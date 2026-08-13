@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
@@ -23,7 +23,7 @@ func (w sliceWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// holdStub defers whatever offset hold returns, and emits one event per frame
+// holdStub defers whatever offset hold returns, and emits one entry per frame
 // it did convert — the same shape a real handler's hold has.
 type holdStub struct {
 	hold    func(fr []Frame) (int64, bool)
@@ -31,7 +31,7 @@ type holdStub struct {
 	lastCtx Context
 }
 
-func (s *holdStub) Handle(fr []Frame, ctx *Context) []*corev1.Event {
+func (s *holdStub) Handle(fr []Frame, ctx *Context) []*agentshimv1.Entry {
 	s.batches = append(s.batches, fr)
 	kept := len(fr)
 	ctx.HeldOffset, ctx.HeldDeliveries = 0, 0
@@ -44,10 +44,10 @@ func (s *holdStub) Handle(fr []Frame, ctx *Context) []*corev1.Event {
 			}
 		}
 	}
-	var out []*corev1.Event
+	var out []*agentshimv1.Entry
 	for _, f := range fr[:kept] {
 		if f.Obj != nil {
-			out = append(out, &corev1.Event{SessionId: ctx.SessionID})
+			out = append(out, stubEntry(ctx.SessionID))
 		}
 	}
 	s.lastCtx = *ctx
@@ -103,8 +103,8 @@ func TestTailerCursorStopsBeforeAHeldFrame(t *testing.T) {
 	if off := r.Next.GetOffset(); off != int64(len(first)) {
 		t.Fatalf("committed offset = %d, want %d (the held frame's first byte)", off, int64(len(first)))
 	}
-	if len(r.Events) != 1 {
-		t.Fatalf("events = %d, want 1 (only the converted frame)", len(r.Events))
+	if len(r.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1 (only the converted frame)", len(r.Entries))
 	}
 	if r.Records != 1 {
 		t.Fatalf("records = %d, want 1 (a deferred frame is not yet observed)", r.Records)

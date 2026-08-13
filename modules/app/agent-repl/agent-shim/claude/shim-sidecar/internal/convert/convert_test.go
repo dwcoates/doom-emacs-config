@@ -1,1048 +1,1210 @@
 package convert
 
 import (
-	"bytes"
-	"encoding/json"
+	"errors"
 	"io"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 	"testing"
 
-	datav1 "agentrepl/proto/agentshim/data/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
-func testLog() *logging.Bound {
-	return logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
-}
-
-// whichResultArm returns the set ToolUseResult oneof arm's field name, or "" if
-// none is set (the empty/unset case; the unclassified arm reports "unclassified").
-func whichResultArm(r *datav1.ToolUseResult) string {
-	m := r.ProtoReflect()
-	od := m.Descriptor().Oneofs().ByName("result")
-	fd := m.WhichOneof(od)
-	if fd == nil {
-		return ""
-	}
-	if string(fd.Name()) == "unclassified" {
-		return "" // treated as "no typed arm" for the test's want=="" cases
-	}
-	return string(fd.Name())
-}
-
-// corpusRoot walks up from the test's working directory to locate
-// testdata/corpus (design §14.1 G13), the golden fixtures shared by G2/G3/G4.
-func corpusRoot(t *testing.T) string {
+// testConverter builds a Converter whose log goes nowhere, so a suite asserting
+// conversion is not also asserting log formatting.
+//
+// The diagnostic sink is installed rather than left nil because the logger
+// refuses to emit a session-scoped record without one — a guard that exists so a
+// diagnostic about a session can never be silently dropped, and one this suite
+// must satisfy rather than route around.
+func testConverter(t *testing.T) *Converter {
 	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	for {
-		cand := filepath.Join(dir, "testdata", "corpus")
-		if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
-			return cand
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatalf("could not locate testdata/corpus above %s", dir)
-		}
-		dir = parent
-	}
+	log := logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+	log.SetDiagnosticSink(func(logging.Diagnostic) {})
+	return New(log)
 }
 
-// knownSchemaGaps is the CLOSED, DOCUMENTED enumeration of fields the corpus
-// exposes that the G1 proto (agentshim.data.v1) does not model faithfully. Each
-// is a REAL on-disk field with no correct proto home (wrong scalar type, a
-// Struct field where the disk carries an array, an unlisted enum value, or an
-// absent field). The converter captures every one losslessly into Event.extras
-// (never dropped, loud-logged once per name); this test asserts that NO OTHER,
-// undocumented extra appears anywhere in the corpus (which fails the build).
-//
-// This is the "known, listed quantity" discipline (§11) applied to the file
-// plane: closing each gap is a G1 proto change (see the group report), NOT a
-// silent fallback. The value is the exact proto amendment required.
-//
-// Keys are canonical leaf names (see convert.canon).
-//
-// NOTE: as of proto commit bc3d014f the following ADDITIVE fields closed their
-// gaps (now decoded as typed data with zero extras, hence removed from this map):
-//
-//	iterations → ApiUsage.iterations (google.protobuf.ListValue)
-//	speed → ApiUsage.speed (string)
-//	inferencegeo → ApiUsage.inference_geo (string)
-//	tooldenialkind → ToolDenialKind.TOOL_DENIAL_KIND_PERMISSION_RULE enum value
-//	precompactdiscoveredtools → DiskCompactMetadata.pre_compact_discovered_tools
-//	cumulativedroppedtokens → DiskCompactMetadata.cumulative_dropped_tokens
-//	blockingerror → HookBlockingErrorAttachment.blocking_error (BlockingErrorDetail)
-//
-// The remaining 10 gap names were BREAKING type mismatches (a Struct/scalar proto
-// field where the disk carries an array/object/other type). All were corrected in
-// the proto under explicit user approval and are now decoded as typed data:
-//
-//	structuredpatch      → Edit/WriteResult.structured_patch (ListValue)
-//	questions            → AskUserQuestionResult.questions (repeated Question)
-//	results              → WebSearchResult.results (ListValue)
-//	tasks                → TaskListResult.tasks (ListValue)
-//	updatedfields        → TaskUpdateResult.updated_fields (repeated string)
-//	statuschange         → TaskUpdateResult.status_change (TaskStatusChange)
-//	pin                  → SendMessageResult.pin (MessagePin)
-//	scheduledfor         → ScheduleWakeupResult.scheduled_for (int64)
-//	automodeconsentflow  → AutoModeAttachment.auto_mode_consent_flow (bool)
-//	files                → DiagnosticsAttachment.files (ListValue)
-//	content              → FileAttachment.content (AttachedFileContent) /
-//	                       TaskReminderAttachment.content (ListValue)
-//
-// A LATER pass replaced four of the schemaless homes above with typed messages
-// (updated_fields, status_change, pin, FileAttachment.content), so those shapes
-// are now modeled field-by-field rather than absorbed wholesale — see
-// TestTypedToolResultShapes / TestFileAttachmentContentTyped.
-//
-// The map is therefore EMPTY: the corpus is fully modeled and the contract is now
-// ZERO extras anywhere in it. The mechanism stays so a future corpus shape the
-// proto cannot express is documented here deliberately rather than tolerated
-// silently — an undocumented extra fails the build.
-var knownSchemaGaps = map[string]string{}
-
-// isKnownGap reports whether an extras dotted-path is a documented schema gap.
-func isKnownGap(path string) bool {
-	segs := strings.Split(path, ".")
-	leaf := stripIndex(segs[len(segs)-1])
-	_, ok := knownSchemaGaps[canon(leaf)]
-	return ok
+func testAttribution() Attribution {
+	return Attribution{SessionID: "sess-1", Path: "/transcripts/sess-1.jsonl", Offset: 100, ProducedAtMs: 1700000000000}
 }
 
-func stripIndex(s string) string {
-	if i := strings.IndexByte(s, '['); i >= 0 {
-		return s[:i]
-	}
-	return s
-}
-
-func readLines(t *testing.T, path string) []map[string]any {
+// single asserts a conversion produced exactly one record and returns it.
+func single(t *testing.T, entries []*agentshimv1.Entry) *agentshimv1.Entry {
 	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want exactly 1", len(entries))
 	}
-	var out []map[string]any
-	lines := strings.Split(string(data), "\n")
-	for i, ln := range lines {
-		ln = strings.TrimSpace(ln)
-		if ln == "" {
-			continue
-		}
-		var obj map[string]any
-		if err := json.Unmarshal([]byte(ln), &obj); err != nil {
-			// A spool captured mid-write (bash-midoutput, agent.output) legitimately
-			// ends on a partial line; the codec's carry handles it live. Tolerate an
-			// unparseable FINAL line only; anything else is a real fixture error.
-			if i == len(lines)-1 || strings.TrimSpace(strings.Join(lines[i+1:], "")) == "" {
-				t.Logf("%s: skipping truncated trailing line (codec carry territory)", path)
-				break
-			}
-			t.Fatalf("%s: json line %d: %v", path, i, err)
-		}
-		out = append(out, obj)
-	}
-	return out
+	return entries[0]
 }
 
-// checkExtras fails the test if extras contains any path whose leaf is not a
-// documented schema gap. Returns the sorted list of gap leaves for reporting.
-func checkExtras(t *testing.T, fixture string, obj any, extras map[string]any) {
-	t.Helper()
-	for path := range extras {
-		if !isKnownGap(path) {
-			t.Errorf("%s: UNDOCUMENTED extras field %q — schema gap not in knownSchemaGaps (STOP and report per golden contract)", fixture, path)
-		} else {
-			t.Logf("%s: known schema gap captured: %s", fixture, path)
-		}
-	}
-}
+// ---------------------------------------------------------------------------
+// the ingestion mandate
+// ---------------------------------------------------------------------------
 
-// TestGoldenTranscriptLines drives every enveloped/metadata line fixture through
-// the transcript converter with ZERO UnparsedEvents (hard errors).
-func TestGoldenTranscriptLines(t *testing.T) {
-	root := corpusRoot(t)
-	dirs := []string{"transcript-lines", "attachments", "content-blocks", "tool-results"}
-	for _, d := range dirs {
-		files, _ := filepath.Glob(filepath.Join(root, d, "*.jsonl"))
-		if len(files) == 0 {
-			t.Fatalf("no fixtures under %s", d)
-		}
-		for _, f := range files {
-			name := d + "/" + filepath.Base(f)
-			t.Run(name, func(t *testing.T) {
-				c := New(testLog())
-				for _, obj := range readLines(t, f) {
-					line, extras, err := c.TranscriptLine(obj)
-					if err != nil {
-						t.Fatalf("%s: hard conversion error (would become UnparsedEvent): %v", name, err)
-					}
-					if line.GetLine() == nil {
-						t.Fatalf("%s: converted line has no oneof arm set", name)
-					}
-					if extras != nil {
-						checkExtras(t, name, obj, extras.AsMap())
-					}
-				}
-			})
-		}
-	}
-}
-
-// TestGoldenToolInputs drives the bare tool_use content-block fixtures.
-func TestGoldenToolInputs(t *testing.T) {
-	root := corpusRoot(t)
-	files, _ := filepath.Glob(filepath.Join(root, "tool-inputs", "*.jsonl"))
-	if len(files) == 0 {
-		t.Fatal("no tool-inputs fixtures")
-	}
-	for _, f := range files {
-		name := "tool-inputs/" + filepath.Base(f)
-		t.Run(name, func(t *testing.T) {
-			c := New(testLog())
-			for _, obj := range readLines(t, f) {
-				block, extras, err := c.ContentBlock(obj)
-				if err != nil {
-					t.Fatalf("%s: hard conversion error: %v", name, err)
-				}
-				if block.GetToolUse() == nil {
-					t.Fatalf("%s: expected tool_use block", name)
-				}
-				if extras != nil {
-					checkExtras(t, name, obj, extras.AsMap())
-				}
-			}
-		})
-	}
-}
-
-// TestGoldenJournals drives the workflow-journal fixtures.
-func TestGoldenJournals(t *testing.T) {
-	root := corpusRoot(t)
-	files, _ := filepath.Glob(filepath.Join(root, "journals", "*.jsonl"))
-	if len(files) == 0 {
-		t.Fatal("no journal fixtures")
-	}
-	for _, f := range files {
-		name := "journals/" + filepath.Base(f)
-		t.Run(name, func(t *testing.T) {
-			c := New(testLog())
-			for _, obj := range readLines(t, f) {
-				rec, extras, err := c.JournalRecord(obj)
-				if err != nil {
-					t.Fatalf("%s: hard conversion error: %v", name, err)
-				}
-				if rec.GetRecord() == nil {
-					t.Fatalf("%s: journal record has no arm", name)
-				}
-				if extras != nil {
-					checkExtras(t, name, obj, extras.AsMap())
-				}
-			}
-		})
-	}
-}
-
-// TestGoldenSidechain drives the agent sidechain transcript + its meta.json and
-// the agent-task spool (a*.output, itself sidechain JSONL).
-func TestGoldenSidechain(t *testing.T) {
-	root := corpusRoot(t)
-	jsonl, _ := filepath.Glob(filepath.Join(root, "sidechain", "*.jsonl"))
-	jsonl2, _ := filepath.Glob(filepath.Join(root, "spools", "agent.output"))
-	for _, f := range append(jsonl, jsonl2...) {
-		name := filepath.Base(filepath.Dir(f)) + "/" + filepath.Base(f)
-		t.Run(name, func(t *testing.T) {
-			c := New(testLog())
-			for _, obj := range readLines(t, f) {
-				line, extras, err := c.TranscriptLine(obj)
-				if err != nil {
-					t.Fatalf("%s: hard conversion error: %v", name, err)
-				}
-				if line.GetLine() == nil {
-					t.Fatalf("%s: no oneof arm", name)
-				}
-				if extras != nil {
-					checkExtras(t, name, obj, extras.AsMap())
-				}
-			}
-		})
-	}
-	// meta.json companions.
-	metas, _ := filepath.Glob(filepath.Join(root, "sidechain", "*.meta.json"))
-	for _, f := range metas {
-		name := "sidechain/" + filepath.Base(f)
-		t.Run(name, func(t *testing.T) {
-			c := New(testLog())
-			data, err := os.ReadFile(f)
-			if err != nil {
-				t.Fatalf("read: %v", err)
-			}
-			var obj map[string]any
-			if err := json.Unmarshal(data, &obj); err != nil {
-				t.Fatalf("json: %v", err)
-			}
-			_, extras := c.AgentMeta(obj)
-			if extras != nil {
-				checkExtras(t, name, obj, extras.AsMap())
-			}
-		})
-	}
-}
-
-// TestListValueFieldAbsorbsArray covers the singular google.protobuf.ListValue
-// path: a JSON array (ApiUsage.iterations) is decoded as a typed ListValue with
-// no extras, rather than being captured verbatim.
-func TestListValueFieldAbsorbsArray(t *testing.T) {
-	// Arrange
-	c := New(testLog())
-	obj := map[string]any{
-		"type": "assistant",
-		"message": map[string]any{
-			"role": "assistant",
-			"usage": map[string]any{
-				"iterations": []any{
-					map[string]any{"input_tokens": float64(1), "output_tokens": float64(2)},
-				},
-			},
-		},
-	}
-	// Act
-	line, extras, err := c.TranscriptLine(obj)
-	// Assert
-	if err != nil {
-		t.Fatalf("conversion error: %v", err)
-	}
-	if extras != nil {
-		t.Fatalf("expected zero extras, got %v", extras.AsMap())
-	}
-	usage := line.GetAssistant().GetMessage().GetUsage()
-	if usage.GetIterations() == nil {
-		t.Fatal("iterations ListValue not populated")
-	}
-	if got := len(usage.GetIterations().GetValues()); got != 1 {
-		t.Fatalf("iterations length = %d, want 1", got)
-	}
-}
-
-// TestHookBlockingErrorRoutesOuterDetail covers the split routing: the disk
-// blockingError object lands in the OUTER blocking_error detail while the other
-// keys populate the wrapped HookSuccessAttachment, with no extras.
-func TestHookBlockingErrorRoutesOuterDetail(t *testing.T) {
-	// Arrange
-	c := New(testLog())
-	obj := map[string]any{
-		"type": "attachment",
-		"attachment": map[string]any{
-			"type":      "hook_blocking_error",
-			"hookName":  "PostToolUse:Edit",
-			"toolUseID": "toolu_x",
-			"hookEvent": "PostToolUse",
-			"blockingError": map[string]any{
-				"blockingError": "tests failed",
-				"command":       "run-tests.sh",
-			},
-		},
-	}
-	// Act
-	line, extras, err := c.TranscriptLine(obj)
-	// Assert
-	if err != nil {
-		t.Fatalf("conversion error: %v", err)
-	}
-	if extras != nil {
-		t.Fatalf("expected zero extras, got %v", extras.AsMap())
-	}
-	att := line.GetAttachment().GetHookBlockingError()
-	if att.GetBlockingError().GetBlockingError() != "tests failed" {
-		t.Fatalf("outer blocking_error not routed: %+v", att.GetBlockingError())
-	}
-	if att.GetBlockingError().GetCommand() != "run-tests.sh" {
-		t.Fatalf("outer blocking_error command not routed: %+v", att.GetBlockingError())
-	}
-	if att.GetFields().GetHookName() != "PostToolUse:Edit" {
-		t.Fatalf("wrapped fields.hook_name not populated: %+v", att.GetFields())
-	}
-}
-
-// TestPermissionRuleDenialKind covers the additive enum value: the corpus string
-// "permission-rule" now resolves to the typed ToolDenialKind rather than extras.
-func TestPermissionRuleDenialKind(t *testing.T) {
-	// Arrange
-	c := New(testLog())
-	obj := map[string]any{
-		"type":           "user",
-		"toolDenialKind": "permission-rule",
-		"message":        map[string]any{"role": "user", "content": "x"},
-	}
-	// Act
-	line, extras, err := c.TranscriptLine(obj)
-	// Assert
-	if err != nil {
-		t.Fatalf("conversion error: %v", err)
-	}
-	if extras != nil {
-		t.Fatalf("expected zero extras, got %v", extras.AsMap())
-	}
-	got := line.GetUser().GetEnvelope().GetToolDenialKind()
-	if got != datav1.ToolDenialKind_TOOL_DENIAL_KIND_PERMISSION_RULE {
-		t.Fatalf("tool_denial_kind = %v, want PERMISSION_RULE", got)
-	}
-}
-
-// TestAutomodeUnavailableDenialKind pins the fourth ToolDenialKind value, which
-// the deployed sidecar loud-logged as an unmodeled enum value on real
-// transcripts (27 occurrences) before it was added.
-func TestAutomodeUnavailableDenialKind(t *testing.T) {
-	// Arrange
-	c := New(testLog())
-	obj := map[string]any{
-		"type":           "user",
-		"toolDenialKind": "automode-unavailable",
-		"message":        map[string]any{"role": "user", "content": "x"},
-	}
-	// Act
-	line, extras, err := c.TranscriptLine(obj)
-	// Assert
-	if err != nil {
-		t.Fatalf("conversion error: %v", err)
-	}
-	if extras != nil {
-		t.Fatalf("expected zero extras, got %v", extras.AsMap())
-	}
-	got := line.GetUser().GetEnvelope().GetToolDenialKind()
-	if got != datav1.ToolDenialKind_TOOL_DENIAL_KIND_AUTOMODE_UNAVAILABLE {
-		t.Fatalf("tool_denial_kind = %v, want AUTOMODE_UNAVAILABLE", got)
-	}
-}
-
-// TestSidecarLoggedFieldsNowTyped covers the tool-result fields the DEPLOYED
-// sidecar loud-logged as unknown on real transcripts. The sidecar's reflective
-// assign resolves them by canonical name, so these pin that it really does pick
-// each newly-added proto field up — populated and absent (AAA, one field per
-// case).
-func TestSidecarLoggedFieldsNowTyped(t *testing.T) {
-	tests := []struct {
-		name     string
-		result   map[string]any
-		populate map[string]any
-		want     func(r *datav1.ToolUseResult) any
-		wantSet  any
-		wantZero any
-	}{
-		{
-			name:     "bash dangerouslyDisableSandbox",
-			result:   map[string]any{"stdout": "", "stderr": "", "interrupted": false},
-			populate: map[string]any{"dangerouslyDisableSandbox": true},
-			want:     func(r *datav1.ToolUseResult) any { return r.GetBash().GetDangerouslyDisableSandbox() },
-			wantSet:  true, wantZero: false,
-		},
-		{
-			name:     "bash backgroundedByUser",
-			result:   map[string]any{"stdout": "", "stderr": "", "interrupted": false},
-			populate: map[string]any{"backgroundedByUser": true},
-			want:     func(r *datav1.ToolUseResult) any { return r.GetBash().GetBackgroundedByUser() },
-			wantSet:  true, wantZero: false,
-		},
-		{
-			name:     "write memdirStamped",
-			result:   map[string]any{"type": "update", "filePath": "/f", "content": "c", "structuredPatch": []any{}},
-			populate: map[string]any{"memdirStamped": true},
-			want:     func(r *datav1.ToolUseResult) any { return r.GetWrite().GetMemdirStamped() },
-			wantSet:  true, wantZero: false,
-		},
-		{
-			name:     "schedule_wakeup stopped",
-			result:   map[string]any{"scheduledFor": float64(1), "clampedDelaySeconds": float64(60)},
-			populate: map[string]any{"stopped": true},
-			want:     func(r *datav1.ToolUseResult) any { return r.GetScheduleWakeup().GetStopped() },
-			wantSet:  true, wantZero: false,
-		},
-		{
-			name:     "schedule_wakeup cancelledWakeups",
-			result:   map[string]any{"scheduledFor": float64(1), "clampedDelaySeconds": float64(60)},
-			populate: map[string]any{"cancelledWakeups": float64(2)},
-			want:     func(r *datav1.ToolUseResult) any { return r.GetScheduleWakeup().GetCancelledWakeups() },
-			wantSet:  int64(2), wantZero: int64(0),
-		},
-		{
-			name:     "ask_user_question afkTimeoutMs",
-			result:   map[string]any{"questions": []any{}, "answers": map[string]any{}},
-			populate: map[string]any{"afkTimeoutMs": float64(60000)},
-			want:     func(r *datav1.ToolUseResult) any { return r.GetAskUserQuestion().GetAfkTimeoutMs() },
-			wantSet:  int64(60000), wantZero: int64(0),
-		},
-		{
-			name:     "agent worktreePath",
-			result:   map[string]any{"agentType": "general-purpose", "totalDurationMs": float64(1), "totalToolUseCount": float64(1)},
-			populate: map[string]any{"worktreePath": "/w/tree"},
-			want:     func(r *datav1.ToolUseResult) any { return r.GetAgent().GetWorktreePath() },
-			wantSet:  "/w/tree", wantZero: "",
-		},
-		{
-			name:     "agent worktreeBranch",
-			result:   map[string]any{"agentType": "general-purpose", "totalDurationMs": float64(1), "totalToolUseCount": float64(1)},
-			populate: map[string]any{"worktreeBranch": "worktree-agent-a1"},
-			want:     func(r *datav1.ToolUseResult) any { return r.GetAgent().GetWorktreeBranch() },
-			wantSet:  "worktree-agent-a1", wantZero: "",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name+"/populated", func(t *testing.T) {
-			// Arrange
-			obj := map[string]any{}
-			for k, v := range tc.result {
-				obj[k] = v
-			}
-			for k, v := range tc.populate {
-				obj[k] = v
-			}
-			c := New(testLog())
-			// Act
-			res, extras := c.ToolUseResult(obj)
-			// Assert
-			if extras != nil {
-				t.Fatalf("expected zero extras, got %v", extras.AsMap())
-			}
-			if got := tc.want(res); got != tc.wantSet {
-				t.Fatalf("field = %v, want %v", got, tc.wantSet)
-			}
-		})
-		t.Run(tc.name+"/absent", func(t *testing.T) {
-			// Arrange
-			c := New(testLog())
-			// Act
-			res, extras := c.ToolUseResult(tc.result)
-			// Assert
-			if extras != nil {
-				t.Fatalf("expected zero extras, got %v", extras.AsMap())
-			}
-			if got := tc.want(res); got != tc.wantZero {
-				t.Fatalf("field = %v, want zero %v", got, tc.wantZero)
-			}
-		})
-	}
-}
-
-// TestRetypedFieldsNowDecode covers the four fields RETYPED IN PLACE under the
-// user's explicit approval. Each previously had a proto type the disk never
-// matched, so the converter captured every value into extras; each must now
-// decode as typed data with ZERO extras. Populated + absent per field (AAA).
-func TestRetypedFieldsNowDecode(t *testing.T) {
-	userLine := func(extra map[string]any) map[string]any {
-		obj := map[string]any{
-			"type":    "user",
-			"message": map[string]any{"role": "user", "content": "x"},
-		}
-		for k, v := range extra {
-			obj[k] = v
-		}
-		return obj
-	}
-	tests := []struct {
-		name     string
-		envelope map[string]any
-		lineType string
-		get      func(l *datav1.TranscriptLine) any
-		want     any
-	}{
-		{
-			name:     "classifier_meta_lines populated (raw NDJSON text)",
-			envelope: map[string]any{"classifierMetaLines": "{\"meta\":{\"gitStatus\":{\"clean\":true}}}\n"},
-			get: func(l *datav1.TranscriptLine) any {
-				return l.GetUser().GetEnvelope().GetClassifierMetaLines()
-			},
-			want: "{\"meta\":{\"gitStatus\":{\"clean\":true}}}\n",
-		},
-		{
-			name:     "classifier_meta_lines absent",
-			envelope: map[string]any{},
-			get: func(l *datav1.TranscriptLine) any {
-				return l.GetUser().GetEnvelope().GetClassifierMetaLines()
-			},
-			want: "",
-		},
-		{
-			name:     "error_details populated (status code plus raw body)",
-			envelope: map[string]any{"errorDetails": `429 {"type":"error"}`},
-			get: func(l *datav1.TranscriptLine) any {
-				return l.GetUser().GetEnvelope().GetErrorDetails()
-			},
-			want: `429 {"type":"error"}`,
-		},
-		{
-			name:     "error_details absent",
-			envelope: map[string]any{},
-			get: func(l *datav1.TranscriptLine) any {
-				return l.GetUser().GetEnvelope().GetErrorDetails()
-			},
-			want: "",
-		},
-		{
-			name:     "queue_priority populated (named priority, not a rank)",
-			envelope: map[string]any{"queuePriority": "later"},
-			get: func(l *datav1.TranscriptLine) any {
-				return l.GetUser().GetEnvelope().GetQueuePriority()
-			},
-			want: "later",
-		},
-		{
-			name:     "queue_priority absent",
-			envelope: map[string]any{},
-			get: func(l *datav1.TranscriptLine) any {
-				return l.GetUser().GetEnvelope().GetQueuePriority()
-			},
-			want: "",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			c := New(testLog())
-			// Act
-			line, extras, err := c.TranscriptLine(userLine(tc.envelope))
-			// Assert
-			if err != nil {
-				t.Fatalf("conversion error: %v", err)
-			}
-			if extras != nil {
-				t.Fatalf("expected zero extras, got %v", extras.AsMap())
-			}
-			if got := tc.get(line); got != tc.want {
-				t.Fatalf("field = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// TestGitOperationDecodes pins BashResult.git_operation, retyped in place from
-// string to a typed GitOperation. The sidecar's reflective assign has to walk
-// the nested arms and their enums, so these assert it really does (AAA).
-func TestGitOperationDecodes(t *testing.T) {
-	bash := func(op any) map[string]any {
-		r := map[string]any{"stdout": "", "stderr": "", "interrupted": false}
-		if op != nil {
-			r["gitOperation"] = op
-		}
-		return r
-	}
+// Every JSON object on disk must end up in the store as a protobuf shape. The
+// converter is where that mandate is either kept or broken, so it is asserted
+// per line SHAPE rather than only for the shapes that convert cleanly.
+func TestLineAlwaysProducesARecord(t *testing.T) {
 	tests := []struct {
 		name   string
-		op     any
-		assert func(t *testing.T, g *datav1.GitOperation)
+		record map[string]any
 	}{
-		{
-			name: "commit sha and kind",
-			op:   map[string]any{"commit": map[string]any{"sha": "868db15d", "kind": "committed"}},
-			assert: func(t *testing.T, g *datav1.GitOperation) {
-				if g.GetCommit().GetSha() != "868db15d" ||
-					g.GetCommit().GetKind() != datav1.GitCommitKind_GIT_COMMIT_KIND_COMMITTED {
-					t.Fatalf("commit = %+v", g.GetCommit())
-				}
-			},
-		},
-		{
-			name: "hyphenated commit kind",
-			op:   map[string]any{"commit": map[string]any{"sha": "x", "kind": "cherry-picked"}},
-			assert: func(t *testing.T, g *datav1.GitOperation) {
-				if g.GetCommit().GetKind() != datav1.GitCommitKind_GIT_COMMIT_KIND_CHERRY_PICKED {
-					t.Fatalf("kind = %v", g.GetCommit().GetKind())
-				}
-			},
-		},
-		{
-			name: "branch ref and action",
-			op:   map[string]any{"branch": map[string]any{"ref": "master", "action": "rebased"}},
-			assert: func(t *testing.T, g *datav1.GitOperation) {
-				if g.GetBranch().GetRef() != "master" ||
-					g.GetBranch().GetAction() != datav1.GitBranchAction_GIT_BRANCH_ACTION_REBASED {
-					t.Fatalf("branch = %+v", g.GetBranch())
-				}
-			},
-		},
-		{
-			name: "pr number url and action",
-			op:   map[string]any{"pr": map[string]any{"number": float64(9155), "url": "https://x/y", "action": "created"}},
-			assert: func(t *testing.T, g *datav1.GitOperation) {
-				if g.GetPr().GetNumber() != 9155 || g.GetPr().GetUrl() != "https://x/y" ||
-					g.GetPr().GetAction() != datav1.GitPullRequestAction_GIT_PULL_REQUEST_ACTION_CREATED {
-					t.Fatalf("pr = %+v", g.GetPr())
-				}
-			},
-		},
-		{
-			name: "hyphenated pr action",
-			op:   map[string]any{"pr": map[string]any{"number": float64(1), "action": "auto-merge-enabled"}},
-			assert: func(t *testing.T, g *datav1.GitOperation) {
-				want := datav1.GitPullRequestAction_GIT_PULL_REQUEST_ACTION_AUTO_MERGE_ENABLED
-				if g.GetPr().GetAction() != want {
-					t.Fatalf("action = %v, want %v", g.GetPr().GetAction(), want)
-				}
-			},
-		},
-		{
-			name: "two arms at once (why it is not a oneof)",
-			op: map[string]any{
-				"commit": map[string]any{"sha": "abc", "kind": "committed"},
-				"push":   map[string]any{"branch": "b"},
-			},
-			assert: func(t *testing.T, g *datav1.GitOperation) {
-				if g.GetCommit().GetSha() != "abc" || g.GetPush().GetBranch() != "b" {
-					t.Fatalf("commit+push = %+v", g)
-				}
-			},
-		},
-		{
-			name: "absent",
-			op:   nil,
-			assert: func(t *testing.T, g *datav1.GitOperation) {
-				if g != nil {
-					t.Fatalf("git_operation = %+v, want nil", g)
-				}
-			},
-		},
+		{name: "user prompt", record: map[string]any{"type": "user", "uuid": "u1", "message": map[string]any{"content": "hello"}}},
+		{name: "assistant response", record: map[string]any{"type": "assistant", "uuid": "a1", "message": map[string]any{"id": "m1", "content": []any{}}}},
+		{name: "system subtype", record: map[string]any{"type": "system", "uuid": "s1", "subtype": "turn_duration"}},
+		{name: "attachment", record: map[string]any{"type": "attachment", "uuid": "x1", "attachment": map[string]any{"type": "date_change"}}},
+		{name: "flat metadata line", record: map[string]any{"type": "ai-title", "aiTitle": "a name"}},
+		{name: "unmodeled top-level type", record: map[string]any{"type": "something-new", "field": "value"}},
+		{name: "no type discriminator at all", record: map[string]any{"field": "value"}},
+		{name: "system with no subtype", record: map[string]any{"type": "system", "uuid": "s2"}},
+		{name: "attachment with no attachment object", record: map[string]any{"type": "attachment", "uuid": "x2"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			c := New(testLog())
-			// Act
-			res, extras := c.ToolUseResult(bash(tc.op))
-			// Assert
-			if extras != nil {
-				t.Fatalf("expected zero extras, got %v", extras.AsMap())
-			}
-			tc.assert(t, res.GetBash().GetGitOperation())
-		})
-	}
-}
+			// Arrange.
+			c := testConverter(t)
 
-// TestClassifyToolResultArms pins the ToolUseResult classifier to the arm the
-// MANIFEST documents for each tool-results fixture (AAA, one arm per case).
-func TestClassifyToolResultArms(t *testing.T) {
-	root := corpusRoot(t)
-	// fixture basename → expected ToolUseResult arm (the oneof field name), or
-	// "" for the unclassified Struct arm.
-	cases := map[string]string{
-		"agent.jsonl":                        "agent",
-		"agent_async_launch.jsonl":           "agent_async_launch",
-		"ask_user_question.jsonl":            "ask_user_question",
-		"bash.jsonl":                         "bash",
-		"bash-background.jsonl":              "bash",
-		"edit.jsonl":                         "edit",
-		"monitor.jsonl":                      "monitor",
-		"read.jsonl":                         "read",
-		"read-image.jsonl":                   "read",
-		"schedule_wakeup.jsonl":              "schedule_wakeup",
-		"send_message.jsonl":                 "send_message",
-		"skill.jsonl":                        "skill",
-		"task_create.jsonl":                  "task_create",
-		"task_list.jsonl":                    "task_list",
-		"task_output.jsonl":                  "task_output",
-		"task_output-local_agent.jsonl":      "task_output",
-		"task_stop.jsonl":                    "task_stop",
-		"task_update.jsonl":                  "task_update",
-		"tool_search.jsonl":                  "tool_search",
-		"web_fetch.jsonl":                    "web_fetch",
-		"web_search.jsonl":                   "web_search",
-		"workflow_launch.jsonl":              "workflow_launch",
-		"write.jsonl":                        "write",
-		"raw_string.jsonl":                   "raw_string",
-		"unclassified-message_success.jsonl": "",
-		"unclassified-path_title_url.jsonl":  "",
-	}
-	names := make([]string, 0, len(cases))
-	for n := range cases {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, base := range names {
-		want := cases[base]
-		t.Run(base, func(t *testing.T) {
-			// Arrange
-			objs := readLines(t, filepath.Join(root, "tool-results", base))
-			obj := objs[0]
-			tur, ok := obj["toolUseResult"]
-			if !ok {
-				t.Fatalf("%s: fixture has no toolUseResult", base)
-			}
-			c := New(testLog())
-			// Act
-			res, _ := c.ToolUseResult(tur)
-			// Assert
-			got := whichResultArm(res)
-			if got != want {
-				t.Fatalf("%s: classified as %q, want %q", base, got, want)
+			// Act.
+			entries := c.Line(tc.record, testAttribution(), nil)
+
+			// Assert.
+			if len(entries) == 0 {
+				t.Fatal("Line produced no record; the line would never reach the store")
 			}
 		})
 	}
 }
 
-// TestTypedToolResultShapes pins the tool-result fields that were tightened from
-// a schemaless Struct/ListValue to a typed shape: each must decode from its
-// GOLDEN FIXTURE as typed data with zero extras. A future corpus shape the typed
-// message cannot express would surface here as an undocumented extra (and in
-// TestGoldenTranscriptLines), which is the discipline the empty knownSchemaGaps
-// map exists to enforce.
-func TestTypedToolResultShapes(t *testing.T) {
-	root := corpusRoot(t)
+// A record that cannot be placed is stored WHOLE with no external half, which is
+// what makes "an unconvertible record cannot reach a page" a fact about the
+// record's shape rather than a rule a query has to remember to apply.
+func TestUnconvertedRecordsHaveNoExternalHalf(t *testing.T) {
+	tests := []struct {
+		name   string
+		record map[string]any
+	}{
+		{name: "unmodeled top-level type", record: map[string]any{"type": "something-new"}},
+		{name: "no type discriminator", record: map[string]any{"field": "value"}},
+		{name: "flat metadata line", record: map[string]any{"type": "pr-link", "prNumber": float64(7)}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := testConverter(t)
+
+			// Act.
+			entry := single(t, c.Line(tc.record, testAttribution(), nil))
+
+			// Assert.
+			if entry.GetExternal() != nil {
+				t.Fatal("unconverted record carries an external half, so it has a path to the daemon")
+			}
+			if entry.GetInternal().GetUnconverted() == nil {
+				t.Fatal("unconverted record carries no unconverted arm, so nothing says why it was not placed")
+			}
+		})
+	}
+}
+
+// The three unconverted arms mean three different things, and picking the wrong
+// one misdirects whoever follows up: vendor_specific asks for a converter,
+// unknown asks for a model, unparsed asks for an investigation.
+func TestUnconvertedArmMatchesTheReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		record map[string]any
+		want   string
+	}{
+		{name: "understood but not carried", record: map[string]any{"type": "ai-title"}, want: "vendor_specific"},
+		{name: "parsed but not modeled", record: map[string]any{"type": "brand-new-line"}, want: "unknown"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := testConverter(t)
+
+			// Act.
+			entry := single(t, c.Line(tc.record, testAttribution(), nil))
+
+			// Assert.
+			var got string
+			switch entry.GetInternal().GetUnconverted().(type) {
+			case *agentshimv1.InternalEntry_VendorSpecific:
+				got = "vendor_specific"
+			case *agentshimv1.InternalEntry_Unknown:
+				got = "unknown"
+			case *agentshimv1.InternalEntry_Unparsed:
+				got = "unparsed"
+			}
+			if got != tc.want {
+				t.Fatalf("unconverted arm = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// lineage
+// ---------------------------------------------------------------------------
+
+// A session transcript's records are FEED ROWS. Reading the vendor's parentUuid
+// chain as containment would nest an entire conversation inside its first line
+// and collapse a whole session into one page slot.
+func TestSessionTranscriptRecordIsAFeedRow(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{
+		"type": "user", "uuid": "u2", "parentUuid": "u1",
+		"message": map[string]any{"content": "second thing I said"},
+	}
+
+	// Act.
+	message := single(t, c.Line(record, testAttribution(), nil)).GetExternal().GetMessage()
+
+	// Assert.
+	if message.GetParent().GetRoot() == nil {
+		t.Fatal("parent is not root; a sequential reply was read as containment")
+	}
+	if message.GetTopLevelMessageId() != message.GetMessageId() {
+		t.Fatalf("top_level_message_id = %q, want its own id %q", message.GetTopLevelMessageId(), message.GetMessageId())
+	}
+}
+
+// A sidechain's records sit INSIDE the card the subagent runs as, so a page of
+// ten rows counts the subagent once however long its conversation runs.
+func TestSidechainRecordSitsInsideItsCard(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	at := testAttribution()
+	at.Container = DetachedWorkMessageID("agent-77")
+	record := map[string]any{"type": "user", "uuid": "u9", "message": map[string]any{"content": "do the thing"}}
+
+	// Act.
+	message := single(t, c.Line(record, at, nil)).GetExternal().GetMessage()
+
+	// Assert.
+	if got := message.GetParent().GetInside().GetMessageId(); got != "dw:agent-77" {
+		t.Fatalf("parent inside = %q, want %q", got, "dw:agent-77")
+	}
+	if got := message.GetTopLevelMessageId(); got != "dw:agent-77" {
+		t.Fatalf("top_level_message_id = %q, want the card %q", got, "dw:agent-77")
+	}
+}
+
+// A sidechain line read from the SESSION transcript names its own agent, so it
+// lands in the same card as the sidechain file's own records without the two
+// readers sharing anything.
+func TestSidechainFlagOnASessionLineNamesItsCard(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{
+		"type": "assistant", "uuid": "a5", "isSidechain": true, "agentId": "agent-77",
+		"message": map[string]any{"id": "m5", "content": []any{}},
+	}
+
+	// Act.
+	message := single(t, c.Line(record, testAttribution(), nil)).GetExternal().GetMessage()
+
+	// Assert.
+	if got := message.GetTopLevelMessageId(); got != "dw:agent-77" {
+		t.Fatalf("top_level_message_id = %q, want %q", got, "dw:agent-77")
+	}
+}
+
+// The card's message id is a PURE FUNCTION of the task id. That is what lets the
+// spool, the sidechain, the launch and the staleness sweep name one card with
+// nothing correlated between them and nothing recovered after a restart.
+func TestDetachedWorkMessageIDIsDerivedFromTheTaskID(t *testing.T) {
+	tests := []struct {
+		name   string
+		taskID string
+		want   string
+	}{
+		{name: "agent task", taskID: "agent-1", want: "dw:agent-1"},
+		{name: "workflow run", taskID: "wf_abc", want: "dw:wf_abc"},
+		{name: "no task identity", taskID: "", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act.
+			got := DetachedWorkMessageID(tc.taskID)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("DetachedWorkMessageID(%q) = %q, want %q", tc.taskID, got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// author
+// ---------------------------------------------------------------------------
+
+// Who a message is FROM is resolved by the producer, never inferred by a reader
+// from which payload arm is set — a tool result is authored by the agent whose
+// message it updates, and the vendor files it under the user.
+func TestAuthorIsResolvedByTheProducer(t *testing.T) {
 	tests := []struct {
 		name    string
-		fixture string
-		assert  func(t *testing.T, r *datav1.ToolUseResult)
+		record  map[string]any
+		wantArm string
+		setup   func(*Converter)
 	}{
 		{
-			name:    "task_update status_change decodes as TaskStatusChange",
-			fixture: "task_update.jsonl",
-			assert: func(t *testing.T, r *datav1.ToolUseResult) {
-				sc := r.GetTaskUpdate().GetStatusChange()
-				if sc.GetFrom() != "pending" || sc.GetTo() != "in_progress" {
-					t.Fatalf("status_change = %+v, want {from:pending to:in_progress}", sc)
-				}
-			},
+			name:    "a person's prompt is from the user",
+			record:  map[string]any{"type": "user", "uuid": "u1", "message": map[string]any{"content": "hi"}},
+			wantArm: "user",
 		},
 		{
-			name:    "task_update updated_fields decodes as repeated string",
-			fixture: "task_update.jsonl",
-			assert: func(t *testing.T, r *datav1.ToolUseResult) {
-				got := r.GetTaskUpdate().GetUpdatedFields()
-				if len(got) != 1 || got[0] != "status" {
-					t.Fatalf("updated_fields = %v, want [status]", got)
-				}
-			},
+			name:    "a response is from the agent",
+			record:  map[string]any{"type": "assistant", "uuid": "a1", "message": map[string]any{"id": "m1", "content": []any{}}},
+			wantArm: "agent",
 		},
 		{
-			name:    "task_output dispatches its task oneof to local_bash",
-			fixture: "task_output.jsonl",
-			assert: func(t *testing.T, r *datav1.ToolUseResult) {
-				got := r.GetTaskOutput().GetLocalBash()
-				if got.GetTaskId() != "b86pl7ir1" {
-					t.Fatalf("local_bash = %+v, want task_id b86pl7ir1", got)
-				}
+			name: "a tool result stays with the agent that called the tool",
+			setup: func(c *Converter) {
+				c.toolCallOwner["call-1"] = "m1"
 			},
-		},
-		{
-			name:    "task_output dispatches its task oneof to local_agent",
-			fixture: "task_output-local_agent.jsonl",
-			assert: func(t *testing.T, r *datav1.ToolUseResult) {
-				got := r.GetTaskOutput().GetLocalAgent()
-				if got.GetTaskId() != "a0cbd94e5da2d662d" {
-					t.Fatalf("local_agent = %+v, want task_id a0cbd94e5da2d662d", got)
-				}
-			},
-		},
-		{
-			name:    "send_message pin decodes as MessagePin",
-			fixture: "send_message.jsonl",
-			assert: func(t *testing.T, r *datav1.ToolUseResult) {
-				pin := r.GetSendMessage().GetPin()
-				if pin.GetId() != "acd910f5fefb75908" ||
-					pin.GetName() != "acd910f5fefb75908" ||
-					pin.GetRef() != "2175c2" {
-					t.Fatalf("pin = %+v, want {id/name:acd910f5fefb75908 ref:2175c2}", pin)
-				}
-			},
+			record: map[string]any{"type": "user", "uuid": "u2", "message": map[string]any{"content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": "call-1", "content": "output"},
+			}}},
+			wantArm: "agent",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			objs := readLines(t, filepath.Join(root, "tool-results", tc.fixture))
-			c := New(testLog())
-			// Act
-			res, extras := c.ToolUseResult(objs[0]["toolUseResult"])
-			// Assert
-			if extras != nil {
-				t.Fatalf("expected zero extras, got %v", extras.AsMap())
+			// Arrange.
+			c := testConverter(t)
+			if tc.setup != nil {
+				tc.setup(c)
 			}
-			tc.assert(t, res)
+
+			// Act.
+			entries := c.Line(tc.record, testAttribution(), nil)
+
+			// Assert.
+			author := entries[0].GetExternal().GetMessage().GetAuthor()
+			var got string
+			switch {
+			case author.GetUser() != nil:
+				got = "user"
+			case author.GetAgent() != nil:
+				got = "agent"
+			case author.GetDetachedAgent() != nil:
+				got = "detached_agent"
+			}
+			if got != tc.wantArm {
+				t.Fatalf("author arm = %q, want %q", got, tc.wantArm)
+			}
 		})
 	}
 }
 
-// TestFileAttachmentContentTyped pins FileAttachment.content, tightened from a
-// Struct to AttachedFileContent{type, file:AttachedFileBody}: the golden
-// attachment fixture must decode every field as typed data with zero extras.
-func TestFileAttachmentContentTyped(t *testing.T) {
-	// Arrange
-	root := corpusRoot(t)
-	objs := readLines(t, filepath.Join(root, "attachments", "file.jsonl"))
-	c := New(testLog())
-	// Act
-	line, extras, err := c.TranscriptLine(objs[0])
-	// Assert
-	if err != nil {
-		t.Fatalf("conversion error: %v", err)
-	}
-	if extras != nil {
-		t.Fatalf("expected zero extras, got %v", extras.AsMap())
-	}
-	content := line.GetAttachment().GetFile().GetContent()
-	if content.GetType() != "text" {
-		t.Fatalf("content.type = %q, want %q", content.GetType(), "text")
-	}
-	body := content.GetFile()
-	if !strings.HasSuffix(body.GetFilePath(), "approval-vs-verification-semantics.md") {
-		t.Fatalf("content.file.file_path = %q, want the fixture's memory path", body.GetFilePath())
-	}
-	if body.GetContent() == "" {
-		t.Fatal("content.file.content decoded empty")
-	}
-	if body.GetNumLines() != 16 || body.GetStartLine() != 1 || body.GetTotalLines() != 16 {
-		t.Fatalf("content.file line bounds = {num:%d start:%d total:%d}, want {16 1 16}",
-			body.GetNumLines(), body.GetStartLine(), body.GetTotalLines())
+// Inside detached work the agent is the DETACHED one, named by the work it runs
+// as, so its emissions route to the card without a second correlation.
+func TestDetachedAgentNamesItsOwnWork(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	at := testAttribution()
+	at.Container = DetachedWorkMessageID("agent-3")
+	record := map[string]any{"type": "assistant", "uuid": "a1", "message": map[string]any{"id": "m1", "content": []any{}}}
+
+	// Act.
+	author := single(t, c.Line(record, at, nil)).GetExternal().GetMessage().GetAuthor()
+
+	// Assert.
+	if got := author.GetDetachedAgent().GetDetachedWorkMessageId(); got != "dw:agent-3" {
+		t.Fatalf("detached_work_message_id = %q, want %q", got, "dw:agent-3")
 	}
 }
 
-// TestQueuedCommandPromptStringArm pins the 702/731-census string form of the
-// string-or-blocks `prompt` union onto the prompt_value oneof's `prompt` arm.
-func TestQueuedCommandPromptStringArm(t *testing.T) {
-	// Arrange
-	root := corpusRoot(t)
-	objs := readLines(t, filepath.Join(root, "attachments", "queued_command.jsonl"))
-	c := New(testLog())
-	// Act
-	line, extras, err := c.TranscriptLine(objs[0])
-	// Assert
-	if err != nil {
-		t.Fatalf("conversion error: %v", err)
+// ---------------------------------------------------------------------------
+// tool results
+// ---------------------------------------------------------------------------
+
+// A tool result folds onto the message that MADE the call, which is what spares
+// every consumer a correlation pass and costs the result no page slot.
+func TestToolResultFoldsOntoTheCallingMessage(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	c.Line(map[string]any{
+		"type": "assistant", "uuid": "a1",
+		"message": map[string]any{"id": "m1", "content": []any{
+			map[string]any{"type": "tool_use", "id": "call-1", "name": "Bash", "input": map[string]any{"command": "ls"}},
+		}},
+	}, testAttribution(), nil)
+
+	// Act.
+	entries := c.Line(map[string]any{
+		"type": "user", "uuid": "u1",
+		"message": map[string]any{"content": []any{
+			map[string]any{"type": "tool_result", "tool_use_id": "call-1", "content": "a b c"},
+		}},
+	}, testAttribution(), nil)
+
+	// Assert.
+	message := entries[0].GetExternal().GetMessage()
+	if got := message.GetMessageId(); got != "m1" {
+		t.Fatalf("message_id = %q, want the calling message %q", got, "m1")
 	}
-	if extras != nil {
-		t.Fatalf("expected zero extras, got %v", extras.AsMap())
-	}
-	qc := line.GetAttachment().GetQueuedCommand()
-	if _, ok := qc.GetPromptValue().(*datav1.QueuedCommandAttachment_Prompt); !ok {
-		t.Fatalf("prompt_value arm = %T, want *QueuedCommandAttachment_Prompt", qc.GetPromptValue())
-	}
-	if !strings.HasPrefix(qc.GetPrompt(), "also, yes, fix failure A and B") {
-		t.Fatalf("prompt = %q, want the fixture's string prompt", qc.GetPrompt())
+	if got := message.GetToolReturned().GetToolCallId(); got != "call-1" {
+		t.Fatalf("tool_call_id = %q, want %q", got, "call-1")
 	}
 }
 
-// TestQueuedCommandPromptBlocksArm covers the 29/731-census ARRAY form of the
-// `prompt` union, which the pre-union string-typed field could not hold: it hit
-// setField's type-mismatch arm, left prompt at "" and dumped the blocks into
-// extras as a misleading `unknown field "prompt"`.
-func TestQueuedCommandPromptBlocksArm(t *testing.T) {
-	// Arrange
-	root := corpusRoot(t)
-	objs := readLines(t, filepath.Join(root, "attachments", "queued_command.jsonl"))
-	c := New(testLog())
-	// Act
-	line, extras, err := c.TranscriptLine(objs[1])
-	// Assert
-	if err != nil {
-		t.Fatalf("conversion error: %v", err)
+// A result whose calling message this reader never saw has no legal parent, and
+// MessageParent has no arm for an unresolved one. It is stored whole rather than
+// given an invented root that would become a phantom feed row.
+func TestUnresolvableToolResultIsStoredUnconverted(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{
+		"type": "user", "uuid": "u1",
+		"message": map[string]any{"content": []any{
+			map[string]any{"type": "tool_result", "tool_use_id": "call-unseen", "content": "output"},
+		}},
 	}
-	if extras != nil {
-		t.Fatalf("expected zero extras, got %v", extras.AsMap())
+
+	// Act.
+	entry := single(t, c.Line(record, testAttribution(), nil))
+
+	// Assert.
+	if entry.GetExternal() != nil {
+		t.Fatal("an unresolvable tool result reached the daemon with an invented parent")
 	}
-	blocks := line.GetAttachment().GetQueuedCommand().GetPromptBlocks().GetBlocks()
-	if len(blocks) != 1 {
-		t.Fatalf("prompt_blocks.blocks len = %d, want 1", len(blocks))
-	}
-	if got := blocks[0].GetText().GetText(); got != "/effort xhigh" {
-		t.Fatalf("prompt_blocks.blocks[0].text = %q, want %q", got, "/effort xhigh")
+	if entry.GetInternal().GetUnknown() == nil {
+		t.Fatal("an unresolvable tool result was not stored as an unknown record")
 	}
 }
 
-// TestQueuedCommandPromptArrayLogsNoUnknownField is the regression for the
-// original defect: the array form must produce NO loud unknown-field log, which
-// is what the 2026-07-25 23:21:16 sidecar entry reported against a freshly-built
-// binary whose proto already "had" a prompt field.
-func TestQueuedCommandPromptArrayLogsNoUnknownField(t *testing.T) {
-	// Arrange
-	root := corpusRoot(t)
-	objs := readLines(t, filepath.Join(root, "attachments", "queued_command.jsonl"))
-	var logs bytes.Buffer
-	c := New(logging.New(&logs, &logs).With(logging.Context{Component: "convert"}))
-	// Act
-	if _, _, err := c.TranscriptLine(objs[1]); err != nil {
-		t.Fatalf("conversion error: %v", err)
+// The vendor also names the assistant LINE a result answers, which resolves the
+// owner when the call id alone does not.
+func TestToolResultResolvesViaTheNamedAssistantLine(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	c.Line(map[string]any{
+		"type": "assistant", "uuid": "a1",
+		"message": map[string]any{"id": "m1", "content": []any{}},
+	}, testAttribution(), nil)
+
+	// Act.
+	entries := c.Line(map[string]any{
+		"type": "user", "uuid": "u1", "sourceToolAssistantUUID": "a1",
+		"message": map[string]any{"content": []any{
+			map[string]any{"type": "tool_result", "tool_use_id": "call-x", "content": "output"},
+		}},
+	}, testAttribution(), nil)
+
+	// Assert.
+	if got := entries[0].GetExternal().GetMessage().GetMessageId(); got != "m1" {
+		t.Fatalf("message_id = %q, want %q", got, "m1")
 	}
-	// Assert
-	for _, l := range strings.Split(logs.String(), "\n") {
-		if strings.Contains(l, "unknown field") {
-			t.Fatalf("array-form prompt still loud-logged: %s", l)
+}
+
+// A tool that FAILED and a tool that returned nothing are different things to
+// render, so the failure is a fact of its own rather than an empty body.
+func TestToolFailureIsStatedRatherThanImpliedByEmptyContent(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	c.toolCallOwner["call-1"] = "m1"
+	record := map[string]any{
+		"type": "user", "uuid": "u1",
+		"message": map[string]any{"content": []any{
+			map[string]any{"type": "tool_result", "tool_use_id": "call-1", "content": "", "is_error": true},
+		}},
+	}
+
+	// Act.
+	entries := c.Line(record, testAttribution(), nil)
+
+	// Assert.
+	if !entries[0].GetExternal().GetMessage().GetToolReturned().GetIsError() {
+		t.Fatal("is_error is false for a tool result the vendor flagged as an error")
+	}
+}
+
+// A user record that carries only tool results is not something a person said,
+// so it must not also produce a UserSaid with empty content.
+func TestToolResultCarrierIsNotAlsoAUserMessage(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	c.toolCallOwner["call-1"] = "m1"
+	record := map[string]any{
+		"type": "user", "uuid": "u1",
+		"message": map[string]any{"content": []any{
+			map[string]any{"type": "tool_result", "tool_use_id": "call-1", "content": "out"},
+		}},
+	}
+
+	// Act.
+	entries := c.Line(record, testAttribution(), nil)
+
+	// Assert.
+	for _, entry := range entries {
+		if entry.GetExternal().GetMessage().GetUserSaid() != nil {
+			t.Fatal("a tool-result carrier produced a UserSaid the person never typed")
 		}
 	}
 }
 
-// TestQueuedCommandPromptUnmodeledTypeCaptured pins the union's loud arm: a
-// prompt value that is NEITHER string nor array selects no oneof arm and is
-// captured verbatim rather than silently dropped.
-func TestQueuedCommandPromptUnmodeledTypeCaptured(t *testing.T) {
-	// Arrange
-	obj := map[string]any{
-		"type": "attachment",
-		"attachment": map[string]any{
-			"type":        "queued_command",
-			"prompt":      map[string]any{"unexpected": "object"},
-			"commandMode": "prompt",
-		},
+// ---------------------------------------------------------------------------
+// agent responses
+// ---------------------------------------------------------------------------
+
+// The vendor's three disjoint input counters map onto the one canonical shape,
+// and the mapping is fixed rather than a judgment call: reading any single
+// counter as "the cost" is the mistake the nesting exists to prevent.
+func TestUsageMapsOntoTheCanonicalTokenShape(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{
+		"type": "assistant", "uuid": "a1",
+		"message": map[string]any{"id": "m1", "content": []any{}, "usage": map[string]any{
+			"cache_read_input_tokens":     float64(900),
+			"cache_creation_input_tokens": float64(30),
+			"input_tokens":                float64(7),
+			"output_tokens":               float64(12),
+		}},
 	}
-	c := New(testLog())
-	// Act
-	line, extras, err := c.TranscriptLine(obj)
-	// Assert
-	if err != nil {
-		t.Fatalf("conversion error: %v", err)
+
+	// Act.
+	usage := single(t, c.Line(record, testAttribution(), nil)).GetExternal().GetMessage().GetAgentSaid().GetUsage()
+
+	// Assert.
+	if got := usage.GetInputHits().GetRead(); got != 900 {
+		t.Fatalf("input_hits.read = %d, want 900", got)
 	}
-	if extras == nil || extras.AsMap()["queued_command.prompt"] == nil {
-		t.Fatalf("expected queued_command.prompt captured into extras, got %v", extras)
+	if got := usage.GetInputMisses().GetWritten(); got != 30 {
+		t.Fatalf("input_misses.written = %d, want 30", got)
 	}
-	if arm := line.GetAttachment().GetQueuedCommand().GetPromptValue(); arm != nil {
-		t.Fatalf("prompt_value arm = %T, want none set for an unmodeled type", arm)
+	if got := usage.GetInputMisses().GetUnwritten(); got != 7 {
+		t.Fatalf("input_misses.unwritten = %d, want 7", got)
+	}
+	if got := usage.GetOutputTokens(); got != 12 {
+		t.Fatalf("output_tokens = %d, want 12", got)
 	}
 }
 
-// TestSkillBodyEnvelopeSurvivesIngestion pins the two envelope fields the
-// daemon's skill-card curator resolves a launched skill's SKILL.md on.
-//
-// The record is the harness's own: a "user" line flagged isMeta, parented on
-// the Skill call's tool_result record, whose text is the "Base directory for
-// this skill:" header and the SKILL.md body. Both fields reach LineEnvelope
-// through routeEnvelope's generic field lookup rather than a named case, so
-// nothing in this package mentions either one — and nothing would notice if a
-// schema change quietly stopped routing them, which is what this test is for.
-func TestSkillBodyEnvelopeSurvivesIngestion(t *testing.T) {
-	// Arrange
-	const raw = `{"parentUuid":"u-result","isSidechain":false,"type":"user","isMeta":true,` +
-		`"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /s/demo\n\n# Demo"}]},` +
-		`"uuid":"u-body","timestamp":"2026-07-27T10:00:00.000Z","userType":"external","sessionId":"s1","version":"2.1.215"}`
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
-		t.Fatalf("unmarshal fixture: %v", err)
-	}
-	c := New(testLog())
+// A response the vendor reported no usage for must not read as a response that
+// cost nothing.
+func TestAbsentUsageIsNotAZeroBill(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{"type": "assistant", "uuid": "a1", "message": map[string]any{"id": "m1", "content": []any{}}}
 
-	// Act
-	line, extras, err := c.TranscriptLine(obj)
+	// Act.
+	usage := single(t, c.Line(record, testAttribution(), nil)).GetExternal().GetMessage().GetAgentSaid().GetUsage()
 
-	// Assert
-	if err != nil {
-		t.Fatalf("conversion error: %v", err)
+	// Assert.
+	if usage != nil {
+		t.Fatal("absent vendor usage produced a zero TokenUsage, which reads as a free response")
 	}
-	if extras != nil {
-		t.Fatalf("expected zero extras, got %v", extras.AsMap())
+}
+
+// A stop reason the schema does not model is STATED as unsupported. Defaulting
+// it to end_turn would report a truncated response as a complete one.
+func TestStopReasonIsStatedRatherThanDefaulted(t *testing.T) {
+	tests := []struct {
+		name   string
+		vendor string
+		check  func(*conversationv1.StopReason) bool
+	}{
+		{name: "end turn", vendor: "end_turn", check: func(s *conversationv1.StopReason) bool { return s.GetEndTurn() != nil }},
+		{name: "waiting on a tool", vendor: "tool_use", check: func(s *conversationv1.StopReason) bool { return s.GetToolCall() != nil }},
+		{name: "hit the output ceiling", vendor: "max_tokens", check: func(s *conversationv1.StopReason) bool { return s.GetMaxTokens() != nil }},
+		{name: "unmodeled vendor reason", vendor: "some_new_reason", check: func(s *conversationv1.StopReason) bool {
+			return s.GetUnsupported().GetReason() == "some_new_reason"
+		}},
+		{name: "vendor said nothing", vendor: "", check: func(s *conversationv1.StopReason) bool { return s == nil }},
 	}
-	env := line.GetUser().GetEnvelope()
-	if !env.GetIsMeta() {
-		t.Error("is_meta = false, want the harness's own flag preserved")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := testConverter(t)
+			record := map[string]any{"type": "assistant", "uuid": "a1", "message": map[string]any{
+				"id": "m1", "content": []any{}, "stop_reason": tc.vendor,
+			}}
+
+			// Act.
+			got := single(t, c.Line(record, testAttribution(), nil)).GetExternal().GetMessage().GetAgentSaid().GetStopReason()
+
+			// Assert.
+			if !tc.check(got) {
+				t.Fatalf("stop reason for vendor %q resolved to %v", tc.vendor, got)
+			}
+		})
 	}
-	if got, want := env.GetParentUuid(), "u-result"; got != want {
-		t.Errorf("parent_uuid = %q, want the record chain's %q", got, want)
+}
+
+// The vendor's own recorded API failure is a MESSAGE, because a reader scrolling
+// back must see that the turn failed rather than find it merely absent.
+func TestVendorApiErrorBecomesAFailureCard(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{
+		"type": "assistant", "uuid": "a1", "isApiErrorMessage": true, "error": "429 rate limited",
+		"message": map[string]any{"id": "m1", "content": []any{}},
 	}
-	blocks := line.GetUser().GetMessage().GetContentBlocks().GetBlocks()
-	if len(blocks) != 1 {
-		t.Fatalf("content blocks = %d, want the body's one text block", len(blocks))
+
+	// Act.
+	message := single(t, c.Line(record, testAttribution(), nil)).GetExternal().GetMessage()
+
+	// Assert.
+	if got := message.GetFailureRaised().GetSummary(); got != "429 rate limited" {
+		t.Fatalf("failure summary = %q, want the vendor's own text", got)
 	}
-	if !strings.HasPrefix(blocks[0].GetText().GetText(), "Base directory for this skill:") {
-		t.Errorf("body text = %q, want the harness's own header", blocks[0].GetText().GetText())
+	if message.GetAgentSaid() != nil {
+		t.Fatal("an API error also produced an empty agent response")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// content blocks
+// ---------------------------------------------------------------------------
+
+// The vendor's call-shaped block kinds are the same fact wearing three names, so
+// all three become a tool call and the tool's own name carries the rest.
+func TestEveryCallShapedBlockKindBecomesAToolCall(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+	}{
+		{name: "client tool", kind: "tool_use"},
+		{name: "server-run tool", kind: "server_tool_use"},
+		{name: "MCP tool", kind: "mcp_tool_use"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := testConverter(t)
+			record := map[string]any{"type": "assistant", "uuid": "a1", "message": map[string]any{
+				"id": "m1", "content": []any{map[string]any{"type": tc.kind, "id": "c1", "name": "Search"}},
+			}}
+
+			// Act.
+			blocks := single(t, c.Line(record, testAttribution(), nil)).GetExternal().GetMessage().GetAgentSaid().GetContent().GetBlocks()
+
+			// Assert.
+			if len(blocks) != 1 || blocks[0].GetToolCall() == nil {
+				t.Fatalf("block kind %q did not convert to a tool call: %v", tc.kind, blocks)
+			}
+			if got := blocks[0].GetToolCall().GetToolName(); got != "Search" {
+				t.Fatalf("tool_name = %q, want %q", got, "Search")
+			}
+		})
+	}
+}
+
+// Reasoning the vendor WITHHELD is stated as redacted, so a client can say
+// "reasoning was hidden" rather than showing nothing and implying none happened.
+func TestRedactedThinkingIsStatedRatherThanShownAsEmpty(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{"type": "assistant", "uuid": "a1", "message": map[string]any{
+		"id": "m1", "content": []any{map[string]any{"type": "redacted_thinking", "data": "opaque"}},
+	}}
+
+	// Act.
+	blocks := single(t, c.Line(record, testAttribution(), nil)).GetExternal().GetMessage().GetAgentSaid().GetContent().GetBlocks()
+
+	// Assert.
+	if !blocks[0].GetThinking().GetRedacted() {
+		t.Fatal("redacted reasoning was not flagged, so it is indistinguishable from no reasoning")
+	}
+}
+
+// A block kind this schema does not model is kept WHOLE, so the decision not to
+// model it stays reversible from stored data.
+func TestUnmodeledBlockIsKeptVerbatim(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{"type": "assistant", "uuid": "a1", "message": map[string]any{
+		"id": "m1", "content": []any{map[string]any{"type": "container_upload", "file_id": "f1"}},
+	}}
+
+	// Act.
+	blocks := single(t, c.Line(record, testAttribution(), nil)).GetExternal().GetMessage().GetAgentSaid().GetContent().GetBlocks()
+
+	// Assert.
+	unsupported := blocks[0].GetUnsupported()
+	if unsupported.GetKind() != "container_upload" {
+		t.Fatalf("unsupported kind = %q, want %q", unsupported.GetKind(), "container_upload")
+	}
+	if unsupported.GetRaw().GetFields()["file_id"].GetStringValue() != "f1" {
+		t.Fatal("the unmodeled block's own fields were not preserved")
+	}
+}
+
+// A person's message spelled as a bare string and one spelled as blocks are the
+// same thing said two ways, and the runtime JSON type is the only discriminator
+// the vendor gives.
+func TestUserContentAcceptsBothVendorSpellings(t *testing.T) {
+	tests := []struct {
+		name    string
+		content any
+	}{
+		{name: "bare string", content: "hello there"},
+		{name: "block array", content: []any{map[string]any{"type": "text", "text": "hello there"}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := testConverter(t)
+			record := map[string]any{"type": "user", "uuid": "u1", "message": map[string]any{"content": tc.content}}
+
+			// Act.
+			blocks := single(t, c.Line(record, testAttribution(), nil)).GetExternal().GetMessage().GetUserSaid().GetContent().GetBlocks()
+
+			// Assert.
+			if len(blocks) != 1 || blocks[0].GetText().GetText() != "hello there" {
+				t.Fatalf("blocks = %v, want one text block", blocks)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// context cuts
+// ---------------------------------------------------------------------------
+
+// The harness never writes the literal prompt "/clear"; it writes the expanded
+// command envelope, so anything matching raw text misses every replayed session.
+func TestClearIsDetectedThroughTheExpandedEnvelope(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{name: "expanded envelope", content: "<command-name>/clear</command-name><command-message>clear</command-message><command-args></command-args>", want: true},
+		{name: "bare command text", content: "/clear", want: true},
+		{name: "envelope with an argument", content: "<command-name>/clear</command-name><command-args>everything</command-args>", want: false},
+		{name: "a different command", content: "<command-name>/compact</command-name><command-args></command-args>", want: false},
+		{name: "a prompt merely quoting the envelope", content: "look: <command-name>/clear</command-name> is what I ran", want: false},
+		{name: "ordinary prose", content: "please clear the context", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := testConverter(t)
+			record := map[string]any{"type": "user", "uuid": "u1", "message": map[string]any{"content": tc.content}}
+
+			// Act.
+			message := single(t, c.Line(record, testAttribution(), nil)).GetExternal().GetMessage()
+
+			// Assert.
+			got := message.GetContextCut().GetCleared() != nil
+			if got != tc.want {
+				t.Fatalf("cleared = %t for content %q, want %t", got, tc.content, tc.want)
+			}
+		})
+	}
+}
+
+// The boundary and its summary are paired in FILE order. The harness composes
+// the summary BEFORE writing the boundary that announces it, so the summary's
+// timestamp is earlier and a timestamp-ordered pairing gets every pair wrong.
+func TestCompactionTakesItsSummaryFromTheFollowingLine(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	boundary := map[string]any{
+		"type": "system", "uuid": "s1", "subtype": "compact_boundary",
+		"compactMetadata": map[string]any{"preTokens": float64(150000), "postTokens": float64(20000)},
+	}
+	summary := map[string]any{
+		"type": "user", "uuid": "u1", "isCompactSummary": true,
+		"message": map[string]any{"content": "we were doing X"},
+	}
+
+	// Act.
+	compacted := single(t, c.Line(boundary, testAttribution(), summary)).
+		GetExternal().GetMessage().GetContextCut().GetCompacted()
+
+	// Assert.
+	if got := compacted.GetSummary().GetBlocks()[0].GetText().GetText(); got != "we were doing X" {
+		t.Fatalf("summary = %q, want the following line's text", got)
+	}
+	if compacted.GetTokensBefore() != 150000 || compacted.GetTokensAfter() != 20000 {
+		t.Fatalf("tokens before/after = %d/%d, want 150000/20000", compacted.GetTokensBefore(), compacted.GetTokensAfter())
+	}
+}
+
+// A boundary with no summary after it is still a real cut and is still emitted:
+// a reader must see WHERE the conversation was cut rather than merely find the
+// history shorter than they left it.
+func TestCompactionWithoutASummaryIsStillACut(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	boundary := map[string]any{"type": "system", "uuid": "s1", "subtype": "compact_boundary"}
+
+	// Act.
+	message := single(t, c.Line(boundary, testAttribution(), nil)).GetExternal().GetMessage()
+
+	// Assert.
+	if message.GetContextCut().GetCompacted() == nil {
+		t.Fatal("a summary-less boundary produced no context cut")
+	}
+}
+
+// The summary line is the harness's own prose standing in for discarded history.
+// Emitting it as a user message would render it twice and attribute the
+// harness's text to the person.
+func TestCompactionSummaryIsNotAlsoAUserMessage(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{
+		"type": "user", "uuid": "u1", "isCompactSummary": true,
+		"message": map[string]any{"content": "we were doing X"},
+	}
+
+	// Act.
+	entries := c.Line(record, testAttribution(), nil)
+
+	// Assert.
+	for _, entry := range entries {
+		if entry.GetExternal().GetMessage().GetUserSaid() != nil {
+			t.Fatal("the compaction summary was emitted as something the person said")
+		}
+	}
+}
+
+// IsCompactBoundary is what the reader consults to decide whether to defer a
+// batch's last frame, so it must recognize exactly that record and no other.
+func TestIsCompactBoundaryRecognizesOnlyTheBoundary(t *testing.T) {
+	tests := []struct {
+		name   string
+		record map[string]any
+		want   bool
+	}{
+		{name: "the boundary", record: map[string]any{"type": "system", "subtype": "compact_boundary"}, want: true},
+		{name: "a different system subtype", record: map[string]any{"type": "system", "subtype": "turn_duration"}, want: false},
+		{name: "a user line", record: map[string]any{"type": "user"}, want: false},
+		{name: "the summary that follows it", record: map[string]any{"type": "user", "isCompactSummary": true}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act.
+			got := IsCompactBoundary(tc.record)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("IsCompactBoundary = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// detached work
+// ---------------------------------------------------------------------------
+
+// A launch opens a card that is a FEED ROW naming itself, so a page of ten rows
+// is ten bounded things rather than ten trees.
+func TestLaunchOpensAFeedRowNamingItself(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     map[string]any
+		wantID     string
+		wantKindOK func(*conversationv1.DetachedWorkKind) bool
+	}{
+		{
+			name:       "background agent",
+			result:     map[string]any{"isAsync": true, "agentId": "agent-1", "description": "do research"},
+			wantID:     "dw:agent-1",
+			wantKindOK: func(k *conversationv1.DetachedWorkKind) bool { return k.GetAgent() != nil },
+		},
+		{
+			name:       "workflow run",
+			result:     map[string]any{"runId": "wf_1", "summary": "build"},
+			wantID:     "dw:wf_1",
+			wantKindOK: func(k *conversationv1.DetachedWorkKind) bool { return k.GetWorkflow() != nil },
+		},
+		{
+			name:       "background shell",
+			result:     map[string]any{"stdout": "", "backgroundTaskId": "b-9"},
+			wantID:     "dw:b-9",
+			wantKindOK: func(k *conversationv1.DetachedWorkKind) bool { return k.GetShell() != nil },
+		},
+		{
+			name:       "skill invocation",
+			result:     map[string]any{"commandName": "deploy", "success": true},
+			wantID:     "dw:call-7",
+			wantKindOK: func(k *conversationv1.DetachedWorkKind) bool { return k.GetSkill().GetSkillName() == "deploy" },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := testConverter(t)
+			record := map[string]any{
+				"type": "user", "uuid": "u1", "sourceToolUseID": "call-7",
+				"toolUseResult": tc.result,
+				"message":       map[string]any{"content": "ok"},
+			}
+
+			// Act.
+			entries := c.Line(record, testAttribution(), nil)
+
+			// Assert.
+			var started *conversationv1.MessageEntry
+			for _, entry := range entries {
+				if entry.GetExternal().GetMessage().GetDetachedWorkStarted() != nil {
+					started = entry.GetExternal().GetMessage()
+				}
+			}
+			if started == nil {
+				t.Fatal("the launch opened no detached-work card")
+			}
+			if started.GetMessageId() != tc.wantID {
+				t.Fatalf("message_id = %q, want %q", started.GetMessageId(), tc.wantID)
+			}
+			if started.GetParent().GetRoot() == nil {
+				t.Fatal("the card is not a feed row, so it cannot own a page slot")
+			}
+			if started.GetTopLevelMessageId() != tc.wantID {
+				t.Fatalf("top_level_message_id = %q, want its own id", started.GetTopLevelMessageId())
+			}
+			if !tc.wantKindOK(started.GetDetachedWorkStarted().GetKind()) {
+				t.Fatalf("detached kind is wrong: %v", started.GetDetachedWorkStarted().GetKind())
+			}
+			if got := started.GetDetachedWorkStarted().GetOriginToolCallId(); got != "call-7" {
+				t.Fatalf("origin_tool_call_id = %q, want %q", got, "call-7")
+			}
+		})
+	}
+}
+
+// A launch the harness did not name would open a card nothing could ever update,
+// so it is stored whole instead.
+func TestUnnamedLaunchDoesNotOpenACard(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{
+		"type": "user", "uuid": "u1",
+		"toolUseResult": map[string]any{"isAsync": true},
+		"message":       map[string]any{"content": "ok"},
+	}
+
+	// Act.
+	entries := c.Line(record, testAttribution(), nil)
+
+	// Assert.
+	for _, entry := range entries {
+		if entry.GetExternal().GetMessage().GetDetachedWorkStarted() != nil {
+			t.Fatal("a launch with no task identity opened a card")
+		}
+	}
+}
+
+// A stop is CANCELLED, which is a different thing from either outcome the work
+// might have reached on its own.
+func TestTaskStopEndsTheWorkAsCancelled(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{
+		"type": "user", "uuid": "u1",
+		"toolUseResult": map[string]any{"command": "stop", "taskType": "agent", "taskId": "agent-4", "message": "stopped"},
+		"message":       map[string]any{"content": "ok"},
+	}
+
+	// Act.
+	entries := c.Line(record, testAttribution(), nil)
+
+	// Assert.
+	var ended *conversationv1.DetachedWorkEnded
+	for _, entry := range entries {
+		if e := entry.GetExternal().GetMessage().GetDetachedWorkEnded(); e != nil {
+			ended = e
+		}
+	}
+	if ended.GetCancelled() == nil {
+		t.Fatalf("a deliberate stop resolved to %v, want cancelled", ended)
+	}
+}
+
+// A zero exit is a success and a non-zero exit is a failure, both read from the
+// one structured byte a shell spool has.
+func TestExitCodeDecidesTheOutcome(t *testing.T) {
+	tests := []struct {
+		name        string
+		code        int
+		wantSuccess bool
+	}{
+		{name: "clean exit", code: 0, wantSuccess: true},
+		{name: "non-zero exit", code: 2, wantSuccess: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act.
+			ended := DetachedExited(testAttribution(), "b-1", tc.code).
+				GetExternal().GetMessage().GetDetachedWorkEnded()
+
+			// Assert.
+			if (ended.GetSucceeded() != nil) != tc.wantSuccess {
+				t.Fatalf("outcome for exit %d = %v, want success=%t", tc.code, ended, tc.wantSuccess)
+			}
+		})
+	}
+}
+
+// LOST is its own outcome and never failure: we do not know the work died, only
+// that we cannot see it any more.
+func TestLostIsNeverReportedAsFailure(t *testing.T) {
+	// Arrange / Act.
+	ended := DetachedLost(testAttribution(), "agent-1", "silence-timeout").
+		GetExternal().GetMessage().GetDetachedWorkEnded()
+
+	// Assert.
+	if ended.GetFailed() != nil {
+		t.Fatal("a LOST inference was reported as a failure the sidecar never observed")
+	}
+	if got := ended.GetLost().GetInference(); got != "silence-timeout" {
+		t.Fatalf("inference = %q, want %q", got, "silence-timeout")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// skills
+// ---------------------------------------------------------------------------
+
+// A skill's body arrives as a SEPARATE record after the call that opened the
+// work, and it is resolved onto the skill's own card rather than left for a
+// consumer to correlate.
+func TestSkillBodyResolvesOntoItsOwnCard(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	c.Line(map[string]any{
+		"type": "user", "uuid": "u1", "sourceToolUseID": "call-1",
+		"toolUseResult": map[string]any{"commandName": "deploy"},
+		"message":       map[string]any{"content": "ok"},
+	}, testAttribution(), nil)
+
+	// Act.
+	entries := c.Line(map[string]any{
+		"type": "attachment", "uuid": "x1",
+		"attachment": map[string]any{"type": "invoked_skills", "skills": []any{
+			map[string]any{"name": "deploy", "content": "# Deploy\nsteps"},
+		}},
+	}, testAttribution(), nil)
+
+	// Assert.
+	message := single(t, entries).GetExternal().GetMessage()
+	if message.GetMessageId() != "dw:call-1" {
+		t.Fatalf("message_id = %q, want the skill's card %q", message.GetMessageId(), "dw:call-1")
+	}
+	if got := message.GetSkillBodyResolved().GetBody(); got != "# Deploy\nsteps" {
+		t.Fatalf("body = %q, want the skill file verbatim", got)
+	}
+}
+
+// A body naming a skill this reader never saw invoked has no card to resolve
+// onto, so it is stored whole rather than attached to an invented one.
+func TestUnresolvableSkillBodyIsStoredUnconverted(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{
+		"type": "attachment", "uuid": "x1",
+		"attachment": map[string]any{"type": "invoked_skills", "skills": []any{
+			map[string]any{"name": "never-seen", "content": "body"},
+		}},
+	}
+
+	// Act.
+	entry := single(t, c.Line(record, testAttribution(), nil))
+
+	// Assert.
+	if entry.GetExternal() != nil {
+		t.Fatal("an unresolvable skill body was resolved onto an invented card")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// write identity
+// ---------------------------------------------------------------------------
+
+// The write identity is minted once and NEVER regenerated — not for a retry, not
+// for a replay after the store bounced. Deriving it from the file position is
+// what makes that true with no durable state to lose.
+func TestWriteIdentityIsStableAcrossReconversion(t *testing.T) {
+	// Arrange.
+	record := map[string]any{"type": "user", "uuid": "u1", "message": map[string]any{"content": "hello"}}
+
+	// Act: two independent converters, as a restart would produce.
+	first := single(t, testConverter(t).Line(record, testAttribution(), nil))
+	second := single(t, testConverter(t).Line(record, testAttribution(), nil))
+
+	// Assert.
+	if first.GetInternal().GetWriteId() != second.GetInternal().GetWriteId() {
+		t.Fatal("a replayed record minted a new write identity, so the store would write it twice")
+	}
+	if first.GetInternal().GetWriteId() == "" {
+		t.Fatal("the record carries no write identity, so it is not replay-idempotent")
+	}
+}
+
+// Two records read at DIFFERENT positions are two records, and must not collide
+// on one write identity — which would silently drop the second at the store.
+func TestWriteIdentityDistinguishesPositions(t *testing.T) {
+	// Arrange.
+	record := map[string]any{"type": "user", "uuid": "u1", "message": map[string]any{"content": "hello"}}
+	first, second := testAttribution(), testAttribution()
+	second.Offset = 500
+
+	// Act.
+	a := single(t, testConverter(t).Line(record, first, nil))
+	b := single(t, testConverter(t).Line(record, second, nil))
+
+	// Assert.
+	if a.GetInternal().GetWriteId() == b.GetInternal().GetWriteId() {
+		t.Fatal("two records at different offsets share one write identity")
+	}
+}
+
+// Several records produced from ONE line are still several records, so they must
+// not collide either.
+func TestWriteIdentityDistinguishesRecordsFromOneLine(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	c.toolCallOwner["call-1"] = "m1"
+	c.toolCallOwner["call-2"] = "m1"
+	record := map[string]any{
+		"type": "user", "uuid": "u1",
+		"message": map[string]any{"content": []any{
+			map[string]any{"type": "tool_result", "tool_use_id": "call-1", "content": "a"},
+			map[string]any{"type": "tool_result", "tool_use_id": "call-2", "content": "b"},
+		}},
+	}
+
+	// Act.
+	entries := c.Line(record, testAttribution(), nil)
+
+	// Assert.
+	seen := map[string]bool{}
+	for _, entry := range entries {
+		id := entry.GetInternal().GetWriteId()
+		if seen[id] {
+			t.Fatalf("two records from one line share write identity %q", id)
+		}
+		seen[id] = true
+	}
+}
+
+// ---------------------------------------------------------------------------
+// plane
+// ---------------------------------------------------------------------------
+
+// Every record this process writes was read from disk, so every one records the
+// FILE plane. Attribution is the shim's own business and never leaves.
+func TestEveryRecordIsAttributedToTheFilePlane(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{"type": "user", "uuid": "u1", "message": map[string]any{"content": "hi"}}
+
+	// Act.
+	entry := single(t, c.Line(record, testAttribution(), nil))
+
+	// Assert.
+	if entry.GetInternal().GetPlane().GetFile() == nil {
+		t.Fatal("a record read from disk was not attributed to the file plane")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// unparsed records
+// ---------------------------------------------------------------------------
+
+// A record we could not READ is a failure rather than a gap, and the fields exist
+// so it is investigable rather than merely counted.
+func TestUnparsedRecordCarriesItsEvidence(t *testing.T) {
+	// Arrange.
+	at := testAttribution()
+	cause := errors.New("unexpected end of JSON input")
+
+	// Act.
+	unparsed := UnparsedEntry(at, []byte(`{"type":"user"`), cause).GetInternal().GetUnparsed()
+
+	// Assert.
+	if unparsed.GetSource() != at.Path {
+		t.Fatalf("source = %q, want %q", unparsed.GetSource(), at.Path)
+	}
+	if unparsed.GetOffset() != uint64(at.Offset) {
+		t.Fatalf("offset = %d, want %d", unparsed.GetOffset(), at.Offset)
+	}
+	if unparsed.GetParseError() != cause.Error() {
+		t.Fatalf("parse_error = %q, want %q", unparsed.GetParseError(), cause.Error())
+	}
+	if unparsed.GetRaw() != `{"type":"user"` {
+		t.Fatalf("raw = %q, want the bytes verbatim", unparsed.GetRaw())
+	}
+}
+
+// A corrupt line is evidence, not a payload: an unbounded copy of a multi-megabyte
+// one would be written to the store on every re-read.
+func TestUnparsedRawIsBounded(t *testing.T) {
+	// Arrange.
+	raw := make([]byte, maxUnparsedRaw+4096)
+
+	// Act.
+	unparsed := UnparsedEntry(testAttribution(), raw, errors.New("boom")).GetInternal().GetUnparsed()
+
+	// Assert.
+	if len(unparsed.GetRaw()) != maxUnparsedRaw {
+		t.Fatalf("raw length = %d, want it capped at %d", len(unparsed.GetRaw()), maxUnparsedRaw)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// journal records
+// ---------------------------------------------------------------------------
+
+// A journal record is the OUTPUT of a run, so it accumulates into the run's own
+// card rather than becoming a feed row of its own.
+func TestJournalRecordAppendsToTheRunsCard(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+	record := map[string]any{"type": "started", "key": "build"}
+
+	// Act.
+	message := single(t, c.JournalRecord(record, testAttribution(), "wf_1")).GetExternal().GetMessage()
+
+	// Assert.
+	if message.GetMessageId() != "dw:wf_1" {
+		t.Fatalf("message_id = %q, want the run's card %q", message.GetMessageId(), "dw:wf_1")
+	}
+	if message.GetDetachedWorkProgressed() == nil {
+		t.Fatal("a journal step did not become progress on the run")
+	}
+}
+
+// Without the run's identity there is no card to append to, and no arm for
+// progress that names no work.
+func TestJournalRecordWithoutARunIsStoredUnconverted(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+
+	// Act.
+	entry := single(t, c.JournalRecord(map[string]any{"type": "started"}, testAttribution(), ""))
+
+	// Assert.
+	if entry.GetExternal() != nil {
+		t.Fatal("a journal record with no run reached the daemon")
+	}
+}
+
+// A journal record type this reader does not know is stored whole rather than
+// rendered as a blank step, because only one of the two is reversible.
+func TestUnknownJournalRecordTypeIsStoredUnconverted(t *testing.T) {
+	// Arrange.
+	c := testConverter(t)
+
+	// Act.
+	entry := single(t, c.JournalRecord(map[string]any{"type": "brand-new"}, testAttribution(), "wf_1"))
+
+	// Assert.
+	if entry.GetExternal() != nil {
+		t.Fatal("an unmodeled journal record was rendered into the run's output")
+	}
+	if got := entry.GetInternal().GetUnknown().GetDiscriminator(); got != "brand-new" {
+		t.Fatalf("discriminator = %q, want %q", got, "brand-new")
 	}
 }

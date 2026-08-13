@@ -6,13 +6,12 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/wire"
 )
@@ -21,102 +20,28 @@ func testLog() *logging.Bound {
 	return logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
 }
 
-// shimStoreDir walks up from the test's working directory to the sibling
-// shim-store module (…/agent-shim/shim-store).
-func shimStoreDir(t *testing.T) string {
+// shortSocket returns an unused path under /tmp. macOS caps sun_path well below
+// what a t.TempDir() path costs, so the socket cannot live in the test's dir.
+func shortSocket(t *testing.T) string {
 	t.Helper()
-	dir, _ := os.Getwd()
-	for {
-		cand := filepath.Join(dir, "agent-shim", "shim-store")
-		if _, err := os.Stat(filepath.Join(cand, "main.go")); err == nil {
-			return cand
-		}
-		p := filepath.Dir(dir)
-		if p == dir {
-			t.Fatalf("shim-store module not found above %s", dir)
-		}
-		dir = p
-	}
-}
-
-// startRealStore builds and spawns the REAL shim-store binary on a temp socket
-// and returns the socket path. The store, db, and log all live under temp dirs
-// so nothing touches the real ~/.cache locations.
-func startRealStore(t *testing.T) string {
-	t.Helper()
-	srcDir := shimStoreDir(t)
-	tmp := t.TempDir()
-	bin := filepath.Join(tmp, "shim-store")
-	build := exec.Command("go", "build", "-o", bin, ".")
-	build.Dir = srcDir
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("building shim-store: %v\n%s", err, out)
-	}
-	// macOS UDS sun_path is short; keep the socket path under /tmp.
-	sockDir, err := os.MkdirTemp("/tmp", "sidecarstore")
+	dir, err := os.MkdirTemp("/tmp", "sidecarstore")
 	if err != nil {
 		t.Fatalf("mkdtemp: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(sockDir) })
-	sock := filepath.Join(sockDir, "s")
-
-	cmd := exec.Command(bin,
-		"-socket", sock,
-		"-db", filepath.Join(tmp, "events.db"),
-		"-log", filepath.Join(tmp, "store.log"),
-	)
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting shim-store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-	})
-
-	// Readiness poll: retry dialing until the store is listening. This waits on
-	// an EXTERNAL process's socket (no in-process channel can signal it); the
-	// small backoff is readiness polling, not goroutine synchronization.
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := net.Dial("unix", sock); err == nil {
-			c.Close()
-			return sock
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("shim-store did not start listening on %s", sock)
-	return ""
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return filepath.Join(dir, "s")
 }
 
-func TestIntegrationRecoverCursorsEmpty(t *testing.T) {
-	// Arrange
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	// Act
-	cursors, err := c.RecoverCursors("")
-	// Assert
-	if err != nil {
-		t.Fatalf("RecoverCursors: %v", err)
-	}
-	if len(cursors) != 0 {
-		t.Fatalf("cursors = %d, want 0 on a fresh store", len(cursors))
-	}
-}
-
-func TestRecoverRejectsStoreWithoutAuthoritativeOpenTaskState(t *testing.T) {
-	socketDir, err := os.MkdirTemp("/tmp", "sidecar-recovery")
-	if err != nil {
-		t.Fatalf("create short socket dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(socketDir) })
-	sock := filepath.Join(socketDir, "s")
+// serveOnce accepts one connection, hands it to serve, and reports serve's
+// error on the returned channel. The channel IS the synchronization: a test
+// reads it to know the server finished.
+func serveOnce(t *testing.T, sock string, serve func(net.Conn) error) <-chan error {
+	t.Helper()
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	t.Cleanup(func() { ln.Close() })
 	served := make(chan error, 1)
 	go func() {
 		conn, err := ln.Accept()
@@ -125,14 +50,77 @@ func TestRecoverRejectsStoreWithoutAuthoritativeOpenTaskState(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		if _, err := wire.ReadAny(conn); err != nil {
-			served <- err
-			return
-		}
-		served <- wire.WriteAny(conn, &corev1.CursorList{})
+		served <- serve(conn)
 	}()
+	return served
+}
 
-	_, err = New(sock, testLog()).Recover("")
+// pipedClient wires a client straight onto an in-memory connection, so a test
+// exercises the frame exchange without a listener at all. The reach-in is
+// deliberate: Connect is the only thing that dials, and these tests are about
+// what happens on an ALREADY established connection.
+func pipedClient(t *testing.T, log *logging.Bound) (*Client, net.Conn) {
+	t.Helper()
+	c := New("/tmp/test-store.sock", log)
+	client, server := net.Pipe()
+	c.conn = client
+	t.Cleanup(func() {
+		_ = c.Close()
+		_ = server.Close()
+	})
+	return c, server
+}
+
+func TestRecoverReturnsCursorsAndOpenTasks(t *testing.T) {
+	// Arrange
+	sock := shortSocket(t)
+	served := serveOnce(t, sock, func(conn net.Conn) error {
+		msg, err := wire.ReadAny(conn)
+		if err != nil {
+			return err
+		}
+		if _, ok := msg.(*agentshimv1.CursorQuery); !ok {
+			return errors.New("expected CursorQuery")
+		}
+		return wire.WriteAny(conn, &agentshimv1.CursorList{
+			Cursors:                []*agentshimv1.CursorState{{FileId: "7:7", Path: "/p/s1.jsonl", Offset: 99}},
+			OpenTasks:              []*agentshimv1.OpenTaskState{{LastActivityAtMs: 5}},
+			OpenTasksAuthoritative: true,
+		})
+	})
+
+	// Act
+	recovery, err := New(sock, testLog()).Recover("")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(recovery.Cursors) != 1 || recovery.Cursors[0].GetOffset() != 99 {
+		t.Fatalf("recovered cursors = %+v", recovery.Cursors)
+	}
+	if len(recovery.OpenTasks) != 1 || recovery.OpenTasks[0].GetLastActivityAtMs() != 5 {
+		t.Fatalf("recovered open tasks = %+v", recovery.OpenTasks)
+	}
+	if serveErr := <-served; serveErr != nil {
+		t.Fatalf("serve recovery response: %v", serveErr)
+	}
+}
+
+func TestRecoverRejectsStoreWithoutAuthoritativeOpenTaskState(t *testing.T) {
+	// Arrange: a store that answers without attesting its open-task set.
+	sock := shortSocket(t)
+	served := serveOnce(t, sock, func(conn net.Conn) error {
+		if _, err := wire.ReadAny(conn); err != nil {
+			return err
+		}
+		return wire.WriteAny(conn, &agentshimv1.CursorList{})
+	})
+
+	// Act
+	_, err := New(sock, testLog()).Recover("")
+
+	// Assert
 	if err == nil {
 		t.Fatal("Recover accepted a CursorList with no authoritative open-task attestation")
 	}
@@ -141,127 +129,84 @@ func TestRecoverRejectsStoreWithoutAuthoritativeOpenTaskState(t *testing.T) {
 	}
 }
 
-func TestIntegrationWriteAckThenCursorRecovery(t *testing.T) {
-	// Arrange
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	if err := c.Connect(); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	ev := &corev1.Event{
-		SessionId: "s1",
-		Plane:     corev1.Plane_PLANE_FILE,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Payload:   &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{StopReason: "done"}},
-		DedupKey:  "turn:s1:u1",
-	}
-	batch := &corev1.EventBatch{
-		Events:        []*corev1.Event{ev},
-		CursorAdvance: &corev1.CursorState{FileId: "7:7", Path: "/p/s1.jsonl", Offset: 99, Carry: []byte("z")},
-	}
-	// Act: write the batch.
-	ack, err := c.Write("shim-claude-sidecar", batch)
+func TestWriteSendsAStoreEntryWriteAndDoesNotWaitForAnAck(t *testing.T) {
+	// Arrange — StoreWriteAck was retired with no successor, so the write is
+	// one-way: the frame goes out and nothing is read back. A server that never
+	// replies must therefore leave Write succeeding rather than blocking.
+	c, server := pipedClient(t, testLog())
+	served := make(chan error, 1)
+	go func() {
+		msg, err := wire.ReadAny(server)
+		if err != nil {
+			served <- err
+			return
+		}
+		write, ok := msg.(*agentshimv1.StoreEntryWrite)
+		if !ok {
+			served <- errors.New("expected StoreEntryWrite")
+			return
+		}
+		if write.GetProducer() != "shim-claude-sidecar" {
+			served <- errors.New("producer = " + write.GetProducer())
+			return
+		}
+		if write.GetBatch().GetCursorAdvance().GetOffset() != 99 {
+			served <- errors.New("cursor advance did not ride with the records")
+			return
+		}
+		served <- nil
+	}()
+
+	// Act
+	err := c.Write("shim-claude-sidecar", &agentshimv1.EntryBatch{
+		Entries:       []*agentshimv1.Entry{{Internal: &agentshimv1.InternalEntry{WriteId: "w1"}}},
+		CursorAdvance: &agentshimv1.CursorState{FileId: "7:7", Path: "/p/s1.jsonl", Offset: 99, Carry: []byte("z")},
+	})
+
+	// Assert
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	// Assert: one accepted event, a seq assigned.
-	if ack.GetAccepted() != 1 || ack.GetLastSeq() == 0 {
-		t.Fatalf("ack = %+v, want accepted=1 last_seq>0", ack)
+	if serveErr := <-served; serveErr != nil {
+		t.Fatalf("serve StoreEntryWrite: %v", serveErr)
 	}
-	// Act: recover the cursor committed atomically with the batch.
-	cursors, err := c.RecoverCursors("")
-	if err != nil {
-		t.Fatalf("RecoverCursors: %v", err)
-	}
-	// Assert
-	if len(cursors) != 1 || cursors[0].GetOffset() != 99 || cursors[0].GetFileId() != "7:7" {
-		t.Fatalf("recovered cursors = %+v", cursors)
+	if !c.Connected() {
+		t.Fatal("a successful write dropped the producer connection")
 	}
 }
 
-func TestIntegrationDedupOnReplay(t *testing.T) {
-	// Arrange: the same producer-keyed batch written twice (a crash-replay).
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	if err := c.Connect(); err != nil {
-		t.Fatalf("Connect: %v", err)
+func TestWriteTransportFailureDropsTheConnection(t *testing.T) {
+	// Arrange: an established connection broken underneath the client, so the
+	// failure has to come from the transport rather than from a nil conn.
+	c, server := pipedClient(t, testLog())
+	if err := server.Close(); err != nil {
+		t.Fatalf("close server: %v", err)
 	}
-	mk := func() *corev1.EventBatch {
-		return &corev1.EventBatch{Events: []*corev1.Event{{
-			SessionId: "s1",
-			Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
-			Plane:     corev1.Plane_PLANE_FILE,
-			Payload:   &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{StopReason: "x"}},
-			DedupKey:  "turn:s1:same",
-		}}}
-	}
+
 	// Act
-	a1, err := c.Write("shim-claude-sidecar", mk())
-	if err != nil {
-		t.Fatalf("write1: %v", err)
-	}
-	a2, err := c.Write("shim-claude-sidecar", mk())
-	if err != nil {
-		t.Fatalf("write2: %v", err)
-	}
-	// Assert: first accepted, second fully deduped (exactly-once under replay).
-	if a1.GetAccepted() != 1 || a2.GetDeduped() != 1 || a2.GetAccepted() != 0 {
-		t.Fatalf("a1=%+v a2=%+v, want accept-then-dedup", a1, a2)
-	}
-}
+	err := c.Write("shim-claude-sidecar", &agentshimv1.EntryBatch{})
 
-func TestIntegrationHeartbeat(t *testing.T) {
-	// Arrange: an established producer connection before any file change has
-	// produced the StoreWrite that ordinarily declares its role.
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	if err := c.Connect(); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-
-	// Act / Assert: heartbeat itself can open the producer preamble.
-	if err := c.Heartbeat(); err != nil {
-		t.Fatalf("Heartbeat: %v", err)
-	}
-	// The same connection must still accept its eventual first write.
-	if _, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{}); err != nil {
-		t.Fatalf("first write after heartbeat: %v", err)
-	}
-}
-
-func TestIntegrationHealthCheck(t *testing.T) {
-	// Arrange: as with a heartbeat, health may be the first deliberate frame
-	// after the sidecar restores its producer connection.
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	if err := c.Connect(); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-
-	// Act / Assert: a correlated store health response keeps the producer
-	// connection usable for the eventual first write.
-	if err := c.Health("sidecar-health-test"); err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if _, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{}); err != nil {
-		t.Fatalf("first write after health: %v", err)
-	}
-}
-
-func TestWriteErrorSurfacedOnDeadStore(t *testing.T) {
-	// Arrange: a client pointed at a socket with no server (honest sad path).
-	socket := filepath.Join(t.TempDir(), "nonexistent.sock")
-	var logs bytes.Buffer
-	c := New(socket, logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
-	// Act
-	_, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
-	// Assert: the failure is surfaced, never swallowed.
+	// Assert: the caller learns the LINK is gone, not merely that a write failed.
 	if err == nil {
-		t.Fatal("expected an error writing to a dead store")
+		t.Fatal("expected an error writing on a broken connection")
+	}
+	if c.Connected() {
+		t.Fatal("Connected() stayed true after the transport failed")
+	}
+}
+
+func TestWriteErrorSurfacedWithoutAGlobalErrorLog(t *testing.T) {
+	// Arrange: never connected, so the write cannot land (honest sad path). The
+	// error belongs to the caller, which owns the dropped-batch report.
+	var logs bytes.Buffer
+	c := New(shortSocket(t), logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
+
+	// Act
+	err := c.Write("shim-claude-sidecar", &agentshimv1.EntryBatch{})
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected an error writing with no producer connection")
 	}
 	if strings.Contains(logs.String(), `"level":"error"`) {
 		t.Fatalf("storeclient globally logged caller-owned write error: %q", logs.String())
@@ -269,15 +214,20 @@ func TestWriteErrorSurfacedOnDeadStore(t *testing.T) {
 }
 
 func TestWriteNeverDialsImplicitly(t *testing.T) {
-	// Arrange: a LIVE store, but a client that was never connected. The dial
+	// Arrange: a LIVE listener, but a client that was never connected. The dial
 	// would succeed, which is exactly why the write must not attempt one: a
 	// connection born under a write skipped cursor recovery.
-	sock := startRealStore(t)
+	sock := shortSocket(t)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
 	c := New(sock, testLog())
 	defer c.Close()
 
 	// Act
-	_, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
+	err = c.Write("shim-claude-sidecar", &agentshimv1.EntryBatch{})
 
 	// Assert
 	if !errors.Is(err, ErrNotConnected) {
@@ -285,6 +235,35 @@ func TestWriteNeverDialsImplicitly(t *testing.T) {
 	}
 	if c.Connected() {
 		t.Fatal("Write opened a producer connection; it must never dial")
+	}
+}
+
+func TestHeartbeatSendsAConnectionHeartbeatAndReadsTheEcho(t *testing.T) {
+	// Arrange
+	c, server := pipedClient(t, testLog())
+	served := make(chan error, 1)
+	go func() {
+		msg, err := wire.ReadAny(server)
+		if err != nil {
+			served <- err
+			return
+		}
+		if _, ok := msg.(*protocolv1.ConnectionHeartbeat); !ok {
+			served <- errors.New("expected ConnectionHeartbeat")
+			return
+		}
+		served <- wire.WriteAny(server, &protocolv1.ConnectionHeartbeat{SentAtMs: 1})
+	}()
+
+	// Act
+	err := c.Heartbeat()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+	if serveErr := <-served; serveErr != nil {
+		t.Fatalf("serve heartbeat echo: %v", serveErr)
 	}
 }
 
@@ -296,6 +275,39 @@ func TestHeartbeatOnADownConnectionIsAnErrorNotSilence(t *testing.T) {
 	// Act / Assert
 	if err := c.Heartbeat(); !errors.Is(err, ErrNotConnected) {
 		t.Fatalf("Heartbeat err = %v, want ErrNotConnected", err)
+	}
+}
+
+func TestHealthAcceptsACorrelatedHealthyStatus(t *testing.T) {
+	// Arrange
+	c, server := pipedClient(t, testLog())
+	served := make(chan error, 1)
+	go func() {
+		msg, err := wire.ReadAny(server)
+		if err != nil {
+			served <- err
+			return
+		}
+		check, ok := msg.(*protocolv1.HealthCheck)
+		if !ok {
+			served <- errors.New("expected HealthCheck")
+			return
+		}
+		served <- wire.WriteAny(server, &protocolv1.HealthStatus{RequestId: check.GetRequestId(), Healthy: true})
+	}()
+
+	// Act
+	err := c.Health("sidecar-health-test")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if serveErr := <-served; serveErr != nil {
+		t.Fatalf("serve HealthStatus: %v", serveErr)
+	}
+	if !c.Connected() {
+		t.Fatal("a healthy store dropped the producer connection")
 	}
 }
 
@@ -311,14 +323,9 @@ func TestHealthOnADownConnectionIsAnErrorNotSilence(t *testing.T) {
 }
 
 func TestHealthRequiresCorrelationID(t *testing.T) {
-	// Arrange: connect first so the request-id invariant, rather than a missing
-	// transport, is the error this test exercises.
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	if err := c.Connect(); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
+	// Arrange: an established connection, so the request-id invariant rather
+	// than a missing transport is the error this test exercises.
+	c, _ := pipedClient(t, testLog())
 
 	// Act / Assert
 	if err := c.Health(""); err == nil {
@@ -327,14 +334,9 @@ func TestHealthRequiresCorrelationID(t *testing.T) {
 }
 
 func TestHealthRejectsMismatchedResponseAndLogsContext(t *testing.T) {
+	// Arrange
 	var logs bytes.Buffer
-	c := New("/tmp/test-store.sock", logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
-	client, server := net.Pipe()
-	c.conn = client
-	t.Cleanup(func() {
-		_ = c.Close()
-		_ = server.Close()
-	})
+	c, server := pipedClient(t, logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
 	served := make(chan error, 1)
 	go func() {
 		msg, err := wire.ReadAny(server)
@@ -342,17 +344,20 @@ func TestHealthRejectsMismatchedResponseAndLogsContext(t *testing.T) {
 			served <- err
 			return
 		}
-		if _, ok := msg.(*corev1.HealthCheck); !ok {
+		if _, ok := msg.(*protocolv1.HealthCheck); !ok {
 			served <- errors.New("expected HealthCheck")
 			return
 		}
-		served <- wire.WriteAny(server, &corev1.HealthStatus{
+		served <- wire.WriteAny(server, &protocolv1.HealthStatus{
 			RequestId: "wrong-request",
 			Healthy:   true,
 		})
 	}()
 
+	// Act
 	err := c.Health("expected-request")
+
+	// Assert
 	if err == nil || !strings.Contains(err.Error(), "request_id") {
 		t.Fatalf("Health err = %v, want request_id mismatch", err)
 	}
@@ -368,28 +373,26 @@ func TestHealthRejectsMismatchedResponseAndLogsContext(t *testing.T) {
 }
 
 func TestHealthRejectsUnhealthyResponseAndLogsReason(t *testing.T) {
+	// Arrange
 	var logs bytes.Buffer
-	c := New("/tmp/test-store.sock", logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
-	client, server := net.Pipe()
-	c.conn = client
-	t.Cleanup(func() {
-		_ = c.Close()
-		_ = server.Close()
-	})
+	c, server := pipedClient(t, logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
 	served := make(chan error, 1)
 	go func() {
 		if _, err := wire.ReadAny(server); err != nil {
 			served <- err
 			return
 		}
-		served <- wire.WriteAny(server, &corev1.HealthStatus{
+		served <- wire.WriteAny(server, &protocolv1.HealthStatus{
 			RequestId: "health-unhealthy",
 			Healthy:   false,
 			Reason:    "database unavailable",
 		})
 	}()
 
+	// Act
 	err := c.Health("health-unhealthy")
+
+	// Assert
 	if err == nil || !strings.Contains(err.Error(), "database unavailable") {
 		t.Fatalf("Health err = %v, want store health reason", err)
 	}
@@ -404,70 +407,61 @@ func TestHealthRejectsUnhealthyResponseAndLogsReason(t *testing.T) {
 	}
 }
 
-func TestWriteRejectionKeepsConnectionAndLogsStoreReason(t *testing.T) {
-	var logs bytes.Buffer
-	c := New("/tmp/test-store.sock", logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
-	client, server := net.Pipe()
-	c.conn = client
-	t.Cleanup(func() {
-		_ = c.Close()
-		_ = server.Close()
-	})
+func TestHealthRejectsAResponseThatIsNotAHealthStatus(t *testing.T) {
+	// Arrange: a peer that answers a health probe with something else has not
+	// asserted health, so the connection cannot be treated as proven.
+	c, server := pipedClient(t, testLog())
 	served := make(chan error, 1)
 	go func() {
-		msg, err := wire.ReadAny(server)
-		if err != nil {
+		if _, err := wire.ReadAny(server); err != nil {
 			served <- err
 			return
 		}
-		if _, ok := msg.(*corev1.StoreWrite); !ok {
-			served <- errors.New("expected StoreWrite")
-			return
-		}
-		served <- wire.WriteAny(server, &corev1.StoreWriteAck{Error: "cursor conflict"})
+		served <- wire.WriteAny(server, &protocolv1.ConnectionHeartbeat{SentAtMs: 1})
 	}()
 
-	ack, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
-	if err == nil || !strings.Contains(err.Error(), "cursor conflict") {
-		t.Fatalf("Write err = %v, want store rejection", err)
+	// Act
+	err := c.Health("health-wrong-type")
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "expected HealthStatus") {
+		t.Fatalf("Health err = %v, want an expected-HealthStatus rejection", err)
 	}
-	if ack.GetError() != "cursor conflict" {
-		t.Fatalf("ack error = %q, want cursor conflict", ack.GetError())
-	}
-	if !c.Connected() {
-		t.Fatal("store rejection dropped a healthy producer connection")
+	if c.Connected() {
+		t.Fatal("a non-HealthStatus reply left the producer connection established")
 	}
 	if serveErr := <-served; serveErr != nil {
-		t.Fatalf("serve StoreWriteAck: %v", serveErr)
-	}
-	if strings.Contains(logs.String(), `"level":"error"`) || strings.Contains(logs.String(), "cursor conflict") {
-		t.Fatalf("storeclient leaked session-owned rejection into global log: %q", logs.String())
+		t.Fatalf("serve reply: %v", serveErr)
 	}
 }
 
-func TestConnectedGoesFalseAfterTheStoreDies(t *testing.T) {
-	// Arrange: an established producer connection to a real store.
-	sock := startRealStore(t)
+func TestConnectEstablishesTheProducerConnectionWithoutAFrame(t *testing.T) {
+	// Arrange: the store fixes a connection's role by its FIRST frame, so
+	// Connect must send none.
+	sock := shortSocket(t)
+	served := serveOnce(t, sock, func(conn net.Conn) error {
+		_, err := wire.ReadAny(conn)
+		if err == nil {
+			return errors.New("Connect sent a frame; the first Write must declare the role")
+		}
+		return nil
+	})
 	c := New(sock, testLog())
-	defer c.Close()
-	if err := c.Connect(); err != nil {
+
+	// Act
+	err := c.Connect()
+
+	// Assert
+	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	if _, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{}); err != nil {
-		t.Fatalf("prime write: %v", err)
+	if !c.Connected() {
+		t.Fatal("Connect did not establish the producer connection")
 	}
-
-	// Act: break the socket underneath the client (same-package reach-in, so the
-	// connection stays non-nil and the failure has to come from the transport),
-	// then write.
-	c.conn.Close()
-	_, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
-
-	// Assert: the caller learns the LINK is gone, not merely that a write failed.
-	if err == nil {
-		t.Fatal("expected an error writing on a dropped connection")
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
-	if c.Connected() {
-		t.Fatal("Connected() stayed true after the connection was dropped")
+	if serveErr := <-served; serveErr != nil {
+		t.Fatalf("serve connect: %v", serveErr)
 	}
 }

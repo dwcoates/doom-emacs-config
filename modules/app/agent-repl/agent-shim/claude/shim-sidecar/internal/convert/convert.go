@@ -1,1099 +1,776 @@
-// Package convert maps the Claude harness's on-disk JSON records into the
-// agentshim.data.v1 proto vocabulary under the design §5.1 validation contract:
+// Package convert turns the Claude harness's on-disk JSON records into the
+// VENDOR-AGNOSTIC conversation model, at the point of production.
 //
-//   - Missing EXPECTED field (an absent/unknown top-level type discriminator)
-//     is a HARD error: the caller persists the raw record as a core.UnparsedEvent
-//     and loud-logs it. Conversion NEVER silently yields a zero value for a
-//     record it cannot classify.
-//   - Unexpected NEW field (a JSON key the proto does not model) is captured
-//     verbatim into a per-record extras Struct (dotted path → value) and
-//     loud-logged ONCE per distinct field name. Nothing is dropped.
-//   - string-or-object / string-or-blocks unions are modeled as explicit oneofs
-//     with a raw_string / content_string arm; the converter routes by the JSON
-//     value's runtime type, never erroring on the string arm.
-//   - Disk camelCase (toolUseResult, sessionId, toolUseID) and stream snake_case
-//     normalize to ONE proto shape via a canonical (lowercased, underscore- and
-//     dash-stripped) field-name match.
+// WHAT REPLACED WHAT. Its predecessor was a reflection-driven transliterator: it
+// copied each JSONL line into a proto whose messages and arms were the vendor's
+// own API surface, so every consumer downstream had to know Claude to read one.
+// The model this package targets has no vendor in it. A tool was CALLED and a
+// tool RETURNED, whoever ran it; a person SAID something, whatever envelope the
+// harness wrapped it in; a conversation was CUT, however the CLI spells that.
 //
-// The converter is intentionally reflection-driven so that adding a proto field
-// automatically starts populating it; only the oneof discriminators (which JSON
-// does not express as a key named after the chosen arm) carry bespoke dispatch.
+// THE THREE OUTCOMES, and nothing else happens to a record:
+//
+//   - CONVERTED. The record becomes a conversation.v1 message or a protocol.v1
+//     bookkeeping fact, stored with an external half the daemon may read.
+//   - UNCONVERTED. The record is understood and deliberately not carried
+//     (VendorSpecificEntry), parsed and not modeled (UnknownEntry), or not
+//     readable at all (UnparsedEntry). It is stored WHOLE, with no external half
+//     and therefore no path to the daemon, which is what makes converting
+//     eagerly at the edge cost no fidelity: the decision to not model something
+//     stays reversible from stored data.
+//   - Nothing else. There is no drop. The total-ingestion mandate is that every
+//     JSON object on disk ends up in the store as a protobuf shape.
+//
+// LINEAGE IS RESOLVED HERE, NEVER DEFERRED. MessageEntry.parent is a oneof
+// precisely so "this is a feed row" and "I could not work out a parent" cannot
+// be spelled the same way. This package states which case it is or stores the
+// record unconverted; it never emits a root it does not believe in.
 package convert
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strings"
 
-	datav1 "agentrepl/proto/agentshim/data/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
-	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// Converter holds the once-per-distinct-field-name log-dedup set. It is NOT safe
-// for concurrent use; each tailer owns its own converter.
+// Converter holds the per-file correlation a conversion needs beyond the record
+// in front of it. It is NOT safe for concurrent use; each tailer owns one.
 type Converter struct {
-	log  *logging.Bound
-	seen map[string]bool
+	log *logging.Bound
+
+	// toolCallOwner maps a vendor tool_call_id to the message that MADE the
+	// call. A tool result carries the id of the call it answers and nothing
+	// else, and ToolReturned must name the message the result folds onto — so
+	// this is the only thing standing between a result and a correlation pass
+	// in a consumer.
+	toolCallOwner map[string]string
+
+	// lineOwner maps an assistant LINE's uuid to the message id it belongs to.
+	// The harness splits one response across several lines sharing one
+	// message.id, and a tool result names the assistant LINE it answers
+	// (`sourceToolAssistantUUID`), so resolving that name needs this second hop.
+	lineOwner map[string]string
+
+	// skillMessage maps a skill's invoked name to the detached-work message that
+	// opened it, so the body the harness writes as a SEPARATE record later can
+	// be resolved onto the skill's own card.
+	skillMessage map[string]string
 }
 
-// New builds a Converter. A nil log is tolerated (discarded).
+// New builds a Converter.
 func New(log *logging.Bound) *Converter {
-	return &Converter{log: log, seen: make(map[string]bool)}
-}
-
-// capture accumulates unknown fields for one record as a flat dotted-path map.
-type capture struct {
-	c      *Converter
-	fields map[string]any
-}
-
-func (c *Converter) newCapture() *capture { return &capture{c: c, fields: map[string]any{}} }
-
-// add records an unknown field at path with its raw JSON value and loud-logs the
-// distinct leaf name once (§5.1).
-func (cap *capture) add(path string, v any) {
-	cap.fields[path] = v
-	leaf := path
-	if i := strings.LastIndex(path, "."); i >= 0 {
-		leaf = path[i+1:]
-	}
-	if !cap.c.seen[leaf] {
-		cap.c.seen[leaf] = true
-		cap.c.log.With(logging.Context{Operation: "capture-extra"}).Log("unknown field %q path=%s captured into extras", leaf, path)
+	log.With(logging.Context{Operation: "convert-new"}).LogVerbose("constructing converter")
+	return &Converter{
+		log:           log,
+		toolCallOwner: map[string]string{},
+		lineOwner:     map[string]string{},
+		skillMessage:  map[string]string{},
 	}
 }
 
-// toStruct returns the accumulated extras as a Struct, or nil if none.
-func (cap *capture) toStruct() *structpb.Struct {
-	if len(cap.fields) == 0 {
-		return nil
-	}
-	s, err := structpb.NewStruct(cap.fields)
-	if err != nil {
-		// A non-representable extras value should never happen (the inputs came
-		// straight from encoding/json), but never drop it silently.
-		cap.c.log.With(logging.Context{Operation: "build-extras", Level: "error"}).Log("failed to build extras struct; every captured unknown field for this record is discarded: %v", err)
-		return nil
-	}
-	return s
+// envelope is the common header on user/assistant/system/attachment lines,
+// reduced to the fields lineage and attribution actually need.
+type envelope struct {
+	uuid        string
+	parentUUID  string
+	logicalUUID string
+	isSidechain bool
+	agentID     string
+	isMeta      bool
+	isSummary   bool
+	toolUseID   string
+	assistUUID  string
+	apiError    bool
+	errorText   string
 }
 
-// canon normalizes a field/JSON name to its case- and separator-insensitive form
-// so disk `toolUseID`, proto `tool_use_id`, and stream `toolUseId` all collide.
-func canon(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r == '_' || r == '-':
-			continue
-		case r >= 'A' && r <= 'Z':
-			b.WriteRune(r + ('a' - 'A'))
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-// fieldIndex maps canonical names → non-oneof field descriptors of md. Oneof
-// members are excluded: a stray key must never be able to select a oneof arm
-// (those are chosen by explicit discriminator dispatch).
-func fieldIndex(md protoreflect.MessageDescriptor) map[string]protoreflect.FieldDescriptor {
-	idx := map[string]protoreflect.FieldDescriptor{}
-	fs := md.Fields()
-	for i := 0; i < fs.Len(); i++ {
-		fd := fs.Get(i)
-		if fd.ContainingOneof() != nil {
-			continue
-		}
-		idx[canon(string(fd.Name()))] = fd
-	}
-	return idx
-}
-
-func isStruct(fd protoreflect.FieldDescriptor) bool {
-	return fd.Kind() == protoreflect.MessageKind &&
-		fd.Message().FullName() == "google.protobuf.Struct"
-}
-
-// isListValue reports whether fd is a singular google.protobuf.ListValue field
-// (a schemaless array home). Repeated ListValue fields are handled by the list
-// path; only the singular case needs the array-subtree absorption here.
-func isListValue(fd protoreflect.FieldDescriptor) bool {
-	return fd.Kind() == protoreflect.MessageKind && !fd.IsList() &&
-		fd.Message().FullName() == "google.protobuf.ListValue"
-}
-
-// assign populates msg from obj, routing every key. ignore names (canonical) are
-// consumed silently (structural discriminators like "type"/"role"). Unmapped
-// keys land in cap under path.
-func (c *Converter) assign(msg protoreflect.Message, obj map[string]any, path string, cap *capture, ignore map[string]bool) {
-	idx := fieldIndex(msg.Descriptor())
-	for k, v := range obj {
-		ck := canon(k)
-		if ignore[ck] {
-			continue
-		}
-		fd, ok := idx[ck]
-		if !ok {
-			cap.add(joinPath(path, k), v)
-			continue
-		}
-		c.setField(msg, fd, v, joinPath(path, k), cap)
+func readEnvelope(obj map[string]any) envelope {
+	return envelope{
+		uuid:        str(obj["uuid"]),
+		parentUUID:  str(obj["parentUuid"]),
+		logicalUUID: str(obj["logicalParentUuid"]),
+		isSidechain: boolean(obj["isSidechain"]),
+		agentID:     str(obj["agentId"]),
+		isMeta:      boolean(obj["isMeta"]),
+		isSummary:   boolean(obj["isCompactSummary"]),
+		toolUseID:   str(obj["sourceToolUseID"]),
+		assistUUID:  str(obj["sourceToolAssistantUUID"]),
+		apiError:    boolean(obj["isApiErrorMessage"]),
+		errorText:   str(obj["error"]),
 	}
 }
 
-func joinPath(path, k string) string {
-	if path == "" {
-		return k
-	}
-	return path + "." + k
+func str(v any) string   { s, _ := v.(string); return s }
+func boolean(v any) bool { b, _ := v.(bool); return b }
+func obj(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
 }
 
-// setField assigns one field. JSON null leaves the field default. Type mismatches
-// and unmodeled enum values are captured (never dropped, never hard-failed).
-func (c *Converter) setField(msg protoreflect.Message, fd protoreflect.FieldDescriptor, v any, path string, cap *capture) {
-	if v == nil {
-		return
+// container returns the detached-work message this record sits inside, and
+// whether there is one.
+//
+// A sidechain line names its own agent, which is how a subagent's records land
+// inside the card that spawned it even when they are read from a different file
+// than the launch was.
+func (c *Converter) container(at Attribution, env envelope) string {
+	if at.Container != "" {
+		return at.Container
 	}
-	if fd.IsList() {
-		list, ok := v.([]any)
-		if !ok {
-			cap.add(path, v)
-			return
-		}
-		lv := msg.Mutable(fd).List()
-		for _, el := range list {
-			ev, ok := c.scalarOrMessage(fd, el, path, cap)
-			if ok {
-				lv.Append(ev)
-			}
+	if env.isSidechain && env.agentID != "" {
+		return DetachedWorkMessageID(env.agentID)
+	}
+	return ""
+}
+
+// lineage fills the three ids and the parent oneof for one record.
+//
+// It is the ONLY place a MessageParent is built. A record inside detached work
+// names that work; everything else is a feed row naming itself. There is no
+// third case and no fallback: a caller that cannot supply a message id has a
+// record this function must never be asked about.
+func lineage(m *conversationv1.MessageEntry, messageID, container string) {
+	m.MessageId = messageID
+	if container == "" || container == messageID {
+		m.TopLevelMessageId = messageID
+		m.Parent = &conversationv1.MessageParent{
+			Parent: &conversationv1.MessageParent_Root{Root: &conversationv1.MessageParentRoot{}},
 		}
 		return
 	}
-	// Struct fields absorb any object subtree losslessly.
-	if isStruct(fd) {
-		m, ok := v.(map[string]any)
-		if !ok {
-			cap.add(path, v)
-			return
-		}
-		s, err := structpb.NewStruct(m)
-		if err != nil {
-			cap.add(path, v)
-			return
-		}
-		msg.Set(fd, protoreflect.ValueOfMessage(s.ProtoReflect()))
-		return
-	}
-	// A singular google.protobuf.ListValue field absorbs a JSON array subtree
-	// losslessly (e.g. ApiUsage.iterations, whose disk value is an array of
-	// heterogeneous per-iteration objects with no fixed schema).
-	if isListValue(fd) {
-		arr, ok := v.([]any)
-		if !ok {
-			cap.add(path, v)
-			return
-		}
-		lv, err := structpb.NewList(arr)
-		if err != nil {
-			cap.add(path, v)
-			return
-		}
-		msg.Set(fd, protoreflect.ValueOfMessage(lv.ProtoReflect()))
-		c.markSet(msg, fd)
-		return
-	}
-	if fd.Kind() == protoreflect.MessageKind || fd.Kind() == protoreflect.GroupKind {
-		m, ok := v.(map[string]any)
-		if !ok {
-			cap.add(path, v)
-			return
-		}
-		sub := msg.NewField(fd)
-		c.fillMessage(sub.Message(), m, path, cap, nil)
-		msg.Set(fd, sub)
-		c.markSet(msg, fd)
-		return
-	}
-	pv, ok := c.scalar(fd, v, path, cap)
-	if !ok {
-		return
-	}
-	msg.Set(fd, pv)
-	c.markSet(msg, fd)
-}
-
-// scalarOrMessage builds a repeated-list element value.
-func (c *Converter) scalarOrMessage(fd protoreflect.FieldDescriptor, v any, path string, cap *capture) (protoreflect.Value, bool) {
-	if fd.Kind() == protoreflect.MessageKind || fd.Kind() == protoreflect.GroupKind {
-		m, ok := v.(map[string]any)
-		if !ok {
-			cap.add(path, v)
-			return protoreflect.Value{}, false
-		}
-		sub := protoreflect.ValueOfMessage(newConcrete(fd.Message()))
-		c.fillMessage(sub.Message(), m, path, cap, nil)
-		return sub, true
-	}
-	return c.scalar(fd, v, path, cap)
-}
-
-// scalar coerces a JSON value to a proto scalar value for fd.
-func (c *Converter) scalar(fd protoreflect.FieldDescriptor, v any, path string, cap *capture) (protoreflect.Value, bool) {
-	switch fd.Kind() {
-	case protoreflect.StringKind:
-		s, ok := v.(string)
-		if !ok {
-			cap.add(path, v)
-			return protoreflect.Value{}, false
-		}
-		return protoreflect.ValueOfString(s), true
-	case protoreflect.BoolKind:
-		b, ok := v.(bool)
-		if !ok {
-			cap.add(path, v)
-			return protoreflect.Value{}, false
-		}
-		return protoreflect.ValueOfBool(b), true
-	case protoreflect.BytesKind:
-		s, ok := v.(string)
-		if !ok {
-			cap.add(path, v)
-			return protoreflect.Value{}, false
-		}
-		return protoreflect.ValueOfBytes(decodeBytes(s)), true
-	case protoreflect.EnumKind:
-		n, ok := enumValue(fd.Enum(), v)
-		if !ok {
-			// Unmodeled enum value: capture the raw string, leave the enum at
-			// its zero value (never guess a mapping).
-			cap.add(path, v)
-			return protoreflect.Value{}, false
-		}
-		return protoreflect.ValueOfEnum(n), true
-	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind:
-		f, ok := asFloat(v)
-		if !ok {
-			cap.add(path, v)
-			return protoreflect.Value{}, false
-		}
-		return protoreflect.ValueOfInt32(int32(f)), true
-	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
-		f, ok := asFloat(v)
-		if !ok {
-			cap.add(path, v)
-			return protoreflect.Value{}, false
-		}
-		return protoreflect.ValueOfInt64(int64(f)), true
-	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind:
-		f, ok := asFloat(v)
-		if !ok {
-			cap.add(path, v)
-			return protoreflect.Value{}, false
-		}
-		return protoreflect.ValueOfUint32(uint32(f)), true
-	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
-		f, ok := asFloat(v)
-		if !ok {
-			cap.add(path, v)
-			return protoreflect.Value{}, false
-		}
-		return protoreflect.ValueOfUint64(uint64(f)), true
-	case protoreflect.DoubleKind:
-		f, ok := asFloat(v)
-		if !ok {
-			cap.add(path, v)
-			return protoreflect.Value{}, false
-		}
-		return protoreflect.ValueOfFloat64(f), true
-	case protoreflect.FloatKind:
-		f, ok := asFloat(v)
-		if !ok {
-			cap.add(path, v)
-			return protoreflect.Value{}, false
-		}
-		return protoreflect.ValueOfFloat32(float32(f)), true
-	default:
-		cap.add(path, v)
-		return protoreflect.Value{}, false
+	m.TopLevelMessageId = container
+	m.Parent = &conversationv1.MessageParent{
+		Parent: &conversationv1.MessageParent_Inside{Inside: &conversationv1.MessageParentInside{
+			MessageId: container,
+		}},
 	}
 }
 
-func asFloat(v any) (float64, bool) {
-	switch t := v.(type) {
-	case float64:
-		return t, true
-	case float32:
-		return float64(t), true
-	case int:
-		return float64(t), true
-	case int64:
-		return float64(t), true
-	default:
-		return 0, false
-	}
+func authorUser() *conversationv1.MessageAuthor {
+	return &conversationv1.MessageAuthor{Author: &conversationv1.MessageAuthor_User{User: &conversationv1.AuthorUser{}}}
 }
 
-// decodeBytes base64-decodes s; on failure (e.g. corpus-truncated image data) it
-// preserves the raw string bytes rather than dropping the field.
-func decodeBytes(s string) []byte {
-	if b, err := base64.StdEncoding.DecodeString(s); err == nil {
-		return b
+// authorAgent resolves which agent a record is from. Inside detached work it is
+// the DETACHED agent, named by the work it runs as, so its emissions route to
+// the card without a second correlation.
+func authorAgent(container string) *conversationv1.MessageAuthor {
+	if container == "" {
+		return &conversationv1.MessageAuthor{Author: &conversationv1.MessageAuthor_Agent{Agent: &conversationv1.AuthorAgent{}}}
 	}
-	if b, err := base64.RawStdEncoding.DecodeString(s); err == nil {
-		return b
-	}
-	return []byte(s)
+	return &conversationv1.MessageAuthor{Author: &conversationv1.MessageAuthor_DetachedAgent{
+		DetachedAgent: &conversationv1.AuthorDetachedAgent{DetachedWorkMessageId: container},
+	}}
 }
 
-// markSet flips a companion "<field>_set" bool true when present, implementing
-// the proto3 absent-vs-false convention (is_error_set, exit_code_set, …).
-func (c *Converter) markSet(msg protoreflect.Message, fd protoreflect.FieldDescriptor) {
-	sib := msg.Descriptor().Fields().ByName(protoreflect.Name(string(fd.Name()) + "_set"))
-	if sib != nil && sib.Kind() == protoreflect.BoolKind && sib.ContainingOneof() == nil {
-		msg.Set(sib, protoreflect.ValueOfBool(true))
-	}
-}
+// Line converts one decoded transcript line into the records it implies.
+//
+// `next` is the line that FOLLOWS this one IN THE FILE, or nil at the end of a
+// batch. It exists for exactly one record: a compaction boundary, whose summary
+// the harness writes as the following line.
+//
+// It NEVER returns zero entries for a line it was given. A line it cannot place
+// is stored unconverted, because the ingestion mandate binds this package
+// absolutely: irrelevance to a reader is a consumption-side judgment, never a
+// reason to leave a record out of the database.
+func (c *Converter) Line(record map[string]any, at Attribution, next map[string]any) []*agentshimv1.Entry {
+	kind := str(record["type"])
+	c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID}).
+		LogVerbose("converting line type=%q offset=%d keys=%d", kind, at.Offset, len(record))
 
-// enumValue resolves a JSON enum value (numeric or "kebab-or-snake string") to a
-// proto enum number by canonical suffix match against the value names.
-func enumValue(ed protoreflect.EnumDescriptor, v any) (protoreflect.EnumNumber, bool) {
-	switch t := v.(type) {
-	case float64:
-		return protoreflect.EnumNumber(int32(t)), true
-	case string:
-		want := canon(t)
-		vals := ed.Values()
-		// Exact canonical match first (ENQUEUE == "enqueue").
-		for i := 0; i < vals.Len(); i++ {
-			vd := vals.Get(i)
-			if canon(string(vd.Name())) == want {
-				return vd.Number(), true
-			}
-		}
-		// Then suffix match against the prefixed form (ENTRYPOINT_SDK_CLI ↦ "sdk-cli").
-		up := strings.ToUpper(strings.ReplaceAll(t, "-", "_"))
-		for i := 0; i < vals.Len(); i++ {
-			vd := vals.Get(i)
-			if strings.HasSuffix(string(vd.Name()), "_"+up) {
-				return vd.Number(), true
-			}
-		}
-		return 0, false
-	default:
-		return 0, false
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Top-level dispatch
-// ---------------------------------------------------------------------------
-
-// TranscriptLine converts one decoded transcript/sidechain JSONL object into a
-// datav1.TranscriptLine plus any captured extras. A missing or unknown top-level
-// "type" is a hard error (→ UnparsedEvent per §5.1).
-func (c *Converter) TranscriptLine(obj map[string]any) (*datav1.TranscriptLine, *structpb.Struct, error) {
-	typ, _ := obj["type"].(string)
-	c.log.With(logging.Context{Operation: "convert-transcript-line"}).LogVerbose("converting transcript line type=%q keys=%d", typ, len(obj))
-	if typ == "" {
-		err := fmt.Errorf("transcript line missing required %q field", "type")
-		return nil, nil, err
-	}
-	line := &datav1.TranscriptLine{}
-	lm := line.ProtoReflect()
-	fd := oneofMemberByCanon(lm.Descriptor(), "line", canon(typ))
-	if fd == nil {
-		err := fmt.Errorf("unknown transcript line type %q", typ)
-		return nil, nil, err
-	}
-	cap := c.newCapture()
-	sub := lm.NewField(fd)
-	switch string(fd.Name()) {
+	switch kind {
+	case "":
+		// No discriminator at all. It parsed, so it is not unparsed; we simply
+		// cannot say what it is, which is exactly what UnknownEntry means.
+		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+			Log("transcript line at offset=%d carries no %q field; stored unconverted with no path to the daemon", at.Offset, "type")
+		return []*agentshimv1.Entry{UnknownEntry(at, "", "type", record)}
 	case "user":
-		c.userLine(sub.Message(), obj, cap)
+		return c.userLine(record, at)
 	case "assistant":
-		c.assistantLine(sub.Message(), obj, cap)
+		return c.assistantLine(record, at)
 	case "system":
-		if err := c.systemLine(sub.Message(), obj, cap); err != nil {
-			return nil, nil, err
-		}
+		return c.systemLine(record, at, next)
 	case "attachment":
-		if err := c.attachmentLine(sub.Message(), obj, cap); err != nil {
-			return nil, nil, err
-		}
+		return c.attachmentLine(record, at)
 	default:
-		// Flat metadata line (mode, permission_mode, queue_operation,
-		// last_prompt, ai_title, pr_link, file_history_*, frame_link): no
-		// envelope, payload fields sit at the top level.
-		c.assign(sub.Message(), obj, string(fd.Name()), cap, map[string]bool{"type": true})
-	}
-	lm.Set(fd, sub)
-	c.log.With(logging.Context{Operation: "convert-transcript-line"}).LogVerbose("converted transcript line type=%q extras=%t", typ, len(cap.fields) > 0)
-	return line, cap.toStruct(), nil
-}
-
-// msgIgnore are the structural tags inside an API message object that carry no
-// data the proto models (the type/role are implied by the enclosing line).
-var msgIgnore = map[string]bool{"type": true, "role": true}
-
-func (c *Converter) userLine(m protoreflect.Message, obj map[string]any, cap *capture) {
-	fs := m.Descriptor().Fields()
-	env := m.Mutable(fs.ByName("envelope")).Message()
-	msgFd := fs.ByName("message")
-	turFd := fs.ByName("tool_use_result")
-	hasTurFd := fs.ByName("has_tool_use_result")
-	for k, v := range obj {
-		switch canon(k) {
-		case "type":
-			continue
-		case "message":
-			if mo, ok := v.(map[string]any); ok {
-				um := m.NewField(msgFd)
-				c.apiUserMessage(um.Message(), mo, cap)
-				m.Set(msgFd, um)
-			} else {
-				cap.add("message", v)
-			}
-		case "tooluseresult":
-			tur := m.NewField(turFd)
-			c.toolUseResult(tur.Message(), v, cap)
-			m.Set(turFd, tur)
-			m.Set(hasTurFd, protoreflect.ValueOfBool(true))
-		default:
-			c.routeEnvelope(env, k, v, cap)
+		if knownMetadataLines[kind] {
+			// A metadata line the harness writes about its own bookkeeping. We
+			// know exactly what each one is and have decided not to carry it,
+			// which is a different situation from not knowing — so it is
+			// vendor_specific, and the follow-up it asks for is a CONVERTER, if
+			// one of them turns out to be portable after all.
+			return []*agentshimv1.Entry{VendorSpecificEntry(at, kind, record)}
 		}
+		// A top-level type this reader has never seen. We parsed it and do not
+		// model it, so the follow-up it asks for is a MODEL — and filing it as
+		// vendor_specific would claim an understanding nobody has.
+		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+			Log("transcript line type=%q at offset=%d is not modeled; stored unconverted with no path to the daemon", kind, at.Offset)
+		return []*agentshimv1.Entry{UnknownEntry(at, kind, "type", record)}
 	}
 }
 
-func (c *Converter) assistantLine(m protoreflect.Message, obj map[string]any, cap *capture) {
-	fs := m.Descriptor().Fields()
-	env := m.Mutable(fs.ByName("envelope")).Message()
-	msgFd := fs.ByName("message")
-	for k, v := range obj {
-		switch canon(k) {
-		case "type":
-			continue
-		case "message":
-			if mo, ok := v.(map[string]any); ok {
-				am := m.NewField(msgFd)
-				c.apiAssistantMessage(am.Message(), mo, cap)
-				m.Set(msgFd, am)
-			} else {
-				cap.add("message", v)
-			}
-		default:
-			c.routeEnvelope(env, k, v, cap)
-		}
-	}
-}
-
-// routeEnvelope assigns one top-level key to the shared LineEnvelope.
-func (c *Converter) routeEnvelope(env protoreflect.Message, k string, v any, cap *capture) {
-	idx := fieldIndex(env.Descriptor())
-	fd, ok := idx[canon(k)]
-	if !ok {
-		cap.add(joinPath("envelope", k), v)
-		return
-	}
-	c.setField(env, fd, v, joinPath("envelope", k), cap)
-}
-
-func (c *Converter) systemLine(m protoreflect.Message, obj map[string]any, cap *capture) error {
-	sub, _ := obj["subtype"].(string)
-	if sub == "" {
-		return fmt.Errorf("system line missing required %q field", "subtype")
-	}
-	env := m.Mutable(m.Descriptor().Fields().ByName("envelope")).Message()
-	subFd := oneofMemberByCanon(m.Descriptor(), "subtype", canon(sub))
-	if subFd == nil {
-		return fmt.Errorf("unknown system subtype %q", sub)
-	}
-	payload := m.NewField(subFd)
-	pm := payload.Message()
-	pidx := fieldIndex(pm.Descriptor())
-	for k, v := range obj {
-		ck := canon(k)
-		if ck == "type" || ck == "subtype" {
-			continue
-		}
-		if fd, ok := pidx[ck]; ok {
-			c.setField(pm, fd, v, joinPath(string(subFd.Name()), k), cap)
-			continue
-		}
-		c.routeEnvelope(env, k, v, cap)
-	}
-	m.Set(subFd, payload)
-	return nil
-}
-
-func (c *Converter) attachmentLine(m protoreflect.Message, obj map[string]any, cap *capture) error {
-	att, ok := obj["attachment"].(map[string]any)
-	if !ok {
-		return fmt.Errorf("attachment line missing required %q object", "attachment")
-	}
-	atype, _ := att["type"].(string)
-	if atype == "" {
-		return fmt.Errorf("attachment missing required %q field", "type")
-	}
-	env := m.Mutable(m.Descriptor().Fields().ByName("envelope")).Message()
-	attFd := oneofMemberByCanon(m.Descriptor(), "attachment", canon(atype))
-	if attFd == nil {
-		return fmt.Errorf("unknown attachment type %q", atype)
-	}
-	payload := m.NewField(attFd)
-	// hook_non_blocking_error / hook_blocking_error wrap a shared "fields" set.
-	// Any OTHER typed field the outer attachment declares (e.g.
-	// HookBlockingErrorAttachment.blocking_error) is routed to the outer message;
-	// the remaining keys populate the wrapped HookSuccessAttachment.
-	if wrapFd := payload.Message().Descriptor().Fields().ByName("fields"); wrapFd != nil &&
-		wrapFd.Kind() == protoreflect.MessageKind {
-		pm := payload.Message()
-		outerIdx := fieldIndex(pm.Descriptor())
-		delete(outerIdx, "fields")
-		inner := pm.NewField(wrapFd)
-		wrapped := make(map[string]any, len(att))
-		for k, v := range att {
-			ck := canon(k)
-			if ck == "type" {
-				continue
-			}
-			if fd, ok := outerIdx[ck]; ok {
-				c.setField(pm, fd, v, joinPath(string(attFd.Name()), k), cap)
-				continue
-			}
-			wrapped[k] = v
-		}
-		c.assign(inner.Message(), wrapped, string(attFd.Name())+".fields", cap, map[string]bool{"type": true})
-		pm.Set(wrapFd, inner)
-	} else {
-		c.fillMessage(payload.Message(), att, string(attFd.Name()), cap, map[string]bool{"type": true})
-	}
-	m.Set(attFd, payload)
-	// Route the remaining top-level keys (the envelope).
-	for k, v := range obj {
-		ck := canon(k)
-		if ck == "type" || ck == "attachment" {
-			continue
-		}
-		c.routeEnvelope(env, k, v, cap)
-	}
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// API messages & content blocks
-// ---------------------------------------------------------------------------
-
-func (c *Converter) apiUserMessage(m protoreflect.Message, obj map[string]any, cap *capture) {
-	c.contentUnion(m, obj["content"], "message.content", cap)
-	for k, v := range obj {
-		ck := canon(k)
-		if ck == "content" || msgIgnore[ck] {
-			continue
-		}
-		cap.add(joinPath("message", k), v)
-	}
-}
-
-func (c *Converter) apiAssistantMessage(m protoreflect.Message, obj map[string]any, cap *capture) {
-	idx := fieldIndex(m.Descriptor())
-	for k, v := range obj {
-		ck := canon(k)
-		if msgIgnore[ck] {
-			continue
-		}
-		if ck == "content" {
-			c.assistantContent(m, v, cap)
-			continue
-		}
-		if fd, ok := idx[ck]; ok {
-			c.setField(m, fd, v, joinPath("message", k), cap)
-			continue
-		}
-		cap.add(joinPath("message", k), v)
-	}
-}
-
-// assistantContent fills ApiAssistantMessage.content (repeated ContentBlock).
-func (c *Converter) assistantContent(m protoreflect.Message, v any, cap *capture) {
-	fd := m.Descriptor().Fields().ByName("content")
-	arr, ok := v.([]any)
-	if !ok {
-		if v != nil {
-			cap.add("message.content", v)
-		}
-		return
-	}
-	lv := m.Mutable(fd).List()
-	for i, el := range arr {
-		mo, ok := el.(map[string]any)
-		if !ok {
-			cap.add(fmt.Sprintf("message.content[%d]", i), el)
-			continue
-		}
-		block := newConcrete(fd.Message())
-		if c.contentBlock(block, mo, fmt.Sprintf("message.content[%d]", i), cap) {
-			lv.Append(protoreflect.ValueOfMessage(block))
-		}
-	}
-}
-
-// contentUnion fills an ApiUserMessage / ToolResultBlock content oneof from a
-// string (content_string) or an array of blocks (content_blocks).
-func (c *Converter) contentUnion(m protoreflect.Message, v any, path string, cap *capture) {
-	c.blockUnion(m, v, path, cap, "content_string", "content_blocks")
-}
-
-// blockUnion routes ONE string-or-blocks disk value onto a two-arm proto oneof,
-// given the arm field names. The disk spells both arms with the SAME key, so the
-// runtime JSON type is the only discriminator; the reflective assign cannot do
-// this itself because fieldIndex deliberately excludes oneof members.
+// knownMetadataLines are the top-level line types the harness writes about its
+// OWN bookkeeping rather than about the conversation.
 //
-// blocksArm's message must carry a `repeated ContentBlock blocks` field
-// (ApiContentBlocks / ToolResultBlockList).
-func (c *Converter) blockUnion(m protoreflect.Message, v any, path string, cap *capture, stringArm, blocksArm string) {
-	fs := m.Descriptor().Fields()
-	switch t := v.(type) {
-	case string:
-		m.Set(fs.ByName(protoreflect.Name(stringArm)), protoreflect.ValueOfString(t))
-	case []any:
-		blocksFd := fs.ByName(protoreflect.Name(blocksArm))
-		bl := m.NewField(blocksFd)
-		listFd := bl.Message().Descriptor().Fields().ByName("blocks")
-		lv := bl.Message().Mutable(listFd).List()
-		for i, el := range t {
-			mo, ok := el.(map[string]any)
-			if !ok {
-				cap.add(fmt.Sprintf("%s[%d]", path, i), el)
-				continue
-			}
-			block := newConcrete(listFd.Message())
-			if c.contentBlock(block, mo, fmt.Sprintf("%s[%d]", path, i), cap) {
-				lv.Append(protoreflect.ValueOfMessage(block))
-			}
-		}
-		m.Set(blocksFd, bl)
-	case nil:
-		// absent content
-	default:
-		cap.add(path, v)
-	}
-}
-
-// contentBlock dispatches one content block by its "type" tag. Returns false only
-// when the block has no usable/known type (captured, not appended).
-func (c *Converter) contentBlock(block protoreflect.Message, obj map[string]any, path string, cap *capture) bool {
-	typ, _ := obj["type"].(string)
-	if typ == "" {
-		cap.add(path, obj)
-		return false
-	}
-	fd := oneofMemberByCanon(block.Descriptor(), "block", canon(typ))
-	if fd == nil {
-		// Unmodeled block type: capture the whole block verbatim (never fold it
-		// into a known arm).
-		cap.add(joinPath(path, typ), obj)
-		return false
-	}
-	payload := block.NewField(fd)
-	switch string(fd.Name()) {
-	case "tool_result":
-		c.toolResultBlock(payload.Message(), obj, path, cap)
-	default:
-		c.fillMessage(payload.Message(), obj, path, cap, map[string]bool{"type": true})
-	}
-	block.Set(fd, payload)
-	return true
-}
-
-func (c *Converter) toolResultBlock(m protoreflect.Message, obj map[string]any, path string, cap *capture) {
-	idx := fieldIndex(m.Descriptor())
-	for k, v := range obj {
-		ck := canon(k)
-		if ck == "type" {
-			continue
-		}
-		if ck == "content" {
-			c.contentUnion(m, v, joinPath(path, "content"), cap)
-			continue
-		}
-		if fd, ok := idx[ck]; ok {
-			c.setField(m, fd, v, joinPath(path, k), cap)
-			continue
-		}
-		cap.add(joinPath(path, k), v)
-	}
+// THE LIST IS WHAT SEPARATES "understood and not carried" FROM "not
+// understood". Without it every unmodeled type would be filed as
+// vendor_specific, which asserts we know what a brand-new line means — and the
+// two arms exist precisely so the follow-up each one needs is distinguishable: a
+// converter for the first, a model for the second.
+var knownMetadataLines = map[string]bool{
+	"mode":                  true,
+	"permission-mode":       true,
+	"queue-operation":       true,
+	"last-prompt":           true,
+	"ai-title":              true,
+	"pr-link":               true,
+	"file-history-snapshot": true,
+	"file-history-delta":    true,
+	"frame-link":            true,
+	"attribution-snapshot":  true,
 }
 
 // ---------------------------------------------------------------------------
-// toolUseResult (string-or-object, classified per tool)
+// user lines
 // ---------------------------------------------------------------------------
 
-// ContentBlock converts a single bare content block object (e.g. a tool_use
-// block from an assistant line). An absent/unknown "type" is a hard error.
-func (c *Converter) ContentBlock(obj map[string]any) (*datav1.ContentBlock, *structpb.Struct, error) {
-	typ, _ := obj["type"].(string)
-	c.log.With(logging.Context{Operation: "convert-content-block"}).LogVerbose("converting content block type=%q keys=%d", typ, len(obj))
-	if typ == "" {
-		err := fmt.Errorf("content block missing required %q field", "type")
-		return nil, nil, err
-	}
-	block := &datav1.ContentBlock{}
-	bm := block.ProtoReflect()
-	if oneofMemberByCanon(bm.Descriptor(), "block", canon(typ)) == nil {
-		err := fmt.Errorf("unknown content block type %q", typ)
-		return nil, nil, err
-	}
-	cap := c.newCapture()
-	c.contentBlock(bm, obj, "block", cap)
-	c.log.With(logging.Context{Operation: "convert-content-block"}).LogVerbose("converted content block type=%q extras=%t", typ, len(cap.fields) > 0)
-	return block, cap.toStruct(), nil
-}
+// userLine converts a `user` record, which is FOUR different things wearing one
+// type tag: a person's prompt, a tool's result the vendor filed under the user,
+// the harness's own compaction summary, and the expanded `/clear` envelope.
+func (c *Converter) userLine(record map[string]any, at Attribution) []*agentshimv1.Entry {
+	env := readEnvelope(record)
+	container := c.container(at, env)
+	message := obj(record["message"])
 
-// ToolUseResult exposes the toolUseResult union conversion for handler reuse.
-func (c *Converter) ToolUseResult(v any) (*datav1.ToolUseResult, *structpb.Struct) {
-	c.log.With(logging.Context{Operation: "convert-tool-use-result"}).LogVerbose("converting tool-use result value_type=%T", v)
-	cap := c.newCapture()
-	tur := &datav1.ToolUseResult{}
-	c.toolUseResult(tur.ProtoReflect(), v, cap)
-	c.log.With(logging.Context{Operation: "convert-tool-use-result"}).LogVerbose("converted tool-use result extras=%t", len(cap.fields) > 0)
-	return tur, cap.toStruct()
-}
+	var out []*agentshimv1.Entry
 
-func (c *Converter) toolUseResult(m protoreflect.Message, v any, cap *capture) {
-	fs := m.Descriptor().Fields()
-	// Universal caveat: a string result is an error/rejection → raw_string.
-	if s, ok := v.(string); ok {
-		m.Set(fs.ByName("raw_string"), protoreflect.ValueOfString(s))
-		return
-	}
-	obj, ok := v.(map[string]any)
-	if !ok {
-		if v != nil {
-			cap.add("toolUseResult", v)
-		}
-		return
-	}
-	arm := classifyToolResult(obj)
-	if arm == "" {
-		// Unclassifiable object: preserve verbatim into the unclassified Struct
-		// arm and loud-log (capture, never silent classification).
-		// Preserved but unmodeled: a schema gap the contract requires surfaced
-		// loudly, not a routine observation.
-		c.log.With(logging.Context{Operation: "classify-tool-use-result", Level: "warn"}).Log("unclassified toolUseResult object keys=%v", sortedKeys(obj))
-		s, err := structpb.NewStruct(obj)
-		if err != nil {
-			cap.add("toolUseResult", obj)
-			return
-		}
-		m.Set(fs.ByName("unclassified"), protoreflect.ValueOfMessage(s.ProtoReflect()))
-		return
-	}
-	fd := fs.ByName(protoreflect.Name(arm))
-	payload := m.NewField(fd)
-	path := "toolUseResult." + arm
-	if arm == "task_output" {
-		c.taskOutputResult(payload.Message(), obj, path, cap)
-	} else {
-		c.assign(payload.Message(), obj, path, cap, nil)
-	}
-	m.Set(fd, payload)
-}
+	// A launch result opens a detached-work card. It rides on a user record
+	// because the vendor files tool results there, and it is emitted BEFORE the
+	// result itself so the card exists by the time anything updates it.
+	out = append(out, c.launchRecords(record, at, env, container)...)
 
-// taskOutputResult fills a TaskOutputResult. `retrieval_status` assigns
-// generically, but `task` is a ONEOF whose arm is named by the NESTED object's
-// `task_type` tag — a discriminator the generic assign cannot see, so it
-// captured the entire task object into extras instead. Same dispatch shape as
-// contentBlock, one level down.
-func (c *Converter) taskOutputResult(m protoreflect.Message, obj map[string]any, path string, cap *capture) {
-	idx := fieldIndex(m.Descriptor())
-	for k, v := range obj {
-		ck := canon(k)
-		if ck == "task" {
-			c.taskOutputTask(m, v, joinPath(path, k), cap)
-			continue
-		}
-		if fd, ok := idx[ck]; ok {
-			c.setField(m, fd, v, joinPath(path, k), cap)
-			continue
-		}
-		cap.add(joinPath(path, k), v)
-	}
-}
+	// Tool results are lifted out of the user's content and become updates to
+	// the message that MADE the call.
+	results, orphans := c.toolReturns(message, at, env, container)
+	out = append(out, results...)
 
-// taskOutputTask sets the `task` oneof from the task object's task_type.
-// A non-object, or a type naming no oneof member, is captured verbatim rather
-// than folded into whichever arm happens to be nearest.
-func (c *Converter) taskOutputTask(m protoreflect.Message, v any, path string, cap *capture) {
-	task, ok := v.(map[string]any)
-	if !ok {
-		cap.add(path, v)
-		return
-	}
-	typ, _ := task["task_type"].(string)
-	fd := oneofMemberByCanon(m.Descriptor(), "task", canon(typ))
-	if fd == nil {
-		cap.add(joinPath(path, typ), task)
-		return
-	}
-	payload := m.NewField(fd)
-	c.fillMessage(payload.Message(), task, path, cap, nil)
-	m.Set(fd, payload)
-}
-
-// classifyToolResult identifies the ToolUseResult arm for an object by its
-// signature keys (§5.3 tools table). Ordered most-specific first; an object
-// matching nothing returns "" (→ unclassified, never guessed).
-func classifyToolResult(o map[string]any) string {
-	has := func(k string) bool { return hasKey(o, k) }
 	switch {
-	case has("isAsync"):
-		return "agent_async_launch"
-	case has("runId"):
-		return "workflow_launch"
-	case has("retrievalStatus"):
-		return "task_output"
-	case has("stdout"):
-		return "bash"
-	case has("timeoutMs"):
-		return "monitor"
-	case has("file") && has("type"):
-		return "read"
-	case has("oldString"):
-		return "edit"
-	case has("commandName"):
-		return "skill"
-	case has("matches") && has("query"):
-		return "tool_search"
-	case has("clampedDelaySeconds") || has("scheduledFor"):
-		return "schedule_wakeup"
-	case has("questions") && has("answers"):
-		return "ask_user_question"
-	case has("searchCount") || has("durationSeconds"):
-		return "web_search"
-	case has("codeText") || (has("code") && has("url") && has("bytes")):
-		return "web_fetch"
-	case has("statusChange") || has("updatedFields"):
-		return "task_update"
-	case has("tasks"):
-		return "task_list"
-	case has("task"):
-		return "task_create"
-	case has("structuredPatch") && has("content") && has("filePath"):
-		return "write"
-	case has("pin"):
-		return "send_message"
-	case has("command") && (has("taskType") || has("task_type")):
-		return "task_stop"
-	case has("agentType") || has("toolStats") || has("totalDurationMs"):
-		return "agent"
+	case env.isSummary:
+		// The harness's own prose standing in for discarded history. It is
+		// consumed by the compaction boundary that precedes it (systemLine), so
+		// emitting it here as a user message would render the summary twice and
+		// attribute the harness's text to the person.
+		c.log.With(logging.Context{Operation: "compact-summary", Path: at.Path, Session: at.SessionID}).
+			LogVerbose("compaction summary at offset=%d folded into its boundary", at.Offset)
+	case c.isClearCommand(message):
+		out = append(out, c.contextCleared(at, env, container))
+	case len(orphans) > 0 && !hasUserProse(message):
+		// The record carried tool results whose calling message we never saw and
+		// nothing else. There is no legal parent to state, so it is stored whole
+		// rather than given an invented one.
+		out = append(out, UnknownEntry(at, "tool_result", "message.content[].type", record))
+	case hasToolResults(message) && !hasUserProse(message):
+		// A pure carrier for tool results, which have already been lifted out
+		// above. The vendor files results under the user's role; emitting an
+		// empty UserSaid alongside them would put words in a person's mouth and
+		// spend a page slot on a message nobody wrote.
+	case env.isMeta && !hasUserProse(message):
+		// A harness-injected user record with no prose: a system reminder, a
+		// skill body, an attachment carrier. Not something a person said.
+		out = append(out, VendorSpecificEntry(at, "user.meta", record))
 	default:
-		return ""
+		out = append(out, c.userSaid(record, at, env, container))
 	}
-}
 
-func hasKey(o map[string]any, k string) bool {
-	ck := canon(k)
-	for kk := range o {
-		if canon(kk) == ck {
-			return true
-		}
-	}
-	return false
-}
-
-func sortedKeys(o map[string]any) []string {
-	ks := make([]string, 0, len(o))
-	for k := range o {
-		ks = append(ks, k)
-	}
-	for i := 1; i < len(ks); i++ {
-		for j := i; j > 0 && ks[j-1] > ks[j]; j-- {
-			ks[j-1], ks[j] = ks[j], ks[j-1]
-		}
-	}
-	return ks
-}
-
-// ---------------------------------------------------------------------------
-// journal & meta
-// ---------------------------------------------------------------------------
-
-// JournalRecord converts one workflow-journal object (started|result).
-func (c *Converter) JournalRecord(obj map[string]any) (*datav1.JournalRecord, *structpb.Struct, error) {
-	typ, _ := obj["type"].(string)
-	c.log.With(logging.Context{Operation: "convert-journal-record"}).LogVerbose("converting journal record type=%q keys=%d", typ, len(obj))
-	if typ == "" {
-		err := fmt.Errorf("journal record missing required %q field", "type")
-		return nil, nil, err
-	}
-	rec := &datav1.JournalRecord{}
-	rm := rec.ProtoReflect()
-	fd := oneofMemberByCanon(rm.Descriptor(), "record", canon(typ))
-	if fd == nil {
-		err := fmt.Errorf("unknown journal record type %q", typ)
-		return nil, nil, err
-	}
-	cap := c.newCapture()
-	payload := rm.NewField(fd)
-	pm := payload.Message()
-	pidx := fieldIndex(pm.Descriptor())
-	for k, v := range obj {
-		ck := canon(k)
-		if ck == "type" {
-			continue
-		}
-		if ck == "result" {
-			// JournalResult.result is a Struct-or-string oneof.
-			fs := pm.Descriptor().Fields()
-			switch t := v.(type) {
-			case string:
-				pm.Set(fs.ByName("result_string"), protoreflect.ValueOfString(t))
-			case map[string]any:
-				s, err := structpb.NewStruct(t)
-				if err != nil {
-					cap.add("result", v)
-				} else {
-					pm.Set(fs.ByName("result_object"), protoreflect.ValueOfMessage(s.ProtoReflect()))
-				}
-			default:
-				cap.add("result", v)
-			}
-			continue
-		}
-		if pfd, ok := pidx[ck]; ok {
-			c.setField(pm, pfd, v, joinPath(string(fd.Name()), k), cap)
-			continue
-		}
-		cap.add(joinPath(string(fd.Name()), k), v)
-	}
-	rm.Set(fd, payload)
-	c.log.With(logging.Context{Operation: "convert-journal-record"}).LogVerbose("converted journal record type=%q extras=%t", typ, len(cap.fields) > 0)
-	return rec, cap.toStruct(), nil
-}
-
-// AgentMeta converts a sidechain agent-<id>.meta.json object.
-func (c *Converter) AgentMeta(obj map[string]any) (*datav1.AgentMetaJson, *structpb.Struct) {
-	c.log.With(logging.Context{Operation: "convert-agent-meta"}).LogVerbose("converting agent metadata keys=%d", len(obj))
-	cap := c.newCapture()
-	meta := &datav1.AgentMetaJson{}
-	c.assign(meta.ProtoReflect(), obj, "meta", cap, nil)
-	c.log.With(logging.Context{Operation: "convert-agent-meta"}).LogVerbose("converted agent metadata extras=%t", len(cap.fields) > 0)
-	return meta, cap.toStruct()
-}
-
-// ---------------------------------------------------------------------------
-// oneof helpers
-// ---------------------------------------------------------------------------
-
-// fillMessage populates m from obj, with two structural specializations over the
-// generic assign:
-//
-//   - a ContentBlock is dispatched by its "type" tag (so repeated ContentBlock
-//     fields like AgentResult.content classify each element instead of treating
-//     the block's oneof members as unknown);
-//   - a message whose ONLY field is a google.protobuf.Struct catchall ("payload"
-//     / "reference"-style wrappers) absorbs the whole surrounding object when the
-//     disk data does not itself carry that wrapper key (the payload-wrapper
-//     attachments and ToolReferenceBlock).
-func (c *Converter) fillMessage(m protoreflect.Message, obj map[string]any, path string, cap *capture, ignore map[string]bool) {
-	if m.Descriptor().FullName() == "agentshim.data.v1.ContentBlock" {
-		c.contentBlock(m, obj, path, cap)
-		return
-	}
-	if m.Descriptor().FullName() == "agentshim.data.v1.QueuedCommandAttachment" {
-		c.queuedCommandAttachment(m, obj, path, cap, ignore)
-		return
-	}
-	if fd := loneStructField(m.Descriptor()); fd != nil && !hasKeyIgnoring(obj, string(fd.Name()), ignore) {
-		if s, err := structpb.NewStruct(stripIgnore(obj, ignore)); err == nil {
-			m.Set(fd, protoreflect.ValueOfMessage(s.ProtoReflect()))
-			return
-		}
-	}
-	c.assign(m, obj, path, cap, ignore)
-}
-
-// queuedCommandAttachment fills a QueuedCommandAttachment, routing its
-// string-or-blocks `prompt` union (census 702 string / 29 blocks) onto the
-// prompt_value oneof and leaving every other key to the reflective assign.
-func (c *Converter) queuedCommandAttachment(m protoreflect.Message, obj map[string]any, path string, cap *capture, ignore map[string]bool) {
-	rest := make(map[string]any, len(obj))
-	for k, v := range obj {
-		if canon(k) == "prompt" && !ignore[canon(k)] {
-			c.blockUnion(m, v, joinPath(path, k), cap, "prompt", "prompt_blocks")
-			continue
-		}
-		rest[k] = v
-	}
-	c.assign(m, rest, path, cap, ignore)
-}
-
-// loneStructField returns md's field when md has exactly one non-repeated
-// google.protobuf.Struct field, else nil.
-func loneStructField(md protoreflect.MessageDescriptor) protoreflect.FieldDescriptor {
-	fs := md.Fields()
-	if fs.Len() != 1 {
-		return nil
-	}
-	fd := fs.Get(0)
-	if isStruct(fd) && !fd.IsList() && fd.ContainingOneof() == nil {
-		return fd
-	}
-	return nil
-}
-
-func hasKeyIgnoring(obj map[string]any, name string, ignore map[string]bool) bool {
-	want := canon(name)
-	for k := range obj {
-		ck := canon(k)
-		if ignore[ck] {
-			continue
-		}
-		if ck == want {
-			return true
-		}
-	}
-	return false
-}
-
-func stripIgnore(obj map[string]any, ignore map[string]bool) map[string]any {
-	if len(ignore) == 0 {
-		return obj
-	}
-	out := make(map[string]any, len(obj))
-	for k, v := range obj {
-		if ignore[canon(k)] {
-			continue
-		}
-		out[k] = v
+	if len(out) == 0 {
+		// Every branch above is either an emit or a documented fold, so this is
+		// only reachable if one stops emitting. It fails LOUD and stores the
+		// record rather than letting a line vanish silently.
+		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+			Log("user line at offset=%d produced no record; stored unconverted so it is not lost", at.Offset)
+		out = append(out, UnknownEntry(at, "user", "type", record))
 	}
 	return out
 }
 
-// oneofMemberByCanon returns the member of the named oneof whose field name
-// canonically equals want, or nil.
-func oneofMemberByCanon(md protoreflect.MessageDescriptor, oneof, want string) protoreflect.FieldDescriptor {
-	od := md.Oneofs().ByName(protoreflect.Name(oneof))
-	if od == nil {
-		return nil
+// hasToolResults reports whether a user message carries any tool result at all,
+// which is what makes it a carrier rather than something a person said.
+func hasToolResults(message map[string]any) bool {
+	blocks, ok := message["content"].([]any)
+	if !ok {
+		return false
 	}
-	fs := od.Fields()
-	for i := 0; i < fs.Len(); i++ {
-		fd := fs.Get(i)
-		if canon(string(fd.Name())) == want {
-			return fd
+	for _, el := range blocks {
+		block, ok := el.(map[string]any)
+		if ok && resultBlockTypes[blockType(block)] {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
-// newConcrete builds a fresh mutable message for md via the global type registry
-// so the result is the concrete generated type (not a dynamicpb placeholder),
-// keeping Any-marshaling and equality against generated messages exact.
-func newConcrete(md protoreflect.MessageDescriptor) protoreflect.Message {
-	return newFromRegistry(md)
+// hasUserProse reports whether a user message carries anything a person could
+// have typed, as opposed to being a pure carrier for tool results.
+func hasUserProse(message map[string]any) bool {
+	switch content := message["content"].(type) {
+	case string:
+		return strings.TrimSpace(content) != ""
+	case []any:
+		for _, el := range content {
+			block, ok := el.(map[string]any)
+			if !ok {
+				return true
+			}
+			if !resultBlockTypes[blockType(block)] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c *Converter) userSaid(record map[string]any, at Attribution, env envelope, container string) *agentshimv1.Entry {
+	m := &conversationv1.MessageEntry{Author: authorUser()}
+	lineage(m, env.uuid, container)
+	m.Payload = &conversationv1.MessageEntry_UserSaid{UserSaid: &conversationv1.UserSaid{
+		Content: userContent(obj(record["message"])["content"]),
+	}}
+	return MessageEntry(at, "user_said", m)
+}
+
+// toolReturns lifts every tool result out of a user record.
+//
+// It returns the converted records and the ids of the results it could NOT
+// place. An unplaceable result is not converted into a root message: ToolReturned
+// exists to fold onto the message that made the call, and a result with no such
+// message would become a phantom feed row.
+func (c *Converter) toolReturns(message map[string]any, at Attribution, env envelope, container string) ([]*agentshimv1.Entry, []string) {
+	blocks, ok := message["content"].([]any)
+	if !ok {
+		return nil, nil
+	}
+	var out []*agentshimv1.Entry
+	var orphans []string
+	for _, el := range blocks {
+		block, ok := el.(map[string]any)
+		if !ok || !resultBlockTypes[blockType(block)] {
+			continue
+		}
+		callID := str(block["tool_use_id"])
+		owner, resolved := c.callOwner(callID, env)
+		if !resolved {
+			// The call this answers was read before this process's cursor, so
+			// the message it folds onto is not derivable from the record. There
+			// is no arm for an unresolved owner and none is invented.
+			c.log.With(logging.Context{Operation: "tool-return", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+				Log("tool result tool_call_id=%q at offset=%d names no message this reader observed; stored unconverted rather than given an invented parent", callID, at.Offset)
+			orphans = append(orphans, callID)
+			continue
+		}
+		m := &conversationv1.MessageEntry{Author: authorAgent(container)}
+		lineage(m, owner, container)
+		m.Payload = &conversationv1.MessageEntry_ToolReturned{ToolReturned: &conversationv1.ToolReturned{
+			ToolCallId: callID,
+			Content:    toolResultContent(block["content"]),
+			IsError:    boolean(block["is_error"]),
+		}}
+		out = append(out, MessageEntry(at, "tool_returned:"+callID, m))
+	}
+	return out, orphans
+}
+
+// callOwner resolves the message that made a tool call, by the call's own id
+// first and by the assistant LINE the vendor named second.
+func (c *Converter) callOwner(callID string, env envelope) (string, bool) {
+	if owner, ok := c.toolCallOwner[callID]; ok && owner != "" {
+		return owner, true
+	}
+	if owner, ok := c.lineOwner[env.assistUUID]; ok && owner != "" {
+		return owner, true
+	}
+	return "", false
+}
+
+// ---------------------------------------------------------------------------
+// assistant lines
+// ---------------------------------------------------------------------------
+
+// assistantLine converts an `assistant` record into the agent's response, and
+// records the call ids it contains so the results that follow can find it.
+func (c *Converter) assistantLine(record map[string]any, at Attribution) []*agentshimv1.Entry {
+	env := readEnvelope(record)
+	container := c.container(at, env)
+	message := obj(record["message"])
+
+	messageID := str(message["id"])
+	if messageID == "" {
+		// A response the vendor did not name. The LINE's own uuid is the only
+		// stable identity left, and it is a real one — it just cannot fold two
+		// lines of one response together.
+		messageID = env.uuid
+	}
+	c.rememberCalls(message, env, messageID)
+
+	// The vendor records its own API failures as assistant records flagged on
+	// the envelope. It is a FailureRaised rather than an empty response,
+	// because a reader scrolling back must see that the turn failed rather than
+	// find it merely absent.
+	if env.apiError {
+		m := &conversationv1.MessageEntry{Author: authorAgent(container)}
+		lineage(m, messageID, container)
+		m.Payload = &conversationv1.MessageEntry_FailureRaised{FailureRaised: &conversationv1.FailureRaised{
+			Summary: firstNonEmpty(env.errorText, "the model API reported an error"),
+			Detail:  str(record["errorDetails"]),
+		}}
+		return []*agentshimv1.Entry{MessageEntry(at, "failure_raised", m)}
+	}
+
+	m := &conversationv1.MessageEntry{Author: authorAgent(container)}
+	lineage(m, messageID, container)
+	m.Payload = &conversationv1.MessageEntry_AgentSaid{AgentSaid: &conversationv1.AgentSaid{
+		Content:    agentContent(message["content"]),
+		Usage:      tokenUsage(message["usage"]),
+		Model:      str(message["model"]),
+		StopReason: stopReason(message["stop_reason"]),
+	}}
+	return []*agentshimv1.Entry{MessageEntry(at, "agent_said", m)}
+}
+
+// rememberCalls indexes every call this response made, under both names a later
+// result can arrive with.
+func (c *Converter) rememberCalls(message map[string]any, env envelope, messageID string) {
+	if env.uuid != "" {
+		c.lineOwner[env.uuid] = messageID
+	}
+	blocks, ok := message["content"].([]any)
+	if !ok {
+		return
+	}
+	for _, el := range blocks {
+		block, ok := el.(map[string]any)
+		if !ok || !callBlockTypes[blockType(block)] {
+			continue
+		}
+		if id := str(block["id"]); id != "" {
+			c.toolCallOwner[id] = messageID
+		}
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// ---------------------------------------------------------------------------
+// system lines
+// ---------------------------------------------------------------------------
+
+// systemLine converts a `system` record by its subtype. Two subtypes have a
+// vendor-agnostic reading; the rest are the harness narrating itself.
+func (c *Converter) systemLine(record map[string]any, at Attribution, next map[string]any) []*agentshimv1.Entry {
+	env := readEnvelope(record)
+	container := c.container(at, env)
+	subtype := str(record["subtype"])
+	switch subtype {
+	case "":
+		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+			Log("system line at offset=%d carries no %q field; stored unconverted", at.Offset, "subtype")
+		return []*agentshimv1.Entry{UnknownEntry(at, "", "subtype", record)}
+	case "compact_boundary":
+		return []*agentshimv1.Entry{c.contextCompacted(record, at, env, container, next)}
+	case "api_error":
+		return []*agentshimv1.Entry{c.apiErrorFailure(record, at, env, container)}
+	default:
+		return []*agentshimv1.Entry{VendorSpecificEntry(at, "system."+subtype, record)}
+	}
+}
+
+// apiErrorFailure converts the vendor's own recorded API error.
+//
+// The failure is the vendor's, which is what makes it a conversation record
+// rather than a daemon-synthesized card: the CLI wrote it to its transcript and
+// this reader read it back, so it is durable because the vendor made it durable.
+func (c *Converter) apiErrorFailure(record map[string]any, at Attribution, env envelope, container string) *agentshimv1.Entry {
+	detail := obj(record["error"])
+	m := &conversationv1.MessageEntry{Author: authorAgent(container)}
+	lineage(m, env.uuid, container)
+	m.Payload = &conversationv1.MessageEntry_FailureRaised{FailureRaised: &conversationv1.FailureRaised{
+		Summary:   firstNonEmpty(str(detail["message"]), "the model API reported an error"),
+		Detail:    str(detail["formatted"]),
+		RetryInMs: int64(number(record["retryInMs"])),
+	}}
+	return MessageEntry(at, "failure_raised", m)
+}
+
+func number(v any) float64 {
+	f, _ := v.(float64)
+	return f
+}
+
+// ---------------------------------------------------------------------------
+// attachment lines
+// ---------------------------------------------------------------------------
+
+// attachmentLine converts an `attachment` record. One attachment type carries a
+// conversation fact — the body of a skill that was invoked — and the rest are
+// context the harness injected, which no vendor-agnostic feed shows.
+func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*agentshimv1.Entry {
+	attachment := obj(record["attachment"])
+	if attachment == nil {
+		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+			Log("attachment line at offset=%d carries no %q object; stored unconverted", at.Offset, "attachment")
+		return []*agentshimv1.Entry{UnknownEntry(at, "", "attachment", record)}
+	}
+	kind := str(attachment["type"])
+	if kind != "invoked_skills" {
+		return []*agentshimv1.Entry{VendorSpecificEntry(at, "attachment."+kind, record)}
+	}
+	env := readEnvelope(record)
+	container := c.container(at, env)
+	entries := c.skillBodies(attachment, at, container)
+	if len(entries) == 0 {
+		// Every skill in the attachment named a card this reader never opened.
+		// The bodies are stored whole rather than resolved onto an invented one.
+		return []*agentshimv1.Entry{VendorSpecificEntry(at, "attachment.invoked_skills", record)}
+	}
+	return entries
+}
+
+// skillBodies resolves each invoked skill's file contents onto the skill's own
+// detached-work message.
+func (c *Converter) skillBodies(attachment map[string]any, at Attribution, container string) []*agentshimv1.Entry {
+	skills, ok := attachment["skills"].([]any)
+	if !ok {
+		return nil
+	}
+	var out []*agentshimv1.Entry
+	for _, el := range skills {
+		skill, ok := el.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := str(skill["name"])
+		messageID, resolved := c.skillMessage[name]
+		if !resolved || messageID == "" {
+			c.log.With(logging.Context{Operation: "skill-body", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+				Log("skill body name=%q at offset=%d names no skill invocation this reader observed; not resolved onto a card", name, at.Offset)
+			continue
+		}
+		m := &conversationv1.MessageEntry{Author: authorAgent(container)}
+		lineage(m, messageID, container)
+		m.Payload = &conversationv1.MessageEntry_SkillBodyResolved{SkillBodyResolved: &conversationv1.SkillBodyResolved{
+			Body: str(skill["content"]),
+		}}
+		out = append(out, MessageEntry(at, "skill_body:"+name, m))
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// context cuts
+// ---------------------------------------------------------------------------
+
+// contextCleared records that history was discarded outright.
+func (c *Converter) contextCleared(at Attribution, env envelope, container string) *agentshimv1.Entry {
+	m := &conversationv1.MessageEntry{Author: authorUser()}
+	lineage(m, env.uuid, container)
+	m.Payload = &conversationv1.MessageEntry_ContextCut{ContextCut: &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
+	}}
+	c.log.With(logging.Context{Operation: "context-cleared", Path: at.Path, Session: at.SessionID}).
+		Log("context cleared at offset=%d uuid=%q", at.Offset, env.uuid)
+	return MessageEntry(at, "context_cleared", m)
+}
+
+// contextCompacted records that history was replaced by a summary of itself,
+// COALESCING the boundary with the summary line that follows it in the file.
+//
+// FILE ORDER, NEVER TIMESTAMP ORDER. The harness composes the summary before
+// writing the boundary that announces it, so the summary's timestamp is EARLIER
+// than the boundary's — a timestamp-ordered assembly pairs every boundary with
+// the wrong summary in a session that compacted more than once.
+func (c *Converter) contextCompacted(record map[string]any, at Attribution, env envelope, container string, next map[string]any) *agentshimv1.Entry {
+	metadata := obj(record["compactMetadata"])
+	summary := compactSummaryText(next)
+	if summary == "" {
+		// A compaction with no summary renders as a hole where the discarded
+		// history was. It is emitted anyway — the cut is real and a reader must
+		// see WHERE — but never silently.
+		c.log.With(logging.Context{Operation: "context-compacted", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+			Log("compact boundary uuid=%q at offset=%d is not followed by a summary line; the cut renders with nothing in place of the discarded history", env.uuid, at.Offset)
+	}
+	m := &conversationv1.MessageEntry{Author: authorAgent(container)}
+	lineage(m, env.uuid, container)
+	compacted := &conversationv1.ContextCompacted{
+		TokensBefore: int64(number(metadata["preTokens"])),
+		TokensAfter:  int64(number(metadata["postTokens"])),
+	}
+	if summary != "" {
+		compacted.Summary = &conversationv1.AgentContent{Blocks: []*conversationv1.AgentContentBlock{{
+			Block: &conversationv1.AgentContentBlock_Text{Text: &conversationv1.TextBlock{Text: summary}},
+		}}}
+	}
+	m.Payload = &conversationv1.MessageEntry_ContextCut{ContextCut: &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_Compacted{Compacted: compacted},
+	}}
+	return MessageEntry(at, "context_compacted", m)
+}
+
+// IsCompactBoundary reports whether a record is a compaction boundary, which is
+// the only record in a transcript whose meaning depends on a line that may not
+// be written yet.
+func IsCompactBoundary(record map[string]any) bool {
+	return str(record["type"]) == "system" && str(record["subtype"]) == "compact_boundary"
+}
+
+// compactSummaryText returns the summary carried by the line FOLLOWING a
+// boundary, or "" when that line is not a summary.
+//
+// The summary line is typed `user`, which is why it is identified by the
+// envelope's flag and never by its type: it is the harness's own text standing
+// in for the discarded history, not the user's prompt.
+func compactSummaryText(next map[string]any) string {
+	if next == nil || str(next["type"]) != "user" || !boolean(next["isCompactSummary"]) {
+		return ""
+	}
+	content := obj(next["message"])["content"]
+	if s, ok := content.(string); ok {
+		return s
+	}
+	var parts []string
+	blocks, _ := content.([]any)
+	for _, el := range blocks {
+		block, ok := el.(map[string]any)
+		if !ok || blockType(block) != "text" {
+			continue
+		}
+		parts = append(parts, str(block["text"]))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// ---------------------------------------------------------------------------
+// clear detection
+// ---------------------------------------------------------------------------
+
+// clearCommand is the command name a cleared context is spelled with.
+const clearCommand = "/clear"
+
+// commandEnvelopeTags are the elements the harness expands a slash command
+// into, in the order it writes them.
+var commandEnvelopeTags = []string{"command-name", "command-message", "command-args"}
+
+// isClearCommand reports whether a user message is `/clear` and nothing else.
+//
+// The harness NEVER writes the literal prompt "/clear" to the transcript. It
+// writes the expanded command envelope, so anything matching raw prompt text
+// against "/clear" misses every replayed or rehydrated session. Detection
+// therefore unwraps the envelope first and then requires the command to be the
+// only non-whitespace content left: an argument, or prose around the envelope,
+// means the user asked for something else.
+func (c *Converter) isClearCommand(message map[string]any) bool {
+	// A clear is always plain text. A blocks-form user message is a tool result
+	// or a composed prompt, never a command envelope.
+	text, ok := message["content"].(string)
+	if !ok {
+		return false
+	}
+	name, args, ok := unwrapCommandEnvelope(text)
+	return ok && name == clearCommand && args == ""
+}
+
+// unwrapCommandEnvelope reduces a user prompt to the command it invokes.
+//
+// Text with no <command-name> element is returned verbatim as the name, so a
+// prompt whose entire content is "/clear" is recognized as one. Text carrying
+// the envelope must consist of NOTHING but the envelope's elements: leftover
+// non-whitespace outside them means the prompt merely QUOTES a command — a
+// pasted transcript, a tool result echoing one — rather than invoking it.
+func unwrapCommandEnvelope(s string) (name, args string, ok bool) {
+	if !strings.Contains(s, "<"+commandEnvelopeTags[0]+">") {
+		return strings.TrimSpace(s), "", true
+	}
+	rest := s
+	found := map[string]string{}
+	for _, tag := range commandEnvelopeTags {
+		// command-args is absent on some harness versions; a missing element is
+		// not a malformed envelope, only an empty one.
+		if inner, remainder, present := takeTag(rest, tag); present {
+			found[tag] = inner
+			rest = remainder
+		}
+	}
+	if strings.TrimSpace(rest) != "" {
+		return "", "", false
+	}
+	// A retained guard, not dead weight: today the leftover check above already
+	// rejects every string that carries an unconsumable <command-name>, so this
+	// branch is not reachable — but it is the one thing standing between a
+	// future change to that check and a nameless envelope being read as a valid
+	// command, so it stays.
+	name, present := found[commandEnvelopeTags[0]]
+	if !present {
+		return "", "", false
+	}
+	// command-message is the command's display label, redundant with the name;
+	// it is consumed above and deliberately not returned.
+	return strings.TrimSpace(name), strings.TrimSpace(found[commandEnvelopeTags[2]]), true
+}
+
+// takeTag removes the first <tag>…</tag> element from s, returning its inner
+// text and s without it. An unterminated open tag is not an element and is left
+// in place, so the caller's leftover check rejects the string.
+func takeTag(s, tag string) (inner, rest string, found bool) {
+	open, closing := "<"+tag+">", "</"+tag+">"
+	i := strings.Index(s, open)
+	if i < 0 {
+		return "", s, false
+	}
+	start := i + len(open)
+	j := strings.Index(s[start:], closing)
+	if j < 0 {
+		return "", s, false
+	}
+	return s[start : start+j], s[:i] + s[start+j+len(closing):], true
+}
+
+// ---------------------------------------------------------------------------
+// producer diagnostics
+// ---------------------------------------------------------------------------
+
+// ProducerDiagnostic states something about the READER rather than the read.
+// It is bookkeeping by the surface's own test: nothing in the feed corresponds
+// to it, and a consumer must never render it as conversation material.
+func ProducerDiagnostic(at Attribution, name, operation, detail string) *agentshimv1.Entry {
+	return SyntheticBookkeepingEntry(at, name, &protocolv1.BookkeepingEntry{
+		Kind: &protocolv1.BookkeepingEntry_ProducerDiagnostic{ProducerDiagnostic: &protocolv1.ProducerDiagnostic{
+			Operation: operation,
+			Detail:    detail,
+		}},
+	})
+}
+
+// Describe renders why a record was stored without an external half, for a log
+// line that has to say what was not carried.
+func Describe(entry *agentshimv1.Entry) string {
+	switch arm := entry.GetInternal().GetUnconverted().(type) {
+	case *agentshimv1.InternalEntry_VendorSpecific:
+		return fmt.Sprintf("vendor_specific kind=%q", arm.VendorSpecific.GetKind())
+	case *agentshimv1.InternalEntry_Unknown:
+		return fmt.Sprintf("unknown discriminator=%q field=%q", arm.Unknown.GetDiscriminator(), arm.Unknown.GetDiscriminatorField())
+	case *agentshimv1.InternalEntry_Unparsed:
+		return fmt.Sprintf("unparsed offset=%d error=%q", arm.Unparsed.GetOffset(), arm.Unparsed.GetParseError())
+	default:
+		return ""
+	}
 }

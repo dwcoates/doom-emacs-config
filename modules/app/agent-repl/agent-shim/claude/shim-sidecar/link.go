@@ -41,7 +41,8 @@ import (
 	"math/rand"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/handler"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
@@ -276,49 +277,37 @@ func (s *sidecar) watchedSessions() []string {
 	return out
 }
 
-// degradedWindowEvents reports the outage as BOTH HALVES OF ONE WINDOW, opening
-// then closing, per session.
+// degradedWindowEvents reports the outage the sidecar just came out of, once
+// per session it watches.
 //
-// The consumer's runtime-fault plumbing is a window: a DegradedState with
-// recovered=false OPENS a fault for the component, and one with recovered=true
-// CLOSES it. Sending only the closing half — which is all the sidecar could
-// ever send live, since the store it reports through is the very thing that was
-// down — asked the daemon to close a window that was never opened, and it
-// rejected the close (`branch=not-open`) instead of recording anything. The
-// outage was then invisible to workspace health even though the failure card
-// showed up.
+// IT IS NO LONGER A WINDOW, AND THAT IS A LOSS RATHER THAN A SIMPLIFICATION.
+// `DegradedState` was reachable only through the retired Event.payload and has
+// no carrier on the new model, so the two-record shape this used to send — one
+// record OPENING a fault for the component and one CLOSING it — cannot be
+// expressed at all. The consumer's runtime-fault plumbing IS a window, and a
+// producer that can no longer open one cannot drive it.
 //
-// Both halves are sent on the recovered connection, in order, which is the
-// honest shape of a window that is already over by the time it can be told.
-func degradedWindowEvents(sessions []string, reason string) []*corev1.Event {
-	out := make([]*corev1.Event, 0, 2*len(sessions))
-	for _, id := range sessions {
-		out = append(out, degradedEvents([]string{id}, reason, false)...)
-		out = append(out, degradedEvents([]string{id}, reason, true)...)
-	}
-	return out
-}
-
-// degradedEvents builds one DegradedState per session, opening the window
-// (recovered=false) or closing it (recovered=true). They are
-// SYNTHETIC/EPHEMERAL, matching how the shim reports its own degraded windows:
-// an operational notice about the pipe belongs in the live stream, never in the
-// durable conversation history the pipe carries.
-func degradedEvents(sessions []string, reason string, recovered bool) []*corev1.Event {
+// What is sent instead is a ProducerDiagnostic: a fact about the READER rather
+// than the read, which is what an ingestion outage is by this schema's own test.
+// It carries the same reason text, so nothing goes unsaid — but it arrives as a
+// diagnostic a human reads rather than as a fault a state machine clears, so
+// workspace health no longer learns this component was down. Recorded as a gap.
+//
+// Only the report AFTER the fact is sendable, and that was already true and
+// already honest: the store is the sidecar's only channel, so while the link is
+// down there is by definition nobody to tell.
+func degradedWindowEvents(sessions []string, reason string) []*agentshimv1.Entry {
 	now := time.Now().UnixMilli()
-	out := make([]*corev1.Event, 0, len(sessions))
+	out := make([]*agentshimv1.Entry, 0, len(sessions))
 	for _, id := range sessions {
-		out = append(out, &corev1.Event{
-			SessionId:    id,
-			Plane:        corev1.Plane_PLANE_SYNTHETIC,
-			Class:        corev1.EventClass_EVENT_CLASS_EPHEMERAL,
-			ProducedAtMs: now,
-			Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
-				Component: degradedComponent,
-				Reason:    reason,
-				Recovered: recovered,
-			}},
-		})
+		out = append(out, convert.ProducerDiagnostic(
+			convert.Attribution{SessionID: id, ProducedAtMs: now},
+			// The write identity names the OUTAGE, not the moment it is reported,
+			// so the same outage reported twice is one record at the store.
+			fmt.Sprintf("degraded:%s:%s:%s", degradedComponent, id, reason),
+			"store-link-degraded",
+			reason,
+		))
 	}
 	return out
 }
@@ -356,8 +345,8 @@ func nextBackoff(d time.Duration) time.Duration {
 // storeWrite is the sidecar's ONLY path to the store. Routing every write
 // through here is what keeps a dead connection from going unnoticed and leaving
 // the reader running against a corpse.
-func (s *sidecar) storeWrite(what string, batch *corev1.EventBatch) error {
-	_, err := s.store.Write(handler.Producer, batch)
+func (s *sidecar) storeWrite(what string, batch *agentshimv1.EntryBatch) error {
+	err := s.store.Write(handler.Producer, batch)
 	s.noteStoreErr(what, err)
 	return err
 }
