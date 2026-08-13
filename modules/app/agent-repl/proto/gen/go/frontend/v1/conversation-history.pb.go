@@ -373,22 +373,20 @@ func (x *NextPageCmd) GetScope() *PageScope {
 	return nil
 }
 
-// AT MOST TEN messages, oldest first.
+// One page of messages, oldest first.
 //
-// Ten discrete slots rather than a repeated field: a repeated field is
-// unbounded by construction and the only enforcement available is a runtime
-// check the producer must remember to apply. Here a producer holding an
-// eleventh message has nowhere to put it.
+// THE PAGE LIMIT IS THE DAEMON'S INVARIANT, NOT THIS TYPE'S. The messages
+// travel in a repeated field, which is unbounded by construction: nothing here
+// stops an over-long page. The at-most-ten ceiling is enforced by the daemon
+// that builds the page, and by nothing else. No `limit` field is added to
+// compensate — a limit on the wire would be a second place for the ceiling to
+// live and a second thing for a client to disagree with.
 //
-// DENSITY IS THE PRODUCER'S INVARIANT. Slots fill from message_1 upward, and
-// message_k set while message_(k-1) is empty is a bug. Making THAT structural
-// needs a oneof of ten page-shaped messages and fifty-five fields; the ceiling
-// is what matters and this achieves it, so the gap is documented rather than
-// paid for.
-//
-// NESTED MESSAGES DO NOT COST A SLOT. A message contained by another travels
-// inside its parent exactly as ConversationDelta carries it, so a client asking
-// for a page cannot be surprised by its width.
+// NESTED MESSAGES ARE NOT IN THIS PAGE. A message contained by another does
+// NOT travel inside its parent here: contained records are reached by PAGING,
+// with a fresh request whose PageScope is PageScopeInside naming the
+// container's message id. So a page of the feed carries feed rows only, and a
+// client that wants a subagent's insides asks for them.
 type ConversationHistoryPage struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
@@ -398,18 +396,9 @@ type ConversationHistoryPage struct {
 	RequestId string `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Messages OLDEST FIRST, as COMPLETE feed envelopes identical in shape to
 	// ConversationDelta's — so a frontend renders a paged message with the same
-	// code that renders a pushed one. Absent slots mean a short page, which at
-	// the top of a conversation is the normal case.
-	Message_1  *Message `protobuf:"bytes,3,opt,name=message_1,json=message1,proto3" json:"message_1,omitempty"`
-	Message_2  *Message `protobuf:"bytes,4,opt,name=message_2,json=message2,proto3" json:"message_2,omitempty"`
-	Message_3  *Message `protobuf:"bytes,5,opt,name=message_3,json=message3,proto3" json:"message_3,omitempty"`
-	Message_4  *Message `protobuf:"bytes,6,opt,name=message_4,json=message4,proto3" json:"message_4,omitempty"`
-	Message_5  *Message `protobuf:"bytes,7,opt,name=message_5,json=message5,proto3" json:"message_5,omitempty"`
-	Message_6  *Message `protobuf:"bytes,8,opt,name=message_6,json=message6,proto3" json:"message_6,omitempty"`
-	Message_7  *Message `protobuf:"bytes,9,opt,name=message_7,json=message7,proto3" json:"message_7,omitempty"`
-	Message_8  *Message `protobuf:"bytes,10,opt,name=message_8,json=message8,proto3" json:"message_8,omitempty"`
-	Message_9  *Message `protobuf:"bytes,11,opt,name=message_9,json=message9,proto3" json:"message_9,omitempty"`
-	Message_10 *Message `protobuf:"bytes,12,opt,name=message_10,json=message10,proto3" json:"message_10,omitempty"`
+	// code that renders a pushed one. Fewer than the daemon's ceiling means a
+	// short page, which at the top of a conversation is the normal case.
+	Messages []*Message `protobuf:"bytes,18,rep,name=messages,proto3" json:"messages,omitempty"`
 	// WHETHER the conversation continues above this page — never WHERE.
 	//
 	// A oneof of MESSAGES rather than a bool or an enum: "there is more" and "we
@@ -493,72 +482,9 @@ func (x *ConversationHistoryPage) GetRequestId() string {
 	return ""
 }
 
-func (x *ConversationHistoryPage) GetMessage_1() *Message {
+func (x *ConversationHistoryPage) GetMessages() []*Message {
 	if x != nil {
-		return x.Message_1
-	}
-	return nil
-}
-
-func (x *ConversationHistoryPage) GetMessage_2() *Message {
-	if x != nil {
-		return x.Message_2
-	}
-	return nil
-}
-
-func (x *ConversationHistoryPage) GetMessage_3() *Message {
-	if x != nil {
-		return x.Message_3
-	}
-	return nil
-}
-
-func (x *ConversationHistoryPage) GetMessage_4() *Message {
-	if x != nil {
-		return x.Message_4
-	}
-	return nil
-}
-
-func (x *ConversationHistoryPage) GetMessage_5() *Message {
-	if x != nil {
-		return x.Message_5
-	}
-	return nil
-}
-
-func (x *ConversationHistoryPage) GetMessage_6() *Message {
-	if x != nil {
-		return x.Message_6
-	}
-	return nil
-}
-
-func (x *ConversationHistoryPage) GetMessage_7() *Message {
-	if x != nil {
-		return x.Message_7
-	}
-	return nil
-}
-
-func (x *ConversationHistoryPage) GetMessage_8() *Message {
-	if x != nil {
-		return x.Message_8
-	}
-	return nil
-}
-
-func (x *ConversationHistoryPage) GetMessage_9() *Message {
-	if x != nil {
-		return x.Message_9
-	}
-	return nil
-}
-
-func (x *ConversationHistoryPage) GetMessage_10() *Message {
-	if x != nil {
-		return x.Message_10
+		return x.Messages
 	}
 	return nil
 }
@@ -722,29 +648,21 @@ const file_frontend_v1_conversation_history_proto_rawDesc = "" +
 	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"Y\n" +
 	"\vNextPageCmd\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12,\n" +
-	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"\xd2\x06\n" +
+	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"\xaf\x04\n" +
 	"\x17ConversationHistoryPage\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x02 \x01(\tR\trequestId\x121\n" +
-	"\tmessage_1\x18\x03 \x01(\v2\x14.frontend.v1.MessageR\bmessage1\x121\n" +
-	"\tmessage_2\x18\x04 \x01(\v2\x14.frontend.v1.MessageR\bmessage2\x121\n" +
-	"\tmessage_3\x18\x05 \x01(\v2\x14.frontend.v1.MessageR\bmessage3\x121\n" +
-	"\tmessage_4\x18\x06 \x01(\v2\x14.frontend.v1.MessageR\bmessage4\x121\n" +
-	"\tmessage_5\x18\a \x01(\v2\x14.frontend.v1.MessageR\bmessage5\x121\n" +
-	"\tmessage_6\x18\b \x01(\v2\x14.frontend.v1.MessageR\bmessage6\x121\n" +
-	"\tmessage_7\x18\t \x01(\v2\x14.frontend.v1.MessageR\bmessage7\x121\n" +
-	"\tmessage_8\x18\n" +
-	" \x01(\v2\x14.frontend.v1.MessageR\bmessage8\x121\n" +
-	"\tmessage_9\x18\v \x01(\v2\x14.frontend.v1.MessageR\bmessage9\x123\n" +
-	"\n" +
-	"message_10\x18\f \x01(\v2\x14.frontend.v1.MessageR\tmessage10\x121\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\x120\n" +
+	"\bmessages\x18\x12 \x03(\v2\x14.frontend.v1.MessageR\bmessages\x121\n" +
 	"\x04more\x18\r \x01(\v2\x1b.frontend.v1.HistoryHasMoreH\x00R\x04more\x123\n" +
 	"\x05start\x18\x0e \x01(\v2\x1b.frontend.v1.HistoryAtStartH\x00R\x05start\x12\"\n" +
 	"\rlive_join_seq\x18\x0f \x01(\x04R\vliveJoinSeq\x12,\n" +
 	"\x05scope\x18\x10 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\x120\n" +
 	"\x14ancestor_message_ids\x18\x11 \x03(\tR\x12ancestorMessageIdsB\x0e\n" +
-	"\fcontinuation\"\x10\n" +
+	"\fcontinuationJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
+	"J\x04\b\n" +
+	"\x10\vJ\x04\b\v\x10\fJ\x04\b\f\x10\rR\tmessage_1R\tmessage_2R\tmessage_3R\tmessage_4R\tmessage_5R\tmessage_6R\tmessage_7R\tmessage_8R\tmessage_9R\n" +
+	"message_10\"\x10\n" +
 	"\x0eHistoryHasMore\"\x10\n" +
 	"\x0eHistoryAtStartB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
@@ -773,28 +691,19 @@ var file_frontend_v1_conversation_history_proto_goTypes = []any{
 	(*Message)(nil),                 // 8: frontend.v1.Message
 }
 var file_frontend_v1_conversation_history_proto_depIdxs = []int32{
-	1,  // 0: frontend.v1.PageScope.feed:type_name -> frontend.v1.PageScopeFeed
-	2,  // 1: frontend.v1.PageScope.inside:type_name -> frontend.v1.PageScopeInside
-	0,  // 2: frontend.v1.FirstPageCmd.scope:type_name -> frontend.v1.PageScope
-	0,  // 3: frontend.v1.NextPageCmd.scope:type_name -> frontend.v1.PageScope
-	8,  // 4: frontend.v1.ConversationHistoryPage.message_1:type_name -> frontend.v1.Message
-	8,  // 5: frontend.v1.ConversationHistoryPage.message_2:type_name -> frontend.v1.Message
-	8,  // 6: frontend.v1.ConversationHistoryPage.message_3:type_name -> frontend.v1.Message
-	8,  // 7: frontend.v1.ConversationHistoryPage.message_4:type_name -> frontend.v1.Message
-	8,  // 8: frontend.v1.ConversationHistoryPage.message_5:type_name -> frontend.v1.Message
-	8,  // 9: frontend.v1.ConversationHistoryPage.message_6:type_name -> frontend.v1.Message
-	8,  // 10: frontend.v1.ConversationHistoryPage.message_7:type_name -> frontend.v1.Message
-	8,  // 11: frontend.v1.ConversationHistoryPage.message_8:type_name -> frontend.v1.Message
-	8,  // 12: frontend.v1.ConversationHistoryPage.message_9:type_name -> frontend.v1.Message
-	8,  // 13: frontend.v1.ConversationHistoryPage.message_10:type_name -> frontend.v1.Message
-	6,  // 14: frontend.v1.ConversationHistoryPage.more:type_name -> frontend.v1.HistoryHasMore
-	7,  // 15: frontend.v1.ConversationHistoryPage.start:type_name -> frontend.v1.HistoryAtStart
-	0,  // 16: frontend.v1.ConversationHistoryPage.scope:type_name -> frontend.v1.PageScope
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	1, // 0: frontend.v1.PageScope.feed:type_name -> frontend.v1.PageScopeFeed
+	2, // 1: frontend.v1.PageScope.inside:type_name -> frontend.v1.PageScopeInside
+	0, // 2: frontend.v1.FirstPageCmd.scope:type_name -> frontend.v1.PageScope
+	0, // 3: frontend.v1.NextPageCmd.scope:type_name -> frontend.v1.PageScope
+	8, // 4: frontend.v1.ConversationHistoryPage.messages:type_name -> frontend.v1.Message
+	6, // 5: frontend.v1.ConversationHistoryPage.more:type_name -> frontend.v1.HistoryHasMore
+	7, // 6: frontend.v1.ConversationHistoryPage.start:type_name -> frontend.v1.HistoryAtStart
+	0, // 7: frontend.v1.ConversationHistoryPage.scope:type_name -> frontend.v1.PageScope
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_conversation_history_proto_init() }
