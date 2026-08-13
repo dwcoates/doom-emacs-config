@@ -478,7 +478,7 @@ type FrontendFrame_ConversationHistoryPage struct {
 	// exactly one delivery shape here.
 	//
 	// POSITIONLESS: its reader holds no position and echoes nothing back — the
-	// daemon holds the reader's place. See conversation-history.proto.
+	// daemon holds the reader's place. See feed.proto.
 	ConversationHistoryPage *ConversationHistoryPage `protobuf:"bytes,26,opt,name=conversation_history_page,json=conversationHistoryPage,proto3,oneof"`
 }
 
@@ -1295,7 +1295,7 @@ type FrontendCommand_FirstPage struct {
 	// daemon-held position to the newest page; `next_page` walks it one page
 	// older and carries NO position of its own, so a reader without an
 	// established one is refused rather than silently served the tail. They do
-	// not replace `resync` above — see conversation-history.proto.
+	// not replace `resync` above — see feed.proto.
 	FirstPage *FirstPageCmd `protobuf:"bytes,34,opt,name=first_page,json=firstPage,proto3,oneof"`
 }
 
@@ -1635,7 +1635,7 @@ var File_frontend_v1_frame_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_frame_proto_rawDesc = "" +
 	"\n" +
-	"\x17frontend/v1/frame.proto\x12\vfrontend.v1\x1a&frontend/v1/conversation-history.proto\x1a\x18frontend/v1/errors.proto\x1a\x1efrontend/v1/failure-card.proto\x1a\x16frontend/v1/feed.proto\x1a\x18frontend/v1/footer.proto\x1a\x1efrontend/v1/gate-revival.proto\x1a\x16frontend/v1/host.proto\x1a\x1bfrontend/v1/lifecycle.proto\x1a\x17frontend/v1/merge.proto\x1a!frontend/v1/permission-card.proto\x1a\x1efrontend/v1/prompt-queue.proto\x1a\x19frontend/v1/sidebar.proto\x1a\x17frontend/v1/state.proto\x1a\x1dfrontend/v1/tokens-menu.proto\x1a\x1bfrontend/v1/tool-call.proto\x1a\x18frontend/v1/topbar.proto\"\x96\x0e\n" +
+	"\x17frontend/v1/frame.proto\x12\vfrontend.v1\x1a\x18frontend/v1/errors.proto\x1a\x16frontend/v1/feed.proto\x1a\x18frontend/v1/footer.proto\x1a\x1efrontend/v1/gate-revival.proto\x1a\x16frontend/v1/host.proto\x1a\x1bfrontend/v1/lifecycle.proto\x1a\x17frontend/v1/merge.proto\x1a\x19frontend/v1/sidebar.proto\x1a\x17frontend/v1/state.proto\x1a\x18frontend/v1/topbar.proto\"\x96\x0e\n" +
 	"\rFrontendFrame\x128\n" +
 	"\bsnapshot\x18\x01 \x01(\v2\x1a.frontend.v1.StateSnapshotH\x00R\bsnapshot\x12F\n" +
 	"\x0fworkspace_state\x18\x02 \x01(\v2\x1b.frontend.v1.WorkspaceStateH\x00R\x0eworkspaceState\x12=\n" +
@@ -1924,21 +1924,15 @@ func file_frontend_v1_frame_proto_init() {
 	if File_frontend_v1_frame_proto != nil {
 		return
 	}
-	file_frontend_v1_conversation_history_proto_init()
 	file_frontend_v1_errors_proto_init()
-	file_frontend_v1_failure_card_proto_init()
 	file_frontend_v1_feed_proto_init()
 	file_frontend_v1_footer_proto_init()
 	file_frontend_v1_gate_revival_proto_init()
 	file_frontend_v1_host_proto_init()
 	file_frontend_v1_lifecycle_proto_init()
 	file_frontend_v1_merge_proto_init()
-	file_frontend_v1_permission_card_proto_init()
-	file_frontend_v1_prompt_queue_proto_init()
 	file_frontend_v1_sidebar_proto_init()
 	file_frontend_v1_state_proto_init()
-	file_frontend_v1_tokens_menu_proto_init()
-	file_frontend_v1_tool_call_proto_init()
 	file_frontend_v1_topbar_proto_init()
 	file_frontend_v1_frame_proto_msgTypes[0].OneofWrappers = []any{
 		(*FrontendFrame_Snapshot)(nil),

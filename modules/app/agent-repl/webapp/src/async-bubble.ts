@@ -78,7 +78,7 @@ import {
   type DetachedWorkSettled as GeneratedDetachedWorkSettled,
   type DetachedWorkSkillUpdate as GeneratedDetachedWorkSkillUpdate,
   type DetachedWorkJournalRow as GeneratedDetachedWorkJournalRow,
-} from "../../proto/gen/ts/frontend/v1/detached-work_pb";
+} from "../../proto/gen/ts/frontend/v1/feed_pb";
 import { unwrapAgentEmission, type UnwrappedEmission } from "./agent-emission.js";
 import {
   ensureArray,

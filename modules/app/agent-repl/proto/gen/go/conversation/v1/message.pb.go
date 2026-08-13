@@ -66,30 +66,18 @@ type MessageEntry struct {
 	//
 	// Here an unresolved parent has no legal record to occupy. The producer must
 	// state which case it is, or fail.
+	//
+	// FIXME: I dont think anything is gained by having this not be a simple `optional string parent_message_id`
+	//
+	//	with unset meaning "root level"
 	Parent *MessageParent `protobuf:"bytes,3,opt,name=parent,proto3" json:"parent,omitempty"`
 	// Who this message is FROM, resolved by the producer rather than inferred by
 	// a reader from which payload arm is set.
 	Author *MessageAuthor `protobuf:"bytes,4,opt,name=author,proto3" json:"author,omitempty"`
-	// What this record says about the message it belongs to. The three groups
-	// below are a reading aid, not a schema distinction: every arm carries the
-	// same ids, so the group an arm sits in changes nothing about the record.
-	//
-	// Types that are valid to be assigned to Payload:
-	//
-	//	*MessageEntry_UserSaid
-	//	*MessageEntry_AgentSaid
-	//	*MessageEntry_PermissionAsked
-	//	*MessageEntry_FailureRaised
-	//	*MessageEntry_ContextCut
-	//	*MessageEntry_DetachedWorkStarted
-	//	*MessageEntry_DetachedWorkProgressed
-	//	*MessageEntry_WorkflowStepObserved
-	//	*MessageEntry_DetachedWorkEnded
-	//	*MessageEntry_PermissionAnswered
-	//	*MessageEntry_ToolReturned
-	//	*MessageEntry_SkillBodyResolved
-	//	*MessageEntry_ContentArriving
-	Payload       isMessageEntry_Payload `protobuf_oneof:"payload"`
+	// What this record says about the message it belongs to. See MessagePayload,
+	// which holds the arms themselves; extracting them changes nothing about what
+	// this record means, only about who else can name the same set.
+	Payload       *MessagePayload `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -152,195 +140,273 @@ func (x *MessageEntry) GetAuthor() *MessageAuthor {
 	return nil
 }
 
-func (x *MessageEntry) GetPayload() isMessageEntry_Payload {
+func (x *MessageEntry) GetPayload() *MessagePayload {
 	if x != nil {
 		return x.Payload
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetUserSaid() *UserSaid {
+// WHAT A RECORD CAN SAY, as a type rather than as a oneof buried in
+// MessageEntry.
+//
+// A `oneof` IS NOT A TYPE and cannot be imported: proto3 offers no way to name
+// `MessageEntry.payload` from another file. That left any surface needing the
+// same payload vocabulary with different stamps exactly two options — import
+// MessageEntry whole, inheriting identity and ordering stamps it wanted to set
+// itself, or write the arms out again. Writing them out again is the mechanical
+// origin of every agent-output re-spelling on frontend.v1, and this extraction
+// is what removes the pressure that produced them.
+//
+// It is PURE ENABLEMENT. MessageEntry embeds this and keeps exactly the
+// semantics it had; nothing about a durable record's meaning moves with the
+// arms, and the extraction commits to nothing about what any other surface
+// chooses to carry.
+type MessagePayload struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The three groups below are a reading aid, not a schema distinction: every
+	// arm is carried by a record with the same ids, so the group an arm sits in
+	// changes nothing about the record.
+	//
+	// Types that are valid to be assigned to Payload:
+	//
+	//	*MessagePayload_UserSaid
+	//	*MessagePayload_AgentSaid
+	//	*MessagePayload_PermissionAsked
+	//	*MessagePayload_FailureRaised
+	//	*MessagePayload_ContextCut
+	//	*MessagePayload_DetachedWorkStarted
+	//	*MessagePayload_DetachedWorkProgressed
+	//	*MessagePayload_WorkflowStepObserved
+	//	*MessagePayload_DetachedWorkEnded
+	//	*MessagePayload_PermissionAnswered
+	//	*MessagePayload_ToolReturned
+	//	*MessagePayload_SkillBodyResolved
+	//	*MessagePayload_ContentArriving
+	Payload       isMessagePayload_Payload `protobuf_oneof:"payload"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MessagePayload) Reset() {
+	*x = MessagePayload{}
+	mi := &file_conversation_v1_message_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MessagePayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MessagePayload) ProtoMessage() {}
+
+func (x *MessagePayload) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_message_proto_msgTypes[1]
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_UserSaid); ok {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MessagePayload.ProtoReflect.Descriptor instead.
+func (*MessagePayload) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_message_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *MessagePayload) GetPayload() isMessagePayload_Payload {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *MessagePayload) GetUserSaid() *UserSaid {
+	if x != nil {
+		if x, ok := x.Payload.(*MessagePayload_UserSaid); ok {
 			return x.UserSaid
 		}
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetAgentSaid() *AgentSaid {
+func (x *MessagePayload) GetAgentSaid() *AgentSaid {
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_AgentSaid); ok {
+		if x, ok := x.Payload.(*MessagePayload_AgentSaid); ok {
 			return x.AgentSaid
 		}
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetPermissionAsked() *PermissionAsked {
+func (x *MessagePayload) GetPermissionAsked() *PermissionAsked {
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_PermissionAsked); ok {
+		if x, ok := x.Payload.(*MessagePayload_PermissionAsked); ok {
 			return x.PermissionAsked
 		}
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetFailureRaised() *FailureRaised {
+func (x *MessagePayload) GetFailureRaised() *FailureRaised {
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_FailureRaised); ok {
+		if x, ok := x.Payload.(*MessagePayload_FailureRaised); ok {
 			return x.FailureRaised
 		}
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetContextCut() *ContextCut {
+func (x *MessagePayload) GetContextCut() *ContextCut {
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_ContextCut); ok {
+		if x, ok := x.Payload.(*MessagePayload_ContextCut); ok {
 			return x.ContextCut
 		}
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetDetachedWorkStarted() *DetachedWorkStarted {
+func (x *MessagePayload) GetDetachedWorkStarted() *DetachedWorkStarted {
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_DetachedWorkStarted); ok {
+		if x, ok := x.Payload.(*MessagePayload_DetachedWorkStarted); ok {
 			return x.DetachedWorkStarted
 		}
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetDetachedWorkProgressed() *DetachedWorkProgressed {
+func (x *MessagePayload) GetDetachedWorkProgressed() *DetachedWorkProgressed {
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_DetachedWorkProgressed); ok {
+		if x, ok := x.Payload.(*MessagePayload_DetachedWorkProgressed); ok {
 			return x.DetachedWorkProgressed
 		}
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetWorkflowStepObserved() *WorkflowStepObserved {
+func (x *MessagePayload) GetWorkflowStepObserved() *WorkflowStepObserved {
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_WorkflowStepObserved); ok {
+		if x, ok := x.Payload.(*MessagePayload_WorkflowStepObserved); ok {
 			return x.WorkflowStepObserved
 		}
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetDetachedWorkEnded() *DetachedWorkEnded {
+func (x *MessagePayload) GetDetachedWorkEnded() *DetachedWorkEnded {
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_DetachedWorkEnded); ok {
+		if x, ok := x.Payload.(*MessagePayload_DetachedWorkEnded); ok {
 			return x.DetachedWorkEnded
 		}
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetPermissionAnswered() *PermissionAnswered {
+func (x *MessagePayload) GetPermissionAnswered() *PermissionAnswered {
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_PermissionAnswered); ok {
+		if x, ok := x.Payload.(*MessagePayload_PermissionAnswered); ok {
 			return x.PermissionAnswered
 		}
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetToolReturned() *ToolReturned {
+func (x *MessagePayload) GetToolReturned() *ToolReturned {
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_ToolReturned); ok {
+		if x, ok := x.Payload.(*MessagePayload_ToolReturned); ok {
 			return x.ToolReturned
 		}
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetSkillBodyResolved() *SkillBodyResolved {
+func (x *MessagePayload) GetSkillBodyResolved() *SkillBodyResolved {
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_SkillBodyResolved); ok {
+		if x, ok := x.Payload.(*MessagePayload_SkillBodyResolved); ok {
 			return x.SkillBodyResolved
 		}
 	}
 	return nil
 }
 
-func (x *MessageEntry) GetContentArriving() *ContentArriving {
+func (x *MessagePayload) GetContentArriving() *ContentArriving {
 	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_ContentArriving); ok {
+		if x, ok := x.Payload.(*MessagePayload_ContentArriving); ok {
 			return x.ContentArriving
 		}
 	}
 	return nil
 }
 
-type isMessageEntry_Payload interface {
-	isMessageEntry_Payload()
+type isMessagePayload_Payload interface {
+	isMessagePayload_Payload()
 }
 
-type MessageEntry_UserSaid struct {
+type MessagePayload_UserSaid struct {
 	// Something a person typed. The opening of a turn.
-	UserSaid *UserSaid `protobuf:"bytes,5,opt,name=user_said,json=userSaid,proto3,oneof"`
+	UserSaid *UserSaid `protobuf:"bytes,1,opt,name=user_said,json=userSaid,proto3,oneof"`
 }
 
-type MessageEntry_AgentSaid struct {
+type MessagePayload_AgentSaid struct {
 	// Something the agent said: its content blocks, and the usage its response
 	// reported.
-	AgentSaid *AgentSaid `protobuf:"bytes,6,opt,name=agent_said,json=agentSaid,proto3,oneof"`
+	AgentSaid *AgentSaid `protobuf:"bytes,2,opt,name=agent_said,json=agentSaid,proto3,oneof"`
 }
 
-type MessageEntry_PermissionAsked struct {
+type MessagePayload_PermissionAsked struct {
 	// A permission the agent ASKED FOR. It is a message because the agent
 	// really did ask and the user really does answer — it is a conversational
 	// act, not a dialog the daemon invented.
-	PermissionAsked *PermissionAsked `protobuf:"bytes,7,opt,name=permission_asked,json=permissionAsked,proto3,oneof"`
+	PermissionAsked *PermissionAsked `protobuf:"bytes,3,opt,name=permission_asked,json=permissionAsked,proto3,oneof"`
 }
 
-type MessageEntry_FailureRaised struct {
+type MessagePayload_FailureRaised struct {
 	// Something went wrong, stated as a card the user reads and acts on.
-	FailureRaised *FailureRaised `protobuf:"bytes,8,opt,name=failure_raised,json=failureRaised,proto3,oneof"`
+	FailureRaised *FailureRaised `protobuf:"bytes,4,opt,name=failure_raised,json=failureRaised,proto3,oneof"`
 }
 
-type MessageEntry_ContextCut struct {
+type MessagePayload_ContextCut struct {
 	// The conversation was CUT here. It is a message because a reader must see
 	// where, rather than merely finding the history shorter than they left it.
-	ContextCut *ContextCut `protobuf:"bytes,9,opt,name=context_cut,json=contextCut,proto3,oneof"`
+	ContextCut *ContextCut `protobuf:"bytes,5,opt,name=context_cut,json=contextCut,proto3,oneof"`
 }
 
-type MessageEntry_DetachedWorkStarted struct {
+type MessagePayload_DetachedWorkStarted struct {
 	// Work that DETACHED from the turn and now runs alongside it — a subagent,
 	// a background shell, a workflow. It is a feed row naming itself, so a page
 	// of ten rows is ten bounded things rather than ten trees.
-	DetachedWorkStarted *DetachedWorkStarted `protobuf:"bytes,10,opt,name=detached_work_started,json=detachedWorkStarted,proto3,oneof"`
+	DetachedWorkStarted *DetachedWorkStarted `protobuf:"bytes,6,opt,name=detached_work_started,json=detachedWorkStarted,proto3,oneof"`
 }
 
-type MessageEntry_DetachedWorkProgressed struct {
+type MessagePayload_DetachedWorkProgressed struct {
 	// Output accumulating into detached work already open.
-	DetachedWorkProgressed *DetachedWorkProgressed `protobuf:"bytes,11,opt,name=detached_work_progressed,json=detachedWorkProgressed,proto3,oneof"`
+	DetachedWorkProgressed *DetachedWorkProgressed `protobuf:"bytes,7,opt,name=detached_work_progressed,json=detachedWorkProgressed,proto3,oneof"`
 }
 
-type MessageEntry_WorkflowStepObserved struct {
+type MessagePayload_WorkflowStepObserved struct {
 	// A journal step observed in detached workflow work already open. It
 	// carries the message_id of the detached work it belongs to, exactly as
 	// detached_work_progressed does, so it folds onto that card without
 	// correlation. Structured rather than folded into the progress string,
 	// because the producer read it structured.
-	WorkflowStepObserved *WorkflowStepObserved `protobuf:"bytes,12,opt,name=workflow_step_observed,json=workflowStepObserved,proto3,oneof"`
+	WorkflowStepObserved *WorkflowStepObserved `protobuf:"bytes,8,opt,name=workflow_step_observed,json=workflowStepObserved,proto3,oneof"`
 }
 
-type MessageEntry_DetachedWorkEnded struct {
+type MessagePayload_DetachedWorkEnded struct {
 	// Detached work reached an end, with the outcome it reached.
-	DetachedWorkEnded *DetachedWorkEnded `protobuf:"bytes,13,opt,name=detached_work_ended,json=detachedWorkEnded,proto3,oneof"`
+	DetachedWorkEnded *DetachedWorkEnded `protobuf:"bytes,9,opt,name=detached_work_ended,json=detachedWorkEnded,proto3,oneof"`
 }
 
-type MessageEntry_PermissionAnswered struct {
+type MessagePayload_PermissionAnswered struct {
 	// The user answered a permission the agent asked for.
-	PermissionAnswered *PermissionAnswered `protobuf:"bytes,14,opt,name=permission_answered,json=permissionAnswered,proto3,oneof"`
+	PermissionAnswered *PermissionAnswered `protobuf:"bytes,10,opt,name=permission_answered,json=permissionAnswered,proto3,oneof"`
 }
 
-type MessageEntry_ToolReturned struct {
+type MessagePayload_ToolReturned struct {
 	// A tool the agent called returned. It carries the message_id of the
 	// message that MADE the call, so the result folds onto that tool card.
 	//
@@ -348,47 +414,47 @@ type MessageEntry_ToolReturned struct {
 	// MESSAGE is from, and the message is the agent's response. The vendor
 	// files tool results under user-role records, which is the accident this
 	// arm exists to not inherit.
-	ToolReturned *ToolReturned `protobuf:"bytes,15,opt,name=tool_returned,json=toolReturned,proto3,oneof"`
+	ToolReturned *ToolReturned `protobuf:"bytes,11,opt,name=tool_returned,json=toolReturned,proto3,oneof"`
 }
 
-type MessageEntry_SkillBodyResolved struct {
+type MessagePayload_SkillBodyResolved struct {
 	// A skill file's contents, resolved onto the skill's own message. Replaces
 	// whole rather than appending.
-	SkillBodyResolved *SkillBodyResolved `protobuf:"bytes,16,opt,name=skill_body_resolved,json=skillBodyResolved,proto3,oneof"`
+	SkillBodyResolved *SkillBodyResolved `protobuf:"bytes,12,opt,name=skill_body_resolved,json=skillBodyResolved,proto3,oneof"`
 }
 
-type MessageEntry_ContentArriving struct {
+type MessagePayload_ContentArriving struct {
 	// A fragment of content still arriving, handed straight to the daemon by
 	// the stream plane. The completed message the file plane writes later
 	// REPLACES the preview rather than appending beside it.
-	ContentArriving *ContentArriving `protobuf:"bytes,17,opt,name=content_arriving,json=contentArriving,proto3,oneof"`
+	ContentArriving *ContentArriving `protobuf:"bytes,13,opt,name=content_arriving,json=contentArriving,proto3,oneof"`
 }
 
-func (*MessageEntry_UserSaid) isMessageEntry_Payload() {}
+func (*MessagePayload_UserSaid) isMessagePayload_Payload() {}
 
-func (*MessageEntry_AgentSaid) isMessageEntry_Payload() {}
+func (*MessagePayload_AgentSaid) isMessagePayload_Payload() {}
 
-func (*MessageEntry_PermissionAsked) isMessageEntry_Payload() {}
+func (*MessagePayload_PermissionAsked) isMessagePayload_Payload() {}
 
-func (*MessageEntry_FailureRaised) isMessageEntry_Payload() {}
+func (*MessagePayload_FailureRaised) isMessagePayload_Payload() {}
 
-func (*MessageEntry_ContextCut) isMessageEntry_Payload() {}
+func (*MessagePayload_ContextCut) isMessagePayload_Payload() {}
 
-func (*MessageEntry_DetachedWorkStarted) isMessageEntry_Payload() {}
+func (*MessagePayload_DetachedWorkStarted) isMessagePayload_Payload() {}
 
-func (*MessageEntry_DetachedWorkProgressed) isMessageEntry_Payload() {}
+func (*MessagePayload_DetachedWorkProgressed) isMessagePayload_Payload() {}
 
-func (*MessageEntry_WorkflowStepObserved) isMessageEntry_Payload() {}
+func (*MessagePayload_WorkflowStepObserved) isMessagePayload_Payload() {}
 
-func (*MessageEntry_DetachedWorkEnded) isMessageEntry_Payload() {}
+func (*MessagePayload_DetachedWorkEnded) isMessagePayload_Payload() {}
 
-func (*MessageEntry_PermissionAnswered) isMessageEntry_Payload() {}
+func (*MessagePayload_PermissionAnswered) isMessagePayload_Payload() {}
 
-func (*MessageEntry_ToolReturned) isMessageEntry_Payload() {}
+func (*MessagePayload_ToolReturned) isMessagePayload_Payload() {}
 
-func (*MessageEntry_SkillBodyResolved) isMessageEntry_Payload() {}
+func (*MessagePayload_SkillBodyResolved) isMessagePayload_Payload() {}
 
-func (*MessageEntry_ContentArriving) isMessageEntry_Payload() {}
+func (*MessagePayload_ContentArriving) isMessagePayload_Payload() {}
 
 // Where a message sits in the feed.
 //
@@ -408,7 +474,7 @@ type MessageParent struct {
 
 func (x *MessageParent) Reset() {
 	*x = MessageParent{}
-	mi := &file_conversation_v1_message_proto_msgTypes[1]
+	mi := &file_conversation_v1_message_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -420,7 +486,7 @@ func (x *MessageParent) String() string {
 func (*MessageParent) ProtoMessage() {}
 
 func (x *MessageParent) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_message_proto_msgTypes[1]
+	mi := &file_conversation_v1_message_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -433,7 +499,7 @@ func (x *MessageParent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageParent.ProtoReflect.Descriptor instead.
 func (*MessageParent) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_message_proto_rawDescGZIP(), []int{1}
+	return file_conversation_v1_message_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *MessageParent) GetParent() isMessageParent_Parent {
@@ -489,7 +555,7 @@ type MessageParentRoot struct {
 
 func (x *MessageParentRoot) Reset() {
 	*x = MessageParentRoot{}
-	mi := &file_conversation_v1_message_proto_msgTypes[2]
+	mi := &file_conversation_v1_message_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -501,7 +567,7 @@ func (x *MessageParentRoot) String() string {
 func (*MessageParentRoot) ProtoMessage() {}
 
 func (x *MessageParentRoot) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_message_proto_msgTypes[2]
+	mi := &file_conversation_v1_message_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -514,7 +580,7 @@ func (x *MessageParentRoot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageParentRoot.ProtoReflect.Descriptor instead.
 func (*MessageParentRoot) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_message_proto_rawDescGZIP(), []int{2}
+	return file_conversation_v1_message_proto_rawDescGZIP(), []int{3}
 }
 
 // Contained by another message.
@@ -530,7 +596,7 @@ type MessageParentInside struct {
 
 func (x *MessageParentInside) Reset() {
 	*x = MessageParentInside{}
-	mi := &file_conversation_v1_message_proto_msgTypes[3]
+	mi := &file_conversation_v1_message_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -542,7 +608,7 @@ func (x *MessageParentInside) String() string {
 func (*MessageParentInside) ProtoMessage() {}
 
 func (x *MessageParentInside) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_message_proto_msgTypes[3]
+	mi := &file_conversation_v1_message_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -555,7 +621,7 @@ func (x *MessageParentInside) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageParentInside.ProtoReflect.Descriptor instead.
 func (*MessageParentInside) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_message_proto_rawDescGZIP(), []int{3}
+	return file_conversation_v1_message_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *MessageParentInside) GetMessageId() string {
@@ -585,7 +651,7 @@ type MessageAuthor struct {
 
 func (x *MessageAuthor) Reset() {
 	*x = MessageAuthor{}
-	mi := &file_conversation_v1_message_proto_msgTypes[4]
+	mi := &file_conversation_v1_message_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -597,7 +663,7 @@ func (x *MessageAuthor) String() string {
 func (*MessageAuthor) ProtoMessage() {}
 
 func (x *MessageAuthor) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_message_proto_msgTypes[4]
+	mi := &file_conversation_v1_message_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -610,7 +676,7 @@ func (x *MessageAuthor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageAuthor.ProtoReflect.Descriptor instead.
 func (*MessageAuthor) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_message_proto_rawDescGZIP(), []int{4}
+	return file_conversation_v1_message_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *MessageAuthor) GetAuthor() isMessageAuthor_Author {
@@ -681,7 +747,7 @@ type AuthorUser struct {
 
 func (x *AuthorUser) Reset() {
 	*x = AuthorUser{}
-	mi := &file_conversation_v1_message_proto_msgTypes[5]
+	mi := &file_conversation_v1_message_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -693,7 +759,7 @@ func (x *AuthorUser) String() string {
 func (*AuthorUser) ProtoMessage() {}
 
 func (x *AuthorUser) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_message_proto_msgTypes[5]
+	mi := &file_conversation_v1_message_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -706,7 +772,7 @@ func (x *AuthorUser) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorUser.ProtoReflect.Descriptor instead.
 func (*AuthorUser) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_message_proto_rawDescGZIP(), []int{5}
+	return file_conversation_v1_message_proto_rawDescGZIP(), []int{6}
 }
 
 // The agent, speaking in the main conversation.
@@ -718,7 +784,7 @@ type AuthorAgent struct {
 
 func (x *AuthorAgent) Reset() {
 	*x = AuthorAgent{}
-	mi := &file_conversation_v1_message_proto_msgTypes[6]
+	mi := &file_conversation_v1_message_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -730,7 +796,7 @@ func (x *AuthorAgent) String() string {
 func (*AuthorAgent) ProtoMessage() {}
 
 func (x *AuthorAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_message_proto_msgTypes[6]
+	mi := &file_conversation_v1_message_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -743,7 +809,7 @@ func (x *AuthorAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorAgent.ProtoReflect.Descriptor instead.
 func (*AuthorAgent) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_message_proto_rawDescGZIP(), []int{6}
+	return file_conversation_v1_message_proto_rawDescGZIP(), []int{7}
 }
 
 // A subagent, speaking inside its own detached conversation.
@@ -758,7 +824,7 @@ type AuthorDetachedAgent struct {
 
 func (x *AuthorDetachedAgent) Reset() {
 	*x = AuthorDetachedAgent{}
-	mi := &file_conversation_v1_message_proto_msgTypes[7]
+	mi := &file_conversation_v1_message_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -770,7 +836,7 @@ func (x *AuthorDetachedAgent) String() string {
 func (*AuthorDetachedAgent) ProtoMessage() {}
 
 func (x *AuthorDetachedAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_message_proto_msgTypes[7]
+	mi := &file_conversation_v1_message_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -783,7 +849,7 @@ func (x *AuthorDetachedAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorDetachedAgent.ProtoReflect.Descriptor instead.
 func (*AuthorDetachedAgent) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_message_proto_rawDescGZIP(), []int{7}
+	return file_conversation_v1_message_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *AuthorDetachedAgent) GetDetachedWorkMessageId() string {
@@ -797,29 +863,31 @@ var File_conversation_v1_message_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_message_proto_rawDesc = "" +
 	"\n" +
-	"\x1dconversation/v1/message.proto\x12\x0fconversation.v1\x1a\x1econversation/v1/payloads.proto\"\xe1\t\n" +
+	"\x1dconversation/v1/message.proto\x12\x0fconversation.v1\x1a\x1econversation/v1/payloads.proto\"\x89\x02\n" +
 	"\fMessageEntry\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12/\n" +
 	"\x14top_level_message_id\x18\x02 \x01(\tR\x11topLevelMessageId\x126\n" +
 	"\x06parent\x18\x03 \x01(\v2\x1e.conversation.v1.MessageParentR\x06parent\x126\n" +
-	"\x06author\x18\x04 \x01(\v2\x1e.conversation.v1.MessageAuthorR\x06author\x128\n" +
-	"\tuser_said\x18\x05 \x01(\v2\x19.conversation.v1.UserSaidH\x00R\buserSaid\x12;\n" +
+	"\x06author\x18\x04 \x01(\v2\x1e.conversation.v1.MessageAuthorR\x06author\x129\n" +
+	"\apayload\x18\x05 \x01(\v2\x1f.conversation.v1.MessagePayloadR\apayload\"\xa3\b\n" +
+	"\x0eMessagePayload\x128\n" +
+	"\tuser_said\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidH\x00R\buserSaid\x12;\n" +
 	"\n" +
-	"agent_said\x18\x06 \x01(\v2\x1a.conversation.v1.AgentSaidH\x00R\tagentSaid\x12M\n" +
-	"\x10permission_asked\x18\a \x01(\v2 .conversation.v1.PermissionAskedH\x00R\x0fpermissionAsked\x12G\n" +
-	"\x0efailure_raised\x18\b \x01(\v2\x1e.conversation.v1.FailureRaisedH\x00R\rfailureRaised\x12>\n" +
-	"\vcontext_cut\x18\t \x01(\v2\x1b.conversation.v1.ContextCutH\x00R\n" +
+	"agent_said\x18\x02 \x01(\v2\x1a.conversation.v1.AgentSaidH\x00R\tagentSaid\x12M\n" +
+	"\x10permission_asked\x18\x03 \x01(\v2 .conversation.v1.PermissionAskedH\x00R\x0fpermissionAsked\x12G\n" +
+	"\x0efailure_raised\x18\x04 \x01(\v2\x1e.conversation.v1.FailureRaisedH\x00R\rfailureRaised\x12>\n" +
+	"\vcontext_cut\x18\x05 \x01(\v2\x1b.conversation.v1.ContextCutH\x00R\n" +
 	"contextCut\x12Z\n" +
-	"\x15detached_work_started\x18\n" +
-	" \x01(\v2$.conversation.v1.DetachedWorkStartedH\x00R\x13detachedWorkStarted\x12c\n" +
-	"\x18detached_work_progressed\x18\v \x01(\v2'.conversation.v1.DetachedWorkProgressedH\x00R\x16detachedWorkProgressed\x12]\n" +
-	"\x16workflow_step_observed\x18\f \x01(\v2%.conversation.v1.WorkflowStepObservedH\x00R\x14workflowStepObserved\x12T\n" +
-	"\x13detached_work_ended\x18\r \x01(\v2\".conversation.v1.DetachedWorkEndedH\x00R\x11detachedWorkEnded\x12V\n" +
-	"\x13permission_answered\x18\x0e \x01(\v2#.conversation.v1.PermissionAnsweredH\x00R\x12permissionAnswered\x12D\n" +
-	"\rtool_returned\x18\x0f \x01(\v2\x1d.conversation.v1.ToolReturnedH\x00R\ftoolReturned\x12T\n" +
-	"\x13skill_body_resolved\x18\x10 \x01(\v2\".conversation.v1.SkillBodyResolvedH\x00R\x11skillBodyResolved\x12M\n" +
-	"\x10content_arriving\x18\x11 \x01(\v2 .conversation.v1.ContentArrivingH\x00R\x0fcontentArrivingB\t\n" +
+	"\x15detached_work_started\x18\x06 \x01(\v2$.conversation.v1.DetachedWorkStartedH\x00R\x13detachedWorkStarted\x12c\n" +
+	"\x18detached_work_progressed\x18\a \x01(\v2'.conversation.v1.DetachedWorkProgressedH\x00R\x16detachedWorkProgressed\x12]\n" +
+	"\x16workflow_step_observed\x18\b \x01(\v2%.conversation.v1.WorkflowStepObservedH\x00R\x14workflowStepObserved\x12T\n" +
+	"\x13detached_work_ended\x18\t \x01(\v2\".conversation.v1.DetachedWorkEndedH\x00R\x11detachedWorkEnded\x12V\n" +
+	"\x13permission_answered\x18\n" +
+	" \x01(\v2#.conversation.v1.PermissionAnsweredH\x00R\x12permissionAnswered\x12D\n" +
+	"\rtool_returned\x18\v \x01(\v2\x1d.conversation.v1.ToolReturnedH\x00R\ftoolReturned\x12T\n" +
+	"\x13skill_body_resolved\x18\f \x01(\v2\".conversation.v1.SkillBodyResolvedH\x00R\x11skillBodyResolved\x12M\n" +
+	"\x10content_arriving\x18\r \x01(\v2 .conversation.v1.ContentArrivingH\x00R\x0fcontentArrivingB\t\n" +
 	"\apayload\"\x93\x01\n" +
 	"\rMessageParent\x128\n" +
 	"\x04root\x18\x01 \x01(\v2\".conversation.v1.MessageParentRootH\x00R\x04root\x12>\n" +
@@ -852,56 +920,58 @@ func file_conversation_v1_message_proto_rawDescGZIP() []byte {
 	return file_conversation_v1_message_proto_rawDescData
 }
 
-var file_conversation_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_conversation_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_conversation_v1_message_proto_goTypes = []any{
 	(*MessageEntry)(nil),           // 0: conversation.v1.MessageEntry
-	(*MessageParent)(nil),          // 1: conversation.v1.MessageParent
-	(*MessageParentRoot)(nil),      // 2: conversation.v1.MessageParentRoot
-	(*MessageParentInside)(nil),    // 3: conversation.v1.MessageParentInside
-	(*MessageAuthor)(nil),          // 4: conversation.v1.MessageAuthor
-	(*AuthorUser)(nil),             // 5: conversation.v1.AuthorUser
-	(*AuthorAgent)(nil),            // 6: conversation.v1.AuthorAgent
-	(*AuthorDetachedAgent)(nil),    // 7: conversation.v1.AuthorDetachedAgent
-	(*UserSaid)(nil),               // 8: conversation.v1.UserSaid
-	(*AgentSaid)(nil),              // 9: conversation.v1.AgentSaid
-	(*PermissionAsked)(nil),        // 10: conversation.v1.PermissionAsked
-	(*FailureRaised)(nil),          // 11: conversation.v1.FailureRaised
-	(*ContextCut)(nil),             // 12: conversation.v1.ContextCut
-	(*DetachedWorkStarted)(nil),    // 13: conversation.v1.DetachedWorkStarted
-	(*DetachedWorkProgressed)(nil), // 14: conversation.v1.DetachedWorkProgressed
-	(*WorkflowStepObserved)(nil),   // 15: conversation.v1.WorkflowStepObserved
-	(*DetachedWorkEnded)(nil),      // 16: conversation.v1.DetachedWorkEnded
-	(*PermissionAnswered)(nil),     // 17: conversation.v1.PermissionAnswered
-	(*ToolReturned)(nil),           // 18: conversation.v1.ToolReturned
-	(*SkillBodyResolved)(nil),      // 19: conversation.v1.SkillBodyResolved
-	(*ContentArriving)(nil),        // 20: conversation.v1.ContentArriving
+	(*MessagePayload)(nil),         // 1: conversation.v1.MessagePayload
+	(*MessageParent)(nil),          // 2: conversation.v1.MessageParent
+	(*MessageParentRoot)(nil),      // 3: conversation.v1.MessageParentRoot
+	(*MessageParentInside)(nil),    // 4: conversation.v1.MessageParentInside
+	(*MessageAuthor)(nil),          // 5: conversation.v1.MessageAuthor
+	(*AuthorUser)(nil),             // 6: conversation.v1.AuthorUser
+	(*AuthorAgent)(nil),            // 7: conversation.v1.AuthorAgent
+	(*AuthorDetachedAgent)(nil),    // 8: conversation.v1.AuthorDetachedAgent
+	(*UserSaid)(nil),               // 9: conversation.v1.UserSaid
+	(*AgentSaid)(nil),              // 10: conversation.v1.AgentSaid
+	(*PermissionAsked)(nil),        // 11: conversation.v1.PermissionAsked
+	(*FailureRaised)(nil),          // 12: conversation.v1.FailureRaised
+	(*ContextCut)(nil),             // 13: conversation.v1.ContextCut
+	(*DetachedWorkStarted)(nil),    // 14: conversation.v1.DetachedWorkStarted
+	(*DetachedWorkProgressed)(nil), // 15: conversation.v1.DetachedWorkProgressed
+	(*WorkflowStepObserved)(nil),   // 16: conversation.v1.WorkflowStepObserved
+	(*DetachedWorkEnded)(nil),      // 17: conversation.v1.DetachedWorkEnded
+	(*PermissionAnswered)(nil),     // 18: conversation.v1.PermissionAnswered
+	(*ToolReturned)(nil),           // 19: conversation.v1.ToolReturned
+	(*SkillBodyResolved)(nil),      // 20: conversation.v1.SkillBodyResolved
+	(*ContentArriving)(nil),        // 21: conversation.v1.ContentArriving
 }
 var file_conversation_v1_message_proto_depIdxs = []int32{
-	1,  // 0: conversation.v1.MessageEntry.parent:type_name -> conversation.v1.MessageParent
-	4,  // 1: conversation.v1.MessageEntry.author:type_name -> conversation.v1.MessageAuthor
-	8,  // 2: conversation.v1.MessageEntry.user_said:type_name -> conversation.v1.UserSaid
-	9,  // 3: conversation.v1.MessageEntry.agent_said:type_name -> conversation.v1.AgentSaid
-	10, // 4: conversation.v1.MessageEntry.permission_asked:type_name -> conversation.v1.PermissionAsked
-	11, // 5: conversation.v1.MessageEntry.failure_raised:type_name -> conversation.v1.FailureRaised
-	12, // 6: conversation.v1.MessageEntry.context_cut:type_name -> conversation.v1.ContextCut
-	13, // 7: conversation.v1.MessageEntry.detached_work_started:type_name -> conversation.v1.DetachedWorkStarted
-	14, // 8: conversation.v1.MessageEntry.detached_work_progressed:type_name -> conversation.v1.DetachedWorkProgressed
-	15, // 9: conversation.v1.MessageEntry.workflow_step_observed:type_name -> conversation.v1.WorkflowStepObserved
-	16, // 10: conversation.v1.MessageEntry.detached_work_ended:type_name -> conversation.v1.DetachedWorkEnded
-	17, // 11: conversation.v1.MessageEntry.permission_answered:type_name -> conversation.v1.PermissionAnswered
-	18, // 12: conversation.v1.MessageEntry.tool_returned:type_name -> conversation.v1.ToolReturned
-	19, // 13: conversation.v1.MessageEntry.skill_body_resolved:type_name -> conversation.v1.SkillBodyResolved
-	20, // 14: conversation.v1.MessageEntry.content_arriving:type_name -> conversation.v1.ContentArriving
-	2,  // 15: conversation.v1.MessageParent.root:type_name -> conversation.v1.MessageParentRoot
-	3,  // 16: conversation.v1.MessageParent.inside:type_name -> conversation.v1.MessageParentInside
-	5,  // 17: conversation.v1.MessageAuthor.user:type_name -> conversation.v1.AuthorUser
-	6,  // 18: conversation.v1.MessageAuthor.agent:type_name -> conversation.v1.AuthorAgent
-	7,  // 19: conversation.v1.MessageAuthor.detached_agent:type_name -> conversation.v1.AuthorDetachedAgent
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	2,  // 0: conversation.v1.MessageEntry.parent:type_name -> conversation.v1.MessageParent
+	5,  // 1: conversation.v1.MessageEntry.author:type_name -> conversation.v1.MessageAuthor
+	1,  // 2: conversation.v1.MessageEntry.payload:type_name -> conversation.v1.MessagePayload
+	9,  // 3: conversation.v1.MessagePayload.user_said:type_name -> conversation.v1.UserSaid
+	10, // 4: conversation.v1.MessagePayload.agent_said:type_name -> conversation.v1.AgentSaid
+	11, // 5: conversation.v1.MessagePayload.permission_asked:type_name -> conversation.v1.PermissionAsked
+	12, // 6: conversation.v1.MessagePayload.failure_raised:type_name -> conversation.v1.FailureRaised
+	13, // 7: conversation.v1.MessagePayload.context_cut:type_name -> conversation.v1.ContextCut
+	14, // 8: conversation.v1.MessagePayload.detached_work_started:type_name -> conversation.v1.DetachedWorkStarted
+	15, // 9: conversation.v1.MessagePayload.detached_work_progressed:type_name -> conversation.v1.DetachedWorkProgressed
+	16, // 10: conversation.v1.MessagePayload.workflow_step_observed:type_name -> conversation.v1.WorkflowStepObserved
+	17, // 11: conversation.v1.MessagePayload.detached_work_ended:type_name -> conversation.v1.DetachedWorkEnded
+	18, // 12: conversation.v1.MessagePayload.permission_answered:type_name -> conversation.v1.PermissionAnswered
+	19, // 13: conversation.v1.MessagePayload.tool_returned:type_name -> conversation.v1.ToolReturned
+	20, // 14: conversation.v1.MessagePayload.skill_body_resolved:type_name -> conversation.v1.SkillBodyResolved
+	21, // 15: conversation.v1.MessagePayload.content_arriving:type_name -> conversation.v1.ContentArriving
+	3,  // 16: conversation.v1.MessageParent.root:type_name -> conversation.v1.MessageParentRoot
+	4,  // 17: conversation.v1.MessageParent.inside:type_name -> conversation.v1.MessageParentInside
+	6,  // 18: conversation.v1.MessageAuthor.user:type_name -> conversation.v1.AuthorUser
+	7,  // 19: conversation.v1.MessageAuthor.agent:type_name -> conversation.v1.AuthorAgent
+	8,  // 20: conversation.v1.MessageAuthor.detached_agent:type_name -> conversation.v1.AuthorDetachedAgent
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_message_proto_init() }
@@ -910,26 +980,26 @@ func file_conversation_v1_message_proto_init() {
 		return
 	}
 	file_conversation_v1_payloads_proto_init()
-	file_conversation_v1_message_proto_msgTypes[0].OneofWrappers = []any{
-		(*MessageEntry_UserSaid)(nil),
-		(*MessageEntry_AgentSaid)(nil),
-		(*MessageEntry_PermissionAsked)(nil),
-		(*MessageEntry_FailureRaised)(nil),
-		(*MessageEntry_ContextCut)(nil),
-		(*MessageEntry_DetachedWorkStarted)(nil),
-		(*MessageEntry_DetachedWorkProgressed)(nil),
-		(*MessageEntry_WorkflowStepObserved)(nil),
-		(*MessageEntry_DetachedWorkEnded)(nil),
-		(*MessageEntry_PermissionAnswered)(nil),
-		(*MessageEntry_ToolReturned)(nil),
-		(*MessageEntry_SkillBodyResolved)(nil),
-		(*MessageEntry_ContentArriving)(nil),
-	}
 	file_conversation_v1_message_proto_msgTypes[1].OneofWrappers = []any{
+		(*MessagePayload_UserSaid)(nil),
+		(*MessagePayload_AgentSaid)(nil),
+		(*MessagePayload_PermissionAsked)(nil),
+		(*MessagePayload_FailureRaised)(nil),
+		(*MessagePayload_ContextCut)(nil),
+		(*MessagePayload_DetachedWorkStarted)(nil),
+		(*MessagePayload_DetachedWorkProgressed)(nil),
+		(*MessagePayload_WorkflowStepObserved)(nil),
+		(*MessagePayload_DetachedWorkEnded)(nil),
+		(*MessagePayload_PermissionAnswered)(nil),
+		(*MessagePayload_ToolReturned)(nil),
+		(*MessagePayload_SkillBodyResolved)(nil),
+		(*MessagePayload_ContentArriving)(nil),
+	}
+	file_conversation_v1_message_proto_msgTypes[2].OneofWrappers = []any{
 		(*MessageParent_Root)(nil),
 		(*MessageParent_Inside)(nil),
 	}
-	file_conversation_v1_message_proto_msgTypes[4].OneofWrappers = []any{
+	file_conversation_v1_message_proto_msgTypes[5].OneofWrappers = []any{
 		(*MessageAuthor_User)(nil),
 		(*MessageAuthor_Agent)(nil),
 		(*MessageAuthor_DetachedAgent)(nil),
@@ -940,7 +1010,7 @@ func file_conversation_v1_message_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_message_proto_rawDesc), len(file_conversation_v1_message_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

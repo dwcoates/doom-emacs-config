@@ -63,7 +63,7 @@ import {
   FailureCardTerminalSchema,
   FailureCardOpenSchema,
   FailureCardViewSchema,
-} from "../../proto/gen/ts/frontend/v1/failure-card_pb";
+} from "../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   ModelOptionSchema,
   TopbarAccountingWarningSchema,
@@ -75,7 +75,7 @@ import {
   TokenBreakdownRowSchema,
   TokenBreakdownSectionSchema,
   TokenBreakdownViewSchema,
-} from "../../proto/gen/ts/frontend/v1/tokens-menu_pb";
+} from "../../proto/gen/ts/frontend/v1/topbar_pb";
 import {
   WorkspaceGateHibernatedSchema,
   WorkspaceGateOpenSchema,

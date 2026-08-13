@@ -1264,7 +1264,7 @@ var File_frontend_v1_state_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_state_proto_rawDesc = "" +
 	"\n" +
-	"\x17frontend/v1/state.proto\x12\vfrontend.v1\x1a\x1efrontend/v1/failure-card.proto\x1a\x1efrontend/v1/gate-revival.proto\x1a\x17frontend/v1/merge.proto\x1a\x16protocol/v1/core.proto\"\xa4\x01\n" +
+	"\x17frontend/v1/state.proto\x12\vfrontend.v1\x1a\x16frontend/v1/feed.proto\x1a\x1efrontend/v1/gate-revival.proto\x1a\x17frontend/v1/merge.proto\x1a\x16protocol/v1/core.proto\"\xa4\x01\n" +
 	"\fRuntimeFault\x12\x1c\n" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x1d\n" +
 	"\n" +
@@ -1435,7 +1435,7 @@ func file_frontend_v1_state_proto_init() {
 	if File_frontend_v1_state_proto != nil {
 		return
 	}
-	file_frontend_v1_failure_card_proto_init()
+	file_frontend_v1_feed_proto_init()
 	file_frontend_v1_gate_revival_proto_init()
 	file_frontend_v1_merge_proto_init()
 	type x struct{}
