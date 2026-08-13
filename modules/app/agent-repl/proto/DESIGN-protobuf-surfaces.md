@@ -9,7 +9,7 @@ compiler can check rather than a convention a reviewer has to hold.
 | package | holds | importable by |
 |---|---|---|
 | **agentshim** | shim-side internals: which plane observed a record, the store's write identity, anything a producer could not convert | shim, sidecar, store ONLY |
-| **conversation** | what the shim generates and routes to the webapp through the daemon — `MessageEntry`, `BookkeepingEntry` and their payloads | everyone |
+| **conversation** | the message model the shim generates and the daemon routes to the webapp — `MessageEntry`, its payloads, the content model, `TokenUsage`. Nothing about sessions, turns or machinery | everyone |
 | **protocol** | what traverses the daemon↔shim boundary, and ONLY that boundary, in both directions: handshakes, commands, receipts, health, replay and page requests, and the delivery envelopes that carry conversation records with their position | shim, daemon |
 | **frontend** | what reaches a frontend client. COMPOSED of `conversation` messages the daemon forwards, and ALSO of novel messages the daemon synthesizes — topbar, sidebar, footer, and the rest | daemon, webapp |
 | **state** | daemon-internal only: what no other service uses, including the schema the daemon marshals into its own SQLite store | daemon |
@@ -19,6 +19,19 @@ the daemon owns it; `protocol` describes a wire both ends speak. Naming either
 for the daemon would have said who it belongs to while leaving what it holds to
 be inferred — and in `protocol`'s case would have been actively wrong, since the
 shim produces on it too.
+
+`BookkeepingEntry` is `protocol`, not `conversation`, and this is the routing
+test doing real work. Bookkeeping is produced by the shim and consumed by the
+daemon, and it STOPS there — a client sees it only after the daemon has resolved
+it into a view. It never reaches the webapp, so it is not part of what routes
+through.
+
+`ExternalEntry` is `protocol` for the same reason: it is the WIRE envelope, and
+it carries either a `conversation.MessageEntry` or a `protocol.BookkeepingEntry`.
+It does not collapse when bookkeeping leaves — the store persists bookkeeping
+too, so a stored record must still be able to hold one.
+
+Every package keeps a `v1` suffix.
 
 Store↔sidecar traffic — the cursor messages — is `agentshim`, not `protocol`:
 it never crosses the daemon boundary, which is the only boundary `protocol`
