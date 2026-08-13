@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // clientLogCmdFor is a workspace-addressed client log, which is what a webview

@@ -41,7 +41,8 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -369,7 +370,7 @@ func (m *Manager) NoteInterrupt(workspace, sessionID string, outcome corev1.Inte
 // STRUCTURAL: a turn's accounting is the last thing that happens in a turn and
 // the figure the user waits for, so it goes out at once rather than riding the
 // ticker window.
-func (m *Manager) NoteTurnAccounting(workspace, sessionID string, accounting *frontendv1.TurnAccounting) error {
+func (m *Manager) NoteTurnAccounting(workspace, sessionID string, accounting *statev1.TurnAccounting) error {
 	if workspace == "" {
 		return fmt.Errorf("progress: NoteTurnAccounting for session %q got an empty workspace", sessionID)
 	}

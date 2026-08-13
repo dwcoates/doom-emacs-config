@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // drainAt builds a window over a fixed pair of instants, so every assertion

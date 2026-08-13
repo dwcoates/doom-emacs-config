@@ -4,7 +4,7 @@ import (
 	"sort"
 	"sync"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/dlog"
 
@@ -62,7 +62,7 @@ type accountingCorrections struct {
 	mu sync.Mutex
 	// usage is the FINAL vendor usage per api_message_id, as relayed from the
 	// vendor's message_delta frame.
-	usage map[string]*frontendv1.VendorTokenUsage
+	usage map[string]*statev1.VendorTokenUsage
 	// facts is every VALUELESS dependency on file — an observation a stamp
 	// waits for but reads from the reducer rather than from this ledger, such
 	// as the turn-end account-usage sample. They share the hold machinery
@@ -96,7 +96,7 @@ func newAccountingCorrections(logf dlog.Logf) *accountingCorrections {
 		logf = func(string, ...any) {}
 	}
 	return &accountingCorrections{
-		usage: map[string]*frontendv1.VendorTokenUsage{},
+		usage: map[string]*statev1.VendorTokenUsage{},
 		facts: map[string]struct{}{},
 		holds: map[string]*enrichmentHold{},
 		logf:  logf,
@@ -142,12 +142,12 @@ func (l *accountingCorrections) onFileLocked(key string) bool {
 // The release callbacks run OUTSIDE the lock, because enrichment resolves,
 // persists and republishes a turn's stamp and may re-enter this ledger to read
 // the very corrections it was released for.
-func (l *accountingCorrections) Record(apiMessageID string, usage *frontendv1.VendorTokenUsage) {
+func (l *accountingCorrections) Record(apiMessageID string, usage *statev1.VendorTokenUsage) {
 	if apiMessageID == "" || usage == nil {
 		return
 	}
 	l.mu.Lock()
-	l.usage[apiMessageID] = proto.Clone(usage).(*frontendv1.VendorTokenUsage)
+	l.usage[apiMessageID] = proto.Clone(usage).(*statev1.VendorTokenUsage)
 	releases := l.satisfyLocked(apiMessageID)
 	l.mu.Unlock()
 	l.fire(releases)
@@ -202,14 +202,14 @@ func (l *accountingCorrections) Install(turnID string, dependencies []string, re
 // Correction reports the final vendor usage on file for one response, or nil.
 // The copy is the caller's: the ledger's own entry may never be mutated by a
 // reducer patching a response record in place.
-func (l *accountingCorrections) Correction(apiMessageID string) *frontendv1.VendorTokenUsage {
+func (l *accountingCorrections) Correction(apiMessageID string) *statev1.VendorTokenUsage {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	filed := l.usage[apiMessageID]
 	if filed == nil {
 		return nil
 	}
-	return proto.Clone(filed).(*frontendv1.VendorTokenUsage)
+	return proto.Clone(filed).(*statev1.VendorTokenUsage)
 }
 
 // Awaiting names the api_message_ids one turn's stamp is still missing a
@@ -235,7 +235,7 @@ func (l *accountingCorrections) Awaiting(turnID string) []string {
 // It is how a LATE correction reaches a turn whose reducer entry has already
 // been retired: the durable record is the only remaining statement of that
 // turn's responses, so it is the thing that gets enriched.
-func (l *accountingCorrections) ApplyTo(accounting *frontendv1.TurnAccounting) bool {
+func (l *accountingCorrections) ApplyTo(accounting *statev1.TurnAccounting) bool {
 	if accounting == nil {
 		return false
 	}
@@ -247,7 +247,7 @@ func (l *accountingCorrections) ApplyTo(accounting *frontendv1.TurnAccounting) b
 		if filed == nil || proto.Equal(response.GetUsage(), filed) {
 			continue
 		}
-		response.Usage = proto.Clone(filed).(*frontendv1.VendorTokenUsage)
+		response.Usage = proto.Clone(filed).(*statev1.VendorTokenUsage)
 		changed = true
 	}
 	return changed

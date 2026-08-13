@@ -11,7 +11,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/shimclient"
 
@@ -417,8 +417,8 @@ func TestConnectedRepullAttachesHistoricalAccountingByPersistedTurnIdentityWhile
 	result.RequestId = "T1"
 	client := &replayClient{events: []*corev1.Event{result}}
 	h := newRepullHarness(t, client)
-	want := &frontendv1.TurnAccounting{TurnId: "T1", QueryInstanceId: "query-1", Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
-	h.m.cfg.TurnAccountings = replayTurnAccountingStore{accountings: []*frontendv1.TurnAccounting{want}}
+	want := &statev1.TurnAccounting{TurnId: "T1", QueryInstanceId: "query-1", Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
+	h.m.cfg.TurnAccountings = replayTurnAccountingStore{accountings: []*statev1.TurnAccounting{want}}
 	h.seq.SetLastSeq("s1", 9)
 	if active := h.controller(t).consumer.accounting.activeTurnID; active != "" {
 		t.Fatalf("active turn = %q, want idle", active)

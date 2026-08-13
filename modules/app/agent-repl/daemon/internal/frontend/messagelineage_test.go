@@ -9,7 +9,7 @@ import (
 
 	_ "agentrepl/proto/agentshim/core/v1"
 	_ "agentrepl/proto/agentshim/data/v1"
-	_ "agentrepl/proto/agentshim/frontend/v1"
+	_ "agentrepl/proto/frontend/v1"
 )
 
 // Lineage is a MESSAGE's fact and nothing else's, and these tests hold the

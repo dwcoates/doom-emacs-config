@@ -3,7 +3,7 @@ package sessioncontroller
 import (
 	"time"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/tokenusage"
 )
@@ -90,7 +90,7 @@ type keepAlivePingMeasurement struct {
 	// shape. The verdict reads the expensive sum off it rather than being handed
 	// a pre-reduced number, so the one place a bucket could be substituted for
 	// the sum does not exist.
-	usage *frontendv1.TokenUsage
+	usage *conversationv1.TokenUsage
 	// resultObserved separates "the result reported nothing" from "no result
 	// arrived at all". A ping whose turn ended without a terminal result is not
 	// evidence of a warm cache and must not be read as one.

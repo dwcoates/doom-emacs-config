@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // hibernate parks a workspace exactly where a successor daemon's boot finds a

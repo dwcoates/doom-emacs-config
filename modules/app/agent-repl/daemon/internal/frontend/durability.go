@@ -42,7 +42,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // NewEphemeralFeedRow classifies one message EPHEMERAL and, in the same act,

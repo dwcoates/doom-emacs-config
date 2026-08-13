@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // internalresume.go — WHY A RE-DRIVEN TURN HAS NO PROMPT.

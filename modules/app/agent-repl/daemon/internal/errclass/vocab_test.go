@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // fixturePath is the checked-in cross-language color contract. It lives beside
