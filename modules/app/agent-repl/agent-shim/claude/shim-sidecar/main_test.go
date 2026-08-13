@@ -13,7 +13,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -55,56 +56,6 @@ func linesContaining(lines []string, sub string) []string {
 		}
 	}
 	return out
-}
-
-// pickupSidecar wires a live store, a 5-line transcript, and a log-capturing
-// sidecar with its link established — the arrangement both pickup tests share.
-func pickupSidecar(t *testing.T) (*sidecar, string, func() []string) {
-	t.Helper()
-	h := newStoreHarness(t)
-	h.start()
-	root, path := writeHistory(t, 5)
-	logf, read := capturingLog()
-	s := newSidecar(h.sock, []string{root}, t.TempDir(), logf)
-	t.Cleanup(func() { s.store.Close() })
-	if err := s.establish(); err != nil {
-		t.Fatalf("establish: %v", err)
-	}
-	return s, path, read
-}
-
-func TestPollLogsOnePickupLinePerChangedFile(t *testing.T) {
-	// Arrange
-	s, path, read := pickupSidecar(t)
-
-	// Act
-	s.pollAll()
-
-	// Assert — exactly one line, carrying path, count, kind and write latency.
-	got := linesContaining(read(), "picked up")
-	if len(got) != 1 {
-		t.Fatalf("pickup lines = %v, want exactly 1", got)
-	}
-	for _, want := range []string{path, "5 event(s)", "kind=session", "store_write_ms="} {
-		if !strings.Contains(got[0], want) {
-			t.Fatalf("pickup line %q missing %q", got[0], want)
-		}
-	}
-}
-
-func TestPollLogsNothingWhenNothingChanged(t *testing.T) {
-	// Arrange — the file's events are already picked up and cursored.
-	s, _, read := pickupSidecar(t)
-	s.pollAll()
-	before := len(read())
-
-	// Act — a second pass over an unchanged file.
-	s.pollAll()
-
-	// Assert — steady state is silent.
-	if after := read(); len(after) != before {
-		t.Fatalf("unchanged poll logged %v", after[before:])
-	}
 }
 
 // --- spool ownership: one identifier, resolved by task id --------------------
@@ -178,34 +129,34 @@ func TestNoteOwnerKeepsTheFirstSessionAndReportsAConflict(t *testing.T) {
 	}
 }
 
-func TestSeedOwnersRestoresAttributionFromPersistedOpenTasks(t *testing.T) {
-	// Arrange — what the store hands back on every connection.
+// The seed USED TO let a restart attribute a spool whose launch line sits
+// behind the resumed cursor and will never be re-read. `OpenTaskState.started`
+// carried the task id, the session and the output path that made that possible,
+// and it was retired with no successor.
+//
+// This pins the honest consequence: the snapshot seeds nothing, and no owner is
+// invented from it. The spool is held and reported instead — see
+// TestAttributionBacklogRestartPastLaunchHoldsWithoutADurableOwner.
+func TestSeedOwnersCannotAttributeFromAPersistedOpenTask(t *testing.T) {
+	// Arrange — what the store hands back on every connection, all it can say.
 	s, _ := ownerSidecar(t)
-	states := []*corev1.OpenTaskState{{
-		Started: &corev1.Event{
-			SessionId: "9b6a4f2d",
-			Payload:   &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "b1pi0nmip"}},
-		},
-		LastActivityAtMs: 1,
-	}}
+	states := []*agentshimv1.OpenTaskState{{LastActivityAtMs: 1}}
 
 	// Act
 	n := s.seedOwners(states)
 
-	// Assert — a restart can attribute a spool whose launch line sits behind
-	// the resumed cursor and will never be re-read.
-	if n != 1 || s.owners["b1pi0nmip"] != "9b6a4f2d" {
-		t.Fatalf("seeded %d, owners = %v", n, s.owners)
+	// Assert
+	if n != 0 || len(s.owners) != 0 {
+		t.Fatalf("seeded %d owner(s) = %v; OpenTaskState names no task to seed from", n, s.owners)
 	}
 }
 
-func TestSeedOwnersIgnoresAStateCarryingNoTaskStarted(t *testing.T) {
+func TestSeedOwnersOfAnEmptySnapshotSeedsNothing(t *testing.T) {
 	// Arrange
 	s, _ := ownerSidecar(t)
-	states := []*corev1.OpenTaskState{{Started: &corev1.Event{SessionId: "S1"}}}
 
 	// Act
-	n := s.seedOwners(states)
+	n := s.seedOwners(nil)
 
 	// Assert
 	if n != 0 || len(s.owners) != 0 {
@@ -257,7 +208,7 @@ func TestParseRootsEmpty(t *testing.T) {
 
 func TestIndexCursorsByPath(t *testing.T) {
 	// Arrange
-	cs := []*corev1.CursorState{
+	cs := []*agentshimv1.CursorState{
 		{FileId: "1:1", Path: "/a.jsonl", Offset: 10},
 		{FileId: "2:2", Path: "/b.jsonl", Offset: 20},
 		{FileId: "3:3", Path: ""}, // no path → dropped
@@ -273,20 +224,54 @@ func TestIndexCursorsByPath(t *testing.T) {
 	}
 }
 
-func TestTaskKindToTail(t *testing.T) {
+// What kind of work detached decides which silence window the staleness policy
+// applies before calling it LOST. A kind this reader does not recognize gets the
+// LONGEST window, because a premature LOST is a wrong verdict the user reads.
+func TestDetachedKindToTail(t *testing.T) {
+	shell := &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Shell{Shell: &conversationv1.DetachedShell{}}}
+	workflow := &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Workflow{Workflow: &conversationv1.DetachedWorkflow{}}}
+	agent := &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Agent{Agent: &conversationv1.DetachedAgent{}}}
+	skill := &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Skill{Skill: &conversationv1.DetachedSkill{}}}
+
 	cases := []struct {
-		in   corev1.TaskKind
+		name string
+		in   *conversationv1.DetachedWorkKind
 		want tail.Kind
 	}{
-		{corev1.TaskKind_TASK_KIND_SHELL, tail.KindShellSpool},
-		{corev1.TaskKind_TASK_KIND_WORKFLOW, tail.KindWorkflowJournal},
-		{corev1.TaskKind_TASK_KIND_AGENT, tail.KindAgentTranscript},
-		{corev1.TaskKind_TASK_KIND_UNSPECIFIED, tail.KindAgentTranscript},
+		{"shell", shell, tail.KindShellSpool},
+		{"workflow", workflow, tail.KindWorkflowJournal},
+		{"agent", agent, tail.KindAgentTranscript},
+		{"skill falls back to the longest window", skill, tail.KindAgentTranscript},
+		{"unstated kind falls back to the longest window", nil, tail.KindAgentTranscript},
 	}
 	for _, tc := range cases {
-		if got := taskKindToTail(tc.in); got != tc.want {
-			t.Fatalf("taskKindToTail(%v) = %v, want %v", tc.in, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if got := detachedKindToTail(tc.in); got != tc.want {
+				t.Fatalf("detachedKindToTail(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// The card's message id is derived from the task id, so recovering the task from
+// the id is a pure inverse — and a message that is not a card must yield nothing
+// rather than a task name taken from a conversation id.
+func TestTaskIDFromMessageID(t *testing.T) {
+	cases := []struct {
+		name      string
+		messageID string
+		want      string
+	}{
+		{"a detached-work card", "dw:agent-1", "agent-1"},
+		{"an ordinary message", "b7e3-uuid", ""},
+		{"an empty id", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := taskIDFromMessageID(tc.messageID); got != tc.want {
+				t.Fatalf("taskIDFromMessageID(%q) = %q, want %q", tc.messageID, got, tc.want)
+			}
+		})
 	}
 }
 
