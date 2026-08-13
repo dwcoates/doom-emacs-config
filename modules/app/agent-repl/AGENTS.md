@@ -376,7 +376,13 @@ the schema rather than chosen.
 
 `shim-store`'s SQLite database is DISPOSABLE and is to be regarded as EMPTY. A
 schema change deletes the file and recreates it; there are no migrations and no
-backfills, and existing rows go away with the database. This is the same posture
+backfills, and existing rows go away with the database.
+
+THIS IS A DEVELOPMENT-STAGE POSTURE, not a permanent property of the store.
+Nobody currently cares what is in that database, so migrating it is complexity
+bought for nothing. That stops being true the moment its contents matter to
+someone, and this section is what has to change first when that happens — it is
+not licence to treat stored data as expendable forever. This is the same posture
 the frozen durable shapes above take from the other end — `state.v1` replay is
 protected by never changing those messages, not by migrating what was written
 under them.
