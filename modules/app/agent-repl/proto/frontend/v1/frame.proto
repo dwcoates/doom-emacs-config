@@ -88,7 +88,7 @@ message FrontendFrame {
     // exactly one delivery shape here.
     //
     // POSITIONLESS: its reader holds no position and echoes nothing back — the
-    // daemon holds the reader's place. See conversation-history.proto.
+    // daemon holds the reader's place. See feed.proto.
     ConversationHistoryPage conversation_history_page = 26;
   }
 }
@@ -217,7 +217,7 @@ message FrontendCommand {
     // daemon-held position to the newest page; `next_page` walks it one page
     // older and carries NO position of its own, so a reader without an
     // established one is refused rather than silently served the tail. They do
-    // not replace `resync` above — see conversation-history.proto.
+    // not replace `resync` above — see feed.proto.
     FirstPageCmd first_page = 34;
     NextPageCmd next_page = 35;
   }
