@@ -571,84 +571,60 @@ one of ITS OWN fields to each child: `encompassing(main.encomp)` calls
 `smaller(encomp.smaller_field)`. Every call site is depth-1 relative to what
 that component received. Nobody writes `smaller(main.encomp.smaller_field)`.
 
-## What counts as NATIVE to a consumer-named namespace
-
-**The test, settled.** A field is native to `frontend.v1` if and only if the
-DAEMON must synthesize it. If the fact is already carried by a
-`conversation.v1.MessageEntry` that a producer populated, the frontend imports
-it and never re-declares it.
-
-Note on who populates: the file plane (the sidecar) writes conversation
-CONTENT, not the shim — the shim cannot write a `conversation.v1.MessageEntry`
-at all, having no parent pointer on the SDK stream. The test is unaffected; the
-producing side is simply the sidecar rather than the shim.
-
-**Applied to `frontend.v1.DetachedWork`.**
-
-Import — every one of these has a `conversation.v1` source today:
-
-| `frontend.v1` | `conversation.v1` source |
-|---|---|
-| `DetachedWork.origin_tool_use_id` | `DetachedWorkStarted.origin_tool_call_id` |
-| `DetachedWork.label` | `DetachedWorkStarted.label` |
-| `DetachedWork.kind` (6 arms) | `DetachedWorkKind` (6 arms) |
-| `DetachedWorkSkill.skill_name`, `.args` | `DetachedSkill.skill_name`, `.args` |
-| `DetachedWorkSkill.body` | `SkillBodyResolved.body` |
-| `DetachedWorkUnclassified.tool_name` | `DetachedUnclassified.tool_name` |
-| `DetachedWorkSettled.outcome` (3 arms) | `DetachedWorkEnded.outcome` (4 arms) |
-| `DetachedWorkAgent`/`Merge`/`Skill.emissions` | the `MessageEntry` records themselves |
-
-Native — the daemon synthesizes each of these and no conversation record
-carries it:
-
-- `DetachedWork.workspace` — a daemon concept; conversation records name a
-  session, never a workspace.
-- `DetachedWorkLiveness`, with `DetachedWorkLive.last_activity_ms` and
-  `DetachedWorkSettled.settled_at_ms`. Conversation has a start record and an
-  end record; "is it live RIGHT NOW, and when did it last move" is a resolution
-  over them, which is exactly the daemon's job under figma→idl.
-- `DetachedWorkFold` — a rendering decision about how much to collapse.
-- `DetachedWorkOutputSpool.through_offset` — the daemon's own append
-  bookkeeping, and the thing that makes an out-of-order append detectable.
-
-## Two conversation.v1 gaps the nativeness test exposed
-
-Neither is a re-spelling. Both are the frontend needing a fact the conversation
-model does not carry, which is why they only became visible once the test was
-applied.
-
-**1. `conversation.v1.DetachedShell` is EMPTY, but `frontend.v1.DetachedWorkShell`
-needs `command`.** The daemon currently has to reach into the spawning
-`conversation.v1.ToolCallBlock`'s input to recover it. A backgrounded shell's
-command is a fact about the detached work, not about the call that happened to
-start it — the same reasoning that put `skill_name` and `args` on
-`conversation.v1.DetachedSkill`.
-
-**2. `conversation.v1.DetachedWorkProgressed.output` is a flat string, but
-`frontend.v1.DetachedWorkJournalRow` needs `label`, `detail` and a status
-oneof.** So the daemon re-parses structure out of prose the sidecar flattened at
-`shim-claude-sidecar.internal.convert.journalLine()`.
-
-This is gap 13 arriving from the other end, and it is the case that shows
-`agentshim.v1.InternalEntry.source_record` does NOT close it: `source_record`
-lives in the INTERNAL half precisely so the daemon cannot read it. The verbatim
-journal object is now durable, and still unreachable by the one consumer that
-needs its structure. Either `DetachedWorkProgressed` carries the structure, or
-the daemon keeps parsing prose.
-
-## `state.v1`'s token vocabulary is not a re-spelling
+## `state.v1`'s token vocabulary is NOT a re-spelling
 
 **Decided.** `state.v1.TokenUsageTotals`, `state.v1.TokenCacheCreation`,
-`state.v1.VendorTokenUsage` and `state.v1.TokenOutputDetails` stay as they are
+`state.v1.VendorTokenUsage` and `state.v1.TokenOutputDetails` stay as they are,
 alongside `conversation.v1.TokenUsage`, `conversation.v1.TokenCacheHits` and
-`conversation.v1.TokenCacheMisses`. No change.
+`conversation.v1.TokenCacheMisses`. `RESPELLINGS.md` §5 closes as no-change.
 
-**Why.** They are two different things rather than one thing written twice. The
-`conversation` spelling is the vendor-AGNOSTIC model a feed consumer reads; the
-`state` spelling is the vendor-FAITHFUL durable record, which sits deliberately
-beneath the UI mapping and carries its own compatibility constraints —
-`state.v1.TokenUtilization` and `state.v1.TurnAccounting` moved there
-field-for-field identical so durable replay stays byte-safe. A durable layer
-that narrowed itself to the agnostic model would be unable to reproduce what the
-vendor actually reported, which is the defect commit `1bdeacec5` recorded when
-it said narrowing was the defect rather than the fix.
+**Why.** They are two different things, not one thing written twice. `state.v1`
+is the DURABLE layer and sits deliberately beneath the UI mapping, carrying its
+own compatibility constraints — `state.v1.TokenUtilization` and
+`state.v1.TurnAccounting` moved there field-for-field identical precisely so
+replay stays byte-safe. A vendor-FAITHFUL durable spelling and a
+vendor-AGNOSTIC conversation spelling answer different questions: one preserves
+what the vendor said for forensics and replay, the other models what the system
+means. Collapsing them would make the durable layer inherit the conversation
+model's deliberate lossiness.
+
+## What is native to `frontend.v1.DetachedWork`, and the test that decides it
+
+**The test, and it is the general one.** A field is native to `frontend.v1` if
+and only if the DAEMON must SYNTHESIZE it — that is, it is not part of the
+`conversation.v1.MessageEntry` the shim and sidecar populate, and exists only
+because the daemon derived it from its own bookkeeping. Everything else is a
+`conversation.v1` fact and is IMPORTED.
+
+This test is not specific to detached work. It decides every `frontend.v1`
+membership question: produced upstream → import; synthesized by the daemon →
+declare it here.
+
+**Native — the daemon synthesizes these:**
+
+- `frontend.v1.DetachedWorkFold` — the fold's accounting and cap. The daemon's
+  own bookkeeping about how much it chose to show; no producer states it.
+- `frontend.v1.DetachedWorkLiveness`, with `frontend.v1.DetachedWorkLive` and
+  `frontend.v1.DetachedWorkSettled` — resolved from whether an end record has
+  arrived. A client deriving it would be the second authority figma→idl exists
+  to remove.
+
+**Imported — these are `conversation.v1` facts:**
+
+- The kind arms. `conversation.v1.DetachedWorkKind` already states them, and the
+  producer is what knows the kind.
+- The outcome arms, against `conversation.v1.DetachedWorkEnded`'s
+  `DetachedSucceeded`/`DetachedFailed`/`DetachedCancelled`/`DetachedLost`.
+
+**Two the test surfaces as NEW questions rather than settling:**
+
+- `frontend.v1.DetachedWorkShellExit` — an exit code is OBSERVED by the
+  producer, not synthesized by the daemon, so by this test it is a
+  `conversation.v1` fact. It has no home there:
+  `conversation.v1.DetachedWorkEnded` carries an outcome oneof and no exit
+  status. A new gap, found by applying the rule rather than by an agent.
+- `frontend.v1.DetachedWorkJournalRow` — structured label/detail/status rows
+  against `conversation.v1.DetachedWorkProgressed.output`, which is a plain
+  string. If the daemon is PARSING that string back into rows, it is deriving,
+  and the structure should reach it intact instead — which is what
+  `agentshim.v1.InternalEntry.source_record` now makes possible.
