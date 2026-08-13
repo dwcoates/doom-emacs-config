@@ -28,8 +28,8 @@ import {
   str,
   type Obj,
 } from "./proto-scalars.js";
-import { ResponseUsageStampSchema } from "../../proto/gen/ts/frontend/v1/agent-response_pb";
-import { AgentToolOutcomeSchema } from "../../proto/gen/ts/frontend/v1/tool-call_pb";
+import { ResponseUsageStampSchema } from "../../proto/gen/ts/frontend/v1/feed_pb";
+import { AgentToolOutcomeSchema } from "../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   DetachedFailedSchema,
   DetachedLostSchema,

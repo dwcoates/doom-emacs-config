@@ -24,10 +24,10 @@ import {
   QueueEntryKeepAliveHoldSchema,
   QueueEntryRevivalHoldSchema,
   QueueEntrySchema,
-} from "../../proto/gen/ts/frontend/v1/prompt-queue_pb";
+} from "../../proto/gen/ts/frontend/v1/footer_pb";
 import { PromptOriginSchema } from "../../proto/gen/ts/protocol/v1/core_pb";
 import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/errors_pb";
-import { FailureCardViewSchema } from "../../proto/gen/ts/frontend/v1/failure-card_pb";
+import { FailureCardViewSchema } from "../../proto/gen/ts/frontend/v1/feed_pb";
 import { WorkspaceGateViewSchema } from "../../proto/gen/ts/frontend/v1/gate-revival_pb";
 import {
   COMMAND_ARM,

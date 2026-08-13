@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/message.proto.
  */
 export const file_conversation_v1_message: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvbWVzc2FnZS5wcm90bxIPY29udmVyc2F0aW9uLnYxItYHCgxNZXNzYWdlRW50cnkSEgoKbWVzc2FnZV9pZBgBIAEoCRIcChR0b3BfbGV2ZWxfbWVzc2FnZV9pZBgCIAEoCRIuCgZwYXJlbnQYAyABKAsyHi5jb252ZXJzYXRpb24udjEuTWVzc2FnZVBhcmVudBIuCgZhdXRob3IYBCABKAsyHi5jb252ZXJzYXRpb24udjEuTWVzc2FnZUF1dGhvchIuCgl1c2VyX3NhaWQYBSABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRIABIwCgphZ2VudF9zYWlkGAYgASgLMhouY29udmVyc2F0aW9uLnYxLkFnZW50U2FpZEgAEjwKEHBlcm1pc3Npb25fYXNrZWQYByABKAsyIC5jb252ZXJzYXRpb24udjEuUGVybWlzc2lvbkFza2VkSAASOAoOZmFpbHVyZV9yYWlzZWQYCCABKAsyHi5jb252ZXJzYXRpb24udjEuRmFpbHVyZVJhaXNlZEgAEjIKC2NvbnRleHRfY3V0GAkgASgLMhsuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDdXRIABJFChVkZXRhY2hlZF93b3JrX3N0YXJ0ZWQYCiABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZEgAEksKGGRldGFjaGVkX3dvcmtfcHJvZ3Jlc3NlZBgLIAEoCzInLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtQcm9ncmVzc2VkSAASRwoWd29ya2Zsb3dfc3RlcF9vYnNlcnZlZBgMIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5Xb3JrZmxvd1N0ZXBPYnNlcnZlZEgAEkEKE2RldGFjaGVkX3dvcmtfZW5kZWQYDSABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWRIABJCChNwZXJtaXNzaW9uX2Fuc3dlcmVkGA4gASgLMiMuY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BbnN3ZXJlZEgAEjYKDXRvb2xfcmV0dXJuZWQYDyABKAsyHS5jb252ZXJzYXRpb24udjEuVG9vbFJldHVybmVkSAASQQoTc2tpbGxfYm9keV9yZXNvbHZlZBgQIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ta2lsbEJvZHlSZXNvbHZlZEgAEjwKEGNvbnRlbnRfYXJyaXZpbmcYESABKAsyIC5jb252ZXJzYXRpb24udjEuQ29udGVudEFycml2aW5nSABCCQoHcGF5bG9hZCKFAQoNTWVzc2FnZVBhcmVudBIyCgRyb290GAEgASgLMiIuY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VQYXJlbnRSb290SAASNgoGaW5zaWRlGAIgASgLMiQuY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VQYXJlbnRJbnNpZGVIAEIICgZwYXJlbnQiEwoRTWVzc2FnZVBhcmVudFJvb3QiKQoTTWVzc2FnZVBhcmVudEluc2lkZRISCgptZXNzYWdlX2lkGAEgASgJIrUBCg1NZXNzYWdlQXV0aG9yEisKBHVzZXIYASABKAsyGy5jb252ZXJzYXRpb24udjEuQXV0aG9yVXNlckgAEi0KBWFnZW50GAIgASgLMhwuY29udmVyc2F0aW9uLnYxLkF1dGhvckFnZW50SAASPgoOZGV0YWNoZWRfYWdlbnQYAyABKAsyJC5jb252ZXJzYXRpb24udjEuQXV0aG9yRGV0YWNoZWRBZ2VudEgAQggKBmF1dGhvciIMCgpBdXRob3JVc2VyIg0KC0F1dGhvckFnZW50IjcKE0F1dGhvckRldGFjaGVkQWdlbnQSIAoYZGV0YWNoZWRfd29ya19tZXNzYWdlX2lkGAEgASgJQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_payloads]);
+  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvbWVzc2FnZS5wcm90bxIPY29udmVyc2F0aW9uLnYxItIBCgxNZXNzYWdlRW50cnkSEgoKbWVzc2FnZV9pZBgBIAEoCRIcChR0b3BfbGV2ZWxfbWVzc2FnZV9pZBgCIAEoCRIuCgZwYXJlbnQYAyABKAsyHi5jb252ZXJzYXRpb24udjEuTWVzc2FnZVBhcmVudBIuCgZhdXRob3IYBCABKAsyHi5jb252ZXJzYXRpb24udjEuTWVzc2FnZUF1dGhvchIwCgdwYXlsb2FkGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VQYXlsb2FkIsYGCg5NZXNzYWdlUGF5bG9hZBIuCgl1c2VyX3NhaWQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRIABIwCgphZ2VudF9zYWlkGAIgASgLMhouY29udmVyc2F0aW9uLnYxLkFnZW50U2FpZEgAEjwKEHBlcm1pc3Npb25fYXNrZWQYAyABKAsyIC5jb252ZXJzYXRpb24udjEuUGVybWlzc2lvbkFza2VkSAASOAoOZmFpbHVyZV9yYWlzZWQYBCABKAsyHi5jb252ZXJzYXRpb24udjEuRmFpbHVyZVJhaXNlZEgAEjIKC2NvbnRleHRfY3V0GAUgASgLMhsuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDdXRIABJFChVkZXRhY2hlZF93b3JrX3N0YXJ0ZWQYBiABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZEgAEksKGGRldGFjaGVkX3dvcmtfcHJvZ3Jlc3NlZBgHIAEoCzInLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtQcm9ncmVzc2VkSAASRwoWd29ya2Zsb3dfc3RlcF9vYnNlcnZlZBgIIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5Xb3JrZmxvd1N0ZXBPYnNlcnZlZEgAEkEKE2RldGFjaGVkX3dvcmtfZW5kZWQYCSABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWRIABJCChNwZXJtaXNzaW9uX2Fuc3dlcmVkGAogASgLMiMuY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BbnN3ZXJlZEgAEjYKDXRvb2xfcmV0dXJuZWQYCyABKAsyHS5jb252ZXJzYXRpb24udjEuVG9vbFJldHVybmVkSAASQQoTc2tpbGxfYm9keV9yZXNvbHZlZBgMIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ta2lsbEJvZHlSZXNvbHZlZEgAEjwKEGNvbnRlbnRfYXJyaXZpbmcYDSABKAsyIC5jb252ZXJzYXRpb24udjEuQ29udGVudEFycml2aW5nSABCCQoHcGF5bG9hZCKFAQoNTWVzc2FnZVBhcmVudBIyCgRyb290GAEgASgLMiIuY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VQYXJlbnRSb290SAASNgoGaW5zaWRlGAIgASgLMiQuY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VQYXJlbnRJbnNpZGVIAEIICgZwYXJlbnQiEwoRTWVzc2FnZVBhcmVudFJvb3QiKQoTTWVzc2FnZVBhcmVudEluc2lkZRISCgptZXNzYWdlX2lkGAEgASgJIrUBCg1NZXNzYWdlQXV0aG9yEisKBHVzZXIYASABKAsyGy5jb252ZXJzYXRpb24udjEuQXV0aG9yVXNlckgAEi0KBWFnZW50GAIgASgLMhwuY29udmVyc2F0aW9uLnYxLkF1dGhvckFnZW50SAASPgoOZGV0YWNoZWRfYWdlbnQYAyABKAsyJC5jb252ZXJzYXRpb24udjEuQXV0aG9yRGV0YWNoZWRBZ2VudEgAQggKBmF1dGhvciIMCgpBdXRob3JVc2VyIg0KC0F1dGhvckFnZW50IjcKE0F1dGhvckRldGFjaGVkQWdlbnQSIAoYZGV0YWNoZWRfd29ya19tZXNzYWdlX2lkGAEgASgJQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_payloads]);
 
 /**
  * One record BELONGING to one message. Several of these share a message_id and
@@ -74,6 +74,9 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
    * Here an unresolved parent has no legal record to occupy. The producer must
    * state which case it is, or fail.
    *
+   * FIXME: I dont think anything is gained by having this not be a simple `optional string parent_message_id`
+   *        with unset meaning "root level" 
+   *
    * @generated from field: conversation.v1.MessageParent parent = 3;
    */
   parent?: MessageParent | undefined;
@@ -87,19 +90,56 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
   author?: MessageAuthor | undefined;
 
   /**
-   * What this record says about the message it belongs to. The three groups
-   * below are a reading aid, not a schema distinction: every arm carries the
-   * same ids, so the group an arm sits in changes nothing about the record.
+   * What this record says about the message it belongs to. See MessagePayload,
+   * which holds the arms themselves; extracting them changes nothing about what
+   * this record means, only about who else can name the same set.
+   *
+   * @generated from field: conversation.v1.MessagePayload payload = 5;
+   */
+  payload?: MessagePayload | undefined;
+};
+
+/**
+ * Describes the message conversation.v1.MessageEntry.
+ * Use `create(MessageEntrySchema)` to create a new message.
+ */
+export const MessageEntrySchema: GenMessage<MessageEntry> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_message, 0);
+
+/**
+ * WHAT A RECORD CAN SAY, as a type rather than as a oneof buried in
+ * MessageEntry.
+ *
+ * A `oneof` IS NOT A TYPE and cannot be imported: proto3 offers no way to name
+ * `MessageEntry.payload` from another file. That left any surface needing the
+ * same payload vocabulary with different stamps exactly two options — import
+ * MessageEntry whole, inheriting identity and ordering stamps it wanted to set
+ * itself, or write the arms out again. Writing them out again is the mechanical
+ * origin of every agent-output re-spelling on frontend.v1, and this extraction
+ * is what removes the pressure that produced them.
+ *
+ * It is PURE ENABLEMENT. MessageEntry embeds this and keeps exactly the
+ * semantics it had; nothing about a durable record's meaning moves with the
+ * arms, and the extraction commits to nothing about what any other surface
+ * chooses to carry.
+ *
+ * @generated from message conversation.v1.MessagePayload
+ */
+export type MessagePayload = Message<"conversation.v1.MessagePayload"> & {
+  /**
+   * The three groups below are a reading aid, not a schema distinction: every
+   * arm is carried by a record with the same ids, so the group an arm sits in
+   * changes nothing about the record.
    *
    * ---- Records that OPEN the message they name ----
    *
-   * @generated from oneof conversation.v1.MessageEntry.payload
+   * @generated from oneof conversation.v1.MessagePayload.payload
    */
   payload: {
     /**
      * Something a person typed. The opening of a turn.
      *
-     * @generated from field: conversation.v1.UserSaid user_said = 5;
+     * @generated from field: conversation.v1.UserSaid user_said = 1;
      */
     value: UserSaid;
     case: "userSaid";
@@ -108,7 +148,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * Something the agent said: its content blocks, and the usage its response
      * reported.
      *
-     * @generated from field: conversation.v1.AgentSaid agent_said = 6;
+     * @generated from field: conversation.v1.AgentSaid agent_said = 2;
      */
     value: AgentSaid;
     case: "agentSaid";
@@ -118,7 +158,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * really did ask and the user really does answer — it is a conversational
      * act, not a dialog the daemon invented.
      *
-     * @generated from field: conversation.v1.PermissionAsked permission_asked = 7;
+     * @generated from field: conversation.v1.PermissionAsked permission_asked = 3;
      */
     value: PermissionAsked;
     case: "permissionAsked";
@@ -126,7 +166,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
     /**
      * Something went wrong, stated as a card the user reads and acts on.
      *
-     * @generated from field: conversation.v1.FailureRaised failure_raised = 8;
+     * @generated from field: conversation.v1.FailureRaised failure_raised = 4;
      */
     value: FailureRaised;
     case: "failureRaised";
@@ -135,7 +175,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * The conversation was CUT here. It is a message because a reader must see
      * where, rather than merely finding the history shorter than they left it.
      *
-     * @generated from field: conversation.v1.ContextCut context_cut = 9;
+     * @generated from field: conversation.v1.ContextCut context_cut = 5;
      */
     value: ContextCut;
     case: "contextCut";
@@ -145,7 +185,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * a background shell, a workflow. It is a feed row naming itself, so a page
      * of ten rows is ten bounded things rather than ten trees.
      *
-     * @generated from field: conversation.v1.DetachedWorkStarted detached_work_started = 10;
+     * @generated from field: conversation.v1.DetachedWorkStarted detached_work_started = 6;
      */
     value: DetachedWorkStarted;
     case: "detachedWorkStarted";
@@ -153,7 +193,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
     /**
      * Output accumulating into detached work already open.
      *
-     * @generated from field: conversation.v1.DetachedWorkProgressed detached_work_progressed = 11;
+     * @generated from field: conversation.v1.DetachedWorkProgressed detached_work_progressed = 7;
      */
     value: DetachedWorkProgressed;
     case: "detachedWorkProgressed";
@@ -165,7 +205,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * correlation. Structured rather than folded into the progress string,
      * because the producer read it structured.
      *
-     * @generated from field: conversation.v1.WorkflowStepObserved workflow_step_observed = 12;
+     * @generated from field: conversation.v1.WorkflowStepObserved workflow_step_observed = 8;
      */
     value: WorkflowStepObserved;
     case: "workflowStepObserved";
@@ -173,7 +213,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
     /**
      * Detached work reached an end, with the outcome it reached.
      *
-     * @generated from field: conversation.v1.DetachedWorkEnded detached_work_ended = 13;
+     * @generated from field: conversation.v1.DetachedWorkEnded detached_work_ended = 9;
      */
     value: DetachedWorkEnded;
     case: "detachedWorkEnded";
@@ -181,7 +221,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
     /**
      * The user answered a permission the agent asked for.
      *
-     * @generated from field: conversation.v1.PermissionAnswered permission_answered = 14;
+     * @generated from field: conversation.v1.PermissionAnswered permission_answered = 10;
      */
     value: PermissionAnswered;
     case: "permissionAnswered";
@@ -195,7 +235,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * files tool results under user-role records, which is the accident this
      * arm exists to not inherit.
      *
-     * @generated from field: conversation.v1.ToolReturned tool_returned = 15;
+     * @generated from field: conversation.v1.ToolReturned tool_returned = 11;
      */
     value: ToolReturned;
     case: "toolReturned";
@@ -204,7 +244,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * A skill file's contents, resolved onto the skill's own message. Replaces
      * whole rather than appending.
      *
-     * @generated from field: conversation.v1.SkillBodyResolved skill_body_resolved = 16;
+     * @generated from field: conversation.v1.SkillBodyResolved skill_body_resolved = 12;
      */
     value: SkillBodyResolved;
     case: "skillBodyResolved";
@@ -214,7 +254,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * the stream plane. The completed message the file plane writes later
      * REPLACES the preview rather than appending beside it.
      *
-     * @generated from field: conversation.v1.ContentArriving content_arriving = 17;
+     * @generated from field: conversation.v1.ContentArriving content_arriving = 13;
      */
     value: ContentArriving;
     case: "contentArriving";
@@ -222,11 +262,11 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
 };
 
 /**
- * Describes the message conversation.v1.MessageEntry.
- * Use `create(MessageEntrySchema)` to create a new message.
+ * Describes the message conversation.v1.MessagePayload.
+ * Use `create(MessagePayloadSchema)` to create a new message.
  */
-export const MessageEntrySchema: GenMessage<MessageEntry> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 0);
+export const MessagePayloadSchema: GenMessage<MessagePayload> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_message, 1);
 
 /**
  * Where a message sits in the feed.
@@ -266,7 +306,7 @@ export type MessageParent = Message<"conversation.v1.MessageParent"> & {
  * Use `create(MessageParentSchema)` to create a new message.
  */
 export const MessageParentSchema: GenMessage<MessageParent> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 1);
+  messageDesc(file_conversation_v1_message, 2);
 
 /**
  * A feed row: nothing contains this message.
@@ -281,7 +321,7 @@ export type MessageParentRoot = Message<"conversation.v1.MessageParentRoot"> & {
  * Use `create(MessageParentRootSchema)` to create a new message.
  */
 export const MessageParentRootSchema: GenMessage<MessageParentRoot> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 2);
+  messageDesc(file_conversation_v1_message, 3);
 
 /**
  * Contained by another message.
@@ -304,7 +344,7 @@ export type MessageParentInside = Message<"conversation.v1.MessageParentInside">
  * Use `create(MessageParentInsideSchema)` to create a new message.
  */
 export const MessageParentInsideSchema: GenMessage<MessageParentInside> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 3);
+  messageDesc(file_conversation_v1_message, 4);
 
 /**
  * Who a message is from.
@@ -352,7 +392,7 @@ export type MessageAuthor = Message<"conversation.v1.MessageAuthor"> & {
  * Use `create(MessageAuthorSchema)` to create a new message.
  */
 export const MessageAuthorSchema: GenMessage<MessageAuthor> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 4);
+  messageDesc(file_conversation_v1_message, 5);
 
 /**
  * A person, typing into the session.
@@ -367,7 +407,7 @@ export type AuthorUser = Message<"conversation.v1.AuthorUser"> & {
  * Use `create(AuthorUserSchema)` to create a new message.
  */
 export const AuthorUserSchema: GenMessage<AuthorUser> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 5);
+  messageDesc(file_conversation_v1_message, 6);
 
 /**
  * The agent, speaking in the main conversation.
@@ -382,7 +422,7 @@ export type AuthorAgent = Message<"conversation.v1.AuthorAgent"> & {
  * Use `create(AuthorAgentSchema)` to create a new message.
  */
 export const AuthorAgentSchema: GenMessage<AuthorAgent> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 6);
+  messageDesc(file_conversation_v1_message, 7);
 
 /**
  * A subagent, speaking inside its own detached conversation.
@@ -404,5 +444,5 @@ export type AuthorDetachedAgent = Message<"conversation.v1.AuthorDetachedAgent">
  * Use `create(AuthorDetachedAgentSchema)` to create a new message.
  */
 export const AuthorDetachedAgentSchema: GenMessage<AuthorDetachedAgent> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 7);
+  messageDesc(file_conversation_v1_message, 8);
 
