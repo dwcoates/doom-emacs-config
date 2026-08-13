@@ -57,6 +57,7 @@ import (
 	v1 "agentrepl/proto/protocol/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -169,6 +170,23 @@ type InternalEntry struct {
 	// not replay-idempotent. The store enforces uniqueness only over non-empty
 	// values.
 	WriteId string `protobuf:"bytes,3,opt,name=write_id,json=writeId,proto3" json:"write_id,omitempty"`
+	// THE PRODUCER'S SOURCE RECORD, kept whole when converting it to `external`
+	// dropped structure.
+	//
+	// NOT the same job as `unconverted` below, and the two are not alternatives.
+	// `unconverted` is for a record with NOTHING renderable; this is for one that
+	// renders fine and is ALSO more than its rendering. A workflow journal line
+	// becomes a single DetachedWorkProgressed string, so every other key in the
+	// source object had nowhere to go — the record was durably less than what was
+	// on disk.
+	//
+	// SHIM-SIDE, WHICH IS WHY IT IS SAFE. Vendor-shaped material in the internal
+	// half is structurally unreachable from the daemon (check-conversation-
+	// isolation.sh), so keeping it whole costs no vendor-agnosticism downstream.
+	// That is exactly what makes eager conversion at the edge a reversible bet.
+	//
+	// UNSET when the conversion was faithful. It is not a copy of every record.
+	SourceRecord *structpb.Struct `protobuf:"bytes,4,opt,name=source_record,json=sourceRecord,proto3" json:"source_record,omitempty"`
 	// Set when there is nothing to hand the daemon: a record we could not place.
 	//
 	// UNSET on every ordinary record — this is not a category every entry falls
@@ -235,6 +253,13 @@ func (x *InternalEntry) GetWriteId() string {
 		return x.WriteId
 	}
 	return ""
+}
+
+func (x *InternalEntry) GetSourceRecord() *structpb.Struct {
+	if x != nil {
+		return x.SourceRecord
+	}
+	return nil
 }
 
 func (x *InternalEntry) GetUnconverted() isInternalEntry_Unconverted {
@@ -470,13 +495,14 @@ var File_agentshim_v1_entry_proto protoreflect.FileDescriptor
 
 const file_agentshim_v1_entry_proto_rawDesc = "" +
 	"\n" +
-	"\x18agentshim/v1/entry.proto\x12\fagentshim.v1\x1a\x1aprotocol/v1/external.proto\x1a\x1eagentshim/v1/unsupported.proto\"x\n" +
+	"\x18agentshim/v1/entry.proto\x12\fagentshim.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1aprotocol/v1/external.proto\x1a\x1eagentshim/v1/unsupported.proto\"x\n" +
 	"\x05Entry\x127\n" +
 	"\binternal\x18\x01 \x01(\v2\x1b.agentshim.v1.InternalEntryR\binternal\x126\n" +
-	"\bexternal\x18\x02 \x01(\v2\x1a.protocol.v1.ExternalEntryR\bexternal\"\xb6\x02\n" +
+	"\bexternal\x18\x02 \x01(\v2\x1a.protocol.v1.ExternalEntryR\bexternal\"\xf4\x02\n" +
 	"\rInternalEntry\x12)\n" +
 	"\x05plane\x18\x01 \x01(\v2\x13.agentshim.v1.PlaneR\x05plane\x12\x19\n" +
-	"\bwrite_id\x18\x03 \x01(\tR\awriteId\x12L\n" +
+	"\bwrite_id\x18\x03 \x01(\tR\awriteId\x12<\n" +
+	"\rsource_record\x18\x04 \x01(\v2\x17.google.protobuf.StructR\fsourceRecord\x12L\n" +
 	"\x0fvendor_specific\x18\n" +
 	" \x01(\v2!.agentshim.v1.VendorSpecificEntryH\x00R\x0evendorSpecific\x126\n" +
 	"\aunknown\x18\v \x01(\v2\x1a.agentshim.v1.UnknownEntryH\x00R\aunknown\x129\n" +
@@ -509,24 +535,26 @@ var file_agentshim_v1_entry_proto_goTypes = []any{
 	(*PlaneStream)(nil),         // 3: agentshim.v1.PlaneStream
 	(*PlaneFile)(nil),           // 4: agentshim.v1.PlaneFile
 	(*v1.ExternalEntry)(nil),    // 5: protocol.v1.ExternalEntry
-	(*VendorSpecificEntry)(nil), // 6: agentshim.v1.VendorSpecificEntry
-	(*UnknownEntry)(nil),        // 7: agentshim.v1.UnknownEntry
-	(*UnparsedEntry)(nil),       // 8: agentshim.v1.UnparsedEntry
+	(*structpb.Struct)(nil),     // 6: google.protobuf.Struct
+	(*VendorSpecificEntry)(nil), // 7: agentshim.v1.VendorSpecificEntry
+	(*UnknownEntry)(nil),        // 8: agentshim.v1.UnknownEntry
+	(*UnparsedEntry)(nil),       // 9: agentshim.v1.UnparsedEntry
 }
 var file_agentshim_v1_entry_proto_depIdxs = []int32{
 	1, // 0: agentshim.v1.Entry.internal:type_name -> agentshim.v1.InternalEntry
 	5, // 1: agentshim.v1.Entry.external:type_name -> protocol.v1.ExternalEntry
 	2, // 2: agentshim.v1.InternalEntry.plane:type_name -> agentshim.v1.Plane
-	6, // 3: agentshim.v1.InternalEntry.vendor_specific:type_name -> agentshim.v1.VendorSpecificEntry
-	7, // 4: agentshim.v1.InternalEntry.unknown:type_name -> agentshim.v1.UnknownEntry
-	8, // 5: agentshim.v1.InternalEntry.unparsed:type_name -> agentshim.v1.UnparsedEntry
-	3, // 6: agentshim.v1.Plane.stream:type_name -> agentshim.v1.PlaneStream
-	4, // 7: agentshim.v1.Plane.file:type_name -> agentshim.v1.PlaneFile
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	6, // 3: agentshim.v1.InternalEntry.source_record:type_name -> google.protobuf.Struct
+	7, // 4: agentshim.v1.InternalEntry.vendor_specific:type_name -> agentshim.v1.VendorSpecificEntry
+	8, // 5: agentshim.v1.InternalEntry.unknown:type_name -> agentshim.v1.UnknownEntry
+	9, // 6: agentshim.v1.InternalEntry.unparsed:type_name -> agentshim.v1.UnparsedEntry
+	3, // 7: agentshim.v1.Plane.stream:type_name -> agentshim.v1.PlaneStream
+	4, // 8: agentshim.v1.Plane.file:type_name -> agentshim.v1.PlaneFile
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	9, // [9:9] is the sub-list for extension type_name
+	9, // [9:9] is the sub-list for extension extendee
+	0, // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_v1_entry_proto_init() }
