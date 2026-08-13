@@ -788,3 +788,31 @@ an oversight to be helpfully corrected.
 
 **Sequencing.** The column and index are part of the implementation fan-out, not
 of this schema wave. They are inert until `claude-repld` can serve a scoped page.
+
+## `frontend.v1.TypingDelta` is deleted; live typing is a `conversation.v1` record
+
+**Decided.** `frontend.v1.TypingDelta` goes, along with its arm on
+`frontend.v1.FrontendFrame`. The live typing preview is
+`conversation.v1.ContentArriving`, which the shim already produces and hands
+straight to the daemon without touching the store.
+
+**Why it costs nothing today.** `TypingDelta` currently carries NO CONTENT. Its
+`delta` field is reserved with "NOTHING REPLACES IT", so the message is an
+envelope around nothing. `claude-repld.internal.frontend.translate.go:119` still
+sets `TypingDelta.Delta` — a field that does not exist — which is the daemon
+being written against a pre-reshape schema rather than a working path.
+
+**The other half is equally dead.** `conversation.v1.ContentArriving` has ZERO
+non-test references in `daemon/`: no producer, no consumer. So live typing is
+broken from BOTH ends right now, and deleting the frontend spelling removes an
+empty box rather than a working feature.
+
+**What restores it, and what that depends on.** `ContentArriving` is a
+`conversation.v1.MessageEntry` payload arm, so it reaches a frontend the moment
+the delivery channels carry `MessageEntry` — the same open question as
+`frontend.v1.Message`'s payload shape. Until that is settled there is no path
+for it, which is a statement of the sequencing rather than a reason to keep an
+empty message around.
+
+**Sequencing.** Queued behind the reservations strip, which is rewriting every
+proto file including `feed.proto`.
