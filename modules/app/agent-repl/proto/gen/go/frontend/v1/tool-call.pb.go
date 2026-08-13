@@ -294,11 +294,30 @@ type TaskEntry struct {
 	// field, and this surface is protojson, where reusing the token would put two
 	// different types behind one name across versions.
 	WorkKind *v1.DetachedWorkKind `protobuf:"bytes,14,opt,name=work_kind,json=workKind,proto3" json:"work_kind,omitempty"`
-	// HOW THE TASK ENDED, as the producer recorded it. UNSET means the task is
-	// still open — the absence of an ending IS "running", which is why there is no
-	// arm asserting it. A set `ended` whose ended_at_ms is 0 is a malformed entry
-	// and is rejected loudly rather than drawn as running.
-	Ended         *v1.DetachedWorkEnded `protobuf:"bytes,26,opt,name=ended,proto3" json:"ended,omitempty"`
+	// The task's lifecycle; the set arm IS the status. Never unset on a wire
+	// entry: an entry with no arm here is a malformed frame and is rejected
+	// loudly rather than drawn as running.
+	//
+	// DAEMON-OWNED. "Is this task still running" is something the daemon works
+	// out from whether an ending has reached it, so the RESOLVED status is
+	// legitimately declared here rather than imported.
+	//
+	// TODO(respelling): the terminal arms nonetheless overlap
+	// conversation.v1.DetachedWorkEnded's outcome — done/error/lost against
+	// succeeded/failed/lost — while stopped/killed have only the single
+	// DetachedCancelled to map onto and running has no counterpart at all.
+	// Reconciling the resolved status with the producer's recorded outcome needs
+	// a ruling; until then the distinctions stay stated here.
+	//
+	// Types that are valid to be assigned to Status:
+	//
+	//	*TaskEntry_Running
+	//	*TaskEntry_Done
+	//	*TaskEntry_Error
+	//	*TaskEntry_Killed
+	//	*TaskEntry_Stopped
+	//	*TaskEntry_Lost
+	Status        isTaskEntry_Status `protobuf_oneof:"status"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -375,11 +394,332 @@ func (x *TaskEntry) GetWorkKind() *v1.DetachedWorkKind {
 	return nil
 }
 
-func (x *TaskEntry) GetEnded() *v1.DetachedWorkEnded {
+func (x *TaskEntry) GetStatus() isTaskEntry_Status {
 	if x != nil {
-		return x.Ended
+		return x.Status
 	}
 	return nil
+}
+
+func (x *TaskEntry) GetRunning() *TaskStatusRunning {
+	if x != nil {
+		if x, ok := x.Status.(*TaskEntry_Running); ok {
+			return x.Running
+		}
+	}
+	return nil
+}
+
+func (x *TaskEntry) GetDone() *TaskStatusDone {
+	if x != nil {
+		if x, ok := x.Status.(*TaskEntry_Done); ok {
+			return x.Done
+		}
+	}
+	return nil
+}
+
+func (x *TaskEntry) GetError() *TaskStatusError {
+	if x != nil {
+		if x, ok := x.Status.(*TaskEntry_Error); ok {
+			return x.Error
+		}
+	}
+	return nil
+}
+
+func (x *TaskEntry) GetKilled() *TaskStatusKilled {
+	if x != nil {
+		if x, ok := x.Status.(*TaskEntry_Killed); ok {
+			return x.Killed
+		}
+	}
+	return nil
+}
+
+func (x *TaskEntry) GetStopped() *TaskStatusStopped {
+	if x != nil {
+		if x, ok := x.Status.(*TaskEntry_Stopped); ok {
+			return x.Stopped
+		}
+	}
+	return nil
+}
+
+func (x *TaskEntry) GetLost() *TaskStatusLost {
+	if x != nil {
+		if x, ok := x.Status.(*TaskEntry_Lost); ok {
+			return x.Lost
+		}
+	}
+	return nil
+}
+
+type isTaskEntry_Status interface {
+	isTaskEntry_Status()
+}
+
+type TaskEntry_Running struct {
+	Running *TaskStatusRunning `protobuf:"bytes,20,opt,name=running,proto3,oneof"`
+}
+
+type TaskEntry_Done struct {
+	Done *TaskStatusDone `protobuf:"bytes,21,opt,name=done,proto3,oneof"`
+}
+
+type TaskEntry_Error struct {
+	Error *TaskStatusError `protobuf:"bytes,22,opt,name=error,proto3,oneof"`
+}
+
+type TaskEntry_Killed struct {
+	Killed *TaskStatusKilled `protobuf:"bytes,23,opt,name=killed,proto3,oneof"`
+}
+
+type TaskEntry_Stopped struct {
+	Stopped *TaskStatusStopped `protobuf:"bytes,24,opt,name=stopped,proto3,oneof"`
+}
+
+type TaskEntry_Lost struct {
+	Lost *TaskStatusLost `protobuf:"bytes,25,opt,name=lost,proto3,oneof"`
+}
+
+func (*TaskEntry_Running) isTaskEntry_Status() {}
+
+func (*TaskEntry_Done) isTaskEntry_Status() {}
+
+func (*TaskEntry_Error) isTaskEntry_Status() {}
+
+func (*TaskEntry_Killed) isTaskEntry_Status() {}
+
+func (*TaskEntry_Stopped) isTaskEntry_Status() {}
+
+func (*TaskEntry_Lost) isTaskEntry_Status() {}
+
+// The task is still running. STATED, never inferred from a missing ending:
+// absence renders absence on this contract.
+type TaskStatusRunning struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskStatusRunning) Reset() {
+	*x = TaskStatusRunning{}
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskStatusRunning) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskStatusRunning) ProtoMessage() {}
+
+func (x *TaskStatusRunning) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskStatusRunning.ProtoReflect.Descriptor instead.
+func (*TaskStatusRunning) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_tool_call_proto_rawDescGZIP(), []int{4}
+}
+
+// The task finished successfully.
+type TaskStatusDone struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskStatusDone) Reset() {
+	*x = TaskStatusDone{}
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskStatusDone) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskStatusDone) ProtoMessage() {}
+
+func (x *TaskStatusDone) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskStatusDone.ProtoReflect.Descriptor instead.
+func (*TaskStatusDone) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_tool_call_proto_rawDescGZIP(), []int{5}
+}
+
+// The task finished by failing.
+type TaskStatusError struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskStatusError) Reset() {
+	*x = TaskStatusError{}
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskStatusError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskStatusError) ProtoMessage() {}
+
+func (x *TaskStatusError) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskStatusError.ProtoReflect.Descriptor instead.
+func (*TaskStatusError) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_tool_call_proto_rawDescGZIP(), []int{6}
+}
+
+// The task was stopped from outside before it finished.
+type TaskStatusKilled struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskStatusKilled) Reset() {
+	*x = TaskStatusKilled{}
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskStatusKilled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskStatusKilled) ProtoMessage() {}
+
+func (x *TaskStatusKilled) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskStatusKilled.ProtoReflect.Descriptor instead.
+func (*TaskStatusKilled) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_tool_call_proto_rawDescGZIP(), []int{7}
+}
+
+// The task was stopped deliberately through its own stop affordance. DISTINCT
+// from killed: who stopped the work is the whole point of the distinction, and
+// conversation.v1.DetachedCancelled cannot express it.
+type TaskStatusStopped struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskStatusStopped) Reset() {
+	*x = TaskStatusStopped{}
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskStatusStopped) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskStatusStopped) ProtoMessage() {}
+
+func (x *TaskStatusStopped) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskStatusStopped.ProtoReflect.Descriptor instead.
+func (*TaskStatusStopped) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_tool_call_proto_rawDescGZIP(), []int{8}
+}
+
+// The daemon lost track of the task — a restart or a vanished process left
+// its ending unobserved. An honest absence, distinct from every observed
+// ending.
+type TaskStatusLost struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskStatusLost) Reset() {
+	*x = TaskStatusLost{}
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskStatusLost) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskStatusLost) ProtoMessage() {}
+
+func (x *TaskStatusLost) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskStatusLost.ProtoReflect.Descriptor instead.
+func (*TaskStatusLost) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_tool_call_proto_rawDescGZIP(), []int{9}
 }
 
 type TaskCatalog struct {
@@ -402,7 +742,7 @@ type TaskCatalog struct {
 
 func (x *TaskCatalog) Reset() {
 	*x = TaskCatalog{}
-	mi := &file_frontend_v1_tool_call_proto_msgTypes[4]
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -414,7 +754,7 @@ func (x *TaskCatalog) String() string {
 func (*TaskCatalog) ProtoMessage() {}
 
 func (x *TaskCatalog) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_tool_call_proto_msgTypes[4]
+	mi := &file_frontend_v1_tool_call_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -427,7 +767,7 @@ func (x *TaskCatalog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskCatalog.ProtoReflect.Descriptor instead.
 func (*TaskCatalog) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_tool_call_proto_rawDescGZIP(), []int{4}
+	return file_frontend_v1_tool_call_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *TaskCatalog) GetWorkspace() string {
@@ -466,7 +806,7 @@ const file_frontend_v1_tool_call_proto_rawDesc = "" +
 	"\x05ended\x18\x04 \x01(\v2\".conversation.v1.DetachedWorkEndedH\x00R\x05ended\x12\x1e\n" +
 	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\x12,\n" +
 	"\x12spawned_message_id\x18\x03 \x01(\tR\x10spawnedMessageIdB\t\n" +
-	"\aoutcomeR\x11spawned_bubble_id\"\xce\x03\n" +
+	"\aoutcomeR\x11spawned_bubble_id\"\xa7\x05\n" +
 	"\tTaskEntry\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\x1f\n" +
@@ -474,9 +814,21 @@ const file_frontend_v1_tool_call_proto_rawDesc = "" +
 	"outputPath\x12\"\n" +
 	"\rstarted_at_ms\x18\x06 \x01(\x03R\vstartedAtMs\x12\x1e\n" +
 	"\vended_at_ms\x18\a \x01(\x03R\tendedAtMs\x12>\n" +
-	"\twork_kind\x18\x0e \x01(\v2!.conversation.v1.DetachedWorkKindR\bworkKind\x128\n" +
-	"\x05ended\x18\x1a \x01(\v2\".conversation.v1.DetachedWorkEndedR\x05endedJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05J\x04\b\n" +
-	"\x10\vJ\x04\b\v\x10\fJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x14\x10\x15J\x04\b\x15\x10\x16J\x04\b\x16\x10\x17J\x04\b\x17\x10\x18J\x04\b\x18\x10\x19J\x04\b\x19\x10\x1aR\x04kindR\x06statusR\x05agentR\bworkflowR\x05shellR\funclassifiedR\arunningR\x04doneR\x05errorR\x06killedR\astoppedR\x04lost\"\x81\x01\n" +
+	"\twork_kind\x18\x0e \x01(\v2!.conversation.v1.DetachedWorkKindR\bworkKind\x12:\n" +
+	"\arunning\x18\x14 \x01(\v2\x1e.frontend.v1.TaskStatusRunningH\x00R\arunning\x121\n" +
+	"\x04done\x18\x15 \x01(\v2\x1b.frontend.v1.TaskStatusDoneH\x00R\x04done\x124\n" +
+	"\x05error\x18\x16 \x01(\v2\x1c.frontend.v1.TaskStatusErrorH\x00R\x05error\x127\n" +
+	"\x06killed\x18\x17 \x01(\v2\x1d.frontend.v1.TaskStatusKilledH\x00R\x06killed\x12:\n" +
+	"\astopped\x18\x18 \x01(\v2\x1e.frontend.v1.TaskStatusStoppedH\x00R\astopped\x121\n" +
+	"\x04lost\x18\x19 \x01(\v2\x1b.frontend.v1.TaskStatusLostH\x00R\x04lostB\b\n" +
+	"\x06statusJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05J\x04\b\n" +
+	"\x10\vJ\x04\b\v\x10\fJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x1a\x10\x1bR\x04kindR\x06statusR\x05agentR\bworkflowR\x05shellR\funclassifiedR\x05ended\"\x13\n" +
+	"\x11TaskStatusRunning\"\x10\n" +
+	"\x0eTaskStatusDone\"\x11\n" +
+	"\x0fTaskStatusError\"\x12\n" +
+	"\x10TaskStatusKilled\"\x13\n" +
+	"\x11TaskStatusStopped\"\x10\n" +
+	"\x0eTaskStatusLost\"\x81\x01\n" +
 	"\vTaskCatalog\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12,\n" +
 	"\x05tasks\x18\x03 \x03(\v2\x16.frontend.v1.TaskEntryR\x05tasks\x12\x14\n" +
@@ -495,32 +847,43 @@ func file_frontend_v1_tool_call_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_tool_call_proto_rawDescData
 }
 
-var file_frontend_v1_tool_call_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_frontend_v1_tool_call_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_frontend_v1_tool_call_proto_goTypes = []any{
 	(*AgentToolCall)(nil),          // 0: frontend.v1.AgentToolCall
 	(*AgentToolResult)(nil),        // 1: frontend.v1.AgentToolResult
 	(*AgentToolOutcome)(nil),       // 2: frontend.v1.AgentToolOutcome
 	(*TaskEntry)(nil),              // 3: frontend.v1.TaskEntry
-	(*TaskCatalog)(nil),            // 4: frontend.v1.TaskCatalog
-	(*v1.ToolCallBlock)(nil),       // 5: conversation.v1.ToolCallBlock
-	(*v1.ToolResultContent)(nil),   // 6: conversation.v1.ToolResultContent
-	(*v1.DetachedWorkStarted)(nil), // 7: conversation.v1.DetachedWorkStarted
-	(*v1.DetachedWorkEnded)(nil),   // 8: conversation.v1.DetachedWorkEnded
-	(*v1.DetachedWorkKind)(nil),    // 9: conversation.v1.DetachedWorkKind
+	(*TaskStatusRunning)(nil),      // 4: frontend.v1.TaskStatusRunning
+	(*TaskStatusDone)(nil),         // 5: frontend.v1.TaskStatusDone
+	(*TaskStatusError)(nil),        // 6: frontend.v1.TaskStatusError
+	(*TaskStatusKilled)(nil),       // 7: frontend.v1.TaskStatusKilled
+	(*TaskStatusStopped)(nil),      // 8: frontend.v1.TaskStatusStopped
+	(*TaskStatusLost)(nil),         // 9: frontend.v1.TaskStatusLost
+	(*TaskCatalog)(nil),            // 10: frontend.v1.TaskCatalog
+	(*v1.ToolCallBlock)(nil),       // 11: conversation.v1.ToolCallBlock
+	(*v1.ToolResultContent)(nil),   // 12: conversation.v1.ToolResultContent
+	(*v1.DetachedWorkStarted)(nil), // 13: conversation.v1.DetachedWorkStarted
+	(*v1.DetachedWorkEnded)(nil),   // 14: conversation.v1.DetachedWorkEnded
+	(*v1.DetachedWorkKind)(nil),    // 15: conversation.v1.DetachedWorkKind
 }
 var file_frontend_v1_tool_call_proto_depIdxs = []int32{
-	5, // 0: frontend.v1.AgentToolCall.call:type_name -> conversation.v1.ToolCallBlock
-	6, // 1: frontend.v1.AgentToolResult.result:type_name -> conversation.v1.ToolResultContent
-	7, // 2: frontend.v1.AgentToolOutcome.started:type_name -> conversation.v1.DetachedWorkStarted
-	8, // 3: frontend.v1.AgentToolOutcome.ended:type_name -> conversation.v1.DetachedWorkEnded
-	9, // 4: frontend.v1.TaskEntry.work_kind:type_name -> conversation.v1.DetachedWorkKind
-	8, // 5: frontend.v1.TaskEntry.ended:type_name -> conversation.v1.DetachedWorkEnded
-	3, // 6: frontend.v1.TaskCatalog.tasks:type_name -> frontend.v1.TaskEntry
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	11, // 0: frontend.v1.AgentToolCall.call:type_name -> conversation.v1.ToolCallBlock
+	12, // 1: frontend.v1.AgentToolResult.result:type_name -> conversation.v1.ToolResultContent
+	13, // 2: frontend.v1.AgentToolOutcome.started:type_name -> conversation.v1.DetachedWorkStarted
+	14, // 3: frontend.v1.AgentToolOutcome.ended:type_name -> conversation.v1.DetachedWorkEnded
+	15, // 4: frontend.v1.TaskEntry.work_kind:type_name -> conversation.v1.DetachedWorkKind
+	4,  // 5: frontend.v1.TaskEntry.running:type_name -> frontend.v1.TaskStatusRunning
+	5,  // 6: frontend.v1.TaskEntry.done:type_name -> frontend.v1.TaskStatusDone
+	6,  // 7: frontend.v1.TaskEntry.error:type_name -> frontend.v1.TaskStatusError
+	7,  // 8: frontend.v1.TaskEntry.killed:type_name -> frontend.v1.TaskStatusKilled
+	8,  // 9: frontend.v1.TaskEntry.stopped:type_name -> frontend.v1.TaskStatusStopped
+	9,  // 10: frontend.v1.TaskEntry.lost:type_name -> frontend.v1.TaskStatusLost
+	3,  // 11: frontend.v1.TaskCatalog.tasks:type_name -> frontend.v1.TaskEntry
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_tool_call_proto_init() }
@@ -532,13 +895,21 @@ func file_frontend_v1_tool_call_proto_init() {
 		(*AgentToolOutcome_Started)(nil),
 		(*AgentToolOutcome_Ended)(nil),
 	}
+	file_frontend_v1_tool_call_proto_msgTypes[3].OneofWrappers = []any{
+		(*TaskEntry_Running)(nil),
+		(*TaskEntry_Done)(nil),
+		(*TaskEntry_Error)(nil),
+		(*TaskEntry_Killed)(nil),
+		(*TaskEntry_Stopped)(nil),
+		(*TaskEntry_Lost)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_tool_call_proto_rawDesc), len(file_frontend_v1_tool_call_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

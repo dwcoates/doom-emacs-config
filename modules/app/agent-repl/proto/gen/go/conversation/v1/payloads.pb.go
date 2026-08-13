@@ -1365,7 +1365,12 @@ func (*DetachedAgent) Descriptor() ([]byte, []int) {
 
 // A shell command running in the background.
 type DetachedShell struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The command as invoked, verbatim. This is what the producer SAW dispatched,
+	// carried so a card can show WHAT is running rather than only that something
+	// is. Empty only when the producer observed a launch with no reconstructible
+	// command line.
+	Command       string `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1398,6 +1403,13 @@ func (x *DetachedShell) ProtoReflect() protoreflect.Message {
 // Deprecated: Use DetachedShell.ProtoReflect.Descriptor instead.
 func (*DetachedShell) Descriptor() ([]byte, []int) {
 	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *DetachedShell) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
 }
 
 // A workflow with its own journal of steps.
@@ -1437,6 +1449,247 @@ func (*DetachedWorkflow) Descriptor() ([]byte, []int) {
 	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{22}
 }
 
+// One step of a workflow's journal, as the producer read it.
+//
+// STRUCTURED AT THE SOURCE. A journal file states a step's label, its detail and
+// its status separately, so they are carried separately. The alternative —
+// flattening them into DetachedWorkProgressed.output — forces every consumer to
+// parse the structure back out of prose, and two consumers parsing the same
+// prose is two chances to disagree about what a step said.
+type WorkflowStep struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The step's name — the phase or agent it reports on — verbatim.
+	Label string `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
+	// The step's detail line, verbatim: the result on success, the error text on
+	// failure, the prompt while running.
+	Detail string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
+	// The step's state, as arms rather than an enum, so a state added later is an
+	// arm a reader must handle rather than an integer it silently renders as
+	// something else. THE SET ARM IS THE STATE; there is no separate status value
+	// to fall out of step with it.
+	//
+	// Types that are valid to be assigned to Status:
+	//
+	//	*WorkflowStep_Running
+	//	*WorkflowStep_Done
+	//	*WorkflowStep_Failed
+	Status        isWorkflowStep_Status `protobuf_oneof:"status"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowStep) Reset() {
+	*x = WorkflowStep{}
+	mi := &file_conversation_v1_payloads_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowStep) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowStep) ProtoMessage() {}
+
+func (x *WorkflowStep) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_payloads_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowStep.ProtoReflect.Descriptor instead.
+func (*WorkflowStep) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *WorkflowStep) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *WorkflowStep) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *WorkflowStep) GetStatus() isWorkflowStep_Status {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+func (x *WorkflowStep) GetRunning() *WorkflowStepRunning {
+	if x != nil {
+		if x, ok := x.Status.(*WorkflowStep_Running); ok {
+			return x.Running
+		}
+	}
+	return nil
+}
+
+func (x *WorkflowStep) GetDone() *WorkflowStepDone {
+	if x != nil {
+		if x, ok := x.Status.(*WorkflowStep_Done); ok {
+			return x.Done
+		}
+	}
+	return nil
+}
+
+func (x *WorkflowStep) GetFailed() *WorkflowStepFailed {
+	if x != nil {
+		if x, ok := x.Status.(*WorkflowStep_Failed); ok {
+			return x.Failed
+		}
+	}
+	return nil
+}
+
+type isWorkflowStep_Status interface {
+	isWorkflowStep_Status()
+}
+
+type WorkflowStep_Running struct {
+	Running *WorkflowStepRunning `protobuf:"bytes,10,opt,name=running,proto3,oneof"`
+}
+
+type WorkflowStep_Done struct {
+	Done *WorkflowStepDone `protobuf:"bytes,11,opt,name=done,proto3,oneof"`
+}
+
+type WorkflowStep_Failed struct {
+	Failed *WorkflowStepFailed `protobuf:"bytes,12,opt,name=failed,proto3,oneof"`
+}
+
+func (*WorkflowStep_Running) isWorkflowStep_Status() {}
+
+func (*WorkflowStep_Done) isWorkflowStep_Status() {}
+
+func (*WorkflowStep_Failed) isWorkflowStep_Status() {}
+
+// The step is still executing.
+type WorkflowStepRunning struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowStepRunning) Reset() {
+	*x = WorkflowStepRunning{}
+	mi := &file_conversation_v1_payloads_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowStepRunning) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowStepRunning) ProtoMessage() {}
+
+func (x *WorkflowStepRunning) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_payloads_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowStepRunning.ProtoReflect.Descriptor instead.
+func (*WorkflowStepRunning) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{24}
+}
+
+// The step completed successfully.
+type WorkflowStepDone struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowStepDone) Reset() {
+	*x = WorkflowStepDone{}
+	mi := &file_conversation_v1_payloads_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowStepDone) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowStepDone) ProtoMessage() {}
+
+func (x *WorkflowStepDone) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_payloads_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowStepDone.ProtoReflect.Descriptor instead.
+func (*WorkflowStepDone) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{25}
+}
+
+// The step failed. The failure text is the step's `detail`; this arm carries no
+// second copy of it.
+type WorkflowStepFailed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowStepFailed) Reset() {
+	*x = WorkflowStepFailed{}
+	mi := &file_conversation_v1_payloads_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowStepFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowStepFailed) ProtoMessage() {}
+
+func (x *WorkflowStepFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_payloads_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowStepFailed.ProtoReflect.Descriptor instead.
+func (*WorkflowStepFailed) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{26}
+}
+
 // A skill invocation, which owns its own window.
 //
 // `merge` is the one skill with an arm of its own; every other skill arrives
@@ -1454,7 +1707,7 @@ type DetachedSkill struct {
 
 func (x *DetachedSkill) Reset() {
 	*x = DetachedSkill{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[23]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1466,7 +1719,7 @@ func (x *DetachedSkill) String() string {
 func (*DetachedSkill) ProtoMessage() {}
 
 func (x *DetachedSkill) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[23]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1479,7 +1732,7 @@ func (x *DetachedSkill) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedSkill.ProtoReflect.Descriptor instead.
 func (*DetachedSkill) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{23}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *DetachedSkill) GetSkillName() string {
@@ -1505,7 +1758,7 @@ type DetachedMerge struct {
 
 func (x *DetachedMerge) Reset() {
 	*x = DetachedMerge{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[24]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1517,7 +1770,7 @@ func (x *DetachedMerge) String() string {
 func (*DetachedMerge) ProtoMessage() {}
 
 func (x *DetachedMerge) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[24]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1530,7 +1783,7 @@ func (x *DetachedMerge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedMerge.ProtoReflect.Descriptor instead.
 func (*DetachedMerge) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{24}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{28}
 }
 
 // Detached work we could not classify. Stated rather than defaulted into one of
@@ -1545,7 +1798,7 @@ type DetachedUnclassified struct {
 
 func (x *DetachedUnclassified) Reset() {
 	*x = DetachedUnclassified{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[25]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1557,7 +1810,7 @@ func (x *DetachedUnclassified) String() string {
 func (*DetachedUnclassified) ProtoMessage() {}
 
 func (x *DetachedUnclassified) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[25]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1570,7 +1823,7 @@ func (x *DetachedUnclassified) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedUnclassified.ProtoReflect.Descriptor instead.
 func (*DetachedUnclassified) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{25}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *DetachedUnclassified) GetToolName() string {
@@ -1605,7 +1858,7 @@ type SkillBodyResolved struct {
 
 func (x *SkillBodyResolved) Reset() {
 	*x = SkillBodyResolved{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[26]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1617,7 +1870,7 @@ func (x *SkillBodyResolved) String() string {
 func (*SkillBodyResolved) ProtoMessage() {}
 
 func (x *SkillBodyResolved) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[26]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1630,7 +1883,7 @@ func (x *SkillBodyResolved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SkillBodyResolved.ProtoReflect.Descriptor instead.
 func (*SkillBodyResolved) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{26}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *SkillBodyResolved) GetBody() string {
@@ -1653,7 +1906,7 @@ type DetachedWorkProgressed struct {
 
 func (x *DetachedWorkProgressed) Reset() {
 	*x = DetachedWorkProgressed{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[27]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1665,7 +1918,7 @@ func (x *DetachedWorkProgressed) String() string {
 func (*DetachedWorkProgressed) ProtoMessage() {}
 
 func (x *DetachedWorkProgressed) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[27]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1678,7 +1931,7 @@ func (x *DetachedWorkProgressed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkProgressed.ProtoReflect.Descriptor instead.
 func (*DetachedWorkProgressed) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{27}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *DetachedWorkProgressed) GetOutput() string {
@@ -1686,6 +1939,60 @@ func (x *DetachedWorkProgressed) GetOutput() string {
 		return x.Output
 	}
 	return ""
+}
+
+// A journal step was OBSERVED in detached workflow work already open.
+//
+// ONE STEP AT A TIME, not a repeated field on DetachedWorkflow, because that is
+// how the producer sees them: the journal file grows and the producer reads the
+// new step, exactly as DetachedWorkProgressed reads new output. A whole list
+// re-sent per step is how watching a long workflow costs more than running it.
+//
+// It carries the message_id of the detached work it belongs to, exactly as
+// DetachedWorkProgressed does, so it folds onto that card without correlation.
+type WorkflowStepObserved struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The step, as read out of the journal.
+	Step          *WorkflowStep `protobuf:"bytes,1,opt,name=step,proto3" json:"step,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowStepObserved) Reset() {
+	*x = WorkflowStepObserved{}
+	mi := &file_conversation_v1_payloads_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowStepObserved) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowStepObserved) ProtoMessage() {}
+
+func (x *WorkflowStepObserved) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_payloads_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowStepObserved.ProtoReflect.Descriptor instead.
+func (*WorkflowStepObserved) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *WorkflowStepObserved) GetStep() *WorkflowStep {
+	if x != nil {
+		return x.Step
+	}
+	return nil
 }
 
 // Detached work reached an end.
@@ -1717,7 +2024,7 @@ type DetachedWorkEnded struct {
 
 func (x *DetachedWorkEnded) Reset() {
 	*x = DetachedWorkEnded{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[28]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1729,7 +2036,7 @@ func (x *DetachedWorkEnded) String() string {
 func (*DetachedWorkEnded) ProtoMessage() {}
 
 func (x *DetachedWorkEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[28]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1742,7 +2049,7 @@ func (x *DetachedWorkEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkEnded.ProtoReflect.Descriptor instead.
 func (*DetachedWorkEnded) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{28}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *DetachedWorkEnded) GetOutcome() isDetachedWorkEnded_Outcome {
@@ -1842,7 +2149,7 @@ type DetachedProcessExit struct {
 
 func (x *DetachedProcessExit) Reset() {
 	*x = DetachedProcessExit{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[29]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1854,7 +2161,7 @@ func (x *DetachedProcessExit) String() string {
 func (*DetachedProcessExit) ProtoMessage() {}
 
 func (x *DetachedProcessExit) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[29]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1867,7 +2174,7 @@ func (x *DetachedProcessExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedProcessExit.ProtoReflect.Descriptor instead.
 func (*DetachedProcessExit) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{29}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *DetachedProcessExit) GetCode() int32 {
@@ -1888,7 +2195,7 @@ type DetachedSucceeded struct {
 
 func (x *DetachedSucceeded) Reset() {
 	*x = DetachedSucceeded{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[30]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1900,7 +2207,7 @@ func (x *DetachedSucceeded) String() string {
 func (*DetachedSucceeded) ProtoMessage() {}
 
 func (x *DetachedSucceeded) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[30]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1913,7 +2220,7 @@ func (x *DetachedSucceeded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedSucceeded.ProtoReflect.Descriptor instead.
 func (*DetachedSucceeded) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{30}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *DetachedSucceeded) GetSummary() string {
@@ -1934,7 +2241,7 @@ type DetachedFailed struct {
 
 func (x *DetachedFailed) Reset() {
 	*x = DetachedFailed{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[31]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1946,7 +2253,7 @@ func (x *DetachedFailed) String() string {
 func (*DetachedFailed) ProtoMessage() {}
 
 func (x *DetachedFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[31]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1959,7 +2266,7 @@ func (x *DetachedFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedFailed.ProtoReflect.Descriptor instead.
 func (*DetachedFailed) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{31}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *DetachedFailed) GetSummary() string {
@@ -1978,7 +2285,7 @@ type DetachedCancelled struct {
 
 func (x *DetachedCancelled) Reset() {
 	*x = DetachedCancelled{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[32]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1990,7 +2297,7 @@ func (x *DetachedCancelled) String() string {
 func (*DetachedCancelled) ProtoMessage() {}
 
 func (x *DetachedCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[32]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2003,7 +2310,7 @@ func (x *DetachedCancelled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedCancelled.ProtoReflect.Descriptor instead.
 func (*DetachedCancelled) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{32}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{37}
 }
 
 // We lost sight of it.
@@ -2022,7 +2329,7 @@ type DetachedLost struct {
 
 func (x *DetachedLost) Reset() {
 	*x = DetachedLost{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[33]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2034,7 +2341,7 @@ func (x *DetachedLost) String() string {
 func (*DetachedLost) ProtoMessage() {}
 
 func (x *DetachedLost) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[33]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2047,7 +2354,7 @@ func (x *DetachedLost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedLost.ProtoReflect.Descriptor instead.
 func (*DetachedLost) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{33}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *DetachedLost) GetInference() string {
@@ -2085,7 +2392,7 @@ type ContentArriving struct {
 
 func (x *ContentArriving) Reset() {
 	*x = ContentArriving{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[34]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2097,7 +2404,7 @@ func (x *ContentArriving) String() string {
 func (*ContentArriving) ProtoMessage() {}
 
 func (x *ContentArriving) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[34]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2110,7 +2417,7 @@ func (x *ContentArriving) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContentArriving.ProtoReflect.Descriptor instead.
 func (*ContentArriving) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{34}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ContentArriving) GetBlockIndex() uint32 {
@@ -2253,9 +2560,21 @@ const file_conversation_v1_payloads_proto_rawDesc = "" +
 	"\x05skill\x18\x05 \x01(\v2\x1e.conversation.v1.DetachedSkillH\x00R\x05skill\x126\n" +
 	"\x05merge\x18\x06 \x01(\v2\x1e.conversation.v1.DetachedMergeH\x00R\x05mergeB\x06\n" +
 	"\x04kind\"\x0f\n" +
-	"\rDetachedAgent\"\x0f\n" +
-	"\rDetachedShell\"\x12\n" +
-	"\x10DetachedWorkflow\"B\n" +
+	"\rDetachedAgent\")\n" +
+	"\rDetachedShell\x12\x18\n" +
+	"\acommand\x18\x01 \x01(\tR\acommand\"\x12\n" +
+	"\x10DetachedWorkflow\"\x80\x02\n" +
+	"\fWorkflowStep\x12\x14\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\x12\x16\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail\x12@\n" +
+	"\arunning\x18\n" +
+	" \x01(\v2$.conversation.v1.WorkflowStepRunningH\x00R\arunning\x127\n" +
+	"\x04done\x18\v \x01(\v2!.conversation.v1.WorkflowStepDoneH\x00R\x04done\x12=\n" +
+	"\x06failed\x18\f \x01(\v2#.conversation.v1.WorkflowStepFailedH\x00R\x06failedB\b\n" +
+	"\x06status\"\x15\n" +
+	"\x13WorkflowStepRunning\"\x12\n" +
+	"\x10WorkflowStepDone\"\x14\n" +
+	"\x12WorkflowStepFailed\"B\n" +
 	"\rDetachedSkill\x12\x1d\n" +
 	"\n" +
 	"skill_name\x18\x01 \x01(\tR\tskillName\x12\x12\n" +
@@ -2266,7 +2585,9 @@ const file_conversation_v1_payloads_proto_rawDesc = "" +
 	"\x11SkillBodyResolved\x12\x12\n" +
 	"\x04body\x18\x01 \x01(\tR\x04body\"0\n" +
 	"\x16DetachedWorkProgressed\x12\x16\n" +
-	"\x06output\x18\x01 \x01(\tR\x06output\"\xdf\x02\n" +
+	"\x06output\x18\x01 \x01(\tR\x06output\"I\n" +
+	"\x14WorkflowStepObserved\x121\n" +
+	"\x04step\x18\x01 \x01(\v2\x1d.conversation.v1.WorkflowStepR\x04step\"\xdf\x02\n" +
 	"\x11DetachedWorkEnded\x12B\n" +
 	"\tsucceeded\x18\x01 \x01(\v2\".conversation.v1.DetachedSucceededH\x00R\tsucceeded\x129\n" +
 	"\x06failed\x18\x02 \x01(\v2\x1f.conversation.v1.DetachedFailedH\x00R\x06failed\x12B\n" +
@@ -2304,7 +2625,7 @@ func file_conversation_v1_payloads_proto_rawDescGZIP() []byte {
 	return file_conversation_v1_payloads_proto_rawDescData
 }
 
-var file_conversation_v1_payloads_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_conversation_v1_payloads_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_conversation_v1_payloads_proto_goTypes = []any{
 	(*UserSaid)(nil),               // 0: conversation.v1.UserSaid
 	(*AgentSaid)(nil),              // 1: conversation.v1.AgentSaid
@@ -2329,59 +2650,68 @@ var file_conversation_v1_payloads_proto_goTypes = []any{
 	(*DetachedAgent)(nil),          // 20: conversation.v1.DetachedAgent
 	(*DetachedShell)(nil),          // 21: conversation.v1.DetachedShell
 	(*DetachedWorkflow)(nil),       // 22: conversation.v1.DetachedWorkflow
-	(*DetachedSkill)(nil),          // 23: conversation.v1.DetachedSkill
-	(*DetachedMerge)(nil),          // 24: conversation.v1.DetachedMerge
-	(*DetachedUnclassified)(nil),   // 25: conversation.v1.DetachedUnclassified
-	(*SkillBodyResolved)(nil),      // 26: conversation.v1.SkillBodyResolved
-	(*DetachedWorkProgressed)(nil), // 27: conversation.v1.DetachedWorkProgressed
-	(*DetachedWorkEnded)(nil),      // 28: conversation.v1.DetachedWorkEnded
-	(*DetachedProcessExit)(nil),    // 29: conversation.v1.DetachedProcessExit
-	(*DetachedSucceeded)(nil),      // 30: conversation.v1.DetachedSucceeded
-	(*DetachedFailed)(nil),         // 31: conversation.v1.DetachedFailed
-	(*DetachedCancelled)(nil),      // 32: conversation.v1.DetachedCancelled
-	(*DetachedLost)(nil),           // 33: conversation.v1.DetachedLost
-	(*ContentArriving)(nil),        // 34: conversation.v1.ContentArriving
-	(*UserContent)(nil),            // 35: conversation.v1.UserContent
-	(*AgentContent)(nil),           // 36: conversation.v1.AgentContent
-	(*TokenUsage)(nil),             // 37: conversation.v1.TokenUsage
-	(*ToolResultContent)(nil),      // 38: conversation.v1.ToolResultContent
-	(*ToolCallBlock)(nil),          // 39: conversation.v1.ToolCallBlock
+	(*WorkflowStep)(nil),           // 23: conversation.v1.WorkflowStep
+	(*WorkflowStepRunning)(nil),    // 24: conversation.v1.WorkflowStepRunning
+	(*WorkflowStepDone)(nil),       // 25: conversation.v1.WorkflowStepDone
+	(*WorkflowStepFailed)(nil),     // 26: conversation.v1.WorkflowStepFailed
+	(*DetachedSkill)(nil),          // 27: conversation.v1.DetachedSkill
+	(*DetachedMerge)(nil),          // 28: conversation.v1.DetachedMerge
+	(*DetachedUnclassified)(nil),   // 29: conversation.v1.DetachedUnclassified
+	(*SkillBodyResolved)(nil),      // 30: conversation.v1.SkillBodyResolved
+	(*DetachedWorkProgressed)(nil), // 31: conversation.v1.DetachedWorkProgressed
+	(*WorkflowStepObserved)(nil),   // 32: conversation.v1.WorkflowStepObserved
+	(*DetachedWorkEnded)(nil),      // 33: conversation.v1.DetachedWorkEnded
+	(*DetachedProcessExit)(nil),    // 34: conversation.v1.DetachedProcessExit
+	(*DetachedSucceeded)(nil),      // 35: conversation.v1.DetachedSucceeded
+	(*DetachedFailed)(nil),         // 36: conversation.v1.DetachedFailed
+	(*DetachedCancelled)(nil),      // 37: conversation.v1.DetachedCancelled
+	(*DetachedLost)(nil),           // 38: conversation.v1.DetachedLost
+	(*ContentArriving)(nil),        // 39: conversation.v1.ContentArriving
+	(*UserContent)(nil),            // 40: conversation.v1.UserContent
+	(*AgentContent)(nil),           // 41: conversation.v1.AgentContent
+	(*TokenUsage)(nil),             // 42: conversation.v1.TokenUsage
+	(*ToolResultContent)(nil),      // 43: conversation.v1.ToolResultContent
+	(*ToolCallBlock)(nil),          // 44: conversation.v1.ToolCallBlock
 }
 var file_conversation_v1_payloads_proto_depIdxs = []int32{
-	35, // 0: conversation.v1.UserSaid.content:type_name -> conversation.v1.UserContent
-	36, // 1: conversation.v1.AgentSaid.content:type_name -> conversation.v1.AgentContent
-	37, // 2: conversation.v1.AgentSaid.usage:type_name -> conversation.v1.TokenUsage
+	40, // 0: conversation.v1.UserSaid.content:type_name -> conversation.v1.UserContent
+	41, // 1: conversation.v1.AgentSaid.content:type_name -> conversation.v1.AgentContent
+	42, // 2: conversation.v1.AgentSaid.usage:type_name -> conversation.v1.TokenUsage
 	3,  // 3: conversation.v1.AgentSaid.stop_reason:type_name -> conversation.v1.StopReason
-	38, // 4: conversation.v1.ToolReturned.content:type_name -> conversation.v1.ToolResultContent
+	43, // 4: conversation.v1.ToolReturned.content:type_name -> conversation.v1.ToolResultContent
 	4,  // 5: conversation.v1.StopReason.end_turn:type_name -> conversation.v1.StopEndTurn
 	5,  // 6: conversation.v1.StopReason.tool_call:type_name -> conversation.v1.StopToolCall
 	6,  // 7: conversation.v1.StopReason.max_tokens:type_name -> conversation.v1.StopMaxTokens
 	7,  // 8: conversation.v1.StopReason.interrupted:type_name -> conversation.v1.StopInterrupted
 	8,  // 9: conversation.v1.StopReason.unsupported:type_name -> conversation.v1.StopUnsupported
-	39, // 10: conversation.v1.PermissionAsked.requested:type_name -> conversation.v1.ToolCallBlock
+	44, // 10: conversation.v1.PermissionAsked.requested:type_name -> conversation.v1.ToolCallBlock
 	11, // 11: conversation.v1.PermissionAnswered.allowed:type_name -> conversation.v1.PermissionAllowed
 	12, // 12: conversation.v1.PermissionAnswered.denied:type_name -> conversation.v1.PermissionDenied
 	13, // 13: conversation.v1.PermissionAnswered.abandoned:type_name -> conversation.v1.PermissionAbandoned
 	16, // 14: conversation.v1.ContextCut.cleared:type_name -> conversation.v1.ContextCleared
 	17, // 15: conversation.v1.ContextCut.compacted:type_name -> conversation.v1.ContextCompacted
-	36, // 16: conversation.v1.ContextCompacted.summary:type_name -> conversation.v1.AgentContent
+	41, // 16: conversation.v1.ContextCompacted.summary:type_name -> conversation.v1.AgentContent
 	19, // 17: conversation.v1.DetachedWorkStarted.kind:type_name -> conversation.v1.DetachedWorkKind
 	20, // 18: conversation.v1.DetachedWorkKind.agent:type_name -> conversation.v1.DetachedAgent
 	21, // 19: conversation.v1.DetachedWorkKind.shell:type_name -> conversation.v1.DetachedShell
 	22, // 20: conversation.v1.DetachedWorkKind.workflow:type_name -> conversation.v1.DetachedWorkflow
-	25, // 21: conversation.v1.DetachedWorkKind.unclassified:type_name -> conversation.v1.DetachedUnclassified
-	23, // 22: conversation.v1.DetachedWorkKind.skill:type_name -> conversation.v1.DetachedSkill
-	24, // 23: conversation.v1.DetachedWorkKind.merge:type_name -> conversation.v1.DetachedMerge
-	30, // 24: conversation.v1.DetachedWorkEnded.succeeded:type_name -> conversation.v1.DetachedSucceeded
-	31, // 25: conversation.v1.DetachedWorkEnded.failed:type_name -> conversation.v1.DetachedFailed
-	32, // 26: conversation.v1.DetachedWorkEnded.cancelled:type_name -> conversation.v1.DetachedCancelled
-	33, // 27: conversation.v1.DetachedWorkEnded.lost:type_name -> conversation.v1.DetachedLost
-	29, // 28: conversation.v1.DetachedWorkEnded.process_exit:type_name -> conversation.v1.DetachedProcessExit
-	29, // [29:29] is the sub-list for method output_type
-	29, // [29:29] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	29, // 21: conversation.v1.DetachedWorkKind.unclassified:type_name -> conversation.v1.DetachedUnclassified
+	27, // 22: conversation.v1.DetachedWorkKind.skill:type_name -> conversation.v1.DetachedSkill
+	28, // 23: conversation.v1.DetachedWorkKind.merge:type_name -> conversation.v1.DetachedMerge
+	24, // 24: conversation.v1.WorkflowStep.running:type_name -> conversation.v1.WorkflowStepRunning
+	25, // 25: conversation.v1.WorkflowStep.done:type_name -> conversation.v1.WorkflowStepDone
+	26, // 26: conversation.v1.WorkflowStep.failed:type_name -> conversation.v1.WorkflowStepFailed
+	23, // 27: conversation.v1.WorkflowStepObserved.step:type_name -> conversation.v1.WorkflowStep
+	35, // 28: conversation.v1.DetachedWorkEnded.succeeded:type_name -> conversation.v1.DetachedSucceeded
+	36, // 29: conversation.v1.DetachedWorkEnded.failed:type_name -> conversation.v1.DetachedFailed
+	37, // 30: conversation.v1.DetachedWorkEnded.cancelled:type_name -> conversation.v1.DetachedCancelled
+	38, // 31: conversation.v1.DetachedWorkEnded.lost:type_name -> conversation.v1.DetachedLost
+	34, // 32: conversation.v1.DetachedWorkEnded.process_exit:type_name -> conversation.v1.DetachedProcessExit
+	33, // [33:33] is the sub-list for method output_type
+	33, // [33:33] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_payloads_proto_init() }
@@ -2415,13 +2745,18 @@ func file_conversation_v1_payloads_proto_init() {
 		(*DetachedWorkKind_Skill)(nil),
 		(*DetachedWorkKind_Merge)(nil),
 	}
-	file_conversation_v1_payloads_proto_msgTypes[28].OneofWrappers = []any{
+	file_conversation_v1_payloads_proto_msgTypes[23].OneofWrappers = []any{
+		(*WorkflowStep_Running)(nil),
+		(*WorkflowStep_Done)(nil),
+		(*WorkflowStep_Failed)(nil),
+	}
+	file_conversation_v1_payloads_proto_msgTypes[33].OneofWrappers = []any{
 		(*DetachedWorkEnded_Succeeded)(nil),
 		(*DetachedWorkEnded_Failed)(nil),
 		(*DetachedWorkEnded_Cancelled)(nil),
 		(*DetachedWorkEnded_Lost)(nil),
 	}
-	file_conversation_v1_payloads_proto_msgTypes[34].OneofWrappers = []any{
+	file_conversation_v1_payloads_proto_msgTypes[39].OneofWrappers = []any{
 		(*ContentArriving_Text)(nil),
 		(*ContentArriving_Thinking)(nil),
 		(*ContentArriving_ArgumentsJson)(nil),
@@ -2432,7 +2767,7 @@ func file_conversation_v1_payloads_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_payloads_proto_rawDesc), len(file_conversation_v1_payloads_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   35,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
