@@ -30,7 +30,8 @@ import (
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/account"
 	"claude-repld/internal/addsupport"
@@ -185,7 +186,7 @@ func ShimEnv(opts CreateOpts, daemonAddr string) []string {
 // a root turn or stream timing. The server aggregates that durable ledger into
 // every SessionView rather than retaining a second cumulative counter.
 type SessionTokenUsageSource interface {
-	List(sessionID string) ([]*frontendv1.TokenUtilization, error)
+	List(sessionID string) ([]*statev1.TokenUtilization, error)
 }
 
 // Server routes daemon HTTP traffic.
@@ -1659,7 +1660,7 @@ func SessionViewFromRecordWithModels(logf dlog.Logf, rec registry.Record, pendin
 // claiming it, in which case the handover is in flight and its death card is
 // withheld rather than presented as an open failure (supersedepresent.go). A
 // nil reg withholds nothing.
-func SessionViewFromRecordWithModelsAndUsage(logf dlog.Logf, reg *registry.Registry, rec registry.Record, pendingPermissions []string, shimAttached bool, modelOptions []*frontendv1.ModelOption, usage *frontendv1.SessionTokenUtilization) *frontendv1.SessionView {
+func SessionViewFromRecordWithModelsAndUsage(logf dlog.Logf, reg *registry.Registry, rec registry.Record, pendingPermissions []string, shimAttached bool, modelOptions []*frontendv1.ModelOption, usage *statev1.SessionTokenUtilization) *frontendv1.SessionView {
 	return &frontendv1.SessionView{
 		Workspace:       rec.CWD,
 		SessionId:       rec.SessionID,
@@ -1739,7 +1740,7 @@ func hibernationDetail(logf dlog.Logf, sessionID string, h registry.HibernationD
 	return detail
 }
 
-func sessionTokenUtilization(logf dlog.Logf, source SessionTokenUsageSource, sessionID string) *frontendv1.SessionTokenUtilization {
+func sessionTokenUtilization(logf dlog.Logf, source SessionTokenUsageSource, sessionID string) *statev1.SessionTokenUtilization {
 	if source == nil {
 		return nil
 	}
@@ -1860,7 +1861,7 @@ func (s *Server) pushSessionView(id string) {
 // withheld rather than published unfenced — an unfenced push cannot be told
 // from a stale one, which is the whole job of the token. The withholding is
 // recorded; it is never silent.
-func (s *Server) publishSessionDerivedViews(workspace, sessionID string, usage *frontendv1.SessionTokenUtilization) {
+func (s *Server) publishSessionDerivedViews(workspace, sessionID string, usage *statev1.SessionTokenUtilization) {
 	// NEVER SILENT. This guard used to return with no record at all, which made
 	// an unwired frontend surface indistinguishable from a workspace that
 	// simply had nothing to publish — and since this function holds the only

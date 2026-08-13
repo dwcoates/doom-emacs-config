@@ -3,24 +3,26 @@ package frontend
 import (
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 )
 
 // canonical builds one canonical usage from the three input buckets plus
 // output, so each case below states the arithmetic it is about and nothing
 // else.
-func canonical(read, written, unwritten, output uint64) *frontendv1.TokenUsage {
-	return &frontendv1.TokenUsage{
-		InputHits:    &frontendv1.TokenCacheHits{Read: read},
-		InputMisses:  &frontendv1.TokenCacheMisses{Written: written, Unwritten: unwritten},
+func canonical(read, written, unwritten, output uint64) *conversationv1.TokenUsage {
+	return &conversationv1.TokenUsage{
+		InputHits:    &conversationv1.TokenCacheHits{Read: read},
+		InputMisses:  &conversationv1.TokenCacheMisses{Written: written, Unwritten: unwritten},
 		OutputTokens: output,
 	}
 }
 
 // aggregate is a session aggregate carrying only the daemon-resolved canonical
 // totals every section needs.
-func aggregate() *frontendv1.SessionTokenUtilization {
-	return &frontendv1.SessionTokenUtilization{
+func aggregate() *statev1.SessionTokenUtilization {
+	return &statev1.SessionTokenUtilization{
 		MainAgentTokens: canonical(0, 0, 0, 0),
 		AllAgentsTokens: canonical(0, 0, 0, 0),
 	}
@@ -109,7 +111,7 @@ func TestTokenBreakdownViewLeadsWithTheMainAgentAndAllAgentsSections(t *testing.
 func TestTokenBreakdownViewAddsOneSectionPerModel(t *testing.T) {
 	// Arrange.
 	usage := aggregate()
-	usage.Models = []*frontendv1.ModelTokenUtilization{{Model: "opus-5", Totals: &frontendv1.TokenUsageTotals{}}}
+	usage.Models = []*statev1.ModelTokenUtilization{{Model: "opus-5", Totals: &statev1.TokenUsageTotals{}}}
 	// Act.
 	view, err := TokenBreakdownView("/w", "s|g", usage)
 	// Assert.
@@ -124,7 +126,7 @@ func TestTokenBreakdownViewAddsOneSectionPerModel(t *testing.T) {
 func TestTokenBreakdownViewRefusesASubagentWithNoCanonicalTotals(t *testing.T) {
 	// Arrange.
 	usage := aggregate()
-	usage.Subagents = []*frontendv1.AgentTokenUtilization{{Agent: &frontendv1.TokenUtilizationSubagent{AgentId: "a1"}}}
+	usage.Subagents = []*statev1.AgentTokenUtilization{{Agent: &statev1.TokenUtilizationSubagent{AgentId: "a1"}}}
 	// Act.
 	view, err := TokenBreakdownView("/w", "s|g", usage)
 	// Assert.
@@ -136,8 +138,8 @@ func TestTokenBreakdownViewRefusesASubagentWithNoCanonicalTotals(t *testing.T) {
 func TestTokenBreakdownViewLabelsASubagentWithNoIdentifierRatherThanBlank(t *testing.T) {
 	// Arrange — a section can never render with no heading.
 	usage := aggregate()
-	usage.Subagents = []*frontendv1.AgentTokenUtilization{{
-		Agent:  &frontendv1.TokenUtilizationSubagent{SubagentType: "explore"},
+	usage.Subagents = []*statev1.AgentTokenUtilization{{
+		Agent:  &statev1.TokenUtilizationSubagent{SubagentType: "explore"},
 		Tokens: canonical(0, 0, 0, 0),
 	}}
 	// Act.

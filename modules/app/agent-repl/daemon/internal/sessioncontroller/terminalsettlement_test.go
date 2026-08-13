@@ -8,7 +8,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/ssm"
 )
@@ -455,7 +455,7 @@ func TestASeqReusedByALaterGenerationIsNotTreatedAsTerminal(t *testing.T) {
 }
 
 // settlementFor reads one turn's settled record out of the store.
-func settlementFor(t *testing.T, store *settlingTurnAccountingStore, turnID string) *frontendv1.TurnAccounting {
+func settlementFor(t *testing.T, store *settlingTurnAccountingStore, turnID string) *statev1.TurnAccounting {
 	t.Helper()
 	settlements, err := store.List("s1")
 	if err != nil {

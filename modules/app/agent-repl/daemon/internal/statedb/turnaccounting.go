@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/tokenutilization"
 
@@ -46,7 +46,7 @@ func NewTurnAccountings(db *sql.DB) (*TurnAccountings, error) {
 // Record persists response records and their resolved terminal accounting as
 // one SQLite transaction. Replays overwrite only byte-identical accounting;
 // a divergent duplicate is an invariant violation and fails loudly.
-func (s *TurnAccountings) Record(sessionID string, accounting *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error) {
+func (s *TurnAccountings) Record(sessionID string, accounting *statev1.TurnAccounting) (*statev1.TurnAccounting, error) {
 	if sessionID == "" || accounting == nil || accounting.GetTurnId() == "" {
 		return nil, fmt.Errorf("statedb: turn accounting needs session id and turn id")
 	}
@@ -78,7 +78,7 @@ func (s *TurnAccountings) Record(sessionID string, accounting *frontendv1.TurnAc
 				return nil, fmt.Errorf("statedb: record response %q for turn %q: %w", response.GetApiMessageId(), accounting.GetTurnId(), err)
 			}
 		case nil:
-			var priorResponse frontendv1.TokenUtilization
+			var priorResponse statev1.TokenUtilization
 			if err := proto.Unmarshal(priorResponseRaw, &priorResponse); err != nil {
 				return nil, fmt.Errorf("statedb: decode response %q: %w", response.GetApiMessageId(), err)
 			}
@@ -158,7 +158,7 @@ func (s *TurnAccountings) EndedAtMs(turnID string) (int64, bool, error) {
 		if err := rows.Scan(&raw); err != nil {
 			return 0, false, fmt.Errorf("statedb: scan turn accounting %q: %w", turnID, err)
 		}
-		var accounting frontendv1.TurnAccounting
+		var accounting statev1.TurnAccounting
 		if err := proto.Unmarshal(raw, &accounting); err != nil {
 			return 0, false, fmt.Errorf("statedb: decode turn accounting %q: %w", turnID, err)
 		}
@@ -177,7 +177,7 @@ func (s *TurnAccountings) EndedAtMs(turnID string) (int64, bool, error) {
 	return latest, found, nil
 }
 
-func validateTurnAccountingResponses(sessionID string, accounting *frontendv1.TurnAccounting) error {
+func validateTurnAccountingResponses(sessionID string, accounting *statev1.TurnAccounting) error {
 	seenMessages := make(map[string]struct{}, len(accounting.GetResponses()))
 	claudeSessionID := ""
 	for _, response := range accounting.GetResponses() {
@@ -232,10 +232,10 @@ func validateTurnAccountingResponses(sessionID string, accounting *frontendv1.Tu
 // arrival order, which is already deterministic across a byte-identical
 // replay of the same durable stream, but sorting removes any dependence on
 // that being true forever.
-func canonicalTurnAccounting(acc *frontendv1.TurnAccounting) *frontendv1.TurnAccounting {
-	c, ok := proto.Clone(acc).(*frontendv1.TurnAccounting)
+func canonicalTurnAccounting(acc *statev1.TurnAccounting) *statev1.TurnAccounting {
+	c, ok := proto.Clone(acc).(*statev1.TurnAccounting)
 	if !ok || c == nil {
-		return &frontendv1.TurnAccounting{}
+		return &statev1.TurnAccounting{}
 	}
 	c.QueryInstanceId = ""
 	c.Runtime = nil
@@ -247,8 +247,8 @@ func canonicalTurnAccounting(acc *frontendv1.TurnAccounting) *frontendv1.TurnAcc
 	return c
 }
 
-func mustUnmarshalTurnAccounting(raw []byte) *frontendv1.TurnAccounting {
-	var accounting frontendv1.TurnAccounting
+func mustUnmarshalTurnAccounting(raw []byte) *statev1.TurnAccounting {
+	var accounting statev1.TurnAccounting
 	if err := proto.Unmarshal(raw, &accounting); err != nil {
 		panic(fmt.Sprintf("statedb: corrupt turn accounting: %v", err))
 	}
@@ -256,19 +256,19 @@ func mustUnmarshalTurnAccounting(raw []byte) *frontendv1.TurnAccounting {
 }
 
 // List returns terminal accounting records in turn-id order for replay.
-func (s *TurnAccountings) List(sessionID string) ([]*frontendv1.TurnAccounting, error) {
+func (s *TurnAccountings) List(sessionID string) ([]*statev1.TurnAccounting, error) {
 	rows, err := s.db.Query(`SELECT record FROM turn_accounting WHERE agent_repl_session_id=? ORDER BY turn_id`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("statedb: list turn accounting for %q: %w", sessionID, err)
 	}
 	defer rows.Close()
-	var out []*frontendv1.TurnAccounting
+	var out []*statev1.TurnAccounting
 	for rows.Next() {
 		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
 			return nil, fmt.Errorf("statedb: scan turn accounting for %q: %w", sessionID, err)
 		}
-		var accounting frontendv1.TurnAccounting
+		var accounting statev1.TurnAccounting
 		if err := proto.Unmarshal(raw, &accounting); err != nil {
 			return nil, fmt.Errorf("statedb: decode turn accounting for %q: %w", sessionID, err)
 		}

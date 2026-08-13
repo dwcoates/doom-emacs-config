@@ -38,7 +38,8 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -3121,7 +3122,7 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// read by the warm-compaction size floor alone (contextsize.go). Bound before
 	// Run for the reason above: the first response of the session is a
 	// measurement, and a hook bound later would drop it.
-	cons.onMainAgentContextSize = func(record *frontendv1.TokenUtilization) {
+	cons.onMainAgentContextSize = func(record *statev1.TokenUtilization) {
 		m.noteMainAgentContextSize(d, record)
 	}
 	// Every PERSISTENT store event names the conversation it belongs to.

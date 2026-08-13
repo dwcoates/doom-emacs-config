@@ -30,7 +30,7 @@ package e2e
 import (
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // acceptedAck matches the OK CommandAck for requestID.

@@ -1,7 +1,7 @@
 package keepalive
 
 import (
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/tokenusage"
 )
@@ -48,7 +48,7 @@ const ColdCompactionUncachedTokens int64 = 10_000
 // It judges tokenusage.ExpensiveInput — BOTH cache misses — because a cold
 // full-context read surfaces as the written miss, so judging the unwritten one
 // alone would read ~0 for the exact cold compaction this exists to catch.
-func ColdCompaction(usage *frontendv1.TokenUsage) bool {
+func ColdCompaction(usage *conversationv1.TokenUsage) bool {
 	return tokenusage.ExpensiveInput(usage) > ColdCompactionUncachedTokens
 }
 
@@ -61,6 +61,6 @@ func ColdCompaction(usage *frontendv1.TokenUsage) bool {
 // evidence the feature ever produces about its own premise — every other input
 // to the policy is a time-since comparison, which is a prediction — so a true
 // answer here overrules the prediction rather than merely annotating it.
-func (c Config) CameBackCold(usage *frontendv1.TokenUsage) bool {
+func (c Config) CameBackCold(usage *conversationv1.TokenUsage) bool {
 	return tokenusage.ExpensiveInput(usage) > c.UncachedCostAlertTokens
 }

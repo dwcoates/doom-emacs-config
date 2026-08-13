@@ -5,7 +5,8 @@ import (
 	"testing"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	statev1 "agentrepl/proto/state/v1"
 )
 
 // The vendor-to-canonical mapping is the whole contract of the boundary: each
@@ -49,7 +50,7 @@ func TestFromAPIUsageMapsEachVendorCounterToItsEconomicBucket(t *testing.T) {
 // The durable record is the READ boundary: the state store keeps the vendor
 // shape and the economics are produced from it here.
 func TestFromVendorUsageConvertsTheDurableRecord(t *testing.T) {
-	durable := &frontendv1.VendorTokenUsage{InputTokens: 2, CacheCreationInputTokens: 3, CacheReadInputTokens: 5, OutputTokens: 8}
+	durable := &statev1.VendorTokenUsage{InputTokens: 2, CacheCreationInputTokens: 3, CacheReadInputTokens: 5, OutputTokens: 8}
 
 	got, err := FromVendorUsage(durable)
 
@@ -62,7 +63,7 @@ func TestFromVendorUsageConvertsTheDurableRecord(t *testing.T) {
 }
 
 func TestFromTotalsConvertsACumulativeVendorTotal(t *testing.T) {
-	totals := &frontendv1.TokenUsageTotals{InputTokens: 2, CacheCreationInputTokens: 3, CacheReadInputTokens: 5, OutputTokens: 8}
+	totals := &statev1.TokenUsageTotals{InputTokens: 2, CacheCreationInputTokens: 3, CacheReadInputTokens: 5, OutputTokens: 8}
 
 	got, err := FromTotals(totals)
 
@@ -118,7 +119,7 @@ func TestFromResultUsageReducesAnAbsentUsageToZeroes(t *testing.T) {
 func TestExpensiveInputSumsBothMissesAndExcludesTheHit(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		usage *frontendv1.TokenUsage
+		usage *conversationv1.TokenUsage
 		want  int64
 	}{
 		{
@@ -224,9 +225,9 @@ func TestDeriveRatesReportsNoPartitionForAnEmptyPrompt(t *testing.T) {
 	}
 }
 
-func canonical(unwritten, written, read uint64) *frontendv1.TokenUsage {
-	return &frontendv1.TokenUsage{
-		InputHits:   &frontendv1.TokenCacheHits{Read: read},
-		InputMisses: &frontendv1.TokenCacheMisses{Written: written, Unwritten: unwritten},
+func canonical(unwritten, written, read uint64) *conversationv1.TokenUsage {
+	return &conversationv1.TokenUsage{
+		InputHits:   &conversationv1.TokenCacheHits{Read: read},
+		InputMisses: &conversationv1.TokenCacheMisses{Written: written, Unwritten: unwritten},
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -17,7 +17,7 @@ func TestTurnAccountingsRejectBlankResponseModelBeforeDurableMutation(t *testing
 	}
 	response := completeUtilization("s", "claude", "t", "m")
 	response.Model = " \t"
-	accounting := &frontendv1.TurnAccounting{TurnId: "t", Responses: []*frontendv1.TokenUtilization{response}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	accounting := &statev1.TurnAccounting{TurnId: "t", Responses: []*statev1.TokenUtilization{response}, Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	if _, err := accountings.Record("s", accounting); err == nil || !strings.Contains(err.Error(), "blank model") {
 		t.Fatalf("Record error = %v, want blank model rejection", err)
 	}
@@ -40,7 +40,7 @@ func TestTurnAccountingsRecordPersistsResponsesAndTerminalEvidence(t *testing.T)
 	}
 	response := completeUtilization("s", "claude", "t", "m")
 	response.Usage.OutputTokens = 2
-	accounting := &frontendv1.TurnAccounting{TurnId: "t", Responses: []*frontendv1.TokenUtilization{response}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	accounting := &statev1.TurnAccounting{TurnId: "t", Responses: []*statev1.TokenUtilization{response}, Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	if _, err := accountings.Record("s", accounting); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
@@ -69,8 +69,8 @@ func TestTurnAccountingAtomicallyEnrichesCompatibleHistoricalResponse(t *testing
 		t.Fatal(err)
 	}
 	live := completeUtilization("s", "claude", "t", "m")
-	live.ResponseTiming = &frontendv1.TokenResponseTiming{OutputGenerationDurationMs: int64p(0)}
-	accounting := &frontendv1.TurnAccounting{TurnId: "t", Responses: []*frontendv1.TokenUtilization{live}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	live.ResponseTiming = &statev1.TokenResponseTiming{OutputGenerationDurationMs: int64p(0)}
+	accounting := &statev1.TurnAccounting{TurnId: "t", Responses: []*statev1.TokenUtilization{live}, Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	accountings, err := NewTurnAccountings(store.db)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestTurnAccountingsRollsBackResponseWhenTerminalPersistenceFails(t *testing
 	if _, err := store.db.Exec(`CREATE TRIGGER reject_turn_accounting BEFORE INSERT ON turn_accounting BEGIN SELECT RAISE(FAIL, 'forced terminal failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	accounting := &frontendv1.TurnAccounting{TurnId: "t", Responses: []*frontendv1.TokenUtilization{completeUtilization("s", "claude", "t", "m")}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	accounting := &statev1.TurnAccounting{TurnId: "t", Responses: []*statev1.TokenUtilization{completeUtilization("s", "claude", "t", "m")}, Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	if _, err := accountings.Record("s", accounting); err == nil {
 		t.Fatal("Record succeeded")
 	}
@@ -122,14 +122,14 @@ func TestTurnAccountingsReplayReturnsCanonicalSettlementToleratingEphemeralField
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := &frontendv1.TurnAccounting{TurnId: "t", QueryInstanceId: "query-a", Timing: &frontendv1.TurnAccountingTiming{AccountingSettledAtMs: 100, ResultToSettlementMs: 10}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	first := &statev1.TurnAccounting{TurnId: "t", QueryInstanceId: "query-a", Timing: &statev1.TurnAccountingTiming{AccountingSettledAtMs: 100, ResultToSettlementMs: 10}, Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	if _, err := accountings.Record("s", first); err != nil {
 		t.Fatal(err)
 	}
 	// A later bring-up recomputes this SAME turn under a brand-new
 	// query_instance_id (query-b) and a later settlement instant — both
 	// EXPECTED to differ, never a sign of corruption.
-	replay := &frontendv1.TurnAccounting{TurnId: "t", QueryInstanceId: "query-b", Timing: &frontendv1.TurnAccountingTiming{AccountingSettledAtMs: 900, ResultToSettlementMs: 810}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	replay := &statev1.TurnAccounting{TurnId: "t", QueryInstanceId: "query-b", Timing: &statev1.TurnAccountingTiming{AccountingSettledAtMs: 900, ResultToSettlementMs: 810}, Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	canonical, err := accountings.Record("s", replay)
 	if err != nil {
 		t.Fatalf("idempotent replay under a fresh query_instance_id: %v", err)
@@ -152,13 +152,13 @@ func TestTurnAccountingsRejectsDivergentResponseEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := &frontendv1.TurnAccounting{TurnId: "t", QueryInstanceId: "query-a", Responses: []*frontendv1.TokenUtilization{completeUtilization("s", "claude", "t", "m")}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	first := &statev1.TurnAccounting{TurnId: "t", QueryInstanceId: "query-a", Responses: []*statev1.TokenUtilization{completeUtilization("s", "claude", "t", "m")}, Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	if _, err := accountings.Record("s", first); err != nil {
 		t.Fatal(err)
 	}
 	divergentResponse := completeUtilization("s", "claude", "t", "m")
 	divergentResponse.Usage.OutputTokens = 999
-	replay := &frontendv1.TurnAccounting{TurnId: "t", QueryInstanceId: "query-b", Responses: []*frontendv1.TokenUtilization{divergentResponse}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	replay := &statev1.TurnAccounting{TurnId: "t", QueryInstanceId: "query-b", Responses: []*statev1.TokenUtilization{divergentResponse}, Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	if _, err := accountings.Record("s", replay); err == nil {
 		t.Fatal("divergent response evidence was accepted")
 	}
@@ -188,14 +188,14 @@ func TestTurnAccountingsRejectsDivergentResponseEvidence(t *testing.T) {
 func TestTurnAccountingsRejectsEvidenceFreeCrossGenerationRecompute(t *testing.T) {
 	// Arrange: the generation that ran the turn settles it with full evidence.
 	accountings := newTurnAccountings(t)
-	settled := &frontendv1.TurnAccounting{
+	settled := &statev1.TurnAccounting{
 		TurnId:          "fe-365-6c53",
 		QueryInstanceId: "query-a",
 		UsageAtStart:    boundaryUsageObservation("query-a", "fe-365-6c53", true),
 		UsageAtEnd:      boundaryUsageObservation("query-a", "fe-365-6c53", false),
-		Responses:       []*frontendv1.TokenUtilization{completeUtilization("s", "claude", "fe-365-6c53", "m")},
-		Reconciliation:  &frontendv1.TokenUsageReconciliation{ResponseRecordCount: 1, ApiMessageIds: []string{"m"}},
-		Verdict:         &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+		Responses:       []*statev1.TokenUtilization{completeUtilization("s", "claude", "fe-365-6c53", "m")},
+		Reconciliation:  &statev1.TokenUsageReconciliation{ResponseRecordCount: 1, ApiMessageIds: []string{"m"}},
+		Verdict:         &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}},
 	}
 	if _, err := accountings.Record("s", settled); err != nil {
 		t.Fatalf("first settlement: %v", err)
@@ -203,11 +203,11 @@ func TestTurnAccountingsRejectsEvidenceFreeCrossGenerationRecompute(t *testing.T
 
 	// Act: the replaying generation recomputes the same turn with no admitted
 	// evidence whatsoever, under a freshly minted query id.
-	replay := &frontendv1.TurnAccounting{
+	replay := &statev1.TurnAccounting{
 		TurnId:          "fe-365-6c53",
 		QueryInstanceId: "query-b",
-		Reconciliation:  &frontendv1.TokenUsageReconciliation{},
-		Verdict:         &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+		Reconciliation:  &statev1.TokenUsageReconciliation{},
+		Verdict:         &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}},
 	}
 	_, err := accountings.Record("s", replay)
 
@@ -259,10 +259,10 @@ func newTurnAccountings(t *testing.T) *TurnAccountings {
 func TestTurnAccountingsEndedAtMsReportsTheRecordedResultInstant(t *testing.T) {
 	// Arrange.
 	accountings := newTurnAccountings(t)
-	if _, err := accountings.Record("s", &frontendv1.TurnAccounting{
+	if _, err := accountings.Record("s", &statev1.TurnAccounting{
 		TurnId:  "ka_1",
-		Timing:  &frontendv1.TurnAccountingTiming{ResultReceivedAtMs: 2_000},
-		Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+		Timing:  &statev1.TurnAccountingTiming{ResultReceivedAtMs: 2_000},
+		Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}},
 	}); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
@@ -297,9 +297,9 @@ func TestTurnAccountingsEndedAtMsReportsNotFoundForAnUnknownTurn(t *testing.T) {
 func TestTurnAccountingsEndedAtMsReportsNotFoundWithoutAResultInstant(t *testing.T) {
 	// Arrange.
 	accountings := newTurnAccountings(t)
-	if _, err := accountings.Record("s", &frontendv1.TurnAccounting{
+	if _, err := accountings.Record("s", &statev1.TurnAccounting{
 		TurnId:  "ka_1",
-		Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+		Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}},
 	}); err != nil {
 		t.Fatalf("Record: %v", err)
 	}

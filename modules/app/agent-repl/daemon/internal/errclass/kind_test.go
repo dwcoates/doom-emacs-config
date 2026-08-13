@@ -3,7 +3,7 @@ package errclass
 import (
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // The two tables in kind.go are each other's inverse. Nothing but this test

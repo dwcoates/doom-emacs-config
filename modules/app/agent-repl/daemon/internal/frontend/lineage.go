@@ -20,7 +20,7 @@
 package frontend
 
 import (
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // auditFrameLineage records every lineage defect in one outbound frame.

@@ -6,7 +6,7 @@ package progress
 // A turn's accounting is a RECONCILIATION: the reducer in
 // internal/sessioncontroller compares the usage each response reported against
 // the totals the terminal result claimed, and files the outcome as a
-// frontendv1.TurnAccounting. Everything the footer shows about that
+// statev1.TurnAccounting. Everything the footer shows about that
 // reconciliation — the verdict, the prose beside it, and the figures inside
 // the prose — is resolved HERE, once, and rendered verbatim.
 //
@@ -24,7 +24,8 @@ import (
 	"strings"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 )
 
 // AccountingCell resolves one settled turn's accounting into the footer's
@@ -39,7 +40,7 @@ import (
 // problems is a defect upstream rather than a renderable state, so it is
 // reported as an unstated problem instead of being silently promoted to
 // complete.
-func AccountingCell(a *frontendv1.TurnAccounting) *frontendv1.FooterAccountingCell {
+func AccountingCell(a *statev1.TurnAccounting) *frontendv1.FooterAccountingCell {
 	if a == nil {
 		return nil
 	}
@@ -75,7 +76,7 @@ func AccountingCell(a *frontendv1.TurnAccounting) *frontendv1.FooterAccountingCe
 // verdict shorter than the evidence behind it. The empty-list case is covered
 // the same way, because "invalid with nothing to say" is exactly the state the
 // arms exist to make unrenderable.
-func accountingProblems(problems []*frontendv1.TurnAccountingProblem) []string {
+func accountingProblems(problems []*statev1.TurnAccountingProblem) []string {
 	out := make([]string, 0, len(problems))
 	for _, p := range problems {
 		out = append(out, accountingProblem(p))
@@ -86,7 +87,7 @@ func accountingProblems(problems []*frontendv1.TurnAccountingProblem) []string {
 	return out
 }
 
-func accountingProblem(p *frontendv1.TurnAccountingProblem) string {
+func accountingProblem(p *statev1.TurnAccountingProblem) string {
 	switch {
 	case p.GetMissingUsageBoundary() != nil:
 		b := p.GetMissingUsageBoundary()
@@ -117,7 +118,7 @@ func accountingProblem(p *frontendv1.TurnAccountingProblem) string {
 	}
 }
 
-func telemetryRecordMissing(m *frontendv1.TelemetryRecordMissing) string {
+func telemetryRecordMissing(m *statev1.TelemetryRecordMissing) string {
 	switch {
 	case m.GetQueryLifecycle() != nil:
 		return "the query lifecycle record for " + quoted(m.GetQueryLifecycle().GetQueryInstanceId()) + " is missing"
@@ -176,7 +177,7 @@ func joinPaths(paths []string) string {
 // missingCompleteEvidence names every evidence fragment the full summary needs
 // and this record does not carry. An empty result means the summary can be
 // drawn from evidence alone.
-func missingCompleteEvidence(a *frontendv1.TurnAccounting) []string {
+func missingCompleteEvidence(a *statev1.TurnAccounting) []string {
 	return absent([]evidence{
 		{"runtime identity", a.GetRuntime() != nil},
 		{"turn timing", a.GetTiming() != nil},
@@ -190,7 +191,7 @@ func missingCompleteEvidence(a *frontendv1.TurnAccounting) []string {
 // condemned by its problems. An invalid turn is judged on the PRESENCE of each
 // fragment rather than on the readable interior a complete one needs: the
 // verdict is settled, and what the note adds is which evidence survived.
-func missingInvalidEvidence(a *frontendv1.TurnAccounting) []string {
+func missingInvalidEvidence(a *statev1.TurnAccounting) []string {
 	return absent([]evidence{
 		{"runtime identity", a.GetRuntime() != nil},
 		{"turn timing", a.GetTiming() != nil},
@@ -241,7 +242,7 @@ func usageOutcomeKnown(o *corev1.AccountUsageObservation) bool {
 // on a settled observation — an account-usage sample that failed, or a turn
 // with no measurable duration. Those read "unavailable" rather than as a
 // fabricated zero.
-func completeAccountingSummary(a *frontendv1.TurnAccounting) string {
+func completeAccountingSummary(a *statev1.TurnAccounting) string {
 	total := a.GetReconciliation().GetResponseAllAgents()
 	durationMs := a.GetTiming().GetPromptToResultMs()
 	return strings.Join([]string{
@@ -270,14 +271,14 @@ func quotaMove(start, end *corev1.AccountUsageObservation) string {
 	return fmt.Sprintf("%.1f%%→%.1f%% (%.1fpp)", a, b, b-a)
 }
 
-func cacheHit(rates *frontendv1.TokenCacheRates) string {
+func cacheHit(rates *statev1.TokenCacheRates) string {
 	if rates == nil {
 		return "hit unavailable"
 	}
 	return fmt.Sprintf("hit %.1f%%", 100*rates.GetCacheHitRate())
 }
 
-func subagentCount(responses []*frontendv1.TokenUtilization) string {
+func subagentCount(responses []*statev1.TokenUtilization) string {
 	n := 0
 	for _, r := range responses {
 		if r.GetSubagent() != nil {

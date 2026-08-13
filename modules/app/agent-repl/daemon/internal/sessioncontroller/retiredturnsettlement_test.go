@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -29,16 +29,16 @@ import (
 // assertion about behavior rather than about a stub's return value.
 type settlingTurnAccountingStore struct {
 	mu       sync.Mutex
-	byTurn   map[string]*frontendv1.TurnAccounting
+	byTurn   map[string]*statev1.TurnAccounting
 	listErr  error
 	recorded []string
 }
 
 func newSettlingTurnAccountingStore() *settlingTurnAccountingStore {
-	return &settlingTurnAccountingStore{byTurn: map[string]*frontendv1.TurnAccounting{}}
+	return &settlingTurnAccountingStore{byTurn: map[string]*statev1.TurnAccounting{}}
 }
 
-func (s *settlingTurnAccountingStore) Record(_ string, accounting *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error) {
+func (s *settlingTurnAccountingStore) Record(_ string, accounting *statev1.TurnAccounting) (*statev1.TurnAccounting, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.recorded = append(s.recorded, accounting.GetTurnId())
@@ -46,13 +46,13 @@ func (s *settlingTurnAccountingStore) Record(_ string, accounting *frontendv1.Tu
 	return accounting, nil
 }
 
-func (s *settlingTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting, error) {
+func (s *settlingTurnAccountingStore) List(string) ([]*statev1.TurnAccounting, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
-	out := make([]*frontendv1.TurnAccounting, 0, len(s.byTurn))
+	out := make([]*statev1.TurnAccounting, 0, len(s.byTurn))
 	for _, accounting := range s.byTurn {
 		out = append(out, accounting)
 	}
@@ -80,7 +80,7 @@ func newRetiredTurnRig(t *testing.T, turnID string) (*consumer, *settlingTurnAcc
 	logs := &levelSplitLogs{}
 	store := newSettlingTurnAccountingStore()
 	store.mu.Lock()
-	store.byTurn[turnID] = &frontendv1.TurnAccounting{TurnId: turnID}
+	store.byTurn[turnID] = &statev1.TurnAccounting{TurnId: turnID}
 	store.mu.Unlock()
 	c := newConsumer("ws", "s1", push, &fakeApplier{}, &fakeProgress{}, newFakeClearCompactStore(), store,
 		logs.logf, nil, nil, nil, nil, nil)

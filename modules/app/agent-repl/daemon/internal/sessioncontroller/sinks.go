@@ -10,7 +10,8 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -296,7 +297,7 @@ type ProgressResolver interface {
 	// single settlement path below, which is the only place that holds a
 	// turn's resolved record, so the cell cannot be produced from a
 	// half-settled turn.
-	NoteTurnAccounting(workspace, sessionID string, accounting *frontendv1.TurnAccounting) error
+	NoteTurnAccounting(workspace, sessionID string, accounting *statev1.TurnAccounting) error
 }
 
 // ClearCompactStore persists the newest CLEAR-OR-COMPACTION seq per
@@ -401,15 +402,15 @@ type PromptReceiptStore interface {
 // completed turn with another client. Every consumer receives one at
 // construction, before it can accept any event.
 type TurnAccountingStore interface {
-	Record(sessionID string, accounting *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error)
-	List(sessionID string) ([]*frontendv1.TurnAccounting, error)
+	Record(sessionID string, accounting *statev1.TurnAccounting) (*statev1.TurnAccounting, error)
+	List(sessionID string) ([]*statev1.TurnAccounting, error)
 }
 
 // HistoricalTokenUtilizationStore durably normalizes file-plane response
 // usage that cannot prove an enclosing turn or stream timing. Its identity is
 // the stable API message id within the agent-repl session.
 type HistoricalTokenUtilizationStore interface {
-	RecordHistorical(*frontendv1.TokenUtilization) (bool, error)
+	RecordHistorical(*statev1.TokenUtilization) (bool, error)
 }
 
 // noopProgress is the ProgressResolver a session controller built without one falls back
@@ -422,7 +423,7 @@ func (noopProgress) SetCounts(string, int64, int64)                           {}
 func (noopProgress) NoteTurnAccepted(string, string) *frontendv1.ProgressView { return nil }
 func (noopProgress) NoteTurnRejected(string, string)                          {}
 func (noopProgress) NoteInterrupt(string, string, corev1.InterruptOutcome)    {}
-func (noopProgress) NoteTurnAccounting(string, string, *frontendv1.TurnAccounting) error {
+func (noopProgress) NoteTurnAccounting(string, string, *statev1.TurnAccounting) error {
 	return nil
 }
 
@@ -653,7 +654,7 @@ type consumer struct {
 	//
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
-	onMainAgentContextSize func(record *frontendv1.TokenUtilization)
+	onMainAgentContextSize func(record *statev1.TokenUtilization)
 	// compactedWaiter reports that a compaction COMPLETED — the compacting
 	// axis closing, which is the only first-class report the vendor gives.
 	// A compact-first revival waits on it before it will accept prompts.
@@ -824,10 +825,10 @@ type consumer struct {
 	// own accord. The stop's own path closes it instead, so the ledger keeps
 	// saying the shim was stopped over a live turn.
 	stoppedTurns           *turnLatch
-	replayedAccounting     map[string]*frontendv1.TurnAccounting
-	replayedResponses      map[string]*frontendv1.TokenUtilization
-	completedTerminalBySeq map[uint64]*frontendv1.TurnAccounting
-	completedResponses     map[string]*frontendv1.TokenUtilization
+	replayedAccounting     map[string]*statev1.TurnAccounting
+	replayedResponses      map[string]*statev1.TokenUtilization
+	completedTerminalBySeq map[uint64]*statev1.TurnAccounting
+	completedResponses     map[string]*statev1.TokenUtilization
 	responseDiagnostics    *diagnosticDeduper
 	// onTerminalAccountingPersisted republishes the SessionView from the
 	// durable aggregate only after the terminal conversation delta is visible.
@@ -883,10 +884,10 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		settledStamps:          map[string]struct{}{},
 		announcedTurnEnds:      newTurnLatch(),
 		stoppedTurns:           newTurnLatch(),
-		replayedAccounting:     map[string]*frontendv1.TurnAccounting{},
-		replayedResponses:      map[string]*frontendv1.TokenUtilization{},
-		completedTerminalBySeq: map[uint64]*frontendv1.TurnAccounting{},
-		completedResponses:     map[string]*frontendv1.TokenUtilization{},
+		replayedAccounting:     map[string]*statev1.TurnAccounting{},
+		replayedResponses:      map[string]*statev1.TokenUtilization{},
+		completedTerminalBySeq: map[uint64]*statev1.TurnAccounting{},
+		completedResponses:     map[string]*statev1.TokenUtilization{},
 		responseDiagnostics:    newDiagnosticDeduper(responseDiagnosticDedupeCapacity, responseDiagnosticRepeatLimit),
 	}
 }
@@ -1582,7 +1583,7 @@ func (c *consumer) serveRetiredTurnAccounting(turnID string) error {
 // this feeds the footer cell and the indexes a resync replays response stamps
 // from. Discharge and publication remain one step so two settlements naming the
 // same turn cannot both claim to be the first.
-func (c *consumer) publishTurnAccountingStamp(turnID string, accounting *frontendv1.TurnAccounting) {
+func (c *consumer) publishTurnAccountingStamp(turnID string, accounting *statev1.TurnAccounting) {
 	// THE FOOTER'S ACCOUNTING CELL IS RESOLVED FROM THIS RECORD, and it is fed
 	// FIRST: a turn whose stamp was already discharged still settled, and its
 	// accounting is still the newest the footer has. A failure to feed it is
@@ -1618,7 +1619,7 @@ func (c *consumer) publishTurnAccountingStamp(turnID string, accounting *fronten
 // this is a failure path taken once per unpersistable turn: a second query
 // shape would be one more thing that could disagree with the row Record
 // compares against.
-func (c *consumer) persistedTurnAccounting(turnID string) (*frontendv1.TurnAccounting, bool, error) {
+func (c *consumer) persistedTurnAccounting(turnID string) (*statev1.TurnAccounting, bool, error) {
 	accountings, err := c.accountingStore.List(c.sessionID)
 	if err != nil {
 		return nil, false, fmt.Errorf("session-controller: read persisted turn accounting: %w", err)
@@ -1825,7 +1826,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 		}
 		observation = nil
 	}
-	var utilization *frontendv1.TokenUtilization
+	var utilization *statev1.TokenUtilization
 	historicalInserted := false
 	if observation != nil {
 		utilization = observation.record
@@ -2531,7 +2532,7 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 		}
 		observation = nil
 	}
-	var historicalUsage *frontendv1.TokenUtilization
+	var historicalUsage *statev1.TokenUtilization
 	if observation != nil && observation.historical {
 		historicalUsage = observation.record
 	}
@@ -2578,7 +2579,7 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 		if assistant == nil {
 			continue
 		}
-		var utilization *frontendv1.TokenUtilization
+		var utilization *statev1.TokenUtilization
 		c.mu.Lock()
 		completed := c.completedResponses[assistant.GetId()]
 		c.mu.Unlock()

@@ -6,7 +6,8 @@ import (
 	"sort"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/tokenusage"
 	"claude-repld/internal/tokenutilization"
@@ -33,7 +34,7 @@ func (e *TokenUtilizationAggregationInvariantError) Unwrap() error {
 // contribute model totals. It deliberately accepts neither an empty model nor
 // whitespace-only model, because the strict frontend wire decoder requires
 // each ModelTokenUtilization entry to carry an identity.
-func ValidateTokenUtilizationAggregation(records []*frontendv1.TokenUtilization) error {
+func ValidateTokenUtilizationAggregation(records []*statev1.TokenUtilization) error {
 	for index, record := range records {
 		if record == nil || record.GetUsage() == nil {
 			continue
@@ -53,11 +54,11 @@ func ValidateTokenUtilizationAggregation(records []*frontendv1.TokenUtilization)
 // classifies a response as main-agent usage only when every subagent field is
 // absent. Keeping the five-field decision here prevents response mapping and
 // aggregation from drifting into different definitions of a subagent.
-func SetTokenUtilizationActor(record *frontendv1.TokenUtilization, assistant *datav1.AssistantMessage) {
+func SetTokenUtilizationActor(record *statev1.TokenUtilization, assistant *datav1.AssistantMessage) {
 	if record == nil || assistant == nil {
 		panic("token utilization actor requires a record and assistant message")
 	}
-	agent := &frontendv1.TokenUtilizationSubagent{
+	agent := &statev1.TokenUtilizationSubagent{
 		AgentId:         assistant.GetAgentId(),
 		ParentToolUseId: assistant.GetParentToolUseId(),
 		ParentAgentId:   assistant.GetParentAgentId(),
@@ -65,13 +66,13 @@ func SetTokenUtilizationActor(record *frontendv1.TokenUtilization, assistant *da
 		TaskDescription: assistant.GetTaskDescription(),
 	}
 	if !hasSubagentProvenance(agent) {
-		record.Actor = &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}}
+		record.Actor = &statev1.TokenUtilization_MainAgent{MainAgent: &statev1.TokenUtilizationMainAgent{}}
 		return
 	}
-	record.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: agent}
+	record.Actor = &statev1.TokenUtilization_Subagent{Subagent: agent}
 }
 
-func hasSubagentProvenance(agent *frontendv1.TokenUtilizationSubagent) bool {
+func hasSubagentProvenance(agent *statev1.TokenUtilizationSubagent) bool {
 	return agent != nil && (agent.GetAgentId() != "" || agent.GetParentToolUseId() != "" || agent.GetParentAgentId() != "" || agent.GetSubagentType() != "" || agent.GetTaskDescription() != "")
 }
 
@@ -94,12 +95,12 @@ func hasSubagentProvenance(agent *frontendv1.TokenUtilizationSubagent) bool {
 // UncachedInputRate: that would double-count against CacheWriteRate, break the
 // partition, and — because these values are durable — make every persisted row
 // irreproducible.
-func CacheRatesFromCounters(input, read, creation int64) *frontendv1.TokenCacheRates {
+func CacheRatesFromCounters(input, read, creation int64) *statev1.TokenCacheRates {
 	total := input + read + creation
 	if total == 0 {
 		return nil
 	}
-	return &frontendv1.TokenCacheRates{
+	return &statev1.TokenCacheRates{
 		TotalPromptInputTokens: total,
 		CacheHitRate:           float64(read) / float64(total),
 		CacheWriteRate:         float64(creation) / float64(total),
@@ -109,17 +110,17 @@ func CacheRatesFromCounters(input, read, creation int64) *frontendv1.TokenCacheR
 
 // AggregateTokenUtilization folds completed response records into the session
 // and per-actor/model totals consumed by frontend views.
-func AggregateTokenUtilization(records []*frontendv1.TokenUtilization) *frontendv1.SessionTokenUtilization {
+func AggregateTokenUtilization(records []*statev1.TokenUtilization) *statev1.SessionTokenUtilization {
 	// Validate before allocating or accumulating so corrupt durable evidence
 	// cannot leave a caller with a partial aggregate that could enter a frame.
 	if err := ValidateTokenUtilizationAggregation(records); err != nil {
 		panic(err)
 	}
-	out := &frontendv1.SessionTokenUtilization{AllAgents: &frontendv1.TokenUsageTotals{}, MainAgent: &frontendv1.TokenUsageTotals{}}
+	out := &statev1.SessionTokenUtilization{AllAgents: &statev1.TokenUsageTotals{}, MainAgent: &statev1.TokenUsageTotals{}}
 	agentIDs := map[string]*subagentAggregateGroup{}
 	parentToolUseIDs := map[string]*subagentAggregateGroup{}
 	var groups []*subagentAggregateGroup
-	models := map[string]*frontendv1.ModelTokenUtilization{}
+	models := map[string]*statev1.ModelTokenUtilization{}
 	for _, record := range records {
 		if record == nil || record.GetUsage() == nil {
 			continue
@@ -146,12 +147,12 @@ func AggregateTokenUtilization(records []*frontendv1.TokenUtilization) *frontend
 		}
 		addModelUsageToMap(models, record)
 	}
-	subagents := make([]*frontendv1.AgentTokenUtilization, 0, len(groups))
+	subagents := make([]*statev1.AgentTokenUtilization, 0, len(groups))
 	for _, group := range groups {
 		if group.mergedInto != nil {
 			continue
 		}
-		entry := &frontendv1.AgentTokenUtilization{Agent: group.agent, Totals: &frontendv1.TokenUsageTotals{}}
+		entry := &statev1.AgentTokenUtilization{Agent: group.agent, Totals: &statev1.TokenUsageTotals{}}
 		for _, record := range group.records {
 			addTokenUsage(entry.Totals, record)
 			entry.Models = addModelUsage(entry.Models, record)
@@ -180,7 +181,7 @@ func AggregateTokenUtilization(records []*frontendv1.TokenUtilization) *frontend
 // contributing record was validated non-negative before it was made durable, so
 // a negative total means the durable evidence itself is wrong, and a view built
 // from it would report a session costing nearly 2^64 tokens.
-func resolveCanonicalTokens(totals *frontendv1.TokenUsageTotals, what string) *frontendv1.TokenUsage {
+func resolveCanonicalTokens(totals *statev1.TokenUsageTotals, what string) *conversationv1.TokenUsage {
 	canonical, err := tokenusage.FromTotals(totals)
 	if err != nil {
 		panic(fmt.Sprintf("token utilization %s cannot be made canonical: %v", what, err))
@@ -189,13 +190,13 @@ func resolveCanonicalTokens(totals *frontendv1.TokenUsageTotals, what string) *f
 }
 
 type subagentAggregateGroup struct {
-	agent      *frontendv1.TokenUtilizationSubagent
-	records    []*frontendv1.TokenUtilization
+	agent      *statev1.TokenUtilizationSubagent
+	records    []*statev1.TokenUtilization
 	mergedInto *subagentAggregateGroup
 	listed     bool
 }
 
-func resolveSubagentGroup(agentIDs, parentToolUseIDs map[string]*subagentAggregateGroup, agent *frontendv1.TokenUtilizationSubagent) *subagentAggregateGroup {
+func resolveSubagentGroup(agentIDs, parentToolUseIDs map[string]*subagentAggregateGroup, agent *statev1.TokenUtilizationSubagent) *subagentAggregateGroup {
 	if !hasSubagentProvenance(agent) {
 		return nil
 	}
@@ -230,7 +231,7 @@ func resolveSubagentGroup(agentIDs, parentToolUseIDs map[string]*subagentAggrega
 	if byTool != nil {
 		return byTool
 	}
-	return &subagentAggregateGroup{agent: &frontendv1.TokenUtilizationSubagent{}}
+	return &subagentAggregateGroup{agent: &statev1.TokenUtilizationSubagent{}}
 }
 
 func bindSubagentGroup(agentIDs, parentToolUseIDs map[string]*subagentAggregateGroup, group *subagentAggregateGroup) {
@@ -242,7 +243,7 @@ func bindSubagentGroup(agentIDs, parentToolUseIDs map[string]*subagentAggregateG
 	}
 }
 
-func mergeSubagentProvenanceSafe(dst, src *frontendv1.TokenUtilizationSubagent) error {
+func mergeSubagentProvenanceSafe(dst, src *statev1.TokenUtilizationSubagent) error {
 	merge := func(field string, current *string, incoming string) error {
 		if incoming == "" {
 			return nil
@@ -274,7 +275,7 @@ func mergeSubagentProvenanceSafe(dst, src *frontendv1.TokenUtilizationSubagent) 
 // resolveSubagentAggregate selects an invocation only from the SDK's stable
 // identifiers. Descriptive provenance without either identifier is retained
 // per response by the caller instead of being promoted into a false identity.
-func resolveSubagentAggregate(agentIDs, parentToolUseIDs map[string]*frontendv1.AgentTokenUtilization, agent *frontendv1.TokenUtilizationSubagent) *frontendv1.AgentTokenUtilization {
+func resolveSubagentAggregate(agentIDs, parentToolUseIDs map[string]*statev1.AgentTokenUtilization, agent *statev1.TokenUtilizationSubagent) *statev1.AgentTokenUtilization {
 	if !hasSubagentProvenance(agent) {
 		panic("subagent token utilization requires provenance")
 	}
@@ -298,10 +299,10 @@ func resolveSubagentAggregate(agentIDs, parentToolUseIDs map[string]*frontendv1.
 	if agent.GetAgentId() == "" && agent.GetParentToolUseId() == "" {
 		return nil
 	}
-	return &frontendv1.AgentTokenUtilization{Agent: &frontendv1.TokenUtilizationSubagent{}}
+	return &statev1.AgentTokenUtilization{Agent: &statev1.TokenUtilizationSubagent{}}
 }
 
-func bindSubagentIdentity(agentIDs, parentToolUseIDs map[string]*frontendv1.AgentTokenUtilization, entry *frontendv1.AgentTokenUtilization) {
+func bindSubagentIdentity(agentIDs, parentToolUseIDs map[string]*statev1.AgentTokenUtilization, entry *statev1.AgentTokenUtilization) {
 	agent := entry.GetAgent()
 	if id := agent.GetAgentId(); id != "" {
 		if prior := agentIDs[id]; prior != nil && prior != entry {
@@ -317,7 +318,7 @@ func bindSubagentIdentity(agentIDs, parentToolUseIDs map[string]*frontendv1.Agen
 	}
 }
 
-func mergeSubagentProvenance(dst, src *frontendv1.TokenUtilizationSubagent) {
+func mergeSubagentProvenance(dst, src *statev1.TokenUtilizationSubagent) {
 	if dst == nil || src == nil {
 		panic("subagent provenance merge requires both records")
 	}
@@ -337,15 +338,15 @@ func mergeSubagentProvenance(dst, src *frontendv1.TokenUtilizationSubagent) {
 	merge("task_description", &dst.TaskDescription, src.GetTaskDescription())
 }
 
-func stableSubagentSortKey(agent *frontendv1.TokenUtilizationSubagent) string {
+func stableSubagentSortKey(agent *statev1.TokenUtilizationSubagent) string {
 	if agent.GetAgentId() != "" {
 		return "agent:" + agent.GetAgentId()
 	}
 	return "tool:" + agent.GetParentToolUseId()
 }
 
-func addModelUsage(models []*frontendv1.ModelTokenUtilization, record *frontendv1.TokenUtilization) []*frontendv1.ModelTokenUtilization {
-	indexed := make(map[string]*frontendv1.ModelTokenUtilization, len(models)+1)
+func addModelUsage(models []*statev1.ModelTokenUtilization, record *statev1.TokenUtilization) []*statev1.ModelTokenUtilization {
+	indexed := make(map[string]*statev1.ModelTokenUtilization, len(models)+1)
 	for _, model := range models {
 		indexed[model.GetModel()] = model
 	}
@@ -353,52 +354,52 @@ func addModelUsage(models []*frontendv1.ModelTokenUtilization, record *frontendv
 	return sortedModelUsage(indexed)
 }
 
-func addModelUsageToMap(models map[string]*frontendv1.ModelTokenUtilization, record *frontendv1.TokenUtilization) {
+func addModelUsageToMap(models map[string]*statev1.ModelTokenUtilization, record *statev1.TokenUtilization) {
 	model := record.GetModel()
 	entry := models[model]
 	if entry == nil {
-		entry = &frontendv1.ModelTokenUtilization{Model: model, Totals: &frontendv1.TokenUsageTotals{}}
+		entry = &statev1.ModelTokenUtilization{Model: model, Totals: &statev1.TokenUsageTotals{}}
 		models[model] = entry
 	}
 	addTokenUsage(entry.Totals, record)
 }
 
-func sortedModelUsage(models map[string]*frontendv1.ModelTokenUtilization) []*frontendv1.ModelTokenUtilization {
+func sortedModelUsage(models map[string]*statev1.ModelTokenUtilization) []*statev1.ModelTokenUtilization {
 	keys := make([]string, 0, len(models))
 	for key := range models {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	out := make([]*frontendv1.ModelTokenUtilization, 0, len(keys))
+	out := make([]*statev1.ModelTokenUtilization, 0, len(keys))
 	for _, key := range keys {
 		out = append(out, models[key])
 	}
 	return out
 }
 
-func addTokenUsage(total *frontendv1.TokenUsageTotals, record *frontendv1.TokenUtilization) {
+func addTokenUsage(total *statev1.TokenUsageTotals, record *statev1.TokenUtilization) {
 	u := record.GetUsage()
 	total.InputTokens += u.GetInputTokens()
 	total.OutputTokens += u.GetOutputTokens()
 	total.CacheReadInputTokens += u.GetCacheReadInputTokens()
 	total.CacheCreationInputTokens += u.GetCacheCreationInputTokens()
 	if total.CacheCreation == nil {
-		total.CacheCreation = &frontendv1.TokenCacheCreation{}
+		total.CacheCreation = &statev1.TokenCacheCreation{}
 	}
 	total.CacheCreation.Ephemeral_5MInputTokens += u.GetCacheCreation().GetEphemeral_5MInputTokens()
 	total.CacheCreation.Ephemeral_1HInputTokens += u.GetCacheCreation().GetEphemeral_1HInputTokens()
 	if total.ServerToolUse == nil {
-		total.ServerToolUse = &frontendv1.TokenServerToolUse{}
+		total.ServerToolUse = &statev1.TokenServerToolUse{}
 	}
 	total.ServerToolUse.WebSearchRequests += u.GetServerToolUse().GetWebSearchRequests()
 	total.ServerToolUse.WebFetchRequests += u.GetServerToolUse().GetWebFetchRequests()
 	if total.OutputDetails == nil {
-		total.OutputDetails = &frontendv1.TokenOutputDetails{}
+		total.OutputDetails = &statev1.TokenOutputDetails{}
 	}
 	total.OutputDetails.ThinkingTokens += u.GetOutputDetails().GetThinkingTokens()
 	total.CacheRates = CacheRatesFromCounters(total.InputTokens, total.CacheReadInputTokens, total.CacheCreationInputTokens)
 	if total.Timing == nil {
-		total.Timing = &frontendv1.TokenTimingTotals{}
+		total.Timing = &statev1.TokenTimingTotals{}
 	}
 	if timing := record.GetResponseTiming(); timing != nil && timing.OutputGenerationDurationMs != nil {
 		total.Timing.OutputTokensWithGenerationDuration += u.GetOutputTokens()

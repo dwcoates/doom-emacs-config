@@ -10,7 +10,8 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/shimclient"
@@ -1341,7 +1342,7 @@ type fakeProgress struct {
 	turnRejections []interruptNote
 	// accountings records one entry per NoteTurnAccounting call — the settled
 	// turns whose reconciliation reached the footer's accounting cell.
-	accountings []*frontendv1.TurnAccounting
+	accountings []*statev1.TurnAccounting
 }
 
 // interruptNote is one opened interrupt window.
@@ -1392,7 +1393,7 @@ func (p *fakeProgress) interruptNotes() []interruptNote {
 }
 
 // NoteTurnAccounting records the settled reconciliations handed to the resolver.
-func (p *fakeProgress) NoteTurnAccounting(_, _ string, accounting *frontendv1.TurnAccounting) error {
+func (p *fakeProgress) NoteTurnAccounting(_, _ string, accounting *statev1.TurnAccounting) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.accountings = append(p.accountings, accounting)
@@ -1400,10 +1401,10 @@ func (p *fakeProgress) NoteTurnAccounting(_, _ string, accounting *frontendv1.Tu
 }
 
 // accountingNotes returns the recorded reconciliations, taken under the lock.
-func (p *fakeProgress) accountingNotes() []*frontendv1.TurnAccounting {
+func (p *fakeProgress) accountingNotes() []*statev1.TurnAccounting {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return append([]*frontendv1.TurnAccounting(nil), p.accountings...)
+	return append([]*statev1.TurnAccounting(nil), p.accountings...)
 }
 
 func newProgressConsumer(prog ProgressResolver) *consumer {
@@ -1417,7 +1418,7 @@ func TestASettledTurnsAccountingReachesTheProgressResolver(t *testing.T) {
 	// this is the single settlement path that holds one.
 	prog := &fakeProgress{}
 	c := newProgressConsumer(prog)
-	accounting := &frontendv1.TurnAccounting{TurnId: "t1"}
+	accounting := &statev1.TurnAccounting{TurnId: "t1"}
 	// Act
 	c.publishTurnAccountingStamp("t1", accounting)
 	// Assert
@@ -1434,7 +1435,7 @@ func TestASettlementWithNoHeldResultStillFeedsTheAccountingCell(t *testing.T) {
 	c := newProgressConsumer(prog)
 	// Act — nothing was ever held for this turn, so the discharge below is a
 	// no-op and the early return used to be reached before the cell was fed.
-	c.publishTurnAccountingStamp("t-never-held", &frontendv1.TurnAccounting{TurnId: "t-never-held"})
+	c.publishTurnAccountingStamp("t-never-held", &statev1.TurnAccounting{TurnId: "t-never-held"})
 	// Assert
 	if len(prog.accountingNotes()) != 1 {
 		t.Fatalf("accounting notes = %v, want the settlement fed despite no held result", prog.accountingNotes())

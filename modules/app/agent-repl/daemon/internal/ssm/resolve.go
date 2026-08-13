@@ -6,7 +6,7 @@ import (
 
 	"claude-repld/internal/dlog"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // Signal tokens stored in workspace_state.state. These are a SUPERSET of

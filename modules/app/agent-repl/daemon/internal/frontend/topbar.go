@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // TopbarInputs is every fact the topbar renders, as the daemon holds them

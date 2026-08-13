@@ -29,7 +29,7 @@ package sessioncontroller
 import (
 	"errors"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"

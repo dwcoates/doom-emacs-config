@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // snapshotQueue returns the QueueView a StateSnapshot carries for workspace, or

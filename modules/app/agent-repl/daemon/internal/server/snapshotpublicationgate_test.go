@@ -5,7 +5,7 @@ import (
 	"sort"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // countingCreationBridge counts the durable publication questions one snapshot

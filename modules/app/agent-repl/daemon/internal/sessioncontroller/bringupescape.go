@@ -43,7 +43,7 @@ import (
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/ssm"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // shimSDKComponent is the component a claude-shim names when its SDK stream

@@ -1,7 +1,8 @@
 package sessioncontroller
 
 import (
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/tokenusage"
@@ -52,7 +53,7 @@ import (
 // An error is returned only for a counter the vendor reported negative, which
 // the canonical shape refuses to convert. The caller surfaces it rather than
 // recording a figure near 2^64 as the conversation's size.
-func mainAgentContextUsage(record *frontendv1.TokenUtilization) (usage *frontendv1.TokenUsage, ok bool, err error) {
+func mainAgentContextUsage(record *statev1.TokenUtilization) (usage *conversationv1.TokenUsage, ok bool, err error) {
 	if record == nil {
 		return nil, false, nil
 	}
@@ -83,7 +84,7 @@ func mainAgentContextUsage(record *frontendv1.TokenUtilization) (usage *frontend
 // writing it would turn a known-large session into an unknown one, which the
 // eligibility check reads as "do not compact". Keeping the last real measurement
 // is the honest answer for a response that reported none.
-func (m *Manager) noteMainAgentContextSize(d *sessionController, record *frontendv1.TokenUtilization) {
+func (m *Manager) noteMainAgentContextSize(d *sessionController, record *statev1.TokenUtilization) {
 	if d == nil {
 		return
 	}

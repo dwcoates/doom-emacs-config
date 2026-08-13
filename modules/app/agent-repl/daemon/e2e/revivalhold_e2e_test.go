@@ -24,7 +24,7 @@ import (
 	"strings"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // revivalHold is a prompt held by a compact-first revival whose compaction has

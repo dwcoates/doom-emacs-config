@@ -34,7 +34,7 @@
 package rostertest
 
 import (
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // The identifiers [ValidRoster] builds with. They are exported so an assertion

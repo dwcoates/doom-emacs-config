@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // THE READER IS MINTED BY THE TRANSPORT, never read off the wire. These cases
