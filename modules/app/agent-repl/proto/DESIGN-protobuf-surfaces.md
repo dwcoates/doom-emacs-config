@@ -659,3 +659,104 @@ and silently dropped `merge` and `skill`." The author saw the duplicate and took
 MATCHING IT BY HAND as the remedy — a remedy that had already failed once, at
 four arms, before anyone noticed. That is the whole argument for the rule in one
 comment.
+
+## Pagination is scoped, and any container can be paged
+
+**Decided.** A page is a page OF A CONTAINER. The feed is the container with no
+parent, so a nested subagent pages with the same message, the same cursor and
+the same renderer as the top-level conversation.
+
+`ConversationPage` gains a `PageScope` — a oneof of `PageScopeFeed` and
+`PageScopeInside { container_message_id }` — and the response states the
+ancestors it resolved.
+
+**What this replaces, and why the replacement was necessary.** The tree
+conflated "a message" with "a feed row", and everything below followed from it:
+
+```
+  "a message == a feed row"
+        -> contained records cannot be records (they would flood the feed)
+        -> so they become repeated frontend.v1.AgentEmission
+        -> so they cannot be paged (a repeated field ships whole or not at all)
+        -> so they must be capped (frontend.v1.DetachedWorkFold)
+        -> so capped content has NO FETCH PATH and is unreachable
+```
+
+Verified: `frontend.v1.DetachedWorkFold` is a TAIL cap (`dropped_before`,
+`tail_cap`), and there is no command anywhere to request the dropped entries —
+zero `DetachedWork` references in `commands.proto` or `conversation-page.proto`.
+A subagent that ran long shows its last N emissions and a notice naming how many
+thousand the user may not look at. They are in the store and unreachable.
+
+The conflation is contradicted by the schema itself: `conversation.v1.MessageParentInside`
+exists precisely so a message need not be a feed row.
+
+**Where the conflation actually lives**, which is further upstream than it first
+appeared — `conversation.v1.MessageEntry.top_level_message_id`:
+
+> EQUALS `message_id` when the message is itself a feed row; names the
+> containing message when nested, so a subagent and everything inside it share
+> one value and therefore ONE PAGE SLOT.
+
+So it is a `conversation.v1` decision, not a `frontend.v1` one, and
+`frontend.v1`'s `emissions` and `fold` are its downstream symptoms.
+
+**Why the path is NOT encoded in the request.** An earlier sketch carried
+`repeated string message_id_path_to_parent`. It is not needed, for two reasons
+that are both stronger than a path:
+
+- The response ECHOES its scope, alongside the `request_id` echo that already
+  exists for exactly this ("a client with a load-more in flight and a cold open
+  still settling has two pages coming").
+- Every returned `conversation.v1.MessageEntry` carries its own `parent`, so the
+  client VERIFIES rather than trusts: every record in the page must name the
+  container that was asked for. A path proves what was ASKED; the parent on each
+  record proves what was RECEIVED.
+
+A path would also be a second statement of the parent chain, and the schema
+already took that bet once — `top_level_message_id` is denormalized with an
+explicit "a write that disagrees is corruption, not a variant". One such
+denormalization is worth its cost; two is a second place for the same
+disagreement.
+
+**What the path was protecting, and where it moved.** A cold open deep into a
+nested container holds no id map and needs the ANCESTORS to render surrounding
+context. That is the daemon ANSWERING with the chain, not the client asserting
+it: `ConversationPage.ancestor_message_ids`, outermost first, empty for the
+feed. It cannot disagree with the parent chain because the resolver derived it
+from that chain in the same pass.
+
+**Follow-up this requires and does not itself deliver.** The store has NO PARENT
+INDEX — `parent` lives inside the opaque `payload` BLOB, and
+`entry_message_owner` indexes `top_level_message_id`, which is the same value
+for a subagent and a subagent inside it. Paging an arbitrary nested container is
+a scan until `entry` carries an indexed parent column.
+
+## The output spool's gap detection is dropped
+
+**Decided, and it is a deliberate removal of error-handling coverage, signed
+off.** `frontend.v1.DetachedWorkOutputSpool.through_offset` and
+`DetachedWorkOutputAppend.from_offset` go.
+
+**What they did.** `from_offset` had to equal the spool's `through_offset`, and
+a mismatch was the only thing that could tell a LOST chunk from a QUIET one; the
+webapp's sole use was to trigger a resync.
+
+**What is lost.** A dropped chunk renders a shell transcript with a silent
+hole — it looks complete and is not. The durable record is intact, so a reload
+repairs it; the user simply has no signal that they should reload.
+
+**Why accepted.** It is display fidelity on a local hop, not data loss. And the
+coverage was already lopsided: `frontend.v1.ConversationDelta`, `TypingDelta`
+and `DetachedWorkDelta` have NO gap detection at all, so one stream of four was
+protected while implying the others were safe. `frontend.v1.FrontendFrame`
+carries no sequence number; the ten `fence` fields are staleness tokens, which
+answer "is this from an old generation", not "did something go missing".
+
+**The cheaper way back, if it is ever wanted.** One `seq` on
+`frontend.v1.FrontendFrame` covers all four delta streams for less than what
+this deletes. Not built now.
+
+**What dropping it unlocks.** With the cursor gone the spool is just bytes, so
+`conversation.v1.DetachedWorkProgressed.output` becomes a genuine counterpart
+and both output TODOs close.
