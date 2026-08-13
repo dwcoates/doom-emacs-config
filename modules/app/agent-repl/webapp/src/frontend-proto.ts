@@ -56,7 +56,7 @@ import {
   type FailureKind as GeneratedFailureKind,
   type QueryTerminationFailure as GeneratedQueryTerminationFailure,
   type SessionResumeFailure as GeneratedSessionResumeFailure,
-} from "../../proto/gen/ts/frontend/v1/errors_pb";
+} from "../../proto/gen/ts/frontend/v1/shared_pb";
 import {
   FailureCardRefSchema,
   FailureCardResolvedSchema,
@@ -80,7 +80,7 @@ import {
   WorkspaceGateHibernatedSchema,
   WorkspaceGateOpenSchema,
   WorkspaceGateViewSchema,
-} from "../../proto/gen/ts/frontend/v1/gate-revival_pb";
+} from "../../proto/gen/ts/frontend/v1/shared_pb";
 import {
   AccountingCompleteSchema,
   AccountingIncompleteSchema,
@@ -138,7 +138,7 @@ import {
   str,
   type Obj,
 } from "./proto-scalars.js";
-import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/frontend/v1/commands_pb";
+import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/frontend/v1/shared_pb";
 import { selectedModel, type SelectedModel } from "../../proto/ts/schema-literals.js";
 
 // --- enums ------------------------------------------------------------------
