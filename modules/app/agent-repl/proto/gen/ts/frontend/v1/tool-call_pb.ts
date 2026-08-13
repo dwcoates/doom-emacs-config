@@ -13,7 +13,7 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { ToolCallBlock, ToolResultContent } from "../../conversation/v1/content_pb";
 import { file_conversation_v1_content } from "../../conversation/v1/content_pb";
-import type { DetachedWorkEnded, DetachedWorkStarted } from "../../conversation/v1/payloads_pb";
+import type { DetachedWorkEnded, DetachedWorkKind, DetachedWorkStarted } from "../../conversation/v1/payloads_pb";
 import { file_conversation_v1_payloads } from "../../conversation/v1/payloads_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/tool-call.proto.
  */
 export const file_frontend_v1_tool_call: GenFile = /*@__PURE__*/
-  fileDesc("Chtmcm9udGVuZC92MS90b29sLWNhbGwucHJvdG8SC2Zyb250ZW5kLnYxImwKDUFnZW50VG9vbENhbGwSLAoEY2FsbBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5Ub29sQ2FsbEJsb2NrEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgCIAEoCVIRc3Bhd25lZF9idWJibGVfaWQiRQoPQWdlbnRUb29sUmVzdWx0EjIKBnJlc3VsdBgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ub29sUmVzdWx0Q29udGVudCLPAQoQQWdlbnRUb29sT3V0Y29tZRI3CgdzdGFydGVkGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya1N0YXJ0ZWRIABIzCgVlbmRlZBgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEgAEhMKC3Rvb2xfdXNlX2lkGAIgASgJEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgDIAEoCUIJCgdvdXRjb21lUhFzcGF3bmVkX2J1YmJsZV9pZCKGBQoJVGFza0VudHJ5Eg8KB3Rhc2tfaWQYASABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSEwoLb3V0cHV0X3BhdGgYBSABKAkSFQoNc3RhcnRlZF9hdF9tcxgGIAEoAxITCgtlbmRlZF9hdF9tcxgHIAEoAxIrCgVhZ2VudBgKIAEoCzIaLmZyb250ZW5kLnYxLlRhc2tLaW5kQWdlbnRIABIxCgh3b3JrZmxvdxgLIAEoCzIdLmZyb250ZW5kLnYxLlRhc2tLaW5kV29ya2Zsb3dIABIrCgVzaGVsbBgMIAEoCzIaLmZyb250ZW5kLnYxLlRhc2tLaW5kU2hlbGxIABI5Cgx1bmNsYXNzaWZpZWQYDSABKAsyIS5mcm9udGVuZC52MS5UYXNrS2luZFVuY2xhc3NpZmllZEgAEjEKB3J1bm5pbmcYFCABKAsyHi5mcm9udGVuZC52MS5UYXNrU3RhdHVzUnVubmluZ0gBEisKBGRvbmUYFSABKAsyGy5mcm9udGVuZC52MS5UYXNrU3RhdHVzRG9uZUgBEi0KBWVycm9yGBYgASgLMhwuZnJvbnRlbmQudjEuVGFza1N0YXR1c0Vycm9ySAESLwoGa2lsbGVkGBcgASgLMh0uZnJvbnRlbmQudjEuVGFza1N0YXR1c0tpbGxlZEgBEjEKB3N0b3BwZWQYGCABKAsyHi5mcm9udGVuZC52MS5UYXNrU3RhdHVzU3RvcHBlZEgBEisKBGxvc3QYGSABKAsyGy5mcm9udGVuZC52MS5UYXNrU3RhdHVzTG9zdEgBQgYKBGtpbmRCCAoGc3RhdHVzSgQIAhADSgQIBBAFUgRraW5kUgZzdGF0dXMiDwoNVGFza0tpbmRBZ2VudCISChBUYXNrS2luZFdvcmtmbG93Ig8KDVRhc2tLaW5kU2hlbGwiKQoUVGFza0tpbmRVbmNsYXNzaWZpZWQSEQoJdG9vbF9uYW1lGAEgASgJIhMKEVRhc2tTdGF0dXNSdW5uaW5nIhAKDlRhc2tTdGF0dXNEb25lIhEKD1Rhc2tTdGF0dXNFcnJvciISChBUYXNrU3RhdHVzS2lsbGVkIhMKEVRhc2tTdGF0dXNTdG9wcGVkIhAKDlRhc2tTdGF0dXNMb3N0ImgKC1Rhc2tDYXRhbG9nEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgV0YXNrcxgDIAMoCzIWLmZyb250ZW5kLnYxLlRhc2tFbnRyeRINCgVmZW5jZRgEIAEoCUoECAIQA1IKc2Vzc2lvbl9pZEIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_content, file_conversation_v1_payloads]);
+  fileDesc("Chtmcm9udGVuZC92MS90b29sLWNhbGwucHJvdG8SC2Zyb250ZW5kLnYxImwKDUFnZW50VG9vbENhbGwSLAoEY2FsbBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5Ub29sQ2FsbEJsb2NrEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgCIAEoCVIRc3Bhd25lZF9idWJibGVfaWQiRQoPQWdlbnRUb29sUmVzdWx0EjIKBnJlc3VsdBgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ub29sUmVzdWx0Q29udGVudCLPAQoQQWdlbnRUb29sT3V0Y29tZRI3CgdzdGFydGVkGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya1N0YXJ0ZWRIABIzCgVlbmRlZBgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEgAEhMKC3Rvb2xfdXNlX2lkGAIgASgJEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgDIAEoCUIJCgdvdXRjb21lUhFzcGF3bmVkX2J1YmJsZV9pZCKEAwoJVGFza0VudHJ5Eg8KB3Rhc2tfaWQYASABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSEwoLb3V0cHV0X3BhdGgYBSABKAkSFQoNc3RhcnRlZF9hdF9tcxgGIAEoAxITCgtlbmRlZF9hdF9tcxgHIAEoAxI0Cgl3b3JrX2tpbmQYDiABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZBIxCgVlbmRlZBgaIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEoECAIQA0oECAQQBUoECAoQC0oECAsQDEoECAwQDUoECA0QDkoECBQQFUoECBUQFkoECBYQF0oECBcQGEoECBgQGUoECBkQGlIEa2luZFIGc3RhdHVzUgVhZ2VudFIId29ya2Zsb3dSBXNoZWxsUgx1bmNsYXNzaWZpZWRSB3J1bm5pbmdSBGRvbmVSBWVycm9yUgZraWxsZWRSB3N0b3BwZWRSBGxvc3QiaAoLVGFza0NhdGFsb2cSEQoJd29ya3NwYWNlGAEgASgJEiUKBXRhc2tzGAMgAygLMhYuZnJvbnRlbmQudjEuVGFza0VudHJ5Eg0KBWZlbmNlGAQgASgJSgQIAhADUgpzZXNzaW9uX2lkQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_conversation_v1_content, file_conversation_v1_payloads]);
 
 /**
  * The tool card's header: one tool invocation.
@@ -199,83 +199,28 @@ export type TaskEntry = Message<"frontend.v1.TaskEntry"> & {
   endedAtMs: bigint;
 
   /**
-   * WHAT KIND of work the task is; the set arm IS the kind. The vocabulary
-   * mirrors DetachedWork's kind arms: the catalog and the detached-work message
-   * describe the same dispatched work from two vantage points and must never
-   * disagree on what it is.
+   * WHAT KIND of work the task is, in the ONE vocabulary the producer wrote it
+   * in. The catalog and the detached-work message describe the same dispatched
+   * work from two vantage points, so they read the same kind out of the same
+   * type rather than each keeping a copy to disagree with.
    *
-   * @generated from oneof frontend.v1.TaskEntry.kind
+   * NOT named `kind`: that wire token is reserved for the retired free-string
+   * field, and this surface is protojson, where reusing the token would put two
+   * different types behind one name across versions.
+   *
+   * @generated from field: conversation.v1.DetachedWorkKind work_kind = 14;
    */
-  kind: {
-    /**
-     * @generated from field: frontend.v1.TaskKindAgent agent = 10;
-     */
-    value: TaskKindAgent;
-    case: "agent";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TaskKindWorkflow workflow = 11;
-     */
-    value: TaskKindWorkflow;
-    case: "workflow";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TaskKindShell shell = 12;
-     */
-    value: TaskKindShell;
-    case: "shell";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TaskKindUnclassified unclassified = 13;
-     */
-    value: TaskKindUnclassified;
-    case: "unclassified";
-  } | { case: undefined; value?: undefined };
+  workKind?: DetachedWorkKind | undefined;
 
   /**
-   * The task's lifecycle; the set arm IS the status. Never unset on a wire
-   * entry: an entry with no arm here is a malformed frame and is rejected
-   * loudly rather than drawn as running.
+   * HOW THE TASK ENDED, as the producer recorded it. UNSET means the task is
+   * still open — the absence of an ending IS "running", which is why there is no
+   * arm asserting it. A set `ended` whose ended_at_ms is 0 is a malformed entry
+   * and is rejected loudly rather than drawn as running.
    *
-   * @generated from oneof frontend.v1.TaskEntry.status
+   * @generated from field: conversation.v1.DetachedWorkEnded ended = 26;
    */
-  status: {
-    /**
-     * @generated from field: frontend.v1.TaskStatusRunning running = 20;
-     */
-    value: TaskStatusRunning;
-    case: "running";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TaskStatusDone done = 21;
-     */
-    value: TaskStatusDone;
-    case: "done";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TaskStatusError error = 22;
-     */
-    value: TaskStatusError;
-    case: "error";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TaskStatusKilled killed = 23;
-     */
-    value: TaskStatusKilled;
-    case: "killed";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TaskStatusStopped stopped = 24;
-     */
-    value: TaskStatusStopped;
-    case: "stopped";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TaskStatusLost lost = 25;
-     */
-    value: TaskStatusLost;
-    case: "lost";
-  } | { case: undefined; value?: undefined };
+  ended?: DetachedWorkEnded | undefined;
 };
 
 /**
@@ -284,165 +229,6 @@ export type TaskEntry = Message<"frontend.v1.TaskEntry"> & {
  */
 export const TaskEntrySchema: GenMessage<TaskEntry> = /*@__PURE__*/
   messageDesc(file_frontend_v1_tool_call, 3);
-
-/**
- * The task is a dispatched subagent.
- *
- * @generated from message frontend.v1.TaskKindAgent
- */
-export type TaskKindAgent = Message<"frontend.v1.TaskKindAgent"> & {
-};
-
-/**
- * Describes the message frontend.v1.TaskKindAgent.
- * Use `create(TaskKindAgentSchema)` to create a new message.
- */
-export const TaskKindAgentSchema: GenMessage<TaskKindAgent> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_tool_call, 4);
-
-/**
- * The task is a Workflow run.
- *
- * @generated from message frontend.v1.TaskKindWorkflow
- */
-export type TaskKindWorkflow = Message<"frontend.v1.TaskKindWorkflow"> & {
-};
-
-/**
- * Describes the message frontend.v1.TaskKindWorkflow.
- * Use `create(TaskKindWorkflowSchema)` to create a new message.
- */
-export const TaskKindWorkflowSchema: GenMessage<TaskKindWorkflow> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_tool_call, 5);
-
-/**
- * The task is a backgrounded shell command.
- *
- * @generated from message frontend.v1.TaskKindShell
- */
-export type TaskKindShell = Message<"frontend.v1.TaskKindShell"> & {
-};
-
-/**
- * Describes the message frontend.v1.TaskKindShell.
- * Use `create(TaskKindShellSchema)` to create a new message.
- */
-export const TaskKindShellSchema: GenMessage<TaskKindShell> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_tool_call, 6);
-
-/**
- * The task's spawning tool is one the daemon does not recognize. Mirrors
- * DetachedWorkUnclassified: named rather than guessed into another kind.
- *
- * @generated from message frontend.v1.TaskKindUnclassified
- */
-export type TaskKindUnclassified = Message<"frontend.v1.TaskKindUnclassified"> & {
-  /**
-   * The tool that spawned the work, verbatim as the agent named it.
-   *
-   * @generated from field: string tool_name = 1;
-   */
-  toolName: string;
-};
-
-/**
- * Describes the message frontend.v1.TaskKindUnclassified.
- * Use `create(TaskKindUnclassifiedSchema)` to create a new message.
- */
-export const TaskKindUnclassifiedSchema: GenMessage<TaskKindUnclassified> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_tool_call, 7);
-
-/**
- * The task is still running.
- *
- * @generated from message frontend.v1.TaskStatusRunning
- */
-export type TaskStatusRunning = Message<"frontend.v1.TaskStatusRunning"> & {
-};
-
-/**
- * Describes the message frontend.v1.TaskStatusRunning.
- * Use `create(TaskStatusRunningSchema)` to create a new message.
- */
-export const TaskStatusRunningSchema: GenMessage<TaskStatusRunning> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_tool_call, 8);
-
-/**
- * The task finished successfully.
- *
- * @generated from message frontend.v1.TaskStatusDone
- */
-export type TaskStatusDone = Message<"frontend.v1.TaskStatusDone"> & {
-};
-
-/**
- * Describes the message frontend.v1.TaskStatusDone.
- * Use `create(TaskStatusDoneSchema)` to create a new message.
- */
-export const TaskStatusDoneSchema: GenMessage<TaskStatusDone> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_tool_call, 9);
-
-/**
- * The task finished by failing.
- *
- * @generated from message frontend.v1.TaskStatusError
- */
-export type TaskStatusError = Message<"frontend.v1.TaskStatusError"> & {
-};
-
-/**
- * Describes the message frontend.v1.TaskStatusError.
- * Use `create(TaskStatusErrorSchema)` to create a new message.
- */
-export const TaskStatusErrorSchema: GenMessage<TaskStatusError> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_tool_call, 10);
-
-/**
- * The task was stopped from outside before it finished.
- *
- * @generated from message frontend.v1.TaskStatusKilled
- */
-export type TaskStatusKilled = Message<"frontend.v1.TaskStatusKilled"> & {
-};
-
-/**
- * Describes the message frontend.v1.TaskStatusKilled.
- * Use `create(TaskStatusKilledSchema)` to create a new message.
- */
-export const TaskStatusKilledSchema: GenMessage<TaskStatusKilled> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_tool_call, 11);
-
-/**
- * The task was stopped deliberately through its own stop affordance.
- *
- * @generated from message frontend.v1.TaskStatusStopped
- */
-export type TaskStatusStopped = Message<"frontend.v1.TaskStatusStopped"> & {
-};
-
-/**
- * Describes the message frontend.v1.TaskStatusStopped.
- * Use `create(TaskStatusStoppedSchema)` to create a new message.
- */
-export const TaskStatusStoppedSchema: GenMessage<TaskStatusStopped> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_tool_call, 12);
-
-/**
- * The daemon lost track of the task — a restart or a vanished process left
- * its ending unobserved. An honest absence, distinct from every observed
- * ending.
- *
- * @generated from message frontend.v1.TaskStatusLost
- */
-export type TaskStatusLost = Message<"frontend.v1.TaskStatusLost"> & {
-};
-
-/**
- * Describes the message frontend.v1.TaskStatusLost.
- * Use `create(TaskStatusLostSchema)` to create a new message.
- */
-export const TaskStatusLostSchema: GenMessage<TaskStatusLost> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_tool_call, 13);
 
 /**
  * @generated from message frontend.v1.TaskCatalog
@@ -479,5 +265,5 @@ export type TaskCatalog = Message<"frontend.v1.TaskCatalog"> & {
  * Use `create(TaskCatalogSchema)` to create a new message.
  */
 export const TaskCatalogSchema: GenMessage<TaskCatalog> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_tool_call, 14);
+  messageDesc(file_frontend_v1_tool_call, 4);
 

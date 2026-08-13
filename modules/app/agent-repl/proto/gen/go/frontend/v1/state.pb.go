@@ -10,6 +10,7 @@
 package frontendv1
 
 import (
+	v1 "agentrepl/proto/protocol/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -914,7 +915,7 @@ type SessionView struct {
 	Death *FailureCardView `protobuf:"bytes,20,opt,name=death,proto3" json:"death,omitempty"`
 	// The SDK-published set this session can deliberately select.  A frontend
 	// only renders these choices; it never invents or owns a model selection.
-	ModelOptions []*ModelOption `protobuf:"bytes,21,rep,name=model_options,json=modelOptions,proto3" json:"model_options,omitempty"`
+	ModelOptions []*v1.ModelOption `protobuf:"bytes,21,rep,name=model_options,json=modelOptions,proto3" json:"model_options,omitempty"`
 	// Present iff the session is hibernated; the typed account behind the
 	// `hibernated` bool (16), which stays as its compatibility projection.
 	// A frontend renders the revival gate from this.
@@ -1086,7 +1087,7 @@ func (x *SessionView) GetDeath() *FailureCardView {
 	return nil
 }
 
-func (x *SessionView) GetModelOptions() []*ModelOption {
+func (x *SessionView) GetModelOptions() []*v1.ModelOption {
 	if x != nil {
 		return x.ModelOptions
 	}
@@ -1247,7 +1248,7 @@ var File_frontend_v1_state_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_state_proto_rawDesc = "" +
 	"\n" +
-	"\x17frontend/v1/state.proto\x12\vfrontend.v1\x1a\x1efrontend/v1/failure-card.proto\x1a\x1efrontend/v1/gate-revival.proto\x1a\x17frontend/v1/merge.proto\x1a\x18frontend/v1/topbar.proto\"\xa4\x01\n" +
+	"\x17frontend/v1/state.proto\x12\vfrontend.v1\x1a\x1efrontend/v1/failure-card.proto\x1a\x1efrontend/v1/gate-revival.proto\x1a\x17frontend/v1/merge.proto\x1a\x16protocol/v1/core.proto\"\xa4\x01\n" +
 	"\fRuntimeFault\x12\x1c\n" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x1d\n" +
 	"\n" +
@@ -1305,7 +1306,7 @@ const file_frontend_v1_state_proto_rawDesc = "" +
 	"config_dir\x18\x12 \x01(\tR\tconfigDir\x126\n" +
 	"\bbackfill\x18\x13 \x01(\x0e2\x1a.frontend.v1.BackfillStateR\bbackfill\x122\n" +
 	"\x05death\x18\x14 \x01(\v2\x1c.frontend.v1.FailureCardViewR\x05death\x12=\n" +
-	"\rmodel_options\x18\x15 \x03(\v2\x18.frontend.v1.ModelOptionR\fmodelOptions\x12@\n" +
+	"\rmodel_options\x18\x15 \x03(\v2\x18.protocol.v1.ModelOptionR\fmodelOptions\x12@\n" +
 	"\vhibernation\x18\x17 \x01(\v2\x1e.frontend.v1.HibernationDetailR\vhibernationJ\x04\b\x0e\x10\x0fJ\x04\b\x16\x10\x17R\fdeath_reasonR\x11token_utilization\"\xac\x01\n" +
 	"\n" +
 	"DaemonView\x12\x17\n" +
@@ -1393,7 +1394,7 @@ var file_frontend_v1_state_proto_goTypes = []any{
 	(*MergeStatus)(nil),       // 9: frontend.v1.MergeStatus
 	(*MergeDequeueOffer)(nil), // 10: frontend.v1.MergeDequeueOffer
 	(*FailureCardView)(nil),   // 11: frontend.v1.FailureCardView
-	(*ModelOption)(nil),       // 12: frontend.v1.ModelOption
+	(*v1.ModelOption)(nil),    // 12: protocol.v1.ModelOption
 	(*HibernationDetail)(nil), // 13: frontend.v1.HibernationDetail
 }
 var file_frontend_v1_state_proto_depIdxs = []int32{
@@ -1405,7 +1406,7 @@ var file_frontend_v1_state_proto_depIdxs = []int32{
 	10, // 5: frontend.v1.WorkspaceState.merge_dequeue_offer:type_name -> frontend.v1.MergeDequeueOffer
 	3,  // 6: frontend.v1.SessionView.backfill:type_name -> frontend.v1.BackfillState
 	11, // 7: frontend.v1.SessionView.death:type_name -> frontend.v1.FailureCardView
-	12, // 8: frontend.v1.SessionView.model_options:type_name -> frontend.v1.ModelOption
+	12, // 8: frontend.v1.SessionView.model_options:type_name -> protocol.v1.ModelOption
 	13, // 9: frontend.v1.SessionView.hibernation:type_name -> frontend.v1.HibernationDetail
 	10, // [10:10] is the sub-list for method output_type
 	10, // [10:10] is the sub-list for method input_type
@@ -1422,7 +1423,6 @@ func file_frontend_v1_state_proto_init() {
 	file_frontend_v1_failure_card_proto_init()
 	file_frontend_v1_gate_revival_proto_init()
 	file_frontend_v1_merge_proto_init()
-	file_frontend_v1_topbar_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

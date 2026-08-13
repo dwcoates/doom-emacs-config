@@ -262,7 +262,7 @@ func (x *DetachedCancelOutcome) GetCancelled() *DetachedAgentsCancelled {
 	return nil
 }
 
-func (x *DetachedCancelOutcome) GetNothingRunning() *NoDetachedAgentsRunning {
+func (x *DetachedCancelOutcome) GetNothingRunning() *v1.NoDetachedAgentsRunning {
 	if x != nil {
 		if x, ok := x.Outcome.(*DetachedCancelOutcome_NothingRunning); ok {
 			return x.NothingRunning
@@ -271,7 +271,7 @@ func (x *DetachedCancelOutcome) GetNothingRunning() *NoDetachedAgentsRunning {
 	return nil
 }
 
-func (x *DetachedCancelOutcome) GetUnsupported() *DetachedCancelUnsupported {
+func (x *DetachedCancelOutcome) GetUnsupported() *v1.DetachedCancelUnsupported {
 	if x != nil {
 		if x, ok := x.Outcome.(*DetachedCancelOutcome_Unsupported); ok {
 			return x.Unsupported
@@ -289,11 +289,11 @@ type DetachedCancelOutcome_Cancelled struct {
 }
 
 type DetachedCancelOutcome_NothingRunning struct {
-	NothingRunning *NoDetachedAgentsRunning `protobuf:"bytes,2,opt,name=nothing_running,json=nothingRunning,proto3,oneof"`
+	NothingRunning *v1.NoDetachedAgentsRunning `protobuf:"bytes,2,opt,name=nothing_running,json=nothingRunning,proto3,oneof"`
 }
 
 type DetachedCancelOutcome_Unsupported struct {
-	Unsupported *DetachedCancelUnsupported `protobuf:"bytes,3,opt,name=unsupported,proto3,oneof"`
+	Unsupported *v1.DetachedCancelUnsupported `protobuf:"bytes,3,opt,name=unsupported,proto3,oneof"`
 }
 
 func (*DetachedCancelOutcome_Cancelled) isDetachedCancelOutcome_Outcome() {}
@@ -303,6 +303,12 @@ func (*DetachedCancelOutcome_NothingRunning) isDetachedCancelOutcome_Outcome() {
 func (*DetachedCancelOutcome_Unsupported) isDetachedCancelOutcome_Outcome() {}
 
 // Detached work was running and the stop reached every agent counted here.
+//
+// TODO(respelling): this shares a name with protocol.v1.DetachedAgentsCancelled
+// but NOT its contents — that one carries `repeated string task_ids`, this one
+// carries `count`, which has no counterpart there. It was therefore not
+// collapsed into protocol.v1's, and DetachedCancelOutcome above stays declared
+// here for the same reason: its `cancelled` arm must reference this message.
 type DetachedAgentsCancelled struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// How many detached agents were stopped. A COUNT rather than the shim's
@@ -352,96 +358,6 @@ func (x *DetachedAgentsCancelled) GetCount() int64 {
 	return 0
 }
 
-// Nothing detached was running, so the command stopped nothing.
-//
-// THE DAEMON REFUSES ON THIS ARM (the ack carries ok=false alongside it). A
-// cancel that stopped nothing is a keystroke that did nothing, and reporting
-// it as success is how a stop control comes to look like it works when it
-// does not reach anything. The typed arm is what lets a frontend say "nothing
-// was running" instead of showing a bare transport failure.
-type NoDetachedAgentsRunning struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *NoDetachedAgentsRunning) Reset() {
-	*x = NoDetachedAgentsRunning{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *NoDetachedAgentsRunning) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*NoDetachedAgentsRunning) ProtoMessage() {}
-
-func (x *NoDetachedAgentsRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use NoDetachedAgentsRunning.ProtoReflect.Descriptor instead.
-func (*NoDetachedAgentsRunning) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{5}
-}
-
-// The stop could not be attempted at all: no live session behind the
-// workspace, or a vendor CLI with no task-stop control.
-type DetachedCancelUnsupported struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Why, in one sentence, for display.
-	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DetachedCancelUnsupported) Reset() {
-	*x = DetachedCancelUnsupported{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DetachedCancelUnsupported) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DetachedCancelUnsupported) ProtoMessage() {}
-
-func (x *DetachedCancelUnsupported) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DetachedCancelUnsupported.ProtoReflect.Descriptor instead.
-func (*DetachedCancelUnsupported) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *DetachedCancelUnsupported) GetDetail() string {
-	if x != nil {
-		return x.Detail
-	}
-	return ""
-}
-
 // The classifier is still running: the entry is queued and undecided.
 type QueueClassificationPending struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -451,7 +367,7 @@ type QueueClassificationPending struct {
 
 func (x *QueueClassificationPending) Reset() {
 	*x = QueueClassificationPending{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[7]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -463,7 +379,7 @@ func (x *QueueClassificationPending) String() string {
 func (*QueueClassificationPending) ProtoMessage() {}
 
 func (x *QueueClassificationPending) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[7]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -476,7 +392,7 @@ func (x *QueueClassificationPending) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueClassificationPending.ProtoReflect.Descriptor instead.
 func (*QueueClassificationPending) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{7}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{5}
 }
 
 // Deliver NOW: interrupt the running turn and submit once it has ended.
@@ -490,7 +406,7 @@ type QueueClassificationInterject struct {
 
 func (x *QueueClassificationInterject) Reset() {
 	*x = QueueClassificationInterject{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[8]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -502,7 +418,7 @@ func (x *QueueClassificationInterject) String() string {
 func (*QueueClassificationInterject) ProtoMessage() {}
 
 func (x *QueueClassificationInterject) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[8]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -515,7 +431,7 @@ func (x *QueueClassificationInterject) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueClassificationInterject.ProtoReflect.Descriptor instead.
 func (*QueueClassificationInterject) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{8}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *QueueClassificationInterject) GetRationale() string {
@@ -541,7 +457,7 @@ type QueueClassificationHold struct {
 
 func (x *QueueClassificationHold) Reset() {
 	*x = QueueClassificationHold{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[9]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -553,7 +469,7 @@ func (x *QueueClassificationHold) String() string {
 func (*QueueClassificationHold) ProtoMessage() {}
 
 func (x *QueueClassificationHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[9]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -566,7 +482,7 @@ func (x *QueueClassificationHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueClassificationHold.ProtoReflect.Descriptor instead.
 func (*QueueClassificationHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{9}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *QueueClassificationHold) GetRationale() string {
@@ -612,7 +528,7 @@ type QueueClassificationUninterruptibleTurn struct {
 
 func (x *QueueClassificationUninterruptibleTurn) Reset() {
 	*x = QueueClassificationUninterruptibleTurn{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[10]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -624,7 +540,7 @@ func (x *QueueClassificationUninterruptibleTurn) String() string {
 func (*QueueClassificationUninterruptibleTurn) ProtoMessage() {}
 
 func (x *QueueClassificationUninterruptibleTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[10]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -637,7 +553,7 @@ func (x *QueueClassificationUninterruptibleTurn) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use QueueClassificationUninterruptibleTurn.ProtoReflect.Descriptor instead.
 func (*QueueClassificationUninterruptibleTurn) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{10}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *QueueClassificationUninterruptibleTurn) GetCommand() SessionCommand {
@@ -662,7 +578,7 @@ type QueueClassificationError struct {
 
 func (x *QueueClassificationError) Reset() {
 	*x = QueueClassificationError{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[11]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -674,7 +590,7 @@ func (x *QueueClassificationError) String() string {
 func (*QueueClassificationError) ProtoMessage() {}
 
 func (x *QueueClassificationError) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[11]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -687,7 +603,7 @@ func (x *QueueClassificationError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueClassificationError.ProtoReflect.Descriptor instead.
 func (*QueueClassificationError) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{11}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *QueueClassificationError) GetDetail() string {
@@ -739,7 +655,7 @@ type QueueEntry struct {
 
 func (x *QueueEntry) Reset() {
 	*x = QueueEntry{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[12]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -751,7 +667,7 @@ func (x *QueueEntry) String() string {
 func (*QueueEntry) ProtoMessage() {}
 
 func (x *QueueEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[12]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -764,7 +680,7 @@ func (x *QueueEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntry.ProtoReflect.Descriptor instead.
 func (*QueueEntry) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{12}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *QueueEntry) GetId() string {
@@ -987,7 +903,7 @@ type QueueEntryShutdownHold struct {
 
 func (x *QueueEntryShutdownHold) Reset() {
 	*x = QueueEntryShutdownHold{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[13]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -999,7 +915,7 @@ func (x *QueueEntryShutdownHold) String() string {
 func (*QueueEntryShutdownHold) ProtoMessage() {}
 
 func (x *QueueEntryShutdownHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[13]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1012,7 +928,7 @@ func (x *QueueEntryShutdownHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntryShutdownHold.ProtoReflect.Descriptor instead.
 func (*QueueEntryShutdownHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{13}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *QueueEntryShutdownHold) GetScheduleId() string {
@@ -1034,7 +950,7 @@ type QueueEntryKeepAliveHold struct {
 
 func (x *QueueEntryKeepAliveHold) Reset() {
 	*x = QueueEntryKeepAliveHold{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[14]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1046,7 +962,7 @@ func (x *QueueEntryKeepAliveHold) String() string {
 func (*QueueEntryKeepAliveHold) ProtoMessage() {}
 
 func (x *QueueEntryKeepAliveHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[14]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1059,7 +975,7 @@ func (x *QueueEntryKeepAliveHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntryKeepAliveHold.ProtoReflect.Descriptor instead.
 func (*QueueEntryKeepAliveHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{14}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *QueueEntryKeepAliveHold) GetTurnId() string {
@@ -1078,7 +994,7 @@ type QueueEntryRevivalHold struct {
 
 func (x *QueueEntryRevivalHold) Reset() {
 	*x = QueueEntryRevivalHold{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[15]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1090,7 +1006,7 @@ func (x *QueueEntryRevivalHold) String() string {
 func (*QueueEntryRevivalHold) ProtoMessage() {}
 
 func (x *QueueEntryRevivalHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[15]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1103,7 +1019,7 @@ func (x *QueueEntryRevivalHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntryRevivalHold.ProtoReflect.Descriptor instead.
 func (*QueueEntryRevivalHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{15}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{13}
 }
 
 // The entry waits for its session's shim to restart onto the current build
@@ -1117,7 +1033,7 @@ type QueueEntryBuildRefreshHold struct {
 
 func (x *QueueEntryBuildRefreshHold) Reset() {
 	*x = QueueEntryBuildRefreshHold{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[16]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1129,7 +1045,7 @@ func (x *QueueEntryBuildRefreshHold) String() string {
 func (*QueueEntryBuildRefreshHold) ProtoMessage() {}
 
 func (x *QueueEntryBuildRefreshHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[16]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1142,7 +1058,7 @@ func (x *QueueEntryBuildRefreshHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntryBuildRefreshHold.ProtoReflect.Descriptor instead.
 func (*QueueEntryBuildRefreshHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{16}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{14}
 }
 
 // The session's queue, pushed on EVERY change and carried in StateSnapshot.
@@ -1168,7 +1084,7 @@ type QueueView struct {
 
 func (x *QueueView) Reset() {
 	*x = QueueView{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[17]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1180,7 +1096,7 @@ func (x *QueueView) String() string {
 func (*QueueView) ProtoMessage() {}
 
 func (x *QueueView) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[17]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1193,7 +1109,7 @@ func (x *QueueView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueView.ProtoReflect.Descriptor instead.
 func (*QueueView) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{17}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *QueueView) GetWorkspace() string {
@@ -1228,7 +1144,7 @@ type QueueForceCmd struct {
 
 func (x *QueueForceCmd) Reset() {
 	*x = QueueForceCmd{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[18]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1240,7 +1156,7 @@ func (x *QueueForceCmd) String() string {
 func (*QueueForceCmd) ProtoMessage() {}
 
 func (x *QueueForceCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[18]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1253,7 +1169,7 @@ func (x *QueueForceCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueForceCmd.ProtoReflect.Descriptor instead.
 func (*QueueForceCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{18}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *QueueForceCmd) GetEntryId() string {
@@ -1274,7 +1190,7 @@ type QueueAcceptCmd struct {
 
 func (x *QueueAcceptCmd) Reset() {
 	*x = QueueAcceptCmd{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[19]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1286,7 +1202,7 @@ func (x *QueueAcceptCmd) String() string {
 func (*QueueAcceptCmd) ProtoMessage() {}
 
 func (x *QueueAcceptCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[19]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1299,7 +1215,7 @@ func (x *QueueAcceptCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueAcceptCmd.ProtoReflect.Descriptor instead.
 func (*QueueAcceptCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{19}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *QueueAcceptCmd) GetEntryId() string {
@@ -1319,7 +1235,7 @@ type QueueCancelCmd struct {
 
 func (x *QueueCancelCmd) Reset() {
 	*x = QueueCancelCmd{}
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[20]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1331,7 +1247,7 @@ func (x *QueueCancelCmd) String() string {
 func (*QueueCancelCmd) ProtoMessage() {}
 
 func (x *QueueCancelCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[20]
+	mi := &file_frontend_v1_prompt_queue_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1344,7 +1260,7 @@ func (x *QueueCancelCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueCancelCmd.ProtoReflect.Descriptor instead.
 func (*QueueCancelCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{20}
+	return file_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *QueueCancelCmd) GetEntryId() string {
@@ -1368,14 +1284,11 @@ const file_frontend_v1_prompt_queue_proto_rawDesc = "" +
 	"\x17CancelDetachedAgentsCmd\"\x85\x02\n" +
 	"\x15DetachedCancelOutcome\x12D\n" +
 	"\tcancelled\x18\x01 \x01(\v2$.frontend.v1.DetachedAgentsCancelledH\x00R\tcancelled\x12O\n" +
-	"\x0fnothing_running\x18\x02 \x01(\v2$.frontend.v1.NoDetachedAgentsRunningH\x00R\x0enothingRunning\x12J\n" +
-	"\vunsupported\x18\x03 \x01(\v2&.frontend.v1.DetachedCancelUnsupportedH\x00R\vunsupportedB\t\n" +
+	"\x0fnothing_running\x18\x02 \x01(\v2$.protocol.v1.NoDetachedAgentsRunningH\x00R\x0enothingRunning\x12J\n" +
+	"\vunsupported\x18\x03 \x01(\v2&.protocol.v1.DetachedCancelUnsupportedH\x00R\vunsupportedB\t\n" +
 	"\aoutcome\"/\n" +
 	"\x17DetachedAgentsCancelled\x12\x14\n" +
-	"\x05count\x18\x01 \x01(\x03R\x05count\"\x19\n" +
-	"\x17NoDetachedAgentsRunning\"3\n" +
-	"\x19DetachedCancelUnsupported\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x1c\n" +
+	"\x05count\x18\x01 \x01(\x03R\x05count\"\x1c\n" +
 	"\x1aQueueClassificationPending\"<\n" +
 	"\x1cQueueClassificationInterject\x12\x1c\n" +
 	"\trationale\x18\x01 \x01(\tR\trationale\"S\n" +
@@ -1437,48 +1350,48 @@ func file_frontend_v1_prompt_queue_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_prompt_queue_proto_rawDescData
 }
 
-var file_frontend_v1_prompt_queue_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_frontend_v1_prompt_queue_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_frontend_v1_prompt_queue_proto_goTypes = []any{
 	(*SubmitPromptCmd)(nil),                        // 0: frontend.v1.SubmitPromptCmd
 	(*InterruptCmd)(nil),                           // 1: frontend.v1.InterruptCmd
 	(*CancelDetachedAgentsCmd)(nil),                // 2: frontend.v1.CancelDetachedAgentsCmd
 	(*DetachedCancelOutcome)(nil),                  // 3: frontend.v1.DetachedCancelOutcome
 	(*DetachedAgentsCancelled)(nil),                // 4: frontend.v1.DetachedAgentsCancelled
-	(*NoDetachedAgentsRunning)(nil),                // 5: frontend.v1.NoDetachedAgentsRunning
-	(*DetachedCancelUnsupported)(nil),              // 6: frontend.v1.DetachedCancelUnsupported
-	(*QueueClassificationPending)(nil),             // 7: frontend.v1.QueueClassificationPending
-	(*QueueClassificationInterject)(nil),           // 8: frontend.v1.QueueClassificationInterject
-	(*QueueClassificationHold)(nil),                // 9: frontend.v1.QueueClassificationHold
-	(*QueueClassificationUninterruptibleTurn)(nil), // 10: frontend.v1.QueueClassificationUninterruptibleTurn
-	(*QueueClassificationError)(nil),               // 11: frontend.v1.QueueClassificationError
-	(*QueueEntry)(nil),                             // 12: frontend.v1.QueueEntry
-	(*QueueEntryShutdownHold)(nil),                 // 13: frontend.v1.QueueEntryShutdownHold
-	(*QueueEntryKeepAliveHold)(nil),                // 14: frontend.v1.QueueEntryKeepAliveHold
-	(*QueueEntryRevivalHold)(nil),                  // 15: frontend.v1.QueueEntryRevivalHold
-	(*QueueEntryBuildRefreshHold)(nil),             // 16: frontend.v1.QueueEntryBuildRefreshHold
-	(*QueueView)(nil),                              // 17: frontend.v1.QueueView
-	(*QueueForceCmd)(nil),                          // 18: frontend.v1.QueueForceCmd
-	(*QueueAcceptCmd)(nil),                         // 19: frontend.v1.QueueAcceptCmd
-	(*QueueCancelCmd)(nil),                         // 20: frontend.v1.QueueCancelCmd
-	(v1.PromptOrigin)(0),                           // 21: protocol.v1.PromptOrigin
+	(*QueueClassificationPending)(nil),             // 5: frontend.v1.QueueClassificationPending
+	(*QueueClassificationInterject)(nil),           // 6: frontend.v1.QueueClassificationInterject
+	(*QueueClassificationHold)(nil),                // 7: frontend.v1.QueueClassificationHold
+	(*QueueClassificationUninterruptibleTurn)(nil), // 8: frontend.v1.QueueClassificationUninterruptibleTurn
+	(*QueueClassificationError)(nil),               // 9: frontend.v1.QueueClassificationError
+	(*QueueEntry)(nil),                             // 10: frontend.v1.QueueEntry
+	(*QueueEntryShutdownHold)(nil),                 // 11: frontend.v1.QueueEntryShutdownHold
+	(*QueueEntryKeepAliveHold)(nil),                // 12: frontend.v1.QueueEntryKeepAliveHold
+	(*QueueEntryRevivalHold)(nil),                  // 13: frontend.v1.QueueEntryRevivalHold
+	(*QueueEntryBuildRefreshHold)(nil),             // 14: frontend.v1.QueueEntryBuildRefreshHold
+	(*QueueView)(nil),                              // 15: frontend.v1.QueueView
+	(*QueueForceCmd)(nil),                          // 16: frontend.v1.QueueForceCmd
+	(*QueueAcceptCmd)(nil),                         // 17: frontend.v1.QueueAcceptCmd
+	(*QueueCancelCmd)(nil),                         // 18: frontend.v1.QueueCancelCmd
+	(v1.PromptOrigin)(0),                           // 19: protocol.v1.PromptOrigin
+	(*v1.NoDetachedAgentsRunning)(nil),             // 20: protocol.v1.NoDetachedAgentsRunning
+	(*v1.DetachedCancelUnsupported)(nil),           // 21: protocol.v1.DetachedCancelUnsupported
 	(SessionCommand)(0),                            // 22: frontend.v1.SessionCommand
 }
 var file_frontend_v1_prompt_queue_proto_depIdxs = []int32{
-	21, // 0: frontend.v1.SubmitPromptCmd.prompt_origin:type_name -> protocol.v1.PromptOrigin
+	19, // 0: frontend.v1.SubmitPromptCmd.prompt_origin:type_name -> protocol.v1.PromptOrigin
 	4,  // 1: frontend.v1.DetachedCancelOutcome.cancelled:type_name -> frontend.v1.DetachedAgentsCancelled
-	5,  // 2: frontend.v1.DetachedCancelOutcome.nothing_running:type_name -> frontend.v1.NoDetachedAgentsRunning
-	6,  // 3: frontend.v1.DetachedCancelOutcome.unsupported:type_name -> frontend.v1.DetachedCancelUnsupported
+	20, // 2: frontend.v1.DetachedCancelOutcome.nothing_running:type_name -> protocol.v1.NoDetachedAgentsRunning
+	21, // 3: frontend.v1.DetachedCancelOutcome.unsupported:type_name -> protocol.v1.DetachedCancelUnsupported
 	22, // 4: frontend.v1.QueueClassificationUninterruptibleTurn.command:type_name -> frontend.v1.SessionCommand
-	7,  // 5: frontend.v1.QueueEntry.pending:type_name -> frontend.v1.QueueClassificationPending
-	8,  // 6: frontend.v1.QueueEntry.interject:type_name -> frontend.v1.QueueClassificationInterject
-	9,  // 7: frontend.v1.QueueEntry.hold_for_turn_end:type_name -> frontend.v1.QueueClassificationHold
-	11, // 8: frontend.v1.QueueEntry.error:type_name -> frontend.v1.QueueClassificationError
-	10, // 9: frontend.v1.QueueEntry.uninterruptible_turn:type_name -> frontend.v1.QueueClassificationUninterruptibleTurn
-	13, // 10: frontend.v1.QueueEntry.shutdown:type_name -> frontend.v1.QueueEntryShutdownHold
-	14, // 11: frontend.v1.QueueEntry.keep_alive:type_name -> frontend.v1.QueueEntryKeepAliveHold
-	15, // 12: frontend.v1.QueueEntry.revival:type_name -> frontend.v1.QueueEntryRevivalHold
-	16, // 13: frontend.v1.QueueEntry.build_refresh:type_name -> frontend.v1.QueueEntryBuildRefreshHold
-	12, // 14: frontend.v1.QueueView.entries:type_name -> frontend.v1.QueueEntry
+	5,  // 5: frontend.v1.QueueEntry.pending:type_name -> frontend.v1.QueueClassificationPending
+	6,  // 6: frontend.v1.QueueEntry.interject:type_name -> frontend.v1.QueueClassificationInterject
+	7,  // 7: frontend.v1.QueueEntry.hold_for_turn_end:type_name -> frontend.v1.QueueClassificationHold
+	9,  // 8: frontend.v1.QueueEntry.error:type_name -> frontend.v1.QueueClassificationError
+	8,  // 9: frontend.v1.QueueEntry.uninterruptible_turn:type_name -> frontend.v1.QueueClassificationUninterruptibleTurn
+	11, // 10: frontend.v1.QueueEntry.shutdown:type_name -> frontend.v1.QueueEntryShutdownHold
+	12, // 11: frontend.v1.QueueEntry.keep_alive:type_name -> frontend.v1.QueueEntryKeepAliveHold
+	13, // 12: frontend.v1.QueueEntry.revival:type_name -> frontend.v1.QueueEntryRevivalHold
+	14, // 13: frontend.v1.QueueEntry.build_refresh:type_name -> frontend.v1.QueueEntryBuildRefreshHold
+	10, // 14: frontend.v1.QueueView.entries:type_name -> frontend.v1.QueueEntry
 	15, // [15:15] is the sub-list for method output_type
 	15, // [15:15] is the sub-list for method input_type
 	15, // [15:15] is the sub-list for extension type_name
@@ -1497,7 +1410,7 @@ func file_frontend_v1_prompt_queue_proto_init() {
 		(*DetachedCancelOutcome_NothingRunning)(nil),
 		(*DetachedCancelOutcome_Unsupported)(nil),
 	}
-	file_frontend_v1_prompt_queue_proto_msgTypes[12].OneofWrappers = []any{
+	file_frontend_v1_prompt_queue_proto_msgTypes[10].OneofWrappers = []any{
 		(*QueueEntry_Pending)(nil),
 		(*QueueEntry_Interject)(nil),
 		(*QueueEntry_HoldForTurnEnd)(nil),
@@ -1514,7 +1427,7 @@ func file_frontend_v1_prompt_queue_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_prompt_queue_proto_rawDesc), len(file_frontend_v1_prompt_queue_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

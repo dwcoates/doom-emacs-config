@@ -1697,7 +1697,20 @@ type DetachedWorkEnded struct {
 	//	*DetachedWorkEnded_Failed
 	//	*DetachedWorkEnded_Cancelled
 	//	*DetachedWorkEnded_Lost
-	Outcome       isDetachedWorkEnded_Outcome `protobuf_oneof:"outcome"`
+	Outcome isDetachedWorkEnded_Outcome `protobuf_oneof:"outcome"`
+	// The exit status of the underlying process, for work that IS one — a
+	// backgrounded shell, or unclassified work the producer ran as a process.
+	// UNSET for work that never had an exit status of its own (an agent, a
+	// workflow), and that absence is the only reading of "this work did not exit,
+	// it concluded".
+	//
+	// EVIDENCE, NEVER THE VERDICT. A killed process also exits nonzero, so the
+	// exit status cannot decide the `outcome` arm and the `outcome` arm cannot
+	// reconstruct the exit status. The outcome is resolved separately by the
+	// consumer that owns that judgment; the two must never be derived from each
+	// other. This field exists so a shell's card can show "exited 137" beside the
+	// verdict rather than an unexplained red dot.
+	ProcessExit   *DetachedProcessExit `protobuf:"bytes,5,opt,name=process_exit,json=processExit,proto3" json:"process_exit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1775,6 +1788,13 @@ func (x *DetachedWorkEnded) GetLost() *DetachedLost {
 	return nil
 }
 
+func (x *DetachedWorkEnded) GetProcessExit() *DetachedProcessExit {
+	if x != nil {
+		return x.ProcessExit
+	}
+	return nil
+}
+
 type isDetachedWorkEnded_Outcome interface {
 	isDetachedWorkEnded_Outcome()
 }
@@ -1806,6 +1826,57 @@ func (*DetachedWorkEnded_Cancelled) isDetachedWorkEnded_Outcome() {}
 
 func (*DetachedWorkEnded_Lost) isDetachedWorkEnded_Outcome() {}
 
+// A process's exit status, exactly as the operating system reported it.
+//
+// A record of an OBSERVATION, which is why it lives here rather than with the
+// consumer: a producer watched a process leave and read its status.
+type DetachedProcessExit struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The exit code as the shell reports it. A signal-terminated process reports
+	// the conventional 128+N form, because that is literally what its exit status
+	// is. 0 is a real zero and always means clean exit.
+	Code          int32 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DetachedProcessExit) Reset() {
+	*x = DetachedProcessExit{}
+	mi := &file_conversation_v1_payloads_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DetachedProcessExit) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DetachedProcessExit) ProtoMessage() {}
+
+func (x *DetachedProcessExit) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_payloads_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DetachedProcessExit.ProtoReflect.Descriptor instead.
+func (*DetachedProcessExit) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *DetachedProcessExit) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
 // It finished and did what it was asked.
 type DetachedSucceeded struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1817,7 +1888,7 @@ type DetachedSucceeded struct {
 
 func (x *DetachedSucceeded) Reset() {
 	*x = DetachedSucceeded{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[29]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1829,7 +1900,7 @@ func (x *DetachedSucceeded) String() string {
 func (*DetachedSucceeded) ProtoMessage() {}
 
 func (x *DetachedSucceeded) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[29]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1842,7 +1913,7 @@ func (x *DetachedSucceeded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedSucceeded.ProtoReflect.Descriptor instead.
 func (*DetachedSucceeded) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{29}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *DetachedSucceeded) GetSummary() string {
@@ -1863,7 +1934,7 @@ type DetachedFailed struct {
 
 func (x *DetachedFailed) Reset() {
 	*x = DetachedFailed{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[30]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1875,7 +1946,7 @@ func (x *DetachedFailed) String() string {
 func (*DetachedFailed) ProtoMessage() {}
 
 func (x *DetachedFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[30]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1888,7 +1959,7 @@ func (x *DetachedFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedFailed.ProtoReflect.Descriptor instead.
 func (*DetachedFailed) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{30}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *DetachedFailed) GetSummary() string {
@@ -1907,7 +1978,7 @@ type DetachedCancelled struct {
 
 func (x *DetachedCancelled) Reset() {
 	*x = DetachedCancelled{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[31]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1919,7 +1990,7 @@ func (x *DetachedCancelled) String() string {
 func (*DetachedCancelled) ProtoMessage() {}
 
 func (x *DetachedCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[31]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1932,7 +2003,7 @@ func (x *DetachedCancelled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedCancelled.ProtoReflect.Descriptor instead.
 func (*DetachedCancelled) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{31}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{32}
 }
 
 // We lost sight of it.
@@ -1951,7 +2022,7 @@ type DetachedLost struct {
 
 func (x *DetachedLost) Reset() {
 	*x = DetachedLost{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[32]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1963,7 +2034,7 @@ func (x *DetachedLost) String() string {
 func (*DetachedLost) ProtoMessage() {}
 
 func (x *DetachedLost) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[32]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1976,7 +2047,7 @@ func (x *DetachedLost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedLost.ProtoReflect.Descriptor instead.
 func (*DetachedLost) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{32}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *DetachedLost) GetInference() string {
@@ -2014,7 +2085,7 @@ type ContentArriving struct {
 
 func (x *ContentArriving) Reset() {
 	*x = ContentArriving{}
-	mi := &file_conversation_v1_payloads_proto_msgTypes[33]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2026,7 +2097,7 @@ func (x *ContentArriving) String() string {
 func (*ContentArriving) ProtoMessage() {}
 
 func (x *ContentArriving) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_payloads_proto_msgTypes[33]
+	mi := &file_conversation_v1_payloads_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2039,7 +2110,7 @@ func (x *ContentArriving) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContentArriving.ProtoReflect.Descriptor instead.
 func (*ContentArriving) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{33}
+	return file_conversation_v1_payloads_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ContentArriving) GetBlockIndex() uint32 {
@@ -2195,13 +2266,16 @@ const file_conversation_v1_payloads_proto_rawDesc = "" +
 	"\x11SkillBodyResolved\x12\x12\n" +
 	"\x04body\x18\x01 \x01(\tR\x04body\"0\n" +
 	"\x16DetachedWorkProgressed\x12\x16\n" +
-	"\x06output\x18\x01 \x01(\tR\x06output\"\x96\x02\n" +
+	"\x06output\x18\x01 \x01(\tR\x06output\"\xdf\x02\n" +
 	"\x11DetachedWorkEnded\x12B\n" +
 	"\tsucceeded\x18\x01 \x01(\v2\".conversation.v1.DetachedSucceededH\x00R\tsucceeded\x129\n" +
 	"\x06failed\x18\x02 \x01(\v2\x1f.conversation.v1.DetachedFailedH\x00R\x06failed\x12B\n" +
 	"\tcancelled\x18\x03 \x01(\v2\".conversation.v1.DetachedCancelledH\x00R\tcancelled\x123\n" +
-	"\x04lost\x18\x04 \x01(\v2\x1d.conversation.v1.DetachedLostH\x00R\x04lostB\t\n" +
-	"\aoutcome\"-\n" +
+	"\x04lost\x18\x04 \x01(\v2\x1d.conversation.v1.DetachedLostH\x00R\x04lost\x12G\n" +
+	"\fprocess_exit\x18\x05 \x01(\v2$.conversation.v1.DetachedProcessExitR\vprocessExitB\t\n" +
+	"\aoutcome\")\n" +
+	"\x13DetachedProcessExit\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\"-\n" +
 	"\x11DetachedSucceeded\x12\x18\n" +
 	"\asummary\x18\x01 \x01(\tR\asummary\"*\n" +
 	"\x0eDetachedFailed\x12\x18\n" +
@@ -2230,7 +2304,7 @@ func file_conversation_v1_payloads_proto_rawDescGZIP() []byte {
 	return file_conversation_v1_payloads_proto_rawDescData
 }
 
-var file_conversation_v1_payloads_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_conversation_v1_payloads_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_conversation_v1_payloads_proto_goTypes = []any{
 	(*UserSaid)(nil),               // 0: conversation.v1.UserSaid
 	(*AgentSaid)(nil),              // 1: conversation.v1.AgentSaid
@@ -2261,35 +2335,36 @@ var file_conversation_v1_payloads_proto_goTypes = []any{
 	(*SkillBodyResolved)(nil),      // 26: conversation.v1.SkillBodyResolved
 	(*DetachedWorkProgressed)(nil), // 27: conversation.v1.DetachedWorkProgressed
 	(*DetachedWorkEnded)(nil),      // 28: conversation.v1.DetachedWorkEnded
-	(*DetachedSucceeded)(nil),      // 29: conversation.v1.DetachedSucceeded
-	(*DetachedFailed)(nil),         // 30: conversation.v1.DetachedFailed
-	(*DetachedCancelled)(nil),      // 31: conversation.v1.DetachedCancelled
-	(*DetachedLost)(nil),           // 32: conversation.v1.DetachedLost
-	(*ContentArriving)(nil),        // 33: conversation.v1.ContentArriving
-	(*UserContent)(nil),            // 34: conversation.v1.UserContent
-	(*AgentContent)(nil),           // 35: conversation.v1.AgentContent
-	(*TokenUsage)(nil),             // 36: conversation.v1.TokenUsage
-	(*ToolResultContent)(nil),      // 37: conversation.v1.ToolResultContent
-	(*ToolCallBlock)(nil),          // 38: conversation.v1.ToolCallBlock
+	(*DetachedProcessExit)(nil),    // 29: conversation.v1.DetachedProcessExit
+	(*DetachedSucceeded)(nil),      // 30: conversation.v1.DetachedSucceeded
+	(*DetachedFailed)(nil),         // 31: conversation.v1.DetachedFailed
+	(*DetachedCancelled)(nil),      // 32: conversation.v1.DetachedCancelled
+	(*DetachedLost)(nil),           // 33: conversation.v1.DetachedLost
+	(*ContentArriving)(nil),        // 34: conversation.v1.ContentArriving
+	(*UserContent)(nil),            // 35: conversation.v1.UserContent
+	(*AgentContent)(nil),           // 36: conversation.v1.AgentContent
+	(*TokenUsage)(nil),             // 37: conversation.v1.TokenUsage
+	(*ToolResultContent)(nil),      // 38: conversation.v1.ToolResultContent
+	(*ToolCallBlock)(nil),          // 39: conversation.v1.ToolCallBlock
 }
 var file_conversation_v1_payloads_proto_depIdxs = []int32{
-	34, // 0: conversation.v1.UserSaid.content:type_name -> conversation.v1.UserContent
-	35, // 1: conversation.v1.AgentSaid.content:type_name -> conversation.v1.AgentContent
-	36, // 2: conversation.v1.AgentSaid.usage:type_name -> conversation.v1.TokenUsage
+	35, // 0: conversation.v1.UserSaid.content:type_name -> conversation.v1.UserContent
+	36, // 1: conversation.v1.AgentSaid.content:type_name -> conversation.v1.AgentContent
+	37, // 2: conversation.v1.AgentSaid.usage:type_name -> conversation.v1.TokenUsage
 	3,  // 3: conversation.v1.AgentSaid.stop_reason:type_name -> conversation.v1.StopReason
-	37, // 4: conversation.v1.ToolReturned.content:type_name -> conversation.v1.ToolResultContent
+	38, // 4: conversation.v1.ToolReturned.content:type_name -> conversation.v1.ToolResultContent
 	4,  // 5: conversation.v1.StopReason.end_turn:type_name -> conversation.v1.StopEndTurn
 	5,  // 6: conversation.v1.StopReason.tool_call:type_name -> conversation.v1.StopToolCall
 	6,  // 7: conversation.v1.StopReason.max_tokens:type_name -> conversation.v1.StopMaxTokens
 	7,  // 8: conversation.v1.StopReason.interrupted:type_name -> conversation.v1.StopInterrupted
 	8,  // 9: conversation.v1.StopReason.unsupported:type_name -> conversation.v1.StopUnsupported
-	38, // 10: conversation.v1.PermissionAsked.requested:type_name -> conversation.v1.ToolCallBlock
+	39, // 10: conversation.v1.PermissionAsked.requested:type_name -> conversation.v1.ToolCallBlock
 	11, // 11: conversation.v1.PermissionAnswered.allowed:type_name -> conversation.v1.PermissionAllowed
 	12, // 12: conversation.v1.PermissionAnswered.denied:type_name -> conversation.v1.PermissionDenied
 	13, // 13: conversation.v1.PermissionAnswered.abandoned:type_name -> conversation.v1.PermissionAbandoned
 	16, // 14: conversation.v1.ContextCut.cleared:type_name -> conversation.v1.ContextCleared
 	17, // 15: conversation.v1.ContextCut.compacted:type_name -> conversation.v1.ContextCompacted
-	35, // 16: conversation.v1.ContextCompacted.summary:type_name -> conversation.v1.AgentContent
+	36, // 16: conversation.v1.ContextCompacted.summary:type_name -> conversation.v1.AgentContent
 	19, // 17: conversation.v1.DetachedWorkStarted.kind:type_name -> conversation.v1.DetachedWorkKind
 	20, // 18: conversation.v1.DetachedWorkKind.agent:type_name -> conversation.v1.DetachedAgent
 	21, // 19: conversation.v1.DetachedWorkKind.shell:type_name -> conversation.v1.DetachedShell
@@ -2297,15 +2372,16 @@ var file_conversation_v1_payloads_proto_depIdxs = []int32{
 	25, // 21: conversation.v1.DetachedWorkKind.unclassified:type_name -> conversation.v1.DetachedUnclassified
 	23, // 22: conversation.v1.DetachedWorkKind.skill:type_name -> conversation.v1.DetachedSkill
 	24, // 23: conversation.v1.DetachedWorkKind.merge:type_name -> conversation.v1.DetachedMerge
-	29, // 24: conversation.v1.DetachedWorkEnded.succeeded:type_name -> conversation.v1.DetachedSucceeded
-	30, // 25: conversation.v1.DetachedWorkEnded.failed:type_name -> conversation.v1.DetachedFailed
-	31, // 26: conversation.v1.DetachedWorkEnded.cancelled:type_name -> conversation.v1.DetachedCancelled
-	32, // 27: conversation.v1.DetachedWorkEnded.lost:type_name -> conversation.v1.DetachedLost
-	28, // [28:28] is the sub-list for method output_type
-	28, // [28:28] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	30, // 24: conversation.v1.DetachedWorkEnded.succeeded:type_name -> conversation.v1.DetachedSucceeded
+	31, // 25: conversation.v1.DetachedWorkEnded.failed:type_name -> conversation.v1.DetachedFailed
+	32, // 26: conversation.v1.DetachedWorkEnded.cancelled:type_name -> conversation.v1.DetachedCancelled
+	33, // 27: conversation.v1.DetachedWorkEnded.lost:type_name -> conversation.v1.DetachedLost
+	29, // 28: conversation.v1.DetachedWorkEnded.process_exit:type_name -> conversation.v1.DetachedProcessExit
+	29, // [29:29] is the sub-list for method output_type
+	29, // [29:29] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_payloads_proto_init() }
@@ -2345,7 +2421,7 @@ func file_conversation_v1_payloads_proto_init() {
 		(*DetachedWorkEnded_Cancelled)(nil),
 		(*DetachedWorkEnded_Lost)(nil),
 	}
-	file_conversation_v1_payloads_proto_msgTypes[33].OneofWrappers = []any{
+	file_conversation_v1_payloads_proto_msgTypes[34].OneofWrappers = []any{
 		(*ContentArriving_Text)(nil),
 		(*ContentArriving_Thinking)(nil),
 		(*ContentArriving_ArgumentsJson)(nil),
@@ -2356,7 +2432,7 @@ func file_conversation_v1_payloads_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_payloads_proto_rawDesc), len(file_conversation_v1_payloads_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   34,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
