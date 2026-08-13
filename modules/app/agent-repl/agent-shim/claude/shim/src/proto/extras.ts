@@ -1,46 +1,62 @@
 /**
- * The §5.1 conversion & validation contract, converter-agnostic half.
+ * The conversion & validation contract, converter-agnostic half.
  *
- * Two obligations, both LOUD and never silent (metaprompt no-fallbacks rule):
+ * THE PRODUCER CONVERTS AT THE EDGE NOW. What leaves this shim is already
+ * vendor-neutral (`conversation.v1` / `protocol.v1`), and the vendor material
+ * that cannot be carried into a neutral feed does not travel at all: it lands
+ * on `agentshim.v1`'s `InternalEntry.unconverted`, which has no external half
+ * and therefore no path to the daemon. That is what makes eager conversion safe
+ * rather than lossy — a record we could not place is stored WHOLE, so the
+ * decision not to model it stays reversible from stored data.
  *
- * 1. UNKNOWN NEW FIELD → captured, never dropped. Any top-level field of an
- *    SDK stream message that the converter did not consume is copied verbatim
- *    into the containing `Event.extras` (a `google.protobuf.Struct`, surfaced
- *    by protobuf-es as a plain `JsonObject`) and loud-logged ONCE per distinct
- *    `<type>.<field>` path. See {@link Reader}.
+ * THREE UNCONVERTED ARMS, and they are not interchangeable:
  *
- * 2. MISSING EXPECTED FIELD → hard error. A record the converter cannot parse
- *    (no `type` discriminator, unknown `type`/`subtype`, structurally broken)
- *    NEVER becomes a zero value: it is turned into a core `UnparsedEvent`
- *    carrying the raw bytes (capped at 64 KiB), the verbatim error, and the
- *    producer identity. See {@link unparsedEvent} / {@link MissingFieldError}.
+ * 1. {@link vendorSpecificEntry} — UNDERSTOOD, and deliberately not carried. We
+ *    know exactly what the record is and have decided a vendor-agnostic feed
+ *    cannot show it. The follow-up is a CONVERTER.
+ * 2. {@link unknownEntry} — PARSED but not MODELED: a discriminator no arm
+ *    matched. The SDK union grew 11 -> 38 members across 0.1.77 -> 0.3.220, so
+ *    this is the expected steady state, not an error. The follow-up is a MODEL.
+ * 3. {@link unparsedEntry} — could not be READ at all. A FAILURE, not a gap.
  *
- * EXTRAS SCOPING (deliberate, documented): unknown-field diffing operates at
- * the TOP LEVEL of each SDK stream message — the granularity at which the
- * converter dispatches. Nested objects (e.g. `message.usage`) are handed to
- * typed sub-converters that map the fields the proto models; nested variance
- * the proto does not type is either absorbed by the schema's designated
- * `Struct` catch fields (`cache_creation`, `server_tool_use`, …) or bounded by
- * the typed model. This matches the corpus MANIFEST's contract that every
- * fixture decodes with zero unknown-field logs while nested telemetry
- * (`usage.inference_geo`, `usage.iterations`, …) exists in the samples.
+ * UNKNOWN NEW FIELDS still get their loud once-per-path log (see {@link
+ * Reader}), and on a family this shim DOES convert they are additionally
+ * carried whole into a companion {@link vendorSpecificEntry} — see {@link
+ * unknownFieldsEntry}. The retired `Event.extras` Struct was the old carrier and
+ * has no successor on any of the five surfaces; a companion internal record is
+ * how "nothing is ever dropped" stays true without inventing a field.
+ *
+ * EXTRAS SCOPING (deliberate, documented, unchanged): unknown-field diffing
+ * operates at the TOP LEVEL of each SDK stream message — the granularity at
+ * which the converter dispatches. Nested variance is either absorbed by a
+ * `Struct` field or bounded by the typed model.
  */
 import { create } from "@bufbuild/protobuf";
 import type { JsonObject } from "@bufbuild/protobuf";
 import { bindLog } from "../uds/log.js";
 import {
-  EventClass,
-  EventSchema,
-  Plane,
-  UnparsedEventSchema,
-  type Event,
+  EntrySchema,
+  InternalEntrySchema,
+  PlaneSchema,
+  PlaneStreamSchema,
+  UnknownEntrySchema,
+  UnparsedEntrySchema,
+  VendorSpecificEntrySchema,
+  type Entry,
+  type InternalEntry,
 } from "../uds/proto.js";
 
-/** Producer identity stamped on every claude-shim-produced record (§5.2). */
+/** Producer identity stamped on every claude-shim-produced record. */
 export const PRODUCER = "claude-shim";
 
-/** UnparsedEvent.raw is bounded; the store caps producers at 64 KiB (§5.2). */
+/** `UnparsedEntry.raw` is bounded; the store caps producers at 64 KiB. */
 export const RAW_CAP_BYTES = 64 * 1024;
+
+/**
+ * `UnparsedEntry.source` for everything this shim reads. The shim observes the
+ * SDK stream and nothing else; the sidecar, which reads files, states a path.
+ */
+export const STREAM_SOURCE = "claude-sdk-stream";
 
 const COMPONENT = "claude-shim-convert";
 const LOGGER = bindLog({ component: COMPONENT, operation: "shim.extras.capture" });
@@ -69,11 +85,10 @@ export function __resetExtrasSeen(): void {
  * Loud-log an unrecognized union discriminator ONCE per distinct value, and
  * report whether this call was the one that logged it.
  *
- * This is the passthrough arm's single log line. It is deliberately NOT a
- * warning about broken data: an unmodeled discriminator means the vendor
- * shipped something new, which is expected on a format documented as
- * version-unstable. What matters is that it is visible and that the record
- * survives in `UnknownRecord.raw`.
+ * Deliberately NOT a warning about broken data: an unmodeled discriminator
+ * means the vendor shipped something new, which is expected on a format
+ * documented as version-unstable. What matters is that it is visible and that
+ * the record survives whole in `UnknownEntry.raw`.
  */
 export function logUnknownDiscriminator(
   discriminator: string,
@@ -84,7 +99,7 @@ export function logUnknownDiscriminator(
   seenDiscriminators.add(key);
   LOGGER.log(
     { discriminator: key },
-    `unmodeled discriminator captured verbatim into UnknownRecord: ${key}`,
+    `unmodeled discriminator captured verbatim into UnknownEntry: ${key}`,
   );
   return true;
 }
@@ -92,7 +107,7 @@ export function logUnknownDiscriminator(
 /**
  * Thrown by a sub-converter when an EXPECTED field is missing or a
  * discriminator is unusable. {@link import("./convert.js")} catches it and
- * turns the record into an {@link unparsedEvent}, never a zero value.
+ * turns the record into an {@link unparsedEntry}, never a zero value.
  */
 export class MissingFieldError extends Error {
   constructor(message: string) {
@@ -101,9 +116,9 @@ export class MissingFieldError extends Error {
   }
 }
 
-/** The outcome of finalizing a {@link Reader}: the extras Struct + new logs. */
+/** The outcome of finalizing a {@link Reader}: leftover fields + new logs. */
 export interface ExtrasOutcome {
-  /** Populated iff any field went unmapped; undefined leaves Event.extras unset. */
+  /** Populated iff any field went unmapped; undefined when everything mapped. */
   extras?: JsonObject;
   /** `<type>.<field>` paths newly loud-logged by this finalize (for tests). */
   logged: string[];
@@ -111,7 +126,7 @@ export interface ExtrasOutcome {
 
 /**
  * A single SDK stream message under conversion, tracking which top-level keys
- * the converter consumed so the leftover set can be captured into extras.
+ * the converter consumed so the leftover set can be captured.
  *
  * Getters coerce defensively (a wrong-typed source value yields the type's
  * zero, not a throw) — a genuinely malformed record is the sub-converter's
@@ -203,15 +218,13 @@ export class Reader {
   }
 
   /**
-   * Mark EVERY remaining key consumed, for the passthrough (UnknownRecord)
-   * path only.
+   * Mark EVERY remaining key consumed, for the passthrough paths only.
    *
-   * The passthrough arm already stores the record whole in `UnknownRecord.raw`,
-   * so letting {@link finish} also copy each field into `Event.extras` would
-   * duplicate the payload AND — worse — log every field of an unknown family
-   * as a "new field", which is noise that hides the genuine unknown-field
-   * signal on families we DO model. The one honest log for this record is the
-   * unknown-discriminator log, emitted by {@link logUnknownDiscriminator}.
+   * `VendorSpecificEntry.raw` and `UnknownEntry.raw` already store the record
+   * whole, so letting {@link finish} also collect each field would duplicate the
+   * payload AND — worse — log every field of an unplaced family as a "new
+   * field", which is noise that hides the genuine unknown-field signal on
+   * families we DO convert.
    */
   consumeAll(): void {
     for (const k of Object.keys(this.raw)) this.consumed.add(k);
@@ -219,10 +232,8 @@ export class Reader {
 
   /**
    * Mark a top-level field RECOGNIZED-but-unmodeled: consumed (so it is not a
-   * loud "unknown field"), yet preserved into extras when present so NOTHING
-   * is dropped. Used for known transport/context telemetry the proto's typed
-   * model deliberately omits (e.g. `ttft_ms` on a stream_event, a subagent
-   * user message's `subagent_type`). Documented per call site.
+   * loud "unknown field"), yet preserved into the leftover set when present so
+   * NOTHING is dropped. Documented per call site.
    */
   carry(...keys: string[]): void {
     for (const k of keys) {
@@ -235,8 +246,8 @@ export class Reader {
 
   /**
    * Finalize: every top-level key not yet consumed is a genuinely UNKNOWN new
-   * field — captured into extras (never dropped) and loud-logged once per
-   * `<typeLabel>.<field>`. Returns the extras object (undefined when empty)
+   * field — collected (never dropped) and loud-logged once per
+   * `<typeLabel>.<field>`. Returns the leftover object (undefined when empty)
    * plus the paths newly logged by this call.
    */
   finish(typeLabel: string): ExtrasOutcome {
@@ -248,7 +259,7 @@ export class Reader {
       if (!seenFieldPaths.has(path)) {
         seenFieldPaths.add(path);
         logged.push(path);
-        LOGGER.log({ type: typeLabel, field: k }, `unknown field captured into Event.extras: ${path}`);
+        LOGGER.log({ type: typeLabel, field: k }, `unknown field captured into a companion VendorSpecificEntry: ${path}`);
       }
     }
     const keys = Object.keys(this.extras);
@@ -256,51 +267,146 @@ export class Reader {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The unconverted arms
+// ---------------------------------------------------------------------------
+
 /**
- * Build a core `UnparsedEvent` Event for a record conversion could not parse.
- * `raw` is the source line/object; it is UTF-8 encoded and capped at 64 KiB.
- * Always loud-logged: a record that fails to parse is an anomaly, never noise.
+ * Wrap one `InternalEntry.unconverted` arm as a whole {@link Entry}.
+ *
+ * NO EXTERNAL HALF, and that absence is the contract rather than an omission: a
+ * record we could not place has nothing to hand the daemon, so it has no field
+ * a forwarder could read. "An unconvertible record cannot reach a page" is
+ * therefore a fact about the record's SHAPE, not a rule a query applies.
+ *
+ * The plane is always `stream`: this shim observes the SDK live and never reads
+ * a file. `write_id` is deliberately left empty here and minted once by the
+ * store client when the record is first handed to a write, because a replay
+ * must re-present the SAME identity it was first delivered under.
  */
-export function unparsedEvent(
-  raw: string | Uint8Array,
-  error: string,
+function internalOnly(unconverted: InternalEntry["unconverted"]): Entry {
+  return create(EntrySchema, {
+    internal: create(InternalEntrySchema, {
+      plane: create(PlaneSchema, { plane: { case: "stream", value: create(PlaneStreamSchema, {}) } }),
+      unconverted,
+    }),
+  });
+}
+
+/**
+ * A fact specific to one vendor, UNDERSTOOD and deliberately not carried into a
+ * vendor-agnostic feed.
+ *
+ * This is where the bulk of the SDK stream now lands. The old converter
+ * transliterated all 38 SDK families into vendor-shaped protos and shipped them
+ * across the wire for the daemon to interpret; the neutral model has a home for
+ * the LIFECYCLE facts (bookkeeping) and for CONVERSATION content (which the
+ * file plane produces, because only it can resolve a parent). Everything else
+ * is understood, unrenderable in a neutral feed, and stored whole here.
+ */
+export function vendorSpecificEntry(kind: string, raw: JsonObject): Entry {
+  return internalOnly({
+    case: "vendorSpecific",
+    value: create(VendorSpecificEntrySchema, { kind, raw }),
+  });
+}
+
+/**
+ * The companion record carrying the top-level fields a CONVERTED family grew
+ * that this converter does not read.
+ *
+ * `Event.extras` used to carry these, and nothing on the five surfaces
+ * replaces it. Emitting a companion internal record keeps the never-drop
+ * contract literally true without inventing a field: the fields are durable,
+ * they are attributable to the family that grew them, and they cannot reach a
+ * consumer that might act on a value nobody modeled.
+ *
+ * Only ever built when {@link Reader.finish} found something; an ordinary
+ * record produces none.
+ */
+export function unknownFieldsEntry(typeLabel: string, extras: JsonObject): Entry {
+  return vendorSpecificEntry(`${typeLabel}.unknown-fields`, extras);
+}
+
+/**
+ * A record we READ but do not MODEL — a discriminator no arm matched.
+ *
+ * `discriminatorField` names WHERE the value was read from, because a producer
+ * that looked in the wrong place and a record with a genuinely new kind produce
+ * the same entry otherwise.
+ */
+export function unknownEntry(
+  discriminator: string,
+  discriminatorField: string,
+  raw: JsonObject,
+): Entry {
+  return internalOnly({
+    case: "unknown",
+    value: create(UnknownEntrySchema, { discriminator, discriminatorField, raw }),
+  });
+}
+
+/**
+ * A record we could not read at all. `raw` is capped at 64 KiB of UTF-8.
+ * Always loud-logged unless the caller states it already emitted the causal
+ * record: a record that fails to parse is an anomaly, never noise.
+ */
+export function unparsedEntry(
+  raw: string,
+  parseError: string,
   fields: {
+    /** Which conversation it belonged to, when the record said. */
     sessionId?: string;
-    requestId?: string;
-    producedAtMs?: number;
-    /**
-     * The query() invocation the producer was running when the unreadable
-     * record arrived. See the `query_instance_id` contract in core.proto.
-     */
-    queryInstanceId?: string;
+    /** Where in the stream it came from; defaults to {@link STREAM_SOURCE}. */
+    source?: string;
+    /** Byte offset within that source, 0 for a stream with no addressable one. */
+    offset?: bigint;
     /** False when the converter already emitted the owning causal record. */
     log?: boolean;
   } = {},
-): Event {
-  const bytes = typeof raw === "string" ? new TextEncoder().encode(raw) : raw;
-  const capped = bytes.length > RAW_CAP_BYTES ? bytes.subarray(0, RAW_CAP_BYTES) : bytes;
+): Entry {
+  const capped = capUtf8(raw, RAW_CAP_BYTES);
   if (fields.log !== false) {
-    LOGGER.log({ level: "error", ...(fields.sessionId === undefined ? {} : { claude_session_id: fields.sessionId }), error, raw_bytes: bytes.length }, `UNPARSED event (${error}); ${bytes.length} raw bytes preserved`);
+    LOGGER.log({
+      level: "error",
+      ...(fields.sessionId === undefined ? {} : { claude_session_id: fields.sessionId }),
+      producer: PRODUCER,
+      parse_error: parseError,
+      raw_bytes: byteLength(raw),
+    }, `UNPARSED record (${parseError}); ${byteLength(raw)} raw bytes preserved`);
   }
-  return create(EventSchema, {
-    sessionId: fields.sessionId ?? "",
-    seq: 0n,
-    plane: Plane.STREAM,
-    class: EventClass.PERSISTENT,
-    requestId: fields.requestId ?? "",
-    queryInstanceId: fields.queryInstanceId ?? "",
-    producedAtMs: BigInt(fields.producedAtMs ?? Date.now()),
-    payload: {
-      case: "unparsed",
-      value: create(UnparsedEventSchema, {
-        sourcePath: "",
-        byteOffset: 0n,
-        raw: capped,
-        error,
-        producer: PRODUCER,
-      }),
-    },
+  return internalOnly({
+    case: "unparsed",
+    value: create(UnparsedEntrySchema, {
+      source: fields.source ?? STREAM_SOURCE,
+      offset: fields.offset ?? 0n,
+      parseError,
+      raw: capped,
+    }),
   });
+}
+
+/** UTF-8 byte length of `s`. */
+function byteLength(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
+
+/**
+ * Truncate `s` to at most `cap` UTF-8 bytes WITHOUT splitting a code point.
+ *
+ * `UnparsedEntry.raw` is a proto3 `string`, which must be valid UTF-8: capping
+ * at a raw byte index could cut a multi-byte sequence in half and produce a
+ * value the wire rejects. `TextDecoder` with `fatal: false` would silently
+ * substitute U+FFFD instead, which is a corruption of the very bytes this field
+ * exists to preserve — so the cut is walked back to a boundary instead.
+ */
+function capUtf8(s: string, cap: number): string {
+  const bytes = new TextEncoder().encode(s);
+  if (bytes.length <= cap) return s;
+  let end = cap;
+  // A UTF-8 continuation byte is 0b10xxxxxx; walk back off any partial sequence.
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
+  return new TextDecoder().decode(bytes.subarray(0, end));
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
