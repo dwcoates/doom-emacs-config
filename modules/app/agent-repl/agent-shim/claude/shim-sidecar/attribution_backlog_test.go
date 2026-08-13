@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
@@ -38,6 +38,25 @@ func attributionUnresolvedOwner(target HeldTarget) OwnerResolution {
 
 func discardHeldReport(HeldLogRecord) {}
 
+// writeSpool lays down one /tmp task spool under a runtime-id-shaped directory
+// component, and returns (spoolRoot, path).
+//
+// The runtime-looking segment is deliberate: it is the harness's own id, NOT the
+// transcript's session, and mistaking one for the other is the bug the whole
+// held-lifecycle path exists to make unreachable.
+func writeSpool(t *testing.T, taskID string) (string, string) {
+	t.Helper()
+	spoolRoot := t.TempDir()
+	path := filepath.Join(spoolRoot, "claude-501", "slug", "a4f52dc5-runtime-id", "tasks", taskID+".output")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir spool dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write spool: %v", err)
+	}
+	return spoolRoot, path
+}
+
 func attributionOwnerTarget(target HeldTarget) discover.Target {
 	return discover.Target{Path: target.Path, Kind: tail.KindShellSpool, TaskID: target.TaskID}
 }
@@ -51,27 +70,29 @@ func observeHeld(t *testing.T, lifecycle *HeldLifecycle, target HeldTarget, owne
 	return decision
 }
 
-func TestAttributionBacklogRestartPastLaunchUsesDurableOpenTaskOwner(t *testing.T) {
-	// A restored cursor beyond the transcript's launch line must not cause the
-	// spool to be held: the durable open-task identity is authoritative.
+// A restart past the launch line USED TO resolve the spool from the store's
+// durable open-task set, which was authoritative. That is no longer derivable:
+// `OpenTaskState.started` carried the task id, the session and the output path,
+// and it was retired with no successor, so the snapshot names nothing to seed
+// an owner from.
+//
+// This test pins the honest consequence rather than the capability that is
+// gone. The spool is HELD — reported and left untailed — because the two
+// alternatives are inventing a session and reading the /tmp path's runtime id as
+// an identity, and refusing both is the whole point of the held lifecycle.
+func TestAttributionBacklogRestartPastLaunchHoldsWithoutADurableOwner(t *testing.T) {
 	now := time.Date(2026, time.August, 5, 14, 0, 0, 0, time.UTC)
 	target := attributionFixture(t, "task-restart", "runtime-id-not-an-owner", now.Add(-time.Minute))
 	lifecycle := NewHeldLifecycle(4, discardHeldReport)
 	owners, _ := ownerSidecar(t)
-	seeded := owners.seedOwners([]*corev1.OpenTaskState{{
-		Started: &corev1.Event{
-			SessionId: "session-durable",
-			Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
-				TaskId: target.TaskID, OutputPath: target.Path,
-			}},
-		},
-	}})
-	if seeded != 1 {
-		t.Fatalf("seeded durable owner mappings = %d, want 1", seeded)
+
+	seeded := owners.seedOwners([]*agentshimv1.OpenTaskState{{LastActivityAtMs: now.UnixMilli()}})
+	if seeded != 0 {
+		t.Fatalf("seeded durable owner mappings = %d, want 0: OpenTaskState carries no identity to seed from", seeded)
 	}
 	owner := owners.resolveOwnerResult(attributionOwnerTarget(target))
-	if owner.Outcome != OwnerResolvedPath || owner.SessionID != "session-durable" {
-		t.Fatalf("durable restarted owner resolution = %#v, want exact-path durable owner", owner)
+	if owner.Outcome != OwnerUnresolvedAwaitingOwner {
+		t.Fatalf("owner resolution = %#v, want it awaiting an authoritative observation", owner)
 	}
 
 	decision := observeHeld(t, lifecycle, target, owner, HeldEvidence{
@@ -80,11 +101,11 @@ func TestAttributionBacklogRestartPastLaunchUsesDurableOpenTaskOwner(t *testing.
 		ModTime:         target.ModTime,
 	}, now)
 
-	if decision.State != HeldStateResolved || decision.SessionID != "session-durable" {
-		t.Fatalf("restart decision = %#v, want resolved durable session", decision)
+	if decision.State != HeldStateActive || decision.Reason != HeldReasonAwaitingOwner {
+		t.Fatalf("restart decision = %#v, want the spool held awaiting an owner", decision)
 	}
-	if snapshot := lifecycle.Snapshot(now); snapshot.ActiveCount != 0 || snapshot.TerminalTotal != 0 {
-		t.Fatalf("restart snapshot = %#v, want no backlog", snapshot)
+	if decision.SessionID != "" {
+		t.Fatalf("held decision carries session %q; an unattributed spool must never be given one", decision.SessionID)
 	}
 }
 

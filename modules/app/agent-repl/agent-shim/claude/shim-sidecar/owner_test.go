@@ -5,7 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
@@ -112,22 +115,81 @@ func TestResetOwnersDiscardsPriorConnectionMappings(t *testing.T) {
 	}
 }
 
+// detachedRecord builds the stored record an opened or ended detached-work card
+// arrives as, so the lifecycle tests drive applyLifecycle through exactly the
+// shape a handler produces.
+func detachedRecord(session, taskID string, payload func(*conversationv1.MessageEntry)) *agentshimv1.Entry {
+	message := &conversationv1.MessageEntry{
+		MessageId:         convert.DetachedWorkMessageID(taskID),
+		TopLevelMessageId: convert.DetachedWorkMessageID(taskID),
+	}
+	payload(message)
+	return &agentshimv1.Entry{External: &protocolv1.ExternalEntry{
+		SessionId: session,
+		Entry:     &protocolv1.ExternalEntry_Message{Message: message},
+	}}
+}
+
 func TestOpenTaskIndexTracksAuthoritativeLifecycle(t *testing.T) {
 	s, _ := ownerSidecar(t)
-	started := &corev1.Event{SessionId: "S1", Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
-		TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL, OutputPath: "/tmp/b1.output",
-	}}}
-	s.applyLifecycle([]*corev1.Event{started}, 1000)
+	started := detachedRecord("S1", "b1", func(m *conversationv1.MessageEntry) {
+		m.Payload = &conversationv1.MessageEntry_DetachedWorkStarted{DetachedWorkStarted: &conversationv1.DetachedWorkStarted{
+			Kind: &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Shell{Shell: &conversationv1.DetachedShell{}}},
+		}}
+	})
+	s.applyLifecycle([]*agentshimv1.Entry{started}, 1000)
 	if !s.taskOpen("b1") {
-		t.Fatal("live TaskStarted did not mark task open")
+		t.Fatal("an opened detached-work card did not mark the task open")
 	}
 
-	ended := &corev1.Event{SessionId: "S1", Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{
-		TaskId: "b1", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
-	}}}
-	s.applyLifecycle([]*corev1.Event{ended}, 2000)
+	ended := detachedRecord("S1", "b1", func(m *conversationv1.MessageEntry) {
+		m.Payload = &conversationv1.MessageEntry_DetachedWorkEnded{DetachedWorkEnded: &conversationv1.DetachedWorkEnded{
+			Outcome: &conversationv1.DetachedWorkEnded_Succeeded{Succeeded: &conversationv1.DetachedSucceeded{}},
+		}}
+	})
+	s.applyLifecycle([]*agentshimv1.Entry{ended}, 2000)
 	if s.taskOpen("b1") {
-		t.Fatal("terminal TaskEnded did not clear open task")
+		t.Fatal("an observed end did not clear the open task")
+	}
+}
+
+// A LOST verdict is this sidecar's OWN inference, not an observation. Treating
+// it as an observed end is precisely the conflation the LOST arm exists to
+// prevent, so the open-task index must not close on one.
+func TestLostIsNotTreatedAsAnObservedEnd(t *testing.T) {
+	s, _ := ownerSidecar(t)
+	started := detachedRecord("S1", "b1", func(m *conversationv1.MessageEntry) {
+		m.Payload = &conversationv1.MessageEntry_DetachedWorkStarted{DetachedWorkStarted: &conversationv1.DetachedWorkStarted{}}
+	})
+	s.applyLifecycle([]*agentshimv1.Entry{started}, 1000)
+
+	lost := detachedRecord("S1", "b1", func(m *conversationv1.MessageEntry) {
+		m.Payload = &conversationv1.MessageEntry_DetachedWorkEnded{DetachedWorkEnded: &conversationv1.DetachedWorkEnded{
+			Outcome: &conversationv1.DetachedWorkEnded_Lost{Lost: &conversationv1.DetachedLost{Inference: "silence-timeout"}},
+		}}
+	})
+	s.applyLifecycle([]*agentshimv1.Entry{lost}, 2000)
+	if !s.taskOpen("b1") {
+		t.Fatal("a LOST inference closed the task as though it had been observed ending")
+	}
+}
+
+// A message that is not a detached-work card names no task, so it must leave the
+// lifecycle index untouched rather than opening one under a conversation id.
+func TestOrdinaryMessagesDoNotTouchTheLifecycleIndex(t *testing.T) {
+	s, _ := ownerSidecar(t)
+	ordinary := &agentshimv1.Entry{External: &protocolv1.ExternalEntry{
+		SessionId: "S1",
+		Entry: &protocolv1.ExternalEntry_Message{Message: &conversationv1.MessageEntry{
+			MessageId: "some-uuid",
+			Payload:   &conversationv1.MessageEntry_UserSaid{UserSaid: &conversationv1.UserSaid{}},
+		}},
+	}}
+
+	s.applyLifecycle([]*agentshimv1.Entry{ordinary}, 1000)
+
+	if len(s.openTasks) != 0 {
+		t.Fatalf("an ordinary message opened a task: %v", s.openTasks)
 	}
 }
 
