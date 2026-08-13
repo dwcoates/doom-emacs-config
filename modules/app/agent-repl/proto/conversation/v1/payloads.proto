@@ -281,6 +281,30 @@ message DetachedWorkEnded {
     // failed, only that we cannot see it any more.
     DetachedLost lost = 4;
   }
+  // The exit status of the underlying process, for work that IS one — a
+  // backgrounded shell, or unclassified work the producer ran as a process.
+  // UNSET for work that never had an exit status of its own (an agent, a
+  // workflow), and that absence is the only reading of "this work did not exit,
+  // it concluded".
+  //
+  // EVIDENCE, NEVER THE VERDICT. A killed process also exits nonzero, so the
+  // exit status cannot decide the `outcome` arm and the `outcome` arm cannot
+  // reconstruct the exit status. The outcome is resolved separately by the
+  // consumer that owns that judgment; the two must never be derived from each
+  // other. This field exists so a shell's card can show "exited 137" beside the
+  // verdict rather than an unexplained red dot.
+  DetachedProcessExit process_exit = 5;
+}
+
+// A process's exit status, exactly as the operating system reported it.
+//
+// A record of an OBSERVATION, which is why it lives here rather than with the
+// consumer: a producer watched a process leave and read its status.
+message DetachedProcessExit {
+  // The exit code as the shell reports it. A signal-terminated process reports
+  // the conventional 128+N form, because that is literally what its exit status
+  // is. 0 is a real zero and always means clean exit.
+  int32 code = 1;
 }
 
 // It finished and did what it was asked.
