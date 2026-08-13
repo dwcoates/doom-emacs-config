@@ -130,14 +130,123 @@ the daemon genuinely adds.
 
 ## Implementation and integration status
 
-**Not started.** A first implementation wave was dispatched across six
-subsystems and four of the six correctly stopped without writing code.
+**The proto tree is restructured onto the five surfaces; no consumer has been
+migrated.** `daemon/`, `webapp/` and `agent-shim/` are mid-rewrite and do not
+build against it, which is the expected steady state until the gaps below are
+reconciled.
 
-The reason, in one line: the contract specified what a record IS and never
-specified how one MOVES. `StoreWrite` still carried the retired `EventBatch`,
-nothing imported the stored record type, and the delivery envelope was generated
-and referenced by nothing. Recorded here so nothing is dispatched again before
-the model is whole.
+A first implementation wave was dispatched across six subsystems and four of the
+six correctly stopped without writing code. The reason, in one line: the contract
+specified what a record IS and never specified how one MOVES. `StoreWrite` still
+carried the retired `EventBatch`, nothing imported the stored record type, and
+the delivery envelope was generated and referenced by nothing. Recorded here so
+nothing is dispatched again before the model is whole.
+
+---
+
+# COLLECTED GAPS — awaiting one reconciliation conversation
+
+Found while restructuring the tree. **Nothing here has been fixed**, per the gap
+protocol above: each is evidence, and whether it is a real omission, bad
+modeling, an abstraction leak or a dead feature needs the whole set in view.
+
+Every retired field below is reserved by NUMBER and by NAME.
+
+## A. A name collision forced the one unilateral change in the pass
+
+`BookkeepingEntry` declares `Heartbeat`, and `core.proto` declared a `Heartbeat`
+too — the UDS keepalive. Moving bookkeeping onto `protocol.v1` put both in one
+package and protoc refuses the tree until one name moves.
+
+The keepalive was renamed `ConnectionHeartbeat`, because the bookkeeping spelling
+is frozen (`FROZEN-conversation-v1.md`). **Which of the two should keep the plain
+name is a contract decision, not a build fix.** It is the only schema change in
+this pass that was not mandated.
+
+`SessionEnded` and `TurnEnded` collided the same way and needed no ruling: both
+core spellings were on the retirement list, and the bookkeeping ones carry
+strictly more.
+
+## B. Retired records whose consumers have no replacement
+
+1. **`PermissionResponse.decision`** (field 2). `PermissionDecision` retired with
+   the record layer, leaving a response that can carry an edited input and a
+   denial sentence but cannot state the allow/deny verdict — the one thing the
+   message exists to say.
+
+2. **`Message.permission`** (feed.proto, field 30). Carried
+   `PermissionItem`, the daemon-composed request-plus-resolution a client renders
+   and answers. A permission request is a MESSAGE by the feed's own test, so its
+   absence is a hole in the feed, not a tidy-up.
+
+3. **`Message.context_cleared` / `context_compacted`** (fields 32, 33). A context
+   cut is a message by `conversation.v1`'s test — a reader scrolling back must
+   see WHERE the conversation was cut. No arm names one on any surface now.
+   `slash-menu.proto`'s `DaemonInterceptedCommandItem` still documents itself as
+   "the invocation, not the outcome", and the outcome half no longer exists.
+
+4. **`TypingDelta.delta`** (field 3). Carried `ContentDelta` — the live typing
+   preview the whole message exists to relay. `TypingDelta` now carries a
+   workspace and a fence and no content.
+
+5. **`HeartbeatView.progress`** (field 3). Carried `HeartbeatProgress`
+   (`tool_use_id`, `elapsed_seconds`). Tool progress is a fact ABOUT a turn, so
+   `BookkeepingEntry` is its home — but bookkeeping never reaches a client and no
+   resolved frontend spelling exists, so the view has nothing to tick.
+
+6. **`OpenTaskState.started`** (field 1). Carried the `TaskStarted` `Event` that
+   opened the task. The message can now say when a task was last active but not
+   WHICH task it is, which makes the sidecar's open-task recovery underivable.
+
+7. **`StoreWriteAck` has no replacement.** `StoreWrite` became `agentshim.v1`'s
+   `StoreEntryWrite`, but nothing acks it — so `accepted`, `deduped`, `last_seq`
+   and the batch-rejected `error` have nowhere to be reported. A producer cannot
+   currently learn that its write landed, which is what `write_id`'s
+   replay-idempotency contract depends on.
+
+8. **`BackfillState.FAILED` has no evidence to resolve from.** It resolved off
+   `core.v1.UnparsedEvent`, which was durable and reached the daemon.
+   Unconvertible records are now `agentshim.v1`'s unsupported arm, which
+   deliberately never leaves the shim.
+
+## C. Layering observations, no build impact
+
+9. **`frontend.v1` imports `protocol.v1`, which the dependency rule does not
+   sanction.** The rule says `conversation` is the leaf that
+   `agentshim`/`protocol`/`frontend` all import; it says nothing about frontend
+   importing protocol. It does, for `PromptOrigin` (prompt-queue, footer),
+   `InterruptOutcome` (footer), `QueryRuntimeIdentity` (durable) and four query
+   failure arms (errors). Each is a shim-wire type reaching a client directly.
+
+10. **`state.v1` imports `protocol.v1` and `conversation.v1`.** Consistent with
+    "daemon-internal, depends on everything", but worth stating: the frozen
+    persistence layer now names types on two other surfaces, so a change to
+    either is a durable-replay concern.
+
+11. **The store↔sidecar cursor messages are in `protocol.v1`, and this document
+    says they should be `agentshim.v1`** — "it never crosses the daemon boundary,
+    which is the only boundary `protocol` describes". `CursorState`,
+    `CursorQuery`, `CursorList` and `OpenTaskState` moved with the rest of
+    `core.proto` because the restructure was specified as a directory move. They
+    are misfiled by this document's own routing test.
+
+12. **`conversation.v1` imports `google/protobuf/struct.proto`** (content.proto),
+    so "imports nothing" is true of the five surfaces but not literally true. A
+    well-known type creates no surface coupling; noted only so the rule is not
+    read as violated.
+
+## D. Orphaned but retained
+
+13. **`TaskKind`, `TerminalStatus` and `SessionSource` have no user left in the
+    schema.** Their only referents were the retired task and session payloads.
+    Kept because master still names all three, per the delete-only-what-nothing-
+    references rule — but nothing in the new model produces or consumes them.
+
+14. **`TurnClaimBridge`, `SessionRewound`, `KeepAliveDiscard`, `QueryLifecycle`
+    and the whole query-lifecycle subtree have no carrier.** They were reachable
+    only through `Event.payload`. They remain declared on `protocol.v1` and every
+    one is referenced on master, but no envelope on the new model carries them, so
+    a producer has no way to send one.
 
 ---
 
