@@ -32,14 +32,11 @@ message CursorQuery {
 }
 
 message OpenTaskState {
-  // 1 WAS `started`, the `TaskStarted` Event that opened the task, and NOTHING
-  // REPLACES IT. `Event` is retired and detached work is modelled on
-  // frontend.v1 now, so this message is left able to say WHEN a task was last
-  // active but not WHICH task it is — see the gap note. Number and name are
-  // reserved so the slot cannot come back meaning something else.
-  reserved 1;
-  reserved "started";
-  int64 last_activity_at_ms = 2;
+  // KNOWN GAP: this message says WHEN a task was last active, but not WHICH
+  // task it is. The `Event` that named the task is retired and detached work is
+  // modelled on frontend.v1 now, with nothing on this message replacing it —
+  // see the gap note.
+  int64 last_activity_at_ms = 1;
 }
 
 message CursorList {
@@ -50,6 +47,6 @@ message CursorList {
   repeated OpenTaskState open_tasks = 2;
   // True only when open_tasks was computed by a store that implements the
   // authoritative lifecycle query. Distinguishes an empty set from an older
-  // store that does not understand field 2.
+  // store that does not understand `open_tasks`.
   bool open_tasks_authoritative = 3;
 }

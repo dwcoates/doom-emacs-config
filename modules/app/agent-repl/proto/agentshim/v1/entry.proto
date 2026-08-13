@@ -94,28 +94,23 @@ message InternalEntry {
   // disagree; nothing downstream sees it.
   Plane plane = 1;
 
-  // 2 was dedup_key, the CROSS-PLANE identity that collapsed two producers'
-  // views of one fact into one row. It is gone because the fact it collapsed no
-  // longer occurs: the shim used to write conversation content live (115,990
-  // rows in the retired store) and the sidecar wrote the same content later
-  // from disk, so the twins were real and constant. The shim no longer writes
-  // MessageEntry records at all — it cannot, having no parent pointer on the
-  // SDK stream — so there is nothing left to collapse.
+  // THERE IS NO CROSS-PLANE DEDUPLICATION HERE, and none is needed: the two
+  // planes no longer observe the same fact. The shim writes no MessageEntry
+  // records at all — it cannot, having no parent pointer on the SDK stream — so
+  // conversation content reaches the store from the sidecar alone and there are
+  // no twins to collapse.
   //
   // The cost of that, accepted deliberately: content is durable only once the
-  // CLI flushes to disk and the sidecar reads it. The old design bought latency
-  // by writing from both planes, and this is the price of the lineage the new
-  // one requires.
-  reserved 2;
-  reserved "dedup_key";
+  // CLI flushes to disk and the sidecar reads it. Writing from both planes
+  // bought latency, and this is the price of the lineage the current design
+  // requires.
 
   // The STABLE WRITE IDENTITY, minted once by the producer when the record is
   // first handed to a store write, and never regenerated — not for a retry, not
   // for a replay after the store bounced underneath the producer.
   //
-  // A DIFFERENT JOB FROM dedup_key, and neither substitutes for the other.
-  // dedup_key collapses two producers' views of one fact; this one recognizes
-  // ONE producer's re-delivery of ONE record. A batch that reached the store
+  // THIS IS ABOUT ONE PRODUCER'S RE-DELIVERY OF ONE RECORD, not about two
+  // producers' views of one fact. A batch that reached the store
   // but whose ack was lost has to be replayed, because from the producer's side
   // an unacked batch and a never-delivered batch are indistinguishable. Without
   // this the store writes it twice; with it the replay is a no-op.
@@ -123,7 +118,7 @@ message InternalEntry {
   // Empty means the producer supplied no write identity, and such a record is
   // not replay-idempotent. The store enforces uniqueness only over non-empty
   // values.
-  string write_id = 3;
+  string write_id = 2;
 
   // THE PRODUCER'S SOURCE RECORD, kept whole when converting it to `external`
   // dropped structure.
@@ -141,7 +136,7 @@ message InternalEntry {
   // That is exactly what makes eager conversion at the edge a reversible bet.
   //
   // UNSET when the conversion was faithful. It is not a copy of every record.
-  google.protobuf.Struct source_record = 4;
+  google.protobuf.Struct source_record = 3;
 
   // Set when there is nothing to hand the daemon: a record we could not place.
   //
@@ -160,13 +155,13 @@ message InternalEntry {
     // A fact specific to one vendor, understood but not carried into a
     // vendor-agnostic feed. The follow-up is a CONVERTER, if it turns out to be
     // portable after all.
-    VendorSpecificEntry vendor_specific = 10;
+    VendorSpecificEntry vendor_specific = 4;
 
     // A record we PARSED but do not MODEL. The follow-up is a MODEL.
-    UnknownEntry unknown = 11;
+    UnknownEntry unknown = 5;
 
     // A record we could not PARSE at all — a failure rather than a gap.
-    UnparsedEntry unparsed = 12;
+    UnparsedEntry unparsed = 6;
   }
 }
 
