@@ -52,9 +52,12 @@ const (
 // nothing and a frontend saying "start fresh" were the same wire value.
 //
 // They are now different values, which is the whole point of this enum.
-// FRESH IS NOT CALLER-EXPRESSIBLE. Tag 2 was RESUME_MODE_FRESH: "begin a NEW
-// conversation even though a resumable one exists". It is retired, not
-// renamed. A workspace's conversation is not replaceable by a caller — no
+// FRESH IS NOT CALLER-EXPRESSIBLE. The only intents on this wire are CONTINUE
+// (this workspace's conversation, whichever one that is) and EXPLICIT (one
+// named conversation a human chose). "Begin a NEW conversation even though a
+// resumable one exists" is not among them, and never will be.
+//
+// A workspace's conversation is not replaceable by a caller — no
 // frontend, no user command, no automatic recovery may abandon one — because
 // the abandonment is silent and irreversible while every alternative (resume,
 // restore from backup, or a loud refusal) is recoverable. A fresh conversation
@@ -76,7 +79,7 @@ const (
 	// Reserved for a human choosing from among conversations (a picker, a fork)
 	// — never for ordinary restore, which is what CONTINUE is for. A caller that
 	// reaches for this at boot is reintroducing the pointer.
-	ResumeMode_RESUME_MODE_EXPLICIT ResumeMode = 3
+	ResumeMode_RESUME_MODE_EXPLICIT ResumeMode = 2
 )
 
 // Enum value maps for ResumeMode.
@@ -84,12 +87,12 @@ var (
 	ResumeMode_name = map[int32]string{
 		0: "RESUME_MODE_UNSPECIFIED",
 		1: "RESUME_MODE_CONTINUE",
-		3: "RESUME_MODE_EXPLICIT",
+		2: "RESUME_MODE_EXPLICIT",
 	}
 	ResumeMode_value = map[string]int32{
 		"RESUME_MODE_UNSPECIFIED": 0,
 		"RESUME_MODE_CONTINUE":    1,
-		"RESUME_MODE_EXPLICIT":    3,
+		"RESUME_MODE_EXPLICIT":    2,
 	}
 )
 
@@ -177,9 +180,9 @@ func (ClientLogLevel) EnumDescriptor() ([]byte, []int) {
 type CreateSessionCmd struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Cwd            string                 `protobuf:"bytes,1,opt,name=cwd,proto3" json:"cwd,omitempty"`
-	PermissionMode string                 `protobuf:"bytes,3,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
-	ConfigDir      string                 `protobuf:"bytes,4,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
-	Fake           bool                   `protobuf:"varint,6,opt,name=fake,proto3" json:"fake,omitempty"` // test harness sessions
+	PermissionMode string                 `protobuf:"bytes,2,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
+	ConfigDir      string                 `protobuf:"bytes,3,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
+	Fake           bool                   `protobuf:"varint,4,opt,name=fake,proto3" json:"fake,omitempty"` // test harness sessions
 	// The caller's DELIBERATE consent to create a session with NO permission
 	// gate. Required whenever permission_mode names a mode that shadows the
 	// shim's canUseTool callback in the fail-OPEN direction
@@ -193,7 +196,7 @@ type CreateSessionCmd struct {
 	// a create-time consent only: a session already registered in that mode
 	// still rehydrates after a daemon restart, since refusing there would
 	// silently change a live session's posture.
-	AllowUngated bool `protobuf:"varint,7,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
+	AllowUngated bool `protobuf:"varint,5,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
 	// The model this session should START on, empty to accept the shim's own
 	// default.  A caller that has a remembered selection would otherwise have to
 	// create and then immediately SetModel, which races: the session is live and
@@ -203,15 +206,15 @@ type CreateSessionCmd struct {
 	// the same SetModel path a later change takes, once the shim is wired, and
 	// still publishes only the shim-confirmed selection.  A rejected model fails
 	// the create rather than silently leaving the session on another one.
-	Model string `protobuf:"bytes,8,opt,name=model,proto3" json:"model,omitempty"`
+	Model string `protobuf:"bytes,6,opt,name=model,proto3" json:"model,omitempty"`
 	// Which conversation to land on. See ResumeMode: this is intent, and the
 	// daemon does the resolving.
-	ResumeMode ResumeMode `protobuf:"varint,9,opt,name=resume_mode,json=resumeMode,proto3,enum=frontend.v1.ResumeMode" json:"resume_mode,omitempty"`
+	ResumeMode ResumeMode `protobuf:"varint,7,opt,name=resume_mode,json=resumeMode,proto3,enum=frontend.v1.ResumeMode" json:"resume_mode,omitempty"`
 	// The conversation to land on, and ONLY meaningful under
 	// RESUME_MODE_EXPLICIT. The daemon rejects a create that sets this under any
 	// other mode rather than quietly ignoring it, because a caller that filled
 	// this in believes it is steering and must be told it is not.
-	ExplicitClaudeSessionId string `protobuf:"bytes,10,opt,name=explicit_claude_session_id,json=explicitClaudeSessionId,proto3" json:"explicit_claude_session_id,omitempty"`
+	ExplicitClaudeSessionId string `protobuf:"bytes,8,opt,name=explicit_claude_session_id,json=explicitClaudeSessionId,proto3" json:"explicit_claude_session_id,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -1197,16 +1200,15 @@ const file_frontend_v1_lifecycle_proto_rawDesc = "" +
 	"\x1bfrontend/v1/lifecycle.proto\x12\vfrontend.v1\x1a\x1cgoogle/protobuf/struct.proto\"\xb2\x02\n" +
 	"\x10CreateSessionCmd\x12\x10\n" +
 	"\x03cwd\x18\x01 \x01(\tR\x03cwd\x12'\n" +
-	"\x0fpermission_mode\x18\x03 \x01(\tR\x0epermissionMode\x12\x1d\n" +
+	"\x0fpermission_mode\x18\x02 \x01(\tR\x0epermissionMode\x12\x1d\n" +
 	"\n" +
-	"config_dir\x18\x04 \x01(\tR\tconfigDir\x12\x12\n" +
-	"\x04fake\x18\x06 \x01(\bR\x04fake\x12#\n" +
-	"\rallow_ungated\x18\a \x01(\bR\fallowUngated\x12\x14\n" +
-	"\x05model\x18\b \x01(\tR\x05model\x128\n" +
-	"\vresume_mode\x18\t \x01(\x0e2\x17.frontend.v1.ResumeModeR\n" +
+	"config_dir\x18\x03 \x01(\tR\tconfigDir\x12\x12\n" +
+	"\x04fake\x18\x04 \x01(\bR\x04fake\x12#\n" +
+	"\rallow_ungated\x18\x05 \x01(\bR\fallowUngated\x12\x14\n" +
+	"\x05model\x18\x06 \x01(\tR\x05model\x128\n" +
+	"\vresume_mode\x18\a \x01(\x0e2\x17.frontend.v1.ResumeModeR\n" +
 	"resumeMode\x12;\n" +
-	"\x1aexplicit_claude_session_id\x18\n" +
-	" \x01(\tR\x17explicitClaudeSessionId\"1\n" +
+	"\x1aexplicit_claude_session_id\x18\b \x01(\tR\x17explicitClaudeSessionId\"1\n" +
 	"\x10DeleteSessionCmd\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"\x13\n" +
@@ -1254,12 +1256,12 @@ const file_frontend_v1_lifecycle_proto_rawDesc = "" +
 	"\fClientLogCmd\x121\n" +
 	"\x05level\x18\x01 \x01(\x0e2\x1b.frontend.v1.ClientLogLevelR\x05level\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x121\n" +
-	"\acontext\x18\x03 \x01(\v2\x17.google.protobuf.StructR\acontext*v\n" +
+	"\acontext\x18\x03 \x01(\v2\x17.google.protobuf.StructR\acontext*]\n" +
 	"\n" +
 	"ResumeMode\x12\x1b\n" +
 	"\x17RESUME_MODE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14RESUME_MODE_CONTINUE\x10\x01\x12\x18\n" +
-	"\x14RESUME_MODE_EXPLICIT\x10\x03\"\x04\b\x02\x10\x02*\x11RESUME_MODE_FRESH*\x84\x01\n" +
+	"\x14RESUME_MODE_EXPLICIT\x10\x02*\x84\x01\n" +
 	"\x0eClientLogLevel\x12 \n" +
 	"\x1cCLIENT_LOG_LEVEL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15CLIENT_LOG_LEVEL_INFO\x10\x01\x12\x19\n" +

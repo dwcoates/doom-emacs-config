@@ -307,16 +307,16 @@ type SessionBegan struct {
 	// What the session started with available. NAMES ONLY, because the panel
 	// counts them and a reader wants to know what was reachable — the full
 	// definition of a skill or a subagent is not conversation material.
-	Skills    []string `protobuf:"bytes,10,rep,name=skills,proto3" json:"skills,omitempty"`
-	Subagents []string `protobuf:"bytes,11,rep,name=subagents,proto3" json:"subagents,omitempty"`
+	Skills    []string `protobuf:"bytes,7,rep,name=skills,proto3" json:"skills,omitempty"`
+	Subagents []string `protobuf:"bytes,8,rep,name=subagents,proto3" json:"subagents,omitempty"`
 	// The MCP servers configured, and whether each one came up.
-	McpServers []*SessionMcpServer `protobuf:"bytes,12,rep,name=mcp_servers,json=mcpServers,proto3" json:"mcp_servers,omitempty"`
+	McpServers []*SessionMcpServer `protobuf:"bytes,9,rep,name=mcp_servers,json=mcpServers,proto3" json:"mcp_servers,omitempty"`
 	// The plugins loaded.
-	Plugins []*SessionPlugin `protobuf:"bytes,13,rep,name=plugins,proto3" json:"plugins,omitempty"`
+	Plugins []*SessionPlugin `protobuf:"bytes,10,rep,name=plugins,proto3" json:"plugins,omitempty"`
 	// The memory files in scope, by path. A list rather than the vendor's
 	// name→path map: nothing renders the names, and a map invites a consumer to
 	// look one up by a key this schema does not promise.
-	MemoryPaths   []string `protobuf:"bytes,14,rep,name=memory_paths,json=memoryPaths,proto3" json:"memory_paths,omitempty"`
+	MemoryPaths   []string `protobuf:"bytes,11,rep,name=memory_paths,json=memoryPaths,proto3" json:"memory_paths,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2019,12 +2019,12 @@ type isAccountUsageObservation_Boundary interface {
 
 type AccountUsageObservation_TurnStart struct {
 	// Marks the boundary immediately before prompt submission.
-	TurnStart *TurnStartUsageBoundary `protobuf:"bytes,10,opt,name=turn_start,json=turnStart,proto3,oneof"`
+	TurnStart *TurnStartUsageBoundary `protobuf:"bytes,7,opt,name=turn_start,json=turnStart,proto3,oneof"`
 }
 
 type AccountUsageObservation_TurnEnd struct {
 	// Marks the boundary after the terminal result is received.
-	TurnEnd *TurnEndUsageBoundary `protobuf:"bytes,11,opt,name=turn_end,json=turnEnd,proto3,oneof"`
+	TurnEnd *TurnEndUsageBoundary `protobuf:"bytes,8,opt,name=turn_end,json=turnEnd,proto3,oneof"`
 }
 
 func (*AccountUsageObservation_TurnStart) isAccountUsageObservation_Boundary() {}
@@ -2037,12 +2037,12 @@ type isAccountUsageObservation_Outcome interface {
 
 type AccountUsageObservation_Available struct {
 	// Contains the account-usage measurement.
-	Available *AccountUsageAvailable `protobuf:"bytes,20,opt,name=available,proto3,oneof"`
+	Available *AccountUsageAvailable `protobuf:"bytes,9,opt,name=available,proto3,oneof"`
 }
 
 type AccountUsageObservation_Unavailable struct {
 	// Explains why the measurement could not be obtained.
-	Unavailable *AccountUsageUnavailable `protobuf:"bytes,21,opt,name=unavailable,proto3,oneof"`
+	Unavailable *AccountUsageUnavailable `protobuf:"bytes,10,opt,name=unavailable,proto3,oneof"`
 }
 
 func (*AccountUsageObservation_Available) isAccountUsageObservation_Outcome() {}
@@ -2529,13 +2529,13 @@ const file_protocol_v1_bookkeeping_proto_rawDesc = "" +
 	"\x04auth\x18\x04 \x01(\v2\x18.protocol.v1.SessionAuthR\x04auth\x12!\n" +
 	"\foutput_style\x18\x05 \x01(\tR\voutputStyle\x122\n" +
 	"\tfast_mode\x18\x06 \x01(\v2\x15.protocol.v1.FastModeR\bfastMode\x12\x16\n" +
-	"\x06skills\x18\n" +
-	" \x03(\tR\x06skills\x12\x1c\n" +
-	"\tsubagents\x18\v \x03(\tR\tsubagents\x12>\n" +
-	"\vmcp_servers\x18\f \x03(\v2\x1d.protocol.v1.SessionMcpServerR\n" +
+	"\x06skills\x18\a \x03(\tR\x06skills\x12\x1c\n" +
+	"\tsubagents\x18\b \x03(\tR\tsubagents\x12>\n" +
+	"\vmcp_servers\x18\t \x03(\v2\x1d.protocol.v1.SessionMcpServerR\n" +
 	"mcpServers\x124\n" +
-	"\aplugins\x18\r \x03(\v2\x1a.protocol.v1.SessionPluginR\aplugins\x12!\n" +
-	"\fmemory_paths\x18\x0e \x03(\tR\vmemoryPaths\"\x8e\x01\n" +
+	"\aplugins\x18\n" +
+	" \x03(\v2\x1a.protocol.v1.SessionPluginR\aplugins\x12!\n" +
+	"\fmemory_paths\x18\v \x03(\tR\vmemoryPaths\"\x8e\x01\n" +
 	"\vSessionAuth\x12C\n" +
 	"\fsubscription\x18\x01 \x01(\v2\x1d.protocol.v1.AuthSubscriptionH\x00R\fsubscription\x122\n" +
 	"\aapi_key\x18\x02 \x01(\v2\x17.protocol.v1.AuthApiKeyH\x00R\x06apiKeyB\x06\n" +
@@ -2611,11 +2611,11 @@ const file_protocol_v1_bookkeeping_proto_rawDesc = "" +
 	"\x11sample_latency_ms\x18\x05 \x01(\x03R\x0fsampleLatencyMs\x12+\n" +
 	"\x11subscription_type\x18\x06 \x01(\tR\x10subscriptionType\x12D\n" +
 	"\n" +
-	"turn_start\x18\n" +
-	" \x01(\v2#.protocol.v1.TurnStartUsageBoundaryH\x00R\tturnStart\x12>\n" +
-	"\bturn_end\x18\v \x01(\v2!.protocol.v1.TurnEndUsageBoundaryH\x00R\aturnEnd\x12B\n" +
-	"\tavailable\x18\x14 \x01(\v2\".protocol.v1.AccountUsageAvailableH\x01R\tavailable\x12H\n" +
-	"\vunavailable\x18\x15 \x01(\v2$.protocol.v1.AccountUsageUnavailableH\x01R\vunavailableB\n" +
+	"turn_start\x18\a \x01(\v2#.protocol.v1.TurnStartUsageBoundaryH\x00R\tturnStart\x12>\n" +
+	"\bturn_end\x18\b \x01(\v2!.protocol.v1.TurnEndUsageBoundaryH\x00R\aturnEnd\x12B\n" +
+	"\tavailable\x18\t \x01(\v2\".protocol.v1.AccountUsageAvailableH\x01R\tavailable\x12H\n" +
+	"\vunavailable\x18\n" +
+	" \x01(\v2$.protocol.v1.AccountUsageUnavailableH\x01R\vunavailableB\n" +
 	"\n" +
 	"\bboundaryB\t\n" +
 	"\aoutcome\"\x18\n" +

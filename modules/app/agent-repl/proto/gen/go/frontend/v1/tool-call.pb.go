@@ -178,14 +178,14 @@ type AgentToolOutcome struct {
 	// ToolUseResult has no correlation id of its own: on disk it is associated
 	// with its tool_result line POSITIONALLY, and a positional association does
 	// not survive being pushed as an independent emission.
-	ToolUseId string `protobuf:"bytes,2,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
+	ToolUseId string `protobuf:"bytes,3,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
 	// THE DETACHMENT VERDICT, same contract as AgentToolCall.spawned_message_id.
 	// It appears on both messages because the structured outcome is where the
 	// detachment becomes knowable, while the call is where a frontend needs the
 	// answer first — the card is drawn before its outcome lands. The two are the
 	// same string whenever both are set; the daemon resolves the id once and
 	// stamps it on both.
-	SpawnedMessageId string `protobuf:"bytes,3,opt,name=spawned_message_id,json=spawnedMessageId,proto3" json:"spawned_message_id,omitempty"`
+	SpawnedMessageId string `protobuf:"bytes,4,opt,name=spawned_message_id,json=spawnedMessageId,proto3" json:"spawned_message_id,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -270,7 +270,7 @@ type AgentToolOutcome_Started struct {
 
 type AgentToolOutcome_Ended struct {
 	// Detached work reached an end, with the outcome it reached.
-	Ended *v1.DetachedWorkEnded `protobuf:"bytes,4,opt,name=ended,proto3,oneof"`
+	Ended *v1.DetachedWorkEnded `protobuf:"bytes,2,opt,name=ended,proto3,oneof"`
 }
 
 func (*AgentToolOutcome_Started) isAgentToolOutcome_Outcome() {}
@@ -279,21 +279,32 @@ func (*AgentToolOutcome_Ended) isAgentToolOutcome_Outcome() {}
 
 // One dispatched background task, as the catalog reports it.
 type TaskEntry struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
-	TaskId      string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	Description string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
-	OutputPath  string                 `protobuf:"bytes,5,opt,name=output_path,json=outputPath,proto3" json:"output_path,omitempty"`
-	StartedAtMs int64                  `protobuf:"varint,6,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
-	EndedAtMs   int64                  `protobuf:"varint,7,opt,name=ended_at_ms,json=endedAtMs,proto3" json:"ended_at_ms,omitempty"` // 0 = still open
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// KIND AND STATUS ARE TYPED, never free strings. A state carried as text
+	// ("agent", "running", ...) renders an unrecognized word as whatever the
+	// client's string comparison falls through to; a typed kind and a status
+	// oneof make an unfamiliar value fail to match instead of silently drawing as
+	// something else.
+	//
+	// THE STATUS IS THIS CATALOG'S OWN ONEOF, not conversation.v1's
+	// DetachedWorkEnded, which cannot say what this surface must say: it collapses
+	// a task stopped through its own affordance and one stopped from outside onto
+	// a single cancelled arm, and it leaves `running` as an ABSENCE — a state
+	// inferred from a missing field. Both distinctions are stated here instead.
+	TaskId      string `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Description string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	OutputPath  string `protobuf:"bytes,3,opt,name=output_path,json=outputPath,proto3" json:"output_path,omitempty"`
+	StartedAtMs int64  `protobuf:"varint,4,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
+	EndedAtMs   int64  `protobuf:"varint,5,opt,name=ended_at_ms,json=endedAtMs,proto3" json:"ended_at_ms,omitempty"` // 0 = still open
 	// WHAT KIND of work the task is, in the ONE vocabulary the producer wrote it
 	// in. The catalog and the detached-work message describe the same dispatched
 	// work from two vantage points, so they read the same kind out of the same
 	// type rather than each keeping a copy to disagree with.
 	//
-	// NOT named `kind`: that wire token is reserved for the retired free-string
-	// field, and this surface is protojson, where reusing the token would put two
-	// different types behind one name across versions.
-	WorkKind *v1.DetachedWorkKind `protobuf:"bytes,14,opt,name=work_kind,json=workKind,proto3" json:"work_kind,omitempty"`
+	// NAMED FOR THE VOCABULARY IT CARRIES, not the bare `kind`. This surface is
+	// protojson on the wire, where the field NAME is the wire token, so the name
+	// says which type the value is in rather than leaving a reader to guess.
+	WorkKind *v1.DetachedWorkKind `protobuf:"bytes,6,opt,name=work_kind,json=workKind,proto3" json:"work_kind,omitempty"`
 	// The task's lifecycle; the set arm IS the status. Never unset on a wire
 	// entry: an entry with no arm here is a malformed frame and is rejected
 	// loudly rather than drawn as running.
@@ -460,27 +471,27 @@ type isTaskEntry_Status interface {
 }
 
 type TaskEntry_Running struct {
-	Running *TaskStatusRunning `protobuf:"bytes,20,opt,name=running,proto3,oneof"`
+	Running *TaskStatusRunning `protobuf:"bytes,7,opt,name=running,proto3,oneof"`
 }
 
 type TaskEntry_Done struct {
-	Done *TaskStatusDone `protobuf:"bytes,21,opt,name=done,proto3,oneof"`
+	Done *TaskStatusDone `protobuf:"bytes,8,opt,name=done,proto3,oneof"`
 }
 
 type TaskEntry_Error struct {
-	Error *TaskStatusError `protobuf:"bytes,22,opt,name=error,proto3,oneof"`
+	Error *TaskStatusError `protobuf:"bytes,9,opt,name=error,proto3,oneof"`
 }
 
 type TaskEntry_Killed struct {
-	Killed *TaskStatusKilled `protobuf:"bytes,23,opt,name=killed,proto3,oneof"`
+	Killed *TaskStatusKilled `protobuf:"bytes,10,opt,name=killed,proto3,oneof"`
 }
 
 type TaskEntry_Stopped struct {
-	Stopped *TaskStatusStopped `protobuf:"bytes,24,opt,name=stopped,proto3,oneof"`
+	Stopped *TaskStatusStopped `protobuf:"bytes,11,opt,name=stopped,proto3,oneof"`
 }
 
 type TaskEntry_Lost struct {
-	Lost *TaskStatusLost `protobuf:"bytes,25,opt,name=lost,proto3,oneof"`
+	Lost *TaskStatusLost `protobuf:"bytes,12,opt,name=lost,proto3,oneof"`
 }
 
 func (*TaskEntry_Running) isTaskEntry_Status() {}
@@ -723,9 +734,12 @@ func (*TaskStatusLost) Descriptor() ([]byte, []int) {
 }
 
 type TaskCatalog struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	Tasks     []*TaskEntry           `protobuf:"bytes,3,rep,name=tasks,proto3" json:"tasks,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// WORKSPACE-ADDRESSED, never session-addressed. A frontend has no session
+	// vocabulary; the only currency question it ever asks is "is this push still
+	// current", which the fence below answers without naming what rotated.
+	Workspace string       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Tasks     []*TaskEntry `protobuf:"bytes,2,rep,name=tasks,proto3" json:"tasks,omitempty"`
 	// The workspace's staleness FENCE at the moment the daemon produced this
 	// push: an opaque token the client compares BYTE-WISE against the fence on
 	// the workspace's current WorkspaceState, and never parses, splits or
@@ -735,7 +749,7 @@ type TaskCatalog struct {
 	// The daemon mints it and is the only thing that can read meaning into it.
 	// A client that learned to decode it would be depending on a fact this
 	// contract does not offer, and the token's composition is free to change.
-	Fence         string `protobuf:"bytes,4,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence         string `protobuf:"bytes,3,opt,name=fence,proto3" json:"fence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -795,45 +809,44 @@ var File_frontend_v1_tool_call_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_tool_call_proto_rawDesc = "" +
 	"\n" +
-	"\x1bfrontend/v1/tool-call.proto\x12\vfrontend.v1\x1a\x1dconversation/v1/content.proto\x1a\x1econversation/v1/payloads.proto\"\x84\x01\n" +
+	"\x1bfrontend/v1/tool-call.proto\x12\vfrontend.v1\x1a\x1dconversation/v1/content.proto\x1a\x1econversation/v1/payloads.proto\"q\n" +
 	"\rAgentToolCall\x122\n" +
 	"\x04call\x18\x01 \x01(\v2\x1e.conversation.v1.ToolCallBlockR\x04call\x12,\n" +
-	"\x12spawned_message_id\x18\x02 \x01(\tR\x10spawnedMessageIdR\x11spawned_bubble_id\"M\n" +
+	"\x12spawned_message_id\x18\x02 \x01(\tR\x10spawnedMessageId\"M\n" +
 	"\x0fAgentToolResult\x12:\n" +
-	"\x06result\x18\x01 \x01(\v2\".conversation.v1.ToolResultContentR\x06result\"\xfc\x01\n" +
+	"\x06result\x18\x01 \x01(\v2\".conversation.v1.ToolResultContentR\x06result\"\xe9\x01\n" +
 	"\x10AgentToolOutcome\x12@\n" +
 	"\astarted\x18\x01 \x01(\v2$.conversation.v1.DetachedWorkStartedH\x00R\astarted\x12:\n" +
-	"\x05ended\x18\x04 \x01(\v2\".conversation.v1.DetachedWorkEndedH\x00R\x05ended\x12\x1e\n" +
-	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\x12,\n" +
-	"\x12spawned_message_id\x18\x03 \x01(\tR\x10spawnedMessageIdB\t\n" +
-	"\aoutcomeR\x11spawned_bubble_id\"\xa7\x05\n" +
+	"\x05ended\x18\x02 \x01(\v2\".conversation.v1.DetachedWorkEndedH\x00R\x05ended\x12\x1e\n" +
+	"\vtool_use_id\x18\x03 \x01(\tR\ttoolUseId\x12,\n" +
+	"\x12spawned_message_id\x18\x04 \x01(\tR\x10spawnedMessageIdB\t\n" +
+	"\aoutcome\"\xc2\x04\n" +
 	"\tTaskEntry\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12 \n" +
-	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\x1f\n" +
-	"\voutput_path\x18\x05 \x01(\tR\n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1f\n" +
+	"\voutput_path\x18\x03 \x01(\tR\n" +
 	"outputPath\x12\"\n" +
-	"\rstarted_at_ms\x18\x06 \x01(\x03R\vstartedAtMs\x12\x1e\n" +
-	"\vended_at_ms\x18\a \x01(\x03R\tendedAtMs\x12>\n" +
-	"\twork_kind\x18\x0e \x01(\v2!.conversation.v1.DetachedWorkKindR\bworkKind\x12:\n" +
-	"\arunning\x18\x14 \x01(\v2\x1e.frontend.v1.TaskStatusRunningH\x00R\arunning\x121\n" +
-	"\x04done\x18\x15 \x01(\v2\x1b.frontend.v1.TaskStatusDoneH\x00R\x04done\x124\n" +
-	"\x05error\x18\x16 \x01(\v2\x1c.frontend.v1.TaskStatusErrorH\x00R\x05error\x127\n" +
-	"\x06killed\x18\x17 \x01(\v2\x1d.frontend.v1.TaskStatusKilledH\x00R\x06killed\x12:\n" +
-	"\astopped\x18\x18 \x01(\v2\x1e.frontend.v1.TaskStatusStoppedH\x00R\astopped\x121\n" +
-	"\x04lost\x18\x19 \x01(\v2\x1b.frontend.v1.TaskStatusLostH\x00R\x04lostB\b\n" +
-	"\x06statusJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05J\x04\b\n" +
-	"\x10\vJ\x04\b\v\x10\fJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x1a\x10\x1bR\x04kindR\x06statusR\x05agentR\bworkflowR\x05shellR\funclassifiedR\x05ended\"\x13\n" +
+	"\rstarted_at_ms\x18\x04 \x01(\x03R\vstartedAtMs\x12\x1e\n" +
+	"\vended_at_ms\x18\x05 \x01(\x03R\tendedAtMs\x12>\n" +
+	"\twork_kind\x18\x06 \x01(\v2!.conversation.v1.DetachedWorkKindR\bworkKind\x12:\n" +
+	"\arunning\x18\a \x01(\v2\x1e.frontend.v1.TaskStatusRunningH\x00R\arunning\x121\n" +
+	"\x04done\x18\b \x01(\v2\x1b.frontend.v1.TaskStatusDoneH\x00R\x04done\x124\n" +
+	"\x05error\x18\t \x01(\v2\x1c.frontend.v1.TaskStatusErrorH\x00R\x05error\x127\n" +
+	"\x06killed\x18\n" +
+	" \x01(\v2\x1d.frontend.v1.TaskStatusKilledH\x00R\x06killed\x12:\n" +
+	"\astopped\x18\v \x01(\v2\x1e.frontend.v1.TaskStatusStoppedH\x00R\astopped\x121\n" +
+	"\x04lost\x18\f \x01(\v2\x1b.frontend.v1.TaskStatusLostH\x00R\x04lostB\b\n" +
+	"\x06status\"\x13\n" +
 	"\x11TaskStatusRunning\"\x10\n" +
 	"\x0eTaskStatusDone\"\x11\n" +
 	"\x0fTaskStatusError\"\x12\n" +
 	"\x10TaskStatusKilled\"\x13\n" +
 	"\x11TaskStatusStopped\"\x10\n" +
-	"\x0eTaskStatusLost\"\x81\x01\n" +
+	"\x0eTaskStatusLost\"o\n" +
 	"\vTaskCatalog\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12,\n" +
-	"\x05tasks\x18\x03 \x03(\v2\x16.frontend.v1.TaskEntryR\x05tasks\x12\x14\n" +
-	"\x05fence\x18\x04 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03R\n" +
-	"session_idB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
+	"\x05tasks\x18\x02 \x03(\v2\x16.frontend.v1.TaskEntryR\x05tasks\x12\x14\n" +
+	"\x05fence\x18\x03 \x01(\tR\x05fenceB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_frontend_v1_tool_call_proto_rawDescOnce sync.Once

@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/tool-call.proto.
  */
 export const file_frontend_v1_tool_call: GenFile = /*@__PURE__*/
-  fileDesc("Chtmcm9udGVuZC92MS90b29sLWNhbGwucHJvdG8SC2Zyb250ZW5kLnYxImwKDUFnZW50VG9vbENhbGwSLAoEY2FsbBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5Ub29sQ2FsbEJsb2NrEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgCIAEoCVIRc3Bhd25lZF9idWJibGVfaWQiRQoPQWdlbnRUb29sUmVzdWx0EjIKBnJlc3VsdBgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ub29sUmVzdWx0Q29udGVudCLPAQoQQWdlbnRUb29sT3V0Y29tZRI3CgdzdGFydGVkGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya1N0YXJ0ZWRIABIzCgVlbmRlZBgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEgAEhMKC3Rvb2xfdXNlX2lkGAIgASgJEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgDIAEoCUIJCgdvdXRjb21lUhFzcGF3bmVkX2J1YmJsZV9pZCK3BAoJVGFza0VudHJ5Eg8KB3Rhc2tfaWQYASABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSEwoLb3V0cHV0X3BhdGgYBSABKAkSFQoNc3RhcnRlZF9hdF9tcxgGIAEoAxITCgtlbmRlZF9hdF9tcxgHIAEoAxI0Cgl3b3JrX2tpbmQYDiABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZBIxCgdydW5uaW5nGBQgASgLMh4uZnJvbnRlbmQudjEuVGFza1N0YXR1c1J1bm5pbmdIABIrCgRkb25lGBUgASgLMhsuZnJvbnRlbmQudjEuVGFza1N0YXR1c0RvbmVIABItCgVlcnJvchgWIAEoCzIcLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNFcnJvckgAEi8KBmtpbGxlZBgXIAEoCzIdLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNLaWxsZWRIABIxCgdzdG9wcGVkGBggASgLMh4uZnJvbnRlbmQudjEuVGFza1N0YXR1c1N0b3BwZWRIABIrCgRsb3N0GBkgASgLMhsuZnJvbnRlbmQudjEuVGFza1N0YXR1c0xvc3RIAEIICgZzdGF0dXNKBAgCEANKBAgEEAVKBAgKEAtKBAgLEAxKBAgMEA1KBAgNEA5KBAgaEBtSBGtpbmRSBnN0YXR1c1IFYWdlbnRSCHdvcmtmbG93UgVzaGVsbFIMdW5jbGFzc2lmaWVkUgVlbmRlZCITChFUYXNrU3RhdHVzUnVubmluZyIQCg5UYXNrU3RhdHVzRG9uZSIRCg9UYXNrU3RhdHVzRXJyb3IiEgoQVGFza1N0YXR1c0tpbGxlZCITChFUYXNrU3RhdHVzU3RvcHBlZCIQCg5UYXNrU3RhdHVzTG9zdCJoCgtUYXNrQ2F0YWxvZxIRCgl3b3Jrc3BhY2UYASABKAkSJQoFdGFza3MYAyADKAsyFi5mcm9udGVuZC52MS5UYXNrRW50cnkSDQoFZmVuY2UYBCABKAlKBAgCEANSCnNlc3Npb25faWRCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_conversation_v1_content, file_conversation_v1_payloads]);
+  fileDesc("Chtmcm9udGVuZC92MS90b29sLWNhbGwucHJvdG8SC2Zyb250ZW5kLnYxIlkKDUFnZW50VG9vbENhbGwSLAoEY2FsbBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5Ub29sQ2FsbEJsb2NrEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgCIAEoCSJFCg9BZ2VudFRvb2xSZXN1bHQSMgoGcmVzdWx0GAEgASgLMiIuY29udmVyc2F0aW9uLnYxLlRvb2xSZXN1bHRDb250ZW50IrwBChBBZ2VudFRvb2xPdXRjb21lEjcKB3N0YXJ0ZWQYASABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZEgAEjMKBWVuZGVkGAIgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0VuZGVkSAASEwoLdG9vbF91c2VfaWQYAyABKAkSGgoSc3Bhd25lZF9tZXNzYWdlX2lkGAQgASgJQgkKB291dGNvbWUi0gMKCVRhc2tFbnRyeRIPCgd0YXNrX2lkGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJEhMKC291dHB1dF9wYXRoGAMgASgJEhUKDXN0YXJ0ZWRfYXRfbXMYBCABKAMSEwoLZW5kZWRfYXRfbXMYBSABKAMSNAoJd29ya19raW5kGAYgASgLMiEuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0tpbmQSMQoHcnVubmluZxgHIAEoCzIeLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNSdW5uaW5nSAASKwoEZG9uZRgIIAEoCzIbLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNEb25lSAASLQoFZXJyb3IYCSABKAsyHC5mcm9udGVuZC52MS5UYXNrU3RhdHVzRXJyb3JIABIvCgZraWxsZWQYCiABKAsyHS5mcm9udGVuZC52MS5UYXNrU3RhdHVzS2lsbGVkSAASMQoHc3RvcHBlZBgLIAEoCzIeLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNTdG9wcGVkSAASKwoEbG9zdBgMIAEoCzIbLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNMb3N0SABCCAoGc3RhdHVzIhMKEVRhc2tTdGF0dXNSdW5uaW5nIhAKDlRhc2tTdGF0dXNEb25lIhEKD1Rhc2tTdGF0dXNFcnJvciISChBUYXNrU3RhdHVzS2lsbGVkIhMKEVRhc2tTdGF0dXNTdG9wcGVkIhAKDlRhc2tTdGF0dXNMb3N0IlYKC1Rhc2tDYXRhbG9nEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgV0YXNrcxgCIAMoCzIWLmZyb250ZW5kLnYxLlRhc2tFbnRyeRINCgVmZW5jZRgDIAEoCUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_content, file_conversation_v1_payloads]);
 
 /**
  * The tool card's header: one tool invocation.
@@ -129,7 +129,7 @@ export type AgentToolOutcome = Message<"frontend.v1.AgentToolOutcome"> & {
     /**
      * Detached work reached an end, with the outcome it reached.
      *
-     * @generated from field: conversation.v1.DetachedWorkEnded ended = 4;
+     * @generated from field: conversation.v1.DetachedWorkEnded ended = 2;
      */
     value: DetachedWorkEnded;
     case: "ended";
@@ -141,7 +141,7 @@ export type AgentToolOutcome = Message<"frontend.v1.AgentToolOutcome"> & {
    * with its tool_result line POSITIONALLY, and a positional association does
    * not survive being pushed as an independent emission.
    *
-   * @generated from field: string tool_use_id = 2;
+   * @generated from field: string tool_use_id = 3;
    */
   toolUseId: string;
 
@@ -153,7 +153,7 @@ export type AgentToolOutcome = Message<"frontend.v1.AgentToolOutcome"> & {
    * same string whenever both are set; the daemon resolves the id once and
    * stamps it on both.
    *
-   * @generated from field: string spawned_message_id = 3;
+   * @generated from field: string spawned_message_id = 4;
    */
   spawnedMessageId: string;
 };
@@ -172,29 +172,41 @@ export const AgentToolOutcomeSchema: GenMessage<AgentToolOutcome> = /*@__PURE__*
  */
 export type TaskEntry = Message<"frontend.v1.TaskEntry"> & {
   /**
+   * KIND AND STATUS ARE TYPED, never free strings. A state carried as text
+   * ("agent", "running", ...) renders an unrecognized word as whatever the
+   * client's string comparison falls through to; a typed kind and a status
+   * oneof make an unfamiliar value fail to match instead of silently drawing as
+   * something else.
+   *
+   * THE STATUS IS THIS CATALOG'S OWN ONEOF, not conversation.v1's
+   * DetachedWorkEnded, which cannot say what this surface must say: it collapses
+   * a task stopped through its own affordance and one stopped from outside onto
+   * a single cancelled arm, and it leaves `running` as an ABSENCE — a state
+   * inferred from a missing field. Both distinctions are stated here instead.
+   *
    * @generated from field: string task_id = 1;
    */
   taskId: string;
 
   /**
-   * @generated from field: string description = 3;
+   * @generated from field: string description = 2;
    */
   description: string;
 
   /**
-   * @generated from field: string output_path = 5;
+   * @generated from field: string output_path = 3;
    */
   outputPath: string;
 
   /**
-   * @generated from field: int64 started_at_ms = 6;
+   * @generated from field: int64 started_at_ms = 4;
    */
   startedAtMs: bigint;
 
   /**
    * 0 = still open
    *
-   * @generated from field: int64 ended_at_ms = 7;
+   * @generated from field: int64 ended_at_ms = 5;
    */
   endedAtMs: bigint;
 
@@ -204,11 +216,11 @@ export type TaskEntry = Message<"frontend.v1.TaskEntry"> & {
    * work from two vantage points, so they read the same kind out of the same
    * type rather than each keeping a copy to disagree with.
    *
-   * NOT named `kind`: that wire token is reserved for the retired free-string
-   * field, and this surface is protojson, where reusing the token would put two
-   * different types behind one name across versions.
+   * NAMED FOR THE VOCABULARY IT CARRIES, not the bare `kind`. This surface is
+   * protojson on the wire, where the field NAME is the wire token, so the name
+   * says which type the value is in rather than leaving a reader to guess.
    *
-   * @generated from field: conversation.v1.DetachedWorkKind work_kind = 14;
+   * @generated from field: conversation.v1.DetachedWorkKind work_kind = 6;
    */
   workKind?: DetachedWorkKind | undefined;
 
@@ -232,37 +244,37 @@ export type TaskEntry = Message<"frontend.v1.TaskEntry"> & {
    */
   status: {
     /**
-     * @generated from field: frontend.v1.TaskStatusRunning running = 20;
+     * @generated from field: frontend.v1.TaskStatusRunning running = 7;
      */
     value: TaskStatusRunning;
     case: "running";
   } | {
     /**
-     * @generated from field: frontend.v1.TaskStatusDone done = 21;
+     * @generated from field: frontend.v1.TaskStatusDone done = 8;
      */
     value: TaskStatusDone;
     case: "done";
   } | {
     /**
-     * @generated from field: frontend.v1.TaskStatusError error = 22;
+     * @generated from field: frontend.v1.TaskStatusError error = 9;
      */
     value: TaskStatusError;
     case: "error";
   } | {
     /**
-     * @generated from field: frontend.v1.TaskStatusKilled killed = 23;
+     * @generated from field: frontend.v1.TaskStatusKilled killed = 10;
      */
     value: TaskStatusKilled;
     case: "killed";
   } | {
     /**
-     * @generated from field: frontend.v1.TaskStatusStopped stopped = 24;
+     * @generated from field: frontend.v1.TaskStatusStopped stopped = 11;
      */
     value: TaskStatusStopped;
     case: "stopped";
   } | {
     /**
-     * @generated from field: frontend.v1.TaskStatusLost lost = 25;
+     * @generated from field: frontend.v1.TaskStatusLost lost = 12;
      */
     value: TaskStatusLost;
     case: "lost";
@@ -376,12 +388,16 @@ export const TaskStatusLostSchema: GenMessage<TaskStatusLost> = /*@__PURE__*/
  */
 export type TaskCatalog = Message<"frontend.v1.TaskCatalog"> & {
   /**
+   * WORKSPACE-ADDRESSED, never session-addressed. A frontend has no session
+   * vocabulary; the only currency question it ever asks is "is this push still
+   * current", which the fence below answers without naming what rotated.
+   *
    * @generated from field: string workspace = 1;
    */
   workspace: string;
 
   /**
-   * @generated from field: repeated frontend.v1.TaskEntry tasks = 3;
+   * @generated from field: repeated frontend.v1.TaskEntry tasks = 2;
    */
   tasks: TaskEntry[];
 
@@ -396,7 +412,7 @@ export type TaskCatalog = Message<"frontend.v1.TaskCatalog"> & {
    * A client that learned to decode it would be depending on a fact this
    * contract does not offer, and the token's composition is free to change.
    *
-   * @generated from field: string fence = 4;
+   * @generated from field: string fence = 3;
    */
   fence: string;
 };

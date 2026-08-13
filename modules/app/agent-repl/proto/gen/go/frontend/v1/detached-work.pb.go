@@ -61,17 +61,17 @@ type DetachedWork struct {
 	// starting — which tool call spawned it, what it is called, what kind of thing
 	// it is — reaches the frontend exactly as it was recorded, so this surface has
 	// no second spelling of those facts to fall out of step with.
-	Started *v1.DetachedWorkStarted `protobuf:"bytes,8,opt,name=started,proto3" json:"started,omitempty"`
+	Started *v1.DetachedWorkStarted `protobuf:"bytes,1,opt,name=started,proto3" json:"started,omitempty"`
 	// When the work was launched, unix millis.
-	StartedAtMs int64 `protobuf:"varint,5,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
+	StartedAtMs int64 `protobuf:"varint,2,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
 	// Live or settled, and with what outcome. See DetachedWorkLiveness.
-	Liveness *DetachedWorkLiveness `protobuf:"bytes,6,opt,name=liveness,proto3" json:"liveness,omitempty"`
+	Liveness *DetachedWorkLiveness `protobuf:"bytes,3,opt,name=liveness,proto3" json:"liveness,omitempty"`
 	// The workspace this work runs under — the same key every workspace-scoped
 	// frame carries. It exists so a snapshot can scope detached work to the
 	// client's workspace exactly as it scopes every other per-workspace family;
 	// deltas already carry the key on their envelope (DetachedWorkDelta.workspace),
 	// and the two are always equal.
-	Workspace     string `protobuf:"bytes,7,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Workspace     string `protobuf:"bytes,4,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -332,7 +332,7 @@ type DetachedWorkSettled struct {
 	// reached, and — for work that was a process — the exit status it left with.
 	// A consumer reads the verdict and the evidence from one place, in the
 	// vocabulary the producer wrote them in.
-	Ended *v1.DetachedWorkEnded `protobuf:"bytes,3,opt,name=ended,proto3" json:"ended,omitempty"`
+	Ended *v1.DetachedWorkEnded `protobuf:"bytes,2,opt,name=ended,proto3" json:"ended,omitempty"`
 	// TODO(respelling): `killed` has NO counterpart in
 	// conversation.v1.DetachedWorkEnded and so was not folded into `ended`. Its
 	// nearest neighbour, conversation.v1.DetachedCancelled, is empty and cannot
@@ -340,7 +340,7 @@ type DetachedWorkSettled struct {
 	// would delete that attribution off the wire silently. It is a plain field
 	// rather than a oneof arm now that its siblings live in `ended`; when set, it
 	// annotates the `cancelled` arm and never contradicts it.
-	Killed        *DetachedWorkOutcomeKilled `protobuf:"bytes,12,opt,name=killed,proto3" json:"killed,omitempty"`
+	Killed        *DetachedWorkOutcomeKilled `protobuf:"bytes,3,opt,name=killed,proto3" json:"killed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -613,31 +613,31 @@ type isDetachedWorkUpdate_Update interface {
 }
 
 type DetachedWorkUpdate_Agent struct {
-	Agent *DetachedWorkAgentUpdate `protobuf:"bytes,10,opt,name=agent,proto3,oneof"`
+	Agent *DetachedWorkAgentUpdate `protobuf:"bytes,2,opt,name=agent,proto3,oneof"`
 }
 
 type DetachedWorkUpdate_Journal struct {
-	Journal *DetachedWorkJournalUpdate `protobuf:"bytes,11,opt,name=journal,proto3,oneof"`
+	Journal *DetachedWorkJournalUpdate `protobuf:"bytes,3,opt,name=journal,proto3,oneof"`
 }
 
 type DetachedWorkUpdate_Shell struct {
-	Shell *DetachedWorkOutputAppend `protobuf:"bytes,12,opt,name=shell,proto3,oneof"`
+	Shell *DetachedWorkOutputAppend `protobuf:"bytes,4,opt,name=shell,proto3,oneof"`
 }
 
 type DetachedWorkUpdate_Unclassified struct {
-	Unclassified *DetachedWorkOutputAppend `protobuf:"bytes,13,opt,name=unclassified,proto3,oneof"`
+	Unclassified *DetachedWorkOutputAppend `protobuf:"bytes,5,opt,name=unclassified,proto3,oneof"`
 }
 
 type DetachedWorkUpdate_Liveness struct {
-	Liveness *DetachedWorkLivenessUpdate `protobuf:"bytes,14,opt,name=liveness,proto3,oneof"`
+	Liveness *DetachedWorkLivenessUpdate `protobuf:"bytes,6,opt,name=liveness,proto3,oneof"`
 }
 
 type DetachedWorkUpdate_Merge struct {
-	Merge *DetachedWorkAgentUpdate `protobuf:"bytes,15,opt,name=merge,proto3,oneof"`
+	Merge *DetachedWorkAgentUpdate `protobuf:"bytes,7,opt,name=merge,proto3,oneof"`
 }
 
 type DetachedWorkUpdate_Skill struct {
-	Skill *DetachedWorkSkillUpdate `protobuf:"bytes,16,opt,name=skill,proto3,oneof"`
+	Skill *DetachedWorkSkillUpdate `protobuf:"bytes,8,opt,name=skill,proto3,oneof"`
 }
 
 func (*DetachedWorkUpdate_Agent) isDetachedWorkUpdate_Update() {}
@@ -999,53 +999,49 @@ var File_frontend_v1_detached_work_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_detached_work_proto_rawDesc = "" +
 	"\n" +
-	"\x1ffrontend/v1/detached-work.proto\x12\vfrontend.v1\x1a\x1econversation/v1/payloads.proto\x1a frontend/v1/agent-emission.proto\"\xef\x02\n" +
+	"\x1ffrontend/v1/detached-work.proto\x12\vfrontend.v1\x1a\x1econversation/v1/payloads.proto\x1a frontend/v1/agent-emission.proto\"\xcf\x01\n" +
 	"\fDetachedWork\x12>\n" +
-	"\astarted\x18\b \x01(\v2$.conversation.v1.DetachedWorkStartedR\astarted\x12\"\n" +
-	"\rstarted_at_ms\x18\x05 \x01(\x03R\vstartedAtMs\x12=\n" +
-	"\bliveness\x18\x06 \x01(\v2!.frontend.v1.DetachedWorkLivenessR\bliveness\x12\x1c\n" +
-	"\tworkspace\x18\a \x01(\tR\tworkspaceJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x02\x10\x03J\x04\b\x04\x10\x05J\x04\b\n" +
-	"\x10\vJ\x04\b\v\x10\fJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10R\x02idR\x10parent_bubble_idR\x12origin_tool_use_idR\x05labelR\x05agentR\ajournalR\x05shellR\funclassifiedR\x05mergeR\x05skill\"C\n" +
+	"\astarted\x18\x01 \x01(\v2$.conversation.v1.DetachedWorkStartedR\astarted\x12\"\n" +
+	"\rstarted_at_ms\x18\x02 \x01(\x03R\vstartedAtMs\x12=\n" +
+	"\bliveness\x18\x03 \x01(\v2!.frontend.v1.DetachedWorkLivenessR\bliveness\x12\x1c\n" +
+	"\tworkspace\x18\x04 \x01(\tR\tworkspace\"-\n" +
 	"\x17DetachedWorkOutputSpool\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04textJ\x04\b\x02\x10\x03R\x0ethrough_offset\"\x92\x01\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\x92\x01\n" +
 	"\x14DetachedWorkLiveness\x123\n" +
 	"\x04live\x18\x01 \x01(\v2\x1d.frontend.v1.DetachedWorkLiveH\x00R\x04live\x12<\n" +
 	"\asettled\x18\x02 \x01(\v2 .frontend.v1.DetachedWorkSettledH\x00R\asettledB\a\n" +
 	"\x05state\"<\n" +
 	"\x10DetachedWorkLive\x12(\n" +
-	"\x10last_activity_ms\x18\x01 \x01(\x03R\x0elastActivityMs\"\xde\x01\n" +
+	"\x10last_activity_ms\x18\x01 \x01(\x03R\x0elastActivityMs\"\xb3\x01\n" +
 	"\x13DetachedWorkSettled\x12\"\n" +
 	"\rsettled_at_ms\x18\x01 \x01(\x03R\vsettledAtMs\x128\n" +
-	"\x05ended\x18\x03 \x01(\v2\".conversation.v1.DetachedWorkEndedR\x05ended\x12>\n" +
-	"\x06killed\x18\f \x01(\v2&.frontend.v1.DetachedWorkOutcomeKilledR\x06killedJ\x04\b\x02\x10\x03J\x04\b\n" +
-	"\x10\vJ\x04\b\v\x10\fR\n" +
-	"shell_exitR\x04doneR\x05error\"3\n" +
+	"\x05ended\x18\x02 \x01(\v2\".conversation.v1.DetachedWorkEndedR\x05ended\x12>\n" +
+	"\x06killed\x18\x03 \x01(\v2&.frontend.v1.DetachedWorkOutcomeKilledR\x06killed\"3\n" +
 	"\x19DetachedWorkOutcomeKilled\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x99\x04\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x8e\x04\n" +
 	"\x12DetachedWorkUpdate\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12<\n" +
-	"\x05agent\x18\n" +
-	" \x01(\v2$.frontend.v1.DetachedWorkAgentUpdateH\x00R\x05agent\x12B\n" +
-	"\ajournal\x18\v \x01(\v2&.frontend.v1.DetachedWorkJournalUpdateH\x00R\ajournal\x12=\n" +
-	"\x05shell\x18\f \x01(\v2%.frontend.v1.DetachedWorkOutputAppendH\x00R\x05shell\x12K\n" +
-	"\funclassified\x18\r \x01(\v2%.frontend.v1.DetachedWorkOutputAppendH\x00R\funclassified\x12E\n" +
-	"\bliveness\x18\x0e \x01(\v2'.frontend.v1.DetachedWorkLivenessUpdateH\x00R\bliveness\x12<\n" +
-	"\x05merge\x18\x0f \x01(\v2$.frontend.v1.DetachedWorkAgentUpdateH\x00R\x05merge\x12<\n" +
-	"\x05skill\x18\x10 \x01(\v2$.frontend.v1.DetachedWorkSkillUpdateH\x00R\x05skillB\b\n" +
-	"\x06updateR\tbubble_id\"_\n" +
+	"\x05agent\x18\x02 \x01(\v2$.frontend.v1.DetachedWorkAgentUpdateH\x00R\x05agent\x12B\n" +
+	"\ajournal\x18\x03 \x01(\v2&.frontend.v1.DetachedWorkJournalUpdateH\x00R\ajournal\x12=\n" +
+	"\x05shell\x18\x04 \x01(\v2%.frontend.v1.DetachedWorkOutputAppendH\x00R\x05shell\x12K\n" +
+	"\funclassified\x18\x05 \x01(\v2%.frontend.v1.DetachedWorkOutputAppendH\x00R\funclassified\x12E\n" +
+	"\bliveness\x18\x06 \x01(\v2'.frontend.v1.DetachedWorkLivenessUpdateH\x00R\bliveness\x12<\n" +
+	"\x05merge\x18\a \x01(\v2$.frontend.v1.DetachedWorkAgentUpdateH\x00R\x05merge\x12<\n" +
+	"\x05skill\x18\b \x01(\v2$.frontend.v1.DetachedWorkSkillUpdateH\x00R\x05skillB\b\n" +
+	"\x06update\"S\n" +
 	"\x17DetachedWorkAgentUpdate\x128\n" +
-	"\temissions\x18\x01 \x03(\v2\x1a.frontend.v1.AgentEmissionR\temissionsJ\x04\b\x02\x10\x03R\x04fold\"\xab\x01\n" +
+	"\temissions\x18\x01 \x03(\v2\x1a.frontend.v1.AgentEmissionR\temissions\"\xab\x01\n" +
 	"\x17DetachedWorkSkillUpdate\x12@\n" +
 	"\x04body\x18\x01 \x01(\v2*.frontend.v1.DetachedWorkSkillBodyResolvedH\x00R\x04body\x12D\n" +
 	"\temissions\x18\x02 \x01(\v2$.frontend.v1.DetachedWorkAgentUpdateH\x00R\temissionsB\b\n" +
 	"\x06update\";\n" +
 	"\x1dDetachedWorkSkillBodyResolved\x12\x1a\n" +
-	"\bcontents\x18\x01 \x01(\tR\bcontents\"Z\n" +
+	"\bcontents\x18\x01 \x01(\tR\bcontents\"N\n" +
 	"\x19DetachedWorkJournalUpdate\x121\n" +
-	"\x04rows\x18\x01 \x03(\v2\x1d.conversation.v1.WorkflowStepR\x04rowsJ\x04\b\x02\x10\x03R\x04fold\"A\n" +
+	"\x04rows\x18\x01 \x03(\v2\x1d.conversation.v1.WorkflowStepR\x04rows\".\n" +
 	"\x18DetachedWorkOutputAppend\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04textJ\x04\b\x02\x10\x03R\vfrom_offset\"[\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"[\n" +
 	"\x1aDetachedWorkLivenessUpdate\x12=\n" +
 	"\bliveness\x18\x01 \x01(\v2!.frontend.v1.DetachedWorkLivenessR\blivenessB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 

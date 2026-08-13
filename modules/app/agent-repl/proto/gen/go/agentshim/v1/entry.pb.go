@@ -159,9 +159,8 @@ type InternalEntry struct {
 	// first handed to a store write, and never regenerated — not for a retry, not
 	// for a replay after the store bounced underneath the producer.
 	//
-	// A DIFFERENT JOB FROM dedup_key, and neither substitutes for the other.
-	// dedup_key collapses two producers' views of one fact; this one recognizes
-	// ONE producer's re-delivery of ONE record. A batch that reached the store
+	// THIS IS ABOUT ONE PRODUCER'S RE-DELIVERY OF ONE RECORD, not about two
+	// producers' views of one fact. A batch that reached the store
 	// but whose ack was lost has to be replayed, because from the producer's side
 	// an unacked batch and a never-delivered batch are indistinguishable. Without
 	// this the store writes it twice; with it the replay is a no-op.
@@ -169,7 +168,7 @@ type InternalEntry struct {
 	// Empty means the producer supplied no write identity, and such a record is
 	// not replay-idempotent. The store enforces uniqueness only over non-empty
 	// values.
-	WriteId string `protobuf:"bytes,3,opt,name=write_id,json=writeId,proto3" json:"write_id,omitempty"`
+	WriteId string `protobuf:"bytes,2,opt,name=write_id,json=writeId,proto3" json:"write_id,omitempty"`
 	// THE PRODUCER'S SOURCE RECORD, kept whole when converting it to `external`
 	// dropped structure.
 	//
@@ -186,7 +185,7 @@ type InternalEntry struct {
 	// That is exactly what makes eager conversion at the edge a reversible bet.
 	//
 	// UNSET when the conversion was faithful. It is not a copy of every record.
-	SourceRecord *structpb.Struct `protobuf:"bytes,4,opt,name=source_record,json=sourceRecord,proto3" json:"source_record,omitempty"`
+	SourceRecord *structpb.Struct `protobuf:"bytes,3,opt,name=source_record,json=sourceRecord,proto3" json:"source_record,omitempty"`
 	// Set when there is nothing to hand the daemon: a record we could not place.
 	//
 	// UNSET on every ordinary record — this is not a category every entry falls
@@ -304,17 +303,17 @@ type InternalEntry_VendorSpecific struct {
 	// A fact specific to one vendor, understood but not carried into a
 	// vendor-agnostic feed. The follow-up is a CONVERTER, if it turns out to be
 	// portable after all.
-	VendorSpecific *VendorSpecificEntry `protobuf:"bytes,10,opt,name=vendor_specific,json=vendorSpecific,proto3,oneof"`
+	VendorSpecific *VendorSpecificEntry `protobuf:"bytes,4,opt,name=vendor_specific,json=vendorSpecific,proto3,oneof"`
 }
 
 type InternalEntry_Unknown struct {
 	// A record we PARSED but do not MODEL. The follow-up is a MODEL.
-	Unknown *UnknownEntry `protobuf:"bytes,11,opt,name=unknown,proto3,oneof"`
+	Unknown *UnknownEntry `protobuf:"bytes,5,opt,name=unknown,proto3,oneof"`
 }
 
 type InternalEntry_Unparsed struct {
 	// A record we could not PARSE at all — a failure rather than a gap.
-	Unparsed *UnparsedEntry `protobuf:"bytes,12,opt,name=unparsed,proto3,oneof"`
+	Unparsed *UnparsedEntry `protobuf:"bytes,6,opt,name=unparsed,proto3,oneof"`
 }
 
 func (*InternalEntry_VendorSpecific) isInternalEntry_Unconverted() {}
@@ -498,16 +497,15 @@ const file_agentshim_v1_entry_proto_rawDesc = "" +
 	"\x18agentshim/v1/entry.proto\x12\fagentshim.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1aprotocol/v1/external.proto\x1a\x1eagentshim/v1/unsupported.proto\"x\n" +
 	"\x05Entry\x127\n" +
 	"\binternal\x18\x01 \x01(\v2\x1b.agentshim.v1.InternalEntryR\binternal\x126\n" +
-	"\bexternal\x18\x02 \x01(\v2\x1a.protocol.v1.ExternalEntryR\bexternal\"\xf4\x02\n" +
+	"\bexternal\x18\x02 \x01(\v2\x1a.protocol.v1.ExternalEntryR\bexternal\"\xe3\x02\n" +
 	"\rInternalEntry\x12)\n" +
 	"\x05plane\x18\x01 \x01(\v2\x13.agentshim.v1.PlaneR\x05plane\x12\x19\n" +
-	"\bwrite_id\x18\x03 \x01(\tR\awriteId\x12<\n" +
-	"\rsource_record\x18\x04 \x01(\v2\x17.google.protobuf.StructR\fsourceRecord\x12L\n" +
-	"\x0fvendor_specific\x18\n" +
-	" \x01(\v2!.agentshim.v1.VendorSpecificEntryH\x00R\x0evendorSpecific\x126\n" +
-	"\aunknown\x18\v \x01(\v2\x1a.agentshim.v1.UnknownEntryH\x00R\aunknown\x129\n" +
-	"\bunparsed\x18\f \x01(\v2\x1b.agentshim.v1.UnparsedEntryH\x00R\bunparsedB\r\n" +
-	"\vunconvertedJ\x04\b\x02\x10\x03R\tdedup_key\"t\n" +
+	"\bwrite_id\x18\x02 \x01(\tR\awriteId\x12<\n" +
+	"\rsource_record\x18\x03 \x01(\v2\x17.google.protobuf.StructR\fsourceRecord\x12L\n" +
+	"\x0fvendor_specific\x18\x04 \x01(\v2!.agentshim.v1.VendorSpecificEntryH\x00R\x0evendorSpecific\x126\n" +
+	"\aunknown\x18\x05 \x01(\v2\x1a.agentshim.v1.UnknownEntryH\x00R\aunknown\x129\n" +
+	"\bunparsed\x18\x06 \x01(\v2\x1b.agentshim.v1.UnparsedEntryH\x00R\bunparsedB\r\n" +
+	"\vunconverted\"t\n" +
 	"\x05Plane\x123\n" +
 	"\x06stream\x18\x01 \x01(\v2\x19.agentshim.v1.PlaneStreamH\x00R\x06stream\x12-\n" +
 	"\x04file\x18\x02 \x01(\v2\x17.agentshim.v1.PlaneFileH\x00R\x04fileB\a\n" +

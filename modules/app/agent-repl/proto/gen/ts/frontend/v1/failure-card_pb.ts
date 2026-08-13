@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/failure-card.proto.
  */
 export const file_frontend_v1_failure_card: GenFile = /*@__PURE__*/
-  fileDesc("Ch5mcm9udGVuZC92MS9mYWlsdXJlLWNhcmQucHJvdG8SC2Zyb250ZW5kLnYxIoECCg9GYWlsdXJlQ2FyZFZpZXcSJgoEa2luZBgBIAEoCzIYLmZyb250ZW5kLnYxLkZhaWx1cmVLaW5kEg8KB21lc3NhZ2UYAiABKAkSDgoGZGV0YWlsGAMgASgJEiwKBG9wZW4YCiABKAsyHC5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZE9wZW5IABI0CghyZXNvbHZlZBgLIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkUmVzb2x2ZWRIABI0Cgh0ZXJtaW5hbBgMIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVGVybWluYWxIAEILCglsaWZlY3ljbGUiEQoPRmFpbHVyZUNhcmRPcGVuIi0KE0ZhaWx1cmVDYXJkUmVzb2x2ZWQSFgoOcmVzb2x2ZWRfYXRfbXMYASABKAMiFQoTRmFpbHVyZUNhcmRUZXJtaW5hbCIjCg5GYWlsdXJlQ2FyZFJlZhIRCgljYXJkX3V1aWQYASABKAlCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_frontend_v1_errors]);
+  fileDesc("Ch5mcm9udGVuZC92MS9mYWlsdXJlLWNhcmQucHJvdG8SC2Zyb250ZW5kLnYxIoECCg9GYWlsdXJlQ2FyZFZpZXcSJgoEa2luZBgBIAEoCzIYLmZyb250ZW5kLnYxLkZhaWx1cmVLaW5kEg8KB21lc3NhZ2UYAiABKAkSDgoGZGV0YWlsGAMgASgJEiwKBG9wZW4YBCABKAsyHC5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZE9wZW5IABI0CghyZXNvbHZlZBgFIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkUmVzb2x2ZWRIABI0Cgh0ZXJtaW5hbBgGIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVGVybWluYWxIAEILCglsaWZlY3ljbGUiEQoPRmFpbHVyZUNhcmRPcGVuIi0KE0ZhaWx1cmVDYXJkUmVzb2x2ZWQSFgoOcmVzb2x2ZWRfYXRfbXMYASABKAMiFQoTRmFpbHVyZUNhcmRUZXJtaW5hbCIjCg5GYWlsdXJlQ2FyZFJlZhIRCgljYXJkX3V1aWQYASABKAlCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_frontend_v1_errors]);
 
 /**
  * A failure as a CONVERSATION ITEM rather than as chrome.
@@ -68,19 +68,19 @@ export type FailureCardView = Message<"frontend.v1.FailureCardView"> & {
    */
   lifecycle: {
     /**
-     * @generated from field: frontend.v1.FailureCardOpen open = 10;
+     * @generated from field: frontend.v1.FailureCardOpen open = 4;
      */
     value: FailureCardOpen;
     case: "open";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureCardResolved resolved = 11;
+     * @generated from field: frontend.v1.FailureCardResolved resolved = 5;
      */
     value: FailureCardResolved;
     case: "resolved";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureCardTerminal terminal = 12;
+     * @generated from field: frontend.v1.FailureCardTerminal terminal = 6;
      */
     value: FailureCardTerminal;
     case: "terminal";

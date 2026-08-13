@@ -66,7 +66,7 @@ type MessagePageRequest struct {
 	// be answered at all: there is no "the" conversation from the store's side.
 	// It is a ROUTING key, never a position — it says which history to read, and
 	// says nothing about where in that history the read starts.
-	SessionId string `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	SessionId string `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	// Types that are valid to be assigned to Anchor:
 	//
 	//	*MessagePageRequest_Head
@@ -153,14 +153,14 @@ type MessagePageRequest_Head struct {
 	// Anchor at the newest message held. The verb a cold open uses, and the
 	// one the old vocabulary could not express: a reader that does not know
 	// the head seq could not name it.
-	Head *MessagePageHead `protobuf:"bytes,2,opt,name=head,proto3,oneof"`
+	Head *MessagePageHead `protobuf:"bytes,3,opt,name=head,proto3,oneof"`
 }
 
 type MessagePageRequest_BeforeSeq struct {
 	// Continue below a page already received, using its last_page_seq
 	// VERBATIM. This names a place the caller has DEMONSTRABLY BEEN, and walks
 	// away from the history rather than into it.
-	BeforeSeq uint64 `protobuf:"varint,3,opt,name=before_seq,json=beforeSeq,proto3,oneof"`
+	BeforeSeq uint64 `protobuf:"varint,4,opt,name=before_seq,json=beforeSeq,proto3,oneof"`
 }
 
 func (*MessagePageRequest_Head) isMessagePageRequest_Anchor() {}
@@ -550,10 +550,10 @@ const file_protocol_v1_message_page_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x04 \x01(\tR\tsessionId\x122\n" +
-	"\x04head\x18\x02 \x01(\v2\x1c.protocol.v1.MessagePageHeadH\x00R\x04head\x12\x1f\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x122\n" +
+	"\x04head\x18\x03 \x01(\v2\x1c.protocol.v1.MessagePageHeadH\x00R\x04head\x12\x1f\n" +
 	"\n" +
-	"before_seq\x18\x03 \x01(\x04H\x00R\tbeforeSeqB\b\n" +
+	"before_seq\x18\x04 \x01(\x04H\x00R\tbeforeSeqB\b\n" +
 	"\x06anchor\"\x11\n" +
 	"\x0fMessagePageHead\"\x8d\x06\n" +
 	"\vMessagePage\x12\x1d\n" +

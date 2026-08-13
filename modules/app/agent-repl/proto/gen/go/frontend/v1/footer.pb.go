@@ -235,8 +235,11 @@ func (x *InterruptWindow) GetOutcome() v1.InterruptOutcome {
 }
 
 type ProgressView struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// WHICH WORKSPACE this footer belongs to, and the only addressing this view
+	// carries. It names no session: correlation is exactly what the fence below
+	// does, and it does it without handing a renderer a session vocabulary.
+	Workspace string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// The workspace's staleness FENCE at the moment the daemon produced this
 	// push: an opaque token the client compares BYTE-WISE against the fence on
 	// the workspace's current WorkspaceState, and never parses, splits or
@@ -246,7 +249,7 @@ type ProgressView struct {
 	// The daemon mints it and is the only thing that can read meaning into it.
 	// A client that learned to decode it would be depending on a fact this
 	// contract does not offer, and the token's composition is free to change.
-	Fence string `protobuf:"bytes,25,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence string `protobuf:"bytes,2,opt,name=fence,proto3" json:"fence,omitempty"`
 	// DEPRECATED (F5), and no longer populated by the resolver.
 	//
 	// It was a COPY of the SSM's verdict kept in a second message, refreshed
@@ -297,7 +300,7 @@ type ProgressView struct {
 	// under the session's name — a reader saw "91% of your session" for a number
 	// that was really the week's, and had no way to tell the two apart.
 	RateLimited       *RateLimitWindow `protobuf:"bytes,12,opt,name=rate_limited,json=rateLimited,proto3" json:"rate_limited,omitempty"`                     // rate_limit_type "five_hour"
-	RateLimitedWeekly *RateLimitWindow `protobuf:"bytes,21,opt,name=rate_limited_weekly,json=rateLimitedWeekly,proto3" json:"rate_limited_weekly,omitempty"` // rate_limit_type "seven_day*"
+	RateLimitedWeekly *RateLimitWindow `protobuf:"bytes,13,opt,name=rate_limited_weekly,json=rateLimitedWeekly,proto3" json:"rate_limited_weekly,omitempty"` // rate_limit_type "seven_day*"
 	// The session itself reporting it is parked on the USER
 	// (data.SessionStateChanged state="requires_action").
 	//
@@ -306,19 +309,20 @@ type ProgressView struct {
 	// here, and it exists because it carries a fact the daemon cannot otherwise
 	// see: the session can be blocked on an interaction the daemon holds no
 	// count for, so `pending_permissions` alone under-reports "waiting on you".
-	Blocked *ProgressWindow `protobuf:"bytes,18,opt,name=blocked,proto3" json:"blocked,omitempty"`
+	Blocked *ProgressWindow `protobuf:"bytes,14,opt,name=blocked,proto3" json:"blocked,omitempty"`
 	// See InterruptWindow. Ack-opened, next-turn-cleared.
-	Interrupt *InterruptWindow `protobuf:"bytes,20,opt,name=interrupt,proto3" json:"interrupt,omitempty"`
-	// The CLASSIFIED error state (F4), superseding the free-string
-	// error_summary/error_item_uuid (RETIRED, step 11) — this failure's own
-	// item_uuid absorbed error_item_uuid's addressing job.
+	Interrupt *InterruptWindow `protobuf:"bytes,15,opt,name=interrupt,proto3" json:"interrupt,omitempty"`
+	// The CLASSIFIED error state (F4), and the sole reader-facing account of a
+	// failure on this footer. It carries its own addressing, so nothing else
+	// here needs a second field to point at the failure with.
 	//
-	// The footer used to render daemon-authored prose in a hardcoded red that
-	// no other surface consulted; carrying the classified failure instead lets
-	// it take its color from the same table the card and the workspace do.
+	// TYPED RATHER THAN PROSE, because prose has to be colored by whoever renders
+	// it: a footer handed daemon-authored text can only pick a hardcoded red no
+	// other surface consulted. Carrying the classified failure lets the row take
+	// its color from the same table the card and the workspace do.
 	// Persists until the next turn starts, when it clears; set from a terminal
 	// ApiErrorLine (retries exhausted) or an errored turn end.
-	Failure *FooterFailureRow `protobuf:"bytes,19,opt,name=failure,proto3" json:"failure,omitempty"`
+	Failure *FooterFailureRow `protobuf:"bytes,16,opt,name=failure,proto3" json:"failure,omitempty"`
 	// Set when a turn's UNCACHED input cost crossed the alert threshold — the
 	// loud "this prompt re-ingested context" signal. Rendered red in the center
 	// footer (the webapp progress footer, displayed inside the Emacs webview);
@@ -326,25 +330,25 @@ type ProgressView struct {
 	// only footer surface native Emacs owns. Persists until the next turn
 	// starts, like `failure`. Unset means the last turn was cache-efficient,
 	// which is the only reading of absence.
-	ExpensiveTurn *ContextCostAlert `protobuf:"bytes,22,opt,name=expensive_turn,json=expensiveTurn,proto3" json:"expensive_turn,omitempty"`
+	ExpensiveTurn *ContextCostAlert `protobuf:"bytes,17,opt,name=expensive_turn,json=expensiveTurn,proto3" json:"expensive_turn,omitempty"`
 	// Counts (ephemeral, session-scoped):
-	PendingPermissions int64 `protobuf:"varint,14,opt,name=pending_permissions,json=pendingPermissions,proto3" json:"pending_permissions,omitempty"`
-	QueueDepth         int64 `protobuf:"varint,15,opt,name=queue_depth,json=queueDepth,proto3" json:"queue_depth,omitempty"`
-	LiveTaskCount      int64 `protobuf:"varint,16,opt,name=live_task_count,json=liveTaskCount,proto3" json:"live_task_count,omitempty"`
+	PendingPermissions int64 `protobuf:"varint,18,opt,name=pending_permissions,json=pendingPermissions,proto3" json:"pending_permissions,omitempty"`
+	QueueDepth         int64 `protobuf:"varint,19,opt,name=queue_depth,json=queueDepth,proto3" json:"queue_depth,omitempty"`
+	LiveTaskCount      int64 `protobuf:"varint,20,opt,name=live_task_count,json=liveTaskCount,proto3" json:"live_task_count,omitempty"`
 	// The phase word, resolved: exactly what the footer's
 	// phase cell renders. Replaces the client-side RenderState→word/tone/
 	// breathing table. The footer's own copy of the phase fact
 	// (duplicate-don't-share): WorkspaceState remains the authority for state;
 	// this is its footer projection.
-	Phase *FooterPhase `protobuf:"bytes,23,opt,name=phase,proto3" json:"phase,omitempty"`
+	Phase *FooterPhase `protobuf:"bytes,21,opt,name=phase,proto3" json:"phase,omitempty"`
 	// The merge chip, resolved: exactly the text and tooltip
 	// the chip renders, or absent when no merge run is publishing. The footer's
 	// own projection of MergeStatus (which other surfaces keep reading for their
 	// own projections).
-	MergeChip *FooterMergeChip `protobuf:"bytes,24,opt,name=merge_chip,json=mergeChip,proto3" json:"merge_chip,omitempty"`
+	MergeChip *FooterMergeChip `protobuf:"bytes,22,opt,name=merge_chip,json=mergeChip,proto3" json:"merge_chip,omitempty"`
 	// The turn-accounting cell, resolved: the composed summary and the verdict
 	// that classes it. Absent when no turn has settled yet.
-	Accounting    *FooterAccountingCell `protobuf:"bytes,26,opt,name=accounting,proto3" json:"accounting,omitempty"`
+	Accounting    *FooterAccountingCell `protobuf:"bytes,23,opt,name=accounting,proto3" json:"accounting,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -934,15 +938,15 @@ type isFooterAccountingCell_Verdict interface {
 }
 
 type FooterAccountingCell_Complete struct {
-	Complete *AccountingComplete `protobuf:"bytes,10,opt,name=complete,proto3,oneof"`
+	Complete *AccountingComplete `protobuf:"bytes,2,opt,name=complete,proto3,oneof"`
 }
 
 type FooterAccountingCell_Incomplete struct {
-	Incomplete *AccountingIncomplete `protobuf:"bytes,11,opt,name=incomplete,proto3,oneof"`
+	Incomplete *AccountingIncomplete `protobuf:"bytes,3,opt,name=incomplete,proto3,oneof"`
 }
 
 type FooterAccountingCell_Invalid struct {
-	Invalid *AccountingInvalid `protobuf:"bytes,12,opt,name=invalid,proto3,oneof"`
+	Invalid *AccountingInvalid `protobuf:"bytes,4,opt,name=invalid,proto3,oneof"`
 }
 
 func (*FooterAccountingCell_Complete) isFooterAccountingCell_Verdict() {}
@@ -1108,10 +1112,10 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x0fInterruptWindow\x12\x16\n" +
 	"\x06active\x18\x01 \x01(\bR\x06active\x12\x19\n" +
 	"\bsince_ms\x18\x02 \x01(\x03R\asinceMs\x127\n" +
-	"\aoutcome\x18\x03 \x01(\x0e2\x1d.protocol.v1.InterruptOutcomeR\aoutcome\"\xdd\t\n" +
+	"\aoutcome\x18\x03 \x01(\x0e2\x1d.protocol.v1.InterruptOutcomeR\aoutcome\"\x9f\t\n" +
 	"\fProgressView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x14\n" +
-	"\x05fence\x18\x19 \x01(\tR\x05fence\x122\n" +
+	"\x05fence\x18\x02 \x01(\tR\x05fence\x122\n" +
 	"\x05state\x18\x03 \x01(\x0e2\x18.frontend.v1.RenderStateB\x02\x18\x01R\x05state\x12+\n" +
 	"\x12turn_started_at_ms\x18\x04 \x01(\x03R\x0fturnStartedAtMs\x12'\n" +
 	"\x0fthinking_tokens\x18\x05 \x01(\x03R\x0ethinkingTokens\x12!\n" +
@@ -1125,22 +1129,21 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	" \x01(\v2\x1b.frontend.v1.ProgressWindowR\x0eauthenticating\x12/\n" +
 	"\x04hook\x18\v \x01(\v2\x1b.frontend.v1.ProgressWindowR\x04hook\x12?\n" +
 	"\frate_limited\x18\f \x01(\v2\x1c.frontend.v1.RateLimitWindowR\vrateLimited\x12L\n" +
-	"\x13rate_limited_weekly\x18\x15 \x01(\v2\x1c.frontend.v1.RateLimitWindowR\x11rateLimitedWeekly\x125\n" +
-	"\ablocked\x18\x12 \x01(\v2\x1b.frontend.v1.ProgressWindowR\ablocked\x12:\n" +
-	"\tinterrupt\x18\x14 \x01(\v2\x1c.frontend.v1.InterruptWindowR\tinterrupt\x127\n" +
-	"\afailure\x18\x13 \x01(\v2\x1d.frontend.v1.FooterFailureRowR\afailure\x12D\n" +
-	"\x0eexpensive_turn\x18\x16 \x01(\v2\x1d.frontend.v1.ContextCostAlertR\rexpensiveTurn\x12/\n" +
-	"\x13pending_permissions\x18\x0e \x01(\x03R\x12pendingPermissions\x12\x1f\n" +
-	"\vqueue_depth\x18\x0f \x01(\x03R\n" +
+	"\x13rate_limited_weekly\x18\r \x01(\v2\x1c.frontend.v1.RateLimitWindowR\x11rateLimitedWeekly\x125\n" +
+	"\ablocked\x18\x0e \x01(\v2\x1b.frontend.v1.ProgressWindowR\ablocked\x12:\n" +
+	"\tinterrupt\x18\x0f \x01(\v2\x1c.frontend.v1.InterruptWindowR\tinterrupt\x127\n" +
+	"\afailure\x18\x10 \x01(\v2\x1d.frontend.v1.FooterFailureRowR\afailure\x12D\n" +
+	"\x0eexpensive_turn\x18\x11 \x01(\v2\x1d.frontend.v1.ContextCostAlertR\rexpensiveTurn\x12/\n" +
+	"\x13pending_permissions\x18\x12 \x01(\x03R\x12pendingPermissions\x12\x1f\n" +
+	"\vqueue_depth\x18\x13 \x01(\x03R\n" +
 	"queueDepth\x12&\n" +
-	"\x0flive_task_count\x18\x10 \x01(\x03R\rliveTaskCount\x12.\n" +
-	"\x05phase\x18\x17 \x01(\v2\x18.frontend.v1.FooterPhaseR\x05phase\x12;\n" +
+	"\x0flive_task_count\x18\x14 \x01(\x03R\rliveTaskCount\x12.\n" +
+	"\x05phase\x18\x15 \x01(\v2\x18.frontend.v1.FooterPhaseR\x05phase\x12;\n" +
 	"\n" +
-	"merge_chip\x18\x18 \x01(\v2\x1c.frontend.v1.FooterMergeChipR\tmergeChip\x12A\n" +
+	"merge_chip\x18\x16 \x01(\v2\x1c.frontend.v1.FooterMergeChipR\tmergeChip\x12A\n" +
 	"\n" +
-	"accounting\x18\x1a \x01(\v2!.frontend.v1.FooterAccountingCellR\n" +
-	"accountingJ\x04\b\r\x10\x0eJ\x04\b\x11\x10\x12J\x04\b\x02\x10\x03R\rerror_summaryR\x0ferror_item_uuidR\n" +
-	"session_id\"\xdf\x01\n" +
+	"accounting\x18\x17 \x01(\v2!.frontend.v1.FooterAccountingCellR\n" +
+	"accounting\"\xdf\x01\n" +
 	"\x10ContextCostAlert\x12\x17\n" +
 	"\aturn_id\x18\x01 \x01(\tR\x06turnId\x122\n" +
 	"\x15uncached_input_tokens\x18\x02 \x01(\x03R\x13uncachedInputTokens\x12)\n" +
@@ -1160,12 +1163,11 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x04card\x18\x03 \x01(\v2\x1b.frontend.v1.FailureCardRefR\x04card\"\xfb\x01\n" +
 	"\x14FooterAccountingCell\x12\x18\n" +
 	"\asummary\x18\x01 \x01(\tR\asummary\x12=\n" +
-	"\bcomplete\x18\n" +
-	" \x01(\v2\x1f.frontend.v1.AccountingCompleteH\x00R\bcomplete\x12C\n" +
+	"\bcomplete\x18\x02 \x01(\v2\x1f.frontend.v1.AccountingCompleteH\x00R\bcomplete\x12C\n" +
 	"\n" +
-	"incomplete\x18\v \x01(\v2!.frontend.v1.AccountingIncompleteH\x00R\n" +
+	"incomplete\x18\x03 \x01(\v2!.frontend.v1.AccountingIncompleteH\x00R\n" +
 	"incomplete\x12:\n" +
-	"\ainvalid\x18\f \x01(\v2\x1e.frontend.v1.AccountingInvalidH\x00R\ainvalidB\t\n" +
+	"\ainvalid\x18\x04 \x01(\v2\x1e.frontend.v1.AccountingInvalidH\x00R\ainvalidB\t\n" +
 	"\averdict\"\x14\n" +
 	"\x12AccountingComplete\"0\n" +
 	"\x14AccountingIncomplete\x12\x18\n" +

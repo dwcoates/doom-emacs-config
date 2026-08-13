@@ -536,10 +536,21 @@ func (*CloseWorkspaceCmd) Descriptor() ([]byte, []int) {
 }
 
 type MergeWorkspaceCmd struct {
-	state                    protoimpl.MessageState `protogen:"open.v1"`
-	ConflictResolvedContinue bool                   `protobuf:"varint,2,opt,name=conflict_resolved_continue,json=conflictResolvedContinue,proto3" json:"conflict_resolved_continue,omitempty"` // the resolve-and-continue handoff
-	// Additive: the workspace's DISPLAY name, for the `merge/<name>` completion
-	// tag and the daemon's merge logs.
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE COMMAND STATES NO MERGE GEOMETRY AND NAMES NO HANDLER. It is a bare
+	// request keyed by workspace, and that is deliberate.
+	//
+	// THE DAEMON OWNS THE GEOMETRY MAP (internal/workspace/geometry). It records
+	// a workspace's source branch, source worktree and merge target when it
+	// CREATES the workspace, and derives them at boot for pre-cutover ones, so a
+	// merge command has nothing left to state. A caller that stated it would be
+	// a SECOND OWNER of one map, which is how a cherry-pick once reached a target
+	// the daemon had never heard of. Nor does the command select a handler: there
+	// has only ever been one merge handler, and naming it would invite a caller
+	// to ask for a mechanism the daemon does not dispatch on.
+	ConflictResolvedContinue bool `protobuf:"varint,1,opt,name=conflict_resolved_continue,json=conflictResolvedContinue,proto3" json:"conflict_resolved_continue,omitempty"` // the resolve-and-continue handoff
+	// The workspace's DISPLAY name, for the `merge/<name>` completion tag and the
+	// daemon's merge logs.
 	//
 	// It exists because the envelope's `workspace` field is the daemon's
 	// workspace KEY — the session cwd — exactly as it is for every other
@@ -549,7 +560,7 @@ type MergeWorkspaceCmd struct {
 	// absent connectivity verdict and was refused, and the merge never tore its
 	// workspace down. The two identities are now separate fields rather than one
 	// slot meaning different things per command.
-	WorkspaceName string `protobuf:"bytes,6,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
+	WorkspaceName string `protobuf:"bytes,2,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1358,12 +1369,10 @@ const file_frontend_v1_host_proto_rawDesc = "" +
 	"config_dir\x18\x02 \x01(\tR\tconfigDir\x12\x12\n" +
 	"\x04fake\x18\x03 \x01(\bR\x04fake\x12#\n" +
 	"\rallow_ungated\x18\x04 \x01(\bR\fallowUngated\"\x13\n" +
-	"\x11CloseWorkspaceCmd\"\xc0\x01\n" +
+	"\x11CloseWorkspaceCmd\"x\n" +
 	"\x11MergeWorkspaceCmd\x12<\n" +
-	"\x1aconflict_resolved_continue\x18\x02 \x01(\bR\x18conflictResolvedContinue\x12%\n" +
-	"\x0eworkspace_name\x18\x06 \x01(\tR\rworkspaceNameJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\ahandlerR\rsource_branchR\n" +
-	"source_dirR\n" +
-	"target_dir\"\xc5\x06\n" +
+	"\x1aconflict_resolved_continue\x18\x01 \x01(\bR\x18conflictResolvedContinue\x12%\n" +
+	"\x0eworkspace_name\x18\x02 \x01(\tR\rworkspaceName\"\xc5\x06\n" +
 	"\n" +
 	"HostAction\x12\x1b\n" +
 	"\taction_id\x18\x01 \x01(\tR\bactionId\x12M\n" +

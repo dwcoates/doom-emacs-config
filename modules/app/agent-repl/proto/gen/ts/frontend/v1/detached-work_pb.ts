@@ -45,10 +45,28 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/detached-work.proto.
  */
 export const file_frontend_v1_detached_work: GenFile = /*@__PURE__*/
-  fileDesc("Ch9mcm9udGVuZC92MS9kZXRhY2hlZC13b3JrLnByb3RvEgtmcm9udGVuZC52MSLEAgoMRGV0YWNoZWRXb3JrEjUKB3N0YXJ0ZWQYCCABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZBIVCg1zdGFydGVkX2F0X21zGAUgASgDEjMKCGxpdmVuZXNzGAYgASgLMiEuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3MSEQoJd29ya3NwYWNlGAcgASgJSgQIARACSgQIAxAESgQIAhADSgQIBBAFSgQIChALSgQICxAMSgQIDBANSgQIDRAOSgQIDhAPSgQIDxAQUgJpZFIQcGFyZW50X2J1YmJsZV9pZFISb3JpZ2luX3Rvb2xfdXNlX2lkUgVsYWJlbFIFYWdlbnRSB2pvdXJuYWxSBXNoZWxsUgx1bmNsYXNzaWZpZWRSBW1lcmdlUgVza2lsbCI9ChdEZXRhY2hlZFdvcmtPdXRwdXRTcG9vbBIMCgR0ZXh0GAEgASgJSgQIAhADUg50aHJvdWdoX29mZnNldCKDAQoURGV0YWNoZWRXb3JrTGl2ZW5lc3MSLQoEbGl2ZRgBIAEoCzIdLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0xpdmVIABIzCgdzZXR0bGVkGAIgASgLMiAuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrU2V0dGxlZEgAQgcKBXN0YXRlIiwKEERldGFjaGVkV29ya0xpdmUSGAoQbGFzdF9hY3Rpdml0eV9tcxgBIAEoAyLCAQoTRGV0YWNoZWRXb3JrU2V0dGxlZBIVCg1zZXR0bGVkX2F0X21zGAEgASgDEjEKBWVuZGVkGAMgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0VuZGVkEjYKBmtpbGxlZBgMIAEoCzImLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dGNvbWVLaWxsZWRKBAgCEANKBAgKEAtKBAgLEAxSCnNoZWxsX2V4aXRSBGRvbmVSBWVycm9yIisKGURldGFjaGVkV29ya091dGNvbWVLaWxsZWQSDgoGcmVhc29uGAEgASgJItEDChJEZXRhY2hlZFdvcmtVcGRhdGUSEgoKbWVzc2FnZV9pZBgBIAEoCRI1CgVhZ2VudBgKIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSAASOQoHam91cm5hbBgLIAEoCzImLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0pvdXJuYWxVcGRhdGVIABI2CgVzaGVsbBgMIAEoCzIlLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dHB1dEFwcGVuZEgAEj0KDHVuY2xhc3NpZmllZBgNIAEoCzIlLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dHB1dEFwcGVuZEgAEjsKCGxpdmVuZXNzGA4gASgLMicuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3NVcGRhdGVIABI1CgVtZXJnZRgPIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSAASNQoFc2tpbGwYECABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTa2lsbFVwZGF0ZUgAQggKBnVwZGF0ZVIJYnViYmxlX2lkIlQKF0RldGFjaGVkV29ya0FnZW50VXBkYXRlEi0KCWVtaXNzaW9ucxgBIAMoCzIaLmZyb250ZW5kLnYxLkFnZW50RW1pc3Npb25KBAgCEANSBGZvbGQimgEKF0RldGFjaGVkV29ya1NraWxsVXBkYXRlEjoKBGJvZHkYASABKAsyKi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTa2lsbEJvZHlSZXNvbHZlZEgAEjkKCWVtaXNzaW9ucxgCIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSABCCAoGdXBkYXRlIjEKHURldGFjaGVkV29ya1NraWxsQm9keVJlc29sdmVkEhAKCGNvbnRlbnRzGAEgASgJIlQKGURldGFjaGVkV29ya0pvdXJuYWxVcGRhdGUSKwoEcm93cxgBIAMoCzIdLmNvbnZlcnNhdGlvbi52MS5Xb3JrZmxvd1N0ZXBKBAgCEANSBGZvbGQiOwoYRGV0YWNoZWRXb3JrT3V0cHV0QXBwZW5kEgwKBHRleHQYASABKAlKBAgCEANSC2Zyb21fb2Zmc2V0IlEKGkRldGFjaGVkV29ya0xpdmVuZXNzVXBkYXRlEjMKCGxpdmVuZXNzGAEgASgLMiEuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3NCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_conversation_v1_payloads, file_frontend_v1_agent_emission]);
+  fileDesc("Ch9mcm9udGVuZC92MS9kZXRhY2hlZC13b3JrLnByb3RvEgtmcm9udGVuZC52MSKkAQoMRGV0YWNoZWRXb3JrEjUKB3N0YXJ0ZWQYASABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZBIVCg1zdGFydGVkX2F0X21zGAIgASgDEjMKCGxpdmVuZXNzGAMgASgLMiEuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3MSEQoJd29ya3NwYWNlGAQgASgJIicKF0RldGFjaGVkV29ya091dHB1dFNwb29sEgwKBHRleHQYASABKAkigwEKFERldGFjaGVkV29ya0xpdmVuZXNzEi0KBGxpdmUYASABKAsyHS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlSAASMwoHc2V0dGxlZBgCIAEoCzIgLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya1NldHRsZWRIAEIHCgVzdGF0ZSIsChBEZXRhY2hlZFdvcmtMaXZlEhgKEGxhc3RfYWN0aXZpdHlfbXMYASABKAMilwEKE0RldGFjaGVkV29ya1NldHRsZWQSFQoNc2V0dGxlZF9hdF9tcxgBIAEoAxIxCgVlbmRlZBgCIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZBI2CgZraWxsZWQYAyABKAsyJi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtPdXRjb21lS2lsbGVkIisKGURldGFjaGVkV29ya091dGNvbWVLaWxsZWQSDgoGcmVhc29uGAEgASgJIsYDChJEZXRhY2hlZFdvcmtVcGRhdGUSEgoKbWVzc2FnZV9pZBgBIAEoCRI1CgVhZ2VudBgCIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSAASOQoHam91cm5hbBgDIAEoCzImLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0pvdXJuYWxVcGRhdGVIABI2CgVzaGVsbBgEIAEoCzIlLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dHB1dEFwcGVuZEgAEj0KDHVuY2xhc3NpZmllZBgFIAEoCzIlLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dHB1dEFwcGVuZEgAEjsKCGxpdmVuZXNzGAYgASgLMicuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3NVcGRhdGVIABI1CgVtZXJnZRgHIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSAASNQoFc2tpbGwYCCABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTa2lsbFVwZGF0ZUgAQggKBnVwZGF0ZSJIChdEZXRhY2hlZFdvcmtBZ2VudFVwZGF0ZRItCgllbWlzc2lvbnMYASADKAsyGi5mcm9udGVuZC52MS5BZ2VudEVtaXNzaW9uIpoBChdEZXRhY2hlZFdvcmtTa2lsbFVwZGF0ZRI6CgRib2R5GAEgASgLMiouZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrU2tpbGxCb2R5UmVzb2x2ZWRIABI5CgllbWlzc2lvbnMYAiABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtBZ2VudFVwZGF0ZUgAQggKBnVwZGF0ZSIxCh1EZXRhY2hlZFdvcmtTa2lsbEJvZHlSZXNvbHZlZBIQCghjb250ZW50cxgBIAEoCSJIChlEZXRhY2hlZFdvcmtKb3VybmFsVXBkYXRlEisKBHJvd3MYASADKAsyHS5jb252ZXJzYXRpb24udjEuV29ya2Zsb3dTdGVwIigKGERldGFjaGVkV29ya091dHB1dEFwcGVuZBIMCgR0ZXh0GAEgASgJIlEKGkRldGFjaGVkV29ya0xpdmVuZXNzVXBkYXRlEjMKCGxpdmVuZXNzGAEgASgLMiEuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3NCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_conversation_v1_payloads, file_frontend_v1_agent_emission]);
 
 /**
  * One piece of detached work, as the payload of the Message that IS it.
+ *
+ * THERE IS ONE ID SPACE: the containing Message's uuid. A routing handle of
+ * this payload's own would be a second id space that had to be bridged to the
+ * first, and the bridge is pure cost.
+ *
+ * THERE IS ONE CONTAINMENT TREE, and it is the message tree. A parent pointer
+ * for detached work would be a second tree walking only detached work, which
+ * could disagree with the real one. Containment is stated exactly once, on
+ * MessageLineage.parent_message_id (feed.proto).
+ *
+ * WHAT A PRODUCER OBSERVED IS SPELLED ONCE, WHERE IT WAS OBSERVED. The
+ * originating tool call and the label live inside `started`, in the producer's
+ * own words; this surface restates neither, so there is nothing here to drift
+ * against.
+ *
+ * THIS SURFACE TRAVELS AS PROTOJSON, so a field NAME is the wire token, not
+ * just documentation — renaming a field breaks the wire exactly as renumbering
+ * it would.
  *
  * @generated from message frontend.v1.DetachedWork
  */
@@ -60,21 +78,34 @@ export type DetachedWork = Message<"frontend.v1.DetachedWork"> & {
    * it is — reaches the frontend exactly as it was recorded, so this surface has
    * no second spelling of those facts to fall out of step with.
    *
-   * @generated from field: conversation.v1.DetachedWorkStarted started = 8;
+   * @generated from field: conversation.v1.DetachedWorkStarted started = 1;
    */
   started?: DetachedWorkStarted | undefined;
 
   /**
    * When the work was launched, unix millis.
    *
-   * @generated from field: int64 started_at_ms = 5;
+   * @generated from field: int64 started_at_ms = 2;
    */
   startedAtMs: bigint;
 
   /**
    * Live or settled, and with what outcome. See DetachedWorkLiveness.
    *
-   * @generated from field: frontend.v1.DetachedWorkLiveness liveness = 6;
+   * WHICH KIND OF WORK THIS IS, IS STATED EXACTLY ONCE: `started.kind`, a
+   * conversation.v1.DetachedWorkKind. This surface carries no per-kind arm of
+   * its own, because an arm set to a kind is the same word said a second time in
+   * a second spelling (`journal` here against `workflow` there), which is a drift
+   * opportunity for no gain. Every kind — agent, workflow, shell, unclassified,
+   * merge, skill — is a DetachedWorkKind value and nothing else.
+   *
+   * CONTAINED CONTENT IS NOT CARRIED HERE. A detached agent's conversation, a
+   * merge run's, a skill window's, a workflow's steps are reached by PAGING:
+   * frontend.v1.PageScopeInside naming THIS message's id walks the records whose
+   * parent is conversation.v1.MessageParentInside it, at any depth, with the same
+   * command and renderer the feed uses.
+   *
+   * @generated from field: frontend.v1.DetachedWorkLiveness liveness = 3;
    */
   liveness?: DetachedWorkLiveness | undefined;
 
@@ -85,7 +116,7 @@ export type DetachedWork = Message<"frontend.v1.DetachedWork"> & {
    * deltas already carry the key on their envelope (DetachedWorkDelta.workspace),
    * and the two are always equal.
    *
-   * @generated from field: string workspace = 7;
+   * @generated from field: string workspace = 4;
    */
   workspace: string;
 };
@@ -107,6 +138,15 @@ export const DetachedWorkSchema: GenMessage<DetachedWork> = /*@__PURE__*/
  * THE SPOOL IS PAYLOAD, NOT A STREAM OF MESSAGES. Everything appended to it is
  * this one message's accumulating content; no chunk of it is ever promoted to a
  * feed row of its own.
+ *
+ * THE SPOOL CARRIES NO DELIVERY CURSOR, and so a dropped append is
+ * indistinguishable from a quiet stretch of output: a transcript with a hole in
+ * it renders as if it were complete. The durable record is intact, so a reload
+ * repairs it; the user simply gets no signal that they should reload. Gap
+ * detection, if it is ever wanted, belongs on the frame — one `seq` on
+ * frontend.v1.FrontendFrame covers all four delta streams (ConversationDelta,
+ * TypingDelta, DetachedWorkDelta and this one) for less than a per-stream
+ * cursor costs.
  *
  * @generated from message frontend.v1.DetachedWorkOutputSpool
  */
@@ -186,6 +226,13 @@ export const DetachedWorkLiveSchema: GenMessage<DetachedWorkLive> = /*@__PURE__*
 /**
  * The work has finished, one way or another.
  *
+ * THE OUTCOME IS THE PRODUCER'S WORD, and this surface does not get a second
+ * one. How the work ended, and — for work that was a process — the exit status
+ * it left with, are things a producer OBSERVED, so they are stated where they
+ * were observed, in conversation.v1.DetachedWorkEnded. A local re-spelling
+ * could only be a smaller vocabulary: it would lack `lost`, and work whose
+ * ending was never observed would have to be reported as an ending that was.
+ *
  * @generated from message frontend.v1.DetachedWorkSettled
  */
 export type DetachedWorkSettled = Message<"frontend.v1.DetachedWorkSettled"> & {
@@ -203,7 +250,7 @@ export type DetachedWorkSettled = Message<"frontend.v1.DetachedWorkSettled"> & {
    * A consumer reads the verdict and the evidence from one place, in the
    * vocabulary the producer wrote them in.
    *
-   * @generated from field: conversation.v1.DetachedWorkEnded ended = 3;
+   * @generated from field: conversation.v1.DetachedWorkEnded ended = 2;
    */
   ended?: DetachedWorkEnded | undefined;
 
@@ -216,7 +263,7 @@ export type DetachedWorkSettled = Message<"frontend.v1.DetachedWorkSettled"> & {
    * rather than a oneof arm now that its siblings live in `ended`; when set, it
    * annotates the `cancelled` arm and never contradicts it.
    *
-   * @generated from field: frontend.v1.DetachedWorkOutcomeKilled killed = 12;
+   * @generated from field: frontend.v1.DetachedWorkOutcomeKilled killed = 3;
    */
   killed?: DetachedWorkOutcomeKilled | undefined;
 };
@@ -265,6 +312,9 @@ export const DetachedWorkOutcomeKilledSchema: GenMessage<DetachedWorkOutcomeKill
  * Never a re-send of the whole message either: an agent running for an hour
  * would otherwise re-transmit its entire transcript on every new line.
  *
+ * THIS SURFACE TRAVELS AS PROTOJSON, so the field NAME below is the wire
+ * token: renaming it breaks every producer and consumer of this update.
+ *
  * @generated from message frontend.v1.DetachedWorkUpdate
  */
 export type DetachedWorkUpdate = Message<"frontend.v1.DetachedWorkUpdate"> & {
@@ -307,43 +357,43 @@ export type DetachedWorkUpdate = Message<"frontend.v1.DetachedWorkUpdate"> & {
    */
   update: {
     /**
-     * @generated from field: frontend.v1.DetachedWorkAgentUpdate agent = 10;
+     * @generated from field: frontend.v1.DetachedWorkAgentUpdate agent = 2;
      */
     value: DetachedWorkAgentUpdate;
     case: "agent";
   } | {
     /**
-     * @generated from field: frontend.v1.DetachedWorkJournalUpdate journal = 11;
+     * @generated from field: frontend.v1.DetachedWorkJournalUpdate journal = 3;
      */
     value: DetachedWorkJournalUpdate;
     case: "journal";
   } | {
     /**
-     * @generated from field: frontend.v1.DetachedWorkOutputAppend shell = 12;
+     * @generated from field: frontend.v1.DetachedWorkOutputAppend shell = 4;
      */
     value: DetachedWorkOutputAppend;
     case: "shell";
   } | {
     /**
-     * @generated from field: frontend.v1.DetachedWorkOutputAppend unclassified = 13;
+     * @generated from field: frontend.v1.DetachedWorkOutputAppend unclassified = 5;
      */
     value: DetachedWorkOutputAppend;
     case: "unclassified";
   } | {
     /**
-     * @generated from field: frontend.v1.DetachedWorkLivenessUpdate liveness = 14;
+     * @generated from field: frontend.v1.DetachedWorkLivenessUpdate liveness = 6;
      */
     value: DetachedWorkLivenessUpdate;
     case: "liveness";
   } | {
     /**
-     * @generated from field: frontend.v1.DetachedWorkAgentUpdate merge = 15;
+     * @generated from field: frontend.v1.DetachedWorkAgentUpdate merge = 7;
      */
     value: DetachedWorkAgentUpdate;
     case: "merge";
   } | {
     /**
-     * @generated from field: frontend.v1.DetachedWorkSkillUpdate skill = 16;
+     * @generated from field: frontend.v1.DetachedWorkSkillUpdate skill = 8;
      */
     value: DetachedWorkSkillUpdate;
     case: "skill";
@@ -482,6 +532,13 @@ export const DetachedWorkJournalUpdateSchema: GenMessage<DetachedWorkJournalUpda
  * and no place of its own in the feed; it is addressed to the message whose
  * spool it extends (DetachedWorkUpdate.message_id) and is applied to that
  * message's accumulating content.
+ *
+ * AN APPEND CARRIES NO OFFSET, so a lost append cannot be told from a quiet
+ * one: an append that never arrives leaves a silent hole in a transcript that
+ * still looks complete. The durable record is intact and a reload repairs it,
+ * with no signal to the user that a reload is warranted. A per-frame `seq` on
+ * frontend.v1.FrontendFrame is the cheaper way to get detection back, and would
+ * cover all four delta streams rather than this one.
  *
  * @generated from message frontend.v1.DetachedWorkOutputAppend
  */
