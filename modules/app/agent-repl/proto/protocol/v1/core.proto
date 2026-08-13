@@ -111,24 +111,20 @@ enum PromptOrigin {
   PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR = 12;
   PROMPT_ORIGIN_PANEL_SELECTION = 13;
   PROMPT_ORIGIN_DEFERRED_PROMPT = 14;
-  reserved 15;
-  reserved "PROMPT_ORIGIN_LEGACY_PENDING_PROMPT";
-  PROMPT_ORIGIN_LEGACY_HOST_PROMPT = 16;
-  PROMPT_ORIGIN_GNS_SOCKETS_CLOSE = 17;
-  PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT = 18;
-  PROMPT_ORIGIN_EXPLAIN_CONFIG = 19;
+  PROMPT_ORIGIN_LEGACY_HOST_PROMPT = 15;
+  PROMPT_ORIGIN_GNS_SOCKETS_CLOSE = 16;
+  PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT = 17;
+  PROMPT_ORIGIN_EXPLAIN_CONFIG = 18;
 
   // Other producers remain explicit without being mislabeled as Emacs.
-  PROMPT_ORIGIN_WEBAPP_USER_SENT = 20;
-  PROMPT_ORIGIN_WEBAPP_CARD_ACTION = 21;
-  PROMPT_ORIGIN_WORKSPACE_CREATED = 22;
-  PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR = 23;
-  PROMPT_ORIGIN_MERGE_TEST_REPAIR = 24;
-  PROMPT_ORIGIN_MERGE_BEFORE_ACTION = 25;
-  PROMPT_ORIGIN_MERGE_AFTER_ACTION = 26;
-  reserved 27;
-  reserved "PROMPT_ORIGIN_MERGE_PARENT_NOTIFICATION";
-  PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME = 28;
+  PROMPT_ORIGIN_WEBAPP_USER_SENT = 19;
+  PROMPT_ORIGIN_WEBAPP_CARD_ACTION = 20;
+  PROMPT_ORIGIN_WORKSPACE_CREATED = 21;
+  PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR = 22;
+  PROMPT_ORIGIN_MERGE_TEST_REPAIR = 23;
+  PROMPT_ORIGIN_MERGE_BEFORE_ACTION = 24;
+  PROMPT_ORIGIN_MERGE_AFTER_ACTION = 25;
+  PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME = 26;
 
   // Daemon-generated cache keep-alive ping: a minimal prompt ("respond with
   // only '.', no tool calls or changes") submitted after turn inactivity to
@@ -138,7 +134,7 @@ enum PromptOrigin {
   // unconditionally, and the shim discards them from the vendor transcript
   // via rewind (SessionRewound) before the next real prompt is submitted, so
   // they can never contaminate the model's context either.
-  PROMPT_ORIGIN_CACHE_KEEP_ALIVE = 29;
+  PROMPT_ORIGIN_CACHE_KEEP_ALIVE = 27;
 
   // Daemon-generated re-drive of a turn a planned bounce interrupted.
   //
@@ -160,7 +156,7 @@ enum PromptOrigin {
   // What it IS for: saying WHY a turn is running. A status surface reads this
   // to report "resumed after restart" instead of presenting work the user did
   // not just ask for as though they had.
-  PROMPT_ORIGIN_RESUME_AFTER_RESTART = 30;
+  PROMPT_ORIGIN_RESUME_AFTER_RESTART = 28;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +240,7 @@ message SessionRewound {
   oneof reason {
     // The only producer today: discarding trailing keep-alive turns before a
     // real prompt.
-    KeepAliveDiscard keep_alive_discard = 10;
+    KeepAliveDiscard keep_alive_discard = 4;
   }
 }
 
@@ -270,13 +266,13 @@ message QueryLifecycle {
   // Describes exactly one lifecycle event without relying on a state enum.
   oneof event {
     // Records creation of the query.
-    QueryCreated created = 10;
+    QueryCreated created = 3;
 
     // Records the effective runtime identity reported after initialization.
-    QueryRuntimeObserved runtime_observed = 11;
+    QueryRuntimeObserved runtime_observed = 4;
 
     // Records termination of the query.
-    QueryTerminated terminated = 12;
+    QueryTerminated terminated = 5;
   }
 }
 
@@ -288,10 +284,10 @@ message QueryCreated {
   // Identifies whether the query starts a vendor session or resumes one.
   oneof invocation {
     // Indicates that no vendor session was supplied for resumption.
-    FreshQuery fresh = 10;
+    FreshQuery fresh = 2;
 
     // Identifies the vendor session supplied for resumption.
-    ResumedQuery resumed = 11;
+    ResumedQuery resumed = 3;
   }
 }
 
@@ -338,51 +334,43 @@ message QueryRuntimeIdentity {
   string sdk_version = 3;
 
   // Gives the shim build commit.
-  string shim_build_sha = 5;
+  string shim_build_sha = 4;
 
-  // RETIRED, because each of these was a per-query spelling of a fact that is
-  // fixed for the whole shim process and already stated once per session.
+  // THIS MESSAGE CARRIES ONLY WHAT VARIES PER QUERY. A fact that is fixed for
+  // the whole shim process belongs to the session record that states it once,
+  // not to every query() call, and three such facts are deliberately absent:
   //
-  // - claude_code_version (4) restated SessionBegan.agent_version. A shim
-  //   process drives one CLI binary for its lifetime; it cannot differ between
-  //   two query() calls it serves.
-  // - auth_source (6) restated SessionBegan.auth (SessionAuth). Credential
+  // - The CLI version is SessionBegan.agent_version. A shim process drives one
+  //   CLI binary for its lifetime; it cannot differ between two query() calls
+  //   it serves.
+  // - The credential source is SessionBegan.auth (SessionAuth). Credential
   //   resolution happens at process start from the environment, so every query
-  //   in a process reported the identical string.
-  // - subscription_type (7) was never populated at all — the producer wrote the
-  //   empty string deliberately, because the subscription type is reported by
-  //   the usage service and already rides every AccountUsageObservation, at
-  //   both of a turn's boundaries. Blocking initialization on a usage
-  //   round-trip to duplicate it here bought the ledger nothing.
-  //
-  // THE NAMES ARE RESERVED ALONGSIDE THE NUMBERS because this surface travels
-  // as protojson, where the field NAME is the wire token. A retired name coming
-  // back meaning something else would be silently misread by any peer still
-  // speaking the old spelling — a class of break that a reserved number alone
-  // does not prevent.
-  reserved 4, 6, 7;
-  reserved "claude_code_version", "auth_source", "subscription_type";
+  //   in a process would report the identical string.
+  // - The subscription type is reported by the usage service and already rides
+  //   every AccountUsageObservation, at both of a turn's boundaries. Blocking
+  //   initialization on a usage round-trip to duplicate it here buys the
+  //   ledger nothing.
 
   // Gives the reported fast-mode state.
-  string fast_mode_state = 8;
+  string fast_mode_state = 5;
 
   // Gives the explanation associated with the fast-mode state.
-  string fast_mode_reason = 9;
+  string fast_mode_reason = 6;
 
   // Hashes the effective SDK options using a canonical encoding.
-  EvidenceFingerprint effective_options = 10;
+  EvidenceFingerprint effective_options = 7;
 
   // Hashes the effective settings using a canonical encoding.
-  EvidenceFingerprint settings = 11;
+  EvidenceFingerprint settings = 8;
 
   // Hashes the ordered tool definitions using a canonical encoding.
-  EvidenceFingerprint tools = 12;
+  EvidenceFingerprint tools = 9;
 
   // Hashes the ordered MCP configuration using a canonical encoding.
-  EvidenceFingerprint mcp = 13;
+  EvidenceFingerprint mcp = 10;
 
   // Hashes the cacheable system and instruction prefix using a canonical encoding.
-  EvidenceFingerprint context_prefix = 14;
+  EvidenceFingerprint context_prefix = 11;
 }
 
 // Represents either a known SHA-256 fingerprint or explicit unavailability.
@@ -418,16 +406,16 @@ message QueryTerminated {
   // Identifies the termination condition without relying on a state enum.
   oneof reason {
     // Records termination initiated by shim shutdown or hibernation.
-    IntentionalQueryTermination intentional = 10;
+    IntentionalQueryTermination intentional = 3;
 
     // Records unexpected completion of the SDK iterator.
-    UnexpectedQueryEof unexpected_eof = 11;
+    UnexpectedQueryEof unexpected_eof = 4;
 
     // Records an error thrown by the SDK iterator.
-    QueryIteratorFailure iterator_failure = 12;
+    QueryIteratorFailure iterator_failure = 5;
 
     // Records failure before the query completed initialization.
-    QueryStartupFailure startup_failure = 13;
+    QueryStartupFailure startup_failure = 6;
   }
 }
 
@@ -1063,17 +1051,12 @@ message PermissionRequest {
 
 message PermissionResponse {
   string request_id = 1;
-  // 2 WAS `decision`, of the retired `PermissionDecision` enum, and NOTHING
-  // REPLACES IT ON THIS MESSAGE. Removing the enum leaves a response that can
-  // carry an edited input and a denial sentence but cannot state the allow/deny
-  // verdict itself — see the gap note in DESIGN-protobuf-surfaces.md. The number
-  // AND the name are reserved because a later arm meaning something else, read
-  // by a peer still speaking the old spelling, is exactly the silent misread the
-  // reservation discipline exists to prevent.
-  reserved 2;
-  reserved "decision";
-  google.protobuf.Struct updated_input = 3;  // optional allow-with-edits
-  string deny_message = 4;
+  // KNOWN GAP: this message cannot state the allow/deny verdict itself. It can
+  // carry an edited input and a denial sentence, but the verdict field went
+  // with the `PermissionDecision` enum and nothing replaces it here — see the
+  // gap note in DESIGN-protobuf-surfaces.md.
+  google.protobuf.Struct updated_input = 2;  // optional allow-with-edits
+  string deny_message = 3;
 }
 
 // The UDS keepalive: a peer saying the connection is still there, echoed back.
