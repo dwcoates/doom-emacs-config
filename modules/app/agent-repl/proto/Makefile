@@ -34,7 +34,6 @@ PROTOS := \
   frontend/v1/prompt-queue.proto \
   frontend/v1/sidebar.proto \
   frontend/v1/state.proto \
-  frontend/v1/tokens-menu.proto \
   frontend/v1/topbar.proto \
   state/v1/durable.proto
 
