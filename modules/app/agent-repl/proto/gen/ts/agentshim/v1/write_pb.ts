@@ -25,17 +25,17 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { CursorState } from "./cursor_pb";
+import { file_agentshim_v1_cursor } from "./cursor_pb";
 import type { Entry } from "./entry_pb";
 import { file_agentshim_v1_entry } from "./entry_pb";
-import type { CursorState } from "../../protocol/v1/core_pb";
-import { file_protocol_v1_core } from "../../protocol/v1/core_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentshim/v1/write.proto.
  */
 export const file_agentshim_v1_write: GenFile = /*@__PURE__*/
-  fileDesc("ChhhZ2VudHNoaW0vdjEvd3JpdGUucHJvdG8SDGFnZW50c2hpbS52MSJMCg9TdG9yZUVudHJ5V3JpdGUSEAoIcHJvZHVjZXIYASABKAkSJwoFYmF0Y2gYAiABKAsyGC5hZ2VudHNoaW0udjEuRW50cnlCYXRjaCJkCgpFbnRyeUJhdGNoEiQKB2VudHJpZXMYASADKAsyEy5hZ2VudHNoaW0udjEuRW50cnkSMAoOY3Vyc29yX2FkdmFuY2UYAiABKAsyGC5wcm90b2NvbC52MS5DdXJzb3JTdGF0ZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL3YxO2FnZW50c2hpbXYxYgZwcm90bzM", [file_agentshim_v1_entry, file_protocol_v1_core]);
+  fileDesc("ChhhZ2VudHNoaW0vdjEvd3JpdGUucHJvdG8SDGFnZW50c2hpbS52MSJMCg9TdG9yZUVudHJ5V3JpdGUSEAoIcHJvZHVjZXIYASABKAkSJwoFYmF0Y2gYAiABKAsyGC5hZ2VudHNoaW0udjEuRW50cnlCYXRjaCJlCgpFbnRyeUJhdGNoEiQKB2VudHJpZXMYASADKAsyEy5hZ2VudHNoaW0udjEuRW50cnkSMQoOY3Vyc29yX2FkdmFuY2UYAiABKAsyGS5hZ2VudHNoaW0udjEuQ3Vyc29yU3RhdGVCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS92MTthZ2VudHNoaW12MWIGcHJvdG8z", [file_agentshim_v1_cursor, file_agentshim_v1_entry]);
 
 /**
  * One producer's write of one batch of records.
@@ -90,7 +90,7 @@ export type EntryBatch = Message<"agentshim.v1.EntryBatch"> & {
    * Where the producer had read to when it produced these. Unset for
    * stream-plane producers, which have no file to be positioned in.
    *
-   * @generated from field: protocol.v1.CursorState cursor_advance = 2;
+   * @generated from field: agentshim.v1.CursorState cursor_advance = 2;
    */
   cursorAdvance?: CursorState | undefined;
 };
