@@ -70,7 +70,7 @@ import {
   EventClass,
   DiagnosticSourceRuntime,
   EventSchema,
-  HeartbeatSchema,
+  ConnectionHeartbeatSchema,
   HealthCheckSchema,
   HealthStatusSchema,
   FilePlaneDiagnosticSchema,
@@ -223,7 +223,7 @@ function fakeStoreAt(socketPath: string): Promise<FakeStore> {
       const peer = new FramedPeer(socket);
       peer.onReceive((frame) => {
         if (unpackAs(frame, SubscribeSchema) === undefined) return false;
-        peer.send(HeartbeatSchema, create(HeartbeatSchema, { sentAtMs: 1n }));
+        peer.send(ConnectionHeartbeatSchema, create(ConnectionHeartbeatSchema, { sentAtMs: 1n }));
         return false;
       });
       accepted.push(peer);

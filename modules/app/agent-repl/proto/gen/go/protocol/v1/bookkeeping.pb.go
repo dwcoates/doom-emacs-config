@@ -131,7 +131,7 @@ func (x *BookkeepingEntry) GetTurnEnded() *TurnEnded {
 	return nil
 }
 
-func (x *BookkeepingEntry) GetHeartbeat() *Heartbeat {
+func (x *BookkeepingEntry) GetHeartbeat() *AgentHeartbeat {
 	if x != nil {
 		if x, ok := x.Kind.(*BookkeepingEntry_Heartbeat); ok {
 			return x.Heartbeat
@@ -202,8 +202,8 @@ type BookkeepingEntry_TurnEnded struct {
 }
 
 type BookkeepingEntry_Heartbeat struct {
-	// Something is alive and working. It reports liveness, never content.
-	Heartbeat *Heartbeat `protobuf:"bytes,5,opt,name=heartbeat,proto3,oneof"`
+	// The agent's work is alive. It reports liveness, never content.
+	Heartbeat *AgentHeartbeat `protobuf:"bytes,5,opt,name=heartbeat,proto3,oneof"`
 }
 
 type BookkeepingEntry_ResponseTiming struct {
@@ -1533,8 +1533,15 @@ func (x *TurnEndedUnexplained) GetInference() string {
 	return ""
 }
 
-// Something is alive and working.
-type Heartbeat struct {
+// The AGENT's work is alive: a record inside the conversation stream, produced
+// only when the vendor reports tool progress during a turn, and consumed by the
+// footer to name which work is still running. Absence means nothing is running,
+// which is the normal state and never a fault.
+//
+// Not to be confused with `ConnectionHeartbeat` (core.proto), which is about the
+// transport. The two are homonyms, not variants, which is why neither of them
+// keeps the plain name `Heartbeat`.
+type AgentHeartbeat struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What is alive, so a footer can say which work is still running. IDENTITIES
 	// rather than a count, because a count cannot be reconciled against what a
@@ -1544,20 +1551,20 @@ type Heartbeat struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Heartbeat) Reset() {
-	*x = Heartbeat{}
+func (x *AgentHeartbeat) Reset() {
+	*x = AgentHeartbeat{}
 	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Heartbeat) String() string {
+func (x *AgentHeartbeat) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Heartbeat) ProtoMessage() {}
+func (*AgentHeartbeat) ProtoMessage() {}
 
-func (x *Heartbeat) ProtoReflect() protoreflect.Message {
+func (x *AgentHeartbeat) ProtoReflect() protoreflect.Message {
 	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1569,12 +1576,12 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
-func (*Heartbeat) Descriptor() ([]byte, []int) {
+// Deprecated: Use AgentHeartbeat.ProtoReflect.Descriptor instead.
+func (*AgentHeartbeat) Descriptor() ([]byte, []int) {
 	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{22}
 }
 
-func (x *Heartbeat) GetLiveWorkIds() []string {
+func (x *AgentHeartbeat) GetLiveWorkIds() []string {
 	if x != nil {
 		return x.LiveWorkIds
 	}
@@ -2405,15 +2412,15 @@ var File_protocol_v1_bookkeeping_proto protoreflect.FileDescriptor
 
 const file_protocol_v1_bookkeeping_proto_rawDesc = "" +
 	"\n" +
-	"\x1dprotocol/v1/bookkeeping.proto\x12\vprotocol.v1\"\xa9\x05\n" +
+	"\x1dprotocol/v1/bookkeeping.proto\x12\vprotocol.v1\"\xae\x05\n" +
 	"\x10BookkeepingEntry\x12@\n" +
 	"\rsession_began\x18\x01 \x01(\v2\x19.protocol.v1.SessionBeganH\x00R\fsessionBegan\x12@\n" +
 	"\rsession_ended\x18\x02 \x01(\v2\x19.protocol.v1.SessionEndedH\x00R\fsessionEnded\x127\n" +
 	"\n" +
 	"turn_began\x18\x03 \x01(\v2\x16.protocol.v1.TurnBeganH\x00R\tturnBegan\x127\n" +
 	"\n" +
-	"turn_ended\x18\x04 \x01(\v2\x16.protocol.v1.TurnEndedH\x00R\tturnEnded\x126\n" +
-	"\theartbeat\x18\x05 \x01(\v2\x16.protocol.v1.HeartbeatH\x00R\theartbeat\x12F\n" +
+	"turn_ended\x18\x04 \x01(\v2\x16.protocol.v1.TurnEndedH\x00R\tturnEnded\x12;\n" +
+	"\theartbeat\x18\x05 \x01(\v2\x1b.protocol.v1.AgentHeartbeatH\x00R\theartbeat\x12F\n" +
 	"\x0fresponse_timing\x18\x06 \x01(\v2\x1b.protocol.v1.ResponseTimingH\x00R\x0eresponseTiming\x12R\n" +
 	"\x13producer_diagnostic\x18\a \x01(\v2\x1f.protocol.v1.ProducerDiagnosticH\x00R\x12producerDiagnostic\x12_\n" +
 	"\x18session_identity_changed\x18\b \x01(\v2#.protocol.v1.SessionIdentityChangedH\x00R\x16sessionIdentityChanged\x12b\n" +
@@ -2483,8 +2490,8 @@ const file_protocol_v1_bookkeeping_proto_rawDesc = "" +
 	"\rTurnCompleted\"\x11\n" +
 	"\x0fTurnInterrupted\"4\n" +
 	"\x14TurnEndedUnexplained\x12\x1c\n" +
-	"\tinference\x18\x01 \x01(\tR\tinference\"/\n" +
-	"\tHeartbeat\x12\"\n" +
+	"\tinference\x18\x01 \x01(\tR\tinference\"4\n" +
+	"\x0eAgentHeartbeat\x12\"\n" +
 	"\rlive_work_ids\x18\x01 \x03(\tR\vliveWorkIds\"p\n" +
 	"\x0eResponseTiming\x12\x1d\n" +
 	"\n" +
@@ -2569,7 +2576,7 @@ var file_protocol_v1_bookkeeping_proto_goTypes = []any{
 	(*TurnCompleted)(nil),             // 19: protocol.v1.TurnCompleted
 	(*TurnInterrupted)(nil),           // 20: protocol.v1.TurnInterrupted
 	(*TurnEndedUnexplained)(nil),      // 21: protocol.v1.TurnEndedUnexplained
-	(*Heartbeat)(nil),                 // 22: protocol.v1.Heartbeat
+	(*AgentHeartbeat)(nil),            // 22: protocol.v1.AgentHeartbeat
 	(*ResponseTiming)(nil),            // 23: protocol.v1.ResponseTiming
 	(*ProducerDiagnostic)(nil),        // 24: protocol.v1.ProducerDiagnostic
 	(*SessionIdentityChanged)(nil),    // 25: protocol.v1.SessionIdentityChanged
@@ -2589,7 +2596,7 @@ var file_protocol_v1_bookkeeping_proto_depIdxs = []int32{
 	13, // 1: protocol.v1.BookkeepingEntry.session_ended:type_name -> protocol.v1.SessionEnded
 	17, // 2: protocol.v1.BookkeepingEntry.turn_began:type_name -> protocol.v1.TurnBegan
 	18, // 3: protocol.v1.BookkeepingEntry.turn_ended:type_name -> protocol.v1.TurnEnded
-	22, // 4: protocol.v1.BookkeepingEntry.heartbeat:type_name -> protocol.v1.Heartbeat
+	22, // 4: protocol.v1.BookkeepingEntry.heartbeat:type_name -> protocol.v1.AgentHeartbeat
 	23, // 5: protocol.v1.BookkeepingEntry.response_timing:type_name -> protocol.v1.ResponseTiming
 	24, // 6: protocol.v1.BookkeepingEntry.producer_diagnostic:type_name -> protocol.v1.ProducerDiagnostic
 	25, // 7: protocol.v1.BookkeepingEntry.session_identity_changed:type_name -> protocol.v1.SessionIdentityChanged
