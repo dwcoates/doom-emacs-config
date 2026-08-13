@@ -628,3 +628,34 @@ declare it here.
   string. If the daemon is PARSING that string back into rows, it is deriving,
   and the structure should reach it intact instead — which is what
   `agentshim.v1.InternalEntry.source_record` now makes possible.
+
+## Import the ENCOMPASSING message, not its constituents
+
+**Decided.** When a consumer needs a fact another namespace owns, it embeds the
+message that CONTAINS that fact, not the constituent the fact sits in. Dropping
+to a constituent is reserved for a genuine strict-subset need, and that need
+triggers provider-side extraction rather than a partial import.
+
+**Why the distinction bites.** `conversation.v1.DetachedWorkKind` is referenced
+from exactly one place, `conversation.v1.DetachedWorkStarted.kind`. Reaching for
+the kind alone reads as reuse, but `frontend.v1.DetachedWork` re-spells all
+THREE of that message's fields — `origin_tool_call_id`, `label` and `kind` — so
+importing only the kind would fix a third of the duplication and leave the rest
+looking intentional. Only `workspace` is genuinely native there.
+
+So `frontend.v1.DetachedWork` embeds `conversation.v1.DetachedWorkStarted`
+whole, and `frontend.v1.DetachedWorkSettled` embeds
+`conversation.v1.DetachedWorkEnded` whole rather than re-declaring
+`frontend.v1.DetachedWorkOutcomeDone`/`Error`/`Killed`.
+
+**This corrects an inconsistency in the earlier record**, which specified a
+whole-message embed for the outcome and an arm-level import for the kind. There
+was no principle behind the difference.
+
+**The schema had already written down the failure mode it was about to repeat.**
+`conversation.v1.DetachedWorkKind`'s comment reads: "SIX ARMS, matching what the
+daemon already resolves (frontend.v1's DetachedWork). An earlier draft had four
+and silently dropped `merge` and `skill`." The author saw the duplicate and took
+MATCHING IT BY HAND as the remedy — a remedy that had already failed once, at
+four arms, before anyone noticed. That is the whole argument for the rule in one
+comment.
