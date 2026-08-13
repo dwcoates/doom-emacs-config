@@ -28,7 +28,6 @@
 package agentshimv1
 
 import (
-	v1 "agentrepl/proto/protocol/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -113,7 +112,7 @@ type EntryBatch struct {
 	Entries []*Entry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
 	// Where the producer had read to when it produced these. Unset for
 	// stream-plane producers, which have no file to be positioned in.
-	CursorAdvance *v1.CursorState `protobuf:"bytes,2,opt,name=cursor_advance,json=cursorAdvance,proto3" json:"cursor_advance,omitempty"`
+	CursorAdvance *CursorState `protobuf:"bytes,2,opt,name=cursor_advance,json=cursorAdvance,proto3" json:"cursor_advance,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -155,7 +154,7 @@ func (x *EntryBatch) GetEntries() []*Entry {
 	return nil
 }
 
-func (x *EntryBatch) GetCursorAdvance() *v1.CursorState {
+func (x *EntryBatch) GetCursorAdvance() *CursorState {
 	if x != nil {
 		return x.CursorAdvance
 	}
@@ -166,14 +165,14 @@ var File_agentshim_v1_write_proto protoreflect.FileDescriptor
 
 const file_agentshim_v1_write_proto_rawDesc = "" +
 	"\n" +
-	"\x18agentshim/v1/write.proto\x12\fagentshim.v1\x1a\x18agentshim/v1/entry.proto\x1a\x16protocol/v1/core.proto\"]\n" +
+	"\x18agentshim/v1/write.proto\x12\fagentshim.v1\x1a\x19agentshim/v1/cursor.proto\x1a\x18agentshim/v1/entry.proto\"]\n" +
 	"\x0fStoreEntryWrite\x12\x1a\n" +
 	"\bproducer\x18\x01 \x01(\tR\bproducer\x12.\n" +
-	"\x05batch\x18\x02 \x01(\v2\x18.agentshim.v1.EntryBatchR\x05batch\"|\n" +
+	"\x05batch\x18\x02 \x01(\v2\x18.agentshim.v1.EntryBatchR\x05batch\"}\n" +
 	"\n" +
 	"EntryBatch\x12-\n" +
-	"\aentries\x18\x01 \x03(\v2\x13.agentshim.v1.EntryR\aentries\x12?\n" +
-	"\x0ecursor_advance\x18\x02 \x01(\v2\x18.protocol.v1.CursorStateR\rcursorAdvanceB*Z(agentrepl/proto/agentshim/v1;agentshimv1b\x06proto3"
+	"\aentries\x18\x01 \x03(\v2\x13.agentshim.v1.EntryR\aentries\x12@\n" +
+	"\x0ecursor_advance\x18\x02 \x01(\v2\x19.agentshim.v1.CursorStateR\rcursorAdvanceB*Z(agentrepl/proto/agentshim/v1;agentshimv1b\x06proto3"
 
 var (
 	file_agentshim_v1_write_proto_rawDescOnce sync.Once
@@ -192,12 +191,12 @@ var file_agentshim_v1_write_proto_goTypes = []any{
 	(*StoreEntryWrite)(nil), // 0: agentshim.v1.StoreEntryWrite
 	(*EntryBatch)(nil),      // 1: agentshim.v1.EntryBatch
 	(*Entry)(nil),           // 2: agentshim.v1.Entry
-	(*v1.CursorState)(nil),  // 3: protocol.v1.CursorState
+	(*CursorState)(nil),     // 3: agentshim.v1.CursorState
 }
 var file_agentshim_v1_write_proto_depIdxs = []int32{
 	1, // 0: agentshim.v1.StoreEntryWrite.batch:type_name -> agentshim.v1.EntryBatch
 	2, // 1: agentshim.v1.EntryBatch.entries:type_name -> agentshim.v1.Entry
-	3, // 2: agentshim.v1.EntryBatch.cursor_advance:type_name -> protocol.v1.CursorState
+	3, // 2: agentshim.v1.EntryBatch.cursor_advance:type_name -> agentshim.v1.CursorState
 	3, // [3:3] is the sub-list for method output_type
 	3, // [3:3] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
@@ -210,6 +209,7 @@ func file_agentshim_v1_write_proto_init() {
 	if File_agentshim_v1_write_proto != nil {
 		return
 	}
+	file_agentshim_v1_cursor_proto_init()
 	file_agentshim_v1_entry_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
