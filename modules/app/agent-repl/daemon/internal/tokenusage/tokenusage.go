@@ -19,21 +19,24 @@ package tokenusage
 import (
 	"fmt"
 
-	datav1 "agentrepl/proto/agentshim/data/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	statev1 "agentrepl/proto/state/v1"
 )
 
-// FromResultUsage converts one terminal result's vendor usage block.
-func FromResultUsage(u *datav1.Usage) (*conversationv1.TokenUsage, error) {
-	return fromCounters("result usage", u.GetInputTokens(), u.GetCacheCreationInputTokens(), u.GetCacheReadInputTokens(), u.GetOutputTokens())
-}
-
-// FromAPIUsage converts one assistant response's vendor usage block.
-func FromAPIUsage(u *datav1.ApiUsage) (*conversationv1.TokenUsage, error) {
-	return fromCounters("api usage", u.GetInputTokens(), u.GetCacheCreationInputTokens(), u.GetCacheReadInputTokens(), u.GetOutputTokens())
-}
+// THE LIVE VENDOR CONVERSIONS ARE GONE FROM HERE, and their absence is the
+// point rather than a loss. FromResultUsage and FromAPIUsage each read one
+// vendor usage block off the wire — the terminal result's and the assistant
+// response's — and turned it into the canonical shape. A vendor block no longer
+// reaches this process at all: the producer converts at the edge, so what
+// arrives is already conversation.v1.TokenUsage on AgentSaid.usage, and a
+// daemon-side conversion would be a second authority on a question already
+// answered upstream.
+//
+// The two entry points below remain because PERSISTENCE is the one place the
+// vendor shape legitimately survives: state.v1 keeps the durable record
+// vendor-faithful so an old row still replays byte-identically, and the
+// economics are derived FROM it at read time rather than stored beside it.
 
 // FromVendorUsage converts the durable vendor-faithful record the state store
 // holds. This is the READ boundary named in the canonical TokenUsage contract:
