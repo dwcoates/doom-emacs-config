@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"sync"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -336,7 +336,7 @@ func (s *detachedWorkStore) observeOutcomeLocked(o frontend.ToolOutcome, atMs in
 		return nil, updates, nil, err
 	case *datav1.ToolUseResult_TaskStop:
 		up, err := s.settleByTaskLocked(r.TaskStop.GetTaskId(), frontend.DetachedVerdict{
-			Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED,
+			Status: protocolv1.TerminalStatus_TERMINAL_STATUS_STOPPED,
 			AtMs:   atMs,
 			Reason: r.TaskStop.GetMessage(),
 		})
@@ -506,7 +506,7 @@ func (s *detachedWorkStore) foldJournalLocked(b *frontendv1.Message, text string
 }
 
 // observeTaskEnded settles the work a finished detachment belongs to.
-func (s *detachedWorkStore) observeTaskEnded(te *corev1.TaskEnded, atMs int64) (asyncPush, error) {
+func (s *detachedWorkStore) observeTaskEnded(te *protocolv1.TaskEnded, atMs int64) (asyncPush, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	up, err := s.settleByTaskLocked(te.GetTaskId(), frontend.DetachedVerdict{
@@ -574,7 +574,7 @@ func (s *detachedWorkStore) settleCancelledTasks(taskIDs []string, v frontend.De
 // for: the outcome plane is where a launch's identity is complete (its task id,
 // its label, its originating call), and opening from both planes would be two
 // sites deciding the same thing.
-func (s *detachedWorkStore) observeTaskStarted(ts *corev1.TaskStarted, atMs int64) (asyncPush, error) {
+func (s *detachedWorkStore) observeTaskStarted(ts *protocolv1.TaskStarted, atMs int64) (asyncPush, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if ts.GetToolUseId() == "" {
@@ -643,7 +643,7 @@ func (s *detachedWorkStore) observeTaskStarted(ts *corev1.TaskStarted, atMs int6
 // announcement does not have: there is nothing to look the name up by. Such a
 // detachment can be neither classified nor honestly reported as unclassified,
 // which is precisely the condition the card exists for.
-func (s *detachedWorkStore) openAnnouncementBornLocked(ts *corev1.TaskStarted, atMs int64) asyncPush {
+func (s *detachedWorkStore) openAnnouncementBornLocked(ts *protocolv1.TaskStarted, atMs int64) asyncPush {
 	kind := frontend.DetachKindFromTaskKind(ts.GetKind())
 	if kind == frontend.DetachUnresolved {
 		return asyncPush{Faults: []asyncFault{*s.faultLocked(ts.GetTaskId(),
@@ -938,18 +938,18 @@ func isRawTerminal(s datav1.RawTaskStatus) bool {
 // frontend.SettleDetachedWork resolves an outcome from. A status this table does
 // not name leaves the result UNSPECIFIED, which the settler refuses rather than
 // standing in for.
-func terminalStatusFromRaw(s datav1.RawTaskStatus) corev1.TerminalStatus {
+func terminalStatusFromRaw(s datav1.RawTaskStatus) protocolv1.TerminalStatus {
 	switch s {
 	case datav1.RawTaskStatus_RAW_TASK_STATUS_COMPLETED:
-		return corev1.TerminalStatus_TERMINAL_STATUS_DONE
+		return protocolv1.TerminalStatus_TERMINAL_STATUS_DONE
 	case datav1.RawTaskStatus_RAW_TASK_STATUS_FAILED:
-		return corev1.TerminalStatus_TERMINAL_STATUS_ERROR
+		return protocolv1.TerminalStatus_TERMINAL_STATUS_ERROR
 	case datav1.RawTaskStatus_RAW_TASK_STATUS_KILLED:
-		return corev1.TerminalStatus_TERMINAL_STATUS_KILLED
+		return protocolv1.TerminalStatus_TERMINAL_STATUS_KILLED
 	case datav1.RawTaskStatus_RAW_TASK_STATUS_STOPPED:
-		return corev1.TerminalStatus_TERMINAL_STATUS_STOPPED
+		return protocolv1.TerminalStatus_TERMINAL_STATUS_STOPPED
 	default:
-		return corev1.TerminalStatus_TERMINAL_STATUS_UNSPECIFIED
+		return protocolv1.TerminalStatus_TERMINAL_STATUS_UNSPECIFIED
 	}
 }
 

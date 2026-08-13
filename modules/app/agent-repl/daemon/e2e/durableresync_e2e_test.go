@@ -33,9 +33,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/progress"
@@ -255,7 +255,7 @@ func (h *bouncedHarness) dialFrontend(t *testing.T) *websocket.Conn {
 
 // storedAssistantEvent is what the stream plane persisted for one assistant
 // reply, in the store's own envelope shape.
-func storedAssistantEvent(t *testing.T, vendorSessionID, uuid, text string) *corev1.Event {
+func storedAssistantEvent(t *testing.T, vendorSessionID, uuid, text string) *protocolv1.Event {
 	t.Helper()
 	payload, err := anypb.New(&datav1.ClaudeStreamMessage{
 		Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
@@ -268,13 +268,13 @@ func storedAssistantEvent(t *testing.T, vendorSessionID, uuid, text string) *cor
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId:    vendorSessionID,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:        protocolv1.Plane_PLANE_FILE,
+		Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		ProducedAtMs: time.Now().UnixMilli(),
 		DedupKey:     "assistant:" + uuid,
-		Payload:      &corev1.Event_Vendor{Vendor: payload},
+		Payload:      &protocolv1.Event_Vendor{Vendor: payload},
 	}
 }
 

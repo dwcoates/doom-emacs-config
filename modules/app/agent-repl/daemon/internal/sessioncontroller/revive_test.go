@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/shimclient"
@@ -120,7 +120,7 @@ func TestReviveSessionDirectAdmitsPromptsAfterwards(t *testing.T) {
 
 	// Act.
 	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert.
 	if errors.Is(err, ErrHibernated) {
@@ -906,7 +906,7 @@ func parkDuringCompactionSubmit(t *testing.T, m *Manager, requestID, text string
 	c.onSubmit = func() {
 		once.Do(func() {
 			if err := m.SubmitPrompt(context.Background(), "ws", requestID, text, "",
-				corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+				protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 				t.Errorf("SubmitPrompt during the compaction submit: %v", err)
 				return
 			}
@@ -931,7 +931,7 @@ func TestPromptDuringAPendingCompactionIsAcceptedRatherThanNacked(t *testing.T) 
 
 	// Act.
 	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert.
 	if err != nil {
@@ -947,7 +947,7 @@ func TestPromptDuringAPendingCompactionIsParkedOnTheQueue(t *testing.T) {
 
 	// Act.
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -969,7 +969,7 @@ func TestARevivalParkedPromptIsStampedHold(t *testing.T) {
 
 	// Act.
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -998,7 +998,7 @@ func TestARevivalParkedPromptIsNeverClassified(t *testing.T) {
 
 	// Act.
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -1017,7 +1017,7 @@ func TestARevivalParkedPromptDoesNotReachTheShim(t *testing.T) {
 
 	// Act.
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -1036,7 +1036,7 @@ func TestALandedCompactionDeliversTheRevivalParkedPrompt(t *testing.T) {
 	m, _ := revivalParkRig(t)
 	signal := compactionWaiter(m, "ws")
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "released-by-compaction", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -1062,7 +1062,7 @@ func TestALandedCompactionEmptiesTheRevivalParkedQueue(t *testing.T) {
 	m, _ := revivalParkRig(t)
 	signal := compactionWaiter(m, "ws")
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "released-by-compaction", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -1159,7 +1159,7 @@ func TestAFailedGateReleaseDropsTheRevivalParkedPrompt(t *testing.T) {
 	m, hib := revivalParkRig(t)
 	signal := compactionWaiter(m, "ws")
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	hib.mu.Lock()
@@ -1183,7 +1183,7 @@ func TestForceIsRefusedForARevivalParkedPrompt(t *testing.T) {
 	// Arrange.
 	m, _ := revivalParkRig(t)
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	entries := revivalParkedEntries(m, "ws")
@@ -1207,7 +1207,7 @@ func TestCancelIsHonoredForARevivalParkedPrompt(t *testing.T) {
 	// Arrange.
 	m, _ := revivalParkRig(t)
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	entries := revivalParkedEntries(m, "ws")
@@ -1236,7 +1236,7 @@ func TestPromptOnAHibernatedSessionWithNoRevivalInFlightIsStillNacked(t *testing
 
 	// Act.
 	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert.
 	if !errors.Is(err, ErrHibernated) {
@@ -1252,7 +1252,7 @@ func TestPromptOnAHibernatedSessionWithNoRevivalInFlightParksNothing(t *testing.
 
 	// Act.
 	_ = m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert.
 	if entries := revivalParkedEntries(m, "ws"); len(entries) != 0 {
@@ -1274,7 +1274,7 @@ func TestARevivalClaimOverAnAwakeSessionParksNothing(t *testing.T) {
 
 	// Act.
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "ordinary", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -1327,7 +1327,7 @@ func newDyingControllerReviveRig(t *testing.T, cause string) (*Manager, *fakeHib
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 	hib.setAsleep("s1", registry.HibernationDetail{Cause: cause, SinceMs: 42})
 	return m, hib, runResult

@@ -3,8 +3,8 @@ package frontend
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -15,11 +15,11 @@ import (
 
 func TestContextClearedCuratesIntoItsArm(t *testing.T) {
 	// Arrange.
-	cleared := &corev1.ContextCleared{}
-	ev := &corev1.Event{
+	cleared := &protocolv1.ContextCleared{}
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 41, ProducedAtMs: producedMs,
 		RequestId: "req-7", DedupKey: "clear:u-1",
-		Payload: &corev1.Event_ContextCleared{ContextCleared: cleared},
+		Payload: &protocolv1.Event_ContextCleared{ContextCleared: cleared},
 	}
 
 	// Act.
@@ -44,16 +44,16 @@ func TestContextClearedCuratesIntoItsArm(t *testing.T) {
 
 func TestContextCompactedCuratesIntoItsArm(t *testing.T) {
 	// Arrange — the coalesced account, every field of which must survive.
-	compacted := &corev1.ContextCompacted{
-		Trigger:    corev1.ContextCompactTrigger_CONTEXT_COMPACT_TRIGGER_AUTO,
+	compacted := &protocolv1.ContextCompacted{
+		Trigger:    protocolv1.ContextCompactTrigger_CONTEXT_COMPACT_TRIGGER_AUTO,
 		PreTokens:  180000,
 		PostTokens: 24000,
 		DurationMs: 4200,
 		Summary:    "we were refactoring the curator",
 	}
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 88, ProducedAtMs: producedMs, DedupKey: "compact:b-1",
-		Payload: &corev1.Event_ContextCompacted{ContextCompacted: compacted},
+		Payload: &protocolv1.Event_ContextCompacted{ContextCompacted: compacted},
 	}
 
 	// Act.
@@ -77,10 +77,10 @@ func TestContextCompactedCuratesIntoItsArm(t *testing.T) {
 
 func TestClearCarriesTheEventEnvelopeOntoItsItem(t *testing.T) {
 	// Arrange — ts_ms draws the work and request_id correlates it.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 41, ProducedAtMs: producedMs, RequestId: "req-7",
 		DedupKey: "clear:u-1",
-		Payload:  &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}},
+		Payload:  &protocolv1.Event_ContextCleared{ContextCleared: &protocolv1.ContextCleared{}},
 	}
 
 	// Act.
@@ -97,9 +97,9 @@ func TestClearCarriesTheEventEnvelopeOntoItsItem(t *testing.T) {
 func TestClearThroughSeqIsTheEventSeq(t *testing.T) {
 	// Arrange — the frontend reconciles on through_seq, and the floor it will
 	// be replayed from next time is this very seq.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 41, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}},
+		Payload: &protocolv1.Event_ContextCleared{ContextCleared: &protocolv1.ContextCleared{}},
 	}
 
 	// Act.
@@ -114,9 +114,9 @@ func TestClearThroughSeqIsTheEventSeq(t *testing.T) {
 func TestClearUUIDIsTheDedupKey(t *testing.T) {
 	// Arrange — the dedup key is the only identity stable across replays, so a
 	// re-push REPLACES the item rather than accumulating a second work.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 41, DedupKey: "clear:u-1",
-		Payload: &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}},
+		Payload: &protocolv1.Event_ContextCleared{ContextCleared: &protocolv1.ContextCleared{}},
 	}
 
 	// Act.
@@ -130,9 +130,9 @@ func TestClearUUIDIsTheDedupKey(t *testing.T) {
 
 func TestCompactUUIDIsTheDedupKey(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 88, DedupKey: "compact:b-1",
-		Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{}},
+		Payload: &protocolv1.Event_ContextCompacted{ContextCompacted: &protocolv1.ContextCompacted{}},
 	}
 
 	// Act.
@@ -149,9 +149,9 @@ func TestClearWithoutADedupKeyDerivesAStableUUID(t *testing.T) {
 	// identity is then its store position, which is just as stable across
 	// replays. Dropping it would leave a frontend discarding its history at a
 	// floor it can show no reason for.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 41,
-		Payload: &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}},
+		Payload: &protocolv1.Event_ContextCleared{ContextCleared: &protocolv1.ContextCleared{}},
 	}
 
 	// Act.
@@ -166,9 +166,9 @@ func TestClearWithoutADedupKeyDerivesAStableUUID(t *testing.T) {
 func TestCompactWithoutADedupKeyDerivesACompactPrefixedUUID(t *testing.T) {
 	// Arrange — the derived form names WHICH of the two it is, matching the
 	// producer's own prefixes so the two id spaces can never overlap.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 41,
-		Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{}},
+		Payload: &protocolv1.Event_ContextCompacted{ContextCompacted: &protocolv1.ContextCompacted{}},
 	}
 
 	// Act.
@@ -182,9 +182,9 @@ func TestCompactWithoutADedupKeyDerivesACompactPrefixedUUID(t *testing.T) {
 
 func TestAClearArmWithNoMessageCuratesToNothing(t *testing.T) {
 	// Arrange — a set arm carrying a nil message is not a clear that happened.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 41,
-		Payload: &corev1.Event_ContextCleared{ContextCleared: nil},
+		Payload: &protocolv1.Event_ContextCleared{ContextCleared: nil},
 	}
 
 	// Act.
@@ -198,9 +198,9 @@ func TestAClearArmWithNoMessageCuratesToNothing(t *testing.T) {
 
 func TestACompactArmWithNoMessageCuratesToNothing(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 41,
-		Payload: &corev1.Event_ContextCompacted{ContextCompacted: nil},
+		Payload: &protocolv1.Event_ContextCompacted{ContextCompacted: nil},
 	}
 
 	// Act.

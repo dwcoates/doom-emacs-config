@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"claude-repld/internal/gitexec"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
@@ -561,7 +561,7 @@ type WorkspaceHealthProbe interface {
 // daemon-to-shim path is usable.
 type sessionControllerHealthProbe struct {
 	Controller interface {
-		Health(context.Context, string, string, string) (*corev1.HealthStatus, error)
+		Health(context.Context, string, string, string) (*protocolv1.HealthStatus, error)
 	}
 	Logf func(string, ...any)
 }

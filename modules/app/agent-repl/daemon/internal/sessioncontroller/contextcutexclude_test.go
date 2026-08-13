@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/daemonturn"
 )
@@ -95,7 +95,7 @@ func TestDaemonContextCutExclusionShowsTheIDLessCompactionDivider(t *testing.T) 
 	cd := excludeDelta(&frontendv1.Message{
 		Uuid: "d1",
 		Payload: &frontendv1.Message_ContextCompacted{
-			ContextCompacted: &corev1.ContextCompacted{},
+			ContextCompacted: &protocolv1.ContextCompacted{},
 		},
 	})
 

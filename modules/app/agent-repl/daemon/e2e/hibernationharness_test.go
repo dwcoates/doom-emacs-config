@@ -57,9 +57,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -342,7 +342,7 @@ func (s *keepAliveSession) awaitAwake(t *testing.T, seed ...*frontendv1.Frontend
 // about the daemon rather than about the frontend's exclusion rules.
 type storeTail struct {
 	conn   net.Conn
-	events chan *corev1.Event
+	events chan *protocolv1.Event
 
 	mu     sync.Mutex
 	failed error
@@ -357,12 +357,12 @@ func tailStore(t *testing.T, vendorSessionID string) *storeTail {
 		t.Fatalf("dial the store to tail %s: %v", vendorSessionID, err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	if err := wire.WriteAny(conn, &corev1.Subscribe{SessionId: vendorSessionID, FromSeq: 0}); err != nil {
+	if err := wire.WriteAny(conn, &protocolv1.Subscribe{SessionId: vendorSessionID, FromSeq: 0}); err != nil {
 		t.Fatalf("subscribe to %s: %v", vendorSessionID, err)
 	}
 	// Generously buffered: a tail that blocked would apply backpressure to the
 	// store and change the very timing the tests measure.
-	s := &storeTail{conn: conn, events: make(chan *corev1.Event, 1024)}
+	s := &storeTail{conn: conn, events: make(chan *protocolv1.Event, 1024)}
 	go s.read()
 	return s
 }
@@ -380,7 +380,7 @@ func (s *storeTail) read() {
 			close(s.events)
 			return
 		}
-		ev, ok := msg.(*corev1.Event)
+		ev, ok := msg.(*protocolv1.Event)
 		if !ok {
 			// The store writes a Heartbeat as its end-of-replay marker; anything
 			// else on this connection is not an observation.
@@ -391,7 +391,7 @@ func (s *storeTail) read() {
 }
 
 // await reads the subscription until an event satisfies match, and returns it.
-func (s *storeTail) await(t *testing.T, what string, match func(*corev1.Event) bool) *corev1.Event {
+func (s *storeTail) await(t *testing.T, what string, match func(*protocolv1.Event) bool) *protocolv1.Event {
 	t.Helper()
 	deadline := time.After(frameTimeout)
 	for {
@@ -422,9 +422,9 @@ func (s *storeTail) await(t *testing.T, what string, match func(*corev1.Event) b
 // been written necessarily precedes one written after it. Reading up to a later
 // event is therefore proof that a missing earlier one is absent rather than
 // merely late — which no amount of waiting could establish.
-func (s *storeTail) awaitSentinel(t *testing.T, what string, forbidden func(*corev1.Event) string, sentinel func(*corev1.Event) bool) {
+func (s *storeTail) awaitSentinel(t *testing.T, what string, forbidden func(*protocolv1.Event) string, sentinel func(*protocolv1.Event) bool) {
 	t.Helper()
-	s.await(t, what, func(ev *corev1.Event) bool {
+	s.await(t, what, func(ev *protocolv1.Event) bool {
 		if why := forbidden(ev); why != "" {
 			t.Fatalf("forbidden durable event: %s", why)
 		}
@@ -436,7 +436,7 @@ func (s *storeTail) awaitSentinel(t *testing.T, what string, forbidden func(*cor
 
 // turnStartOf returns the TurnStarted an event carries with the given prompt
 // origin, or nil.
-func turnStartOf(ev *corev1.Event, origin corev1.PromptOrigin) *corev1.TurnStarted {
+func turnStartOf(ev *protocolv1.Event, origin protocolv1.PromptOrigin) *protocolv1.TurnStarted {
 	started := ev.GetTurnStarted()
 	if started == nil || started.GetPromptOrigin() != origin {
 		return nil
@@ -445,24 +445,24 @@ func turnStartOf(ev *corev1.Event, origin corev1.PromptOrigin) *corev1.TurnStart
 }
 
 // keepAlivePing returns the TurnStarted of a cache keep-alive ping, or nil.
-func keepAlivePing(ev *corev1.Event) *corev1.TurnStarted {
-	return turnStartOf(ev, corev1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE)
+func keepAlivePing(ev *protocolv1.Event) *protocolv1.TurnStarted {
+	return turnStartOf(ev, protocolv1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE)
 }
 
 // userTurnStart returns the TurnStarted of an ordinary user prompt, or nil.
-func userTurnStart(ev *corev1.Event) *corev1.TurnStarted {
-	return turnStartOf(ev, corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+func userTurnStart(ev *protocolv1.Event) *protocolv1.TurnStarted {
+	return turnStartOf(ev, protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 }
 
 // turnEndedOf reports whether the event ends the named turn.
-func turnEndedOf(ev *corev1.Event, turnID string) bool {
+func turnEndedOf(ev *protocolv1.Event, turnID string) bool {
 	return ev.GetTurnEnded() != nil && ev.GetTurnEnded().GetTurnId() == turnID
 }
 
 // noKeepAlivePing is the forbidden-event predicate every "must not ping"
 // assertion is written with.
-func noKeepAlivePing(why string) func(*corev1.Event) string {
-	return func(ev *corev1.Event) string {
+func noKeepAlivePing(why string) func(*protocolv1.Event) string {
+	return func(ev *protocolv1.Event) string {
 		if ping := keepAlivePing(ev); ping != nil {
 			return fmt.Sprintf("a cache keep-alive ping (turn_id=%q, preview=%q) was submitted, but %s",
 				ping.GetTurnId(), ping.GetPromptPreview(), why)
@@ -738,7 +738,7 @@ func assistantFixtureText(content any) string {
 // transcript `assistant` line, mirroring sidecarUserLineEvent
 // (machinery_e2e_test.go): vendor Any carrying datav1.TranscriptLine, FILE
 // plane, PERSISTENT, dedup key left for the store to derive.
-func sidecarAssistantLineEvent(t *testing.T, vendorSessionID, lineUUID, text string) *corev1.Event {
+func sidecarAssistantLineEvent(t *testing.T, vendorSessionID, lineUUID, text string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.TranscriptLine{
 		Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
@@ -751,12 +751,12 @@ func sidecarAssistantLineEvent(t *testing.T, vendorSessionID, lineUUID, text str
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId:    vendorSessionID,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:        protocolv1.Plane_PLANE_FILE,
+		Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		ProducedAtMs: time.Now().UnixMilli(),
-		Payload:      &corev1.Event_Vendor{Vendor: a},
+		Payload:      &protocolv1.Event_Vendor{Vendor: a},
 	}
 }
 

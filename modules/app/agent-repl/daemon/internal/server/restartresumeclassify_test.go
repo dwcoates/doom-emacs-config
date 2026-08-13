@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // resumeDetail pulls the wire evidence off a classified error.

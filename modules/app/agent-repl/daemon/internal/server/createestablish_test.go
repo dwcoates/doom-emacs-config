@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/session"
@@ -38,7 +38,7 @@ type probeHealthRouter struct {
 	entered chan struct{}
 }
 
-func (r *probeHealthRouter) Health(ctx context.Context, workspace, sessionID, requestID string) (*corev1.HealthStatus, error) {
+func (r *probeHealthRouter) Health(ctx context.Context, workspace, sessionID, requestID string) (*protocolv1.HealthStatus, error) {
 	r.mu.Lock()
 	r.requests = append(r.requests, requestID)
 	gate := r.gate
@@ -60,7 +60,7 @@ func (r *probeHealthRouter) Health(ctx context.Context, workspace, sessionID, re
 	if r.answerID != "" {
 		id = r.answerID
 	}
-	return &corev1.HealthStatus{RequestId: id, Healthy: r.healthy, Component: r.component, Reason: r.reason}, nil
+	return &protocolv1.HealthStatus{RequestId: id, Healthy: r.healthy, Component: r.component, Reason: r.reason}, nil
 }
 
 func (r *probeHealthRouter) probeCount() int {

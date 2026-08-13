@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // THE MARKER IS THE INVISIBILITY THAT SURVIVES THE STORE.

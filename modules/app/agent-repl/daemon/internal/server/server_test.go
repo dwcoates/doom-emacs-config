@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -35,7 +35,7 @@ import (
 
 type discardFileDiagnosticPersister struct{}
 
-func (discardFileDiagnosticPersister) PersistFileDiagnostic(string, string, *corev1.Event, *corev1.FilePlaneDiagnostic) error {
+func (discardFileDiagnosticPersister) PersistFileDiagnostic(string, string, *protocolv1.Event, *protocolv1.FilePlaneDiagnostic) error {
 	return nil
 }
 
@@ -121,7 +121,7 @@ func (f *fakeSpawner) stoppedIDs() []string {
 // real shim, so nothing ever dials in.
 type stubConnSource struct{}
 
-func (stubConnSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.ShimHello, error) {
+func (stubConnSource) Next(ctx context.Context, _ string) (net.Conn, *protocolv1.ShimHello, error) {
 	<-ctx.Done()
 	return nil, nil, ctx.Err()
 }
@@ -304,11 +304,11 @@ func markControllerOperational(t testing.TB, h *harness, workspace string) {
 		t.Fatalf("Composite(%s) = (%+v, %t, %v), want connecting controller",
 			workspace, state, found, err)
 	}
-	if err := h.ssm.Apply(&corev1.Event{
+	if err := h.ssm.Apply(&protocolv1.Event{
 		SessionId: state.AgentReplSessionID,
 		Seq:       1,
-		Payload: &corev1.Event_SessionStarted{
-			SessionStarted: &corev1.SessionStarted{},
+		Payload: &protocolv1.Event_SessionStarted{
+			SessionStarted: &protocolv1.SessionStarted{},
 		},
 	}); err != nil {
 		t.Fatalf("Apply SessionStarted(%s): %v", workspace, err)
@@ -986,12 +986,12 @@ func TestAccountSwitchGuardsTurnActive(t *testing.T) {
 	h := newHarnessWith(t, Config{Accounts: accountRoster()})
 	id := createSession(t, h, `{"cwd":"/w"}`)
 	markControllerOperational(t, h, "/w")
-	if _, err := h.ssm.ApplyTurnBoundary("/w", id, "", &corev1.Event{
+	if _, err := h.ssm.ApplyTurnBoundary("/w", id, "", &protocolv1.Event{
 		SessionId: id,
 		Seq:       2,
-		Plane:     corev1.Plane_PLANE_STREAM,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
 		RequestId: "turn-1",
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{
 			PromptPreview: "go",
 			TurnId:        "turn-1",
 		}},

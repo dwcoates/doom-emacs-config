@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/shimclient"
 )
@@ -56,7 +56,7 @@ type failingClient struct {
 	err error
 }
 
-func (c *failingClient) SubmitPrompt(_ context.Context, _, _, _, _ string, _ corev1.PromptOrigin) error {
+func (c *failingClient) SubmitPrompt(_ context.Context, _, _, _, _ string, _ protocolv1.PromptOrigin) error {
 	return c.err
 }
 func (c *failingClient) SetModel(_ context.Context, _ string) (string, error) { return "", c.err }
@@ -875,7 +875,7 @@ func TestAFailedInterjectStopDropsTheHeadJumpClaim(t *testing.T) {
 	// Arrange.
 	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictInterject}}
 	h := newQueueHarness(t, cls)
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
 	h.turn(true)
 
 	// Act.
@@ -1202,7 +1202,7 @@ func TestQueueEntryIDsAreUnique(t *testing.T) {
 }
 
 // unusedCoreImport keeps corev1 referenced if a future test drops its last use.
-var _ = corev1.Event{}
+var _ = protocolv1.Event{}
 
 // --- the moot-path race ------------------------------------------------------
 
@@ -1383,7 +1383,7 @@ func TestPingTurnEndTransfersItsClaimToTheRewind(t *testing.T) {
 		t.Fatalf("SubmitKeepAlivePing: %v", err)
 	}
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "real work", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	m.mu.Lock()
@@ -1943,7 +1943,7 @@ func TestAnUnknownFateRedeliveryReconcilesBeforeResubmitting(t *testing.T) {
 			})
 			if tc.claimLanded {
 				if _, err := h.applier.ApplyTurnBoundary("ws", "s1", "",
-					turnStartEvent(corev1.Plane_PLANE_STREAM, 41, requestID)); err != nil {
+					turnStartEvent(protocolv1.Plane_PLANE_STREAM, 41, requestID)); err != nil {
 					t.Fatalf("record the landed turn: %v", err)
 				}
 			}

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/shim"
@@ -32,28 +32,28 @@ import (
 // be asserting the roll of a shim whose async work was never established
 // (asyncrefresh.go). Every test that means "a settled shim rolls now" says so
 // with this.
-func settledHello(build string) *corev1.ShimHello {
-	return &corev1.ShimHello{
+func settledHello(build string) *protocolv1.ShimHello {
+	return &protocolv1.ShimHello{
 		SessionId:   "s1",
 		BuildSha:    build,
-		LiveTaskSet: &corev1.LiveTaskSet{},
+		LiveTaskSet: &protocolv1.LiveTaskSet{},
 	}
 }
 
 // asyncBusyHello is the handshake of a shim with NO turn running but detached
 // work still going — the exact shape that used to read as idle.
-func asyncBusyHello(build string, taskIDs ...string) *corev1.ShimHello {
-	return &corev1.ShimHello{
+func asyncBusyHello(build string, taskIDs ...string) *protocolv1.ShimHello {
+	return &protocolv1.ShimHello{
 		SessionId:   "s1",
 		BuildSha:    build,
-		LiveTaskSet: &corev1.LiveTaskSet{TaskIds: taskIDs},
+		LiveTaskSet: &protocolv1.LiveTaskSet{TaskIds: taskIDs},
 	}
 }
 
 // unansweredHello is the handshake of a bundle built before live_task_set
 // existed: no set at all, which is silence rather than an all-clear.
-func unansweredHello(build string) *corev1.ShimHello {
-	return &corev1.ShimHello{SessionId: "s1", BuildSha: build}
+func unansweredHello(build string) *protocolv1.ShimHello {
+	return &protocolv1.ShimHello{SessionId: "s1", BuildSha: build}
 }
 
 // newRefreshRig builds a manager whose current bundle identity is `current`.
@@ -302,7 +302,7 @@ func TestHealthFollowsTheIntentionalStaleBuildReplacement(t *testing.T) {
 
 	// Act.
 	type answer struct {
-		status *corev1.HealthStatus
+		status *protocolv1.HealthStatus
 		err    error
 	}
 	done := make(chan answer, 1)
@@ -584,7 +584,7 @@ func TestRestartSessionCarriesTheAnnouncedPidToTheStop(t *testing.T) {
 	if err := m.Ensure("ws"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	m.onHandshake("ws", "s1", &corev1.ShimHello{Pid: 4242, QueryInstanceId: "query-build-refresh"})
+	m.onHandshake("ws", "s1", &protocolv1.ShimHello{Pid: 4242, QueryInstanceId: "query-build-refresh"})
 
 	// Act.
 	if err := m.RestartSession(context.Background(), "ws"); err != nil {
@@ -606,10 +606,10 @@ func TestAHelloWithoutAPidRecordsNone(t *testing.T) {
 	if err := m.Ensure("ws"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	m.onHandshake("ws", "s1", &corev1.ShimHello{Pid: 7, QueryInstanceId: "query-build-refresh"})
+	m.onHandshake("ws", "s1", &protocolv1.ShimHello{Pid: 7, QueryInstanceId: "query-build-refresh"})
 
 	// Act — a later hello (a reconnect from a build that does not report one).
-	m.onHandshake("ws", "s1", &corev1.ShimHello{QueryInstanceId: "query-build-refresh"})
+	m.onHandshake("ws", "s1", &protocolv1.ShimHello{QueryInstanceId: "query-build-refresh"})
 
 	// Assert.
 	if got := m.shimPIDFor("s1"); got != 0 {
@@ -626,7 +626,7 @@ func TestLiveShimPIDsNamesEverySessionsShim(t *testing.T) {
 	if err := m.Ensure("ws"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	m.onHandshake("ws", "s1", &corev1.ShimHello{Pid: 27494, QueryInstanceId: "query-build-refresh"})
+	m.onHandshake("ws", "s1", &protocolv1.ShimHello{Pid: 27494, QueryInstanceId: "query-build-refresh"})
 
 	// Act.
 	pids := m.LiveShimPIDs()
@@ -672,7 +672,7 @@ func TestShimStopIsDeclinedForAProvenCurrentBundle(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{SessionId: "s1", BuildSha: "sha-current"})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{SessionId: "s1", BuildSha: "sha-current"})
 
 	// Act.
 	stop, reported, want := m.ShimStopWouldFixTheBundle("s1")
@@ -692,7 +692,7 @@ func TestShimStopIsIssuedForASupersededBundle(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{SessionId: "s1", BuildSha: "sha-old"})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{SessionId: "s1", BuildSha: "sha-old"})
 
 	// Act.
 	stop, reported, want := m.ShimStopWouldFixTheBundle("s1")
@@ -726,7 +726,7 @@ func TestShimStopIsIssuedWhenAnIdentityCannotBeRead(t *testing.T) {
 				t.Fatalf("Ensure: %v", err)
 			}
 			waitForWirings(applier, 1)
-			m.onConnected("ws", "s1", &corev1.ShimHello{SessionId: "s1", BuildSha: tc.reported})
+			m.onConnected("ws", "s1", &protocolv1.ShimHello{SessionId: "s1", BuildSha: tc.reported})
 
 			// Act.
 			stop, _, _ := m.ShimStopWouldFixTheBundle("s1")
@@ -770,7 +770,7 @@ func TestShimStopIsIssuedForASessionThatNeverHandshaked(t *testing.T) {
 func TestAnnouncedAsyncWorkIsClassifiedIntoThreeAnswers(t *testing.T) {
 	tests := []struct {
 		name  string
-		hello *corev1.ShimHello
+		hello *protocolv1.ShimHello
 		want  asyncWorkVerdict
 	}{
 		{

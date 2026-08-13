@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 )
 
@@ -17,13 +17,13 @@ import (
 type pageRig struct {
 	client   *Client
 	stop     func()
-	requests chan *corev1.MessagePageRequest
+	requests chan *protocolv1.MessagePageRequest
 }
 
-func newPageRig(t *testing.T, serve func(conn net.Conn, req *corev1.MessagePageRequest)) *pageRig {
+func newPageRig(t *testing.T, serve func(conn net.Conn, req *protocolv1.MessagePageRequest)) *pageRig {
 	t.Helper()
 	h := newHarness()
-	requests := make(chan *corev1.MessagePageRequest, 8)
+	requests := make(chan *protocolv1.MessagePageRequest, 8)
 	path := startFakeShim(t, func(conn net.Conn) {
 		fakeServerHandshake(t, conn, "s1", "1", false)
 		for {
@@ -31,7 +31,7 @@ func newPageRig(t *testing.T, serve func(conn net.Conn, req *corev1.MessagePageR
 			if err != nil {
 				return
 			}
-			req, ok := m.(*corev1.MessagePageRequest)
+			req, ok := m.(*protocolv1.MessagePageRequest)
 			if !ok {
 				continue // heartbeats and control traffic: not this test's business
 			}
@@ -60,10 +60,10 @@ func newPageRig(t *testing.T, serve func(conn net.Conn, req *corev1.MessagePageR
 func TestAMessagePageRequestCarriesTheHeadAnchor(t *testing.T) {
 	// Arrange — the head is a fact the serving side resolves. A daemon that
 	// named a seq for it would be authoring the position this contract removes.
-	rig := newPageRig(t, func(conn net.Conn, req *corev1.MessagePageRequest) {
-		mustWriteMsg(t, conn, &corev1.MessagePage{
+	rig := newPageRig(t, func(conn net.Conn, req *protocolv1.MessagePageRequest) {
+		mustWriteMsg(t, conn, &protocolv1.MessagePage{
 			RequestId: req.GetRequestId(),
-			Boundary:  &corev1.MessagePage_Floor{Floor: &corev1.HistoryAtRetainedFloor{}},
+			Boundary:  &protocolv1.MessagePage_Floor{Floor: &protocolv1.HistoryAtRetainedFloor{}},
 		})
 	})
 
@@ -86,10 +86,10 @@ func TestAMessagePageRequestCarriesTheHeadAnchor(t *testing.T) {
 func TestAMessagePageRequestCarriesABeforeSeqAnchorVerbatim(t *testing.T) {
 	// Arrange — a continuation names a place the caller has demonstrably been,
 	// and the value travels untouched.
-	rig := newPageRig(t, func(conn net.Conn, req *corev1.MessagePageRequest) {
-		mustWriteMsg(t, conn, &corev1.MessagePage{
+	rig := newPageRig(t, func(conn net.Conn, req *protocolv1.MessagePageRequest) {
+		mustWriteMsg(t, conn, &protocolv1.MessagePage{
 			RequestId: req.GetRequestId(),
-			Boundary:  &corev1.MessagePage_More{More: &corev1.HistoryRemainsBelow{}},
+			Boundary:  &protocolv1.MessagePage_More{More: &protocolv1.HistoryRemainsBelow{}},
 		})
 	})
 
@@ -111,11 +111,11 @@ func TestAMessagePageRequestCarriesABeforeSeqAnchorVerbatim(t *testing.T) {
 
 func TestAMessagePageIsReturnedToItsRequester(t *testing.T) {
 	// Arrange.
-	rig := newPageRig(t, func(conn net.Conn, req *corev1.MessagePageRequest) {
-		mustWriteMsg(t, conn, &corev1.MessagePage{
+	rig := newPageRig(t, func(conn net.Conn, req *protocolv1.MessagePageRequest) {
+		mustWriteMsg(t, conn, &protocolv1.MessagePage{
 			RequestId:   req.GetRequestId(),
 			LastPageSeq: 77,
-			Boundary:    &corev1.MessagePage_More{More: &corev1.HistoryRemainsBelow{}},
+			Boundary:    &protocolv1.MessagePage_More{More: &protocolv1.HistoryRemainsBelow{}},
 		})
 	})
 
@@ -135,8 +135,8 @@ func TestANackOnThePageRequestIdIsAFailureAndNotAnEmptyPage(t *testing.T) {
 	// Arrange — THE failure arm. The shim reports every page failure as a Nack
 	// bearing the page's own request id; read as an empty page it would be
 	// indistinguishable from a conversation with no history.
-	rig := newPageRig(t, func(conn net.Conn, req *corev1.MessagePageRequest) {
-		mustWriteMsg(t, conn, &corev1.Nack{RequestId: req.GetRequestId(), Reason: "store unreachable"})
+	rig := newPageRig(t, func(conn net.Conn, req *protocolv1.MessagePageRequest) {
+		mustWriteMsg(t, conn, &protocolv1.Nack{RequestId: req.GetRequestId(), Reason: "store unreachable"})
 	})
 
 	// Act.

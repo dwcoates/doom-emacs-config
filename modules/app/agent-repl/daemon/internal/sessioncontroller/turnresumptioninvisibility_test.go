@@ -3,7 +3,7 @@ package sessioncontroller
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/frontend"
 )
@@ -21,7 +21,7 @@ import (
 
 // markedTranscriptEvent is the durable transcript line of one re-drive, as the
 // file plane delivers it: the marked text, and no request id anywhere.
-func markedTranscriptEvent(t *testing.T, seq uint64, uuid, requestID string) *corev1.Event {
+func markedTranscriptEvent(t *testing.T, seq uint64, uuid, requestID string) *protocolv1.Event {
 	t.Helper()
 	return transcriptUserEvent(t, seq, uuid,
 		frontend.MarkInternalResumeInstruction(requestID, resumptionInstruction))

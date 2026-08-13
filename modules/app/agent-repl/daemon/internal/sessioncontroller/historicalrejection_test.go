@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // The defect these tests pin: a durable row written by a RETIRED query carried a
@@ -22,7 +22,7 @@ import (
 func rejectingConsumer(t *testing.T, logs *levelSplitLogs) *consumer {
 	t.Helper()
 	c := degradedAccountingConsumer(logs)
-	if err := c.accounting.bindHandshakeIdentity(&corev1.ShimHello{
+	if err := c.accounting.bindHandshakeIdentity(&protocolv1.ShimHello{
 		QueryInstanceId: "live-query",
 		QueryCreatedSeq: 100,
 		VendorSessionId: "vendor-session",
@@ -35,7 +35,7 @@ func rejectingConsumer(t *testing.T, logs *levelSplitLogs) *consumer {
 
 // blankModelUtilizationEvent is a stream response whose token utilization names
 // no model, stamped as produced by ENVELOPEQUERY. It is the seq-182 row's shape.
-func blankModelUtilizationEvent(t *testing.T, envelopeQuery string) *corev1.Event {
+func blankModelUtilizationEvent(t *testing.T, envelopeQuery string) *protocolv1.Event {
 	t.Helper()
 	ev := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{
 		Id:      "c18f98fa",
@@ -43,7 +43,7 @@ func blankModelUtilizationEvent(t *testing.T, envelopeQuery string) *corev1.Even
 		Usage:   &datav1.ApiUsage{InputTokens: 1},
 		Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "response"}}}},
 	}}}})
-	ev.Seq, ev.Plane = 182, corev1.Plane_PLANE_STREAM
+	ev.Seq, ev.Plane = 182, protocolv1.Plane_PLANE_STREAM
 	ev.QueryInstanceId = envelopeQuery
 	return ev
 }
@@ -89,7 +89,7 @@ func TestRejectionIsHistoricalReadsTheEnvelopeWithNoObservationPayload(t *testin
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange -- a utilization-only event: no AccountUsageObservation at all.
 			r := boundReducer(t)
-			ev := &corev1.Event{Seq: 182, QueryInstanceId: tt.envelopeQuery}
+			ev := &protocolv1.Event{Seq: 182, QueryInstanceId: tt.envelopeQuery}
 
 			// Act
 			got := rejectionIsHistorical(r, ev)

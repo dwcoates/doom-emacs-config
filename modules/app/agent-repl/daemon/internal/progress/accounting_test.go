@@ -4,16 +4,16 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
+	statev1 "agentrepl/proto/state/v1"
 )
 
 // availableUsage is a boundary observation that measured the account.
-func availableUsage(percent float64) *corev1.AccountUsageObservation {
-	return &corev1.AccountUsageObservation{
-		Outcome: &corev1.AccountUsageObservation_Available{
-			Available: &corev1.AccountUsageAvailable{
-				FiveHour: &corev1.UsageWindow{UtilizationPercent: percent},
+func availableUsage(percent float64) *protocolv1.AccountUsageObservation {
+	return &protocolv1.AccountUsageObservation{
+		Outcome: &protocolv1.AccountUsageObservation_Available{
+			Available: &protocolv1.AccountUsageAvailable{
+				FiveHour: &protocolv1.UsageWindow{UtilizationPercent: percent},
 			},
 		},
 	}
@@ -21,12 +21,12 @@ func availableUsage(percent float64) *corev1.AccountUsageObservation {
 
 // unavailableUsage is a boundary observation that SETTLED by stating why it
 // could not measure — a different thing from one that never finished.
-func unavailableUsage() *corev1.AccountUsageObservation {
-	return &corev1.AccountUsageObservation{
-		Outcome: &corev1.AccountUsageObservation_Unavailable{
-			Unavailable: &corev1.AccountUsageUnavailable{
-				Reason: &corev1.AccountUsageUnavailable_ServiceUnavailable{
-					ServiceUnavailable: &corev1.UsageServiceUnavailable{},
+func unavailableUsage() *protocolv1.AccountUsageObservation {
+	return &protocolv1.AccountUsageObservation{
+		Outcome: &protocolv1.AccountUsageObservation_Unavailable{
+			Unavailable: &protocolv1.AccountUsageUnavailable{
+				Reason: &protocolv1.AccountUsageUnavailable_ServiceUnavailable{
+					ServiceUnavailable: &protocolv1.UsageServiceUnavailable{},
 				},
 			},
 		},
@@ -34,32 +34,32 @@ func unavailableUsage() *corev1.AccountUsageObservation {
 }
 
 // completeAccounting is a turn with every fragment the full summary needs.
-func completeAccounting() *frontendv1.TurnAccounting {
-	return &frontendv1.TurnAccounting{
+func completeAccounting() *statev1.TurnAccounting {
+	return &statev1.TurnAccounting{
 		TurnId:  "t1",
-		Runtime: &corev1.QueryRuntimeIdentity{},
-		Timing: &frontendv1.TurnAccountingTiming{
+		Runtime: &protocolv1.QueryRuntimeIdentity{},
+		Timing: &statev1.TurnAccountingTiming{
 			PromptToResultMs: 10_000,
 		},
 		UsageAtStart: availableUsage(10),
 		UsageAtEnd:   availableUsage(12.5),
-		Reconciliation: &frontendv1.TokenUsageReconciliation{
-			ResponseAllAgents: &frontendv1.TokenUsageTotals{
+		Reconciliation: &statev1.TokenUsageReconciliation{
+			ResponseAllAgents: &statev1.TokenUsageTotals{
 				InputTokens:              1234,
 				OutputTokens:             500,
 				CacheReadInputTokens:     8910,
 				CacheCreationInputTokens: 1112,
-				CacheRates:               &frontendv1.TokenCacheRates{CacheHitRate: 0.881},
+				CacheRates:               &statev1.TokenCacheRates{CacheHitRate: 0.881},
 			},
 		},
-		Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+		Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}},
 	}
 }
 
-func invalidWith(problem *frontendv1.TurnAccountingProblem) *frontendv1.TurnAccounting {
+func invalidWith(problem *statev1.TurnAccountingProblem) *statev1.TurnAccounting {
 	a := completeAccounting()
-	a.Verdict = &frontendv1.TurnAccounting_Invalid{
-		Invalid: &frontendv1.TurnAccountingInvalid{Problems: []*frontendv1.TurnAccountingProblem{problem}},
+	a.Verdict = &statev1.TurnAccounting_Invalid{
+		Invalid: &statev1.TurnAccountingInvalid{Problems: []*statev1.TurnAccountingProblem{problem}},
 	}
 	return a
 }
@@ -187,7 +187,7 @@ func TestAnIncompleteVerdictNamesWhatIsMissing(t *testing.T) {
 func TestAnUnfinishedUsageSampleIsMissingEvidence(t *testing.T) {
 	// Arrange — an observation with neither outcome arm never settled.
 	a := completeAccounting()
-	a.UsageAtEnd = &corev1.AccountUsageObservation{}
+	a.UsageAtEnd = &protocolv1.AccountUsageObservation{}
 	// Act.
 	got := AccountingCell(a)
 	// Assert.
@@ -199,9 +199,9 @@ func TestAnUnfinishedUsageSampleIsMissingEvidence(t *testing.T) {
 func TestAnInvalidVerdictOutranksMissingEvidence(t *testing.T) {
 	// Arrange — the evidence is present and does not add up, which is a
 	// different claim from an absence.
-	a := invalidWith(&frontendv1.TurnAccountingProblem{
-		Problem: &frontendv1.TurnAccountingProblem_TokenLedgerMismatch{
-			TokenLedgerMismatch: &frontendv1.TokenLedgerMismatch{DifferingFieldPaths: []string{"usage.output_tokens"}},
+	a := invalidWith(&statev1.TurnAccountingProblem{
+		Problem: &statev1.TurnAccountingProblem_TokenLedgerMismatch{
+			TokenLedgerMismatch: &statev1.TokenLedgerMismatch{DifferingFieldPaths: []string{"usage.output_tokens"}},
 		},
 	})
 	a.Timing = nil
@@ -215,9 +215,9 @@ func TestAnInvalidVerdictOutranksMissingEvidence(t *testing.T) {
 
 func TestAnInvalidVerdictNamesTheContradictingFieldPaths(t *testing.T) {
 	// Arrange.
-	a := invalidWith(&frontendv1.TurnAccountingProblem{
-		Problem: &frontendv1.TurnAccountingProblem_TokenLedgerMismatch{
-			TokenLedgerMismatch: &frontendv1.TokenLedgerMismatch{DifferingFieldPaths: []string{"usage.output_tokens"}},
+	a := invalidWith(&statev1.TurnAccountingProblem{
+		Problem: &statev1.TurnAccountingProblem_TokenLedgerMismatch{
+			TokenLedgerMismatch: &statev1.TokenLedgerMismatch{DifferingFieldPaths: []string{"usage.output_tokens"}},
 		},
 	})
 	// Act.
@@ -230,10 +230,10 @@ func TestAnInvalidVerdictNamesTheContradictingFieldPaths(t *testing.T) {
 
 func TestAMissingTurnStartBoundaryIsNamedAsSuch(t *testing.T) {
 	// Arrange.
-	a := invalidWith(&frontendv1.TurnAccountingProblem{
-		Problem: &frontendv1.TurnAccountingProblem_MissingUsageBoundary{
-			MissingUsageBoundary: &frontendv1.MissingUsageBoundary{
-				Boundary: &frontendv1.MissingUsageBoundary_TurnStart{TurnStart: &frontendv1.MissingUsageBoundaryTurnStart{}},
+	a := invalidWith(&statev1.TurnAccountingProblem{
+		Problem: &statev1.TurnAccountingProblem_MissingUsageBoundary{
+			MissingUsageBoundary: &statev1.MissingUsageBoundary{
+				Boundary: &statev1.MissingUsageBoundary_TurnStart{TurnStart: &statev1.MissingUsageBoundaryTurnStart{}},
 			},
 		},
 	})
@@ -247,11 +247,11 @@ func TestAMissingTurnStartBoundaryIsNamedAsSuch(t *testing.T) {
 
 func TestAMissingPersistenceReceiptNamesItsTurn(t *testing.T) {
 	// Arrange.
-	a := invalidWith(&frontendv1.TurnAccountingProblem{
-		Problem: &frontendv1.TurnAccountingProblem_TelemetryRecordMissing{
-			TelemetryRecordMissing: &frontendv1.TelemetryRecordMissing{
-				Record: &frontendv1.TelemetryRecordMissing_PersistenceReceipt{
-					PersistenceReceipt: &frontendv1.TelemetryRecordMissingPersistenceReceipt{TurnId: "t9"},
+	a := invalidWith(&statev1.TurnAccountingProblem{
+		Problem: &statev1.TurnAccountingProblem_TelemetryRecordMissing{
+			TelemetryRecordMissing: &statev1.TelemetryRecordMissing{
+				Record: &statev1.TelemetryRecordMissing_PersistenceReceipt{
+					PersistenceReceipt: &statev1.TelemetryRecordMissingPersistenceReceipt{TurnId: "t9"},
 				},
 			},
 		},
@@ -266,7 +266,7 @@ func TestAMissingPersistenceReceiptNamesItsTurn(t *testing.T) {
 
 func TestAProblemWithNoArmIsReportedRatherThanDropped(t *testing.T) {
 	// Arrange — dropping it would leave the verdict shorter than its evidence.
-	a := invalidWith(&frontendv1.TurnAccountingProblem{})
+	a := invalidWith(&statev1.TurnAccountingProblem{})
 	// Act.
 	got := AccountingCell(a)
 	// Assert.
@@ -278,7 +278,7 @@ func TestAProblemWithNoArmIsReportedRatherThanDropped(t *testing.T) {
 func TestAnInvalidVerdictWithNoProblemsStillSaysSomething(t *testing.T) {
 	// Arrange — "invalid with nothing to say" is what the arms make unrenderable.
 	a := completeAccounting()
-	a.Verdict = &frontendv1.TurnAccounting_Invalid{Invalid: &frontendv1.TurnAccountingInvalid{}}
+	a.Verdict = &statev1.TurnAccounting_Invalid{Invalid: &statev1.TurnAccountingInvalid{}}
 	// Act.
 	got := AccountingCell(a)
 	// Assert.
@@ -290,9 +290,9 @@ func TestAnInvalidVerdictWithNoProblemsStillSaysSomething(t *testing.T) {
 func TestASubagentResponseIsCountedInTheSummary(t *testing.T) {
 	// Arrange.
 	a := completeAccounting()
-	a.Responses = []*frontendv1.TokenUtilization{{
-		Actor: &frontendv1.TokenUtilization_Subagent{
-			Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "a1"},
+	a.Responses = []*statev1.TokenUtilization{{
+		Actor: &statev1.TokenUtilization_Subagent{
+			Subagent: &statev1.TokenUtilizationSubagent{AgentId: "a1"},
 		},
 	}}
 	// Act.
@@ -306,8 +306,8 @@ func TestASubagentResponseIsCountedInTheSummary(t *testing.T) {
 func TestAMainAgentResponseIsNotCountedAsASubagent(t *testing.T) {
 	// Arrange.
 	a := completeAccounting()
-	a.Responses = []*frontendv1.TokenUtilization{{
-		Actor: &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}},
+	a.Responses = []*statev1.TokenUtilization{{
+		Actor: &statev1.TokenUtilization_MainAgent{MainAgent: &statev1.TokenUtilizationMainAgent{}},
 	}}
 	// Act.
 	got := AccountingCell(a)
@@ -338,9 +338,9 @@ func TestARepeatedUnmodeledPathIsFoldedIntoOneCountedPhrase(t *testing.T) {
 	for i := range paths {
 		paths[i] = "iterations.0"
 	}
-	a := invalidWith(&frontendv1.TurnAccountingProblem{
-		Problem: &frontendv1.TurnAccountingProblem_UnmodeledUsageFields{
-			UnmodeledUsageFields: &frontendv1.UnmodeledUsageFields{SourceFieldPaths: paths},
+	a := invalidWith(&statev1.TurnAccountingProblem{
+		Problem: &statev1.TurnAccountingProblem_UnmodeledUsageFields{
+			UnmodeledUsageFields: &statev1.UnmodeledUsageFields{SourceFieldPaths: paths},
 		},
 	})
 	// Act.
@@ -355,9 +355,9 @@ func TestARepeatedUnmodeledPathIsFoldedIntoOneCountedPhrase(t *testing.T) {
 // phrase unchanged: a count of one states nothing the path did not.
 func TestADistinctPathIsNamedWithoutACount(t *testing.T) {
 	// Arrange.
-	a := invalidWith(&frontendv1.TurnAccountingProblem{
-		Problem: &frontendv1.TurnAccountingProblem_UnmodeledUsageFields{
-			UnmodeledUsageFields: &frontendv1.UnmodeledUsageFields{SourceFieldPaths: []string{"iterations.0"}},
+	a := invalidWith(&statev1.TurnAccountingProblem{
+		Problem: &statev1.TurnAccountingProblem_UnmodeledUsageFields{
+			UnmodeledUsageFields: &statev1.UnmodeledUsageFields{SourceFieldPaths: []string{"iterations.0"}},
 		},
 	})
 	// Act.
@@ -372,9 +372,9 @@ func TestADistinctPathIsNamedWithoutACount(t *testing.T) {
 // phrase into a map's iteration order.
 func TestFoldedPathsKeepFirstAppearanceOrder(t *testing.T) {
 	// Arrange.
-	a := invalidWith(&frontendv1.TurnAccountingProblem{
-		Problem: &frontendv1.TurnAccountingProblem_TokenLedgerMismatch{
-			TokenLedgerMismatch: &frontendv1.TokenLedgerMismatch{DifferingFieldPaths: []string{"zeta", "alpha", "zeta"}},
+	a := invalidWith(&statev1.TurnAccountingProblem{
+		Problem: &statev1.TurnAccountingProblem_TokenLedgerMismatch{
+			TokenLedgerMismatch: &statev1.TokenLedgerMismatch{DifferingFieldPaths: []string{"zeta", "alpha", "zeta"}},
 		},
 	})
 	// Act.
@@ -389,9 +389,9 @@ func TestFoldedPathsKeepFirstAppearanceOrder(t *testing.T) {
 // rule: the fold is the CELL's, and the evidence behind it stays complete.
 func TestTheRecordsOwnPathListIsNotDeduplicated(t *testing.T) {
 	// Arrange.
-	problem := &frontendv1.TurnAccountingProblem{
-		Problem: &frontendv1.TurnAccountingProblem_UnmodeledUsageFields{
-			UnmodeledUsageFields: &frontendv1.UnmodeledUsageFields{SourceFieldPaths: []string{"iterations.0", "iterations.0"}},
+	problem := &statev1.TurnAccountingProblem{
+		Problem: &statev1.TurnAccountingProblem_UnmodeledUsageFields{
+			UnmodeledUsageFields: &statev1.UnmodeledUsageFields{SourceFieldPaths: []string{"iterations.0", "iterations.0"}},
 		},
 	}
 	a := invalidWith(problem)

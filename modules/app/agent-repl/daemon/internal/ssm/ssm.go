@@ -8,11 +8,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/workspace/merge"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -472,7 +472,7 @@ func (m *Manager) nextAt() int64 {
 // started/ended (live-task counting), degraded state (extension). Applying
 // the same event twice (same session+seq) is a no-op. Ephemeral and
 // unmodeled payloads are ignored but loud-logged — never silently dropped.
-func (m *Manager) Apply(ev *corev1.Event) error {
+func (m *Manager) Apply(ev *protocolv1.Event) error {
 	if ev == nil {
 		return fmt.Errorf("ssm: Apply got a nil event")
 	}
@@ -481,7 +481,7 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 		return fmt.Errorf("ssm: Apply got an event with no session_id (seq %d)", ev.GetSeq())
 	}
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_TurnStarted, *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnStarted, *protocolv1.Event_TurnEnded:
 		// THE ENFORCEMENT RUNG, and the reason turn liveness has exactly one
 		// answer. Apply is the general door every lifecycle event comes
 		// through, and it used to fold turn boundaries into the session-status
@@ -507,7 +507,7 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 			sid, ev.GetSeq(), payloadKind(ev), ev.GetPlane().String(),
 			turnCorrelation(ev), ev.GetRequestId(), ev.GetDedupKey(), err)
 		return err
-	case *corev1.Event_TurnClaimBridge:
+	case *protocolv1.Event_TurnClaimBridge:
 		return fmt.Errorf("ssm: TurnClaimBridge must use the durable turn-claim ledger, never Apply (session=%s seq=%d turn_id=%q)",
 			sid, ev.GetSeq(), ev.GetTurnClaimBridge().GetTurnId())
 	}
@@ -561,7 +561,7 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 		m.logf("ssm: duplicate event skipped kind=%s session=%s seq=%d ws=%s", causeKind, sid, ev.GetSeq(), ws)
 		return nil
 	}
-	if _, started := ev.GetPayload().(*corev1.Event_TurnStarted); started {
+	if _, started := ev.GetPayload().(*protocolv1.Event_TurnStarted); started {
 		if err := m.rejectStartDuringHibernationLocked(ws, "TurnStarted apply"); err != nil {
 			return err
 		}
@@ -633,14 +633,14 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 	// simply stops reporting — so the turn's own end is a hard bound on the
 	// window. Without it the phase word would stand over a settled session-status lifecycle
 	// with nothing arriving that could ever release it.
-	if _, ended := ev.GetPayload().(*corev1.Event_TurnEnded); ended {
+	if _, ended := ev.GetPayload().(*protocolv1.Event_TurnEnded); ended {
 		m.closeCompactingLocked(ws, causeTurnEnded)
 	}
 
 	return m.reresolveLocked(ws, causeKind, ev.GetSeq())
 }
 
-func turnCorrelation(ev *corev1.Event) string {
+func turnCorrelation(ev *protocolv1.Event) string {
 	if started := ev.GetTurnStarted(); started != nil {
 		return started.GetTurnId()
 	}
@@ -750,18 +750,18 @@ func (m *Manager) UnansweredInterruptAgeMs(workspace string) (int64, bool) {
 // mark on the NEXT turn would report a stop that turn never received.
 //
 // Caller holds mu.
-func (m *Manager) applyInterruptMarkLocked(ws string, ev *corev1.Event, state, causeKind string) (string, string) {
+func (m *Manager) applyInterruptMarkLocked(ws string, ev *protocolv1.Event, state, causeKind string) (string, string) {
 	mark := m.interruptedTurn[ws]
 	if mark == nil {
 		return state, causeKind
 	}
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnEnded:
 		delete(m.interruptedTurn, ws)
 		m.logf("ssm: turn end reported as `interrupted` ws=%s session=%s seq=%d (superseding %s) — a user-commanded stop was delivered to this turn",
 			ws, ev.GetSessionId(), ev.GetSeq(), state)
 		return sigInterrupted, causeInterrupted
-	case *corev1.Event_TurnStarted:
+	case *protocolv1.Event_TurnStarted:
 		if mark.tolerateLateStart {
 			// The stopped turn's own start, arriving through the store after
 			// the stop already landed. It belongs to the marked turn: keep the
@@ -1743,11 +1743,11 @@ func (r resolved) toProto(workspace string) *frontendv1.WorkspaceState {
 // the same task ending twice (a spool's EXIT= marker after a TaskStop tool
 // result, or twin planes reporting the same completion) must decrement the
 // counter once, not once per event.
-func taskIDOf(ev *corev1.Event) string {
+func taskIDOf(ev *protocolv1.Event) string {
 	switch p := ev.GetPayload().(type) {
-	case *corev1.Event_TaskStarted:
+	case *protocolv1.Event_TaskStarted:
 		return p.TaskStarted.GetTaskId()
-	case *corev1.Event_TaskEnded:
+	case *protocolv1.Event_TaskEnded:
 		return p.TaskEnded.GetTaskId()
 	default:
 		return ""
@@ -1760,17 +1760,17 @@ func taskIDOf(ev *corev1.Event) string {
 // start→thinking, turn end→done (clean) / stop_failed (error), session
 // end→dead; task start/end feed the live-task counter. ok is false for
 // events that are not SSM-relevant.
-func agentOrTaskSignal(ev *corev1.Event) (state, causeKind string, ok bool) {
+func agentOrTaskSignal(ev *protocolv1.Event) (state, causeKind string, ok bool) {
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_SessionStarted:
+	case *protocolv1.Event_SessionStarted:
 		// READY, not idle: the shim asserts SessionStarted at its OWN
 		// readiness (session lock held, daemon handshake complete, SDK query
 		// constructed), so this is the moment the route is proven usable
 		// WITHOUT a first message ever having been sent.
 		return sigReady, causeSessionStarted, true
-	case *corev1.Event_TurnStarted:
+	case *protocolv1.Event_TurnStarted:
 		return sigThinking, causeTurnStarted, true
-	case *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnEnded:
 		// EXACTLY ONE session-status lifecycle row per turn end, naming HOW the turn
 		// ended. `vendor_blocked` and `done` are the same kind of fact —
 		// a report of the concluded turn — so they are the same axis and
@@ -1784,15 +1784,15 @@ func agentOrTaskSignal(ev *corev1.Event) (state, causeKind string, ok bool) {
 			return sigVendorBlocked, causeVendorBlocked, true
 		}
 		return sigDone, causeTurnEnded, true
-	case *corev1.Event_SessionEnded:
+	case *protocolv1.Event_SessionEnded:
 		return sigDead, causeSessionEnded, true
-	case *corev1.Event_TaskStarted:
+	case *protocolv1.Event_TaskStarted:
 		return sigTaskStarted, causeTaskStarted, true
-	case *corev1.Event_TaskEnded:
+	case *protocolv1.Event_TaskEnded:
 		// Includes LOST (a lost task stopped; the counter decrements the same
 		// way, distinct terminal status is preserved on the source event).
 		return sigTaskEnded, causeTaskEnded, true
-	case *corev1.Event_DegradedState:
+	case *protocolv1.Event_DegradedState:
 		if ev.GetDegradedState().GetRecovered() {
 			return sigDegradedClear, "degraded_recovered", true
 		}
@@ -1817,17 +1817,17 @@ func mergeToken(phase string) (string, error) {
 }
 
 // payloadKind names an event's payload for logging.
-func payloadKind(ev *corev1.Event) string {
+func payloadKind(ev *protocolv1.Event) string {
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_ContentDelta:
+	case *protocolv1.Event_ContentDelta:
 		return "content_delta"
-	case *corev1.Event_HeartbeatProgress:
+	case *protocolv1.Event_HeartbeatProgress:
 		return "heartbeat_progress"
-	case *corev1.Event_TaskProgress:
+	case *protocolv1.Event_TaskProgress:
 		return "task_progress"
-	case *corev1.Event_Unparsed:
+	case *protocolv1.Event_Unparsed:
 		return "unparsed"
-	case *corev1.Event_Vendor:
+	case *protocolv1.Event_Vendor:
 		return "vendor"
 	case nil:
 		return "empty"

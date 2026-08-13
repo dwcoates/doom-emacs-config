@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/ssm"
@@ -234,7 +234,7 @@ func (m *Manager) guardMergeLease(workspace string, who submitter, requestID, or
 // conflict-resolution turn is distinguishable from a person's prompt, and the
 // conversation items it produces are stamped CONVERSATION_SOURCE_MERGE off the
 // lease ledger by the ordinary provenance path (provenance.go).
-func (m *Manager) SubmitMergePrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) error {
+func (m *Manager) SubmitMergePrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin protocolv1.PromptOrigin) error {
 	_, err := m.submitMergePrompt(ctx, workspace, requestID, text, permissionMode, promptOrigin)
 	return err
 }
@@ -247,7 +247,7 @@ func (m *Manager) SubmitMergePrompt(ctx context.Context, workspace, requestID, t
 // parking is a success for every OTHER submitter. For the merge it is not, and
 // treating it as one is what let a resolution wait out its whole bound on a
 // prompt the shim was never handed.
-func (m *Manager) submitMergePrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) (promptDisposition, error) {
+func (m *Manager) submitMergePrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin protocolv1.PromptOrigin) (promptDisposition, error) {
 	if requestID == "" {
 		return promptDisposition{}, fmt.Errorf("session-controller: a merge prompt for workspace %q needs a request id; it is the identity the submitted turn carries on the wire", workspace)
 	}
@@ -326,7 +326,7 @@ func (m *Manager) InterruptForMerge(ctx context.Context, workspace string) (*ssm
 	// A turn that was ALREADY COMPLETE was not displaced by this stop, so
 	// resubmitting its prompt would be re-running work that FINISHED rather
 	// than restoring work that was cut.
-	if outcome != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+	if outcome != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
 		displaced = nil
 	}
 	m.logf("session-controller: merge interrupt ws=%q session=%s outcome=%s displaced_turn=%t — the shim is handed to merge.Coordinator",
@@ -369,6 +369,6 @@ func (m *Manager) ResumeDisplacedTurn(ctx context.Context, workspace string, tur
 	m.logf("session-controller: resuming the turn the merge lease displaced ws=%q request_id=%s permission_mode=%q",
 		workspace, requestID, turn.PermissionMode)
 	_, err := m.submitPromptAs(ctx, workspace, requestID, turn.Prompt, turn.PermissionMode,
-		"merge-resume:"+requestID, corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME, submitterUser, leavesParkedPermissions)
+		"merge-resume:"+requestID, protocolv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME, submitterUser, leavesParkedPermissions)
 	return err
 }

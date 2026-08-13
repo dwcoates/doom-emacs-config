@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sync"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // ErrReplayNotConnected reports that a replay was asked for on a session with
@@ -53,8 +53,8 @@ type ReplayResult struct {
 // truncated ReplayDone — which is what this used to do — made a deliberate
 // re-handshake indistinguishable from the shim hitting its cap.
 type replayWaiter struct {
-	onEvent func(*corev1.Event)
-	done    chan *corev1.ReplayDone
+	onEvent func(*protocolv1.Event)
+	done    chan *protocolv1.ReplayDone
 	lost    chan string
 }
 
@@ -150,7 +150,7 @@ func (r *replayRegistry) failAll(reason string) {
 //
 // There is therefore no state in which a ReplayRequest stays in flight across a
 // disconnect, and no timer anywhere in the recovery.
-func (c *Client) Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (ReplayResult, error) {
+func (c *Client) Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*protocolv1.Event)) (ReplayResult, error) {
 	if onEvent == nil {
 		return ReplayResult{}, fmt.Errorf("shimclient: Replay needs an onEvent sink")
 	}
@@ -162,11 +162,11 @@ func (c *Client) Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents ui
 	}
 
 	requestID := newReplayID()
-	w := &replayWaiter{onEvent: onEvent, done: make(chan *corev1.ReplayDone, 1), lost: make(chan string, 1)}
+	w := &replayWaiter{onEvent: onEvent, done: make(chan *protocolv1.ReplayDone, 1), lost: make(chan string, 1)}
 	c.replays.add(requestID, w)
 	defer c.replays.remove(requestID)
 
-	if err := ac.writeMsg(&corev1.ReplayRequest{
+	if err := ac.writeMsg(&protocolv1.ReplayRequest{
 		RequestId: requestID,
 		FromSeq:   fromSeq,
 		ToSeq:     toSeq,
@@ -207,7 +207,7 @@ func (c *Client) Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents ui
 	}
 }
 
-// dispatchReplayEvent routes one replayed event to the replay that asked for
+// dispatchReplayEntry routes one replayed event to the replay that asked for
 // it. It NEVER touches last_seen_seq and NEVER reaches the state/frame sinks:
 // this is historical content for conversation translation only, which is why
 // it arrives as its own message type.
@@ -215,7 +215,7 @@ func (c *Client) Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents ui
 // An event for an unknown request id is a late frame from a replay the caller
 // already gave up on. It is loud-logged and dropped — never redirected into
 // the live path, which is precisely the mistake the separate type prevents.
-func (c *Client) dispatchReplayEvent(re *corev1.ReplayEvent) {
+func (c *Client) dispatchReplayEntry(re *protocolv1.ReplayEntry) {
 	w, ok := c.replays.get(re.GetRequestId())
 	if !ok {
 		c.logf("replay event for unknown request_id=%s seq=%d; dropped (the replay already ended)",
@@ -228,7 +228,7 @@ func (c *Client) dispatchReplayEvent(re *corev1.ReplayEvent) {
 }
 
 // dispatchReplayDone resolves the replay its request id names.
-func (c *Client) dispatchReplayDone(done *corev1.ReplayDone) {
+func (c *Client) dispatchReplayDone(done *protocolv1.ReplayDone) {
 	w, ok := c.replays.get(done.GetRequestId())
 	if !ok {
 		c.logf("replay completion for unknown request_id=%s; dropped (the replay already ended)", done.GetRequestId())

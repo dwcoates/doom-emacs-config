@@ -19,7 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // observedStates reads frames until want is seen for the workspace, returning

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -133,7 +133,7 @@ func auditBlankModelTokenUtilizations(db queryer) ([]TokenUtilizationModelAuditR
 		if err := rows.Scan(&row.AgentReplSessionID, &row.APIMessageID, &row.raw); err != nil {
 			return nil, fmt.Errorf("statedb: scan token utilization model audit: %w", err)
 		}
-		var record frontendv1.TokenUtilization
+		var record statev1.TokenUtilization
 		if err := proto.Unmarshal(row.raw, &record); err != nil {
 			return nil, fmt.Errorf("statedb: decode token utilization model audit %q/%q: %w", row.AgentReplSessionID, row.APIMessageID, err)
 		}

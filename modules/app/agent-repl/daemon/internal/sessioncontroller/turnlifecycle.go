@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/ssm"
 )
@@ -66,7 +66,7 @@ func newTurnLifecycle(store StateApplier, workspace, claimantSessionID string) t
 // replayed boundary through the ordinary turn lifecycle — accounting, result
 // item, progress edge and all — rather than replaced by a synthesized cut.
 // Only a claim the store has NO terminal evidence for is cut as interrupted.
-func (c *consumer) reconcileTurnHandshake(hello *corev1.ShimHello) (active bool, closed []string, err error) {
+func (c *consumer) reconcileTurnHandshake(hello *protocolv1.ShimHello) (active bool, closed []string, err error) {
 	durablyEnded := c.durablySettledClaims(hello)
 	before, after, closed, err := c.ssm.ReconcileTurnHandshake(
 		c.workspace, c.sessionID, hello.GetActiveTurnIds(), hello.GetTurnInFlight(), durablyEnded,
@@ -114,7 +114,7 @@ func (c *consumer) reconcileTurnHandshake(hello *corev1.ShimHello) (active bool,
 // A FAILURE IS LOUD AND NEVER FAILS THE BRING-UP. The session is perfectly
 // driveable with a stale colour, and refusing to establish it over a row this
 // could not tidy would be strictly worse than the row.
-func (c *consumer) healStaleThinkingOnBringUp(hello *corev1.ShimHello, after []string) {
+func (c *consumer) healStaleThinkingOnBringUp(hello *protocolv1.ShimHello, after []string) {
 	if hello.GetTurnInFlight() || len(hello.GetActiveTurnIds()) > 0 || len(after) > 0 {
 		return
 	}
@@ -148,7 +148,7 @@ func (c *consumer) healStaleThinkingOnBringUp(hello *corev1.ShimHello, after []s
 // evidence of completion: with nothing proved, the reconciliation cuts the claim
 // exactly as it did before, and this record is what explains a completed turn
 // that was nonetheless reported interrupted.
-func (c *consumer) durablySettledClaims(hello *corev1.ShimHello) []string {
+func (c *consumer) durablySettledClaims(hello *protocolv1.ShimHello) []string {
 	if len(hello.GetActiveTurnIds()) > 0 || hello.GetTurnInFlight() {
 		return nil
 	}
@@ -187,9 +187,9 @@ func (c *consumer) durablySettledClaims(hello *corev1.ShimHello) []string {
 // liveQueryInstanceID is the query the consumer is currently bound to. It is
 // handed down per call rather than held on the struct because the binding
 // changes at each handshake while the resolver lives for the consumer.
-func (t turnLifecycle) resolve(ev *corev1.Event, liveQueryInstanceID string) (turnResolution, error) {
+func (t turnLifecycle) resolve(ev *protocolv1.Event, liveQueryInstanceID string) (turnResolution, error) {
 	base := turnResolution{correlation: turnID(ev)}
-	if ev.GetPlane() != corev1.Plane_PLANE_STREAM {
+	if ev.GetPlane() != protocolv1.Plane_PLANE_STREAM {
 		base.decision = "reject_non_authoritative_plane"
 		base.before, base.after = "unknown", "unknown"
 		return base, fmt.Errorf("turn lifecycle plane %s is not authoritative", ev.GetPlane().String())
@@ -218,7 +218,7 @@ func (t turnLifecycle) resolve(ev *corev1.Event, liveQueryInstanceID string) (tu
 	base.notify = replayed || ((len(before) == 0) != (len(after) == 0))
 
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_TurnStarted:
+	case *protocolv1.Event_TurnStarted:
 		base.apply = true
 		if replayed {
 			base.decision = "accept_replayed_stream_start"
@@ -227,7 +227,7 @@ func (t turnLifecycle) resolve(ev *corev1.Event, liveQueryInstanceID string) (tu
 		} else {
 			base.decision = "accept_correlated_stream_start"
 		}
-	case *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnEnded:
 		if replayed && base.active {
 			base.decision = "accept_replayed_stream_end_queued_turn_remains"
 		} else if replayed {
@@ -259,7 +259,7 @@ func handshakeDecision(before, after []string, err error) string {
 	return "confirm_handshake_claim"
 }
 
-func turnID(ev *corev1.Event) string {
+func turnID(ev *protocolv1.Event) string {
 	if started := ev.GetTurnStarted(); started != nil {
 		return started.GetTurnId()
 	}

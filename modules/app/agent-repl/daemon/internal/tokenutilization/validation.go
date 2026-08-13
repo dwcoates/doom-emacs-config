@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"google.golang.org/protobuf/proto"
 
@@ -38,7 +38,7 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("token utilization has %s", e.Reason)
 }
 
-func invalid(record *frontendv1.TokenUtilization, fieldPath, reason string) error {
+func invalid(record *statev1.TokenUtilization, fieldPath, reason string) error {
 	return &ValidationError{
 		FieldPath:          fieldPath,
 		APIMessageID:       record.GetApiMessageId(),
@@ -52,7 +52,7 @@ func invalid(record *frontendv1.TokenUtilization, fieldPath, reason string) erro
 // ValidateModelIdentity is the one model-identity invariant shared by durable
 // ingress and frontend aggregation. It snapshots the rejected evidence so
 // callers can add boundary-specific context without reimplementing validation.
-func ValidateModelIdentity(record *frontendv1.TokenUtilization) error {
+func ValidateModelIdentity(record *statev1.TokenUtilization) error {
 	if record == nil {
 		return fmt.Errorf("token utilization is nil")
 	}
@@ -74,7 +74,7 @@ type Identity struct {
 // the partial view of one richer live response. Every fact the historical
 // source carries must agree; only root-turn attribution, stream timing, an
 // absent API request id, and missing subagent provenance may be enriched.
-func ValidateHistoricalAgainstLive(historical, live *frontendv1.TokenUtilization) error {
+func ValidateHistoricalAgainstLive(historical, live *statev1.TokenUtilization) error {
 	if err := ValidateHistorical(historical, Identity{}); err != nil {
 		return fmt.Errorf("historical record: %w", err)
 	}
@@ -121,7 +121,7 @@ func ValidateHistoricalAgainstLive(historical, live *frontendv1.TokenUtilization
 // Validate rejects incomplete or misattributed billing evidence. API request
 // presence is represented by the generated optional field and participates in
 // exact duplicate identity.
-func Validate(record *frontendv1.TokenUtilization, expected Identity) error {
+func Validate(record *statev1.TokenUtilization, expected Identity) error {
 	if err := validateCommon(record, expected); err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func Validate(record *frontendv1.TokenUtilization, expected Identity) error {
 // ValidateHistorical rejects incomplete file-plane response evidence without
 // requiring an enclosing turn the transcript cannot prove. Historical records
 // must keep both root-turn attribution and stream-derived timing absent.
-func ValidateHistorical(record *frontendv1.TokenUtilization, expected Identity) error {
+func ValidateHistorical(record *statev1.TokenUtilization, expected Identity) error {
 	if expected.RootTurnID != "" {
 		return fmt.Errorf("historical token utilization expected identity has root_turn_id=%q", expected.RootTurnID)
 	}
@@ -150,7 +150,7 @@ func ValidateHistorical(record *frontendv1.TokenUtilization, expected Identity) 
 	return nil
 }
 
-func validateCommon(record *frontendv1.TokenUtilization, expected Identity) error {
+func validateCommon(record *statev1.TokenUtilization, expected Identity) error {
 	if record == nil {
 		return fmt.Errorf("token utilization is nil")
 	}
@@ -193,7 +193,7 @@ func validateCommon(record *frontendv1.TokenUtilization, expected Identity) erro
 // SameOptionalAPIRequestID compares both protobuf presence and value. An
 // omitted SDK request id is valid evidence and must not be conflated with a
 // supplied id during replay.
-func SameOptionalAPIRequestID(a, b *frontendv1.TokenUtilization) bool {
+func SameOptionalAPIRequestID(a, b *statev1.TokenUtilization) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
@@ -218,7 +218,7 @@ func SameOptionalAPIRequestID(a, b *frontendv1.TokenUtilization) bool {
 // are skipped by the loop below, so a set of them contributes nothing to the
 // alias map; the union of an invariant-holding persisted set with such records
 // therefore has the persisted set's own verdict.
-func CarriesSubagentAlias(records []*frontendv1.TokenUtilization) bool {
+func CarriesSubagentAlias(records []*statev1.TokenUtilization) bool {
 	for _, record := range records {
 		if record == nil || record.GetSubagent() == nil {
 			continue
@@ -235,7 +235,7 @@ func CarriesSubagentAlias(records []*frontendv1.TokenUtilization) bool {
 // ValidateSubagentTopology rejects contradictory stable aliases before a
 // response becomes durable. A record carrying both aliases is a bridge that
 // joins prior agent-id-only and parent-tool-use-id-only observations.
-func ValidateSubagentTopology(records []*frontendv1.TokenUtilization) error {
+func ValidateSubagentTopology(records []*statev1.TokenUtilization) error {
 	aliases := map[string]*subagentTopology{}
 	for _, record := range records {
 		if record == nil || record.GetSubagent() == nil {
@@ -297,14 +297,14 @@ func unionTopology(left, right *subagentTopology) error {
 	if left == right {
 		return nil
 	}
-	if err := mergeTopology(left, &frontendv1.TokenUtilizationSubagent{AgentId: right.agentID, ParentToolUseId: right.parentToolUseID, ParentAgentId: right.parentAgentID, SubagentType: right.subagentType, TaskDescription: right.taskDescription}); err != nil {
+	if err := mergeTopology(left, &statev1.TokenUtilizationSubagent{AgentId: right.agentID, ParentToolUseId: right.parentToolUseID, ParentAgentId: right.parentAgentID, SubagentType: right.subagentType, TaskDescription: right.taskDescription}); err != nil {
 		return err
 	}
 	right.parent = left
 	return nil
 }
 
-func mergeTopology(node *subagentTopology, incoming *frontendv1.TokenUtilizationSubagent) error {
+func mergeTopology(node *subagentTopology, incoming *statev1.TokenUtilizationSubagent) error {
 	node = findTopology(node)
 	merge := func(field string, current *string, value string) error {
 		if value == "" {
@@ -331,6 +331,6 @@ func mergeTopology(node *subagentTopology, incoming *frontendv1.TokenUtilization
 	return merge("task_description", &node.taskDescription, incoming.GetTaskDescription())
 }
 
-func hasSubagentProvenance(agent *frontendv1.TokenUtilizationSubagent) bool {
+func hasSubagentProvenance(agent *statev1.TokenUtilizationSubagent) bool {
 	return agent != nil && (agent.GetAgentId() != "" || agent.GetParentToolUseId() != "" || agent.GetParentAgentId() != "" || agent.GetSubagentType() != "" || agent.GetTaskDescription() != "")
 }

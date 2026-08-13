@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 func TestControllerGenerationIsStableAcrossEveryEdge(t *testing.T) {
@@ -65,11 +65,11 @@ func TestRetiredGenerationOfSameSessionCannotMutateReplacement(t *testing.T) {
 	before := len(applier.connectivityEdges)
 
 	if err := m.onHandshakeForGeneration(
-		"ws", "s1", "g_retired", &corev1.ShimHello{SessionId: "s1"},
+		"ws", "s1", "g_retired", &protocolv1.ShimHello{SessionId: "s1"},
 	); err == nil {
 		t.Fatal("retired generation handshake succeeded")
 	}
-	m.onConnectedForGeneration("ws", "s1", "g_retired", &corev1.ShimHello{SessionId: "s1"})
+	m.onConnectedForGeneration("ws", "s1", "g_retired", &protocolv1.ShimHello{SessionId: "s1"})
 	m.onLinkLostForGeneration("ws", "s1", "g_retired", errors.New("late EOF"))
 
 	if after := len(applier.connectivityEdges); after != before {

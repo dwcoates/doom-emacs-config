@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/ssm"
@@ -35,7 +35,7 @@ type pageHarness struct {
 // newPageHarness arranges an UNWIRED workspace — the state every workspace is
 // in after a daemon bounce, and the one a cold webview actually mounts
 // against — holding the given store events.
-func newPageHarness(t *testing.T, events []*corev1.Event) *pageHarness {
+func newPageHarness(t *testing.T, events []*protocolv1.Event) *pageHarness {
 	t.Helper()
 	h := &pageHarness{durableHarness: newDurableHarness(t, &durableHistorySpy{events: events})}
 	// The Fence is stamped exactly as the mint stamps it (ssm.compositeWorkspaceState),
@@ -66,7 +66,7 @@ func (h *pageHarness) page(t *testing.T, anchor PageAnchor) *frontendv1.Conversa
 // The blocks matter to exactly one question this file asks: how many TOP-LEVEL
 // items an event contributes. A record with a text block and a tool_use block
 // is ONE feed item carrying its tool call inside it, not two.
-func pageAssistantEvent(t *testing.T, seq uint64, uuid string, blocks []*datav1.ContentBlock) *corev1.Event {
+func pageAssistantEvent(t *testing.T, seq uint64, uuid string, blocks []*datav1.ContentBlock) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.ClaudeStreamMessage{
 		Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
@@ -77,7 +77,7 @@ func pageAssistantEvent(t *testing.T, seq uint64, uuid string, blocks []*datav1.
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, ProducedAtMs: int64(seq) * 1_000, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, ProducedAtMs: int64(seq) * 1_000, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 func pageTextBlock(text string) *datav1.ContentBlock {
@@ -89,9 +89,9 @@ func pageToolUseBlock(id, name string) *datav1.ContentBlock {
 }
 
 // pageTextEvents is a run of `n` one-item events at seqs 1..n.
-func pageTextEvents(t *testing.T, n int) []*corev1.Event {
+func pageTextEvents(t *testing.T, n int) []*protocolv1.Event {
 	t.Helper()
-	var out []*corev1.Event
+	var out []*protocolv1.Event
 	for i := 1; i <= n; i++ {
 		out = append(out, pageAssistantEvent(t, uint64(i), fmt.Sprintf("u%d", i), []*datav1.ContentBlock{pageTextBlock(fmt.Sprintf("m%d", i))}))
 	}
@@ -162,7 +162,7 @@ func TestConstituentsRideInsideTheirItemAndDoNotCountTowardTheLimit(t *testing.T
 	// Arrange — three records, each ONE top-level item, and each carrying a
 	// tool call inside it. A page that counted constituents would serve one
 	// item for a limit of three.
-	var events []*corev1.Event
+	var events []*protocolv1.Event
 	for i := 1; i <= 3; i++ {
 		events = append(events, pageAssistantEvent(t, uint64(i), fmt.Sprintf("u%d", i), []*datav1.ContentBlock{
 			pageTextBlock(fmt.Sprintf("m%d", i)),
@@ -404,7 +404,7 @@ func TestTheWalkWidensUntilThePageIsFull(t *testing.T) {
 	// Arrange — one item, sitting far below the tail, with a long stretch of
 	// nothing renderable above it. The first window finds nothing, so the walk
 	// has to widen rather than serve an empty page.
-	events := []*corev1.Event{pageAssistantEvent(t, 1, "u1", []*datav1.ContentBlock{pageTextBlock("m1")})}
+	events := []*protocolv1.Event{pageAssistantEvent(t, 1, "u1", []*datav1.ContentBlock{pageTextBlock("m1")})}
 	h := newPageHarness(t, events)
 	h.seq.SetLastSeq("s1", 3000)
 

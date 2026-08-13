@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 func TestPermRegistryAnswerAllow(t *testing.T) {
@@ -25,7 +25,7 @@ func TestPermRegistryAnswerAllow(t *testing.T) {
 		if resp.GetRequestId() != "r1" {
 			t.Errorf("request_id: got %q, want r1", resp.GetRequestId())
 		}
-		if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+		if resp.GetDecision() != protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW {
 			t.Errorf("decision: got %v, want ALLOW", resp.GetDecision())
 		}
 	case <-time.After(time.Second):
@@ -46,7 +46,7 @@ func TestPermRegistryAnswerDenyCarriesMessage(t *testing.T) {
 
 	// Assert.
 	resp := <-ch
-	if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_DENY {
+	if resp.GetDecision() != protocolv1.PermissionDecision_PERMISSION_DECISION_DENY {
 		t.Errorf("decision: got %v, want DENY", resp.GetDecision())
 	}
 	if resp.GetDenyMessage() != "nope" {
@@ -97,10 +97,10 @@ func TestPermRegistryResentRequestJoinsTheSameRendezvous(t *testing.T) {
 
 	// Assert: the one answer releases BOTH parked handlers; replacing the
 	// waiter instead would wedge the displaced one forever.
-	for name, ch := range map[string]<-chan *corev1.PermissionResponse{"first": first, "second": second} {
+	for name, ch := range map[string]<-chan *protocolv1.PermissionResponse{"first": first, "second": second} {
 		select {
 		case resp := <-ch:
-			if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+			if resp.GetDecision() != protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW {
 				t.Errorf("%s decision: got %v, want ALLOW", name, resp.GetDecision())
 			}
 		case <-time.After(time.Second):
@@ -155,7 +155,7 @@ func TestPermRegistryFailReleasesEveryJoinedCaller(t *testing.T) {
 	reg.fail("teardown")
 
 	// Assert: neither handler is left blocked, and neither is fed a decision.
-	for name, ch := range map[string]<-chan *corev1.PermissionResponse{"first": first, "second": second} {
+	for name, ch := range map[string]<-chan *protocolv1.PermissionResponse{"first": first, "second": second} {
 		select {
 		case resp := <-ch:
 			if resp != nil {
@@ -184,7 +184,7 @@ func TestPermRegistryRecallsAGrant(t *testing.T) {
 	if !ok {
 		t.Fatal("recall must report the grant the human already made")
 	}
-	if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+	if resp.GetDecision() != protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW {
 		t.Errorf("decision: got %v, want ALLOW", resp.GetDecision())
 	}
 }

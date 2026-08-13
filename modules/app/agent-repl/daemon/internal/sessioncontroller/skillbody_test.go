@@ -21,9 +21,9 @@ package sessioncontroller
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -33,7 +33,7 @@ import (
 const skillBody = "Base directory for this skill: /Users/x/.claude/skills/demo\n\n# Demo skill\n\nDo the thing."
 
 // transcriptToolUseEvent is an assistant record making one tool call.
-func transcriptToolUseEvent(t *testing.T, seq uint64, uuid, toolUseID, toolName string) *corev1.Event {
+func transcriptToolUseEvent(t *testing.T, seq uint64, uuid, toolUseID, toolName string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.TranscriptLine{
 		Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
@@ -46,11 +46,11 @@ func transcriptToolUseEvent(t *testing.T, seq uint64, uuid, toolUseID, toolName 
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // transcriptToolResultEvent is the user record reporting one tool's result.
-func transcriptToolResultEvent(t *testing.T, seq uint64, uuid, toolUseID string) *corev1.Event {
+func transcriptToolResultEvent(t *testing.T, seq uint64, uuid, toolUseID string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.TranscriptLine{
 		Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
@@ -68,12 +68,12 @@ func transcriptToolResultEvent(t *testing.T, seq uint64, uuid, toolUseID string)
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // transcriptMetaUserEvent is a user record the harness flagged isMeta, parented
 // on the record it answers.
-func transcriptMetaUserEvent(t *testing.T, seq uint64, uuid, parentUUID, text string) *corev1.Event {
+func transcriptMetaUserEvent(t *testing.T, seq uint64, uuid, parentUUID, text string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.TranscriptLine{
 		Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
@@ -88,7 +88,7 @@ func transcriptMetaUserEvent(t *testing.T, seq uint64, uuid, parentUUID, text st
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // launchSkill feeds the two records that precede a body: the Skill call and its

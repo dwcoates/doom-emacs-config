@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/registry"
 )
@@ -23,7 +23,7 @@ func NewSessionModelCatalogs() *SessionModelCatalogs {
 	return &SessionModelCatalogs{byID: make(map[string][]*frontendv1.ModelOption)}
 }
 
-func (c *SessionModelCatalogs) Set(sessionID string, models []*corev1.ModelOption) error {
+func (c *SessionModelCatalogs) Set(sessionID string, models []*protocolv1.ModelOption) error {
 	if c == nil {
 		return fmt.Errorf("model catalog store is nil")
 	}

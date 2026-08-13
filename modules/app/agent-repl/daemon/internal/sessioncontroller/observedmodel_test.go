@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/registry"
 
@@ -19,7 +19,7 @@ import (
 
 // systemInitEvent is a vendor stream-plane SystemInit, which the SDK re-emits on
 // every submit rather than only at session start.
-func systemInitEvent(t *testing.T, seq uint64, model string) *corev1.Event {
+func systemInitEvent(t *testing.T, seq uint64, model string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.ClaudeStreamMessage{
 		Msg: &datav1.ClaudeStreamMessage_SystemInit{SystemInit: &datav1.SystemInit{Model: model}},
@@ -27,7 +27,7 @@ func systemInitEvent(t *testing.T, seq uint64, model string) *corev1.Event {
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // observedModels returns the models the harness's registrar was told about.

@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -20,15 +20,15 @@ import (
 
 // evTurnStartedNamed is a TurnStarted carrying an explicit turn identity, which
 // is what a revival's `/compact` submits under.
-func evTurnStartedNamed(sid string, seq uint64, turnID string) *corev1.Event {
-	return &corev1.Event{
+func evTurnStartedNamed(sid string, seq uint64, turnID string) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId: sid,
 		Seq:       seq,
-		Plane:     corev1.Plane_PLANE_STREAM,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
 		// The envelope's request id IS the turn's identity; the boundary door
 		// refuses the two disagreeing.
 		RequestId: turnID,
-		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: turnID}},
+		Payload:   &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: turnID}},
 	}
 }
 

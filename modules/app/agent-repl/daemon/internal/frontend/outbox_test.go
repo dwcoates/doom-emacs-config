@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // --- frame classification ---------------------------------------------------
@@ -59,7 +59,7 @@ func TestCoalesceKeyClassifiesFrames(t *testing.T) {
 			name: "heartbeat is absolute per running tool",
 			frame: HeartbeatViewFrame(&frontendv1.HeartbeatView{
 				Workspace: "/w", Fence: "s1",
-				Progress: &corev1.HeartbeatProgress{ToolUseId: "t1"},
+				Progress: &protocolv1.HeartbeatProgress{ToolUseId: "t1"},
 			}),
 			wantKeyed:  true,
 			wantSubstr: "t1",
@@ -68,7 +68,7 @@ func TestCoalesceKeyClassifiesFrames(t *testing.T) {
 			name: "typing delta grows a block and is never coalescable",
 			frame: TypingDeltaFrame(&frontendv1.TypingDelta{
 				Workspace: "/w", Fence: "s1",
-				Delta: &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Text{Text: "hi"}},
+				Delta: &protocolv1.ContentDelta{Uuid: "u1", Delta: &protocolv1.ContentDelta_Text{Text: "hi"}},
 			}),
 			wantKeyed: false,
 		},
@@ -173,10 +173,10 @@ func TestOutboxCompactionKeepsOnlyTheNewestRoster(t *testing.T) {
 func TestCoalesceKeySeparatesConcurrentTools(t *testing.T) {
 	// Arrange: two heartbeats for the same session but different tools.
 	first := HeartbeatViewFrame(&frontendv1.HeartbeatView{
-		Workspace: "/w", Fence: "s1", Progress: &corev1.HeartbeatProgress{ToolUseId: "t1"},
+		Workspace: "/w", Fence: "s1", Progress: &protocolv1.HeartbeatProgress{ToolUseId: "t1"},
 	})
 	second := HeartbeatViewFrame(&frontendv1.HeartbeatView{
-		Workspace: "/w", Fence: "s1", Progress: &corev1.HeartbeatProgress{ToolUseId: "t2"},
+		Workspace: "/w", Fence: "s1", Progress: &protocolv1.HeartbeatProgress{ToolUseId: "t2"},
 	})
 
 	// Act.

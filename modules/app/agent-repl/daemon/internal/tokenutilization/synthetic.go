@@ -1,7 +1,7 @@
 package tokenutilization
 
 import (
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 )
 
 // SyntheticModelReconciliationExcluded reports whether a stream-plane per-model
@@ -21,7 +21,7 @@ import (
 // never reached the API cannot legitimately have spent tokens, so that entry is
 // genuinely anomalous and must keep surfacing loudly through the existing
 // mismatch path. No other model identity is affected in any way.
-func SyntheticModelReconciliationExcluded(model string, totals *frontendv1.TokenUsageTotals) bool {
+func SyntheticModelReconciliationExcluded(model string, totals *statev1.TokenUsageTotals) bool {
 	if model != SyntheticModelIdentity {
 		return false
 	}
@@ -31,7 +31,7 @@ func SyntheticModelReconciliationExcluded(model string, totals *frontendv1.Token
 // totalsCarryUsage reports whether totals claims any token or server-tool usage.
 // Any nonzero counter counts, including a negative one: a negative counter is
 // itself corrupt evidence and must not be mistaken for "no usage".
-func totalsCarryUsage(totals *frontendv1.TokenUsageTotals) bool {
+func totalsCarryUsage(totals *statev1.TokenUsageTotals) bool {
 	return totals.GetInputTokens() != 0 ||
 		totals.GetOutputTokens() != 0 ||
 		totals.GetCacheReadInputTokens() != 0 ||

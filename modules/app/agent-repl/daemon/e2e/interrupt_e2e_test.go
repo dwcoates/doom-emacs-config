@@ -58,9 +58,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"github.com/gorilla/websocket"
 )
@@ -116,7 +116,7 @@ func ackFor(frame *frontendv1.FrontendFrame, requestID string) *frontendv1.Comma
 // permissionItem(req, PermissionItem_RESOLUTION_PENDING, "")).
 func isPendingPermission(item *frontendv1.Message) bool {
 	perm := item.GetPermission()
-	return perm != nil && perm.GetResolution() == corev1.PermissionItem_RESOLUTION_PENDING
+	return perm != nil && perm.GetResolution() == protocolv1.PermissionItem_RESOLUTION_PENDING
 }
 
 // assistantText concatenates the TEXT blocks of an assistant_message item (arm
@@ -374,7 +374,7 @@ func TestE2EInterruptOfALiveTurnResolvesInterrupted(t *testing.T) {
 		t.Errorf("interrupt ack ok=false (error=%q, challenge=%v), want ok: interrupting a LIVE turn never asks for confirmation",
 			obs.ack.GetError(), obs.ack.GetInterruptConfirmRequired())
 	}
-	if got := obs.window.GetOutcome(); got != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+	if got := obs.window.GetOutcome(); got != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
 		t.Errorf("interrupt window outcome = %s, want INTERRUPTED: the shim's turn counter was non-zero when the stop landed", got)
 	}
 	if obs.state.GetState() != frontendv1.RenderState_RENDER_STATE_INTERRUPTED {
@@ -527,7 +527,7 @@ func TestE2ELateInterruptReportsAlreadyComplete(t *testing.T) {
 			if !view.GetInterrupt().GetActive() {
 				return false
 			}
-			if got := view.GetInterrupt().GetOutcome(); got != corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
+			if got := view.GetInterrupt().GetOutcome(); got != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
 				t.Fatalf("interrupt window outcome = %s, want ALREADY_COMPLETE: no turn was in flight when the stop landed", got)
 			}
 			// The gate's precondition, read off the same resolver the gate
@@ -577,7 +577,7 @@ func TestE2EFreshConnectCarriesTheInterruptedResolution(t *testing.T) {
 	if !window.GetActive() {
 		t.Errorf("snapshot ProgressView for %s carries interrupt=%v, want an OPEN window", cwd, window)
 	}
-	if got := window.GetOutcome(); got != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+	if got := window.GetOutcome(); got != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
 		t.Errorf("snapshot interrupt window outcome = %s, want INTERRUPTED", got)
 	}
 	found := false

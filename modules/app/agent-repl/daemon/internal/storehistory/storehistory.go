@@ -58,7 +58,7 @@ import (
 	"path/filepath"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 )
 
@@ -115,7 +115,7 @@ func DefaultSocketPath() (string, error) {
 //
 // fromSeq is EXCLUSIVE, matching Subscribe.from_seq and ReplayRequest.from_seq,
 // so callers holding an INCLUSIVE first-seq-to-replay convert before calling.
-func (r *Reader) ReplayHistory(ctx context.Context, workspace, sessionID string, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (Result, error) {
+func (r *Reader) ReplayHistory(ctx context.Context, workspace, sessionID string, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*protocolv1.Event)) (Result, error) {
 	if r.Logf == nil {
 		return Result{}, fmt.Errorf("storehistory: replay for ws %q needs a logger", workspace)
 	}
@@ -160,7 +160,7 @@ func (r *Reader) ReplayHistory(ctx context.Context, workspace, sessionID string,
 		}
 	}()
 
-	if err := wire.WriteAny(conn, &corev1.Subscribe{SessionId: vendor, FromSeq: fromSeq}); err != nil {
+	if err := wire.WriteAny(conn, &protocolv1.Subscribe{SessionId: vendor, FromSeq: fromSeq}); err != nil {
 		r.Logf("storehistory: durable history UNREADABLE ws=%q session=%s vendor_session=%s socket=%q from_seq=%d: subscribe write failed: %v",
 			workspace, sessionID, vendor, r.Socket, fromSeq, err)
 		return Result{}, fmt.Errorf("storehistory: subscribing to the store for ws %q (vendor session %s): %w", workspace, vendor, err)
@@ -201,7 +201,7 @@ func (r *Reader) ReplayHistory(ctx context.Context, workspace, sessionID string,
 				workspace, sessionID, vendor, fromSeq, res.Delivered, err)
 			return res, fmt.Errorf("storehistory: reading the store's replay for ws %q after %d event(s): %w", workspace, res.Delivered, err)
 		}
-		ev, isEvent := msg.(*corev1.Event)
+		ev, isEvent := msg.(*protocolv1.Event)
 		if !isEvent {
 			r.Logf("storehistory: skipped a non-event store frame ws=%q session=%s vendor_session=%s type=%T (this path serves persisted conversation history only)",
 				workspace, sessionID, vendor, msg)
