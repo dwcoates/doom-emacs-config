@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/shim-store/internal/logging"
 )
 
@@ -142,13 +142,13 @@ func TestSlowQueryRecordIsNormalVerbosityWarn(t *testing.T) {
 func TestSlowQueryRecordCarriesTheStatementFamilyAndCost(t *testing.T) {
 	// Arrange.
 	d, sink := openThreshold(t, time.Nanosecond)
-	if _, err := d.Ingest("producer", []*corev1.Event{persistentCore("session-1"), persistentCore("session-1")}, nil); err != nil {
+	if _, err := d.Ingest("producer", batch(bookkeeping("session-1"), bookkeeping("session-1"))); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 	sink.Reset()
 
 	// Act.
-	if _, err := d.ReplayFrom(context.Background(), "session-1", 0, func(*corev1.Event) error { return nil }); err != nil {
+	if _, err := d.ReplayFrom(context.Background(), "session-1", 0, func(*protocolv1.EntryDelivery) error { return nil }); err != nil {
 		t.Fatalf("ReplayFrom: %v", err)
 	}
 
@@ -174,13 +174,13 @@ func TestSlowQueryRecordNeverCarriesRenderedSQL(t *testing.T) {
 	d, sink := openThreshold(t, time.Nanosecond)
 
 	// Act.
-	if _, err := d.EventsByTask("session-1", "task-1"); err != nil {
-		t.Fatalf("EventsByTask: %v", err)
+	if _, err := d.Cursor("file-secret"); err != nil {
+		t.Fatalf("Cursor: %v", err)
 	}
 
 	// Assert.
 	raw := sink.String()
-	if strings.Contains(raw, "SELECT") || strings.Contains(raw, "task-1") {
+	if strings.Contains(raw, "SELECT") || strings.Contains(raw, "file-secret") {
 		t.Fatalf("slow-query output = %q, want a statement FAMILY with no SQL and no bound values", raw)
 	}
 }
@@ -207,7 +207,7 @@ func TestSlowQueryReportsTheIngestTransaction(t *testing.T) {
 	d, sink := openThreshold(t, time.Nanosecond)
 
 	// Act.
-	if _, err := d.Ingest("producer", []*corev1.Event{persistentCore("session-1")}, nil); err != nil {
+	if _, err := d.Ingest("producer", batch(bookkeeping("session-1"))); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
