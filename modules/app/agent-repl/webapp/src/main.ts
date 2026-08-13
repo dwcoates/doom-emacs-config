@@ -135,7 +135,6 @@ import { DRAINING_BODY_CLASS, drainBannerHtml } from "./drain.js";
 import { SessionIdentityGate } from "./session-identity.js";
 import { SessionRebase, claudeSessionIdOf } from "./session-rebase.js";
 import { requestSupportWorkspace } from "./unsupported.js";
-import { statusSnapshotFromInit } from "./status.js";
 import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
 import { installEdgeScroll, TailFollow } from "./scroll.js";
 import { FeedSearch, type SearchHost, installSearchHook } from "./search.js";
@@ -803,17 +802,12 @@ async function boot(): Promise<void> {
     // resolves to the workspace name Emacs was asked for — Emacs, not the
     // daemon, decides what actually happens next.
     addSupport: (command) => requestSupportWorkspace(httpBase, activeSessionId, command),
-    // The `/status` panel's data. The snapshot half is re-sourced from the
-    // session's PUSHED SystemInit (no round trip, and never staler than the
-    // daemon's own view, which is why the old GET /status and its
-    // /status/refresh re-probe are both gone). Only the account half is
-    // fetched, on the sanctioned account endpoint, targeting the CURRENT
-    // session so the account belongs to the checkout in view.
-    getStatus: () =>
-      fetchAccount(httpBase, activeSessionId).then((account) => ({
-        snapshot: statusSnapshotFromInit(store.state.systemInit),
-        account,
-      })),
+    // The `/status` panel's data. The ROWS half needs no fetch at all: the
+    // daemon resolves and stringifies every row and pushes them on the
+    // `sessionInit` frame, so the panel reads them off the store. Only the
+    // account half is fetched, on the sanctioned account endpoint, targeting
+    // the CURRENT session so the account belongs to the checkout in view.
+    getStatus: () => fetchAccount(httpBase, activeSessionId).then((account) => ({ account })),
     },
     // The renderer takes the page's owner rather than minting one, so its
     // parks and the host's snap are the same decision (see TailFollow).
@@ -1118,10 +1112,7 @@ async function boot(): Promise<void> {
     // Read off `s.permissionMode`, NOT the settled `wantMode`: a pending pick
     // is a UI intent, and a warning that a click can clear before the daemon
     // has honored anything is a warning that can be clicked away.
-    const ungatedMode = ungatedModeOf({
-      requestedMode: s.permissionMode,
-      systemInit: s.systemInit,
-    });
+    const ungatedMode = ungatedModeOf({ requestedMode: s.permissionMode });
     ungatedBannerSlot.paint(ungatedBannerHtml(ungatedMode));
     document.body.classList.toggle("ungated", ungatedMode !== "");
     // THE DRAIN LEASE (drain.ts): a daemon-global banner, repainted on the

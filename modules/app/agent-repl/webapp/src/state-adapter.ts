@@ -40,13 +40,14 @@
  *   drawn as a chip rather than as the prompt bubble the daemon withheld for
  *   it. The wire message carries the command enum and NO text, so this end
  *   cannot put the submitted prompt back on screen.
- * - sessionInit (SessionInitView) → the /status panel's SystemInit source.
+ * - sessionInit (SessionInitView) → the /status panel's ROWS, resolved and
+ *   stringified by the daemon and printed verbatim.
  *
  * EXPLICIT IGNORE (no new visuals; §11): a frame variant in `UNSUPPORTED_SHAPES`
- * (commandAck, daemonView) and a CONVERSATION-ITEM shape with no webapp visual
- * — a `toolUseResult` arm (no correlation key on the proto arm; the tool result
- * is carried by tool_result blocks), a `signature` content delta, an image /
- * tool_reference / fallback / unknown content block — are IGNORED EXPLICITLY:
+ * (commandAck, daemonView), a tool outcome that detached NOTHING, and a
+ * CONVERSATION-ITEM shape with no webapp visual — a `signature` content delta,
+ * an image / tool_reference / fallback / unknown content block — are IGNORED
+ * EXPLICITLY:
  * typed as an `{ kind: "ignored" }` effect, counted, and debug-logged once per
  * distinct shape name. They are never crashed on and never silently dropped.
  */
@@ -59,6 +60,7 @@ import { mergeStatusLogValue } from "./merge-status.js";
 import { previewBlockId, recordBlockIdentity } from "./streaming.js";
 import type { FencedComponentView } from "./fence.js";
 import type {
+  CompactionSummaryItem,
   ContextCompactedItem,
   ConversationItem,
   FailureCardItem,
@@ -72,6 +74,7 @@ import type {
 } from "./store.js";
 import {
   ConversationSource,
+  decodeCompactionSummaryItem,
   decodeFailureCardView,
   RenderState,
   sessionCommandOf,
@@ -99,6 +102,7 @@ import {
   type QueueEntry,
   type QueueView,
   type RuntimeFault,
+  type SessionInitRow,
   type SessionInitView,
   type SessionView,
   type ShutdownScheduleView,
@@ -484,7 +488,7 @@ export interface TaskCatalogInput {
   entries: CounterEntry[];
 }
 
-/** SessionInitView → the /status panel's SystemInit snapshot source. */
+/** SessionInitView → the /status panel's rows, as the daemon resolved them. */
 export interface SessionInitInput {
   workspace: string;
   /**
@@ -493,8 +497,11 @@ export interface SessionInitInput {
    * `session_id` in the figma-idl reshape.
    */
   fence: string;
-  /** The data.v1.SystemInit payload, adopted by shape (read leniently). */
-  init: Record<string, unknown>;
+  /**
+   * The panel's rows, in render order, already labelled and already
+   * stringified. EMPTY means no init has landed yet.
+   */
+  rows: SessionInitRow[];
 }
 
 /** One thing the store/render layer should adopt from a decoded frame. */
@@ -950,7 +957,7 @@ export class StateAdapter {
   private sessionInitEffect(si: SessionInitView): AdapterEffect {
     return {
       kind: "session-init",
-      value: { workspace: si.workspace, fence: si.fence, init: si.init },
+      value: { workspace: si.workspace, fence: si.fence, rows: si.rows },
     };
   }
 
@@ -1558,6 +1565,9 @@ export function asyncAgentItems(
     if (emission.spawnedMessageId !== undefined && emission.spawnedMessageId !== "") {
       frame.spawnedMessageId = emission.spawnedMessageId;
     }
+    // A detached agent's own tool outcomes carry its detachments, so the chip
+    // is drawn inside the work exactly as it is in the feed.
+    if (emission.toolOutcome !== undefined) frame.toolOutcome = emission.toolOutcome;
     const built = itemsFromFrame(frame);
     items.push(...built.items);
     ignores.push(...built.ignores);
@@ -1586,8 +1596,11 @@ function itemsFromFrame(frame: MessageFrame): { items: ConversationItem[]; ignor
     case "toolResult":
       return { items: [toolItemFromResult(frame.payload, frame.uuid, tsFromMs(frame.tsMs))], ignores: [] };
     case "toolUseResult":
-      // No correlation key on the arm + unbuilt curator counterpart; ignored.
-      return { items: [], ignores: ["conversation-item:toolUseResult"] };
+      // THE TYPED OUTCOME, which IS the card's detachment chip. It reconciles
+      // onto the call by the `tool_use_id` the outcome now carries explicitly
+      // — the correlation key this arm used to lack, which is why it was
+      // ignored wholesale before the reshape.
+      return toolOutcomeItems(frame);
     case "result":
       return { items: [resultItemFrom(frame.payload, frame.uuid)], ignores: [] };
     case "contextCleared":
@@ -1596,6 +1609,8 @@ function itemsFromFrame(frame: MessageFrame): { items: ConversationItem[]; ignor
       return { items: [{ kind: "context-cleared", uuid: frame.uuid }], ignores: [] };
     case "contextCompacted":
       return { items: [contextCompactedItem(frame.payload, frame.uuid)], ignores: [] };
+    case "compactionSummary":
+      return { items: [compactionSummaryItem(frame.payload, frame.uuid)], ignores: [] };
     case "permission":
       return { items: [permissionItemFrom(frame.payload, frame.uuid)], ignores: [] };
     case "failureCard":
@@ -1811,6 +1826,51 @@ function toolItemFromUse(use: Obj, messageUuid: string, ts: string, spawnedMessa
 }
 
 /**
+ * `AgentToolOutcome` → a PARTIAL tool item carrying the call's detachment, or
+ * nothing at all when the call detached nothing.
+ *
+ * ABSENT DETACHMENT IS A STATED FACT, not a missing one: the outcome's oneof is
+ * absent exactly when the call returned ordinarily, and there is then no chip
+ * to draw. It is counted as an explicit ignore rather than filed as an empty
+ * item, so a card never grows a blank chip.
+ *
+ * The verdict (`spawned_message_id`) rides through on the same partial item,
+ * because the outcome is where the detachment becomes knowable and the card
+ * may have been drawn before its own call carried one.
+ */
+function toolOutcomeItems(frame: MessageFrame): { items: ConversationItem[]; ignores: string[] } {
+  const outcome = frame.toolOutcome;
+  if (outcome === undefined) {
+    // UNREACHABLE by construction: the decoder sets this arm and `toolOutcome`
+    // together. Reaching this means the two came apart, so it fails loudly
+    // rather than quietly dropping a detachment the card needs.
+    throw new Error(
+      `state-adapter: toolUseResult message ${frame.uuid} reached the feed decomposition ` +
+        `without a decoded outcome — the arm and \`toolOutcome\` must be set together`,
+    );
+  }
+  if (outcome.detachment === undefined && frame.spawnedMessageId === undefined) {
+    return { items: [], ignores: ["conversation-item:toolUseResult:no-detachment"] };
+  }
+  const item: ToolItem = {
+    kind: "tool",
+    toolUseId: outcome.toolUseId,
+    // Empty by the same contract a tool RESULT item follows: the name lives on
+    // the tool_use item this reconciles onto, and the store field-merges them.
+    toolName: "",
+    messageId: frame.uuid,
+    ts: tsFromMs(frame.tsMs),
+    inputJson: "",
+    inputDone: true,
+  };
+  if (outcome.detachment !== undefined) item.outcome = outcome.detachment;
+  if (frame.spawnedMessageId !== undefined && frame.spawnedMessageId !== "") {
+    item.spawnedMessageId = frame.spawnedMessageId;
+  }
+  return { items: [item], ignores: [] };
+}
+
+/**
  * ToolResultBlock {toolUseId, content, isError} → the tool RESULT item. Empty
  * toolName by contract (the name lives on the tool_use item this reconciles
  * onto by toolUseId; the store field-merges the pair).
@@ -1986,6 +2046,30 @@ function contextCompactedItem(c: Obj, uuid: string): ContextCompactedItem {
     durationMs: pnum(c, "durationMs"),
     summary: pstr(c, "summary"),
   };
+}
+
+/**
+ * Adopt a `frontend.v1.CompactionSummaryItem` as the feed's compaction-summary
+ * block.
+ *
+ * DECODED STRICTLY, like every other frontend.v1-owned payload: an unknown
+ * field or a wrong scalar type throws rather than reaching the renderer.
+ *
+ * `expensive_input_tokens` is -1 when the result's usage was unavailable, and
+ * the item then carries NO figure at all. The -1 is not passed on as a number
+ * to be formatted, and it is never turned into a 0 — the daemon states the
+ * absence, and the block renders it as absence.
+ */
+function compactionSummaryItem(e: Obj, uuid: string): CompactionSummaryItem {
+  const view = decodeCompactionSummaryItem(e, "ConversationItem.compactionSummary");
+  const item: CompactionSummaryItem = {
+    kind: "compaction-summary",
+    uuid,
+    summary: view.summary,
+    compactedAtMs: view.compactedAtMs,
+  };
+  if (view.expensiveInputTokens >= 0) item.expensiveInputTokens = view.expensiveInputTokens;
+  return item;
 }
 
 /**

@@ -48,51 +48,34 @@ export function isUngatedMode(mode: string): boolean {
 }
 
 /**
- * The session's ungated verdict, read from BOTH mode sources the store holds.
+ * The session's ungated verdict, read from the ONE mode source that still
+ * exists: `SessionView.permission_mode`, which the daemon fills from the
+ * registry record — the mode the session was LAUNCHED with.
  *
- * - `requested` is `SessionView.permission_mode`, which the daemon fills from
- *   the registry record — the mode the session was LAUNCHED with.
- * - `effective` is `SystemInit.permissionMode`, the mode the CLI itself
- *   reports back in its init handshake.
+ * A KNOWN HOLE, stated rather than papered over. This used to be an OR across
+ * two sources: the requested mode above, and the EFFECTIVE mode the CLI
+ * reported back in its `system:init` handshake (`SystemInit.permissionMode`).
+ * The two can disagree — a requested mode the CLI declines is downgraded
+ * silently, and conversely a `permissions.defaultMode` in the user's own
+ * settings.json can escalate a session the daemon believes is plain `default`,
+ * since the shim loads `settingSources: ["user", "project", "local"]` and the
+ * registry never sees those.
  *
- * The two can disagree. A requested mode the CLI declines is downgraded
- * silently (a session asked for `auto` was observed reporting `default`), and
- * conversely a `permissions.defaultMode` in the user's own settings.json can
- * escalate a session the daemon believes is plain `default` — the shim loads
- * `settingSources: ["user", "project", "local"]`, so settings-borne modes are
- * in play and the registry never sees them.
- *
- * Either source claiming `bypassPermissions` therefore means ungated. This is
- * an OR and not a precedence rule on purpose: the failure that matters is
- * showing a gate that is not there, so the verdict never lets one source's
- * silence suppress the other's warning.
+ * `SessionInitView` no longer carries the vendor init (field 3 is RESERVED by
+ * name and number), and NOTHING on any frontend.v1 surface replaces
+ * `SystemInit.permissionMode`. So the settings-borne escalation case now goes
+ * unwarned. The verdict is not reconstructed from anything else here: the
+ * daemon resolves modes, and a client guessing an effective mode out of some
+ * other field is exactly the derivation this surface was reshaped to delete.
+ * Closing the hole needs a daemon-resolved effective-mode fact on the wire.
  */
-export function ungatedModeOf(args: {
-  requestedMode: string;
-  systemInit: Record<string, unknown> | null;
-}): string {
-  if (isUngatedMode(args.requestedMode)) return args.requestedMode;
-  const effective = effectiveMode(args.systemInit);
-  return isUngatedMode(effective) ? effective : "";
+export function ungatedModeOf(args: { requestedMode: string }): string {
+  return isUngatedMode(args.requestedMode) ? args.requestedMode : "";
 }
 
 /** Whether the session runs with no permission gate. See {@link ungatedModeOf}. */
-export function isUngatedSession(args: {
-  requestedMode: string;
-  systemInit: Record<string, unknown> | null;
-}): boolean {
+export function isUngatedSession(args: { requestedMode: string }): boolean {
   return ungatedModeOf(args) !== "";
-}
-
-/**
- * The permission mode the CLI reported in its `system:init` handshake, or ""
- * when no init has landed (or it carried no mode). protojson camelCase, which
- * is the shape the store adopts verbatim.
- */
-export function effectiveMode(systemInit: Record<string, unknown> | null): string {
-  if (systemInit === null) return "";
-  const v = systemInit.permissionMode;
-  return typeof v === "string" ? v : "";
 }
 
 /**

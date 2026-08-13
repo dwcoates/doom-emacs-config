@@ -2079,10 +2079,23 @@ pre {
    landed answer wears, on the purple --compact-summary-bg wash no other
    bubble uses. The pairing is deliberate — it reads as an answer (it IS the
    conversation above, restated) that is nonetheless not part of the ordinary
-   exchange. Nothing here varies with the compaction's trigger. */
+   exchange. Nothing here varies with the compaction's trigger.
+
+   The `compaction_summary` payload arm draws the SAME block through the same
+   selector, which is the point: the purple wash is one visual with one rule,
+   so a summary that arrives on its own arm cannot drift into a second look. */
 .bubble.assistant.compact-summary {
   border-color: var(--final-response);
   background: var(--compact-summary-bg);
+}
+/* The summary block's own footnote — when the compaction completed and, when
+   the daemon resolved one, what producing the summary cost. Muted and small:
+   it annotates the account above it rather than competing with it. A summary
+   whose usage was unavailable prints no cost half at all. */
+.compaction-summary-meta {
+  margin-top: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--muted);
 }
 /* The three context-boundary separators — the red rule a clear draws, the
    orange rule a compaction draws, and the "— context compacted —" label under

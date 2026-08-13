@@ -37,6 +37,7 @@ import {
 import { AsyncBubbleForCall, type AsyncRenderContext } from "./async-render.js";
 import type { AsyncBubbleRegistry } from "./async-routing.js";
 import { Fold, capLabel } from "./fold.js";
+import type { DetachedKind, ToolDetachment } from "./agent-emission.js";
 import { asyncAgentItems } from "./state-adapter.js";
 import { animatedEllipsis, escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { failureKindName, failureToneClass } from "./failure-card.js";
@@ -48,7 +49,7 @@ import {
   transcriptFeed,
 } from "./subfeed.js";
 import { parseUnsupportedCommand } from "./unsupported.js";
-import { StatusResponse, statusPanelHtml, statusSnapshotFromInit } from "./status.js";
+import { StatusResponse, statusPanelHtml } from "./status.js";
 import {
   BodySpec,
   MemberContext,
@@ -95,6 +96,7 @@ import { asyncByBubble, isWatcher, watcherRef, type AsyncClassification } from "
 import { TaskTail, WatcherPoller } from "./watcher-poll.js";
 import {
   ContextClearedItem,
+  CompactionSummaryItem,
   ContextCompactedItem,
   ConversationItem,
   PermissionItem,
@@ -1164,10 +1166,61 @@ function ToolCard(
   return `
     <div class="tool-card tool-${variant.toLowerCase()}">
       ${tabBar}
-      <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}${permBadge}${faceSide(member)}</div>
+      <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}${DetachmentChip(item.outcome)}${permBadge}${faceSide(member)}</div>
       ${cardContent(item, { item, member, progress, panels })}
       ${asyncBubbleForCard(item, panels)}
     </div>`;
+}
+
+/**
+ * The WORD a detachment's kind is named by. The set arm IS the kind, so this
+ * is a rendering of a stated fact and never a guess: `unclassified` is the
+ * daemon saying it could not tell, and it names the tool so the card can still
+ * say what ran.
+ */
+function detachedKindWord(kind: DetachedKind): string {
+  switch (kind.case) {
+    case "skill":
+      return kind.args === "" ? `skill ${kind.skillName}` : `skill ${kind.skillName} ${kind.args}`;
+    case "unclassified":
+      return `unclassified ${kind.toolName}`;
+    default:
+      return kind.case;
+  }
+}
+
+/**
+ * The card's DETACHMENT CHIP: the tool call's typed outcome, drawn.
+ *
+ * THE TYPED OUTCOME IS THE CHIP — there is no separate chip arm, and nothing
+ * here is inferred from the call, the result or the tool's name. A card whose
+ * outcome carried no detachment gets no chip at all, because the call returned
+ * ordinarily and there is nothing to say about it.
+ *
+ * `lost` keeps its OWN WORD beside the error hue (the badge palette has no
+ * third settled color, exactly as `statusDot` notes): we do not know the work
+ * failed, only that we stopped being able to see it, and the word is what
+ * carries that distinction.
+ */
+function DetachmentChip(outcome: ToolDetachment | undefined): string {
+  if (outcome === undefined) return "";
+  if (outcome.case === "started") {
+    const label = outcome.value.label;
+    const text = label === ""
+      ? `detached · ${detachedKindWord(outcome.value.kind)}`
+      : `detached · ${detachedKindWord(outcome.value.kind)} · ${label}`;
+    return `<span class="badge run detachment">${escapeHtml(capLabel(text, 60))}</span>`;
+  }
+  const ended = outcome.value;
+  const tone = ended.case === "succeeded" ? "ok" : "err";
+  const detail =
+    ended.case === "succeeded" || ended.case === "failed"
+      ? ended.summary
+      : ended.case === "lost"
+        ? ended.inference
+        : "";
+  const text = detail === "" ? ended.case : `${ended.case} · ${detail}`;
+  return `<span class="badge ${tone} detachment">${escapeHtml(capLabel(text, 60))}</span>`;
 }
 
 /**
@@ -2298,6 +2351,34 @@ function CompactDivider(item: ContextCompactedItem): string {
 }
 
 /**
+ * The COMPACTION SUMMARY block: the summary a compaction recorded, on the same
+ * purple wash and green border the compaction divider's summary bubble wears.
+ *
+ * ITS OWN ARM, so the wash is a STATED kind rather than an inference — the
+ * block is drawn because the daemon said `compaction_summary`, never because
+ * something about a neighbouring item looked like a compaction.
+ *
+ * THE COST NOTE IS OPTIONAL AND ABSENCE IS ABSENCE. The wire carries -1 when
+ * the result's usage was unavailable, the item then carries no figure at all,
+ * and this prints none — a `0` here would read as a summary that cost nothing.
+ */
+function CompactionSummaryBlock(item: CompactionSummaryItem): string {
+  const cost =
+    item.expensiveInputTokens === undefined
+      ? ""
+      : ` · ${escapeHtml(formatTokens(item.expensiveInputTokens))} expensive input`;
+  return (
+    `<div class="bubble assistant md compact-summary compaction-summary" ` +
+    `data-compaction-summary-uuid="${escapeHtml(item.uuid)}">` +
+    `<div class="bubble-body">${renderMarkdown(item.summary)}</div>` +
+    `<div class="compaction-summary-meta">compacted ${escapeHtml(
+      formatClockTime(item.compactedAtMs),
+    )}${cost}</div>` +
+    `</div>`
+  );
+}
+
+/**
  * A daemon-resolved failure, as a bordered card in the feed.
  *
  * It is where a user whose workspace changed color finds out WHY. Before it
@@ -2537,6 +2618,8 @@ export function renderItem(
       return ClearDivider(item);
     case "context-compacted":
       return CompactDivider(item);
+    case "compaction-summary":
+      return CompactionSummaryBlock(item);
     case "daemon-intercepted-command":
       return DaemonInterceptedCommandChip(item);
     case "failure":
@@ -2564,6 +2647,9 @@ export function itemKey(item: ConversationItem, index: number): string {
     // arrival triggers, and an index key would move under it.
     case "context-cleared":
     case "context-compacted":
+    // Keyed by uuid too: a compaction summary is re-pushed by every resync
+    // that replays the conversation, and an index key drew a second block.
+    case "compaction-summary":
     // Keyed by uuid too, and for the same reason: a resync re-pushes the same
     // turn result, and an index key drew its closing chip again.
     case "result":
@@ -3334,23 +3420,23 @@ export class FeedRenderer {
    * support wired (no `getStatus` action) — in which case a refused
    * `/status` falls back to the generic unsupported card.
    *
-   * Merges three sources: the session's PUSHED `SystemInit` (the freshest,
-   * arriving on `sessionInit` frames) preferred over the snapshot the load
-   * carried, that load's account, and the store's live model / permission
-   * mode.
+   * Merges three sources, and DERIVES NOTHING from any of them: the daemon's
+   * pushed `/status` rows (already labelled and stringified), the loaded
+   * account, and the store's live model / permission mode.
+   *
+   * NO LOADING STATE. Empty rows is the daemon saying no init has landed,
+   * which the panel draws as the three rows it owns and nothing more.
    */
   private statusCardHtml(): string | undefined {
     if (!this.actions.getStatus) return undefined;
     const st = this.statusState;
     const store = this.lastState;
     const loaded = st.kind === "loaded" ? st.data : null;
-    const fromFrame = statusSnapshotFromInit(store?.systemInit ?? null);
     return statusPanelHtml({
-      snapshot: fromFrame ?? loaded?.snapshot ?? null,
+      rows: store?.statusRows ?? [],
       account: loaded?.account ?? null,
       model: store?.model ?? "",
       permissionMode: store?.permissionMode ?? "default",
-      loading: st.kind === "idle" || st.kind === "loading",
       error: st.kind === "error" ? st.error : undefined,
     });
   }

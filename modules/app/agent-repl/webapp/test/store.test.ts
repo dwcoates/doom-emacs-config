@@ -1431,25 +1431,35 @@ describe("ingest task-catalog", () => {
 // --- session-init -----------------------------------------------------------
 
 describe("ingest session-init", () => {
-  it("adopts the pushed SystemInit as the status snapshot source", () => {
+  it("adopts the pushed rows as the /status panel's source", () => {
     // Arrange
     const store = new ConversationStore();
+    const rows = [{ label: "Version", value: "2.1.215" }];
     // Act
-    store.ingest([
-      { kind: "session-init", value: { workspace: "ws", fence: "s1", init: { model: "claude", cwd: "/w" } } },
-    ]);
+    store.ingest([{ kind: "session-init", value: { workspace: "ws", fence: "s1", rows } }]);
     // Assert
-    expect(store.state.systemInit).toEqual({ model: "claude", cwd: "/w" });
+    expect(store.state.statusRows).toEqual(rows);
   });
 
-  it("replaces the retained init wholesale on the next push", () => {
+  it("replaces the retained rows wholesale on the next push", () => {
     // Arrange
     const store = new ConversationStore();
-    store.ingest([{ kind: "session-init", value: { workspace: "ws", fence: "s1", init: { fastModeState: "off" } } }]);
+    store.ingest([
+      { kind: "session-init", value: { workspace: "ws", fence: "s1", rows: [{ label: "Fast mode", value: "off" }] } },
+    ]);
     // Act
-    store.ingest([{ kind: "session-init", value: { workspace: "ws", fence: "s1", init: { fastModeState: "on" } } }]);
+    store.ingest([
+      { kind: "session-init", value: { workspace: "ws", fence: "s1", rows: [{ label: "Fast mode", value: "on" }] } },
+    ]);
     // Assert
-    expect(store.state.systemInit).toEqual({ fastModeState: "on" });
+    expect(store.state.statusRows).toEqual([{ label: "Fast mode", value: "on" }]);
+  });
+
+  it("holds no rows before any init has landed", () => {
+    // Arrange / Act — a fresh store has received no sessionInit push.
+    const store = new ConversationStore();
+    // Assert — empty, which the panel draws as its own rows and nothing more.
+    expect(store.state.statusRows).toEqual([]);
   });
 });
 
