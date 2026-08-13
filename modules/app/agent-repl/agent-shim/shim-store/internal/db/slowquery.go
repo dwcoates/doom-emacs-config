@@ -28,15 +28,19 @@ const SlowQueryOperation = "store.db.slow-query"
 // Statement families. They name WHAT ran, never the SQL and never its bound
 // values: the store's payloads are opaque to it, and a record quoting a
 // parameterized statement would leak session content into the global log.
+//
+// `events_by_task` and `open_tasks` are gone with the statements they timed:
+// both selected on a `task_id` column extracted from the retired TaskStarted /
+// TaskProgress / TaskEnded payloads, and detached work is modelled as messages
+// now, with no task-scoped envelope column for the store to index. See the gap
+// note on OpenTaskState.
 const (
-	StatementReplay       = "replay"
-	StatementMaxSeq       = "max_seq"
-	StatementEventsByTask = "events_by_task"
-	StatementOpenTasks    = "open_tasks"
-	StatementListCursors  = "list_cursors"
-	StatementCursor       = "cursor"
-	StatementIngest       = "ingest"
-	StatementMessagePage  = "message_page"
+	StatementReplay      = "replay"
+	StatementMaxSeq      = "max_seq"
+	StatementListCursors = "list_cursors"
+	StatementCursor      = "cursor"
+	StatementIngest      = "ingest"
+	StatementMessagePage = "message_page"
 )
 
 // SlowQueryFromEnv resolves the slow-query threshold from the environment.
