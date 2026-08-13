@@ -4,7 +4,7 @@ import { create } from "@bufbuild/protobuf";
 import {
   FailureKindSchema,
   QueryTerminationFailureSchema,
-} from "../../proto/gen/ts/frontend/v1/errors_pb";
+} from "../../proto/gen/ts/frontend/v1/shared_pb";
 import {
   QueryIteratorFailureSchema,
   QueryStartupFailureSchema,

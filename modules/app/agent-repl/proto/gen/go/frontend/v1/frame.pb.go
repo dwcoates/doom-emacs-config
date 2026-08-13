@@ -1635,7 +1635,7 @@ var File_frontend_v1_frame_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_frame_proto_rawDesc = "" +
 	"\n" +
-	"\x17frontend/v1/frame.proto\x12\vfrontend.v1\x1a\x18frontend/v1/errors.proto\x1a\x16frontend/v1/feed.proto\x1a\x18frontend/v1/footer.proto\x1a\x1efrontend/v1/gate-revival.proto\x1a\x16frontend/v1/host.proto\x1a\x1bfrontend/v1/lifecycle.proto\x1a\x17frontend/v1/merge.proto\x1a\x19frontend/v1/sidebar.proto\x1a\x17frontend/v1/state.proto\x1a\x18frontend/v1/topbar.proto\"\x96\x0e\n" +
+	"\x17frontend/v1/frame.proto\x12\vfrontend.v1\x1a\x16frontend/v1/feed.proto\x1a\x18frontend/v1/footer.proto\x1a\x18frontend/v1/shared.proto\x1a\x19frontend/v1/sidebar.proto\x1a\x18frontend/v1/topbar.proto\"\x96\x0e\n" +
 	"\rFrontendFrame\x128\n" +
 	"\bsnapshot\x18\x01 \x01(\v2\x1a.frontend.v1.StateSnapshotH\x00R\bsnapshot\x12F\n" +
 	"\x0fworkspace_state\x18\x02 \x01(\v2\x1b.frontend.v1.WorkspaceStateH\x00R\x0eworkspaceState\x12=\n" +
@@ -1924,15 +1924,10 @@ func file_frontend_v1_frame_proto_init() {
 	if File_frontend_v1_frame_proto != nil {
 		return
 	}
-	file_frontend_v1_errors_proto_init()
 	file_frontend_v1_feed_proto_init()
 	file_frontend_v1_footer_proto_init()
-	file_frontend_v1_gate_revival_proto_init()
-	file_frontend_v1_host_proto_init()
-	file_frontend_v1_lifecycle_proto_init()
-	file_frontend_v1_merge_proto_init()
+	file_frontend_v1_shared_proto_init()
 	file_frontend_v1_sidebar_proto_init()
-	file_frontend_v1_state_proto_init()
 	file_frontend_v1_topbar_proto_init()
 	file_frontend_v1_frame_proto_msgTypes[0].OneofWrappers = []any{
 		(*FrontendFrame_Snapshot)(nil),

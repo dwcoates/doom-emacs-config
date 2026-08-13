@@ -27,7 +27,7 @@
  */
 
 import { create } from "@bufbuild/protobuf";
-import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/errors_pb";
+import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/shared_pb";
 import type { FailureCardLifecycle, FailureCardView, FailureKind } from "./frontend-proto.js";
 import type { FailureCardItem } from "./store.js";
 
