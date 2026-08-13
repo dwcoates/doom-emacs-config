@@ -53,7 +53,7 @@ import type {
 import type {
   FirstPageCmd as GeneratedFirstPageCmd,
   NextPageCmd as GeneratedNextPageCmd,
-} from "../../proto/gen/ts/frontend/v1/conversation-history_pb";
+} from "../../proto/gen/ts/frontend/v1/feed_pb";
 import type {
   HibernationDetail as GeneratedHibernationDetail,
   ReviveCompactFirst as GeneratedReviveCompactFirst,
@@ -63,14 +63,14 @@ import type {
 import { CompactionScope as GeneratedCompactionScope } from "../../proto/gen/ts/frontend/v1/gate-revival_pb";
 import type { AnswerMergeDequeueCmd as GeneratedAnswerMergeDequeueCmd } from "../../proto/gen/ts/frontend/v1/merge_pb";
 import type { FailureKind as GeneratedFailureKind } from "../../proto/gen/ts/frontend/v1/errors_pb";
-import type { FailureCardView as GeneratedFailureCardView } from "../../proto/gen/ts/frontend/v1/failure-card_pb";
+import type { FailureCardView as GeneratedFailureCardView } from "../../proto/gen/ts/frontend/v1/feed_pb";
 import type {
   QueueEntry as GeneratedQueueEntry,
   QueueEntryKeepAliveHold as GeneratedQueueEntryKeepAliveHold,
   QueueEntryRevivalHold as GeneratedQueueEntryRevivalHold,
   QueueEntryBuildRefreshHold as GeneratedQueueEntryBuildRefreshHold,
   QueueClassificationUninterruptibleTurn as GeneratedQueueClassificationUninterruptibleTurn,
-} from "../../proto/gen/ts/frontend/v1/prompt-queue_pb";
+} from "../../proto/gen/ts/frontend/v1/footer_pb";
 import { PromptOrigin as GeneratedPromptOrigin } from "../../proto/gen/ts/protocol/v1/core_pb";
 
 /** A generated oneof's arm keys, with protobuf-es's "nothing set" arm dropped. */
