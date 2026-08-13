@@ -1,0 +1,337 @@
+// payloads.proto — the bodies of the MessageEntry payload arms.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/content.proto";
+import "conversation/v1/tokens.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// Something a person typed. The opening of a turn.
+message UserSaid {
+  // What they typed, and anything they attached. NOT a bare TextBlock: a person
+  // pastes images, and a single block could not hold one alongside their words.
+  UserContent content = 1;
+}
+
+// One response from the agent.
+message AgentSaid {
+  // The response entire: prose, reasoning, and tool calls, in order.
+  AgentContent content = 1;
+  // What this response cost, in the ONE canonical token shape. Carried because
+  // it is evidence about THIS message; the footer's aggregate figures are
+  // resolved by the daemon from many of these and are not this.
+  TokenUsage usage = 2;
+  // The model that produced it, since a conversation can span models and the
+  // cost of a message is not readable without knowing which. It sits beside the
+  // usage rather than inside it because it describes the RESPONSE, not the
+  // counters.
+  string model = 3;
+  // Why the agent stopped. A oneof rather than a string because the set is
+  // closed and a client branches on it.
+  StopReason stop_reason = 4;
+}
+
+// A tool the agent called has returned.
+//
+// An UPDATE arm rather than a content block, carrying the message_id of the
+// message that made the call, so the result folds onto the tool card without a
+// correlation pass and costs no page slot.
+//
+// The vendor delivers these inside user-role records. That is a transport
+// accident of its API, and this shape is where it stops.
+message ToolReturned {
+  // The call this answers, which the agent supplied when it made the call.
+  string tool_call_id = 1;
+  // What the tool returned, for the reader.
+  ToolResultContent content = 2;
+  // The tool FAILED. A separate fact from empty content, because a tool that
+  // returned nothing and a tool that errored are different things to render.
+  bool is_error = 3;
+}
+
+// Why an agent response ended where it did.
+message StopReason {
+  oneof reason {
+    // The agent finished speaking.
+    StopEndTurn end_turn = 1;
+    // The agent called a tool and is waiting for it.
+    StopToolCall tool_call = 2;
+    // The response hit its length ceiling.
+    StopMaxTokens max_tokens = 3;
+    // Something interrupted it.
+    StopInterrupted interrupted = 4;
+    // The vendor gave a reason we do not model.
+    StopUnsupported unsupported = 5;
+  }
+}
+
+// The agent had nothing further to say.
+message StopEndTurn {}
+
+// The agent stopped to wait for a tool it called.
+message StopToolCall {}
+
+// The response was truncated at its output ceiling.
+message StopMaxTokens {}
+
+// The response was cut short by something outside it.
+message StopInterrupted {}
+
+// A stop reason this schema does not model.
+message StopUnsupported {
+  // What the vendor called it, so a later schema knows what to add.
+  string reason = 1;
+}
+
+// A permission the agent asked for.
+message PermissionAsked {
+  // What the agent wants to do, so the user can answer knowing what they allow.
+  ToolCallBlock requested = 1;
+}
+
+// The answer to a permission the agent asked for.
+message PermissionAnswered {
+  oneof answer {
+    PermissionAllowed allowed = 1;
+    PermissionDenied denied = 2;
+    // The question went away without an answer — the turn ended, the session
+    // stopped. Distinct from denial, which is a decision the user made.
+    PermissionAbandoned abandoned = 3;
+  }
+}
+
+// The user allowed the call.
+message PermissionAllowed {
+  // The user allowed this kind of call from now on, not just this one.
+  bool for_session = 1;
+}
+
+// The user refused the call.
+message PermissionDenied {
+  // What the user said when denying, which the agent reads as feedback.
+  string reason = 1;
+}
+
+// Nobody ever answered, and the question is no longer live.
+message PermissionAbandoned {}
+
+// A failure the PRODUCER OBSERVED and the vendor RECORDED.
+//
+// NARROW ON PURPOSE, and the narrowing is the point. A failure card the daemon
+// SYNTHESIZED — a session that never started, a store write the shim rejected —
+// is not this: nothing observed it and no transcript holds it, so it has no
+// producer and cannot be an entry at all. That is `frontend.v1.FailureCardView`,
+// which the daemon mints and pushes.
+//
+// What lands here is the other kind: the vendor's own recorded error, which the
+// CLI writes to its transcript and the sidecar reads back. It is durable
+// because the vendor made it durable, and a reader scrolling back must see that
+// the turn failed rather than find it merely absent.
+//
+// NO RECOVERY CLASSIFICATION HERE. Whether anything can be done about a failure
+// is the daemon's judgement (`internal/errclass`), and it reaches a client
+// already resolved on FailureCardView. A producer stating it too would be a
+// second authority on one question, and the two would disagree.
+message FailureRaised {
+  // What went wrong, as the vendor reported it.
+  string summary = 1;
+  // The underlying detail, for someone who wants it. Held apart from the
+  // summary so a client can show one without the other.
+  string detail = 2;
+  // How long the vendor said it would wait before retrying, in millis. Zero
+  // means it said nothing — NOT that it will retry immediately.
+  int64 retry_in_ms = 3;
+}
+
+// The conversation was cut here, and the reader must see where.
+message ContextCut {
+  oneof cut {
+    // Everything before this was discarded outright.
+    ContextCleared cleared = 1;
+    // Everything before this was summarized into what follows.
+    ContextCompacted compacted = 2;
+  }
+}
+
+// History was discarded with nothing left in its place.
+message ContextCleared {}
+
+// History was replaced by a summary of itself.
+message ContextCompacted {
+  // The summary that replaced the history, which the feed shows in its place so
+  // the cut is not a hole. AgentContent because the summary is the agent's own
+  // prose about what it is discarding.
+  AgentContent summary = 1;
+  // What the context measured before and after, so a reader can see what the
+  // compaction bought rather than being told it happened.
+  int64 tokens_before = 2;
+  int64 tokens_after = 3;
+}
+
+// Work that DETACHED from the turn and now runs alongside it.
+message DetachedWorkStarted {
+  // The tool call that spawned it. Every detachment originates from one, and
+  // this is what draws the line from the card back to the call.
+  string origin_tool_call_id = 1;
+  // What to call it in the feed, resolved by the producer.
+  string label = 2;
+  // What kind of thing detached, which decides how its output is read.
+  DetachedWorkKind kind = 3;
+}
+
+// What kind of work detached.
+//
+// SIX ARMS, matching what the daemon already resolves (frontend.v1's
+// DetachedWork). An earlier draft had four and silently dropped `merge` and
+// `skill`, which is how a contract quietly deletes a feature: a merge-driven
+// turn and a skill invocation would both have arrived as `unclassified` and
+// rendered as a nameless spool.
+message DetachedWorkKind {
+  oneof kind {
+    // A subagent: a whole conversation happening elsewhere.
+    DetachedAgent agent = 1;
+    // A background shell command.
+    DetachedShell shell = 2;
+    // A workflow with its own journal.
+    DetachedWorkflow workflow = 3;
+    // We could not tell, which is stated rather than guessed.
+    DetachedUnclassified unclassified = 4;
+    // A skill invocation. It owns its own window rather than rendering flat, so
+    // every record the skill produces names this message as its
+    // top_level_message_id and needs no correlation to find its card.
+    DetachedSkill skill = 5;
+    // A merge run: the conversation a merge drives through the workspace's OWN
+    // session. NO TOOL SPAWNS IT — the daemon opens it when it classifies the
+    // merge skill's invocation — so its origin_tool_call_id is empty, which is
+    // the one detachment for which that is not a producer fault.
+    DetachedMerge merge = 6;
+  }
+}
+
+// A subagent running its own conversation.
+message DetachedAgent {}
+
+// A shell command running in the background.
+message DetachedShell {}
+
+// A workflow with its own journal of steps.
+message DetachedWorkflow {}
+
+// A skill invocation, which owns its own window.
+//
+// `merge` is the one skill with an arm of its own; every other skill arrives
+// here. The distinction is not cosmetic — a merge run drives the workspace's
+// own session and carries no skill file to show.
+message DetachedSkill {
+  // The skill's name as invoked, verbatim (e.g. "create-or-update-workspace").
+  string skill_name = 1;
+  // The invocation's arguments, verbatim; empty when none were given.
+  string args = 2;
+}
+
+// A merge run, driving the workspace's own session.
+message DetachedMerge {}
+
+// Detached work we could not classify. Stated rather than defaulted into one of
+// the known kinds, because a wrong kind renders wrong output confidently.
+message DetachedUnclassified {
+  // The tool we could not classify, so the card can still name it.
+  string tool_name = 1;
+}
+
+// A skill file's contents, delivered as the SKILL's own body.
+//
+// AN UPDATE, not part of DetachedWorkStarted, because the harness writes the
+// body as a SEPARATE transcript record — a `user` line flagged isMeta — which
+// the producer reads after the call that opened the work.
+//
+// IT REPLACES WHOLE rather than appending, unlike DetachedWorkProgressed. The
+// body is delivered once, and a re-read overwrites with the same bytes instead
+// of doubling them.
+//
+// It carries the SKILL MESSAGE's own message_id, which is what makes the old
+// daemon-side correlation unnecessary: the record states which skill it belongs
+// to instead of a reader reconstructing it by walking a chain through isMeta
+// records.
+message SkillBodyResolved {
+  // The skill file's contents, verbatim markdown. A skill IS a markdown
+  // document, so it is carried and rendered as one.
+  string body = 1;
+}
+
+// Output accumulating into detached work already open.
+message DetachedWorkProgressed {
+  // Output since the last record, appended in seq order. A DELTA rather than
+  // the whole spool, because the whole spool re-sent on every update is how a
+  // long-running shell costs more to watch than to run.
+  string output = 1;
+}
+
+// Detached work reached an end.
+message DetachedWorkEnded {
+  oneof outcome {
+    DetachedSucceeded succeeded = 1;
+    DetachedFailed failed = 2;
+    // It was stopped on purpose.
+    DetachedCancelled cancelled = 3;
+    // We stopped hearing from it. DISTINCT from failure: we do not know that it
+    // failed, only that we cannot see it any more.
+    DetachedLost lost = 4;
+  }
+}
+
+// It finished and did what it was asked.
+message DetachedSucceeded {
+  // What it reported on the way out, for the card's collapsed line.
+  string summary = 1;
+}
+
+// It finished and did not.
+message DetachedFailed {
+  // What went wrong, for the card's collapsed line.
+  string summary = 1;
+}
+
+// Someone stopped it deliberately.
+message DetachedCancelled {}
+
+// We lost sight of it.
+//
+// A SEPARATE OUTCOME FROM FAILURE, deliberately. Folding it into failure would
+// have this system assert something it did not observe: that the work died.
+message DetachedLost {
+  // How we concluded it: the file vanished, it went silent, a sweep found it.
+  // Carried so "we watched it exit" is distinguishable from "we stopped
+  // hearing from it".
+  string inference = 1;
+}
+
+// A fragment of a message still arriving.
+//
+// The stream plane hands these straight to the daemon as they are typed; the
+// file plane writes the completed message afterwards. A consumer REPLACES the
+// preview with the settled message rather than appending beside it, matching on
+// message_id — which is why both producers must derive that id from the same
+// vendor value.
+message ContentArriving {
+  // Which block of the message this extends. The index into the settled
+  // message's content, so two reasoning fragments from one response land on
+  // their own previews rather than both on the first.
+  uint32 block_index = 1;
+
+  // What is arriving. Which arm is set says which KIND of block is being
+  // extended, so a preview never has to guess what it is showing.
+  oneof fragment {
+    // Prose, as the agent writes it.
+    string text = 2;
+    // Reasoning, as the agent reasons.
+    string thinking = 3;
+    // Tool arguments, arriving as the agent composes them. A string because it
+    // is INCOMPLETE JSON until the last fragment lands; typing it as Struct
+    // would claim it parses when it does not yet.
+    string arguments_json = 4;
+  }
+}

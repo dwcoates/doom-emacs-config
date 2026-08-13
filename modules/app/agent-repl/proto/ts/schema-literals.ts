@@ -36,12 +36,12 @@ import {
   ModelMarker,
   ModelMarkerSchema,
   model_marker_literal,
-} from "../gen/ts/agentshim/core/v1/core_pb.js";
+} from "../gen/ts/protocol/v1/core_pb.js";
 import {
   SessionCommand,
   SessionCommandSchema,
   session_command_spec,
-} from "../gen/ts/agentshim/frontend/v1/commands_pb.js";
+} from "../gen/ts/frontend/v1/commands_pb.js";
 
 /** One session command's schema facts. */
 export interface SessionCommandSpec {

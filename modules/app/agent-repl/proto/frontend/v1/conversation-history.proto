@@ -1,0 +1,121 @@
+// conversation-history.proto — THE ONLY WAY a frontend obtains conversation it
+// does not already hold, and deliberately a TWO-VERB one.
+//
+// Live delivery of NEW messages (ConversationDelta) is not pagination and is
+// not governed here.
+//
+// THE CLIENT CANNOT NAME A POSITION. Not a seq, not an offset, not a cursor it
+// authored or holds. "Give me everything" is not a request this contract can
+// express — not because no caller sends it, but because there is no value that
+// means it. The daemon owns the position, persisted in the SSM, per reader per
+// workspace, and NextPageCmd carries no position at all: even an opaque cursor
+// is a position the client holds.
+//
+// NO FENCE. A fence was daemon state the client echoed back so the daemon could
+// check the client against itself — the same category error as from_seq. The
+// daemon owns the reader's position, so it already knows when a generation
+// change invalidates it: it DROPS the position, the next NextPageCmd arrives
+// with none and is REFUSED, and a client answers a refusal with FirstPageCmd. A
+// page in flight across the transition is handled by request_id, which a client
+// already uses to apply only the pages it awaits.
+//
+// ON THE WEBAPP BOUNCE, EXPLICITLY ACCEPTED. A frontend that bounces calls
+// FirstPageCmd and starts from the bottom. Earlier pages are re-reached by
+// paging back. Scroll depth is NOT preserved across a bounce, and no
+// client-side persistence is added to preserve it. This is a deliberate
+// simplification, not an oversight.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// Ask for the MOST RECENT page, and reset this reader's position to it.
+//
+// The cold open and the whole recovery story: a client that bounced, rotated
+// its seq space, or lost its place calls this and starts from the bottom.
+message FirstPageCmd {
+  // Which conversation. The daemon's position is per reader PER WORKSPACE, so
+  // this is what selects the position being reset.
+  string workspace = 1;
+}
+
+// Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
+//
+// IT CARRIES NO POSITION, and that absence is the design. From a reader with no
+// established position it is REFUSED rather than answered with the tail:
+// defaulting would turn a client bug into a silent tail read, and "I have no
+// position" already has its own verb.
+message NextPageCmd {
+  string workspace = 1;
+}
+
+// AT MOST TEN messages, oldest first.
+//
+// Ten discrete slots rather than a repeated field: a repeated field is
+// unbounded by construction and the only enforcement available is a runtime
+// check the producer must remember to apply. Here a producer holding an
+// eleventh message has nowhere to put it.
+//
+// DENSITY IS THE PRODUCER'S INVARIANT. Slots fill from message_1 upward, and
+// message_k set while message_(k-1) is empty is a bug. Making THAT structural
+// needs a oneof of ten page-shaped messages and fifty-five fields; the ceiling
+// is what matters and this achieves it, so the gap is documented rather than
+// paid for.
+//
+// NESTED MESSAGES DO NOT COST A SLOT. A message contained by another travels
+// inside its parent exactly as ConversationDelta carries it, so a client asking
+// for a page cannot be surprised by its width.
+message ConversationHistoryPage {
+  string workspace = 1;
+  // The requesting command's request_id, echoed so a client correlates this
+  // page with the request it made rather than with whichever was most recent,
+  // and so it can DISCARD a page it is no longer awaiting.
+  string request_id = 2;
+
+  // Messages OLDEST FIRST, as COMPLETE feed envelopes identical in shape to
+  // ConversationDelta's — so a frontend renders a paged message with the same
+  // code that renders a pushed one. Absent slots mean a short page, which at
+  // the top of a conversation is the normal case.
+  Message message_1 = 3;
+  Message message_2 = 4;
+  Message message_3 = 5;
+  Message message_4 = 6;
+  Message message_5 = 7;
+  Message message_6 = 8;
+  Message message_7 = 9;
+  Message message_8 = 10;
+  Message message_9 = 11;
+  Message message_10 = 12;
+
+  // WHETHER the conversation continues above this page — never WHERE.
+  //
+  // A oneof of MESSAGES rather than a bool or an enum: "there is more" and "we
+  // reached the beginning" are the only two answers, and a shape that could
+  // carry both or neither invites a client to invent a third.
+  oneof continuation {
+    // Older history remains. EMPTY on purpose: under this contract "there is
+    // more" is a FACT the client acts on by calling NextPageCmd, not a handle
+    // it stores. The cursor that used to live here is precisely the position
+    // the client no longer holds.
+    HistoryHasMore more = 13;
+    // This page reaches the conversation's beginning; the client retires its
+    // load-more affordance.
+    HistoryAtStart start = 14;
+  }
+
+  // FIRST PAGES ONLY: the seq this page is current THROUGH, so the client
+  // splices onto the live push stream gap-free BY CONSTRUCTION rather than by
+  // timing. An OUTPUT the client never echoes back — it rides no request.
+  // Zero on next pages, which are history and carry no live edge.
+  uint64 live_join_seq = 15;
+}
+
+// Older history remains; call NextPageCmd.
+message HistoryHasMore {}
+
+// There is nothing older. A FACT the daemon established by reading to the floor.
+message HistoryAtStart {}

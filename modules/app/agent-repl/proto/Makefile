@@ -6,55 +6,56 @@
 #
 # Requires: protoc, protoc-gen-go, and @bufbuild/protoc-gen-es (via npx).
 
+# Listed by SURFACE, most upstream first. conversation imports nothing, so it
+# leads; state is daemon-internal and depends on everything, so it trails.
 PROTOS := \
-  agentshim/core/v1/core.proto \
-  agentshim/core/v1/message-page.proto \
-  agentshim/core/v1/entry-delivery.proto \
-  agentshim/conversation/v1/tokens.proto \
-  agentshim/conversation/v1/content.proto \
-  agentshim/conversation/v1/payloads.proto \
-  agentshim/conversation/v1/bookkeeping.proto \
-  agentshim/conversation/v1/message.proto \
-  agentshim/conversation/v1/external.proto \
-  agentshim/conversation/shimside/v1/unsupported.proto \
-  agentshim/conversation/shimside/v1/entry.proto \
-  agentshim/conversation/shimside/v1/write.proto \
-  agentshim/frontend/v1/agent-emission.proto \
-  agentshim/frontend/v1/agent-response.proto \
-  agentshim/frontend/v1/commands.proto \
-  agentshim/frontend/v1/conversation-history.proto \
-  agentshim/frontend/v1/conversation-page.proto \
-  agentshim/frontend/v1/detached-work.proto \
-  agentshim/frontend/v1/durable.proto \
-  agentshim/frontend/v1/errors.proto \
-  agentshim/frontend/v1/failure-card.proto \
-  agentshim/frontend/v1/feed.proto \
-  agentshim/frontend/v1/footer.proto \
-  agentshim/frontend/v1/frame.proto \
-  agentshim/frontend/v1/gate-revival.proto \
-  agentshim/frontend/v1/host.proto \
-  agentshim/frontend/v1/lifecycle.proto \
-  agentshim/frontend/v1/merge.proto \
-  agentshim/frontend/v1/permission-card.proto \
-  agentshim/frontend/v1/prompt-queue.proto \
-  agentshim/frontend/v1/sidebar.proto \
-  agentshim/frontend/v1/slash-menu.proto \
-  agentshim/frontend/v1/state.proto \
-  agentshim/frontend/v1/tokens-menu.proto \
-  agentshim/frontend/v1/tool-call.proto \
-  agentshim/frontend/v1/topbar.proto \
-  agentshim/frontend/v1/user-message.proto
+  conversation/v1/content.proto \
+  conversation/v1/message.proto \
+  conversation/v1/payloads.proto \
+  conversation/v1/tokens.proto \
+  protocol/v1/bookkeeping.proto \
+  protocol/v1/core.proto \
+  protocol/v1/entry-delivery.proto \
+  protocol/v1/external.proto \
+  protocol/v1/message-page.proto \
+  agentshim/v1/entry.proto \
+  agentshim/v1/unsupported.proto \
+  agentshim/v1/write.proto \
+  frontend/v1/agent-emission.proto \
+  frontend/v1/agent-response.proto \
+  frontend/v1/commands.proto \
+  frontend/v1/conversation-history.proto \
+  frontend/v1/conversation-page.proto \
+  frontend/v1/detached-work.proto \
+  frontend/v1/errors.proto \
+  frontend/v1/failure-card.proto \
+  frontend/v1/feed.proto \
+  frontend/v1/footer.proto \
+  frontend/v1/frame.proto \
+  frontend/v1/gate-revival.proto \
+  frontend/v1/host.proto \
+  frontend/v1/lifecycle.proto \
+  frontend/v1/merge.proto \
+  frontend/v1/permission-card.proto \
+  frontend/v1/prompt-queue.proto \
+  frontend/v1/sidebar.proto \
+  frontend/v1/slash-menu.proto \
+  frontend/v1/state.proto \
+  frontend/v1/tokens-menu.proto \
+  frontend/v1/tool-call.proto \
+  frontend/v1/topbar.proto \
+  frontend/v1/user-message.proto \
+  state/v1/durable.proto
 
 # The component tree the structural gates scan. Overridable so the gate
 # self-tests can drive the REAL targets against a fixture tree; the default is
 # the schema tree this Makefile generates from.
-COMPONENT_DIR ?= agentshim/frontend/v1
+COMPONENT_DIR ?= frontend/v1
 # The tree I7 scans for forbidden imports. Overridable so the codegen-gate
 # self-test can point it at its own fixture root.
 ISOLATION_ROOT ?= ..
-DURABLE_SCHEMA ?= durable.proto
 
-.PHONY: all go ts lint codegen-gate durable-isolation conversation-isolation test-check-durable-isolation test-check-conversation-isolation test-check-generated check-generated validate coverage clean
+.PHONY: all go ts lint codegen-gate conversation-isolation test-check-conversation-isolation test-check-generated check-generated validate coverage clean
 
 all: go ts
 
@@ -63,7 +64,7 @@ all: go ts
 # schema that has already drifted must not be able to produce bindings by any
 # Makefile route, so `go`, `ts`, `all`, and `lint` all depend on this rather
 # than on `lint` alone. New structural gates are added here, once.
-codegen-gate: durable-isolation conversation-isolation
+codegen-gate: conversation-isolation
 
 go: codegen-gate
 	mkdir -p gen/go
@@ -81,23 +82,18 @@ ts: codegen-gate
 lint: codegen-gate
 	protoc -I . --descriptor_set_out=/dev/null $(PROTOS)
 
-# INVARIANT I6. durable.proto is the persistence evidence layer and no other
-# component schema may import it or name a type it declares. It hangs off
-# codegen-gate, which `go`, `ts`, and `lint` all require, so EVERY Makefile
-# route to bindings REFUSES a schema that has already drifted rather than
-# emitting bindings for the coupling and leaving the refusal to review.
-durable-isolation:
-	./check-durable-isolation.sh $(COMPONENT_DIR) $(DURABLE_SCHEMA)
+# INVARIANT I6 IS GONE, AND ITS GATE WITH IT. `durable.proto` needed a script
+# only while it sat INSIDE frontend/v1 being definitionally not frontend, so the
+# one thing separating persistence evidence from the push surface was a grep.
+# It is now `state.v1`, its own package, its own Go import path and its own TS
+# module — the compiler enforces what the script used to check.
 
-test-check-durable-isolation:
-	./test-check-durable-isolation.sh
-
-# INVARIANT I7. agentshim.conversation.internal.v1 is the half of a stored
-# record that never crosses the shim wire — the observation plane, the store's
-# dedup key, and anything the producer could not convert. No daemon or webapp
-# source may import it. It is a separate PACKAGE rather than a separate file
-# precisely so the boundary is a Go import path and a TS module rather than a
-# convention; this gate refuses the one remaining way to cross it.
+# INVARIANT I7. agentshim.v1 is the half of a stored record that never crosses
+# the shim wire — the observation plane, the store's dedup key, and anything the
+# producer could not convert. No daemon or webapp source may import it. It is a
+# separate PACKAGE rather than a separate file precisely so the boundary is a Go
+# import path and a TS module rather than a convention; this gate refuses the one
+# remaining way to cross it.
 conversation-isolation:
 	./check-conversation-isolation.sh $(ISOLATION_ROOT)
 
@@ -119,7 +115,7 @@ test-check-generated:
 	./test-check-generated.sh
 
 # Validate both the source schema and the checked-in Go/TS generated artifacts.
-validate: lint test-check-durable-isolation test-check-conversation-isolation test-check-generated check-generated
+validate: lint test-check-conversation-isolation test-check-generated check-generated
 
 # Generated stubs are dependencies, not coverage subjects.  Each consumer's
 # own coverage configuration scopes measurement to handwritten package source.

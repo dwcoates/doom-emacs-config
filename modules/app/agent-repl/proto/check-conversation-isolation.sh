@@ -2,10 +2,14 @@
 #
 # INVARIANT I7 — CONVERSATION-INTERNAL ISOLATION, AS A BUILD GATE.
 #
-# A stored conversation record has two halves. agentshim.conversation.v1 is the
-# half that may cross the shim→daemon wire; agentshim.conversation.internal.v1
-# is the half that may not — which observation plane produced the record, the
-# key the store deduped it on, and anything the producer could not convert.
+# A stored conversation record has two halves. protocol.v1's ExternalEntry is the
+# half that may cross the shim→daemon wire; agentshim.v1 is the half that may
+# not — which observation plane produced the record, the key the store deduped it
+# on, and anything the producer could not convert.
+#
+# agentshim.v1 IS ONE OF THE FIVE SURFACES, not a sub-namespace of a shared
+# umbrella. It is named for what it holds — shim-side internals — which is why it
+# cannot also be the prefix conversation, protocol, frontend and state hang under.
 #
 # WHY THIS EXISTS. The daemon used to read the observation plane in order to
 # decide whether a turn boundary was authoritative. That is an abstraction leak
@@ -17,13 +21,12 @@
 #
 # WHY A SEPARATE PACKAGE RATHER THAN A SEPARATE FILE. Every file in one proto
 # package generates into ONE Go package. entry.proto and external.proto sitting
-# side by side in agentshim.conversation.v1 would both land in `conversationv1`,
-# and a daemon importing the external half would get Plane in the same namespace
-# for free — the file split would enforce nothing at all in Go. TypeScript would
-# have honored it (one module per file); Go would not. So the shim-side half is
-# its own proto package, hence its own Go import path and its own TS module, and
-# this gate checks the one thing left: that nobody imports it from a runtime
-# that has no business with it.
+# side by side in one package would both land in one Go namespace, and a daemon
+# importing the external half would get Plane for free — the file split would
+# enforce nothing at all in Go. TypeScript would have honored it (one module per
+# file); Go would not. So the shim-side half is its own proto package, hence its
+# own Go import path and its own TS module, and this gate checks the one thing
+# left: that nobody imports it from a runtime that has no business with it.
 #
 # WHY THE PACKAGE IS NOT CALLED `internal`. It was, briefly, and that was a bug
 # this gate could not catch. Go's `internal/` path element means "importable
@@ -55,8 +58,8 @@ ROOT="${1:-$(cd "$THIS_DIR/.." && pwd)}"
 
 # The proto package, and the Go import path its bindings generate into. Both
 # forms are checked because a Go file names the import path, not the package.
-PROTO_PKG="agentshim/conversation/shimside/v1"
-GO_PKG="agentrepl/proto/agentshim/conversation/shimside/v1"
+PROTO_PKG="agentshim/v1"
+GO_PKG="agentrepl/proto/agentshim/v1"
 
 if [ ! -d "$ROOT" ]; then
     printf 'conversation-isolation: root %s does not exist\n' "$ROOT" >&2
