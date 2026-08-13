@@ -198,17 +198,13 @@ message DetachedWorkShell {
   reserved 1;
   reserved "command";
 
-  // Everything the command has written so far. See DetachedWorkOutputSpool.
-  //
-  // TODO(respelling): conversation.v1.DetachedWorkProgressed.output is the
-  // producer's counterpart for the BYTES, but it is NARROWER than this spool:
-  // it is a per-record delta with no cursor, while DetachedWorkOutputSpool also
-  // carries `through_offset`, the delivered-bytes cursor that
-  // DetachedWorkOutputAppend.from_offset is checked against. Removing the spool
-  // would delete the anchor gap detection compares to, turning a lost chunk
-  // into a silently applied append. NOT REMOVED; needs a ruling on where the
-  // cursor lives first.
-  DetachedWorkOutputSpool output = 2;
+  // 2 was `output`: a second spelling of the bytes
+  // conversation.v1.DetachedWorkProgressed.output already carries. It was kept
+  // only because this spool also carried `through_offset`, a delivered-bytes
+  // cursor the producer's record had no counterpart for; that cursor is gone,
+  // so the spool is bytes and the producer's record is a genuine counterpart.
+  reserved 2;
+  reserved "output";
 }
 
 // A spawn whose tool the daemon does not recognize.
@@ -229,17 +225,15 @@ message DetachedWorkUnclassified {
   reserved 1;
   reserved "tool_name";
 
-  // Everything the work has written so far. See DetachedWorkOutputSpool.
-  //
-  // TODO(respelling): as on DetachedWorkShell.output — the producer's
-  // counterpart, conversation.v1.DetachedWorkProgressed.output, carries the
-  // bytes but not `through_offset`, the cursor
-  // DetachedWorkOutputAppend.from_offset is checked against. NOT REMOVED; the
-  // cursor needs a home before the spool can go.
-  DetachedWorkOutputSpool output = 2;
+  // 2 was `output`: as on DetachedWorkShell — a second spelling of the bytes
+  // conversation.v1.DetachedWorkProgressed.output carries, held back only by
+  // the spool's delivered-bytes cursor. The cursor is gone, so the producer's
+  // record says everything this said.
+  reserved 2;
+  reserved "output";
 }
 
-// A verbatim byte spool and its delivery cursor.
+// A verbatim byte spool. Just bytes.
 //
 // Deliberately unparsed and unstructured — this output is bytes, and
 // pretending otherwise is how a renderer starts guessing at ANSI, line framing
@@ -249,13 +243,21 @@ message DetachedWorkUnclassified {
 // this one message's accumulating content; no chunk of it is ever promoted to a
 // feed row of its own.
 message DetachedWorkOutputSpool {
+  // 2 was `through_offset`: the delivered-bytes cursor an incoming
+  // DetachedWorkOutputAppend.from_offset was checked against. WHAT IS NO LONGER
+  // DETECTED: a dropped append is now indistinguishable from a quiet stretch of
+  // output, so a transcript with a hole in it renders as if it were complete.
+  // The durable record is intact, so a reload repairs it; the user simply gets
+  // no signal that they should reload. If detection is ever wanted back, one
+  // `seq` on frontend.v1.FrontendFrame restores it for all four delta streams
+  // — ConversationDelta, TypingDelta, DetachedWorkDelta and this one — for less
+  // than a per-stream cursor costs. Reserved by number AND by name because this
+  // surface is protojson on the wire, where the field NAME is the wire token.
+  reserved 2;
+  reserved "through_offset";
+
   // Everything spooled so far, verbatim.
   string text = 1;
-  // Bytes delivered so far, so a reconnecting client resumes rather than
-  // re-fetches. Also the sequencing check on DetachedWorkOutputAppend: an
-  // append whose from_offset does not equal this value is a gap and must be
-  // rejected loudly, not applied.
-  uint64 through_offset = 2;
 }
 
 // Live-or-settled, expressed as arms so that "settled" and "settled with what
@@ -329,8 +331,8 @@ message DetachedWorkOutcomeKilled {
 // entries it drops were never messages and dropping them removes no feed row.
 //
 // It applies to the item-counted kinds (an agent's emissions, a workflow's
-// rows). A byte spool has no items to count and carries its delivery cursor
-// instead — see DetachedWorkOutputSpool.
+// rows). A byte spool has no items to count and carries none of this — see
+// DetachedWorkOutputSpool.
 message DetachedWorkFold {
   // How many entries were dropped off the FRONT to honour the cap. 0 means
   // the fold is complete and no "earlier entries" notice is drawn.
@@ -371,10 +373,9 @@ message DetachedWorkUpdate {
   //
   // `shell` and `unclassified` are distinct arms carrying the SAME message:
   // the arm names which kind the update is for, while the payload is one byte
-  // append at one offset in both cases. The two kinds differ in what they ARE,
-  // not in how their output arrives, so there is no axis along which a
-  // duplicated pair of append messages could evolve apart — only a
-  // gap-detection rule that would have to be kept identical in two places.
+  // append in both cases. The two kinds differ in what they ARE, not in how
+  // their output arrives, so there is no axis along which a duplicated pair of
+  // append messages could evolve apart.
   //
   // `merge` carries the SAME message as `agent` for exactly that reason: a
   // merge run's emissions arrive precisely as a detached agent's do, so the
@@ -451,13 +452,20 @@ message DetachedWorkJournalUpdate {
 // spool it extends (DetachedWorkUpdate.message_id) and is applied to that
 // message's accumulating content.
 message DetachedWorkOutputAppend {
+  // 2 was `from_offset`: the offset these bytes started at, checked against
+  // DetachedWorkOutputSpool.through_offset. WHAT IS NO LONGER DETECTED: a lost
+  // append cannot be told from a quiet one, so an append that never arrives
+  // leaves a silent hole in a transcript that still looks complete. The durable
+  // record is intact and a reload repairs it, with no signal to the user that a
+  // reload is warranted. A per-frame `seq` on frontend.v1.FrontendFrame is the
+  // cheaper way to restore detection, and would cover all four delta streams
+  // rather than this one. Reserved by number AND by name because this surface
+  // is protojson on the wire, where the field NAME is the wire token.
+  reserved 2;
+  reserved "from_offset";
+
   // The bytes, verbatim, to append.
   string text = 1;
-  // The spool offset these bytes START at. MUST equal the message's current
-  // DetachedWorkOutputSpool.through_offset; anything else is a gap. Carried
-  // explicitly so a gap is detectable at all — a bare append cannot tell a
-  // lost chunk from a quiet one.
-  uint64 from_offset = 2;
 }
 
 // A liveness transition: live to settled, or a settled outcome changing (a
