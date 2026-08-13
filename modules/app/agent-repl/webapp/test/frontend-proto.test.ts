@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   UNSUPPORTED_SHAPES,
+  decodeCompactionSummaryItem,
   decodeFrontendFrame,
   decodeFailureCardView,
   decodeFailureKind,
@@ -50,7 +51,11 @@ const CONV_DELTA = {
   throughSeq: "5",
   messages: [{ uuid: "u1", tsMs: "1700000000000", assistantMessage: { content: [{ text: { text: "hi" } }] } }],
 };
-const SESSION_INIT = { workspace: "ws", fence: "s1", init: { model: "claude", cwd: "/w" } };
+const SESSION_INIT = {
+  workspace: "ws",
+  fence: "s1",
+  rows: [{ label: "Version", value: "2.1.215" }],
+};
 const COMMAND_ACK = { requestId: "r1", ok: true };
 const DAEMON_VIEW = {
   bootId: "b_abc",
@@ -81,12 +86,6 @@ const WORKSPACE_AVAILABLE = {
   finalName: "new-workspace",
   worktreePath: "/worktrees/new-workspace",
   sessionId: "session-1",
-};
-
-const TOKEN_UTILIZATION = {
-  agentReplSessionId: "session-1", claudeSessionId: "claude-1", rootTurnId: "turn-1", apiRequestId: "request-1", apiMessageId: "msg-1", model: "claude-opus", mainAgent: {},
-  usage: { inputTokens: "10", outputTokens: "20", cacheReadInputTokens: "30", cacheCreationInputTokens: "40", cacheCreation: { ephemeral5mInputTokens: "4", ephemeral1hInputTokens: "36" }, serverToolUse: { webSearchRequests: "2", webFetchRequests: "3" }, serviceTier: "priority", speed: "fast", inferenceGeo: "us", outputDetails: { thinkingTokens: "5" }, iterations: [{ sampling: { inputTokens: "1", outputTokens: "2", cacheReadInputTokens: "3", cacheCreationInputTokens: "4", cacheCreation: { ephemeral5mInputTokens: "1", ephemeral1hInputTokens: "3" }, model: "claude-opus" } }, { compaction: { inputTokens: "5", outputTokens: "6", cacheReadInputTokens: "7", cacheCreationInputTokens: "8", cacheCreation: { ephemeral5mInputTokens: "2", ephemeral1hInputTokens: "6" } } }, { advisor: { inputTokens: "9", outputTokens: "10", cacheReadInputTokens: "11", cacheCreationInputTokens: "12", cacheCreation: { ephemeral5mInputTokens: "3", ephemeral1hInputTokens: "9" }, model: "claude-haiku" } }, { fallback: { inputTokens: "13", outputTokens: "14", cacheReadInputTokens: "15", cacheCreationInputTokens: "16", cacheCreation: { ephemeral5mInputTokens: "4", ephemeral1hInputTokens: "12" }, model: "claude-sonnet" } }], cacheDiagnostic: { modelChanged: { cacheMissedInputTokens: "17" } }, cacheRates: { totalPromptInputTokens: "80", cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 }, fallbackCredit: { applied: true }, unmodeledUsage: { vendorField: { preserved: "exactly" } }, rawUsage: { inputTokens: "10", outputTokens: "20", cacheReadInputTokens: "30", cacheCreationInputTokens: "40", cacheCreation: { ephemeral_5m_input_tokens: 4, retainedNestedField: { exact: ["value"] } }, serverToolUse: { web_search_requests: 2 }, iterations: [{ model: "claude-opus", output_tokens: 20, details: { exact: true } }], fallbackCredit: { applied: true }, outputTokensDetails: { thinking_tokens: 5 }, unmodeledUsage: { vendor_field: { preserved: "exactly" } }, cacheDiagnostic: { cache_miss_reason: "cold" } } },
-  responseTiming: { timeToFirstTokenMs: "50", outputGenerationDurationMs: "100" },
 };
 
 describe("FailureKind: the closed failure vocabulary", () => {
@@ -512,57 +511,7 @@ describe("Message durability: whether a store record exists", () => {
   });
 });
 
-describe("ConversationItem token utilization", () => {
-  it("preserves every modeled response usage field and raw payload", () => {
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [TOKEN_UTILIZATION] }] } });
-    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(frame.frame.value.messages[0].tokenUtilization[0]).toEqual({ agentReplSessionId: "session-1", claudeSessionId: "claude-1", rootTurnId: "turn-1", apiRequestId: "request-1", apiMessageId: "msg-1", model: "claude-opus", actor: "mainAgent", usage: { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 30, cacheCreationInputTokens: 40, cacheCreation: { ephemeral5mInputTokens: 4, ephemeral1hInputTokens: 36 }, serverToolUse: { webSearchRequests: 2, webFetchRequests: 3 }, serviceTier: "priority", speed: "fast", inferenceGeo: "us", outputDetails: { thinkingTokens: 5 }, iterations: [{ kind: "sampling", inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 3, cacheCreationInputTokens: 4, cacheCreation: { ephemeral5mInputTokens: 1, ephemeral1hInputTokens: 3 }, model: "claude-opus" }, { kind: "compaction", inputTokens: 5, outputTokens: 6, cacheReadInputTokens: 7, cacheCreationInputTokens: 8, cacheCreation: { ephemeral5mInputTokens: 2, ephemeral1hInputTokens: 6 } }, { kind: "advisor", inputTokens: 9, outputTokens: 10, cacheReadInputTokens: 11, cacheCreationInputTokens: 12, cacheCreation: { ephemeral5mInputTokens: 3, ephemeral1hInputTokens: 9 }, model: "claude-haiku" }, { kind: "fallback", inputTokens: 13, outputTokens: 14, cacheReadInputTokens: 15, cacheCreationInputTokens: 16, cacheCreation: { ephemeral5mInputTokens: 4, ephemeral1hInputTokens: 12 }, model: "claude-sonnet" }], cacheDiagnostic: { kind: "modelChanged", cacheMissedInputTokens: 17 }, cacheRates: { totalPromptInputTokens: 80, cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 }, fallbackCredit: { applied: true }, unmodeledUsage: { vendorField: { preserved: "exactly" } }, rawUsage: TOKEN_UTILIZATION.usage.rawUsage }, responseTiming: { timeToFirstTokenMs: 50, outputGenerationDurationMs: 100 } });
-  });
-
-  it.each(["agentReplSessionId", "claudeSessionId", "rootTurnId", "apiMessageId"] as const)("rejects blank required correlation field %s", (field) => {
-    const utilization = { ...TOKEN_UTILIZATION, [field]: "" };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [utilization] }] } })).toThrow(new RegExp(`${field} must be nonblank`));
-  });
-
-  it.each(["", " \t\n"])("rejects blank response model identity %j", (model) => {
-    const utilization = { ...TOKEN_UTILIZATION, model };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [utilization] }] } })).toThrow(/model must be nonblank/);
-  });
-
-  it("distinguishes an absent API request identifier from an invalid empty present value", () => {
-    const utilization = { ...TOKEN_UTILIZATION, apiRequestId: "" };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [utilization] }] } })).toThrow(/apiRequestId must be absent or nonblank/);
-    const decoded = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, apiRequestId: undefined }] }] } });
-    if (decoded.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(decoded.frame.value.messages[0].tokenUtilization[0].apiRequestId).toBeUndefined();
-  });
-
-  it("preserves every nested subagent lineage field", () => {
-    const subagent = { agentId: "agent-child", parentToolUseId: "tool-parent", parentAgentId: "agent-parent", subagentType: "research", taskDescription: "inspect cache evidence" };
-    const utilization = { ...TOKEN_UTILIZATION, mainAgent: undefined, subagent };
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [utilization] }] } });
-    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(frame.frame.value.messages[0].tokenUtilization[0].subagent).toEqual(subagent);
-  });
-
-  it("preserves every cache diagnostic oneof arm", () => {
-    const cases = [
-      [{ pending: {} }, { kind: "pending" }],
-      [{ modelChanged: { cacheMissedInputTokens: "1" } }, { kind: "modelChanged", cacheMissedInputTokens: 1 }],
-      [{ systemChanged: { cacheMissedInputTokens: "2" } }, { kind: "systemChanged", cacheMissedInputTokens: 2 }],
-      [{ toolsChanged: { cacheMissedInputTokens: "3" } }, { kind: "toolsChanged", cacheMissedInputTokens: 3 }],
-      [{ messagesChanged: { cacheMissedInputTokens: "4" } }, { kind: "messagesChanged", cacheMissedInputTokens: 4 }],
-      [{ previousMessageUnavailable: {} }, { kind: "previousMessageUnavailable" }],
-      [{ diagnosticsUnavailable: {} }, { kind: "diagnosticsUnavailable" }],
-    ] as const;
-    for (const [cacheDiagnostic, expected] of cases) {
-      const utilization = { ...TOKEN_UTILIZATION, usage: { ...TOKEN_UTILIZATION.usage, cacheDiagnostic } };
-      const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [utilization] }] } });
-      if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-      expect(frame.frame.value.messages[0].tokenUtilization[0].usage.cacheDiagnostic).toEqual(expected);
-    }
-  });
-
+describe("ConversationItem reasoning emission origin", () => {
   it("carries the reasoning emission's stated origin beside its block", () => {
     // Arrange: `AgentThinking` states the message it was stripped from and the
     // index it held there, alongside the `ThinkingBlock` payload itself.
@@ -618,130 +567,9 @@ describe("ConversationItem token utilization", () => {
     // Act / Assert
     expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [item] } })).toThrow(/apiMessageId must be a string/);
   });
-
-  it("rejects malformed response actor and unknown usage fields", () => {
-    const item = { ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, subagent: {} }] };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [item] } })).toThrow(/oneof .*actor.*set multiple times/);
-    const usage = { ...TOKEN_UTILIZATION.usage, unrecognized: 1 };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage }] }] } })).toThrow(/key "unrecognized" is unknown/);
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, rawUsage: TOKEN_UTILIZATION.usage.rawUsage }] }] } })).toThrow(/key "rawUsage" is unknown/);
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: { ...TOKEN_UTILIZATION.usage, rawUsage: undefined } }] }] } })).toThrow(/usage\.rawUsage is required/);
-    const malformedDiagnostic = { ...TOKEN_UTILIZATION.usage, cacheDiagnostic: { pending: { unrecognized: true } } };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: malformedDiagnostic }] }] } })).toThrow(/key "unrecognized" is unknown/);
-    const subagent = { agentId: "a", parentToolUseId: "t", parentAgentId: "p", subagentType: "research", taskDescription: "inspect", unrecognized: true };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, mainAgent: undefined, subagent }] }] } })).toThrow(/key "unrecognized" is unknown/);
-  });
-
-  it("rejects scalar and nested oneof violations through the generated contract", () => {
-    const wrongScalar = { ...TOKEN_UTILIZATION.usage, inputTokens: true };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: wrongScalar }] }] } })).toThrow(/generated TokenUtilization contract/);
-    const competingDiagnostic = { ...TOKEN_UTILIZATION.usage, cacheDiagnostic: { pending: {}, modelChanged: { cacheMissedInputTokens: "1" } } };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: competingDiagnostic }] }] } })).toThrow(/oneof .*reason.*set multiple times/);
-  });
-
-  it("preserves raw SDK nulls, zeroes, absence, and unknown nested values through generated decode", () => {
-    const rawSdkUsage = { cache_read_input_tokens: null, cache_creation_input_tokens: 0, nested_vendor_evidence: { unknown: [null, 0, { exact: "value" }] } };
-    const rawUsage = { ...TOKEN_UTILIZATION.usage.rawUsage, rawSdkUsage };
-    const utilization = { ...TOKEN_UTILIZATION, usage: { ...TOKEN_UTILIZATION.usage, rawUsage } };
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [utilization] }] } });
-    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    const preserved = frame.frame.value.messages[0].tokenUtilization[0].usage.rawUsage.rawSdkUsage as Record<string, unknown>;
-    expect(preserved).toEqual(rawSdkUsage);
-    expect(preserved.cache_read_input_tokens).toBeNull();
-    expect(preserved.cache_creation_input_tokens).toBe(0);
-    expect(Object.hasOwn(preserved, "absent_vendor_field")).toBe(false);
-  });
 });
 
-describe("Session token utilization", () => {
-  it("preserves subagent lineage and complete per-agent and session model usage", () => {
-    const totals = { inputTokens: "10", outputTokens: "20", cacheReadInputTokens: "30", cacheCreationInputTokens: "40", cacheCreation: { ephemeral5mInputTokens: "4", ephemeral1hInputTokens: "36" }, serverToolUse: { webSearchRequests: "2", webFetchRequests: "3" }, outputDetails: { thinkingTokens: "5" }, cacheRates: { totalPromptInputTokens: "80", cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 }, timing: { outputTokensWithGenerationDuration: "20", outputGenerationDurationMs: "100", responsesWithGenerationDuration: "1", responsesWithoutGenerationDuration: "0", totalTimeToFirstTokenMs: "50", responsesWithTimeToFirstToken: "1", responsesWithoutTimeToFirstToken: "0" } };
-    const model = { model: "opus", canonicalModel: "claude-opus-4", provider: "anthropic", totals, contextWindow: "200000", maxOutputTokens: "32000", costUsd: 1.25 };
-    const tokenUtilization = { allAgents: totals, mainAgent: totals, subagents: [{ agent: { agentId: "agent-child", parentToolUseId: "tool-parent", parentAgentId: "agent-parent", subagentType: "research", taskDescription: "inspect cache evidence" }, totals, models: [model] }], models: [model] };
-    const frame = decode({ sessionView: { ...SESSION_VIEW, tokenUtilization } });
-    if (frame.frame.case !== "sessionView") throw new Error("wrong frame");
-    const aggregate = frame.frame.value.tokenUtilization;
-    expect(aggregate?.allAgents?.inputTokens).toBe(10n);
-    expect(aggregate?.allAgents?.cacheCreation?.ephemeral1hInputTokens).toBe(36n);
-    expect(aggregate?.allAgents?.serverToolUse?.webFetchRequests).toBe(3n);
-    expect(aggregate?.allAgents?.outputDetails?.thinkingTokens).toBe(5n);
-    expect(aggregate?.allAgents?.timing?.outputGenerationDurationMs).toBe(100n);
-    expect(aggregate?.subagents[0].agent).toMatchObject({ agentId: "agent-child", parentToolUseId: "tool-parent", parentAgentId: "agent-parent", subagentType: "research", taskDescription: "inspect cache evidence" });
-    expect(aggregate?.subagents[0].models[0]).toMatchObject({ model: "opus", canonicalModel: "claude-opus-4", provider: "anthropic", contextWindow: 200000n, maxOutputTokens: 32000n, costUsd: 1.25 });
-    expect(aggregate?.models[0].totals?.cacheRates).toMatchObject({ totalPromptInputTokens: 80n, cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 });
-  });
 
-  it("preserves every ungrouped response separately by API message identity and lineage", () => {
-    const totals = { inputTokens: "0", outputTokens: "0", cacheReadInputTokens: "0", cacheCreationInputTokens: "0" };
-    const lineage = { agentId: "", parentToolUseId: "", parentAgentId: "parent-agent", subagentType: "research", taskDescription: "inspect evidence" };
-    const first = { ...TOKEN_UTILIZATION, apiMessageId: "msg-ungrouped-1", mainAgent: undefined, subagent: lineage, usage: { ...TOKEN_UTILIZATION.usage, inputTokens: "11" } };
-    const second = { ...TOKEN_UTILIZATION, apiMessageId: "msg-ungrouped-2", mainAgent: undefined, subagent: lineage, usage: { ...TOKEN_UTILIZATION.usage, inputTokens: "22" } };
-    const sessionFrame = decode({ sessionView: { ...SESSION_VIEW, tokenUtilization: { allAgents: totals, mainAgent: totals, subagents: [], models: [], ungroupedSubagentResponses: [first, second] } } });
-    const responseFrame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [first, second] }] } });
-    if (sessionFrame.frame.case !== "sessionView" || responseFrame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    const preserved = sessionFrame.frame.value.tokenUtilization?.ungroupedSubagentResponses;
-    expect(preserved?.map((response) => response.apiMessageId)).toEqual(responseFrame.frame.value.messages[0].tokenUtilization.map((response) => response.apiMessageId));
-    expect(preserved?.map((response) => [response.apiMessageId, response.usage?.inputTokens, response.actor.case === "subagent" ? { agentId: response.actor.value.agentId, parentToolUseId: response.actor.value.parentToolUseId, parentAgentId: response.actor.value.parentAgentId, subagentType: response.actor.value.subagentType, taskDescription: response.actor.value.taskDescription } : undefined])).toEqual([["msg-ungrouped-1", 11n, lineage], ["msg-ungrouped-2", 22n, lineage]]);
-  });
-
-  it.each(["", " \t\n"])("rejects blank durable aggregate model identity %j in session and snapshot frames", (model) => {
-    const totals = { inputTokens: "1", outputTokens: "0", cacheReadInputTokens: "0", cacheCreationInputTokens: "0" };
-    const tokenUtilization = { allAgents: totals, mainAgent: totals, models: [{ model, totals }] };
-    expect(() => decode({ sessionView: { ...SESSION_VIEW, tokenUtilization } })).toThrow(/models\[0\] requires model identity and totals/);
-    expect(() => decode({ snapshot: { ...SNAPSHOT, sessions: [{ ...SESSION_VIEW, tokenUtilization }] } })).toThrow(/models\[0\] requires model identity and totals/);
-  });
-
-  it("rejects blank nested subagent model identity", () => {
-    const totals = { inputTokens: "1", outputTokens: "0", cacheReadInputTokens: "0", cacheCreationInputTokens: "0" };
-    const tokenUtilization = { allAgents: totals, mainAgent: totals, subagents: [{ agent: { agentId: "agent" }, totals, models: [{ model: " ", totals }] }], models: [{ model: "valid", totals }] };
-    expect(() => decode({ sessionView: { ...SESSION_VIEW, tokenUtilization } })).toThrow(/subagents\[0\]\.models\[0\] requires model identity and totals/);
-  });
-
-  it("rejects grouped, main-agent, and duplicate-message records in the ungrouped set", () => {
-    const totals = { inputTokens: "0", outputTokens: "0", cacheReadInputTokens: "0", cacheCreationInputTokens: "0" };
-    const base = { allAgents: totals, mainAgent: totals, subagents: [], models: [] };
-    const ungrouped = { ...TOKEN_UTILIZATION, apiMessageId: "msg-ungrouped", mainAgent: undefined, subagent: { agentId: "", parentToolUseId: "", parentAgentId: "parent", subagentType: "research", taskDescription: "inspect" } };
-    expect(() => decode({ sessionView: { ...SESSION_VIEW, tokenUtilization: { ...base, ungroupedSubagentResponses: [{ ...ungrouped, subagent: { ...ungrouped.subagent, agentId: "stable-agent" } }] } } })).toThrow(/stable invocation identity/);
-    expect(() => decode({ sessionView: { ...SESSION_VIEW, tokenUtilization: { ...base, ungroupedSubagentResponses: [TOKEN_UTILIZATION] } } })).toThrow(/must be a subagent response/);
-    expect(() => decode({ sessionView: { ...SESSION_VIEW, tokenUtilization: { ...base, ungroupedSubagentResponses: [ungrouped, ungrouped] } } })).toThrow(/repeated apiMessageId msg-ungrouped/);
-  });
-});
-
-describe("ConversationItem turn accounting", () => {
-  it("decodes invalid problems before accepting explicitly absent partial evidence", () => {
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", timing: { promptAdmittedAtMs: "1", resultReceivedAtMs: "2", accountingSettledAtMs: "3", promptToResultMs: "1", resultToSettlementMs: "1" }, responses: [TOKEN_UTILIZATION], invalid: { problems: [{ missingUsageBoundary: { turnStart: {} } }] } } }] } });
-    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(frame.frame.value.messages[0].turnAccounting).toMatchObject({ turnId: "turn-1", queryInstanceId: "query-1", timing: { promptAdmittedAtMs: 1, resultReceivedAtMs: 2, accountingSettledAtMs: 3, promptToResultMs: 1, resultToSettlementMs: 1 }, responses: [{ usage: { rawUsage: TOKEN_UTILIZATION.usage.rawUsage } }], verdict: { kind: "invalid", problems: [{ kind: "missingUsageBoundary", boundary: "turnStart" }] } });
-  });
-
-  it("uses generated proto presence for complete accounting evidence", () => {
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", reconciliation: { responseRecordCount: "0", responseModels: [{ model: "metadata-absent" }, { model: "explicit-zero", canonicalModel: "", provider: "", contextWindow: "0", maxOutputTokens: "0", costUsd: 0 }], resultModels: [], apiMessageIds: [] }, complete: {} } }] } });
-    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    const accounting = frame.frame.value.messages[0].turnAccounting;
-    expect(accounting).toMatchObject({ turnId: "turn-1", queryInstanceId: "query-1", responses: [], verdict: { kind: "complete" } });
-    if (accounting?.reconciliation === undefined) throw new Error("missing reconciliation");
-    expect(accounting.reconciliation.responseAllAgents).toBeUndefined();
-    expect(accounting.reconciliation.responseModels).toEqual([
-      { model: "metadata-absent" },
-      { model: "explicit-zero", canonicalModel: "", provider: "", contextWindow: 0, maxOutputTokens: 0, costUsd: 0 },
-    ]);
-  });
-
-  it("rejects malformed account-usage outcomes instead of inventing unavailable reasons", () => {
-    const accounting = (usageAtStart: unknown) => ({ conversationDelta: { ...CONV_DELTA, messages: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", usageAtStart, responses: [], complete: {} } }] } });
-    expect(() => decode(accounting({ turnId: "turn-1", turnStart: {}, available: {} }))).toThrow(/available requires fiveHour/);
-    expect(() => decode(accounting({ turnId: "turn-1", turnStart: {}, unavailable: {} }))).toThrow(/unavailable requires a reason/);
-  });
-
-  it("preserves explicit zero utilization and legal unavailable reasons", () => {
-    const accounting = (usageAtStart: unknown) => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", usageAtStart, responses: [], complete: {} } }] } });
-    const available = accounting({ turnId: "turn-1", turnStart: {}, available: { fiveHour: { utilizationPercent: 0, resetsAtMs: "100" } } });
-    const unavailable = accounting({ turnId: "turn-1", turnStart: {}, unavailable: { windowUnavailable: {} } });
-    if (available.frame.case !== "conversationDelta" || unavailable.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(available.frame.value.messages[0].turnAccounting?.usageAtStart?.outcome).toEqual({ kind: "available", utilizationPercent: 0, resetsAtMs: 100 });
-    expect(unavailable.frame.value.messages[0].turnAccounting?.usageAtStart?.outcome).toEqual({ kind: "unavailable", reason: "windowUnavailable" });
-  });
-});
 const HOST_ACTION = { actionId: "action-1", setRepositoryFold: { repoKey: "repo", folded: false } };
 
 describe("decodeFrontendFrame — every frame variant decodes", () => {
@@ -975,6 +803,23 @@ describe("decodeFrontendFrame — ConversationItem envelope", () => {
     expect(() => itemOf({ uuid: "u1", toolUse: {}, bogus: 1 })).toThrow(/unrecognized field/);
   });
 
+  it("rejects an item whose payload arm this bundle does not name", () => {
+    // Arrange / Act / Assert — an arm the wire grew and this bundle has not
+    // learned is refused loudly, never rendered as whatever it resembles.
+    expect(() => itemOf({ uuid: "u1", someFuturePayload: {} })).toThrow(/unrecognized field/);
+  });
+
+  it("carries a compactionSummary payload through", () => {
+    // Arrange / Act
+    const frame = itemOf({
+      uuid: "u1",
+      compactionSummary: { summary: "what survived", compactedAtMs: "5", expensiveInputTokens: "7" },
+    });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong variant");
+    // Assert
+    expect(frame.frame.value.messages[0].arm).toBe("compactionSummary");
+  });
+
   it("adopts the typed payload by shape (does not reject its inner fields)", () => {
     const frame = itemOf({ uuid: "u1", permission: { request: { requestId: "u1" }, brandNewField: 9 } });
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong variant");
@@ -1066,16 +911,51 @@ describe("decodeFrontendFrame — TypingDelta embeds ContentDelta", () => {
 });
 
 describe("decodeFrontendFrame — SessionInitView (S9)", () => {
-  it("adopts the SystemInit init by shape", () => {
+  it("carries the panel's rows through verbatim", () => {
+    // Arrange / Act
     const frame = decode({ sessionInit: SESSION_INIT });
     if (frame.frame.case !== "sessionInit") throw new Error("wrong variant");
-    expect(frame.frame.value.init).toEqual({ model: "claude", cwd: "/w" });
+    // Assert
+    expect(frame.frame.value.rows).toEqual([{ label: "Version", value: "2.1.215" }]);
   });
 
-  it("defaults an absent init to an empty object", () => {
+  it("reads an absent rows list as no init having landed", () => {
+    // Arrange / Act
     const frame = decode({ sessionInit: { fence: "s1" } });
     if (frame.frame.case !== "sessionInit") throw new Error("wrong variant");
-    expect(frame.frame.value.init).toEqual({});
+    // Assert
+    expect(frame.frame.value.rows).toEqual([]);
+  });
+
+  it("rejects the retired `init` field, whose number and name are reserved", () => {
+    // Arrange / Act / Assert — nothing on this surface carries a vendor payload.
+    expect(() => decode({ sessionInit: { workspace: "ws", fence: "s1", init: {} } })).toThrow(
+      /unrecognized field/,
+    );
+  });
+
+  it("rejects a row missing its label", () => {
+    // Arrange / Act / Assert — the daemon omits a row it cannot fill, so a
+    // labelless one is a producer fault rather than a blank line to draw.
+    expect(() =>
+      decode({ sessionInit: { workspace: "ws", fence: "s1", rows: [{ value: "2.1.215" }] } }),
+    ).toThrow(/rows\[0\] missing required `label`/);
+  });
+
+  it("rejects a row missing its value", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({ sessionInit: { workspace: "ws", fence: "s1", rows: [{ label: "Version" }] } }),
+    ).toThrow(/rows\[0\] missing required `value`/);
+  });
+
+  it("rejects an unrecognized field on a row", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({
+        sessionInit: { workspace: "ws", fence: "s1", rows: [{ label: "V", value: "1", bogus: 1 }] },
+      }),
+    ).toThrow(/unrecognized field/);
   });
 
   it("rejects an unrecognized SessionInitView field loudly", () => {
@@ -1085,7 +965,7 @@ describe("decodeFrontendFrame — SessionInitView (S9)", () => {
   it("rejects a SessionInitView without a fence", () => {
     // The push is fenced since the figma-idl reshape: `session_id` is reserved,
     // and an unfenced push cannot be tested for staleness at all.
-    expect(() => decode({ sessionInit: { workspace: "ws", init: {} } })).toThrow(
+    expect(() => decode({ sessionInit: { workspace: "ws" } })).toThrow(
       /SessionInitView missing required `fence`/,
     );
   });
@@ -1094,7 +974,7 @@ describe("decodeFrontendFrame — SessionInitView (S9)", () => {
     const frame = decode({ snapshot: { ...SNAPSHOT, inits: [SESSION_INIT] } });
     if (frame.frame.case !== "snapshot") throw new Error("wrong variant");
     expect(frame.frame.value.inits).toHaveLength(1);
-    expect(frame.frame.value.inits[0].init).toEqual({ model: "claude", cwd: "/w" });
+    expect(frame.frame.value.inits[0].rows).toEqual([{ label: "Version", value: "2.1.215" }]);
   });
 
   it("defaults snapshot.inits to an empty array when absent", () => {
@@ -1514,6 +1394,46 @@ describe("decodeFrontendFrame — QueueView (E4)", () => {
   });
 });
 
+describe("decodeCompactionSummaryItem", () => {
+  it("reads the summary, its stamp and its cost", () => {
+    // Arrange / Act
+    const got = decodeCompactionSummaryItem(
+      { summary: "what survived", compactedAtMs: "1700000000000", expensiveInputTokens: "4096" },
+      "cs",
+    );
+    // Assert
+    expect(got).toEqual({
+      summary: "what survived",
+      compactedAtMs: 1700000000000,
+      expensiveInputTokens: 4096,
+    });
+  });
+
+  it("carries -1 through as the unavailable-usage statement it is", () => {
+    // Arrange / Act — never fabricated as 0 on either end.
+    const got = decodeCompactionSummaryItem(
+      { summary: "s", compactedAtMs: "1", expensiveInputTokens: "-1" },
+      "cs",
+    );
+    // Assert
+    expect(got.expensiveInputTokens).toBe(-1);
+  });
+
+  it("rejects an unrecognized field loudly", () => {
+    // Arrange / Act / Assert
+    expect(() => decodeCompactionSummaryItem({ summary: "s", bogus: 1 }, "cs")).toThrow(
+      /unrecognized field/,
+    );
+  });
+
+  it("rejects a summary that is not a string", () => {
+    // Arrange / Act / Assert
+    expect(() => decodeCompactionSummaryItem({ summary: 7 }, "cs")).toThrow(
+      /summary must be a string/,
+    );
+  });
+});
+
 describe("UNSUPPORTED_SHAPES registry", () => {
   it("lists non-rendered control and host-only frontend.v1 frames", () => {
     expect([...UNSUPPORTED_SHAPES.keys()]).toEqual([
@@ -1526,6 +1446,11 @@ describe("UNSUPPORTED_SHAPES registry", () => {
       // silently missing (warn) — an arm this bundle predates has no visual by
       // definition.
       "unknownArm",
+      // Not a frame variant but a CONVERSATION-ITEM shape: a tool outcome
+      // whose detachment oneof is absent. Registered for the same reason —
+      // the daemon is stating the call detached nothing, so there is no chip
+      // to draw and no content the user is missing.
+      "conversation-item:toolUseResult:no-detachment",
     ]);
   });
 

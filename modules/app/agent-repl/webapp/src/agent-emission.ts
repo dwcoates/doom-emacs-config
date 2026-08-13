@@ -19,8 +19,32 @@
  * boundary note in `frontend-proto.ts`).
  */
 
-import { ensureObject, generatedFieldSet, num, rejectUnknown, str, type Obj } from "./proto-scalars.js";
-import { ResponseUsageStampSchema } from "../../proto/gen/ts/agentshim/frontend/v1/agent-response_pb";
+import {
+  EMPTY_KEY_SET,
+  ensureObject,
+  generatedFieldSet,
+  num,
+  rejectUnknown,
+  str,
+  type Obj,
+} from "./proto-scalars.js";
+import { ResponseUsageStampSchema } from "../../proto/gen/ts/frontend/v1/agent-response_pb";
+import { AgentToolOutcomeSchema } from "../../proto/gen/ts/frontend/v1/tool-call_pb";
+import {
+  DetachedFailedSchema,
+  DetachedLostSchema,
+  DetachedSkillSchema,
+  DetachedUnclassifiedSchema,
+  DetachedSucceededSchema,
+  DetachedWorkEndedSchema,
+  DetachedWorkKindSchema,
+  DetachedWorkStartedSchema,
+  type DetachedWorkEnded as GeneratedDetachedWorkEnded,
+  type DetachedWorkKind as GeneratedDetachedWorkKind,
+} from "../../proto/gen/ts/conversation/v1/payloads_pb";
+
+/** A generated oneof's arm keys, with protobuf-es's "nothing set" arm dropped. */
+type ArmKeys<Oneof extends { case: string | undefined }> = Exclude<Oneof["case"], undefined>;
 
 /**
  * The figures an assistant bubble's corner renders, resolved daemon-side.
@@ -65,6 +89,258 @@ export function decodeResponseUsageStamp(v: unknown, where: string): ResponseUsa
   };
 }
 
+// --- the tool's TYPED OUTCOME (frontend.v1.AgentToolOutcome) ----------------
+//
+// It used to carry `data.v1.ToolUseResult`, a vendor union of five shapes
+// (AgentAsyncLaunch, AgentResult, TaskOutputResult, TaskStopResult,
+// WorkflowLaunchResult) that this end destructured into two facts: work
+// detached, and work reached an end. conversation.v1 models those two facts
+// directly, so the chip's facts are now the DETACHMENT'S OWN facts. THE TYPED
+// OUTCOME IS THE CHIP; there is no separate chip arm.
+
+/** What kind of work detached; the set arm IS the kind. */
+export type DetachedKind =
+  | { case: "agent" }
+  | { case: "shell" }
+  | { case: "workflow" }
+  | { case: "skill"; skillName: string; args: string }
+  | { case: "merge" }
+  | { case: "unclassified"; toolName: string };
+
+/** Work that detached from the turn and now runs alongside it. */
+export interface DetachedStarted {
+  /**
+   * The tool call that spawned it. Empty ONLY for a `merge`, the one
+   * detachment no tool spawns — see conversation.v1's DetachedMerge.
+   */
+  originToolCallId: string;
+  /** What to call it in the feed, resolved by the producer. */
+  label: string;
+  kind: DetachedKind;
+}
+
+/**
+ * Detached work reached an end, with the outcome it reached.
+ *
+ * `lost` is a SEPARATE outcome from `failed` on purpose: we do not know that
+ * the work failed, only that we cannot see it any more, and folding the two
+ * would have the chip assert something nothing observed.
+ */
+export type DetachedEnded =
+  | { case: "succeeded"; summary: string }
+  | { case: "failed"; summary: string }
+  | { case: "cancelled" }
+  | { case: "lost"; inference: string };
+
+/**
+ * The detachment a tool outcome reports: a launch or an ending, and never both.
+ *
+ * A oneof rather than one field because a launch and an ending are DIFFERENT
+ * FACTS and a chip renders them differently.
+ */
+export type ToolDetachment =
+  | { case: "started"; value: DetachedStarted }
+  | { case: "ended"; value: DetachedEnded };
+
+/** The decoded `AgentToolOutcome`. */
+export interface ToolOutcome {
+  /**
+   * The tool_use id this outcome belongs to, carried explicitly because the
+   * outcome has no correlation id of its own. NEVER EMPTY: an outcome that
+   * cannot say which call it belongs to is unattachable, so it throws.
+   */
+  toolUseId: string;
+  /**
+   * The detachment, or ABSENT when the call returned ordinarily and detached
+   * nothing. Absent is a fact, not a missing one.
+   */
+  detachment?: ToolDetachment;
+}
+
+const TOOL_OUTCOME_KEYS = generatedFieldSet<keyof typeof AgentToolOutcomeSchema.field>()(
+  "started",
+  "ended",
+  "toolUseId",
+  "spawnedMessageId",
+);
+const DETACHED_STARTED_KEYS = generatedFieldSet<keyof typeof DetachedWorkStartedSchema.field>()(
+  "originToolCallId",
+  "label",
+  "kind",
+);
+const DETACHED_KIND_KEYS = generatedFieldSet<keyof typeof DetachedWorkKindSchema.field>()(
+  "agent",
+  "shell",
+  "workflow",
+  "unclassified",
+  "skill",
+  "merge",
+);
+const DETACHED_SKILL_KEYS = generatedFieldSet<keyof typeof DetachedSkillSchema.field>()(
+  "skillName",
+  "args",
+);
+const DETACHED_UNCLASSIFIED_KEYS = generatedFieldSet<
+  keyof typeof DetachedUnclassifiedSchema.field
+>()("toolName");
+const DETACHED_ENDED_KEYS = generatedFieldSet<keyof typeof DetachedWorkEndedSchema.field>()(
+  "succeeded",
+  "failed",
+  "cancelled",
+  "lost",
+);
+const DETACHED_SUCCEEDED_KEYS = generatedFieldSet<keyof typeof DetachedSucceededSchema.field>()(
+  "summary",
+);
+const DETACHED_FAILED_KEYS = generatedFieldSet<keyof typeof DetachedFailedSchema.field>()("summary");
+const DETACHED_LOST_KEYS = generatedFieldSet<keyof typeof DetachedLostSchema.field>()("inference");
+
+/** The kind arm keys, typed against the generated oneof. */
+const DETACHED_KIND_ARMS = [
+  "agent",
+  "shell",
+  "workflow",
+  "unclassified",
+  "skill",
+  "merge",
+] as const satisfies readonly ArmKeys<GeneratedDetachedWorkKind["kind"]>[];
+
+/** The ending arm keys, typed against the generated oneof. */
+const DETACHED_ENDED_ARMS = [
+  "succeeded",
+  "failed",
+  "cancelled",
+  "lost",
+] as const satisfies readonly ArmKeys<GeneratedDetachedWorkEnded["outcome"]>[];
+
+/** The single set arm of a oneof, refusing empty and multiple alike. */
+function singleArm(o: Obj, arms: readonly string[], ctx: string): string {
+  const set = arms.filter((k) => o[k] !== undefined && o[k] !== null);
+  if (set.length === 0) {
+    throw new Error(`frontend-proto: ${ctx} carries no arm (empty oneof)`);
+  }
+  if (set.length > 1) {
+    throw new Error(`frontend-proto: ${ctx} sets multiple arms: ${set.join(", ")}`);
+  }
+  return set[0];
+}
+
+/**
+ * Decode a `DetachedWorkKind`.
+ *
+ * SIX ARMS, and an unrecognized one throws rather than falling into
+ * `unclassified`. `unclassified` is the daemon STATING that it could not tell,
+ * which is a different assertion from this end failing to recognize an arm the
+ * daemon does know.
+ */
+function decodeDetachedKind(v: unknown, ctx: string): DetachedKind {
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, DETACHED_KIND_KEYS, ctx);
+  const arm = singleArm(o, DETACHED_KIND_ARMS, ctx);
+  switch (arm) {
+    case "skill": {
+      const s = ensureObject(o.skill, `${ctx}.skill`);
+      rejectUnknown(s, DETACHED_SKILL_KEYS, `${ctx}.skill`);
+      return {
+        case: "skill",
+        skillName: str(s, "skillName", `${ctx}.skill`),
+        args: str(s, "args", `${ctx}.skill`),
+      };
+    }
+    case "unclassified": {
+      const u = ensureObject(o.unclassified, `${ctx}.unclassified`);
+      rejectUnknown(u, DETACHED_UNCLASSIFIED_KEYS, `${ctx}.unclassified`);
+      return { case: "unclassified", toolName: str(u, "toolName", `${ctx}.unclassified`) };
+    }
+    default: {
+      // agent / shell / workflow / merge are EMPTY messages: being set is the
+      // entire assertion, so there is nothing to read out of them.
+      rejectUnknown(ensureObject(o[arm], `${ctx}.${arm}`), EMPTY_KEY_SET, `${ctx}.${arm}`);
+      return { case: arm } as DetachedKind;
+    }
+  }
+}
+
+/** Decode a `DetachedWorkStarted`. */
+function decodeDetachedStarted(v: unknown, ctx: string): DetachedStarted {
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, DETACHED_STARTED_KEYS, ctx);
+  if (o.kind === undefined || o.kind === null) {
+    throw new Error(`frontend-proto: ${ctx} requires \`kind\``);
+  }
+  return {
+    originToolCallId: str(o, "originToolCallId", ctx),
+    label: str(o, "label", ctx),
+    kind: decodeDetachedKind(o.kind, `${ctx}.kind`),
+  };
+}
+
+/** Decode a `DetachedWorkEnded`. */
+function decodeDetachedEnded(v: unknown, ctx: string): DetachedEnded {
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, DETACHED_ENDED_KEYS, ctx);
+  const arm = singleArm(o, DETACHED_ENDED_ARMS, ctx);
+  switch (arm) {
+    case "succeeded": {
+      const s = ensureObject(o.succeeded, `${ctx}.succeeded`);
+      rejectUnknown(s, DETACHED_SUCCEEDED_KEYS, `${ctx}.succeeded`);
+      return { case: "succeeded", summary: str(s, "summary", `${ctx}.succeeded`) };
+    }
+    case "failed": {
+      const f = ensureObject(o.failed, `${ctx}.failed`);
+      rejectUnknown(f, DETACHED_FAILED_KEYS, `${ctx}.failed`);
+      return { case: "failed", summary: str(f, "summary", `${ctx}.failed`) };
+    }
+    case "lost": {
+      const l = ensureObject(o.lost, `${ctx}.lost`);
+      rejectUnknown(l, DETACHED_LOST_KEYS, `${ctx}.lost`);
+      return { case: "lost", inference: str(l, "inference", `${ctx}.lost`) };
+    }
+    default: {
+      rejectUnknown(ensureObject(o.cancelled, `${ctx}.cancelled`), EMPTY_KEY_SET, `${ctx}.cancelled`);
+      return { case: "cancelled" };
+    }
+  }
+}
+
+/**
+ * Decode an `AgentToolOutcome`.
+ *
+ * THE OUTCOME ONEOF IS OPTIONAL and both arms set is refused: absent means the
+ * call returned ordinarily and detached nothing, which is a stated fact, while
+ * a launch and an ending at once is a producer fault the chip cannot draw.
+ *
+ * `toolUseId` is REQUIRED. The outcome has no correlation id of its own — on
+ * disk it is associated with its tool_result line positionally, and a
+ * positional association does not survive being pushed as an independent
+ * emission — so an outcome without it can attach to nothing.
+ */
+export function decodeToolOutcome(v: unknown, ctx: string): ToolOutcome {
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, TOOL_OUTCOME_KEYS, ctx);
+  const toolUseId = str(o, "toolUseId", ctx);
+  if (toolUseId === "") {
+    throw new Error(
+      `frontend-proto: ${ctx} missing required \`toolUseId\` — a tool outcome carries no correlation id of its own`,
+    );
+  }
+  const hasStarted = o.started !== undefined && o.started !== null;
+  const hasEnded = o.ended !== undefined && o.ended !== null;
+  if (hasStarted && hasEnded) {
+    throw new Error(
+      `frontend-proto: ${ctx} sets both \`started\` and \`ended\`, which are one oneof`,
+    );
+  }
+  const outcome: ToolOutcome = { toolUseId };
+  if (hasStarted) {
+    outcome.detachment = { case: "started", value: decodeDetachedStarted(o.started, `${ctx}.started`) };
+  }
+  if (hasEnded) {
+    outcome.detachment = { case: "ended", value: decodeDetachedEnded(o.ended, `${ctx}.ended`) };
+  }
+  return outcome;
+}
+
 /**
  * `AgentEmission` arm key → the flat decoded arm it unwraps to, and the field
  * of the emission that carries the payload the adapter reads.
@@ -79,7 +355,11 @@ export const AGENT_EMISSION_ARMS = {
   thinking: { arm: "thinking", body: "body" },
   toolCall: { arm: "toolUse", body: "call" },
   toolResult: { arm: "toolResult", body: "result" },
-  toolOutcome: { arm: "toolUseResult", body: "structured" },
+  // The TYPED OUTCOME. `body` is empty because the whole message IS the
+  // payload now: `structured` (the vendor's data.v1.ToolUseResult) is gone,
+  // and what is left — the detachment oneof, the tool_use id, the verdict —
+  // is decoded strictly into `UnwrappedEmission.toolOutcome`.
+  toolOutcome: { arm: "toolUseResult", body: "" },
   skillBody: { arm: "skillBody", body: "" },
   turnResult: { arm: "result", body: "" },
 } as const;
@@ -121,6 +401,14 @@ export interface UnwrappedEmission {
    * ABSENT MEANS ABSENT — the corner renders no figures rather than zeros.
    */
   usageStamp?: ResponseUsageStamp;
+  /**
+   * The DECODED `AgentToolOutcome` — the tool call's typed outcome, and the
+   * chip itself (the outcome IS the chip; there is no separate chip arm).
+   *
+   * Present exactly on the `toolOutcome` emission. Its `detachment` is absent
+   * when the call returned ordinarily and detached nothing.
+   */
+  toolOutcome?: ToolOutcome;
 }
 
 /**
@@ -156,6 +444,9 @@ export function unwrapAgentEmission(v: unknown, ctx: string): UnwrappedEmission 
   }
   if (key === "toolCall" || key === "toolOutcome") {
     out.spawnedMessageId = str(value, "spawnedMessageId", `${ctx}.${key}`);
+  }
+  if (key === "toolOutcome") {
+    out.toolOutcome = decodeToolOutcome(value, `${ctx}.toolOutcome`);
   }
   if (key === "response") {
     // ABSENT STAMP STAYS ABSENT. A response that carried no usage record gets

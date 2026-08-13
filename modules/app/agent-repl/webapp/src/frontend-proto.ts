@@ -52,75 +52,35 @@
  */
 
 import {
-  MissingUsageBoundarySchema,
-  ModelTokenUtilizationSchema,
-  RuntimeIdentityIncompleteSchema,
-  SessionTokenUtilizationSchema,
-  TelemetryRecordMissingPersistenceReceiptSchema,
-  TelemetryRecordMissingQueryLifecycleSchema,
-  TelemetryRecordMissingResponseUsageSchema,
-  TelemetryRecordMissingSchema,
-  TokenCacheCreationSchema,
-  TokenCacheRatesSchema,
-  TokenLedgerMismatchSchema,
-  TokenOutputDetailsSchema,
-  TokenServerToolUseSchema,
-  TokenTimingTotalsSchema,
-  TokenUsageReconciliationSchema,
-  TokenUsageTotalsSchema,
-  TokenUtilizationSchema,
-  TurnAccountingInvalidSchema,
-  TurnAccountingProblemSchema,
-  TurnAccountingSchema,
-  TurnAccountingTimingSchema,
-  UnmodeledUsageFieldsSchema,
-  UsageWindowResetSchema,
-  type ModelTokenUtilization as GeneratedModelTokenUtilization,
-  type SessionTokenUtilization as GeneratedSessionTokenUtilization,
-  type TokenCacheCreation as GeneratedTokenCacheCreation,
-  type TokenCacheDiagnostic as GeneratedTokenCacheDiagnostic,
-  type TokenCacheRates as GeneratedTokenCacheRates,
-  type TokenOutputDetails as GeneratedTokenOutputDetails,
-  type TokenServerToolUse as GeneratedTokenServerToolUse,
-  type TokenUsageIteration as GeneratedTokenUsageIteration,
-  type TokenUsageReconciliation as GeneratedTokenUsageReconciliation,
-  type TokenUsageTotals as GeneratedTokenUsageTotals,
-  type TokenUtilization as GeneratedTokenUtilization,
-  type TurnAccounting as GeneratedTurnAccounting,
-  type TurnAccountingProblem as GeneratedTurnAccountingProblem,
-  type TurnAccountingTiming as GeneratedTurnAccountingTiming,
-  type VendorTokenUsage as GeneratedVendorTokenUsage,
-} from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
-import {
   FailureKindSchema,
   type FailureKind as GeneratedFailureKind,
   type QueryTerminationFailure as GeneratedQueryTerminationFailure,
   type SessionResumeFailure as GeneratedSessionResumeFailure,
-} from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
+} from "../../proto/gen/ts/frontend/v1/errors_pb";
 import {
   FailureCardRefSchema,
   FailureCardResolvedSchema,
   FailureCardTerminalSchema,
   FailureCardOpenSchema,
   FailureCardViewSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/failure-card_pb";
+} from "../../proto/gen/ts/frontend/v1/failure-card_pb";
 import {
   ModelOptionSchema,
   TopbarAccountingWarningSchema,
   TopbarConnectivitySchema,
   TopbarViewSchema,
   TopbarWarningSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/topbar_pb";
+} from "../../proto/gen/ts/frontend/v1/topbar_pb";
 import {
   TokenBreakdownRowSchema,
   TokenBreakdownSectionSchema,
   TokenBreakdownViewSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/tokens-menu_pb";
+} from "../../proto/gen/ts/frontend/v1/tokens-menu_pb";
 import {
   WorkspaceGateHibernatedSchema,
   WorkspaceGateOpenSchema,
   WorkspaceGateViewSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
+} from "../../proto/gen/ts/frontend/v1/gate-revival_pb";
 import {
   AccountingCompleteSchema,
   AccountingIncompleteSchema,
@@ -129,8 +89,8 @@ import {
   FooterFailureRowSchema,
   FooterMergeChipSchema,
   FooterPhaseSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/footer_pb";
-import { fromJson, toJson, type JsonValue } from "@bufbuild/protobuf";
+} from "../../proto/gen/ts/frontend/v1/footer_pb";
+import { fromJson, type JsonValue } from "@bufbuild/protobuf";
 import { historyContinuation, type HistoryContinuation } from "./load-more.js";
 import {
   FAILURE_CARD_LIFECYCLE_ARM,
@@ -154,10 +114,16 @@ import {
   type AsyncBubbleDelta,
   type DetachedWorkPackaging,
 } from "./async-bubble.js";
-import { DetachedWorkDeltaSchema } from "../../proto/gen/ts/agentshim/frontend/v1/feed_pb";
+import {
+  CompactionSummaryItemSchema,
+  DetachedWorkDeltaSchema,
+  SessionInitRowSchema,
+  SessionInitViewSchema,
+} from "../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   unwrapAgentEmission,
   type ResponseUsageStamp,
+  type ToolOutcome,
 } from "./agent-emission.js";
 import {
   EMPTY_KEY_SET,
@@ -172,21 +138,7 @@ import {
   str,
   type Obj,
 } from "./proto-scalars.js";
-import { ApiUsageSchema } from "../../proto/gen/ts/agentshim/data/v1/tools_pb";
-import {
-  AccountUsageAvailableSchema,
-  AccountUsageObservationSchema,
-  AccountUsageUnavailableSchema,
-  EvidenceFingerprintSchema,
-  FingerprintUnavailableSchema,
-  QueryRuntimeIdentitySchema,
-  UsageSamplingFailureSchema,
-  UsageWindowSchema,
-  type AccountUsageObservation as GeneratedAccountUsageObservation,
-  type EvidenceFingerprint as GeneratedEvidenceFingerprint,
-  type QueryRuntimeIdentity as GeneratedQueryRuntimeIdentity,
-} from "../../proto/gen/ts/agentshim/core/v1/core_pb";
-import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/agentshim/frontend/v1/slash-menu_pb";
+import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/frontend/v1/commands_pb";
 import { selectedModel, type SelectedModel } from "../../proto/ts/schema-literals.js";
 
 // --- enums ------------------------------------------------------------------
@@ -711,7 +663,9 @@ export interface SessionView {
    * resolved failure card.
    */
   death?: FailureCardView;
-  tokenUtilization?: SessionTokenUtilization;
+  // RETIRED: `tokenUtilization` (22) stood here — the session's cumulative
+  // per-agent and per-model token economics. The wire field is RESERVED with no
+  // successor on this message; `TokenBreakdownView` carries those rows resolved.
   /**
    * Present IFF the session is hibernated — the typed account behind the
    * `hibernated` bool above, which stays as its compatibility projection.
@@ -841,6 +795,10 @@ export const MESSAGE_ARMS = [
   // as `DetachedWorkUpdate` addressed to this message's uuid, so a detached
   // agent emitting a thousand lines inserts ONE row here, not a thousand.
   "detachedWork",
+  // The purple-washed summary block a compaction leaves behind. ITS OWN ARM,
+  // so the wash is a stated kind rather than an inference off some other
+  // payload's shape.
+  "compactionSummary",
 ] as const;
 export type MessageArm = (typeof MESSAGE_ARMS)[number];
 
@@ -913,9 +871,6 @@ export function sessionCommandOf(name: string, where: string): SessionCommand {
 // reading. Deleted rather than deprecated, following this repo's style for
 // retired frontend surface: no live frontend commitment survives the change.
 
-/** Exact generated cumulative usage for an agent-repl session. */
-export type SessionTokenUtilization = GeneratedSessionTokenUtilization;
-
 /**
  * One decoded conversation addition: the {uuid, tsMs, requestId} envelope plus
  * the single selected typed payload arm and its (shape-adopted) value. The
@@ -970,9 +925,12 @@ export interface MessageFrame {
   arm: MessageArm;
   /** The typed data.v1/core.v1 payload, adopted by shape (see file-top §5.1). */
   payload: JsonObject;
-  tokenUtilization: TokenUtilization[];
-  /** Complete terminal-turn evidence, present only on result items. */
-  turnAccounting?: TurnAccounting;
+  // RETIRED: `tokenUtilization` (36) and `turnAccounting` (37) stood here. They
+  // carried per-response token records and a turn's accounting verdict, which
+  // the feed rendered none of directly. Both wire fields are RESERVED with no
+  // successor; the figures they were read for are resolved elsewhere — a
+  // response's stamp on `usageStamp`, a turn's verdict on `FooterAccountingCell`,
+  // session and per-model economics on `TokenBreakdownView`.
   /**
    * WHERE a `thinking` item's block stood before the daemon stripped it, stated
    * by the daemon that did the stripping (`AgentThinking.api_message_id` +
@@ -1009,6 +967,15 @@ export interface MessageFrame {
    */
   spawnedMessageId?: string;
   /**
+   * The TOOL CALL'S TYPED OUTCOME (`AgentToolOutcome`), decoded. Present
+   * exactly on the `toolUseResult` arm.
+   *
+   * Carried beside the payload because it IS the payload now: the vendor union
+   * this arm used to wrap is gone, and what is left is the detachment's own
+   * facts — which call it belongs to, and whether work started or ended.
+   */
+  toolOutcome?: ToolOutcome;
+  /**
    * The DETACHED WORK this message IS, decoded. Present exactly on the
    * `detachedWork` arm.
    *
@@ -1020,207 +987,6 @@ export interface MessageFrame {
    * payload no longer states either.
    */
   detachedWork?: AsyncBubble;
-}
-
-/** Durable evidence used to compare one completed turn with another client. */
-interface TurnAccountingEvidence {
-  turnId: string;
-  queryInstanceId: string;
-}
-/** Evidence required before a turn can be compared definitively. */
-export interface CompleteTurnAccounting extends TurnAccountingEvidence {
-  verdict: { kind: "complete" };
-  runtime?: QueryRuntimeIdentity;
-  timing?: TurnAccountingTiming;
-  usageAtStart?: AccountUsageObservation;
-  usageAtEnd?: AccountUsageObservation;
-  responses: TokenUtilization[];
-  reconciliation?: TokenUsageReconciliation;
-}
-/** Invalid turns retain every available evidence fragment without inventing absent evidence. */
-export interface InvalidTurnAccounting extends TurnAccountingEvidence {
-  verdict: { kind: "invalid"; problems: TurnAccountingProblem[] };
-  runtime?: QueryRuntimeIdentity;
-  timing?: TurnAccountingTiming;
-  usageAtStart?: AccountUsageObservation;
-  usageAtEnd?: AccountUsageObservation;
-  responses?: TokenUtilization[];
-  reconciliation?: TokenUsageReconciliation;
-}
-export type TurnAccounting = CompleteTurnAccounting | InvalidTurnAccounting;
-export interface TurnAccountingTiming {
-  promptAdmittedAtMs: number;
-  resultReceivedAtMs: number;
-  accountingSettledAtMs: number;
-  promptToResultMs: number;
-  resultToSettlementMs: number;
-}
-export interface QueryRuntimeIdentity {
-  vendorSessionId: string;
-  effectiveModel: string;
-  sdkVersion: string;
-  claudeCodeVersion: string;
-  shimBuildSha: string;
-  authSource: string;
-  subscriptionType: string;
-  fastModeState: string;
-  fastModeReason: string;
-  effectiveOptions?: EvidenceFingerprint;
-  settings?: EvidenceFingerprint;
-  tools?: EvidenceFingerprint;
-  mcp?: EvidenceFingerprint;
-  contextPrefix?: EvidenceFingerprint;
-}
-export type EvidenceFingerprint =
-  { kind: "sha256"; value: string } | { kind: "unavailable"; cause: string };
-export interface AccountUsageObservation {
-  queryInstanceId: string;
-  turnId: string;
-  boundaryAtMs: number;
-  observedAtMs: number;
-  sampleLatencyMs: number;
-  subscriptionType: string;
-  boundary?: "turnStart" | "turnEnd";
-  outcome?:
-    | { kind: "available"; utilizationPercent: number; resetsAtMs: number }
-    | { kind: "unavailable"; reason: string };
-}
-export interface TokenUsageReconciliation {
-  responseRecordCount: number;
-  responseAllAgents?: UsageTotals;
-  responseMainAgent?: UsageTotals;
-  resultMainAgent?: UsageTotals;
-  responseModels: ModelUsageTotals[];
-  resultModels: ModelUsageTotals[];
-  apiMessageIds: string[];
-}
-export interface UsageTotals {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadInputTokens: number;
-  cacheCreationInputTokens: number;
-  cacheCreation5m?: number;
-  cacheCreation1h?: number;
-  webSearchRequests?: number;
-  webFetchRequests?: number;
-  thinkingTokens?: number;
-  cacheRates?: {
-    totalPromptInputTokens: number;
-    cacheHitRate: number;
-    cacheWriteRate: number;
-    uncachedInputRate: number;
-  };
-  timing?: {
-    outputTokensWithGenerationDuration: number;
-    outputGenerationDurationMs: number;
-    responsesWithGenerationDuration: number;
-    responsesWithoutGenerationDuration: number;
-    totalTimeToFirstTokenMs: number;
-    responsesWithTimeToFirstToken: number;
-    responsesWithoutTimeToFirstToken: number;
-  };
-}
-export interface ModelUsageTotals {
-  model: string;
-  canonicalModel?: string;
-  provider?: string;
-  totals?: UsageTotals;
-  contextWindow?: number;
-  maxOutputTokens?: number;
-  costUsd?: number;
-}
-export type TurnAccountingProblem =
-  | { kind: "missingUsageBoundary"; boundary: "turnStart" | "turnEnd" }
-  | { kind: "windowReset"; startResetsAtMs: number; endResetsAtMs: number }
-  | { kind: "tokenLedgerMismatch"; differingFieldPaths: string[] }
-  | { kind: "runtimeIdentityIncomplete"; missingFieldPaths: string[] }
-  | { kind: "unmodeledUsageFields"; sourceFieldPaths: string[] }
-  | {
-      kind: "telemetryRecordMissing";
-      record:
-        | { kind: "queryLifecycle"; queryInstanceId: string }
-        | { kind: "responseUsage"; apiMessageId: string }
-        | { kind: "persistenceReceipt"; turnId: string };
-    };
-
-/** Response-level usage associated with one rendered assistant response. */
-export interface TokenUtilization {
-  agentReplSessionId: string;
-  claudeSessionId: string;
-  rootTurnId: string;
-  apiRequestId?: string;
-  apiMessageId: string;
-  model: string;
-  actor: "mainAgent" | "subagent";
-  subagent?: {
-    agentId: string;
-    parentToolUseId: string;
-    parentAgentId: string;
-    subagentType: string;
-    taskDescription: string;
-  };
-  usage: ResponseTokenUsage;
-  responseTiming?: {
-    timeToFirstTokenMs?: number;
-    outputGenerationDurationMs?: number;
-  };
-}
-
-export interface TokenCacheCreation {
-  ephemeral5mInputTokens: number;
-  ephemeral1hInputTokens: number;
-}
-export interface TokenServerToolUse {
-  webSearchRequests: number;
-  webFetchRequests: number;
-}
-export interface TokenOutputDetails {
-  thinkingTokens: number;
-}
-export interface TokenCacheRates {
-  totalPromptInputTokens: number;
-  cacheHitRate: number;
-  cacheWriteRate: number;
-  uncachedInputRate: number;
-}
-export interface TokenUsageIterationCounters {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadInputTokens: number;
-  cacheCreationInputTokens: number;
-  cacheCreation?: TokenCacheCreation;
-}
-export type TokenUsageIteration =
-  | ({ kind: "sampling"; model: string } & TokenUsageIterationCounters)
-  | ({ kind: "compaction" } & TokenUsageIterationCounters)
-  | ({ kind: "advisor"; model: string } & TokenUsageIterationCounters)
-  | ({ kind: "fallback"; model: string } & TokenUsageIterationCounters);
-export type TokenCacheDiagnostic =
-  | { kind: "pending" }
-  | { kind: "modelChanged"; cacheMissedInputTokens: number }
-  | { kind: "systemChanged"; cacheMissedInputTokens: number }
-  | { kind: "toolsChanged"; cacheMissedInputTokens: number }
-  | { kind: "messagesChanged"; cacheMissedInputTokens: number }
-  | { kind: "previousMessageUnavailable" }
-  | { kind: "diagnosticsUnavailable" };
-/** Every field modeled by `frontend.v1.TokenUsage`, preserving intentional absence. */
-export interface ResponseTokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadInputTokens: number;
-  cacheCreationInputTokens: number;
-  cacheCreation?: TokenCacheCreation;
-  serverToolUse?: TokenServerToolUse;
-  serviceTier: string;
-  speed: string;
-  inferenceGeo: string;
-  outputDetails?: TokenOutputDetails;
-  iterations: TokenUsageIteration[];
-  cacheDiagnostic?: TokenCacheDiagnostic;
-  cacheRates?: TokenCacheRates;
-  fallbackCredit?: JsonObject;
-  unmodeledUsage?: JsonObject;
-  rawUsage: JsonObject;
 }
 
 export interface ConversationDelta {
@@ -1425,10 +1191,29 @@ export interface HeartbeatView {
 }
 
 /**
- * The session's retained `data.v1.SystemInit` (slash commands, tools, skills,
- * model, auth source, …), pushed on attach + carried in `StateSnapshot.inits`
- * (S9). `init` is adopted by shape — a large, additively-growing message the
- * status panel reads leniently. Replaces the HTTP `/status` snapshot source.
+ * One row of the `/status` panel: a label and the value beside it, both
+ * resolved by the daemon.
+ *
+ * The value is a STRING on purpose, so no renderer reformats what the daemon
+ * decided it says. Neither field is ever empty on the wire — the daemon OMITS
+ * a row it has no value for rather than pushing a blank one — so a blank of
+ * either is a malformed row and throws.
+ */
+export interface SessionInitRow {
+  label: string;
+  value: string;
+}
+
+/**
+ * The `/status` panel's rows, in render order, already labelled and already
+ * stringified — pushed on attach and carried in `StateSnapshot.inits`.
+ *
+ * `init`, the vendor's whole init record, is RESERVED on the wire by name and
+ * number: nothing on this surface carries a vendor payload any more, and the
+ * five derivations the panel used to run against it are gone with it.
+ *
+ * EMPTY `rows` means no init has landed yet, which the panel draws as the rows
+ * it owns and nothing more.
  */
 export interface SessionInitView {
   workspace: string;
@@ -1440,7 +1225,24 @@ export interface SessionInitView {
    * arrives only on `WorkspaceState`.
    */
   fence: string;
-  init: JsonObject;
+  rows: SessionInitRow[];
+}
+
+/**
+ * `frontend.v1.CompactionSummaryItem` — the summary the daemon recorded after
+ * a compaction, and what it cost to produce.
+ */
+export interface CompactionSummary {
+  /** The summary text, verbatim markdown. */
+  summary: string;
+  /** When the compaction completed, unix millis. */
+  compactedAtMs: number;
+  /**
+   * The resolved expensive-input cost of producing this summary, and -1 when
+   * the result's usage was UNAVAILABLE. Never fabricated as 0, and never
+   * rendered as one: -1 prints no figure at all.
+   */
+  expensiveInputTokens: number;
 }
 
 export interface TaskEntry {
@@ -2432,9 +2234,9 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
  * reason. Everything else maps to a supported visual (`sessionInit` feeds the
  * /status panel + slash-menu source). The state adapter routes a listed
  * variant down its typed, counted, log-once ignore path. Unsupported
- * CONVERSATION-ITEM arms/blocks (a `toolUseResult` with no correlation key, a
- * `signature` content delta, an image content block) are ignored dynamically
- * by the adapter the same way, since that set is the daemon's to grow.
+ * CONVERSATION-ITEM arms/blocks (a `signature` content delta, an image content
+ * block) are ignored dynamically by the adapter the same way, since that set
+ * is the daemon's to grow.
  */
 export const UNSUPPORTED_SHAPES: ReadonlyMap<string, string> = new Map<
   string,
@@ -2459,6 +2261,12 @@ export const UNSUPPORTED_SHAPES: ReadonlyMap<string, string> = new Map<
   [
     "unknownArm",
     "a newer daemon's additive frame arm this bundle predates; counted and ignored",
+  ],
+  [
+    "conversation-item:toolUseResult:no-detachment",
+    "a tool outcome whose detachment oneof is ABSENT, which is the daemon " +
+      "stating the call returned ordinarily and detached nothing; there is no " +
+      "chip to draw and no content the user is missing",
   ],
 ]);
 
@@ -3207,7 +3015,6 @@ const SESSION_VIEW_KEYS = new Set([
   "backfill",
   "death",
   "modelOptions",
-  "tokenUtilization",
   "hibernation",
 ]);
 const HIBERNATION_DETAIL_ENVELOPE_KEYS = new Set(["sinceMs"]);
@@ -3351,8 +3158,6 @@ function decodeSessionView(v: unknown): SessionView {
   if (o.death !== undefined) {
     sv.death = decodeFailureCardView(o.death, "SessionView.death");
   }
-  if (o.tokenUtilization !== undefined)
-    sv.tokenUtilization = decodeSessionTokenUtilization(o.tokenUtilization);
   // ABSENCE IS "THE SESSION IS AWAKE", and that is its only reading. Decoded
   // when present rather than synthesized from the `hibernated` bool: the bool
   // is the compatibility projection of this message, so deriving one from the
@@ -3588,8 +3393,6 @@ const MESSAGE_ENVELOPE_KEYS = new Set([
   "requestId",
   "source",
   "lineage",
-  "tokenUtilization",
-  "turnAccounting",
 ]);
 const MESSAGE_ARM_SET: ReadonlySet<string> = new Set(
   MESSAGE_ARMS,
@@ -3640,6 +3443,7 @@ function decodeMessage(v: unknown, ctx: string): MessageFrame {
     thinkingOrigin?: { apiMessageId: string; blockIndex: number };
     spawnedMessageId?: string;
     usageStamp?: ResponseUsageStamp;
+    toolOutcome?: ToolOutcome;
   } =
     armKeys[0] === AGENT_EMISSION_ENVELOPE
       ? unwrapAgentEmission(o[AGENT_EMISSION_ENVELOPE], `${ctx}.agent`)
@@ -3656,16 +3460,6 @@ function decodeMessage(v: unknown, ctx: string): MessageFrame {
     source: enumConversationSource(o, "source", ctx),
     arm,
     payload: selected.payload,
-    tokenUtilization:
-      o.tokenUtilization === undefined
-        ? []
-        : ensureArray(o.tokenUtilization, `${ctx}.tokenUtilization`).map(
-            (entry, index) =>
-              decodeTokenUtilization(
-                entry,
-                `${ctx}.tokenUtilization[${index}]`,
-              ),
-          ),
   };
   // LINEAGE, carried through decoded. Absent stays absent (see the field's own
   // doc); present is validated, because `topLevelMessageId` is documented as
@@ -3725,6 +3519,10 @@ function decodeMessage(v: unknown, ctx: string): MessageFrame {
   // ABSENT: a response that carried no usage record gets no stamp, and the
   // corner then renders no figures rather than zeros.
   if (selected.usageStamp !== undefined) frame.usageStamp = selected.usageStamp;
+  // The TYPED OUTCOME, carried through decoded. It is the chip's whole content
+  // — there is no separate chip arm — so an arm that carries one and a frame
+  // that drops it would render a detachment as an ordinary settled call.
+  if (selected.toolOutcome !== undefined) frame.toolOutcome = selected.toolOutcome;
   // THE CLASSIFICATION VERDICT, carried through whole. A tool card learns the
   // message its call detached work onto by MATCHING this string against that
   // message's uuid; it never derives one. Empty means "this call detached
@@ -3746,16 +3544,6 @@ function decodeMessage(v: unknown, ctx: string): MessageFrame {
       selected.payload,
       detachedWorkPackaging(frame, ctx),
       `${ctx}.detachedWork`,
-    );
-  }
-  if (o.turnAccounting !== undefined) {
-    if (arm !== "result")
-      throw new Error(
-        `frontend-proto: ${ctx}.turnAccounting is valid only on result`,
-      );
-    frame.turnAccounting = decodeTurnAccounting(
-      o.turnAccounting,
-      `${ctx}.turnAccounting`,
     );
   }
   return frame;
@@ -3835,1120 +3623,6 @@ function decodeAsyncBubbleDelta(v: unknown): AsyncBubbleDelta {
     throw new Error(`frontend-proto: ${ctx} missing required \`fence\``);
   }
   return delta;
-}
-
-const FINGERPRINT_KEYS = generatedFieldSet<
-  keyof typeof EvidenceFingerprintSchema.field
->()("sha256", "unavailable");
-const FINGERPRINT_UNAVAILABLE_KEYS =
-  generatedFieldSet<keyof typeof FingerprintUnavailableSchema.field>()("cause");
-const RUNTIME_IDENTITY_KEYS = generatedFieldSet<
-  keyof typeof QueryRuntimeIdentitySchema.field
->()(
-  "vendorSessionId",
-  "effectiveModel",
-  "sdkVersion",
-  "claudeCodeVersion",
-  "shimBuildSha",
-  "authSource",
-  "subscriptionType",
-  "fastModeState",
-  "fastModeReason",
-  "effectiveOptions",
-  "settings",
-  "tools",
-  "mcp",
-  "contextPrefix",
-);
-const USAGE_OBSERVATION_KEYS = generatedFieldSet<
-  keyof typeof AccountUsageObservationSchema.field
->()(
-  "queryInstanceId",
-  "turnId",
-  "boundaryAtMs",
-  "observedAtMs",
-  "sampleLatencyMs",
-  "subscriptionType",
-  "turnStart",
-  "turnEnd",
-  "available",
-  "unavailable",
-);
-const USAGE_AVAILABLE_KEYS =
-  generatedFieldSet<keyof typeof AccountUsageAvailableSchema.field>()(
-    "fiveHour",
-  );
-const USAGE_WINDOW_KEYS = generatedFieldSet<
-  keyof typeof UsageWindowSchema.field
->()("utilizationPercent", "resetsAtMs");
-const USAGE_UNAVAILABLE_KEYS = generatedFieldSet<
-  keyof typeof AccountUsageUnavailableSchema.field
->()(
-  "serviceUnavailable",
-  "windowUnavailable",
-  "utilizationUnavailable",
-  "samplingFailure",
-);
-const USAGE_SAMPLING_FAILURE_KEYS =
-  generatedFieldSet<keyof typeof UsageSamplingFailureSchema.field>()("cause");
-
-function fingerprint(v: unknown, where: string): EvidenceFingerprint {
-  const o = ensureObject(v, where);
-  rejectUnknown(o, FINGERPRINT_KEYS, where);
-  const arm = oneof(o, [...FINGERPRINT_KEYS], where);
-  return arm === "sha256"
-    ? { kind: "sha256", value: str(o, "sha256", where) }
-    : (() => {
-        const unavailable = ensureObject(o.unavailable, `${where}.unavailable`);
-        rejectUnknown(
-          unavailable,
-          FINGERPRINT_UNAVAILABLE_KEYS,
-          `${where}.unavailable`,
-        );
-        return {
-          kind: "unavailable" as const,
-          cause: str(unavailable, "cause", `${where}.unavailable`),
-        };
-      })();
-}
-
-function decodeRuntime(v: unknown, where: string): QueryRuntimeIdentity {
-  const o = ensureObject(v, where);
-  rejectUnknown(o, RUNTIME_IDENTITY_KEYS, where);
-  return {
-    vendorSessionId: str(o, "vendorSessionId", where),
-    effectiveModel: str(o, "effectiveModel", where),
-    sdkVersion: str(o, "sdkVersion", where),
-    claudeCodeVersion: str(o, "claudeCodeVersion", where),
-    shimBuildSha: str(o, "shimBuildSha", where),
-    authSource: str(o, "authSource", where),
-    subscriptionType: str(o, "subscriptionType", where),
-    fastModeState: str(o, "fastModeState", where),
-    fastModeReason: str(o, "fastModeReason", where),
-    effectiveOptions: fingerprint(
-      o.effectiveOptions,
-      `${where}.effectiveOptions`,
-    ),
-    settings: fingerprint(o.settings, `${where}.settings`),
-    tools: fingerprint(o.tools, `${where}.tools`),
-    mcp: fingerprint(o.mcp, `${where}.mcp`),
-    contextPrefix: fingerprint(o.contextPrefix, `${where}.contextPrefix`),
-  };
-}
-
-function decodeUsageObservation(
-  v: unknown,
-  where: string,
-): AccountUsageObservation {
-  const o = ensureObject(v, where);
-  rejectUnknown(o, USAGE_OBSERVATION_KEYS, where);
-  const boundary = oneof(o, ["turnStart", "turnEnd"], where);
-  const outcome = oneof(o, ["available", "unavailable"], where);
-  const common = {
-    queryInstanceId: str(o, "queryInstanceId", where),
-    turnId: str(o, "turnId", where),
-    boundaryAtMs: int64(o, "boundaryAtMs", where),
-    observedAtMs: int64(o, "observedAtMs", where),
-    sampleLatencyMs: int64(o, "sampleLatencyMs", where),
-    subscriptionType: str(o, "subscriptionType", where),
-    boundary: boundary as "turnStart" | "turnEnd",
-  };
-  if (outcome === "available") {
-    const available = ensureObject(o.available, `${where}.available`);
-    rejectUnknown(available, USAGE_AVAILABLE_KEYS, `${where}.available`);
-    const five = ensureObject(
-      available.fiveHour,
-      `${where}.available.fiveHour`,
-    );
-    rejectUnknown(five, USAGE_WINDOW_KEYS, `${where}.available.fiveHour`);
-    return {
-      ...common,
-      outcome: {
-        kind: "available",
-        utilizationPercent: num(
-          five,
-          "utilizationPercent",
-          `${where}.available.fiveHour`,
-        ),
-        resetsAtMs: int64(five, "resetsAtMs", `${where}.available.fiveHour`),
-      },
-    };
-  }
-  const unavailable = ensureObject(o.unavailable, `${where}.unavailable`);
-  rejectUnknown(unavailable, USAGE_UNAVAILABLE_KEYS, `${where}.unavailable`);
-  const reason = oneof(
-    unavailable,
-    [...USAGE_UNAVAILABLE_KEYS],
-    `${where}.unavailable`,
-  );
-  if (reason === "samplingFailure") {
-    const failure = ensureObject(
-      unavailable.samplingFailure,
-      `${where}.unavailable.samplingFailure`,
-    );
-    rejectUnknown(
-      failure,
-      USAGE_SAMPLING_FAILURE_KEYS,
-      `${where}.unavailable.samplingFailure`,
-    );
-    return {
-      ...common,
-      outcome: {
-        kind: "unavailable",
-        reason: `${reason}:${str(failure, "cause", `${where}.unavailable.samplingFailure`)}`,
-      },
-    };
-  }
-  return { ...common, outcome: { kind: "unavailable", reason } };
-}
-
-const USAGE_TOTALS_KEYS = generatedFieldSet<
-  keyof typeof TokenUsageTotalsSchema.field
->()(
-  "inputTokens",
-  "outputTokens",
-  "cacheReadInputTokens",
-  "cacheCreationInputTokens",
-  "cacheCreation",
-  "serverToolUse",
-  "outputDetails",
-  "cacheRates",
-  "timing",
-);
-const RECONCILIATION_KEYS = generatedFieldSet<
-  keyof typeof TokenUsageReconciliationSchema.field
->()(
-  "responseRecordCount",
-  "responseAllAgents",
-  "responseMainAgent",
-  "resultMainAgent",
-  "responseModels",
-  "resultModels",
-  "apiMessageIds",
-);
-const CACHE_CREATION_KEYS = generatedFieldSet<
-  keyof typeof TokenCacheCreationSchema.field
->()("ephemeral5mInputTokens", "ephemeral1hInputTokens");
-const SERVER_TOOL_USE_KEYS = generatedFieldSet<
-  keyof typeof TokenServerToolUseSchema.field
->()("webSearchRequests", "webFetchRequests");
-const OUTPUT_DETAILS_KEYS =
-  generatedFieldSet<keyof typeof TokenOutputDetailsSchema.field>()(
-    "thinkingTokens",
-  );
-const CACHE_RATES_KEYS = generatedFieldSet<
-  keyof typeof TokenCacheRatesSchema.field
->()(
-  "totalPromptInputTokens",
-  "cacheHitRate",
-  "cacheWriteRate",
-  "uncachedInputRate",
-);
-const TOKEN_TIMING_TOTALS_KEYS = generatedFieldSet<
-  keyof typeof TokenTimingTotalsSchema.field
->()(
-  "outputTokensWithGenerationDuration",
-  "outputGenerationDurationMs",
-  "responsesWithGenerationDuration",
-  "responsesWithoutGenerationDuration",
-  "totalTimeToFirstTokenMs",
-  "responsesWithTimeToFirstToken",
-  "responsesWithoutTimeToFirstToken",
-);
-const MODEL_UTILIZATION_KEYS = generatedFieldSet<
-  keyof typeof ModelTokenUtilizationSchema.field
->()(
-  "model",
-  "canonicalModel",
-  "provider",
-  "totals",
-  "contextWindow",
-  "maxOutputTokens",
-  "costUsd",
-);
-
-function projectAccountingFingerprint(
-  value: GeneratedEvidenceFingerprint,
-  where: string,
-): EvidenceFingerprint {
-  switch (value.evidence.case) {
-    case "sha256":
-      return { kind: "sha256", value: value.evidence.value };
-    case "unavailable":
-      return { kind: "unavailable", cause: value.evidence.value.cause };
-    case undefined:
-      throw new Error(
-        `frontend-proto: ${where} requires a generated evidence oneof`,
-      );
-  }
-  return unreachableGeneratedCase(value.evidence, where);
-}
-
-function projectAccountingRuntime(
-  value: GeneratedQueryRuntimeIdentity,
-  where: string,
-): QueryRuntimeIdentity {
-  return {
-    vendorSessionId: value.vendorSessionId,
-    effectiveModel: value.effectiveModel,
-    sdkVersion: value.sdkVersion,
-    claudeCodeVersion: value.claudeCodeVersion,
-    shimBuildSha: value.shimBuildSha,
-    authSource: value.authSource,
-    subscriptionType: value.subscriptionType,
-    fastModeState: value.fastModeState,
-    fastModeReason: value.fastModeReason,
-    ...(value.effectiveOptions === undefined
-      ? {}
-      : {
-          effectiveOptions: projectAccountingFingerprint(
-            value.effectiveOptions,
-            `${where}.effectiveOptions`,
-          ),
-        }),
-    ...(value.settings === undefined
-      ? {}
-      : {
-          settings: projectAccountingFingerprint(
-            value.settings,
-            `${where}.settings`,
-          ),
-        }),
-    ...(value.tools === undefined
-      ? {}
-      : { tools: projectAccountingFingerprint(value.tools, `${where}.tools`) }),
-    ...(value.mcp === undefined
-      ? {}
-      : { mcp: projectAccountingFingerprint(value.mcp, `${where}.mcp`) }),
-    ...(value.contextPrefix === undefined
-      ? {}
-      : {
-          contextPrefix: projectAccountingFingerprint(
-            value.contextPrefix,
-            `${where}.contextPrefix`,
-          ),
-        }),
-  };
-}
-
-function projectAccountingUsageObservation(
-  value: GeneratedAccountUsageObservation,
-  where: string,
-): AccountUsageObservation {
-  const boundary =
-    value.boundary.case === undefined ? undefined : value.boundary.case;
-  let outcome: AccountUsageObservation["outcome"];
-  switch (value.outcome.case) {
-    case "available":
-      if (value.outcome.value.fiveHour === undefined)
-        throw new Error(
-          `frontend-proto: ${where}.outcome.available requires fiveHour`,
-        );
-      outcome = {
-        kind: "available",
-        utilizationPercent: value.outcome.value.fiveHour.utilizationPercent,
-        resetsAtMs: safeGeneratedInt64(
-          value.outcome.value.fiveHour.resetsAtMs,
-          `${where}.outcome.available.fiveHour.resetsAtMs`,
-        ),
-      };
-      break;
-    case "unavailable":
-      outcome =
-        value.outcome.value.reason.case === "samplingFailure"
-          ? {
-              kind: "unavailable",
-              reason: `samplingFailure:${value.outcome.value.reason.value.cause}`,
-            }
-          : value.outcome.value.reason.case === undefined
-            ? (() => {
-                throw new Error(
-                  `frontend-proto: ${where}.outcome.unavailable requires a reason`,
-                );
-              })()
-            : { kind: "unavailable", reason: value.outcome.value.reason.case };
-      break;
-    case undefined:
-      outcome = undefined;
-      break;
-  }
-  return {
-    queryInstanceId: value.queryInstanceId,
-    turnId: value.turnId,
-    boundaryAtMs: safeGeneratedInt64(
-      value.boundaryAtMs,
-      `${where}.boundaryAtMs`,
-    ),
-    observedAtMs: safeGeneratedInt64(
-      value.observedAtMs,
-      `${where}.observedAtMs`,
-    ),
-    sampleLatencyMs: safeGeneratedInt64(
-      value.sampleLatencyMs,
-      `${where}.sampleLatencyMs`,
-    ),
-    subscriptionType: value.subscriptionType,
-    ...(boundary === undefined ? {} : { boundary }),
-    ...(outcome === undefined ? {} : { outcome }),
-  };
-}
-
-function projectAccountingUsageTotals(
-  value: GeneratedTokenUsageTotals,
-  where: string,
-): UsageTotals {
-  return {
-    inputTokens: safeGeneratedInt64(value.inputTokens, `${where}.inputTokens`),
-    outputTokens: safeGeneratedInt64(
-      value.outputTokens,
-      `${where}.outputTokens`,
-    ),
-    cacheReadInputTokens: safeGeneratedInt64(
-      value.cacheReadInputTokens,
-      `${where}.cacheReadInputTokens`,
-    ),
-    cacheCreationInputTokens: safeGeneratedInt64(
-      value.cacheCreationInputTokens,
-      `${where}.cacheCreationInputTokens`,
-    ),
-    ...(value.cacheCreation === undefined
-      ? {}
-      : {
-          cacheCreation5m: safeGeneratedInt64(
-            value.cacheCreation.ephemeral5mInputTokens,
-            `${where}.cacheCreation.ephemeral5mInputTokens`,
-          ),
-          cacheCreation1h: safeGeneratedInt64(
-            value.cacheCreation.ephemeral1hInputTokens,
-            `${where}.cacheCreation.ephemeral1hInputTokens`,
-          ),
-        }),
-    ...(value.serverToolUse === undefined
-      ? {}
-      : {
-          webSearchRequests: safeGeneratedInt64(
-            value.serverToolUse.webSearchRequests,
-            `${where}.serverToolUse.webSearchRequests`,
-          ),
-          webFetchRequests: safeGeneratedInt64(
-            value.serverToolUse.webFetchRequests,
-            `${where}.serverToolUse.webFetchRequests`,
-          ),
-        }),
-    ...(value.outputDetails === undefined
-      ? {}
-      : {
-          thinkingTokens: safeGeneratedInt64(
-            value.outputDetails.thinkingTokens,
-            `${where}.outputDetails.thinkingTokens`,
-          ),
-        }),
-    ...(value.cacheRates === undefined
-      ? {}
-      : {
-          cacheRates: {
-            totalPromptInputTokens: safeGeneratedInt64(
-              value.cacheRates.totalPromptInputTokens,
-              `${where}.cacheRates.totalPromptInputTokens`,
-            ),
-            cacheHitRate: value.cacheRates.cacheHitRate,
-            cacheWriteRate: value.cacheRates.cacheWriteRate,
-            uncachedInputRate: value.cacheRates.uncachedInputRate,
-          },
-        }),
-    ...(value.timing === undefined
-      ? {}
-      : {
-          timing: {
-            outputTokensWithGenerationDuration: safeGeneratedInt64(
-              value.timing.outputTokensWithGenerationDuration,
-              `${where}.timing.outputTokensWithGenerationDuration`,
-            ),
-            outputGenerationDurationMs: safeGeneratedInt64(
-              value.timing.outputGenerationDurationMs,
-              `${where}.timing.outputGenerationDurationMs`,
-            ),
-            responsesWithGenerationDuration: safeGeneratedInt64(
-              value.timing.responsesWithGenerationDuration,
-              `${where}.timing.responsesWithGenerationDuration`,
-            ),
-            responsesWithoutGenerationDuration: safeGeneratedInt64(
-              value.timing.responsesWithoutGenerationDuration,
-              `${where}.timing.responsesWithoutGenerationDuration`,
-            ),
-            totalTimeToFirstTokenMs: safeGeneratedInt64(
-              value.timing.totalTimeToFirstTokenMs,
-              `${where}.timing.totalTimeToFirstTokenMs`,
-            ),
-            responsesWithTimeToFirstToken: safeGeneratedInt64(
-              value.timing.responsesWithTimeToFirstToken,
-              `${where}.timing.responsesWithTimeToFirstToken`,
-            ),
-            responsesWithoutTimeToFirstToken: safeGeneratedInt64(
-              value.timing.responsesWithoutTimeToFirstToken,
-              `${where}.timing.responsesWithoutTimeToFirstToken`,
-            ),
-          },
-        }),
-  };
-}
-
-function projectAccountingModel(
-  value: GeneratedModelTokenUtilization,
-  where: string,
-): ModelUsageTotals {
-  return {
-    model: value.model,
-    ...(value.canonicalModel === undefined
-      ? {}
-      : { canonicalModel: value.canonicalModel }),
-    ...(value.provider === undefined ? {} : { provider: value.provider }),
-    ...(value.totals === undefined
-      ? {}
-      : {
-          totals: projectAccountingUsageTotals(value.totals, `${where}.totals`),
-        }),
-    ...(value.contextWindow === undefined
-      ? {}
-      : {
-          contextWindow: safeGeneratedInt64(
-            value.contextWindow,
-            `${where}.contextWindow`,
-          ),
-        }),
-    ...(value.maxOutputTokens === undefined
-      ? {}
-      : {
-          maxOutputTokens: safeGeneratedInt64(
-            value.maxOutputTokens,
-            `${where}.maxOutputTokens`,
-          ),
-        }),
-    ...(value.costUsd === undefined ? {} : { costUsd: value.costUsd }),
-  };
-}
-
-function projectAccountingReconciliation(
-  value: GeneratedTokenUsageReconciliation,
-  where: string,
-): TokenUsageReconciliation {
-  return {
-    responseRecordCount: safeGeneratedInt64(
-      value.responseRecordCount,
-      `${where}.responseRecordCount`,
-    ),
-    ...(value.responseAllAgents === undefined
-      ? {}
-      : {
-          responseAllAgents: projectAccountingUsageTotals(
-            value.responseAllAgents,
-            `${where}.responseAllAgents`,
-          ),
-        }),
-    ...(value.responseMainAgent === undefined
-      ? {}
-      : {
-          responseMainAgent: projectAccountingUsageTotals(
-            value.responseMainAgent,
-            `${where}.responseMainAgent`,
-          ),
-        }),
-    ...(value.resultMainAgent === undefined
-      ? {}
-      : {
-          resultMainAgent: projectAccountingUsageTotals(
-            value.resultMainAgent,
-            `${where}.resultMainAgent`,
-          ),
-        }),
-    responseModels: value.responseModels.map((model, index) =>
-      projectAccountingModel(model, `${where}.responseModels[${index}]`),
-    ),
-    resultModels: value.resultModels.map((model, index) =>
-      projectAccountingModel(model, `${where}.resultModels[${index}]`),
-    ),
-    apiMessageIds: [...value.apiMessageIds],
-  };
-}
-
-function projectAccountingProblem(
-  value: GeneratedTurnAccountingProblem,
-  where: string,
-): TurnAccountingProblem {
-  switch (value.problem.case) {
-    case "missingUsageBoundary": {
-      const boundary = value.problem.value.boundary.case;
-      if (boundary === undefined)
-        throw new Error(
-          `frontend-proto: ${where}.missingUsageBoundary requires a generated boundary oneof`,
-        );
-      return { kind: "missingUsageBoundary", boundary };
-    }
-    case "windowReset":
-      return {
-        kind: "windowReset",
-        startResetsAtMs: safeGeneratedInt64(
-          value.problem.value.startResetsAtMs,
-          `${where}.windowReset.startResetsAtMs`,
-        ),
-        endResetsAtMs: safeGeneratedInt64(
-          value.problem.value.endResetsAtMs,
-          `${where}.windowReset.endResetsAtMs`,
-        ),
-      };
-    case "tokenLedgerMismatch":
-      return {
-        kind: "tokenLedgerMismatch",
-        differingFieldPaths: [...value.problem.value.differingFieldPaths],
-      };
-    case "runtimeIdentityIncomplete":
-      return {
-        kind: "runtimeIdentityIncomplete",
-        missingFieldPaths: [...value.problem.value.missingFieldPaths],
-      };
-    case "unmodeledUsageFields":
-      return {
-        kind: "unmodeledUsageFields",
-        sourceFieldPaths: [...value.problem.value.sourceFieldPaths],
-      };
-    case "telemetryRecordMissing": {
-      switch (value.problem.value.record.case) {
-        case "queryLifecycle":
-          return {
-            kind: "telemetryRecordMissing",
-            record: {
-              kind: "queryLifecycle",
-              queryInstanceId: value.problem.value.record.value.queryInstanceId,
-            },
-          };
-        case "responseUsage":
-          return {
-            kind: "telemetryRecordMissing",
-            record: {
-              kind: "responseUsage",
-              apiMessageId: value.problem.value.record.value.apiMessageId,
-            },
-          };
-        case "persistenceReceipt":
-          return {
-            kind: "telemetryRecordMissing",
-            record: {
-              kind: "persistenceReceipt",
-              turnId: value.problem.value.record.value.turnId,
-            },
-          };
-        case undefined:
-          throw new Error(
-            `frontend-proto: ${where}.telemetryRecordMissing requires a generated record oneof`,
-          );
-      }
-      return unreachableGeneratedCase(
-        value.problem.value.record,
-        `${where}.telemetryRecordMissing`,
-      );
-    }
-    case undefined:
-      throw new Error(
-        `frontend-proto: ${where} requires a generated accounting-problem oneof`,
-      );
-  }
-  return unreachableGeneratedCase(value.problem, where);
-}
-
-function projectAccountingTiming(
-  value: GeneratedTurnAccountingTiming,
-  where: string,
-): TurnAccountingTiming {
-  return {
-    promptAdmittedAtMs: safeGeneratedInt64(
-      value.promptAdmittedAtMs,
-      `${where}.promptAdmittedAtMs`,
-    ),
-    resultReceivedAtMs: safeGeneratedInt64(
-      value.resultReceivedAtMs,
-      `${where}.resultReceivedAtMs`,
-    ),
-    accountingSettledAtMs: safeGeneratedInt64(
-      value.accountingSettledAtMs,
-      `${where}.accountingSettledAtMs`,
-    ),
-    promptToResultMs: safeGeneratedInt64(
-      value.promptToResultMs,
-      `${where}.promptToResultMs`,
-    ),
-    resultToSettlementMs: safeGeneratedInt64(
-      value.resultToSettlementMs,
-      `${where}.resultToSettlementMs`,
-    ),
-  };
-}
-
-function decodeTurnAccounting(v: unknown, where: string): TurnAccounting {
-  let value: GeneratedTurnAccounting;
-  try {
-    value = fromJson(TurnAccountingSchema, ensureObject(v, where) as JsonValue);
-  } catch (error) {
-    throw new Error(
-      `frontend-proto: ${where} violates the generated TurnAccounting contract: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  const consumed = {
-    turnId: value.turnId,
-    queryInstanceId: value.queryInstanceId,
-    runtime: value.runtime,
-    timing: value.timing,
-    usageAtStart: value.usageAtStart,
-    usageAtEnd: value.usageAtEnd,
-    responses: value.responses,
-    reconciliation: value.reconciliation,
-    verdict: value.verdict,
-  } satisfies {
-    [
-      K in Exclude<keyof GeneratedTurnAccounting, "$typeName" | "$unknown">
-    ]: GeneratedTurnAccounting[K];
-  };
-  const evidence = {
-    ...(consumed.runtime === undefined
-      ? {}
-      : {
-          runtime: projectAccountingRuntime(
-            consumed.runtime,
-            `${where}.runtime`,
-          ),
-        }),
-    ...(consumed.timing === undefined
-      ? {}
-      : {
-          timing: projectAccountingTiming(consumed.timing, `${where}.timing`),
-        }),
-    ...(consumed.usageAtStart === undefined
-      ? {}
-      : {
-          usageAtStart: projectAccountingUsageObservation(
-            consumed.usageAtStart,
-            `${where}.usageAtStart`,
-          ),
-        }),
-    ...(consumed.usageAtEnd === undefined
-      ? {}
-      : {
-          usageAtEnd: projectAccountingUsageObservation(
-            consumed.usageAtEnd,
-            `${where}.usageAtEnd`,
-          ),
-        }),
-    responses: consumed.responses.map((response, index) =>
-      decodeTokenUtilization(
-        toJson(TokenUtilizationSchema, response),
-        `${where}.responses[${index}]`,
-      ),
-    ),
-    ...(consumed.reconciliation === undefined
-      ? {}
-      : {
-          reconciliation: projectAccountingReconciliation(
-            consumed.reconciliation,
-            `${where}.reconciliation`,
-          ),
-        }),
-  };
-  switch (consumed.verdict.case) {
-    case "complete":
-      return {
-        turnId: consumed.turnId,
-        queryInstanceId: consumed.queryInstanceId,
-        ...evidence,
-        verdict: { kind: "complete" },
-      };
-    case "invalid":
-      return {
-        turnId: consumed.turnId,
-        queryInstanceId: consumed.queryInstanceId,
-        ...evidence,
-        verdict: {
-          kind: "invalid",
-          problems: consumed.verdict.value.problems.map((problem, index) =>
-            projectAccountingProblem(
-              problem,
-              `${where}.invalid.problems[${index}]`,
-            ),
-          ),
-        },
-      };
-    case undefined:
-      throw new Error(
-        `frontend-proto: ${where} requires a generated verdict oneof`,
-      );
-  }
-  return unreachableGeneratedCase(consumed.verdict, where);
-}
-
-function safeGeneratedInt64(value: bigint, where: string): number {
-  const projected = Number(value);
-  if (!Number.isSafeInteger(projected))
-    throw new Error(
-      `frontend-proto: ${where} exceeds the webapp's safe integer range`,
-    );
-  return projected;
-}
-
-function unreachableGeneratedCase(value: never, where: string): never {
-  throw new Error(
-    `frontend-proto: ${where} has an unsupported generated oneof case ${JSON.stringify(value)}`,
-  );
-}
-
-function projectCacheCreation(
-  value: GeneratedTokenCacheCreation,
-  where: string,
-): TokenCacheCreation {
-  return {
-    ephemeral5mInputTokens: safeGeneratedInt64(
-      value.ephemeral5mInputTokens,
-      `${where}.ephemeral5mInputTokens`,
-    ),
-    ephemeral1hInputTokens: safeGeneratedInt64(
-      value.ephemeral1hInputTokens,
-      `${where}.ephemeral1hInputTokens`,
-    ),
-  };
-}
-
-function projectServerToolUse(
-  value: GeneratedTokenServerToolUse,
-  where: string,
-): TokenServerToolUse {
-  return {
-    webSearchRequests: safeGeneratedInt64(
-      value.webSearchRequests,
-      `${where}.webSearchRequests`,
-    ),
-    webFetchRequests: safeGeneratedInt64(
-      value.webFetchRequests,
-      `${where}.webFetchRequests`,
-    ),
-  };
-}
-
-function projectOutputDetails(
-  value: GeneratedTokenOutputDetails,
-  where: string,
-): TokenOutputDetails {
-  return {
-    thinkingTokens: safeGeneratedInt64(
-      value.thinkingTokens,
-      `${where}.thinkingTokens`,
-    ),
-  };
-}
-
-function projectCacheRates(
-  value: GeneratedTokenCacheRates,
-  where: string,
-): TokenCacheRates {
-  return {
-    totalPromptInputTokens: safeGeneratedInt64(
-      value.totalPromptInputTokens,
-      `${where}.totalPromptInputTokens`,
-    ),
-    cacheHitRate: value.cacheHitRate,
-    cacheWriteRate: value.cacheWriteRate,
-    uncachedInputRate: value.uncachedInputRate,
-  };
-}
-
-type GeneratedIterationValue = Exclude<
-  GeneratedTokenUsageIteration["iteration"],
-  { case: undefined }
->["value"];
-
-function projectIterationCounters(
-  value: GeneratedIterationValue,
-  where: string,
-): TokenUsageIterationCounters {
-  return {
-    inputTokens: safeGeneratedInt64(value.inputTokens, `${where}.inputTokens`),
-    outputTokens: safeGeneratedInt64(
-      value.outputTokens,
-      `${where}.outputTokens`,
-    ),
-    cacheReadInputTokens: safeGeneratedInt64(
-      value.cacheReadInputTokens,
-      `${where}.cacheReadInputTokens`,
-    ),
-    cacheCreationInputTokens: safeGeneratedInt64(
-      value.cacheCreationInputTokens,
-      `${where}.cacheCreationInputTokens`,
-    ),
-    ...(value.cacheCreation === undefined
-      ? {}
-      : {
-          cacheCreation: projectCacheCreation(
-            value.cacheCreation,
-            `${where}.cacheCreation`,
-          ),
-        }),
-  };
-}
-
-function projectUsageIteration(
-  value: GeneratedTokenUsageIteration,
-  where: string,
-): TokenUsageIteration {
-  const arm = value.iteration;
-  switch (arm.case) {
-    case "sampling":
-      return {
-        kind: "sampling",
-        ...projectIterationCounters(arm.value, `${where}.sampling`),
-        model: arm.value.model,
-      };
-    case "compaction":
-      return {
-        kind: "compaction",
-        ...projectIterationCounters(arm.value, `${where}.compaction`),
-      };
-    case "advisor":
-      return {
-        kind: "advisor",
-        ...projectIterationCounters(arm.value, `${where}.advisor`),
-        model: arm.value.model,
-      };
-    case "fallback":
-      return {
-        kind: "fallback",
-        ...projectIterationCounters(arm.value, `${where}.fallback`),
-        model: arm.value.model,
-      };
-    case undefined:
-      throw new Error(
-        `frontend-proto: ${where} requires a generated iteration oneof`,
-      );
-  }
-  return unreachableGeneratedCase(arm, where);
-}
-
-function projectCacheDiagnostic(
-  value: GeneratedTokenCacheDiagnostic,
-  where: string,
-): TokenCacheDiagnostic {
-  const arm = value.reason;
-  switch (arm.case) {
-    case "pending":
-    case "previousMessageUnavailable":
-    case "diagnosticsUnavailable":
-      return { kind: arm.case };
-    case "modelChanged":
-    case "systemChanged":
-    case "toolsChanged":
-    case "messagesChanged":
-      return {
-        kind: arm.case,
-        cacheMissedInputTokens: safeGeneratedInt64(
-          arm.value.cacheMissedInputTokens,
-          `${where}.${arm.case}.cacheMissedInputTokens`,
-        ),
-      };
-    case undefined:
-      throw new Error(
-        `frontend-proto: ${where} requires a generated cache-diagnostic oneof`,
-      );
-  }
-  return unreachableGeneratedCase(arm, where);
-}
-
-function projectResponseTokenUsage(
-  value: GeneratedVendorTokenUsage,
-  where: string,
-): ResponseTokenUsage {
-  if (value.rawUsage === undefined)
-    throw new Error(`frontend-proto: ${where}.rawUsage is required`);
-  const rawUsage = ensureObject(
-    toJson(ApiUsageSchema, value.rawUsage),
-    `${where}.rawUsage`,
-  );
-  const projected = {
-    inputTokens: safeGeneratedInt64(value.inputTokens, `${where}.inputTokens`),
-    outputTokens: safeGeneratedInt64(
-      value.outputTokens,
-      `${where}.outputTokens`,
-    ),
-    cacheReadInputTokens: safeGeneratedInt64(
-      value.cacheReadInputTokens,
-      `${where}.cacheReadInputTokens`,
-    ),
-    cacheCreationInputTokens: safeGeneratedInt64(
-      value.cacheCreationInputTokens,
-      `${where}.cacheCreationInputTokens`,
-    ),
-    cacheCreation:
-      value.cacheCreation === undefined
-        ? undefined
-        : projectCacheCreation(value.cacheCreation, `${where}.cacheCreation`),
-    serverToolUse:
-      value.serverToolUse === undefined
-        ? undefined
-        : projectServerToolUse(value.serverToolUse, `${where}.serverToolUse`),
-    serviceTier: value.serviceTier,
-    speed: value.speed,
-    inferenceGeo: value.inferenceGeo,
-    outputDetails:
-      value.outputDetails === undefined
-        ? undefined
-        : projectOutputDetails(value.outputDetails, `${where}.outputDetails`),
-    iterations: value.iterations.map((entry, index) =>
-      projectUsageIteration(entry, `${where}.iterations[${index}]`),
-    ),
-    cacheDiagnostic:
-      value.cacheDiagnostic === undefined
-        ? undefined
-        : projectCacheDiagnostic(
-            value.cacheDiagnostic,
-            `${where}.cacheDiagnostic`,
-          ),
-    cacheRates:
-      value.cacheRates === undefined
-        ? undefined
-        : projectCacheRates(value.cacheRates, `${where}.cacheRates`),
-    fallbackCredit: value.fallbackCredit,
-    unmodeledUsage: value.unmodeledUsage,
-    rawUsage,
-  } satisfies {
-    [
-      K in Exclude<keyof GeneratedVendorTokenUsage, "$typeName" | "$unknown">
-    ]-?: K extends keyof ResponseTokenUsage ? ResponseTokenUsage[K] : never;
-  };
-  return {
-    inputTokens: projected.inputTokens,
-    outputTokens: projected.outputTokens,
-    cacheReadInputTokens: projected.cacheReadInputTokens,
-    cacheCreationInputTokens: projected.cacheCreationInputTokens,
-    ...(projected.cacheCreation === undefined
-      ? {}
-      : { cacheCreation: projected.cacheCreation }),
-    ...(projected.serverToolUse === undefined
-      ? {}
-      : { serverToolUse: projected.serverToolUse }),
-    serviceTier: projected.serviceTier,
-    speed: projected.speed,
-    inferenceGeo: projected.inferenceGeo,
-    ...(projected.outputDetails === undefined
-      ? {}
-      : { outputDetails: projected.outputDetails }),
-    iterations: projected.iterations,
-    ...(projected.cacheDiagnostic === undefined
-      ? {}
-      : { cacheDiagnostic: projected.cacheDiagnostic }),
-    ...(projected.cacheRates === undefined
-      ? {}
-      : { cacheRates: projected.cacheRates }),
-    ...(projected.fallbackCredit === undefined
-      ? {}
-      : { fallbackCredit: projected.fallbackCredit }),
-    ...(projected.unmodeledUsage === undefined
-      ? {}
-      : { unmodeledUsage: projected.unmodeledUsage }),
-    rawUsage: projected.rawUsage,
-  };
-}
-
-/** Parse the schema-owned contract through generated protobuf types before projecting a web DTO. */
-function decodeTokenUtilization(v: unknown, where: string): TokenUtilization {
-  const o = ensureObject(v, where);
-  let generated: GeneratedTokenUtilization;
-  try {
-    generated = fromJson(TokenUtilizationSchema, o as JsonValue);
-  } catch (error) {
-    throw new Error(
-      `frontend-proto: ${where} violates the generated TokenUtilization contract: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  const consumed = {
-    agentReplSessionId: generated.agentReplSessionId,
-    claudeSessionId: generated.claudeSessionId,
-    rootTurnId: generated.rootTurnId,
-    apiRequestId: generated.apiRequestId,
-    apiMessageId: generated.apiMessageId,
-    model: generated.model,
-    actor: generated.actor,
-    usage: generated.usage,
-    responseTiming: generated.responseTiming,
-  } satisfies {
-    [
-      K in Exclude<keyof GeneratedTokenUtilization, "$typeName" | "$unknown">
-    ]: GeneratedTokenUtilization[K];
-  };
-  if (consumed.usage === undefined)
-    throw new Error(`frontend-proto: ${where}.usage is required`);
-  const actor = consumed.actor;
-  const result: TokenUtilization = {
-    agentReplSessionId: consumed.agentReplSessionId,
-    claudeSessionId: consumed.claudeSessionId,
-    rootTurnId: consumed.rootTurnId,
-    ...(consumed.apiRequestId === undefined
-      ? {}
-      : { apiRequestId: consumed.apiRequestId }),
-    apiMessageId: consumed.apiMessageId,
-    model: consumed.model,
-    actor: actor.case === "subagent" ? "subagent" : "mainAgent",
-    usage: projectResponseTokenUsage(consumed.usage, `${where}.usage`),
-  };
-  for (const [field, value] of [
-    ["agentReplSessionId", result.agentReplSessionId],
-    ["claudeSessionId", result.claudeSessionId],
-    ["rootTurnId", result.rootTurnId],
-    ["apiMessageId", result.apiMessageId],
-  ] as const) {
-    if (value === "")
-      throw new Error(`frontend-proto: ${where}.${field} must be nonblank`);
-  }
-  if (result.model.trim() === "")
-    throw new Error(`frontend-proto: ${where}.model must be nonblank`);
-  if (result.apiRequestId === "")
-    throw new Error(
-      `frontend-proto: ${where}.apiRequestId must be absent or nonblank`,
-    );
-  switch (actor.case) {
-    case "mainAgent":
-      break;
-    case "subagent":
-      result.subagent = {
-        agentId: actor.value.agentId,
-        parentToolUseId: actor.value.parentToolUseId,
-        parentAgentId: actor.value.parentAgentId,
-        subagentType: actor.value.subagentType,
-        taskDescription: actor.value.taskDescription,
-      };
-      break;
-    case undefined:
-      throw new Error(
-        `frontend-proto: ${where} requires a generated actor oneof`,
-      );
-    default:
-      unreachableGeneratedCase(actor, where);
-  }
-  if (consumed.responseTiming !== undefined) {
-    const timing = consumed.responseTiming;
-    result.responseTiming = {
-      ...(timing.timeToFirstTokenMs === undefined
-        ? {}
-        : {
-            timeToFirstTokenMs: safeGeneratedInt64(
-              timing.timeToFirstTokenMs,
-              `${where}.responseTiming.timeToFirstTokenMs`,
-            ),
-          }),
-      ...(timing.outputGenerationDurationMs === undefined
-        ? {}
-        : {
-            outputGenerationDurationMs: safeGeneratedInt64(
-              timing.outputGenerationDurationMs,
-              `${where}.responseTiming.outputGenerationDurationMs`,
-            ),
-          }),
-    };
-  }
-  return result;
 }
 
 const HEARTBEAT_VIEW_KEYS = new Set(["workspace", "fence", "progress"]);
@@ -5534,18 +4208,50 @@ function decodeTypingDelta(v: unknown): TypingDelta {
   return td;
 }
 
-const SESSION_INIT_VIEW_KEYS = new Set(["workspace", "fence", "init"]);
+const SESSION_INIT_VIEW_KEYS = generatedFieldSet<
+  keyof typeof SessionInitViewSchema.field
+>()("workspace", "fence", "rows");
+const SESSION_INIT_ROW_KEYS = generatedFieldSet<
+  keyof typeof SessionInitRowSchema.field
+>()("label", "value");
+
+/**
+ * One `/status` row, decoded STRICTLY like every other `frontend.v1`-owned
+ * message.
+ *
+ * BOTH FIELDS ARE LOAD-BEARING and neither is ever blank on the wire: the
+ * daemon omits a row it has no value for rather than pushing an empty one. A
+ * blank of either is therefore a producer fault, and it throws rather than
+ * rendering a labelless or valueless line the reader would have to interpret.
+ */
+function decodeSessionInitRow(v: unknown, ctx: string): SessionInitRow {
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, SESSION_INIT_ROW_KEYS, ctx);
+  const label = str(o, "label", ctx);
+  const value = str(o, "value", ctx);
+  if (label === "") {
+    throw new Error(`frontend-proto: ${ctx} missing required \`label\``);
+  }
+  if (value === "") {
+    throw new Error(`frontend-proto: ${ctx} missing required \`value\``);
+  }
+  return { label, value };
+}
+
 function decodeSessionInitView(v: unknown): SessionInitView {
   const o = ensureObject(v, "SessionInitView");
   rejectUnknown(o, SESSION_INIT_VIEW_KEYS, "SessionInitView");
   const siv: SessionInitView = {
     workspace: str(o, "workspace", "SessionInitView"),
     fence: str(o, "fence", "SessionInitView"),
-    // The SystemInit is adopted by shape (large, additive); an absent init is {}.
-    init:
-      o.init === undefined || o.init === null
-        ? {}
-        : ensureObject(o.init, "SessionInitView.init"),
+    // EMPTY IS A STATEMENT, not a hole: no init has landed yet, and the panel
+    // draws the rows it owns and nothing more.
+    rows:
+      o.rows === undefined || o.rows === null
+        ? []
+        : ensureArray(o.rows, "SessionInitView.rows").map((row, i) =>
+            decodeSessionInitRow(row, `SessionInitView.rows[${i}]`),
+          ),
   };
   if (siv.fence === "") {
     throw new Error("frontend-proto: SessionInitView missing required `fence`");
@@ -5628,86 +4334,6 @@ function decodeTaskCatalog(v: unknown): TaskCatalog {
     throw new Error("frontend-proto: TaskCatalog missing required `fence`");
   }
   return tc;
-}
-
-function decodeSessionTokenUtilization(v: unknown): SessionTokenUtilization {
-  let generated: SessionTokenUtilization;
-  try {
-    generated = fromJson(
-      SessionTokenUtilizationSchema,
-      ensureObject(v, "SessionTokenUtilization") as JsonValue,
-    );
-  } catch (error) {
-    throw new Error(
-      `frontend-proto: SessionTokenUtilization violates its generated contract: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  if (generated.allAgents === undefined || generated.mainAgent === undefined) {
-    throw new Error(
-      "frontend-proto: SessionTokenUtilization requires allAgents and mainAgent totals",
-    );
-  }
-  for (const [index, entry] of generated.subagents.entries()) {
-    if (entry.agent === undefined || entry.totals === undefined) {
-      throw new Error(
-        `frontend-proto: SessionTokenUtilization.subagents[${index}] requires agent and totals`,
-      );
-    }
-    if (entry.agent.agentId === "" && entry.agent.parentToolUseId === "") {
-      throw new Error(
-        `frontend-proto: SessionTokenUtilization.subagents[${index}] lacks a stable invocation identity`,
-      );
-    }
-    for (const [modelIndex, model] of entry.models.entries()) {
-      requireModelTokenUtilization(
-        model,
-        `SessionTokenUtilization.subagents[${index}].models[${modelIndex}]`,
-      );
-    }
-  }
-  for (const [index, model] of generated.models.entries()) {
-    requireModelTokenUtilization(
-      model,
-      `SessionTokenUtilization.models[${index}]`,
-    );
-  }
-  const seenApiMessageIds = new Set<string>();
-  for (const [
-    index,
-    response,
-  ] of generated.ungroupedSubagentResponses.entries()) {
-    if (response.actor.case !== "subagent")
-      throw new Error(
-        `frontend-proto: SessionTokenUtilization.ungroupedSubagentResponses[${index}] must be a subagent response`,
-      );
-    if (
-      response.actor.value.agentId !== "" ||
-      response.actor.value.parentToolUseId !== ""
-    )
-      throw new Error(
-        `frontend-proto: SessionTokenUtilization.ungroupedSubagentResponses[${index}] has a stable invocation identity`,
-      );
-    if (
-      response.apiMessageId === "" ||
-      seenApiMessageIds.has(response.apiMessageId)
-    )
-      throw new Error(
-        `frontend-proto: SessionTokenUtilization.ungroupedSubagentResponses has missing or repeated apiMessageId ${response.apiMessageId}`,
-      );
-    seenApiMessageIds.add(response.apiMessageId);
-  }
-  return generated;
-}
-
-function requireModelTokenUtilization(
-  model: GeneratedModelTokenUtilization,
-  where: string,
-): void {
-  if (model.model.trim() === "" || model.totals === undefined) {
-    throw new Error(
-      `frontend-proto: ${where} requires model identity and totals`,
-    );
-  }
 }
 
 const COMMAND_ACK_KEYS = new Set([
@@ -6840,6 +5466,32 @@ const FAILURE_CARD_TERMINAL_KEYS =
   generatedFieldSet<keyof typeof FailureCardTerminalSchema.field>()();
 const FAILURE_CARD_REF_KEYS =
   generatedFieldSet<keyof typeof FailureCardRefSchema.field>()("cardUuid");
+
+const COMPACTION_SUMMARY_KEYS = generatedFieldSet<
+  keyof typeof CompactionSummaryItemSchema.field
+>()("summary", "compactedAtMs", "expensiveInputTokens");
+
+/**
+ * Decode a `CompactionSummaryItem` — the purple-washed summary block a
+ * compaction leaves behind.
+ *
+ * `expensiveInputTokens` is carried through VERBATIM, -1 and all. -1 is the
+ * daemon stating that the result's usage was unavailable, and it is never
+ * fabricated as 0 on either end: the renderer prints no figure for it rather
+ * than a zero that would read as a summary that cost nothing.
+ */
+export function decodeCompactionSummaryItem(
+  v: unknown,
+  where: string,
+): CompactionSummary {
+  const o = ensureObject(v, where);
+  rejectUnknown(o, COMPACTION_SUMMARY_KEYS, where);
+  return {
+    summary: str(o, "summary", where),
+    compactedAtMs: num(o, "compactedAtMs", where),
+    expensiveInputTokens: num(o, "expensiveInputTokens", where),
+  };
+}
 
 /**
  * Decode a `FailureCardView`.

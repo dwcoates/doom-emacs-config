@@ -4,12 +4,12 @@ import { create } from "@bufbuild/protobuf";
 import {
   FailureKindSchema,
   QueryTerminationFailureSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
+} from "../../proto/gen/ts/frontend/v1/errors_pb";
 import {
   QueryIteratorFailureSchema,
   QueryStartupFailureSchema,
   UnexpectedQueryEofSchema,
-} from "../../proto/gen/ts/agentshim/core/v1/core_pb";
+} from "../../proto/gen/ts/protocol/v1/core_pb";
 import {
   Actions,
   ASYNC_TEAL_TOOLS,
@@ -51,13 +51,12 @@ import { StubIntersectionObserver, withIntersectionObserver } from "./intersecti
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import { FIXED_FOLD_CLASS } from "../src/fold.js";
 import { AsyncSource } from "../src/protocol.js";
-import type { UnwrappedEmission } from "../src/agent-emission.js";
+import type { ToolDetachment, UnwrappedEmission } from "../src/agent-emission.js";
 import type { AsyncBubble } from "../src/async-bubble.js";
 import { AsyncBubbleRegistry } from "../src/async-routing.js";
-import { agentUncachedInput, uncachedInputHtml } from "../src/tokens.js";
-import { attributedSubagent } from "./token-utilization-fixture.js";
 import {
   ContextClearedItem,
+  CompactionSummaryItem,
   ContextCompactedItem,
   ConversationItem,
   ConversationStore,
@@ -639,6 +638,180 @@ describe("context compaction", () => {
     expect(html).not.toContain("manual");
   });
 
+});
+
+/** A tool card carrying a typed outcome, which IS its detachment chip. */
+function outcomeCard(outcome?: ToolDetachment): ToolItem {
+  const item: ToolItem = {
+    kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
+    toolUseId: "t1",
+    toolName: "Bash",
+    messageId: "m1",
+    inputJson: "",
+    inputDone: true,
+  };
+  if (outcome !== undefined) item.outcome = outcome;
+  return item;
+}
+
+describe("the tool card's detachment chip", () => {
+  it("draws NO chip when the outcome carried no detachment", () => {
+    // Arrange / Act — the call returned ordinarily; there is nothing to say.
+    const html = renderItem(outcomeCard());
+    // Assert
+    expect(html).not.toContain("detachment");
+  });
+
+  it("names the kind a started detachment stated", () => {
+    // Arrange / Act
+    const html = renderItem(
+      outcomeCard({
+        case: "started",
+        value: { originToolCallId: "t1", label: "nightly sweep", kind: { case: "shell" } },
+      }),
+    );
+    // Assert
+    expect(html).toContain("detached · shell · nightly sweep");
+  });
+
+  it("names a skill detachment by the skill it invoked", () => {
+    // Arrange / Act
+    const html = renderItem(
+      outcomeCard({
+        case: "started",
+        value: {
+          originToolCallId: "t1",
+          label: "merge",
+          kind: { case: "skill", skillName: "create-or-update-workspace", args: "" },
+        },
+      }),
+    );
+    // Assert
+    expect(html).toContain("skill create-or-update-workspace");
+  });
+
+  it("names the tool an UNCLASSIFIED detachment could not be placed by", () => {
+    // Arrange / Act — the daemon stating it could not tell, not this end guessing.
+    const html = renderItem(
+      outcomeCard({
+        case: "started",
+        value: {
+          originToolCallId: "t1",
+          label: "",
+          kind: { case: "unclassified", toolName: "Weird" },
+        },
+      }),
+    );
+    // Assert
+    expect(html).toContain("unclassified Weird");
+  });
+
+  it("wears the ok tone when the work succeeded", () => {
+    // Arrange / Act
+    const html = renderItem(
+      outcomeCard({ case: "ended", value: { case: "succeeded", summary: "3 files" } }),
+    );
+    // Assert
+    expect(html).toContain(`<span class="badge ok detachment">succeeded · 3 files</span>`);
+  });
+
+  it("wears the err tone when the work failed", () => {
+    // Arrange / Act
+    const html = renderItem(
+      outcomeCard({ case: "ended", value: { case: "failed", summary: "exit 1" } }),
+    );
+    // Assert
+    expect(html).toContain(`<span class="badge err detachment">failed · exit 1</span>`);
+  });
+
+  it("keeps LOST its own word rather than calling it a failure", () => {
+    // Arrange / Act — we do not know it failed, only that we stopped seeing it.
+    const html = renderItem(
+      outcomeCard({ case: "ended", value: { case: "lost", inference: "pid vanished" } }),
+    );
+    // Assert
+    expect(html).toContain("lost · pid vanished");
+  });
+
+  it("draws a cancelled ending with no detail beside it", () => {
+    // Arrange / Act — the arm being set is the entire assertion.
+    const html = renderItem(outcomeCard({ case: "ended", value: { case: "cancelled" } }));
+    // Assert
+    expect(html).toContain(`<span class="badge err detachment">cancelled</span>`);
+  });
+
+  it("escapes a label rather than injecting it raw", () => {
+    // Arrange / Act — the label is producer text.
+    const html = renderItem(
+      outcomeCard({
+        case: "started",
+        value: { originToolCallId: "t1", label: "<img>", kind: { case: "agent" } },
+      }),
+    );
+    // Assert
+    expect(html).not.toContain("<img>");
+  });
+});
+
+/** A compaction-summary block, defaulted to one whose cost is known. */
+function compactionSummary(
+  over: Partial<CompactionSummaryItem> = {},
+): CompactionSummaryItem {
+  return {
+    kind: "compaction-summary",
+    uuid: "cs1",
+    summary: "what survived",
+    compactedAtMs: 1700000000000,
+    expensiveInputTokens: 4096,
+    ...over,
+  };
+}
+
+describe("compaction summary block", () => {
+  it("wears the purple-wash class the stylesheet paints", () => {
+    // Arrange / Act
+    const html = renderItem(compactionSummary());
+    // Assert — the SAME class the compaction divider's summary bubble wears,
+    // so the wash is one visual with one rule.
+    expect(html).toContain("bubble assistant md compact-summary compaction-summary");
+  });
+
+  it("renders the summary as markdown, since it is verbatim prose", () => {
+    // Arrange / Act
+    const html = renderItem(compactionSummary({ summary: "# heading" }));
+    // Assert
+    expect(html).toContain("<h1");
+  });
+
+  it("prints the expensive-input figure when the daemon resolved one", () => {
+    // Arrange / Act
+    const html = renderItem(compactionSummary());
+    // Assert
+    expect(html).toContain("4,096 expensive input");
+  });
+
+  it("prints NO figure when the result's usage was unavailable", () => {
+    // Arrange / Act — the -1 arrives here as an ABSENT field, and absence
+    // renders as absence: a 0 would read as a summary that cost nothing.
+    const html = renderItem(compactionSummary({ expensiveInputTokens: undefined }));
+    // Assert
+    expect(html).not.toContain("expensive input");
+  });
+
+  it("prints no ZERO in place of the missing figure", () => {
+    // Arrange / Act
+    const html = renderItem(compactionSummary({ expensiveInputTokens: undefined }));
+    // Assert
+    expect(html).not.toContain(">0<");
+  });
+
+  it("escapes the block's own uuid rather than injecting it raw", () => {
+    // Arrange / Act
+    const html = renderItem(compactionSummary({ uuid: `a"><img>` }));
+    // Assert
+    expect(html).not.toContain("<img>");
+  });
 });
 
 /** A markup string as a queryable element tree. */
@@ -4837,50 +5010,17 @@ describe("async catalog", () => {
     };
   }
 
-  it("shows the daemon's uncached input for the agent on its badge", () => {
-    // Arrange — the attribution keys on the Agent call's own tool-use id.
-    const panels = detachedAgentPanels({ tokenUtilization: attributedSubagent("w1", 12_340) });
+  // RETIRED: four cases stood here pinning the badge's uncached-input figure —
+  // that it matched the footer's row for the same agent, and that absence
+  // rendered nothing. `SessionView.token_utilization` is RESERVED with no
+  // successor, so the figure is gone and only its absence is still assertable.
+  it("keeps the detached agent badge's label and carries no token figure", () => {
+    // Arrange
+    const panels = detachedAgentPanels();
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), panels);
-    // Assert — the collapsed pill carries the compact, heated figure.
-    expect(html).toContain(
-      `<span class="async-badge-tokens token-heat" style="--token-heat-hue:120">12k in</span>`,
-    );
-  });
-
-  it("draws the badge figure exactly as the footer draws the same agent's row", () => {
-    // Arrange — one attribution, read by both surfaces.
-    const utilization = attributedSubagent("w1", 12_340);
-    // Act
-    const html = renderItem(
-      text("b1"),
-      undefined,
-      finalsClosing(text("b1")),
-      detachedAgentPanels({ tokenUtilization: utilization }),
-    );
-    const footer = uncachedInputHtml("pfooter-agent-tokens", agentUncachedInput(utilization, "w1") ?? -1);
-    // Assert — same measure, same form, same heat: only the placement class differs.
-    expect(html).toContain(footer.replace("pfooter-agent-tokens", "async-badge-tokens"));
-  });
-
-  it("shows no token figure on a badge the daemon has attributed none to", () => {
-    // Arrange — an attribution naming some OTHER call, so this one has none.
-    const panels = detachedAgentPanels({ tokenUtilization: attributedSubagent("other", 12_340) });
-    // Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), panels);
-    // Assert — absence renders nothing, never a zero.
-    expect(html).not.toContain("async-badge-tokens");
-  });
-
-  it("shows no token figure on a badge before any attribution has landed", () => {
-    // Arrange — a shell spool, and no utilization on the context at all.
-    const html = renderItem(
-      text("b1"),
-      undefined,
-      finalsClosing(text("b1")),
-      watcherPanels([watcher("bg1", { taskOutput: "bytes" })]),
-    );
     // Assert
+    expect(html).toContain("async-badge");
     expect(html).not.toContain("async-badge-tokens");
   });
 });
