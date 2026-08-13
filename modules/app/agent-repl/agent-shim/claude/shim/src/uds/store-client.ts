@@ -112,8 +112,8 @@ import {
   EventSchema,
   HealthCheckSchema,
   HealthStatusSchema,
-  Heartbeat,
-  HeartbeatSchema,
+  ConnectionHeartbeat,
+  ConnectionHeartbeatSchema,
   MessagePage,
   MessagePageRequest,
   MessagePageRequestSchema,
@@ -210,7 +210,7 @@ export interface StoreClientOptions {
   sessionId: string;
   /** Producer identity in StoreWrite; e.g. `claude-shim:<session>`. */
   producer: string;
-  /** Heartbeat cadence on the connection; 0 disables. Default 5000ms. */
+  /** ConnectionHeartbeat cadence on the connection; 0 disables. Default 5000ms. */
   heartbeatIntervalMs?: number;
   /**
    * The VENDOR session id (the Claude CLI's uuid, which is its transcript
@@ -948,7 +948,7 @@ export class StoreClient {
 
   /**
    * Open the standing subscription connection at `fromSeq` and settle once the
-   * store confirms registration and replay completion with a Heartbeat.
+   * store confirms registration and replay completion with a ConnectionHeartbeat.
    *
    * It REPORTS NOTHING on failure — it is the shared mechanism under both the
    * daemon's explicit {@link subscribe} (which degrades) and a relink attempt
@@ -978,7 +978,7 @@ export class StoreClient {
           socket,
           {
             onMessage: (msg) => {
-              if (this.openingSub === opening && unpackAs(msg, HeartbeatSchema)) {
+              if (this.openingSub === opening && unpackAs(msg, ConnectionHeartbeatSchema)) {
                 opening.settled = true;
                 this.openingSub = null;
                 this.subConn = conn;
@@ -1682,7 +1682,7 @@ export class StoreClient {
       this.onAck(ack);
       return;
     }
-    if (unpackAs(msg, HeartbeatSchema)) return; // liveness only
+    if (unpackAs(msg, ConnectionHeartbeatSchema)) return; // liveness only
     LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId }, `unhandled store message ${envelopeType(msg)}`);
   }
 
@@ -1704,7 +1704,7 @@ export class StoreClient {
       }
       return;
     }
-    if (unpackAs(msg, HeartbeatSchema)) return; // liveness only
+    if (unpackAs(msg, ConnectionHeartbeatSchema)) return; // liveness only
     LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId }, `unhandled store subscription message ${envelopeType(msg)}`);
   }
 
@@ -2130,9 +2130,9 @@ export class StoreClient {
     if (this.heartbeatIntervalMs <= 0) return;
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
-      const hb = create(HeartbeatSchema, { sentAtMs: BigInt(Date.now()) } as Heartbeat);
-      this.conn?.send(HeartbeatSchema, hb);
-      this.subConn?.send(HeartbeatSchema, hb);
+      const hb = create(ConnectionHeartbeatSchema, { sentAtMs: BigInt(Date.now()) } as ConnectionHeartbeat);
+      this.conn?.send(ConnectionHeartbeatSchema, hb);
+      this.subConn?.send(ConnectionHeartbeatSchema, hb);
     }, this.heartbeatIntervalMs);
     this.heartbeatTimer.unref?.();
   }

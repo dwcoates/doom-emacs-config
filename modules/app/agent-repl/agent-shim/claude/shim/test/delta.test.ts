@@ -191,7 +191,7 @@ describe("streamEventToResponseTiming", () => {
 });
 
 // ---------------------------------------------------------------------------
-// tool_progress → Heartbeat.
+// tool_progress → AgentHeartbeat.
 // ---------------------------------------------------------------------------
 
 describe("toolProgressToHeartbeat", () => {

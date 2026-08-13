@@ -1078,13 +1078,13 @@ message PermissionResponse {
 
 // The UDS keepalive: a peer saying the connection is still there, echoed back.
 //
-// RENAMED FROM `Heartbeat` UNDER PROTEST, and the rename is the only unilateral
-// contract change in this pass. `BookkeepingEntry` already declares a
-// `Heartbeat` — "something is alive and working", a durable record — and both
-// files are now `protocol.v1`, so protoc refuses the tree until one of the two
-// names moves. The bookkeeping spelling is frozen (FROZEN-conversation-v1.md),
-// so this one moved instead. Which of the two SHOULD keep the plain name is a
-// contract decision, not a build fix; it is recorded as a gap for reconciliation.
+// This one is about the TRANSPORT. It is sent on a fixed timer on any UDS hop —
+// including store<->sidecar, where no agent work exists at all — and echoed back
+// by the peer. Absence means the peer is gone and the connection is dropped.
+//
+// `AgentHeartbeat` (bookkeeping.proto) is about the AGENT'S WORK: a durable
+// record of which tool calls are still running. The two are homonyms rather than
+// variants of one idea, so neither of them keeps the generic name `Heartbeat`.
 message ConnectionHeartbeat {
   int64 sent_at_ms = 1;
 }

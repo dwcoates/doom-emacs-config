@@ -228,7 +228,7 @@ export interface UdsSessionDeps {
   ) => UdsQuery;
   /** Request-id minter for permission round-trips; defaults to randomUUID. */
   newRequestId?: () => string;
-  /** Heartbeat cadence on both UDS connections; 0 disables. Test injects 0. */
+  /** ConnectionHeartbeat cadence on both UDS connections; 0 disables. Test injects 0. */
   heartbeatIntervalMs?: number;
   /**
    * How long a dropped store link may stay down before the store client reports

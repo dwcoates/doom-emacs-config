@@ -319,3 +319,27 @@ argument that was raised against the change. It was accepted because both values
 are constant for a shim process, so the join has exactly one answer and cannot
 be ambiguous — and because the five fingerprints, which are what the record
 exists for, remain per-query and self-contained.
+
+## Neither heartbeat keeps the generic name
+
+**What changed.** `protocol.v1.Heartbeat` (bookkeeping.proto) is renamed to
+`AgentHeartbeat`. `ConnectionHeartbeat` (core.proto) keeps its name, and its
+"RENAMED UNDER PROTEST" comment is replaced with a statement of the settled
+distinction. Type rename only: the oneof arm stays `heartbeat` at field 5, so
+the wire is unchanged.
+
+**Why.** The two messages are homonyms, not variants of one idea.
+`ConnectionHeartbeat` is about the TRANSPORT — a fixed-timer ping on any UDS
+hop, including store<->sidecar where no agent work exists, echoed by the peer,
+whose absence means the peer is gone and the connection is dropped.
+`AgentHeartbeat` is about the AGENT'S WORK — a durable record in the
+conversation stream, produced only when the vendor reports tool progress during
+a turn, whose absence just means nothing is running. Letting either hold the
+plain name `Heartbeat` invites a reader to treat the other as its qualified
+variant, so both are qualified and neither is the default.
+
+**Architectural consequence, accepted.** Every call site must now say which
+heartbeat it means. That surfaced a real defect immediately: the shim's UDS
+keepalive sites imported the BOOKKEEPING `Heartbeat` and set `sentAtMs` on it
+behind an `as` cast. They now name `ConnectionHeartbeat`, which is what they
+were always sending on the wire.

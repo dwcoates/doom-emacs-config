@@ -54,8 +54,8 @@ import {
   HealthCheckSchema,
   HealthStatus,
   HealthStatusSchema,
-  Heartbeat,
-  HeartbeatSchema,
+  ConnectionHeartbeat,
+  ConnectionHeartbeatSchema,
   Interrupt,
   InterruptSchema,
   MessagePage,
@@ -198,7 +198,7 @@ export interface SessionServerOptions {
    * ShimHello.vendor_session_id. "" while the shim has not learned it yet.
    */
   vendorSessionId?: () => string;
-  /** Heartbeat cadence on the live connection; 0 disables. Default 5000ms. */
+  /** ConnectionHeartbeat cadence on the live connection; 0 disables. Default 5000ms. */
   heartbeatIntervalMs?: number;
   /** First reconnect delay; doubles to reconnectMaxMs. Default 100ms. */
   reconnectMinMs?: number;
@@ -732,7 +732,7 @@ export class SessionServer {
       void this.answerHealthCheck(health);
       return;
     }
-    const hb = unpackAs(msg, HeartbeatSchema);
+    const hb = unpackAs(msg, ConnectionHeartbeatSchema);
     if (hb) {
       return; // liveness only; nothing to do
     }
@@ -883,7 +883,7 @@ export class SessionServer {
     if (this.heartbeatIntervalMs <= 0) return;
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
-      this.conn?.send(HeartbeatSchema, create(HeartbeatSchema, { sentAtMs: BigInt(Date.now()) }));
+      this.conn?.send(ConnectionHeartbeatSchema, create(ConnectionHeartbeatSchema, { sentAtMs: BigInt(Date.now()) }));
     }, this.heartbeatIntervalMs);
     // Do not keep the process alive solely for heartbeats.
     this.heartbeatTimer.unref?.();

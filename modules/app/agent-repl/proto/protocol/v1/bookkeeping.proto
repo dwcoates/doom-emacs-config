@@ -36,8 +36,8 @@ message BookkeepingEntry {
     // A turn ended, and how.
     TurnEnded turn_ended = 4;
 
-    // Something is alive and working. It reports liveness, never content.
-    Heartbeat heartbeat = 5;
+    // The agent's work is alive. It reports liveness, never content.
+    AgentHeartbeat heartbeat = 5;
 
     // How long a response took, retained for analysis on replay. It measures
     // the conversation rather than participating in it.
@@ -258,8 +258,15 @@ message TurnEndedUnexplained {
   string inference = 1;
 }
 
-// Something is alive and working.
-message Heartbeat {
+// The AGENT's work is alive: a record inside the conversation stream, produced
+// only when the vendor reports tool progress during a turn, and consumed by the
+// footer to name which work is still running. Absence means nothing is running,
+// which is the normal state and never a fault.
+//
+// Not to be confused with `ConnectionHeartbeat` (core.proto), which is about the
+// transport. The two are homonyms, not variants, which is why neither of them
+// keeps the plain name `Heartbeat`.
+message AgentHeartbeat {
   // What is alive, so a footer can say which work is still running. IDENTITIES
   // rather than a count, because a count cannot be reconciled against what a
   // feed is showing and a set can.

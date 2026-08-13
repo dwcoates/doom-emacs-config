@@ -17,7 +17,7 @@ import {
   LiveTaskSetSchema,
   DaemonHelloSchema,
   EventSchema,
-  HeartbeatSchema,
+  ConnectionHeartbeatSchema,
   HealthStatusSchema,
   ShimHelloSchema,
   ShimReadySchema,
@@ -44,7 +44,7 @@ function fakeStore(): Promise<FakeStore> {
       const peer = new FramedPeer(socket);
       peer.onReceive((frame) => {
         if (unpackAs(frame, SubscribeSchema) === undefined) return false;
-        peer.send(HeartbeatSchema, create(HeartbeatSchema, { sentAtMs: 1n }));
+        peer.send(ConnectionHeartbeatSchema, create(ConnectionHeartbeatSchema, { sentAtMs: 1n }));
         return false;
       });
       accepted.push(peer);
