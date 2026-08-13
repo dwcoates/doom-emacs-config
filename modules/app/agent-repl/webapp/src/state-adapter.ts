@@ -244,7 +244,9 @@ export interface SessionViewInput {
   configDir: string;
   /** SDK-published menu; the browser renders it but never owns selection. */
   models: ModelInfo[];
-  tokenUtilization?: import("./frontend-proto.js").SessionTokenUtilization;
+  // RETIRED: `tokenUtilization` stood here — the session's cumulative token
+  // utilization off `SessionView.token_utilization`, now RESERVED with no
+  // successor. `TokenBreakdownView` carries those rows resolved.
   // NO HIBERNATION HERE. The revival gate reads `WorkspaceGateView` — a fenced,
   // per-WORKSPACE view — and this per-SESSION catalog entry no longer feeds it.
   // A catalog answers "what is true of session X" and leaves the reader to work
@@ -930,7 +932,6 @@ export class StateAdapter {
           displayName: model.displayName,
           description: model.description,
         })),
-        tokenUtilization: sv.tokenUtilization,
       },
     };
   }
@@ -1549,7 +1550,6 @@ export function asyncAgentItems(
       source: ConversationSource.USER,
       arm: emission.arm,
       payload: emission.payload,
-      tokenUtilization: [],
     };
     if (emission.thinkingOrigin !== undefined) frame.thinkingOrigin = emission.thinkingOrigin;
     // A detached agent dispatches detached agents, so its own tool calls carry
@@ -1589,7 +1589,7 @@ function itemsFromFrame(frame: MessageFrame): { items: ConversationItem[]; ignor
       // No correlation key on the arm + unbuilt curator counterpart; ignored.
       return { items: [], ignores: ["conversation-item:toolUseResult"] };
     case "result":
-      return { items: [resultItemFrom(frame.payload, frame.uuid, frame.turnAccounting)], ignores: [] };
+      return { items: [resultItemFrom(frame.payload, frame.uuid)], ignores: [] };
     case "contextCleared":
       // An EMPTY message: its existence and position are the whole fact, so
       // there is nothing to read off the payload but the envelope's uuid.
@@ -1707,7 +1707,6 @@ function assistantMessageItems(frame: MessageFrame): {
           text: pstr(value, "text"),
           done: true,
           ts,
-          ...(frame.tokenUtilization.length === 0 ? {} : { tokenUtilization: frame.tokenUtilization }),
         };
         items.push(item);
         break;
@@ -1904,11 +1903,7 @@ function usageFrom(u: Obj | undefined): Usage {
   };
 }
 
-function resultItemFrom(
-  r: Obj,
-  uuid: string,
-  turnAccounting?: import("./frontend-proto.js").TurnAccounting,
-): ResultItem {
+function resultItemFrom(r: Obj, uuid: string): ResultItem {
   const item: ResultItem = {
     kind: "result",
     uuid,
@@ -1924,7 +1919,6 @@ function resultItemFrom(
   if (models !== undefined) item.modelUsage = models;
   const resultText = pstr(r, "result");
   if (resultText !== "") item.resultText = resultText;
-  if (turnAccounting !== undefined) item.turnAccounting = turnAccounting;
   return item;
 }
 

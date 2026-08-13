@@ -29,7 +29,6 @@ import {
 import { CounterEntry } from "../src/counter-menu.js";
 import { StoreState, ToolItem } from "../src/store.js";
 import { IDLE_LABEL, TIMER_SLOT } from "../src/timer.js";
-import { generatedSessionUtilization, generatedUngroupedResponse, ungroupedResponse } from "./token-utilization-fixture.js";
 
 /** A counter entry, defaulted to an active (still-running) one. */
 function counterEntry(over: Partial<CounterEntry> = {}): CounterEntry {

@@ -1822,11 +1822,9 @@ pre {
 }
 .async-badge.active { background: color-mix(in srgb, var(--async) 18%, transparent); }
 .async-badge.settled { border-color: var(--border); color: var(--muted); }
-/* The member's uncached input, sized a notch under the label so the label
-   stays the badge's voice. NO COLOR IS SET HERE: the figure is the same one
-   the footer reports for the same agent, so it wears the same heat ramp
-   (`.token-heat`) and a muted grey here would only fight it. */
-.async-badge-tokens { font-size: 0.7rem; }
+/* RETIRED: `.async-badge-tokens` stood here, sizing the member's uncached-input
+   figure. It was read off `SessionView.token_utilization`, which is RESERVED
+   with no successor, so the badge carries no token figure to style. */
 
 /* Work whose parent_message_id names a message that never arrived. It is drawn
    — it is real work the user started — but set off by a dashed rule rather
@@ -3323,30 +3321,10 @@ pre {
   column-gap: 22px;
   color: var(--fg);
 }
-.pfooter-peek-fact {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  justify-content: space-between;
-  overflow: hidden;
-}
-/* The label is the same white, held apart from the figure by weight and case
-   rather than by a second color. */
-.pfooter-peek-label {
-  font-size: 0.68rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-.pfooter-peek-value {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* The verbatim fallback (the daemon's composed sentence) is prose, not a pair,
-   so it spans the whole grid rather than sitting in one column. */
+/* RETIRED: `.pfooter-peek-fact`, `.pfooter-peek-label` and `.pfooter-peek-value`
+   stood here, styling the grid of labelled figures the peek drew from
+   `Message.turn_accounting`. That wire field is RESERVED with no successor, so
+   the peek renders only the daemon's composed lines below. */
 .pfooter-peek-line { grid-column: 1 / -1; }
 
 /* The token cell is the peek's trigger, so it says so on hover. */

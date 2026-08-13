@@ -75,25 +75,10 @@ export interface ModelUsage {
   context_window: number;
 }
 
-/** Additive timing measurements for exactly the responses covered by a total. */
-export interface TokenTimingTotals {
-  output_tokens_with_generation_duration: number;
-  output_generation_duration_ms: number;
-  responses_with_generation_duration: number;
-  responses_without_generation_duration: number;
-  total_time_to_first_token_ms: number;
-  responses_with_time_to_first_token: number;
-  responses_without_time_to_first_token: number;
-}
-
-/** Cumulative accounting for a defined set of API responses. */
-export interface TokenUsageTotals extends Usage {
-  cache_creation?: { ephemeral_5m_input_tokens: number; ephemeral_1h_input_tokens: number };
-  server_tool_use?: { web_search_requests: number; web_fetch_requests: number };
-  output_details?: { thinking_tokens: number };
-  cache_rates?: { total_prompt_input_tokens: number; cache_hit_rate: number; cache_write_rate: number; uncached_input_rate: number };
-  timing?: TokenTimingTotals;
-}
+// RETIRED: `TokenTimingTotals` and `TokenUsageTotals` stood here. They were the
+// hand-typed shapes of `frontend.v1.TokenUsageTotals`, which reached this end
+// only through `SessionView.token_utilization` / `Message.token_utilization` —
+// both RESERVED with no successor. Nothing that survives reads either.
 
 /** One selectable model. */
 export interface ModelInfo {

@@ -1032,7 +1032,7 @@ async function boot(): Promise<void> {
         mergeStatus: s.mergeStatus,
         // The roster PLUS the two figures the expanded footer reports beside
         // it, both projected from state this end already holds.
-        agents: footerAgentRows(s.items, s.tokenUtilization),
+        agents: footerAgentRows(s.items),
         tasks: store.taskRoster,
         items: s.items,
         timerLabel,

@@ -54,8 +54,6 @@ import { AsyncSource } from "../src/protocol.js";
 import type { UnwrappedEmission } from "../src/agent-emission.js";
 import type { AsyncBubble } from "../src/async-bubble.js";
 import { AsyncBubbleRegistry } from "../src/async-routing.js";
-import { agentUncachedInput, uncachedInputHtml } from "../src/tokens.js";
-import { attributedSubagent } from "./token-utilization-fixture.js";
 import {
   ContextClearedItem,
   ContextCompactedItem,
@@ -4837,50 +4835,17 @@ describe("async catalog", () => {
     };
   }
 
-  it("shows the daemon's uncached input for the agent on its badge", () => {
-    // Arrange — the attribution keys on the Agent call's own tool-use id.
-    const panels = detachedAgentPanels({ tokenUtilization: attributedSubagent("w1", 12_340) });
+  // RETIRED: four cases stood here pinning the badge's uncached-input figure —
+  // that it matched the footer's row for the same agent, and that absence
+  // rendered nothing. `SessionView.token_utilization` is RESERVED with no
+  // successor, so the figure is gone and only its absence is still assertable.
+  it("keeps the detached agent badge's label and carries no token figure", () => {
+    // Arrange
+    const panels = detachedAgentPanels();
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), panels);
-    // Assert — the collapsed pill carries the compact, heated figure.
-    expect(html).toContain(
-      `<span class="async-badge-tokens token-heat" style="--token-heat-hue:120">12k in</span>`,
-    );
-  });
-
-  it("draws the badge figure exactly as the footer draws the same agent's row", () => {
-    // Arrange — one attribution, read by both surfaces.
-    const utilization = attributedSubagent("w1", 12_340);
-    // Act
-    const html = renderItem(
-      text("b1"),
-      undefined,
-      finalsClosing(text("b1")),
-      detachedAgentPanels({ tokenUtilization: utilization }),
-    );
-    const footer = uncachedInputHtml("pfooter-agent-tokens", agentUncachedInput(utilization, "w1") ?? -1);
-    // Assert — same measure, same form, same heat: only the placement class differs.
-    expect(html).toContain(footer.replace("pfooter-agent-tokens", "async-badge-tokens"));
-  });
-
-  it("shows no token figure on a badge the daemon has attributed none to", () => {
-    // Arrange — an attribution naming some OTHER call, so this one has none.
-    const panels = detachedAgentPanels({ tokenUtilization: attributedSubagent("other", 12_340) });
-    // Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), panels);
-    // Assert — absence renders nothing, never a zero.
-    expect(html).not.toContain("async-badge-tokens");
-  });
-
-  it("shows no token figure on a badge before any attribution has landed", () => {
-    // Arrange — a shell spool, and no utilization on the context at all.
-    const html = renderItem(
-      text("b1"),
-      undefined,
-      finalsClosing(text("b1")),
-      watcherPanels([watcher("bg1", { taskOutput: "bytes" })]),
-    );
     // Assert
+    expect(html).toContain("async-badge");
     expect(html).not.toContain("async-badge-tokens");
   });
 });

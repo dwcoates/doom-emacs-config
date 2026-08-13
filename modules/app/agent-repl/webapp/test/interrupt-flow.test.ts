@@ -151,7 +151,7 @@ function flow(): Flow {
             progress: store.progress,
             renderState: s.renderState,
             mergeStatus: s.mergeStatus,
-            agents: footerAgentRows(s.items, s.tokenUtilization),
+            agents: footerAgentRows(s.items),
             tasks: store.taskRoster,
             items: s.items,
             timerLabel: TIMER_LABEL,

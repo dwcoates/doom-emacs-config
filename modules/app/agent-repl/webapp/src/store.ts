@@ -22,7 +22,6 @@ import type {
   ResponseUsageStamp,
   RuntimeFault,
   SessionCommand,
-  SessionTokenUtilization,
   ShutdownScheduleDraining,
   ShutdownScheduleView,
   MergeQueueRoster,
@@ -152,7 +151,8 @@ export interface TextItem extends FeedOrderedItem {
    * start rather than the end so the stamp holds still while the block streams.
    */
   ts: string;
-  tokenUtilization?: import("./frontend-proto.js").TokenUtilization[];
+  // RETIRED: `tokenUtilization` stood here — the per-response token records
+  // carried on `Message.token_utilization`, now RESERVED with no successor.
 }
 export interface ThinkingItem extends FeedOrderedItem {
   kind: "thinking";
@@ -294,8 +294,9 @@ export interface ResultItem extends FeedOrderedItem {
    * API request declares it.
    */
   context: ResultContext | null;
-  /** Complete accounting evidence attached to the terminal result. */
-  turnAccounting?: import("./frontend-proto.js").TurnAccounting;
+  // RETIRED: `turnAccounting` stood here — the turn's complete accounting
+  // evidence off `Message.turn_accounting`, now RESERVED with no successor. The
+  // turn's verdict is the daemon's `FooterAccountingCell` instead.
 }
 /**
  * The context was CLEARED (`core.v1.ContextCleared`): discarded outright.
@@ -585,7 +586,9 @@ export interface StoreState {
    * that carries a map; `null` until the first one does.
    */
   modelUsage: Record<string, ModelUsage> | null;
-  tokenUtilization?: SessionTokenUtilization | null;
+  // RETIRED: `tokenUtilization` stood here — the session's cumulative token
+  // utilization off `SessionView.token_utilization`, now RESERVED with no
+  // successor. `TokenBreakdownView` carries those rows resolved.
   /**
    * Whether the running turn is being INTERRUPTED. GAP after the cutover: no
    * interrupt frame in `frontend.v1`; stays false (the SSM-resolved
@@ -750,7 +753,6 @@ function initialState(): StoreState {
     resultUsage: null,
     turnUsage: new Map(),
     modelUsage: null,
-    tokenUtilization: null,
     interrupting: false,
     turnRetracted: false,
     costUsd: null,
@@ -1590,7 +1592,6 @@ export class ConversationStore {
     if (sv.permissionMode !== "") s.permissionMode = sv.permissionMode as PermissionMode;
     s.costUsd = sv.totalCostUsd;
     s.contextTokens = sv.totalTokens > 0 ? sv.totalTokens : null;
-    if (sv.tokenUtilization !== undefined) s.tokenUtilization = sv.tokenUtilization;
     if (sv.title !== "") s.taskSummary = sv.title;
     // Empty identity values never clobber a filled record.
     if (sv.claudeSessionId !== "") s.claudeSessionId = sv.claudeSessionId;
