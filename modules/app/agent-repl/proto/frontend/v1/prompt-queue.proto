@@ -64,12 +64,18 @@ message CancelDetachedAgentsCmd {}
 message DetachedCancelOutcome {
   oneof outcome {
     DetachedAgentsCancelled cancelled = 1;
-    NoDetachedAgentsRunning nothing_running = 2;
-    DetachedCancelUnsupported unsupported = 3;
+    protocol.v1.NoDetachedAgentsRunning nothing_running = 2;
+    protocol.v1.DetachedCancelUnsupported unsupported = 3;
   }
 }
 
 // Detached work was running and the stop reached every agent counted here.
+//
+// TODO(respelling): this shares a name with protocol.v1.DetachedAgentsCancelled
+// but NOT its contents — that one carries `repeated string task_ids`, this one
+// carries `count`, which has no counterpart there. It was therefore not
+// collapsed into protocol.v1's, and DetachedCancelOutcome above stays declared
+// here for the same reason: its `cancelled` arm must reference this message.
 message DetachedAgentsCancelled {
   // How many detached agents were stopped. A COUNT rather than the shim's
   // task ids: a task id is daemon-internal bookkeeping a frontend has no
@@ -79,21 +85,16 @@ message DetachedAgentsCancelled {
   int64 count = 1;
 }
 
-// Nothing detached was running, so the command stopped nothing.
+// frontend.v1.NoDetachedAgentsRunning (empty) and
+// frontend.v1.DetachedCancelUnsupported (one `detail` string) were declared
+// here, field for field identical to protocol.v1's. Both are shim-wire facts
+// the daemon forwards unchanged, so the arms above name protocol.v1's directly.
 //
-// THE DAEMON REFUSES ON THIS ARM (the ack carries ok=false alongside it). A
-// cancel that stopped nothing is a keystroke that did nothing, and reporting
-// it as success is how a stop control comes to look like it works when it
-// does not reach anything. The typed arm is what lets a frontend say "nothing
-// was running" instead of showing a bare transport failure.
-message NoDetachedAgentsRunning {}
+// THE DAEMON STILL REFUSES ON THE `nothing_running` ARM (the ack carries
+// ok=false alongside it): a cancel that stopped nothing is a keystroke that did
+// nothing, and reporting it as success is how a stop that silently missed looks
+// exactly like a stop that worked.
 
-// The stop could not be attempted at all: no live session behind the
-// workspace, or a vendor CLI with no task-stop control.
-message DetachedCancelUnsupported {
-  // Why, in one sentence, for display.
-  string detail = 1;
-}
 
 // ---------------------------------------------------------------------------
 // The daemon-held prompt queue (E4).

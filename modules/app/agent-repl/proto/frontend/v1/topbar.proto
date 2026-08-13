@@ -4,6 +4,8 @@ syntax = "proto3";
 
 package frontend.v1;
 
+import "protocol/v1/core.proto";
+
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
 // One workspace's topbar, resolved completely by the daemon. The client
@@ -24,7 +26,7 @@ message TopbarView {
   string model_display = 4;
   // The selectable models, in display order. The selector renders exactly
   // this list.
-  repeated ModelOption model_options = 5;
+  repeated protocol.v1.ModelOption model_options = 5;
   // The connectivity glyph, resolved: which glyph and which color class to
   // draw, and the tooltip text. The client never maps connectivity enums.
   TopbarConnectivity connectivity = 6;
@@ -92,11 +94,10 @@ message TopbarConnectivity {
   string title = 3;
 }
 
-message ModelOption {
-  string value = 1;
-  string display_name = 2;
-  string description = 3;
-}
+// frontend.v1.ModelOption was declared here, field for field identical to
+// protocol.v1.ModelOption. A model option is a shim-wire fact the daemon
+// forwards untouched, so there was never a second one to declare; every
+// reference now names protocol.v1's.
 
 // A deliberate request to change an already-live session's model.  The daemon
 // forwards this to the shim and only publishes the shim-confirmed selection.
