@@ -760,3 +760,26 @@ this deletes. Not built now.
 **What dropping it unlocks.** With the cursor gone the spool is just bytes, so
 `conversation.v1.DetachedWorkProgressed.output` becomes a genuine counterpart
 and both output TODOs close.
+
+## The store indexes `parent`, and the database is NUKED rather than migrated
+
+**Decided.** `entry` gains a `parent_message_id` column, extracted at ingest
+exactly as `top_level_message_id` already is, and an index
+`entry(session_id, parent_message_id, seq)` mirroring `entry_message_owner`.
+Without it `frontend.v1.PageScopeInside` is a scan: `parent` lives inside the
+opaque `payload` BLOB, and `top_level_message_id` cannot substitute because a
+subagent and a subagent inside IT share one value.
+
+**NO MIGRATION AND NO BACKFILL, and this is a standing posture rather than a
+concession for this change.** The store database is NUKED as needed and is to be
+regarded as EMPTY. Nothing is written to carry old rows forward.
+
+**Every implementation agent must be told this explicitly.** A half-migrated or
+stale database filled with rows written under a retired schema produces
+confusing, plausible-looking wrong data, and an agent that assumes the database
+must be preserved will invent migration and compatibility work that is not
+wanted and will not be reviewed. The absence of a migration is a DECISION, not
+an oversight to be helpfully corrected.
+
+**Sequencing.** The column and index are part of the implementation fan-out, not
+of this schema wave. They are inert until `claude-repld` can serve a scoped page.
