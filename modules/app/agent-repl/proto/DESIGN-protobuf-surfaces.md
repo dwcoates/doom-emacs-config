@@ -254,6 +254,59 @@ strictly more.
 
 What changed, why, and which consequences were accepted as costs.
 
+## The schema splits into the five surfaces
+
+**What changed.** The tree became five ROOT namespaces — `conversation/v1`,
+`protocol/v1`, `agentshim/v1`, `frontend/v1`, `state/v1` — with no umbrella
+prefix. `BookkeepingEntry` and `ExternalEntry` moved to `protocol`; the durable
+persistence layer moved to `state`; the shim-side record surface became
+`agentshim`. Twenty-four retired types were deleted outright. The
+durable-isolation gate was deleted with them.
+
+**Why.** Membership was previously decided by subject, which is a judgment call,
+so an ambiguous message got no home at all — and a missing message does not fail
+a compile, it is simply absent until a consumer reaches for it. Routing has one
+answer per message and is decidable by inspection. Making the package boundary
+the surface boundary turns that answer into something a compiler checks.
+
+`check-durable-isolation.sh` could go because it existed only to enforce that the
+daemon's persistence layer, which sat inside `frontend/v1`, was not treated as
+frontend. Once the package says `state`, the gate enforces what the compiler
+already does.
+
+**The delete-by-default pass found nothing to delete.** Every one of the ~79
+top-level types in the old `core.proto` is referenced on master — verified across
+Go and TypeScript including enum-value constants and oneof wrapper types, which a
+word-boundary grep misses. So the "delete because nothing references it" bucket
+is empty, and everything removed came off the known-retired list instead. Worth
+recording because the delete-first instinct was correct as a posture and produced
+zero deletions on its own evidence.
+
+**Accepted cost.** `frontend` imports `protocol` — for `PromptOrigin`,
+`InterruptOutcome`, `QueryRuntimeIdentity` and four query-failure arms. The
+dependency rule sanctions `conversation` as the shared leaf and says nothing
+about this edge, so each of those is a shim-wire type reaching a client directly.
+Recorded as gap 9 rather than resolved, because whether a client should see a
+shim-wire type is the same question the gap protocol exists to batch.
+
+## Store↔sidecar cursor traffic moves to `agentshim`
+
+**What changed.** `CursorState`, `CursorQuery`, `CursorList` and `OpenTaskState`
+moved from `protocol/v1/core.proto` to `agentshim/v1/cursor.proto`, unchanged in
+content.
+
+**Why.** `protocol` describes the daemon↔shim boundary and only that boundary.
+These four never cross it — they are how the sidecar recovers its file cursors
+from the store. This was already the document's ruling; the restructure landed
+them in `protocol` only because it was specified as a directory move, and gap 11
+recorded the contradiction.
+
+Applied rather than batched with the other gaps because it is not an open
+question: the routing test gives one answer, and the evidence confirmed the move
+costs nothing. No `daemon/` or `webapp/` source references any of the four, and
+the sole cross-package proto reference is `agentshim`'s own `EntryBatch`, so the
+move REMOVES an import rather than inverting one.
+
 ## `QueryRuntimeIdentity` stops restating process-fixed facts
 
 **What changed.** Removed `claude_code_version`, `auth_source` and
