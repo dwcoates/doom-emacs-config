@@ -33,6 +33,7 @@ syntax = "proto3";
 
 package frontend.v1;
 
+import "conversation/v1/payloads.proto";
 import "frontend/v1/agent-emission.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
@@ -52,21 +53,19 @@ message DetachedWork {
   // on MessageLineage.parent_message_id (feed.proto).
   reserved 3;
   reserved "parent_bubble_id";
+  // 2 was `origin_tool_use_id` and 4 was `label`: a second spelling of
+  // conversation.v1.DetachedWorkStarted.origin_tool_call_id and .label, which a
+  // producer had already observed and stated. They now arrive inside `started`
+  // unchanged, so there is nothing left here to drift against.
+  reserved 2, 4;
+  reserved "origin_tool_use_id", "label";
 
-  // The tool_use id of the call that spawned this work, for a frontend that
-  // draws the work attached to its originating card rather than free-standing.
-  // Empty only for work that no tool call spawned.
-  //
-  // PROVENANCE, NEVER CONTAINMENT. It says which call STARTED this work, which
-  // is a different fact from what CONTAINS it: a reader that treated it as
-  // containment would place a feed row inside the card that launched it and
-  // make a page of ten messages unbounded again. Containment is
-  // MessageLineage's alone.
-  string origin_tool_use_id = 2;
-  // The face the collapsed fold shows: the agent's task description, the
-  // workflow's name, or the shell's command line. Empty means the daemon had
-  // no label for the work, and the client shows the message's id.
-  string label = 4;
+  // THE PRODUCER'S OWN RECORD of the detachment, embedded whole rather than
+  // copied out field by field. Everything a producer observed about the work
+  // starting — which tool call spawned it, what it is called, what kind of thing
+  // it is — reaches the frontend exactly as it was recorded, so this surface has
+  // no second spelling of those facts to fall out of step with.
+  conversation.v1.DetachedWorkStarted started = 8;
   // When the work was launched, unix millis.
   int64 started_at_ms = 5;
   // Live or settled, and with what outcome. See DetachedWorkLiveness.
@@ -80,6 +79,17 @@ message DetachedWork {
   // than a card. `merge` is the one skill with an arm of its own, because the
   // merge run is a distinct thing to render; every other skill arrives as
   // `skill`.
+  //
+  // TODO(respelling): this oneof RE-SPELLS conversation.v1.DetachedWorkKind, and
+  // must not, but it cannot simply be deleted: every arm carries daemon-folded
+  // content with no counterpart in conversation.v1 —
+  //   DetachedWorkAgent.emissions/.fold, DetachedWorkMerge.emissions/.fold,
+  //   DetachedWorkSkill.body/.emissions/.fold, DetachedWorkJournal.rows/.fold,
+  //   DetachedWorkShell.command/.output, DetachedWorkUnclassified.output
+  // Deleting the arms would delete that content off the wire silently. It stays
+  // until the fold has a home of its own; `started.kind` is the authority on
+  // WHICH kind, and this oneof's arm must always agree with it. Note the two are
+  // already drifted: `journal` here is `workflow` there.
   oneof kind {
     DetachedWorkAgent agent = 10;
     DetachedWorkJournal journal = 11;
@@ -259,55 +269,39 @@ message DetachedWorkLive {
 
 // The work has finished, one way or another.
 message DetachedWorkSettled {
-  // When it finished, unix millis.
-  int64 settled_at_ms = 1;
-  // The process exit status, for work that IS a process — shell work, and
-  // unclassified work the daemon ran as one. Absent for work with no exit
-  // status of its own (an agent, a workflow), and absence is the only reading
-  // of "this work did not exit, it concluded".
+  // 2 was `shell_exit` (and DetachedWorkShellExit with it): a process's exit
+  // status is something a producer OBSERVED, and it is now recorded where it was
+  // observed, as conversation.v1.DetachedWorkEnded.process_exit. Nothing on this
+  // surface could legitimately produce it.
   //
-  // It sits BESIDE the outcome rather than inside an outcome arm because the
-  // exit status and the verdict are two different facts about one ending. The
-  // daemon resolves `outcome` FROM this code — that mapping is not a client's
-  // to make — while the code itself stays on the wire so a shell's card can
-  // show "exited 137" rather than an unexplained red dot. Putting the code
-  // inside `done` and `error` would force every reader to check two arms for
-  // one field; putting the verdict inside the exit status would leave work
-  // with no exit status unable to say how it ended.
-  DetachedWorkShellExit shell_exit = 2;
-  // HOW it finished. Exactly one arm is always set.
-  oneof outcome {
-    DetachedWorkOutcomeDone done = 10;
-    DetachedWorkOutcomeError error = 11;
-    DetachedWorkOutcomeKilled killed = 12;
-  }
-}
+  // 10 and 11 were the `done` and `error` outcome arms, a second spelling of
+  // conversation.v1's `succeeded` and `failed` — at a different size, missing
+  // `lost` entirely, so work whose ending was never observed had to be reported
+  // as an ending that was.
+  reserved 2, 10, 11;
+  reserved "shell_exit", "done", "error";
 
-// A process's exit status.
-message DetachedWorkShellExit {
-  // The exit code, as the shell reports it. A signal-terminated process
-  // reports the conventional 128+N form, because that is what its exit status
-  // literally is. 0 is a real zero and always means clean exit.
-  int32 code = 1;
-}
-
-// Finished successfully. For a process, the daemon resolved this from an exit
-// code of 0 (see DetachedWorkSettled.shell_exit).
-message DetachedWorkOutcomeDone {}
-
-// Finished by failing. For a process, the daemon resolved this from a nonzero
-// exit code (see DetachedWorkSettled.shell_exit).
-message DetachedWorkOutcomeError {
-  // The failure, resolved for display. Empty when the source reported failure
-  // without a reason — never filled with a manufactured one. A process's exit
-  // code is NOT restated here; it rides DetachedWorkSettled.shell_exit.
-  string message = 1;
+  // When it finished, unix millis. Daemon bookkeeping: the moment this system
+  // learned of the ending, which is not the moment the work ended.
+  int64 settled_at_ms = 1;
+  // THE PRODUCER'S OWN RECORD of the ending, embedded whole: which outcome it
+  // reached, and — for work that was a process — the exit status it left with.
+  // A consumer reads the verdict and the evidence from one place, in the
+  // vocabulary the producer wrote them in.
+  conversation.v1.DetachedWorkEnded ended = 3;
+  // TODO(respelling): `killed` has NO counterpart in
+  // conversation.v1.DetachedWorkEnded and so was not folded into `ended`. Its
+  // nearest neighbour, conversation.v1.DetachedCancelled, is empty and cannot
+  // carry `reason` — the attribution of WHO stopped the work. Deleting this
+  // would delete that attribution off the wire silently. It is a plain field
+  // rather than a oneof arm now that its siblings live in `ended`; when set, it
+  // annotates the `cancelled` arm and never contradicts it.
+  DetachedWorkOutcomeKilled killed = 12;
 }
 
 // Stopped from outside before it finished: an explicit stop, a cancellation,
 // a session teardown. Distinct from error because the work did not fail — it
-// was not allowed to conclude. A killed process still carries its exit status
-// on DetachedWorkSettled.shell_exit.
+// was not allowed to conclude.
 message DetachedWorkOutcomeKilled {
   // Who or what stopped it, resolved for display. Empty when unattributed.
   string reason = 1;
