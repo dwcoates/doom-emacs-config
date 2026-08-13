@@ -91,10 +91,6 @@ func (x *SubmitPromptCmd) GetPromptOrigin() v1.PromptOrigin {
 // refuses with CommandAck.interrupt_confirm_required and performs the
 // interrupt only on a resend carrying confirm_agents=true — stopping working
 // subagents is the one interrupt worth a deliberate second keystroke.
-//
-// (The retired `hard` flag also lived at field 1: it promised a soft variant
-// no layer implemented, and was deleted rather than reserved — this repo had
-// no live frontend commitments at the time.)
 type InterruptCmd struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ConfirmAgents bool                   `protobuf:"varint,1,opt,name=confirm_agents,json=confirmAgents,proto3" json:"confirm_agents,omitempty"`
@@ -615,10 +611,14 @@ func (x *QueueClassificationError) GetDetail() string {
 
 // One prompt the daemon is holding.
 type QueueEntry struct {
-	state      protoimpl.MessageState `protogen:"open.v1"`
-	Id         string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Text       string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
-	QueuedAtMs int64                  `protobuf:"varint,3,opt,name=queued_at_ms,json=queuedAtMs,proto3" json:"queued_at_ms,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE VERDICT IS ONE ONEOF, never a plain enum with loose companion fields
+	// beside it. Each verdict's own facts — a rationale, an acceptance — live on
+	// the arm that owns them, so a rationale cannot arrive with no verdict to
+	// explain and an acceptance cannot be set on an entry no classifier held.
+	Id         string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Text       string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	QueuedAtMs int64  `protobuf:"varint,3,opt,name=queued_at_ms,json=queuedAtMs,proto3" json:"queued_at_ms,omitempty"`
 	// What the classifier decided, the arm being set IS the verdict. Never
 	// unset on a wire entry: an entry with no arm here is a malformed frame and
 	// is rejected loudly rather than rendered as pending.
@@ -804,19 +804,19 @@ type isQueueEntry_Classification interface {
 }
 
 type QueueEntry_Pending struct {
-	Pending *QueueClassificationPending `protobuf:"bytes,10,opt,name=pending,proto3,oneof"`
+	Pending *QueueClassificationPending `protobuf:"bytes,4,opt,name=pending,proto3,oneof"`
 }
 
 type QueueEntry_Interject struct {
-	Interject *QueueClassificationInterject `protobuf:"bytes,11,opt,name=interject,proto3,oneof"`
+	Interject *QueueClassificationInterject `protobuf:"bytes,5,opt,name=interject,proto3,oneof"`
 }
 
 type QueueEntry_HoldForTurnEnd struct {
-	HoldForTurnEnd *QueueClassificationHold `protobuf:"bytes,12,opt,name=hold_for_turn_end,json=holdForTurnEnd,proto3,oneof"`
+	HoldForTurnEnd *QueueClassificationHold `protobuf:"bytes,6,opt,name=hold_for_turn_end,json=holdForTurnEnd,proto3,oneof"`
 }
 
 type QueueEntry_Error struct {
-	Error *QueueClassificationError `protobuf:"bytes,13,opt,name=error,proto3,oneof"`
+	Error *QueueClassificationError `protobuf:"bytes,7,opt,name=error,proto3,oneof"`
 }
 
 type QueueEntry_UninterruptibleTurn struct {
@@ -824,7 +824,7 @@ type QueueEntry_UninterruptibleTurn struct {
 	// context cut, which is never interrupted. Delivery is the ordinary
 	// turn-end drain's, so this arm changes WHO decided rather than WHEN the
 	// prompt runs.
-	UninterruptibleTurn *QueueClassificationUninterruptibleTurn `protobuf:"bytes,15,opt,name=uninterruptible_turn,json=uninterruptibleTurn,proto3,oneof"`
+	UninterruptibleTurn *QueueClassificationUninterruptibleTurn `protobuf:"bytes,8,opt,name=uninterruptible_turn,json=uninterruptibleTurn,proto3,oneof"`
 }
 
 func (*QueueEntry_Pending) isQueueEntry_Classification() {}
@@ -849,7 +849,7 @@ type QueueEntry_Shutdown struct {
 	// daemon swap, so such a prompt is delayed, never lost. A frontend
 	// renders a dedicated lease explanation from this arm instead of the
 	// classification.
-	Shutdown *QueueEntryShutdownHold `protobuf:"bytes,7,opt,name=shutdown,proto3,oneof"`
+	Shutdown *QueueEntryShutdownHold `protobuf:"bytes,9,opt,name=shutdown,proto3,oneof"`
 }
 
 type QueueEntry_KeepAlive struct {
@@ -860,7 +860,7 @@ type QueueEntry_KeepAlive struct {
 	// this entry) or QueueCancelCmd. A frontend renders a dedicated "waiting
 	// on a keep-alive response" explanation from this arm instead of the
 	// classification.
-	KeepAlive *QueueEntryKeepAliveHold `protobuf:"bytes,8,opt,name=keep_alive,json=keepAlive,proto3,oneof"`
+	KeepAlive *QueueEntryKeepAliveHold `protobuf:"bytes,10,opt,name=keep_alive,json=keepAlive,proto3,oneof"`
 }
 
 type QueueEntry_Revival struct {
@@ -872,7 +872,7 @@ type QueueEntry_Revival struct {
 	// a leak, not a delay), or QueueCancelCmd. A frontend renders a dedicated
 	// "waiting on the revival's compaction" explanation from this arm instead
 	// of the classification.
-	Revival *QueueEntryRevivalHold `protobuf:"bytes,9,opt,name=revival,proto3,oneof"`
+	Revival *QueueEntryRevivalHold `protobuf:"bytes,11,opt,name=revival,proto3,oneof"`
 }
 
 type QueueEntry_BuildRefresh struct {
@@ -880,7 +880,7 @@ type QueueEntry_BuildRefresh struct {
 	// build at the turn boundary (automatic stale-shim refresh). Like the
 	// other holds, the classifier never runs on such an entry; the exit is
 	// delivery the moment the restarted shim reports ready.
-	BuildRefresh *QueueEntryBuildRefreshHold `protobuf:"bytes,14,opt,name=build_refresh,json=buildRefresh,proto3,oneof"`
+	BuildRefresh *QueueEntryBuildRefreshHold `protobuf:"bytes,12,opt,name=build_refresh,json=buildRefresh,proto3,oneof"`
 }
 
 func (*QueueEntry_Shutdown) isQueueEntry_Hold() {}
@@ -986,6 +986,10 @@ func (x *QueueEntryKeepAliveHold) GetTurnId() string {
 }
 
 // The pending compact-first revival holding a queue entry.
+// DELIBERATELY EMPTY: the arm's presence is the whole fact it carries. A
+// revival is a WORKSPACE-level event and the entry already rides its
+// workspace's queue, so naming a session here would join the entry to nothing
+// the client could not already reach.
 type QueueEntryRevivalHold struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1065,9 +1069,12 @@ func (*QueueEntryBuildRefreshHold) Descriptor() ([]byte, []int) {
 // An empty entries list is a meaningful value (the queue drained, or the
 // session died), not an absent one.
 type QueueView struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	Entries   []*QueueEntry          `protobuf:"bytes,3,rep,name=entries,proto3" json:"entries,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// WORKSPACE-ADDRESSED, never session-addressed. A frontend has no session
+	// vocabulary; the only currency question it ever asks is "is this push still
+	// current", which the fence below answers without naming what rotated.
+	Workspace string        `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Entries   []*QueueEntry `protobuf:"bytes,2,rep,name=entries,proto3" json:"entries,omitempty"`
 	// The workspace's staleness FENCE at the moment the daemon produced this
 	// push: an opaque token the client compares BYTE-WISE against the fence on
 	// the workspace's current WorkspaceState, and never parses, splits or
@@ -1077,7 +1084,7 @@ type QueueView struct {
 	// The daemon mints it and is the only thing that can read meaning into it.
 	// A client that learned to decode it would be depending on a fact this
 	// contract does not offer, and the token's composition is free to change.
-	Fence         string `protobuf:"bytes,4,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence         string `protobuf:"bytes,3,opt,name=fence,proto3" json:"fence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1298,39 +1305,37 @@ const file_frontend_v1_prompt_queue_proto_rawDesc = "" +
 	"&QueueClassificationUninterruptibleTurn\x125\n" +
 	"\acommand\x18\x01 \x01(\x0e2\x1b.frontend.v1.SessionCommandR\acommand\"2\n" +
 	"\x18QueueClassificationError\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"\xc9\x06\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x92\x06\n" +
 	"\n" +
 	"QueueEntry\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12 \n" +
 	"\fqueued_at_ms\x18\x03 \x01(\x03R\n" +
 	"queuedAtMs\x12C\n" +
-	"\apending\x18\n" +
-	" \x01(\v2'.frontend.v1.QueueClassificationPendingH\x00R\apending\x12I\n" +
-	"\tinterject\x18\v \x01(\v2).frontend.v1.QueueClassificationInterjectH\x00R\tinterject\x12Q\n" +
-	"\x11hold_for_turn_end\x18\f \x01(\v2$.frontend.v1.QueueClassificationHoldH\x00R\x0eholdForTurnEnd\x12=\n" +
-	"\x05error\x18\r \x01(\v2%.frontend.v1.QueueClassificationErrorH\x00R\x05error\x12h\n" +
-	"\x14uninterruptible_turn\x18\x0f \x01(\v23.frontend.v1.QueueClassificationUninterruptibleTurnH\x00R\x13uninterruptibleTurn\x12A\n" +
-	"\bshutdown\x18\a \x01(\v2#.frontend.v1.QueueEntryShutdownHoldH\x01R\bshutdown\x12E\n" +
+	"\apending\x18\x04 \x01(\v2'.frontend.v1.QueueClassificationPendingH\x00R\apending\x12I\n" +
+	"\tinterject\x18\x05 \x01(\v2).frontend.v1.QueueClassificationInterjectH\x00R\tinterject\x12Q\n" +
+	"\x11hold_for_turn_end\x18\x06 \x01(\v2$.frontend.v1.QueueClassificationHoldH\x00R\x0eholdForTurnEnd\x12=\n" +
+	"\x05error\x18\a \x01(\v2%.frontend.v1.QueueClassificationErrorH\x00R\x05error\x12h\n" +
+	"\x14uninterruptible_turn\x18\b \x01(\v23.frontend.v1.QueueClassificationUninterruptibleTurnH\x00R\x13uninterruptibleTurn\x12A\n" +
+	"\bshutdown\x18\t \x01(\v2#.frontend.v1.QueueEntryShutdownHoldH\x01R\bshutdown\x12E\n" +
 	"\n" +
-	"keep_alive\x18\b \x01(\v2$.frontend.v1.QueueEntryKeepAliveHoldH\x01R\tkeepAlive\x12>\n" +
-	"\arevival\x18\t \x01(\v2\".frontend.v1.QueueEntryRevivalHoldH\x01R\arevival\x12N\n" +
-	"\rbuild_refresh\x18\x0e \x01(\v2'.frontend.v1.QueueEntryBuildRefreshHoldH\x01R\fbuildRefreshB\x10\n" +
+	"keep_alive\x18\n" +
+	" \x01(\v2$.frontend.v1.QueueEntryKeepAliveHoldH\x01R\tkeepAlive\x12>\n" +
+	"\arevival\x18\v \x01(\v2\".frontend.v1.QueueEntryRevivalHoldH\x01R\arevival\x12N\n" +
+	"\rbuild_refresh\x18\f \x01(\v2'.frontend.v1.QueueEntryBuildRefreshHoldH\x01R\fbuildRefreshB\x10\n" +
 	"\x0eclassificationB\x06\n" +
-	"\x04holdJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\x0eclassificationR\trationaleR\baccepted\"9\n" +
+	"\x04hold\"9\n" +
 	"\x16QueueEntryShutdownHold\x12\x1f\n" +
 	"\vschedule_id\x18\x01 \x01(\tR\n" +
 	"scheduleId\"2\n" +
 	"\x17QueueEntryKeepAliveHold\x12\x17\n" +
-	"\aturn_id\x18\x01 \x01(\tR\x06turnId\")\n" +
-	"\x15QueueEntryRevivalHoldJ\x04\b\x01\x10\x02R\n" +
-	"session_id\"\x1c\n" +
-	"\x1aQueueEntryBuildRefreshHold\"\x84\x01\n" +
+	"\aturn_id\x18\x01 \x01(\tR\x06turnId\"\x17\n" +
+	"\x15QueueEntryRevivalHold\"\x1c\n" +
+	"\x1aQueueEntryBuildRefreshHold\"r\n" +
 	"\tQueueView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x121\n" +
-	"\aentries\x18\x03 \x03(\v2\x17.frontend.v1.QueueEntryR\aentries\x12\x14\n" +
-	"\x05fence\x18\x04 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03R\n" +
-	"session_id\"*\n" +
+	"\aentries\x18\x02 \x03(\v2\x17.frontend.v1.QueueEntryR\aentries\x12\x14\n" +
+	"\x05fence\x18\x03 \x01(\tR\x05fence\"*\n" +
 	"\rQueueForceCmd\x12\x19\n" +
 	"\bentry_id\x18\x01 \x01(\tR\aentryId\"+\n" +
 	"\x0eQueueAcceptCmd\x12\x19\n" +

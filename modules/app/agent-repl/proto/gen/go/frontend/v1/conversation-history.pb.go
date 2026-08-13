@@ -398,7 +398,7 @@ type ConversationHistoryPage struct {
 	// ConversationDelta's — so a frontend renders a paged message with the same
 	// code that renders a pushed one. Fewer than the daemon's ceiling means a
 	// short page, which at the top of a conversation is the normal case.
-	Messages []*Message `protobuf:"bytes,18,rep,name=messages,proto3" json:"messages,omitempty"`
+	Messages []*Message `protobuf:"bytes,3,rep,name=messages,proto3" json:"messages,omitempty"`
 	// WHETHER the conversation continues above this page — never WHERE.
 	//
 	// A oneof of MESSAGES rather than a bool or an enum: "there is more" and "we
@@ -414,7 +414,7 @@ type ConversationHistoryPage struct {
 	// splices onto the live push stream gap-free BY CONSTRUCTION rather than by
 	// timing. An OUTPUT the client never echoes back — it rides no request.
 	// Zero on next pages, which are history and carry no live edge.
-	LiveJoinSeq uint64 `protobuf:"varint,15,opt,name=live_join_seq,json=liveJoinSeq,proto3" json:"live_join_seq,omitempty"`
+	LiveJoinSeq uint64 `protobuf:"varint,6,opt,name=live_join_seq,json=liveJoinSeq,proto3" json:"live_join_seq,omitempty"`
 	// WHICH CONTAINER this page walks, STATED rather than left to be inferred,
 	// so a client can never mistake a page of a subagent's insides for a page of
 	// the feed.
@@ -423,7 +423,7 @@ type ConversationHistoryPage struct {
 	// with the `parent` each returned record carries, it is how a client VERIFIES
 	// that the page it got is the page it asked for: the echo proves what was
 	// ASKED, the per-record parent proves what was RECEIVED.
-	Scope *PageScope `protobuf:"bytes,16,opt,name=scope,proto3" json:"scope,omitempty"`
+	Scope *PageScope `protobuf:"bytes,7,opt,name=scope,proto3" json:"scope,omitempty"`
 	// The containers this page's scope sits inside, OUTERMOST FIRST. Empty when
 	// the scope is the feed.
 	//
@@ -433,7 +433,7 @@ type ConversationHistoryPage struct {
 	// one `parent` hop at a time would cost a round trip per level to learn what
 	// the resolver already knew. It cannot disagree with the parent chain because
 	// it is derived from that chain in the same pass.
-	AncestorMessageIds []string `protobuf:"bytes,17,rep,name=ancestor_message_ids,json=ancestorMessageIds,proto3" json:"ancestor_message_ids,omitempty"`
+	AncestorMessageIds []string `protobuf:"bytes,8,rep,name=ancestor_message_ids,json=ancestorMessageIds,proto3" json:"ancestor_message_ids,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -544,13 +544,13 @@ type ConversationHistoryPage_More struct {
 	// more" is a FACT the client acts on by calling NextPageCmd, not a handle
 	// it stores. The cursor that used to live here is precisely the position
 	// the client no longer holds.
-	More *HistoryHasMore `protobuf:"bytes,13,opt,name=more,proto3,oneof"`
+	More *HistoryHasMore `protobuf:"bytes,4,opt,name=more,proto3,oneof"`
 }
 
 type ConversationHistoryPage_Start struct {
 	// This page reaches the conversation's beginning; the client retires its
 	// load-more affordance.
-	Start *HistoryAtStart `protobuf:"bytes,14,opt,name=start,proto3,oneof"`
+	Start *HistoryAtStart `protobuf:"bytes,5,opt,name=start,proto3,oneof"`
 }
 
 func (*ConversationHistoryPage_More) isConversationHistoryPage_Continuation() {}
@@ -648,21 +648,18 @@ const file_frontend_v1_conversation_history_proto_rawDesc = "" +
 	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"Y\n" +
 	"\vNextPageCmd\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12,\n" +
-	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"\xaf\x04\n" +
+	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"\x84\x03\n" +
 	"\x17ConversationHistoryPage\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x02 \x01(\tR\trequestId\x120\n" +
-	"\bmessages\x18\x12 \x03(\v2\x14.frontend.v1.MessageR\bmessages\x121\n" +
-	"\x04more\x18\r \x01(\v2\x1b.frontend.v1.HistoryHasMoreH\x00R\x04more\x123\n" +
-	"\x05start\x18\x0e \x01(\v2\x1b.frontend.v1.HistoryAtStartH\x00R\x05start\x12\"\n" +
-	"\rlive_join_seq\x18\x0f \x01(\x04R\vliveJoinSeq\x12,\n" +
-	"\x05scope\x18\x10 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\x120\n" +
-	"\x14ancestor_message_ids\x18\x11 \x03(\tR\x12ancestorMessageIdsB\x0e\n" +
-	"\fcontinuationJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
-	"J\x04\b\n" +
-	"\x10\vJ\x04\b\v\x10\fJ\x04\b\f\x10\rR\tmessage_1R\tmessage_2R\tmessage_3R\tmessage_4R\tmessage_5R\tmessage_6R\tmessage_7R\tmessage_8R\tmessage_9R\n" +
-	"message_10\"\x10\n" +
+	"\bmessages\x18\x03 \x03(\v2\x14.frontend.v1.MessageR\bmessages\x121\n" +
+	"\x04more\x18\x04 \x01(\v2\x1b.frontend.v1.HistoryHasMoreH\x00R\x04more\x123\n" +
+	"\x05start\x18\x05 \x01(\v2\x1b.frontend.v1.HistoryAtStartH\x00R\x05start\x12\"\n" +
+	"\rlive_join_seq\x18\x06 \x01(\x04R\vliveJoinSeq\x12,\n" +
+	"\x05scope\x18\a \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\x120\n" +
+	"\x14ancestor_message_ids\x18\b \x03(\tR\x12ancestorMessageIdsB\x0e\n" +
+	"\fcontinuation\"\x10\n" +
 	"\x0eHistoryHasMore\"\x10\n" +
 	"\x0eHistoryAtStartB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 

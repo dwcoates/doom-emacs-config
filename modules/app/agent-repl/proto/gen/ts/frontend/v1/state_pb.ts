@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/state.proto.
  */
 export const file_frontend_v1_state: GenFile = /*@__PURE__*/
-  fileDesc("Chdmcm9udGVuZC92MS9zdGF0ZS5wcm90bxILZnJvbnRlbmQudjEibwoMUnVudGltZUZhdWx0EhEKCWNvbXBvbmVudBgBIAEoCRISCgpmYXVsdF90eXBlGAIgASgJEg4KBmltcGFjdBgDIAEoCRISCgpjYXVzZV9raW5kGAQgASgJEhQKDG9wZW5lZF9hdF9tcxgFIAEoAyLwBAoOV29ya3NwYWNlU3RhdGUSEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDQoFZmVuY2UYEyABKAkSJwoFc3RhdGUYAyABKA4yGC5mcm9udGVuZC52MS5SZW5kZXJTdGF0ZRITCgt0dXJuX2FjdGl2ZRgEIAEoCBIXCg9saXZlX3Rhc2tfY291bnQYBSABKAMSEgoKY2F1c2Vfa2luZBgHIAEoCRIRCgljYXVzZV9zZXEYCCABKAQSDQoFYXRfbXMYCSABKAMSNgoMY29ubmVjdGl2aXR5GAogASgOMiAuZnJvbnRlbmQudjEuU2Vzc2lvbkNvbm5lY3Rpdml0eRIqCgZzdGF0dXMYCyABKA4yGi5mcm9udGVuZC52MS5TZXNzaW9uU3RhdHVzEiAKGGNvbnRyb2xsZXJfZ2VuZXJhdGlvbl9pZBgMIAEoCRIwCg1hY3RpdmVfZmF1bHRzGA0gAygLMhkuZnJvbnRlbmQudjEuUnVudGltZUZhdWx0EhgKEG1lcmdlX2xlYXNlX2hlbGQYECABKAgSFAoMbWVyZ2VkX2F0X21zGBEgASgDEi4KDG1lcmdlX3N0YXR1cxgSIAEoCzIYLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzEjsKE21lcmdlX2RlcXVldWVfb2ZmZXIYFCABKAsyHi5mcm9udGVuZC52MS5NZXJnZURlcXVldWVPZmZlckoECAYQB0oECA4QD0oECA8QEFILbWVyZ2VfcGhhc2VSFG1lcmdlX3F1ZXVlX3Bvc2l0aW9uUhFtZXJnZV9xdWV1ZV9kZXB0aCLZBAoLU2Vzc2lvblZpZXcSEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDQoFbW9kZWwYAyABKAkSDAoEc2x1ZxgEIAEoCRINCgV0aXRsZRgFIAEoCRIUCgx0b3RhbF90b2tlbnMYBiABKAMSFgoOdG90YWxfY29zdF91c2QYByABKAESFgoOY29udGV4dF93aW5kb3cYCCABKAMSFwoPcGVybWlzc2lvbl9tb2RlGAkgASgJEhUKDXNoaW1fYXR0YWNoZWQYCiABKAgSGQoRY2xhdWRlX3Nlc3Npb25faWQYCyABKAkSCwoDY3dkGAwgASgJEhAKCHRlcm1pbmFsGA0gASgIEhQKDHJlaHlkcmF0YWJsZRgPIAEoCBISCgpoaWJlcm5hdGVkGBAgASgIEhsKE3BlbmRpbmdfcGVybWlzc2lvbnMYESABKAMSEgoKY29uZmlnX2RpchgSIAEoCRIsCghiYWNrZmlsbBgTIAEoDjIaLmZyb250ZW5kLnYxLkJhY2tmaWxsU3RhdGUSKwoFZGVhdGgYFCABKAsyHC5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZFZpZXcSLwoNbW9kZWxfb3B0aW9ucxgVIAMoCzIYLnByb3RvY29sLnYxLk1vZGVsT3B0aW9uEjMKC2hpYmVybmF0aW9uGBcgASgLMh4uZnJvbnRlbmQudjEuSGliZXJuYXRpb25EZXRhaWxKBAgOEA9KBAgWEBdSDGRlYXRoX3JlYXNvblIRdG9rZW5fdXRpbGl6YXRpb24ibwoKRGFlbW9uVmlldxIPCgdib290X2lkGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKAkSHgoWZGFlbW9uX2JpbmFyeV9tdGltZV9tcxgDIAEoAxIWCg5kYWVtb25fdmVyc2lvbhgEIAEoCSJTCg1IZWFydGJlYXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRINCgVmZW5jZRgEIAEoCUoECAIQA0oECAMQBFIKc2Vzc2lvbl9pZFIIcHJvZ3Jlc3MqsAUKC1JlbmRlclN0YXRlEhwKGFJFTkRFUl9TVEFURV9VTlNQRUNJRklFRBAAEhUKEVJFTkRFUl9TVEFURV9JTklUEAESFQoRUkVOREVSX1NUQVRFX0lETEUQAhIbChdSRU5ERVJfU1RBVEVfSURMRV9BU1lOQxADEhkKFVJFTkRFUl9TVEFURV9USElOS0lORxAEEhsKF1JFTkRFUl9TVEFURV9QRVJNSVNTSU9OEAUSFQoRUkVOREVSX1NUQVRFX0RPTkUQBhIgChhSRU5ERVJfU1RBVEVfU1RPUF9GQUlMRUQQBxoCCAESGAoUUkVOREVSX1NUQVRFX01FUkdJTkcQCBIdChlSRU5ERVJfU1RBVEVfTUVSR0VfUVVFVUVEEAkSHwobUkVOREVSX1NUQVRFX01FUkdFX0NPTkZMSUNUEAoSHQoZUkVOREVSX1NUQVRFX01FUkdFX0ZBSUxFRBALEhcKE1JFTkRFUl9TVEFURV9NRVJHRUQQDBIVChFSRU5ERVJfU1RBVEVfREVBRBANEhkKFVJFTkRFUl9TVEFURV9ERUdSQURFRBAOEhYKElJFTkRFUl9TVEFURV9SRUFEWRAPEh8KG1JFTkRFUl9TVEFURV9WRU5ET1JfQkxPQ0tFRBAQEhwKGFJFTkRFUl9TVEFURV9JTlRFUlJVUFRFRBAREhkKFVJFTkRFUl9TVEFURV9DTEVBUklORxASEhsKF1JFTkRFUl9TVEFURV9DT01QQUNUSU5HEBMSGAoUUkVOREVSX1NUQVRFX1NFVkVSRUQQFBIbChdSRU5ERVJfU1RBVEVfSElCRVJOQVRFRBAVEhsKF1JFTkRFUl9TVEFURV9TVUJNSVRUSU5HEBYSIAocUkVOREVSX1NUQVRFX01FUkdFX0VOUVVFVUlORxAXKvQBChNTZXNzaW9uQ29ubmVjdGl2aXR5EiQKIFNFU1NJT05fQ09OTkVDVElWSVRZX1VOU1BFQ0lGSUVEEAASIwofU0VTU0lPTl9DT05ORUNUSVZJVFlfSElCRVJOQVRFRBABEiMKH1NFU1NJT05fQ09OTkVDVElWSVRZX0NPTk5FQ1RJTkcQAhIkCiBTRVNTSU9OX0NPTk5FQ1RJVklUWV9PUEVSQVRJT05BTBADEiEKHVNFU1NJT05fQ09OTkVDVElWSVRZX0RFR1JBREVEEAQSJAogU0VTU0lPTl9DT05ORUNUSVZJVFlfVU5BVkFJTEFCTEUQBSqfAgoNU2Vzc2lvblN0YXR1cxIeChpTRVNTSU9OX1NUQVRVU19VTlNQRUNJRklFRBAAEhgKFFNFU1NJT05fU1RBVFVTX1JFQURZEAESGwoXU0VTU0lPTl9TVEFUVVNfVEhJTktJTkcQAhIdChlTRVNTSU9OX1NUQVRVU19QRVJNSVNTSU9OEAMSFwoTU0VTU0lPTl9TVEFUVVNfRE9ORRAEEh4KGlNFU1NJT05fU1RBVFVTX0lOVEVSUlVQVEVEEAUSIQodU0VTU0lPTl9TVEFUVVNfVkVORE9SX0JMT0NLRUQQBhIdChlTRVNTSU9OX1NUQVRVU19NT05JVE9SSU5HEAcSHQoZU0VTU0lPTl9TVEFUVVNfU1VCTUlUVElORxAIKn8KDUJhY2tmaWxsU3RhdGUSHgoaQkFDS0ZJTExfU1RBVEVfVU5TUEVDSUZJRUQQABIaChZCQUNLRklMTF9TVEFURV9QRU5ESU5HEAESFwoTQkFDS0ZJTExfU1RBVEVfRE9ORRACEhkKFUJBQ0tGSUxMX1NUQVRFX0ZBSUxFRBADQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_frontend_v1_failure_card, file_frontend_v1_gate_revival, file_frontend_v1_merge, file_protocol_v1_core]);
+  fileDesc("Chdmcm9udGVuZC92MS9zdGF0ZS5wcm90bxILZnJvbnRlbmQudjEibwoMUnVudGltZUZhdWx0EhEKCWNvbXBvbmVudBgBIAEoCRISCgpmYXVsdF90eXBlGAIgASgJEg4KBmltcGFjdBgDIAEoCRISCgpjYXVzZV9raW5kGAQgASgJEhQKDG9wZW5lZF9hdF9tcxgFIAEoAyKoBAoOV29ya3NwYWNlU3RhdGUSEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDQoFZmVuY2UYAyABKAkSJwoFc3RhdGUYBCABKA4yGC5mcm9udGVuZC52MS5SZW5kZXJTdGF0ZRITCgt0dXJuX2FjdGl2ZRgFIAEoCBIXCg9saXZlX3Rhc2tfY291bnQYBiABKAMSEgoKY2F1c2Vfa2luZBgHIAEoCRIRCgljYXVzZV9zZXEYCCABKAQSDQoFYXRfbXMYCSABKAMSNgoMY29ubmVjdGl2aXR5GAogASgOMiAuZnJvbnRlbmQudjEuU2Vzc2lvbkNvbm5lY3Rpdml0eRIqCgZzdGF0dXMYCyABKA4yGi5mcm9udGVuZC52MS5TZXNzaW9uU3RhdHVzEiAKGGNvbnRyb2xsZXJfZ2VuZXJhdGlvbl9pZBgMIAEoCRIwCg1hY3RpdmVfZmF1bHRzGA0gAygLMhkuZnJvbnRlbmQudjEuUnVudGltZUZhdWx0EhgKEG1lcmdlX2xlYXNlX2hlbGQYDiABKAgSFAoMbWVyZ2VkX2F0X21zGA8gASgDEi4KDG1lcmdlX3N0YXR1cxgQIAEoCzIYLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzEjsKE21lcmdlX2RlcXVldWVfb2ZmZXIYESABKAsyHi5mcm9udGVuZC52MS5NZXJnZURlcXVldWVPZmZlciKsBAoLU2Vzc2lvblZpZXcSEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDQoFbW9kZWwYAyABKAkSDAoEc2x1ZxgEIAEoCRINCgV0aXRsZRgFIAEoCRIUCgx0b3RhbF90b2tlbnMYBiABKAMSFgoOdG90YWxfY29zdF91c2QYByABKAESFgoOY29udGV4dF93aW5kb3cYCCABKAMSFwoPcGVybWlzc2lvbl9tb2RlGAkgASgJEhUKDXNoaW1fYXR0YWNoZWQYCiABKAgSGQoRY2xhdWRlX3Nlc3Npb25faWQYCyABKAkSCwoDY3dkGAwgASgJEhAKCHRlcm1pbmFsGA0gASgIEhQKDHJlaHlkcmF0YWJsZRgOIAEoCBISCgpoaWJlcm5hdGVkGA8gASgIEhsKE3BlbmRpbmdfcGVybWlzc2lvbnMYECABKAMSEgoKY29uZmlnX2RpchgRIAEoCRIsCghiYWNrZmlsbBgSIAEoDjIaLmZyb250ZW5kLnYxLkJhY2tmaWxsU3RhdGUSKwoFZGVhdGgYEyABKAsyHC5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZFZpZXcSLwoNbW9kZWxfb3B0aW9ucxgUIAMoCzIYLnByb3RvY29sLnYxLk1vZGVsT3B0aW9uEjMKC2hpYmVybmF0aW9uGBUgASgLMh4uZnJvbnRlbmQudjEuSGliZXJuYXRpb25EZXRhaWwibwoKRGFlbW9uVmlldxIPCgdib290X2lkGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKAkSHgoWZGFlbW9uX2JpbmFyeV9tdGltZV9tcxgDIAEoAxIWCg5kYWVtb25fdmVyc2lvbhgEIAEoCSIxCg1IZWFydGJlYXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRINCgVmZW5jZRgCIAEoCSqwBQoLUmVuZGVyU3RhdGUSHAoYUkVOREVSX1NUQVRFX1VOU1BFQ0lGSUVEEAASFQoRUkVOREVSX1NUQVRFX0lOSVQQARIVChFSRU5ERVJfU1RBVEVfSURMRRACEhsKF1JFTkRFUl9TVEFURV9JRExFX0FTWU5DEAMSGQoVUkVOREVSX1NUQVRFX1RISU5LSU5HEAQSGwoXUkVOREVSX1NUQVRFX1BFUk1JU1NJT04QBRIVChFSRU5ERVJfU1RBVEVfRE9ORRAGEiAKGFJFTkRFUl9TVEFURV9TVE9QX0ZBSUxFRBAHGgIIARIYChRSRU5ERVJfU1RBVEVfTUVSR0lORxAIEh0KGVJFTkRFUl9TVEFURV9NRVJHRV9RVUVVRUQQCRIfChtSRU5ERVJfU1RBVEVfTUVSR0VfQ09ORkxJQ1QQChIdChlSRU5ERVJfU1RBVEVfTUVSR0VfRkFJTEVEEAsSFwoTUkVOREVSX1NUQVRFX01FUkdFRBAMEhUKEVJFTkRFUl9TVEFURV9ERUFEEA0SGQoVUkVOREVSX1NUQVRFX0RFR1JBREVEEA4SFgoSUkVOREVSX1NUQVRFX1JFQURZEA8SHwobUkVOREVSX1NUQVRFX1ZFTkRPUl9CTE9DS0VEEBASHAoYUkVOREVSX1NUQVRFX0lOVEVSUlVQVEVEEBESGQoVUkVOREVSX1NUQVRFX0NMRUFSSU5HEBISGwoXUkVOREVSX1NUQVRFX0NPTVBBQ1RJTkcQExIYChRSRU5ERVJfU1RBVEVfU0VWRVJFRBAUEhsKF1JFTkRFUl9TVEFURV9ISUJFUk5BVEVEEBUSGwoXUkVOREVSX1NUQVRFX1NVQk1JVFRJTkcQFhIgChxSRU5ERVJfU1RBVEVfTUVSR0VfRU5RVUVVSU5HEBcq9AEKE1Nlc3Npb25Db25uZWN0aXZpdHkSJAogU0VTU0lPTl9DT05ORUNUSVZJVFlfVU5TUEVDSUZJRUQQABIjCh9TRVNTSU9OX0NPTk5FQ1RJVklUWV9ISUJFUk5BVEVEEAESIwofU0VTU0lPTl9DT05ORUNUSVZJVFlfQ09OTkVDVElORxACEiQKIFNFU1NJT05fQ09OTkVDVElWSVRZX09QRVJBVElPTkFMEAMSIQodU0VTU0lPTl9DT05ORUNUSVZJVFlfREVHUkFERUQQBBIkCiBTRVNTSU9OX0NPTk5FQ1RJVklUWV9VTkFWQUlMQUJMRRAFKp8CCg1TZXNzaW9uU3RhdHVzEh4KGlNFU1NJT05fU1RBVFVTX1VOU1BFQ0lGSUVEEAASGAoUU0VTU0lPTl9TVEFUVVNfUkVBRFkQARIbChdTRVNTSU9OX1NUQVRVU19USElOS0lORxACEh0KGVNFU1NJT05fU1RBVFVTX1BFUk1JU1NJT04QAxIXChNTRVNTSU9OX1NUQVRVU19ET05FEAQSHgoaU0VTU0lPTl9TVEFUVVNfSU5URVJSVVBURUQQBRIhCh1TRVNTSU9OX1NUQVRVU19WRU5ET1JfQkxPQ0tFRBAGEh0KGVNFU1NJT05fU1RBVFVTX01PTklUT1JJTkcQBxIdChlTRVNTSU9OX1NUQVRVU19TVUJNSVRUSU5HEAgqfwoNQmFja2ZpbGxTdGF0ZRIeChpCQUNLRklMTF9TVEFURV9VTlNQRUNJRklFRBAAEhoKFkJBQ0tGSUxMX1NUQVRFX1BFTkRJTkcQARIXChNCQUNLRklMTF9TVEFURV9ET05FEAISGQoVQkFDS0ZJTExfU1RBVEVfRkFJTEVEEANCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_frontend_v1_failure_card, file_frontend_v1_gate_revival, file_frontend_v1_merge, file_protocol_v1_core]);
 
 /**
  * A runtime fault is explanatory evidence scoped to exactly one
@@ -112,7 +112,7 @@ export type WorkspaceState = Message<"frontend.v1.WorkspaceState"> & {
    * and is free to change without a wire change, which is only true for as
    * long as nothing reads structure into it.
    *
-   * @generated from field: string fence = 19;
+   * @generated from field: string fence = 3;
    */
   fence: string;
 
@@ -121,19 +121,19 @@ export type WorkspaceState = Message<"frontend.v1.WorkspaceState"> & {
    * and context-cut presentation; it is not the authority for connectivity or
    * session status.
    *
-   * @generated from field: frontend.v1.RenderState state = 3;
+   * @generated from field: frontend.v1.RenderState state = 4;
    */
   state: RenderState;
 
   /**
    * Resolution inputs (SSM):
    *
-   * @generated from field: bool turn_active = 4;
+   * @generated from field: bool turn_active = 5;
    */
   turnActive: boolean;
 
   /**
-   * @generated from field: int64 live_task_count = 5;
+   * @generated from field: int64 live_task_count = 6;
    */
   liveTaskCount: bigint;
 
@@ -188,7 +188,7 @@ export type WorkspaceState = Message<"frontend.v1.WorkspaceState"> & {
    * and every message the session produces carries
    * CONVERSATION_SOURCE_MERGE.
    *
-   * @generated from field: bool merge_lease_held = 16;
+   * @generated from field: bool merge_lease_held = 14;
    */
   mergeLeaseHeld: boolean;
 
@@ -198,7 +198,7 @@ export type WorkspaceState = Message<"frontend.v1.WorkspaceState"> & {
    * workspace always carries the instant it merged at.
    *
    * WRITTEN ONCE, at the `merged` transition, and never moved afterwards.
-   * merge_status (18) reports whichever run is currently newest and can
+   * `merge_status` reports whichever run is currently newest and can
    * therefore be superseded; this is the durable record that the merge
    * LANDED, so a later transition on any axis leaves it exactly where it was.
    *
@@ -206,20 +206,23 @@ export type WorkspaceState = Message<"frontend.v1.WorkspaceState"> & {
    * log, so a frontend ordering a recently-merged section reads the identical
    * instant from every push, snapshot and resync.
    *
-   * @generated from field: int64 merged_at_ms = 17;
+   * @generated from field: int64 merged_at_ms = 15;
    */
   mergedAtMs: bigint;
 
   /**
    * THE merge run's live progress, and the ONLY merge-run surface on this
-   * message. See MergeStatus. The coarse flat trio it replaced is reserved
-   * above; there is no second, weaker form of these facts to disagree with.
+   * message. See MergeStatus. IT NAMES A RUN, carries the phase as WHICH oneof
+   * arm is set, and reports the queue place the run was actually ADMITTED at.
+   * There is deliberately no second, flatter form of these facts on this
+   * message: two forms of one fact can disagree on a single frame, so the
+   * resolved run is the only one that exists.
    *
    * UNSET means this workspace has no merge to report — the merge axis has
    * never spoken for it, or its axis is cleared. It is never a zero-valued
    * status standing in for absence.
    *
-   * @generated from field: frontend.v1.MergeStatus merge_status = 18;
+   * @generated from field: frontend.v1.MergeStatus merge_status = 16;
    */
   mergeStatus?: MergeStatus | undefined;
 
@@ -234,7 +237,7 @@ export type WorkspaceState = Message<"frontend.v1.WorkspaceState"> & {
    * frontend draws the card if and only if this field is set, so clearing it
    * IS how the card comes down; there is no second dismissal channel.
    *
-   * @generated from field: frontend.v1.MergeDequeueOffer merge_dequeue_offer = 20;
+   * @generated from field: frontend.v1.MergeDequeueOffer merge_dequeue_offer = 17;
    */
   mergeDequeueOffer?: MergeDequeueOffer | undefined;
 };
@@ -267,6 +270,13 @@ export const WorkspaceStateSchema: GenMessage<WorkspaceState> = /*@__PURE__*/
  */
 export type SessionView = Message<"frontend.v1.SessionView"> & {
   /**
+   * HOST SURFACE. Emacs creates, deletes, revives and catalogs sessions, so
+   * it reads sessions as sessions. A rendering frontend does not: the facts it
+   * used to take from here reach it as fenced component views instead —
+   * WorkspaceGateView for the hibernation gate, TopbarView for the identity
+   * line, TokenBreakdownView for economics, and a resolved failure card for a
+   * terminal session's account.
+   *
    * @generated from field: string workspace = 1;
    */
   workspace: string;
@@ -355,17 +365,17 @@ export type SessionView = Message<"frontend.v1.SessionView"> & {
   terminal: boolean;
 
   /**
-   * @generated from field: bool rehydratable = 15;
+   * @generated from field: bool rehydratable = 14;
    */
   rehydratable: boolean;
 
   /**
-   * @generated from field: bool hibernated = 16;
+   * @generated from field: bool hibernated = 15;
    */
   hibernated: boolean;
 
   /**
-   * @generated from field: int64 pending_permissions = 17;
+   * @generated from field: int64 pending_permissions = 16;
    */
   pendingPermissions: bigint;
 
@@ -373,7 +383,7 @@ export type SessionView = Message<"frontend.v1.SessionView"> & {
    * Account identity — the CLAUDE_CONFIG_DIR the session's
    * shim runs against (account switching is daemon-executed, webapp-initiated).
    *
-   * @generated from field: string config_dir = 18;
+   * @generated from field: string config_dir = 17;
    */
   configDir: string;
 
@@ -381,21 +391,21 @@ export type SessionView = Message<"frontend.v1.SessionView"> & {
    * Whether this session's on-disk transcript has been read
    * into the store — the NEVER-BLUE completion signal (see BackfillState).
    *
-   * @generated from field: frontend.v1.BackfillState backfill = 19;
+   * @generated from field: frontend.v1.BackfillState backfill = 18;
    */
   backfill: BackfillState;
 
   /**
-   * The TYPED account of why this session is terminal,
-   * superseding the free-string death_reason (RETIRED, step 11).
+   * The TYPED account of why this session is terminal, and the ONLY
+   * reader-facing account of it.
    *
-   * death_reason was a free string with two producers, zero readers, and no
-   * way for a frontend to know what class of failure it described. This is
-   * the same fact classified once, daemon-side, so the dead-state card can
-   * render it the way every other failure renders. Unset while the session
+   * CLASSIFIED ONCE, DAEMON-SIDE, never a free string: a frontend that is
+   * handed prose cannot know what class of failure it describes, so it cannot
+   * color it, group it, or offer the right remedy. Typed, the dead-state card
+   * renders it the way every other failure renders. Unset while the session
    * lives.
    *
-   * @generated from field: frontend.v1.FailureCardView death = 20;
+   * @generated from field: frontend.v1.FailureCardView death = 19;
    */
   death?: FailureCardView | undefined;
 
@@ -403,16 +413,21 @@ export type SessionView = Message<"frontend.v1.SessionView"> & {
    * The SDK-published set this session can deliberately select.  A frontend
    * only renders these choices; it never invents or owns a model selection.
    *
-   * @generated from field: repeated protocol.v1.ModelOption model_options = 21;
+   * @generated from field: repeated protocol.v1.ModelOption model_options = 20;
    */
   modelOptions: ModelOption[];
 
   /**
+   * NO PERSISTENCE AGGREGATE RIDES THIS MESSAGE. Token economics is durable
+   * evidence with its own home, and what a frontend needs of it arrives
+   * already digested as TokenBreakdownView's resolved rows — never as a whole
+   * aggregate a renderer is expected to re-derive rows from itself.
+   *
    * Present iff the session is hibernated; the typed account behind the
-   * `hibernated` bool (16), which stays as its compatibility projection.
+   * `hibernated` bool, which stays as its coarse projection.
    * A frontend renders the revival gate from this.
    *
-   * @generated from field: frontend.v1.HibernationDetail hibernation = 23;
+   * @generated from field: frontend.v1.HibernationDetail hibernation = 21;
    */
   hibernation?: HibernationDetail | undefined;
 };
@@ -460,23 +475,27 @@ export const DaemonViewSchema: GenMessage<DaemonView> = /*@__PURE__*/
   messageDesc(file_frontend_v1_state, 3);
 
 /**
- * EPHEMERAL long-tool liveness relay. The shim already emits
- * core.v1.HeartbeatProgress over its UDS while a tool runs; before this arm
- * existed the daemon had nowhere to put it and dropped it (a schema-forced
- * drop). This is the arm.
+ * EPHEMERAL long-tool liveness relay: the arm the daemon puts a running tool's
+ * liveness on, so a long-running tool stops looking hung. Like TypingDelta it
+ * is never persisted and never appears in a StateSnapshot — a frontend that
+ * reconnects simply waits for the next heartbeat.
  *
- * The embedded HeartbeatProgress is carried UNCHANGED, exactly as TypingDelta
- * carries ContentDelta: the daemon relays, it does not re-type. Consumers key
- * on progress.tool_use_id to find the running tool and use
- * progress.elapsed_seconds to tick its liveness, so a long-running tool stops
- * looking hung. Like TypingDelta it is never persisted and never appears in a
- * StateSnapshot — a frontend that reconnects simply waits for the next
- * heartbeat.
+ * KNOWN GAP: THIS VIEW CURRENTLY HAS NOTHING TO TICK WITH. The per-tool
+ * progress a renderer would need (which tool, how long it has been running) is
+ * a fact ABOUT a turn, so BookkeepingEntry is its home — and bookkeeping never
+ * reaches a client, and no resolved frontend spelling of it exists yet. So the
+ * view carries a workspace and a fence and no payload. Stated loudly rather
+ * than left to be discovered by a frontend looking for a field to render.
  *
  * @generated from message frontend.v1.HeartbeatView
  */
 export type HeartbeatView = Message<"frontend.v1.HeartbeatView"> & {
   /**
+   * WHICH WORKSPACE this liveness belongs to, and the only addressing this
+   * view carries. A rendering frontend holds no session vocabulary; the one
+   * question it has beyond "which workspace" is "is this push still current",
+   * and the fence below answers that without naming what rotated.
+   *
    * @generated from field: string workspace = 1;
    */
   workspace: string;
@@ -492,7 +511,7 @@ export type HeartbeatView = Message<"frontend.v1.HeartbeatView"> & {
    * A client that learned to decode it would be depending on a fact this
    * contract does not offer, and the token's composition is free to change.
    *
-   * @generated from field: string fence = 4;
+   * @generated from field: string fence = 2;
    */
   fence: string;
 };
@@ -594,9 +613,9 @@ export enum RenderState {
    * DEPRECATED by RENDER_STATE_VENDOR_BLOCKED. It was never a state of its
    * own: an errored turn end is an abnormal CONCLUSION, which is exactly
    * what VENDOR_BLOCKED means, and its own color said "stopped" in a way
-   * that read as neither working nor blocked. The SSM no longer resolves
-   * it; the number stays reserved-by-use so no future state reuses it and
-   * an old frontend decoding an old log still reads what it always did.
+   * that read as neither working nor blocked. The SSM no longer resolves it,
+   * and it stays in the vocabulary so an old frontend decoding an old log
+   * still reads what it always did.
    *
    * @generated from enum value: RENDER_STATE_STOP_FAILED = 7 [deprecated = true];
    * @deprecated
@@ -704,13 +723,12 @@ export enum RenderState {
    * `thinking` row from the turn it was driving when it broke; reporting that
    * would advertise an agent nobody is connected to.
    *
-   * KEEPS FIELD NUMBER 20, which it held while it was named
-   * RENDER_STATE_DORMANT. The rename is deliberately wire-compatible: an
-   * append-only state log written by an older daemon still carries the literal
-   * text `dormant`, and the SSM resolves that alias onto this state forever.
-   * What changed is only that the benign half of the old DORMANT — the
-   * deliberate hibernation, the never-wired workspace — moved to HIBERNATED
-   * below, so that BLUE finally means "something is actually wrong".
+   * THE SSM RESOLVES THE LITERAL TEXT `dormant` ONTO THIS STATE, FOREVER. The
+   * state log is append-only, so rows written before this state carried its
+   * present name still have to resolve to something, and this is the state
+   * they mean: not wired, and broken. The benign half of that older reading —
+   * the deliberate hibernation, the never-wired workspace — is HIBERNATED
+   * below, which is what lets BLUE mean "something is actually wrong".
    *
    * @generated from enum value: RENDER_STATE_SEVERED = 20;
    */

@@ -38,7 +38,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/errors.proto.
  */
 export const file_frontend_v1_errors: GenFile = /*@__PURE__*/
-  fileDesc("Chhmcm9udGVuZC92MS9lcnJvcnMucHJvdG8SC2Zyb250ZW5kLnYxImEKFFZlbmRvckZhaWx1cmVDb250ZXh0EhkKEWNsYXVkZV9zZXNzaW9uX2lkGAEgASgJEhYKDmFwaV9yZXF1ZXN0X2lkGAIgASgJEhYKDmFwaV9tZXNzYWdlX2lkGAMgASgJIp4iCgtGYWlsdXJlS2luZBJCChJzaGltX25vdF9jb25uZWN0ZWQYCiABKAsyJC5mcm9udGVuZC52MS5GYWlsdXJlU2hpbU5vdENvbm5lY3RlZEgAEjkKDXNoaW1fcmVqZWN0ZWQYCyABKAsyIC5mcm9udGVuZC52MS5GYWlsdXJlU2hpbVJlamVjdGVkSAASPgoQc2hpbV9hY2tfdGltZW91dBgMIAEoCzIiLmZyb250ZW5kLnYxLkZhaWx1cmVTaGltQWNrVGltZW91dEgAEkgKFXNoaW1fdmVyc2lvbl9taXNtYXRjaBgNIAEoCzInLmZyb250ZW5kLnYxLkZhaWx1cmVTaGltVmVyc2lvbk1pc21hdGNoSAASRAoTc2hpbV9zZXFfcmVncmVzc2lvbhgOIAEoCzIlLmZyb250ZW5kLnYxLkZhaWx1cmVTaGltU2VxUmVncmVzc2lvbkgAEjkKDXNoaW1fZGVncmFkZWQYDyABKAsyIC5mcm9udGVuZC52MS5GYWlsdXJlU2hpbURlZ3JhZGVkSAASTwoZc2hpbV9zdG9yZV93cml0ZV9yZWplY3RlZBgQIAEoCzIqLmZyb250ZW5kLnYxLkZhaWx1cmVTaGltU3RvcmVXcml0ZVJlamVjdGVkSAASQQoRcXVlcnlfdGVybWluYXRpb24YESABKAsyJC5mcm9udGVuZC52MS5GYWlsdXJlUXVlcnlUZXJtaW5hdGlvbkgAEj4KEHNoaW1fbm90X3NwYXduZWQYEiABKAsyIi5mcm9udGVuZC52MS5GYWlsdXJlU2hpbU5vdFNwYXduZWRIABJQChlzaGltX2hhbmRzaGFrZV9pbmNvbXBsZXRlGBMgASgLMisuZnJvbnRlbmQudjEuRmFpbHVyZVNoaW1IYW5kc2hha2VJbmNvbXBsZXRlSAASOwoOc2hpbV91bmhlYWx0aHkYFCABKAsyIS5mcm9udGVuZC52MS5GYWlsdXJlU2hpbVVuaGVhbHRoeUgAEkwKF3Nlc3Npb25fbm90X2VzdGFibGlzaGVkGBUgASgLMikuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25Ob3RFc3RhYmxpc2hlZEgAEkIKEndvcmtzcGFjZV9ub3RfbGl2ZRgWIAEoCzIkLmZyb250ZW5kLnYxLkZhaWx1cmVXb3Jrc3BhY2VOb3RMaXZlSAASPQoPc2Vzc2lvbl9kZWxldGVkGBcgASgLMiIuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25EZWxldGVkSAASQwoSc2Vzc2lvbl9zdXBlcnNlZGVkGBggASgLMiUuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25TdXBlcnNlZGVkSAASRwoUcmVjb25uZWN0X3N1cGVyc2VkZWQYGSABKAsyJy5mcm9udGVuZC52MS5GYWlsdXJlUmVjb25uZWN0U3VwZXJzZWRlZEgAEkAKEXNlc3Npb25fc2hpbV9kaWVkGBogASgLMiMuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25TaGltRGllZEgAEkYKFHNlc3Npb25fc3RhcnRfZmFpbGVkGBsgASgLMiYuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25TdGFydEZhaWxlZEgAEkgKFXNlc3Npb25fcmVzdW1lX2ZhaWxlZBgcIAEoCzInLmZyb250ZW5kLnYxLkZhaWx1cmVTZXNzaW9uUmVzdW1lRmFpbGVkSAASTwoYY29udmVyc2F0aW9uX3VucmVzdW1hYmxlGB0gASgLMisuZnJvbnRlbmQudjEuRmFpbHVyZUNvbnZlcnNhdGlvblVucmVzdW1hYmxlSAASRAoTcmVzdW1lX21vZGVfcmV0aXJlZBgeIAEoCzIlLmZyb250ZW5kLnYxLkZhaWx1cmVSZXN1bWVNb2RlUmV0aXJlZEgAElIKGnNlc3Npb25fZW5kZWRfdW5jbGFzc2lmaWVkGB8gASgLMiwuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25FbmRlZFVuY2xhc3NpZmllZEgAEk0KGGhpc3RvcnlfcmVwdWxsX2luX2ZsaWdodBggIAEoCzIpLmZyb250ZW5kLnYxLkZhaWx1cmVIaXN0b3J5UmVwdWxsSW5GbGlnaHRIABJOChhoaXN0b3J5X3JlcGxheV90cnVuY2F0ZWQYISABKAsyKi5mcm9udGVuZC52MS5GYWlsdXJlSGlzdG9yeVJlcGxheVRydW5jYXRlZEgAEkkKFWludGVycnVwdF91bmRlbGl2ZXJlZBgiIAEoCzIoLmZyb250ZW5kLnYxLkZhaWx1cmVJbnRlcnJ1cHRVbmRlbGl2ZXJlZEgAEkQKE3F1ZXVlX2VudHJ5X3Vud2lyZWQYIyABKAsyJS5mcm9udGVuZC52MS5GYWlsdXJlUXVldWVFbnRyeVVud2lyZWRIABJSChtxdWV1ZV9lbnRyeV9rZWVwX2FsaXZlX2hlbGQYJCABKAsyKy5mcm9udGVuZC52MS5GYWlsdXJlUXVldWVFbnRyeUtlZXBBbGl2ZUhlbGRIABJDChJzZXNzaW9uX2hpYmVybmF0ZWQYJSABKAsyJS5mcm9udGVuZC52MS5GYWlsdXJlU2Vzc2lvbkhpYmVybmF0ZWRIABJRChprZWVwX2FsaXZlX3dpbmRvd191bmNsb3NlZBgmIAEoCzIrLmZyb250ZW5kLnYxLkZhaWx1cmVLZWVwQWxpdmVXaW5kb3dVbmNsb3NlZEgAElEKGmtlZXBfYWxpdmVfd2luZG93X2ludmVydGVkGCcgASgLMisuZnJvbnRlbmQudjEuRmFpbHVyZUtlZXBBbGl2ZVdpbmRvd0ludmVydGVkSAASRgoUY29tcGFjdGlvbl9jb2xkX3JlYWQYKCABKAsyJi5mcm9udGVuZC52MS5GYWlsdXJlQ29tcGFjdGlvbkNvbGRSZWFkSAASTwoZY2xpZW50X2xvZ19pZGVudGl0eV9zdGFsZRgpIAEoCzIqLmZyb250ZW5kLnYxLkZhaWx1cmVDbGllbnRMb2dJZGVudGl0eVN0YWxlSAASSQoVaW50ZXJuYWxfdW5jbGFzc2lmaWVkGCogASgLMiguZnJvbnRlbmQudjEuRmFpbHVyZUludGVybmFsVW5jbGFzc2lmaWVkSAASUAoZYXBpX2F1dGhlbnRpY2F0aW9uX2ZhaWxlZBgrIAEoCzIrLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlBdXRoZW50aWNhdGlvbkZhaWxlZEgAEkAKEWFwaV9iaWxsaW5nX2Vycm9yGCwgASgLMiMuZnJvbnRlbmQudjEuRmFpbHVyZUFwaUJpbGxpbmdFcnJvckgAEjoKDmFwaV9yYXRlX2xpbWl0GC0gASgLMiAuZnJvbnRlbmQudjEuRmFpbHVyZUFwaVJhdGVMaW1pdEgAEkQKE2FwaV9pbnZhbGlkX3JlcXVlc3QYLiABKAsyJS5mcm9udGVuZC52MS5GYWlsdXJlQXBpSW52YWxpZFJlcXVlc3RIABI+ChBhcGlfc2VydmVyX2Vycm9yGC8gASgLMiIuZnJvbnRlbmQudjEuRmFpbHVyZUFwaVNlcnZlckVycm9ySAASOwoOYXBpX292ZXJsb2FkZWQYMCABKAsyIS5mcm9udGVuZC52MS5GYWlsdXJlQXBpT3ZlcmxvYWRlZEgAEk4KGWFwaV9vYXV0aF9vcmdfbm90X2FsbG93ZWQYMSABKAsyKS5mcm9udGVuZC52MS5GYWlsdXJlQXBpT0F1dGhPcmdOb3RBbGxvd2VkSAASQwoTYXBpX21vZGVsX25vdF9mb3VuZBgyIAEoCzIkLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlNb2RlbE5vdEZvdW5kSAASPgoQYXBpX25ldHdvcmtfZG93bhgzIAEoCzIiLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlOZXR3b3JrRG93bkgAEkIKEmFwaV9yZXF1ZXN0X2ZhaWxlZBg0IAEoCzIkLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlSZXF1ZXN0RmFpbGVkSAASNQoLYXBpX3Vua25vd24YNSABKAsyHi5mcm9udGVuZC52MS5GYWlsdXJlQXBpVW5rbm93bkgAEkcKFWFwaV9tYXhfb3V0cHV0X3Rva2Vucxg2IAEoCzImLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlNYXhPdXRwdXRUb2tlbnNIABI4Cg1hcGlfbWF4X3R1cm5zGDcgASgLMh8uZnJvbnRlbmQudjEuRmFpbHVyZUFwaU1heFR1cm5zSAASOgoOYXBpX21heF9idWRnZXQYOCABKAsyIC5mcm9udGVuZC52MS5GYWlsdXJlQXBpTWF4QnVkZ2V0SAASRAoTYXBpX2V4ZWN1dGlvbl9lcnJvchg5IAEoCzIlLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlFeGVjdXRpb25FcnJvckgAEjUKC2FwaV9yZWZ1c2FsGDogASgLMh4uZnJvbnRlbmQudjEuRmFpbHVyZUFwaVJlZnVzYWxIABI8Cg9hcGlfdHVybl9mYWlsZWQYOyABKAsyIS5mcm9udGVuZC52MS5GYWlsdXJlQXBpVHVybkZhaWxlZEgAElYKHXByb21wdF9yZWZ1c2VkX2J5X21lcmdlX3N0YXRlGDwgASgLMi0uZnJvbnRlbmQudjEuRmFpbHVyZVByb21wdFJlZnVzZWRCeU1lcmdlU3RhdGVIABJdCiBxdWV1ZV9lbnRyeV91bmludGVycnVwdGlibGVfdHVybhg9IAEoCzIxLmZyb250ZW5kLnYxLkZhaWx1cmVRdWV1ZUVudHJ5VW5pbnRlcnJ1cHRpYmxlVHVybkgAEjkKDXR1cm5fdW5kcml2ZW4YPiABKAsyIC5mcm9udGVuZC52MS5GYWlsdXJlVHVyblVuZHJpdmVuSAASRAoTcmVwbGF5X21hcmtfcmV0aXJlZBg/IAEoCzIlLmZyb250ZW5kLnYxLkZhaWx1cmVSZXBsYXlNYXJrUmV0aXJlZEgAEkMKEmRhZW1vbl91bnJlYWNoYWJsZRhkIAEoCzIlLmZyb250ZW5kLnYxLkZhaWx1cmVEYWVtb25VbnJlYWNoYWJsZUgAEjsKDndvcmtzcGFjZV9nb25lGGUgASgLMiEuZnJvbnRlbmQudjEuRmFpbHVyZVdvcmtzcGFjZUdvbmVIABI1Cgtib290X2ZhaWxlZBhmIAEoCzIeLmZyb250ZW5kLnYxLkZhaWx1cmVCb290RmFpbGVkSAASRgoUY29udHJvbF9wbGFuZV9mYWlsZWQYZyABKAsyJi5mcm9udGVuZC52MS5GYWlsdXJlQ29udHJvbFBsYW5lRmFpbGVkSAASQQoRZnJhbWVfdW5kZWNvZGFibGUYaCABKAsyJC5mcm9udGVuZC52MS5GYWlsdXJlRnJhbWVVbmRlY29kYWJsZUgAEjcKDHN0YWxlX2J1bmRsZRhpIAEoCzIfLmZyb250ZW5kLnYxLkZhaWx1cmVTdGFsZUJ1bmRsZUgAEjsKDmNvbW1hbmRfdW5zZW50GGogASgLMiEuZnJvbnRlbmQudjEuRmFpbHVyZUNvbW1hbmRVbnNlbnRIABJaCh5jb21tYW5kX3JlamVjdGlvbl91bmNsYXNzaWZpZWQYayABKAsyMC5mcm9udGVuZC52MS5GYWlsdXJlQ29tbWFuZFJlamVjdGlvblVuY2xhc3NpZmllZEgAQgYKBGtpbmQiGQoXRmFpbHVyZVNoaW1Ob3RDb25uZWN0ZWQiOQoTRmFpbHVyZVNoaW1SZWplY3RlZBISCgpyZXF1ZXN0X2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSI+ChVGYWlsdXJlU2hpbUFja1RpbWVvdXQSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl3YWl0ZWRfbXMYAiABKAMiSgoaRmFpbHVyZVNoaW1WZXJzaW9uTWlzbWF0Y2gSFAoMc2hpbV92ZXJzaW9uGAEgASgJEhYKDmRhZW1vbl92ZXJzaW9uGAIgASgJIj4KGEZhaWx1cmVTaGltU2VxUmVncmVzc2lvbhILCgNzZXEYASABKAQSFQoNbGFzdF9zZWVuX3NlcRgCIAEoBCIoChNGYWlsdXJlU2hpbURlZ3JhZGVkEhEKCWNvbXBvbmVudBgBIAEoCSJZCh1GYWlsdXJlU2hpbVN0b3JlV3JpdGVSZWplY3RlZBIRCgljb21wb25lbnQYASABKAkSDgoGcmVhc29uGAIgASgJEhUKDWRyb3BwZWRfY291bnQYAyABKAMiTwoXRmFpbHVyZVF1ZXJ5VGVybWluYXRpb24SNAoGZGV0YWlsGAEgASgLMiQuZnJvbnRlbmQudjEuUXVlcnlUZXJtaW5hdGlvbkZhaWx1cmUiFwoVRmFpbHVyZVNoaW1Ob3RTcGF3bmVkIkMKHkZhaWx1cmVTaGltSGFuZHNoYWtlSW5jb21wbGV0ZRISCgpyZXF1ZXN0X2lkGAEgASgJEg0KBWNhdXNlGAIgASgJIk0KFEZhaWx1cmVTaGltVW5oZWFsdGh5EhIKCnJlcXVlc3RfaWQYASABKAkSEQoJY29tcG9uZW50GAIgASgJEg4KBnJlYXNvbhgDIAEoCSItChxGYWlsdXJlU2Vzc2lvbk5vdEVzdGFibGlzaGVkEg0KBWNhdXNlGAEgASgJIhkKF0ZhaWx1cmVXb3Jrc3BhY2VOb3RMaXZlIhcKFUZhaWx1cmVTZXNzaW9uRGVsZXRlZCIaChhGYWlsdXJlU2Vzc2lvblN1cGVyc2VkZWQiLAoaRmFpbHVyZVJlY29ubmVjdFN1cGVyc2VkZWQSDgoGcmVtZWR5GAEgASgJIhgKFkZhaWx1cmVTZXNzaW9uU2hpbURpZWQiKgoZRmFpbHVyZVNlc3Npb25TdGFydEZhaWxlZBINCgVjYXVzZRgBIAEoCSJPChpGYWlsdXJlU2Vzc2lvblJlc3VtZUZhaWxlZBIxCgZkZXRhaWwYASABKAsyIS5mcm9udGVuZC52MS5TZXNzaW9uUmVzdW1lRmFpbHVyZSJsCh5GYWlsdXJlQ29udmVyc2F0aW9uVW5yZXN1bWFibGUSGQoRY2xhdWRlX3Nlc3Npb25faWQYASABKAkSCwoDY3dkGAIgASgJEhIKCmNvbmZpZ19kaXIYAyABKAkSDgoGcmVhc29uGAQgASgJIhoKGEZhaWx1cmVSZXN1bWVNb2RlUmV0aXJlZCI1Ch9GYWlsdXJlU2Vzc2lvbkVuZGVkVW5jbGFzc2lmaWVkEhIKCnJhd19yZWFzb24YASABKAkiHgocRmFpbHVyZUhpc3RvcnlSZXB1bGxJbkZsaWdodCJpCh1GYWlsdXJlSGlzdG9yeVJlcGxheVRydW5jYXRlZBIQCghmcm9tX3NlcRgBIAEoBBITCgtzdG9wX2F0X3NlcRgCIAEoBBIRCglkZWxpdmVyZWQYAyABKAMSDgoGcmVhc29uGAQgASgJIkMKGEZhaWx1cmVSZXBsYXlNYXJrUmV0aXJlZBIQCghmcm9tX3NlcRgBIAEoBBIVCg1saXZlX2xhc3Rfc2VxGAIgASgEIh0KG0ZhaWx1cmVJbnRlcnJ1cHRVbmRlbGl2ZXJlZCI8ChhGYWlsdXJlUXVldWVFbnRyeVVud2lyZWQSEAoIZW50cnlfaWQYASABKAkSDgoGcmVhc29uGAIgASgJIk4KHkZhaWx1cmVRdWV1ZUVudHJ5S2VlcEFsaXZlSGVsZBIQCghlbnRyeV9pZBgBIAEoCRIaChJrZWVwX2FsaXZlX3R1cm5faWQYAiABKAkiLAoYRmFpbHVyZVNlc3Npb25IaWJlcm5hdGVkEhAKCHNpbmNlX21zGAEgASgDIjAKHkZhaWx1cmVLZWVwQWxpdmVXaW5kb3dVbmNsb3NlZBIOCgZyZWFzb24YASABKAkiMAoeRmFpbHVyZUtlZXBBbGl2ZVdpbmRvd0ludmVydGVkEg4KBnJlYXNvbhgBIAEoCSI6ChlGYWlsdXJlQ29tcGFjdGlvbkNvbGRSZWFkEh0KFXVuY2FjaGVkX2lucHV0X3Rva2VucxgBIAEoAyIfCh1GYWlsdXJlQ2xpZW50TG9nSWRlbnRpdHlTdGFsZSIsChtGYWlsdXJlSW50ZXJuYWxVbmNsYXNzaWZpZWQSDQoFY2F1c2UYASABKAkiegoeRmFpbHVyZUFwaUF1dGhlbnRpY2F0aW9uRmFpbGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFInIKFkZhaWx1cmVBcGlCaWxsaW5nRXJyb3ISMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSEwoLaHR0cF9zdGF0dXMYAiABKAUSEAoIYXR0ZW1wdHMYAyABKAUibwoTRmFpbHVyZUFwaVJhdGVMaW1pdBIxCgZ2ZW5kb3IYASABKAsyIS5mcm9udGVuZC52MS5WZW5kb3JGYWlsdXJlQ29udGV4dBITCgtodHRwX3N0YXR1cxgCIAEoBRIQCghhdHRlbXB0cxgDIAEoBSJ0ChhGYWlsdXJlQXBpSW52YWxpZFJlcXVlc3QSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSEwoLaHR0cF9zdGF0dXMYAiABKAUSEAoIYXR0ZW1wdHMYAyABKAUicQoVRmFpbHVyZUFwaVNlcnZlckVycm9yEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFInAKFEZhaWx1cmVBcGlPdmVybG9hZGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFIngKHEZhaWx1cmVBcGlPQXV0aE9yZ05vdEFsbG93ZWQSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSEwoLaHR0cF9zdGF0dXMYAiABKAUSEAoIYXR0ZW1wdHMYAyABKAUiWwoXRmFpbHVyZUFwaU1vZGVsTm90Rm91bmQSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSDQoFbW9kZWwYAiABKAkiSgoVRmFpbHVyZUFwaU5ldHdvcmtEb3duEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0InMKF0ZhaWx1cmVBcGlSZXF1ZXN0RmFpbGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFIm0KEUZhaWx1cmVBcGlVbmtub3duEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFIk4KGUZhaWx1cmVBcGlNYXhPdXRwdXRUb2tlbnMSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQiRwoSRmFpbHVyZUFwaU1heFR1cm5zEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0IkgKE0ZhaWx1cmVBcGlNYXhCdWRnZXQSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQiTQoYRmFpbHVyZUFwaUV4ZWN1dGlvbkVycm9yEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0IkYKEUZhaWx1cmVBcGlSZWZ1c2FsEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0Il4KFEZhaWx1cmVBcGlUdXJuRmFpbGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC3N0b3BfcmVhc29uGAIgASgJIjEKIEZhaWx1cmVQcm9tcHRSZWZ1c2VkQnlNZXJnZVN0YXRlEg0KBXN0YXRlGAEgASgJIiUKE0ZhaWx1cmVUdXJuVW5kcml2ZW4SDgoGcmVhc29uGAEgASgJImYKJEZhaWx1cmVRdWV1ZUVudHJ5VW5pbnRlcnJ1cHRpYmxlVHVybhIQCghlbnRyeV9pZBgBIAEoCRIsCgdjb21tYW5kGAIgASgOMhsuZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmQiRAoYRmFpbHVyZURhZW1vblVucmVhY2hhYmxlEhIKCmNsb3NlX2NvZGUYASABKAUSFAoMY2xvc2VfcmVhc29uGAIgASgJIhYKFEZhaWx1cmVXb3Jrc3BhY2VHb25lIiIKEUZhaWx1cmVCb290RmFpbGVkEg0KBWNhdXNlGAEgASgJIjgKGUZhaWx1cmVDb250cm9sUGxhbmVGYWlsZWQSDAoEd2hhdBgBIAEoCRINCgVjYXVzZRgCIAEoCSI8ChdGYWlsdXJlRnJhbWVVbmRlY29kYWJsZRINCgVjYXVzZRgBIAEoCRISCgpmcmFtZV9oZWFkGAIgASgJIiQKEkZhaWx1cmVTdGFsZUJ1bmRsZRIOCgZkZXRhaWwYASABKAkiJwoURmFpbHVyZUNvbW1hbmRVbnNlbnQSDwoHY29tbWFuZBgBIAEoCSJNCiNGYWlsdXJlQ29tbWFuZFJlamVjdGlvblVuY2xhc3NpZmllZBIPCgdjb21tYW5kGAEgASgJEhUKDWRhZW1vbl9yZWFzb24YAiABKAkiuAMKF1F1ZXJ5VGVybWluYXRpb25GYWlsdXJlEhkKEXF1ZXJ5X2luc3RhbmNlX2lkGAIgASgJEhsKEXZlbmRvcl9zZXNzaW9uX2lkGAMgASgJSAASXAojdmVuZG9yX3Nlc3Npb25faWRlbnRpdHlfdW5hdmFpbGFibGUYBSABKAsyLS5wcm90b2NvbC52MS5WZW5kb3JTZXNzaW9uSWRlbnRpdHlVbmF2YWlsYWJsZUgAEhYKDm9ic2VydmVkX2F0X21zGAQgASgDEjkKDnVuZXhwZWN0ZWRfZW9mGAogASgLMh8ucHJvdG9jb2wudjEuVW5leHBlY3RlZFF1ZXJ5RW9mSAESPQoQaXRlcmF0b3JfZmFpbHVyZRgLIAEoCzIhLnByb3RvY29sLnYxLlF1ZXJ5SXRlcmF0b3JGYWlsdXJlSAESOwoPc3RhcnR1cF9mYWlsdXJlGAwgASgLMiAucHJvdG9jb2wudjEuUXVlcnlTdGFydHVwRmFpbHVyZUgBQhEKD3ZlbmRvcl9pZGVudGl0eUIICgZyZWFzb25KBAgBEAJSFWFnZW50X3JlcGxfc2Vzc2lvbl9pZCLlBAoUU2Vzc2lvblJlc3VtZUZhaWx1cmUSGQoRY2xhdWRlX3Nlc3Npb25faWQYAiABKAkSCwoDY3dkGAMgASgJEhIKCmNvbmZpZ19kaXIYBCABKAkSGwoTcmVzb2x2ZWRfY29uZmlnX2RpchgFIAEoCRI5CgZjcmVhdGUYCiABKAsyJy5mcm9udGVuZC52MS5TZXNzaW9uUmVzdW1lRmFpbHVyZUNyZWF0ZUgAEk4KEWF1dG9tYXRpY19yZXN0b3JlGAsgASgLMjEuZnJvbnRlbmQudjEuU2Vzc2lvblJlc3VtZUZhaWx1cmVBdXRvbWF0aWNSZXN0b3JlSAASWAoWdHJhbnNjcmlwdF91bmF2YWlsYWJsZRgUIAEoCzI2LmZyb250ZW5kLnYxLlNlc3Npb25SZXN1bWVGYWlsdXJlVHJhbnNjcmlwdFVuYXZhaWxhYmxlSAESTgoRaWRlbnRpdHlfbWlzbWF0Y2gYFSABKAsyMS5mcm9udGVuZC52MS5TZXNzaW9uUmVzdW1lRmFpbHVyZUlkZW50aXR5TWlzbWF0Y2hIARJBChFxdWVyeV90ZXJtaW5hdGlvbhgWIAEoCzIkLmZyb250ZW5kLnYxLlF1ZXJ5VGVybWluYXRpb25GYWlsdXJlSAESSwoQYnJpbmdfdXBfZmFpbHVyZRgXIAEoCzIvLmZyb250ZW5kLnYxLlNlc3Npb25SZXN1bWVGYWlsdXJlQnJpbmdVcEZhaWx1cmVIAUIJCgdhdHRlbXB0QgcKBWNhdXNlSgQIARACUhVhZ2VudF9yZXBsX3Nlc3Npb25faWQiHAoaU2Vzc2lvblJlc3VtZUZhaWx1cmVDcmVhdGUiJgokU2Vzc2lvblJlc3VtZUZhaWx1cmVBdXRvbWF0aWNSZXN0b3JlIkMKKVNlc3Npb25SZXN1bWVGYWlsdXJlVHJhbnNjcmlwdFVuYXZhaWxhYmxlEhYKDnNlYXJjaGVkX3BhdGhzGAEgAygJIk0KJFNlc3Npb25SZXN1bWVGYWlsdXJlSWRlbnRpdHlNaXNtYXRjaBIlCh1yZXBsYWNlbWVudF9jbGF1ZGVfc2Vzc2lvbl9pZBgBIAEoCSIzCiJTZXNzaW9uUmVzdW1lRmFpbHVyZUJyaW5nVXBGYWlsdXJlEg0KBWNhdXNlGAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_frontend_v1_commands, file_protocol_v1_core]);
+  fileDesc("Chhmcm9udGVuZC92MS9lcnJvcnMucHJvdG8SC2Zyb250ZW5kLnYxImEKFFZlbmRvckZhaWx1cmVDb250ZXh0EhkKEWNsYXVkZV9zZXNzaW9uX2lkGAEgASgJEhYKDmFwaV9yZXF1ZXN0X2lkGAIgASgJEhYKDmFwaV9tZXNzYWdlX2lkGAMgASgJIp4iCgtGYWlsdXJlS2luZBJCChJzaGltX25vdF9jb25uZWN0ZWQYASABKAsyJC5mcm9udGVuZC52MS5GYWlsdXJlU2hpbU5vdENvbm5lY3RlZEgAEjkKDXNoaW1fcmVqZWN0ZWQYAiABKAsyIC5mcm9udGVuZC52MS5GYWlsdXJlU2hpbVJlamVjdGVkSAASPgoQc2hpbV9hY2tfdGltZW91dBgDIAEoCzIiLmZyb250ZW5kLnYxLkZhaWx1cmVTaGltQWNrVGltZW91dEgAEkgKFXNoaW1fdmVyc2lvbl9taXNtYXRjaBgEIAEoCzInLmZyb250ZW5kLnYxLkZhaWx1cmVTaGltVmVyc2lvbk1pc21hdGNoSAASRAoTc2hpbV9zZXFfcmVncmVzc2lvbhgFIAEoCzIlLmZyb250ZW5kLnYxLkZhaWx1cmVTaGltU2VxUmVncmVzc2lvbkgAEjkKDXNoaW1fZGVncmFkZWQYBiABKAsyIC5mcm9udGVuZC52MS5GYWlsdXJlU2hpbURlZ3JhZGVkSAASTwoZc2hpbV9zdG9yZV93cml0ZV9yZWplY3RlZBgHIAEoCzIqLmZyb250ZW5kLnYxLkZhaWx1cmVTaGltU3RvcmVXcml0ZVJlamVjdGVkSAASQQoRcXVlcnlfdGVybWluYXRpb24YCCABKAsyJC5mcm9udGVuZC52MS5GYWlsdXJlUXVlcnlUZXJtaW5hdGlvbkgAEj4KEHNoaW1fbm90X3NwYXduZWQYCSABKAsyIi5mcm9udGVuZC52MS5GYWlsdXJlU2hpbU5vdFNwYXduZWRIABJQChlzaGltX2hhbmRzaGFrZV9pbmNvbXBsZXRlGAogASgLMisuZnJvbnRlbmQudjEuRmFpbHVyZVNoaW1IYW5kc2hha2VJbmNvbXBsZXRlSAASOwoOc2hpbV91bmhlYWx0aHkYCyABKAsyIS5mcm9udGVuZC52MS5GYWlsdXJlU2hpbVVuaGVhbHRoeUgAEkwKF3Nlc3Npb25fbm90X2VzdGFibGlzaGVkGAwgASgLMikuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25Ob3RFc3RhYmxpc2hlZEgAEkIKEndvcmtzcGFjZV9ub3RfbGl2ZRgNIAEoCzIkLmZyb250ZW5kLnYxLkZhaWx1cmVXb3Jrc3BhY2VOb3RMaXZlSAASPQoPc2Vzc2lvbl9kZWxldGVkGA4gASgLMiIuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25EZWxldGVkSAASQwoSc2Vzc2lvbl9zdXBlcnNlZGVkGA8gASgLMiUuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25TdXBlcnNlZGVkSAASRwoUcmVjb25uZWN0X3N1cGVyc2VkZWQYECABKAsyJy5mcm9udGVuZC52MS5GYWlsdXJlUmVjb25uZWN0U3VwZXJzZWRlZEgAEkAKEXNlc3Npb25fc2hpbV9kaWVkGBEgASgLMiMuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25TaGltRGllZEgAEkYKFHNlc3Npb25fc3RhcnRfZmFpbGVkGBIgASgLMiYuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25TdGFydEZhaWxlZEgAEkgKFXNlc3Npb25fcmVzdW1lX2ZhaWxlZBgTIAEoCzInLmZyb250ZW5kLnYxLkZhaWx1cmVTZXNzaW9uUmVzdW1lRmFpbGVkSAASTwoYY29udmVyc2F0aW9uX3VucmVzdW1hYmxlGBQgASgLMisuZnJvbnRlbmQudjEuRmFpbHVyZUNvbnZlcnNhdGlvblVucmVzdW1hYmxlSAASRAoTcmVzdW1lX21vZGVfcmV0aXJlZBgVIAEoCzIlLmZyb250ZW5kLnYxLkZhaWx1cmVSZXN1bWVNb2RlUmV0aXJlZEgAElIKGnNlc3Npb25fZW5kZWRfdW5jbGFzc2lmaWVkGBYgASgLMiwuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25FbmRlZFVuY2xhc3NpZmllZEgAEk0KGGhpc3RvcnlfcmVwdWxsX2luX2ZsaWdodBgXIAEoCzIpLmZyb250ZW5kLnYxLkZhaWx1cmVIaXN0b3J5UmVwdWxsSW5GbGlnaHRIABJOChhoaXN0b3J5X3JlcGxheV90cnVuY2F0ZWQYGCABKAsyKi5mcm9udGVuZC52MS5GYWlsdXJlSGlzdG9yeVJlcGxheVRydW5jYXRlZEgAEkkKFWludGVycnVwdF91bmRlbGl2ZXJlZBgZIAEoCzIoLmZyb250ZW5kLnYxLkZhaWx1cmVJbnRlcnJ1cHRVbmRlbGl2ZXJlZEgAEkQKE3F1ZXVlX2VudHJ5X3Vud2lyZWQYGiABKAsyJS5mcm9udGVuZC52MS5GYWlsdXJlUXVldWVFbnRyeVVud2lyZWRIABJSChtxdWV1ZV9lbnRyeV9rZWVwX2FsaXZlX2hlbGQYGyABKAsyKy5mcm9udGVuZC52MS5GYWlsdXJlUXVldWVFbnRyeUtlZXBBbGl2ZUhlbGRIABJDChJzZXNzaW9uX2hpYmVybmF0ZWQYHCABKAsyJS5mcm9udGVuZC52MS5GYWlsdXJlU2Vzc2lvbkhpYmVybmF0ZWRIABJRChprZWVwX2FsaXZlX3dpbmRvd191bmNsb3NlZBgdIAEoCzIrLmZyb250ZW5kLnYxLkZhaWx1cmVLZWVwQWxpdmVXaW5kb3dVbmNsb3NlZEgAElEKGmtlZXBfYWxpdmVfd2luZG93X2ludmVydGVkGB4gASgLMisuZnJvbnRlbmQudjEuRmFpbHVyZUtlZXBBbGl2ZVdpbmRvd0ludmVydGVkSAASRgoUY29tcGFjdGlvbl9jb2xkX3JlYWQYHyABKAsyJi5mcm9udGVuZC52MS5GYWlsdXJlQ29tcGFjdGlvbkNvbGRSZWFkSAASTwoZY2xpZW50X2xvZ19pZGVudGl0eV9zdGFsZRggIAEoCzIqLmZyb250ZW5kLnYxLkZhaWx1cmVDbGllbnRMb2dJZGVudGl0eVN0YWxlSAASSQoVaW50ZXJuYWxfdW5jbGFzc2lmaWVkGCEgASgLMiguZnJvbnRlbmQudjEuRmFpbHVyZUludGVybmFsVW5jbGFzc2lmaWVkSAASUAoZYXBpX2F1dGhlbnRpY2F0aW9uX2ZhaWxlZBgiIAEoCzIrLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlBdXRoZW50aWNhdGlvbkZhaWxlZEgAEkAKEWFwaV9iaWxsaW5nX2Vycm9yGCMgASgLMiMuZnJvbnRlbmQudjEuRmFpbHVyZUFwaUJpbGxpbmdFcnJvckgAEjoKDmFwaV9yYXRlX2xpbWl0GCQgASgLMiAuZnJvbnRlbmQudjEuRmFpbHVyZUFwaVJhdGVMaW1pdEgAEkQKE2FwaV9pbnZhbGlkX3JlcXVlc3QYJSABKAsyJS5mcm9udGVuZC52MS5GYWlsdXJlQXBpSW52YWxpZFJlcXVlc3RIABI+ChBhcGlfc2VydmVyX2Vycm9yGCYgASgLMiIuZnJvbnRlbmQudjEuRmFpbHVyZUFwaVNlcnZlckVycm9ySAASOwoOYXBpX292ZXJsb2FkZWQYJyABKAsyIS5mcm9udGVuZC52MS5GYWlsdXJlQXBpT3ZlcmxvYWRlZEgAEk4KGWFwaV9vYXV0aF9vcmdfbm90X2FsbG93ZWQYKCABKAsyKS5mcm9udGVuZC52MS5GYWlsdXJlQXBpT0F1dGhPcmdOb3RBbGxvd2VkSAASQwoTYXBpX21vZGVsX25vdF9mb3VuZBgpIAEoCzIkLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlNb2RlbE5vdEZvdW5kSAASPgoQYXBpX25ldHdvcmtfZG93bhgqIAEoCzIiLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlOZXR3b3JrRG93bkgAEkIKEmFwaV9yZXF1ZXN0X2ZhaWxlZBgrIAEoCzIkLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlSZXF1ZXN0RmFpbGVkSAASNQoLYXBpX3Vua25vd24YLCABKAsyHi5mcm9udGVuZC52MS5GYWlsdXJlQXBpVW5rbm93bkgAEkcKFWFwaV9tYXhfb3V0cHV0X3Rva2VucxgtIAEoCzImLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlNYXhPdXRwdXRUb2tlbnNIABI4Cg1hcGlfbWF4X3R1cm5zGC4gASgLMh8uZnJvbnRlbmQudjEuRmFpbHVyZUFwaU1heFR1cm5zSAASOgoOYXBpX21heF9idWRnZXQYLyABKAsyIC5mcm9udGVuZC52MS5GYWlsdXJlQXBpTWF4QnVkZ2V0SAASRAoTYXBpX2V4ZWN1dGlvbl9lcnJvchgwIAEoCzIlLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlFeGVjdXRpb25FcnJvckgAEjUKC2FwaV9yZWZ1c2FsGDEgASgLMh4uZnJvbnRlbmQudjEuRmFpbHVyZUFwaVJlZnVzYWxIABI8Cg9hcGlfdHVybl9mYWlsZWQYMiABKAsyIS5mcm9udGVuZC52MS5GYWlsdXJlQXBpVHVybkZhaWxlZEgAElYKHXByb21wdF9yZWZ1c2VkX2J5X21lcmdlX3N0YXRlGDMgASgLMi0uZnJvbnRlbmQudjEuRmFpbHVyZVByb21wdFJlZnVzZWRCeU1lcmdlU3RhdGVIABJdCiBxdWV1ZV9lbnRyeV91bmludGVycnVwdGlibGVfdHVybhg0IAEoCzIxLmZyb250ZW5kLnYxLkZhaWx1cmVRdWV1ZUVudHJ5VW5pbnRlcnJ1cHRpYmxlVHVybkgAEjkKDXR1cm5fdW5kcml2ZW4YNSABKAsyIC5mcm9udGVuZC52MS5GYWlsdXJlVHVyblVuZHJpdmVuSAASRAoTcmVwbGF5X21hcmtfcmV0aXJlZBg2IAEoCzIlLmZyb250ZW5kLnYxLkZhaWx1cmVSZXBsYXlNYXJrUmV0aXJlZEgAEkMKEmRhZW1vbl91bnJlYWNoYWJsZRg3IAEoCzIlLmZyb250ZW5kLnYxLkZhaWx1cmVEYWVtb25VbnJlYWNoYWJsZUgAEjsKDndvcmtzcGFjZV9nb25lGDggASgLMiEuZnJvbnRlbmQudjEuRmFpbHVyZVdvcmtzcGFjZUdvbmVIABI1Cgtib290X2ZhaWxlZBg5IAEoCzIeLmZyb250ZW5kLnYxLkZhaWx1cmVCb290RmFpbGVkSAASRgoUY29udHJvbF9wbGFuZV9mYWlsZWQYOiABKAsyJi5mcm9udGVuZC52MS5GYWlsdXJlQ29udHJvbFBsYW5lRmFpbGVkSAASQQoRZnJhbWVfdW5kZWNvZGFibGUYOyABKAsyJC5mcm9udGVuZC52MS5GYWlsdXJlRnJhbWVVbmRlY29kYWJsZUgAEjcKDHN0YWxlX2J1bmRsZRg8IAEoCzIfLmZyb250ZW5kLnYxLkZhaWx1cmVTdGFsZUJ1bmRsZUgAEjsKDmNvbW1hbmRfdW5zZW50GD0gASgLMiEuZnJvbnRlbmQudjEuRmFpbHVyZUNvbW1hbmRVbnNlbnRIABJaCh5jb21tYW5kX3JlamVjdGlvbl91bmNsYXNzaWZpZWQYPiABKAsyMC5mcm9udGVuZC52MS5GYWlsdXJlQ29tbWFuZFJlamVjdGlvblVuY2xhc3NpZmllZEgAQgYKBGtpbmQiGQoXRmFpbHVyZVNoaW1Ob3RDb25uZWN0ZWQiOQoTRmFpbHVyZVNoaW1SZWplY3RlZBISCgpyZXF1ZXN0X2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSI+ChVGYWlsdXJlU2hpbUFja1RpbWVvdXQSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl3YWl0ZWRfbXMYAiABKAMiSgoaRmFpbHVyZVNoaW1WZXJzaW9uTWlzbWF0Y2gSFAoMc2hpbV92ZXJzaW9uGAEgASgJEhYKDmRhZW1vbl92ZXJzaW9uGAIgASgJIj4KGEZhaWx1cmVTaGltU2VxUmVncmVzc2lvbhILCgNzZXEYASABKAQSFQoNbGFzdF9zZWVuX3NlcRgCIAEoBCIoChNGYWlsdXJlU2hpbURlZ3JhZGVkEhEKCWNvbXBvbmVudBgBIAEoCSJZCh1GYWlsdXJlU2hpbVN0b3JlV3JpdGVSZWplY3RlZBIRCgljb21wb25lbnQYASABKAkSDgoGcmVhc29uGAIgASgJEhUKDWRyb3BwZWRfY291bnQYAyABKAMiTwoXRmFpbHVyZVF1ZXJ5VGVybWluYXRpb24SNAoGZGV0YWlsGAEgASgLMiQuZnJvbnRlbmQudjEuUXVlcnlUZXJtaW5hdGlvbkZhaWx1cmUiFwoVRmFpbHVyZVNoaW1Ob3RTcGF3bmVkIkMKHkZhaWx1cmVTaGltSGFuZHNoYWtlSW5jb21wbGV0ZRISCgpyZXF1ZXN0X2lkGAEgASgJEg0KBWNhdXNlGAIgASgJIk0KFEZhaWx1cmVTaGltVW5oZWFsdGh5EhIKCnJlcXVlc3RfaWQYASABKAkSEQoJY29tcG9uZW50GAIgASgJEg4KBnJlYXNvbhgDIAEoCSItChxGYWlsdXJlU2Vzc2lvbk5vdEVzdGFibGlzaGVkEg0KBWNhdXNlGAEgASgJIhkKF0ZhaWx1cmVXb3Jrc3BhY2VOb3RMaXZlIhcKFUZhaWx1cmVTZXNzaW9uRGVsZXRlZCIaChhGYWlsdXJlU2Vzc2lvblN1cGVyc2VkZWQiLAoaRmFpbHVyZVJlY29ubmVjdFN1cGVyc2VkZWQSDgoGcmVtZWR5GAEgASgJIhgKFkZhaWx1cmVTZXNzaW9uU2hpbURpZWQiKgoZRmFpbHVyZVNlc3Npb25TdGFydEZhaWxlZBINCgVjYXVzZRgBIAEoCSJPChpGYWlsdXJlU2Vzc2lvblJlc3VtZUZhaWxlZBIxCgZkZXRhaWwYASABKAsyIS5mcm9udGVuZC52MS5TZXNzaW9uUmVzdW1lRmFpbHVyZSJsCh5GYWlsdXJlQ29udmVyc2F0aW9uVW5yZXN1bWFibGUSGQoRY2xhdWRlX3Nlc3Npb25faWQYASABKAkSCwoDY3dkGAIgASgJEhIKCmNvbmZpZ19kaXIYAyABKAkSDgoGcmVhc29uGAQgASgJIhoKGEZhaWx1cmVSZXN1bWVNb2RlUmV0aXJlZCI1Ch9GYWlsdXJlU2Vzc2lvbkVuZGVkVW5jbGFzc2lmaWVkEhIKCnJhd19yZWFzb24YASABKAkiHgocRmFpbHVyZUhpc3RvcnlSZXB1bGxJbkZsaWdodCJpCh1GYWlsdXJlSGlzdG9yeVJlcGxheVRydW5jYXRlZBIQCghmcm9tX3NlcRgBIAEoBBITCgtzdG9wX2F0X3NlcRgCIAEoBBIRCglkZWxpdmVyZWQYAyABKAMSDgoGcmVhc29uGAQgASgJIkMKGEZhaWx1cmVSZXBsYXlNYXJrUmV0aXJlZBIQCghmcm9tX3NlcRgBIAEoBBIVCg1saXZlX2xhc3Rfc2VxGAIgASgEIh0KG0ZhaWx1cmVJbnRlcnJ1cHRVbmRlbGl2ZXJlZCI8ChhGYWlsdXJlUXVldWVFbnRyeVVud2lyZWQSEAoIZW50cnlfaWQYASABKAkSDgoGcmVhc29uGAIgASgJIk4KHkZhaWx1cmVRdWV1ZUVudHJ5S2VlcEFsaXZlSGVsZBIQCghlbnRyeV9pZBgBIAEoCRIaChJrZWVwX2FsaXZlX3R1cm5faWQYAiABKAkiLAoYRmFpbHVyZVNlc3Npb25IaWJlcm5hdGVkEhAKCHNpbmNlX21zGAEgASgDIjAKHkZhaWx1cmVLZWVwQWxpdmVXaW5kb3dVbmNsb3NlZBIOCgZyZWFzb24YASABKAkiMAoeRmFpbHVyZUtlZXBBbGl2ZVdpbmRvd0ludmVydGVkEg4KBnJlYXNvbhgBIAEoCSI6ChlGYWlsdXJlQ29tcGFjdGlvbkNvbGRSZWFkEh0KFXVuY2FjaGVkX2lucHV0X3Rva2VucxgBIAEoAyIfCh1GYWlsdXJlQ2xpZW50TG9nSWRlbnRpdHlTdGFsZSIsChtGYWlsdXJlSW50ZXJuYWxVbmNsYXNzaWZpZWQSDQoFY2F1c2UYASABKAkiegoeRmFpbHVyZUFwaUF1dGhlbnRpY2F0aW9uRmFpbGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFInIKFkZhaWx1cmVBcGlCaWxsaW5nRXJyb3ISMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSEwoLaHR0cF9zdGF0dXMYAiABKAUSEAoIYXR0ZW1wdHMYAyABKAUibwoTRmFpbHVyZUFwaVJhdGVMaW1pdBIxCgZ2ZW5kb3IYASABKAsyIS5mcm9udGVuZC52MS5WZW5kb3JGYWlsdXJlQ29udGV4dBITCgtodHRwX3N0YXR1cxgCIAEoBRIQCghhdHRlbXB0cxgDIAEoBSJ0ChhGYWlsdXJlQXBpSW52YWxpZFJlcXVlc3QSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSEwoLaHR0cF9zdGF0dXMYAiABKAUSEAoIYXR0ZW1wdHMYAyABKAUicQoVRmFpbHVyZUFwaVNlcnZlckVycm9yEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFInAKFEZhaWx1cmVBcGlPdmVybG9hZGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFIngKHEZhaWx1cmVBcGlPQXV0aE9yZ05vdEFsbG93ZWQSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSEwoLaHR0cF9zdGF0dXMYAiABKAUSEAoIYXR0ZW1wdHMYAyABKAUiWwoXRmFpbHVyZUFwaU1vZGVsTm90Rm91bmQSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSDQoFbW9kZWwYAiABKAkiSgoVRmFpbHVyZUFwaU5ldHdvcmtEb3duEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0InMKF0ZhaWx1cmVBcGlSZXF1ZXN0RmFpbGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFIm0KEUZhaWx1cmVBcGlVbmtub3duEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFIk4KGUZhaWx1cmVBcGlNYXhPdXRwdXRUb2tlbnMSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQiRwoSRmFpbHVyZUFwaU1heFR1cm5zEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0IkgKE0ZhaWx1cmVBcGlNYXhCdWRnZXQSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQiTQoYRmFpbHVyZUFwaUV4ZWN1dGlvbkVycm9yEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0IkYKEUZhaWx1cmVBcGlSZWZ1c2FsEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0Il4KFEZhaWx1cmVBcGlUdXJuRmFpbGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC3N0b3BfcmVhc29uGAIgASgJIjEKIEZhaWx1cmVQcm9tcHRSZWZ1c2VkQnlNZXJnZVN0YXRlEg0KBXN0YXRlGAEgASgJIiUKE0ZhaWx1cmVUdXJuVW5kcml2ZW4SDgoGcmVhc29uGAEgASgJImYKJEZhaWx1cmVRdWV1ZUVudHJ5VW5pbnRlcnJ1cHRpYmxlVHVybhIQCghlbnRyeV9pZBgBIAEoCRIsCgdjb21tYW5kGAIgASgOMhsuZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmQiRAoYRmFpbHVyZURhZW1vblVucmVhY2hhYmxlEhIKCmNsb3NlX2NvZGUYASABKAUSFAoMY2xvc2VfcmVhc29uGAIgASgJIhYKFEZhaWx1cmVXb3Jrc3BhY2VHb25lIiIKEUZhaWx1cmVCb290RmFpbGVkEg0KBWNhdXNlGAEgASgJIjgKGUZhaWx1cmVDb250cm9sUGxhbmVGYWlsZWQSDAoEd2hhdBgBIAEoCRINCgVjYXVzZRgCIAEoCSI8ChdGYWlsdXJlRnJhbWVVbmRlY29kYWJsZRINCgVjYXVzZRgBIAEoCRISCgpmcmFtZV9oZWFkGAIgASgJIiQKEkZhaWx1cmVTdGFsZUJ1bmRsZRIOCgZkZXRhaWwYASABKAkiJwoURmFpbHVyZUNvbW1hbmRVbnNlbnQSDwoHY29tbWFuZBgBIAEoCSJNCiNGYWlsdXJlQ29tbWFuZFJlamVjdGlvblVuY2xhc3NpZmllZBIPCgdjb21tYW5kGAEgASgJEhUKDWRhZW1vbl9yZWFzb24YAiABKAkimwMKF1F1ZXJ5VGVybWluYXRpb25GYWlsdXJlEhkKEXF1ZXJ5X2luc3RhbmNlX2lkGAEgASgJEhsKEXZlbmRvcl9zZXNzaW9uX2lkGAIgASgJSAASXAojdmVuZG9yX3Nlc3Npb25faWRlbnRpdHlfdW5hdmFpbGFibGUYAyABKAsyLS5wcm90b2NvbC52MS5WZW5kb3JTZXNzaW9uSWRlbnRpdHlVbmF2YWlsYWJsZUgAEhYKDm9ic2VydmVkX2F0X21zGAQgASgDEjkKDnVuZXhwZWN0ZWRfZW9mGAUgASgLMh8ucHJvdG9jb2wudjEuVW5leHBlY3RlZFF1ZXJ5RW9mSAESPQoQaXRlcmF0b3JfZmFpbHVyZRgGIAEoCzIhLnByb3RvY29sLnYxLlF1ZXJ5SXRlcmF0b3JGYWlsdXJlSAESOwoPc3RhcnR1cF9mYWlsdXJlGAcgASgLMiAucHJvdG9jb2wudjEuUXVlcnlTdGFydHVwRmFpbHVyZUgBQhEKD3ZlbmRvcl9pZGVudGl0eUIICgZyZWFzb24iyAQKFFNlc3Npb25SZXN1bWVGYWlsdXJlEhkKEWNsYXVkZV9zZXNzaW9uX2lkGAEgASgJEgsKA2N3ZBgCIAEoCRISCgpjb25maWdfZGlyGAMgASgJEhsKE3Jlc29sdmVkX2NvbmZpZ19kaXIYBCABKAkSOQoGY3JlYXRlGAUgASgLMicuZnJvbnRlbmQudjEuU2Vzc2lvblJlc3VtZUZhaWx1cmVDcmVhdGVIABJOChFhdXRvbWF0aWNfcmVzdG9yZRgGIAEoCzIxLmZyb250ZW5kLnYxLlNlc3Npb25SZXN1bWVGYWlsdXJlQXV0b21hdGljUmVzdG9yZUgAElgKFnRyYW5zY3JpcHRfdW5hdmFpbGFibGUYByABKAsyNi5mcm9udGVuZC52MS5TZXNzaW9uUmVzdW1lRmFpbHVyZVRyYW5zY3JpcHRVbmF2YWlsYWJsZUgBEk4KEWlkZW50aXR5X21pc21hdGNoGAggASgLMjEuZnJvbnRlbmQudjEuU2Vzc2lvblJlc3VtZUZhaWx1cmVJZGVudGl0eU1pc21hdGNoSAESQQoRcXVlcnlfdGVybWluYXRpb24YCSABKAsyJC5mcm9udGVuZC52MS5RdWVyeVRlcm1pbmF0aW9uRmFpbHVyZUgBEksKEGJyaW5nX3VwX2ZhaWx1cmUYCiABKAsyLy5mcm9udGVuZC52MS5TZXNzaW9uUmVzdW1lRmFpbHVyZUJyaW5nVXBGYWlsdXJlSAFCCQoHYXR0ZW1wdEIHCgVjYXVzZSIcChpTZXNzaW9uUmVzdW1lRmFpbHVyZUNyZWF0ZSImCiRTZXNzaW9uUmVzdW1lRmFpbHVyZUF1dG9tYXRpY1Jlc3RvcmUiQwopU2Vzc2lvblJlc3VtZUZhaWx1cmVUcmFuc2NyaXB0VW5hdmFpbGFibGUSFgoOc2VhcmNoZWRfcGF0aHMYASADKAkiTQokU2Vzc2lvblJlc3VtZUZhaWx1cmVJZGVudGl0eU1pc21hdGNoEiUKHXJlcGxhY2VtZW50X2NsYXVkZV9zZXNzaW9uX2lkGAEgASgJIjMKIlNlc3Npb25SZXN1bWVGYWlsdXJlQnJpbmdVcEZhaWx1cmUSDQoFY2F1c2UYASABKAlCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_frontend_v1_commands, file_protocol_v1_core]);
 
 /**
  * The vendor conversation and request a vendor-side failure pertains to.
@@ -105,7 +105,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
      * helps. This side of the vocabulary resolves the workspace BLUE. ----
      * The agent process is not connected.
      *
-     * @generated from field: frontend.v1.FailureShimNotConnected shim_not_connected = 10;
+     * @generated from field: frontend.v1.FailureShimNotConnected shim_not_connected = 1;
      */
     value: FailureShimNotConnected;
     case: "shimNotConnected";
@@ -113,7 +113,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The agent process received the request and refused it.
      *
-     * @generated from field: frontend.v1.FailureShimRejected shim_rejected = 11;
+     * @generated from field: frontend.v1.FailureShimRejected shim_rejected = 2;
      */
     value: FailureShimRejected;
     case: "shimRejected";
@@ -121,7 +121,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The agent process never acknowledged the request within its window.
      *
-     * @generated from field: frontend.v1.FailureShimAckTimeout shim_ack_timeout = 12;
+     * @generated from field: frontend.v1.FailureShimAckTimeout shim_ack_timeout = 3;
      */
     value: FailureShimAckTimeout;
     case: "shimAckTimeout";
@@ -129,7 +129,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The agent process speaks a different protocol version than the daemon.
      *
-     * @generated from field: frontend.v1.FailureShimVersionMismatch shim_version_mismatch = 13;
+     * @generated from field: frontend.v1.FailureShimVersionMismatch shim_version_mismatch = 4;
      */
     value: FailureShimVersionMismatch;
     case: "shimVersionMismatch";
@@ -137,7 +137,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The agent process's event stream went backwards.
      *
-     * @generated from field: frontend.v1.FailureShimSeqRegression shim_seq_regression = 14;
+     * @generated from field: frontend.v1.FailureShimSeqRegression shim_seq_regression = 5;
      */
     value: FailureShimSeqRegression;
     case: "shimSeqRegression";
@@ -145,7 +145,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * No traffic is arriving from the agent process.
      *
-     * @generated from field: frontend.v1.FailureShimDegraded shim_degraded = 15;
+     * @generated from field: frontend.v1.FailureShimDegraded shim_degraded = 6;
      */
     value: FailureShimDegraded;
     case: "shimDegraded";
@@ -153,7 +153,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The agent process could not write to the store, so conversation is being dropped rather than persisted.
      *
-     * @generated from field: frontend.v1.FailureShimStoreWriteRejected shim_store_write_rejected = 16;
+     * @generated from field: frontend.v1.FailureShimStoreWriteRejected shim_store_write_rejected = 7;
      */
     value: FailureShimStoreWriteRejected;
     case: "shimStoreWriteRejected";
@@ -161,7 +161,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The agent sdk query ended unexpectedly — the session is alive but the thing that drives it stopped.
      *
-     * @generated from field: frontend.v1.FailureQueryTermination query_termination = 17;
+     * @generated from field: frontend.v1.FailureQueryTermination query_termination = 8;
      */
     value: FailureQueryTermination;
     case: "queryTermination";
@@ -169,7 +169,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * No agent process was ever started for this workspace, so there is nothing to talk to yet.
      *
-     * @generated from field: frontend.v1.FailureShimNotSpawned shim_not_spawned = 18;
+     * @generated from field: frontend.v1.FailureShimNotSpawned shim_not_spawned = 9;
      */
     value: FailureShimNotSpawned;
     case: "shimNotSpawned";
@@ -177,7 +177,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The agent process connected but never finished wiring up, so it is present without being usable.
      *
-     * @generated from field: frontend.v1.FailureShimHandshakeIncomplete shim_handshake_incomplete = 19;
+     * @generated from field: frontend.v1.FailureShimHandshakeIncomplete shim_handshake_incomplete = 10;
      */
     value: FailureShimHandshakeIncomplete;
     case: "shimHandshakeIncomplete";
@@ -185,7 +185,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The agent process reported itself unhealthy — a self-diagnosis, not an inference from silence.
      *
-     * @generated from field: frontend.v1.FailureShimUnhealthy shim_unhealthy = 20;
+     * @generated from field: frontend.v1.FailureShimUnhealthy shim_unhealthy = 11;
      */
     value: FailureShimUnhealthy;
     case: "shimUnhealthy";
@@ -193,7 +193,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * Bring-up did not finish connecting in time.
      *
-     * @generated from field: frontend.v1.FailureSessionNotEstablished session_not_established = 21;
+     * @generated from field: frontend.v1.FailureSessionNotEstablished session_not_established = 12;
      */
     value: FailureSessionNotEstablished;
     case: "sessionNotEstablished";
@@ -201,7 +201,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The command addressed something this workspace no longer runs.
      *
-     * @generated from field: frontend.v1.FailureWorkspaceNotLive workspace_not_live = 22;
+     * @generated from field: frontend.v1.FailureWorkspaceNotLive workspace_not_live = 13;
      */
     value: FailureWorkspaceNotLive;
     case: "workspaceNotLive";
@@ -209,7 +209,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The workspace's session was deleted deliberately.
      *
-     * @generated from field: frontend.v1.FailureSessionDeleted session_deleted = 23;
+     * @generated from field: frontend.v1.FailureSessionDeleted session_deleted = 14;
      */
     value: FailureSessionDeleted;
     case: "sessionDeleted";
@@ -217,7 +217,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * A new session took over this workspace, so the previous one was stopped.
      *
-     * @generated from field: frontend.v1.FailureSessionSuperseded session_superseded = 24;
+     * @generated from field: frontend.v1.FailureSessionSuperseded session_superseded = 15;
      */
     value: FailureSessionSuperseded;
     case: "sessionSuperseded";
@@ -225,7 +225,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * This view is behind: the workspace's live connection changed under it, and the replay it asked for would have come from a generation it never saw.
      *
-     * @generated from field: frontend.v1.FailureReconnectSuperseded reconnect_superseded = 25;
+     * @generated from field: frontend.v1.FailureReconnectSuperseded reconnect_superseded = 16;
      */
     value: FailureReconnectSuperseded;
     case: "reconnectSuperseded";
@@ -233,7 +233,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The agent process exited.
      *
-     * @generated from field: frontend.v1.FailureSessionShimDied session_shim_died = 26;
+     * @generated from field: frontend.v1.FailureSessionShimDied session_shim_died = 17;
      */
     value: FailureSessionShimDied;
     case: "sessionShimDied";
@@ -241,7 +241,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The session could not be started at all.
      *
-     * @generated from field: frontend.v1.FailureSessionStartFailed session_start_failed = 27;
+     * @generated from field: frontend.v1.FailureSessionStartFailed session_start_failed = 18;
      */
     value: FailureSessionStartFailed;
     case: "sessionStartFailed";
@@ -249,7 +249,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The vendor conversation could not be resumed without breaking continuity.
      *
-     * @generated from field: frontend.v1.FailureSessionResumeFailed session_resume_failed = 28;
+     * @generated from field: frontend.v1.FailureSessionResumeFailed session_resume_failed = 19;
      */
     value: FailureSessionResumeFailed;
     case: "sessionResumeFailed";
@@ -257,7 +257,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * This workspace has a vendor conversation that could not be reached, and a blank one will not be started in its place.
      *
-     * @generated from field: frontend.v1.FailureConversationUnresumable conversation_unresumable = 29;
+     * @generated from field: frontend.v1.FailureConversationUnresumable conversation_unresumable = 20;
      */
     value: FailureConversationUnresumable;
     case: "conversationUnresumable";
@@ -265,7 +265,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The client asked for a resume mode the daemon no longer supports.
      *
-     * @generated from field: frontend.v1.FailureResumeModeRetired resume_mode_retired = 30;
+     * @generated from field: frontend.v1.FailureResumeModeRetired resume_mode_retired = 21;
      */
     value: FailureResumeModeRetired;
     case: "resumeModeRetired";
@@ -273,7 +273,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The session ended for a reason the daemon could not classify.
      *
-     * @generated from field: frontend.v1.FailureSessionEndedUnclassified session_ended_unclassified = 31;
+     * @generated from field: frontend.v1.FailureSessionEndedUnclassified session_ended_unclassified = 22;
      */
     value: FailureSessionEndedUnclassified;
     case: "sessionEndedUnclassified";
@@ -281,7 +281,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * A history re-pull is already running, so a second one was refused.
      *
-     * @generated from field: frontend.v1.FailureHistoryRepullInFlight history_repull_in_flight = 32;
+     * @generated from field: frontend.v1.FailureHistoryRepullInFlight history_repull_in_flight = 23;
      */
     value: FailureHistoryRepullInFlight;
     case: "historyRepullInFlight";
@@ -289,7 +289,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The history re-pull ended before it reached the live window, so what is on screen has a gap in it.
      *
-     * @generated from field: frontend.v1.FailureHistoryReplayTruncated history_replay_truncated = 33;
+     * @generated from field: frontend.v1.FailureHistoryReplayTruncated history_replay_truncated = 24;
      */
     value: FailureHistoryReplayTruncated;
     case: "historyReplayTruncated";
@@ -297,7 +297,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The stop could not be delivered, so the turn is still running.
      *
-     * @generated from field: frontend.v1.FailureInterruptUndelivered interrupt_undelivered = 34;
+     * @generated from field: frontend.v1.FailureInterruptUndelivered interrupt_undelivered = 25;
      */
     value: FailureInterruptUndelivered;
     case: "interruptUndelivered";
@@ -305,7 +305,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The queued prompt has no attached agent process yet, so it cannot run.
      *
-     * @generated from field: frontend.v1.FailureQueueEntryUnwired queue_entry_unwired = 35;
+     * @generated from field: frontend.v1.FailureQueueEntryUnwired queue_entry_unwired = 26;
      */
     value: FailureQueueEntryUnwired;
     case: "queueEntryUnwired";
@@ -313,7 +313,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The queued prompt is waiting on a cache keep-alive response and cannot be forced ahead of it.
      *
-     * @generated from field: frontend.v1.FailureQueueEntryKeepAliveHeld queue_entry_keep_alive_held = 36;
+     * @generated from field: frontend.v1.FailureQueueEntryKeepAliveHeld queue_entry_keep_alive_held = 27;
      */
     value: FailureQueueEntryKeepAliveHeld;
     case: "queueEntryKeepAliveHeld";
@@ -321,7 +321,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The workspace is hibernated; a revival decision is required before prompts are accepted.
      *
-     * @generated from field: frontend.v1.FailureSessionHibernated session_hibernated = 37;
+     * @generated from field: frontend.v1.FailureSessionHibernated session_hibernated = 28;
      */
     value: FailureSessionHibernated;
     case: "sessionHibernated";
@@ -329,7 +329,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * A cache keep-alive window could not be closed, so new conversation is withheld until it is repaired.
      *
-     * @generated from field: frontend.v1.FailureKeepAliveWindowUnclosed keep_alive_window_unclosed = 38;
+     * @generated from field: frontend.v1.FailureKeepAliveWindowUnclosed keep_alive_window_unclosed = 29;
      */
     value: FailureKeepAliveWindowUnclosed;
     case: "keepAliveWindowUnclosed";
@@ -337,7 +337,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * A cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation.
      *
-     * @generated from field: frontend.v1.FailureKeepAliveWindowInverted keep_alive_window_inverted = 39;
+     * @generated from field: frontend.v1.FailureKeepAliveWindowInverted keep_alive_window_inverted = 30;
      */
     value: FailureKeepAliveWindowInverted;
     case: "keepAliveWindowInverted";
@@ -345,7 +345,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * A compaction re-read the whole conversation at the uncached rate instead of from the prompt cache — the exact cost compaction exists to avoid.
      *
-     * @generated from field: frontend.v1.FailureCompactionColdRead compaction_cold_read = 40;
+     * @generated from field: frontend.v1.FailureCompactionColdRead compaction_cold_read = 31;
      */
     value: FailureCompactionColdRead;
     case: "compactionColdRead";
@@ -353,7 +353,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * A browser log record arrived against a workspace state that had already moved on, so it was not recorded.
      *
-     * @generated from field: frontend.v1.FailureClientLogIdentityStale client_log_identity_stale = 41;
+     * @generated from field: frontend.v1.FailureClientLogIdentityStale client_log_identity_stale = 32;
      */
     value: FailureClientLogIdentityStale;
     case: "clientLogIdentityStale";
@@ -361,7 +361,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * Agent-repl's own machinery failed in a way it could not classify.
      *
-     * @generated from field: frontend.v1.FailureInternalUnclassified internal_unclassified = 42;
+     * @generated from field: frontend.v1.FailureInternalUnclassified internal_unclassified = 33;
      */
     value: FailureInternalUnclassified;
     case: "internalUnclassified";
@@ -372,7 +372,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
      * of the vocabulary resolves the workspace PURPLE. ----
      * Authentication failed.
      *
-     * @generated from field: frontend.v1.FailureApiAuthenticationFailed api_authentication_failed = 43;
+     * @generated from field: frontend.v1.FailureApiAuthenticationFailed api_authentication_failed = 34;
      */
     value: FailureApiAuthenticationFailed;
     case: "apiAuthenticationFailed";
@@ -380,7 +380,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * A billing problem stopped the request.
      *
-     * @generated from field: frontend.v1.FailureApiBillingError api_billing_error = 44;
+     * @generated from field: frontend.v1.FailureApiBillingError api_billing_error = 35;
      */
     value: FailureApiBillingError;
     case: "apiBillingError";
@@ -388,7 +388,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The account is rate limited.
      *
-     * @generated from field: frontend.v1.FailureApiRateLimit api_rate_limit = 45;
+     * @generated from field: frontend.v1.FailureApiRateLimit api_rate_limit = 36;
      */
     value: FailureApiRateLimit;
     case: "apiRateLimit";
@@ -396,7 +396,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The vendor rejected the request as invalid.
      *
-     * @generated from field: frontend.v1.FailureApiInvalidRequest api_invalid_request = 46;
+     * @generated from field: frontend.v1.FailureApiInvalidRequest api_invalid_request = 37;
      */
     value: FailureApiInvalidRequest;
     case: "apiInvalidRequest";
@@ -404,7 +404,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The vendor returned a server error.
      *
-     * @generated from field: frontend.v1.FailureApiServerError api_server_error = 47;
+     * @generated from field: frontend.v1.FailureApiServerError api_server_error = 38;
      */
     value: FailureApiServerError;
     case: "apiServerError";
@@ -412,7 +412,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The vendor is overloaded.
      *
-     * @generated from field: frontend.v1.FailureApiOverloaded api_overloaded = 48;
+     * @generated from field: frontend.v1.FailureApiOverloaded api_overloaded = 39;
      */
     value: FailureApiOverloaded;
     case: "apiOverloaded";
@@ -420,7 +420,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * This organization is not allowed to use the api.
      *
-     * @generated from field: frontend.v1.FailureApiOAuthOrgNotAllowed api_oauth_org_not_allowed = 49;
+     * @generated from field: frontend.v1.FailureApiOAuthOrgNotAllowed api_oauth_org_not_allowed = 40;
      */
     value: FailureApiOAuthOrgNotAllowed;
     case: "apiOauthOrgNotAllowed";
@@ -428,7 +428,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The requested model does not exist.
      *
-     * @generated from field: frontend.v1.FailureApiModelNotFound api_model_not_found = 50;
+     * @generated from field: frontend.v1.FailureApiModelNotFound api_model_not_found = 41;
      */
     value: FailureApiModelNotFound;
     case: "apiModelNotFound";
@@ -436,7 +436,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The network never reached the vendor.
      *
-     * @generated from field: frontend.v1.FailureApiNetworkDown api_network_down = 51;
+     * @generated from field: frontend.v1.FailureApiNetworkDown api_network_down = 42;
      */
     value: FailureApiNetworkDown;
     case: "apiNetworkDown";
@@ -444,7 +444,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The vendor request failed for a reason with no more specific kind.
      *
-     * @generated from field: frontend.v1.FailureApiRequestFailed api_request_failed = 52;
+     * @generated from field: frontend.v1.FailureApiRequestFailed api_request_failed = 43;
      */
     value: FailureApiRequestFailed;
     case: "apiRequestFailed";
@@ -452,7 +452,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The vendor failed for a reason the daemon could not classify.
      *
-     * @generated from field: frontend.v1.FailureApiUnknown api_unknown = 53;
+     * @generated from field: frontend.v1.FailureApiUnknown api_unknown = 44;
      */
     value: FailureApiUnknown;
     case: "apiUnknown";
@@ -460,7 +460,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The response hit the output-token ceiling.
      *
-     * @generated from field: frontend.v1.FailureApiMaxOutputTokens api_max_output_tokens = 54;
+     * @generated from field: frontend.v1.FailureApiMaxOutputTokens api_max_output_tokens = 45;
      */
     value: FailureApiMaxOutputTokens;
     case: "apiMaxOutputTokens";
@@ -468,7 +468,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The turn hit its maximum-turns limit.
      *
-     * @generated from field: frontend.v1.FailureApiMaxTurns api_max_turns = 55;
+     * @generated from field: frontend.v1.FailureApiMaxTurns api_max_turns = 46;
      */
     value: FailureApiMaxTurns;
     case: "apiMaxTurns";
@@ -476,7 +476,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The turn hit its budget limit.
      *
-     * @generated from field: frontend.v1.FailureApiMaxBudget api_max_budget = 56;
+     * @generated from field: frontend.v1.FailureApiMaxBudget api_max_budget = 47;
      */
     value: FailureApiMaxBudget;
     case: "apiMaxBudget";
@@ -484,7 +484,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The turn aborted during execution.
      *
-     * @generated from field: frontend.v1.FailureApiExecutionError api_execution_error = 57;
+     * @generated from field: frontend.v1.FailureApiExecutionError api_execution_error = 48;
      */
     value: FailureApiExecutionError;
     case: "apiExecutionError";
@@ -492,7 +492,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The model refused the request.
      *
-     * @generated from field: frontend.v1.FailureApiRefusal api_refusal = 58;
+     * @generated from field: frontend.v1.FailureApiRefusal api_refusal = 49;
      */
     value: FailureApiRefusal;
     case: "apiRefusal";
@@ -500,7 +500,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The turn ended abnormally for a reason with no more specific kind.
      *
-     * @generated from field: frontend.v1.FailureApiTurnFailed api_turn_failed = 59;
+     * @generated from field: frontend.v1.FailureApiTurnFailed api_turn_failed = 50;
      */
     value: FailureApiTurnFailed;
     case: "apiTurnFailed";
@@ -509,7 +509,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
      * ---- MACHINERY, continued. ----
      * The daemon refused a user prompt because the workspace's merge machinery holds the session.
      *
-     * @generated from field: frontend.v1.FailurePromptRefusedByMergeState prompt_refused_by_merge_state = 60;
+     * @generated from field: frontend.v1.FailurePromptRefusedByMergeState prompt_refused_by_merge_state = 51;
      */
     value: FailurePromptRefusedByMergeState;
     case: "promptRefusedByMergeState";
@@ -517,7 +517,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The queued prompt is waiting behind a context cut, which is never interrupted, so it cannot be forced ahead of it.
      *
-     * @generated from field: frontend.v1.FailureQueueEntryUninterruptibleTurn queue_entry_uninterruptible_turn = 61;
+     * @generated from field: frontend.v1.FailureQueueEntryUninterruptibleTurn queue_entry_uninterruptible_turn = 52;
      */
     value: FailureQueueEntryUninterruptibleTurn;
     case: "queueEntryUninterruptibleTurn";
@@ -525,7 +525,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * A turn stood bound with nothing driving it, so the daemon closed it rather than leaving the workspace thinking forever.
      *
-     * @generated from field: frontend.v1.FailureTurnUndriven turn_undriven = 62;
+     * @generated from field: frontend.v1.FailureTurnUndriven turn_undriven = 53;
      */
     value: FailureTurnUndriven;
     case: "turnUndriven";
@@ -533,7 +533,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The replay mark the client asked from counts in a store seq space the vendor session retired, so no delta above it exists and the client must re-anchor from the conversation's tail.
      *
-     * @generated from field: frontend.v1.FailureReplayMarkRetired replay_mark_retired = 63;
+     * @generated from field: frontend.v1.FailureReplayMarkRetired replay_mark_retired = 54;
      */
     value: FailureReplayMarkRetired;
     case: "replayMarkRetired";
@@ -544,49 +544,49 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
      * frontend can only ever observe its own machinery failing.
      * The daemon never sets one of these arms.
      *
-     * @generated from field: frontend.v1.FailureDaemonUnreachable daemon_unreachable = 100;
+     * @generated from field: frontend.v1.FailureDaemonUnreachable daemon_unreachable = 55;
      */
     value: FailureDaemonUnreachable;
     case: "daemonUnreachable";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureWorkspaceGone workspace_gone = 101;
+     * @generated from field: frontend.v1.FailureWorkspaceGone workspace_gone = 56;
      */
     value: FailureWorkspaceGone;
     case: "workspaceGone";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureBootFailed boot_failed = 102;
+     * @generated from field: frontend.v1.FailureBootFailed boot_failed = 57;
      */
     value: FailureBootFailed;
     case: "bootFailed";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureControlPlaneFailed control_plane_failed = 103;
+     * @generated from field: frontend.v1.FailureControlPlaneFailed control_plane_failed = 58;
      */
     value: FailureControlPlaneFailed;
     case: "controlPlaneFailed";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureFrameUndecodable frame_undecodable = 104;
+     * @generated from field: frontend.v1.FailureFrameUndecodable frame_undecodable = 59;
      */
     value: FailureFrameUndecodable;
     case: "frameUndecodable";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureStaleBundle stale_bundle = 105;
+     * @generated from field: frontend.v1.FailureStaleBundle stale_bundle = 60;
      */
     value: FailureStaleBundle;
     case: "staleBundle";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureCommandUnsent command_unsent = 106;
+     * @generated from field: frontend.v1.FailureCommandUnsent command_unsent = 61;
      */
     value: FailureCommandUnsent;
     case: "commandUnsent";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureCommandRejectionUnclassified command_rejection_unclassified = 107;
+     * @generated from field: frontend.v1.FailureCommandRejectionUnclassified command_rejection_unclassified = 62;
      */
     value: FailureCommandRejectionUnclassified;
     case: "commandRejectionUnclassified";
@@ -2023,10 +2023,6 @@ export const FailurePromptRefusedByMergeStateSchema: GenMessage<FailurePromptRef
   messageDesc(file_frontend_v1_errors, 53);
 
 /**
- * The queued prompt is waiting behind a context cut, which is never
- * interrupted, so it cannot be forced ahead of it.
- *
- * Resolves the workspace BLUE.
  * A turn stood bound with nothing driving it, so the daemon closed it rather
  * than leaving the workspace thinking forever.
  *
@@ -2051,6 +2047,11 @@ export const FailureTurnUndrivenSchema: GenMessage<FailureTurnUndriven> = /*@__P
   messageDesc(file_frontend_v1_errors, 54);
 
 /**
+ * The queued prompt is waiting behind a context cut, which is never
+ * interrupted, so it cannot be forced ahead of it.
+ *
+ * Resolves the workspace BLUE.
+ *
  * @generated from message frontend.v1.FailureQueueEntryUninterruptibleTurn
  */
 export type FailureQueueEntryUninterruptibleTurn = Message<"frontend.v1.FailureQueueEntryUninterruptibleTurn"> & {
@@ -2308,13 +2309,18 @@ export const FailureCommandRejectionUnclassifiedSchema: GenMessage<FailureComman
  * same typed reason messages, allowing a frontend to diagnose the termination
  * without reconstructing evidence from generic failure prose.
  *
+ * THE ONLY IDENTITIES ON THIS RECORD ARE ONES A CARD CAN SHOW: the query
+ * invocation that died, and the VENDOR conversation it was driving. An
+ * agent-repl session identity is deliberately absent — a rendering frontend
+ * has no vocabulary for one, so it could only carry it, never use it.
+ *
  * @generated from message frontend.v1.QueryTerminationFailure
  */
 export type QueryTerminationFailure = Message<"frontend.v1.QueryTerminationFailure"> & {
   /**
    * The unique query() invocation that terminated.
    *
-   * @generated from field: string query_instance_id = 2;
+   * @generated from field: string query_instance_id = 1;
    */
   queryInstanceId: string;
 
@@ -2328,7 +2334,7 @@ export type QueryTerminationFailure = Message<"frontend.v1.QueryTerminationFailu
     /**
      * The non-empty authoritative Claude conversation UUID for the query.
      *
-     * @generated from field: string vendor_session_id = 3;
+     * @generated from field: string vendor_session_id = 2;
      */
     value: string;
     case: "vendorSessionId";
@@ -2336,7 +2342,7 @@ export type QueryTerminationFailure = Message<"frontend.v1.QueryTerminationFailu
     /**
      * Records that the query ended before the SDK exposed a vendor session.
      *
-     * @generated from field: protocol.v1.VendorSessionIdentityUnavailable vendor_session_identity_unavailable = 5;
+     * @generated from field: protocol.v1.VendorSessionIdentityUnavailable vendor_session_identity_unavailable = 3;
      */
     value: VendorSessionIdentityUnavailable;
     case: "vendorSessionIdentityUnavailable";
@@ -2358,7 +2364,7 @@ export type QueryTerminationFailure = Message<"frontend.v1.QueryTerminationFailu
     /**
      * The SDK iterator ended without an intentional shim shutdown.
      *
-     * @generated from field: protocol.v1.UnexpectedQueryEof unexpected_eof = 10;
+     * @generated from field: protocol.v1.UnexpectedQueryEof unexpected_eof = 5;
      */
     value: UnexpectedQueryEof;
     case: "unexpectedEof";
@@ -2366,7 +2372,7 @@ export type QueryTerminationFailure = Message<"frontend.v1.QueryTerminationFailu
     /**
      * The SDK iterator threw an error, including its complete cause.
      *
-     * @generated from field: protocol.v1.QueryIteratorFailure iterator_failure = 11;
+     * @generated from field: protocol.v1.QueryIteratorFailure iterator_failure = 6;
      */
     value: QueryIteratorFailure;
     case: "iteratorFailure";
@@ -2374,7 +2380,7 @@ export type QueryTerminationFailure = Message<"frontend.v1.QueryTerminationFailu
     /**
      * Query initialization failed, including its complete cause.
      *
-     * @generated from field: protocol.v1.QueryStartupFailure startup_failure = 12;
+     * @generated from field: protocol.v1.QueryStartupFailure startup_failure = 7;
      */
     value: QueryStartupFailure;
     case: "startupFailure";
@@ -2392,20 +2398,25 @@ export const QueryTerminationFailureSchema: GenMessage<QueryTerminationFailure> 
  * Machine-readable evidence that a requested Claude conversation could not
  * be resumed without violating conversation continuity.
  *
+ * It names the VENDOR conversation and nothing else, for the same reason
+ * QueryTerminationFailure does: the vendor conversation is what the card
+ * shows, and an agent-repl session identity is a vocabulary a rendering
+ * frontend does not have.
+ *
  * @generated from message frontend.v1.SessionResumeFailure
  */
 export type SessionResumeFailure = Message<"frontend.v1.SessionResumeFailure"> & {
   /**
    * The exact Claude conversation UUID that must remain authoritative.
    *
-   * @generated from field: string claude_session_id = 2;
+   * @generated from field: string claude_session_id = 1;
    */
   claudeSessionId: string;
 
   /**
    * The working directory used to locate the Claude transcript.
    *
-   * @generated from field: string cwd = 3;
+   * @generated from field: string cwd = 2;
    */
   cwd: string;
 
@@ -2413,14 +2424,14 @@ export type SessionResumeFailure = Message<"frontend.v1.SessionResumeFailure"> &
    * The configured Claude account root. Empty means the daemon's inherited
    * Claude configuration root supplies the value.
    *
-   * @generated from field: string config_dir = 4;
+   * @generated from field: string config_dir = 3;
    */
   configDir: string;
 
   /**
    * The absolute Claude configuration root used for transcript lookup.
    *
-   * @generated from field: string resolved_config_dir = 5;
+   * @generated from field: string resolved_config_dir = 4;
    */
   resolvedConfigDir: string;
 
@@ -2433,7 +2444,7 @@ export type SessionResumeFailure = Message<"frontend.v1.SessionResumeFailure"> &
     /**
      * A frontend requested a session that continues a durable conversation.
      *
-     * @generated from field: frontend.v1.SessionResumeFailureCreate create = 10;
+     * @generated from field: frontend.v1.SessionResumeFailureCreate create = 5;
      */
     value: SessionResumeFailureCreate;
     case: "create";
@@ -2441,7 +2452,7 @@ export type SessionResumeFailure = Message<"frontend.v1.SessionResumeFailure"> &
     /**
      * A durable agent-repl session required shim reconstruction.
      *
-     * @generated from field: frontend.v1.SessionResumeFailureAutomaticRestore automatic_restore = 11;
+     * @generated from field: frontend.v1.SessionResumeFailureAutomaticRestore automatic_restore = 6;
      */
     value: SessionResumeFailureAutomaticRestore;
     case: "automaticRestore";
@@ -2456,7 +2467,7 @@ export type SessionResumeFailure = Message<"frontend.v1.SessionResumeFailure"> &
     /**
      * No readable transcript exists for the authoritative Claude UUID.
      *
-     * @generated from field: frontend.v1.SessionResumeFailureTranscriptUnavailable transcript_unavailable = 20;
+     * @generated from field: frontend.v1.SessionResumeFailureTranscriptUnavailable transcript_unavailable = 7;
      */
     value: SessionResumeFailureTranscriptUnavailable;
     case: "transcriptUnavailable";
@@ -2464,7 +2475,7 @@ export type SessionResumeFailure = Message<"frontend.v1.SessionResumeFailure"> &
     /**
      * A recovery attempt proposed a different Claude UUID or a fresh session.
      *
-     * @generated from field: frontend.v1.SessionResumeFailureIdentityMismatch identity_mismatch = 21;
+     * @generated from field: frontend.v1.SessionResumeFailureIdentityMismatch identity_mismatch = 8;
      */
     value: SessionResumeFailureIdentityMismatch;
     case: "identityMismatch";
@@ -2472,7 +2483,7 @@ export type SessionResumeFailure = Message<"frontend.v1.SessionResumeFailure"> &
     /**
      * The exact resumed SDK query terminated before becoming driveable.
      *
-     * @generated from field: frontend.v1.QueryTerminationFailure query_termination = 22;
+     * @generated from field: frontend.v1.QueryTerminationFailure query_termination = 9;
      */
     value: QueryTerminationFailure;
     case: "queryTermination";
@@ -2480,7 +2491,7 @@ export type SessionResumeFailure = Message<"frontend.v1.SessionResumeFailure"> &
     /**
      * Bring-up failed before exact query-termination evidence was available.
      *
-     * @generated from field: frontend.v1.SessionResumeFailureBringUpFailure bring_up_failure = 23;
+     * @generated from field: frontend.v1.SessionResumeFailureBringUpFailure bring_up_failure = 10;
      */
     value: SessionResumeFailureBringUpFailure;
     case: "bringUpFailure";

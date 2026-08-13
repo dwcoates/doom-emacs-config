@@ -193,12 +193,12 @@ type HibernationDetail_IdleCutoff struct {
 	// The keep-alive loop reached its configured maximum: idle time crossed
 	// the cutoff, so the daemon stopped pinging and hibernated in the same
 	// transition (the two are one act by construction).
-	IdleCutoff *HibernationIdleCutoff `protobuf:"bytes,10,opt,name=idle_cutoff,json=idleCutoff,proto3,oneof"`
+	IdleCutoff *HibernationIdleCutoff `protobuf:"bytes,2,opt,name=idle_cutoff,json=idleCutoff,proto3,oneof"`
 }
 
 type HibernationDetail_Forced struct {
 	// The user forced it via HibernateWorkspaceCmd.
-	Forced *HibernationForced `protobuf:"bytes,11,opt,name=forced,proto3,oneof"`
+	Forced *HibernationForced `protobuf:"bytes,3,opt,name=forced,proto3,oneof"`
 }
 
 type HibernationDetail_CacheExpired struct {
@@ -208,7 +208,7 @@ type HibernationDetail_CacheExpired struct {
 	// downtime). Pinging a cold cache would pay full re-ingest cost for
 	// nothing, so the discovery IS the hibernate transition — reported
 	// loudly to the user rather than silently absorbed.
-	CacheExpired *HibernationCacheExpired `protobuf:"bytes,12,opt,name=cache_expired,json=cacheExpired,proto3,oneof"`
+	CacheExpired *HibernationCacheExpired `protobuf:"bytes,4,opt,name=cache_expired,json=cacheExpired,proto3,oneof"`
 }
 
 func (*HibernationDetail_IdleCutoff) isHibernationDetail_Cause() {}
@@ -713,11 +713,11 @@ type isWorkspaceGateView_Gate interface {
 }
 
 type WorkspaceGateView_Open struct {
-	Open *WorkspaceGateOpen `protobuf:"bytes,10,opt,name=open,proto3,oneof"`
+	Open *WorkspaceGateOpen `protobuf:"bytes,3,opt,name=open,proto3,oneof"`
 }
 
 type WorkspaceGateView_Hibernated struct {
-	Hibernated *WorkspaceGateHibernated `protobuf:"bytes,11,opt,name=hibernated,proto3,oneof"`
+	Hibernated *WorkspaceGateHibernated `protobuf:"bytes,4,opt,name=hibernated,proto3,oneof"`
 }
 
 func (*WorkspaceGateView_Open) isWorkspaceGateView_Gate() {}
@@ -816,11 +816,10 @@ const file_frontend_v1_gate_revival_proto_rawDesc = "" +
 	"\x1efrontend/v1/gate-revival.proto\x12\vfrontend.v1\"\x85\x02\n" +
 	"\x11HibernationDetail\x12\x19\n" +
 	"\bsince_ms\x18\x01 \x01(\x03R\asinceMs\x12E\n" +
-	"\vidle_cutoff\x18\n" +
-	" \x01(\v2\".frontend.v1.HibernationIdleCutoffH\x00R\n" +
+	"\vidle_cutoff\x18\x02 \x01(\v2\".frontend.v1.HibernationIdleCutoffH\x00R\n" +
 	"idleCutoff\x128\n" +
-	"\x06forced\x18\v \x01(\v2\x1e.frontend.v1.HibernationForcedH\x00R\x06forced\x12K\n" +
-	"\rcache_expired\x18\f \x01(\v2$.frontend.v1.HibernationCacheExpiredH\x00R\fcacheExpiredB\a\n" +
+	"\x06forced\x18\x03 \x01(\v2\x1e.frontend.v1.HibernationForcedH\x00R\x06forced\x12K\n" +
+	"\rcache_expired\x18\x04 \x01(\v2$.frontend.v1.HibernationCacheExpiredH\x00R\fcacheExpiredB\a\n" +
 	"\x05cause\"4\n" +
 	"\x15HibernationIdleCutoff\x12\x1b\n" +
 	"\tcutoff_ms\x18\x01 \x01(\x03R\bcutoffMs\"\x13\n" +
@@ -841,10 +840,9 @@ const file_frontend_v1_gate_revival_proto_rawDesc = "" +
 	"\x11WorkspaceGateView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x14\n" +
 	"\x05fence\x18\x02 \x01(\tR\x05fence\x124\n" +
-	"\x04open\x18\n" +
-	" \x01(\v2\x1e.frontend.v1.WorkspaceGateOpenH\x00R\x04open\x12F\n" +
+	"\x04open\x18\x03 \x01(\v2\x1e.frontend.v1.WorkspaceGateOpenH\x00R\x04open\x12F\n" +
 	"\n" +
-	"hibernated\x18\v \x01(\v2$.frontend.v1.WorkspaceGateHibernatedH\x00R\n" +
+	"hibernated\x18\x04 \x01(\v2$.frontend.v1.WorkspaceGateHibernatedH\x00R\n" +
 	"hibernatedB\x06\n" +
 	"\x04gate\"\x13\n" +
 	"\x11WorkspaceGateOpen\"Q\n" +

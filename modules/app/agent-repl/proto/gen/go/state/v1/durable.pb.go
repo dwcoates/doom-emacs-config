@@ -78,10 +78,10 @@ type TokenUtilization struct {
 	//	*TokenUtilization_Subagent
 	Actor isTokenUtilization_Actor `protobuf_oneof:"actor"`
 	// The complete usage object reported by the Claude SDK for this response.
-	Usage *VendorTokenUsage `protobuf:"bytes,20,opt,name=usage,proto3" json:"usage,omitempty"`
+	Usage *VendorTokenUsage `protobuf:"bytes,9,opt,name=usage,proto3" json:"usage,omitempty"`
 	// Timing measured for this specific Messages API response. Absent when the
 	// source is a historical transcript without corresponding stream events.
-	ResponseTiming *TokenResponseTiming `protobuf:"bytes,21,opt,name=response_timing,json=responseTiming,proto3" json:"response_timing,omitempty"`
+	ResponseTiming *TokenResponseTiming `protobuf:"bytes,10,opt,name=response_timing,json=responseTiming,proto3" json:"response_timing,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -203,12 +203,12 @@ type isTokenUtilization_Actor interface {
 
 type TokenUtilization_MainAgent struct {
 	// Attributes the response to the session's main agent loop.
-	MainAgent *TokenUtilizationMainAgent `protobuf:"bytes,10,opt,name=main_agent,json=mainAgent,proto3,oneof"`
+	MainAgent *TokenUtilizationMainAgent `protobuf:"bytes,7,opt,name=main_agent,json=mainAgent,proto3,oneof"`
 }
 
 type TokenUtilization_Subagent struct {
 	// Attributes the response to one dispatched subagent invocation.
-	Subagent *TokenUtilizationSubagent `protobuf:"bytes,11,opt,name=subagent,proto3,oneof"`
+	Subagent *TokenUtilizationSubagent `protobuf:"bytes,8,opt,name=subagent,proto3,oneof"`
 }
 
 func (*TokenUtilization_MainAgent) isTokenUtilization_Actor() {}
@@ -2444,12 +2444,12 @@ type isTurnAccounting_Verdict interface {
 
 type TurnAccounting_Complete struct {
 	// Marks a complete and internally consistent record.
-	Complete *TurnAccountingComplete `protobuf:"bytes,20,opt,name=complete,proto3,oneof"`
+	Complete *TurnAccountingComplete `protobuf:"bytes,9,opt,name=complete,proto3,oneof"`
 }
 
 type TurnAccounting_Invalid struct {
 	// Describes every condition invalidating the record.
-	Invalid *TurnAccountingInvalid `protobuf:"bytes,21,opt,name=invalid,proto3,oneof"`
+	Invalid *TurnAccountingInvalid `protobuf:"bytes,10,opt,name=invalid,proto3,oneof"`
 }
 
 func (*TurnAccounting_Complete) isTurnAccounting_Verdict() {}
@@ -3486,11 +3486,11 @@ const file_state_v1_durable_proto_rawDesc = "" +
 	"\x0eapi_message_id\x18\x05 \x01(\tR\fapiMessageId\x12\x14\n" +
 	"\x05model\x18\x06 \x01(\tR\x05model\x12D\n" +
 	"\n" +
-	"main_agent\x18\n" +
-	" \x01(\v2#.state.v1.TokenUtilizationMainAgentH\x00R\tmainAgent\x12@\n" +
-	"\bsubagent\x18\v \x01(\v2\".state.v1.TokenUtilizationSubagentH\x00R\bsubagent\x120\n" +
-	"\x05usage\x18\x14 \x01(\v2\x1a.state.v1.VendorTokenUsageR\x05usage\x12F\n" +
-	"\x0fresponse_timing\x18\x15 \x01(\v2\x1d.state.v1.TokenResponseTimingR\x0eresponseTimingB\a\n" +
+	"main_agent\x18\a \x01(\v2#.state.v1.TokenUtilizationMainAgentH\x00R\tmainAgent\x12@\n" +
+	"\bsubagent\x18\b \x01(\v2\".state.v1.TokenUtilizationSubagentH\x00R\bsubagent\x120\n" +
+	"\x05usage\x18\t \x01(\v2\x1a.state.v1.VendorTokenUsageR\x05usage\x12F\n" +
+	"\x0fresponse_timing\x18\n" +
+	" \x01(\v2\x1d.state.v1.TokenResponseTimingR\x0eresponseTimingB\a\n" +
 	"\x05actorB\x11\n" +
 	"\x0f_api_request_id\"\x1b\n" +
 	"\x19TokenUtilizationMainAgent\"\xda\x01\n" +
@@ -3651,8 +3651,9 @@ const file_state_v1_durable_proto_rawDesc = "" +
 	"usageAtEnd\x128\n" +
 	"\tresponses\x18\a \x03(\v2\x1a.state.v1.TokenUtilizationR\tresponses\x12J\n" +
 	"\x0ereconciliation\x18\b \x01(\v2\".state.v1.TokenUsageReconciliationR\x0ereconciliation\x12>\n" +
-	"\bcomplete\x18\x14 \x01(\v2 .state.v1.TurnAccountingCompleteH\x00R\bcomplete\x12;\n" +
-	"\ainvalid\x18\x15 \x01(\v2\x1f.state.v1.TurnAccountingInvalidH\x00R\ainvalidB\t\n" +
+	"\bcomplete\x18\t \x01(\v2 .state.v1.TurnAccountingCompleteH\x00R\bcomplete\x12;\n" +
+	"\ainvalid\x18\n" +
+	" \x01(\v2\x1f.state.v1.TurnAccountingInvalidH\x00R\ainvalidB\t\n" +
 	"\averdict\"\x9b\x02\n" +
 	"\x14TurnAccountingTiming\x121\n" +
 	"\x15prompt_admitted_at_ms\x18\x01 \x01(\x03R\x12promptAdmittedAtMs\x121\n" +

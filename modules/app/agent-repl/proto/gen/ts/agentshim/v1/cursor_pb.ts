@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/v1/cursor.proto.
  */
 export const file_agentshim_v1_cursor: GenFile = /*@__PURE__*/
-  fileDesc("ChlhZ2VudHNoaW0vdjEvY3Vyc29yLnByb3RvEgxhZ2VudHNoaW0udjEiSwoLQ3Vyc29yU3RhdGUSDwoHZmlsZV9pZBgBIAEoCRIMCgRwYXRoGAIgASgJEg4KBm9mZnNldBgDIAEoAxINCgVjYXJyeRgEIAEoDCIeCgtDdXJzb3JRdWVyeRIPCgdmaWxlX2lkGAEgASgJIjsKDU9wZW5UYXNrU3RhdGUSGwoTbGFzdF9hY3Rpdml0eV9hdF9tcxgCIAEoA0oECAEQAlIHc3RhcnRlZCKLAQoKQ3Vyc29yTGlzdBIqCgdjdXJzb3JzGAEgAygLMhkuYWdlbnRzaGltLnYxLkN1cnNvclN0YXRlEi8KCm9wZW5fdGFza3MYAiADKAsyGy5hZ2VudHNoaW0udjEuT3BlblRhc2tTdGF0ZRIgChhvcGVuX3Rhc2tzX2F1dGhvcml0YXRpdmUYAyABKAhCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS92MTthZ2VudHNoaW12MWIGcHJvdG8z");
+  fileDesc("ChlhZ2VudHNoaW0vdjEvY3Vyc29yLnByb3RvEgxhZ2VudHNoaW0udjEiSwoLQ3Vyc29yU3RhdGUSDwoHZmlsZV9pZBgBIAEoCRIMCgRwYXRoGAIgASgJEg4KBm9mZnNldBgDIAEoAxINCgVjYXJyeRgEIAEoDCIeCgtDdXJzb3JRdWVyeRIPCgdmaWxlX2lkGAEgASgJIiwKDU9wZW5UYXNrU3RhdGUSGwoTbGFzdF9hY3Rpdml0eV9hdF9tcxgBIAEoAyKLAQoKQ3Vyc29yTGlzdBIqCgdjdXJzb3JzGAEgAygLMhkuYWdlbnRzaGltLnYxLkN1cnNvclN0YXRlEi8KCm9wZW5fdGFza3MYAiADKAsyGy5hZ2VudHNoaW0udjEuT3BlblRhc2tTdGF0ZRIgChhvcGVuX3Rhc2tzX2F1dGhvcml0YXRpdmUYAyABKAhCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS92MTthZ2VudHNoaW12MWIGcHJvdG8z");
 
 /**
  * shim-claude-sidecar file-cursor state, persisted by the store (§6.2 cursor table).
@@ -88,7 +88,12 @@ export const CursorQuerySchema: GenMessage<CursorQuery> = /*@__PURE__*/
  */
 export type OpenTaskState = Message<"agentshim.v1.OpenTaskState"> & {
   /**
-   * @generated from field: int64 last_activity_at_ms = 2;
+   * KNOWN GAP: this message says WHEN a task was last active, but not WHICH
+   * task it is. The `Event` that named the task is retired and detached work is
+   * modelled on frontend.v1 now, with nothing on this message replacing it —
+   * see the gap note.
+   *
+   * @generated from field: int64 last_activity_at_ms = 1;
    */
   lastActivityAtMs: bigint;
 };
@@ -121,7 +126,7 @@ export type CursorList = Message<"agentshim.v1.CursorList"> & {
   /**
    * True only when open_tasks was computed by a store that implements the
    * authoritative lifecycle query. Distinguishes an empty set from an older
-   * store that does not understand field 2.
+   * store that does not understand `open_tasks`.
    *
    * @generated from field: bool open_tasks_authoritative = 3;
    */
