@@ -13,7 +13,7 @@ import {
   type CommandRefusal,
 } from "../src/command-dispatch.js";
 import { create } from "@bufbuild/protobuf";
-import { FailureKindSchema } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
+import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/errors_pb";
 import { failureKindName } from "../src/failure-card.js";
 import type { FailureCardItem } from "../src/store.js";
 import {

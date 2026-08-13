@@ -30,7 +30,7 @@ import {
   TokenUsageTotalsSchema,
   TokenUtilizationSubagentSchema,
   type SessionTokenUtilization,
-} from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
+} from "../../proto/gen/ts/frontend/v1/durable_pb";
 
 function timing(over: Partial<TokenTimingTotals> = {}): TokenTimingTotals {
   return {
