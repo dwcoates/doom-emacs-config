@@ -7,8 +7,14 @@ The shared Go framing layer for every agent-shim UDS hop, in two layers:
 2. **The Any envelope** — `WriteAny` / `ReadAny` (and their halves
    `MarshalAny` / `UnmarshalAny`): the frame payload is a serialized
    `google.protobuf.Any` whose `type_url` is THE message discriminator,
-   resolved against the proto global registry. `core.proto` has no top-level
-   frame oneof, so the Any *is* the type tag.
+   resolved against the proto global registry. No schema on any UDS hop
+   declares a top-level frame oneof, so the Any *is* the type tag. The hops
+   carry `protocol.v1` and `agentshim.v1`; `frontend.v1`'s `FrontendFrame`
+   oneof reaches a client as protojson and never passes through here.
+
+The `type_url` is schema identity, so a peer built against different proto
+package names fails `UnmarshalAny`'s resolve step loudly. This package does not
+negotiate a schema version and does not alias one.
 
 One owner so shim-store, shim-claude-sidecar, and the daemon cannot drift on
 either layer. Oversized or truncated frames are protocol violations surfaced

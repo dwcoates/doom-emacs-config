@@ -4,17 +4,36 @@
 //
 // The framing is deliberately trivial and owned in ONE place so the
 // shim-store, the shim-claude-sidecar, and the daemon cannot drift. A frame
-// larger than MaxFrame, a zero-length read, or a truncated payload is a
-// protocol violation and surfaces as a loud error — never absorbed, never
-// resynced past (a corrupted stream cannot be trusted after a bad length).
+// larger than MaxFrame, a short read, or a truncated payload is a protocol
+// violation and surfaces as a loud error — never absorbed, never resynced past
+// (a corrupted stream cannot be trusted after a bad length).
+//
+// A frame whose length prefix is ZERO is not rejected at this layer, because
+// this layer moves opaque bytes and has no basis for an opinion on emptiness.
+// It is rejected one layer up, where an empty payload carries no type_url and
+// UnmarshalAny fails to resolve it. Both halves are pinned by test, because a
+// caller reading raw frames needs to know which layer refuses it.
 //
 // # Two layers: raw frames, and the Any envelope on top of them
 //
 // WriteFrame/ReadFrame move opaque bytes. On top of them sits the SECOND half
 // of the convention every hop speaks: the payload of a frame is a serialized
 // google.protobuf.Any whose type_url is THE message discriminator, resolved
-// against the proto global registry. core.proto carries no top-level frame
-// oneof, so the Any IS the type tag.
+// against the proto global registry. No schema on any UDS hop declares a
+// top-level frame oneof, so the Any IS the type tag.
+//
+// That is a property of the whole schema set and not of one file. The UDS hops
+// carry protocol.v1 (the daemon<->shim boundary, both directions) and
+// agentshim.v1 (the shim-side write half), and neither declares a frame
+// envelope. frontend.v1 DOES declare a FrontendFrame oneof, but that surface
+// travels to a client as protojson and never through this package, so it does
+// not make the Any tag redundant on any hop this framing serves.
+//
+// The type_url is therefore load-bearing schema identity, not an opaque token:
+// renaming a proto package renames every type_url it produces, and a peer built
+// against the old names fails UnmarshalAny's resolve step rather than silently
+// misreading a frame. That is the intended failure — this package neither
+// negotiates a schema version nor accepts an alias for one.
 //
 // That envelope layer used to be copy-pasted into four packages, each with its
 // own hand-maintained copy of one wire contract — exactly the drift this
