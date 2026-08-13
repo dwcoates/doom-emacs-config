@@ -8,7 +8,7 @@ package frontend.v1;
 import "frontend/v1/failure-card.proto";
 import "frontend/v1/gate-revival.proto";
 import "frontend/v1/merge.proto";
-import "frontend/v1/topbar.proto";
+import "protocol/v1/core.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
@@ -431,7 +431,7 @@ message SessionView {
   FailureCardView death = 20;
   // The SDK-published set this session can deliberately select.  A frontend
   // only renders these choices; it never invents or owns a model selection.
-  repeated ModelOption model_options = 21;
+  repeated protocol.v1.ModelOption model_options = 21;
   // 22 was token_utilization (SessionTokenUtilization): a persistence
   // aggregate shipped whole so a renderer could re-derive rows from it.
   // TokenBreakdownView carries those rows resolved.
