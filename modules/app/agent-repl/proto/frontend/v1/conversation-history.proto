@@ -115,22 +115,20 @@ message NextPageCmd {
   PageScope scope = 2;
 }
 
-// AT MOST TEN messages, oldest first.
+// One page of messages, oldest first.
 //
-// Ten discrete slots rather than a repeated field: a repeated field is
-// unbounded by construction and the only enforcement available is a runtime
-// check the producer must remember to apply. Here a producer holding an
-// eleventh message has nowhere to put it.
+// THE PAGE LIMIT IS THE DAEMON'S INVARIANT, NOT THIS TYPE'S. The messages
+// travel in a repeated field, which is unbounded by construction: nothing here
+// stops an over-long page. The at-most-ten ceiling is enforced by the daemon
+// that builds the page, and by nothing else. No `limit` field is added to
+// compensate — a limit on the wire would be a second place for the ceiling to
+// live and a second thing for a client to disagree with.
 //
-// DENSITY IS THE PRODUCER'S INVARIANT. Slots fill from message_1 upward, and
-// message_k set while message_(k-1) is empty is a bug. Making THAT structural
-// needs a oneof of ten page-shaped messages and fifty-five fields; the ceiling
-// is what matters and this achieves it, so the gap is documented rather than
-// paid for.
-//
-// NESTED MESSAGES DO NOT COST A SLOT. A message contained by another travels
-// inside its parent exactly as ConversationDelta carries it, so a client asking
-// for a page cannot be surprised by its width.
+// NESTED MESSAGES ARE NOT IN THIS PAGE. A message contained by another does
+// NOT travel inside its parent here: contained records are reached by PAGING,
+// with a fresh request whose PageScope is PageScopeInside naming the
+// container's message id. So a page of the feed carries feed rows only, and a
+// client that wants a subagent's insides asks for them.
 message ConversationHistoryPage {
   string workspace = 1;
   // The requesting command's request_id, echoed so a client correlates this
@@ -138,20 +136,15 @@ message ConversationHistoryPage {
   // and so it can DISCARD a page it is no longer awaiting.
   string request_id = 2;
 
+  reserved 3, 4, 5, 6, 7, 8, 9, 10, 11, 12;
+  reserved "message_1", "message_2", "message_3", "message_4", "message_5",
+      "message_6", "message_7", "message_8", "message_9", "message_10";
+
   // Messages OLDEST FIRST, as COMPLETE feed envelopes identical in shape to
   // ConversationDelta's — so a frontend renders a paged message with the same
-  // code that renders a pushed one. Absent slots mean a short page, which at
-  // the top of a conversation is the normal case.
-  Message message_1 = 3;
-  Message message_2 = 4;
-  Message message_3 = 5;
-  Message message_4 = 6;
-  Message message_5 = 7;
-  Message message_6 = 8;
-  Message message_7 = 9;
-  Message message_8 = 10;
-  Message message_9 = 11;
-  Message message_10 = 12;
+  // code that renders a pushed one. Fewer than the daemon's ceiling means a
+  // short page, which at the top of a conversation is the normal case.
+  repeated Message messages = 18;
 
   // WHETHER the conversation continues above this page — never WHERE.
   //
