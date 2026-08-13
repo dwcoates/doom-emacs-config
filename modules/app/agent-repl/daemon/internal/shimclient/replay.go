@@ -207,7 +207,7 @@ func (c *Client) Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents ui
 	}
 }
 
-// dispatchReplayEvent routes one replayed event to the replay that asked for
+// dispatchReplayEntry routes one replayed event to the replay that asked for
 // it. It NEVER touches last_seen_seq and NEVER reaches the state/frame sinks:
 // this is historical content for conversation translation only, which is why
 // it arrives as its own message type.
@@ -215,7 +215,7 @@ func (c *Client) Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents ui
 // An event for an unknown request id is a late frame from a replay the caller
 // already gave up on. It is loud-logged and dropped — never redirected into
 // the live path, which is precisely the mistake the separate type prevents.
-func (c *Client) dispatchReplayEvent(re *corev1.ReplayEvent) {
+func (c *Client) dispatchReplayEntry(re *corev1.ReplayEntry) {
 	w, ok := c.replays.get(re.GetRequestId())
 	if !ok {
 		c.logf("replay event for unknown request_id=%s seq=%d; dropped (the replay already ended)",

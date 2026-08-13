@@ -37,7 +37,7 @@ type fakeStore struct {
 	closeAfter bool
 	// preamble is written before the events, standing in for any non-Event
 	// frame that can share the subscription.
-	preamble *corev1.Heartbeat
+	preamble *corev1.ConnectionHeartbeat
 }
 
 // newFakeStore listens on a short /tmp path: a t.TempDir()-derived socket path
@@ -411,7 +411,7 @@ func TestANonEventStoreFrameIsSkippedRatherThanServed(t *testing.T) {
 	// Arrange — this path serves persisted conversation history only.
 	var logged []string
 	store := newFakeStore(t, []*corev1.Event{event(1)}, false)
-	store.preamble = &corev1.Heartbeat{SentAtMs: 1}
+	store.preamble = &corev1.ConnectionHeartbeat{SentAtMs: 1}
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
