@@ -19,14 +19,18 @@
  *   does. wire.go rejects neither, and neither do we.
  *
  * MULTIPLEXING: several distinct protobuf message types share one connection
- * in each direction (e.g. SubmitPrompt, Ack, Event, Heartbeat on the
- * shim↔daemon socket). Serialized protobufs are not self-describing, so each
- * frame payload is a serialized google.protobuf.Any wrapping one core
- * message. The receiver dispatches on the Any type URL
- * (`type.googleapis.com/agentshim.core.v1.<Message>`). Any is the
- * protobuf-native discriminator and is unpackable identically from Go, which
- * is why the daemon-side client (G7) MUST use the same Any envelope. See the
- * G5 report for this contract.
+ * in each direction (e.g. SubmitPrompt, Ack, EntryDelivery, ConnectionHeartbeat
+ * on the shim↔daemon socket). Serialized protobufs are not self-describing, so
+ * each frame payload is a serialized google.protobuf.Any wrapping one message.
+ * The receiver dispatches on the Any type URL
+ * (`type.googleapis.com/protocol.v1.<Message>` for the control plane,
+ * `agentshim.v1.<Message>` for the shim↔store write frame). Any is the
+ * protobuf-native discriminator and is unpackable identically from Go, which is
+ * why the daemon-side client MUST use the same Any envelope.
+ *
+ * THE PACKAGE NAME IS PART OF THE WIRE. It travels inside the type URL, so a
+ * package rename is a BREAKING transport change even though no field moved:
+ * both ends must move together or every frame is unroutable.
  */
 import net from "node:net";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
