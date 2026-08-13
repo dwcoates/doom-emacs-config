@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -114,5 +115,66 @@ func TestWriteFrameOversizePayload(t *testing.T) {
 	// Assert
 	if !errors.Is(err, ErrFrameTooLarge) {
 		t.Fatalf("want ErrFrameTooLarge, got %v", err)
+	}
+}
+
+// headerOnlyWriter accepts the 4-byte header and then fails, standing in for a
+// socket that dies between the two writes WriteFrame issues.
+type headerOnlyWriter struct{ wrote int }
+
+func (w *headerOnlyWriter) Write(p []byte) (int, error) {
+	w.wrote++
+	if w.wrote == 1 {
+		return len(p), nil
+	}
+	return 0, errors.New("peer went away mid-frame")
+}
+
+func TestWriteFrameSurfacesAPayloadWriteFailure(t *testing.T) {
+	// Arrange — a half-written frame leaves the stream unusable, so the failure
+	// must reach the caller rather than being absorbed after a good header.
+	w := &headerOnlyWriter{}
+	// Act
+	err := WriteFrame(w, []byte("body"))
+	// Assert
+	if err == nil {
+		t.Fatal("a failed payload write must surface, not be swallowed")
+	}
+}
+
+func TestWriteFramePayloadFailureNamesThePayloadWrite(t *testing.T) {
+	// Arrange — the owning runtime logs this error and has to be able to tell a
+	// header failure from a payload one; only the payload branch names a size.
+	w := &headerOnlyWriter{}
+	// Act
+	err := WriteFrame(w, []byte("body"))
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "frame payload (4 bytes)") {
+		t.Fatalf("error must identify the payload write and its size, got %v", err)
+	}
+}
+
+func TestReadFrameAcceptsAZeroLengthFrameAtLayerOne(t *testing.T) {
+	// Arrange — a header of 0 with nothing behind it. Layer 1 moves opaque
+	// bytes and has no opinion on emptiness, so this is NOT an error here.
+	// Pinned because callers that read raw frames (the daemon's shim listener)
+	// depend on where the rejection actually happens.
+	// Act
+	payload, err := ReadFrame(bytes.NewReader([]byte{0, 0, 0, 0}))
+	// Assert
+	if err != nil || len(payload) != 0 {
+		t.Fatalf("ReadFrame = (%v, %v), want an empty payload and no error", payload, err)
+	}
+}
+
+func TestZeroLengthFrameIsRejectedAtTheAnyLayer(t *testing.T) {
+	// Arrange — the other half of the previous test: an empty frame carries no
+	// type_url, so the envelope layer is where it becomes a loud protocol
+	// violation. It must never yield a nil message with a nil error.
+	// Act
+	msg, err := ReadAny(bytes.NewReader([]byte{0, 0, 0, 0}))
+	// Assert
+	if err == nil {
+		t.Fatalf("an empty frame must error at the Any layer, got message %v", msg)
 	}
 }
