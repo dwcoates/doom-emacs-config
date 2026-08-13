@@ -6,13 +6,15 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { ModelOption } from "../../protocol/v1/core_pb";
+import { file_protocol_v1_core } from "../../protocol/v1/core_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file frontend/v1/topbar.proto.
  */
 export const file_frontend_v1_topbar: GenFile = /*@__PURE__*/
-  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIpcCCgpUb3BiYXJWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRINCgV0aXRsZRgCIAEoCRIUCgxzZXNzaW9uX2xpbmUYAyABKAkSFQoNbW9kZWxfZGlzcGxheRgEIAEoCRIvCg1tb2RlbF9vcHRpb25zGAUgAygLMhguZnJvbnRlbmQudjEuTW9kZWxPcHRpb24SNQoMY29ubmVjdGl2aXR5GAYgASgLMh8uZnJvbnRlbmQudjEuVG9wYmFyQ29ubmVjdGl2aXR5Eg0KBWZlbmNlGAggASgJEiwKCHdhcm5pbmdzGAkgAygLMhouZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0oECAcQCFIPYWNjb3VudGluZ19saW5lImEKDVRvcGJhcldhcm5pbmcSDAoEdGV4dBgBIAEoCRI6CgphY2NvdW50aW5nGAogASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudGluZ1dhcm5pbmdIAEIGCgRraW5kIhkKF1RvcGJhckFjY291bnRpbmdXYXJuaW5nIkAKElRvcGJhckNvbm5lY3Rpdml0eRIMCgR0b25lGAEgASgJEg0KBWdseXBoGAIgASgJEg0KBXRpdGxlGAMgASgJIkcKC01vZGVsT3B0aW9uEg0KBXZhbHVlGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCSIcCgtTZXRNb2RlbENtZBINCgVtb2RlbBgBIAEoCSJHChBEYWVtb25IZWFsdGhWaWV3EhIKCnJlcXVlc3RfaWQYASABKAkSDwoHaGVhbHRoeRgCIAEoCBIOCgZyZWFzb24YAyABKAkibwoRU2Vzc2lvbkhlYWx0aFZpZXcSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl3b3Jrc3BhY2UYAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCRIPCgdoZWFsdGh5GAQgASgIEg4KBnJlYXNvbhgFIAEoCSIRCg9EYWVtb25IZWFsdGhDbWQiJgoQU2Vzc2lvbkhlYWx0aENtZBISCgpzZXNzaW9uX2lkGAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM");
+  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIpcCCgpUb3BiYXJWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRINCgV0aXRsZRgCIAEoCRIUCgxzZXNzaW9uX2xpbmUYAyABKAkSFQoNbW9kZWxfZGlzcGxheRgEIAEoCRIvCg1tb2RlbF9vcHRpb25zGAUgAygLMhgucHJvdG9jb2wudjEuTW9kZWxPcHRpb24SNQoMY29ubmVjdGl2aXR5GAYgASgLMh8uZnJvbnRlbmQudjEuVG9wYmFyQ29ubmVjdGl2aXR5Eg0KBWZlbmNlGAggASgJEiwKCHdhcm5pbmdzGAkgAygLMhouZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0oECAcQCFIPYWNjb3VudGluZ19saW5lImEKDVRvcGJhcldhcm5pbmcSDAoEdGV4dBgBIAEoCRI6CgphY2NvdW50aW5nGAogASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudGluZ1dhcm5pbmdIAEIGCgRraW5kIhkKF1RvcGJhckFjY291bnRpbmdXYXJuaW5nIkAKElRvcGJhckNvbm5lY3Rpdml0eRIMCgR0b25lGAEgASgJEg0KBWdseXBoGAIgASgJEg0KBXRpdGxlGAMgASgJIhwKC1NldE1vZGVsQ21kEg0KBW1vZGVsGAEgASgJIkcKEERhZW1vbkhlYWx0aFZpZXcSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdoZWFsdGh5GAIgASgIEg4KBnJlYXNvbhgDIAEoCSJvChFTZXNzaW9uSGVhbHRoVmlldxISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEg8KB2hlYWx0aHkYBCABKAgSDgoGcmVhc29uGAUgASgJIhEKD0RhZW1vbkhlYWx0aENtZCImChBTZXNzaW9uSGVhbHRoQ21kEhIKCnNlc3Npb25faWQYASABKAlCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_protocol_v1_core]);
 
 /**
  * One workspace's topbar, resolved completely by the daemon. The client
@@ -58,7 +60,7 @@ export type TopbarView = Message<"frontend.v1.TopbarView"> & {
    * The selectable models, in display order. The selector renders exactly
    * this list.
    *
-   * @generated from field: repeated frontend.v1.ModelOption model_options = 5;
+   * @generated from field: repeated protocol.v1.ModelOption model_options = 5;
    */
   modelOptions: ModelOption[];
 
@@ -207,33 +209,6 @@ export const TopbarConnectivitySchema: GenMessage<TopbarConnectivity> = /*@__PUR
   messageDesc(file_frontend_v1_topbar, 3);
 
 /**
- * @generated from message frontend.v1.ModelOption
- */
-export type ModelOption = Message<"frontend.v1.ModelOption"> & {
-  /**
-   * @generated from field: string value = 1;
-   */
-  value: string;
-
-  /**
-   * @generated from field: string display_name = 2;
-   */
-  displayName: string;
-
-  /**
-   * @generated from field: string description = 3;
-   */
-  description: string;
-};
-
-/**
- * Describes the message frontend.v1.ModelOption.
- * Use `create(ModelOptionSchema)` to create a new message.
- */
-export const ModelOptionSchema: GenMessage<ModelOption> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 4);
-
-/**
  * A deliberate request to change an already-live session's model.  The daemon
  * forwards this to the shim and only publishes the shim-confirmed selection.
  * Bootstrap and rebind intentionally have no model field: they observe session
@@ -254,7 +229,7 @@ export type SetModelCmd = Message<"frontend.v1.SetModelCmd"> & {
  * Use `create(SetModelCmdSchema)` to create a new message.
  */
 export const SetModelCmdSchema: GenMessage<SetModelCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 5);
+  messageDesc(file_frontend_v1_topbar, 4);
 
 /**
  * Correlated result of the daemon-global health command.  A command ACK alone
@@ -287,7 +262,7 @@ export type DaemonHealthView = Message<"frontend.v1.DaemonHealthView"> & {
  * Use `create(DaemonHealthViewSchema)` to create a new message.
  */
 export const DaemonHealthViewSchema: GenMessage<DaemonHealthView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 6);
+  messageDesc(file_frontend_v1_topbar, 5);
 
 /**
  * Correlated result of the session-specific health command.  The daemon sets
@@ -336,7 +311,7 @@ export type SessionHealthView = Message<"frontend.v1.SessionHealthView"> & {
  * Use `create(SessionHealthViewSchema)` to create a new message.
  */
 export const SessionHealthViewSchema: GenMessage<SessionHealthView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 7);
+  messageDesc(file_frontend_v1_topbar, 6);
 
 /**
  * Ask the daemon to assert that every boot-critical global dependency is
@@ -354,7 +329,7 @@ export type DaemonHealthCmd = Message<"frontend.v1.DaemonHealthCmd"> & {
  * Use `create(DaemonHealthCmdSchema)` to create a new message.
  */
 export const DaemonHealthCmdSchema: GenMessage<DaemonHealthCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 8);
+  messageDesc(file_frontend_v1_topbar, 7);
 
 /**
  * Ask the daemon to prove the entire session route for one restored workspace:
@@ -378,5 +353,5 @@ export type SessionHealthCmd = Message<"frontend.v1.SessionHealthCmd"> & {
  * Use `create(SessionHealthCmdSchema)` to create a new message.
  */
 export const SessionHealthCmdSchema: GenMessage<SessionHealthCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 9);
+  messageDesc(file_frontend_v1_topbar, 8);
 

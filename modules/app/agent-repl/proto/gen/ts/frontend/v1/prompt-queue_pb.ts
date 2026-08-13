@@ -8,7 +8,7 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { SessionCommand } from "./commands_pb";
 import { file_frontend_v1_commands } from "./commands_pb";
-import type { PromptOrigin } from "../../protocol/v1/core_pb";
+import type { DetachedCancelUnsupported, NoDetachedAgentsRunning, PromptOrigin } from "../../protocol/v1/core_pb";
 import { file_protocol_v1_core } from "../../protocol/v1/core_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/prompt-queue.proto.
  */
 export const file_frontend_v1_prompt_queue: GenFile = /*@__PURE__*/
-  fileDesc("Ch5mcm9udGVuZC92MS9wcm9tcHQtcXVldWUucHJvdG8SC2Zyb250ZW5kLnYxImoKD1N1Ym1pdFByb21wdENtZBIMCgR0ZXh0GAEgASgJEhcKD3Blcm1pc3Npb25fbW9kZRgCIAEoCRIwCg1wcm9tcHRfb3JpZ2luGAMgASgOMhkucHJvdG9jb2wudjEuUHJvbXB0T3JpZ2luIiYKDEludGVycnVwdENtZBIWCg5jb25maXJtX2FnZW50cxgBIAEoCCIZChdDYW5jZWxEZXRhY2hlZEFnZW50c0NtZCLdAQoVRGV0YWNoZWRDYW5jZWxPdXRjb21lEjkKCWNhbmNlbGxlZBgBIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkQWdlbnRzQ2FuY2VsbGVkSAASPwoPbm90aGluZ19ydW5uaW5nGAIgASgLMiQuZnJvbnRlbmQudjEuTm9EZXRhY2hlZEFnZW50c1J1bm5pbmdIABI9Cgt1bnN1cHBvcnRlZBgDIAEoCzImLmZyb250ZW5kLnYxLkRldGFjaGVkQ2FuY2VsVW5zdXBwb3J0ZWRIAEIJCgdvdXRjb21lIigKF0RldGFjaGVkQWdlbnRzQ2FuY2VsbGVkEg0KBWNvdW50GAEgASgDIhkKF05vRGV0YWNoZWRBZ2VudHNSdW5uaW5nIisKGURldGFjaGVkQ2FuY2VsVW5zdXBwb3J0ZWQSDgoGZGV0YWlsGAEgASgJIhwKGlF1ZXVlQ2xhc3NpZmljYXRpb25QZW5kaW5nIjEKHFF1ZXVlQ2xhc3NpZmljYXRpb25JbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIj4KF1F1ZXVlQ2xhc3NpZmljYXRpb25Ib2xkEhEKCXJhdGlvbmFsZRgBIAEoCRIQCghhY2NlcHRlZBgCIAEoCCJWCiZRdWV1ZUNsYXNzaWZpY2F0aW9uVW5pbnRlcnJ1cHRpYmxlVHVybhIsCgdjb21tYW5kGAEgASgOMhsuZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmQiKgoYUXVldWVDbGFzc2lmaWNhdGlvbkVycm9yEg4KBmRldGFpbBgBIAEoCSLHBQoKUXVldWVFbnRyeRIKCgJpZBgBIAEoCRIMCgR0ZXh0GAIgASgJEhQKDHF1ZXVlZF9hdF9tcxgDIAEoAxI6CgdwZW5kaW5nGAogASgLMicuZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvblBlbmRpbmdIABI+CglpbnRlcmplY3QYCyABKAsyKS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uSW50ZXJqZWN0SAASQQoRaG9sZF9mb3JfdHVybl9lbmQYDCABKAsyJC5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uSG9sZEgAEjYKBWVycm9yGA0gASgLMiUuZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbkVycm9ySAASUwoUdW5pbnRlcnJ1cHRpYmxlX3R1cm4YDyABKAsyMy5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uVW5pbnRlcnJ1cHRpYmxlVHVybkgAEjcKCHNodXRkb3duGAcgASgLMiMuZnJvbnRlbmQudjEuUXVldWVFbnRyeVNodXRkb3duSG9sZEgBEjoKCmtlZXBfYWxpdmUYCCABKAsyJC5mcm9udGVuZC52MS5RdWV1ZUVudHJ5S2VlcEFsaXZlSG9sZEgBEjUKB3Jldml2YWwYCSABKAsyIi5mcm9udGVuZC52MS5RdWV1ZUVudHJ5UmV2aXZhbEhvbGRIARJACg1idWlsZF9yZWZyZXNoGA4gASgLMicuZnJvbnRlbmQudjEuUXVldWVFbnRyeUJ1aWxkUmVmcmVzaEhvbGRIAUIQCg5jbGFzc2lmaWNhdGlvbkIGCgRob2xkSgQIBBAFSgQIBRAGSgQIBhAHUg5jbGFzc2lmaWNhdGlvblIJcmF0aW9uYWxlUghhY2NlcHRlZCItChZRdWV1ZUVudHJ5U2h1dGRvd25Ib2xkEhMKC3NjaGVkdWxlX2lkGAEgASgJIioKF1F1ZXVlRW50cnlLZWVwQWxpdmVIb2xkEg8KB3R1cm5faWQYASABKAkiKQoVUXVldWVFbnRyeVJldml2YWxIb2xkSgQIARACUgpzZXNzaW9uX2lkIhwKGlF1ZXVlRW50cnlCdWlsZFJlZnJlc2hIb2xkImkKCVF1ZXVlVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSKAoHZW50cmllcxgDIAMoCzIXLmZyb250ZW5kLnYxLlF1ZXVlRW50cnkSDQoFZmVuY2UYBCABKAlKBAgCEANSCnNlc3Npb25faWQiIQoNUXVldWVGb3JjZUNtZBIQCghlbnRyeV9pZBgBIAEoCSIiCg5RdWV1ZUFjY2VwdENtZBIQCghlbnRyeV9pZBgBIAEoCSIiCg5RdWV1ZUNhbmNlbENtZBIQCghlbnRyeV9pZBgBIAEoCUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_frontend_v1_commands, file_protocol_v1_core]);
+  fileDesc("Ch5mcm9udGVuZC92MS9wcm9tcHQtcXVldWUucHJvdG8SC2Zyb250ZW5kLnYxImoKD1N1Ym1pdFByb21wdENtZBIMCgR0ZXh0GAEgASgJEhcKD3Blcm1pc3Npb25fbW9kZRgCIAEoCRIwCg1wcm9tcHRfb3JpZ2luGAMgASgOMhkucHJvdG9jb2wudjEuUHJvbXB0T3JpZ2luIiYKDEludGVycnVwdENtZBIWCg5jb25maXJtX2FnZW50cxgBIAEoCCIZChdDYW5jZWxEZXRhY2hlZEFnZW50c0NtZCLdAQoVRGV0YWNoZWRDYW5jZWxPdXRjb21lEjkKCWNhbmNlbGxlZBgBIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkQWdlbnRzQ2FuY2VsbGVkSAASPwoPbm90aGluZ19ydW5uaW5nGAIgASgLMiQucHJvdG9jb2wudjEuTm9EZXRhY2hlZEFnZW50c1J1bm5pbmdIABI9Cgt1bnN1cHBvcnRlZBgDIAEoCzImLnByb3RvY29sLnYxLkRldGFjaGVkQ2FuY2VsVW5zdXBwb3J0ZWRIAEIJCgdvdXRjb21lIigKF0RldGFjaGVkQWdlbnRzQ2FuY2VsbGVkEg0KBWNvdW50GAEgASgDIhwKGlF1ZXVlQ2xhc3NpZmljYXRpb25QZW5kaW5nIjEKHFF1ZXVlQ2xhc3NpZmljYXRpb25JbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIj4KF1F1ZXVlQ2xhc3NpZmljYXRpb25Ib2xkEhEKCXJhdGlvbmFsZRgBIAEoCRIQCghhY2NlcHRlZBgCIAEoCCJWCiZRdWV1ZUNsYXNzaWZpY2F0aW9uVW5pbnRlcnJ1cHRpYmxlVHVybhIsCgdjb21tYW5kGAEgASgOMhsuZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmQiKgoYUXVldWVDbGFzc2lmaWNhdGlvbkVycm9yEg4KBmRldGFpbBgBIAEoCSLHBQoKUXVldWVFbnRyeRIKCgJpZBgBIAEoCRIMCgR0ZXh0GAIgASgJEhQKDHF1ZXVlZF9hdF9tcxgDIAEoAxI6CgdwZW5kaW5nGAogASgLMicuZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvblBlbmRpbmdIABI+CglpbnRlcmplY3QYCyABKAsyKS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uSW50ZXJqZWN0SAASQQoRaG9sZF9mb3JfdHVybl9lbmQYDCABKAsyJC5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uSG9sZEgAEjYKBWVycm9yGA0gASgLMiUuZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbkVycm9ySAASUwoUdW5pbnRlcnJ1cHRpYmxlX3R1cm4YDyABKAsyMy5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uVW5pbnRlcnJ1cHRpYmxlVHVybkgAEjcKCHNodXRkb3duGAcgASgLMiMuZnJvbnRlbmQudjEuUXVldWVFbnRyeVNodXRkb3duSG9sZEgBEjoKCmtlZXBfYWxpdmUYCCABKAsyJC5mcm9udGVuZC52MS5RdWV1ZUVudHJ5S2VlcEFsaXZlSG9sZEgBEjUKB3Jldml2YWwYCSABKAsyIi5mcm9udGVuZC52MS5RdWV1ZUVudHJ5UmV2aXZhbEhvbGRIARJACg1idWlsZF9yZWZyZXNoGA4gASgLMicuZnJvbnRlbmQudjEuUXVldWVFbnRyeUJ1aWxkUmVmcmVzaEhvbGRIAUIQCg5jbGFzc2lmaWNhdGlvbkIGCgRob2xkSgQIBBAFSgQIBRAGSgQIBhAHUg5jbGFzc2lmaWNhdGlvblIJcmF0aW9uYWxlUghhY2NlcHRlZCItChZRdWV1ZUVudHJ5U2h1dGRvd25Ib2xkEhMKC3NjaGVkdWxlX2lkGAEgASgJIioKF1F1ZXVlRW50cnlLZWVwQWxpdmVIb2xkEg8KB3R1cm5faWQYASABKAkiKQoVUXVldWVFbnRyeVJldml2YWxIb2xkSgQIARACUgpzZXNzaW9uX2lkIhwKGlF1ZXVlRW50cnlCdWlsZFJlZnJlc2hIb2xkImkKCVF1ZXVlVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSKAoHZW50cmllcxgDIAMoCzIXLmZyb250ZW5kLnYxLlF1ZXVlRW50cnkSDQoFZmVuY2UYBCABKAlKBAgCEANSCnNlc3Npb25faWQiIQoNUXVldWVGb3JjZUNtZBIQCghlbnRyeV9pZBgBIAEoCSIiCg5RdWV1ZUFjY2VwdENtZBIQCghlbnRyeV9pZBgBIAEoCSIiCg5RdWV1ZUNhbmNlbENtZBIQCghlbnRyeV9pZBgBIAEoCUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_frontend_v1_commands, file_protocol_v1_core]);
 
 /**
  * @generated from message frontend.v1.SubmitPromptCmd
@@ -134,13 +134,13 @@ export type DetachedCancelOutcome = Message<"frontend.v1.DetachedCancelOutcome">
     case: "cancelled";
   } | {
     /**
-     * @generated from field: frontend.v1.NoDetachedAgentsRunning nothing_running = 2;
+     * @generated from field: protocol.v1.NoDetachedAgentsRunning nothing_running = 2;
      */
     value: NoDetachedAgentsRunning;
     case: "nothingRunning";
   } | {
     /**
-     * @generated from field: frontend.v1.DetachedCancelUnsupported unsupported = 3;
+     * @generated from field: protocol.v1.DetachedCancelUnsupported unsupported = 3;
      */
     value: DetachedCancelUnsupported;
     case: "unsupported";
@@ -156,6 +156,12 @@ export const DetachedCancelOutcomeSchema: GenMessage<DetachedCancelOutcome> = /*
 
 /**
  * Detached work was running and the stop reached every agent counted here.
+ *
+ * TODO(respelling): this shares a name with protocol.v1.DetachedAgentsCancelled
+ * but NOT its contents — that one carries `repeated string task_ids`, this one
+ * carries `count`, which has no counterpart there. It was therefore not
+ * collapsed into protocol.v1's, and DetachedCancelOutcome above stays declared
+ * here for the same reason: its `cancelled` arm must reference this message.
  *
  * @generated from message frontend.v1.DetachedAgentsCancelled
  */
@@ -180,49 +186,6 @@ export const DetachedAgentsCancelledSchema: GenMessage<DetachedAgentsCancelled> 
   messageDesc(file_frontend_v1_prompt_queue, 4);
 
 /**
- * Nothing detached was running, so the command stopped nothing.
- *
- * THE DAEMON REFUSES ON THIS ARM (the ack carries ok=false alongside it). A
- * cancel that stopped nothing is a keystroke that did nothing, and reporting
- * it as success is how a stop control comes to look like it works when it
- * does not reach anything. The typed arm is what lets a frontend say "nothing
- * was running" instead of showing a bare transport failure.
- *
- * @generated from message frontend.v1.NoDetachedAgentsRunning
- */
-export type NoDetachedAgentsRunning = Message<"frontend.v1.NoDetachedAgentsRunning"> & {
-};
-
-/**
- * Describes the message frontend.v1.NoDetachedAgentsRunning.
- * Use `create(NoDetachedAgentsRunningSchema)` to create a new message.
- */
-export const NoDetachedAgentsRunningSchema: GenMessage<NoDetachedAgentsRunning> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 5);
-
-/**
- * The stop could not be attempted at all: no live session behind the
- * workspace, or a vendor CLI with no task-stop control.
- *
- * @generated from message frontend.v1.DetachedCancelUnsupported
- */
-export type DetachedCancelUnsupported = Message<"frontend.v1.DetachedCancelUnsupported"> & {
-  /**
-   * Why, in one sentence, for display.
-   *
-   * @generated from field: string detail = 1;
-   */
-  detail: string;
-};
-
-/**
- * Describes the message frontend.v1.DetachedCancelUnsupported.
- * Use `create(DetachedCancelUnsupportedSchema)` to create a new message.
- */
-export const DetachedCancelUnsupportedSchema: GenMessage<DetachedCancelUnsupported> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 6);
-
-/**
  * The classifier is still running: the entry is queued and undecided.
  *
  * @generated from message frontend.v1.QueueClassificationPending
@@ -235,7 +198,7 @@ export type QueueClassificationPending = Message<"frontend.v1.QueueClassificatio
  * Use `create(QueueClassificationPendingSchema)` to create a new message.
  */
 export const QueueClassificationPendingSchema: GenMessage<QueueClassificationPending> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 7);
+  messageDesc(file_frontend_v1_prompt_queue, 5);
 
 /**
  * Deliver NOW: interrupt the running turn and submit once it has ended.
@@ -256,7 +219,7 @@ export type QueueClassificationInterject = Message<"frontend.v1.QueueClassificat
  * Use `create(QueueClassificationInterjectSchema)` to create a new message.
  */
 export const QueueClassificationInterjectSchema: GenMessage<QueueClassificationInterject> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 8);
+  messageDesc(file_frontend_v1_prompt_queue, 6);
 
 /**
  * Deliver when the turn ends on its own; do not interrupt for it.
@@ -287,7 +250,7 @@ export type QueueClassificationHold = Message<"frontend.v1.QueueClassificationHo
  * Use `create(QueueClassificationHoldSchema)` to create a new message.
  */
 export const QueueClassificationHoldSchema: GenMessage<QueueClassificationHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 9);
+  messageDesc(file_frontend_v1_prompt_queue, 7);
 
 /**
  * NOTHING CLASSIFIED THIS ENTRY, because the turn in front of it is a CONTEXT
@@ -326,7 +289,7 @@ export type QueueClassificationUninterruptibleTurn = Message<"frontend.v1.QueueC
  * Use `create(QueueClassificationUninterruptibleTurnSchema)` to create a new message.
  */
 export const QueueClassificationUninterruptibleTurnSchema: GenMessage<QueueClassificationUninterruptibleTurn> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 10);
+  messageDesc(file_frontend_v1_prompt_queue, 8);
 
 /**
  * The classifier could not be believed (it answered with neither token, or
@@ -351,7 +314,7 @@ export type QueueClassificationError = Message<"frontend.v1.QueueClassificationE
  * Use `create(QueueClassificationErrorSchema)` to create a new message.
  */
 export const QueueClassificationErrorSchema: GenMessage<QueueClassificationError> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 11);
+  messageDesc(file_frontend_v1_prompt_queue, 9);
 
 /**
  * One prompt the daemon is holding.
@@ -494,7 +457,7 @@ export type QueueEntry = Message<"frontend.v1.QueueEntry"> & {
  * Use `create(QueueEntrySchema)` to create a new message.
  */
 export const QueueEntrySchema: GenMessage<QueueEntry> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 12);
+  messageDesc(file_frontend_v1_prompt_queue, 10);
 
 /**
  * A scheduled shutdown's drain lease, holding a queue entry.
@@ -516,7 +479,7 @@ export type QueueEntryShutdownHold = Message<"frontend.v1.QueueEntryShutdownHold
  * Use `create(QueueEntryShutdownHoldSchema)` to create a new message.
  */
 export const QueueEntryShutdownHoldSchema: GenMessage<QueueEntryShutdownHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 13);
+  messageDesc(file_frontend_v1_prompt_queue, 11);
 
 /**
  * The keep-alive turn holding a queue entry.
@@ -538,7 +501,7 @@ export type QueueEntryKeepAliveHold = Message<"frontend.v1.QueueEntryKeepAliveHo
  * Use `create(QueueEntryKeepAliveHoldSchema)` to create a new message.
  */
 export const QueueEntryKeepAliveHoldSchema: GenMessage<QueueEntryKeepAliveHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 14);
+  messageDesc(file_frontend_v1_prompt_queue, 12);
 
 /**
  * The pending compact-first revival holding a queue entry.
@@ -553,7 +516,7 @@ export type QueueEntryRevivalHold = Message<"frontend.v1.QueueEntryRevivalHold">
  * Use `create(QueueEntryRevivalHoldSchema)` to create a new message.
  */
 export const QueueEntryRevivalHoldSchema: GenMessage<QueueEntryRevivalHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 15);
+  messageDesc(file_frontend_v1_prompt_queue, 13);
 
 /**
  * The entry waits for its session's shim to restart onto the current build
@@ -570,7 +533,7 @@ export type QueueEntryBuildRefreshHold = Message<"frontend.v1.QueueEntryBuildRef
  * Use `create(QueueEntryBuildRefreshHoldSchema)` to create a new message.
  */
 export const QueueEntryBuildRefreshHoldSchema: GenMessage<QueueEntryBuildRefreshHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 16);
+  messageDesc(file_frontend_v1_prompt_queue, 14);
 
 /**
  * The session's queue, pushed on EVERY change and carried in StateSnapshot.
@@ -611,7 +574,7 @@ export type QueueView = Message<"frontend.v1.QueueView"> & {
  * Use `create(QueueViewSchema)` to create a new message.
  */
 export const QueueViewSchema: GenMessage<QueueView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 17);
+  messageDesc(file_frontend_v1_prompt_queue, 15);
 
 /**
  * Deliver this entry NOW — the user overriding the classifier, or not waiting
@@ -631,7 +594,7 @@ export type QueueForceCmd = Message<"frontend.v1.QueueForceCmd"> & {
  * Use `create(QueueForceCmdSchema)` to create a new message.
  */
 export const QueueForceCmdSchema: GenMessage<QueueForceCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 18);
+  messageDesc(file_frontend_v1_prompt_queue, 16);
 
 /**
  * Confirm a HOLD entry. View state only: the entry is still delivered by the
@@ -651,7 +614,7 @@ export type QueueAcceptCmd = Message<"frontend.v1.QueueAcceptCmd"> & {
  * Use `create(QueueAcceptCmdSchema)` to create a new message.
  */
 export const QueueAcceptCmdSchema: GenMessage<QueueAcceptCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 19);
+  messageDesc(file_frontend_v1_prompt_queue, 17);
 
 /**
  * Drop an entry. It is never delivered.
@@ -670,5 +633,5 @@ export type QueueCancelCmd = Message<"frontend.v1.QueueCancelCmd"> & {
  * Use `create(QueueCancelCmdSchema)` to create a new message.
  */
 export const QueueCancelCmdSchema: GenMessage<QueueCancelCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prompt_queue, 20);
+  messageDesc(file_frontend_v1_prompt_queue, 18);
 
