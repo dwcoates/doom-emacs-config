@@ -1,19 +1,48 @@
 # agent-shim/claude/shim/
 
 The per-session Claude shim (TypeScript/Node, one process per session).
-Responsibility: drive the Claude Agent SDK (`query()`), convert the SDK stream
-into agent-shim protocol events (loud validation: hard-error on missing
-expected fields of a KNOWN family, capture an UNKNOWN discriminator onto the
-`unknown` passthrough arm, capture-and-log unknown new fields), write PERSISTENT events
-to the shim-store, forward the store-merged session stream plus EPHEMERAL
-deltas to its daemon connection, and execute control messages (prompts,
-interrupts, `canUseTool` permission round-trips).
+Responsibility: drive the Claude Agent SDK (`query()`), CONVERT the SDK stream
+into vendor-neutral records at the edge, write durable ones to the shim-store,
+forward the store-merged session stream plus live records to its daemon
+connection, and execute control messages (prompts, interrupts, `canUseTool`
+permission round-trips).
 
 It holds no cross-turn state, serves no frontend, and derives no render-state.
 A daemon disconnect does not end the in-flight turn (reattach support).
 
-Dependencies: `@anthropic-ai/claude-agent-sdk`, `proto/agentshim/` (generated
-TS), the shim-store UDS socket.
+## The shim converts at the edge, and says less than it used to
+
+Nothing vendor-shaped leaves this process. Each SDK message becomes zero or
+more `agentshim.v1.Entry` records whose external half
+(`protocol.v1.ExternalEntry`) is already neutral and whose internal half never
+crosses the wire.
+
+- **It is authoritative for LIFECYCLE**, and that is what it converts:
+  `system:init` -> `SessionBegan`, `result` -> `TurnEnded`,
+  `conversation_reset` -> `SessionIdentityChanged`, a stamped `message_start` ->
+  `ResponseTiming`, `tool_progress` -> `Heartbeat`. Every one is bookkeeping —
+  a fact ABOUT the session, which renders as nothing.
+- **It produces NO conversation content, and cannot.** A
+  `conversation.v1.MessageEntry` must state its `parent`, and the SDK stream
+  carries no parent pointer. The file plane (the sidecar) owns content because
+  that is what the vendor itself recorded.
+- **The ONE exception is the live typing preview** (`ContentArriving`, in
+  `src/proto/delta.ts`), handed straight to the daemon and never written. It is
+  refused rather than guessed when the parent is unresolvable — see below.
+- **Everything else lands on `InternalEntry.unconverted`**, whole: understood
+  vendor material on `VendorSpecificEntry`, an unrecognized discriminator on
+  `UnknownEntry`, a read failure on `UnparsedEntry`. A record with no external
+  half has no path to the daemon at all, which is what makes eager conversion
+  safe rather than lossy.
+
+**Never encode an unresolved parent as a root.** `MessageParent` is a oneof
+precisely so "this is a feed row" and "the producer could not resolve a parent"
+cannot wear the same value. A producer that cannot resolve one has nothing legal
+to emit and must fail loudly.
+
+Dependencies: `@anthropic-ai/claude-agent-sdk`, `proto/gen/ts` (generated TS for
+`conversation.v1`, `protocol.v1` and `agentshim.v1`, re-exported through
+`src/uds/proto.ts`), the shim-store UDS socket.
 
 ## No real SDK calls from tests
 
