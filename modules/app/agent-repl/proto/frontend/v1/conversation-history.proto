@@ -29,6 +29,7 @@ syntax = "proto3";
 
 package frontend.v1;
 
+import "frontend/v1/conversation-page.proto";
 import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
@@ -41,6 +42,15 @@ message FirstPageCmd {
   // Which conversation. The daemon's position is per reader PER WORKSPACE, so
   // this is what selects the position being reset.
   string workspace = 1;
+  // WHICH CONTAINER this page walks: the feed, or the inside of one message.
+  // The daemon's position is per reader per workspace PER SCOPE, so this also
+  // selects which position is being reset — opening a subagent does not throw
+  // away where the reader was in the feed.
+  //
+  // Unset is NOT a default. A request that does not state its scope is REFUSED,
+  // never read as the feed: defaulting would answer a client that forgot to
+  // name its container with the whole conversation.
+  PageScope scope = 2;
 }
 
 // Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
@@ -51,6 +61,14 @@ message FirstPageCmd {
 // position" already has its own verb.
 message NextPageCmd {
   string workspace = 1;
+  // WHICH CONTAINER to walk back through. It names the scope, never a position
+  // within it — the daemon still owns where this reader is inside that scope,
+  // so the no-position rule above is untouched.
+  //
+  // Unset is NOT a default and is REFUSED, exactly as on FirstPageCmd: a
+  // load-more that forgot which container it belongs to must not silently walk
+  // back through the feed instead.
+  PageScope scope = 2;
 }
 
 // AT MOST TEN messages, oldest first.
