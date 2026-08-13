@@ -22,7 +22,7 @@ import type {
   ResponseUsageStamp,
   RuntimeFault,
   SessionCommand,
-  SessionTokenUtilization,
+  SessionInitRow,
   ShutdownScheduleDraining,
   ShutdownScheduleView,
   MergeQueueRoster,
@@ -56,6 +56,7 @@ import type {
   WebSessionStatus,
   WorkspaceStatusInput,
 } from "./state-adapter.js";
+import type { ToolDetachment } from "./agent-emission.js";
 import type { AsyncBubbleDelta } from "./async-bubble.js";
 import { AsyncBubbleRegistry, type AsyncApplyResult, type AsyncGap } from "./async-routing.js";
 import { mergeStatusLogValue } from "./merge-status.js";
@@ -152,7 +153,8 @@ export interface TextItem extends FeedOrderedItem {
    * start rather than the end so the stamp holds still while the block streams.
    */
   ts: string;
-  tokenUtilization?: import("./frontend-proto.js").TokenUtilization[];
+  // RETIRED: `tokenUtilization` stood here — the per-response token records
+  // carried on `Message.token_utilization`, now RESERVED with no successor.
 }
 export interface ThinkingItem extends FeedOrderedItem {
   kind: "thinking";
@@ -226,6 +228,17 @@ export interface ToolItem extends FeedOrderedItem {
    * to, by design (see `watchers.ts`).
    */
   spawnedMessageId?: string;
+  /**
+   * THE CALL'S TYPED OUTCOME (`frontend.v1.AgentToolOutcome`), and the card's
+   * detachment CHIP — the typed outcome IS the chip, so there is no separate
+   * chip field beside it.
+   *
+   * Present only when the call actually detached something: an outcome whose
+   * own oneof is absent says the call returned ordinarily, and files nothing
+   * here. What it carries is the DETACHMENT'S own facts (label, kind, the
+   * ending it reached), not a vendor union this end destructures.
+   */
+  outcome?: ToolDetachment;
   /** Streamed output of the detached task this call spawned. */
   taskOutput?: string;
   /**
@@ -294,8 +307,9 @@ export interface ResultItem extends FeedOrderedItem {
    * API request declares it.
    */
   context: ResultContext | null;
-  /** Complete accounting evidence attached to the terminal result. */
-  turnAccounting?: import("./frontend-proto.js").TurnAccounting;
+  // RETIRED: `turnAccounting` stood here — the turn's complete accounting
+  // evidence off `Message.turn_accounting`, now RESERVED with no successor. The
+  // turn's verdict is the daemon's `FooterAccountingCell` instead.
 }
 /**
  * The context was CLEARED (`core.v1.ContextCleared`): discarded outright.
@@ -334,6 +348,28 @@ export interface ContextCompactedItem extends FeedOrderedItem {
   postTokens: number;
   durationMs: number;
   summary: string;
+}
+/**
+ * A COMPACTION SUMMARY: the purple-washed summary block a compaction leaves
+ * behind (`frontend.v1.CompactionSummaryItem`).
+ *
+ * ITS OWN KIND because it is its own payload arm. The wash is a STATED kind
+ * rather than an inference off a neighbouring item's shape, which is the whole
+ * reason the arm exists.
+ */
+export interface CompactionSummaryItem extends FeedOrderedItem {
+  kind: "compaction-summary";
+  uuid: string;
+  /** The summary text, verbatim markdown. */
+  summary: string;
+  /** When the compaction completed, unix millis. */
+  compactedAtMs: number;
+  /**
+   * What producing the summary cost in expensive input, and ABSENT when the
+   * result's usage was unavailable (the wire's -1). Absence renders as
+   * absence: the block prints no figure rather than a fabricated zero.
+   */
+  expensiveInputTokens?: number;
 }
 /**
  * A daemon-classified failure, as a conversation card.
@@ -473,6 +509,7 @@ export type ConversationItem =
   | ResultItem
   | ContextClearedItem
   | ContextCompactedItem
+  | CompactionSummaryItem
   | DaemonInterceptedCommandItem
   | FailureCardItem
   | SystemItem;
@@ -537,12 +574,18 @@ export interface StoreState {
   claudeSessionId: string;
   permissionMode: PermissionMode;
   /**
-   * The session's retained `data.v1.SystemInit` (protojson, camelCase),
-   * adopted from the pushed `sessionInit` frame — the /status panel's snapshot
-   * source after the cutover (replacing the GET /status probe). `null` before
-   * any init lands.
+   * The `/status` panel's ROWS, adopted verbatim from the pushed `sessionInit`
+   * frame: label and already-stringified value, in the daemon's render order.
+   *
+   * EMPTY means no init has landed yet — the panel then draws the three rows
+   * it owns (account, model, permission mode) and nothing more. It is never a
+   * placeholder and never a hole.
+   *
+   * RETIRED with the vendor payload it replaced: this held the session's whole
+   * `data.v1.SystemInit`, out of which the panel computed every value the user
+   * saw. That field is reserved on the wire now, name and number.
    */
-  systemInit: Record<string, unknown> | null;
+  statusRows: SessionInitRow[];
   items: ConversationItem[];
   /**
    * The prompts the DAEMON is holding for this session (E4), sourced wholesale
@@ -585,7 +628,9 @@ export interface StoreState {
    * that carries a map; `null` until the first one does.
    */
   modelUsage: Record<string, ModelUsage> | null;
-  tokenUtilization?: SessionTokenUtilization | null;
+  // RETIRED: `tokenUtilization` stood here — the session's cumulative token
+  // utilization off `SessionView.token_utilization`, now RESERVED with no
+  // successor. `TokenBreakdownView` carries those rows resolved.
   /**
    * Whether the running turn is being INTERRUPTED. GAP after the cutover: no
    * interrupt frame in `frontend.v1`; stays false (the SSM-resolved
@@ -741,7 +786,7 @@ function initialState(): StoreState {
     cwd: "",
     claudeSessionId: "",
     permissionMode: "default",
-    systemInit: null,
+    statusRows: [],
     items: [],
     queued: [],
     turnInFlight: false,
@@ -750,7 +795,6 @@ function initialState(): StoreState {
     resultUsage: null,
     turnUsage: new Map(),
     modelUsage: null,
-    tokenUtilization: null,
     interrupting: false,
     turnRetracted: false,
     costUsd: null,
@@ -978,6 +1022,7 @@ function itemKey(item: ConversationItem): string | null {
     case "result":
     case "context-cleared":
     case "context-compacted":
+    case "compaction-summary":
     case "daemon-intercepted-command":
       return `${item.kind}:${item.uuid}`;
     // Terminal / one-shot items carry no reconcilable id: they are appended.
@@ -1590,7 +1635,6 @@ export class ConversationStore {
     if (sv.permissionMode !== "") s.permissionMode = sv.permissionMode as PermissionMode;
     s.costUsd = sv.totalCostUsd;
     s.contextTokens = sv.totalTokens > 0 ? sv.totalTokens : null;
-    if (sv.tokenUtilization !== undefined) s.tokenUtilization = sv.tokenUtilization;
     if (sv.title !== "") s.taskSummary = sv.title;
     // Empty identity values never clobber a filled record.
     if (sv.claudeSessionId !== "") s.claudeSessionId = sv.claudeSessionId;
@@ -1710,11 +1754,12 @@ export class ConversationStore {
   }
 
   /**
-   * Adopt the pushed `SystemInit` — the /status panel's snapshot source. The
-   * daemon re-pushes the whole retained init, so the latest wins wholesale.
+   * Adopt the pushed `/status` rows. The daemon re-pushes the WHOLE row list,
+   * so the latest wins wholesale — including an empty one, which states that
+   * no init has landed rather than leaving the previous rows standing.
    */
   private applySessionInit(si: SessionInitInput): boolean {
-    this.state.systemInit = si.init;
+    this.state.statusRows = si.rows;
     return true;
   }
 

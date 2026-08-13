@@ -1,49 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { create } from "@bufbuild/protobuf";
-import { ModelUsage, TokenTimingTotals, Usage } from "../src/protocol.js";
+import { ModelUsage, Usage } from "../src/protocol.js";
 import {
   TokenMenuData,
   compactTokens,
-  averageTimeToFirstTokenMs,
   formatTokens,
-  generationTokensPerSecond,
-  timingRows,
   tokenHeatHue,
   TOKEN_HEAT_CLASS,
   uncachedInputHtml,
   tokensMenuHtml,
   tokensOverlayHtml,
   canonicalTokens,
-  agentUncachedInput,
   expensiveInput,
 } from "../src/tokens.js";
-import { attributedSubagent, generatedSessionUtilization, generatedUngroupedResponse, ungroupedResponse } from "./token-utilization-fixture.js";
-import {
-  AgentTokenUtilizationSchema,
-  ModelTokenUtilizationSchema,
-  SessionTokenUtilizationSchema,
-  TokenCacheCreationSchema,
-  TokenCacheRatesSchema,
-  TokenOutputDetailsSchema,
-  TokenServerToolUseSchema,
-  TokenTimingTotalsSchema,
-  TokenUsageTotalsSchema,
-  TokenUtilizationSubagentSchema,
-  type SessionTokenUtilization,
-} from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
 
-function timing(over: Partial<TokenTimingTotals> = {}): TokenTimingTotals {
-  return {
-    output_tokens_with_generation_duration: 400,
-    output_generation_duration_ms: 200,
-    responses_with_generation_duration: 2,
-    responses_without_generation_duration: 1,
-    total_time_to_first_token_ms: 180,
-    responses_with_time_to_first_token: 2,
-    responses_without_time_to_first_token: 1,
-    ...over,
-  };
-}
 
 /** A top-level usage payload, defaulted small and fully dimensioned. */
 function usage(over: Partial<Usage> = {}): Usage {
@@ -103,23 +72,6 @@ describe("compactTokens", () => {
   it("writes a million-scale count in M", () => {
     // Arrange + Act + Assert
     expect(compactTokens(1_230_000)).toBe("1.2M");
-  });
-});
-
-describe("timing derivations", () => {
-  it("uses only timed output for generation throughput", () => {
-    expect(generationTokensPerSecond(timing())).toBe(2000);
-  });
-
-  it("does not invent rates when timing is absent or has a zero denominator", () => {
-    expect(generationTokensPerSecond(undefined)).toBeNull();
-    expect(generationTokensPerSecond(timing({ output_generation_duration_ms: 0 }))).toBeNull();
-    expect(averageTimeToFirstTokenMs(timing({ responses_with_time_to_first_token: 0 }))).toBeNull();
-    expect(timingRows(undefined)).toEqual([["generation", "unavailable"], ["average TTFT", "unavailable"]]);
-  });
-
-  it("averages TTFT over only responses that reported it", () => {
-    expect(averageTimeToFirstTokenMs(timing())).toBe(90);
   });
 });
 
@@ -313,150 +265,6 @@ describe("tokensOverlayHtml per-model sections", () => {
   });
 });
 
-describe("tokensOverlayHtml ungrouped subagent responses", () => {
-  it("renders each response independently by API message ID and lineage", () => {
-    const first = ungroupedResponse({
-      apiMessageId: "message-one",
-      usage: { ...ungroupedResponse().usage, inputTokens: 11 },
-    });
-    const second = ungroupedResponse({
-      apiMessageId: "message-two",
-      usage: { ...ungroupedResponse().usage, inputTokens: 22 },
-    });
-
-    const html = tokensOverlayHtml(data({ ungroupedSubagentResponses: [first, second] }));
-    const firstStart = html.indexOf("ungrouped subagent response message-one");
-    const secondStart = html.indexOf("ungrouped subagent response message-two");
-    const firstSection = html.slice(firstStart, secondStart);
-    const secondSection = html.slice(secondStart);
-
-    expect(firstStart).toBeGreaterThanOrEqual(0);
-    expect(secondStart).toBeGreaterThan(firstStart);
-    expect(rows(firstSection)).toEqual(expect.arrayContaining([
-      "API message ID|message-one",
-      "parent agent|parent-agent",
-      "subagent type|research",
-      "task|inspect evidence",
-      "fresh input|11",
-    ]));
-    expect(rows(firstSection)).not.toContain("fresh input|22");
-    expect(rows(secondSection)).toEqual(expect.arrayContaining([
-      "API message ID|message-two",
-      "parent agent|parent-agent",
-      "fresh input|22",
-    ]));
-    expect(rows(secondSection)).not.toContain("fresh input|11");
-  });
-
-  it("fails loudly if an ungrouped response lacks subagent lineage", () => {
-    expect(() => tokensOverlayHtml(data({
-      ungroupedSubagentResponses: [ungroupedResponse({ actor: "mainAgent", subagent: undefined })],
-    }))).toThrow("lacks subagent lineage");
-  });
-});
-
-describe("tokensOverlayHtml generated session accounting", () => {
-  it("renders main, all-agent, grouped-subagent, model, timing, and ungrouped evidence", () => {
-    const totals = create(TokenUsageTotalsSchema, {
-      inputTokens: 10n,
-      outputTokens: 20n,
-      cacheReadInputTokens: 30n,
-      cacheCreationInputTokens: 40n,
-      cacheCreation: create(TokenCacheCreationSchema, { ephemeral5mInputTokens: 4n, ephemeral1hInputTokens: 36n }),
-      serverToolUse: create(TokenServerToolUseSchema, { webSearchRequests: 2n, webFetchRequests: 3n }),
-      outputDetails: create(TokenOutputDetailsSchema, { thinkingTokens: 5n }),
-      cacheRates: create(TokenCacheRatesSchema, { totalPromptInputTokens: 80n, cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 }),
-      timing: create(TokenTimingTotalsSchema, { outputTokensWithGenerationDuration: 20n, outputGenerationDurationMs: 100n, responsesWithGenerationDuration: 1n, responsesWithoutGenerationDuration: 2n, totalTimeToFirstTokenMs: 50n, responsesWithTimeToFirstToken: 1n, responsesWithoutTimeToFirstToken: 3n }),
-    });
-    const model = create(ModelTokenUtilizationSchema, { model: "opus", canonicalModel: "claude-opus", provider: "anthropic", totals, contextWindow: 200000n, maxOutputTokens: 32000n, costUsd: 1.25 });
-    // The daemon's canonical resolution of `totals`: 30 read, 40 written, 10
-    // unwritten, 20 output. The renderer requires it rather than partitioning
-    // the vendor buckets itself.
-    const canonical = { inputHits: { read: 30n }, inputMisses: { written: 40n, unwritten: 10n }, outputTokens: 20n };
-    const subagent = create(AgentTokenUtilizationSchema, {
-      agent: create(TokenUtilizationSubagentSchema, { agentId: "agent-7", parentToolUseId: "tool-parent", parentAgentId: "agent-parent", subagentType: "research", taskDescription: "inspect evidence" }),
-      totals,
-      tokens: canonical,
-      models: [model],
-    });
-    const ungrouped = generatedUngroupedResponse({ apiMessageId: "message-ungrouped" });
-    const session = create(SessionTokenUtilizationSchema, { allAgents: totals, mainAgent: totals, allAgentsTokens: canonical, mainAgentTokens: canonical, subagents: [subagent], models: [model], ungroupedSubagentResponses: [ungrouped] });
-
-    const html = tokensOverlayHtml(data({ sessionUtilization: session }));
-    expect(html).toContain("main agent");
-    expect(html).toContain("all agents");
-    expect(html).toContain("subagent agent-7");
-    expect(html).toContain("all agents model opus");
-    expect(html).toContain("ungrouped subagent response message-ungrouped");
-    expect(rows(html)).toEqual(expect.arrayContaining([
-      "cache write 5m|4",
-      "cache write 1h|36",
-      "total prompt input|80",
-      "web searches|2",
-      "web fetches|3",
-      "thinking tokens|5",
-      "generation|200.0 tok/s",
-      "average TTFT|50 ms",
-      "timed output tokens|20",
-      "output generation duration|100 ms",
-      "responses with generation duration|1",
-      "responses without generation duration|2",
-      "total TTFT|50 ms",
-      "responses with TTFT|1",
-      "responses without TTFT|3",
-      "canonical model|claude-opus",
-      "parent tool use ID|tool-parent",
-    ]));
-  });
-
-  it("fails loudly when generated totals are structurally absent", () => {
-    expect(() => tokensOverlayHtml(data({ sessionUtilization: create(SessionTokenUtilizationSchema) }))).toThrow(/lacks mainAgent or allAgents/);
-  });
-
-  // A MISSING DAEMON RESOLUTION IS A FAILURE, NOT A CUE TO DERIVE ONE HERE.
-  // Falling back to a local partition of the vendor buckets would put a second
-  // owner of the session economics in the renderer, silently, on exactly the
-  // frames where the daemon failed to resolve one.
-  it("fails loudly when the daemon resolved no canonical session tokens", () => {
-    const totals = create(TokenUsageTotalsSchema, { inputTokens: 10n });
-    const session = create(SessionTokenUtilizationSchema, { allAgents: totals, mainAgent: totals });
-    expect(() => tokensOverlayHtml(data({ sessionUtilization: session }))).toThrow(/lacks daemon-resolved canonical tokens/);
-  });
-
-  it("fails loudly when the daemon resolved no canonical subagent tokens", () => {
-    const totals = create(TokenUsageTotalsSchema, { inputTokens: 10n });
-    const subagent = create(AgentTokenUtilizationSchema, {
-      agent: create(TokenUtilizationSubagentSchema, { agentId: "agent-7" }),
-      totals,
-    });
-    const session = create(SessionTokenUtilizationSchema, { allAgents: totals, mainAgent: totals, allAgentsTokens: {}, mainAgentTokens: {}, subagents: [subagent] });
-    expect(() => tokensOverlayHtml(data({ sessionUtilization: session }))).toThrow(/subagent 0 lacks daemon-resolved canonical tokens/);
-  });
-
-  it("renders unavailable model metadata without fabricating scalar defaults", () => {
-    const totals = create(TokenUsageTotalsSchema);
-    const model = create(ModelTokenUtilizationSchema, { model: "opus", totals });
-    const session = create(SessionTokenUtilizationSchema, { allAgents: totals, mainAgent: totals, allAgentsTokens: {}, mainAgentTokens: {}, models: [model] });
-    const html = tokensOverlayHtml(data({ sessionUtilization: session }));
-    const start = html.indexOf("all agents model opus");
-    const modelRows = rows(html.slice(start));
-
-    expect(modelRows).toEqual(expect.arrayContaining([
-      "canonical model|unavailable",
-      "provider|unavailable",
-      "cost|unavailable",
-      "context window|unavailable",
-      "max output|unavailable",
-    ]));
-  });
-
-  it("renders generated ungrouped records from the shared fixture", () => {
-    const response = generatedUngroupedResponse({ apiMessageId: "generated-message" });
-    const session = generatedSessionUtilization([response]);
-    expect(tokensOverlayHtml(data({ sessionUtilization: session }))).toContain("complete response JSON");
-  });
-});
-
 describe("expensiveInput: the NEW input a turn fed the model", () => {
   /**
    * `canonicalTokens` is the webapp's ONE translation of vendor buckets into
@@ -498,42 +306,6 @@ describe("expensiveInput: the NEW input a turn fed the model", () => {
     u.inputMisses = undefined;
     // Act + Assert
     expect(expensiveInput(u)).toBe(0);
-  });
-});
-
-describe("agentUncachedInput: one subagent's own expensive input", () => {
-  const attributed = attributedSubagent;
-
-  it("reads the figure the daemon attributed to the named call", () => {
-    // Arrange
-    const utilization = attributed("tu1", 4_200);
-    // Act + Assert — the cache hit and the output stay out, as everywhere else.
-    expect(agentUncachedInput(utilization, "tu1")).toBe(4_200);
-  });
-
-  it("reports absence for a call the attribution does not name", () => {
-    // Arrange
-    const utilization = attributed("tu1", 4_200);
-    // Act + Assert
-    expect(agentUncachedInput(utilization, "tu2")).toBeNull();
-  });
-
-  it("reports absence for a subagent the daemon resolved no canonical tokens for", () => {
-    // Arrange
-    const utilization = create(SessionTokenUtilizationSchema, {
-      subagents: [
-        create(AgentTokenUtilizationSchema, {
-          agent: create(TokenUtilizationSubagentSchema, { parentToolUseId: "tu1" }),
-        }),
-      ],
-    });
-    // Act + Assert — a zero would claim the subagent cost nothing.
-    expect(agentUncachedInput(utilization, "tu1")).toBeNull();
-  });
-
-  it("reports absence before any attribution has landed", () => {
-    // Arrange / Act + Assert
-    expect(agentUncachedInput(null, "tu1")).toBeNull();
   });
 });
 
