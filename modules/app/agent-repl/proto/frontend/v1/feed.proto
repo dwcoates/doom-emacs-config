@@ -17,8 +17,7 @@ package frontend.v1;
 
 import "conversation/v1/content.proto";
 import "conversation/v1/payloads.proto";
-import "frontend/v1/commands.proto";
-import "frontend/v1/errors.proto";
+import "frontend/v1/shared.proto";
 import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
@@ -787,7 +786,7 @@ message TaskCatalog {
 // skill body a launched skill contributes.
 // ==========================================================================
 
-// THE COMMAND SET ITSELF LIVES IN conversation.v1 (commands.proto),
+// THE COMMAND SET ITSELF LIVES IN conversation.v1 (shared.proto),
 // along with its SessionCommandSpec option. It moved there because a durable
 // conversation record names one — DaemonAnsweredCommand — and a stored record
 // cannot depend on the daemon's resolved output surface. The MENU that renders
