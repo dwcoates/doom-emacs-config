@@ -23,8 +23,8 @@ syntax = "proto3";
 
 package agentshim.v1;
 
+import "agentshim/v1/cursor.proto";
 import "agentshim/v1/entry.proto";
-import "protocol/v1/core.proto";
 
 option go_package = "agentrepl/proto/agentshim/v1;agentshimv1";
 
@@ -52,5 +52,5 @@ message EntryBatch {
 
   // Where the producer had read to when it produced these. Unset for
   // stream-plane producers, which have no file to be positioned in.
-  protocol.v1.CursorState cursor_advance = 2;
+  CursorState cursor_advance = 2;
 }
