@@ -84,9 +84,9 @@ const (
 	// DEPRECATED by RENDER_STATE_VENDOR_BLOCKED. It was never a state of its
 	// own: an errored turn end is an abnormal CONCLUSION, which is exactly
 	// what VENDOR_BLOCKED means, and its own color said "stopped" in a way
-	// that read as neither working nor blocked. The SSM no longer resolves
-	// it; the number stays reserved-by-use so no future state reuses it and
-	// an old frontend decoding an old log still reads what it always did.
+	// that read as neither working nor blocked. The SSM no longer resolves it,
+	// and it stays in the vocabulary so an old frontend decoding an old log
+	// still reads what it always did.
 	//
 	// Deprecated: Marked as deprecated in frontend/v1/state.proto.
 	RenderState_RENDER_STATE_STOP_FAILED    RenderState = 7
@@ -139,13 +139,12 @@ const (
 	// `thinking` row from the turn it was driving when it broke; reporting that
 	// would advertise an agent nobody is connected to.
 	//
-	// KEEPS FIELD NUMBER 20, which it held while it was named
-	// RENDER_STATE_DORMANT. The rename is deliberately wire-compatible: an
-	// append-only state log written by an older daemon still carries the literal
-	// text `dormant`, and the SSM resolves that alias onto this state forever.
-	// What changed is only that the benign half of the old DORMANT — the
-	// deliberate hibernation, the never-wired workspace — moved to HIBERNATED
-	// below, so that BLUE finally means "something is actually wrong".
+	// THE SSM RESOLVES THE LITERAL TEXT `dormant` ONTO THIS STATE, FOREVER. The
+	// state log is append-only, so rows written before this state carried its
+	// present name still have to resolve to something, and this is the state
+	// they mean: not wired, and broken. The benign half of that older reading —
+	// the deliberate hibernation, the never-wired workspace — is HIBERNATED
+	// below, which is what lets BLUE mean "something is actually wrong".
 	RenderState_RENDER_STATE_SEVERED RenderState = 20
 	// Additive: NOT WIRED, and NOTHING IS WRONG — the session was deliberately
 	// put to sleep to reclaim its memory, or nothing has ever been wired to this
@@ -637,14 +636,14 @@ type WorkspaceState struct {
 	// OPAQUE. Compared byte-wise, never parsed. Its composition is the daemon's
 	// and is free to change without a wire change, which is only true for as
 	// long as nothing reads structure into it.
-	Fence string `protobuf:"bytes,19,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence string `protobuf:"bytes,3,opt,name=fence,proto3" json:"fence,omitempty"`
 	// Primary UX projection resolved by the daemon. This is retained for merge
 	// and context-cut presentation; it is not the authority for connectivity or
 	// session status.
-	State RenderState `protobuf:"varint,3,opt,name=state,proto3,enum=frontend.v1.RenderState" json:"state,omitempty"`
+	State RenderState `protobuf:"varint,4,opt,name=state,proto3,enum=frontend.v1.RenderState" json:"state,omitempty"`
 	// Resolution inputs (SSM):
-	TurnActive    bool                `protobuf:"varint,4,opt,name=turn_active,json=turnActive,proto3" json:"turn_active,omitempty"`
-	LiveTaskCount int64               `protobuf:"varint,5,opt,name=live_task_count,json=liveTaskCount,proto3" json:"live_task_count,omitempty"`
+	TurnActive    bool                `protobuf:"varint,5,opt,name=turn_active,json=turnActive,proto3" json:"turn_active,omitempty"`
+	LiveTaskCount int64               `protobuf:"varint,6,opt,name=live_task_count,json=liveTaskCount,proto3" json:"live_task_count,omitempty"`
 	CauseKind     string              `protobuf:"bytes,7,opt,name=cause_kind,json=causeKind,proto3" json:"cause_kind,omitempty"` // event kind that caused this transition
 	CauseSeq      uint64              `protobuf:"varint,8,opt,name=cause_seq,json=causeSeq,proto3" json:"cause_seq,omitempty"`   // store seq when event-caused (0 = daemon-local)
 	AtMs          int64               `protobuf:"varint,9,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
@@ -661,28 +660,31 @@ type WorkspaceState struct {
 	// shim. While held, USER prompting is blocked (the merge owns the session)
 	// and every message the session produces carries
 	// CONVERSATION_SOURCE_MERGE.
-	MergeLeaseHeld bool `protobuf:"varint,16,opt,name=merge_lease_held,json=mergeLeaseHeld,proto3" json:"merge_lease_held,omitempty"`
+	MergeLeaseHeld bool `protobuf:"varint,14,opt,name=merge_lease_held,json=mergeLeaseHeld,proto3" json:"merge_lease_held,omitempty"`
 	// WHEN this workspace's merge landed, in unix millis. 0 means it has never
 	// reached `merged`, which is the only reading of absence: a merged
 	// workspace always carries the instant it merged at.
 	//
 	// WRITTEN ONCE, at the `merged` transition, and never moved afterwards.
-	// merge_status (18) reports whichever run is currently newest and can
+	// `merge_status` reports whichever run is currently newest and can
 	// therefore be superseded; this is the durable record that the merge
 	// LANDED, so a later transition on any axis leaves it exactly where it was.
 	//
 	// It is its own persisted fact rather than a re-derivation over the state
 	// log, so a frontend ordering a recently-merged section reads the identical
 	// instant from every push, snapshot and resync.
-	MergedAtMs int64 `protobuf:"varint,17,opt,name=merged_at_ms,json=mergedAtMs,proto3" json:"merged_at_ms,omitempty"`
+	MergedAtMs int64 `protobuf:"varint,15,opt,name=merged_at_ms,json=mergedAtMs,proto3" json:"merged_at_ms,omitempty"`
 	// THE merge run's live progress, and the ONLY merge-run surface on this
-	// message. See MergeStatus. The coarse flat trio it replaced is reserved
-	// above; there is no second, weaker form of these facts to disagree with.
+	// message. See MergeStatus. IT NAMES A RUN, carries the phase as WHICH oneof
+	// arm is set, and reports the queue place the run was actually ADMITTED at.
+	// There is deliberately no second, flatter form of these facts on this
+	// message: two forms of one fact can disagree on a single frame, so the
+	// resolved run is the only one that exists.
 	//
 	// UNSET means this workspace has no merge to report — the merge axis has
 	// never spoken for it, or its axis is cleared. It is never a zero-valued
 	// status standing in for absence.
-	MergeStatus *MergeStatus `protobuf:"bytes,18,opt,name=merge_status,json=mergeStatus,proto3" json:"merge_status,omitempty"`
+	MergeStatus *MergeStatus `protobuf:"bytes,16,opt,name=merge_status,json=mergeStatus,proto3" json:"merge_status,omitempty"`
 	// THE OUTSTANDING QUESTION about taking this workspace's merge off the
 	// queue. See MergeDequeueOffer: an interrupt no longer performs the queue
 	// half, it asks, and this is where the asking lives.
@@ -692,7 +694,7 @@ type WorkspaceState struct {
 	// terminal, or dropped because the merge left the queue on its own. A
 	// frontend draws the card if and only if this field is set, so clearing it
 	// IS how the card comes down; there is no second dismissal channel.
-	MergeDequeueOffer *MergeDequeueOffer `protobuf:"bytes,20,opt,name=merge_dequeue_offer,json=mergeDequeueOffer,proto3" json:"merge_dequeue_offer,omitempty"`
+	MergeDequeueOffer *MergeDequeueOffer `protobuf:"bytes,17,opt,name=merge_dequeue_offer,json=mergeDequeueOffer,proto3" json:"merge_dequeue_offer,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -862,8 +864,14 @@ func (x *WorkspaceState) GetMergeDequeueOffer() *MergeDequeueOffer {
 // controller generation, which the daemon refuses as an identity mismatch.
 // That is a real, observed outage, not a hypothetical.
 type SessionView struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// HOST SURFACE. Emacs creates, deletes, revives and catalogs sessions, so
+	// it reads sessions as sessions. A rendering frontend does not: the facts it
+	// used to take from here reach it as fenced component views instead —
+	// WorkspaceGateView for the hibernation gate, TopbarView for the identity
+	// line, TokenBreakdownView for economics, and a resolved failure card for a
+	// terminal session's account.
+	Workspace string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// WHICH session this catalog entry describes — a correlation key, never a
 	// binding. It says "the facts below belong to this session"; it does not
 	// say "this session owns `workspace`". Only WorkspaceState.session_id says
@@ -895,31 +903,36 @@ type SessionView struct {
 	Cwd             string `protobuf:"bytes,12,opt,name=cwd,proto3" json:"cwd,omitempty"`
 	// GET /sessions parity so Emacs can drop HTTP entirely.
 	Terminal           bool  `protobuf:"varint,13,opt,name=terminal,proto3" json:"terminal,omitempty"`
-	Rehydratable       bool  `protobuf:"varint,15,opt,name=rehydratable,proto3" json:"rehydratable,omitempty"`
-	Hibernated         bool  `protobuf:"varint,16,opt,name=hibernated,proto3" json:"hibernated,omitempty"`
-	PendingPermissions int64 `protobuf:"varint,17,opt,name=pending_permissions,json=pendingPermissions,proto3" json:"pending_permissions,omitempty"`
+	Rehydratable       bool  `protobuf:"varint,14,opt,name=rehydratable,proto3" json:"rehydratable,omitempty"`
+	Hibernated         bool  `protobuf:"varint,15,opt,name=hibernated,proto3" json:"hibernated,omitempty"`
+	PendingPermissions int64 `protobuf:"varint,16,opt,name=pending_permissions,json=pendingPermissions,proto3" json:"pending_permissions,omitempty"`
 	// Account identity — the CLAUDE_CONFIG_DIR the session's
 	// shim runs against (account switching is daemon-executed, webapp-initiated).
-	ConfigDir string `protobuf:"bytes,18,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
+	ConfigDir string `protobuf:"bytes,17,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
 	// Whether this session's on-disk transcript has been read
 	// into the store — the NEVER-BLUE completion signal (see BackfillState).
-	Backfill BackfillState `protobuf:"varint,19,opt,name=backfill,proto3,enum=frontend.v1.BackfillState" json:"backfill,omitempty"`
-	// The TYPED account of why this session is terminal,
-	// superseding the free-string death_reason (RETIRED, step 11).
+	Backfill BackfillState `protobuf:"varint,18,opt,name=backfill,proto3,enum=frontend.v1.BackfillState" json:"backfill,omitempty"`
+	// The TYPED account of why this session is terminal, and the ONLY
+	// reader-facing account of it.
 	//
-	// death_reason was a free string with two producers, zero readers, and no
-	// way for a frontend to know what class of failure it described. This is
-	// the same fact classified once, daemon-side, so the dead-state card can
-	// render it the way every other failure renders. Unset while the session
+	// CLASSIFIED ONCE, DAEMON-SIDE, never a free string: a frontend that is
+	// handed prose cannot know what class of failure it describes, so it cannot
+	// color it, group it, or offer the right remedy. Typed, the dead-state card
+	// renders it the way every other failure renders. Unset while the session
 	// lives.
-	Death *FailureCardView `protobuf:"bytes,20,opt,name=death,proto3" json:"death,omitempty"`
+	Death *FailureCardView `protobuf:"bytes,19,opt,name=death,proto3" json:"death,omitempty"`
 	// The SDK-published set this session can deliberately select.  A frontend
 	// only renders these choices; it never invents or owns a model selection.
-	ModelOptions []*v1.ModelOption `protobuf:"bytes,21,rep,name=model_options,json=modelOptions,proto3" json:"model_options,omitempty"`
+	ModelOptions []*v1.ModelOption `protobuf:"bytes,20,rep,name=model_options,json=modelOptions,proto3" json:"model_options,omitempty"`
+	// NO PERSISTENCE AGGREGATE RIDES THIS MESSAGE. Token economics is durable
+	// evidence with its own home, and what a frontend needs of it arrives
+	// already digested as TokenBreakdownView's resolved rows — never as a whole
+	// aggregate a renderer is expected to re-derive rows from itself.
+	//
 	// Present iff the session is hibernated; the typed account behind the
-	// `hibernated` bool (16), which stays as its compatibility projection.
+	// `hibernated` bool, which stays as its coarse projection.
 	// A frontend renders the revival gate from this.
-	Hibernation   *HibernationDetail `protobuf:"bytes,23,opt,name=hibernation,proto3" json:"hibernation,omitempty"`
+	Hibernation   *HibernationDetail `protobuf:"bytes,21,opt,name=hibernation,proto3" json:"hibernation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1171,21 +1184,24 @@ func (x *DaemonView) GetDaemonVersion() string {
 	return ""
 }
 
-// EPHEMERAL long-tool liveness relay. The shim already emits
-// core.v1.HeartbeatProgress over its UDS while a tool runs; before this arm
-// existed the daemon had nowhere to put it and dropped it (a schema-forced
-// drop). This is the arm.
+// EPHEMERAL long-tool liveness relay: the arm the daemon puts a running tool's
+// liveness on, so a long-running tool stops looking hung. Like TypingDelta it
+// is never persisted and never appears in a StateSnapshot — a frontend that
+// reconnects simply waits for the next heartbeat.
 //
-// The embedded HeartbeatProgress is carried UNCHANGED, exactly as TypingDelta
-// carries ContentDelta: the daemon relays, it does not re-type. Consumers key
-// on progress.tool_use_id to find the running tool and use
-// progress.elapsed_seconds to tick its liveness, so a long-running tool stops
-// looking hung. Like TypingDelta it is never persisted and never appears in a
-// StateSnapshot — a frontend that reconnects simply waits for the next
-// heartbeat.
+// KNOWN GAP: THIS VIEW CURRENTLY HAS NOTHING TO TICK WITH. The per-tool
+// progress a renderer would need (which tool, how long it has been running) is
+// a fact ABOUT a turn, so BookkeepingEntry is its home — and bookkeeping never
+// reaches a client, and no resolved frontend spelling of it exists yet. So the
+// view carries a workspace and a fence and no payload. Stated loudly rather
+// than left to be discovered by a frontend looking for a field to render.
 type HeartbeatView struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// WHICH WORKSPACE this liveness belongs to, and the only addressing this
+	// view carries. A rendering frontend holds no session vocabulary; the one
+	// question it has beyond "which workspace" is "is this push still current",
+	// and the fence below answers that without naming what rotated.
+	Workspace string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// The workspace's staleness FENCE at the moment the daemon produced this
 	// push: an opaque token the client compares BYTE-WISE against the fence on
 	// the workspace's current WorkspaceState, and never parses, splits or
@@ -1195,7 +1211,7 @@ type HeartbeatView struct {
 	// The daemon mints it and is the only thing that can read meaning into it.
 	// A client that learned to decode it would be depending on a fact this
 	// contract does not offer, and the token's composition is free to change.
-	Fence         string `protobuf:"bytes,4,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence         string `protobuf:"bytes,2,opt,name=fence,proto3" json:"fence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1257,16 +1273,16 @@ const file_frontend_v1_state_proto_rawDesc = "" +
 	"\n" +
 	"cause_kind\x18\x04 \x01(\tR\tcauseKind\x12 \n" +
 	"\fopened_at_ms\x18\x05 \x01(\x03R\n" +
-	"openedAtMs\"\xc2\x06\n" +
+	"openedAtMs\"\xfa\x05\n" +
 	"\x0eWorkspaceState\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x14\n" +
-	"\x05fence\x18\x13 \x01(\tR\x05fence\x12.\n" +
-	"\x05state\x18\x03 \x01(\x0e2\x18.frontend.v1.RenderStateR\x05state\x12\x1f\n" +
-	"\vturn_active\x18\x04 \x01(\bR\n" +
+	"\x05fence\x18\x03 \x01(\tR\x05fence\x12.\n" +
+	"\x05state\x18\x04 \x01(\x0e2\x18.frontend.v1.RenderStateR\x05state\x12\x1f\n" +
+	"\vturn_active\x18\x05 \x01(\bR\n" +
 	"turnActive\x12&\n" +
-	"\x0flive_task_count\x18\x05 \x01(\x03R\rliveTaskCount\x12\x1d\n" +
+	"\x0flive_task_count\x18\x06 \x01(\x03R\rliveTaskCount\x12\x1d\n" +
 	"\n" +
 	"cause_kind\x18\a \x01(\tR\tcauseKind\x12\x1b\n" +
 	"\tcause_seq\x18\b \x01(\x04R\bcauseSeq\x12\x13\n" +
@@ -1276,11 +1292,11 @@ const file_frontend_v1_state_proto_rawDesc = "" +
 	"\x06status\x18\v \x01(\x0e2\x1a.frontend.v1.SessionStatusR\x06status\x128\n" +
 	"\x18controller_generation_id\x18\f \x01(\tR\x16controllerGenerationId\x12>\n" +
 	"\ractive_faults\x18\r \x03(\v2\x19.frontend.v1.RuntimeFaultR\factiveFaults\x12(\n" +
-	"\x10merge_lease_held\x18\x10 \x01(\bR\x0emergeLeaseHeld\x12 \n" +
-	"\fmerged_at_ms\x18\x11 \x01(\x03R\n" +
+	"\x10merge_lease_held\x18\x0e \x01(\bR\x0emergeLeaseHeld\x12 \n" +
+	"\fmerged_at_ms\x18\x0f \x01(\x03R\n" +
 	"mergedAtMs\x12;\n" +
-	"\fmerge_status\x18\x12 \x01(\v2\x18.frontend.v1.MergeStatusR\vmergeStatus\x12N\n" +
-	"\x13merge_dequeue_offer\x18\x14 \x01(\v2\x1e.frontend.v1.MergeDequeueOfferR\x11mergeDequeueOfferJ\x04\b\x06\x10\aJ\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10R\vmerge_phaseR\x14merge_queue_positionR\x11merge_queue_depth\"\xd0\x06\n" +
+	"\fmerge_status\x18\x10 \x01(\v2\x18.frontend.v1.MergeStatusR\vmergeStatus\x12N\n" +
+	"\x13merge_dequeue_offer\x18\x11 \x01(\v2\x1e.frontend.v1.MergeDequeueOfferR\x11mergeDequeueOffer\"\xa3\x06\n" +
 	"\vSessionView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -1297,27 +1313,26 @@ const file_frontend_v1_state_proto_rawDesc = "" +
 	"\x11claude_session_id\x18\v \x01(\tR\x0fclaudeSessionId\x12\x10\n" +
 	"\x03cwd\x18\f \x01(\tR\x03cwd\x12\x1a\n" +
 	"\bterminal\x18\r \x01(\bR\bterminal\x12\"\n" +
-	"\frehydratable\x18\x0f \x01(\bR\frehydratable\x12\x1e\n" +
+	"\frehydratable\x18\x0e \x01(\bR\frehydratable\x12\x1e\n" +
 	"\n" +
-	"hibernated\x18\x10 \x01(\bR\n" +
+	"hibernated\x18\x0f \x01(\bR\n" +
 	"hibernated\x12/\n" +
-	"\x13pending_permissions\x18\x11 \x01(\x03R\x12pendingPermissions\x12\x1d\n" +
+	"\x13pending_permissions\x18\x10 \x01(\x03R\x12pendingPermissions\x12\x1d\n" +
 	"\n" +
-	"config_dir\x18\x12 \x01(\tR\tconfigDir\x126\n" +
-	"\bbackfill\x18\x13 \x01(\x0e2\x1a.frontend.v1.BackfillStateR\bbackfill\x122\n" +
-	"\x05death\x18\x14 \x01(\v2\x1c.frontend.v1.FailureCardViewR\x05death\x12=\n" +
-	"\rmodel_options\x18\x15 \x03(\v2\x18.protocol.v1.ModelOptionR\fmodelOptions\x12@\n" +
-	"\vhibernation\x18\x17 \x01(\v2\x1e.frontend.v1.HibernationDetailR\vhibernationJ\x04\b\x0e\x10\x0fJ\x04\b\x16\x10\x17R\fdeath_reasonR\x11token_utilization\"\xac\x01\n" +
+	"config_dir\x18\x11 \x01(\tR\tconfigDir\x126\n" +
+	"\bbackfill\x18\x12 \x01(\x0e2\x1a.frontend.v1.BackfillStateR\bbackfill\x122\n" +
+	"\x05death\x18\x13 \x01(\v2\x1c.frontend.v1.FailureCardViewR\x05death\x12=\n" +
+	"\rmodel_options\x18\x14 \x03(\v2\x18.protocol.v1.ModelOptionR\fmodelOptions\x12@\n" +
+	"\vhibernation\x18\x15 \x01(\v2\x1e.frontend.v1.HibernationDetailR\vhibernation\"\xac\x01\n" +
 	"\n" +
 	"DaemonView\x12\x17\n" +
 	"\aboot_id\x18\x01 \x01(\tR\x06bootId\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\x123\n" +
 	"\x16daemon_binary_mtime_ms\x18\x03 \x01(\x03R\x13daemonBinaryMtimeMs\x12%\n" +
-	"\x0edaemon_version\x18\x04 \x01(\tR\rdaemonVersion\"e\n" +
+	"\x0edaemon_version\x18\x04 \x01(\tR\rdaemonVersion\"C\n" +
 	"\rHeartbeatView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x14\n" +
-	"\x05fence\x18\x04 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\n" +
-	"session_idR\bprogress*\xb0\x05\n" +
+	"\x05fence\x18\x02 \x01(\tR\x05fence*\xb0\x05\n" +
 	"\vRenderState\x12\x1c\n" +
 	"\x18RENDER_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RENDER_STATE_INIT\x10\x01\x12\x15\n" +

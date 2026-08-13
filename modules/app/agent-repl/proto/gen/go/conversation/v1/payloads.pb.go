@@ -1561,15 +1561,15 @@ type isWorkflowStep_Status interface {
 }
 
 type WorkflowStep_Running struct {
-	Running *WorkflowStepRunning `protobuf:"bytes,10,opt,name=running,proto3,oneof"`
+	Running *WorkflowStepRunning `protobuf:"bytes,3,opt,name=running,proto3,oneof"`
 }
 
 type WorkflowStep_Done struct {
-	Done *WorkflowStepDone `protobuf:"bytes,11,opt,name=done,proto3,oneof"`
+	Done *WorkflowStepDone `protobuf:"bytes,4,opt,name=done,proto3,oneof"`
 }
 
 type WorkflowStep_Failed struct {
-	Failed *WorkflowStepFailed `protobuf:"bytes,12,opt,name=failed,proto3,oneof"`
+	Failed *WorkflowStepFailed `protobuf:"bytes,5,opt,name=failed,proto3,oneof"`
 }
 
 func (*WorkflowStep_Running) isWorkflowStep_Status() {}
@@ -2567,10 +2567,9 @@ const file_conversation_v1_payloads_proto_rawDesc = "" +
 	"\fWorkflowStep\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x16\n" +
 	"\x06detail\x18\x02 \x01(\tR\x06detail\x12@\n" +
-	"\arunning\x18\n" +
-	" \x01(\v2$.conversation.v1.WorkflowStepRunningH\x00R\arunning\x127\n" +
-	"\x04done\x18\v \x01(\v2!.conversation.v1.WorkflowStepDoneH\x00R\x04done\x12=\n" +
-	"\x06failed\x18\f \x01(\v2#.conversation.v1.WorkflowStepFailedH\x00R\x06failedB\b\n" +
+	"\arunning\x18\x03 \x01(\v2$.conversation.v1.WorkflowStepRunningH\x00R\arunning\x127\n" +
+	"\x04done\x18\x04 \x01(\v2!.conversation.v1.WorkflowStepDoneH\x00R\x04done\x12=\n" +
+	"\x06failed\x18\x05 \x01(\v2#.conversation.v1.WorkflowStepFailedH\x00R\x06failedB\b\n" +
 	"\x06status\"\x15\n" +
 	"\x13WorkflowStepRunning\"\x12\n" +
 	"\x10WorkflowStepDone\"\x14\n" +

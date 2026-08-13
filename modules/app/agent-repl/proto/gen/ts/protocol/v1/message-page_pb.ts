@@ -44,7 +44,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file protocol/v1/message-page.proto.
  */
 export const file_protocol_v1_message_page: GenFile = /*@__PURE__*/
-  fileDesc("Ch5wcm90b2NvbC92MS9tZXNzYWdlLXBhZ2UucHJvdG8SC3Byb3RvY29sLnYxIooBChJNZXNzYWdlUGFnZVJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAQgASgJEiwKBGhlYWQYAiABKAsyHC5wcm90b2NvbC52MS5NZXNzYWdlUGFnZUhlYWRIABIUCgpiZWZvcmVfc2VxGAMgASgESABCCAoGYW5jaG9yIhEKD01lc3NhZ2VQYWdlSGVhZCKDBQoLTWVzc2FnZVBhZ2USEgoKcmVxdWVzdF9pZBgBIAEoCRItCgltZXNzYWdlXzEYAiABKAsyGi5wcm90b2NvbC52MS5TdG9yZWRNZXNzYWdlEi0KCW1lc3NhZ2VfMhgDIAEoCzIaLnByb3RvY29sLnYxLlN0b3JlZE1lc3NhZ2USLQoJbWVzc2FnZV8zGAQgASgLMhoucHJvdG9jb2wudjEuU3RvcmVkTWVzc2FnZRItCgltZXNzYWdlXzQYBSABKAsyGi5wcm90b2NvbC52MS5TdG9yZWRNZXNzYWdlEi0KCW1lc3NhZ2VfNRgGIAEoCzIaLnByb3RvY29sLnYxLlN0b3JlZE1lc3NhZ2USLQoJbWVzc2FnZV82GAcgASgLMhoucHJvdG9jb2wudjEuU3RvcmVkTWVzc2FnZRItCgltZXNzYWdlXzcYCCABKAsyGi5wcm90b2NvbC52MS5TdG9yZWRNZXNzYWdlEi0KCW1lc3NhZ2VfOBgJIAEoCzIaLnByb3RvY29sLnYxLlN0b3JlZE1lc3NhZ2USLQoJbWVzc2FnZV85GAogASgLMhoucHJvdG9jb2wudjEuU3RvcmVkTWVzc2FnZRIuCgptZXNzYWdlXzEwGAsgASgLMhoucHJvdG9jb2wudjEuU3RvcmVkTWVzc2FnZRIVCg1sYXN0X3BhZ2Vfc2VxGAwgASgEEjAKBG1vcmUYDSABKAsyIC5wcm90b2NvbC52MS5IaXN0b3J5UmVtYWluc0JlbG93SAASNAoFZmxvb3IYDiABKAsyIy5wcm90b2NvbC52MS5IaXN0b3J5QXRSZXRhaW5lZEZsb29ySABCCgoIYm91bmRhcnkiUAoNU3RvcmVkTWVzc2FnZRISCgptZXNzYWdlX2lkGAEgASgJEisKB3JlY29yZHMYAiADKAsyGi5wcm90b2NvbC52MS5FeHRlcm5hbEVudHJ5IhUKE0hpc3RvcnlSZW1haW5zQmVsb3ciGAoWSGlzdG9yeUF0UmV0YWluZWRGbG9vckIoWiZhZ2VudHJlcGwvcHJvdG8vcHJvdG9jb2wvdjE7cHJvdG9jb2x2MWIGcHJvdG8z", [file_protocol_v1_external]);
+  fileDesc("Ch5wcm90b2NvbC92MS9tZXNzYWdlLXBhZ2UucHJvdG8SC3Byb3RvY29sLnYxIooBChJNZXNzYWdlUGFnZVJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEiwKBGhlYWQYAyABKAsyHC5wcm90b2NvbC52MS5NZXNzYWdlUGFnZUhlYWRIABIUCgpiZWZvcmVfc2VxGAQgASgESABCCAoGYW5jaG9yIhEKD01lc3NhZ2VQYWdlSGVhZCKDBQoLTWVzc2FnZVBhZ2USEgoKcmVxdWVzdF9pZBgBIAEoCRItCgltZXNzYWdlXzEYAiABKAsyGi5wcm90b2NvbC52MS5TdG9yZWRNZXNzYWdlEi0KCW1lc3NhZ2VfMhgDIAEoCzIaLnByb3RvY29sLnYxLlN0b3JlZE1lc3NhZ2USLQoJbWVzc2FnZV8zGAQgASgLMhoucHJvdG9jb2wudjEuU3RvcmVkTWVzc2FnZRItCgltZXNzYWdlXzQYBSABKAsyGi5wcm90b2NvbC52MS5TdG9yZWRNZXNzYWdlEi0KCW1lc3NhZ2VfNRgGIAEoCzIaLnByb3RvY29sLnYxLlN0b3JlZE1lc3NhZ2USLQoJbWVzc2FnZV82GAcgASgLMhoucHJvdG9jb2wudjEuU3RvcmVkTWVzc2FnZRItCgltZXNzYWdlXzcYCCABKAsyGi5wcm90b2NvbC52MS5TdG9yZWRNZXNzYWdlEi0KCW1lc3NhZ2VfOBgJIAEoCzIaLnByb3RvY29sLnYxLlN0b3JlZE1lc3NhZ2USLQoJbWVzc2FnZV85GAogASgLMhoucHJvdG9jb2wudjEuU3RvcmVkTWVzc2FnZRIuCgptZXNzYWdlXzEwGAsgASgLMhoucHJvdG9jb2wudjEuU3RvcmVkTWVzc2FnZRIVCg1sYXN0X3BhZ2Vfc2VxGAwgASgEEjAKBG1vcmUYDSABKAsyIC5wcm90b2NvbC52MS5IaXN0b3J5UmVtYWluc0JlbG93SAASNAoFZmxvb3IYDiABKAsyIy5wcm90b2NvbC52MS5IaXN0b3J5QXRSZXRhaW5lZEZsb29ySABCCgoIYm91bmRhcnkiUAoNU3RvcmVkTWVzc2FnZRISCgptZXNzYWdlX2lkGAEgASgJEisKB3JlY29yZHMYAiADKAsyGi5wcm90b2NvbC52MS5FeHRlcm5hbEVudHJ5IhUKE0hpc3RvcnlSZW1haW5zQmVsb3ciGAoWSGlzdG9yeUF0UmV0YWluZWRGbG9vckIoWiZhZ2VudHJlcGwvcHJvdG8vcHJvdG9jb2wvdjE7cHJvdG9jb2x2MWIGcHJvdG8z", [file_protocol_v1_external]);
 
 /**
  * Ask for ONE page of messages, running BACKWARD from the anchor. Never a
@@ -68,7 +68,7 @@ export type MessagePageRequest = Message<"protocol.v1.MessagePageRequest"> & {
    * It is a ROUTING key, never a position — it says which history to read, and
    * says nothing about where in that history the read starts.
    *
-   * @generated from field: string session_id = 4;
+   * @generated from field: string session_id = 2;
    */
   sessionId: string;
 
@@ -81,7 +81,7 @@ export type MessagePageRequest = Message<"protocol.v1.MessagePageRequest"> & {
      * one the old vocabulary could not express: a reader that does not know
      * the head seq could not name it.
      *
-     * @generated from field: protocol.v1.MessagePageHead head = 2;
+     * @generated from field: protocol.v1.MessagePageHead head = 3;
      */
     value: MessagePageHead;
     case: "head";
@@ -91,7 +91,7 @@ export type MessagePageRequest = Message<"protocol.v1.MessagePageRequest"> & {
      * VERBATIM. This names a place the caller has DEMONSTRABLY BEEN, and walks
      * away from the history rather than into it.
      *
-     * @generated from field: uint64 before_seq = 3;
+     * @generated from field: uint64 before_seq = 4;
      */
     value: bigint;
     case: "beforeSeq";

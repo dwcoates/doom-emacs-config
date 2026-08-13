@@ -174,7 +174,7 @@ type ExternalEntry_Message struct {
 	// A context cut and a failure card are messages by this test: a reader must
 	// see WHERE the conversation was cut, and a failure card is a thing the
 	// user reads and acts on.
-	Message *v1.MessageEntry `protobuf:"bytes,40,opt,name=message,proto3,oneof"`
+	Message *v1.MessageEntry `protobuf:"bytes,3,opt,name=message,proto3,oneof"`
 }
 
 type ExternalEntry_Bookkeeping struct {
@@ -194,7 +194,7 @@ type ExternalEntry_Bookkeeping struct {
 	// the daemon has resolved it into a view, which is what makes it evidence
 	// rather than content. That is a SECOND cut, made later and by the daemon;
 	// this file's cut is the shim→daemon one.
-	Bookkeeping *BookkeepingEntry `protobuf:"bytes,41,opt,name=bookkeeping,proto3,oneof"`
+	Bookkeeping *BookkeepingEntry `protobuf:"bytes,4,opt,name=bookkeeping,proto3,oneof"`
 }
 
 func (*ExternalEntry_Message) isExternalEntry_Entry() {}
@@ -210,8 +210,8 @@ const file_protocol_v1_external_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12$\n" +
 	"\x0eproduced_at_ms\x18\x02 \x01(\x03R\fproducedAtMs\x129\n" +
-	"\amessage\x18( \x01(\v2\x1d.conversation.v1.MessageEntryH\x00R\amessage\x12A\n" +
-	"\vbookkeeping\x18) \x01(\v2\x1d.protocol.v1.BookkeepingEntryH\x00R\vbookkeepingB\a\n" +
+	"\amessage\x18\x03 \x01(\v2\x1d.conversation.v1.MessageEntryH\x00R\amessage\x12A\n" +
+	"\vbookkeeping\x18\x04 \x01(\v2\x1d.protocol.v1.BookkeepingEntryH\x00R\vbookkeepingB\a\n" +
 	"\x05entryB(Z&agentrepl/proto/protocol/v1;protocolv1b\x06proto3"
 
 var (

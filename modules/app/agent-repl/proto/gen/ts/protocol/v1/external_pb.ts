@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file protocol/v1/external.proto.
  */
 export const file_protocol_v1_external: GenFile = /*@__PURE__*/
-  fileDesc("Chpwcm90b2NvbC92MS9leHRlcm5hbC5wcm90bxILcHJvdG9jb2wudjEirAEKDUV4dGVybmFsRW50cnkSEgoKc2Vzc2lvbl9pZBgBIAEoCRIWCg5wcm9kdWNlZF9hdF9tcxgCIAEoAxIwCgdtZXNzYWdlGCggASgLMh0uY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VFbnRyeUgAEjQKC2Jvb2trZWVwaW5nGCkgASgLMh0ucHJvdG9jb2wudjEuQm9va2tlZXBpbmdFbnRyeUgAQgcKBWVudHJ5QihaJmFnZW50cmVwbC9wcm90by9wcm90b2NvbC92MTtwcm90b2NvbHYxYgZwcm90bzM", [file_protocol_v1_bookkeeping, file_conversation_v1_message]);
+  fileDesc("Chpwcm90b2NvbC92MS9leHRlcm5hbC5wcm90bxILcHJvdG9jb2wudjEirAEKDUV4dGVybmFsRW50cnkSEgoKc2Vzc2lvbl9pZBgBIAEoCRIWCg5wcm9kdWNlZF9hdF9tcxgCIAEoAxIwCgdtZXNzYWdlGAMgASgLMh0uY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VFbnRyeUgAEjQKC2Jvb2trZWVwaW5nGAQgASgLMh0ucHJvdG9jb2wudjEuQm9va2tlZXBpbmdFbnRyeUgAQgcKBWVudHJ5QihaJmFnZW50cmVwbC9wcm90by9wcm90b2NvbC92MTtwcm90b2NvbHYxYgZwcm90bzM", [file_protocol_v1_bookkeeping, file_conversation_v1_message]);
 
 /**
  * Everything about a record that is eligible to cross the shim→daemon wire.
@@ -104,7 +104,7 @@ export type ExternalEntry = Message<"protocol.v1.ExternalEntry"> & {
      * see WHERE the conversation was cut, and a failure card is a thing the
      * user reads and acts on.
      *
-     * @generated from field: conversation.v1.MessageEntry message = 40;
+     * @generated from field: conversation.v1.MessageEntry message = 3;
      */
     value: MessageEntry;
     case: "message";
@@ -127,7 +127,7 @@ export type ExternalEntry = Message<"protocol.v1.ExternalEntry"> & {
      * rather than content. That is a SECOND cut, made later and by the daemon;
      * this file's cut is the shim→daemon one.
      *
-     * @generated from field: protocol.v1.BookkeepingEntry bookkeeping = 41;
+     * @generated from field: protocol.v1.BookkeepingEntry bookkeeping = 4;
      */
     value: BookkeepingEntry;
     case: "bookkeeping";

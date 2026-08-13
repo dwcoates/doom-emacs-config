@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/sidebar.proto.
  */
 export const file_frontend_v1_sidebar: GenFile = /*@__PURE__*/
-  fileDesc("Chlmcm9udGVuZC92MS9zaWRlYmFyLnByb3RvEgtmcm9udGVuZC52MSL9AQoPV29ya3NwYWNlUm9zdGVyEhAKCHJldmlzaW9uGAEgASgDEg8KB2Jvb3RfaWQYByABKAkSNwoKcmVwb3NpdG9yeRgCIAEoCzIhLmZyb250ZW5kLnYxLlJvc3RlclJlcG9zaXRvcnlWaWV3SAASKwoEdGFzaxgDIAEoCzIbLmZyb250ZW5kLnYxLlJvc3RlclRhc2tWaWV3SAASMwoPcmVjZW50bHlfbWVyZ2VkGAQgASgLMhouZnJvbnRlbmQudjEuUm9zdGVyU2VjdGlvbhITCgtjdXJyZW50X2RpchgFIAEoCRIPCgduYXZfZGlyGAYgASgJQgYKBHZpZXciSAoUUm9zdGVyUmVwb3NpdG9yeVZpZXcSMAoIc2VjdGlvbnMYASADKAsyHi5mcm9udGVuZC52MS5Sb3N0ZXJSZXBvU2VjdGlvbiJCCg5Sb3N0ZXJUYXNrVmlldxIwCghzZWN0aW9ucxgBIAMoCzIeLmZyb250ZW5kLnYxLlJvc3RlclRhc2tTZWN0aW9uImoKEVJvc3RlclJlcG9TZWN0aW9uEhAKCHJlcG9fa2V5GAEgASgJEg4KBmZvbGRlZBgCIAEoCBIkCgRyb3dzGAMgAygLMhYuZnJvbnRlbmQudjEuUm9zdGVyUm93Eg0KBWxhYmVsGAQgASgJImcKEVJvc3RlclRhc2tTZWN0aW9uEg8KB3Rhc2tfaWQYASABKAkSDQoFdGl0bGUYAiABKAkSDAoEZG9uZRgDIAEoCBIkCgRyb3dzGAQgAygLMhYuZnJvbnRlbmQudjEuUm9zdGVyUm93IlQKDVJvc3RlclNlY3Rpb24SJAoEcm93cxgBIAMoCzIWLmZyb250ZW5kLnYxLlJvc3RlclJvdxIOCgZmb2xkZWQYAiABKAgSDQoFbGFiZWwYAyABKAki9wwKCVJvc3RlclJvdxILCgNkaXIYASABKAkSDAoEbmFtZRgCIAEoCRI8CgpzdWJtaXR0aW5nGAMgASgLMiYuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzU3VibWl0dGluZ0gAEjgKCHRoaW5raW5nGAYgASgLMiQuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzVGhpbmtpbmdIABI4CghjbGVhcmluZxgHIAEoCzIkLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0NsZWFyaW5nSAASPAoKY29tcGFjdGluZxgIIAEoCzImLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0NvbXBhY3RpbmdIABI8CgpwZXJtaXNzaW9uGAkgASgLMiYuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzUGVybWlzc2lvbkgAEjAKBGRvbmUYCiABKAsyIC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNEb25lSAASPgoLaW50ZXJydXB0ZWQYCyABKAsyJy5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNJbnRlcnJ1cHRlZEgAEjIKBXJlYWR5GAwgASgLMiEuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzUmVhZHlIABI7CgppZGxlX2FzeW5jGA0gASgLMiUuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzSWRsZUFzeW5jSAASQwoOdmVuZG9yX2Jsb2NrZWQYDiABKAsyKS5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNWZW5kb3JCbG9ja2VkSAASMAoEaW5pdBgPIAEoCzIgLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0luaXRIABI2CgdzZXZlcmVkGBAgASgLMiMuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzU2V2ZXJlZEgAEjwKCmhpYmVybmF0ZWQYESABKAsyJi5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNIaWJlcm5hdGVkSAASPwoMc3RhcnRfZmFpbGVkGBIgASgLMicuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzU3RhcnRGYWlsZWRIABI4CghkZWdyYWRlZBgTIAEoCzIkLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0RlZ3JhZGVkSAASMAoEZGVhZBgUIAEoCzIgLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0RlYWRIABJFCg9tZXJnZV9lbnF1ZXVpbmcYFSABKAsyKi5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNNZXJnZUVucXVldWluZ0gAEjYKB21lcmdpbmcYFiABKAsyIy5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNNZXJnaW5nSAASPwoMbWVyZ2VfcXVldWVkGBcgASgLMicuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzTWVyZ2VRdWV1ZWRIABJDCg5tZXJnZV9jb25mbGljdBgYIAEoCzIpLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c01lcmdlQ29uZmxpY3RIABI/CgxtZXJnZV9mYWlsZWQYGSABKAsyJy5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNNZXJnZUZhaWxlZEgAEjQKBm1lcmdlZBgaIAEoCzIiLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c01lcmdlZEgAEjAKBG5vbmUYGyABKAsyIC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNOb25lSAASOAoIaW5hY3RpdmUYHCABKAsyJC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNJbmFjdGl2ZUgAEg8KB2N1cnJlbnQYBCABKAgSKAoIY2hpbGRyZW4YBSADKAsyFi5mcm9udGVuZC52MS5Sb3N0ZXJSb3cSGQoRbGFzdF92aWV3ZWRfYXRfbXMYHSABKAMSFAoMbWVyZ2VkX2F0X21zGB4gASgDEg4KBmJyYW5jaBgfIAEoCRIVCg1wYXJlbnRfYnJhbmNoGCAgASgJEg8KB3N1bW1hcnkYISABKAkSDgoGY2xvc2VkGCIgASgIQggKBnN0YXR1cyIbChlSb3N0ZXJSb3dTdGF0dXNTdWJtaXR0aW5nIhkKF1Jvc3RlclJvd1N0YXR1c1RoaW5raW5nIhkKF1Jvc3RlclJvd1N0YXR1c0NsZWFyaW5nIhsKGVJvc3RlclJvd1N0YXR1c0NvbXBhY3RpbmciGwoZUm9zdGVyUm93U3RhdHVzUGVybWlzc2lvbiIVChNSb3N0ZXJSb3dTdGF0dXNEb25lIhwKGlJvc3RlclJvd1N0YXR1c0ludGVycnVwdGVkIhYKFFJvc3RlclJvd1N0YXR1c1JlYWR5IhoKGFJvc3RlclJvd1N0YXR1c0lkbGVBc3luYyIeChxSb3N0ZXJSb3dTdGF0dXNWZW5kb3JCbG9ja2VkIhUKE1Jvc3RlclJvd1N0YXR1c0luaXQiGAoWUm9zdGVyUm93U3RhdHVzU2V2ZXJlZCIbChlSb3N0ZXJSb3dTdGF0dXNIaWJlcm5hdGVkIhwKGlJvc3RlclJvd1N0YXR1c1N0YXJ0RmFpbGVkIhkKF1Jvc3RlclJvd1N0YXR1c0RlZ3JhZGVkIhUKE1Jvc3RlclJvd1N0YXR1c0RlYWQiHwodUm9zdGVyUm93U3RhdHVzTWVyZ2VFbnF1ZXVpbmciGAoWUm9zdGVyUm93U3RhdHVzTWVyZ2luZyIcChpSb3N0ZXJSb3dTdGF0dXNNZXJnZVF1ZXVlZCIeChxSb3N0ZXJSb3dTdGF0dXNNZXJnZUNvbmZsaWN0IhwKGlJvc3RlclJvd1N0YXR1c01lcmdlRmFpbGVkIhcKFVJvc3RlclJvd1N0YXR1c01lcmdlZCIVChNSb3N0ZXJSb3dTdGF0dXNOb25lIhkKF1Jvc3RlclJvd1N0YXR1c0luYWN0aXZlIkkKGVB1Ymxpc2hXb3Jrc3BhY2VSb3N0ZXJDbWQSLAoGcm9zdGVyGAEgASgLMhwuZnJvbnRlbmQudjEuV29ya3NwYWNlUm9zdGVyIjMKDFJvc3Rlck5vdGljZRIMCgR0ZXh0GAEgASgJEhUKDWF1dG9fY2xlYXJfbXMYAiABKAVCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw");
+  fileDesc("Chlmcm9udGVuZC92MS9zaWRlYmFyLnByb3RvEgtmcm9udGVuZC52MSL9AQoPV29ya3NwYWNlUm9zdGVyEhAKCHJldmlzaW9uGAEgASgDEg8KB2Jvb3RfaWQYAiABKAkSNwoKcmVwb3NpdG9yeRgDIAEoCzIhLmZyb250ZW5kLnYxLlJvc3RlclJlcG9zaXRvcnlWaWV3SAASKwoEdGFzaxgEIAEoCzIbLmZyb250ZW5kLnYxLlJvc3RlclRhc2tWaWV3SAASMwoPcmVjZW50bHlfbWVyZ2VkGAUgASgLMhouZnJvbnRlbmQudjEuUm9zdGVyU2VjdGlvbhITCgtjdXJyZW50X2RpchgGIAEoCRIPCgduYXZfZGlyGAcgASgJQgYKBHZpZXciSAoUUm9zdGVyUmVwb3NpdG9yeVZpZXcSMAoIc2VjdGlvbnMYASADKAsyHi5mcm9udGVuZC52MS5Sb3N0ZXJSZXBvU2VjdGlvbiJCCg5Sb3N0ZXJUYXNrVmlldxIwCghzZWN0aW9ucxgBIAMoCzIeLmZyb250ZW5kLnYxLlJvc3RlclRhc2tTZWN0aW9uImoKEVJvc3RlclJlcG9TZWN0aW9uEhAKCHJlcG9fa2V5GAEgASgJEg4KBmZvbGRlZBgCIAEoCBIkCgRyb3dzGAMgAygLMhYuZnJvbnRlbmQudjEuUm9zdGVyUm93Eg0KBWxhYmVsGAQgASgJImcKEVJvc3RlclRhc2tTZWN0aW9uEg8KB3Rhc2tfaWQYASABKAkSDQoFdGl0bGUYAiABKAkSDAoEZG9uZRgDIAEoCBIkCgRyb3dzGAQgAygLMhYuZnJvbnRlbmQudjEuUm9zdGVyUm93IlQKDVJvc3RlclNlY3Rpb24SJAoEcm93cxgBIAMoCzIWLmZyb250ZW5kLnYxLlJvc3RlclJvdxIOCgZmb2xkZWQYAiABKAgSDQoFbGFiZWwYAyABKAki9wwKCVJvc3RlclJvdxILCgNkaXIYASABKAkSDAoEbmFtZRgCIAEoCRI8CgpzdWJtaXR0aW5nGAMgASgLMiYuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzU3VibWl0dGluZ0gAEjgKCHRoaW5raW5nGAQgASgLMiQuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzVGhpbmtpbmdIABI4CghjbGVhcmluZxgFIAEoCzIkLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0NsZWFyaW5nSAASPAoKY29tcGFjdGluZxgGIAEoCzImLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0NvbXBhY3RpbmdIABI8CgpwZXJtaXNzaW9uGAcgASgLMiYuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzUGVybWlzc2lvbkgAEjAKBGRvbmUYCCABKAsyIC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNEb25lSAASPgoLaW50ZXJydXB0ZWQYCSABKAsyJy5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNJbnRlcnJ1cHRlZEgAEjIKBXJlYWR5GAogASgLMiEuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzUmVhZHlIABI7CgppZGxlX2FzeW5jGAsgASgLMiUuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzSWRsZUFzeW5jSAASQwoOdmVuZG9yX2Jsb2NrZWQYDCABKAsyKS5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNWZW5kb3JCbG9ja2VkSAASMAoEaW5pdBgNIAEoCzIgLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0luaXRIABI2CgdzZXZlcmVkGA4gASgLMiMuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzU2V2ZXJlZEgAEjwKCmhpYmVybmF0ZWQYDyABKAsyJi5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNIaWJlcm5hdGVkSAASPwoMc3RhcnRfZmFpbGVkGBAgASgLMicuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzU3RhcnRGYWlsZWRIABI4CghkZWdyYWRlZBgRIAEoCzIkLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0RlZ3JhZGVkSAASMAoEZGVhZBgSIAEoCzIgLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0RlYWRIABJFCg9tZXJnZV9lbnF1ZXVpbmcYEyABKAsyKi5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNNZXJnZUVucXVldWluZ0gAEjYKB21lcmdpbmcYFCABKAsyIy5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNNZXJnaW5nSAASPwoMbWVyZ2VfcXVldWVkGBUgASgLMicuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzTWVyZ2VRdWV1ZWRIABJDCg5tZXJnZV9jb25mbGljdBgWIAEoCzIpLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c01lcmdlQ29uZmxpY3RIABI/CgxtZXJnZV9mYWlsZWQYFyABKAsyJy5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNNZXJnZUZhaWxlZEgAEjQKBm1lcmdlZBgYIAEoCzIiLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c01lcmdlZEgAEjAKBG5vbmUYGSABKAsyIC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNOb25lSAASOAoIaW5hY3RpdmUYGiABKAsyJC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNJbmFjdGl2ZUgAEg8KB2N1cnJlbnQYGyABKAgSKAoIY2hpbGRyZW4YHCADKAsyFi5mcm9udGVuZC52MS5Sb3N0ZXJSb3cSGQoRbGFzdF92aWV3ZWRfYXRfbXMYHSABKAMSFAoMbWVyZ2VkX2F0X21zGB4gASgDEg4KBmJyYW5jaBgfIAEoCRIVCg1wYXJlbnRfYnJhbmNoGCAgASgJEg8KB3N1bW1hcnkYISABKAkSDgoGY2xvc2VkGCIgASgIQggKBnN0YXR1cyIbChlSb3N0ZXJSb3dTdGF0dXNTdWJtaXR0aW5nIhkKF1Jvc3RlclJvd1N0YXR1c1RoaW5raW5nIhkKF1Jvc3RlclJvd1N0YXR1c0NsZWFyaW5nIhsKGVJvc3RlclJvd1N0YXR1c0NvbXBhY3RpbmciGwoZUm9zdGVyUm93U3RhdHVzUGVybWlzc2lvbiIVChNSb3N0ZXJSb3dTdGF0dXNEb25lIhwKGlJvc3RlclJvd1N0YXR1c0ludGVycnVwdGVkIhYKFFJvc3RlclJvd1N0YXR1c1JlYWR5IhoKGFJvc3RlclJvd1N0YXR1c0lkbGVBc3luYyIeChxSb3N0ZXJSb3dTdGF0dXNWZW5kb3JCbG9ja2VkIhUKE1Jvc3RlclJvd1N0YXR1c0luaXQiGAoWUm9zdGVyUm93U3RhdHVzU2V2ZXJlZCIbChlSb3N0ZXJSb3dTdGF0dXNIaWJlcm5hdGVkIhwKGlJvc3RlclJvd1N0YXR1c1N0YXJ0RmFpbGVkIhkKF1Jvc3RlclJvd1N0YXR1c0RlZ3JhZGVkIhUKE1Jvc3RlclJvd1N0YXR1c0RlYWQiHwodUm9zdGVyUm93U3RhdHVzTWVyZ2VFbnF1ZXVpbmciGAoWUm9zdGVyUm93U3RhdHVzTWVyZ2luZyIcChpSb3N0ZXJSb3dTdGF0dXNNZXJnZVF1ZXVlZCIeChxSb3N0ZXJSb3dTdGF0dXNNZXJnZUNvbmZsaWN0IhwKGlJvc3RlclJvd1N0YXR1c01lcmdlRmFpbGVkIhcKFVJvc3RlclJvd1N0YXR1c01lcmdlZCIVChNSb3N0ZXJSb3dTdGF0dXNOb25lIhkKF1Jvc3RlclJvd1N0YXR1c0luYWN0aXZlIkkKGVB1Ymxpc2hXb3Jrc3BhY2VSb3N0ZXJDbWQSLAoGcm9zdGVyGAEgASgLMhwuZnJvbnRlbmQudjEuV29ya3NwYWNlUm9zdGVyIjMKDFJvc3Rlck5vdGljZRIMCgR0ZXh0GAEgASgJEhUKDWF1dG9fY2xlYXJfbXMYAiABKAVCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw");
 
 /**
  * One complete, self-contained picture of the sidebar.
@@ -61,7 +61,7 @@ export type WorkspaceRoster = Message<"frontend.v1.WorkspaceRoster"> & {
    * Opaque to every reader: nothing compares boot_ids for order, derives a time
    * from one, or parses one. Equality is the only question ever asked of it.
    *
-   * @generated from field: string boot_id = 7;
+   * @generated from field: string boot_id = 2;
    */
   bootId: string;
 
@@ -76,7 +76,7 @@ export type WorkspaceRoster = Message<"frontend.v1.WorkspaceRoster"> & {
     /**
      * Group by repository: the default, one section per repo.
      *
-     * @generated from field: frontend.v1.RosterRepositoryView repository = 2;
+     * @generated from field: frontend.v1.RosterRepositoryView repository = 3;
      */
     value: RosterRepositoryView;
     case: "repository";
@@ -85,7 +85,7 @@ export type WorkspaceRoster = Message<"frontend.v1.WorkspaceRoster"> & {
      * Group by task: one section per task, workspaces filed under the task
      * they serve.
      *
-     * @generated from field: frontend.v1.RosterTaskView task = 3;
+     * @generated from field: frontend.v1.RosterTaskView task = 4;
      */
     value: RosterTaskView;
     case: "task";
@@ -96,7 +96,7 @@ export type WorkspaceRoster = Message<"frontend.v1.WorkspaceRoster"> & {
    * rendered under BOTH views. Hoisted because a merged workspace's repo or
    * task is no longer the interesting fact about it — that it is done is.
    *
-   * @generated from field: frontend.v1.RosterSection recently_merged = 4;
+   * @generated from field: frontend.v1.RosterSection recently_merged = 5;
    */
   recentlyMerged?: RosterSection | undefined;
 
@@ -105,7 +105,7 @@ export type WorkspaceRoster = Message<"frontend.v1.WorkspaceRoster"> & {
    * The dir is the identity: this is compared against RosterRow.dir, never
    * against a display name, which is not unique.
    *
-   * @generated from field: string current_dir = 5;
+   * @generated from field: string current_dir = 6;
    */
   currentDir: string;
 
@@ -114,7 +114,7 @@ export type WorkspaceRoster = Message<"frontend.v1.WorkspaceRoster"> & {
    * there is none. Distinct from current_dir on purpose: the cursor moves
    * through the roster without switching workspaces.
    *
-   * @generated from field: string nav_dir = 6;
+   * @generated from field: string nav_dir = 7;
    */
   navDir: string;
 };
@@ -369,7 +369,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * A turn is in flight.
      *
-     * @generated from field: frontend.v1.RosterRowStatusThinking thinking = 6;
+     * @generated from field: frontend.v1.RosterRowStatusThinking thinking = 4;
      */
     value: RosterRowStatusThinking;
     case: "thinking";
@@ -377,7 +377,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * The conversation is being cleared.
      *
-     * @generated from field: frontend.v1.RosterRowStatusClearing clearing = 7;
+     * @generated from field: frontend.v1.RosterRowStatusClearing clearing = 5;
      */
     value: RosterRowStatusClearing;
     case: "clearing";
@@ -385,7 +385,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * The context is being compacted.
      *
-     * @generated from field: frontend.v1.RosterRowStatusCompacting compacting = 8;
+     * @generated from field: frontend.v1.RosterRowStatusCompacting compacting = 6;
      */
     value: RosterRowStatusCompacting;
     case: "compacting";
@@ -393,7 +393,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * A tool-permission request is waiting on the user.
      *
-     * @generated from field: frontend.v1.RosterRowStatusPermission permission = 9;
+     * @generated from field: frontend.v1.RosterRowStatusPermission permission = 7;
      */
     value: RosterRowStatusPermission;
     case: "permission";
@@ -401,7 +401,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * The turn finished and its response is unread.
      *
-     * @generated from field: frontend.v1.RosterRowStatusDone done = 10;
+     * @generated from field: frontend.v1.RosterRowStatusDone done = 8;
      */
     value: RosterRowStatusDone;
     case: "done";
@@ -409,7 +409,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * The turn was interrupted by the user.
      *
-     * @generated from field: frontend.v1.RosterRowStatusInterrupted interrupted = 11;
+     * @generated from field: frontend.v1.RosterRowStatusInterrupted interrupted = 9;
      */
     value: RosterRowStatusInterrupted;
     case: "interrupted";
@@ -418,7 +418,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
      * Live, proven usable, and idle. Emacs maps BOTH its idle and ready render
      * states here — the sidebar draws them identically.
      *
-     * @generated from field: frontend.v1.RosterRowStatusReady ready = 12;
+     * @generated from field: frontend.v1.RosterRowStatusReady ready = 10;
      */
     value: RosterRowStatusReady;
     case: "ready";
@@ -426,7 +426,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * No foreground turn, but detached work is still running.
      *
-     * @generated from field: frontend.v1.RosterRowStatusIdleAsync idle_async = 13;
+     * @generated from field: frontend.v1.RosterRowStatusIdleAsync idle_async = 11;
      */
     value: RosterRowStatusIdleAsync;
     case: "idleAsync";
@@ -434,7 +434,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * Blocked on the vendor or the account, not on agent-repl.
      *
-     * @generated from field: frontend.v1.RosterRowStatusVendorBlocked vendor_blocked = 14;
+     * @generated from field: frontend.v1.RosterRowStatusVendorBlocked vendor_blocked = 12;
      */
     value: RosterRowStatusVendorBlocked;
     case: "vendorBlocked";
@@ -442,7 +442,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * Starting up; the route is not yet proven.
      *
-     * @generated from field: frontend.v1.RosterRowStatusInit init = 15;
+     * @generated from field: frontend.v1.RosterRowStatusInit init = 13;
      */
     value: RosterRowStatusInit;
     case: "init";
@@ -450,7 +450,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * The session's backing process is gone but the workspace is recoverable.
      *
-     * @generated from field: frontend.v1.RosterRowStatusSevered severed = 16;
+     * @generated from field: frontend.v1.RosterRowStatusSevered severed = 14;
      */
     value: RosterRowStatusSevered;
     case: "severed";
@@ -458,7 +458,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * Deliberately parked, resumable on demand.
      *
-     * @generated from field: frontend.v1.RosterRowStatusHibernated hibernated = 17;
+     * @generated from field: frontend.v1.RosterRowStatusHibernated hibernated = 15;
      */
     value: RosterRowStatusHibernated;
     case: "hibernated";
@@ -466,7 +466,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * Startup failed outright.
      *
-     * @generated from field: frontend.v1.RosterRowStatusStartFailed start_failed = 18;
+     * @generated from field: frontend.v1.RosterRowStatusStartFailed start_failed = 16;
      */
     value: RosterRowStatusStartFailed;
     case: "startFailed";
@@ -474,7 +474,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * Running, but with a compromised route.
      *
-     * @generated from field: frontend.v1.RosterRowStatusDegraded degraded = 19;
+     * @generated from field: frontend.v1.RosterRowStatusDegraded degraded = 17;
      */
     value: RosterRowStatusDegraded;
     case: "degraded";
@@ -482,7 +482,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * Terminal: no live session backs the workspace.
      *
-     * @generated from field: frontend.v1.RosterRowStatusDead dead = 20;
+     * @generated from field: frontend.v1.RosterRowStatusDead dead = 18;
      */
     value: RosterRowStatusDead;
     case: "dead";
@@ -492,7 +492,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
      * dot, except merged, which is settled and files under recently_merged.
      * The first instant of a merge, before anything durable exists for it.
      *
-     * @generated from field: frontend.v1.RosterRowStatusMergeEnqueuing merge_enqueuing = 21;
+     * @generated from field: frontend.v1.RosterRowStatusMergeEnqueuing merge_enqueuing = 19;
      */
     value: RosterRowStatusMergeEnqueuing;
     case: "mergeEnqueuing";
@@ -500,7 +500,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * A merge is actively running.
      *
-     * @generated from field: frontend.v1.RosterRowStatusMerging merging = 22;
+     * @generated from field: frontend.v1.RosterRowStatusMerging merging = 20;
      */
     value: RosterRowStatusMerging;
     case: "merging";
@@ -508,7 +508,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * Enqueued behind another workspace's merge.
      *
-     * @generated from field: frontend.v1.RosterRowStatusMergeQueued merge_queued = 23;
+     * @generated from field: frontend.v1.RosterRowStatusMergeQueued merge_queued = 21;
      */
     value: RosterRowStatusMergeQueued;
     case: "mergeQueued";
@@ -516,7 +516,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * The merge stopped on a conflict awaiting resolution.
      *
-     * @generated from field: frontend.v1.RosterRowStatusMergeConflict merge_conflict = 24;
+     * @generated from field: frontend.v1.RosterRowStatusMergeConflict merge_conflict = 22;
      */
     value: RosterRowStatusMergeConflict;
     case: "mergeConflict";
@@ -524,7 +524,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * The merge failed outright.
      *
-     * @generated from field: frontend.v1.RosterRowStatusMergeFailed merge_failed = 25;
+     * @generated from field: frontend.v1.RosterRowStatusMergeFailed merge_failed = 23;
      */
     value: RosterRowStatusMergeFailed;
     case: "mergeFailed";
@@ -532,7 +532,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     /**
      * The merge settled successfully.
      *
-     * @generated from field: frontend.v1.RosterRowStatusMerged merged = 26;
+     * @generated from field: frontend.v1.RosterRowStatusMerged merged = 24;
      */
     value: RosterRowStatusMerged;
     case: "merged";
@@ -543,7 +543,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
      * there is none" is an assertion, where an unset oneof is the absence of
      * one.
      *
-     * @generated from field: frontend.v1.RosterRowStatusNone none = 27;
+     * @generated from field: frontend.v1.RosterRowStatusNone none = 25;
      */
     value: RosterRowStatusNone;
     case: "none";
@@ -554,7 +554,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
      * every render state: a perspective-less workspace is inactive whatever its
      * session once was.
      *
-     * @generated from field: frontend.v1.RosterRowStatusInactive inactive = 28;
+     * @generated from field: frontend.v1.RosterRowStatusInactive inactive = 26;
      */
     value: RosterRowStatusInactive;
     case: "inactive";
@@ -565,14 +565,14 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
    * against WorkspaceRoster.current_dir and deliberately so: the author
    * resolves it once, so no client can compute it differently.
    *
-   * @generated from field: bool current = 4;
+   * @generated from field: bool current = 27;
    */
   current: boolean;
 
   /**
    * Nested workspaces (a spawned family under its parent), in render order.
    *
-   * @generated from field: repeated frontend.v1.RosterRow children = 5;
+   * @generated from field: repeated frontend.v1.RosterRow children = 28;
    */
   children: RosterRow[];
 

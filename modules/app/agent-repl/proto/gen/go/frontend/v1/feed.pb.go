@@ -98,12 +98,21 @@ func (ConversationSource) EnumDescriptor() ([]byte, []int) {
 // which payloads are pushed but never re-types them — frontends render,
 // never interpret.
 type ConversationDelta struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THERE IS NO SESSION ID ON THIS PUSH, deliberately, and there is none on any
+	// push in this file. A frontend has no session vocabulary: the only question
+	// it ever asks about a push is "is this still current", and `fence` answers
+	// that without naming what rotated. A workspace is the whole address.
+	//
+	// THIS SURFACE TRAVELS AS PROTOJSON, so the FIELD NAME is the wire token, not
+	// the number. Renaming a field here is a breaking wire change even when the
+	// number is untouched, and a name once spent must never come back meaning
+	// something else.
+	Workspace string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// The conversation additions this push carries, oldest first. Each is a
 	// complete feed envelope the frontend renders without further resolution.
-	Messages   []*Message `protobuf:"bytes,3,rep,name=messages,proto3" json:"messages,omitempty"`
-	ThroughSeq uint64     `protobuf:"varint,4,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"` // frontends persist this for reconnect resync
+	Messages   []*Message `protobuf:"bytes,2,rep,name=messages,proto3" json:"messages,omitempty"`
+	ThroughSeq uint64     `protobuf:"varint,3,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"` // frontends persist this for reconnect resync
 	// The workspace's staleness FENCE at the moment the daemon produced this
 	// push: an opaque token the client compares BYTE-WISE against the fence on
 	// the workspace's current WorkspaceState, and never parses, splits or
@@ -113,7 +122,7 @@ type ConversationDelta struct {
 	// The daemon mints it and is the only thing that can read meaning into it.
 	// A client that learned to decode it would be depending on a fact this
 	// contract does not offer, and the token's composition is free to change.
-	Fence         string `protobuf:"bytes,5,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence         string `protobuf:"bytes,4,opt,name=fence,proto3" json:"fence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -375,8 +384,7 @@ func (*MessageEphemeral) Descriptor() ([]byte, []int) {
 // failure cards, session-level events — keeps an arm of its own, because
 // folding those into AgentEmission would make that message's name untrue.
 //
-// Consumers reconcile by uuid (permission items use the permission request_id
-// as their uuid).
+// Consumers reconcile by uuid.
 type Message struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Uuid      string                 `protobuf:"bytes,1,opt,name=uuid,proto3" json:"uuid,omitempty"`
@@ -404,7 +412,7 @@ type Message struct {
 	// phantom feed row, and a page of ten "messages" would silently deliver
 	// several turn boundaries and a short screen. Do not lift this field onto
 	// Envelope, and do not model an unowned record as an empty MessageLineage.
-	Lineage *MessageLineage `protobuf:"bytes,6,opt,name=lineage,proto3" json:"lineage,omitempty"`
+	Lineage *MessageLineage `protobuf:"bytes,5,opt,name=lineage,proto3" json:"lineage,omitempty"`
 	// WHETHER A DURABLE RECORD FOR THIS MESSAGE EXISTS AT ALL. Always set: a
 	// message with neither arm is malformed and is rejected loudly rather than
 	// assumed durable, exactly as an UNSPECIFIED source is.
@@ -610,12 +618,12 @@ type Message_Durable struct {
 	// is this, INCLUDING the daemon-minted "detached-work:" ids, whose
 	// durability comes from the TaskStarted behind them and not from who
 	// chose the id.
-	Durable *MessageDurable `protobuf:"bytes,7,opt,name=durable,proto3,oneof"`
+	Durable *MessageDurable `protobuf:"bytes,6,opt,name=durable,proto3,oneof"`
 }
 
 type Message_Ephemeral struct {
 	// No record for this message exists ANYWHERE, and none ever will.
-	Ephemeral *MessageEphemeral `protobuf:"bytes,8,opt,name=ephemeral,proto3,oneof"`
+	Ephemeral *MessageEphemeral `protobuf:"bytes,7,opt,name=ephemeral,proto3,oneof"`
 }
 
 func (*Message_Durable) isMessage_Durability() {}
@@ -629,27 +637,24 @@ type isMessage_Payload interface {
 type Message_Agent struct {
 	// EVERYTHING the agent produced, in the one vocabulary that also carries
 	// a detached agent's output (AsyncAgentUpdate). See AgentEmission.
-	Agent *AgentEmission `protobuf:"bytes,5,opt,name=agent,proto3,oneof"`
+	Agent *AgentEmission `protobuf:"bytes,8,opt,name=agent,proto3,oneof"`
 }
 
 type Message_UserMessage struct {
 	// The user's own prompt.
-	UserMessage *v1.UserContent `protobuf:"bytes,11,opt,name=user_message,json=userMessage,proto3,oneof"`
+	UserMessage *v1.UserContent `protobuf:"bytes,9,opt,name=user_message,json=userMessage,proto3,oneof"`
 }
 
 type Message_FailureCard struct {
-	// 30 was `permission` and 32/33 were `context_cleared`/`context_compacted`.
-	// All three are retired with the core.v1 payloads they carried, and NOTHING
-	// REPLACES THEM — see the reservations at the foot of this message and the
-	// gap note in DESIGN-protobuf-surfaces.md.
-	FailureCard *FailureCardView `protobuf:"bytes,31,opt,name=failure_card,json=failureCard,proto3,oneof"`
+	// The daemon's own card for a failure the agent never got to report.
+	FailureCard *FailureCardView `protobuf:"bytes,10,opt,name=failure_card,json=failureCard,proto3,oneof"`
 }
 
 type Message_DaemonInterceptedCommand struct {
 	// A slash command the daemon took out of the user's input. Both
 	// durability classes ride this arm; which one a given command is, is
 	// stated by `durability` above and never inferred from the command.
-	DaemonInterceptedCommand *DaemonInterceptedCommandItem `protobuf:"bytes,35,opt,name=daemon_intercepted_command,json=daemonInterceptedCommand,proto3,oneof"`
+	DaemonInterceptedCommand *DaemonInterceptedCommandItem `protobuf:"bytes,11,opt,name=daemon_intercepted_command,json=daemonInterceptedCommand,proto3,oneof"`
 }
 
 type Message_DetachedWork struct {
@@ -662,13 +667,13 @@ type Message_DetachedWork struct {
 	// messages. A detached agent emitting a thousand lines must not insert a
 	// thousand rows into the conversation it was dispatched from — those lines
 	// are this message's payload, not messages of their own.
-	DetachedWork *DetachedWork `protobuf:"bytes,38,opt,name=detached_work,json=detachedWork,proto3,oneof"`
+	DetachedWork *DetachedWork `protobuf:"bytes,12,opt,name=detached_work,json=detachedWork,proto3,oneof"`
 }
 
 type Message_CompactionSummary struct {
 	// The purple-washed summary block a compaction leaves behind. Its own arm
 	// so that the wash is a stated kind rather than an inference.
-	CompactionSummary *CompactionSummaryItem `protobuf:"bytes,39,opt,name=compaction_summary,json=compactionSummary,proto3,oneof"`
+	CompactionSummary *CompactionSummaryItem `protobuf:"bytes,13,opt,name=compaction_summary,json=compactionSummary,proto3,oneof"`
 }
 
 func (*Message_Agent) isMessage_Payload() {}
@@ -710,12 +715,12 @@ type DetachedWorkDelta struct {
 	//
 	// Each carries payload arm `detached_work`; a message arriving here with any
 	// other payload is a daemon bug and is rejected rather than rendered.
-	Opened []*Message `protobuf:"bytes,3,rep,name=opened,proto3" json:"opened,omitempty"`
+	Opened []*Message `protobuf:"bytes,2,rep,name=opened,proto3" json:"opened,omitempty"`
 	// UPDATES to messages already open, in order. Each names its target message by
 	// id and mutates that message's payload; none of them is a message.
-	Updates []*DetachedWorkUpdate `protobuf:"bytes,4,rep,name=updates,proto3" json:"updates,omitempty"`
+	Updates []*DetachedWorkUpdate `protobuf:"bytes,3,rep,name=updates,proto3" json:"updates,omitempty"`
 	// Frontends persist this for reconnect resync.
-	ThroughSeq uint64 `protobuf:"varint,5,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"`
+	ThroughSeq uint64 `protobuf:"varint,4,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"`
 	// The workspace's staleness FENCE at the moment the daemon produced this
 	// push: an opaque token the client compares BYTE-WISE against the fence on
 	// the workspace's current WorkspaceState, and never parses, splits or
@@ -725,7 +730,7 @@ type DetachedWorkDelta struct {
 	// The daemon mints it and is the only thing that can read meaning into it.
 	// A client that learned to decode it would be depending on a fact this
 	// contract does not offer, and the token's composition is free to change.
-	Fence         string `protobuf:"bytes,6,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence         string `protobuf:"bytes,5,opt,name=fence,proto3" json:"fence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -863,8 +868,15 @@ func (x *CompactionSummaryItem) GetExpensiveInputTokens() int64 {
 
 // Ephemeral live-typing relay (never persisted, never in snapshots).
 type TypingDelta struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Addressed by workspace alone — no session id, for the reason stated on
+	// ConversationDelta.
+	Workspace string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// OPEN GAP: THIS MESSAGE CARRIES NO CONTENT. The live preview it exists to
+	// relay has no frontend-side spelling — the content model lives in
+	// conversation.v1 and arrives on EntryDelivery's `live` arm — so TypingDelta
+	// is currently a workspace, a fence and a target, and nothing to draw. See
+	// the gap note in DESIGN-protobuf-surfaces.md.
 	// The workspace's staleness FENCE at the moment the daemon produced this
 	// push: an opaque token the client compares BYTE-WISE against the fence on
 	// the workspace's current WorkspaceState, and never parses, splits or
@@ -874,7 +886,7 @@ type TypingDelta struct {
 	// The daemon mints it and is the only thing that can read meaning into it.
 	// A client that learned to decode it would be depending on a fact this
 	// contract does not offer, and the token's composition is free to change.
-	Fence string `protobuf:"bytes,4,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence string `protobuf:"bytes,2,opt,name=fence,proto3" json:"fence,omitempty"`
 	// WHERE THIS PREVIEW BELONGS, and therefore WHAT WILL RETIRE IT.
 	//
 	// Empty — the ordinary case — means the top-level feed: the preview opens
@@ -892,7 +904,7 @@ type TypingDelta struct {
 	// The daemon knows which of the two it is BEFORE the preview goes out (it
 	// is the same fold decision, made in the same place), so no preview it
 	// cannot retire is ever created. This is provenance, not a timeout.
-	ParentMessageId string `protobuf:"bytes,5,opt,name=parent_message_id,json=parentMessageId,proto3" json:"parent_message_id,omitempty"`
+	ParentMessageId string `protobuf:"bytes,3,opt,name=parent_message_id,json=parentMessageId,proto3" json:"parent_message_id,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1039,8 +1051,13 @@ func (x *TypingCut) GetFence() string {
 // neutral facts the producer observed; the daemon turns those into rows; the
 // panel prints them.
 type SessionInitView struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Addressed by workspace alone — no session id, for the reason stated on
+	// ConversationDelta.
+	//
+	// NOTHING ON THIS MESSAGE CARRIES A VENDOR PAYLOAD. The panel gets rows, not
+	// a record to read field by field; that is the whole point of the message.
+	Workspace string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// The panel's rows, in render order. EMPTY means no init has landed yet,
 	// which the panel draws as the rows it owns and nothing more — absence
 	// rendering absence, rather than a spinner standing in for a fact.
@@ -1048,7 +1065,7 @@ type SessionInitView struct {
 	// The panel splices its own rows (account, model, permission mode) ahead of
 	// these, because those come from sources that move independently of an init
 	// and are already resolved elsewhere.
-	Rows []*SessionInitRow `protobuf:"bytes,5,rep,name=rows,proto3" json:"rows,omitempty"`
+	Rows []*SessionInitRow `protobuf:"bytes,2,rep,name=rows,proto3" json:"rows,omitempty"`
 	// The workspace's staleness FENCE at the moment the daemon produced this
 	// push: an opaque token the client compares BYTE-WISE against the fence on
 	// the workspace's current WorkspaceState, and never parses, splits or
@@ -1058,7 +1075,7 @@ type SessionInitView struct {
 	// The daemon mints it and is the only thing that can read meaning into it.
 	// A client that learned to decode it would be depending on a fact this
 	// contract does not offer, and the token's composition is free to change.
-	Fence         string `protobuf:"bytes,4,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence         string `protobuf:"bytes,3,opt,name=fence,proto3" json:"fence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1179,66 +1196,60 @@ var File_frontend_v1_feed_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\n" +
-	"\x16frontend/v1/feed.proto\x12\vfrontend.v1\x1a\x1dconversation/v1/content.proto\x1a frontend/v1/agent-emission.proto\x1a\x1ffrontend/v1/detached-work.proto\x1a\x1efrontend/v1/failure-card.proto\x1a\x1cfrontend/v1/slash-menu.proto\"\xb3\x01\n" +
+	"\x16frontend/v1/feed.proto\x12\vfrontend.v1\x1a\x1dconversation/v1/content.proto\x1a frontend/v1/agent-emission.proto\x1a\x1ffrontend/v1/detached-work.proto\x1a\x1efrontend/v1/failure-card.proto\x1a\x1cfrontend/v1/slash-menu.proto\"\x9a\x01\n" +
 	"\x11ConversationDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x120\n" +
-	"\bmessages\x18\x03 \x03(\v2\x14.frontend.v1.MessageR\bmessages\x12\x1f\n" +
-	"\vthrough_seq\x18\x04 \x01(\x04R\n" +
+	"\bmessages\x18\x02 \x03(\v2\x14.frontend.v1.MessageR\bmessages\x12\x1f\n" +
+	"\vthrough_seq\x18\x03 \x01(\x04R\n" +
 	"throughSeq\x12\x14\n" +
-	"\x05fence\x18\x05 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03R\n" +
-	"session_idR\x05items\"m\n" +
+	"\x05fence\x18\x04 \x01(\tR\x05fence\"m\n" +
 	"\x0eMessageLineage\x12/\n" +
 	"\x14top_level_message_id\x18\x01 \x01(\tR\x11topLevelMessageId\x12*\n" +
 	"\x11parent_message_id\x18\x02 \x01(\tR\x0fparentMessageId\"\x10\n" +
 	"\x0eMessageDurable\"\x12\n" +
-	"\x10MessageEphemeral\"\xeb\b\n" +
+	"\x10MessageEphemeral\"\x8e\x06\n" +
 	"\aMessage\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x13\n" +
 	"\x05ts_ms\x18\x02 \x01(\x03R\x04tsMs\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x03 \x01(\tR\trequestId\x127\n" +
 	"\x06source\x18\x04 \x01(\x0e2\x1f.frontend.v1.ConversationSourceR\x06source\x125\n" +
-	"\alineage\x18\x06 \x01(\v2\x1b.frontend.v1.MessageLineageR\alineage\x127\n" +
-	"\adurable\x18\a \x01(\v2\x1b.frontend.v1.MessageDurableH\x00R\adurable\x12=\n" +
-	"\tephemeral\x18\b \x01(\v2\x1d.frontend.v1.MessageEphemeralH\x00R\tephemeral\x122\n" +
-	"\x05agent\x18\x05 \x01(\v2\x1a.frontend.v1.AgentEmissionH\x01R\x05agent\x12A\n" +
-	"\fuser_message\x18\v \x01(\v2\x1c.conversation.v1.UserContentH\x01R\vuserMessage\x12A\n" +
-	"\ffailure_card\x18\x1f \x01(\v2\x1c.frontend.v1.FailureCardViewH\x01R\vfailureCard\x12i\n" +
-	"\x1adaemon_intercepted_command\x18# \x01(\v2).frontend.v1.DaemonInterceptedCommandItemH\x01R\x18daemonInterceptedCommand\x12@\n" +
-	"\rdetached_work\x18& \x01(\v2\x19.frontend.v1.DetachedWorkH\x01R\fdetachedWork\x12S\n" +
-	"\x12compaction_summary\x18' \x01(\v2\".frontend.v1.CompactionSummaryItemH\x01R\x11compactionSummaryB\f\n" +
+	"\alineage\x18\x05 \x01(\v2\x1b.frontend.v1.MessageLineageR\alineage\x127\n" +
+	"\adurable\x18\x06 \x01(\v2\x1b.frontend.v1.MessageDurableH\x00R\adurable\x12=\n" +
+	"\tephemeral\x18\a \x01(\v2\x1d.frontend.v1.MessageEphemeralH\x00R\tephemeral\x122\n" +
+	"\x05agent\x18\b \x01(\v2\x1a.frontend.v1.AgentEmissionH\x01R\x05agent\x12A\n" +
+	"\fuser_message\x18\t \x01(\v2\x1c.conversation.v1.UserContentH\x01R\vuserMessage\x12A\n" +
+	"\ffailure_card\x18\n" +
+	" \x01(\v2\x1c.frontend.v1.FailureCardViewH\x01R\vfailureCard\x12i\n" +
+	"\x1adaemon_intercepted_command\x18\v \x01(\v2).frontend.v1.DaemonInterceptedCommandItemH\x01R\x18daemonInterceptedCommand\x12@\n" +
+	"\rdetached_work\x18\f \x01(\v2\x19.frontend.v1.DetachedWorkH\x01R\fdetachedWork\x12S\n" +
+	"\x12compaction_summary\x18\r \x01(\v2\".frontend.v1.CompactionSummaryItemH\x01R\x11compactionSummaryB\f\n" +
 	"\n" +
 	"durabilityB\t\n" +
-	"\apayloadJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x12\x10\x13J\x04\b\n" +
-	"\x10\vJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10J\x04\b\"\x10#J\x04\b(\x10)J\x04\b$\x10%J\x04\b%\x10&J\x04\b\x1e\x10\x1fJ\x04\b \x10!J\x04\b!\x10\"R\tapi_errorR\x10compact_boundaryR\x15compact_boundary_lineR\x11assistant_messageR\btool_useR\vtool_resultR\x0ftool_use_resultR\x06resultR\n" +
-	"skill_bodyR\vusage_stampR\x11token_utilizationR\x0fturn_accountingR\fasync_bubbleR\x0fsession_commandR\n" +
-	"permissionR\x0fcontext_clearedR\x11context_compacted\"\xe3\x01\n" +
+	"\apayload\"\xd1\x01\n" +
 	"\x11DetachedWorkDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12,\n" +
-	"\x06opened\x18\x03 \x03(\v2\x14.frontend.v1.MessageR\x06opened\x129\n" +
-	"\aupdates\x18\x04 \x03(\v2\x1f.frontend.v1.DetachedWorkUpdateR\aupdates\x12\x1f\n" +
-	"\vthrough_seq\x18\x05 \x01(\x04R\n" +
+	"\x06opened\x18\x02 \x03(\v2\x14.frontend.v1.MessageR\x06opened\x129\n" +
+	"\aupdates\x18\x03 \x03(\v2\x1f.frontend.v1.DetachedWorkUpdateR\aupdates\x12\x1f\n" +
+	"\vthrough_seq\x18\x04 \x01(\x04R\n" +
 	"throughSeq\x12\x14\n" +
-	"\x05fence\x18\x06 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03R\n" +
-	"session_id\"\x8f\x01\n" +
+	"\x05fence\x18\x05 \x01(\tR\x05fence\"\x8f\x01\n" +
 	"\x15CompactionSummaryItem\x12\x18\n" +
 	"\asummary\x18\x01 \x01(\tR\asummary\x12&\n" +
 	"\x0fcompacted_at_ms\x18\x02 \x01(\x03R\rcompactedAtMs\x124\n" +
-	"\x16expensive_input_tokens\x18\x03 \x01(\x03R\x14expensiveInputTokens\"\x97\x01\n" +
+	"\x16expensive_input_tokens\x18\x03 \x01(\x03R\x14expensiveInputTokens\"m\n" +
 	"\vTypingDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x14\n" +
-	"\x05fence\x18\x04 \x01(\tR\x05fence\x12*\n" +
-	"\x11parent_message_id\x18\x05 \x01(\tR\x0fparentMessageIdJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\n" +
-	"session_idR\x05deltaR\tbubble_id\"v\n" +
+	"\x05fence\x18\x02 \x01(\tR\x05fence\x12*\n" +
+	"\x11parent_message_id\x18\x03 \x01(\tR\x0fparentMessageId\"k\n" +
 	"\tTypingCut\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12*\n" +
 	"\x11parent_message_id\x18\x02 \x01(\tR\x0fparentMessageId\x12\x14\n" +
-	"\x05fence\x18\x03 \x01(\tR\x05fenceR\tbubble_id\"\x94\x01\n" +
+	"\x05fence\x18\x03 \x01(\tR\x05fence\"v\n" +
 	"\x0fSessionInitView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12/\n" +
-	"\x04rows\x18\x05 \x03(\v2\x1b.frontend.v1.SessionInitRowR\x04rows\x12\x14\n" +
-	"\x05fence\x18\x04 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\n" +
-	"session_idR\x04init\"<\n" +
+	"\x04rows\x18\x02 \x03(\v2\x1b.frontend.v1.SessionInitRowR\x04rows\x12\x14\n" +
+	"\x05fence\x18\x03 \x01(\tR\x05fence\"<\n" +
 	"\x0eSessionInitRow\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value*v\n" +

@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/message.proto.
  */
 export const file_conversation_v1_message: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvbWVzc2FnZS5wcm90bxIPY29udmVyc2F0aW9uLnYxIo4ICgxNZXNzYWdlRW50cnkSEgoKbWVzc2FnZV9pZBgBIAEoCRIcChR0b3BfbGV2ZWxfbWVzc2FnZV9pZBgCIAEoCRIuCgZwYXJlbnQYBSABKAsyHi5jb252ZXJzYXRpb24udjEuTWVzc2FnZVBhcmVudBIuCgZhdXRob3IYBCABKAsyHi5jb252ZXJzYXRpb24udjEuTWVzc2FnZUF1dGhvchIuCgl1c2VyX3NhaWQYCiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRIABIwCgphZ2VudF9zYWlkGAsgASgLMhouY29udmVyc2F0aW9uLnYxLkFnZW50U2FpZEgAEjwKEHBlcm1pc3Npb25fYXNrZWQYDCABKAsyIC5jb252ZXJzYXRpb24udjEuUGVybWlzc2lvbkFza2VkSAASOAoOZmFpbHVyZV9yYWlzZWQYDSABKAsyHi5jb252ZXJzYXRpb24udjEuRmFpbHVyZVJhaXNlZEgAEjIKC2NvbnRleHRfY3V0GA4gASgLMhsuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDdXRIABJFChVkZXRhY2hlZF93b3JrX3N0YXJ0ZWQYECABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZEgAEksKGGRldGFjaGVkX3dvcmtfcHJvZ3Jlc3NlZBgUIAEoCzInLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtQcm9ncmVzc2VkSAASRwoWd29ya2Zsb3dfc3RlcF9vYnNlcnZlZBgZIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5Xb3JrZmxvd1N0ZXBPYnNlcnZlZEgAEkEKE2RldGFjaGVkX3dvcmtfZW5kZWQYFSABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWRIABJCChNwZXJtaXNzaW9uX2Fuc3dlcmVkGBYgASgLMiMuY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BbnN3ZXJlZEgAEjYKDXRvb2xfcmV0dXJuZWQYFyABKAsyHS5jb252ZXJzYXRpb24udjEuVG9vbFJldHVybmVkSAASQQoTc2tpbGxfYm9keV9yZXNvbHZlZBgYIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ta2lsbEJvZHlSZXNvbHZlZEgAEjwKEGNvbnRlbnRfYXJyaXZpbmcYHiABKAsyIC5jb252ZXJzYXRpb24udjEuQ29udGVudEFycml2aW5nSABCCQoHcGF5bG9hZEoECAMQBEoECA8QEFIRcGFyZW50X21lc3NhZ2VfaWRSF2RhZW1vbl9hbnN3ZXJlZF9jb21tYW5kIoUBCg1NZXNzYWdlUGFyZW50EjIKBHJvb3QYASABKAsyIi5jb252ZXJzYXRpb24udjEuTWVzc2FnZVBhcmVudFJvb3RIABI2CgZpbnNpZGUYAiABKAsyJC5jb252ZXJzYXRpb24udjEuTWVzc2FnZVBhcmVudEluc2lkZUgAQggKBnBhcmVudCITChFNZXNzYWdlUGFyZW50Um9vdCIpChNNZXNzYWdlUGFyZW50SW5zaWRlEhIKCm1lc3NhZ2VfaWQYASABKAkiwwEKDU1lc3NhZ2VBdXRob3ISKwoEdXNlchgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BdXRob3JVc2VySAASLQoFYWdlbnQYAiABKAsyHC5jb252ZXJzYXRpb24udjEuQXV0aG9yQWdlbnRIABI+Cg5kZXRhY2hlZF9hZ2VudBgDIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BdXRob3JEZXRhY2hlZEFnZW50SABCCAoGYXV0aG9ySgQIBBAFUgZkYWVtb24iDAoKQXV0aG9yVXNlciINCgtBdXRob3JBZ2VudCI3ChNBdXRob3JEZXRhY2hlZEFnZW50EiAKGGRldGFjaGVkX3dvcmtfbWVzc2FnZV9pZBgBIAEoCUIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_payloads]);
+  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvbWVzc2FnZS5wcm90bxIPY29udmVyc2F0aW9uLnYxItYHCgxNZXNzYWdlRW50cnkSEgoKbWVzc2FnZV9pZBgBIAEoCRIcChR0b3BfbGV2ZWxfbWVzc2FnZV9pZBgCIAEoCRIuCgZwYXJlbnQYAyABKAsyHi5jb252ZXJzYXRpb24udjEuTWVzc2FnZVBhcmVudBIuCgZhdXRob3IYBCABKAsyHi5jb252ZXJzYXRpb24udjEuTWVzc2FnZUF1dGhvchIuCgl1c2VyX3NhaWQYBSABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRIABIwCgphZ2VudF9zYWlkGAYgASgLMhouY29udmVyc2F0aW9uLnYxLkFnZW50U2FpZEgAEjwKEHBlcm1pc3Npb25fYXNrZWQYByABKAsyIC5jb252ZXJzYXRpb24udjEuUGVybWlzc2lvbkFza2VkSAASOAoOZmFpbHVyZV9yYWlzZWQYCCABKAsyHi5jb252ZXJzYXRpb24udjEuRmFpbHVyZVJhaXNlZEgAEjIKC2NvbnRleHRfY3V0GAkgASgLMhsuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDdXRIABJFChVkZXRhY2hlZF93b3JrX3N0YXJ0ZWQYCiABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZEgAEksKGGRldGFjaGVkX3dvcmtfcHJvZ3Jlc3NlZBgLIAEoCzInLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtQcm9ncmVzc2VkSAASRwoWd29ya2Zsb3dfc3RlcF9vYnNlcnZlZBgMIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5Xb3JrZmxvd1N0ZXBPYnNlcnZlZEgAEkEKE2RldGFjaGVkX3dvcmtfZW5kZWQYDSABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWRIABJCChNwZXJtaXNzaW9uX2Fuc3dlcmVkGA4gASgLMiMuY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BbnN3ZXJlZEgAEjYKDXRvb2xfcmV0dXJuZWQYDyABKAsyHS5jb252ZXJzYXRpb24udjEuVG9vbFJldHVybmVkSAASQQoTc2tpbGxfYm9keV9yZXNvbHZlZBgQIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ta2lsbEJvZHlSZXNvbHZlZEgAEjwKEGNvbnRlbnRfYXJyaXZpbmcYESABKAsyIC5jb252ZXJzYXRpb24udjEuQ29udGVudEFycml2aW5nSABCCQoHcGF5bG9hZCKFAQoNTWVzc2FnZVBhcmVudBIyCgRyb290GAEgASgLMiIuY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VQYXJlbnRSb290SAASNgoGaW5zaWRlGAIgASgLMiQuY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VQYXJlbnRJbnNpZGVIAEIICgZwYXJlbnQiEwoRTWVzc2FnZVBhcmVudFJvb3QiKQoTTWVzc2FnZVBhcmVudEluc2lkZRISCgptZXNzYWdlX2lkGAEgASgJIrUBCg1NZXNzYWdlQXV0aG9yEisKBHVzZXIYASABKAsyGy5jb252ZXJzYXRpb24udjEuQXV0aG9yVXNlckgAEi0KBWFnZW50GAIgASgLMhwuY29udmVyc2F0aW9uLnYxLkF1dGhvckFnZW50SAASPgoOZGV0YWNoZWRfYWdlbnQYAyABKAsyJC5jb252ZXJzYXRpb24udjEuQXV0aG9yRGV0YWNoZWRBZ2VudEgAQggKBmF1dGhvciIMCgpBdXRob3JVc2VyIg0KC0F1dGhvckFnZW50IjcKE0F1dGhvckRldGFjaGVkQWdlbnQSIAoYZGV0YWNoZWRfd29ya19tZXNzYWdlX2lkGAEgASgJQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_payloads]);
 
 /**
  * One record BELONGING to one message. Several of these share a message_id and
@@ -74,7 +74,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
    * Here an unresolved parent has no legal record to occupy. The producer must
    * state which case it is, or fail.
    *
-   * @generated from field: conversation.v1.MessageParent parent = 5;
+   * @generated from field: conversation.v1.MessageParent parent = 3;
    */
   parent?: MessageParent | undefined;
 
@@ -99,7 +99,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
     /**
      * Something a person typed. The opening of a turn.
      *
-     * @generated from field: conversation.v1.UserSaid user_said = 10;
+     * @generated from field: conversation.v1.UserSaid user_said = 5;
      */
     value: UserSaid;
     case: "userSaid";
@@ -108,7 +108,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * Something the agent said: its content blocks, and the usage its response
      * reported.
      *
-     * @generated from field: conversation.v1.AgentSaid agent_said = 11;
+     * @generated from field: conversation.v1.AgentSaid agent_said = 6;
      */
     value: AgentSaid;
     case: "agentSaid";
@@ -118,7 +118,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * really did ask and the user really does answer — it is a conversational
      * act, not a dialog the daemon invented.
      *
-     * @generated from field: conversation.v1.PermissionAsked permission_asked = 12;
+     * @generated from field: conversation.v1.PermissionAsked permission_asked = 7;
      */
     value: PermissionAsked;
     case: "permissionAsked";
@@ -126,7 +126,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
     /**
      * Something went wrong, stated as a card the user reads and acts on.
      *
-     * @generated from field: conversation.v1.FailureRaised failure_raised = 13;
+     * @generated from field: conversation.v1.FailureRaised failure_raised = 8;
      */
     value: FailureRaised;
     case: "failureRaised";
@@ -135,7 +135,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * The conversation was CUT here. It is a message because a reader must see
      * where, rather than merely finding the history shorter than they left it.
      *
-     * @generated from field: conversation.v1.ContextCut context_cut = 14;
+     * @generated from field: conversation.v1.ContextCut context_cut = 9;
      */
     value: ContextCut;
     case: "contextCut";
@@ -145,7 +145,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * a background shell, a workflow. It is a feed row naming itself, so a page
      * of ten rows is ten bounded things rather than ten trees.
      *
-     * @generated from field: conversation.v1.DetachedWorkStarted detached_work_started = 16;
+     * @generated from field: conversation.v1.DetachedWorkStarted detached_work_started = 10;
      */
     value: DetachedWorkStarted;
     case: "detachedWorkStarted";
@@ -153,7 +153,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
     /**
      * Output accumulating into detached work already open.
      *
-     * @generated from field: conversation.v1.DetachedWorkProgressed detached_work_progressed = 20;
+     * @generated from field: conversation.v1.DetachedWorkProgressed detached_work_progressed = 11;
      */
     value: DetachedWorkProgressed;
     case: "detachedWorkProgressed";
@@ -165,7 +165,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * correlation. Structured rather than folded into the progress string,
      * because the producer read it structured.
      *
-     * @generated from field: conversation.v1.WorkflowStepObserved workflow_step_observed = 25;
+     * @generated from field: conversation.v1.WorkflowStepObserved workflow_step_observed = 12;
      */
     value: WorkflowStepObserved;
     case: "workflowStepObserved";
@@ -173,7 +173,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
     /**
      * Detached work reached an end, with the outcome it reached.
      *
-     * @generated from field: conversation.v1.DetachedWorkEnded detached_work_ended = 21;
+     * @generated from field: conversation.v1.DetachedWorkEnded detached_work_ended = 13;
      */
     value: DetachedWorkEnded;
     case: "detachedWorkEnded";
@@ -181,7 +181,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
     /**
      * The user answered a permission the agent asked for.
      *
-     * @generated from field: conversation.v1.PermissionAnswered permission_answered = 22;
+     * @generated from field: conversation.v1.PermissionAnswered permission_answered = 14;
      */
     value: PermissionAnswered;
     case: "permissionAnswered";
@@ -195,7 +195,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * files tool results under user-role records, which is the accident this
      * arm exists to not inherit.
      *
-     * @generated from field: conversation.v1.ToolReturned tool_returned = 23;
+     * @generated from field: conversation.v1.ToolReturned tool_returned = 15;
      */
     value: ToolReturned;
     case: "toolReturned";
@@ -204,7 +204,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * A skill file's contents, resolved onto the skill's own message. Replaces
      * whole rather than appending.
      *
-     * @generated from field: conversation.v1.SkillBodyResolved skill_body_resolved = 24;
+     * @generated from field: conversation.v1.SkillBodyResolved skill_body_resolved = 16;
      */
     value: SkillBodyResolved;
     case: "skillBodyResolved";
@@ -214,7 +214,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
      * the stream plane. The completed message the file plane writes later
      * REPLACES the preview rather than appending beside it.
      *
-     * @generated from field: conversation.v1.ContentArriving content_arriving = 30;
+     * @generated from field: conversation.v1.ContentArriving content_arriving = 17;
      */
     value: ContentArriving;
     case: "contentArriving";

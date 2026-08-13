@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/prompt-queue.proto.
  */
 export const file_frontend_v1_prompt_queue: GenFile = /*@__PURE__*/
-  fileDesc("Ch5mcm9udGVuZC92MS9wcm9tcHQtcXVldWUucHJvdG8SC2Zyb250ZW5kLnYxImoKD1N1Ym1pdFByb21wdENtZBIMCgR0ZXh0GAEgASgJEhcKD3Blcm1pc3Npb25fbW9kZRgCIAEoCRIwCg1wcm9tcHRfb3JpZ2luGAMgASgOMhkucHJvdG9jb2wudjEuUHJvbXB0T3JpZ2luIiYKDEludGVycnVwdENtZBIWCg5jb25maXJtX2FnZW50cxgBIAEoCCIZChdDYW5jZWxEZXRhY2hlZEFnZW50c0NtZCLdAQoVRGV0YWNoZWRDYW5jZWxPdXRjb21lEjkKCWNhbmNlbGxlZBgBIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkQWdlbnRzQ2FuY2VsbGVkSAASPwoPbm90aGluZ19ydW5uaW5nGAIgASgLMiQucHJvdG9jb2wudjEuTm9EZXRhY2hlZEFnZW50c1J1bm5pbmdIABI9Cgt1bnN1cHBvcnRlZBgDIAEoCzImLnByb3RvY29sLnYxLkRldGFjaGVkQ2FuY2VsVW5zdXBwb3J0ZWRIAEIJCgdvdXRjb21lIigKF0RldGFjaGVkQWdlbnRzQ2FuY2VsbGVkEg0KBWNvdW50GAEgASgDIhwKGlF1ZXVlQ2xhc3NpZmljYXRpb25QZW5kaW5nIjEKHFF1ZXVlQ2xhc3NpZmljYXRpb25JbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIj4KF1F1ZXVlQ2xhc3NpZmljYXRpb25Ib2xkEhEKCXJhdGlvbmFsZRgBIAEoCRIQCghhY2NlcHRlZBgCIAEoCCJWCiZRdWV1ZUNsYXNzaWZpY2F0aW9uVW5pbnRlcnJ1cHRpYmxlVHVybhIsCgdjb21tYW5kGAEgASgOMhsuZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmQiKgoYUXVldWVDbGFzc2lmaWNhdGlvbkVycm9yEg4KBmRldGFpbBgBIAEoCSLHBQoKUXVldWVFbnRyeRIKCgJpZBgBIAEoCRIMCgR0ZXh0GAIgASgJEhQKDHF1ZXVlZF9hdF9tcxgDIAEoAxI6CgdwZW5kaW5nGAogASgLMicuZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvblBlbmRpbmdIABI+CglpbnRlcmplY3QYCyABKAsyKS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uSW50ZXJqZWN0SAASQQoRaG9sZF9mb3JfdHVybl9lbmQYDCABKAsyJC5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uSG9sZEgAEjYKBWVycm9yGA0gASgLMiUuZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbkVycm9ySAASUwoUdW5pbnRlcnJ1cHRpYmxlX3R1cm4YDyABKAsyMy5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uVW5pbnRlcnJ1cHRpYmxlVHVybkgAEjcKCHNodXRkb3duGAcgASgLMiMuZnJvbnRlbmQudjEuUXVldWVFbnRyeVNodXRkb3duSG9sZEgBEjoKCmtlZXBfYWxpdmUYCCABKAsyJC5mcm9udGVuZC52MS5RdWV1ZUVudHJ5S2VlcEFsaXZlSG9sZEgBEjUKB3Jldml2YWwYCSABKAsyIi5mcm9udGVuZC52MS5RdWV1ZUVudHJ5UmV2aXZhbEhvbGRIARJACg1idWlsZF9yZWZyZXNoGA4gASgLMicuZnJvbnRlbmQudjEuUXVldWVFbnRyeUJ1aWxkUmVmcmVzaEhvbGRIAUIQCg5jbGFzc2lmaWNhdGlvbkIGCgRob2xkSgQIBBAFSgQIBRAGSgQIBhAHUg5jbGFzc2lmaWNhdGlvblIJcmF0aW9uYWxlUghhY2NlcHRlZCItChZRdWV1ZUVudHJ5U2h1dGRvd25Ib2xkEhMKC3NjaGVkdWxlX2lkGAEgASgJIioKF1F1ZXVlRW50cnlLZWVwQWxpdmVIb2xkEg8KB3R1cm5faWQYASABKAkiKQoVUXVldWVFbnRyeVJldml2YWxIb2xkSgQIARACUgpzZXNzaW9uX2lkIhwKGlF1ZXVlRW50cnlCdWlsZFJlZnJlc2hIb2xkImkKCVF1ZXVlVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSKAoHZW50cmllcxgDIAMoCzIXLmZyb250ZW5kLnYxLlF1ZXVlRW50cnkSDQoFZmVuY2UYBCABKAlKBAgCEANSCnNlc3Npb25faWQiIQoNUXVldWVGb3JjZUNtZBIQCghlbnRyeV9pZBgBIAEoCSIiCg5RdWV1ZUFjY2VwdENtZBIQCghlbnRyeV9pZBgBIAEoCSIiCg5RdWV1ZUNhbmNlbENtZBIQCghlbnRyeV9pZBgBIAEoCUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_frontend_v1_commands, file_protocol_v1_core]);
+  fileDesc("Ch5mcm9udGVuZC92MS9wcm9tcHQtcXVldWUucHJvdG8SC2Zyb250ZW5kLnYxImoKD1N1Ym1pdFByb21wdENtZBIMCgR0ZXh0GAEgASgJEhcKD3Blcm1pc3Npb25fbW9kZRgCIAEoCRIwCg1wcm9tcHRfb3JpZ2luGAMgASgOMhkucHJvdG9jb2wudjEuUHJvbXB0T3JpZ2luIiYKDEludGVycnVwdENtZBIWCg5jb25maXJtX2FnZW50cxgBIAEoCCIZChdDYW5jZWxEZXRhY2hlZEFnZW50c0NtZCLdAQoVRGV0YWNoZWRDYW5jZWxPdXRjb21lEjkKCWNhbmNlbGxlZBgBIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkQWdlbnRzQ2FuY2VsbGVkSAASPwoPbm90aGluZ19ydW5uaW5nGAIgASgLMiQucHJvdG9jb2wudjEuTm9EZXRhY2hlZEFnZW50c1J1bm5pbmdIABI9Cgt1bnN1cHBvcnRlZBgDIAEoCzImLnByb3RvY29sLnYxLkRldGFjaGVkQ2FuY2VsVW5zdXBwb3J0ZWRIAEIJCgdvdXRjb21lIigKF0RldGFjaGVkQWdlbnRzQ2FuY2VsbGVkEg0KBWNvdW50GAEgASgDIhwKGlF1ZXVlQ2xhc3NpZmljYXRpb25QZW5kaW5nIjEKHFF1ZXVlQ2xhc3NpZmljYXRpb25JbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIj4KF1F1ZXVlQ2xhc3NpZmljYXRpb25Ib2xkEhEKCXJhdGlvbmFsZRgBIAEoCRIQCghhY2NlcHRlZBgCIAEoCCJWCiZRdWV1ZUNsYXNzaWZpY2F0aW9uVW5pbnRlcnJ1cHRpYmxlVHVybhIsCgdjb21tYW5kGAEgASgOMhsuZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmQiKgoYUXVldWVDbGFzc2lmaWNhdGlvbkVycm9yEg4KBmRldGFpbBgBIAEoCSKQBQoKUXVldWVFbnRyeRIKCgJpZBgBIAEoCRIMCgR0ZXh0GAIgASgJEhQKDHF1ZXVlZF9hdF9tcxgDIAEoAxI6CgdwZW5kaW5nGAQgASgLMicuZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvblBlbmRpbmdIABI+CglpbnRlcmplY3QYBSABKAsyKS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uSW50ZXJqZWN0SAASQQoRaG9sZF9mb3JfdHVybl9lbmQYBiABKAsyJC5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uSG9sZEgAEjYKBWVycm9yGAcgASgLMiUuZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbkVycm9ySAASUwoUdW5pbnRlcnJ1cHRpYmxlX3R1cm4YCCABKAsyMy5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uVW5pbnRlcnJ1cHRpYmxlVHVybkgAEjcKCHNodXRkb3duGAkgASgLMiMuZnJvbnRlbmQudjEuUXVldWVFbnRyeVNodXRkb3duSG9sZEgBEjoKCmtlZXBfYWxpdmUYCiABKAsyJC5mcm9udGVuZC52MS5RdWV1ZUVudHJ5S2VlcEFsaXZlSG9sZEgBEjUKB3Jldml2YWwYCyABKAsyIi5mcm9udGVuZC52MS5RdWV1ZUVudHJ5UmV2aXZhbEhvbGRIARJACg1idWlsZF9yZWZyZXNoGAwgASgLMicuZnJvbnRlbmQudjEuUXVldWVFbnRyeUJ1aWxkUmVmcmVzaEhvbGRIAUIQCg5jbGFzc2lmaWNhdGlvbkIGCgRob2xkIi0KFlF1ZXVlRW50cnlTaHV0ZG93bkhvbGQSEwoLc2NoZWR1bGVfaWQYASABKAkiKgoXUXVldWVFbnRyeUtlZXBBbGl2ZUhvbGQSDwoHdHVybl9pZBgBIAEoCSIXChVRdWV1ZUVudHJ5UmV2aXZhbEhvbGQiHAoaUXVldWVFbnRyeUJ1aWxkUmVmcmVzaEhvbGQiVwoJUXVldWVWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRIoCgdlbnRyaWVzGAIgAygLMhcuZnJvbnRlbmQudjEuUXVldWVFbnRyeRINCgVmZW5jZRgDIAEoCSIhCg1RdWV1ZUZvcmNlQ21kEhAKCGVudHJ5X2lkGAEgASgJIiIKDlF1ZXVlQWNjZXB0Q21kEhAKCGVudHJ5X2lkGAEgASgJIiIKDlF1ZXVlQ2FuY2VsQ21kEhAKCGVudHJ5X2lkGAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_frontend_v1_commands, file_protocol_v1_core]);
 
 /**
  * @generated from message frontend.v1.SubmitPromptCmd
@@ -54,10 +54,6 @@ export const SubmitPromptCmdSchema: GenMessage<SubmitPromptCmd> = /*@__PURE__*/
  * refuses with CommandAck.interrupt_confirm_required and performs the
  * interrupt only on a resend carrying confirm_agents=true — stopping working
  * subagents is the one interrupt worth a deliberate second keystroke.
- *
- * (The retired `hard` flag also lived at field 1: it promised a soft variant
- * no layer implemented, and was deleted rather than reserved — this repo had
- * no live frontend commitments at the time.)
  *
  * @generated from message frontend.v1.InterruptCmd
  */
@@ -323,6 +319,11 @@ export const QueueClassificationErrorSchema: GenMessage<QueueClassificationError
  */
 export type QueueEntry = Message<"frontend.v1.QueueEntry"> & {
   /**
+   * THE VERDICT IS ONE ONEOF, never a plain enum with loose companion fields
+   * beside it. Each verdict's own facts — a rationale, an acceptance — live on
+   * the arm that owns them, so a rationale cannot arrive with no verdict to
+   * explain and an acceptance cannot be set on an entry no classifier held.
+   *
    * @generated from field: string id = 1;
    */
   id: string;
@@ -346,25 +347,25 @@ export type QueueEntry = Message<"frontend.v1.QueueEntry"> & {
    */
   classification: {
     /**
-     * @generated from field: frontend.v1.QueueClassificationPending pending = 10;
+     * @generated from field: frontend.v1.QueueClassificationPending pending = 4;
      */
     value: QueueClassificationPending;
     case: "pending";
   } | {
     /**
-     * @generated from field: frontend.v1.QueueClassificationInterject interject = 11;
+     * @generated from field: frontend.v1.QueueClassificationInterject interject = 5;
      */
     value: QueueClassificationInterject;
     case: "interject";
   } | {
     /**
-     * @generated from field: frontend.v1.QueueClassificationHold hold_for_turn_end = 12;
+     * @generated from field: frontend.v1.QueueClassificationHold hold_for_turn_end = 6;
      */
     value: QueueClassificationHold;
     case: "holdForTurnEnd";
   } | {
     /**
-     * @generated from field: frontend.v1.QueueClassificationError error = 13;
+     * @generated from field: frontend.v1.QueueClassificationError error = 7;
      */
     value: QueueClassificationError;
     case: "error";
@@ -375,7 +376,7 @@ export type QueueEntry = Message<"frontend.v1.QueueEntry"> & {
      * turn-end drain's, so this arm changes WHO decided rather than WHEN the
      * prompt runs.
      *
-     * @generated from field: frontend.v1.QueueClassificationUninterruptibleTurn uninterruptible_turn = 15;
+     * @generated from field: frontend.v1.QueueClassificationUninterruptibleTurn uninterruptible_turn = 8;
      */
     value: QueueClassificationUninterruptibleTurn;
     case: "uninterruptibleTurn";
@@ -405,7 +406,7 @@ export type QueueEntry = Message<"frontend.v1.QueueEntry"> & {
      * renders a dedicated lease explanation from this arm instead of the
      * classification.
      *
-     * @generated from field: frontend.v1.QueueEntryShutdownHold shutdown = 7;
+     * @generated from field: frontend.v1.QueueEntryShutdownHold shutdown = 9;
      */
     value: QueueEntryShutdownHold;
     case: "shutdown";
@@ -419,7 +420,7 @@ export type QueueEntry = Message<"frontend.v1.QueueEntry"> & {
      * on a keep-alive response" explanation from this arm instead of the
      * classification.
      *
-     * @generated from field: frontend.v1.QueueEntryKeepAliveHold keep_alive = 8;
+     * @generated from field: frontend.v1.QueueEntryKeepAliveHold keep_alive = 10;
      */
     value: QueueEntryKeepAliveHold;
     case: "keepAlive";
@@ -434,7 +435,7 @@ export type QueueEntry = Message<"frontend.v1.QueueEntry"> & {
      * "waiting on the revival's compaction" explanation from this arm instead
      * of the classification.
      *
-     * @generated from field: frontend.v1.QueueEntryRevivalHold revival = 9;
+     * @generated from field: frontend.v1.QueueEntryRevivalHold revival = 11;
      */
     value: QueueEntryRevivalHold;
     case: "revival";
@@ -445,7 +446,7 @@ export type QueueEntry = Message<"frontend.v1.QueueEntry"> & {
      * other holds, the classifier never runs on such an entry; the exit is
      * delivery the moment the restarted shim reports ready.
      *
-     * @generated from field: frontend.v1.QueueEntryBuildRefreshHold build_refresh = 14;
+     * @generated from field: frontend.v1.QueueEntryBuildRefreshHold build_refresh = 12;
      */
     value: QueueEntryBuildRefreshHold;
     case: "buildRefresh";
@@ -505,6 +506,10 @@ export const QueueEntryKeepAliveHoldSchema: GenMessage<QueueEntryKeepAliveHold> 
 
 /**
  * The pending compact-first revival holding a queue entry.
+ * DELIBERATELY EMPTY: the arm's presence is the whole fact it carries. A
+ * revival is a WORKSPACE-level event and the entry already rides its
+ * workspace's queue, so naming a session here would join the entry to nothing
+ * the client could not already reach.
  *
  * @generated from message frontend.v1.QueueEntryRevivalHold
  */
@@ -544,12 +549,16 @@ export const QueueEntryBuildRefreshHoldSchema: GenMessage<QueueEntryBuildRefresh
  */
 export type QueueView = Message<"frontend.v1.QueueView"> & {
   /**
+   * WORKSPACE-ADDRESSED, never session-addressed. A frontend has no session
+   * vocabulary; the only currency question it ever asks is "is this push still
+   * current", which the fence below answers without naming what rotated.
+   *
    * @generated from field: string workspace = 1;
    */
   workspace: string;
 
   /**
-   * @generated from field: repeated frontend.v1.QueueEntry entries = 3;
+   * @generated from field: repeated frontend.v1.QueueEntry entries = 2;
    */
   entries: QueueEntry[];
 
@@ -564,7 +573,7 @@ export type QueueView = Message<"frontend.v1.QueueView"> & {
    * A client that learned to decode it would be depending on a fact this
    * contract does not offer, and the token's composition is free to change.
    *
-   * @generated from field: string fence = 4;
+   * @generated from field: string fence = 3;
    */
   fence: string;
 };

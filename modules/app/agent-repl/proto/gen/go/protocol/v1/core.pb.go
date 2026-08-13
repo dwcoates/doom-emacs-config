@@ -250,19 +250,19 @@ const (
 	PromptOrigin_PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR PromptOrigin = 12
 	PromptOrigin_PROMPT_ORIGIN_PANEL_SELECTION             PromptOrigin = 13
 	PromptOrigin_PROMPT_ORIGIN_DEFERRED_PROMPT             PromptOrigin = 14
-	PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_PROMPT          PromptOrigin = 16
-	PromptOrigin_PROMPT_ORIGIN_GNS_SOCKETS_CLOSE           PromptOrigin = 17
-	PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT     PromptOrigin = 18
-	PromptOrigin_PROMPT_ORIGIN_EXPLAIN_CONFIG              PromptOrigin = 19
+	PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_PROMPT          PromptOrigin = 15
+	PromptOrigin_PROMPT_ORIGIN_GNS_SOCKETS_CLOSE           PromptOrigin = 16
+	PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT     PromptOrigin = 17
+	PromptOrigin_PROMPT_ORIGIN_EXPLAIN_CONFIG              PromptOrigin = 18
 	// Other producers remain explicit without being mislabeled as Emacs.
-	PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT            PromptOrigin = 20
-	PromptOrigin_PROMPT_ORIGIN_WEBAPP_CARD_ACTION          PromptOrigin = 21
-	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED           PromptOrigin = 22
-	PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR       PromptOrigin = 23
-	PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR           PromptOrigin = 24
-	PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION         PromptOrigin = 25
-	PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION          PromptOrigin = 26
-	PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME PromptOrigin = 28
+	PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT            PromptOrigin = 19
+	PromptOrigin_PROMPT_ORIGIN_WEBAPP_CARD_ACTION          PromptOrigin = 20
+	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED           PromptOrigin = 21
+	PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR       PromptOrigin = 22
+	PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR           PromptOrigin = 23
+	PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION         PromptOrigin = 24
+	PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION          PromptOrigin = 25
+	PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME PromptOrigin = 26
 	// Daemon-generated cache keep-alive ping: a minimal prompt ("respond with
 	// only '.', no tool calls or changes") submitted after turn inactivity to
 	// refresh the vendor prompt cache before its TTL expires. Turns with this
@@ -271,7 +271,7 @@ const (
 	// unconditionally, and the shim discards them from the vendor transcript
 	// via rewind (SessionRewound) before the next real prompt is submitted, so
 	// they can never contaminate the model's context either.
-	PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE PromptOrigin = 29
+	PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE PromptOrigin = 27
 	// Daemon-generated re-drive of a turn a planned bounce interrupted.
 	//
 	// A restart that has to take the shim with it (the shim bundle changed, or
@@ -292,7 +292,7 @@ const (
 	// What it IS for: saying WHY a turn is running. A status surface reads this
 	// to report "resumed after restart" instead of presenting work the user did
 	// not just ask for as though they had.
-	PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART PromptOrigin = 30
+	PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART PromptOrigin = 28
 )
 
 // Enum value maps for PromptOrigin.
@@ -313,20 +313,20 @@ var (
 		12: "PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR",
 		13: "PROMPT_ORIGIN_PANEL_SELECTION",
 		14: "PROMPT_ORIGIN_DEFERRED_PROMPT",
-		16: "PROMPT_ORIGIN_LEGACY_HOST_PROMPT",
-		17: "PROMPT_ORIGIN_GNS_SOCKETS_CLOSE",
-		18: "PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT",
-		19: "PROMPT_ORIGIN_EXPLAIN_CONFIG",
-		20: "PROMPT_ORIGIN_WEBAPP_USER_SENT",
-		21: "PROMPT_ORIGIN_WEBAPP_CARD_ACTION",
-		22: "PROMPT_ORIGIN_WORKSPACE_CREATED",
-		23: "PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR",
-		24: "PROMPT_ORIGIN_MERGE_TEST_REPAIR",
-		25: "PROMPT_ORIGIN_MERGE_BEFORE_ACTION",
-		26: "PROMPT_ORIGIN_MERGE_AFTER_ACTION",
-		28: "PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME",
-		29: "PROMPT_ORIGIN_CACHE_KEEP_ALIVE",
-		30: "PROMPT_ORIGIN_RESUME_AFTER_RESTART",
+		15: "PROMPT_ORIGIN_LEGACY_HOST_PROMPT",
+		16: "PROMPT_ORIGIN_GNS_SOCKETS_CLOSE",
+		17: "PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT",
+		18: "PROMPT_ORIGIN_EXPLAIN_CONFIG",
+		19: "PROMPT_ORIGIN_WEBAPP_USER_SENT",
+		20: "PROMPT_ORIGIN_WEBAPP_CARD_ACTION",
+		21: "PROMPT_ORIGIN_WORKSPACE_CREATED",
+		22: "PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR",
+		23: "PROMPT_ORIGIN_MERGE_TEST_REPAIR",
+		24: "PROMPT_ORIGIN_MERGE_BEFORE_ACTION",
+		25: "PROMPT_ORIGIN_MERGE_AFTER_ACTION",
+		26: "PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME",
+		27: "PROMPT_ORIGIN_CACHE_KEEP_ALIVE",
+		28: "PROMPT_ORIGIN_RESUME_AFTER_RESTART",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -344,20 +344,20 @@ var (
 		"PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR": 12,
 		"PROMPT_ORIGIN_PANEL_SELECTION":             13,
 		"PROMPT_ORIGIN_DEFERRED_PROMPT":             14,
-		"PROMPT_ORIGIN_LEGACY_HOST_PROMPT":          16,
-		"PROMPT_ORIGIN_GNS_SOCKETS_CLOSE":           17,
-		"PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT":     18,
-		"PROMPT_ORIGIN_EXPLAIN_CONFIG":              19,
-		"PROMPT_ORIGIN_WEBAPP_USER_SENT":            20,
-		"PROMPT_ORIGIN_WEBAPP_CARD_ACTION":          21,
-		"PROMPT_ORIGIN_WORKSPACE_CREATED":           22,
-		"PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR":       23,
-		"PROMPT_ORIGIN_MERGE_TEST_REPAIR":           24,
-		"PROMPT_ORIGIN_MERGE_BEFORE_ACTION":         25,
-		"PROMPT_ORIGIN_MERGE_AFTER_ACTION":          26,
-		"PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME": 28,
-		"PROMPT_ORIGIN_CACHE_KEEP_ALIVE":            29,
-		"PROMPT_ORIGIN_RESUME_AFTER_RESTART":        30,
+		"PROMPT_ORIGIN_LEGACY_HOST_PROMPT":          15,
+		"PROMPT_ORIGIN_GNS_SOCKETS_CLOSE":           16,
+		"PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT":     17,
+		"PROMPT_ORIGIN_EXPLAIN_CONFIG":              18,
+		"PROMPT_ORIGIN_WEBAPP_USER_SENT":            19,
+		"PROMPT_ORIGIN_WEBAPP_CARD_ACTION":          20,
+		"PROMPT_ORIGIN_WORKSPACE_CREATED":           21,
+		"PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR":       22,
+		"PROMPT_ORIGIN_MERGE_TEST_REPAIR":           23,
+		"PROMPT_ORIGIN_MERGE_BEFORE_ACTION":         24,
+		"PROMPT_ORIGIN_MERGE_AFTER_ACTION":          25,
+		"PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME": 26,
+		"PROMPT_ORIGIN_CACHE_KEEP_ALIVE":            27,
+		"PROMPT_ORIGIN_RESUME_AFTER_RESTART":        28,
 	}
 )
 
@@ -691,7 +691,7 @@ type isSessionRewound_Reason interface {
 type SessionRewound_KeepAliveDiscard struct {
 	// The only producer today: discarding trailing keep-alive turns before a
 	// real prompt.
-	KeepAliveDiscard *KeepAliveDiscard `protobuf:"bytes,10,opt,name=keep_alive_discard,json=keepAliveDiscard,proto3,oneof"`
+	KeepAliveDiscard *KeepAliveDiscard `protobuf:"bytes,4,opt,name=keep_alive_discard,json=keepAliveDiscard,proto3,oneof"`
 }
 
 func (*SessionRewound_KeepAliveDiscard) isSessionRewound_Reason() {}
@@ -850,17 +850,17 @@ type isQueryLifecycle_Event interface {
 
 type QueryLifecycle_Created struct {
 	// Records creation of the query.
-	Created *QueryCreated `protobuf:"bytes,10,opt,name=created,proto3,oneof"`
+	Created *QueryCreated `protobuf:"bytes,3,opt,name=created,proto3,oneof"`
 }
 
 type QueryLifecycle_RuntimeObserved struct {
 	// Records the effective runtime identity reported after initialization.
-	RuntimeObserved *QueryRuntimeObserved `protobuf:"bytes,11,opt,name=runtime_observed,json=runtimeObserved,proto3,oneof"`
+	RuntimeObserved *QueryRuntimeObserved `protobuf:"bytes,4,opt,name=runtime_observed,json=runtimeObserved,proto3,oneof"`
 }
 
 type QueryLifecycle_Terminated struct {
 	// Records termination of the query.
-	Terminated *QueryTerminated `protobuf:"bytes,12,opt,name=terminated,proto3,oneof"`
+	Terminated *QueryTerminated `protobuf:"bytes,5,opt,name=terminated,proto3,oneof"`
 }
 
 func (*QueryLifecycle_Created) isQueryLifecycle_Event() {}
@@ -953,12 +953,12 @@ type isQueryCreated_Invocation interface {
 
 type QueryCreated_Fresh struct {
 	// Indicates that no vendor session was supplied for resumption.
-	Fresh *FreshQuery `protobuf:"bytes,10,opt,name=fresh,proto3,oneof"`
+	Fresh *FreshQuery `protobuf:"bytes,2,opt,name=fresh,proto3,oneof"`
 }
 
 type QueryCreated_Resumed struct {
 	// Identifies the vendor session supplied for resumption.
-	Resumed *ResumedQuery `protobuf:"bytes,11,opt,name=resumed,proto3,oneof"`
+	Resumed *ResumedQuery `protobuf:"bytes,3,opt,name=resumed,proto3,oneof"`
 }
 
 func (*QueryCreated_Fresh) isQueryCreated_Invocation() {}
@@ -1120,21 +1120,21 @@ type QueryRuntimeIdentity struct {
 	// Gives the Claude Agent SDK package version.
 	SdkVersion string `protobuf:"bytes,3,opt,name=sdk_version,json=sdkVersion,proto3" json:"sdk_version,omitempty"`
 	// Gives the shim build commit.
-	ShimBuildSha string `protobuf:"bytes,5,opt,name=shim_build_sha,json=shimBuildSha,proto3" json:"shim_build_sha,omitempty"`
+	ShimBuildSha string `protobuf:"bytes,4,opt,name=shim_build_sha,json=shimBuildSha,proto3" json:"shim_build_sha,omitempty"`
 	// Gives the reported fast-mode state.
-	FastModeState string `protobuf:"bytes,8,opt,name=fast_mode_state,json=fastModeState,proto3" json:"fast_mode_state,omitempty"`
+	FastModeState string `protobuf:"bytes,5,opt,name=fast_mode_state,json=fastModeState,proto3" json:"fast_mode_state,omitempty"`
 	// Gives the explanation associated with the fast-mode state.
-	FastModeReason string `protobuf:"bytes,9,opt,name=fast_mode_reason,json=fastModeReason,proto3" json:"fast_mode_reason,omitempty"`
+	FastModeReason string `protobuf:"bytes,6,opt,name=fast_mode_reason,json=fastModeReason,proto3" json:"fast_mode_reason,omitempty"`
 	// Hashes the effective SDK options using a canonical encoding.
-	EffectiveOptions *EvidenceFingerprint `protobuf:"bytes,10,opt,name=effective_options,json=effectiveOptions,proto3" json:"effective_options,omitempty"`
+	EffectiveOptions *EvidenceFingerprint `protobuf:"bytes,7,opt,name=effective_options,json=effectiveOptions,proto3" json:"effective_options,omitempty"`
 	// Hashes the effective settings using a canonical encoding.
-	Settings *EvidenceFingerprint `protobuf:"bytes,11,opt,name=settings,proto3" json:"settings,omitempty"`
+	Settings *EvidenceFingerprint `protobuf:"bytes,8,opt,name=settings,proto3" json:"settings,omitempty"`
 	// Hashes the ordered tool definitions using a canonical encoding.
-	Tools *EvidenceFingerprint `protobuf:"bytes,12,opt,name=tools,proto3" json:"tools,omitempty"`
+	Tools *EvidenceFingerprint `protobuf:"bytes,9,opt,name=tools,proto3" json:"tools,omitempty"`
 	// Hashes the ordered MCP configuration using a canonical encoding.
-	Mcp *EvidenceFingerprint `protobuf:"bytes,13,opt,name=mcp,proto3" json:"mcp,omitempty"`
+	Mcp *EvidenceFingerprint `protobuf:"bytes,10,opt,name=mcp,proto3" json:"mcp,omitempty"`
 	// Hashes the cacheable system and instruction prefix using a canonical encoding.
-	ContextPrefix *EvidenceFingerprint `protobuf:"bytes,14,opt,name=context_prefix,json=contextPrefix,proto3" json:"context_prefix,omitempty"`
+	ContextPrefix *EvidenceFingerprint `protobuf:"bytes,11,opt,name=context_prefix,json=contextPrefix,proto3" json:"context_prefix,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1525,22 +1525,22 @@ type isQueryTerminated_Reason interface {
 
 type QueryTerminated_Intentional struct {
 	// Records termination initiated by shim shutdown or hibernation.
-	Intentional *IntentionalQueryTermination `protobuf:"bytes,10,opt,name=intentional,proto3,oneof"`
+	Intentional *IntentionalQueryTermination `protobuf:"bytes,3,opt,name=intentional,proto3,oneof"`
 }
 
 type QueryTerminated_UnexpectedEof struct {
 	// Records unexpected completion of the SDK iterator.
-	UnexpectedEof *UnexpectedQueryEof `protobuf:"bytes,11,opt,name=unexpected_eof,json=unexpectedEof,proto3,oneof"`
+	UnexpectedEof *UnexpectedQueryEof `protobuf:"bytes,4,opt,name=unexpected_eof,json=unexpectedEof,proto3,oneof"`
 }
 
 type QueryTerminated_IteratorFailure struct {
 	// Records an error thrown by the SDK iterator.
-	IteratorFailure *QueryIteratorFailure `protobuf:"bytes,12,opt,name=iterator_failure,json=iteratorFailure,proto3,oneof"`
+	IteratorFailure *QueryIteratorFailure `protobuf:"bytes,5,opt,name=iterator_failure,json=iteratorFailure,proto3,oneof"`
 }
 
 type QueryTerminated_StartupFailure struct {
 	// Records failure before the query completed initialization.
-	StartupFailure *QueryStartupFailure `protobuf:"bytes,13,opt,name=startup_failure,json=startupFailure,proto3,oneof"`
+	StartupFailure *QueryStartupFailure `protobuf:"bytes,6,opt,name=startup_failure,json=startupFailure,proto3,oneof"`
 }
 
 func (*QueryTerminated_Intentional) isQueryTerminated_Reason() {}
@@ -3594,10 +3594,14 @@ func (x *PermissionRequest) GetInput() *structpb.Struct {
 }
 
 type PermissionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	UpdatedInput  *structpb.Struct       `protobuf:"bytes,3,opt,name=updated_input,json=updatedInput,proto3" json:"updated_input,omitempty"` // optional allow-with-edits
-	DenyMessage   string                 `protobuf:"bytes,4,opt,name=deny_message,json=denyMessage,proto3" json:"deny_message,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// KNOWN GAP: this message cannot state the allow/deny verdict itself. It can
+	// carry an edited input and a denial sentence, but the verdict field went
+	// with the `PermissionDecision` enum and nothing replaces it here — see the
+	// gap note in DESIGN-protobuf-surfaces.md.
+	UpdatedInput  *structpb.Struct `protobuf:"bytes,2,opt,name=updated_input,json=updatedInput,proto3" json:"updated_input,omitempty"` // optional allow-with-edits
+	DenyMessage   string           `protobuf:"bytes,3,opt,name=deny_message,json=denyMessage,proto3" json:"deny_message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3861,26 +3865,23 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"\x1aprevious_vendor_session_id\x18\x01 \x01(\tR\x17previousVendorSessionId\x121\n" +
 	"\x15new_vendor_session_id\x18\x02 \x01(\tR\x12newVendorSessionId\x12,\n" +
 	"\x12retained_leaf_uuid\x18\x03 \x01(\tR\x10retainedLeafUuid\x12M\n" +
-	"\x12keep_alive_discard\x18\n" +
-	" \x01(\v2\x1d.protocol.v1.KeepAliveDiscardH\x00R\x10keepAliveDiscardB\b\n" +
+	"\x12keep_alive_discard\x18\x04 \x01(\v2\x1d.protocol.v1.KeepAliveDiscardH\x00R\x10keepAliveDiscardB\b\n" +
 	"\x06reason\"<\n" +
 	"\x10KeepAliveDiscard\x12(\n" +
 	"\x10dropped_turn_ids\x18\x01 \x03(\tR\x0edroppedTurnIds\"\xb2\x02\n" +
 	"\x0eQueryLifecycle\x12*\n" +
 	"\x11query_instance_id\x18\x01 \x01(\tR\x0fqueryInstanceId\x12$\n" +
 	"\x0eobserved_at_ms\x18\x02 \x01(\x03R\fobservedAtMs\x125\n" +
-	"\acreated\x18\n" +
-	" \x01(\v2\x19.protocol.v1.QueryCreatedH\x00R\acreated\x12N\n" +
-	"\x10runtime_observed\x18\v \x01(\v2!.protocol.v1.QueryRuntimeObservedH\x00R\x0fruntimeObserved\x12>\n" +
+	"\acreated\x18\x03 \x01(\v2\x19.protocol.v1.QueryCreatedH\x00R\acreated\x12N\n" +
+	"\x10runtime_observed\x18\x04 \x01(\v2!.protocol.v1.QueryRuntimeObservedH\x00R\x0fruntimeObserved\x12>\n" +
 	"\n" +
-	"terminated\x18\f \x01(\v2\x1c.protocol.v1.QueryTerminatedH\x00R\n" +
+	"terminated\x18\x05 \x01(\v2\x1c.protocol.v1.QueryTerminatedH\x00R\n" +
 	"terminatedB\a\n" +
 	"\x05event\"\xad\x01\n" +
 	"\fQueryCreated\x12'\n" +
 	"\x0frequested_model\x18\x01 \x01(\tR\x0erequestedModel\x12/\n" +
-	"\x05fresh\x18\n" +
-	" \x01(\v2\x17.protocol.v1.FreshQueryH\x00R\x05fresh\x125\n" +
-	"\aresumed\x18\v \x01(\v2\x19.protocol.v1.ResumedQueryH\x00R\aresumedB\f\n" +
+	"\x05fresh\x18\x02 \x01(\v2\x17.protocol.v1.FreshQueryH\x00R\x05fresh\x125\n" +
+	"\aresumed\x18\x03 \x01(\v2\x19.protocol.v1.ResumedQueryH\x00R\aresumedB\f\n" +
 	"\n" +
 	"invocation\"\f\n" +
 	"\n" +
@@ -3888,21 +3889,21 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"\fResumedQuery\x12=\n" +
 	"\x1brequested_vendor_session_id\x18\x01 \x01(\tR\x18requestedVendorSessionId\"U\n" +
 	"\x14QueryRuntimeObserved\x12=\n" +
-	"\bidentity\x18\x01 \x01(\v2!.protocol.v1.QueryRuntimeIdentityR\bidentity\"\x8d\x05\n" +
+	"\bidentity\x18\x01 \x01(\v2!.protocol.v1.QueryRuntimeIdentityR\bidentity\"\xc6\x04\n" +
 	"\x14QueryRuntimeIdentity\x12*\n" +
 	"\x11vendor_session_id\x18\x01 \x01(\tR\x0fvendorSessionId\x12'\n" +
 	"\x0feffective_model\x18\x02 \x01(\tR\x0eeffectiveModel\x12\x1f\n" +
 	"\vsdk_version\x18\x03 \x01(\tR\n" +
 	"sdkVersion\x12$\n" +
-	"\x0eshim_build_sha\x18\x05 \x01(\tR\fshimBuildSha\x12&\n" +
-	"\x0ffast_mode_state\x18\b \x01(\tR\rfastModeState\x12(\n" +
-	"\x10fast_mode_reason\x18\t \x01(\tR\x0efastModeReason\x12M\n" +
-	"\x11effective_options\x18\n" +
-	" \x01(\v2 .protocol.v1.EvidenceFingerprintR\x10effectiveOptions\x12<\n" +
-	"\bsettings\x18\v \x01(\v2 .protocol.v1.EvidenceFingerprintR\bsettings\x126\n" +
-	"\x05tools\x18\f \x01(\v2 .protocol.v1.EvidenceFingerprintR\x05tools\x122\n" +
-	"\x03mcp\x18\r \x01(\v2 .protocol.v1.EvidenceFingerprintR\x03mcp\x12G\n" +
-	"\x0econtext_prefix\x18\x0e \x01(\v2 .protocol.v1.EvidenceFingerprintR\rcontextPrefixJ\x04\b\x04\x10\x05J\x04\b\x06\x10\aJ\x04\b\a\x10\bR\x13claude_code_versionR\vauth_sourceR\x11subscription_type\"\x84\x01\n" +
+	"\x0eshim_build_sha\x18\x04 \x01(\tR\fshimBuildSha\x12&\n" +
+	"\x0ffast_mode_state\x18\x05 \x01(\tR\rfastModeState\x12(\n" +
+	"\x10fast_mode_reason\x18\x06 \x01(\tR\x0efastModeReason\x12M\n" +
+	"\x11effective_options\x18\a \x01(\v2 .protocol.v1.EvidenceFingerprintR\x10effectiveOptions\x12<\n" +
+	"\bsettings\x18\b \x01(\v2 .protocol.v1.EvidenceFingerprintR\bsettings\x126\n" +
+	"\x05tools\x18\t \x01(\v2 .protocol.v1.EvidenceFingerprintR\x05tools\x122\n" +
+	"\x03mcp\x18\n" +
+	" \x01(\v2 .protocol.v1.EvidenceFingerprintR\x03mcp\x12G\n" +
+	"\x0econtext_prefix\x18\v \x01(\v2 .protocol.v1.EvidenceFingerprintR\rcontextPrefix\"\x84\x01\n" +
 	"\x13EvidenceFingerprint\x12\x18\n" +
 	"\x06sha256\x18\x01 \x01(\tH\x00R\x06sha256\x12G\n" +
 	"\vunavailable\x18\x02 \x01(\v2#.protocol.v1.FingerprintUnavailableH\x00R\vunavailableB\n" +
@@ -3913,11 +3914,10 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"\x0fQueryTerminated\x12,\n" +
 	"\x11vendor_session_id\x18\x01 \x01(\tH\x00R\x0fvendorSessionId\x12~\n" +
 	"#vendor_session_identity_unavailable\x18\x02 \x01(\v2-.protocol.v1.VendorSessionIdentityUnavailableH\x00R vendorSessionIdentityUnavailable\x12L\n" +
-	"\vintentional\x18\n" +
-	" \x01(\v2(.protocol.v1.IntentionalQueryTerminationH\x01R\vintentional\x12H\n" +
-	"\x0eunexpected_eof\x18\v \x01(\v2\x1f.protocol.v1.UnexpectedQueryEofH\x01R\runexpectedEof\x12N\n" +
-	"\x10iterator_failure\x18\f \x01(\v2!.protocol.v1.QueryIteratorFailureH\x01R\x0fiteratorFailure\x12K\n" +
-	"\x0fstartup_failure\x18\r \x01(\v2 .protocol.v1.QueryStartupFailureH\x01R\x0estartupFailureB\x11\n" +
+	"\vintentional\x18\x03 \x01(\v2(.protocol.v1.IntentionalQueryTerminationH\x01R\vintentional\x12H\n" +
+	"\x0eunexpected_eof\x18\x04 \x01(\v2\x1f.protocol.v1.UnexpectedQueryEofH\x01R\runexpectedEof\x12N\n" +
+	"\x10iterator_failure\x18\x05 \x01(\v2!.protocol.v1.QueryIteratorFailureH\x01R\x0fiteratorFailure\x12K\n" +
+	"\x0fstartup_failure\x18\x06 \x01(\v2 .protocol.v1.QueryStartupFailureH\x01R\x0estartupFailureB\x11\n" +
 	"\x0fvendor_identityB\b\n" +
 	"\x06reason\"\"\n" +
 	" VendorSessionIdentityUnavailable\"5\n" +
@@ -4042,12 +4042,12 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
 	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12-\n" +
-	"\x05input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x05input\"\xa4\x01\n" +
+	"\x05input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x05input\"\x94\x01\n" +
 	"\x12PermissionResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12<\n" +
-	"\rupdated_input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\fupdatedInput\x12!\n" +
-	"\fdeny_message\x18\x04 \x01(\tR\vdenyMessageJ\x04\b\x02\x10\x03R\bdecision\"3\n" +
+	"\rupdated_input\x18\x02 \x01(\v2\x17.google.protobuf.StructR\fupdatedInput\x12!\n" +
+	"\fdeny_message\x18\x03 \x01(\tR\vdenyMessage\"3\n" +
 	"\x13ConnectionHeartbeat\x12\x1c\n" +
 	"\n" +
 	"sent_at_ms\x18\x01 \x01(\x03R\bsentAtMs\",\n" +
@@ -4076,7 +4076,7 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"\x1aSESSION_SOURCE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14SESSION_SOURCE_FRESH\x10\x01\x12\x19\n" +
 	"\x15SESSION_SOURCE_RESUME\x10\x02\x12#\n" +
-	"\x1fSESSION_SOURCE_COMPACT_CONTINUE\x10\x03*\xc4\t\n" +
+	"\x1fSESSION_SOURCE_COMPACT_CONTINUE\x10\x03*\xea\b\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -4094,20 +4094,20 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	")PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR\x10\f\x12!\n" +
 	"\x1dPROMPT_ORIGIN_PANEL_SELECTION\x10\r\x12!\n" +
 	"\x1dPROMPT_ORIGIN_DEFERRED_PROMPT\x10\x0e\x12$\n" +
-	" PROMPT_ORIGIN_LEGACY_HOST_PROMPT\x10\x10\x12#\n" +
-	"\x1fPROMPT_ORIGIN_GNS_SOCKETS_CLOSE\x10\x11\x12)\n" +
-	"%PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT\x10\x12\x12 \n" +
-	"\x1cPROMPT_ORIGIN_EXPLAIN_CONFIG\x10\x13\x12\"\n" +
-	"\x1ePROMPT_ORIGIN_WEBAPP_USER_SENT\x10\x14\x12$\n" +
-	" PROMPT_ORIGIN_WEBAPP_CARD_ACTION\x10\x15\x12#\n" +
-	"\x1fPROMPT_ORIGIN_WORKSPACE_CREATED\x10\x16\x12'\n" +
-	"#PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR\x10\x17\x12#\n" +
-	"\x1fPROMPT_ORIGIN_MERGE_TEST_REPAIR\x10\x18\x12%\n" +
-	"!PROMPT_ORIGIN_MERGE_BEFORE_ACTION\x10\x19\x12$\n" +
-	" PROMPT_ORIGIN_MERGE_AFTER_ACTION\x10\x1a\x12-\n" +
-	")PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME\x10\x1c\x12\"\n" +
-	"\x1ePROMPT_ORIGIN_CACHE_KEEP_ALIVE\x10\x1d\x12&\n" +
-	"\"PROMPT_ORIGIN_RESUME_AFTER_RESTART\x10\x1e\"\x04\b\x0f\x10\x0f\"\x04\b\x1b\x10\x1b*#PROMPT_ORIGIN_LEGACY_PENDING_PROMPT*'PROMPT_ORIGIN_MERGE_PARENT_NOTIFICATION*X\n" +
+	" PROMPT_ORIGIN_LEGACY_HOST_PROMPT\x10\x0f\x12#\n" +
+	"\x1fPROMPT_ORIGIN_GNS_SOCKETS_CLOSE\x10\x10\x12)\n" +
+	"%PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT\x10\x11\x12 \n" +
+	"\x1cPROMPT_ORIGIN_EXPLAIN_CONFIG\x10\x12\x12\"\n" +
+	"\x1ePROMPT_ORIGIN_WEBAPP_USER_SENT\x10\x13\x12$\n" +
+	" PROMPT_ORIGIN_WEBAPP_CARD_ACTION\x10\x14\x12#\n" +
+	"\x1fPROMPT_ORIGIN_WORKSPACE_CREATED\x10\x15\x12'\n" +
+	"#PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR\x10\x16\x12#\n" +
+	"\x1fPROMPT_ORIGIN_MERGE_TEST_REPAIR\x10\x17\x12%\n" +
+	"!PROMPT_ORIGIN_MERGE_BEFORE_ACTION\x10\x18\x12$\n" +
+	" PROMPT_ORIGIN_MERGE_AFTER_ACTION\x10\x19\x12-\n" +
+	")PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME\x10\x1a\x12\"\n" +
+	"\x1ePROMPT_ORIGIN_CACHE_KEEP_ALIVE\x10\x1b\x12&\n" +
+	"\"PROMPT_ORIGIN_RESUME_AFTER_RESTART\x10\x1c*X\n" +
 	"\vModelMarker\x12\x1c\n" +
 	"\x18MODEL_MARKER_UNSPECIFIED\x10\x00\x12+\n" +
 	"\x16MODEL_MARKER_SYNTHETIC\x10\x01\x1a\x0f\x8a\xa6\x1d\v<synthetic>*\x9e\x01\n" +

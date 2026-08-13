@@ -48,7 +48,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file protocol/v1/core.proto.
  */
 export const file_protocol_v1_core: GenFile = /*@__PURE__*/
-  fileDesc("ChZwcm90b2NvbC92MS9jb3JlLnByb3RvEgtwcm90b2NvbC52MSI/Cg9UdXJuQ2xhaW1CcmlkZ2USDwoHdHVybl9pZBgBIAEoCRIbChNwcmV2aW91c19zZXNzaW9uX2lkGAIgASgJIrYBCg5TZXNzaW9uUmV3b3VuZBIiChpwcmV2aW91c192ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRIdChVuZXdfdmVuZG9yX3Nlc3Npb25faWQYAiABKAkSGgoScmV0YWluZWRfbGVhZl91dWlkGAMgASgJEjsKEmtlZXBfYWxpdmVfZGlzY2FyZBgKIAEoCzIdLnByb3RvY29sLnYxLktlZXBBbGl2ZURpc2NhcmRIAEIICgZyZWFzb24iLAoQS2VlcEFsaXZlRGlzY2FyZBIYChBkcm9wcGVkX3R1cm5faWRzGAEgAygJIu0BCg5RdWVyeUxpZmVjeWNsZRIZChFxdWVyeV9pbnN0YW5jZV9pZBgBIAEoCRIWCg5vYnNlcnZlZF9hdF9tcxgCIAEoAxIsCgdjcmVhdGVkGAogASgLMhkucHJvdG9jb2wudjEuUXVlcnlDcmVhdGVkSAASPQoQcnVudGltZV9vYnNlcnZlZBgLIAEoCzIhLnByb3RvY29sLnYxLlF1ZXJ5UnVudGltZU9ic2VydmVkSAASMgoKdGVybWluYXRlZBgMIAEoCzIcLnByb3RvY29sLnYxLlF1ZXJ5VGVybWluYXRlZEgAQgcKBWV2ZW50Io0BCgxRdWVyeUNyZWF0ZWQSFwoPcmVxdWVzdGVkX21vZGVsGAEgASgJEigKBWZyZXNoGAogASgLMhcucHJvdG9jb2wudjEuRnJlc2hRdWVyeUgAEiwKB3Jlc3VtZWQYCyABKAsyGS5wcm90b2NvbC52MS5SZXN1bWVkUXVlcnlIAEIMCgppbnZvY2F0aW9uIgwKCkZyZXNoUXVlcnkiMwoMUmVzdW1lZFF1ZXJ5EiMKG3JlcXVlc3RlZF92ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCSJLChRRdWVyeVJ1bnRpbWVPYnNlcnZlZBIzCghpZGVudGl0eRgBIAEoCzIhLnByb3RvY29sLnYxLlF1ZXJ5UnVudGltZUlkZW50aXR5IvwDChRRdWVyeVJ1bnRpbWVJZGVudGl0eRIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRIXCg9lZmZlY3RpdmVfbW9kZWwYAiABKAkSEwoLc2RrX3ZlcnNpb24YAyABKAkSFgoOc2hpbV9idWlsZF9zaGEYBSABKAkSFwoPZmFzdF9tb2RlX3N0YXRlGAggASgJEhgKEGZhc3RfbW9kZV9yZWFzb24YCSABKAkSOwoRZWZmZWN0aXZlX29wdGlvbnMYCiABKAsyIC5wcm90b2NvbC52MS5FdmlkZW5jZUZpbmdlcnByaW50EjIKCHNldHRpbmdzGAsgASgLMiAucHJvdG9jb2wudjEuRXZpZGVuY2VGaW5nZXJwcmludBIvCgV0b29scxgMIAEoCzIgLnByb3RvY29sLnYxLkV2aWRlbmNlRmluZ2VycHJpbnQSLQoDbWNwGA0gASgLMiAucHJvdG9jb2wudjEuRXZpZGVuY2VGaW5nZXJwcmludBI4Cg5jb250ZXh0X3ByZWZpeBgOIAEoCzIgLnByb3RvY29sLnYxLkV2aWRlbmNlRmluZ2VycHJpbnRKBAgEEAVKBAgGEAdKBAgHEAhSE2NsYXVkZV9jb2RlX3ZlcnNpb25SC2F1dGhfc291cmNlUhFzdWJzY3JpcHRpb25fdHlwZSJvChNFdmlkZW5jZUZpbmdlcnByaW50EhAKBnNoYTI1NhgBIAEoCUgAEjoKC3VuYXZhaWxhYmxlGAIgASgLMiMucHJvdG9jb2wudjEuRmluZ2VycHJpbnRVbmF2YWlsYWJsZUgAQgoKCGV2aWRlbmNlIicKFkZpbmdlcnByaW50VW5hdmFpbGFibGUSDQoFY2F1c2UYASABKAkioQMKD1F1ZXJ5VGVybWluYXRlZBIbChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCUgAElwKI3ZlbmRvcl9zZXNzaW9uX2lkZW50aXR5X3VuYXZhaWxhYmxlGAIgASgLMi0ucHJvdG9jb2wudjEuVmVuZG9yU2Vzc2lvbklkZW50aXR5VW5hdmFpbGFibGVIABI/CgtpbnRlbnRpb25hbBgKIAEoCzIoLnByb3RvY29sLnYxLkludGVudGlvbmFsUXVlcnlUZXJtaW5hdGlvbkgBEjkKDnVuZXhwZWN0ZWRfZW9mGAsgASgLMh8ucHJvdG9jb2wudjEuVW5leHBlY3RlZFF1ZXJ5RW9mSAESPQoQaXRlcmF0b3JfZmFpbHVyZRgMIAEoCzIhLnByb3RvY29sLnYxLlF1ZXJ5SXRlcmF0b3JGYWlsdXJlSAESOwoPc3RhcnR1cF9mYWlsdXJlGA0gASgLMiAucHJvdG9jb2wudjEuUXVlcnlTdGFydHVwRmFpbHVyZUgBQhEKD3ZlbmRvcl9pZGVudGl0eUIICgZyZWFzb24iIgogVmVuZG9yU2Vzc2lvbklkZW50aXR5VW5hdmFpbGFibGUiLQobSW50ZW50aW9uYWxRdWVyeVRlcm1pbmF0aW9uEg4KBnJlYXNvbhgBIAEoCSIUChJVbmV4cGVjdGVkUXVlcnlFb2YiJQoUUXVlcnlJdGVyYXRvckZhaWx1cmUSDQoFY2F1c2UYASABKAkiJAoTUXVlcnlTdGFydHVwRmFpbHVyZRINCgVjYXVzZRgBIAEoCSKSAQoNRGVncmFkZWRTdGF0ZRIRCgljb21wb25lbnQYASABKAkSDgoGcmVhc29uGAIgASgJEhUKDWRyb3BwZWRfY291bnQYAyABKAQSEQoJcmVjb3ZlcmVkGAQgASgIEh4KEXF1ZXJ5X2luc3RhbmNlX2lkGAUgASgJSACIAQFCFAoSX3F1ZXJ5X2luc3RhbmNlX2lkIvUCCglTaGltSGVsbG8SEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZ2ZW5kb3IYAiABKAkSFAoMc2hpbV92ZXJzaW9uGAMgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YBCABKAkSFgoOdHVybl9pbl9mbGlnaHQYBSABKAgSGQoRdmVuZG9yX3Nlc3Npb25faWQYBiABKAkSCwoDcGlkGAcgASgFEhEKCWJ1aWxkX3NoYRgIIAEoCRIXCg9hY3RpdmVfdHVybl9pZHMYCSADKAkSGQoRcXVlcnlfaW5zdGFuY2VfaWQYCiABKAkSQQoWcXVlcnlfcnVudGltZV9pZGVudGl0eRgLIAEoCzIhLnByb3RvY29sLnYxLlF1ZXJ5UnVudGltZUlkZW50aXR5EhkKEXF1ZXJ5X2NyZWF0ZWRfc2VxGAwgASgEEi8KDWxpdmVfdGFza19zZXQYDSABKAsyGC5wcm90b2NvbC52MS5MaXZlVGFza1NldCJqCgtEYWVtb25IZWxsbxIWCg5kYWVtb25fdmVyc2lvbhgBIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAIgASgJEhAKCGZyb21fc2VxGAMgASgEEhcKD3Blcm1pc3Npb25fbW9kZRgEIAEoCSJMCglTaGltUmVhZHkSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCghmcm9tX3NlcRgCIAEoBBIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgDIAEoCSKLAQoMU3VibWl0UHJvbXB0EhIKCnJlcXVlc3RfaWQYASABKAkSDAoEdGV4dBgCIAEoCRIOCgZvcmlnaW4YAyABKAkSFwoPcGVybWlzc2lvbl9tb2RlGAQgASgJEjAKDXByb21wdF9vcmlnaW4YBSABKA4yGS5wcm90b2NvbC52MS5Qcm9tcHRPcmlnaW4iLQoIU2V0TW9kZWwSEgoKcmVxdWVzdF9pZBgBIAEoCRINCgVtb2RlbBgCIAEoCSIoChJRdWVyeVNlbGVjdGVkTW9kZWwSEgoKcmVxdWVzdF9pZBgBIAEoCSJHCgtNb2RlbE9wdGlvbhINCgV2YWx1ZRgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkiTAoMTW9kZWxDYXRhbG9nEhIKCnNlc3Npb25faWQYASABKAkSKAoGbW9kZWxzGAIgAygLMhgucHJvdG9jb2wudjEuTW9kZWxPcHRpb24iHwoJSW50ZXJydXB0EhIKCnJlcXVlc3RfaWQYASABKAkiKgoUQ2FuY2VsRGV0YWNoZWRBZ2VudHMSEgoKcmVxdWVzdF9pZBgBIAEoCSIkCg5RdWVyeUxpdmVUYXNrcxISCgpyZXF1ZXN0X2lkGAEgASgJIh8KC0xpdmVUYXNrU2V0EhAKCHRhc2tfaWRzGAEgAygJIt0BChVEZXRhY2hlZENhbmNlbE91dGNvbWUSOQoJY2FuY2VsbGVkGAEgASgLMiQucHJvdG9jb2wudjEuRGV0YWNoZWRBZ2VudHNDYW5jZWxsZWRIABI/Cg9ub3RoaW5nX3J1bm5pbmcYAiABKAsyJC5wcm90b2NvbC52MS5Ob0RldGFjaGVkQWdlbnRzUnVubmluZ0gAEj0KC3Vuc3VwcG9ydGVkGAMgASgLMiYucHJvdG9jb2wudjEuRGV0YWNoZWRDYW5jZWxVbnN1cHBvcnRlZEgAQgkKB291dGNvbWUiKwoXRGV0YWNoZWRBZ2VudHNDYW5jZWxsZWQSEAoIdGFza19pZHMYASADKAkiGQoXTm9EZXRhY2hlZEFnZW50c1J1bm5pbmciKwoZRGV0YWNoZWRDYW5jZWxVbnN1cHBvcnRlZBIOCgZkZXRhaWwYASABKAki4QEKA0FjaxISCgpyZXF1ZXN0X2lkGAEgASgJEjgKEWludGVycnVwdF9vdXRjb21lGAIgASgOMh0ucHJvdG9jb2wudjEuSW50ZXJydXB0T3V0Y29tZRIWCg5zZWxlY3RlZF9tb2RlbBgDIAEoCRJDChdkZXRhY2hlZF9jYW5jZWxfb3V0Y29tZRgEIAEoCzIiLnByb3RvY29sLnYxLkRldGFjaGVkQ2FuY2VsT3V0Y29tZRIvCg1saXZlX3Rhc2tfc2V0GAUgASgLMhgucHJvdG9jb2wudjEuTGl2ZVRhc2tTZXQiQgoETmFjaxISCgpyZXF1ZXN0X2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCRIWCg5zZWxlY3RlZF9tb2RlbBgDIAEoCSIxCglTdWJzY3JpYmUSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCghmcm9tX3NlcRgCIAEoBCJZCg1SZXBsYXlSZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQSDgoGdG9fc2VxGAMgASgEEhIKCm1heF9ldmVudHMYBCABKA0iTAoLUmVwbGF5RW50cnkSEgoKcmVxdWVzdF9pZBgBIAEoCRIpCgVlbnRyeRgCIAEoCzIaLnByb3RvY29sLnYxLkV4dGVybmFsRW50cnkiVgoKUmVwbGF5RG9uZRISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXRydW5jYXRlZBgCIAEoCBIOCgZyZWFzb24YAyABKAkSEQoJZGVsaXZlcmVkGAQgASgEImIKEVBlcm1pc3Npb25SZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEiYKBWlucHV0GAMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCJ+ChJQZXJtaXNzaW9uUmVzcG9uc2USEgoKcmVxdWVzdF9pZBgBIAEoCRIuCg11cGRhdGVkX2lucHV0GAMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBIUCgxkZW55X21lc3NhZ2UYBCABKAlKBAgCEANSCGRlY2lzaW9uIikKE0Nvbm5lY3Rpb25IZWFydGJlYXQSEgoKc2VudF9hdF9tcxgBIAEoAyIhCgtIZWFsdGhDaGVjaxISCgpyZXF1ZXN0X2lkGAEgASgJIlYKDEhlYWx0aFN0YXR1cxISCgpyZXF1ZXN0X2lkGAEgASgJEg8KB2hlYWx0aHkYAiABKAgSEQoJY29tcG9uZW50GAMgASgJEg4KBnJlYXNvbhgEIAEoCSpnCghUYXNrS2luZBIZChVUQVNLX0tJTkRfVU5TUEVDSUZJRUQQABITCg9UQVNLX0tJTkRfQUdFTlQQARITCg9UQVNLX0tJTkRfU0hFTEwQAhIWChJUQVNLX0tJTkRfV09SS0ZMT1cQAyq5AQoOVGVybWluYWxTdGF0dXMSHwobVEVSTUlOQUxfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGAoUVEVSTUlOQUxfU1RBVFVTX0RPTkUQARIZChVURVJNSU5BTF9TVEFUVVNfRVJST1IQAhIaChZURVJNSU5BTF9TVEFUVVNfS0lMTEVEEAMSGwoXVEVSTUlOQUxfU1RBVFVTX1NUT1BQRUQQBBIYChRURVJNSU5BTF9TVEFUVVNfTE9TVBAFKokBCg1TZXNzaW9uU291cmNlEh4KGlNFU1NJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASGAoUU0VTU0lPTl9TT1VSQ0VfRlJFU0gQARIZChVTRVNTSU9OX1NPVVJDRV9SRVNVTUUQAhIjCh9TRVNTSU9OX1NPVVJDRV9DT01QQUNUX0NPTlRJTlVFEAMqxAkKDFByb21wdE9yaWdpbhIdChlQUk9NUFRfT1JJR0lOX1VOU1BFQ0lGSUVEEAASGwoXUFJPTVBUX09SSUdJTl9VU0VSX1NFTlQQARIkCiBQUk9NUFRfT1JJR0lOX1VTRVJfU0VOVF9BTkRfSElERRACEisKJ1BST01QVF9PUklHSU5fVVNFUl9TRU5UX1dJVEhfTUVUQVBST01QVBADEigKJFBST01QVF9PUklHSU5fVVNFUl9TRU5UX1dJVEhfUE9TVEZJWBAEEicKI1BST01QVF9PUklHSU5fVVNFUl9TRU5UX1dJVEhfUFJFRklYEAUSIQodUFJPTVBUX09SSUdJTl9NRVRBUFJPTVBUX1JFQUQQBhInCiNQUk9NUFRfT1JJR0lOX0NPTU1BTkRfRElGRl9BTkFMWVNJUxAHEikKJVBST01QVF9PUklHSU5fQ09NTUFORF9FWFBMQUlOX0NPTlRFWFQQCBIoCiRQUk9NUFRfT1JJR0lOX0NPTU1BTkRfRVhQTEFJTl9QUk9NUFQQCRIjCh9QUk9NUFRfT1JJR0lOX0NPTU1BTkRfVVBEQVRFX1BSEAoSIAocUFJPTVBUX09SSUdJTl9DT01NQU5EX1JFQkFTRRALEi0KKVBST01QVF9PUklHSU5fQ09NTUFORF9DUkVBVEVfT1JfVVBEQVRFX1BSEAwSIQodUFJPTVBUX09SSUdJTl9QQU5FTF9TRUxFQ1RJT04QDRIhCh1QUk9NUFRfT1JJR0lOX0RFRkVSUkVEX1BST01QVBAOEiQKIFBST01QVF9PUklHSU5fTEVHQUNZX0hPU1RfUFJPTVBUEBASIwofUFJPTVBUX09SSUdJTl9HTlNfU09DS0VUU19DTE9TRRAREikKJVBST01QVF9PUklHSU5fTEVHQUNZX0hPU1RfRVZBTF9SRVNVTFQQEhIgChxQUk9NUFRfT1JJR0lOX0VYUExBSU5fQ09ORklHEBMSIgoeUFJPTVBUX09SSUdJTl9XRUJBUFBfVVNFUl9TRU5UEBQSJAogUFJPTVBUX09SSUdJTl9XRUJBUFBfQ0FSRF9BQ1RJT04QFRIjCh9QUk9NUFRfT1JJR0lOX1dPUktTUEFDRV9DUkVBVEVEEBYSJwojUFJPTVBUX09SSUdJTl9NRVJHRV9DT05GTElDVF9SRVBBSVIQFxIjCh9QUk9NUFRfT1JJR0lOX01FUkdFX1RFU1RfUkVQQUlSEBgSJQohUFJPTVBUX09SSUdJTl9NRVJHRV9CRUZPUkVfQUNUSU9OEBkSJAogUFJPTVBUX09SSUdJTl9NRVJHRV9BRlRFUl9BQ1RJT04QGhItCilQUk9NUFRfT1JJR0lOX01FUkdFX0RJU1BMQUNFRF9UVVJOX1JFU1VNRRAcEiIKHlBST01QVF9PUklHSU5fQ0FDSEVfS0VFUF9BTElWRRAdEiYKIlBST01QVF9PUklHSU5fUkVTVU1FX0FGVEVSX1JFU1RBUlQQHiIECA8QDyIECBsQGyojUFJPTVBUX09SSUdJTl9MRUdBQ1lfUEVORElOR19QUk9NUFQqJ1BST01QVF9PUklHSU5fTUVSR0VfUEFSRU5UX05PVElGSUNBVElPTipYCgtNb2RlbE1hcmtlchIcChhNT0RFTF9NQVJLRVJfVU5TUEVDSUZJRUQQABIrChZNT0RFTF9NQVJLRVJfU1lOVEhFVElDEAEaD4qmHQs8c3ludGhldGljPiqeAQoQSW50ZXJydXB0T3V0Y29tZRIhCh1JTlRFUlJVUFRfT1VUQ09NRV9VTlNQRUNJRklFRBAAEiEKHUlOVEVSUlVQVF9PVVRDT01FX0lOVEVSUlVQVEVEEAESJgoiSU5URVJSVVBUX09VVENPTUVfQUxSRUFEWV9DT01QTEVURRACEhwKGElOVEVSUlVQVF9PVVRDT01FX0ZBSUxFRBADOlUKFG1vZGVsX21hcmtlcl9saXRlcmFsEiEuZ29vZ2xlLnByb3RvYnVmLkVudW1WYWx1ZU9wdGlvbnMY4dQDIAEoCVISbW9kZWxNYXJrZXJMaXRlcmFsQihaJmFnZW50cmVwbC9wcm90by9wcm90b2NvbC92MTtwcm90b2NvbHYxYgZwcm90bzM", [file_google_protobuf_descriptor, file_google_protobuf_struct, file_protocol_v1_external]);
+  fileDesc("ChZwcm90b2NvbC92MS9jb3JlLnByb3RvEgtwcm90b2NvbC52MSI/Cg9UdXJuQ2xhaW1CcmlkZ2USDwoHdHVybl9pZBgBIAEoCRIbChNwcmV2aW91c19zZXNzaW9uX2lkGAIgASgJIrYBCg5TZXNzaW9uUmV3b3VuZBIiChpwcmV2aW91c192ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRIdChVuZXdfdmVuZG9yX3Nlc3Npb25faWQYAiABKAkSGgoScmV0YWluZWRfbGVhZl91dWlkGAMgASgJEjsKEmtlZXBfYWxpdmVfZGlzY2FyZBgEIAEoCzIdLnByb3RvY29sLnYxLktlZXBBbGl2ZURpc2NhcmRIAEIICgZyZWFzb24iLAoQS2VlcEFsaXZlRGlzY2FyZBIYChBkcm9wcGVkX3R1cm5faWRzGAEgAygJIu0BCg5RdWVyeUxpZmVjeWNsZRIZChFxdWVyeV9pbnN0YW5jZV9pZBgBIAEoCRIWCg5vYnNlcnZlZF9hdF9tcxgCIAEoAxIsCgdjcmVhdGVkGAMgASgLMhkucHJvdG9jb2wudjEuUXVlcnlDcmVhdGVkSAASPQoQcnVudGltZV9vYnNlcnZlZBgEIAEoCzIhLnByb3RvY29sLnYxLlF1ZXJ5UnVudGltZU9ic2VydmVkSAASMgoKdGVybWluYXRlZBgFIAEoCzIcLnByb3RvY29sLnYxLlF1ZXJ5VGVybWluYXRlZEgAQgcKBWV2ZW50Io0BCgxRdWVyeUNyZWF0ZWQSFwoPcmVxdWVzdGVkX21vZGVsGAEgASgJEigKBWZyZXNoGAIgASgLMhcucHJvdG9jb2wudjEuRnJlc2hRdWVyeUgAEiwKB3Jlc3VtZWQYAyABKAsyGS5wcm90b2NvbC52MS5SZXN1bWVkUXVlcnlIAEIMCgppbnZvY2F0aW9uIgwKCkZyZXNoUXVlcnkiMwoMUmVzdW1lZFF1ZXJ5EiMKG3JlcXVlc3RlZF92ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCSJLChRRdWVyeVJ1bnRpbWVPYnNlcnZlZBIzCghpZGVudGl0eRgBIAEoCzIhLnByb3RvY29sLnYxLlF1ZXJ5UnVudGltZUlkZW50aXR5IrUDChRRdWVyeVJ1bnRpbWVJZGVudGl0eRIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRIXCg9lZmZlY3RpdmVfbW9kZWwYAiABKAkSEwoLc2RrX3ZlcnNpb24YAyABKAkSFgoOc2hpbV9idWlsZF9zaGEYBCABKAkSFwoPZmFzdF9tb2RlX3N0YXRlGAUgASgJEhgKEGZhc3RfbW9kZV9yZWFzb24YBiABKAkSOwoRZWZmZWN0aXZlX29wdGlvbnMYByABKAsyIC5wcm90b2NvbC52MS5FdmlkZW5jZUZpbmdlcnByaW50EjIKCHNldHRpbmdzGAggASgLMiAucHJvdG9jb2wudjEuRXZpZGVuY2VGaW5nZXJwcmludBIvCgV0b29scxgJIAEoCzIgLnByb3RvY29sLnYxLkV2aWRlbmNlRmluZ2VycHJpbnQSLQoDbWNwGAogASgLMiAucHJvdG9jb2wudjEuRXZpZGVuY2VGaW5nZXJwcmludBI4Cg5jb250ZXh0X3ByZWZpeBgLIAEoCzIgLnByb3RvY29sLnYxLkV2aWRlbmNlRmluZ2VycHJpbnQibwoTRXZpZGVuY2VGaW5nZXJwcmludBIQCgZzaGEyNTYYASABKAlIABI6Cgt1bmF2YWlsYWJsZRgCIAEoCzIjLnByb3RvY29sLnYxLkZpbmdlcnByaW50VW5hdmFpbGFibGVIAEIKCghldmlkZW5jZSInChZGaW5nZXJwcmludFVuYXZhaWxhYmxlEg0KBWNhdXNlGAEgASgJIqEDCg9RdWVyeVRlcm1pbmF0ZWQSGwoRdmVuZG9yX3Nlc3Npb25faWQYASABKAlIABJcCiN2ZW5kb3Jfc2Vzc2lvbl9pZGVudGl0eV91bmF2YWlsYWJsZRgCIAEoCzItLnByb3RvY29sLnYxLlZlbmRvclNlc3Npb25JZGVudGl0eVVuYXZhaWxhYmxlSAASPwoLaW50ZW50aW9uYWwYAyABKAsyKC5wcm90b2NvbC52MS5JbnRlbnRpb25hbFF1ZXJ5VGVybWluYXRpb25IARI5Cg51bmV4cGVjdGVkX2VvZhgEIAEoCzIfLnByb3RvY29sLnYxLlVuZXhwZWN0ZWRRdWVyeUVvZkgBEj0KEGl0ZXJhdG9yX2ZhaWx1cmUYBSABKAsyIS5wcm90b2NvbC52MS5RdWVyeUl0ZXJhdG9yRmFpbHVyZUgBEjsKD3N0YXJ0dXBfZmFpbHVyZRgGIAEoCzIgLnByb3RvY29sLnYxLlF1ZXJ5U3RhcnR1cEZhaWx1cmVIAUIRCg92ZW5kb3JfaWRlbnRpdHlCCAoGcmVhc29uIiIKIFZlbmRvclNlc3Npb25JZGVudGl0eVVuYXZhaWxhYmxlIi0KG0ludGVudGlvbmFsUXVlcnlUZXJtaW5hdGlvbhIOCgZyZWFzb24YASABKAkiFAoSVW5leHBlY3RlZFF1ZXJ5RW9mIiUKFFF1ZXJ5SXRlcmF0b3JGYWlsdXJlEg0KBWNhdXNlGAEgASgJIiQKE1F1ZXJ5U3RhcnR1cEZhaWx1cmUSDQoFY2F1c2UYASABKAkikgEKDURlZ3JhZGVkU3RhdGUSEQoJY29tcG9uZW50GAEgASgJEg4KBnJlYXNvbhgCIAEoCRIVCg1kcm9wcGVkX2NvdW50GAMgASgEEhEKCXJlY292ZXJlZBgEIAEoCBIeChFxdWVyeV9pbnN0YW5jZV9pZBgFIAEoCUgAiAEBQhQKEl9xdWVyeV9pbnN0YW5jZV9pZCL1AgoJU2hpbUhlbGxvEhIKCnNlc3Npb25faWQYASABKAkSDgoGdmVuZG9yGAIgASgJEhQKDHNoaW1fdmVyc2lvbhgDIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAQgASgJEhYKDnR1cm5faW5fZmxpZ2h0GAUgASgIEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAYgASgJEgsKA3BpZBgHIAEoBRIRCglidWlsZF9zaGEYCCABKAkSFwoPYWN0aXZlX3R1cm5faWRzGAkgAygJEhkKEXF1ZXJ5X2luc3RhbmNlX2lkGAogASgJEkEKFnF1ZXJ5X3J1bnRpbWVfaWRlbnRpdHkYCyABKAsyIS5wcm90b2NvbC52MS5RdWVyeVJ1bnRpbWVJZGVudGl0eRIZChFxdWVyeV9jcmVhdGVkX3NlcRgMIAEoBBIvCg1saXZlX3Rhc2tfc2V0GA0gASgLMhgucHJvdG9jb2wudjEuTGl2ZVRhc2tTZXQiagoLRGFlbW9uSGVsbG8SFgoOZGFlbW9uX3ZlcnNpb24YASABKAkSGAoQcHJvdG9jb2xfdmVyc2lvbhgCIAEoCRIQCghmcm9tX3NlcRgDIAEoBBIXCg9wZXJtaXNzaW9uX21vZGUYBCABKAkiTAoJU2hpbVJlYWR5EhIKCnNlc3Npb25faWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQSGQoRdmVuZG9yX3Nlc3Npb25faWQYAyABKAkiiwEKDFN1Ym1pdFByb21wdBISCgpyZXF1ZXN0X2lkGAEgASgJEgwKBHRleHQYAiABKAkSDgoGb3JpZ2luGAMgASgJEhcKD3Blcm1pc3Npb25fbW9kZRgEIAEoCRIwCg1wcm9tcHRfb3JpZ2luGAUgASgOMhkucHJvdG9jb2wudjEuUHJvbXB0T3JpZ2luIi0KCFNldE1vZGVsEhIKCnJlcXVlc3RfaWQYASABKAkSDQoFbW9kZWwYAiABKAkiKAoSUXVlcnlTZWxlY3RlZE1vZGVsEhIKCnJlcXVlc3RfaWQYASABKAkiRwoLTW9kZWxPcHRpb24SDQoFdmFsdWUYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJIkwKDE1vZGVsQ2F0YWxvZxISCgpzZXNzaW9uX2lkGAEgASgJEigKBm1vZGVscxgCIAMoCzIYLnByb3RvY29sLnYxLk1vZGVsT3B0aW9uIh8KCUludGVycnVwdBISCgpyZXF1ZXN0X2lkGAEgASgJIioKFENhbmNlbERldGFjaGVkQWdlbnRzEhIKCnJlcXVlc3RfaWQYASABKAkiJAoOUXVlcnlMaXZlVGFza3MSEgoKcmVxdWVzdF9pZBgBIAEoCSIfCgtMaXZlVGFza1NldBIQCgh0YXNrX2lkcxgBIAMoCSLdAQoVRGV0YWNoZWRDYW5jZWxPdXRjb21lEjkKCWNhbmNlbGxlZBgBIAEoCzIkLnByb3RvY29sLnYxLkRldGFjaGVkQWdlbnRzQ2FuY2VsbGVkSAASPwoPbm90aGluZ19ydW5uaW5nGAIgASgLMiQucHJvdG9jb2wudjEuTm9EZXRhY2hlZEFnZW50c1J1bm5pbmdIABI9Cgt1bnN1cHBvcnRlZBgDIAEoCzImLnByb3RvY29sLnYxLkRldGFjaGVkQ2FuY2VsVW5zdXBwb3J0ZWRIAEIJCgdvdXRjb21lIisKF0RldGFjaGVkQWdlbnRzQ2FuY2VsbGVkEhAKCHRhc2tfaWRzGAEgAygJIhkKF05vRGV0YWNoZWRBZ2VudHNSdW5uaW5nIisKGURldGFjaGVkQ2FuY2VsVW5zdXBwb3J0ZWQSDgoGZGV0YWlsGAEgASgJIuEBCgNBY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRI4ChFpbnRlcnJ1cHRfb3V0Y29tZRgCIAEoDjIdLnByb3RvY29sLnYxLkludGVycnVwdE91dGNvbWUSFgoOc2VsZWN0ZWRfbW9kZWwYAyABKAkSQwoXZGV0YWNoZWRfY2FuY2VsX291dGNvbWUYBCABKAsyIi5wcm90b2NvbC52MS5EZXRhY2hlZENhbmNlbE91dGNvbWUSLwoNbGl2ZV90YXNrX3NldBgFIAEoCzIYLnByb3RvY29sLnYxLkxpdmVUYXNrU2V0IkIKBE5hY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRIOCgZyZWFzb24YAiABKAkSFgoOc2VsZWN0ZWRfbW9kZWwYAyABKAkiMQoJU3Vic2NyaWJlEhIKCnNlc3Npb25faWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQiWQoNUmVwbGF5UmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhAKCGZyb21fc2VxGAIgASgEEg4KBnRvX3NlcRgDIAEoBBISCgptYXhfZXZlbnRzGAQgASgNIkwKC1JlcGxheUVudHJ5EhIKCnJlcXVlc3RfaWQYASABKAkSKQoFZW50cnkYAiABKAsyGi5wcm90b2NvbC52MS5FeHRlcm5hbEVudHJ5IlYKClJlcGxheURvbmUSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl0cnVuY2F0ZWQYAiABKAgSDgoGcmVhc29uGAMgASgJEhEKCWRlbGl2ZXJlZBgEIAEoBCJiChFQZXJtaXNzaW9uUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXRvb2xfbmFtZRgCIAEoCRImCgVpbnB1dBgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QibgoSUGVybWlzc2lvblJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSLgoNdXBkYXRlZF9pbnB1dBgCIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSFAoMZGVueV9tZXNzYWdlGAMgASgJIikKE0Nvbm5lY3Rpb25IZWFydGJlYXQSEgoKc2VudF9hdF9tcxgBIAEoAyIhCgtIZWFsdGhDaGVjaxISCgpyZXF1ZXN0X2lkGAEgASgJIlYKDEhlYWx0aFN0YXR1cxISCgpyZXF1ZXN0X2lkGAEgASgJEg8KB2hlYWx0aHkYAiABKAgSEQoJY29tcG9uZW50GAMgASgJEg4KBnJlYXNvbhgEIAEoCSpnCghUYXNrS2luZBIZChVUQVNLX0tJTkRfVU5TUEVDSUZJRUQQABITCg9UQVNLX0tJTkRfQUdFTlQQARITCg9UQVNLX0tJTkRfU0hFTEwQAhIWChJUQVNLX0tJTkRfV09SS0ZMT1cQAyq5AQoOVGVybWluYWxTdGF0dXMSHwobVEVSTUlOQUxfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGAoUVEVSTUlOQUxfU1RBVFVTX0RPTkUQARIZChVURVJNSU5BTF9TVEFUVVNfRVJST1IQAhIaChZURVJNSU5BTF9TVEFUVVNfS0lMTEVEEAMSGwoXVEVSTUlOQUxfU1RBVFVTX1NUT1BQRUQQBBIYChRURVJNSU5BTF9TVEFUVVNfTE9TVBAFKokBCg1TZXNzaW9uU291cmNlEh4KGlNFU1NJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASGAoUU0VTU0lPTl9TT1VSQ0VfRlJFU0gQARIZChVTRVNTSU9OX1NPVVJDRV9SRVNVTUUQAhIjCh9TRVNTSU9OX1NPVVJDRV9DT01QQUNUX0NPTlRJTlVFEAMq6ggKDFByb21wdE9yaWdpbhIdChlQUk9NUFRfT1JJR0lOX1VOU1BFQ0lGSUVEEAASGwoXUFJPTVBUX09SSUdJTl9VU0VSX1NFTlQQARIkCiBQUk9NUFRfT1JJR0lOX1VTRVJfU0VOVF9BTkRfSElERRACEisKJ1BST01QVF9PUklHSU5fVVNFUl9TRU5UX1dJVEhfTUVUQVBST01QVBADEigKJFBST01QVF9PUklHSU5fVVNFUl9TRU5UX1dJVEhfUE9TVEZJWBAEEicKI1BST01QVF9PUklHSU5fVVNFUl9TRU5UX1dJVEhfUFJFRklYEAUSIQodUFJPTVBUX09SSUdJTl9NRVRBUFJPTVBUX1JFQUQQBhInCiNQUk9NUFRfT1JJR0lOX0NPTU1BTkRfRElGRl9BTkFMWVNJUxAHEikKJVBST01QVF9PUklHSU5fQ09NTUFORF9FWFBMQUlOX0NPTlRFWFQQCBIoCiRQUk9NUFRfT1JJR0lOX0NPTU1BTkRfRVhQTEFJTl9QUk9NUFQQCRIjCh9QUk9NUFRfT1JJR0lOX0NPTU1BTkRfVVBEQVRFX1BSEAoSIAocUFJPTVBUX09SSUdJTl9DT01NQU5EX1JFQkFTRRALEi0KKVBST01QVF9PUklHSU5fQ09NTUFORF9DUkVBVEVfT1JfVVBEQVRFX1BSEAwSIQodUFJPTVBUX09SSUdJTl9QQU5FTF9TRUxFQ1RJT04QDRIhCh1QUk9NUFRfT1JJR0lOX0RFRkVSUkVEX1BST01QVBAOEiQKIFBST01QVF9PUklHSU5fTEVHQUNZX0hPU1RfUFJPTVBUEA8SIwofUFJPTVBUX09SSUdJTl9HTlNfU09DS0VUU19DTE9TRRAQEikKJVBST01QVF9PUklHSU5fTEVHQUNZX0hPU1RfRVZBTF9SRVNVTFQQERIgChxQUk9NUFRfT1JJR0lOX0VYUExBSU5fQ09ORklHEBISIgoeUFJPTVBUX09SSUdJTl9XRUJBUFBfVVNFUl9TRU5UEBMSJAogUFJPTVBUX09SSUdJTl9XRUJBUFBfQ0FSRF9BQ1RJT04QFBIjCh9QUk9NUFRfT1JJR0lOX1dPUktTUEFDRV9DUkVBVEVEEBUSJwojUFJPTVBUX09SSUdJTl9NRVJHRV9DT05GTElDVF9SRVBBSVIQFhIjCh9QUk9NUFRfT1JJR0lOX01FUkdFX1RFU1RfUkVQQUlSEBcSJQohUFJPTVBUX09SSUdJTl9NRVJHRV9CRUZPUkVfQUNUSU9OEBgSJAogUFJPTVBUX09SSUdJTl9NRVJHRV9BRlRFUl9BQ1RJT04QGRItCilQUk9NUFRfT1JJR0lOX01FUkdFX0RJU1BMQUNFRF9UVVJOX1JFU1VNRRAaEiIKHlBST01QVF9PUklHSU5fQ0FDSEVfS0VFUF9BTElWRRAbEiYKIlBST01QVF9PUklHSU5fUkVTVU1FX0FGVEVSX1JFU1RBUlQQHCpYCgtNb2RlbE1hcmtlchIcChhNT0RFTF9NQVJLRVJfVU5TUEVDSUZJRUQQABIrChZNT0RFTF9NQVJLRVJfU1lOVEhFVElDEAEaD4qmHQs8c3ludGhldGljPiqeAQoQSW50ZXJydXB0T3V0Y29tZRIhCh1JTlRFUlJVUFRfT1VUQ09NRV9VTlNQRUNJRklFRBAAEiEKHUlOVEVSUlVQVF9PVVRDT01FX0lOVEVSUlVQVEVEEAESJgoiSU5URVJSVVBUX09VVENPTUVfQUxSRUFEWV9DT01QTEVURRACEhwKGElOVEVSUlVQVF9PVVRDT01FX0ZBSUxFRBADOlUKFG1vZGVsX21hcmtlcl9saXRlcmFsEiEuZ29vZ2xlLnByb3RvYnVmLkVudW1WYWx1ZU9wdGlvbnMY4dQDIAEoCVISbW9kZWxNYXJrZXJMaXRlcmFsQihaJmFnZW50cmVwbC9wcm90by9wcm90b2NvbC92MTtwcm90b2NvbHYxYgZwcm90bzM", [file_google_protobuf_descriptor, file_google_protobuf_struct, file_protocol_v1_external]);
 
 /**
  * @generated from message protocol.v1.TurnClaimBridge
@@ -134,7 +134,7 @@ export type SessionRewound = Message<"protocol.v1.SessionRewound"> & {
      * The only producer today: discarding trailing keep-alive turns before a
      * real prompt.
      *
-     * @generated from field: protocol.v1.KeepAliveDiscard keep_alive_discard = 10;
+     * @generated from field: protocol.v1.KeepAliveDiscard keep_alive_discard = 4;
      */
     value: KeepAliveDiscard;
     case: "keepAliveDiscard";
@@ -203,7 +203,7 @@ export type QueryLifecycle = Message<"protocol.v1.QueryLifecycle"> & {
     /**
      * Records creation of the query.
      *
-     * @generated from field: protocol.v1.QueryCreated created = 10;
+     * @generated from field: protocol.v1.QueryCreated created = 3;
      */
     value: QueryCreated;
     case: "created";
@@ -211,7 +211,7 @@ export type QueryLifecycle = Message<"protocol.v1.QueryLifecycle"> & {
     /**
      * Records the effective runtime identity reported after initialization.
      *
-     * @generated from field: protocol.v1.QueryRuntimeObserved runtime_observed = 11;
+     * @generated from field: protocol.v1.QueryRuntimeObserved runtime_observed = 4;
      */
     value: QueryRuntimeObserved;
     case: "runtimeObserved";
@@ -219,7 +219,7 @@ export type QueryLifecycle = Message<"protocol.v1.QueryLifecycle"> & {
     /**
      * Records termination of the query.
      *
-     * @generated from field: protocol.v1.QueryTerminated terminated = 12;
+     * @generated from field: protocol.v1.QueryTerminated terminated = 5;
      */
     value: QueryTerminated;
     case: "terminated";
@@ -255,7 +255,7 @@ export type QueryCreated = Message<"protocol.v1.QueryCreated"> & {
     /**
      * Indicates that no vendor session was supplied for resumption.
      *
-     * @generated from field: protocol.v1.FreshQuery fresh = 10;
+     * @generated from field: protocol.v1.FreshQuery fresh = 2;
      */
     value: FreshQuery;
     case: "fresh";
@@ -263,7 +263,7 @@ export type QueryCreated = Message<"protocol.v1.QueryCreated"> & {
     /**
      * Identifies the vendor session supplied for resumption.
      *
-     * @generated from field: protocol.v1.ResumedQuery resumed = 11;
+     * @generated from field: protocol.v1.ResumedQuery resumed = 3;
      */
     value: ResumedQuery;
     case: "resumed";
@@ -380,56 +380,56 @@ export type QueryRuntimeIdentity = Message<"protocol.v1.QueryRuntimeIdentity"> &
   /**
    * Gives the shim build commit.
    *
-   * @generated from field: string shim_build_sha = 5;
+   * @generated from field: string shim_build_sha = 4;
    */
   shimBuildSha: string;
 
   /**
    * Gives the reported fast-mode state.
    *
-   * @generated from field: string fast_mode_state = 8;
+   * @generated from field: string fast_mode_state = 5;
    */
   fastModeState: string;
 
   /**
    * Gives the explanation associated with the fast-mode state.
    *
-   * @generated from field: string fast_mode_reason = 9;
+   * @generated from field: string fast_mode_reason = 6;
    */
   fastModeReason: string;
 
   /**
    * Hashes the effective SDK options using a canonical encoding.
    *
-   * @generated from field: protocol.v1.EvidenceFingerprint effective_options = 10;
+   * @generated from field: protocol.v1.EvidenceFingerprint effective_options = 7;
    */
   effectiveOptions?: EvidenceFingerprint | undefined;
 
   /**
    * Hashes the effective settings using a canonical encoding.
    *
-   * @generated from field: protocol.v1.EvidenceFingerprint settings = 11;
+   * @generated from field: protocol.v1.EvidenceFingerprint settings = 8;
    */
   settings?: EvidenceFingerprint | undefined;
 
   /**
    * Hashes the ordered tool definitions using a canonical encoding.
    *
-   * @generated from field: protocol.v1.EvidenceFingerprint tools = 12;
+   * @generated from field: protocol.v1.EvidenceFingerprint tools = 9;
    */
   tools?: EvidenceFingerprint | undefined;
 
   /**
    * Hashes the ordered MCP configuration using a canonical encoding.
    *
-   * @generated from field: protocol.v1.EvidenceFingerprint mcp = 13;
+   * @generated from field: protocol.v1.EvidenceFingerprint mcp = 10;
    */
   mcp?: EvidenceFingerprint | undefined;
 
   /**
    * Hashes the cacheable system and instruction prefix using a canonical encoding.
    *
-   * @generated from field: protocol.v1.EvidenceFingerprint context_prefix = 14;
+   * @generated from field: protocol.v1.EvidenceFingerprint context_prefix = 11;
    */
   contextPrefix?: EvidenceFingerprint | undefined;
 };
@@ -538,7 +538,7 @@ export type QueryTerminated = Message<"protocol.v1.QueryTerminated"> & {
     /**
      * Records termination initiated by shim shutdown or hibernation.
      *
-     * @generated from field: protocol.v1.IntentionalQueryTermination intentional = 10;
+     * @generated from field: protocol.v1.IntentionalQueryTermination intentional = 3;
      */
     value: IntentionalQueryTermination;
     case: "intentional";
@@ -546,7 +546,7 @@ export type QueryTerminated = Message<"protocol.v1.QueryTerminated"> & {
     /**
      * Records unexpected completion of the SDK iterator.
      *
-     * @generated from field: protocol.v1.UnexpectedQueryEof unexpected_eof = 11;
+     * @generated from field: protocol.v1.UnexpectedQueryEof unexpected_eof = 4;
      */
     value: UnexpectedQueryEof;
     case: "unexpectedEof";
@@ -554,7 +554,7 @@ export type QueryTerminated = Message<"protocol.v1.QueryTerminated"> & {
     /**
      * Records an error thrown by the SDK iterator.
      *
-     * @generated from field: protocol.v1.QueryIteratorFailure iterator_failure = 12;
+     * @generated from field: protocol.v1.QueryIteratorFailure iterator_failure = 5;
      */
     value: QueryIteratorFailure;
     case: "iteratorFailure";
@@ -562,7 +562,7 @@ export type QueryTerminated = Message<"protocol.v1.QueryTerminated"> & {
     /**
      * Records failure before the query completed initialization.
      *
-     * @generated from field: protocol.v1.QueryStartupFailure startup_failure = 13;
+     * @generated from field: protocol.v1.QueryStartupFailure startup_failure = 6;
      */
     value: QueryStartupFailure;
     case: "startupFailure";
@@ -1753,14 +1753,19 @@ export type PermissionResponse = Message<"protocol.v1.PermissionResponse"> & {
   requestId: string;
 
   /**
+   * KNOWN GAP: this message cannot state the allow/deny verdict itself. It can
+   * carry an edited input and a denial sentence, but the verdict field went
+   * with the `PermissionDecision` enum and nothing replaces it here — see the
+   * gap note in DESIGN-protobuf-surfaces.md.
+   *
    * optional allow-with-edits
    *
-   * @generated from field: google.protobuf.Struct updated_input = 3;
+   * @generated from field: google.protobuf.Struct updated_input = 2;
    */
   updatedInput?: JsonObject | undefined;
 
   /**
-   * @generated from field: string deny_message = 4;
+   * @generated from field: string deny_message = 3;
    */
   denyMessage: string;
 };
@@ -2069,66 +2074,66 @@ export enum PromptOrigin {
   DEFERRED_PROMPT = 14,
 
   /**
-   * @generated from enum value: PROMPT_ORIGIN_LEGACY_HOST_PROMPT = 16;
+   * @generated from enum value: PROMPT_ORIGIN_LEGACY_HOST_PROMPT = 15;
    */
-  LEGACY_HOST_PROMPT = 16,
+  LEGACY_HOST_PROMPT = 15,
 
   /**
-   * @generated from enum value: PROMPT_ORIGIN_GNS_SOCKETS_CLOSE = 17;
+   * @generated from enum value: PROMPT_ORIGIN_GNS_SOCKETS_CLOSE = 16;
    */
-  GNS_SOCKETS_CLOSE = 17,
+  GNS_SOCKETS_CLOSE = 16,
 
   /**
-   * @generated from enum value: PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT = 18;
+   * @generated from enum value: PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT = 17;
    */
-  LEGACY_HOST_EVAL_RESULT = 18,
+  LEGACY_HOST_EVAL_RESULT = 17,
 
   /**
-   * @generated from enum value: PROMPT_ORIGIN_EXPLAIN_CONFIG = 19;
+   * @generated from enum value: PROMPT_ORIGIN_EXPLAIN_CONFIG = 18;
    */
-  EXPLAIN_CONFIG = 19,
+  EXPLAIN_CONFIG = 18,
 
   /**
    * Other producers remain explicit without being mislabeled as Emacs.
    *
-   * @generated from enum value: PROMPT_ORIGIN_WEBAPP_USER_SENT = 20;
+   * @generated from enum value: PROMPT_ORIGIN_WEBAPP_USER_SENT = 19;
    */
-  WEBAPP_USER_SENT = 20,
+  WEBAPP_USER_SENT = 19,
 
   /**
-   * @generated from enum value: PROMPT_ORIGIN_WEBAPP_CARD_ACTION = 21;
+   * @generated from enum value: PROMPT_ORIGIN_WEBAPP_CARD_ACTION = 20;
    */
-  WEBAPP_CARD_ACTION = 21,
+  WEBAPP_CARD_ACTION = 20,
 
   /**
-   * @generated from enum value: PROMPT_ORIGIN_WORKSPACE_CREATED = 22;
+   * @generated from enum value: PROMPT_ORIGIN_WORKSPACE_CREATED = 21;
    */
-  WORKSPACE_CREATED = 22,
+  WORKSPACE_CREATED = 21,
 
   /**
-   * @generated from enum value: PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR = 23;
+   * @generated from enum value: PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR = 22;
    */
-  MERGE_CONFLICT_REPAIR = 23,
+  MERGE_CONFLICT_REPAIR = 22,
 
   /**
-   * @generated from enum value: PROMPT_ORIGIN_MERGE_TEST_REPAIR = 24;
+   * @generated from enum value: PROMPT_ORIGIN_MERGE_TEST_REPAIR = 23;
    */
-  MERGE_TEST_REPAIR = 24,
+  MERGE_TEST_REPAIR = 23,
 
   /**
-   * @generated from enum value: PROMPT_ORIGIN_MERGE_BEFORE_ACTION = 25;
+   * @generated from enum value: PROMPT_ORIGIN_MERGE_BEFORE_ACTION = 24;
    */
-  MERGE_BEFORE_ACTION = 25,
+  MERGE_BEFORE_ACTION = 24,
 
   /**
-   * @generated from enum value: PROMPT_ORIGIN_MERGE_AFTER_ACTION = 26;
+   * @generated from enum value: PROMPT_ORIGIN_MERGE_AFTER_ACTION = 25;
    */
-  MERGE_AFTER_ACTION = 26,
+  MERGE_AFTER_ACTION = 25,
 
   /**
-   * @generated from enum value: PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME = 28;
+   * @generated from enum value: PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME = 26;
    */
-  MERGE_DISPLACED_TURN_RESUME = 28,
+  MERGE_DISPLACED_TURN_RESUME = 26,
 
   /**
    * Daemon-generated cache keep-alive ping: a minimal prompt ("respond with
@@ -2140,9 +2145,9 @@ export enum PromptOrigin {
    * via rewind (SessionRewound) before the next real prompt is submitted, so
    * they can never contaminate the model's context either.
    *
-   * @generated from enum value: PROMPT_ORIGIN_CACHE_KEEP_ALIVE = 29;
+   * @generated from enum value: PROMPT_ORIGIN_CACHE_KEEP_ALIVE = 27;
    */
-  CACHE_KEEP_ALIVE = 29,
+  CACHE_KEEP_ALIVE = 27,
 
   /**
    * Daemon-generated re-drive of a turn a planned bounce interrupted.
@@ -2166,9 +2171,9 @@ export enum PromptOrigin {
    * to report "resumed after restart" instead of presenting work the user did
    * not just ask for as though they had.
    *
-   * @generated from enum value: PROMPT_ORIGIN_RESUME_AFTER_RESTART = 30;
+   * @generated from enum value: PROMPT_ORIGIN_RESUME_AFTER_RESTART = 28;
    */
-  RESUME_AFTER_RESTART = 30,
+  RESUME_AFTER_RESTART = 28,
 }
 
 /**

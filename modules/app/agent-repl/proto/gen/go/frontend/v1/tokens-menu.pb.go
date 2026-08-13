@@ -27,10 +27,14 @@ const (
 // display order; the client renders exactly this tree.
 type TokenBreakdownView struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The workspace/session this breakdown describes.
+	// WORKSPACE-ADDRESSED, never session-addressed. A frontend has no session
+	// vocabulary; the only currency question it ever asks is "is this push still
+	// current", which the fence below answers without naming what rotated.
+	//
+	// The workspace this breakdown describes.
 	Workspace string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// Menu sections, in display order (e.g. "this turn", "session", per-model).
-	Sections []*TokenBreakdownSection `protobuf:"bytes,3,rep,name=sections,proto3" json:"sections,omitempty"`
+	Sections []*TokenBreakdownSection `protobuf:"bytes,2,rep,name=sections,proto3" json:"sections,omitempty"`
 	// The workspace's staleness FENCE at the moment the daemon produced this
 	// push: an opaque token the client compares BYTE-WISE against the fence on
 	// the workspace's current WorkspaceState, and never parses, splits or
@@ -40,7 +44,7 @@ type TokenBreakdownView struct {
 	// The daemon mints it and is the only thing that can read meaning into it.
 	// A client that learned to decode it would be depending on a fact this
 	// contract does not offer, and the token's composition is free to change.
-	Fence         string `protobuf:"bytes,4,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence         string `protobuf:"bytes,3,opt,name=fence,proto3" json:"fence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -241,12 +245,11 @@ var File_frontend_v1_tokens_menu_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_tokens_menu_proto_rawDesc = "" +
 	"\n" +
-	"\x1dfrontend/v1/tokens-menu.proto\x12\vfrontend.v1\"\x9a\x01\n" +
+	"\x1dfrontend/v1/tokens-menu.proto\x12\vfrontend.v1\"\x88\x01\n" +
 	"\x12TokenBreakdownView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12>\n" +
-	"\bsections\x18\x03 \x03(\v2\".frontend.v1.TokenBreakdownSectionR\bsections\x12\x14\n" +
-	"\x05fence\x18\x04 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03R\n" +
-	"session_id\"a\n" +
+	"\bsections\x18\x02 \x03(\v2\".frontend.v1.TokenBreakdownSectionR\bsections\x12\x14\n" +
+	"\x05fence\x18\x03 \x01(\tR\x05fence\"a\n" +
 	"\x15TokenBreakdownSection\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x122\n" +
 	"\x04rows\x18\x02 \x03(\v2\x1e.frontend.v1.TokenBreakdownRowR\x04rows\"\x9e\x01\n" +

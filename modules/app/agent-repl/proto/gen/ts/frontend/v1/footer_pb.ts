@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/footer.proto.
  */
 export const file_frontend_v1_footer: GenFile = /*@__PURE__*/
-  fileDesc("Chhmcm9udGVuZC92MS9mb290ZXIucHJvdG8SC2Zyb250ZW5kLnYxIkIKDlByb2dyZXNzV2luZG93Eg4KBmFjdGl2ZRgBIAEoCBIQCghzaW5jZV9tcxgCIAEoAxIOCgZkZXRhaWwYAyABKAkiWQoPUmF0ZUxpbWl0V2luZG93Eg4KBmFjdGl2ZRgBIAEoCBIRCglyZXNldHNfYXQYAiABKAMSEwoLdXRpbGl6YXRpb24YAyABKAESDgoGc3RhdHVzGAQgASgJImMKD0ludGVycnVwdFdpbmRvdxIOCgZhY3RpdmUYASABKAgSEAoIc2luY2VfbXMYAiABKAMSLgoHb3V0Y29tZRgDIAEoDjIdLnByb3RvY29sLnYxLkludGVycnVwdE91dGNvbWUiyQcKDFByb2dyZXNzVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSDQoFZmVuY2UYGSABKAkSKwoFc3RhdGUYAyABKA4yGC5mcm9udGVuZC52MS5SZW5kZXJTdGF0ZUICGAESGgoSdHVybl9zdGFydGVkX2F0X21zGAQgASgDEhcKD3RoaW5raW5nX3Rva2VucxgFIAEoAxIUCgxpbnB1dF90b2tlbnMYBiABKAMSDwoHdHRmdF9tcxgHIAEoAxIvCgpjb21wYWN0aW5nGAggASgLMhsuZnJvbnRlbmQudjEuUHJvZ3Jlc3NXaW5kb3cSLQoIcmV0cnlpbmcYCSABKAsyGy5mcm9udGVuZC52MS5Qcm9ncmVzc1dpbmRvdxIzCg5hdXRoZW50aWNhdGluZxgKIAEoCzIbLmZyb250ZW5kLnYxLlByb2dyZXNzV2luZG93EikKBGhvb2sYCyABKAsyGy5mcm9udGVuZC52MS5Qcm9ncmVzc1dpbmRvdxIyCgxyYXRlX2xpbWl0ZWQYDCABKAsyHC5mcm9udGVuZC52MS5SYXRlTGltaXRXaW5kb3cSOQoTcmF0ZV9saW1pdGVkX3dlZWtseRgVIAEoCzIcLmZyb250ZW5kLnYxLlJhdGVMaW1pdFdpbmRvdxIsCgdibG9ja2VkGBIgASgLMhsuZnJvbnRlbmQudjEuUHJvZ3Jlc3NXaW5kb3cSLwoJaW50ZXJydXB0GBQgASgLMhwuZnJvbnRlbmQudjEuSW50ZXJydXB0V2luZG93Ei4KB2ZhaWx1cmUYEyABKAsyHS5mcm9udGVuZC52MS5Gb290ZXJGYWlsdXJlUm93EjUKDmV4cGVuc2l2ZV90dXJuGBYgASgLMh0uZnJvbnRlbmQudjEuQ29udGV4dENvc3RBbGVydBIbChNwZW5kaW5nX3Blcm1pc3Npb25zGA4gASgDEhMKC3F1ZXVlX2RlcHRoGA8gASgDEhcKD2xpdmVfdGFza19jb3VudBgQIAEoAxInCgVwaGFzZRgXIAEoCzIYLmZyb250ZW5kLnYxLkZvb3RlclBoYXNlEjAKCm1lcmdlX2NoaXAYGCABKAsyHC5mcm9udGVuZC52MS5Gb290ZXJNZXJnZUNoaXASNQoKYWNjb3VudGluZxgaIAEoCzIhLmZyb250ZW5kLnYxLkZvb3RlckFjY291bnRpbmdDZWxsSgQIDRAOSgQIERASSgQIAhADUg1lcnJvcl9zdW1tYXJ5Ug9lcnJvcl9pdGVtX3V1aWRSCnNlc3Npb25faWQinQEKEENvbnRleHRDb3N0QWxlcnQSDwoHdHVybl9pZBgBIAEoCRIdChV1bmNhY2hlZF9pbnB1dF90b2tlbnMYAiABKAMSGAoQdGhyZXNob2xkX3Rva2VucxgDIAEoAxINCgVhdF9tcxgEIAEoAxIwCg1wcm9tcHRfb3JpZ2luGAUgASgOMhkucHJvdG9jb2wudjEuUHJvbXB0T3JpZ2luIjwKC0Zvb3RlclBoYXNlEgwKBHdvcmQYASABKAkSDAoEdG9uZRgCIAEoCRIRCglicmVhdGhpbmcYAyABKAgiLgoPRm9vdGVyTWVyZ2VDaGlwEgwKBHRleHQYASABKAkSDQoFdGl0bGUYAiABKAkiXAoQRm9vdGVyRmFpbHVyZVJvdxIPCgdtZXNzYWdlGAEgASgJEgwKBHRvbmUYAiABKAkSKQoEY2FyZBgDIAEoCzIbLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkUmVmItMBChRGb290ZXJBY2NvdW50aW5nQ2VsbBIPCgdzdW1tYXJ5GAEgASgJEjMKCGNvbXBsZXRlGAogASgLMh8uZnJvbnRlbmQudjEuQWNjb3VudGluZ0NvbXBsZXRlSAASNwoKaW5jb21wbGV0ZRgLIAEoCzIhLmZyb250ZW5kLnYxLkFjY291bnRpbmdJbmNvbXBsZXRlSAASMQoHaW52YWxpZBgMIAEoCzIeLmZyb250ZW5kLnYxLkFjY291bnRpbmdJbnZhbGlkSABCCQoHdmVyZGljdCIUChJBY2NvdW50aW5nQ29tcGxldGUiJwoUQWNjb3VudGluZ0luY29tcGxldGUSDwoHbWlzc2luZxgBIAMoCSIlChFBY2NvdW50aW5nSW52YWxpZBIQCghwcm9ibGVtcxgBIAMoCUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_protocol_v1_core, file_frontend_v1_failure_card, file_frontend_v1_state]);
+  fileDesc("Chhmcm9udGVuZC92MS9mb290ZXIucHJvdG8SC2Zyb250ZW5kLnYxIkIKDlByb2dyZXNzV2luZG93Eg4KBmFjdGl2ZRgBIAEoCBIQCghzaW5jZV9tcxgCIAEoAxIOCgZkZXRhaWwYAyABKAkiWQoPUmF0ZUxpbWl0V2luZG93Eg4KBmFjdGl2ZRgBIAEoCBIRCglyZXNldHNfYXQYAiABKAMSEwoLdXRpbGl6YXRpb24YAyABKAESDgoGc3RhdHVzGAQgASgJImMKD0ludGVycnVwdFdpbmRvdxIOCgZhY3RpdmUYASABKAgSEAoIc2luY2VfbXMYAiABKAMSLgoHb3V0Y29tZRgDIAEoDjIdLnByb3RvY29sLnYxLkludGVycnVwdE91dGNvbWUiiwcKDFByb2dyZXNzVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSDQoFZmVuY2UYAiABKAkSKwoFc3RhdGUYAyABKA4yGC5mcm9udGVuZC52MS5SZW5kZXJTdGF0ZUICGAESGgoSdHVybl9zdGFydGVkX2F0X21zGAQgASgDEhcKD3RoaW5raW5nX3Rva2VucxgFIAEoAxIUCgxpbnB1dF90b2tlbnMYBiABKAMSDwoHdHRmdF9tcxgHIAEoAxIvCgpjb21wYWN0aW5nGAggASgLMhsuZnJvbnRlbmQudjEuUHJvZ3Jlc3NXaW5kb3cSLQoIcmV0cnlpbmcYCSABKAsyGy5mcm9udGVuZC52MS5Qcm9ncmVzc1dpbmRvdxIzCg5hdXRoZW50aWNhdGluZxgKIAEoCzIbLmZyb250ZW5kLnYxLlByb2dyZXNzV2luZG93EikKBGhvb2sYCyABKAsyGy5mcm9udGVuZC52MS5Qcm9ncmVzc1dpbmRvdxIyCgxyYXRlX2xpbWl0ZWQYDCABKAsyHC5mcm9udGVuZC52MS5SYXRlTGltaXRXaW5kb3cSOQoTcmF0ZV9saW1pdGVkX3dlZWtseRgNIAEoCzIcLmZyb250ZW5kLnYxLlJhdGVMaW1pdFdpbmRvdxIsCgdibG9ja2VkGA4gASgLMhsuZnJvbnRlbmQudjEuUHJvZ3Jlc3NXaW5kb3cSLwoJaW50ZXJydXB0GA8gASgLMhwuZnJvbnRlbmQudjEuSW50ZXJydXB0V2luZG93Ei4KB2ZhaWx1cmUYECABKAsyHS5mcm9udGVuZC52MS5Gb290ZXJGYWlsdXJlUm93EjUKDmV4cGVuc2l2ZV90dXJuGBEgASgLMh0uZnJvbnRlbmQudjEuQ29udGV4dENvc3RBbGVydBIbChNwZW5kaW5nX3Blcm1pc3Npb25zGBIgASgDEhMKC3F1ZXVlX2RlcHRoGBMgASgDEhcKD2xpdmVfdGFza19jb3VudBgUIAEoAxInCgVwaGFzZRgVIAEoCzIYLmZyb250ZW5kLnYxLkZvb3RlclBoYXNlEjAKCm1lcmdlX2NoaXAYFiABKAsyHC5mcm9udGVuZC52MS5Gb290ZXJNZXJnZUNoaXASNQoKYWNjb3VudGluZxgXIAEoCzIhLmZyb250ZW5kLnYxLkZvb3RlckFjY291bnRpbmdDZWxsIp0BChBDb250ZXh0Q29zdEFsZXJ0Eg8KB3R1cm5faWQYASABKAkSHQoVdW5jYWNoZWRfaW5wdXRfdG9rZW5zGAIgASgDEhgKEHRocmVzaG9sZF90b2tlbnMYAyABKAMSDQoFYXRfbXMYBCABKAMSMAoNcHJvbXB0X29yaWdpbhgFIAEoDjIZLnByb3RvY29sLnYxLlByb21wdE9yaWdpbiI8CgtGb290ZXJQaGFzZRIMCgR3b3JkGAEgASgJEgwKBHRvbmUYAiABKAkSEQoJYnJlYXRoaW5nGAMgASgIIi4KD0Zvb3Rlck1lcmdlQ2hpcBIMCgR0ZXh0GAEgASgJEg0KBXRpdGxlGAIgASgJIlwKEEZvb3RlckZhaWx1cmVSb3cSDwoHbWVzc2FnZRgBIAEoCRIMCgR0b25lGAIgASgJEikKBGNhcmQYAyABKAsyGy5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZFJlZiLTAQoURm9vdGVyQWNjb3VudGluZ0NlbGwSDwoHc3VtbWFyeRgBIAEoCRIzCghjb21wbGV0ZRgCIAEoCzIfLmZyb250ZW5kLnYxLkFjY291bnRpbmdDb21wbGV0ZUgAEjcKCmluY29tcGxldGUYAyABKAsyIS5mcm9udGVuZC52MS5BY2NvdW50aW5nSW5jb21wbGV0ZUgAEjEKB2ludmFsaWQYBCABKAsyHi5mcm9udGVuZC52MS5BY2NvdW50aW5nSW52YWxpZEgAQgkKB3ZlcmRpY3QiFAoSQWNjb3VudGluZ0NvbXBsZXRlIicKFEFjY291bnRpbmdJbmNvbXBsZXRlEg8KB21pc3NpbmcYASADKAkiJQoRQWNjb3VudGluZ0ludmFsaWQSEAoIcHJvYmxlbXMYASADKAlCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_protocol_v1_core, file_frontend_v1_failure_card, file_frontend_v1_state]);
 
 /**
  * An activity window: open until cleared. Each window is its own message so
@@ -141,6 +141,10 @@ export const InterruptWindowSchema: GenMessage<InterruptWindow> = /*@__PURE__*/
  */
 export type ProgressView = Message<"frontend.v1.ProgressView"> & {
   /**
+   * WHICH WORKSPACE this footer belongs to, and the only addressing this view
+   * carries. It names no session: correlation is exactly what the fence below
+   * does, and it does it without handing a renderer a session vocabulary.
+   *
    * @generated from field: string workspace = 1;
    */
   workspace: string;
@@ -156,7 +160,7 @@ export type ProgressView = Message<"frontend.v1.ProgressView"> & {
    * A client that learned to decode it would be depending on a fact this
    * contract does not offer, and the token's composition is free to change.
    *
-   * @generated from field: string fence = 25;
+   * @generated from field: string fence = 2;
    */
   fence: string;
 
@@ -273,7 +277,7 @@ export type ProgressView = Message<"frontend.v1.ProgressView"> & {
   /**
    * rate_limit_type "seven_day*"
    *
-   * @generated from field: frontend.v1.RateLimitWindow rate_limited_weekly = 21;
+   * @generated from field: frontend.v1.RateLimitWindow rate_limited_weekly = 13;
    */
   rateLimitedWeekly?: RateLimitWindow | undefined;
 
@@ -287,29 +291,30 @@ export type ProgressView = Message<"frontend.v1.ProgressView"> & {
    * see: the session can be blocked on an interaction the daemon holds no
    * count for, so `pending_permissions` alone under-reports "waiting on you".
    *
-   * @generated from field: frontend.v1.ProgressWindow blocked = 18;
+   * @generated from field: frontend.v1.ProgressWindow blocked = 14;
    */
   blocked?: ProgressWindow | undefined;
 
   /**
    * See InterruptWindow. Ack-opened, next-turn-cleared.
    *
-   * @generated from field: frontend.v1.InterruptWindow interrupt = 20;
+   * @generated from field: frontend.v1.InterruptWindow interrupt = 15;
    */
   interrupt?: InterruptWindow | undefined;
 
   /**
-   * The CLASSIFIED error state (F4), superseding the free-string
-   * error_summary/error_item_uuid (RETIRED, step 11) — this failure's own
-   * item_uuid absorbed error_item_uuid's addressing job.
+   * The CLASSIFIED error state (F4), and the sole reader-facing account of a
+   * failure on this footer. It carries its own addressing, so nothing else
+   * here needs a second field to point at the failure with.
    *
-   * The footer used to render daemon-authored prose in a hardcoded red that
-   * no other surface consulted; carrying the classified failure instead lets
-   * it take its color from the same table the card and the workspace do.
+   * TYPED RATHER THAN PROSE, because prose has to be colored by whoever renders
+   * it: a footer handed daemon-authored text can only pick a hardcoded red no
+   * other surface consulted. Carrying the classified failure lets the row take
+   * its color from the same table the card and the workspace do.
    * Persists until the next turn starts, when it clears; set from a terminal
    * ApiErrorLine (retries exhausted) or an errored turn end.
    *
-   * @generated from field: frontend.v1.FooterFailureRow failure = 19;
+   * @generated from field: frontend.v1.FooterFailureRow failure = 16;
    */
   failure?: FooterFailureRow | undefined;
 
@@ -322,24 +327,24 @@ export type ProgressView = Message<"frontend.v1.ProgressView"> & {
    * starts, like `failure`. Unset means the last turn was cache-efficient,
    * which is the only reading of absence.
    *
-   * @generated from field: frontend.v1.ContextCostAlert expensive_turn = 22;
+   * @generated from field: frontend.v1.ContextCostAlert expensive_turn = 17;
    */
   expensiveTurn?: ContextCostAlert | undefined;
 
   /**
    * Counts (ephemeral, session-scoped):
    *
-   * @generated from field: int64 pending_permissions = 14;
+   * @generated from field: int64 pending_permissions = 18;
    */
   pendingPermissions: bigint;
 
   /**
-   * @generated from field: int64 queue_depth = 15;
+   * @generated from field: int64 queue_depth = 19;
    */
   queueDepth: bigint;
 
   /**
-   * @generated from field: int64 live_task_count = 16;
+   * @generated from field: int64 live_task_count = 20;
    */
   liveTaskCount: bigint;
 
@@ -350,7 +355,7 @@ export type ProgressView = Message<"frontend.v1.ProgressView"> & {
    * (duplicate-don't-share): WorkspaceState remains the authority for state;
    * this is its footer projection.
    *
-   * @generated from field: frontend.v1.FooterPhase phase = 23;
+   * @generated from field: frontend.v1.FooterPhase phase = 21;
    */
   phase?: FooterPhase | undefined;
 
@@ -360,7 +365,7 @@ export type ProgressView = Message<"frontend.v1.ProgressView"> & {
    * own projection of MergeStatus (which other surfaces keep reading for their
    * own projections).
    *
-   * @generated from field: frontend.v1.FooterMergeChip merge_chip = 24;
+   * @generated from field: frontend.v1.FooterMergeChip merge_chip = 22;
    */
   mergeChip?: FooterMergeChip | undefined;
 
@@ -368,7 +373,7 @@ export type ProgressView = Message<"frontend.v1.ProgressView"> & {
    * The turn-accounting cell, resolved: the composed summary and the verdict
    * that classes it. Absent when no turn has settled yet.
    *
-   * @generated from field: frontend.v1.FooterAccountingCell accounting = 26;
+   * @generated from field: frontend.v1.FooterAccountingCell accounting = 23;
    */
   accounting?: FooterAccountingCell | undefined;
 };
@@ -582,19 +587,19 @@ export type FooterAccountingCell = Message<"frontend.v1.FooterAccountingCell"> &
    */
   verdict: {
     /**
-     * @generated from field: frontend.v1.AccountingComplete complete = 10;
+     * @generated from field: frontend.v1.AccountingComplete complete = 2;
      */
     value: AccountingComplete;
     case: "complete";
   } | {
     /**
-     * @generated from field: frontend.v1.AccountingIncomplete incomplete = 11;
+     * @generated from field: frontend.v1.AccountingIncomplete incomplete = 3;
      */
     value: AccountingIncomplete;
     case: "incomplete";
   } | {
     /**
-     * @generated from field: frontend.v1.AccountingInvalid invalid = 12;
+     * @generated from field: frontend.v1.AccountingInvalid invalid = 4;
      */
     value: AccountingInvalid;
     case: "invalid";

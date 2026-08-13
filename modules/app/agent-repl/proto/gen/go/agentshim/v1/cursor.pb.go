@@ -150,8 +150,12 @@ func (x *CursorQuery) GetFileId() string {
 }
 
 type OpenTaskState struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	LastActivityAtMs int64                  `protobuf:"varint,2,opt,name=last_activity_at_ms,json=lastActivityAtMs,proto3" json:"last_activity_at_ms,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// KNOWN GAP: this message says WHEN a task was last active, but not WHICH
+	// task it is. The `Event` that named the task is retired and detached work is
+	// modelled on frontend.v1 now, with nothing on this message replacing it —
+	// see the gap note.
+	LastActivityAtMs int64 `protobuf:"varint,1,opt,name=last_activity_at_ms,json=lastActivityAtMs,proto3" json:"last_activity_at_ms,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -202,7 +206,7 @@ type CursorList struct {
 	OpenTasks []*OpenTaskState `protobuf:"bytes,2,rep,name=open_tasks,json=openTasks,proto3" json:"open_tasks,omitempty"`
 	// True only when open_tasks was computed by a store that implements the
 	// authoritative lifecycle query. Distinguishes an empty set from an older
-	// store that does not understand field 2.
+	// store that does not understand `open_tasks`.
 	OpenTasksAuthoritative bool `protobuf:"varint,3,opt,name=open_tasks_authoritative,json=openTasksAuthoritative,proto3" json:"open_tasks_authoritative,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
@@ -270,9 +274,9 @@ const file_agentshim_v1_cursor_proto_rawDesc = "" +
 	"\x06offset\x18\x03 \x01(\x03R\x06offset\x12\x14\n" +
 	"\x05carry\x18\x04 \x01(\fR\x05carry\"&\n" +
 	"\vCursorQuery\x12\x17\n" +
-	"\afile_id\x18\x01 \x01(\tR\x06fileId\"M\n" +
+	"\afile_id\x18\x01 \x01(\tR\x06fileId\">\n" +
 	"\rOpenTaskState\x12-\n" +
-	"\x13last_activity_at_ms\x18\x02 \x01(\x03R\x10lastActivityAtMsJ\x04\b\x01\x10\x02R\astarted\"\xb7\x01\n" +
+	"\x13last_activity_at_ms\x18\x01 \x01(\x03R\x10lastActivityAtMs\"\xb7\x01\n" +
 	"\n" +
 	"CursorList\x123\n" +
 	"\acursors\x18\x01 \x03(\v2\x19.agentshim.v1.CursorStateR\acursors\x12:\n" +

@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/tokens-menu.proto.
  */
 export const file_frontend_v1_tokens_menu: GenFile = /*@__PURE__*/
-  fileDesc("Ch1mcm9udGVuZC92MS90b2tlbnMtbWVudS5wcm90bxILZnJvbnRlbmQudjEifgoSVG9rZW5CcmVha2Rvd25WaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRI0CghzZWN0aW9ucxgDIAMoCzIiLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duU2VjdGlvbhINCgVmZW5jZRgEIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCJUChVUb2tlbkJyZWFrZG93blNlY3Rpb24SDQoFbGFiZWwYASABKAkSLAoEcm93cxgCIAMoCzIeLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duUm93Im0KEVRva2VuQnJlYWtkb3duUm93Eg0KBWxhYmVsGAEgASgJEg4KBnRva2VucxgCIAEoAxIWCg5zaGFyZV9wZXJtaWxsZRgDIAEoBRISCgplbXBoYXNpemVkGAQgASgIEg0KBWRlcHRoGAUgASgFQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM");
+  fileDesc("Ch1mcm9udGVuZC92MS90b2tlbnMtbWVudS5wcm90bxILZnJvbnRlbmQudjEibAoSVG9rZW5CcmVha2Rvd25WaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRI0CghzZWN0aW9ucxgCIAMoCzIiLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duU2VjdGlvbhINCgVmZW5jZRgDIAEoCSJUChVUb2tlbkJyZWFrZG93blNlY3Rpb24SDQoFbGFiZWwYASABKAkSLAoEcm93cxgCIAMoCzIeLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duUm93Im0KEVRva2VuQnJlYWtkb3duUm93Eg0KBWxhYmVsGAEgASgJEg4KBnRva2VucxgCIAEoAxIWCg5zaGFyZV9wZXJtaWxsZRgDIAEoBRISCgplbXBoYXNpemVkGAQgASgIEg0KBWRlcHRoGAUgASgFQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM");
 
 /**
  * The token-breakdown menu, fully resolved. Sections and rows arrive in
@@ -22,7 +22,11 @@ export const file_frontend_v1_tokens_menu: GenFile = /*@__PURE__*/
  */
 export type TokenBreakdownView = Message<"frontend.v1.TokenBreakdownView"> & {
   /**
-   * The workspace/session this breakdown describes.
+   * WORKSPACE-ADDRESSED, never session-addressed. A frontend has no session
+   * vocabulary; the only currency question it ever asks is "is this push still
+   * current", which the fence below answers without naming what rotated.
+   *
+   * The workspace this breakdown describes.
    *
    * @generated from field: string workspace = 1;
    */
@@ -31,7 +35,7 @@ export type TokenBreakdownView = Message<"frontend.v1.TokenBreakdownView"> & {
   /**
    * Menu sections, in display order (e.g. "this turn", "session", per-model).
    *
-   * @generated from field: repeated frontend.v1.TokenBreakdownSection sections = 3;
+   * @generated from field: repeated frontend.v1.TokenBreakdownSection sections = 2;
    */
   sections: TokenBreakdownSection[];
 
@@ -46,7 +50,7 @@ export type TokenBreakdownView = Message<"frontend.v1.TokenBreakdownView"> & {
    * A client that learned to decode it would be depending on a fact this
    * contract does not offer, and the token's composition is free to change.
    *
-   * @generated from field: string fence = 4;
+   * @generated from field: string fence = 3;
    */
   fence: string;
 };

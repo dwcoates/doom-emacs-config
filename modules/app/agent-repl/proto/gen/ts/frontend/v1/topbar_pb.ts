@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/topbar.proto.
  */
 export const file_frontend_v1_topbar: GenFile = /*@__PURE__*/
-  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIpcCCgpUb3BiYXJWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRINCgV0aXRsZRgCIAEoCRIUCgxzZXNzaW9uX2xpbmUYAyABKAkSFQoNbW9kZWxfZGlzcGxheRgEIAEoCRIvCg1tb2RlbF9vcHRpb25zGAUgAygLMhgucHJvdG9jb2wudjEuTW9kZWxPcHRpb24SNQoMY29ubmVjdGl2aXR5GAYgASgLMh8uZnJvbnRlbmQudjEuVG9wYmFyQ29ubmVjdGl2aXR5Eg0KBWZlbmNlGAggASgJEiwKCHdhcm5pbmdzGAkgAygLMhouZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0oECAcQCFIPYWNjb3VudGluZ19saW5lImEKDVRvcGJhcldhcm5pbmcSDAoEdGV4dBgBIAEoCRI6CgphY2NvdW50aW5nGAogASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudGluZ1dhcm5pbmdIAEIGCgRraW5kIhkKF1RvcGJhckFjY291bnRpbmdXYXJuaW5nIkAKElRvcGJhckNvbm5lY3Rpdml0eRIMCgR0b25lGAEgASgJEg0KBWdseXBoGAIgASgJEg0KBXRpdGxlGAMgASgJIhwKC1NldE1vZGVsQ21kEg0KBW1vZGVsGAEgASgJIkcKEERhZW1vbkhlYWx0aFZpZXcSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdoZWFsdGh5GAIgASgIEg4KBnJlYXNvbhgDIAEoCSJvChFTZXNzaW9uSGVhbHRoVmlldxISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEg8KB2hlYWx0aHkYBCABKAgSDgoGcmVhc29uGAUgASgJIhEKD0RhZW1vbkhlYWx0aENtZCImChBTZXNzaW9uSGVhbHRoQ21kEhIKCnNlc3Npb25faWQYASABKAlCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_protocol_v1_core]);
+  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIoACCgpUb3BiYXJWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRINCgV0aXRsZRgCIAEoCRIUCgxzZXNzaW9uX2xpbmUYAyABKAkSFQoNbW9kZWxfZGlzcGxheRgEIAEoCRIvCg1tb2RlbF9vcHRpb25zGAUgAygLMhgucHJvdG9jb2wudjEuTW9kZWxPcHRpb24SNQoMY29ubmVjdGl2aXR5GAYgASgLMh8uZnJvbnRlbmQudjEuVG9wYmFyQ29ubmVjdGl2aXR5Eg0KBWZlbmNlGAcgASgJEiwKCHdhcm5pbmdzGAggAygLMhouZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZyJhCg1Ub3BiYXJXYXJuaW5nEgwKBHRleHQYASABKAkSOgoKYWNjb3VudGluZxgCIAEoCzIkLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRpbmdXYXJuaW5nSABCBgoEa2luZCIZChdUb3BiYXJBY2NvdW50aW5nV2FybmluZyJAChJUb3BiYXJDb25uZWN0aXZpdHkSDAoEdG9uZRgBIAEoCRINCgVnbHlwaBgCIAEoCRINCgV0aXRsZRgDIAEoCSIcCgtTZXRNb2RlbENtZBINCgVtb2RlbBgBIAEoCSJHChBEYWVtb25IZWFsdGhWaWV3EhIKCnJlcXVlc3RfaWQYASABKAkSDwoHaGVhbHRoeRgCIAEoCBIOCgZyZWFzb24YAyABKAkibwoRU2Vzc2lvbkhlYWx0aFZpZXcSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl3b3Jrc3BhY2UYAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCRIPCgdoZWFsdGh5GAQgASgIEg4KBnJlYXNvbhgFIAEoCSIRCg9EYWVtb25IZWFsdGhDbWQiJgoQU2Vzc2lvbkhlYWx0aENtZBISCgpzZXNzaW9uX2lkGAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_protocol_v1_core]);
 
 /**
  * One workspace's topbar, resolved completely by the daemon. The client
@@ -83,13 +83,18 @@ export type TopbarView = Message<"frontend.v1.TopbarView"> & {
    * A client that learned to decode it would be depending on a fact this
    * contract does not offer, and the token's composition is free to change.
    *
-   * @generated from field: string fence = 8;
+   * @generated from field: string fence = 7;
    */
   fence: string;
 
   /**
    * Everything the topbar has to WARN about right now, in display order, each
-   * already resolved into the sentence the client shows. An empty list is the
+   * already resolved into the sentence the client shows.
+   *
+   * THE STRIP STATES NOTHING WHEN NOTHING IS WRONG. A settled turn's accounting
+   * prose is not printed inline; the topbar raises a warning only when there is
+   * something wrong to say, and the sentence lives inside that warning's
+   * dropdown. An empty list is the
    * daemon saying there is nothing wrong, and the client draws no indicator at
    * all rather than a quiet one — a control over an empty list only invites
    * the click that proves it is empty.
@@ -98,7 +103,7 @@ export type TopbarView = Message<"frontend.v1.TopbarView"> & {
    * concern (a degraded watcher, a skewed build) joins this list and reaches
    * the same affordance, instead of growing the strip a second bespoke slot.
    *
-   * @generated from field: repeated frontend.v1.TopbarWarning warnings = 9;
+   * @generated from field: repeated frontend.v1.TopbarWarning warnings = 8;
    */
   warnings: TopbarWarning[];
 };
@@ -140,7 +145,7 @@ export type TopbarWarning = Message<"frontend.v1.TopbarWarning"> & {
      * The settled turn's accounting did not reconcile (incomplete evidence or
      * a contradiction); `text` is the footer cell's own summary.
      *
-     * @generated from field: frontend.v1.TopbarAccountingWarning accounting = 10;
+     * @generated from field: frontend.v1.TopbarAccountingWarning accounting = 2;
      */
     value: TopbarAccountingWarning;
     case: "accounting";

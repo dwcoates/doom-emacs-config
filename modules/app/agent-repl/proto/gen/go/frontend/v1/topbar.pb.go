@@ -56,9 +56,14 @@ type TopbarView struct {
 	// The daemon mints it and is the only thing that can read meaning into it.
 	// A client that learned to decode it would be depending on a fact this
 	// contract does not offer, and the token's composition is free to change.
-	Fence string `protobuf:"bytes,8,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence string `protobuf:"bytes,7,opt,name=fence,proto3" json:"fence,omitempty"`
 	// Everything the topbar has to WARN about right now, in display order, each
-	// already resolved into the sentence the client shows. An empty list is the
+	// already resolved into the sentence the client shows.
+	//
+	// THE STRIP STATES NOTHING WHEN NOTHING IS WRONG. A settled turn's accounting
+	// prose is not printed inline; the topbar raises a warning only when there is
+	// something wrong to say, and the sentence lives inside that warning's
+	// dropdown. An empty list is the
 	// daemon saying there is nothing wrong, and the client draws no indicator at
 	// all rather than a quiet one — a control over an empty list only invites
 	// the click that proves it is empty.
@@ -66,7 +71,7 @@ type TopbarView struct {
 	// It is a LIST because a warning is not a property of accounting: a second
 	// concern (a degraded watcher, a skewed build) joins this list and reaches
 	// the same affordance, instead of growing the strip a second bespoke slot.
-	Warnings      []*TopbarWarning `protobuf:"bytes,9,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	Warnings      []*TopbarWarning `protobuf:"bytes,8,rep,name=warnings,proto3" json:"warnings,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -239,7 +244,7 @@ type isTopbarWarning_Kind interface {
 type TopbarWarning_Accounting struct {
 	// The settled turn's accounting did not reconcile (incomplete evidence or
 	// a contradiction); `text` is the footer cell's own summary.
-	Accounting *TopbarAccountingWarning `protobuf:"bytes,10,opt,name=accounting,proto3,oneof"`
+	Accounting *TopbarAccountingWarning `protobuf:"bytes,2,opt,name=accounting,proto3,oneof"`
 }
 
 func (*TopbarWarning_Accounting) isTopbarWarning_Kind() {}
@@ -644,7 +649,7 @@ var File_frontend_v1_topbar_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\n" +
-	"\x18frontend/v1/topbar.proto\x12\vfrontend.v1\x1a\x16protocol/v1/core.proto\"\xf1\x02\n" +
+	"\x18frontend/v1/topbar.proto\x12\vfrontend.v1\x1a\x16protocol/v1/core.proto\"\xda\x02\n" +
 	"\n" +
 	"TopbarView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x14\n" +
@@ -653,13 +658,12 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\rmodel_display\x18\x04 \x01(\tR\fmodelDisplay\x12=\n" +
 	"\rmodel_options\x18\x05 \x03(\v2\x18.protocol.v1.ModelOptionR\fmodelOptions\x12C\n" +
 	"\fconnectivity\x18\x06 \x01(\v2\x1f.frontend.v1.TopbarConnectivityR\fconnectivity\x12\x14\n" +
-	"\x05fence\x18\b \x01(\tR\x05fence\x126\n" +
-	"\bwarnings\x18\t \x03(\v2\x1a.frontend.v1.TopbarWarningR\bwarningsJ\x04\b\a\x10\bR\x0faccounting_line\"s\n" +
+	"\x05fence\x18\a \x01(\tR\x05fence\x126\n" +
+	"\bwarnings\x18\b \x03(\v2\x1a.frontend.v1.TopbarWarningR\bwarnings\"s\n" +
 	"\rTopbarWarning\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12F\n" +
 	"\n" +
-	"accounting\x18\n" +
-	" \x01(\v2$.frontend.v1.TopbarAccountingWarningH\x00R\n" +
+	"accounting\x18\x02 \x01(\v2$.frontend.v1.TopbarAccountingWarningH\x00R\n" +
 	"accountingB\x06\n" +
 	"\x04kind\"\x19\n" +
 	"\x17TopbarAccountingWarning\"T\n" +

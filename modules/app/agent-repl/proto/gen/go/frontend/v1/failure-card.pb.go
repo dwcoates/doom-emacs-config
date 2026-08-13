@@ -152,15 +152,15 @@ type isFailureCardView_Lifecycle interface {
 }
 
 type FailureCardView_Open struct {
-	Open *FailureCardOpen `protobuf:"bytes,10,opt,name=open,proto3,oneof"`
+	Open *FailureCardOpen `protobuf:"bytes,4,opt,name=open,proto3,oneof"`
 }
 
 type FailureCardView_Resolved struct {
-	Resolved *FailureCardResolved `protobuf:"bytes,11,opt,name=resolved,proto3,oneof"`
+	Resolved *FailureCardResolved `protobuf:"bytes,5,opt,name=resolved,proto3,oneof"`
 }
 
 type FailureCardView_Terminal struct {
-	Terminal *FailureCardTerminal `protobuf:"bytes,12,opt,name=terminal,proto3,oneof"`
+	Terminal *FailureCardTerminal `protobuf:"bytes,6,opt,name=terminal,proto3,oneof"`
 }
 
 func (*FailureCardView_Open) isFailureCardView_Lifecycle() {}
@@ -352,10 +352,9 @@ const file_frontend_v1_failure_card_proto_rawDesc = "" +
 	"\x04kind\x18\x01 \x01(\v2\x18.frontend.v1.FailureKindR\x04kind\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
 	"\x06detail\x18\x03 \x01(\tR\x06detail\x122\n" +
-	"\x04open\x18\n" +
-	" \x01(\v2\x1c.frontend.v1.FailureCardOpenH\x00R\x04open\x12>\n" +
-	"\bresolved\x18\v \x01(\v2 .frontend.v1.FailureCardResolvedH\x00R\bresolved\x12>\n" +
-	"\bterminal\x18\f \x01(\v2 .frontend.v1.FailureCardTerminalH\x00R\bterminalB\v\n" +
+	"\x04open\x18\x04 \x01(\v2\x1c.frontend.v1.FailureCardOpenH\x00R\x04open\x12>\n" +
+	"\bresolved\x18\x05 \x01(\v2 .frontend.v1.FailureCardResolvedH\x00R\bresolved\x12>\n" +
+	"\bterminal\x18\x06 \x01(\v2 .frontend.v1.FailureCardTerminalH\x00R\bterminalB\v\n" +
 	"\tlifecycle\"\x11\n" +
 	"\x0fFailureCardOpen\";\n" +
 	"\x13FailureCardResolved\x12$\n" +

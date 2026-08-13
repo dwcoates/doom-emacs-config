@@ -24,7 +24,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/lifecycle.proto.
  */
 export const file_frontend_v1_lifecycle: GenFile = /*@__PURE__*/
-  fileDesc("Chtmcm9udGVuZC92MS9saWZlY3ljbGUucHJvdG8SC2Zyb250ZW5kLnYxItIBChBDcmVhdGVTZXNzaW9uQ21kEgsKA2N3ZBgBIAEoCRIXCg9wZXJtaXNzaW9uX21vZGUYAyABKAkSEgoKY29uZmlnX2RpchgEIAEoCRIMCgRmYWtlGAYgASgIEhUKDWFsbG93X3VuZ2F0ZWQYByABKAgSDQoFbW9kZWwYCCABKAkSLAoLcmVzdW1lX21vZGUYCSABKA4yFy5mcm9udGVuZC52MS5SZXN1bWVNb2RlEiIKGmV4cGxpY2l0X2NsYXVkZV9zZXNzaW9uX2lkGAogASgJIiYKEERlbGV0ZVNlc3Npb25DbWQSEgoKc2Vzc2lvbl9pZBgBIAEoCSITChFSZXN0YXJ0U2Vzc2lvbkNtZCIXChVIaWJlcm5hdGVXb3Jrc3BhY2VDbWQiIQoLU2h1dGRvd25DbWQSEgoKc3RvcF9zaGltcxgBIAEoCCKNAQoUU2h1dGRvd25TY2hlZHVsZVZpZXcSMQoEaWRsZRgBIAEoCzIhLmZyb250ZW5kLnYxLlNodXRkb3duU2NoZWR1bGVJZGxlSAASOQoIZHJhaW5pbmcYAiABKAsyJS5mcm9udGVuZC52MS5TaHV0ZG93blNjaGVkdWxlRHJhaW5pbmdIAEIHCgVzdGF0ZSIWChRTaHV0ZG93blNjaGVkdWxlSWRsZSKVAQoYU2h1dGRvd25TY2hlZHVsZURyYWluaW5nEhMKC3NjaGVkdWxlX2lkGAEgASgJEhcKD3NjaGVkdWxlZF9hdF9tcxgCIAEoAxINCgVjYXVzZRgDIAEoCRISCgpzdG9wX3NoaW1zGAQgASgIEigKBWhvbGRzGAUgAygLMhkuZnJvbnRlbmQudjEuU2h1dGRvd25Ib2xkIpEBCgxTaHV0ZG93bkhvbGQSEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSKwoEdHVybhgDIAEoCzIdLmZyb250ZW5kLnYxLlNodXRkb3duSG9sZFR1cm4SLQoFdGFza3MYBCABKAsyHi5mcm9udGVuZC52MS5TaHV0ZG93bkhvbGRUYXNrcyIjChBTaHV0ZG93bkhvbGRUdXJuEg8KB3R1cm5faWQYASABKAkiIgoRU2h1dGRvd25Ib2xkVGFza3MSDQoFY291bnQYASABKAUiOAoTU2NoZWR1bGVTaHV0ZG93bkNtZBISCgpzdG9wX3NoaW1zGAEgASgIEg0KBWNhdXNlGAIgASgJIjEKGkNhbmNlbFNjaGVkdWxlZFNodXRkb3duQ21kEhMKC3NjaGVkdWxlX2lkGAEgASgJInEKElJlc3RhcnRQZW5kaW5nVmlldxINCgVjYXVzZRgBIAEoCRIfChdleHBlY3RlZF9vdXRhZ2Vfc2Vjb25kcxgCIAEoBRISCgpzdG9wX3NoaW1zGAMgASgIEhcKD2Fubm91bmNlZF9hdF9tcxgEIAEoAyJ1CgxDbGllbnRMb2dDbWQSKgoFbGV2ZWwYASABKA4yGy5mcm9udGVuZC52MS5DbGllbnRMb2dMZXZlbBIPCgdtZXNzYWdlGAIgASgJEigKB2NvbnRleHQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0KnYKClJlc3VtZU1vZGUSGwoXUkVTVU1FX01PREVfVU5TUEVDSUZJRUQQABIYChRSRVNVTUVfTU9ERV9DT05USU5VRRABEhgKFFJFU1VNRV9NT0RFX0VYUExJQ0lUEAMiBAgCEAIqEVJFU1VNRV9NT0RFX0ZSRVNIKoQBCg5DbGllbnRMb2dMZXZlbBIgChxDTElFTlRfTE9HX0xFVkVMX1VOU1BFQ0lGSUVEEAASGQoVQ0xJRU5UX0xPR19MRVZFTF9JTkZPEAESGQoVQ0xJRU5UX0xPR19MRVZFTF9XQVJOEAISGgoWQ0xJRU5UX0xPR19MRVZFTF9FUlJPUhADQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_google_protobuf_struct]);
+  fileDesc("Chtmcm9udGVuZC92MS9saWZlY3ljbGUucHJvdG8SC2Zyb250ZW5kLnYxItIBChBDcmVhdGVTZXNzaW9uQ21kEgsKA2N3ZBgBIAEoCRIXCg9wZXJtaXNzaW9uX21vZGUYAiABKAkSEgoKY29uZmlnX2RpchgDIAEoCRIMCgRmYWtlGAQgASgIEhUKDWFsbG93X3VuZ2F0ZWQYBSABKAgSDQoFbW9kZWwYBiABKAkSLAoLcmVzdW1lX21vZGUYByABKA4yFy5mcm9udGVuZC52MS5SZXN1bWVNb2RlEiIKGmV4cGxpY2l0X2NsYXVkZV9zZXNzaW9uX2lkGAggASgJIiYKEERlbGV0ZVNlc3Npb25DbWQSEgoKc2Vzc2lvbl9pZBgBIAEoCSITChFSZXN0YXJ0U2Vzc2lvbkNtZCIXChVIaWJlcm5hdGVXb3Jrc3BhY2VDbWQiIQoLU2h1dGRvd25DbWQSEgoKc3RvcF9zaGltcxgBIAEoCCKNAQoUU2h1dGRvd25TY2hlZHVsZVZpZXcSMQoEaWRsZRgBIAEoCzIhLmZyb250ZW5kLnYxLlNodXRkb3duU2NoZWR1bGVJZGxlSAASOQoIZHJhaW5pbmcYAiABKAsyJS5mcm9udGVuZC52MS5TaHV0ZG93blNjaGVkdWxlRHJhaW5pbmdIAEIHCgVzdGF0ZSIWChRTaHV0ZG93blNjaGVkdWxlSWRsZSKVAQoYU2h1dGRvd25TY2hlZHVsZURyYWluaW5nEhMKC3NjaGVkdWxlX2lkGAEgASgJEhcKD3NjaGVkdWxlZF9hdF9tcxgCIAEoAxINCgVjYXVzZRgDIAEoCRISCgpzdG9wX3NoaW1zGAQgASgIEigKBWhvbGRzGAUgAygLMhkuZnJvbnRlbmQudjEuU2h1dGRvd25Ib2xkIpEBCgxTaHV0ZG93bkhvbGQSEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSKwoEdHVybhgDIAEoCzIdLmZyb250ZW5kLnYxLlNodXRkb3duSG9sZFR1cm4SLQoFdGFza3MYBCABKAsyHi5mcm9udGVuZC52MS5TaHV0ZG93bkhvbGRUYXNrcyIjChBTaHV0ZG93bkhvbGRUdXJuEg8KB3R1cm5faWQYASABKAkiIgoRU2h1dGRvd25Ib2xkVGFza3MSDQoFY291bnQYASABKAUiOAoTU2NoZWR1bGVTaHV0ZG93bkNtZBISCgpzdG9wX3NoaW1zGAEgASgIEg0KBWNhdXNlGAIgASgJIjEKGkNhbmNlbFNjaGVkdWxlZFNodXRkb3duQ21kEhMKC3NjaGVkdWxlX2lkGAEgASgJInEKElJlc3RhcnRQZW5kaW5nVmlldxINCgVjYXVzZRgBIAEoCRIfChdleHBlY3RlZF9vdXRhZ2Vfc2Vjb25kcxgCIAEoBRISCgpzdG9wX3NoaW1zGAMgASgIEhcKD2Fubm91bmNlZF9hdF9tcxgEIAEoAyJ1CgxDbGllbnRMb2dDbWQSKgoFbGV2ZWwYASABKA4yGy5mcm9udGVuZC52MS5DbGllbnRMb2dMZXZlbBIPCgdtZXNzYWdlGAIgASgJEigKB2NvbnRleHQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Kl0KClJlc3VtZU1vZGUSGwoXUkVTVU1FX01PREVfVU5TUEVDSUZJRUQQABIYChRSRVNVTUVfTU9ERV9DT05USU5VRRABEhgKFFJFU1VNRV9NT0RFX0VYUExJQ0lUEAIqhAEKDkNsaWVudExvZ0xldmVsEiAKHENMSUVOVF9MT0dfTEVWRUxfVU5TUEVDSUZJRUQQABIZChVDTElFTlRfTE9HX0xFVkVMX0lORk8QARIZChVDTElFTlRfTE9HX0xFVkVMX1dBUk4QAhIaChZDTElFTlRfTE9HX0xFVkVMX0VSUk9SEANCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_google_protobuf_struct]);
 
 /**
  * @generated from message frontend.v1.CreateSessionCmd
@@ -36,19 +36,19 @@ export type CreateSessionCmd = Message<"frontend.v1.CreateSessionCmd"> & {
   cwd: string;
 
   /**
-   * @generated from field: string permission_mode = 3;
+   * @generated from field: string permission_mode = 2;
    */
   permissionMode: string;
 
   /**
-   * @generated from field: string config_dir = 4;
+   * @generated from field: string config_dir = 3;
    */
   configDir: string;
 
   /**
    * test harness sessions
    *
-   * @generated from field: bool fake = 6;
+   * @generated from field: bool fake = 4;
    */
   fake: boolean;
 
@@ -67,7 +67,7 @@ export type CreateSessionCmd = Message<"frontend.v1.CreateSessionCmd"> & {
    * still rehydrates after a daemon restart, since refusing there would
    * silently change a live session's posture.
    *
-   * @generated from field: bool allow_ungated = 7;
+   * @generated from field: bool allow_ungated = 5;
    */
   allowUngated: boolean;
 
@@ -82,7 +82,7 @@ export type CreateSessionCmd = Message<"frontend.v1.CreateSessionCmd"> & {
    * still publishes only the shim-confirmed selection.  A rejected model fails
    * the create rather than silently leaving the session on another one.
    *
-   * @generated from field: string model = 8;
+   * @generated from field: string model = 6;
    */
   model: string;
 
@@ -90,7 +90,7 @@ export type CreateSessionCmd = Message<"frontend.v1.CreateSessionCmd"> & {
    * Which conversation to land on. See ResumeMode: this is intent, and the
    * daemon does the resolving.
    *
-   * @generated from field: frontend.v1.ResumeMode resume_mode = 9;
+   * @generated from field: frontend.v1.ResumeMode resume_mode = 7;
    */
   resumeMode: ResumeMode;
 
@@ -100,7 +100,7 @@ export type CreateSessionCmd = Message<"frontend.v1.CreateSessionCmd"> & {
    * other mode rather than quietly ignoring it, because a caller that filled
    * this in believes it is steering and must be told it is not.
    *
-   * @generated from field: string explicit_claude_session_id = 10;
+   * @generated from field: string explicit_claude_session_id = 8;
    */
   explicitClaudeSessionId: string;
 };
@@ -621,9 +621,12 @@ export const ClientLogCmdSchema: GenMessage<ClientLogCmd> = /*@__PURE__*/
  * nothing and a frontend saying "start fresh" were the same wire value.
  *
  * They are now different values, which is the whole point of this enum.
- * FRESH IS NOT CALLER-EXPRESSIBLE. Tag 2 was RESUME_MODE_FRESH: "begin a NEW
- * conversation even though a resumable one exists". It is retired, not
- * renamed. A workspace's conversation is not replaceable by a caller — no
+ * FRESH IS NOT CALLER-EXPRESSIBLE. The only intents on this wire are CONTINUE
+ * (this workspace's conversation, whichever one that is) and EXPLICIT (one
+ * named conversation a human chose). "Begin a NEW conversation even though a
+ * resumable one exists" is not among them, and never will be.
+ *
+ * A workspace's conversation is not replaceable by a caller — no
  * frontend, no user command, no automatic recovery may abandon one — because
  * the abandonment is silent and irreversible while every alternative (resume,
  * restore from backup, or a loud refusal) is recoverable. A fresh conversation
@@ -658,9 +661,9 @@ export enum ResumeMode {
    * — never for ordinary restore, which is what CONTINUE is for. A caller that
    * reaches for this at boot is reintroducing the pointer.
    *
-   * @generated from enum value: RESUME_MODE_EXPLICIT = 3;
+   * @generated from enum value: RESUME_MODE_EXPLICIT = 2;
    */
-  EXPLICIT = 3,
+  EXPLICIT = 2,
 }
 
 /**

@@ -60,7 +60,7 @@ type WorkspaceRoster struct {
 	//
 	// Opaque to every reader: nothing compares boot_ids for order, derives a time
 	// from one, or parses one. Equality is the only question ever asked of it.
-	BootId string `protobuf:"bytes,7,opt,name=boot_id,json=bootId,proto3" json:"boot_id,omitempty"`
+	BootId string `protobuf:"bytes,2,opt,name=boot_id,json=bootId,proto3" json:"boot_id,omitempty"`
 	// The active grouping. The SET ARM IS THE GROUPING — there is no separate
 	// mode enum to disagree with the payload, and the rows of the inactive
 	// grouping are simply absent rather than carried and ignored.
@@ -73,15 +73,15 @@ type WorkspaceRoster struct {
 	// Workspaces whose merge has settled, hoisted out of the grouping above and
 	// rendered under BOTH views. Hoisted because a merged workspace's repo or
 	// task is no longer the interesting fact about it — that it is done is.
-	RecentlyMerged *RosterSection `protobuf:"bytes,4,opt,name=recently_merged,json=recentlyMerged,proto3" json:"recently_merged,omitempty"`
+	RecentlyMerged *RosterSection `protobuf:"bytes,5,opt,name=recently_merged,json=recentlyMerged,proto3" json:"recently_merged,omitempty"`
 	// Absolute worktree dir of the current workspace, empty when there is none.
 	// The dir is the identity: this is compared against RosterRow.dir, never
 	// against a display name, which is not unique.
-	CurrentDir string `protobuf:"bytes,5,opt,name=current_dir,json=currentDir,proto3" json:"current_dir,omitempty"`
+	CurrentDir string `protobuf:"bytes,6,opt,name=current_dir,json=currentDir,proto3" json:"current_dir,omitempty"`
 	// Absolute worktree dir the keyboard-navigation cursor rests on, empty when
 	// there is none. Distinct from current_dir on purpose: the cursor moves
 	// through the roster without switching workspaces.
-	NavDir        string `protobuf:"bytes,6,opt,name=nav_dir,json=navDir,proto3" json:"nav_dir,omitempty"`
+	NavDir        string `protobuf:"bytes,7,opt,name=nav_dir,json=navDir,proto3" json:"nav_dir,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -182,13 +182,13 @@ type isWorkspaceRoster_View interface {
 
 type WorkspaceRoster_Repository struct {
 	// Group by repository: the default, one section per repo.
-	Repository *RosterRepositoryView `protobuf:"bytes,2,opt,name=repository,proto3,oneof"`
+	Repository *RosterRepositoryView `protobuf:"bytes,3,opt,name=repository,proto3,oneof"`
 }
 
 type WorkspaceRoster_Task struct {
 	// Group by task: one section per task, workspaces filed under the task
 	// they serve.
-	Task *RosterTaskView `protobuf:"bytes,3,opt,name=task,proto3,oneof"`
+	Task *RosterTaskView `protobuf:"bytes,4,opt,name=task,proto3,oneof"`
 }
 
 func (*WorkspaceRoster_Repository) isWorkspaceRoster_View() {}
@@ -581,9 +581,9 @@ type RosterRow struct {
 	// Whether this row is the current workspace. Redundant with a dir comparison
 	// against WorkspaceRoster.current_dir and deliberately so: the author
 	// resolves it once, so no client can compute it differently.
-	Current bool `protobuf:"varint,4,opt,name=current,proto3" json:"current,omitempty"`
+	Current bool `protobuf:"varint,27,opt,name=current,proto3" json:"current,omitempty"`
 	// Nested workspaces (a spawned family under its parent), in render order.
-	Children []*RosterRow `protobuf:"bytes,5,rep,name=children,proto3" json:"children,omitempty"`
+	Children []*RosterRow `protobuf:"bytes,28,rep,name=children,proto3" json:"children,omitempty"`
 	// When the user last viewed this workspace, in epoch MILLISECONDS. Drives
 	// the row's when-column, the relative-age text the rail renders on the
 	// right ("3m", "2h"). ZERO MEANS NEVER VIEWED, and renders as no age at all
@@ -953,110 +953,110 @@ type RosterRow_Submitting struct {
 
 type RosterRow_Thinking struct {
 	// A turn is in flight.
-	Thinking *RosterRowStatusThinking `protobuf:"bytes,6,opt,name=thinking,proto3,oneof"`
+	Thinking *RosterRowStatusThinking `protobuf:"bytes,4,opt,name=thinking,proto3,oneof"`
 }
 
 type RosterRow_Clearing struct {
 	// The conversation is being cleared.
-	Clearing *RosterRowStatusClearing `protobuf:"bytes,7,opt,name=clearing,proto3,oneof"`
+	Clearing *RosterRowStatusClearing `protobuf:"bytes,5,opt,name=clearing,proto3,oneof"`
 }
 
 type RosterRow_Compacting struct {
 	// The context is being compacted.
-	Compacting *RosterRowStatusCompacting `protobuf:"bytes,8,opt,name=compacting,proto3,oneof"`
+	Compacting *RosterRowStatusCompacting `protobuf:"bytes,6,opt,name=compacting,proto3,oneof"`
 }
 
 type RosterRow_Permission struct {
 	// A tool-permission request is waiting on the user.
-	Permission *RosterRowStatusPermission `protobuf:"bytes,9,opt,name=permission,proto3,oneof"`
+	Permission *RosterRowStatusPermission `protobuf:"bytes,7,opt,name=permission,proto3,oneof"`
 }
 
 type RosterRow_Done struct {
 	// The turn finished and its response is unread.
-	Done *RosterRowStatusDone `protobuf:"bytes,10,opt,name=done,proto3,oneof"`
+	Done *RosterRowStatusDone `protobuf:"bytes,8,opt,name=done,proto3,oneof"`
 }
 
 type RosterRow_Interrupted struct {
 	// The turn was interrupted by the user.
-	Interrupted *RosterRowStatusInterrupted `protobuf:"bytes,11,opt,name=interrupted,proto3,oneof"`
+	Interrupted *RosterRowStatusInterrupted `protobuf:"bytes,9,opt,name=interrupted,proto3,oneof"`
 }
 
 type RosterRow_Ready struct {
 	// Live, proven usable, and idle. Emacs maps BOTH its idle and ready render
 	// states here — the sidebar draws them identically.
-	Ready *RosterRowStatusReady `protobuf:"bytes,12,opt,name=ready,proto3,oneof"`
+	Ready *RosterRowStatusReady `protobuf:"bytes,10,opt,name=ready,proto3,oneof"`
 }
 
 type RosterRow_IdleAsync struct {
 	// No foreground turn, but detached work is still running.
-	IdleAsync *RosterRowStatusIdleAsync `protobuf:"bytes,13,opt,name=idle_async,json=idleAsync,proto3,oneof"`
+	IdleAsync *RosterRowStatusIdleAsync `protobuf:"bytes,11,opt,name=idle_async,json=idleAsync,proto3,oneof"`
 }
 
 type RosterRow_VendorBlocked struct {
 	// Blocked on the vendor or the account, not on agent-repl.
-	VendorBlocked *RosterRowStatusVendorBlocked `protobuf:"bytes,14,opt,name=vendor_blocked,json=vendorBlocked,proto3,oneof"`
+	VendorBlocked *RosterRowStatusVendorBlocked `protobuf:"bytes,12,opt,name=vendor_blocked,json=vendorBlocked,proto3,oneof"`
 }
 
 type RosterRow_Init struct {
 	// Starting up; the route is not yet proven.
-	Init *RosterRowStatusInit `protobuf:"bytes,15,opt,name=init,proto3,oneof"`
+	Init *RosterRowStatusInit `protobuf:"bytes,13,opt,name=init,proto3,oneof"`
 }
 
 type RosterRow_Severed struct {
 	// The session's backing process is gone but the workspace is recoverable.
-	Severed *RosterRowStatusSevered `protobuf:"bytes,16,opt,name=severed,proto3,oneof"`
+	Severed *RosterRowStatusSevered `protobuf:"bytes,14,opt,name=severed,proto3,oneof"`
 }
 
 type RosterRow_Hibernated struct {
 	// Deliberately parked, resumable on demand.
-	Hibernated *RosterRowStatusHibernated `protobuf:"bytes,17,opt,name=hibernated,proto3,oneof"`
+	Hibernated *RosterRowStatusHibernated `protobuf:"bytes,15,opt,name=hibernated,proto3,oneof"`
 }
 
 type RosterRow_StartFailed struct {
 	// Startup failed outright.
-	StartFailed *RosterRowStatusStartFailed `protobuf:"bytes,18,opt,name=start_failed,json=startFailed,proto3,oneof"`
+	StartFailed *RosterRowStatusStartFailed `protobuf:"bytes,16,opt,name=start_failed,json=startFailed,proto3,oneof"`
 }
 
 type RosterRow_Degraded struct {
 	// Running, but with a compromised route.
-	Degraded *RosterRowStatusDegraded `protobuf:"bytes,19,opt,name=degraded,proto3,oneof"`
+	Degraded *RosterRowStatusDegraded `protobuf:"bytes,17,opt,name=degraded,proto3,oneof"`
 }
 
 type RosterRow_Dead struct {
 	// Terminal: no live session backs the workspace.
-	Dead *RosterRowStatusDead `protobuf:"bytes,20,opt,name=dead,proto3,oneof"`
+	Dead *RosterRowStatusDead `protobuf:"bytes,18,opt,name=dead,proto3,oneof"`
 }
 
 type RosterRow_MergeEnqueuing struct {
 	// The merge pipeline. These render a recycle glyph rather than a lifecycle
 	// dot, except merged, which is settled and files under recently_merged.
 	// The first instant of a merge, before anything durable exists for it.
-	MergeEnqueuing *RosterRowStatusMergeEnqueuing `protobuf:"bytes,21,opt,name=merge_enqueuing,json=mergeEnqueuing,proto3,oneof"`
+	MergeEnqueuing *RosterRowStatusMergeEnqueuing `protobuf:"bytes,19,opt,name=merge_enqueuing,json=mergeEnqueuing,proto3,oneof"`
 }
 
 type RosterRow_Merging struct {
 	// A merge is actively running.
-	Merging *RosterRowStatusMerging `protobuf:"bytes,22,opt,name=merging,proto3,oneof"`
+	Merging *RosterRowStatusMerging `protobuf:"bytes,20,opt,name=merging,proto3,oneof"`
 }
 
 type RosterRow_MergeQueued struct {
 	// Enqueued behind another workspace's merge.
-	MergeQueued *RosterRowStatusMergeQueued `protobuf:"bytes,23,opt,name=merge_queued,json=mergeQueued,proto3,oneof"`
+	MergeQueued *RosterRowStatusMergeQueued `protobuf:"bytes,21,opt,name=merge_queued,json=mergeQueued,proto3,oneof"`
 }
 
 type RosterRow_MergeConflict struct {
 	// The merge stopped on a conflict awaiting resolution.
-	MergeConflict *RosterRowStatusMergeConflict `protobuf:"bytes,24,opt,name=merge_conflict,json=mergeConflict,proto3,oneof"`
+	MergeConflict *RosterRowStatusMergeConflict `protobuf:"bytes,22,opt,name=merge_conflict,json=mergeConflict,proto3,oneof"`
 }
 
 type RosterRow_MergeFailed struct {
 	// The merge failed outright.
-	MergeFailed *RosterRowStatusMergeFailed `protobuf:"bytes,25,opt,name=merge_failed,json=mergeFailed,proto3,oneof"`
+	MergeFailed *RosterRowStatusMergeFailed `protobuf:"bytes,23,opt,name=merge_failed,json=mergeFailed,proto3,oneof"`
 }
 
 type RosterRow_Merged struct {
 	// The merge settled successfully.
-	Merged *RosterRowStatusMerged `protobuf:"bytes,26,opt,name=merged,proto3,oneof"`
+	Merged *RosterRowStatusMerged `protobuf:"bytes,24,opt,name=merged,proto3,oneof"`
 }
 
 type RosterRow_None struct {
@@ -1064,7 +1064,7 @@ type RosterRow_None struct {
 	// or not yet born). Distinct from an unset oneof: "the author looked and
 	// there is none" is an assertion, where an unset oneof is the absence of
 	// one.
-	None *RosterRowStatusNone `protobuf:"bytes,27,opt,name=none,proto3,oneof"`
+	None *RosterRowStatusNone `protobuf:"bytes,25,opt,name=none,proto3,oneof"`
 }
 
 type RosterRow_Inactive struct {
@@ -1072,7 +1072,7 @@ type RosterRow_Inactive struct {
 	// whose lifecycle a dot could report. Drawn as a question mark. Dominates
 	// every render state: a perspective-less workspace is inactive whatever its
 	// session once was.
-	Inactive *RosterRowStatusInactive `protobuf:"bytes,28,opt,name=inactive,proto3,oneof"`
+	Inactive *RosterRowStatusInactive `protobuf:"bytes,26,opt,name=inactive,proto3,oneof"`
 }
 
 func (*RosterRow_Submitting) isRosterRow_Status() {}
@@ -2117,15 +2117,15 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x19frontend/v1/sidebar.proto\x12\vfrontend.v1\"\xc5\x02\n" +
 	"\x0fWorkspaceRoster\x12\x1a\n" +
 	"\brevision\x18\x01 \x01(\x03R\brevision\x12\x17\n" +
-	"\aboot_id\x18\a \x01(\tR\x06bootId\x12C\n" +
+	"\aboot_id\x18\x02 \x01(\tR\x06bootId\x12C\n" +
 	"\n" +
-	"repository\x18\x02 \x01(\v2!.frontend.v1.RosterRepositoryViewH\x00R\n" +
+	"repository\x18\x03 \x01(\v2!.frontend.v1.RosterRepositoryViewH\x00R\n" +
 	"repository\x121\n" +
-	"\x04task\x18\x03 \x01(\v2\x1b.frontend.v1.RosterTaskViewH\x00R\x04task\x12C\n" +
-	"\x0frecently_merged\x18\x04 \x01(\v2\x1a.frontend.v1.RosterSectionR\x0erecentlyMerged\x12\x1f\n" +
-	"\vcurrent_dir\x18\x05 \x01(\tR\n" +
+	"\x04task\x18\x04 \x01(\v2\x1b.frontend.v1.RosterTaskViewH\x00R\x04task\x12C\n" +
+	"\x0frecently_merged\x18\x05 \x01(\v2\x1a.frontend.v1.RosterSectionR\x0erecentlyMerged\x12\x1f\n" +
+	"\vcurrent_dir\x18\x06 \x01(\tR\n" +
 	"currentDir\x12\x17\n" +
-	"\anav_dir\x18\x06 \x01(\tR\x06navDirB\x06\n" +
+	"\anav_dir\x18\a \x01(\tR\x06navDirB\x06\n" +
 	"\x04view\"R\n" +
 	"\x14RosterRepositoryView\x12:\n" +
 	"\bsections\x18\x01 \x03(\v2\x1e.frontend.v1.RosterRepoSectionR\bsections\"L\n" +
@@ -2151,39 +2151,39 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\n" +
 	"submitting\x18\x03 \x01(\v2&.frontend.v1.RosterRowStatusSubmittingH\x00R\n" +
 	"submitting\x12B\n" +
-	"\bthinking\x18\x06 \x01(\v2$.frontend.v1.RosterRowStatusThinkingH\x00R\bthinking\x12B\n" +
-	"\bclearing\x18\a \x01(\v2$.frontend.v1.RosterRowStatusClearingH\x00R\bclearing\x12H\n" +
+	"\bthinking\x18\x04 \x01(\v2$.frontend.v1.RosterRowStatusThinkingH\x00R\bthinking\x12B\n" +
+	"\bclearing\x18\x05 \x01(\v2$.frontend.v1.RosterRowStatusClearingH\x00R\bclearing\x12H\n" +
 	"\n" +
-	"compacting\x18\b \x01(\v2&.frontend.v1.RosterRowStatusCompactingH\x00R\n" +
+	"compacting\x18\x06 \x01(\v2&.frontend.v1.RosterRowStatusCompactingH\x00R\n" +
 	"compacting\x12H\n" +
 	"\n" +
-	"permission\x18\t \x01(\v2&.frontend.v1.RosterRowStatusPermissionH\x00R\n" +
+	"permission\x18\a \x01(\v2&.frontend.v1.RosterRowStatusPermissionH\x00R\n" +
 	"permission\x126\n" +
-	"\x04done\x18\n" +
-	" \x01(\v2 .frontend.v1.RosterRowStatusDoneH\x00R\x04done\x12K\n" +
-	"\vinterrupted\x18\v \x01(\v2'.frontend.v1.RosterRowStatusInterruptedH\x00R\vinterrupted\x129\n" +
-	"\x05ready\x18\f \x01(\v2!.frontend.v1.RosterRowStatusReadyH\x00R\x05ready\x12F\n" +
+	"\x04done\x18\b \x01(\v2 .frontend.v1.RosterRowStatusDoneH\x00R\x04done\x12K\n" +
+	"\vinterrupted\x18\t \x01(\v2'.frontend.v1.RosterRowStatusInterruptedH\x00R\vinterrupted\x129\n" +
+	"\x05ready\x18\n" +
+	" \x01(\v2!.frontend.v1.RosterRowStatusReadyH\x00R\x05ready\x12F\n" +
 	"\n" +
-	"idle_async\x18\r \x01(\v2%.frontend.v1.RosterRowStatusIdleAsyncH\x00R\tidleAsync\x12R\n" +
-	"\x0evendor_blocked\x18\x0e \x01(\v2).frontend.v1.RosterRowStatusVendorBlockedH\x00R\rvendorBlocked\x126\n" +
-	"\x04init\x18\x0f \x01(\v2 .frontend.v1.RosterRowStatusInitH\x00R\x04init\x12?\n" +
-	"\asevered\x18\x10 \x01(\v2#.frontend.v1.RosterRowStatusSeveredH\x00R\asevered\x12H\n" +
+	"idle_async\x18\v \x01(\v2%.frontend.v1.RosterRowStatusIdleAsyncH\x00R\tidleAsync\x12R\n" +
+	"\x0evendor_blocked\x18\f \x01(\v2).frontend.v1.RosterRowStatusVendorBlockedH\x00R\rvendorBlocked\x126\n" +
+	"\x04init\x18\r \x01(\v2 .frontend.v1.RosterRowStatusInitH\x00R\x04init\x12?\n" +
+	"\asevered\x18\x0e \x01(\v2#.frontend.v1.RosterRowStatusSeveredH\x00R\asevered\x12H\n" +
 	"\n" +
-	"hibernated\x18\x11 \x01(\v2&.frontend.v1.RosterRowStatusHibernatedH\x00R\n" +
+	"hibernated\x18\x0f \x01(\v2&.frontend.v1.RosterRowStatusHibernatedH\x00R\n" +
 	"hibernated\x12L\n" +
-	"\fstart_failed\x18\x12 \x01(\v2'.frontend.v1.RosterRowStatusStartFailedH\x00R\vstartFailed\x12B\n" +
-	"\bdegraded\x18\x13 \x01(\v2$.frontend.v1.RosterRowStatusDegradedH\x00R\bdegraded\x126\n" +
-	"\x04dead\x18\x14 \x01(\v2 .frontend.v1.RosterRowStatusDeadH\x00R\x04dead\x12U\n" +
-	"\x0fmerge_enqueuing\x18\x15 \x01(\v2*.frontend.v1.RosterRowStatusMergeEnqueuingH\x00R\x0emergeEnqueuing\x12?\n" +
-	"\amerging\x18\x16 \x01(\v2#.frontend.v1.RosterRowStatusMergingH\x00R\amerging\x12L\n" +
-	"\fmerge_queued\x18\x17 \x01(\v2'.frontend.v1.RosterRowStatusMergeQueuedH\x00R\vmergeQueued\x12R\n" +
-	"\x0emerge_conflict\x18\x18 \x01(\v2).frontend.v1.RosterRowStatusMergeConflictH\x00R\rmergeConflict\x12L\n" +
-	"\fmerge_failed\x18\x19 \x01(\v2'.frontend.v1.RosterRowStatusMergeFailedH\x00R\vmergeFailed\x12<\n" +
-	"\x06merged\x18\x1a \x01(\v2\".frontend.v1.RosterRowStatusMergedH\x00R\x06merged\x126\n" +
-	"\x04none\x18\x1b \x01(\v2 .frontend.v1.RosterRowStatusNoneH\x00R\x04none\x12B\n" +
-	"\binactive\x18\x1c \x01(\v2$.frontend.v1.RosterRowStatusInactiveH\x00R\binactive\x12\x18\n" +
-	"\acurrent\x18\x04 \x01(\bR\acurrent\x122\n" +
-	"\bchildren\x18\x05 \x03(\v2\x16.frontend.v1.RosterRowR\bchildren\x12)\n" +
+	"\fstart_failed\x18\x10 \x01(\v2'.frontend.v1.RosterRowStatusStartFailedH\x00R\vstartFailed\x12B\n" +
+	"\bdegraded\x18\x11 \x01(\v2$.frontend.v1.RosterRowStatusDegradedH\x00R\bdegraded\x126\n" +
+	"\x04dead\x18\x12 \x01(\v2 .frontend.v1.RosterRowStatusDeadH\x00R\x04dead\x12U\n" +
+	"\x0fmerge_enqueuing\x18\x13 \x01(\v2*.frontend.v1.RosterRowStatusMergeEnqueuingH\x00R\x0emergeEnqueuing\x12?\n" +
+	"\amerging\x18\x14 \x01(\v2#.frontend.v1.RosterRowStatusMergingH\x00R\amerging\x12L\n" +
+	"\fmerge_queued\x18\x15 \x01(\v2'.frontend.v1.RosterRowStatusMergeQueuedH\x00R\vmergeQueued\x12R\n" +
+	"\x0emerge_conflict\x18\x16 \x01(\v2).frontend.v1.RosterRowStatusMergeConflictH\x00R\rmergeConflict\x12L\n" +
+	"\fmerge_failed\x18\x17 \x01(\v2'.frontend.v1.RosterRowStatusMergeFailedH\x00R\vmergeFailed\x12<\n" +
+	"\x06merged\x18\x18 \x01(\v2\".frontend.v1.RosterRowStatusMergedH\x00R\x06merged\x126\n" +
+	"\x04none\x18\x19 \x01(\v2 .frontend.v1.RosterRowStatusNoneH\x00R\x04none\x12B\n" +
+	"\binactive\x18\x1a \x01(\v2$.frontend.v1.RosterRowStatusInactiveH\x00R\binactive\x12\x18\n" +
+	"\acurrent\x18\x1b \x01(\bR\acurrent\x122\n" +
+	"\bchildren\x18\x1c \x03(\v2\x16.frontend.v1.RosterRowR\bchildren\x12)\n" +
 	"\x11last_viewed_at_ms\x18\x1d \x01(\x03R\x0elastViewedAtMs\x12 \n" +
 	"\fmerged_at_ms\x18\x1e \x01(\x03R\n" +
 	"mergedAtMs\x12\x16\n" +

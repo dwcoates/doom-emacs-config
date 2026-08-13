@@ -28,7 +28,7 @@ import type { Message as Message$1 } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/feed.proto.
  */
 export const file_frontend_v1_feed: GenFile = /*@__PURE__*/
-  fileDesc("ChZmcm9udGVuZC92MS9mZWVkLnByb3RvEgtmcm9udGVuZC52MSKLAQoRQ29udmVyc2F0aW9uRGVsdGESEQoJd29ya3NwYWNlGAEgASgJEiYKCG1lc3NhZ2VzGAMgAygLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIFaXRlbXMiSQoOTWVzc2FnZUxpbmVhZ2USHAoUdG9wX2xldmVsX21lc3NhZ2VfaWQYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAkiEAoOTWVzc2FnZUR1cmFibGUiEgoQTWVzc2FnZUVwaGVtZXJhbCLTBwoHTWVzc2FnZRIMCgR1dWlkGAEgASgJEg0KBXRzX21zGAIgASgDEhIKCnJlcXVlc3RfaWQYAyABKAkSLwoGc291cmNlGAQgASgOMh8uZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uU291cmNlEiwKB2xpbmVhZ2UYBiABKAsyGy5mcm9udGVuZC52MS5NZXNzYWdlTGluZWFnZRIuCgdkdXJhYmxlGAcgASgLMhsuZnJvbnRlbmQudjEuTWVzc2FnZUR1cmFibGVIABIyCgllcGhlbWVyYWwYCCABKAsyHS5mcm9udGVuZC52MS5NZXNzYWdlRXBoZW1lcmFsSAASKwoFYWdlbnQYBSABKAsyGi5mcm9udGVuZC52MS5BZ2VudEVtaXNzaW9uSAESNAoMdXNlcl9tZXNzYWdlGAsgASgLMhwuY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50SAESNAoMZmFpbHVyZV9jYXJkGB8gASgLMhwuZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRWaWV3SAESTwoaZGFlbW9uX2ludGVyY2VwdGVkX2NvbW1hbmQYIyABKAsyKS5mcm9udGVuZC52MS5EYWVtb25JbnRlcmNlcHRlZENvbW1hbmRJdGVtSAESMgoNZGV0YWNoZWRfd29yaxgmIAEoCzIZLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0gBEkAKEmNvbXBhY3Rpb25fc3VtbWFyeRgnIAEoCzIiLmZyb250ZW5kLnYxLkNvbXBhY3Rpb25TdW1tYXJ5SXRlbUgBQgwKCmR1cmFiaWxpdHlCCQoHcGF5bG9hZEoECBAQEUoECBEQEkoECBIQE0oECAoQC0oECAwQDUoECA0QDkoECA4QD0oECA8QEEoECCIQI0oECCgQKUoECCQQJUoECCUQJkoECB4QH0oECCAQIUoECCEQIlIJYXBpX2Vycm9yUhBjb21wYWN0X2JvdW5kYXJ5UhVjb21wYWN0X2JvdW5kYXJ5X2xpbmVSEWFzc2lzdGFudF9tZXNzYWdlUgh0b29sX3VzZVILdG9vbF9yZXN1bHRSD3Rvb2xfdXNlX3Jlc3VsdFIGcmVzdWx0Ugpza2lsbF9ib2R5Ugt1c2FnZV9zdGFtcFIRdG9rZW5fdXRpbGl6YXRpb25SD3R1cm5fYWNjb3VudGluZ1IMYXN5bmNfYnViYmxlUg9zZXNzaW9uX2NvbW1hbmRSCnBlcm1pc3Npb25SD2NvbnRleHRfY2xlYXJlZFIRY29udGV4dF9jb21wYWN0ZWQitAEKEURldGFjaGVkV29ya0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIkCgZvcGVuZWQYAyADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEjAKB3VwZGF0ZXMYBCADKAsyHy5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtVcGRhdGUSEwoLdGhyb3VnaF9zZXEYBSABKAQSDQoFZmVuY2UYBiABKAlKBAgCEANSCnNlc3Npb25faWQiYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMidAoLVHlwaW5nRGVsdGESEQoJd29ya3NwYWNlGAEgASgJEg0KBWZlbmNlGAQgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAUgASgJSgQIAhADSgQIAxAEUgpzZXNzaW9uX2lkUgVkZWx0YVIJYnViYmxlX2lkIlMKCVR5cGluZ0N1dBIRCgl3b3Jrc3BhY2UYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAkSDQoFZmVuY2UYAyABKAlSCWJ1YmJsZV9pZCJ8Cg9TZXNzaW9uSW5pdFZpZXcSEQoJd29ya3NwYWNlGAEgASgJEikKBHJvd3MYBSADKAsyGy5mcm9udGVuZC52MS5TZXNzaW9uSW5pdFJvdxINCgVmZW5jZRgEIAEoCUoECAIQA0oECAMQBFIKc2Vzc2lvbl9pZFIEaW5pdCIuCg5TZXNzaW9uSW5pdFJvdxINCgVsYWJlbBgBIAEoCRINCgV2YWx1ZRgCIAEoCSp2ChJDb252ZXJzYXRpb25Tb3VyY2USIwofQ09OVkVSU0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEhwKGENPTlZFUlNBVElPTl9TT1VSQ0VfVVNFUhABEh0KGUNPTlZFUlNBVElPTl9TT1VSQ0VfTUVSR0UQAkIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_content, file_frontend_v1_agent_emission, file_frontend_v1_detached_work, file_frontend_v1_failure_card, file_frontend_v1_slash_menu]);
+  fileDesc("ChZmcm9udGVuZC92MS9mZWVkLnByb3RvEgtmcm9udGVuZC52MSJyChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSJgoIbWVzc2FnZXMYAiADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEhMKC3Rocm91Z2hfc2VxGAMgASgEEg0KBWZlbmNlGAQgASgJIkkKDk1lc3NhZ2VMaW5lYWdlEhwKFHRvcF9sZXZlbF9tZXNzYWdlX2lkGAEgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAIgASgJIhAKDk1lc3NhZ2VEdXJhYmxlIhIKEE1lc3NhZ2VFcGhlbWVyYWwi9gQKB01lc3NhZ2USDAoEdXVpZBgBIAEoCRINCgV0c19tcxgCIAEoAxISCgpyZXF1ZXN0X2lkGAMgASgJEi8KBnNvdXJjZRgEIAEoDjIfLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblNvdXJjZRIsCgdsaW5lYWdlGAUgASgLMhsuZnJvbnRlbmQudjEuTWVzc2FnZUxpbmVhZ2USLgoHZHVyYWJsZRgGIAEoCzIbLmZyb250ZW5kLnYxLk1lc3NhZ2VEdXJhYmxlSAASMgoJZXBoZW1lcmFsGAcgASgLMh0uZnJvbnRlbmQudjEuTWVzc2FnZUVwaGVtZXJhbEgAEisKBWFnZW50GAggASgLMhouZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbkgBEjQKDHVzZXJfbWVzc2FnZRgJIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5Vc2VyQ29udGVudEgBEjQKDGZhaWx1cmVfY2FyZBgKIAEoCzIcLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVmlld0gBEk8KGmRhZW1vbl9pbnRlcmNlcHRlZF9jb21tYW5kGAsgASgLMikuZnJvbnRlbmQudjEuRGFlbW9uSW50ZXJjZXB0ZWRDb21tYW5kSXRlbUgBEjIKDWRldGFjaGVkX3dvcmsYDCABKAsyGS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtIARJAChJjb21wYWN0aW9uX3N1bW1hcnkYDSABKAsyIi5mcm9udGVuZC52MS5Db21wYWN0aW9uU3VtbWFyeUl0ZW1IAUIMCgpkdXJhYmlsaXR5QgkKB3BheWxvYWQiogEKEURldGFjaGVkV29ya0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIkCgZvcGVuZWQYAiADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEjAKB3VwZGF0ZXMYAyADKAsyHy5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtVcGRhdGUSEwoLdGhyb3VnaF9zZXEYBCABKAQSDQoFZmVuY2UYBSABKAkiYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMiSgoLVHlwaW5nRGVsdGESEQoJd29ya3NwYWNlGAEgASgJEg0KBWZlbmNlGAIgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAMgASgJIkgKCVR5cGluZ0N1dBIRCgl3b3Jrc3BhY2UYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAkSDQoFZmVuY2UYAyABKAkiXgoPU2Vzc2lvbkluaXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRIpCgRyb3dzGAIgAygLMhsuZnJvbnRlbmQudjEuU2Vzc2lvbkluaXRSb3cSDQoFZmVuY2UYAyABKAkiLgoOU2Vzc2lvbkluaXRSb3cSDQoFbGFiZWwYASABKAkSDQoFdmFsdWUYAiABKAkqdgoSQ29udmVyc2F0aW9uU291cmNlEiMKH0NPTlZFUlNBVElPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIcChhDT05WRVJTQVRJT05fU09VUkNFX1VTRVIQARIdChlDT05WRVJTQVRJT05fU09VUkNFX01FUkdFEAJCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_conversation_v1_content, file_frontend_v1_agent_emission, file_frontend_v1_detached_work, file_frontend_v1_failure_card, file_frontend_v1_slash_menu]);
 
 /**
  * Complete (store-round-tripped) conversation additions, composed from the
@@ -40,6 +40,16 @@ export const file_frontend_v1_feed: GenFile = /*@__PURE__*/
  */
 export type ConversationDelta = Message$1<"frontend.v1.ConversationDelta"> & {
   /**
+   * THERE IS NO SESSION ID ON THIS PUSH, deliberately, and there is none on any
+   * push in this file. A frontend has no session vocabulary: the only question
+   * it ever asks about a push is "is this still current", and `fence` answers
+   * that without naming what rotated. A workspace is the whole address.
+   *
+   * THIS SURFACE TRAVELS AS PROTOJSON, so the FIELD NAME is the wire token, not
+   * the number. Renaming a field here is a breaking wire change even when the
+   * number is untouched, and a name once spent must never come back meaning
+   * something else.
+   *
    * @generated from field: string workspace = 1;
    */
   workspace: string;
@@ -48,14 +58,14 @@ export type ConversationDelta = Message$1<"frontend.v1.ConversationDelta"> & {
    * The conversation additions this push carries, oldest first. Each is a
    * complete feed envelope the frontend renders without further resolution.
    *
-   * @generated from field: repeated frontend.v1.Message messages = 3;
+   * @generated from field: repeated frontend.v1.Message messages = 2;
    */
   messages: Message[];
 
   /**
    * frontends persist this for reconnect resync
    *
-   * @generated from field: uint64 through_seq = 4;
+   * @generated from field: uint64 through_seq = 3;
    */
   throughSeq: bigint;
 
@@ -70,7 +80,7 @@ export type ConversationDelta = Message$1<"frontend.v1.ConversationDelta"> & {
    * A client that learned to decode it would be depending on a fact this
    * contract does not offer, and the token's composition is free to change.
    *
-   * @generated from field: string fence = 5;
+   * @generated from field: string fence = 4;
    */
   fence: string;
 };
@@ -211,8 +221,24 @@ export const MessageEphemeralSchema: GenMessage<MessageEphemeral> = /*@__PURE__*
  * failure cards, session-level events — keeps an arm of its own, because
  * folding those into AgentEmission would make that message's name untrue.
  *
- * Consumers reconcile by uuid (permission items use the permission request_id
- * as their uuid).
+ * Consumers reconcile by uuid.
+ *
+ * THERE IS NO PER-KIND AGENT ARM HERE, and there must never be one. Every
+ * agent-produced payload — assistant text, tool use, tool results, skill
+ * bodies, the turn's result — is an arm of AgentEmission and is reached
+ * through `agent` below. An arm added here for one agent output kind would
+ * give that kind two spellings on the wire, and make AgentEmission's name
+ * untrue.
+ *
+ * THIS MESSAGE CARRIES NO PERSISTENCE RECORDS EITHER — no raw usage or
+ * accounting blobs for a renderer to digest itself. The figures a frontend
+ * shows are RESOLVED before they reach it: a response's stamp on
+ * AgentResponse, a turn's verdict on FooterAccountingCell, session and
+ * per-model economics on TokenBreakdownView. The feed renders; it does not
+ * derive.
+ *
+ * As everywhere in this file, the FIELD NAME is the wire token (protojson),
+ * so renaming an arm is a breaking change even at the same number.
  *
  * @generated from message frontend.v1.Message
  */
@@ -263,7 +289,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
    * several turn boundaries and a short screen. Do not lift this field onto
    * Envelope, and do not model an unowned record as an empty MessageLineage.
    *
-   * @generated from field: frontend.v1.MessageLineage lineage = 6;
+   * @generated from field: frontend.v1.MessageLineage lineage = 5;
    */
   lineage?: MessageLineage | undefined;
 
@@ -304,7 +330,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
      * durability comes from the TaskStarted behind them and not from who
      * chose the id.
      *
-     * @generated from field: frontend.v1.MessageDurable durable = 7;
+     * @generated from field: frontend.v1.MessageDurable durable = 6;
      */
     value: MessageDurable;
     case: "durable";
@@ -312,7 +338,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
     /**
      * No record for this message exists ANYWHERE, and none ever will.
      *
-     * @generated from field: frontend.v1.MessageEphemeral ephemeral = 8;
+     * @generated from field: frontend.v1.MessageEphemeral ephemeral = 7;
      */
     value: MessageEphemeral;
     case: "ephemeral";
@@ -326,7 +352,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
      * EVERYTHING the agent produced, in the one vocabulary that also carries
      * a detached agent's output (AsyncAgentUpdate). See AgentEmission.
      *
-     * @generated from field: frontend.v1.AgentEmission agent = 5;
+     * @generated from field: frontend.v1.AgentEmission agent = 8;
      */
     value: AgentEmission;
     case: "agent";
@@ -334,18 +360,15 @@ export type Message = Message$1<"frontend.v1.Message"> & {
     /**
      * The user's own prompt.
      *
-     * @generated from field: conversation.v1.UserContent user_message = 11;
+     * @generated from field: conversation.v1.UserContent user_message = 9;
      */
     value: UserContent;
     case: "userMessage";
   } | {
     /**
-     * 30 was `permission` and 32/33 were `context_cleared`/`context_compacted`.
-     * All three are retired with the core.v1 payloads they carried, and NOTHING
-     * REPLACES THEM — see the reservations at the foot of this message and the
-     * gap note in DESIGN-protobuf-surfaces.md.
+     * The daemon's own card for a failure the agent never got to report.
      *
-     * @generated from field: frontend.v1.FailureCardView failure_card = 31;
+     * @generated from field: frontend.v1.FailureCardView failure_card = 10;
      */
     value: FailureCardView;
     case: "failureCard";
@@ -355,7 +378,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
      * durability classes ride this arm; which one a given command is, is
      * stated by `durability` above and never inferred from the command.
      *
-     * @generated from field: frontend.v1.DaemonInterceptedCommandItem daemon_intercepted_command = 35;
+     * @generated from field: frontend.v1.DaemonInterceptedCommandItem daemon_intercepted_command = 11;
      */
     value: DaemonInterceptedCommandItem;
     case: "daemonInterceptedCommand";
@@ -371,7 +394,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
      * thousand rows into the conversation it was dispatched from — those lines
      * are this message's payload, not messages of their own.
      *
-     * @generated from field: frontend.v1.DetachedWork detached_work = 38;
+     * @generated from field: frontend.v1.DetachedWork detached_work = 12;
      */
     value: DetachedWork;
     case: "detachedWork";
@@ -380,7 +403,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
      * The purple-washed summary block a compaction leaves behind. Its own arm
      * so that the wash is a stated kind rather than an inference.
      *
-     * @generated from field: frontend.v1.CompactionSummaryItem compaction_summary = 39;
+     * @generated from field: frontend.v1.CompactionSummaryItem compaction_summary = 13;
      */
     value: CompactionSummaryItem;
     case: "compactionSummary";
@@ -430,7 +453,7 @@ export type DetachedWorkDelta = Message$1<"frontend.v1.DetachedWorkDelta"> & {
    * Each carries payload arm `detached_work`; a message arriving here with any
    * other payload is a daemon bug and is rejected rather than rendered.
    *
-   * @generated from field: repeated frontend.v1.Message opened = 3;
+   * @generated from field: repeated frontend.v1.Message opened = 2;
    */
   opened: Message[];
 
@@ -438,14 +461,14 @@ export type DetachedWorkDelta = Message$1<"frontend.v1.DetachedWorkDelta"> & {
    * UPDATES to messages already open, in order. Each names its target message by
    * id and mutates that message's payload; none of them is a message.
    *
-   * @generated from field: repeated frontend.v1.DetachedWorkUpdate updates = 4;
+   * @generated from field: repeated frontend.v1.DetachedWorkUpdate updates = 3;
    */
   updates: DetachedWorkUpdate[];
 
   /**
    * Frontends persist this for reconnect resync.
    *
-   * @generated from field: uint64 through_seq = 5;
+   * @generated from field: uint64 through_seq = 4;
    */
   throughSeq: bigint;
 
@@ -460,7 +483,7 @@ export type DetachedWorkDelta = Message$1<"frontend.v1.DetachedWorkDelta"> & {
    * A client that learned to decode it would be depending on a fact this
    * contract does not offer, and the token's composition is free to change.
    *
-   * @generated from field: string fence = 6;
+   * @generated from field: string fence = 5;
    */
   fence: string;
 };
@@ -516,11 +539,19 @@ export const CompactionSummaryItemSchema: GenMessage<CompactionSummaryItem> = /*
  */
 export type TypingDelta = Message$1<"frontend.v1.TypingDelta"> & {
   /**
+   * Addressed by workspace alone — no session id, for the reason stated on
+   * ConversationDelta.
+   *
    * @generated from field: string workspace = 1;
    */
   workspace: string;
 
   /**
+   * OPEN GAP: THIS MESSAGE CARRIES NO CONTENT. The live preview it exists to
+   * relay has no frontend-side spelling — the content model lives in
+   * conversation.v1 and arrives on EntryDelivery's `live` arm — so TypingDelta
+   * is currently a workspace, a fence and a target, and nothing to draw. See
+   * the gap note in DESIGN-protobuf-surfaces.md.
    * The workspace's staleness FENCE at the moment the daemon produced this
    * push: an opaque token the client compares BYTE-WISE against the fence on
    * the workspace's current WorkspaceState, and never parses, splits or
@@ -531,7 +562,7 @@ export type TypingDelta = Message$1<"frontend.v1.TypingDelta"> & {
    * A client that learned to decode it would be depending on a fact this
    * contract does not offer, and the token's composition is free to change.
    *
-   * @generated from field: string fence = 4;
+   * @generated from field: string fence = 2;
    */
   fence: string;
 
@@ -554,7 +585,7 @@ export type TypingDelta = Message$1<"frontend.v1.TypingDelta"> & {
    * is the same fold decision, made in the same place), so no preview it
    * cannot retire is ever created. This is provenance, not a timeout.
    *
-   * @generated from field: string parent_message_id = 5;
+   * @generated from field: string parent_message_id = 3;
    */
   parentMessageId: string;
 };
@@ -632,6 +663,12 @@ export const TypingCutSchema: GenMessage<TypingCut> = /*@__PURE__*/
  */
 export type SessionInitView = Message$1<"frontend.v1.SessionInitView"> & {
   /**
+   * Addressed by workspace alone — no session id, for the reason stated on
+   * ConversationDelta.
+   *
+   * NOTHING ON THIS MESSAGE CARRIES A VENDOR PAYLOAD. The panel gets rows, not
+   * a record to read field by field; that is the whole point of the message.
+   *
    * @generated from field: string workspace = 1;
    */
   workspace: string;
@@ -645,7 +682,7 @@ export type SessionInitView = Message$1<"frontend.v1.SessionInitView"> & {
    * these, because those come from sources that move independently of an init
    * and are already resolved elsewhere.
    *
-   * @generated from field: repeated frontend.v1.SessionInitRow rows = 5;
+   * @generated from field: repeated frontend.v1.SessionInitRow rows = 2;
    */
   rows: SessionInitRow[];
 
@@ -660,7 +697,7 @@ export type SessionInitView = Message$1<"frontend.v1.SessionInitView"> & {
    * A client that learned to decode it would be depending on a fact this
    * contract does not offer, and the token's composition is free to change.
    *
-   * @generated from field: string fence = 4;
+   * @generated from field: string fence = 3;
    */
   fence: string;
 };

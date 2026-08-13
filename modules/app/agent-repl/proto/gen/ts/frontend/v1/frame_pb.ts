@@ -45,9 +45,15 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/frame.proto.
  */
 export const file_frontend_v1_frame: GenFile = /*@__PURE__*/
-  fileDesc("Chdmcm9udGVuZC92MS9mcmFtZS5wcm90bxILZnJvbnRlbmQudjEi5QsKDUZyb250ZW5kRnJhbWUSLgoIc25hcHNob3QYASABKAsyGi5mcm9udGVuZC52MS5TdGF0ZVNuYXBzaG90SAASNgoPd29ya3NwYWNlX3N0YXRlGAIgASgLMhsuZnJvbnRlbmQudjEuV29ya3NwYWNlU3RhdGVIABIwCgxzZXNzaW9uX3ZpZXcYAyABKAsyGC5mcm9udGVuZC52MS5TZXNzaW9uVmlld0gAEjwKEmNvbnZlcnNhdGlvbl9kZWx0YRgEIAEoCzIeLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvbkRlbHRhSAASMAoMdHlwaW5nX2RlbHRhGAUgASgLMhguZnJvbnRlbmQudjEuVHlwaW5nRGVsdGFIABIwCgx0YXNrX2NhdGFsb2cYBiABKAsyGC5mcm9udGVuZC52MS5UYXNrQ2F0YWxvZ0gAEi4KC2NvbW1hbmRfYWNrGAcgASgLMhcuZnJvbnRlbmQudjEuQ29tbWFuZEFja0gAEi4KC2RhZW1vbl92aWV3GAkgASgLMhcuZnJvbnRlbmQudjEuRGFlbW9uVmlld0gAEjQKDHNlc3Npb25faW5pdBgKIAEoCzIcLmZyb250ZW5kLnYxLlNlc3Npb25Jbml0Vmlld0gAEi8KCWhlYXJ0YmVhdBgLIAEoCzIaLmZyb250ZW5kLnYxLkhlYXJ0YmVhdFZpZXdIABInCgVxdWV1ZRgMIAEoCzIWLmZyb250ZW5kLnYxLlF1ZXVlVmlld0gAEi0KCHByb2dyZXNzGA0gASgLMhkuZnJvbnRlbmQudjEuUHJvZ3Jlc3NWaWV3SAASPgoTd29ya3NwYWNlX2F2YWlsYWJsZRgOIAEoCzIfLmZyb250ZW5kLnYxLldvcmtzcGFjZUF2YWlsYWJsZUgAEi4KC2hvc3RfYWN0aW9uGA8gASgLMhcuZnJvbnRlbmQudjEuSG9zdEFjdGlvbkgAEjYKDWRhZW1vbl9oZWFsdGgYECABKAsyHS5mcm9udGVuZC52MS5EYWVtb25IZWFsdGhWaWV3SAASOAoOc2Vzc2lvbl9oZWFsdGgYESABKAsyHi5mcm9udGVuZC52MS5TZXNzaW9uSGVhbHRoVmlld0gAEjgKEHdvcmtzcGFjZV9yb3N0ZXIYEiABKAsyHC5mcm9udGVuZC52MS5Xb3Jrc3BhY2VSb3N0ZXJIABI+ChFzaHV0ZG93bl9zY2hlZHVsZRgTIAEoCzIhLmZyb250ZW5kLnYxLlNodXRkb3duU2NoZWR1bGVWaWV3SAASPQoTZGV0YWNoZWRfd29ya19kZWx0YRgUIAEoCzIeLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0RlbHRhSAASKQoGdG9wYmFyGBUgASgLMhcuZnJvbnRlbmQudjEuVG9wYmFyVmlld0gAEjoKD3Rva2VuX2JyZWFrZG93bhgWIAEoCzIfLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duVmlld0gAEjgKDndvcmtzcGFjZV9nYXRlGBcgASgLMh4uZnJvbnRlbmQudjEuV29ya3NwYWNlR2F0ZVZpZXdIABI7ChJtZXJnZV9xdWV1ZV9yb3N0ZXIYGCABKAsyHS5mcm9udGVuZC52MS5NZXJnZVF1ZXVlUm9zdGVySAASOgoPcmVzdGFydF9wZW5kaW5nGBkgASgLMh8uZnJvbnRlbmQudjEuUmVzdGFydFBlbmRpbmdWaWV3SAASLAoKdHlwaW5nX2N1dBgbIAEoCzIWLmZyb250ZW5kLnYxLlR5cGluZ0N1dEgAEkkKGWNvbnZlcnNhdGlvbl9oaXN0b3J5X3BhZ2UYHCABKAsyJC5mcm9udGVuZC52MS5Db252ZXJzYXRpb25IaXN0b3J5UGFnZUgAQgcKBWZyYW1lSgQICBAJSgQIGhAbUg9kZWdyYWRlZF9ub3RpY2VSEmFzeW5jX2J1YmJsZV9kZWx0YVIRY29udmVyc2F0aW9uX3BhZ2UiuwYKDVN0YXRlU25hcHNob3QSLwoKd29ya3NwYWNlcxgBIAMoCzIbLmZyb250ZW5kLnYxLldvcmtzcGFjZVN0YXRlEioKCHNlc3Npb25zGAIgAygLMhguZnJvbnRlbmQudjEuU2Vzc2lvblZpZXcSKgoIY2F0YWxvZ3MYAyADKAsyGC5mcm9udGVuZC52MS5UYXNrQ2F0YWxvZxInCgZkYWVtb24YBCABKAsyFy5mcm9udGVuZC52MS5EYWVtb25WaWV3EisKBWluaXRzGAUgAygLMhwuZnJvbnRlbmQudjEuU2Vzc2lvbkluaXRWaWV3EiYKBnF1ZXVlcxgGIAMoCzIWLmZyb250ZW5kLnYxLlF1ZXVlVmlldxIrCghwcm9ncmVzcxgHIAMoCzIZLmZyb250ZW5kLnYxLlByb2dyZXNzVmlldxI8ChN3b3Jrc3BhY2VfYXZhaWxhYmxlGAggAygLMh8uZnJvbnRlbmQudjEuV29ya3NwYWNlQXZhaWxhYmxlEi0KDGhvc3RfYWN0aW9ucxgJIAMoCzIXLmZyb250ZW5kLnYxLkhvc3RBY3Rpb24SPAoRc2h1dGRvd25fc2NoZWR1bGUYCiABKAsyIS5mcm9udGVuZC52MS5TaHV0ZG93blNjaGVkdWxlVmlldxIrCg1kZXRhY2hlZF93b3JrGAsgAygLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRIoCgd0b3BiYXJzGAwgAygLMhcuZnJvbnRlbmQudjEuVG9wYmFyVmlldxI5ChB0b2tlbl9icmVha2Rvd25zGA0gAygLMh8uZnJvbnRlbmQudjEuVG9rZW5CcmVha2Rvd25WaWV3EjcKD3dvcmtzcGFjZV9nYXRlcxgOIAMoCzIeLmZyb250ZW5kLnYxLldvcmtzcGFjZUdhdGVWaWV3EjkKEm1lcmdlX3F1ZXVlX3Jvc3RlchgPIAEoCzIdLmZyb250ZW5kLnYxLk1lcmdlUXVldWVSb3N0ZXISFwoPd29ya3NwYWNlX3RvdGFsGBAgASgFEh0KFXdvcmtzcGFjZV9iYXRjaF9pbmRleBgRIAEoBVINYXN5bmNfYnViYmxlcyLhDwoPRnJvbnRlbmRDb21tYW5kEhIKCnJlcXVlc3RfaWQYASABKAkSEQoJd29ya3NwYWNlGAIgASgJEjUKDXN1Ym1pdF9wcm9tcHQYAyABKAsyHC5mcm9udGVuZC52MS5TdWJtaXRQcm9tcHRDbWRIABIuCglpbnRlcnJ1cHQYBCABKAsyGS5mcm9udGVuZC52MS5JbnRlcnJ1cHRDbWRIABI9ChFwZXJtaXNzaW9uX2Fuc3dlchgFIAEoCzIgLmZyb250ZW5kLnYxLlBlcm1pc3Npb25BbnN3ZXJDbWRIABI5Cg9tZXJnZV93b3Jrc3BhY2UYBiABKAsyHi5mcm9udGVuZC52MS5NZXJnZVdvcmtzcGFjZUNtZEgAEjkKD2Nsb3NlX3dvcmtzcGFjZRgHIAEoCzIeLmZyb250ZW5kLnYxLkNsb3NlV29ya3NwYWNlQ21kSAASNwoOb3Blbl93b3Jrc3BhY2UYCCABKAsyHS5mcm9udGVuZC52MS5PcGVuV29ya3NwYWNlQ21kSAASKAoGcmVzeW5jGAkgASgLMhYuZnJvbnRlbmQudjEuUmVzeW5jQ21kSAASNwoOY3JlYXRlX3Nlc3Npb24YCiABKAsyHS5mcm9udGVuZC52MS5DcmVhdGVTZXNzaW9uQ21kSAASNwoOZGVsZXRlX3Nlc3Npb24YCyABKAsyHS5mcm9udGVuZC52MS5EZWxldGVTZXNzaW9uQ21kSAASLAoIc2h1dGRvd24YDCABKAsyGC5mcm9udGVuZC52MS5TaHV0ZG93bkNtZEgAEi8KCmNsaWVudF9sb2cYDSABKAsyGS5mcm9udGVuZC52MS5DbGllbnRMb2dDbWRIABIxCgtxdWV1ZV9mb3JjZRgOIAEoCzIaLmZyb250ZW5kLnYxLlF1ZXVlRm9yY2VDbWRIABIzCgxxdWV1ZV9hY2NlcHQYDyABKAsyGy5mcm9udGVuZC52MS5RdWV1ZUFjY2VwdENtZEgAEjMKDHF1ZXVlX2NhbmNlbBgQIAEoCzIbLmZyb250ZW5kLnYxLlF1ZXVlQ2FuY2VsQ21kSAASOwoQY3JlYXRlX3dvcmtzcGFjZRgSIAEoCzIfLmZyb250ZW5kLnYxLkNyZWF0ZVdvcmtzcGFjZUNtZEgAEkcKFndvcmtzcGFjZV9tYXRlcmlhbGl6ZWQYEyABKAsyJS5mcm9udGVuZC52MS5Xb3Jrc3BhY2VNYXRlcmlhbGl6ZWRDbWRIABJEChVob3N0X2FjdGlvbl9jb21wbGV0ZWQYFCABKAsyIy5mcm9udGVuZC52MS5Ib3N0QWN0aW9uQ29tcGxldGVkQ21kSAASNQoNZGFlbW9uX2hlYWx0aBgVIAEoCzIcLmZyb250ZW5kLnYxLkRhZW1vbkhlYWx0aENtZEgAEjcKDnNlc3Npb25faGVhbHRoGBYgASgLMh0uZnJvbnRlbmQudjEuU2Vzc2lvbkhlYWx0aENtZEgAEjkKD3Jlc3RhcnRfc2Vzc2lvbhgXIAEoCzIeLmZyb250ZW5kLnYxLlJlc3RhcnRTZXNzaW9uQ21kSAASLQoJc2V0X21vZGVsGBggASgLMhguZnJvbnRlbmQudjEuU2V0TW9kZWxDbWRIABJKChhwdWJsaXNoX3dvcmtzcGFjZV9yb3N0ZXIYGSABKAsyJi5mcm9udGVuZC52MS5QdWJsaXNoV29ya3NwYWNlUm9zdGVyQ21kSAASPQoRc2NoZWR1bGVfc2h1dGRvd24YGiABKAsyIC5mcm9udGVuZC52MS5TY2hlZHVsZVNodXRkb3duQ21kSAASTAoZY2FuY2VsX3NjaGVkdWxlZF9zaHV0ZG93bhgbIAEoCzInLmZyb250ZW5kLnYxLkNhbmNlbFNjaGVkdWxlZFNodXRkb3duQ21kSAASQQoTaGliZXJuYXRlX3dvcmtzcGFjZRgcIAEoCzIiLmZyb250ZW5kLnYxLkhpYmVybmF0ZVdvcmtzcGFjZUNtZEgAEjcKDnJldml2ZV9zZXNzaW9uGB0gASgLMh0uZnJvbnRlbmQudjEuUmV2aXZlU2Vzc2lvbkNtZEgAEjwKEXBhdXNlX21lcmdlX3F1ZXVlGB4gASgLMh8uZnJvbnRlbmQudjEuUGF1c2VNZXJnZVF1ZXVlQ21kSAASPgoScmVzdW1lX21lcmdlX3F1ZXVlGB8gASgLMiAuZnJvbnRlbmQudjEuUmVzdW1lTWVyZ2VRdWV1ZUNtZEgAEjEKC2V2aWN0X21lcmdlGCAgASgLMhouZnJvbnRlbmQudjEuRXZpY3RNZXJnZUNtZEgAEkIKFGFuc3dlcl9tZXJnZV9kZXF1ZXVlGCEgASgLMiIuZnJvbnRlbmQudjEuQW5zd2VyTWVyZ2VEZXF1ZXVlQ21kSAASRgoWY2FuY2VsX2RldGFjaGVkX2FnZW50cxgiIAEoCzIkLmZyb250ZW5kLnYxLkNhbmNlbERldGFjaGVkQWdlbnRzQ21kSAASLwoKZmlyc3RfcGFnZRgkIAEoCzIZLmZyb250ZW5kLnYxLkZpcnN0UGFnZUNtZEgAEi0KCW5leHRfcGFnZRglIAEoCzIYLmZyb250ZW5kLnYxLk5leHRQYWdlQ21kSABCCQoHY29tbWFuZEoECCMQJFIRY29udmVyc2F0aW9uX3BhZ2Ui3QIKCkNvbW1hbmRBY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRIKCgJvaxgCIAEoCBINCgVlcnJvchgDIAEoCRIpCgdmYWlsdXJlGAQgASgLMhguZnJvbnRlbmQudjEuRmFpbHVyZUtpbmQSMQoMZmFpbHVyZV9jYXJkGBQgASgLMhsuZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRSZWYSSQoaaW50ZXJydXB0X2NvbmZpcm1fcmVxdWlyZWQYBSABKAsyJS5mcm9udGVuZC52MS5JbnRlcnJ1cHRDb25maXJtUmVxdWlyZWQSOwoPZGV0YWNoZWRfY2FuY2VsGAggASgLMiIuZnJvbnRlbmQudjEuRGV0YWNoZWRDYW5jZWxPdXRjb21lEhYKDnNlbGVjdGVkX21vZGVsGAYgASgJEiIKGm9ic2VydmVkX2NsYXVkZV9zZXNzaW9uX2lkGAcgASgJIi4KGEludGVycnVwdENvbmZpcm1SZXF1aXJlZBISCgpsaXZlX3Rhc2tzGAEgASgDIl4KCVJlc3luY0NtZBIQCghmcm9tX3NlcRgBIAEoBBINCgVmZW5jZRgEIAEoCUoECAIQA0oECAMQBFIKc2Vzc2lvbl9pZFIYY29udHJvbGxlcl9nZW5lcmF0aW9uX2lkQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_frontend_v1_conversation_history, file_frontend_v1_errors, file_frontend_v1_failure_card, file_frontend_v1_feed, file_frontend_v1_footer, file_frontend_v1_gate_revival, file_frontend_v1_host, file_frontend_v1_lifecycle, file_frontend_v1_merge, file_frontend_v1_permission_card, file_frontend_v1_prompt_queue, file_frontend_v1_sidebar, file_frontend_v1_state, file_frontend_v1_tokens_menu, file_frontend_v1_tool_call, file_frontend_v1_topbar]);
+  fileDesc("Chdmcm9udGVuZC92MS9mcmFtZS5wcm90bxILZnJvbnRlbmQudjEioQsKDUZyb250ZW5kRnJhbWUSLgoIc25hcHNob3QYASABKAsyGi5mcm9udGVuZC52MS5TdGF0ZVNuYXBzaG90SAASNgoPd29ya3NwYWNlX3N0YXRlGAIgASgLMhsuZnJvbnRlbmQudjEuV29ya3NwYWNlU3RhdGVIABIwCgxzZXNzaW9uX3ZpZXcYAyABKAsyGC5mcm9udGVuZC52MS5TZXNzaW9uVmlld0gAEjwKEmNvbnZlcnNhdGlvbl9kZWx0YRgEIAEoCzIeLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvbkRlbHRhSAASMAoMdHlwaW5nX2RlbHRhGAUgASgLMhguZnJvbnRlbmQudjEuVHlwaW5nRGVsdGFIABIwCgx0YXNrX2NhdGFsb2cYBiABKAsyGC5mcm9udGVuZC52MS5UYXNrQ2F0YWxvZ0gAEi4KC2NvbW1hbmRfYWNrGAcgASgLMhcuZnJvbnRlbmQudjEuQ29tbWFuZEFja0gAEi4KC2RhZW1vbl92aWV3GAggASgLMhcuZnJvbnRlbmQudjEuRGFlbW9uVmlld0gAEjQKDHNlc3Npb25faW5pdBgJIAEoCzIcLmZyb250ZW5kLnYxLlNlc3Npb25Jbml0Vmlld0gAEi8KCWhlYXJ0YmVhdBgKIAEoCzIaLmZyb250ZW5kLnYxLkhlYXJ0YmVhdFZpZXdIABInCgVxdWV1ZRgLIAEoCzIWLmZyb250ZW5kLnYxLlF1ZXVlVmlld0gAEi0KCHByb2dyZXNzGAwgASgLMhkuZnJvbnRlbmQudjEuUHJvZ3Jlc3NWaWV3SAASPgoTd29ya3NwYWNlX2F2YWlsYWJsZRgNIAEoCzIfLmZyb250ZW5kLnYxLldvcmtzcGFjZUF2YWlsYWJsZUgAEi4KC2hvc3RfYWN0aW9uGA4gASgLMhcuZnJvbnRlbmQudjEuSG9zdEFjdGlvbkgAEjYKDWRhZW1vbl9oZWFsdGgYDyABKAsyHS5mcm9udGVuZC52MS5EYWVtb25IZWFsdGhWaWV3SAASOAoOc2Vzc2lvbl9oZWFsdGgYECABKAsyHi5mcm9udGVuZC52MS5TZXNzaW9uSGVhbHRoVmlld0gAEjgKEHdvcmtzcGFjZV9yb3N0ZXIYESABKAsyHC5mcm9udGVuZC52MS5Xb3Jrc3BhY2VSb3N0ZXJIABI+ChFzaHV0ZG93bl9zY2hlZHVsZRgSIAEoCzIhLmZyb250ZW5kLnYxLlNodXRkb3duU2NoZWR1bGVWaWV3SAASPQoTZGV0YWNoZWRfd29ya19kZWx0YRgTIAEoCzIeLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0RlbHRhSAASKQoGdG9wYmFyGBQgASgLMhcuZnJvbnRlbmQudjEuVG9wYmFyVmlld0gAEjoKD3Rva2VuX2JyZWFrZG93bhgVIAEoCzIfLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duVmlld0gAEjgKDndvcmtzcGFjZV9nYXRlGBYgASgLMh4uZnJvbnRlbmQudjEuV29ya3NwYWNlR2F0ZVZpZXdIABI7ChJtZXJnZV9xdWV1ZV9yb3N0ZXIYFyABKAsyHS5mcm9udGVuZC52MS5NZXJnZVF1ZXVlUm9zdGVySAASOgoPcmVzdGFydF9wZW5kaW5nGBggASgLMh8uZnJvbnRlbmQudjEuUmVzdGFydFBlbmRpbmdWaWV3SAASLAoKdHlwaW5nX2N1dBgZIAEoCzIWLmZyb250ZW5kLnYxLlR5cGluZ0N1dEgAEkkKGWNvbnZlcnNhdGlvbl9oaXN0b3J5X3BhZ2UYGiABKAsyJC5mcm9udGVuZC52MS5Db252ZXJzYXRpb25IaXN0b3J5UGFnZUgAQgcKBWZyYW1lIqwGCg1TdGF0ZVNuYXBzaG90Ei8KCndvcmtzcGFjZXMYASADKAsyGy5mcm9udGVuZC52MS5Xb3Jrc3BhY2VTdGF0ZRIqCghzZXNzaW9ucxgCIAMoCzIYLmZyb250ZW5kLnYxLlNlc3Npb25WaWV3EioKCGNhdGFsb2dzGAMgAygLMhguZnJvbnRlbmQudjEuVGFza0NhdGFsb2cSJwoGZGFlbW9uGAQgASgLMhcuZnJvbnRlbmQudjEuRGFlbW9uVmlldxIrCgVpbml0cxgFIAMoCzIcLmZyb250ZW5kLnYxLlNlc3Npb25Jbml0VmlldxImCgZxdWV1ZXMYBiADKAsyFi5mcm9udGVuZC52MS5RdWV1ZVZpZXcSKwoIcHJvZ3Jlc3MYByADKAsyGS5mcm9udGVuZC52MS5Qcm9ncmVzc1ZpZXcSPAoTd29ya3NwYWNlX2F2YWlsYWJsZRgIIAMoCzIfLmZyb250ZW5kLnYxLldvcmtzcGFjZUF2YWlsYWJsZRItCgxob3N0X2FjdGlvbnMYCSADKAsyFy5mcm9udGVuZC52MS5Ib3N0QWN0aW9uEjwKEXNodXRkb3duX3NjaGVkdWxlGAogASgLMiEuZnJvbnRlbmQudjEuU2h1dGRvd25TY2hlZHVsZVZpZXcSKwoNZGV0YWNoZWRfd29yaxgLIAMoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USKAoHdG9wYmFycxgMIAMoCzIXLmZyb250ZW5kLnYxLlRvcGJhclZpZXcSOQoQdG9rZW5fYnJlYWtkb3ducxgNIAMoCzIfLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duVmlldxI3Cg93b3Jrc3BhY2VfZ2F0ZXMYDiADKAsyHi5mcm9udGVuZC52MS5Xb3Jrc3BhY2VHYXRlVmlldxI5ChJtZXJnZV9xdWV1ZV9yb3N0ZXIYDyABKAsyHS5mcm9udGVuZC52MS5NZXJnZVF1ZXVlUm9zdGVyEhcKD3dvcmtzcGFjZV90b3RhbBgQIAEoBRIdChV3b3Jrc3BhY2VfYmF0Y2hfaW5kZXgYESABKAUiyA8KD0Zyb250ZW5kQ29tbWFuZBISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRI1Cg1zdWJtaXRfcHJvbXB0GAMgASgLMhwuZnJvbnRlbmQudjEuU3VibWl0UHJvbXB0Q21kSAASLgoJaW50ZXJydXB0GAQgASgLMhkuZnJvbnRlbmQudjEuSW50ZXJydXB0Q21kSAASPQoRcGVybWlzc2lvbl9hbnN3ZXIYBSABKAsyIC5mcm9udGVuZC52MS5QZXJtaXNzaW9uQW5zd2VyQ21kSAASOQoPbWVyZ2Vfd29ya3NwYWNlGAYgASgLMh4uZnJvbnRlbmQudjEuTWVyZ2VXb3Jrc3BhY2VDbWRIABI5Cg9jbG9zZV93b3Jrc3BhY2UYByABKAsyHi5mcm9udGVuZC52MS5DbG9zZVdvcmtzcGFjZUNtZEgAEjcKDm9wZW5fd29ya3NwYWNlGAggASgLMh0uZnJvbnRlbmQudjEuT3BlbldvcmtzcGFjZUNtZEgAEigKBnJlc3luYxgJIAEoCzIWLmZyb250ZW5kLnYxLlJlc3luY0NtZEgAEjcKDmNyZWF0ZV9zZXNzaW9uGAogASgLMh0uZnJvbnRlbmQudjEuQ3JlYXRlU2Vzc2lvbkNtZEgAEjcKDmRlbGV0ZV9zZXNzaW9uGAsgASgLMh0uZnJvbnRlbmQudjEuRGVsZXRlU2Vzc2lvbkNtZEgAEiwKCHNodXRkb3duGAwgASgLMhguZnJvbnRlbmQudjEuU2h1dGRvd25DbWRIABIvCgpjbGllbnRfbG9nGA0gASgLMhkuZnJvbnRlbmQudjEuQ2xpZW50TG9nQ21kSAASMQoLcXVldWVfZm9yY2UYDiABKAsyGi5mcm9udGVuZC52MS5RdWV1ZUZvcmNlQ21kSAASMwoMcXVldWVfYWNjZXB0GA8gASgLMhsuZnJvbnRlbmQudjEuUXVldWVBY2NlcHRDbWRIABIzCgxxdWV1ZV9jYW5jZWwYECABKAsyGy5mcm9udGVuZC52MS5RdWV1ZUNhbmNlbENtZEgAEjsKEGNyZWF0ZV93b3Jrc3BhY2UYESABKAsyHy5mcm9udGVuZC52MS5DcmVhdGVXb3Jrc3BhY2VDbWRIABJHChZ3b3Jrc3BhY2VfbWF0ZXJpYWxpemVkGBIgASgLMiUuZnJvbnRlbmQudjEuV29ya3NwYWNlTWF0ZXJpYWxpemVkQ21kSAASRAoVaG9zdF9hY3Rpb25fY29tcGxldGVkGBMgASgLMiMuZnJvbnRlbmQudjEuSG9zdEFjdGlvbkNvbXBsZXRlZENtZEgAEjUKDWRhZW1vbl9oZWFsdGgYFCABKAsyHC5mcm9udGVuZC52MS5EYWVtb25IZWFsdGhDbWRIABI3Cg5zZXNzaW9uX2hlYWx0aBgVIAEoCzIdLmZyb250ZW5kLnYxLlNlc3Npb25IZWFsdGhDbWRIABI5Cg9yZXN0YXJ0X3Nlc3Npb24YFiABKAsyHi5mcm9udGVuZC52MS5SZXN0YXJ0U2Vzc2lvbkNtZEgAEi0KCXNldF9tb2RlbBgXIAEoCzIYLmZyb250ZW5kLnYxLlNldE1vZGVsQ21kSAASSgoYcHVibGlzaF93b3Jrc3BhY2Vfcm9zdGVyGBggASgLMiYuZnJvbnRlbmQudjEuUHVibGlzaFdvcmtzcGFjZVJvc3RlckNtZEgAEj0KEXNjaGVkdWxlX3NodXRkb3duGBkgASgLMiAuZnJvbnRlbmQudjEuU2NoZWR1bGVTaHV0ZG93bkNtZEgAEkwKGWNhbmNlbF9zY2hlZHVsZWRfc2h1dGRvd24YGiABKAsyJy5mcm9udGVuZC52MS5DYW5jZWxTY2hlZHVsZWRTaHV0ZG93bkNtZEgAEkEKE2hpYmVybmF0ZV93b3Jrc3BhY2UYGyABKAsyIi5mcm9udGVuZC52MS5IaWJlcm5hdGVXb3Jrc3BhY2VDbWRIABI3Cg5yZXZpdmVfc2Vzc2lvbhgcIAEoCzIdLmZyb250ZW5kLnYxLlJldml2ZVNlc3Npb25DbWRIABI8ChFwYXVzZV9tZXJnZV9xdWV1ZRgdIAEoCzIfLmZyb250ZW5kLnYxLlBhdXNlTWVyZ2VRdWV1ZUNtZEgAEj4KEnJlc3VtZV9tZXJnZV9xdWV1ZRgeIAEoCzIgLmZyb250ZW5kLnYxLlJlc3VtZU1lcmdlUXVldWVDbWRIABIxCgtldmljdF9tZXJnZRgfIAEoCzIaLmZyb250ZW5kLnYxLkV2aWN0TWVyZ2VDbWRIABJCChRhbnN3ZXJfbWVyZ2VfZGVxdWV1ZRggIAEoCzIiLmZyb250ZW5kLnYxLkFuc3dlck1lcmdlRGVxdWV1ZUNtZEgAEkYKFmNhbmNlbF9kZXRhY2hlZF9hZ2VudHMYISABKAsyJC5mcm9udGVuZC52MS5DYW5jZWxEZXRhY2hlZEFnZW50c0NtZEgAEi8KCmZpcnN0X3BhZ2UYIiABKAsyGS5mcm9udGVuZC52MS5GaXJzdFBhZ2VDbWRIABItCgluZXh0X3BhZ2UYIyABKAsyGC5mcm9udGVuZC52MS5OZXh0UGFnZUNtZEgAQgkKB2NvbW1hbmQi3QIKCkNvbW1hbmRBY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRIKCgJvaxgCIAEoCBINCgVlcnJvchgDIAEoCRIpCgdmYWlsdXJlGAQgASgLMhguZnJvbnRlbmQudjEuRmFpbHVyZUtpbmQSMQoMZmFpbHVyZV9jYXJkGAUgASgLMhsuZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRSZWYSSQoaaW50ZXJydXB0X2NvbmZpcm1fcmVxdWlyZWQYBiABKAsyJS5mcm9udGVuZC52MS5JbnRlcnJ1cHRDb25maXJtUmVxdWlyZWQSOwoPZGV0YWNoZWRfY2FuY2VsGAcgASgLMiIuZnJvbnRlbmQudjEuRGV0YWNoZWRDYW5jZWxPdXRjb21lEhYKDnNlbGVjdGVkX21vZGVsGAggASgJEiIKGm9ic2VydmVkX2NsYXVkZV9zZXNzaW9uX2lkGAkgASgJIi4KGEludGVycnVwdENvbmZpcm1SZXF1aXJlZBISCgpsaXZlX3Rhc2tzGAEgASgDIiwKCVJlc3luY0NtZBIQCghmcm9tX3NlcRgBIAEoBBINCgVmZW5jZRgCIAEoCUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_frontend_v1_conversation_history, file_frontend_v1_errors, file_frontend_v1_failure_card, file_frontend_v1_feed, file_frontend_v1_footer, file_frontend_v1_gate_revival, file_frontend_v1_host, file_frontend_v1_lifecycle, file_frontend_v1_merge, file_frontend_v1_permission_card, file_frontend_v1_prompt_queue, file_frontend_v1_sidebar, file_frontend_v1_state, file_frontend_v1_tokens_menu, file_frontend_v1_tool_call, file_frontend_v1_topbar]);
 
 /**
+ * THE outbound frame. Exactly one arm is set per frame.
+ *
+ * THIS SURFACE IS PROTOJSON ON THE WIRE, SO A FIELD'S NAME IS ITS WIRE TOKEN.
+ * Renaming an arm is a breaking change every bit as much as renumbering one:
+ * a peer that has not shipped the new spelling simply stops seeing the frame.
+ *
  * @generated from message frontend.v1.FrontendFrame
  */
 export type FrontendFrame = Message<"frontend.v1.FrontendFrame"> & {
@@ -105,31 +111,31 @@ export type FrontendFrame = Message<"frontend.v1.FrontendFrame"> & {
     case: "commandAck";
   } | {
     /**
-     * @generated from field: frontend.v1.DaemonView daemon_view = 9;
+     * @generated from field: frontend.v1.DaemonView daemon_view = 8;
      */
     value: DaemonView;
     case: "daemonView";
   } | {
     /**
-     * @generated from field: frontend.v1.SessionInitView session_init = 10;
+     * @generated from field: frontend.v1.SessionInitView session_init = 9;
      */
     value: SessionInitView;
     case: "sessionInit";
   } | {
     /**
-     * @generated from field: frontend.v1.HeartbeatView heartbeat = 11;
+     * @generated from field: frontend.v1.HeartbeatView heartbeat = 10;
      */
     value: HeartbeatView;
     case: "heartbeat";
   } | {
     /**
-     * @generated from field: frontend.v1.QueueView queue = 12;
+     * @generated from field: frontend.v1.QueueView queue = 11;
      */
     value: QueueView;
     case: "queue";
   } | {
     /**
-     * @generated from field: frontend.v1.ProgressView progress = 13;
+     * @generated from field: frontend.v1.ProgressView progress = 12;
      */
     value: ProgressView;
     case: "progress";
@@ -139,7 +145,7 @@ export type FrontendFrame = Message<"frontend.v1.FrontendFrame"> & {
      * this only after the worktree and waiting shim are healthy; Emacs then
      * materializes its perspective and acknowledges it.
      *
-     * @generated from field: frontend.v1.WorkspaceAvailable workspace_available = 14;
+     * @generated from field: frontend.v1.WorkspaceAvailable workspace_available = 13;
      */
     value: WorkspaceAvailable;
     case: "workspaceAvailable";
@@ -147,19 +153,19 @@ export type FrontendFrame = Message<"frontend.v1.FrontendFrame"> & {
     /**
      * Host-only durable UI action sourced by the daemon-owned JSON inbox.
      *
-     * @generated from field: frontend.v1.HostAction host_action = 15;
+     * @generated from field: frontend.v1.HostAction host_action = 14;
      */
     value: HostAction;
     case: "hostAction";
   } | {
     /**
-     * @generated from field: frontend.v1.DaemonHealthView daemon_health = 16;
+     * @generated from field: frontend.v1.DaemonHealthView daemon_health = 15;
      */
     value: DaemonHealthView;
     case: "daemonHealth";
   } | {
     /**
-     * @generated from field: frontend.v1.SessionHealthView session_health = 17;
+     * @generated from field: frontend.v1.SessionHealthView session_health = 16;
      */
     value: SessionHealthView;
     case: "sessionHealth";
@@ -170,13 +176,13 @@ export type FrontendFrame = Message<"frontend.v1.FrontendFrame"> & {
      * the daemon retains the latest roster, includes it in every connect
      * snapshot, and rebroadcasts on change.
      *
-     * @generated from field: frontend.v1.WorkspaceRoster workspace_roster = 18;
+     * @generated from field: frontend.v1.WorkspaceRoster workspace_roster = 17;
      */
     value: WorkspaceRoster;
     case: "workspaceRoster";
   } | {
     /**
-     * @generated from field: frontend.v1.ShutdownScheduleView shutdown_schedule = 19;
+     * @generated from field: frontend.v1.ShutdownScheduleView shutdown_schedule = 18;
      */
     value: ShutdownScheduleView;
     case: "shutdownSchedule";
@@ -187,7 +193,7 @@ export type FrontendFrame = Message<"frontend.v1.FrontendFrame"> & {
      * messages, because a detached agent produces at its own rate and must not
      * flood the conversation that dispatched it.
      *
-     * @generated from field: frontend.v1.DetachedWorkDelta detached_work_delta = 20;
+     * @generated from field: frontend.v1.DetachedWorkDelta detached_work_delta = 19;
      */
     value: DetachedWorkDelta;
     case: "detachedWorkDelta";
@@ -196,7 +202,7 @@ export type FrontendFrame = Message<"frontend.v1.FrontendFrame"> & {
      * One workspace's topbar, fully resolved. Pushed whenever any fact the
      * topbar renders changes.
      *
-     * @generated from field: frontend.v1.TopbarView topbar = 21;
+     * @generated from field: frontend.v1.TopbarView topbar = 20;
      */
     value: TopbarView;
     case: "topbar";
@@ -205,7 +211,7 @@ export type FrontendFrame = Message<"frontend.v1.FrontendFrame"> & {
      * One workspace's token-breakdown menu, fully resolved. Pushed whenever
      * the figures change.
      *
-     * @generated from field: frontend.v1.TokenBreakdownView token_breakdown = 22;
+     * @generated from field: frontend.v1.TokenBreakdownView token_breakdown = 21;
      */
     value: TokenBreakdownView;
     case: "tokenBreakdown";
@@ -214,7 +220,7 @@ export type FrontendFrame = Message<"frontend.v1.FrontendFrame"> & {
      * One workspace's revival gate, resolved and fenced. Pushed on every gate
      * transition (hibernate, revival start, revival settle).
      *
-     * @generated from field: frontend.v1.WorkspaceGateView workspace_gate = 23;
+     * @generated from field: frontend.v1.WorkspaceGateView workspace_gate = 22;
      */
     value: WorkspaceGateView;
     case: "workspaceGate";
@@ -223,7 +229,7 @@ export type FrontendFrame = Message<"frontend.v1.FrontendFrame"> & {
      * The WHOLE merge queue, pushed complete on every queue mutation. Never a
      * delta: the roster IS the drain order.
      *
-     * @generated from field: frontend.v1.MergeQueueRoster merge_queue_roster = 24;
+     * @generated from field: frontend.v1.MergeQueueRoster merge_queue_roster = 23;
      */
     value: MergeQueueRoster;
     case: "mergeQueueRoster";
@@ -234,7 +240,7 @@ export type FrontendFrame = Message<"frontend.v1.FrontendFrame"> & {
      * deliberate bounce stops being indistinguishable from a crash; see
      * RestartPendingView for why it is an edge and never snapshot state.
      *
-     * @generated from field: frontend.v1.RestartPendingView restart_pending = 25;
+     * @generated from field: frontend.v1.RestartPendingView restart_pending = 24;
      */
     value: RestartPendingView;
     case: "restartPending";
@@ -244,21 +250,21 @@ export type FrontendFrame = Message<"frontend.v1.FrontendFrame"> & {
      * it is an EDGE and never snapshot state: a cut describes the end of one
      * preview, and a client that connects afterwards has no preview to retire.
      *
-     * @generated from field: frontend.v1.TypingCut typing_cut = 27;
+     * @generated from field: frontend.v1.TypingCut typing_cut = 25;
      */
     value: TypingCut;
     case: "typingCut";
   } | {
     /**
-     * ONE page of conversation history under the positionless contract,
-     * answering a FirstPageCmd or a NextPageCmd. A push for the same reason
-     * `conversation_page` above is one — its messages are feed content, and
-     * feed content has exactly one delivery shape in this protocol — and a
-     * DISTINCT frame from it because the two contracts answer different
-     * questions: this one's reader holds no position and echoes nothing back.
-     * See conversation-history.proto.
+     * ONE page of conversation history, and the ONLY history page on this
+     * protocol, answering a FirstPageCmd or a NextPageCmd. A PUSH rather than
+     * a response, because its messages are feed content and feed content has
+     * exactly one delivery shape here.
      *
-     * @generated from field: frontend.v1.ConversationHistoryPage conversation_history_page = 28;
+     * POSITIONLESS: its reader holds no position and echoes nothing back — the
+     * daemon holds the reader's place. See conversation-history.proto.
+     *
+     * @generated from field: frontend.v1.ConversationHistoryPage conversation_history_page = 26;
      */
     value: ConversationHistoryPage;
     case: "conversationHistoryPage";
@@ -297,7 +303,8 @@ export type StateSnapshot = Message<"frontend.v1.StateSnapshot"> & {
    * never for a workspace's identity (see SessionView). HOST SURFACE:
    * frontend.Server strips it from every GUI client, exactly as it strips the
    * host-only fields below — a rendering frontend's chrome arrives as the
-   * resolved component views (12-14) instead.
+   * resolved component views (`topbars`, `token_breakdowns`,
+   * `workspace_gates`) instead.
    *
    * @generated from field: repeated frontend.v1.SessionView sessions = 2;
    */
@@ -387,7 +394,7 @@ export type StateSnapshot = Message<"frontend.v1.StateSnapshot"> & {
   mergeQueueRoster?: MergeQueueRoster | undefined;
 
   /**
-   * THE BATCHING OF `workspaces` (1) ACROSS ONE CONNECT DELIVERY.
+   * THE BATCHING OF `workspaces` ACROSS ONE CONNECT DELIVERY.
    *
    * A connect snapshot at fleet scale carries every workspace, and the host
    * applies a workspace's state — perspective, bookkeeping, readiness latches —
@@ -438,6 +445,10 @@ export const StateSnapshotSchema: GenMessage<StateSnapshot> = /*@__PURE__*/
 
 /**
  * Frontend→daemon commands (the ONLY inbound frame).
+ *
+ * PROTOJSON ON THE WIRE, exactly as FrontendFrame is: a command arm's NAME is
+ * its wire token, so renaming one breaks every peer that has not shipped the
+ * new spelling.
  *
  * @generated from message frontend.v1.FrontendCommand
  */
@@ -541,103 +552,103 @@ export type FrontendCommand = Message<"frontend.v1.FrontendCommand"> & {
     case: "queueCancel";
   } | {
     /**
-     * @generated from field: frontend.v1.CreateWorkspaceCmd create_workspace = 18;
+     * @generated from field: frontend.v1.CreateWorkspaceCmd create_workspace = 17;
      */
     value: CreateWorkspaceCmd;
     case: "createWorkspace";
   } | {
     /**
-     * @generated from field: frontend.v1.WorkspaceMaterializedCmd workspace_materialized = 19;
+     * @generated from field: frontend.v1.WorkspaceMaterializedCmd workspace_materialized = 18;
      */
     value: WorkspaceMaterializedCmd;
     case: "workspaceMaterialized";
   } | {
     /**
-     * @generated from field: frontend.v1.HostActionCompletedCmd host_action_completed = 20;
+     * @generated from field: frontend.v1.HostActionCompletedCmd host_action_completed = 19;
      */
     value: HostActionCompletedCmd;
     case: "hostActionCompleted";
   } | {
     /**
-     * @generated from field: frontend.v1.DaemonHealthCmd daemon_health = 21;
+     * @generated from field: frontend.v1.DaemonHealthCmd daemon_health = 20;
      */
     value: DaemonHealthCmd;
     case: "daemonHealth";
   } | {
     /**
-     * @generated from field: frontend.v1.SessionHealthCmd session_health = 22;
+     * @generated from field: frontend.v1.SessionHealthCmd session_health = 21;
      */
     value: SessionHealthCmd;
     case: "sessionHealth";
   } | {
     /**
-     * @generated from field: frontend.v1.RestartSessionCmd restart_session = 23;
+     * @generated from field: frontend.v1.RestartSessionCmd restart_session = 22;
      */
     value: RestartSessionCmd;
     case: "restartSession";
   } | {
     /**
-     * @generated from field: frontend.v1.SetModelCmd set_model = 24;
+     * @generated from field: frontend.v1.SetModelCmd set_model = 23;
      */
     value: SetModelCmd;
     case: "setModel";
   } | {
     /**
-     * @generated from field: frontend.v1.PublishWorkspaceRosterCmd publish_workspace_roster = 25;
+     * @generated from field: frontend.v1.PublishWorkspaceRosterCmd publish_workspace_roster = 24;
      */
     value: PublishWorkspaceRosterCmd;
     case: "publishWorkspaceRoster";
   } | {
     /**
-     * @generated from field: frontend.v1.ScheduleShutdownCmd schedule_shutdown = 26;
+     * @generated from field: frontend.v1.ScheduleShutdownCmd schedule_shutdown = 25;
      */
     value: ScheduleShutdownCmd;
     case: "scheduleShutdown";
   } | {
     /**
-     * @generated from field: frontend.v1.CancelScheduledShutdownCmd cancel_scheduled_shutdown = 27;
+     * @generated from field: frontend.v1.CancelScheduledShutdownCmd cancel_scheduled_shutdown = 26;
      */
     value: CancelScheduledShutdownCmd;
     case: "cancelScheduledShutdown";
   } | {
     /**
-     * @generated from field: frontend.v1.HibernateWorkspaceCmd hibernate_workspace = 28;
+     * @generated from field: frontend.v1.HibernateWorkspaceCmd hibernate_workspace = 27;
      */
     value: HibernateWorkspaceCmd;
     case: "hibernateWorkspace";
   } | {
     /**
-     * @generated from field: frontend.v1.ReviveSessionCmd revive_session = 29;
+     * @generated from field: frontend.v1.ReviveSessionCmd revive_session = 28;
      */
     value: ReviveSessionCmd;
     case: "reviveSession";
   } | {
     /**
-     * @generated from field: frontend.v1.PauseMergeQueueCmd pause_merge_queue = 30;
+     * @generated from field: frontend.v1.PauseMergeQueueCmd pause_merge_queue = 29;
      */
     value: PauseMergeQueueCmd;
     case: "pauseMergeQueue";
   } | {
     /**
-     * @generated from field: frontend.v1.ResumeMergeQueueCmd resume_merge_queue = 31;
+     * @generated from field: frontend.v1.ResumeMergeQueueCmd resume_merge_queue = 30;
      */
     value: ResumeMergeQueueCmd;
     case: "resumeMergeQueue";
   } | {
     /**
-     * @generated from field: frontend.v1.EvictMergeCmd evict_merge = 32;
+     * @generated from field: frontend.v1.EvictMergeCmd evict_merge = 31;
      */
     value: EvictMergeCmd;
     case: "evictMerge";
   } | {
     /**
-     * @generated from field: frontend.v1.AnswerMergeDequeueCmd answer_merge_dequeue = 33;
+     * @generated from field: frontend.v1.AnswerMergeDequeueCmd answer_merge_dequeue = 32;
      */
     value: AnswerMergeDequeueCmd;
     case: "answerMergeDequeue";
   } | {
     /**
-     * @generated from field: frontend.v1.CancelDetachedAgentsCmd cancel_detached_agents = 34;
+     * @generated from field: frontend.v1.CancelDetachedAgentsCmd cancel_detached_agents = 33;
      */
     value: CancelDetachedAgentsCmd;
     case: "cancelDetachedAgents";
@@ -649,13 +660,13 @@ export type FrontendCommand = Message<"frontend.v1.FrontendCommand"> & {
      * established one is refused rather than silently served the tail. They do
      * not replace `resync` above — see conversation-history.proto.
      *
-     * @generated from field: frontend.v1.FirstPageCmd first_page = 36;
+     * @generated from field: frontend.v1.FirstPageCmd first_page = 34;
      */
     value: FirstPageCmd;
     case: "firstPage";
   } | {
     /**
-     * @generated from field: frontend.v1.NextPageCmd next_page = 37;
+     * @generated from field: frontend.v1.NextPageCmd next_page = 35;
      */
     value: NextPageCmd;
     case: "nextPage";
@@ -707,7 +718,7 @@ export type CommandAck = Message<"frontend.v1.CommandAck"> & {
    * The feed card this refusal was filed under, when it produced one, so the
    * client can offer to reveal it instead of restating the account inline.
    *
-   * @generated from field: frontend.v1.FailureCardRef failure_card = 20;
+   * @generated from field: frontend.v1.FailureCardRef failure_card = 5;
    */
   failureCard?: FailureCardRef | undefined;
 
@@ -718,7 +729,7 @@ export type CommandAck = Message<"frontend.v1.CommandAck"> & {
    * explicit yes. Set with ok=false and `failure` unset; the client asks the
    * user and resends InterruptCmd{confirm_agents: true}.
    *
-   * @generated from field: frontend.v1.InterruptConfirmRequired interrupt_confirm_required = 5;
+   * @generated from field: frontend.v1.InterruptConfirmRequired interrupt_confirm_required = 6;
    */
   interruptConfirmRequired?: InterruptConfirmRequired | undefined;
 
@@ -728,7 +739,7 @@ export type CommandAck = Message<"frontend.v1.CommandAck"> & {
    * refusal (`nothing_running` / `unsupported` alongside ok=false), so a
    * client never has to read a refusal's meaning out of `error` text.
    *
-   * @generated from field: frontend.v1.DetachedCancelOutcome detached_cancel = 8;
+   * @generated from field: frontend.v1.DetachedCancelOutcome detached_cancel = 7;
    */
   detachedCancel?: DetachedCancelOutcome | undefined;
 
@@ -737,7 +748,7 @@ export type CommandAck = Message<"frontend.v1.CommandAck"> & {
    * both success and rejection, so a frontend never needs an optimistic model
    * state or a local recovery guess.
    *
-   * @generated from field: string selected_model = 6;
+   * @generated from field: string selected_model = 8;
    */
   selectedModel: string;
 
@@ -759,7 +770,7 @@ export type CommandAck = Message<"frontend.v1.CommandAck"> & {
    * matters: the Emacs frontend has no persistence path that can reach a
    * vendor uuid, and a test asserts its state file never contains one.
    *
-   * @generated from field: string observed_claude_session_id = 7;
+   * @generated from field: string observed_claude_session_id = 9;
    */
   observedClaudeSessionId: string;
 };
@@ -793,6 +804,14 @@ export const InterruptConfirmRequiredSchema: GenMessage<InterruptConfirmRequired
   messageDesc(file_frontend_v1_frame, 4);
 
 /**
+ * A replay request carries ONE token of identity, not several.
+ *
+ * The client says where it had read up to and which fence it held when it
+ * decided to ask. It never copies, holds or agrees a session identity or a
+ * controller generation: several identities a client must send back in
+ * agreement is several ways for a client to send back a disagreement, and the
+ * fence already answers the only question they were ever asked together.
+ *
  * @generated from message frontend.v1.ResyncCmd
  */
 export type ResyncCmd = Message<"frontend.v1.ResyncCmd"> & {
@@ -812,7 +831,7 @@ export type ResyncCmd = Message<"frontend.v1.ResyncCmd"> & {
    * it against the workspace's live fence and REFUSES the command before
    * replaying anything when they differ.
    *
-   * @generated from field: string fence = 4;
+   * @generated from field: string fence = 2;
    */
   fence: string;
 };

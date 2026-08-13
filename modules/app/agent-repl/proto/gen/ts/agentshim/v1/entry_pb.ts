@@ -62,7 +62,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/v1/entry.proto.
  */
 export const file_agentshim_v1_entry: GenFile = /*@__PURE__*/
-  fileDesc("ChhhZ2VudHNoaW0vdjEvZW50cnkucHJvdG8SDGFnZW50c2hpbS52MSJkCgVFbnRyeRItCghpbnRlcm5hbBgBIAEoCzIbLmFnZW50c2hpbS52MS5JbnRlcm5hbEVudHJ5EiwKCGV4dGVybmFsGAIgASgLMhoucHJvdG9jb2wudjEuRXh0ZXJuYWxFbnRyeSKzAgoNSW50ZXJuYWxFbnRyeRIiCgVwbGFuZRgBIAEoCzITLmFnZW50c2hpbS52MS5QbGFuZRIQCgh3cml0ZV9pZBgDIAEoCRIuCg1zb3VyY2VfcmVjb3JkGAQgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBI8Cg92ZW5kb3Jfc3BlY2lmaWMYCiABKAsyIS5hZ2VudHNoaW0udjEuVmVuZG9yU3BlY2lmaWNFbnRyeUgAEi0KB3Vua25vd24YCyABKAsyGi5hZ2VudHNoaW0udjEuVW5rbm93bkVudHJ5SAASLwoIdW5wYXJzZWQYDCABKAsyGy5hZ2VudHNoaW0udjEuVW5wYXJzZWRFbnRyeUgAQg0KC3VuY29udmVydGVkSgQIAhADUglkZWR1cF9rZXkiZgoFUGxhbmUSKwoGc3RyZWFtGAEgASgLMhkuYWdlbnRzaGltLnYxLlBsYW5lU3RyZWFtSAASJwoEZmlsZRgCIAEoCzIXLmFnZW50c2hpbS52MS5QbGFuZUZpbGVIAEIHCgVwbGFuZSINCgtQbGFuZVN0cmVhbSILCglQbGFuZUZpbGVCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS92MTthZ2VudHNoaW12MWIGcHJvdG8z", [file_google_protobuf_struct, file_protocol_v1_external, file_agentshim_v1_unsupported]);
+  fileDesc("ChhhZ2VudHNoaW0vdjEvZW50cnkucHJvdG8SDGFnZW50c2hpbS52MSJkCgVFbnRyeRItCghpbnRlcm5hbBgBIAEoCzIbLmFnZW50c2hpbS52MS5JbnRlcm5hbEVudHJ5EiwKCGV4dGVybmFsGAIgASgLMhoucHJvdG9jb2wudjEuRXh0ZXJuYWxFbnRyeSKiAgoNSW50ZXJuYWxFbnRyeRIiCgVwbGFuZRgBIAEoCzITLmFnZW50c2hpbS52MS5QbGFuZRIQCgh3cml0ZV9pZBgCIAEoCRIuCg1zb3VyY2VfcmVjb3JkGAMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBI8Cg92ZW5kb3Jfc3BlY2lmaWMYBCABKAsyIS5hZ2VudHNoaW0udjEuVmVuZG9yU3BlY2lmaWNFbnRyeUgAEi0KB3Vua25vd24YBSABKAsyGi5hZ2VudHNoaW0udjEuVW5rbm93bkVudHJ5SAASLwoIdW5wYXJzZWQYBiABKAsyGy5hZ2VudHNoaW0udjEuVW5wYXJzZWRFbnRyeUgAQg0KC3VuY29udmVydGVkImYKBVBsYW5lEisKBnN0cmVhbRgBIAEoCzIZLmFnZW50c2hpbS52MS5QbGFuZVN0cmVhbUgAEicKBGZpbGUYAiABKAsyFy5hZ2VudHNoaW0udjEuUGxhbmVGaWxlSABCBwoFcGxhbmUiDQoLUGxhbmVTdHJlYW0iCwoJUGxhbmVGaWxlQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vdjE7YWdlbnRzaGltdjFiBnByb3RvMw", [file_google_protobuf_struct, file_protocol_v1_external, file_agentshim_v1_unsupported]);
 
 /**
  * One record as the STORE holds it: the half that may leave, and the half that
@@ -135,9 +135,8 @@ export type InternalEntry = Message<"agentshim.v1.InternalEntry"> & {
    * first handed to a store write, and never regenerated — not for a retry, not
    * for a replay after the store bounced underneath the producer.
    *
-   * A DIFFERENT JOB FROM dedup_key, and neither substitutes for the other.
-   * dedup_key collapses two producers' views of one fact; this one recognizes
-   * ONE producer's re-delivery of ONE record. A batch that reached the store
+   * THIS IS ABOUT ONE PRODUCER'S RE-DELIVERY OF ONE RECORD, not about two
+   * producers' views of one fact. A batch that reached the store
    * but whose ack was lost has to be replayed, because from the producer's side
    * an unacked batch and a never-delivered batch are indistinguishable. Without
    * this the store writes it twice; with it the replay is a no-op.
@@ -146,7 +145,7 @@ export type InternalEntry = Message<"agentshim.v1.InternalEntry"> & {
    * not replay-idempotent. The store enforces uniqueness only over non-empty
    * values.
    *
-   * @generated from field: string write_id = 3;
+   * @generated from field: string write_id = 2;
    */
   writeId: string;
 
@@ -168,7 +167,7 @@ export type InternalEntry = Message<"agentshim.v1.InternalEntry"> & {
    *
    * UNSET when the conversion was faithful. It is not a copy of every record.
    *
-   * @generated from field: google.protobuf.Struct source_record = 4;
+   * @generated from field: google.protobuf.Struct source_record = 3;
    */
   sourceRecord?: JsonObject | undefined;
 
@@ -195,7 +194,7 @@ export type InternalEntry = Message<"agentshim.v1.InternalEntry"> & {
      * vendor-agnostic feed. The follow-up is a CONVERTER, if it turns out to be
      * portable after all.
      *
-     * @generated from field: agentshim.v1.VendorSpecificEntry vendor_specific = 10;
+     * @generated from field: agentshim.v1.VendorSpecificEntry vendor_specific = 4;
      */
     value: VendorSpecificEntry;
     case: "vendorSpecific";
@@ -203,7 +202,7 @@ export type InternalEntry = Message<"agentshim.v1.InternalEntry"> & {
     /**
      * A record we PARSED but do not MODEL. The follow-up is a MODEL.
      *
-     * @generated from field: agentshim.v1.UnknownEntry unknown = 11;
+     * @generated from field: agentshim.v1.UnknownEntry unknown = 5;
      */
     value: UnknownEntry;
     case: "unknown";
@@ -211,7 +210,7 @@ export type InternalEntry = Message<"agentshim.v1.InternalEntry"> & {
     /**
      * A record we could not PARSE at all — a failure rather than a gap.
      *
-     * @generated from field: agentshim.v1.UnparsedEntry unparsed = 12;
+     * @generated from field: agentshim.v1.UnparsedEntry unparsed = 6;
      */
     value: UnparsedEntry;
     case: "unparsed";

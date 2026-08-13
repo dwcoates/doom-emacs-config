@@ -800,167 +800,167 @@ type FailureKind_ShimNotConnected struct {
 	// the account is implicated and no amount of waiting or re-authenticating
 	// helps. This side of the vocabulary resolves the workspace BLUE. ----
 	// The agent process is not connected.
-	ShimNotConnected *FailureShimNotConnected `protobuf:"bytes,10,opt,name=shim_not_connected,json=shimNotConnected,proto3,oneof"`
+	ShimNotConnected *FailureShimNotConnected `protobuf:"bytes,1,opt,name=shim_not_connected,json=shimNotConnected,proto3,oneof"`
 }
 
 type FailureKind_ShimRejected struct {
 	// The agent process received the request and refused it.
-	ShimRejected *FailureShimRejected `protobuf:"bytes,11,opt,name=shim_rejected,json=shimRejected,proto3,oneof"`
+	ShimRejected *FailureShimRejected `protobuf:"bytes,2,opt,name=shim_rejected,json=shimRejected,proto3,oneof"`
 }
 
 type FailureKind_ShimAckTimeout struct {
 	// The agent process never acknowledged the request within its window.
-	ShimAckTimeout *FailureShimAckTimeout `protobuf:"bytes,12,opt,name=shim_ack_timeout,json=shimAckTimeout,proto3,oneof"`
+	ShimAckTimeout *FailureShimAckTimeout `protobuf:"bytes,3,opt,name=shim_ack_timeout,json=shimAckTimeout,proto3,oneof"`
 }
 
 type FailureKind_ShimVersionMismatch struct {
 	// The agent process speaks a different protocol version than the daemon.
-	ShimVersionMismatch *FailureShimVersionMismatch `protobuf:"bytes,13,opt,name=shim_version_mismatch,json=shimVersionMismatch,proto3,oneof"`
+	ShimVersionMismatch *FailureShimVersionMismatch `protobuf:"bytes,4,opt,name=shim_version_mismatch,json=shimVersionMismatch,proto3,oneof"`
 }
 
 type FailureKind_ShimSeqRegression struct {
 	// The agent process's event stream went backwards.
-	ShimSeqRegression *FailureShimSeqRegression `protobuf:"bytes,14,opt,name=shim_seq_regression,json=shimSeqRegression,proto3,oneof"`
+	ShimSeqRegression *FailureShimSeqRegression `protobuf:"bytes,5,opt,name=shim_seq_regression,json=shimSeqRegression,proto3,oneof"`
 }
 
 type FailureKind_ShimDegraded struct {
 	// No traffic is arriving from the agent process.
-	ShimDegraded *FailureShimDegraded `protobuf:"bytes,15,opt,name=shim_degraded,json=shimDegraded,proto3,oneof"`
+	ShimDegraded *FailureShimDegraded `protobuf:"bytes,6,opt,name=shim_degraded,json=shimDegraded,proto3,oneof"`
 }
 
 type FailureKind_ShimStoreWriteRejected struct {
 	// The agent process could not write to the store, so conversation is being dropped rather than persisted.
-	ShimStoreWriteRejected *FailureShimStoreWriteRejected `protobuf:"bytes,16,opt,name=shim_store_write_rejected,json=shimStoreWriteRejected,proto3,oneof"`
+	ShimStoreWriteRejected *FailureShimStoreWriteRejected `protobuf:"bytes,7,opt,name=shim_store_write_rejected,json=shimStoreWriteRejected,proto3,oneof"`
 }
 
 type FailureKind_QueryTermination struct {
 	// The agent sdk query ended unexpectedly — the session is alive but the thing that drives it stopped.
-	QueryTermination *FailureQueryTermination `protobuf:"bytes,17,opt,name=query_termination,json=queryTermination,proto3,oneof"`
+	QueryTermination *FailureQueryTermination `protobuf:"bytes,8,opt,name=query_termination,json=queryTermination,proto3,oneof"`
 }
 
 type FailureKind_ShimNotSpawned struct {
 	// No agent process was ever started for this workspace, so there is nothing to talk to yet.
-	ShimNotSpawned *FailureShimNotSpawned `protobuf:"bytes,18,opt,name=shim_not_spawned,json=shimNotSpawned,proto3,oneof"`
+	ShimNotSpawned *FailureShimNotSpawned `protobuf:"bytes,9,opt,name=shim_not_spawned,json=shimNotSpawned,proto3,oneof"`
 }
 
 type FailureKind_ShimHandshakeIncomplete struct {
 	// The agent process connected but never finished wiring up, so it is present without being usable.
-	ShimHandshakeIncomplete *FailureShimHandshakeIncomplete `protobuf:"bytes,19,opt,name=shim_handshake_incomplete,json=shimHandshakeIncomplete,proto3,oneof"`
+	ShimHandshakeIncomplete *FailureShimHandshakeIncomplete `protobuf:"bytes,10,opt,name=shim_handshake_incomplete,json=shimHandshakeIncomplete,proto3,oneof"`
 }
 
 type FailureKind_ShimUnhealthy struct {
 	// The agent process reported itself unhealthy — a self-diagnosis, not an inference from silence.
-	ShimUnhealthy *FailureShimUnhealthy `protobuf:"bytes,20,opt,name=shim_unhealthy,json=shimUnhealthy,proto3,oneof"`
+	ShimUnhealthy *FailureShimUnhealthy `protobuf:"bytes,11,opt,name=shim_unhealthy,json=shimUnhealthy,proto3,oneof"`
 }
 
 type FailureKind_SessionNotEstablished struct {
 	// Bring-up did not finish connecting in time.
-	SessionNotEstablished *FailureSessionNotEstablished `protobuf:"bytes,21,opt,name=session_not_established,json=sessionNotEstablished,proto3,oneof"`
+	SessionNotEstablished *FailureSessionNotEstablished `protobuf:"bytes,12,opt,name=session_not_established,json=sessionNotEstablished,proto3,oneof"`
 }
 
 type FailureKind_WorkspaceNotLive struct {
 	// The command addressed something this workspace no longer runs.
-	WorkspaceNotLive *FailureWorkspaceNotLive `protobuf:"bytes,22,opt,name=workspace_not_live,json=workspaceNotLive,proto3,oneof"`
+	WorkspaceNotLive *FailureWorkspaceNotLive `protobuf:"bytes,13,opt,name=workspace_not_live,json=workspaceNotLive,proto3,oneof"`
 }
 
 type FailureKind_SessionDeleted struct {
 	// The workspace's session was deleted deliberately.
-	SessionDeleted *FailureSessionDeleted `protobuf:"bytes,23,opt,name=session_deleted,json=sessionDeleted,proto3,oneof"`
+	SessionDeleted *FailureSessionDeleted `protobuf:"bytes,14,opt,name=session_deleted,json=sessionDeleted,proto3,oneof"`
 }
 
 type FailureKind_SessionSuperseded struct {
 	// A new session took over this workspace, so the previous one was stopped.
-	SessionSuperseded *FailureSessionSuperseded `protobuf:"bytes,24,opt,name=session_superseded,json=sessionSuperseded,proto3,oneof"`
+	SessionSuperseded *FailureSessionSuperseded `protobuf:"bytes,15,opt,name=session_superseded,json=sessionSuperseded,proto3,oneof"`
 }
 
 type FailureKind_ReconnectSuperseded struct {
 	// This view is behind: the workspace's live connection changed under it, and the replay it asked for would have come from a generation it never saw.
-	ReconnectSuperseded *FailureReconnectSuperseded `protobuf:"bytes,25,opt,name=reconnect_superseded,json=reconnectSuperseded,proto3,oneof"`
+	ReconnectSuperseded *FailureReconnectSuperseded `protobuf:"bytes,16,opt,name=reconnect_superseded,json=reconnectSuperseded,proto3,oneof"`
 }
 
 type FailureKind_SessionShimDied struct {
 	// The agent process exited.
-	SessionShimDied *FailureSessionShimDied `protobuf:"bytes,26,opt,name=session_shim_died,json=sessionShimDied,proto3,oneof"`
+	SessionShimDied *FailureSessionShimDied `protobuf:"bytes,17,opt,name=session_shim_died,json=sessionShimDied,proto3,oneof"`
 }
 
 type FailureKind_SessionStartFailed struct {
 	// The session could not be started at all.
-	SessionStartFailed *FailureSessionStartFailed `protobuf:"bytes,27,opt,name=session_start_failed,json=sessionStartFailed,proto3,oneof"`
+	SessionStartFailed *FailureSessionStartFailed `protobuf:"bytes,18,opt,name=session_start_failed,json=sessionStartFailed,proto3,oneof"`
 }
 
 type FailureKind_SessionResumeFailed struct {
 	// The vendor conversation could not be resumed without breaking continuity.
-	SessionResumeFailed *FailureSessionResumeFailed `protobuf:"bytes,28,opt,name=session_resume_failed,json=sessionResumeFailed,proto3,oneof"`
+	SessionResumeFailed *FailureSessionResumeFailed `protobuf:"bytes,19,opt,name=session_resume_failed,json=sessionResumeFailed,proto3,oneof"`
 }
 
 type FailureKind_ConversationUnresumable struct {
 	// This workspace has a vendor conversation that could not be reached, and a blank one will not be started in its place.
-	ConversationUnresumable *FailureConversationUnresumable `protobuf:"bytes,29,opt,name=conversation_unresumable,json=conversationUnresumable,proto3,oneof"`
+	ConversationUnresumable *FailureConversationUnresumable `protobuf:"bytes,20,opt,name=conversation_unresumable,json=conversationUnresumable,proto3,oneof"`
 }
 
 type FailureKind_ResumeModeRetired struct {
 	// The client asked for a resume mode the daemon no longer supports.
-	ResumeModeRetired *FailureResumeModeRetired `protobuf:"bytes,30,opt,name=resume_mode_retired,json=resumeModeRetired,proto3,oneof"`
+	ResumeModeRetired *FailureResumeModeRetired `protobuf:"bytes,21,opt,name=resume_mode_retired,json=resumeModeRetired,proto3,oneof"`
 }
 
 type FailureKind_SessionEndedUnclassified struct {
 	// The session ended for a reason the daemon could not classify.
-	SessionEndedUnclassified *FailureSessionEndedUnclassified `protobuf:"bytes,31,opt,name=session_ended_unclassified,json=sessionEndedUnclassified,proto3,oneof"`
+	SessionEndedUnclassified *FailureSessionEndedUnclassified `protobuf:"bytes,22,opt,name=session_ended_unclassified,json=sessionEndedUnclassified,proto3,oneof"`
 }
 
 type FailureKind_HistoryRepullInFlight struct {
 	// A history re-pull is already running, so a second one was refused.
-	HistoryRepullInFlight *FailureHistoryRepullInFlight `protobuf:"bytes,32,opt,name=history_repull_in_flight,json=historyRepullInFlight,proto3,oneof"`
+	HistoryRepullInFlight *FailureHistoryRepullInFlight `protobuf:"bytes,23,opt,name=history_repull_in_flight,json=historyRepullInFlight,proto3,oneof"`
 }
 
 type FailureKind_HistoryReplayTruncated struct {
 	// The history re-pull ended before it reached the live window, so what is on screen has a gap in it.
-	HistoryReplayTruncated *FailureHistoryReplayTruncated `protobuf:"bytes,33,opt,name=history_replay_truncated,json=historyReplayTruncated,proto3,oneof"`
+	HistoryReplayTruncated *FailureHistoryReplayTruncated `protobuf:"bytes,24,opt,name=history_replay_truncated,json=historyReplayTruncated,proto3,oneof"`
 }
 
 type FailureKind_InterruptUndelivered struct {
 	// The stop could not be delivered, so the turn is still running.
-	InterruptUndelivered *FailureInterruptUndelivered `protobuf:"bytes,34,opt,name=interrupt_undelivered,json=interruptUndelivered,proto3,oneof"`
+	InterruptUndelivered *FailureInterruptUndelivered `protobuf:"bytes,25,opt,name=interrupt_undelivered,json=interruptUndelivered,proto3,oneof"`
 }
 
 type FailureKind_QueueEntryUnwired struct {
 	// The queued prompt has no attached agent process yet, so it cannot run.
-	QueueEntryUnwired *FailureQueueEntryUnwired `protobuf:"bytes,35,opt,name=queue_entry_unwired,json=queueEntryUnwired,proto3,oneof"`
+	QueueEntryUnwired *FailureQueueEntryUnwired `protobuf:"bytes,26,opt,name=queue_entry_unwired,json=queueEntryUnwired,proto3,oneof"`
 }
 
 type FailureKind_QueueEntryKeepAliveHeld struct {
 	// The queued prompt is waiting on a cache keep-alive response and cannot be forced ahead of it.
-	QueueEntryKeepAliveHeld *FailureQueueEntryKeepAliveHeld `protobuf:"bytes,36,opt,name=queue_entry_keep_alive_held,json=queueEntryKeepAliveHeld,proto3,oneof"`
+	QueueEntryKeepAliveHeld *FailureQueueEntryKeepAliveHeld `protobuf:"bytes,27,opt,name=queue_entry_keep_alive_held,json=queueEntryKeepAliveHeld,proto3,oneof"`
 }
 
 type FailureKind_SessionHibernated struct {
 	// The workspace is hibernated; a revival decision is required before prompts are accepted.
-	SessionHibernated *FailureSessionHibernated `protobuf:"bytes,37,opt,name=session_hibernated,json=sessionHibernated,proto3,oneof"`
+	SessionHibernated *FailureSessionHibernated `protobuf:"bytes,28,opt,name=session_hibernated,json=sessionHibernated,proto3,oneof"`
 }
 
 type FailureKind_KeepAliveWindowUnclosed struct {
 	// A cache keep-alive window could not be closed, so new conversation is withheld until it is repaired.
-	KeepAliveWindowUnclosed *FailureKeepAliveWindowUnclosed `protobuf:"bytes,38,opt,name=keep_alive_window_unclosed,json=keepAliveWindowUnclosed,proto3,oneof"`
+	KeepAliveWindowUnclosed *FailureKeepAliveWindowUnclosed `protobuf:"bytes,29,opt,name=keep_alive_window_unclosed,json=keepAliveWindowUnclosed,proto3,oneof"`
 }
 
 type FailureKind_KeepAliveWindowInverted struct {
 	// A cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation.
-	KeepAliveWindowInverted *FailureKeepAliveWindowInverted `protobuf:"bytes,39,opt,name=keep_alive_window_inverted,json=keepAliveWindowInverted,proto3,oneof"`
+	KeepAliveWindowInverted *FailureKeepAliveWindowInverted `protobuf:"bytes,30,opt,name=keep_alive_window_inverted,json=keepAliveWindowInverted,proto3,oneof"`
 }
 
 type FailureKind_CompactionColdRead struct {
 	// A compaction re-read the whole conversation at the uncached rate instead of from the prompt cache — the exact cost compaction exists to avoid.
-	CompactionColdRead *FailureCompactionColdRead `protobuf:"bytes,40,opt,name=compaction_cold_read,json=compactionColdRead,proto3,oneof"`
+	CompactionColdRead *FailureCompactionColdRead `protobuf:"bytes,31,opt,name=compaction_cold_read,json=compactionColdRead,proto3,oneof"`
 }
 
 type FailureKind_ClientLogIdentityStale struct {
 	// A browser log record arrived against a workspace state that had already moved on, so it was not recorded.
-	ClientLogIdentityStale *FailureClientLogIdentityStale `protobuf:"bytes,41,opt,name=client_log_identity_stale,json=clientLogIdentityStale,proto3,oneof"`
+	ClientLogIdentityStale *FailureClientLogIdentityStale `protobuf:"bytes,32,opt,name=client_log_identity_stale,json=clientLogIdentityStale,proto3,oneof"`
 }
 
 type FailureKind_InternalUnclassified struct {
 	// Agent-repl's own machinery failed in a way it could not classify.
-	InternalUnclassified *FailureInternalUnclassified `protobuf:"bytes,42,opt,name=internal_unclassified,json=internalUnclassified,proto3,oneof"`
+	InternalUnclassified *FailureInternalUnclassified `protobuf:"bytes,33,opt,name=internal_unclassified,json=internalUnclassified,proto3,oneof"`
 }
 
 type FailureKind_ApiAuthenticationFailed struct {
@@ -968,108 +968,108 @@ type FailureKind_ApiAuthenticationFailed struct {
 	// work. Releasing it needs a human or the vendor, never a retry. This side
 	// of the vocabulary resolves the workspace PURPLE. ----
 	// Authentication failed.
-	ApiAuthenticationFailed *FailureApiAuthenticationFailed `protobuf:"bytes,43,opt,name=api_authentication_failed,json=apiAuthenticationFailed,proto3,oneof"`
+	ApiAuthenticationFailed *FailureApiAuthenticationFailed `protobuf:"bytes,34,opt,name=api_authentication_failed,json=apiAuthenticationFailed,proto3,oneof"`
 }
 
 type FailureKind_ApiBillingError struct {
 	// A billing problem stopped the request.
-	ApiBillingError *FailureApiBillingError `protobuf:"bytes,44,opt,name=api_billing_error,json=apiBillingError,proto3,oneof"`
+	ApiBillingError *FailureApiBillingError `protobuf:"bytes,35,opt,name=api_billing_error,json=apiBillingError,proto3,oneof"`
 }
 
 type FailureKind_ApiRateLimit struct {
 	// The account is rate limited.
-	ApiRateLimit *FailureApiRateLimit `protobuf:"bytes,45,opt,name=api_rate_limit,json=apiRateLimit,proto3,oneof"`
+	ApiRateLimit *FailureApiRateLimit `protobuf:"bytes,36,opt,name=api_rate_limit,json=apiRateLimit,proto3,oneof"`
 }
 
 type FailureKind_ApiInvalidRequest struct {
 	// The vendor rejected the request as invalid.
-	ApiInvalidRequest *FailureApiInvalidRequest `protobuf:"bytes,46,opt,name=api_invalid_request,json=apiInvalidRequest,proto3,oneof"`
+	ApiInvalidRequest *FailureApiInvalidRequest `protobuf:"bytes,37,opt,name=api_invalid_request,json=apiInvalidRequest,proto3,oneof"`
 }
 
 type FailureKind_ApiServerError struct {
 	// The vendor returned a server error.
-	ApiServerError *FailureApiServerError `protobuf:"bytes,47,opt,name=api_server_error,json=apiServerError,proto3,oneof"`
+	ApiServerError *FailureApiServerError `protobuf:"bytes,38,opt,name=api_server_error,json=apiServerError,proto3,oneof"`
 }
 
 type FailureKind_ApiOverloaded struct {
 	// The vendor is overloaded.
-	ApiOverloaded *FailureApiOverloaded `protobuf:"bytes,48,opt,name=api_overloaded,json=apiOverloaded,proto3,oneof"`
+	ApiOverloaded *FailureApiOverloaded `protobuf:"bytes,39,opt,name=api_overloaded,json=apiOverloaded,proto3,oneof"`
 }
 
 type FailureKind_ApiOauthOrgNotAllowed struct {
 	// This organization is not allowed to use the api.
-	ApiOauthOrgNotAllowed *FailureApiOAuthOrgNotAllowed `protobuf:"bytes,49,opt,name=api_oauth_org_not_allowed,json=apiOauthOrgNotAllowed,proto3,oneof"`
+	ApiOauthOrgNotAllowed *FailureApiOAuthOrgNotAllowed `protobuf:"bytes,40,opt,name=api_oauth_org_not_allowed,json=apiOauthOrgNotAllowed,proto3,oneof"`
 }
 
 type FailureKind_ApiModelNotFound struct {
 	// The requested model does not exist.
-	ApiModelNotFound *FailureApiModelNotFound `protobuf:"bytes,50,opt,name=api_model_not_found,json=apiModelNotFound,proto3,oneof"`
+	ApiModelNotFound *FailureApiModelNotFound `protobuf:"bytes,41,opt,name=api_model_not_found,json=apiModelNotFound,proto3,oneof"`
 }
 
 type FailureKind_ApiNetworkDown struct {
 	// The network never reached the vendor.
-	ApiNetworkDown *FailureApiNetworkDown `protobuf:"bytes,51,opt,name=api_network_down,json=apiNetworkDown,proto3,oneof"`
+	ApiNetworkDown *FailureApiNetworkDown `protobuf:"bytes,42,opt,name=api_network_down,json=apiNetworkDown,proto3,oneof"`
 }
 
 type FailureKind_ApiRequestFailed struct {
 	// The vendor request failed for a reason with no more specific kind.
-	ApiRequestFailed *FailureApiRequestFailed `protobuf:"bytes,52,opt,name=api_request_failed,json=apiRequestFailed,proto3,oneof"`
+	ApiRequestFailed *FailureApiRequestFailed `protobuf:"bytes,43,opt,name=api_request_failed,json=apiRequestFailed,proto3,oneof"`
 }
 
 type FailureKind_ApiUnknown struct {
 	// The vendor failed for a reason the daemon could not classify.
-	ApiUnknown *FailureApiUnknown `protobuf:"bytes,53,opt,name=api_unknown,json=apiUnknown,proto3,oneof"`
+	ApiUnknown *FailureApiUnknown `protobuf:"bytes,44,opt,name=api_unknown,json=apiUnknown,proto3,oneof"`
 }
 
 type FailureKind_ApiMaxOutputTokens struct {
 	// The response hit the output-token ceiling.
-	ApiMaxOutputTokens *FailureApiMaxOutputTokens `protobuf:"bytes,54,opt,name=api_max_output_tokens,json=apiMaxOutputTokens,proto3,oneof"`
+	ApiMaxOutputTokens *FailureApiMaxOutputTokens `protobuf:"bytes,45,opt,name=api_max_output_tokens,json=apiMaxOutputTokens,proto3,oneof"`
 }
 
 type FailureKind_ApiMaxTurns struct {
 	// The turn hit its maximum-turns limit.
-	ApiMaxTurns *FailureApiMaxTurns `protobuf:"bytes,55,opt,name=api_max_turns,json=apiMaxTurns,proto3,oneof"`
+	ApiMaxTurns *FailureApiMaxTurns `protobuf:"bytes,46,opt,name=api_max_turns,json=apiMaxTurns,proto3,oneof"`
 }
 
 type FailureKind_ApiMaxBudget struct {
 	// The turn hit its budget limit.
-	ApiMaxBudget *FailureApiMaxBudget `protobuf:"bytes,56,opt,name=api_max_budget,json=apiMaxBudget,proto3,oneof"`
+	ApiMaxBudget *FailureApiMaxBudget `protobuf:"bytes,47,opt,name=api_max_budget,json=apiMaxBudget,proto3,oneof"`
 }
 
 type FailureKind_ApiExecutionError struct {
 	// The turn aborted during execution.
-	ApiExecutionError *FailureApiExecutionError `protobuf:"bytes,57,opt,name=api_execution_error,json=apiExecutionError,proto3,oneof"`
+	ApiExecutionError *FailureApiExecutionError `protobuf:"bytes,48,opt,name=api_execution_error,json=apiExecutionError,proto3,oneof"`
 }
 
 type FailureKind_ApiRefusal struct {
 	// The model refused the request.
-	ApiRefusal *FailureApiRefusal `protobuf:"bytes,58,opt,name=api_refusal,json=apiRefusal,proto3,oneof"`
+	ApiRefusal *FailureApiRefusal `protobuf:"bytes,49,opt,name=api_refusal,json=apiRefusal,proto3,oneof"`
 }
 
 type FailureKind_ApiTurnFailed struct {
 	// The turn ended abnormally for a reason with no more specific kind.
-	ApiTurnFailed *FailureApiTurnFailed `protobuf:"bytes,59,opt,name=api_turn_failed,json=apiTurnFailed,proto3,oneof"`
+	ApiTurnFailed *FailureApiTurnFailed `protobuf:"bytes,50,opt,name=api_turn_failed,json=apiTurnFailed,proto3,oneof"`
 }
 
 type FailureKind_PromptRefusedByMergeState struct {
 	// ---- MACHINERY, continued. ----
 	// The daemon refused a user prompt because the workspace's merge machinery holds the session.
-	PromptRefusedByMergeState *FailurePromptRefusedByMergeState `protobuf:"bytes,60,opt,name=prompt_refused_by_merge_state,json=promptRefusedByMergeState,proto3,oneof"`
+	PromptRefusedByMergeState *FailurePromptRefusedByMergeState `protobuf:"bytes,51,opt,name=prompt_refused_by_merge_state,json=promptRefusedByMergeState,proto3,oneof"`
 }
 
 type FailureKind_QueueEntryUninterruptibleTurn struct {
 	// The queued prompt is waiting behind a context cut, which is never interrupted, so it cannot be forced ahead of it.
-	QueueEntryUninterruptibleTurn *FailureQueueEntryUninterruptibleTurn `protobuf:"bytes,61,opt,name=queue_entry_uninterruptible_turn,json=queueEntryUninterruptibleTurn,proto3,oneof"`
+	QueueEntryUninterruptibleTurn *FailureQueueEntryUninterruptibleTurn `protobuf:"bytes,52,opt,name=queue_entry_uninterruptible_turn,json=queueEntryUninterruptibleTurn,proto3,oneof"`
 }
 
 type FailureKind_TurnUndriven struct {
 	// A turn stood bound with nothing driving it, so the daemon closed it rather than leaving the workspace thinking forever.
-	TurnUndriven *FailureTurnUndriven `protobuf:"bytes,62,opt,name=turn_undriven,json=turnUndriven,proto3,oneof"`
+	TurnUndriven *FailureTurnUndriven `protobuf:"bytes,53,opt,name=turn_undriven,json=turnUndriven,proto3,oneof"`
 }
 
 type FailureKind_ReplayMarkRetired struct {
 	// The replay mark the client asked from counts in a store seq space the vendor session retired, so no delta above it exists and the client must re-anchor from the conversation's tail.
-	ReplayMarkRetired *FailureReplayMarkRetired `protobuf:"bytes,63,opt,name=replay_mark_retired,json=replayMarkRetired,proto3,oneof"`
+	ReplayMarkRetired *FailureReplayMarkRetired `protobuf:"bytes,54,opt,name=replay_mark_retired,json=replayMarkRetired,proto3,oneof"`
 }
 
 type FailureKind_DaemonUnreachable struct {
@@ -1077,35 +1077,35 @@ type FailureKind_DaemonUnreachable struct {
 	// mints itself. See the note on FailureKind. All resolve BLUE, because a
 	// frontend can only ever observe its own machinery failing.
 	// The daemon never sets one of these arms.
-	DaemonUnreachable *FailureDaemonUnreachable `protobuf:"bytes,100,opt,name=daemon_unreachable,json=daemonUnreachable,proto3,oneof"`
+	DaemonUnreachable *FailureDaemonUnreachable `protobuf:"bytes,55,opt,name=daemon_unreachable,json=daemonUnreachable,proto3,oneof"`
 }
 
 type FailureKind_WorkspaceGone struct {
-	WorkspaceGone *FailureWorkspaceGone `protobuf:"bytes,101,opt,name=workspace_gone,json=workspaceGone,proto3,oneof"`
+	WorkspaceGone *FailureWorkspaceGone `protobuf:"bytes,56,opt,name=workspace_gone,json=workspaceGone,proto3,oneof"`
 }
 
 type FailureKind_BootFailed struct {
-	BootFailed *FailureBootFailed `protobuf:"bytes,102,opt,name=boot_failed,json=bootFailed,proto3,oneof"`
+	BootFailed *FailureBootFailed `protobuf:"bytes,57,opt,name=boot_failed,json=bootFailed,proto3,oneof"`
 }
 
 type FailureKind_ControlPlaneFailed struct {
-	ControlPlaneFailed *FailureControlPlaneFailed `protobuf:"bytes,103,opt,name=control_plane_failed,json=controlPlaneFailed,proto3,oneof"`
+	ControlPlaneFailed *FailureControlPlaneFailed `protobuf:"bytes,58,opt,name=control_plane_failed,json=controlPlaneFailed,proto3,oneof"`
 }
 
 type FailureKind_FrameUndecodable struct {
-	FrameUndecodable *FailureFrameUndecodable `protobuf:"bytes,104,opt,name=frame_undecodable,json=frameUndecodable,proto3,oneof"`
+	FrameUndecodable *FailureFrameUndecodable `protobuf:"bytes,59,opt,name=frame_undecodable,json=frameUndecodable,proto3,oneof"`
 }
 
 type FailureKind_StaleBundle struct {
-	StaleBundle *FailureStaleBundle `protobuf:"bytes,105,opt,name=stale_bundle,json=staleBundle,proto3,oneof"`
+	StaleBundle *FailureStaleBundle `protobuf:"bytes,60,opt,name=stale_bundle,json=staleBundle,proto3,oneof"`
 }
 
 type FailureKind_CommandUnsent struct {
-	CommandUnsent *FailureCommandUnsent `protobuf:"bytes,106,opt,name=command_unsent,json=commandUnsent,proto3,oneof"`
+	CommandUnsent *FailureCommandUnsent `protobuf:"bytes,61,opt,name=command_unsent,json=commandUnsent,proto3,oneof"`
 }
 
 type FailureKind_CommandRejectionUnclassified struct {
-	CommandRejectionUnclassified *FailureCommandRejectionUnclassified `protobuf:"bytes,107,opt,name=command_rejection_unclassified,json=commandRejectionUnclassified,proto3,oneof"`
+	CommandRejectionUnclassified *FailureCommandRejectionUnclassified `protobuf:"bytes,62,opt,name=command_rejection_unclassified,json=commandRejectionUnclassified,proto3,oneof"`
 }
 
 func (*FailureKind_ShimNotConnected) isFailureKind_Kind() {}
@@ -4005,10 +4005,6 @@ func (x *FailurePromptRefusedByMergeState) GetState() string {
 	return ""
 }
 
-// The queued prompt is waiting behind a context cut, which is never
-// interrupted, so it cannot be forced ahead of it.
-//
-// Resolves the workspace BLUE.
 // A turn stood bound with nothing driving it, so the daemon closed it rather
 // than leaving the workspace thinking forever.
 //
@@ -4058,6 +4054,10 @@ func (x *FailureTurnUndriven) GetReason() string {
 	return ""
 }
 
+// The queued prompt is waiting behind a context cut, which is never
+// interrupted, so it cannot be forced ahead of it.
+//
+// Resolves the workspace BLUE.
 type FailureQueueEntryUninterruptibleTurn struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Which queued entry, so the card addresses the right row.
@@ -4547,10 +4547,15 @@ func (x *FailureCommandRejectionUnclassified) GetDaemonReason() string {
 // This message repeats the durable lifecycle record's identity and uses the
 // same typed reason messages, allowing a frontend to diagnose the termination
 // without reconstructing evidence from generic failure prose.
+//
+// THE ONLY IDENTITIES ON THIS RECORD ARE ONES A CARD CAN SHOW: the query
+// invocation that died, and the VENDOR conversation it was driving. An
+// agent-repl session identity is deliberately absent — a rendering frontend
+// has no vocabulary for one, so it could only carry it, never use it.
 type QueryTerminationFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The unique query() invocation that terminated.
-	QueryInstanceId string `protobuf:"bytes,2,opt,name=query_instance_id,json=queryInstanceId,proto3" json:"query_instance_id,omitempty"`
+	QueryInstanceId string `protobuf:"bytes,1,opt,name=query_instance_id,json=queryInstanceId,proto3" json:"query_instance_id,omitempty"`
 	// Identifies the vendor conversation when query initialization exposed it,
 	// or states explicitly that termination preceded vendor identity discovery.
 	//
@@ -4682,12 +4687,12 @@ type isQueryTerminationFailure_VendorIdentity interface {
 
 type QueryTerminationFailure_VendorSessionId struct {
 	// The non-empty authoritative Claude conversation UUID for the query.
-	VendorSessionId string `protobuf:"bytes,3,opt,name=vendor_session_id,json=vendorSessionId,proto3,oneof"`
+	VendorSessionId string `protobuf:"bytes,2,opt,name=vendor_session_id,json=vendorSessionId,proto3,oneof"`
 }
 
 type QueryTerminationFailure_VendorSessionIdentityUnavailable struct {
 	// Records that the query ended before the SDK exposed a vendor session.
-	VendorSessionIdentityUnavailable *v1.VendorSessionIdentityUnavailable `protobuf:"bytes,5,opt,name=vendor_session_identity_unavailable,json=vendorSessionIdentityUnavailable,proto3,oneof"`
+	VendorSessionIdentityUnavailable *v1.VendorSessionIdentityUnavailable `protobuf:"bytes,3,opt,name=vendor_session_identity_unavailable,json=vendorSessionIdentityUnavailable,proto3,oneof"`
 }
 
 func (*QueryTerminationFailure_VendorSessionId) isQueryTerminationFailure_VendorIdentity() {}
@@ -4701,17 +4706,17 @@ type isQueryTerminationFailure_Reason interface {
 
 type QueryTerminationFailure_UnexpectedEof struct {
 	// The SDK iterator ended without an intentional shim shutdown.
-	UnexpectedEof *v1.UnexpectedQueryEof `protobuf:"bytes,10,opt,name=unexpected_eof,json=unexpectedEof,proto3,oneof"`
+	UnexpectedEof *v1.UnexpectedQueryEof `protobuf:"bytes,5,opt,name=unexpected_eof,json=unexpectedEof,proto3,oneof"`
 }
 
 type QueryTerminationFailure_IteratorFailure struct {
 	// The SDK iterator threw an error, including its complete cause.
-	IteratorFailure *v1.QueryIteratorFailure `protobuf:"bytes,11,opt,name=iterator_failure,json=iteratorFailure,proto3,oneof"`
+	IteratorFailure *v1.QueryIteratorFailure `protobuf:"bytes,6,opt,name=iterator_failure,json=iteratorFailure,proto3,oneof"`
 }
 
 type QueryTerminationFailure_StartupFailure struct {
 	// Query initialization failed, including its complete cause.
-	StartupFailure *v1.QueryStartupFailure `protobuf:"bytes,12,opt,name=startup_failure,json=startupFailure,proto3,oneof"`
+	StartupFailure *v1.QueryStartupFailure `protobuf:"bytes,7,opt,name=startup_failure,json=startupFailure,proto3,oneof"`
 }
 
 func (*QueryTerminationFailure_UnexpectedEof) isQueryTerminationFailure_Reason() {}
@@ -4722,17 +4727,22 @@ func (*QueryTerminationFailure_StartupFailure) isQueryTerminationFailure_Reason(
 
 // Machine-readable evidence that a requested Claude conversation could not
 // be resumed without violating conversation continuity.
+//
+// It names the VENDOR conversation and nothing else, for the same reason
+// QueryTerminationFailure does: the vendor conversation is what the card
+// shows, and an agent-repl session identity is a vocabulary a rendering
+// frontend does not have.
 type SessionResumeFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The exact Claude conversation UUID that must remain authoritative.
-	ClaudeSessionId string `protobuf:"bytes,2,opt,name=claude_session_id,json=claudeSessionId,proto3" json:"claude_session_id,omitempty"`
+	ClaudeSessionId string `protobuf:"bytes,1,opt,name=claude_session_id,json=claudeSessionId,proto3" json:"claude_session_id,omitempty"`
 	// The working directory used to locate the Claude transcript.
-	Cwd string `protobuf:"bytes,3,opt,name=cwd,proto3" json:"cwd,omitempty"`
+	Cwd string `protobuf:"bytes,2,opt,name=cwd,proto3" json:"cwd,omitempty"`
 	// The configured Claude account root. Empty means the daemon's inherited
 	// Claude configuration root supplies the value.
-	ConfigDir string `protobuf:"bytes,4,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
+	ConfigDir string `protobuf:"bytes,3,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
 	// The absolute Claude configuration root used for transcript lookup.
-	ResolvedConfigDir string `protobuf:"bytes,5,opt,name=resolved_config_dir,json=resolvedConfigDir,proto3" json:"resolved_config_dir,omitempty"`
+	ResolvedConfigDir string `protobuf:"bytes,4,opt,name=resolved_config_dir,json=resolvedConfigDir,proto3" json:"resolved_config_dir,omitempty"`
 	// Identifies the operation whose continuity requirement could not be met.
 	//
 	// Types that are valid to be assigned to Attempt:
@@ -4885,12 +4895,12 @@ type isSessionResumeFailure_Attempt interface {
 
 type SessionResumeFailure_Create struct {
 	// A frontend requested a session that continues a durable conversation.
-	Create *SessionResumeFailureCreate `protobuf:"bytes,10,opt,name=create,proto3,oneof"`
+	Create *SessionResumeFailureCreate `protobuf:"bytes,5,opt,name=create,proto3,oneof"`
 }
 
 type SessionResumeFailure_AutomaticRestore struct {
 	// A durable agent-repl session required shim reconstruction.
-	AutomaticRestore *SessionResumeFailureAutomaticRestore `protobuf:"bytes,11,opt,name=automatic_restore,json=automaticRestore,proto3,oneof"`
+	AutomaticRestore *SessionResumeFailureAutomaticRestore `protobuf:"bytes,6,opt,name=automatic_restore,json=automaticRestore,proto3,oneof"`
 }
 
 func (*SessionResumeFailure_Create) isSessionResumeFailure_Attempt() {}
@@ -4903,22 +4913,22 @@ type isSessionResumeFailure_Cause interface {
 
 type SessionResumeFailure_TranscriptUnavailable struct {
 	// No readable transcript exists for the authoritative Claude UUID.
-	TranscriptUnavailable *SessionResumeFailureTranscriptUnavailable `protobuf:"bytes,20,opt,name=transcript_unavailable,json=transcriptUnavailable,proto3,oneof"`
+	TranscriptUnavailable *SessionResumeFailureTranscriptUnavailable `protobuf:"bytes,7,opt,name=transcript_unavailable,json=transcriptUnavailable,proto3,oneof"`
 }
 
 type SessionResumeFailure_IdentityMismatch struct {
 	// A recovery attempt proposed a different Claude UUID or a fresh session.
-	IdentityMismatch *SessionResumeFailureIdentityMismatch `protobuf:"bytes,21,opt,name=identity_mismatch,json=identityMismatch,proto3,oneof"`
+	IdentityMismatch *SessionResumeFailureIdentityMismatch `protobuf:"bytes,8,opt,name=identity_mismatch,json=identityMismatch,proto3,oneof"`
 }
 
 type SessionResumeFailure_QueryTermination struct {
 	// The exact resumed SDK query terminated before becoming driveable.
-	QueryTermination *QueryTerminationFailure `protobuf:"bytes,22,opt,name=query_termination,json=queryTermination,proto3,oneof"`
+	QueryTermination *QueryTerminationFailure `protobuf:"bytes,9,opt,name=query_termination,json=queryTermination,proto3,oneof"`
 }
 
 type SessionResumeFailure_BringUpFailure struct {
 	// Bring-up failed before exact query-termination evidence was available.
-	BringUpFailure *SessionResumeFailureBringUpFailure `protobuf:"bytes,23,opt,name=bring_up_failure,json=bringUpFailure,proto3,oneof"`
+	BringUpFailure *SessionResumeFailureBringUpFailure `protobuf:"bytes,10,opt,name=bring_up_failure,json=bringUpFailure,proto3,oneof"`
 }
 
 func (*SessionResumeFailure_TranscriptUnavailable) isSessionResumeFailure_Cause() {}
@@ -5157,72 +5167,72 @@ const file_frontend_v1_errors_proto_rawDesc = "" +
 	"\x0eapi_request_id\x18\x02 \x01(\tR\fapiRequestId\x12$\n" +
 	"\x0eapi_message_id\x18\x03 \x01(\tR\fapiMessageId\"\xc6+\n" +
 	"\vFailureKind\x12T\n" +
-	"\x12shim_not_connected\x18\n" +
-	" \x01(\v2$.frontend.v1.FailureShimNotConnectedH\x00R\x10shimNotConnected\x12G\n" +
-	"\rshim_rejected\x18\v \x01(\v2 .frontend.v1.FailureShimRejectedH\x00R\fshimRejected\x12N\n" +
-	"\x10shim_ack_timeout\x18\f \x01(\v2\".frontend.v1.FailureShimAckTimeoutH\x00R\x0eshimAckTimeout\x12]\n" +
-	"\x15shim_version_mismatch\x18\r \x01(\v2'.frontend.v1.FailureShimVersionMismatchH\x00R\x13shimVersionMismatch\x12W\n" +
-	"\x13shim_seq_regression\x18\x0e \x01(\v2%.frontend.v1.FailureShimSeqRegressionH\x00R\x11shimSeqRegression\x12G\n" +
-	"\rshim_degraded\x18\x0f \x01(\v2 .frontend.v1.FailureShimDegradedH\x00R\fshimDegraded\x12g\n" +
-	"\x19shim_store_write_rejected\x18\x10 \x01(\v2*.frontend.v1.FailureShimStoreWriteRejectedH\x00R\x16shimStoreWriteRejected\x12S\n" +
-	"\x11query_termination\x18\x11 \x01(\v2$.frontend.v1.FailureQueryTerminationH\x00R\x10queryTermination\x12N\n" +
-	"\x10shim_not_spawned\x18\x12 \x01(\v2\".frontend.v1.FailureShimNotSpawnedH\x00R\x0eshimNotSpawned\x12i\n" +
-	"\x19shim_handshake_incomplete\x18\x13 \x01(\v2+.frontend.v1.FailureShimHandshakeIncompleteH\x00R\x17shimHandshakeIncomplete\x12J\n" +
-	"\x0eshim_unhealthy\x18\x14 \x01(\v2!.frontend.v1.FailureShimUnhealthyH\x00R\rshimUnhealthy\x12c\n" +
-	"\x17session_not_established\x18\x15 \x01(\v2).frontend.v1.FailureSessionNotEstablishedH\x00R\x15sessionNotEstablished\x12T\n" +
-	"\x12workspace_not_live\x18\x16 \x01(\v2$.frontend.v1.FailureWorkspaceNotLiveH\x00R\x10workspaceNotLive\x12M\n" +
-	"\x0fsession_deleted\x18\x17 \x01(\v2\".frontend.v1.FailureSessionDeletedH\x00R\x0esessionDeleted\x12V\n" +
-	"\x12session_superseded\x18\x18 \x01(\v2%.frontend.v1.FailureSessionSupersededH\x00R\x11sessionSuperseded\x12\\\n" +
-	"\x14reconnect_superseded\x18\x19 \x01(\v2'.frontend.v1.FailureReconnectSupersededH\x00R\x13reconnectSuperseded\x12Q\n" +
-	"\x11session_shim_died\x18\x1a \x01(\v2#.frontend.v1.FailureSessionShimDiedH\x00R\x0fsessionShimDied\x12Z\n" +
-	"\x14session_start_failed\x18\x1b \x01(\v2&.frontend.v1.FailureSessionStartFailedH\x00R\x12sessionStartFailed\x12]\n" +
-	"\x15session_resume_failed\x18\x1c \x01(\v2'.frontend.v1.FailureSessionResumeFailedH\x00R\x13sessionResumeFailed\x12h\n" +
-	"\x18conversation_unresumable\x18\x1d \x01(\v2+.frontend.v1.FailureConversationUnresumableH\x00R\x17conversationUnresumable\x12W\n" +
-	"\x13resume_mode_retired\x18\x1e \x01(\v2%.frontend.v1.FailureResumeModeRetiredH\x00R\x11resumeModeRetired\x12l\n" +
-	"\x1asession_ended_unclassified\x18\x1f \x01(\v2,.frontend.v1.FailureSessionEndedUnclassifiedH\x00R\x18sessionEndedUnclassified\x12d\n" +
-	"\x18history_repull_in_flight\x18  \x01(\v2).frontend.v1.FailureHistoryRepullInFlightH\x00R\x15historyRepullInFlight\x12f\n" +
-	"\x18history_replay_truncated\x18! \x01(\v2*.frontend.v1.FailureHistoryReplayTruncatedH\x00R\x16historyReplayTruncated\x12_\n" +
-	"\x15interrupt_undelivered\x18\" \x01(\v2(.frontend.v1.FailureInterruptUndeliveredH\x00R\x14interruptUndelivered\x12W\n" +
-	"\x13queue_entry_unwired\x18# \x01(\v2%.frontend.v1.FailureQueueEntryUnwiredH\x00R\x11queueEntryUnwired\x12k\n" +
-	"\x1bqueue_entry_keep_alive_held\x18$ \x01(\v2+.frontend.v1.FailureQueueEntryKeepAliveHeldH\x00R\x17queueEntryKeepAliveHeld\x12V\n" +
-	"\x12session_hibernated\x18% \x01(\v2%.frontend.v1.FailureSessionHibernatedH\x00R\x11sessionHibernated\x12j\n" +
-	"\x1akeep_alive_window_unclosed\x18& \x01(\v2+.frontend.v1.FailureKeepAliveWindowUnclosedH\x00R\x17keepAliveWindowUnclosed\x12j\n" +
-	"\x1akeep_alive_window_inverted\x18' \x01(\v2+.frontend.v1.FailureKeepAliveWindowInvertedH\x00R\x17keepAliveWindowInverted\x12Z\n" +
-	"\x14compaction_cold_read\x18( \x01(\v2&.frontend.v1.FailureCompactionColdReadH\x00R\x12compactionColdRead\x12g\n" +
-	"\x19client_log_identity_stale\x18) \x01(\v2*.frontend.v1.FailureClientLogIdentityStaleH\x00R\x16clientLogIdentityStale\x12_\n" +
-	"\x15internal_unclassified\x18* \x01(\v2(.frontend.v1.FailureInternalUnclassifiedH\x00R\x14internalUnclassified\x12i\n" +
-	"\x19api_authentication_failed\x18+ \x01(\v2+.frontend.v1.FailureApiAuthenticationFailedH\x00R\x17apiAuthenticationFailed\x12Q\n" +
-	"\x11api_billing_error\x18, \x01(\v2#.frontend.v1.FailureApiBillingErrorH\x00R\x0fapiBillingError\x12H\n" +
-	"\x0eapi_rate_limit\x18- \x01(\v2 .frontend.v1.FailureApiRateLimitH\x00R\fapiRateLimit\x12W\n" +
-	"\x13api_invalid_request\x18. \x01(\v2%.frontend.v1.FailureApiInvalidRequestH\x00R\x11apiInvalidRequest\x12N\n" +
-	"\x10api_server_error\x18/ \x01(\v2\".frontend.v1.FailureApiServerErrorH\x00R\x0eapiServerError\x12J\n" +
-	"\x0eapi_overloaded\x180 \x01(\v2!.frontend.v1.FailureApiOverloadedH\x00R\rapiOverloaded\x12e\n" +
-	"\x19api_oauth_org_not_allowed\x181 \x01(\v2).frontend.v1.FailureApiOAuthOrgNotAllowedH\x00R\x15apiOauthOrgNotAllowed\x12U\n" +
-	"\x13api_model_not_found\x182 \x01(\v2$.frontend.v1.FailureApiModelNotFoundH\x00R\x10apiModelNotFound\x12N\n" +
-	"\x10api_network_down\x183 \x01(\v2\".frontend.v1.FailureApiNetworkDownH\x00R\x0eapiNetworkDown\x12T\n" +
-	"\x12api_request_failed\x184 \x01(\v2$.frontend.v1.FailureApiRequestFailedH\x00R\x10apiRequestFailed\x12A\n" +
-	"\vapi_unknown\x185 \x01(\v2\x1e.frontend.v1.FailureApiUnknownH\x00R\n" +
+	"\x12shim_not_connected\x18\x01 \x01(\v2$.frontend.v1.FailureShimNotConnectedH\x00R\x10shimNotConnected\x12G\n" +
+	"\rshim_rejected\x18\x02 \x01(\v2 .frontend.v1.FailureShimRejectedH\x00R\fshimRejected\x12N\n" +
+	"\x10shim_ack_timeout\x18\x03 \x01(\v2\".frontend.v1.FailureShimAckTimeoutH\x00R\x0eshimAckTimeout\x12]\n" +
+	"\x15shim_version_mismatch\x18\x04 \x01(\v2'.frontend.v1.FailureShimVersionMismatchH\x00R\x13shimVersionMismatch\x12W\n" +
+	"\x13shim_seq_regression\x18\x05 \x01(\v2%.frontend.v1.FailureShimSeqRegressionH\x00R\x11shimSeqRegression\x12G\n" +
+	"\rshim_degraded\x18\x06 \x01(\v2 .frontend.v1.FailureShimDegradedH\x00R\fshimDegraded\x12g\n" +
+	"\x19shim_store_write_rejected\x18\a \x01(\v2*.frontend.v1.FailureShimStoreWriteRejectedH\x00R\x16shimStoreWriteRejected\x12S\n" +
+	"\x11query_termination\x18\b \x01(\v2$.frontend.v1.FailureQueryTerminationH\x00R\x10queryTermination\x12N\n" +
+	"\x10shim_not_spawned\x18\t \x01(\v2\".frontend.v1.FailureShimNotSpawnedH\x00R\x0eshimNotSpawned\x12i\n" +
+	"\x19shim_handshake_incomplete\x18\n" +
+	" \x01(\v2+.frontend.v1.FailureShimHandshakeIncompleteH\x00R\x17shimHandshakeIncomplete\x12J\n" +
+	"\x0eshim_unhealthy\x18\v \x01(\v2!.frontend.v1.FailureShimUnhealthyH\x00R\rshimUnhealthy\x12c\n" +
+	"\x17session_not_established\x18\f \x01(\v2).frontend.v1.FailureSessionNotEstablishedH\x00R\x15sessionNotEstablished\x12T\n" +
+	"\x12workspace_not_live\x18\r \x01(\v2$.frontend.v1.FailureWorkspaceNotLiveH\x00R\x10workspaceNotLive\x12M\n" +
+	"\x0fsession_deleted\x18\x0e \x01(\v2\".frontend.v1.FailureSessionDeletedH\x00R\x0esessionDeleted\x12V\n" +
+	"\x12session_superseded\x18\x0f \x01(\v2%.frontend.v1.FailureSessionSupersededH\x00R\x11sessionSuperseded\x12\\\n" +
+	"\x14reconnect_superseded\x18\x10 \x01(\v2'.frontend.v1.FailureReconnectSupersededH\x00R\x13reconnectSuperseded\x12Q\n" +
+	"\x11session_shim_died\x18\x11 \x01(\v2#.frontend.v1.FailureSessionShimDiedH\x00R\x0fsessionShimDied\x12Z\n" +
+	"\x14session_start_failed\x18\x12 \x01(\v2&.frontend.v1.FailureSessionStartFailedH\x00R\x12sessionStartFailed\x12]\n" +
+	"\x15session_resume_failed\x18\x13 \x01(\v2'.frontend.v1.FailureSessionResumeFailedH\x00R\x13sessionResumeFailed\x12h\n" +
+	"\x18conversation_unresumable\x18\x14 \x01(\v2+.frontend.v1.FailureConversationUnresumableH\x00R\x17conversationUnresumable\x12W\n" +
+	"\x13resume_mode_retired\x18\x15 \x01(\v2%.frontend.v1.FailureResumeModeRetiredH\x00R\x11resumeModeRetired\x12l\n" +
+	"\x1asession_ended_unclassified\x18\x16 \x01(\v2,.frontend.v1.FailureSessionEndedUnclassifiedH\x00R\x18sessionEndedUnclassified\x12d\n" +
+	"\x18history_repull_in_flight\x18\x17 \x01(\v2).frontend.v1.FailureHistoryRepullInFlightH\x00R\x15historyRepullInFlight\x12f\n" +
+	"\x18history_replay_truncated\x18\x18 \x01(\v2*.frontend.v1.FailureHistoryReplayTruncatedH\x00R\x16historyReplayTruncated\x12_\n" +
+	"\x15interrupt_undelivered\x18\x19 \x01(\v2(.frontend.v1.FailureInterruptUndeliveredH\x00R\x14interruptUndelivered\x12W\n" +
+	"\x13queue_entry_unwired\x18\x1a \x01(\v2%.frontend.v1.FailureQueueEntryUnwiredH\x00R\x11queueEntryUnwired\x12k\n" +
+	"\x1bqueue_entry_keep_alive_held\x18\x1b \x01(\v2+.frontend.v1.FailureQueueEntryKeepAliveHeldH\x00R\x17queueEntryKeepAliveHeld\x12V\n" +
+	"\x12session_hibernated\x18\x1c \x01(\v2%.frontend.v1.FailureSessionHibernatedH\x00R\x11sessionHibernated\x12j\n" +
+	"\x1akeep_alive_window_unclosed\x18\x1d \x01(\v2+.frontend.v1.FailureKeepAliveWindowUnclosedH\x00R\x17keepAliveWindowUnclosed\x12j\n" +
+	"\x1akeep_alive_window_inverted\x18\x1e \x01(\v2+.frontend.v1.FailureKeepAliveWindowInvertedH\x00R\x17keepAliveWindowInverted\x12Z\n" +
+	"\x14compaction_cold_read\x18\x1f \x01(\v2&.frontend.v1.FailureCompactionColdReadH\x00R\x12compactionColdRead\x12g\n" +
+	"\x19client_log_identity_stale\x18  \x01(\v2*.frontend.v1.FailureClientLogIdentityStaleH\x00R\x16clientLogIdentityStale\x12_\n" +
+	"\x15internal_unclassified\x18! \x01(\v2(.frontend.v1.FailureInternalUnclassifiedH\x00R\x14internalUnclassified\x12i\n" +
+	"\x19api_authentication_failed\x18\" \x01(\v2+.frontend.v1.FailureApiAuthenticationFailedH\x00R\x17apiAuthenticationFailed\x12Q\n" +
+	"\x11api_billing_error\x18# \x01(\v2#.frontend.v1.FailureApiBillingErrorH\x00R\x0fapiBillingError\x12H\n" +
+	"\x0eapi_rate_limit\x18$ \x01(\v2 .frontend.v1.FailureApiRateLimitH\x00R\fapiRateLimit\x12W\n" +
+	"\x13api_invalid_request\x18% \x01(\v2%.frontend.v1.FailureApiInvalidRequestH\x00R\x11apiInvalidRequest\x12N\n" +
+	"\x10api_server_error\x18& \x01(\v2\".frontend.v1.FailureApiServerErrorH\x00R\x0eapiServerError\x12J\n" +
+	"\x0eapi_overloaded\x18' \x01(\v2!.frontend.v1.FailureApiOverloadedH\x00R\rapiOverloaded\x12e\n" +
+	"\x19api_oauth_org_not_allowed\x18( \x01(\v2).frontend.v1.FailureApiOAuthOrgNotAllowedH\x00R\x15apiOauthOrgNotAllowed\x12U\n" +
+	"\x13api_model_not_found\x18) \x01(\v2$.frontend.v1.FailureApiModelNotFoundH\x00R\x10apiModelNotFound\x12N\n" +
+	"\x10api_network_down\x18* \x01(\v2\".frontend.v1.FailureApiNetworkDownH\x00R\x0eapiNetworkDown\x12T\n" +
+	"\x12api_request_failed\x18+ \x01(\v2$.frontend.v1.FailureApiRequestFailedH\x00R\x10apiRequestFailed\x12A\n" +
+	"\vapi_unknown\x18, \x01(\v2\x1e.frontend.v1.FailureApiUnknownH\x00R\n" +
 	"apiUnknown\x12[\n" +
-	"\x15api_max_output_tokens\x186 \x01(\v2&.frontend.v1.FailureApiMaxOutputTokensH\x00R\x12apiMaxOutputTokens\x12E\n" +
-	"\rapi_max_turns\x187 \x01(\v2\x1f.frontend.v1.FailureApiMaxTurnsH\x00R\vapiMaxTurns\x12H\n" +
-	"\x0eapi_max_budget\x188 \x01(\v2 .frontend.v1.FailureApiMaxBudgetH\x00R\fapiMaxBudget\x12W\n" +
-	"\x13api_execution_error\x189 \x01(\v2%.frontend.v1.FailureApiExecutionErrorH\x00R\x11apiExecutionError\x12A\n" +
-	"\vapi_refusal\x18: \x01(\v2\x1e.frontend.v1.FailureApiRefusalH\x00R\n" +
+	"\x15api_max_output_tokens\x18- \x01(\v2&.frontend.v1.FailureApiMaxOutputTokensH\x00R\x12apiMaxOutputTokens\x12E\n" +
+	"\rapi_max_turns\x18. \x01(\v2\x1f.frontend.v1.FailureApiMaxTurnsH\x00R\vapiMaxTurns\x12H\n" +
+	"\x0eapi_max_budget\x18/ \x01(\v2 .frontend.v1.FailureApiMaxBudgetH\x00R\fapiMaxBudget\x12W\n" +
+	"\x13api_execution_error\x180 \x01(\v2%.frontend.v1.FailureApiExecutionErrorH\x00R\x11apiExecutionError\x12A\n" +
+	"\vapi_refusal\x181 \x01(\v2\x1e.frontend.v1.FailureApiRefusalH\x00R\n" +
 	"apiRefusal\x12K\n" +
-	"\x0fapi_turn_failed\x18; \x01(\v2!.frontend.v1.FailureApiTurnFailedH\x00R\rapiTurnFailed\x12q\n" +
-	"\x1dprompt_refused_by_merge_state\x18< \x01(\v2-.frontend.v1.FailurePromptRefusedByMergeStateH\x00R\x19promptRefusedByMergeState\x12|\n" +
-	" queue_entry_uninterruptible_turn\x18= \x01(\v21.frontend.v1.FailureQueueEntryUninterruptibleTurnH\x00R\x1dqueueEntryUninterruptibleTurn\x12G\n" +
-	"\rturn_undriven\x18> \x01(\v2 .frontend.v1.FailureTurnUndrivenH\x00R\fturnUndriven\x12W\n" +
-	"\x13replay_mark_retired\x18? \x01(\v2%.frontend.v1.FailureReplayMarkRetiredH\x00R\x11replayMarkRetired\x12V\n" +
-	"\x12daemon_unreachable\x18d \x01(\v2%.frontend.v1.FailureDaemonUnreachableH\x00R\x11daemonUnreachable\x12J\n" +
-	"\x0eworkspace_gone\x18e \x01(\v2!.frontend.v1.FailureWorkspaceGoneH\x00R\rworkspaceGone\x12A\n" +
-	"\vboot_failed\x18f \x01(\v2\x1e.frontend.v1.FailureBootFailedH\x00R\n" +
+	"\x0fapi_turn_failed\x182 \x01(\v2!.frontend.v1.FailureApiTurnFailedH\x00R\rapiTurnFailed\x12q\n" +
+	"\x1dprompt_refused_by_merge_state\x183 \x01(\v2-.frontend.v1.FailurePromptRefusedByMergeStateH\x00R\x19promptRefusedByMergeState\x12|\n" +
+	" queue_entry_uninterruptible_turn\x184 \x01(\v21.frontend.v1.FailureQueueEntryUninterruptibleTurnH\x00R\x1dqueueEntryUninterruptibleTurn\x12G\n" +
+	"\rturn_undriven\x185 \x01(\v2 .frontend.v1.FailureTurnUndrivenH\x00R\fturnUndriven\x12W\n" +
+	"\x13replay_mark_retired\x186 \x01(\v2%.frontend.v1.FailureReplayMarkRetiredH\x00R\x11replayMarkRetired\x12V\n" +
+	"\x12daemon_unreachable\x187 \x01(\v2%.frontend.v1.FailureDaemonUnreachableH\x00R\x11daemonUnreachable\x12J\n" +
+	"\x0eworkspace_gone\x188 \x01(\v2!.frontend.v1.FailureWorkspaceGoneH\x00R\rworkspaceGone\x12A\n" +
+	"\vboot_failed\x189 \x01(\v2\x1e.frontend.v1.FailureBootFailedH\x00R\n" +
 	"bootFailed\x12Z\n" +
-	"\x14control_plane_failed\x18g \x01(\v2&.frontend.v1.FailureControlPlaneFailedH\x00R\x12controlPlaneFailed\x12S\n" +
-	"\x11frame_undecodable\x18h \x01(\v2$.frontend.v1.FailureFrameUndecodableH\x00R\x10frameUndecodable\x12D\n" +
-	"\fstale_bundle\x18i \x01(\v2\x1f.frontend.v1.FailureStaleBundleH\x00R\vstaleBundle\x12J\n" +
-	"\x0ecommand_unsent\x18j \x01(\v2!.frontend.v1.FailureCommandUnsentH\x00R\rcommandUnsent\x12x\n" +
-	"\x1ecommand_rejection_unclassified\x18k \x01(\v20.frontend.v1.FailureCommandRejectionUnclassifiedH\x00R\x1ccommandRejectionUnclassifiedB\x06\n" +
+	"\x14control_plane_failed\x18: \x01(\v2&.frontend.v1.FailureControlPlaneFailedH\x00R\x12controlPlaneFailed\x12S\n" +
+	"\x11frame_undecodable\x18; \x01(\v2$.frontend.v1.FailureFrameUndecodableH\x00R\x10frameUndecodable\x12D\n" +
+	"\fstale_bundle\x18< \x01(\v2\x1f.frontend.v1.FailureStaleBundleH\x00R\vstaleBundle\x12J\n" +
+	"\x0ecommand_unsent\x18= \x01(\v2!.frontend.v1.FailureCommandUnsentH\x00R\rcommandUnsent\x12x\n" +
+	"\x1ecommand_rejection_unclassified\x18> \x01(\v20.frontend.v1.FailureCommandRejectionUnclassifiedH\x00R\x1ccommandRejectionUnclassifiedB\x06\n" +
 	"\x04kind\"\x19\n" +
 	"\x17FailureShimNotConnected\"L\n" +
 	"\x13FailureShimRejected\x12\x1d\n" +
@@ -5397,33 +5407,32 @@ const file_frontend_v1_errors_proto_rawDesc = "" +
 	"\acommand\x18\x01 \x01(\tR\acommand\"d\n" +
 	"#FailureCommandRejectionUnclassified\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12#\n" +
-	"\rdaemon_reason\x18\x02 \x01(\tR\fdaemonReason\"\xba\x04\n" +
+	"\rdaemon_reason\x18\x02 \x01(\tR\fdaemonReason\"\x9d\x04\n" +
 	"\x17QueryTerminationFailure\x12*\n" +
-	"\x11query_instance_id\x18\x02 \x01(\tR\x0fqueryInstanceId\x12,\n" +
-	"\x11vendor_session_id\x18\x03 \x01(\tH\x00R\x0fvendorSessionId\x12~\n" +
-	"#vendor_session_identity_unavailable\x18\x05 \x01(\v2-.protocol.v1.VendorSessionIdentityUnavailableH\x00R vendorSessionIdentityUnavailable\x12$\n" +
+	"\x11query_instance_id\x18\x01 \x01(\tR\x0fqueryInstanceId\x12,\n" +
+	"\x11vendor_session_id\x18\x02 \x01(\tH\x00R\x0fvendorSessionId\x12~\n" +
+	"#vendor_session_identity_unavailable\x18\x03 \x01(\v2-.protocol.v1.VendorSessionIdentityUnavailableH\x00R vendorSessionIdentityUnavailable\x12$\n" +
 	"\x0eobserved_at_ms\x18\x04 \x01(\x03R\fobservedAtMs\x12H\n" +
-	"\x0eunexpected_eof\x18\n" +
-	" \x01(\v2\x1f.protocol.v1.UnexpectedQueryEofH\x01R\runexpectedEof\x12N\n" +
-	"\x10iterator_failure\x18\v \x01(\v2!.protocol.v1.QueryIteratorFailureH\x01R\x0fiteratorFailure\x12K\n" +
-	"\x0fstartup_failure\x18\f \x01(\v2 .protocol.v1.QueryStartupFailureH\x01R\x0estartupFailureB\x11\n" +
+	"\x0eunexpected_eof\x18\x05 \x01(\v2\x1f.protocol.v1.UnexpectedQueryEofH\x01R\runexpectedEof\x12N\n" +
+	"\x10iterator_failure\x18\x06 \x01(\v2!.protocol.v1.QueryIteratorFailureH\x01R\x0fiteratorFailure\x12K\n" +
+	"\x0fstartup_failure\x18\a \x01(\v2 .protocol.v1.QueryStartupFailureH\x01R\x0estartupFailureB\x11\n" +
 	"\x0fvendor_identityB\b\n" +
-	"\x06reasonJ\x04\b\x01\x10\x02R\x15agent_repl_session_id\"\xfe\x05\n" +
+	"\x06reason\"\xe1\x05\n" +
 	"\x14SessionResumeFailure\x12*\n" +
-	"\x11claude_session_id\x18\x02 \x01(\tR\x0fclaudeSessionId\x12\x10\n" +
-	"\x03cwd\x18\x03 \x01(\tR\x03cwd\x12\x1d\n" +
+	"\x11claude_session_id\x18\x01 \x01(\tR\x0fclaudeSessionId\x12\x10\n" +
+	"\x03cwd\x18\x02 \x01(\tR\x03cwd\x12\x1d\n" +
 	"\n" +
-	"config_dir\x18\x04 \x01(\tR\tconfigDir\x12.\n" +
-	"\x13resolved_config_dir\x18\x05 \x01(\tR\x11resolvedConfigDir\x12A\n" +
-	"\x06create\x18\n" +
-	" \x01(\v2'.frontend.v1.SessionResumeFailureCreateH\x00R\x06create\x12`\n" +
-	"\x11automatic_restore\x18\v \x01(\v21.frontend.v1.SessionResumeFailureAutomaticRestoreH\x00R\x10automaticRestore\x12o\n" +
-	"\x16transcript_unavailable\x18\x14 \x01(\v26.frontend.v1.SessionResumeFailureTranscriptUnavailableH\x01R\x15transcriptUnavailable\x12`\n" +
-	"\x11identity_mismatch\x18\x15 \x01(\v21.frontend.v1.SessionResumeFailureIdentityMismatchH\x01R\x10identityMismatch\x12S\n" +
-	"\x11query_termination\x18\x16 \x01(\v2$.frontend.v1.QueryTerminationFailureH\x01R\x10queryTermination\x12[\n" +
-	"\x10bring_up_failure\x18\x17 \x01(\v2/.frontend.v1.SessionResumeFailureBringUpFailureH\x01R\x0ebringUpFailureB\t\n" +
+	"config_dir\x18\x03 \x01(\tR\tconfigDir\x12.\n" +
+	"\x13resolved_config_dir\x18\x04 \x01(\tR\x11resolvedConfigDir\x12A\n" +
+	"\x06create\x18\x05 \x01(\v2'.frontend.v1.SessionResumeFailureCreateH\x00R\x06create\x12`\n" +
+	"\x11automatic_restore\x18\x06 \x01(\v21.frontend.v1.SessionResumeFailureAutomaticRestoreH\x00R\x10automaticRestore\x12o\n" +
+	"\x16transcript_unavailable\x18\a \x01(\v26.frontend.v1.SessionResumeFailureTranscriptUnavailableH\x01R\x15transcriptUnavailable\x12`\n" +
+	"\x11identity_mismatch\x18\b \x01(\v21.frontend.v1.SessionResumeFailureIdentityMismatchH\x01R\x10identityMismatch\x12S\n" +
+	"\x11query_termination\x18\t \x01(\v2$.frontend.v1.QueryTerminationFailureH\x01R\x10queryTermination\x12[\n" +
+	"\x10bring_up_failure\x18\n" +
+	" \x01(\v2/.frontend.v1.SessionResumeFailureBringUpFailureH\x01R\x0ebringUpFailureB\t\n" +
 	"\aattemptB\a\n" +
-	"\x05causeJ\x04\b\x01\x10\x02R\x15agent_repl_session_id\"\x1c\n" +
+	"\x05cause\"\x1c\n" +
 	"\x1aSessionResumeFailureCreate\"&\n" +
 	"$SessionResumeFailureAutomaticRestore\"R\n" +
 	")SessionResumeFailureTranscriptUnavailable\x12%\n" +

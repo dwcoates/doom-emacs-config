@@ -55,7 +55,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/conversation-history.proto.
  */
 export const file_frontend_v1_conversation_history: GenFile = /*@__PURE__*/
-  fileDesc("CiZmcm9udGVuZC92MS9jb252ZXJzYXRpb24taGlzdG9yeS5wcm90bxILZnJvbnRlbmQudjEicAoJUGFnZVNjb3BlEioKBGZlZWQYASABKAsyGi5mcm9udGVuZC52MS5QYWdlU2NvcGVGZWVkSAASLgoGaW5zaWRlGAIgASgLMhwuZnJvbnRlbmQudjEuUGFnZVNjb3BlSW5zaWRlSABCBwoFc2NvcGUiDwoNUGFnZVNjb3BlRmVlZCIvCg9QYWdlU2NvcGVJbnNpZGUSHAoUY29udGFpbmVyX21lc3NhZ2VfaWQYASABKAkiSAoMRmlyc3RQYWdlQ21kEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgVzY29wZRgCIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZSJHCgtOZXh0UGFnZUNtZBIRCgl3b3Jrc3BhY2UYASABKAkSJQoFc2NvcGUYAiABKAsyFi5mcm9udGVuZC52MS5QYWdlU2NvcGUi2gMKF0NvbnZlcnNhdGlvbkhpc3RvcnlQYWdlEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpyZXF1ZXN0X2lkGAIgASgJEiYKCG1lc3NhZ2VzGBIgAygLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRIrCgRtb3JlGA0gASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUhhc01vcmVIABIsCgVzdGFydBgOIAEoCzIbLmZyb250ZW5kLnYxLkhpc3RvcnlBdFN0YXJ0SAASFQoNbGl2ZV9qb2luX3NlcRgPIAEoBBIlCgVzY29wZRgQIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZRIcChRhbmNlc3Rvcl9tZXNzYWdlX2lkcxgRIAMoCUIOCgxjb250aW51YXRpb25KBAgDEARKBAgEEAVKBAgFEAZKBAgGEAdKBAgHEAhKBAgIEAlKBAgJEApKBAgKEAtKBAgLEAxKBAgMEA1SCW1lc3NhZ2VfMVIJbWVzc2FnZV8yUgltZXNzYWdlXzNSCW1lc3NhZ2VfNFIJbWVzc2FnZV81UgltZXNzYWdlXzZSCW1lc3NhZ2VfN1IJbWVzc2FnZV84UgltZXNzYWdlXzlSCm1lc3NhZ2VfMTAiEAoOSGlzdG9yeUhhc01vcmUiEAoOSGlzdG9yeUF0U3RhcnRCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_frontend_v1_feed]);
+  fileDesc("CiZmcm9udGVuZC92MS9jb252ZXJzYXRpb24taGlzdG9yeS5wcm90bxILZnJvbnRlbmQudjEicAoJUGFnZVNjb3BlEioKBGZlZWQYASABKAsyGi5mcm9udGVuZC52MS5QYWdlU2NvcGVGZWVkSAASLgoGaW5zaWRlGAIgASgLMhwuZnJvbnRlbmQudjEuUGFnZVNjb3BlSW5zaWRlSABCBwoFc2NvcGUiDwoNUGFnZVNjb3BlRmVlZCIvCg9QYWdlU2NvcGVJbnNpZGUSHAoUY29udGFpbmVyX21lc3NhZ2VfaWQYASABKAkiSAoMRmlyc3RQYWdlQ21kEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgVzY29wZRgCIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZSJHCgtOZXh0UGFnZUNtZBIRCgl3b3Jrc3BhY2UYASABKAkSJQoFc2NvcGUYAiABKAsyFi5mcm9udGVuZC52MS5QYWdlU2NvcGUirwIKF0NvbnZlcnNhdGlvbkhpc3RvcnlQYWdlEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpyZXF1ZXN0X2lkGAIgASgJEiYKCG1lc3NhZ2VzGAMgAygLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRIrCgRtb3JlGAQgASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUhhc01vcmVIABIsCgVzdGFydBgFIAEoCzIbLmZyb250ZW5kLnYxLkhpc3RvcnlBdFN0YXJ0SAASFQoNbGl2ZV9qb2luX3NlcRgGIAEoBBIlCgVzY29wZRgHIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZRIcChRhbmNlc3Rvcl9tZXNzYWdlX2lkcxgIIAMoCUIOCgxjb250aW51YXRpb24iEAoOSGlzdG9yeUhhc01vcmUiEAoOSGlzdG9yeUF0U3RhcnRCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_frontend_v1_feed]);
 
 /**
  * Which container a page walks.
@@ -253,7 +253,7 @@ export type ConversationHistoryPage = Message<"frontend.v1.ConversationHistoryPa
    * code that renders a pushed one. Fewer than the daemon's ceiling means a
    * short page, which at the top of a conversation is the normal case.
    *
-   * @generated from field: repeated frontend.v1.Message messages = 18;
+   * @generated from field: repeated frontend.v1.Message messages = 3;
    */
   messages: Message$1[];
 
@@ -273,7 +273,7 @@ export type ConversationHistoryPage = Message<"frontend.v1.ConversationHistoryPa
      * it stores. The cursor that used to live here is precisely the position
      * the client no longer holds.
      *
-     * @generated from field: frontend.v1.HistoryHasMore more = 13;
+     * @generated from field: frontend.v1.HistoryHasMore more = 4;
      */
     value: HistoryHasMore;
     case: "more";
@@ -282,7 +282,7 @@ export type ConversationHistoryPage = Message<"frontend.v1.ConversationHistoryPa
      * This page reaches the conversation's beginning; the client retires its
      * load-more affordance.
      *
-     * @generated from field: frontend.v1.HistoryAtStart start = 14;
+     * @generated from field: frontend.v1.HistoryAtStart start = 5;
      */
     value: HistoryAtStart;
     case: "start";
@@ -294,7 +294,7 @@ export type ConversationHistoryPage = Message<"frontend.v1.ConversationHistoryPa
    * timing. An OUTPUT the client never echoes back — it rides no request.
    * Zero on next pages, which are history and carry no live edge.
    *
-   * @generated from field: uint64 live_join_seq = 15;
+   * @generated from field: uint64 live_join_seq = 6;
    */
   liveJoinSeq: bigint;
 
@@ -308,7 +308,7 @@ export type ConversationHistoryPage = Message<"frontend.v1.ConversationHistoryPa
    * that the page it got is the page it asked for: the echo proves what was
    * ASKED, the per-record parent proves what was RECEIVED.
    *
-   * @generated from field: frontend.v1.PageScope scope = 16;
+   * @generated from field: frontend.v1.PageScope scope = 7;
    */
   scope?: PageScope | undefined;
 
@@ -323,7 +323,7 @@ export type ConversationHistoryPage = Message<"frontend.v1.ConversationHistoryPa
    * the resolver already knew. It cannot disagree with the parent chain because
    * it is derived from that chain in the same pass.
    *
-   * @generated from field: repeated string ancestor_message_ids = 17;
+   * @generated from field: repeated string ancestor_message_ids = 8;
    */
   ancestorMessageIds: string[];
 };

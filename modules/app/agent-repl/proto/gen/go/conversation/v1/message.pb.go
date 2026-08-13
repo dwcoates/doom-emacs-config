@@ -66,7 +66,7 @@ type MessageEntry struct {
 	//
 	// Here an unresolved parent has no legal record to occupy. The producer must
 	// state which case it is, or fail.
-	Parent *MessageParent `protobuf:"bytes,5,opt,name=parent,proto3" json:"parent,omitempty"`
+	Parent *MessageParent `protobuf:"bytes,3,opt,name=parent,proto3" json:"parent,omitempty"`
 	// Who this message is FROM, resolved by the producer rather than inferred by
 	// a reader from which payload arm is set.
 	Author *MessageAuthor `protobuf:"bytes,4,opt,name=author,proto3" json:"author,omitempty"`
@@ -282,43 +282,43 @@ type isMessageEntry_Payload interface {
 
 type MessageEntry_UserSaid struct {
 	// Something a person typed. The opening of a turn.
-	UserSaid *UserSaid `protobuf:"bytes,10,opt,name=user_said,json=userSaid,proto3,oneof"`
+	UserSaid *UserSaid `protobuf:"bytes,5,opt,name=user_said,json=userSaid,proto3,oneof"`
 }
 
 type MessageEntry_AgentSaid struct {
 	// Something the agent said: its content blocks, and the usage its response
 	// reported.
-	AgentSaid *AgentSaid `protobuf:"bytes,11,opt,name=agent_said,json=agentSaid,proto3,oneof"`
+	AgentSaid *AgentSaid `protobuf:"bytes,6,opt,name=agent_said,json=agentSaid,proto3,oneof"`
 }
 
 type MessageEntry_PermissionAsked struct {
 	// A permission the agent ASKED FOR. It is a message because the agent
 	// really did ask and the user really does answer — it is a conversational
 	// act, not a dialog the daemon invented.
-	PermissionAsked *PermissionAsked `protobuf:"bytes,12,opt,name=permission_asked,json=permissionAsked,proto3,oneof"`
+	PermissionAsked *PermissionAsked `protobuf:"bytes,7,opt,name=permission_asked,json=permissionAsked,proto3,oneof"`
 }
 
 type MessageEntry_FailureRaised struct {
 	// Something went wrong, stated as a card the user reads and acts on.
-	FailureRaised *FailureRaised `protobuf:"bytes,13,opt,name=failure_raised,json=failureRaised,proto3,oneof"`
+	FailureRaised *FailureRaised `protobuf:"bytes,8,opt,name=failure_raised,json=failureRaised,proto3,oneof"`
 }
 
 type MessageEntry_ContextCut struct {
 	// The conversation was CUT here. It is a message because a reader must see
 	// where, rather than merely finding the history shorter than they left it.
-	ContextCut *ContextCut `protobuf:"bytes,14,opt,name=context_cut,json=contextCut,proto3,oneof"`
+	ContextCut *ContextCut `protobuf:"bytes,9,opt,name=context_cut,json=contextCut,proto3,oneof"`
 }
 
 type MessageEntry_DetachedWorkStarted struct {
 	// Work that DETACHED from the turn and now runs alongside it — a subagent,
 	// a background shell, a workflow. It is a feed row naming itself, so a page
 	// of ten rows is ten bounded things rather than ten trees.
-	DetachedWorkStarted *DetachedWorkStarted `protobuf:"bytes,16,opt,name=detached_work_started,json=detachedWorkStarted,proto3,oneof"`
+	DetachedWorkStarted *DetachedWorkStarted `protobuf:"bytes,10,opt,name=detached_work_started,json=detachedWorkStarted,proto3,oneof"`
 }
 
 type MessageEntry_DetachedWorkProgressed struct {
 	// Output accumulating into detached work already open.
-	DetachedWorkProgressed *DetachedWorkProgressed `protobuf:"bytes,20,opt,name=detached_work_progressed,json=detachedWorkProgressed,proto3,oneof"`
+	DetachedWorkProgressed *DetachedWorkProgressed `protobuf:"bytes,11,opt,name=detached_work_progressed,json=detachedWorkProgressed,proto3,oneof"`
 }
 
 type MessageEntry_WorkflowStepObserved struct {
@@ -327,17 +327,17 @@ type MessageEntry_WorkflowStepObserved struct {
 	// detached_work_progressed does, so it folds onto that card without
 	// correlation. Structured rather than folded into the progress string,
 	// because the producer read it structured.
-	WorkflowStepObserved *WorkflowStepObserved `protobuf:"bytes,25,opt,name=workflow_step_observed,json=workflowStepObserved,proto3,oneof"`
+	WorkflowStepObserved *WorkflowStepObserved `protobuf:"bytes,12,opt,name=workflow_step_observed,json=workflowStepObserved,proto3,oneof"`
 }
 
 type MessageEntry_DetachedWorkEnded struct {
 	// Detached work reached an end, with the outcome it reached.
-	DetachedWorkEnded *DetachedWorkEnded `protobuf:"bytes,21,opt,name=detached_work_ended,json=detachedWorkEnded,proto3,oneof"`
+	DetachedWorkEnded *DetachedWorkEnded `protobuf:"bytes,13,opt,name=detached_work_ended,json=detachedWorkEnded,proto3,oneof"`
 }
 
 type MessageEntry_PermissionAnswered struct {
 	// The user answered a permission the agent asked for.
-	PermissionAnswered *PermissionAnswered `protobuf:"bytes,22,opt,name=permission_answered,json=permissionAnswered,proto3,oneof"`
+	PermissionAnswered *PermissionAnswered `protobuf:"bytes,14,opt,name=permission_answered,json=permissionAnswered,proto3,oneof"`
 }
 
 type MessageEntry_ToolReturned struct {
@@ -348,20 +348,20 @@ type MessageEntry_ToolReturned struct {
 	// MESSAGE is from, and the message is the agent's response. The vendor
 	// files tool results under user-role records, which is the accident this
 	// arm exists to not inherit.
-	ToolReturned *ToolReturned `protobuf:"bytes,23,opt,name=tool_returned,json=toolReturned,proto3,oneof"`
+	ToolReturned *ToolReturned `protobuf:"bytes,15,opt,name=tool_returned,json=toolReturned,proto3,oneof"`
 }
 
 type MessageEntry_SkillBodyResolved struct {
 	// A skill file's contents, resolved onto the skill's own message. Replaces
 	// whole rather than appending.
-	SkillBodyResolved *SkillBodyResolved `protobuf:"bytes,24,opt,name=skill_body_resolved,json=skillBodyResolved,proto3,oneof"`
+	SkillBodyResolved *SkillBodyResolved `protobuf:"bytes,16,opt,name=skill_body_resolved,json=skillBodyResolved,proto3,oneof"`
 }
 
 type MessageEntry_ContentArriving struct {
 	// A fragment of content still arriving, handed straight to the daemon by
 	// the stream plane. The completed message the file plane writes later
 	// REPLACES the preview rather than appending beside it.
-	ContentArriving *ContentArriving `protobuf:"bytes,30,opt,name=content_arriving,json=contentArriving,proto3,oneof"`
+	ContentArriving *ContentArriving `protobuf:"bytes,17,opt,name=content_arriving,json=contentArriving,proto3,oneof"`
 }
 
 func (*MessageEntry_UserSaid) isMessageEntry_Payload() {}
@@ -797,31 +797,30 @@ var File_conversation_v1_message_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_message_proto_rawDesc = "" +
 	"\n" +
-	"\x1dconversation/v1/message.proto\x12\x0fconversation.v1\x1a\x1econversation/v1/payloads.proto\"\x99\n" +
-	"\n" +
+	"\x1dconversation/v1/message.proto\x12\x0fconversation.v1\x1a\x1econversation/v1/payloads.proto\"\xe1\t\n" +
 	"\fMessageEntry\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12/\n" +
 	"\x14top_level_message_id\x18\x02 \x01(\tR\x11topLevelMessageId\x126\n" +
-	"\x06parent\x18\x05 \x01(\v2\x1e.conversation.v1.MessageParentR\x06parent\x126\n" +
+	"\x06parent\x18\x03 \x01(\v2\x1e.conversation.v1.MessageParentR\x06parent\x126\n" +
 	"\x06author\x18\x04 \x01(\v2\x1e.conversation.v1.MessageAuthorR\x06author\x128\n" +
-	"\tuser_said\x18\n" +
-	" \x01(\v2\x19.conversation.v1.UserSaidH\x00R\buserSaid\x12;\n" +
+	"\tuser_said\x18\x05 \x01(\v2\x19.conversation.v1.UserSaidH\x00R\buserSaid\x12;\n" +
 	"\n" +
-	"agent_said\x18\v \x01(\v2\x1a.conversation.v1.AgentSaidH\x00R\tagentSaid\x12M\n" +
-	"\x10permission_asked\x18\f \x01(\v2 .conversation.v1.PermissionAskedH\x00R\x0fpermissionAsked\x12G\n" +
-	"\x0efailure_raised\x18\r \x01(\v2\x1e.conversation.v1.FailureRaisedH\x00R\rfailureRaised\x12>\n" +
-	"\vcontext_cut\x18\x0e \x01(\v2\x1b.conversation.v1.ContextCutH\x00R\n" +
+	"agent_said\x18\x06 \x01(\v2\x1a.conversation.v1.AgentSaidH\x00R\tagentSaid\x12M\n" +
+	"\x10permission_asked\x18\a \x01(\v2 .conversation.v1.PermissionAskedH\x00R\x0fpermissionAsked\x12G\n" +
+	"\x0efailure_raised\x18\b \x01(\v2\x1e.conversation.v1.FailureRaisedH\x00R\rfailureRaised\x12>\n" +
+	"\vcontext_cut\x18\t \x01(\v2\x1b.conversation.v1.ContextCutH\x00R\n" +
 	"contextCut\x12Z\n" +
-	"\x15detached_work_started\x18\x10 \x01(\v2$.conversation.v1.DetachedWorkStartedH\x00R\x13detachedWorkStarted\x12c\n" +
-	"\x18detached_work_progressed\x18\x14 \x01(\v2'.conversation.v1.DetachedWorkProgressedH\x00R\x16detachedWorkProgressed\x12]\n" +
-	"\x16workflow_step_observed\x18\x19 \x01(\v2%.conversation.v1.WorkflowStepObservedH\x00R\x14workflowStepObserved\x12T\n" +
-	"\x13detached_work_ended\x18\x15 \x01(\v2\".conversation.v1.DetachedWorkEndedH\x00R\x11detachedWorkEnded\x12V\n" +
-	"\x13permission_answered\x18\x16 \x01(\v2#.conversation.v1.PermissionAnsweredH\x00R\x12permissionAnswered\x12D\n" +
-	"\rtool_returned\x18\x17 \x01(\v2\x1d.conversation.v1.ToolReturnedH\x00R\ftoolReturned\x12T\n" +
-	"\x13skill_body_resolved\x18\x18 \x01(\v2\".conversation.v1.SkillBodyResolvedH\x00R\x11skillBodyResolved\x12M\n" +
-	"\x10content_arriving\x18\x1e \x01(\v2 .conversation.v1.ContentArrivingH\x00R\x0fcontentArrivingB\t\n" +
-	"\apayloadJ\x04\b\x03\x10\x04J\x04\b\x0f\x10\x10R\x11parent_message_idR\x17daemon_answered_command\"\x93\x01\n" +
+	"\x15detached_work_started\x18\n" +
+	" \x01(\v2$.conversation.v1.DetachedWorkStartedH\x00R\x13detachedWorkStarted\x12c\n" +
+	"\x18detached_work_progressed\x18\v \x01(\v2'.conversation.v1.DetachedWorkProgressedH\x00R\x16detachedWorkProgressed\x12]\n" +
+	"\x16workflow_step_observed\x18\f \x01(\v2%.conversation.v1.WorkflowStepObservedH\x00R\x14workflowStepObserved\x12T\n" +
+	"\x13detached_work_ended\x18\r \x01(\v2\".conversation.v1.DetachedWorkEndedH\x00R\x11detachedWorkEnded\x12V\n" +
+	"\x13permission_answered\x18\x0e \x01(\v2#.conversation.v1.PermissionAnsweredH\x00R\x12permissionAnswered\x12D\n" +
+	"\rtool_returned\x18\x0f \x01(\v2\x1d.conversation.v1.ToolReturnedH\x00R\ftoolReturned\x12T\n" +
+	"\x13skill_body_resolved\x18\x10 \x01(\v2\".conversation.v1.SkillBodyResolvedH\x00R\x11skillBodyResolved\x12M\n" +
+	"\x10content_arriving\x18\x11 \x01(\v2 .conversation.v1.ContentArrivingH\x00R\x0fcontentArrivingB\t\n" +
+	"\apayload\"\x93\x01\n" +
 	"\rMessageParent\x128\n" +
 	"\x04root\x18\x01 \x01(\v2\".conversation.v1.MessageParentRootH\x00R\x04root\x12>\n" +
 	"\x06inside\x18\x02 \x01(\v2$.conversation.v1.MessageParentInsideH\x00R\x06insideB\b\n" +
@@ -829,12 +828,12 @@ const file_conversation_v1_message_proto_rawDesc = "" +
 	"\x11MessageParentRoot\"4\n" +
 	"\x13MessageParentInside\x12\x1d\n" +
 	"\n" +
-	"message_id\x18\x01 \x01(\tR\tmessageId\"\xdf\x01\n" +
+	"message_id\x18\x01 \x01(\tR\tmessageId\"\xd1\x01\n" +
 	"\rMessageAuthor\x121\n" +
 	"\x04user\x18\x01 \x01(\v2\x1b.conversation.v1.AuthorUserH\x00R\x04user\x124\n" +
 	"\x05agent\x18\x02 \x01(\v2\x1c.conversation.v1.AuthorAgentH\x00R\x05agent\x12M\n" +
 	"\x0edetached_agent\x18\x03 \x01(\v2$.conversation.v1.AuthorDetachedAgentH\x00R\rdetachedAgentB\b\n" +
-	"\x06authorJ\x04\b\x04\x10\x05R\x06daemon\"\f\n" +
+	"\x06author\"\f\n" +
 	"\n" +
 	"AuthorUser\"\r\n" +
 	"\vAuthorAgent\"N\n" +

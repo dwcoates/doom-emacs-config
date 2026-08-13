@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/gate-revival.proto.
  */
 export const file_frontend_v1_gate_revival: GenFile = /*@__PURE__*/
-  fileDesc("Ch5mcm9udGVuZC92MS9nYXRlLXJldml2YWwucHJvdG8SC2Zyb250ZW5kLnYxItoBChFIaWJlcm5hdGlvbkRldGFpbBIQCghzaW5jZV9tcxgBIAEoAxI5CgtpZGxlX2N1dG9mZhgKIAEoCzIiLmZyb250ZW5kLnYxLkhpYmVybmF0aW9uSWRsZUN1dG9mZkgAEjAKBmZvcmNlZBgLIAEoCzIeLmZyb250ZW5kLnYxLkhpYmVybmF0aW9uRm9yY2VkSAASPQoNY2FjaGVfZXhwaXJlZBgMIAEoCzIkLmZyb250ZW5kLnYxLkhpYmVybmF0aW9uQ2FjaGVFeHBpcmVkSABCBwoFY2F1c2UiKgoVSGliZXJuYXRpb25JZGxlQ3V0b2ZmEhEKCWN1dG9mZl9tcxgBIAEoAyITChFIaWJlcm5hdGlvbkZvcmNlZCI9ChdIaWJlcm5hdGlvbkNhY2hlRXhwaXJlZBISCgplbGFwc2VkX21zGAEgASgDEg4KBnR0bF9tcxgCIAEoAyKsAQoQUmV2aXZlU2Vzc2lvbkNtZBI4Cg1jb21wYWN0X2ZpcnN0GAEgASgLMh8uZnJvbnRlbmQudjEuUmV2aXZlQ29tcGFjdEZpcnN0SAASKwoGZGlyZWN0GAIgASgLMhkuZnJvbnRlbmQudjEuUmV2aXZlRGlyZWN0SAASKQoFY2xlYXIYAyABKAsyGC5mcm9udGVuZC52MS5SZXZpdmVDbGVhckgAQgYKBG1vZGUiQQoSUmV2aXZlQ29tcGFjdEZpcnN0EisKBXNjb3BlGAEgASgOMhwuZnJvbnRlbmQudjEuQ29tcGFjdGlvblNjb3BlIg4KDFJldml2ZURpcmVjdCINCgtSZXZpdmVDbGVhciKpAQoRV29ya3NwYWNlR2F0ZVZpZXcSEQoJd29ya3NwYWNlGAEgASgJEg0KBWZlbmNlGAIgASgJEi4KBG9wZW4YCiABKAsyHi5mcm9udGVuZC52MS5Xb3Jrc3BhY2VHYXRlT3BlbkgAEjoKCmhpYmVybmF0ZWQYCyABKAsyJC5mcm9udGVuZC52MS5Xb3Jrc3BhY2VHYXRlSGliZXJuYXRlZEgAQgYKBGdhdGUiEwoRV29ya3NwYWNlR2F0ZU9wZW4iSQoXV29ya3NwYWNlR2F0ZUhpYmVybmF0ZWQSLgoGZGV0YWlsGAEgASgLMh4uZnJvbnRlbmQudjEuSGliZXJuYXRpb25EZXRhaWwqtwEKD0NvbXBhY3Rpb25TY29wZRIgChxDT01QQUNUSU9OX1NDT1BFX1VOU1BFQ0lGSUVEEAASGAoUQ09NUEFDVElPTl9TQ09QRV9BTEwQARIeChpDT01QQUNUSU9OX1NDT1BFX1JFU1BPTlNFUxACEhwKGENPTVBBQ1RJT05fU0NPUEVfUFJPTVBUUxADEioKJkNPTVBBQ1RJT05fU0NPUEVfUFJPTVBUU19BTkRfUkVTUE9OU0VTEARCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw");
+  fileDesc("Ch5mcm9udGVuZC92MS9nYXRlLXJldml2YWwucHJvdG8SC2Zyb250ZW5kLnYxItoBChFIaWJlcm5hdGlvbkRldGFpbBIQCghzaW5jZV9tcxgBIAEoAxI5CgtpZGxlX2N1dG9mZhgCIAEoCzIiLmZyb250ZW5kLnYxLkhpYmVybmF0aW9uSWRsZUN1dG9mZkgAEjAKBmZvcmNlZBgDIAEoCzIeLmZyb250ZW5kLnYxLkhpYmVybmF0aW9uRm9yY2VkSAASPQoNY2FjaGVfZXhwaXJlZBgEIAEoCzIkLmZyb250ZW5kLnYxLkhpYmVybmF0aW9uQ2FjaGVFeHBpcmVkSABCBwoFY2F1c2UiKgoVSGliZXJuYXRpb25JZGxlQ3V0b2ZmEhEKCWN1dG9mZl9tcxgBIAEoAyITChFIaWJlcm5hdGlvbkZvcmNlZCI9ChdIaWJlcm5hdGlvbkNhY2hlRXhwaXJlZBISCgplbGFwc2VkX21zGAEgASgDEg4KBnR0bF9tcxgCIAEoAyKsAQoQUmV2aXZlU2Vzc2lvbkNtZBI4Cg1jb21wYWN0X2ZpcnN0GAEgASgLMh8uZnJvbnRlbmQudjEuUmV2aXZlQ29tcGFjdEZpcnN0SAASKwoGZGlyZWN0GAIgASgLMhkuZnJvbnRlbmQudjEuUmV2aXZlRGlyZWN0SAASKQoFY2xlYXIYAyABKAsyGC5mcm9udGVuZC52MS5SZXZpdmVDbGVhckgAQgYKBG1vZGUiQQoSUmV2aXZlQ29tcGFjdEZpcnN0EisKBXNjb3BlGAEgASgOMhwuZnJvbnRlbmQudjEuQ29tcGFjdGlvblNjb3BlIg4KDFJldml2ZURpcmVjdCINCgtSZXZpdmVDbGVhciKpAQoRV29ya3NwYWNlR2F0ZVZpZXcSEQoJd29ya3NwYWNlGAEgASgJEg0KBWZlbmNlGAIgASgJEi4KBG9wZW4YAyABKAsyHi5mcm9udGVuZC52MS5Xb3Jrc3BhY2VHYXRlT3BlbkgAEjoKCmhpYmVybmF0ZWQYBCABKAsyJC5mcm9udGVuZC52MS5Xb3Jrc3BhY2VHYXRlSGliZXJuYXRlZEgAQgYKBGdhdGUiEwoRV29ya3NwYWNlR2F0ZU9wZW4iSQoXV29ya3NwYWNlR2F0ZUhpYmVybmF0ZWQSLgoGZGV0YWlsGAEgASgLMh4uZnJvbnRlbmQudjEuSGliZXJuYXRpb25EZXRhaWwqtwEKD0NvbXBhY3Rpb25TY29wZRIgChxDT01QQUNUSU9OX1NDT1BFX1VOU1BFQ0lGSUVEEAASGAoUQ09NUEFDVElPTl9TQ09QRV9BTEwQARIeChpDT01QQUNUSU9OX1NDT1BFX1JFU1BPTlNFUxACEhwKGENPTVBBQ1RJT05fU0NPUEVfUFJPTVBUUxADEioKJkNPTVBBQ1RJT05fU0NPUEVfUFJPTVBUU19BTkRfUkVTUE9OU0VTEARCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw");
 
 /**
  * Why and since when a session is hibernated. Exists so the revival gate can
@@ -38,7 +38,7 @@ export type HibernationDetail = Message<"frontend.v1.HibernationDetail"> & {
      * the cutoff, so the daemon stopped pinging and hibernated in the same
      * transition (the two are one act by construction).
      *
-     * @generated from field: frontend.v1.HibernationIdleCutoff idle_cutoff = 10;
+     * @generated from field: frontend.v1.HibernationIdleCutoff idle_cutoff = 2;
      */
     value: HibernationIdleCutoff;
     case: "idleCutoff";
@@ -46,7 +46,7 @@ export type HibernationDetail = Message<"frontend.v1.HibernationDetail"> & {
     /**
      * The user forced it via HibernateWorkspaceCmd.
      *
-     * @generated from field: frontend.v1.HibernationForced forced = 11;
+     * @generated from field: frontend.v1.HibernationForced forced = 3;
      */
     value: HibernationForced;
     case: "forced";
@@ -59,7 +59,7 @@ export type HibernationDetail = Message<"frontend.v1.HibernationDetail"> & {
      * nothing, so the discovery IS the hibernate transition — reported
      * loudly to the user rather than silently absorbed.
      *
-     * @generated from field: frontend.v1.HibernationCacheExpired cache_expired = 12;
+     * @generated from field: frontend.v1.HibernationCacheExpired cache_expired = 4;
      */
     value: HibernationCacheExpired;
     case: "cacheExpired";
@@ -301,13 +301,13 @@ export type WorkspaceGateView = Message<"frontend.v1.WorkspaceGateView"> & {
    */
   gate: {
     /**
-     * @generated from field: frontend.v1.WorkspaceGateOpen open = 10;
+     * @generated from field: frontend.v1.WorkspaceGateOpen open = 3;
      */
     value: WorkspaceGateOpen;
     case: "open";
   } | {
     /**
-     * @generated from field: frontend.v1.WorkspaceGateHibernated hibernated = 11;
+     * @generated from field: frontend.v1.WorkspaceGateHibernated hibernated = 4;
      */
     value: WorkspaceGateHibernated;
     case: "hibernated";

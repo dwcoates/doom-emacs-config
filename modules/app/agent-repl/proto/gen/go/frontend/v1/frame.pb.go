@@ -24,6 +24,11 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// THE outbound frame. Exactly one arm is set per frame.
+//
+// THIS SURFACE IS PROTOJSON ON THE WIRE, SO A FIELD'S NAME IS ITS WIRE TOKEN.
+// Renaming an arm is a breaking change every bit as much as renumbering one:
+// a peer that has not shipped the new spelling simply stops seeing the frame.
 type FrontendFrame struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Frame:
@@ -368,43 +373,43 @@ type FrontendFrame_CommandAck struct {
 }
 
 type FrontendFrame_DaemonView struct {
-	DaemonView *DaemonView `protobuf:"bytes,9,opt,name=daemon_view,json=daemonView,proto3,oneof"`
+	DaemonView *DaemonView `protobuf:"bytes,8,opt,name=daemon_view,json=daemonView,proto3,oneof"`
 }
 
 type FrontendFrame_SessionInit struct {
-	SessionInit *SessionInitView `protobuf:"bytes,10,opt,name=session_init,json=sessionInit,proto3,oneof"`
+	SessionInit *SessionInitView `protobuf:"bytes,9,opt,name=session_init,json=sessionInit,proto3,oneof"`
 }
 
 type FrontendFrame_Heartbeat struct {
-	Heartbeat *HeartbeatView `protobuf:"bytes,11,opt,name=heartbeat,proto3,oneof"`
+	Heartbeat *HeartbeatView `protobuf:"bytes,10,opt,name=heartbeat,proto3,oneof"`
 }
 
 type FrontendFrame_Queue struct {
-	Queue *QueueView `protobuf:"bytes,12,opt,name=queue,proto3,oneof"`
+	Queue *QueueView `protobuf:"bytes,11,opt,name=queue,proto3,oneof"`
 }
 
 type FrontendFrame_Progress struct {
-	Progress *ProgressView `protobuf:"bytes,13,opt,name=progress,proto3,oneof"`
+	Progress *ProgressView `protobuf:"bytes,12,opt,name=progress,proto3,oneof"`
 }
 
 type FrontendFrame_WorkspaceAvailable struct {
 	// Host-only durable workspace lifecycle notification.  The daemon emits
 	// this only after the worktree and waiting shim are healthy; Emacs then
 	// materializes its perspective and acknowledges it.
-	WorkspaceAvailable *WorkspaceAvailable `protobuf:"bytes,14,opt,name=workspace_available,json=workspaceAvailable,proto3,oneof"`
+	WorkspaceAvailable *WorkspaceAvailable `protobuf:"bytes,13,opt,name=workspace_available,json=workspaceAvailable,proto3,oneof"`
 }
 
 type FrontendFrame_HostAction struct {
 	// Host-only durable UI action sourced by the daemon-owned JSON inbox.
-	HostAction *HostAction `protobuf:"bytes,15,opt,name=host_action,json=hostAction,proto3,oneof"`
+	HostAction *HostAction `protobuf:"bytes,14,opt,name=host_action,json=hostAction,proto3,oneof"`
 }
 
 type FrontendFrame_DaemonHealth struct {
-	DaemonHealth *DaemonHealthView `protobuf:"bytes,16,opt,name=daemon_health,json=daemonHealth,proto3,oneof"`
+	DaemonHealth *DaemonHealthView `protobuf:"bytes,15,opt,name=daemon_health,json=daemonHealth,proto3,oneof"`
 }
 
 type FrontendFrame_SessionHealth struct {
-	SessionHealth *SessionHealthView `protobuf:"bytes,17,opt,name=session_health,json=sessionHealth,proto3,oneof"`
+	SessionHealth *SessionHealthView `protobuf:"bytes,16,opt,name=session_health,json=sessionHealth,proto3,oneof"`
 }
 
 type FrontendFrame_WorkspaceRoster struct {
@@ -412,11 +417,11 @@ type FrontendFrame_WorkspaceRoster struct {
 	// by Emacs script-injection per webview. Emacs remains the single author;
 	// the daemon retains the latest roster, includes it in every connect
 	// snapshot, and rebroadcasts on change.
-	WorkspaceRoster *WorkspaceRoster `protobuf:"bytes,18,opt,name=workspace_roster,json=workspaceRoster,proto3,oneof"`
+	WorkspaceRoster *WorkspaceRoster `protobuf:"bytes,17,opt,name=workspace_roster,json=workspaceRoster,proto3,oneof"`
 }
 
 type FrontendFrame_ShutdownSchedule struct {
-	ShutdownSchedule *ShutdownScheduleView `protobuf:"bytes,19,opt,name=shutdown_schedule,json=shutdownSchedule,proto3,oneof"`
+	ShutdownSchedule *ShutdownScheduleView `protobuf:"bytes,18,opt,name=shutdown_schedule,json=shutdownSchedule,proto3,oneof"`
 }
 
 type FrontendFrame_DetachedWorkDelta struct {
@@ -424,31 +429,31 @@ type FrontendFrame_DetachedWorkDelta struct {
 	// messages already open. Its own frame rather than more ConversationDelta
 	// messages, because a detached agent produces at its own rate and must not
 	// flood the conversation that dispatched it.
-	DetachedWorkDelta *DetachedWorkDelta `protobuf:"bytes,20,opt,name=detached_work_delta,json=detachedWorkDelta,proto3,oneof"`
+	DetachedWorkDelta *DetachedWorkDelta `protobuf:"bytes,19,opt,name=detached_work_delta,json=detachedWorkDelta,proto3,oneof"`
 }
 
 type FrontendFrame_Topbar struct {
 	// One workspace's topbar, fully resolved. Pushed whenever any fact the
 	// topbar renders changes.
-	Topbar *TopbarView `protobuf:"bytes,21,opt,name=topbar,proto3,oneof"`
+	Topbar *TopbarView `protobuf:"bytes,20,opt,name=topbar,proto3,oneof"`
 }
 
 type FrontendFrame_TokenBreakdown struct {
 	// One workspace's token-breakdown menu, fully resolved. Pushed whenever
 	// the figures change.
-	TokenBreakdown *TokenBreakdownView `protobuf:"bytes,22,opt,name=token_breakdown,json=tokenBreakdown,proto3,oneof"`
+	TokenBreakdown *TokenBreakdownView `protobuf:"bytes,21,opt,name=token_breakdown,json=tokenBreakdown,proto3,oneof"`
 }
 
 type FrontendFrame_WorkspaceGate struct {
 	// One workspace's revival gate, resolved and fenced. Pushed on every gate
 	// transition (hibernate, revival start, revival settle).
-	WorkspaceGate *WorkspaceGateView `protobuf:"bytes,23,opt,name=workspace_gate,json=workspaceGate,proto3,oneof"`
+	WorkspaceGate *WorkspaceGateView `protobuf:"bytes,22,opt,name=workspace_gate,json=workspaceGate,proto3,oneof"`
 }
 
 type FrontendFrame_MergeQueueRoster struct {
 	// The WHOLE merge queue, pushed complete on every queue mutation. Never a
 	// delta: the roster IS the drain order.
-	MergeQueueRoster *MergeQueueRoster `protobuf:"bytes,24,opt,name=merge_queue_roster,json=mergeQueueRoster,proto3,oneof"`
+	MergeQueueRoster *MergeQueueRoster `protobuf:"bytes,23,opt,name=merge_queue_roster,json=mergeQueueRoster,proto3,oneof"`
 }
 
 type FrontendFrame_RestartPending struct {
@@ -456,25 +461,25 @@ type FrontendFrame_RestartPending struct {
 	// and to the Emacs UDS host immediately before teardown. It exists so a
 	// deliberate bounce stops being indistinguishable from a crash; see
 	// RestartPendingView for why it is an edge and never snapshot state.
-	RestartPending *RestartPendingView `protobuf:"bytes,25,opt,name=restart_pending,json=restartPending,proto3,oneof"`
+	RestartPending *RestartPendingView `protobuf:"bytes,24,opt,name=restart_pending,json=restartPending,proto3,oneof"`
 }
 
 type FrontendFrame_TypingCut struct {
 	// A preview the daemon opened and can no longer retire. Like TypingDelta
 	// it is an EDGE and never snapshot state: a cut describes the end of one
 	// preview, and a client that connects afterwards has no preview to retire.
-	TypingCut *TypingCut `protobuf:"bytes,27,opt,name=typing_cut,json=typingCut,proto3,oneof"`
+	TypingCut *TypingCut `protobuf:"bytes,25,opt,name=typing_cut,json=typingCut,proto3,oneof"`
 }
 
 type FrontendFrame_ConversationHistoryPage struct {
-	// ONE page of conversation history under the positionless contract,
-	// answering a FirstPageCmd or a NextPageCmd. A push for the same reason
-	// `conversation_page` above is one — its messages are feed content, and
-	// feed content has exactly one delivery shape in this protocol — and a
-	// DISTINCT frame from it because the two contracts answer different
-	// questions: this one's reader holds no position and echoes nothing back.
-	// See conversation-history.proto.
-	ConversationHistoryPage *ConversationHistoryPage `protobuf:"bytes,28,opt,name=conversation_history_page,json=conversationHistoryPage,proto3,oneof"`
+	// ONE page of conversation history, and the ONLY history page on this
+	// protocol, answering a FirstPageCmd or a NextPageCmd. A PUSH rather than
+	// a response, because its messages are feed content and feed content has
+	// exactly one delivery shape here.
+	//
+	// POSITIONLESS: its reader holds no position and echoes nothing back — the
+	// daemon holds the reader's place. See conversation-history.proto.
+	ConversationHistoryPage *ConversationHistoryPage `protobuf:"bytes,26,opt,name=conversation_history_page,json=conversationHistoryPage,proto3,oneof"`
 }
 
 func (*FrontendFrame_Snapshot) isFrontendFrame_Frame() {}
@@ -545,7 +550,8 @@ type StateSnapshot struct {
 	// never for a workspace's identity (see SessionView). HOST SURFACE:
 	// frontend.Server strips it from every GUI client, exactly as it strips the
 	// host-only fields below — a rendering frontend's chrome arrives as the
-	// resolved component views (12-14) instead.
+	// resolved component views (`topbars`, `token_breakdowns`,
+	// `workspace_gates`) instead.
 	Sessions []*SessionView     `protobuf:"bytes,2,rep,name=sessions,proto3" json:"sessions,omitempty"`
 	Catalogs []*TaskCatalog     `protobuf:"bytes,3,rep,name=catalogs,proto3" json:"catalogs,omitempty"`
 	Daemon   *DaemonView        `protobuf:"bytes,4,opt,name=daemon,proto3" json:"daemon,omitempty"`
@@ -573,7 +579,7 @@ type StateSnapshot struct {
 	// The merge queue as of this connect, so a client joining mid-drain renders
 	// the queue without waiting for the next mutation.
 	MergeQueueRoster *MergeQueueRoster `protobuf:"bytes,15,opt,name=merge_queue_roster,json=mergeQueueRoster,proto3" json:"merge_queue_roster,omitempty"`
-	// THE BATCHING OF `workspaces` (1) ACROSS ONE CONNECT DELIVERY.
+	// THE BATCHING OF `workspaces` ACROSS ONE CONNECT DELIVERY.
 	//
 	// A connect snapshot at fleet scale carries every workspace, and the host
 	// applies a workspace's state — perspective, bookkeeping, readiness latches —
@@ -760,6 +766,10 @@ func (x *StateSnapshot) GetWorkspaceBatchIndex() int32 {
 }
 
 // Frontend→daemon commands (the ONLY inbound frame).
+//
+// PROTOJSON ON THE WIRE, exactly as FrontendFrame is: a command arm's NAME is
+// its wire token, so renaming one breaks every peer that has not shipped the
+// new spelling.
 type FrontendCommand struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -1213,71 +1223,71 @@ type FrontendCommand_QueueCancel struct {
 }
 
 type FrontendCommand_CreateWorkspace struct {
-	CreateWorkspace *CreateWorkspaceCmd `protobuf:"bytes,18,opt,name=create_workspace,json=createWorkspace,proto3,oneof"`
+	CreateWorkspace *CreateWorkspaceCmd `protobuf:"bytes,17,opt,name=create_workspace,json=createWorkspace,proto3,oneof"`
 }
 
 type FrontendCommand_WorkspaceMaterialized struct {
-	WorkspaceMaterialized *WorkspaceMaterializedCmd `protobuf:"bytes,19,opt,name=workspace_materialized,json=workspaceMaterialized,proto3,oneof"`
+	WorkspaceMaterialized *WorkspaceMaterializedCmd `protobuf:"bytes,18,opt,name=workspace_materialized,json=workspaceMaterialized,proto3,oneof"`
 }
 
 type FrontendCommand_HostActionCompleted struct {
-	HostActionCompleted *HostActionCompletedCmd `protobuf:"bytes,20,opt,name=host_action_completed,json=hostActionCompleted,proto3,oneof"`
+	HostActionCompleted *HostActionCompletedCmd `protobuf:"bytes,19,opt,name=host_action_completed,json=hostActionCompleted,proto3,oneof"`
 }
 
 type FrontendCommand_DaemonHealth struct {
-	DaemonHealth *DaemonHealthCmd `protobuf:"bytes,21,opt,name=daemon_health,json=daemonHealth,proto3,oneof"`
+	DaemonHealth *DaemonHealthCmd `protobuf:"bytes,20,opt,name=daemon_health,json=daemonHealth,proto3,oneof"`
 }
 
 type FrontendCommand_SessionHealth struct {
-	SessionHealth *SessionHealthCmd `protobuf:"bytes,22,opt,name=session_health,json=sessionHealth,proto3,oneof"`
+	SessionHealth *SessionHealthCmd `protobuf:"bytes,21,opt,name=session_health,json=sessionHealth,proto3,oneof"`
 }
 
 type FrontendCommand_RestartSession struct {
-	RestartSession *RestartSessionCmd `protobuf:"bytes,23,opt,name=restart_session,json=restartSession,proto3,oneof"`
+	RestartSession *RestartSessionCmd `protobuf:"bytes,22,opt,name=restart_session,json=restartSession,proto3,oneof"`
 }
 
 type FrontendCommand_SetModel struct {
-	SetModel *SetModelCmd `protobuf:"bytes,24,opt,name=set_model,json=setModel,proto3,oneof"`
+	SetModel *SetModelCmd `protobuf:"bytes,23,opt,name=set_model,json=setModel,proto3,oneof"`
 }
 
 type FrontendCommand_PublishWorkspaceRoster struct {
-	PublishWorkspaceRoster *PublishWorkspaceRosterCmd `protobuf:"bytes,25,opt,name=publish_workspace_roster,json=publishWorkspaceRoster,proto3,oneof"`
+	PublishWorkspaceRoster *PublishWorkspaceRosterCmd `protobuf:"bytes,24,opt,name=publish_workspace_roster,json=publishWorkspaceRoster,proto3,oneof"`
 }
 
 type FrontendCommand_ScheduleShutdown struct {
-	ScheduleShutdown *ScheduleShutdownCmd `protobuf:"bytes,26,opt,name=schedule_shutdown,json=scheduleShutdown,proto3,oneof"`
+	ScheduleShutdown *ScheduleShutdownCmd `protobuf:"bytes,25,opt,name=schedule_shutdown,json=scheduleShutdown,proto3,oneof"`
 }
 
 type FrontendCommand_CancelScheduledShutdown struct {
-	CancelScheduledShutdown *CancelScheduledShutdownCmd `protobuf:"bytes,27,opt,name=cancel_scheduled_shutdown,json=cancelScheduledShutdown,proto3,oneof"`
+	CancelScheduledShutdown *CancelScheduledShutdownCmd `protobuf:"bytes,26,opt,name=cancel_scheduled_shutdown,json=cancelScheduledShutdown,proto3,oneof"`
 }
 
 type FrontendCommand_HibernateWorkspace struct {
-	HibernateWorkspace *HibernateWorkspaceCmd `protobuf:"bytes,28,opt,name=hibernate_workspace,json=hibernateWorkspace,proto3,oneof"`
+	HibernateWorkspace *HibernateWorkspaceCmd `protobuf:"bytes,27,opt,name=hibernate_workspace,json=hibernateWorkspace,proto3,oneof"`
 }
 
 type FrontendCommand_ReviveSession struct {
-	ReviveSession *ReviveSessionCmd `protobuf:"bytes,29,opt,name=revive_session,json=reviveSession,proto3,oneof"`
+	ReviveSession *ReviveSessionCmd `protobuf:"bytes,28,opt,name=revive_session,json=reviveSession,proto3,oneof"`
 }
 
 type FrontendCommand_PauseMergeQueue struct {
-	PauseMergeQueue *PauseMergeQueueCmd `protobuf:"bytes,30,opt,name=pause_merge_queue,json=pauseMergeQueue,proto3,oneof"`
+	PauseMergeQueue *PauseMergeQueueCmd `protobuf:"bytes,29,opt,name=pause_merge_queue,json=pauseMergeQueue,proto3,oneof"`
 }
 
 type FrontendCommand_ResumeMergeQueue struct {
-	ResumeMergeQueue *ResumeMergeQueueCmd `protobuf:"bytes,31,opt,name=resume_merge_queue,json=resumeMergeQueue,proto3,oneof"`
+	ResumeMergeQueue *ResumeMergeQueueCmd `protobuf:"bytes,30,opt,name=resume_merge_queue,json=resumeMergeQueue,proto3,oneof"`
 }
 
 type FrontendCommand_EvictMerge struct {
-	EvictMerge *EvictMergeCmd `protobuf:"bytes,32,opt,name=evict_merge,json=evictMerge,proto3,oneof"`
+	EvictMerge *EvictMergeCmd `protobuf:"bytes,31,opt,name=evict_merge,json=evictMerge,proto3,oneof"`
 }
 
 type FrontendCommand_AnswerMergeDequeue struct {
-	AnswerMergeDequeue *AnswerMergeDequeueCmd `protobuf:"bytes,33,opt,name=answer_merge_dequeue,json=answerMergeDequeue,proto3,oneof"`
+	AnswerMergeDequeue *AnswerMergeDequeueCmd `protobuf:"bytes,32,opt,name=answer_merge_dequeue,json=answerMergeDequeue,proto3,oneof"`
 }
 
 type FrontendCommand_CancelDetachedAgents struct {
-	CancelDetachedAgents *CancelDetachedAgentsCmd `protobuf:"bytes,34,opt,name=cancel_detached_agents,json=cancelDetachedAgents,proto3,oneof"`
+	CancelDetachedAgents *CancelDetachedAgentsCmd `protobuf:"bytes,33,opt,name=cancel_detached_agents,json=cancelDetachedAgents,proto3,oneof"`
 }
 
 type FrontendCommand_FirstPage struct {
@@ -1286,11 +1296,11 @@ type FrontendCommand_FirstPage struct {
 	// older and carries NO position of its own, so a reader without an
 	// established one is refused rather than silently served the tail. They do
 	// not replace `resync` above — see conversation-history.proto.
-	FirstPage *FirstPageCmd `protobuf:"bytes,36,opt,name=first_page,json=firstPage,proto3,oneof"`
+	FirstPage *FirstPageCmd `protobuf:"bytes,34,opt,name=first_page,json=firstPage,proto3,oneof"`
 }
 
 type FrontendCommand_NextPage struct {
-	NextPage *NextPageCmd `protobuf:"bytes,37,opt,name=next_page,json=nextPage,proto3,oneof"`
+	NextPage *NextPageCmd `protobuf:"bytes,35,opt,name=next_page,json=nextPage,proto3,oneof"`
 }
 
 func (*FrontendCommand_SubmitPrompt) isFrontendCommand_Command() {}
@@ -1376,22 +1386,22 @@ type CommandAck struct {
 	Failure *FailureKind `protobuf:"bytes,4,opt,name=failure,proto3" json:"failure,omitempty"`
 	// The feed card this refusal was filed under, when it produced one, so the
 	// client can offer to reveal it instead of restating the account inline.
-	FailureCard *FailureCardRef `protobuf:"bytes,20,opt,name=failure_card,json=failureCard,proto3" json:"failure_card,omitempty"`
+	FailureCard *FailureCardRef `protobuf:"bytes,5,opt,name=failure_card,json=failureCard,proto3" json:"failure_card,omitempty"`
 	// The interrupt confirmation CHALLENGE. Not a failure and
 	// not an error: the command was understood and deliberately not performed,
 	// because no turn was live and stopping live subagents deserves an
 	// explicit yes. Set with ok=false and `failure` unset; the client asks the
 	// user and resends InterruptCmd{confirm_agents: true}.
-	InterruptConfirmRequired *InterruptConfirmRequired `protobuf:"bytes,5,opt,name=interrupt_confirm_required,json=interruptConfirmRequired,proto3" json:"interrupt_confirm_required,omitempty"`
+	InterruptConfirmRequired *InterruptConfirmRequired `protobuf:"bytes,6,opt,name=interrupt_confirm_required,json=interruptConfirmRequired,proto3" json:"interrupt_confirm_required,omitempty"`
 	// Present only for CancelDetachedAgentsCmd: WHAT the cancel did, relayed
 	// from the shim. Set on BOTH the success ack (the `cancelled` arm) and the
 	// refusal (`nothing_running` / `unsupported` alongside ok=false), so a
 	// client never has to read a refusal's meaning out of `error` text.
-	DetachedCancel *DetachedCancelOutcome `protobuf:"bytes,8,opt,name=detached_cancel,json=detachedCancel,proto3" json:"detached_cancel,omitempty"`
+	DetachedCancel *DetachedCancelOutcome `protobuf:"bytes,7,opt,name=detached_cancel,json=detachedCancel,proto3" json:"detached_cancel,omitempty"`
 	// Present only for SetModelCmd.  It is the shim-confirmed current model on
 	// both success and rejection, so a frontend never needs an optimistic model
 	// state or a local recovery guess.
-	SelectedModel string `protobuf:"bytes,6,opt,name=selected_model,json=selectedModel,proto3" json:"selected_model,omitempty"`
+	SelectedModel string `protobuf:"bytes,8,opt,name=selected_model,json=selectedModel,proto3" json:"selected_model,omitempty"`
 	// Present only for CreateSessionCmd, and FOR OBSERVABILITY ONLY: the vendor
 	// conversation uuid the created session actually landed on, so a client can
 	// attribute its logs from its very first line instead of waiting for the
@@ -1408,7 +1418,7 @@ type CommandAck struct {
 	// rule is not enforceable from here, so it is also enforced where it
 	// matters: the Emacs frontend has no persistence path that can reach a
 	// vendor uuid, and a test asserts its state file never contains one.
-	ObservedClaudeSessionId string `protobuf:"bytes,7,opt,name=observed_claude_session_id,json=observedClaudeSessionId,proto3" json:"observed_claude_session_id,omitempty"`
+	ObservedClaudeSessionId string `protobuf:"bytes,9,opt,name=observed_claude_session_id,json=observedClaudeSessionId,proto3" json:"observed_claude_session_id,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -1553,6 +1563,13 @@ func (x *InterruptConfirmRequired) GetLiveTasks() int64 {
 	return 0
 }
 
+// A replay request carries ONE token of identity, not several.
+//
+// The client says where it had read up to and which fence it held when it
+// decided to ask. It never copies, holds or agrees a session identity or a
+// controller generation: several identities a client must send back in
+// agreement is several ways for a client to send back a disagreement, and the
+// fence already answers the only question they were ever asked together.
 type ResyncCmd struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	FromSeq uint64                 `protobuf:"varint,1,opt,name=from_seq,json=fromSeq,proto3" json:"from_seq,omitempty"`
@@ -1565,7 +1582,7 @@ type ResyncCmd struct {
 	// newer generation and asks for a replay nobody wanted. The daemon compares
 	// it against the workspace's live fence and REFUSES the command before
 	// replaying anything when they differ.
-	Fence         string `protobuf:"bytes,4,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence         string `protobuf:"bytes,2,opt,name=fence,proto3" json:"fence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1618,7 +1635,7 @@ var File_frontend_v1_frame_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_frame_proto_rawDesc = "" +
 	"\n" +
-	"\x17frontend/v1/frame.proto\x12\vfrontend.v1\x1a&frontend/v1/conversation-history.proto\x1a\x18frontend/v1/errors.proto\x1a\x1efrontend/v1/failure-card.proto\x1a\x16frontend/v1/feed.proto\x1a\x18frontend/v1/footer.proto\x1a\x1efrontend/v1/gate-revival.proto\x1a\x16frontend/v1/host.proto\x1a\x1bfrontend/v1/lifecycle.proto\x1a\x17frontend/v1/merge.proto\x1a!frontend/v1/permission-card.proto\x1a\x1efrontend/v1/prompt-queue.proto\x1a\x19frontend/v1/sidebar.proto\x1a\x17frontend/v1/state.proto\x1a\x1dfrontend/v1/tokens-menu.proto\x1a\x1bfrontend/v1/tool-call.proto\x1a\x18frontend/v1/topbar.proto\"\xda\x0e\n" +
+	"\x17frontend/v1/frame.proto\x12\vfrontend.v1\x1a&frontend/v1/conversation-history.proto\x1a\x18frontend/v1/errors.proto\x1a\x1efrontend/v1/failure-card.proto\x1a\x16frontend/v1/feed.proto\x1a\x18frontend/v1/footer.proto\x1a\x1efrontend/v1/gate-revival.proto\x1a\x16frontend/v1/host.proto\x1a\x1bfrontend/v1/lifecycle.proto\x1a\x17frontend/v1/merge.proto\x1a!frontend/v1/permission-card.proto\x1a\x1efrontend/v1/prompt-queue.proto\x1a\x19frontend/v1/sidebar.proto\x1a\x17frontend/v1/state.proto\x1a\x1dfrontend/v1/tokens-menu.proto\x1a\x1bfrontend/v1/tool-call.proto\x1a\x18frontend/v1/topbar.proto\"\x96\x0e\n" +
 	"\rFrontendFrame\x128\n" +
 	"\bsnapshot\x18\x01 \x01(\v2\x1a.frontend.v1.StateSnapshotH\x00R\bsnapshot\x12F\n" +
 	"\x0fworkspace_state\x18\x02 \x01(\v2\x1b.frontend.v1.WorkspaceStateH\x00R\x0eworkspaceState\x12=\n" +
@@ -1628,30 +1645,30 @@ const file_frontend_v1_frame_proto_rawDesc = "" +
 	"\ftask_catalog\x18\x06 \x01(\v2\x18.frontend.v1.TaskCatalogH\x00R\vtaskCatalog\x12:\n" +
 	"\vcommand_ack\x18\a \x01(\v2\x17.frontend.v1.CommandAckH\x00R\n" +
 	"commandAck\x12:\n" +
-	"\vdaemon_view\x18\t \x01(\v2\x17.frontend.v1.DaemonViewH\x00R\n" +
+	"\vdaemon_view\x18\b \x01(\v2\x17.frontend.v1.DaemonViewH\x00R\n" +
 	"daemonView\x12A\n" +
-	"\fsession_init\x18\n" +
-	" \x01(\v2\x1c.frontend.v1.SessionInitViewH\x00R\vsessionInit\x12:\n" +
-	"\theartbeat\x18\v \x01(\v2\x1a.frontend.v1.HeartbeatViewH\x00R\theartbeat\x12.\n" +
-	"\x05queue\x18\f \x01(\v2\x16.frontend.v1.QueueViewH\x00R\x05queue\x127\n" +
-	"\bprogress\x18\r \x01(\v2\x19.frontend.v1.ProgressViewH\x00R\bprogress\x12R\n" +
-	"\x13workspace_available\x18\x0e \x01(\v2\x1f.frontend.v1.WorkspaceAvailableH\x00R\x12workspaceAvailable\x12:\n" +
-	"\vhost_action\x18\x0f \x01(\v2\x17.frontend.v1.HostActionH\x00R\n" +
+	"\fsession_init\x18\t \x01(\v2\x1c.frontend.v1.SessionInitViewH\x00R\vsessionInit\x12:\n" +
+	"\theartbeat\x18\n" +
+	" \x01(\v2\x1a.frontend.v1.HeartbeatViewH\x00R\theartbeat\x12.\n" +
+	"\x05queue\x18\v \x01(\v2\x16.frontend.v1.QueueViewH\x00R\x05queue\x127\n" +
+	"\bprogress\x18\f \x01(\v2\x19.frontend.v1.ProgressViewH\x00R\bprogress\x12R\n" +
+	"\x13workspace_available\x18\r \x01(\v2\x1f.frontend.v1.WorkspaceAvailableH\x00R\x12workspaceAvailable\x12:\n" +
+	"\vhost_action\x18\x0e \x01(\v2\x17.frontend.v1.HostActionH\x00R\n" +
 	"hostAction\x12D\n" +
-	"\rdaemon_health\x18\x10 \x01(\v2\x1d.frontend.v1.DaemonHealthViewH\x00R\fdaemonHealth\x12G\n" +
-	"\x0esession_health\x18\x11 \x01(\v2\x1e.frontend.v1.SessionHealthViewH\x00R\rsessionHealth\x12I\n" +
-	"\x10workspace_roster\x18\x12 \x01(\v2\x1c.frontend.v1.WorkspaceRosterH\x00R\x0fworkspaceRoster\x12P\n" +
-	"\x11shutdown_schedule\x18\x13 \x01(\v2!.frontend.v1.ShutdownScheduleViewH\x00R\x10shutdownSchedule\x12P\n" +
-	"\x13detached_work_delta\x18\x14 \x01(\v2\x1e.frontend.v1.DetachedWorkDeltaH\x00R\x11detachedWorkDelta\x121\n" +
-	"\x06topbar\x18\x15 \x01(\v2\x17.frontend.v1.TopbarViewH\x00R\x06topbar\x12J\n" +
-	"\x0ftoken_breakdown\x18\x16 \x01(\v2\x1f.frontend.v1.TokenBreakdownViewH\x00R\x0etokenBreakdown\x12G\n" +
-	"\x0eworkspace_gate\x18\x17 \x01(\v2\x1e.frontend.v1.WorkspaceGateViewH\x00R\rworkspaceGate\x12M\n" +
-	"\x12merge_queue_roster\x18\x18 \x01(\v2\x1d.frontend.v1.MergeQueueRosterH\x00R\x10mergeQueueRoster\x12J\n" +
-	"\x0frestart_pending\x18\x19 \x01(\v2\x1f.frontend.v1.RestartPendingViewH\x00R\x0erestartPending\x127\n" +
+	"\rdaemon_health\x18\x0f \x01(\v2\x1d.frontend.v1.DaemonHealthViewH\x00R\fdaemonHealth\x12G\n" +
+	"\x0esession_health\x18\x10 \x01(\v2\x1e.frontend.v1.SessionHealthViewH\x00R\rsessionHealth\x12I\n" +
+	"\x10workspace_roster\x18\x11 \x01(\v2\x1c.frontend.v1.WorkspaceRosterH\x00R\x0fworkspaceRoster\x12P\n" +
+	"\x11shutdown_schedule\x18\x12 \x01(\v2!.frontend.v1.ShutdownScheduleViewH\x00R\x10shutdownSchedule\x12P\n" +
+	"\x13detached_work_delta\x18\x13 \x01(\v2\x1e.frontend.v1.DetachedWorkDeltaH\x00R\x11detachedWorkDelta\x121\n" +
+	"\x06topbar\x18\x14 \x01(\v2\x17.frontend.v1.TopbarViewH\x00R\x06topbar\x12J\n" +
+	"\x0ftoken_breakdown\x18\x15 \x01(\v2\x1f.frontend.v1.TokenBreakdownViewH\x00R\x0etokenBreakdown\x12G\n" +
+	"\x0eworkspace_gate\x18\x16 \x01(\v2\x1e.frontend.v1.WorkspaceGateViewH\x00R\rworkspaceGate\x12M\n" +
+	"\x12merge_queue_roster\x18\x17 \x01(\v2\x1d.frontend.v1.MergeQueueRosterH\x00R\x10mergeQueueRoster\x12J\n" +
+	"\x0frestart_pending\x18\x18 \x01(\v2\x1f.frontend.v1.RestartPendingViewH\x00R\x0erestartPending\x127\n" +
 	"\n" +
-	"typing_cut\x18\x1b \x01(\v2\x16.frontend.v1.TypingCutH\x00R\ttypingCut\x12b\n" +
-	"\x19conversation_history_page\x18\x1c \x01(\v2$.frontend.v1.ConversationHistoryPageH\x00R\x17conversationHistoryPageB\a\n" +
-	"\x05frameJ\x04\b\b\x10\tJ\x04\b\x1a\x10\x1bR\x0fdegraded_noticeR\x12async_bubble_deltaR\x11conversation_page\"\x9e\b\n" +
+	"typing_cut\x18\x19 \x01(\v2\x16.frontend.v1.TypingCutH\x00R\ttypingCut\x12b\n" +
+	"\x19conversation_history_page\x18\x1a \x01(\v2$.frontend.v1.ConversationHistoryPageH\x00R\x17conversationHistoryPageB\a\n" +
+	"\x05frame\"\x8f\b\n" +
 	"\rStateSnapshot\x12;\n" +
 	"\n" +
 	"workspaces\x18\x01 \x03(\v2\x1b.frontend.v1.WorkspaceStateR\n" +
@@ -1672,7 +1689,7 @@ const file_frontend_v1_frame_proto_rawDesc = "" +
 	"\x0fworkspace_gates\x18\x0e \x03(\v2\x1e.frontend.v1.WorkspaceGateViewR\x0eworkspaceGates\x12K\n" +
 	"\x12merge_queue_roster\x18\x0f \x01(\v2\x1d.frontend.v1.MergeQueueRosterR\x10mergeQueueRoster\x12'\n" +
 	"\x0fworkspace_total\x18\x10 \x01(\x05R\x0eworkspaceTotal\x122\n" +
-	"\x15workspace_batch_index\x18\x11 \x01(\x05R\x13workspaceBatchIndexR\rasync_bubbles\"\xfa\x13\n" +
+	"\x15workspace_batch_index\x18\x11 \x01(\x05R\x13workspaceBatchIndex\"\xe1\x13\n" +
 	"\x0fFrontendCommand\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
@@ -1694,28 +1711,28 @@ const file_frontend_v1_frame_proto_rawDesc = "" +
 	"queueForce\x12@\n" +
 	"\fqueue_accept\x18\x0f \x01(\v2\x1b.frontend.v1.QueueAcceptCmdH\x00R\vqueueAccept\x12@\n" +
 	"\fqueue_cancel\x18\x10 \x01(\v2\x1b.frontend.v1.QueueCancelCmdH\x00R\vqueueCancel\x12L\n" +
-	"\x10create_workspace\x18\x12 \x01(\v2\x1f.frontend.v1.CreateWorkspaceCmdH\x00R\x0fcreateWorkspace\x12^\n" +
-	"\x16workspace_materialized\x18\x13 \x01(\v2%.frontend.v1.WorkspaceMaterializedCmdH\x00R\x15workspaceMaterialized\x12Y\n" +
-	"\x15host_action_completed\x18\x14 \x01(\v2#.frontend.v1.HostActionCompletedCmdH\x00R\x13hostActionCompleted\x12C\n" +
-	"\rdaemon_health\x18\x15 \x01(\v2\x1c.frontend.v1.DaemonHealthCmdH\x00R\fdaemonHealth\x12F\n" +
-	"\x0esession_health\x18\x16 \x01(\v2\x1d.frontend.v1.SessionHealthCmdH\x00R\rsessionHealth\x12I\n" +
-	"\x0frestart_session\x18\x17 \x01(\v2\x1e.frontend.v1.RestartSessionCmdH\x00R\x0erestartSession\x127\n" +
-	"\tset_model\x18\x18 \x01(\v2\x18.frontend.v1.SetModelCmdH\x00R\bsetModel\x12b\n" +
-	"\x18publish_workspace_roster\x18\x19 \x01(\v2&.frontend.v1.PublishWorkspaceRosterCmdH\x00R\x16publishWorkspaceRoster\x12O\n" +
-	"\x11schedule_shutdown\x18\x1a \x01(\v2 .frontend.v1.ScheduleShutdownCmdH\x00R\x10scheduleShutdown\x12e\n" +
-	"\x19cancel_scheduled_shutdown\x18\x1b \x01(\v2'.frontend.v1.CancelScheduledShutdownCmdH\x00R\x17cancelScheduledShutdown\x12U\n" +
-	"\x13hibernate_workspace\x18\x1c \x01(\v2\".frontend.v1.HibernateWorkspaceCmdH\x00R\x12hibernateWorkspace\x12F\n" +
-	"\x0erevive_session\x18\x1d \x01(\v2\x1d.frontend.v1.ReviveSessionCmdH\x00R\rreviveSession\x12M\n" +
-	"\x11pause_merge_queue\x18\x1e \x01(\v2\x1f.frontend.v1.PauseMergeQueueCmdH\x00R\x0fpauseMergeQueue\x12P\n" +
-	"\x12resume_merge_queue\x18\x1f \x01(\v2 .frontend.v1.ResumeMergeQueueCmdH\x00R\x10resumeMergeQueue\x12=\n" +
-	"\vevict_merge\x18  \x01(\v2\x1a.frontend.v1.EvictMergeCmdH\x00R\n" +
+	"\x10create_workspace\x18\x11 \x01(\v2\x1f.frontend.v1.CreateWorkspaceCmdH\x00R\x0fcreateWorkspace\x12^\n" +
+	"\x16workspace_materialized\x18\x12 \x01(\v2%.frontend.v1.WorkspaceMaterializedCmdH\x00R\x15workspaceMaterialized\x12Y\n" +
+	"\x15host_action_completed\x18\x13 \x01(\v2#.frontend.v1.HostActionCompletedCmdH\x00R\x13hostActionCompleted\x12C\n" +
+	"\rdaemon_health\x18\x14 \x01(\v2\x1c.frontend.v1.DaemonHealthCmdH\x00R\fdaemonHealth\x12F\n" +
+	"\x0esession_health\x18\x15 \x01(\v2\x1d.frontend.v1.SessionHealthCmdH\x00R\rsessionHealth\x12I\n" +
+	"\x0frestart_session\x18\x16 \x01(\v2\x1e.frontend.v1.RestartSessionCmdH\x00R\x0erestartSession\x127\n" +
+	"\tset_model\x18\x17 \x01(\v2\x18.frontend.v1.SetModelCmdH\x00R\bsetModel\x12b\n" +
+	"\x18publish_workspace_roster\x18\x18 \x01(\v2&.frontend.v1.PublishWorkspaceRosterCmdH\x00R\x16publishWorkspaceRoster\x12O\n" +
+	"\x11schedule_shutdown\x18\x19 \x01(\v2 .frontend.v1.ScheduleShutdownCmdH\x00R\x10scheduleShutdown\x12e\n" +
+	"\x19cancel_scheduled_shutdown\x18\x1a \x01(\v2'.frontend.v1.CancelScheduledShutdownCmdH\x00R\x17cancelScheduledShutdown\x12U\n" +
+	"\x13hibernate_workspace\x18\x1b \x01(\v2\".frontend.v1.HibernateWorkspaceCmdH\x00R\x12hibernateWorkspace\x12F\n" +
+	"\x0erevive_session\x18\x1c \x01(\v2\x1d.frontend.v1.ReviveSessionCmdH\x00R\rreviveSession\x12M\n" +
+	"\x11pause_merge_queue\x18\x1d \x01(\v2\x1f.frontend.v1.PauseMergeQueueCmdH\x00R\x0fpauseMergeQueue\x12P\n" +
+	"\x12resume_merge_queue\x18\x1e \x01(\v2 .frontend.v1.ResumeMergeQueueCmdH\x00R\x10resumeMergeQueue\x12=\n" +
+	"\vevict_merge\x18\x1f \x01(\v2\x1a.frontend.v1.EvictMergeCmdH\x00R\n" +
 	"evictMerge\x12V\n" +
-	"\x14answer_merge_dequeue\x18! \x01(\v2\".frontend.v1.AnswerMergeDequeueCmdH\x00R\x12answerMergeDequeue\x12\\\n" +
-	"\x16cancel_detached_agents\x18\" \x01(\v2$.frontend.v1.CancelDetachedAgentsCmdH\x00R\x14cancelDetachedAgents\x12:\n" +
+	"\x14answer_merge_dequeue\x18  \x01(\v2\".frontend.v1.AnswerMergeDequeueCmdH\x00R\x12answerMergeDequeue\x12\\\n" +
+	"\x16cancel_detached_agents\x18! \x01(\v2$.frontend.v1.CancelDetachedAgentsCmdH\x00R\x14cancelDetachedAgents\x12:\n" +
 	"\n" +
-	"first_page\x18$ \x01(\v2\x19.frontend.v1.FirstPageCmdH\x00R\tfirstPage\x127\n" +
-	"\tnext_page\x18% \x01(\v2\x18.frontend.v1.NextPageCmdH\x00R\bnextPageB\t\n" +
-	"\acommandJ\x04\b#\x10$R\x11conversation_page\"\xdb\x03\n" +
+	"first_page\x18\" \x01(\v2\x19.frontend.v1.FirstPageCmdH\x00R\tfirstPage\x127\n" +
+	"\tnext_page\x18# \x01(\v2\x18.frontend.v1.NextPageCmdH\x00R\bnextPageB\t\n" +
+	"\acommand\"\xdb\x03\n" +
 	"\n" +
 	"CommandAck\x12\x1d\n" +
 	"\n" +
@@ -1723,18 +1740,17 @@ const file_frontend_v1_frame_proto_rawDesc = "" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x122\n" +
 	"\afailure\x18\x04 \x01(\v2\x18.frontend.v1.FailureKindR\afailure\x12>\n" +
-	"\ffailure_card\x18\x14 \x01(\v2\x1b.frontend.v1.FailureCardRefR\vfailureCard\x12c\n" +
-	"\x1ainterrupt_confirm_required\x18\x05 \x01(\v2%.frontend.v1.InterruptConfirmRequiredR\x18interruptConfirmRequired\x12K\n" +
-	"\x0fdetached_cancel\x18\b \x01(\v2\".frontend.v1.DetachedCancelOutcomeR\x0edetachedCancel\x12%\n" +
-	"\x0eselected_model\x18\x06 \x01(\tR\rselectedModel\x12;\n" +
-	"\x1aobserved_claude_session_id\x18\a \x01(\tR\x17observedClaudeSessionId\"9\n" +
+	"\ffailure_card\x18\x05 \x01(\v2\x1b.frontend.v1.FailureCardRefR\vfailureCard\x12c\n" +
+	"\x1ainterrupt_confirm_required\x18\x06 \x01(\v2%.frontend.v1.InterruptConfirmRequiredR\x18interruptConfirmRequired\x12K\n" +
+	"\x0fdetached_cancel\x18\a \x01(\v2\".frontend.v1.DetachedCancelOutcomeR\x0edetachedCancel\x12%\n" +
+	"\x0eselected_model\x18\b \x01(\tR\rselectedModel\x12;\n" +
+	"\x1aobserved_claude_session_id\x18\t \x01(\tR\x17observedClaudeSessionId\"9\n" +
 	"\x18InterruptConfirmRequired\x12\x1d\n" +
 	"\n" +
-	"live_tasks\x18\x01 \x01(\x03R\tliveTasks\"n\n" +
+	"live_tasks\x18\x01 \x01(\x03R\tliveTasks\"<\n" +
 	"\tResyncCmd\x12\x19\n" +
 	"\bfrom_seq\x18\x01 \x01(\x04R\afromSeq\x12\x14\n" +
-	"\x05fence\x18\x04 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\n" +
-	"session_idR\x18controller_generation_idB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
+	"\x05fence\x18\x02 \x01(\tR\x05fenceB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_frontend_v1_frame_proto_rawDescOnce sync.Once
