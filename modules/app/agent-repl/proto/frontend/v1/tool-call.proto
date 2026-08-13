@@ -105,14 +105,21 @@ message TaskEntry {
   // something else.
   reserved 2, 4;
   reserved "kind", "status";
-  // 10-13 were per-kind arms (TaskKindAgent/Workflow/Shell/Unclassified) and
-  // 20-25 were per-status arms (TaskStatusRunning/Done/Error/Killed/Stopped/
-  // Lost): a THIRD spelling of the detached-work vocabulary, at a third size.
-  // Both now come from conversation.v1, so the catalog cannot describe the same
+  // 10-13 were per-kind arms (TaskKindAgent/Workflow/Shell/Unclassified): a
+  // THIRD spelling of the detached-work kind vocabulary, at a third size. The
+  // kind now comes from conversation.v1, so the catalog cannot describe the same
   // dispatched work in different words than the message that carries it.
-  reserved 10, 11, 12, 13, 20, 21, 22, 23, 24, 25;
+  reserved 10, 11, 12, 13;
   reserved "agent", "workflow", "shell", "unclassified";
-  reserved "running", "done", "error", "killed", "stopped", "lost";
+  // 26 was `ended` (conversation.v1.DetachedWorkEnded), which briefly replaced
+  // the status oneof below and lost two things doing it: `stopped` and `killed`
+  // both collapsed onto the single DetachedCancelled arm, erasing the
+  // distinction between a task stopped through its own affordance and one
+  // stopped from outside; and `running` became an ABSENCE, a state inferred from
+  // a missing field. Reverted, and reserved by number and name so the token
+  // cannot come back meaning something else.
+  reserved 26;
+  reserved "ended";
   string task_id = 1;
   string description = 3;
   string output_path = 5;
@@ -127,12 +134,57 @@ message TaskEntry {
   // field, and this surface is protojson, where reusing the token would put two
   // different types behind one name across versions.
   conversation.v1.DetachedWorkKind work_kind = 14;
-  // HOW THE TASK ENDED, as the producer recorded it. UNSET means the task is
-  // still open — the absence of an ending IS "running", which is why there is no
-  // arm asserting it. A set `ended` whose ended_at_ms is 0 is a malformed entry
-  // and is rejected loudly rather than drawn as running.
-  conversation.v1.DetachedWorkEnded ended = 26;
+  // The task's lifecycle; the set arm IS the status. Never unset on a wire
+  // entry: an entry with no arm here is a malformed frame and is rejected
+  // loudly rather than drawn as running.
+  //
+  // DAEMON-OWNED. "Is this task still running" is something the daemon works
+  // out from whether an ending has reached it, so the RESOLVED status is
+  // legitimately declared here rather than imported.
+  //
+  // TODO(respelling): the terminal arms nonetheless overlap
+  // conversation.v1.DetachedWorkEnded's outcome — done/error/lost against
+  // succeeded/failed/lost — while stopped/killed have only the single
+  // DetachedCancelled to map onto and running has no counterpart at all.
+  // Reconciling the resolved status with the producer's recorded outcome needs
+  // a ruling; until then the distinctions stay stated here.
+  oneof status {
+    TaskStatusRunning running = 20;
+    TaskStatusDone done = 21;
+    TaskStatusError error = 22;
+    TaskStatusKilled killed = 23;
+    TaskStatusStopped stopped = 24;
+    TaskStatusLost lost = 25;
+  }
 }
+
+// The task statuses. Each is EMPTY BY DESIGN — being set is the entire
+// assertion; the detail of HOW a task ended lives on its detached-work
+// message's settled outcome, and the catalog does not carry a second copy to
+// disagree with it.
+
+// The task is still running. STATED, never inferred from a missing ending:
+// absence renders absence on this contract.
+message TaskStatusRunning {}
+
+// The task finished successfully.
+message TaskStatusDone {}
+
+// The task finished by failing.
+message TaskStatusError {}
+
+// The task was stopped from outside before it finished.
+message TaskStatusKilled {}
+
+// The task was stopped deliberately through its own stop affordance. DISTINCT
+// from killed: who stopped the work is the whole point of the distinction, and
+// conversation.v1.DetachedCancelled cannot express it.
+message TaskStatusStopped {}
+
+// The daemon lost track of the task — a restart or a vanished process left
+// its ending unobserved. An honest absence, distinct from every observed
+// ending.
+message TaskStatusLost {}
 
 message TaskCatalog {
   // 2 was session_id. A frontend has no session vocabulary: the only question
