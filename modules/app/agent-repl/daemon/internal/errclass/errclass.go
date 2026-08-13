@@ -765,6 +765,19 @@ func apiErrorDetail(ae *datav1.ApiErrorLine) string {
 // this only names the block it found. Keeping the predicate there and the
 // naming here means a stop reason cannot come to block without also having a
 // name, or gain a name without blocking.
+//
+// GAP — THIS FUNCTION HAS NO EVIDENCE LEFT, AND THE TYPE IT NAMES IS NOT THE
+// TYPE IT WAS WRITTEN AGAINST. `protocolv1.TurnEnded` now resolves to
+// BookkeepingEntry's spelling: {turn_id, oneof{completed|interrupted|
+// unexplained}}. It carries no `is_error` and no `stop_reason`, so there is no
+// arm that can say a turn ended in a VENDOR error — `unexplained` is for a
+// close the daemon synthesized when it could not see why, which is a different
+// claim and one this classifier must not make on the vendor's behalf.
+//
+// Deliberately NOT patched into compiling. Deriving "the turn failed" from the
+// arms available would be inventing a second authority on the one question the
+// card exists to answer, so it is recorded as a gap instead. Nothing here is
+// weakened or deleted: the whole classification stands, waiting on a carrier.
 func TurnEnd(te *protocolv1.TurnEnded) *frontendv1.FailureCardView {
 	reason := te.GetStopReason()
 	if !ssm.VendorBlockingTurnEnd(reason, te.GetIsError()) {
