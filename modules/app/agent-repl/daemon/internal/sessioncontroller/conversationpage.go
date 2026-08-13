@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -203,7 +203,7 @@ type pageOutcome struct {
 // fromSeq is EXCLUSIVE (matching Subscribe.from_seq and ReplayRequest.from_seq)
 // and toSeq is an EXCLUSIVE upper bound, with 0 meaning "until the history
 // drains".
-type pageRangeReader func(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (pageRangeResult, error)
+type pageRangeReader func(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*protocolv1.Event)) (pageRangeResult, error)
 
 // pageRangeResult is the common report both routes make about one range.
 type pageRangeResult struct {
@@ -336,7 +336,7 @@ func anchorBoundResolver(anchor PageAnchor) pageBoundResolver {
 // pageFromController serves a page for a workspace with a live session
 // controller, reading the range THROUGH THE SHIM.
 func (m *Manager) pageFromController(ctx context.Context, d *sessionController, resolve pageBoundResolver, limit uint32) (pageOutcome, error) {
-	read := func(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (pageRangeResult, error) {
+	read := func(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*protocolv1.Event)) (pageRangeResult, error) {
 		res, err := d.client.Replay(ctx, fromSeq, toSeq, maxEvents, onEvent)
 		return pageRangeResult{Delivered: res.Delivered, Truncated: res.Truncated, Reason: res.Reason}, err
 	}
@@ -353,7 +353,7 @@ func (m *Manager) pageFromDurableHistory(ctx context.Context, workspace, generat
 	if !ok {
 		return pageOutcome{}, fmt.Errorf("session-controller: conversation page for unwired ws %q cannot be served: %w", workspace, errclass.ErrNoLiveSessionController)
 	}
-	read := func(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (pageRangeResult, error) {
+	read := func(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*protocolv1.Event)) (pageRangeResult, error) {
 		res, err := m.cfg.DurableHistory.ReplayHistory(ctx, workspace, sessionID, fromSeq, toSeq, maxEvents, onEvent)
 		return pageRangeResult{Delivered: res.Delivered, Truncated: res.Truncated, Reason: res.Reason}, err
 	}
@@ -553,7 +553,7 @@ func (m *Manager) translateRange(ctx context.Context, workspace, sessionID, gene
 		segments []pageSegment
 		dropped  bool
 	)
-	res, err := read(ctx, exclusiveLowerBound(lower), upper, pageMaxEvents, func(ev *corev1.Event) {
+	res, err := read(ctx, exclusiveLowerBound(lower), upper, pageMaxEvents, func(ev *protocolv1.Event) {
 		before := len(capture.deltas)
 		cons.pushConversation(ev, false)
 		for _, cd := range capture.deltas[before:] {
@@ -676,5 +676,5 @@ func continuationName(reachedStart bool) string {
 // compile-time proof the live route's replay really has the shape the windowed
 // walk was written against.
 var _ interface {
-	Replay(context.Context, uint64, uint64, uint32, func(*corev1.Event)) (shimclient.ReplayResult, error)
+	Replay(context.Context, uint64, uint64, uint32, func(*protocolv1.Event)) (shimclient.ReplayResult, error)
 } = (*shimclient.Client)(nil)

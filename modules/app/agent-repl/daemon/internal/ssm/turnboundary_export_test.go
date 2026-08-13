@@ -1,7 +1,7 @@
 package ssm
 
 import (
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // applyTest routes ONE event exactly the way the daemon's consumer does: a turn
@@ -13,9 +13,9 @@ import (
 // resolver the daemon uses. An event whose session no resolver binds is passed
 // through so the caller sees the resolver's own refusal rather than a validation
 // error about a workspace the test never supplied.
-func applyTest(m *Manager, ev *corev1.Event) error {
+func applyTest(m *Manager, ev *protocolv1.Event) error {
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_TurnStarted, *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnStarted, *protocolv1.Event_TurnEnded:
 	default:
 		return m.Apply(ev)
 	}
@@ -37,7 +37,7 @@ func applyTest(m *Manager, ev *corev1.Event) error {
 // asserting on the ledger is asserting on the same transaction that paints the
 // color. A production caller has exactly one way in, which is the point of
 // Apply's refusal.
-func (m *Manager) ResolveTurnLifecycle(workspace, claimantSessionID, liveQueryInstanceID string, ev *corev1.Event) (before, after []string, replayed bool, err error) {
+func (m *Manager) ResolveTurnLifecycle(workspace, claimantSessionID, liveQueryInstanceID string, ev *protocolv1.Event) (before, after []string, replayed bool, err error) {
 	b, err := m.ApplyTurnBoundary(workspace, claimantSessionID, liveQueryInstanceID, ev)
 	return b.Before, b.After, b.Replayed, err
 }

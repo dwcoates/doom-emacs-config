@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // TurnBoundary is one accepted turn boundary's outcome: what the durable
@@ -48,7 +48,7 @@ type TurnBoundary struct {
 //
 // liveQueryInstanceID is the query() invocation the CALLER is bound to; see
 // turnEndIsHistorical.
-func (m *Manager) ApplyTurnBoundary(workspace, claimantSessionID, liveQueryInstanceID string, ev *corev1.Event) (TurnBoundary, error) {
+func (m *Manager) ApplyTurnBoundary(workspace, claimantSessionID, liveQueryInstanceID string, ev *protocolv1.Event) (TurnBoundary, error) {
 	if err := m.validateTurnBoundary(workspace, claimantSessionID, ev); err != nil {
 		return TurnBoundary{}, err
 	}
@@ -107,7 +107,7 @@ func (m *Manager) ApplyTurnBoundary(workspace, claimantSessionID, liveQueryInsta
 	// A COMPACTION CANNOT OUTLIVE ITS TURN — see the same note in Apply. The
 	// compaction axis is not turn liveness, so it is closed after the boundary's
 	// own transaction rather than inside it.
-	if _, ended := ev.GetPayload().(*corev1.Event_TurnEnded); ended {
+	if _, ended := ev.GetPayload().(*protocolv1.Event_TurnEnded); ended {
 		m.closeCompactingLocked(workspace, causeTurnEnded)
 	}
 	if err := m.reresolveLocked(workspace, causeKind, ev.GetSeq()); err != nil {
@@ -124,7 +124,7 @@ func (m *Manager) ApplyTurnBoundary(workspace, claimantSessionID, liveQueryInsta
 
 // validateTurnBoundary is the boundary's envelope check, unchanged from the
 // ledger resolver it was factored out of.
-func (m *Manager) validateTurnBoundary(workspace, claimantSessionID string, ev *corev1.Event) error {
+func (m *Manager) validateTurnBoundary(workspace, claimantSessionID string, ev *protocolv1.Event) error {
 	if workspace == "" {
 		err := fmt.Errorf("ssm: turn boundary got an empty workspace")
 		m.logf("ssm: turn boundary decision=reject_validation workspace=%q claimant_session=%q event=%v error=%v",
@@ -143,7 +143,7 @@ func (m *Manager) validateTurnBoundary(workspace, claimantSessionID string, ev *
 			workspace, claimantSessionID, ev, err)
 		return err
 	}
-	if ev.GetPlane() != corev1.Plane_PLANE_STREAM {
+	if ev.GetPlane() != protocolv1.Plane_PLANE_STREAM {
 		err := fmt.Errorf("ssm: turn boundary rejected plane=%s workspace=%s claimant_session=%s event_session=%s seq=%d",
 			ev.GetPlane().String(), workspace, claimantSessionID, ev.GetSessionId(), ev.GetSeq())
 		m.logf("ssm: turn boundary decision=reject_validation workspace=%q claimant_session=%q event_session=%q seq=%d plane=%s turn_id=%q request_id=%q error=%v",
@@ -168,7 +168,7 @@ func (m *Manager) validateTurnBoundary(workspace, claimantSessionID string, ev *
 // (vendor) identity.
 //
 // Caller holds m.mu.
-func (m *Manager) turnBoundaryOwnerLocked(workspace, claimantSessionID string, ev *corev1.Event) (string, error) {
+func (m *Manager) turnBoundaryOwnerLocked(workspace, claimantSessionID string, ev *protocolv1.Event) (string, error) {
 	sid := ev.GetSessionId()
 	if m.resolver == nil {
 		return "", fmt.Errorf("ssm: no resolver injected; cannot bind session %s to a workspace", sid)
@@ -197,19 +197,19 @@ func (m *Manager) turnBoundaryOwnerLocked(workspace, claimantSessionID string, e
 // commits — see the call site.
 //
 // Caller holds m.mu.
-func (m *Manager) turnBoundaryMarkLocked(ws string, ev *corev1.Event, state, causeKind string) (string, string, func()) {
+func (m *Manager) turnBoundaryMarkLocked(ws string, ev *protocolv1.Event, state, causeKind string) (string, string, func()) {
 	mark := m.interruptedTurn[ws]
 	if mark == nil {
 		return state, causeKind, func() {}
 	}
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnEnded:
 		return sigInterrupted, causeInterrupted, func() {
 			delete(m.interruptedTurn, ws)
 			m.logf("ssm: turn end reported as `interrupted` ws=%s session=%s seq=%d (superseding %s) — a user-commanded stop was delivered to this turn",
 				ws, ev.GetSessionId(), ev.GetSeq(), state)
 		}
-	case *corev1.Event_TurnStarted:
+	case *protocolv1.Event_TurnStarted:
 		if mark.tolerateLateStart {
 			return state, causeKind, func() {
 				mark.tolerateLateStart = false
@@ -244,7 +244,7 @@ func (m *Manager) turnBoundaryMarkLocked(ws string, ev *corev1.Event, state, cau
 func (m *Manager) paintTurnBandLocked(
 	tx *sql.Tx,
 	workspace, owner, eventSessionID string,
-	ev *corev1.Event,
+	ev *protocolv1.Event,
 	l TurnLiveness,
 	endState, endCause string,
 ) (string, error) {
@@ -257,7 +257,7 @@ func (m *Manager) paintTurnBandLocked(
 	want, causeKind := endState, endCause
 	if band, live := turnBandToken(l); live {
 		want, causeKind = band, causeTurnStarted
-	} else if _, started := ev.GetPayload().(*corev1.Event_TurnStarted); started {
+	} else if _, started := ev.GetPayload().(*protocolv1.Event_TurnStarted); started {
 		// A START THAT ARRIVES ALREADY ENDED PAINTS NOTHING. The derivation
 		// holds no live turn because this start replays a turn the daemon
 		// killed, and its durable end closed the claim in the same statement

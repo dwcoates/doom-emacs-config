@@ -3,7 +3,7 @@ package shimclient
 import (
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // A store seq is only meaningful inside one SHIM GENERATION's seq space.
@@ -43,7 +43,7 @@ import (
 // "" means UNIDENTIFIABLE (a hello carrying no pid — a shim built before the
 // field existed), never "some generation". Callers must treat it as a generation
 // they cannot compare rather than as one that matches.
-func shimGenerationID(hello *corev1.ShimHello) string {
+func shimGenerationID(hello *protocolv1.ShimHello) string {
 	if pid := hello.GetPid(); pid > 0 {
 		return fmt.Sprintf("pid=%d", pid)
 	}
@@ -60,7 +60,7 @@ func shimGenerationID(hello *corev1.ShimHello) string {
 // and the reset because it silently drops a durable high-water mark to zero,
 // which must be auditable from the log alone (old mark, both generations, and
 // the seq that forced the decision).
-func (c *Client) reconcileSeqGeneration(ev *corev1.Event, seq uint64) error {
+func (c *Client) reconcileSeqGeneration(ev *protocolv1.Event, seq uint64) error {
 	regression := fmt.Errorf("%w: session=%s got seq=%d after last_seen=%d",
 		ErrSeqRegression, ev.GetSessionId(), seq, c.lastSeen)
 	switch {

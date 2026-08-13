@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
@@ -168,15 +168,15 @@ func TestRegistryAndStateLogInterleaveOnOneSharedStore(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			if _, err := mgr.ApplyTurnBoundary("/ws", "uuid-1", "", &corev1.Event{
+			if _, err := mgr.ApplyTurnBoundary("/ws", "uuid-1", "", &protocolv1.Event{
 				SessionId: "uuid-1",
 				Seq:       uint64(i + 1),
-				Plane:     corev1.Plane_PLANE_STREAM,
+				Plane:     protocolv1.Plane_PLANE_STREAM,
 				// One identity per round: a turn id names ONE turn, and the
 				// durable ledger refuses a second start under a name it already
 				// holds. The subject here is store contention, not correlation.
 				RequestId: fmt.Sprintf("turn-%d", i),
-				Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: fmt.Sprintf("turn-%d", i)}},
+				Payload:   &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: fmt.Sprintf("turn-%d", i)}},
 			}); err != nil {
 				ssmErrs <- err
 			}

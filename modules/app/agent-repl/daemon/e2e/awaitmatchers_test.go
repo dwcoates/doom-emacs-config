@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // awaitmatchers_test.go — the two shared await predicates, and the guard that
@@ -133,7 +133,7 @@ func permissionFrame(t *testing.T, workspace, uuid string) *frontendv1.FrontendF
 				Messages: []*frontendv1.Message{{
 					Uuid: uuid,
 					Payload: &frontendv1.Message_Permission{
-						Permission: &corev1.PermissionItem{Resolution: corev1.PermissionItem_RESOLUTION_PENDING},
+						Permission: &protocolv1.PermissionItem{Resolution: protocolv1.PermissionItem_RESOLUTION_PENDING},
 					},
 				}},
 			},

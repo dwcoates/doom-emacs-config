@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
@@ -30,7 +30,7 @@ func TestConsumerRetainsLatestSystemInit(t *testing.T) {
 	}
 
 	// Act
-	c.Consume(&corev1.Event{SessionId: "s1", Payload: &corev1.Event_Vendor{Vendor: any}})
+	c.Consume(&protocolv1.Event{SessionId: "s1", Payload: &protocolv1.Event_Vendor{Vendor: any}})
 
 	// Assert — the snapshot is retained for the pushed SessionInitView frame.
 	si := c.latestSystemInit()
@@ -54,7 +54,7 @@ func TestConsumeVendorSystemInitPushesSessionInitView(t *testing.T) {
 	}
 
 	// Act.
-	c.Consume(&corev1.Event{SessionId: "s1", Payload: &corev1.Event_Vendor{Vendor: any}})
+	c.Consume(&protocolv1.Event{SessionId: "s1", Payload: &protocolv1.Event_Vendor{Vendor: any}})
 
 	// Assert — a SessionInitView is pushed when the init lands (S9), scoped to
 	// the consumer's workspace/session and carrying the retained init.

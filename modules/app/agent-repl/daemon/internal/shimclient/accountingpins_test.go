@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // fakeOpenClaims answers the durable open-claim question.
@@ -102,12 +102,12 @@ func TestUnpinningAnUnknownTurnIsANoOp(t *testing.T) {
 // --- turn ends from a retired query vs genuine inconsistency ------------------
 
 // endEvent is a TurnEnded at SEQ for TURNID, produced by ENVELOPEQUERY.
-func endEvent(seq uint64, turnID, envelopeQuery string) *corev1.Event {
-	return &corev1.Event{
-		SessionId: "vendor", Seq: seq, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT,
+func endEvent(seq uint64, turnID, envelopeQuery string) *protocolv1.Event {
+	return &protocolv1.Event{
+		SessionId: "vendor", Seq: seq, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		RequestId:       turnID,
 		QueryInstanceId: envelopeQuery,
-		Payload:         &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: turnID}},
+		Payload:         &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: turnID}},
 	}
 }
 

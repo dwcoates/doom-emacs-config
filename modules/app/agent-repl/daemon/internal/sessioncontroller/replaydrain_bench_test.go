@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/progress"
@@ -202,11 +202,11 @@ func newBenchRig(tb testing.TB) *benchRig {
 // drain feeds the events in at the seam the shim's read loop feeds them,
 // routing each payload to the sink the read loop's own type switch routes it
 // to.
-func (r *benchRig) drain(tb testing.TB, events []*corev1.Event) {
+func (r *benchRig) drain(tb testing.TB, events []*protocolv1.Event) {
 	tb.Helper()
 	for _, ev := range events {
 		switch ev.GetPayload().(type) {
-		case *corev1.Event_TurnStarted, *corev1.Event_TurnEnded, *corev1.Event_SessionStarted:
+		case *protocolv1.Event_TurnStarted, *protocolv1.Event_TurnEnded, *protocolv1.Event_SessionStarted:
 			if err := r.cons.Apply(ev); err != nil {
 				tb.Fatalf("apply seq=%d: %v", ev.GetSeq(), err)
 			}
@@ -221,33 +221,33 @@ func (r *benchRig) drain(tb testing.TB, events []*corev1.Event) {
 // benchTranscript builds one realistic replayed transcript: turn lifecycle
 // boundaries, transcript user and assistant lines carrying API usage, streamed
 // assistant messages, and content deltas.
-func benchTranscript(tb testing.TB, events int) []*corev1.Event {
+func benchTranscript(tb testing.TB, events int) []*protocolv1.Event {
 	tb.Helper()
-	out := make([]*corev1.Event, 0, events)
+	out := make([]*protocolv1.Event, 0, events)
 	var seq uint64
-	next := func() *corev1.Event {
+	next := func() *protocolv1.Event {
 		seq++
-		return &corev1.Event{
+		return &protocolv1.Event{
 			SessionId:    benchSessionID,
 			Seq:          seq,
-			Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+			Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 			ProducedAtMs: benchNowMs,
 		}
 	}
-	vendor := func(msg proto.Message) *corev1.Event {
+	vendor := func(msg proto.Message) *protocolv1.Event {
 		a, err := anypb.New(msg)
 		if err != nil {
 			tb.Fatalf("anypb.New: %v", err)
 		}
 		ev := next()
-		ev.Payload = &corev1.Event_Vendor{Vendor: a}
+		ev.Payload = &protocolv1.Event_Vendor{Vendor: a}
 		return ev
 	}
 	for turn := 0; len(out) < events; turn++ {
 		turnID := fmt.Sprintf("turn-%d", turn)
 		start := next()
-		start.Payload = &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: turnID}}
-		start.Plane = corev1.Plane_PLANE_STREAM
+		start.Payload = &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: turnID}}
+		start.Plane = protocolv1.Plane_PLANE_STREAM
 		start.RequestId = turnID
 		out = append(out, start)
 		out = append(out, vendor(&datav1.TranscriptLine{Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
@@ -259,13 +259,13 @@ func benchTranscript(tb testing.TB, events int) []*corev1.Event {
 		for i := 0; i < benchEventsPerTurn/5; i++ {
 			// Ephemeral: a streamed delta carries no store seq, so it neither
 			// consumes one nor advances the drain's high-water mark.
-			out = append(out, &corev1.Event{
+			out = append(out, &protocolv1.Event{
 				SessionId:    benchSessionID,
-				Class:        corev1.EventClass_EVENT_CLASS_EPHEMERAL,
+				Class:        protocolv1.EventClass_EVENT_CLASS_EPHEMERAL,
 				ProducedAtMs: benchNowMs,
-				Payload: &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{
+				Payload: &protocolv1.Event_ContentDelta{ContentDelta: &protocolv1.ContentDelta{
 					Uuid:  fmt.Sprintf("a-%d-stream", turn),
-					Delta: &corev1.ContentDelta_Text{Text: "streamed assistant text chunk"},
+					Delta: &protocolv1.ContentDelta_Text{Text: "streamed assistant text chunk"},
 				}},
 			})
 		}
@@ -291,8 +291,8 @@ func benchTranscript(tb testing.TB, events int) []*corev1.Event {
 			}}}))
 		}
 		end := next()
-		end.Payload = &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: turnID}}
-		end.Plane = corev1.Plane_PLANE_STREAM
+		end.Payload = &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: turnID}}
+		end.Plane = protocolv1.Plane_PLANE_STREAM
 		end.RequestId = turnID
 		out = append(out, end)
 	}
@@ -312,9 +312,9 @@ func TestReplayDrainPersistsEveryResponseItCarried(t *testing.T) {
 	wantTurns := 0
 	for _, ev := range events {
 		switch ev.GetPayload().(type) {
-		case *corev1.Event_TurnEnded:
+		case *protocolv1.Event_TurnEnded:
 			wantTurns++
-		case *corev1.Event_Vendor:
+		case *protocolv1.Event_Vendor:
 			var line datav1.TranscriptLine
 			if err := ev.GetVendor().UnmarshalTo(&line); err != nil {
 				continue

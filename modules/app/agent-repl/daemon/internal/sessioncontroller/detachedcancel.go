@@ -17,8 +17,8 @@ import (
 	"context"
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/frontend"
 )
@@ -42,7 +42,7 @@ import (
 // reason Interrupt's is: the wire travels under a daemon-minted control id
 // that appears in no caller's records, so without it the cancel would be
 // unfindable end to end.
-func (m *Manager) CancelDetachedAgents(ctx context.Context, workspace, requestID string) (*corev1.DetachedCancelOutcome, error) {
+func (m *Manager) CancelDetachedAgents(ctx context.Context, workspace, requestID string) (*protocolv1.DetachedCancelOutcome, error) {
 	d, err := m.existing(workspace)
 	if err != nil {
 		return nil, err
@@ -83,7 +83,7 @@ func (c *consumer) settleDetachedOnCancel(taskIDs []string, reason string) {
 		return
 	}
 	ups, err := c.work.settleCancelledTasks(taskIDs, frontend.DetachedVerdict{
-		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED,
+		Status: protocolv1.TerminalStatus_TERMINAL_STATUS_STOPPED,
 		AtMs:   c.now(),
 		Reason: reason,
 	})

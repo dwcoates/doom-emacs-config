@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/shim"
 	"claude-repld/internal/ssm"
@@ -91,11 +91,11 @@ func (h *queueHarness) reattach(build string, turnInFlight bool, activeTurnIDs [
 // work. A nil id list is still an ANSWER — present and empty.
 func (h *queueHarness) reattachWithAsyncWork(build string, turnInFlight bool, activeTurnIDs, liveTaskIDs []string) {
 	h.t.Helper()
-	h.m.onConnected("ws", "s1", &corev1.ShimHello{
+	h.m.onConnected("ws", "s1", &protocolv1.ShimHello{
 		BuildSha:      build,
 		TurnInFlight:  turnInFlight,
 		ActiveTurnIds: activeTurnIDs,
-		LiveTaskSet:   &corev1.LiveTaskSet{TaskIds: liveTaskIDs},
+		LiveTaskSet:   &protocolv1.LiveTaskSet{TaskIds: liveTaskIDs},
 	})
 }
 

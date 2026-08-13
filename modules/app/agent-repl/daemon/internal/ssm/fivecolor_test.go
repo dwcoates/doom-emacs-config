@@ -6,19 +6,19 @@ import (
 	"reflect"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // evTurnEndedReason is evTurnEnded with an explicit stop reason, for the
 // vendor-block classification.
-func evTurnEndedReason(sid string, seq uint64, reason string, isErr bool) *corev1.Event {
-	return &corev1.Event{
+func evTurnEndedReason(sid string, seq uint64, reason string, isErr bool) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId: sid,
 		Seq:       seq,
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Payload: &corev1.Event_TurnEnded{
-			TurnEnded: &corev1.TurnEnded{StopReason: reason, IsError: isErr},
+		Plane:     protocolv1.Plane_PLANE_STREAM,
+		Payload: &protocolv1.Event_TurnEnded{
+			TurnEnded: &protocolv1.TurnEnded{StopReason: reason, IsError: isErr},
 		},
 	}
 }

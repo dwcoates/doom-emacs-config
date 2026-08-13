@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/keepalive"
@@ -176,7 +176,7 @@ func (m *Manager) SubmitKeepAlivePing(ctx context.Context, workspace string) (tu
 	m.logf("session-controller: keep-alive ping SUBMITTING ws=%q session=%s turn_id=%s — refreshing the vendor prompt cache before its TTL expires",
 		workspace, sessionID, turnID)
 	err = m.forwardPrompt(ctx, d, turnID, keepalive.PingText, "keep-alive:"+turnID, "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE, submitterKeepAlive)
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE, submitterKeepAlive)
 	if err != nil {
 		// THE CLAIM, THE HOLDS AND THE WINDOW ARE RELEASED TOGETHER. Each one
 		// alone is a leak the others cannot repair: a surviving claim parks

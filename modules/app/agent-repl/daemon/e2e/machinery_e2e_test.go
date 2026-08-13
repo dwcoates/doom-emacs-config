@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -37,7 +37,7 @@ const machineryContent = "<command-message>compact</command-message>\n" +
 // the class PERSISTENT, and the dedup key is left EMPTY so the store derives
 // its own uuid: key (handler.go §"dedupKey is set only where the store cannot
 // derive it").
-func sidecarUserLineEvent(t *testing.T, vendorSessionID, lineUUID, content string) *corev1.Event {
+func sidecarUserLineEvent(t *testing.T, vendorSessionID, lineUUID, content string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.TranscriptLine{
 		Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
@@ -50,12 +50,12 @@ func sidecarUserLineEvent(t *testing.T, vendorSessionID, lineUUID, content strin
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId:    vendorSessionID,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:        protocolv1.Plane_PLANE_FILE,
+		Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		ProducedAtMs: time.Now().UnixMilli(),
-		Payload:      &corev1.Event_Vendor{Vendor: a},
+		Payload:      &protocolv1.Event_Vendor{Vendor: a},
 	}
 }
 

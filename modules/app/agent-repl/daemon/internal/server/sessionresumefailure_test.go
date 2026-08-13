@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	agentshimcorev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	agentshimprotocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
@@ -88,7 +88,7 @@ func TestAutomaticResumeEstablishmentPreservesTypedTerminationAndGenericCause(t 
 				err: errors.New("query startup failed"),
 				detail: &frontendv1.QueryTerminationFailure{
 					QueryInstanceId: "query-1", VendorIdentity: &frontendv1.QueryTerminationFailure_VendorSessionId{VendorSessionId: "claude-session"},
-					Reason: &frontendv1.QueryTerminationFailure_StartupFailure{StartupFailure: &agentshimcorev1.QueryStartupFailure{Cause: "resume rejected"}},
+					Reason: &frontendv1.QueryTerminationFailure_StartupFailure{StartupFailure: &protocolv1.QueryStartupFailure{Cause: "resume rejected"}},
 				},
 			},
 			check: func(t *testing.T, detail *frontendv1.SessionResumeFailure) {

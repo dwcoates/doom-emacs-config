@@ -7,28 +7,28 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
-func turnStartEvent(plane corev1.Plane, seq uint64, id string) *corev1.Event {
-	return &corev1.Event{
+func turnStartEvent(plane protocolv1.Plane, seq uint64, id string) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId: "vendor-session",
 		Seq:       seq,
 		Plane:     plane,
 		RequestId: id,
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{
 			TurnId: id,
 		}},
 	}
 }
 
-func turnEndEvent(plane corev1.Plane, seq uint64, id string) *corev1.Event {
-	return &corev1.Event{
+func turnEndEvent(plane protocolv1.Plane, seq uint64, id string) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId: "vendor-session",
 		Seq:       seq,
 		Plane:     plane,
 		RequestId: id,
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{
 			TurnId: id,
 		}},
 	}
@@ -41,7 +41,7 @@ func testTurnLifecycle() (turnLifecycle, *fakeApplier) {
 
 func TestTurnLifecycleRejectsDelayedFileEndAcrossANewerTurn(t *testing.T) {
 	lifecycle, store := testTurnLifecycle()
-	start, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 12885, "turn-new"), "")
+	start, err := lifecycle.resolve(turnStartEvent(protocolv1.Plane_PLANE_STREAM, 12885, "turn-new"), "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestTurnLifecycleRejectsDelayedFileEndAcrossANewerTurn(t *testing.T) {
 		t.Fatalf("start resolution = %+v, want applied active transition", start)
 	}
 
-	stale, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_FILE, 12891, ""), "")
+	stale, err := lifecycle.resolve(turnEndEvent(protocolv1.Plane_PLANE_FILE, 12891, ""), "")
 	if err == nil {
 		t.Fatal("stale file end succeeded")
 	}
@@ -60,7 +60,7 @@ func TestTurnLifecycleRejectsDelayedFileEndAcrossANewerTurn(t *testing.T) {
 		t.Fatalf("durable active turns after stale file end = %v, want [turn-new]", store.turns)
 	}
 
-	real, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 12905, "turn-new"), "")
+	real, err := lifecycle.resolve(turnEndEvent(protocolv1.Plane_PLANE_STREAM, 12905, "turn-new"), "")
 	if err != nil {
 		t.Fatalf("real stream end: %v", err)
 	}
@@ -71,11 +71,11 @@ func TestTurnLifecycleRejectsDelayedFileEndAcrossANewerTurn(t *testing.T) {
 
 func TestTurnLifecycleRejectsWrongTurnIdentity(t *testing.T) {
 	lifecycle, store := testTurnLifecycle()
-	if _, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "turn-current"), ""); err != nil {
+	if _, err := lifecycle.resolve(turnStartEvent(protocolv1.Plane_PLANE_STREAM, 1, "turn-current"), ""); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	got, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 2, "turn-prior"), "")
+	got, err := lifecycle.resolve(turnEndEvent(protocolv1.Plane_PLANE_STREAM, 2, "turn-prior"), "")
 	if err == nil {
 		t.Fatal("mismatched end succeeded")
 	}
@@ -89,10 +89,10 @@ func TestTurnLifecycleRejectsWrongTurnIdentity(t *testing.T) {
 
 func TestTurnLifecycleKeepsStateActiveUntilEveryQueuedTurnEnds(t *testing.T) {
 	lifecycle, _ := testTurnLifecycle()
-	if _, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "turn-1"), ""); err != nil {
+	if _, err := lifecycle.resolve(turnStartEvent(protocolv1.Plane_PLANE_STREAM, 1, "turn-1"), ""); err != nil {
 		t.Fatalf("first start: %v", err)
 	}
-	second, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 2, "turn-2"), "")
+	second, err := lifecycle.resolve(turnStartEvent(protocolv1.Plane_PLANE_STREAM, 2, "turn-2"), "")
 	if err != nil {
 		t.Fatalf("second start: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestTurnLifecycleKeepsStateActiveUntilEveryQueuedTurnEnds(t *testing.T) {
 		t.Fatalf("second start resolution = %+v, want applied without a second active edge", second)
 	}
 
-	firstEnd, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 3, "turn-1"), "")
+	firstEnd, err := lifecycle.resolve(turnEndEvent(protocolv1.Plane_PLANE_STREAM, 3, "turn-1"), "")
 	if err != nil {
 		t.Fatalf("first end: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestTurnLifecycleKeepsStateActiveUntilEveryQueuedTurnEnds(t *testing.T) {
 		t.Fatalf("first queued end resolution = %+v, want state held active", firstEnd)
 	}
 
-	lastEnd, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 4, "turn-2"), "")
+	lastEnd, err := lifecycle.resolve(turnEndEvent(protocolv1.Plane_PLANE_STREAM, 4, "turn-2"), "")
 	if err != nil {
 		t.Fatalf("last end: %v", err)
 	}
@@ -119,8 +119,8 @@ func TestTurnLifecycleKeepsStateActiveUntilEveryQueuedTurnEnds(t *testing.T) {
 
 func TestTurnLifecycleAdmitsOrderedLegacyReplay(t *testing.T) {
 	lifecycle, _ := testTurnLifecycle()
-	start := turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "")
-	end := turnEndEvent(corev1.Plane_PLANE_STREAM, 2, "")
+	start := turnStartEvent(protocolv1.Plane_PLANE_STREAM, 1, "")
+	end := turnEndEvent(protocolv1.Plane_PLANE_STREAM, 2, "")
 	if got, err := lifecycle.resolve(start, ""); err != nil || got.decision != "accept_legacy_stream_start" || !got.apply {
 		t.Fatalf("legacy start resolution = %+v", got)
 	}
@@ -137,7 +137,7 @@ func TestTurnLifecycleHandshakeRestoresCorrelationForAnUnseenEnd(t *testing.T) {
 		logf:   func(string, ...any) {},
 		onTurn: func(active bool, _ int64) { snapshots = append(snapshots, active) },
 	}
-	active, closed, err := consumer.reconcileTurnHandshake(&corev1.ShimHello{
+	active, closed, err := consumer.reconcileTurnHandshake(&protocolv1.ShimHello{
 		ActiveTurnIds: []string{"turn-live"}, TurnInFlight: true,
 	})
 	if err != nil {
@@ -154,7 +154,7 @@ func TestTurnLifecycleHandshakeRestoresCorrelationForAnUnseenEnd(t *testing.T) {
 	}
 
 	lifecycle := newTurnLifecycle(store, "ws", "s1")
-	end, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 99, "turn-live"), "")
+	end, err := lifecycle.resolve(turnEndEvent(protocolv1.Plane_PLANE_STREAM, 99, "turn-live"), "")
 	if err != nil {
 		t.Fatalf("end after handshake: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestTurnLifecycleHandshakeRestoresCorrelationForAnUnseenEnd(t *testing.T) {
 
 func TestTurnLifecycleRejectsAStreamEndWithoutDurableClaim(t *testing.T) {
 	lifecycle, _ := testTurnLifecycle()
-	got, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 99, "turn-live"), "")
+	got, err := lifecycle.resolve(turnEndEvent(protocolv1.Plane_PLANE_STREAM, 99, "turn-live"), "")
 	if err == nil {
 		t.Fatal("unclaimed stream end succeeded")
 	}
@@ -176,10 +176,10 @@ func TestTurnLifecycleRejectsAStreamEndWithoutDurableClaim(t *testing.T) {
 
 func TestTurnLifecycleReplaysARecordedFinalEndToInterruptedConsumers(t *testing.T) {
 	lifecycle, _ := testTurnLifecycle()
-	if _, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "turn-live"), ""); err != nil {
+	if _, err := lifecycle.resolve(turnStartEvent(protocolv1.Plane_PLANE_STREAM, 1, "turn-live"), ""); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	end := turnEndEvent(corev1.Plane_PLANE_STREAM, 2, "turn-live")
+	end := turnEndEvent(protocolv1.Plane_PLANE_STREAM, 2, "turn-live")
 	if _, err := lifecycle.resolve(end, ""); err != nil {
 		t.Fatalf("first end: %v", err)
 	}
@@ -196,12 +196,12 @@ func TestTurnLifecycleReplayDoesNotPaintIdleWhileQueuedTurnRemains(t *testing.T)
 	lifecycle, _ := testTurnLifecycle()
 	for seq, id := range []string{"turn-1", "turn-2"} {
 		if _, err := lifecycle.resolve(turnStartEvent(
-			corev1.Plane_PLANE_STREAM, uint64(seq+1), id,
+			protocolv1.Plane_PLANE_STREAM, uint64(seq+1), id,
 		), ""); err != nil {
 			t.Fatalf("start %s: %v", id, err)
 		}
 	}
-	end := turnEndEvent(corev1.Plane_PLANE_STREAM, 3, "turn-1")
+	end := turnEndEvent(protocolv1.Plane_PLANE_STREAM, 3, "turn-1")
 	if _, err := lifecycle.resolve(end, ""); err != nil {
 		t.Fatalf("first queued end: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestDurablySettledClaimsNamesTheProvenCompletion(t *testing.T) {
 	}, func(string, ...any) {})
 
 	// Act.
-	got := cons.durablySettledClaims(&corev1.ShimHello{})
+	got := cons.durablySettledClaims(&protocolv1.ShimHello{})
 
 	// Assert.
 	if !reflect.DeepEqual(got, []string{"turn-finished"}) {
@@ -251,7 +251,7 @@ func TestDurablySettledClaimsSkipsTheProbeWhenTheHelloNamesATurn(t *testing.T) {
 	}, func(string, ...any) {})
 
 	// Act.
-	got := cons.durablySettledClaims(&corev1.ShimHello{TurnInFlight: true, ActiveTurnIds: []string{"turn-live"}})
+	got := cons.durablySettledClaims(&protocolv1.ShimHello{TurnInFlight: true, ActiveTurnIds: []string{"turn-live"}})
 
 	// Assert.
 	if got != nil || probed {
@@ -268,7 +268,7 @@ func TestDurablySettledClaimsSkipsTheProbeWithNoStandingClaim(t *testing.T) {
 	}, func(string, ...any) {})
 
 	// Act.
-	got := cons.durablySettledClaims(&corev1.ShimHello{})
+	got := cons.durablySettledClaims(&protocolv1.ShimHello{})
 
 	// Assert.
 	if got != nil || probed {
@@ -286,7 +286,7 @@ func TestDurablySettledClaimsProvesNothingWhenTheProbeFails(t *testing.T) {
 	}, func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) })
 
 	// Act.
-	got := cons.durablySettledClaims(&corev1.ShimHello{})
+	got := cons.durablySettledClaims(&protocolv1.ShimHello{})
 
 	// Assert.
 	if got != nil {
@@ -305,7 +305,7 @@ func TestDurablySettledClaimsProvesNothingWithNoProbeBound(t *testing.T) {
 	cons := evidenceConsumer(applier, nil, func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) })
 
 	// Act.
-	got := cons.durablySettledClaims(&corev1.ShimHello{})
+	got := cons.durablySettledClaims(&protocolv1.ShimHello{})
 
 	// Assert.
 	if got != nil {
@@ -327,7 +327,7 @@ func TestDurablySettledClaimsProvesNothingWhenTheClaimReadFails(t *testing.T) {
 	}, func(string, ...any) {})
 
 	// Act.
-	got := cons.durablySettledClaims(&corev1.ShimHello{})
+	got := cons.durablySettledClaims(&protocolv1.ShimHello{})
 
 	// Assert.
 	if got != nil || probed {
@@ -344,7 +344,7 @@ func TestReconcileTurnHandshakeKeepsTheDurablyEndedClaimOpen(t *testing.T) {
 	}, func(string, ...any) {})
 
 	// Act.
-	active, closed, err := cons.reconcileTurnHandshake(&corev1.ShimHello{})
+	active, closed, err := cons.reconcileTurnHandshake(&protocolv1.ShimHello{})
 
 	// Assert.
 	if err != nil {
@@ -365,7 +365,7 @@ func TestReconcileTurnHandshakeCutsTheClaimTheStoreCannotProve(t *testing.T) {
 	cons := evidenceConsumer(applier, func([]string) ([]string, error) { return nil, nil }, func(string, ...any) {})
 
 	// Act.
-	active, closed, err := cons.reconcileTurnHandshake(&corev1.ShimHello{})
+	active, closed, err := cons.reconcileTurnHandshake(&protocolv1.ShimHello{})
 
 	// Assert.
 	if err != nil {
@@ -387,7 +387,7 @@ func TestContradictoryTurnHandshakeAbortsBeforeHandshakeSideEffects(t *testing.T
 		t.Fatalf("seed durable turn: %v", err)
 	}
 
-	err := h.m.onHandshake("ws", "s1", &corev1.ShimHello{
+	err := h.m.onHandshake("ws", "s1", &protocolv1.ShimHello{
 		Pid:             4242,
 		QueryInstanceId: "query-1",
 		VendorSessionId: "uuid-other",

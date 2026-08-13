@@ -37,7 +37,7 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // RecordCategory is which of the contract's three categories one durable record
@@ -162,7 +162,7 @@ var eventPayloadOneof protoreflect.OneofDescriptor
 // kept for a kind nothing produces, and the next arm to claim that number would
 // silently inherit it.
 func init() {
-	eventPayloadOneof = (&corev1.Event{}).ProtoReflect().Descriptor().Oneofs().ByName("payload")
+	eventPayloadOneof = (&protocolv1.Event{}).ProtoReflect().Descriptor().Oneofs().ByName("payload")
 	if eventPayloadOneof == nil {
 		panic("frontend: agentshim.core.v1.Event has no `payload` oneof, so no durable record can be classified into the contract's three categories and every record would silently become unowned")
 	}
@@ -196,7 +196,7 @@ func init() {
 // returns a category, because the only category that could be returned by
 // convention is C, and returning C for something unrecognized is exactly how a
 // message gets silently dropped from paging.
-func CategorizeRecord(ev *corev1.Event) (RecordCategory, error) {
+func CategorizeRecord(ev *protocolv1.Event) (RecordCategory, error) {
 	if ev == nil {
 		return RecordCategoryUnset, fmt.Errorf("frontend: record categorization refused: no event was supplied, so there is no payload arm to classify and no identity to name in this error")
 	}
@@ -271,7 +271,7 @@ func unownedRecord(why string) RecordOwnership {
 // and is the exact cost the denormalized column exists to remove; a record
 // whose owner is not knowable from what the producer already holds is a
 // producer fault and is refused here, loudly, rather than repaired by a walk.
-func ResolveRecordOwnership(ev *corev1.Event, messageID string) (RecordOwnership, error) {
+func ResolveRecordOwnership(ev *protocolv1.Event, messageID string) (RecordOwnership, error) {
 	category, err := CategorizeRecord(ev)
 	if err != nil {
 		return RecordOwnership{}, err

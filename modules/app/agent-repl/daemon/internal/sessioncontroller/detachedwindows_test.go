@@ -9,9 +9,9 @@ import (
 	"context"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/frontend"
 
@@ -26,7 +26,7 @@ const mergeOriginCall = "toolu_merge"
 // skillCallEvent is the transcript record making one Skill call, for the
 // consumer-level tests. It builds ANY invocation — the merge run and every
 // other skill are the same record shape and differ only by what they name.
-func skillCallEvent(t *testing.T, seq uint64, uuid, toolUseID, skill, args string) *corev1.Event {
+func skillCallEvent(t *testing.T, seq uint64, uuid, toolUseID, skill, args string) *protocolv1.Event {
 	t.Helper()
 	input, err := structpb.NewStruct(map[string]any{"skill": skill, "args": args})
 	if err != nil {
@@ -43,11 +43,11 @@ func skillCallEvent(t *testing.T, seq uint64, uuid, toolUseID, skill, args strin
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // assistantTextEvent is one ordinary assistant utterance.
-func assistantTextEvent(t *testing.T, seq uint64, uuid, text string) *corev1.Event {
+func assistantTextEvent(t *testing.T, seq uint64, uuid, text string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.TranscriptLine{
 		Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
@@ -60,11 +60,11 @@ func assistantTextEvent(t *testing.T, seq uint64, uuid, text string) *corev1.Eve
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // userPromptEvent is a person typing: an unflagged user record carrying prose.
-func userPromptEvent(t *testing.T, seq uint64, uuid, text string) *corev1.Event {
+func userPromptEvent(t *testing.T, seq uint64, uuid, text string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.TranscriptLine{
 		Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
@@ -75,7 +75,7 @@ func userPromptEvent(t *testing.T, seq uint64, uuid, text string) *corev1.Event 
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // mergeEmissions is one batch of a session's own emissions.
@@ -398,7 +398,7 @@ func TestSettleWindowsSettlesTheDetachedWork(t *testing.T) {
 	b := openWindow(t, s)
 
 	// Act
-	ups, err := s.settleWindows(frontend.DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 12}, "user_prompt")
+	ups, err := s.settleWindows(frontend.DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 12}, "user_prompt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +415,7 @@ func TestSettleWindowsClosesTheWindow(t *testing.T) {
 	openWindow(t, s)
 
 	// Act
-	if _, err := s.settleWindows(frontend.DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 12}, "user_prompt"); err != nil {
+	if _, err := s.settleWindows(frontend.DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 12}, "user_prompt"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -430,7 +430,7 @@ func TestSettleWindowsReportsNothingWithNoWindowOpen(t *testing.T) {
 	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
-	ups, err := s.settleWindows(frontend.DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 12}, "user_prompt")
+	ups, err := s.settleWindows(frontend.DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 12}, "user_prompt")
 
 	// Assert
 	if err != nil || len(ups) != 0 {
@@ -601,7 +601,7 @@ func TestAnInterruptSettlesTheMergeWindow(t *testing.T) {
 	h := newQueueHarness(t, nil)
 	h.controller().consumer.Consume(skillCallEvent(t, 10, "a-merge", mergeOriginCall, "create-or-update-workspace", "merge"))
 	messageID := h.mergeDetachedWork()[0].GetUuid()
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 
 	// Act
 	if err := h.m.Interrupt(context.Background(), "ws", "fe-merge-stop"); err != nil {
@@ -623,7 +623,7 @@ func TestAnUndeliverableInterruptLeavesTheMergeWindowOpen(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 	h.controller().consumer.Consume(skillCallEvent(t, 10, "a-merge", mergeOriginCall, "create-or-update-workspace", "merge"))
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
 
 	// Act
 	_ = h.m.Interrupt(context.Background(), "ws", "fe-merge-stop")
@@ -1196,7 +1196,7 @@ func TestAnInterruptSettlesTheSkillWindow(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 	b := invokeSkill(t, h, 10, "a-demo", "toolu_demo", "demo", "run it")
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 
 	// Act
 	if err := h.m.Interrupt(context.Background(), "ws", "fe-skill-stop"); err != nil {

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -21,15 +21,15 @@ import (
 // ---------------------------------------------------------------------------
 
 // hello builds a ShimHello announcing vendorSessionID for session "s1".
-func rotationHello(vendorSessionID string) *corev1.ShimHello {
-	return &corev1.ShimHello{
+func rotationHello(vendorSessionID string) *protocolv1.ShimHello {
+	return &protocolv1.ShimHello{
 		SessionId: "s1", Vendor: "claude", ShimVersion: "test", ProtocolVersion: "1",
 		VendorSessionId: vendorSessionID,
 		QueryInstanceId: "query-rotation",
 	}
 }
 
-func rotationHelloInFlight(vendorSessionID string) *corev1.ShimHello {
+func rotationHelloInFlight(vendorSessionID string) *protocolv1.ShimHello {
 	hello := rotationHello(vendorSessionID)
 	hello.TurnInFlight = true
 	return hello
@@ -234,9 +234,9 @@ func TestPersistentEventReportsItsVendorSessionID(t *testing.T) {
 	c.onVendorSessionID = func(id string) { seen = append(seen, id) }
 
 	// Act.
-	c.Apply(&corev1.Event{
-		SessionId: "uuid-old", Seq: 7, Plane: corev1.Plane_PLANE_STREAM,
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
+	c.Apply(&protocolv1.Event{
+		SessionId: "uuid-old", Seq: 7, Plane: protocolv1.Plane_PLANE_STREAM,
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}},
 	})
 
 	// Assert.
@@ -254,9 +254,9 @@ func TestEphemeralEventReportsNoVendorSessionID(t *testing.T) {
 	c.onVendorSessionID = func(id string) { seen = append(seen, id) }
 
 	// Act.
-	c.Apply(&corev1.Event{
+	c.Apply(&protocolv1.Event{
 		SessionId: "s1", Seq: 0,
-		Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}},
+		Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{}},
 	})
 
 	// Assert.

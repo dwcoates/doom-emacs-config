@@ -1,7 +1,7 @@
 package sessioncontroller
 
 import (
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/ssm"
 )
@@ -63,7 +63,7 @@ import (
 //     where the settlement above failed.
 //   - THE ENRICHMENT HOLD IS INSTALLED LAST, over a ledger it reads at install
 //     time, so it cannot be waiting on anything that already happened.
-func (c *consumer) settleTurnOnTerminalResult(turnID string, ev *corev1.Event) {
+func (c *consumer) settleTurnOnTerminalResult(turnID string, ev *protocolv1.Event) {
 	c.noteTerminalResult(turnID, ev)
 	c.settleTurnStateOnTerminalResult(turnID, ev)
 	c.pushConversationAttributed(ev, true, turnID)
@@ -94,7 +94,7 @@ func (c *consumer) settleTurnOnTerminalResult(turnID string, ev *corev1.Event) {
 // prompt behind an end that is not coming. SettleTurnFromTerminalResult retires
 // the claims, paints the axis and hands the re-derived state to the frontends
 // that are already drawing the old one.
-func (c *consumer) settleTurnStateOnTerminalResult(turnID string, ev *corev1.Event) {
+func (c *consumer) settleTurnStateOnTerminalResult(turnID string, ev *protocolv1.Event) {
 	// A DISPLACED TURN IS NOT A FINISHED ONE. A teardown that is about to take
 	// this shim away interrupts the turn first, and the result that interrupt
 	// provokes is the SDK unwinding rather than the turn arriving at its own

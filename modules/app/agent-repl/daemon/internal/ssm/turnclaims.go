@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/statedb"
 )
@@ -98,13 +98,13 @@ const (
 // envelope; see turnEndIsHistorical.
 //
 // Caller holds m.mu and owns tx.
-func (m *Manager) moveTurnLedgerLocked(tx *sql.Tx, workspace, claimantSessionID, liveQueryInstanceID string, ev *corev1.Event) (before, after []string, replayed bool, err error) {
+func (m *Manager) moveTurnLedgerLocked(tx *sql.Tx, workspace, claimantSessionID, liveQueryInstanceID string, ev *protocolv1.Event) (before, after []string, replayed bool, err error) {
 	id := turnCorrelation(ev)
 	before, err = activeTurnIDs(tx, workspace, claimantSessionID)
 	if err != nil {
 		return nil, nil, false, err
 	}
-	if _, started := ev.GetPayload().(*corev1.Event_TurnStarted); started && m.hibernationLeases[workspace] != 0 {
+	if _, started := ev.GetPayload().(*protocolv1.Event_TurnStarted); started && m.hibernationLeases[workspace] != 0 {
 		isReplay, _, _, probeErr := recordTurnStart(tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq())
 		if probeErr != nil {
 			return before, before, false, probeErr
@@ -114,7 +114,7 @@ func (m *Manager) moveTurnLedgerLocked(tx *sql.Tx, workspace, claimantSessionID,
 		}
 	}
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_TurnStarted:
+	case *protocolv1.Event_TurnStarted:
 		var reconstructedEnd, settledReplay string
 		replayed, reconstructedEnd, settledReplay, err = recordTurnStart(
 			tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq(),
@@ -138,7 +138,7 @@ func (m *Manager) moveTurnLedgerLocked(tx *sql.Tx, workspace, claimantSessionID,
 			m.logf("ssm: turn start ADMITTED ALREADY ENDED workspace=%s claimant_session=%s event_session=%s seq=%d turn_id=%q cause=%s — this start replays a turn the daemon killed; the durable end recorded against its store coordinate closed the claim as it was created, so the replay reconstructs a matched start/end pair rather than a turn nothing can finish",
 				workspace, claimantSessionID, ev.GetSessionId(), ev.GetSeq(), id, reconstructedEnd)
 		}
-	case *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnEnded:
 		var crossGeneration bool
 		replayed, crossGeneration, err = recordTurnEnd(
 			tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq(),
@@ -184,7 +184,7 @@ func (m *Manager) moveTurnLedgerLocked(tx *sql.Tx, workspace, claimantSessionID,
 // creating a lifecycle edge. This method is the payload's only daemon
 // destination: it updates the durable claim ledger but never calls Apply,
 // appends workspace state, or publishes anything.
-func (m *Manager) ResolveTurnClaimBridge(workspace, claimantSessionID string, ev *corev1.Event) (replayed bool, err error) {
+func (m *Manager) ResolveTurnClaimBridge(workspace, claimantSessionID string, ev *protocolv1.Event) (replayed bool, err error) {
 	bridge := ev.GetTurnClaimBridge()
 	if workspace == "" || claimantSessionID == "" {
 		err := fmt.Errorf("ssm: turn claim bridge requires workspace and claimant session id")
@@ -198,8 +198,8 @@ func (m *Manager) ResolveTurnClaimBridge(workspace, claimantSessionID string, ev
 			workspace, claimantSessionID, ev, err)
 		return false, err
 	}
-	if ev.GetPlane() != corev1.Plane_PLANE_STREAM ||
-		ev.GetClass() != corev1.EventClass_EVENT_CLASS_PERSISTENT {
+	if ev.GetPlane() != protocolv1.Plane_PLANE_STREAM ||
+		ev.GetClass() != protocolv1.EventClass_EVENT_CLASS_PERSISTENT {
 		err := fmt.Errorf("ssm: turn claim bridge requires persistent stream plane, got plane=%s class=%s",
 			ev.GetPlane().String(), ev.GetClass().String())
 		m.logf("ssm: turn bridge decision=reject_validation workspace=%q claimant_session=%q event_session=%q seq=%d plane=%s class=%s turn_id=%q previous_session=%q request_id=%q error=%v",
@@ -930,7 +930,7 @@ func recordTurnBridge(
 // EMPTY IS LIVE. FAIL CLOSED. A producer that predates query_instance_id stamps
 // nothing, and the claim check must then apply to it exactly as it did before
 // the field existed. A caller with no bound query likewise admits no history.
-func turnEndIsHistorical(liveQueryInstanceID string, ev *corev1.Event) bool {
+func turnEndIsHistorical(liveQueryInstanceID string, ev *protocolv1.Event) bool {
 	if liveQueryInstanceID == "" {
 		return false
 	}

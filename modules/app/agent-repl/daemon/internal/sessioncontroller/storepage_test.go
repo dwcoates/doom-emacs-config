@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/storehistory"
 )
@@ -29,15 +29,15 @@ type messagePageSpy struct {
 	anchors []storehistory.PageAnchor
 	// served records the pages handed back, so a test can compare the anchor
 	// of one request against the value the previous page minted.
-	served []*corev1.MessagePage
-	events []*corev1.Event
+	served []*protocolv1.MessagePage
+	events []*protocolv1.Event
 	// override, when set, is returned instead of a page built from events —
 	// the way a test states a boundary arm the fixture would not produce.
-	override *corev1.MessagePage
+	override *protocolv1.MessagePage
 	err      error
 }
 
-func (s *messagePageSpy) MessagePage(_ context.Context, _, _ string, anchor storehistory.PageAnchor) (*corev1.MessagePage, error) {
+func (s *messagePageSpy) MessagePage(_ context.Context, _, _ string, anchor storehistory.PageAnchor) (*protocolv1.MessagePage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.anchors = append(s.anchors, anchor)
@@ -51,7 +51,7 @@ func (s *messagePageSpy) MessagePage(_ context.Context, _, _ string, anchor stor
 	// Everything strictly below the anchor, exactly as the store's
 	// `seq < :anchor` selection reads it. A head anchor names nothing, so the
 	// whole conversation is below it.
-	var below []*corev1.Event
+	var below []*protocolv1.Event
 	for _, ev := range s.events {
 		if anchor.Head || ev.GetSeq() < anchor.BeforeSeq {
 			below = append(below, ev)
@@ -61,31 +61,31 @@ func (s *messagePageSpy) MessagePage(_ context.Context, _, _ string, anchor stor
 	if len(take) > 10 {
 		take = take[len(take)-10:]
 	}
-	page := &corev1.MessagePage{}
+	page := &protocolv1.MessagePage{}
 	// NEWEST FIRST into the slots, which is what the storage contract states.
-	slots := []func(*corev1.StoredMessage){
-		func(m *corev1.StoredMessage) { page.Message_1 = m },
-		func(m *corev1.StoredMessage) { page.Message_2 = m },
-		func(m *corev1.StoredMessage) { page.Message_3 = m },
-		func(m *corev1.StoredMessage) { page.Message_4 = m },
-		func(m *corev1.StoredMessage) { page.Message_5 = m },
-		func(m *corev1.StoredMessage) { page.Message_6 = m },
-		func(m *corev1.StoredMessage) { page.Message_7 = m },
-		func(m *corev1.StoredMessage) { page.Message_8 = m },
-		func(m *corev1.StoredMessage) { page.Message_9 = m },
-		func(m *corev1.StoredMessage) { page.Message_10 = m },
+	slots := []func(*protocolv1.StoredMessage){
+		func(m *protocolv1.StoredMessage) { page.Message_1 = m },
+		func(m *protocolv1.StoredMessage) { page.Message_2 = m },
+		func(m *protocolv1.StoredMessage) { page.Message_3 = m },
+		func(m *protocolv1.StoredMessage) { page.Message_4 = m },
+		func(m *protocolv1.StoredMessage) { page.Message_5 = m },
+		func(m *protocolv1.StoredMessage) { page.Message_6 = m },
+		func(m *protocolv1.StoredMessage) { page.Message_7 = m },
+		func(m *protocolv1.StoredMessage) { page.Message_8 = m },
+		func(m *protocolv1.StoredMessage) { page.Message_9 = m },
+		func(m *protocolv1.StoredMessage) { page.Message_10 = m },
 	}
 	for i := 0; i < len(take); i++ {
 		ev := take[len(take)-1-i]
-		slots[i](&corev1.StoredMessage{MessageId: fmt.Sprintf("m%d", ev.GetSeq()), Records: []*corev1.Event{ev}})
+		slots[i](&protocolv1.StoredMessage{MessageId: fmt.Sprintf("m%d", ev.GetSeq()), Records: []*protocolv1.Event{ev}})
 	}
 	if len(take) > 0 {
 		page.LastPageSeq = take[0].GetSeq()
 	}
 	if len(below) > len(take) {
-		page.Boundary = &corev1.MessagePage_More{More: &corev1.HistoryRemainsBelow{}}
+		page.Boundary = &protocolv1.MessagePage_More{More: &protocolv1.HistoryRemainsBelow{}}
 	} else {
-		page.Boundary = &corev1.MessagePage_Floor{Floor: &corev1.HistoryAtRetainedFloor{}}
+		page.Boundary = &protocolv1.MessagePage_Floor{Floor: &protocolv1.HistoryAtRetainedFloor{}}
 	}
 	s.served = append(s.served, page)
 	return page, nil
@@ -97,10 +97,10 @@ func (s *messagePageSpy) requests() []storehistory.PageAnchor {
 	return append([]storehistory.PageAnchor(nil), s.anchors...)
 }
 
-func (s *messagePageSpy) pages() []*corev1.MessagePage {
+func (s *messagePageSpy) pages() []*protocolv1.MessagePage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]*corev1.MessagePage(nil), s.served...)
+	return append([]*protocolv1.MessagePage(nil), s.served...)
 }
 
 func TestAFirstHistoryPageAnchorsAtTheStoresHead(t *testing.T) {
@@ -165,10 +165,10 @@ func TestTheRetainedFloorArmIsNotHistoryAtStart(t *testing.T) {
 	// conversation began; the daemon's floor here is untouched, so nothing
 	// establishes a beginning.
 	h := newHistoryHarness(t, pageTextEvents(t, 30))
-	h.pages.override = &corev1.MessagePage{
-		Message_1:   &corev1.StoredMessage{MessageId: "m20", Records: []*corev1.Event{pageAssistantEvent(t, 20, "u20", nil)}},
+	h.pages.override = &protocolv1.MessagePage{
+		Message_1:   &protocolv1.StoredMessage{MessageId: "m20", Records: []*protocolv1.Event{pageAssistantEvent(t, 20, "u20", nil)}},
 		LastPageSeq: 20,
-		Boundary:    &corev1.MessagePage_Floor{Floor: &corev1.HistoryAtRetainedFloor{}},
+		Boundary:    &protocolv1.MessagePage_Floor{Floor: &protocolv1.HistoryAtRetainedFloor{}},
 	}
 
 	// Act.
@@ -222,8 +222,8 @@ func TestAStorePageWithNoBoundaryArmIsRefused(t *testing.T) {
 	// history. An unset arm is a protocol violation, not a third answer, and
 	// defaulting it would invent a claim the store never made.
 	h := newHistoryHarness(t, pageTextEvents(t, 30))
-	h.pages.override = &corev1.MessagePage{
-		Message_1:   &corev1.StoredMessage{MessageId: "m20", Records: []*corev1.Event{pageAssistantEvent(t, 20, "u20", nil)}},
+	h.pages.override = &protocolv1.MessagePage{
+		Message_1:   &protocolv1.StoredMessage{MessageId: "m20", Records: []*protocolv1.Event{pageAssistantEvent(t, 20, "u20", nil)}},
 		LastPageSeq: 20,
 	}
 

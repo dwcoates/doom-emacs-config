@@ -6,7 +6,7 @@ package sessioncontroller
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/frontend"
 )
@@ -28,13 +28,13 @@ func openTestSkillWindow(t *testing.T, c *consumer, toolUseID string) {
 }
 
 // inputDelta is one tool-input chunk on a stable tool identity.
-func inputDelta(toolUseID, chunk string) *corev1.Event {
+func inputDelta(toolUseID, chunk string) *protocolv1.Event {
 	id := toolUseID
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId: "s1",
-		Payload: &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{
+		Payload: &protocolv1.Event_ContentDelta{ContentDelta: &protocolv1.ContentDelta{
 			Uuid:      "u1",
-			Delta:     &corev1.ContentDelta_InputJson{InputJson: chunk},
+			Delta:     &protocolv1.ContentDelta_InputJson{InputJson: chunk},
 			ToolUseId: &id,
 		}},
 	}
@@ -200,7 +200,7 @@ func TestConsumeRelaysPreviewOnceTheWindowIsGone(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 	openTestSkillWindow(t, c, "toolu_skill")
-	settled := frontend.DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 1001}
+	settled := frontend.DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 1001}
 	if _, err := c.work.settleWindows(settled, "user_prompt"); err != nil {
 		t.Fatalf("settleWindows: %v", err)
 	}

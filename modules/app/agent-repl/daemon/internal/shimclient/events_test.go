@@ -9,23 +9,23 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-type recordingFileDiagnostics struct{ got chan *corev1.Event }
+type recordingFileDiagnostics struct{ got chan *protocolv1.Event }
 
-func (s *recordingFileDiagnostics) PersistFileDiagnostic(ev *corev1.Event, _ *corev1.FilePlaneDiagnostic) error {
+func (s *recordingFileDiagnostics) PersistFileDiagnostic(ev *protocolv1.Event, _ *protocolv1.FilePlaneDiagnostic) error {
 	s.got <- ev
 	return nil
 }
 
 type failingFileDiagnostics struct{}
 
-func (failingFileDiagnostics) PersistFileDiagnostic(*corev1.Event, *corev1.FilePlaneDiagnostic) error {
+func (failingFileDiagnostics) PersistFileDiagnostic(*protocolv1.Event, *protocolv1.FilePlaneDiagnostic) error {
 	return errors.New("durable sink failed")
 }
 
@@ -134,11 +134,11 @@ func TestTurnScopedLifecycleRejectionIsNotTerminal(t *testing.T) {
 			h := newHarness()
 			h.state.err = tc.sinkErr
 			c := New(h.config(t, "sess-1", "/unused.sock"))
-			ev := &corev1.Event{
+			ev := &protocolv1.Event{
 				SessionId: "sess-1", Seq: 7,
-				Plane:   corev1.Plane_PLANE_STREAM,
-				Class:   corev1.EventClass_EVENT_CLASS_PERSISTENT,
-				Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn-1"}},
+				Plane:   protocolv1.Plane_PLANE_STREAM,
+				Class:   protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
+				Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "turn-1"}},
 			}
 
 			// Act.
@@ -164,11 +164,11 @@ func TestTurnScopedLifecycleRejectionIsReportedAsDegraded(t *testing.T) {
 	h := newHarness()
 	h.state.err = fmt.Errorf("%w: duplicate turn start identity %q", ErrTurnScopedRejection, "turn-1")
 	c := New(h.config(t, "sess-1", "/unused.sock"))
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "sess-1", Seq: 7,
-		Plane:   corev1.Plane_PLANE_STREAM,
-		Class:   corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn-1"}},
+		Plane:   protocolv1.Plane_PLANE_STREAM,
+		Class:   protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "turn-1"}},
 	}
 
 	// Act.
@@ -193,10 +193,10 @@ func TestRejectedAccountUsageObservationDoesNotAdvanceHighWater(t *testing.T) {
 	sinkErr := errors.New("account usage observation names unknown turn")
 	h.state.err = sinkErr
 	c := New(h.config(t, "sess-1", "/unused.sock"))
-	ev := &corev1.Event{
-		SessionId: "sess-1", Seq: 7, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: &corev1.AccountUsageObservation{
-			TurnId: "missing", Boundary: &corev1.AccountUsageObservation_TurnStart{TurnStart: &corev1.TurnStartUsageBoundary{}},
+	ev := &protocolv1.Event{
+		SessionId: "sess-1", Seq: 7, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
+		Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: &protocolv1.AccountUsageObservation{
+			TurnId: "missing", Boundary: &protocolv1.AccountUsageObservation_TurnStart{TurnStart: &protocolv1.TurnStartUsageBoundary{}},
 		}},
 	}
 
@@ -215,7 +215,7 @@ func TestRejectedFrameDoesNotAdvanceHighWater(t *testing.T) {
 	sinkErr := errors.New("response usage has no validated root-turn claim")
 	h.frame.err = sinkErr
 	c := New(h.config(t, "sess-1", "/unused.sock"))
-	ev := &corev1.Event{SessionId: "sess-1", Seq: 7, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_Vendor{Vendor: &anypb.Any{}}}
+	ev := &protocolv1.Event{SessionId: "sess-1", Seq: 7, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_Vendor{Vendor: &anypb.Any{}}}
 
 	err := c.dispatchEvent(ev)
 	if !errors.Is(err, ErrLifecycleRejected) || !errors.Is(err, sinkErr) || !strings.Contains(err.Error(), "frame sink rejected") {
@@ -230,8 +230,8 @@ func TestRejectedFrameDoesNotAdvanceHighWater(t *testing.T) {
 func TestResumedQueryPinsDurableCursorUntilRuntimeIdentityIsAccepted(t *testing.T) {
 	h := newHarness()
 	c := New(h.config(t, "agent-session", "/unused.sock"))
-	created := &corev1.Event{SessionId: "vendor-session", Seq: 7, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
-		QueryInstanceId: "query", Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "vendor-session"}}}},
+	created := &protocolv1.Event{SessionId: "vendor-session", Seq: 7, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
+		QueryInstanceId: "query", Event: &protocolv1.QueryLifecycle_Created{Created: &protocolv1.QueryCreated{Invocation: &protocolv1.QueryCreated_Resumed{Resumed: &protocolv1.ResumedQuery{RequestedVendorSessionId: "vendor-session"}}}},
 	}}}
 	if err := c.dispatchEvent(created); err != nil {
 		t.Fatalf("QueryCreated: %v", err)
@@ -241,8 +241,8 @@ func TestResumedQueryPinsDurableCursorUntilRuntimeIdentityIsAccepted(t *testing.
 		t.Fatalf("durable cursor after resumed QueryCreated = %d, want pinned before commitment", got)
 	}
 
-	runtime := &corev1.Event{SessionId: "vendor-session", Seq: 8, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
-		QueryInstanceId: "query", Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: &corev1.QueryRuntimeIdentity{VendorSessionId: "vendor-session"}}},
+	runtime := &protocolv1.Event{SessionId: "vendor-session", Seq: 8, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
+		QueryInstanceId: "query", Event: &protocolv1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &protocolv1.QueryRuntimeObserved{Identity: &protocolv1.QueryRuntimeIdentity{VendorSessionId: "vendor-session"}}},
 	}}}
 	if err := c.dispatchEvent(runtime); err != nil {
 		t.Fatalf("QueryRuntimeObserved: %v", err)
@@ -256,16 +256,16 @@ func TestResumedQueryPinsDurableCursorUntilRuntimeIdentityIsAccepted(t *testing.
 func TestRejectedRuntimeIdentityKeepsResumeCommitmentPinnedForReplacementController(t *testing.T) {
 	h := newHarness()
 	c := New(h.config(t, "agent-session", "/unused.sock"))
-	created := &corev1.Event{SessionId: "requested", Seq: 7, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
-		QueryInstanceId: "query", Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "requested"}}}},
+	created := &protocolv1.Event{SessionId: "requested", Seq: 7, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
+		QueryInstanceId: "query", Event: &protocolv1.QueryLifecycle_Created{Created: &protocolv1.QueryCreated{Invocation: &protocolv1.QueryCreated_Resumed{Resumed: &protocolv1.ResumedQuery{RequestedVendorSessionId: "requested"}}}},
 	}}}
 	if err := c.dispatchEvent(created); err != nil {
 		t.Fatalf("QueryCreated: %v", err)
 	}
 	assertRecv(t, h.frame.ch)
 	h.frame.err = errors.New("resumed runtime identity mismatch")
-	runtime := &corev1.Event{SessionId: "requested", Seq: 8, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
-		QueryInstanceId: "query", Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: &corev1.QueryRuntimeIdentity{VendorSessionId: "replacement"}}},
+	runtime := &protocolv1.Event{SessionId: "requested", Seq: 8, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
+		QueryInstanceId: "query", Event: &protocolv1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &protocolv1.QueryRuntimeObserved{Identity: &protocolv1.QueryRuntimeIdentity{VendorSessionId: "replacement"}}},
 	}}}
 	if err := c.dispatchEvent(runtime); !errors.Is(err, ErrLifecycleRejected) {
 		t.Fatalf("rejected runtime identity = %v, want terminal lifecycle rejection", err)
@@ -279,10 +279,10 @@ func TestRejectedRuntimeIdentityKeepsResumeCommitmentPinnedForReplacementControl
 func TestDurableCursorPinsWholeTurnUntilTerminalSinkCommits(t *testing.T) {
 	h := newHarness()
 	c := New(h.config(t, "agent-session", "/unused.sock"))
-	startSession := &corev1.Event{SessionId: "vendor-session", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{VendorSessionId: "vendor-session"}}}
-	startTurn := &corev1.Event{SessionId: "vendor-session", Seq: 2, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn"}}}
-	response := &corev1.Event{SessionId: "vendor-session", Seq: 3, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_Vendor{Vendor: &anypb.Any{}}}
-	endTurn := &corev1.Event{SessionId: "vendor-session", Seq: 4, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "turn"}}}
+	startSession := &protocolv1.Event{SessionId: "vendor-session", Seq: 1, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{VendorSessionId: "vendor-session"}}}
+	startTurn := &protocolv1.Event{SessionId: "vendor-session", Seq: 2, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "turn"}}}
+	response := &protocolv1.Event{SessionId: "vendor-session", Seq: 3, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_Vendor{Vendor: &anypb.Any{}}}
+	endTurn := &protocolv1.Event{SessionId: "vendor-session", Seq: 4, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "turn"}}}
 	if err := c.dispatchEvent(startSession); err != nil {
 		t.Fatal(err)
 	}
@@ -322,10 +322,10 @@ func TestDurableCursorPinsWholeTurnUntilTerminalSinkCommits(t *testing.T) {
 func TestDurableCursorPinsRotatedTurnFromClaimBridgeUntilTerminalSinkCommits(t *testing.T) {
 	h := newHarness()
 	c := New(h.config(t, "agent-session", "/unused.sock"))
-	baseline := &corev1.Event{SessionId: "vendor-new", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{VendorSessionId: "vendor-new"}}}
-	bridge := &corev1.Event{SessionId: "vendor-new", Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{TurnId: "turn", PreviousSessionId: "vendor-old"}}}
-	response := &corev1.Event{SessionId: "vendor-new", Seq: 3, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_Vendor{Vendor: &anypb.Any{}}}
-	endTurn := &corev1.Event{SessionId: "vendor-new", Seq: 4, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "turn"}}}
+	baseline := &protocolv1.Event{SessionId: "vendor-new", Seq: 1, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{VendorSessionId: "vendor-new"}}}
+	bridge := &protocolv1.Event{SessionId: "vendor-new", Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_TurnClaimBridge{TurnClaimBridge: &protocolv1.TurnClaimBridge{TurnId: "turn", PreviousSessionId: "vendor-old"}}}
+	response := &protocolv1.Event{SessionId: "vendor-new", Seq: 3, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_Vendor{Vendor: &anypb.Any{}}}
+	endTurn := &protocolv1.Event{SessionId: "vendor-new", Seq: 4, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "turn"}}}
 
 	if err := c.dispatchEvent(baseline); err != nil {
 		t.Fatal(err)
@@ -354,10 +354,10 @@ func TestDurableCursorPinsRotatedTurnFromClaimBridgeUntilTerminalSinkCommits(t *
 func TestDurableCursorPinsTypedTerminationUntilGenericCompanion(t *testing.T) {
 	h := newHarness()
 	c := New(h.config(t, "agent-session", "/unused.sock"))
-	baseline := &corev1.Event{SessionId: "vendor-session", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{VendorSessionId: "vendor-session"}}}
-	lifecycle := &corev1.Event{SessionId: "vendor-session", Seq: 2, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{QueryInstanceId: "query", ObservedAtMs: 1234, Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-session"}, Reason: &corev1.QueryTerminated_UnexpectedEof{UnexpectedEof: &corev1.UnexpectedQueryEof{}}}}}}}
+	baseline := &protocolv1.Event{SessionId: "vendor-session", Seq: 1, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{VendorSessionId: "vendor-session"}}}
+	lifecycle := &protocolv1.Event{SessionId: "vendor-session", Seq: 2, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{QueryInstanceId: "query", ObservedAtMs: 1234, Event: &protocolv1.QueryLifecycle_Terminated{Terminated: &protocolv1.QueryTerminated{VendorIdentity: &protocolv1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-session"}, Reason: &protocolv1.QueryTerminated_UnexpectedEof{UnexpectedEof: &protocolv1.UnexpectedQueryEof{}}}}}}}
 	queryID := "query"
-	companion := &corev1.Event{SessionId: "vendor-session", Seq: 3, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID}}}
+	companion := &protocolv1.Event{SessionId: "vendor-session", Seq: 3, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_DegradedState{DegradedState: &protocolv1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID}}}
 	if err := c.dispatchEvent(baseline); err != nil {
 		t.Fatal(err)
 	}
@@ -381,10 +381,10 @@ func TestDurableCursorPinsTypedTerminationUntilGenericCompanion(t *testing.T) {
 func TestDurableCursorPinsStartupFailureUntilItsExactGenericCompanion(t *testing.T) {
 	h := newHarness()
 	c := New(h.config(t, "agent-session", "/unused.sock"))
-	baseline := &corev1.Event{SessionId: "vendor-session", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{VendorSessionId: "vendor-session"}}}
-	lifecycle := &corev1.Event{SessionId: "vendor-session", Seq: 2, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{QueryInstanceId: "startup-query", ObservedAtMs: 1234, Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionIdentityUnavailable{VendorSessionIdentityUnavailable: &corev1.VendorSessionIdentityUnavailable{}}, Reason: &corev1.QueryTerminated_StartupFailure{StartupFailure: &corev1.QueryStartupFailure{Cause: "daemon connection refused"}}}}}}}
+	baseline := &protocolv1.Event{SessionId: "vendor-session", Seq: 1, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{VendorSessionId: "vendor-session"}}}
+	lifecycle := &protocolv1.Event{SessionId: "vendor-session", Seq: 2, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{QueryInstanceId: "startup-query", ObservedAtMs: 1234, Event: &protocolv1.QueryLifecycle_Terminated{Terminated: &protocolv1.QueryTerminated{VendorIdentity: &protocolv1.QueryTerminated_VendorSessionIdentityUnavailable{VendorSessionIdentityUnavailable: &protocolv1.VendorSessionIdentityUnavailable{}}, Reason: &protocolv1.QueryTerminated_StartupFailure{StartupFailure: &protocolv1.QueryStartupFailure{Cause: "daemon connection refused"}}}}}}}
 	queryID := "startup-query"
-	companion := &corev1.Event{SessionId: "vendor-session", Seq: 3, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID}}}
+	companion := &protocolv1.Event{SessionId: "vendor-session", Seq: 3, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_DegradedState{DegradedState: &protocolv1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID}}}
 	if err := c.dispatchEvent(baseline); err != nil {
 		t.Fatal(err)
 	}
@@ -408,11 +408,11 @@ func TestDurableCursorPinsStartupFailureUntilItsExactGenericCompanion(t *testing
 func TestDurableCursorAdvancesPastIntentionalTerminationBeforeNextUnexpectedQuery(t *testing.T) {
 	h := newHarness()
 	c := New(h.config(t, "agent-session", "/unused.sock"))
-	baseline := &corev1.Event{SessionId: "vendor-session", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{VendorSessionId: "vendor-session"}}}
-	intentional := &corev1.Event{SessionId: "vendor-session", Seq: 2, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{QueryInstanceId: "retired-query", ObservedAtMs: 1234, Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-session"}, Reason: &corev1.QueryTerminated_Intentional{Intentional: &corev1.IntentionalQueryTermination{Reason: "SIGTERM"}}}}}}}
-	unexpected := &corev1.Event{SessionId: "vendor-session", Seq: 3, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{QueryInstanceId: "resumed-query", ObservedAtMs: 2345, Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-session"}, Reason: &corev1.QueryTerminated_UnexpectedEof{UnexpectedEof: &corev1.UnexpectedQueryEof{}}}}}}}
+	baseline := &protocolv1.Event{SessionId: "vendor-session", Seq: 1, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{VendorSessionId: "vendor-session"}}}
+	intentional := &protocolv1.Event{SessionId: "vendor-session", Seq: 2, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{QueryInstanceId: "retired-query", ObservedAtMs: 1234, Event: &protocolv1.QueryLifecycle_Terminated{Terminated: &protocolv1.QueryTerminated{VendorIdentity: &protocolv1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-session"}, Reason: &protocolv1.QueryTerminated_Intentional{Intentional: &protocolv1.IntentionalQueryTermination{Reason: "SIGTERM"}}}}}}}
+	unexpected := &protocolv1.Event{SessionId: "vendor-session", Seq: 3, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{QueryInstanceId: "resumed-query", ObservedAtMs: 2345, Event: &protocolv1.QueryLifecycle_Terminated{Terminated: &protocolv1.QueryTerminated{VendorIdentity: &protocolv1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-session"}, Reason: &protocolv1.QueryTerminated_UnexpectedEof{UnexpectedEof: &protocolv1.UnexpectedQueryEof{}}}}}}}
 	queryID := "resumed-query"
-	companion := &corev1.Event{SessionId: "vendor-session", Seq: 4, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID}}}
+	companion := &protocolv1.Event{SessionId: "vendor-session", Seq: 4, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_DegradedState{DegradedState: &protocolv1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID}}}
 
 	if err := c.dispatchEvent(baseline); err != nil {
 		t.Fatal(err)
@@ -447,7 +447,7 @@ func TestReplayCursorViolationFailsBeforeSinkMutationAndLogsIdentity(t *testing.
 	cfg := h.config(t, "agent-session", "/unused.sock")
 	cfg.Logf = func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
 	c := New(cfg)
-	event := &corev1.Event{SessionId: "vendor-session", Seq: 4, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "turn"}}}
+	event := &protocolv1.Event{SessionId: "vendor-session", Seq: 4, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "turn"}}}
 	err := c.dispatchEvent(event)
 	if !errors.Is(err, ErrReplayCursorInvariant) {
 		t.Fatalf("error = %v, want ErrReplayCursorInvariant", err)
@@ -492,13 +492,13 @@ func TestRejectedTurnClaimBridgeDoesNotAdvanceOrLeakToOtherSinks(t *testing.T) {
 	sinkErr := errors.New("bridge contradicts durable start receipt")
 	h.claims.err = sinkErr
 	c := New(h.config(t, "sess-1", "/unused.sock"))
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "vendor-new",
 		Seq:       3,
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
+		Class:     protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		RequestId: "turn-1",
-		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+		Payload: &protocolv1.Event_TurnClaimBridge{TurnClaimBridge: &protocolv1.TurnClaimBridge{
 			TurnId: "turn-1", PreviousSessionId: "vendor-old",
 		}},
 	}
@@ -534,10 +534,10 @@ func TestEphemeralSeqZeroDoesNotAdvanceHighWater(t *testing.T) {
 	<-h.state.ch
 
 	// Act: an ephemeral ContentDelta (seq 0) must not regress or advance.
-	ephemeral := &corev1.Event{
+	ephemeral := &protocolv1.Event{
 		SessionId: "sess-1",
-		Class:     corev1.EventClass_EVENT_CLASS_EPHEMERAL,
-		Payload:   &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "u1"}},
+		Class:     protocolv1.EventClass_EVENT_CLASS_EPHEMERAL,
+		Payload:   &protocolv1.Event_ContentDelta{ContentDelta: &protocolv1.ContentDelta{Uuid: "u1"}},
 	}
 	err := c.dispatchEvent(ephemeral)
 
@@ -553,7 +553,7 @@ func TestEphemeralSeqZeroDoesNotAdvanceHighWater(t *testing.T) {
 
 func TestFilePlaneDiagnosticPersistsWithoutEnteringOtherSinks(t *testing.T) {
 	h := newHarness()
-	diagnostics := &recordingFileDiagnostics{got: make(chan *corev1.Event, 1)}
+	diagnostics := &recordingFileDiagnostics{got: make(chan *protocolv1.Event, 1)}
 	cfg := h.config(t, "agent-session", "/unused.sock")
 	cfg.FileDiagnostics = diagnostics
 	c := New(cfg)
@@ -561,9 +561,9 @@ func TestFilePlaneDiagnosticPersistsWithoutEnteringOtherSinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev := &corev1.Event{SessionId: "claude-session", Seq: 9, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Plane: corev1.Plane_PLANE_FILE, ProducedAtMs: 1234,
-		Payload: &corev1.Event_FilePlaneDiagnostic{FilePlaneDiagnostic: &corev1.FilePlaneDiagnostic{
-			SourceRuntime: corev1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR,
+	ev := &protocolv1.Event{SessionId: "claude-session", Seq: 9, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Plane: protocolv1.Plane_PLANE_FILE, ProducedAtMs: 1234,
+		Payload: &protocolv1.Event_FilePlaneDiagnostic{FilePlaneDiagnostic: &protocolv1.FilePlaneDiagnostic{
+			SourceRuntime: protocolv1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR,
 			Level:         "error", Verbosity: "normal", Operation: "sidecar.ingest.failed", Message: "ingest failed", Context: context, SourcePid: 42, SourcePath: "/tmp/events.jsonl",
 		}}}
 	if err := c.dispatchEvent(ev); err != nil {
@@ -573,7 +573,7 @@ func TestFilePlaneDiagnosticPersistsWithoutEnteringOtherSinks(t *testing.T) {
 	if got := h.seq.LastSeq("agent-session"); got != 9 {
 		t.Fatalf("last sequence=%d, want 9", got)
 	}
-	for name, channel := range map[string]chan *corev1.Event{"state": h.state.ch, "frame": h.frame.ch} {
+	for name, channel := range map[string]chan *protocolv1.Event{"state": h.state.ch, "frame": h.frame.ch} {
 		select {
 		case <-channel:
 			t.Fatalf("file-plane diagnostic entered %s sink", name)
@@ -585,10 +585,10 @@ func TestFilePlaneDiagnosticPersistsWithoutEnteringOtherSinks(t *testing.T) {
 func TestFilePlaneDiagnosticRejectsWrongPlane(t *testing.T) {
 	h := newHarness()
 	cfg := h.config(t, "agent-session", "/unused.sock")
-	cfg.FileDiagnostics = &recordingFileDiagnostics{got: make(chan *corev1.Event, 1)}
+	cfg.FileDiagnostics = &recordingFileDiagnostics{got: make(chan *protocolv1.Event, 1)}
 	c := New(cfg)
-	err := c.dispatchEvent(&corev1.Event{SessionId: "claude-session", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Plane: corev1.Plane_PLANE_STREAM, ProducedAtMs: 1,
-		Payload: &corev1.Event_FilePlaneDiagnostic{FilePlaneDiagnostic: &corev1.FilePlaneDiagnostic{SourceRuntime: corev1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR, Level: "info", Verbosity: "normal", Operation: "sidecar.x", Message: "x", Context: &structpb.Struct{}, SourcePid: 1, SourcePath: "/tmp/x"}}})
+	err := c.dispatchEvent(&protocolv1.Event{SessionId: "claude-session", Seq: 1, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Plane: protocolv1.Plane_PLANE_STREAM, ProducedAtMs: 1,
+		Payload: &protocolv1.Event_FilePlaneDiagnostic{FilePlaneDiagnostic: &protocolv1.FilePlaneDiagnostic{SourceRuntime: protocolv1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR, Level: "info", Verbosity: "normal", Operation: "sidecar.x", Message: "x", Context: &structpb.Struct{}, SourcePid: 1, SourcePath: "/tmp/x"}}})
 	if err == nil {
 		t.Fatal("wrong-plane file diagnostic was accepted")
 	}
@@ -600,8 +600,8 @@ func TestFilePlaneDiagnosticDoesNotAdvanceSequenceUntilPersisted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev := &corev1.Event{SessionId: "claude-session", Seq: 7, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Plane: corev1.Plane_PLANE_FILE, ProducedAtMs: 1,
-		Payload: &corev1.Event_FilePlaneDiagnostic{FilePlaneDiagnostic: &corev1.FilePlaneDiagnostic{SourceRuntime: corev1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR, Level: "error", Verbosity: "normal", Operation: "sidecar.x", Message: "x", Context: context, SourcePid: 1}}}
+	ev := &protocolv1.Event{SessionId: "claude-session", Seq: 7, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Plane: protocolv1.Plane_PLANE_FILE, ProducedAtMs: 1,
+		Payload: &protocolv1.Event_FilePlaneDiagnostic{FilePlaneDiagnostic: &protocolv1.FilePlaneDiagnostic{SourceRuntime: protocolv1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR, Level: "error", Verbosity: "normal", Operation: "sidecar.x", Message: "x", Context: context, SourcePid: 1}}}
 	failingConfig := h.config(t, "agent-session", "/unused.sock")
 	failingConfig.FileDiagnostics = failingFileDiagnostics{}
 	failing := New(failingConfig)
@@ -612,7 +612,7 @@ func TestFilePlaneDiagnosticDoesNotAdvanceSequenceUntilPersisted(t *testing.T) {
 		t.Fatalf("failed persistence advanced sequence: store=%d client=%d", got, failing.lastSeen)
 	}
 	successConfig := h.config(t, "agent-session", "/unused.sock")
-	successConfig.FileDiagnostics = &recordingFileDiagnostics{got: make(chan *corev1.Event, 1)}
+	successConfig.FileDiagnostics = &recordingFileDiagnostics{got: make(chan *protocolv1.Event, 1)}
 	success := New(successConfig)
 	if err := success.dispatchEvent(ev); err != nil {
 		t.Fatalf("successful retry: %v", err)
@@ -623,30 +623,30 @@ func TestFilePlaneDiagnosticDoesNotAdvanceSequenceUntilPersisted(t *testing.T) {
 }
 
 func TestEventRouting(t *testing.T) {
-	vendorAny, err := anypb.New(&corev1.TurnEnded{StopReason: "vendor-wrapped"})
+	vendorAny, err := anypb.New(&protocolv1.TurnEnded{StopReason: "vendor-wrapped"})
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
 	tests := []struct {
 		name string
-		ev   *corev1.Event
+		ev   *protocolv1.Event
 		want string // "state" | "frame" | "degraded"
 	}{
 		{
 			name: "session started to state sink",
-			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}}},
+			ev:   &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{}}},
 			want: "state",
 		},
 		{
 			name: "turn started to state sink",
-			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}},
+			ev:   &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}}},
 			want: "state",
 		},
 		{
 			name: "turn claim bridge to dedicated ledger sink",
-			ev: &corev1.Event{
+			ev: &protocolv1.Event{
 				SessionId: "s",
-				Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+				Payload: &protocolv1.Event_TurnClaimBridge{TurnClaimBridge: &protocolv1.TurnClaimBridge{
 					TurnId: "turn-1", PreviousSessionId: "s-old",
 				}},
 			},
@@ -654,34 +654,34 @@ func TestEventRouting(t *testing.T) {
 		},
 		{
 			name: "task started to state sink",
-			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "a1"}}},
+			ev:   &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "a1"}}},
 			want: "state",
 		},
 		{
 			name: "account usage observation to error-returning state sink",
-			ev: &corev1.Event{SessionId: "s", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: &corev1.AccountUsageObservation{
-				TurnId: "turn-1", Boundary: &corev1.AccountUsageObservation_TurnStart{TurnStart: &corev1.TurnStartUsageBoundary{}},
+			ev: &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: &protocolv1.AccountUsageObservation{
+				TurnId: "turn-1", Boundary: &protocolv1.AccountUsageObservation_TurnStart{TurnStart: &protocolv1.TurnStartUsageBoundary{}},
 			}}},
 			want: "state",
 		},
 		{
 			name: "content delta to frame sink",
-			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "u"}}},
+			ev:   &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_ContentDelta{ContentDelta: &protocolv1.ContentDelta{Uuid: "u"}}},
 			want: "frame",
 		},
 		{
 			name: "message latency to frame sink",
-			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_MessageLatency{MessageLatency: &corev1.MessageLatency{Uuid: "m", TtftMs: 865}}},
+			ev:   &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_MessageLatency{MessageLatency: &protocolv1.MessageLatency{Uuid: "m", TtftMs: 865}}},
 			want: "frame",
 		},
 		{
 			name: "heartbeat progress to frame sink",
-			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_HeartbeatProgress{HeartbeatProgress: &corev1.HeartbeatProgress{ToolUseId: "t"}}},
+			ev:   &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_HeartbeatProgress{HeartbeatProgress: &protocolv1.HeartbeatProgress{ToolUseId: "t"}}},
 			want: "frame",
 		},
 		{
 			name: "vendor payload to frame sink",
-			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_Vendor{Vendor: vendorAny}},
+			ev:   &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_Vendor{Vendor: vendorAny}},
 			want: "frame",
 		},
 		{
@@ -690,22 +690,22 @@ func TestEventRouting(t *testing.T) {
 			// because a conversation's history stopped informing the agent, so it
 			// belongs to the frame sink and not the lifecycle sink.
 			name: "context cleared to frame sink",
-			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}}},
+			ev:   &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_ContextCleared{ContextCleared: &protocolv1.ContextCleared{}}},
 			want: "frame",
 		},
 		{
 			name: "context compacted to frame sink",
-			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{}}},
+			ev:   &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_ContextCompacted{ContextCompacted: &protocolv1.ContextCompacted{}}},
 			want: "frame",
 		},
 		{
 			name: "unparsed to frame sink",
-			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{Producer: "claude-shim"}}},
+			ev:   &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_Unparsed{Unparsed: &protocolv1.UnparsedEvent{Producer: "claude-shim"}}},
 			want: "frame",
 		},
 		{
 			name: "degraded state to degraded reporter",
-			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{Component: "store-client"}}},
+			ev:   &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_DegradedState{DegradedState: &protocolv1.DegradedState{Component: "store-client"}}},
 			want: "degraded",
 		},
 	}
@@ -742,13 +742,13 @@ func TestEventRouting(t *testing.T) {
 func TestTurnClaimBridgeCannotReachLifecycleOrFrontendSinks(t *testing.T) {
 	h := newHarness()
 	c := New(h.config(t, "s", "/unused.sock"))
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "vendor-new",
 		Seq:       2,
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
+		Class:     protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		RequestId: "turn-1",
-		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+		Payload: &protocolv1.Event_TurnClaimBridge{TurnClaimBridge: &protocolv1.TurnClaimBridge{
 			TurnId: "turn-1", PreviousSessionId: "vendor-old",
 		}},
 	}
@@ -785,7 +785,7 @@ func TestShimDegradedStateTakesTheWarnChannel(t *testing.T) {
 	// Arrange.
 	var info, warn []string
 	c := New(splitLevelConfig(t, newHarness(), &info, &warn))
-	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+	ev := &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_DegradedState{DegradedState: &protocolv1.DegradedState{
 		Component: "claude-shim-sdk", Reason: "unexpected_query_termination",
 	}}}
 
@@ -809,7 +809,7 @@ func TestHistoricalShimDegradedStateStaysOnTheInfoChannel(t *testing.T) {
 	h := newHarness()
 	h.deg.disposition = DegradationHistorical
 	c := New(splitLevelConfig(t, h, &info, &warn))
-	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+	ev := &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_DegradedState{DegradedState: &protocolv1.DegradedState{
 		Component: "claude-shim-sdk", Reason: "unexpected_query_termination",
 	}}}
 
@@ -831,7 +831,7 @@ func TestHistoricalShimDegradedStateKeepsItsRecord(t *testing.T) {
 	h := newHarness()
 	h.deg.disposition = DegradationHistorical
 	c := New(splitLevelConfig(t, h, &info, &warn))
-	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+	ev := &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_DegradedState{DegradedState: &protocolv1.DegradedState{
 		Component: "claude-shim-sdk", Reason: "unexpected_query_termination",
 	}}}
 
@@ -853,7 +853,7 @@ func TestLiveShimDegradedStateNamesItsDispositionToo(t *testing.T) {
 	// absence.
 	var info, warn []string
 	c := New(splitLevelConfig(t, newHarness(), &info, &warn))
-	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+	ev := &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_DegradedState{DegradedState: &protocolv1.DegradedState{
 		Component: "claude-shim-sdk", Reason: "unexpected_query_termination",
 	}}}
 
@@ -873,7 +873,7 @@ func TestRecoveredShimDegradedStateStaysOnTheInfoChannel(t *testing.T) {
 	// not inflate the warn channel.
 	var info, warn []string
 	c := New(splitLevelConfig(t, newHarness(), &info, &warn))
-	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+	ev := &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_DegradedState{DegradedState: &protocolv1.DegradedState{
 		Component: "claude-shim-sdk", Recovered: true,
 	}}}
 
@@ -893,7 +893,7 @@ func TestUnparsedEventTakesTheWarnChannel(t *testing.T) {
 	// will never see.
 	var info, warn []string
 	c := New(splitLevelConfig(t, newHarness(), &info, &warn))
-	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{
+	ev := &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_Unparsed{Unparsed: &protocolv1.UnparsedEvent{
 		Producer: "claude-shim", Error: "bad json",
 	}}}
 
@@ -915,7 +915,7 @@ func TestShimDegradedStateStillRecordsWithNoWarnChannelWired(t *testing.T) {
 	cfg := newHarness().config(t, "s", "/unused.sock")
 	cfg.Logf = func(format string, args ...any) { info = append(info, fmt.Sprintf(format, args...)) }
 	c := New(cfg)
-	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{Component: "store-client"}}}
+	ev := &protocolv1.Event{SessionId: "s", Payload: &protocolv1.Event_DegradedState{DegradedState: &protocolv1.DegradedState{Component: "store-client"}}}
 
 	// Act.
 	if err := c.dispatchEvent(ev); err != nil {
@@ -928,7 +928,7 @@ func TestShimDegradedStateStillRecordsWithNoWarnChannelWired(t *testing.T) {
 	}
 }
 
-func assertRecv(t *testing.T, ch chan *corev1.Event) {
+func assertRecv(t *testing.T, ch chan *protocolv1.Event) {
 	t.Helper()
 	select {
 	case <-ch:

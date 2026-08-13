@@ -20,8 +20,8 @@ import (
 	"syscall"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
@@ -142,7 +142,7 @@ var _ shimclient.ConnSource = (*ShimConnSource)(nil)
 
 // Next blocks until sessionID's shim connects, then yields its connection and
 // the ShimHello that identified it.
-func (s *ShimConnSource) Next(ctx context.Context, sessionID string) (net.Conn, *corev1.ShimHello, error) {
+func (s *ShimConnSource) Next(ctx context.Context, sessionID string) (net.Conn, *protocolv1.ShimHello, error) {
 	if s.Listener == nil {
 		return nil, nil, fmt.Errorf("server: ShimConnSource has no listener")
 	}
@@ -963,7 +963,7 @@ type RegistryRegistrar struct {
 // SessionModelCatalogObserved accepts a shim-published menu, then re-pushes
 // the session view. Model selection remains owned by the shim; this only
 // preserves the SDK's offered choices for frontend rendering.
-func (r *RegistryRegistrar) SessionModelCatalogObserved(sessionID string, models []*corev1.ModelOption) error {
+func (r *RegistryRegistrar) SessionModelCatalogObserved(sessionID string, models []*protocolv1.ModelOption) error {
 	if r.ModelCatalogs == nil {
 		return fmt.Errorf("server: session %s: model catalog received without a catalog store", sessionID)
 	}

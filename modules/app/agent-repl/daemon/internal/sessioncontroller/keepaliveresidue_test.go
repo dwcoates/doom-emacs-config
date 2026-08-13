@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/session"
@@ -140,7 +140,7 @@ func TestAUserPromptSettlesTheDebtBeforeItIsSubmitted(t *testing.T) {
 
 	// Act.
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "what did I ask you?", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 

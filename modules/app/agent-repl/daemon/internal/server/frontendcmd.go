@@ -22,8 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -48,7 +48,7 @@ type PromptRouter interface {
 	// it is what the daemon's immediate prompt receipt is keyed on, and what
 	// the durable transcript line is later stamped with, so a frontend
 	// reconciles the two onto one work.
-	SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) error
+	SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin protocolv1.PromptOrigin) error
 	// Interrupt carries the COMMAND'S OWN request id through to the session
 	// controller for the same reason SubmitPrompt does: it is the only id the
 	// user's client, the daemon's command log and the shim's control exchange
@@ -58,7 +58,7 @@ type PromptRouter interface {
 	// CancelDetachedAgents stops the workspace session's detached background
 	// agents and returns the shim's typed verdict. It carries the COMMAND'S
 	// OWN request id for the same reason Interrupt does.
-	CancelDetachedAgents(ctx context.Context, workspace, requestID string) (*corev1.DetachedCancelOutcome, error)
+	CancelDetachedAgents(ctx context.Context, workspace, requestID string) (*protocolv1.DetachedCancelOutcome, error)
 	// AnswerPermission carries the COMMAND'S OWN request id alongside the
 	// permission request id it answers, for the same reason Interrupt does: a
 	// DECLINE stops the workspace's turn (sessioncontroller/permdecline.go),
@@ -126,7 +126,7 @@ type SessionHibernator interface {
 // lazily create or revive a shim just because a frontend asked whether one is
 // ready.
 type SessionHealthRouter interface {
-	Health(ctx context.Context, workspace, sessionID, requestID string) (*corev1.HealthStatus, error)
+	Health(ctx context.Context, workspace, sessionID, requestID string) (*protocolv1.HealthStatus, error)
 }
 
 // DaemonHealthChecker reports whether every daemon-global boot dependency is
@@ -812,11 +812,11 @@ func (h *commandHandler) SubmitPrompt(ctx context.Context, workspace, requestID 
 	return h.prompts.SubmitPrompt(ctx, workspace, requestID, cmd.GetText(), cmd.GetPermissionMode(), cmd.GetPromptOrigin())
 }
 
-func validatePromptOrigin(origin corev1.PromptOrigin) error {
-	if origin == corev1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
+func validatePromptOrigin(origin protocolv1.PromptOrigin) error {
+	if origin == protocolv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
 		return fmt.Errorf("frontend submit_prompt requires a non-UNSPECIFIED prompt_origin")
 	}
-	if _, ok := corev1.PromptOrigin_name[int32(origin)]; !ok {
+	if _, ok := protocolv1.PromptOrigin_name[int32(origin)]; !ok {
 		return fmt.Errorf("frontend submit_prompt received unknown prompt_origin %d", origin)
 	}
 	return nil
@@ -951,15 +951,15 @@ func (h *commandHandler) CancelDetachedAgents(ctx context.Context, workspace, re
 	}
 	view := detachedCancelView(outcome)
 	switch arm := outcome.GetOutcome().(type) {
-	case *corev1.DetachedCancelOutcome_Cancelled:
+	case *protocolv1.DetachedCancelOutcome_Cancelled:
 		h.logf("frontend cmd: cancel_detached_agents ws=%s request_id=%s CANCELLED %d agent(s) task_ids=%v",
 			workspace, requestID, len(arm.Cancelled.GetTaskIds()), arm.Cancelled.GetTaskIds())
 		return view, nil
-	case *corev1.DetachedCancelOutcome_NothingRunning:
+	case *protocolv1.DetachedCancelOutcome_NothingRunning:
 		h.logf("frontend cmd: cancel_detached_agents ws=%s request_id=%s found NO detached work — refusing rather than acking a stop that reached nothing",
 			workspace, requestID)
 		return view, fmt.Errorf("frontend cmd: cancel_detached_agents ws=%s: no detached background agents are running; nothing was cancelled", workspace)
-	case *corev1.DetachedCancelOutcome_Unsupported:
+	case *protocolv1.DetachedCancelOutcome_Unsupported:
 		h.logf("frontend cmd: cancel_detached_agents ws=%s request_id=%s could NOT be attempted: %s",
 			workspace, requestID, arm.Unsupported.GetDetail())
 		return view, fmt.Errorf("frontend cmd: cancel_detached_agents ws=%s: the stop could not be attempted: %s", workspace, arm.Unsupported.GetDetail())
@@ -979,17 +979,17 @@ func (h *commandHandler) CancelDetachedAgents(ctx context.Context, workspace, re
 // a frontend renders is "cancelled 3 agents". So the count crosses and the ids
 // stay, which is the same split every other resolved view on this boundary
 // makes.
-func detachedCancelView(outcome *corev1.DetachedCancelOutcome) *frontendv1.DetachedCancelOutcome {
+func detachedCancelView(outcome *protocolv1.DetachedCancelOutcome) *frontendv1.DetachedCancelOutcome {
 	switch arm := outcome.GetOutcome().(type) {
-	case *corev1.DetachedCancelOutcome_Cancelled:
+	case *protocolv1.DetachedCancelOutcome_Cancelled:
 		return &frontendv1.DetachedCancelOutcome{Outcome: &frontendv1.DetachedCancelOutcome_Cancelled{
 			Cancelled: &frontendv1.DetachedAgentsCancelled{Count: int64(len(arm.Cancelled.GetTaskIds()))},
 		}}
-	case *corev1.DetachedCancelOutcome_NothingRunning:
+	case *protocolv1.DetachedCancelOutcome_NothingRunning:
 		return &frontendv1.DetachedCancelOutcome{Outcome: &frontendv1.DetachedCancelOutcome_NothingRunning{
 			NothingRunning: &frontendv1.NoDetachedAgentsRunning{},
 		}}
-	case *corev1.DetachedCancelOutcome_Unsupported:
+	case *protocolv1.DetachedCancelOutcome_Unsupported:
 		return &frontendv1.DetachedCancelOutcome{Outcome: &frontendv1.DetachedCancelOutcome_Unsupported{
 			Unsupported: &frontendv1.DetachedCancelUnsupported{Detail: arm.Unsupported.GetDetail()},
 		}}
@@ -1992,7 +1992,7 @@ func clientLogLevel(level frontendv1.ClientLogLevel) dlog.Level {
 // FileDiagnosticPersister is injected into the session controller without making
 // it depend on daemon target management.
 type FileDiagnosticPersister interface {
-	PersistFileDiagnostic(workspace, agentReplSessionID string, ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error
+	PersistFileDiagnostic(workspace, agentReplSessionID string, ev *protocolv1.Event, diagnostic *protocolv1.FilePlaneDiagnostic) error
 }
 
 type targetFileDiagnosticPersister struct {
@@ -2013,7 +2013,7 @@ func NewTargetFileDiagnosticPersister(targets *dlog.TargetManager, terminal io.W
 	return &targetFileDiagnosticPersister{targets: targets, terminal: terminal, verbose: verbose}, nil
 }
 
-func (p *targetFileDiagnosticPersister) PersistFileDiagnostic(workspace, agentReplSessionID string, ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error {
+func (p *targetFileDiagnosticPersister) PersistFileDiagnostic(workspace, agentReplSessionID string, ev *protocolv1.Event, diagnostic *protocolv1.FilePlaneDiagnostic) error {
 	if ev == nil || diagnostic == nil {
 		return errors.New("sidecar diagnostic event and payload are required")
 	}

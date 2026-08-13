@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/daemonturn"
 	"claude-repld/internal/registry"
@@ -471,7 +471,7 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 		}
 	}
 	if err := m.forwardPrompt(ctx, d, cutRequestID, cut.text,
-		cut.requestIDPrefix+sessionID, "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, submitterRevival); err != nil {
+		cut.requestIDPrefix+sessionID, "", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, submitterRevival); err != nil {
 		// The claim goes with the compaction that never ran. Leaving it standing
 		// would hand the NEXT turn's cost to a compaction that was never
 		// submitted, which is the misattribution the claim exists to prevent.

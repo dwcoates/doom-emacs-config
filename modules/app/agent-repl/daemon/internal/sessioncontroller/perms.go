@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -48,7 +48,7 @@ const answeredMemoryLimit = 64
 // must be released by the single answer. Replacing the waiter instead would
 // wedge the displaced handler on a channel nobody writes to.
 type permWaiter struct {
-	chans     []chan *corev1.PermissionResponse
+	chans     []chan *protocolv1.PermissionResponse
 	workspace string
 }
 
@@ -69,7 +69,7 @@ type permRegistry struct {
 	// remembered answer is correct only while the identity it was recorded
 	// against is still this process's, which is exactly what an in-memory ring
 	// guarantees.
-	answered      map[string]*corev1.PermissionResponse
+	answered      map[string]*protocolv1.PermissionResponse
 	answeredOrder []string
 	logf          func(string, ...any)
 }
@@ -80,7 +80,7 @@ func newPermRegistry(logf func(string, ...any)) *permRegistry {
 	}
 	return &permRegistry{
 		waiters:  make(map[string]*permWaiter),
-		answered: make(map[string]*corev1.PermissionResponse),
+		answered: make(map[string]*protocolv1.PermissionResponse),
 		logf:     logf,
 	}
 }
@@ -95,8 +95,8 @@ func newPermRegistry(logf func(string, ...any)) *permRegistry {
 // A duplicate request_id JOINS the existing rendezvous instead of replacing it:
 // it is the shim restating an ask this daemon already holds, and the one answer
 // resolves every parked caller.
-func (p *permRegistry) await(requestID, workspace string) (<-chan *corev1.PermissionResponse, func()) {
-	ch := make(chan *corev1.PermissionResponse, 1)
+func (p *permRegistry) await(requestID, workspace string) (<-chan *protocolv1.PermissionResponse, func()) {
+	ch := make(chan *protocolv1.PermissionResponse, 1)
 	p.mu.Lock()
 	w, dup := p.waiters[requestID]
 	if dup {
@@ -127,7 +127,7 @@ func (p *permRegistry) await(requestID, workspace string) (<-chan *corev1.Permis
 
 // recall returns the recorded decision for requestID when this daemon already
 // answered it, so a re-sent request is served that answer rather than re-asked.
-func (p *permRegistry) recall(requestID string) (*corev1.PermissionResponse, bool) {
+func (p *permRegistry) recall(requestID string) (*protocolv1.PermissionResponse, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	resp, ok := p.answered[requestID]
@@ -135,7 +135,7 @@ func (p *permRegistry) recall(requestID string) (*corev1.PermissionResponse, boo
 }
 
 // rememberAnswered records a decision in the bounded ring. Caller holds p.mu.
-func (p *permRegistry) rememberAnswered(requestID string, resp *corev1.PermissionResponse) {
+func (p *permRegistry) rememberAnswered(requestID string, resp *protocolv1.PermissionResponse) {
 	if _, dup := p.answered[requestID]; !dup {
 		p.answeredOrder = append(p.answeredOrder, requestID)
 	}
@@ -197,12 +197,12 @@ func (p *permRegistry) answerDecline(requestID, denyMessage string) error {
 // denial would unblock the tool call and let the agent carry on, which is the
 // exact behavior the decline exists to end. It is re-asked instead, so the user
 // answers a live question and their answer stops the turn again.
-func (p *permRegistry) resolve(requestID string, resp *corev1.PermissionResponse) error {
+func (p *permRegistry) resolve(requestID string, resp *protocolv1.PermissionResponse) error {
 	p.mu.Lock()
 	w, ok := p.waiters[requestID]
 	if ok {
 		delete(p.waiters, requestID)
-		if resp.GetDecision() == corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+		if resp.GetDecision() == protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW {
 			p.rememberAnswered(requestID, resp)
 		}
 	}
@@ -238,12 +238,12 @@ func (p *permRegistry) fail(reason string) {
 }
 
 // buildPermissionResponse maps a frontend answer to the core PermissionResponse.
-func buildPermissionResponse(requestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) *corev1.PermissionResponse {
-	decision := corev1.PermissionDecision_PERMISSION_DECISION_DENY
+func buildPermissionResponse(requestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) *protocolv1.PermissionResponse {
+	decision := protocolv1.PermissionDecision_PERMISSION_DECISION_DENY
 	if allow {
-		decision = corev1.PermissionDecision_PERMISSION_DECISION_ALLOW
+		decision = protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW
 	}
-	return &corev1.PermissionResponse{
+	return &protocolv1.PermissionResponse{
 		RequestId:    requestID,
 		Decision:     decision,
 		UpdatedInput: updatedInput,

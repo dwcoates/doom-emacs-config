@@ -10,16 +10,16 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 )
 
 // runConnectedClient starts c.Run and returns a channel that fires on each
 // successful attach plus a stop func that cancels and joins Run.
-func runConnectedClient(t *testing.T, cfg Config) (*Client, <-chan *corev1.ShimHello, func()) {
+func runConnectedClient(t *testing.T, cfg Config) (*Client, <-chan *protocolv1.ShimHello, func()) {
 	t.Helper()
-	connected := make(chan *corev1.ShimHello, 8)
-	cfg.OnConnected = func(h *corev1.ShimHello) bool { connected <- h; return false }
+	connected := make(chan *protocolv1.ShimHello, 8)
+	cfg.OnConnected = func(h *protocolv1.ShimHello) bool { connected <- h; return false }
 	c := New(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
@@ -35,7 +35,7 @@ func runConnectedClient(t *testing.T, cfg Config) (*Client, <-chan *corev1.ShimH
 	return c, connected, stop
 }
 
-func waitConnected(t *testing.T, ch <-chan *corev1.ShimHello) {
+func waitConnected(t *testing.T, ch <-chan *protocolv1.ShimHello) {
 	t.Helper()
 	select {
 	case <-ch:
@@ -67,7 +67,7 @@ func TestSubmitPromptAckSuccess(t *testing.T) {
 			t.Errorf("read SubmitPrompt: %v", err)
 			return
 		}
-		sp, ok := m.(*corev1.SubmitPrompt)
+		sp, ok := m.(*protocolv1.SubmitPrompt)
 		if !ok {
 			t.Errorf("expected SubmitPrompt, got %T", m)
 			return
@@ -75,7 +75,7 @@ func TestSubmitPromptAckSuccess(t *testing.T) {
 		if sp.GetText() != "hello" {
 			t.Errorf("prompt text: got %q", sp.GetText())
 		}
-		mustWriteMsg(t, conn, &corev1.Ack{RequestId: sp.GetRequestId()})
+		mustWriteMsg(t, conn, &protocolv1.Ack{RequestId: sp.GetRequestId()})
 		_, _ = wire.ReadAny(conn)
 	})
 	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
@@ -83,7 +83,7 @@ func TestSubmitPromptAckSuccess(t *testing.T) {
 	waitConnected(t, connected)
 
 	// Act
-	err := c.SubmitPrompt(context.Background(), "", "hello", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := c.SubmitPrompt(context.Background(), "", "hello", "human", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert
 	if err != nil {
@@ -105,13 +105,13 @@ func submitPromptRequestID(t *testing.T, requestID string) string {
 			t.Errorf("read SubmitPrompt: %v", err)
 			return
 		}
-		sp, ok := m.(*corev1.SubmitPrompt)
+		sp, ok := m.(*protocolv1.SubmitPrompt)
 		if !ok {
 			t.Errorf("expected SubmitPrompt, got %T", m)
 			return
 		}
 		observed <- sp.GetRequestId()
-		mustWriteMsg(t, conn, &corev1.Ack{RequestId: sp.GetRequestId()})
+		mustWriteMsg(t, conn, &protocolv1.Ack{RequestId: sp.GetRequestId()})
 		_, _ = wire.ReadAny(conn)
 	})
 	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
@@ -119,7 +119,7 @@ func submitPromptRequestID(t *testing.T, requestID string) string {
 	waitConnected(t, connected)
 
 	if err := c.SubmitPrompt(context.Background(), requestID, "hello", "human", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	select {
@@ -149,9 +149,9 @@ func TestSubmitPromptMintsARequestIDWhenTheCallerOwnsNone(t *testing.T) {
 }
 
 func TestSubmitPromptRejectsInvalidOriginBeforeControlSend(t *testing.T) {
-	for _, origin := range []corev1.PromptOrigin{
-		corev1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
-		corev1.PromptOrigin(999),
+	for _, origin := range []protocolv1.PromptOrigin{
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
+		protocolv1.PromptOrigin(999),
 	} {
 		t.Run(origin.String(), func(t *testing.T) {
 			c := &Client{}
@@ -175,12 +175,12 @@ func TestHealthRequiresMatchingStatusFromLiveShim(t *testing.T) {
 			t.Errorf("read HealthCheck: %v", err)
 			return
 		}
-		check, ok := m.(*corev1.HealthCheck)
+		check, ok := m.(*protocolv1.HealthCheck)
 		if !ok {
 			t.Errorf("expected HealthCheck, got %T", m)
 			return
 		}
-		mustWriteMsg(t, conn, &corev1.HealthStatus{RequestId: check.GetRequestId(), Healthy: true, Component: "claude-shim"})
+		mustWriteMsg(t, conn, &protocolv1.HealthStatus{RequestId: check.GetRequestId(), Healthy: true, Component: "claude-shim"})
 		_, _ = wire.ReadAny(conn)
 	})
 	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
@@ -222,8 +222,8 @@ func TestSubmitPromptNackIsLoudError(t *testing.T) {
 			t.Errorf("read SubmitPrompt: %v", err)
 			return
 		}
-		sp := m.(*corev1.SubmitPrompt)
-		mustWriteMsg(t, conn, &corev1.Nack{RequestId: sp.GetRequestId(), Reason: "busy"})
+		sp := m.(*protocolv1.SubmitPrompt)
+		mustWriteMsg(t, conn, &protocolv1.Nack{RequestId: sp.GetRequestId(), Reason: "busy"})
 		_, _ = wire.ReadAny(conn)
 	})
 	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
@@ -231,7 +231,7 @@ func TestSubmitPromptNackIsLoudError(t *testing.T) {
 	waitConnected(t, connected)
 
 	// Act
-	err := c.SubmitPrompt(context.Background(), "", "hello", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := c.SubmitPrompt(context.Background(), "", "hello", "human", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert
 	if !errors.Is(err, ErrNack) {
@@ -254,7 +254,7 @@ func TestControlAckTimeout(t *testing.T) {
 	waitConnected(t, connected)
 
 	// Act
-	err := c.SubmitPrompt(context.Background(), "", "hello", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := c.SubmitPrompt(context.Background(), "", "hello", "human", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert
 	if !errors.Is(err, ErrAckTimeout) {
@@ -273,15 +273,15 @@ func TestInterruptAckSuccess(t *testing.T) {
 			t.Errorf("read Interrupt: %v", err)
 			return
 		}
-		iv, ok := m.(*corev1.Interrupt)
+		iv, ok := m.(*protocolv1.Interrupt)
 		if !ok {
 			t.Errorf("expected Interrupt, got %T", m)
 			return
 		}
 		delivered <- iv.GetRequestId()
-		mustWriteMsg(t, conn, &corev1.Ack{
+		mustWriteMsg(t, conn, &protocolv1.Ack{
 			RequestId:        iv.GetRequestId(),
-			InterruptOutcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED,
+			InterruptOutcome: protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED,
 		})
 		_, _ = wire.ReadAny(conn)
 	})
@@ -299,7 +299,7 @@ func TestInterruptAckSuccess(t *testing.T) {
 	if reqID := <-delivered; reqID == "" {
 		t.Fatal("shim should have received an Interrupt with a request id")
 	}
-	if outcome != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+	if outcome != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
 		t.Fatalf("outcome = %v, want INTERRUPTED (the shim's ack verdict, verbatim)", outcome)
 	}
 }
@@ -354,7 +354,7 @@ func TestSubmitPromptNotConnected(t *testing.T) {
 	c := New(h.config(t, "sess-1", "/nonexistent/agent-shim/session.sock"))
 
 	// Act: no Run goroutine, so there is no live connection.
-	err := c.SubmitPrompt(context.Background(), "", "hi", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := c.SubmitPrompt(context.Background(), "", "hi", "human", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert
 	if !errors.Is(err, ErrNotConnected) {
@@ -365,22 +365,22 @@ func TestSubmitPromptNotConnected(t *testing.T) {
 func TestPermissionRequestRoundTrip(t *testing.T) {
 	// Arrange: shim sends a canUseTool request and expects the matching answer.
 	h := newHarness()
-	h.perm = funcPerm(func(_ string, req *corev1.PermissionRequest) *corev1.PermissionResponse {
-		return &corev1.PermissionResponse{
+	h.perm = funcPerm(func(_ string, req *protocolv1.PermissionRequest) *protocolv1.PermissionResponse {
+		return &protocolv1.PermissionResponse{
 			RequestId: req.GetRequestId(),
-			Decision:  corev1.PermissionDecision_PERMISSION_DECISION_ALLOW,
+			Decision:  protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW,
 		}
 	})
-	gotResp := make(chan *corev1.PermissionResponse, 1)
+	gotResp := make(chan *protocolv1.PermissionResponse, 1)
 	path := startFakeShim(t, func(conn net.Conn) {
 		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
-		mustWriteMsg(t, conn, &corev1.PermissionRequest{RequestId: "perm-7", ToolName: "Bash"})
+		mustWriteMsg(t, conn, &protocolv1.PermissionRequest{RequestId: "perm-7", ToolName: "Bash"})
 		m, err := wire.ReadAny(conn)
 		if err != nil {
 			t.Errorf("read PermissionResponse: %v", err)
 			return
 		}
-		pr, ok := m.(*corev1.PermissionResponse)
+		pr, ok := m.(*protocolv1.PermissionResponse)
 		if !ok {
 			t.Errorf("expected PermissionResponse, got %T", m)
 			return
@@ -398,7 +398,7 @@ func TestPermissionRequestRoundTrip(t *testing.T) {
 		if pr.GetRequestId() != "perm-7" {
 			t.Fatalf("response request_id: got %q want perm-7", pr.GetRequestId())
 		}
-		if pr.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+		if pr.GetDecision() != protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW {
 			t.Fatalf("decision: got %v", pr.GetDecision())
 		}
 	case <-time.After(2 * time.Second):
@@ -533,14 +533,14 @@ func interruptWithCapturedLog(t *testing.T, originRequestID string) *capturingLo
 			t.Errorf("read Interrupt: %v", err)
 			return
 		}
-		iv, ok := m.(*corev1.Interrupt)
+		iv, ok := m.(*protocolv1.Interrupt)
 		if !ok {
 			t.Errorf("expected Interrupt, got %T", m)
 			return
 		}
-		mustWriteMsg(t, conn, &corev1.Ack{
+		mustWriteMsg(t, conn, &protocolv1.Ack{
 			RequestId:        iv.GetRequestId(),
-			InterruptOutcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED,
+			InterruptOutcome: protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED,
 		})
 		_, _ = wire.ReadAny(conn)
 	})
@@ -618,17 +618,17 @@ func TestCancelDetachedAgentsRelaysTheShimVerdict(t *testing.T) {
 			t.Errorf("read CancelDetachedAgents: %v", err)
 			return
 		}
-		cv, ok := m.(*corev1.CancelDetachedAgents)
+		cv, ok := m.(*protocolv1.CancelDetachedAgents)
 		if !ok {
 			t.Errorf("expected CancelDetachedAgents, got %T", m)
 			return
 		}
 		delivered <- cv.GetRequestId()
-		mustWriteMsg(t, conn, &corev1.Ack{
+		mustWriteMsg(t, conn, &protocolv1.Ack{
 			RequestId: cv.GetRequestId(),
-			DetachedCancelOutcome: &corev1.DetachedCancelOutcome{
-				Outcome: &corev1.DetachedCancelOutcome_Cancelled{
-					Cancelled: &corev1.DetachedAgentsCancelled{TaskIds: []string{"t-1", "t-2"}},
+			DetachedCancelOutcome: &protocolv1.DetachedCancelOutcome{
+				Outcome: &protocolv1.DetachedCancelOutcome_Cancelled{
+					Cancelled: &protocolv1.DetachedAgentsCancelled{TaskIds: []string{"t-1", "t-2"}},
 				},
 			},
 		})
@@ -664,12 +664,12 @@ func TestCancelDetachedAgentsRefusesAnAckWithNoOutcome(t *testing.T) {
 			t.Errorf("read CancelDetachedAgents: %v", err)
 			return
 		}
-		cv, ok := m.(*corev1.CancelDetachedAgents)
+		cv, ok := m.(*protocolv1.CancelDetachedAgents)
 		if !ok {
 			t.Errorf("expected CancelDetachedAgents, got %T", m)
 			return
 		}
-		mustWriteMsg(t, conn, &corev1.Ack{RequestId: cv.GetRequestId()})
+		mustWriteMsg(t, conn, &protocolv1.Ack{RequestId: cv.GetRequestId()})
 		_, _ = wire.ReadAny(conn)
 	})
 	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))

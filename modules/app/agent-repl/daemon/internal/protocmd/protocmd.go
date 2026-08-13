@@ -27,8 +27,8 @@ package protocmd
 import (
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -93,16 +93,16 @@ func SessionCommandSpecs() map[frontendv1.SessionCommand]Spec {
 // may offer it, so every site that commits or displays a reported model has to
 // compare against this value first.
 func SyntheticModelLiteral() string {
-	value := corev1.ModelMarker_MODEL_MARKER_SYNTHETIC.Descriptor().
-		Values().ByNumber(protoreflect.EnumNumber(corev1.ModelMarker_MODEL_MARKER_SYNTHETIC))
+	value := protocolv1.ModelMarker_MODEL_MARKER_SYNTHETIC.Descriptor().
+		Values().ByNumber(protoreflect.EnumNumber(protocolv1.ModelMarker_MODEL_MARKER_SYNTHETIC))
 	if value == nil {
 		panic("protocmd: MODEL_MARKER_SYNTHETIC is absent from its own enum descriptor")
 	}
 	options := enumValueOptions(value)
-	if !proto.HasExtension(options, corev1.E_ModelMarkerLiteral) {
+	if !proto.HasExtension(options, protocolv1.E_ModelMarkerLiteral) {
 		panic("protocmd: MODEL_MARKER_SYNTHETIC carries no model_marker_literal option; the schema and these bindings disagree")
 	}
-	literal, ok := proto.GetExtension(options, corev1.E_ModelMarkerLiteral).(string)
+	literal, ok := proto.GetExtension(options, protocolv1.E_ModelMarkerLiteral).(string)
 	if !ok || literal == "" {
 		panic("protocmd: MODEL_MARKER_SYNTHETIC model_marker_literal option is empty or not a string")
 	}

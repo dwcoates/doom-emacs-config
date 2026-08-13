@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 
 	"google.golang.org/protobuf/proto"
@@ -46,7 +46,7 @@ func dialAsShim(t *testing.T, path, sessionID string) net.Conn {
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() { conn.Close() })
-	hello := &corev1.ShimHello{SessionId: sessionID, Vendor: "claude", ShimVersion: "test", ProtocolVersion: "1"}
+	hello := &protocolv1.ShimHello{SessionId: sessionID, Vendor: "claude", ShimVersion: "test", ProtocolVersion: "1"}
 	env, err := anypb.New(hello)
 	if err != nil {
 		t.Fatalf("anypb: %v", err)
@@ -179,7 +179,7 @@ func TestConnectionWithoutAHelloIsRejected(t *testing.T) {
 	defer conn.Close()
 
 	// Act: a well-formed frame carrying the wrong message type.
-	env, err := anypb.New(&corev1.DaemonHello{DaemonVersion: "d1"})
+	env, err := anypb.New(&protocolv1.DaemonHello{DaemonVersion: "d1"})
 	if err != nil {
 		t.Fatalf("anypb: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestConnectedSurfacesAnUnprobeableConnectionWithoutEvictingIt(t *testing.T)
 	s := New(func(string, ...any) {})
 	server, peer := net.Pipe()
 	t.Cleanup(func() { _ = server.Close(); _ = peer.Close() })
-	s.parked["s_unknown"] = &Conn{Net: server, Hello: &corev1.ShimHello{SessionId: "s_unknown"}}
+	s.parked["s_unknown"] = &Conn{Net: server, Hello: &protocolv1.ShimHello{SessionId: "s_unknown"}}
 
 	// Act.
 	connected, err := s.Connected("s_unknown")

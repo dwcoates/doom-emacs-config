@@ -47,7 +47,7 @@ package sessioncontroller
 import (
 	"context"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // asyncWorkVerdict is what a handshaking shim's announced background-task set
@@ -92,7 +92,7 @@ type announcedAsyncWork struct {
 // is a message and not a bare repeated field on the hello — a repeated field
 // cannot distinguish "I have nothing" from "I said nothing", and collapsing the
 // two is how a roll comes to be taken on silence.
-func classifyAnnouncedAsyncWork(hello *corev1.ShimHello) announcedAsyncWork {
+func classifyAnnouncedAsyncWork(hello *protocolv1.ShimHello) announcedAsyncWork {
 	set := hello.GetLiveTaskSet()
 	if set == nil {
 		return announcedAsyncWork{verdict: asyncWorkUnanswered}

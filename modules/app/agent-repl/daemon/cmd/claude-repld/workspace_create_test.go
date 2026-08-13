@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
 	"claude-repld/internal/session"
@@ -358,20 +358,20 @@ func TestWorkspaceCreatePathsAndAssemblyDemandExplicitHealthAndPromptSeams(t *te
 }
 
 type fakeHealthSessionController struct {
-	status *corev1.HealthStatus
+	status *protocolv1.HealthStatus
 	err    error
 }
 
-func (f fakeHealthSessionController) Health(context.Context, string, string, string) (*corev1.HealthStatus, error) {
+func (f fakeHealthSessionController) Health(context.Context, string, string, string) (*protocolv1.HealthStatus, error) {
 	return f.status, f.err
 }
 
 func TestSessionControllerHealthProbeRejectsUnhealthyReply(t *testing.T) {
-	probe := sessionControllerHealthProbe{Controller: fakeHealthSessionController{status: &corev1.HealthStatus{Healthy: false, Component: "shim", Reason: "store unavailable"}}, Logf: func(string, ...any) {}}
+	probe := sessionControllerHealthProbe{Controller: fakeHealthSessionController{status: &protocolv1.HealthStatus{Healthy: false, Component: "shim", Reason: "store unavailable"}}, Logf: func(string, ...any) {}}
 	if err := probe.CheckWorkspaceHealth(context.Background(), "/worktree", "s1", "job-1"); err == nil {
 		t.Fatal("unhealthy health reply was accepted")
 	}
-	probe.Controller = fakeHealthSessionController{status: &corev1.HealthStatus{Healthy: true, Component: "shim"}}
+	probe.Controller = fakeHealthSessionController{status: &protocolv1.HealthStatus{Healthy: true, Component: "shim"}}
 	if err := probe.CheckWorkspaceHealth(context.Background(), "/worktree", "s1", "job-1"); err != nil {
 		t.Fatalf("healthy health reply: %v", err)
 	}

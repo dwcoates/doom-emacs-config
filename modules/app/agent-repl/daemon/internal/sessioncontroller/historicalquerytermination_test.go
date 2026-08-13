@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 )
@@ -39,7 +39,7 @@ func terminationHarness(t *testing.T, clients ...*fakeClient) *escapeHarness {
 	if err != nil {
 		t.Fatalf("existing: %v", err)
 	}
-	if err := d.consumer.accounting.bindHandshakeIdentity(&corev1.ShimHello{
+	if err := d.consumer.accounting.bindHandshakeIdentity(&protocolv1.ShimHello{
 		QueryInstanceId: "live-query",
 		QueryCreatedSeq: 1,
 		VendorSessionId: "vendor-1",
@@ -51,16 +51,16 @@ func terminationHarness(t *testing.T, clients ...*fakeClient) *escapeHarness {
 
 // terminationEvent is an SDK-iterator death at SEQ written by ENVELOPEQUERY.
 // Only the envelope classifies: it says which query WROTE the row.
-func terminationEvent(seq uint64, envelopeQuery string) *corev1.Event {
-	return &corev1.Event{
+func terminationEvent(seq uint64, envelopeQuery string) *protocolv1.Event {
+	return &protocolv1.Event{
 		Seq:             seq,
 		QueryInstanceId: envelopeQuery,
-		Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 			QueryInstanceId: envelopeQuery,
 			ObservedAtMs:    4242,
-			Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{
-				VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-1"},
-				Reason: &corev1.QueryTerminated_IteratorFailure{IteratorFailure: &corev1.QueryIteratorFailure{
+			Event: &protocolv1.QueryLifecycle_Terminated{Terminated: &protocolv1.QueryTerminated{
+				VendorIdentity: &protocolv1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-1"},
+				Reason: &protocolv1.QueryTerminated_IteratorFailure{IteratorFailure: &protocolv1.QueryIteratorFailure{
 					Cause: `SDK emitted TaskEnded for unknown task "a4699ecc217adfa70"`,
 				}},
 			}},
@@ -68,7 +68,7 @@ func terminationEvent(seq uint64, envelopeQuery string) *corev1.Event {
 	}
 }
 
-func consumeTermination(t *testing.T, h *escapeHarness, ev *corev1.Event) {
+func consumeTermination(t *testing.T, h *escapeHarness, ev *protocolv1.Event) {
 	t.Helper()
 	d, err := h.m.existing("ws")
 	if err != nil {
@@ -210,7 +210,7 @@ func TestReplayedRetiredQueryTerminationDoesNotSwallowALaterLiveOne(t *testing.T
 
 	// Act.
 	queryID := "live-query"
-	d.consumer.Degraded("", nil, &corev1.DegradedState{
+	d.consumer.Degraded("", nil, &protocolv1.DegradedState{
 		Component:       shimSDKComponent,
 		Reason:          "unexpected_query_termination",
 		QueryInstanceId: &queryID,

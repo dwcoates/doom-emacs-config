@@ -54,8 +54,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 
 	"claude-repld/internal/dlog"
@@ -184,7 +184,7 @@ func (s *acceptOnceShim) run(t *testing.T, shimSock string) error {
 	}
 	go func() {
 		defer conn.Close()
-		if err := wire.WriteAny(conn, &corev1.ShimHello{
+		if err := wire.WriteAny(conn, &protocolv1.ShimHello{
 			SessionId:       s.sessionID,
 			Vendor:          "claude",
 			ShimVersion:     "fake-accept-once",
@@ -201,7 +201,7 @@ func (s *acceptOnceShim) run(t *testing.T, shimSock string) error {
 				return // the daemon went away, or this shim already died
 			}
 			switch m := msg.(type) {
-			case *corev1.DaemonHello:
+			case *protocolv1.DaemonHello:
 				// The session's own announcement that it started, BEFORE the
 				// gate closes: an operational session must already carry a
 				// status, and a workspace that has never heard a start is
@@ -210,19 +210,19 @@ func (s *acceptOnceShim) run(t *testing.T, shimSock string) error {
 				// exactly as every off-store event does, so nothing about it
 				// reaches the store — this shim's whole point is producing no
 				// durable record of the turn it is about to accept.
-				if err := wire.WriteAny(conn, &corev1.Event{
+				if err := wire.WriteAny(conn, &protocolv1.Event{
 					SessionId:    s.sessionID,
-					Plane:        corev1.Plane_PLANE_STREAM,
-					Class:        corev1.EventClass_EVENT_CLASS_EPHEMERAL,
+					Plane:        protocolv1.Plane_PLANE_STREAM,
+					Class:        protocolv1.EventClass_EVENT_CLASS_EPHEMERAL,
 					ProducedAtMs: time.Now().UnixMilli(),
-					Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{
+					Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{
 						VendorSessionId: s.vendorSessionID,
 					}},
 				}); err != nil {
 					t.Errorf("fake shim: write SessionStarted: %v", err)
 					return
 				}
-				if err := wire.WriteAny(conn, &corev1.ShimReady{
+				if err := wire.WriteAny(conn, &protocolv1.ShimReady{
 					SessionId:       s.sessionID,
 					FromSeq:         m.GetFromSeq(),
 					VendorSessionId: s.vendorSessionID,
@@ -230,10 +230,10 @@ func (s *acceptOnceShim) run(t *testing.T, shimSock string) error {
 					t.Errorf("fake shim: write ShimReady: %v", err)
 					return
 				}
-			case *corev1.SubmitPrompt:
+			case *protocolv1.SubmitPrompt:
 				// ACCEPT, then DIE: the ack is written and the connection is
 				// closed without a single event ever being produced.
-				if err := wire.WriteAny(conn, &corev1.Ack{RequestId: m.GetRequestId()}); err != nil {
+				if err := wire.WriteAny(conn, &protocolv1.Ack{RequestId: m.GetRequestId()}); err != nil {
 					t.Errorf("fake shim: write Ack: %v", err)
 					return
 				}
@@ -328,7 +328,7 @@ func (w *receiptWorld) submitThenDie(t *testing.T, requestID, text string) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	awaitOperational(t, states, w.workspace)
-	if err := controller.SubmitPrompt(ctx, w.workspace, requestID, text, "default", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+	if err := controller.SubmitPrompt(ctx, w.workspace, requestID, text, "default", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	if got := shim.awaitAccepted(t); got != text {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 )
 
@@ -26,7 +26,7 @@ func TestAwaitReadyWaitsForTheShimReadyAckNotTheConnection(t *testing.T) {
 	h := newHarness()
 	ack := make(chan struct{})
 	path := startFakeShim(t, func(conn net.Conn) {
-		mustWriteMsg(t, conn, &corev1.ShimHello{
+		mustWriteMsg(t, conn, &protocolv1.ShimHello{
 			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim", ProtocolVersion: "1",
 		})
 		if _, err := wire.ReadAny(conn); err != nil {
@@ -34,7 +34,7 @@ func TestAwaitReadyWaitsForTheShimReadyAckNotTheConnection(t *testing.T) {
 			return
 		}
 		<-ack
-		mustWriteMsg(t, conn, &corev1.ShimReady{SessionId: "sess-1"})
+		mustWriteMsg(t, conn, &protocolv1.ShimReady{SessionId: "sess-1"})
 		_, _ = wire.ReadAny(conn) // hold the connection open
 	})
 	c := New(h.config(t, "sess-1", path))
@@ -74,12 +74,12 @@ func TestHealthProbeImmediatelyAfterAwaitReadyAnswersOnTheFirstTry(t *testing.T)
 			t.Errorf("read HealthCheck: %v", err)
 			return
 		}
-		check, ok := msg.(*corev1.HealthCheck)
+		check, ok := msg.(*protocolv1.HealthCheck)
 		if !ok {
 			t.Errorf("expected HealthCheck, got %T", msg)
 			return
 		}
-		mustWriteMsg(t, conn, &corev1.HealthStatus{
+		mustWriteMsg(t, conn, &protocolv1.HealthStatus{
 			RequestId: check.GetRequestId(), Healthy: true, Component: "claude-shim",
 		})
 		_, _ = wire.ReadAny(conn)
@@ -117,7 +117,7 @@ func TestVersionMismatchRefusesBeforeAnyOtherGateStageRuns(t *testing.T) {
 	h := newHarness()
 	frames := make(chan any, 4)
 	path := startFakeShim(t, func(conn net.Conn) {
-		mustWriteMsg(t, conn, &corev1.ShimHello{
+		mustWriteMsg(t, conn, &protocolv1.ShimHello{
 			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim", ProtocolVersion: "999",
 		})
 		msg, err := wire.ReadAny(conn)
@@ -128,7 +128,7 @@ func TestVersionMismatchRefusesBeforeAnyOtherGateStageRuns(t *testing.T) {
 	})
 	cfg := h.config(t, "sess-1", path)
 	hooked := make(chan struct{}, 1)
-	cfg.OnHandshake = func(*corev1.ShimHello) error {
+	cfg.OnHandshake = func(*protocolv1.ShimHello) error {
 		hooked <- struct{}{}
 		return nil
 	}

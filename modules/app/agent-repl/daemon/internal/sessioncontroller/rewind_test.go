@@ -11,7 +11,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/session"
@@ -378,7 +378,7 @@ func aftermathRig(t *testing.T) (m *Manager, pingTurnID string, d *sessionContro
 	}
 	for _, text := range []string{"real work", "real work 2"} {
 		if err := m.SubmitPrompt(context.Background(), "ws", "req-"+text, text, "",
-			corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+			protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 			t.Fatalf("SubmitPrompt %q: %v", text, err)
 		}
 	}

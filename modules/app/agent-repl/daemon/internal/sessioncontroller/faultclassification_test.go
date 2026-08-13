@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/ssm"
 )
@@ -48,7 +48,7 @@ func TestUnknownDegradedProducerFailsLoudlyWithoutStateMutation(t *testing.T) {
 	)
 	c.generationID = "g1"
 
-	c.Degraded("s1", nil, &corev1.DegradedState{
+	c.Degraded("s1", nil, &protocolv1.DegradedState{
 		Component: "new-unclassified-component",
 		Reason:    "opaque failure",
 	})
@@ -83,7 +83,7 @@ func TestTurnLifecycleDegradationAppliesATurnTerminalFault(t *testing.T) {
 	)
 	c.generationID = "g1"
 
-	c.Degraded("s1", nil, &corev1.DegradedState{
+	c.Degraded("s1", nil, &protocolv1.DegradedState{
 		Component: "claude-shim-turn-lifecycle",
 		Reason:    "the shim closed the turn itself",
 		Recovered: true,

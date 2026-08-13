@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 )
 
@@ -29,20 +29,20 @@ type fakeStore struct {
 
 	mu sync.Mutex
 	// subscribed is the Subscribe frame the reader sent.
-	subscribed *corev1.Subscribe
+	subscribed *protocolv1.Subscribe
 	// events are written in order once the subscription arrives.
-	events []*corev1.Event
+	events []*protocolv1.Event
 	// closeAfter closes the connection once every event is written, standing
 	// in for a store that goes away mid-subscription.
 	closeAfter bool
 	// preamble is written before the events, standing in for any non-Event
 	// frame that can share the subscription.
-	preamble *corev1.ConnectionHeartbeat
+	preamble *protocolv1.ConnectionHeartbeat
 }
 
 // newFakeStore listens on a short /tmp path: a t.TempDir()-derived socket path
 // exceeds the 104-byte sun_path limit on macOS and fails to bind.
-func newFakeStore(t *testing.T, events []*corev1.Event, closeAfter bool) *fakeStore {
+func newFakeStore(t *testing.T, events []*protocolv1.Event, closeAfter bool) *fakeStore {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "storehistory-")
 	if err != nil {
@@ -71,7 +71,7 @@ func (s *fakeStore) serve() {
 		_ = conn.Close()
 		return
 	}
-	sub, ok := msg.(*corev1.Subscribe)
+	sub, ok := msg.(*protocolv1.Subscribe)
 	if !ok {
 		_ = conn.Close()
 		return
@@ -104,7 +104,7 @@ func (s *fakeStore) serve() {
 	<-make(chan struct{})
 }
 
-func (s *fakeStore) subscription() *corev1.Subscribe {
+func (s *fakeStore) subscription() *protocolv1.Subscribe {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.subscribed
@@ -112,8 +112,8 @@ func (s *fakeStore) subscription() *corev1.Subscribe {
 
 // event is a seq-bearing store row. The payload kind is irrelevant here: this
 // package moves rows, and translation happens a layer up.
-func event(seq uint64) *corev1.Event {
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq}
+func event(seq uint64) *protocolv1.Event {
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq}
 }
 
 // newReader builds a Reader over path with a fixed vendor resolution.
@@ -137,7 +137,7 @@ func collect(t *testing.T, r *Reader, fromSeq, toSeq uint64, maxEvents uint32) (
 	t.Helper()
 	var seqs []uint64
 	res, err := r.ReplayHistory(context.Background(), "/ws", "s1", fromSeq, toSeq, maxEvents,
-		func(ev *corev1.Event) { seqs = append(seqs, ev.GetSeq()) })
+		func(ev *protocolv1.Event) { seqs = append(seqs, ev.GetSeq()) })
 	return seqs, res, err
 }
 
@@ -146,7 +146,7 @@ func collect(t *testing.T, r *Reader, fromSeq, toSeq uint64, maxEvents uint32) (
 func TestAReplayDeliversEveryPersistedEvent(t *testing.T) {
 	// Arrange.
 	var logged []string
-	store := newFakeStore(t, []*corev1.Event{event(1), event(2), event(3)}, false)
+	store := newFakeStore(t, []*protocolv1.Event{event(1), event(2), event(3)}, false)
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
@@ -164,7 +164,7 @@ func TestAReplayDeliversEveryPersistedEvent(t *testing.T) {
 func TestADrainedReplayIsCompleteRatherThanTruncated(t *testing.T) {
 	// Arrange — quiet on a workspace with no producer IS the end of history.
 	var logged []string
-	store := newFakeStore(t, []*corev1.Event{event(1)}, false)
+	store := newFakeStore(t, []*protocolv1.Event{event(1)}, false)
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
@@ -183,7 +183,7 @@ func TestAReplaySubscribesUnderTheVendorSessionUuid(t *testing.T) {
 	// Arrange — the store keys its seq space, dedup index, and fan-out on the
 	// vendor uuid; any other id subscribes to a channel nothing publishes to.
 	var logged []string
-	store := newFakeStore(t, []*corev1.Event{event(1)}, false)
+	store := newFakeStore(t, []*protocolv1.Event{event(1)}, false)
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
@@ -200,7 +200,7 @@ func TestAReplaySubscribesUnderTheVendorSessionUuid(t *testing.T) {
 func TestAReplayCarriesTheCallersExclusiveFromSeq(t *testing.T) {
 	// Arrange.
 	var logged []string
-	store := newFakeStore(t, []*corev1.Event{event(1), event(2), event(3)}, false)
+	store := newFakeStore(t, []*protocolv1.Event{event(1), event(2), event(3)}, false)
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
@@ -221,7 +221,7 @@ func TestAReplayCarriesTheCallersExclusiveFromSeq(t *testing.T) {
 func TestAReplayStopsAtItsExclusiveUpperBound(t *testing.T) {
 	// Arrange — to_seq is the first seq the caller already covers.
 	var logged []string
-	store := newFakeStore(t, []*corev1.Event{event(1), event(2), event(3)}, false)
+	store := newFakeStore(t, []*protocolv1.Event{event(1), event(2), event(3)}, false)
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
@@ -243,7 +243,7 @@ func TestAnEphemeralEventIsNotServedAsHistory(t *testing.T) {
 	// Arrange — seq 0 is fanned to live subscribers and never persisted, so it
 	// sits outside the seq space every floor and replay mark counts in.
 	var logged []string
-	store := newFakeStore(t, []*corev1.Event{event(0), event(1)}, false)
+	store := newFakeStore(t, []*protocolv1.Event{event(0), event(1)}, false)
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
@@ -263,7 +263,7 @@ func TestAnEphemeralEventIsNotServedAsHistory(t *testing.T) {
 func TestATrippedEventCapIsReportedAsTruncated(t *testing.T) {
 	// Arrange — a cap that trips is never a quiet short answer.
 	var logged []string
-	store := newFakeStore(t, []*corev1.Event{event(1), event(2), event(3)}, false)
+	store := newFakeStore(t, []*protocolv1.Event{event(1), event(2), event(3)}, false)
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
@@ -284,7 +284,7 @@ func TestATrippedEventCapIsReportedAsTruncated(t *testing.T) {
 func TestAStoreThatClosesTheSubscriptionTruncatesTheReplay(t *testing.T) {
 	// Arrange — whatever arrived is real, but it is not provably all of it.
 	var logged []string
-	store := newFakeStore(t, []*corev1.Event{event(1)}, true)
+	store := newFakeStore(t, []*protocolv1.Event{event(1)}, true)
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
@@ -370,7 +370,7 @@ func TestAReaderWithNoLoggerRefuses(t *testing.T) {
 	r := &Reader{Socket: "/tmp/x.sock", Vendor: func(string) (string, bool) { return "v", true }}
 
 	// Act.
-	_, err := r.ReplayHistory(context.Background(), "/ws", "s1", 0, 0, 0, func(*corev1.Event) {})
+	_, err := r.ReplayHistory(context.Background(), "/ws", "s1", 0, 0, 0, func(*protocolv1.Event) {})
 
 	// Assert.
 	if err == nil {
@@ -410,8 +410,8 @@ func TestAReaderWithNoVendorResolverRefuses(t *testing.T) {
 func TestANonEventStoreFrameIsSkippedRatherThanServed(t *testing.T) {
 	// Arrange — this path serves persisted conversation history only.
 	var logged []string
-	store := newFakeStore(t, []*corev1.Event{event(1)}, false)
-	store.preamble = &corev1.ConnectionHeartbeat{SentAtMs: 1}
+	store := newFakeStore(t, []*protocolv1.Event{event(1)}, false)
+	store.preamble = &protocolv1.ConnectionHeartbeat{SentAtMs: 1}
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
@@ -430,13 +430,13 @@ func TestACancelledReplayReportsTheCancellation(t *testing.T) {
 	// Arrange — the context owns the connection, so a cancelled resync
 	// unblocks a read parked on a store that stopped answering.
 	var logged []string
-	store := newFakeStore(t, []*corev1.Event{event(1)}, false)
+	store := newFakeStore(t, []*protocolv1.Event{event(1)}, false)
 	r := newReader(t, store.path(), &logged)
 	r.Idle = time.Minute
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Act — cancel from the sink, the moment the first event lands.
-	_, err := r.ReplayHistory(ctx, "/ws", "s1", 0, 0, 0, func(*corev1.Event) { cancel() })
+	_, err := r.ReplayHistory(ctx, "/ws", "s1", 0, 0, 0, func(*protocolv1.Event) { cancel() })
 	defer cancel()
 
 	// Assert.

@@ -33,9 +33,9 @@ import (
 	"fmt"
 	"strings"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ssm"
@@ -655,8 +655,8 @@ func CommandWithFacts(logf dlog.Logf, err error, f Facts) *frontendv1.FailureCar
 // from a turn that had ALREADY ENDED, and painted the second as the first.
 // Deriving it downstream is what made it ambiguous; this reads the shim's own
 // verdict instead.
-func InterruptError(outcome corev1.InterruptOutcome) error {
-	if outcome != corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED {
+func InterruptError(outcome protocolv1.InterruptOutcome) error {
+	if outcome != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED {
 		return nil
 	}
 	return ErrInterruptUndelivered
@@ -765,7 +765,7 @@ func apiErrorDetail(ae *datav1.ApiErrorLine) string {
 // this only names the block it found. Keeping the predicate there and the
 // naming here means a stop reason cannot come to block without also having a
 // name, or gain a name without blocking.
-func TurnEnd(te *corev1.TurnEnded) *frontendv1.FailureCardView {
+func TurnEnd(te *protocolv1.TurnEnded) *frontendv1.FailureCardView {
 	reason := te.GetStopReason()
 	if !ssm.VendorBlockingTurnEnd(reason, te.GetIsError()) {
 		return nil

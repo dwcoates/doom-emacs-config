@@ -9,9 +9,9 @@ package sessioncontroller
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -34,7 +34,7 @@ func assistantTextItem(uuid, model string, texts ...string) *frontendv1.Message 
 
 // transcriptAssistantTextEvent is the DURABLE account of an assistant record as
 // the real pipeline delivers it: a file-plane transcript assistant line.
-func transcriptAssistantTextEvent(t *testing.T, seq uint64, uuid, model, text string) *corev1.Event {
+func transcriptAssistantTextEvent(t *testing.T, seq uint64, uuid, model, text string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.TranscriptLine{
 		Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
@@ -47,7 +47,7 @@ func transcriptAssistantTextEvent(t *testing.T, seq uint64, uuid, model, text st
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // assistantTurns returns every pushed conversation item carrying an assistant

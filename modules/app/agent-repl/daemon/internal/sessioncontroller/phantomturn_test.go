@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/ssm"
 )
@@ -17,7 +17,7 @@ import (
 // handshake drives the shim's pre-subscription hello through the real hook.
 func (h *queueHarness) handshake(inFlight bool, ids ...string) error {
 	h.t.Helper()
-	return h.m.onHandshake("ws", "s1", &corev1.ShimHello{
+	return h.m.onHandshake("ws", "s1", &protocolv1.ShimHello{
 		Pid:             4242,
 		QueryInstanceId: "query-phantom-turn",
 		TurnInFlight:    inFlight,
@@ -28,7 +28,7 @@ func (h *queueHarness) handshake(inFlight bool, ids ...string) error {
 // shimReady closes the bring-up gate, the frame the phantom release rides.
 func (h *queueHarness) shimReady() {
 	h.t.Helper()
-	h.m.onConnected("ws", "s1", &corev1.ShimHello{Pid: 4242})
+	h.m.onConnected("ws", "s1", &protocolv1.ShimHello{Pid: 4242})
 }
 
 // turnActive reads the queue's process-local latch under the manager mutex.
@@ -199,7 +199,7 @@ func TestShimReadyWithoutAPhantomCloseDeliversNothing(t *testing.T) {
 func TestInterjectAlreadyCompleteDeliversTheHeldPrompt(t *testing.T) {
 	// Arrange — a turn is claimed and a prompt is held behind it.
 	h := newQueueHarness(t, nil)
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 	h.turn(true)
 	if err := h.submit("run me"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -225,7 +225,7 @@ func TestInterjectAlreadyCompleteDeliversTheHeldPrompt(t *testing.T) {
 func TestInterjectAlreadyCompleteClosesTheDurableClaim(t *testing.T) {
 	// Arrange.
 	h := newQueueHarness(t, nil)
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 	h.turn(true)
 	if err := h.submit("run me"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -249,7 +249,7 @@ func TestInterjectAlreadyCompleteClosesTheDurableClaim(t *testing.T) {
 func TestInterjectAlreadyCompleteReconcilesTheStatusAxis(t *testing.T) {
 	// Arrange.
 	h := newQueueHarness(t, nil)
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 	h.turn(true)
 	if err := h.submit("run me"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -272,7 +272,7 @@ func TestInterjectAlreadyCompleteReconcilesTheStatusAxis(t *testing.T) {
 func TestInterjectInterruptedSynthesizesNoClose(t *testing.T) {
 	// Arrange.
 	h := newQueueHarness(t, nil)
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 	h.turn(true)
 	if err := h.submit("run me"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -302,7 +302,7 @@ func TestInterjectInterruptedSynthesizesNoClose(t *testing.T) {
 func TestUserStopAlreadyCompleteClosesTheClaimWithoutDelivering(t *testing.T) {
 	// Arrange.
 	h := newQueueHarness(t, nil)
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 	h.turn(true)
 	if err := h.submit("run me"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -331,7 +331,7 @@ func TestUserStopAlreadyCompleteClosesTheClaimWithoutDelivering(t *testing.T) {
 func TestAlreadyCompleteWithNoClaimStaysBenign(t *testing.T) {
 	// Arrange — no turn was ever claimed.
 	h := newQueueHarness(t, nil)
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 
 	// Act.
 	err := h.interrupt()
@@ -363,7 +363,7 @@ func TestInterjectAlreadyCompleteReleasesTheQueueDespiteALedgerFailure(t *testin
 	// Arrange.
 	log := &capturedLog{}
 	h := newQueueHarnessWithPusher(t, nil, nil, log.logf)
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 	h.failSynthesizedTurnClose(errors.New("state store is gone"))
 	h.turn(true)
 	if err := h.submit("run me"); err != nil {
@@ -393,7 +393,7 @@ func TestUserStopAlreadyCompleteReportsALedgerFailureWithoutFailingTheStop(t *te
 	// Arrange.
 	log := &capturedLog{}
 	h := newQueueHarnessWithPusher(t, nil, nil, log.logf)
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 	h.failSynthesizedTurnClose(errors.New("state store is gone"))
 	h.turn(true)
 

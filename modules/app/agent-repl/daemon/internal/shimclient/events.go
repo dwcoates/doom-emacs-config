@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 )
 
@@ -31,35 +31,35 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 		c.markRecv()
 
 		switch m := msg.(type) {
-		case *corev1.Event:
+		case *protocolv1.Event:
 			if err := c.dispatchEvent(m); err != nil {
 				return err // seq regression: terminal
 			}
-		case *corev1.Ack:
+		case *protocolv1.Ack:
 			c.resolveAck(ac, m)
-		case *corev1.Nack:
+		case *protocolv1.Nack:
 			c.resolveNack(ac, m)
-		case *corev1.HealthStatus:
+		case *protocolv1.HealthStatus:
 			c.resolveHealth(ac, m)
-		case *corev1.PermissionRequest:
+		case *protocolv1.PermissionRequest:
 			c.dispatchPermission(ctx, ac, m)
-		case *corev1.ModelCatalog:
+		case *protocolv1.ModelCatalog:
 			if err := c.dispatchModelCatalog(m); err != nil {
 				return err
 			}
 		// REPLAYED HISTORY. Its own arms, physically apart from the live
-		// *corev1.Event case above: a replayed event cannot reach dispatchEvent
+		// *protocolv1.Event case above: a replayed event cannot reach dispatchEvent
 		// (and so cannot reach the SSM, the task catalog, or the progress
 		// resolver) because it is not that type. See replay.go.
-		case *corev1.ReplayEntry:
+		case *protocolv1.ReplayEntry:
 			c.dispatchReplayEntry(m)
-		case *corev1.ReplayDone:
+		case *protocolv1.ReplayDone:
 			c.dispatchReplayDone(m)
-		// THE BOUNDED PAGE. Its failure arm is the *corev1.Nack case above,
+		// THE BOUNDED PAGE. Its failure arm is the *protocolv1.Nack case above,
 		// which carries this page's own request id — see messagepage.go.
-		case *corev1.MessagePage:
+		case *protocolv1.MessagePage:
 			c.resolveMessagePage(ac, m)
-		case *corev1.ConnectionHeartbeat:
+		case *protocolv1.ConnectionHeartbeat:
 			// Liveness only (already recorded via markRecv). No reply: our own
 			// heartbeatSender covers the reverse direction.
 			//
@@ -68,10 +68,10 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 			// now siblings in one package, so the plain name resolves to the
 			// other one: this connection-liveness frame must always be spelled
 			// ConnectionHeartbeat, and a mistake between them compiles.
-		case *corev1.ShimReady:
+		case *protocolv1.ShimReady:
 			// GATE STAGE 3. Nothing else releases AwaitReady.
 			c.dispatchShimReady(ac, m)
-		case *corev1.ShimHello:
+		case *protocolv1.ShimHello:
 			c.logf("unexpected ShimHello after handshake; ignoring")
 		default:
 			c.logf("unexpected inbound message type %T; ignoring", m)
@@ -79,7 +79,7 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 	}
 }
 
-func (c *Client) dispatchModelCatalog(catalog *corev1.ModelCatalog) error {
+func (c *Client) dispatchModelCatalog(catalog *protocolv1.ModelCatalog) error {
 	if catalog.GetSessionId() != c.cfg.SessionID {
 		return c.modelCatalogInvariant("model catalog session=%s arrived on session=%s connection", catalog.GetSessionId(), c.cfg.SessionID)
 	}
@@ -105,7 +105,7 @@ func (c *Client) modelCatalogInvariant(format string, args ...any) error {
 		// nil envelope: this degradation is the DAEMON's own report about a
 		// broken capability channel, not a row read off the durable sequence, so
 		// there is no producer stamp to classify it by. It is live by definition.
-		c.cfg.Degraded.Degraded(c.cfg.SessionID, nil, &corev1.DegradedState{
+		c.cfg.Degraded.Degraded(c.cfg.SessionID, nil, &protocolv1.DegradedState{
 			Component: "daemon-model-catalog",
 			Reason:    reason,
 		})
@@ -120,7 +120,7 @@ func (c *Client) modelCatalogInvariant(format string, args ...any) error {
 // ContextCleared, ContextCompacted, UnparsedEvent) to the FrameSink. PERSISTENT
 // events (seq > 0) advance the monotonic high-water mark; a regression is a
 // fatal protocol violation.
-func (c *Client) dispatchEvent(ev *corev1.Event) error {
+func (c *Client) dispatchEvent(ev *protocolv1.Event) error {
 	if seq := ev.GetSeq(); seq > 0 {
 		if seq <= c.lastSeen {
 			// Fatal inside the mark's own generation, a rebase across a proven
@@ -137,7 +137,7 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 	}
 
 	switch p := ev.GetPayload().(type) {
-	case *corev1.Event_FilePlaneDiagnostic:
+	case *protocolv1.Event_FilePlaneDiagnostic:
 		if err := validateFilePlaneDiagnostic(ev, p.FilePlaneDiagnostic); err != nil {
 			return err
 		}
@@ -147,7 +147,7 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		if err := c.cfg.FileDiagnostics.PersistFileDiagnostic(ev, p.FilePlaneDiagnostic); err != nil {
 			return fmt.Errorf("shimclient: persist file-plane diagnostic: %w", err)
 		}
-	case *corev1.Event_TurnClaimBridge:
+	case *protocolv1.Event_TurnClaimBridge:
 		if c.cfg.TurnClaims == nil {
 			return fmt.Errorf("%w session=%s seq=%d: sink is not wired",
 				ErrTurnClaimRejected, ev.GetSessionId(), ev.GetSeq())
@@ -157,17 +157,17 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 				ErrTurnClaimRejected, ev.GetSessionId(), ev.GetSeq(),
 				p.TurnClaimBridge.GetTurnId(), err)
 		}
-	case *corev1.Event_SessionStarted,
-		*corev1.Event_SessionEnded,
-		*corev1.Event_TurnStarted,
-		*corev1.Event_TurnEnded,
+	case *protocolv1.Event_SessionStarted,
+		*protocolv1.Event_SessionEnded,
+		*protocolv1.Event_TurnStarted,
+		*protocolv1.Event_TurnEnded,
 		// Account-window observations participate in terminal accounting and
 		// can be rejected when they name no admitted turn. They must use the
 		// error-returning state sink so a rejection cannot advance lastSeen.
-		*corev1.Event_AccountUsageObservation,
-		*corev1.Event_TaskStarted,
-		*corev1.Event_TaskProgress,
-		*corev1.Event_TaskEnded:
+		*protocolv1.Event_AccountUsageObservation,
+		*protocolv1.Event_TaskStarted,
+		*protocolv1.Event_TaskProgress,
+		*protocolv1.Event_TaskEnded:
 		if err := c.cfg.StateSink.Apply(ev); err != nil {
 			if !errors.Is(err, ErrTurnScopedRejection) {
 				return fmt.Errorf("%w session=%s seq=%d kind=%T: %v",
@@ -183,13 +183,13 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 			if c.cfg.Degraded != nil {
 				// nil envelope: this is the DAEMON's report about its own
 				// refusal, not a row read off the durable sequence.
-				c.cfg.Degraded.Degraded(c.cfg.SessionID, nil, &corev1.DegradedState{
+				c.cfg.Degraded.Degraded(c.cfg.SessionID, nil, &protocolv1.DegradedState{
 					Component: "daemon-turn-ledger",
 					Reason:    err.Error(),
 				})
 			}
 		}
-	case *corev1.Event_SessionRewound:
+	case *protocolv1.Event_SessionRewound:
 		// A REAL ROUTE, not the default FrameSink fallthrough it used to take.
 		// SessionRewound is correlation evidence in TurnClaimBridge's sense: the
 		// rotation itself is announced by the ordinary handshake bounce, and
@@ -208,7 +208,7 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 				ev.GetSessionId(), ev.GetSeq(), p.SessionRewound.GetPreviousVendorSessionId(),
 				p.SessionRewound.GetNewVendorSessionId(), err)
 		}
-	case *corev1.Event_DegradedState:
+	case *protocolv1.Event_DegradedState:
 		// A degradation the shim reports becomes a failure card and, for an
 		// unexpected query termination, a dead session. It is a warning; the
 		// RECOVERY of one is ordinary good news and stays at info.
@@ -233,7 +233,7 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		emit("shim reported DegradedState component=%s reason=%q dropped=%d recovered=%v disposition=%s",
 			p.DegradedState.GetComponent(), p.DegradedState.GetReason(),
 			p.DegradedState.GetDroppedCount(), p.DegradedState.GetRecovered(), disposition)
-	case *corev1.Event_Unparsed:
+	case *protocolv1.Event_Unparsed:
 		// The vendor produced a line nothing could read, so that content is
 		// missing from the conversation the user sees.
 		c.warn("received UnparsedEvent producer=%s path=%s offset=%d error=%q",
@@ -242,17 +242,17 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		if err := c.consumeFrame(ev, fmt.Sprintf("%T", p)); err != nil {
 			return err
 		}
-	case *corev1.Event_ContentDelta,
-		*corev1.Event_HeartbeatProgress,
-		*corev1.Event_MessageLatency,
+	case *protocolv1.Event_ContentDelta,
+		*protocolv1.Event_HeartbeatProgress,
+		*protocolv1.Event_MessageLatency,
 		// The clear and the compaction. Both are CONVERSATION content — each
 		// renders as its own work and floors the frontend's replay — so they
 		// belong to the frame sink, not the lifecycle sink: nothing in the SSM's
 		// state axes moves because a conversation's history stopped informing
 		// the agent.
-		*corev1.Event_ContextCleared,
-		*corev1.Event_ContextCompacted,
-		*corev1.Event_Vendor:
+		*protocolv1.Event_ContextCleared,
+		*protocolv1.Event_ContextCompacted,
+		*protocolv1.Event_Vendor:
 		if err := c.consumeFrame(ev, fmt.Sprintf("%T", p)); err != nil {
 			return err
 		}
@@ -279,12 +279,12 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 	return nil
 }
 
-func (c *Client) validateDurableCursorTransition(ev *corev1.Event) error {
+func (c *Client) validateDurableCursorTransition(ev *protocolv1.Event) error {
 	if ev.GetSeq() == 0 {
 		return nil
 	}
 	switch payload := ev.GetPayload().(type) {
-	case *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnEnded:
 		turnID := payload.TurnEnded.GetTurnId()
 		if turnID != "" {
 			if _, ok := c.pinnedAccountingTurns[turnID]; !ok {
@@ -314,7 +314,7 @@ func (c *Client) validateDurableCursorTransition(ev *corev1.Event) error {
 					c.cfg.SessionID, ev.GetSeq(), turnID, ev.GetQueryInstanceId(), c.liveQueryInstanceID)
 			}
 		}
-	case *corev1.Event_QueryLifecycle:
+	case *protocolv1.Event_QueryLifecycle:
 		lifecycle := payload.QueryLifecycle
 		if runtime := lifecycle.GetRuntimeObserved(); runtime != nil && c.pendingResumeQuery != "" && lifecycle.GetQueryInstanceId() != c.pendingResumeQuery {
 			return fmt.Errorf("runtime identity for query %q arrived while resumed query %q awaits identity proof", lifecycle.GetQueryInstanceId(), c.pendingResumeQuery)
@@ -328,7 +328,7 @@ func (c *Client) validateDurableCursorTransition(ev *corev1.Event) error {
 				return fmt.Errorf("query termination %q arrived while %q awaits its companion", queryID, c.pendingTerminationQuery)
 			}
 		}
-	case *corev1.Event_DegradedState:
+	case *protocolv1.Event_DegradedState:
 		degraded := payload.DegradedState
 		if degraded.GetComponent() == "claude-shim-sdk" && degraded.GetReason() == "unexpected_query_termination" && !degraded.GetRecovered() {
 			if degraded.QueryInstanceId == nil || degraded.GetQueryInstanceId() == "" {
@@ -346,17 +346,17 @@ func (c *Client) validateDurableCursorTransition(ev *corev1.Event) error {
 // needs multiple store events or an external transaction to become complete.
 // Transport reconnects use lastSeen in memory, while a new daemon has only the
 // pinned SeqStore cursor and must replay the complete turn or termination pair.
-func (c *Client) advanceDurableCursor(ev *corev1.Event) {
+func (c *Client) advanceDurableCursor(ev *protocolv1.Event) {
 	if c.pinnedAccountingTurns == nil {
 		c.pinnedAccountingTurns = map[string]struct{}{}
 	}
 	switch payload := ev.GetPayload().(type) {
-	case *corev1.Event_TurnStarted:
+	case *protocolv1.Event_TurnStarted:
 		turnID := payload.TurnStarted.GetTurnId()
 		if turnID != "" {
 			c.pinnedAccountingTurns[turnID] = struct{}{}
 		}
-	case *corev1.Event_TurnClaimBridge:
+	case *protocolv1.Event_TurnClaimBridge:
 		// A rotated sequence deliberately contains no duplicate TurnStarted.
 		// Its durable bridge is the proof that pins the same logical accounting
 		// transaction before assistant usage and the terminal boundary arrive.
@@ -364,13 +364,13 @@ func (c *Client) advanceDurableCursor(ev *corev1.Event) {
 		if turnID != "" {
 			c.pinnedAccountingTurns[turnID] = struct{}{}
 		}
-	case *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnEnded:
 		turnID := payload.TurnEnded.GetTurnId()
 		if turnID == "" {
 			break
 		}
 		delete(c.pinnedAccountingTurns, turnID)
-	case *corev1.Event_QueryLifecycle:
+	case *protocolv1.Event_QueryLifecycle:
 		lifecycle := payload.QueryLifecycle
 		if created := lifecycle.GetCreated(); created != nil && created.GetResumed() != nil {
 			c.pendingResumeQuery = lifecycle.GetQueryInstanceId()
@@ -385,7 +385,7 @@ func (c *Client) advanceDurableCursor(ev *corev1.Event) {
 			queryID := lifecycle.GetQueryInstanceId()
 			c.pendingTerminationQuery = queryID
 		}
-	case *corev1.Event_DegradedState:
+	case *protocolv1.Event_DegradedState:
 		degraded := payload.DegradedState
 		if degraded.GetComponent() == "claude-shim-sdk" && degraded.GetReason() == "unexpected_query_termination" && !degraded.GetRecovered() {
 			if c.pendingTerminationQuery != "" {
@@ -402,13 +402,13 @@ func (c *Client) advanceDurableCursor(ev *corev1.Event) {
 // meaning is completed by the following unexpected-query DegradedState. An
 // intentional shutdown has no such companion: pinning it would leave the
 // cursor behind a completed hibernation and reject the next query instance.
-func queryTerminationNeedsCompanion(lifecycle *corev1.QueryLifecycle) bool {
+func queryTerminationNeedsCompanion(lifecycle *protocolv1.QueryLifecycle) bool {
 	terminated := lifecycle.GetTerminated()
 	return terminated != nil && (terminated.GetUnexpectedEof() != nil ||
 		terminated.GetIteratorFailure() != nil || terminated.GetStartupFailure() != nil)
 }
 
-func (c *Client) consumeFrame(ev *corev1.Event, kind string) error {
+func (c *Client) consumeFrame(ev *protocolv1.Event, kind string) error {
 	if err := c.cfg.FrameSink.Consume(ev); err != nil {
 		return fmt.Errorf("%w: frame sink rejected session=%s seq=%d kind=%s: %w",
 			ErrLifecycleRejected, ev.GetSessionId(), ev.GetSeq(), kind, err)
@@ -416,14 +416,14 @@ func (c *Client) consumeFrame(ev *corev1.Event, kind string) error {
 	return nil
 }
 
-func validateFilePlaneDiagnostic(ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error {
+func validateFilePlaneDiagnostic(ev *protocolv1.Event, diagnostic *protocolv1.FilePlaneDiagnostic) error {
 	if ev.GetSeq() == 0 {
 		return errors.New("shimclient: file-plane diagnostic must be persistent")
 	}
-	if ev.GetClass() != corev1.EventClass_EVENT_CLASS_PERSISTENT {
+	if ev.GetClass() != protocolv1.EventClass_EVENT_CLASS_PERSISTENT {
 		return fmt.Errorf("shimclient: file-plane diagnostic class %s is not persistent", ev.GetClass())
 	}
-	if ev.GetPlane() != corev1.Plane_PLANE_FILE {
+	if ev.GetPlane() != protocolv1.Plane_PLANE_FILE {
 		return fmt.Errorf("shimclient: file-plane diagnostic has plane %s, want PLANE_FILE", ev.GetPlane())
 	}
 	if ev.GetProducedAtMs() <= 0 {
@@ -432,7 +432,7 @@ func validateFilePlaneDiagnostic(ev *corev1.Event, diagnostic *corev1.FilePlaneD
 	if diagnostic == nil {
 		return errors.New("shimclient: file-plane diagnostic payload is required")
 	}
-	if diagnostic.GetSourceRuntime() != corev1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR {
+	if diagnostic.GetSourceRuntime() != protocolv1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR {
 		return fmt.Errorf("shimclient: unsupported file-plane diagnostic source runtime %s", diagnostic.GetSourceRuntime())
 	}
 	if diagnostic.GetSourcePid() <= 0 || diagnostic.GetOperation() == "" || diagnostic.GetMessage() == "" || diagnostic.GetContext() == nil {
@@ -454,7 +454,7 @@ func validateFilePlaneDiagnostic(ev *corev1.Event, diagnostic *corev1.FilePlaneD
 // dispatchPermission runs the injected handler on its own goroutine (it may
 // block on a human) and sends the returned PermissionResponse. The event demux
 // is never blocked by a pending permission answer.
-func (c *Client) dispatchPermission(ctx context.Context, ac *activeConn, req *corev1.PermissionRequest) {
+func (c *Client) dispatchPermission(ctx context.Context, ac *activeConn, req *protocolv1.PermissionRequest) {
 	c.logf("received PermissionRequest request_id=%s tool=%s", req.GetRequestId(), req.GetToolName())
 	go func() {
 		resp := c.cfg.Permissions.HandlePermission(c.cfg.SessionID, req)

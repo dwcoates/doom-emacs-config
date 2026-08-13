@@ -23,8 +23,8 @@ import (
 	"strconv"
 	"strings"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	statev1 "agentrepl/proto/state/v1"
 )
 
@@ -226,7 +226,7 @@ func evidenceSuffix(missing []string) string {
 // usageOutcomeKnown reports whether a boundary observation SETTLED — either it
 // measured the account or it stated why it could not. An observation with
 // neither arm is an unfinished sample, not an unavailable one.
-func usageOutcomeKnown(o *corev1.AccountUsageObservation) bool {
+func usageOutcomeKnown(o *protocolv1.AccountUsageObservation) bool {
 	if o == nil {
 		return false
 	}
@@ -262,7 +262,7 @@ func completeAccountingSummary(a *statev1.TurnAccounting) string {
 // move between them, or "unavailable" when either boundary failed to measure.
 // A one-sided move is not reported: the delta is the point, and half of one
 // would read as a full account of the turn's cost.
-func quotaMove(start, end *corev1.AccountUsageObservation) string {
+func quotaMove(start, end *protocolv1.AccountUsageObservation) string {
 	from, to := start.GetAvailable(), end.GetAvailable()
 	if from == nil || to == nil {
 		return "unavailable"

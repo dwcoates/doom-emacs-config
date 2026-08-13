@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 )
 
@@ -27,7 +27,7 @@ func (f *fakeDeaths) SpawnState(string) ShimSpawnState         { return f.state 
 // is the shape the daemon's real listener adapter has.
 type deathSource struct{ *fakeDeaths }
 
-func (deathSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.ShimHello, error) {
+func (deathSource) Next(ctx context.Context, _ string) (net.Conn, *protocolv1.ShimHello, error) {
 	<-ctx.Done()
 	return nil, nil, ctx.Err()
 }
@@ -40,14 +40,14 @@ type observedExitSource struct {
 
 func (s *observedExitSource) DiedAfterConnect(string) <-chan ShimExit { return s.exits }
 
-func (s *observedExitSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.ShimHello, error) {
+func (s *observedExitSource) Next(ctx context.Context, _ string) (net.Conn, *protocolv1.ShimHello, error) {
 	if s.calls.Add(1) > 1 {
 		<-ctx.Done()
 		return nil, nil, ctx.Err()
 	}
 	client, peer := net.Pipe()
 	go s.serve(peer)
-	return client, &corev1.ShimHello{
+	return client, &protocolv1.ShimHello{
 		SessionId: "s1", Vendor: "claude", ShimVersion: "test-shim", ProtocolVersion: "1",
 	}, nil
 }
@@ -59,7 +59,7 @@ func serveReadyUntilClosed(t *testing.T, conn net.Conn) {
 		t.Errorf("read DaemonHello: %v", err)
 		return
 	}
-	mustWriteMsg(t, conn, &corev1.ShimReady{SessionId: "s1"})
+	mustWriteMsg(t, conn, &protocolv1.ShimReady{SessionId: "s1"})
 	_, _ = wire.ReadAny(conn)
 }
 

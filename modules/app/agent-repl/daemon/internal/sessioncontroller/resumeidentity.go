@@ -3,8 +3,8 @@ package sessioncontroller
 import (
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // resumeIdentityTracker proves that each resumed query first reports the
@@ -80,7 +80,7 @@ func newResumeIdentityTracker() *resumeIdentityTracker {
 // adoption so the substitution is still on the record. Every OTHER changed
 // identity is as fatal as it ever was: the discharge is consumed by the one
 // rotation it consented to, so a second unexplained change is refused.
-func (t *resumeIdentityTracker) observe(ev *corev1.Event) (*resumeIdentityMismatch, *resumeIdentityAdoption, error) {
+func (t *resumeIdentityTracker) observe(ev *protocolv1.Event) (*resumeIdentityMismatch, *resumeIdentityAdoption, error) {
 	lifecycle := ev.GetQueryLifecycle()
 	if lifecycle == nil {
 		return nil, nil, nil

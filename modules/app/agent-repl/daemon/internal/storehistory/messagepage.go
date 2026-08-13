@@ -8,13 +8,13 @@ import (
 	"net"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 
 	"github.com/google/uuid"
 )
 
-// THE BOUNDED, BACKWARD-ANCHORED READ (agentshim/core/v1/message-page.proto),
+// THE BOUNDED, BACKWARD-ANCHORED READ (protocol/v1/message-page.proto),
 // performed against the same store socket ReplayHistory subscribes to.
 //
 // WHAT IT SAYS THAT Subscribe COULD NOT. Subscribe and ReplayRequest both read
@@ -60,7 +60,7 @@ type PageAnchor struct {
 // The connection is a throwaway, exactly as ReplayHistory's is: a page is a
 // one-shot request/response and has no business sharing a subscription's
 // lifetime.
-func (r *Reader) MessagePage(ctx context.Context, workspace, sessionID string, anchor PageAnchor) (*corev1.MessagePage, error) {
+func (r *Reader) MessagePage(ctx context.Context, workspace, sessionID string, anchor PageAnchor) (*protocolv1.MessagePage, error) {
 	if r.Logf == nil {
 		return nil, fmt.Errorf("storehistory: message page for ws %q needs a logger", workspace)
 	}
@@ -79,11 +79,11 @@ func (r *Reader) MessagePage(ctx context.Context, workspace, sessionID string, a
 		timeout = DefaultPageTimeout
 	}
 	requestID := uuid.NewString()
-	req := &corev1.MessagePageRequest{RequestId: requestID, SessionId: vendor}
+	req := &protocolv1.MessagePageRequest{RequestId: requestID, SessionId: vendor}
 	if anchor.Head {
-		req.Anchor = &corev1.MessagePageRequest_Head{Head: &corev1.MessagePageHead{}}
+		req.Anchor = &protocolv1.MessagePageRequest_Head{Head: &protocolv1.MessagePageHead{}}
 	} else {
-		req.Anchor = &corev1.MessagePageRequest_BeforeSeq{BeforeSeq: anchor.BeforeSeq}
+		req.Anchor = &protocolv1.MessagePageRequest_BeforeSeq{BeforeSeq: anchor.BeforeSeq}
 	}
 	started := time.Now()
 	r.Logf("storehistory: requesting ONE bounded message page ws=%q session=%s vendor_session=%s socket=%q request_id=%s anchor=%s before_seq=%d",
@@ -138,7 +138,7 @@ func (r *Reader) MessagePage(ctx context.Context, workspace, sessionID string, a
 			}
 			return nil, fmt.Errorf("storehistory: reading the store's message page for ws %q: %w", workspace, err)
 		}
-		page, isPage := msg.(*corev1.MessagePage)
+		page, isPage := msg.(*protocolv1.MessagePage)
 		if !isPage {
 			// Routing is by frame type: anything else sharing this connection
 			// (a heartbeat) is simply not this page.
@@ -168,11 +168,11 @@ func anchorName(a PageAnchor) string {
 
 // boundaryName names the boundary arm for the log line, keeping the UNSET case
 // visible rather than folding it into either answer.
-func boundaryName(page *corev1.MessagePage) string {
+func boundaryName(page *protocolv1.MessagePage) string {
 	switch page.GetBoundary().(type) {
-	case *corev1.MessagePage_More:
+	case *protocolv1.MessagePage_More:
 		return "more"
-	case *corev1.MessagePage_Floor:
+	case *protocolv1.MessagePage_Floor:
 		return "retained_floor"
 	default:
 		return "unset"

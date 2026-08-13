@@ -4,16 +4,16 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	statev1 "agentrepl/proto/state/v1"
 )
 
 // availableUsage is a boundary observation that measured the account.
-func availableUsage(percent float64) *corev1.AccountUsageObservation {
-	return &corev1.AccountUsageObservation{
-		Outcome: &corev1.AccountUsageObservation_Available{
-			Available: &corev1.AccountUsageAvailable{
-				FiveHour: &corev1.UsageWindow{UtilizationPercent: percent},
+func availableUsage(percent float64) *protocolv1.AccountUsageObservation {
+	return &protocolv1.AccountUsageObservation{
+		Outcome: &protocolv1.AccountUsageObservation_Available{
+			Available: &protocolv1.AccountUsageAvailable{
+				FiveHour: &protocolv1.UsageWindow{UtilizationPercent: percent},
 			},
 		},
 	}
@@ -21,12 +21,12 @@ func availableUsage(percent float64) *corev1.AccountUsageObservation {
 
 // unavailableUsage is a boundary observation that SETTLED by stating why it
 // could not measure — a different thing from one that never finished.
-func unavailableUsage() *corev1.AccountUsageObservation {
-	return &corev1.AccountUsageObservation{
-		Outcome: &corev1.AccountUsageObservation_Unavailable{
-			Unavailable: &corev1.AccountUsageUnavailable{
-				Reason: &corev1.AccountUsageUnavailable_ServiceUnavailable{
-					ServiceUnavailable: &corev1.UsageServiceUnavailable{},
+func unavailableUsage() *protocolv1.AccountUsageObservation {
+	return &protocolv1.AccountUsageObservation{
+		Outcome: &protocolv1.AccountUsageObservation_Unavailable{
+			Unavailable: &protocolv1.AccountUsageUnavailable{
+				Reason: &protocolv1.AccountUsageUnavailable_ServiceUnavailable{
+					ServiceUnavailable: &protocolv1.UsageServiceUnavailable{},
 				},
 			},
 		},
@@ -37,7 +37,7 @@ func unavailableUsage() *corev1.AccountUsageObservation {
 func completeAccounting() *statev1.TurnAccounting {
 	return &statev1.TurnAccounting{
 		TurnId:  "t1",
-		Runtime: &corev1.QueryRuntimeIdentity{},
+		Runtime: &protocolv1.QueryRuntimeIdentity{},
 		Timing: &statev1.TurnAccountingTiming{
 			PromptToResultMs: 10_000,
 		},
@@ -187,7 +187,7 @@ func TestAnIncompleteVerdictNamesWhatIsMissing(t *testing.T) {
 func TestAnUnfinishedUsageSampleIsMissingEvidence(t *testing.T) {
 	// Arrange — an observation with neither outcome arm never settled.
 	a := completeAccounting()
-	a.UsageAtEnd = &corev1.AccountUsageObservation{}
+	a.UsageAtEnd = &protocolv1.AccountUsageObservation{}
 	// Act.
 	got := AccountingCell(a)
 	// Assert.

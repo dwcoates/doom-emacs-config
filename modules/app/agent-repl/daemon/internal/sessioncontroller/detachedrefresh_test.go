@@ -3,7 +3,7 @@ package sessioncontroller
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -24,12 +24,12 @@ func drainConsumer() *consumer {
 		func(string, ...any) {}, nil, nil, nil, nil, nil)
 }
 
-func taskStarted(id string) *corev1.Event {
-	return &corev1.Event{Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: id}}}
+func taskStarted(id string) *protocolv1.Event {
+	return &protocolv1.Event{Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: id}}}
 }
 
-func taskEnded(id string) *corev1.Event {
-	return &corev1.Event{Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: id}}}
+func taskEnded(id string) *protocolv1.Event {
+	return &protocolv1.Event{Payload: &protocolv1.Event_TaskEnded{TaskEnded: &protocolv1.TaskEnded{TaskId: id}}}
 }
 
 func TestTheLastTaskEndingDrainsTheLiveSet(t *testing.T) {

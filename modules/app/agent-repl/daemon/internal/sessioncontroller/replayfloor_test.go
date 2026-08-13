@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/shimclient"
 )
@@ -20,18 +20,18 @@ import (
 // throw everything away and hand it nothing to show for it.
 
 // clearEvent is a first-class ContextCleared at seq.
-func clearEvent(seq uint64, uuid string) *corev1.Event {
-	return &corev1.Event{
+func clearEvent(seq uint64, uuid string) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId: "vendor-uuid", Seq: seq, DedupKey: "clear:" + uuid,
-		Payload: &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}},
+		Payload: &protocolv1.Event_ContextCleared{ContextCleared: &protocolv1.ContextCleared{}},
 	}
 }
 
 // compactEvent is a first-class ContextCompacted at seq.
-func compactEvent(seq uint64, uuid string) *corev1.Event {
-	return &corev1.Event{
+func compactEvent(seq uint64, uuid string) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId: "vendor-uuid", Seq: seq, DedupKey: "compact:" + uuid,
-		Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{
+		Payload: &protocolv1.Event_ContextCompacted{ContextCompacted: &protocolv1.ContextCompacted{
 			PreTokens: 180000, PostTokens: 24000, Summary: "the story so far",
 		}},
 	}

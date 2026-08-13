@@ -23,8 +23,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // keepAliveHold is a real prompt held by an in-flight keep-alive ping, plus the
@@ -66,7 +66,7 @@ func heldByKeepAlivePing(t *testing.T, s *keepAliveSession, text string) keepAli
 			return false
 		},
 	})
-	ping := s.store.await(t, "the keep-alive ping holding the prompt", func(ev *corev1.Event) bool {
+	ping := s.store.await(t, "the keep-alive ping holding the prompt", func(ev *protocolv1.Event) bool {
 		return keepAlivePing(ev) != nil
 	})
 	return keepAliveHold{session: s, pingTurnID: keepAlivePing(ping).GetTurnId(), entry: entry, text: text}
@@ -249,7 +249,7 @@ func TestE2EAHeldPromptIsDeliveredOnTheRewoundConversation(t *testing.T) {
 
 	// Assert — the held prompt's turn is in the NEW seq space.
 	rewound := tailStore(t, after)
-	rewound.await(t, "the held prompt's TurnStarted in the rewound conversation", func(ev *corev1.Event) bool {
+	rewound.await(t, "the held prompt's TurnStarted in the rewound conversation", func(ev *protocolv1.Event) bool {
 		started := userTurnStart(ev)
 		return started != nil && strings.Contains(started.GetPromptPreview(), held.text)
 	})

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	statev1 "agentrepl/proto/state/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -223,22 +223,22 @@ func TestTurnAccountingsRejectsEvidenceFreeCrossGenerationRecompute(t *testing.T
 // boundaryUsageObservation is one account-usage boundary sample of the shape
 // the live poller writes: stamped with the query instance that took it and
 // with the wall-clock instants of the sampling itself.
-func boundaryUsageObservation(queryID, turnID string, start bool) *corev1.AccountUsageObservation {
-	observation := &corev1.AccountUsageObservation{
+func boundaryUsageObservation(queryID, turnID string, start bool) *protocolv1.AccountUsageObservation {
+	observation := &protocolv1.AccountUsageObservation{
 		QueryInstanceId:  queryID,
 		TurnId:           turnID,
 		BoundaryAtMs:     1786053233408,
 		ObservedAtMs:     1786053234013,
 		SampleLatencyMs:  605,
 		SubscriptionType: "max",
-		Outcome: &corev1.AccountUsageObservation_Available{Available: &corev1.AccountUsageAvailable{
-			FiveHour: &corev1.UsageWindow{UtilizationPercent: 8, ResetsAtMs: 1786064399579},
+		Outcome: &protocolv1.AccountUsageObservation_Available{Available: &protocolv1.AccountUsageAvailable{
+			FiveHour: &protocolv1.UsageWindow{UtilizationPercent: 8, ResetsAtMs: 1786064399579},
 		}},
 	}
 	if start {
-		observation.Boundary = &corev1.AccountUsageObservation_TurnStart{TurnStart: &corev1.TurnStartUsageBoundary{}}
+		observation.Boundary = &protocolv1.AccountUsageObservation_TurnStart{TurnStart: &protocolv1.TurnStartUsageBoundary{}}
 	} else {
-		observation.Boundary = &corev1.AccountUsageObservation_TurnEnd{TurnEnd: &corev1.TurnEndUsageBoundary{}}
+		observation.Boundary = &protocolv1.AccountUsageObservation_TurnEnd{TurnEnd: &protocolv1.TurnEndUsageBoundary{}}
 	}
 	return observation
 }

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -53,7 +53,7 @@ import (
 // with 0 meaning "until the history drains"; maxEvents caps one replay, and a
 // tripped cap comes back as a TRUNCATED result rather than a quiet short answer.
 type DurableHistorySource interface {
-	ReplayHistory(ctx context.Context, workspace, sessionID string, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (storehistory.Result, error)
+	ReplayHistory(ctx context.Context, workspace, sessionID string, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*protocolv1.Event)) (storehistory.Result, error)
 }
 
 // resyncFromDurableHistory serves a resync for a workspace with no live session
@@ -107,7 +107,7 @@ func (m *Manager) resyncFromDurableHistory(workspace string, fromSeq uint64, pub
 		workspace, sessionID, replayFrom, lastSeen, repullMaxEvents)
 	res, err := m.cfg.DurableHistory.ReplayHistory(m.rootCtx, workspace, sessionID,
 		exclusiveLowerBound(replayFrom), 0, repullMaxEvents,
-		func(ev *corev1.Event) { cons.pushConversation(ev, false) })
+		func(ev *protocolv1.Event) { cons.pushConversation(ev, false) })
 	if err != nil {
 		logf("session-controller: durable resync FAILED ws=%q session=%s replay_from=%d delivered=%d: %v",
 			workspace, sessionID, replayFrom, res.Delivered, err)

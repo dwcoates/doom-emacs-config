@@ -82,9 +82,9 @@ import (
 	"strings"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -253,7 +253,7 @@ func WorkspaceRosterFrame(r *frontendv1.WorkspaceRoster) *frontendv1.FrontendFra
 // message's own authoritative record retires it. See TypingDelta.parent_message_id
 // in feed.proto and sessioncontroller/foldedtyping.go for which of the two a
 // delta is.
-func TypingDeltaFromContentDelta(workspace, fence, parentMessageID string, cd *corev1.ContentDelta) *frontendv1.TypingDelta {
+func TypingDeltaFromContentDelta(workspace, fence, parentMessageID string, cd *protocolv1.ContentDelta) *frontendv1.TypingDelta {
 	if cd == nil {
 		return nil
 	}
@@ -277,7 +277,7 @@ func TypingDeltaFromContentDelta(workspace, fence, parentMessageID string, cd *c
 //
 // Returns nil for a nil progress so the caller pushes nothing rather than an
 // empty frame.
-func HeartbeatViewFromProgress(workspace, fence string, hp *corev1.HeartbeatProgress) *frontendv1.HeartbeatView {
+func HeartbeatViewFromProgress(workspace, fence string, hp *protocolv1.HeartbeatProgress) *frontendv1.HeartbeatView {
 	if hp == nil {
 		return nil
 	}
@@ -304,7 +304,7 @@ func HeartbeatViewFromProgress(workspace, fence string, hp *corev1.HeartbeatProg
 // dropped_count finally survives. The banner discarded it, which meant the
 // single most useful fact about a store outage — how much conversation was
 // lost — reached no surface at all.
-func FailureCardFromDegradedState(ds *corev1.DegradedState, atMs int64) *frontendv1.FailureCardView {
+func FailureCardFromDegradedState(ds *protocolv1.DegradedState, atMs int64) *frontendv1.FailureCardView {
 	if ds == nil {
 		return nil
 	}
@@ -324,7 +324,7 @@ func FailureCardFromDegradedState(ds *corev1.DegradedState, atMs int64) *fronten
 // lifecycle record directly into the dedicated frontend failure detail. The
 // generic failure vocabulary remains populated, while every diagnostic field
 // retains the lifecycle record's exact identity and typed cause.
-func FailureCardFromQueryTermination(sessionID string, lifecycle *corev1.QueryLifecycle, observedAtMs int64) (*frontendv1.FailureCardView, error) {
+func FailureCardFromQueryTermination(sessionID string, lifecycle *protocolv1.QueryLifecycle, observedAtMs int64) (*frontendv1.FailureCardView, error) {
 	if lifecycle == nil || lifecycle.GetTerminated() == nil {
 		return nil, nil
 	}
@@ -345,35 +345,35 @@ func FailureCardFromQueryTermination(sessionID string, lifecycle *corev1.QueryLi
 		ObservedAtMs:    observedAtMs,
 	}
 	switch identity := terminated.GetVendorIdentity().(type) {
-	case *corev1.QueryTerminated_VendorSessionId:
+	case *protocolv1.QueryTerminated_VendorSessionId:
 		if identity.VendorSessionId == "" {
 			return nil, fmt.Errorf("typed query termination has blank vendor_session_id session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
 		}
 		detail.VendorIdentity = &frontendv1.QueryTerminationFailure_VendorSessionId{VendorSessionId: identity.VendorSessionId}
-	case *corev1.QueryTerminated_VendorSessionIdentityUnavailable:
+	case *protocolv1.QueryTerminated_VendorSessionIdentityUnavailable:
 		if identity.VendorSessionIdentityUnavailable == nil {
 			return nil, fmt.Errorf("typed query termination has nil vendor_session_identity_unavailable session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
 		}
-		detail.VendorIdentity = &frontendv1.QueryTerminationFailure_VendorSessionIdentityUnavailable{VendorSessionIdentityUnavailable: proto.Clone(identity.VendorSessionIdentityUnavailable).(*corev1.VendorSessionIdentityUnavailable)}
+		detail.VendorIdentity = &frontendv1.QueryTerminationFailure_VendorSessionIdentityUnavailable{VendorSessionIdentityUnavailable: proto.Clone(identity.VendorSessionIdentityUnavailable).(*protocolv1.VendorSessionIdentityUnavailable)}
 	default:
 		return nil, fmt.Errorf("typed query termination has no vendor identity session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
 	}
 	switch reason := terminated.GetReason().(type) {
-	case *corev1.QueryTerminated_UnexpectedEof:
+	case *protocolv1.QueryTerminated_UnexpectedEof:
 		if reason.UnexpectedEof == nil {
 			return nil, fmt.Errorf("typed query termination unexpected_eof reason is nil session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
 		}
-		detail.Reason = &frontendv1.QueryTerminationFailure_UnexpectedEof{UnexpectedEof: proto.Clone(reason.UnexpectedEof).(*corev1.UnexpectedQueryEof)}
-	case *corev1.QueryTerminated_IteratorFailure:
+		detail.Reason = &frontendv1.QueryTerminationFailure_UnexpectedEof{UnexpectedEof: proto.Clone(reason.UnexpectedEof).(*protocolv1.UnexpectedQueryEof)}
+	case *protocolv1.QueryTerminated_IteratorFailure:
 		if reason.IteratorFailure == nil {
 			return nil, fmt.Errorf("typed query termination iterator_failure reason is nil session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
 		}
-		detail.Reason = &frontendv1.QueryTerminationFailure_IteratorFailure{IteratorFailure: proto.Clone(reason.IteratorFailure).(*corev1.QueryIteratorFailure)}
-	case *corev1.QueryTerminated_StartupFailure:
+		detail.Reason = &frontendv1.QueryTerminationFailure_IteratorFailure{IteratorFailure: proto.Clone(reason.IteratorFailure).(*protocolv1.QueryIteratorFailure)}
+	case *protocolv1.QueryTerminated_StartupFailure:
 		if reason.StartupFailure == nil {
 			return nil, fmt.Errorf("typed query termination startup_failure reason is nil session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
 		}
-		detail.Reason = &frontendv1.QueryTerminationFailure_StartupFailure{StartupFailure: proto.Clone(reason.StartupFailure).(*corev1.QueryStartupFailure)}
+		detail.Reason = &frontendv1.QueryTerminationFailure_StartupFailure{StartupFailure: proto.Clone(reason.StartupFailure).(*protocolv1.QueryStartupFailure)}
 	default:
 		return nil, fmt.Errorf("typed query termination has no unexpected reason session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
 	}
@@ -417,22 +417,22 @@ func FailureCardFromQueryTermination(sessionID string, lifecycle *corev1.QueryLi
 // top-level feed. CurateEvent (asyncsplit.go) is the only exported route from
 // an event to conversation content, so no caller outside this package can
 // obtain an unsplit delta and no push site can forget to partition one.
-func conversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*frontendv1.ConversationDelta, map[string]RecordEnvelope, error) {
+func conversationDeltaFromEvent(workspace, fence string, ev *protocolv1.Event) (*frontendv1.ConversationDelta, map[string]RecordEnvelope, error) {
 	if ev == nil {
 		return nil, nil, nil
 	}
 	var items []*frontendv1.Message
 	var envs map[string]RecordEnvelope
 	switch p := ev.GetPayload().(type) {
-	case *corev1.Event_Vendor:
+	case *protocolv1.Event_Vendor:
 		vitems, venvs, err := conversationItemsFromVendor(p.Vendor, ev)
 		if err != nil {
 			return nil, nil, err
 		}
 		items, envs = vitems, venvs
-	case *corev1.Event_ContextCleared:
+	case *protocolv1.Event_ContextCleared:
 		items = contextClearedItems(p.ContextCleared, ev)
-	case *corev1.Event_ContextCompacted:
+	case *protocolv1.Event_ContextCompacted:
 		items = contextCompactedItems(p.ContextCompacted, ev)
 	default:
 		// EVERY OTHER KIND IS CLASSIFIED, NEVER DEFAULTED. A bare `default`
@@ -591,7 +591,7 @@ type RecordEnvelope struct {
 // The second return carries each item's RecordEnvelope: the file plane's own
 // transcript envelope, or — on the stream plane, which has none — the
 // detachment envelope synthesized from parent_tool_use_id.
-func conversationItemsFromVendor(a *anypb.Any, ev *corev1.Event) ([]*frontendv1.Message, map[string]RecordEnvelope, error) {
+func conversationItemsFromVendor(a *anypb.Any, ev *protocolv1.Event) ([]*frontendv1.Message, map[string]RecordEnvelope, error) {
 	if a == nil {
 		return nil, nil, nil
 	}
@@ -639,7 +639,7 @@ func conversationItemsFromVendor(a *anypb.Any, ev *corev1.Event) ([]*frontendv1.
 // WHEN (ts_ms, for the work). The message itself is still passed rather than
 // re-modeled — a frontend-shaped copy of an empty message would be a second
 // shape to keep in step with the first for no gain.
-func contextClearedItems(cc *corev1.ContextCleared, ev *corev1.Event) []*frontendv1.Message {
+func contextClearedItems(cc *protocolv1.ContextCleared, ev *protocolv1.Event) []*frontendv1.Message {
 	if cc == nil {
 		return nil
 	}
@@ -660,7 +660,7 @@ func contextClearedItems(cc *corev1.ContextCleared, ev *corev1.Event) []*fronten
 // result into a webapp-shaped struct would only be a chance to drift from the
 // fact the daemon already resolved. That is the whole reason the retired
 // compact_boundary / compact_boundary_line arms are gone.
-func contextCompactedItems(cc *corev1.ContextCompacted, ev *corev1.Event) []*frontendv1.Message {
+func contextCompactedItems(cc *protocolv1.ContextCompacted, ev *protocolv1.Event) []*frontendv1.Message {
 	if cc == nil {
 		return nil
 	}
@@ -690,7 +690,7 @@ func contextCompactedItems(cc *corev1.ContextCompacted, ev *corev1.Event) []*fro
 // RENDERABLE: an item with no uuid would leave a frontend discarding its
 // history at a floor it can show no reason for — and, for a result, appending
 // one more copy of the same turn's closing chip on every resync.
-func eventDerivedUUID(ev *corev1.Event, kind string) string {
+func eventDerivedUUID(ev *protocolv1.Event, kind string) string {
 	if key := ev.GetDedupKey(); key != "" {
 		return key
 	}
@@ -1124,7 +1124,7 @@ func hasUserContent(msg *datav1.ApiUserMessage) bool {
 // replays the session's conversation from the floor — appended another copy of
 // the same turn's closing chip, so an interrupted turn's yellow badge repeated
 // down the feed once per resync.
-func resultItems(r *datav1.ResultMessage, ev *corev1.Event) []*frontendv1.Message {
+func resultItems(r *datav1.ResultMessage, ev *protocolv1.Event) []*frontendv1.Message {
 	if r == nil {
 		return nil
 	}
@@ -1162,7 +1162,7 @@ func resultItems(r *datav1.ResultMessage, ev *corev1.Event) []*frontendv1.Messag
 // validating decoder, and because a retained catalog is replayed into every
 // connect snapshot for its session, one such entry used to make the workspace
 // unrenderable forever rather than costing one task's row.
-func BuildTaskCatalog(workspace, sessionID, fence string, events []*corev1.Event, logf dlog.Logf) *frontendv1.TaskCatalog {
+func BuildTaskCatalog(workspace, sessionID, fence string, events []*protocolv1.Event, logf dlog.Logf) *frontendv1.TaskCatalog {
 	if logf == nil {
 		panic("frontend: BuildTaskCatalog requires a logger")
 	}
@@ -1179,7 +1179,7 @@ func BuildTaskCatalog(workspace, sessionID, fence string, events []*corev1.Event
 	}
 	for _, ev := range events {
 		switch p := ev.GetPayload().(type) {
-		case *corev1.Event_TaskStarted:
+		case *protocolv1.Event_TaskStarted:
 			ts := p.TaskStarted
 			e := get(ts.GetTaskId())
 			setTaskKind(e, ts.GetKind())
@@ -1187,7 +1187,7 @@ func BuildTaskCatalog(workspace, sessionID, fence string, events []*corev1.Event
 			e.OutputPath = ts.GetOutputPath()
 			setTaskRunning(e)
 			e.StartedAtMs = ev.GetProducedAtMs()
-		case *corev1.Event_TaskEnded:
+		case *protocolv1.Event_TaskEnded:
 			te := p.TaskEnded
 			e := get(te.GetTaskId())
 			if e.GetKind() == nil {
@@ -1198,7 +1198,7 @@ func BuildTaskCatalog(workspace, sessionID, fence string, events []*corev1.Event
 			if op := te.GetOutputPath(); op != "" {
 				e.OutputPath = op
 			}
-		case *corev1.Event_Vendor:
+		case *protocolv1.Event_Vendor:
 			if btc := BackgroundTasksFromVendor(p.Vendor); btc != nil {
 				applyBackgroundTasks(btc, ev.GetProducedAtMs(), index, get, logf)
 			}
@@ -1272,7 +1272,7 @@ func applyBackgroundTasks(
 			continue
 		}
 		if e.GetRunning() != nil {
-			setTerminalStatus(e, corev1.TerminalStatus_TERMINAL_STATUS_LOST)
+			setTerminalStatus(e, protocolv1.TerminalStatus_TERMINAL_STATUS_LOST)
 			e.EndedAtMs = atMs
 		}
 	}
@@ -1311,15 +1311,15 @@ func applyBackgroundTasks(
 // supplies token totals and cost. Title/slug/context-window/permission-mode are
 // sourced from the SSM and daemon-local metadata at the stitch phase (not
 // carried by these core events) and are left to the caller to populate.
-func BuildSessionView(workspace, sessionID string, events []*corev1.Event) *frontendv1.SessionView {
+func BuildSessionView(workspace, sessionID string, events []*protocolv1.Event) *frontendv1.SessionView {
 	view := &frontendv1.SessionView{Workspace: workspace, SessionId: sessionID}
 	for _, ev := range events {
 		switch p := ev.GetPayload().(type) {
-		case *corev1.Event_SessionStarted:
+		case *protocolv1.Event_SessionStarted:
 			if m := p.SessionStarted.GetModel(); m != "" {
 				view.Model = m
 			}
-		case *corev1.Event_Vendor:
+		case *protocolv1.Event_Vendor:
 			applyResultUsage(view, p.Vendor)
 		}
 	}
@@ -1411,13 +1411,13 @@ func setTaskKindFromTaskType(e *frontendv1.TaskEntry, taskType string) bool {
 // setTaskKind sets the entry's kind arm from a typed shim TaskKind. UNSPECIFIED
 // leaves the entry KINDLESS — the enum being unset is the ABSENCE of a kind, so
 // the catalog refuses the entry rather than drawing a guess.
-func setTaskKind(e *frontendv1.TaskEntry, k corev1.TaskKind) {
+func setTaskKind(e *frontendv1.TaskEntry, k protocolv1.TaskKind) {
 	switch k {
-	case corev1.TaskKind_TASK_KIND_AGENT:
+	case protocolv1.TaskKind_TASK_KIND_AGENT:
 		e.Kind = &frontendv1.TaskEntry_Agent{Agent: &frontendv1.TaskKindAgent{}}
-	case corev1.TaskKind_TASK_KIND_SHELL:
+	case protocolv1.TaskKind_TASK_KIND_SHELL:
 		e.Kind = &frontendv1.TaskEntry_Shell{Shell: &frontendv1.TaskKindShell{}}
-	case corev1.TaskKind_TASK_KIND_WORKFLOW:
+	case protocolv1.TaskKind_TASK_KIND_WORKFLOW:
 		e.Kind = &frontendv1.TaskEntry_Workflow{Workflow: &frontendv1.TaskKindWorkflow{}}
 	}
 }
@@ -1427,17 +1427,17 @@ func setTaskKind(e *frontendv1.TaskEntry, k corev1.TaskKind) {
 // substituting a stand-in ending: a statusless entry is refused loudly, where a
 // substituted one would be a fabricated ending nobody could tell from a real
 // one.
-func setTerminalStatus(e *frontendv1.TaskEntry, s corev1.TerminalStatus) {
+func setTerminalStatus(e *frontendv1.TaskEntry, s protocolv1.TerminalStatus) {
 	switch s {
-	case corev1.TerminalStatus_TERMINAL_STATUS_DONE:
+	case protocolv1.TerminalStatus_TERMINAL_STATUS_DONE:
 		e.Status = &frontendv1.TaskEntry_Done{Done: &frontendv1.TaskStatusDone{}}
-	case corev1.TerminalStatus_TERMINAL_STATUS_ERROR:
+	case protocolv1.TerminalStatus_TERMINAL_STATUS_ERROR:
 		e.Status = &frontendv1.TaskEntry_Error{Error: &frontendv1.TaskStatusError{}}
-	case corev1.TerminalStatus_TERMINAL_STATUS_KILLED:
+	case protocolv1.TerminalStatus_TERMINAL_STATUS_KILLED:
 		e.Status = &frontendv1.TaskEntry_Killed{Killed: &frontendv1.TaskStatusKilled{}}
-	case corev1.TerminalStatus_TERMINAL_STATUS_STOPPED:
+	case protocolv1.TerminalStatus_TERMINAL_STATUS_STOPPED:
 		e.Status = &frontendv1.TaskEntry_Stopped{Stopped: &frontendv1.TaskStatusStopped{}}
-	case corev1.TerminalStatus_TERMINAL_STATUS_LOST:
+	case protocolv1.TerminalStatus_TERMINAL_STATUS_LOST:
 		e.Status = &frontendv1.TaskEntry_Lost{Lost: &frontendv1.TaskStatusLost{}}
 	}
 }
