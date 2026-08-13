@@ -49,6 +49,7 @@ syntax = "proto3";
 
 package agentshim.v1;
 
+import "google/protobuf/struct.proto";
 import "protocol/v1/external.proto";
 import "agentshim/v1/unsupported.proto";
 
@@ -123,6 +124,24 @@ message InternalEntry {
   // not replay-idempotent. The store enforces uniqueness only over non-empty
   // values.
   string write_id = 3;
+
+  // THE PRODUCER'S SOURCE RECORD, kept whole when converting it to `external`
+  // dropped structure.
+  //
+  // NOT the same job as `unconverted` below, and the two are not alternatives.
+  // `unconverted` is for a record with NOTHING renderable; this is for one that
+  // renders fine and is ALSO more than its rendering. A workflow journal line
+  // becomes a single DetachedWorkProgressed string, so every other key in the
+  // source object had nowhere to go — the record was durably less than what was
+  // on disk.
+  //
+  // SHIM-SIDE, WHICH IS WHY IT IS SAFE. Vendor-shaped material in the internal
+  // half is structurally unreachable from the daemon (check-conversation-
+  // isolation.sh), so keeping it whole costs no vendor-agnosticism downstream.
+  // That is exactly what makes eager conversion at the edge a reversible bet.
+  //
+  // UNSET when the conversion was faithful. It is not a copy of every record.
+  google.protobuf.Struct source_record = 4;
 
   // Set when there is nothing to hand the daemon: a record we could not place.
   //
