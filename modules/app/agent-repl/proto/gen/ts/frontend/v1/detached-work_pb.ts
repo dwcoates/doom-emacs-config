@@ -35,7 +35,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { DetachedWorkEnded, DetachedWorkStarted } from "../../conversation/v1/payloads_pb";
+import type { DetachedWorkEnded, DetachedWorkStarted, WorkflowStep } from "../../conversation/v1/payloads_pb";
 import { file_conversation_v1_payloads } from "../../conversation/v1/payloads_pb";
 import type { AgentEmission } from "./agent-emission_pb";
 import { file_frontend_v1_agent_emission } from "./agent-emission_pb";
@@ -45,7 +45,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/detached-work.proto.
  */
 export const file_frontend_v1_detached_work: GenFile = /*@__PURE__*/
-  fileDesc("Ch9mcm9udGVuZC92MS9kZXRhY2hlZC13b3JrLnByb3RvEgtmcm9udGVuZC52MSKtBAoMRGV0YWNoZWRXb3JrEjUKB3N0YXJ0ZWQYCCABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZBIVCg1zdGFydGVkX2F0X21zGAUgASgDEjMKCGxpdmVuZXNzGAYgASgLMiEuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3MSLwoFYWdlbnQYCiABKAsyHi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtBZ2VudEgAEjMKB2pvdXJuYWwYCyABKAsyIC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtKb3VybmFsSAASLwoFc2hlbGwYDCABKAsyHi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTaGVsbEgAEj0KDHVuY2xhc3NpZmllZBgNIAEoCzIlLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya1VuY2xhc3NpZmllZEgAEi8KBW1lcmdlGA4gASgLMh4uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTWVyZ2VIABIvCgVza2lsbBgPIAEoCzIeLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya1NraWxsSAASEQoJd29ya3NwYWNlGAcgASgJQgYKBGtpbmRKBAgBEAJKBAgDEARKBAgCEANKBAgEEAVSAmlkUhBwYXJlbnRfYnViYmxlX2lkUhJvcmlnaW5fdG9vbF91c2VfaWRSBWxhYmVsIm8KEURldGFjaGVkV29ya0FnZW50Ei0KCWVtaXNzaW9ucxgBIAMoCzIaLmZyb250ZW5kLnYxLkFnZW50RW1pc3Npb24SKwoEZm9sZBgCIAEoCzIdLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0ZvbGQibwoRRGV0YWNoZWRXb3JrTWVyZ2USLQoJZW1pc3Npb25zGAEgAygLMhouZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbhIrCgRmb2xkGAIgASgLMh0uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrRm9sZCKfAQoRRGV0YWNoZWRXb3JrU2tpbGwSEgoKc2tpbGxfbmFtZRgBIAEoCRIMCgRhcmdzGAIgASgJEgwKBGJvZHkYAyABKAkSLQoJZW1pc3Npb25zGAQgAygLMhouZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbhIrCgRmb2xkGAUgASgLMh0uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrRm9sZCJ1ChNEZXRhY2hlZFdvcmtKb3VybmFsEjEKBHJvd3MYASADKAsyIy5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtKb3VybmFsUm93EisKBGZvbGQYAiABKAsyHS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtGb2xkIloKEURldGFjaGVkV29ya1NoZWxsEg8KB2NvbW1hbmQYASABKAkSNAoGb3V0cHV0GAIgASgLMiQuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrT3V0cHV0U3Bvb2wiYwoYRGV0YWNoZWRXb3JrVW5jbGFzc2lmaWVkEhEKCXRvb2xfbmFtZRgBIAEoCRI0CgZvdXRwdXQYAiABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtPdXRwdXRTcG9vbCI/ChdEZXRhY2hlZFdvcmtPdXRwdXRTcG9vbBIMCgR0ZXh0GAEgASgJEhYKDnRocm91Z2hfb2Zmc2V0GAIgASgEIuQBChZEZXRhY2hlZFdvcmtKb3VybmFsUm93Eg0KBWxhYmVsGAEgASgJEg4KBmRldGFpbBgCIAEoCRI3CgdydW5uaW5nGAogASgLMiQuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrU3RlcFJ1bm5pbmdIABIxCgRkb25lGAsgASgLMiEuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrU3RlcERvbmVIABI1CgZmYWlsZWQYDCABKAsyIy5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTdGVwRmFpbGVkSABCCAoGc3RhdHVzIhkKF0RldGFjaGVkV29ya1N0ZXBSdW5uaW5nIhYKFERldGFjaGVkV29ya1N0ZXBEb25lIhgKFkRldGFjaGVkV29ya1N0ZXBGYWlsZWQigwEKFERldGFjaGVkV29ya0xpdmVuZXNzEi0KBGxpdmUYASABKAsyHS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlSAASMwoHc2V0dGxlZBgCIAEoCzIgLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya1NldHRsZWRIAEIHCgVzdGF0ZSIsChBEZXRhY2hlZFdvcmtMaXZlEhgKEGxhc3RfYWN0aXZpdHlfbXMYASABKAMiwgEKE0RldGFjaGVkV29ya1NldHRsZWQSFQoNc2V0dGxlZF9hdF9tcxgBIAEoAxIxCgVlbmRlZBgDIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZBI2CgZraWxsZWQYDCABKAsyJi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtPdXRjb21lS2lsbGVkSgQIAhADSgQIChALSgQICxAMUgpzaGVsbF9leGl0UgRkb25lUgVlcnJvciIrChlEZXRhY2hlZFdvcmtPdXRjb21lS2lsbGVkEg4KBnJlYXNvbhgBIAEoCSI8ChBEZXRhY2hlZFdvcmtGb2xkEhYKDmRyb3BwZWRfYmVmb3JlGAEgASgDEhAKCHRhaWxfY2FwGAIgASgFItEDChJEZXRhY2hlZFdvcmtVcGRhdGUSEgoKbWVzc2FnZV9pZBgBIAEoCRI1CgVhZ2VudBgKIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSAASOQoHam91cm5hbBgLIAEoCzImLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0pvdXJuYWxVcGRhdGVIABI2CgVzaGVsbBgMIAEoCzIlLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dHB1dEFwcGVuZEgAEj0KDHVuY2xhc3NpZmllZBgNIAEoCzIlLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dHB1dEFwcGVuZEgAEjsKCGxpdmVuZXNzGA4gASgLMicuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3NVcGRhdGVIABI1CgVtZXJnZRgPIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSAASNQoFc2tpbGwYECABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTa2lsbFVwZGF0ZUgAQggKBnVwZGF0ZVIJYnViYmxlX2lkInUKF0RldGFjaGVkV29ya0FnZW50VXBkYXRlEi0KCWVtaXNzaW9ucxgBIAMoCzIaLmZyb250ZW5kLnYxLkFnZW50RW1pc3Npb24SKwoEZm9sZBgCIAEoCzIdLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0ZvbGQimgEKF0RldGFjaGVkV29ya1NraWxsVXBkYXRlEjoKBGJvZHkYASABKAsyKi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTa2lsbEJvZHlSZXNvbHZlZEgAEjkKCWVtaXNzaW9ucxgCIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSABCCAoGdXBkYXRlIjEKHURldGFjaGVkV29ya1NraWxsQm9keVJlc29sdmVkEhAKCGNvbnRlbnRzGAEgASgJInsKGURldGFjaGVkV29ya0pvdXJuYWxVcGRhdGUSMQoEcm93cxgBIAMoCzIjLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0pvdXJuYWxSb3cSKwoEZm9sZBgCIAEoCzIdLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0ZvbGQiPQoYRGV0YWNoZWRXb3JrT3V0cHV0QXBwZW5kEgwKBHRleHQYASABKAkSEwoLZnJvbV9vZmZzZXQYAiABKAQiUQoaRGV0YWNoZWRXb3JrTGl2ZW5lc3NVcGRhdGUSMwoIbGl2ZW5lc3MYASABKAsyIS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlbmVzc0IoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_payloads, file_frontend_v1_agent_emission]);
+  fileDesc("Ch9mcm9udGVuZC92MS9kZXRhY2hlZC13b3JrLnByb3RvEgtmcm9udGVuZC52MSKtBAoMRGV0YWNoZWRXb3JrEjUKB3N0YXJ0ZWQYCCABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZBIVCg1zdGFydGVkX2F0X21zGAUgASgDEjMKCGxpdmVuZXNzGAYgASgLMiEuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3MSLwoFYWdlbnQYCiABKAsyHi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtBZ2VudEgAEjMKB2pvdXJuYWwYCyABKAsyIC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtKb3VybmFsSAASLwoFc2hlbGwYDCABKAsyHi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTaGVsbEgAEj0KDHVuY2xhc3NpZmllZBgNIAEoCzIlLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya1VuY2xhc3NpZmllZEgAEi8KBW1lcmdlGA4gASgLMh4uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTWVyZ2VIABIvCgVza2lsbBgPIAEoCzIeLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya1NraWxsSAASEQoJd29ya3NwYWNlGAcgASgJQgYKBGtpbmRKBAgBEAJKBAgDEARKBAgCEANKBAgEEAVSAmlkUhBwYXJlbnRfYnViYmxlX2lkUhJvcmlnaW5fdG9vbF91c2VfaWRSBWxhYmVsIm8KEURldGFjaGVkV29ya0FnZW50Ei0KCWVtaXNzaW9ucxgBIAMoCzIaLmZyb250ZW5kLnYxLkFnZW50RW1pc3Npb24SKwoEZm9sZBgCIAEoCzIdLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0ZvbGQibwoRRGV0YWNoZWRXb3JrTWVyZ2USLQoJZW1pc3Npb25zGAEgAygLMhouZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbhIrCgRmb2xkGAIgASgLMh0uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrRm9sZCKZAQoRRGV0YWNoZWRXb3JrU2tpbGwSLQoJZW1pc3Npb25zGAQgAygLMhouZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbhIrCgRmb2xkGAUgASgLMh0uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrRm9sZEoECAEQAkoECAIQA0oECAMQBFIKc2tpbGxfbmFtZVIEYXJnc1IEYm9keSJOChNEZXRhY2hlZFdvcmtKb3VybmFsEisKBGZvbGQYAiABKAsyHS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtGb2xkSgQIARACUgRyb3dzIlgKEURldGFjaGVkV29ya1NoZWxsEjQKBm91dHB1dBgCIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dHB1dFNwb29sSgQIARACUgdjb21tYW5kImEKGERldGFjaGVkV29ya1VuY2xhc3NpZmllZBI0CgZvdXRwdXQYAiABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtPdXRwdXRTcG9vbEoECAEQAlIJdG9vbF9uYW1lIj8KF0RldGFjaGVkV29ya091dHB1dFNwb29sEgwKBHRleHQYASABKAkSFgoOdGhyb3VnaF9vZmZzZXQYAiABKAQigwEKFERldGFjaGVkV29ya0xpdmVuZXNzEi0KBGxpdmUYASABKAsyHS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlSAASMwoHc2V0dGxlZBgCIAEoCzIgLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya1NldHRsZWRIAEIHCgVzdGF0ZSIsChBEZXRhY2hlZFdvcmtMaXZlEhgKEGxhc3RfYWN0aXZpdHlfbXMYASABKAMiwgEKE0RldGFjaGVkV29ya1NldHRsZWQSFQoNc2V0dGxlZF9hdF9tcxgBIAEoAxIxCgVlbmRlZBgDIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZBI2CgZraWxsZWQYDCABKAsyJi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtPdXRjb21lS2lsbGVkSgQIAhADSgQIChALSgQICxAMUgpzaGVsbF9leGl0UgRkb25lUgVlcnJvciIrChlEZXRhY2hlZFdvcmtPdXRjb21lS2lsbGVkEg4KBnJlYXNvbhgBIAEoCSI8ChBEZXRhY2hlZFdvcmtGb2xkEhYKDmRyb3BwZWRfYmVmb3JlGAEgASgDEhAKCHRhaWxfY2FwGAIgASgFItEDChJEZXRhY2hlZFdvcmtVcGRhdGUSEgoKbWVzc2FnZV9pZBgBIAEoCRI1CgVhZ2VudBgKIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSAASOQoHam91cm5hbBgLIAEoCzImLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0pvdXJuYWxVcGRhdGVIABI2CgVzaGVsbBgMIAEoCzIlLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dHB1dEFwcGVuZEgAEj0KDHVuY2xhc3NpZmllZBgNIAEoCzIlLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dHB1dEFwcGVuZEgAEjsKCGxpdmVuZXNzGA4gASgLMicuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3NVcGRhdGVIABI1CgVtZXJnZRgPIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSAASNQoFc2tpbGwYECABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTa2lsbFVwZGF0ZUgAQggKBnVwZGF0ZVIJYnViYmxlX2lkInUKF0RldGFjaGVkV29ya0FnZW50VXBkYXRlEi0KCWVtaXNzaW9ucxgBIAMoCzIaLmZyb250ZW5kLnYxLkFnZW50RW1pc3Npb24SKwoEZm9sZBgCIAEoCzIdLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0ZvbGQimgEKF0RldGFjaGVkV29ya1NraWxsVXBkYXRlEjoKBGJvZHkYASABKAsyKi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTa2lsbEJvZHlSZXNvbHZlZEgAEjkKCWVtaXNzaW9ucxgCIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSABCCAoGdXBkYXRlIjEKHURldGFjaGVkV29ya1NraWxsQm9keVJlc29sdmVkEhAKCGNvbnRlbnRzGAEgASgJInUKGURldGFjaGVkV29ya0pvdXJuYWxVcGRhdGUSKwoEcm93cxgBIAMoCzIdLmNvbnZlcnNhdGlvbi52MS5Xb3JrZmxvd1N0ZXASKwoEZm9sZBgCIAEoCzIdLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0ZvbGQiPQoYRGV0YWNoZWRXb3JrT3V0cHV0QXBwZW5kEgwKBHRleHQYASABKAkSEwoLZnJvbV9vZmZzZXQYAiABKAQiUQoaRGV0YWNoZWRXb3JrTGl2ZW5lc3NVcGRhdGUSMwoIbGl2ZW5lc3MYASABKAsyIS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlbmVzc0IoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_payloads, file_frontend_v1_agent_emission]);
 
 /**
  * One piece of detached work, as the payload of the Message that IS it.
@@ -89,16 +89,12 @@ export type DetachedWork = Message<"frontend.v1.DetachedWork"> & {
    * merge run is a distinct thing to render; every other skill arrives as
    * `skill`.
    *
-   * TODO(respelling): this oneof RE-SPELLS conversation.v1.DetachedWorkKind, and
-   * must not, but it cannot simply be deleted: every arm carries daemon-folded
-   * content with no counterpart in conversation.v1 —
-   *   DetachedWorkAgent.emissions/.fold, DetachedWorkMerge.emissions/.fold,
-   *   DetachedWorkSkill.body/.emissions/.fold, DetachedWorkJournal.rows/.fold,
-   *   DetachedWorkShell.command/.output, DetachedWorkUnclassified.output
-   * Deleting the arms would delete that content off the wire silently. It stays
-   * until the fold has a home of its own; `started.kind` is the authority on
-   * WHICH kind, and this oneof's arm must always agree with it. Note the two are
-   * already drifted: `journal` here is `workflow` there.
+   * WHICH kind this is, is stated exactly once — by `started.kind`, the
+   * producer's own record. The arms below no longer re-spell any of the
+   * producer's content: each keeps ONLY what the daemon itself produced, its
+   * fold and the emissions it folded together. This oneof's arm must always
+   * agree with `started.kind`. Note the two are named differently: `journal`
+   * here is `workflow` there.
    *
    * @generated from oneof frontend.v1.DetachedWork.kind
    */
@@ -170,6 +166,10 @@ export type DetachedWorkAgent = Message<"frontend.v1.DetachedWorkAgent"> & {
    * vocabulary the top-level feed uses. A frontend's renderer for a response, a
    * thinking block or a tool card is the same code in both places.
    *
+   * TODO(respelling): repeated frontend.v1.AgentEmission may be redundant with
+   * conversation.v1.MessageEntry records whose parent is MessageParentInside
+   * this work; needs a ruling before removal.
+   *
    * @generated from field: repeated frontend.v1.AgentEmission emissions = 1;
    */
   emissions: AgentEmission[];
@@ -209,6 +209,10 @@ export type DetachedWorkMerge = Message<"frontend.v1.DetachedWorkMerge"> & {
    * DetachedWorkAgent.emissions, deliberately: a frontend's renderer for a
    * response, a thinking block or a tool card is the same code here).
    *
+   * TODO(respelling): repeated frontend.v1.AgentEmission may be redundant with
+   * conversation.v1.MessageEntry records whose parent is MessageParentInside
+   * this work; needs a ruling before removal.
+   *
    * @generated from field: repeated frontend.v1.AgentEmission emissions = 1;
    */
   emissions: AgentEmission[];
@@ -242,32 +246,12 @@ export const DetachedWorkMergeSchema: GenMessage<DetachedWorkMerge> = /*@__PURE_
  */
 export type DetachedWorkSkill = Message<"frontend.v1.DetachedWorkSkill"> & {
   /**
-   * The skill's name as invoked, verbatim (e.g. "create-or-update-workspace").
-   *
-   * @generated from field: string skill_name = 1;
-   */
-  skillName: string;
-
-  /**
-   * The invocation's arguments, verbatim; empty when none were given.
-   *
-   * @generated from field: string args = 2;
-   */
-  args: string;
-
-  /**
-   * The skill file's contents, resolved daemon-side, rendered verbatim as the
-   * work's own body. Empty until resolution delivers it (see
-   * DetachedWorkSkillUpdate.body); a skill whose file cannot be read keeps an
-   * empty body and the failure surfaces through the ordinary failure channel.
-   *
-   * @generated from field: string body = 3;
-   */
-  body: string;
-
-  /**
    * The window's conversation so far, in emission order, in EXACTLY the
    * vocabulary the top-level feed uses.
+   *
+   * TODO(respelling): repeated frontend.v1.AgentEmission may be redundant with
+   * conversation.v1.MessageEntry records whose parent is MessageParentInside
+   * this work; needs a ruling before removal.
    *
    * @generated from field: repeated frontend.v1.AgentEmission emissions = 4;
    */
@@ -300,14 +284,7 @@ export const DetachedWorkSkillSchema: GenMessage<DetachedWorkSkill> = /*@__PURE_
  */
 export type DetachedWorkJournal = Message<"frontend.v1.DetachedWorkJournal"> & {
   /**
-   * The steps logged so far, in order.
-   *
-   * @generated from field: repeated frontend.v1.DetachedWorkJournalRow rows = 1;
-   */
-  rows: DetachedWorkJournalRow[];
-
-  /**
-   * Tail-cap accounting for `rows`. See DetachedWorkFold.
+   * Tail-cap accounting for the folded steps. See DetachedWorkFold.
    *
    * @generated from field: frontend.v1.DetachedWorkFold fold = 2;
    */
@@ -328,16 +305,16 @@ export const DetachedWorkJournalSchema: GenMessage<DetachedWorkJournal> = /*@__P
  */
 export type DetachedWorkShell = Message<"frontend.v1.DetachedWorkShell"> & {
   /**
-   * The command line that was backgrounded, verbatim, for the work's header.
-   * Empty only when the daemon launched the process without a reconstructible
-   * command line.
-   *
-   * @generated from field: string command = 1;
-   */
-  command: string;
-
-  /**
    * Everything the command has written so far. See DetachedWorkOutputSpool.
+   *
+   * TODO(respelling): conversation.v1.DetachedWorkProgressed.output is the
+   * producer's counterpart for the BYTES, but it is NARROWER than this spool:
+   * it is a per-record delta with no cursor, while DetachedWorkOutputSpool also
+   * carries `through_offset`, the delivered-bytes cursor that
+   * DetachedWorkOutputAppend.from_offset is checked against. Removing the spool
+   * would delete the anchor gap detection compares to, turning a lost chunk
+   * into a silently applied append. NOT REMOVED; needs a ruling on where the
+   * cursor lives first.
    *
    * @generated from field: frontend.v1.DetachedWorkOutputSpool output = 2;
    */
@@ -366,17 +343,13 @@ export const DetachedWorkShellSchema: GenMessage<DetachedWorkShell> = /*@__PURE_
  */
 export type DetachedWorkUnclassified = Message<"frontend.v1.DetachedWorkUnclassified"> & {
   /**
-   * The tool that spawned the work, verbatim as the agent named it. This is
-   * the fact that makes the arm useful rather than merely honest: it is what
-   * tells a maintainer which tool needs a classification, and what lets a
-   * frontend label the work with something truer than "unknown".
-   *
-   * @generated from field: string tool_name = 1;
-   */
-  toolName: string;
-
-  /**
    * Everything the work has written so far. See DetachedWorkOutputSpool.
+   *
+   * TODO(respelling): as on DetachedWorkShell.output — the producer's
+   * counterpart, conversation.v1.DetachedWorkProgressed.output, carries the
+   * bytes but not `through_offset`, the cursor
+   * DetachedWorkOutputAppend.from_offset is checked against. NOT REMOVED; the
+   * cursor needs a home before the spool can go.
    *
    * @generated from field: frontend.v1.DetachedWorkOutputSpool output = 2;
    */
@@ -430,108 +403,6 @@ export const DetachedWorkOutputSpoolSchema: GenMessage<DetachedWorkOutputSpool> 
   messageDesc(file_frontend_v1_detached_work, 7);
 
 /**
- * One logged step of a Workflow run: a dot, a name and a detail line.
- *
- * @generated from message frontend.v1.DetachedWorkJournalRow
- */
-export type DetachedWorkJournalRow = Message<"frontend.v1.DetachedWorkJournalRow"> & {
-  /**
-   * The step's name — the phase or agent it reports on — verbatim.
-   *
-   * @generated from field: string label = 1;
-   */
-  label: string;
-
-  /**
-   * The step's detail line, verbatim: the result on success, the error text on
-   * failure, the prompt while running.
-   *
-   * @generated from field: string detail = 2;
-   */
-  detail: string;
-
-  /**
-   * The step's state, as arms rather than an enum, so that a state added later
-   * is an arm a reader must handle rather than an integer it silently renders
-   * as something else.
-   *
-   * @generated from oneof frontend.v1.DetachedWorkJournalRow.status
-   */
-  status: {
-    /**
-     * @generated from field: frontend.v1.DetachedWorkStepRunning running = 10;
-     */
-    value: DetachedWorkStepRunning;
-    case: "running";
-  } | {
-    /**
-     * @generated from field: frontend.v1.DetachedWorkStepDone done = 11;
-     */
-    value: DetachedWorkStepDone;
-    case: "done";
-  } | {
-    /**
-     * @generated from field: frontend.v1.DetachedWorkStepFailed failed = 12;
-     */
-    value: DetachedWorkStepFailed;
-    case: "failed";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message frontend.v1.DetachedWorkJournalRow.
- * Use `create(DetachedWorkJournalRowSchema)` to create a new message.
- */
-export const DetachedWorkJournalRowSchema: GenMessage<DetachedWorkJournalRow> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 8);
-
-/**
- * The step is still executing.
- *
- * @generated from message frontend.v1.DetachedWorkStepRunning
- */
-export type DetachedWorkStepRunning = Message<"frontend.v1.DetachedWorkStepRunning"> & {
-};
-
-/**
- * Describes the message frontend.v1.DetachedWorkStepRunning.
- * Use `create(DetachedWorkStepRunningSchema)` to create a new message.
- */
-export const DetachedWorkStepRunningSchema: GenMessage<DetachedWorkStepRunning> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 9);
-
-/**
- * The step completed successfully.
- *
- * @generated from message frontend.v1.DetachedWorkStepDone
- */
-export type DetachedWorkStepDone = Message<"frontend.v1.DetachedWorkStepDone"> & {
-};
-
-/**
- * Describes the message frontend.v1.DetachedWorkStepDone.
- * Use `create(DetachedWorkStepDoneSchema)` to create a new message.
- */
-export const DetachedWorkStepDoneSchema: GenMessage<DetachedWorkStepDone> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 10);
-
-/**
- * The step failed. The failure text is the row's `detail`; this arm carries no
- * second copy of it.
- *
- * @generated from message frontend.v1.DetachedWorkStepFailed
- */
-export type DetachedWorkStepFailed = Message<"frontend.v1.DetachedWorkStepFailed"> & {
-};
-
-/**
- * Describes the message frontend.v1.DetachedWorkStepFailed.
- * Use `create(DetachedWorkStepFailedSchema)` to create a new message.
- */
-export const DetachedWorkStepFailedSchema: GenMessage<DetachedWorkStepFailed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 11);
-
-/**
  * Live-or-settled, expressed as arms so that "settled" and "settled with what
  * outcome" are one indivisible fact. Settled work with no outcome is
  * unrepresentable.
@@ -562,7 +433,7 @@ export type DetachedWorkLiveness = Message<"frontend.v1.DetachedWorkLiveness"> &
  * Use `create(DetachedWorkLivenessSchema)` to create a new message.
  */
 export const DetachedWorkLivenessSchema: GenMessage<DetachedWorkLiveness> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 12);
+  messageDesc(file_frontend_v1_detached_work, 8);
 
 /**
  * The work is still running.
@@ -586,7 +457,7 @@ export type DetachedWorkLive = Message<"frontend.v1.DetachedWorkLive"> & {
  * Use `create(DetachedWorkLiveSchema)` to create a new message.
  */
 export const DetachedWorkLiveSchema: GenMessage<DetachedWorkLive> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 13);
+  messageDesc(file_frontend_v1_detached_work, 9);
 
 /**
  * The work has finished, one way or another.
@@ -631,7 +502,7 @@ export type DetachedWorkSettled = Message<"frontend.v1.DetachedWorkSettled"> & {
  * Use `create(DetachedWorkSettledSchema)` to create a new message.
  */
 export const DetachedWorkSettledSchema: GenMessage<DetachedWorkSettled> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 14);
+  messageDesc(file_frontend_v1_detached_work, 10);
 
 /**
  * Stopped from outside before it finished: an explicit stop, a cancellation,
@@ -654,7 +525,7 @@ export type DetachedWorkOutcomeKilled = Message<"frontend.v1.DetachedWorkOutcome
  * Use `create(DetachedWorkOutcomeKilledSchema)` to create a new message.
  */
 export const DetachedWorkOutcomeKilledSchema: GenMessage<DetachedWorkOutcomeKilled> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 15);
+  messageDesc(file_frontend_v1_detached_work, 11);
 
 /**
  * Tail-cap accounting for detached work whose folded content is capped.
@@ -697,7 +568,7 @@ export type DetachedWorkFold = Message<"frontend.v1.DetachedWorkFold"> & {
  * Use `create(DetachedWorkFoldSchema)` to create a new message.
  */
 export const DetachedWorkFoldSchema: GenMessage<DetachedWorkFold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 16);
+  messageDesc(file_frontend_v1_detached_work, 12);
 
 /**
  * One incremental push to ONE MESSAGE'S detached-work payload: the message id
@@ -794,7 +665,7 @@ export type DetachedWorkUpdate = Message<"frontend.v1.DetachedWorkUpdate"> & {
  * Use `create(DetachedWorkUpdateSchema)` to create a new message.
  */
 export const DetachedWorkUpdateSchema: GenMessage<DetachedWorkUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 17);
+  messageDesc(file_frontend_v1_detached_work, 13);
 
 /**
  * New output from a detached agent.
@@ -830,7 +701,7 @@ export type DetachedWorkAgentUpdate = Message<"frontend.v1.DetachedWorkAgentUpda
  * Use `create(DetachedWorkAgentUpdateSchema)` to create a new message.
  */
 export const DetachedWorkAgentUpdateSchema: GenMessage<DetachedWorkAgentUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 18);
+  messageDesc(file_frontend_v1_detached_work, 14);
 
 /**
  * One incremental push to a skill message. Body resolution and emission
@@ -868,7 +739,7 @@ export type DetachedWorkSkillUpdate = Message<"frontend.v1.DetachedWorkSkillUpda
  * Use `create(DetachedWorkSkillUpdateSchema)` to create a new message.
  */
 export const DetachedWorkSkillUpdateSchema: GenMessage<DetachedWorkSkillUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 19);
+  messageDesc(file_frontend_v1_detached_work, 15);
 
 /**
  * The resolved skill file contents, whole. A message rather than a bare
@@ -891,7 +762,7 @@ export type DetachedWorkSkillBodyResolved = Message<"frontend.v1.DetachedWorkSki
  * Use `create(DetachedWorkSkillBodyResolvedSchema)` to create a new message.
  */
 export const DetachedWorkSkillBodyResolvedSchema: GenMessage<DetachedWorkSkillBodyResolved> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 20);
+  messageDesc(file_frontend_v1_detached_work, 16);
 
 /**
  * New steps in a Workflow run's journal.
@@ -908,9 +779,12 @@ export type DetachedWorkJournalUpdate = Message<"frontend.v1.DetachedWorkJournal
    * step collapses them by label; a frontend that wants the log renders them
    * all. Neither reading is imposed here.
    *
-   * @generated from field: repeated frontend.v1.DetachedWorkJournalRow rows = 1;
+   * THE PRODUCER'S OWN STEP RECORD, carried unchanged: the daemon batches which
+   * steps it forwards, it does not restate what a step said.
+   *
+   * @generated from field: repeated conversation.v1.WorkflowStep rows = 1;
    */
-  rows: DetachedWorkJournalRow[];
+  rows: WorkflowStep[];
 
   /**
    * The message's fold accounting after applying this update.
@@ -925,7 +799,7 @@ export type DetachedWorkJournalUpdate = Message<"frontend.v1.DetachedWorkJournal
  * Use `create(DetachedWorkJournalUpdateSchema)` to create a new message.
  */
 export const DetachedWorkJournalUpdateSchema: GenMessage<DetachedWorkJournalUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 21);
+  messageDesc(file_frontend_v1_detached_work, 17);
 
 /**
  * New bytes on a spool: an APPEND TO ONE MESSAGE'S PAYLOAD.
@@ -961,7 +835,7 @@ export type DetachedWorkOutputAppend = Message<"frontend.v1.DetachedWorkOutputAp
  * Use `create(DetachedWorkOutputAppendSchema)` to create a new message.
  */
 export const DetachedWorkOutputAppendSchema: GenMessage<DetachedWorkOutputAppend> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 22);
+  messageDesc(file_frontend_v1_detached_work, 18);
 
 /**
  * A liveness transition: live to settled, or a settled outcome changing (a
@@ -983,5 +857,5 @@ export type DetachedWorkLivenessUpdate = Message<"frontend.v1.DetachedWorkLivene
  * Use `create(DetachedWorkLivenessUpdateSchema)` to create a new message.
  */
 export const DetachedWorkLivenessUpdateSchema: GenMessage<DetachedWorkLivenessUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_detached_work, 23);
+  messageDesc(file_frontend_v1_detached_work, 19);
 

@@ -83,6 +83,7 @@ type MessageEntry struct {
 	//	*MessageEntry_ContextCut
 	//	*MessageEntry_DetachedWorkStarted
 	//	*MessageEntry_DetachedWorkProgressed
+	//	*MessageEntry_WorkflowStepObserved
 	//	*MessageEntry_DetachedWorkEnded
 	//	*MessageEntry_PermissionAnswered
 	//	*MessageEntry_ToolReturned
@@ -221,6 +222,15 @@ func (x *MessageEntry) GetDetachedWorkProgressed() *DetachedWorkProgressed {
 	return nil
 }
 
+func (x *MessageEntry) GetWorkflowStepObserved() *WorkflowStepObserved {
+	if x != nil {
+		if x, ok := x.Payload.(*MessageEntry_WorkflowStepObserved); ok {
+			return x.WorkflowStepObserved
+		}
+	}
+	return nil
+}
+
 func (x *MessageEntry) GetDetachedWorkEnded() *DetachedWorkEnded {
 	if x != nil {
 		if x, ok := x.Payload.(*MessageEntry_DetachedWorkEnded); ok {
@@ -311,6 +321,15 @@ type MessageEntry_DetachedWorkProgressed struct {
 	DetachedWorkProgressed *DetachedWorkProgressed `protobuf:"bytes,20,opt,name=detached_work_progressed,json=detachedWorkProgressed,proto3,oneof"`
 }
 
+type MessageEntry_WorkflowStepObserved struct {
+	// A journal step observed in detached workflow work already open. It
+	// carries the message_id of the detached work it belongs to, exactly as
+	// detached_work_progressed does, so it folds onto that card without
+	// correlation. Structured rather than folded into the progress string,
+	// because the producer read it structured.
+	WorkflowStepObserved *WorkflowStepObserved `protobuf:"bytes,25,opt,name=workflow_step_observed,json=workflowStepObserved,proto3,oneof"`
+}
+
 type MessageEntry_DetachedWorkEnded struct {
 	// Detached work reached an end, with the outcome it reached.
 	DetachedWorkEnded *DetachedWorkEnded `protobuf:"bytes,21,opt,name=detached_work_ended,json=detachedWorkEnded,proto3,oneof"`
@@ -358,6 +377,8 @@ func (*MessageEntry_ContextCut) isMessageEntry_Payload() {}
 func (*MessageEntry_DetachedWorkStarted) isMessageEntry_Payload() {}
 
 func (*MessageEntry_DetachedWorkProgressed) isMessageEntry_Payload() {}
+
+func (*MessageEntry_WorkflowStepObserved) isMessageEntry_Payload() {}
 
 func (*MessageEntry_DetachedWorkEnded) isMessageEntry_Payload() {}
 
@@ -776,7 +797,8 @@ var File_conversation_v1_message_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_message_proto_rawDesc = "" +
 	"\n" +
-	"\x1dconversation/v1/message.proto\x12\x0fconversation.v1\x1a\x1econversation/v1/payloads.proto\"\xba\t\n" +
+	"\x1dconversation/v1/message.proto\x12\x0fconversation.v1\x1a\x1econversation/v1/payloads.proto\"\x99\n" +
+	"\n" +
 	"\fMessageEntry\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12/\n" +
@@ -792,7 +814,8 @@ const file_conversation_v1_message_proto_rawDesc = "" +
 	"\vcontext_cut\x18\x0e \x01(\v2\x1b.conversation.v1.ContextCutH\x00R\n" +
 	"contextCut\x12Z\n" +
 	"\x15detached_work_started\x18\x10 \x01(\v2$.conversation.v1.DetachedWorkStartedH\x00R\x13detachedWorkStarted\x12c\n" +
-	"\x18detached_work_progressed\x18\x14 \x01(\v2'.conversation.v1.DetachedWorkProgressedH\x00R\x16detachedWorkProgressed\x12T\n" +
+	"\x18detached_work_progressed\x18\x14 \x01(\v2'.conversation.v1.DetachedWorkProgressedH\x00R\x16detachedWorkProgressed\x12]\n" +
+	"\x16workflow_step_observed\x18\x19 \x01(\v2%.conversation.v1.WorkflowStepObservedH\x00R\x14workflowStepObserved\x12T\n" +
 	"\x13detached_work_ended\x18\x15 \x01(\v2\".conversation.v1.DetachedWorkEndedH\x00R\x11detachedWorkEnded\x12V\n" +
 	"\x13permission_answered\x18\x16 \x01(\v2#.conversation.v1.PermissionAnsweredH\x00R\x12permissionAnswered\x12D\n" +
 	"\rtool_returned\x18\x17 \x01(\v2\x1d.conversation.v1.ToolReturnedH\x00R\ftoolReturned\x12T\n" +
@@ -847,11 +870,12 @@ var file_conversation_v1_message_proto_goTypes = []any{
 	(*ContextCut)(nil),             // 12: conversation.v1.ContextCut
 	(*DetachedWorkStarted)(nil),    // 13: conversation.v1.DetachedWorkStarted
 	(*DetachedWorkProgressed)(nil), // 14: conversation.v1.DetachedWorkProgressed
-	(*DetachedWorkEnded)(nil),      // 15: conversation.v1.DetachedWorkEnded
-	(*PermissionAnswered)(nil),     // 16: conversation.v1.PermissionAnswered
-	(*ToolReturned)(nil),           // 17: conversation.v1.ToolReturned
-	(*SkillBodyResolved)(nil),      // 18: conversation.v1.SkillBodyResolved
-	(*ContentArriving)(nil),        // 19: conversation.v1.ContentArriving
+	(*WorkflowStepObserved)(nil),   // 15: conversation.v1.WorkflowStepObserved
+	(*DetachedWorkEnded)(nil),      // 16: conversation.v1.DetachedWorkEnded
+	(*PermissionAnswered)(nil),     // 17: conversation.v1.PermissionAnswered
+	(*ToolReturned)(nil),           // 18: conversation.v1.ToolReturned
+	(*SkillBodyResolved)(nil),      // 19: conversation.v1.SkillBodyResolved
+	(*ContentArriving)(nil),        // 20: conversation.v1.ContentArriving
 }
 var file_conversation_v1_message_proto_depIdxs = []int32{
 	1,  // 0: conversation.v1.MessageEntry.parent:type_name -> conversation.v1.MessageParent
@@ -863,21 +887,22 @@ var file_conversation_v1_message_proto_depIdxs = []int32{
 	12, // 6: conversation.v1.MessageEntry.context_cut:type_name -> conversation.v1.ContextCut
 	13, // 7: conversation.v1.MessageEntry.detached_work_started:type_name -> conversation.v1.DetachedWorkStarted
 	14, // 8: conversation.v1.MessageEntry.detached_work_progressed:type_name -> conversation.v1.DetachedWorkProgressed
-	15, // 9: conversation.v1.MessageEntry.detached_work_ended:type_name -> conversation.v1.DetachedWorkEnded
-	16, // 10: conversation.v1.MessageEntry.permission_answered:type_name -> conversation.v1.PermissionAnswered
-	17, // 11: conversation.v1.MessageEntry.tool_returned:type_name -> conversation.v1.ToolReturned
-	18, // 12: conversation.v1.MessageEntry.skill_body_resolved:type_name -> conversation.v1.SkillBodyResolved
-	19, // 13: conversation.v1.MessageEntry.content_arriving:type_name -> conversation.v1.ContentArriving
-	2,  // 14: conversation.v1.MessageParent.root:type_name -> conversation.v1.MessageParentRoot
-	3,  // 15: conversation.v1.MessageParent.inside:type_name -> conversation.v1.MessageParentInside
-	5,  // 16: conversation.v1.MessageAuthor.user:type_name -> conversation.v1.AuthorUser
-	6,  // 17: conversation.v1.MessageAuthor.agent:type_name -> conversation.v1.AuthorAgent
-	7,  // 18: conversation.v1.MessageAuthor.detached_agent:type_name -> conversation.v1.AuthorDetachedAgent
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	15, // 9: conversation.v1.MessageEntry.workflow_step_observed:type_name -> conversation.v1.WorkflowStepObserved
+	16, // 10: conversation.v1.MessageEntry.detached_work_ended:type_name -> conversation.v1.DetachedWorkEnded
+	17, // 11: conversation.v1.MessageEntry.permission_answered:type_name -> conversation.v1.PermissionAnswered
+	18, // 12: conversation.v1.MessageEntry.tool_returned:type_name -> conversation.v1.ToolReturned
+	19, // 13: conversation.v1.MessageEntry.skill_body_resolved:type_name -> conversation.v1.SkillBodyResolved
+	20, // 14: conversation.v1.MessageEntry.content_arriving:type_name -> conversation.v1.ContentArriving
+	2,  // 15: conversation.v1.MessageParent.root:type_name -> conversation.v1.MessageParentRoot
+	3,  // 16: conversation.v1.MessageParent.inside:type_name -> conversation.v1.MessageParentInside
+	5,  // 17: conversation.v1.MessageAuthor.user:type_name -> conversation.v1.AuthorUser
+	6,  // 18: conversation.v1.MessageAuthor.agent:type_name -> conversation.v1.AuthorAgent
+	7,  // 19: conversation.v1.MessageAuthor.detached_agent:type_name -> conversation.v1.AuthorDetachedAgent
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_message_proto_init() }
@@ -894,6 +919,7 @@ func file_conversation_v1_message_proto_init() {
 		(*MessageEntry_ContextCut)(nil),
 		(*MessageEntry_DetachedWorkStarted)(nil),
 		(*MessageEntry_DetachedWorkProgressed)(nil),
+		(*MessageEntry_WorkflowStepObserved)(nil),
 		(*MessageEntry_DetachedWorkEnded)(nil),
 		(*MessageEntry_PermissionAnswered)(nil),
 		(*MessageEntry_ToolReturned)(nil),

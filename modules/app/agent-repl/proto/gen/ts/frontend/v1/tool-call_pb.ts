@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/tool-call.proto.
  */
 export const file_frontend_v1_tool_call: GenFile = /*@__PURE__*/
-  fileDesc("Chtmcm9udGVuZC92MS90b29sLWNhbGwucHJvdG8SC2Zyb250ZW5kLnYxImwKDUFnZW50VG9vbENhbGwSLAoEY2FsbBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5Ub29sQ2FsbEJsb2NrEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgCIAEoCVIRc3Bhd25lZF9idWJibGVfaWQiRQoPQWdlbnRUb29sUmVzdWx0EjIKBnJlc3VsdBgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ub29sUmVzdWx0Q29udGVudCLPAQoQQWdlbnRUb29sT3V0Y29tZRI3CgdzdGFydGVkGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya1N0YXJ0ZWRIABIzCgVlbmRlZBgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEgAEhMKC3Rvb2xfdXNlX2lkGAIgASgJEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgDIAEoCUIJCgdvdXRjb21lUhFzcGF3bmVkX2J1YmJsZV9pZCKEAwoJVGFza0VudHJ5Eg8KB3Rhc2tfaWQYASABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSEwoLb3V0cHV0X3BhdGgYBSABKAkSFQoNc3RhcnRlZF9hdF9tcxgGIAEoAxITCgtlbmRlZF9hdF9tcxgHIAEoAxI0Cgl3b3JrX2tpbmQYDiABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZBIxCgVlbmRlZBgaIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEoECAIQA0oECAQQBUoECAoQC0oECAsQDEoECAwQDUoECA0QDkoECBQQFUoECBUQFkoECBYQF0oECBcQGEoECBgQGUoECBkQGlIEa2luZFIGc3RhdHVzUgVhZ2VudFIId29ya2Zsb3dSBXNoZWxsUgx1bmNsYXNzaWZpZWRSB3J1bm5pbmdSBGRvbmVSBWVycm9yUgZraWxsZWRSB3N0b3BwZWRSBGxvc3QiaAoLVGFza0NhdGFsb2cSEQoJd29ya3NwYWNlGAEgASgJEiUKBXRhc2tzGAMgAygLMhYuZnJvbnRlbmQudjEuVGFza0VudHJ5Eg0KBWZlbmNlGAQgASgJSgQIAhADUgpzZXNzaW9uX2lkQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_conversation_v1_content, file_conversation_v1_payloads]);
+  fileDesc("Chtmcm9udGVuZC92MS90b29sLWNhbGwucHJvdG8SC2Zyb250ZW5kLnYxImwKDUFnZW50VG9vbENhbGwSLAoEY2FsbBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5Ub29sQ2FsbEJsb2NrEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgCIAEoCVIRc3Bhd25lZF9idWJibGVfaWQiRQoPQWdlbnRUb29sUmVzdWx0EjIKBnJlc3VsdBgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ub29sUmVzdWx0Q29udGVudCLPAQoQQWdlbnRUb29sT3V0Y29tZRI3CgdzdGFydGVkGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya1N0YXJ0ZWRIABIzCgVlbmRlZBgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEgAEhMKC3Rvb2xfdXNlX2lkGAIgASgJEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgDIAEoCUIJCgdvdXRjb21lUhFzcGF3bmVkX2J1YmJsZV9pZCK3BAoJVGFza0VudHJ5Eg8KB3Rhc2tfaWQYASABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSEwoLb3V0cHV0X3BhdGgYBSABKAkSFQoNc3RhcnRlZF9hdF9tcxgGIAEoAxITCgtlbmRlZF9hdF9tcxgHIAEoAxI0Cgl3b3JrX2tpbmQYDiABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZBIxCgdydW5uaW5nGBQgASgLMh4uZnJvbnRlbmQudjEuVGFza1N0YXR1c1J1bm5pbmdIABIrCgRkb25lGBUgASgLMhsuZnJvbnRlbmQudjEuVGFza1N0YXR1c0RvbmVIABItCgVlcnJvchgWIAEoCzIcLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNFcnJvckgAEi8KBmtpbGxlZBgXIAEoCzIdLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNLaWxsZWRIABIxCgdzdG9wcGVkGBggASgLMh4uZnJvbnRlbmQudjEuVGFza1N0YXR1c1N0b3BwZWRIABIrCgRsb3N0GBkgASgLMhsuZnJvbnRlbmQudjEuVGFza1N0YXR1c0xvc3RIAEIICgZzdGF0dXNKBAgCEANKBAgEEAVKBAgKEAtKBAgLEAxKBAgMEA1KBAgNEA5KBAgaEBtSBGtpbmRSBnN0YXR1c1IFYWdlbnRSCHdvcmtmbG93UgVzaGVsbFIMdW5jbGFzc2lmaWVkUgVlbmRlZCITChFUYXNrU3RhdHVzUnVubmluZyIQCg5UYXNrU3RhdHVzRG9uZSIRCg9UYXNrU3RhdHVzRXJyb3IiEgoQVGFza1N0YXR1c0tpbGxlZCITChFUYXNrU3RhdHVzU3RvcHBlZCIQCg5UYXNrU3RhdHVzTG9zdCJoCgtUYXNrQ2F0YWxvZxIRCgl3b3Jrc3BhY2UYASABKAkSJQoFdGFza3MYAyADKAsyFi5mcm9udGVuZC52MS5UYXNrRW50cnkSDQoFZmVuY2UYBCABKAlKBAgCEANSCnNlc3Npb25faWRCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_conversation_v1_content, file_conversation_v1_payloads]);
 
 /**
  * The tool card's header: one tool invocation.
@@ -213,14 +213,60 @@ export type TaskEntry = Message<"frontend.v1.TaskEntry"> & {
   workKind?: DetachedWorkKind | undefined;
 
   /**
-   * HOW THE TASK ENDED, as the producer recorded it. UNSET means the task is
-   * still open — the absence of an ending IS "running", which is why there is no
-   * arm asserting it. A set `ended` whose ended_at_ms is 0 is a malformed entry
-   * and is rejected loudly rather than drawn as running.
+   * The task's lifecycle; the set arm IS the status. Never unset on a wire
+   * entry: an entry with no arm here is a malformed frame and is rejected
+   * loudly rather than drawn as running.
    *
-   * @generated from field: conversation.v1.DetachedWorkEnded ended = 26;
+   * DAEMON-OWNED. "Is this task still running" is something the daemon works
+   * out from whether an ending has reached it, so the RESOLVED status is
+   * legitimately declared here rather than imported.
+   *
+   * TODO(respelling): the terminal arms nonetheless overlap
+   * conversation.v1.DetachedWorkEnded's outcome — done/error/lost against
+   * succeeded/failed/lost — while stopped/killed have only the single
+   * DetachedCancelled to map onto and running has no counterpart at all.
+   * Reconciling the resolved status with the producer's recorded outcome needs
+   * a ruling; until then the distinctions stay stated here.
+   *
+   * @generated from oneof frontend.v1.TaskEntry.status
    */
-  ended?: DetachedWorkEnded | undefined;
+  status: {
+    /**
+     * @generated from field: frontend.v1.TaskStatusRunning running = 20;
+     */
+    value: TaskStatusRunning;
+    case: "running";
+  } | {
+    /**
+     * @generated from field: frontend.v1.TaskStatusDone done = 21;
+     */
+    value: TaskStatusDone;
+    case: "done";
+  } | {
+    /**
+     * @generated from field: frontend.v1.TaskStatusError error = 22;
+     */
+    value: TaskStatusError;
+    case: "error";
+  } | {
+    /**
+     * @generated from field: frontend.v1.TaskStatusKilled killed = 23;
+     */
+    value: TaskStatusKilled;
+    case: "killed";
+  } | {
+    /**
+     * @generated from field: frontend.v1.TaskStatusStopped stopped = 24;
+     */
+    value: TaskStatusStopped;
+    case: "stopped";
+  } | {
+    /**
+     * @generated from field: frontend.v1.TaskStatusLost lost = 25;
+     */
+    value: TaskStatusLost;
+    case: "lost";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -229,6 +275,101 @@ export type TaskEntry = Message<"frontend.v1.TaskEntry"> & {
  */
 export const TaskEntrySchema: GenMessage<TaskEntry> = /*@__PURE__*/
   messageDesc(file_frontend_v1_tool_call, 3);
+
+/**
+ * The task is still running. STATED, never inferred from a missing ending:
+ * absence renders absence on this contract.
+ *
+ * @generated from message frontend.v1.TaskStatusRunning
+ */
+export type TaskStatusRunning = Message<"frontend.v1.TaskStatusRunning"> & {
+};
+
+/**
+ * Describes the message frontend.v1.TaskStatusRunning.
+ * Use `create(TaskStatusRunningSchema)` to create a new message.
+ */
+export const TaskStatusRunningSchema: GenMessage<TaskStatusRunning> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_tool_call, 4);
+
+/**
+ * The task finished successfully.
+ *
+ * @generated from message frontend.v1.TaskStatusDone
+ */
+export type TaskStatusDone = Message<"frontend.v1.TaskStatusDone"> & {
+};
+
+/**
+ * Describes the message frontend.v1.TaskStatusDone.
+ * Use `create(TaskStatusDoneSchema)` to create a new message.
+ */
+export const TaskStatusDoneSchema: GenMessage<TaskStatusDone> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_tool_call, 5);
+
+/**
+ * The task finished by failing.
+ *
+ * @generated from message frontend.v1.TaskStatusError
+ */
+export type TaskStatusError = Message<"frontend.v1.TaskStatusError"> & {
+};
+
+/**
+ * Describes the message frontend.v1.TaskStatusError.
+ * Use `create(TaskStatusErrorSchema)` to create a new message.
+ */
+export const TaskStatusErrorSchema: GenMessage<TaskStatusError> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_tool_call, 6);
+
+/**
+ * The task was stopped from outside before it finished.
+ *
+ * @generated from message frontend.v1.TaskStatusKilled
+ */
+export type TaskStatusKilled = Message<"frontend.v1.TaskStatusKilled"> & {
+};
+
+/**
+ * Describes the message frontend.v1.TaskStatusKilled.
+ * Use `create(TaskStatusKilledSchema)` to create a new message.
+ */
+export const TaskStatusKilledSchema: GenMessage<TaskStatusKilled> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_tool_call, 7);
+
+/**
+ * The task was stopped deliberately through its own stop affordance. DISTINCT
+ * from killed: who stopped the work is the whole point of the distinction, and
+ * conversation.v1.DetachedCancelled cannot express it.
+ *
+ * @generated from message frontend.v1.TaskStatusStopped
+ */
+export type TaskStatusStopped = Message<"frontend.v1.TaskStatusStopped"> & {
+};
+
+/**
+ * Describes the message frontend.v1.TaskStatusStopped.
+ * Use `create(TaskStatusStoppedSchema)` to create a new message.
+ */
+export const TaskStatusStoppedSchema: GenMessage<TaskStatusStopped> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_tool_call, 8);
+
+/**
+ * The daemon lost track of the task — a restart or a vanished process left
+ * its ending unobserved. An honest absence, distinct from every observed
+ * ending.
+ *
+ * @generated from message frontend.v1.TaskStatusLost
+ */
+export type TaskStatusLost = Message<"frontend.v1.TaskStatusLost"> & {
+};
+
+/**
+ * Describes the message frontend.v1.TaskStatusLost.
+ * Use `create(TaskStatusLostSchema)` to create a new message.
+ */
+export const TaskStatusLostSchema: GenMessage<TaskStatusLost> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_tool_call, 9);
 
 /**
  * @generated from message frontend.v1.TaskCatalog
@@ -265,5 +406,5 @@ export type TaskCatalog = Message<"frontend.v1.TaskCatalog"> & {
  * Use `create(TaskCatalogSchema)` to create a new message.
  */
 export const TaskCatalogSchema: GenMessage<TaskCatalog> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_tool_call, 4);
+  messageDesc(file_frontend_v1_tool_call, 10);
 
