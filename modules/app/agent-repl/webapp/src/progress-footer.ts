@@ -44,9 +44,7 @@ import { ConversationItem, ToolItem } from "./store.js";
 import { TASKS_SPEC, tasksMenuHtml } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
 import { agentElapsedLabel } from "./topbar.js";
-import { agentUncachedInput, compactTokens, uncachedInputHtml } from "./tokens.js";
-import type { SessionTokenUtilization } from "../../proto/gen/ts/frontend/v1/durable_pb";
-import { AccountingFact, accountingFacts, latestTurnAccounting } from "./turn-accounting.js";
+import { compactTokens, uncachedInputHtml } from "./tokens.js";
 
 /**
  * Which of the footer's counter overlays is open, and whether the EXPANDED
@@ -77,11 +75,10 @@ export interface FooterDisclosure {
 
 /**
  * One subagent as the EXPANDED FOOTER draws it: the roster entry every counter
- * shares, plus the two figures only this surface reports.
+ * shares, plus the call's own wallclock.
  *
  * It is a WEBAPP-SIDE projection over data this end already holds — the call's
- * own item for the wallclock, and the daemon's per-subagent attribution for the
- * uncached input. Nothing about it reaches the wire.
+ * own item for the wallclock. Nothing about it reaches the wire.
  */
 export interface FooterAgentRow extends CounterEntry {
   /**
@@ -90,19 +87,17 @@ export interface FooterAgentRow extends CounterEntry {
    * reading rather than one baked in when the projection was built.
    */
   item: ToolItem;
-  /**
-   * The uncached input the daemon attributed to this subagent, or null when it
-   * has attributed none. NULL RENDERS NOTHING — a zero would claim the agent
-   * cost nothing (see `agentUncachedInput`).
-   */
-  uncachedInput: number | null;
+  // RETIRED: `uncachedInput` stood here — the uncached input the daemon
+  // attributed to this subagent, read off `SessionView.token_utilization`.
+  // That wire field is RESERVED with no successor, so the row carries no token
+  // figure rather than one derived some other way.
 }
 
 /**
  * The session's LIVE subagents as expanded-footer rows.
  *
- * The roster itself is `sessionSubagents`' — this adds only the two figures the
- * expanded footer shows beside it.
+ * The roster itself is `sessionSubagents`' — this adds only the call item the
+ * expanded footer reads its wallclock off.
  *
  * A CONCLUDED SUBAGENT IS NOT A ROW. The narrowing happens HERE, once, and the
  * result is the only array the footer holds: the chip reports its length and
@@ -112,7 +107,6 @@ export interface FooterAgentRow extends CounterEntry {
  */
 export function footerAgentRows(
   items: readonly ConversationItem[],
-  utilization: SessionTokenUtilization | null | undefined,
 ): FooterAgentRow[] {
   const calls = new Map<string, ToolItem>();
   for (const item of items) {
@@ -123,7 +117,7 @@ export function footerAgentRows(
     if (item === undefined) {
       throw new Error(`progress-footer: roster entry ${entry.id} names no tool call in the feed`);
     }
-    return { ...entry, item, uncachedInput: agentUncachedInput(utilization, entry.id) };
+    return { ...entry, item };
   });
 }
 
@@ -793,10 +787,12 @@ export function expandedFooterScrolls(rows: number): boolean {
  * on the right.
  *
  * LEFT is the roster's own account — the type chip and the description the
- * spawn carried. RIGHT is the pair only this surface reports: the call's
- * wallclock (elapsed while running, total once settled) and the uncached input
- * the daemon attributed to it. An unattributed figure renders NOTHING rather
- * than a zero.
+ * spawn carried. RIGHT is the figure only this surface reports: the call's
+ * wallclock (elapsed while running, total once settled).
+ *
+ * RETIRED: the row also showed the uncached input the daemon attributed to the
+ * subagent, off `SessionView.token_utilization`. That wire field is RESERVED
+ * with no successor, so the figure is gone.
  *
  * The row wears the shared `.agent-row` identity and its `data-agent-id`, so a
  * click reveals the agent's bubble through the classifier's existing verb.
@@ -806,16 +802,12 @@ function agentRowHtml(row: FooterAgentRow, nowMs: number): string {
     ? ""
     : `<span class="agent-type">${escapeHtml(row.detail)}</span>`;
   const headline = row.summary === "" ? AGENTS_SPEC.placeholder : row.summary;
-  const tokens = row.uncachedInput === null
-    ? ""
-    : uncachedInputHtml("pfooter-agent-tokens", row.uncachedInput);
   return (
     `<div class="agent-row pfooter-agent-row" data-agent-id="${escapeHtml(row.id)}">` +
     `<span class="pfooter-agent-name">${type}` +
     `<span class="agent-desc">${escapeHtml(headline)}</span></span>` +
     `<span class="pfooter-agent-figures">` +
     `<span class="pfooter-agent-runtime">${escapeHtml(agentElapsedLabel(row.item, nowMs))}</span>` +
-    tokens +
     `</span></div>`
   );
 }
@@ -875,13 +867,16 @@ export const ACCOUNTING_PEEK_MS = 10_000;
  * clock for the strip's width; as a grid it is nine figures a reader can
  * actually find one of.
  *
- * SOURCE. The pairs come from the feed's own settled accounting, which is the
- * only form that carries FIELDS — the daemon resolves the same reconciliation
- * but ships it as one composed sentence, and prettifying a composed sentence
- * means parsing it, which this side does not do to daemon prose. When the feed
- * has no settled turn the daemon's sentence is rendered VERBATIM instead, with
- * its verdict phrases beneath it, which is exactly how the retired cell drew
- * it.
+ * SOURCE. The daemon's `FooterAccountingCell`, and nothing else. It ships the
+ * reconciliation as ONE COMPOSED SENTENCE plus the phrases of its verdict arm,
+ * and this side renders both verbatim — it does not parse daemon prose back
+ * into fields.
+ *
+ * The feed used to carry a second, FIELDED copy of the same reconciliation
+ * (`Message.turn_accounting`) and this peek preferred it, drawing a grid of
+ * labelled figures the webapp reconciled for itself. That field is retired and
+ * nothing replaces it: a turn's accounting is a verdict the daemon reaches, so
+ * a client recomputing one was a second authority on the same question.
  */
 export function accountingPeekHtml(input: FooterInput): string {
   const rows = accountingPeekRows(input);
@@ -892,23 +887,12 @@ export function accountingPeekHtml(input: FooterInput): string {
   );
 }
 
-/** One labelled figure as the peek's grid cell. */
-function accountingFactHtml(fact: AccountingFact): string {
-  return (
-    `<div class="pfooter-peek-fact">` +
-    `<span class="pfooter-peek-label">${escapeHtml(fact.label)}</span>` +
-    `<span class="pfooter-peek-value">${escapeHtml(fact.value)}</span></div>`
-  );
-}
-
 /**
  * The peek's rows, in the source order the doc above states. A session with no
  * accounting at all says so rather than opening an empty section: the click was
  * deliberate and deserves an answer.
  */
 function accountingPeekRows(input: FooterInput): string[] {
-  const settled = latestTurnAccounting(input.items);
-  if (settled !== null) return accountingFacts(settled).map(accountingFactHtml);
   const daemon = input.progress.accounting;
   if (daemon !== null) {
     const phrases =

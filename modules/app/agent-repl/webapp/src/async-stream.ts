@@ -311,10 +311,11 @@ export function parseTranscript(text: string, cap = STREAM_ITEM_CAP): ParsedTran
  * SPEND IS NOT HERE, deliberately. This scan used to also sum the tail's
  * `output_tokens` for the catalog badge, which made a renderer-side summation a
  * second owner of the session's economics — reporting a different measure, from
- * a different source, than the footer reported for the same invocation. Every
- * token figure now comes from the daemon's own attribution
- * (`agentUncachedInput`), so the only thing a transcript is read for is whether
- * its run has ended and how.
+ * a different source, than the footer reported for the same invocation. The
+ * daemon's per-subagent attribution that replaced it is itself retired now
+ * (`SessionView.token_utilization`, RESERVED with no successor), so no
+ * per-subagent token figure exists at all and a transcript is read only for
+ * whether its run has ended and how.
  */
 export interface TranscriptStats {
   /** The stream's terminal `result` record has landed: the run is over. */

@@ -50,7 +50,7 @@ import { IDLE_LABEL } from "../src/timer.js";
 import type { ContextCostAlert } from "../src/frontend-proto.js";
 import type { MergeStatus, ProgressInput } from "../src/state-adapter.js";
 import { ConversationItem, ToolItem } from "../src/store.js";
-import type { FooterFailureRow } from "../src/frontend-proto.js";
+import type { FooterAccountingCell, FooterFailureRow } from "../src/frontend-proto.js";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
 
@@ -189,7 +189,6 @@ function agentRow(over: Partial<FooterAgentRow> = {}): FooterAgentRow {
   return {
     ...counterEntry(),
     item: tool({ toolUseId: "a1", toolName: "Agent" }),
-    uncachedInput: null,
     ...over,
   };
 }
@@ -1329,20 +1328,12 @@ describe("sheetHtml: the subagent roster", () => {
     expect(got).toContain('<span class="pfooter-agent-runtime">12s</span>');
   });
 
-  it("puts the agent's uncached input on the right of its row", () => {
-    // Arrange
-    const i = input({ agents: [agentRow({ uncachedInput: 4_200 })] });
-    // Act
-    const got = sheetHtml(i, NOW);
-    // Assert — the compact, heated form every uncached-input figure wears.
-    expect(got).toContain(
-      '<span class="pfooter-agent-tokens token-heat" style="--token-heat-hue:120">4.2k in</span>',
-    );
-  });
-
-  it("shows no token figure for an agent the daemon has not attributed", () => {
-    // Arrange / Act — a zero would claim the agent cost nothing.
-    const got = sheetHtml(input({ agents: [agentRow({ uncachedInput: null })] }), NOW);
+  // RETIRED: two cases stood here pinning the row's uncached-input figure and
+  // its absence. `SessionView.token_utilization` is RESERVED with no successor,
+  // so the row carries no token figure at all.
+  it("draws no token figure on an agent row", () => {
+    // Arrange / Act
+    const got = sheetHtml(input({ agents: [agentRow()] }), NOW);
     // Assert
     expect(got).not.toContain("pfooter-agent-tokens");
   });
@@ -1405,21 +1396,33 @@ describe("footerAgentRows", () => {
     // Arrange
     const call = agentCall("tu1");
     // Act
-    const [row] = footerAgentRows([call], null);
+    const [row] = footerAgentRows([call]);
     // Assert
     expect(row.item).toBe(call);
   });
 
-  it("reports no token figure without a session attribution", () => {
-    // Arrange / Act
-    const [row] = footerAgentRows([agentCall("tu1")], null);
-    // Assert
-    expect(row.uncachedInput).toBeNull();
+  it("throws when a roster entry names no tool call in the feed", () => {
+    // Arrange — the guard is DEFENSIVE: the call index and the roster read the
+    // same feed, so only a feed that answers differently on two reads can name
+    // an id the index does not hold. This one does exactly that, which is the
+    // only way to exercise the guard without weakening it.
+    const feed = [tool({ toolUseId: "unrelated", toolName: "Bash" })] as ConversationItem[];
+    const filler = feed[0];
+    let read = 0;
+    Object.defineProperty(feed, 0, {
+      configurable: true,
+      enumerable: true,
+      get: () => (read++ === 0 ? filler : agentCall("tu-missing")),
+    });
+    // Act / Assert — a missing call is a broken projection, never a skipped row.
+    expect(() => footerAgentRows(feed)).toThrow(
+      /roster entry tu-missing names no tool call in the feed/,
+    );
   });
 
   it("projects no rows for a session that spawned no subagent", () => {
     // Arrange / Act
-    const got = footerAgentRows([tool()], null);
+    const got = footerAgentRows([tool()]);
     // Assert
     expect(got).toEqual([]);
   });
@@ -1436,14 +1439,14 @@ describe("footerAgentRows", () => {
 
   it("drops a subagent that concluded successfully", () => {
     // Arrange / Act — the expanded footer lists LIVE subagents only.
-    const got = footerAgentRows([settledCall("tu1", false)], null);
+    const got = footerAgentRows([settledCall("tu1", false)]);
     // Assert
     expect(got).toEqual([]);
   });
 
   it("drops a subagent that concluded with an error", () => {
     // Arrange / Act
-    const got = footerAgentRows([settledCall("tu1", true)], null);
+    const got = footerAgentRows([settledCall("tu1", true)]);
     // Assert
     expect(got).toEqual([]);
   });
@@ -1452,7 +1455,7 @@ describe("footerAgentRows", () => {
     // Arrange
     const feed = [settledCall("tu1", false), agentCall("tu2")];
     // Act
-    const got = footerAgentRows(feed, null);
+    const got = footerAgentRows(feed);
     // Assert
     expect(got.map((row) => row.id)).toEqual(["tu2"]);
   });
@@ -1461,7 +1464,7 @@ describe("footerAgentRows", () => {
     // Arrange — spawned but not yet started: live, and the roster says so.
     const starting = tool({ toolUseId: "tu3", toolName: "Agent", inputDone: false });
     // Act
-    const got = footerAgentRows([starting], null);
+    const got = footerAgentRows([starting]);
     // Assert
     expect(got.map((row) => row.id)).toEqual(["tu3"]);
   });
@@ -1487,7 +1490,7 @@ describe("the agent chip counts exactly the rows the section draws", () => {
 
   it("agrees with the section when concluded subagents outnumber live ones", () => {
     // Arrange — the invariant's whole point: settled calls must not inflate it.
-    const i = input({ agents: footerAgentRows(feed(2, 3), null) });
+    const i = input({ agents: footerAgentRows(feed(2, 3)) });
     // Act
     const got = footerHtml(i, { ...CLOSED, expanded: true }, NOW);
     // Assert
@@ -1497,7 +1500,7 @@ describe("the agent chip counts exactly the rows the section draws", () => {
 
   it("hides the chip and draws no rows when every subagent has concluded", () => {
     // Arrange
-    const i = input({ agents: footerAgentRows(feed(0, 3), null) });
+    const i = input({ agents: footerAgentRows(feed(0, 3)) });
     // Act
     const got = footerHtml(i, { ...CLOSED, expanded: true }, NOW);
     // Assert
@@ -2560,25 +2563,14 @@ describe("expensiveTurnRowHtml: the uncached-input alert", () => {
 });
 
 describe("the accounting metadata: off the strip, behind the token cell", () => {
-  /** A settled turn the client-side projection can draw fields off. */
-  function derivedItems(): ConversationItem[] {
-    return [
-      {
-        kind: "result",
-        subtype: "success",
-        durationMs: 0,
-        numTurns: 0,
-        totalCostUsd: 0,
-        usage: { input_tokens: 0, output_tokens: 0 },
-        isError: false,
-        context: null,
-        turnAccounting: {
-          turnId: "turn-1",
-          queryInstanceId: "query-1",
-          verdict: { kind: "complete" },
-        },
-      } as ConversationItem,
-    ];
+  // RETIRED: a `derivedItems()` fixture stood here, minting a settled result
+  // carrying `Message.turn_accounting` for the client-side projection to draw
+  // fields off. That wire field is RESERVED with no successor, so every case
+  // below sources the peek from the daemon's `FooterAccountingCell` instead.
+
+  /** A footer input carrying exactly one daemon-resolved accounting cell. */
+  function cellInput(accounting: FooterAccountingCell): FooterInput {
+    return input({ progress: progress({ accounting }) });
   }
 
   it("keeps the DAEMON's accounting summary out of the strip entirely", () => {
@@ -2593,13 +2585,6 @@ describe("the accounting metadata: off the strip, behind the token cell", () => 
     // Assert
     expect(got).not.toContain("pfooter-accounting\"");
     expect(got).not.toContain("5h 10.0% · 2s");
-  });
-
-  it("keeps the CLIENT-DERIVED accounting line out of the strip too", () => {
-    // Arrange / Act — the fallback cell is gone with the cell it backed.
-    const got = footerHtml(input({ items: derivedItems() }), CLOSED, NOW);
-    // Assert
-    expect(got).not.toContain("INCOMPLETE ACCOUNTING");
   });
 
   it("keeps the token cell's own figure on the strip", () => {
@@ -2624,31 +2609,46 @@ describe("the accounting metadata: off the strip, behind the token cell", () => 
     expect(got).toContain(`class="pfooter-cell pfooter-tokens" data-pfooter-tokens`);
   });
 
-  it("draws the settled turn's figures as labelled pairs when the peek stands", () => {
-    // Arrange
-    const i = input({ items: derivedItems() });
+  // RETIRED: a case stood here pinning the client-derived grid of labelled
+  // `verdict`/`problems` pairs the peek drew off `Message.turn_accounting`.
+  // That field is RESERVED with no successor; the peek renders the daemon's
+  // composed prose verbatim now, which the four cases below pin.
+
+  it("renders the daemon cell's summary verbatim", () => {
+    // Arrange — prose the webapp must not reword, reformat or parse back.
+    const i = cellInput({ summary: "5h 10.0% · 2s", verdict: { kind: "complete" } });
     // Act
     const got = accountingPeekHtml(i);
     // Assert
-    expect(got).toContain(`<span class="pfooter-peek-label">verdict</span>`);
-    expect(got).toContain(`<span class="pfooter-peek-value">INCOMPLETE ACCOUNTING</span>`);
+    expect(got).toContain(`<div class="pfooter-peek-line">5h 10.0% · 2s</div>`);
   });
 
-  it("falls back to the daemon's composed sentence when no turn has settled", () => {
-    // Arrange — the daemon ships prose, not fields, so it is rendered verbatim.
-    const i = input({
-      progress: progress({
-        accounting: {
-          summary: "partial",
-          verdict: { kind: "incomplete", missing: ["turn start", "turn end"] },
-        },
-      }),
+  it("renders an incomplete verdict's missing phrases beneath the summary", () => {
+    // Arrange
+    const i = cellInput({
+      summary: "partial",
+      verdict: { kind: "incomplete", missing: ["turn start", "turn end"] },
+    });
+    // Act
+    const got = accountingPeekHtml(i);
+    // Assert — the summary leads, its absent evidence follows in order.
+    expect(got.indexOf(`>partial<`)).toBeLessThan(got.indexOf(`>turn start<`));
+    expect(got.indexOf(`>turn start<`)).toBeLessThan(got.indexOf(`>turn end<`));
+  });
+
+  it("renders an invalid verdict's problems beneath the summary", () => {
+    // Arrange
+    const i = cellInput({
+      summary: "reconciliation failed",
+      verdict: { kind: "invalid", problems: ["token ledger mismatch", "window reset"] },
     });
     // Act
     const got = accountingPeekHtml(i);
     // Assert
-    expect(got).toContain(`<div class="pfooter-peek-line">partial</div>`);
-    expect(got).toContain(`<div class="pfooter-peek-line">turn start</div>`);
+    expect(got.indexOf(`>reconciliation failed<`)).toBeLessThan(
+      got.indexOf(`>token ledger mismatch<`),
+    );
+    expect(got).toContain(`<div class="pfooter-peek-line">window reset</div>`);
   });
 
   it("answers a click on a session with no accounting at all", () => {
@@ -2661,14 +2661,16 @@ describe("the accounting metadata: off the strip, behind the token cell", () => 
   it("scrolls the peek when its figures outrun the section's row ceiling", () => {
     // Arrange — the complete shape's nine facts sit in three grid rows, so the
     // marker tracks the ROW COUNT the section counts, not the fact count.
-    const got = accountingPeekHtml(input({ items: derivedItems() }));
+    const got = accountingPeekHtml(
+      cellInput({ summary: "5h 10.0% · 2s", verdict: { kind: "complete" } }),
+    );
     // Assert
     expect(got).toContain(`--pfooter-sheet-rows:${EXPANDED_FOOTER_MAX_ROWS}`);
   });
 
   it("shows the peek INSTEAD of the expanded footer's ordinary rows", () => {
     // Arrange — the section was open on its own detail.
-    const i = input({ items: derivedItems() });
+    const i = cellInput({ summary: "5h 10.0% · 2s", verdict: { kind: "complete" } });
     // Act
     const got = footerHtml(i, { ...CLOSED, expanded: true, accountingPeek: true }, NOW);
     // Assert
@@ -2679,7 +2681,11 @@ describe("the accounting metadata: off the strip, behind the token cell", () => 
   it("shows the peek even when the expanded footer is closed", () => {
     // Arrange / Act — the click asked for the accounting; the section's own
     // disclosure has no say in whether the answer arrives.
-    const got = footerHtml(input({ items: derivedItems() }), { ...CLOSED, accountingPeek: true }, NOW);
+    const got = footerHtml(
+      cellInput({ summary: "5h 10.0% · 2s", verdict: { kind: "complete" } }),
+      { ...CLOSED, accountingPeek: true },
+      NOW,
+    );
     // Assert
     expect(got).toContain("pfooter-accounting-peek");
   });
