@@ -216,7 +216,7 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
     - So a bare message name is genuinely ambiguous, not merely terse.
 - Every code symbol named anywhere in the response MUST carry its owning program and namespace path: `<program>.<namespace path>.<symbol>()`.
   - Never a bare `foo()`, always e.g. `shim-store.internal.server.ingestAndFan()`.
-  - It is typically NOT nearly as obvious as I assume which program or system a symbol belongs to, and I usually do not know the code intimately enough to disambiguate it from the name alone.
+  - It is typically NOT nearly as obvious as you assume which program or system a symbol belongs to, and I usually do not know the code intimately enough to disambiguate it from the name alone.
   - This repo runs several cooperating programs (a daemon, a per-session shim, a sidecar, a store, a webapp), so a bare `Write()` could be the store client, the wire layer, or the sidecar.
 - These references are still code-like references, so they are still wrapped in markdown inline code per the section above.
 
