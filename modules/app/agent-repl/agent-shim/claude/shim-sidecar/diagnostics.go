@@ -4,9 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -18,7 +21,7 @@ import (
 type diagnosticOutbox struct {
 	mu     sync.Mutex
 	next   uint64
-	events []*corev1.Event
+	events []*agentshimv1.Entry
 }
 
 func (o *diagnosticOutbox) enqueue(d logging.Diagnostic) {
@@ -28,10 +31,10 @@ func (o *diagnosticOutbox) enqueue(d logging.Diagnostic) {
 	o.events = append(o.events, diagnosticEvent(d, o.next))
 }
 
-func (o *diagnosticOutbox) snapshot() []*corev1.Event {
+func (o *diagnosticOutbox) snapshot() []*agentshimv1.Entry {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return append([]*corev1.Event(nil), o.events...)
+	return append([]*agentshimv1.Entry(nil), o.events...)
 }
 
 func (o *diagnosticOutbox) acknowledge(n int) {
@@ -46,7 +49,7 @@ func (o *diagnosticOutbox) acknowledge(n int) {
 // flush writes queued events in order. A failed write leaves that exact event
 // at the queue head, so a later retry reuses its producer identity and dedup
 // key rather than creating a replacement.
-func (o *diagnosticOutbox) flush(write func(*corev1.Event) error) (*corev1.Event, error) {
+func (o *diagnosticOutbox) flush(write func(*agentshimv1.Entry) error) (*agentshimv1.Entry, error) {
 	for {
 		events := o.snapshot()
 		if len(events) == 0 {
@@ -59,32 +62,69 @@ func (o *diagnosticOutbox) flush(write func(*corev1.Event) error) (*corev1.Event
 	}
 }
 
-func diagnosticEvent(d logging.Diagnostic, ordinal uint64) *corev1.Event {
-	context, err := structpb.NewStruct(d.Context)
-	if err != nil {
+// diagnosticEvent turns one logged diagnostic into the record that carries it
+// through the store to a session's own log.
+//
+// ITS HOME IS ProducerDiagnostic, WHICH IS NARROWER THAN WHAT IT REPLACES. The
+// retired FilePlaneDiagnostic carried the level, the verbosity, the emitting
+// runtime, the pid, the source path, a request id and a structured context
+// object as FIELDS — every one of them separately readable. ProducerDiagnostic
+// carries an operation and a free-text detail, so everything else is flattened
+// into that detail rather than dropped. It is PRESERVED, not STRUCTURED, and a
+// consumer that used to filter on level now has to parse prose. See the gap
+// note; nothing here invents a field to keep the old shape.
+func diagnosticEvent(d logging.Diagnostic, ordinal uint64) *agentshimv1.Entry {
+	// An unencodable context is still rejected loudly, exactly as before: it is
+	// a bug in the caller, not a record to quietly truncate. The check is kept
+	// even though the Struct itself no longer has a field to sit in, because
+	// dropping it would silently accept diagnostics this system used to refuse.
+	if _, err := structpb.NewStruct(d.Context); err != nil {
 		panic(fmt.Sprintf("sidecar: diagnostic context is not protobuf-compatible: %v", err))
 	}
 	if ordinal == 0 {
 		panic("sidecar: diagnostic ordinal must be positive")
 	}
+	// The write identity is the digest the retired dedup key used, unchanged, so
+	// a diagnostic replayed after a lost connection is still one record.
 	keySource := fmt.Sprintf("%s\x00%d\x00%d\x00%d", d.Session, d.PID, ordinal, d.Timestamp.UnixMilli())
 	digest := sha256.Sum256([]byte(keySource))
-	return &corev1.Event{
-		SessionId:    d.Session,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		RequestId:    d.RequestID,
-		ProducedAtMs: d.Timestamp.UnixMilli(),
-		DedupKey:     "sidecar-diagnostic:" + hex.EncodeToString(digest[:]),
-		Payload: &corev1.Event_FilePlaneDiagnostic{FilePlaneDiagnostic: &corev1.FilePlaneDiagnostic{
-			SourceRuntime: corev1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR,
-			Level:         d.Level,
-			Verbosity:     d.Verbosity,
-			Operation:     d.Operation,
-			Message:       d.Message,
-			Context:       context,
-			SourcePid:     int64(d.PID),
-			SourcePath:    d.Path,
-		}},
+	return convert.ProducerDiagnostic(
+		convert.Attribution{
+			SessionID:    d.Session,
+			Path:         d.Path,
+			ProducedAtMs: d.Timestamp.UnixMilli(),
+		},
+		"sidecar-diagnostic:"+hex.EncodeToString(digest[:]),
+		d.Operation,
+		diagnosticDetail(d),
+	)
+}
+
+// diagnosticDetail flattens everything ProducerDiagnostic has no field for into
+// the one field it has, so nothing the logger recorded is lost on the way to the
+// store.
+//
+// The rendering is ORDER-STABLE, which is not cosmetic: the write identity above
+// makes a replayed diagnostic idempotent, and that only holds if the same
+// diagnostic renders to the same bytes every time it is produced.
+func diagnosticDetail(d logging.Diagnostic) string {
+	var b strings.Builder
+	b.WriteString(d.Message)
+	fmt.Fprintf(&b, " [runtime=sidecar level=%s verbosity=%s pid=%d", d.Level, d.Verbosity, d.PID)
+	if d.Path != "" {
+		fmt.Fprintf(&b, " path=%s", d.Path)
 	}
+	if d.RequestID != "" {
+		fmt.Fprintf(&b, " request_id=%s", d.RequestID)
+	}
+	keys := make([]string, 0, len(d.Context))
+	for key := range d.Context {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		fmt.Fprintf(&b, " %s=%v", key, d.Context[key])
+	}
+	b.WriteString("]")
+	return b.String()
 }
