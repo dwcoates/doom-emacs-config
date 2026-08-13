@@ -24,7 +24,7 @@ package e2e
 import (
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // spawnedShims reports how many shim processes THIS boot has exec'd. A stale

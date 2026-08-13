@@ -11,7 +11,8 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
@@ -122,7 +123,7 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 // the work's corner renders, and the vendor-faithful evidence stays in the
 // durable layer. Both are still asserted — this reads the evidence, and
 // requireResponseStamp below reads what the wire resolved from it.
-func requireSingleTokenUtilization(t *testing.T, h *e2eHarness, sessionID, apiMessageID, source string) *frontendv1.TokenUtilization {
+func requireSingleTokenUtilization(t *testing.T, h *e2eHarness, sessionID, apiMessageID, source string) *statev1.TokenUtilization {
 	t.Helper()
 	ledger, err := statedb.NewTokenUtilizations(h.stateDB)
 	if err != nil {
@@ -132,7 +133,7 @@ func requireSingleTokenUtilization(t *testing.T, h *e2eHarness, sessionID, apiMe
 	if err != nil {
 		t.Fatalf("list durable token-utilization ledger: %v", err)
 	}
-	var records []*frontendv1.TokenUtilization
+	var records []*statev1.TokenUtilization
 	for _, record := range all {
 		if record.GetApiMessageId() == apiMessageID {
 			records = append(records, record)
@@ -451,7 +452,7 @@ func TestE2EAutomaticRestoreFailureIsTypedAndVisible(t *testing.T) {
 // The aggregate left SessionView with the rest of the durable evidence layer;
 // its rendering replacement is TokenBreakdownView. The figures themselves are
 // unchanged, and this reads them where they are still authoritative.
-func durableSessionAggregate(h *e2eHarness, sessionID string) (*frontendv1.SessionTokenUtilization, error) {
+func durableSessionAggregate(h *e2eHarness, sessionID string) (*statev1.SessionTokenUtilization, error) {
 	ledger, err := statedb.NewTokenUtilizations(h.stateDB)
 	if err != nil {
 		return nil, err

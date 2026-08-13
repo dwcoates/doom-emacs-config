@@ -24,7 +24,7 @@ package errclass
 // "structured now" would be the one irreversible half of this change.
 
 import (
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // Facts is the evidence a construction site holds about ONE failure.

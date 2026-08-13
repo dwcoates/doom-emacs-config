@@ -3,7 +3,7 @@ package frontend
 import (
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // The GUI carrier reaches the rendering webview — the client that paints the

@@ -9,7 +9,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -24,45 +24,45 @@ import (
 
 type failingTurnAccountingStore struct{ err error }
 
-func (s failingTurnAccountingStore) Record(string, *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error) {
+func (s failingTurnAccountingStore) Record(string, *statev1.TurnAccounting) (*statev1.TurnAccounting, error) {
 	return nil, s.err
 }
-func (s failingTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting, error) {
+func (s failingTurnAccountingStore) List(string) ([]*statev1.TurnAccounting, error) {
 	return nil, s.err
 }
 
 type emptyTurnAccountingStore struct{}
 
-func (emptyTurnAccountingStore) Record(_ string, accounting *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error) {
+func (emptyTurnAccountingStore) Record(_ string, accounting *statev1.TurnAccounting) (*statev1.TurnAccounting, error) {
 	return accounting, nil
 }
-func (emptyTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting, error) {
+func (emptyTurnAccountingStore) List(string) ([]*statev1.TurnAccounting, error) {
 	return nil, nil
 }
 
 type replayTurnAccountingStore struct {
-	accountings []*frontendv1.TurnAccounting
+	accountings []*statev1.TurnAccounting
 	err         error
 }
 
 type fakeHistoricalUsageStore struct {
 	inserted bool
 	err      error
-	records  []*frontendv1.TokenUtilization
+	records  []*statev1.TokenUtilization
 }
 
-func (s *fakeHistoricalUsageStore) RecordHistorical(record *frontendv1.TokenUtilization) (bool, error) {
+func (s *fakeHistoricalUsageStore) RecordHistorical(record *statev1.TokenUtilization) (bool, error) {
 	if s.err != nil {
 		return false, s.err
 	}
-	s.records = append(s.records, proto.Clone(record).(*frontendv1.TokenUtilization))
+	s.records = append(s.records, proto.Clone(record).(*statev1.TokenUtilization))
 	return s.inserted, nil
 }
 
-func (s replayTurnAccountingStore) Record(_ string, accounting *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error) {
+func (s replayTurnAccountingStore) Record(_ string, accounting *statev1.TurnAccounting) (*statev1.TurnAccounting, error) {
 	return accounting, s.err
 }
-func (s replayTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting, error) {
+func (s replayTurnAccountingStore) List(string) ([]*statev1.TurnAccounting, error) {
 	return s.accountings, s.err
 }
 
@@ -308,7 +308,7 @@ func TestPerContentBlockDuplicatesDoNotConflictAfterCorrection(t *testing.T) {
 }
 
 func TestReconcileTokenUsageNamesEveryResponseInStableOrderWithoutResult(t *testing.T) {
-	records := []*frontendv1.TokenUtilization{
+	records := []*statev1.TokenUtilization{
 		{ApiMessageId: "message-b"},
 		{ApiMessageId: "message-c"},
 		{ApiMessageId: "message-a"},
@@ -791,7 +791,7 @@ func TestTokenUtilizationFromEventMapsSubagentLineageExactly(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := record.GetSubagent()
-	want := &frontendv1.TokenUtilizationSubagent{AgentId: "agent", ParentToolUseId: "tool", ParentAgentId: "parent", SubagentType: "research", TaskDescription: "investigate"}
+	want := &statev1.TokenUtilizationSubagent{AgentId: "agent", ParentToolUseId: "tool", ParentAgentId: "parent", SubagentType: "research", TaskDescription: "investigate"}
 	if !proto.Equal(got, want) {
 		t.Fatalf("subagent = %v, want %v", got, want)
 	}
@@ -1354,8 +1354,8 @@ func TestEvidenceFingerprintSettlement(t *testing.T) {
 }
 
 func TestHydratePersistedAccountingFeedsBothReplayConsumers(t *testing.T) {
-	want := &frontendv1.TurnAccounting{TurnId: "turn", Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
-	m := &Manager{cfg: Config{TurnAccountings: replayTurnAccountingStore{accountings: []*frontendv1.TurnAccounting{want}}}, logf: t.Logf}
+	want := &statev1.TurnAccounting{TurnId: "turn", Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
+	m := &Manager{cfg: Config{TurnAccountings: replayTurnAccountingStore{accountings: []*statev1.TurnAccounting{want}}}, logf: t.Logf}
 	for _, cons := range []*consumer{
 		newConsumer("ws", "session", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil),
 		newConsumer("ws", "session", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil),
@@ -1576,8 +1576,8 @@ func TestReplayOnlyUnexpectedQueryDegradedStateSurfacesOnce(t *testing.T) {
 func TestDurableReplayAttachesByteEquivalentPersistedAccounting(t *testing.T) {
 	push := &fakePusher{}
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
-	wantUsage := &frontendv1.TokenUtilization{ApiMessageId: "m", Usage: &frontendv1.VendorTokenUsage{InputTokens: 7}}
-	want := &frontendv1.TurnAccounting{TurnId: "t", QueryInstanceId: "q", Responses: []*frontendv1.TokenUtilization{wantUsage}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	wantUsage := &statev1.TokenUtilization{ApiMessageId: "m", Usage: &statev1.VendorTokenUsage{InputTokens: 7}}
+	want := &statev1.TurnAccounting{TurnId: "t", QueryInstanceId: "q", Responses: []*statev1.TokenUtilization{wantUsage}, Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	c.replayedAccounting["t"] = want
 	c.replayedResponses["m"] = wantUsage
 	assistant := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Uuid: "assistant-record", Message: &datav1.ApiAssistantMessage{Id: "m", Usage: &datav1.ApiUsage{InputTokens: 7}, Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hello"}}}}}}}})
@@ -1609,9 +1609,9 @@ func TestDurableReplayAttachesByteEquivalentPersistedAccounting(t *testing.T) {
 func TestHistoricalConversationNeverFallsBackToLiveReducerAccounting(t *testing.T) {
 	push := &fakePusher{}
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
-	liveUsage := &frontendv1.TokenUtilization{ApiMessageId: "m", Usage: &frontendv1.VendorTokenUsage{InputTokens: 99}}
+	liveUsage := &statev1.TokenUtilization{ApiMessageId: "m", Usage: &statev1.VendorTokenUsage{InputTokens: 99}}
 	c.accounting.activeTurnID = "live-turn"
-	c.accounting.turns["live-turn"] = &accountingTurn{responses: []*frontendv1.TokenUtilization{liveUsage}}
+	c.accounting.turns["live-turn"] = &accountingTurn{responses: []*statev1.TokenUtilization{liveUsage}}
 	ev := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Uuid: "assistant-record", Message: &datav1.ApiAssistantMessage{Id: "m", Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hello"}}}}}}}})
 
 	c.pushConversation(ev, false)
@@ -2058,13 +2058,13 @@ func accountingVendorEvent(t *testing.T, m *datav1.ClaudeStreamMessage) *corev1.
 // refuses a divergent replay, while still serving the settlement it already
 // holds. It is the fake shape of the live failure: the row exists, and only
 // the attempt to overwrite it fails.
-type divergentTurnAccountingStore struct{ persisted []*frontendv1.TurnAccounting }
+type divergentTurnAccountingStore struct{ persisted []*statev1.TurnAccounting }
 
-func (s divergentTurnAccountingStore) Record(string, *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error) {
+func (s divergentTurnAccountingStore) Record(string, *statev1.TurnAccounting) (*statev1.TurnAccounting, error) {
 	return nil, errors.New(`statedb: divergent replay for turn accounting "t"`)
 }
 
-func (s divergentTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting, error) {
+func (s divergentTurnAccountingStore) List(string) ([]*statev1.TurnAccounting, error) {
 	return s.persisted, nil
 }
 
@@ -2078,15 +2078,15 @@ func (s divergentTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting
 // that actually observed the turn, so it is what the turn is served.
 func TestDivergentTerminalSettlementServesThePersistedAccounting(t *testing.T) {
 	// Arrange.
-	persisted := &frontendv1.TurnAccounting{
+	persisted := &statev1.TurnAccounting{
 		TurnId:          "t",
 		QueryInstanceId: "retired-query",
-		Responses:       []*frontendv1.TokenUtilization{{ApiMessageId: "m"}},
-		Verdict:         &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+		Responses:       []*statev1.TokenUtilization{{ApiMessageId: "m"}},
+		Verdict:         &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}},
 	}
 	push := &fakePusher{}
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
-	c.accountingStore = divergentTurnAccountingStore{persisted: []*frontendv1.TurnAccounting{persisted}}
+	c.accountingStore = divergentTurnAccountingStore{persisted: []*statev1.TurnAccounting{persisted}}
 	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -2102,7 +2102,7 @@ func TestDivergentTerminalSettlementServesThePersistedAccounting(t *testing.T) {
 		t.Fatalf("Apply error = %v, want the turn boundary accepted", err)
 	}
 	c.mu.Lock()
-	served := make([]*frontendv1.TurnAccounting, 0, len(c.completedTerminalBySeq))
+	served := make([]*statev1.TurnAccounting, 0, len(c.completedTerminalBySeq))
 	for _, accounting := range c.completedTerminalBySeq {
 		served = append(served, accounting)
 	}
@@ -2117,10 +2117,10 @@ func TestDivergentTerminalSettlementServesThePersistedAccounting(t *testing.T) {
 // that serves nothing strands the answer with no completion border.
 func TestDivergentTerminalSettlementReleasesTheHeldTerminalResult(t *testing.T) {
 	// Arrange.
-	persisted := &frontendv1.TurnAccounting{TurnId: "t", Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	persisted := &statev1.TurnAccounting{TurnId: "t", Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	push := &fakePusher{}
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
-	c.accountingStore = divergentTurnAccountingStore{persisted: []*frontendv1.TurnAccounting{persisted}}
+	c.accountingStore = divergentTurnAccountingStore{persisted: []*statev1.TurnAccounting{persisted}}
 	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -2144,10 +2144,10 @@ func TestDivergentTerminalSettlementReleasesTheHeldTerminalResult(t *testing.T) 
 // must survive the degradation that hides it from the conversation.
 func TestDivergentTerminalSettlementStillLogsTheRefusalAndTheSubstitution(t *testing.T) {
 	// Arrange.
-	persisted := &frontendv1.TurnAccounting{TurnId: "t", Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	persisted := &statev1.TurnAccounting{TurnId: "t", Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	var logs []string
 	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
-	c.accountingStore = divergentTurnAccountingStore{persisted: []*frontendv1.TurnAccounting{persisted}}
+	c.accountingStore = divergentTurnAccountingStore{persisted: []*statev1.TurnAccounting{persisted}}
 	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -2223,7 +2223,7 @@ func TestFailedTerminalSettlementWithoutAPersistedRowKeepsReducerState(t *testin
 // main-agent usage absorbs extraUsage so the only compare that can differ is
 // the per-model one under test; the result plane names ONLY "model" in
 // model_usage, exactly as the vendor does for a model it never called.
-func resolveSyntheticReconciliationTurn(t *testing.T, logf dlog.Logf, extraModel string, extraUsage *datav1.ApiUsage) *frontendv1.TurnAccounting {
+func resolveSyntheticReconciliationTurn(t *testing.T, logf dlog.Logf, extraModel string, extraUsage *datav1.ApiUsage) *statev1.TurnAccounting {
 	t.Helper()
 	r := newTurnAccountingReducer(logf)
 	r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
@@ -2247,7 +2247,7 @@ func resolveSyntheticReconciliationTurn(t *testing.T, logf dlog.Logf, extraModel
 	return r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
 }
 
-func ledgerMismatchPaths(accounting *frontendv1.TurnAccounting) []string {
+func ledgerMismatchPaths(accounting *statev1.TurnAccounting) []string {
 	for _, problem := range accounting.GetInvalid().GetProblems() {
 		if mismatch := problem.GetTokenLedgerMismatch(); mismatch != nil {
 			return mismatch.GetDifferingFieldPaths()

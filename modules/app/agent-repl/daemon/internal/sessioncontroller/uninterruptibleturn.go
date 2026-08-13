@@ -3,7 +3,7 @@ package sessioncontroller
 import (
 	"fmt"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/errclass"
 )

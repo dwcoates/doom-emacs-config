@@ -1,7 +1,7 @@
 package frontend
 
 import (
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // Scope restricts a single frontend connection to the frames about ONE session

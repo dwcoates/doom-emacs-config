@@ -20,16 +20,18 @@ import (
 	"fmt"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 )
 
 // FromResultUsage converts one terminal result's vendor usage block.
-func FromResultUsage(u *datav1.Usage) (*frontendv1.TokenUsage, error) {
+func FromResultUsage(u *datav1.Usage) (*conversationv1.TokenUsage, error) {
 	return fromCounters("result usage", u.GetInputTokens(), u.GetCacheCreationInputTokens(), u.GetCacheReadInputTokens(), u.GetOutputTokens())
 }
 
 // FromAPIUsage converts one assistant response's vendor usage block.
-func FromAPIUsage(u *datav1.ApiUsage) (*frontendv1.TokenUsage, error) {
+func FromAPIUsage(u *datav1.ApiUsage) (*conversationv1.TokenUsage, error) {
 	return fromCounters("api usage", u.GetInputTokens(), u.GetCacheCreationInputTokens(), u.GetCacheReadInputTokens(), u.GetOutputTokens())
 }
 
@@ -37,12 +39,12 @@ func FromAPIUsage(u *datav1.ApiUsage) (*frontendv1.TokenUsage, error) {
 // holds. This is the READ boundary named in the canonical TokenUsage contract:
 // persistence keeps the vendor shape, and the economics are produced here from
 // it rather than stored beside it.
-func FromVendorUsage(u *frontendv1.VendorTokenUsage) (*frontendv1.TokenUsage, error) {
+func FromVendorUsage(u *statev1.VendorTokenUsage) (*conversationv1.TokenUsage, error) {
 	return fromCounters("vendor token usage", u.GetInputTokens(), u.GetCacheCreationInputTokens(), u.GetCacheReadInputTokens(), u.GetOutputTokens())
 }
 
 // FromTotals converts one cumulative vendor total.
-func FromTotals(t *frontendv1.TokenUsageTotals) (*frontendv1.TokenUsage, error) {
+func FromTotals(t *statev1.TokenUsageTotals) (*conversationv1.TokenUsage, error) {
 	return fromCounters("token usage totals", t.GetInputTokens(), t.GetCacheCreationInputTokens(), t.GetCacheReadInputTokens(), t.GetOutputTokens())
 }
 
@@ -59,7 +61,7 @@ func FromTotals(t *frontendv1.TokenUsageTotals) (*frontendv1.TokenUsage, error) 
 // astronomically expensive turn reported to the tripwire, the hibernation
 // policy, and the footer alike. The vendor never sends one; if it ever does,
 // the caller is told rather than handed a fabricated figure.
-func fromCounters(source string, input, cacheCreation, cacheRead, output int64) (*frontendv1.TokenUsage, error) {
+func fromCounters(source string, input, cacheCreation, cacheRead, output int64) (*conversationv1.TokenUsage, error) {
 	for _, counter := range []struct {
 		name  string
 		value int64
@@ -73,9 +75,9 @@ func fromCounters(source string, input, cacheCreation, cacheRead, output int64) 
 			return nil, fmt.Errorf("tokenusage: %s reports negative %s=%d", source, counter.name, counter.value)
 		}
 	}
-	return &frontendv1.TokenUsage{
-		InputHits:    &frontendv1.TokenCacheHits{Read: uint64(cacheRead)},
-		InputMisses:  &frontendv1.TokenCacheMisses{Written: uint64(cacheCreation), Unwritten: uint64(input)},
+	return &conversationv1.TokenUsage{
+		InputHits:    &conversationv1.TokenCacheHits{Read: uint64(cacheRead)},
+		InputMisses:  &conversationv1.TokenCacheMisses{Written: uint64(cacheCreation), Unwritten: uint64(input)},
 		OutputTokens: uint64(output),
 	}, nil
 }
@@ -93,7 +95,7 @@ func fromCounters(source string, input, cacheCreation, cacheRead, output int64) 
 // The cache read is EXCLUDED on purpose: it is the standing prefix presented
 // again, which is precisely the cost the keep-alive exists to keep paying
 // instead of a re-ingest.
-func ExpensiveInput(u *frontendv1.TokenUsage) int64 {
+func ExpensiveInput(u *conversationv1.TokenUsage) int64 {
 	return int64(u.GetInputMisses().GetWritten() + u.GetInputMisses().GetUnwritten())
 }
 
@@ -105,7 +107,7 @@ func ExpensiveInput(u *frontendv1.TokenUsage) int64 {
 // to be worth compacting" against. Cache reads are INCLUDED here and excluded
 // from ExpensiveInput, and the difference is deliberate: a cached token is cheap
 // NOW but is still a token a cold revival would re-ingest at full price later.
-func ContextInput(u *frontendv1.TokenUsage) int64 {
+func ContextInput(u *conversationv1.TokenUsage) int64 {
 	return int64(u.GetInputHits().GetRead()) + ExpensiveInput(u)
 }
 
@@ -116,7 +118,7 @@ func ContextInput(u *frontendv1.TokenUsage) int64 {
 // asked to believe that a compaction read the conversation cold needs to see
 // that the cache read was near zero while the written miss was enormous; a bare
 // "uncached_input_tokens=1500000" is the conclusion without the evidence.
-func Breakdown(u *frontendv1.TokenUsage) string {
+func Breakdown(u *conversationv1.TokenUsage) string {
 	return fmt.Sprintf("input_tokens=%d cache_creation_input_tokens=%d cache_read_input_tokens=%d uncached_input_tokens=%d context_input_tokens=%d",
 		u.GetInputMisses().GetUnwritten(), u.GetInputMisses().GetWritten(), u.GetInputHits().GetRead(),
 		ExpensiveInput(u), ContextInput(u))
@@ -141,7 +143,7 @@ type Rates struct {
 // DeriveRates returns the partition, and whether there was any prompt input to
 // partition at all. A zero total has no rates rather than three zeroes or three
 // NaNs, and the caller is told which it got.
-func DeriveRates(u *frontendv1.TokenUsage) (Rates, bool) {
+func DeriveRates(u *conversationv1.TokenUsage) (Rates, bool) {
 	total := ContextInput(u)
 	if total == 0 {
 		return Rates{}, false
@@ -165,7 +167,7 @@ func DeriveRates(u *frontendv1.TokenUsage) (Rates, bool) {
 // A nil utilization yields a nil stamp: the response carried no usage record,
 // and the contract says the stamp is ABSENT in that case rather than fabricated
 // as zeros.
-func ResponseStamp(u *frontendv1.TokenUtilization) (*frontendv1.ResponseUsageStamp, error) {
+func ResponseStamp(u *statev1.TokenUtilization) (*frontendv1.ResponseUsageStamp, error) {
 	if u == nil {
 		return nil, nil
 	}

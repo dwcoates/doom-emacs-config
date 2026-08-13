@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -19,8 +19,8 @@ import (
 
 // correctionUsage is one response's final vendor usage, distinguishable by its
 // output count so a test can prove WHICH figure a hold released against.
-func correctionUsage(outputTokens int64) *frontendv1.VendorTokenUsage {
-	return &frontendv1.VendorTokenUsage{OutputTokens: outputTokens}
+func correctionUsage(outputTokens int64) *statev1.VendorTokenUsage {
+	return &statev1.VendorTokenUsage{OutputTokens: outputTokens}
 }
 
 // releaseRecorder captures every enrichment release, so ordering assertions are
@@ -262,7 +262,7 @@ func TestApplyToPatchesASettledRecordsResponseUsage(t *testing.T) {
 	// Arrange.
 	ledger := newAccountingCorrections(t.Logf)
 	ledger.Record("msg_1", correctionUsage(720))
-	settled := &frontendv1.TurnAccounting{TurnId: "turn_1", Responses: []*frontendv1.TokenUtilization{
+	settled := &statev1.TurnAccounting{TurnId: "turn_1", Responses: []*statev1.TokenUtilization{
 		{ApiMessageId: "msg_1", Usage: correctionUsage(563)},
 	}}
 
@@ -281,7 +281,7 @@ func TestApplyToReportsNoChangeWhenTheRecordAlreadyAgrees(t *testing.T) {
 	// Arrange.
 	ledger := newAccountingCorrections(t.Logf)
 	ledger.Record("msg_1", correctionUsage(720))
-	settled := &frontendv1.TurnAccounting{TurnId: "turn_1", Responses: []*frontendv1.TokenUtilization{
+	settled := &statev1.TurnAccounting{TurnId: "turn_1", Responses: []*statev1.TokenUtilization{
 		{ApiMessageId: "msg_1", Usage: correctionUsage(720)},
 	}}
 

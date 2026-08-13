@@ -3,7 +3,7 @@ package rostertest
 import (
 	"fmt"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // FleetRosterWorkspaces is the fleet size a real editor startup publishes, and

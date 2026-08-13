@@ -3,7 +3,7 @@ package ssm
 import (
 	"errors"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // mergepromptgate.go — WHO MAY TAKE THE ACCEPTED-PROMPT EDGE OVER A MERGE STATE.

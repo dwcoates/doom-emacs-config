@@ -23,7 +23,9 @@ package frontend
 import (
 	"fmt"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/tokenusage"
 )
@@ -46,7 +48,7 @@ const shareNotApplicable int32 = -1
 // Falling back to a local partition of the vendor buckets here would silently
 // install a second answer to what the session paid, on exactly the frames where
 // the first one failed.
-func TokenBreakdownView(workspace, fence string, usage *frontendv1.SessionTokenUtilization) (*frontendv1.TokenBreakdownView, error) {
+func TokenBreakdownView(workspace, fence string, usage *statev1.SessionTokenUtilization) (*frontendv1.TokenBreakdownView, error) {
 	if workspace == "" {
 		return nil, fmt.Errorf("frontend: token breakdown view requires a workspace")
 	}
@@ -89,7 +91,7 @@ func TokenBreakdownView(workspace, fence string, usage *frontendv1.SessionTokenU
 // subagentLabel names a subagent section by whichever stable identifier the
 // SDK gave it. An invocation with neither is labeled as unidentified rather
 // than as an empty string, so a section can never render with no heading.
-func subagentLabel(agent *frontendv1.TokenUtilizationSubagent) string {
+func subagentLabel(agent *statev1.TokenUtilizationSubagent) string {
 	if id := agent.GetAgentId(); id != "" {
 		return id
 	}
@@ -113,7 +115,7 @@ func subagentLabel(agent *frontendv1.TokenUtilizationSubagent) string {
 // The bucket row is named "fresh input", never "uncached": cache WRITES are
 // uncached too, and calling the unwritten bucket that put the cheap/expensive
 // split one row above where it actually is.
-func usageRows(u *frontendv1.TokenUsage) []*frontendv1.TokenBreakdownRow {
+func usageRows(u *conversationv1.TokenUsage) []*frontendv1.TokenBreakdownRow {
 	read := int64(u.GetInputHits().GetRead())
 	written := int64(u.GetInputMisses().GetWritten())
 	unwritten := int64(u.GetInputMisses().GetUnwritten())

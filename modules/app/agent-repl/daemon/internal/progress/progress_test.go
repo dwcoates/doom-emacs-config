@@ -7,7 +7,8 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
@@ -1662,17 +1663,17 @@ func TestNonProgressPayloadIsQuiet(t *testing.T) {
 
 // settledTurn is one reconciled turn's accounting, enough for the cell's
 // complete arm.
-func settledTurn(turnID string, durationMs int64) *frontendv1.TurnAccounting {
-	return &frontendv1.TurnAccounting{
+func settledTurn(turnID string, durationMs int64) *statev1.TurnAccounting {
+	return &statev1.TurnAccounting{
 		TurnId:       turnID,
 		Runtime:      &corev1.QueryRuntimeIdentity{},
-		Timing:       &frontendv1.TurnAccountingTiming{PromptToResultMs: durationMs},
+		Timing:       &statev1.TurnAccountingTiming{PromptToResultMs: durationMs},
 		UsageAtStart: availableUsage(1),
 		UsageAtEnd:   availableUsage(2),
-		Reconciliation: &frontendv1.TokenUsageReconciliation{
-			ResponseAllAgents: &frontendv1.TokenUsageTotals{OutputTokens: 100},
+		Reconciliation: &statev1.TokenUsageReconciliation{
+			ResponseAllAgents: &statev1.TokenUsageTotals{OutputTokens: 100},
 		},
-		Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+		Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}},
 	}
 }
 
