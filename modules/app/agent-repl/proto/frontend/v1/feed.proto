@@ -3,8 +3,8 @@
 //
 // Message is feed packaging — identity, lineage, ordering, provenance and
 // resolution stamps — wrapped around a payload. Agent-produced payloads are a
-// single AgentEmission arm (agent-emission.proto); everything the agent did
-// not emit keeps an arm of its own.
+// single AgentEmission arm; everything the agent did not emit keeps an arm of
+// its own.
 //
 // This file also carries every component rendered IN the feed: the agent
 // emission vocabulary, the agent response, the tool card, the slash-command
@@ -154,7 +154,7 @@ message MessageEphemeral {}
 // it, and the figures resolved against it. The payload is the message itself.
 //
 // Agent-produced payloads are ONE arm, AgentEmission, which is also the
-// vocabulary a detached agent's output arrives in (detached-work.proto).
+// vocabulary a detached agent's output arrives in (DetachedWorkAgentUpdate).
 // Everything the agent did not emit — the user's own prompt, the daemon's
 // failure cards, session-level events — keeps an arm of its own, because
 // folding those into AgentEmission would make that message's name untrue.
@@ -472,9 +472,9 @@ message SessionInitRow {
 // timestamp, no ordering and no provenance, because it is used in two places
 // that stamp those differently —
 //
-//   1. the top-level feed, where Message (feed.proto) wraps it with
+//   1. the top-level feed, where Message wraps it with
 //      the session's own identity/ordering/provenance stamps, and
-//   2. detached work, where DetachedWorkAgentUpdate (detached-work.proto)
+//   2. detached work, where DetachedWorkAgentUpdate
 //      wraps it with the target message's id and that message's fold accounting.
 //
 // The same message serves both because a detached agent is not a second,
@@ -485,32 +485,41 @@ message SessionInitRow {
 
 // One thing an agent produced.
 //
-// The arm payloads live in the component files that draw them
-// (agent-response.proto, tool-call.proto, slash-menu.proto) rather than
-// here, so a component's wire shape and its picture stay in one file.
+// MOST ARMS ARE conversation.v1 MESSAGES IMPORTED WHOLE. This surface no longer
+// keeps second spellings of what the agent said: a response carries
+// conversation.v1.AgentSaid verbatim, a tool return carries
+// conversation.v1.ToolReturned, a skill body carries
+// conversation.v1.SkillBodyResolved. Only the arms that must carry a
+// DAEMON-RESOLVED fact alongside the record — AgentResponse's usage stamp and
+// detachment verdicts, AgentToolOutcome's — are frontend types at all, and each
+// of those wraps the conversation record rather than restating it.
+//
+// It used to be the other way round: one assistant response was EXPLODED into a
+// response, a thinking emission and a tool-call emission so that each fragment
+// could be stamped separately. That flattening was what forced a frontend type
+// to exist for every fragment, and it was losing is_error, stop_reason and model
+// while re-deriving block position by hand. A response now arrives whole.
 message AgentEmission {
   oneof emission {
-    // The assistant's spoken turn, with the resolved usage figures it is
+    // The assistant's spoken turn — prose, reasoning and tool calls in the
+    // order it produced them — with the resolved figures and verdicts it is
     // stamped with.
     AgentResponse response = 1;
-    // A reasoning block: the collapsed reasoning that precedes a response.
-    // Carried as its own emission rather than inside the response body — see
-    // the exclusivity invariant on AgentResponse.body, which is what keeps
-    // the two from being duplicate copies of the same reasoning.
-    AgentThinking thinking = 2;
-    // A tool invocation: the tool card's header.
-    AgentToolCall tool_call = 3;
-    // A tool's raw return value: the tool card's body.
-    AgentToolResult tool_result = 4;
+    // A tool's return value, the conversation record whole. It carries
+    // `is_error`, so a failed tool is distinguishable from a successful one:
+    // the frontend type this replaced wrapped only the result content and had
+    // no counterpart for that fact at all.
+    conversation.v1.ToolReturned tool_result = 2;
     // A tool's TYPED outcome, and the arm that carries subagent and task chip
     // activity: agentshim.data.v1.ToolUseResult's own oneof holds
     // AgentAsyncLaunch, AgentResult, TaskOutputResult, TaskStopResult and
     // WorkflowLaunchResult, which are the launches and terminations a chip
     // draws. The typed outcome IS the chip, so there is no separate chip arm.
-    AgentToolOutcome tool_outcome = 5;
-    // A skill invocation's SKILL.md body, merged into the Skill call's card by
-    // tool_use_id (see the merge contract on SkillBodyItem itself).
-    SkillBodyItem skill_body = 6;
+    AgentToolOutcome tool_outcome = 3;
+    // A skill invocation's SKILL.md body, the conversation record whole. It is
+    // addressed by the skill message's own message_id, which is what makes the
+    // old tool_use_id correlation unnecessary.
+    conversation.v1.SkillBodyResolved skill_body = 4;
     // The turn's terminal result record. It is agent output rather than feed
     // bookkeeping: a detached agent's transcript ends with exactly this
     // record, and it is where a fold learns that the agent finished and
@@ -519,53 +528,92 @@ message AgentEmission {
     // A turn's ACCOUNTING VERDICT is a different thing and is not here: it is
     // the session's ledger rather than the agent's utterance, and it reaches a
     // frontend resolved, on FooterAccountingCell.
-    conversation.v1.DetachedWorkEnded turn_result = 7;
+    conversation.v1.DetachedWorkEnded turn_result = 5;
   }
 }
 
 // ==========================================================================
-// The assistant's spoken response and the collapsed
-// reasoning block that precedes it.
+// The assistant's spoken response, carried whole.
 // ==========================================================================
 
-// The assistant's spoken turn: one response, with the figures it is stamped
-// with.
+// The assistant's spoken turn: the conversation record itself, plus the facts
+// only the daemon can resolve about it.
+//
+// THE RECORD ARRIVES WHOLE AND UNMUTATED. Prose, reasoning and tool calls sit
+// in `said.content` in the order the agent produced them, and nothing is
+// stripped out of it on any path. There is exactly one copy of the agent's
+// words on this surface, so there is nothing for an exclusivity rule to guard:
+// the rule this message used to carry existed only because reasoning was lifted
+// out into a second emission, and it is gone with the lifting.
+//
+// The daemon's resolved facts ride ALONGSIDE the record, each keyed by a value
+// the content already carries, so a stamp never has to be merged INTO the
+// evidence it describes.
 message AgentResponse {
-  // The assistant API message, verbatim durable evidence, with ONE carve-out
-  // stated below.
+  // The response, exactly as the conversation surface states it: content
+  // blocks in order, the usage the response reported, the model that produced
+  // it, and why it stopped. Verbatim durable evidence.
   //
-  // EXCLUSIVITY INVARIANT: thinking blocks are NOT carried here. The daemon
-  // emits them as their own AgentThinking emissions, immediately before this
-  // one, and strips them from `content`. Both halves of the rule are load
-  // bearing — without the strip, a frontend that renders both emissions draws
-  // the agent's reasoning twice; without the separate emission, a frontend
-  // must reach into a durable message's content array to find the reasoning.
-  //
-  // The carve-out applies UNIFORMLY: top-level feed and detached-agent fold
-  // alike. There is no path on which this field carries thinking.
-  conversation.v1.AgentContent body = 1;
+  // A frontend WALKS `said.content` and draws each block. That is rendering,
+  // not deriving — a block's position IS its index in this array, so nothing
+  // has to be re-stated for a client to know where a reasoning block or a tool
+  // call sat.
+  conversation.v1.AgentSaid said = 1;
   // The resolved figures this response is stamped with. Absent when the
   // response carried no usage record — never fabricated as zeros.
+  //
+  // It is a SEPARATE stamp from `said.usage` because these are the daemon's
+  // canonical derivation (internal/tokenusage), which the client renders
+  // verbatim, while `said.usage` is what the response itself reported.
   ResponseUsageStamp usage_stamp = 2;
+  // The daemon's DETACHMENT VERDICTS for the tool calls in `said.content`.
+  //
+  // EMPTY when no call in this response detached anything, and an entry is
+  // present ONLY for calls that DID detach. This list is therefore not a
+  // census of the response's tool calls, and a missing entry is never a claim
+  // that a call does not exist — the calls themselves are in `said.content`,
+  // which is the only place that answers what the agent called. A call whose
+  // detachment the daemon cannot classify is a daemon fault, surfaced as a
+  // failure card, never silently omitted here and rendered as synchronous.
+  repeated ToolCallVerdict verdicts = 3;
 }
 
-// The agent's reasoning, emitted collapsed. See the exclusivity invariant on
-// AgentResponse.body for why reasoning is its own emission rather than a
-// content block of the response it precedes.
-message AgentThinking {
-  // The reasoning block, verbatim durable evidence (text + signature).
-  conversation.v1.ThinkingBlock body = 1;
-  // The API message this block was stripped from, verbatim. A live preview is
-  // keyed by the message id its typing deltas carried; this is the resolved
-  // fact that lets the settled block replace its preview instead of appending
-  // beside it. The daemon states it because the daemon did the stripping — a
-  // client that inferred it would be matching "the earliest same-kind
-  // preview", which is exactly the derivation this contract removes.
-  string api_message_id = 2;
-  // The block's position in that message's original content array, so two
-  // reasoning blocks from one message settle onto their own previews rather
-  // than both onto the first.
-  int32 block_index = 3;
+// THE DAEMON'S VERDICT THAT ONE TOOL CALL DETACHED WORK, addressed to a call
+// inside the response it accompanies.
+//
+// It exists because the verdict is DAEMON-RESOLVED and the call is not. The
+// call itself is a conversation.v1.ToolCallBlock — durable evidence the
+// producer wrote, which cannot carry a fact the daemon decided later — so once
+// the response stopped being exploded into per-call emissions, the verdict had
+// nowhere left to sit. This is that place, and it is the only new type this
+// consolidation adds.
+//
+// The daemon owns the classification and publishes only its answer, so that
+// frontends MATCH an id rather than deriving one. Deriving it is not
+// reproducible across frontends — the evidence is a mix of structured tool
+// metadata, completion notifications and free-text result prose — and two
+// frontends deriving it independently would eventually disagree about which
+// message an update belongs to.
+message ToolCallVerdict {
+  // WHICH CALL this verdict is about: the tool_use id of a
+  // conversation.v1.ToolCallBlock inside the accompanying `said.content`. A
+  // verdict naming an id that is not in that array is a daemon fault, not a
+  // renderable record.
+  string tool_use_id = 1;
+  // THE WORK THAT DETACHED: the uuid of the Message that work IS (payload arm
+  // `detached_work`). Never empty — a verdict exists only because something
+  // detached, so an empty value here is malformed rather than a "detached
+  // nothing" claim.
+  //
+  // A POINTER IN ONE ID SPACE, NOT A BRIDGE BETWEEN TWO. It used to translate a
+  // message id into a separate bubble id; both ends are message ids now, so it
+  // states which message this call produced and nothing has to be reconciled.
+  //
+  // PROVENANCE, NEVER CONTAINMENT. The named message is a feed row in its own
+  // right, and a frontend that read this as "that message lives inside this
+  // card" would nest an unbounded thing inside a bounded one. Containment is
+  // MessageLineage's alone.
+  string spawned_message_id = 2;
 }
 
 // The per-response usage stamp carried by one assistant response.
@@ -585,50 +633,16 @@ message ResponseUsageStamp {
 }
 
 // ==========================================================================
-// The tool card: the call, its raw result, its typed
-// outcome, and the async task catalog its dispatched-agent rows render from.
+// The tool card's typed outcome, and the async task catalog its
+// dispatched-agent rows render from.
 //
-// The card is also where the daemon publishes its DETACHMENT CLASSIFICATION
-// verdict: whether a call detached work, and which MESSAGE that work is.
+// THE CALL AND ITS RESULT ARE NOT HERE. The call is a
+// conversation.v1.ToolCallBlock inside AgentResponse.said.content, and the
+// result is conversation.v1.ToolReturned on its own emission arm; neither has a
+// frontend spelling any more. What remains on this surface is what the daemon
+// RESOLVED about the call — its DETACHMENT CLASSIFICATION, which is published
+// as ToolCallVerdict from the call side and restated here at the outcome.
 // ==========================================================================
-
-// The tool card's header: one tool invocation.
-message AgentToolCall {
-  // The call the agent made, verbatim durable evidence.
-  conversation.v1.ToolCallBlock call = 1;
-  // THE DETACHMENT VERDICT. Non-empty exactly when this call detached work, and
-  // then equal to the uuid of the Message that work IS (payload arm
-  // `detached_work`).
-  //
-  // A POINTER IN ONE ID SPACE, NOT A BRIDGE BETWEEN TWO. It used to translate a
-  // message id into a separate bubble id; now both ends are message ids, so it
-  // states which message this call produced and nothing has to be reconciled.
-  //
-  // PROVENANCE, NEVER CONTAINMENT. The named message is a feed row in its own
-  // right, and a frontend that read this as "that message lives inside this
-  // card" would nest an unbounded thing inside a bounded one. Containment is
-  // MessageLineage's alone (feed.proto).
-  //
-  // The daemon owns the classification and publishes only its answer, so that
-  // frontends MATCH an id rather than deriving one. Deriving it is not
-  // reproducible across frontends — the evidence is a mix of structured tool
-  // metadata, completion notifications and free-text result prose — and two
-  // frontends deriving it independently would eventually disagree about which
-  // message an update belongs to.
-  //
-  // Empty means "this call detached nothing", and that is the ONLY reading of
-  // empty. A call whose detachment the daemon cannot classify is a daemon
-  // fault, surfaced as a failure card, never silently rendered as a
-  // synchronous call.
-  string spawned_message_id = 2;
-}
-
-// The tool card's body: a tool's raw return value.
-message AgentToolResult {
-  // The result block, verbatim durable evidence. Carries its own
-  // tool_use_id, which is the card's reconciliation identity.
-  conversation.v1.ToolResultContent result = 1;
-}
 
 // A tool's TYPED outcome, and the subagent/task chip.
 //
@@ -654,12 +668,20 @@ message AgentToolOutcome {
   // with its tool_result line POSITIONALLY, and a positional association does
   // not survive being pushed as an independent emission.
   string tool_use_id = 3;
-  // THE DETACHMENT VERDICT, same contract as AgentToolCall.spawned_message_id.
-  // It appears on both messages because the structured outcome is where the
-  // detachment becomes knowable, while the call is where a frontend needs the
-  // answer first — the card is drawn before its outcome lands. The two are the
-  // same string whenever both are set; the daemon resolves the id once and
-  // stamps it on both.
+  // THE DETACHMENT VERDICT AS OBSERVED AT THE STRUCTURED OUTCOME: the uuid of
+  // the Message the detached work IS (payload arm `detached_work`), empty when
+  // this outcome detached nothing.
+  //
+  // WHY IT IS STATED HERE AND NOT ONLY ON THE CALL SIDE. The structured outcome
+  // is where the detachment becomes KNOWABLE — it is the record the daemon
+  // classifies from — while ToolCallVerdict, riding the response, is where a
+  // frontend needs the answer FIRST, because the card is drawn before its
+  // outcome lands. The daemon resolves the id once and states it in both
+  // places; they are the same string whenever both are set.
+  //
+  // Same reading of empty as everywhere else on this contract: "this detached
+  // nothing", never "the daemon could not tell". An unclassifiable detachment
+  // is a daemon fault surfaced as a failure card.
   string spawned_message_id = 4;
 }
 
@@ -786,7 +808,7 @@ message TaskCatalog {
 // A command the CLI handled has a transcript record behind it and rides a
 // DURABLE message; a command the daemon answered alone has no record anywhere
 // and rides an EPHEMERAL one. That distinction is stated once, on the carrying
-// Message's `durability` oneof (feed.proto), rather than restated here: a
+// Message's `durability` oneof, rather than restated here: a
 // second copy of it is a second chance for the two to disagree, and the
 // invariant that an ephemeral message is never anyone's parent is enforced
 // where lineage lives, not where the command's name lives.
@@ -820,42 +842,14 @@ message DaemonInterceptedCommandItem {
   SessionCommand command = 1;
 }
 
-// Additive: the launched skill's own SKILL.md body, addressed to the Skill
-// tool card that launched it.
+// A LAUNCHED SKILL'S SKILL.md BODY HAS NO FRONTEND TYPE. It is
+// conversation.v1.SkillBodyResolved, carried whole on AgentEmission.skill_body.
 //
-// WHY THIS IS ITS OWN ARM RATHER THAN A FIELD ON tool_use (12). The daemon
-// never populates arm 12: a tool call rides as a ToolUseBlock INSIDE its
-// carrying assistant_message (see internal/frontend/translate.go), and its
-// result as a tool_result block inside the following user_message. There is
-// therefore no tool item on this wire to hang a body field on, and inventing
-// one would mean emitting a second, half-populated representation of a call
-// the frontend already assembled.
-//
-// WHAT IT CORRESPONDS TO ON DISK. The harness writes a skill's body as a
-// SEPARATE transcript record — type "user", flagged isMeta, whose text is
-// "Base directory for this skill: <dir>" followed by the whole SKILL.md. It
-// is bookkeeping addressed to the model, not a prompt the person typed, so
-// rendering it as a user turn is a defect (it draws a user message nobody
-// wrote). The daemon correlates that record back to the Skill call that
-// caused it and pushes THIS instead; the user record itself reaches no
-// frontend at all.
-//
-// HOW A FRONTEND CONSUMES IT. tool_use_id is the reconciliation identity, and
-// it is deliberately the SAME identity the frontend already files the Skill
-// call under — so this item MERGES INTO the existing card rather than adding
-// one beside it. One invocation is one card, updated in place as the call,
-// the result and the body land, in whatever order they land. Replays are
-// idempotent for the same reason: re-sending it replaces the body it already
-// merged.
-message SkillBodyItem {
-  // The Skill call's tool_use id. Never empty: the daemon emits this item
-  // only once it has resolved the body to a specific call.
-  string tool_use_id = 1;
-  // The SKILL.md body VERBATIM, markdown, including the leading "Base
-  // directory for this skill:" line the harness prepends. A skill IS a
-  // markdown document, so it is carried as markdown and rendered as markdown.
-  string body_markdown = 2;
-}
+// The type that used to sit here correlated a body to its card by tool_use_id.
+// SkillBodyResolved's own comment identifies that as the SUPERSEDED mechanism:
+// the record carries the skill message's own message_id, so the body states
+// which skill it belongs to instead of a reader reconstructing it by walking a
+// chain through the harness's isMeta records.
 
 // ==========================================================================
 // The feed's system-failure card.
@@ -975,7 +969,7 @@ message DetachedWork {
   // THERE IS ONE CONTAINMENT TREE, and it is the message tree. A parent pointer
   // for detached work would be a second tree walking only detached work, which
   // could disagree with the real one. Containment is stated exactly once, on
-  // MessageLineage.parent_message_id (feed.proto).
+  // MessageLineage.parent_message_id.
   //
   // WHAT A PRODUCER OBSERVED IS SPELLED ONCE, WHERE IT WAS OBSERVED. The
   // originating tool call and the label live inside `started`, in the producer's
@@ -1172,20 +1166,14 @@ message DetachedWorkAgentUpdate {
 // rather than co-set fields.
 message DetachedWorkSkillUpdate {
   oneof update {
-    // The skill file's contents, resolved. Replaces the message's `body`
-    // whole; delivered once in the ordinary case.
-    DetachedWorkSkillBodyResolved body = 1;
+    // The skill file's contents, resolved — the conversation record whole.
+    // Replaces the message's body rather than appending; delivered once in the
+    // ordinary case. WHICH message it lands on is stated once, by the
+    // containing DetachedWorkUpdate.message_id.
+    conversation.v1.SkillBodyResolved body = 1;
     // Emissions appended to the window, exactly as a detached agent's.
     DetachedWorkAgentUpdate emissions = 2;
   }
-}
-
-// The resolved skill file contents, whole. A message rather than a bare
-// string so the arm can carry resolution-adjacent facts if the contract ever
-// needs them without renumbering.
-message DetachedWorkSkillBodyResolved {
-  // The contents, verbatim.
-  string contents = 1;
 }
 
 // New steps in a Workflow run's journal.
