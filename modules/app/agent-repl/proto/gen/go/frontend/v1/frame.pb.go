@@ -52,7 +52,6 @@ type FrontendFrame struct {
 	//	*FrontendFrame_WorkspaceGate
 	//	*FrontendFrame_MergeQueueRoster
 	//	*FrontendFrame_RestartPending
-	//	*FrontendFrame_ConversationPage
 	//	*FrontendFrame_TypingCut
 	//	*FrontendFrame_ConversationHistoryPage
 	Frame         isFrontendFrame_Frame `protobuf_oneof:"frame"`
@@ -313,15 +312,6 @@ func (x *FrontendFrame) GetRestartPending() *RestartPendingView {
 	return nil
 }
 
-func (x *FrontendFrame) GetConversationPage() *ConversationPage {
-	if x != nil {
-		if x, ok := x.Frame.(*FrontendFrame_ConversationPage); ok {
-			return x.ConversationPage
-		}
-	}
-	return nil
-}
-
 func (x *FrontendFrame) GetTypingCut() *TypingCut {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_TypingCut); ok {
@@ -469,14 +459,6 @@ type FrontendFrame_RestartPending struct {
 	RestartPending *RestartPendingView `protobuf:"bytes,25,opt,name=restart_pending,json=restartPending,proto3,oneof"`
 }
 
-type FrontendFrame_ConversationPage struct {
-	// ONE page of conversation history, answering a ConversationPageCmd. It is
-	// a push rather than a command response because its messages are feed
-	// content, and the command's ack is early by design — see
-	// conversation-page.proto.
-	ConversationPage *ConversationPage `protobuf:"bytes,26,opt,name=conversation_page,json=conversationPage,proto3,oneof"`
-}
-
 type FrontendFrame_TypingCut struct {
 	// A preview the daemon opened and can no longer retire. Like TypingDelta
 	// it is an EDGE and never snapshot state: a cut describes the end of one
@@ -542,8 +524,6 @@ func (*FrontendFrame_WorkspaceGate) isFrontendFrame_Frame() {}
 func (*FrontendFrame_MergeQueueRoster) isFrontendFrame_Frame() {}
 
 func (*FrontendFrame_RestartPending) isFrontendFrame_Frame() {}
-
-func (*FrontendFrame_ConversationPage) isFrontendFrame_Frame() {}
 
 func (*FrontendFrame_TypingCut) isFrontendFrame_Frame() {}
 
@@ -817,7 +797,6 @@ type FrontendCommand struct {
 	//	*FrontendCommand_EvictMerge
 	//	*FrontendCommand_AnswerMergeDequeue
 	//	*FrontendCommand_CancelDetachedAgents
-	//	*FrontendCommand_ConversationPage
 	//	*FrontendCommand_FirstPage
 	//	*FrontendCommand_NextPage
 	Command       isFrontendCommand_Command `protobuf_oneof:"command"`
@@ -1155,15 +1134,6 @@ func (x *FrontendCommand) GetCancelDetachedAgents() *CancelDetachedAgentsCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetConversationPage() *ConversationPageCmd {
-	if x != nil {
-		if x, ok := x.Command.(*FrontendCommand_ConversationPage); ok {
-			return x.ConversationPage
-		}
-	}
-	return nil
-}
-
 func (x *FrontendCommand) GetFirstPage() *FirstPageCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_FirstPage); ok {
@@ -1310,20 +1280,12 @@ type FrontendCommand_CancelDetachedAgents struct {
 	CancelDetachedAgents *CancelDetachedAgentsCmd `protobuf:"bytes,34,opt,name=cancel_detached_agents,json=cancelDetachedAgents,proto3,oneof"`
 }
 
-type FrontendCommand_ConversationPage struct {
-	// The COLD-OPEN history request, and the load-more that walks backwards
-	// from it. It does not replace `resync` above, which stays the live-page
-	// path — see conversation-page.proto.
-	ConversationPage *ConversationPageCmd `protobuf:"bytes,35,opt,name=conversation_page,json=conversationPage,proto3,oneof"`
-}
-
 type FrontendCommand_FirstPage struct {
 	// The positionless history verbs. `first_page` resets this reader's
 	// daemon-held position to the newest page; `next_page` walks it one page
 	// older and carries NO position of its own, so a reader without an
 	// established one is refused rather than silently served the tail. They do
-	// not replace `resync` above, and they will retire `conversation_page`
-	// once every frontend has moved — see conversation-history.proto.
+	// not replace `resync` above — see conversation-history.proto.
 	FirstPage *FirstPageCmd `protobuf:"bytes,36,opt,name=first_page,json=firstPage,proto3,oneof"`
 }
 
@@ -1392,8 +1354,6 @@ func (*FrontendCommand_EvictMerge) isFrontendCommand_Command() {}
 func (*FrontendCommand_AnswerMergeDequeue) isFrontendCommand_Command() {}
 
 func (*FrontendCommand_CancelDetachedAgents) isFrontendCommand_Command() {}
-
-func (*FrontendCommand_ConversationPage) isFrontendCommand_Command() {}
 
 func (*FrontendCommand_FirstPage) isFrontendCommand_Command() {}
 
@@ -1658,7 +1618,7 @@ var File_frontend_v1_frame_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_frame_proto_rawDesc = "" +
 	"\n" +
-	"\x17frontend/v1/frame.proto\x12\vfrontend.v1\x1a&frontend/v1/conversation-history.proto\x1a#frontend/v1/conversation-page.proto\x1a\x18frontend/v1/errors.proto\x1a\x1efrontend/v1/failure-card.proto\x1a\x16frontend/v1/feed.proto\x1a\x18frontend/v1/footer.proto\x1a\x1efrontend/v1/gate-revival.proto\x1a\x16frontend/v1/host.proto\x1a\x1bfrontend/v1/lifecycle.proto\x1a\x17frontend/v1/merge.proto\x1a!frontend/v1/permission-card.proto\x1a\x1efrontend/v1/prompt-queue.proto\x1a\x19frontend/v1/sidebar.proto\x1a\x17frontend/v1/state.proto\x1a\x1dfrontend/v1/tokens-menu.proto\x1a\x1bfrontend/v1/tool-call.proto\x1a\x18frontend/v1/topbar.proto\"\x8f\x0f\n" +
+	"\x17frontend/v1/frame.proto\x12\vfrontend.v1\x1a&frontend/v1/conversation-history.proto\x1a\x18frontend/v1/errors.proto\x1a\x1efrontend/v1/failure-card.proto\x1a\x16frontend/v1/feed.proto\x1a\x18frontend/v1/footer.proto\x1a\x1efrontend/v1/gate-revival.proto\x1a\x16frontend/v1/host.proto\x1a\x1bfrontend/v1/lifecycle.proto\x1a\x17frontend/v1/merge.proto\x1a!frontend/v1/permission-card.proto\x1a\x1efrontend/v1/prompt-queue.proto\x1a\x19frontend/v1/sidebar.proto\x1a\x17frontend/v1/state.proto\x1a\x1dfrontend/v1/tokens-menu.proto\x1a\x1bfrontend/v1/tool-call.proto\x1a\x18frontend/v1/topbar.proto\"\xda\x0e\n" +
 	"\rFrontendFrame\x128\n" +
 	"\bsnapshot\x18\x01 \x01(\v2\x1a.frontend.v1.StateSnapshotH\x00R\bsnapshot\x12F\n" +
 	"\x0fworkspace_state\x18\x02 \x01(\v2\x1b.frontend.v1.WorkspaceStateH\x00R\x0eworkspaceState\x12=\n" +
@@ -1687,12 +1647,11 @@ const file_frontend_v1_frame_proto_rawDesc = "" +
 	"\x0ftoken_breakdown\x18\x16 \x01(\v2\x1f.frontend.v1.TokenBreakdownViewH\x00R\x0etokenBreakdown\x12G\n" +
 	"\x0eworkspace_gate\x18\x17 \x01(\v2\x1e.frontend.v1.WorkspaceGateViewH\x00R\rworkspaceGate\x12M\n" +
 	"\x12merge_queue_roster\x18\x18 \x01(\v2\x1d.frontend.v1.MergeQueueRosterH\x00R\x10mergeQueueRoster\x12J\n" +
-	"\x0frestart_pending\x18\x19 \x01(\v2\x1f.frontend.v1.RestartPendingViewH\x00R\x0erestartPending\x12L\n" +
-	"\x11conversation_page\x18\x1a \x01(\v2\x1d.frontend.v1.ConversationPageH\x00R\x10conversationPage\x127\n" +
+	"\x0frestart_pending\x18\x19 \x01(\v2\x1f.frontend.v1.RestartPendingViewH\x00R\x0erestartPending\x127\n" +
 	"\n" +
 	"typing_cut\x18\x1b \x01(\v2\x16.frontend.v1.TypingCutH\x00R\ttypingCut\x12b\n" +
 	"\x19conversation_history_page\x18\x1c \x01(\v2$.frontend.v1.ConversationHistoryPageH\x00R\x17conversationHistoryPageB\a\n" +
-	"\x05frameJ\x04\b\b\x10\tR\x0fdegraded_noticeR\x12async_bubble_delta\"\x9e\b\n" +
+	"\x05frameJ\x04\b\b\x10\tJ\x04\b\x1a\x10\x1bR\x0fdegraded_noticeR\x12async_bubble_deltaR\x11conversation_page\"\x9e\b\n" +
 	"\rStateSnapshot\x12;\n" +
 	"\n" +
 	"workspaces\x18\x01 \x03(\v2\x1b.frontend.v1.WorkspaceStateR\n" +
@@ -1713,7 +1672,7 @@ const file_frontend_v1_frame_proto_rawDesc = "" +
 	"\x0fworkspace_gates\x18\x0e \x03(\v2\x1e.frontend.v1.WorkspaceGateViewR\x0eworkspaceGates\x12K\n" +
 	"\x12merge_queue_roster\x18\x0f \x01(\v2\x1d.frontend.v1.MergeQueueRosterR\x10mergeQueueRoster\x12'\n" +
 	"\x0fworkspace_total\x18\x10 \x01(\x05R\x0eworkspaceTotal\x122\n" +
-	"\x15workspace_batch_index\x18\x11 \x01(\x05R\x13workspaceBatchIndexR\rasync_bubbles\"\xb2\x14\n" +
+	"\x15workspace_batch_index\x18\x11 \x01(\x05R\x13workspaceBatchIndexR\rasync_bubbles\"\xfa\x13\n" +
 	"\x0fFrontendCommand\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
@@ -1752,12 +1711,11 @@ const file_frontend_v1_frame_proto_rawDesc = "" +
 	"\vevict_merge\x18  \x01(\v2\x1a.frontend.v1.EvictMergeCmdH\x00R\n" +
 	"evictMerge\x12V\n" +
 	"\x14answer_merge_dequeue\x18! \x01(\v2\".frontend.v1.AnswerMergeDequeueCmdH\x00R\x12answerMergeDequeue\x12\\\n" +
-	"\x16cancel_detached_agents\x18\" \x01(\v2$.frontend.v1.CancelDetachedAgentsCmdH\x00R\x14cancelDetachedAgents\x12O\n" +
-	"\x11conversation_page\x18# \x01(\v2 .frontend.v1.ConversationPageCmdH\x00R\x10conversationPage\x12:\n" +
+	"\x16cancel_detached_agents\x18\" \x01(\v2$.frontend.v1.CancelDetachedAgentsCmdH\x00R\x14cancelDetachedAgents\x12:\n" +
 	"\n" +
 	"first_page\x18$ \x01(\v2\x19.frontend.v1.FirstPageCmdH\x00R\tfirstPage\x127\n" +
 	"\tnext_page\x18% \x01(\v2\x18.frontend.v1.NextPageCmdH\x00R\bnextPageB\t\n" +
-	"\acommand\"\xdb\x03\n" +
+	"\acommandJ\x04\b#\x10$R\x11conversation_page\"\xdb\x03\n" +
 	"\n" +
 	"CommandAck\x12\x1d\n" +
 	"\n" +
@@ -1820,46 +1778,44 @@ var file_frontend_v1_frame_proto_goTypes = []any{
 	(*WorkspaceGateView)(nil),          // 25: frontend.v1.WorkspaceGateView
 	(*MergeQueueRoster)(nil),           // 26: frontend.v1.MergeQueueRoster
 	(*RestartPendingView)(nil),         // 27: frontend.v1.RestartPendingView
-	(*ConversationPage)(nil),           // 28: frontend.v1.ConversationPage
-	(*TypingCut)(nil),                  // 29: frontend.v1.TypingCut
-	(*ConversationHistoryPage)(nil),    // 30: frontend.v1.ConversationHistoryPage
-	(*Message)(nil),                    // 31: frontend.v1.Message
-	(*SubmitPromptCmd)(nil),            // 32: frontend.v1.SubmitPromptCmd
-	(*InterruptCmd)(nil),               // 33: frontend.v1.InterruptCmd
-	(*PermissionAnswerCmd)(nil),        // 34: frontend.v1.PermissionAnswerCmd
-	(*MergeWorkspaceCmd)(nil),          // 35: frontend.v1.MergeWorkspaceCmd
-	(*CloseWorkspaceCmd)(nil),          // 36: frontend.v1.CloseWorkspaceCmd
-	(*OpenWorkspaceCmd)(nil),           // 37: frontend.v1.OpenWorkspaceCmd
-	(*CreateSessionCmd)(nil),           // 38: frontend.v1.CreateSessionCmd
-	(*DeleteSessionCmd)(nil),           // 39: frontend.v1.DeleteSessionCmd
-	(*ShutdownCmd)(nil),                // 40: frontend.v1.ShutdownCmd
-	(*ClientLogCmd)(nil),               // 41: frontend.v1.ClientLogCmd
-	(*QueueForceCmd)(nil),              // 42: frontend.v1.QueueForceCmd
-	(*QueueAcceptCmd)(nil),             // 43: frontend.v1.QueueAcceptCmd
-	(*QueueCancelCmd)(nil),             // 44: frontend.v1.QueueCancelCmd
-	(*CreateWorkspaceCmd)(nil),         // 45: frontend.v1.CreateWorkspaceCmd
-	(*WorkspaceMaterializedCmd)(nil),   // 46: frontend.v1.WorkspaceMaterializedCmd
-	(*HostActionCompletedCmd)(nil),     // 47: frontend.v1.HostActionCompletedCmd
-	(*DaemonHealthCmd)(nil),            // 48: frontend.v1.DaemonHealthCmd
-	(*SessionHealthCmd)(nil),           // 49: frontend.v1.SessionHealthCmd
-	(*RestartSessionCmd)(nil),          // 50: frontend.v1.RestartSessionCmd
-	(*SetModelCmd)(nil),                // 51: frontend.v1.SetModelCmd
-	(*PublishWorkspaceRosterCmd)(nil),  // 52: frontend.v1.PublishWorkspaceRosterCmd
-	(*ScheduleShutdownCmd)(nil),        // 53: frontend.v1.ScheduleShutdownCmd
-	(*CancelScheduledShutdownCmd)(nil), // 54: frontend.v1.CancelScheduledShutdownCmd
-	(*HibernateWorkspaceCmd)(nil),      // 55: frontend.v1.HibernateWorkspaceCmd
-	(*ReviveSessionCmd)(nil),           // 56: frontend.v1.ReviveSessionCmd
-	(*PauseMergeQueueCmd)(nil),         // 57: frontend.v1.PauseMergeQueueCmd
-	(*ResumeMergeQueueCmd)(nil),        // 58: frontend.v1.ResumeMergeQueueCmd
-	(*EvictMergeCmd)(nil),              // 59: frontend.v1.EvictMergeCmd
-	(*AnswerMergeDequeueCmd)(nil),      // 60: frontend.v1.AnswerMergeDequeueCmd
-	(*CancelDetachedAgentsCmd)(nil),    // 61: frontend.v1.CancelDetachedAgentsCmd
-	(*ConversationPageCmd)(nil),        // 62: frontend.v1.ConversationPageCmd
-	(*FirstPageCmd)(nil),               // 63: frontend.v1.FirstPageCmd
-	(*NextPageCmd)(nil),                // 64: frontend.v1.NextPageCmd
-	(*FailureKind)(nil),                // 65: frontend.v1.FailureKind
-	(*FailureCardRef)(nil),             // 66: frontend.v1.FailureCardRef
-	(*DetachedCancelOutcome)(nil),      // 67: frontend.v1.DetachedCancelOutcome
+	(*TypingCut)(nil),                  // 28: frontend.v1.TypingCut
+	(*ConversationHistoryPage)(nil),    // 29: frontend.v1.ConversationHistoryPage
+	(*Message)(nil),                    // 30: frontend.v1.Message
+	(*SubmitPromptCmd)(nil),            // 31: frontend.v1.SubmitPromptCmd
+	(*InterruptCmd)(nil),               // 32: frontend.v1.InterruptCmd
+	(*PermissionAnswerCmd)(nil),        // 33: frontend.v1.PermissionAnswerCmd
+	(*MergeWorkspaceCmd)(nil),          // 34: frontend.v1.MergeWorkspaceCmd
+	(*CloseWorkspaceCmd)(nil),          // 35: frontend.v1.CloseWorkspaceCmd
+	(*OpenWorkspaceCmd)(nil),           // 36: frontend.v1.OpenWorkspaceCmd
+	(*CreateSessionCmd)(nil),           // 37: frontend.v1.CreateSessionCmd
+	(*DeleteSessionCmd)(nil),           // 38: frontend.v1.DeleteSessionCmd
+	(*ShutdownCmd)(nil),                // 39: frontend.v1.ShutdownCmd
+	(*ClientLogCmd)(nil),               // 40: frontend.v1.ClientLogCmd
+	(*QueueForceCmd)(nil),              // 41: frontend.v1.QueueForceCmd
+	(*QueueAcceptCmd)(nil),             // 42: frontend.v1.QueueAcceptCmd
+	(*QueueCancelCmd)(nil),             // 43: frontend.v1.QueueCancelCmd
+	(*CreateWorkspaceCmd)(nil),         // 44: frontend.v1.CreateWorkspaceCmd
+	(*WorkspaceMaterializedCmd)(nil),   // 45: frontend.v1.WorkspaceMaterializedCmd
+	(*HostActionCompletedCmd)(nil),     // 46: frontend.v1.HostActionCompletedCmd
+	(*DaemonHealthCmd)(nil),            // 47: frontend.v1.DaemonHealthCmd
+	(*SessionHealthCmd)(nil),           // 48: frontend.v1.SessionHealthCmd
+	(*RestartSessionCmd)(nil),          // 49: frontend.v1.RestartSessionCmd
+	(*SetModelCmd)(nil),                // 50: frontend.v1.SetModelCmd
+	(*PublishWorkspaceRosterCmd)(nil),  // 51: frontend.v1.PublishWorkspaceRosterCmd
+	(*ScheduleShutdownCmd)(nil),        // 52: frontend.v1.ScheduleShutdownCmd
+	(*CancelScheduledShutdownCmd)(nil), // 53: frontend.v1.CancelScheduledShutdownCmd
+	(*HibernateWorkspaceCmd)(nil),      // 54: frontend.v1.HibernateWorkspaceCmd
+	(*ReviveSessionCmd)(nil),           // 55: frontend.v1.ReviveSessionCmd
+	(*PauseMergeQueueCmd)(nil),         // 56: frontend.v1.PauseMergeQueueCmd
+	(*ResumeMergeQueueCmd)(nil),        // 57: frontend.v1.ResumeMergeQueueCmd
+	(*EvictMergeCmd)(nil),              // 58: frontend.v1.EvictMergeCmd
+	(*AnswerMergeDequeueCmd)(nil),      // 59: frontend.v1.AnswerMergeDequeueCmd
+	(*CancelDetachedAgentsCmd)(nil),    // 60: frontend.v1.CancelDetachedAgentsCmd
+	(*FirstPageCmd)(nil),               // 61: frontend.v1.FirstPageCmd
+	(*NextPageCmd)(nil),                // 62: frontend.v1.NextPageCmd
+	(*FailureKind)(nil),                // 63: frontend.v1.FailureKind
+	(*FailureCardRef)(nil),             // 64: frontend.v1.FailureCardRef
+	(*DetachedCancelOutcome)(nil),      // 65: frontend.v1.DetachedCancelOutcome
 }
 var file_frontend_v1_frame_proto_depIdxs = []int32{
 	1,  // 0: frontend.v1.FrontendFrame.snapshot:type_name -> frontend.v1.StateSnapshot
@@ -1886,67 +1842,65 @@ var file_frontend_v1_frame_proto_depIdxs = []int32{
 	25, // 21: frontend.v1.FrontendFrame.workspace_gate:type_name -> frontend.v1.WorkspaceGateView
 	26, // 22: frontend.v1.FrontendFrame.merge_queue_roster:type_name -> frontend.v1.MergeQueueRoster
 	27, // 23: frontend.v1.FrontendFrame.restart_pending:type_name -> frontend.v1.RestartPendingView
-	28, // 24: frontend.v1.FrontendFrame.conversation_page:type_name -> frontend.v1.ConversationPage
-	29, // 25: frontend.v1.FrontendFrame.typing_cut:type_name -> frontend.v1.TypingCut
-	30, // 26: frontend.v1.FrontendFrame.conversation_history_page:type_name -> frontend.v1.ConversationHistoryPage
-	6,  // 27: frontend.v1.StateSnapshot.workspaces:type_name -> frontend.v1.WorkspaceState
-	7,  // 28: frontend.v1.StateSnapshot.sessions:type_name -> frontend.v1.SessionView
-	10, // 29: frontend.v1.StateSnapshot.catalogs:type_name -> frontend.v1.TaskCatalog
-	11, // 30: frontend.v1.StateSnapshot.daemon:type_name -> frontend.v1.DaemonView
-	12, // 31: frontend.v1.StateSnapshot.inits:type_name -> frontend.v1.SessionInitView
-	14, // 32: frontend.v1.StateSnapshot.queues:type_name -> frontend.v1.QueueView
-	15, // 33: frontend.v1.StateSnapshot.progress:type_name -> frontend.v1.ProgressView
-	16, // 34: frontend.v1.StateSnapshot.workspace_available:type_name -> frontend.v1.WorkspaceAvailable
-	17, // 35: frontend.v1.StateSnapshot.host_actions:type_name -> frontend.v1.HostAction
-	21, // 36: frontend.v1.StateSnapshot.shutdown_schedule:type_name -> frontend.v1.ShutdownScheduleView
-	31, // 37: frontend.v1.StateSnapshot.detached_work:type_name -> frontend.v1.Message
-	23, // 38: frontend.v1.StateSnapshot.topbars:type_name -> frontend.v1.TopbarView
-	24, // 39: frontend.v1.StateSnapshot.token_breakdowns:type_name -> frontend.v1.TokenBreakdownView
-	25, // 40: frontend.v1.StateSnapshot.workspace_gates:type_name -> frontend.v1.WorkspaceGateView
-	26, // 41: frontend.v1.StateSnapshot.merge_queue_roster:type_name -> frontend.v1.MergeQueueRoster
-	32, // 42: frontend.v1.FrontendCommand.submit_prompt:type_name -> frontend.v1.SubmitPromptCmd
-	33, // 43: frontend.v1.FrontendCommand.interrupt:type_name -> frontend.v1.InterruptCmd
-	34, // 44: frontend.v1.FrontendCommand.permission_answer:type_name -> frontend.v1.PermissionAnswerCmd
-	35, // 45: frontend.v1.FrontendCommand.merge_workspace:type_name -> frontend.v1.MergeWorkspaceCmd
-	36, // 46: frontend.v1.FrontendCommand.close_workspace:type_name -> frontend.v1.CloseWorkspaceCmd
-	37, // 47: frontend.v1.FrontendCommand.open_workspace:type_name -> frontend.v1.OpenWorkspaceCmd
-	5,  // 48: frontend.v1.FrontendCommand.resync:type_name -> frontend.v1.ResyncCmd
-	38, // 49: frontend.v1.FrontendCommand.create_session:type_name -> frontend.v1.CreateSessionCmd
-	39, // 50: frontend.v1.FrontendCommand.delete_session:type_name -> frontend.v1.DeleteSessionCmd
-	40, // 51: frontend.v1.FrontendCommand.shutdown:type_name -> frontend.v1.ShutdownCmd
-	41, // 52: frontend.v1.FrontendCommand.client_log:type_name -> frontend.v1.ClientLogCmd
-	42, // 53: frontend.v1.FrontendCommand.queue_force:type_name -> frontend.v1.QueueForceCmd
-	43, // 54: frontend.v1.FrontendCommand.queue_accept:type_name -> frontend.v1.QueueAcceptCmd
-	44, // 55: frontend.v1.FrontendCommand.queue_cancel:type_name -> frontend.v1.QueueCancelCmd
-	45, // 56: frontend.v1.FrontendCommand.create_workspace:type_name -> frontend.v1.CreateWorkspaceCmd
-	46, // 57: frontend.v1.FrontendCommand.workspace_materialized:type_name -> frontend.v1.WorkspaceMaterializedCmd
-	47, // 58: frontend.v1.FrontendCommand.host_action_completed:type_name -> frontend.v1.HostActionCompletedCmd
-	48, // 59: frontend.v1.FrontendCommand.daemon_health:type_name -> frontend.v1.DaemonHealthCmd
-	49, // 60: frontend.v1.FrontendCommand.session_health:type_name -> frontend.v1.SessionHealthCmd
-	50, // 61: frontend.v1.FrontendCommand.restart_session:type_name -> frontend.v1.RestartSessionCmd
-	51, // 62: frontend.v1.FrontendCommand.set_model:type_name -> frontend.v1.SetModelCmd
-	52, // 63: frontend.v1.FrontendCommand.publish_workspace_roster:type_name -> frontend.v1.PublishWorkspaceRosterCmd
-	53, // 64: frontend.v1.FrontendCommand.schedule_shutdown:type_name -> frontend.v1.ScheduleShutdownCmd
-	54, // 65: frontend.v1.FrontendCommand.cancel_scheduled_shutdown:type_name -> frontend.v1.CancelScheduledShutdownCmd
-	55, // 66: frontend.v1.FrontendCommand.hibernate_workspace:type_name -> frontend.v1.HibernateWorkspaceCmd
-	56, // 67: frontend.v1.FrontendCommand.revive_session:type_name -> frontend.v1.ReviveSessionCmd
-	57, // 68: frontend.v1.FrontendCommand.pause_merge_queue:type_name -> frontend.v1.PauseMergeQueueCmd
-	58, // 69: frontend.v1.FrontendCommand.resume_merge_queue:type_name -> frontend.v1.ResumeMergeQueueCmd
-	59, // 70: frontend.v1.FrontendCommand.evict_merge:type_name -> frontend.v1.EvictMergeCmd
-	60, // 71: frontend.v1.FrontendCommand.answer_merge_dequeue:type_name -> frontend.v1.AnswerMergeDequeueCmd
-	61, // 72: frontend.v1.FrontendCommand.cancel_detached_agents:type_name -> frontend.v1.CancelDetachedAgentsCmd
-	62, // 73: frontend.v1.FrontendCommand.conversation_page:type_name -> frontend.v1.ConversationPageCmd
-	63, // 74: frontend.v1.FrontendCommand.first_page:type_name -> frontend.v1.FirstPageCmd
-	64, // 75: frontend.v1.FrontendCommand.next_page:type_name -> frontend.v1.NextPageCmd
-	65, // 76: frontend.v1.CommandAck.failure:type_name -> frontend.v1.FailureKind
-	66, // 77: frontend.v1.CommandAck.failure_card:type_name -> frontend.v1.FailureCardRef
-	4,  // 78: frontend.v1.CommandAck.interrupt_confirm_required:type_name -> frontend.v1.InterruptConfirmRequired
-	67, // 79: frontend.v1.CommandAck.detached_cancel:type_name -> frontend.v1.DetachedCancelOutcome
-	80, // [80:80] is the sub-list for method output_type
-	80, // [80:80] is the sub-list for method input_type
-	80, // [80:80] is the sub-list for extension type_name
-	80, // [80:80] is the sub-list for extension extendee
-	0,  // [0:80] is the sub-list for field type_name
+	28, // 24: frontend.v1.FrontendFrame.typing_cut:type_name -> frontend.v1.TypingCut
+	29, // 25: frontend.v1.FrontendFrame.conversation_history_page:type_name -> frontend.v1.ConversationHistoryPage
+	6,  // 26: frontend.v1.StateSnapshot.workspaces:type_name -> frontend.v1.WorkspaceState
+	7,  // 27: frontend.v1.StateSnapshot.sessions:type_name -> frontend.v1.SessionView
+	10, // 28: frontend.v1.StateSnapshot.catalogs:type_name -> frontend.v1.TaskCatalog
+	11, // 29: frontend.v1.StateSnapshot.daemon:type_name -> frontend.v1.DaemonView
+	12, // 30: frontend.v1.StateSnapshot.inits:type_name -> frontend.v1.SessionInitView
+	14, // 31: frontend.v1.StateSnapshot.queues:type_name -> frontend.v1.QueueView
+	15, // 32: frontend.v1.StateSnapshot.progress:type_name -> frontend.v1.ProgressView
+	16, // 33: frontend.v1.StateSnapshot.workspace_available:type_name -> frontend.v1.WorkspaceAvailable
+	17, // 34: frontend.v1.StateSnapshot.host_actions:type_name -> frontend.v1.HostAction
+	21, // 35: frontend.v1.StateSnapshot.shutdown_schedule:type_name -> frontend.v1.ShutdownScheduleView
+	30, // 36: frontend.v1.StateSnapshot.detached_work:type_name -> frontend.v1.Message
+	23, // 37: frontend.v1.StateSnapshot.topbars:type_name -> frontend.v1.TopbarView
+	24, // 38: frontend.v1.StateSnapshot.token_breakdowns:type_name -> frontend.v1.TokenBreakdownView
+	25, // 39: frontend.v1.StateSnapshot.workspace_gates:type_name -> frontend.v1.WorkspaceGateView
+	26, // 40: frontend.v1.StateSnapshot.merge_queue_roster:type_name -> frontend.v1.MergeQueueRoster
+	31, // 41: frontend.v1.FrontendCommand.submit_prompt:type_name -> frontend.v1.SubmitPromptCmd
+	32, // 42: frontend.v1.FrontendCommand.interrupt:type_name -> frontend.v1.InterruptCmd
+	33, // 43: frontend.v1.FrontendCommand.permission_answer:type_name -> frontend.v1.PermissionAnswerCmd
+	34, // 44: frontend.v1.FrontendCommand.merge_workspace:type_name -> frontend.v1.MergeWorkspaceCmd
+	35, // 45: frontend.v1.FrontendCommand.close_workspace:type_name -> frontend.v1.CloseWorkspaceCmd
+	36, // 46: frontend.v1.FrontendCommand.open_workspace:type_name -> frontend.v1.OpenWorkspaceCmd
+	5,  // 47: frontend.v1.FrontendCommand.resync:type_name -> frontend.v1.ResyncCmd
+	37, // 48: frontend.v1.FrontendCommand.create_session:type_name -> frontend.v1.CreateSessionCmd
+	38, // 49: frontend.v1.FrontendCommand.delete_session:type_name -> frontend.v1.DeleteSessionCmd
+	39, // 50: frontend.v1.FrontendCommand.shutdown:type_name -> frontend.v1.ShutdownCmd
+	40, // 51: frontend.v1.FrontendCommand.client_log:type_name -> frontend.v1.ClientLogCmd
+	41, // 52: frontend.v1.FrontendCommand.queue_force:type_name -> frontend.v1.QueueForceCmd
+	42, // 53: frontend.v1.FrontendCommand.queue_accept:type_name -> frontend.v1.QueueAcceptCmd
+	43, // 54: frontend.v1.FrontendCommand.queue_cancel:type_name -> frontend.v1.QueueCancelCmd
+	44, // 55: frontend.v1.FrontendCommand.create_workspace:type_name -> frontend.v1.CreateWorkspaceCmd
+	45, // 56: frontend.v1.FrontendCommand.workspace_materialized:type_name -> frontend.v1.WorkspaceMaterializedCmd
+	46, // 57: frontend.v1.FrontendCommand.host_action_completed:type_name -> frontend.v1.HostActionCompletedCmd
+	47, // 58: frontend.v1.FrontendCommand.daemon_health:type_name -> frontend.v1.DaemonHealthCmd
+	48, // 59: frontend.v1.FrontendCommand.session_health:type_name -> frontend.v1.SessionHealthCmd
+	49, // 60: frontend.v1.FrontendCommand.restart_session:type_name -> frontend.v1.RestartSessionCmd
+	50, // 61: frontend.v1.FrontendCommand.set_model:type_name -> frontend.v1.SetModelCmd
+	51, // 62: frontend.v1.FrontendCommand.publish_workspace_roster:type_name -> frontend.v1.PublishWorkspaceRosterCmd
+	52, // 63: frontend.v1.FrontendCommand.schedule_shutdown:type_name -> frontend.v1.ScheduleShutdownCmd
+	53, // 64: frontend.v1.FrontendCommand.cancel_scheduled_shutdown:type_name -> frontend.v1.CancelScheduledShutdownCmd
+	54, // 65: frontend.v1.FrontendCommand.hibernate_workspace:type_name -> frontend.v1.HibernateWorkspaceCmd
+	55, // 66: frontend.v1.FrontendCommand.revive_session:type_name -> frontend.v1.ReviveSessionCmd
+	56, // 67: frontend.v1.FrontendCommand.pause_merge_queue:type_name -> frontend.v1.PauseMergeQueueCmd
+	57, // 68: frontend.v1.FrontendCommand.resume_merge_queue:type_name -> frontend.v1.ResumeMergeQueueCmd
+	58, // 69: frontend.v1.FrontendCommand.evict_merge:type_name -> frontend.v1.EvictMergeCmd
+	59, // 70: frontend.v1.FrontendCommand.answer_merge_dequeue:type_name -> frontend.v1.AnswerMergeDequeueCmd
+	60, // 71: frontend.v1.FrontendCommand.cancel_detached_agents:type_name -> frontend.v1.CancelDetachedAgentsCmd
+	61, // 72: frontend.v1.FrontendCommand.first_page:type_name -> frontend.v1.FirstPageCmd
+	62, // 73: frontend.v1.FrontendCommand.next_page:type_name -> frontend.v1.NextPageCmd
+	63, // 74: frontend.v1.CommandAck.failure:type_name -> frontend.v1.FailureKind
+	64, // 75: frontend.v1.CommandAck.failure_card:type_name -> frontend.v1.FailureCardRef
+	4,  // 76: frontend.v1.CommandAck.interrupt_confirm_required:type_name -> frontend.v1.InterruptConfirmRequired
+	65, // 77: frontend.v1.CommandAck.detached_cancel:type_name -> frontend.v1.DetachedCancelOutcome
+	78, // [78:78] is the sub-list for method output_type
+	78, // [78:78] is the sub-list for method input_type
+	78, // [78:78] is the sub-list for extension type_name
+	78, // [78:78] is the sub-list for extension extendee
+	0,  // [0:78] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_frame_proto_init() }
@@ -1955,7 +1909,6 @@ func file_frontend_v1_frame_proto_init() {
 		return
 	}
 	file_frontend_v1_conversation_history_proto_init()
-	file_frontend_v1_conversation_page_proto_init()
 	file_frontend_v1_errors_proto_init()
 	file_frontend_v1_failure_card_proto_init()
 	file_frontend_v1_feed_proto_init()
@@ -1996,7 +1949,6 @@ func file_frontend_v1_frame_proto_init() {
 		(*FrontendFrame_WorkspaceGate)(nil),
 		(*FrontendFrame_MergeQueueRoster)(nil),
 		(*FrontendFrame_RestartPending)(nil),
-		(*FrontendFrame_ConversationPage)(nil),
 		(*FrontendFrame_TypingCut)(nil),
 		(*FrontendFrame_ConversationHistoryPage)(nil),
 	}
@@ -2032,7 +1984,6 @@ func file_frontend_v1_frame_proto_init() {
 		(*FrontendCommand_EvictMerge)(nil),
 		(*FrontendCommand_AnswerMergeDequeue)(nil),
 		(*FrontendCommand_CancelDetachedAgents)(nil),
-		(*FrontendCommand_ConversationPage)(nil),
 		(*FrontendCommand_FirstPage)(nil),
 		(*FrontendCommand_NextPage)(nil),
 	}

@@ -19,6 +19,22 @@
 // page in flight across the transition is handled by request_id, which a client
 // already uses to apply only the pages it awaits.
 //
+// THE CLIENT-ANCHORED SURFACE IS GONE, AND THAT IS WHY THE CLAIM ABOVE IS
+// TRUE. ConversationPageCmd and its page — tail/before anchors, an opaque
+// cursor, and a fence the client echoed back — have been deleted outright
+// rather than deprecated, because two ways to obtain history is exactly one
+// way for a client's idea of where it is to diverge from the daemon's. A
+// client that holds no position cannot desync; a position the client echoes
+// back is only the daemon checking itself against its own state, which it
+// could have read directly.
+//
+// WHAT WAS LOST, AND ACCEPTED: ARBITRARY ANCHORING. ConversationPageBefore
+// could say "the page before THIS one"; FirstPageCmd and NextPageCmd express
+// only "the most recent" and "one older". Deep-linking to an arbitrary point
+// in history therefore has no verb here. That is accepted: no frontend asked
+// for it, and restoring it means handing the client a position again, which is
+// the whole thing this contract forbids.
+//
 // ON THE WEBAPP BOUNCE, EXPLICITLY ACCEPTED. A frontend that bounces calls
 // FirstPageCmd and starts from the bottom. Earlier pages are re-reached by
 // paging back. Scroll depth is NOT preserved across a bounce, and no
@@ -48,6 +64,184 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Which container a page walks.
+//
+// A oneof rather than an optional container id: "the feed" and "inside message
+// X" are the only two answers, and an empty string standing for the feed is
+// exactly the ambiguity conversation.v1.MessageParent exists to forbid.
+type PageScope struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Scope:
+	//
+	//	*PageScope_Feed
+	//	*PageScope_Inside
+	Scope         isPageScope_Scope `protobuf_oneof:"scope"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PageScope) Reset() {
+	*x = PageScope{}
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PageScope) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PageScope) ProtoMessage() {}
+
+func (x *PageScope) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PageScope.ProtoReflect.Descriptor instead.
+func (*PageScope) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *PageScope) GetScope() isPageScope_Scope {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
+func (x *PageScope) GetFeed() *PageScopeFeed {
+	if x != nil {
+		if x, ok := x.Scope.(*PageScope_Feed); ok {
+			return x.Feed
+		}
+	}
+	return nil
+}
+
+func (x *PageScope) GetInside() *PageScopeInside {
+	if x != nil {
+		if x, ok := x.Scope.(*PageScope_Inside); ok {
+			return x.Inside
+		}
+	}
+	return nil
+}
+
+type isPageScope_Scope interface {
+	isPageScope_Scope()
+}
+
+type PageScope_Feed struct {
+	// Records whose parent is conversation.v1.MessageParentRoot.
+	Feed *PageScopeFeed `protobuf:"bytes,1,opt,name=feed,proto3,oneof"`
+}
+
+type PageScope_Inside struct {
+	// Records whose parent is conversation.v1.MessageParentInside this message.
+	Inside *PageScopeInside `protobuf:"bytes,2,opt,name=inside,proto3,oneof"`
+}
+
+func (*PageScope_Feed) isPageScope_Scope() {}
+
+func (*PageScope_Inside) isPageScope_Scope() {}
+
+// The top-level conversation: everything the feed renders as a standalone row.
+//
+// An empty message rather than a bool, so that naming the feed and naming a
+// container are the same act at the same cost, and a client never has to choose
+// between two spellings of "where".
+type PageScopeFeed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PageScopeFeed) Reset() {
+	*x = PageScopeFeed{}
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PageScopeFeed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PageScopeFeed) ProtoMessage() {}
+
+func (x *PageScopeFeed) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PageScopeFeed.ProtoReflect.Descriptor instead.
+func (*PageScopeFeed) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{1}
+}
+
+// The inside of one message: the records that message contains.
+type PageScopeInside struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The containing message. It is itself a conversation.v1.MessageEntry, so a
+	// subagent inside a subagent is named the same way at every depth — the
+	// recursion lives in the DATA, not in this type.
+	ContainerMessageId string `protobuf:"bytes,1,opt,name=container_message_id,json=containerMessageId,proto3" json:"container_message_id,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *PageScopeInside) Reset() {
+	*x = PageScopeInside{}
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PageScopeInside) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PageScopeInside) ProtoMessage() {}
+
+func (x *PageScopeInside) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PageScopeInside.ProtoReflect.Descriptor instead.
+func (*PageScopeInside) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *PageScopeInside) GetContainerMessageId() string {
+	if x != nil {
+		return x.ContainerMessageId
+	}
+	return ""
+}
+
 // Ask for the MOST RECENT page, and reset this reader's position to it.
 //
 // The cold open and the whole recovery story: a client that bounced, rotated
@@ -72,7 +266,7 @@ type FirstPageCmd struct {
 
 func (x *FirstPageCmd) Reset() {
 	*x = FirstPageCmd{}
-	mi := &file_frontend_v1_conversation_history_proto_msgTypes[0]
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -84,7 +278,7 @@ func (x *FirstPageCmd) String() string {
 func (*FirstPageCmd) ProtoMessage() {}
 
 func (x *FirstPageCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_conversation_history_proto_msgTypes[0]
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -97,7 +291,7 @@ func (x *FirstPageCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FirstPageCmd.ProtoReflect.Descriptor instead.
 func (*FirstPageCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{0}
+	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *FirstPageCmd) GetWorkspace() string {
@@ -137,7 +331,7 @@ type NextPageCmd struct {
 
 func (x *NextPageCmd) Reset() {
 	*x = NextPageCmd{}
-	mi := &file_frontend_v1_conversation_history_proto_msgTypes[1]
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -149,7 +343,7 @@ func (x *NextPageCmd) String() string {
 func (*NextPageCmd) ProtoMessage() {}
 
 func (x *NextPageCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_conversation_history_proto_msgTypes[1]
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -162,7 +356,7 @@ func (x *NextPageCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NextPageCmd.ProtoReflect.Descriptor instead.
 func (*NextPageCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{1}
+	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *NextPageCmd) GetWorkspace() string {
@@ -231,14 +425,33 @@ type ConversationHistoryPage struct {
 	// splices onto the live push stream gap-free BY CONSTRUCTION rather than by
 	// timing. An OUTPUT the client never echoes back — it rides no request.
 	// Zero on next pages, which are history and carry no live edge.
-	LiveJoinSeq   uint64 `protobuf:"varint,15,opt,name=live_join_seq,json=liveJoinSeq,proto3" json:"live_join_seq,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	LiveJoinSeq uint64 `protobuf:"varint,15,opt,name=live_join_seq,json=liveJoinSeq,proto3" json:"live_join_seq,omitempty"`
+	// WHICH CONTAINER this page walks, STATED rather than left to be inferred,
+	// so a client can never mistake a page of a subagent's insides for a page of
+	// the feed.
+	//
+	// It is the ECHO of the requested scope, alongside `request_id`. Together
+	// with the `parent` each returned record carries, it is how a client VERIFIES
+	// that the page it got is the page it asked for: the echo proves what was
+	// ASKED, the per-record parent proves what was RECEIVED.
+	Scope *PageScope `protobuf:"bytes,16,opt,name=scope,proto3" json:"scope,omitempty"`
+	// The containers this page's scope sits inside, OUTERMOST FIRST. Empty when
+	// the scope is the feed.
+	//
+	// STATED BY THE DAEMON BECAUSE IT ALREADY WALKED THE CHAIN while resolving
+	// the scope. A cold open deep-linked into a nested container holds no message
+	// map yet and needs the ancestors to render the surrounding cards; walking up
+	// one `parent` hop at a time would cost a round trip per level to learn what
+	// the resolver already knew. It cannot disagree with the parent chain because
+	// it is derived from that chain in the same pass.
+	AncestorMessageIds []string `protobuf:"bytes,17,rep,name=ancestor_message_ids,json=ancestorMessageIds,proto3" json:"ancestor_message_ids,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ConversationHistoryPage) Reset() {
 	*x = ConversationHistoryPage{}
-	mi := &file_frontend_v1_conversation_history_proto_msgTypes[2]
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -250,7 +463,7 @@ func (x *ConversationHistoryPage) String() string {
 func (*ConversationHistoryPage) ProtoMessage() {}
 
 func (x *ConversationHistoryPage) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_conversation_history_proto_msgTypes[2]
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -263,7 +476,7 @@ func (x *ConversationHistoryPage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationHistoryPage.ProtoReflect.Descriptor instead.
 func (*ConversationHistoryPage) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{2}
+	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ConversationHistoryPage) GetWorkspace() string {
@@ -382,6 +595,20 @@ func (x *ConversationHistoryPage) GetLiveJoinSeq() uint64 {
 	return 0
 }
 
+func (x *ConversationHistoryPage) GetScope() *PageScope {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
+func (x *ConversationHistoryPage) GetAncestorMessageIds() []string {
+	if x != nil {
+		return x.AncestorMessageIds
+	}
+	return nil
+}
+
 type isConversationHistoryPage_Continuation interface {
 	isConversationHistoryPage_Continuation()
 }
@@ -413,7 +640,7 @@ type HistoryHasMore struct {
 
 func (x *HistoryHasMore) Reset() {
 	*x = HistoryHasMore{}
-	mi := &file_frontend_v1_conversation_history_proto_msgTypes[3]
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -425,7 +652,7 @@ func (x *HistoryHasMore) String() string {
 func (*HistoryHasMore) ProtoMessage() {}
 
 func (x *HistoryHasMore) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_conversation_history_proto_msgTypes[3]
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -438,7 +665,7 @@ func (x *HistoryHasMore) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryHasMore.ProtoReflect.Descriptor instead.
 func (*HistoryHasMore) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{3}
+	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{6}
 }
 
 // There is nothing older. A FACT the daemon established by reading to the floor.
@@ -450,7 +677,7 @@ type HistoryAtStart struct {
 
 func (x *HistoryAtStart) Reset() {
 	*x = HistoryAtStart{}
-	mi := &file_frontend_v1_conversation_history_proto_msgTypes[4]
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -462,7 +689,7 @@ func (x *HistoryAtStart) String() string {
 func (*HistoryAtStart) ProtoMessage() {}
 
 func (x *HistoryAtStart) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_conversation_history_proto_msgTypes[4]
+	mi := &file_frontend_v1_conversation_history_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -475,20 +702,27 @@ func (x *HistoryAtStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryAtStart.ProtoReflect.Descriptor instead.
 func (*HistoryAtStart) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{4}
+	return file_frontend_v1_conversation_history_proto_rawDescGZIP(), []int{7}
 }
 
 var File_frontend_v1_conversation_history_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_conversation_history_proto_rawDesc = "" +
 	"\n" +
-	"&frontend/v1/conversation-history.proto\x12\vfrontend.v1\x1a#frontend/v1/conversation-page.proto\x1a\x16frontend/v1/feed.proto\"Z\n" +
+	"&frontend/v1/conversation-history.proto\x12\vfrontend.v1\x1a\x16frontend/v1/feed.proto\"~\n" +
+	"\tPageScope\x120\n" +
+	"\x04feed\x18\x01 \x01(\v2\x1a.frontend.v1.PageScopeFeedH\x00R\x04feed\x126\n" +
+	"\x06inside\x18\x02 \x01(\v2\x1c.frontend.v1.PageScopeInsideH\x00R\x06insideB\a\n" +
+	"\x05scope\"\x0f\n" +
+	"\rPageScopeFeed\"C\n" +
+	"\x0fPageScopeInside\x120\n" +
+	"\x14container_message_id\x18\x01 \x01(\tR\x12containerMessageId\"Z\n" +
 	"\fFirstPageCmd\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12,\n" +
 	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"Y\n" +
 	"\vNextPageCmd\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12,\n" +
-	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"\xf2\x05\n" +
+	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"\xd2\x06\n" +
 	"\x17ConversationHistoryPage\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -507,7 +741,9 @@ const file_frontend_v1_conversation_history_proto_rawDesc = "" +
 	"message_10\x18\f \x01(\v2\x14.frontend.v1.MessageR\tmessage10\x121\n" +
 	"\x04more\x18\r \x01(\v2\x1b.frontend.v1.HistoryHasMoreH\x00R\x04more\x123\n" +
 	"\x05start\x18\x0e \x01(\v2\x1b.frontend.v1.HistoryAtStartH\x00R\x05start\x12\"\n" +
-	"\rlive_join_seq\x18\x0f \x01(\x04R\vliveJoinSeqB\x0e\n" +
+	"\rlive_join_seq\x18\x0f \x01(\x04R\vliveJoinSeq\x12,\n" +
+	"\x05scope\x18\x10 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\x120\n" +
+	"\x14ancestor_message_ids\x18\x11 \x03(\tR\x12ancestorMessageIdsB\x0e\n" +
 	"\fcontinuation\"\x10\n" +
 	"\x0eHistoryHasMore\"\x10\n" +
 	"\x0eHistoryAtStartB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
@@ -524,36 +760,41 @@ func file_frontend_v1_conversation_history_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_conversation_history_proto_rawDescData
 }
 
-var file_frontend_v1_conversation_history_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_frontend_v1_conversation_history_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_frontend_v1_conversation_history_proto_goTypes = []any{
-	(*FirstPageCmd)(nil),            // 0: frontend.v1.FirstPageCmd
-	(*NextPageCmd)(nil),             // 1: frontend.v1.NextPageCmd
-	(*ConversationHistoryPage)(nil), // 2: frontend.v1.ConversationHistoryPage
-	(*HistoryHasMore)(nil),          // 3: frontend.v1.HistoryHasMore
-	(*HistoryAtStart)(nil),          // 4: frontend.v1.HistoryAtStart
-	(*PageScope)(nil),               // 5: frontend.v1.PageScope
-	(*Message)(nil),                 // 6: frontend.v1.Message
+	(*PageScope)(nil),               // 0: frontend.v1.PageScope
+	(*PageScopeFeed)(nil),           // 1: frontend.v1.PageScopeFeed
+	(*PageScopeInside)(nil),         // 2: frontend.v1.PageScopeInside
+	(*FirstPageCmd)(nil),            // 3: frontend.v1.FirstPageCmd
+	(*NextPageCmd)(nil),             // 4: frontend.v1.NextPageCmd
+	(*ConversationHistoryPage)(nil), // 5: frontend.v1.ConversationHistoryPage
+	(*HistoryHasMore)(nil),          // 6: frontend.v1.HistoryHasMore
+	(*HistoryAtStart)(nil),          // 7: frontend.v1.HistoryAtStart
+	(*Message)(nil),                 // 8: frontend.v1.Message
 }
 var file_frontend_v1_conversation_history_proto_depIdxs = []int32{
-	5,  // 0: frontend.v1.FirstPageCmd.scope:type_name -> frontend.v1.PageScope
-	5,  // 1: frontend.v1.NextPageCmd.scope:type_name -> frontend.v1.PageScope
-	6,  // 2: frontend.v1.ConversationHistoryPage.message_1:type_name -> frontend.v1.Message
-	6,  // 3: frontend.v1.ConversationHistoryPage.message_2:type_name -> frontend.v1.Message
-	6,  // 4: frontend.v1.ConversationHistoryPage.message_3:type_name -> frontend.v1.Message
-	6,  // 5: frontend.v1.ConversationHistoryPage.message_4:type_name -> frontend.v1.Message
-	6,  // 6: frontend.v1.ConversationHistoryPage.message_5:type_name -> frontend.v1.Message
-	6,  // 7: frontend.v1.ConversationHistoryPage.message_6:type_name -> frontend.v1.Message
-	6,  // 8: frontend.v1.ConversationHistoryPage.message_7:type_name -> frontend.v1.Message
-	6,  // 9: frontend.v1.ConversationHistoryPage.message_8:type_name -> frontend.v1.Message
-	6,  // 10: frontend.v1.ConversationHistoryPage.message_9:type_name -> frontend.v1.Message
-	6,  // 11: frontend.v1.ConversationHistoryPage.message_10:type_name -> frontend.v1.Message
-	3,  // 12: frontend.v1.ConversationHistoryPage.more:type_name -> frontend.v1.HistoryHasMore
-	4,  // 13: frontend.v1.ConversationHistoryPage.start:type_name -> frontend.v1.HistoryAtStart
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	1,  // 0: frontend.v1.PageScope.feed:type_name -> frontend.v1.PageScopeFeed
+	2,  // 1: frontend.v1.PageScope.inside:type_name -> frontend.v1.PageScopeInside
+	0,  // 2: frontend.v1.FirstPageCmd.scope:type_name -> frontend.v1.PageScope
+	0,  // 3: frontend.v1.NextPageCmd.scope:type_name -> frontend.v1.PageScope
+	8,  // 4: frontend.v1.ConversationHistoryPage.message_1:type_name -> frontend.v1.Message
+	8,  // 5: frontend.v1.ConversationHistoryPage.message_2:type_name -> frontend.v1.Message
+	8,  // 6: frontend.v1.ConversationHistoryPage.message_3:type_name -> frontend.v1.Message
+	8,  // 7: frontend.v1.ConversationHistoryPage.message_4:type_name -> frontend.v1.Message
+	8,  // 8: frontend.v1.ConversationHistoryPage.message_5:type_name -> frontend.v1.Message
+	8,  // 9: frontend.v1.ConversationHistoryPage.message_6:type_name -> frontend.v1.Message
+	8,  // 10: frontend.v1.ConversationHistoryPage.message_7:type_name -> frontend.v1.Message
+	8,  // 11: frontend.v1.ConversationHistoryPage.message_8:type_name -> frontend.v1.Message
+	8,  // 12: frontend.v1.ConversationHistoryPage.message_9:type_name -> frontend.v1.Message
+	8,  // 13: frontend.v1.ConversationHistoryPage.message_10:type_name -> frontend.v1.Message
+	6,  // 14: frontend.v1.ConversationHistoryPage.more:type_name -> frontend.v1.HistoryHasMore
+	7,  // 15: frontend.v1.ConversationHistoryPage.start:type_name -> frontend.v1.HistoryAtStart
+	0,  // 16: frontend.v1.ConversationHistoryPage.scope:type_name -> frontend.v1.PageScope
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_conversation_history_proto_init() }
@@ -561,9 +802,12 @@ func file_frontend_v1_conversation_history_proto_init() {
 	if File_frontend_v1_conversation_history_proto != nil {
 		return
 	}
-	file_frontend_v1_conversation_page_proto_init()
 	file_frontend_v1_feed_proto_init()
-	file_frontend_v1_conversation_history_proto_msgTypes[2].OneofWrappers = []any{
+	file_frontend_v1_conversation_history_proto_msgTypes[0].OneofWrappers = []any{
+		(*PageScope_Feed)(nil),
+		(*PageScope_Inside)(nil),
+	}
+	file_frontend_v1_conversation_history_proto_msgTypes[5].OneofWrappers = []any{
 		(*ConversationHistoryPage_More)(nil),
 		(*ConversationHistoryPage_Start)(nil),
 	}
@@ -573,7 +817,7 @@ func file_frontend_v1_conversation_history_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_conversation_history_proto_rawDesc), len(file_frontend_v1_conversation_history_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
