@@ -74,10 +74,20 @@ type TokenUsage struct {
 	// What the prompt cache did not serve: the expensive buckets, together.
 	InputMisses *TokenCacheMisses `protobuf:"bytes,2,opt,name=input_misses,json=inputMisses,proto3" json:"input_misses,omitempty"`
 	// Generated tokens, including extended thinking where the API includes it.
-	// There is no output cache, so this is a plain total with no partition.
-	OutputTokens  uint64 `protobuf:"varint,3,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// There is no output cache, so no cache partition applies; this remains the
+	// TOTAL, and `output_thinking_tokens` below names a part of it.
+	OutputTokens uint64 `protobuf:"varint,3,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	// The part of `output_tokens` the vendor attributed to extended thinking.
+	//
+	// A PARTITION OF output_tokens, NOT AN ADDITION TO IT — never sum the two.
+	// Carried because the old narrow usage projection could not express it, and a
+	// record built without it is durably unfaithful to what the vendor reported.
+	//
+	// Zero when the vendor reported no thinking tokens, which is also what a
+	// response with no extended thinking reports.
+	OutputThinkingTokens uint64 `protobuf:"varint,4,opt,name=output_thinking_tokens,json=outputThinkingTokens,proto3" json:"output_thinking_tokens,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *TokenUsage) Reset() {
@@ -127,6 +137,13 @@ func (x *TokenUsage) GetInputMisses() *TokenCacheMisses {
 func (x *TokenUsage) GetOutputTokens() uint64 {
 	if x != nil {
 		return x.OutputTokens
+	}
+	return 0
+}
+
+func (x *TokenUsage) GetOutputThinkingTokens() uint64 {
+	if x != nil {
+		return x.OutputThinkingTokens
 	}
 	return 0
 }
@@ -243,13 +260,14 @@ var File_conversation_v1_tokens_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_tokens_proto_rawDesc = "" +
 	"\n" +
-	"\x1cconversation/v1/tokens.proto\x12\x0fconversation.v1\"\xb7\x01\n" +
+	"\x1cconversation/v1/tokens.proto\x12\x0fconversation.v1\"\xed\x01\n" +
 	"\n" +
 	"TokenUsage\x12>\n" +
 	"\n" +
 	"input_hits\x18\x01 \x01(\v2\x1f.conversation.v1.TokenCacheHitsR\tinputHits\x12D\n" +
 	"\finput_misses\x18\x02 \x01(\v2!.conversation.v1.TokenCacheMissesR\vinputMisses\x12#\n" +
-	"\routput_tokens\x18\x03 \x01(\x04R\foutputTokens\"$\n" +
+	"\routput_tokens\x18\x03 \x01(\x04R\foutputTokens\x124\n" +
+	"\x16output_thinking_tokens\x18\x04 \x01(\x04R\x14outputThinkingTokens\"$\n" +
 	"\x0eTokenCacheHits\x12\x12\n" +
 	"\x04read\x18\x01 \x01(\x04R\x04read\"J\n" +
 	"\x10TokenCacheMisses\x12\x18\n" +

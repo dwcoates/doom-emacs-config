@@ -10,13 +10,15 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { TokenUsage } from "../../conversation/v1/tokens_pb";
+import { file_conversation_v1_tokens } from "../../conversation/v1/tokens_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file protocol/v1/bookkeeping.proto.
  */
 export const file_protocol_v1_bookkeeping: GenFile = /*@__PURE__*/
-  fileDesc("Ch1wcm90b2NvbC92MS9ib29ra2VlcGluZy5wcm90bxILcHJvdG9jb2wudjEinAQKEEJvb2trZWVwaW5nRW50cnkSMgoNc2Vzc2lvbl9iZWdhbhgBIAEoCzIZLnByb3RvY29sLnYxLlNlc3Npb25CZWdhbkgAEjIKDXNlc3Npb25fZW5kZWQYAiABKAsyGS5wcm90b2NvbC52MS5TZXNzaW9uRW5kZWRIABIsCgp0dXJuX2JlZ2FuGAMgASgLMhYucHJvdG9jb2wudjEuVHVybkJlZ2FuSAASLAoKdHVybl9lbmRlZBgEIAEoCzIWLnByb3RvY29sLnYxLlR1cm5FbmRlZEgAEjAKCWhlYXJ0YmVhdBgFIAEoCzIbLnByb3RvY29sLnYxLkFnZW50SGVhcnRiZWF0SAASNgoPcmVzcG9uc2VfdGltaW5nGAYgASgLMhsucHJvdG9jb2wudjEuUmVzcG9uc2VUaW1pbmdIABI+ChNwcm9kdWNlcl9kaWFnbm9zdGljGAcgASgLMh8ucHJvdG9jb2wudjEuUHJvZHVjZXJEaWFnbm9zdGljSAASRwoYc2Vzc2lvbl9pZGVudGl0eV9jaGFuZ2VkGAggASgLMiMucHJvdG9jb2wudjEuU2Vzc2lvbklkZW50aXR5Q2hhbmdlZEgAEkkKGWFjY291bnRfdXNhZ2Vfb2JzZXJ2YXRpb24YCSABKAsyJC5wcm90b2NvbC52MS5BY2NvdW50VXNhZ2VPYnNlcnZhdGlvbkgAQgYKBGtpbmQiwwIKDFNlc3Npb25CZWdhbhINCgVtb2RlbBgBIAEoCRILCgNjd2QYAiABKAkSFQoNYWdlbnRfdmVyc2lvbhgDIAEoCRImCgRhdXRoGAQgASgLMhgucHJvdG9jb2wudjEuU2Vzc2lvbkF1dGgSFAoMb3V0cHV0X3N0eWxlGAUgASgJEigKCWZhc3RfbW9kZRgGIAEoCzIVLnByb3RvY29sLnYxLkZhc3RNb2RlEg4KBnNraWxscxgKIAMoCRIRCglzdWJhZ2VudHMYCyADKAkSMgoLbWNwX3NlcnZlcnMYDCADKAsyHS5wcm90b2NvbC52MS5TZXNzaW9uTWNwU2VydmVyEisKB3BsdWdpbnMYDSADKAsyGi5wcm90b2NvbC52MS5TZXNzaW9uUGx1Z2luEhQKDG1lbW9yeV9wYXRocxgOIAMoCSJ4CgtTZXNzaW9uQXV0aBI1CgxzdWJzY3JpcHRpb24YASABKAsyHS5wcm90b2NvbC52MS5BdXRoU3Vic2NyaXB0aW9uSAASKgoHYXBpX2tleRgCIAEoCzIXLnByb3RvY29sLnYxLkF1dGhBcGlLZXlIAEIGCgRhdXRoIhIKEEF1dGhTdWJzY3JpcHRpb24iHAoKQXV0aEFwaUtleRIOCgZzb3VyY2UYASABKAkiYwoIRmFzdE1vZGUSJQoCb24YASABKAsyFy5wcm90b2NvbC52MS5GYXN0TW9kZU9uSAASJwoDb2ZmGAIgASgLMhgucHJvdG9jb2wudjEuRmFzdE1vZGVPZmZIAEIHCgVzdGF0ZSIMCgpGYXN0TW9kZU9uIh0KC0Zhc3RNb2RlT2ZmEg4KBnJlYXNvbhgBIAEoCSJOChBTZXNzaW9uTWNwU2VydmVyEgwKBG5hbWUYASABKAkSLAoGaGVhbHRoGAIgASgLMhwucHJvdG9jb2wudjEuTWNwU2VydmVySGVhbHRoIoEBCg9NY3BTZXJ2ZXJIZWFsdGgSNAoJY29ubmVjdGVkGAEgASgLMh8ucHJvdG9jb2wudjEuTWNwU2VydmVyQ29ubmVjdGVkSAASLgoGZmFpbGVkGAIgASgLMhwucHJvdG9jb2wudjEuTWNwU2VydmVyRmFpbGVkSABCCAoGaGVhbHRoIhQKEk1jcFNlcnZlckNvbm5lY3RlZCIgCg9NY3BTZXJ2ZXJGYWlsZWQSDQoFZXJyb3IYASABKAkiLgoNU2Vzc2lvblBsdWdpbhIMCgRuYW1lGAEgASgJEg8KB3ZlcnNpb24YAiABKAkiwQEKDFNlc3Npb25FbmRlZBI1Cghub3JtYWxseRgBIAEoCzIhLnByb3RvY29sLnYxLlNlc3Npb25FbmRlZE5vcm1hbGx5SAASNAoIYnlfZXJyb3IYAiABKAsyIC5wcm90b2NvbC52MS5TZXNzaW9uRW5kZWRCeUVycm9ySAASOgoLYnlfc2h1dGRvd24YAyABKAsyIy5wcm90b2NvbC52MS5TZXNzaW9uRW5kZWRCeVNodXRkb3duSABCCAoGcmVhc29uIhYKFFNlc3Npb25FbmRlZE5vcm1hbGx5IiUKE1Nlc3Npb25FbmRlZEJ5RXJyb3ISDgoGZGV0YWlsGAEgASgJIhgKFlNlc3Npb25FbmRlZEJ5U2h1dGRvd24iHAoJVHVybkJlZ2FuEg8KB3R1cm5faWQYASABKAkixwEKCVR1cm5FbmRlZBIPCgd0dXJuX2lkGAEgASgJEi8KCWNvbXBsZXRlZBgCIAEoCzIaLnByb3RvY29sLnYxLlR1cm5Db21wbGV0ZWRIABIzCgtpbnRlcnJ1cHRlZBgDIAEoCzIcLnByb3RvY29sLnYxLlR1cm5JbnRlcnJ1cHRlZEgAEjgKC3VuZXhwbGFpbmVkGAQgASgLMiEucHJvdG9jb2wudjEuVHVybkVuZGVkVW5leHBsYWluZWRIAEIJCgdvdXRjb21lIg8KDVR1cm5Db21wbGV0ZWQiEQoPVHVybkludGVycnVwdGVkIikKFFR1cm5FbmRlZFVuZXhwbGFpbmVkEhEKCWluZmVyZW5jZRgBIAEoCSInCg5BZ2VudEhlYXJ0YmVhdBIVCg1saXZlX3dvcmtfaWRzGAEgAygJIk4KDlJlc3BvbnNlVGltaW5nEhIKCm1lc3NhZ2VfaWQYASABKAkSFgoOZmlyc3RfdG9rZW5fbXMYAiABKAMSEAoIdG90YWxfbXMYAyABKAMiNwoSUHJvZHVjZXJEaWFnbm9zdGljEhEKCW9wZXJhdGlvbhgBIAEoCRIOCgZkZXRhaWwYAiABKAkiRQoWU2Vzc2lvbklkZW50aXR5Q2hhbmdlZBIbChNwcmV2aW91c19zZXNzaW9uX2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSKqAwoXQWNjb3VudFVzYWdlT2JzZXJ2YXRpb24SGQoRcXVlcnlfaW5zdGFuY2VfaWQYASABKAkSDwoHdHVybl9pZBgCIAEoCRIWCg5ib3VuZGFyeV9hdF9tcxgDIAEoAxIWCg5vYnNlcnZlZF9hdF9tcxgEIAEoAxIZChFzYW1wbGVfbGF0ZW5jeV9tcxgFIAEoAxIZChFzdWJzY3JpcHRpb25fdHlwZRgGIAEoCRI5Cgp0dXJuX3N0YXJ0GAogASgLMiMucHJvdG9jb2wudjEuVHVyblN0YXJ0VXNhZ2VCb3VuZGFyeUgAEjUKCHR1cm5fZW5kGAsgASgLMiEucHJvdG9jb2wudjEuVHVybkVuZFVzYWdlQm91bmRhcnlIABI3CglhdmFpbGFibGUYFCABKAsyIi5wcm90b2NvbC52MS5BY2NvdW50VXNhZ2VBdmFpbGFibGVIARI7Cgt1bmF2YWlsYWJsZRgVIAEoCzIkLnByb3RvY29sLnYxLkFjY291bnRVc2FnZVVuYXZhaWxhYmxlSAFCCgoIYm91bmRhcnlCCQoHb3V0Y29tZSIYChZUdXJuU3RhcnRVc2FnZUJvdW5kYXJ5IhYKFFR1cm5FbmRVc2FnZUJvdW5kYXJ5IkQKFUFjY291bnRVc2FnZUF2YWlsYWJsZRIrCglmaXZlX2hvdXIYASABKAsyGC5wcm90b2NvbC52MS5Vc2FnZVdpbmRvdyJACgtVc2FnZVdpbmRvdxIbChN1dGlsaXphdGlvbl9wZXJjZW50GAEgASgBEhQKDHJlc2V0c19hdF9tcxgCIAEoAyK1AgoXQWNjb3VudFVzYWdlVW5hdmFpbGFibGUSQwoTc2VydmljZV91bmF2YWlsYWJsZRgBIAEoCzIkLnByb3RvY29sLnYxLlVzYWdlU2VydmljZVVuYXZhaWxhYmxlSAASRAoSd2luZG93X3VuYXZhaWxhYmxlGAIgASgLMiYucHJvdG9jb2wudjEuRml2ZUhvdXJXaW5kb3dVbmF2YWlsYWJsZUgAEkYKF3V0aWxpemF0aW9uX3VuYXZhaWxhYmxlGAMgASgLMiMucHJvdG9jb2wudjEuVXRpbGl6YXRpb25VbmF2YWlsYWJsZUgAEj0KEHNhbXBsaW5nX2ZhaWx1cmUYBCABKAsyIS5wcm90b2NvbC52MS5Vc2FnZVNhbXBsaW5nRmFpbHVyZUgAQggKBnJlYXNvbiIZChdVc2FnZVNlcnZpY2VVbmF2YWlsYWJsZSIbChlGaXZlSG91cldpbmRvd1VuYXZhaWxhYmxlIhgKFlV0aWxpemF0aW9uVW5hdmFpbGFibGUiJQoUVXNhZ2VTYW1wbGluZ0ZhaWx1cmUSDQoFY2F1c2UYASABKAlCKFomYWdlbnRyZXBsL3Byb3RvL3Byb3RvY29sL3YxO3Byb3RvY29sdjFiBnByb3RvMw");
+  fileDesc("Ch1wcm90b2NvbC92MS9ib29ra2VlcGluZy5wcm90bxILcHJvdG9jb2wudjEi5QQKEEJvb2trZWVwaW5nRW50cnkSMgoNc2Vzc2lvbl9iZWdhbhgBIAEoCzIZLnByb3RvY29sLnYxLlNlc3Npb25CZWdhbkgAEjIKDXNlc3Npb25fZW5kZWQYAiABKAsyGS5wcm90b2NvbC52MS5TZXNzaW9uRW5kZWRIABIsCgp0dXJuX2JlZ2FuGAMgASgLMhYucHJvdG9jb2wudjEuVHVybkJlZ2FuSAASLAoKdHVybl9lbmRlZBgEIAEoCzIWLnByb3RvY29sLnYxLlR1cm5FbmRlZEgAEjAKCWhlYXJ0YmVhdBgFIAEoCzIbLnByb3RvY29sLnYxLkFnZW50SGVhcnRiZWF0SAASNgoPcmVzcG9uc2VfdGltaW5nGAYgASgLMhsucHJvdG9jb2wudjEuUmVzcG9uc2VUaW1pbmdIABI+ChNwcm9kdWNlcl9kaWFnbm9zdGljGAcgASgLMh8ucHJvdG9jb2wudjEuUHJvZHVjZXJEaWFnbm9zdGljSAASRwoYc2Vzc2lvbl9pZGVudGl0eV9jaGFuZ2VkGAggASgLMiMucHJvdG9jb2wudjEuU2Vzc2lvbklkZW50aXR5Q2hhbmdlZEgAEkkKGWFjY291bnRfdXNhZ2Vfb2JzZXJ2YXRpb24YCSABKAsyJC5wcm90b2NvbC52MS5BY2NvdW50VXNhZ2VPYnNlcnZhdGlvbkgAEkcKGHJlc3BvbnNlX3VzYWdlX2NvcnJlY3RlZBgKIAEoCzIjLnByb3RvY29sLnYxLlJlc3BvbnNlVXNhZ2VDb3JyZWN0ZWRIAEIGCgRraW5kIsMCCgxTZXNzaW9uQmVnYW4SDQoFbW9kZWwYASABKAkSCwoDY3dkGAIgASgJEhUKDWFnZW50X3ZlcnNpb24YAyABKAkSJgoEYXV0aBgEIAEoCzIYLnByb3RvY29sLnYxLlNlc3Npb25BdXRoEhQKDG91dHB1dF9zdHlsZRgFIAEoCRIoCglmYXN0X21vZGUYBiABKAsyFS5wcm90b2NvbC52MS5GYXN0TW9kZRIOCgZza2lsbHMYCiADKAkSEQoJc3ViYWdlbnRzGAsgAygJEjIKC21jcF9zZXJ2ZXJzGAwgAygLMh0ucHJvdG9jb2wudjEuU2Vzc2lvbk1jcFNlcnZlchIrCgdwbHVnaW5zGA0gAygLMhoucHJvdG9jb2wudjEuU2Vzc2lvblBsdWdpbhIUCgxtZW1vcnlfcGF0aHMYDiADKAkieAoLU2Vzc2lvbkF1dGgSNQoMc3Vic2NyaXB0aW9uGAEgASgLMh0ucHJvdG9jb2wudjEuQXV0aFN1YnNjcmlwdGlvbkgAEioKB2FwaV9rZXkYAiABKAsyFy5wcm90b2NvbC52MS5BdXRoQXBpS2V5SABCBgoEYXV0aCISChBBdXRoU3Vic2NyaXB0aW9uIhwKCkF1dGhBcGlLZXkSDgoGc291cmNlGAEgASgJImMKCEZhc3RNb2RlEiUKAm9uGAEgASgLMhcucHJvdG9jb2wudjEuRmFzdE1vZGVPbkgAEicKA29mZhgCIAEoCzIYLnByb3RvY29sLnYxLkZhc3RNb2RlT2ZmSABCBwoFc3RhdGUiDAoKRmFzdE1vZGVPbiIdCgtGYXN0TW9kZU9mZhIOCgZyZWFzb24YASABKAkiTgoQU2Vzc2lvbk1jcFNlcnZlchIMCgRuYW1lGAEgASgJEiwKBmhlYWx0aBgCIAEoCzIcLnByb3RvY29sLnYxLk1jcFNlcnZlckhlYWx0aCKBAQoPTWNwU2VydmVySGVhbHRoEjQKCWNvbm5lY3RlZBgBIAEoCzIfLnByb3RvY29sLnYxLk1jcFNlcnZlckNvbm5lY3RlZEgAEi4KBmZhaWxlZBgCIAEoCzIcLnByb3RvY29sLnYxLk1jcFNlcnZlckZhaWxlZEgAQggKBmhlYWx0aCIUChJNY3BTZXJ2ZXJDb25uZWN0ZWQiIAoPTWNwU2VydmVyRmFpbGVkEg0KBWVycm9yGAEgASgJIi4KDVNlc3Npb25QbHVnaW4SDAoEbmFtZRgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJIsEBCgxTZXNzaW9uRW5kZWQSNQoIbm9ybWFsbHkYASABKAsyIS5wcm90b2NvbC52MS5TZXNzaW9uRW5kZWROb3JtYWxseUgAEjQKCGJ5X2Vycm9yGAIgASgLMiAucHJvdG9jb2wudjEuU2Vzc2lvbkVuZGVkQnlFcnJvckgAEjoKC2J5X3NodXRkb3duGAMgASgLMiMucHJvdG9jb2wudjEuU2Vzc2lvbkVuZGVkQnlTaHV0ZG93bkgAQggKBnJlYXNvbiIWChRTZXNzaW9uRW5kZWROb3JtYWxseSIlChNTZXNzaW9uRW5kZWRCeUVycm9yEg4KBmRldGFpbBgBIAEoCSIYChZTZXNzaW9uRW5kZWRCeVNodXRkb3duIhwKCVR1cm5CZWdhbhIPCgd0dXJuX2lkGAEgASgJIscBCglUdXJuRW5kZWQSDwoHdHVybl9pZBgBIAEoCRIvCgljb21wbGV0ZWQYAiABKAsyGi5wcm90b2NvbC52MS5UdXJuQ29tcGxldGVkSAASMwoLaW50ZXJydXB0ZWQYAyABKAsyHC5wcm90b2NvbC52MS5UdXJuSW50ZXJydXB0ZWRIABI4Cgt1bmV4cGxhaW5lZBgEIAEoCzIhLnByb3RvY29sLnYxLlR1cm5FbmRlZFVuZXhwbGFpbmVkSABCCQoHb3V0Y29tZSIPCg1UdXJuQ29tcGxldGVkIhEKD1R1cm5JbnRlcnJ1cHRlZCIpChRUdXJuRW5kZWRVbmV4cGxhaW5lZBIRCglpbmZlcmVuY2UYASABKAkiJwoOQWdlbnRIZWFydGJlYXQSFQoNbGl2ZV93b3JrX2lkcxgBIAMoCSJOCg5SZXNwb25zZVRpbWluZxISCgptZXNzYWdlX2lkGAEgASgJEhYKDmZpcnN0X3Rva2VuX21zGAIgASgDEhAKCHRvdGFsX21zGAMgASgDIlwKFlJlc3BvbnNlVXNhZ2VDb3JyZWN0ZWQSFgoOYXBpX21lc3NhZ2VfaWQYASABKAkSKgoFdXNhZ2UYAiABKAsyGy5jb252ZXJzYXRpb24udjEuVG9rZW5Vc2FnZSI3ChJQcm9kdWNlckRpYWdub3N0aWMSEQoJb3BlcmF0aW9uGAEgASgJEg4KBmRldGFpbBgCIAEoCSJFChZTZXNzaW9uSWRlbnRpdHlDaGFuZ2VkEhsKE3ByZXZpb3VzX3Nlc3Npb25faWQYASABKAkSDgoGcmVhc29uGAIgASgJIqoDChdBY2NvdW50VXNhZ2VPYnNlcnZhdGlvbhIZChFxdWVyeV9pbnN0YW5jZV9pZBgBIAEoCRIPCgd0dXJuX2lkGAIgASgJEhYKDmJvdW5kYXJ5X2F0X21zGAMgASgDEhYKDm9ic2VydmVkX2F0X21zGAQgASgDEhkKEXNhbXBsZV9sYXRlbmN5X21zGAUgASgDEhkKEXN1YnNjcmlwdGlvbl90eXBlGAYgASgJEjkKCnR1cm5fc3RhcnQYCiABKAsyIy5wcm90b2NvbC52MS5UdXJuU3RhcnRVc2FnZUJvdW5kYXJ5SAASNQoIdHVybl9lbmQYCyABKAsyIS5wcm90b2NvbC52MS5UdXJuRW5kVXNhZ2VCb3VuZGFyeUgAEjcKCWF2YWlsYWJsZRgUIAEoCzIiLnByb3RvY29sLnYxLkFjY291bnRVc2FnZUF2YWlsYWJsZUgBEjsKC3VuYXZhaWxhYmxlGBUgASgLMiQucHJvdG9jb2wudjEuQWNjb3VudFVzYWdlVW5hdmFpbGFibGVIAUIKCghib3VuZGFyeUIJCgdvdXRjb21lIhgKFlR1cm5TdGFydFVzYWdlQm91bmRhcnkiFgoUVHVybkVuZFVzYWdlQm91bmRhcnkiRAoVQWNjb3VudFVzYWdlQXZhaWxhYmxlEisKCWZpdmVfaG91chgBIAEoCzIYLnByb3RvY29sLnYxLlVzYWdlV2luZG93IkAKC1VzYWdlV2luZG93EhsKE3V0aWxpemF0aW9uX3BlcmNlbnQYASABKAESFAoMcmVzZXRzX2F0X21zGAIgASgDIrUCChdBY2NvdW50VXNhZ2VVbmF2YWlsYWJsZRJDChNzZXJ2aWNlX3VuYXZhaWxhYmxlGAEgASgLMiQucHJvdG9jb2wudjEuVXNhZ2VTZXJ2aWNlVW5hdmFpbGFibGVIABJEChJ3aW5kb3dfdW5hdmFpbGFibGUYAiABKAsyJi5wcm90b2NvbC52MS5GaXZlSG91cldpbmRvd1VuYXZhaWxhYmxlSAASRgoXdXRpbGl6YXRpb25fdW5hdmFpbGFibGUYAyABKAsyIy5wcm90b2NvbC52MS5VdGlsaXphdGlvblVuYXZhaWxhYmxlSAASPQoQc2FtcGxpbmdfZmFpbHVyZRgEIAEoCzIhLnByb3RvY29sLnYxLlVzYWdlU2FtcGxpbmdGYWlsdXJlSABCCAoGcmVhc29uIhkKF1VzYWdlU2VydmljZVVuYXZhaWxhYmxlIhsKGUZpdmVIb3VyV2luZG93VW5hdmFpbGFibGUiGAoWVXRpbGl6YXRpb25VbmF2YWlsYWJsZSIlChRVc2FnZVNhbXBsaW5nRmFpbHVyZRINCgVjYXVzZRgBIAEoCUIoWiZhZ2VudHJlcGwvcHJvdG8vcHJvdG9jb2wvdjE7cHJvdG9jb2x2MWIGcHJvdG8z", [file_conversation_v1_tokens]);
 
 /**
  * A fact about the session that renders as nothing.
@@ -124,6 +126,16 @@ export type BookkeepingEntry = Message<"protocol.v1.BookkeepingEntry"> & {
      */
     value: AccountUsageObservation;
     case: "accountUsageObservation";
+  } | {
+    /**
+     * The vendor's settled usage for a response whose own record states only
+     * the interim output count. It corrects an already-written measurement
+     * rather than saying anything the conversation consists of.
+     *
+     * @generated from field: protocol.v1.ResponseUsageCorrected response_usage_corrected = 10;
+     */
+    value: ResponseUsageCorrected;
+    case: "responseUsageCorrected";
   } | { case: undefined; value?: undefined };
 };
 
@@ -798,6 +810,53 @@ export const ResponseTimingSchema: GenMessage<ResponseTiming> = /*@__PURE__*/
   messageDesc(file_protocol_v1_bookkeeping, 23);
 
 /**
+ * The vendor's FINAL usage for one response, correcting the interim figure the
+ * response's own record carries.
+ *
+ * WHY A SEPARATE RECORD RATHER THAN A FIELD ON THE RESPONSE. The two facts come
+ * from different planes and at different times. A response's own usage is what
+ * the vendor stated when the message OPENED — final input and cache counters,
+ * interim output — and the file plane writes it. The final output count arrives
+ * later, on a stream frame, after the response is already recorded. A producer
+ * that could only state usage on the response would have to either withhold the
+ * response until the turn ended or restate it, and neither is available to it.
+ *
+ * IT IS BOOKKEEPING BECAUSE IT MEASURES THE CONVERSATION RATHER THAN
+ * PARTICIPATING IN IT — the same test that puts ResponseTiming here.
+ *
+ * @generated from message protocol.v1.ResponseUsageCorrected
+ */
+export type ResponseUsageCorrected = Message<"protocol.v1.ResponseUsageCorrected"> & {
+  /**
+   * Which response this corrects, keyed by the ANTHROPIC message id (`msg_…`).
+   *
+   * The vendor's own delta frame is ANONYMOUS — the identity arrives once, on
+   * the frame that opened the message — so a producer relaying a correction must
+   * name what it corrects. Never the SDK envelope uuid, which is minted fresh
+   * per emission.
+   *
+   * @generated from field: string api_message_id = 1;
+   */
+  apiMessageId: string;
+
+  /**
+   * The corrected figures, whole. REPLACES the response's own usage rather than
+   * adding to it: this is the same accounting restated with the output side
+   * settled, not a delta to apply.
+   *
+   * @generated from field: conversation.v1.TokenUsage usage = 2;
+   */
+  usage?: TokenUsage | undefined;
+};
+
+/**
+ * Describes the message protocol.v1.ResponseUsageCorrected.
+ * Use `create(ResponseUsageCorrectedSchema)` to create a new message.
+ */
+export const ResponseUsageCorrectedSchema: GenMessage<ResponseUsageCorrected> = /*@__PURE__*/
+  messageDesc(file_protocol_v1_bookkeeping, 24);
+
+/**
  * A diagnostic about the READER rather than the read.
  *
  * @generated from message protocol.v1.ProducerDiagnostic
@@ -823,7 +882,7 @@ export type ProducerDiagnostic = Message<"protocol.v1.ProducerDiagnostic"> & {
  * Use `create(ProducerDiagnosticSchema)` to create a new message.
  */
 export const ProducerDiagnosticSchema: GenMessage<ProducerDiagnostic> = /*@__PURE__*/
-  messageDesc(file_protocol_v1_bookkeeping, 24);
+  messageDesc(file_protocol_v1_bookkeeping, 25);
 
 /**
  * The vendor rotated the session's identity.
@@ -851,7 +910,7 @@ export type SessionIdentityChanged = Message<"protocol.v1.SessionIdentityChanged
  * Use `create(SessionIdentityChangedSchema)` to create a new message.
  */
 export const SessionIdentityChangedSchema: GenMessage<SessionIdentityChanged> = /*@__PURE__*/
-  messageDesc(file_protocol_v1_bookkeeping, 25);
+  messageDesc(file_protocol_v1_bookkeeping, 26);
 
 /**
  * Records one attempt to measure subscription usage at a turn boundary.
@@ -953,7 +1012,7 @@ export type AccountUsageObservation = Message<"protocol.v1.AccountUsageObservati
  * Use `create(AccountUsageObservationSchema)` to create a new message.
  */
 export const AccountUsageObservationSchema: GenMessage<AccountUsageObservation> = /*@__PURE__*/
-  messageDesc(file_protocol_v1_bookkeeping, 26);
+  messageDesc(file_protocol_v1_bookkeeping, 27);
 
 /**
  * Marks an observation taken immediately before prompt submission.
@@ -968,7 +1027,7 @@ export type TurnStartUsageBoundary = Message<"protocol.v1.TurnStartUsageBoundary
  * Use `create(TurnStartUsageBoundarySchema)` to create a new message.
  */
 export const TurnStartUsageBoundarySchema: GenMessage<TurnStartUsageBoundary> = /*@__PURE__*/
-  messageDesc(file_protocol_v1_bookkeeping, 27);
+  messageDesc(file_protocol_v1_bookkeeping, 28);
 
 /**
  * Marks an observation taken after the terminal result is received.
@@ -983,7 +1042,7 @@ export type TurnEndUsageBoundary = Message<"protocol.v1.TurnEndUsageBoundary"> &
  * Use `create(TurnEndUsageBoundarySchema)` to create a new message.
  */
 export const TurnEndUsageBoundarySchema: GenMessage<TurnEndUsageBoundary> = /*@__PURE__*/
-  messageDesc(file_protocol_v1_bookkeeping, 28);
+  messageDesc(file_protocol_v1_bookkeeping, 29);
 
 /**
  * Contains subscription-usage windows returned by the usage service.
@@ -1004,7 +1063,7 @@ export type AccountUsageAvailable = Message<"protocol.v1.AccountUsageAvailable">
  * Use `create(AccountUsageAvailableSchema)` to create a new message.
  */
 export const AccountUsageAvailableSchema: GenMessage<AccountUsageAvailable> = /*@__PURE__*/
-  messageDesc(file_protocol_v1_bookkeeping, 29);
+  messageDesc(file_protocol_v1_bookkeeping, 30);
 
 /**
  * Describes utilization and reset time for one account-usage window.
@@ -1032,7 +1091,7 @@ export type UsageWindow = Message<"protocol.v1.UsageWindow"> & {
  * Use `create(UsageWindowSchema)` to create a new message.
  */
 export const UsageWindowSchema: GenMessage<UsageWindow> = /*@__PURE__*/
-  messageDesc(file_protocol_v1_bookkeeping, 30);
+  messageDesc(file_protocol_v1_bookkeeping, 31);
 
 /**
  * Explains why an account-usage measurement could not be obtained.
@@ -1085,7 +1144,7 @@ export type AccountUsageUnavailable = Message<"protocol.v1.AccountUsageUnavailab
  * Use `create(AccountUsageUnavailableSchema)` to create a new message.
  */
 export const AccountUsageUnavailableSchema: GenMessage<AccountUsageUnavailable> = /*@__PURE__*/
-  messageDesc(file_protocol_v1_bookkeeping, 31);
+  messageDesc(file_protocol_v1_bookkeeping, 32);
 
 /**
  * Marks unavailability of the account-usage API.
@@ -1100,7 +1159,7 @@ export type UsageServiceUnavailable = Message<"protocol.v1.UsageServiceUnavailab
  * Use `create(UsageServiceUnavailableSchema)` to create a new message.
  */
 export const UsageServiceUnavailableSchema: GenMessage<UsageServiceUnavailable> = /*@__PURE__*/
-  messageDesc(file_protocol_v1_bookkeeping, 32);
+  messageDesc(file_protocol_v1_bookkeeping, 33);
 
 /**
  * Marks absence of the five-hour window.
@@ -1115,7 +1174,7 @@ export type FiveHourWindowUnavailable = Message<"protocol.v1.FiveHourWindowUnava
  * Use `create(FiveHourWindowUnavailableSchema)` to create a new message.
  */
 export const FiveHourWindowUnavailableSchema: GenMessage<FiveHourWindowUnavailable> = /*@__PURE__*/
-  messageDesc(file_protocol_v1_bookkeeping, 33);
+  messageDesc(file_protocol_v1_bookkeeping, 34);
 
 /**
  * Marks absence of utilization within the five-hour window.
@@ -1130,7 +1189,7 @@ export type UtilizationUnavailable = Message<"protocol.v1.UtilizationUnavailable
  * Use `create(UtilizationUnavailableSchema)` to create a new message.
  */
 export const UtilizationUnavailableSchema: GenMessage<UtilizationUnavailable> = /*@__PURE__*/
-  messageDesc(file_protocol_v1_bookkeeping, 34);
+  messageDesc(file_protocol_v1_bookkeeping, 35);
 
 /**
  * Records an error encountered while sampling account usage.
@@ -1151,5 +1210,5 @@ export type UsageSamplingFailure = Message<"protocol.v1.UsageSamplingFailure"> &
  * Use `create(UsageSamplingFailureSchema)` to create a new message.
  */
 export const UsageSamplingFailureSchema: GenMessage<UsageSamplingFailure> = /*@__PURE__*/
-  messageDesc(file_protocol_v1_bookkeeping, 35);
+  messageDesc(file_protocol_v1_bookkeeping, 36);
 

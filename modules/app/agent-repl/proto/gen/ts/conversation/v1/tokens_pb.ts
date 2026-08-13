@@ -22,7 +22,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/tokens.proto.
  */
 export const file_conversation_v1_tokens: GenFile = /*@__PURE__*/
-  fileDesc("Chxjb252ZXJzYXRpb24vdjEvdG9rZW5zLnByb3RvEg9jb252ZXJzYXRpb24udjEikQEKClRva2VuVXNhZ2USMwoKaW5wdXRfaGl0cxgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5Ub2tlbkNhY2hlSGl0cxI3CgxpbnB1dF9taXNzZXMYAiABKAsyIS5jb252ZXJzYXRpb24udjEuVG9rZW5DYWNoZU1pc3NlcxIVCg1vdXRwdXRfdG9rZW5zGAMgASgEIh4KDlRva2VuQ2FjaGVIaXRzEgwKBHJlYWQYASABKAQiNgoQVG9rZW5DYWNoZU1pc3NlcxIPCgd3cml0dGVuGAEgASgEEhEKCXVud3JpdHRlbhgCIAEoBEIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM");
+  fileDesc("Chxjb252ZXJzYXRpb24vdjEvdG9rZW5zLnByb3RvEg9jb252ZXJzYXRpb24udjEisQEKClRva2VuVXNhZ2USMwoKaW5wdXRfaGl0cxgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5Ub2tlbkNhY2hlSGl0cxI3CgxpbnB1dF9taXNzZXMYAiABKAsyIS5jb252ZXJzYXRpb24udjEuVG9rZW5DYWNoZU1pc3NlcxIVCg1vdXRwdXRfdG9rZW5zGAMgASgEEh4KFm91dHB1dF90aGlua2luZ190b2tlbnMYBCABKAQiHgoOVG9rZW5DYWNoZUhpdHMSDAoEcmVhZBgBIAEoBCI2ChBUb2tlbkNhY2hlTWlzc2VzEg8KB3dyaXR0ZW4YASABKAQSEQoJdW53cml0dGVuGAIgASgEQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw");
 
 /**
  * THE ONE CANONICAL TOKEN SHAPE, and the only representation in which this
@@ -79,11 +79,26 @@ export type TokenUsage = Message<"conversation.v1.TokenUsage"> & {
 
   /**
    * Generated tokens, including extended thinking where the API includes it.
-   * There is no output cache, so this is a plain total with no partition.
+   * There is no output cache, so no cache partition applies; this remains the
+   * TOTAL, and `output_thinking_tokens` below names a part of it.
    *
    * @generated from field: uint64 output_tokens = 3;
    */
   outputTokens: bigint;
+
+  /**
+   * The part of `output_tokens` the vendor attributed to extended thinking.
+   *
+   * A PARTITION OF output_tokens, NOT AN ADDITION TO IT — never sum the two.
+   * Carried because the old narrow usage projection could not express it, and a
+   * record built without it is durably unfaithful to what the vendor reported.
+   *
+   * Zero when the vendor reported no thinking tokens, which is also what a
+   * response with no extended thinking reports.
+   *
+   * @generated from field: uint64 output_thinking_tokens = 4;
+   */
+  outputThinkingTokens: bigint;
 };
 
 /**
