@@ -69,9 +69,9 @@ enum RenderState {
   // DEPRECATED by RENDER_STATE_VENDOR_BLOCKED. It was never a state of its
   // own: an errored turn end is an abnormal CONCLUSION, which is exactly
   // what VENDOR_BLOCKED means, and its own color said "stopped" in a way
-  // that read as neither working nor blocked. The SSM no longer resolves
-  // it; the number stays reserved-by-use so no future state reuses it and
-  // an old frontend decoding an old log still reads what it always did.
+  // that read as neither working nor blocked. The SSM no longer resolves it,
+  // and it stays in the vocabulary so an old frontend decoding an old log
+  // still reads what it always did.
   RENDER_STATE_STOP_FAILED = 7 [deprecated = true];
   RENDER_STATE_MERGING = 8;
   RENDER_STATE_MERGE_QUEUED = 9;
@@ -122,13 +122,12 @@ enum RenderState {
   // `thinking` row from the turn it was driving when it broke; reporting that
   // would advertise an agent nobody is connected to.
   //
-  // KEEPS FIELD NUMBER 20, which it held while it was named
-  // RENDER_STATE_DORMANT. The rename is deliberately wire-compatible: an
-  // append-only state log written by an older daemon still carries the literal
-  // text `dormant`, and the SSM resolves that alias onto this state forever.
-  // What changed is only that the benign half of the old DORMANT — the
-  // deliberate hibernation, the never-wired workspace — moved to HIBERNATED
-  // below, so that BLUE finally means "something is actually wrong".
+  // THE SSM RESOLVES THE LITERAL TEXT `dormant` ONTO THIS STATE, FOREVER. The
+  // state log is append-only, so rows written before this state carried its
+  // present name still have to resolve to something, and this is the state
+  // they mean: not wired, and broken. The benign half of that older reading —
+  // the deliberate hibernation, the never-wired workspace — is HIBERNATED
+  // below, which is what lets BLUE mean "something is actually wrong".
   RENDER_STATE_SEVERED = 20;
   // Additive: NOT WIRED, and NOTHING IS WRONG — the session was deliberately
   // put to sleep to reclaim its memory, or nothing has ever been wired to this
@@ -278,14 +277,14 @@ message WorkspaceState {
   // OPAQUE. Compared byte-wise, never parsed. Its composition is the daemon's
   // and is free to change without a wire change, which is only true for as
   // long as nothing reads structure into it.
-  string fence = 19;
+  string fence = 3;
   // Primary UX projection resolved by the daemon. This is retained for merge
   // and context-cut presentation; it is not the authority for connectivity or
   // session status.
-  RenderState state = 3;
+  RenderState state = 4;
   // Resolution inputs (SSM):
-  bool turn_active = 4;
-  int64 live_task_count = 5;
+  bool turn_active = 5;
+  int64 live_task_count = 6;
   string cause_kind = 7;  // event kind that caused this transition
   uint64 cause_seq = 8;   // store seq when event-caused (0 = daemon-local)
   int64 at_ms = 9;
@@ -298,47 +297,35 @@ message WorkspaceState {
   // and answers the only question a renderer has.
   string controller_generation_id = 12;
   repeated RuntimeFault active_faults = 13;
-  // The coarse flat merge trio: RETIRED, superseded by merge_status (18).
-  //
-  // `merge_phase` was one word for WHAT a merge was doing, and
-  // `merge_queue_position` / `merge_queue_depth` said WHERE it sat among the
-  // workspaces contending for the same repository. All three were a lossy
-  // re-derivation of facts the merge run itself already publishes: MergeStatus
-  // names a RUN, carries the phase as WHICH oneof arm is set, and reports the
-  // queue place the run was actually ADMITTED at rather than a snapshot
-  // re-read at push time. Two forms of the same fact could disagree on a
-  // frame, so the weaker one is gone rather than kept in sync.
-  //
-  // The merge AXIS is untouched: it still drives RenderState (3) and is still
-  // what MergeStatus is stamped behind.
-  reserved 6, 14, 15;
-  reserved "merge_phase", "merge_queue_position", "merge_queue_depth";
   // Whether merge.Coordinator holds the exclusivity lease on this workspace's
   // shim. While held, USER prompting is blocked (the merge owns the session)
   // and every message the session produces carries
   // CONVERSATION_SOURCE_MERGE.
-  bool merge_lease_held = 16;
+  bool merge_lease_held = 14;
   // WHEN this workspace's merge landed, in unix millis. 0 means it has never
   // reached `merged`, which is the only reading of absence: a merged
   // workspace always carries the instant it merged at.
   //
   // WRITTEN ONCE, at the `merged` transition, and never moved afterwards.
-  // merge_status (18) reports whichever run is currently newest and can
+  // `merge_status` reports whichever run is currently newest and can
   // therefore be superseded; this is the durable record that the merge
   // LANDED, so a later transition on any axis leaves it exactly where it was.
   //
   // It is its own persisted fact rather than a re-derivation over the state
   // log, so a frontend ordering a recently-merged section reads the identical
   // instant from every push, snapshot and resync.
-  int64 merged_at_ms = 17;
+  int64 merged_at_ms = 15;
   // THE merge run's live progress, and the ONLY merge-run surface on this
-  // message. See MergeStatus. The coarse flat trio it replaced is reserved
-  // above; there is no second, weaker form of these facts to disagree with.
+  // message. See MergeStatus. IT NAMES A RUN, carries the phase as WHICH oneof
+  // arm is set, and reports the queue place the run was actually ADMITTED at.
+  // There is deliberately no second, flatter form of these facts on this
+  // message: two forms of one fact can disagree on a single frame, so the
+  // resolved run is the only one that exists.
   //
   // UNSET means this workspace has no merge to report — the merge axis has
   // never spoken for it, or its axis is cleared. It is never a zero-valued
   // status standing in for absence.
-  MergeStatus merge_status = 18;
+  MergeStatus merge_status = 16;
   // THE OUTSTANDING QUESTION about taking this workspace's merge off the
   // queue. See MergeDequeueOffer: an interrupt no longer performs the queue
   // half, it asks, and this is where the asking lives.
@@ -348,7 +335,7 @@ message WorkspaceState {
   // terminal, or dropped because the merge left the queue on its own. A
   // frontend draws the card if and only if this field is set, so clearing it
   // IS how the card comes down; there is no second dismissal channel.
-  MergeDequeueOffer merge_dequeue_offer = 20;
+  MergeDequeueOffer merge_dequeue_offer = 17;
 }
 
 // A PER-SESSION CATALOG ENTRY, not a statement about who owns a workspace.
@@ -373,12 +360,6 @@ message SessionView {
   // WorkspaceGateView for the hibernation gate, TopbarView for the identity
   // line, TokenBreakdownView for economics, and a resolved failure card for a
   // terminal session's account.
-  //
-  // 14 was death_reason (string): RETIRED (step 11). It had two producers
-  // and zero readers on either frontend; `death` below (F4) is the sole
-  // reader-facing account now.
-  reserved 14;
-  reserved "death_reason";
   string workspace = 1;
   // WHICH session this catalog entry describes — a correlation key, never a
   // binding. It says "the facts below belong to this session"; it does not
@@ -411,36 +392,36 @@ message SessionView {
   string cwd = 12;
   // GET /sessions parity so Emacs can drop HTTP entirely.
   bool terminal = 13;
-  bool rehydratable = 15;
-  bool hibernated = 16;
-  int64 pending_permissions = 17;
+  bool rehydratable = 14;
+  bool hibernated = 15;
+  int64 pending_permissions = 16;
   // Account identity — the CLAUDE_CONFIG_DIR the session's
   // shim runs against (account switching is daemon-executed, webapp-initiated).
-  string config_dir = 18;
+  string config_dir = 17;
   // Whether this session's on-disk transcript has been read
   // into the store — the NEVER-BLUE completion signal (see BackfillState).
-  BackfillState backfill = 19;
-  // The TYPED account of why this session is terminal,
-  // superseding the free-string death_reason (RETIRED, step 11).
+  BackfillState backfill = 18;
+  // The TYPED account of why this session is terminal, and the ONLY
+  // reader-facing account of it.
   //
-  // death_reason was a free string with two producers, zero readers, and no
-  // way for a frontend to know what class of failure it described. This is
-  // the same fact classified once, daemon-side, so the dead-state card can
-  // render it the way every other failure renders. Unset while the session
+  // CLASSIFIED ONCE, DAEMON-SIDE, never a free string: a frontend that is
+  // handed prose cannot know what class of failure it describes, so it cannot
+  // color it, group it, or offer the right remedy. Typed, the dead-state card
+  // renders it the way every other failure renders. Unset while the session
   // lives.
-  FailureCardView death = 20;
+  FailureCardView death = 19;
   // The SDK-published set this session can deliberately select.  A frontend
   // only renders these choices; it never invents or owns a model selection.
-  repeated protocol.v1.ModelOption model_options = 21;
-  // 22 was token_utilization (SessionTokenUtilization): a persistence
-  // aggregate shipped whole so a renderer could re-derive rows from it.
-  // TokenBreakdownView carries those rows resolved.
-  reserved 22;
-  reserved "token_utilization";
+  repeated protocol.v1.ModelOption model_options = 20;
+  // NO PERSISTENCE AGGREGATE RIDES THIS MESSAGE. Token economics is durable
+  // evidence with its own home, and what a frontend needs of it arrives
+  // already digested as TokenBreakdownView's resolved rows — never as a whole
+  // aggregate a renderer is expected to re-derive rows from itself.
+  //
   // Present iff the session is hibernated; the typed account behind the
-  // `hibernated` bool (16), which stays as its compatibility projection.
+  // `hibernated` bool, which stays as its coarse projection.
   // A frontend renders the revival gate from this.
-  HibernationDetail hibernation = 23;
+  HibernationDetail hibernation = 21;
 }
 
 // Whether a session's on-disk transcript has been backfilled into the store.
@@ -493,33 +474,23 @@ message DaemonView {
   string daemon_version = 4;
 }
 
-// EPHEMERAL long-tool liveness relay. The shim already emits
-// core.v1.HeartbeatProgress over its UDS while a tool runs; before this arm
-// existed the daemon had nowhere to put it and dropped it (a schema-forced
-// drop). This is the arm.
+// EPHEMERAL long-tool liveness relay: the arm the daemon puts a running tool's
+// liveness on, so a long-running tool stops looking hung. Like TypingDelta it
+// is never persisted and never appears in a StateSnapshot — a frontend that
+// reconnects simply waits for the next heartbeat.
 //
-// The embedded HeartbeatProgress is carried UNCHANGED, exactly as TypingDelta
-// carries ContentDelta: the daemon relays, it does not re-type. Consumers key
-// on progress.tool_use_id to find the running tool and use
-// progress.elapsed_seconds to tick its liveness, so a long-running tool stops
-// looking hung. Like TypingDelta it is never persisted and never appears in a
-// StateSnapshot — a frontend that reconnects simply waits for the next
-// heartbeat.
+// KNOWN GAP: THIS VIEW CURRENTLY HAS NOTHING TO TICK WITH. The per-tool
+// progress a renderer would need (which tool, how long it has been running) is
+// a fact ABOUT a turn, so BookkeepingEntry is its home — and bookkeeping never
+// reaches a client, and no resolved frontend spelling of it exists yet. So the
+// view carries a workspace and a fence and no payload. Stated loudly rather
+// than left to be discovered by a frontend looking for a field to render.
 message HeartbeatView {
-  // 2 was session_id. A frontend has no session vocabulary: the only question
-  // it ever asked of that field was "is this push still current", which the
-  // fence answers without naming what rotated.
-  reserved 2;
-  reserved "session_id";
+  // WHICH WORKSPACE this liveness belongs to, and the only addressing this
+  // view carries. A rendering frontend holds no session vocabulary; the one
+  // question it has beyond "which workspace" is "is this push still current",
+  // and the fence below answers that without naming what rotated.
   string workspace = 1;
-  // 3 WAS `progress`, carrying the retired protocol.v1.HeartbeatProgress — the
-  // tool_use_id and elapsed_seconds this view exists to relay. NOTHING REPLACES
-  // IT: tool progress is a fact ABOUT a turn, so BookkeepingEntry is its home,
-  // but bookkeeping never reaches a client and no resolved frontend spelling of
-  // it exists. HeartbeatView is left with a workspace and a fence and nothing to
-  // tick. See the gap note.
-  reserved 3;
-  reserved "progress";
   // The workspace's staleness FENCE at the moment the daemon produced this
   // push: an opaque token the client compares BYTE-WISE against the fence on
   // the workspace's current WorkspaceState, and never parses, splits or
@@ -529,5 +500,5 @@ message HeartbeatView {
   // The daemon mints it and is the only thing that can read meaning into it.
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
-  string fence = 4;
+  string fence = 2;
 }

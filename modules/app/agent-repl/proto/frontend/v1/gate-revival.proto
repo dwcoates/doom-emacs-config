@@ -16,16 +16,16 @@ message HibernationDetail {
     // The keep-alive loop reached its configured maximum: idle time crossed
     // the cutoff, so the daemon stopped pinging and hibernated in the same
     // transition (the two are one act by construction).
-    HibernationIdleCutoff idle_cutoff = 10;
+    HibernationIdleCutoff idle_cutoff = 2;
     // The user forced it via HibernateWorkspaceCmd.
-    HibernationForced forced = 11;
+    HibernationForced forced = 3;
     // The keep-alive loop discovered, at a time-since check against the
     // durably recorded last turn end, that the expected cache TTL had
     // already elapsed before a ping could fire (laptop sleep, daemon
     // downtime). Pinging a cold cache would pay full re-ingest cost for
     // nothing, so the discovery IS the hibernate transition — reported
     // loudly to the user rather than silently absorbed.
-    HibernationCacheExpired cache_expired = 12;
+    HibernationCacheExpired cache_expired = 4;
   }
 }
 
@@ -148,8 +148,8 @@ message WorkspaceGateView {
   // WHETHER the gate is open, as arms, so that a closed gate always arrives
   // with the account the revival card needs to render.
   oneof gate {
-    WorkspaceGateOpen open = 10;
-    WorkspaceGateHibernated hibernated = 11;
+    WorkspaceGateOpen open = 3;
+    WorkspaceGateHibernated hibernated = 4;
   }
 }
 

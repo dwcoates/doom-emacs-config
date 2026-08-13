@@ -22,10 +22,6 @@ message SubmitPromptCmd {
 // refuses with CommandAck.interrupt_confirm_required and performs the
 // interrupt only on a resend carrying confirm_agents=true — stopping working
 // subagents is the one interrupt worth a deliberate second keystroke.
-//
-// (The retired `hard` flag also lived at field 1: it promised a soft variant
-// no layer implemented, and was deleted rather than reserved — this repo had
-// no live frontend commitments at the time.)
 message InterruptCmd {
   bool confirm_agents = 1;
 }
@@ -85,10 +81,10 @@ message DetachedAgentsCancelled {
   int64 count = 1;
 }
 
-// frontend.v1.NoDetachedAgentsRunning (empty) and
-// frontend.v1.DetachedCancelUnsupported (one `detail` string) were declared
-// here, field for field identical to protocol.v1's. Both are shim-wire facts
-// the daemon forwards unchanged, so the arms above name protocol.v1's directly.
+// TWO OF THE THREE ARMS ABOVE NAME protocol.v1's MESSAGES DIRECTLY. "Nothing
+// was running" and "this shim cannot be asked" are shim-wire facts the daemon
+// forwards unchanged, so this package keeps no second copy of them to drift
+// against the originals.
 //
 // THE DAEMON STILL REFUSES ON THE `nothing_running` ARM (the ack carries
 // ok=false alongside it): a cancel that stopped nothing is a keystroke that did
@@ -169,13 +165,10 @@ message QueueClassificationError {
 
 // One prompt the daemon is holding.
 message QueueEntry {
-  // 4 was classification (an enum), 5 was rationale, 6 was accepted: one
-  // verdict spread over three plain fields, so "accepted" could be set on an
-  // entry the classifier never held and a rationale could arrive with no
-  // verdict to explain. The classification oneof below carries each verdict's
-  // own facts on its own arm.
-  reserved 4, 5, 6;
-  reserved "classification", "rationale", "accepted";
+  // THE VERDICT IS ONE ONEOF, never a plain enum with loose companion fields
+  // beside it. Each verdict's own facts — a rationale, an acceptance — live on
+  // the arm that owns them, so a rationale cannot arrive with no verdict to
+  // explain and an acceptance cannot be set on an entry no classifier held.
   string id = 1;
   string text = 2;
   int64 queued_at_ms = 3;
@@ -183,15 +176,15 @@ message QueueEntry {
   // unset on a wire entry: an entry with no arm here is a malformed frame and
   // is rejected loudly rather than rendered as pending.
   oneof classification {
-    QueueClassificationPending pending = 10;
-    QueueClassificationInterject interject = 11;
-    QueueClassificationHold hold_for_turn_end = 12;
-    QueueClassificationError error = 13;
+    QueueClassificationPending pending = 4;
+    QueueClassificationInterject interject = 5;
+    QueueClassificationHold hold_for_turn_end = 6;
+    QueueClassificationError error = 7;
     // No classifier ran and none will: the turn in front of this entry is a
     // context cut, which is never interrupted. Delivery is the ordinary
     // turn-end drain's, so this arm changes WHO decided rather than WHEN the
     // prompt runs.
-    QueueClassificationUninterruptibleTurn uninterruptible_turn = 15;
+    QueueClassificationUninterruptibleTurn uninterruptible_turn = 8;
   }
   // WHAT is holding this entry, when something other than a running turn is.
   //
@@ -211,7 +204,7 @@ message QueueEntry {
     // daemon swap, so such a prompt is delayed, never lost. A frontend
     // renders a dedicated lease explanation from this arm instead of the
     // classification.
-    QueueEntryShutdownHold shutdown = 7;
+    QueueEntryShutdownHold shutdown = 9;
     // Held because a cache keep-alive turn is in flight. The classifier NEVER
     // runs on such an entry and there is NO force-through: the keep-alive must
     // complete before the rewind-and-submit can run, so the only exits are
@@ -219,7 +212,7 @@ message QueueEntry {
     // this entry) or QueueCancelCmd. A frontend renders a dedicated "waiting
     // on a keep-alive response" explanation from this arm instead of the
     // classification.
-    QueueEntryKeepAliveHold keep_alive = 8;
+    QueueEntryKeepAliveHold keep_alive = 10;
     // Held because a compact-first revival's compaction is still pending. Like
     // the other two holds, the classifier NEVER runs on such an entry and
     // there is NO force-through: the exits are delivery once the compaction
@@ -228,12 +221,12 @@ message QueueEntry {
     // a leak, not a delay), or QueueCancelCmd. A frontend renders a dedicated
     // "waiting on the revival's compaction" explanation from this arm instead
     // of the classification.
-    QueueEntryRevivalHold revival = 9;
+    QueueEntryRevivalHold revival = 11;
     // Held because the session's shim is being restarted onto the current
     // build at the turn boundary (automatic stale-shim refresh). Like the
     // other holds, the classifier never runs on such an entry; the exit is
     // delivery the moment the restarted shim reports ready.
-    QueueEntryBuildRefreshHold build_refresh = 14;
+    QueueEntryBuildRefreshHold build_refresh = 12;
   }
 }
 
@@ -252,13 +245,11 @@ message QueueEntryKeepAliveHold {
 }
 
 // The pending compact-first revival holding a queue entry.
+// DELIBERATELY EMPTY: the arm's presence is the whole fact it carries. A
+// revival is a WORKSPACE-level event and the entry already rides its
+// workspace's queue, so naming a session here would join the entry to nothing
+// the client could not already reach.
 message QueueEntryRevivalHold {
-  // 1 was session_id, naming the session being revived. A revival is a
-  // WORKSPACE-level event and the entry already rides its workspace's queue,
-  // so the id joined the entry to nothing the client could not already
-  // reach. The arm's presence is the whole fact it carries.
-  reserved 1;
-  reserved "session_id";
 }
 
 // The entry waits for its session's shim to restart onto the current build
@@ -270,13 +261,11 @@ message QueueEntryBuildRefreshHold {}
 // An empty entries list is a meaningful value (the queue drained, or the
 // session died), not an absent one.
 message QueueView {
-  // 2 was session_id. A frontend has no session vocabulary: the only question
-  // it ever asked of that field was "is this push still current", which the
-  // fence answers without naming what rotated.
-  reserved 2;
-  reserved "session_id";
+  // WORKSPACE-ADDRESSED, never session-addressed. A frontend has no session
+  // vocabulary; the only currency question it ever asks is "is this push still
+  // current", which the fence below answers without naming what rotated.
   string workspace = 1;
-  repeated QueueEntry entries = 3;
+  repeated QueueEntry entries = 2;
   // The workspace's staleness FENCE at the moment the daemon produced this
   // push: an opaque token the client compares BYTE-WISE against the fence on
   // the workspace's current WorkspaceState, and never parses, splits or
@@ -286,7 +275,7 @@ message QueueView {
   // The daemon mints it and is the only thing that can read meaning into it.
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
-  string fence = 4;
+  string fence = 3;
 }
 
 // Deliver this entry NOW — the user overriding the classifier, or not waiting
