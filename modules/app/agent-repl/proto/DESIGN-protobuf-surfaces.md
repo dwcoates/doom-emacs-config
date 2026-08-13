@@ -31,7 +31,30 @@ it carries either a `conversation.MessageEntry` or a `protocol.BookkeepingEntry`
 It does not collapse when bookkeeping leaves — the store persists bookkeeping
 too, so a stored record must still be able to hold one.
 
-Every package keeps a `v1` suffix.
+Every package keeps a `v1` suffix, and the five are ROOT namespaces —
+`agentshim.v1`, `conversation.v1`, `protocol.v1`, `frontend.v1`, `state.v1`. There
+is no umbrella prefix: `agentshim` is the name of the surface holding
+shim-specific internals, so it cannot also be the namespace everything else
+hangs under.
+
+## Collecting gaps rather than fixing them
+
+While the model is being implemented, two situations — and only these two —
+indicate a POTENTIAL gap in the new schema:
+
+1. The proto build breaks after something is removed from the old packages.
+2. An implementing subagent finds existing code parsing data into an old proto
+   shape that has no counterpart in the new one.
+
+In neither case is a change made. The situation is NOTED and collected. Only
+once the implementation attempt is complete are the collected cases taken up
+together, as one remediation conversation.
+
+**Why this lives here**: a gap found mid-implementation is evidence, not a
+verdict — it may be a real omission, or bad modeling, an abstraction leak, or a
+dead feature, and that judgment needs the whole set in view. Letting each
+implementing agent patch the schema where it happens to trip is how six agents
+produce six unilateral contract changes nobody reconciled.
 
 Store↔sidecar traffic — the cursor messages — is `agentshim`, not `protocol`:
 it never crosses the daemon boundary, which is the only boundary `protocol`
