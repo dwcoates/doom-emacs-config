@@ -50,16 +50,16 @@ message MessagePageRequest {
   // be answered at all: there is no "the" conversation from the store's side.
   // It is a ROUTING key, never a position — it says which history to read, and
   // says nothing about where in that history the read starts.
-  string session_id = 4;
+  string session_id = 2;
   oneof anchor {
     // Anchor at the newest message held. The verb a cold open uses, and the
     // one the old vocabulary could not express: a reader that does not know
     // the head seq could not name it.
-    MessagePageHead head = 2;
+    MessagePageHead head = 3;
     // Continue below a page already received, using its last_page_seq
     // VERBATIM. This names a place the caller has DEMONSTRABLY BEEN, and walks
     // away from the history rather than into it.
-    uint64 before_seq = 3;
+    uint64 before_seq = 4;
   }
 }
 
