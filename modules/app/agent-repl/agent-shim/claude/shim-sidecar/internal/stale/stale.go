@@ -20,7 +20,8 @@ import (
 	"sync"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
@@ -116,55 +117,54 @@ func (t *Tracker) Open(id string, kind tail.Kind, session, outputPath string, st
 }
 
 // Restore replaces the in-memory tracker with the store's authoritative
-// persisted open-task set. It validates the complete snapshot before mutation,
-// so a malformed persisted lifecycle leaves the prior tracker intact and
-// prevents the sidecar link from coming up.
-func (t *Tracker) Restore(states []*corev1.OpenTaskState) error {
+// persisted open-task set.
+//
+// IT CAN NO LONGER RESTORE ANYTHING, AND THE REASON IS A SCHEMA HOLE RATHER
+// THAN A FAILURE. `OpenTaskState.started` carried the TaskStarted record that
+// opened a task — its id, its kind, its session, its output path — and it was
+// retired with no successor. What is left says only WHEN a task was last active,
+// which cannot name a task, so there is nothing to key a restored entry on.
+//
+// The consequences are stated rather than smoothed over, because every one of
+// them is a real behavior change:
+//
+//   - A task open when this process restarts is not tracked, so it is never
+//     LOST-swept. It sits in the feed as running until something else ends it.
+//   - The boot sweep has nothing to sweep, so tasks killed by a reboot stay
+//     running rather than being resolved to LOST.
+//   - The spool-owner index cannot be seeded (see the sidecar's seedOwners), so
+//     a live task's spool stays unattributed until the transcript that announced
+//     it is re-read.
+//
+// It still VALIDATES what remains and still refuses a malformed snapshot, so the
+// link cannot come up on evidence the store contradicts itself about. What it
+// will not do is invent a task identity the schema no longer carries.
+func (t *Tracker) Restore(states []*agentshimv1.OpenTaskState) error {
 	t.log.With(logging.Context{Operation: "restore-open-tasks"}).LogVerbose("restore requested states=%d", len(states))
-	restored := make(map[taskKey]*task, len(states))
 	for _, state := range states {
-		if state == nil || state.GetStarted() == nil {
-			err := fmt.Errorf("stale: recovery contains an open task with no start event")
+		if state == nil {
+			err := fmt.Errorf("stale: recovery contains a nil open task")
 			return t.restoreError(logging.Context{}, err)
 		}
-		ev := state.GetStarted()
-		ts := ev.GetTaskStarted()
-		if ts == nil {
-			err := fmt.Errorf("stale: recovery session=%s seq=%d is not TaskStarted", ev.GetSessionId(), ev.GetSeq())
-			return t.restoreError(logging.Context{Session: ev.GetSessionId()}, err)
-		}
-		if ev.GetSessionId() == "" || ts.GetTaskId() == "" || ev.GetProducedAtMs() <= 0 || state.GetLastActivityAtMs() <= 0 {
-			err := fmt.Errorf("stale: invalid recovered TaskStarted session=%q task_id=%q produced_at_ms=%d last_activity_at_ms=%d seq=%d",
-				ev.GetSessionId(), ts.GetTaskId(), ev.GetProducedAtMs(), state.GetLastActivityAtMs(), ev.GetSeq())
-			return t.restoreError(logging.Context{Session: ev.GetSessionId(), Task: ts.GetTaskId()}, err)
-		}
-		key := taskKey{session: ev.GetSessionId(), id: ts.GetTaskId()}
-		if _, exists := restored[key]; exists {
-			err := fmt.Errorf("stale: duplicate recovered task session=%q task_id=%q",
-				ev.GetSessionId(), ts.GetTaskId())
-			return t.restoreError(logging.Context{Session: ev.GetSessionId(), Task: ts.GetTaskId()}, err)
-		}
-		kind, err := coreTaskKindToTail(ts.GetKind())
-		if err != nil {
-			wrapped := fmt.Errorf("stale: invalid recovered TaskStarted session=%q task_id=%q: %w",
-				ev.GetSessionId(), ts.GetTaskId(), err)
-			return t.restoreError(logging.Context{Session: ev.GetSessionId(), Task: ts.GetTaskId()}, wrapped)
-		}
-		restored[key] = &task{
-			id:          ts.GetTaskId(),
-			kind:        kind,
-			session:     ev.GetSessionId(),
-			outputPath:  ts.GetOutputPath(),
-			startedAtMs: ev.GetProducedAtMs(),
-			lastActMs:   state.GetLastActivityAtMs(),
+		if state.GetLastActivityAtMs() <= 0 {
+			err := fmt.Errorf("stale: invalid recovered open task last_activity_at_ms=%d", state.GetLastActivityAtMs())
+			return t.restoreError(logging.Context{}, err)
 		}
 	}
+	if len(states) > 0 {
+		// Loud, and at error level, because this is silent data loss in the
+		// user's feed: work that was running is now untracked and will never be
+		// resolved to a terminal status by this process.
+		t.log.With(logging.Context{Operation: "restore-open-tasks", Level: "error"}).Log(
+			"store reported %d open task(s) but OpenTaskState carries no task identity to restore them by; "+
+				"they are neither tracked nor swept, and their spools stay unattributed until their transcripts are re-read", len(states))
+	}
 	t.mu.Lock()
-	t.tasks = restored
+	t.tasks = map[taskKey]*task{}
 	t.restoreFailure = ""
 	t.mu.Unlock()
 	t.log.With(logging.Context{Operation: "restore-open-tasks"}).Log(
-		"restored %d authoritative open task(s) with persisted activity from store", len(restored))
+		"open-task tracker reset; %d persisted open task(s) were unrestorable", len(states))
 	return nil
 }
 
@@ -236,11 +236,11 @@ func (t *Tracker) IsOpen(session, id string) bool {
 
 // Sweep evaluates every open task against the vanish-grace and silence windows,
 // emits a LOST TaskEnded for each that crossed a threshold, and closes them.
-func (t *Tracker) Sweep(nowMs int64) []*corev1.Event {
+func (t *Tracker) Sweep(nowMs int64) []*agentshimv1.Entry {
 	t.log.With(logging.Context{Operation: "stale-sweep"}).LogVerbose("sweep requested now_ms=%d", nowMs)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var out []*corev1.Event
+	var out []*agentshimv1.Entry
 	for key, tk := range t.tasks {
 		switch {
 		case tk.vanishedAtMs != 0 && nowMs-tk.vanishedAtMs >= t.opt.Grace.Milliseconds():
@@ -257,11 +257,11 @@ func (t *Tracker) Sweep(nowMs int64) []*corev1.Event {
 
 // BootSweep LOSTs every open task whose started_at predates bootMs (nothing
 // survives a reboot). Run once at startup.
-func (t *Tracker) BootSweep(bootMs, nowMs int64) []*corev1.Event {
+func (t *Tracker) BootSweep(bootMs, nowMs int64) []*agentshimv1.Entry {
 	t.log.With(logging.Context{Operation: "stale-boot-sweep"}).LogVerbose("boot sweep requested boot_ms=%d now_ms=%d", bootMs, nowMs)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var out []*corev1.Event
+	var out []*agentshimv1.Entry
 	for key, tk := range t.tasks {
 		if tk.startedAtMs > 0 && tk.startedAtMs < bootMs {
 			out = append(out, t.lost(tk, "boot-sweep"))
@@ -272,25 +272,20 @@ func (t *Tracker) BootSweep(bootMs, nowMs int64) []*corev1.Event {
 	return out
 }
 
-// lost builds the synthetic-plane LOST TaskEnded and loud-logs the transition.
-func (t *Tracker) lost(tk *task, inference string) *corev1.Event {
-	// A synthetic LOST is a terminal verdict the user READS: the task is drawn
-	// as lost and never reaches DONE.
-	t.log.With(logging.Context{Operation: "infer-lost", Task: tk.id, Session: tk.session, Level: "warn"}).Log("LOST kind=%d inference=%s never DONE", tk.kind, inference)
-	return &corev1.Event{
-		SessionId:    tk.session,
-		Plane:        corev1.Plane_PLANE_SYNTHETIC,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+// lost builds the LOST end-of-work record and loud-logs the transition.
+//
+// LOST IS ITS OWN OUTCOME AND IS NEVER FOLDED INTO FAILURE. We do not know that
+// the work died; we know only that we cannot see it any more. The inference is
+// carried so a reader can tell "we watched it exit" from "we stopped hearing
+// from it", and so a wrong threshold is diagnosable rather than merely wrong.
+func (t *Tracker) lost(tk *task, inference string) *agentshimv1.Entry {
+	t.log.With(logging.Context{Operation: "infer-lost", Task: tk.id, Session: tk.session, Level: "warn"}).
+		Log("LOST kind=%d inference=%s; never reported as succeeded", tk.kind, inference)
+	return convert.DetachedLost(convert.Attribution{
+		SessionID:    tk.session,
+		Path:         tk.outputPath,
 		ProducedAtMs: nowMillis(),
-		DedupKey:     "task-lost:" + tk.id,
-		Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{
-			TaskId:     tk.id,
-			Kind:       kindToTaskKind(tk.kind),
-			Status:     corev1.TerminalStatus_TERMINAL_STATUS_LOST,
-			OutputPath: tk.outputPath,
-			Inference:  inference,
-		}},
-	}
+	}, tk.id, inference)
 }
 
 func (t *Tracker) silence(k tail.Kind) time.Duration {
@@ -301,32 +296,6 @@ func (t *Tracker) silence(k tail.Kind) time.Duration {
 		return t.opt.WorkflowSilence
 	default:
 		return t.opt.AgentSilence
-	}
-}
-
-func coreTaskKindToTail(k corev1.TaskKind) (tail.Kind, error) {
-	switch k {
-	case corev1.TaskKind_TASK_KIND_SHELL:
-		return tail.KindShellSpool, nil
-	case corev1.TaskKind_TASK_KIND_WORKFLOW:
-		return tail.KindWorkflowJournal, nil
-	case corev1.TaskKind_TASK_KIND_AGENT:
-		return tail.KindAgentTranscript, nil
-	default:
-		return 0, fmt.Errorf("unsupported task kind %s", k)
-	}
-}
-
-func kindToTaskKind(k tail.Kind) corev1.TaskKind {
-	switch k {
-	case tail.KindShellSpool:
-		return corev1.TaskKind_TASK_KIND_SHELL
-	case tail.KindWorkflowJournal:
-		return corev1.TaskKind_TASK_KIND_WORKFLOW
-	case tail.KindAgentTranscript:
-		return corev1.TaskKind_TASK_KIND_AGENT
-	default:
-		return corev1.TaskKind_TASK_KIND_UNSPECIFIED
 	}
 }
 
