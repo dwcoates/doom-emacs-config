@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/statedb"
@@ -205,7 +205,7 @@ func (m *Manager) driveOneResumption(workspace, sessionID string, r statedb.Pend
 	// instruction suppressible on a replay, where no request id survives.
 	_, err = m.submitPromptAs(
 		ctx, workspace, r.RequestID, frontend.MarkInternalResumeInstruction(r.RequestID, r.Text), "",
-		"turn-resumption", corev1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART,
+		"turn-resumption", protocolv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART,
 		submitterTurnResumption, leavesParkedPermissions,
 	)
 	if err != nil {

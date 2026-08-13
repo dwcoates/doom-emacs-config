@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 )
@@ -131,7 +131,7 @@ func TestE2EAHibernatedSessionIsNeverPinged(t *testing.T) {
 	awake.idleFor(t, policy.pingAt())
 
 	// Assert — the awake session is pinged...
-	awake.store.await(t, "the awake session's keep-alive ping", func(ev *corev1.Event) bool {
+	awake.store.await(t, "the awake session's keep-alive ping", func(ev *protocolv1.Event) bool {
 		return keepAlivePing(ev) != nil
 	})
 	// ... and the sleeping one is not. The sweep that produced the ping above
@@ -238,7 +238,7 @@ func TestE2EAPingAlreadySubmittedIsNotSubmittedAgainAfterARestart(t *testing.T) 
 	tail := tailStore(t, vendorID)
 	first.clock.advance(policy.pingAt())
 	first.sweepIdle <- time.Now()
-	tail.await(t, "the first daemon's keep-alive ping", func(ev *corev1.Event) bool {
+	tail.await(t, "the first daemon's keep-alive ping", func(ev *protocolv1.Event) bool {
 		return keepAlivePing(ev) != nil
 	})
 
@@ -267,7 +267,7 @@ func TestE2ETheKeepAlivePingIsNeverRenderedAsConversation(t *testing.T) {
 
 	// Act — a ping, then a real turn behind it as the terminator.
 	s.idleFor(t, policy.pingAt())
-	s.store.await(t, "the keep-alive ping", func(ev *corev1.Event) bool { return keepAlivePing(ev) != nil })
+	s.store.await(t, "the keep-alive ping", func(ev *protocolv1.Event) bool { return keepAlivePing(ev) != nil })
 	writeCmd(t, s.conn, `{"requestId":"r-after","submitPrompt":{"text":"after-the-ping","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert — everything the frontend was shown between the ping and the real

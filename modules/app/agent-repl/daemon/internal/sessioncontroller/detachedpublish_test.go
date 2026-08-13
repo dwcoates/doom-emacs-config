@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/frontend"
 
@@ -18,7 +18,7 @@ import (
 // spoken turn: an assistant transcript record flagged isSidechain and linked to
 // the call that launched it. It is the exact stimulus the acceptance criterion
 // is about.
-func sidechainAssistantEvent(t *testing.T, seq uint64, uuid, sourceToolUseID, text string) *corev1.Event {
+func sidechainAssistantEvent(t *testing.T, seq uint64, uuid, sourceToolUseID, text string) *protocolv1.Event {
 	t.Helper()
 	return transcriptRecordEvent(t, seq, &datav1.TranscriptLine{Line: &datav1.TranscriptLine_Assistant{
 		Assistant: &datav1.AssistantLine{
@@ -34,7 +34,7 @@ func sidechainAssistantEvent(t *testing.T, seq uint64, uuid, sourceToolUseID, te
 
 // mainAssistantEvent is the same record WITHOUT the sidechain flag: the
 // session's own agent speaking.
-func mainAssistantEvent(t *testing.T, seq uint64, uuid, text string) *corev1.Event {
+func mainAssistantEvent(t *testing.T, seq uint64, uuid, text string) *protocolv1.Event {
 	t.Helper()
 	return transcriptRecordEvent(t, seq, &datav1.TranscriptLine{Line: &datav1.TranscriptLine_Assistant{
 		Assistant: &datav1.AssistantLine{
@@ -46,19 +46,19 @@ func mainAssistantEvent(t *testing.T, seq uint64, uuid, text string) *corev1.Eve
 	}})
 }
 
-func transcriptRecordEvent(t *testing.T, seq uint64, tl *datav1.TranscriptLine) *corev1.Event {
+func transcriptRecordEvent(t *testing.T, seq uint64, tl *datav1.TranscriptLine) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(tl)
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId:    "s1",
 		Seq:          seq,
 		ProducedAtMs: 1700000000000,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Payload:      &corev1.Event_Vendor{Vendor: a},
+		Plane:        protocolv1.Plane_PLANE_FILE,
+		Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
+		Payload:      &protocolv1.Event_Vendor{Vendor: a},
 	}
 }
 
@@ -446,7 +446,7 @@ func TestAnEventThatOpensNoDetachedWorkDeliversNone(t *testing.T) {
 // streamSubagentEvent is the store event carrying one detached agent's spoken
 // turn as the SDK streams it: no transcript envelope, parent_tool_use_id naming
 // the call that launched it.
-func streamSubagentEvent(t *testing.T, seq uint64, uuid, parentToolUseID, text string) *corev1.Event {
+func streamSubagentEvent(t *testing.T, seq uint64, uuid, parentToolUseID, text string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.ClaudeStreamMessage{
 		Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
@@ -460,13 +460,13 @@ func streamSubagentEvent(t *testing.T, seq uint64, uuid, parentToolUseID, text s
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId:    "s1",
 		Seq:          seq,
 		ProducedAtMs: 1700000000000,
-		Plane:        corev1.Plane_PLANE_STREAM,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Payload:      &corev1.Event_Vendor{Vendor: a},
+		Plane:        protocolv1.Plane_PLANE_STREAM,
+		Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
+		Payload:      &protocolv1.Event_Vendor{Vendor: a},
 	}
 }
 
@@ -540,15 +540,15 @@ func gapConsumer(t *testing.T, push Pusher) (*consumer, *[]string) {
 	return c, &lines
 }
 
-func gapEvent(seq uint64) *corev1.Event {
-	return &corev1.Event{SessionId: "s1", Seq: seq, ProducedAtMs: 1700000000000}
+func gapEvent(seq uint64) *protocolv1.Event {
+	return &protocolv1.Event{SessionId: "s1", Seq: seq, ProducedAtMs: 1700000000000}
 }
 
 // openWorkflowDetachedWork opens a WORKFLOW work, whose fold is a row journal.
 func openWorkflowDetachedWork(t *testing.T, c *consumer) {
 	t.Helper()
-	if _, err := c.work.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_WORKFLOW, ToolUseId: "tu_1",
+	if _, err := c.work.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_WORKFLOW, ToolUseId: "tu_1",
 	}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -557,8 +557,8 @@ func openWorkflowDetachedWork(t *testing.T, c *consumer) {
 // openShellDetachedWork opens a SHELL work, whose fold is a byte spool.
 func openShellDetachedWork(t *testing.T, c *consumer) {
 	t.Helper()
-	if _, err := c.work.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL, ToolUseId: "tu_1",
+	if _, err := c.work.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL, ToolUseId: "tu_1",
 	}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -754,7 +754,7 @@ func faultLevelConsumer(t *testing.T, push Pusher) (*consumer, *levelSplitLogs) 
 		logs.logf, nil, nil, nil, nil, nil)
 	c.warnf = logs.warnf
 	c.now = func() int64 { return 1000 }
-	if err := c.accounting.bindHandshakeIdentity(&corev1.ShimHello{
+	if err := c.accounting.bindHandshakeIdentity(&protocolv1.ShimHello{
 		QueryInstanceId: "live-query", QueryCreatedSeq: 100, VendorSessionId: "vendor-session",
 	}); err != nil {
 		t.Fatalf("bind handshake: %v", err)
@@ -767,7 +767,7 @@ func faultLevelConsumer(t *testing.T, push Pusher) (*consumer, *levelSplitLogs) 
 // look a tool name up by.
 func unclassifiableFault(t *testing.T, c *consumer) asyncPush {
 	t.Helper()
-	push, err := c.work.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_x"}, 10)
+	push, err := c.work.observeTaskStarted(&protocolv1.TaskStarted{TaskId: "task_x"}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -779,8 +779,8 @@ func unclassifiableFault(t *testing.T, c *consumer) asyncPush {
 
 // faultEvent is a detachment-fault-bearing event stamped as produced by
 // ENVELOPEQUERY, which is the only fact the historical classification reads.
-func faultEvent(seq uint64, envelopeQuery string) *corev1.Event {
-	return &corev1.Event{SessionId: "s1", Seq: seq, ProducedAtMs: 1700000000000, QueryInstanceId: envelopeQuery}
+func faultEvent(seq uint64, envelopeQuery string) *protocolv1.Event {
+	return &protocolv1.Event{SessionId: "s1", Seq: seq, ProducedAtMs: 1700000000000, QueryInstanceId: envelopeQuery}
 }
 
 func TestAReplayedDetachmentFaultTakesTheInfoChannel(t *testing.T) {
@@ -877,8 +877,8 @@ func TestAnAnnouncementBornDetachmentReplaysWithoutAnyFaultRecord(t *testing.T) 
 	// Arrange
 	pusher := &fakePusher{}
 	c, logs := faultLevelConsumer(t, pusher)
-	push, err := c.work.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "bgbjlnfrv", Kind: corev1.TaskKind_TASK_KIND_SHELL,
+	push, err := c.work.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "bgbjlnfrv", Kind: protocolv1.TaskKind_TASK_KIND_SHELL,
 	}, 10)
 	if err != nil {
 		t.Fatal(err)

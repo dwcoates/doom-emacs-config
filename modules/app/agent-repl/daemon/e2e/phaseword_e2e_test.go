@@ -38,9 +38,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -50,7 +50,7 @@ import (
 // compaction ticker: a stream-plane ClaudeStreamMessage carrying the
 // StatusMessage arm (data/v1 stream.proto arm 7). An empty status is the
 // vendor's null — the window closing — not an absent field.
-func vendorStatusEvent(t *testing.T, vendorSessionID, dedupKey, status string) *corev1.Event {
+func vendorStatusEvent(t *testing.T, vendorSessionID, dedupKey, status string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.ClaudeStreamMessage{
 		Msg: &datav1.ClaudeStreamMessage_Status{Status: &datav1.StatusMessage{Status: status}},
@@ -58,13 +58,13 @@ func vendorStatusEvent(t *testing.T, vendorSessionID, dedupKey, status string) *
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId:    vendorSessionID,
-		Plane:        corev1.Plane_PLANE_STREAM,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:        protocolv1.Plane_PLANE_STREAM,
+		Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		ProducedAtMs: time.Now().UnixMilli(),
 		DedupKey:     dedupKey,
-		Payload:      &corev1.Event_Vendor{Vendor: a},
+		Payload:      &protocolv1.Event_Vendor{Vendor: a},
 	}
 }
 

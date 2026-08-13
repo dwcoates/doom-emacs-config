@@ -5,9 +5,9 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/shimclient"
 
@@ -35,11 +35,11 @@ type storeHistoryClient struct {
 	fakeClient
 
 	mu      sync.Mutex
-	history []*corev1.Event
+	history []*protocolv1.Event
 	calls   [][2]uint64
 }
 
-func (c *storeHistoryClient) Replay(_ context.Context, from, to uint64, _ uint32, onEvent func(*corev1.Event)) (shimclient.ReplayResult, error) {
+func (c *storeHistoryClient) Replay(_ context.Context, from, to uint64, _ uint32, onEvent func(*protocolv1.Event)) (shimclient.ReplayResult, error) {
 	c.mu.Lock()
 	c.calls = append(c.calls, [2]uint64{from, to})
 	history := c.history
@@ -127,7 +127,7 @@ func (h *floorHarness) forget() {
 
 // historyAssistant is one renderable assistant message at seq, identified by
 // uuid (which becomes the conversation item's uuid).
-func historyAssistant(t *testing.T, seq uint64, uuid string) *corev1.Event {
+func historyAssistant(t *testing.T, seq uint64, uuid string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.ClaudeStreamMessage{
 		Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
@@ -140,24 +140,24 @@ func historyAssistant(t *testing.T, seq uint64, uuid string) *corev1.Event {
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // historyClear is a first-class ContextCleared at seq, whose dedup key is the
 // item uuid a frontend reconciles on.
-func historyClear(seq uint64, dedupKey string) *corev1.Event {
-	return &corev1.Event{
+func historyClear(seq uint64, dedupKey string) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId: "vendor-uuid", Seq: seq, DedupKey: dedupKey,
-		Payload: &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}},
+		Payload: &protocolv1.Event_ContextCleared{ContextCleared: &protocolv1.ContextCleared{}},
 	}
 }
 
 // historyCompact is a first-class ContextCompacted at seq, carrying the summary
 // that stands in for the history it discarded.
-func historyCompact(seq uint64, dedupKey, summary string) *corev1.Event {
-	return &corev1.Event{
+func historyCompact(seq uint64, dedupKey, summary string) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId: "vendor-uuid", Seq: seq, DedupKey: dedupKey,
-		Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{
+		Payload: &protocolv1.Event_ContextCompacted{ContextCompacted: &protocolv1.ContextCompacted{
 			PreTokens: 180000, PostTokens: 24000, Summary: summary,
 		}},
 	}
@@ -210,7 +210,7 @@ func TestStorePathReplayIncludesTheClearAndNothingBeneathIt(t *testing.T) {
 	// Arrange — a restarted daemon: the ring is empty, so EVERY replay goes
 	// through the store, and the durable floor is all that stands between the
 	// frontend and the history the clear discarded.
-	client := &storeHistoryClient{history: []*corev1.Event{
+	client := &storeHistoryClient{history: []*protocolv1.Event{
 		historyAssistant(t, 100, "u100"),
 		historyAssistant(t, 200, "u200"),
 		historyClear(300, "clear:u-cut"),
@@ -239,7 +239,7 @@ func TestStorePathReplayIncludesTheCompactionSummaryAndNothingBeneathIt(t *testi
 	// Arrange — a compaction discards its history just as a clear does, and the
 	// summary is the ONLY thing that stands in for what it discarded, so it is
 	// the one item a floored replay can least afford to omit.
-	client := &storeHistoryClient{history: []*corev1.Event{
+	client := &storeHistoryClient{history: []*protocolv1.Event{
 		historyAssistant(t, 100, "u100"),
 		historyAssistant(t, 200, "u200"),
 		historyCompact(300, "compact:b-1", "the story so far"),
@@ -295,7 +295,7 @@ func TestAConversationWithNoCutReplaysItsWholeHistory(t *testing.T) {
 	// Arrange — no clear and no compaction has ever been observed, so there is
 	// nothing to floor at and the client's own mark stands. Flooring a
 	// conversation that was never cut would silently truncate a complete history.
-	client := &storeHistoryClient{history: []*corev1.Event{
+	client := &storeHistoryClient{history: []*protocolv1.Event{
 		historyAssistant(t, 100, "u100"),
 		historyAssistant(t, 200, "u200"),
 		historyAssistant(t, 300, "u300"),
@@ -325,8 +325,8 @@ func TestTheRingPathAndTheStorePathReplayTheSameItems(t *testing.T) {
 	// request must still produce the same items — otherwise a frontend sees a
 	// different conversation depending only on whether the daemon happened to
 	// have restarted.
-	history := func(t *testing.T) []*corev1.Event {
-		return []*corev1.Event{
+	history := func(t *testing.T) []*protocolv1.Event {
+		return []*protocolv1.Event{
 			historyAssistant(t, 100, "u100"),
 			historyClear(200, "clear:u-cut"),
 			historyAssistant(t, 300, "u300"),
@@ -372,7 +372,7 @@ func TestAReplayedCutSurvivesTheStorePathWithNoFloorInPlay(t *testing.T) {
 	// is exactly this case: a store whose history was ingested before this daemon
 	// ever ran, so nothing raised a floor and the clear is just another event in
 	// the range.
-	client := &storeHistoryClient{history: []*corev1.Event{
+	client := &storeHistoryClient{history: []*protocolv1.Event{
 		historyAssistant(t, 100, "u100"),
 		historyClear(200, "clear:u-cut"),
 		historyAssistant(t, 300, "u300"),
@@ -400,15 +400,15 @@ func TestEphemeralEventsAreNeverReplayed(t *testing.T) {
 	h := newFloorHarness(t, &fakeClient{})
 	cons := h.consumer(t)
 	cons.Consume(historyAssistant(t, 10, "u10"))
-	cons.Consume(&corev1.Event{
+	cons.Consume(&protocolv1.Event{
 		SessionId: "vendor-uuid",
-		Payload: &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{
-			Uuid: "u10", Delta: &corev1.ContentDelta_Text{Text: "hi"},
+		Payload: &protocolv1.Event_ContentDelta{ContentDelta: &protocolv1.ContentDelta{
+			Uuid: "u10", Delta: &protocolv1.ContentDelta_Text{Text: "hi"},
 		}},
 	})
-	cons.Consume(&corev1.Event{
+	cons.Consume(&protocolv1.Event{
 		SessionId: "vendor-uuid",
-		Payload:   &corev1.Event_HeartbeatProgress{HeartbeatProgress: &corev1.HeartbeatProgress{ToolUseId: "t1"}},
+		Payload:   &protocolv1.Event_HeartbeatProgress{HeartbeatProgress: &protocolv1.HeartbeatProgress{ToolUseId: "t1"}},
 	})
 	cons.Consume(historyAssistant(t, 20, "u20"))
 	h.forget()

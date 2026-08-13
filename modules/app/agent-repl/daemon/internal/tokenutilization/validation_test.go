@@ -5,20 +5,20 @@ import (
 	"strings"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"google.golang.org/protobuf/proto"
 )
 
-func validationRecord(rootTurnID string) *frontendv1.TokenUtilization {
-	return &frontendv1.TokenUtilization{
+func validationRecord(rootTurnID string) *statev1.TokenUtilization {
+	return &statev1.TokenUtilization{
 		AgentReplSessionId: "session",
 		ClaudeSessionId:    "claude",
 		RootTurnId:         rootTurnID,
 		ApiMessageId:       "message",
 		Model:              "model",
-		Actor:              &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}},
-		Usage:              &frontendv1.VendorTokenUsage{InputTokens: 1},
+		Actor:              &statev1.TokenUtilization_MainAgent{MainAgent: &statev1.TokenUtilizationMainAgent{}},
+		Usage:              &statev1.VendorTokenUsage{InputTokens: 1},
 	}
 }
 
@@ -26,7 +26,7 @@ func TestValidateRequiresNonblankModelForLiveAndHistoricalEvidence(t *testing.T)
 	identity := Identity{AgentReplSessionID: "session", ClaudeSessionID: "claude"}
 	for _, tc := range []struct {
 		name     string
-		validate func(*frontendv1.TokenUtilization, Identity) error
+		validate func(*statev1.TokenUtilization, Identity) error
 		rootTurn string
 		model    string
 	}{
@@ -47,7 +47,7 @@ func TestValidateRequiresNonblankModelForLiveAndHistoricalEvidence(t *testing.T)
 	}
 	for _, tc := range []struct {
 		name     string
-		validate func(*frontendv1.TokenUtilization, Identity) error
+		validate func(*statev1.TokenUtilization, Identity) error
 		rootTurn string
 	}{
 		{name: "live synthetic", validate: Validate, rootTurn: "turn"},
@@ -66,14 +66,14 @@ func TestValidateRequiresNonblankModelForLiveAndHistoricalEvidence(t *testing.T)
 func TestValidateModelIdentityOwnsTheSharedModelInvariant(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		record  *frontendv1.TokenUtilization
+		record  *statev1.TokenUtilization
 		wantErr bool
 	}{
 		{name: "nil", wantErr: true},
-		{name: "blank", record: &frontendv1.TokenUtilization{Model: ""}, wantErr: true},
-		{name: "whitespace", record: &frontendv1.TokenUtilization{Model: " \t\n"}, wantErr: true},
-		{name: "vendor model", record: &frontendv1.TokenUtilization{Model: "claude-opus"}},
-		{name: "synthetic model", record: &frontendv1.TokenUtilization{Model: SyntheticModelIdentity}},
+		{name: "blank", record: &statev1.TokenUtilization{Model: ""}, wantErr: true},
+		{name: "whitespace", record: &statev1.TokenUtilization{Model: " \t\n"}, wantErr: true},
+		{name: "vendor model", record: &statev1.TokenUtilization{Model: "claude-opus"}},
+		{name: "synthetic model", record: &statev1.TokenUtilization{Model: SyntheticModelIdentity}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateModelIdentity(tc.record)
@@ -108,7 +108,7 @@ func TestValidateHistoricalRequiresAbsentRootTurnAndTiming(t *testing.T) {
 		t.Fatalf("ValidateHistorical rooted error = %v", err)
 	}
 	record.RootTurnId = ""
-	record.ResponseTiming = &frontendv1.TokenResponseTiming{}
+	record.ResponseTiming = &statev1.TokenResponseTiming{}
 	if err := ValidateHistorical(record, identity); err == nil || !strings.Contains(err.Error(), "has response_timing") {
 		t.Fatalf("ValidateHistorical timed error = %v", err)
 	}
@@ -116,23 +116,23 @@ func TestValidateHistoricalRequiresAbsentRootTurnAndTiming(t *testing.T) {
 
 func TestValidateHistoricalAgainstLiveAllowsOnlyProvenanceAndTimingEnrichment(t *testing.T) {
 	historical := validationRecord("")
-	historical.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent"}}
+	historical.Actor = &statev1.TokenUtilization_Subagent{Subagent: &statev1.TokenUtilizationSubagent{AgentId: "agent"}}
 	live := validationRecord("turn")
-	live.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent", ParentToolUseId: "tool"}}
-	live.ResponseTiming = &frontendv1.TokenResponseTiming{OutputGenerationDurationMs: int64Pointer(0)}
+	live.Actor = &statev1.TokenUtilization_Subagent{Subagent: &statev1.TokenUtilizationSubagent{AgentId: "agent", ParentToolUseId: "tool"}}
+	live.ResponseTiming = &statev1.TokenResponseTiming{OutputGenerationDurationMs: int64Pointer(0)}
 	if err := ValidateHistoricalAgainstLive(historical, live); err != nil {
 		t.Fatalf("compatible enrichment: %v", err)
 	}
 	// proto.Clone, never a struct-value copy: TokenUtilization embeds a
 	// protoimpl.MessageState (a sync.Mutex), which go vet's copylocks check
 	// forbids copying by value.
-	usageConflict := proto.Clone(live).(*frontendv1.TokenUtilization)
-	usageConflict.Usage = &frontendv1.VendorTokenUsage{InputTokens: 2}
+	usageConflict := proto.Clone(live).(*statev1.TokenUtilization)
+	usageConflict.Usage = &statev1.VendorTokenUsage{InputTokens: 2}
 	if err := ValidateHistoricalAgainstLive(historical, usageConflict); err == nil || !strings.Contains(err.Error(), "payloads disagree") {
 		t.Fatalf("usage conflict error = %v", err)
 	}
-	actorConflict := proto.Clone(live).(*frontendv1.TokenUtilization)
-	actorConflict.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "other"}}
+	actorConflict := proto.Clone(live).(*statev1.TokenUtilization)
+	actorConflict.Actor = &statev1.TokenUtilization_Subagent{Subagent: &statev1.TokenUtilizationSubagent{AgentId: "other"}}
 	if err := ValidateHistoricalAgainstLive(historical, actorConflict); err == nil || !strings.Contains(err.Error(), "agent_id disagree") {
 		t.Fatalf("actor conflict error = %v", err)
 	}
@@ -145,26 +145,26 @@ func int64Pointer(value int64) *int64 { return &value }
 // whether the increment can change the verdict. Its answer must therefore
 // track exactly which records ValidateSubagentTopology's loop looks at.
 func TestCarriesSubagentAlias(t *testing.T) {
-	subagent := func(agentID, parentToolUseID string) *frontendv1.TokenUtilization {
+	subagent := func(agentID, parentToolUseID string) *statev1.TokenUtilization {
 		record := validationRecord("turn")
-		record.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{
+		record.Actor = &statev1.TokenUtilization_Subagent{Subagent: &statev1.TokenUtilizationSubagent{
 			AgentId: agentID, ParentToolUseId: parentToolUseID, SubagentType: "explore",
 		}}
 		return record
 	}
 	tests := []struct {
 		name    string
-		records []*frontendv1.TokenUtilization
+		records []*statev1.TokenUtilization
 		want    bool
 	}{
 		{name: "no records", records: nil, want: false},
-		{name: "nil record", records: []*frontendv1.TokenUtilization{nil}, want: false},
-		{name: "main agent actor", records: []*frontendv1.TokenUtilization{validationRecord("turn")}, want: false},
-		{name: "subagent naming neither alias", records: []*frontendv1.TokenUtilization{subagent("", "")}, want: false},
-		{name: "subagent naming only an agent id", records: []*frontendv1.TokenUtilization{subagent("agent-a", "")}, want: true},
-		{name: "subagent naming only a parent tool use id", records: []*frontendv1.TokenUtilization{subagent("", "tool-a")}, want: true},
-		{name: "subagent bridging both aliases", records: []*frontendv1.TokenUtilization{subagent("agent-a", "tool-a")}, want: true},
-		{name: "an aliasing record among unaliased ones", records: []*frontendv1.TokenUtilization{
+		{name: "nil record", records: []*statev1.TokenUtilization{nil}, want: false},
+		{name: "main agent actor", records: []*statev1.TokenUtilization{validationRecord("turn")}, want: false},
+		{name: "subagent naming neither alias", records: []*statev1.TokenUtilization{subagent("", "")}, want: false},
+		{name: "subagent naming only an agent id", records: []*statev1.TokenUtilization{subagent("agent-a", "")}, want: true},
+		{name: "subagent naming only a parent tool use id", records: []*statev1.TokenUtilization{subagent("", "tool-a")}, want: true},
+		{name: "subagent bridging both aliases", records: []*statev1.TokenUtilization{subagent("agent-a", "tool-a")}, want: true},
+		{name: "an aliasing record among unaliased ones", records: []*statev1.TokenUtilization{
 			validationRecord("turn"), subagent("", ""), subagent("agent-a", ""),
 		}, want: true},
 	}
@@ -191,10 +191,10 @@ func TestCarriesSubagentAlias(t *testing.T) {
 func TestUnaliasedRecordsAreAlwaysTopologyClean(t *testing.T) {
 	// Arrange — a subagent naming neither alias, beside a main-agent record.
 	unaliased := validationRecord("turn")
-	unaliased.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{
+	unaliased.Actor = &statev1.TokenUtilization_Subagent{Subagent: &statev1.TokenUtilizationSubagent{
 		SubagentType: "explore", TaskDescription: "look around",
 	}}
-	records := []*frontendv1.TokenUtilization{validationRecord("turn"), unaliased}
+	records := []*statev1.TokenUtilization{validationRecord("turn"), unaliased}
 	if CarriesSubagentAlias(records) {
 		t.Fatal("the arranged records carry an alias; the case under test needs ones that do not")
 	}

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/keepalive"
@@ -27,7 +27,7 @@ func lastPromptText(t *testing.T, m *Manager, workspace string) string {
 }
 
 // lastPromptOrigin is the newest prompt's vendor-visible attribution.
-func lastPromptOrigin(t *testing.T, m *Manager, workspace string) corev1.PromptOrigin {
+func lastPromptOrigin(t *testing.T, m *Manager, workspace string) protocolv1.PromptOrigin {
 	t.Helper()
 	c := fakeClientFor(t, m, workspace)
 	c.mu.Lock()
@@ -149,7 +149,7 @@ func TestKeepAlivePingSubmitsWithTheKeepAliveOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitKeepAlivePing: %v", err)
 	}
-	if got := lastPromptOrigin(t, m, "ws"); got != corev1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE {
+	if got := lastPromptOrigin(t, m, "ws"); got != protocolv1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE {
 		t.Fatalf("prompt origin = %s, want CACHE_KEEP_ALIVE", got)
 	}
 	if turnID == "" {
@@ -340,7 +340,7 @@ func TestPromptDuringAPingIsHeldAndUnclassified(t *testing.T) {
 
 	// Act.
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "real work", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -370,7 +370,7 @@ func TestKeepAliveHoldIsProjectedOntoTheQueueView(t *testing.T) {
 		t.Fatalf("SubmitKeepAlivePing: %v", err)
 	}
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "real work", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -415,7 +415,7 @@ func TestForceQueueEntryRefusesAKeepAliveHeldPrompt(t *testing.T) {
 		t.Fatalf("SubmitKeepAlivePing: %v", err)
 	}
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "real work", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	m.mu.Lock()
@@ -440,7 +440,7 @@ func TestCancelQueueEntryWorksOnAKeepAliveHeldPrompt(t *testing.T) {
 		t.Fatalf("SubmitKeepAlivePing: %v", err)
 	}
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "real work", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	m.mu.Lock()
@@ -563,7 +563,7 @@ func TestFailedKeepAlivePingReleasesThePromptsHeldBehindIt(t *testing.T) {
 	c.onSubmit = func() {
 		once.Do(func() {
 			if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "real work", "",
-				corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+				protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 				t.Errorf("SubmitPrompt during the ping: %v", err)
 			}
 		})
@@ -728,7 +728,7 @@ func TestPromptDuringTheRewindIsHeldBehindThePingTurn(t *testing.T) {
 
 	// Act.
 	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "real work", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -824,13 +824,13 @@ func TestKeepAliveWindowStartRestampsFromTheConsumersStartBoundary(t *testing.T)
 
 	// Act — the ping's TurnStarted, arriving over the authoritative plane.
 	const startedAtMs int64 = 1_700_000_000_000
-	if err := d.consumer.Apply(&corev1.Event{
+	if err := d.consumer.Apply(&protocolv1.Event{
 		SessionId:    "vendor-uuid",
 		Seq:          11,
-		Plane:        corev1.Plane_PLANE_STREAM,
+		Plane:        protocolv1.Plane_PLANE_STREAM,
 		ProducedAtMs: startedAtMs,
 		RequestId:    turnID,
-		Payload:      &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: turnID}},
+		Payload:      &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: turnID}},
 	}); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}

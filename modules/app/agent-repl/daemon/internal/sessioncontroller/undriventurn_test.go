@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/ssm"
@@ -265,7 +265,7 @@ func TestSweepUndrivenTurnsLeavesATurnTheShimAnnouncedAlone(t *testing.T) {
 	// Arrange.
 	m, _ := undrivenRig(t)
 	d := controllerFor(t, m)
-	m.reconcileTurnSnapshot(d, true, &corev1.ShimHello{
+	m.reconcileTurnSnapshot(d, true, &protocolv1.ShimHello{
 		TurnInFlight: true, ActiveTurnIds: []string{"t-adopted"},
 	})
 	bindUndrivenTurn(t, m, "t-adopted", overdueMs)

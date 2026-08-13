@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/tokenutilization"
 
@@ -62,18 +62,18 @@ func NewTokenUtilizations(db *sql.DB) (*TokenUtilizations, error) {
 // Record atomically persists one completed response. A response is immutable
 // billing evidence: an exact replay is accepted while every conflicting
 // duplicate is rejected before the durable row can change.
-func (s *TokenUtilizations) Record(in *frontendv1.TokenUtilization) (inserted bool, err error) {
+func (s *TokenUtilizations) Record(in *statev1.TokenUtilization) (inserted bool, err error) {
 	return s.record(in, false)
 }
 
 // RecordHistorical atomically persists one normalized file-plane response.
 // Exact replay converges on the same row while a fabricated root turn, timing,
 // or conflicting duplicate is rejected before durable state changes.
-func (s *TokenUtilizations) RecordHistorical(in *frontendv1.TokenUtilization) (inserted bool, err error) {
+func (s *TokenUtilizations) RecordHistorical(in *statev1.TokenUtilization) (inserted bool, err error) {
 	return s.record(in, true)
 }
 
-func (s *TokenUtilizations) record(in *frontendv1.TokenUtilization, historical bool) (inserted bool, err error) {
+func (s *TokenUtilizations) record(in *statev1.TokenUtilization, historical bool) (inserted bool, err error) {
 	validate := tokenutilization.Validate
 	kind := "token utilization"
 	if historical {
@@ -88,7 +88,7 @@ func (s *TokenUtilizations) record(in *frontendv1.TokenUtilization, historical b
 		return false, fmt.Errorf("statedb: begin token utilization record: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := validateSubagentTopologyTx(tx, in.GetAgentReplSessionId(), []*frontendv1.TokenUtilization{in}); err != nil {
+	if err := validateSubagentTopologyTx(tx, in.GetAgentReplSessionId(), []*statev1.TokenUtilization{in}); err != nil {
 		return false, fmt.Errorf("%w: reject token utilization topology: %w", ErrIrreconcilableObservation, err)
 	}
 	var raw []byte
@@ -109,7 +109,7 @@ func (s *TokenUtilizations) record(in *frontendv1.TokenUtilization, historical b
 	if err != nil {
 		return false, fmt.Errorf("statedb: read token utilization %q: %w", in.GetApiMessageId(), err)
 	}
-	var prior frontendv1.TokenUtilization
+	var prior statev1.TokenUtilization
 	if err := proto.Unmarshal(raw, &prior); err != nil {
 		return false, fmt.Errorf("statedb: decode token utilization %q: %w", in.GetApiMessageId(), err)
 	}
@@ -155,7 +155,7 @@ func (s *TokenUtilizations) record(in *frontendv1.TokenUtilization, historical b
 // re-selected and re-unmarshalled the entire session's responses per assistant
 // message, which measured as the single dominant cost of bring-up. An
 // aliasing increment still reads and validates the whole set, unchanged.
-func validateSubagentTopologyTx(tx *sql.Tx, sessionID string, incoming []*frontendv1.TokenUtilization) error {
+func validateSubagentTopologyTx(tx *sql.Tx, sessionID string, incoming []*statev1.TokenUtilization) error {
 	if !tokenutilization.CarriesSubagentAlias(incoming) {
 		return nil
 	}
@@ -164,13 +164,13 @@ func validateSubagentTopologyTx(tx *sql.Tx, sessionID string, incoming []*fronte
 		return fmt.Errorf("list persisted response topology: %w", err)
 	}
 	defer rows.Close()
-	records := make([]*frontendv1.TokenUtilization, 0, len(incoming)+1)
+	records := make([]*statev1.TokenUtilization, 0, len(incoming)+1)
 	for rows.Next() {
 		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
 			return fmt.Errorf("scan persisted response topology: %w", err)
 		}
-		var record frontendv1.TokenUtilization
+		var record statev1.TokenUtilization
 		if err := proto.Unmarshal(raw, &record); err != nil {
 			return fmt.Errorf("decode persisted response topology: %w", err)
 		}
@@ -184,19 +184,19 @@ func validateSubagentTopologyTx(tx *sql.Tx, sessionID string, incoming []*fronte
 }
 
 // List returns every durable response record for one daemon session.
-func (s *TokenUtilizations) List(sessionID string) ([]*frontendv1.TokenUtilization, error) {
+func (s *TokenUtilizations) List(sessionID string) ([]*statev1.TokenUtilization, error) {
 	rows, err := s.db.Query(`SELECT record FROM token_utilization WHERE agent_repl_session_id=? ORDER BY api_message_id`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("statedb: list token utilizations for %q: %w", sessionID, err)
 	}
 	defer rows.Close()
-	var out []*frontendv1.TokenUtilization
+	var out []*statev1.TokenUtilization
 	for rows.Next() {
 		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
 			return nil, fmt.Errorf("statedb: scan token utilization for %q: %w", sessionID, err)
 		}
-		var u frontendv1.TokenUtilization
+		var u statev1.TokenUtilization
 		if err := proto.Unmarshal(raw, &u); err != nil {
 			return nil, fmt.Errorf("statedb: decode token utilization for %q: %w", sessionID, err)
 		}

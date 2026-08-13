@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/sessioncontroller"
 )
@@ -20,7 +20,7 @@ type closingTokenUsage struct {
 	readAfterClose bool
 }
 
-func (c *closingTokenUsage) List(string) ([]*frontendv1.TokenUtilization, error) {
+func (c *closingTokenUsage) List(string) ([]*statev1.TokenUtilization, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {

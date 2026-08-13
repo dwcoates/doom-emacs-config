@@ -7,18 +7,18 @@ import (
 	"strings"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 )
 
 type fixedSessionTokenUsageSource struct {
-	records []*frontendv1.TokenUtilization
+	records []*statev1.TokenUtilization
 	err     error
 }
 
-func (s fixedSessionTokenUsageSource) List(string) ([]*frontendv1.TokenUtilization, error) {
+func (s fixedSessionTokenUsageSource) List(string) ([]*statev1.TokenUtilization, error) {
 	return s.records, s.err
 }
 
@@ -38,12 +38,12 @@ func TestSessionTokenUtilizationReadFailureLogsAndFailsHard(t *testing.T) {
 
 func TestSessionTokenUtilizationRejectsPoisonedDurableModelBeforeFrameConstruction(t *testing.T) {
 	var logs []string
-	record := &frontendv1.TokenUtilization{
+	record := &statev1.TokenUtilization{
 		AgentReplSessionId: "daemon-session",
 		ClaudeSessionId:    "claude-session",
 		ApiMessageId:       "api-message",
 		Model:              " \n ",
-		Usage:              &frontendv1.VendorTokenUsage{InputTokens: 1},
+		Usage:              &statev1.VendorTokenUsage{InputTokens: 1},
 	}
 	defer func() {
 		if recover() == nil {
@@ -65,7 +65,7 @@ func TestSessionTokenUtilizationRejectsPoisonedDurableModelBeforeFrameConstructi
 			}
 		}
 	}()
-	_ = sessionTokenUtilization(func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, fixedSessionTokenUsageSource{records: []*frontendv1.TokenUtilization{record}}, "daemon-session")
+	_ = sessionTokenUtilization(func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, fixedSessionTokenUsageSource{records: []*statev1.TokenUtilization{record}}, "daemon-session")
 }
 
 // TestRegistrySessionViewsPopulatesRegistryFields verifies the SessionView
@@ -124,9 +124,9 @@ func TestRegistrySessionViewsCarriesDurableCompletedUsage(t *testing.T) {
 	if err := reg.Put(registry.Record{SessionID: "s_usage", CWD: "/work/ws"}); err != nil {
 		t.Fatal(err)
 	}
-	records := []*frontendv1.TokenUtilization{
-		{ApiMessageId: "m1", Model: "fable", Actor: &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}}, Usage: &frontendv1.VendorTokenUsage{InputTokens: 3}},
-		{ApiMessageId: "m2", Model: "opus", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent"}}, Usage: &frontendv1.VendorTokenUsage{CacheReadInputTokens: 7}},
+	records := []*statev1.TokenUtilization{
+		{ApiMessageId: "m1", Model: "fable", Actor: &statev1.TokenUtilization_MainAgent{MainAgent: &statev1.TokenUtilizationMainAgent{}}, Usage: &statev1.VendorTokenUsage{InputTokens: 3}},
+		{ApiMessageId: "m2", Model: "opus", Actor: &statev1.TokenUtilization_Subagent{Subagent: &statev1.TokenUtilizationSubagent{AgentId: "agent"}}, Usage: &statev1.VendorTokenUsage{CacheReadInputTokens: 7}},
 	}
 	// The aggregate LEFT SessionView with the rest of the durable evidence
 	// layer; economics reach a rendering frontend as TokenBreakdownView. What

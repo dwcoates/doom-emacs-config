@@ -4,32 +4,32 @@ import (
 	"errors"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
-func queryCreatedEvent(queryID, requested, envelopeSessionID string, seq uint64) *corev1.Event {
-	created := &corev1.QueryCreated{Invocation: &corev1.QueryCreated_Fresh{Fresh: &corev1.FreshQuery{}}}
+func queryCreatedEvent(queryID, requested, envelopeSessionID string, seq uint64) *protocolv1.Event {
+	created := &protocolv1.QueryCreated{Invocation: &protocolv1.QueryCreated_Fresh{Fresh: &protocolv1.FreshQuery{}}}
 	if requested != "" {
-		created.Invocation = &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: requested}}
+		created.Invocation = &protocolv1.QueryCreated_Resumed{Resumed: &protocolv1.ResumedQuery{RequestedVendorSessionId: requested}}
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId: envelopeSessionID,
 		Seq:       seq,
-		Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 			QueryInstanceId: queryID,
-			Event:           &corev1.QueryLifecycle_Created{Created: created},
+			Event:           &protocolv1.QueryLifecycle_Created{Created: created},
 		}},
 	}
 }
 
-func queryRuntimeEvent(queryID, observed, envelopeSessionID string, seq uint64) *corev1.Event {
-	return &corev1.Event{
+func queryRuntimeEvent(queryID, observed, envelopeSessionID string, seq uint64) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId: envelopeSessionID,
 		Seq:       seq,
-		Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 			QueryInstanceId: queryID,
-			Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{
-				Identity: &corev1.QueryRuntimeIdentity{VendorSessionId: observed},
+			Event: &protocolv1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &protocolv1.QueryRuntimeObserved{
+				Identity: &protocolv1.QueryRuntimeIdentity{VendorSessionId: observed},
 			}},
 		}},
 	}

@@ -4,20 +4,24 @@ import (
 	"math"
 	"testing"
 
-	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	statev1 "agentrepl/proto/state/v1"
 )
 
 // The vendor-to-canonical mapping is the whole contract of the boundary: each
 // vendor counter must land in the bucket whose ECONOMICS it describes, not the
 // one whose name it resembles.
-func TestFromResultUsageMapsEachVendorCounterToItsEconomicBucket(t *testing.T) {
-	usage := &datav1.Usage{InputTokens: 7, CacheCreationInputTokens: 11, CacheReadInputTokens: 13, OutputTokens: 17}
+//
+// It is asserted against the DURABLE record because that is the only vendor
+// shape still reaching this process. A live usage block is converted by the
+// producer now, and arrives already canonical on AgentSaid.usage.
+func TestFromVendorUsageMapsEachVendorCounterToItsEconomicBucket(t *testing.T) {
+	usage := &statev1.VendorTokenUsage{InputTokens: 7, CacheCreationInputTokens: 11, CacheReadInputTokens: 13, OutputTokens: 17}
 
-	got, err := FromResultUsage(usage)
+	got, err := FromVendorUsage(usage)
 
 	if err != nil {
-		t.Fatalf("FromResultUsage returned %v, want no error", err)
+		t.Fatalf("FromVendorUsage returned %v, want no error", err)
 	}
 	if got.GetInputHits().GetRead() != 13 {
 		t.Errorf("input_hits.read = %d, want the cache_read_input_tokens counter 13", got.GetInputHits().GetRead())
@@ -33,23 +37,10 @@ func TestFromResultUsageMapsEachVendorCounterToItsEconomicBucket(t *testing.T) {
 	}
 }
 
-func TestFromAPIUsageMapsEachVendorCounterToItsEconomicBucket(t *testing.T) {
-	usage := &datav1.ApiUsage{InputTokens: 7, CacheCreationInputTokens: 11, CacheReadInputTokens: 13, OutputTokens: 17}
-
-	got, err := FromAPIUsage(usage)
-
-	if err != nil {
-		t.Fatalf("FromAPIUsage returned %v, want no error", err)
-	}
-	if got.GetInputHits().GetRead() != 13 || got.GetInputMisses().GetWritten() != 11 || got.GetInputMisses().GetUnwritten() != 7 || got.GetOutputTokens() != 17 {
-		t.Fatalf("canonical usage = %v, want read=13 written=11 unwritten=7 output=17", got)
-	}
-}
-
 // The durable record is the READ boundary: the state store keeps the vendor
 // shape and the economics are produced from it here.
 func TestFromVendorUsageConvertsTheDurableRecord(t *testing.T) {
-	durable := &frontendv1.VendorTokenUsage{InputTokens: 2, CacheCreationInputTokens: 3, CacheReadInputTokens: 5, OutputTokens: 8}
+	durable := &statev1.VendorTokenUsage{InputTokens: 2, CacheCreationInputTokens: 3, CacheReadInputTokens: 5, OutputTokens: 8}
 
 	got, err := FromVendorUsage(durable)
 
@@ -62,7 +53,7 @@ func TestFromVendorUsageConvertsTheDurableRecord(t *testing.T) {
 }
 
 func TestFromTotalsConvertsACumulativeVendorTotal(t *testing.T) {
-	totals := &frontendv1.TokenUsageTotals{InputTokens: 2, CacheCreationInputTokens: 3, CacheReadInputTokens: 5, OutputTokens: 8}
+	totals := &statev1.TokenUsageTotals{InputTokens: 2, CacheCreationInputTokens: 3, CacheReadInputTokens: 5, OutputTokens: 8}
 
 	got, err := FromTotals(totals)
 
@@ -76,24 +67,24 @@ func TestFromTotalsConvertsACumulativeVendorTotal(t *testing.T) {
 
 // A negative counter must be surfaced, never converted: the unsigned canonical
 // field would report a number near 2^64 to the tripwire and the footer alike.
-func TestFromResultUsageRejectsEachNegativeCounter(t *testing.T) {
+func TestFromVendorUsageRejectsEachNegativeCounter(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		usage *datav1.Usage
+		usage *statev1.VendorTokenUsage
 	}{
-		{name: "input_tokens", usage: &datav1.Usage{InputTokens: -1}},
-		{name: "cache_creation_input_tokens", usage: &datav1.Usage{CacheCreationInputTokens: -1}},
-		{name: "cache_read_input_tokens", usage: &datav1.Usage{CacheReadInputTokens: -1}},
-		{name: "output_tokens", usage: &datav1.Usage{OutputTokens: -1}},
+		{name: "input_tokens", usage: &statev1.VendorTokenUsage{InputTokens: -1}},
+		{name: "cache_creation_input_tokens", usage: &statev1.VendorTokenUsage{CacheCreationInputTokens: -1}},
+		{name: "cache_read_input_tokens", usage: &statev1.VendorTokenUsage{CacheReadInputTokens: -1}},
+		{name: "output_tokens", usage: &statev1.VendorTokenUsage{OutputTokens: -1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := FromResultUsage(tc.usage)
+			got, err := FromVendorUsage(tc.usage)
 
 			if err == nil {
-				t.Fatalf("FromResultUsage(%s=-1) = %v, want an error", tc.name, got)
+				t.Fatalf("FromVendorUsage(%s=-1) = %v, want an error", tc.name, got)
 			}
 			if got != nil {
-				t.Fatalf("FromResultUsage(%s=-1) returned usage %v alongside its error", tc.name, got)
+				t.Fatalf("FromVendorUsage(%s=-1) returned usage %v alongside its error", tc.name, got)
 			}
 		})
 	}
@@ -101,11 +92,11 @@ func TestFromResultUsageRejectsEachNegativeCounter(t *testing.T) {
 
 // An absent usage block is a request that reported nothing, which every caller
 // already distinguishes from "no request", so it reduces to zeroes.
-func TestFromResultUsageReducesAnAbsentUsageToZeroes(t *testing.T) {
-	got, err := FromResultUsage(nil)
+func TestFromVendorUsageReducesAnAbsentUsageToZeroes(t *testing.T) {
+	got, err := FromVendorUsage(nil)
 
 	if err != nil {
-		t.Fatalf("FromResultUsage(nil) returned %v, want no error", err)
+		t.Fatalf("FromVendorUsage(nil) returned %v, want no error", err)
 	}
 	if ExpensiveInput(got) != 0 || ContextInput(got) != 0 || got.GetOutputTokens() != 0 {
 		t.Fatalf("canonical usage = %v, want every figure zero", got)
@@ -118,7 +109,7 @@ func TestFromResultUsageReducesAnAbsentUsageToZeroes(t *testing.T) {
 func TestExpensiveInputSumsBothMissesAndExcludesTheHit(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		usage *frontendv1.TokenUsage
+		usage *conversationv1.TokenUsage
 		want  int64
 	}{
 		{
@@ -224,9 +215,9 @@ func TestDeriveRatesReportsNoPartitionForAnEmptyPrompt(t *testing.T) {
 	}
 }
 
-func canonical(unwritten, written, read uint64) *frontendv1.TokenUsage {
-	return &frontendv1.TokenUsage{
-		InputHits:   &frontendv1.TokenCacheHits{Read: read},
-		InputMisses: &frontendv1.TokenCacheMisses{Written: written, Unwritten: unwritten},
+func canonical(unwritten, written, read uint64) *conversationv1.TokenUsage {
+	return &conversationv1.TokenUsage{
+		InputHits:   &conversationv1.TokenCacheHits{Read: read},
+		InputMisses: &conversationv1.TokenCacheMisses{Written: written, Unwritten: unwritten},
 	}
 }

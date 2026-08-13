@@ -27,8 +27,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // rewound is one completed rewind, with both ends of the lineage and the ping
@@ -155,7 +155,7 @@ func TestE2EARewoundConversationOpensWithSessionRewound(t *testing.T) {
 
 	// Assert — the first event the new seq space serves.
 	tail := tailStore(t, rw.next)
-	first := tail.await(t, "the first event of the rewound conversation", func(*corev1.Event) bool { return true })
+	first := tail.await(t, "the first event of the rewound conversation", func(*protocolv1.Event) bool { return true })
 	if first.GetSessionRewound() == nil {
 		t.Fatalf("the rewound conversation opens with %T, want SessionRewound: the explanation must precede what it explains", first.GetPayload())
 	}
@@ -314,7 +314,7 @@ func TestE2EAKeepAliveTurnStaysInTheStoreAfterTheRewind(t *testing.T) {
 	retired := tailStore(t, rw.previous)
 
 	// Assert
-	started := retired.await(t, "the keep-alive turn still recorded in the retired conversation", func(ev *corev1.Event) bool {
+	started := retired.await(t, "the keep-alive turn still recorded in the retired conversation", func(ev *protocolv1.Event) bool {
 		ping := keepAlivePing(ev)
 		return ping != nil && ping.GetTurnId() == rw.pingTurnID
 	})
@@ -356,10 +356,10 @@ func TestE2ETheLiveStreamNeverShowedTheKeepAliveTurnEither(t *testing.T) {
 
 // awaitSessionRewound reads the rewound conversation until its SessionRewound
 // record arrives, and returns it.
-func awaitSessionRewound(t *testing.T, vendorSessionID string) *corev1.SessionRewound {
+func awaitSessionRewound(t *testing.T, vendorSessionID string) *protocolv1.SessionRewound {
 	t.Helper()
 	tail := tailStore(t, vendorSessionID)
-	ev := tail.await(t, "the SessionRewound record", func(ev *corev1.Event) bool {
+	ev := tail.await(t, "the SessionRewound record", func(ev *protocolv1.Event) bool {
 		return ev.GetSessionRewound() != nil
 	})
 	return ev.GetSessionRewound()

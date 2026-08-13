@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/ssm"
 )
@@ -63,15 +63,15 @@ func newSettledTurnRig(t *testing.T) *settledTurnRig {
 	// The authoritative query the turn runs under. Every account-usage
 	// observation is validated against it, so a rig without one could not
 	// deliver the end boundary the stamp depends on.
-	if err := rig.consumer.Apply(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	if err := rig.consumer.Apply(&protocolv1.Event{Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "q",
-		Event:           &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{}},
+		Event:           &protocolv1.QueryLifecycle_Created{Created: &protocolv1.QueryCreated{}},
 	}}}); err != nil {
 		t.Fatalf("admit the query: %v", err)
 	}
-	if err := rig.consumer.Apply(&corev1.Event{
-		Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t",
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}},
+	if err := rig.consumer.Apply(&protocolv1.Event{
+		Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t",
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}},
 	}); err != nil {
 		t.Fatalf("admit the turn: %v", err)
 	}
@@ -95,9 +95,9 @@ func (r *settledTurnRig) correct(t *testing.T, outputTokens int64) {
 // beside the shim's `TurnEnded`, so it lands after the vendor's result.
 func (r *settledTurnRig) endBoundary(t *testing.T) {
 	t.Helper()
-	if err := r.consumer.Apply(&corev1.Event{
-		Seq: 3, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: r.turnID,
-		Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation(r.turnID, false)},
+	if err := r.consumer.Apply(&protocolv1.Event{
+		Seq: 3, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: r.turnID,
+		Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation(r.turnID, false)},
 	}); err != nil {
 		t.Fatalf("deliver the turn-end usage observation: %v", err)
 	}
@@ -123,15 +123,15 @@ func newReDrivenTurnRig(t *testing.T) *settledTurnRig {
 	rig.consumer = newConsumer("ws", "s1", rig.push, rig.applier, rig.prog, newFakeClearCompactStore(),
 		rig.store, rig.logs.logf, nil, nil, nil, nil, nil)
 	rig.consumer.warnf = rig.logs.warnf
-	if err := rig.consumer.Apply(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	if err := rig.consumer.Apply(&protocolv1.Event{Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "q",
-		Event:           &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{}},
+		Event:           &protocolv1.QueryLifecycle_Created{Created: &protocolv1.QueryCreated{}},
 	}}}); err != nil {
 		t.Fatalf("admit the query: %v", err)
 	}
-	if err := rig.consumer.Apply(&corev1.Event{
-		Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: reDriveRequestID,
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: reDriveRequestID}},
+	if err := rig.consumer.Apply(&protocolv1.Event{
+		Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: reDriveRequestID,
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: reDriveRequestID}},
 	}); err != nil {
 		t.Fatalf("admit the re-driven turn: %v", err)
 	}
@@ -323,9 +323,9 @@ func TestTheShimsLaterTurnEndedIsAdmittedWithoutResettlingTheStamp(t *testing.T)
 	rig.endBoundary(t)
 
 	// Act.
-	err := rig.consumer.Apply(&corev1.Event{
-		Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t",
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}},
+	err := rig.consumer.Apply(&protocolv1.Event{
+		Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t",
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}},
 	})
 
 	// Assert.
@@ -377,9 +377,9 @@ func TestATurnEndReachesTheQueueExactlyOnce(t *testing.T) {
 
 	// Act — the result settles the turn, then the shim announces the same end.
 	rig.result(t)
-	if err := rig.consumer.Apply(&corev1.Event{
-		Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t",
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}},
+	if err := rig.consumer.Apply(&protocolv1.Event{
+		Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t",
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}},
 	}); err != nil {
 		t.Fatalf("Apply the shim's own end: %v", err)
 	}
@@ -401,9 +401,9 @@ func TestTheIdleClockIsStampedOncePerTurnEnd(t *testing.T) {
 
 	// Act.
 	rig.result(t)
-	if err := rig.consumer.Apply(&corev1.Event{
-		Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t",
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}},
+	if err := rig.consumer.Apply(&protocolv1.Event{
+		Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t",
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}},
 	}); err != nil {
 		t.Fatalf("Apply the shim's own end: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestASeqReusedByALaterGenerationIsNotTreatedAsTerminal(t *testing.T) {
 }
 
 // settlementFor reads one turn's settled record out of the store.
-func settlementFor(t *testing.T, store *settlingTurnAccountingStore, turnID string) *frontendv1.TurnAccounting {
+func settlementFor(t *testing.T, store *settlingTurnAccountingStore, turnID string) *statev1.TurnAccounting {
 	t.Helper()
 	settlements, err := store.List("s1")
 	if err != nil {

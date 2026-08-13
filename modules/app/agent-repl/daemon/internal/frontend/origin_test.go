@@ -3,8 +3,8 @@ package frontend
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // origin_test.go — the record's provenance reaching the daemon's own curators.
@@ -34,7 +34,7 @@ func userLineWithOrigin(uuid, text string, kind datav1.OriginKind) *datav1.Trans
 // streamUserEvent is one stream-plane user message as the store event a
 // consumer sees. parentToolUseID empty is the MAIN conversation, which is where
 // a task notification lands.
-func streamUserEvent(t *testing.T, uuid, text, parentToolUseID string, kind datav1.OriginKind) *corev1.Event {
+func streamUserEvent(t *testing.T, uuid, text, parentToolUseID string, kind datav1.OriginKind) *protocolv1.Event {
 	t.Helper()
 	u := &datav1.UserMessage{
 		Uuid:            uuid,
@@ -46,11 +46,11 @@ func streamUserEvent(t *testing.T, uuid, text, parentToolUseID string, kind data
 	if kind != datav1.OriginKind_ORIGIN_KIND_UNSPECIFIED {
 		u.Origin = &datav1.Origin{Kind: kind}
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		Seq:          7,
 		ProducedAtMs: producedMs,
 		SessionId:    "s1",
-		Payload:      &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_User{User: u}})},
+		Payload:      &protocolv1.Event_Vendor{Vendor: mustAny(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_User{User: u}})},
 	}
 }
 

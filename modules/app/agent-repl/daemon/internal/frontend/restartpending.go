@@ -19,7 +19,7 @@ package frontend
 // because the process is exiting.
 
 import (
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // RestartPendingFrame wraps the intentional-restart announcement.

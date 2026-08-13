@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
@@ -126,7 +127,7 @@ func (h *harness) last() *frontendv1.ProgressView {
 }
 
 // apply folds an event, failing on error.
-func (h *harness) apply(ev *corev1.Event) {
+func (h *harness) apply(ev *protocolv1.Event) {
 	h.t.Helper()
 	if err := h.m.Apply(testWS, testSID, ev); err != nil {
 		h.t.Fatalf("Apply: %v", err)
@@ -153,17 +154,17 @@ func mustAny(t *testing.T, m proto.Message) *anypb.Any {
 }
 
 // vendorEvent wraps a data.v1 message as the vendor payload of a store event.
-func vendorEvent(t *testing.T, m proto.Message) *corev1.Event {
+func vendorEvent(t *testing.T, m proto.Message) *protocolv1.Event {
 	t.Helper()
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId:    testSID,
 		ProducedAtMs: atMs,
-		Payload:      &corev1.Event_Vendor{Vendor: mustAny(t, m)},
+		Payload:      &protocolv1.Event_Vendor{Vendor: mustAny(t, m)},
 	}
 }
 
 // streamEvent wraps a ClaudeStreamMessage arm as a vendor store event.
-func streamEvent(t *testing.T, msg *datav1.ClaudeStreamMessage) *corev1.Event {
+func streamEvent(t *testing.T, msg *datav1.ClaudeStreamMessage) *protocolv1.Event {
 	t.Helper()
 	return vendorEvent(t, msg)
 }
@@ -181,13 +182,13 @@ func assistantWithUsage(uuid string, u *datav1.ApiUsage) *datav1.ClaudeStreamMes
 // latencyEvent builds the EPHEMERAL first-token-latency relay the shim's delta
 // bypass emits off a message_start's ttft stamp. Ephemeral, so it carries no
 // seq.
-func latencyEvent(uuid string, ttftMs int64) *corev1.Event {
-	return &corev1.Event{
+func latencyEvent(uuid string, ttftMs int64) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId:    testSID,
-		Class:        corev1.EventClass_EVENT_CLASS_EPHEMERAL,
+		Class:        protocolv1.EventClass_EVENT_CLASS_EPHEMERAL,
 		ProducedAtMs: atMs,
-		Payload: &corev1.Event_MessageLatency{
-			MessageLatency: &corev1.MessageLatency{Uuid: uuid, TtftMs: ttftMs},
+		Payload: &protocolv1.Event_MessageLatency{
+			MessageLatency: &protocolv1.MessageLatency{Uuid: uuid, TtftMs: ttftMs},
 		},
 	}
 }
@@ -446,9 +447,9 @@ func TestTurnStartedEventStartsTheTurnClock(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}},
 	})
 	// Assert
 	if got := h.last().GetTurnStartedAtMs(); got != atMs {
@@ -461,9 +462,9 @@ func TestTurnEndedStopsTheTurnClock(t *testing.T) {
 	h := newHarness(t)
 	h.openTurn()
 	// Act
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{}},
 	})
 	// Assert
 	if got := h.last().GetTurnStartedAtMs(); got != 0 {
@@ -571,9 +572,9 @@ func TestInputTokensResetAtTurnStart(t *testing.T) {
 	h := newHarness(t)
 	h.openTurn()
 	h.apply(streamEvent(t, assistantWithUsage("m1", &datav1.ApiUsage{InputTokens: 9_000})))
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{}},
 	})
 	h.drain()
 	// Act
@@ -590,9 +591,9 @@ func TestInputTokensClearedAtTurnEnd(t *testing.T) {
 	h.openTurn()
 	h.apply(streamEvent(t, assistantWithUsage("m1", &datav1.ApiUsage{InputTokens: 9_000})))
 	// Act
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{}},
 	})
 	// Assert — the figure moves to the final-response bubble's stamp, so the
 	// footer reads `--` between turns rather than a stale summary.
@@ -611,9 +612,9 @@ func TestThinkingTokensClearedAtTurnEnd(t *testing.T) {
 		},
 	}))
 	// Act
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{}},
 	})
 	// Assert
 	if got := h.last().GetThinkingTokens(); got != 0 {
@@ -670,9 +671,9 @@ func TestMessageLatencyResetsAtTurnStart(t *testing.T) {
 	h := newHarness(t)
 	h.openTurn()
 	h.apply(latencyEvent("msg_01ABC", 865))
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{}},
 	})
 	h.drain()
 	// Act
@@ -764,9 +765,9 @@ func TestWindowSinceMsSurvivesADetailRefresh(t *testing.T) {
 	h.drain()
 	// Act — a later attempt refreshes the detail at a LATER stamp.
 	later := atMs + 5_000
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: later,
-		Payload: &corev1.Event_Vendor{Vendor: mustAny(t, apiErrorLine("e2", "overloaded", 2, 10))},
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAny(t, apiErrorLine("e2", "overloaded", 2, 10))},
 	})
 	// Assert — the window's age counts from when it OPENED.
 	if got := h.last().GetRetrying().GetSinceMs(); got != atMs {
@@ -1074,7 +1075,7 @@ func TestATurnStartClearsTheFailure(t *testing.T) {
 	h.apply(vendorEvent(t, apiErrorLine("e9", "boom", 10, 10)))
 	h.drain()
 	// Act
-	h.apply(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}})
+	h.apply(&protocolv1.Event{Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}}})
 	// Assert — the error persists until the NEXT turn starts, and no longer.
 	if got := h.last().GetFailure(); got != nil {
 		t.Fatalf("failure = %v, want it cleared at the turn start", got)
@@ -1084,17 +1085,17 @@ func TestATurnStartClearsTheFailure(t *testing.T) {
 func TestAnErroredTurnEndSetsTheClassifiedFailure(t *testing.T) {
 	// Arrange: a turn that concluded abnormally with no ApiErrorLine of its own.
 	h := newHarness(t)
-	h.apply(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}})
+	h.apply(&protocolv1.Event{Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}}})
 	h.drain()
 	// Act
-	h.apply(&corev1.Event{Payload: &corev1.Event_TurnEnded{
-		TurnEnded: &corev1.TurnEnded{IsError: true, StopReason: "error_max_turns"},
+	h.apply(&protocolv1.Event{Payload: &protocolv1.Event_TurnEnded{
+		TurnEnded: &protocolv1.TurnEnded{IsError: true, StopReason: "error_max_turns"},
 	}})
 	// Assert
 	// The row carries the SENTENCE, not the type: it renders one line and has
 	// no use for typed evidence. The sentence is the classifier's own, so it is
 	// still that classification being asserted.
-	want := errclass.TurnEnd(&corev1.TurnEnded{IsError: true, StopReason: "error_max_turns"}).GetMessage()
+	want := errclass.TurnEnd(&protocolv1.TurnEnded{IsError: true, StopReason: "error_max_turns"}).GetMessage()
 	if got := h.last().GetFailure().GetMessage(); got != want {
 		t.Fatalf("message = %q, want %q (the %s sentence)", got, want, errclass.TypeAPIMaxTurns)
 	}
@@ -1103,10 +1104,10 @@ func TestAnErroredTurnEndSetsTheClassifiedFailure(t *testing.T) {
 func TestACleanTurnEndSetsNoFailure(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.apply(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}})
+	h.apply(&protocolv1.Event{Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}}})
 	h.drain()
 	// Act
-	h.apply(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}}})
+	h.apply(&protocolv1.Event{Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{}}})
 	// Assert
 	if got := h.last().GetFailure(); got != nil {
 		t.Fatalf("failure = %v, want none for a clean conclusion", got)
@@ -1229,9 +1230,9 @@ func TestAFreshTurnLetsTheApiErrorFallbackSpeakAgain(t *testing.T) {
 	h := newHarness(t)
 	h.openTurn()
 	h.apply(streamEvent(t, apiRetry(1, 10, 8000, 529, true, 0)))
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{}},
 	})
 	h.drain()
 	// Act — the next turn retries, and only the disk twin reports it.
@@ -1546,9 +1547,9 @@ func TestApplyLeavesTheWorkspaceFenceUntouchedByAVendorStampedEvent(t *testing.T
 	}); err != nil {
 		t.Fatalf("ObserveWorkspaceState: %v", err)
 	}
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: vendorSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}},
 	}
 	// Act
 	if err := h.m.Apply(testWS, testSID, ev); err != nil {
@@ -1614,7 +1615,7 @@ func TestApplyRejectsAnEmptyCanonicalSessionId(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	err := h.m.Apply(testWS, "", &corev1.Event{SessionId: vendorSID})
+	err := h.m.Apply(testWS, "", &protocolv1.Event{SessionId: vendorSID})
 	// Assert
 	if err == nil {
 		t.Fatal("wanted an error for an event applied with no canonical session id, got nil")
@@ -1625,7 +1626,7 @@ func TestApplyRejectsAnEmptyWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	err := h.m.Apply("", testSID, &corev1.Event{SessionId: testSID})
+	err := h.m.Apply("", testSID, &protocolv1.Event{SessionId: testSID})
 	// Assert
 	if err == nil {
 		t.Fatal("wanted an error for an event with no workspace, got nil")
@@ -1636,9 +1637,9 @@ func TestApplyRejectsACorruptVendorPayload(t *testing.T) {
 	// Arrange — an Any whose type URL names nothing the schema set knows.
 	h := newHarness(t)
 	// Act
-	err := h.m.Apply(testWS, testSID, &corev1.Event{
+	err := h.m.Apply(testWS, testSID, &protocolv1.Event{
 		SessionId: testSID,
-		Payload:   &corev1.Event_Vendor{Vendor: &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope"}},
+		Payload:   &protocolv1.Event_Vendor{Vendor: &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope"}},
 	})
 	// Assert — a genuine anomaly, surfaced rather than swallowed.
 	if err == nil {
@@ -1650,9 +1651,9 @@ func TestNonProgressPayloadIsQuiet(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act — task lifecycle reaches the footer as the SSM's live_task_count.
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "t1"}},
+		Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "t1"}},
 	})
 	// Assert
 	if pushes := h.drain(); len(pushes) != 0 {
@@ -1662,17 +1663,17 @@ func TestNonProgressPayloadIsQuiet(t *testing.T) {
 
 // settledTurn is one reconciled turn's accounting, enough for the cell's
 // complete arm.
-func settledTurn(turnID string, durationMs int64) *frontendv1.TurnAccounting {
-	return &frontendv1.TurnAccounting{
+func settledTurn(turnID string, durationMs int64) *statev1.TurnAccounting {
+	return &statev1.TurnAccounting{
 		TurnId:       turnID,
-		Runtime:      &corev1.QueryRuntimeIdentity{},
-		Timing:       &frontendv1.TurnAccountingTiming{PromptToResultMs: durationMs},
+		Runtime:      &protocolv1.QueryRuntimeIdentity{},
+		Timing:       &statev1.TurnAccountingTiming{PromptToResultMs: durationMs},
 		UsageAtStart: availableUsage(1),
 		UsageAtEnd:   availableUsage(2),
-		Reconciliation: &frontendv1.TokenUsageReconciliation{
-			ResponseAllAgents: &frontendv1.TokenUsageTotals{OutputTokens: 100},
+		Reconciliation: &statev1.TokenUsageReconciliation{
+			ResponseAllAgents: &statev1.TokenUsageTotals{OutputTokens: 100},
 		},
-		Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+		Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}},
 	}
 }
 

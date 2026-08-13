@@ -6,21 +6,21 @@ import (
 	"strings"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 	"google.golang.org/protobuf/proto"
 )
 
 func int64p(v int64) *int64 { return &v }
 
-func completeUtilization(sessionID, claudeSessionID, turnID, messageID string) *frontendv1.TokenUtilization {
-	return &frontendv1.TokenUtilization{
+func completeUtilization(sessionID, claudeSessionID, turnID, messageID string) *statev1.TokenUtilization {
+	return &statev1.TokenUtilization{
 		AgentReplSessionId: sessionID,
 		ClaudeSessionId:    claudeSessionID,
 		RootTurnId:         turnID,
 		ApiMessageId:       messageID,
 		Model:              "model",
-		Actor:              &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}},
-		Usage:              &frontendv1.VendorTokenUsage{OutputTokens: 4},
+		Actor:              &statev1.TokenUtilization_MainAgent{MainAgent: &statev1.TokenUtilizationMainAgent{}},
+		Usage:              &statev1.VendorTokenUsage{OutputTokens: 4},
 	}
 }
 
@@ -32,15 +32,15 @@ func TestTokenUtilizationRejectsBlankModelBeforeDurableMutation(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name   string
-		record func() *frontendv1.TokenUtilization
-		write  func(*frontendv1.TokenUtilization) (bool, error)
+		record func() *statev1.TokenUtilization
+		write  func(*statev1.TokenUtilization) (bool, error)
 	}{
-		{name: "live blank", record: func() *frontendv1.TokenUtilization { return completeUtilization("s", "claude", "turn", "live-blank") }, write: utilizations.Record},
-		{name: "live whitespace", record: func() *frontendv1.TokenUtilization {
+		{name: "live blank", record: func() *statev1.TokenUtilization { return completeUtilization("s", "claude", "turn", "live-blank") }, write: utilizations.Record},
+		{name: "live whitespace", record: func() *statev1.TokenUtilization {
 			return completeUtilization("s", "claude", "turn", "live-whitespace")
 		}, write: utilizations.Record},
-		{name: "historical blank", record: func() *frontendv1.TokenUtilization { return completeUtilization("s", "claude", "", "historical-blank") }, write: utilizations.RecordHistorical},
-		{name: "historical whitespace", record: func() *frontendv1.TokenUtilization {
+		{name: "historical blank", record: func() *statev1.TokenUtilization { return completeUtilization("s", "claude", "", "historical-blank") }, write: utilizations.RecordHistorical},
+		{name: "historical whitespace", record: func() *statev1.TokenUtilization {
 			return completeUtilization("s", "claude", "", "historical-whitespace")
 		}, write: utilizations.RecordHistorical},
 	} {
@@ -83,7 +83,7 @@ func TestTokenUtilizationAcceptsExactReplayAndRejectsConflictingDuplicate(t *tes
 		t.Fatalf("NewTokenUtilizations: %v", err)
 	}
 	base := completeUtilization("s", "claude", "turn", "m")
-	base.ResponseTiming = &frontendv1.TokenResponseTiming{TimeToFirstTokenMs: int64p(20)}
+	base.ResponseTiming = &statev1.TokenResponseTiming{TimeToFirstTokenMs: int64p(20)}
 	if inserted, err := utilizations.Record(base); err != nil || !inserted {
 		t.Fatalf("first Record = %v, %v", inserted, err)
 	}
@@ -91,7 +91,7 @@ func TestTokenUtilizationAcceptsExactReplayAndRejectsConflictingDuplicate(t *tes
 		t.Fatalf("exact replay Record = %v, %v", inserted, err)
 	}
 	conflict := completeUtilization("s", "claude", "turn", "m")
-	conflict.ResponseTiming = &frontendv1.TokenResponseTiming{OutputGenerationDurationMs: int64p(80)}
+	conflict.ResponseTiming = &statev1.TokenResponseTiming{OutputGenerationDurationMs: int64p(80)}
 	if _, err := utilizations.Record(conflict); err == nil {
 		t.Fatal("conflicting duplicate was accepted")
 	}
@@ -145,7 +145,7 @@ func TestHistoricalTokenUtilizationAcceptsExactReplayAndRejectsInventedLiveEvide
 		t.Fatal("historical record with invented root turn was accepted")
 	}
 	timed := completeUtilization("s", "claude", "", "timed")
-	timed.ResponseTiming = &frontendv1.TokenResponseTiming{}
+	timed.ResponseTiming = &statev1.TokenResponseTiming{}
 	if _, err := utilizations.RecordHistorical(timed); err == nil {
 		t.Fatal("historical record with invented response timing was accepted")
 	}
@@ -162,7 +162,7 @@ func TestHistoricalObservationConvergesWithRicherLiveRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	live := completeUtilization("s", "claude", "turn", "message")
-	live.ResponseTiming = &frontendv1.TokenResponseTiming{OutputGenerationDurationMs: int64p(0)}
+	live.ResponseTiming = &statev1.TokenResponseTiming{OutputGenerationDurationMs: int64p(0)}
 	if inserted, err := utilizations.Record(live); err != nil || !inserted {
 		t.Fatalf("Record live = %v, %v", inserted, err)
 	}
@@ -188,16 +188,16 @@ func TestTokenUtilizationRejectsInconsistentSubagentAliasTopologyBeforeMutation(
 		t.Fatalf("NewTokenUtilizations: %v", err)
 	}
 	first := completeUtilization("s", "claude", "turn", "m1")
-	first.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-a", ParentToolUseId: "tool-a"}}
+	first.Actor = &statev1.TokenUtilization_Subagent{Subagent: &statev1.TokenUtilizationSubagent{AgentId: "agent-a", ParentToolUseId: "tool-a"}}
 	second := completeUtilization("s", "claude", "turn", "m2")
-	second.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-b", ParentToolUseId: "tool-b"}}
-	for _, record := range []*frontendv1.TokenUtilization{first, second} {
+	second.Actor = &statev1.TokenUtilization_Subagent{Subagent: &statev1.TokenUtilizationSubagent{AgentId: "agent-b", ParentToolUseId: "tool-b"}}
+	for _, record := range []*statev1.TokenUtilization{first, second} {
 		if _, err := utilizations.Record(record); err != nil {
 			t.Fatalf("Record %q: %v", record.GetApiMessageId(), err)
 		}
 	}
 	bridge := completeUtilization("s", "claude", "turn", "m3")
-	bridge.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-a", ParentToolUseId: "tool-b"}}
+	bridge.Actor = &statev1.TokenUtilization_Subagent{Subagent: &statev1.TokenUtilizationSubagent{AgentId: "agent-a", ParentToolUseId: "tool-b"}}
 	if _, err := utilizations.Record(bridge); err == nil {
 		t.Fatal("inconsistent alias bridge was accepted")
 	}
@@ -212,13 +212,13 @@ func TestTokenUtilizationRejectsInconsistentSubagentAliasTopologyBeforeMutation(
 func TestTokenUtilizationTopologyCheckCoversTheAliasesItSkipsFor(t *testing.T) {
 	tests := []struct {
 		name       string
-		actor      *frontendv1.TokenUtilizationSubagent
+		actor      *statev1.TokenUtilizationSubagent
 		wantReject bool
 	}{
 		{name: "main agent record is admitted", actor: nil},
-		{name: "subagent naming neither alias is admitted", actor: &frontendv1.TokenUtilizationSubagent{SubagentType: "explore"}},
-		{name: "agent id contradicting a persisted bridge is rejected", actor: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-a", ParentToolUseId: "tool-b"}, wantReject: true},
-		{name: "parent tool use id contradicting a persisted bridge is rejected", actor: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-b", ParentToolUseId: "tool-a"}, wantReject: true},
+		{name: "subagent naming neither alias is admitted", actor: &statev1.TokenUtilizationSubagent{SubagentType: "explore"}},
+		{name: "agent id contradicting a persisted bridge is rejected", actor: &statev1.TokenUtilizationSubagent{AgentId: "agent-a", ParentToolUseId: "tool-b"}, wantReject: true},
+		{name: "parent tool use id contradicting a persisted bridge is rejected", actor: &statev1.TokenUtilizationSubagent{AgentId: "agent-b", ParentToolUseId: "tool-a"}, wantReject: true},
 	}
 
 	for _, tc := range tests {
@@ -229,19 +229,19 @@ func TestTokenUtilizationTopologyCheckCoversTheAliasesItSkipsFor(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewTokenUtilizations: %v", err)
 			}
-			for i, seed := range []*frontendv1.TokenUtilizationSubagent{
+			for i, seed := range []*statev1.TokenUtilizationSubagent{
 				{AgentId: "agent-a", ParentToolUseId: "tool-a"},
 				{AgentId: "agent-b", ParentToolUseId: "tool-b"},
 			} {
 				record := completeUtilization("s", "claude", "turn", fmt.Sprintf("seed-%d", i))
-				record.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: seed}
+				record.Actor = &statev1.TokenUtilization_Subagent{Subagent: seed}
 				if _, err := utilizations.Record(record); err != nil {
 					t.Fatalf("seed %d: %v", i, err)
 				}
 			}
 			incoming := completeUtilization("s", "claude", "turn", "incoming")
 			if tc.actor != nil {
-				incoming.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: tc.actor}
+				incoming.Actor = &statev1.TokenUtilization_Subagent{Subagent: tc.actor}
 			}
 
 			// Act.
@@ -305,13 +305,13 @@ func TestIrreconcilableObservationClassifiesTheVerdictsThatCanNeverChange(t *tes
 			name: "inconsistent subagent alias topology",
 			seed: func(u *TokenUtilizations) error {
 				rec := completeUtilization("s", "claude", "turn", "m")
-				rec.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "a", ParentToolUseId: "tool"}}
+				rec.Actor = &statev1.TokenUtilization_Subagent{Subagent: &statev1.TokenUtilizationSubagent{AgentId: "a", ParentToolUseId: "tool"}}
 				_, err := u.Record(rec)
 				return err
 			},
 			submit: func(u *TokenUtilizations) error {
 				rec := completeUtilization("s", "claude", "turn", "m2")
-				rec.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "a", ParentToolUseId: "other"}}
+				rec.Actor = &statev1.TokenUtilization_Subagent{Subagent: &statev1.TokenUtilizationSubagent{AgentId: "a", ParentToolUseId: "other"}}
 				_, err := u.Record(rec)
 				return err
 			},

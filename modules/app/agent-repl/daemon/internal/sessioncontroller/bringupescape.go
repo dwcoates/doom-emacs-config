@@ -38,12 +38,12 @@ import (
 	"fmt"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/ssm"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // shimSDKComponent is the component a claude-shim names when its SDK stream
@@ -253,7 +253,7 @@ func (m *Manager) noteBringUpTermination(d *sessionController, detail *frontendv
 // not a half-minute one. The reason is kept because it is the only account of
 // the failure the daemon will ever hold: the shim's exit carries no reason on
 // the wire, and this report precedes it.
-func (m *Manager) noteBringUpFault(d *sessionController, ds *corev1.DegradedState) {
+func (m *Manager) noteBringUpFault(d *sessionController, ds *protocolv1.DegradedState) {
 	if ds.GetComponent() != shimSDKComponent || ds.GetRecovered() {
 		return
 	}

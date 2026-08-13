@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/tokenusage"
@@ -12,12 +12,12 @@ import (
 
 // mainAgentUtilization builds one MAIN-AGENT response's durable record with the
 // three input buckets a context measurement is taken from.
-func mainAgentUtilization(apiMessageID string, input, cacheCreation, cacheRead int64) *frontendv1.TokenUtilization {
-	return &frontendv1.TokenUtilization{
+func mainAgentUtilization(apiMessageID string, input, cacheCreation, cacheRead int64) *statev1.TokenUtilization {
+	return &statev1.TokenUtilization{
 		ApiMessageId: apiMessageID,
 		Model:        "claude-opus-5",
-		Actor:        &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}},
-		Usage: &frontendv1.VendorTokenUsage{
+		Actor:        &statev1.TokenUtilization_MainAgent{MainAgent: &statev1.TokenUtilizationMainAgent{}},
+		Usage: &statev1.VendorTokenUsage{
 			InputTokens:              input,
 			CacheCreationInputTokens: cacheCreation,
 			CacheReadInputTokens:     cacheRead,
@@ -27,9 +27,9 @@ func mainAgentUtilization(apiMessageID string, input, cacheCreation, cacheRead i
 
 // subagentUtilization is the same record attributed to a subagent, which runs a
 // context of its own that this session's floor must not read.
-func subagentUtilization(apiMessageID string, input, cacheCreation, cacheRead int64) *frontendv1.TokenUtilization {
+func subagentUtilization(apiMessageID string, input, cacheCreation, cacheRead int64) *statev1.TokenUtilization {
 	record := mainAgentUtilization(apiMessageID, input, cacheCreation, cacheRead)
-	record.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{
+	record.Actor = &statev1.TokenUtilization_Subagent{Subagent: &statev1.TokenUtilizationSubagent{
 		AgentId:         "agent-1",
 		ParentToolUseId: "toolu_1",
 		SubagentType:    "general-purpose",
@@ -236,14 +236,14 @@ func TestNoteMainAgentContextSizeReportsARejectedCounterAndKeepsTheLastMeasureme
 
 // contextSizeConsumer is one consumer with the size hook recording everything it
 // receives, which is the seam the manager binds in production.
-func contextSizeConsumer(t *testing.T) (*consumer, *[]*frontendv1.TokenUtilization) {
+func contextSizeConsumer(t *testing.T) (*consumer, *[]*statev1.TokenUtilization) {
 	t.Helper()
-	var seen []*frontendv1.TokenUtilization
+	var seen []*statev1.TokenUtilization
 	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, nil)
 	c.historicalUsageStore = &fakeHistoricalUsageStore{}
 	c.accounting.activeTurnID = "t"
 	c.accounting.turns["t"] = &accountingTurn{}
-	c.onMainAgentContextSize = func(record *frontendv1.TokenUtilization) { seen = append(seen, record) }
+	c.onMainAgentContextSize = func(record *statev1.TokenUtilization) { seen = append(seen, record) }
 	return c, &seen
 }
 

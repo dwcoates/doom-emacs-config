@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -550,7 +550,7 @@ func (m *Manager) repullFromStore(d *sessionController, activity *repullActivity
 	logf("session-controller: re-pulling history ws=%q session=%s from_seq=%d stop_at=%d max_events=%d idle_timeout_ms=%d (frontend-initiated, from DURABLE history, conversation only; requested gap was (%d,%d))",
 		d.workspace, d.sessionID, fromSeq, stopAt, repullMaxEvents, repullIdleTimeout.Milliseconds(), reqFrom, reqStop)
 	res, err := m.cfg.DurableHistory.ReplayHistory(activity.ctx, d.workspace, d.sessionID, fromSeq, stopAt, repullMaxEvents,
-		func(ev *corev1.Event) {
+		func(ev *protocolv1.Event) {
 			progress := activity.observe(ev.GetSeq())
 			if progress.delivered == 1 || progress.delivered%repullProgressLogEvery == 0 {
 				logf("session-controller: re-pull progress ws=%q session=%s source=store from_seq=%d stop_at=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d idle_timeout_ms=%d",
@@ -582,7 +582,7 @@ func (m *Manager) repullFromStore(d *sessionController, activity *repullActivity
 func (m *Manager) repullFromShim(d *sessionController, activity *repullActivity, fromSeq, stopAt uint64) error {
 	m.logf("session-controller: re-pulling history ws=%q session=%s from_seq=%d stop_at=%d max_events=%d idle_timeout_ms=%d (frontend-initiated, via the shim, conversation only)",
 		d.workspace, d.sessionID, fromSeq, stopAt, repullMaxEvents, repullIdleTimeout.Milliseconds())
-	res, err := d.client.Replay(activity.ctx, fromSeq, stopAt, repullMaxEvents, func(ev *corev1.Event) {
+	res, err := d.client.Replay(activity.ctx, fromSeq, stopAt, repullMaxEvents, func(ev *protocolv1.Event) {
 		progress := activity.observe(ev.GetSeq())
 		if progress.delivered == 1 || progress.delivered%repullProgressLogEvery == 0 {
 			m.logf("session-controller: re-pull progress ws=%q session=%s source=shim from_seq=%d stop_at=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d idle_timeout_ms=%d",
@@ -639,11 +639,11 @@ func (m *Manager) repullFromShim(d *sessionController, activity *repullActivity,
 // floor: the floor is durable, a re-pull is bounded ABOVE by it, and letting
 // history move it would be the replayed-history-as-live-state class of bug
 // repull exists to avoid.
-func (c *consumer) repullConversation(ev *corev1.Event) {
+func (c *consumer) repullConversation(ev *protocolv1.Event) {
 	c.pushConversation(ev, false)
 }
 
 // compile-time proof that the real client satisfies the session controller's replay need.
 var _ interface {
-	Replay(context.Context, uint64, uint64, uint32, func(*corev1.Event)) (shimclient.ReplayResult, error)
+	Replay(context.Context, uint64, uint64, uint32, func(*protocolv1.Event)) (shimclient.ReplayResult, error)
 } = (*shimclient.Client)(nil)

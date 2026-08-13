@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/storehistory"
@@ -23,7 +23,7 @@ type gatedDurableHistory struct {
 	once    sync.Once
 }
 
-func (h *gatedDurableHistory) ReplayHistory(_ context.Context, _, _ string, _, _ uint64, _ uint32, _ func(*corev1.Event)) (storehistory.Result, error) {
+func (h *gatedDurableHistory) ReplayHistory(_ context.Context, _, _ string, _, _ uint64, _ uint32, _ func(*protocolv1.Event)) (storehistory.Result, error) {
 	h.mu.Lock()
 	h.calls++
 	h.mu.Unlock()
@@ -116,7 +116,7 @@ func TestResyncForGenerationAcceptsReconnectWithinTheSameControllerGeneration(t 
 	sessionID, generationID := d.sessionID, d.generationID
 
 	h.m.onLinkLostForGeneration("ws", sessionID, generationID, errors.New("test link loss"))
-	if retiring := h.m.onConnectedForGeneration("ws", sessionID, generationID, &corev1.ShimHello{SessionId: sessionID}); retiring {
+	if retiring := h.m.onConnectedForGeneration("ws", sessionID, generationID, &protocolv1.ShimHello{SessionId: sessionID}); retiring {
 		t.Fatal("same-generation reconnect retired the live controller")
 	}
 	if err := h.m.ResyncForFence("ws", ssm.Fence(sessionID, generationID), 0); err != nil {

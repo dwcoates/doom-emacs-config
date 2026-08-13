@@ -32,8 +32,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"claude-repld/internal/daemonturn"
 )
 
@@ -130,12 +130,12 @@ func TestE2EADirectRevivalCompactsNothing(t *testing.T) {
 	// that no compaction preceded it.
 	tail := tailStore(t, revivedVendorID(t, s))
 	tail.awaitSentinel(t, "the user's own first turn after a direct revival",
-		func(ev *corev1.Event) string {
+		func(ev *protocolv1.Event) string {
 			if started := daemonCompactStart(ev); started != nil {
 				return "a direct revival submitted " + compactCommand + " anyway (turn_id=" + started.GetTurnId() + ")"
 			}
 			return ""
-		}, func(ev *corev1.Event) bool {
+		}, func(ev *protocolv1.Event) bool {
 			started := userTurnStart(ev)
 			return started != nil && strings.Contains(started.GetPromptPreview(), "after-direct-revival")
 		})
@@ -186,7 +186,7 @@ func TestE2EPromptsAreGatedUntilTheCompactionLands(t *testing.T) {
 	// proof of absence rather than of lateness.
 	tail := tailStore(t, revivedVendorID(t, s))
 	tail.awaitSentinel(t, "the revival's own /compact turn ending in the durable record",
-		func(ev *corev1.Event) string {
+		func(ev *protocolv1.Event) string {
 			if started := userTurnStart(ev); started != nil && strings.Contains(started.GetPromptPreview(), "typed-before-compaction") {
 				return "a prompt submitted during a compact-first revival reached the vendor before the compaction landed"
 			}
@@ -383,7 +383,7 @@ func revivedVendorID(t *testing.T, s *keepAliveSession) string {
 // daemonCompactStart returns the TurnStarted of a revival's own `/compact`, or
 // nil. The id's family is the verdict, read through the one vocabulary the
 // minting site uses.
-func daemonCompactStart(ev *corev1.Event) *corev1.TurnStarted {
+func daemonCompactStart(ev *protocolv1.Event) *protocolv1.TurnStarted {
 	started := ev.GetTurnStarted()
 	if started == nil || !strings.HasPrefix(started.GetTurnId(), daemonturn.ReviveCompactPrefix) {
 		return nil
@@ -392,7 +392,7 @@ func daemonCompactStart(ev *corev1.Event) *corev1.TurnStarted {
 }
 
 // daemonCompactEnded reports whether the event ends a revival's own `/compact`.
-func daemonCompactEnded(ev *corev1.Event) bool {
+func daemonCompactEnded(ev *protocolv1.Event) bool {
 	ended := ev.GetTurnEnded()
 	return ended != nil && strings.HasPrefix(ended.GetTurnId(), daemonturn.ReviveCompactPrefix)
 }
@@ -403,7 +403,7 @@ func daemonCompactEnded(ev *corev1.Event) bool {
 func awaitDaemonCompact(t *testing.T, s *keepAliveSession) string {
 	t.Helper()
 	tail := tailStore(t, revivedVendorID(t, s))
-	ev := tail.await(t, "the revival's own /compact in the durable record", func(ev *corev1.Event) bool {
+	ev := tail.await(t, "the revival's own /compact in the durable record", func(ev *protocolv1.Event) bool {
 		return daemonCompactStart(ev) != nil
 	})
 	return daemonCompactStart(ev).GetPromptPreview()

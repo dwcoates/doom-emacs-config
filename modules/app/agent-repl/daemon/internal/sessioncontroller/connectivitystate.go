@@ -6,7 +6,7 @@ import (
 
 	"claude-repld/internal/ssm"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // connectivitystate.go — this package's production of session connectivity.

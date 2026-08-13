@@ -43,7 +43,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 
 	"google.golang.org/protobuf/proto"
@@ -151,14 +151,14 @@ type ModeStore interface {
 type StateSink interface {
 	// Apply feeds one lifecycle Event to the SSM. Called on the demux
 	// goroutine in strict arrival order; must not block indefinitely.
-	Apply(ev *corev1.Event) error
+	Apply(ev *protocolv1.Event) error
 }
 
 // TurnClaimSink consumes only TurnClaimBridge correlation proof. The stitch
 // phase binds it directly to the durable turn ledger; it is deliberately
 // separate from StateSink and FrameSink so proof cannot paint or render.
 type TurnClaimSink interface {
-	ApplyTurnClaimBridge(ev *corev1.Event) error
+	ApplyTurnClaimBridge(ev *protocolv1.Event) error
 }
 
 // SessionRewoundSink consumes SessionRewound lineage evidence. It is separate
@@ -167,7 +167,7 @@ type TurnClaimSink interface {
 // and a sink that could also paint or render would be able to do more than
 // record.
 type SessionRewoundSink interface {
-	ApplySessionRewound(ev *corev1.Event, rewound *corev1.SessionRewound) error
+	ApplySessionRewound(ev *protocolv1.Event, rewound *protocolv1.SessionRewound) error
 }
 
 // FrameSink consumes every non-lifecycle, non-degraded event: the data.v1
@@ -179,19 +179,19 @@ type FrameSink interface {
 	// goroutine in strict arrival order. A rejection prevents the persistent
 	// high-water mark from advancing past an event the frontend/accounting path
 	// did not accept.
-	Consume(ev *corev1.Event) error
+	Consume(ev *protocolv1.Event) error
 }
 
 // ModelCatalogSink receives the live query's selectable models.  A catalogue
 // is session state, not conversation content a frontend may infer.
 type ModelCatalogSink interface {
-	ModelCatalog(sessionID string, catalog *corev1.ModelCatalog) error
+	ModelCatalog(sessionID string, catalog *protocolv1.ModelCatalog) error
 }
 
 // FileDiagnosticSink consumes a persistent file-plane diagnostic before it can
 // enter frontend, retained, progress, or SSM paths.
 type FileDiagnosticSink interface {
-	PersistFileDiagnostic(ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error
+	PersistFileDiagnostic(ev *protocolv1.Event, diagnostic *protocolv1.FilePlaneDiagnostic) error
 }
 
 // Disposition is the reporter's verdict on one DegradedState: whether the row
@@ -252,7 +252,7 @@ type DegradedReporter interface {
 	// It returns the disposition it classified ds under, so this client can
 	// record the same event at the severity that verdict earns instead of
 	// guessing at one it has no way to compute.
-	Degraded(sessionID string, ev *corev1.Event, ds *corev1.DegradedState) Disposition
+	Degraded(sessionID string, ev *protocolv1.Event, ds *protocolv1.DegradedState) Disposition
 	// ConnectionDegraded reports that the missed-heartbeat window elapsed with
 	// no inbound traffic on the shim connection.
 	ConnectionDegraded(sessionID, reason string)
@@ -267,7 +267,7 @@ type DegradedReporter interface {
 // shim. Returning nil is a protocol error and is loud-logged (no response is
 // sent, and the shim's canUseTool stays blocked — honest, not papered over).
 type PermissionHandler interface {
-	HandlePermission(sessionID string, req *corev1.PermissionRequest) *corev1.PermissionResponse
+	HandlePermission(sessionID string, req *protocolv1.PermissionRequest) *protocolv1.PermissionResponse
 }
 
 // Config injects everything the stitch phase binds. Zero-value durations fall
@@ -344,14 +344,14 @@ type Config struct {
 	// that means nothing in the new space and then reads its seq=1 as a
 	// terminal regression. A hook that ran after the Subscribe could only
 	// correct the NEXT connection.
-	OnHandshake func(hello *corev1.ShimHello) error
+	OnHandshake func(hello *protocolv1.ShimHello) error
 
 	// OnConnected fires when the bring-up gate CLOSES — the shim's ShimReady,
 	// not merely a completed handshake — carrying the ShimHello that opened it
 	// (so stitch sees turn_in_flight for mid-turn reattach). Optional.
 	// The return value reports that the source generation is being retired by
 	// an intentional transition. Readiness stays withheld in that case.
-	OnConnected func(hello *corev1.ShimHello) (retiring bool)
+	OnConnected func(hello *protocolv1.ShimHello) (retiring bool)
 
 	// OnLinkLost fires when a connection this client was DRIVING drops while
 	// the client itself lives on — the reconnect loop is about to re-run the
@@ -433,7 +433,7 @@ const (
 // Implemented by the daemon's shim listener; an interface so the client stays
 // testable without a real socket.
 type ConnSource interface {
-	Next(ctx context.Context, sessionID string) (net.Conn, *corev1.ShimHello, error)
+	Next(ctx context.Context, sessionID string) (net.Conn, *protocolv1.ShimHello, error)
 }
 
 // Client is one session's shim connection. Construct with New; drive with Run.
@@ -550,7 +550,7 @@ type activeConn struct {
 	conn net.Conn
 	// hello is the ShimHello this connection opened with, kept so the
 	// ShimReady that closes the gate can hand it to OnConnected.
-	hello   *corev1.ShimHello
+	hello   *protocolv1.ShimHello
 	writeMu sync.Mutex // serializes frame writes across goroutines
 
 	pendMu  sync.Mutex
@@ -560,13 +560,13 @@ type activeConn struct {
 
 // ackResult carries the outcome of a correlated control request.
 type ackResult struct {
-	ack  *corev1.Ack  // non-nil on success; carries the interrupt outcome
-	nack *corev1.Nack // non-nil = Nack; nil = Ack
+	ack  *protocolv1.Ack  // non-nil on success; carries the interrupt outcome
+	nack *protocolv1.Nack // non-nil = Nack; nil = Ack
 	// page is the success arm of a MessagePageRequest, whose answer is a
 	// MessagePage rather than an Ack. It rides this struct because the page and
 	// its Nack share ONE request id, so they must share one waiter (see
 	// messagepage.go).
-	page *corev1.MessagePage
+	page *protocolv1.MessagePage
 	err  error // connection lost etc.
 }
 
@@ -913,7 +913,7 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	// the field is never empty on the wire (core.proto DaemonHello.
 	// permission_mode). Empty is reserved for a daemon too old to speak it.
 	mode := c.permissionMode()
-	if err := ac.writeMsg(&corev1.DaemonHello{
+	if err := ac.writeMsg(&protocolv1.DaemonHello{
 		DaemonVersion:   c.cfg.DaemonVersion,
 		ProtocolVersion: c.cfg.ProtocolVersion,
 		FromSeq:         from,
@@ -985,14 +985,14 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 
 type connectionResult struct {
 	conn  net.Conn
-	hello *corev1.ShimHello
+	hello *protocolv1.ShimHello
 	err   error
 }
 
 // nextConnection waits on the transport and, after the process has connected
 // once, on that process's exit event. The derived context makes the losing
 // transport wait stop immediately, so the observer adds no goroutine leak.
-func (c *Client) nextConnection(ctx context.Context) (net.Conn, *corev1.ShimHello, error) {
+func (c *Client) nextConnection(ctx context.Context) (net.Conn, *protocolv1.ShimHello, error) {
 	if !c.connectedOnce || c.cfg.ShimExits == nil {
 		return c.cfg.Source.Next(ctx, c.cfg.SessionID)
 	}
@@ -1027,7 +1027,7 @@ func (c *Client) nextConnection(ctx context.Context) (net.Conn, *corev1.ShimHell
 // The ShimHello is passed in rather than read here because the listener had to
 // read it to know which session the connection belonged to — reading it twice
 // would consume the first real frame instead.
-func (c *Client) checkVersion(hello *corev1.ShimHello) error {
+func (c *Client) checkVersion(hello *protocolv1.ShimHello) error {
 	if hello == nil {
 		return fmt.Errorf("shimclient: handshake got no ShimHello")
 	}
@@ -1043,7 +1043,7 @@ func (c *Client) checkVersion(hello *corev1.ShimHello) error {
 // releases AwaitReady, and OnConnected fires from here for the same reason —
 // a reattach consumer (the pending-resync re-arm) needs a shim that can serve,
 // not merely one that has connected.
-func (c *Client) dispatchShimReady(ac *activeConn, ready *corev1.ShimReady) {
+func (c *Client) dispatchShimReady(ac *activeConn, ready *protocolv1.ShimReady) {
 	if got := ready.GetSessionId(); got != "" && got != c.cfg.SessionID {
 		c.logf("ShimReady names session=%s on session=%s's connection; ignoring", got, c.cfg.SessionID)
 		return
@@ -1088,7 +1088,7 @@ func (c *Client) heartbeatSender(ctx context.Context, ac *activeConn) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := ac.writeMsg(&corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
+			if err := ac.writeMsg(&protocolv1.ConnectionHeartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
 				// The sender stops here, so the link is on its way down.
 				c.warn("heartbeat send failed: %v", err)
 				return
@@ -1312,7 +1312,7 @@ func (c *Client) UnpinAccountingTurn(turnIDs ...string) {
 // nothing, and every check must then apply to it exactly as it did before the
 // field existed. An unbound connection (no hello query) has nothing to compare
 // against and likewise admits no history.
-func (c *Client) eventIsHistorical(ev *corev1.Event) bool {
+func (c *Client) eventIsHistorical(ev *protocolv1.Event) bool {
 	if c.liveQueryInstanceID == "" {
 		return false
 	}

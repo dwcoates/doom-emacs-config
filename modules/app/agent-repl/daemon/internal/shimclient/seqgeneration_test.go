@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 
 	"claude-repld/internal/dlog"
@@ -20,9 +20,9 @@ import (
 // fakeServerHandshakeWithPid is fakeServerHandshake plus the one field this
 // file turns on: the shim's own pid, which is the generation identity the
 // daemon compares connections by.
-func fakeServerHandshakeWithPid(t *testing.T, conn net.Conn, sessionID, protoVer string, pid int32) *corev1.DaemonHello {
+func fakeServerHandshakeWithPid(t *testing.T, conn net.Conn, sessionID, protoVer string, pid int32) *protocolv1.DaemonHello {
 	t.Helper()
-	mustWriteMsg(t, conn, &corev1.ShimHello{
+	mustWriteMsg(t, conn, &protocolv1.ShimHello{
 		SessionId:       sessionID,
 		Vendor:          "claude",
 		ShimVersion:     "test-shim",
@@ -33,11 +33,11 @@ func fakeServerHandshakeWithPid(t *testing.T, conn net.Conn, sessionID, protoVer
 	if err != nil {
 		t.Fatalf("shim reading DaemonHello: %v", err)
 	}
-	dh, ok := m.(*corev1.DaemonHello)
+	dh, ok := m.(*protocolv1.DaemonHello)
 	if !ok {
 		t.Fatalf("shim expected DaemonHello, got %T", m)
 	}
-	mustWriteMsg(t, conn, &corev1.ShimReady{SessionId: sessionID, FromSeq: dh.GetFromSeq()})
+	mustWriteMsg(t, conn, &protocolv1.ShimReady{SessionId: sessionID, FromSeq: dh.GetFromSeq()})
 	return dh
 }
 

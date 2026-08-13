@@ -7,7 +7,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // TestEveryEventPayloadArmIsClassified is the totality check restated as a
@@ -15,7 +15,7 @@ import (
 // addition to the init() panic that stops the binary.
 func TestEveryEventPayloadArmIsClassified(t *testing.T) {
 	// Arrange.
-	oneof := (&corev1.Event{}).ProtoReflect().Descriptor().Oneofs().ByName("payload")
+	oneof := (&protocolv1.Event{}).ProtoReflect().Descriptor().Oneofs().ByName("payload")
 	if oneof == nil {
 		t.Fatal("agentshim.core.v1.Event has no `payload` oneof")
 	}
@@ -38,7 +38,7 @@ func TestEveryEventPayloadArmIsClassified(t *testing.T) {
 // proto no longer declares, which a future arm reusing the number would inherit.
 func TestNoOrphanedRecordCategory(t *testing.T) {
 	// Arrange.
-	oneof := (&corev1.Event{}).ProtoReflect().Descriptor().Oneofs().ByName("payload")
+	oneof := (&protocolv1.Event{}).ProtoReflect().Descriptor().Oneofs().ByName("payload")
 	declared := map[protoreflect.FieldNumber]bool{}
 	for i := 0; i < oneof.Fields().Len(); i++ {
 		declared[oneof.Fields().Get(i).Number()] = true
@@ -58,28 +58,28 @@ func TestNoOrphanedRecordCategory(t *testing.T) {
 // a C kind without a vector here is itself a failure.
 var categoryCVectors = []struct {
 	name    string
-	payload func(*corev1.Event)
+	payload func(*protocolv1.Event)
 }{
-	{"session_started", func(e *corev1.Event) { e.Payload = &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}} }},
-	{"session_ended", func(e *corev1.Event) { e.Payload = &corev1.Event_SessionEnded{SessionEnded: &corev1.SessionEnded{}} }},
-	{"turn_started", func(e *corev1.Event) { e.Payload = &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}} }},
-	{"turn_ended", func(e *corev1.Event) { e.Payload = &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}} }},
-	{"heartbeat_progress", func(e *corev1.Event) {
-		e.Payload = &corev1.Event_HeartbeatProgress{HeartbeatProgress: &corev1.HeartbeatProgress{}}
+	{"session_started", func(e *protocolv1.Event) { e.Payload = &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{}} }},
+	{"session_ended", func(e *protocolv1.Event) { e.Payload = &protocolv1.Event_SessionEnded{SessionEnded: &protocolv1.SessionEnded{}} }},
+	{"turn_started", func(e *protocolv1.Event) { e.Payload = &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}} }},
+	{"turn_ended", func(e *protocolv1.Event) { e.Payload = &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{}} }},
+	{"heartbeat_progress", func(e *protocolv1.Event) {
+		e.Payload = &protocolv1.Event_HeartbeatProgress{HeartbeatProgress: &protocolv1.HeartbeatProgress{}}
 	}},
-	{"message_latency", func(e *corev1.Event) { e.Payload = &corev1.Event_MessageLatency{MessageLatency: &corev1.MessageLatency{}} }},
-	{"file_plane_diagnostic", func(e *corev1.Event) {
-		e.Payload = &corev1.Event_FilePlaneDiagnostic{FilePlaneDiagnostic: &corev1.FilePlaneDiagnostic{}}
+	{"message_latency", func(e *protocolv1.Event) { e.Payload = &protocolv1.Event_MessageLatency{MessageLatency: &protocolv1.MessageLatency{}} }},
+	{"file_plane_diagnostic", func(e *protocolv1.Event) {
+		e.Payload = &protocolv1.Event_FilePlaneDiagnostic{FilePlaneDiagnostic: &protocolv1.FilePlaneDiagnostic{}}
 	}},
-	{"turn_claim_bridge", func(e *corev1.Event) {
-		e.Payload = &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{}}
+	{"turn_claim_bridge", func(e *protocolv1.Event) {
+		e.Payload = &protocolv1.Event_TurnClaimBridge{TurnClaimBridge: &protocolv1.TurnClaimBridge{}}
 	}},
-	{"query_lifecycle", func(e *corev1.Event) { e.Payload = &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{}} }},
-	{"account_usage_observation", func(e *corev1.Event) {
-		e.Payload = &corev1.Event_AccountUsageObservation{AccountUsageObservation: &corev1.AccountUsageObservation{}}
+	{"query_lifecycle", func(e *protocolv1.Event) { e.Payload = &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{}} }},
+	{"account_usage_observation", func(e *protocolv1.Event) {
+		e.Payload = &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: &protocolv1.AccountUsageObservation{}}
 	}},
-	{"session_rewound", func(e *corev1.Event) { e.Payload = &corev1.Event_SessionRewound{SessionRewound: &corev1.SessionRewound{}} }},
-	{"unparsed", func(e *corev1.Event) { e.Payload = &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{}} }},
+	{"session_rewound", func(e *protocolv1.Event) { e.Payload = &protocolv1.Event_SessionRewound{SessionRewound: &protocolv1.SessionRewound{}} }},
+	{"unparsed", func(e *protocolv1.Event) { e.Payload = &protocolv1.Event_Unparsed{Unparsed: &protocolv1.UnparsedEvent{}} }},
 }
 
 // TestEveryCategoryCKindCarriesNoOwnership walks every category-C kind
@@ -89,7 +89,7 @@ func TestEveryCategoryCKindCarriesNoOwnership(t *testing.T) {
 	for _, tc := range categoryCVectors {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			ev := &corev1.Event{Seq: 7}
+			ev := &protocolv1.Event{Seq: 7}
 			tc.payload(ev)
 
 			// Act.
@@ -118,7 +118,7 @@ func TestCategoryCVectorsCoverEveryCategoryCKind(t *testing.T) {
 	for _, tc := range categoryCVectors {
 		covered[tc.name] = true
 	}
-	oneof := (&corev1.Event{}).ProtoReflect().Descriptor().Oneofs().ByName("payload")
+	oneof := (&protocolv1.Event{}).ProtoReflect().Descriptor().Oneofs().ByName("payload")
 
 	// Act / Assert.
 	for i := 0; i < oneof.Fields().Len(); i++ {
@@ -136,7 +136,7 @@ func TestCategoryCVectorsCoverEveryCategoryCKind(t *testing.T) {
 // that hands a turn boundary an id must be refused, not quietly obeyed.
 func TestCategoryCRecordRefusesAnOfferedOwner(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{Seq: 3, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t1"}}}
+	ev := &protocolv1.Event{Seq: 3, Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t1"}}}
 
 	// Act.
 	_, err := ResolveRecordOwnership(ev, "msg-1")
@@ -151,7 +151,7 @@ func TestCategoryCRecordRefusesAnOfferedOwner(t *testing.T) {
 // delta's owner is the message id the producer already carries.
 func TestCategoryARecordNamesItsComposingMessage(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{Seq: 11, Payload: &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "msg-a"}}}
+	ev := &protocolv1.Event{Seq: 11, Payload: &protocolv1.Event_ContentDelta{ContentDelta: &protocolv1.ContentDelta{Uuid: "msg-a"}}}
 
 	// Act.
 	own, err := ResolveRecordOwnership(ev, ev.GetContentDelta().GetUuid())
@@ -173,7 +173,7 @@ func TestCategoryARecordNamesItsComposingMessage(t *testing.T) {
 // message, so its owner is its own id.
 func TestCategoryBRecordNamesItself(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{Seq: 12, Payload: &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}}}
+	ev := &protocolv1.Event{Seq: 12, Payload: &protocolv1.Event_ContextCleared{ContextCleared: &protocolv1.ContextCleared{}}}
 
 	// Act.
 	own, err := ResolveRecordOwnership(ev, "msg-self")
@@ -196,7 +196,7 @@ func TestCategoryBRecordNamesItself(t *testing.T) {
 // than written unowned and lost to every page query.
 func TestUnresolvableOwnerFailsLoudly(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{Seq: 13, Payload: &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{}}}
+	ev := &protocolv1.Event{Seq: 13, Payload: &protocolv1.Event_ContentDelta{ContentDelta: &protocolv1.ContentDelta{}}}
 
 	// Act.
 	_, err := ResolveRecordOwnership(ev, "")
@@ -212,11 +212,11 @@ func TestUnresolvableOwnerFailsLoudly(t *testing.T) {
 // vendor record is refused.
 func TestVendorPayloadDefersToTheCurator(t *testing.T) {
 	// Arrange.
-	any, err := anypb.New(&corev1.ContextCleared{})
+	any, err := anypb.New(&protocolv1.ContextCleared{})
 	if err != nil {
 		t.Fatalf("building vendor payload: %v", err)
 	}
-	ev := &corev1.Event{Seq: 14, Payload: &corev1.Event_Vendor{Vendor: any}}
+	ev := &protocolv1.Event{Seq: 14, Payload: &protocolv1.Event_Vendor{Vendor: any}}
 
 	// Act.
 	_, err = ResolveRecordOwnership(ev, "")
@@ -231,7 +231,7 @@ func TestVendorPayloadDefersToTheCurator(t *testing.T) {
 // producer fault, not an unowned record.
 func TestEventWithNoPayloadArmIsRefused(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{Seq: 15, SessionId: "s1"}
+	ev := &protocolv1.Event{Seq: 15, SessionId: "s1"}
 
 	// Act.
 	_, err := CategorizeRecord(ev)

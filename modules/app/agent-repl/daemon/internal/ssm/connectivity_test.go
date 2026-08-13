@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 func connectOperational(t *testing.T, m *Manager, workspace, sessionID, generationID string) {

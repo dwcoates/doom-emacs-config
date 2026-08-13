@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 )
@@ -24,7 +24,7 @@ import (
 // The waiter is parked through the registry directly rather than through
 // permHandler: the handler's own behavior is covered by the permission-item
 // tests, and what these need is the rendezvous a real canUseTool leaves behind.
-func liveManagerWithParkedPermission(t *testing.T, permissionID string) (*Manager, *fakeClient, <-chan *corev1.PermissionResponse) {
+func liveManagerWithParkedPermission(t *testing.T, permissionID string) (*Manager, *fakeClient, <-chan *protocolv1.PermissionResponse) {
 	t.Helper()
 	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
 	if err := m.SubmitPrompt(context.Background(), "ws", "fe-bringup", "hello", "", testPromptOrigin); err != nil {
@@ -38,7 +38,7 @@ func liveManagerWithParkedPermission(t *testing.T, permissionID string) (*Manage
 // awaitDecision reads the parked waiter's response, failing the test when none
 // arrives. The channel is buffered by the registry, so a resolved waiter is
 // already readable and this never sleeps on the happy path.
-func awaitDecision(t *testing.T, ch <-chan *corev1.PermissionResponse) *corev1.PermissionResponse {
+func awaitDecision(t *testing.T, ch <-chan *protocolv1.PermissionResponse) *protocolv1.PermissionResponse {
 	t.Helper()
 	select {
 	case resp := <-ch:
@@ -66,7 +66,7 @@ func TestDeclinedPermissionStopsTheTurn(t *testing.T) {
 	if origins := fc.interruptOriginIDs(); len(origins) == 0 || origins[len(origins)-1] != "fe-decline" {
 		t.Fatalf("interrupt origin ids = %v, want the decline command's own id last", origins)
 	}
-	if decision := awaitDecision(t, ch).GetDecision(); decision != corev1.PermissionDecision_PERMISSION_DECISION_DENY {
+	if decision := awaitDecision(t, ch).GetDecision(); decision != protocolv1.PermissionDecision_PERMISSION_DECISION_DENY {
 		t.Fatalf("decision = %v, want DENY", decision)
 	}
 }
@@ -100,7 +100,7 @@ func TestGrantedPermissionStopsNothing(t *testing.T) {
 	if got := fc.interruptCount() - before; got != 0 {
 		t.Fatalf("interrupts issued by a grant = %d, want 0", got)
 	}
-	if decision := awaitDecision(t, ch).GetDecision(); decision != corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+	if decision := awaitDecision(t, ch).GetDecision(); decision != protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW {
 		t.Fatalf("decision = %v, want ALLOW", decision)
 	}
 }
@@ -126,7 +126,7 @@ func TestDeclineOfAnAlreadyResolvedPermissionStopsNothing(t *testing.T) {
 func TestDeclineReportsAnUndeliverableStop(t *testing.T) {
 	// Arrange — the shim cannot be reached, so the decline cannot be delivered.
 	m, fc, ch := liveManagerWithParkedPermission(t, "perm-5")
-	fc.interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED
+	fc.interruptOutcome = protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED
 
 	// Act.
 	err := m.AnswerPermission(context.Background(), "ws", "fe-decline", "perm-5", false, "", nil)
@@ -136,7 +136,7 @@ func TestDeclineReportsAnUndeliverableStop(t *testing.T) {
 	if !errors.Is(err, errclass.ErrInterruptUndelivered) {
 		t.Fatalf("AnswerPermission(deny) over a failed stop = %v, want ErrInterruptUndelivered", err)
 	}
-	if decision := awaitDecision(t, ch).GetDecision(); decision != corev1.PermissionDecision_PERMISSION_DECISION_DENY {
+	if decision := awaitDecision(t, ch).GetDecision(); decision != protocolv1.PermissionDecision_PERMISSION_DECISION_DENY {
 		t.Fatalf("decision = %v, want DENY (the daemon still recorded the answer)", decision)
 	}
 }
@@ -153,7 +153,7 @@ func TestPromptSubmittedOverAParkedPermissionDeclinesIt(t *testing.T) {
 
 	// Assert — declined, stopped, and the prompt still went through.
 	resp := awaitDecision(t, ch)
-	if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_DENY {
+	if resp.GetDecision() != protocolv1.PermissionDecision_PERMISSION_DECISION_DENY {
 		t.Fatalf("decision = %v, want DENY", resp.GetDecision())
 	}
 	if resp.GetDenyMessage() != promptSupersededDenyMessage {
@@ -245,7 +245,7 @@ func TestPromptSubmittedWithNothingParkedStopsNothing(t *testing.T) {
 func TestPromptOverAParkedPermissionIsRefusedWhenTheStopFails(t *testing.T) {
 	// Arrange — the decline's stop cannot be delivered.
 	m, fc, _ := liveManagerWithParkedPermission(t, "perm-7")
-	fc.interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED
+	fc.interruptOutcome = protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED
 	sent := len(fc.promptTexts())
 
 	// Act.
@@ -274,8 +274,8 @@ func TestPromptOverSeveralParkedPermissionsDeclinesAllOfThemAndStopsOnce(t *test
 	}
 
 	// Assert — both released, one stop (a turn cannot be ended twice).
-	for name, ch := range map[string]<-chan *corev1.PermissionResponse{"perm-8a": first, "perm-8b": second} {
-		if decision := awaitDecision(t, ch).GetDecision(); decision != corev1.PermissionDecision_PERMISSION_DECISION_DENY {
+	for name, ch := range map[string]<-chan *protocolv1.PermissionResponse{"perm-8a": first, "perm-8b": second} {
+		if decision := awaitDecision(t, ch).GetDecision(); decision != protocolv1.PermissionDecision_PERMISSION_DECISION_DENY {
 			t.Errorf("%s decision = %v, want DENY", name, decision)
 		}
 	}
@@ -297,7 +297,7 @@ func TestInterruptReleasesTheWorkspacesParkedPermissions(t *testing.T) {
 
 	// Assert — released, and recorded as declined by the stop.
 	resp := awaitDecision(t, ch)
-	if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_DENY {
+	if resp.GetDecision() != protocolv1.PermissionDecision_PERMISSION_DECISION_DENY {
 		t.Fatalf("decision = %v, want DENY", resp.GetDecision())
 	}
 	if resp.GetDenyMessage() != stoppedDenyMessage {
@@ -329,10 +329,10 @@ func TestDeclinedPermissionSendsNoAnswerToTheShim(t *testing.T) {
 	// Arrange — the handler is what decides what reaches the wire; a decline's
 	// only delivery is the stop, so it must answer with nothing.
 	ph, reg, push := newTestPermHandler()
-	req := &corev1.PermissionRequest{RequestId: "r-decline", ToolName: "Bash"}
+	req := &protocolv1.PermissionRequest{RequestId: "r-decline", ToolName: "Bash"}
 
 	// Act.
-	done := make(chan *corev1.PermissionResponse, 1)
+	done := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r-decline")
 	if err := reg.answerDecline("r-decline", "no"); err != nil {

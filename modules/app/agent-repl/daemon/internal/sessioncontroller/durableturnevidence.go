@@ -3,7 +3,7 @@ package sessioncontroller
 import (
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 )
@@ -96,7 +96,7 @@ func (m *Manager) durableTurnEnds(workspace, sessionID string, candidates []stri
 		workspace, sessionID, lastSeen, formatTurnIDs(candidates))
 	found := map[string]struct{}{}
 	res, err := m.cfg.DurableHistory.ReplayHistory(m.rootCtx, workspace, sessionID, lastSeen, 0, repullMaxEvents,
-		func(ev *corev1.Event) {
+		func(ev *protocolv1.Event) {
 			ended := ev.GetTurnEnded()
 			if ended == nil {
 				return

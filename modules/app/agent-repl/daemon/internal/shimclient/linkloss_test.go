@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 )
 
@@ -100,7 +100,7 @@ func TestAConnectionThatNeverWiredDoesNotFireOnLinkLost(t *testing.T) {
 	var conns atomic.Int64
 	path := startFakeShim(t, func(conn net.Conn) {
 		if conns.Add(1) == 1 {
-			mustWriteMsg(t, conn, &corev1.ShimHello{
+			mustWriteMsg(t, conn, &protocolv1.ShimHello{
 				SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim", ProtocolVersion: "1",
 			})
 			if _, err := wire.ReadAny(conn); err != nil {

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/shimclient"
@@ -112,7 +112,7 @@ func (h *escapeHarness) sdkDied(t *testing.T, reason string) {
 	if err != nil {
 		t.Fatalf("existing: %v", err)
 	}
-	d.consumer.Degraded("", nil, &corev1.DegradedState{Component: shimSDKComponent, Reason: reason})
+	d.consumer.Degraded("", nil, &protocolv1.DegradedState{Component: shimSDKComponent, Reason: reason})
 }
 
 // failureCards returns every SystemFailureItem pushed into the feed.
@@ -226,14 +226,14 @@ func TestResumedQueryStartupFailureRetainsTypedTerminationThroughDriveabilityFai
 	if err != nil {
 		t.Fatalf("existing: %v", err)
 	}
-	if err := d.consumer.Consume(&corev1.Event{
+	if err := d.consumer.Consume(&protocolv1.Event{
 		Seq: 17,
-		Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 			QueryInstanceId: "resumed-query",
 			ObservedAtMs:    1234,
-			Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{
-				VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-resume"},
-				Reason:         &corev1.QueryTerminated_StartupFailure{StartupFailure: &corev1.QueryStartupFailure{Cause: "resume rejected"}},
+			Event: &protocolv1.QueryLifecycle_Terminated{Terminated: &protocolv1.QueryTerminated{
+				VendorIdentity: &protocolv1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-resume"},
+				Reason:         &protocolv1.QueryTerminated_StartupFailure{StartupFailure: &protocolv1.QueryStartupFailure{Cause: "resume rejected"}},
 			}},
 		}},
 	}); err != nil {

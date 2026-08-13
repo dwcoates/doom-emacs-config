@@ -1,7 +1,7 @@
 package ssm
 
 import (
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // This file carries the merge PIPELINE's own MergeStatus onto WorkspaceState.
