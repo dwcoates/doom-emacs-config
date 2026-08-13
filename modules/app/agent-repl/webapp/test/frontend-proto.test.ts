@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   UNSUPPORTED_SHAPES,
+  decodeCompactionSummaryItem,
   decodeFrontendFrame,
   decodeFailureCardView,
   decodeFailureKind,
@@ -50,7 +51,11 @@ const CONV_DELTA = {
   throughSeq: "5",
   messages: [{ uuid: "u1", tsMs: "1700000000000", assistantMessage: { content: [{ text: { text: "hi" } }] } }],
 };
-const SESSION_INIT = { workspace: "ws", fence: "s1", init: { model: "claude", cwd: "/w" } };
+const SESSION_INIT = {
+  workspace: "ws",
+  fence: "s1",
+  rows: [{ label: "Version", value: "2.1.215" }],
+};
 const COMMAND_ACK = { requestId: "r1", ok: true };
 const DAEMON_VIEW = {
   bootId: "b_abc",
@@ -798,6 +803,23 @@ describe("decodeFrontendFrame — ConversationItem envelope", () => {
     expect(() => itemOf({ uuid: "u1", toolUse: {}, bogus: 1 })).toThrow(/unrecognized field/);
   });
 
+  it("rejects an item whose payload arm this bundle does not name", () => {
+    // Arrange / Act / Assert — an arm the wire grew and this bundle has not
+    // learned is refused loudly, never rendered as whatever it resembles.
+    expect(() => itemOf({ uuid: "u1", someFuturePayload: {} })).toThrow(/unrecognized field/);
+  });
+
+  it("carries a compactionSummary payload through", () => {
+    // Arrange / Act
+    const frame = itemOf({
+      uuid: "u1",
+      compactionSummary: { summary: "what survived", compactedAtMs: "5", expensiveInputTokens: "7" },
+    });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong variant");
+    // Assert
+    expect(frame.frame.value.messages[0].arm).toBe("compactionSummary");
+  });
+
   it("adopts the typed payload by shape (does not reject its inner fields)", () => {
     const frame = itemOf({ uuid: "u1", permission: { request: { requestId: "u1" }, brandNewField: 9 } });
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong variant");
@@ -889,16 +911,51 @@ describe("decodeFrontendFrame — TypingDelta embeds ContentDelta", () => {
 });
 
 describe("decodeFrontendFrame — SessionInitView (S9)", () => {
-  it("adopts the SystemInit init by shape", () => {
+  it("carries the panel's rows through verbatim", () => {
+    // Arrange / Act
     const frame = decode({ sessionInit: SESSION_INIT });
     if (frame.frame.case !== "sessionInit") throw new Error("wrong variant");
-    expect(frame.frame.value.init).toEqual({ model: "claude", cwd: "/w" });
+    // Assert
+    expect(frame.frame.value.rows).toEqual([{ label: "Version", value: "2.1.215" }]);
   });
 
-  it("defaults an absent init to an empty object", () => {
+  it("reads an absent rows list as no init having landed", () => {
+    // Arrange / Act
     const frame = decode({ sessionInit: { fence: "s1" } });
     if (frame.frame.case !== "sessionInit") throw new Error("wrong variant");
-    expect(frame.frame.value.init).toEqual({});
+    // Assert
+    expect(frame.frame.value.rows).toEqual([]);
+  });
+
+  it("rejects the retired `init` field, whose number and name are reserved", () => {
+    // Arrange / Act / Assert — nothing on this surface carries a vendor payload.
+    expect(() => decode({ sessionInit: { workspace: "ws", fence: "s1", init: {} } })).toThrow(
+      /unrecognized field/,
+    );
+  });
+
+  it("rejects a row missing its label", () => {
+    // Arrange / Act / Assert — the daemon omits a row it cannot fill, so a
+    // labelless one is a producer fault rather than a blank line to draw.
+    expect(() =>
+      decode({ sessionInit: { workspace: "ws", fence: "s1", rows: [{ value: "2.1.215" }] } }),
+    ).toThrow(/rows\[0\] missing required `label`/);
+  });
+
+  it("rejects a row missing its value", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({ sessionInit: { workspace: "ws", fence: "s1", rows: [{ label: "Version" }] } }),
+    ).toThrow(/rows\[0\] missing required `value`/);
+  });
+
+  it("rejects an unrecognized field on a row", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({
+        sessionInit: { workspace: "ws", fence: "s1", rows: [{ label: "V", value: "1", bogus: 1 }] },
+      }),
+    ).toThrow(/unrecognized field/);
   });
 
   it("rejects an unrecognized SessionInitView field loudly", () => {
@@ -908,7 +965,7 @@ describe("decodeFrontendFrame — SessionInitView (S9)", () => {
   it("rejects a SessionInitView without a fence", () => {
     // The push is fenced since the figma-idl reshape: `session_id` is reserved,
     // and an unfenced push cannot be tested for staleness at all.
-    expect(() => decode({ sessionInit: { workspace: "ws", init: {} } })).toThrow(
+    expect(() => decode({ sessionInit: { workspace: "ws" } })).toThrow(
       /SessionInitView missing required `fence`/,
     );
   });
@@ -917,7 +974,7 @@ describe("decodeFrontendFrame — SessionInitView (S9)", () => {
     const frame = decode({ snapshot: { ...SNAPSHOT, inits: [SESSION_INIT] } });
     if (frame.frame.case !== "snapshot") throw new Error("wrong variant");
     expect(frame.frame.value.inits).toHaveLength(1);
-    expect(frame.frame.value.inits[0].init).toEqual({ model: "claude", cwd: "/w" });
+    expect(frame.frame.value.inits[0].rows).toEqual([{ label: "Version", value: "2.1.215" }]);
   });
 
   it("defaults snapshot.inits to an empty array when absent", () => {
@@ -1337,6 +1394,46 @@ describe("decodeFrontendFrame — QueueView (E4)", () => {
   });
 });
 
+describe("decodeCompactionSummaryItem", () => {
+  it("reads the summary, its stamp and its cost", () => {
+    // Arrange / Act
+    const got = decodeCompactionSummaryItem(
+      { summary: "what survived", compactedAtMs: "1700000000000", expensiveInputTokens: "4096" },
+      "cs",
+    );
+    // Assert
+    expect(got).toEqual({
+      summary: "what survived",
+      compactedAtMs: 1700000000000,
+      expensiveInputTokens: 4096,
+    });
+  });
+
+  it("carries -1 through as the unavailable-usage statement it is", () => {
+    // Arrange / Act — never fabricated as 0 on either end.
+    const got = decodeCompactionSummaryItem(
+      { summary: "s", compactedAtMs: "1", expensiveInputTokens: "-1" },
+      "cs",
+    );
+    // Assert
+    expect(got.expensiveInputTokens).toBe(-1);
+  });
+
+  it("rejects an unrecognized field loudly", () => {
+    // Arrange / Act / Assert
+    expect(() => decodeCompactionSummaryItem({ summary: "s", bogus: 1 }, "cs")).toThrow(
+      /unrecognized field/,
+    );
+  });
+
+  it("rejects a summary that is not a string", () => {
+    // Arrange / Act / Assert
+    expect(() => decodeCompactionSummaryItem({ summary: 7 }, "cs")).toThrow(
+      /summary must be a string/,
+    );
+  });
+});
+
 describe("UNSUPPORTED_SHAPES registry", () => {
   it("lists non-rendered control and host-only frontend.v1 frames", () => {
     expect([...UNSUPPORTED_SHAPES.keys()]).toEqual([
@@ -1349,6 +1446,11 @@ describe("UNSUPPORTED_SHAPES registry", () => {
       // silently missing (warn) — an arm this bundle predates has no visual by
       // definition.
       "unknownArm",
+      // Not a frame variant but a CONVERSATION-ITEM shape: a tool outcome
+      // whose detachment oneof is absent. Registered for the same reason —
+      // the daemon is stating the call detached nothing, so there is no chip
+      // to draw and no content the user is missing.
+      "conversation-item:toolUseResult:no-detachment",
     ]);
   });
 

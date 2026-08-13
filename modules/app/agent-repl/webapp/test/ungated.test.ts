@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import indexHtml from "../index.html?raw";
 import {
   UNGATED_PERMISSION_MODES,
-  effectiveMode,
   isUngatedMode,
   isUngatedSession,
   ungatedBannerHtml,
@@ -53,74 +52,30 @@ describe("isUngatedMode", () => {
   });
 });
 
-describe("effectiveMode", () => {
-  it("reads the CLI's own init-reported mode", () => {
-    // Arrange
-    const init = { permissionMode: "bypassPermissions" };
-    // Act + Assert
-    expect(effectiveMode(init)).toBe("bypassPermissions");
-  });
-
-  it("reports no mode before any init has landed", () => {
-    // Arrange + Act + Assert
-    expect(effectiveMode(null)).toBe("");
-  });
-
-  it("reports no mode when the init carried no permissionMode field", () => {
-    // Arrange
-    const init = { model: "sonnet" };
-    // Act + Assert
-    expect(effectiveMode(init)).toBe("");
-  });
-
-  it("reports no mode when permissionMode is not a string", () => {
-    // Arrange
-    const init = { permissionMode: 7 };
-    // Act + Assert
-    expect(effectiveMode(init)).toBe("");
-  });
-});
+// DELETED: the `effectiveMode` suite stood here. Its subject is gone: it read
+// `SystemInit.permissionMode` off the pushed init, and `SessionInitView` no
+// longer carries a vendor init at all (field 3 is reserved by name and
+// number). Nothing on any frontend.v1 surface replaces that fact, so the
+// settings-borne escalation case is an OPEN GAP rather than a relocated test.
 
 describe("ungatedModeOf", () => {
-  it("flags a session LAUNCHED ungated even before its init lands", () => {
+  it("flags a session LAUNCHED ungated", () => {
     // Arrange
-    const args = { requestedMode: "bypassPermissions", systemInit: null };
+    const args = { requestedMode: "bypassPermissions" };
     // Act + Assert
     expect(ungatedModeOf(args)).toBe("bypassPermissions");
   });
 
-  it("flags a session the CLI reports ungated though the daemon requested default", () => {
-    // Arrange: a settings-borne permissions.defaultMode escalation the
-    // registry never sees.
-    const args = {
-      requestedMode: "default",
-      systemInit: { permissionMode: "bypassPermissions" },
-    };
-    // Act + Assert
-    expect(ungatedModeOf(args)).toBe("bypassPermissions");
-  });
-
-  it("clears a fully gated session", () => {
+  it("clears a gated session", () => {
     // Arrange
-    const args = { requestedMode: "default", systemInit: { permissionMode: "default" } };
+    const args = { requestedMode: "default" };
     // Act + Assert
     expect(ungatedModeOf(args)).toBe("");
   });
 
-  it("keeps flagging when only the requested mode is ungated and the init disagrees", () => {
-    // Arrange: over-warning is the safe direction, so one source's silence
-    // never suppresses the other's warning.
-    const args = {
-      requestedMode: "bypassPermissions",
-      systemInit: { permissionMode: "default" },
-    };
-    // Act + Assert
-    expect(ungatedModeOf(args)).toBe("bypassPermissions");
-  });
-
   it("answers the boolean question through the same verdict", () => {
     // Arrange
-    const args = { requestedMode: "bypassPermissions", systemInit: null };
+    const args = { requestedMode: "bypassPermissions" };
     // Act + Assert
     expect(isUngatedSession(args)).toBe(true);
   });

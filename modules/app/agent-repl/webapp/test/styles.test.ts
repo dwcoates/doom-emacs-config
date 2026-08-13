@@ -840,6 +840,15 @@ describe("compaction summary bubble", () => {
     expect(purple).toBe(true);
   });
 
+  it("paints the summary block's footnote as muted small print", () => {
+    // Arrange / Act — the `compaction_summary` arm's own block carries a
+    // footnote (when it was compacted, and what it cost when the daemon
+    // resolved one), which annotates the account rather than competing with it.
+    const meta = blockAfter(css, ".compaction-summary-meta {");
+    // Assert
+    expect(meta).toMatch(/color:\s*var\(--muted\)/);
+  });
+
   it("claims the purple wash for the summary bubble alone", () => {
     // Arrange / Act — one selector reads the token, so no ordinary bubble can
     // be mistaken for the one surviving account of the discarded history.

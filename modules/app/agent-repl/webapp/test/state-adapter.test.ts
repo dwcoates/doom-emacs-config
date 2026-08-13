@@ -366,14 +366,23 @@ describe("TaskCatalog mapping", () => {
   }
 });
 
-// --- SessionInitView → /status snapshot source -----------------------------
+// --- SessionInitView → the /status panel's rows -----------------------------
 
 describe("SessionInit mapping", () => {
-  it("produces a session-init effect carrying the SystemInit payload", () => {
-    const effects = applyOne({ sessionInit: { workspace: "ws", fence: "s1", init: { model: "claude", cwd: "/w" } } });
-    expect(effects).toEqual([
-      { kind: "session-init", value: { workspace: "ws", fence: "s1", init: { model: "claude", cwd: "/w" } } },
-    ]);
+  it("produces a session-init effect carrying the daemon's rows verbatim", () => {
+    // Arrange
+    const rows = [{ label: "Version", value: "2.1.215" }];
+    // Act
+    const effects = applyOne({ sessionInit: { workspace: "ws", fence: "s1", rows } });
+    // Assert
+    expect(effects).toEqual([{ kind: "session-init", value: { workspace: "ws", fence: "s1", rows } }]);
+  });
+
+  it("carries an EMPTY row list through as the statement it is", () => {
+    // Arrange / Act — empty means no init has landed yet.
+    const effects = applyOne({ sessionInit: { workspace: "ws", fence: "s1" } });
+    // Assert
+    expect(effects).toEqual([{ kind: "session-init", value: { workspace: "ws", fence: "s1", rows: [] } }]);
   });
 });
 
@@ -405,7 +414,7 @@ describe("StateSnapshot mapping", () => {
         workspaces: [workspaceState({ workspace: "w", sessionId: "s", state: "RENDER_STATE_IDLE" })],
         sessions: [{ workspace: "w", sessionId: "s", model: "m", modelOptions: [] }],
         catalogs: [{ workspace: "w", fence: "s", tasks: [] }],
-        inits: [{ workspace: "w", fence: "s", init: { model: "m" } }],
+        inits: [{ workspace: "w", fence: "s", rows: [{ label: "Model", value: "m" }] }],
       },
     });
     // The async-bubbles snapshot rides EVERY snapshot, including this one that
@@ -844,6 +853,47 @@ describe("result arm", () => {
     const items = itemsFrom({ uuid: "m1", result: { subtype: "RESULT_SUBTYPE_ERROR_MAX_BUDGET_USD" } });
     // Assert
     expect((items[0] as ResultItem).subtype).toBe("error_during_execution");
+  });
+});
+
+describe("compactionSummary arm", () => {
+  it("adopts the summary and its stamp", () => {
+    // Arrange / Act
+    const items = itemsFrom({
+      uuid: "m1",
+      compactionSummary: {
+        summary: "what survived",
+        compactedAtMs: "1700000000000",
+        expensiveInputTokens: "4096",
+      },
+    });
+    // Assert
+    expect(items).toEqual([
+      {
+        kind: "compaction-summary",
+        uuid: "m1",
+        summary: "what survived",
+        compactedAtMs: 1700000000000,
+        expensiveInputTokens: 4096,
+      },
+    ]);
+  });
+
+  it("files NO figure when the result's usage was unavailable (-1)", () => {
+    // Arrange / Act — absence is absence; a 0 would read as a free summary.
+    const items = itemsFrom({
+      uuid: "m1",
+      compactionSummary: { summary: "s", compactedAtMs: "1", expensiveInputTokens: "-1" },
+    });
+    // Assert
+    expect(items[0]).not.toHaveProperty("expensiveInputTokens");
+  });
+
+  it("rejects an unrecognized field on the payload rather than rendering it", () => {
+    // Arrange / Act / Assert — a frontend.v1-owned payload is decoded strictly.
+    expect(() => itemsFrom({ uuid: "m1", compactionSummary: { summary: "s", bogus: 1 } })).toThrow(
+      /unrecognized field/,
+    );
   });
 });
 
@@ -1353,19 +1403,27 @@ describe("explicit-ignore path", () => {
   });
 
   it("warns on an UNREGISTERED ignored shape (conversation the user simply never sees)", () => {
+    // Arrange — an image content block has no webapp visual and is not
+    // registered, so the user is missing content and the sweep must find it.
     const logs: Array<[AdapterLogLevel, string]> = [];
     const adapter = new StateAdapter((lvl, msg) => logs.push([lvl, msg]));
 
+    // Act
     adapter.apply(
       frame({
         conversationDelta: {
           fence: "s1",
-          messages: [userItem({ uuid: "m1", toolUseResult: { rawString: "x" } })],
+          messages: [
+            userItem({ uuid: "m1", assistantMessage: { id: "a1", content: [{ image: {} }] } }),
+          ],
         },
       }),
     );
 
-    expect(logs.filter(([, m]) => m.includes("conversation-item:toolUseResult")).map(([lvl]) => lvl)).toEqual(["warn"]);
+    // Assert
+    expect(logs.filter(([, m]) => m.includes("content-block:image")).map(([lvl]) => lvl)).toEqual([
+      "warn",
+    ]);
   });
 
   it("ignores a daemonView frame (S7 unsupported shape)", () => {
@@ -1376,21 +1434,45 @@ describe("explicit-ignore path", () => {
     expect(adapter.apply(dv)).toEqual([{ kind: "ignored", shape: "daemonView" }]);
   });
 
-  it("ignores a toolUseResult item (no correlation key), emitting an empty batch beside it", () => {
+  it("ignores a tool outcome that detached NOTHING, emitting an empty batch beside it", () => {
+    // Arrange — an absent detachment oneof is the daemon saying the call
+    // returned ordinarily; there is no chip to draw.
     const adapter = new StateAdapter();
+    // Act
     const effects = adapter.apply(
       frame({
         conversationDelta: {
           fence: "s1",
-          messages: [userItem({ uuid: "m1", toolUseResult: { rawString: "x" } })],
+          messages: [
+            userItem({ uuid: "m1", agent: { toolOutcome: { toolUseId: "t1" } } }),
+          ],
         },
       }),
     );
+    // Assert
     expect(effects).toEqual([
       { kind: "conversation-items", workspace: "", fence: "s1", throughSeq: 0, items: [] },
-      { kind: "ignored", shape: "conversation-item:toolUseResult" },
+      { kind: "ignored", shape: "conversation-item:toolUseResult:no-detachment" },
     ]);
-    expect(adapter.ignoredCounts().get("conversation-item:toolUseResult")).toBe(1);
+  });
+
+  it("logs the no-detachment ignore as a DEBUG breadcrumb, not a warning", () => {
+    // Arrange — it is a registered, deliberate non-visual: nothing is missing.
+    const logs: Array<[AdapterLogLevel, string]> = [];
+    const adapter = new StateAdapter((lvl, msg) => logs.push([lvl, msg]));
+    // Act
+    adapter.apply(
+      frame({
+        conversationDelta: {
+          fence: "s1",
+          messages: [userItem({ uuid: "m1", agent: { toolOutcome: { toolUseId: "t1" } } })],
+        },
+      }),
+    );
+    // Assert
+    expect(
+      logs.filter(([, m]) => m.includes("toolUseResult:no-detachment")).map(([lvl]) => lvl),
+    ).toEqual(["debug"]);
   });
 
   it("ignores an unrenderable content block, once per distinct name, keeping the rest", () => {
@@ -2164,16 +2246,49 @@ describe("asyncAgentItems — a detached agent decomposed by the FEED's own path
     expect(built.items[0].kind === "tool" && built.items[0].ts).toBe(new Date(1700000000000).toISOString());
   });
 
-  it("routes an emission with no webapp visual down the explicit-ignore path", () => {
-    // Arrange — a typed outcome has no correlation key on the arm.
+  it("routes a tool outcome that detached nothing down the explicit-ignore path", () => {
+    // Arrange — the outcome's detachment oneof is absent, so there is no chip.
     const emissions = [
-      { emission: "toolOutcome" as const, arm: "toolUseResult" as const, payload: {} },
+      {
+        emission: "toolOutcome" as const,
+        arm: "toolUseResult" as const,
+        payload: {},
+        toolOutcome: { toolUseId: "t1" },
+      },
     ];
 
     // Act
     const built = asyncAgentItems(emissions, "b1", 0);
 
     // Assert
-    expect(built).toEqual({ items: [], ignores: ["conversation-item:toolUseResult"] });
+    expect(built).toEqual({
+      items: [],
+      ignores: ["conversation-item:toolUseResult:no-detachment"],
+    });
+  });
+
+  it("draws a detached agent's OWN tool outcome as a chip inside the work", () => {
+    // Arrange — a detachment inside detached work is the same fact, decoded by
+    // the same path the feed uses.
+    const emissions = [
+      {
+        emission: "toolOutcome" as const,
+        arm: "toolUseResult" as const,
+        payload: {},
+        toolOutcome: {
+          toolUseId: "t1",
+          detachment: {
+            case: "started" as const,
+            value: { originToolCallId: "t1", label: "sweep", kind: { case: "shell" as const } },
+          },
+        },
+      },
+    ];
+
+    // Act
+    const built = asyncAgentItems(emissions, "b1", 0);
+
+    // Assert
+    expect(built.items[0].kind === "tool" && built.items[0].outcome?.case).toBe("started");
   });
 });
