@@ -45,7 +45,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/conversation-page.proto.
  */
 export const file_frontend_v1_conversation_page: GenFile = /*@__PURE__*/
-  fileDesc("CiNmcm9udGVuZC92MS9jb252ZXJzYXRpb24tcGFnZS5wcm90bxILZnJvbnRlbmQudjEimAEKE0NvbnZlcnNhdGlvblBhZ2VDbWQSMQoEdGFpbBgBIAEoCzIhLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblBhZ2VUYWlsSAASNQoGYmVmb3JlGAIgASgLMiMuZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uUGFnZUJlZm9yZUgAEg0KBWZlbmNlGAMgASgJQggKBmFuY2hvciIlChRDb252ZXJzYXRpb25QYWdlVGFpbBINCgVsaW1pdBgBIAEoDSI3ChZDb252ZXJzYXRpb25QYWdlQmVmb3JlEg4KBmN1cnNvchgBIAEoCRINCgVsaW1pdBgCIAEoDSKGAgoQQ29udmVyc2F0aW9uUGFnZRIRCgl3b3Jrc3BhY2UYASABKAkSEgoKcmVxdWVzdF9pZBgCIAEoCRImCghtZXNzYWdlcxgDIAMoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USMQoEbW9yZRgEIAEoCzIhLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblBhZ2VNb3JlSAASMwoFc3RhcnQYBSABKAsyIi5mcm9udGVuZC52MS5Db252ZXJzYXRpb25QYWdlU3RhcnRIABIVCg1saXZlX2pvaW5fc2VxGAYgASgEEg0KBWZlbmNlGAcgASgJQg4KDGNvbnRpbnVhdGlvblIFaXRlbXMiJgoUQ29udmVyc2F0aW9uUGFnZU1vcmUSDgoGY3Vyc29yGAEgASgJIhcKFUNvbnZlcnNhdGlvblBhZ2VTdGFydEIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_frontend_v1_feed]);
+  fileDesc("CiNmcm9udGVuZC92MS9jb252ZXJzYXRpb24tcGFnZS5wcm90bxILZnJvbnRlbmQudjEivwEKE0NvbnZlcnNhdGlvblBhZ2VDbWQSMQoEdGFpbBgBIAEoCzIhLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblBhZ2VUYWlsSAASNQoGYmVmb3JlGAIgASgLMiMuZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uUGFnZUJlZm9yZUgAEiUKBXNjb3BlGAQgASgLMhYuZnJvbnRlbmQudjEuUGFnZVNjb3BlEg0KBWZlbmNlGAMgASgJQggKBmFuY2hvciJwCglQYWdlU2NvcGUSKgoEZmVlZBgBIAEoCzIaLmZyb250ZW5kLnYxLlBhZ2VTY29wZUZlZWRIABIuCgZpbnNpZGUYAiABKAsyHC5mcm9udGVuZC52MS5QYWdlU2NvcGVJbnNpZGVIAEIHCgVzY29wZSIPCg1QYWdlU2NvcGVGZWVkIi8KD1BhZ2VTY29wZUluc2lkZRIcChRjb250YWluZXJfbWVzc2FnZV9pZBgBIAEoCSIlChRDb252ZXJzYXRpb25QYWdlVGFpbBINCgVsaW1pdBgBIAEoDSI3ChZDb252ZXJzYXRpb25QYWdlQmVmb3JlEg4KBmN1cnNvchgBIAEoCRINCgVsaW1pdBgCIAEoDSLLAgoQQ29udmVyc2F0aW9uUGFnZRIRCgl3b3Jrc3BhY2UYASABKAkSEgoKcmVxdWVzdF9pZBgCIAEoCRImCghtZXNzYWdlcxgDIAMoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USMQoEbW9yZRgEIAEoCzIhLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblBhZ2VNb3JlSAASMwoFc3RhcnQYBSABKAsyIi5mcm9udGVuZC52MS5Db252ZXJzYXRpb25QYWdlU3RhcnRIABIVCg1saXZlX2pvaW5fc2VxGAYgASgEEg0KBWZlbmNlGAcgASgJEiUKBXNjb3BlGAggASgLMhYuZnJvbnRlbmQudjEuUGFnZVNjb3BlEhwKFGFuY2VzdG9yX21lc3NhZ2VfaWRzGAkgAygJQg4KDGNvbnRpbnVhdGlvblIFaXRlbXMiJgoUQ29udmVyc2F0aW9uUGFnZU1vcmUSDgoGY3Vyc29yGAEgASgJIhcKFUNvbnZlcnNhdGlvblBhZ2VTdGFydEIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_frontend_v1_feed]);
 
 /**
  * Ask for ONE page of conversation history.
@@ -85,6 +85,17 @@ export type ConversationPageCmd = Message<"frontend.v1.ConversationPageCmd"> & {
    * ResyncCmd.fence, and deliberately the same token rather than a
    * paging-specific one.
    *
+   * WHICH CONTAINER this page walks: the feed, or the inside of one message.
+   * Unset is NOT a default — a request that does not state its scope is
+   * REFUSED, never read as the feed. Defaulting would make a client bug that
+   * forgot to name a subagent indistinguishable from a legitimate cold open,
+   * and would answer it with the whole conversation.
+   *
+   * @generated from field: frontend.v1.PageScope scope = 4;
+   */
+  scope?: PageScope | undefined;
+
+  /**
    * It is the exact fence the client held when it decided to ask for this
    * page, copied byte-for-byte from the WorkspaceState it was reading at that
    * moment. Reading current state at transport time instead would let a
@@ -104,6 +115,87 @@ export type ConversationPageCmd = Message<"frontend.v1.ConversationPageCmd"> & {
  */
 export const ConversationPageCmdSchema: GenMessage<ConversationPageCmd> = /*@__PURE__*/
   messageDesc(file_frontend_v1_conversation_page, 0);
+
+/**
+ * Which container a page walks.
+ *
+ * A oneof rather than an optional container id: "the feed" and "inside message
+ * X" are the only two answers, and an empty string standing for the feed is
+ * exactly the ambiguity conversation.v1.MessageParent exists to forbid.
+ *
+ * @generated from message frontend.v1.PageScope
+ */
+export type PageScope = Message<"frontend.v1.PageScope"> & {
+  /**
+   * @generated from oneof frontend.v1.PageScope.scope
+   */
+  scope: {
+    /**
+     * Records whose parent is conversation.v1.MessageParentRoot.
+     *
+     * @generated from field: frontend.v1.PageScopeFeed feed = 1;
+     */
+    value: PageScopeFeed;
+    case: "feed";
+  } | {
+    /**
+     * Records whose parent is conversation.v1.MessageParentInside this message.
+     *
+     * @generated from field: frontend.v1.PageScopeInside inside = 2;
+     */
+    value: PageScopeInside;
+    case: "inside";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message frontend.v1.PageScope.
+ * Use `create(PageScopeSchema)` to create a new message.
+ */
+export const PageScopeSchema: GenMessage<PageScope> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_conversation_page, 1);
+
+/**
+ * The top-level conversation: everything the feed renders as a standalone row.
+ *
+ * An empty message rather than a bool, so that naming the feed and naming a
+ * container are the same act at the same cost, and a client never has to choose
+ * between two spellings of "where".
+ *
+ * @generated from message frontend.v1.PageScopeFeed
+ */
+export type PageScopeFeed = Message<"frontend.v1.PageScopeFeed"> & {
+};
+
+/**
+ * Describes the message frontend.v1.PageScopeFeed.
+ * Use `create(PageScopeFeedSchema)` to create a new message.
+ */
+export const PageScopeFeedSchema: GenMessage<PageScopeFeed> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_conversation_page, 2);
+
+/**
+ * The inside of one message: the records that message contains.
+ *
+ * @generated from message frontend.v1.PageScopeInside
+ */
+export type PageScopeInside = Message<"frontend.v1.PageScopeInside"> & {
+  /**
+   * The containing message. It is itself a conversation.v1.MessageEntry, so a
+   * subagent inside a subagent is named the same way at every depth — the
+   * recursion lives in the DATA, not in this type.
+   *
+   * @generated from field: string container_message_id = 1;
+   */
+  containerMessageId: string;
+};
+
+/**
+ * Describes the message frontend.v1.PageScopeInside.
+ * Use `create(PageScopeInsideSchema)` to create a new message.
+ */
+export const PageScopeInsideSchema: GenMessage<PageScopeInside> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_conversation_page, 3);
 
 /**
  * The tail anchor: start at the newest message and walk backwards.
@@ -131,7 +223,7 @@ export type ConversationPageTail = Message<"frontend.v1.ConversationPageTail"> &
  * Use `create(ConversationPageTailSchema)` to create a new message.
  */
 export const ConversationPageTailSchema: GenMessage<ConversationPageTail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_conversation_page, 1);
+  messageDesc(file_frontend_v1_conversation_page, 4);
 
 /**
  * The load-more anchor: start immediately older than a previously served page.
@@ -166,7 +258,7 @@ export type ConversationPageBefore = Message<"frontend.v1.ConversationPageBefore
  * Use `create(ConversationPageBeforeSchema)` to create a new message.
  */
 export const ConversationPageBeforeSchema: GenMessage<ConversationPageBefore> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_conversation_page, 2);
+  messageDesc(file_frontend_v1_conversation_page, 5);
 
 /**
  * One page of conversation history, pushed in answer to a ConversationPageCmd.
@@ -264,6 +356,35 @@ export type ConversationPage = Message<"frontend.v1.ConversationPage"> & {
    * @generated from field: string fence = 7;
    */
   fence: string;
+
+  /**
+   * WHICH CONTAINER this page walks, STATED rather than left to be inferred,
+   * so a client can never mistake a page of a subagent's insides for a page of
+   * the feed.
+   *
+   * It is the ECHO of the requested scope, alongside `request_id`. Together
+   * with the `parent` each returned record carries, it is how a client VERIFIES
+   * that the page it got is the page it asked for: the echo proves what was
+   * ASKED, the per-record parent proves what was RECEIVED.
+   *
+   * @generated from field: frontend.v1.PageScope scope = 8;
+   */
+  scope?: PageScope | undefined;
+
+  /**
+   * The containers this page's scope sits inside, OUTERMOST FIRST. Empty when
+   * the scope is the feed.
+   *
+   * STATED BY THE DAEMON BECAUSE IT ALREADY WALKED THE CHAIN while resolving
+   * the scope. A cold open deep-linked into a nested container holds no message
+   * map yet and needs the ancestors to render the surrounding cards; walking up
+   * one `parent` hop at a time would cost a round trip per level to learn what
+   * the resolver already knew. It cannot disagree with the parent chain because
+   * it is derived from that chain in the same pass.
+   *
+   * @generated from field: repeated string ancestor_message_ids = 9;
+   */
+  ancestorMessageIds: string[];
 };
 
 /**
@@ -271,7 +392,7 @@ export type ConversationPage = Message<"frontend.v1.ConversationPage"> & {
  * Use `create(ConversationPageSchema)` to create a new message.
  */
 export const ConversationPageSchema: GenMessage<ConversationPage> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_conversation_page, 3);
+  messageDesc(file_frontend_v1_conversation_page, 6);
 
 /**
  * There is older history, and this is how to ask for it.
@@ -293,7 +414,7 @@ export type ConversationPageMore = Message<"frontend.v1.ConversationPageMore"> &
  * Use `create(ConversationPageMoreSchema)` to create a new message.
  */
 export const ConversationPageMoreSchema: GenMessage<ConversationPageMore> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_conversation_page, 4);
+  messageDesc(file_frontend_v1_conversation_page, 7);
 
 /**
  * This page reaches the conversation's BEGINNING: there is nothing older.
@@ -313,5 +434,5 @@ export type ConversationPageStart = Message<"frontend.v1.ConversationPageStart">
  * Use `create(ConversationPageStartSchema)` to create a new message.
  */
 export const ConversationPageStartSchema: GenMessage<ConversationPageStart> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_conversation_page, 5);
+  messageDesc(file_frontend_v1_conversation_page, 8);
 
