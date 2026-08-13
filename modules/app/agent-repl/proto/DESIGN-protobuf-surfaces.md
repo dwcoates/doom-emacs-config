@@ -816,3 +816,86 @@ empty message around.
 
 **Sequencing.** Queued behind the reservations strip, which is rewriting every
 proto file including `feed.proto`.
+
+## `frontend.v1` stops flattening `conversation.v1.AgentSaid`; it carries it whole and stamps alongside
+
+**Decided.** `frontend.v1.AgentEmission` currently EXPLODES one assistant
+response into several emissions — a response, a thinking block, a tool call —
+so that each fragment can carry its own daemon-resolved stamp. That flattening
+is the ROOT CAUSE of the agent-output re-spellings: every fragment needs a
+frontend type to be a fragment OF, and each of those types is a second spelling
+of something `conversation.v1` already says.
+
+It stops. `frontend.v1.AgentResponse` embeds `conversation.v1.AgentSaid`
+VERBATIM, nothing stripped, and the daemon's resolved facts ride ALONGSIDE it
+keyed by a value the content already carries.
+
+```proto
+message AgentResponse {
+  conversation.v1.AgentSaid said = 1;
+  ResponseUsageStamp usage_stamp = 2;
+  repeated ToolCallVerdict verdicts = 3;
+}
+
+message ToolCallVerdict {
+  string tool_use_id = 1;
+  string spawned_message_id = 2;
+}
+```
+
+**Deleted outright:** `frontend.v1.AgentThinking`, `frontend.v1.AgentToolCall`,
+`frontend.v1.AgentToolResult`, `frontend.v1.SkillBodyItem`.
+
+**The flattening was already losing data, in three places.**
+
+- `frontend.v1.AgentToolResult` wrapped `conversation.v1.ToolResultContent`
+  instead of the encompassing `conversation.v1.ToolReturned`, so
+  `ToolReturned.is_error` had NO counterpart on the frontend surface. A tool
+  that failed rendered identically to one that succeeded.
+- `frontend.v1.AgentResponse` wrapped `conversation.v1.AgentContent` instead of
+  `conversation.v1.AgentSaid`, dropping `stop_reason` entirely and relocating
+  `model` into `ResponseUsageStamp`.
+- `frontend.v1.AgentThinking` carried `api_message_id` and `block_index` — pure
+  RE-DERIVATIONS of position, needed only to rebuild what the stripping
+  destroyed. A thinking block's position IS its index in
+  `AgentSaid.content`; stripping it out and then re-stating where it came from
+  is the schema paying twice for a fact it started with.
+
+**It also makes the live preview coherent.**
+`conversation.v1.ContentArriving` keys on `block_index` within the settled
+message's content. Under the flattening, the settled content a preview
+reconciles against had been mutated out from under it. Carrying `AgentSaid`
+whole means preview and settled block index the SAME array.
+
+**`SkillBodyItem` dies on its own evidence.** It correlates by `tool_use_id`,
+which `conversation.v1.SkillBodyResolved`'s own comment identifies as the
+SUPERSEDED mechanism — the record now carries the skill message's `message_id`
+directly, "which is what makes the old daemon-side correlation unnecessary".
+
+**What this costs, stated plainly.** The webapp renderer must walk
+`AgentSaid.content` and draw each block — prose, reasoning collapsed, tool
+calls — rather than receiving them pre-separated. That is a REAL behavior
+change on the client, and it is the price of the frontend surface no longer
+holding a second, lossier copy of the agent's own words. Walking a content
+array to render it is rendering, not deriving: nothing about the message's
+meaning is being reconstructed, only drawn.
+
+## `conversation.v1.MessagePayload` is extracted so the payload set can be imported
+
+**Decided.** `conversation.v1.MessageEntry.payload` moves into its own message,
+`conversation.v1.MessagePayload`, which `MessageEntry` then embeds.
+
+**Because a `oneof` is not a type.** `frontend.v1` cannot import
+`MessageEntry.payload` — proto3 offers no way to name it. The ONLY two options
+available to the author were to import `MessageEntry` whole (inheriting
+identity and ordering stamps a frontend wrapper wants to set itself) or to
+write the arms out again. They wrote the arms out again, and that is the
+mechanical origin of `frontend.v1.AgentEmission`.
+
+Extracting the oneof gives the third option that should always have existed:
+ONE canonical payload set, embedded by `MessageEntry` for durable records and
+importable by any surface that needs the same vocabulary with different stamps.
+
+This is the EXTRACT-rather-than-re-spell heuristic applied literally, and it is
+pure enablement — `MessageEntry` keeps exactly its current semantics, and the
+extraction commits to nothing about what the delivery channels carry.
