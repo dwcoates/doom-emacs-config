@@ -44,6 +44,42 @@ Re-spelled messages: `DetachedWorkAgent`, `DetachedWorkShell`,
 `TaskKindWorkflow`, `TaskKindUnclassified`, `TaskStatusDone`, `TaskStatusError`,
 `TaskStatusKilled`, `TaskStatusLost`, `TaskStatusRunning`, `TaskStatusStopped`.
 
+**The fix is WHOLE-MESSAGE embedding, not arm-level import.** An earlier draft
+of this file said `frontend.v1.DetachedWork` should import
+`conversation.v1.DetachedWorkKind` and the outcome arms. That was still
+partial-import thinking. `conversation.v1.DetachedWorkKind` is referenced from
+exactly one place — `conversation.v1.DetachedWorkStarted.kind` — and
+`frontend.v1.DetachedWork` re-spells all THREE of that message's fields, not
+just the kind:
+
+| `frontend.v1.DetachedWork` | `conversation.v1.DetachedWorkStarted` |
+|---|---|
+| `origin_tool_use_id = 2` | `origin_tool_call_id = 1` |
+| `label = 4` | `label = 2` |
+| the `kind` oneof, 10–15 | `kind = 3` |
+| `workspace = 7` | — genuinely native |
+
+So the shape is:
+
+```proto
+message DetachedWork {
+  conversation.v1.DetachedWorkStarted started = 1;
+  string workspace = 7;   // daemon bookkeeping, the only native field here
+  // + the daemon-synthesized liveness and fold
+}
+```
+
+and `frontend.v1.DetachedWorkSettled` embeds `conversation.v1.DetachedWorkEnded`
+whole rather than re-declaring `frontend.v1.DetachedWorkOutcomeDone`/`Error`/
+`Killed`.
+
+**The schema already recorded the failure mode it was about to repeat.**
+`conversation.v1.DetachedWorkKind`'s own comment reads "SIX ARMS, matching what
+the daemon already resolves (frontend.v1's DetachedWork). An earlier draft had
+four and silently dropped `merge` and `skill`". The author knew about the
+duplicate and treated matching it BY HAND as the remedy — and that remedy had
+already failed once, at four arms, before anyone caught it.
+
 ## 2. The message model itself
 
 | `frontend.v1` | `conversation.v1` |
