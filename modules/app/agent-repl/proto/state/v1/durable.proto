@@ -58,15 +58,15 @@ message TokenUtilization {
   // Identifies the only agent loop that owns this API response.
   oneof actor {
     // Attributes the response to the session's main agent loop.
-    TokenUtilizationMainAgent main_agent = 10;
+    TokenUtilizationMainAgent main_agent = 7;
     // Attributes the response to one dispatched subagent invocation.
-    TokenUtilizationSubagent subagent = 11;
+    TokenUtilizationSubagent subagent = 8;
   }
   // The complete usage object reported by the Claude SDK for this response.
-  VendorTokenUsage usage = 20;
+  VendorTokenUsage usage = 9;
   // Timing measured for this specific Messages API response. Absent when the
   // source is a historical transcript without corresponding stream events.
-  TokenResponseTiming response_timing = 21;
+  TokenResponseTiming response_timing = 10;
 }
 
 // Identifies usage produced by the session's main agent loop.
@@ -483,10 +483,10 @@ message TurnAccounting {
   // States whether the record satisfies all requirements for comparison.
   oneof verdict {
     // Marks a complete and internally consistent record.
-    TurnAccountingComplete complete = 20;
+    TurnAccountingComplete complete = 9;
 
     // Describes every condition invalidating the record.
-    TurnAccountingInvalid invalid = 21;
+    TurnAccountingInvalid invalid = 10;
   }
 }
 
