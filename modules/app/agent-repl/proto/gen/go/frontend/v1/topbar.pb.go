@@ -9,6 +9,7 @@
 package frontendv1
 
 import (
+	v1 "agentrepl/proto/protocol/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -42,7 +43,7 @@ type TopbarView struct {
 	ModelDisplay string `protobuf:"bytes,4,opt,name=model_display,json=modelDisplay,proto3" json:"model_display,omitempty"`
 	// The selectable models, in display order. The selector renders exactly
 	// this list.
-	ModelOptions []*ModelOption `protobuf:"bytes,5,rep,name=model_options,json=modelOptions,proto3" json:"model_options,omitempty"`
+	ModelOptions []*v1.ModelOption `protobuf:"bytes,5,rep,name=model_options,json=modelOptions,proto3" json:"model_options,omitempty"`
 	// The connectivity glyph, resolved: which glyph and which color class to
 	// draw, and the tooltip text. The client never maps connectivity enums.
 	Connectivity *TopbarConnectivity `protobuf:"bytes,6,opt,name=connectivity,proto3" json:"connectivity,omitempty"`
@@ -128,7 +129,7 @@ func (x *TopbarView) GetModelDisplay() string {
 	return ""
 }
 
-func (x *TopbarView) GetModelOptions() []*ModelOption {
+func (x *TopbarView) GetModelOptions() []*v1.ModelOption {
 	if x != nil {
 		return x.ModelOptions
 	}
@@ -348,66 +349,6 @@ func (x *TopbarConnectivity) GetTitle() string {
 	return ""
 }
 
-type ModelOption struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Value         string                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
-	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ModelOption) Reset() {
-	*x = ModelOption{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ModelOption) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ModelOption) ProtoMessage() {}
-
-func (x *ModelOption) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ModelOption.ProtoReflect.Descriptor instead.
-func (*ModelOption) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *ModelOption) GetValue() string {
-	if x != nil {
-		return x.Value
-	}
-	return ""
-}
-
-func (x *ModelOption) GetDisplayName() string {
-	if x != nil {
-		return x.DisplayName
-	}
-	return ""
-}
-
-func (x *ModelOption) GetDescription() string {
-	if x != nil {
-		return x.Description
-	}
-	return ""
-}
-
 // A deliberate request to change an already-live session's model.  The daemon
 // forwards this to the shim and only publishes the shim-confirmed selection.
 // Bootstrap and rebind intentionally have no model field: they observe session
@@ -422,7 +363,7 @@ type SetModelCmd struct {
 
 func (x *SetModelCmd) Reset() {
 	*x = SetModelCmd{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[5]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -434,7 +375,7 @@ func (x *SetModelCmd) String() string {
 func (*SetModelCmd) ProtoMessage() {}
 
 func (x *SetModelCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[5]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -447,7 +388,7 @@ func (x *SetModelCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetModelCmd.ProtoReflect.Descriptor instead.
 func (*SetModelCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{5}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SetModelCmd) GetModel() string {
@@ -473,7 +414,7 @@ type DaemonHealthView struct {
 
 func (x *DaemonHealthView) Reset() {
 	*x = DaemonHealthView{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[6]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -485,7 +426,7 @@ func (x *DaemonHealthView) String() string {
 func (*DaemonHealthView) ProtoMessage() {}
 
 func (x *DaemonHealthView) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[6]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -498,7 +439,7 @@ func (x *DaemonHealthView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonHealthView.ProtoReflect.Descriptor instead.
 func (*DaemonHealthView) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{6}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DaemonHealthView) GetRequestId() string {
@@ -546,7 +487,7 @@ type SessionHealthView struct {
 
 func (x *SessionHealthView) Reset() {
 	*x = SessionHealthView{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[7]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -558,7 +499,7 @@ func (x *SessionHealthView) String() string {
 func (*SessionHealthView) ProtoMessage() {}
 
 func (x *SessionHealthView) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[7]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -571,7 +512,7 @@ func (x *SessionHealthView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionHealthView.ProtoReflect.Descriptor instead.
 func (*SessionHealthView) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{7}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SessionHealthView) GetRequestId() string {
@@ -621,7 +562,7 @@ type DaemonHealthCmd struct {
 
 func (x *DaemonHealthCmd) Reset() {
 	*x = DaemonHealthCmd{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[8]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -633,7 +574,7 @@ func (x *DaemonHealthCmd) String() string {
 func (*DaemonHealthCmd) ProtoMessage() {}
 
 func (x *DaemonHealthCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[8]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -646,7 +587,7 @@ func (x *DaemonHealthCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonHealthCmd.ProtoReflect.Descriptor instead.
 func (*DaemonHealthCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{8}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{7}
 }
 
 // Ask the daemon to prove the entire session route for one restored workspace:
@@ -664,7 +605,7 @@ type SessionHealthCmd struct {
 
 func (x *SessionHealthCmd) Reset() {
 	*x = SessionHealthCmd{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[9]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -676,7 +617,7 @@ func (x *SessionHealthCmd) String() string {
 func (*SessionHealthCmd) ProtoMessage() {}
 
 func (x *SessionHealthCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[9]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -689,7 +630,7 @@ func (x *SessionHealthCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionHealthCmd.ProtoReflect.Descriptor instead.
 func (*SessionHealthCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{9}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SessionHealthCmd) GetSessionId() string {
@@ -703,14 +644,14 @@ var File_frontend_v1_topbar_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\n" +
-	"\x18frontend/v1/topbar.proto\x12\vfrontend.v1\"\xf1\x02\n" +
+	"\x18frontend/v1/topbar.proto\x12\vfrontend.v1\x1a\x16protocol/v1/core.proto\"\xf1\x02\n" +
 	"\n" +
 	"TopbarView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12!\n" +
 	"\fsession_line\x18\x03 \x01(\tR\vsessionLine\x12#\n" +
 	"\rmodel_display\x18\x04 \x01(\tR\fmodelDisplay\x12=\n" +
-	"\rmodel_options\x18\x05 \x03(\v2\x18.frontend.v1.ModelOptionR\fmodelOptions\x12C\n" +
+	"\rmodel_options\x18\x05 \x03(\v2\x18.protocol.v1.ModelOptionR\fmodelOptions\x12C\n" +
 	"\fconnectivity\x18\x06 \x01(\v2\x1f.frontend.v1.TopbarConnectivityR\fconnectivity\x12\x14\n" +
 	"\x05fence\x18\b \x01(\tR\x05fence\x126\n" +
 	"\bwarnings\x18\t \x03(\v2\x1a.frontend.v1.TopbarWarningR\bwarningsJ\x04\b\a\x10\bR\x0faccounting_line\"s\n" +
@@ -725,11 +666,7 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\x12TopbarConnectivity\x12\x12\n" +
 	"\x04tone\x18\x01 \x01(\tR\x04tone\x12\x14\n" +
 	"\x05glyph\x18\x02 \x01(\tR\x05glyph\x12\x14\n" +
-	"\x05title\x18\x03 \x01(\tR\x05title\"h\n" +
-	"\vModelOption\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05value\x12!\n" +
-	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12 \n" +
-	"\vdescription\x18\x03 \x01(\tR\vdescription\"#\n" +
+	"\x05title\x18\x03 \x01(\tR\x05title\"#\n" +
 	"\vSetModelCmd\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\"c\n" +
 	"\x10DaemonHealthView\x12\x1d\n" +
@@ -762,21 +699,21 @@ func file_frontend_v1_topbar_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_topbar_proto_rawDescData
 }
 
-var file_frontend_v1_topbar_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_frontend_v1_topbar_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_frontend_v1_topbar_proto_goTypes = []any{
 	(*TopbarView)(nil),              // 0: frontend.v1.TopbarView
 	(*TopbarWarning)(nil),           // 1: frontend.v1.TopbarWarning
 	(*TopbarAccountingWarning)(nil), // 2: frontend.v1.TopbarAccountingWarning
 	(*TopbarConnectivity)(nil),      // 3: frontend.v1.TopbarConnectivity
-	(*ModelOption)(nil),             // 4: frontend.v1.ModelOption
-	(*SetModelCmd)(nil),             // 5: frontend.v1.SetModelCmd
-	(*DaemonHealthView)(nil),        // 6: frontend.v1.DaemonHealthView
-	(*SessionHealthView)(nil),       // 7: frontend.v1.SessionHealthView
-	(*DaemonHealthCmd)(nil),         // 8: frontend.v1.DaemonHealthCmd
-	(*SessionHealthCmd)(nil),        // 9: frontend.v1.SessionHealthCmd
+	(*SetModelCmd)(nil),             // 4: frontend.v1.SetModelCmd
+	(*DaemonHealthView)(nil),        // 5: frontend.v1.DaemonHealthView
+	(*SessionHealthView)(nil),       // 6: frontend.v1.SessionHealthView
+	(*DaemonHealthCmd)(nil),         // 7: frontend.v1.DaemonHealthCmd
+	(*SessionHealthCmd)(nil),        // 8: frontend.v1.SessionHealthCmd
+	(*v1.ModelOption)(nil),          // 9: protocol.v1.ModelOption
 }
 var file_frontend_v1_topbar_proto_depIdxs = []int32{
-	4, // 0: frontend.v1.TopbarView.model_options:type_name -> frontend.v1.ModelOption
+	9, // 0: frontend.v1.TopbarView.model_options:type_name -> protocol.v1.ModelOption
 	3, // 1: frontend.v1.TopbarView.connectivity:type_name -> frontend.v1.TopbarConnectivity
 	1, // 2: frontend.v1.TopbarView.warnings:type_name -> frontend.v1.TopbarWarning
 	2, // 3: frontend.v1.TopbarWarning.accounting:type_name -> frontend.v1.TopbarAccountingWarning
@@ -801,7 +738,7 @@ func file_frontend_v1_topbar_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_topbar_proto_rawDesc), len(file_frontend_v1_topbar_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

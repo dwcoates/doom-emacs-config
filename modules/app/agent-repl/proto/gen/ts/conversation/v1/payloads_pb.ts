@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/payloads.proto.
  */
 export const file_conversation_v1_payloads: GenFile = /*@__PURE__*/
-  fileDesc("Ch5jb252ZXJzYXRpb24vdjEvcGF5bG9hZHMucHJvdG8SD2NvbnZlcnNhdGlvbi52MSI5CghVc2VyU2FpZBItCgdjb250ZW50GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50IqgBCglBZ2VudFNhaWQSLgoHY29udGVudBgBIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudENvbnRlbnQSKgoFdXNhZ2UYAiABKAsyGy5jb252ZXJzYXRpb24udjEuVG9rZW5Vc2FnZRINCgVtb2RlbBgDIAEoCRIwCgtzdG9wX3JlYXNvbhgEIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5TdG9wUmVhc29uImsKDFRvb2xSZXR1cm5lZBIUCgx0b29sX2NhbGxfaWQYASABKAkSMwoHY29udGVudBgCIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ub29sUmVzdWx0Q29udGVudBIQCghpc19lcnJvchgDIAEoCCKkAgoKU3RvcFJlYXNvbhIwCghlbmRfdHVybhgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5TdG9wRW5kVHVybkgAEjIKCXRvb2xfY2FsbBgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5TdG9wVG9vbENhbGxIABI0CgptYXhfdG9rZW5zGAMgASgLMh4uY29udmVyc2F0aW9uLnYxLlN0b3BNYXhUb2tlbnNIABI3CgtpbnRlcnJ1cHRlZBgEIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5TdG9wSW50ZXJydXB0ZWRIABI3Cgt1bnN1cHBvcnRlZBgFIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5TdG9wVW5zdXBwb3J0ZWRIAEIICgZyZWFzb24iDQoLU3RvcEVuZFR1cm4iDgoMU3RvcFRvb2xDYWxsIg8KDVN0b3BNYXhUb2tlbnMiEQoPU3RvcEludGVycnVwdGVkIiEKD1N0b3BVbnN1cHBvcnRlZBIOCgZyZWFzb24YASABKAkiRAoPUGVybWlzc2lvbkFza2VkEjEKCXJlcXVlc3RlZBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5Ub29sQ2FsbEJsb2NrIsUBChJQZXJtaXNzaW9uQW5zd2VyZWQSNQoHYWxsb3dlZBgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uQWxsb3dlZEgAEjMKBmRlbmllZBgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uRGVuaWVkSAASOQoJYWJhbmRvbmVkGAMgASgLMiQuY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BYmFuZG9uZWRIAEIICgZhbnN3ZXIiKAoRUGVybWlzc2lvbkFsbG93ZWQSEwoLZm9yX3Nlc3Npb24YASABKAgiIgoQUGVybWlzc2lvbkRlbmllZBIOCgZyZWFzb24YASABKAkiFQoTUGVybWlzc2lvbkFiYW5kb25lZCJFCg1GYWlsdXJlUmFpc2VkEg8KB3N1bW1hcnkYASABKAkSDgoGZGV0YWlsGAIgASgJEhMKC3JldHJ5X2luX21zGAMgASgDIn8KCkNvbnRleHRDdXQSMgoHY2xlYXJlZBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q2xlYXJlZEgAEjYKCWNvbXBhY3RlZBgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q29tcGFjdGVkSABCBQoDY3V0IhAKDkNvbnRleHRDbGVhcmVkIm8KEENvbnRleHRDb21wYWN0ZWQSLgoHc3VtbWFyeRgBIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudENvbnRlbnQSFQoNdG9rZW5zX2JlZm9yZRgCIAEoAxIUCgx0b2tlbnNfYWZ0ZXIYAyABKAMicgoTRGV0YWNoZWRXb3JrU3RhcnRlZBIbChNvcmlnaW5fdG9vbF9jYWxsX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEi8KBGtpbmQYAyABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZCLUAgoQRGV0YWNoZWRXb3JrS2luZBIvCgVhZ2VudBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZEFnZW50SAASLwoFc2hlbGwYAiABKAsyHi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRTaGVsbEgAEjUKCHdvcmtmbG93GAMgASgLMiEuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya2Zsb3dIABI9Cgx1bmNsYXNzaWZpZWQYBCABKAsyJS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRVbmNsYXNzaWZpZWRIABIvCgVza2lsbBgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFNraWxsSAASLwoFbWVyZ2UYBiABKAsyHi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRNZXJnZUgAQgYKBGtpbmQiDwoNRGV0YWNoZWRBZ2VudCIPCg1EZXRhY2hlZFNoZWxsIhIKEERldGFjaGVkV29ya2Zsb3ciMQoNRGV0YWNoZWRTa2lsbBISCgpza2lsbF9uYW1lGAEgASgJEgwKBGFyZ3MYAiABKAkiDwoNRGV0YWNoZWRNZXJnZSIpChREZXRhY2hlZFVuY2xhc3NpZmllZBIRCgl0b29sX25hbWUYASABKAkiIQoRU2tpbGxCb2R5UmVzb2x2ZWQSDAoEYm9keRgBIAEoCSIoChZEZXRhY2hlZFdvcmtQcm9ncmVzc2VkEg4KBm91dHB1dBgBIAEoCSLyAQoRRGV0YWNoZWRXb3JrRW5kZWQSNwoJc3VjY2VlZGVkGAEgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkU3VjY2VlZGVkSAASMQoGZmFpbGVkGAIgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkRmFpbGVkSAASNwoJY2FuY2VsbGVkGAMgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQ2FuY2VsbGVkSAASLQoEbG9zdBgEIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZExvc3RIAEIJCgdvdXRjb21lIiQKEURldGFjaGVkU3VjY2VlZGVkEg8KB3N1bW1hcnkYASABKAkiIQoORGV0YWNoZWRGYWlsZWQSDwoHc3VtbWFyeRgBIAEoCSITChFEZXRhY2hlZENhbmNlbGxlZCIhCgxEZXRhY2hlZExvc3QSEQoJaW5mZXJlbmNlGAEgASgJInAKD0NvbnRlbnRBcnJpdmluZxITCgtibG9ja19pbmRleBgBIAEoDRIOCgR0ZXh0GAIgASgJSAASEgoIdGhpbmtpbmcYAyABKAlIABIYCg5hcmd1bWVudHNfanNvbhgEIAEoCUgAQgoKCGZyYWdtZW50QjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_content, file_conversation_v1_tokens]);
+  fileDesc("Ch5jb252ZXJzYXRpb24vdjEvcGF5bG9hZHMucHJvdG8SD2NvbnZlcnNhdGlvbi52MSI5CghVc2VyU2FpZBItCgdjb250ZW50GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50IqgBCglBZ2VudFNhaWQSLgoHY29udGVudBgBIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudENvbnRlbnQSKgoFdXNhZ2UYAiABKAsyGy5jb252ZXJzYXRpb24udjEuVG9rZW5Vc2FnZRINCgVtb2RlbBgDIAEoCRIwCgtzdG9wX3JlYXNvbhgEIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5TdG9wUmVhc29uImsKDFRvb2xSZXR1cm5lZBIUCgx0b29sX2NhbGxfaWQYASABKAkSMwoHY29udGVudBgCIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ub29sUmVzdWx0Q29udGVudBIQCghpc19lcnJvchgDIAEoCCKkAgoKU3RvcFJlYXNvbhIwCghlbmRfdHVybhgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5TdG9wRW5kVHVybkgAEjIKCXRvb2xfY2FsbBgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5TdG9wVG9vbENhbGxIABI0CgptYXhfdG9rZW5zGAMgASgLMh4uY29udmVyc2F0aW9uLnYxLlN0b3BNYXhUb2tlbnNIABI3CgtpbnRlcnJ1cHRlZBgEIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5TdG9wSW50ZXJydXB0ZWRIABI3Cgt1bnN1cHBvcnRlZBgFIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5TdG9wVW5zdXBwb3J0ZWRIAEIICgZyZWFzb24iDQoLU3RvcEVuZFR1cm4iDgoMU3RvcFRvb2xDYWxsIg8KDVN0b3BNYXhUb2tlbnMiEQoPU3RvcEludGVycnVwdGVkIiEKD1N0b3BVbnN1cHBvcnRlZBIOCgZyZWFzb24YASABKAkiRAoPUGVybWlzc2lvbkFza2VkEjEKCXJlcXVlc3RlZBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5Ub29sQ2FsbEJsb2NrIsUBChJQZXJtaXNzaW9uQW5zd2VyZWQSNQoHYWxsb3dlZBgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uQWxsb3dlZEgAEjMKBmRlbmllZBgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uRGVuaWVkSAASOQoJYWJhbmRvbmVkGAMgASgLMiQuY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BYmFuZG9uZWRIAEIICgZhbnN3ZXIiKAoRUGVybWlzc2lvbkFsbG93ZWQSEwoLZm9yX3Nlc3Npb24YASABKAgiIgoQUGVybWlzc2lvbkRlbmllZBIOCgZyZWFzb24YASABKAkiFQoTUGVybWlzc2lvbkFiYW5kb25lZCJFCg1GYWlsdXJlUmFpc2VkEg8KB3N1bW1hcnkYASABKAkSDgoGZGV0YWlsGAIgASgJEhMKC3JldHJ5X2luX21zGAMgASgDIn8KCkNvbnRleHRDdXQSMgoHY2xlYXJlZBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q2xlYXJlZEgAEjYKCWNvbXBhY3RlZBgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q29tcGFjdGVkSABCBQoDY3V0IhAKDkNvbnRleHRDbGVhcmVkIm8KEENvbnRleHRDb21wYWN0ZWQSLgoHc3VtbWFyeRgBIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudENvbnRlbnQSFQoNdG9rZW5zX2JlZm9yZRgCIAEoAxIUCgx0b2tlbnNfYWZ0ZXIYAyABKAMicgoTRGV0YWNoZWRXb3JrU3RhcnRlZBIbChNvcmlnaW5fdG9vbF9jYWxsX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEi8KBGtpbmQYAyABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZCLUAgoQRGV0YWNoZWRXb3JrS2luZBIvCgVhZ2VudBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZEFnZW50SAASLwoFc2hlbGwYAiABKAsyHi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRTaGVsbEgAEjUKCHdvcmtmbG93GAMgASgLMiEuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya2Zsb3dIABI9Cgx1bmNsYXNzaWZpZWQYBCABKAsyJS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRVbmNsYXNzaWZpZWRIABIvCgVza2lsbBgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFNraWxsSAASLwoFbWVyZ2UYBiABKAsyHi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRNZXJnZUgAQgYKBGtpbmQiDwoNRGV0YWNoZWRBZ2VudCIPCg1EZXRhY2hlZFNoZWxsIhIKEERldGFjaGVkV29ya2Zsb3ciMQoNRGV0YWNoZWRTa2lsbBISCgpza2lsbF9uYW1lGAEgASgJEgwKBGFyZ3MYAiABKAkiDwoNRGV0YWNoZWRNZXJnZSIpChREZXRhY2hlZFVuY2xhc3NpZmllZBIRCgl0b29sX25hbWUYASABKAkiIQoRU2tpbGxCb2R5UmVzb2x2ZWQSDAoEYm9keRgBIAEoCSIoChZEZXRhY2hlZFdvcmtQcm9ncmVzc2VkEg4KBm91dHB1dBgBIAEoCSKuAgoRRGV0YWNoZWRXb3JrRW5kZWQSNwoJc3VjY2VlZGVkGAEgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkU3VjY2VlZGVkSAASMQoGZmFpbGVkGAIgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkRmFpbGVkSAASNwoJY2FuY2VsbGVkGAMgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQ2FuY2VsbGVkSAASLQoEbG9zdBgEIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZExvc3RIABI6Cgxwcm9jZXNzX2V4aXQYBSABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRQcm9jZXNzRXhpdEIJCgdvdXRjb21lIiMKE0RldGFjaGVkUHJvY2Vzc0V4aXQSDAoEY29kZRgBIAEoBSIkChFEZXRhY2hlZFN1Y2NlZWRlZBIPCgdzdW1tYXJ5GAEgASgJIiEKDkRldGFjaGVkRmFpbGVkEg8KB3N1bW1hcnkYASABKAkiEwoRRGV0YWNoZWRDYW5jZWxsZWQiIQoMRGV0YWNoZWRMb3N0EhEKCWluZmVyZW5jZRgBIAEoCSJwCg9Db250ZW50QXJyaXZpbmcSEwoLYmxvY2tfaW5kZXgYASABKA0SDgoEdGV4dBgCIAEoCUgAEhIKCHRoaW5raW5nGAMgASgJSAASGAoOYXJndW1lbnRzX2pzb24YBCABKAlIAEIKCghmcmFnbWVudEIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_content, file_conversation_v1_tokens]);
 
 /**
  * Something a person typed. The opening of a turn.
@@ -853,6 +853,24 @@ export type DetachedWorkEnded = Message<"conversation.v1.DetachedWorkEnded"> & {
     value: DetachedLost;
     case: "lost";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * The exit status of the underlying process, for work that IS one — a
+   * backgrounded shell, or unclassified work the producer ran as a process.
+   * UNSET for work that never had an exit status of its own (an agent, a
+   * workflow), and that absence is the only reading of "this work did not exit,
+   * it concluded".
+   *
+   * EVIDENCE, NEVER THE VERDICT. A killed process also exits nonzero, so the
+   * exit status cannot decide the `outcome` arm and the `outcome` arm cannot
+   * reconstruct the exit status. The outcome is resolved separately by the
+   * consumer that owns that judgment; the two must never be derived from each
+   * other. This field exists so a shell's card can show "exited 137" beside the
+   * verdict rather than an unexplained red dot.
+   *
+   * @generated from field: conversation.v1.DetachedProcessExit process_exit = 5;
+   */
+  processExit?: DetachedProcessExit | undefined;
 };
 
 /**
@@ -861,6 +879,32 @@ export type DetachedWorkEnded = Message<"conversation.v1.DetachedWorkEnded"> & {
  */
 export const DetachedWorkEndedSchema: GenMessage<DetachedWorkEnded> = /*@__PURE__*/
   messageDesc(file_conversation_v1_payloads, 28);
+
+/**
+ * A process's exit status, exactly as the operating system reported it.
+ *
+ * A record of an OBSERVATION, which is why it lives here rather than with the
+ * consumer: a producer watched a process leave and read its status.
+ *
+ * @generated from message conversation.v1.DetachedProcessExit
+ */
+export type DetachedProcessExit = Message<"conversation.v1.DetachedProcessExit"> & {
+  /**
+   * The exit code as the shell reports it. A signal-terminated process reports
+   * the conventional 128+N form, because that is literally what its exit status
+   * is. 0 is a real zero and always means clean exit.
+   *
+   * @generated from field: int32 code = 1;
+   */
+  code: number;
+};
+
+/**
+ * Describes the message conversation.v1.DetachedProcessExit.
+ * Use `create(DetachedProcessExitSchema)` to create a new message.
+ */
+export const DetachedProcessExitSchema: GenMessage<DetachedProcessExit> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_payloads, 29);
 
 /**
  * It finished and did what it was asked.
@@ -881,7 +925,7 @@ export type DetachedSucceeded = Message<"conversation.v1.DetachedSucceeded"> & {
  * Use `create(DetachedSucceededSchema)` to create a new message.
  */
 export const DetachedSucceededSchema: GenMessage<DetachedSucceeded> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 29);
+  messageDesc(file_conversation_v1_payloads, 30);
 
 /**
  * It finished and did not.
@@ -902,7 +946,7 @@ export type DetachedFailed = Message<"conversation.v1.DetachedFailed"> & {
  * Use `create(DetachedFailedSchema)` to create a new message.
  */
 export const DetachedFailedSchema: GenMessage<DetachedFailed> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 30);
+  messageDesc(file_conversation_v1_payloads, 31);
 
 /**
  * Someone stopped it deliberately.
@@ -917,7 +961,7 @@ export type DetachedCancelled = Message<"conversation.v1.DetachedCancelled"> & {
  * Use `create(DetachedCancelledSchema)` to create a new message.
  */
 export const DetachedCancelledSchema: GenMessage<DetachedCancelled> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 31);
+  messageDesc(file_conversation_v1_payloads, 32);
 
 /**
  * We lost sight of it.
@@ -943,7 +987,7 @@ export type DetachedLost = Message<"conversation.v1.DetachedLost"> & {
  * Use `create(DetachedLostSchema)` to create a new message.
  */
 export const DetachedLostSchema: GenMessage<DetachedLost> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 32);
+  messageDesc(file_conversation_v1_payloads, 33);
 
 /**
  * A fragment of a message still arriving.
@@ -1006,5 +1050,5 @@ export type ContentArriving = Message<"conversation.v1.ContentArriving"> & {
  * Use `create(ContentArrivingSchema)` to create a new message.
  */
 export const ContentArrivingSchema: GenMessage<ContentArriving> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 33);
+  messageDesc(file_conversation_v1_payloads, 34);
 

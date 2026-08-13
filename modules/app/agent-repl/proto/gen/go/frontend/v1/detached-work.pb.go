@@ -38,6 +38,7 @@
 package frontendv1
 
 import (
+	v1 "agentrepl/proto/conversation/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -55,20 +56,12 @@ const (
 // One piece of detached work, as the payload of the Message that IS it.
 type DetachedWork struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The tool_use id of the call that spawned this work, for a frontend that
-	// draws the work attached to its originating card rather than free-standing.
-	// Empty only for work that no tool call spawned.
-	//
-	// PROVENANCE, NEVER CONTAINMENT. It says which call STARTED this work, which
-	// is a different fact from what CONTAINS it: a reader that treated it as
-	// containment would place a feed row inside the card that launched it and
-	// make a page of ten messages unbounded again. Containment is
-	// MessageLineage's alone.
-	OriginToolUseId string `protobuf:"bytes,2,opt,name=origin_tool_use_id,json=originToolUseId,proto3" json:"origin_tool_use_id,omitempty"`
-	// The face the collapsed fold shows: the agent's task description, the
-	// workflow's name, or the shell's command line. Empty means the daemon had
-	// no label for the work, and the client shows the message's id.
-	Label string `protobuf:"bytes,4,opt,name=label,proto3" json:"label,omitempty"`
+	// THE PRODUCER'S OWN RECORD of the detachment, embedded whole rather than
+	// copied out field by field. Everything a producer observed about the work
+	// starting — which tool call spawned it, what it is called, what kind of thing
+	// it is — reaches the frontend exactly as it was recorded, so this surface has
+	// no second spelling of those facts to fall out of step with.
+	Started *v1.DetachedWorkStarted `protobuf:"bytes,8,opt,name=started,proto3" json:"started,omitempty"`
 	// When the work was launched, unix millis.
 	StartedAtMs int64 `protobuf:"varint,5,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
 	// Live or settled, and with what outcome. See DetachedWorkLiveness.
@@ -82,6 +75,19 @@ type DetachedWork struct {
 	// than a card. `merge` is the one skill with an arm of its own, because the
 	// merge run is a distinct thing to render; every other skill arrives as
 	// `skill`.
+	//
+	// TODO(respelling): this oneof RE-SPELLS conversation.v1.DetachedWorkKind, and
+	// must not, but it cannot simply be deleted: every arm carries daemon-folded
+	// content with no counterpart in conversation.v1 —
+	//
+	//	DetachedWorkAgent.emissions/.fold, DetachedWorkMerge.emissions/.fold,
+	//	DetachedWorkSkill.body/.emissions/.fold, DetachedWorkJournal.rows/.fold,
+	//	DetachedWorkShell.command/.output, DetachedWorkUnclassified.output
+	//
+	// Deleting the arms would delete that content off the wire silently. It stays
+	// until the fold has a home of its own; `started.kind` is the authority on
+	// WHICH kind, and this oneof's arm must always agree with it. Note the two are
+	// already drifted: `journal` here is `workflow` there.
 	//
 	// Types that are valid to be assigned to Kind:
 	//
@@ -132,18 +138,11 @@ func (*DetachedWork) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *DetachedWork) GetOriginToolUseId() string {
+func (x *DetachedWork) GetStarted() *v1.DetachedWorkStarted {
 	if x != nil {
-		return x.OriginToolUseId
+		return x.Started
 	}
-	return ""
-}
-
-func (x *DetachedWork) GetLabel() string {
-	if x != nil {
-		return x.Label
-	}
-	return ""
+	return nil
 }
 
 func (x *DetachedWork) GetStartedAtMs() int64 {
@@ -1104,30 +1103,22 @@ func (x *DetachedWorkLive) GetLastActivityMs() int64 {
 // The work has finished, one way or another.
 type DetachedWorkSettled struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// When it finished, unix millis.
+	// When it finished, unix millis. Daemon bookkeeping: the moment this system
+	// learned of the ending, which is not the moment the work ended.
 	SettledAtMs int64 `protobuf:"varint,1,opt,name=settled_at_ms,json=settledAtMs,proto3" json:"settled_at_ms,omitempty"`
-	// The process exit status, for work that IS a process — shell work, and
-	// unclassified work the daemon ran as one. Absent for work with no exit
-	// status of its own (an agent, a workflow), and absence is the only reading
-	// of "this work did not exit, it concluded".
-	//
-	// It sits BESIDE the outcome rather than inside an outcome arm because the
-	// exit status and the verdict are two different facts about one ending. The
-	// daemon resolves `outcome` FROM this code — that mapping is not a client's
-	// to make — while the code itself stays on the wire so a shell's card can
-	// show "exited 137" rather than an unexplained red dot. Putting the code
-	// inside `done` and `error` would force every reader to check two arms for
-	// one field; putting the verdict inside the exit status would leave work
-	// with no exit status unable to say how it ended.
-	ShellExit *DetachedWorkShellExit `protobuf:"bytes,2,opt,name=shell_exit,json=shellExit,proto3" json:"shell_exit,omitempty"`
-	// HOW it finished. Exactly one arm is always set.
-	//
-	// Types that are valid to be assigned to Outcome:
-	//
-	//	*DetachedWorkSettled_Done
-	//	*DetachedWorkSettled_Error
-	//	*DetachedWorkSettled_Killed
-	Outcome       isDetachedWorkSettled_Outcome `protobuf_oneof:"outcome"`
+	// THE PRODUCER'S OWN RECORD of the ending, embedded whole: which outcome it
+	// reached, and — for work that was a process — the exit status it left with.
+	// A consumer reads the verdict and the evidence from one place, in the
+	// vocabulary the producer wrote them in.
+	Ended *v1.DetachedWorkEnded `protobuf:"bytes,3,opt,name=ended,proto3" json:"ended,omitempty"`
+	// TODO(respelling): `killed` has NO counterpart in
+	// conversation.v1.DetachedWorkEnded and so was not folded into `ended`. Its
+	// nearest neighbour, conversation.v1.DetachedCancelled, is empty and cannot
+	// carry `reason` — the attribution of WHO stopped the work. Deleting this
+	// would delete that attribution off the wire silently. It is a plain field
+	// rather than a oneof arm now that its siblings live in `ended`; when set, it
+	// annotates the `cancelled` arm and never contradicts it.
+	Killed        *DetachedWorkOutcomeKilled `protobuf:"bytes,12,opt,name=killed,proto3" json:"killed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1169,208 +1160,23 @@ func (x *DetachedWorkSettled) GetSettledAtMs() int64 {
 	return 0
 }
 
-func (x *DetachedWorkSettled) GetShellExit() *DetachedWorkShellExit {
+func (x *DetachedWorkSettled) GetEnded() *v1.DetachedWorkEnded {
 	if x != nil {
-		return x.ShellExit
-	}
-	return nil
-}
-
-func (x *DetachedWorkSettled) GetOutcome() isDetachedWorkSettled_Outcome {
-	if x != nil {
-		return x.Outcome
-	}
-	return nil
-}
-
-func (x *DetachedWorkSettled) GetDone() *DetachedWorkOutcomeDone {
-	if x != nil {
-		if x, ok := x.Outcome.(*DetachedWorkSettled_Done); ok {
-			return x.Done
-		}
-	}
-	return nil
-}
-
-func (x *DetachedWorkSettled) GetError() *DetachedWorkOutcomeError {
-	if x != nil {
-		if x, ok := x.Outcome.(*DetachedWorkSettled_Error); ok {
-			return x.Error
-		}
+		return x.Ended
 	}
 	return nil
 }
 
 func (x *DetachedWorkSettled) GetKilled() *DetachedWorkOutcomeKilled {
 	if x != nil {
-		if x, ok := x.Outcome.(*DetachedWorkSettled_Killed); ok {
-			return x.Killed
-		}
+		return x.Killed
 	}
 	return nil
 }
 
-type isDetachedWorkSettled_Outcome interface {
-	isDetachedWorkSettled_Outcome()
-}
-
-type DetachedWorkSettled_Done struct {
-	Done *DetachedWorkOutcomeDone `protobuf:"bytes,10,opt,name=done,proto3,oneof"`
-}
-
-type DetachedWorkSettled_Error struct {
-	Error *DetachedWorkOutcomeError `protobuf:"bytes,11,opt,name=error,proto3,oneof"`
-}
-
-type DetachedWorkSettled_Killed struct {
-	Killed *DetachedWorkOutcomeKilled `protobuf:"bytes,12,opt,name=killed,proto3,oneof"`
-}
-
-func (*DetachedWorkSettled_Done) isDetachedWorkSettled_Outcome() {}
-
-func (*DetachedWorkSettled_Error) isDetachedWorkSettled_Outcome() {}
-
-func (*DetachedWorkSettled_Killed) isDetachedWorkSettled_Outcome() {}
-
-// A process's exit status.
-type DetachedWorkShellExit struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The exit code, as the shell reports it. A signal-terminated process
-	// reports the conventional 128+N form, because that is what its exit status
-	// literally is. 0 is a real zero and always means clean exit.
-	Code          int32 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DetachedWorkShellExit) Reset() {
-	*x = DetachedWorkShellExit{}
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[15]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DetachedWorkShellExit) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DetachedWorkShellExit) ProtoMessage() {}
-
-func (x *DetachedWorkShellExit) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[15]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DetachedWorkShellExit.ProtoReflect.Descriptor instead.
-func (*DetachedWorkShellExit) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{15}
-}
-
-func (x *DetachedWorkShellExit) GetCode() int32 {
-	if x != nil {
-		return x.Code
-	}
-	return 0
-}
-
-// Finished successfully. For a process, the daemon resolved this from an exit
-// code of 0 (see DetachedWorkSettled.shell_exit).
-type DetachedWorkOutcomeDone struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DetachedWorkOutcomeDone) Reset() {
-	*x = DetachedWorkOutcomeDone{}
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[16]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DetachedWorkOutcomeDone) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DetachedWorkOutcomeDone) ProtoMessage() {}
-
-func (x *DetachedWorkOutcomeDone) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[16]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DetachedWorkOutcomeDone.ProtoReflect.Descriptor instead.
-func (*DetachedWorkOutcomeDone) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{16}
-}
-
-// Finished by failing. For a process, the daemon resolved this from a nonzero
-// exit code (see DetachedWorkSettled.shell_exit).
-type DetachedWorkOutcomeError struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The failure, resolved for display. Empty when the source reported failure
-	// without a reason — never filled with a manufactured one. A process's exit
-	// code is NOT restated here; it rides DetachedWorkSettled.shell_exit.
-	Message       string `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DetachedWorkOutcomeError) Reset() {
-	*x = DetachedWorkOutcomeError{}
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[17]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DetachedWorkOutcomeError) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DetachedWorkOutcomeError) ProtoMessage() {}
-
-func (x *DetachedWorkOutcomeError) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[17]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DetachedWorkOutcomeError.ProtoReflect.Descriptor instead.
-func (*DetachedWorkOutcomeError) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{17}
-}
-
-func (x *DetachedWorkOutcomeError) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
 // Stopped from outside before it finished: an explicit stop, a cancellation,
 // a session teardown. Distinct from error because the work did not fail — it
-// was not allowed to conclude. A killed process still carries its exit status
-// on DetachedWorkSettled.shell_exit.
+// was not allowed to conclude.
 type DetachedWorkOutcomeKilled struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Who or what stopped it, resolved for display. Empty when unattributed.
@@ -1381,7 +1187,7 @@ type DetachedWorkOutcomeKilled struct {
 
 func (x *DetachedWorkOutcomeKilled) Reset() {
 	*x = DetachedWorkOutcomeKilled{}
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[18]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1393,7 +1199,7 @@ func (x *DetachedWorkOutcomeKilled) String() string {
 func (*DetachedWorkOutcomeKilled) ProtoMessage() {}
 
 func (x *DetachedWorkOutcomeKilled) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[18]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1406,7 +1212,7 @@ func (x *DetachedWorkOutcomeKilled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkOutcomeKilled.ProtoReflect.Descriptor instead.
 func (*DetachedWorkOutcomeKilled) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{18}
+	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DetachedWorkOutcomeKilled) GetReason() string {
@@ -1444,7 +1250,7 @@ type DetachedWorkFold struct {
 
 func (x *DetachedWorkFold) Reset() {
 	*x = DetachedWorkFold{}
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[19]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1456,7 +1262,7 @@ func (x *DetachedWorkFold) String() string {
 func (*DetachedWorkFold) ProtoMessage() {}
 
 func (x *DetachedWorkFold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[19]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1469,7 +1275,7 @@ func (x *DetachedWorkFold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkFold.ProtoReflect.Descriptor instead.
 func (*DetachedWorkFold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{19}
+	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DetachedWorkFold) GetDroppedBefore() int64 {
@@ -1536,7 +1342,7 @@ type DetachedWorkUpdate struct {
 
 func (x *DetachedWorkUpdate) Reset() {
 	*x = DetachedWorkUpdate{}
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[20]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1548,7 +1354,7 @@ func (x *DetachedWorkUpdate) String() string {
 func (*DetachedWorkUpdate) ProtoMessage() {}
 
 func (x *DetachedWorkUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[20]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1561,7 +1367,7 @@ func (x *DetachedWorkUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkUpdate.ProtoReflect.Descriptor instead.
 func (*DetachedWorkUpdate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{20}
+	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DetachedWorkUpdate) GetMessageId() string {
@@ -1708,7 +1514,7 @@ type DetachedWorkAgentUpdate struct {
 
 func (x *DetachedWorkAgentUpdate) Reset() {
 	*x = DetachedWorkAgentUpdate{}
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[21]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1720,7 +1526,7 @@ func (x *DetachedWorkAgentUpdate) String() string {
 func (*DetachedWorkAgentUpdate) ProtoMessage() {}
 
 func (x *DetachedWorkAgentUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[21]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1733,7 +1539,7 @@ func (x *DetachedWorkAgentUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkAgentUpdate.ProtoReflect.Descriptor instead.
 func (*DetachedWorkAgentUpdate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{21}
+	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DetachedWorkAgentUpdate) GetEmissions() []*AgentEmission {
@@ -1766,7 +1572,7 @@ type DetachedWorkSkillUpdate struct {
 
 func (x *DetachedWorkSkillUpdate) Reset() {
 	*x = DetachedWorkSkillUpdate{}
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[22]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1778,7 +1584,7 @@ func (x *DetachedWorkSkillUpdate) String() string {
 func (*DetachedWorkSkillUpdate) ProtoMessage() {}
 
 func (x *DetachedWorkSkillUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[22]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1791,7 +1597,7 @@ func (x *DetachedWorkSkillUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkSkillUpdate.ProtoReflect.Descriptor instead.
 func (*DetachedWorkSkillUpdate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{22}
+	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DetachedWorkSkillUpdate) GetUpdate() isDetachedWorkSkillUpdate_Update {
@@ -1851,7 +1657,7 @@ type DetachedWorkSkillBodyResolved struct {
 
 func (x *DetachedWorkSkillBodyResolved) Reset() {
 	*x = DetachedWorkSkillBodyResolved{}
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[23]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1863,7 +1669,7 @@ func (x *DetachedWorkSkillBodyResolved) String() string {
 func (*DetachedWorkSkillBodyResolved) ProtoMessage() {}
 
 func (x *DetachedWorkSkillBodyResolved) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[23]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1876,7 +1682,7 @@ func (x *DetachedWorkSkillBodyResolved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkSkillBodyResolved.ProtoReflect.Descriptor instead.
 func (*DetachedWorkSkillBodyResolved) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{23}
+	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *DetachedWorkSkillBodyResolved) GetContents() string {
@@ -1905,7 +1711,7 @@ type DetachedWorkJournalUpdate struct {
 
 func (x *DetachedWorkJournalUpdate) Reset() {
 	*x = DetachedWorkJournalUpdate{}
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[24]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1917,7 +1723,7 @@ func (x *DetachedWorkJournalUpdate) String() string {
 func (*DetachedWorkJournalUpdate) ProtoMessage() {}
 
 func (x *DetachedWorkJournalUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[24]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1930,7 +1736,7 @@ func (x *DetachedWorkJournalUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkJournalUpdate.ProtoReflect.Descriptor instead.
 func (*DetachedWorkJournalUpdate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{24}
+	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *DetachedWorkJournalUpdate) GetRows() []*DetachedWorkJournalRow {
@@ -1968,7 +1774,7 @@ type DetachedWorkOutputAppend struct {
 
 func (x *DetachedWorkOutputAppend) Reset() {
 	*x = DetachedWorkOutputAppend{}
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[25]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1980,7 +1786,7 @@ func (x *DetachedWorkOutputAppend) String() string {
 func (*DetachedWorkOutputAppend) ProtoMessage() {}
 
 func (x *DetachedWorkOutputAppend) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[25]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1993,7 +1799,7 @@ func (x *DetachedWorkOutputAppend) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkOutputAppend.ProtoReflect.Descriptor instead.
 func (*DetachedWorkOutputAppend) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{25}
+	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DetachedWorkOutputAppend) GetText() string {
@@ -2022,7 +1828,7 @@ type DetachedWorkLivenessUpdate struct {
 
 func (x *DetachedWorkLivenessUpdate) Reset() {
 	*x = DetachedWorkLivenessUpdate{}
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[26]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2034,7 +1840,7 @@ func (x *DetachedWorkLivenessUpdate) String() string {
 func (*DetachedWorkLivenessUpdate) ProtoMessage() {}
 
 func (x *DetachedWorkLivenessUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_detached_work_proto_msgTypes[26]
+	mi := &file_frontend_v1_detached_work_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2047,7 +1853,7 @@ func (x *DetachedWorkLivenessUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkLivenessUpdate.ProtoReflect.Descriptor instead.
 func (*DetachedWorkLivenessUpdate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{26}
+	return file_frontend_v1_detached_work_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DetachedWorkLivenessUpdate) GetLiveness() *DetachedWorkLiveness {
@@ -2061,10 +1867,9 @@ var File_frontend_v1_detached_work_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_detached_work_proto_rawDesc = "" +
 	"\n" +
-	"\x1ffrontend/v1/detached-work.proto\x12\vfrontend.v1\x1a frontend/v1/agent-emission.proto\"\xe7\x04\n" +
-	"\fDetachedWork\x12+\n" +
-	"\x12origin_tool_use_id\x18\x02 \x01(\tR\x0foriginToolUseId\x12\x14\n" +
-	"\x05label\x18\x04 \x01(\tR\x05label\x12\"\n" +
+	"\x1ffrontend/v1/detached-work.proto\x12\vfrontend.v1\x1a\x1econversation/v1/payloads.proto\x1a frontend/v1/agent-emission.proto\"\x8b\x05\n" +
+	"\fDetachedWork\x12>\n" +
+	"\astarted\x18\b \x01(\v2$.conversation.v1.DetachedWorkStartedR\astarted\x12\"\n" +
 	"\rstarted_at_ms\x18\x05 \x01(\x03R\vstartedAtMs\x12=\n" +
 	"\bliveness\x18\x06 \x01(\v2!.frontend.v1.DetachedWorkLivenessR\bliveness\x126\n" +
 	"\x05agent\x18\n" +
@@ -2075,7 +1880,7 @@ const file_frontend_v1_detached_work_proto_rawDesc = "" +
 	"\x05merge\x18\x0e \x01(\v2\x1e.frontend.v1.DetachedWorkMergeH\x00R\x05merge\x126\n" +
 	"\x05skill\x18\x0f \x01(\v2\x1e.frontend.v1.DetachedWorkSkillH\x00R\x05skill\x12\x1c\n" +
 	"\tworkspace\x18\a \x01(\tR\tworkspaceB\x06\n" +
-	"\x04kindJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04R\x02idR\x10parent_bubble_id\"\x80\x01\n" +
+	"\x04kindJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\x02idR\x10parent_bubble_idR\x12origin_tool_use_idR\x05label\"\x80\x01\n" +
 	"\x11DetachedWorkAgent\x128\n" +
 	"\temissions\x18\x01 \x03(\v2\x1a.frontend.v1.AgentEmissionR\temissions\x121\n" +
 	"\x04fold\x18\x02 \x01(\v2\x1d.frontend.v1.DetachedWorkFoldR\x04fold\"\x80\x01\n" +
@@ -2117,21 +1922,13 @@ const file_frontend_v1_detached_work_proto_rawDesc = "" +
 	"\asettled\x18\x02 \x01(\v2 .frontend.v1.DetachedWorkSettledH\x00R\asettledB\a\n" +
 	"\x05state\"<\n" +
 	"\x10DetachedWorkLive\x12(\n" +
-	"\x10last_activity_ms\x18\x01 \x01(\x03R\x0elastActivityMs\"\xc4\x02\n" +
+	"\x10last_activity_ms\x18\x01 \x01(\x03R\x0elastActivityMs\"\xde\x01\n" +
 	"\x13DetachedWorkSettled\x12\"\n" +
-	"\rsettled_at_ms\x18\x01 \x01(\x03R\vsettledAtMs\x12A\n" +
-	"\n" +
-	"shell_exit\x18\x02 \x01(\v2\".frontend.v1.DetachedWorkShellExitR\tshellExit\x12:\n" +
-	"\x04done\x18\n" +
-	" \x01(\v2$.frontend.v1.DetachedWorkOutcomeDoneH\x00R\x04done\x12=\n" +
-	"\x05error\x18\v \x01(\v2%.frontend.v1.DetachedWorkOutcomeErrorH\x00R\x05error\x12@\n" +
-	"\x06killed\x18\f \x01(\v2&.frontend.v1.DetachedWorkOutcomeKilledH\x00R\x06killedB\t\n" +
-	"\aoutcome\"+\n" +
-	"\x15DetachedWorkShellExit\x12\x12\n" +
-	"\x04code\x18\x01 \x01(\x05R\x04code\"\x19\n" +
-	"\x17DetachedWorkOutcomeDone\"4\n" +
-	"\x18DetachedWorkOutcomeError\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\"3\n" +
+	"\rsettled_at_ms\x18\x01 \x01(\x03R\vsettledAtMs\x128\n" +
+	"\x05ended\x18\x03 \x01(\v2\".conversation.v1.DetachedWorkEndedR\x05ended\x12>\n" +
+	"\x06killed\x18\f \x01(\v2&.frontend.v1.DetachedWorkOutcomeKilledR\x06killedJ\x04\b\x02\x10\x03J\x04\b\n" +
+	"\x10\vJ\x04\b\v\x10\fR\n" +
+	"shell_exitR\x04doneR\x05error\"3\n" +
 	"\x19DetachedWorkOutcomeKilled\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"T\n" +
 	"\x10DetachedWorkFold\x12%\n" +
@@ -2180,7 +1977,7 @@ func file_frontend_v1_detached_work_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_detached_work_proto_rawDescData
 }
 
-var file_frontend_v1_detached_work_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_frontend_v1_detached_work_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_frontend_v1_detached_work_proto_goTypes = []any{
 	(*DetachedWork)(nil),                  // 0: frontend.v1.DetachedWork
 	(*DetachedWorkAgent)(nil),             // 1: frontend.v1.DetachedWorkAgent
@@ -2197,66 +1994,64 @@ var file_frontend_v1_detached_work_proto_goTypes = []any{
 	(*DetachedWorkLiveness)(nil),          // 12: frontend.v1.DetachedWorkLiveness
 	(*DetachedWorkLive)(nil),              // 13: frontend.v1.DetachedWorkLive
 	(*DetachedWorkSettled)(nil),           // 14: frontend.v1.DetachedWorkSettled
-	(*DetachedWorkShellExit)(nil),         // 15: frontend.v1.DetachedWorkShellExit
-	(*DetachedWorkOutcomeDone)(nil),       // 16: frontend.v1.DetachedWorkOutcomeDone
-	(*DetachedWorkOutcomeError)(nil),      // 17: frontend.v1.DetachedWorkOutcomeError
-	(*DetachedWorkOutcomeKilled)(nil),     // 18: frontend.v1.DetachedWorkOutcomeKilled
-	(*DetachedWorkFold)(nil),              // 19: frontend.v1.DetachedWorkFold
-	(*DetachedWorkUpdate)(nil),            // 20: frontend.v1.DetachedWorkUpdate
-	(*DetachedWorkAgentUpdate)(nil),       // 21: frontend.v1.DetachedWorkAgentUpdate
-	(*DetachedWorkSkillUpdate)(nil),       // 22: frontend.v1.DetachedWorkSkillUpdate
-	(*DetachedWorkSkillBodyResolved)(nil), // 23: frontend.v1.DetachedWorkSkillBodyResolved
-	(*DetachedWorkJournalUpdate)(nil),     // 24: frontend.v1.DetachedWorkJournalUpdate
-	(*DetachedWorkOutputAppend)(nil),      // 25: frontend.v1.DetachedWorkOutputAppend
-	(*DetachedWorkLivenessUpdate)(nil),    // 26: frontend.v1.DetachedWorkLivenessUpdate
-	(*AgentEmission)(nil),                 // 27: frontend.v1.AgentEmission
+	(*DetachedWorkOutcomeKilled)(nil),     // 15: frontend.v1.DetachedWorkOutcomeKilled
+	(*DetachedWorkFold)(nil),              // 16: frontend.v1.DetachedWorkFold
+	(*DetachedWorkUpdate)(nil),            // 17: frontend.v1.DetachedWorkUpdate
+	(*DetachedWorkAgentUpdate)(nil),       // 18: frontend.v1.DetachedWorkAgentUpdate
+	(*DetachedWorkSkillUpdate)(nil),       // 19: frontend.v1.DetachedWorkSkillUpdate
+	(*DetachedWorkSkillBodyResolved)(nil), // 20: frontend.v1.DetachedWorkSkillBodyResolved
+	(*DetachedWorkJournalUpdate)(nil),     // 21: frontend.v1.DetachedWorkJournalUpdate
+	(*DetachedWorkOutputAppend)(nil),      // 22: frontend.v1.DetachedWorkOutputAppend
+	(*DetachedWorkLivenessUpdate)(nil),    // 23: frontend.v1.DetachedWorkLivenessUpdate
+	(*v1.DetachedWorkStarted)(nil),        // 24: conversation.v1.DetachedWorkStarted
+	(*AgentEmission)(nil),                 // 25: frontend.v1.AgentEmission
+	(*v1.DetachedWorkEnded)(nil),          // 26: conversation.v1.DetachedWorkEnded
 }
 var file_frontend_v1_detached_work_proto_depIdxs = []int32{
-	12, // 0: frontend.v1.DetachedWork.liveness:type_name -> frontend.v1.DetachedWorkLiveness
-	1,  // 1: frontend.v1.DetachedWork.agent:type_name -> frontend.v1.DetachedWorkAgent
-	4,  // 2: frontend.v1.DetachedWork.journal:type_name -> frontend.v1.DetachedWorkJournal
-	5,  // 3: frontend.v1.DetachedWork.shell:type_name -> frontend.v1.DetachedWorkShell
-	6,  // 4: frontend.v1.DetachedWork.unclassified:type_name -> frontend.v1.DetachedWorkUnclassified
-	2,  // 5: frontend.v1.DetachedWork.merge:type_name -> frontend.v1.DetachedWorkMerge
-	3,  // 6: frontend.v1.DetachedWork.skill:type_name -> frontend.v1.DetachedWorkSkill
-	27, // 7: frontend.v1.DetachedWorkAgent.emissions:type_name -> frontend.v1.AgentEmission
-	19, // 8: frontend.v1.DetachedWorkAgent.fold:type_name -> frontend.v1.DetachedWorkFold
-	27, // 9: frontend.v1.DetachedWorkMerge.emissions:type_name -> frontend.v1.AgentEmission
-	19, // 10: frontend.v1.DetachedWorkMerge.fold:type_name -> frontend.v1.DetachedWorkFold
-	27, // 11: frontend.v1.DetachedWorkSkill.emissions:type_name -> frontend.v1.AgentEmission
-	19, // 12: frontend.v1.DetachedWorkSkill.fold:type_name -> frontend.v1.DetachedWorkFold
-	8,  // 13: frontend.v1.DetachedWorkJournal.rows:type_name -> frontend.v1.DetachedWorkJournalRow
-	19, // 14: frontend.v1.DetachedWorkJournal.fold:type_name -> frontend.v1.DetachedWorkFold
-	7,  // 15: frontend.v1.DetachedWorkShell.output:type_name -> frontend.v1.DetachedWorkOutputSpool
-	7,  // 16: frontend.v1.DetachedWorkUnclassified.output:type_name -> frontend.v1.DetachedWorkOutputSpool
-	9,  // 17: frontend.v1.DetachedWorkJournalRow.running:type_name -> frontend.v1.DetachedWorkStepRunning
-	10, // 18: frontend.v1.DetachedWorkJournalRow.done:type_name -> frontend.v1.DetachedWorkStepDone
-	11, // 19: frontend.v1.DetachedWorkJournalRow.failed:type_name -> frontend.v1.DetachedWorkStepFailed
-	13, // 20: frontend.v1.DetachedWorkLiveness.live:type_name -> frontend.v1.DetachedWorkLive
-	14, // 21: frontend.v1.DetachedWorkLiveness.settled:type_name -> frontend.v1.DetachedWorkSettled
-	15, // 22: frontend.v1.DetachedWorkSettled.shell_exit:type_name -> frontend.v1.DetachedWorkShellExit
-	16, // 23: frontend.v1.DetachedWorkSettled.done:type_name -> frontend.v1.DetachedWorkOutcomeDone
-	17, // 24: frontend.v1.DetachedWorkSettled.error:type_name -> frontend.v1.DetachedWorkOutcomeError
-	18, // 25: frontend.v1.DetachedWorkSettled.killed:type_name -> frontend.v1.DetachedWorkOutcomeKilled
-	21, // 26: frontend.v1.DetachedWorkUpdate.agent:type_name -> frontend.v1.DetachedWorkAgentUpdate
-	24, // 27: frontend.v1.DetachedWorkUpdate.journal:type_name -> frontend.v1.DetachedWorkJournalUpdate
-	25, // 28: frontend.v1.DetachedWorkUpdate.shell:type_name -> frontend.v1.DetachedWorkOutputAppend
-	25, // 29: frontend.v1.DetachedWorkUpdate.unclassified:type_name -> frontend.v1.DetachedWorkOutputAppend
-	26, // 30: frontend.v1.DetachedWorkUpdate.liveness:type_name -> frontend.v1.DetachedWorkLivenessUpdate
-	21, // 31: frontend.v1.DetachedWorkUpdate.merge:type_name -> frontend.v1.DetachedWorkAgentUpdate
-	22, // 32: frontend.v1.DetachedWorkUpdate.skill:type_name -> frontend.v1.DetachedWorkSkillUpdate
-	27, // 33: frontend.v1.DetachedWorkAgentUpdate.emissions:type_name -> frontend.v1.AgentEmission
-	19, // 34: frontend.v1.DetachedWorkAgentUpdate.fold:type_name -> frontend.v1.DetachedWorkFold
-	23, // 35: frontend.v1.DetachedWorkSkillUpdate.body:type_name -> frontend.v1.DetachedWorkSkillBodyResolved
-	21, // 36: frontend.v1.DetachedWorkSkillUpdate.emissions:type_name -> frontend.v1.DetachedWorkAgentUpdate
-	8,  // 37: frontend.v1.DetachedWorkJournalUpdate.rows:type_name -> frontend.v1.DetachedWorkJournalRow
-	19, // 38: frontend.v1.DetachedWorkJournalUpdate.fold:type_name -> frontend.v1.DetachedWorkFold
-	12, // 39: frontend.v1.DetachedWorkLivenessUpdate.liveness:type_name -> frontend.v1.DetachedWorkLiveness
-	40, // [40:40] is the sub-list for method output_type
-	40, // [40:40] is the sub-list for method input_type
-	40, // [40:40] is the sub-list for extension type_name
-	40, // [40:40] is the sub-list for extension extendee
-	0,  // [0:40] is the sub-list for field type_name
+	24, // 0: frontend.v1.DetachedWork.started:type_name -> conversation.v1.DetachedWorkStarted
+	12, // 1: frontend.v1.DetachedWork.liveness:type_name -> frontend.v1.DetachedWorkLiveness
+	1,  // 2: frontend.v1.DetachedWork.agent:type_name -> frontend.v1.DetachedWorkAgent
+	4,  // 3: frontend.v1.DetachedWork.journal:type_name -> frontend.v1.DetachedWorkJournal
+	5,  // 4: frontend.v1.DetachedWork.shell:type_name -> frontend.v1.DetachedWorkShell
+	6,  // 5: frontend.v1.DetachedWork.unclassified:type_name -> frontend.v1.DetachedWorkUnclassified
+	2,  // 6: frontend.v1.DetachedWork.merge:type_name -> frontend.v1.DetachedWorkMerge
+	3,  // 7: frontend.v1.DetachedWork.skill:type_name -> frontend.v1.DetachedWorkSkill
+	25, // 8: frontend.v1.DetachedWorkAgent.emissions:type_name -> frontend.v1.AgentEmission
+	16, // 9: frontend.v1.DetachedWorkAgent.fold:type_name -> frontend.v1.DetachedWorkFold
+	25, // 10: frontend.v1.DetachedWorkMerge.emissions:type_name -> frontend.v1.AgentEmission
+	16, // 11: frontend.v1.DetachedWorkMerge.fold:type_name -> frontend.v1.DetachedWorkFold
+	25, // 12: frontend.v1.DetachedWorkSkill.emissions:type_name -> frontend.v1.AgentEmission
+	16, // 13: frontend.v1.DetachedWorkSkill.fold:type_name -> frontend.v1.DetachedWorkFold
+	8,  // 14: frontend.v1.DetachedWorkJournal.rows:type_name -> frontend.v1.DetachedWorkJournalRow
+	16, // 15: frontend.v1.DetachedWorkJournal.fold:type_name -> frontend.v1.DetachedWorkFold
+	7,  // 16: frontend.v1.DetachedWorkShell.output:type_name -> frontend.v1.DetachedWorkOutputSpool
+	7,  // 17: frontend.v1.DetachedWorkUnclassified.output:type_name -> frontend.v1.DetachedWorkOutputSpool
+	9,  // 18: frontend.v1.DetachedWorkJournalRow.running:type_name -> frontend.v1.DetachedWorkStepRunning
+	10, // 19: frontend.v1.DetachedWorkJournalRow.done:type_name -> frontend.v1.DetachedWorkStepDone
+	11, // 20: frontend.v1.DetachedWorkJournalRow.failed:type_name -> frontend.v1.DetachedWorkStepFailed
+	13, // 21: frontend.v1.DetachedWorkLiveness.live:type_name -> frontend.v1.DetachedWorkLive
+	14, // 22: frontend.v1.DetachedWorkLiveness.settled:type_name -> frontend.v1.DetachedWorkSettled
+	26, // 23: frontend.v1.DetachedWorkSettled.ended:type_name -> conversation.v1.DetachedWorkEnded
+	15, // 24: frontend.v1.DetachedWorkSettled.killed:type_name -> frontend.v1.DetachedWorkOutcomeKilled
+	18, // 25: frontend.v1.DetachedWorkUpdate.agent:type_name -> frontend.v1.DetachedWorkAgentUpdate
+	21, // 26: frontend.v1.DetachedWorkUpdate.journal:type_name -> frontend.v1.DetachedWorkJournalUpdate
+	22, // 27: frontend.v1.DetachedWorkUpdate.shell:type_name -> frontend.v1.DetachedWorkOutputAppend
+	22, // 28: frontend.v1.DetachedWorkUpdate.unclassified:type_name -> frontend.v1.DetachedWorkOutputAppend
+	23, // 29: frontend.v1.DetachedWorkUpdate.liveness:type_name -> frontend.v1.DetachedWorkLivenessUpdate
+	18, // 30: frontend.v1.DetachedWorkUpdate.merge:type_name -> frontend.v1.DetachedWorkAgentUpdate
+	19, // 31: frontend.v1.DetachedWorkUpdate.skill:type_name -> frontend.v1.DetachedWorkSkillUpdate
+	25, // 32: frontend.v1.DetachedWorkAgentUpdate.emissions:type_name -> frontend.v1.AgentEmission
+	16, // 33: frontend.v1.DetachedWorkAgentUpdate.fold:type_name -> frontend.v1.DetachedWorkFold
+	20, // 34: frontend.v1.DetachedWorkSkillUpdate.body:type_name -> frontend.v1.DetachedWorkSkillBodyResolved
+	18, // 35: frontend.v1.DetachedWorkSkillUpdate.emissions:type_name -> frontend.v1.DetachedWorkAgentUpdate
+	8,  // 36: frontend.v1.DetachedWorkJournalUpdate.rows:type_name -> frontend.v1.DetachedWorkJournalRow
+	16, // 37: frontend.v1.DetachedWorkJournalUpdate.fold:type_name -> frontend.v1.DetachedWorkFold
+	12, // 38: frontend.v1.DetachedWorkLivenessUpdate.liveness:type_name -> frontend.v1.DetachedWorkLiveness
+	39, // [39:39] is the sub-list for method output_type
+	39, // [39:39] is the sub-list for method input_type
+	39, // [39:39] is the sub-list for extension type_name
+	39, // [39:39] is the sub-list for extension extendee
+	0,  // [0:39] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_detached_work_proto_init() }
@@ -2282,12 +2077,7 @@ func file_frontend_v1_detached_work_proto_init() {
 		(*DetachedWorkLiveness_Live)(nil),
 		(*DetachedWorkLiveness_Settled)(nil),
 	}
-	file_frontend_v1_detached_work_proto_msgTypes[14].OneofWrappers = []any{
-		(*DetachedWorkSettled_Done)(nil),
-		(*DetachedWorkSettled_Error)(nil),
-		(*DetachedWorkSettled_Killed)(nil),
-	}
-	file_frontend_v1_detached_work_proto_msgTypes[20].OneofWrappers = []any{
+	file_frontend_v1_detached_work_proto_msgTypes[17].OneofWrappers = []any{
 		(*DetachedWorkUpdate_Agent)(nil),
 		(*DetachedWorkUpdate_Journal)(nil),
 		(*DetachedWorkUpdate_Shell)(nil),
@@ -2296,7 +2086,7 @@ func file_frontend_v1_detached_work_proto_init() {
 		(*DetachedWorkUpdate_Merge)(nil),
 		(*DetachedWorkUpdate_Skill)(nil),
 	}
-	file_frontend_v1_detached_work_proto_msgTypes[22].OneofWrappers = []any{
+	file_frontend_v1_detached_work_proto_msgTypes[19].OneofWrappers = []any{
 		(*DetachedWorkSkillUpdate_Body)(nil),
 		(*DetachedWorkSkillUpdate_Emissions)(nil),
 	}
@@ -2306,7 +2096,7 @@ func file_frontend_v1_detached_work_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_detached_work_proto_rawDesc), len(file_frontend_v1_detached_work_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
