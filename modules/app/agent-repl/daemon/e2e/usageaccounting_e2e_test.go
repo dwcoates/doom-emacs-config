@@ -578,13 +578,13 @@ func replayStoreEvents(t *testing.T, vendorSessionID string) []*corev1.Event {
 			// Keep that replay private until the marker proves the live tail is
 			// registered, so callers never observe a partial subscription.
 			events = append(events, frame)
-		case *corev1.Heartbeat:
+		case *corev1.ConnectionHeartbeat:
 			if frame.GetSentAtMs() <= 0 {
 				t.Fatalf("store replay readiness heartbeat sent_at_ms = %d, want a positive timestamp", frame.GetSentAtMs())
 			}
 			goto subscribed
 		default:
-			t.Fatalf("store replay readiness message = %T, want *corev1.Event or *corev1.Heartbeat", message)
+			t.Fatalf("store replay readiness message = %T, want *corev1.Event or *corev1.ConnectionHeartbeat", message)
 		}
 	}
 
