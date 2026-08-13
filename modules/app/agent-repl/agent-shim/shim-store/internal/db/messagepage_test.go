@@ -6,50 +6,67 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
-// seedOwned ingests one PERSISTENT record and stamps its owning message on the
-// stored row.
+// seedOwned ingests one record BELONGING to the named message and returns the
+// seq the store assigned it.
 //
-// Writing ownership at record-write time is a SEPARATE concern with its own
-// owner; this suite needs only the column's contents, so it seeds them
-// directly rather than depending on that path landing first.
+// It no longer stamps the ownership column by hand: `top_level_message_id` is
+// read off `ExternalEntry.message` at write time, so seeding a real message
+// record exercises the same extraction production uses.
+//
+// The record's produced_at is stamped with the seq it is about to receive.
+// `ExternalEntry` deliberately carries NO position — a page's records are
+// identified by what they say, not by where the store keeps them — so a test
+// that needs to tell one record of a message from another needs some field
+// that differs, and the producer clock is the honest one to use.
 func seedOwned(t *testing.T, d *DB, session, owner string) uint64 {
 	t.Helper()
-	ev := persistentCore(session)
-	if _, err := d.Ingest("test", []*corev1.Event{ev}, nil); err != nil {
+	head, err := d.MaxSeq(session)
+	if err != nil {
+		t.Fatalf("MaxSeq: %v", err)
+	}
+	entry := message(session, owner, owner)
+	entry.External.ProducedAtMs = int64(head + 1)
+	res, err := d.Ingest("test", batch(entry))
+	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
-	seq := ev.GetSeq()
-	if _, err := d.sql.Exec(
-		`UPDATE event SET top_level_message_id = ? WHERE session_id = ? AND seq = ?`,
-		owner, session, seq); err != nil {
-		t.Fatalf("stamping ownership: %v", err)
-	}
-	return seq
+	return res.LastSeq
 }
 
-// seedUnowned ingests a record that composes no message. Its ownership column
-// stays SQL NULL, which is what "unowned" means here.
+// recordStamps reports each record's producer clock, which seedOwned set to the
+// seq the store assigned it.
+func recordStamps(m *protocolv1.StoredMessage) []uint64 {
+	out := make([]uint64, 0, len(m.GetRecords()))
+	for _, r := range m.GetRecords() {
+		out = append(out, uint64(r.GetProducedAtMs()))
+	}
+	return out
+}
+
+// seedUnowned ingests a record that composes no message — a turn boundary.
+// Its ownership column stays SQL NULL, because BookkeepingEntry has no field
+// capable of naming a message.
 func seedUnowned(t *testing.T, d *DB, session string) uint64 {
 	t.Helper()
-	ev := persistentCore(session)
-	if _, err := d.Ingest("test", []*corev1.Event{ev}, nil); err != nil {
+	res, err := d.Ingest("test", batch(bookkeeping(session)))
+	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
-	return ev.GetSeq()
+	return res.LastSeq
 }
 
 // pageMessages reads the page's ten slots in order, stopping at the first
 // empty one, so a test asserts on what the page CARRIES rather than on which
 // field number it landed in.
-func pageMessages(p *corev1.MessagePage) []*corev1.StoredMessage {
-	slots := []*corev1.StoredMessage{
+func pageMessages(p *protocolv1.MessagePage) []*protocolv1.StoredMessage {
+	slots := []*protocolv1.StoredMessage{
 		p.GetMessage_1(), p.GetMessage_2(), p.GetMessage_3(), p.GetMessage_4(), p.GetMessage_5(),
 		p.GetMessage_6(), p.GetMessage_7(), p.GetMessage_8(), p.GetMessage_9(), p.GetMessage_10(),
 	}
-	var out []*corev1.StoredMessage
+	var out []*protocolv1.StoredMessage
 	for _, m := range slots {
 		if m == nil {
 			break
@@ -59,7 +76,7 @@ func pageMessages(p *corev1.MessagePage) []*corev1.StoredMessage {
 	return out
 }
 
-func messageIDs(p *corev1.MessagePage) []string {
+func messageIDs(p *protocolv1.MessagePage) []string {
 	var out []string
 	for _, m := range pageMessages(p) {
 		out = append(out, m.GetMessageId())
@@ -67,11 +84,11 @@ func messageIDs(p *corev1.MessagePage) []string {
 	return out
 }
 
-func headRequest(session string) *corev1.MessagePageRequest {
-	return &corev1.MessagePageRequest{
+func headRequest(session string) *protocolv1.MessagePageRequest {
+	return &protocolv1.MessagePageRequest{
 		RequestId: "r1",
 		SessionId: session,
-		Anchor:    &corev1.MessagePageRequest_Head{Head: &corev1.MessagePageHead{}},
+		Anchor:    &protocolv1.MessagePageRequest_Head{Head: &protocolv1.MessagePageHead{}},
 	}
 }
 
@@ -166,9 +183,9 @@ func TestMessagePageOrdersOneMessagesRecordsOldestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MessagePage: %v", err)
 	}
-	recs := page.GetMessage_1().GetRecords()
-	if len(recs) != 2 || recs[0].GetSeq() != first || recs[1].GetSeq() != second {
-		t.Fatalf("records=%v, want seqs [%d %d] in that order", recs, first, second)
+	stamps := recordStamps(page.GetMessage_1())
+	if len(stamps) != 2 || stamps[0] != first || stamps[1] != second {
+		t.Fatalf("records=%v, want seqs [%d %d] in that order", stamps, first, second)
 	}
 }
 
@@ -210,9 +227,9 @@ func TestMessagePageExcludesUnownedRecordsFromAMessagesRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MessagePage: %v", err)
 	}
-	recs := page.GetMessage_1().GetRecords()
-	if len(recs) != 1 || recs[0].GetSeq() != owned {
-		t.Fatalf("message carried %d records, want only the owned seq=%d", len(recs), owned)
+	stamps := recordStamps(page.GetMessage_1())
+	if len(stamps) != 1 || stamps[0] != owned {
+		t.Fatalf("message carried records %v, want only the owned seq=%d", stamps, owned)
 	}
 }
 
@@ -229,9 +246,9 @@ func TestMessagePageHeadResolvesWithoutTheCallerNamingASeq(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MessagePage: %v", err)
 	}
-	recs := page.GetMessage_1().GetRecords()
-	if len(recs) != 1 || recs[0].GetSeq() != newest {
-		t.Fatalf("head page newest record=%v, want seq=%d", recs, newest)
+	stamps := recordStamps(page.GetMessage_1())
+	if len(stamps) != 1 || stamps[0] != newest {
+		t.Fatalf("head page newest record=%v, want seq=%d", stamps, newest)
 	}
 }
 
@@ -276,10 +293,10 @@ func TestMessagePageDoesNotSkipMessagesBeneathAWideSpanningMessage(t *testing.T)
 	if err != nil {
 		t.Fatalf("MessagePage head: %v", err)
 	}
-	second, err := d.MessagePage(context.Background(), &corev1.MessagePageRequest{
+	second, err := d.MessagePage(context.Background(), &protocolv1.MessagePageRequest{
 		RequestId: "r2",
 		SessionId: "s1",
-		Anchor:    &corev1.MessagePageRequest_BeforeSeq{BeforeSeq: first.GetLastPageSeq()},
+		Anchor:    &protocolv1.MessagePageRequest_BeforeSeq{BeforeSeq: first.GetLastPageSeq()},
 	})
 
 	// Assert: every buried message is delivered by one of the two pages.
@@ -312,10 +329,10 @@ func TestMessagePageDoesNotRedeliverAWideSpanningMessage(t *testing.T) {
 	}
 
 	// Act
-	second, err := d.MessagePage(context.Background(), &corev1.MessagePageRequest{
+	second, err := d.MessagePage(context.Background(), &protocolv1.MessagePageRequest{
 		RequestId: "r2",
 		SessionId: "s1",
-		Anchor:    &corev1.MessagePageRequest_BeforeSeq{BeforeSeq: first.GetLastPageSeq()},
+		Anchor:    &protocolv1.MessagePageRequest_BeforeSeq{BeforeSeq: first.GetLastPageSeq()},
 	})
 
 	// Assert
@@ -358,10 +375,10 @@ func TestMessagePageInterleavedHistoryPartitionsAcrossEveryPage(t *testing.T) {
 		if page.GetFloor() != nil {
 			break
 		}
-		req = &corev1.MessagePageRequest{
+		req = &protocolv1.MessagePageRequest{
 			RequestId: "rN",
 			SessionId: "s1",
-			Anchor:    &corev1.MessagePageRequest_BeforeSeq{BeforeSeq: page.GetLastPageSeq()},
+			Anchor:    &protocolv1.MessagePageRequest_BeforeSeq{BeforeSeq: page.GetLastPageSeq()},
 		}
 	}
 
@@ -396,10 +413,10 @@ func TestMessagePageBeforeSeqContinuesWithoutOverlapOrGap(t *testing.T) {
 	}
 
 	// Act: continue with the served last_page_seq VERBATIM.
-	second, err := d.MessagePage(context.Background(), &corev1.MessagePageRequest{
+	second, err := d.MessagePage(context.Background(), &protocolv1.MessagePageRequest{
 		RequestId: "r2",
 		SessionId: "s1",
-		Anchor:    &corev1.MessagePageRequest_BeforeSeq{BeforeSeq: first.GetLastPageSeq()},
+		Anchor:    &protocolv1.MessagePageRequest_BeforeSeq{BeforeSeq: first.GetLastPageSeq()},
 	})
 
 	// Assert: the two pages partition the fifteen messages exactly.
@@ -539,9 +556,9 @@ func TestMessagePageRefusesARequestWithNoSession(t *testing.T) {
 	d := openTemp(t)
 
 	// Act
-	_, err := d.MessagePage(context.Background(), &corev1.MessagePageRequest{
+	_, err := d.MessagePage(context.Background(), &protocolv1.MessagePageRequest{
 		RequestId: "r1",
-		Anchor:    &corev1.MessagePageRequest_Head{Head: &corev1.MessagePageHead{}},
+		Anchor:    &protocolv1.MessagePageRequest_Head{Head: &protocolv1.MessagePageHead{}},
 	})
 
 	// Assert
@@ -556,7 +573,7 @@ func TestMessagePageRefusesARequestWithNoAnchor(t *testing.T) {
 	d := openTemp(t)
 
 	// Act
-	_, err := d.MessagePage(context.Background(), &corev1.MessagePageRequest{RequestId: "r1", SessionId: "s1"})
+	_, err := d.MessagePage(context.Background(), &protocolv1.MessagePageRequest{RequestId: "r1", SessionId: "s1"})
 
 	// Assert
 	if err == nil {
@@ -568,7 +585,7 @@ func TestMessagePageSurfacesACorruptRecord(t *testing.T) {
 	// Arrange
 	d := openTemp(t)
 	seq := seedOwned(t, d, "s1", "m1")
-	if _, err := d.sql.Exec(`UPDATE event SET payload = X'00' WHERE session_id = 's1' AND seq = ?`, seq); err != nil {
+	if _, err := d.sql.Exec(`UPDATE entry SET payload = X'00' WHERE session_id = 's1' AND seq = ?`, seq); err != nil {
 		t.Fatalf("corrupting fixture row: %v", err)
 	}
 
@@ -619,8 +636,8 @@ func TestMessagePageOwnerSelectRunsOnItsIndexWithNoSort(t *testing.T) {
 	plan := queryPlan(t, d, ownerSelectSQL, "s1", uint64(1<<62))
 
 	// Assert
-	if !strings.Contains(plan, "event_message_page") {
-		t.Fatalf("owner selection plan does not use event_message_page: %s", plan)
+	if !strings.Contains(plan, "entry_message_page") {
+		t.Fatalf("owner selection plan does not use entry_message_page: %s", plan)
 	}
 	if strings.Contains(plan, "TEMP B-TREE") {
 		t.Fatalf("owner selection plan sorts instead of walking the index: %s", plan)
@@ -640,8 +657,8 @@ func TestMessagePageAlreadyServedCheckRunsOnItsOwnerIndex(t *testing.T) {
 	plan := queryPlan(t, d, ownerAboveAnchorSQL, "s1", "m01", uint64(1))
 
 	// Assert
-	if !strings.Contains(plan, "event_message_owner") {
-		t.Fatalf("already-served check does not use event_message_owner: %s", plan)
+	if !strings.Contains(plan, "entry_message_owner") {
+		t.Fatalf("already-served check does not use entry_message_owner: %s", plan)
 	}
 	if strings.Contains(plan, "TEMP B-TREE") {
 		t.Fatalf("already-served check sorts instead of seeking the index: %s", plan)
@@ -651,10 +668,10 @@ func TestMessagePageAlreadyServedCheckRunsOnItsOwnerIndex(t *testing.T) {
 func TestSetPageSlotRefusesAnEleventhMessage(t *testing.T) {
 	// Arrange: the schema declares ten slots, so an eleventh has nowhere to
 	// go. It must fail loudly rather than be dropped into a short page.
-	page := &corev1.MessagePage{}
+	page := &protocolv1.MessagePage{}
 
 	// Act
-	err := setPageSlot(page, MessagePageSize, &corev1.StoredMessage{MessageId: "overflow"})
+	err := setPageSlot(page, MessagePageSize, &protocolv1.StoredMessage{MessageId: "overflow"})
 
 	// Assert
 	if err == nil {
