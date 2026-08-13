@@ -19,6 +19,22 @@
 // page in flight across the transition is handled by request_id, which a client
 // already uses to apply only the pages it awaits.
 //
+// THE CLIENT-ANCHORED SURFACE IS GONE, AND THAT IS WHY THE CLAIM ABOVE IS
+// TRUE. ConversationPageCmd and its page — tail/before anchors, an opaque
+// cursor, and a fence the client echoed back — have been deleted outright
+// rather than deprecated, because two ways to obtain history is exactly one
+// way for a client's idea of where it is to diverge from the daemon's. A
+// client that holds no position cannot desync; a position the client echoes
+// back is only the daemon checking itself against its own state, which it
+// could have read directly.
+//
+// WHAT WAS LOST, AND ACCEPTED: ARBITRARY ANCHORING. ConversationPageBefore
+// could say "the page before THIS one"; FirstPageCmd and NextPageCmd express
+// only "the most recent" and "one older". Deep-linking to an arbitrary point
+// in history therefore has no verb here. That is accepted: no frontend asked
+// for it, and restoring it means handing the client a position again, which is
+// the whole thing this contract forbids.
+//
 // ON THE WEBAPP BOUNCE, EXPLICITLY ACCEPTED. A frontend that bounces calls
 // FirstPageCmd and starts from the bottom. Earlier pages are re-reached by
 // paging back. Scroll depth is NOT preserved across a bounce, and no
@@ -31,8 +47,6 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { PageScope } from "./conversation-page_pb";
-import { file_frontend_v1_conversation_page } from "./conversation-page_pb";
 import type { Message as Message$1 } from "./feed_pb";
 import { file_frontend_v1_feed } from "./feed_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -41,7 +55,88 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/conversation-history.proto.
  */
 export const file_frontend_v1_conversation_history: GenFile = /*@__PURE__*/
-  fileDesc("CiZmcm9udGVuZC92MS9jb252ZXJzYXRpb24taGlzdG9yeS5wcm90bxILZnJvbnRlbmQudjEiSAoMRmlyc3RQYWdlQ21kEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgVzY29wZRgCIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZSJHCgtOZXh0UGFnZUNtZBIRCgl3b3Jrc3BhY2UYASABKAkSJQoFc2NvcGUYAiABKAsyFi5mcm9udGVuZC52MS5QYWdlU2NvcGUi3QQKF0NvbnZlcnNhdGlvbkhpc3RvcnlQYWdlEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpyZXF1ZXN0X2lkGAIgASgJEicKCW1lc3NhZ2VfMRgDIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV8yGAQgASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzMYBSABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEicKCW1lc3NhZ2VfNBgGIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV81GAcgASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzYYCCABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEicKCW1lc3NhZ2VfNxgJIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV84GAogASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzkYCyABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEigKCm1lc3NhZ2VfMTAYDCABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEisKBG1vcmUYDSABKAsyGy5mcm9udGVuZC52MS5IaXN0b3J5SGFzTW9yZUgAEiwKBXN0YXJ0GA4gASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUF0U3RhcnRIABIVCg1saXZlX2pvaW5fc2VxGA8gASgEQg4KDGNvbnRpbnVhdGlvbiIQCg5IaXN0b3J5SGFzTW9yZSIQCg5IaXN0b3J5QXRTdGFydEIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_frontend_v1_conversation_page, file_frontend_v1_feed]);
+  fileDesc("CiZmcm9udGVuZC92MS9jb252ZXJzYXRpb24taGlzdG9yeS5wcm90bxILZnJvbnRlbmQudjEicAoJUGFnZVNjb3BlEioKBGZlZWQYASABKAsyGi5mcm9udGVuZC52MS5QYWdlU2NvcGVGZWVkSAASLgoGaW5zaWRlGAIgASgLMhwuZnJvbnRlbmQudjEuUGFnZVNjb3BlSW5zaWRlSABCBwoFc2NvcGUiDwoNUGFnZVNjb3BlRmVlZCIvCg9QYWdlU2NvcGVJbnNpZGUSHAoUY29udGFpbmVyX21lc3NhZ2VfaWQYASABKAkiSAoMRmlyc3RQYWdlQ21kEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgVzY29wZRgCIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZSJHCgtOZXh0UGFnZUNtZBIRCgl3b3Jrc3BhY2UYASABKAkSJQoFc2NvcGUYAiABKAsyFi5mcm9udGVuZC52MS5QYWdlU2NvcGUiogUKF0NvbnZlcnNhdGlvbkhpc3RvcnlQYWdlEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpyZXF1ZXN0X2lkGAIgASgJEicKCW1lc3NhZ2VfMRgDIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV8yGAQgASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzMYBSABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEicKCW1lc3NhZ2VfNBgGIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV81GAcgASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzYYCCABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEicKCW1lc3NhZ2VfNxgJIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV84GAogASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzkYCyABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEigKCm1lc3NhZ2VfMTAYDCABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEisKBG1vcmUYDSABKAsyGy5mcm9udGVuZC52MS5IaXN0b3J5SGFzTW9yZUgAEiwKBXN0YXJ0GA4gASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUF0U3RhcnRIABIVCg1saXZlX2pvaW5fc2VxGA8gASgEEiUKBXNjb3BlGBAgASgLMhYuZnJvbnRlbmQudjEuUGFnZVNjb3BlEhwKFGFuY2VzdG9yX21lc3NhZ2VfaWRzGBEgAygJQg4KDGNvbnRpbnVhdGlvbiIQCg5IaXN0b3J5SGFzTW9yZSIQCg5IaXN0b3J5QXRTdGFydEIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_frontend_v1_feed]);
+
+/**
+ * Which container a page walks.
+ *
+ * A oneof rather than an optional container id: "the feed" and "inside message
+ * X" are the only two answers, and an empty string standing for the feed is
+ * exactly the ambiguity conversation.v1.MessageParent exists to forbid.
+ *
+ * @generated from message frontend.v1.PageScope
+ */
+export type PageScope = Message<"frontend.v1.PageScope"> & {
+  /**
+   * @generated from oneof frontend.v1.PageScope.scope
+   */
+  scope: {
+    /**
+     * Records whose parent is conversation.v1.MessageParentRoot.
+     *
+     * @generated from field: frontend.v1.PageScopeFeed feed = 1;
+     */
+    value: PageScopeFeed;
+    case: "feed";
+  } | {
+    /**
+     * Records whose parent is conversation.v1.MessageParentInside this message.
+     *
+     * @generated from field: frontend.v1.PageScopeInside inside = 2;
+     */
+    value: PageScopeInside;
+    case: "inside";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message frontend.v1.PageScope.
+ * Use `create(PageScopeSchema)` to create a new message.
+ */
+export const PageScopeSchema: GenMessage<PageScope> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_conversation_history, 0);
+
+/**
+ * The top-level conversation: everything the feed renders as a standalone row.
+ *
+ * An empty message rather than a bool, so that naming the feed and naming a
+ * container are the same act at the same cost, and a client never has to choose
+ * between two spellings of "where".
+ *
+ * @generated from message frontend.v1.PageScopeFeed
+ */
+export type PageScopeFeed = Message<"frontend.v1.PageScopeFeed"> & {
+};
+
+/**
+ * Describes the message frontend.v1.PageScopeFeed.
+ * Use `create(PageScopeFeedSchema)` to create a new message.
+ */
+export const PageScopeFeedSchema: GenMessage<PageScopeFeed> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_conversation_history, 1);
+
+/**
+ * The inside of one message: the records that message contains.
+ *
+ * @generated from message frontend.v1.PageScopeInside
+ */
+export type PageScopeInside = Message<"frontend.v1.PageScopeInside"> & {
+  /**
+   * The containing message. It is itself a conversation.v1.MessageEntry, so a
+   * subagent inside a subagent is named the same way at every depth — the
+   * recursion lives in the DATA, not in this type.
+   *
+   * @generated from field: string container_message_id = 1;
+   */
+  containerMessageId: string;
+};
+
+/**
+ * Describes the message frontend.v1.PageScopeInside.
+ * Use `create(PageScopeInsideSchema)` to create a new message.
+ */
+export const PageScopeInsideSchema: GenMessage<PageScopeInside> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_conversation_history, 2);
 
 /**
  * Ask for the MOST RECENT page, and reset this reader's position to it.
@@ -80,7 +175,7 @@ export type FirstPageCmd = Message<"frontend.v1.FirstPageCmd"> & {
  * Use `create(FirstPageCmdSchema)` to create a new message.
  */
 export const FirstPageCmdSchema: GenMessage<FirstPageCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_conversation_history, 0);
+  messageDesc(file_frontend_v1_conversation_history, 3);
 
 /**
  * Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
@@ -117,7 +212,7 @@ export type NextPageCmd = Message<"frontend.v1.NextPageCmd"> & {
  * Use `create(NextPageCmdSchema)` to create a new message.
  */
 export const NextPageCmdSchema: GenMessage<NextPageCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_conversation_history, 1);
+  messageDesc(file_frontend_v1_conversation_history, 4);
 
 /**
  * AT MOST TEN messages, oldest first.
@@ -249,6 +344,35 @@ export type ConversationHistoryPage = Message<"frontend.v1.ConversationHistoryPa
    * @generated from field: uint64 live_join_seq = 15;
    */
   liveJoinSeq: bigint;
+
+  /**
+   * WHICH CONTAINER this page walks, STATED rather than left to be inferred,
+   * so a client can never mistake a page of a subagent's insides for a page of
+   * the feed.
+   *
+   * It is the ECHO of the requested scope, alongside `request_id`. Together
+   * with the `parent` each returned record carries, it is how a client VERIFIES
+   * that the page it got is the page it asked for: the echo proves what was
+   * ASKED, the per-record parent proves what was RECEIVED.
+   *
+   * @generated from field: frontend.v1.PageScope scope = 16;
+   */
+  scope?: PageScope | undefined;
+
+  /**
+   * The containers this page's scope sits inside, OUTERMOST FIRST. Empty when
+   * the scope is the feed.
+   *
+   * STATED BY THE DAEMON BECAUSE IT ALREADY WALKED THE CHAIN while resolving
+   * the scope. A cold open deep-linked into a nested container holds no message
+   * map yet and needs the ancestors to render the surrounding cards; walking up
+   * one `parent` hop at a time would cost a round trip per level to learn what
+   * the resolver already knew. It cannot disagree with the parent chain because
+   * it is derived from that chain in the same pass.
+   *
+   * @generated from field: repeated string ancestor_message_ids = 17;
+   */
+  ancestorMessageIds: string[];
 };
 
 /**
@@ -256,7 +380,7 @@ export type ConversationHistoryPage = Message<"frontend.v1.ConversationHistoryPa
  * Use `create(ConversationHistoryPageSchema)` to create a new message.
  */
 export const ConversationHistoryPageSchema: GenMessage<ConversationHistoryPage> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_conversation_history, 2);
+  messageDesc(file_frontend_v1_conversation_history, 5);
 
 /**
  * Older history remains; call NextPageCmd.
@@ -271,7 +395,7 @@ export type HistoryHasMore = Message<"frontend.v1.HistoryHasMore"> & {
  * Use `create(HistoryHasMoreSchema)` to create a new message.
  */
 export const HistoryHasMoreSchema: GenMessage<HistoryHasMore> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_conversation_history, 3);
+  messageDesc(file_frontend_v1_conversation_history, 6);
 
 /**
  * There is nothing older. A FACT the daemon established by reading to the floor.
@@ -286,5 +410,5 @@ export type HistoryAtStart = Message<"frontend.v1.HistoryAtStart"> & {
  * Use `create(HistoryAtStartSchema)` to create a new message.
  */
 export const HistoryAtStartSchema: GenMessage<HistoryAtStart> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_conversation_history, 4);
+  messageDesc(file_frontend_v1_conversation_history, 7);
 
