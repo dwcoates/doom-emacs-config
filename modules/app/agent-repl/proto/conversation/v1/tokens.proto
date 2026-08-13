@@ -56,8 +56,19 @@ message TokenUsage {
   // What the prompt cache did not serve: the expensive buckets, together.
   TokenCacheMisses input_misses = 2;
   // Generated tokens, including extended thinking where the API includes it.
-  // There is no output cache, so this is a plain total with no partition.
+  // There is no output cache, so no cache partition applies; this remains the
+  // TOTAL, and `output_thinking_tokens` below names a part of it.
   uint64 output_tokens = 3;
+
+  // The part of `output_tokens` the vendor attributed to extended thinking.
+  //
+  // A PARTITION OF output_tokens, NOT AN ADDITION TO IT — never sum the two.
+  // Carried because the old narrow usage projection could not express it, and a
+  // record built without it is durably unfaithful to what the vendor reported.
+  //
+  // Zero when the vendor reported no thinking tokens, which is also what a
+  // response with no extended thinking reports.
+  uint64 output_thinking_tokens = 4;
 }
 
 // The prompt input this request did not have to process, because the prompt

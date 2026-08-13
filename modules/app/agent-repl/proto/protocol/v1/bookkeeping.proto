@@ -8,6 +8,8 @@ syntax = "proto3";
 
 package protocol.v1;
 
+import "conversation/v1/tokens.proto";
+
 option go_package = "agentrepl/proto/protocol/v1;protocolv1";
 
 // A fact about the session that renders as nothing.
@@ -62,6 +64,11 @@ message BookkeepingEntry {
     // producer-observed, durable, and a fact ABOUT the session — bookkeeping by
     // this file's own test.
     AccountUsageObservation account_usage_observation = 9;
+
+    // The vendor's settled usage for a response whose own record states only
+    // the interim output count. It corrects an already-written measurement
+    // rather than saying anything the conversation consists of.
+    ResponseUsageCorrected response_usage_corrected = 10;
   }
 }
 
@@ -283,6 +290,34 @@ message ResponseTiming {
   int64 first_token_ms = 2;
   // Time to the last, which is what the work actually cost.
   int64 total_ms = 3;
+}
+
+// The vendor's FINAL usage for one response, correcting the interim figure the
+// response's own record carries.
+//
+// WHY A SEPARATE RECORD RATHER THAN A FIELD ON THE RESPONSE. The two facts come
+// from different planes and at different times. A response's own usage is what
+// the vendor stated when the message OPENED — final input and cache counters,
+// interim output — and the file plane writes it. The final output count arrives
+// later, on a stream frame, after the response is already recorded. A producer
+// that could only state usage on the response would have to either withhold the
+// response until the turn ended or restate it, and neither is available to it.
+//
+// IT IS BOOKKEEPING BECAUSE IT MEASURES THE CONVERSATION RATHER THAN
+// PARTICIPATING IN IT — the same test that puts ResponseTiming here.
+message ResponseUsageCorrected {
+  // Which response this corrects, keyed by the ANTHROPIC message id (`msg_…`).
+  //
+  // The vendor's own delta frame is ANONYMOUS — the identity arrives once, on
+  // the frame that opened the message — so a producer relaying a correction must
+  // name what it corrects. Never the SDK envelope uuid, which is minted fresh
+  // per emission.
+  string api_message_id = 1;
+
+  // The corrected figures, whole. REPLACES the response's own usage rather than
+  // adding to it: this is the same accounting restated with the output side
+  // settled, not a delta to apply.
+  conversation.v1.TokenUsage usage = 2;
 }
 
 // A diagnostic about the READER rather than the read.
