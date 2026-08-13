@@ -52,24 +52,11 @@ message MessageEntry {
   //
   // Here an unresolved parent has no legal record to occupy. The producer must
   // state which case it is, or fail.
-  MessageParent parent = 5;
+  MessageParent parent = 3;
 
   // Who this message is FROM, resolved by the producer rather than inferred by
   // a reader from which payload arm is set.
   MessageAuthor author = 4;
-
-  // 3 was parent_message_id, a bare string whose empty value meant both "feed
-  // row" and "unresolved". Replaced by `parent` (5), a oneof.
-  reserved 3;
-  reserved "parent_message_id";
-
-  // 15 was daemon_answered_command. It was UNBUILDABLE: only the daemon can
-  // observe a command it answered itself, and the daemon has no store write
-  // path — so the arm named a record nothing could ever produce. It belongs on
-  // the frontend surface, where frontend.v1.DaemonInterceptedCommandItem
-  // already carries it as a message the daemon mints and pushes.
-  reserved 15;
-  reserved "daemon_answered_command";
 
   // What this record says about the message it belongs to. The three groups
   // below are a reading aid, not a schema distinction: every arm carries the
@@ -78,48 +65,48 @@ message MessageEntry {
     // ---- Records that OPEN the message they name ----
 
     // Something a person typed. The opening of a turn.
-    UserSaid user_said = 10;
+    UserSaid user_said = 5;
 
     // Something the agent said: its content blocks, and the usage its response
     // reported.
-    AgentSaid agent_said = 11;
+    AgentSaid agent_said = 6;
 
     // A permission the agent ASKED FOR. It is a message because the agent
     // really did ask and the user really does answer — it is a conversational
     // act, not a dialog the daemon invented.
-    PermissionAsked permission_asked = 12;
+    PermissionAsked permission_asked = 7;
 
     // Something went wrong, stated as a card the user reads and acts on.
-    FailureRaised failure_raised = 13;
+    FailureRaised failure_raised = 8;
 
     // The conversation was CUT here. It is a message because a reader must see
     // where, rather than merely finding the history shorter than they left it.
-    ContextCut context_cut = 14;
+    ContextCut context_cut = 9;
 
     // Work that DETACHED from the turn and now runs alongside it — a subagent,
     // a background shell, a workflow. It is a feed row naming itself, so a page
     // of ten rows is ten bounded things rather than ten trees.
-    DetachedWorkStarted detached_work_started = 16;
+    DetachedWorkStarted detached_work_started = 10;
 
     // ---- Records that UPDATE a message already opened ----
     // They carry the same message_id, so attaching them needs no correlation
     // and costs no additional page slot.
 
     // Output accumulating into detached work already open.
-    DetachedWorkProgressed detached_work_progressed = 20;
+    DetachedWorkProgressed detached_work_progressed = 11;
 
     // A journal step observed in detached workflow work already open. It
     // carries the message_id of the detached work it belongs to, exactly as
     // detached_work_progressed does, so it folds onto that card without
     // correlation. Structured rather than folded into the progress string,
     // because the producer read it structured.
-    WorkflowStepObserved workflow_step_observed = 25;
+    WorkflowStepObserved workflow_step_observed = 12;
 
     // Detached work reached an end, with the outcome it reached.
-    DetachedWorkEnded detached_work_ended = 21;
+    DetachedWorkEnded detached_work_ended = 13;
 
     // The user answered a permission the agent asked for.
-    PermissionAnswered permission_answered = 22;
+    PermissionAnswered permission_answered = 14;
 
     // A tool the agent called returned. It carries the message_id of the
     // message that MADE the call, so the result folds onto that tool card.
@@ -128,18 +115,18 @@ message MessageEntry {
     // MESSAGE is from, and the message is the agent's response. The vendor
     // files tool results under user-role records, which is the accident this
     // arm exists to not inherit.
-    ToolReturned tool_returned = 23;
+    ToolReturned tool_returned = 15;
 
     // A skill file's contents, resolved onto the skill's own message. Replaces
     // whole rather than appending.
-    SkillBodyResolved skill_body_resolved = 24;
+    SkillBodyResolved skill_body_resolved = 16;
 
     // ---- Records that COMPOSE a message, arriving before it is whole ----
 
     // A fragment of content still arriving, handed straight to the daemon by
     // the stream plane. The completed message the file plane writes later
     // REPLACES the preview rather than appending beside it.
-    ContentArriving content_arriving = 30;
+    ContentArriving content_arriving = 17;
   }
 }
 
@@ -185,12 +172,11 @@ message MessageAuthor {
     AuthorDetachedAgent detached_agent = 3;
   }
 
-  // 4 was `daemon`, for things the daemon answered or synthesized. It went for
-  // the same reason daemon_answered_command did: the daemon writes no entries,
-  // so no record in this package can have it as an author. Everything it would
-  // have covered is minted on the frontend surface instead.
-  reserved 4;
-  reserved "daemon";
+  // THE DAEMON IS NOT AN AUTHOR HERE, and there is no arm for it. Every record
+  // in this package is written by a producer observing the session, and the
+  // daemon has no store write path — so nothing it answers or synthesizes can
+  // ever reach this surface. Those messages are minted on the frontend surface
+  // instead, where the daemon pushes them directly.
 }
 
 // A person, typing into the session.
