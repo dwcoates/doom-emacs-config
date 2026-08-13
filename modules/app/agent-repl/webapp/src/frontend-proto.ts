@@ -114,10 +114,16 @@ import {
   type AsyncBubbleDelta,
   type DetachedWorkPackaging,
 } from "./async-bubble.js";
-import { DetachedWorkDeltaSchema } from "../../proto/gen/ts/frontend/v1/feed_pb";
+import {
+  CompactionSummaryItemSchema,
+  DetachedWorkDeltaSchema,
+  SessionInitRowSchema,
+  SessionInitViewSchema,
+} from "../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   unwrapAgentEmission,
   type ResponseUsageStamp,
+  type ToolOutcome,
 } from "./agent-emission.js";
 import {
   EMPTY_KEY_SET,
@@ -789,6 +795,10 @@ export const MESSAGE_ARMS = [
   // as `DetachedWorkUpdate` addressed to this message's uuid, so a detached
   // agent emitting a thousand lines inserts ONE row here, not a thousand.
   "detachedWork",
+  // The purple-washed summary block a compaction leaves behind. ITS OWN ARM,
+  // so the wash is a stated kind rather than an inference off some other
+  // payload's shape.
+  "compactionSummary",
 ] as const;
 export type MessageArm = (typeof MESSAGE_ARMS)[number];
 
@@ -956,6 +966,15 @@ export interface MessageFrame {
    * and free-text prose that two frontends would eventually read differently.
    */
   spawnedMessageId?: string;
+  /**
+   * The TOOL CALL'S TYPED OUTCOME (`AgentToolOutcome`), decoded. Present
+   * exactly on the `toolUseResult` arm.
+   *
+   * Carried beside the payload because it IS the payload now: the vendor union
+   * this arm used to wrap is gone, and what is left is the detachment's own
+   * facts — which call it belongs to, and whether work started or ended.
+   */
+  toolOutcome?: ToolOutcome;
   /**
    * The DETACHED WORK this message IS, decoded. Present exactly on the
    * `detachedWork` arm.
@@ -1172,10 +1191,29 @@ export interface HeartbeatView {
 }
 
 /**
- * The session's retained `data.v1.SystemInit` (slash commands, tools, skills,
- * model, auth source, …), pushed on attach + carried in `StateSnapshot.inits`
- * (S9). `init` is adopted by shape — a large, additively-growing message the
- * status panel reads leniently. Replaces the HTTP `/status` snapshot source.
+ * One row of the `/status` panel: a label and the value beside it, both
+ * resolved by the daemon.
+ *
+ * The value is a STRING on purpose, so no renderer reformats what the daemon
+ * decided it says. Neither field is ever empty on the wire — the daemon OMITS
+ * a row it has no value for rather than pushing a blank one — so a blank of
+ * either is a malformed row and throws.
+ */
+export interface SessionInitRow {
+  label: string;
+  value: string;
+}
+
+/**
+ * The `/status` panel's rows, in render order, already labelled and already
+ * stringified — pushed on attach and carried in `StateSnapshot.inits`.
+ *
+ * `init`, the vendor's whole init record, is RESERVED on the wire by name and
+ * number: nothing on this surface carries a vendor payload any more, and the
+ * five derivations the panel used to run against it are gone with it.
+ *
+ * EMPTY `rows` means no init has landed yet, which the panel draws as the rows
+ * it owns and nothing more.
  */
 export interface SessionInitView {
   workspace: string;
@@ -1187,7 +1225,24 @@ export interface SessionInitView {
    * arrives only on `WorkspaceState`.
    */
   fence: string;
-  init: JsonObject;
+  rows: SessionInitRow[];
+}
+
+/**
+ * `frontend.v1.CompactionSummaryItem` — the summary the daemon recorded after
+ * a compaction, and what it cost to produce.
+ */
+export interface CompactionSummary {
+  /** The summary text, verbatim markdown. */
+  summary: string;
+  /** When the compaction completed, unix millis. */
+  compactedAtMs: number;
+  /**
+   * The resolved expensive-input cost of producing this summary, and -1 when
+   * the result's usage was UNAVAILABLE. Never fabricated as 0, and never
+   * rendered as one: -1 prints no figure at all.
+   */
+  expensiveInputTokens: number;
 }
 
 export interface TaskEntry {
@@ -2179,9 +2234,9 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
  * reason. Everything else maps to a supported visual (`sessionInit` feeds the
  * /status panel + slash-menu source). The state adapter routes a listed
  * variant down its typed, counted, log-once ignore path. Unsupported
- * CONVERSATION-ITEM arms/blocks (a `toolUseResult` with no correlation key, a
- * `signature` content delta, an image content block) are ignored dynamically
- * by the adapter the same way, since that set is the daemon's to grow.
+ * CONVERSATION-ITEM arms/blocks (a `signature` content delta, an image content
+ * block) are ignored dynamically by the adapter the same way, since that set
+ * is the daemon's to grow.
  */
 export const UNSUPPORTED_SHAPES: ReadonlyMap<string, string> = new Map<
   string,
@@ -2206,6 +2261,12 @@ export const UNSUPPORTED_SHAPES: ReadonlyMap<string, string> = new Map<
   [
     "unknownArm",
     "a newer daemon's additive frame arm this bundle predates; counted and ignored",
+  ],
+  [
+    "conversation-item:toolUseResult:no-detachment",
+    "a tool outcome whose detachment oneof is ABSENT, which is the daemon " +
+      "stating the call returned ordinarily and detached nothing; there is no " +
+      "chip to draw and no content the user is missing",
   ],
 ]);
 
@@ -3382,6 +3443,7 @@ function decodeMessage(v: unknown, ctx: string): MessageFrame {
     thinkingOrigin?: { apiMessageId: string; blockIndex: number };
     spawnedMessageId?: string;
     usageStamp?: ResponseUsageStamp;
+    toolOutcome?: ToolOutcome;
   } =
     armKeys[0] === AGENT_EMISSION_ENVELOPE
       ? unwrapAgentEmission(o[AGENT_EMISSION_ENVELOPE], `${ctx}.agent`)
@@ -3457,6 +3519,10 @@ function decodeMessage(v: unknown, ctx: string): MessageFrame {
   // ABSENT: a response that carried no usage record gets no stamp, and the
   // corner then renders no figures rather than zeros.
   if (selected.usageStamp !== undefined) frame.usageStamp = selected.usageStamp;
+  // The TYPED OUTCOME, carried through decoded. It is the chip's whole content
+  // — there is no separate chip arm — so an arm that carries one and a frame
+  // that drops it would render a detachment as an ordinary settled call.
+  if (selected.toolOutcome !== undefined) frame.toolOutcome = selected.toolOutcome;
   // THE CLASSIFICATION VERDICT, carried through whole. A tool card learns the
   // message its call detached work onto by MATCHING this string against that
   // message's uuid; it never derives one. Empty means "this call detached
@@ -4142,18 +4208,50 @@ function decodeTypingDelta(v: unknown): TypingDelta {
   return td;
 }
 
-const SESSION_INIT_VIEW_KEYS = new Set(["workspace", "fence", "init"]);
+const SESSION_INIT_VIEW_KEYS = generatedFieldSet<
+  keyof typeof SessionInitViewSchema.field
+>()("workspace", "fence", "rows");
+const SESSION_INIT_ROW_KEYS = generatedFieldSet<
+  keyof typeof SessionInitRowSchema.field
+>()("label", "value");
+
+/**
+ * One `/status` row, decoded STRICTLY like every other `frontend.v1`-owned
+ * message.
+ *
+ * BOTH FIELDS ARE LOAD-BEARING and neither is ever blank on the wire: the
+ * daemon omits a row it has no value for rather than pushing an empty one. A
+ * blank of either is therefore a producer fault, and it throws rather than
+ * rendering a labelless or valueless line the reader would have to interpret.
+ */
+function decodeSessionInitRow(v: unknown, ctx: string): SessionInitRow {
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, SESSION_INIT_ROW_KEYS, ctx);
+  const label = str(o, "label", ctx);
+  const value = str(o, "value", ctx);
+  if (label === "") {
+    throw new Error(`frontend-proto: ${ctx} missing required \`label\``);
+  }
+  if (value === "") {
+    throw new Error(`frontend-proto: ${ctx} missing required \`value\``);
+  }
+  return { label, value };
+}
+
 function decodeSessionInitView(v: unknown): SessionInitView {
   const o = ensureObject(v, "SessionInitView");
   rejectUnknown(o, SESSION_INIT_VIEW_KEYS, "SessionInitView");
   const siv: SessionInitView = {
     workspace: str(o, "workspace", "SessionInitView"),
     fence: str(o, "fence", "SessionInitView"),
-    // The SystemInit is adopted by shape (large, additive); an absent init is {}.
-    init:
-      o.init === undefined || o.init === null
-        ? {}
-        : ensureObject(o.init, "SessionInitView.init"),
+    // EMPTY IS A STATEMENT, not a hole: no init has landed yet, and the panel
+    // draws the rows it owns and nothing more.
+    rows:
+      o.rows === undefined || o.rows === null
+        ? []
+        : ensureArray(o.rows, "SessionInitView.rows").map((row, i) =>
+            decodeSessionInitRow(row, `SessionInitView.rows[${i}]`),
+          ),
   };
   if (siv.fence === "") {
     throw new Error("frontend-proto: SessionInitView missing required `fence`");
@@ -5368,6 +5466,32 @@ const FAILURE_CARD_TERMINAL_KEYS =
   generatedFieldSet<keyof typeof FailureCardTerminalSchema.field>()();
 const FAILURE_CARD_REF_KEYS =
   generatedFieldSet<keyof typeof FailureCardRefSchema.field>()("cardUuid");
+
+const COMPACTION_SUMMARY_KEYS = generatedFieldSet<
+  keyof typeof CompactionSummaryItemSchema.field
+>()("summary", "compactedAtMs", "expensiveInputTokens");
+
+/**
+ * Decode a `CompactionSummaryItem` — the purple-washed summary block a
+ * compaction leaves behind.
+ *
+ * `expensiveInputTokens` is carried through VERBATIM, -1 and all. -1 is the
+ * daemon stating that the result's usage was unavailable, and it is never
+ * fabricated as 0 on either end: the renderer prints no figure for it rather
+ * than a zero that would read as a summary that cost nothing.
+ */
+export function decodeCompactionSummaryItem(
+  v: unknown,
+  where: string,
+): CompactionSummary {
+  const o = ensureObject(v, where);
+  rejectUnknown(o, COMPACTION_SUMMARY_KEYS, where);
+  return {
+    summary: str(o, "summary", where),
+    compactedAtMs: num(o, "compactedAtMs", where),
+    expensiveInputTokens: num(o, "expensiveInputTokens", where),
+  };
+}
 
 /**
  * Decode a `FailureCardView`.

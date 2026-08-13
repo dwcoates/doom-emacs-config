@@ -51,11 +51,12 @@ import { StubIntersectionObserver, withIntersectionObserver } from "./intersecti
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import { FIXED_FOLD_CLASS } from "../src/fold.js";
 import { AsyncSource } from "../src/protocol.js";
-import type { UnwrappedEmission } from "../src/agent-emission.js";
+import type { ToolDetachment, UnwrappedEmission } from "../src/agent-emission.js";
 import type { AsyncBubble } from "../src/async-bubble.js";
 import { AsyncBubbleRegistry } from "../src/async-routing.js";
 import {
   ContextClearedItem,
+  CompactionSummaryItem,
   ContextCompactedItem,
   ConversationItem,
   ConversationStore,
@@ -637,6 +638,180 @@ describe("context compaction", () => {
     expect(html).not.toContain("manual");
   });
 
+});
+
+/** A tool card carrying a typed outcome, which IS its detachment chip. */
+function outcomeCard(outcome?: ToolDetachment): ToolItem {
+  const item: ToolItem = {
+    kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
+    toolUseId: "t1",
+    toolName: "Bash",
+    messageId: "m1",
+    inputJson: "",
+    inputDone: true,
+  };
+  if (outcome !== undefined) item.outcome = outcome;
+  return item;
+}
+
+describe("the tool card's detachment chip", () => {
+  it("draws NO chip when the outcome carried no detachment", () => {
+    // Arrange / Act — the call returned ordinarily; there is nothing to say.
+    const html = renderItem(outcomeCard());
+    // Assert
+    expect(html).not.toContain("detachment");
+  });
+
+  it("names the kind a started detachment stated", () => {
+    // Arrange / Act
+    const html = renderItem(
+      outcomeCard({
+        case: "started",
+        value: { originToolCallId: "t1", label: "nightly sweep", kind: { case: "shell" } },
+      }),
+    );
+    // Assert
+    expect(html).toContain("detached · shell · nightly sweep");
+  });
+
+  it("names a skill detachment by the skill it invoked", () => {
+    // Arrange / Act
+    const html = renderItem(
+      outcomeCard({
+        case: "started",
+        value: {
+          originToolCallId: "t1",
+          label: "merge",
+          kind: { case: "skill", skillName: "create-or-update-workspace", args: "" },
+        },
+      }),
+    );
+    // Assert
+    expect(html).toContain("skill create-or-update-workspace");
+  });
+
+  it("names the tool an UNCLASSIFIED detachment could not be placed by", () => {
+    // Arrange / Act — the daemon stating it could not tell, not this end guessing.
+    const html = renderItem(
+      outcomeCard({
+        case: "started",
+        value: {
+          originToolCallId: "t1",
+          label: "",
+          kind: { case: "unclassified", toolName: "Weird" },
+        },
+      }),
+    );
+    // Assert
+    expect(html).toContain("unclassified Weird");
+  });
+
+  it("wears the ok tone when the work succeeded", () => {
+    // Arrange / Act
+    const html = renderItem(
+      outcomeCard({ case: "ended", value: { case: "succeeded", summary: "3 files" } }),
+    );
+    // Assert
+    expect(html).toContain(`<span class="badge ok detachment">succeeded · 3 files</span>`);
+  });
+
+  it("wears the err tone when the work failed", () => {
+    // Arrange / Act
+    const html = renderItem(
+      outcomeCard({ case: "ended", value: { case: "failed", summary: "exit 1" } }),
+    );
+    // Assert
+    expect(html).toContain(`<span class="badge err detachment">failed · exit 1</span>`);
+  });
+
+  it("keeps LOST its own word rather than calling it a failure", () => {
+    // Arrange / Act — we do not know it failed, only that we stopped seeing it.
+    const html = renderItem(
+      outcomeCard({ case: "ended", value: { case: "lost", inference: "pid vanished" } }),
+    );
+    // Assert
+    expect(html).toContain("lost · pid vanished");
+  });
+
+  it("draws a cancelled ending with no detail beside it", () => {
+    // Arrange / Act — the arm being set is the entire assertion.
+    const html = renderItem(outcomeCard({ case: "ended", value: { case: "cancelled" } }));
+    // Assert
+    expect(html).toContain(`<span class="badge err detachment">cancelled</span>`);
+  });
+
+  it("escapes a label rather than injecting it raw", () => {
+    // Arrange / Act — the label is producer text.
+    const html = renderItem(
+      outcomeCard({
+        case: "started",
+        value: { originToolCallId: "t1", label: "<img>", kind: { case: "agent" } },
+      }),
+    );
+    // Assert
+    expect(html).not.toContain("<img>");
+  });
+});
+
+/** A compaction-summary block, defaulted to one whose cost is known. */
+function compactionSummary(
+  over: Partial<CompactionSummaryItem> = {},
+): CompactionSummaryItem {
+  return {
+    kind: "compaction-summary",
+    uuid: "cs1",
+    summary: "what survived",
+    compactedAtMs: 1700000000000,
+    expensiveInputTokens: 4096,
+    ...over,
+  };
+}
+
+describe("compaction summary block", () => {
+  it("wears the purple-wash class the stylesheet paints", () => {
+    // Arrange / Act
+    const html = renderItem(compactionSummary());
+    // Assert — the SAME class the compaction divider's summary bubble wears,
+    // so the wash is one visual with one rule.
+    expect(html).toContain("bubble assistant md compact-summary compaction-summary");
+  });
+
+  it("renders the summary as markdown, since it is verbatim prose", () => {
+    // Arrange / Act
+    const html = renderItem(compactionSummary({ summary: "# heading" }));
+    // Assert
+    expect(html).toContain("<h1");
+  });
+
+  it("prints the expensive-input figure when the daemon resolved one", () => {
+    // Arrange / Act
+    const html = renderItem(compactionSummary());
+    // Assert
+    expect(html).toContain("4,096 expensive input");
+  });
+
+  it("prints NO figure when the result's usage was unavailable", () => {
+    // Arrange / Act — the -1 arrives here as an ABSENT field, and absence
+    // renders as absence: a 0 would read as a summary that cost nothing.
+    const html = renderItem(compactionSummary({ expensiveInputTokens: undefined }));
+    // Assert
+    expect(html).not.toContain("expensive input");
+  });
+
+  it("prints no ZERO in place of the missing figure", () => {
+    // Arrange / Act
+    const html = renderItem(compactionSummary({ expensiveInputTokens: undefined }));
+    // Assert
+    expect(html).not.toContain(">0<");
+  });
+
+  it("escapes the block's own uuid rather than injecting it raw", () => {
+    // Arrange / Act
+    const html = renderItem(compactionSummary({ uuid: `a"><img>` }));
+    // Assert
+    expect(html).not.toContain("<img>");
+  });
 });
 
 /** A markup string as a queryable element tree. */
