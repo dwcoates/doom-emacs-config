@@ -3832,231 +3832,6 @@ func (x *HealthStatus) GetReason() string {
 	return ""
 }
 
-// shim-claude-sidecar file-cursor state, persisted by the store (§6.2 cursor table).
-type CursorState struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	FileId        string                 `protobuf:"bytes,1,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"` // "dev:inode"
-	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
-	Offset        int64                  `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
-	Carry         []byte                 `protobuf:"bytes,4,opt,name=carry,proto3" json:"carry,omitempty"` // bounded partial-line carry
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CursorState) Reset() {
-	*x = CursorState{}
-	mi := &file_protocol_v1_core_proto_msgTypes[45]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CursorState) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CursorState) ProtoMessage() {}
-
-func (x *CursorState) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[45]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CursorState.ProtoReflect.Descriptor instead.
-func (*CursorState) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{45}
-}
-
-func (x *CursorState) GetFileId() string {
-	if x != nil {
-		return x.FileId
-	}
-	return ""
-}
-
-func (x *CursorState) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-func (x *CursorState) GetOffset() int64 {
-	if x != nil {
-		return x.Offset
-	}
-	return 0
-}
-
-func (x *CursorState) GetCarry() []byte {
-	if x != nil {
-		return x.Carry
-	}
-	return nil
-}
-
-// Cursor recovery over the socket (§7.3): the sidecar asks the store for its
-// persisted cursors at startup. Empty file_id = all cursors.
-type CursorQuery struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	FileId        string                 `protobuf:"bytes,1,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CursorQuery) Reset() {
-	*x = CursorQuery{}
-	mi := &file_protocol_v1_core_proto_msgTypes[46]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CursorQuery) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CursorQuery) ProtoMessage() {}
-
-func (x *CursorQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[46]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CursorQuery.ProtoReflect.Descriptor instead.
-func (*CursorQuery) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{46}
-}
-
-func (x *CursorQuery) GetFileId() string {
-	if x != nil {
-		return x.FileId
-	}
-	return ""
-}
-
-type OpenTaskState struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	LastActivityAtMs int64                  `protobuf:"varint,2,opt,name=last_activity_at_ms,json=lastActivityAtMs,proto3" json:"last_activity_at_ms,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
-}
-
-func (x *OpenTaskState) Reset() {
-	*x = OpenTaskState{}
-	mi := &file_protocol_v1_core_proto_msgTypes[47]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *OpenTaskState) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*OpenTaskState) ProtoMessage() {}
-
-func (x *OpenTaskState) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[47]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use OpenTaskState.ProtoReflect.Descriptor instead.
-func (*OpenTaskState) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{47}
-}
-
-func (x *OpenTaskState) GetLastActivityAtMs() int64 {
-	if x != nil {
-		return x.LastActivityAtMs
-	}
-	return 0
-}
-
-type CursorList struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Cursors []*CursorState         `protobuf:"bytes,1,rep,name=cursors,proto3" json:"cursors,omitempty"`
-	// Authoritative persisted tasks with no TaskEnded for the same session/task
-	// identity. Returned with an all-cursors startup query so the sidecar
-	// restores liveness and last activity from durable state, not file presence.
-	OpenTasks []*OpenTaskState `protobuf:"bytes,2,rep,name=open_tasks,json=openTasks,proto3" json:"open_tasks,omitempty"`
-	// True only when open_tasks was computed by a store that implements the
-	// authoritative lifecycle query. Distinguishes an empty set from an older
-	// store that does not understand field 2.
-	OpenTasksAuthoritative bool `protobuf:"varint,3,opt,name=open_tasks_authoritative,json=openTasksAuthoritative,proto3" json:"open_tasks_authoritative,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
-}
-
-func (x *CursorList) Reset() {
-	*x = CursorList{}
-	mi := &file_protocol_v1_core_proto_msgTypes[48]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CursorList) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CursorList) ProtoMessage() {}
-
-func (x *CursorList) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[48]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CursorList.ProtoReflect.Descriptor instead.
-func (*CursorList) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{48}
-}
-
-func (x *CursorList) GetCursors() []*CursorState {
-	if x != nil {
-		return x.Cursors
-	}
-	return nil
-}
-
-func (x *CursorList) GetOpenTasks() []*OpenTaskState {
-	if x != nil {
-		return x.OpenTasks
-	}
-	return nil
-}
-
-func (x *CursorList) GetOpenTasksAuthoritative() bool {
-	if x != nil {
-		return x.OpenTasksAuthoritative
-	}
-	return false
-}
-
 var file_protocol_v1_core_proto_extTypes = []protoimpl.ExtensionInfo{
 	{
 		ExtendedType:  (*descriptorpb.EnumValueOptions)(nil),
@@ -4284,22 +4059,7 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
 	"\ahealthy\x18\x02 \x01(\bR\ahealthy\x12\x1c\n" +
 	"\tcomponent\x18\x03 \x01(\tR\tcomponent\x12\x16\n" +
-	"\x06reason\x18\x04 \x01(\tR\x06reason\"h\n" +
-	"\vCursorState\x12\x17\n" +
-	"\afile_id\x18\x01 \x01(\tR\x06fileId\x12\x12\n" +
-	"\x04path\x18\x02 \x01(\tR\x04path\x12\x16\n" +
-	"\x06offset\x18\x03 \x01(\x03R\x06offset\x12\x14\n" +
-	"\x05carry\x18\x04 \x01(\fR\x05carry\"&\n" +
-	"\vCursorQuery\x12\x17\n" +
-	"\afile_id\x18\x01 \x01(\tR\x06fileId\"M\n" +
-	"\rOpenTaskState\x12-\n" +
-	"\x13last_activity_at_ms\x18\x02 \x01(\x03R\x10lastActivityAtMsJ\x04\b\x01\x10\x02R\astarted\"\xb5\x01\n" +
-	"\n" +
-	"CursorList\x122\n" +
-	"\acursors\x18\x01 \x03(\v2\x18.protocol.v1.CursorStateR\acursors\x129\n" +
-	"\n" +
-	"open_tasks\x18\x02 \x03(\v2\x1a.protocol.v1.OpenTaskStateR\topenTasks\x128\n" +
-	"\x18open_tasks_authoritative\x18\x03 \x01(\bR\x16openTasksAuthoritative*g\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason*g\n" +
 	"\bTaskKind\x12\x19\n" +
 	"\x15TASK_KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fTASK_KIND_AGENT\x10\x01\x12\x13\n" +
@@ -4371,7 +4131,7 @@ func file_protocol_v1_core_proto_rawDescGZIP() []byte {
 }
 
 var file_protocol_v1_core_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_protocol_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
+var file_protocol_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
 var file_protocol_v1_core_proto_goTypes = []any{
 	(TaskKind)(0),                            // 0: protocol.v1.TaskKind
 	(TerminalStatus)(0),                      // 1: protocol.v1.TerminalStatus
@@ -4424,13 +4184,9 @@ var file_protocol_v1_core_proto_goTypes = []any{
 	(*ConnectionHeartbeat)(nil),              // 48: protocol.v1.ConnectionHeartbeat
 	(*HealthCheck)(nil),                      // 49: protocol.v1.HealthCheck
 	(*HealthStatus)(nil),                     // 50: protocol.v1.HealthStatus
-	(*CursorState)(nil),                      // 51: protocol.v1.CursorState
-	(*CursorQuery)(nil),                      // 52: protocol.v1.CursorQuery
-	(*OpenTaskState)(nil),                    // 53: protocol.v1.OpenTaskState
-	(*CursorList)(nil),                       // 54: protocol.v1.CursorList
-	(*ExternalEntry)(nil),                    // 55: protocol.v1.ExternalEntry
-	(*structpb.Struct)(nil),                  // 56: google.protobuf.Struct
-	(*descriptorpb.EnumValueOptions)(nil),    // 57: google.protobuf.EnumValueOptions
+	(*ExternalEntry)(nil),                    // 51: protocol.v1.ExternalEntry
+	(*structpb.Struct)(nil),                  // 52: google.protobuf.Struct
+	(*descriptorpb.EnumValueOptions)(nil),    // 53: google.protobuf.EnumValueOptions
 }
 var file_protocol_v1_core_proto_depIdxs = []int32{
 	8,  // 0: protocol.v1.SessionRewound.keep_alive_discard:type_name -> protocol.v1.KeepAliveDiscard
@@ -4461,17 +4217,15 @@ var file_protocol_v1_core_proto_depIdxs = []int32{
 	5,  // 25: protocol.v1.Ack.interrupt_outcome:type_name -> protocol.v1.InterruptOutcome
 	36, // 26: protocol.v1.Ack.detached_cancel_outcome:type_name -> protocol.v1.DetachedCancelOutcome
 	35, // 27: protocol.v1.Ack.live_task_set:type_name -> protocol.v1.LiveTaskSet
-	55, // 28: protocol.v1.ReplayEntry.entry:type_name -> protocol.v1.ExternalEntry
-	56, // 29: protocol.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
-	56, // 30: protocol.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
-	51, // 31: protocol.v1.CursorList.cursors:type_name -> protocol.v1.CursorState
-	53, // 32: protocol.v1.CursorList.open_tasks:type_name -> protocol.v1.OpenTaskState
-	57, // 33: protocol.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
-	34, // [34:34] is the sub-list for method output_type
-	34, // [34:34] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	33, // [33:34] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	51, // 28: protocol.v1.ReplayEntry.entry:type_name -> protocol.v1.ExternalEntry
+	52, // 29: protocol.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
+	52, // 30: protocol.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
+	53, // 31: protocol.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
+	32, // [32:32] is the sub-list for method output_type
+	32, // [32:32] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	31, // [31:32] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_protocol_v1_core_proto_init() }
@@ -4516,7 +4270,7 @@ func file_protocol_v1_core_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protocol_v1_core_proto_rawDesc), len(file_protocol_v1_core_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   49,
+			NumMessages:   45,
 			NumExtensions: 1,
 			NumServices:   0,
 		},
