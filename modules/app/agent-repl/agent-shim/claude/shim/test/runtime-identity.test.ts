@@ -52,12 +52,15 @@ describe("canonicalSha256", () => {
 // settled turns across 5 unrelated workspaces: the reader looked for snake_case
 // keys the SDK emits in camelCase, so present evidence was recorded as "".
 describe("queryRuntimeIdentity", () => {
-  it("reads auth_source from the SDK's camelCase apiKeySource", () => {
-    expect(queryRuntimeIdentity(corpusInit(), shimFacts).authSource).toBe("none");
-  });
-
-  it("reads claude_code_version from the SDK's snake_case key", () => {
-    expect(queryRuntimeIdentity(corpusInit(), shimFacts).claudeCodeVersion).not.toBe("");
+  // The auth source and the CLI version used to be read here too, and are now
+  // stated ONCE per session on SessionBegan instead — they are fixed for a shim
+  // process, so a per-query spelling could only ever drift from the session's.
+  // The mixed-spelling defect those cases guarded is still guarded, both by the
+  // fast-mode cases below and by convert.test.ts's SessionBegan auth cases.
+  it("reads fast_mode_state from the SDK's camelCase key", () => {
+    const init = { ...corpusInit(), fastModeState: "on" };
+    delete init["fast_mode_state"];
+    expect(queryRuntimeIdentity(init, shimFacts).fastModeState).toBe("on");
   });
 
   it("reads fast_mode_state from the SDK's snake_case key", () => {
@@ -104,9 +107,5 @@ describe("queryRuntimeIdentity", () => {
 
   it("carries the shim's own vendor session id rather than the init message's", () => {
     expect(queryRuntimeIdentity(corpusInit(), shimFacts).vendorSessionId).toBe("vendor-uuid");
-  });
-
-  it("leaves subscription_type empty because init never reports it", () => {
-    expect(queryRuntimeIdentity(corpusInit(), shimFacts).subscriptionType).toBe("");
   });
 });

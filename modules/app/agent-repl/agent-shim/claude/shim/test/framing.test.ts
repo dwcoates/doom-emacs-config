@@ -165,9 +165,12 @@ describe("Any envelope multiplexing", () => {
     const any = decodeEnvelope(
       encodeMessage(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "r" })).subarray(4),
     );
-    // Assert: this string MUST match the Go proto registry name (G7 interop)
-    expect(any.typeUrl).toBe("type.googleapis.com/agentshim.core.v1.SubmitPrompt");
-    expect(envelopeType(any)).toBe("agentshim.core.v1.SubmitPrompt");
+    // Assert: this string MUST match the Go proto registry name, which the
+    // daemon-side client dispatches on. The package moved from
+    // agentshim.core.v1 to protocol.v1, so the discriminator moved with it —
+    // and BOTH ends must move together or every frame is unroutable.
+    expect(any.typeUrl).toBe("type.googleapis.com/protocol.v1.SubmitPrompt");
+    expect(envelopeType(any)).toBe("protocol.v1.SubmitPrompt");
   });
 
   it("distinguishes message types by their type URL", () => {
