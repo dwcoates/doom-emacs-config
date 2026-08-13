@@ -594,6 +594,34 @@ func TestKindOfTracksAnArmTheSwitchNeverNamed(t *testing.T) {
 	}
 }
 
+func TestOneofArmReportsAnAbsentOneof(t *testing.T) {
+	// Arrange: the column derivation reads a oneof by NAME off the descriptor.
+	// A schema that no longer declares that oneof must be loud in the data
+	// rather than indistinguishable from "the arm is unset" — the two mean
+	// opposite things about the record.
+	entry := bookkeeping("s1")
+
+	// Act
+	got := oneofArm(entry.GetInternal().ProtoReflect(), "no-such-oneof")
+
+	// Assert
+	if got != "no-such-oneof:no-such-oneof" {
+		t.Fatalf("oneofArm = %q, want the missing oneof named", got)
+	}
+}
+
+func TestKindOfSurvivesARecordWithNoInternalHalf(t *testing.T) {
+	// Arrange: kindOf runs BEFORE such a record is rejected, because the
+	// rejection message quotes the kind. It must therefore survive describing
+	// the very record that is about to be refused.
+	entry := &agentshimv1.Entry{}
+
+	// Act / Assert
+	if got := kindOf(entry); got != "unconverted.unset" {
+		t.Fatalf("kindOf = %q, want %q", got, "unconverted.unset")
+	}
+}
+
 // --- concurrency -----------------------------------------------------------
 
 func TestConcurrentIngestNeverRejectsABatch(t *testing.T) {

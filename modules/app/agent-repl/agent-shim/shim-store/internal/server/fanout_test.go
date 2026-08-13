@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/shim-store/internal/logging"
 )
 
@@ -17,20 +17,15 @@ func testFanout(buffer int) *fanout {
 func ignoreSubscriberDrop(subscriberDropReason) {}
 func prepareSubscriber(*subscriber)             {}
 
-func persistentEvent(session string, seq uint64) *corev1.Event {
-	return &corev1.Event{
-		SessionId: session,
-		Seq:       seq,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Payload:   &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}},
-	}
-}
-
-func ephemeralEvent(session string) *corev1.Event {
-	return &corev1.Event{
-		SessionId: session,
-		Class:     corev1.EventClass_EVENT_CLASS_EPHEMERAL,
-		Payload:   &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "u"}},
+// liveDelivery is the OTHER delivery arm — a record handed straight to the
+// daemon that the store never saw. The store never publishes one, but the
+// fan-out must still route it, because the routing key is on the external half
+// both arms carry.
+func liveDelivery(session string) *protocolv1.EntryDelivery {
+	return &protocolv1.EntryDelivery{
+		Delivery: &protocolv1.EntryDelivery_Live{Live: &protocolv1.LiveEntryDelivery{
+			Entry: turnBegan(session, "live").GetExternal(),
+		}},
 	}
 }
 
@@ -39,12 +34,12 @@ func TestFanoutDeliversToSessionSubscriber(t *testing.T) {
 	f := testFanout(4)
 	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act
-	f.publish(persistentEvent("s1", 1))
+	f.publish(storedDelivery("s1", 1))
 	// Assert
 	select {
 	case got := <-sub.ch:
-		if got.GetSeq() != 1 {
-			t.Fatalf("delivered seq = %d, want 1", got.GetSeq())
+		if got.GetStored().GetSeq() != 1 {
+			t.Fatalf("delivered seq = %d, want 1", got.GetStored().GetSeq())
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for delivery")
@@ -56,7 +51,7 @@ func TestFanoutIsSessionScoped(t *testing.T) {
 	f := testFanout(4)
 	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act: publish for a different session.
-	f.publish(persistentEvent("other", 1))
+	f.publish(storedDelivery("other", 1))
 	// Assert: nothing delivered to s1's subscriber.
 	select {
 	case got := <-sub.ch:
@@ -65,20 +60,44 @@ func TestFanoutIsSessionScoped(t *testing.T) {
 	}
 }
 
-func TestFanoutEphemeralPassesThrough(t *testing.T) {
-	// Arrange
+func TestFanoutRoutesALiveDeliveryByItsExternalHalf(t *testing.T) {
+	// Arrange: a live delivery has NO seq field, which is the contract that
+	// stops a consumer resuming from a position the store never assigned. Its
+	// routing key still has to resolve, or such a record would silently reach
+	// nobody.
 	f := testFanout(4)
 	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
-	// Act: the fanout is class-agnostic; ephemeral events reach live subscribers.
-	f.publish(ephemeralEvent("s1"))
+	// Act
+	f.publish(liveDelivery("s1"))
 	// Assert
 	select {
 	case got := <-sub.ch:
-		if got.GetClass() != corev1.EventClass_EVENT_CLASS_EPHEMERAL {
-			t.Fatalf("delivered class = %v, want EPHEMERAL", got.GetClass())
+		if got.GetLive() == nil {
+			t.Fatalf("delivered %+v, want the live arm", got)
+		}
+		if got.GetStored().GetSeq() != 0 {
+			t.Fatal("a live delivery reported a position it cannot have")
 		}
 	case <-time.After(time.Second):
-		t.Fatal("ephemeral event was not fanned out")
+		t.Fatal("a live delivery was not fanned out")
+	}
+}
+
+func TestFanoutRoutesADeliveryWithNoArmToNobody(t *testing.T) {
+	// Arrange: an envelope naming neither arm carries no external half, so it
+	// carries no session either. It must reach no subscriber rather than every
+	// subscriber that happens to be registered under the empty string.
+	f := testFanout(4)
+	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
+
+	// Act
+	f.publish(&protocolv1.EntryDelivery{})
+
+	// Assert
+	select {
+	case got := <-sub.ch:
+		t.Fatalf("an armless delivery reached a subscriber: %+v", got)
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
@@ -87,9 +106,9 @@ func TestFanoutSlowConsumerDisconnected(t *testing.T) {
 	f := testFanout(2)
 	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act: overflow the bounded buffer.
-	f.publish(persistentEvent("s1", 1))
-	f.publish(persistentEvent("s1", 2))
-	f.publish(persistentEvent("s1", 3)) // buffer full → disconnect
+	f.publish(storedDelivery("s1", 1))
+	f.publish(storedDelivery("s1", 2))
+	f.publish(storedDelivery("s1", 3)) // buffer full → disconnect
 	// Assert: the subscriber is dropped and deregistered; the requester owns
 	// its session-specific reconnect diagnostic.
 	select {
@@ -108,7 +127,7 @@ func TestFanoutUnsubscribeStopsDelivery(t *testing.T) {
 	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act
 	f.unsubscribe(sub)
-	f.publish(persistentEvent("s1", 1))
+	f.publish(storedDelivery("s1", 1))
 	// Assert: no delivery, done closed, count zero.
 	if f.subscriberCount("s1") != 0 {
 		t.Fatalf("subscriberCount = %d, want 0", f.subscriberCount("s1"))
@@ -124,8 +143,8 @@ func TestFanoutSlowConsumerLogsCanonicalContext(t *testing.T) {
 	var logs bytes.Buffer
 	f := newFanout(1, logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "server", Socket: "store.sock"}))
 	sub := f.subscribe("vendor-session", ignoreSubscriberDrop, prepareSubscriber)
-	f.publish(persistentEvent("vendor-session", 1))
-	f.publish(persistentEvent("vendor-session", 2))
+	f.publish(storedDelivery("vendor-session", 1))
+	f.publish(storedDelivery("vendor-session", 2))
 
 	select {
 	case <-sub.done:

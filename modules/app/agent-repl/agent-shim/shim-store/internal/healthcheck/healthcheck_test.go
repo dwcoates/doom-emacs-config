@@ -14,7 +14,7 @@ import (
 	"agentrepl/shim-store/internal/logging"
 	"agentrepl/wire"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -101,7 +101,7 @@ func TestProbeClassifiesEveryHealthOutcomeAndLogsIt(t *testing.T) {
 			name:   "mismatched request id",
 			config: validConfig(requestID),
 			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return responseConn(t, &corev1.HealthStatus{RequestId: "another-request", Healthy: true, Component: "shim-store"}), nil
+				return responseConn(t, &protocolv1.HealthStatus{RequestId: "another-request", Healthy: true, Component: "shim-store"}), nil
 			}),
 			wantExit: ExitMismatchedRequestID, wantClass: FailureMismatchedRequestID, wantComp: "shim-store",
 		},
@@ -109,7 +109,7 @@ func TestProbeClassifiesEveryHealthOutcomeAndLogsIt(t *testing.T) {
 			name:   "unhealthy response",
 			config: validConfig(requestID),
 			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return responseConn(t, &corev1.HealthStatus{RequestId: requestID, Healthy: false, Component: "shim-store", Reason: "database is draining"}), nil
+				return responseConn(t, &protocolv1.HealthStatus{RequestId: requestID, Healthy: false, Component: "shim-store", Reason: "database is draining"}), nil
 			}),
 			wantExit: ExitUnhealthyResponse, wantClass: FailureUnhealthyResponse, wantComp: "shim-store", wantReason: "database is draining", checkReason: true,
 		},
@@ -117,7 +117,7 @@ func TestProbeClassifiesEveryHealthOutcomeAndLogsIt(t *testing.T) {
 			name:   "healthy response without component",
 			config: validConfig(requestID),
 			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return responseConn(t, &corev1.HealthStatus{RequestId: requestID, Healthy: true}), nil
+				return responseConn(t, &protocolv1.HealthStatus{RequestId: requestID, Healthy: true}), nil
 			}),
 			wantExit: ExitUnhealthyResponse, wantClass: FailureUnhealthyResponse,
 		},
@@ -125,7 +125,7 @@ func TestProbeClassifiesEveryHealthOutcomeAndLogsIt(t *testing.T) {
 			name:   "correlated healthy response",
 			config: validConfig(requestID),
 			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return responseConn(t, &corev1.HealthStatus{RequestId: requestID, Healthy: true, Component: "shim-store", Reason: "wal checkpoint current"}), nil
+				return responseConn(t, &protocolv1.HealthStatus{RequestId: requestID, Healthy: true, Component: "shim-store", Reason: "wal checkpoint current"}), nil
 			}),
 			wantExit: ExitOK, wantClass: "", wantOK: true, wantComp: "shim-store", wantReason: "wal checkpoint current", checkReason: true,
 		},

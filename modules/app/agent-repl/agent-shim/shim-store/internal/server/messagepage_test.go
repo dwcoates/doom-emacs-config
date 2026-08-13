@@ -2,38 +2,28 @@ package server
 
 import (
 	"bytes"
-	"database/sql"
 	"io"
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/shim-store/internal/logging"
 	"agentrepl/wire"
 	_ "modernc.org/sqlite"
 )
 
-// seedOwnedRecord writes one PERSISTENT record through the store and stamps its
-// owning message on the stored row. Writing ownership at record-write time has
-// its own owner; this suite needs only that the served page reflects the
-// column, so it seeds the column directly.
+// seedOwnedRecord writes one record BELONGING to the named message through the
+// store's own socket.
+//
+// It no longer reaches into the database to stamp ownership: the column is read
+// off `ExternalEntry.message` at write time, so an ordinary write through the
+// production path is enough.
 func seedOwnedRecord(t *testing.T, h *harness, session, owner string) {
 	t.Helper()
 	conn := h.dial(t)
-	send(t, conn, write(vAssistantStream(t, session, owner)))
-	recvAck(t, conn)
+	send(t, conn, storeWrite(userSaid(session, owner)))
+	awaitWrite(t, conn)
 	conn.Close()
-
-	raw, err := sql.Open("sqlite", "file:"+h.dbPath)
-	if err != nil {
-		t.Fatalf("raw open: %v", err)
-	}
-	defer raw.Close()
-	if _, err := raw.Exec(
-		`UPDATE event SET top_level_message_id = ? WHERE session_id = ? AND uuid = ?`,
-		owner, session, owner); err != nil {
-		t.Fatalf("stamping ownership: %v", err)
-	}
 }
 
 func TestMessagePageRequestIsServedOverTheSocket(t *testing.T) {
@@ -43,21 +33,47 @@ func TestMessagePageRequestIsServedOverTheSocket(t *testing.T) {
 
 	// Act: one request frame, routed by its Any type-URL alone.
 	conn := h.dial(t)
-	send(t, conn, &corev1.MessagePageRequest{
+	send(t, conn, &protocolv1.MessagePageRequest{
 		RequestId: "r1",
 		SessionId: "s1",
-		Anchor:    &corev1.MessagePageRequest_Head{Head: &corev1.MessagePageHead{}},
+		Anchor:    &protocolv1.MessagePageRequest_Head{Head: &protocolv1.MessagePageHead{}},
 	})
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	msg := recv(t, conn)
 
 	// Assert
-	page, ok := msg.(*corev1.MessagePage)
+	page, ok := msg.(*protocolv1.MessagePage)
 	if !ok {
-		t.Fatalf("reply is %T, want *corev1.MessagePage", msg)
+		t.Fatalf("reply is %T, want *protocolv1.MessagePage", msg)
 	}
 	if page.GetRequestId() != "r1" || page.GetMessage_1().GetMessageId() != "m1" {
 		t.Fatalf("page=%v, want request_id=r1 carrying message m1", page)
+	}
+}
+
+func TestMessagePageCarriesTheExternalHalfOfEachRecord(t *testing.T) {
+	// Arrange: a page is read BY a consumer, and the internal half exists
+	// precisely so a consumer cannot read it.
+	h := start(t, 8, testLogger())
+	seedOwnedRecord(t, h, "s1", "m1")
+
+	// Act
+	conn := h.dial(t)
+	send(t, conn, &protocolv1.MessagePageRequest{
+		RequestId: "r1",
+		SessionId: "s1",
+		Anchor:    &protocolv1.MessagePageRequest_Head{Head: &protocolv1.MessagePageHead{}},
+	})
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	page := recv(t, conn).(*protocolv1.MessagePage)
+
+	// Assert
+	records := page.GetMessage_1().GetRecords()
+	if len(records) != 1 {
+		t.Fatalf("message carried %d records, want 1", len(records))
+	}
+	if records[0].GetMessage().GetMessageId() != "m1" || records[0].GetSessionId() != "s1" {
+		t.Fatalf("record = %+v, want the external half of m1 in s1", records[0])
 	}
 }
 
@@ -70,9 +86,9 @@ func TestMessagePageRequestWithNoSessionIsRefusedWithoutAPage(t *testing.T) {
 
 	// Act
 	conn := h.dial(t)
-	send(t, conn, &corev1.MessagePageRequest{
+	send(t, conn, &protocolv1.MessagePageRequest{
 		RequestId: "r1",
-		Anchor:    &corev1.MessagePageRequest_Head{Head: &corev1.MessagePageHead{}},
+		Anchor:    &protocolv1.MessagePageRequest_Head{Head: &protocolv1.MessagePageHead{}},
 	})
 	conn.SetReadDeadline(time.Now().Add(time.Second))
 	_, err := wire.ReadAny(conn)
@@ -98,13 +114,13 @@ func TestSubscribeStillReplaysAfterTheMessagePageDoorOpens(t *testing.T) {
 
 	// Act
 	sub := h.dial(t)
-	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
+	send(t, sub, &protocolv1.Subscribe{SessionId: "s1", FromSeq: 0})
 	sub.SetReadDeadline(time.Now().Add(5 * time.Second))
-	ev := recvEvent(t, sub)
+	delivery := recvDelivery(t, sub)
 	recvSubscriptionReady(t, sub)
 
 	// Assert
-	if ev.GetSeq() != 1 {
-		t.Fatalf("replayed seq=%d, want 1", ev.GetSeq())
+	if delivery.GetStored().GetSeq() != 1 {
+		t.Fatalf("replayed seq=%d, want 1", delivery.GetStored().GetSeq())
 	}
 }
