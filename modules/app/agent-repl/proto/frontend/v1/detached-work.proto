@@ -70,36 +70,31 @@ message DetachedWork {
   int64 started_at_ms = 5;
   // Live or settled, and with what outcome. See DetachedWorkLiveness.
   DetachedWorkLiveness liveness = 6;
-  // WHAT KIND of work this is. The arm TYPES the work; it does not carry the
-  // work's accumulated content — see the paging note below.
+  // 10-15 were the `kind` oneof: agent, journal, shell, unclassified, merge,
+  // skill. Every field those six arm messages carried had already moved to
+  // conversation.v1, leaving six EMPTY messages whose only remaining content was
+  // which arm was set — which is exactly the word
+  // conversation.v1.DetachedWorkStarted.kind states, via
+  // conversation.v1.DetachedWorkKind. Two oneofs of empty messages saying the
+  // same word, spelled differently (`journal` here, `workflow` there), is a
+  // documented drift opportunity for no gain. WHICH kind this is, is now stated
+  // exactly once, by `started.kind`.
   //
-  // Skill invocations detach: the daemon intercepts the Skill call and opens
-  // detached work, because what follows a skill is a whole conversation rather
-  // than a card. `merge` is the one skill with an arm of its own, because the
-  // merge run is a distinct thing to render; every other skill arrives as
-  // `skill`.
+  // Skill invocations still detach, and `merge` is still a kind of its own —
+  // both are conversation.v1.DetachedWorkKind values, not something this
+  // deletion retires.
   //
-  // CONTAINED CONTENT IS NOT CARRIED HERE. A detached agent's conversation, a
-  // merge run's, a skill window's, a workflow's steps — none of it rides inside
-  // these arms any more. It is reached by PAGING: frontend.v1.PageScopeInside
-  // naming THIS message's id walks the records whose parent is
-  // conversation.v1.MessageParentInside it, at any depth, with the same command
-  // and renderer the feed uses. That is why nothing here caps or drops it. The
-  // inline form had to cap, the cap had no fetch path, and the dropped entries
-  // sat in the store unreachable.
+  // CONTAINED CONTENT WAS NEVER CARRIED HERE, and still is not. A detached
+  // agent's conversation, a merge run's, a skill window's, a workflow's steps
+  // are reached by PAGING: frontend.v1.PageScopeInside naming THIS message's id
+  // walks the records whose parent is conversation.v1.MessageParentInside it, at
+  // any depth, with the same command and renderer the feed uses.
   //
-  // WHICH kind this is, is stated exactly once — by `started.kind`, the
-  // producer's own record. The arms below no longer re-spell any of the
-  // producer's content. This oneof's arm must always agree with `started.kind`.
-  // Note the two are named differently: `journal` here is `workflow` there.
-  oneof kind {
-    DetachedWorkAgent agent = 10;
-    DetachedWorkJournal journal = 11;
-    DetachedWorkShell shell = 12;
-    DetachedWorkUnclassified unclassified = 13;
-    DetachedWorkMerge merge = 14;
-    DetachedWorkSkill skill = 15;
-  }
+  // Reserved by number AND by name because this surface is protojson on the
+  // wire, where the field NAME is the wire token.
+  reserved 10, 11, 12, 13, 14, 15;
+  reserved "agent", "journal", "shell", "unclassified", "merge", "skill";
+
   // The workspace this work runs under — the same key every workspace-scoped
   // frame carries. It exists so a snapshot can scope detached work to the
   // client's workspace exactly as it scopes every other per-workspace family;
@@ -108,131 +103,12 @@ message DetachedWork {
   string workspace = 7;
 }
 
-// A detached agent: a whole conversation happening elsewhere.
-message DetachedWorkAgent {
-  // 1 was `emissions` and 2 was `fold`: the agent's conversation carried inline
-  // as a repeated field, and the tail cap a repeated field forced. Both existed
-  // only because contained content could not be paged. It can now — the
-  // agent's conversation is conversation.v1.MessageEntry records whose parent
-  // is MessageParentInside this message, reached with frontend.v1.PageScopeInside
-  // — so the inline copy is the second spelling and the cap is a limitation
-  // that no longer exists. Reserved by number AND by name because this surface
-  // is protojson on the wire, where the field NAME is the wire token.
-  reserved 1, 2;
-  reserved "emissions", "fold";
-}
-
-// A merge run: the conversation a merge drives through this workspace's own
-// session, folded exactly like a detached agent's.
-//
-// DAEMON-AUTHORED. No tool spawns it: the daemon opens it when it classifies
-// the Skill invocation `/create-or-update-workspace merge`, and every
-// subsequent emission of the session folds here as a child until the user's
-// own next prompt or an interrupt settles it. Membership is TEMPORAL — the
-// window between that classification and the user taking the session back —
-// not a join key.
-message DetachedWorkMerge {
-  // 1 was `emissions` and 2 was `fold`: as on DetachedWorkAgent. The merge
-  // run's conversation is records parented inside this message and is paged
-  // with frontend.v1.PageScopeInside, so neither the inline copy nor its cap
-  // has anything left to do. Reserved by number AND by name because this
-  // surface is protojson on the wire, where the field NAME is the wire token.
-  reserved 1, 2;
-  reserved "emissions", "fold";
-}
-
-// A skill invocation as detached work: the invocation card the feed used to
-// render flat, now work that owns its window. The daemon opens it when it
-// classifies the Skill tool call, resolves the skill file's contents as the
-// work's own body (they are the SKILL's content, not a response of the
-// conversation — rendering the file contents as an agent response is retired
-// by this arm), and folds the session's subsequent emissions here until the
-// user's own next prompt or an interrupt settles it — the same temporal
-// membership the merge arm uses.
-message DetachedWorkSkill {
-  // 1 was `skill_name` and 2 was `args`: a second spelling of
-  // conversation.v1.DetachedSkill.skill_name and .args, which the producer
-  // observed at the invocation and states inside `started.kind`. 3 was `body`,
-  // a second spelling of conversation.v1.SkillBodyResolved.body, which the
-  // producer reads out of the transcript. Reserved by number AND by name
-  // because this surface is protojson on the wire, where the field NAME is the
-  // wire token.
-  reserved 1, 2, 3;
-  reserved "skill_name", "args", "body";
-  // 4 was `emissions` and 5 was `fold`: as on DetachedWorkAgent. The window's
-  // conversation is records parented inside this message and is paged with
-  // frontend.v1.PageScopeInside, so the inline copy and its tail cap are both
-  // retired.
-  reserved 4, 5;
-  reserved "emissions", "fold";
-}
-
-// A Workflow run's journal: the step log a Workflow launch writes.
-//
-// ONE PRODUCER. This kind exists for the Workflow tool and nothing else — its
-// rows are the entries of that run's journal.jsonl step log, one row per
-// logged step. It is not a general-purpose progress table, and work of any
-// other kind never arrives here.
-message DetachedWorkJournal {
-  // 1 was `rows`, together with frontend.v1.DetachedWorkJournalRow and its
-  // status arms: a structured step log the producer reads out of the journal
-  // file, which conversation.v1.WorkflowStep now declares and
-  // conversation.v1.WorkflowStepObserved delivers one step at a time. Reserved
-  // by number AND by name because this surface is protojson on the wire, where
-  // the field NAME is the wire token.
-  reserved 1;
-  reserved "rows";
-  // 2 was `fold`: the tail cap on the folded steps. The steps are records
-  // parented inside this message and are paged with frontend.v1.PageScopeInside,
-  // so a run's earlier steps are reachable rather than dropped and there is
-  // nothing left to cap.
-  reserved 2;
-  reserved "fold";
-}
-
-// A backgrounded shell command: an opaque byte spool with a command line.
-message DetachedWorkShell {
-  // 1 was `command`: a second spelling of conversation.v1.DetachedShell.command,
-  // which the producer observed at dispatch and states inside `started.kind`.
-  // Reserved by number AND by name because this surface is protojson on the
-  // wire, where the field NAME is the wire token.
-  reserved 1;
-  reserved "command";
-
-  // 2 was `output`: a second spelling of the bytes
-  // conversation.v1.DetachedWorkProgressed.output already carries. It was kept
-  // only because this spool also carried `through_offset`, a delivered-bytes
-  // cursor the producer's record had no counterpart for; that cursor is gone,
-  // so the spool is bytes and the producer's record is a genuine counterpart.
-  reserved 2;
-  reserved "output";
-}
-
-// A spawn whose tool the daemon does not recognize.
-//
-// AN EXPLICIT ARM, NOT A FALLBACK. Unrecognized work is a first-class kind on
-// this contract: the daemon states that it could not classify the tool, names
-// the tool it could not classify, and streams the work's output anyway. A
-// renderer must draw this work — it is real work the user started, and
-// dropping it would make a running process invisible. The one thing a
-// renderer may not do is guess: an unrecognized tool is not silently treated
-// as a shell, an agent or a workflow.
-message DetachedWorkUnclassified {
-  // 1 was `tool_name`: a second spelling of
-  // conversation.v1.DetachedUnclassified.tool_name, which the producer named
-  // when it failed to classify the tool and states inside `started.kind`.
-  // Reserved by number AND by name because this surface is protojson on the
-  // wire, where the field NAME is the wire token.
-  reserved 1;
-  reserved "tool_name";
-
-  // 2 was `output`: as on DetachedWorkShell — a second spelling of the bytes
-  // conversation.v1.DetachedWorkProgressed.output carries, held back only by
-  // the spool's delivered-bytes cursor. The cursor is gone, so the producer's
-  // record says everything this said.
-  reserved 2;
-  reserved "output";
-}
+// The six per-kind arm messages — DetachedWorkAgent, DetachedWorkMerge,
+// DetachedWorkSkill, DetachedWorkJournal, DetachedWorkShell and
+// DetachedWorkUnclassified — are GONE. Each had been emptied field by field as
+// its content moved to conversation.v1, and an empty message that exists only
+// to name a oneof arm states nothing conversation.v1.DetachedWorkKind does not
+// already state. See the reservations on DetachedWork above.
 
 // A verbatim byte spool. Just bytes.
 //
@@ -366,6 +242,16 @@ message DetachedWorkUpdate {
   // `merge` carries the SAME message as `agent` for exactly that reason: a
   // merge run's emissions arrive precisely as a detached agent's do, so the
   // arm names the kind while the payload has no axis to evolve apart on.
+  //
+  // TODO(respelling): seven arms carry only FIVE distinct types —
+  // `agent`/`merge` are both DetachedWorkAgentUpdate, and `shell`/`unclassified`
+  // are both DetachedWorkOutputAppend. The arms are therefore typed by the
+  // work's KIND when what an update actually varies by is its SHAPE: emissions,
+  // byte append, journal rows, skill body, liveness. Kind is already stated once
+  // on the message (conversation.v1.DetachedWorkStarted.kind), so restating it
+  // here is the same duplication the `kind` oneof was deleted for. Whether these
+  // collapse to shape-typed arms needs a ruling; this oneof is NOT changed
+  // meanwhile, because its arms route live traffic.
   oneof update {
     DetachedWorkAgentUpdate agent = 10;
     DetachedWorkJournalUpdate journal = 11;
