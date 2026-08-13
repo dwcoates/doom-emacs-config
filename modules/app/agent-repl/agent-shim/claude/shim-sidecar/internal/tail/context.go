@@ -1,6 +1,6 @@
 package tail
 
-import corev1 "agentrepl/proto/agentshim/core/v1"
+import agentshimv1 "agentrepl/proto/agentshim/v1"
 
 // Kind classifies a watched file so the tailer picks the right codec + handler.
 type Kind int
@@ -53,9 +53,9 @@ type Context struct {
 	HeldDeliveries int
 }
 
-// Handler converts a batch of framed records into events (pure; no IO). Layer-2
-// implementations live in the handler package; the tailer drives them through
-// this interface.
+// Handler converts a batch of framed records into stored records (pure; no IO).
+// Layer-2 implementations live in the handler package; the tailer drives them
+// through this interface.
 type Handler interface {
-	Handle(frames []Frame, ctx *Context) []*corev1.Event
+	Handle(frames []Frame, ctx *Context) []*agentshimv1.Entry
 }
