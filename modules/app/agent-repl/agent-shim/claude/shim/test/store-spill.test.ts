@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { SpillJournal } from "../src/uds/store-spill.js";
-import { EventSchema } from "../src/uds/proto.js";
+import { EntrySchema, InternalEntrySchema } from "../src/uds/proto.js";
 import { tmpSpillDir } from "./uds-harness.js";
 
 const journals: SpillJournal[] = [];
@@ -18,8 +18,14 @@ function openJournal(dir: string, sessionId = "sess-1"): SpillJournal {
   return journal;
 }
 
-function event(seq: bigint, writeId: string) {
-  return create(EventSchema, { sessionId: "sess-1", seq, writeId });
+/** One held record, identified by the write id its replay is recognized by. */
+function entry(writeId: string) {
+  return create(EntrySchema, { internal: create(InternalEntrySchema, { writeId }) });
+}
+
+/** The write ids of a recovered batch, which is what the journal owes. */
+function writeIds(batch: ReturnType<typeof entry>[]): string[] {
+  return batch.map((e) => e.internal?.writeId ?? "");
 }
 
 describe("SpillJournal", () => {
@@ -28,10 +34,10 @@ describe("SpillJournal", () => {
     const journal = openJournal(tmpSpillDir());
 
     // Act
-    journal.append([event(1n, "w-1")]);
+    journal.append([entry("w-1")]);
 
     // Assert
-    expect(journal.read().map((batch) => batch.map((e) => e.writeId))).toEqual([["w-1"]]);
+    expect(journal.read().map((batch) => writeIds(batch))).toEqual([["w-1"]]);
   });
 
   it("preserves the order batches were appended in", async () => {
@@ -40,26 +46,26 @@ describe("SpillJournal", () => {
     const journal = openJournal(tmpSpillDir());
 
     // Act
-    journal.append([event(1n, "w-1")]);
-    journal.append([event(2n, "w-2")]);
-    journal.append([event(3n, "w-3")]);
+    journal.append([entry("w-1")]);
+    journal.append([entry("w-2")]);
+    journal.append([entry("w-3")]);
 
     // Assert
-    expect(journal.read().map((batch) => batch[0]!.writeId)).toEqual(["w-1", "w-2", "w-3"]);
+    expect(journal.read().map((batch) => writeIds(batch)[0])).toEqual(["w-1", "w-2", "w-3"]);
   });
 
   it("carries records across a reopen, which is the whole point", async () => {
     // Arrange: the shim that appended these is gone.
     const dir = tmpSpillDir();
     const first = openJournal(dir);
-    first.append([event(1n, "w-1")]);
+    first.append([entry("w-1")]);
     first.close();
 
     // Act
     const second = openJournal(dir);
 
     // Assert
-    expect(second.read().map((batch) => batch[0]!.writeId)).toEqual(["w-1"]);
+    expect(second.read().map((batch) => writeIds(batch)[0])).toEqual(["w-1"]);
   });
 
   it("reports empty when nothing is owed", async () => {
@@ -75,7 +81,7 @@ describe("SpillJournal", () => {
     const journal = openJournal(tmpSpillDir());
 
     // Act
-    journal.append([event(1n, "w-1")]);
+    journal.append([entry("w-1")]);
 
     // Assert
     expect(journal.isEmpty()).toBe(false);
@@ -84,7 +90,7 @@ describe("SpillJournal", () => {
   it("drops every record on clear", async () => {
     // Arrange
     const journal = openJournal(tmpSpillDir());
-    journal.append([event(1n, "w-1")]);
+    journal.append([entry("w-1")]);
 
     // Act
     journal.clear();
@@ -98,7 +104,7 @@ describe("SpillJournal", () => {
     // fsynced, so nothing was ever reported held for it.
     const dir = tmpSpillDir();
     const journal = openJournal(dir);
-    journal.append([event(1n, "w-1")]);
+    journal.append([entry("w-1")]);
     journal.close();
     const file = path.join(dir, "store-write-spill.bin");
     fs.appendFileSync(file, Buffer.from([0, 0, 0, 64, 1, 2, 3]));
@@ -108,14 +114,14 @@ describe("SpillJournal", () => {
     const recovered = reopened.read();
 
     // Assert
-    expect(recovered.map((batch) => batch[0]!.writeId)).toEqual(["w-1"]);
+    expect(recovered.map((batch) => writeIds(batch)[0])).toEqual(["w-1"]);
   });
 
   it("truncates the torn tail away so it is not read twice", async () => {
     // Arrange
     const dir = tmpSpillDir();
     const journal = openJournal(dir);
-    journal.append([event(1n, "w-1")]);
+    journal.append([entry("w-1")]);
     journal.close();
     const file = path.join(dir, "store-write-spill.bin");
     fs.appendFileSync(file, Buffer.from([0, 0, 0, 64, 1, 2, 3]));
@@ -127,7 +133,7 @@ describe("SpillJournal", () => {
     const third = openJournal(dir);
 
     // Assert
-    expect(third.read().map((batch) => batch[0]!.writeId)).toEqual(["w-1"]);
+    expect(third.read().map((batch) => writeIds(batch)[0])).toEqual(["w-1"]);
   });
 
   it("refuses a file that is not a journal and preserves it beside a fresh one", async () => {
@@ -168,7 +174,7 @@ describe("SpillJournal", () => {
     // a reader what it is looking at.
     const dir = tmpSpillDir();
     const journal = openJournal(dir);
-    journal.append([event(1n, "w-1")]);
+    journal.append([entry("w-1")]);
     fs.truncateSync(path.join(dir, "store-write-spill.bin"), 0);
 
     // Act
@@ -180,16 +186,16 @@ describe("SpillJournal", () => {
   });
 
   it("stops at a record whose body is present but does not decode", async () => {
-    // Arrange: a complete-looking record that is not a valid EventBatch is NOT
+    // Arrange: a complete-looking record that is not a valid EntryBatch is NOT
     // a torn tail — the bytes are all there and they are wrong. Reading past it
     // would mean reading at a bad offset.
     const dir = tmpSpillDir();
     const journal = openJournal(dir);
-    journal.append([event(1n, "w-1")]);
+    journal.append([entry("w-1")]);
     journal.close();
     const undecodable = Buffer.alloc(6);
     undecodable.writeUInt32BE(2, 0);
-    // Field 1 (events), wire type LEN, declaring 127 bytes that are not there.
+    // Field 1 (entries), wire type LEN, declaring 127 bytes that are not there.
     undecodable[4] = 0x0a;
     undecodable[5] = 0x7f;
     fs.appendFileSync(path.join(dir, "store-write-spill.bin"), undecodable);
@@ -199,7 +205,7 @@ describe("SpillJournal", () => {
     const recovered = reopened.read();
 
     // Assert: the good record before it is still delivered.
-    expect(recovered.map((batch) => batch[0]!.writeId)).toEqual(["w-1"]);
+    expect(recovered.map((batch) => writeIds(batch)[0])).toEqual(["w-1"]);
   });
 
   it("reports closed once the descriptor is released", async () => {
@@ -218,7 +224,7 @@ describe("SpillJournal", () => {
     // next shim on the workspace has to find it.
     const dir = tmpSpillDir();
     const journal = openJournal(dir);
-    journal.append([event(1n, "w-1")]);
+    journal.append([entry("w-1")]);
 
     // Act
     journal.close();
@@ -233,6 +239,6 @@ describe("SpillJournal", () => {
     journal.close();
 
     // Act / Assert
-    expect(() => journal.append([event(1n, "w-1")])).toThrow();
+    expect(() => journal.append([entry("w-1")])).toThrow();
   });
 });

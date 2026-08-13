@@ -123,15 +123,19 @@ export function queryRuntimeIdentity(
     vendorSessionId: shim.vendorSessionId,
     effectiveModel: shim.effectiveModel,
     sdkVersion: shim.sdkVersion,
-    claudeCodeVersion: text("claude_code_version", "claudeCodeVersion"),
     shimBuildSha: shim.shimBuildSha,
-    authSource: text("apiKeySource", "api_key_source"),
-    // NOT INITIALIZATION EVIDENCE. The subscription type is reported by the
-    // usage service, and the session records it on every AccountUsageObservation
-    // it samples, so the accounting record already holds it at both of a turn's
-    // boundaries. Blocking init on a usage round-trip to duplicate it here would
-    // buy the ledger nothing.
-    subscriptionType: "",
+    // `claude_code_version`, `apiKeySource` and the subscription type are NOT
+    // stated here any more, and none of them is lost. Each was a per-QUERY
+    // spelling of a fact that is fixed for the whole shim process: a shim drives
+    // one CLI binary and resolves one credential at process start, so two
+    // query() calls it serves could never disagree. `SessionBegan` states both
+    // once per session (`agent_version`, `auth`), and the subscription type
+    // rides every AccountUsageObservation, at both of a turn's boundaries.
+    //
+    // Two spellings of one fact, with nothing comparing them, drift silently —
+    // a wrong /status panel or a wrong cost attribution with no error anywhere.
+    // What remains below is exactly what can DIFFER between two queries, which
+    // is the whole point of a per-query identity record.
     fastModeState: text("fast_mode_state", "fastModeState"),
     // The EXPLANATION for the state, which the SDK emits only when fast mode is
     // disabled. Absent while fast mode is on is the correct reading, not a gap.

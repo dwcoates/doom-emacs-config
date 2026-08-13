@@ -1,646 +1,334 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   StreamMessageTracker,
   isEphemeral,
-  streamEventToContentDelta,
-  streamEventToMessageLatency,
-  streamEventToResponseUsage,
-  toEphemeralEvent,
-  toPersistentEvent,
+  streamEventToContentArriving,
+  streamEventToResponseTiming,
+  toLiveEntry,
+  toStoredStreamEntry,
   toolProgressToHeartbeat,
 } from "../src/proto/delta.js";
-import { EventClass, Plane } from "../src/uds/proto.js";
-import { createRegistry } from "@bufbuild/protobuf";
-import { anyUnpack } from "@bufbuild/protobuf/wkt";
-import { ClaudeStreamMessageSchema } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
-import type { ClaudeStreamMessage } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+import type { ContentArriving, ExternalEntry } from "../src/uds/proto.js";
 
 function loadStream(name: string): Record<string, unknown> {
   const line = readFileSync(new URL(`../../../../testdata/corpus/stream/${name}.jsonl`, import.meta.url), "utf8").split("\n")[0]!;
   return JSON.parse(line) as Record<string, unknown>;
 }
 
+/** The ContentArriving payload of a record this converter produced. */
+function arriving(external: ExternalEntry | null): ContentArriving {
+  if (external === null) throw new Error("expected a record");
+  if (external.entry.case !== "message") throw new Error("expected the message arm");
+  if (external.entry.value.payload.case !== "contentArriving") throw new Error("expected contentArriving");
+  return external.entry.value.payload.value;
+}
+
+const MSG = "msg_01ABC";
+
 // ---------------------------------------------------------------------------
-// stream_event → ContentDelta (every ContentBlockDelta arm).
+// stream_event → ContentArriving: the fragment arms.
 // ---------------------------------------------------------------------------
 
-describe("streamEventToContentDelta arms", () => {
-  function delta(name: string) {
-    const evt = streamEventToContentDelta(loadStream(name), { nowMs: 1000 });
-    expect(evt).not.toBeNull();
-    if (evt!.payload.case !== "contentDelta") throw new Error("not a content delta");
-    return evt!.payload.value;
-  }
-
-  it("text arm carries the text and block_index", () => {
-    const d = delta("stream_event-content_block_delta-text");
-    expect(d.delta.case).toBe("text");
-    if (d.delta.case !== "text") throw new Error("arm");
-    expect(d.delta.value).toBe("hi");
-    expect(d.blockIndex).toBe(1);
-    expect(d.toolUseId).toBeUndefined();
+describe("streamEventToContentArriving fragment arms", () => {
+  it("relays a text fragment verbatim", () => {
+    const a = arriving(streamEventToContentArriving(loadStream("stream_event-content_block_delta-text"), { messageId: MSG }));
+    if (a.fragment.case !== "text") throw new Error("arm");
+    expect(a.fragment.value).toBe("hi");
   });
 
-  it("carries the streamed message id, NOT the event's own envelope uuid", () => {
-    // The fixture's envelope uuid is unique to this one stream_event; keying on
-    // it gave every chunk a different id, which is what made the frontend open
-    // a bubble per chunk.
-    const evt = streamEventToContentDelta(loadStream("stream_event-content_block_delta-thinking"), {
-      messageId: "msg_01ABC",
-    })!;
-    if (evt.payload.case !== "contentDelta") throw new Error("case");
-    expect(evt.payload.value.delta.case).toBe("thinking");
-    expect(evt.payload.value.uuid).toBe("msg_01ABC");
-    expect(evt.payload.value.uuid).not.toBe("aa3da566-9d60-4f94-9e99-b9c1f68fc9b4");
+  it("relays a thinking fragment on its own arm, never as text", () => {
+    const a = arriving(streamEventToContentArriving(loadStream("stream_event-content_block_delta-thinking"), { messageId: MSG }));
+    expect(a.fragment.case).toBe("thinking");
   });
 
-  it("thinking arm with null estimated_tokens → 0", () => {
-    expect(delta("stream_event-content_block_delta-thinking").estimatedTokens).toBe(0n);
-  });
-
-  it("thinking arm with a number estimated_tokens → bigint (synthetic)", () => {
-    const msg = { type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "x", estimated_tokens: 42 } }, session_id: "s", uuid: "u" };
-    const evt = streamEventToContentDelta(msg)!;
-    if (evt.payload.case !== "contentDelta") throw new Error("case");
-    expect(evt.payload.value.estimatedTokens).toBe(42n);
-  });
-
-  it("signature arm", () => {
-    expect(delta("stream_event-content_block_delta-signature").delta.case).toBe("signature");
-  });
-
-  it("input_json arm carries the bound tool-use identity (synthetic)", () => {
-    const msg = { type: "stream_event", event: { type: "content_block_delta", index: 3, delta: { type: "input_json_delta", partial_json: "{\"k\":1}" } }, session_id: "s", uuid: "u" };
-    const evt = streamEventToContentDelta(msg, { messageId: "msg_1", toolUseId: "toolu_3" })!;
-    if (evt.payload.case !== "contentDelta" || evt.payload.value.delta.case !== "inputJson") throw new Error("arm");
-    expect(evt.payload.value.delta.value).toBe("{\"k\":1}");
-    expect(evt.payload.value.toolUseId).toBe("toolu_3");
-  });
-
-  it("rejects an input_json arm without a tool-use binding before constructing an event", () => {
-    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    const msg = { type: "stream_event", event: { type: "content_block_delta", index: 3, delta: { type: "input_json_delta", partial_json: "{\"k\":1}" } }, session_id: "s", uuid: "u" };
-
-    expect(() => streamEventToContentDelta(msg, { messageId: "msg_1", agentReplSessionId: "agent-session" })).toThrow("input_json delta has no bound tool-use identity");
-
-    const records = write.mock.calls.map(([line]) => JSON.parse(String(line)) as { agent_repl_session_id?: string; claude_session_id?: string; context: Record<string, unknown> });
-    expect(records).toContainEqual(expect.objectContaining({
-      agent_repl_session_id: "test-agent-session",
-      claude_session_id: "s",
-      context: expect.objectContaining({
-        api_message_id: "msg_1",
-        block_index: 3,
-        tool_use_id: null,
-        delta_length: 7,
-        outcome: "missing_tool_use_id_binding",
-      }),
-    }));
-  });
-
-  it("rejects an unsupported content delta arm without fabricating an event", () => {
+  it("relays tool arguments as INCOMPLETE json on the arguments arm", () => {
     const msg = {
       type: "stream_event",
-      event: {
-        type: "content_block_delta",
-        index: 0,
-        delta: { type: "future_vendor_delta", value: "unmodeled" },
-      },
       session_id: "s",
-      uuid: "u",
+      event: { type: "content_block_delta", index: 2, delta: { type: "input_json_delta", partial_json: "{\"pat" } },
     };
-    expect(streamEventToContentDelta(msg)).toBeNull();
-    expect(toEphemeralEvent(msg)).toBeNull();
+    const a = arriving(streamEventToContentArriving(msg, { messageId: MSG, toolUseId: "toolu_1" }));
+    if (a.fragment.case !== "argumentsJson") throw new Error("arm");
+    expect(a.fragment.value).toBe("{\"pat");
   });
 
-  it("is classified EPHEMERAL, plane STREAM, seq 0", () => {
-    const evt = streamEventToContentDelta(loadStream("stream_event-content_block_delta-text"))!;
-    expect(evt.class).toBe(EventClass.EPHEMERAL);
-    expect(evt.plane).toBe(Plane.STREAM);
-    expect(evt.seq).toBe(0n);
+  it("carries the block index so two fragments of one response land apart", () => {
+    const a = arriving(streamEventToContentArriving(loadStream("stream_event-content_block_delta-text"), { messageId: MSG }));
+    expect(a.blockIndex).toBe(1);
+  });
+
+  it("yields nothing for a signature delta, which the content model cannot hold", () => {
+    expect(streamEventToContentArriving(loadStream("stream_event-content_block_delta-signature"), { messageId: MSG })).toBeNull();
+  });
+
+  it("yields nothing for a structural frame carrying no fragment", () => {
+    expect(streamEventToContentArriving(loadStream("stream_event-content_block_stop"), { messageId: MSG })).toBeNull();
   });
 });
 
 // ---------------------------------------------------------------------------
-// Structural stream_event frames carry no live-typing content → null.
+// The identity a preview must carry for the settled message to replace it.
 // ---------------------------------------------------------------------------
 
-describe("streamEventToContentDelta ignores structural frames", () => {
-  for (const name of [
-    "stream_event-message_start",
-    "stream_event-message_stop",
-    "stream_event-message_delta",
-    "stream_event-content_block_start",
-    "stream_event-content_block_stop",
-  ]) {
-    it(`${name} → null`, () => {
-      expect(streamEventToContentDelta(loadStream(name))).toBeNull();
-    });
+describe("streamEventToContentArriving identity", () => {
+  it("keys on the streamed Anthropic message id, NOT the envelope uuid", () => {
+    // The fixture's envelope uuid is unique to this one stream_event; keying on
+    // it gave every chunk a different id, which opened a bubble per chunk.
+    const external = streamEventToContentArriving(loadStream("stream_event-content_block_delta-text"), { messageId: MSG })!;
+    if (external.entry.case !== "message") throw new Error("arm");
+    expect(external.entry.value.messageId).toBe(MSG);
+  });
+
+  it("names itself as its own feed row, since a response is one", () => {
+    const external = streamEventToContentArriving(loadStream("stream_event-content_block_delta-text"), { messageId: MSG })!;
+    if (external.entry.case !== "message") throw new Error("arm");
+    expect(external.entry.value.topLevelMessageId).toBe(MSG);
+  });
+
+  it("states root parentage explicitly rather than leaving it unresolved", () => {
+    const external = streamEventToContentArriving(loadStream("stream_event-content_block_delta-text"), { messageId: MSG })!;
+    if (external.entry.case !== "message") throw new Error("arm");
+    expect(external.entry.value.parent?.parent.case).toBe("root");
+  });
+
+  it("attributes the preview to the agent, resolved rather than inferred", () => {
+    const external = streamEventToContentArriving(loadStream("stream_event-content_block_delta-text"), { messageId: MSG })!;
+    if (external.entry.case !== "message") throw new Error("arm");
+    expect(external.entry.value.author?.author.case).toBe("agent");
+  });
+
+  it("carries the conversation the fragment belongs to", () => {
+    const external = streamEventToContentArriving(loadStream("stream_event-content_block_delta-text"), { messageId: MSG })!;
+    expect(external.sessionId).toBe("79f88fa5-93c3-45d0-8376-ef9812240092");
+  });
+
+  it("stamps the producer's observation time", () => {
+    const external = streamEventToContentArriving(loadStream("stream_event-content_block_delta-text"), { messageId: MSG, nowMs: 1000 })!;
+    expect(external.producedAtMs).toBe(1000n);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The refusals. Each is a different reason, and none invents a parent.
+// ---------------------------------------------------------------------------
+
+describe("streamEventToContentArriving refusals", () => {
+  it("refuses a fragment with no in-flight message id", () => {
+    expect(streamEventToContentArriving(loadStream("stream_event-content_block_delta-text"), {})).toBeNull();
+  });
+
+  it("refuses subagent content rather than emitting it as a feed row", () => {
+    // Arrange: the stream marks subagent content by naming the tool call that
+    // spawned it, and never carries the containing message's own id.
+    const msg = {
+      ...loadStream("stream_event-content_block_delta-text"),
+      parent_tool_use_id: "toolu_parent",
+    };
+
+    // Act / Assert.
+    expect(streamEventToContentArriving(msg, { messageId: MSG })).toBeNull();
+  });
+
+  it("throws on an arguments fragment with no bound tool block", () => {
+    const msg = {
+      type: "stream_event",
+      session_id: "s",
+      event: { type: "content_block_delta", index: 2, delta: { type: "input_json_delta", partial_json: "{" } },
+    };
+    expect(() => streamEventToContentArriving(msg, { messageId: MSG })).toThrow(/no bound tool-use identity/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stream_event → ResponseTiming.
+// ---------------------------------------------------------------------------
+
+describe("streamEventToResponseTiming", () => {
+  function timing(msg: Record<string, unknown>, messageId = MSG) {
+    const entry = streamEventToResponseTiming(msg, { messageId });
+    if (entry === null) throw new Error("expected a record");
+    if (entry.external?.entry.case !== "bookkeeping") throw new Error("expected bookkeeping");
+    if (entry.external.entry.value.kind.case !== "responseTiming") throw new Error("expected responseTiming");
+    return entry.external.entry.value.kind.value;
   }
-});
 
-// ---------------------------------------------------------------------------
-// stream_event → MessageLatency (the ttft relay).
-//
-// `ttft_ms` is a top-level field of the stream_event envelope that the SDK
-// stamps on message_start — the one structural frame carrying a progress fact,
-// and one the ContentDelta mapper drops. Relaying it is what makes first-token
-// latency reachable mid-turn instead of only at the turn's result.
-// ---------------------------------------------------------------------------
-
-describe("streamEventToMessageLatency", () => {
-  /** A message_start frame with an arbitrary top-level ttft stamp. */
-  const start = (ttft: unknown) => ({
-    type: "stream_event",
-    session_id: "s1",
-    uuid: "envelope-of-the-start-event",
-    ttft_ms: ttft,
-    event: { type: "message_start", message: { id: "msg_01ABC", type: "message", role: "assistant" } },
+  it("carries the first-token latency the message_start stamped", () => {
+    expect(timing(loadStream("stream_event-message_start")).firstTokenMs).toBe(865n);
   });
 
-  function latency(msg: Record<string, unknown>, opts?: { nowMs?: number; messageId?: string }) {
-    const evt = streamEventToMessageLatency(msg, opts);
-    expect(evt).not.toBeNull();
-    if (evt!.payload.case !== "messageLatency") throw new Error("not a message latency");
-    return evt!.payload.value;
-  }
-
-  it("carries the corpus message_start's ttft stamp", () => {
-    // Arrange / Act
-    const l = latency(loadStream("stream_event-message_start"));
-    // Assert: the observed stamp, verbatim.
-    expect(l.ttftMs).toBe(865n);
+  it("names the message it measured", () => {
+    expect(timing(loadStream("stream_event-message_start")).messageId).toBe(MSG);
   });
 
-  it("keys the stamp to the streaming message id, not the envelope uuid", () => {
-    // Arrange / Act
-    const l = latency(start(700), { messageId: "msg_01ABC" });
-    // Assert: same key ContentDelta uses, so both describe one message.
-    expect(l.uuid).toBe("msg_01ABC");
+  it("leaves total_ms at zero, because this frame measured no total", () => {
+    expect(timing(loadStream("stream_event-message_start")).totalMs).toBe(0n);
   });
 
-  it("carries the session id off the envelope", () => {
-    expect(streamEventToMessageLatency(start(700))!.sessionId).toBe("s1");
+  it("is DURABLE, so it carries the observing plane for the store", () => {
+    const entry = streamEventToResponseTiming(loadStream("stream_event-message_start"), { messageId: MSG })!;
+    expect(entry.internal?.plane?.plane.case).toBe("stream");
   });
 
-  it("is classified PERSISTENT, plane STREAM, seq 0", () => {
-    // Arrange / Act
-    const evt = streamEventToMessageLatency(start(700), { nowMs: 42 })!;
-    // Assert: store sequencing assigns the durable sequence after write.
-    expect([evt.class, evt.plane, evt.seq, evt.producedAtMs]).toEqual([
-      EventClass.PERSISTENT,
-      Plane.STREAM,
-      0n,
-      42n,
-    ]);
+  it("yields nothing for a frame that is not a message_start", () => {
+    expect(streamEventToResponseTiming(loadStream("stream_event-content_block_delta-text"), { messageId: MSG })).toBeNull();
   });
 
-  it("truncates a fractional stamp rather than rejecting it", () => {
-    expect(latency(start(864.7)).ttftMs).toBe(864n);
+  it("yields nothing when the message_start carries no ttft stamp", () => {
+    const msg = { ...loadStream("stream_event-message_start") };
+    delete msg["ttft_ms"];
+    expect(streamEventToResponseTiming(msg, { messageId: MSG })).toBeNull();
   });
 
-  it("returns null when message_start carries no stamp", () => {
-    // Arrange: absence is the common case, not an anomaly.
-    const msg = start(undefined);
-    delete (msg as Record<string, unknown>)["ttft_ms"];
-    // Act / Assert
-    expect(streamEventToMessageLatency(msg)).toBeNull();
+  it("yields nothing for a non-positive stamp rather than reporting it", () => {
+    const msg = { ...loadStream("stream_event-message_start"), ttft_ms: 0 };
+    expect(streamEventToResponseTiming(msg, { messageId: MSG })).toBeNull();
   });
 
-  it("returns null for a zero stamp (absence, not a measured zero)", () => {
-    expect(streamEventToMessageLatency(start(0))).toBeNull();
-  });
-
-  it("returns null for a non-numeric stamp", () => {
-    expect(streamEventToMessageLatency(start("865"))).toBeNull();
-  });
-
-  it("returns null for a content_block_delta frame", () => {
-    // Arrange / Act / Assert: the two mappers are mutually exclusive.
-    expect(streamEventToMessageLatency(loadStream("stream_event-content_block_delta-text"))).toBeNull();
-  });
-
-  it("returns null for a message_stop frame", () => {
-    expect(streamEventToMessageLatency(loadStream("stream_event-message_stop"))).toBeNull();
+  it("refuses a timing it cannot attribute to a message", () => {
+    expect(streamEventToResponseTiming(loadStream("stream_event-message_start"), {})).toBeNull();
   });
 });
 
 // ---------------------------------------------------------------------------
-// tool_progress → HeartbeatProgress.
+// tool_progress → Heartbeat.
 // ---------------------------------------------------------------------------
 
 describe("toolProgressToHeartbeat", () => {
-  const msg = {
-    type: "tool_progress",
-    tool_use_id: "toolu_abc",
-    tool_name: "Bash",
-    parent_tool_use_id: "toolu_parent",
-    elapsed_time_seconds: 12.5,
-    session_id: "s1",
-    uuid: "u1",
-  };
+  const progress = { type: "tool_progress", session_id: "sess", tool_use_id: "toolu_9", tool_name: "Bash", elapsed_time_seconds: 12 };
 
-  it("maps tool_use_id and elapsed seconds", () => {
-    const evt = toolProgressToHeartbeat(msg, { nowMs: 5 });
-    if (evt.payload.case !== "heartbeatProgress") throw new Error("case");
-    expect(evt.payload.value.toolUseId).toBe("toolu_abc");
-    expect(evt.payload.value.elapsedSeconds).toBeCloseTo(12.5);
+  it("reports the tool-use id as the live work identity", () => {
+    const external = toolProgressToHeartbeat(progress)!;
+    if (external.entry.case !== "bookkeeping") throw new Error("arm");
+    if (external.entry.value.kind.case !== "heartbeat") throw new Error("kind");
+    expect(external.entry.value.kind.value.liveWorkIds).toEqual(["toolu_9"]);
   });
 
-  it("is classified EPHEMERAL", () => {
-    expect(toolProgressToHeartbeat(msg).class).toBe(EventClass.EPHEMERAL);
+  it("carries the conversation the work belongs to", () => {
+    expect(toolProgressToHeartbeat(progress)!.sessionId).toBe("sess");
+  });
+
+  it("refuses a frame naming no tool, rather than asserting nothing is running", () => {
+    expect(toolProgressToHeartbeat({ type: "tool_progress", session_id: "sess" })).toBeNull();
+  });
+
+  it("reads the camelCase disk spelling of the tool id", () => {
+    const external = toolProgressToHeartbeat({ type: "tool_progress", sessionId: "sess", toolUseId: "toolu_9" })!;
+    if (external.entry.case !== "bookkeeping") throw new Error("arm");
+    if (external.entry.value.kind.case !== "heartbeat") throw new Error("kind");
+    expect(external.entry.value.kind.value.liveWorkIds).toEqual(["toolu_9"]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Dispatcher + classification.
+// Dispatch: which route each SDK message takes.
 // ---------------------------------------------------------------------------
 
-describe("toEphemeralEvent / toPersistentEvent / isEphemeral", () => {
-  it("routes stream_event to a ContentDelta", () => {
-    const evt = toEphemeralEvent(loadStream("stream_event-content_block_delta-text"));
-    expect(evt?.payload.case).toBe("contentDelta");
+describe("toLiveEntry", () => {
+  it("routes a content fragment to the live path", () => {
+    expect(toLiveEntry(loadStream("stream_event-content_block_delta-text"), { messageId: MSG })).not.toBeNull();
   });
 
-  it("routes a stamped message_start to a persistent MessageLatency", () => {
-    // Arrange / Act: the frame the ContentDelta mapper drops.
-    const evt = toPersistentEvent(loadStream("stream_event-message_start"));
-    // Assert
-    expect(evt?.payload.case).toBe("messageLatency");
-    expect(evt?.class).toBe(EventClass.PERSISTENT);
+  it("routes a tool_progress to the live path", () => {
+    expect(toLiveEntry({ type: "tool_progress", session_id: "s", tool_use_id: "t" })).not.toBeNull();
   });
 
-  it("returns null for a message_start with no ttft stamp", () => {
-    // Arrange: a structural frame with nothing relayable stays dropped.
-    const msg = { type: "stream_event", session_id: "s", event: { type: "message_start", message: { id: "m" } } };
-    // Act / Assert
-    expect(toPersistentEvent(msg)).toBeNull();
+  it("routes nothing else to the live path", () => {
+    expect(toLiveEntry(loadStream("assistant"))).toBeNull();
   });
 
-  it("routes tool_progress to a HeartbeatProgress", () => {
-    const evt = toEphemeralEvent({ type: "tool_progress", tool_use_id: "t", session_id: "s" });
-    expect(evt?.payload.case).toBe("heartbeatProgress");
+  it("yields nothing for a non-object", () => {
+    expect(toLiveEntry("nope")).toBeNull();
+  });
+});
+
+describe("toStoredStreamEntry", () => {
+  it("routes a stamped message_start to the durable path", () => {
+    expect(toStoredStreamEntry(loadStream("stream_event-message_start"), { messageId: MSG })).not.toBeNull();
   });
 
-  it("returns null for a non-ephemeral message (the persistent path owns it)", () => {
-    expect(toEphemeralEvent(loadStream("assistant"))).toBeNull();
+  it("leaves a content fragment off the durable path", () => {
+    expect(toStoredStreamEntry(loadStream("stream_event-content_block_delta-text"), { messageId: MSG })).toBeNull();
   });
 
-  it("routes a message_delta to a persistent response usage relay", () => {
-    // Arrange: the frame that used to be dropped, with the message id the
-    // tracker holds for the message currently streaming.
-    const msg = loadStream("stream_event-message_delta");
-    // Act
-    const evt = toPersistentEvent(msg, { messageId: "msg_011CdKQJaCBXrp4nizdg3fXW" });
-    // Assert
-    expect(evt?.payload.case).toBe("vendor");
-    expect(evt?.class).toBe(EventClass.PERSISTENT);
-    expect(evt?.plane).toBe(Plane.STREAM);
+  it("leaves a tool_progress off the durable path", () => {
+    expect(toStoredStreamEntry({ type: "tool_progress", session_id: "s", tool_use_id: "t" })).toBeNull();
   });
+});
 
-  it("isEphemeral true for stream_event and tool_progress only", () => {
+describe("isEphemeral", () => {
+  it("claims stream_event for the live relay", () => {
     expect(isEphemeral({ type: "stream_event" })).toBe(true);
+  });
+
+  it("claims tool_progress for the live relay", () => {
     expect(isEphemeral({ type: "tool_progress" })).toBe(true);
+  });
+
+  it("leaves every other family to the persistent converter", () => {
     expect(isEphemeral({ type: "assistant" })).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// stream_event(message_delta) → the response's FINAL vendor usage.
-//
-// The assistant message the daemon's per-response ledger is built from carries
-// the message_start usage SNAPSHOT: settled input and cache counters, interim
-// output. The final output_tokens are reported on this frame and nowhere else,
-// which is why the turn ledger could not be made to agree with the terminal
-// result on output.
-// ---------------------------------------------------------------------------
-
-describe("streamEventToResponseUsage", () => {
-  const messageId = "msg_011CdKQJaCBXrp4nizdg3fXW";
-
-  function relayed(msg: Record<string, unknown>, opts?: { messageId?: string }) {
-    const evt = streamEventToResponseUsage(msg, opts ?? { messageId });
-    if (evt === null) return null;
-    if (evt.payload.case !== "vendor") throw new Error("not a vendor payload");
-    const csm = anyUnpack(evt.payload.value, createRegistry(ClaudeStreamMessageSchema)) as ClaudeStreamMessage;
-    if (csm.msg.case !== "streamEvent") throw new Error("not a stream event");
-    const inner = csm.msg.value.event?.event;
-    if (inner?.case !== "messageDelta") throw new Error("not a message delta");
-    return inner.value;
-  }
-
-  it("carries the corpus delta's final output_tokens", () => {
-    // Arrange: the same message the corpus assistant snapshot reports as 3.
-    // Act
-    const delta = relayed(loadStream("stream_event-message_delta"));
-    // Assert
-    expect(delta?.vendorUsage?.outputTokens).toBe(36n);
-  });
-
-  it("carries the thinking tokens the narrow legacy usage cannot hold", () => {
-    const delta = relayed(loadStream("stream_event-message_delta"));
-    expect(delta?.vendorUsage?.outputTokensDetails?.["thinking_tokens"]).toBe(30);
-  });
-
-  it("names the message the correction belongs to", () => {
-    const delta = relayed(loadStream("stream_event-message_delta"));
-    expect(delta?.apiMessageId).toBe(messageId);
-  });
-
-  it("refuses to relay a correction it cannot attribute to a message", () => {
-    // Arrange: no message_start has opened a message, so the tracker holds none.
-    // Act / Assert: an unattributed correction is not evidence.
-    expect(relayed(loadStream("stream_event-message_delta"), { messageId: "" })).toBeNull();
-  });
-
-  it("returns null for a message_delta carrying no usage", () => {
-    const msg = { type: "stream_event", session_id: "s", event: { type: "message_delta", delta: {} } };
-    expect(relayed(msg)).toBeNull();
-  });
-
-  it("returns null for any frame that is not a message_delta", () => {
-    expect(relayed(loadStream("stream_event-message_stop"))).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// StreamMessageTracker — which message the deltas belong to.
-//
-// A content_block_delta says nothing about its message; the identity arrives
-// once, on the message_start that opened it. Keying deltas on the SDK envelope
-// uuid instead gave every chunk a different id, so the frontend opened a new
-// bubble per chunk rather than growing one.
+// StreamMessageTracker: the identity the stream carries only once.
 // ---------------------------------------------------------------------------
 
 describe("StreamMessageTracker", () => {
-  const start = (id: string) => ({
-    type: "stream_event",
-    session_id: "s",
-    uuid: "envelope-of-the-start-event",
-    event: { type: "message_start", message: { id, type: "message", role: "assistant" } },
-  });
-  const chunk = (text: string, envelopeUuid: string) => ({
-    type: "stream_event",
-    session_id: "s",
-    uuid: envelopeUuid,
-    event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
-  });
-  const stop = () => ({
-    type: "stream_event",
-    session_id: "s",
-    uuid: "envelope-of-the-stop-event",
-    event: { type: "message_stop" },
-  });
-  const toolStart = (index: number, id: string) => ({
-    type: "stream_event",
-    session_id: "s",
-    uuid: `envelope-tool-${index}`,
-    event: { type: "content_block_start", index, content_block: { type: "tool_use", id, name: "Bash", input: {} } },
-  });
-  const inputChunk = (index: number, partialJson: string) => ({
-    type: "stream_event",
-    session_id: "s",
-    uuid: `envelope-input-${index}`,
-    event: { type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: partialJson } },
-  });
-
-  it("adopts the message id from message_start", () => {
-    // Arrange
+  it("adopts the message id a message_start announces", () => {
     const t = new StreamMessageTracker();
-    // Act
-    t.observe(start("msg_01ABC"));
-    // Assert
-    expect(t.current()).toBe("msg_01ABC");
+    t.observe(loadStream("stream_event-message_start"));
+    expect(t.current()).toBe("msg_011CdKQJaCBXrp4nizdg3fXW");
   });
 
-  it("holds that id across every delta of the message", () => {
-    // Arrange: the whole point — consecutive chunks must reconcile together.
+  it("clears the identity when the message stops", () => {
     const t = new StreamMessageTracker();
-    t.observe(start("msg_01ABC"));
-
-    // Act: three chunks, each with its OWN envelope uuid, as the SDK emits them.
-    const ids = ["e1", "e2", "e3"].map((e) => {
-      const msg = chunk("x", e);
-      t.observe(msg);
-      const evt = streamEventToContentDelta(msg, { messageId: t.current() })!;
-      if (evt.payload.case !== "contentDelta") throw new Error("case");
-      return evt.payload.value.uuid;
-    });
-
-    // Assert: one id, not three.
-    expect(ids).toEqual(["msg_01ABC", "msg_01ABC", "msg_01ABC"]);
-  });
-
-  it("clears the id at message_stop", () => {
-    // Arrange
-    const t = new StreamMessageTracker();
-    t.observe(start("msg_01ABC"));
-    // Act
-    t.observe(stop());
-    // Assert: nothing is in flight between messages.
+    t.observe(loadStream("stream_event-message_start"));
+    t.observe(loadStream("stream_event-message_stop"));
     expect(t.current()).toBe("");
   });
 
-  it("switches to the next message when a new one starts", () => {
-    // Arrange: two messages in one turn must not share a block.
+  it("binds a tool block's use-id to its API block index", () => {
     const t = new StreamMessageTracker();
-    t.observe(start("msg_FIRST"));
-    t.observe(stop());
-    // Act
-    t.observe(start("msg_SECOND"));
-    // Assert
-    expect(t.current()).toBe("msg_SECOND");
-  });
-
-  it("ignores non-stream messages", () => {
-    // Arrange: a persistent assistant message must not disturb the tracker.
-    const t = new StreamMessageTracker();
-    t.observe(start("msg_01ABC"));
-    // Act
-    t.observe({ type: "assistant", uuid: "u", message: { id: "msg_OTHER" } });
-    // Assert
-    expect(t.current()).toBe("msg_01ABC");
-  });
-
-  it("reports no message when message_start carries no id", () => {
-    // Arrange / Act: a malformed start must not invent an id that would
-    // silently collide with another message's blocks.
-    const t = new StreamMessageTracker();
-    t.observe({ type: "stream_event", session_id: "s", event: { type: "message_start", message: {} } });
-    // Assert
-    expect(t.current()).toBe("");
-  });
-
-  it("binds multiple tool blocks by API block index", () => {
-    const t = new StreamMessageTracker();
-    t.observe(start("msg_tools"));
-    t.observe(toolStart(1, "toolu_one"));
-    t.observe(toolStart(4, "toolu_four"));
-
-    const first = inputChunk(1, "{\"first\":true}");
-    const second = inputChunk(4, "{\"second\":true}");
-    expect(t.toolUseIdFor(first)).toBe("toolu_one");
-    expect(t.toolUseIdFor(second)).toBe("toolu_four");
-
-    const firstEvent = streamEventToContentDelta(first, { messageId: t.current(), toolUseId: t.toolUseIdFor(first) });
-    const secondEvent = streamEventToContentDelta(second, { messageId: t.current(), toolUseId: t.toolUseIdFor(second) });
-    if (firstEvent?.payload.case !== "contentDelta" || secondEvent?.payload.case !== "contentDelta") throw new Error("case");
-    expect([firstEvent.payload.value.toolUseId, secondEvent.payload.value.toolUseId]).toEqual(["toolu_one", "toolu_four"]);
-  });
-
-  it("preserves an identical tool block binding on exact redelivery", () => {
-    const t = new StreamMessageTracker();
-    t.observe(start("msg_tools"));
-    t.observe(toolStart(2, "toolu_two"));
-    t.observe(toolStart(2, "toolu_two"));
-
-    expect(t.toolUseIdFor(inputChunk(2, "{}"))).toBe("toolu_two");
-  });
-
-  it("does not bind a non-tool content block", () => {
-    const t = new StreamMessageTracker();
-    t.observe(start("msg_tools"));
+    t.observe(loadStream("stream_event-message_start"));
     t.observe({
       type: "stream_event",
       session_id: "s",
-      event: { type: "content_block_start", index: 2, content_block: { type: "text", text: "not a tool" } },
+      event: { type: "content_block_start", index: 3, content_block: { type: "tool_use", id: "toolu_5" } },
     });
-
-    expect(t.toolUseIdFor(inputChunk(2, "{}"))).toBeUndefined();
-  });
-
-  it("ignores a malformed non-object content block start", () => {
-    const t = new StreamMessageTracker();
-    t.observe(start("msg_tools"));
-    t.observe({
+    const bound = t.toolUseIdFor({
       type: "stream_event",
       session_id: "s",
-      event: { type: "content_block_start", index: 2, content_block: null },
+      event: { type: "content_block_delta", index: 3, delta: { type: "input_json_delta", partial_json: "{" } },
     });
-
-    expect(t.toolUseIdFor(inputChunk(2, "{}"))).toBeUndefined();
+    expect(bound).toBe("toolu_5");
   });
 
-  it("rejects a malformed input delta index without selecting another tool", () => {
+  it("fails loudly on a tool block start with no active message identity", () => {
     const t = new StreamMessageTracker();
-    t.observe(start("msg_tools"));
-    t.observe(toolStart(2, "toolu_two"));
-
-    expect(t.toolUseIdFor(inputChunk(-1, "{}"))).toBeUndefined();
+    expect(() => t.observe({
+      type: "stream_event",
+      session_id: "s",
+      event: { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_5" } },
+    })).toThrow(/no active API message identity/);
   });
 
-  it("rejects a conflicting tool block redelivery without changing its binding", () => {
-    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  it("fails loudly when a redelivered tool block contradicts its binding", () => {
     const t = new StreamMessageTracker();
-    t.observe(start("msg_tools"));
-    t.observe(toolStart(2, "toolu_two"), "agent-session");
-
-    expect(() => t.observe(toolStart(2, "toolu_conflict"), "agent-session")).toThrow("conflicting_tool_use_id_at_block_index");
-    expect(t.toolUseIdFor(inputChunk(2, "{}"))).toBe("toolu_two");
-    const records = write.mock.calls.map(([line]) => JSON.parse(String(line)) as { agent_repl_session_id?: string; claude_session_id?: string; context: Record<string, unknown> });
-    expect(records).toContainEqual(expect.objectContaining({
-      agent_repl_session_id: "test-agent-session",
-      claude_session_id: "s",
-      context: expect.objectContaining({
-        api_message_id: "msg_tools",
-        block_index: 2,
-        tool_use_id: "toolu_conflict",
-        bound_tool_use_id: "toolu_two",
-        delta_length: null,
-        outcome: "conflicting_tool_use_id_at_block_index",
-      }),
-    }));
+    t.observe(loadStream("stream_event-message_start"));
+    const start = (id: string) => ({
+      type: "stream_event",
+      session_id: "s",
+      event: { type: "content_block_start", index: 1, content_block: { type: "tool_use", id } },
+    });
+    t.observe(start("toolu_a"));
+    expect(() => t.observe(start("toolu_b"))).toThrow(/conflicts with the bound tool-use identity/);
   });
 
-  it("clears tool block bindings at message_stop so a reconnect cannot reuse stale identity", () => {
+  it("ignores a non-tool content block start", () => {
     const t = new StreamMessageTracker();
-    t.observe(start("msg_old"));
-    t.observe(toolStart(0, "toolu_old"));
-    t.observe(stop());
-    t.observe(start("msg_new"));
-
-    expect(t.toolUseIdFor(inputChunk(0, "{}"))).toBeUndefined();
-    expect(() => streamEventToContentDelta(inputChunk(0, "{}"), { messageId: t.current(), toolUseId: t.toolUseIdFor(inputChunk(0, "{}")) })).toThrow("input_json delta has no bound tool-use identity");
-  });
-
-  it("rejects a tool block start without an API tool-use identity before binding it", () => {
-    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    const t = new StreamMessageTracker();
-    t.observe(start("msg_tools"));
-    const missingId = { ...toolStart(5, ""), event: { type: "content_block_start", index: 5, content_block: { type: "tool_use", name: "Bash", input: {} } } };
-
-    expect(() => t.observe(missingId, "agent-session")).toThrow("missing_tool_use_id_at_tool_block_start");
-    expect(t.toolUseIdFor(inputChunk(5, "{}"))).toBeUndefined();
-    const records = write.mock.calls.map(([line]) => JSON.parse(String(line)) as { agent_repl_session_id?: string; claude_session_id?: string; context: Record<string, unknown> });
-    expect(records).toContainEqual(expect.objectContaining({
-      agent_repl_session_id: "test-agent-session",
-      claude_session_id: "s",
-      context: expect.objectContaining({
-        api_message_id: "msg_tools",
-        block_index: 5,
-        tool_use_id: null,
-        delta_length: null,
-        outcome: "missing_tool_use_id_at_tool_block_start",
-      }),
-    }));
-  });
-
-  it("rejects a tool block start before message_start without changing tracker state", () => {
-    const t = new StreamMessageTracker();
-
-    expect(() => t.observe(toolStart(5, "toolu_five"), "agent-session")).toThrow("missing_api_message_id_at_tool_block_start");
-    expect(t.current()).toBe("");
-    expect(t.toolUseIdFor(inputChunk(5, "{}"))).toBeUndefined();
-  });
-
-  it("rejects a non-integral API tool block index before binding it", () => {
-    const t = new StreamMessageTracker();
-    t.observe(start("msg_tools"));
-    const invalidIndex = { ...toolStart(0, "toolu_zero"), event: { type: "content_block_start", index: 1.5, content_block: { type: "tool_use", id: "toolu_fractional", name: "Bash", input: {} } } };
-
-    expect(() => t.observe(invalidIndex, "agent-session")).toThrow("invalid_tool_block_index");
-    expect(t.toolUseIdFor(inputChunk(0, "{}"))).toBeUndefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Producer provenance: the query() invocation an event was built inside.
-// ---------------------------------------------------------------------------
-
-describe("delta mappers stamp the query they are running", () => {
-  it("stamps the running query on a persistent MessageLatency", () => {
-    // Arrange: a message_start carrying a ttft stamp, converted inside a query.
-    const msg = loadStream("stream_event-message_start");
-
-    // Act.
-    const evt = toPersistentEvent(msg, { nowMs: 1000, queryInstanceId: "query-running" });
-
-    // Assert: the envelope names the query that produced it.
-    expect(evt).not.toBeNull();
-    expect(evt!.queryInstanceId).toBe("query-running");
-  });
-
-  it("stamps the running query on an ephemeral ContentDelta", () => {
-    // Arrange.
-    const msg = loadStream("stream_event-content_block_delta-text");
-
-    // Act.
-    const evt = toEphemeralEvent(msg, { nowMs: 1000, queryInstanceId: "query-running" });
-
-    // Assert.
-    expect(evt).not.toBeNull();
-    expect(evt!.queryInstanceId).toBe("query-running");
-  });
-
-  it("leaves the envelope empty when no query is supplied", () => {
-    // Arrange: the single-message decode path used by probes has no query.
-    const msg = loadStream("stream_event-content_block_delta-text");
-
-    // Act.
-    const evt = toEphemeralEvent(msg, { nowMs: 1000 });
-
-    // Assert: empty, which consumers read as live. Never a substituted fact.
-    expect(evt).not.toBeNull();
-    expect(evt!.queryInstanceId).toBe("");
+    t.observe(loadStream("stream_event-message_start"));
+    t.observe(loadStream("stream_event-content_block_start"));
+    expect(t.current()).toBe("msg_011CdKQJaCBXrp4nizdg3fXW");
   });
 });
