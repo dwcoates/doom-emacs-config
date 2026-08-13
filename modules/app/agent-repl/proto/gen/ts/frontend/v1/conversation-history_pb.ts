@@ -55,7 +55,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/conversation-history.proto.
  */
 export const file_frontend_v1_conversation_history: GenFile = /*@__PURE__*/
-  fileDesc("CiZmcm9udGVuZC92MS9jb252ZXJzYXRpb24taGlzdG9yeS5wcm90bxILZnJvbnRlbmQudjEicAoJUGFnZVNjb3BlEioKBGZlZWQYASABKAsyGi5mcm9udGVuZC52MS5QYWdlU2NvcGVGZWVkSAASLgoGaW5zaWRlGAIgASgLMhwuZnJvbnRlbmQudjEuUGFnZVNjb3BlSW5zaWRlSABCBwoFc2NvcGUiDwoNUGFnZVNjb3BlRmVlZCIvCg9QYWdlU2NvcGVJbnNpZGUSHAoUY29udGFpbmVyX21lc3NhZ2VfaWQYASABKAkiSAoMRmlyc3RQYWdlQ21kEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgVzY29wZRgCIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZSJHCgtOZXh0UGFnZUNtZBIRCgl3b3Jrc3BhY2UYASABKAkSJQoFc2NvcGUYAiABKAsyFi5mcm9udGVuZC52MS5QYWdlU2NvcGUiogUKF0NvbnZlcnNhdGlvbkhpc3RvcnlQYWdlEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpyZXF1ZXN0X2lkGAIgASgJEicKCW1lc3NhZ2VfMRgDIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV8yGAQgASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzMYBSABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEicKCW1lc3NhZ2VfNBgGIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV81GAcgASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzYYCCABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEicKCW1lc3NhZ2VfNxgJIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV84GAogASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzkYCyABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEigKCm1lc3NhZ2VfMTAYDCABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEisKBG1vcmUYDSABKAsyGy5mcm9udGVuZC52MS5IaXN0b3J5SGFzTW9yZUgAEiwKBXN0YXJ0GA4gASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUF0U3RhcnRIABIVCg1saXZlX2pvaW5fc2VxGA8gASgEEiUKBXNjb3BlGBAgASgLMhYuZnJvbnRlbmQudjEuUGFnZVNjb3BlEhwKFGFuY2VzdG9yX21lc3NhZ2VfaWRzGBEgAygJQg4KDGNvbnRpbnVhdGlvbiIQCg5IaXN0b3J5SGFzTW9yZSIQCg5IaXN0b3J5QXRTdGFydEIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_frontend_v1_feed]);
+  fileDesc("CiZmcm9udGVuZC92MS9jb252ZXJzYXRpb24taGlzdG9yeS5wcm90bxILZnJvbnRlbmQudjEicAoJUGFnZVNjb3BlEioKBGZlZWQYASABKAsyGi5mcm9udGVuZC52MS5QYWdlU2NvcGVGZWVkSAASLgoGaW5zaWRlGAIgASgLMhwuZnJvbnRlbmQudjEuUGFnZVNjb3BlSW5zaWRlSABCBwoFc2NvcGUiDwoNUGFnZVNjb3BlRmVlZCIvCg9QYWdlU2NvcGVJbnNpZGUSHAoUY29udGFpbmVyX21lc3NhZ2VfaWQYASABKAkiSAoMRmlyc3RQYWdlQ21kEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgVzY29wZRgCIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZSJHCgtOZXh0UGFnZUNtZBIRCgl3b3Jrc3BhY2UYASABKAkSJQoFc2NvcGUYAiABKAsyFi5mcm9udGVuZC52MS5QYWdlU2NvcGUi2gMKF0NvbnZlcnNhdGlvbkhpc3RvcnlQYWdlEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpyZXF1ZXN0X2lkGAIgASgJEiYKCG1lc3NhZ2VzGBIgAygLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRIrCgRtb3JlGA0gASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUhhc01vcmVIABIsCgVzdGFydBgOIAEoCzIbLmZyb250ZW5kLnYxLkhpc3RvcnlBdFN0YXJ0SAASFQoNbGl2ZV9qb2luX3NlcRgPIAEoBBIlCgVzY29wZRgQIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZRIcChRhbmNlc3Rvcl9tZXNzYWdlX2lkcxgRIAMoCUIOCgxjb250aW51YXRpb25KBAgDEARKBAgEEAVKBAgFEAZKBAgGEAdKBAgHEAhKBAgIEAlKBAgJEApKBAgKEAtKBAgLEAxKBAgMEA1SCW1lc3NhZ2VfMVIJbWVzc2FnZV8yUgltZXNzYWdlXzNSCW1lc3NhZ2VfNFIJbWVzc2FnZV81UgltZXNzYWdlXzZSCW1lc3NhZ2VfN1IJbWVzc2FnZV84UgltZXNzYWdlXzlSCm1lc3NhZ2VfMTAiEAoOSGlzdG9yeUhhc01vcmUiEAoOSGlzdG9yeUF0U3RhcnRCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_frontend_v1_feed]);
 
 /**
  * Which container a page walks.
@@ -215,22 +215,20 @@ export const NextPageCmdSchema: GenMessage<NextPageCmd> = /*@__PURE__*/
   messageDesc(file_frontend_v1_conversation_history, 4);
 
 /**
- * AT MOST TEN messages, oldest first.
+ * One page of messages, oldest first.
  *
- * Ten discrete slots rather than a repeated field: a repeated field is
- * unbounded by construction and the only enforcement available is a runtime
- * check the producer must remember to apply. Here a producer holding an
- * eleventh message has nowhere to put it.
+ * THE PAGE LIMIT IS THE DAEMON'S INVARIANT, NOT THIS TYPE'S. The messages
+ * travel in a repeated field, which is unbounded by construction: nothing here
+ * stops an over-long page. The at-most-ten ceiling is enforced by the daemon
+ * that builds the page, and by nothing else. No `limit` field is added to
+ * compensate — a limit on the wire would be a second place for the ceiling to
+ * live and a second thing for a client to disagree with.
  *
- * DENSITY IS THE PRODUCER'S INVARIANT. Slots fill from message_1 upward, and
- * message_k set while message_(k-1) is empty is a bug. Making THAT structural
- * needs a oneof of ten page-shaped messages and fifty-five fields; the ceiling
- * is what matters and this achieves it, so the gap is documented rather than
- * paid for.
- *
- * NESTED MESSAGES DO NOT COST A SLOT. A message contained by another travels
- * inside its parent exactly as ConversationDelta carries it, so a client asking
- * for a page cannot be surprised by its width.
+ * NESTED MESSAGES ARE NOT IN THIS PAGE. A message contained by another does
+ * NOT travel inside its parent here: contained records are reached by PAGING,
+ * with a fresh request whose PageScope is PageScopeInside naming the
+ * container's message id. So a page of the feed carries feed rows only, and a
+ * client that wants a subagent's insides asks for them.
  *
  * @generated from message frontend.v1.ConversationHistoryPage
  */
@@ -252,57 +250,12 @@ export type ConversationHistoryPage = Message<"frontend.v1.ConversationHistoryPa
   /**
    * Messages OLDEST FIRST, as COMPLETE feed envelopes identical in shape to
    * ConversationDelta's — so a frontend renders a paged message with the same
-   * code that renders a pushed one. Absent slots mean a short page, which at
-   * the top of a conversation is the normal case.
+   * code that renders a pushed one. Fewer than the daemon's ceiling means a
+   * short page, which at the top of a conversation is the normal case.
    *
-   * @generated from field: frontend.v1.Message message_1 = 3;
+   * @generated from field: repeated frontend.v1.Message messages = 18;
    */
-  message1?: Message$1 | undefined;
-
-  /**
-   * @generated from field: frontend.v1.Message message_2 = 4;
-   */
-  message2?: Message$1 | undefined;
-
-  /**
-   * @generated from field: frontend.v1.Message message_3 = 5;
-   */
-  message3?: Message$1 | undefined;
-
-  /**
-   * @generated from field: frontend.v1.Message message_4 = 6;
-   */
-  message4?: Message$1 | undefined;
-
-  /**
-   * @generated from field: frontend.v1.Message message_5 = 7;
-   */
-  message5?: Message$1 | undefined;
-
-  /**
-   * @generated from field: frontend.v1.Message message_6 = 8;
-   */
-  message6?: Message$1 | undefined;
-
-  /**
-   * @generated from field: frontend.v1.Message message_7 = 9;
-   */
-  message7?: Message$1 | undefined;
-
-  /**
-   * @generated from field: frontend.v1.Message message_8 = 10;
-   */
-  message8?: Message$1 | undefined;
-
-  /**
-   * @generated from field: frontend.v1.Message message_9 = 11;
-   */
-  message9?: Message$1 | undefined;
-
-  /**
-   * @generated from field: frontend.v1.Message message_10 = 12;
-   */
-  message10?: Message$1 | undefined;
+  messages: Message$1[];
 
   /**
    * WHETHER the conversation continues above this page — never WHERE.
