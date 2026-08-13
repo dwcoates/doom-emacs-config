@@ -8,7 +8,6 @@ package frontend.v1;
 import "frontend/v1/feed.proto";
 import "frontend/v1/footer.proto";
 import "frontend/v1/shared.proto";
-import "frontend/v1/state.proto";
 import "frontend/v1/sidebar.proto";
 import "frontend/v1/topbar.proto";
 
