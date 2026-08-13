@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/payloads.proto.
  */
 export const file_conversation_v1_payloads: GenFile = /*@__PURE__*/
-  fileDesc("Ch5jb252ZXJzYXRpb24vdjEvcGF5bG9hZHMucHJvdG8SD2NvbnZlcnNhdGlvbi52MSI5CghVc2VyU2FpZBItCgdjb250ZW50GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50IqgBCglBZ2VudFNhaWQSLgoHY29udGVudBgBIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudENvbnRlbnQSKgoFdXNhZ2UYAiABKAsyGy5jb252ZXJzYXRpb24udjEuVG9rZW5Vc2FnZRINCgVtb2RlbBgDIAEoCRIwCgtzdG9wX3JlYXNvbhgEIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5TdG9wUmVhc29uImsKDFRvb2xSZXR1cm5lZBIUCgx0b29sX2NhbGxfaWQYASABKAkSMwoHY29udGVudBgCIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ub29sUmVzdWx0Q29udGVudBIQCghpc19lcnJvchgDIAEoCCKkAgoKU3RvcFJlYXNvbhIwCghlbmRfdHVybhgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5TdG9wRW5kVHVybkgAEjIKCXRvb2xfY2FsbBgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5TdG9wVG9vbENhbGxIABI0CgptYXhfdG9rZW5zGAMgASgLMh4uY29udmVyc2F0aW9uLnYxLlN0b3BNYXhUb2tlbnNIABI3CgtpbnRlcnJ1cHRlZBgEIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5TdG9wSW50ZXJydXB0ZWRIABI3Cgt1bnN1cHBvcnRlZBgFIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5TdG9wVW5zdXBwb3J0ZWRIAEIICgZyZWFzb24iDQoLU3RvcEVuZFR1cm4iDgoMU3RvcFRvb2xDYWxsIg8KDVN0b3BNYXhUb2tlbnMiEQoPU3RvcEludGVycnVwdGVkIiEKD1N0b3BVbnN1cHBvcnRlZBIOCgZyZWFzb24YASABKAkiRAoPUGVybWlzc2lvbkFza2VkEjEKCXJlcXVlc3RlZBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5Ub29sQ2FsbEJsb2NrIsUBChJQZXJtaXNzaW9uQW5zd2VyZWQSNQoHYWxsb3dlZBgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uQWxsb3dlZEgAEjMKBmRlbmllZBgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uRGVuaWVkSAASOQoJYWJhbmRvbmVkGAMgASgLMiQuY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BYmFuZG9uZWRIAEIICgZhbnN3ZXIiKAoRUGVybWlzc2lvbkFsbG93ZWQSEwoLZm9yX3Nlc3Npb24YASABKAgiIgoQUGVybWlzc2lvbkRlbmllZBIOCgZyZWFzb24YASABKAkiFQoTUGVybWlzc2lvbkFiYW5kb25lZCJFCg1GYWlsdXJlUmFpc2VkEg8KB3N1bW1hcnkYASABKAkSDgoGZGV0YWlsGAIgASgJEhMKC3JldHJ5X2luX21zGAMgASgDIn8KCkNvbnRleHRDdXQSMgoHY2xlYXJlZBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q2xlYXJlZEgAEjYKCWNvbXBhY3RlZBgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q29tcGFjdGVkSABCBQoDY3V0IhAKDkNvbnRleHRDbGVhcmVkIm8KEENvbnRleHRDb21wYWN0ZWQSLgoHc3VtbWFyeRgBIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudENvbnRlbnQSFQoNdG9rZW5zX2JlZm9yZRgCIAEoAxIUCgx0b2tlbnNfYWZ0ZXIYAyABKAMicgoTRGV0YWNoZWRXb3JrU3RhcnRlZBIbChNvcmlnaW5fdG9vbF9jYWxsX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEi8KBGtpbmQYAyABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZCLUAgoQRGV0YWNoZWRXb3JrS2luZBIvCgVhZ2VudBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZEFnZW50SAASLwoFc2hlbGwYAiABKAsyHi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRTaGVsbEgAEjUKCHdvcmtmbG93GAMgASgLMiEuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya2Zsb3dIABI9Cgx1bmNsYXNzaWZpZWQYBCABKAsyJS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRVbmNsYXNzaWZpZWRIABIvCgVza2lsbBgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFNraWxsSAASLwoFbWVyZ2UYBiABKAsyHi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRNZXJnZUgAQgYKBGtpbmQiDwoNRGV0YWNoZWRBZ2VudCIPCg1EZXRhY2hlZFNoZWxsIhIKEERldGFjaGVkV29ya2Zsb3ciMQoNRGV0YWNoZWRTa2lsbBISCgpza2lsbF9uYW1lGAEgASgJEgwKBGFyZ3MYAiABKAkiDwoNRGV0YWNoZWRNZXJnZSIpChREZXRhY2hlZFVuY2xhc3NpZmllZBIRCgl0b29sX25hbWUYASABKAkiIQoRU2tpbGxCb2R5UmVzb2x2ZWQSDAoEYm9keRgBIAEoCSIoChZEZXRhY2hlZFdvcmtQcm9ncmVzc2VkEg4KBm91dHB1dBgBIAEoCSKuAgoRRGV0YWNoZWRXb3JrRW5kZWQSNwoJc3VjY2VlZGVkGAEgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkU3VjY2VlZGVkSAASMQoGZmFpbGVkGAIgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkRmFpbGVkSAASNwoJY2FuY2VsbGVkGAMgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQ2FuY2VsbGVkSAASLQoEbG9zdBgEIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZExvc3RIABI6Cgxwcm9jZXNzX2V4aXQYBSABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRQcm9jZXNzRXhpdEIJCgdvdXRjb21lIiMKE0RldGFjaGVkUHJvY2Vzc0V4aXQSDAoEY29kZRgBIAEoBSIkChFEZXRhY2hlZFN1Y2NlZWRlZBIPCgdzdW1tYXJ5GAEgASgJIiEKDkRldGFjaGVkRmFpbGVkEg8KB3N1bW1hcnkYASABKAkiEwoRRGV0YWNoZWRDYW5jZWxsZWQiIQoMRGV0YWNoZWRMb3N0EhEKCWluZmVyZW5jZRgBIAEoCSJwCg9Db250ZW50QXJyaXZpbmcSEwoLYmxvY2tfaW5kZXgYASABKA0SDgoEdGV4dBgCIAEoCUgAEhIKCHRoaW5raW5nGAMgASgJSAASGAoOYXJndW1lbnRzX2pzb24YBCABKAlIAEIKCghmcmFnbWVudEIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_content, file_conversation_v1_tokens]);
+  fileDesc("Ch5jb252ZXJzYXRpb24vdjEvcGF5bG9hZHMucHJvdG8SD2NvbnZlcnNhdGlvbi52MSI5CghVc2VyU2FpZBItCgdjb250ZW50GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50IqgBCglBZ2VudFNhaWQSLgoHY29udGVudBgBIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudENvbnRlbnQSKgoFdXNhZ2UYAiABKAsyGy5jb252ZXJzYXRpb24udjEuVG9rZW5Vc2FnZRINCgVtb2RlbBgDIAEoCRIwCgtzdG9wX3JlYXNvbhgEIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5TdG9wUmVhc29uImsKDFRvb2xSZXR1cm5lZBIUCgx0b29sX2NhbGxfaWQYASABKAkSMwoHY29udGVudBgCIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ub29sUmVzdWx0Q29udGVudBIQCghpc19lcnJvchgDIAEoCCKkAgoKU3RvcFJlYXNvbhIwCghlbmRfdHVybhgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5TdG9wRW5kVHVybkgAEjIKCXRvb2xfY2FsbBgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5TdG9wVG9vbENhbGxIABI0CgptYXhfdG9rZW5zGAMgASgLMh4uY29udmVyc2F0aW9uLnYxLlN0b3BNYXhUb2tlbnNIABI3CgtpbnRlcnJ1cHRlZBgEIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5TdG9wSW50ZXJydXB0ZWRIABI3Cgt1bnN1cHBvcnRlZBgFIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5TdG9wVW5zdXBwb3J0ZWRIAEIICgZyZWFzb24iDQoLU3RvcEVuZFR1cm4iDgoMU3RvcFRvb2xDYWxsIg8KDVN0b3BNYXhUb2tlbnMiEQoPU3RvcEludGVycnVwdGVkIiEKD1N0b3BVbnN1cHBvcnRlZBIOCgZyZWFzb24YASABKAkiRAoPUGVybWlzc2lvbkFza2VkEjEKCXJlcXVlc3RlZBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5Ub29sQ2FsbEJsb2NrIsUBChJQZXJtaXNzaW9uQW5zd2VyZWQSNQoHYWxsb3dlZBgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uQWxsb3dlZEgAEjMKBmRlbmllZBgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uRGVuaWVkSAASOQoJYWJhbmRvbmVkGAMgASgLMiQuY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BYmFuZG9uZWRIAEIICgZhbnN3ZXIiKAoRUGVybWlzc2lvbkFsbG93ZWQSEwoLZm9yX3Nlc3Npb24YASABKAgiIgoQUGVybWlzc2lvbkRlbmllZBIOCgZyZWFzb24YASABKAkiFQoTUGVybWlzc2lvbkFiYW5kb25lZCJFCg1GYWlsdXJlUmFpc2VkEg8KB3N1bW1hcnkYASABKAkSDgoGZGV0YWlsGAIgASgJEhMKC3JldHJ5X2luX21zGAMgASgDIn8KCkNvbnRleHRDdXQSMgoHY2xlYXJlZBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q2xlYXJlZEgAEjYKCWNvbXBhY3RlZBgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q29tcGFjdGVkSABCBQoDY3V0IhAKDkNvbnRleHRDbGVhcmVkIm8KEENvbnRleHRDb21wYWN0ZWQSLgoHc3VtbWFyeRgBIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudENvbnRlbnQSFQoNdG9rZW5zX2JlZm9yZRgCIAEoAxIUCgx0b2tlbnNfYWZ0ZXIYAyABKAMicgoTRGV0YWNoZWRXb3JrU3RhcnRlZBIbChNvcmlnaW5fdG9vbF9jYWxsX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEi8KBGtpbmQYAyABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZCLUAgoQRGV0YWNoZWRXb3JrS2luZBIvCgVhZ2VudBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZEFnZW50SAASLwoFc2hlbGwYAiABKAsyHi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRTaGVsbEgAEjUKCHdvcmtmbG93GAMgASgLMiEuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya2Zsb3dIABI9Cgx1bmNsYXNzaWZpZWQYBCABKAsyJS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRVbmNsYXNzaWZpZWRIABIvCgVza2lsbBgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFNraWxsSAASLwoFbWVyZ2UYBiABKAsyHi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRNZXJnZUgAQgYKBGtpbmQiDwoNRGV0YWNoZWRBZ2VudCIgCg1EZXRhY2hlZFNoZWxsEg8KB2NvbW1hbmQYASABKAkiEgoQRGV0YWNoZWRXb3JrZmxvdyLaAQoMV29ya2Zsb3dTdGVwEg0KBWxhYmVsGAEgASgJEg4KBmRldGFpbBgCIAEoCRI3CgdydW5uaW5nGAogASgLMiQuY29udmVyc2F0aW9uLnYxLldvcmtmbG93U3RlcFJ1bm5pbmdIABIxCgRkb25lGAsgASgLMiEuY29udmVyc2F0aW9uLnYxLldvcmtmbG93U3RlcERvbmVIABI1CgZmYWlsZWQYDCABKAsyIy5jb252ZXJzYXRpb24udjEuV29ya2Zsb3dTdGVwRmFpbGVkSABCCAoGc3RhdHVzIhUKE1dvcmtmbG93U3RlcFJ1bm5pbmciEgoQV29ya2Zsb3dTdGVwRG9uZSIUChJXb3JrZmxvd1N0ZXBGYWlsZWQiMQoNRGV0YWNoZWRTa2lsbBISCgpza2lsbF9uYW1lGAEgASgJEgwKBGFyZ3MYAiABKAkiDwoNRGV0YWNoZWRNZXJnZSIpChREZXRhY2hlZFVuY2xhc3NpZmllZBIRCgl0b29sX25hbWUYASABKAkiIQoRU2tpbGxCb2R5UmVzb2x2ZWQSDAoEYm9keRgBIAEoCSIoChZEZXRhY2hlZFdvcmtQcm9ncmVzc2VkEg4KBm91dHB1dBgBIAEoCSJDChRXb3JrZmxvd1N0ZXBPYnNlcnZlZBIrCgRzdGVwGAEgASgLMh0uY29udmVyc2F0aW9uLnYxLldvcmtmbG93U3RlcCKuAgoRRGV0YWNoZWRXb3JrRW5kZWQSNwoJc3VjY2VlZGVkGAEgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkU3VjY2VlZGVkSAASMQoGZmFpbGVkGAIgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkRmFpbGVkSAASNwoJY2FuY2VsbGVkGAMgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQ2FuY2VsbGVkSAASLQoEbG9zdBgEIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZExvc3RIABI6Cgxwcm9jZXNzX2V4aXQYBSABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRQcm9jZXNzRXhpdEIJCgdvdXRjb21lIiMKE0RldGFjaGVkUHJvY2Vzc0V4aXQSDAoEY29kZRgBIAEoBSIkChFEZXRhY2hlZFN1Y2NlZWRlZBIPCgdzdW1tYXJ5GAEgASgJIiEKDkRldGFjaGVkRmFpbGVkEg8KB3N1bW1hcnkYASABKAkiEwoRRGV0YWNoZWRDYW5jZWxsZWQiIQoMRGV0YWNoZWRMb3N0EhEKCWluZmVyZW5jZRgBIAEoCSJwCg9Db250ZW50QXJyaXZpbmcSEwoLYmxvY2tfaW5kZXgYASABKA0SDgoEdGV4dBgCIAEoCUgAEhIKCHRoaW5raW5nGAMgASgJSAASGAoOYXJndW1lbnRzX2pzb24YBCABKAlIAEIKCghmcmFnbWVudEIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_content, file_conversation_v1_tokens]);
 
 /**
  * Something a person typed. The opening of a turn.
@@ -663,6 +663,15 @@ export const DetachedAgentSchema: GenMessage<DetachedAgent> = /*@__PURE__*/
  * @generated from message conversation.v1.DetachedShell
  */
 export type DetachedShell = Message<"conversation.v1.DetachedShell"> & {
+  /**
+   * The command as invoked, verbatim. This is what the producer SAW dispatched,
+   * carried so a card can show WHAT is running rather than only that something
+   * is. Empty only when the producer observed a launch with no reconstructible
+   * command line.
+   *
+   * @generated from field: string command = 1;
+   */
+  command: string;
 };
 
 /**
@@ -686,6 +695,115 @@ export type DetachedWorkflow = Message<"conversation.v1.DetachedWorkflow"> & {
  */
 export const DetachedWorkflowSchema: GenMessage<DetachedWorkflow> = /*@__PURE__*/
   messageDesc(file_conversation_v1_payloads, 22);
+
+/**
+ * One step of a workflow's journal, as the producer read it.
+ *
+ * STRUCTURED AT THE SOURCE. A journal file states a step's label, its detail and
+ * its status separately, so they are carried separately. The alternative —
+ * flattening them into DetachedWorkProgressed.output — forces every consumer to
+ * parse the structure back out of prose, and two consumers parsing the same
+ * prose is two chances to disagree about what a step said.
+ *
+ * @generated from message conversation.v1.WorkflowStep
+ */
+export type WorkflowStep = Message<"conversation.v1.WorkflowStep"> & {
+  /**
+   * The step's name — the phase or agent it reports on — verbatim.
+   *
+   * @generated from field: string label = 1;
+   */
+  label: string;
+
+  /**
+   * The step's detail line, verbatim: the result on success, the error text on
+   * failure, the prompt while running.
+   *
+   * @generated from field: string detail = 2;
+   */
+  detail: string;
+
+  /**
+   * The step's state, as arms rather than an enum, so a state added later is an
+   * arm a reader must handle rather than an integer it silently renders as
+   * something else. THE SET ARM IS THE STATE; there is no separate status value
+   * to fall out of step with it.
+   *
+   * @generated from oneof conversation.v1.WorkflowStep.status
+   */
+  status: {
+    /**
+     * @generated from field: conversation.v1.WorkflowStepRunning running = 10;
+     */
+    value: WorkflowStepRunning;
+    case: "running";
+  } | {
+    /**
+     * @generated from field: conversation.v1.WorkflowStepDone done = 11;
+     */
+    value: WorkflowStepDone;
+    case: "done";
+  } | {
+    /**
+     * @generated from field: conversation.v1.WorkflowStepFailed failed = 12;
+     */
+    value: WorkflowStepFailed;
+    case: "failed";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message conversation.v1.WorkflowStep.
+ * Use `create(WorkflowStepSchema)` to create a new message.
+ */
+export const WorkflowStepSchema: GenMessage<WorkflowStep> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_payloads, 23);
+
+/**
+ * The step is still executing.
+ *
+ * @generated from message conversation.v1.WorkflowStepRunning
+ */
+export type WorkflowStepRunning = Message<"conversation.v1.WorkflowStepRunning"> & {
+};
+
+/**
+ * Describes the message conversation.v1.WorkflowStepRunning.
+ * Use `create(WorkflowStepRunningSchema)` to create a new message.
+ */
+export const WorkflowStepRunningSchema: GenMessage<WorkflowStepRunning> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_payloads, 24);
+
+/**
+ * The step completed successfully.
+ *
+ * @generated from message conversation.v1.WorkflowStepDone
+ */
+export type WorkflowStepDone = Message<"conversation.v1.WorkflowStepDone"> & {
+};
+
+/**
+ * Describes the message conversation.v1.WorkflowStepDone.
+ * Use `create(WorkflowStepDoneSchema)` to create a new message.
+ */
+export const WorkflowStepDoneSchema: GenMessage<WorkflowStepDone> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_payloads, 25);
+
+/**
+ * The step failed. The failure text is the step's `detail`; this arm carries no
+ * second copy of it.
+ *
+ * @generated from message conversation.v1.WorkflowStepFailed
+ */
+export type WorkflowStepFailed = Message<"conversation.v1.WorkflowStepFailed"> & {
+};
+
+/**
+ * Describes the message conversation.v1.WorkflowStepFailed.
+ * Use `create(WorkflowStepFailedSchema)` to create a new message.
+ */
+export const WorkflowStepFailedSchema: GenMessage<WorkflowStepFailed> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_payloads, 26);
 
 /**
  * A skill invocation, which owns its own window.
@@ -717,7 +835,7 @@ export type DetachedSkill = Message<"conversation.v1.DetachedSkill"> & {
  * Use `create(DetachedSkillSchema)` to create a new message.
  */
 export const DetachedSkillSchema: GenMessage<DetachedSkill> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 23);
+  messageDesc(file_conversation_v1_payloads, 27);
 
 /**
  * A merge run, driving the workspace's own session.
@@ -732,7 +850,7 @@ export type DetachedMerge = Message<"conversation.v1.DetachedMerge"> & {
  * Use `create(DetachedMergeSchema)` to create a new message.
  */
 export const DetachedMergeSchema: GenMessage<DetachedMerge> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 24);
+  messageDesc(file_conversation_v1_payloads, 28);
 
 /**
  * Detached work we could not classify. Stated rather than defaulted into one of
@@ -754,7 +872,7 @@ export type DetachedUnclassified = Message<"conversation.v1.DetachedUnclassified
  * Use `create(DetachedUnclassifiedSchema)` to create a new message.
  */
 export const DetachedUnclassifiedSchema: GenMessage<DetachedUnclassified> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 25);
+  messageDesc(file_conversation_v1_payloads, 29);
 
 /**
  * A skill file's contents, delivered as the SKILL's own body.
@@ -789,7 +907,7 @@ export type SkillBodyResolved = Message<"conversation.v1.SkillBodyResolved"> & {
  * Use `create(SkillBodyResolvedSchema)` to create a new message.
  */
 export const SkillBodyResolvedSchema: GenMessage<SkillBodyResolved> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 26);
+  messageDesc(file_conversation_v1_payloads, 30);
 
 /**
  * Output accumulating into detached work already open.
@@ -812,7 +930,36 @@ export type DetachedWorkProgressed = Message<"conversation.v1.DetachedWorkProgre
  * Use `create(DetachedWorkProgressedSchema)` to create a new message.
  */
 export const DetachedWorkProgressedSchema: GenMessage<DetachedWorkProgressed> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 27);
+  messageDesc(file_conversation_v1_payloads, 31);
+
+/**
+ * A journal step was OBSERVED in detached workflow work already open.
+ *
+ * ONE STEP AT A TIME, not a repeated field on DetachedWorkflow, because that is
+ * how the producer sees them: the journal file grows and the producer reads the
+ * new step, exactly as DetachedWorkProgressed reads new output. A whole list
+ * re-sent per step is how watching a long workflow costs more than running it.
+ *
+ * It carries the message_id of the detached work it belongs to, exactly as
+ * DetachedWorkProgressed does, so it folds onto that card without correlation.
+ *
+ * @generated from message conversation.v1.WorkflowStepObserved
+ */
+export type WorkflowStepObserved = Message<"conversation.v1.WorkflowStepObserved"> & {
+  /**
+   * The step, as read out of the journal.
+   *
+   * @generated from field: conversation.v1.WorkflowStep step = 1;
+   */
+  step?: WorkflowStep | undefined;
+};
+
+/**
+ * Describes the message conversation.v1.WorkflowStepObserved.
+ * Use `create(WorkflowStepObservedSchema)` to create a new message.
+ */
+export const WorkflowStepObservedSchema: GenMessage<WorkflowStepObserved> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_payloads, 32);
 
 /**
  * Detached work reached an end.
@@ -878,7 +1025,7 @@ export type DetachedWorkEnded = Message<"conversation.v1.DetachedWorkEnded"> & {
  * Use `create(DetachedWorkEndedSchema)` to create a new message.
  */
 export const DetachedWorkEndedSchema: GenMessage<DetachedWorkEnded> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 28);
+  messageDesc(file_conversation_v1_payloads, 33);
 
 /**
  * A process's exit status, exactly as the operating system reported it.
@@ -904,7 +1051,7 @@ export type DetachedProcessExit = Message<"conversation.v1.DetachedProcessExit">
  * Use `create(DetachedProcessExitSchema)` to create a new message.
  */
 export const DetachedProcessExitSchema: GenMessage<DetachedProcessExit> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 29);
+  messageDesc(file_conversation_v1_payloads, 34);
 
 /**
  * It finished and did what it was asked.
@@ -925,7 +1072,7 @@ export type DetachedSucceeded = Message<"conversation.v1.DetachedSucceeded"> & {
  * Use `create(DetachedSucceededSchema)` to create a new message.
  */
 export const DetachedSucceededSchema: GenMessage<DetachedSucceeded> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 30);
+  messageDesc(file_conversation_v1_payloads, 35);
 
 /**
  * It finished and did not.
@@ -946,7 +1093,7 @@ export type DetachedFailed = Message<"conversation.v1.DetachedFailed"> & {
  * Use `create(DetachedFailedSchema)` to create a new message.
  */
 export const DetachedFailedSchema: GenMessage<DetachedFailed> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 31);
+  messageDesc(file_conversation_v1_payloads, 36);
 
 /**
  * Someone stopped it deliberately.
@@ -961,7 +1108,7 @@ export type DetachedCancelled = Message<"conversation.v1.DetachedCancelled"> & {
  * Use `create(DetachedCancelledSchema)` to create a new message.
  */
 export const DetachedCancelledSchema: GenMessage<DetachedCancelled> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 32);
+  messageDesc(file_conversation_v1_payloads, 37);
 
 /**
  * We lost sight of it.
@@ -987,7 +1134,7 @@ export type DetachedLost = Message<"conversation.v1.DetachedLost"> & {
  * Use `create(DetachedLostSchema)` to create a new message.
  */
 export const DetachedLostSchema: GenMessage<DetachedLost> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 33);
+  messageDesc(file_conversation_v1_payloads, 38);
 
 /**
  * A fragment of a message still arriving.
@@ -1050,5 +1197,5 @@ export type ContentArriving = Message<"conversation.v1.ContentArriving"> & {
  * Use `create(ContentArrivingSchema)` to create a new message.
  */
 export const ContentArrivingSchema: GenMessage<ContentArriving> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_payloads, 34);
+  messageDesc(file_conversation_v1_payloads, 39);
 
