@@ -1,12 +1,19 @@
 // Package server is the shim-store UDS front end: it accepts producer and
-// subscriber connections, ingests StoreWrite batches through the db layer, and
-// serves Subscribe replay-then-live-tail subscriptions via the fanout.
+// subscriber connections, ingests StoreEntryWrite batches through the db layer,
+// and serves Subscribe replay-then-live-tail subscriptions via the fanout.
+//
+// THE WRITE HALF AND THE READ HALF SPEAK DIFFERENT SURFACES, on purpose. A
+// producer writes `agentshim.v1.StoreEntryWrite`, carrying whole `Entry`
+// records — both halves, including the observation plane and anything the
+// producer could not convert. A subscriber receives `protocol.v1.EntryDelivery`,
+// carrying only the external half. The store is one of the three runtimes
+// entitled to the internal half, and nothing it serves carries it.
 //
 // Socket protocol (the system-wide convention every agent-shim UDS hop uses).
 // Transport is UDS with `agentrepl/wire` framing: a 4-byte big-endian length
 // prefix followed by exactly one serialized google.protobuf.Any. The Any wraps
-// the actual message (StoreWrite, StoreWriteAck, Subscribe, Heartbeat,
-// core.v1.Event for subscription delivery, ...) and its type_url is THE message
+// the actual message (StoreEntryWrite, Subscribe, ConnectionHeartbeat,
+// EntryDelivery for subscription delivery, ...) and its type_url is THE message
 // discriminator, resolved against the proto registry. Both halves of that
 // envelope live in `agentrepl/wire` (WriteAny / ReadAny), so this server, the
 // sidecar's store client, and the daemon cannot drift; the TS shim speaks the
@@ -14,19 +21,21 @@
 //
 // Connection roles follow from the first frame's wrapped message:
 //
-//   - StoreWrite → PRODUCER connection: the store ingests the batch and replies
-//     with one StoreWriteAck frame, then loops (further StoreWrite frames each
-//     get an ack; Heartbeat frames get a Heartbeat reply).
-//   - Heartbeat → PRODUCER-PREAMBLE connection: the store echoes heartbeats
-//     until the first StoreWrite declares the producer. This keeps an idle
-//     sidecar link alive after startup recovery but before any file changes.
+//   - StoreEntryWrite → PRODUCER connection: the store ingests the batch and
+//     sends NOTHING BACK, then loops. There is no ack message on any surface
+//     (see processWrite), so this direction is write-only; a rejected batch
+//     ends the connection because that is the only signal left.
+//   - ConnectionHeartbeat → PRODUCER-PREAMBLE connection: the store echoes
+//     heartbeats until the first StoreEntryWrite declares the producer. This
+//     keeps an idle sidecar link alive after startup recovery but before any
+//     file changes.
 //   - HealthCheck → PRODUCER-PREAMBLE connection: the store returns the
-//     correlated HealthStatus, then continues to await the first StoreWrite.
-//     This lets a recovered idle sidecar prove store health without losing its
-//     producer connection.
-//   - Subscribe → SUBSCRIBER connection: the store replays persisted events with
-//     seq > from_seq, then live-tails Event frames until the client disconnects
-//     or falls behind.
+//     correlated HealthStatus, then continues to await the first
+//     StoreEntryWrite. This lets a recovered idle sidecar prove store health
+//     without losing its producer connection.
+//   - Subscribe → SUBSCRIBER connection: the store replays persisted records
+//     with seq > from_seq, then live-tails EntryDelivery frames until the
+//     client disconnects or falls behind.
 package server
 
 import (
@@ -41,7 +50,8 @@ import (
 	"syscall"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/shim-store/internal/db"
 	"agentrepl/shim-store/internal/logging"
 	"agentrepl/wire"
@@ -78,9 +88,9 @@ type Server struct {
 	// WHY IT IS NEEDED. Seq assignment is already totally ordered — db.Ingest
 	// runs under BEGIN IMMEDIATE (see internal/db/db.go), which serializes every
 	// writer globally. The PUBLISH was not: it ran after the transaction, on the
-	// producer's own goroutine, holding nothing. Every session has two
+	// producer's own goroutine, holding nothing. A session can have two
 	// concurrent producers (the shim's stream plane and the sidecar's file
-	// plane, merged by the (session_id, dedup_key) index), so two goroutines
+	// plane), so two goroutines
 	// could commit as 1043-then-1044 and publish as 1044-then-1043. The daemon
 	// reads a non-increasing seq as a terminal protocol violation and kills the
 	// session — observed twice on 2026-07-29, both mid-turn.
@@ -274,45 +284,45 @@ func (s *Server) handleConn(conn net.Conn) {
 		return
 	}
 	switch m := msg.(type) {
-	case *corev1.StoreWrite:
+	case *agentshimv1.StoreEntryWrite:
 		s.log.Log(logging.Fields{Operation: "classify-connection", Producer: m.GetProducer(), Subscriber: peer}, "classified producer connection")
 		s.serveProducer(conn, m)
-	case *corev1.Heartbeat:
+	case *protocolv1.ConnectionHeartbeat:
 		if err := s.echoHeartbeat(conn, m); err != nil {
 			return
 		}
-		s.log.Log(logging.Fields{Operation: "producer-preamble", Subscriber: peer}, "connection opened with heartbeat; awaiting first StoreWrite")
+		s.log.Log(logging.Fields{Operation: "producer-preamble", Subscriber: peer}, "connection opened with heartbeat; awaiting first StoreEntryWrite")
 		s.serveProducerPreamble(conn)
-	case *corev1.Subscribe:
+	case *protocolv1.Subscribe:
 		s.log.Log(logging.Fields{Operation: "classify-connection", Session: m.GetSessionId(), Subscriber: peer}, "classified subscriber connection from_seq=%d", m.GetFromSeq())
 		s.serveSubscriber(conn, m)
-	case *corev1.CursorQuery:
+	case *agentshimv1.CursorQuery:
 		s.log.Log(logging.Fields{Operation: "classify-connection", Subscriber: peer}, "classified cursor query file_id=%q", m.GetFileId())
 		s.serveCursorQuery(conn, m)
-	case *corev1.MessagePageRequest:
+	case *protocolv1.MessagePageRequest:
 		s.log.Log(logging.Fields{Operation: "classify-connection", Session: m.GetSessionId(), Subscriber: peer, RequestID: m.GetRequestId()},
 			"classified message page request")
 		s.serveMessagePage(conn, m)
-	case *corev1.HealthCheck:
+	case *protocolv1.HealthCheck:
 		s.serveHealth(conn, m)
-		s.log.Log(logging.Fields{Operation: "producer-preamble", Subscriber: peer, RequestID: m.GetRequestId()}, "connection opened with health check; awaiting first StoreWrite")
+		s.log.Log(logging.Fields{Operation: "producer-preamble", Subscriber: peer, RequestID: m.GetRequestId()}, "connection opened with health check; awaiting first StoreEntryWrite")
 		s.serveProducerPreamble(conn)
 	default:
 		s.log.Log(logging.Fields{Operation: "classify-connection", Subscriber: peer, Level: "error"},
-			"protocol frame is %T; expected StoreWrite, Heartbeat, Subscribe, CursorQuery, MessagePageRequest, or HealthCheck", m)
+			"protocol frame is %T; expected StoreEntryWrite, ConnectionHeartbeat, Subscribe, CursorQuery, MessagePageRequest, or HealthCheck", m)
 	}
 }
 
 // serveHealth proves that the store is accepting framed protocol traffic after
 // its database-backed server has been constructed.  A socket file alone can be
 // stale or merely listening; only this correlated response is health.
-func (s *Server) serveHealth(conn net.Conn, check *corev1.HealthCheck) {
+func (s *Server) serveHealth(conn net.Conn, check *protocolv1.HealthCheck) {
 	s.log.LogVerbose(logging.Fields{Operation: "health", Subscriber: conn.RemoteAddr().String(), RequestID: check.GetRequestId()}, "processing health check")
 	if check.GetRequestId() == "" {
 		s.log.Log(logging.Fields{Operation: "health", Subscriber: conn.RemoteAddr().String(), Level: "error"}, "health check rejected: empty request_id")
 		return
 	}
-	status := &corev1.HealthStatus{
+	status := &protocolv1.HealthStatus{
 		RequestId: check.GetRequestId(),
 		Healthy:   true,
 		Component: "shim-store",
@@ -324,15 +334,27 @@ func (s *Server) serveHealth(conn net.Conn, check *corev1.HealthCheck) {
 	s.log.Log(logging.Fields{Operation: "health", Subscriber: conn.RemoteAddr().String(), RequestID: check.GetRequestId()}, "health PASS")
 }
 
-// serveCursorQuery answers a sidecar's startup cursor-recovery request (§7.3):
-// an empty file_id returns all persisted cursors, a set file_id returns just
-// that one (or an empty list when absent). One CursorList reply, then the
-// connection is done.
-func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
+// serveCursorQuery answers a sidecar's startup cursor-recovery request: an
+// empty file_id returns all persisted cursors, a set file_id returns just that
+// one (or an empty list when absent). One CursorList reply, then the connection
+// is done.
+//
+// OPEN TASKS ARE NO LONGER ANSWERABLE, and the reply says so rather than
+// implying otherwise. `OpenTaskState.started` carried the `TaskStarted` event
+// that opened the task and is retired with the `Event` layer, so the message
+// can state when a task was last active but not WHICH task it is. The store
+// also has nothing left to derive one from: the `task_id` column was extracted
+// from the retired task payloads, and detached work is modelled as messages
+// now, with no task-scoped envelope column.
+//
+// `open_tasks_authoritative` is therefore FALSE on every reply. That field
+// exists exactly to distinguish an empty set from a store that cannot compute
+// one, and inventing identity-less entries to fill the list would hand the
+// sidecar a set it cannot reconcile against anything. Recorded as a gap.
+func (s *Server) serveCursorQuery(conn net.Conn, q *agentshimv1.CursorQuery) {
 	peer := conn.RemoteAddr().String()
 	s.log.LogVerbose(logging.Fields{Operation: "cursor-query", Subscriber: peer}, "processing cursor query file_id=%q", q.GetFileId())
-	var cursors []*corev1.CursorState
-	var openTasks []*corev1.OpenTaskState
+	var cursors []*agentshimv1.CursorState
 	if id := q.GetFileId(); id != "" {
 		c, err := s.db.Cursor(id)
 		if err != nil {
@@ -347,17 +369,14 @@ func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
 			return
 		}
 		cursors = all
-		openTasks, err = s.db.OpenTasks()
-		if err != nil {
-			return
-		}
+		s.log.Log(logging.Fields{Operation: "cursor-query", Subscriber: peer, Level: "warn"},
+			"open-task recovery is UNANSWERABLE: OpenTaskState carries no task identity since OpenTaskState.started was retired, so open_tasks is empty and open_tasks_authoritative is false")
 	}
 	s.log.Log(logging.Fields{Operation: "cursor-query", Subscriber: peer},
-		"startup recovery snapshot: cursors=%d open_tasks=%d file_id=%q", len(cursors), len(openTasks), q.GetFileId())
-	if err := wire.WriteAny(conn, &corev1.CursorList{
+		"startup recovery snapshot: cursors=%d open_tasks=0 open_tasks_authoritative=false file_id=%q", len(cursors), q.GetFileId())
+	if err := wire.WriteAny(conn, &agentshimv1.CursorList{
 		Cursors:                cursors,
-		OpenTasks:              openTasks,
-		OpenTasksAuthoritative: q.GetFileId() == "",
+		OpenTasksAuthoritative: false,
 	}); err != nil {
 		s.log.Log(logging.Fields{Operation: "cursor-query-reply", Subscriber: peer, Level: "error"}, "protocol cursor reply write failed: %v", err)
 	}
@@ -376,7 +395,7 @@ func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
 // This door is ADDITIVE. Subscribe and ReplayRequest keep working exactly as
 // they did: the bounded tail read has to demonstrably work before the old ones
 // close, and closing them first would trade a slow feed for an empty one.
-func (s *Server) serveMessagePage(conn net.Conn, req *corev1.MessagePageRequest) {
+func (s *Server) serveMessagePage(conn net.Conn, req *protocolv1.MessagePageRequest) {
 	peer := conn.RemoteAddr().String()
 	fields := logging.Fields{Operation: "message-page", Session: req.GetSessionId(), Subscriber: peer, RequestID: req.GetRequestId()}
 	s.log.LogVerbose(fields, "processing message page request")
@@ -401,7 +420,7 @@ func (s *Server) serveMessagePage(conn net.Conn, req *corev1.MessagePageRequest)
 // ---- producer side --------------------------------------------------------
 
 // serveProducerPreamble keeps a recovered-but-idle producer connection alive
-// until its first StoreWrite identifies the producer. A sidecar can legitimately
+// until its first StoreEntryWrite identifies the producer. A sidecar can legitimately
 // have no event to write for hours after startup, so requiring a write before
 // its first heartbeat turns healthy idleness into a reconnect loop.
 func (s *Server) serveProducerPreamble(conn net.Conn) {
@@ -418,15 +437,15 @@ func (s *Server) serveProducerPreamble(conn net.Conn) {
 			return
 		}
 		switch m := msg.(type) {
-		case *corev1.StoreWrite:
-			s.log.Log(logging.Fields{Operation: "producer-preamble", Producer: m.GetProducer(), Subscriber: peer}, "producer declared by StoreWrite")
+		case *agentshimv1.StoreEntryWrite:
+			s.log.Log(logging.Fields{Operation: "producer-preamble", Producer: m.GetProducer(), Subscriber: peer}, "producer declared by StoreEntryWrite")
 			s.serveProducer(conn, m)
 			return
-		case *corev1.Heartbeat:
+		case *protocolv1.ConnectionHeartbeat:
 			if err := s.echoHeartbeat(conn, m); err != nil {
 				return
 			}
-		case *corev1.HealthCheck:
+		case *protocolv1.HealthCheck:
 			s.serveHealth(conn, m)
 		default:
 			s.log.Log(logging.Fields{Operation: "producer-preamble-read", Subscriber: peer, Level: "error"}, "unrecognized frame %T; disconnecting", m)
@@ -435,7 +454,7 @@ func (s *Server) serveProducerPreamble(conn net.Conn) {
 	}
 }
 
-func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
+func (s *Server) serveProducer(conn net.Conn, first *agentshimv1.StoreEntryWrite) {
 	peer := conn.RemoteAddr().String()
 	producer := first.GetProducer()
 	s.log.LogVerbose(logging.Fields{Operation: "producer", Producer: producer, Subscriber: peer}, "serving producer connection")
@@ -453,15 +472,15 @@ func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 			return
 		}
 		switch m := msg.(type) {
-		case *corev1.StoreWrite:
+		case *agentshimv1.StoreEntryWrite:
 			if err := s.processWrite(conn, m); err != nil {
 				return
 			}
-		case *corev1.Heartbeat:
+		case *protocolv1.ConnectionHeartbeat:
 			if err := s.echoHeartbeat(conn, m); err != nil {
 				return
 			}
-		case *corev1.HealthCheck:
+		case *protocolv1.HealthCheck:
 			s.serveHealth(conn, m)
 		default:
 			s.log.Log(logging.Fields{Operation: "producer-read", Producer: producer, Subscriber: peer, Level: "error"}, "protocol frame is %T; disconnecting producer", m)
@@ -470,8 +489,8 @@ func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 	}
 }
 
-func (s *Server) echoHeartbeat(conn net.Conn, heartbeat *corev1.Heartbeat) error {
-	if err := wire.WriteAny(conn, &corev1.Heartbeat{SentAtMs: heartbeat.GetSentAtMs()}); err != nil {
+func (s *Server) echoHeartbeat(conn net.Conn, heartbeat *protocolv1.ConnectionHeartbeat) error {
+	if err := wire.WriteAny(conn, &protocolv1.ConnectionHeartbeat{SentAtMs: heartbeat.GetSentAtMs()}); err != nil {
 		s.log.Log(logging.Fields{Operation: "heartbeat-reply", Subscriber: conn.RemoteAddr().String(), Level: "error"}, "protocol heartbeat reply failed sent_at_ms=%d: %v", heartbeat.GetSentAtMs(), err)
 		return err
 	}
@@ -479,55 +498,50 @@ func (s *Server) echoHeartbeat(conn net.Conn, heartbeat *corev1.Heartbeat) error
 	return nil
 }
 
-// processWrite ingests one batch and fans out its events, then acks. A rejected
-// batch acks with a non-empty error and a loud log; it is never silently
-// dropped.
-func (s *Server) processWrite(conn net.Conn, sw *corev1.StoreWrite) error {
-	events := sw.GetBatch().GetEvents()
-	ack, durable := s.ingestAndFan(sw)
-	if durable {
-		s.log.LogVerbose(logging.Fields{Operation: "store-write", Producer: sw.GetProducer(), Subscriber: conn.RemoteAddr().String()}, "processing StoreWrite events=%d cursor_advance=%t", len(events), sw.GetBatch().GetCursorAdvance() != nil)
-	}
-	if err := wire.WriteAny(conn, ack); err != nil {
-		s.log.Log(logging.Fields{Operation: "store-write-ack", Producer: sw.GetProducer(), Subscriber: conn.RemoteAddr().String(), Level: "error"}, "protocol StoreWriteAck failed accepted=%d deduped=%d last_seq=%d rejected=%t: %v", ack.GetAccepted(), ack.GetDeduped(), ack.GetLastSeq(), ack.GetError() != "", err)
+// processWrite ingests one batch and fans out its records.
+//
+// THERE IS NO ACK, AND NOTHING REPLACES ONE. `StoreWriteAck` was retired with
+// the `Event` layer and `StoreEntryWrite` has no reply message on any surface,
+// so the store cannot tell a producer how many records it accepted, which were
+// replayed, what seq the batch reached, or that the batch was rejected. No
+// substitute message is invented here; the loss is recorded as a gap.
+//
+// A REJECTED BATCH THEREFORE ENDS THE CONNECTION. That is the only channel
+// left: silence and success are indistinguishable on a write-only stream, so a
+// producer whose batch was refused would otherwise go on writing into a store
+// that discarded it. Dropping the connection is a signal the producer can
+// actually observe, and the refusal is loud-logged with its cause here first.
+// It is not a substitute for an ack and does not carry one's information.
+func (s *Server) processWrite(conn net.Conn, write *agentshimv1.StoreEntryWrite) error {
+	peer := conn.RemoteAddr().String()
+	batch := write.GetBatch()
+	res, err := s.ingestAndFan(write)
+	if err != nil {
+		s.log.Log(logging.Fields{Operation: "store-write", Producer: write.GetProducer(), Subscriber: peer, Level: "error"},
+			"StoreEntryWrite REJECTED entries=%d cursor_advance=%t — the producer cannot be told (StoreEntryWrite has no ack), so the connection is dropped instead: %v",
+			len(batch.GetEntries()), batch.GetCursorAdvance() != nil, err)
 		return err
 	}
-	if durable {
-		s.log.LogVerbose(logging.Fields{Operation: "store-write-ack", Producer: sw.GetProducer(), Subscriber: conn.RemoteAddr().String()}, "StoreWriteAck sent accepted=%d deduped=%d last_seq=%d rejected=%t", ack.GetAccepted(), ack.GetDeduped(), ack.GetLastSeq(), ack.GetError() != "")
-	}
+	s.log.LogVerbose(logging.Fields{Operation: "store-write", Producer: write.GetProducer(), Subscriber: peer},
+		"StoreEntryWrite processed entries=%d accepted=%d replayed=%d unconverted=%d last_seq=%d cursor_advance=%t",
+		len(batch.GetEntries()), res.Accepted, res.Replayed, res.Unconverted, res.LastSeq, batch.GetCursorAdvance() != nil)
 	return nil
 }
 
-func (s *Server) ingestAndFan(sw *corev1.StoreWrite) (*corev1.StoreWriteAck, bool) {
-	batch := sw.GetBatch()
-	events := batch.GetEvents()
+// ingestAndFan persists one batch and announces what it persisted.
+func (s *Server) ingestAndFan(write *agentshimv1.StoreEntryWrite) (db.Result, error) {
+	batch := write.GetBatch()
+	entries := batch.GetEntries()
 
-	// Split ephemeral out: they never touch the DB but still fan out in
-	// arrival position (§4.3, §6.5).
-	persistent := make([]*corev1.Event, 0, len(events))
-	for _, ev := range events {
-		if ev.GetClass() != corev1.EventClass_EVENT_CLASS_EPHEMERAL {
-			persistent = append(persistent, ev)
-		}
+	if len(entries) == 0 && batch.GetCursorAdvance() == nil {
+		// Nothing to persist and no cursor to advance. There is no live-only
+		// class of record any more — every entry in an EntryBatch is a durable
+		// write — so an empty batch is simply a no-op rather than the hot
+		// ephemeral fan-out path this branch used to serve.
+		s.log.LogVerbose(logging.Fields{Operation: "ingest-classify", Producer: write.GetProducer()}, "empty batch carries neither entries nor a cursor advance")
+		return db.Result{}, nil
 	}
-	if len(persistent) == 0 && batch.GetCursorAdvance() == nil {
-		// EPHEMERAL batches are a hot live-tail path. They neither persist nor
-		// change a cursor, so a store log would bury the durable outcomes the
-		// store owns without adding diagnostic value.
-		//
-		// It still takes ingestMu, even holding no seq of its own: this path is
-		// what makes the "fan out in arrival position" claim above true. Without
-		// the lock an ephemeral batch could publish between another batch's
-		// commit and that batch's publish, landing ahead of a persistent event
-		// that was assigned before it.
-		s.ingestMu.Lock()
-		for _, ev := range events {
-			s.fan.publish(ev)
-		}
-		s.ingestMu.Unlock()
-		return &corev1.StoreWriteAck{}, false
-	}
-	s.log.LogVerbose(logging.Fields{Operation: "ingest-classify", Producer: sw.GetProducer()}, "classified batch total_events=%d persistent_events=%d ephemeral_events=%d", len(events), len(persistent), len(events)-len(persistent))
+	s.log.LogVerbose(logging.Fields{Operation: "ingest-classify", Producer: write.GetProducer()}, "classified batch entries=%d cursor_advance=%t", len(entries), batch.GetCursorAdvance() != nil)
 
 	// ASSIGN THEN ANNOUNCE, as one indivisible step (see Server.ingestMu). The
 	// lock opens here rather than after the Ingest because it is the ORDER of
@@ -535,27 +549,23 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) (*corev1.StoreWriteAck, boo
 	// publish is exactly the seq inversion the daemon reads as fatal.
 	s.ingestMu.Lock()
 	start := time.Now()
-	res, err := s.db.Ingest(sw.GetProducer(), persistent, batch.GetCursorAdvance())
+	res, err := s.db.Ingest(write.GetProducer(), batch)
 	ingestMs := time.Since(start).Milliseconds()
 	if err != nil {
-		// The rejected-batch path is unchanged: a loud non-empty ack error, and
-		// the batch counted as durable-intent. Only the unlock is added, so a
-		// rejection cannot wedge every later write behind a held lock.
+		// The db layer already logged this with its own context. Only the
+		// unlock is done here, so a rejection cannot wedge every later write
+		// behind a held lock.
 		s.ingestMu.Unlock()
-		return &corev1.StoreWriteAck{Error: err.Error()}, true
+		return res, err
 	}
 
-	// Fan out in arrival order. Ingest stamped accepted persistent events with
-	// seq>0 and reset deduped ones to seq==0; deduped losers are already
-	// durable and were delivered by the first writer, so we skip them.
-	for _, ev := range events {
-		if ev.GetClass() == corev1.EventClass_EVENT_CLASS_EPHEMERAL {
-			s.fan.publish(ev)
-			continue
-		}
-		if ev.GetSeq() > 0 {
-			s.fan.publish(ev)
-		}
+	// Fan out in arrival order. Ingest returns exactly the deliveries to
+	// announce: a replayed write produces none, because the original write
+	// already fanned that record out and re-fanning it would turn an idempotent
+	// store write into a duplicate DELIVERY. An unconverted record produces
+	// none either — it has no external half, so there is nothing to deliver.
+	for _, delivery := range res.Deliveries {
+		s.fan.publish(delivery)
 	}
 	// The announce is complete, so the ordering guarantee is discharged. The log
 	// below is deliberately outside: it reports what already happened and no
@@ -565,22 +575,32 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) (*corev1.StoreWriteAck, boo
 	// Successful persisted batches are high-frequency session narration rather
 	// than lifecycle or failure evidence. Keep their detailed outcome available
 	// in verbose mode without growing the normal global service log.
-	if len(persistent) > 0 {
-		s.log.LogVerbose(logging.Fields{
-			Operation: "ingest", Producer: sw.GetProducer(), Session: persistent[0].GetSessionId(),
-		}, "persisted batch events=%d accepted=%d deduped=%d replayed=%d last_seq=%d ingest_ms=%d",
-			len(persistent), res.Accepted, res.Deduped, res.Replayed, res.LastSeq, ingestMs)
-	}
+	s.log.LogVerbose(logging.Fields{
+		Operation: "ingest", Producer: write.GetProducer(), Session: batchSession(res),
+	}, "persisted batch entries=%d accepted=%d replayed=%d unconverted=%d last_seq=%d ingest_ms=%d",
+		len(entries), res.Accepted, res.Replayed, res.Unconverted, res.LastSeq, ingestMs)
 	// A REPLAY is a normal-log fact, not narration: it says a producer resent a
-	// batch it never saw acked, and that the write identity held. It is rare by
-	// construction (one store bounce per deploy), so it never floods.
+	// batch whose outcome it never learned, and that the write identity held. It
+	// is rare by construction (one store bounce per deploy), so it never floods.
 	if res.Replayed > 0 {
 		s.log.Log(logging.Fields{
-			Operation: "ingest", Producer: sw.GetProducer(), Session: persistent[0].GetSessionId(),
-		}, "REPLAYED batch absorbed idempotently events=%d accepted=%d replayed=%d — the producer resent writes whose ack it never saw, and the (session_id, write_id) identity made them no-ops instead of duplicate rows",
-			len(persistent), res.Accepted, res.Replayed)
+			Operation: "ingest", Producer: write.GetProducer(), Session: batchSession(res),
+		}, "REPLAYED batch absorbed idempotently entries=%d accepted=%d replayed=%d — the producer resent writes whose outcome it never learned, and the (session_id, write_id) identity made them no-ops instead of duplicate rows",
+			len(entries), res.Accepted, res.Replayed)
 	}
-	return &corev1.StoreWriteAck{Accepted: res.Accepted, Deduped: res.Deduped, LastSeq: res.LastSeq}, true
+	return res, nil
+}
+
+// batchSession names the session a batch's log record is attributed to.
+//
+// Empty when the batch accepted nothing positioned — a pure cursor advance, or
+// a batch of unconverted records, neither of which belongs to a session the
+// store can name.
+func batchSession(res db.Result) string {
+	if len(res.Deliveries) == 0 {
+		return ""
+	}
+	return deliverySession(res.Deliveries[0])
 }
 
 // ---- subscriber side ------------------------------------------------------
@@ -729,7 +749,7 @@ func terminalReasonForRead(err error) subscriptionTerminalReason {
 	}
 }
 
-func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
+func (s *Server) serveSubscriber(conn net.Conn, sub *protocolv1.Subscribe) {
 	sessionID := sub.GetSessionId()
 	peer := conn.RemoteAddr().String()
 	s.log.LogVerbose(logging.Fields{Operation: "subscribe", Session: sessionID, Subscriber: peer}, "starting streaming replay-then-tail from_seq=%d", sub.GetFromSeq())
@@ -758,19 +778,19 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	// to the next row. That first-row progress is what keeps the shim's
 	// activity deadline alive during large history pulls.
 	var delivered, firstReplaySeq, lastReplaySeq uint64
-	replayStats, err := s.db.ReplayFrom(replayCtx, sessionID, sub.GetFromSeq(), func(ev *corev1.Event) error {
+	replayStats, err := s.db.ReplayFrom(replayCtx, sessionID, sub.GetFromSeq(), func(delivery *protocolv1.EntryDelivery) error {
 		if terminal.hooks.beforeReplayRow != nil {
 			terminal.hooks.beforeReplayRow()
 		}
 		nextDelivered := delivered + 1
-		if err := wire.WriteAny(conn, ev); err != nil {
+		if err := wire.WriteAny(conn, delivery); err != nil {
 			return err
 		}
 		if delivered == 0 {
-			firstReplaySeq = ev.GetSeq()
+			firstReplaySeq = delivery.GetStored().GetSeq()
 		}
 		delivered = nextDelivered
-		lastReplaySeq = ev.GetSeq()
+		lastReplaySeq = delivery.GetStored().GetSeq()
 		terminal.setReplayProgress(delivered, firstReplaySeq, lastReplaySeq)
 		// One bounded record at first progress and then every 512 events keeps
 		// large replays diagnosable without turning this per-event path into a
@@ -788,8 +808,8 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 		}
 		return
 	}
-	if replayStats.Events != delivered || replayStats.FirstSeq != firstReplaySeq || replayStats.LastSeq != lastReplaySeq {
-		panic(fmt.Sprintf("shim-store server: replay accounting diverged: query=%+v transport={events:%d first_seq:%d last_seq:%d}",
+	if replayStats.Entries != delivered || replayStats.FirstSeq != firstReplaySeq || replayStats.LastSeq != lastReplaySeq {
+		panic(fmt.Sprintf("shim-store server: replay accounting diverged: query=%+v transport={entries:%d first_seq:%d last_seq:%d}",
 			replayStats, delivered, firstReplaySeq, lastReplaySeq))
 	}
 	s.log.Log(logging.Fields{Operation: "subscribe-replay", Session: sessionID, Subscriber: peer},
@@ -799,7 +819,7 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	// complete. A subscribing shim waits for this frame before asserting its
 	// bring-up gate, so a producer write issued immediately after readiness
 	// cannot overtake registration on another accepted socket.
-	if err := wire.WriteAny(conn, &corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
+	if err := wire.WriteAny(conn, &protocolv1.ConnectionHeartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
 		terminal.terminate("readiness", subscriptionTerminalReadinessFailure, err)
 		return
 	}
@@ -810,17 +830,22 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 		case <-subr.done:
 			s.log.LogVerbose(logging.Fields{Operation: "subscribe-tail", Session: sessionID, Subscriber: peer}, "live tail stopped after terminal owner")
 			return
-		case ev := <-subr.ch:
-			// Skip persistent events already covered by replay (overlap window).
-			if ev.GetClass() != corev1.EventClass_EVENT_CLASS_EPHEMERAL &&
-				ev.GetSeq() > 0 && ev.GetSeq() <= lastReplaySeq {
-				s.log.LogVerbose(logging.Fields{Operation: "subscribe-tail", Session: sessionID, Subscriber: peer}, "skipped replay overlap seq=%d", ev.GetSeq())
+		case delivery := <-subr.ch:
+			// Skip records already covered by replay (overlap window).
+			//
+			// THE POSITION IS READ OFF THE `stored` ARM AND ONLY THAT ARM. A
+			// live delivery has no seq field at all, so it can never be
+			// compared against — or advance — a replay position. The store
+			// publishes only stored deliveries today, and this is what keeps
+			// that from being a fact a reader has to remember.
+			if seq := delivery.GetStored().GetSeq(); seq > 0 && seq <= lastReplaySeq {
+				s.log.LogVerbose(logging.Fields{Operation: "subscribe-tail", Session: sessionID, Subscriber: peer}, "skipped replay overlap seq=%d", seq)
 				continue
 			}
 			if terminal.hooks.beforeTailWrite != nil {
 				terminal.hooks.beforeTailWrite()
 			}
-			if err := wire.WriteAny(conn, ev); err != nil {
+			if err := wire.WriteAny(conn, delivery); err != nil {
 				terminal.terminate("tail", subscriptionTerminalTransportFailure, err)
 				return
 			}

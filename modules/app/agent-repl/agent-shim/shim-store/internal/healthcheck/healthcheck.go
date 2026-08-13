@@ -1,6 +1,6 @@
 // Package healthcheck implements the one-shot correlated shim-store health
 // probe used by agent-shim-doctor.  It owns the client side of the existing
-// core.v1 HealthCheck/HealthStatus protocol; it does not infer readiness from
+// protocol.v1 HealthCheck/HealthStatus protocol; it does not infer readiness from
 // socket presence alone.
 package healthcheck
 
@@ -15,7 +15,7 @@ import (
 	"agentrepl/shim-store/internal/logging"
 	"agentrepl/wire"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 const (
@@ -134,7 +134,7 @@ func probe(config Config, log *logging.Logger, d deps) (Result, int) {
 	if err := conn.SetDeadline(started.Add(config.Timeout)); err != nil {
 		return finish(ExitClientFailure, FailureClientFailure, fmt.Sprintf("set probe deadline: %v", err), "", false)
 	}
-	if err := wire.WriteAny(conn, &corev1.HealthCheck{RequestId: config.RequestID}); err != nil {
+	if err := wire.WriteAny(conn, &protocolv1.HealthCheck{RequestId: config.RequestID}); err != nil {
 		if isTimeout(err) {
 			return finish(ExitTimeout, FailureTimeout, err.Error(), "", false)
 		}
@@ -147,7 +147,7 @@ func probe(config Config, log *logging.Logger, d deps) (Result, int) {
 		}
 		return finish(ExitDecodeFailure, FailureDecodeFailure, err.Error(), "", false)
 	}
-	status, ok := message.(*corev1.HealthStatus)
+	status, ok := message.(*protocolv1.HealthStatus)
 	if !ok {
 		return finish(ExitDecodeFailure, FailureDecodeFailure, fmt.Sprintf("unexpected response type %T", message), "", false)
 	}
