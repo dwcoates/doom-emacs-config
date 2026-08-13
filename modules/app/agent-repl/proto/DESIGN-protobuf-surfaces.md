@@ -770,9 +770,14 @@ Without it `frontend.v1.PageScopeInside` is a scan: `parent` lives inside the
 opaque `payload` BLOB, and `top_level_message_id` cannot substitute because a
 subagent and a subagent inside IT share one value.
 
-**NO MIGRATION AND NO BACKFILL, and this is a standing posture rather than a
-concession for this change.** The store database is NUKED as needed and is to be
-regarded as EMPTY. Nothing is written to carry old rows forward.
+**NO MIGRATION AND NO BACKFILL.** The store database is NUKED as needed and is
+to be regarded as EMPTY. Nothing is written to carry old rows forward.
+
+This holds for EVERY store schema change in this stage of the project, not just
+this one — but it is a DEVELOPMENT-STAGE posture rather than a permanent
+property of the store. Nobody currently cares what is in that database, so
+migrating it buys complexity for nothing. The day its contents matter to
+somebody, this is the decision that has to be revisited first.
 
 **Every implementation agent must be told this explicitly.** A half-migrated or
 stale database filled with rows written under a retired schema produces
