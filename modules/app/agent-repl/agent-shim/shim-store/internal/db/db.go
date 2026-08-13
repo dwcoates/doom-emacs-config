@@ -1,7 +1,13 @@
-// Package db owns the shim-store SQLite database: the §6.2 schema, WAL
+// Package db owns the shim-store SQLite database: the schema, WAL
 // configuration, schema_meta versioning, and the transactional ingest / replay
 // operations. It knows nothing about vendors; it extracts only the envelope
-// columns (§6.2) needed to index otherwise-opaque payload blobs.
+// columns needed to index otherwise-opaque payload blobs.
+//
+// WHAT IT PERSISTS IS agentshim.v1.Entry — the WHOLE stored record, both
+// halves. What it HANDS BACK is only the external half, wrapped in a
+// protocol.v1.EntryDelivery. That asymmetry is the point of the two-half
+// record: the internal half is durable and the store is one of the three
+// runtimes entitled to it, but nothing the store serves carries it.
 package db
 
 import (
@@ -16,7 +22,14 @@ import (
 
 // SchemaVersion is the current schema_meta version. Bump it and append a step
 // to migrationSteps for any schema change.
-const SchemaVersion = 3
+//
+// BACK TO 1, AND THE LINEAGE RESTARTS HERE. The old `event` table held the
+// retired `Event` envelope, and every row of it is gone with the store that
+// held them — the database this binary opens is empty by design. There is
+// therefore no version-3 database to migrate FROM, so carrying its numbering
+// forward would claim a continuity that does not exist. A database still
+// stamped at the old lineage is refused loudly by migrate() rather than read.
+const SchemaVersion = 1
 
 // DB wraps the SQLite handle plus the store's logger.
 type DB struct {
@@ -104,7 +117,7 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		log.Log(logging.Fields{Operation: "migrate", DatabasePath: path, Table: "schema_meta", Level: "error"}, "schema migration failed: %v", err)
 		return nil, err
 	}
-	log.Log(logging.Fields{Operation: "open", DatabasePath: path, Table: "event"},
+	log.Log(logging.Fields{Operation: "open", DatabasePath: path, Table: "entry"},
 		"SQLite database ready slow_query_threshold_ms=%d", opts.SlowQuery.Milliseconds())
 	return d, nil
 }
@@ -125,24 +138,48 @@ func (d *DB) Close() error {
 // created by an older binary already HAS these objects and would never see an
 // edit made here — writing the new shape into the CREATE TABLE would give
 // fresh and migrated databases two different schemas.
+// TWO RECORD TABLES, BECAUSE THE RECORDS ARE TWO DIFFERENT THINGS. `entry`
+// holds records with an external half: they have a session, a position in it,
+// and a route to the daemon. `unconverted` holds records with no external half
+// at all — the residue the producer could not place. Those are stored whole
+// (agentshim.v1's unconverted arm is durable on purpose, so the decision not to
+// model something stays reversible from stored data) and they are UNREACHABLE
+// from every read the store serves: replay, subscribe and a message page all
+// select from `entry`, so "an unconvertible record cannot reach a page" is a
+// fact about which table it is in rather than a filter a query must remember.
+//
+// They are also unpositioned. `seq` is per-session addressing, and a record
+// with no external half carries no session_id anywhere in the schema — see the
+// gap note. Assigning one a seq would either gap the session's sequence or name
+// a position in a session it cannot claim to belong to.
 const baseDDL = `
-CREATE TABLE IF NOT EXISTS event (
-  session_id  TEXT    NOT NULL,
-  seq         INTEGER NOT NULL,
-  plane       INTEGER NOT NULL,
-  class       INTEGER NOT NULL,
-  kind        TEXT    NOT NULL,
-  task_id     TEXT,
-  uuid        TEXT,
-  dedup_key   TEXT,
-  produced_at INTEGER NOT NULL,
-  payload     BLOB    NOT NULL,
+CREATE TABLE IF NOT EXISTS entry (
+  session_id           TEXT    NOT NULL,
+  seq                  INTEGER NOT NULL,
+  plane                INTEGER NOT NULL,
+  kind                 TEXT    NOT NULL,
+  write_id             TEXT,
+  top_level_message_id TEXT,
+  produced_at          INTEGER NOT NULL,
+  payload              BLOB    NOT NULL,
   PRIMARY KEY (session_id, seq)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS event_dedup
-  ON event(session_id, dedup_key) WHERE dedup_key IS NOT NULL;
-CREATE INDEX IF NOT EXISTS event_task
-  ON event(session_id, task_id) WHERE task_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS entry_write_id
+  ON entry(session_id, write_id) WHERE write_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS entry_message_page
+  ON entry(session_id, seq DESC) WHERE top_level_message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS entry_message_owner
+  ON entry(session_id, top_level_message_id, seq) WHERE top_level_message_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS unconverted (
+  id        INTEGER PRIMARY KEY,
+  producer  TEXT    NOT NULL,
+  write_id  TEXT,
+  kind      TEXT    NOT NULL,
+  stored_at INTEGER NOT NULL,
+  payload   BLOB    NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS unconverted_write_id
+  ON unconverted(producer, write_id) WHERE write_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS cursor (
   file_id    TEXT PRIMARY KEY,
   path       TEXT    NOT NULL,
@@ -165,26 +202,13 @@ type migrationStep struct {
 }
 
 // migrationSteps carries every forward migration past baseDDL, in order.
-var migrationSteps = []migrationStep{
-	{
-		to:   2,
-		name: "event.write_id",
-		ddl: `ALTER TABLE event ADD COLUMN write_id TEXT;
-CREATE UNIQUE INDEX IF NOT EXISTS event_write_id
-  ON event(session_id, write_id) WHERE write_id IS NOT NULL;`,
-		reason: "the producer's stable per-event write identity, which is what makes a replayed batch a no-op instead of a duplicate row",
-	},
-	{
-		to:   3,
-		name: "event.top_level_message_id",
-		ddl: `ALTER TABLE event ADD COLUMN top_level_message_id TEXT;
-CREATE INDEX IF NOT EXISTS event_message_page
-  ON event(session_id, seq DESC) WHERE top_level_message_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS event_message_owner
-  ON event(session_id, top_level_message_id, seq) WHERE top_level_message_id IS NOT NULL;`,
-		reason: "the denormalized owning message, so a page of ten messages is one indexed backward pass instead of a parent walk",
-	},
-}
+//
+// EMPTY, because the lineage restarts at the base shape (see SchemaVersion).
+// The three steps that used to live here migrated the retired `event` table,
+// and there is no database carrying it left to migrate. The mechanism stays:
+// the next schema change appends a step here and bumps SchemaVersion, and
+// migrate() refuses a bump that ships without one.
+var migrationSteps []migrationStep
 
 // migrate brings the database to SchemaVersion, loud-logging the transition.
 //
@@ -211,7 +235,11 @@ func (d *DB) migrate() error {
 		d.log.Log(logging.Fields{Operation: "migrate", Table: "schema_meta"}, "schema initialized at version=%d", version)
 	case nil:
 		if version > SchemaVersion {
-			return fmt.Errorf("shim-store db: on-disk schema version %d is newer than this binary's %d", version, SchemaVersion)
+			// Either a newer binary wrote it, or it is a database from the
+			// retired `event` lineage. Both are refused for the same reason:
+			// this binary cannot state what shape those rows are in, and
+			// reading them anyway is the dual-read path the rewrite removed.
+			return fmt.Errorf("shim-store db: on-disk schema version %d is not this binary's %d — refusing to read a schema this binary did not create", version, SchemaVersion)
 		}
 	default:
 		return fmt.Errorf("shim-store db: reading schema_meta: %w", err)

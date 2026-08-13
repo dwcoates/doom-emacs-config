@@ -4,61 +4,95 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	"agentrepl/shim-store/internal/dedup"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/shim-store/internal/logging"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// Result reports the outcome of one Ingest call (mirrors StoreWriteAck).
+// Plane column values. The observing plane is a shim-side fact and the store is
+// entitled to it, so it is extracted for attribution in the store's own logs —
+// never returned to a reader, which is why it has no place in any query result.
+const (
+	planeUnset  = 0
+	planeStream = 1
+	planeFile   = 2
+)
+
+// Result reports the outcome of one Ingest call.
+//
+// NOTHING CARRIES IT BACK TO THE PRODUCER. `StoreWriteAck` was retired with the
+// `Event` layer and `StoreEntryWrite` has no reply message at all, so these
+// counters reach the store's log and stop there. A producer therefore cannot
+// currently learn that its write landed — which is what write_id's
+// replay-idempotency contract was written to depend on. Recorded as a gap; no
+// replacement message is invented here.
 type Result struct {
-	Accepted uint64 // events persisted with a freshly assigned seq
-	Deduped  uint64 // events dropped as duplicates (first-writer-wins)
-	LastSeq  uint64 // highest seq assigned in this batch (0 if none)
-	// Replayed is the SUBSET of Deduped that collided on write_id rather than
-	// on dedup_key: the producer re-sent an event this store had already
-	// written, which is what a batch whose ack was lost to a store restart
-	// looks like from here. It is accounted separately because the two are
-	// different facts — a dedup_key collision is two PLANES describing one
-	// event, a write_id collision is one producer delivering one event twice —
-	// and conflating them would hide whether replay is idempotent in practice.
+	// Accepted is the number of records persisted with a freshly assigned seq.
+	Accepted uint64
+	// Replayed is the number of records the producer re-delivered under a
+	// write_id this store had already written. It is what a batch whose
+	// (now nonexistent) ack was lost to a store restart looks like from here:
+	// the unique (session_id, write_id) index rejects the repeat, it consumes
+	// no seq, and it is neither written again nor fanned out again.
+	//
+	// It no longer has a sibling `Deduped`. Cross-plane dedup is gone with
+	// `dedup_key`: the shim stopped writing conversation content, so the twins
+	// the key existed to collapse no longer occur, and a duplicate arriving now
+	// can only be one producer re-delivering one record.
 	Replayed uint64
+	// Unconverted is the number of records stored with no external half. They
+	// are durable and unreachable by every read the store serves.
+	Unconverted uint64
+	// Deduplicated-away records consume no seq, so LastSeq is the highest seq
+	// assigned in this batch (0 if none).
+	LastSeq uint64
+	// Deliveries are the accepted records, in arrival order, already wrapped in
+	// the envelope a subscriber receives.
+	//
+	// RETURNED RATHER THAN STAMPED IN PLACE. The old Event carried its own seq
+	// field, so ingest wrote the assigned position back onto the caller's
+	// message and the caller re-read it to decide what to fan out. `Entry` has
+	// no seq field — position is the store's addressing and lives on the
+	// delivery envelope — so the fan-out set is stated here instead of being
+	// recovered from a mutation.
+	Deliveries []*protocolv1.EntryDelivery
 }
 
-// Ingest persists a batch of PERSISTENT events and, atomically in the SAME
-// transaction, advances the file cursor when one is supplied (§6.3, §7.3).
+// Ingest persists a batch of records and, atomically in the SAME transaction,
+// advances the file cursor when one is supplied.
 //
-// Per-session seq is assigned gapless in arrival order: a duplicate (its
-// dedup_key already present) consumes NO seq, so the sequence never gaps. On
-// return each accepted event has ev.Seq (>0) and ev.DedupKey stamped in place;
-// a deduped event is reset to ev.Seq == 0 so the caller can tell which events
-// to fan out (accepted → seq>0). EPHEMERAL events must never reach here (the
-// server routes them straight to fan-out); one arriving is a loud invariant
-// violation that rejects the whole batch.
+// Per-session seq is assigned gapless in arrival order over the records that
+// HAVE a session: a replayed write consumes no seq, and a record with no
+// external half is not positioned at all.
 //
-// IDEMPOTENT BY IDENTITY. An event carrying a write_id (core.proto
-// Event.write_id) can be delivered any number of times and lands exactly once:
-// the unique (session_id, write_id) index rejects every repeat, the repeat
-// consumes no seq, and it is reported as Deduped/Replayed rather than written
-// again. That is what makes a producer safe to replay a batch it sent but
-// never saw acked — which is every batch in flight when the store bounces.
-func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.CursorState) (res Result, resultErr error) {
+// IDEMPOTENT BY IDENTITY. A record carrying a write_id can be delivered any
+// number of times and lands exactly once: the unique (session_id, write_id)
+// index rejects every repeat, the repeat consumes no seq, and it is reported as
+// Replayed rather than written again. A record with an empty write_id is not
+// replay-idempotent, and the store enforces uniqueness only over non-empty
+// values — exactly as the field's contract states.
+func (d *DB) Ingest(producer string, batch *agentshimv1.EntryBatch) (res Result, resultErr error) {
+	entries := batch.GetEntries()
+	cursor := batch.GetCursorAdvance()
 	d.log.LogVerbose(logging.Fields{
-		Operation: "ingest", Producer: producer, Table: "event", Transaction: "BEGIN IMMEDIATE",
-	}, "starting transaction events=%d cursor_advance=%t", len(events), cursor != nil)
+		Operation: "ingest", Producer: producer, Table: "entry", Transaction: "BEGIN IMMEDIATE",
+	}, "starting transaction entries=%d cursor_advance=%t", len(entries), cursor != nil)
 	// The whole transaction is one timed unit: it is a read-then-write under
 	// BEGIN IMMEDIATE, so what an operator needs to see is the interval the
-	// writer lock was held, not one statement inside it. Rows are the events
+	// writer lock was held, not one statement inside it. Rows are the records
 	// the batch actually resolved.
 	started := time.Now()
-	defer func() { d.observeQuery(StatementIngest, "event", "", started, int64(res.Accepted+res.Deduped)) }()
+	defer func() {
+		d.observeQuery(StatementIngest, "entry", "", started, int64(res.Accepted+res.Replayed+res.Unconverted))
+	}()
 	defer func() {
 		if resultErr != nil {
 			d.log.Log(logging.Fields{
-				Operation: "ingest", Producer: producer, Table: "event",
+				Operation: "ingest", Producer: producer, Table: "entry",
 				Transaction: "BEGIN IMMEDIATE", Level: "error",
 			}, "transaction rejected: %v", resultErr)
 		}
@@ -70,7 +104,7 @@ func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.Curs
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
-	// Lazily loaded per-session high-water seq, so multi-event single-session
+	// Lazily loaded per-session high-water seq, so multi-record single-session
 	// batches read MAX(seq) exactly once.
 	sessionSeq := make(map[string]uint64)
 	loadSeq := func(sid string) (uint64, error) {
@@ -78,7 +112,7 @@ func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.Curs
 			return v, nil
 		}
 		var v uint64
-		row := tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM event WHERE session_id = ?`, sid)
+		row := tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM entry WHERE session_id = ?`, sid)
 		if err := row.Scan(&v); err != nil {
 			return 0, fmt.Errorf("shim-store ingest: reading max seq for session %q: %w", sid, err)
 		}
@@ -86,22 +120,58 @@ func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.Curs
 		return v, nil
 	}
 
-	// OR IGNORE covers BOTH unique indexes: event_dedup (session_id,
-	// dedup_key) collapses cross-plane twins, and event_write_id (session_id,
-	// write_id) makes a REPLAYED write a no-op. Which one rejected is resolved
-	// below, because the two mean different things.
-	const insertSQL = `INSERT OR IGNORE INTO event
-	  (session_id, seq, plane, class, kind, task_id, uuid, dedup_key, write_id, produced_at, payload)
-	  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	const writeIDSeqSQL = `SELECT seq FROM event WHERE session_id = ? AND write_id = ?`
+	// OR IGNORE covers the one remaining unique index, entry_write_id
+	// (session_id, write_id), which makes a REPLAYED write a no-op. There is no
+	// second index to disambiguate against any more: event_dedup went with
+	// dedup_key, so a rejection here has exactly one cause.
+	const insertSQL = `INSERT OR IGNORE INTO entry
+	  (session_id, seq, plane, kind, write_id, top_level_message_id, produced_at, payload)
+	  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	const insertUnconvertedSQL = `INSERT OR IGNORE INTO unconverted
+	  (producer, write_id, kind, stored_at, payload) VALUES (?, ?, ?, ?, ?)`
+	const writeIDSeqSQL = `SELECT seq FROM entry WHERE session_id = ? AND write_id = ?`
 
-	for _, ev := range events {
-		if ev.GetClass() == corev1.EventClass_EVENT_CLASS_EPHEMERAL {
-			return res, fmt.Errorf("shim-store ingest: EPHEMERAL event reached persistence (session=%q kind=%q) — bug: ephemeral must bypass the DB", ev.GetSessionId(), kindOf(ev))
+	for i, entry := range entries {
+		plane, err := planeOf(entry)
+		if err != nil {
+			return res, fmt.Errorf("shim-store ingest: %w (producer=%q index=%d)", err, producer, i)
 		}
-		sid := ev.GetSessionId()
+		kind := kindOf(entry)
+		blob, err := proto.Marshal(entry)
+		if err != nil {
+			return res, fmt.Errorf("shim-store ingest: marshaling entry (producer=%q index=%d kind=%q): %w", producer, i, kind, err)
+		}
+		writeID := entry.GetInternal().GetWriteId()
+
+		external := entry.GetExternal()
+		if external == nil {
+			// UNRENDERABLE. Nothing to hand the daemon, no session to be
+			// positioned in, so it is stored whole and unpositioned.
+			if entry.GetInternal().GetUnconverted() == nil {
+				return res, fmt.Errorf("shim-store ingest: entry has neither an external half nor an unconverted arm — it says nothing and can never be read back (producer=%q index=%d)", producer, i)
+			}
+			out, err := tx.Exec(insertUnconvertedSQL, producer, nullStr(writeID), kind, nowMillis(), blob)
+			if err != nil {
+				return res, fmt.Errorf("shim-store ingest: inserting unconverted record (producer=%q index=%d kind=%q): %w", producer, i, kind, err)
+			}
+			n, err := out.RowsAffected()
+			if err != nil {
+				return res, fmt.Errorf("shim-store ingest: rows-affected for unconverted record (producer=%q index=%d): %w", producer, i, err)
+			}
+			if n == 1 {
+				res.Unconverted++
+				d.log.Log(logging.Fields{
+					Operation: "ingest-unconverted", Producer: producer, Table: "unconverted",
+				}, "stored a record the producer could not convert kind=%q write_id=%q — it is durable and has no path to any reader", kind, writeID)
+			} else {
+				res.Replayed++
+			}
+			continue
+		}
+
+		sid := external.GetSessionId()
 		if sid == "" {
-			return res, fmt.Errorf("shim-store ingest: event with empty session_id (kind=%q)", kindOf(ev))
+			return res, fmt.Errorf("shim-store ingest: entry with empty session_id (producer=%q index=%d kind=%q)", producer, i, kind)
 		}
 
 		cur, err := loadSeq(sid)
@@ -110,21 +180,12 @@ func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.Curs
 		}
 		candidate := cur + 1
 
-		key := dedup.Derive(ev)
-		ev.Seq = candidate
-		ev.DedupKey = key
-
-		blob, err := proto.Marshal(ev)
-		if err != nil {
-			return res, fmt.Errorf("shim-store ingest: marshaling event (session=%q seq=%d): %w", sid, candidate, err)
-		}
-
 		out, err := tx.Exec(insertSQL,
-			sid, candidate, int32(ev.GetPlane()), int32(ev.GetClass()),
-			kindOf(ev), nullStr(taskIDOf(ev)), nullStr(uuidOf(key)), nullStr(key),
-			nullStr(ev.GetWriteId()), ev.GetProducedAtMs(), blob)
+			sid, candidate, plane, kind, nullStr(writeID),
+			nullStr(external.GetMessage().GetTopLevelMessageId()),
+			external.GetProducedAtMs(), blob)
 		if err != nil {
-			return res, fmt.Errorf("shim-store ingest: inserting event (session=%q seq=%d): %w", sid, candidate, err)
+			return res, fmt.Errorf("shim-store ingest: inserting entry (session=%q seq=%d kind=%q): %w", sid, candidate, kind, err)
 		}
 		n, err := out.RowsAffected()
 		if err != nil {
@@ -136,37 +197,38 @@ func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.Curs
 			if candidate > res.LastSeq {
 				res.LastSeq = candidate
 			}
-		} else {
-			// Duplicate: one of the unique indexes rejected it. Do not consume
-			// a seq; mark unpersisted so the caller does not re-fan-out the
-			// loser.
-			res.Deduped++
-			ev.Seq = 0
-			// WHICH index rejected is the difference between "two planes saw
-			// one event" and "one producer delivered one event twice", and the
-			// second is the idempotent-replay guarantee actually firing. Only
-			// a write_id-bearing event can be a replay, so the lookup is
-			// skipped entirely for the events that cannot be one.
-			if wid := ev.GetWriteId(); wid != "" {
-				var prior uint64
-				switch err := tx.QueryRow(writeIDSeqSQL, sid, wid).Scan(&prior); {
-				case err == nil:
-					res.Replayed++
-					// ev.Seq STAYS 0. It is the fan-out selector (see the
-					// doc comment): the original write already fanned this
-					// event out to every subscriber, and re-fanning it would
-					// turn an idempotent store write into a duplicate
-					// DELIVERY, which is the same defect one layer up.
-					d.log.LogVerbose(logging.Fields{
-						Operation: "ingest", Producer: producer, Table: "event",
-					}, "replayed write is a no-op session=%q write_id=%q existing_seq=%d", sid, wid, prior)
-				case errors.Is(err, sql.ErrNoRows):
-					// Not a replay: the dedup_key index rejected it. Nothing to
-					// report beyond the dedup already counted.
-				default:
-					return res, fmt.Errorf("shim-store ingest: resolving duplicate cause (session=%q write_id=%q): %w", sid, wid, err)
-				}
-			}
+			res.Deliveries = append(res.Deliveries, &protocolv1.EntryDelivery{
+				Delivery: &protocolv1.EntryDelivery_Stored{Stored: &protocolv1.StoredEntryDelivery{
+					Seq:   candidate,
+					Entry: external,
+				}},
+			})
+			continue
+		}
+
+		// The write_id index rejected it: one producer delivered one record
+		// twice, which is the idempotent-replay guarantee firing. It consumes
+		// no seq and produces NO delivery — the original write already fanned
+		// this record out, and re-fanning it would turn an idempotent store
+		// write into a duplicate DELIVERY, the same defect one layer up.
+		res.Replayed++
+		if writeID == "" {
+			// Unreachable via entry_write_id, which is partial on a non-null
+			// write_id, so a rejection with no write identity means some other
+			// constraint fired. Surfaced rather than counted as a replay we
+			// cannot substantiate.
+			return res, fmt.Errorf("shim-store ingest: entry rejected by a constraint with no write identity to explain it (session=%q seq=%d kind=%q)", sid, candidate, kind)
+		}
+		var prior uint64
+		switch err := tx.QueryRow(writeIDSeqSQL, sid, writeID).Scan(&prior); {
+		case err == nil:
+			d.log.LogVerbose(logging.Fields{
+				Operation: "ingest", Producer: producer, Table: "entry",
+			}, "replayed write is a no-op session=%q write_id=%q existing_seq=%d", sid, writeID, prior)
+		case errors.Is(err, sql.ErrNoRows):
+			return res, fmt.Errorf("shim-store ingest: entry rejected but no row holds its write identity (session=%q write_id=%q seq=%d)", sid, writeID, candidate)
+		default:
+			return res, fmt.Errorf("shim-store ingest: resolving duplicate cause (session=%q write_id=%q): %w", sid, writeID, err)
 		}
 	}
 
@@ -180,12 +242,12 @@ func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.Curs
 		return res, fmt.Errorf("shim-store ingest: commit (producer=%q): %w", producer, err)
 	}
 	d.log.LogVerbose(logging.Fields{
-		Operation: "ingest", Producer: producer, Table: "event", Transaction: "BEGIN IMMEDIATE",
-	}, "transaction committed accepted=%d deduped=%d replayed=%d last_seq=%d cursor_advance=%t", res.Accepted, res.Deduped, res.Replayed, res.LastSeq, cursor != nil)
+		Operation: "ingest", Producer: producer, Table: "entry", Transaction: "BEGIN IMMEDIATE",
+	}, "transaction committed accepted=%d replayed=%d unconverted=%d last_seq=%d cursor_advance=%t", res.Accepted, res.Replayed, res.Unconverted, res.LastSeq, cursor != nil)
 	return res, nil
 }
 
-func upsertCursor(tx *sql.Tx, c *corev1.CursorState) error {
+func upsertCursor(tx *sql.Tx, c *agentshimv1.CursorState) error {
 	const upsertSQL = `INSERT INTO cursor (file_id, path, offset, carry, updated_at)
 	  VALUES (?, ?, ?, ?, ?)
 	  ON CONFLICT(file_id) DO UPDATE SET
@@ -197,83 +259,75 @@ func upsertCursor(tx *sql.Tx, c *corev1.CursorState) error {
 	return nil
 }
 
-// kindOf returns the §6.2 `kind` column: the vendor Any type-URL suffix, or
-// the core payload message name.
-func kindOf(ev *corev1.Event) string {
-	if v := ev.GetVendor(); v != nil {
-		tu := v.GetTypeUrl()
-		if i := strings.LastIndexByte(tu, '.'); i >= 0 {
-			return tu[i+1:]
-		}
-		if i := strings.LastIndexByte(tu, '/'); i >= 0 {
-			return tu[i+1:]
-		}
-		return tu
+// planeOf returns the `plane` column, refusing a record that does not say which
+// producer observed it.
+//
+// THIS IS WHERE THE EPHEMERAL INVARIANT WENT. Ingest used to reject an
+// EVENT_CLASS_EPHEMERAL event reaching persistence, because such an event was
+// supposed to bypass the database entirely. `EventClass` is retired and no
+// message on the write surface can say "do not store this", so that particular
+// violation is no longer expressible. What replaced it is the invariant the new
+// record DOES carry: every stored record has an internal half, and at minimum
+// that half names the observing plane. A record without one cannot be
+// attributed, so it rejects the whole batch exactly as the old violation did.
+func planeOf(entry *agentshimv1.Entry) (int, error) {
+	internal := entry.GetInternal()
+	if internal == nil {
+		return planeUnset, errors.New("entry has no internal half — every stored record has one, at minimum naming the producer that observed it")
 	}
-	switch ev.GetPayload().(type) {
-	case *corev1.Event_SessionStarted:
-		return "SessionStarted"
-	case *corev1.Event_SessionEnded:
-		return "SessionEnded"
-	case *corev1.Event_TurnStarted:
-		return "TurnStarted"
-	case *corev1.Event_TurnEnded:
-		return "TurnEnded"
-	case *corev1.Event_TurnClaimBridge:
-		return "TurnClaimBridge"
-	case *corev1.Event_TaskStarted:
-		return "TaskStarted"
-	case *corev1.Event_TaskProgress:
-		return "TaskProgress"
-	case *corev1.Event_TaskEnded:
-		return "TaskEnded"
-	case *corev1.Event_ContentDelta:
-		return "ContentDelta"
-	case *corev1.Event_HeartbeatProgress:
-		return "HeartbeatProgress"
-	case *corev1.Event_DegradedState:
-		return "DegradedState"
-	case *corev1.Event_Unparsed:
-		return "UnparsedEvent"
-	case *corev1.Event_MessageLatency:
-		return "MessageLatency"
-	case *corev1.Event_ContextCleared:
-		return "ContextCleared"
-	case *corev1.Event_ContextCompacted:
-		return "ContextCompacted"
-	case *corev1.Event_FilePlaneDiagnostic:
-		return "FilePlaneDiagnostic"
-	case *corev1.Event_QueryLifecycle:
-		return "QueryLifecycle"
-	case *corev1.Event_AccountUsageObservation:
-		return "AccountUsageObservation"
-	case *corev1.Event_SessionRewound:
-		return "SessionRewound"
+	switch internal.GetPlane().GetPlane().(type) {
+	case *agentshimv1.Plane_Stream:
+		return planeStream, nil
+	case *agentshimv1.Plane_File:
+		return planeFile, nil
 	default:
-		return "Unknown"
+		return planeUnset, errors.New("entry does not name the plane that observed it")
 	}
 }
 
-// taskIDOf extracts the §6.2 `task_id` column from task-scoped core payloads.
-func taskIDOf(ev *corev1.Event) string {
-	switch p := ev.GetPayload().(type) {
-	case *corev1.Event_TaskStarted:
-		return p.TaskStarted.GetTaskId()
-	case *corev1.Event_TaskProgress:
-		return p.TaskProgress.GetTaskId()
-	case *corev1.Event_TaskEnded:
-		return p.TaskEnded.GetTaskId()
+// kindOf returns the `kind` column: which arm of the record is set, in
+// `<half>.<arm>` form ("message.user_said", "bookkeeping.turn_began",
+// "unconverted.unparsed").
+//
+// READ REFLECTIVELY RATHER THAN BY TYPE SWITCH. The old spelling was a switch
+// over every payload arm, which meant a schema that grew an arm silently
+// reported "Unknown" for it until somebody noticed. The oneof descriptor
+// already knows every arm's name, so this cannot fall behind the schema.
+//
+// It is diagnostic only: nothing indexes it and no query selects on it. The
+// column exists so the store's own logs and error messages can say WHAT was
+// rejected without opening the opaque payload.
+func kindOf(entry *agentshimv1.Entry) string {
+	if external := entry.GetExternal(); external != nil {
+		switch arm := external.GetEntry().(type) {
+		case *protocolv1.ExternalEntry_Message:
+			return "message." + oneofArm(arm.Message.ProtoReflect(), "payload")
+		case *protocolv1.ExternalEntry_Bookkeeping:
+			return "bookkeeping." + oneofArm(arm.Bookkeeping.ProtoReflect(), "kind")
+		default:
+			return "external.unset"
+		}
 	}
-	return ""
+	return "unconverted." + oneofArm(entry.GetInternal().ProtoReflect(), "unconverted")
 }
 
-// uuidOf extracts the §6.2 `uuid` column from a "uuid:<uuid>" dedup key. Events
-// keyed otherwise (tur/turn/wf) or unkeyed have no indexed uuid.
-func uuidOf(dedupKey string) string {
-	if strings.HasPrefix(dedupKey, "uuid:") {
-		return dedupKey[len("uuid:"):]
+// oneofArm names the set arm of a oneof, or "unset" when none is.
+func oneofArm(m protoreflect.Message, oneof string) string {
+	if m == nil || !m.IsValid() {
+		return "unset"
 	}
-	return ""
+	od := m.Descriptor().Oneofs().ByName(protoreflect.Name(oneof))
+	if od == nil {
+		// The schema no longer declares the oneof this column is derived from.
+		// Loud in the data rather than silently indistinguishable from "unset",
+		// because the two mean opposite things about the record.
+		return "no-such-oneof:" + oneof
+	}
+	fd := m.WhichOneof(od)
+	if fd == nil {
+		return "unset"
+	}
+	return string(fd.Name())
 }
 
 // nullStr maps "" to a SQL NULL so the partial indexes (WHERE ... IS NOT NULL)
