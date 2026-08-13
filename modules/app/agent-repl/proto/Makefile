@@ -22,8 +22,13 @@ PROTOS := \
   agentshim/v1/entry.proto \
   agentshim/v1/unsupported.proto \
   agentshim/v1/write.proto \
+  frontend/v1/agent-emission.proto \
+  frontend/v1/agent-response.proto \
   frontend/v1/commands.proto \
+  frontend/v1/conversation-history.proto \
+  frontend/v1/detached-work.proto \
   frontend/v1/errors.proto \
+  frontend/v1/failure-card.proto \
   frontend/v1/feed.proto \
   frontend/v1/footer.proto \
   frontend/v1/frame.proto \
@@ -31,9 +36,15 @@ PROTOS := \
   frontend/v1/host.proto \
   frontend/v1/lifecycle.proto \
   frontend/v1/merge.proto \
+  frontend/v1/permission-card.proto \
+  frontend/v1/prompt-queue.proto \
   frontend/v1/sidebar.proto \
+  frontend/v1/slash-menu.proto \
   frontend/v1/state.proto \
+  frontend/v1/tokens-menu.proto \
+  frontend/v1/tool-call.proto \
   frontend/v1/topbar.proto \
+  frontend/v1/user-message.proto \
   state/v1/durable.proto
 
 # The component tree the structural gates scan. Overridable so the gate
