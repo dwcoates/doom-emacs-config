@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/storehistory"
@@ -37,7 +37,7 @@ type pageClient struct {
 	err     error
 }
 
-func (c *pageClient) MessagePage(ctx context.Context, anchor shimclient.MessagePageAnchor) (*corev1.MessagePage, error) {
+func (c *pageClient) MessagePage(ctx context.Context, anchor shimclient.MessagePageAnchor) (*protocolv1.MessagePage, error) {
 	c.mu.Lock()
 	c.anchors = append(c.anchors, anchor)
 	err := c.err
@@ -63,7 +63,7 @@ type livePageHarness struct {
 	positions *fakePositions
 }
 
-func newLivePageHarness(t *testing.T, events []*corev1.Event) *livePageHarness {
+func newLivePageHarness(t *testing.T, events []*protocolv1.Event) *livePageHarness {
 	t.Helper()
 	h := &livePageHarness{
 		applier: &fakeApplier{},
@@ -182,9 +182,9 @@ func TestALiveWorkspacesRetainedFloorIsNotAStart(t *testing.T) {
 	// the daemon's. This page reaches the oldest RETAINED record while sitting
 	// far above the daemon's own replay floor.
 	h := newLivePageHarness(t, pageTextEvents(t, 30))
-	h.client.spy.override = &corev1.MessagePage{
+	h.client.spy.override = &protocolv1.MessagePage{
 		LastPageSeq: 50,
-		Boundary:    &corev1.MessagePage_Floor{Floor: &corev1.HistoryAtRetainedFloor{}},
+		Boundary:    &protocolv1.MessagePage_Floor{Floor: &protocolv1.HistoryAtRetainedFloor{}},
 	}
 
 	// Act.
@@ -203,7 +203,7 @@ func TestALiveWorkspacesPageWithAnUnsetBoundaryIsRefused(t *testing.T) {
 	// Arrange — the boundary oneof is the store's whole statement about older
 	// history. An unset arm is a protocol violation, not a third answer.
 	h := newLivePageHarness(t, pageTextEvents(t, 30))
-	h.client.spy.override = &corev1.MessagePage{LastPageSeq: 7}
+	h.client.spy.override = &protocolv1.MessagePage{LastPageSeq: 7}
 
 	// Act.
 	_, err := h.m.FirstConversationHistoryPage(context.Background(), "r1", "ws")
@@ -277,5 +277,5 @@ func TestALiveWorkspacesRotatedGenerationDropsTheReaderPosition(t *testing.T) {
 // compile-time proof the real shim client satisfies the page verb this route
 // asks of a live session's own transport.
 var _ interface {
-	MessagePage(context.Context, shimclient.MessagePageAnchor) (*corev1.MessagePage, error)
+	MessagePage(context.Context, shimclient.MessagePageAnchor) (*protocolv1.MessagePage, error)
 } = (*shimclient.Client)(nil)

@@ -3,9 +3,9 @@ package sessioncontroller
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -312,7 +312,7 @@ func TestAReplayedMachineryLineIsNeverDrawnAsAPromptEither(t *testing.T) {
 
 // machineryStreamEvent is the same bookkeeping arriving on the STREAM plane
 // (a bare UserMessage rather than a transcript line).
-func machineryStreamEvent(t *testing.T, seq uint64, text string) *corev1.Event {
+func machineryStreamEvent(t *testing.T, seq uint64, text string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.UserMessage{
 		Message: &datav1.ApiUserMessage{
@@ -322,7 +322,7 @@ func machineryStreamEvent(t *testing.T, seq uint64, text string) *corev1.Event {
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 func TestMachineryOnTheStreamPlaneIsNeverDrawnAsAPromptEither(t *testing.T) {
@@ -343,7 +343,7 @@ func TestMachineryOnTheStreamPlaneIsNeverDrawnAsAPromptEither(t *testing.T) {
 // shapeAPromptEvent is the CLI's SHAPE A synthetic record as the file plane
 // delivers it: a "user" transcript line, NOT flagged isMeta, carrying the
 // promptId that groups one submission's records.
-func shapeAPromptEvent(t *testing.T, seq uint64, uuid, promptID, text string) *corev1.Event {
+func shapeAPromptEvent(t *testing.T, seq uint64, uuid, promptID, text string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.TranscriptLine{
 		Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
@@ -356,12 +356,12 @@ func shapeAPromptEvent(t *testing.T, seq uint64, uuid, promptID, text string) *c
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // shapeBLocalCommandEvent is the CLI's SHAPE B synthetic record: a "system"
 // line with subtype local_command, flagged isMeta and carrying NO promptId.
-func shapeBLocalCommandEvent(t *testing.T, seq uint64, uuid, content string) *corev1.Event {
+func shapeBLocalCommandEvent(t *testing.T, seq uint64, uuid, content string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.TranscriptLine{
 		Line: &datav1.TranscriptLine_System{System: &datav1.SystemLine{
@@ -372,7 +372,7 @@ func shapeBLocalCommandEvent(t *testing.T, seq uint64, uuid, content string) *co
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // classifiedCommands returns every DaemonInterceptedCommandItem the consumer
@@ -536,7 +536,7 @@ func TestAClassifiedEphemeralCommandIsAFeedRow(t *testing.T) {
 // blockUserTranscriptEvent is a user transcript line whose body arrives as
 // content BLOCKS — the shape the real file plane produces for a typed prompt,
 // as opposed to the single content string a hand-simplified fixture uses.
-func blockUserTranscriptEvent(t *testing.T, seq uint64, uuid, promptID string, texts ...string) *corev1.Event {
+func blockUserTranscriptEvent(t *testing.T, seq uint64, uuid, promptID string, texts ...string) *protocolv1.Event {
 	t.Helper()
 	blocks := make([]*datav1.ContentBlock, 0, len(texts))
 	for _, txt := range texts {
@@ -557,7 +557,7 @@ func blockUserTranscriptEvent(t *testing.T, seq uint64, uuid, promptID string, t
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 func TestAHumanPromptOpeningWithAnUnclosedMachineryTagStaysAPrompt(t *testing.T) {

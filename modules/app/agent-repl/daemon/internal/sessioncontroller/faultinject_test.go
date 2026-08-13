@@ -23,9 +23,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/ssm"
@@ -88,22 +88,22 @@ func newFaultRig(t *testing.T) *faultRig {
 func (r *faultRig) apply(payload any) {
 	r.t.Helper()
 	r.seq++
-	ev := &corev1.Event{SessionId: r.sid, Seq: r.seq}
+	ev := &protocolv1.Event{SessionId: r.sid, Seq: r.seq}
 	switch p := payload.(type) {
-	case *corev1.SessionStarted:
-		ev.Payload = &corev1.Event_SessionStarted{SessionStarted: p}
-	case *corev1.SessionEnded:
-		ev.Payload = &corev1.Event_SessionEnded{SessionEnded: p}
-	case *corev1.TurnStarted:
-		ev.Plane = corev1.Plane_PLANE_STREAM
-		ev.Payload = &corev1.Event_TurnStarted{TurnStarted: p}
-	case *corev1.TurnEnded:
-		ev.Plane = corev1.Plane_PLANE_STREAM
-		ev.Payload = &corev1.Event_TurnEnded{TurnEnded: p}
-	case *corev1.TaskStarted:
-		ev.Payload = &corev1.Event_TaskStarted{TaskStarted: p}
-	case *corev1.TaskEnded:
-		ev.Payload = &corev1.Event_TaskEnded{TaskEnded: p}
+	case *protocolv1.SessionStarted:
+		ev.Payload = &protocolv1.Event_SessionStarted{SessionStarted: p}
+	case *protocolv1.SessionEnded:
+		ev.Payload = &protocolv1.Event_SessionEnded{SessionEnded: p}
+	case *protocolv1.TurnStarted:
+		ev.Plane = protocolv1.Plane_PLANE_STREAM
+		ev.Payload = &protocolv1.Event_TurnStarted{TurnStarted: p}
+	case *protocolv1.TurnEnded:
+		ev.Plane = protocolv1.Plane_PLANE_STREAM
+		ev.Payload = &protocolv1.Event_TurnEnded{TurnEnded: p}
+	case *protocolv1.TaskStarted:
+		ev.Payload = &protocolv1.Event_TaskStarted{TaskStarted: p}
+	case *protocolv1.TaskEnded:
+		ev.Payload = &protocolv1.Event_TaskEnded{TaskEnded: p}
 	default:
 		r.t.Fatalf("faultRig.apply: unsupported payload %T", payload)
 	}
@@ -207,7 +207,7 @@ func (r *faultRig) retainedCards() []*frontendv1.Message {
 func (r *faultRig) settleGreen() {
 	r.t.Helper()
 	r.wire()
-	r.apply(&corev1.SessionStarted{Model: "test-model", Cwd: r.ws})
+	r.apply(&protocolv1.SessionStarted{Model: "test-model", Cwd: r.ws})
 	if err := r.mgr.ApplyBackfillState(r.ws, BackfillDone); err != nil {
 		r.t.Fatalf("apply backfill done: %v", err)
 	}
@@ -225,11 +225,11 @@ func TestShimDeathMidTurnResolvesBlueOverTheLiveTurn(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_THINKING, "turn in flight")
 
 	// Act
-	rig.apply(&corev1.SessionEnded{})
+	rig.apply(&protocolv1.SessionEnded{})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_DEAD, "after shim death")
@@ -242,10 +242,10 @@ func TestShimDeathMidTurnRecordsTheDeathReason(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 
 	// Act
-	rig.apply(&corev1.SessionEnded{})
+	rig.apply(&protocolv1.SessionEnded{})
 
 	// Assert
 	if len(rig.death) != 1 {
@@ -263,8 +263,8 @@ func TestShimDeathClassifiesAsInternal(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.SessionEnded{})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.SessionEnded{})
 
 	// Act
 	item := errclass.Death(t.Logf, "s_fault", rig.death[0], 0)
@@ -282,7 +282,7 @@ func TestShimConnectionLossMidTurnFilesAnInternalCard(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 
 	// Act
 	rig.cons.ConnectionDegraded(rig.sid, "no shim traffic for 30s")
@@ -303,7 +303,7 @@ func TestShimConnectionLossMidTurnResolvesBlue(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_THINKING, "turn in flight")
 
 	// Act
@@ -325,7 +325,7 @@ func TestStoreOutageFilesAnInternalCard(t *testing.T) {
 	rig.settleGreen()
 
 	// Act
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{
 		Component:    "store-client",
 		Reason:       "store socket closed",
 		DroppedCount: 7,
@@ -350,7 +350,7 @@ func TestStoreOutageOpensUnresolved(t *testing.T) {
 	rig.settleGreen()
 
 	// Act
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "store-client", Reason: "store socket closed"})
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{Component: "store-client", Reason: "store socket closed"})
 
 	// Assert
 	if got := errclass.ResolvedAtMs(rig.cards()[0]); got != 0 {
@@ -367,10 +367,10 @@ func TestStoreRecoveryResolvesTheSameCardInPlace(t *testing.T) {
 	rig.settleGreen()
 	const recoveredAt int64 = 1_700_000_042_000
 	rig.cons.now = func() int64 { return recoveredAt }
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "store-client", Reason: "store socket closed"})
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{Component: "store-client", Reason: "store socket closed"})
 
 	// Act
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "store-client", Recovered: true})
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{Component: "store-client", Recovered: true})
 
 	// Assert
 	uuids := rig.cardUUIDs()
@@ -461,7 +461,7 @@ func TestShimStoreLinkDropOpensAConnectivityFault(t *testing.T) {
 	rig.settleGreen()
 
 	// Act
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{
 		Component: "shim-store-client",
 		Reason:    "store connection closed",
 	})
@@ -487,13 +487,13 @@ func TestShimStoreLinkRecoveryClosesTheFault(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{
 		Component: "shim-store-client",
 		Reason:    "store subscription closed",
 	})
 
 	// Act
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{
 		Component: "shim-store-client",
 		Reason:    "store link recovered",
 		Recovered: true,
@@ -511,11 +511,11 @@ func TestShimStoreLinkRecoveryLeavesTheBlueBand(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_DEGRADED, "store link down")
 
 	// Act
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{
 		Component: "shim-store-client",
 		Reason:    "store link recovered",
 		Recovered: true,
@@ -534,10 +534,10 @@ func TestShimStoreLinkRecoveryWithoutAReasonStillClosesTheFault(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
 
 	// Act
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "shim-store-client", Recovered: true})
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{Component: "shim-store-client", Recovered: true})
 
 	// Assert
 	if faults := rig.activeFaults(); len(faults) != 0 {
@@ -553,12 +553,12 @@ func TestShimStoreLinkRecoveryRepushesTheWorkspaceState(t *testing.T) {
 	// has already opened, so the only push in the channel is the recovery's.
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
 	states, cancel := rig.mgr.Subscribe()
 	defer cancel()
 
 	// Act
-	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{
+	rig.cons.Degraded(rig.sid, nil, &protocolv1.DegradedState{
 		Component: "shim-store-client",
 		Reason:    "store link recovered",
 		Recovered: true,
@@ -588,10 +588,10 @@ func TestAuthFailureResolvesVendorBlocked(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 
 	// Act
-	rig.apply(&corev1.TurnEnded{StopReason: "authentication_failed", IsError: true})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "authentication_failed", IsError: true})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED, "after an auth failure")
@@ -601,7 +601,7 @@ func TestAuthFailureResolvesVendorBlocked(t *testing.T) {
 // agent-repl's own machinery failed.
 func TestAuthFailureClassifiesAsAPI(t *testing.T) {
 	// Arrange
-	te := &corev1.TurnEnded{StopReason: "authentication_failed", IsError: true}
+	te := &protocolv1.TurnEnded{StopReason: "authentication_failed", IsError: true}
 
 	// Act
 	item := errclass.TurnEnd(te)
@@ -636,13 +636,13 @@ func TestCleanTurnAfterAuthFailureReleasesTheBlock(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TurnEnded{StopReason: "authentication_failed", IsError: true})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "authentication_failed", IsError: true})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED, "blocked")
 
 	// Act
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "end_turn"})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_DONE, "after a clean turn")
@@ -676,10 +676,10 @@ func TestBudgetStopResolvesVendorBlocked(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 
 	// Act
-	rig.apply(&corev1.TurnEnded{StopReason: "error_max_budget", IsError: true})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "error_max_budget", IsError: true})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED, "after a budget stop")
@@ -715,10 +715,10 @@ func TestAllowedWarningLeavesTheWorkspaceGreen(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 
 	// Act — the turn carrying the warning ANSWERED, so it ends cleanly.
-	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "end_turn"})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_DONE, "after a turn carrying an allowed_warning")
@@ -735,12 +735,12 @@ func TestInterruptOutcomesAreThreeValued(t *testing.T) {
 	// Arrange
 	tests := []struct {
 		name    string
-		outcome corev1.InterruptOutcome
+		outcome protocolv1.InterruptOutcome
 		wantErr bool
 	}{
-		{"interrupted is success", corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED, false},
-		{"already complete is success", corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE, false},
-		{"failed is the only failure", corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED, true},
+		{"interrupted is success", protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED, false},
+		{"already complete is success", protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE, false},
+		{"failed is the only failure", protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -761,11 +761,11 @@ func TestAlreadyCompleteInterruptMintsNoCard(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "end_turn"})
 
 	// Act — the stop lands after the turn already concluded.
-	err := errclass.InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	err := errclass.InterruptError(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 
 	// Assert
 	if err != nil {
@@ -780,7 +780,7 @@ func TestAlreadyCompleteInterruptMintsNoCard(t *testing.T) {
 // than implicating the vendor.
 func TestUndeliverableInterruptClassifiesAsInternal(t *testing.T) {
 	// Arrange
-	err := errclass.InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
+	err := errclass.InterruptError(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
 
 	// Act
 	item := errclass.Command(t.Logf, err)
@@ -797,11 +797,11 @@ func TestInterruptedTurnDoesNotStickRed(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_THINKING, "turn in flight")
 
 	// Act — the interrupt lands and the turn concludes as aborted.
-	rig.apply(&corev1.TurnEnded{StopReason: "aborted", IsError: true})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "aborted", IsError: true})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_DONE, "after an interrupt")
@@ -813,11 +813,11 @@ func TestInterruptRacingACleanEndLeavesGreen(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 
 	// Act — the turn finishes first; the stop finds nothing to interrupt.
-	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})
-	if err := errclass.InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE); err != nil {
+	rig.apply(&protocolv1.TurnEnded{StopReason: "end_turn"})
+	if err := errclass.InterruptError(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE); err != nil {
 		t.Fatalf("already-complete produced err %v, want nil", err)
 	}
 
@@ -837,7 +837,7 @@ func TestTurnStartFlipsToRed(t *testing.T) {
 	rig.settleGreen()
 
 	// Act
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_THINKING, "at submit-accept")
@@ -850,7 +850,7 @@ func TestFailedBackfillHoldsTheWorkspaceBlue(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.wire()
-	rig.apply(&corev1.SessionStarted{Model: "test-model", Cwd: rig.ws})
+	rig.apply(&protocolv1.SessionStarted{Model: "test-model", Cwd: rig.ws})
 
 	// Act
 	if err := rig.mgr.ApplyBackfillState(rig.ws, BackfillFailed); err != nil {
@@ -866,7 +866,7 @@ func TestBackfillSettlingReleasesTowardGreen(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.wire()
-	rig.apply(&corev1.SessionStarted{Model: "test-model", Cwd: rig.ws})
+	rig.apply(&protocolv1.SessionStarted{Model: "test-model", Cwd: rig.ws})
 	if err := rig.mgr.ApplyBackfillState(rig.ws, BackfillFailed); err != nil {
 		t.Fatalf("apply backfill failed: %v", err)
 	}
@@ -892,7 +892,7 @@ func TestRejectedRateLimitAloneDoesNotResolveVendorBlocked(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 
 	// Act — the predicate says this status blocks...
 	if !ssm.VendorBlockingRateLimit("rejected") {
@@ -914,11 +914,11 @@ func TestBackgroundWorkAfterTurnEndResolvesYellow(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TaskStarted{TaskId: "task-1"})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TaskStarted{TaskId: "task-1"})
 
 	// Act
-	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "end_turn"})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC, "with a task still live")
@@ -929,13 +929,13 @@ func TestQuiescenceAfterBackgroundWorkReturnsGreen(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TaskStarted{TaskId: "task-1"})
-	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TaskStarted{TaskId: "task-1"})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "end_turn"})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC, "with a task still live")
 
 	// Act
-	rig.apply(&corev1.TaskEnded{TaskId: "task-1"})
+	rig.apply(&protocolv1.TaskEnded{TaskId: "task-1"})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_DONE, "after quiescence")
@@ -947,10 +947,10 @@ func TestBackgroundWorkDuringATurnStaysRed(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 
 	// Act
-	rig.apply(&corev1.TaskStarted{TaskId: "task-1"})
+	rig.apply(&protocolv1.TaskStarted{TaskId: "task-1"})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_THINKING, "with a turn in flight")
@@ -966,12 +966,12 @@ func TestShimDeathOutranksAnOpenVendorBlock(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TurnEnded{StopReason: "authentication_failed", IsError: true})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "authentication_failed", IsError: true})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED, "vendor blocked")
 
 	// Act
-	rig.apply(&corev1.SessionEnded{})
+	rig.apply(&protocolv1.SessionEnded{})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_DEAD, "shim dead while vendor blocked")
@@ -983,8 +983,8 @@ func TestConnectionOutageOutranksAnOpenVendorBlock(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TurnEnded{StopReason: "authentication_failed", IsError: true})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "authentication_failed", IsError: true})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED, "vendor blocked")
 
 	// Act
@@ -1001,12 +1001,12 @@ func TestALiveTurnSupersedesTheVendorBlock(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TurnEnded{StopReason: "authentication_failed", IsError: true})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "authentication_failed", IsError: true})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED, "vendor blocked")
 
 	// Act — the user retries.
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_THINKING, "retry after a vendor block")
@@ -1018,12 +1018,12 @@ func TestBackgroundWorkOutranksTheSettledTurn(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "end_turn"})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_DONE, "settled turn")
 
 	// Act
-	rig.apply(&corev1.TaskStarted{TaskId: "task-late"})
+	rig.apply(&protocolv1.TaskStarted{TaskId: "task-late"})
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC, "detached work after the turn settled")
@@ -1035,9 +1035,9 @@ func TestConnectionOutageOutranksBackgroundWork(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TaskStarted{TaskId: "task-1"})
-	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TaskStarted{TaskId: "task-1"})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "end_turn"})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC, "detached work live")
 
 	// Act

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/registry"
@@ -247,11 +247,11 @@ func TestATurnActiveWorkspaceIsHeldHoweverOldItsLogIs(t *testing.T) {
 	// Arrange — a live turn, with the clock long past the window. The elapsed
 	// gate must never be able to override the turn gate.
 	h, id, quietFor := sweptWorkspace(t, time.Hour)
-	if _, err := h.ssm.ApplyTurnBoundary("/w", id, "", &corev1.Event{
+	if _, err := h.ssm.ApplyTurnBoundary("/w", id, "", &protocolv1.Event{
 		SessionId: id, Seq: 2,
-		Plane:     corev1.Plane_PLANE_STREAM,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
 		RequestId: "turn-1",
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{
 			PromptPreview: "go",
 			TurnId:        "turn-1",
 		}},
@@ -280,10 +280,10 @@ func TestATurnActiveWorkspaceIsHeldHoweverOldItsLogIs(t *testing.T) {
 func TestAnIdleAsyncWorkspaceIsHeldHoweverOldItsLogIs(t *testing.T) {
 	// Arrange — no turn, one live background task, the clock long past the window.
 	h, id, quietFor := sweptWorkspace(t, time.Hour)
-	if err := h.ssm.Apply(&corev1.Event{
+	if err := h.ssm.Apply(&protocolv1.Event{
 		SessionId: id, Seq: 3,
-		Plane:   corev1.Plane_PLANE_STREAM,
-		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "task-1"}},
+		Plane:   protocolv1.Plane_PLANE_STREAM,
+		Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "task-1"}},
 	}); err != nil {
 		t.Fatalf("apply task started: %v", err)
 	}
@@ -303,17 +303,17 @@ func TestAnIdleAsyncWorkspaceIsHeldHoweverOldItsLogIs(t *testing.T) {
 func TestAWorkspaceWhoseAsyncWorkEndedIsSweepableAgain(t *testing.T) {
 	// Arrange — a task that started and ended.
 	h, id, quietFor := sweptWorkspace(t, time.Hour)
-	if err := h.ssm.Apply(&corev1.Event{
+	if err := h.ssm.Apply(&protocolv1.Event{
 		SessionId: id, Seq: 3,
-		Plane:   corev1.Plane_PLANE_STREAM,
-		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "task-1"}},
+		Plane:   protocolv1.Plane_PLANE_STREAM,
+		Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "task-1"}},
 	}); err != nil {
 		t.Fatalf("apply task started: %v", err)
 	}
-	if err := h.ssm.Apply(&corev1.Event{
+	if err := h.ssm.Apply(&protocolv1.Event{
 		SessionId: id, Seq: 4,
-		Plane:   corev1.Plane_PLANE_STREAM,
-		Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "task-1"}},
+		Plane:   protocolv1.Plane_PLANE_STREAM,
+		Payload: &protocolv1.Event_TaskEnded{TaskEnded: &protocolv1.TaskEnded{TaskId: "task-1"}},
 	}); err != nil {
 		t.Fatalf("apply task ended: %v", err)
 	}

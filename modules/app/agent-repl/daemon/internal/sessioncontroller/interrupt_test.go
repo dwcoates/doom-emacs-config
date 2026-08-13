@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/ssm"
 )
@@ -25,7 +25,7 @@ func (h *queueHarness) interrupt() error {
 }
 
 // ackWith arms the fake shim's interrupt ack with a specific outcome.
-func (h *queueHarness) ackWith(outcome corev1.InterruptOutcome) {
+func (h *queueHarness) ackWith(outcome protocolv1.InterruptOutcome) {
 	h.client.mu.Lock()
 	h.client.interruptOutcome = outcome
 	h.client.mu.Unlock()
@@ -55,11 +55,11 @@ func (h *queueHarness) texts() []string {
 func TestUserInterruptOpensTheWindowForEveryOutcome(t *testing.T) {
 	tests := []struct {
 		name    string
-		outcome corev1.InterruptOutcome
+		outcome protocolv1.InterruptOutcome
 	}{
-		{"a live turn was stopped", corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED},
-		{"the turn had already ended", corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE},
-		{"the stop could not be delivered", corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED},
+		{"a live turn was stopped", protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED},
+		{"the turn had already ended", protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE},
+		{"the stop could not be delivered", protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,12 +82,12 @@ func TestUserInterruptOpensTheWindowForEveryOutcome(t *testing.T) {
 func TestOnlyAnInterruptedAckMarksTheTurn(t *testing.T) {
 	tests := []struct {
 		name    string
-		outcome corev1.InterruptOutcome
+		outcome protocolv1.InterruptOutcome
 		want    int
 	}{
-		{"a live turn was stopped", corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED, 1},
-		{"the turn had already ended", corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE, 0},
-		{"the stop could not be delivered", corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED, 0},
+		{"a live turn was stopped", protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED, 1},
+		{"the turn had already ended", protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE, 0},
+		{"the stop could not be delivered", protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -206,7 +206,7 @@ func TestUserInterruptPausesTheQueueRetainingEveryEntry(t *testing.T) {
 func TestAFailedStopDoesNotPauseTheQueue(t *testing.T) {
 	// Arrange.
 	h := newQueueHarness(t, nil)
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
 	// Act.
 	if err := h.interrupt(); err == nil {
 		t.Fatal("an undeliverable stop must surface as an error")
@@ -223,7 +223,7 @@ func TestAFailedStopDoesNotPauseTheQueue(t *testing.T) {
 func TestAnAlreadyCompleteStopStillPausesTheQueue(t *testing.T) {
 	// Arrange.
 	h := newQueueHarness(t, nil)
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 	// Act.
 	if err := h.interrupt(); err != nil {
 		t.Fatalf("interrupt: %v", err)
@@ -685,10 +685,10 @@ func TestTheInterjectStopDoesNotRouteThroughTheRecovery(t *testing.T) {
 
 // armSupersededStop arms an ALREADY_COMPLETE ack whose reconciliation reports a
 // newer turn already active, and answers the NEXT stop with `then`.
-func armSupersededStop(h *queueHarness, then corev1.InterruptOutcome) {
+func armSupersededStop(h *queueHarness, then protocolv1.InterruptOutcome) {
 	h.client.mu.Lock()
-	h.client.interruptOutcomeQueue = []corev1.InterruptOutcome{
-		corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE, then,
+	h.client.interruptOutcomeQueue = []protocolv1.InterruptOutcome{
+		protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE, then,
 	}
 	h.client.mu.Unlock()
 	h.applier.reconcMutex.Lock()
@@ -699,7 +699,7 @@ func armSupersededStop(h *queueHarness, then corev1.InterruptOutcome) {
 func TestAStopSupersededAtATurnBoundaryIsReAimed(t *testing.T) {
 	// Arrange.
 	h := newQueueHarness(t, nil)
-	armSupersededStop(h, corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	armSupersededStop(h, protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 
 	// Act.
 	err := h.interrupt()
@@ -712,7 +712,7 @@ func TestAStopSupersededAtATurnBoundaryIsReAimed(t *testing.T) {
 		t.Fatalf("stops delivered = %d, want 2 (the aimed-at turn and the re-aim)", got)
 	}
 	notes := h.prog.interruptNotes()
-	if len(notes) != 1 || notes[0].outcome != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+	if len(notes) != 1 || notes[0].outcome != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
 		t.Fatalf("interrupt windows = %+v, want one INTERRUPTED window", notes)
 	}
 }
@@ -720,7 +720,7 @@ func TestAStopSupersededAtATurnBoundaryIsReAimed(t *testing.T) {
 func TestAReAimedStopIsNotRetriedForever(t *testing.T) {
 	// Arrange: every stop lands on a boundary.
 	h := newQueueHarness(t, nil)
-	armSupersededStop(h, corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	armSupersededStop(h, protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 
 	// Act.
 	err := h.interrupt()
@@ -738,7 +738,7 @@ func TestAnOrdinaryAlreadyCompleteFailureIsNotReAimed(t *testing.T) {
 	// Arrange: the reconciliation failed for a reason that is not a boundary
 	// race, so delivering a second stop would be delivering it into a fault.
 	h := newQueueHarness(t, nil)
-	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	h.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 	h.applier.reconcMutex.Lock()
 	h.applier.alreadyCompleteErr = errors.New("state database unreadable")
 	h.applier.reconcMutex.Unlock()

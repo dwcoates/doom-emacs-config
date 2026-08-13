@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	_ "modernc.org/sqlite"
 )
@@ -64,23 +64,23 @@ func (c *capLog) count(substr string) int {
 
 // event helpers ------------------------------------------------------------
 
-func evSessionStarted(sid string, seq uint64) *corev1.Event {
-	return &corev1.Event{SessionId: sid, Seq: seq, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}}}
+func evSessionStarted(sid string, seq uint64) *protocolv1.Event {
+	return &protocolv1.Event{SessionId: sid, Seq: seq, Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{}}}
 }
-func evTurnStarted(sid string, seq uint64) *corev1.Event {
-	return &corev1.Event{SessionId: sid, Seq: seq, Plane: corev1.Plane_PLANE_STREAM, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}}
+func evTurnStarted(sid string, seq uint64) *protocolv1.Event {
+	return &protocolv1.Event{SessionId: sid, Seq: seq, Plane: protocolv1.Plane_PLANE_STREAM, Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}}}
 }
-func evTurnEnded(sid string, seq uint64, isErr bool) *corev1.Event {
-	return &corev1.Event{SessionId: sid, Seq: seq, Plane: corev1.Plane_PLANE_STREAM, Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{IsError: isErr}}}
+func evTurnEnded(sid string, seq uint64, isErr bool) *protocolv1.Event {
+	return &protocolv1.Event{SessionId: sid, Seq: seq, Plane: protocolv1.Plane_PLANE_STREAM, Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{IsError: isErr}}}
 }
-func evSessionEnded(sid string, seq uint64) *corev1.Event {
-	return &corev1.Event{SessionId: sid, Seq: seq, Payload: &corev1.Event_SessionEnded{SessionEnded: &corev1.SessionEnded{}}}
+func evSessionEnded(sid string, seq uint64) *protocolv1.Event {
+	return &protocolv1.Event{SessionId: sid, Seq: seq, Payload: &protocolv1.Event_SessionEnded{SessionEnded: &protocolv1.SessionEnded{}}}
 }
-func evTaskStarted(sid string, seq uint64, taskID string) *corev1.Event {
-	return &corev1.Event{SessionId: sid, Seq: seq, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: taskID}}}
+func evTaskStarted(sid string, seq uint64, taskID string) *protocolv1.Event {
+	return &protocolv1.Event{SessionId: sid, Seq: seq, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: taskID}}}
 }
-func evTaskEnded(sid string, seq uint64, taskID string, status corev1.TerminalStatus) *corev1.Event {
-	return &corev1.Event{SessionId: sid, Seq: seq, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: taskID, Status: status}}}
+func evTaskEnded(sid string, seq uint64, taskID string, status protocolv1.TerminalStatus) *protocolv1.Event {
+	return &protocolv1.Event{SessionId: sid, Seq: seq, Payload: &protocolv1.Event_TaskEnded{TaskEnded: &protocolv1.TaskEnded{TaskId: taskID, Status: status}}}
 }
 
 // openTest opens a Manager on a temp DB with a capturing logger, and WIRES
@@ -150,8 +150,8 @@ func TestApplyLifecycleTransitions(t *testing.T) {
 		// pre is the boundary that must already have happened for ev to be a
 		// well-formed one. A turn END has always required the durable START it
 		// closes; only the axis's separate fold let a test skip it.
-		pre  *corev1.Event
-		ev   *corev1.Event
+		pre  *protocolv1.Event
+		ev   *protocolv1.Event
 		want frontendv1.RenderState
 	}{
 		{"session started -> ready", nil, evSessionStarted("s1", 1), frontendv1.RenderState_RENDER_STATE_READY},
@@ -213,14 +213,14 @@ func TestLiveTaskCounting(t *testing.T) {
 	}
 	// Act + Assert, step by step (each step is one counting edge).
 	steps := []struct {
-		ev        *corev1.Event
+		ev        *protocolv1.Event
 		wantCount int64
 		wantState frontendv1.RenderState
 	}{
 		{evTaskStarted("s1", 2, "a1"), 1, frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC},
 		{evTaskStarted("s1", 3, "a2"), 2, frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC},
-		{evTaskEnded("s1", 4, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE), 1, frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC},
-		{evTaskEnded("s1", 5, "a2", corev1.TerminalStatus_TERMINAL_STATUS_LOST), 0, frontendv1.RenderState_RENDER_STATE_READY},
+		{evTaskEnded("s1", 4, "a1", protocolv1.TerminalStatus_TERMINAL_STATUS_DONE), 1, frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC},
+		{evTaskEnded("s1", 5, "a2", protocolv1.TerminalStatus_TERMINAL_STATUS_LOST), 0, frontendv1.RenderState_RENDER_STATE_READY},
 	}
 	for i, s := range steps {
 		if err := applyTest(m, s.ev); err != nil {
@@ -349,7 +349,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 		t.Fatalf("post-reopen live_task_count = %d, want 1", after.LiveTaskCount)
 	}
 	// And a subsequent real change on m2 still resolves correctly.
-	if err := applyTest(m2, evTaskEnded("s1", 3, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE)); err != nil {
+	if err := applyTest(m2, evTaskEnded("s1", 3, "a1", protocolv1.TerminalStatus_TERMINAL_STATUS_DONE)); err != nil {
 		t.Fatalf("task end: %v", err)
 	}
 	if got := mustCurrent(t, m2, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
@@ -476,19 +476,19 @@ func TestApplyNilAndEmptyEventErrors(t *testing.T) {
 	if err := applyTest(m, nil); err == nil {
 		t.Fatalf("expected error for nil event")
 	}
-	if err := applyTest(m, &corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}}); err == nil {
+	if err := applyTest(m, &protocolv1.Event{Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}}}); err == nil {
 		t.Fatalf("expected error for event with empty session_id")
 	}
 }
 
 func TestApplyRejectsFilePlaneTurnLifecycle(t *testing.T) {
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1",
 		Seq:       7,
-		Plane:     corev1.Plane_PLANE_FILE,
+		Plane:     protocolv1.Plane_PLANE_FILE,
 		DedupKey:  "turn:s1:old-stop-hook",
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{
 			StopReason: "end_turn",
 		}},
 	}
@@ -509,7 +509,7 @@ func TestApplyIgnoresEphemeral(t *testing.T) {
 	// Arrange.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	// Act: a content delta (ephemeral) with a bound session.
-	ev := &corev1.Event{SessionId: "s1", Seq: 1, Payload: &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{}}}
+	ev := &protocolv1.Event{SessionId: "s1", Seq: 1, Payload: &protocolv1.Event_ContentDelta{ContentDelta: &protocolv1.ContentDelta{}}}
 	if err := applyTest(m, ev); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -577,8 +577,8 @@ func TestLiveTaskCountIgnoresADuplicateTaskEnded(t *testing.T) {
 	mustApply(t, m, evTaskStarted("s1", 2, "a1"))
 
 	// Act.
-	mustApply(t, m, evTaskEnded("s1", 3, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE))
-	mustApply(t, m, evTaskEnded("s1", 4, "a1", corev1.TerminalStatus_TERMINAL_STATUS_LOST))
+	mustApply(t, m, evTaskEnded("s1", 3, "a1", protocolv1.TerminalStatus_TERMINAL_STATUS_DONE))
+	mustApply(t, m, evTaskEnded("s1", 4, "a1", protocolv1.TerminalStatus_TERMINAL_STATUS_LOST))
 
 	// Assert — the second end is a no-op, not a second decrement.
 	if got := mustCurrent(t, m, "ws1").LiveTaskCount; got != 0 {
@@ -595,7 +595,7 @@ func TestLiveTaskCountNeverGoesNegativeOnDuplicateEnds(t *testing.T) {
 
 	// Act.
 	for seq := uint64(3); seq <= 6; seq++ {
-		mustApply(t, m, evTaskEnded("s1", seq, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE))
+		mustApply(t, m, evTaskEnded("s1", seq, "a1", protocolv1.TerminalStatus_TERMINAL_STATUS_DONE))
 	}
 
 	// Assert.
@@ -612,8 +612,8 @@ func TestLiveTaskCountKeepsADuplicateEndFromResurrectingIdleAsync(t *testing.T) 
 	mustApply(t, m, evTaskStarted("s1", 3, "a2"))
 
 	// Act — a1 ends twice; a2 is still running.
-	mustApply(t, m, evTaskEnded("s1", 4, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE))
-	mustApply(t, m, evTaskEnded("s1", 5, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE))
+	mustApply(t, m, evTaskEnded("s1", 4, "a1", protocolv1.TerminalStatus_TERMINAL_STATUS_DONE))
+	mustApply(t, m, evTaskEnded("s1", 5, "a1", protocolv1.TerminalStatus_TERMINAL_STATUS_DONE))
 
 	// Assert — a2 is still live, so the workspace stays idle_async.
 	cur := mustCurrent(t, m, "ws1")
@@ -658,7 +658,7 @@ func TestLiveTaskCountStillCountsDistinctTasks(t *testing.T) {
 }
 
 // mustApply applies ev, failing the test on error.
-func mustApply(t *testing.T, m *Manager, ev *corev1.Event) {
+func mustApply(t *testing.T, m *Manager, ev *protocolv1.Event) {
 	t.Helper()
 	if err := applyTest(m, ev); err != nil {
 		t.Fatalf("Apply(seq %d): %v", ev.GetSeq(), err)

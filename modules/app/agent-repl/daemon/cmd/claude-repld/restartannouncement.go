@@ -7,7 +7,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/restartannounce"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // restartAnnouncementPublisher is the narrow frontend surface the announcement

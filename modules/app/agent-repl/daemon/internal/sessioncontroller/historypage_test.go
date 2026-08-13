@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/ssm"
 )
@@ -88,7 +88,7 @@ type historyHarness struct {
 	positions *fakePositions
 }
 
-func newHistoryHarness(t *testing.T, events []*corev1.Event) *historyHarness {
+func newHistoryHarness(t *testing.T, events []*protocolv1.Event) *historyHarness {
 	t.Helper()
 	h := &historyHarness{pageHarness: newPageHarness(t, events)}
 	h.positions = h.applier.positions()

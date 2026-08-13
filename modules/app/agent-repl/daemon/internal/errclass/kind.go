@@ -21,7 +21,7 @@
 package errclass
 
 import (
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // kindFor builds the wire's failure kind for a daemon failure type. It returns

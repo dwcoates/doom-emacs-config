@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/shimclient"
@@ -38,12 +38,12 @@ type durableHistorySpy struct {
 	calls [][2]uint64
 	// caps records the max_events each replay carried.
 	caps      []uint32
-	events    []*corev1.Event
+	events    []*protocolv1.Event
 	err       error
 	truncated string
 }
 
-func (s *durableHistorySpy) ReplayHistory(_ context.Context, _, _ string, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (storehistory.Result, error) {
+func (s *durableHistorySpy) ReplayHistory(_ context.Context, _, _ string, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*protocolv1.Event)) (storehistory.Result, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, [2]uint64{fromSeq, toSeq})
 	s.caps = append(s.caps, maxEvents)
@@ -154,7 +154,7 @@ func newDurableHarness(t *testing.T, history DurableHistorySource) *durableHarne
 
 // durableAssistantEvent is a vendor assistant message at seq, stamped at tsMs
 // so the lease ledger has an instant to place it against.
-func durableAssistantEvent(t *testing.T, seq uint64, uuid string, tsMs int64) *corev1.Event {
+func durableAssistantEvent(t *testing.T, seq uint64, uuid string, tsMs int64) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.ClaudeStreamMessage{
 		Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
@@ -167,7 +167,7 @@ func durableAssistantEvent(t *testing.T, seq uint64, uuid string, tsMs int64) *c
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, ProducedAtMs: tsMs, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, ProducedAtMs: tsMs, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 func (h *durableHarness) throughSeqs() []uint64 {
@@ -191,7 +191,7 @@ func (h *durableHarness) logLines() []string {
 func TestAnUnwiredWorkspaceServesItsStoredConversation(t *testing.T) {
 	// Arrange — the daemon bounced: nothing is live, and the whole
 	// conversation is sitting in the store.
-	history := &durableHistorySpy{events: []*corev1.Event{
+	history := &durableHistorySpy{events: []*protocolv1.Event{
 		durableAssistantEvent(t, 1, "u1", 1_000),
 		durableAssistantEvent(t, 2, "u2", 2_000),
 		durableAssistantEvent(t, 3, "u3", 3_000),
@@ -213,7 +213,7 @@ func TestAnUnwiredWorkspaceServesItsStoredConversation(t *testing.T) {
 func TestADurableReplayStartsAtTheClientsOwnMark(t *testing.T) {
 	// Arrange — a frontend holding seq 5 asks for everything after it. The
 	// store's from_seq is EXCLUSIVE, so the inclusive mark 5 goes down as 4.
-	history := &durableHistorySpy{events: []*corev1.Event{
+	history := &durableHistorySpy{events: []*protocolv1.Event{
 		durableAssistantEvent(t, 5, "u5", 5_000),
 		durableAssistantEvent(t, 6, "u6", 6_000),
 	}}
@@ -234,7 +234,7 @@ func TestADurableReplayStartsAtTheClientsOwnMark(t *testing.T) {
 func TestADurableReplayIsFlooredAtTheNewestClearOrCompaction(t *testing.T) {
 	// Arrange — a clear at seq 30 discarded everything below it, so a client
 	// mark of 1 must not drag that history back onto the screen.
-	history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 31, "u31", 31_000)}}
+	history := &durableHistorySpy{events: []*protocolv1.Event{durableAssistantEvent(t, 31, "u31", 31_000)}}
 	h := newDurableHarness(t, history)
 	h.seq.SetLastSeq("s1", 60)
 	h.floors.SetNewestClearOrCompactSeq("s1", 30)
@@ -253,7 +253,7 @@ func TestADurableReplayIsFlooredAtTheNewestClearOrCompaction(t *testing.T) {
 func TestADurableReplayHasNoUpperBound(t *testing.T) {
 	// Arrange — an unwired workspace holds no retained ring, so there is no
 	// live window for the replay to stop short of.
-	history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
+	history := &durableHistorySpy{events: []*protocolv1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
 	h := newDurableHarness(t, history)
 
 	// Act.
@@ -272,7 +272,7 @@ func TestADurableReplayHasNoUpperBound(t *testing.T) {
 func TestADurableReplayStampsMergeProvenanceFromTheLeaseLedger(t *testing.T) {
 	// Arrange — the item was produced inside a merge window that has since
 	// CLOSED. The durable ledger still says so, and a replay must agree.
-	history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 7, "u7", 5_000)}}
+	history := &durableHistorySpy{events: []*protocolv1.Event{durableAssistantEvent(t, 7, "u7", 5_000)}}
 	h := newDurableHarness(t, history)
 	h.applier.mergeWindows = map[string][][2]int64{"ws": {{4_000, 6_000}}}
 
@@ -294,7 +294,7 @@ func TestADurableReplayStampsMergeProvenanceFromTheLeaseLedger(t *testing.T) {
 
 func TestADurableReplayStampsUserProvenanceOutsideEveryMergeWindow(t *testing.T) {
 	// Arrange — the same path must not rewrite a user's history as a merge's.
-	history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 7, "u7", 9_000)}}
+	history := &durableHistorySpy{events: []*protocolv1.Event{durableAssistantEvent(t, 7, "u7", 9_000)}}
 	h := newDurableHarness(t, history)
 	h.applier.mergeWindows = map[string][][2]int64{"ws": {{4_000, 6_000}}}
 
@@ -351,7 +351,7 @@ func TestAnUnreadableStoreIsLoggedWithItsCause(t *testing.T) {
 func TestATruncatedDurableReplayIsReportedRatherThanPresentedAsComplete(t *testing.T) {
 	// Arrange — a partial answer is reported as one.
 	history := &durableHistorySpy{
-		events:    []*corev1.Event{durableAssistantEvent(t, 1, "u1", 1_000)},
+		events:    []*protocolv1.Event{durableAssistantEvent(t, 1, "u1", 1_000)},
 		truncated: "the store closed the subscription",
 	}
 	h := newDurableHarness(t, history)
@@ -401,7 +401,7 @@ func TestAResyncForAWorkspaceWithNoSessionRecordFailsLoudly(t *testing.T) {
 func TestALiveWorkspaceStillResyncsFromItsRetainedRing(t *testing.T) {
 	// Arrange — a workspace WITH a live session controller keeps the ring
 	// path: the durable route is for the unwired case only.
-	history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
+	history := &durableHistorySpy{events: []*protocolv1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
 	h := newDurableHarness(t, history)
 	if err := h.m.Ensure("ws"); err != nil {
 		t.Fatalf("Ensure: %v", err)
@@ -435,7 +435,7 @@ func TestADurableReplayWithholdsTheDaemonsOwnKeepAliveTurn(t *testing.T) {
 	// id the window row is keyed by.
 	ping := durableAssistantEvent(t, 1, "u1", 1_000)
 	ping.RequestId = "ka_1"
-	history := &durableHistorySpy{events: []*corev1.Event{ping}}
+	history := &durableHistorySpy{events: []*protocolv1.Event{ping}}
 	h := newDurableHarness(t, history)
 	windows := newFakeKeepAliveWindows()
 	if err := windows.Open(KeepAliveWindowRecord{TurnID: "ka_1", Workspace: "ws", StartedAtMs: 1_000}); err != nil {
@@ -504,7 +504,7 @@ func (h *durableHarness) durableFailureCards() []*frontendv1.Message {
 // connecting long after the refusal gets the same account of it.
 func TestALateClientIsServedTheStandingTerminalCard(t *testing.T) {
 	// Arrange — a fenced session, and the conversation it never got to add to.
-	history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
+	history := &durableHistorySpy{events: []*protocolv1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
 	h := newDurableHarness(t, history)
 	h.cards.seed(seededTerminalCard(t))
 
@@ -528,7 +528,7 @@ func TestALateClientIsServedTheStandingTerminalCard(t *testing.T) {
 // healthy session as broken.
 func TestAnUnfencedWorkspaceIsServedNoTerminalCard(t *testing.T) {
 	// Arrange.
-	history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
+	history := &durableHistorySpy{events: []*protocolv1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
 	h := newDurableHarness(t, history)
 
 	// Act.
@@ -547,7 +547,7 @@ func TestAnUnfencedWorkspaceIsServedNoTerminalCard(t *testing.T) {
 // path exists to end.
 func TestAnUnreadableTerminalCardFailsTheResync(t *testing.T) {
 	// Arrange.
-	history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
+	history := &durableHistorySpy{events: []*protocolv1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
 	h := newDurableHarness(t, history)
 	h.cards.readErr = errors.New("statedb: the store is unreadable")
 
@@ -565,7 +565,7 @@ func TestAnUnreadableTerminalCardFailsTheResync(t *testing.T) {
 // severed arm is exactly that claim.
 func TestADurableReplayStampsAFencedWorkspaceSevered(t *testing.T) {
 	// Arrange.
-	history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
+	history := &durableHistorySpy{events: []*protocolv1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
 	h := newDurableHarness(t, history)
 	h.cards.seed(seededTerminalCard(t))
 
@@ -586,7 +586,7 @@ func TestADurableReplayStampsAFencedWorkspaceSevered(t *testing.T) {
 // ordinary post-bounce workspace as broken is what spent blue's meaning.
 func TestADurableReplayStampsAnUnfencedWorkspaceHibernated(t *testing.T) {
 	// Arrange.
-	history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
+	history := &durableHistorySpy{events: []*protocolv1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
 	h := newDurableHarness(t, history)
 
 	// Act.
@@ -606,7 +606,7 @@ func TestADurableReplayStampsAnUnfencedWorkspaceHibernated(t *testing.T) {
 // success.
 func TestAFailedUnwiredStampFailsTheResync(t *testing.T) {
 	// Arrange.
-	history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
+	history := &durableHistorySpy{events: []*protocolv1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
 	h := newDurableHarness(t, history)
 	h.applier.wiredErr = errors.New("ssm: the state log is unwritable")
 
@@ -659,7 +659,7 @@ func TestADurableReplayStampsTheWorkspacesPublishedFence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange — the store holds one event, and the workspace's
 			// authoritative state publishes the fence under test.
-			history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
+			history := &durableHistorySpy{events: []*protocolv1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
 			h := newDurableHarness(t, history)
 			h.applier.setCurrent("ws", &frontendv1.WorkspaceState{
 				Workspace: "ws",

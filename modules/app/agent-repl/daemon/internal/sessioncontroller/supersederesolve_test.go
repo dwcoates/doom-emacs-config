@@ -3,7 +3,7 @@ package sessioncontroller
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // A SUPERSEDED SESSION'S DEATH CARD CLOSES WHEN ITS SUCCESSOR IS UP, AND THE
@@ -34,7 +34,7 @@ func TestOperationalReportsTheWorkspaceHandoverIsComplete(t *testing.T) {
 	m, reg := operationalRig(t)
 
 	// Act — the bring-up gate closes.
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Assert.
 	got := reg.operationalEdges()
@@ -63,7 +63,7 @@ func TestAStaleShimReadyResolvesNothing(t *testing.T) {
 	m, reg := operationalRig(t)
 
 	// Act.
-	m.onConnectedForGeneration("ws", "s1", "g_retired", &corev1.ShimHello{SessionId: "s1"})
+	m.onConnectedForGeneration("ws", "s1", "g_retired", &protocolv1.ShimHello{SessionId: "s1"})
 
 	// Assert.
 	if got := reg.operationalEdges(); len(got) != 0 {

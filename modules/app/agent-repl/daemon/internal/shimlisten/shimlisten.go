@@ -38,7 +38,7 @@ import (
 	"syscall"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 
 	"golang.org/x/sys/unix"
@@ -83,7 +83,7 @@ func DefaultSocketPath() (string, error) {
 // Conn is an accepted shim connection plus the hello that identified it.
 type Conn struct {
 	Net   net.Conn
-	Hello *corev1.ShimHello
+	Hello *protocolv1.ShimHello
 	// watchDone closes when this connection's parked-socket watch has exited,
 	// so a claim can take sole ownership of the read side by rendezvous rather
 	// than by hoping the watch has noticed. Nil when nothing watches it.
@@ -687,7 +687,7 @@ func (s *Server) Close() error {
 // wire.ReadAny call sites: this one WRAPS the frame error with what it was
 // trying to read, and nothing about the listener's error handling should change
 // as a side effect of sharing the decode half.
-func readHello(conn net.Conn) (*corev1.ShimHello, error) {
+func readHello(conn net.Conn) (*protocolv1.ShimHello, error) {
 	payload, err := wire.ReadFrame(conn)
 	if err != nil {
 		return nil, fmt.Errorf("reading hello frame: %w", err)
@@ -696,7 +696,7 @@ func readHello(conn net.Conn) (*corev1.ShimHello, error) {
 	if err != nil {
 		return nil, err
 	}
-	hello, ok := msg.(*corev1.ShimHello)
+	hello, ok := msg.(*protocolv1.ShimHello)
 	if !ok {
 		return nil, fmt.Errorf("first frame was %T, expected ShimHello", msg)
 	}

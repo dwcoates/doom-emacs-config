@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ type settlementRecordingStore struct {
 	afterCancel []bool
 }
 
-func (s *settlementRecordingStore) Record(_ string, accounting *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error) {
+func (s *settlementRecordingStore) Record(_ string, accounting *statev1.TurnAccounting) (*statev1.TurnAccounting, error) {
 	s.mu.Lock()
 	s.recorded = append(s.recorded, accounting.GetTurnId())
 	s.afterCancel = append(s.afterCancel, s.cancelled.Load())
@@ -49,7 +49,7 @@ func (s *settlementRecordingStore) Record(_ string, accounting *frontendv1.TurnA
 	return accounting, nil
 }
 
-func (s *settlementRecordingStore) List(string) ([]*frontendv1.TurnAccounting, error) {
+func (s *settlementRecordingStore) List(string) ([]*statev1.TurnAccounting, error) {
 	return nil, nil
 }
 

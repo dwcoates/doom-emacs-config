@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // --- (1) the ping fires at TTL minus leeway ----------------------------------
@@ -40,7 +40,7 @@ func TestE2EAKeepAlivePingFiresAtTheCacheTtlLessLeeway(t *testing.T) {
 	s.idleFor(t, policy.pingAt())
 
 	// Assert
-	ping := s.store.await(t, "a TurnStarted attributed to the cache keep-alive", func(ev *corev1.Event) bool {
+	ping := s.store.await(t, "a TurnStarted attributed to the cache keep-alive", func(ev *protocolv1.Event) bool {
 		return keepAlivePing(ev) != nil
 	})
 	if got := keepAlivePing(ping).GetTurnId(); got == "" {
@@ -62,7 +62,7 @@ func TestE2EAKeepAlivePingCarriesTheContractText(t *testing.T) {
 
 	// Assert — TurnStarted.prompt_preview is the durable copy of the submitted
 	// text's first line, and the ping is exactly one line.
-	ping := s.store.await(t, "the keep-alive TurnStarted", func(ev *corev1.Event) bool {
+	ping := s.store.await(t, "the keep-alive TurnStarted", func(ev *protocolv1.Event) bool {
 		return keepAlivePing(ev) != nil
 	})
 	if got := keepAlivePing(ping).GetPromptPreview(); got != keepAlivePingText {
@@ -89,7 +89,7 @@ func TestE2ENoKeepAlivePingBeforeTheCacheTtlLessLeeway(t *testing.T) {
 	// Assert
 	s.store.awaitSentinel(t, "the sentinel user turn",
 		noKeepAlivePing(fmt.Sprintf("the session had been idle for only %s and the ping window opens at %s", policy.pingAt()-time.Minute, policy.pingAt())),
-		func(ev *corev1.Event) bool {
+		func(ev *protocolv1.Event) bool {
 			started := userTurnStart(ev)
 			return started != nil && started.GetPromptPreview() == "sentinel"
 		})
@@ -108,7 +108,7 @@ func TestE2EAKeepAlivePingIsStillTriedInsideTheRetryWindow(t *testing.T) {
 	s.idleFor(t, policy.retryUntil())
 
 	// Assert
-	s.store.await(t, "a keep-alive ping at the retry window's last moment", func(ev *corev1.Event) bool {
+	s.store.await(t, "a keep-alive ping at the retry window's last moment", func(ev *protocolv1.Event) bool {
 		return keepAlivePing(ev) != nil
 	})
 }
@@ -133,7 +133,7 @@ func TestE2ENoKeepAlivePingWhileATurnIsLive(t *testing.T) {
 	// Assert — the held turn ends and no ping preceded its end.
 	s.store.awaitSentinel(t, "the held turn's end",
 		noKeepAlivePing("a turn was in flight, so the workspace was not idle at all"),
-		func(ev *corev1.Event) bool { return ev.GetTurnEnded() != nil })
+		func(ev *protocolv1.Event) bool { return ev.GetTurnEnded() != nil })
 }
 
 // TestE2ENoKeepAlivePingWhileHeldPromptsWaitOnAPausedQueue covers THE PENDING
@@ -170,7 +170,7 @@ func TestE2ENoKeepAlivePingWhileHeldPromptsWaitOnAPausedQueue(t *testing.T) {
 	// Assert
 	s.store.awaitSentinel(t, "the sentinel user turn",
 		noKeepAlivePing("the user's own prompt was already queued, so the cache was about to be used for real"),
-		func(ev *corev1.Event) bool {
+		func(ev *protocolv1.Event) bool {
 			started := userTurnStart(ev)
 			return started != nil && started.GetPromptPreview() == "sentinel"
 		})
@@ -203,11 +203,11 @@ func TestE2ENoKeepAlivePingWhileTheMergeLeaseHoldsTheWorkspace(t *testing.T) {
 	// follows the lease being taken.
 	s.store.awaitSentinel(t, "a turn submitted by the merge that holds the lease",
 		noKeepAlivePing("the merge lease holds the workspace's shim, which the user themself cannot prompt"),
-		func(ev *corev1.Event) bool {
+		func(ev *protocolv1.Event) bool {
 			started := ev.GetTurnStarted()
 			return started != nil &&
-				started.GetPromptOrigin() != corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT &&
-				started.GetPromptOrigin() != corev1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE
+				started.GetPromptOrigin() != protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT &&
+				started.GetPromptOrigin() != protocolv1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE
 		})
 }
 
@@ -236,7 +236,7 @@ func TestE2EAnOversleptCacheDoesNotHibernate(t *testing.T) {
 
 	// Assert — the prompt was accepted and its turn began, which a session held
 	// behind the revival gate could not have done.
-	s.store.await(t, "the sentinel user turn on a session the cold cache did not sleep", func(ev *corev1.Event) bool {
+	s.store.await(t, "the sentinel user turn on a session the cold cache did not sleep", func(ev *protocolv1.Event) bool {
 		started := userTurnStart(ev)
 		return started != nil && started.GetPromptPreview() == "sentinel"
 	})
@@ -257,7 +257,7 @@ func TestE2EAnOversleptCacheSubmitsNoPing(t *testing.T) {
 	// Assert
 	s.store.awaitSentinel(t, "the sentinel user turn",
 		noKeepAlivePing("the cache had already expired, so the check declined the ping rather than paying a full re-ingest to warm nothing"),
-		func(ev *corev1.Event) bool {
+		func(ev *protocolv1.Event) bool {
 			started := userTurnStart(ev)
 			return started != nil && started.GetPromptPreview() == "sentinel"
 		})
@@ -308,7 +308,7 @@ func TestE2EWithNoConfigurationThePingFiresAtTheDocumentedDefaults(t *testing.T)
 	s.idleFor(t, defaults.pingAt())
 
 	// Assert
-	s.store.await(t, "a keep-alive ping at the default TTL less the default leeway", func(ev *corev1.Event) bool {
+	s.store.await(t, "a keep-alive ping at the default TTL less the default leeway", func(ev *protocolv1.Event) bool {
 		return keepAlivePing(ev) != nil
 	})
 }
@@ -334,11 +334,11 @@ func TestE2EAPingOnlySessionStillHibernatesAtTheIdleCutoff(t *testing.T) {
 	policy := testKeepAlivePolicy()
 	s := newKeepAliveSession(t, policy)
 	s.idleFor(t, policy.pingAt())
-	ping := s.store.await(t, "the keep-alive ping's TurnStarted", func(ev *corev1.Event) bool {
+	ping := s.store.await(t, "the keep-alive ping's TurnStarted", func(ev *protocolv1.Event) bool {
 		return keepAlivePing(ev) != nil
 	})
 	pingTurnID := keepAlivePing(ping).GetTurnId()
-	s.store.await(t, "the keep-alive ping's TurnEnded", func(ev *corev1.Event) bool {
+	s.store.await(t, "the keep-alive ping's TurnEnded", func(ev *protocolv1.Event) bool {
 		return turnEndedOf(ev, pingTurnID)
 	})
 

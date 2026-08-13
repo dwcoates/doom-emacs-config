@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // rebasedMark is what a client that rebased across a rotation asks with. Zero

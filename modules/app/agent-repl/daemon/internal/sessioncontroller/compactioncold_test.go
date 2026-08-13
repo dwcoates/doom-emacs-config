@@ -5,7 +5,8 @@ import (
 	"testing"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/keepalive"
@@ -34,9 +35,9 @@ func coldCompactionRig(t *testing.T, kind compactionKind, turnID string) (*Manag
 // buckets, for a case that is about a THRESHOLD rather than about the vendor
 // conversion. The conversion itself is proved by newTurnResultCost's own tests.
 func costOf(turnID string, freshInput, cacheWrite, cacheRead uint64) turnResultCost {
-	return turnResultCost{turnID: turnID, usage: &frontendv1.TokenUsage{
-		InputHits:   &frontendv1.TokenCacheHits{Read: cacheRead},
-		InputMisses: &frontendv1.TokenCacheMisses{Written: cacheWrite, Unwritten: freshInput},
+	return turnResultCost{turnID: turnID, usage: &conversationv1.TokenUsage{
+		InputHits:   &conversationv1.TokenCacheHits{Read: cacheRead},
+		InputMisses: &conversationv1.TokenCacheMisses{Written: cacheWrite, Unwritten: freshInput},
 	}}
 }
 

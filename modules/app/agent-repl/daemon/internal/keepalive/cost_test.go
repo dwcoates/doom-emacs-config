@@ -3,16 +3,16 @@ package keepalive
 import (
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
 // usage builds one canonical measurement from the two vendor buckets a cost
 // verdict is taken from. The cache hit is named explicitly so a test can prove
 // it is excluded rather than merely omitted.
-func usage(freshInput, cacheWrite, cacheRead uint64) *frontendv1.TokenUsage {
-	return &frontendv1.TokenUsage{
-		InputHits:   &frontendv1.TokenCacheHits{Read: cacheRead},
-		InputMisses: &frontendv1.TokenCacheMisses{Written: cacheWrite, Unwritten: freshInput},
+func usage(freshInput, cacheWrite, cacheRead uint64) *conversationv1.TokenUsage {
+	return &conversationv1.TokenUsage{
+		InputHits:   &conversationv1.TokenCacheHits{Read: cacheRead},
+		InputMisses: &conversationv1.TokenCacheMisses{Written: cacheWrite, Unwritten: freshInput},
 	}
 }
 
@@ -44,7 +44,7 @@ func TestOnlyTheExpensiveSumCrossesTheColdThreshold(t *testing.T) {
 func TestCameBackColdComparesAgainstTheConfiguredThreshold(t *testing.T) {
 	tests := []struct {
 		name  string
-		usage *frontendv1.TokenUsage
+		usage *conversationv1.TokenUsage
 		want  bool
 	}{
 		{name: "over the threshold is proof the cache was gone", usage: usage(20001, 0, 0), want: true},

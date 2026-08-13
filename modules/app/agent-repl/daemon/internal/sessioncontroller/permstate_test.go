@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // errApplyPermission is the SSM refusing a permission-row edge.
@@ -85,10 +85,10 @@ func TestPermissionRowOpensAndClosesOnEveryResolution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			ph, applier := newProducerHandler(t)
-			req := &corev1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}
+			req := &protocolv1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}
 
 			// Act — park the real handler, then resolve it.
-			done := make(chan *corev1.PermissionResponse, 1)
+			done := make(chan *protocolv1.PermissionResponse, 1)
 			go func() { done <- ph.HandlePermission("s1", req) }()
 			waitForPermWaiter(ph.reg, "ws", "r1")
 			waitForPermEdges(applier, 1)
@@ -110,11 +110,13 @@ func TestPermissionRowOpensAndClosesOnEveryResolution(t *testing.T) {
 func TestConcurrentPermissionsOpenOnceAndCloseAtZero(t *testing.T) {
 	// Arrange — two questions parked at the same time.
 	ph, applier := newProducerHandler(t)
-	done := map[string]chan *corev1.PermissionResponse{}
+	done := map[string]chan *protocolv1.PermissionResponse{}
 	for i, id := range []string{"r1", "r2"} {
-		ch := make(chan *corev1.PermissionResponse, 1)
+		ch := make(chan *protocolv1.PermissionResponse, 1)
 		done[id] = ch
-		go func() { ch <- ph.HandlePermission("s1", &corev1.PermissionRequest{RequestId: id, ToolName: "Bash"}) }()
+		go func() {
+			ch <- ph.HandlePermission("s1", &protocolv1.PermissionRequest{RequestId: id, ToolName: "Bash"})
+		}()
 		waitForPermWaiter(ph.reg, "ws", id)
 		waitForPermEdges(applier, i+1)
 	}
@@ -146,8 +148,8 @@ func TestPermissionRowApplyFailureIsLoudAndDoesNotBlockTheRoundTrip(t *testing.T
 	applier.permErr = errApplyPermission
 
 	// Act.
-	done := make(chan *corev1.PermissionResponse, 1)
-	go func() { done <- ph.HandlePermission("s1", &corev1.PermissionRequest{RequestId: "r1"}) }()
+	done := make(chan *protocolv1.PermissionResponse, 1)
+	go func() { done <- ph.HandlePermission("s1", &protocolv1.PermissionRequest{RequestId: "r1"}) }()
 	waitForPermWaiter(ph.reg, "ws", "r1")
 	waitForPermEdges(applier, 1)
 	allowIt(t, ph.reg, "r1")
@@ -155,7 +157,7 @@ func TestPermissionRowApplyFailureIsLoudAndDoesNotBlockTheRoundTrip(t *testing.T
 
 	// Assert — the human's answer still reaches the shim; a state-write failure
 	// must never swallow a decision.
-	if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+	if resp.GetDecision() != protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW {
 		t.Fatalf("decision = %s, want ALLOW", resp.GetDecision())
 	}
 	if len(applier.permissionsApplied()) != 2 {

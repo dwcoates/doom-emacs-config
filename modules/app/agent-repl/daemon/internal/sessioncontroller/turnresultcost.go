@@ -2,7 +2,7 @@ package sessioncontroller
 
 import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/tokenusage"
 )
@@ -34,7 +34,7 @@ type turnResultCost struct {
 	// than fields spread out here. Carrying the message instead of a handful of
 	// pre-reduced numbers is what stops a consumer from reaching for one bucket
 	// where the sum was meant.
-	usage *frontendv1.TokenUsage
+	usage *conversationv1.TokenUsage
 }
 
 // expensiveInputTokens is what the turn fed the model NEW: both cache misses,

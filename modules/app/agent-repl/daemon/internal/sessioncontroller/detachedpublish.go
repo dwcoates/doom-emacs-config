@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"strings"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/frontend"
 )
@@ -42,7 +42,7 @@ import (
 // so those refusals are routed to the same card path an unattributable
 // detachment takes, carrying the very sentence this warn would have carried.
 // What is left over is still warned about here.
-func (c *consumer) observeAsync(curated frontend.Curation, ev *corev1.Event) asyncPush {
+func (c *consumer) observeAsync(curated frontend.Curation, ev *protocolv1.Event) asyncPush {
 	// THE CURATION VERDICT, RECORDED. Which records left the feed for a work
 	// and which stayed is the single decision this whole plane turns on, and it
 	// was previously unobservable: a subagent rendering at the top level and a
@@ -70,13 +70,13 @@ func (c *consumer) observeAsync(curated frontend.Curation, ev *corev1.Event) asy
 // observeAsyncTask folds a task-lifecycle event into the session's work. It
 // classifies its refusals exactly as observeAsync does: a daemon bug earns the
 // card, everything else the degraded warn.
-func (c *consumer) observeAsyncTask(ev *corev1.Event) asyncPush {
+func (c *consumer) observeAsyncTask(ev *protocolv1.Event) asyncPush {
 	var push asyncPush
 	var err error
 	switch p := ev.GetPayload().(type) {
-	case *corev1.Event_TaskStarted:
+	case *protocolv1.Event_TaskStarted:
 		push, err = c.work.observeTaskStarted(p.TaskStarted, c.asyncInstant(ev))
-	case *corev1.Event_TaskEnded:
+	case *protocolv1.Event_TaskEnded:
 		push, err = c.work.observeTaskEnded(p.TaskEnded, c.asyncInstant(ev))
 	default:
 		return asyncPush{}
@@ -105,7 +105,7 @@ func (c *consumer) observeAsyncTask(ev *corev1.Event) asyncPush {
 // historical event is the same account being read back out of the store, and it
 // takes the withhold arm below instead: classified, recorded in full at info,
 // and given no live card.
-func (c *consumer) pushAsync(push asyncPush, ev *corev1.Event) {
+func (c *consumer) pushAsync(push asyncPush, ev *protocolv1.Event) {
 	if push.empty() {
 		return
 	}
@@ -204,7 +204,7 @@ func updatedWorkIDs(updates []*frontendv1.DetachedWorkUpdate) string {
 // on this path prefers it: a replay must fold the same instants it folded the
 // first time, and the consumer's clock would rewrite a year-old detachment as
 // having just happened.
-func (c *consumer) asyncInstant(ev *corev1.Event) int64 {
+func (c *consumer) asyncInstant(ev *protocolv1.Event) int64 {
 	if ms := ev.GetProducedAtMs(); ms > 0 {
 		return ms
 	}

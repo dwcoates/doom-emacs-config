@@ -7,16 +7,16 @@ import (
 	"strings"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"google.golang.org/protobuf/proto"
 )
 
-func auditUtilization(sessionID, messageID, model string) *frontendv1.TokenUtilization {
-	return &frontendv1.TokenUtilization{AgentReplSessionId: sessionID, ClaudeSessionId: "claude-" + sessionID, RootTurnId: "turn-" + messageID, ApiMessageId: messageID, Model: model, Actor: &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}}, Usage: &frontendv1.VendorTokenUsage{OutputTokens: 1}}
+func auditUtilization(sessionID, messageID, model string) *statev1.TokenUtilization {
+	return &statev1.TokenUtilization{AgentReplSessionId: sessionID, ClaudeSessionId: "claude-" + sessionID, RootTurnId: "turn-" + messageID, ApiMessageId: messageID, Model: model, Actor: &statev1.TokenUtilization_MainAgent{MainAgent: &statev1.TokenUtilizationMainAgent{}}, Usage: &statev1.VendorTokenUsage{OutputTokens: 1}}
 }
 
-func insertAuditUtilization(t *testing.T, db *sql.DB, record *frontendv1.TokenUtilization) {
+func insertAuditUtilization(t *testing.T, db *sql.DB, record *statev1.TokenUtilization) {
 	t.Helper()
 	raw, err := proto.Marshal(record)
 	if err != nil {

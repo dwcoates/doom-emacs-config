@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/shim"
@@ -151,14 +151,14 @@ func (s *fakeSpawner) stopHints() []int32 {
 // production cannot drive a session without somewhere for shims to dial in.
 type stubSource struct{}
 
-func (stubSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.ShimHello, error) {
+func (stubSource) Next(ctx context.Context, _ string) (net.Conn, *protocolv1.ShimHello, error) {
 	<-ctx.Done()
 	return nil, nil, ctx.Err()
 }
 
 type fakeLocator struct{ m map[string]string }
 
-const testPromptOrigin = corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT
+const testPromptOrigin = protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT
 
 func (l fakeLocator) Locate(ws string) (string, bool) { id, ok := l.m[ws]; return id, ok }
 
@@ -173,19 +173,19 @@ type fakeClient struct {
 	// come back with.
 	requestIDs    []string
 	origins       []string
-	promptOrigins []corev1.PromptOrigin
+	promptOrigins []protocolv1.PromptOrigin
 	modes         []string
 	interrupts    int
 	// interruptOutcome is the shim verdict the fake acks with. Zero means
 	// INTERRUPTED, so a test that does not care about the outcome gets the
 	// ordinary successful stop.
-	interruptOutcome corev1.InterruptOutcome
+	interruptOutcome protocolv1.InterruptOutcome
 	// interruptOutcomeQueue answers successive stops with successive verdicts,
 	// which is what a re-aimed stop needs: the first ack reports the aimed-at
 	// turn already complete and the second reports the newer turn interrupted.
 	// It is consumed front to back and falls back to interruptOutcome when
 	// empty.
-	interruptOutcomeQueue []corev1.InterruptOutcome
+	interruptOutcomeQueue []protocolv1.InterruptOutcome
 	// interruptOrigins records who ORDERED each stop, in that caller's own
 	// vocabulary, so a test can prove the correlation reaches the wire.
 	interruptOrigins []string
@@ -195,7 +195,7 @@ type fakeClient struct {
 	interruptErr error
 	// detachedCancelOutcome is the verdict the fake answers a detached-agent
 	// cancel with; nil defaults to nothing_running.
-	detachedCancelOutcome *corev1.DetachedCancelOutcome
+	detachedCancelOutcome *protocolv1.DetachedCancelOutcome
 	// detachedCancelOrigins records who ORDERED each cancel, in that caller's
 	// own vocabulary.
 	detachedCancelOrigins []string
@@ -218,7 +218,7 @@ type fakeClient struct {
 	// runResult, when non-nil, makes Run terminate with the received error.
 	// This models a protocol failure that evicts the session controller without Hibernate.
 	runResult        chan error
-	healthStatus     *corev1.HealthStatus
+	healthStatus     *protocolv1.HealthStatus
 	healthErr        error
 	healthRequestIDs []string
 	// onSubmit, when set, runs INSIDE SubmitPrompt, before it records or
@@ -313,7 +313,7 @@ func (c *fakeClient) modelQueryCount() int {
 
 type fakeFileDiagnosticPersister struct{}
 
-func (fakeFileDiagnosticPersister) PersistFileDiagnostic(string, string, *corev1.Event, *corev1.FilePlaneDiagnostic) error {
+func (fakeFileDiagnosticPersister) PersistFileDiagnostic(string, string, *protocolv1.Event, *protocolv1.FilePlaneDiagnostic) error {
 	return nil
 }
 
@@ -329,7 +329,7 @@ func (c *fakeClient) Run(ctx context.Context) error {
 	<-ctx.Done()
 	return nil
 }
-func (c *fakeClient) SubmitPrompt(_ context.Context, requestID, text, origin, mode string, promptOrigin corev1.PromptOrigin) error {
+func (c *fakeClient) SubmitPrompt(_ context.Context, requestID, text, origin, mode string, promptOrigin protocolv1.PromptOrigin) error {
 	c.mu.Lock()
 	hook := c.onSubmit
 	c.mu.Unlock()
@@ -380,7 +380,7 @@ func (c *fakeClient) AwaitReady(ctx context.Context) error {
 	}
 }
 
-func (c *fakeClient) Health(_ context.Context, requestID string) (*corev1.HealthStatus, error) {
+func (c *fakeClient) Health(_ context.Context, requestID string) (*protocolv1.HealthStatus, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.healthRequestIDs = append(c.healthRequestIDs, requestID)
@@ -389,7 +389,7 @@ func (c *fakeClient) Health(_ context.Context, requestID string) (*corev1.Health
 		return nil, c.healthErr
 	}
 	if c.healthStatus == nil {
-		return &corev1.HealthStatus{RequestId: requestID, Healthy: true, Component: "fake-shim"}, nil
+		return &protocolv1.HealthStatus{RequestId: requestID, Healthy: true, Component: "fake-shim"}, nil
 	}
 	return c.healthStatus, nil
 }
@@ -405,7 +405,7 @@ func (c *fakeClient) UnpinAccountingTurn(turnIDs ...string) {
 // CancelDetachedAgents answers with whatever the test staged, defaulting to a
 // nothing_running verdict — the honest answer for a fake session that has never
 // launched detached work.
-func (c *fakeClient) CancelDetachedAgents(_ context.Context, originRequestID string) (*corev1.DetachedCancelOutcome, error) {
+func (c *fakeClient) CancelDetachedAgents(_ context.Context, originRequestID string) (*protocolv1.DetachedCancelOutcome, error) {
 	c.mu.Lock()
 	c.detachedCancelOrigins = append(c.detachedCancelOrigins, originRequestID)
 	outcome := c.detachedCancelOutcome
@@ -416,14 +416,14 @@ func (c *fakeClient) CancelDetachedAgents(_ context.Context, originRequestID str
 		return nil, failure
 	}
 	if outcome == nil {
-		outcome = &corev1.DetachedCancelOutcome{Outcome: &corev1.DetachedCancelOutcome_NothingRunning{
-			NothingRunning: &corev1.NoDetachedAgentsRunning{},
+		outcome = &protocolv1.DetachedCancelOutcome{Outcome: &protocolv1.DetachedCancelOutcome_NothingRunning{
+			NothingRunning: &protocolv1.NoDetachedAgentsRunning{},
 		}}
 	}
 	return outcome, nil
 }
 
-func (c *fakeClient) Interrupt(_ context.Context, originRequestID string) (corev1.InterruptOutcome, error) {
+func (c *fakeClient) Interrupt(_ context.Context, originRequestID string) (protocolv1.InterruptOutcome, error) {
 	c.mu.Lock()
 	c.interruptOrigins = append(c.interruptOrigins, originRequestID)
 	c.mu.Unlock()
@@ -438,10 +438,10 @@ func (c *fakeClient) Interrupt(_ context.Context, originRequestID string) (corev
 	c.mu.Unlock()
 	notifyTestActivity()
 	if failure != nil {
-		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, failure
+		return protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, failure
 	}
-	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED {
-		outcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED
+	if outcome == protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED {
+		outcome = protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED
 	}
 	return outcome, nil
 }
@@ -491,7 +491,7 @@ func TestManagerSetModelRejectsSyntheticBeforeSessionLookup(t *testing.T) {
 // Replay is the shim-mediated bounded history replay. The default fake serves
 // an empty, complete one; the replay-specific harness (repull_test.go) swaps in
 // a scripted stand-in.
-func (c *fakeClient) Replay(_ context.Context, _, _ uint64, _ uint32, _ func(*corev1.Event)) (shimclient.ReplayResult, error) {
+func (c *fakeClient) Replay(_ context.Context, _, _ uint64, _ uint32, _ func(*protocolv1.Event)) (shimclient.ReplayResult, error) {
 	return shimclient.ReplayResult{}, nil
 }
 
@@ -500,7 +500,7 @@ func (c *fakeClient) Replay(_ context.Context, _, _ uint64, _ uint32, _ func(*co
 // conversation, and a fixture that made that claim by accident would hide
 // exactly the confusion this arm exists to prevent. The page-specific harness
 // (livepage_test.go) swaps in a scripted stand-in.
-func (c *fakeClient) MessagePage(_ context.Context, _ shimclient.MessagePageAnchor) (*corev1.MessagePage, error) {
+func (c *fakeClient) MessagePage(_ context.Context, _ shimclient.MessagePageAnchor) (*protocolv1.MessagePage, error) {
 	return nil, fmt.Errorf("fakeClient: no bounded message page is scripted for this session")
 }
 
@@ -655,9 +655,9 @@ func TestSubmitPromptBringsUpAndSends(t *testing.T) {
 }
 
 func TestSubmitPromptRejectsInvalidOriginBeforeSessionMutation(t *testing.T) {
-	for _, origin := range []corev1.PromptOrigin{
-		corev1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
-		corev1.PromptOrigin(999),
+	for _, origin := range []protocolv1.PromptOrigin{
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
+		protocolv1.PromptOrigin(999),
 	} {
 		t.Run(origin.String(), func(t *testing.T) {
 			spawner := &fakeSpawner{}
@@ -703,7 +703,7 @@ func TestHealthRequiresTheNamedExistingSessionControllerAndForwardsCorrelation(t
 	if err := m.SubmitPrompt(context.Background(), "ws", "test-request", "hello", "", testPromptOrigin); err != nil {
 		t.Fatalf("bring up: %v", err)
 	}
-	lastClient().healthStatus = &corev1.HealthStatus{RequestId: "health-1", Healthy: true, Component: "claude-shim"}
+	lastClient().healthStatus = &protocolv1.HealthStatus{RequestId: "health-1", Healthy: true, Component: "claude-shim"}
 
 	// Act.
 	status, err := m.Health(context.Background(), "ws", "s1", "health-1")
@@ -778,7 +778,7 @@ func TestHealthWaitsForABringUpAlreadyInMotion(t *testing.T) {
 
 	// Act: probe while the shim is still connecting, then let it connect.
 	type answer struct {
-		status *corev1.HealthStatus
+		status *protocolv1.HealthStatus
 		err    error
 	}
 	done := make(chan answer, 1)
@@ -971,10 +971,10 @@ func TestResumedSessionPromptsAreForwardedVerbatim(t *testing.T) {
 		t.Fatalf("existing: %v", err)
 	}
 	m.onTurnBoundary(d, false, m.now())
-	d.consumer.Apply(&corev1.Event{
+	d.consumer.Apply(&protocolv1.Event{
 		SessionId: "s1",
-		Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{
-			Source: corev1.SessionSource_SESSION_SOURCE_RESUME,
+		Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{
+			Source: protocolv1.SessionSource_SESSION_SOURCE_RESUME,
 			Cwd:    t.TempDir(),
 		}},
 	})
@@ -1016,7 +1016,7 @@ func TestInterruptReportsNoErrorWhenTheTurnWasStopped(t *testing.T) {
 	if err := m.SubmitPrompt(context.Background(), "ws", "test-request", "hello", "", testPromptOrigin); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
-	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED
+	lastClient().interruptOutcome = protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED
 
 	// Act.
 	err := m.Interrupt(context.Background(), "ws", "fe-1")
@@ -1034,7 +1034,7 @@ func TestInterruptReportsNoErrorWhenTheTurnHadAlreadyEnded(t *testing.T) {
 	if err := m.SubmitPrompt(context.Background(), "ws", "test-request", "hello", "", testPromptOrigin); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
-	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE
+	lastClient().interruptOutcome = protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE
 
 	// Act.
 	err := m.Interrupt(context.Background(), "ws", "fe-1")
@@ -1065,7 +1065,7 @@ func TestAlreadyCompleteWithholdsFooterWindowWhenStateReconciliationFails(t *tes
 	}
 	applier := m.cfg.SSM.(*fakeApplier)
 	applier.alreadyCompleteErr = errors.New("state write failed")
-	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE
+	lastClient().interruptOutcome = protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE
 
 	// Act.
 	err := m.Interrupt(context.Background(), "ws", "fe-1")
@@ -1085,7 +1085,7 @@ func TestInterruptReportsAnUndeliverableStopAsAFailure(t *testing.T) {
 	if err := m.SubmitPrompt(context.Background(), "ws", "test-request", "hello", "", testPromptOrigin); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
-	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED
+	lastClient().interruptOutcome = protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED
 
 	// Act.
 	err := m.Interrupt(context.Background(), "ws", "fe-1")
@@ -1110,7 +1110,7 @@ func TestAnswerPermissionRoutesToRegistry(t *testing.T) {
 	// Assert.
 	select {
 	case resp := <-ch:
-		if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+		if resp.GetDecision() != protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW {
 			t.Errorf("decision: got %v, want ALLOW", resp.GetDecision())
 		}
 	case <-time.After(time.Second):
@@ -1176,10 +1176,10 @@ func waitForPermWaiterCount(reg *permRegistry, id string, want int) {
 func TestHandlePermissionPushesPendingThenAllowed(t *testing.T) {
 	// Arrange.
 	ph, reg, push := newTestPermHandler()
-	req := &corev1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}
+	req := &protocolv1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}
 
 	// Act: run the blocking handler, wait for its waiter, then allow.
-	done := make(chan *corev1.PermissionResponse, 1)
+	done := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r1")
 	if err := reg.answerAllow("r1", nil); err != nil {
@@ -1189,9 +1189,9 @@ func TestHandlePermissionPushesPendingThenAllowed(t *testing.T) {
 
 	// Assert: pending then allowed on uuid r1.
 	got := push.permissionResolutions("r1")
-	want := []corev1.PermissionItem_Resolution{
-		corev1.PermissionItem_RESOLUTION_PENDING,
-		corev1.PermissionItem_RESOLUTION_ALLOWED,
+	want := []protocolv1.PermissionItem_Resolution{
+		protocolv1.PermissionItem_RESOLUTION_PENDING,
+		protocolv1.PermissionItem_RESOLUTION_ALLOWED,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolutions = %v, want %v", got, want)
@@ -1203,10 +1203,10 @@ func TestHandlePermissionPushesNoHandBuiltWorkspaceState(t *testing.T) {
 	// a render state, whose UNSPECIFIED connectivity the frontend contract has
 	// no reading for. The SSM's permission row is the authority.
 	ph, reg, push := newTestPermHandler()
-	req := &corev1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}
+	req := &protocolv1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}
 
 	// Act.
-	done := make(chan *corev1.PermissionResponse, 1)
+	done := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r1")
 	if err := reg.answerAllow("r1", nil); err != nil {
@@ -1223,10 +1223,10 @@ func TestHandlePermissionPushesNoHandBuiltWorkspaceState(t *testing.T) {
 func TestHandlePermissionPushesDeniedWithMessage(t *testing.T) {
 	// Arrange.
 	ph, reg, push := newTestPermHandler()
-	req := &corev1.PermissionRequest{RequestId: "r2", ToolName: "Bash"}
+	req := &protocolv1.PermissionRequest{RequestId: "r2", ToolName: "Bash"}
 
 	// Act.
-	done := make(chan *corev1.PermissionResponse, 1)
+	done := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r2")
 	if err := reg.answerDecline("r2", "not allowed"); err != nil {
@@ -1236,9 +1236,9 @@ func TestHandlePermissionPushesDeniedWithMessage(t *testing.T) {
 
 	// Assert: pending then denied, and the denied item carries the deny message.
 	got := push.permissionResolutions("r2")
-	want := []corev1.PermissionItem_Resolution{
-		corev1.PermissionItem_RESOLUTION_PENDING,
-		corev1.PermissionItem_RESOLUTION_DENIED,
+	want := []protocolv1.PermissionItem_Resolution{
+		protocolv1.PermissionItem_RESOLUTION_PENDING,
+		protocolv1.PermissionItem_RESOLUTION_DENIED,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolutions = %v, want %v", got, want)
@@ -1251,10 +1251,10 @@ func TestHandlePermissionPushesDeniedWithMessage(t *testing.T) {
 func TestHandlePermissionAbandonedOnTeardown(t *testing.T) {
 	// Arrange.
 	ph, reg, push := newTestPermHandler()
-	req := &corev1.PermissionRequest{RequestId: "r3", ToolName: "Bash"}
+	req := &protocolv1.PermissionRequest{RequestId: "r3", ToolName: "Bash"}
 
 	// Act: the handler blocks; a teardown fail abandons it (nil response).
-	done := make(chan *corev1.PermissionResponse, 1)
+	done := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r3")
 	reg.fail("connection teardown")
@@ -1264,9 +1264,9 @@ func TestHandlePermissionAbandonedOnTeardown(t *testing.T) {
 
 	// Assert: pending then abandoned on uuid r3.
 	got := push.permissionResolutions("r3")
-	want := []corev1.PermissionItem_Resolution{
-		corev1.PermissionItem_RESOLUTION_PENDING,
-		corev1.PermissionItem_RESOLUTION_ABANDONED,
+	want := []protocolv1.PermissionItem_Resolution{
+		protocolv1.PermissionItem_RESOLUTION_PENDING,
+		protocolv1.PermissionItem_RESOLUTION_ABANDONED,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolutions = %v, want %v", got, want)
@@ -1283,8 +1283,8 @@ func TestHandlePermissionReplaysTheRecordedAnswerToAResend(t *testing.T) {
 	// Arrange: the request was answered, but its response never reached the
 	// shim, so the shim re-sends it after reattaching.
 	ph, reg, _ := newTestPermHandler()
-	req := &corev1.PermissionRequest{RequestId: "r-resend", ToolName: "Bash"}
-	done := make(chan *corev1.PermissionResponse, 1)
+	req := &protocolv1.PermissionRequest{RequestId: "r-resend", ToolName: "Bash"}
+	done := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r-resend")
 	if err := reg.answerAllow("r-resend", nil); err != nil {
@@ -1297,7 +1297,7 @@ func TestHandlePermissionReplaysTheRecordedAnswerToAResend(t *testing.T) {
 
 	// Assert: the recorded decision comes straight back, so the shim's blocked
 	// canUseTool resolves without the human answering twice.
-	if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+	if resp.GetDecision() != protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW {
 		t.Fatalf("decision: got %v, want the recorded ALLOW", resp.GetDecision())
 	}
 }
@@ -1305,8 +1305,8 @@ func TestHandlePermissionReplaysTheRecordedAnswerToAResend(t *testing.T) {
 func TestHandlePermissionResendOfAnAnsweredRequestPushesNothing(t *testing.T) {
 	// Arrange: as above, answered and then re-sent.
 	ph, reg, push := newTestPermHandler()
-	req := &corev1.PermissionRequest{RequestId: "r-resend-push", ToolName: "Bash"}
-	done := make(chan *corev1.PermissionResponse, 1)
+	req := &protocolv1.PermissionRequest{RequestId: "r-resend-push", ToolName: "Bash"}
+	done := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r-resend-push")
 	if err := reg.answerAllow("r-resend-push", nil); err != nil {
@@ -1328,15 +1328,15 @@ func TestHandlePermissionResendOfAnAnsweredRequestPushesNothing(t *testing.T) {
 func TestHandlePermissionResendAfterAbandonmentReAsks(t *testing.T) {
 	// Arrange: the request was abandoned by a teardown, never answered.
 	ph, reg, push := newTestPermHandler()
-	req := &corev1.PermissionRequest{RequestId: "r-reask", ToolName: "Bash"}
-	done := make(chan *corev1.PermissionResponse, 1)
+	req := &protocolv1.PermissionRequest{RequestId: "r-reask", ToolName: "Bash"}
+	done := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r-reask")
 	reg.fail("connection teardown")
 	<-done
 
 	// Act: the shim reattaches and re-sends.
-	resent := make(chan *corev1.PermissionResponse, 1)
+	resent := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { resent <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r-reask")
 	if err := reg.answerDecline("r-reask", "no"); err != nil {
@@ -1352,11 +1352,11 @@ func TestHandlePermissionResendAfterAbandonmentReAsks(t *testing.T) {
 		t.Fatalf("HandlePermission returned %v for a decline, want nil", resp)
 	}
 	got := push.permissionResolutions("r-reask")
-	want := []corev1.PermissionItem_Resolution{
-		corev1.PermissionItem_RESOLUTION_PENDING,
-		corev1.PermissionItem_RESOLUTION_ABANDONED,
-		corev1.PermissionItem_RESOLUTION_PENDING,
-		corev1.PermissionItem_RESOLUTION_DENIED,
+	want := []protocolv1.PermissionItem_Resolution{
+		protocolv1.PermissionItem_RESOLUTION_PENDING,
+		protocolv1.PermissionItem_RESOLUTION_ABANDONED,
+		protocolv1.PermissionItem_RESOLUTION_PENDING,
+		protocolv1.PermissionItem_RESOLUTION_DENIED,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolutions = %v, want %v", got, want)
@@ -1369,8 +1369,8 @@ func TestHandlePermissionResendOfADeclinedRequestReAsks(t *testing.T) {
 	// and let the agent carry on past a stop the user commanded, which is the
 	// behavior the decline exists to end (permdecline.go).
 	ph, reg, push := newTestPermHandler()
-	req := &corev1.PermissionRequest{RequestId: "r-declined-resend", ToolName: "Bash"}
-	done := make(chan *corev1.PermissionResponse, 1)
+	req := &protocolv1.PermissionRequest{RequestId: "r-declined-resend", ToolName: "Bash"}
+	done := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r-declined-resend")
 	if err := reg.answerDecline("r-declined-resend", "no"); err != nil {
@@ -1379,17 +1379,17 @@ func TestHandlePermissionResendOfADeclinedRequestReAsks(t *testing.T) {
 	<-done
 
 	// Act — the shim asks again.
-	resent := make(chan *corev1.PermissionResponse, 1)
+	resent := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { resent <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r-declined-resend")
 
 	// Assert — a live question again, put back to the user rather than served
 	// the decline.
 	got := push.permissionResolutions("r-declined-resend")
-	want := []corev1.PermissionItem_Resolution{
-		corev1.PermissionItem_RESOLUTION_PENDING,
-		corev1.PermissionItem_RESOLUTION_DENIED,
-		corev1.PermissionItem_RESOLUTION_PENDING,
+	want := []protocolv1.PermissionItem_Resolution{
+		protocolv1.PermissionItem_RESOLUTION_PENDING,
+		protocolv1.PermissionItem_RESOLUTION_DENIED,
+		protocolv1.PermissionItem_RESOLUTION_PENDING,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolutions = %v, want %v", got, want)
@@ -1404,11 +1404,11 @@ func TestHandlePermissionDuplicateResendsShareOneAnswer(t *testing.T) {
 	// Arrange: two quick reconnects put two handlers on the same request_id
 	// before anyone answers.
 	ph, reg, _ := newTestPermHandler()
-	req := &corev1.PermissionRequest{RequestId: "r-dup", ToolName: "Bash"}
-	first := make(chan *corev1.PermissionResponse, 1)
+	req := &protocolv1.PermissionRequest{RequestId: "r-dup", ToolName: "Bash"}
+	first := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { first <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r-dup")
-	second := make(chan *corev1.PermissionResponse, 1)
+	second := make(chan *protocolv1.PermissionResponse, 1)
 	go func() { second <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiterCount(reg, "r-dup", 2)
 
@@ -1418,10 +1418,10 @@ func TestHandlePermissionDuplicateResendsShareOneAnswer(t *testing.T) {
 	}
 
 	// Assert: neither handler goroutine is stranded.
-	for name, ch := range map[string]chan *corev1.PermissionResponse{"first": first, "second": second} {
+	for name, ch := range map[string]chan *protocolv1.PermissionResponse{"first": first, "second": second} {
 		select {
 		case resp := <-ch:
-			if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+			if resp.GetDecision() != protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW {
 				t.Errorf("%s decision: got %v, want ALLOW", name, resp.GetDecision())
 			}
 		case <-time.After(5 * time.Second):
@@ -1577,7 +1577,7 @@ func TestHibernateStillStopsWhicheverSessionIsLive(t *testing.T) {
 	if err := m.SubmitPrompt(context.Background(), "ws", "test-request", "hi", "", testPromptOrigin); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	m.cfg.SSM.(*fakeApplier).setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 
 	// Act
@@ -1722,12 +1722,12 @@ func TestTaskCatalogsSnapshotsEveryLiveSessionIncludingAnEmptyRoster(t *testing.
 
 	// Act.
 	empty := h.m.TaskCatalogs()
-	d.consumer.Apply(&corev1.Event{
+	d.consumer.Apply(&protocolv1.Event{
 		SessionId: "s1",
 		Seq:       1,
-		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
+		Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{
 			TaskId:      "t1",
-			Kind:        corev1.TaskKind_TASK_KIND_AGENT,
+			Kind:        protocolv1.TaskKind_TASK_KIND_AGENT,
 			Description: "investigate",
 		}},
 	})

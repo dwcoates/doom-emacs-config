@@ -12,9 +12,10 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"agentrepl/wire"
 
@@ -69,7 +70,7 @@ func TestE2ETurnAccountingIsDurableAndUsesOneLongLivedQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read durable turn accounting: %v", err)
 	}
-	var replayed *frontendv1.TurnAccounting
+	var replayed *statev1.TurnAccounting
 	for _, accounting := range durable {
 		if accounting.GetTurnId() == second.GetTurnId() {
 			replayed = accounting
@@ -100,7 +101,7 @@ func TestE2ETurnAccountingIncludesMainAndSubagentRawUsage(t *testing.T) {
 		t.Fatalf("accounting response records = %d, want main-agent and subagent records", got)
 	}
 
-	var main, subagent *frontendv1.TokenUtilization
+	var main, subagent *statev1.TokenUtilization
 	for _, response := range accounting.GetResponses() {
 		switch {
 		case response.GetMainAgent() != nil:
@@ -139,7 +140,7 @@ func TestE2ETurnAccountingIncludesMainAndSubagentRawUsage(t *testing.T) {
 // assertSubagentLineage checks the actor identity emitted by the raw SDK
 // fixture survives the shim wire, durable daemon accounting, and frontend
 // terminal payload without reconstruction or fallback.
-func assertSubagentLineage(t *testing.T, response *frontendv1.TokenUtilization) {
+func assertSubagentLineage(t *testing.T, response *statev1.TokenUtilization) {
 	t.Helper()
 	subagent := response.GetSubagent()
 	if subagent == nil {
@@ -198,7 +199,7 @@ func TestE2EUnexpectedQueryTerminationReachesTypedFailure(t *testing.T) {
 // and may wait on a response's final usage (terminalsettlement.go). So the
 // event that says "this turn's accounting is durable" is the ProgressView
 // carrying its settled cell, and that is what this waits on.
-func submitAndAwaitAccounting(t *testing.T, h *e2eHarness, conn *websocket.Conn, sessionID, workspace, requestID, text string) *frontendv1.TurnAccounting {
+func submitAndAwaitAccounting(t *testing.T, h *e2eHarness, conn *websocket.Conn, sessionID, workspace, requestID, text string) *statev1.TurnAccounting {
 	t.Helper()
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, requestID, text))
 	item, _ := awaitItem(t, conn, workspace, "the terminal result carrying turn accounting", isResult)
@@ -218,7 +219,7 @@ func submitAndAwaitAccounting(t *testing.T, h *e2eHarness, conn *websocket.Conn,
 
 // durableTurnAccountings lists a session's persisted turn accountings, newest
 // last.
-func durableTurnAccountings(h *e2eHarness, sessionID string) ([]*frontendv1.TurnAccounting, error) {
+func durableTurnAccountings(h *e2eHarness, sessionID string) ([]*statev1.TurnAccounting, error) {
 	ledger, err := statedb.NewTurnAccountings(h.stateDB)
 	if err != nil {
 		return nil, err
@@ -226,7 +227,7 @@ func durableTurnAccountings(h *e2eHarness, sessionID string) ([]*frontendv1.Turn
 	return ledger.List(sessionID)
 }
 
-func assertInvalidAccountingForUnmodeledUsage(t *testing.T, accounting *frontendv1.TurnAccounting, sessionID string) {
+func assertInvalidAccountingForUnmodeledUsage(t *testing.T, accounting *statev1.TurnAccounting, sessionID string) {
 	t.Helper()
 	assertAccountingEvidence(t, accounting, sessionID)
 	gotRuntime, gotUnmodeled := accountingInvalidEvidence(t, accounting)
@@ -244,7 +245,7 @@ func assertInvalidAccountingForUnmodeledUsage(t *testing.T, accounting *frontend
 	}
 }
 
-func assertInvalidAccountingForRuntimeIdentityAndUnmodeledUsage(t *testing.T, accounting *frontendv1.TurnAccounting, sessionID string, wantUnmodeled []string) {
+func assertInvalidAccountingForRuntimeIdentityAndUnmodeledUsage(t *testing.T, accounting *statev1.TurnAccounting, sessionID string, wantUnmodeled []string) {
 	t.Helper()
 	assertAccountingEvidence(t, accounting, sessionID)
 	gotRuntime, gotUnmodeled := accountingInvalidEvidence(t, accounting)
@@ -254,7 +255,7 @@ func assertInvalidAccountingForRuntimeIdentityAndUnmodeledUsage(t *testing.T, ac
 	}
 }
 
-func accountingInvalidEvidence(t *testing.T, accounting *frontendv1.TurnAccounting) (runtime, unmodeled []string) {
+func accountingInvalidEvidence(t *testing.T, accounting *statev1.TurnAccounting) (runtime, unmodeled []string) {
 	t.Helper()
 	invalid := accounting.GetInvalid()
 	if invalid == nil || accounting.GetComplete() != nil {
@@ -273,7 +274,7 @@ func accountingInvalidEvidence(t *testing.T, accounting *frontendv1.TurnAccounti
 	return runtime, unmodeled
 }
 
-func assertRuntimeIdentityUnavailable(t *testing.T, accounting *frontendv1.TurnAccounting, paths []string) {
+func assertRuntimeIdentityUnavailable(t *testing.T, accounting *statev1.TurnAccounting, paths []string) {
 	t.Helper()
 	got := make([]string, 0, len(paths))
 	for _, path := range paths {
@@ -317,7 +318,7 @@ func assertRuntimeIdentityUnavailable(t *testing.T, accounting *frontendv1.TurnA
 	}
 }
 
-func assertAccountingEvidence(t *testing.T, accounting *frontendv1.TurnAccounting, sessionID string) {
+func assertAccountingEvidence(t *testing.T, accounting *statev1.TurnAccounting, sessionID string) {
 	t.Helper()
 	if accounting.GetTurnId() == "" || accounting.GetQueryInstanceId() == "" {
 		t.Fatalf("turn accounting has blank turn or query identity: %v", accounting)
@@ -344,7 +345,7 @@ func assertAccountingEvidence(t *testing.T, accounting *frontendv1.TurnAccountin
 	}
 }
 
-func assertUsageBoundary(t *testing.T, observation *corev1.AccountUsageObservation, turnID, queryID string, start bool, turnBoundary int64) {
+func assertUsageBoundary(t *testing.T, observation *protocolv1.AccountUsageObservation, turnID, queryID string, start bool, turnBoundary int64) {
 	t.Helper()
 	if observation == nil {
 		t.Fatalf("turn %q has no %s account-usage observation", turnID, boundaryName(start))
@@ -376,7 +377,7 @@ func boundaryName(start bool) string {
 	return "turn-end"
 }
 
-func assertCompleteRawUsage(t *testing.T, actor string, response *frontendv1.TokenUtilization, wantRaw *datav1.ApiUsage) {
+func assertCompleteRawUsage(t *testing.T, actor string, response *statev1.TokenUtilization, wantRaw *datav1.ApiUsage) {
 	t.Helper()
 	usage := response.GetUsage()
 	if usage == nil {
@@ -500,7 +501,7 @@ func mustList(t *testing.T, values []any) *structpb.ListValue {
 	return value
 }
 
-func assertDurableQueryLifecycle(t *testing.T, events []*corev1.Event, queryID string) {
+func assertDurableQueryLifecycle(t *testing.T, events []*protocolv1.Event, queryID string) {
 	t.Helper()
 	created, runtimeObserved, terminated := 0, 0, 0
 	for _, event := range events {
@@ -522,7 +523,7 @@ func assertDurableQueryLifecycle(t *testing.T, events []*corev1.Event, queryID s
 	}
 }
 
-func assertStateDBResponseLedger(t *testing.T, h *e2eHarness, sessionID string, accountings ...*frontendv1.TurnAccounting) {
+func assertStateDBResponseLedger(t *testing.T, h *e2eHarness, sessionID string, accountings ...*statev1.TurnAccounting) {
 	t.Helper()
 	ledger, err := statedb.NewTokenUtilizations(h.stateDB)
 	if err != nil {
@@ -552,38 +553,38 @@ func assertStateDBResponseLedger(t *testing.T, h *e2eHarness, sessionID string, 
 // deadline is a bounded observation of the standing subscription's idle tail,
 // not an ordering delay: every event returned before timeout was durably
 // committed by shim-store before delivery.
-func replayStoreEvents(t *testing.T, vendorSessionID string) []*corev1.Event {
+func replayStoreEvents(t *testing.T, vendorSessionID string) []*protocolv1.Event {
 	t.Helper()
 	conn, err := net.Dial("unix", storeSocket(t))
 	if err != nil {
 		t.Fatalf("dial store replay: %v", err)
 	}
 	defer conn.Close()
-	if err := wire.WriteAny(conn, &corev1.Subscribe{SessionId: vendorSessionID}); err != nil {
+	if err := wire.WriteAny(conn, &protocolv1.Subscribe{SessionId: vendorSessionID}); err != nil {
 		t.Fatalf("subscribe to store replay: %v", err)
 	}
 	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatalf("set store replay deadline: %v", err)
 	}
-	var events []*corev1.Event
+	var events []*protocolv1.Event
 	for {
 		message, err := wire.ReadAny(conn)
 		if err != nil {
 			t.Fatalf("read store replay readiness: %v", err)
 		}
 		switch frame := message.(type) {
-		case *corev1.Event:
+		case *protocolv1.Event:
 			// The store emits its persisted replay before the readiness marker.
 			// Keep that replay private until the marker proves the live tail is
 			// registered, so callers never observe a partial subscription.
 			events = append(events, frame)
-		case *corev1.Heartbeat:
+		case *protocolv1.ConnectionHeartbeat:
 			if frame.GetSentAtMs() <= 0 {
 				t.Fatalf("store replay readiness heartbeat sent_at_ms = %d, want a positive timestamp", frame.GetSentAtMs())
 			}
 			goto subscribed
 		default:
-			t.Fatalf("store replay readiness message = %T, want *corev1.Event or *corev1.Heartbeat", message)
+			t.Fatalf("store replay readiness message = %T, want *protocolv1.Event or *protocolv1.ConnectionHeartbeat", message)
 		}
 	}
 
@@ -597,9 +598,9 @@ subscribed:
 			}
 			t.Fatalf("read store replay: %v", err)
 		}
-		event, ok := message.(*corev1.Event)
+		event, ok := message.(*protocolv1.Event)
 		if !ok {
-			t.Fatalf("store replay message = %T, want *corev1.Event", message)
+			t.Fatalf("store replay message = %T, want *protocolv1.Event", message)
 		}
 		events = append(events, event)
 	}

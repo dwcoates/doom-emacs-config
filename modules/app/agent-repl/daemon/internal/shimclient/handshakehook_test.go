@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 )
 
@@ -24,9 +24,9 @@ import (
 
 // helloThenDaemonHello stands up a fake shim that opens with hello, reports the
 // DaemonHello the client answers with, and closes the gate with a ShimReady.
-func helloThenDaemonHello(t *testing.T, hello *corev1.ShimHello) (string, chan *corev1.DaemonHello) {
+func helloThenDaemonHello(t *testing.T, hello *protocolv1.ShimHello) (string, chan *protocolv1.DaemonHello) {
 	t.Helper()
-	hellos := make(chan *corev1.DaemonHello, 1)
+	hellos := make(chan *protocolv1.DaemonHello, 1)
 	path := startFakeShim(t, func(conn net.Conn) {
 		mustWriteMsg(t, conn, hello)
 		msg, err := wire.ReadAny(conn)
@@ -34,14 +34,14 @@ func helloThenDaemonHello(t *testing.T, hello *corev1.ShimHello) (string, chan *
 			t.Errorf("read DaemonHello: %v", err)
 			return
 		}
-		dh, ok := msg.(*corev1.DaemonHello)
+		dh, ok := msg.(*protocolv1.DaemonHello)
 		if !ok {
 			t.Errorf("expected DaemonHello, got %T", msg)
 			return
 		}
 		// Ack BEFORE publishing: the test cancels as soon as it has the hello,
 		// and a write racing that cancel would fail on a closed connection.
-		mustWriteMsg(t, conn, &corev1.ShimReady{SessionId: hello.GetSessionId(), FromSeq: dh.GetFromSeq()})
+		mustWriteMsg(t, conn, &protocolv1.ShimReady{SessionId: hello.GetSessionId(), FromSeq: dh.GetFromSeq()})
 		hellos <- dh
 		_, _ = wire.ReadAny(conn) // hold the connection open
 	})
@@ -49,7 +49,7 @@ func helloThenDaemonHello(t *testing.T, hello *corev1.ShimHello) (string, chan *
 }
 
 // awaitDaemonHello takes the DaemonHello the client sent, or fails at the deadline.
-func awaitDaemonHello(t *testing.T, hellos chan *corev1.DaemonHello) *corev1.DaemonHello {
+func awaitDaemonHello(t *testing.T, hellos chan *protocolv1.DaemonHello) *protocolv1.DaemonHello {
 	t.Helper()
 	select {
 	case dh := <-hellos:
@@ -65,12 +65,12 @@ func TestOnHandshakeRunsBeforeTheDaemonHelloReadsItsPosition(t *testing.T) {
 	// that resets it exactly as the rotation path does.
 	h := newHarness()
 	h.seq.SetLastSeq("sess-1", 5990)
-	path, hellos := helloThenDaemonHello(t, &corev1.ShimHello{
+	path, hellos := helloThenDaemonHello(t, &protocolv1.ShimHello{
 		SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
 		ProtocolVersion: "1", VendorSessionId: "uuid-new",
 	})
 	cfg := h.config(t, "sess-1", path)
-	cfg.OnHandshake = func(hello *corev1.ShimHello) error {
+	cfg.OnHandshake = func(hello *protocolv1.ShimHello) error {
 		if hello.GetVendorSessionId() == "uuid-new" {
 			h.seq.SetLastSeq("sess-1", 0)
 		}
@@ -98,13 +98,13 @@ func TestOnHandshakeCarriesTheAnnouncedVendorSessionID(t *testing.T) {
 	// Arrange — the announcement is the ONLY thing that tells the daemon which
 	// seq space it is about to serve.
 	h := newHarness()
-	path, hellos := helloThenDaemonHello(t, &corev1.ShimHello{
+	path, hellos := helloThenDaemonHello(t, &protocolv1.ShimHello{
 		SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
 		ProtocolVersion: "1", VendorSessionId: "uuid-new",
 	})
 	cfg := h.config(t, "sess-1", path)
 	seen := make(chan string, 1)
-	cfg.OnHandshake = func(hello *corev1.ShimHello) error {
+	cfg.OnHandshake = func(hello *protocolv1.ShimHello) error {
 		seen <- hello.GetVendorSessionId()
 		return nil
 	}
@@ -136,12 +136,12 @@ func TestDaemonHelloKeepsItsPositionWhenTheHookResetsNothing(t *testing.T) {
 	// had, so the mark stands and the tail resumes where it left off.
 	h := newHarness()
 	h.seq.SetLastSeq("sess-1", 5990)
-	path, hellos := helloThenDaemonHello(t, &corev1.ShimHello{
+	path, hellos := helloThenDaemonHello(t, &protocolv1.ShimHello{
 		SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
 		ProtocolVersion: "1", VendorSessionId: "uuid-old",
 	})
 	cfg := h.config(t, "sess-1", path)
-	cfg.OnHandshake = func(hello *corev1.ShimHello) error {
+	cfg.OnHandshake = func(hello *protocolv1.ShimHello) error {
 		if hello.GetVendorSessionId() != "uuid-old" {
 			h.seq.SetLastSeq("sess-1", 0)
 		}
@@ -169,7 +169,7 @@ func TestRejectedHandshakeIsTerminalBeforeDaemonHelloAndReady(t *testing.T) {
 	frames := make(chan any, 1)
 	closed := make(chan error, 1)
 	path := startFakeShim(t, func(conn net.Conn) {
-		mustWriteMsg(t, conn, &corev1.ShimHello{
+		mustWriteMsg(t, conn, &protocolv1.ShimHello{
 			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
 			ProtocolVersion: "1", ActiveTurnIds: []string{"turn-other"},
 		})
@@ -182,9 +182,9 @@ func TestRejectedHandshakeIsTerminalBeforeDaemonHelloAndReady(t *testing.T) {
 	})
 	cfg := h.config(t, "sess-1", path)
 	reconcileErr := errors.New("active turn identities disagree")
-	cfg.OnHandshake = func(*corev1.ShimHello) error { return reconcileErr }
+	cfg.OnHandshake = func(*protocolv1.ShimHello) error { return reconcileErr }
 	connected := make(chan struct{}, 1)
-	cfg.OnConnected = func(*corev1.ShimHello) bool { connected <- struct{}{}; return false }
+	cfg.OnConnected = func(*protocolv1.ShimHello) bool { connected <- struct{}{}; return false }
 	c := New(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

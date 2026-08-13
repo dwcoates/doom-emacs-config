@@ -9,8 +9,8 @@ import (
 	"sort"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/shimclient"
@@ -32,7 +32,7 @@ type queueEntry struct {
 	requestID      string
 	text           string
 	permissionMode string
-	promptOrigin   corev1.PromptOrigin
+	promptOrigin   protocolv1.PromptOrigin
 	queuedAtMs     int64
 
 	classification Verdict
@@ -586,7 +586,7 @@ type ClassifyResult struct {
 // manager mutex. It is passed in rather than read here on purpose: the lease
 // engine calls back into this package to recompute its holds, so a read of the
 // engine underneath the manager mutex would invert the two locks.
-func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin, leaseScheduleID string) (*queueEntry, bool, error) {
+func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permissionMode string, promptOrigin protocolv1.PromptOrigin, leaseScheduleID string) (*queueEntry, bool, error) {
 	if scheduleID := leaseScheduleID; scheduleID != "" {
 		e := newParkedEntry(newQueueEntryID(), requestID, text, permissionMode, promptOrigin, m.now())
 		if err := m.parkForDrain(d, e, scheduleID); err != nil {

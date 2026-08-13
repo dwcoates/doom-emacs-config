@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/shimclient"
@@ -28,12 +28,12 @@ import (
 
 // degradationEvent is the shim's unexpected-termination confirmation at SEQ,
 // written by ENVELOPEQUERY. Only the envelope classifies.
-func degradationEvent(seq uint64, envelopeQuery string) *corev1.Event {
+func degradationEvent(seq uint64, envelopeQuery string) *protocolv1.Event {
 	queryID := envelopeQuery
-	return &corev1.Event{
+	return &protocolv1.Event{
 		Seq:             seq,
 		QueryInstanceId: envelopeQuery,
-		Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+		Payload: &protocolv1.Event_DegradedState{DegradedState: &protocolv1.DegradedState{
 			Component:       shimSDKComponent,
 			Reason:          "unexpected_query_termination",
 			QueryInstanceId: &queryID,
@@ -43,7 +43,7 @@ func degradationEvent(seq uint64, envelopeQuery string) *corev1.Event {
 
 // reportDegradation feeds one DegradedState event through the reporter exactly
 // as the shim client does — envelope and payload together.
-func reportDegradation(t *testing.T, h *escapeHarness, ev *corev1.Event) {
+func reportDegradation(t *testing.T, h *escapeHarness, ev *protocolv1.Event) {
 	t.Helper()
 	d, err := h.m.existing("ws")
 	if err != nil {
@@ -352,7 +352,7 @@ func TestDaemonOriginatedDegradationWithoutAnEnvelopeIsLive(t *testing.T) {
 	}
 
 	// Act.
-	d.consumer.Degraded("", nil, &corev1.DegradedState{
+	d.consumer.Degraded("", nil, &protocolv1.DegradedState{
 		Component: "daemon-model-catalog",
 		Reason:    "model catalog rejected by sink",
 	})

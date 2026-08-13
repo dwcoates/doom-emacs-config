@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -763,7 +763,7 @@ func TestProtojsonRoundTripStability(t *testing.T) {
 		})},
 		{"typing_delta", TypingDeltaFrame(&frontendv1.TypingDelta{
 			Workspace: "w",
-			Delta:     &corev1.ContentDelta{Uuid: "u", BlockIndex: 0, Delta: &corev1.ContentDelta_Text{Text: "ab"}},
+			Delta:     &protocolv1.ContentDelta{Uuid: "u", BlockIndex: 0, Delta: &protocolv1.ContentDelta_Text{Text: "ab"}},
 		})},
 		{"session_init", SessionInitViewFrame(&frontendv1.SessionInitView{
 			Workspace: "w", Fence: "s",

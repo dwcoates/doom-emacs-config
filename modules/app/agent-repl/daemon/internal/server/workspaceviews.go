@@ -36,7 +36,8 @@ import (
 	"context"
 	"sync"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/frontend"
@@ -349,7 +350,7 @@ func (v *WorkspaceViews) publishGateLocked(workspace, sessionID string, gate *fr
 // read — the same aggregate SessionViewFromRecordWithModelsAndUsage has always
 // been handed and had nowhere to put. fence comes from the workspace's current
 // state and is carried, never composed.
-func (v *WorkspaceViews) PublishTokenBreakdown(workspace, fence string, usage *frontendv1.SessionTokenUtilization) {
+func (v *WorkspaceViews) PublishTokenBreakdown(workspace, fence string, usage *statev1.SessionTokenUtilization) {
 	if workspace == "" {
 		v.logf("server: token breakdown PUBLICATION DECLINED — no workspace to key the view on")
 		return

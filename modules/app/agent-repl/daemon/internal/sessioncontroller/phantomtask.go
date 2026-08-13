@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"claude-repld/internal/frontend"
 )
 
@@ -195,9 +195,9 @@ func (c *consumer) noteLiveSetAnswered() (taskLiveSetVerdict, int) {
 // empty now" cannot be read by one goroutine while another is midway through
 // emptying it — which is the difference between firing the lease exactly once
 // and firing it for every concurrent task end.
-func (c *consumer) observeTaskLifecycle(ev *corev1.Event) (drained bool) {
+func (c *consumer) observeTaskLifecycle(ev *protocolv1.Event) (drained bool) {
 	switch p := ev.GetPayload().(type) {
-	case *corev1.Event_TaskStarted:
+	case *protocolv1.Event_TaskStarted:
 		id := p.TaskStarted.GetTaskId()
 		if id == "" {
 			return false
@@ -213,7 +213,7 @@ func (c *consumer) observeTaskLifecycle(ev *corev1.Event) (drained bool) {
 			c.openTasks[id] = c.instantOf(ev)
 		}
 		c.mu.Unlock()
-	case *corev1.Event_TaskEnded:
+	case *protocolv1.Event_TaskEnded:
 		id := p.TaskEnded.GetTaskId()
 		if id == "" {
 			return false
@@ -232,7 +232,7 @@ func (c *consumer) observeTaskLifecycle(ev *corev1.Event) (drained bool) {
 
 // instantOf is the event's own produced-at instant, falling back to this
 // consumer's clock for an event that carries none (a daemon-composed one).
-func (c *consumer) instantOf(ev *corev1.Event) int64 {
+func (c *consumer) instantOf(ev *protocolv1.Event) int64 {
 	if at := ev.GetProducedAtMs(); at > 0 {
 		return at
 	}
@@ -334,12 +334,12 @@ func (c *consumer) closeOpenTasks(ids []string, reason string) []string {
 		}
 		delete(c.openTasks, id)
 		closed = append(closed, id)
-		c.ring = append(c.ring, &corev1.Event{
+		c.ring = append(c.ring, &protocolv1.Event{
 			SessionId:    c.sessionID,
 			ProducedAtMs: nowMs,
-			Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{
+			Payload: &protocolv1.Event_TaskEnded{TaskEnded: &protocolv1.TaskEnded{
 				TaskId: id,
-				Status: corev1.TerminalStatus_TERMINAL_STATUS_LOST,
+				Status: protocolv1.TerminalStatus_TERMINAL_STATUS_LOST,
 			}},
 		})
 	}

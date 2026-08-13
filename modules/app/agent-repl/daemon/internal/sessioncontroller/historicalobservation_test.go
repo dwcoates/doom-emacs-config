@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // boundReducer is a reducer bound to the live query, which is the shape a
@@ -12,7 +12,7 @@ import (
 func boundReducer(t *testing.T) *turnAccountingReducer {
 	t.Helper()
 	r := newTurnAccountingReducer(nil)
-	if err := r.bindHandshakeIdentity(&corev1.ShimHello{
+	if err := r.bindHandshakeIdentity(&protocolv1.ShimHello{
 		QueryInstanceId: "live-query",
 		QueryCreatedSeq: 100,
 		VendorSessionId: "vendor",
@@ -28,15 +28,15 @@ func boundReducer(t *testing.T) *turnAccountingReducer {
 // The two ids are supplied separately on purpose. The envelope says which query
 // WROTE the row; the payload says which query the observation is ABOUT. Only
 // the envelope classifies.
-func observationEvent(seq uint64, envelopeQuery, payloadQuery, turnID string) *corev1.Event {
-	return &corev1.Event{
+func observationEvent(seq uint64, envelopeQuery, payloadQuery, turnID string) *protocolv1.Event {
+	return &protocolv1.Event{
 		Seq:             seq,
 		QueryInstanceId: envelopeQuery,
-		Payload: &corev1.Event_AccountUsageObservation{
-			AccountUsageObservation: &corev1.AccountUsageObservation{
+		Payload: &protocolv1.Event_AccountUsageObservation{
+			AccountUsageObservation: &protocolv1.AccountUsageObservation{
 				QueryInstanceId: payloadQuery,
 				TurnId:          turnID,
-				Boundary:        &corev1.AccountUsageObservation_TurnStart{TurnStart: &corev1.TurnStartUsageBoundary{}},
+				Boundary:        &protocolv1.AccountUsageObservation_TurnStart{TurnStart: &protocolv1.TurnStartUsageBoundary{}},
 			},
 		},
 	}
@@ -44,13 +44,13 @@ func observationEvent(seq uint64, envelopeQuery, payloadQuery, turnID string) *c
 
 // lifecycleEvent is a QueryCreated row at SEQ produced by ENVELOPEQUERY and
 // describing PAYLOADQUERY.
-func lifecycleEvent(seq uint64, envelopeQuery, payloadQuery string) *corev1.Event {
-	return &corev1.Event{
+func lifecycleEvent(seq uint64, envelopeQuery, payloadQuery string) *protocolv1.Event {
+	return &protocolv1.Event{
 		Seq:             seq,
 		QueryInstanceId: envelopeQuery,
-		Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 			QueryInstanceId: payloadQuery,
-			Event:           &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{}},
+			Event:           &protocolv1.QueryLifecycle_Created{Created: &protocolv1.QueryCreated{}},
 		}},
 	}
 }
@@ -291,7 +291,7 @@ func TestHistoricalRowsCarryNoLiveEvidence(t *testing.T) {
 // rejected for lacking an authoritative id, rather than passing validation.
 func TestZeroLiveEvidenceFailsClosed(t *testing.T) {
 	// Arrange / Act.
-	err := validateAccountUsageObservation(liveEvidence{}, "t", &corev1.AccountUsageObservation{
+	err := validateAccountUsageObservation(liveEvidence{}, "t", &protocolv1.AccountUsageObservation{
 		QueryInstanceId: "anything", TurnId: "t",
 	})
 

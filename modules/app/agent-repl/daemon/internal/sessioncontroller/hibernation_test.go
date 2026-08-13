@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/ssm"
@@ -139,7 +139,7 @@ func newHibernationRig(t *testing.T, opts ...func(*Config)) (*Manager, *fakeAppl
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	// THE WIRE'S OWED-RESUMPTION DRIVE IS JOINED BEFORE THE RIG IS HANDED OVER.
 	// noteWired launches it, it is the ONLY goroutine allowed to claim from the
 	// owed set, and it reads the manager's clock. A rig returned while it is
@@ -167,7 +167,7 @@ func newClockedHibernationRig(t *testing.T, now func() int64) (*Manager, *fakeHi
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	// Joined for newHibernationRig's reason: this rig's whole point is an
 	// injected clock, and the wire's drive reads that clock.
 	m.resumptionDrives.Wait()
@@ -519,7 +519,7 @@ func TestHibernateWithCauseRefusesWithoutARegistrar(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 
 	// Act.
@@ -578,7 +578,7 @@ func TestSubmitPromptRefusedOnAHibernatedSession(t *testing.T) {
 	hib.setAsleep("s1", registry.HibernationDetail{Cause: registry.HibernationCauseIdleCutoff, SinceMs: 99})
 
 	// Act.
-	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert.
 	if !errors.Is(err, ErrHibernated) {
@@ -598,7 +598,7 @@ func TestRehydratedHibernatedSessionStillMeetsTheGate(t *testing.T) {
 	m.cfg.Hibernations = hib
 
 	// Act.
-	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert.
 	if !errors.Is(err, ErrHibernated) {
@@ -617,7 +617,7 @@ func TestRevivalGateRefusesWithoutSpawningAShim(t *testing.T) {
 	m.cfg.Hibernations = hib
 
 	// Act.
-	_ = m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	_ = m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert.
 	if m.Live("ws") {
@@ -649,7 +649,7 @@ func TestSubmitPromptUngatedOnAnAwakeSession(t *testing.T) {
 	m, _, _ := newHibernationRig(t)
 
 	// Act.
-	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert.
 	if errors.Is(err, ErrHibernated) {
@@ -707,7 +707,7 @@ func TestWiringASleepingSessionStopsTheGateRefusingPrompts(t *testing.T) {
 	m.noteWired("ws", "s1")
 
 	// Act.
-	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert.
 	if errors.Is(err, ErrHibernated) {
@@ -796,7 +796,7 @@ func TestRestartSessionDischargesTheRevivalGate(t *testing.T) {
 	if err := m.RestartSession(context.Background(), "ws"); err != nil {
 		t.Fatalf("RestartSession: %v", err)
 	}
-	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert.
 	if errors.Is(err, ErrHibernated) {

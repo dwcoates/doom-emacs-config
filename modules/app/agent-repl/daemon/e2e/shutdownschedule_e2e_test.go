@@ -34,8 +34,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"github.com/gorilla/websocket"
 )
@@ -89,16 +89,16 @@ func scheduleAndAwaitDraining(t *testing.T, conn *websocket.Conn, requestID stri
 // as the converter writes it, so everything downstream of the producer — store
 // ingest, fan-out, the shim's forward, the SSM fold, the drain's hold list — is
 // exercised for real.
-func storeTaskStartedEvent(vendorSessionID, taskID string) *corev1.Event {
-	return &corev1.Event{
+func storeTaskStartedEvent(vendorSessionID, taskID string) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId:    vendorSessionID,
-		Plane:        corev1.Plane_PLANE_STREAM,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:        protocolv1.Plane_PLANE_STREAM,
+		Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		ProducedAtMs: time.Now().UnixMilli(),
 		DedupKey:     "task-started:" + taskID,
-		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
+		Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{
 			TaskId:      taskID,
-			Kind:        corev1.TaskKind_TASK_KIND_AGENT,
+			Kind:        protocolv1.TaskKind_TASK_KIND_AGENT,
 			Description: "e2e drain-lease background task",
 		}},
 	}

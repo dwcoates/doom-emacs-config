@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // fakeSchedules is a controllable ShutdownScheduleController, so the command

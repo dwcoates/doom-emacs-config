@@ -21,8 +21,8 @@ package e2e
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // The offline engine's result usage for an ordinary turn (fake-query.ts
@@ -224,13 +224,13 @@ func TestE2EAColdKeepAlivePingRaisesTheAlertUnderItsOwnOrigin(t *testing.T) {
 
 	// Act — the check fires, and the ping's own usage crosses the threshold.
 	s.idleFor(t, policy.pingAt())
-	ping := s.store.await(t, "the keep-alive ping", func(ev *corev1.Event) bool {
+	ping := s.store.await(t, "the keep-alive ping", func(ev *protocolv1.Event) bool {
 		return keepAlivePing(ev) != nil
 	})
 
 	// Assert
 	alert := awaitExpensiveTurn(t, s, keepAlivePing(ping).GetTurnId())
-	if got := alert.GetPromptOrigin(); got != corev1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE {
+	if got := alert.GetPromptOrigin(); got != protocolv1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE {
 		t.Errorf("expensive_turn prompt_origin = %s, want PROMPT_ORIGIN_CACHE_KEEP_ALIVE: this alert IS the cold-ping alarm, and a frontend cannot tell it apart from an expensive user prompt without the origin", got)
 	}
 }
@@ -246,7 +246,7 @@ func TestE2EAnOrdinaryExpensiveTurnIsAttributedToTheUser(t *testing.T) {
 	s.runRealTurn(t, "r-user-expensive", "the user's own expensive turn")
 
 	// Assert
-	if got := awaitExpensiveTurn(t, s, "r-user-expensive").GetPromptOrigin(); got != corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT {
+	if got := awaitExpensiveTurn(t, s, "r-user-expensive").GetPromptOrigin(); got != protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT {
 		t.Errorf("expensive_turn prompt_origin = %s, want PROMPT_ORIGIN_USER_SENT: the attribution is the turn's own, verbatim", got)
 	}
 }

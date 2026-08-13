@@ -12,7 +12,7 @@ import (
 	"claude-repld/internal/restartannounce"
 	"claude-repld/internal/sessioncontroller"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // fakeRestartPublisher records what each carrier was handed, so a test can

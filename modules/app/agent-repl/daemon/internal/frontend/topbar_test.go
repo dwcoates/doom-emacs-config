@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // validTopbarInputs is a topbar that resolves, so each case below can vary the

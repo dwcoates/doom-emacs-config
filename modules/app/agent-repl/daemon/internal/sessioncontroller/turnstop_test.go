@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ import (
 // including one that never answers until the caller's deadline fires. It is the
 // injectable boundary that makes the timeout branch deterministic.
 type stubInterrupter struct {
-	outcome corev1.InterruptOutcome
+	outcome protocolv1.InterruptOutcome
 	err     error
 	// block makes Interrupt wait for the caller's context instead of
 	// answering, which is exactly what a wedged shim does.
@@ -35,12 +35,12 @@ type stubInterrupter struct {
 	origins []string
 }
 
-func (s *stubInterrupter) Interrupt(ctx context.Context, originRequestID string) (corev1.InterruptOutcome, error) {
+func (s *stubInterrupter) Interrupt(ctx context.Context, originRequestID string) (protocolv1.InterruptOutcome, error) {
 	s.calls++
 	s.origins = append(s.origins, originRequestID)
 	if s.block {
 		<-ctx.Done()
-		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, ctx.Err()
+		return protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, ctx.Err()
 	}
 	return s.outcome, s.err
 }
@@ -89,7 +89,7 @@ func TestDrainInterruptsALiveTurn(t *testing.T) {
 	// Arrange.
 	m, _, applier, cl := newTurnStopRig(t)
 	applier.setCurrent("ws", thinkingState())
-	client := &stubInterrupter{outcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED}
+	client := &stubInterrupter{outcome: protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED}
 	// Act.
 	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client, nil)
 	// Assert.
@@ -193,7 +193,7 @@ func TestDrainInterruptsAnywayWhenTheStateReadFails(t *testing.T) {
 	// Arrange.
 	m, _, applier, cl := newTurnStopRig(t)
 	applier.currentErr = errors.New("state db is gone")
-	client := &stubInterrupter{outcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE}
+	client := &stubInterrupter{outcome: protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE}
 	// Act.
 	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client, nil)
 	// Assert.

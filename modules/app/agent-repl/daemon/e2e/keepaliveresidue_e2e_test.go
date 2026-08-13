@@ -21,8 +21,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // pingCompletedWithNothingWaiting fires one keep-alive ping and returns once its
@@ -33,11 +33,11 @@ func pingCompletedWithNothingWaiting(t *testing.T, s *keepAliveSession) string {
 	writeDefaultRewindFixture(t, s)
 	s.idleFor(t, s.policy.pingAt())
 	s.syncSweep(t)
-	ping := s.store.await(t, "the keep-alive ping's own turn start", func(ev *corev1.Event) bool {
+	ping := s.store.await(t, "the keep-alive ping's own turn start", func(ev *protocolv1.Event) bool {
 		return keepAlivePing(ev) != nil
 	})
 	turnID := keepAlivePing(ping).GetTurnId()
-	s.store.await(t, "the keep-alive ping's turn end", func(ev *corev1.Event) bool {
+	s.store.await(t, "the keep-alive ping's turn end", func(ev *protocolv1.Event) bool {
 		return turnEndedOf(ev, turnID)
 	})
 	// THE STORE'S TurnEnded IS NOT THE BARRIER THESE TESTS NEED. It says the

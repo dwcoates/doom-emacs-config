@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/shim"
 )
@@ -126,7 +126,7 @@ func (m *Manager) drainTimeout() time.Duration {
 // is an interface rather than *sessionController so the timeout and the already-dead-shim
 // branches are exercisable deterministically.
 type turnInterrupter interface {
-	Interrupt(ctx context.Context, originRequestID string) (corev1.InterruptOutcome, error)
+	Interrupt(ctx context.Context, originRequestID string) (protocolv1.InterruptOutcome, error)
 }
 
 // drainLiveTurnForStop asks a shim about to be stopped to interrupt the turn it

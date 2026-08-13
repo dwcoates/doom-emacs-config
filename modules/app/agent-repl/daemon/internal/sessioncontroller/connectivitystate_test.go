@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/shimclient"
 
@@ -103,7 +103,7 @@ func TestShimReadyWiresTheWorkspace(t *testing.T) {
 	waitForWirings(applier, 1)
 
 	// Act — the bring-up gate closes.
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Assert.
 	if got := lastWiring(t, applier, "ws"); got.wiring != ssm.WiringWired {
@@ -121,7 +121,7 @@ func TestASecondEnsureDoesNotReopenTheAxis(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	before := len(wiringsFor(applier, "ws"))
 
 	// Act.
@@ -153,7 +153,7 @@ func TestHibernateReportsHibernated(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 
 	// Act.
@@ -183,7 +183,7 @@ func TestANonHibernationTeardownNamesItsOwnInitiator(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 
 	// Act.
@@ -207,7 +207,7 @@ func TestStopSessionDoesNotReportHibernated(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Act.
 	before := len(wiringsFor(applier, "ws"))
@@ -232,7 +232,7 @@ func TestASessionScopedStopOfAnotherRecordLeavesTheAxisAlone(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	before := len(wiringsFor(applier, "ws"))
 
 	// Act — reap some OTHER record for the same workspace.
@@ -277,7 +277,7 @@ func TestSessionControllerExitOnATerminalErrorReportsSevered(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Act — Run ends with a terminal protocol error.
 	runResult <- errors.New("protocol violation")
@@ -304,10 +304,10 @@ func TestARotationReportsTheBounce(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Act.
-	m.onHandshake("ws", "s1", &corev1.ShimHello{QueryInstanceId: "query-connectivity", VendorSessionId: "new-uuid"})
+	m.onHandshake("ws", "s1", &protocolv1.ShimHello{QueryInstanceId: "query-connectivity", VendorSessionId: "new-uuid"})
 
 	// Assert.
 	got := lastWiring(t, applier, "ws")
@@ -328,11 +328,11 @@ func TestTheReHandshakeRewiresAfterARotation(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
-	m.onHandshake("ws", "s1", &corev1.ShimHello{QueryInstanceId: "query-connectivity", VendorSessionId: "new-uuid"})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
+	m.onHandshake("ws", "s1", &protocolv1.ShimHello{QueryInstanceId: "query-connectivity", VendorSessionId: "new-uuid"})
 
 	// Act — the new gate closes.
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Assert.
 	if got := lastWiring(t, applier, "ws"); got.wiring != ssm.WiringWired {
@@ -350,11 +350,11 @@ func TestAnUnrotatedHandshakeLeavesTheAxisAlone(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	before := len(wiringsFor(applier, "ws"))
 
 	// Act.
-	m.onHandshake("ws", "s1", &corev1.ShimHello{QueryInstanceId: "query-connectivity", VendorSessionId: "same-uuid"})
+	m.onHandshake("ws", "s1", &protocolv1.ShimHello{QueryInstanceId: "query-connectivity", VendorSessionId: "same-uuid"})
 
 	// Assert.
 	if after := len(wiringsFor(applier, "ws")); after != before {
@@ -372,7 +372,7 @@ func TestALinkLossReportsStarting(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Act — the shim connection drops while the session controller lives on.
 	m.onLinkLost("ws", "s1", errors.New("shim connection closed: EOF"))
@@ -396,11 +396,11 @@ func TestTheReHandshakeRewiresAfterALinkLoss(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	m.onLinkLost("ws", "s1", errors.New("shim connection closed: EOF"))
 
 	// Act — the reconnect's own ShimReady lands.
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Assert.
 	if got := lastWiring(t, applier, "ws"); got.wiring != ssm.WiringWired {
@@ -417,7 +417,7 @@ func TestALinkLossOnASupersededSessionLeavesTheAxisAlone(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	before := len(wiringsFor(applier, "ws"))
 
 	// Act — some OTHER record's link dies.
@@ -509,7 +509,7 @@ func TestAHibernationSurvivesItsOwnSessionControllerExit(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 
 	// Act — hibernate, then join the exit goroutine the cancel released.
@@ -538,7 +538,7 @@ func hibernateGuardRig(t *testing.T) (*Manager, *fakeApplier) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 	return m, applier
 }
@@ -652,7 +652,7 @@ func TestHibernateWithholdsHibernatedUntilSpawnerProvesTheStop(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 	before := len(wiringsFor(applier, "ws"))
 
@@ -792,7 +792,7 @@ func TestControllerRegistrationExcludesHibernationUntilOperationalIsDurable(t *t
 	}
 	connectedDone := make(chan bool, 1)
 	go func() {
-		connectedDone <- m.onConnectedForGeneration("ws", "s1", d.generationID, &corev1.ShimHello{})
+		connectedDone <- m.onConnectedForGeneration("ws", "s1", d.generationID, &protocolv1.ShimHello{})
 	}()
 	<-operationalEntered
 

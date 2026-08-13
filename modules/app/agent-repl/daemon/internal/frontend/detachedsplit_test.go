@@ -3,18 +3,18 @@ package frontend
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // transcriptEvent wraps a transcript line as the store event a consumer sees.
-func transcriptEvent(t *testing.T, tl *datav1.TranscriptLine) *corev1.Event {
+func transcriptEvent(t *testing.T, tl *datav1.TranscriptLine) *protocolv1.Event {
 	t.Helper()
-	return &corev1.Event{
+	return &protocolv1.Event{
 		Seq:          7,
 		ProducedAtMs: producedMs,
 		SessionId:    "s1",
-		Payload:      &corev1.Event_Vendor{Vendor: mustAny(t, tl)},
+		Payload:      &protocolv1.Event_Vendor{Vendor: mustAny(t, tl)},
 		DedupKey:     "d1",
 	}
 }
@@ -289,13 +289,13 @@ func TestCurateEventMarksAnOutcomeProducedInsideADetachedAgent(t *testing.T) {
 
 // streamAssistantEvent wraps a stream-plane assistant message as the store
 // event a consumer sees. An empty parentToolUseID is the main agent speaking.
-func streamAssistantEvent(t *testing.T, uuid, text, parentToolUseID string) *corev1.Event {
+func streamAssistantEvent(t *testing.T, uuid, text, parentToolUseID string) *protocolv1.Event {
 	t.Helper()
-	return &corev1.Event{
+	return &protocolv1.Event{
 		Seq:          9,
 		ProducedAtMs: producedMs,
 		SessionId:    "s1",
-		Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ClaudeStreamMessage{
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAny(t, &datav1.ClaudeStreamMessage{
 			Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
 				Uuid:            uuid,
 				ParentToolUseId: parentToolUseID,
@@ -361,11 +361,11 @@ func TestAStreamPlaneMainAgentEmissionIsNotRoutedToAnyDetachedWork(t *testing.T)
 }
 
 func TestAStreamPlaneSubagentLaunchPromptIsWithheldRatherThanPromotedToTheFeed(t *testing.T) {
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		Seq:          9,
 		ProducedAtMs: producedMs,
 		SessionId:    "s1",
-		Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ClaudeStreamMessage{
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAny(t, &datav1.ClaudeStreamMessage{
 			Msg: &datav1.ClaudeStreamMessage_User{User: &datav1.UserMessage{
 				Uuid:            "u1",
 				ParentToolUseId: "toolu_launch",

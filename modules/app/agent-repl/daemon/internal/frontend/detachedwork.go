@@ -56,8 +56,8 @@ package frontend
 import (
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // StreamItemCap is the tail cap the daemon applies to the item-counted folds
@@ -134,13 +134,13 @@ func (k DetachKind) String() string {
 // omission be reported to the user as an unknown tool. It returns
 // DetachUnresolved, and the caller decides — with the tool name in hand —
 // whether this is the unclassified arm or a fault.
-func DetachKindFromTaskKind(k corev1.TaskKind) DetachKind {
+func DetachKindFromTaskKind(k protocolv1.TaskKind) DetachKind {
 	switch k {
-	case corev1.TaskKind_TASK_KIND_AGENT:
+	case protocolv1.TaskKind_TASK_KIND_AGENT:
 		return DetachAgent
-	case corev1.TaskKind_TASK_KIND_SHELL:
+	case protocolv1.TaskKind_TASK_KIND_SHELL:
 		return DetachShell
-	case corev1.TaskKind_TASK_KIND_WORKFLOW:
+	case protocolv1.TaskKind_TASK_KIND_WORKFLOW:
 		return DetachWorkflow
 	default:
 		return DetachUnresolved
@@ -654,7 +654,7 @@ type DetachedVerdict struct {
 	// settled work with no outcome is unrepresentable on the contract, and a
 	// substituted stand-in ending is a fabrication nobody could tell from a
 	// real one.
-	Status corev1.TerminalStatus
+	Status protocolv1.TerminalStatus
 	// AtMs is when the work finished, unix millis.
 	AtMs int64
 	// ExitCode is the process exit status, for work that IS a process. Nil for
@@ -686,9 +686,9 @@ func SettleDetachedWork(m *frontendv1.Message, v DetachedVerdict) (*frontendv1.D
 	// A KILL IS A KILL WHATEVER THE CODE SAYS. A stopped process still exits
 	// nonzero, and reading that code as "it failed" would report a user's own
 	// interrupt back to them as an error.
-	case v.Status == corev1.TerminalStatus_TERMINAL_STATUS_KILLED ||
-		v.Status == corev1.TerminalStatus_TERMINAL_STATUS_STOPPED ||
-		v.Status == corev1.TerminalStatus_TERMINAL_STATUS_LOST:
+	case v.Status == protocolv1.TerminalStatus_TERMINAL_STATUS_KILLED ||
+		v.Status == protocolv1.TerminalStatus_TERMINAL_STATUS_STOPPED ||
+		v.Status == protocolv1.TerminalStatus_TERMINAL_STATUS_LOST:
 		settled.Outcome = &frontendv1.DetachedWorkSettled_Killed{Killed: &frontendv1.DetachedWorkOutcomeKilled{Reason: v.Reason}}
 	case v.ExitCode != nil:
 		if *v.ExitCode == 0 {
@@ -696,9 +696,9 @@ func SettleDetachedWork(m *frontendv1.Message, v DetachedVerdict) (*frontendv1.D
 		} else {
 			settled.Outcome = &frontendv1.DetachedWorkSettled_Error{Error: &frontendv1.DetachedWorkOutcomeError{Message: v.Message}}
 		}
-	case v.Status == corev1.TerminalStatus_TERMINAL_STATUS_DONE:
+	case v.Status == protocolv1.TerminalStatus_TERMINAL_STATUS_DONE:
 		settled.Outcome = &frontendv1.DetachedWorkSettled_Done{Done: &frontendv1.DetachedWorkOutcomeDone{}}
-	case v.Status == corev1.TerminalStatus_TERMINAL_STATUS_ERROR:
+	case v.Status == protocolv1.TerminalStatus_TERMINAL_STATUS_ERROR:
 		settled.Outcome = &frontendv1.DetachedWorkSettled_Error{Error: &frontendv1.DetachedWorkOutcomeError{Message: v.Message}}
 	default:
 		return nil, fmt.Errorf("frontend: detached work %q settlement refused — the terminal status was left unspecified and no exit code resolved one, and settled work with no outcome is unrepresentable", m.GetUuid())

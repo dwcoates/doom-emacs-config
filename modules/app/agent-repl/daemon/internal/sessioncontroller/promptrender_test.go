@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // A PROMPT RENDERS WHEN IT ROUND-TRIPS THROUGH THE SDK, AND NEVER BEFORE.
@@ -55,7 +55,7 @@ func (h *queueHarness) userTurns() []pushedTurn {
 // transcriptUserEvent is the DURABLE account of a prompt as the real pipeline
 // delivers it: a file-plane transcript user line, carrying NO request id of its
 // own (that field is empty on every line the file plane produces).
-func transcriptUserEvent(t *testing.T, seq uint64, uuid, text string) *corev1.Event {
+func transcriptUserEvent(t *testing.T, seq uint64, uuid, text string) *protocolv1.Event {
 	t.Helper()
 	return userLineEvent(t, seq, uuid, text, datav1.OriginKind_ORIGIN_KIND_UNSPECIFIED)
 }

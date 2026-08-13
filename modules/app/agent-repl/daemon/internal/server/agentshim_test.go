@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/ssm"
@@ -93,12 +93,12 @@ func TestRegistryResolverBindsSSMToWorkspace(t *testing.T) {
 		t.Fatalf("apply wired: %v", err)
 	}
 	// Act — a turn-started event for s1 (seq 1).
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1",
 		Seq:       1,
-		Plane:     corev1.Plane_PLANE_STREAM,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
 		RequestId: "turn-1",
-		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn-1"}},
+		Payload:   &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "turn-1"}},
 	}
 	if _, err := mgr.ApplyTurnBoundary("/w", "s1", "", ev); err != nil {
 		t.Fatalf("apply: %v", err)

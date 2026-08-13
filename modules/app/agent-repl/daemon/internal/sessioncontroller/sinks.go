@@ -8,9 +8,10 @@ import (
 	"sync"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -50,7 +51,7 @@ type Pusher interface {
 // StateApplier is the slice of the SSM the session controller feeds lifecycle events to.
 // Satisfied by *ssm.Manager.
 type StateApplier interface {
-	Apply(ev *corev1.Event) error
+	Apply(ev *protocolv1.Event) error
 	// ApplyTurnBoundary is the ONE destination of a STREAM turn boundary. It
 	// moves the durable turn ledger, derives turn liveness from it, and paints
 	// the session-status axis from that SAME derivation, in one transaction.
@@ -58,10 +59,10 @@ type StateApplier interface {
 	// It replaced a pair — a ledger resolve followed by a general Apply — whose
 	// two idempotency rules could disagree about whether a turn was in flight.
 	// The color and the queue now read one value; see ssm.TurnLiveness.
-	ApplyTurnBoundary(workspace, claimantSessionID, liveQueryInstanceID string, ev *corev1.Event) (ssm.TurnBoundary, error)
+	ApplyTurnBoundary(workspace, claimantSessionID, liveQueryInstanceID string, ev *protocolv1.Event) (ssm.TurnBoundary, error)
 	// ResolveTurnClaimBridge persists cross-session correlation proof without
 	// applying lifecycle state. This is the only route for TurnClaimBridge.
-	ResolveTurnClaimBridge(workspace, claimantSessionID string, ev *corev1.Event) (replayed bool, err error)
+	ResolveTurnClaimBridge(workspace, claimantSessionID string, ev *protocolv1.Event) (replayed bool, err error)
 	// ReconcileTurnHandshake validates/persists the shim's active-turn snapshot
 	// before DaemonHello opens its standing store subscription. closed names the
 	// PHANTOM claims it synthesized an end for — turns the returning shim says
@@ -273,7 +274,7 @@ type StateApplier interface {
 // ticks. The controller is the authority on which daemon session drives the
 // workspace, so it names it here.
 type ProgressResolver interface {
-	Apply(workspace, sessionID string, ev *corev1.Event) error
+	Apply(workspace, sessionID string, ev *protocolv1.Event) error
 	SetCounts(workspace string, pendingPermissions, queueDepth int64)
 	// NoteTurnAccepted returns the exact cleared interrupt view so the prompt
 	// path can offer it synchronously before the active WorkspaceState. Nil is
@@ -290,13 +291,13 @@ type ProgressResolver interface {
 	// MarkTurnInterrupted is: an interject's stop is machinery, not a user
 	// action, and opening a window for it would report a stop nobody asked
 	// for.
-	NoteInterrupt(workspace, sessionID string, outcome corev1.InterruptOutcome)
+	NoteInterrupt(workspace, sessionID string, outcome protocolv1.InterruptOutcome)
 	// NoteTurnAccounting hands the resolver one SETTLED turn's reconciliation,
 	// from which it resolves the footer's accounting cell. It is fed from the
 	// single settlement path below, which is the only place that holds a
 	// turn's resolved record, so the cell cannot be produced from a
 	// half-settled turn.
-	NoteTurnAccounting(workspace, sessionID string, accounting *frontendv1.TurnAccounting) error
+	NoteTurnAccounting(workspace, sessionID string, accounting *statev1.TurnAccounting) error
 }
 
 // ClearCompactStore persists the newest CLEAR-OR-COMPACTION seq per
@@ -401,15 +402,15 @@ type PromptReceiptStore interface {
 // completed turn with another client. Every consumer receives one at
 // construction, before it can accept any event.
 type TurnAccountingStore interface {
-	Record(sessionID string, accounting *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error)
-	List(sessionID string) ([]*frontendv1.TurnAccounting, error)
+	Record(sessionID string, accounting *statev1.TurnAccounting) (*statev1.TurnAccounting, error)
+	List(sessionID string) ([]*statev1.TurnAccounting, error)
 }
 
 // HistoricalTokenUtilizationStore durably normalizes file-plane response
 // usage that cannot prove an enclosing turn or stream timing. Its identity is
 // the stable API message id within the agent-repl session.
 type HistoricalTokenUtilizationStore interface {
-	RecordHistorical(*frontendv1.TokenUtilization) (bool, error)
+	RecordHistorical(*statev1.TokenUtilization) (bool, error)
 }
 
 // noopProgress is the ProgressResolver a session controller built without one falls back
@@ -417,12 +418,12 @@ type HistoricalTokenUtilizationStore interface {
 // not care about it, without every feed site growing a nil check.
 type noopProgress struct{}
 
-func (noopProgress) Apply(string, string, *corev1.Event) error                { return nil }
-func (noopProgress) SetCounts(string, int64, int64)                           {}
-func (noopProgress) NoteTurnAccepted(string, string) *frontendv1.ProgressView { return nil }
-func (noopProgress) NoteTurnRejected(string, string)                          {}
-func (noopProgress) NoteInterrupt(string, string, corev1.InterruptOutcome)    {}
-func (noopProgress) NoteTurnAccounting(string, string, *frontendv1.TurnAccounting) error {
+func (noopProgress) Apply(string, string, *protocolv1.Event) error             { return nil }
+func (noopProgress) SetCounts(string, int64, int64)                            {}
+func (noopProgress) NoteTurnAccepted(string, string) *frontendv1.ProgressView  { return nil }
+func (noopProgress) NoteTurnRejected(string, string)                           {}
+func (noopProgress) NoteInterrupt(string, string, protocolv1.InterruptOutcome) {}
+func (noopProgress) NoteTurnAccounting(string, string, *statev1.TurnAccounting) error {
 	return nil
 }
 
@@ -487,7 +488,7 @@ type consumer struct {
 	now   func() int64
 	// onSessionStarted fires when a SessionStarted event arrives, letting the
 	// controller adopt the vendor session uuid the start announced.
-	onSessionStarted func(*corev1.SessionStarted)
+	onSessionStarted func(*protocolv1.SessionStarted)
 	// onVendorSessionID reports the VENDOR session uuid observed on a
 	// PERSISTENT store event's envelope. Assigned after construction (the
 	// controller binds it before any event can flow) rather than taken as a
@@ -520,7 +521,7 @@ type consumer struct {
 	// onDegraded reports a shim-sourced DegradedState to the session controller, which is
 	// what lets a bring-up still waiting on the handshake learn that the shim
 	// has already given up. Assigned after construction, like the hook above.
-	onDegraded func(*corev1.DegradedState)
+	onDegraded func(*protocolv1.DegradedState)
 	// onQueryTermination reports the typed lifecycle evidence before its paired
 	// degraded wake-up. The bring-up gate retains it so an exact resume failure
 	// can retain the SDK's reason and identity through the command boundary.
@@ -653,7 +654,7 @@ type consumer struct {
 	//
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
-	onMainAgentContextSize func(record *frontendv1.TokenUtilization)
+	onMainAgentContextSize func(record *statev1.TokenUtilization)
 	// compactedWaiter reports that a compaction COMPLETED — the compacting
 	// axis closing, which is the only first-class report the vendor gives.
 	// A compact-first revival waits on it before it will accept prompts.
@@ -715,7 +716,7 @@ type consumer struct {
 	foldedTyping foldedTypingLedger
 
 	mu   sync.Mutex
-	ring []*corev1.Event
+	ring []*protocolv1.Event
 	// previewSurfaces names every surface this consumer has opened a live typing
 	// preview on — "" for the top-level feed, or an detached work id. It is what
 	// a torn-down query's cut is addressed from (typingcut.go). Guarded by c.mu,
@@ -796,7 +797,7 @@ type consumer struct {
 	// stream writes it from the consumer's own event path while teardowns and
 	// interrupt acks read and drain it from their goroutines, and an unguarded
 	// range over a map another goroutine is writing kills the process outright.
-	pendingTerminal map[string]*corev1.Event
+	pendingTerminal map[string]*protocolv1.Event
 	// terminalSeqByTurn is the PERMANENT receipt of which stream coordinate
 	// carried each turn's terminal result. It outlives pendingTerminal's
 	// discharge because a LATE correction revises a stamp long after it
@@ -824,10 +825,10 @@ type consumer struct {
 	// own accord. The stop's own path closes it instead, so the ledger keeps
 	// saying the shim was stopped over a live turn.
 	stoppedTurns           *turnLatch
-	replayedAccounting     map[string]*frontendv1.TurnAccounting
-	replayedResponses      map[string]*frontendv1.TokenUtilization
-	completedTerminalBySeq map[uint64]*frontendv1.TurnAccounting
-	completedResponses     map[string]*frontendv1.TokenUtilization
+	replayedAccounting     map[string]*statev1.TurnAccounting
+	replayedResponses      map[string]*statev1.TokenUtilization
+	completedTerminalBySeq map[uint64]*statev1.TurnAccounting
+	completedResponses     map[string]*statev1.TokenUtilization
 	responseDiagnostics    *diagnosticDeduper
 	// onTerminalAccountingPersisted republishes the SessionView from the
 	// durable aggregate only after the terminal conversation delta is visible.
@@ -848,7 +849,7 @@ func (c *consumer) warn(format string, args ...any) {
 	c.logf(format, args...)
 }
 
-func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, accountingStore TurnAccountingStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool, atMs int64), onBackfill func(state string), onSystemInit func(si *datav1.SystemInit, seq uint64), onSessionEnded func()) *consumer {
+func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, accountingStore TurnAccountingStore, logf func(string, ...any), onSessionStarted func(*protocolv1.SessionStarted), onTurn func(active bool, atMs int64), onBackfill func(state string), onSystemInit func(si *datav1.SystemInit, seq uint64), onSessionEnded func()) *consumer {
 	if accountingStore == nil {
 		panic("session-controller: newConsumer needs a TurnAccountingStore")
 	}
@@ -878,15 +879,15 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		turns:                  newTurnLifecycle(applier, workspace, sessionID),
 		accounting:             newTurnAccountingReducer(dlog.Tag(dlog.Logf(logf), "session", sessionID, "ws", workspace)),
 		resumeIdentity:         newResumeIdentityTracker(),
-		pendingTerminal:        map[string]*corev1.Event{},
+		pendingTerminal:        map[string]*protocolv1.Event{},
 		terminalSeqByTurn:      map[string]uint64{},
 		settledStamps:          map[string]struct{}{},
 		announcedTurnEnds:      newTurnLatch(),
 		stoppedTurns:           newTurnLatch(),
-		replayedAccounting:     map[string]*frontendv1.TurnAccounting{},
-		replayedResponses:      map[string]*frontendv1.TokenUtilization{},
-		completedTerminalBySeq: map[uint64]*frontendv1.TurnAccounting{},
-		completedResponses:     map[string]*frontendv1.TokenUtilization{},
+		replayedAccounting:     map[string]*statev1.TurnAccounting{},
+		replayedResponses:      map[string]*statev1.TokenUtilization{},
+		completedTerminalBySeq: map[uint64]*statev1.TurnAccounting{},
+		completedResponses:     map[string]*statev1.TokenUtilization{},
 		responseDiagnostics:    newDiagnosticDeduper(responseDiagnosticDedupeCapacity, responseDiagnosticRepeatLimit),
 	}
 }
@@ -895,7 +896,7 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 // observeVendorSessionID reports a PERSISTENT event's envelope session id as
 // the conversation's vendor uuid. Seq 0 (ephemeral) carries the daemon's own
 // id and is skipped; see onVendorSessionID.
-func (c *consumer) observeVendorSessionID(ev *corev1.Event) {
+func (c *consumer) observeVendorSessionID(ev *protocolv1.Event) {
 	if c.onVendorSessionID == nil || ev.GetSeq() == 0 {
 		return
 	}
@@ -904,7 +905,7 @@ func (c *consumer) observeVendorSessionID(ev *corev1.Event) {
 	}
 }
 
-func (c *consumer) retain(ev *corev1.Event) {
+func (c *consumer) retain(ev *protocolv1.Event) {
 	c.mu.Lock()
 	c.ring = append(c.ring, ev)
 	if len(c.ring) > ringCap {
@@ -964,10 +965,10 @@ func (c *consumer) purgeRetained() (dropped int, ceiling uint64) {
 // snapshotRing returns a shallow copy of the retained events for catalog
 // rebuilds and resync, taken under the lock so a concurrent retain cannot race
 // the read.
-func (c *consumer) snapshotRing() []*corev1.Event {
+func (c *consumer) snapshotRing() []*protocolv1.Event {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := make([]*corev1.Event, len(c.ring))
+	out := make([]*protocolv1.Event, len(c.ring))
 	copy(out, c.ring)
 	return out
 }
@@ -1133,7 +1134,7 @@ func (c *consumer) applyCommandsChanged(cc *datav1.CommandsChanged) *datav1.Syst
 // bring-up the workspace never establishes at all — a bookkeeping
 // disagreement about one turn's token accounting denying the user their
 // entire conversation. See degradeAccountingObservation.
-func (c *consumer) Apply(ev *corev1.Event) error {
+func (c *consumer) Apply(ev *protocolv1.Event) error {
 	// The reducer consumes every durable lifecycle and observation fact before
 	// derived state can publish a terminal result. Its failure DEGRADES this
 	// turn's accounting — loudly, below — and does not stop the boundary
@@ -1146,12 +1147,12 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	applyState := true
 	var turnResult *turnResolution
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_TurnClaimBridge:
+	case *protocolv1.Event_TurnClaimBridge:
 		err := fmt.Errorf("session-controller: TurnClaimBridge must use ApplyTurnClaimBridge, never lifecycle Apply")
 		c.logf("session-controller: turn bridge decision=reject_misroute session=%s seq=%d turn_id=%q request_id=%q error=%v",
 			c.sessionID, ev.GetSeq(), ev.GetTurnClaimBridge().GetTurnId(), ev.GetRequestId(), err)
 		return err
-	case *corev1.Event_TurnStarted, *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnStarted, *protocolv1.Event_TurnEnded:
 		res, turnErr := c.turns.resolve(ev, c.accounting.queryID)
 		c.logf("session-controller: turn lifecycle plane=%s kind=%s session=%s seq=%d turn_id=%q request_id=%q dedup_key=%q active_before=%s active_after=%s decision=%s apply=%v notify=%v replayed=%v error=%v",
 			ev.GetPlane().String(), stateKind(ev), c.sessionID, ev.GetSeq(),
@@ -1245,7 +1246,7 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	// still ending produces no edge, and a wait correlated on that turn's id
 	// would otherwise never see it begin.
 	if turnResult != nil && c.onTurnEvent != nil {
-		_, started := ev.GetPayload().(*corev1.Event_TurnStarted)
+		_, started := ev.GetPayload().(*protocolv1.Event_TurnStarted)
 		// The end's own verdict rides with it. A waiter that only learned a turn
 		// ended could not tell a completed merge action from an errored one.
 		var outcome turnOutcome
@@ -1258,7 +1259,7 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		c.applyProgress(ev)
 	}
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_TaskStarted, *corev1.Event_TaskEnded:
+	case *protocolv1.Event_TaskStarted, *protocolv1.Event_TaskEnded:
 		// The SAME lifecycle event that moves the task catalog opens and settles
 		// the detachment's work. One event, both surfaces, so a task the
 		// footer shows as running and a work that says it settled cannot come
@@ -1279,11 +1280,11 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		c.logf("session-controller: task catalog push session=%s ws=%s seq=%d event=%s tasks=%d",
 			c.sessionID, c.workspace, ev.GetSeq(), stateKind(ev), len(catalog.GetTasks()))
 		c.push.PushTaskCatalog(catalog)
-	case *corev1.Event_TaskProgress:
+	case *protocolv1.Event_TaskProgress:
 		// TaskProgress can fire hundreds of times per second, but TaskCatalog has
 		// no progress fields and BuildTaskCatalog deliberately ignores it. Do not
 		// log or broadcast this hot no-change path.
-	case *corev1.Event_SessionEnded:
+	case *protocolv1.Event_SessionEnded:
 		// The SAME event the SSM resolves to RENDER_STATE_DEAD also records
 		// WHY, so the color and its account cannot disagree. Before this the
 		// SSM went dead and the record stayed silent.
@@ -1337,7 +1338,7 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 // forever about a fault surfaced once and already fixed at its producer. Such a
 // rejection records in full at info under a decision field. A LIVE rejection is
 // byte-identical to what it always was.
-func (c *consumer) degradeAccountingObservation(ev *corev1.Event, cause error) error {
+func (c *consumer) degradeAccountingObservation(ev *protocolv1.Event, cause error) error {
 	// ONE classification for the whole rejection, made here and threaded down, so
 	// the three records this path emits cannot disagree about the row's epoch.
 	historical := rejectionIsHistorical(c.accounting, ev)
@@ -1367,7 +1368,7 @@ func (c *consumer) degradeAccountingObservation(ev *corev1.Event, cause error) e
 // IT WITHHOLDS NOTHING. The event it records is published by the caller in the
 // same breath; this map used to be a parking lot and is now a receipt. See
 // pendingTerminal for why it is only ever reached under mu.
-func (c *consumer) noteTerminalResult(turnID string, ev *corev1.Event) {
+func (c *consumer) noteTerminalResult(turnID string, ev *protocolv1.Event) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pendingTerminal[turnID] = ev
@@ -1411,7 +1412,7 @@ func (c *consumer) stampAlreadySettled(turnID string) bool {
 
 // heldTerminalResult reports the terminal result parked for a turn without
 // discharging the hold. Nil means nothing is held for that turn.
-func (c *consumer) heldTerminalResult(turnID string) *corev1.Event {
+func (c *consumer) heldTerminalResult(turnID string) *protocolv1.Event {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.pendingTerminal[turnID]
@@ -1420,7 +1421,7 @@ func (c *consumer) heldTerminalResult(turnID string) *corev1.Event {
 // takeHeldTerminalResult discharges a turn's hold and hands back what it held,
 // in one step so two settlements of the same turn cannot both publish it. Nil
 // means nothing was held.
-func (c *consumer) takeHeldTerminalResult(turnID string) *corev1.Event {
+func (c *consumer) takeHeldTerminalResult(turnID string) *protocolv1.Event {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ev := c.pendingTerminal[turnID]
@@ -1582,7 +1583,7 @@ func (c *consumer) serveRetiredTurnAccounting(turnID string) error {
 // this feeds the footer cell and the indexes a resync replays response stamps
 // from. Discharge and publication remain one step so two settlements naming the
 // same turn cannot both claim to be the first.
-func (c *consumer) publishTurnAccountingStamp(turnID string, accounting *frontendv1.TurnAccounting) {
+func (c *consumer) publishTurnAccountingStamp(turnID string, accounting *statev1.TurnAccounting) {
 	// THE FOOTER'S ACCOUNTING CELL IS RESOLVED FROM THIS RECORD, and it is fed
 	// FIRST: a turn whose stamp was already discharged still settled, and its
 	// accounting is still the newest the footer has. A failure to feed it is
@@ -1618,7 +1619,7 @@ func (c *consumer) publishTurnAccountingStamp(turnID string, accounting *fronten
 // this is a failure path taken once per unpersistable turn: a second query
 // shape would be one more thing that could disagree with the row Record
 // compares against.
-func (c *consumer) persistedTurnAccounting(turnID string) (*frontendv1.TurnAccounting, bool, error) {
+func (c *consumer) persistedTurnAccounting(turnID string) (*statev1.TurnAccounting, bool, error) {
 	accountings, err := c.accountingStore.List(c.sessionID)
 	if err != nil {
 		return nil, false, fmt.Errorf("session-controller: read persisted turn accounting: %w", err)
@@ -1658,7 +1659,7 @@ func (c *consumer) ReleaseSynthesizedTurnClose(turnIDs []string, cause string) {
 // proof. It touches the durable claim ledger and the private accounting
 // correlation reducer: no retain, SSM Apply, lifecycle edge, onTurn, progress,
 // task catalog, or frontend push occurs on this path.
-func (c *consumer) ApplyTurnClaimBridge(ev *corev1.Event) error {
+func (c *consumer) ApplyTurnClaimBridge(ev *protocolv1.Event) error {
 	replayed, err := c.ssm.ResolveTurnClaimBridge(c.workspace, c.sessionID, ev)
 	// ONE record per bridge, carrying the consumer's own outcome. The SSM owns
 	// the refusal itself and has already logged it with its full context; this
@@ -1736,7 +1737,7 @@ func turnBridgeDecision(err error) string {
 // through_seq; ContentDelta and HeartbeatProgress become ephemeral TypingDelta
 // relays. A vendor payload that cannot be translated is a loud error, never a
 // silent drop.
-func (c *consumer) Consume(ev *corev1.Event) error {
+func (c *consumer) Consume(ev *protocolv1.Event) error {
 	// THE HIGH-WATER MARK, advanced before anything can be decided from it and
 	// unconditionally: an event this consumer refuses further down was still
 	// PRODUCED, and a confirmation taken after it is still newer than it.
@@ -1825,7 +1826,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 		}
 		observation = nil
 	}
-	var utilization *frontendv1.TokenUtilization
+	var utilization *statev1.TokenUtilization
 	historicalInserted := false
 	if observation != nil {
 		utilization = observation.record
@@ -1899,9 +1900,9 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 	c.applyProgress(ev)
 	c.observeBackfill(ev)
 	switch p := ev.GetPayload().(type) {
-	case *corev1.Event_ContentDelta:
+	case *protocolv1.Event_ContentDelta:
 		c.relayTypingDelta(p.ContentDelta, ev.GetSeq())
-	case *corev1.Event_HeartbeatProgress:
+	case *protocolv1.Event_HeartbeatProgress:
 		// E4: relayed as HeartbeatView. Under S9 this was a schema-forced DROP —
 		// TypingDelta carries only a ContentDelta and there was no other arm to
 		// put a tool-progress heartbeat in. HeartbeatView is that arm, so the
@@ -1909,7 +1910,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 		if hv := frontend.HeartbeatViewFromProgress(c.workspace, c.sessionID, p.HeartbeatProgress); hv != nil {
 			c.push.PushHeartbeatView(hv)
 		}
-	case *corev1.Event_Vendor:
+	case *protocolv1.Event_Vendor:
 		if si := systemInitFromVendor(p.Vendor); si != nil {
 			c.mu.Lock()
 			c.systemInit = si
@@ -1967,7 +1968,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 			return nil
 		}
 		c.pushConversation(ev, true)
-	case *corev1.Event_ContextCleared, *corev1.Event_ContextCompacted:
+	case *protocolv1.Event_ContextCleared, *protocolv1.Event_ContextCompacted:
 		// A clear and a compaction each do two things at once: they render as
 		// their own work, and they RAISE this conversation's replay floor so no
 		// reconnecting frontend is ever served the history they discarded. The
@@ -2005,7 +2006,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 // retired query and fixed shim-side long ago) kept re-announcing itself at warn
 // on every boot while claiming to be live. The event's epoch is a property of
 // its envelope; no payload arm can make a replayed row live.
-func rejectionIsHistorical(r *turnAccountingReducer, ev *corev1.Event) bool {
+func rejectionIsHistorical(r *turnAccountingReducer, ev *protocolv1.Event) bool {
 	_, historical := r.liveEvidenceFor(ev)
 	return historical
 }
@@ -2016,16 +2017,16 @@ func rejectionIsHistorical(r *turnAccountingReducer, ev *corev1.Event) bool {
 // severity is withheld.
 const historicalRejectionDecision = "retain_history_no_live_warn"
 
-func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause error, historical bool) {
+func (c *consumer) logRejectedAccountingObservation(ev *protocolv1.Event, cause error, historical bool) {
 	c.logRejectedTokenUtilization(ev, cause, historical)
 	observation := ev.GetAccountUsageObservation()
 	queryID, turnID, boundary := "", "", "unspecified"
 	if observation != nil {
 		queryID, turnID = observation.GetQueryInstanceId(), observation.GetTurnId()
 		switch observation.GetBoundary().(type) {
-		case *corev1.AccountUsageObservation_TurnStart:
+		case *protocolv1.AccountUsageObservation_TurnStart:
 			boundary = "turn_start"
-		case *corev1.AccountUsageObservation_TurnEnd:
+		case *protocolv1.AccountUsageObservation_TurnEnd:
 			boundary = "turn_end"
 		}
 	}
@@ -2061,7 +2062,7 @@ func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause erro
 // historical is the ONE classifier's verdict for this event, passed in rather
 // than re-derived so this record and the observation record beneath it can never
 // disagree about the same row's epoch.
-func (c *consumer) logRejectedTokenUtilization(ev *corev1.Event, cause error, historical bool) {
+func (c *consumer) logRejectedTokenUtilization(ev *protocolv1.Event, cause error, historical bool) {
 	var invalid *tokenutilization.ValidationError
 	if !errors.As(cause, &invalid) {
 		return
@@ -2103,7 +2104,7 @@ func (c *consumer) logRejectedTokenUtilization(ev *corev1.Event, cause error, hi
 // duplicate-suppression latch (which would swallow a genuine LIVE termination
 // arriving later through Degraded). The card is still pushed, under the same
 // stable identity, so nothing the user could see is lost.
-func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *frontendv1.FailureCardView, historical bool) {
+func (c *consumer) surfaceUnexpectedQueryTermination(ev *protocolv1.Event, item *frontendv1.FailureCardView, historical bool) {
 	lifecycle := ev.GetQueryLifecycle()
 	terminated := lifecycle.GetTerminated()
 	detail := item.GetKind().GetQueryTermination().GetDetail()
@@ -2133,7 +2134,7 @@ func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *fro
 		c.onQueryTermination(proto.Clone(detail).(*frontendv1.QueryTerminationFailure))
 	}
 	queryID := detail.GetQueryInstanceId()
-	ds := &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID}
+	ds := &protocolv1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID}
 	if c.onDegraded != nil {
 		c.onDegraded(ds)
 	}
@@ -2158,7 +2159,7 @@ func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *fro
 // (producer → store, pre-ingest), and a floor derived from it would be no floor
 // at all. It is loud-logged instead of being taken as "nothing happened", since
 // a clear or compaction the daemon saw but cannot position is a real anomaly.
-func (c *consumer) noteClearOrCompact(ev *corev1.Event) {
+func (c *consumer) noteClearOrCompact(ev *protocolv1.Event) {
 	seq := ev.GetSeq()
 	logf := dlog.Tag(dlog.Logf(c.logf),
 		"session", c.sessionID, "ws", c.workspace, "kind", stateKind(ev),
@@ -2190,10 +2191,10 @@ func (c *consumer) noteClearOrCompact(ev *corev1.Event) {
 // A close for an axis that was never open is not an error — a compaction can
 // be reported by the file plane on a daemon that never saw its status ticker —
 // and the SSM logs that case rather than acting on it.
-func (c *consumer) noteCutCompleted(ev *corev1.Event) {
+func (c *consumer) noteCutCompleted(ev *protocolv1.Event) {
 	var err error
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_ContextCleared:
+	case *protocolv1.Event_ContextCleared:
 		err = c.ssm.ApplyClearing(c.workspace, false, "context_cleared")
 		// THE GATE CLOSES HERE TOO, on the compaction's exact terms: this is the
 		// only first-class report that the conversation was actually discarded,
@@ -2216,7 +2217,7 @@ func (c *consumer) noteCutCompleted(ev *corev1.Event) {
 		// from here rather than from a turn end that would also fire for a
 		// `/clear` the CLI never carried out.
 		c.fireCutWaiter(&c.clearedWaiter)
-	case *corev1.Event_ContextCompacted:
+	case *protocolv1.Event_ContextCompacted:
 		err = c.ssm.ApplyCompacting(c.workspace, false, "context_compacted")
 		// THE COMPACTION GATE CLOSES HERE, on the same event and for the same
 		// reason the revival's completion gate opens here: this is the only
@@ -2252,7 +2253,7 @@ func (c *consumer) noteCutCompleted(ev *corev1.Event) {
 // contract progress.applyStreamLocked already reads it under, and the two must
 // agree or the footer's window and the phase word would disagree about the
 // same fact.
-func (c *consumer) noteCompactingStatus(ev *corev1.Event, a *anypb.Any) {
+func (c *consumer) noteCompactingStatus(ev *protocolv1.Event, a *anypb.Any) {
 	status, ok := statusFromVendor(a)
 	if !ok {
 		return
@@ -2276,7 +2277,7 @@ func (c *consumer) noteCompactingStatus(ev *corev1.Event, a *anypb.Any) {
 //
 // An SSM failure is loud-logged and does not stop the roster refresh: the two
 // planes are independent, and losing both over one failure would be worse.
-func (c *consumer) reconcileTasks(ev *corev1.Event, btc *datav1.BackgroundTasksChanged) {
+func (c *consumer) reconcileTasks(ev *protocolv1.Event, btc *datav1.BackgroundTasksChanged) {
 	ids := make([]string, 0, len(btc.GetTasks()))
 	for _, ref := range btc.GetTasks() {
 		if ref.GetTaskId() != "" {
@@ -2388,15 +2389,15 @@ func (c *consumer) settleBackfillFromStore(highWater uint64) {
 //
 // This sees only backfills that HAPPEN. A session reopened with its history
 // already ingested is settled by settleBackfillFromStore instead.
-func (c *consumer) observeBackfill(ev *corev1.Event) {
+func (c *consumer) observeBackfill(ev *protocolv1.Event) {
 	switch p := ev.GetPayload().(type) {
-	case *corev1.Event_Unparsed:
+	case *protocolv1.Event_Unparsed:
 		if p.Unparsed.GetProducer() == sidecarProducer {
 			c.logf("session-controller: sidecar could not read transcript line session=%s path=%s offset=%d: %s",
 				c.sessionID, p.Unparsed.GetSourcePath(), p.Unparsed.GetByteOffset(), p.Unparsed.GetError())
 			c.noteBackfill(BackfillFailed)
 		}
-	case *corev1.Event_Vendor:
+	case *protocolv1.Event_Vendor:
 		if isTranscriptLine(p.Vendor) {
 			c.noteBackfill(BackfillDone)
 		}
@@ -2436,7 +2437,7 @@ func isTranscriptLine(a *anypb.Any) bool {
 //
 // See foldedtyping.go for the rule that decides the destination and why it is
 // the fold's own rule.
-func (c *consumer) relayTypingDelta(cd *corev1.ContentDelta, seq uint64) {
+func (c *consumer) relayTypingDelta(cd *protocolv1.ContentDelta, seq uint64) {
 	messageID := ""
 	if c.work != nil {
 		if v := c.work.typingRelayVerdict(cd.GetToolUseId()); v.Suppress {
@@ -2454,7 +2455,7 @@ func (c *consumer) relayTypingDelta(cd *corev1.ContentDelta, seq uint64) {
 	}
 }
 
-func (c *consumer) applyProgress(ev *corev1.Event) {
+func (c *consumer) applyProgress(ev *protocolv1.Event) {
 	if err := c.prog.Apply(c.workspace, c.sessionID, ev); err != nil {
 		c.logf("session-controller: progress apply failed session=%s seq=%d kind=%s: %v",
 			c.sessionID, ev.GetSeq(), stateKind(ev), err)
@@ -2503,7 +2504,7 @@ func userTurnReceipt(cd *frontendv1.ConversationDelta) (requestID string, textLe
 
 // pushConversation converts a vendor event to a ConversationDelta and pushes it,
 // loud-logging (never swallowing) a translation failure.
-func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
+func (c *consumer) pushConversation(ev *protocolv1.Event, live bool) {
 	c.pushConversationAttributed(ev, live, "")
 }
 
@@ -2517,7 +2518,7 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 // seq 10 of the first. Passing the turn id along the one call that makes the
 // attribution makes that confusion unrepresentable: the assertion below can
 // only ever be asked of the event it was made about.
-func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, terminalTurnID string) {
+func (c *consumer) pushConversationAttributed(ev *protocolv1.Event, live bool, terminalTurnID string) {
 	observation, err := tokenUtilizationObservationFromEvent(ev, c.sessionID, c.accounting.isKnownVendorSession)
 	if err != nil {
 		historical := rejectionIsHistorical(c.accounting, ev)
@@ -2531,7 +2532,7 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 		}
 		observation = nil
 	}
-	var historicalUsage *frontendv1.TokenUtilization
+	var historicalUsage *statev1.TokenUtilization
 	if observation != nil && observation.historical {
 		historicalUsage = observation.record
 	}
@@ -2578,7 +2579,7 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 		if assistant == nil {
 			continue
 		}
-		var utilization *frontendv1.TokenUtilization
+		var utilization *statev1.TokenUtilization
 		c.mu.Lock()
 		completed := c.completedResponses[assistant.GetId()]
 		c.mu.Unlock()
@@ -2758,7 +2759,7 @@ var faultClassifications = map[string]faultClassification{
 // It returns the disposition it classified ds under, because the shim client's
 // own relay record for this event takes its severity from that verdict and has
 // no way to compute it (shimclient.DegradedReporter).
-func (c *consumer) Degraded(_ string, ev *corev1.Event, ds *corev1.DegradedState) shimclient.Disposition {
+func (c *consumer) Degraded(_ string, ev *protocolv1.Event, ds *protocolv1.DegradedState) shimclient.Disposition {
 	// THE SAME EPOCH TEST THE TYPED TERMINATION CHANNEL ALREADY MAKES, asked of
 	// the ONE classifier, on the envelope. The shim writes an unexpected
 	// termination as an ACKNOWLEDGED PAIR — the QueryLifecycle row and this
@@ -2821,7 +2822,7 @@ func (c *consumer) Degraded(_ string, ev *corev1.Event, ds *corev1.DegradedState
 // decision, not a drop. It is pushed ONCE per replayed pair, through
 // pushHistoricalTerminationCard, because the QueryLifecycle half derives the
 // same card identity from the other sink.
-func (c *consumer) withholdHistoricalDegradation(ev *corev1.Event, ds *corev1.DegradedState) {
+func (c *consumer) withholdHistoricalDegradation(ev *protocolv1.Event, ds *protocolv1.DegradedState) {
 	// INFO, NOT WARN, for the same reason the typed termination's historical arm
 	// is at info (surfaceUnexpectedQueryTermination): a replayed row is history
 	// being classified, not a fresh degradation. The live arm in Degraded keeps
@@ -2896,7 +2897,7 @@ const (
 
 // faultCauseKind is the cause kind for the fault edge ds describes: its own
 // reason when it carries one, else this daemon's canonical name for the edge.
-func faultCauseKind(ds *corev1.DegradedState) string {
+func faultCauseKind(ds *protocolv1.DegradedState) string {
 	if reason := ds.GetReason(); reason != "" {
 		return reason
 	}
@@ -2967,7 +2968,7 @@ func (c *consumer) startFailedUUID() string {
 // instant — the boundary really was observed, and dropping it because a field
 // was unset would lose the fact entirely — and it is the same fallback the
 // last-turn-end stamp has always used.
-func (c *consumer) boundaryInstant(ev *corev1.Event) int64 {
+func (c *consumer) boundaryInstant(ev *protocolv1.Event) int64 {
 	if at := ev.GetProducedAtMs(); at != 0 {
 		return at
 	}
@@ -3432,10 +3433,10 @@ func (c *consumer) snapshotPermItems() []*frontendv1.Message {
 // It states neither lineage nor durability. Both are written in one act by the
 // constructor pushPermission routes through, so the item cannot claim a class
 // and carry lineage that contradicts it.
-func permissionItem(req *corev1.PermissionRequest, res corev1.PermissionItem_Resolution, denyMessage string) *frontendv1.Message {
+func permissionItem(req *protocolv1.PermissionRequest, res protocolv1.PermissionItem_Resolution, denyMessage string) *frontendv1.Message {
 	return &frontendv1.Message{
 		Uuid: req.GetRequestId(),
-		Payload: &frontendv1.Message_Permission{Permission: &corev1.PermissionItem{
+		Payload: &frontendv1.Message_Permission{Permission: &protocolv1.PermissionItem{
 			Request:     req,
 			Resolution:  res,
 			DenyMessage: denyMessage,
@@ -3444,23 +3445,23 @@ func permissionItem(req *corev1.PermissionRequest, res corev1.PermissionItem_Res
 }
 
 // stateKind names a lifecycle event's payload for logging.
-func stateKind(ev *corev1.Event) string {
+func stateKind(ev *protocolv1.Event) string {
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_SessionStarted:
+	case *protocolv1.Event_SessionStarted:
 		return "session_started"
-	case *corev1.Event_SessionEnded:
+	case *protocolv1.Event_SessionEnded:
 		return "session_ended"
-	case *corev1.Event_TurnStarted:
+	case *protocolv1.Event_TurnStarted:
 		return "turn_started"
-	case *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnEnded:
 		return "turn_ended"
-	case *corev1.Event_TurnClaimBridge:
+	case *protocolv1.Event_TurnClaimBridge:
 		return "turn_claim_bridge"
-	case *corev1.Event_TaskStarted:
+	case *protocolv1.Event_TaskStarted:
 		return "task_started"
-	case *corev1.Event_TaskProgress:
+	case *protocolv1.Event_TaskProgress:
 		return "task_progress"
-	case *corev1.Event_TaskEnded:
+	case *protocolv1.Event_TaskEnded:
 		return "task_ended"
 	default:
 		return "other"

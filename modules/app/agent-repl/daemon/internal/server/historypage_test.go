@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // The command handler's half of conversation-history.proto: it carries the

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
@@ -74,11 +74,11 @@ type protoControl interface {
 // and one is minted (newRequestID). That is not a fallback for a failed lookup:
 // it is the honest statement that nothing daemon-side is keyed by this turn's
 // name, so any unique name will do.
-func (c *Client) SubmitPrompt(ctx context.Context, requestID, text, origin, permissionMode string, promptOrigin corev1.PromptOrigin) error {
-	if promptOrigin == corev1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
+func (c *Client) SubmitPrompt(ctx context.Context, requestID, text, origin, permissionMode string, promptOrigin protocolv1.PromptOrigin) error {
+	if promptOrigin == protocolv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
 		return fmt.Errorf("shimclient: submit prompt requires a non-UNSPECIFIED prompt origin")
 	}
-	if _, ok := corev1.PromptOrigin_name[int32(promptOrigin)]; !ok {
+	if _, ok := protocolv1.PromptOrigin_name[int32(promptOrigin)]; !ok {
 		return fmt.Errorf("shimclient: submit prompt received unknown prompt origin %d", promptOrigin)
 	}
 	reqID := requestID
@@ -89,7 +89,7 @@ func (c *Client) SubmitPrompt(ctx context.Context, requestID, text, origin, perm
 		}
 		reqID = minted
 	}
-	_, err := c.sendAwait(ctx, &corev1.SubmitPrompt{
+	_, err := c.sendAwait(ctx, &protocolv1.SubmitPrompt{
 		RequestId:      reqID,
 		Text:           text,
 		Origin:         origin,
@@ -115,14 +115,14 @@ func (c *Client) SubmitPrompt(ctx context.Context, requestID, text, origin, perm
 // arriving and nothing else, so an interrupt that WAS delivered and acked read
 // exactly like one the daemon had swallowed. Observed while diagnosing a stop
 // that had in fact been answered INTERRUPTED within two milliseconds.
-func (c *Client) Interrupt(ctx context.Context, originRequestID string) (corev1.InterruptOutcome, error) {
+func (c *Client) Interrupt(ctx context.Context, originRequestID string) (protocolv1.InterruptOutcome, error) {
 	reqID, err := c.newRequestID("interrupt")
 	if err != nil {
-		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
+		return protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
 	}
-	ack, err := c.sendAwait(ctx, &corev1.Interrupt{RequestId: reqID}, originRequestID)
+	ack, err := c.sendAwait(ctx, &protocolv1.Interrupt{RequestId: reqID}, originRequestID)
 	if err != nil {
-		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
+		return protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
 	}
 	return ack.GetInterruptOutcome(), nil
 }
@@ -143,12 +143,12 @@ func (c *Client) Interrupt(ctx context.Context, originRequestID string) (corev1.
 //
 // originRequestID NAMES WHO ORDERED THE STOP and is carried purely so the log
 // can say, exactly as Interrupt's is.
-func (c *Client) CancelDetachedAgents(ctx context.Context, originRequestID string) (*corev1.DetachedCancelOutcome, error) {
+func (c *Client) CancelDetachedAgents(ctx context.Context, originRequestID string) (*protocolv1.DetachedCancelOutcome, error) {
 	reqID, err := c.newRequestID("cancel-detached-agents")
 	if err != nil {
 		return nil, err
 	}
-	ack, err := c.sendAwait(ctx, &corev1.CancelDetachedAgents{RequestId: reqID}, originRequestID)
+	ack, err := c.sendAwait(ctx, &protocolv1.CancelDetachedAgents{RequestId: reqID}, originRequestID)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,7 @@ func (c *Client) QueryLiveTasks(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	ack, nack, err := c.sendAwaitReceipt(ctx, &corev1.QueryLiveTasks{RequestId: reqID}, reqID)
+	ack, nack, err := c.sendAwaitReceipt(ctx, &protocolv1.QueryLiveTasks{RequestId: reqID}, reqID)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +212,7 @@ func (c *Client) SetModel(ctx context.Context, model string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ack, nack, err := c.sendAwaitReceipt(ctx, &corev1.SetModel{RequestId: reqID, Model: requested}, reqID)
+	ack, nack, err := c.sendAwaitReceipt(ctx, &protocolv1.SetModel{RequestId: reqID, Model: requested}, reqID)
 	if err != nil {
 		return "", err
 	}
@@ -251,7 +251,7 @@ func (c *Client) QuerySelectedModel(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ack, nack, err := c.sendAwaitReceipt(ctx, &corev1.QuerySelectedModel{RequestId: reqID}, reqID)
+	ack, nack, err := c.sendAwaitReceipt(ctx, &protocolv1.QuerySelectedModel{RequestId: reqID}, reqID)
 	if err != nil {
 		return "", err
 	}
@@ -271,7 +271,7 @@ func (c *Client) QuerySelectedModel(ctx context.Context) (string, error) {
 // correlated by the SAME request_id the shim used. It is fire-and-forget on
 // the control plane (the shim uses it to unblock canUseTool); it is NOT
 // Ack-awaited.
-func (c *Client) PermissionResponse(resp *corev1.PermissionResponse) error {
+func (c *Client) PermissionResponse(resp *protocolv1.PermissionResponse) error {
 	ac := c.currentConn()
 	if ac == nil {
 		return ErrNotConnected
@@ -298,7 +298,7 @@ func (c *Client) currentConn() *activeConn {
 // some commands (an interrupt's outcome) and discarding it here would put the
 // only process that can see that verdict in the position of having to guess
 // at it later.
-func (c *Client) sendAwait(ctx context.Context, msg protoControl, originRequestID string) (*corev1.Ack, error) {
+func (c *Client) sendAwait(ctx context.Context, msg protoControl, originRequestID string) (*protocolv1.Ack, error) {
 	ack, nack, err := c.sendAwaitReceipt(ctx, msg, originRequestID)
 	if err != nil {
 		return nil, err
@@ -318,7 +318,7 @@ func (c *Client) sendAwait(ctx context.Context, msg protoControl, originRequestI
 // send and the ack. The two ids are the only bridge between a caller's record
 // and the wire, and a caller with no id of its own passes "" — which the log
 // then renders as an exchange nothing outside this package named.
-func (c *Client) sendAwaitReceipt(ctx context.Context, msg protoControl, originRequestID string) (*corev1.Ack, *corev1.Nack, error) {
+func (c *Client) sendAwaitReceipt(ctx context.Context, msg protoControl, originRequestID string) (*protocolv1.Ack, *protocolv1.Nack, error) {
 	reqID := msg.GetRequestId()
 	ac := c.currentConn()
 	if ac == nil {
@@ -374,14 +374,14 @@ func (c *Client) sendAwaitReceipt(ctx context.Context, msg protoControl, originR
 
 // resolveAck delivers an Ack to the correlated waiter. An Ack with no waiter is
 // loud-logged (a stray or duplicate ack) but not fatal.
-func (c *Client) resolveAck(ac *activeConn, ack *corev1.Ack) {
+func (c *Client) resolveAck(ac *activeConn, ack *protocolv1.Ack) {
 	if !ac.deliver(ack.GetRequestId(), ackResult{ack: ack}) {
 		c.logf("received Ack for unknown request_id=%s (stray or late)", ack.GetRequestId())
 	}
 }
 
 // resolveNack delivers a Nack (loud) to the correlated waiter.
-func (c *Client) resolveNack(ac *activeConn, nack *corev1.Nack) {
+func (c *Client) resolveNack(ac *activeConn, nack *protocolv1.Nack) {
 	c.logf("received Nack request_id=%s reason=%q", nack.GetRequestId(), nack.GetReason())
 	if !ac.deliver(nack.GetRequestId(), ackResult{nack: nack}) {
 		c.logf("received Nack for unknown request_id=%s (stray or late)", nack.GetRequestId())

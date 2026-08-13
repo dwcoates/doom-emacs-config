@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 
 	"claude-repld/internal/protocol"
@@ -28,11 +28,11 @@ func (m modeStore) PermissionMode(string) string { return m.mode }
 
 // readDaemonHello runs one fake shim through the gate and hands back the
 // DaemonHello it received.
-func readDaemonHello(t *testing.T, cfg Config) *corev1.DaemonHello {
+func readDaemonHello(t *testing.T, cfg Config) *protocolv1.DaemonHello {
 	t.Helper()
-	got := make(chan *corev1.DaemonHello, 1)
+	got := make(chan *protocolv1.DaemonHello, 1)
 	path := startFakeShim(t, func(conn net.Conn) {
-		mustWriteMsg(t, conn, &corev1.ShimHello{
+		mustWriteMsg(t, conn, &protocolv1.ShimHello{
 			SessionId: cfg.SessionID, Vendor: "claude", ShimVersion: "test-shim", ProtocolVersion: "1",
 		})
 		msg, err := wire.ReadAny(conn)
@@ -40,7 +40,7 @@ func readDaemonHello(t *testing.T, cfg Config) *corev1.DaemonHello {
 			t.Errorf("read DaemonHello: %v", err)
 			return
 		}
-		dh, ok := msg.(*corev1.DaemonHello)
+		dh, ok := msg.(*protocolv1.DaemonHello)
 		if !ok {
 			t.Errorf("expected DaemonHello, got %T", msg)
 			return

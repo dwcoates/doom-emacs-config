@@ -36,8 +36,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"github.com/gorilla/websocket"
 )
@@ -99,12 +99,12 @@ func TestE2EPendingPermissionResolvesThePermissionState(t *testing.T) {
 // answers the shim with nothing — the stop is the delivery).
 func isDeniedPermission(item *frontendv1.Message) bool {
 	perm := item.GetPermission()
-	return perm != nil && perm.GetResolution() == corev1.PermissionItem_RESOLUTION_DENIED
+	return perm != nil && perm.GetResolution() == protocolv1.PermissionItem_RESOLUTION_DENIED
 }
 
 // declineObservation is what a declined permission produced on the frontend.
 type declineObservation struct {
-	denied *corev1.PermissionItem
+	denied *protocolv1.PermissionItem
 	window *frontendv1.InterruptWindow
 	state  *frontendv1.WorkspaceState
 }
@@ -169,7 +169,7 @@ func TestE2EDeclinedPermissionStopsTheTurn(t *testing.T) {
 
 	// Assert.
 	obs := awaitDecline(t, conn, cwd, permID)
-	if got := obs.window.GetOutcome(); got != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+	if got := obs.window.GetOutcome(); got != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
 		t.Errorf("interrupt window outcome = %s, want INTERRUPTED: a decline stops the turn that asked", got)
 	}
 	if msg := obs.denied.GetDenyMessage(); msg != "not that one" {
@@ -195,7 +195,7 @@ func TestE2EPromptOverAParkedPermissionDeclinesIt(t *testing.T) {
 	// runs as the paused queue's one deliverable (covered by the interrupted-
 	// queue test in interrupt_e2e_test.go, whose path this joins).
 	obs := awaitDecline(t, conn, cwd, permID)
-	if got := obs.window.GetOutcome(); got != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+	if got := obs.window.GetOutcome(); got != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
 		t.Errorf("interrupt window outcome = %s, want INTERRUPTED: the prompt declined the parked question and stopped its turn", got)
 	}
 }

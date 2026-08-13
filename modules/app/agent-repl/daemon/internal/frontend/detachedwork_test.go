@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // openKind is the shortest valid spec for each kind, so a test that is about
@@ -149,25 +149,25 @@ func TestOpenDetachedWorkCarriesTheParentPointerForANestedDispatch(t *testing.T)
 // --- classification --------------------------------------------------------
 
 func TestDetachKindFromTaskKindResolvesAnAgent(t *testing.T) {
-	if got := DetachKindFromTaskKind(corev1.TaskKind_TASK_KIND_AGENT); got != DetachAgent {
+	if got := DetachKindFromTaskKind(protocolv1.TaskKind_TASK_KIND_AGENT); got != DetachAgent {
 		t.Fatalf("want agent, got %s", got)
 	}
 }
 
 func TestDetachKindFromTaskKindResolvesAShell(t *testing.T) {
-	if got := DetachKindFromTaskKind(corev1.TaskKind_TASK_KIND_SHELL); got != DetachShell {
+	if got := DetachKindFromTaskKind(protocolv1.TaskKind_TASK_KIND_SHELL); got != DetachShell {
 		t.Fatalf("want shell, got %s", got)
 	}
 }
 
 func TestDetachKindFromTaskKindResolvesAWorkflow(t *testing.T) {
-	if got := DetachKindFromTaskKind(corev1.TaskKind_TASK_KIND_WORKFLOW); got != DetachWorkflow {
+	if got := DetachKindFromTaskKind(protocolv1.TaskKind_TASK_KIND_WORKFLOW); got != DetachWorkflow {
 		t.Fatalf("want workflow, got %s", got)
 	}
 }
 
 func TestDetachKindFromTaskKindNeverReadsAnUnsetEnumAsAnUnknownTool(t *testing.T) {
-	if got := DetachKindFromTaskKind(corev1.TaskKind_TASK_KIND_UNSPECIFIED); got != DetachUnresolved {
+	if got := DetachKindFromTaskKind(protocolv1.TaskKind_TASK_KIND_UNSPECIFIED); got != DetachUnresolved {
 		t.Fatalf("an unset kind is a shim omission, not the unclassified verdict; got %s", got)
 	}
 }
@@ -647,7 +647,7 @@ func TestSettleDetachedWorkSettlesAMergeRunThroughTheOneLivenessArm(t *testing.T
 	b := openKind(t, DetachMerge)
 
 	// Act
-	up, err := SettleDetachedWork(b, DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 9})
+	up, err := SettleDetachedWork(b, DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 9})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -845,7 +845,7 @@ func TestAppendDetachedOutputThroughRefusesASourceThatRewound(t *testing.T) {
 
 func TestSettleDetachedWorkResolvesDoneFromAZeroExitCode(t *testing.T) {
 	b := openKind(t, DetachShell)
-	up, err := SettleDetachedWork(b, DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, ExitCode: int32p(0), AtMs: 9})
+	up, err := SettleDetachedWork(b, DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE, ExitCode: int32p(0), AtMs: 9})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -856,7 +856,7 @@ func TestSettleDetachedWorkResolvesDoneFromAZeroExitCode(t *testing.T) {
 
 func TestSettleDetachedWorkResolvesErrorFromANonzeroExitCode(t *testing.T) {
 	b := openKind(t, DetachShell)
-	up, err := SettleDetachedWork(b, DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, ExitCode: int32p(2), AtMs: 9})
+	up, err := SettleDetachedWork(b, DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE, ExitCode: int32p(2), AtMs: 9})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -867,7 +867,7 @@ func TestSettleDetachedWorkResolvesErrorFromANonzeroExitCode(t *testing.T) {
 
 func TestSettleDetachedWorkKeepsTheExitCodeBesideTheOutcome(t *testing.T) {
 	b := openKind(t, DetachShell)
-	if _, err := SettleDetachedWork(b, DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_KILLED, ExitCode: int32p(137), AtMs: 9}); err != nil {
+	if _, err := SettleDetachedWork(b, DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_KILLED, ExitCode: int32p(137), AtMs: 9}); err != nil {
 		t.Fatal(err)
 	}
 	if got := b.GetDetachedWork().GetLiveness().GetSettled().GetShellExit().GetCode(); got != 137 {
@@ -877,7 +877,7 @@ func TestSettleDetachedWorkKeepsTheExitCodeBesideTheOutcome(t *testing.T) {
 
 func TestSettleDetachedWorkReadsAKillAsKilledDespiteItsNonzeroExit(t *testing.T) {
 	b := openKind(t, DetachShell)
-	if _, err := SettleDetachedWork(b, DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_KILLED, ExitCode: int32p(137), AtMs: 9}); err != nil {
+	if _, err := SettleDetachedWork(b, DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_KILLED, ExitCode: int32p(137), AtMs: 9}); err != nil {
 		t.Fatal(err)
 	}
 	if b.GetDetachedWork().GetLiveness().GetSettled().GetKilled() == nil {
@@ -887,7 +887,7 @@ func TestSettleDetachedWorkReadsAKillAsKilledDespiteItsNonzeroExit(t *testing.T)
 
 func TestSettleDetachedWorkLeavesShellExitAbsentForWorkThatIsNotAProcess(t *testing.T) {
 	b := openKind(t, DetachAgent)
-	if _, err := SettleDetachedWork(b, DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 9}); err != nil {
+	if _, err := SettleDetachedWork(b, DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 9}); err != nil {
 		t.Fatal(err)
 	}
 	if b.GetDetachedWork().GetLiveness().GetSettled().GetShellExit() != nil {
@@ -897,7 +897,7 @@ func TestSettleDetachedWorkLeavesShellExitAbsentForWorkThatIsNotAProcess(t *test
 
 func TestSettleDetachedWorkReadsALostTaskAsKilledRatherThanDone(t *testing.T) {
 	b := openKind(t, DetachAgent)
-	if _, err := SettleDetachedWork(b, DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_LOST, AtMs: 9}); err != nil {
+	if _, err := SettleDetachedWork(b, DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_LOST, AtMs: 9}); err != nil {
 		t.Fatal(err)
 	}
 	if b.GetDetachedWork().GetLiveness().GetSettled().GetKilled() == nil {
@@ -914,7 +914,7 @@ func TestSettleDetachedWorkRefusesAnUnspecifiedStatusWithNoExitCode(t *testing.T
 
 func TestSettleDetachedWorkCarriesTheFailureMessageWithoutManufacturingOne(t *testing.T) {
 	b := openKind(t, DetachAgent)
-	if _, err := SettleDetachedWork(b, DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_ERROR, AtMs: 9}); err != nil {
+	if _, err := SettleDetachedWork(b, DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_ERROR, AtMs: 9}); err != nil {
 		t.Fatal(err)
 	}
 	if got := b.GetDetachedWork().GetLiveness().GetSettled().GetError().GetMessage(); got != "" {
@@ -924,7 +924,7 @@ func TestSettleDetachedWorkCarriesTheFailureMessageWithoutManufacturingOne(t *te
 
 func TestSettleDetachedWorkStopsRecordingActivityOnceSettled(t *testing.T) {
 	b := openKind(t, DetachShell)
-	if _, err := SettleDetachedWork(b, DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, ExitCode: int32p(0), AtMs: 9}); err != nil {
+	if _, err := SettleDetachedWork(b, DetachedVerdict{Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE, ExitCode: int32p(0), AtMs: 9}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := AppendDetachedOutput(b, "late", 99); err != nil {

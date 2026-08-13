@@ -7,9 +7,9 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	_ "agentrepl/proto/agentshim/core/v1"
 	_ "agentrepl/proto/agentshim/data/v1"
-	_ "agentrepl/proto/agentshim/frontend/v1"
+	_ "agentrepl/proto/frontend/v1"
+	_ "agentrepl/proto/protocol/v1"
 )
 
 // Lineage is a MESSAGE's fact and nothing else's, and these tests hold the

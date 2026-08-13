@@ -56,8 +56,8 @@ package sessioncontroller
 import (
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/frontend"
 )
@@ -410,7 +410,7 @@ func (s *detachedWorkStore) settleWindows(v frontend.DetachedVerdict, edge strin
 //
 // ONE PASS DECIDES BOTH KINDS (frontend.SkillCall), so merge detection and skill
 // detection cannot disagree about the same call.
-func (c *consumer) observeSkillSpawn(curated frontend.Curation, ev *corev1.Event) asyncPush {
+func (c *consumer) observeSkillSpawn(curated frontend.Curation, ev *protocolv1.Event) asyncPush {
 	var push asyncPush
 	for _, item := range curated.Feed.GetMessages() {
 		for _, use := range frontend.SkillToolCallsInItem(item) {
@@ -432,7 +432,7 @@ func (c *consumer) observeSkillSpawn(curated frontend.Curation, ev *corev1.Event
 
 // openSkillInvocationWindow opens the one work a classified invocation earns —
 // Merge for the merge run, Skill for every other invocation.
-func (c *consumer) openSkillInvocationWindow(inv frontend.SkillInvocation, ev *corev1.Event) asyncPush {
+func (c *consumer) openSkillInvocationWindow(inv frontend.SkillInvocation, ev *protocolv1.Event) asyncPush {
 	kind := frontend.DetachSkill
 	if inv.IsMerge {
 		kind = frontend.DetachMerge
@@ -491,7 +491,7 @@ func (c *consumer) openSkillInvocationWindow(inv frontend.SkillInvocation, ev *c
 //     failure card). Dropping those would DELETE them: there is nothing to fold
 //     and no second copy anywhere, and a permission prompt that vanishes wedges
 //     the session behind a question nobody can answer.
-func (c *consumer) foldWindows(cd *frontendv1.ConversationDelta, ev *corev1.Event) asyncPush {
+func (c *consumer) foldWindows(cd *frontendv1.ConversationDelta, ev *protocolv1.Event) asyncPush {
 	targets := c.work.windowFoldTargets()
 	if len(targets) == 0 {
 		return asyncPush{}
@@ -578,7 +578,7 @@ func (b *windowFoldBatches) add(messageID string, ems []*frontendv1.AgentEmissio
 // foldWindowBatches hands every accumulated batch to the store, in
 // first-touched order, and classifies each refusal as any other async refusal
 // is classified.
-func (c *consumer) foldWindowBatches(batches windowFoldBatches, ev *corev1.Event) asyncPush {
+func (c *consumer) foldWindowBatches(batches windowFoldBatches, ev *protocolv1.Event) asyncPush {
 	var push asyncPush
 	for _, messageID := range batches.order {
 		push.absorb(c.foldWindowBatch(messageID, batches.byID[messageID], ev))
@@ -588,7 +588,7 @@ func (c *consumer) foldWindowBatches(batches windowFoldBatches, ev *corev1.Event
 
 // foldWindowBatch hands one destination's diverted emissions to the store and
 // classifies the refusal if it comes back with one.
-func (c *consumer) foldWindowBatch(messageID string, ems []*frontendv1.AgentEmission, ev *corev1.Event) asyncPush {
+func (c *consumer) foldWindowBatch(messageID string, ems []*frontendv1.AgentEmission, ev *protocolv1.Event) asyncPush {
 	if len(ems) == 0 {
 		return asyncPush{}
 	}
@@ -629,9 +629,9 @@ func (c *consumer) resolveSkillBodyIntoWindow(originToolUseID, contents string, 
 // DONE, not error: the user typing again is the window ending, not the work
 // failing. Work that actually failed said so inside its own conversation, which
 // the work holds.
-func (c *consumer) settleWindowsOnPrompt(item *frontendv1.Message, ev *corev1.Event) asyncPush {
+func (c *consumer) settleWindowsOnPrompt(item *frontendv1.Message, ev *protocolv1.Event) asyncPush {
 	ups, err := c.work.settleWindows(frontend.DetachedVerdict{
-		Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
+		Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE,
 		AtMs:   c.asyncInstant(ev),
 	}, "user_prompt")
 	return c.windowSettlePush(ups, err, fmt.Sprintf("seq=%d uuid=%s", ev.GetSeq(), item.GetUuid()))
@@ -651,7 +651,7 @@ func (c *consumer) settleWindowsOnInterrupt(reason string) {
 		return
 	}
 	ups, err := c.work.settleWindows(frontend.DetachedVerdict{
-		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED,
+		Status: protocolv1.TerminalStatus_TERMINAL_STATUS_STOPPED,
 		AtMs:   c.now(),
 		Reason: reason,
 	}, "interrupt")

@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/frontend"
@@ -27,7 +27,7 @@ type turnAccountingReducer struct {
 	queryID             string
 	queryCreatedSeq     uint64
 	queryStoreSessionID string
-	runtime             *corev1.QueryRuntimeIdentity
+	runtime             *protocolv1.QueryRuntimeIdentity
 	activeTurnID        string
 	turns               map[string]*accountingTurn
 	latencies           map[string]responseLatency
@@ -74,9 +74,9 @@ type responseLatency struct {
 
 type accountingTurn struct {
 	startedAt         int64
-	startUsage        *corev1.AccountUsageObservation
-	endUsage          *corev1.AccountUsageObservation
-	responses         []*frontendv1.TokenUtilization
+	startUsage        *protocolv1.AccountUsageObservation
+	endUsage          *protocolv1.AccountUsageObservation
+	responses         []*statev1.TokenUtilization
 	result            *datav1.ResultMessage
 	resultAt          int64
 	responseConflicts []string
@@ -154,7 +154,7 @@ func (r *turnAccountingReducer) isKnownVendorSession(id string) bool {
 // record and observed identity are exactly the durable proof a later
 // historical response needs to be recognized as this conversation's history
 // rather than rejected as evidence about an unrelated one.
-func (r *turnAccountingReducer) recordQueryLifecycleVendorLineage(q *corev1.QueryLifecycle) {
+func (r *turnAccountingReducer) recordQueryLifecycleVendorLineage(q *protocolv1.QueryLifecycle) {
 	if resumed := q.GetCreated().GetResumed(); resumed != nil {
 		r.recordKnownVendorSession(resumed.GetRequestedVendorSessionId())
 	}
@@ -166,7 +166,7 @@ func (r *turnAccountingReducer) recordQueryLifecycleVendorLineage(q *corev1.Quer
 // bindHandshakeIdentity gives a replacement daemon the query facts that its
 // durable cursor may correctly have passed. Validation finishes before the
 // handshake can reconcile a turn or open a store subscription.
-func (r *turnAccountingReducer) bindHandshakeIdentity(hello *corev1.ShimHello) error {
+func (r *turnAccountingReducer) bindHandshakeIdentity(hello *protocolv1.ShimHello) error {
 	queryID := strings.TrimSpace(hello.GetQueryInstanceId())
 	if queryID == "" {
 		return fmt.Errorf("shim hello omitted query_instance_id")
@@ -251,7 +251,7 @@ type liveEvidence struct{ queryID string }
 // admits no history at all. Query-specific resume validation is owned by
 // resumeIdentityTracker, which independently follows every query_instance_id in
 // the durable sequence.
-func (r *turnAccountingReducer) liveEvidenceFor(ev *corev1.Event) (live liveEvidence, historical bool) {
+func (r *turnAccountingReducer) liveEvidenceFor(ev *protocolv1.Event) (live liveEvidence, historical bool) {
 	if r.queryID == "" {
 		return liveEvidence{queryID: r.queryID}, false
 	}
@@ -264,7 +264,7 @@ func (r *turnAccountingReducer) liveEvidenceFor(ev *corev1.Event) (live liveEvid
 // HistoricalQueryLifecycle reports whether a lifecycle row is replayed history,
 // for the consumer's decision log. It is the same classification every other
 // event type now gets, asked by name because the log names it.
-func (r *turnAccountingReducer) HistoricalQueryLifecycle(ev *corev1.Event) (string, bool) {
+func (r *turnAccountingReducer) HistoricalQueryLifecycle(ev *protocolv1.Event) (string, bool) {
 	lifecycle := ev.GetQueryLifecycle()
 	if lifecycle == nil {
 		return "", false
@@ -278,7 +278,7 @@ func (r *turnAccountingReducer) HistoricalQueryLifecycle(ev *corev1.Event) (stri
 // reconnect may construct a fresh consumer in the rotated vendor sequence,
 // where the original TurnStarted is intentionally absent; the bridge is the
 // ordered proof that lets response usage name that live root turn.
-func (r *turnAccountingReducer) observeTurnClaimBridge(ev *corev1.Event) {
+func (r *turnAccountingReducer) observeTurnClaimBridge(ev *protocolv1.Event) {
 	id := ev.GetTurnClaimBridge().GetTurnId()
 	if r.turns[id] == nil {
 		r.turns[id] = &accountingTurn{startedAt: ev.GetProducedAtMs()}
@@ -307,7 +307,7 @@ func (r *turnAccountingReducer) activeTurn() string {
 // conversation delivery. See consumer.degradeAccountingObservation.
 var ErrAccountingQueryIdentityContradiction = errors.New("session-controller: live query lifecycle contradicts its own bound identity")
 
-func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string) error {
+func (r *turnAccountingReducer) observe(ev *protocolv1.Event, daemonSessionID string) error {
 	if q := ev.GetQueryLifecycle(); q != nil {
 		r.recordQueryLifecycleVendorLineage(q)
 		if _, historical := r.HistoricalQueryLifecycle(ev); historical {
@@ -378,7 +378,7 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 		// to that historical conversation item by pushConversation.
 		return nil
 	}
-	var usage *frontendv1.TokenUtilization
+	var usage *statev1.TokenUtilization
 	if observation != nil {
 		usage = observation.record
 	}
@@ -416,7 +416,7 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 			return fmt.Errorf("turn accounting response identity: %w", err)
 		}
 		if latency, ok := r.latencies[usage.GetApiMessageId()]; ok {
-			usage.ResponseTiming = &frontendv1.TokenResponseTiming{TimeToFirstTokenMs: &latency.ttftMs}
+			usage.ResponseTiming = &statev1.TokenResponseTiming{TimeToFirstTokenMs: &latency.ttftMs}
 			if latency.messageStartedAtMs > 0 && ev.GetProducedAtMs() >= latency.messageStartedAtMs {
 				duration := ev.GetProducedAtMs() - latency.messageStartedAtMs
 				usage.ResponseTiming.OutputGenerationDurationMs = &duration
@@ -431,9 +431,9 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 				}
 				duplicate = true
 				if usage.GetResponseTiming() == nil && prior.GetResponseTiming() != nil {
-					usage.ResponseTiming = proto.Clone(prior.GetResponseTiming()).(*frontendv1.TokenResponseTiming)
+					usage.ResponseTiming = proto.Clone(prior.GetResponseTiming()).(*statev1.TokenResponseTiming)
 				} else if usage.GetResponseTiming() != nil && prior.GetResponseTiming() == nil {
-					prior.ResponseTiming = proto.Clone(usage.GetResponseTiming()).(*frontendv1.TokenResponseTiming)
+					prior.ResponseTiming = proto.Clone(usage.GetResponseTiming()).(*statev1.TokenResponseTiming)
 				}
 				if !proto.Equal(prior, usage) {
 					turn.responseConflicts = append(turn.responseConflicts, "responses."+usage.GetApiMessageId())
@@ -462,7 +462,7 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 // validateAccountUsageObservation takes liveEvidence rather than a bare id so a
 // replayed row cannot reach it: only liveEvidenceFor produces the proof, and it
 // produces none for history.
-func validateAccountUsageObservation(live liveEvidence, requestID string, observation *corev1.AccountUsageObservation) error {
+func validateAccountUsageObservation(live liveEvidence, requestID string, observation *protocolv1.AccountUsageObservation) error {
 	queryID := live.queryID
 	if strings.TrimSpace(queryID) == "" {
 		return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "authoritative query_instance_id is required"}
@@ -492,11 +492,11 @@ func validateAccountUsageObservation(live liveEvidence, requestID string, observ
 		return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: fmt.Sprintf("sample_latency_ms must be nonnegative, got %d", observation.GetSampleLatencyMs())}
 	}
 	switch boundary := observation.GetBoundary().(type) {
-	case *corev1.AccountUsageObservation_TurnStart:
+	case *protocolv1.AccountUsageObservation_TurnStart:
 		if boundary == nil || boundary.TurnStart == nil {
 			return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "turn_start boundary is nil"}
 		}
-	case *corev1.AccountUsageObservation_TurnEnd:
+	case *protocolv1.AccountUsageObservation_TurnEnd:
 		if boundary == nil || boundary.TurnEnd == nil {
 			return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "turn_end boundary is nil"}
 		}
@@ -504,7 +504,7 @@ func validateAccountUsageObservation(live liveEvidence, requestID string, observ
 		return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "boundary is required"}
 	}
 	switch outcome := observation.GetOutcome().(type) {
-	case *corev1.AccountUsageObservation_Available:
+	case *protocolv1.AccountUsageObservation_Available:
 		if outcome == nil || outcome.Available == nil || outcome.Available.GetFiveHour() == nil {
 			return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "available outcome requires five_hour"}
 		}
@@ -515,24 +515,24 @@ func validateAccountUsageObservation(live liveEvidence, requestID string, observ
 		if window.GetResetsAtMs() <= 0 {
 			return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: fmt.Sprintf("available.five_hour.resets_at_ms must be positive, got %d", window.GetResetsAtMs())}
 		}
-	case *corev1.AccountUsageObservation_Unavailable:
+	case *protocolv1.AccountUsageObservation_Unavailable:
 		if outcome == nil || outcome.Unavailable == nil || outcome.Unavailable.GetReason() == nil {
 			return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "unavailable outcome requires a reason"}
 		}
 		switch reason := outcome.Unavailable.GetReason().(type) {
-		case *corev1.AccountUsageUnavailable_ServiceUnavailable:
+		case *protocolv1.AccountUsageUnavailable_ServiceUnavailable:
 			if reason == nil || reason.ServiceUnavailable == nil {
 				return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "unavailable.service_unavailable is nil"}
 			}
-		case *corev1.AccountUsageUnavailable_WindowUnavailable:
+		case *protocolv1.AccountUsageUnavailable_WindowUnavailable:
 			if reason == nil || reason.WindowUnavailable == nil {
 				return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "unavailable.window_unavailable is nil"}
 			}
-		case *corev1.AccountUsageUnavailable_UtilizationUnavailable:
+		case *protocolv1.AccountUsageUnavailable_UtilizationUnavailable:
 			if reason == nil || reason.UtilizationUnavailable == nil {
 				return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "unavailable.utilization_unavailable is nil"}
 			}
-		case *corev1.AccountUsageUnavailable_SamplingFailure:
+		case *protocolv1.AccountUsageUnavailable_SamplingFailure:
 			if reason == nil || reason.SamplingFailure == nil {
 				return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "unavailable.sampling_failure is nil"}
 			}
@@ -548,7 +548,7 @@ func validateAccountUsageObservation(live liveEvidence, requestID string, observ
 	return nil
 }
 
-func (r *turnAccountingReducer) resolve(ended *corev1.Event, settledAt int64) *frontendv1.TurnAccounting {
+func (r *turnAccountingReducer) resolve(ended *protocolv1.Event, settledAt int64) *statev1.TurnAccounting {
 	return r.resolveTurn(ended.GetTurnEnded().GetTurnId(), settledAt)
 }
 
@@ -560,12 +560,12 @@ func (r *turnAccountingReducer) resolve(ended *corev1.Event, settledAt int64) *f
 // so a synthesized close left the turn's retained terminal result stranded
 // forever — 16 held against 0 released in one daemon lifetime. Both authorities
 // resolve through this one function so neither can drift from the other.
-func (r *turnAccountingReducer) resolveTurn(turnID string, settledAt int64) *frontendv1.TurnAccounting {
+func (r *turnAccountingReducer) resolveTurn(turnID string, settledAt int64) *statev1.TurnAccounting {
 	turn := r.turns[turnID]
 	if turn == nil {
 		return invalidTurnAccounting(turnID, r.queryID, nil, settledAt, runtimeIdentityProblem(r.queryID, incompleteRuntimeIdentityPaths(nil)))
 	}
-	problems := make([]*frontendv1.TurnAccountingProblem, 0, 3)
+	problems := make([]*statev1.TurnAccountingProblem, 0, 3)
 	if turn.startUsage == nil || turn.startUsage.GetAvailable() == nil {
 		problems = append(problems, missingUsageProblem(true))
 	}
@@ -573,19 +573,19 @@ func (r *turnAccountingReducer) resolveTurn(turnID string, settledAt int64) *fro
 		problems = append(problems, missingUsageProblem(false))
 	}
 	if startWindow, endWindow := turn.startUsage.GetAvailable().GetFiveHour(), turn.endUsage.GetAvailable().GetFiveHour(); startWindow != nil && endWindow != nil && usageWindowRolledOver(startWindow.GetResetsAtMs(), endWindow.GetResetsAtMs()) {
-		problems = append(problems, &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_WindowReset{WindowReset: &frontendv1.UsageWindowReset{StartResetsAtMs: startWindow.GetResetsAtMs(), EndResetsAtMs: endWindow.GetResetsAtMs()}}})
+		problems = append(problems, &statev1.TurnAccountingProblem{Problem: &statev1.TurnAccountingProblem_WindowReset{WindowReset: &statev1.UsageWindowReset{StartResetsAtMs: startWindow.GetResetsAtMs(), EndResetsAtMs: endWindow.GetResetsAtMs()}}})
 	}
 	if missing := incompleteRuntimeIdentityPaths(r.runtime); len(missing) > 0 {
 		problems = append(problems, runtimeIdentityProblem(r.queryID, missing))
 	}
 	if turn.result == nil {
-		problems = append(problems, &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_TelemetryRecordMissing{TelemetryRecordMissing: &frontendv1.TelemetryRecordMissing{Record: &frontendv1.TelemetryRecordMissing_PersistenceReceipt{PersistenceReceipt: &frontendv1.TelemetryRecordMissingPersistenceReceipt{TurnId: turnID}}}}})
+		problems = append(problems, &statev1.TurnAccountingProblem{Problem: &statev1.TurnAccountingProblem_TelemetryRecordMissing{TelemetryRecordMissing: &statev1.TelemetryRecordMissing{Record: &statev1.TelemetryRecordMissing_PersistenceReceipt{PersistenceReceipt: &statev1.TelemetryRecordMissingPersistenceReceipt{TurnId: turnID}}}}})
 	}
 	reconciliation := reconcileTokenUsage(turn.responses, turn.result, dlog.Tag(r.logf, "turn", turnID, "query", r.queryID))
 	reconciliation.mismatch = append(reconciliation.mismatch, turn.responseConflicts...)
 	sort.Strings(reconciliation.mismatch)
 	if len(reconciliation.mismatch) > 0 {
-		problems = append(problems, &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_TokenLedgerMismatch{TokenLedgerMismatch: &frontendv1.TokenLedgerMismatch{DifferingFieldPaths: reconciliation.mismatch}}})
+		problems = append(problems, &statev1.TurnAccountingProblem{Problem: &statev1.TurnAccountingProblem_TokenLedgerMismatch{TokenLedgerMismatch: &statev1.TokenLedgerMismatch{DifferingFieldPaths: reconciliation.mismatch}}})
 	}
 	var unmodeled []string
 	for _, response := range turn.responses {
@@ -595,7 +595,7 @@ func (r *turnAccountingReducer) resolveTurn(turnID string, settledAt int64) *fro
 	}
 	if len(unmodeled) > 0 {
 		sort.Strings(unmodeled)
-		problems = append(problems, &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_UnmodeledUsageFields{UnmodeledUsageFields: &frontendv1.UnmodeledUsageFields{SourceFieldPaths: unmodeled}}})
+		problems = append(problems, &statev1.TurnAccountingProblem{Problem: &statev1.TurnAccountingProblem_UnmodeledUsageFields{UnmodeledUsageFields: &statev1.UnmodeledUsageFields{SourceFieldPaths: unmodeled}}})
 	}
 	promptAt, resultAt := turn.startedAt, turn.resultAt
 	if turn.startUsage != nil && turn.startUsage.GetBoundaryAtMs() > 0 {
@@ -604,11 +604,11 @@ func (r *turnAccountingReducer) resolveTurn(turnID string, settledAt int64) *fro
 	if turn.endUsage != nil && turn.endUsage.GetBoundaryAtMs() > 0 {
 		resultAt = turn.endUsage.GetBoundaryAtMs()
 	}
-	accounting := &frontendv1.TurnAccounting{TurnId: turnID, QueryInstanceId: r.queryID, Runtime: r.runtime, UsageAtStart: turn.startUsage, UsageAtEnd: turn.endUsage, Responses: turn.responses, Reconciliation: reconciliation.reconciliation, Timing: &frontendv1.TurnAccountingTiming{PromptAdmittedAtMs: promptAt, ResultReceivedAtMs: resultAt, AccountingSettledAtMs: settledAt, PromptToResultMs: resultAt - promptAt, ResultToSettlementMs: settledAt - resultAt}}
+	accounting := &statev1.TurnAccounting{TurnId: turnID, QueryInstanceId: r.queryID, Runtime: r.runtime, UsageAtStart: turn.startUsage, UsageAtEnd: turn.endUsage, Responses: turn.responses, Reconciliation: reconciliation.reconciliation, Timing: &statev1.TurnAccountingTiming{PromptAdmittedAtMs: promptAt, ResultReceivedAtMs: resultAt, AccountingSettledAtMs: settledAt, PromptToResultMs: resultAt - promptAt, ResultToSettlementMs: settledAt - resultAt}}
 	if len(problems) == 0 {
-		accounting.Verdict = &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}
+		accounting.Verdict = &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}
 	} else {
-		accounting.Verdict = &frontendv1.TurnAccounting_Invalid{Invalid: &frontendv1.TurnAccountingInvalid{Problems: problems}}
+		accounting.Verdict = &statev1.TurnAccounting_Invalid{Invalid: &statev1.TurnAccountingInvalid{Problems: problems}}
 	}
 	return accounting
 }
@@ -656,7 +656,7 @@ func (r *turnAccountingReducer) commitResolved(turnID string) error {
 	return nil
 }
 
-func (r *turnAccountingReducer) response(apiMessageID string) *frontendv1.TokenUtilization {
+func (r *turnAccountingReducer) response(apiMessageID string) *statev1.TokenUtilization {
 	turn := r.turns[r.activeTurnID]
 	if turn == nil {
 		return nil
@@ -677,7 +677,7 @@ func (r *turnAccountingReducer) response(apiMessageID string) *frontendv1.TokenU
 func (r *turnAccountingReducer) recordResponseUsageCorrection(apiMessageID string, usage *datav1.ApiUsage) {
 	corrected := vendorTokenUsageFromAPI(usage)
 	if existing := r.response(apiMessageID); existing != nil {
-		existing.Usage = proto.Clone(corrected).(*frontendv1.VendorTokenUsage)
+		existing.Usage = proto.Clone(corrected).(*statev1.VendorTokenUsage)
 		r.logf("session-controller: corrected a response's token usage from its message_delta (api_message_id=%s output_tokens=%d)", apiMessageID, corrected.GetOutputTokens())
 	}
 	// FILED LAST, because filing is what releases the enrichment holds that read
@@ -715,7 +715,7 @@ func (r *turnAccountingReducer) enrichmentDependencies(turnID string) []string {
 // assistant message described it. That is the pre-amendment world, and it stays
 // representable: the ledger reports its disagreement honestly rather than being
 // quietly reconciled against evidence nobody sent.
-func (r *turnAccountingReducer) applyResponseUsageCorrection(usage *frontendv1.TokenUtilization) {
+func (r *turnAccountingReducer) applyResponseUsageCorrection(usage *statev1.TokenUtilization) {
 	corrected := r.corrections.Correction(usage.GetApiMessageId())
 	if corrected == nil {
 		return
@@ -759,7 +759,7 @@ func resultFromVendor(a *anypb.Any) *datav1.ResultMessage {
 }
 
 type tokenUtilizationObservation struct {
-	record     *frontendv1.TokenUtilization
+	record     *statev1.TokenUtilization
 	historical bool
 	// priorVendorSession is set only when this record was admitted under the
 	// prior-session exception below: a historical response whose embedded
@@ -776,7 +776,7 @@ type tokenUtilizationObservation struct {
 // lineage at all.
 type knownVendorSessionFunc func(id string) bool
 
-func tokenUtilizationFromEvent(ev *corev1.Event, daemonSessionID string, knownVendorSession knownVendorSessionFunc) (*frontendv1.TokenUtilization, error) {
+func tokenUtilizationFromEvent(ev *protocolv1.Event, daemonSessionID string, knownVendorSession knownVendorSessionFunc) (*statev1.TokenUtilization, error) {
 	observation, err := tokenUtilizationObservationFromEvent(ev, daemonSessionID, knownVendorSession)
 	if observation == nil || err != nil {
 		return nil, err
@@ -789,7 +789,7 @@ func tokenUtilizationFromEvent(ev *corev1.Event, daemonSessionID string, knownVe
 // transcript responses have stable response/session identity but no reliable
 // enclosing turn or stream timing, so replay may attach them only as explicit
 // historical evidence.
-func tokenUtilizationObservationFromEvent(ev *corev1.Event, daemonSessionID string, knownVendorSession knownVendorSessionFunc) (*tokenUtilizationObservation, error) {
+func tokenUtilizationObservationFromEvent(ev *protocolv1.Event, daemonSessionID string, knownVendorSession knownVendorSessionFunc) (*tokenUtilizationObservation, error) {
 	a := ev.GetVendor()
 	if a == nil {
 		return nil, nil
@@ -863,7 +863,7 @@ func tokenUtilizationObservationFromEvent(ev *corev1.Event, daemonSessionID stri
 		priorVendorSession = assistant.GetSessionId()
 	}
 	u := assistant.GetMessage().GetUsage()
-	record := &frontendv1.TokenUtilization{AgentReplSessionId: daemonSessionID, ClaudeSessionId: assistant.GetSessionId(), ApiMessageId: assistant.GetMessage().GetId(), Model: assistant.GetMessage().GetModel(), Usage: vendorTokenUsageFromAPI(u)}
+	record := &statev1.TokenUtilization{AgentReplSessionId: daemonSessionID, ClaudeSessionId: assistant.GetSessionId(), ApiMessageId: assistant.GetMessage().GetId(), Model: assistant.GetMessage().GetModel(), Usage: vendorTokenUsageFromAPI(u)}
 	if assistant.RequestId != nil {
 		requestID := assistant.GetRequestId()
 		record.ApiRequestId = &requestID
@@ -896,14 +896,14 @@ func tokenUtilizationObservationFromEvent(ev *corev1.Event, daemonSessionID stri
 // stored beside it.
 //
 // THE SHAPE IS FROZEN, INCLUDING THE RATES. cache_rates is durable-legacy — see
-// frontendv1.TokenCacheRates — and it stays populated because a persisted row
+// statev1.TokenCacheRates — and it stays populated because a persisted row
 // written by an earlier build must keep replaying byte-identically through
 // statedb's proto.Equal comparison. It is computed HERE, from the same counters
 // the shim used to divide before its rate partition was retired, so a replayed
 // pre-retirement store event produces the identical durable record it always
 // did. Nothing reads it to decide anything.
-func vendorTokenUsageFromAPI(u *datav1.ApiUsage) *frontendv1.VendorTokenUsage {
-	usage := &frontendv1.VendorTokenUsage{InputTokens: u.GetInputTokens(), OutputTokens: u.GetOutputTokens(), CacheReadInputTokens: u.GetCacheReadInputTokens(), CacheCreationInputTokens: u.GetCacheCreationInputTokens(), ServiceTier: u.GetServiceTier(), Speed: u.GetSpeed(), InferenceGeo: u.GetInferenceGeo(), RawUsage: proto.Clone(u).(*datav1.ApiUsage), CacheCreation: &frontendv1.TokenCacheCreation{Ephemeral_5MInputTokens: structInt(u.GetCacheCreation(), "ephemeral_5m_input_tokens"), Ephemeral_1HInputTokens: structInt(u.GetCacheCreation(), "ephemeral_1h_input_tokens")}, ServerToolUse: &frontendv1.TokenServerToolUse{WebSearchRequests: structInt(u.GetServerToolUse(), "web_search_requests"), WebFetchRequests: structInt(u.GetServerToolUse(), "web_fetch_requests")}}
+func vendorTokenUsageFromAPI(u *datav1.ApiUsage) *statev1.VendorTokenUsage {
+	usage := &statev1.VendorTokenUsage{InputTokens: u.GetInputTokens(), OutputTokens: u.GetOutputTokens(), CacheReadInputTokens: u.GetCacheReadInputTokens(), CacheCreationInputTokens: u.GetCacheCreationInputTokens(), ServiceTier: u.GetServiceTier(), Speed: u.GetSpeed(), InferenceGeo: u.GetInferenceGeo(), RawUsage: proto.Clone(u).(*datav1.ApiUsage), CacheCreation: &statev1.TokenCacheCreation{Ephemeral_5MInputTokens: structInt(u.GetCacheCreation(), "ephemeral_5m_input_tokens"), Ephemeral_1HInputTokens: structInt(u.GetCacheCreation(), "ephemeral_1h_input_tokens")}, ServerToolUse: &statev1.TokenServerToolUse{WebSearchRequests: structInt(u.GetServerToolUse(), "web_search_requests"), WebFetchRequests: structInt(u.GetServerToolUse(), "web_fetch_requests")}}
 	usage.CacheRates = frontend.CacheRatesFromCounters(u.GetInputTokens(), u.GetCacheReadInputTokens(), u.GetCacheCreationInputTokens())
 	usage.Iterations = tokenIterations(u.GetIterations())
 	if u.GetCacheCreation() == nil {
@@ -918,7 +918,7 @@ func vendorTokenUsageFromAPI(u *datav1.ApiUsage) *frontendv1.VendorTokenUsage {
 	if u.GetOutputTokensDetails().GetFields()["thinking_tokens"] == nil {
 		thinkingTokens = structInt(u.GetOutputTokensDetails(), "reasoning_tokens")
 	}
-	usage.OutputDetails = &frontendv1.TokenOutputDetails{ThinkingTokens: thinkingTokens}
+	usage.OutputDetails = &statev1.TokenOutputDetails{ThinkingTokens: thinkingTokens}
 	usage.FallbackCredit = cloneStruct(u.GetFallbackCredit())
 	usage.UnmodeledUsage = collectUnmodeledUsage(u)
 	usage.CacheDiagnostic = cacheDiagnostic(u.GetCacheDiagnostic())
@@ -963,31 +963,31 @@ func collectUnmodeledUsage(u *datav1.ApiUsage) *structpb.Struct {
 	return out
 }
 
-func cacheDiagnostic(s *structpb.Struct) *frontendv1.TokenCacheDiagnostic {
+func cacheDiagnostic(s *structpb.Struct) *statev1.TokenCacheDiagnostic {
 	if s == nil {
-		return &frontendv1.TokenCacheDiagnostic{Reason: &frontendv1.TokenCacheDiagnostic_DiagnosticsUnavailable{DiagnosticsUnavailable: &frontendv1.TokenCacheDiagnosticDiagnosticsUnavailable{}}}
+		return &statev1.TokenCacheDiagnostic{Reason: &statev1.TokenCacheDiagnostic_DiagnosticsUnavailable{DiagnosticsUnavailable: &statev1.TokenCacheDiagnosticDiagnosticsUnavailable{}}}
 	}
 	reason := s.GetFields()["cache_miss_reason"]
 	if reason == nil || reason.GetKind() == nil {
-		return &frontendv1.TokenCacheDiagnostic{Reason: &frontendv1.TokenCacheDiagnostic_Pending{Pending: &frontendv1.TokenCacheDiagnosticPending{}}}
+		return &statev1.TokenCacheDiagnostic{Reason: &statev1.TokenCacheDiagnostic_Pending{Pending: &statev1.TokenCacheDiagnosticPending{}}}
 	}
 	if _, ok := reason.GetKind().(*structpb.Value_NullValue); ok {
-		return &frontendv1.TokenCacheDiagnostic{Reason: &frontendv1.TokenCacheDiagnostic_Pending{Pending: &frontendv1.TokenCacheDiagnosticPending{}}}
+		return &statev1.TokenCacheDiagnostic{Reason: &statev1.TokenCacheDiagnostic_Pending{Pending: &statev1.TokenCacheDiagnosticPending{}}}
 	}
 	missed := structInt(s, "cache_missed_input_tokens")
 	switch reason.GetStringValue() {
 	case "model_changed":
-		return &frontendv1.TokenCacheDiagnostic{Reason: &frontendv1.TokenCacheDiagnostic_ModelChanged{ModelChanged: &frontendv1.TokenCacheDiagnosticModelChanged{CacheMissedInputTokens: missed}}}
+		return &statev1.TokenCacheDiagnostic{Reason: &statev1.TokenCacheDiagnostic_ModelChanged{ModelChanged: &statev1.TokenCacheDiagnosticModelChanged{CacheMissedInputTokens: missed}}}
 	case "system_changed":
-		return &frontendv1.TokenCacheDiagnostic{Reason: &frontendv1.TokenCacheDiagnostic_SystemChanged{SystemChanged: &frontendv1.TokenCacheDiagnosticSystemChanged{CacheMissedInputTokens: missed}}}
+		return &statev1.TokenCacheDiagnostic{Reason: &statev1.TokenCacheDiagnostic_SystemChanged{SystemChanged: &statev1.TokenCacheDiagnosticSystemChanged{CacheMissedInputTokens: missed}}}
 	case "tools_changed":
-		return &frontendv1.TokenCacheDiagnostic{Reason: &frontendv1.TokenCacheDiagnostic_ToolsChanged{ToolsChanged: &frontendv1.TokenCacheDiagnosticToolsChanged{CacheMissedInputTokens: missed}}}
+		return &statev1.TokenCacheDiagnostic{Reason: &statev1.TokenCacheDiagnostic_ToolsChanged{ToolsChanged: &statev1.TokenCacheDiagnosticToolsChanged{CacheMissedInputTokens: missed}}}
 	case "messages_changed":
-		return &frontendv1.TokenCacheDiagnostic{Reason: &frontendv1.TokenCacheDiagnostic_MessagesChanged{MessagesChanged: &frontendv1.TokenCacheDiagnosticMessagesChanged{CacheMissedInputTokens: missed}}}
+		return &statev1.TokenCacheDiagnostic{Reason: &statev1.TokenCacheDiagnostic_MessagesChanged{MessagesChanged: &statev1.TokenCacheDiagnosticMessagesChanged{CacheMissedInputTokens: missed}}}
 	case "previous_message_unavailable":
-		return &frontendv1.TokenCacheDiagnostic{Reason: &frontendv1.TokenCacheDiagnostic_PreviousMessageUnavailable{PreviousMessageUnavailable: &frontendv1.TokenCacheDiagnosticPreviousMessageUnavailable{}}}
+		return &statev1.TokenCacheDiagnostic{Reason: &statev1.TokenCacheDiagnostic_PreviousMessageUnavailable{PreviousMessageUnavailable: &statev1.TokenCacheDiagnosticPreviousMessageUnavailable{}}}
 	default:
-		return &frontendv1.TokenCacheDiagnostic{Reason: &frontendv1.TokenCacheDiagnostic_DiagnosticsUnavailable{DiagnosticsUnavailable: &frontendv1.TokenCacheDiagnosticDiagnosticsUnavailable{}}}
+		return &statev1.TokenCacheDiagnostic{Reason: &statev1.TokenCacheDiagnostic_DiagnosticsUnavailable{DiagnosticsUnavailable: &statev1.TokenCacheDiagnosticDiagnosticsUnavailable{}}}
 	}
 }
 
@@ -1049,11 +1049,11 @@ func vendorIterationKind(value *structpb.Value) iterationKind {
 	}
 }
 
-func tokenIterations(values *structpb.ListValue) []*frontendv1.TokenUsageIteration {
+func tokenIterations(values *structpb.ListValue) []*statev1.TokenUsageIteration {
 	if values == nil {
 		return nil
 	}
-	out := make([]*frontendv1.TokenUsageIteration, 0, len(values.GetValues()))
+	out := make([]*statev1.TokenUsageIteration, 0, len(values.GetValues()))
 	for _, value := range values.GetValues() {
 		kind := vendorIterationKind(value)
 		if kind == iterationUnmodeled {
@@ -1062,17 +1062,17 @@ func tokenIterations(values *structpb.ListValue) []*frontendv1.TokenUsageIterati
 		s := value.GetStructValue()
 		i, o := structInt(s, "input_tokens"), structInt(s, "output_tokens")
 		r, c := structInt(s, "cache_read_input_tokens"), structInt(s, "cache_creation_input_tokens")
-		creation := &frontendv1.TokenCacheCreation{Ephemeral_5MInputTokens: structInt(s.GetFields()["cache_creation"].GetStructValue(), "ephemeral_5m_input_tokens"), Ephemeral_1HInputTokens: structInt(s.GetFields()["cache_creation"].GetStructValue(), "ephemeral_1h_input_tokens")}
+		creation := &statev1.TokenCacheCreation{Ephemeral_5MInputTokens: structInt(s.GetFields()["cache_creation"].GetStructValue(), "ephemeral_5m_input_tokens"), Ephemeral_1HInputTokens: structInt(s.GetFields()["cache_creation"].GetStructValue(), "ephemeral_1h_input_tokens")}
 		model := s.GetFields()["model"].GetStringValue()
 		switch kind {
 		case iterationCompaction:
-			out = append(out, &frontendv1.TokenUsageIteration{Iteration: &frontendv1.TokenUsageIteration_Compaction{Compaction: &frontendv1.TokenUsageIterationCompaction{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation}}})
+			out = append(out, &statev1.TokenUsageIteration{Iteration: &statev1.TokenUsageIteration_Compaction{Compaction: &statev1.TokenUsageIterationCompaction{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation}}})
 		case iterationAdvisor:
-			out = append(out, &frontendv1.TokenUsageIteration{Iteration: &frontendv1.TokenUsageIteration_Advisor{Advisor: &frontendv1.TokenUsageIterationAdvisor{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation, Model: model}}})
+			out = append(out, &statev1.TokenUsageIteration{Iteration: &statev1.TokenUsageIteration_Advisor{Advisor: &statev1.TokenUsageIterationAdvisor{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation, Model: model}}})
 		case iterationFallback:
-			out = append(out, &frontendv1.TokenUsageIteration{Iteration: &frontendv1.TokenUsageIteration_Fallback{Fallback: &frontendv1.TokenUsageIterationFallback{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation, Model: model}}})
+			out = append(out, &statev1.TokenUsageIteration{Iteration: &statev1.TokenUsageIteration_Fallback{Fallback: &statev1.TokenUsageIterationFallback{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation, Model: model}}})
 		default:
-			out = append(out, &frontendv1.TokenUsageIteration{Iteration: &frontendv1.TokenUsageIteration_Sampling{Sampling: &frontendv1.TokenUsageIterationSampling{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation, Model: model}}})
+			out = append(out, &statev1.TokenUsageIteration{Iteration: &statev1.TokenUsageIteration_Sampling{Sampling: &statev1.TokenUsageIterationSampling{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation, Model: model}}})
 		}
 	}
 	return out
@@ -1080,7 +1080,7 @@ func tokenIterations(values *structpb.ListValue) []*frontendv1.TokenUsageIterati
 
 // iterationCacheCreation reads one filed iteration's TTL split, whichever arm
 // it took.
-func iterationCacheCreation(iteration *frontendv1.TokenUsageIteration) *frontendv1.TokenCacheCreation {
+func iterationCacheCreation(iteration *statev1.TokenUsageIteration) *statev1.TokenCacheCreation {
 	switch {
 	case iteration.GetSampling() != nil:
 		return iteration.GetSampling().GetCacheCreation()
@@ -1121,11 +1121,11 @@ func iterationCacheCreation(iteration *frontendv1.TokenUsageIteration) *frontend
 // `cache_creation_input_tokens`, a total already held independently. Anything
 // else returns nothing, so the ledger keeps reporting its disagreement rather
 // than being reconciled against a relation this evidence does not demonstrate.
-func cacheCreationFromIterations(iterations []*frontendv1.TokenUsageIteration, cacheCreationInputTokens int64) *frontendv1.TokenCacheCreation {
+func cacheCreationFromIterations(iterations []*statev1.TokenUsageIteration, cacheCreationInputTokens int64) *statev1.TokenCacheCreation {
 	if len(iterations) == 0 {
 		return nil
 	}
-	out := &frontendv1.TokenCacheCreation{}
+	out := &statev1.TokenCacheCreation{}
 	for _, iteration := range iterations {
 		creation := iterationCacheCreation(iteration)
 		out.Ephemeral_5MInputTokens += creation.GetEphemeral_5MInputTokens()
@@ -1138,14 +1138,14 @@ func cacheCreationFromIterations(iterations []*frontendv1.TokenUsageIteration, c
 }
 
 type reconciliationResult struct {
-	reconciliation *frontendv1.TokenUsageReconciliation
+	reconciliation *statev1.TokenUsageReconciliation
 	mismatch       []string
 }
 
 // reconcileTokenUsage compares the stream plane's per-response evidence against
 // the result plane's terminal usage. logf carries the resolving turn's identity
 // and is never nil — callers route it through the reducer's tagged channel.
-func reconcileTokenUsage(records []*frontendv1.TokenUtilization, result *datav1.ResultMessage, logf dlog.Logf) reconciliationResult {
+func reconcileTokenUsage(records []*statev1.TokenUtilization, result *datav1.ResultMessage, logf dlog.Logf) reconciliationResult {
 	logf("session-controller: reconciling turn token ledger (responses=%d result_present=%t)", len(records), result != nil)
 	aggregate := frontend.AggregateTokenUtilization(records)
 	apiMessageIDSet := make(map[string]struct{}, len(records))
@@ -1164,12 +1164,12 @@ func reconcileTokenUsage(records []*frontendv1.TokenUtilization, result *datav1.
 		apiMessageIDs = append(apiMessageIDs, apiMessageID)
 	}
 	sort.Strings(apiMessageIDs)
-	r := &frontendv1.TokenUsageReconciliation{ResponseRecordCount: int64(len(records)), ResponseAllAgents: aggregate.GetAllAgents(), ResponseMainAgent: aggregate.GetMainAgent(), ApiMessageIds: apiMessageIDs}
+	r := &statev1.TokenUsageReconciliation{ResponseRecordCount: int64(len(records)), ResponseAllAgents: aggregate.GetAllAgents(), ResponseMainAgent: aggregate.GetMainAgent(), ApiMessageIds: apiMessageIDs}
 	if result == nil {
 		return reconciliationResult{reconciliation: r}
 	}
 	u := result.GetUsage()
-	r.ResultMainAgent = &frontendv1.TokenUsageTotals{InputTokens: u.GetInputTokens(), OutputTokens: u.GetOutputTokens(), CacheReadInputTokens: u.GetCacheReadInputTokens(), CacheCreationInputTokens: u.GetCacheCreationInputTokens(), CacheCreation: &frontendv1.TokenCacheCreation{Ephemeral_5MInputTokens: structInt(u.GetCacheCreation(), "ephemeral_5m_input_tokens"), Ephemeral_1HInputTokens: structInt(u.GetCacheCreation(), "ephemeral_1h_input_tokens")}, ServerToolUse: &frontendv1.TokenServerToolUse{WebSearchRequests: structInt(u.GetServerToolUse(), "web_search_requests"), WebFetchRequests: structInt(u.GetServerToolUse(), "web_fetch_requests")}}
+	r.ResultMainAgent = &statev1.TokenUsageTotals{InputTokens: u.GetInputTokens(), OutputTokens: u.GetOutputTokens(), CacheReadInputTokens: u.GetCacheReadInputTokens(), CacheCreationInputTokens: u.GetCacheCreationInputTokens(), CacheCreation: &statev1.TokenCacheCreation{Ephemeral_5MInputTokens: structInt(u.GetCacheCreation(), "ephemeral_5m_input_tokens"), Ephemeral_1HInputTokens: structInt(u.GetCacheCreation(), "ephemeral_1h_input_tokens")}, ServerToolUse: &statev1.TokenServerToolUse{WebSearchRequests: structInt(u.GetServerToolUse(), "web_search_requests"), WebFetchRequests: structInt(u.GetServerToolUse(), "web_fetch_requests")}}
 	r.ResponseModels = aggregate.GetModels()
 	modelKeys := make([]string, 0, len(result.GetModelUsage()))
 	for model := range result.GetModelUsage() {
@@ -1178,17 +1178,17 @@ func reconcileTokenUsage(records []*frontendv1.TokenUtilization, result *datav1.
 	sort.Strings(modelKeys)
 	for _, model := range modelKeys {
 		usage := result.GetModelUsage()[model]
-		r.ResultModels = append(r.ResultModels, &frontendv1.ModelTokenUtilization{
+		r.ResultModels = append(r.ResultModels, &statev1.ModelTokenUtilization{
 			Model:           model,
 			CanonicalModel:  cloneOptional(usage.CanonicalModel),
 			Provider:        cloneOptional(usage.Provider),
 			ContextWindow:   cloneOptional(usage.ContextWindow),
 			MaxOutputTokens: cloneOptional(usage.MaxOutputTokens),
 			CostUsd:         cloneOptional(usage.CostUsd),
-			Totals: &frontendv1.TokenUsageTotals{
+			Totals: &statev1.TokenUsageTotals{
 				InputTokens: usage.GetInputTokens(), OutputTokens: usage.GetOutputTokens(),
 				CacheReadInputTokens: usage.GetCacheReadInputTokens(), CacheCreationInputTokens: usage.GetCacheCreationInputTokens(),
-				ServerToolUse: &frontendv1.TokenServerToolUse{WebSearchRequests: usage.GetWebSearchRequests()},
+				ServerToolUse: &statev1.TokenServerToolUse{WebSearchRequests: usage.GetWebSearchRequests()},
 			},
 		})
 	}
@@ -1217,11 +1217,11 @@ func reconcileTokenUsage(records []*frontendv1.TokenUtilization, result *datav1.
 	if r.GetResponseMainAgent().GetServerToolUse().GetWebFetchRequests() != r.GetResultMainAgent().GetServerToolUse().GetWebFetchRequests() {
 		mismatch = append(mismatch, "server_tool_use.web_fetch_requests")
 	}
-	responseModels := map[string]*frontendv1.ModelTokenUtilization{}
+	responseModels := map[string]*statev1.ModelTokenUtilization{}
 	for _, model := range r.GetResponseModels() {
 		responseModels[model.GetModel()] = model
 	}
-	resultModels := map[string]*frontendv1.ModelTokenUtilization{}
+	resultModels := map[string]*statev1.ModelTokenUtilization{}
 	for _, model := range r.GetResultModels() {
 		resultModels[model.GetModel()] = model
 		observed := responseModels[model.GetModel()]
@@ -1296,13 +1296,13 @@ func usageWindowRolledOver(startResetsAtMs, endResetsAtMs int64) bool {
 	return delta >= usageWindowRolloverFloorMs
 }
 
-func missingUsageProblem(start bool) *frontendv1.TurnAccountingProblem {
+func missingUsageProblem(start bool) *statev1.TurnAccountingProblem {
 	if start {
-		return &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_MissingUsageBoundary{MissingUsageBoundary: &frontendv1.MissingUsageBoundary{Boundary: &frontendv1.MissingUsageBoundary_TurnStart{TurnStart: &frontendv1.MissingUsageBoundaryTurnStart{}}}}}
+		return &statev1.TurnAccountingProblem{Problem: &statev1.TurnAccountingProblem_MissingUsageBoundary{MissingUsageBoundary: &statev1.MissingUsageBoundary{Boundary: &statev1.MissingUsageBoundary_TurnStart{TurnStart: &statev1.MissingUsageBoundaryTurnStart{}}}}}
 	}
-	return &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_MissingUsageBoundary{MissingUsageBoundary: &frontendv1.MissingUsageBoundary{Boundary: &frontendv1.MissingUsageBoundary_TurnEnd{TurnEnd: &frontendv1.MissingUsageBoundaryTurnEnd{}}}}}
+	return &statev1.TurnAccountingProblem{Problem: &statev1.TurnAccountingProblem_MissingUsageBoundary{MissingUsageBoundary: &statev1.MissingUsageBoundary{Boundary: &statev1.MissingUsageBoundary_TurnEnd{TurnEnd: &statev1.MissingUsageBoundaryTurnEnd{}}}}}
 }
-func runtimeIdentityProblem(queryID string, missing []string) *frontendv1.TurnAccountingProblem {
+func runtimeIdentityProblem(queryID string, missing []string) *statev1.TurnAccountingProblem {
 	paths := make([]string, len(missing))
 	for i, path := range missing {
 		if path == "" {
@@ -1311,7 +1311,7 @@ func runtimeIdentityProblem(queryID string, missing []string) *frontendv1.TurnAc
 		}
 		paths[i] = fmt.Sprintf("query_lifecycle[%s].runtime_observed.identity.%s", queryID, path)
 	}
-	return &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_RuntimeIdentityIncomplete{RuntimeIdentityIncomplete: &frontendv1.RuntimeIdentityIncomplete{MissingFieldPaths: paths}}}
+	return &statev1.TurnAccountingProblem{Problem: &statev1.TurnAccountingProblem_RuntimeIdentityIncomplete{RuntimeIdentityIncomplete: &statev1.RuntimeIdentityIncomplete{MissingFieldPaths: paths}}}
 }
 
 // incompleteRuntimeIdentityPaths names every field of the query's runtime
@@ -1330,7 +1330,7 @@ func runtimeIdentityProblem(queryID string, missing []string) *frontendv1.TurnAc
 //     needs no explaining has none. Requiring it unconditionally made "fast
 //     mode is on and working" indistinguishable from missing evidence.
 //     fast_mode_state itself stays required, so the state is never unstated.
-func incompleteRuntimeIdentityPaths(runtime *corev1.QueryRuntimeIdentity) []string {
+func incompleteRuntimeIdentityPaths(runtime *protocolv1.QueryRuntimeIdentity) []string {
 	if runtime == nil {
 		return []string{""}
 	}
@@ -1353,7 +1353,7 @@ func incompleteRuntimeIdentityPaths(runtime *corev1.QueryRuntimeIdentity) []stri
 	}
 	for _, fingerprint := range []struct {
 		path  string
-		value *corev1.EvidenceFingerprint
+		value *protocolv1.EvidenceFingerprint
 	}{
 		{"effective_options", runtime.GetEffectiveOptions()},
 		{"settings", runtime.GetSettings()},
@@ -1378,16 +1378,16 @@ func incompleteRuntimeIdentityPaths(runtime *corev1.QueryRuntimeIdentity) []stri
 // AccountUsageObservation already uses for its boundary samples, and it is read
 // the same way here. A fingerprint that is absent, carries no arm, or carries an
 // empty digest or a causeless unavailability is still unsettled.
-func evidenceFingerprintSettled(f *corev1.EvidenceFingerprint) bool {
+func evidenceFingerprintSettled(f *protocolv1.EvidenceFingerprint) bool {
 	switch evidence := f.GetEvidence().(type) {
-	case *corev1.EvidenceFingerprint_Sha256:
+	case *protocolv1.EvidenceFingerprint_Sha256:
 		return evidence.Sha256 != ""
-	case *corev1.EvidenceFingerprint_Unavailable:
+	case *protocolv1.EvidenceFingerprint_Unavailable:
 		return strings.TrimSpace(evidence.Unavailable.GetCause()) != ""
 	default:
 		return false
 	}
 }
-func invalidTurnAccounting(turnID, queryID string, runtime *corev1.QueryRuntimeIdentity, settledAt int64, problem *frontendv1.TurnAccountingProblem) *frontendv1.TurnAccounting {
-	return &frontendv1.TurnAccounting{TurnId: turnID, QueryInstanceId: queryID, Runtime: runtime, Timing: &frontendv1.TurnAccountingTiming{AccountingSettledAtMs: settledAt}, Verdict: &frontendv1.TurnAccounting_Invalid{Invalid: &frontendv1.TurnAccountingInvalid{Problems: []*frontendv1.TurnAccountingProblem{problem}}}}
+func invalidTurnAccounting(turnID, queryID string, runtime *protocolv1.QueryRuntimeIdentity, settledAt int64, problem *statev1.TurnAccountingProblem) *statev1.TurnAccounting {
+	return &statev1.TurnAccounting{TurnId: turnID, QueryInstanceId: queryID, Runtime: runtime, Timing: &statev1.TurnAccountingTiming{AccountingSettledAtMs: settledAt}, Verdict: &statev1.TurnAccounting_Invalid{Invalid: &statev1.TurnAccountingInvalid{Problems: []*statev1.TurnAccountingProblem{problem}}}}
 }

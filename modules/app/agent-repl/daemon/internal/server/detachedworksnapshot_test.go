@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // fakeDetachedWorks is a TaskCatalogSource whose work half returns a fixed

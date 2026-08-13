@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -89,14 +89,14 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		event *corev1.Event
+		event *protocolv1.Event
 		want  *frontendv1.ConversationDelta
 	}{
 		{
 			name: "assistant text block passes the ApiAssistantMessage through",
-			event: &corev1.Event{
+			event: &protocolv1.Event{
 				SessionId: "s1", Seq: 7, ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.ClaudeStreamMessage{
+				Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.ClaudeStreamMessage{
 					Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
 						Uuid: "u1", Message: assistantMsg,
 					}},
@@ -115,9 +115,9 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 		},
 		{
 			name: "assistant tool_use rides inside the assistant_message item",
-			event: &corev1.Event{
+			event: &protocolv1.Event{
 				SessionId: "s1", Seq: 9, ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
+				Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
 					Uuid: "u3", Message: toolUseMsg,
 				})},
 			},
@@ -134,9 +134,9 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 		},
 		{
 			name: "user tool_result rides inside the user_message item",
-			event: &corev1.Event{
+			event: &protocolv1.Event{
 				SessionId: "s1", Seq: 10, ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
+				Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
 					Uuid: "u4", Message: toolResultMsg,
 				})},
 			},
@@ -153,9 +153,9 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 		},
 		{
 			name: "user plain-text prompt carries the request_id envelope",
-			event: &corev1.Event{
+			event: &protocolv1.Event{
 				SessionId: "s1", Seq: 2, ProducedAtMs: producedMs, RequestId: "req-5",
-				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
+				Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
 					Uuid: "u5", Message: promptMsg,
 				})},
 			},
@@ -172,9 +172,9 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 		},
 		{
 			name: "result message passes through into the result arm",
-			event: &corev1.Event{
+			event: &protocolv1.Event{
 				SessionId: "s1", Seq: 12, ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, resultMsg)},
+				Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, resultMsg)},
 			},
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", Fence: "s1", ThroughSeq: 12,
@@ -190,9 +190,9 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 		},
 		{
 			name: "empty assistant message has no visual value and is dropped",
-			event: &corev1.Event{
+			event: &protocolv1.Event{
 				SessionId: "s1", Seq: 14, ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
+				Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
 					Uuid: "u7", Message: &datav1.ApiAssistantMessage{},
 				})},
 			},
@@ -200,9 +200,9 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 		},
 		{
 			name: "empty user message has no visual value and is dropped",
-			event: &corev1.Event{
+			event: &protocolv1.Event{
 				SessionId: "s1", Seq: 15, ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
+				Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
 					Uuid: "u8", Message: &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentString{ContentString: ""}},
 				})},
 			},
@@ -210,18 +210,18 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 		},
 		{
 			name: "non-conversational payload yields nil",
-			event: &corev1.Event{
+			event: &protocolv1.Event{
 				SessionId: "s1", Seq: 6,
-				Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{PromptPreview: "go"}},
+				Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{PromptPreview: "go"}},
 			},
 			want: nil,
 		},
 		{
 			name: "task-lifecycle event routes nothing (TaskCatalog covers it)",
-			event: &corev1.Event{
+			event: &protocolv1.Event{
 				SessionId: "s1", Seq: 4,
-				Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
-					TaskId: "a1", Kind: corev1.TaskKind_TASK_KIND_AGENT, Description: "explore",
+				Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{
+					TaskId: "a1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT, Description: "explore",
 				}},
 			},
 			want: nil,
@@ -245,9 +245,9 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 
 func TestConversationDeltaFromEventCorruptVendorErrors(t *testing.T) {
 	// Arrange: an Any with a type URL absent from the compiled schema set.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 1,
-		Payload: &corev1.Event_Vendor{Vendor: &anypb.Any{
+		Payload: &protocolv1.Event_Vendor{Vendor: &anypb.Any{
 			TypeUrl: "type.googleapis.com/agentshim.data.v1.NoSuchMessage",
 			Value:   []byte{0x08, 0x01},
 		}},
@@ -272,9 +272,9 @@ func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.
 			{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "disk text"}}},
 		},
 	}
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 20, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
 			Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
 				Envelope: &datav1.LineEnvelope{Uuid: "au1", Timestamp: "2026-01-02T03:04:05Z"},
 				Message:  msg,
@@ -317,9 +317,9 @@ func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.
 // emissions it curated to, in order.
 func thinkingEmissions(t *testing.T, msg *datav1.ApiAssistantMessage) []*frontendv1.AgentThinking {
 	t.Helper()
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 20, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
 			Uuid: "env-1", Message: msg,
 		})},
 	}
@@ -404,9 +404,9 @@ func TestTheStrippedBodyKeepsTheBlocksTheEmissionsLeftBehind(t *testing.T) {
 	// The strip is the other half of the exclusivity invariant: what the
 	// emissions state about their origin must not change what the body keeps.
 	// Arrange
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 20, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
 			Uuid: "env-1", Message: twoThinkingBlocks(),
 		})},
 	}
@@ -455,9 +455,9 @@ func textBlocks(texts ...string) *datav1.ApiAssistantMessage {
 // every response emission's surviving blocks.
 func assistantResponseBodies(t *testing.T, msg *datav1.ApiAssistantMessage) []string {
 	t.Helper()
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 20, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
 			Uuid: "env-1", Message: msg,
 		})},
 	}
@@ -482,9 +482,9 @@ func assistantResponseBodies(t *testing.T, msg *datav1.ApiAssistantMessage) []st
 // surviving text, so a dropped item and an emptied one are distinguishable.
 func userMessageBodies(t *testing.T, msg *datav1.ApiUserMessage) (int, []string) {
 	t.Helper()
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 21, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
 			Uuid: "env-2", Message: msg,
 		})},
 	}
@@ -618,9 +618,9 @@ func TestConversationDeltaFromEventTranscriptApiErrorMidBackoffCuratesToNothing(
 		Error:     &datav1.ApiErrorDetail{Message: "overloaded"},
 		RetryInMs: 2000, RetryAttempt: 2, MaxRetries: 5,
 	}
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 22, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
 			Line: &datav1.TranscriptLine_System{System: &datav1.SystemLine{
 				Envelope: &datav1.LineEnvelope{Uuid: "sy2"},
 				Subtype:  &datav1.SystemLine_ApiError{ApiError: line},
@@ -647,11 +647,11 @@ func TestConversationDeltaFromEventTranscriptApiErrorMidBackoffCuratesToNothing(
 
 // apiErrorEvent wraps an ApiErrorLine as the transcript-plane vendor event the
 // curator sees.
-func apiErrorEvent(t *testing.T, uuid string, attempt, max int64) *corev1.Event {
+func apiErrorEvent(t *testing.T, uuid string, attempt, max int64) *protocolv1.Event {
 	t.Helper()
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId: "s1", Seq: 22, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
 			Line: &datav1.TranscriptLine_System{System: &datav1.SystemLine{
 				Envelope: &datav1.LineEnvelope{Uuid: uuid},
 				Subtype: &datav1.SystemLine_ApiError{ApiError: &datav1.ApiErrorLine{
@@ -676,23 +676,23 @@ func failureOf(cd *frontendv1.ConversationDelta) *frontendv1.FailureCardView {
 func TestQueryTerminationFailurePreservesTypedLifecycleEvidence(t *testing.T) {
 	tests := []struct {
 		name       string
-		terminated *corev1.QueryTerminated
+		terminated *protocolv1.QueryTerminated
 		check      func(*frontendv1.QueryTerminationFailure) bool
 	}{
-		{name: "unexpected eof", terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"}, Reason: &corev1.QueryTerminated_UnexpectedEof{UnexpectedEof: &corev1.UnexpectedQueryEof{}}}, check: func(got *frontendv1.QueryTerminationFailure) bool { return got.GetUnexpectedEof() != nil }},
-		{name: "iterator failure", terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"}, Reason: &corev1.QueryTerminated_IteratorFailure{IteratorFailure: &corev1.QueryIteratorFailure{Cause: "child exited 137"}}}, check: func(got *frontendv1.QueryTerminationFailure) bool {
+		{name: "unexpected eof", terminated: &protocolv1.QueryTerminated{VendorIdentity: &protocolv1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"}, Reason: &protocolv1.QueryTerminated_UnexpectedEof{UnexpectedEof: &protocolv1.UnexpectedQueryEof{}}}, check: func(got *frontendv1.QueryTerminationFailure) bool { return got.GetUnexpectedEof() != nil }},
+		{name: "iterator failure", terminated: &protocolv1.QueryTerminated{VendorIdentity: &protocolv1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"}, Reason: &protocolv1.QueryTerminated_IteratorFailure{IteratorFailure: &protocolv1.QueryIteratorFailure{Cause: "child exited 137"}}}, check: func(got *frontendv1.QueryTerminationFailure) bool {
 			return got.GetIteratorFailure().GetCause() == "child exited 137"
 		}},
-		{name: "startup failure", terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"}, Reason: &corev1.QueryTerminated_StartupFailure{StartupFailure: &corev1.QueryStartupFailure{Cause: "resume rejected"}}}, check: func(got *frontendv1.QueryTerminationFailure) bool {
+		{name: "startup failure", terminated: &protocolv1.QueryTerminated{VendorIdentity: &protocolv1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"}, Reason: &protocolv1.QueryTerminated_StartupFailure{StartupFailure: &protocolv1.QueryStartupFailure{Cause: "resume rejected"}}}, check: func(got *frontendv1.QueryTerminationFailure) bool {
 			return got.GetStartupFailure().GetCause() == "resume rejected"
 		}},
-		{name: "vendor unavailable", terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionIdentityUnavailable{VendorSessionIdentityUnavailable: &corev1.VendorSessionIdentityUnavailable{}}, Reason: &corev1.QueryTerminated_UnexpectedEof{UnexpectedEof: &corev1.UnexpectedQueryEof{}}}, check: func(got *frontendv1.QueryTerminationFailure) bool {
+		{name: "vendor unavailable", terminated: &protocolv1.QueryTerminated{VendorIdentity: &protocolv1.QueryTerminated_VendorSessionIdentityUnavailable{VendorSessionIdentityUnavailable: &protocolv1.VendorSessionIdentityUnavailable{}}, Reason: &protocolv1.QueryTerminated_UnexpectedEof{UnexpectedEof: &protocolv1.UnexpectedQueryEof{}}}, check: func(got *frontendv1.QueryTerminationFailure) bool {
 			return got.GetVendorSessionIdentityUnavailable() != nil
 		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			lifecycle := &corev1.QueryLifecycle{QueryInstanceId: "query", Event: &corev1.QueryLifecycle_Terminated{Terminated: tc.terminated}}
+			lifecycle := &protocolv1.QueryLifecycle{QueryInstanceId: "query", Event: &protocolv1.QueryLifecycle_Terminated{Terminated: tc.terminated}}
 			item, err := FailureCardFromQueryTermination("session", lifecycle, 1234)
 			if err != nil {
 				t.Fatal(err)
@@ -709,7 +709,7 @@ func TestQueryTerminationFailurePreservesTypedLifecycleEvidence(t *testing.T) {
 }
 
 func TestQueryTerminationFailureRejectsMissingIdentity(t *testing.T) {
-	lifecycle := &corev1.QueryLifecycle{QueryInstanceId: "query", Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{Reason: &corev1.QueryTerminated_UnexpectedEof{UnexpectedEof: &corev1.UnexpectedQueryEof{}}}}}
+	lifecycle := &protocolv1.QueryLifecycle{QueryInstanceId: "query", Event: &protocolv1.QueryLifecycle_Terminated{Terminated: &protocolv1.QueryTerminated{Reason: &protocolv1.QueryTerminated_UnexpectedEof{UnexpectedEof: &protocolv1.UnexpectedQueryEof{}}}}}
 	item, err := FailureCardFromQueryTermination("session", lifecycle, 1234)
 	if err == nil || item != nil || !strings.Contains(err.Error(), "no vendor identity") {
 		t.Fatalf("item=%+v err=%v, want missing-vendor-identity rejection", item, err)
@@ -834,7 +834,7 @@ func TestMarshalTypingDeltaLowerCamelCase(t *testing.T) {
 	// delta.toolUseId.
 	frame := TypingDeltaFrame(&frontendv1.TypingDelta{
 		Workspace: "ws", Fence: "s1",
-		Delta: &corev1.ContentDelta{Uuid: "u1", BlockIndex: 2, ToolUseId: proto.String("toolu_01"), Delta: &corev1.ContentDelta_InputJson{InputJson: `{"command":"pwd"}`}},
+		Delta: &protocolv1.ContentDelta{Uuid: "u1", BlockIndex: 2, ToolUseId: proto.String("toolu_01"), Delta: &protocolv1.ContentDelta_InputJson{InputJson: `{"command":"pwd"}`}},
 	})
 
 	// Act.
@@ -861,7 +861,7 @@ func TestContentDeltaToolUseIDIsAdditiveAndPresenceAware(t *testing.T) {
 	// Arrange: this byte sequence represents the prior ContentDelta layout
 	// (uuid = 1 and text = 3), before field 8 existed on the wire.
 	legacy := []byte{0x0a, 0x02, 'u', '1', 0x1a, 0x03, 'a', 'b', 'c'}
-	var decoded corev1.ContentDelta
+	var decoded protocolv1.ContentDelta
 
 	// Act: the current reader must continue accepting a delta emitted by the
 	// prior schema without manufacturing tool identity.
@@ -983,18 +983,18 @@ func TestFilterSnapshotKeepsMergedAt(t *testing.T) {
 func TestTypingDeltaFromContentDelta(t *testing.T) {
 	tests := []struct {
 		name string
-		cd   *corev1.ContentDelta
+		cd   *protocolv1.ContentDelta
 		want *frontendv1.TypingDelta
 	}{
 		{
 			name: "text delta embedded unchanged",
-			cd:   &corev1.ContentDelta{Uuid: "u1", BlockIndex: 2, Delta: &corev1.ContentDelta_Text{Text: "abc"}},
-			want: &frontendv1.TypingDelta{Workspace: "ws", Fence: "s1", Delta: &corev1.ContentDelta{Uuid: "u1", BlockIndex: 2, Delta: &corev1.ContentDelta_Text{Text: "abc"}}},
+			cd:   &protocolv1.ContentDelta{Uuid: "u1", BlockIndex: 2, Delta: &protocolv1.ContentDelta_Text{Text: "abc"}},
+			want: &frontendv1.TypingDelta{Workspace: "ws", Fence: "s1", Delta: &protocolv1.ContentDelta{Uuid: "u1", BlockIndex: 2, Delta: &protocolv1.ContentDelta_Text{Text: "abc"}}},
 		},
 		{
 			name: "signature delta forwarded as-is (no daemon curation of arms)",
-			cd:   &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Signature{Signature: "sig"}},
-			want: &frontendv1.TypingDelta{Workspace: "ws", Fence: "s1", Delta: &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Signature{Signature: "sig"}}},
+			cd:   &protocolv1.ContentDelta{Uuid: "u1", Delta: &protocolv1.ContentDelta_Signature{Signature: "sig"}},
+			want: &frontendv1.TypingDelta{Workspace: "ws", Fence: "s1", Delta: &protocolv1.ContentDelta{Uuid: "u1", Delta: &protocolv1.ContentDelta_Signature{Signature: "sig"}}},
 		},
 		{
 			name: "nil content delta yields nil",
@@ -1016,10 +1016,10 @@ func TestTypingDeltaFromContentDelta(t *testing.T) {
 
 func TestBuildTaskCatalog(t *testing.T) {
 	// Arrange: start two tasks, end one.
-	events := []*corev1.Event{
-		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "a1", Kind: corev1.TaskKind_TASK_KIND_AGENT, Description: "d1"}}},
-		{ProducedAtMs: 150, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL}}},
-		{ProducedAtMs: 200, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "a1", Kind: corev1.TaskKind_TASK_KIND_AGENT, Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}}},
+	events := []*protocolv1.Event{
+		{ProducedAtMs: 100, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "a1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT, Description: "d1"}}},
+		{ProducedAtMs: 150, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "b1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL}}},
+		{ProducedAtMs: 200, Payload: &protocolv1.Event_TaskEnded{TaskEnded: &protocolv1.TaskEnded{TaskId: "a1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT, Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE}}},
 	}
 
 	// Act.
@@ -1041,10 +1041,10 @@ func TestBuildTaskCatalog(t *testing.T) {
 func TestBuildTaskCatalogFoldsADuplicateTaskEndedOntoOneEntry(t *testing.T) {
 	// Arrange — one task ended twice, which a shell spool's EXIT= marker makes
 	// real: the marker can report a completion another plane already reported.
-	events := []*corev1.Event{
-		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL}}},
-		{ProducedAtMs: 200, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL, Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}}},
-		{ProducedAtMs: 250, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL, Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}}},
+	events := []*protocolv1.Event{
+		{ProducedAtMs: 100, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "b1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL}}},
+		{ProducedAtMs: 200, Payload: &protocolv1.Event_TaskEnded{TaskEnded: &protocolv1.TaskEnded{TaskId: "b1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL, Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE}}},
+		{ProducedAtMs: 250, Payload: &protocolv1.Event_TaskEnded{TaskEnded: &protocolv1.TaskEnded{TaskId: "b1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL, Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE}}},
 	}
 
 	// Act.
@@ -1058,10 +1058,10 @@ func TestBuildTaskCatalogFoldsADuplicateTaskEndedOntoOneEntry(t *testing.T) {
 
 func TestBuildTaskCatalogKeepsTheTaskEndedOnADuplicate(t *testing.T) {
 	// Arrange — a duplicate end must not reopen a settled task.
-	events := []*corev1.Event{
-		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL}}},
-		{ProducedAtMs: 200, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL, Status: corev1.TerminalStatus_TERMINAL_STATUS_ERROR}}},
-		{ProducedAtMs: 250, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL, Status: corev1.TerminalStatus_TERMINAL_STATUS_ERROR}}},
+	events := []*protocolv1.Event{
+		{ProducedAtMs: 100, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "b1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL}}},
+		{ProducedAtMs: 200, Payload: &protocolv1.Event_TaskEnded{TaskEnded: &protocolv1.TaskEnded{TaskId: "b1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL, Status: protocolv1.TerminalStatus_TERMINAL_STATUS_ERROR}}},
+		{ProducedAtMs: 250, Payload: &protocolv1.Event_TaskEnded{TaskEnded: &protocolv1.TaskEnded{TaskId: "b1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL, Status: protocolv1.TerminalStatus_TERMINAL_STATUS_ERROR}}},
 	}
 
 	// Act.
@@ -1077,9 +1077,9 @@ func TestBuildTaskCatalogKeepsTheTaskEndedOnADuplicate(t *testing.T) {
 
 func TestBuildSessionView(t *testing.T) {
 	// Arrange: a session start (model) then a result (cost + usage).
-	events := []*corev1.Event{
-		{Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{Model: "claude-x"}}},
-		{Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.ResultMessage{
+	events := []*protocolv1.Event{
+		{Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{Model: "claude-x"}}},
+		{Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.ResultMessage{
 			TotalCostUsd: 0.25,
 			Usage:        &datav1.Usage{InputTokens: 10, OutputTokens: 5, CacheReadInputTokens: 2, CacheCreationInputTokens: 3},
 		})}},
@@ -1135,11 +1135,11 @@ func TestFrameWrappers(t *testing.T) {
 // --- BuildTaskCatalog: BackgroundTasksChanged reconciliation ----------------
 
 // backgroundTasksEvent wraps a live-set snapshot as a vendor core Event.
-func backgroundTasksEvent(t *testing.T, atMs int64, refs ...*datav1.BackgroundTaskRef) *corev1.Event {
+func backgroundTasksEvent(t *testing.T, atMs int64, refs ...*datav1.BackgroundTaskRef) *protocolv1.Event {
 	t.Helper()
-	return &corev1.Event{
+	return &protocolv1.Event{
 		ProducedAtMs: atMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ClaudeStreamMessage{
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAny(t, &datav1.ClaudeStreamMessage{
 			Msg: &datav1.ClaudeStreamMessage_BackgroundTasksChanged{
 				BackgroundTasksChanged: &datav1.BackgroundTasksChanged{Tasks: refs},
 			},
@@ -1151,8 +1151,8 @@ func TestBuildTaskCatalogSweepsAGhostAbsentFromTheLiveSet(t *testing.T) {
 	// Arrange — a task whose end never arrived, and a session that says it is
 	// not running. Without the authority this stays "running" until a LOST
 	// staleness sweep gets to it.
-	events := []*corev1.Event{
-		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "ghost", Kind: corev1.TaskKind_TASK_KIND_AGENT}}},
+	events := []*protocolv1.Event{
+		{ProducedAtMs: 100, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "ghost", Kind: protocolv1.TaskKind_TASK_KIND_AGENT}}},
 		backgroundTasksEvent(t, 300),
 	}
 
@@ -1167,8 +1167,8 @@ func TestBuildTaskCatalogSweepsAGhostAbsentFromTheLiveSet(t *testing.T) {
 
 func TestBuildTaskCatalogStampsTheSweepAtTheSnapshotTime(t *testing.T) {
 	// Arrange
-	events := []*corev1.Event{
-		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "ghost", Kind: corev1.TaskKind_TASK_KIND_AGENT}}},
+	events := []*protocolv1.Event{
+		{ProducedAtMs: 100, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "ghost", Kind: protocolv1.TaskKind_TASK_KIND_AGENT}}},
 		backgroundTasksEvent(t, 300),
 	}
 
@@ -1184,9 +1184,9 @@ func TestBuildTaskCatalogStampsTheSweepAtTheSnapshotTime(t *testing.T) {
 func TestBuildTaskCatalogLeavesASettledTaskAlone(t *testing.T) {
 	// Arrange — a task that genuinely finished must keep its real status, not
 	// be re-reported as lost because it is absent from the live set.
-	events := []*corev1.Event{
-		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "a1", Kind: corev1.TaskKind_TASK_KIND_AGENT}}},
-		{ProducedAtMs: 200, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "a1", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}}},
+	events := []*protocolv1.Event{
+		{ProducedAtMs: 100, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "a1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT}}},
+		{ProducedAtMs: 200, Payload: &protocolv1.Event_TaskEnded{TaskEnded: &protocolv1.TaskEnded{TaskId: "a1", Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE}}},
 		backgroundTasksEvent(t, 300),
 	}
 
@@ -1201,7 +1201,7 @@ func TestBuildTaskCatalogLeavesASettledTaskAlone(t *testing.T) {
 
 func TestBuildTaskCatalogAdoptsATaskItNeverSawStart(t *testing.T) {
 	// Arrange — the live set names a task with no TaskStarted in the window.
-	events := []*corev1.Event{
+	events := []*protocolv1.Event{
 		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "unseen", TaskType: "local_bash", Description: "npm test"}),
 	}
 
@@ -1217,8 +1217,8 @@ func TestBuildTaskCatalogAdoptsATaskItNeverSawStart(t *testing.T) {
 
 func TestBuildTaskCatalogKeepsALiveTaskRunning(t *testing.T) {
 	// Arrange — a task present in the live set is untouched by the sweep.
-	events := []*corev1.Event{
-		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "a1", Kind: corev1.TaskKind_TASK_KIND_AGENT, Description: "d"}}},
+	events := []*protocolv1.Event{
+		{ProducedAtMs: 100, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "a1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT, Description: "d"}}},
 		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "a1"}),
 	}
 
@@ -1235,9 +1235,9 @@ func TestBuildTaskCatalogKeepsALiveTaskRunning(t *testing.T) {
 func TestBuildTaskCatalogLetsALaterTaskEndedCloseAnAdoptedTask(t *testing.T) {
 	// Arrange — the live set is authoritative AT ITS POINT in the stream; a
 	// TaskEnded that folds after it still closes the task.
-	events := []*corev1.Event{
+	events := []*protocolv1.Event{
 		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "a1", TaskType: "local_bash"}),
-		{ProducedAtMs: 400, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "a1", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}}},
+		{ProducedAtMs: 400, Payload: &protocolv1.Event_TaskEnded{TaskEnded: &protocolv1.TaskEnded{TaskId: "a1", Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE}}},
 	}
 
 	// Act.
@@ -1265,7 +1265,7 @@ func TestBuildTaskCatalogTranslatesTheShimTaskTypeOnTheRefPath(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange — a task referenced by the live set with no TaskStarted
 			// folded, which is what a restart or a replay leaves behind.
-			events := []*corev1.Event{
+			events := []*protocolv1.Event{
 				backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "t1", TaskType: tc.taskType}),
 			}
 
@@ -1283,7 +1283,7 @@ func TestBuildTaskCatalogTranslatesTheShimTaskTypeOnTheRefPath(t *testing.T) {
 func TestBuildTaskCatalogRefusesAnUnrecognizedShimTaskType(t *testing.T) {
 	// Arrange — a task_type outside the shim vocabulary maps to no frontend
 	// kind, and the frontend contract has no value for "unknown".
-	events := []*corev1.Event{
+	events := []*protocolv1.Event{
 		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "t1", TaskType: "local_teleport"}),
 	}
 
@@ -1299,7 +1299,7 @@ func TestBuildTaskCatalogRefusesAnUnrecognizedShimTaskType(t *testing.T) {
 func TestBuildTaskCatalogRecordsTheUnrecognizedShimTaskType(t *testing.T) {
 	// Arrange — the refusal must leave a trace naming the task and the string.
 	var lines []string
-	events := []*corev1.Event{
+	events := []*protocolv1.Event{
 		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "t1", TaskType: "local_teleport"}),
 	}
 
@@ -1322,7 +1322,7 @@ func TestBuildTaskCatalogNeverPassesARawShimTaskTypeThroughAsAKind(t *testing.T)
 	// Arrange — the exact live poisoning: a retained ref-only entry whose raw
 	// task_type used to be copied into the frontend kind, which the webapp's
 	// validating decoder then rejected for every snapshot of the session.
-	events := []*corev1.Event{
+	events := []*protocolv1.Event{
 		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "t1", TaskType: "local_agent"}),
 	}
 
@@ -1343,8 +1343,8 @@ func TestBuildTaskCatalogRefusesAnUnspecifiedTaskKind(t *testing.T) {
 	// Arrange — a TaskStarted the shim could not type resolves to
 	// "unspecified", which is no more decodable to a frontend than a raw
 	// task_type is.
-	events := []*corev1.Event{
-		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "t1"}}},
+	events := []*protocolv1.Event{
+		{ProducedAtMs: 100, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "t1"}}},
 	}
 
 	// Act.
@@ -1359,8 +1359,8 @@ func TestBuildTaskCatalogRefusesAnUnspecifiedTaskKind(t *testing.T) {
 func TestBuildTaskCatalogRecordsARefusedEntryByTaskID(t *testing.T) {
 	// Arrange.
 	var lines []string
-	events := []*corev1.Event{
-		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "t1"}}},
+	events := []*protocolv1.Event{
+		{ProducedAtMs: 100, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "t1"}}},
 	}
 
 	// Act.
@@ -1422,9 +1422,9 @@ func mustStructHelper(t *testing.T, m map[string]any) *structpb.Struct {
 // feed.
 func TestResultUUIDIsTheDedupKey(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 12, ProducedAtMs: producedMs, DedupKey: "result:r-1",
-		Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS})},
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAny(t, &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS})},
 	}
 
 	// Act.
@@ -1444,9 +1444,9 @@ func TestResultUUIDIsTheDedupKey(t *testing.T) {
 // stable across replays.
 func TestResultWithoutADedupKeyDerivesAStableUUID(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 12, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS})},
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAny(t, &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS})},
 	}
 
 	// Act.
@@ -1467,10 +1467,10 @@ func TestResultWithoutADedupKeyDerivesAStableUUID(t *testing.T) {
 // than appending a second chip.
 func TestResultUUIDIsStableAcrossReplaysOfTheSameEvent(t *testing.T) {
 	// Arrange.
-	newEvent := func() *corev1.Event {
-		return &corev1.Event{
+	newEvent := func() *protocolv1.Event {
+		return &protocolv1.Event{
 			SessionId: "s1", Seq: 12, ProducedAtMs: producedMs,
-			Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS})},
+			Payload: &protocolv1.Event_Vendor{Vendor: mustAny(t, &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS})},
 		}
 	}
 
@@ -1495,10 +1495,10 @@ func TestResultUUIDIsStableAcrossReplaysOfTheSameEvent(t *testing.T) {
 // identity would collapse a session's every closing chip onto one node.
 func TestResultUUIDsDifferPerTurn(t *testing.T) {
 	// Arrange.
-	at := func(seq uint64) *corev1.Event {
-		return &corev1.Event{
+	at := func(seq uint64) *protocolv1.Event {
+		return &protocolv1.Event{
 			SessionId: "s1", Seq: seq, ProducedAtMs: producedMs,
-			Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS})},
+			Payload: &protocolv1.Event_Vendor{Vendor: mustAny(t, &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS})},
 		}
 	}
 
@@ -1519,7 +1519,7 @@ func TestResultUUIDsDifferPerTurn(t *testing.T) {
 // event's identity IS its dedup key, whatever kind asked for it.
 func TestEventDerivedUUIDPrefersTheDedupKey(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{SessionId: "s1", Seq: 41, DedupKey: "d-1"}
+	ev := &protocolv1.Event{SessionId: "s1", Seq: 41, DedupKey: "d-1"}
 
 	// Act + Assert.
 	for _, kind := range []string{"clear", "compact", "result"} {
@@ -1534,7 +1534,7 @@ func TestEventDerivedUUIDPrefersTheDedupKey(t *testing.T) {
 // overlap even at the same store position.
 func TestEventDerivedUUIDDerivesFromKindSessionAndSeq(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{SessionId: "s1", Seq: 41}
+	ev := &protocolv1.Event{SessionId: "s1", Seq: 41}
 	want := map[string]string{
 		"clear":   "clear:s1:41",
 		"compact": "compact:s1:41",
@@ -1555,15 +1555,15 @@ func TestEventDerivedUUIDDerivesFromKindSessionAndSeq(t *testing.T) {
 func TestEveryIdentityLessItemUsesTheSharedDerivation(t *testing.T) {
 	// Arrange — one un-deduped event per kind at the SAME store position, so
 	// only the shared derivation's kind prefix can tell them apart.
-	at41 := func(payload any) *corev1.Event {
-		ev := &corev1.Event{SessionId: "s1", Seq: 41, ProducedAtMs: producedMs}
+	at41 := func(payload any) *protocolv1.Event {
+		ev := &protocolv1.Event{SessionId: "s1", Seq: 41, ProducedAtMs: producedMs}
 		switch p := payload.(type) {
-		case *corev1.ContextCleared:
-			ev.Payload = &corev1.Event_ContextCleared{ContextCleared: p}
-		case *corev1.ContextCompacted:
-			ev.Payload = &corev1.Event_ContextCompacted{ContextCompacted: p}
+		case *protocolv1.ContextCleared:
+			ev.Payload = &protocolv1.Event_ContextCleared{ContextCleared: p}
+		case *protocolv1.ContextCompacted:
+			ev.Payload = &protocolv1.Event_ContextCompacted{ContextCompacted: p}
 		case *datav1.ResultMessage:
-			ev.Payload = &corev1.Event_Vendor{Vendor: mustAny(t, p)}
+			ev.Payload = &protocolv1.Event_Vendor{Vendor: mustAny(t, p)}
 		default:
 			t.Fatalf("unhandled payload %T", payload)
 		}
@@ -1574,8 +1574,8 @@ func TestEveryIdentityLessItemUsesTheSharedDerivation(t *testing.T) {
 		payload any
 		want    string
 	}{
-		{"clear", &corev1.ContextCleared{}, "clear:s1:41"},
-		{"compact", &corev1.ContextCompacted{}, "compact:s1:41"},
+		{"clear", &protocolv1.ContextCleared{}, "clear:s1:41"},
+		{"compact", &protocolv1.ContextCompacted{}, "compact:s1:41"},
 		{"result", &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS}, "result:s1:41"},
 	}
 
@@ -1604,9 +1604,9 @@ func TestEveryIdentityLessItemUsesTheSharedDerivation(t *testing.T) {
 // record for it, so it is durable.
 func TestAnOrdinaryPromptStatesTheDurableArm(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 21, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
 			Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
 				Envelope: &datav1.LineEnvelope{Uuid: "pu1"},
 				Message:  &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentString{ContentString: "hi there"}},
@@ -1631,9 +1631,9 @@ func TestAnOrdinaryPromptStatesTheDurableArm(t *testing.T) {
 // record carries no promptId and the user ruled it out of the durable set.
 func TestALocalCommandRecordStatesTheEphemeralArm(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 22, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
+		Payload: &protocolv1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
 			Line: &datav1.TranscriptLine_System{System: &datav1.SystemLine{
 				Envelope: &datav1.LineEnvelope{Uuid: "lc1", IsMeta: true},
 				Subtype:  &datav1.SystemLine_LocalCommand{LocalCommand: &datav1.LocalCommandLine{Content: "Context low"}},
@@ -1659,9 +1659,9 @@ func TestALocalCommandRecordStatesTheEphemeralArm(t *testing.T) {
 // one a class would put a phantom row in the feed and shorten a page.
 func TestACategoryCRecordAcquiresNoLineageAndNoDurabilityArm(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1", Seq: 23, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}},
+		Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{}},
 	}
 
 	// Act.
@@ -1681,7 +1681,7 @@ func TestACategoryCRecordAcquiresNoLineageAndNoDurabilityArm(t *testing.T) {
 // therefore to no ownership.
 func TestCurationOfACategoryCEventYieldsNothing(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{Seq: 4, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t1"}}}
+	ev := &protocolv1.Event{Seq: 4, Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t1"}}}
 
 	// Act.
 	delta, _, err := conversationDeltaFromEvent("ws", "f", ev)
@@ -1700,7 +1700,7 @@ func TestCurationOfACategoryCEventYieldsNothing(t *testing.T) {
 // because that silence is how a message-bearing kind vanishes from the feed.
 func TestCurationOfAnEventWithNoPayloadArmIsRefused(t *testing.T) {
 	// Arrange.
-	ev := &corev1.Event{Seq: 5, SessionId: "s1"}
+	ev := &protocolv1.Event{Seq: 5, SessionId: "s1"}
 
 	// Act.
 	_, _, err := conversationDeltaFromEvent("ws", "f", ev)

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
+	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -24,63 +24,63 @@ import (
 
 type failingTurnAccountingStore struct{ err error }
 
-func (s failingTurnAccountingStore) Record(string, *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error) {
+func (s failingTurnAccountingStore) Record(string, *statev1.TurnAccounting) (*statev1.TurnAccounting, error) {
 	return nil, s.err
 }
-func (s failingTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting, error) {
+func (s failingTurnAccountingStore) List(string) ([]*statev1.TurnAccounting, error) {
 	return nil, s.err
 }
 
 type emptyTurnAccountingStore struct{}
 
-func (emptyTurnAccountingStore) Record(_ string, accounting *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error) {
+func (emptyTurnAccountingStore) Record(_ string, accounting *statev1.TurnAccounting) (*statev1.TurnAccounting, error) {
 	return accounting, nil
 }
-func (emptyTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting, error) {
+func (emptyTurnAccountingStore) List(string) ([]*statev1.TurnAccounting, error) {
 	return nil, nil
 }
 
 type replayTurnAccountingStore struct {
-	accountings []*frontendv1.TurnAccounting
+	accountings []*statev1.TurnAccounting
 	err         error
 }
 
 type fakeHistoricalUsageStore struct {
 	inserted bool
 	err      error
-	records  []*frontendv1.TokenUtilization
+	records  []*statev1.TokenUtilization
 }
 
-func (s *fakeHistoricalUsageStore) RecordHistorical(record *frontendv1.TokenUtilization) (bool, error) {
+func (s *fakeHistoricalUsageStore) RecordHistorical(record *statev1.TokenUtilization) (bool, error) {
 	if s.err != nil {
 		return false, s.err
 	}
-	s.records = append(s.records, proto.Clone(record).(*frontendv1.TokenUtilization))
+	s.records = append(s.records, proto.Clone(record).(*statev1.TokenUtilization))
 	return s.inserted, nil
 }
 
-func (s replayTurnAccountingStore) Record(_ string, accounting *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error) {
+func (s replayTurnAccountingStore) Record(_ string, accounting *statev1.TurnAccounting) (*statev1.TurnAccounting, error) {
 	return accounting, s.err
 }
-func (s replayTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting, error) {
+func (s replayTurnAccountingStore) List(string) ([]*statev1.TurnAccounting, error) {
 	return s.accountings, s.err
 }
 
 func TestTurnAccountingReducerCompletesWithBoundaryAndMatchingLedger(t *testing.T) {
 	r := newTurnAccountingReducer(nil)
-	r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	r.observe(&protocolv1.Event{Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "q",
-		Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{
+		Event: &protocolv1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &protocolv1.QueryRuntimeObserved{
 			Identity: completeRuntimeIdentity(),
 		}},
 	}}}, "s")
-	r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
-	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
-	r.observe(&corev1.Event{ProducedAtMs: 12, Payload: &corev1.Event_MessageLatency{MessageLatency: &corev1.MessageLatency{Uuid: "m", TtftMs: 42}}}, "s")
+	r.observe(&protocolv1.Event{ProducedAtMs: 10, Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}, "s")
+	r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
+	r.observe(&protocolv1.Event{ProducedAtMs: 12, Payload: &protocolv1.Event_MessageLatency{MessageLatency: &protocolv1.MessageLatency{Uuid: "m", TtftMs: 42}}}, "s")
 	r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4}}}}}), "s")
 	r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{Usage: &datav1.Usage{InputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4}, ModelUsage: map[string]*datav1.ModelUsage{"model": {InputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4}}}}}), "s")
-	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
-	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
+	got := r.resolve(&protocolv1.Event{Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}, 30)
 	if got.GetComplete() == nil || len(got.GetResponses()) != 1 || got.GetResponses()[0].GetResponseTiming().GetTimeToFirstTokenMs() != 42 || got.GetResponses()[0].GetResponseTiming().GetOutputGenerationDurationMs() != 8 || got.GetReconciliation().GetResponseMainAgent().GetOutputTokens() != 2 {
 		t.Fatalf("accounting = %+v", got)
 	}
@@ -94,12 +94,12 @@ func TestTurnAccountingReducerCompletesWithBoundaryAndMatchingLedger(t *testing.
 func oneHourCacheTurnReducer(t *testing.T, responses int, perResponseCacheCreation int64) *turnAccountingReducer {
 	t.Helper()
 	r := newTurnAccountingReducer(nil)
-	r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	r.observe(&protocolv1.Event{Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "q",
-		Event:           &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: completeRuntimeIdentity()}},
+		Event:           &protocolv1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &protocolv1.QueryRuntimeObserved{Identity: completeRuntimeIdentity()}},
 	}}}, "s")
-	r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
-	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
+	r.observe(&protocolv1.Event{ProducedAtMs: 10, Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}, "s")
+	r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
 	snapshotCreation, err := structpb.NewStruct(map[string]any{"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": float64(perResponseCacheCreation)})
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +128,7 @@ func oneHourCacheTurnReducer(t *testing.T, responses int, perResponseCacheCreati
 		Usage:      &datav1.Usage{CacheCreationInputTokens: total, CacheCreation: resultCreation},
 		ModelUsage: map[string]*datav1.ModelUsage{"claude-opus-5": {CacheCreationInputTokens: total}},
 	}}}), "s")
-	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
+	r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
 	return r
 }
 
@@ -140,7 +140,7 @@ func TestAOneHourCacheTurnReconcilesItsEphemeral1hBucket(t *testing.T) {
 	// Arrange.
 	r := oneHourCacheTurnReducer(t, 113, 1710)
 	// Act.
-	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	got := r.resolve(&protocolv1.Event{Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}, 30)
 	// Assert.
 	if got.GetReconciliation().GetResponseMainAgent().GetCacheCreation().GetEphemeral_1HInputTokens() != 193230 {
 		t.Fatalf("response 1h bucket = %d, want the responses to account for the whole result total", got.GetReconciliation().GetResponseMainAgent().GetCacheCreation().GetEphemeral_1HInputTokens())
@@ -154,7 +154,7 @@ func TestAOneHourCacheTurnSettlesComplete(t *testing.T) {
 	// Arrange.
 	r := oneHourCacheTurnReducer(t, 113, 1710)
 	// Act.
-	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	got := r.resolve(&protocolv1.Event{Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}, 30)
 	// Assert.
 	if got.GetComplete() == nil {
 		t.Fatalf("verdict = %+v, want a complete turn", got.GetInvalid().GetProblems())
@@ -164,7 +164,7 @@ func TestAOneHourCacheTurnSettlesComplete(t *testing.T) {
 // messageDeltaUsageEvent is the vendor's relayed message_delta correction: the
 // FINAL cumulative usage for one API message, reported after the assistant
 // message that carried only the message_start snapshot.
-func messageDeltaUsageEvent(t *testing.T, apiMessageID string, usage *datav1.ApiUsage) *corev1.Event {
+func messageDeltaUsageEvent(t *testing.T, apiMessageID string, usage *datav1.ApiUsage) *protocolv1.Event {
 	t.Helper()
 	return accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_StreamEvent{StreamEvent: &datav1.StreamEvent{
 		Event: &datav1.RawMessageStreamEvent{Event: &datav1.RawMessageStreamEvent_MessageDelta{MessageDelta: &datav1.MessageDeltaEvent{
@@ -177,7 +177,7 @@ func messageDeltaUsageEvent(t *testing.T, apiMessageID string, usage *datav1.Api
 // snapshotAssistantEvent is one assistant message as the stream plane delivers
 // it: settled input and cache counters, and only the INTERIM output count the
 // message_start snapshot knew.
-func snapshotAssistantEvent(t *testing.T, apiMessageID string, snapshotOutput int64) *corev1.Event {
+func snapshotAssistantEvent(t *testing.T, apiMessageID string, snapshotOutput int64) *protocolv1.Event {
 	t.Helper()
 	return accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
 		Message: &datav1.ApiAssistantMessage{Id: apiMessageID, Model: "claude-opus-5", Usage: &datav1.ApiUsage{InputTokens: 33, OutputTokens: snapshotOutput}},
@@ -204,14 +204,14 @@ func TestResponseUsageCorrectionReconcilesTheOutputLedger(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newTurnAccountingReducer(t.Logf)
-			r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+			r.observe(&protocolv1.Event{Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 				QueryInstanceId: "q",
-				Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{
+				Event: &protocolv1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &protocolv1.QueryRuntimeObserved{
 					Identity: completeRuntimeIdentity(),
 				}},
 			}}}, "s")
-			r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
-			r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
+			r.observe(&protocolv1.Event{ProducedAtMs: 10, Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}, "s")
+			r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
 			for _, step := range tc.order {
 				switch step {
 				case "assistant":
@@ -228,8 +228,8 @@ func TestResponseUsageCorrectionReconcilesTheOutputLedger(t *testing.T) {
 				Usage:      &datav1.Usage{InputTokens: 33, OutputTokens: 4407},
 				ModelUsage: map[string]*datav1.ModelUsage{"claude-opus-5": {InputTokens: 33, OutputTokens: 4407}},
 			}}}), "s")
-			r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
-			got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+			r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
+			got := r.resolve(&protocolv1.Event{Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}, 30)
 			if got.GetComplete() == nil {
 				t.Fatalf("accounting = %+v, want complete", got.GetInvalid().GetProblems())
 			}
@@ -247,14 +247,14 @@ func TestResponseUsageCorrectionReconcilesTheOutputLedger(t *testing.T) {
 // so, rather than being quietly reconciled against evidence nobody sent.
 func TestUncorrectedResponseStillReportsTheLedgerDisagreement(t *testing.T) {
 	r := newTurnAccountingReducer(t.Logf)
-	r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	r.observe(&protocolv1.Event{Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "q",
-		Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{
+		Event: &protocolv1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &protocolv1.QueryRuntimeObserved{
 			Identity: completeRuntimeIdentity(),
 		}},
 	}}}, "s")
-	r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
-	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
+	r.observe(&protocolv1.Event{ProducedAtMs: 10, Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}, "s")
+	r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
 	r.observe(snapshotAssistantEvent(t, "msg_old", 563), "s")
 	// An old row: the relayed frame carries the legacy narrow usage only, with
 	// neither of the fields the amendment added.
@@ -269,8 +269,8 @@ func TestUncorrectedResponseStillReportsTheLedgerDisagreement(t *testing.T) {
 		Usage:      &datav1.Usage{InputTokens: 33, OutputTokens: 4407},
 		ModelUsage: map[string]*datav1.ModelUsage{"claude-opus-5": {InputTokens: 33, OutputTokens: 4407}},
 	}}}), "s")
-	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
-	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
+	got := r.resolve(&protocolv1.Event{Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}, 30)
 	var mismatch []string
 	for _, problem := range got.GetInvalid().GetProblems() {
 		mismatch = append(mismatch, problem.GetTokenLedgerMismatch().GetDifferingFieldPaths()...)
@@ -291,7 +291,7 @@ func TestPerContentBlockDuplicatesDoNotConflictAfterCorrection(t *testing.T) {
 	r := newTurnAccountingReducer(t.Logf)
 	r.queryID = "q"
 	r.runtime = completeRuntimeIdentity()
-	r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
+	r.observe(&protocolv1.Event{ProducedAtMs: 10, Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}, "s")
 	r.observe(snapshotAssistantEvent(t, "msg_dup", 5), "s")
 	r.observe(messageDeltaUsageEvent(t, "msg_dup", &datav1.ApiUsage{InputTokens: 33, OutputTokens: 4407}), "s")
 	r.observe(snapshotAssistantEvent(t, "msg_dup", 5), "s")
@@ -308,7 +308,7 @@ func TestPerContentBlockDuplicatesDoNotConflictAfterCorrection(t *testing.T) {
 }
 
 func TestReconcileTokenUsageNamesEveryResponseInStableOrderWithoutResult(t *testing.T) {
-	records := []*frontendv1.TokenUtilization{
+	records := []*statev1.TokenUtilization{
 		{ApiMessageId: "message-b"},
 		{ApiMessageId: "message-c"},
 		{ApiMessageId: "message-a"},
@@ -322,7 +322,7 @@ func TestReconcileTokenUsageNamesEveryResponseInStableOrderWithoutResult(t *test
 
 func TestTurnAccountingReducerRejectsUsageWithoutAPIMessageID(t *testing.T) {
 	r := newTurnAccountingReducer(nil)
-	if err := r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn"}}}, "session"); err != nil {
+	if err := r.observe(&protocolv1.Event{Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "turn"}}}, "session"); err != nil {
 		t.Fatal(err)
 	}
 	err := r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Usage: &datav1.ApiUsage{InputTokens: 1}}}}}), "session")
@@ -336,7 +336,7 @@ func TestTurnAccountingReducerRejectsUsageWithoutAPIMessageID(t *testing.T) {
 
 func TestResponseWithoutMessageStartRemainsExplicitlyUntimed(t *testing.T) {
 	r := newTurnAccountingReducer(nil)
-	if err := r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s"); err != nil {
+	if err := r.observe(&protocolv1.Event{Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}, "s"); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "historical", Model: "model", Usage: &datav1.ApiUsage{OutputTokens: 2}}}}}), "s"); err != nil {
@@ -347,11 +347,11 @@ func TestResponseWithoutMessageStartRemainsExplicitlyUntimed(t *testing.T) {
 	}
 }
 
-func completeRuntimeIdentity() *corev1.QueryRuntimeIdentity {
-	fingerprint := func(value string) *corev1.EvidenceFingerprint {
-		return &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Sha256{Sha256: value}}
+func completeRuntimeIdentity() *protocolv1.QueryRuntimeIdentity {
+	fingerprint := func(value string) *protocolv1.EvidenceFingerprint {
+		return &protocolv1.EvidenceFingerprint{Evidence: &protocolv1.EvidenceFingerprint_Sha256{Sha256: value}}
 	}
-	return &corev1.QueryRuntimeIdentity{
+	return &protocolv1.QueryRuntimeIdentity{
 		VendorSessionId: "vendor", EffectiveModel: "model", SdkVersion: "sdk", ClaudeCodeVersion: "code",
 		ShimBuildSha: "shim", AuthSource: "auth", SubscriptionType: "subscription", FastModeState: "state", FastModeReason: "reason",
 		EffectiveOptions: fingerprint("options"), Settings: fingerprint("settings"), Tools: fingerprint("tools"), Mcp: fingerprint("mcp"), ContextPrefix: fingerprint("prefix"),
@@ -361,7 +361,7 @@ func completeRuntimeIdentity() *corev1.QueryRuntimeIdentity {
 func TestTurnAccountingHandshakeBindsQueryAndRuntimeIdentityWithoutMutationOnRejection(t *testing.T) {
 	r := newTurnAccountingReducer(nil)
 	runtime := completeRuntimeIdentity()
-	hello := &corev1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 17, VendorSessionId: "vendor", QueryRuntimeIdentity: runtime}
+	hello := &protocolv1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 17, VendorSessionId: "vendor", QueryRuntimeIdentity: runtime}
 	if err := r.bindHandshakeIdentity(hello); err != nil {
 		t.Fatalf("bind first hello: %v", err)
 	}
@@ -374,16 +374,16 @@ func TestTurnAccountingHandshakeBindsQueryAndRuntimeIdentityWithoutMutationOnRej
 
 	tests := []struct {
 		name  string
-		hello *corev1.ShimHello
+		hello *protocolv1.ShimHello
 		want  string
 	}{
-		{name: "blank query", hello: &corev1.ShimHello{VendorSessionId: "vendor"}, want: "omitted query_instance_id"},
-		{name: "different query", hello: &corev1.ShimHello{QueryInstanceId: "query-2", VendorSessionId: "vendor"}, want: "does not match bound"},
-		{name: "different creation sequence", hello: &corev1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 18, VendorSessionId: "vendor"}, want: "does not match bound query_created_seq"},
-		{name: "runtime lacks hello vendor", hello: &corev1.ShimHello{QueryInstanceId: "query-1", QueryRuntimeIdentity: runtime}, want: "without vendor_session_id"},
-		{name: "runtime lacks vendor", hello: &corev1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 17, VendorSessionId: "vendor", QueryRuntimeIdentity: &corev1.QueryRuntimeIdentity{}}, want: "omitted vendor_session_id"},
-		{name: "runtime vendor mismatch", hello: &corev1.ShimHello{QueryInstanceId: "query-1", VendorSessionId: "vendor-other", QueryRuntimeIdentity: runtime}, want: "does not match vendor_session_id"},
-		{name: "runtime differs within one vendor session", hello: &corev1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 17, VendorSessionId: "vendor", QueryRuntimeIdentity: &corev1.QueryRuntimeIdentity{VendorSessionId: "vendor", EffectiveModel: "different"}}, want: "does not match the bound runtime identity"},
+		{name: "blank query", hello: &protocolv1.ShimHello{VendorSessionId: "vendor"}, want: "omitted query_instance_id"},
+		{name: "different query", hello: &protocolv1.ShimHello{QueryInstanceId: "query-2", VendorSessionId: "vendor"}, want: "does not match bound"},
+		{name: "different creation sequence", hello: &protocolv1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 18, VendorSessionId: "vendor"}, want: "does not match bound query_created_seq"},
+		{name: "runtime lacks hello vendor", hello: &protocolv1.ShimHello{QueryInstanceId: "query-1", QueryRuntimeIdentity: runtime}, want: "without vendor_session_id"},
+		{name: "runtime lacks vendor", hello: &protocolv1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 17, VendorSessionId: "vendor", QueryRuntimeIdentity: &protocolv1.QueryRuntimeIdentity{}}, want: "omitted vendor_session_id"},
+		{name: "runtime vendor mismatch", hello: &protocolv1.ShimHello{QueryInstanceId: "query-1", VendorSessionId: "vendor-other", QueryRuntimeIdentity: runtime}, want: "does not match vendor_session_id"},
+		{name: "runtime differs within one vendor session", hello: &protocolv1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 17, VendorSessionId: "vendor", QueryRuntimeIdentity: &protocolv1.QueryRuntimeIdentity{VendorSessionId: "vendor", EffectiveModel: "different"}}, want: "does not match the bound runtime identity"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -397,9 +397,9 @@ func TestTurnAccountingHandshakeBindsQueryAndRuntimeIdentityWithoutMutationOnRej
 			}
 		})
 	}
-	rotated := proto.Clone(runtime).(*corev1.QueryRuntimeIdentity)
+	rotated := proto.Clone(runtime).(*protocolv1.QueryRuntimeIdentity)
 	rotated.VendorSessionId = "vendor-rotated"
-	if err := r.bindHandshakeIdentity(&corev1.ShimHello{QueryInstanceId: "query-1", VendorSessionId: "vendor-rotated", QueryRuntimeIdentity: rotated}); err != nil {
+	if err := r.bindHandshakeIdentity(&protocolv1.ShimHello{QueryInstanceId: "query-1", VendorSessionId: "vendor-rotated", QueryRuntimeIdentity: rotated}); err != nil {
 		t.Fatalf("bind rotated runtime: %v", err)
 	}
 	if r.queryID != "query-1" || !proto.Equal(r.runtime, rotated) {
@@ -413,7 +413,7 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 		logs = append(logs, fmt.Sprintf(format, args...))
 	}, nil, nil, nil, nil, nil)
 	liveRuntime := completeRuntimeIdentity()
-	if err := c.accounting.bindHandshakeIdentity(&corev1.ShimHello{
+	if err := c.accounting.bindHandshakeIdentity(&protocolv1.ShimHello{
 		QueryInstanceId:      "live-query",
 		QueryCreatedSeq:      8,
 		VendorSessionId:      "vendor",
@@ -422,27 +422,27 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 		t.Fatalf("bind live handshake: %v", err)
 	}
 
-	historicalCreated := &corev1.Event{Seq: 5, QueryInstanceId: "retired-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	historicalCreated := &protocolv1.Event{Seq: 5, QueryInstanceId: "retired-query", Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "retired-query",
-		Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{
-			Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "vendor"}},
+		Event: &protocolv1.QueryLifecycle_Created{Created: &protocolv1.QueryCreated{
+			Invocation: &protocolv1.QueryCreated_Resumed{Resumed: &protocolv1.ResumedQuery{RequestedVendorSessionId: "vendor"}},
 		}},
 	}}}
-	historicalRuntime := &corev1.Event{Seq: 6, QueryInstanceId: "retired-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	historicalRuntime := &protocolv1.Event{Seq: 6, QueryInstanceId: "retired-query", Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "retired-query",
-		Event:           &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: liveRuntime}},
+		Event:           &protocolv1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &protocolv1.QueryRuntimeObserved{Identity: liveRuntime}},
 	}}}
-	historicalTerminated := &corev1.Event{Seq: 7, QueryInstanceId: "retired-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	historicalTerminated := &protocolv1.Event{Seq: 7, QueryInstanceId: "retired-query", Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "retired-query",
 		ObservedAtMs:    1234,
-		Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{
-			VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"},
-			Reason: &corev1.QueryTerminated_Intentional{Intentional: &corev1.IntentionalQueryTermination{
+		Event: &protocolv1.QueryLifecycle_Terminated{Terminated: &protocolv1.QueryTerminated{
+			VendorIdentity: &protocolv1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"},
+			Reason: &protocolv1.QueryTerminated_Intentional{Intentional: &protocolv1.IntentionalQueryTermination{
 				Reason: "SIGTERM",
 			}},
 		}},
 	}}}
-	for _, historical := range []*corev1.Event{historicalCreated, historicalRuntime, historicalTerminated} {
+	for _, historical := range []*protocolv1.Event{historicalCreated, historicalRuntime, historicalTerminated} {
 		if err := c.Consume(historical); err != nil {
 			t.Fatalf("consume retired lifecycle seq=%d: %v", historical.GetSeq(), err)
 		}
@@ -450,20 +450,20 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 	if c.accounting.queryID != "live-query" || !proto.Equal(c.accounting.runtime, liveRuntime) {
 		t.Fatalf("retired lifecycle rebound accounting identity: query=%q runtime=%+v", c.accounting.queryID, c.accounting.runtime)
 	}
-	created := &corev1.Event{Seq: 8, QueryInstanceId: "live-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	created := &protocolv1.Event{Seq: 8, QueryInstanceId: "live-query", Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "live-query",
-		Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{
-			Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "vendor"}},
+		Event: &protocolv1.QueryLifecycle_Created{Created: &protocolv1.QueryCreated{
+			Invocation: &protocolv1.QueryCreated_Resumed{Resumed: &protocolv1.ResumedQuery{RequestedVendorSessionId: "vendor"}},
 		}},
 	}}}
 	if err := c.Consume(created); err != nil {
 		t.Fatalf("consume live query creation: %v", err)
 	}
-	observedRuntime := proto.Clone(liveRuntime).(*corev1.QueryRuntimeIdentity)
+	observedRuntime := proto.Clone(liveRuntime).(*protocolv1.QueryRuntimeIdentity)
 	observedRuntime.FastModeReason = "runtime event"
-	runtimeObserved := &corev1.Event{Seq: 9, QueryInstanceId: "live-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	runtimeObserved := &protocolv1.Event{Seq: 9, QueryInstanceId: "live-query", Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "live-query",
-		Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{
+		Event: &protocolv1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &protocolv1.QueryRuntimeObserved{
 			Identity: observedRuntime,
 		}},
 	}}}
@@ -476,7 +476,7 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 	// THE LIVE CONTRADICTION IS STILL FATAL. The same retired-query payload,
 	// but PRODUCED BY the live query: the running invocation is claiming a
 	// lifecycle that is not its own, which no provenance rule excuses.
-	contradiction := proto.Clone(historicalTerminated).(*corev1.Event)
+	contradiction := proto.Clone(historicalTerminated).(*protocolv1.Event)
 	contradiction.Seq = 10
 	contradiction.QueryInstanceId = "live-query"
 	if err := c.Consume(contradiction); err == nil || !strings.Contains(err.Error(), "does not match bound query_instance_id") {
@@ -499,19 +499,19 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 
 func TestHistoricalResumeIdentityMismatchRemainsFatalBeforeLiveQueryBoundary(t *testing.T) {
 	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(string, ...any) {}, nil, nil, nil, nil, nil)
-	if err := c.accounting.bindHandshakeIdentity(&corev1.ShimHello{QueryInstanceId: "live-query", QueryCreatedSeq: 10, VendorSessionId: "vendor"}); err != nil {
+	if err := c.accounting.bindHandshakeIdentity(&protocolv1.ShimHello{QueryInstanceId: "live-query", QueryCreatedSeq: 10, VendorSessionId: "vendor"}); err != nil {
 		t.Fatalf("bind live handshake: %v", err)
 	}
-	created := &corev1.Event{Seq: 5, QueryInstanceId: "retired-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	created := &protocolv1.Event{Seq: 5, QueryInstanceId: "retired-query", Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "retired-query",
-		Event:           &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "requested-vendor"}}}},
+		Event:           &protocolv1.QueryLifecycle_Created{Created: &protocolv1.QueryCreated{Invocation: &protocolv1.QueryCreated_Resumed{Resumed: &protocolv1.ResumedQuery{RequestedVendorSessionId: "requested-vendor"}}}},
 	}}}
 	if err := c.Consume(created); err != nil {
 		t.Fatalf("consume historical QueryCreated: %v", err)
 	}
-	runtime := &corev1.Event{Seq: 6, QueryInstanceId: "retired-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	runtime := &protocolv1.Event{Seq: 6, QueryInstanceId: "retired-query", Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "retired-query",
-		Event:           &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: &corev1.QueryRuntimeIdentity{VendorSessionId: "replacement-vendor"}}},
+		Event:           &protocolv1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &protocolv1.QueryRuntimeObserved{Identity: &protocolv1.QueryRuntimeIdentity{VendorSessionId: "replacement-vendor"}}},
 	}}}
 	err := c.Consume(runtime)
 	if err == nil || !strings.Contains(err.Error(), `resumed query reported vendor session "replacement-vendor" instead of requested session "requested-vendor"`) {
@@ -545,7 +545,7 @@ func TestAccountingBookkeepingFailureOnApplyDoesNotDenyEstablishment(t *testing.
 	malformed := usageObservation("t-missing", true) // names a turn the reducer never admitted.
 
 	// Act.
-	err := c.Apply(&corev1.Event{Seq: 1, RequestId: "t-missing", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: malformed}})
+	err := c.Apply(&protocolv1.Event{Seq: 1, RequestId: "t-missing", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: malformed}})
 
 	// Assert.
 	if err != nil {
@@ -564,7 +564,7 @@ func TestAccountingQueryIdentityContradictionOnApplyStaysFatal(t *testing.T) {
 	// Arrange.
 	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(string, ...any) {}, nil, nil, nil, nil, nil)
 	c.accounting.queryID = "live-query"
-	contradiction := &corev1.Event{Seq: 1, QueryInstanceId: "live-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	contradiction := &protocolv1.Event{Seq: 1, QueryInstanceId: "live-query", Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "other-query",
 	}}}
 
@@ -791,7 +791,7 @@ func TestTokenUtilizationFromEventMapsSubagentLineageExactly(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := record.GetSubagent()
-	want := &frontendv1.TokenUtilizationSubagent{AgentId: "agent", ParentToolUseId: "tool", ParentAgentId: "parent", SubagentType: "research", TaskDescription: "investigate"}
+	want := &statev1.TokenUtilizationSubagent{AgentId: "agent", ParentToolUseId: "tool", ParentAgentId: "parent", SubagentType: "research", TaskDescription: "investigate"}
 	if !proto.Equal(got, want) {
 		t.Fatalf("subagent = %v, want %v", got, want)
 	}
@@ -844,7 +844,7 @@ func TestTokenUtilizationObservationMapsHistoricalTranscriptWithoutInventingTurn
 	if err != nil {
 		t.Fatal(err)
 	}
-	event := &corev1.Event{SessionId: "claude", Plane: corev1.Plane_PLANE_FILE, Payload: &corev1.Event_Vendor{Vendor: vendor}}
+	event := &protocolv1.Event{SessionId: "claude", Plane: protocolv1.Plane_PLANE_FILE, Payload: &protocolv1.Event_Vendor{Vendor: vendor}}
 
 	observation, err := tokenUtilizationObservationFromEvent(event, "session", nil)
 	if err != nil {
@@ -879,7 +879,7 @@ func TestTokenUtilizationObservationRejectsHistoricalTranscriptSessionMismatch(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	event := &corev1.Event{SessionId: "claude", Plane: corev1.Plane_PLANE_FILE, Payload: &corev1.Event_Vendor{Vendor: vendor}}
+	event := &protocolv1.Event{SessionId: "claude", Plane: protocolv1.Plane_PLANE_FILE, Payload: &protocolv1.Event_Vendor{Vendor: vendor}}
 	if _, err := tokenUtilizationObservationFromEvent(event, "session", nil); err == nil || !strings.Contains(err.Error(), "Claude session mismatch") {
 		t.Fatalf("mismatched transcript error = %v, want Claude session mismatch", err)
 	}
@@ -899,7 +899,7 @@ func TestTokenUtilizationObservationRejectsHistoricalTranscriptSessionMismatch(t
 // lineage proves the retired id belongs to it.
 // ---------------------------------------------------------------------------
 
-func historicalTranscriptEvent(t *testing.T, envelopeSessionID, assistantSessionID string) *corev1.Event {
+func historicalTranscriptEvent(t *testing.T, envelopeSessionID, assistantSessionID string) *protocolv1.Event {
 	t.Helper()
 	line := &datav1.TranscriptLine{Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
 		Envelope: &datav1.LineEnvelope{SessionId: assistantSessionID},
@@ -914,7 +914,7 @@ func historicalTranscriptEvent(t *testing.T, envelopeSessionID, assistantSession
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &corev1.Event{SessionId: envelopeSessionID, Plane: corev1.Plane_PLANE_FILE, Payload: &corev1.Event_Vendor{Vendor: vendor}}
+	return &protocolv1.Event{SessionId: envelopeSessionID, Plane: protocolv1.Plane_PLANE_FILE, Payload: &protocolv1.Event_Vendor{Vendor: vendor}}
 }
 
 // TestTokenUtilizationObservationAcceptsHistoricalResponseFromAKnownPriorVendorSession
@@ -976,10 +976,10 @@ func TestTokenUtilizationObservationRejectsLiveResponseFromAKnownPriorVendorSess
 func TestReducerRecordsResumeLineageAndAdmitsTheRetiredSession(t *testing.T) {
 	// Arrange.
 	reducer := newTurnAccountingReducer(nil)
-	created := &corev1.Event{Seq: 1, QueryInstanceId: "q2", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	created := &protocolv1.Event{Seq: 1, QueryInstanceId: "q2", Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "q2",
-		Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{
-			Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "fe97f7a9-f138-45ec-b3cb-e608fa2fceb2"}},
+		Event: &protocolv1.QueryLifecycle_Created{Created: &protocolv1.QueryCreated{
+			Invocation: &protocolv1.QueryCreated_Resumed{Resumed: &protocolv1.ResumedQuery{RequestedVendorSessionId: "fe97f7a9-f138-45ec-b3cb-e608fa2fceb2"}},
 		}},
 	}}}
 	if err := reducer.observe(created, "session"); err != nil {
@@ -1019,7 +1019,7 @@ func TestTokenUtilizationFromEventRejectsSessionCorrelationViolations(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			event := &corev1.Event{SessionId: tc.eventSessionID, RequestId: "turn", Payload: &corev1.Event_Vendor{Vendor: vendor}}
+			event := &protocolv1.Event{SessionId: tc.eventSessionID, RequestId: "turn", Payload: &protocolv1.Event_Vendor{Vendor: vendor}}
 			if _, err := tokenUtilizationFromEvent(event, tc.daemonSessionID, nil); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want %q", err, tc.want)
 			}
@@ -1058,9 +1058,9 @@ func TestResponseUsageWithoutValidatedClaimFailsBeforeReducerMutation(t *testing
 
 func TestResponseUsageAcceptsRootTurnAdmittedByRotationBridge(t *testing.T) {
 	r := newTurnAccountingReducer(nil)
-	bridge := &corev1.Event{
+	bridge := &protocolv1.Event{
 		ProducedAtMs: 10,
-		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+		Payload: &protocolv1.Event_TurnClaimBridge{TurnClaimBridge: &protocolv1.TurnClaimBridge{
 			TurnId: "turn", PreviousSessionId: "vendor-old",
 		}},
 	}
@@ -1105,7 +1105,7 @@ func TestResponseUsagePreservesAbsentSDKRequestIdentityUnderActiveTurnClaim(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	event := &corev1.Event{SessionId: "vendor-session", RequestId: "turn", ProducedAtMs: 20, Payload: &corev1.Event_Vendor{Vendor: vendor}}
+	event := &protocolv1.Event{SessionId: "vendor-session", RequestId: "turn", ProducedAtMs: 20, Payload: &protocolv1.Event_Vendor{Vendor: vendor}}
 	if err := r.observe(event, "session"); err != nil {
 		t.Fatalf("observe absent SDK request identity: %v", err)
 	}
@@ -1156,7 +1156,7 @@ func TestUnmodeledUsageDiagnosticDeduplicatesByMessageAndPayload(t *testing.T) {
 	c.accounting.turns["t"] = &accountingTurn{}
 	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m", Model: "model", Usage: &datav1.ApiUsage{UnmodeledUsage: unmodeled}}}}})
 	for range 10 {
-		if err := c.Consume(proto.Clone(event).(*corev1.Event)); err != nil {
+		if err := c.Consume(proto.Clone(event).(*protocolv1.Event)); err != nil {
 			t.Fatalf("consume duplicated response: %v", err)
 		}
 	}
@@ -1196,8 +1196,8 @@ func TestUnmodeledUsageDiagnosticDoesNotLogPayloadValues(t *testing.T) {
 
 func TestTurnAccountingReducerInvalidatesMissingEvidence(t *testing.T) {
 	r := newTurnAccountingReducer(nil)
-	r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
-	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	r.observe(&protocolv1.Event{Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}, "s")
+	got := r.resolve(&protocolv1.Event{Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}, 30)
 	if got.GetInvalid() == nil || len(got.GetInvalid().GetProblems()) < 3 {
 		t.Fatalf("accounting = %+v", got)
 	}
@@ -1206,9 +1206,9 @@ func TestTurnAccountingReducerInvalidatesMissingEvidence(t *testing.T) {
 func TestTurnAccountingReducerInvalidatesIncompleteRuntimeIdentity(t *testing.T) {
 	r := newTurnAccountingReducer(nil)
 	r.queryID = "q"
-	r.runtime = &corev1.QueryRuntimeIdentity{EffectiveModel: "model"}
-	r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
-	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	r.runtime = &protocolv1.QueryRuntimeIdentity{EffectiveModel: "model"}
+	r.observe(&protocolv1.Event{Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}, "s")
+	got := r.resolve(&protocolv1.Event{Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}, 30)
 	var paths []string
 	for _, problem := range got.GetInvalid().GetProblems() {
 		paths = append(paths, problem.GetRuntimeIdentityIncomplete().GetMissingFieldPaths()...)
@@ -1224,11 +1224,11 @@ func TestTurnAccountingReducerInvalidatesIncompleteRuntimeIdentity(t *testing.T)
 // every field the daemon requires, settled. Tests below take exactly one field
 // away each, so a passing suite means each requirement is load-bearing on its
 // own rather than jointly.
-func fullRuntimeIdentity() *corev1.QueryRuntimeIdentity {
-	digest := func() *corev1.EvidenceFingerprint {
-		return &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Sha256{Sha256: "abc"}}
+func fullRuntimeIdentity() *protocolv1.QueryRuntimeIdentity {
+	digest := func() *protocolv1.EvidenceFingerprint {
+		return &protocolv1.EvidenceFingerprint{Evidence: &protocolv1.EvidenceFingerprint_Sha256{Sha256: "abc"}}
 	}
-	return &corev1.QueryRuntimeIdentity{
+	return &protocolv1.QueryRuntimeIdentity{
 		VendorSessionId:   "vendor",
 		EffectiveModel:    "model",
 		SdkVersion:        "0.3.220",
@@ -1246,13 +1246,13 @@ func fullRuntimeIdentity() *corev1.QueryRuntimeIdentity {
 
 // missingRuntimeIdentityPathsFor settles one turn against the given runtime
 // identity and returns the identity paths the record reported as missing.
-func missingRuntimeIdentityPathsFor(t *testing.T, runtime *corev1.QueryRuntimeIdentity) []string {
+func missingRuntimeIdentityPathsFor(t *testing.T, runtime *protocolv1.QueryRuntimeIdentity) []string {
 	t.Helper()
 	r := newTurnAccountingReducer(nil)
 	r.queryID = "q"
 	r.runtime = runtime
-	r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
-	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	r.observe(&protocolv1.Event{Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}, "s")
+	got := r.resolve(&protocolv1.Event{Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}, 30)
 	var paths []string
 	for _, problem := range got.GetInvalid().GetProblems() {
 		paths = append(paths, problem.GetRuntimeIdentityIncomplete().GetMissingFieldPaths()...)
@@ -1265,23 +1265,23 @@ func missingRuntimeIdentityPathsFor(t *testing.T, runtime *corev1.QueryRuntimeId
 func TestRuntimeIdentityRequiresEveryRecordableField(t *testing.T) {
 	tests := []struct {
 		name   string
-		clear  func(*corev1.QueryRuntimeIdentity)
+		clear  func(*protocolv1.QueryRuntimeIdentity)
 		want   string
 		absent bool
 	}{
-		{name: "a fully recorded identity is complete", clear: func(*corev1.QueryRuntimeIdentity) {}, absent: true},
-		{name: "vendor_session_id", clear: func(i *corev1.QueryRuntimeIdentity) { i.VendorSessionId = "" }, want: "vendor_session_id"},
-		{name: "effective_model", clear: func(i *corev1.QueryRuntimeIdentity) { i.EffectiveModel = "" }, want: "effective_model"},
-		{name: "sdk_version", clear: func(i *corev1.QueryRuntimeIdentity) { i.SdkVersion = "" }, want: "sdk_version"},
-		{name: "claude_code_version", clear: func(i *corev1.QueryRuntimeIdentity) { i.ClaudeCodeVersion = "" }, want: "claude_code_version"},
-		{name: "shim_build_sha", clear: func(i *corev1.QueryRuntimeIdentity) { i.ShimBuildSha = "" }, want: "shim_build_sha"},
-		{name: "auth_source", clear: func(i *corev1.QueryRuntimeIdentity) { i.AuthSource = "" }, want: "auth_source"},
-		{name: "fast_mode_state", clear: func(i *corev1.QueryRuntimeIdentity) { i.FastModeState = "" }, want: "fast_mode_state"},
-		{name: "effective_options", clear: func(i *corev1.QueryRuntimeIdentity) { i.EffectiveOptions = nil }, want: "effective_options"},
-		{name: "settings", clear: func(i *corev1.QueryRuntimeIdentity) { i.Settings = nil }, want: "settings"},
-		{name: "tools", clear: func(i *corev1.QueryRuntimeIdentity) { i.Tools = nil }, want: "tools"},
-		{name: "mcp", clear: func(i *corev1.QueryRuntimeIdentity) { i.Mcp = nil }, want: "mcp"},
-		{name: "context_prefix", clear: func(i *corev1.QueryRuntimeIdentity) { i.ContextPrefix = nil }, want: "context_prefix"},
+		{name: "a fully recorded identity is complete", clear: func(*protocolv1.QueryRuntimeIdentity) {}, absent: true},
+		{name: "vendor_session_id", clear: func(i *protocolv1.QueryRuntimeIdentity) { i.VendorSessionId = "" }, want: "vendor_session_id"},
+		{name: "effective_model", clear: func(i *protocolv1.QueryRuntimeIdentity) { i.EffectiveModel = "" }, want: "effective_model"},
+		{name: "sdk_version", clear: func(i *protocolv1.QueryRuntimeIdentity) { i.SdkVersion = "" }, want: "sdk_version"},
+		{name: "claude_code_version", clear: func(i *protocolv1.QueryRuntimeIdentity) { i.ClaudeCodeVersion = "" }, want: "claude_code_version"},
+		{name: "shim_build_sha", clear: func(i *protocolv1.QueryRuntimeIdentity) { i.ShimBuildSha = "" }, want: "shim_build_sha"},
+		{name: "auth_source", clear: func(i *protocolv1.QueryRuntimeIdentity) { i.AuthSource = "" }, want: "auth_source"},
+		{name: "fast_mode_state", clear: func(i *protocolv1.QueryRuntimeIdentity) { i.FastModeState = "" }, want: "fast_mode_state"},
+		{name: "effective_options", clear: func(i *protocolv1.QueryRuntimeIdentity) { i.EffectiveOptions = nil }, want: "effective_options"},
+		{name: "settings", clear: func(i *protocolv1.QueryRuntimeIdentity) { i.Settings = nil }, want: "settings"},
+		{name: "tools", clear: func(i *protocolv1.QueryRuntimeIdentity) { i.Tools = nil }, want: "tools"},
+		{name: "mcp", clear: func(i *protocolv1.QueryRuntimeIdentity) { i.Mcp = nil }, want: "mcp"},
+		{name: "context_prefix", clear: func(i *protocolv1.QueryRuntimeIdentity) { i.ContextPrefix = nil }, want: "context_prefix"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1334,14 +1334,14 @@ func TestRuntimeIdentityDoesNotRequireNonInitEvidence(t *testing.T) {
 func TestEvidenceFingerprintSettlement(t *testing.T) {
 	tests := []struct {
 		name        string
-		fingerprint *corev1.EvidenceFingerprint
+		fingerprint *protocolv1.EvidenceFingerprint
 		want        bool
 	}{
-		{name: "a digest is settled", fingerprint: &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Sha256{Sha256: "abc"}}, want: true},
-		{name: "a caused unavailability is settled", fingerprint: &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Unavailable{Unavailable: &corev1.FingerprintUnavailable{Cause: "not exposed"}}}, want: true},
-		{name: "an empty digest is unsettled", fingerprint: &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Sha256{Sha256: ""}}, want: false},
-		{name: "a causeless unavailability is unsettled", fingerprint: &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Unavailable{Unavailable: &corev1.FingerprintUnavailable{}}}, want: false},
-		{name: "an armless fingerprint is unsettled", fingerprint: &corev1.EvidenceFingerprint{}, want: false},
+		{name: "a digest is settled", fingerprint: &protocolv1.EvidenceFingerprint{Evidence: &protocolv1.EvidenceFingerprint_Sha256{Sha256: "abc"}}, want: true},
+		{name: "a caused unavailability is settled", fingerprint: &protocolv1.EvidenceFingerprint{Evidence: &protocolv1.EvidenceFingerprint_Unavailable{Unavailable: &protocolv1.FingerprintUnavailable{Cause: "not exposed"}}}, want: true},
+		{name: "an empty digest is unsettled", fingerprint: &protocolv1.EvidenceFingerprint{Evidence: &protocolv1.EvidenceFingerprint_Sha256{Sha256: ""}}, want: false},
+		{name: "a causeless unavailability is unsettled", fingerprint: &protocolv1.EvidenceFingerprint{Evidence: &protocolv1.EvidenceFingerprint_Unavailable{Unavailable: &protocolv1.FingerprintUnavailable{}}}, want: false},
+		{name: "an armless fingerprint is unsettled", fingerprint: &protocolv1.EvidenceFingerprint{}, want: false},
 		{name: "an absent fingerprint is unsettled", fingerprint: nil, want: false},
 	}
 	for _, tc := range tests {
@@ -1354,8 +1354,8 @@ func TestEvidenceFingerprintSettlement(t *testing.T) {
 }
 
 func TestHydratePersistedAccountingFeedsBothReplayConsumers(t *testing.T) {
-	want := &frontendv1.TurnAccounting{TurnId: "turn", Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
-	m := &Manager{cfg: Config{TurnAccountings: replayTurnAccountingStore{accountings: []*frontendv1.TurnAccounting{want}}}, logf: t.Logf}
+	want := &statev1.TurnAccounting{TurnId: "turn", Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
+	m := &Manager{cfg: Config{TurnAccountings: replayTurnAccountingStore{accountings: []*statev1.TurnAccounting{want}}}, logf: t.Logf}
 	for _, cons := range []*consumer{
 		newConsumer("ws", "session", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil),
 		newConsumer("ws", "session", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil),
@@ -1405,16 +1405,16 @@ func containsPath(paths []string, suffix string) bool {
 func resolveWithWindowResets(t *testing.T, startResetsAtMs, endResetsAtMs int64) bool {
 	t.Helper()
 	r := newTurnAccountingReducer(nil)
-	r.runtime = &corev1.QueryRuntimeIdentity{EffectiveModel: "model"}
+	r.runtime = &protocolv1.QueryRuntimeIdentity{EffectiveModel: "model"}
 	r.queryID = "q"
-	r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
+	r.observe(&protocolv1.Event{Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}, "s")
 	start := usageObservation("t", true)
 	end := usageObservation("t", false)
 	start.GetAvailable().FiveHour.ResetsAtMs = startResetsAtMs
 	end.GetAvailable().FiveHour.ResetsAtMs = endResetsAtMs
-	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: start}}, "s")
-	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: end}}, "s")
-	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: start}}, "s")
+	r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: end}}, "s")
+	got := r.resolve(&protocolv1.Event{Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}, 30)
 	for _, problem := range got.GetInvalid().GetProblems() {
 		if problem.GetWindowReset() != nil {
 			return true
@@ -1471,11 +1471,11 @@ func TestTerminalAccountingPersistenceFailureDegradesAccountingWithoutDenyingEst
 	var logs []string
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
 	c.accountingStore = failingTurnAccountingStore{err: errors.New("disk unavailable")}
-	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 	c.Consume(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}}}))
-	err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}})
+	err := c.Apply(&protocolv1.Event{Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}})
 	if err != nil {
 		t.Fatalf("Apply error = %v, want the turn boundary accepted despite the persistence failure", err)
 	}
@@ -1502,13 +1502,13 @@ func TestTerminalAccountingRepublishesSessionViewAfterTerminalConversation(t *te
 		push.trace = append(push.trace, "session_view")
 		push.mu.Unlock()
 	}
-	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Consume(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}}})); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 	push.mu.Lock()
@@ -1539,12 +1539,12 @@ func TestUnexpectedQueryTerminationUsesOneAuthoritativeDegradedState(t *testing.
 	var logs []string
 	degraded := 0
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
-	c.onDegraded = func(*corev1.DegradedState) { degraded++ }
-	if err := c.Consume(&corev1.Event{Seq: 7, ProducedAtMs: 9999, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{QueryInstanceId: "q", ObservedAtMs: 1234, Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"}, Reason: &corev1.QueryTerminated_UnexpectedEof{UnexpectedEof: &corev1.UnexpectedQueryEof{}}}}}}}); err != nil {
+	c.onDegraded = func(*protocolv1.DegradedState) { degraded++ }
+	if err := c.Consume(&protocolv1.Event{Seq: 7, ProducedAtMs: 9999, Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{QueryInstanceId: "q", ObservedAtMs: 1234, Event: &protocolv1.QueryLifecycle_Terminated{Terminated: &protocolv1.QueryTerminated{VendorIdentity: &protocolv1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"}, Reason: &protocolv1.QueryTerminated_UnexpectedEof{UnexpectedEof: &protocolv1.UnexpectedQueryEof{}}}}}}}); err != nil {
 		t.Fatal(err)
 	}
 	queryID := "q"
-	c.Degraded("s", nil, &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID})
+	c.Degraded("s", nil, &protocolv1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID})
 	if degraded != 1 {
 		t.Fatalf("degraded callbacks = %d", degraded)
 	}
@@ -1565,9 +1565,9 @@ func TestReplayOnlyUnexpectedQueryDegradedStateSurfacesOnce(t *testing.T) {
 	push := &fakePusher{}
 	degraded := 0
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
-	c.onDegraded = func(*corev1.DegradedState) { degraded++ }
+	c.onDegraded = func(*protocolv1.DegradedState) { degraded++ }
 	queryID := "q"
-	c.Degraded("s", nil, &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID})
+	c.Degraded("s", nil, &protocolv1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID})
 	if degraded != 1 || len(push.convo) != 1 || errclass.TypeName(push.convo[0].GetMessages()[0].GetFailureCard()) != "unexpected_query_termination" {
 		t.Fatalf("replay-only degraded state: callbacks=%d pushes=%+v", degraded, push.convo)
 	}
@@ -1576,8 +1576,8 @@ func TestReplayOnlyUnexpectedQueryDegradedStateSurfacesOnce(t *testing.T) {
 func TestDurableReplayAttachesByteEquivalentPersistedAccounting(t *testing.T) {
 	push := &fakePusher{}
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
-	wantUsage := &frontendv1.TokenUtilization{ApiMessageId: "m", Usage: &frontendv1.VendorTokenUsage{InputTokens: 7}}
-	want := &frontendv1.TurnAccounting{TurnId: "t", QueryInstanceId: "q", Responses: []*frontendv1.TokenUtilization{wantUsage}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	wantUsage := &statev1.TokenUtilization{ApiMessageId: "m", Usage: &statev1.VendorTokenUsage{InputTokens: 7}}
+	want := &statev1.TurnAccounting{TurnId: "t", QueryInstanceId: "q", Responses: []*statev1.TokenUtilization{wantUsage}, Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	c.replayedAccounting["t"] = want
 	c.replayedResponses["m"] = wantUsage
 	assistant := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Uuid: "assistant-record", Message: &datav1.ApiAssistantMessage{Id: "m", Usage: &datav1.ApiUsage{InputTokens: 7}, Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hello"}}}}}}}})
@@ -1609,9 +1609,9 @@ func TestDurableReplayAttachesByteEquivalentPersistedAccounting(t *testing.T) {
 func TestHistoricalConversationNeverFallsBackToLiveReducerAccounting(t *testing.T) {
 	push := &fakePusher{}
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
-	liveUsage := &frontendv1.TokenUtilization{ApiMessageId: "m", Usage: &frontendv1.VendorTokenUsage{InputTokens: 99}}
+	liveUsage := &statev1.TokenUtilization{ApiMessageId: "m", Usage: &statev1.VendorTokenUsage{InputTokens: 99}}
 	c.accounting.activeTurnID = "live-turn"
-	c.accounting.turns["live-turn"] = &accountingTurn{responses: []*frontendv1.TokenUtilization{liveUsage}}
+	c.accounting.turns["live-turn"] = &accountingTurn{responses: []*statev1.TokenUtilization{liveUsage}}
 	ev := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Uuid: "assistant-record", Message: &datav1.ApiAssistantMessage{Id: "m", Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hello"}}}}}}}})
 
 	c.pushConversation(ev, false)
@@ -1641,7 +1641,7 @@ func TestHistoricalConversationAttachesTranscriptUsageOnLiveAndReplayPaths(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	event := &corev1.Event{Seq: 9, SessionId: "claude", Plane: corev1.Plane_PLANE_FILE, Payload: &corev1.Event_Vendor{Vendor: vendor}}
+	event := &protocolv1.Event{Seq: 9, SessionId: "claude", Plane: protocolv1.Plane_PLANE_FILE, Payload: &protocolv1.Event_Vendor{Vendor: vendor}}
 
 	c.pushConversation(event, true)
 	c.pushConversation(event, false)
@@ -1715,16 +1715,16 @@ func TestHistoricalUsagePersistenceFailurePrecedesConsumerMutation(t *testing.T)
 func TestTokenUtilizationModelRejectionDegradesAccountingWithoutWithholdingConversation(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
-		plane     corev1.Plane
-		event     func(*testing.T) *corev1.Event
+		plane     protocolv1.Plane
+		event     func(*testing.T) *protocolv1.Event
 		prepare   func(*consumer)
 		wantModel string
 		claudeID  string
 	}{
 		{
 			name:  "live whitespace model",
-			plane: corev1.Plane_PLANE_STREAM,
-			event: func(t *testing.T) *corev1.Event {
+			plane: protocolv1.Plane_PLANE_STREAM,
+			event: func(t *testing.T) *protocolv1.Event {
 				// The uuid is the item's identity, and a curated message
 				// without one can state no durability class: its feed row would
 				// root at nothing. The SDK stamps one on every stream message;
@@ -1735,7 +1735,7 @@ func TestTokenUtilizationModelRejectionDegradesAccountingWithoutWithholdingConve
 					Usage:   &datav1.ApiUsage{InputTokens: 1},
 					Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "live response"}}}},
 				}}}})
-				ev.Seq, ev.Plane = 11, corev1.Plane_PLANE_STREAM
+				ev.Seq, ev.Plane = 11, protocolv1.Plane_PLANE_STREAM
 				ev.RequestId = "turn"
 				return ev
 			},
@@ -1745,8 +1745,8 @@ func TestTokenUtilizationModelRejectionDegradesAccountingWithoutWithholdingConve
 		},
 		{
 			name:  "historical blank model",
-			plane: corev1.Plane_PLANE_FILE,
-			event: func(t *testing.T) *corev1.Event {
+			plane: protocolv1.Plane_PLANE_FILE,
+			event: func(t *testing.T) *protocolv1.Event {
 				ev := historicalUsageEvent(t)
 				ev.Seq = 12
 				line := &datav1.TranscriptLine{}
@@ -1758,7 +1758,7 @@ func TestTokenUtilizationModelRejectionDegradesAccountingWithoutWithholdingConve
 				if err != nil {
 					t.Fatal(err)
 				}
-				ev.Payload = &corev1.Event_Vendor{Vendor: vendor}
+				ev.Payload = &protocolv1.Event_Vendor{Vendor: vendor}
 				return ev
 			},
 			prepare:   func(c *consumer) { c.historicalUsageStore = &fakeHistoricalUsageStore{} },
@@ -1785,17 +1785,17 @@ func TestTokenUtilizationModelRejectionDegradesAccountingWithoutWithholdingConve
 					}
 				}
 			}
-			if tc.plane == corev1.Plane_PLANE_STREAM && len(c.accounting.turns["turn"].responses) != 0 {
+			if tc.plane == protocolv1.Plane_PLANE_STREAM && len(c.accounting.turns["turn"].responses) != 0 {
 				t.Fatalf("invalid live token utilization mutated response ledger: %+v", c.accounting.turns["turn"].responses)
 			}
-			if tc.plane == corev1.Plane_PLANE_FILE && len(c.historicalUsageStore.(*fakeHistoricalUsageStore).records) != 0 {
+			if tc.plane == protocolv1.Plane_PLANE_FILE && len(c.historicalUsageStore.(*fakeHistoricalUsageStore).records) != 0 {
 				t.Fatalf("invalid historical token utilization reached durable store: %+v", c.historicalUsageStore.(*fakeHistoricalUsageStore).records)
 			}
 			log := strings.Join(logs, "\n")
 			for _, field := range []string{
 				"token utilization REJECTED before mutation",
 				"field_path=\"TokenUtilization.model\"",
-				"api_message_id=\"" + map[corev1.Plane]string{corev1.Plane_PLANE_STREAM: "live-message", corev1.Plane_PLANE_FILE: "message"}[tc.plane] + "\"",
+				"api_message_id=\"" + map[protocolv1.Plane]string{protocolv1.Plane_PLANE_STREAM: "live-message", protocolv1.Plane_PLANE_FILE: "message"}[tc.plane] + "\"",
 				"model=" + tc.wantModel,
 				"source_plane=" + tc.plane.String(),
 				"agent_repl_session_id=\"daemon-session\"",
@@ -1810,7 +1810,7 @@ func TestTokenUtilizationModelRejectionDegradesAccountingWithoutWithholdingConve
 	}
 }
 
-func historicalUsageEvent(t *testing.T) *corev1.Event {
+func historicalUsageEvent(t *testing.T) *protocolv1.Event {
 	t.Helper()
 	line := &datav1.TranscriptLine{Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
 		Envelope: &datav1.LineEnvelope{Uuid: "line", SessionId: "claude", AgentId: "nested"},
@@ -1822,7 +1822,7 @@ func historicalUsageEvent(t *testing.T) *corev1.Event {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &corev1.Event{Seq: 9, SessionId: "claude", Plane: corev1.Plane_PLANE_FILE, Payload: &corev1.Event_Vendor{Vendor: vendor}}
+	return &protocolv1.Event{Seq: 9, SessionId: "claude", Plane: protocolv1.Plane_PLANE_FILE, Payload: &protocolv1.Event_Vendor{Vendor: vendor}}
 }
 
 // TestUnknownUsageObservationDegradesAccountingWithoutDenyingTheEvent is the
@@ -1835,7 +1835,7 @@ func TestUnknownUsageObservationDegradesAccountingWithoutDenyingTheEvent(t *test
 	var logs []string
 	c := newConsumer("ws", "s", &fakePusher{}, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
 	c.accounting.queryID = "q"
-	ev := &corev1.Event{Seq: 9, RequestId: "t-missing", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t-missing", true)}}
+	ev := &protocolv1.Event{Seq: 9, RequestId: "t-missing", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t-missing", true)}}
 	err := c.Apply(ev)
 	if err != nil {
 		t.Fatalf("Apply error = %v, want the event still applied despite the unknown-turn observation", err)
@@ -1857,71 +1857,89 @@ func TestMalformedUsageObservationDegradesAccountingWithoutDenyingTheEvent(t *te
 		name            string
 		authoritativeID string
 		requestID       string
-		mutate          func(*corev1.AccountUsageObservation)
+		mutate          func(*protocolv1.AccountUsageObservation)
 		want            string
 	}{
 		{name: "authoritative query blank", authoritativeID: "", requestID: "t", want: "authoritative query_instance_id is required"},
-		{name: "observation query blank", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.QueryInstanceId = " " }, want: "query_instance_id is required"},
-		{name: "observation query mismatches", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.QueryInstanceId = "other" }, want: "does not match authoritative query_instance_id"},
-		{name: "turn blank", authoritativeID: "q", requestID: "", mutate: func(o *corev1.AccountUsageObservation) { o.TurnId = " " }, want: "turn_id is required"},
+		{name: "observation query blank", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.QueryInstanceId = " " }, want: "query_instance_id is required"},
+		{name: "observation query mismatches", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.QueryInstanceId = "other" }, want: "does not match authoritative query_instance_id"},
+		{name: "turn blank", authoritativeID: "q", requestID: "", mutate: func(o *protocolv1.AccountUsageObservation) { o.TurnId = " " }, want: "turn_id is required"},
 		{name: "request mismatches turn", authoritativeID: "q", requestID: "other", want: "event request_id \"other\" does not match turn_id \"t\""},
-		{name: "boundary timestamp zero", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.BoundaryAtMs = 0 }, want: "boundary_at_ms must be positive"},
-		{name: "boundary timestamp negative", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.BoundaryAtMs = -1 }, want: "boundary_at_ms must be positive"},
-		{name: "observed timestamp zero", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.ObservedAtMs = 0 }, want: "observed_at_ms must be positive"},
-		{name: "observed timestamp negative", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.ObservedAtMs = -1 }, want: "observed_at_ms must be positive"},
-		{name: "observation predates boundary", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.ObservedAtMs = o.BoundaryAtMs - 1 }, want: "precedes boundary_at_ms"},
-		{name: "sample latency negative", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.SampleLatencyMs = -1 }, want: "sample_latency_ms must be nonnegative"},
-		{name: "boundary absent", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.Boundary = nil }, want: "boundary is required"},
-		{name: "start boundary wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.Boundary = &corev1.AccountUsageObservation_TurnStart{} }, want: "turn_start boundary is nil"},
-		{name: "start boundary oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.Boundary = (*corev1.AccountUsageObservation_TurnStart)(nil) }, want: "turn_start boundary is nil"},
-		{name: "end boundary wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.Boundary = &corev1.AccountUsageObservation_TurnEnd{} }, want: "turn_end boundary is nil"},
-		{name: "end boundary oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.Boundary = (*corev1.AccountUsageObservation_TurnEnd)(nil) }, want: "turn_end boundary is nil"},
-		{name: "outcome absent", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.Outcome = nil }, want: "outcome is required"},
-		{name: "available wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.Outcome = &corev1.AccountUsageObservation_Available{} }, want: "available outcome requires five_hour"},
-		{name: "available oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.Outcome = (*corev1.AccountUsageObservation_Available)(nil) }, want: "available outcome requires five_hour"},
-		{name: "available five hour nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Available{Available: &corev1.AccountUsageAvailable{}}
+		{name: "boundary timestamp zero", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.BoundaryAtMs = 0 }, want: "boundary_at_ms must be positive"},
+		{name: "boundary timestamp negative", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.BoundaryAtMs = -1 }, want: "boundary_at_ms must be positive"},
+		{name: "observed timestamp zero", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.ObservedAtMs = 0 }, want: "observed_at_ms must be positive"},
+		{name: "observed timestamp negative", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.ObservedAtMs = -1 }, want: "observed_at_ms must be positive"},
+		{name: "observation predates boundary", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.ObservedAtMs = o.BoundaryAtMs - 1 }, want: "precedes boundary_at_ms"},
+		{name: "sample latency negative", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.SampleLatencyMs = -1 }, want: "sample_latency_ms must be nonnegative"},
+		{name: "boundary absent", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.Boundary = nil }, want: "boundary is required"},
+		{name: "start boundary wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Boundary = &protocolv1.AccountUsageObservation_TurnStart{}
+		}, want: "turn_start boundary is nil"},
+		{name: "start boundary oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Boundary = (*protocolv1.AccountUsageObservation_TurnStart)(nil)
+		}, want: "turn_start boundary is nil"},
+		{name: "end boundary wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Boundary = &protocolv1.AccountUsageObservation_TurnEnd{}
+		}, want: "turn_end boundary is nil"},
+		{name: "end boundary oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Boundary = (*protocolv1.AccountUsageObservation_TurnEnd)(nil)
+		}, want: "turn_end boundary is nil"},
+		{name: "outcome absent", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.Outcome = nil }, want: "outcome is required"},
+		{name: "available wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Available{}
 		}, want: "available outcome requires five_hour"},
-		{name: "utilization below range", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.GetAvailable().FiveHour.UtilizationPercent = -1 }, want: "utilization_percent must be finite and within [0,100]"},
-		{name: "utilization above range", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.GetAvailable().FiveHour.UtilizationPercent = 101 }, want: "utilization_percent must be finite and within [0,100]"},
-		{name: "utilization NaN", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.GetAvailable().FiveHour.UtilizationPercent = math.NaN() }, want: "utilization_percent must be finite and within [0,100]"},
-		{name: "utilization positive infinity", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.GetAvailable().FiveHour.UtilizationPercent = math.Inf(1) }, want: "utilization_percent must be finite and within [0,100]"},
-		{name: "utilization negative infinity", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.GetAvailable().FiveHour.UtilizationPercent = math.Inf(-1) }, want: "utilization_percent must be finite and within [0,100]"},
-		{name: "reset timestamp zero", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.GetAvailable().FiveHour.ResetsAtMs = 0 }, want: "resets_at_ms must be positive"},
-		{name: "reset timestamp negative", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.GetAvailable().FiveHour.ResetsAtMs = -1 }, want: "resets_at_ms must be positive"},
-		{name: "unavailable wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) { o.Outcome = &corev1.AccountUsageObservation_Unavailable{} }, want: "unavailable outcome requires a reason"},
-		{name: "unavailable oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = (*corev1.AccountUsageObservation_Unavailable)(nil)
+		{name: "available oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = (*protocolv1.AccountUsageObservation_Available)(nil)
+		}, want: "available outcome requires five_hour"},
+		{name: "available five hour nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Available{Available: &protocolv1.AccountUsageAvailable{}}
+		}, want: "available outcome requires five_hour"},
+		{name: "utilization below range", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.GetAvailable().FiveHour.UtilizationPercent = -1 }, want: "utilization_percent must be finite and within [0,100]"},
+		{name: "utilization above range", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.GetAvailable().FiveHour.UtilizationPercent = 101 }, want: "utilization_percent must be finite and within [0,100]"},
+		{name: "utilization NaN", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.GetAvailable().FiveHour.UtilizationPercent = math.NaN() }, want: "utilization_percent must be finite and within [0,100]"},
+		{name: "utilization positive infinity", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.GetAvailable().FiveHour.UtilizationPercent = math.Inf(1)
+		}, want: "utilization_percent must be finite and within [0,100]"},
+		{name: "utilization negative infinity", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.GetAvailable().FiveHour.UtilizationPercent = math.Inf(-1)
+		}, want: "utilization_percent must be finite and within [0,100]"},
+		{name: "reset timestamp zero", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.GetAvailable().FiveHour.ResetsAtMs = 0 }, want: "resets_at_ms must be positive"},
+		{name: "reset timestamp negative", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) { o.GetAvailable().FiveHour.ResetsAtMs = -1 }, want: "resets_at_ms must be positive"},
+		{name: "unavailable wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{}
 		}, want: "unavailable outcome requires a reason"},
-		{name: "unavailable reason absent", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{}}
+		{name: "unavailable oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = (*protocolv1.AccountUsageObservation_Unavailable)(nil)
 		}, want: "unavailable outcome requires a reason"},
-		{name: "service unavailable wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: &corev1.AccountUsageUnavailable_ServiceUnavailable{}}}
+		{name: "unavailable reason absent", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{}}
+		}, want: "unavailable outcome requires a reason"},
+		{name: "service unavailable wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: &protocolv1.AccountUsageUnavailable_ServiceUnavailable{}}}
 		}, want: "unavailable.service_unavailable is nil"},
-		{name: "service unavailable oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: (*corev1.AccountUsageUnavailable_ServiceUnavailable)(nil)}}
+		{name: "service unavailable oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: (*protocolv1.AccountUsageUnavailable_ServiceUnavailable)(nil)}}
 		}, want: "unavailable.service_unavailable is nil"},
-		{name: "window unavailable wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: &corev1.AccountUsageUnavailable_WindowUnavailable{}}}
+		{name: "window unavailable wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: &protocolv1.AccountUsageUnavailable_WindowUnavailable{}}}
 		}, want: "unavailable.window_unavailable is nil"},
-		{name: "window unavailable oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: (*corev1.AccountUsageUnavailable_WindowUnavailable)(nil)}}
+		{name: "window unavailable oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: (*protocolv1.AccountUsageUnavailable_WindowUnavailable)(nil)}}
 		}, want: "unavailable.window_unavailable is nil"},
-		{name: "utilization unavailable wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: &corev1.AccountUsageUnavailable_UtilizationUnavailable{}}}
+		{name: "utilization unavailable wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: &protocolv1.AccountUsageUnavailable_UtilizationUnavailable{}}}
 		}, want: "unavailable.utilization_unavailable is nil"},
-		{name: "utilization unavailable oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: (*corev1.AccountUsageUnavailable_UtilizationUnavailable)(nil)}}
+		{name: "utilization unavailable oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: (*protocolv1.AccountUsageUnavailable_UtilizationUnavailable)(nil)}}
 		}, want: "unavailable.utilization_unavailable is nil"},
-		{name: "sampling failure wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: &corev1.AccountUsageUnavailable_SamplingFailure{}}}
+		{name: "sampling failure wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: &protocolv1.AccountUsageUnavailable_SamplingFailure{}}}
 		}, want: "unavailable.sampling_failure is nil"},
-		{name: "sampling failure oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: (*corev1.AccountUsageUnavailable_SamplingFailure)(nil)}}
+		{name: "sampling failure oneof wrapper nil", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: (*protocolv1.AccountUsageUnavailable_SamplingFailure)(nil)}}
 		}, want: "unavailable.sampling_failure is nil"},
-		{name: "sampling failure cause blank", authoritativeID: "q", requestID: "t", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: &corev1.AccountUsageUnavailable_SamplingFailure{SamplingFailure: &corev1.UsageSamplingFailure{Cause: " "}}}}
+		{name: "sampling failure cause blank", authoritativeID: "q", requestID: "t", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: &protocolv1.AccountUsageUnavailable_SamplingFailure{SamplingFailure: &protocolv1.UsageSamplingFailure{Cause: " "}}}}
 		}, want: "unavailable.sampling_failure.cause is required"},
 	}
 	for _, test := range tests {
@@ -1938,19 +1956,19 @@ func TestMalformedUsageObservationDegradesAccountingWithoutDenyingTheEvent(t *te
 func TestTurnAccountingReducerAcceptsEveryUnavailableReason(t *testing.T) {
 	tests := []struct {
 		name   string
-		mutate func(*corev1.AccountUsageObservation)
+		mutate func(*protocolv1.AccountUsageObservation)
 	}{
-		{name: "service unavailable", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: &corev1.AccountUsageUnavailable_ServiceUnavailable{ServiceUnavailable: &corev1.UsageServiceUnavailable{}}}}
+		{name: "service unavailable", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: &protocolv1.AccountUsageUnavailable_ServiceUnavailable{ServiceUnavailable: &protocolv1.UsageServiceUnavailable{}}}}
 		}},
-		{name: "window unavailable", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: &corev1.AccountUsageUnavailable_WindowUnavailable{WindowUnavailable: &corev1.FiveHourWindowUnavailable{}}}}
+		{name: "window unavailable", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: &protocolv1.AccountUsageUnavailable_WindowUnavailable{WindowUnavailable: &protocolv1.FiveHourWindowUnavailable{}}}}
 		}},
-		{name: "utilization unavailable", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: &corev1.AccountUsageUnavailable_UtilizationUnavailable{UtilizationUnavailable: &corev1.UtilizationUnavailable{}}}}
+		{name: "utilization unavailable", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: &protocolv1.AccountUsageUnavailable_UtilizationUnavailable{UtilizationUnavailable: &protocolv1.UtilizationUnavailable{}}}}
 		}},
-		{name: "sampling failure", mutate: func(o *corev1.AccountUsageObservation) {
-			o.Outcome = &corev1.AccountUsageObservation_Unavailable{Unavailable: &corev1.AccountUsageUnavailable{Reason: &corev1.AccountUsageUnavailable_SamplingFailure{SamplingFailure: &corev1.UsageSamplingFailure{Cause: "upstream timeout"}}}}
+		{name: "sampling failure", mutate: func(o *protocolv1.AccountUsageObservation) {
+			o.Outcome = &protocolv1.AccountUsageObservation_Unavailable{Unavailable: &protocolv1.AccountUsageUnavailable{Reason: &protocolv1.AccountUsageUnavailable_SamplingFailure{SamplingFailure: &protocolv1.UsageSamplingFailure{Cause: "upstream timeout"}}}}
 		}},
 	}
 	for _, test := range tests {
@@ -1960,7 +1978,7 @@ func TestTurnAccountingReducerAcceptsEveryUnavailableReason(t *testing.T) {
 			r.turns["t"] = &accountingTurn{}
 			observation := usageObservation("t", true)
 			test.mutate(observation)
-			if err := r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: observation}}, "s"); err != nil {
+			if err := r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: observation}}, "s"); err != nil {
 				t.Fatalf("observe unavailable usage: %v", err)
 			}
 			if r.turns["t"].startUsage != observation {
@@ -1975,7 +1993,7 @@ func TestTurnAccountingReducerAcceptsEveryUnavailableReason(t *testing.T) {
 // evidence the reducer must refuse to retain, not a protocol violation, so it
 // degrades this event's accounting (loudly, with the exact malformed cause)
 // rather than rejecting the event itself.
-func assertMalformedUsageObservationRejected(t *testing.T, authoritativeID, requestID string, observation *corev1.AccountUsageObservation, want string) {
+func assertMalformedUsageObservationRejected(t *testing.T, authoritativeID, requestID string, observation *protocolv1.AccountUsageObservation, want string) {
 	t.Helper()
 	wantCause := validateAccountUsageObservation(liveEvidence{queryID: authoritativeID}, requestID, observation)
 	var malformed *malformedAccountUsageObservationError
@@ -1986,11 +2004,11 @@ func assertMalformedUsageObservationRejected(t *testing.T, authoritativeID, requ
 	var logs []string
 	c := newConsumer("ws", "s", &fakePusher{}, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
 	c.accounting.queryID = authoritativeID
-	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}); err != nil {
 		t.Fatalf("start turn: %v", err)
 	}
 	beforeApplied, beforeRetained := len(applier.applied), len(c.snapshotRing())
-	err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: requestID, Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: observation}})
+	err := c.Apply(&protocolv1.Event{Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: requestID, Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: observation}})
 	if err != nil {
 		t.Fatalf("Apply error = %v, want the event still applied despite the malformed observation", err)
 	}
@@ -2003,9 +2021,9 @@ func assertMalformedUsageObservationRejected(t *testing.T, authoritativeID, requ
 	}
 	boundary := "unspecified"
 	switch observation.GetBoundary().(type) {
-	case *corev1.AccountUsageObservation_TurnStart:
+	case *protocolv1.AccountUsageObservation_TurnStart:
 		boundary = "turn_start"
-	case *corev1.AccountUsageObservation_TurnEnd:
+	case *protocolv1.AccountUsageObservation_TurnEnd:
 		boundary = "turn_end"
 	}
 	for _, field := range []string{
@@ -2025,17 +2043,17 @@ func assertMalformedUsageObservationRejected(t *testing.T, authoritativeID, requ
 	}
 }
 
-func usageObservation(turn string, start bool) *corev1.AccountUsageObservation {
-	o := &corev1.AccountUsageObservation{QueryInstanceId: "q", TurnId: turn, BoundaryAtMs: 10, ObservedAtMs: 15, SampleLatencyMs: 5, Outcome: &corev1.AccountUsageObservation_Available{Available: &corev1.AccountUsageAvailable{FiveHour: &corev1.UsageWindow{UtilizationPercent: 10, ResetsAtMs: 100}}}}
+func usageObservation(turn string, start bool) *protocolv1.AccountUsageObservation {
+	o := &protocolv1.AccountUsageObservation{QueryInstanceId: "q", TurnId: turn, BoundaryAtMs: 10, ObservedAtMs: 15, SampleLatencyMs: 5, Outcome: &protocolv1.AccountUsageObservation_Available{Available: &protocolv1.AccountUsageAvailable{FiveHour: &protocolv1.UsageWindow{UtilizationPercent: 10, ResetsAtMs: 100}}}}
 	if start {
-		o.Boundary = &corev1.AccountUsageObservation_TurnStart{TurnStart: &corev1.TurnStartUsageBoundary{}}
+		o.Boundary = &protocolv1.AccountUsageObservation_TurnStart{TurnStart: &protocolv1.TurnStartUsageBoundary{}}
 	} else {
-		o.Boundary = &corev1.AccountUsageObservation_TurnEnd{TurnEnd: &corev1.TurnEndUsageBoundary{}}
+		o.Boundary = &protocolv1.AccountUsageObservation_TurnEnd{TurnEnd: &protocolv1.TurnEndUsageBoundary{}}
 	}
 	return o
 }
 
-func accountingVendorEvent(t *testing.T, m *datav1.ClaudeStreamMessage) *corev1.Event {
+func accountingVendorEvent(t *testing.T, m *datav1.ClaudeStreamMessage) *protocolv1.Event {
 	t.Helper()
 	if assistant := m.GetAssistant(); assistant != nil && assistant.RequestId == nil {
 		assistant.RequestId = proto.String("t")
@@ -2051,20 +2069,20 @@ func accountingVendorEvent(t *testing.T, m *datav1.ClaudeStreamMessage) *corev1.
 	if assistant := m.GetAssistant(); assistant != nil {
 		requestID = assistant.GetRequestId()
 	}
-	return &corev1.Event{SessionId: "vendor-session", ProducedAtMs: 20, RequestId: requestID, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-session", ProducedAtMs: 20, RequestId: requestID, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // divergentTurnAccountingStore refuses every write the way the state store
 // refuses a divergent replay, while still serving the settlement it already
 // holds. It is the fake shape of the live failure: the row exists, and only
 // the attempt to overwrite it fails.
-type divergentTurnAccountingStore struct{ persisted []*frontendv1.TurnAccounting }
+type divergentTurnAccountingStore struct{ persisted []*statev1.TurnAccounting }
 
-func (s divergentTurnAccountingStore) Record(string, *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error) {
+func (s divergentTurnAccountingStore) Record(string, *statev1.TurnAccounting) (*statev1.TurnAccounting, error) {
 	return nil, errors.New(`statedb: divergent replay for turn accounting "t"`)
 }
 
-func (s divergentTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting, error) {
+func (s divergentTurnAccountingStore) List(string) ([]*statev1.TurnAccounting, error) {
 	return s.persisted, nil
 }
 
@@ -2078,16 +2096,16 @@ func (s divergentTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting
 // that actually observed the turn, so it is what the turn is served.
 func TestDivergentTerminalSettlementServesThePersistedAccounting(t *testing.T) {
 	// Arrange.
-	persisted := &frontendv1.TurnAccounting{
+	persisted := &statev1.TurnAccounting{
 		TurnId:          "t",
 		QueryInstanceId: "retired-query",
-		Responses:       []*frontendv1.TokenUtilization{{ApiMessageId: "m"}},
-		Verdict:         &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+		Responses:       []*statev1.TokenUtilization{{ApiMessageId: "m"}},
+		Verdict:         &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}},
 	}
 	push := &fakePusher{}
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
-	c.accountingStore = divergentTurnAccountingStore{persisted: []*frontendv1.TurnAccounting{persisted}}
-	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+	c.accountingStore = divergentTurnAccountingStore{persisted: []*statev1.TurnAccounting{persisted}}
+	if err := c.Apply(&protocolv1.Event{Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Consume(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}}})); err != nil {
@@ -2095,14 +2113,14 @@ func TestDivergentTerminalSettlementServesThePersistedAccounting(t *testing.T) {
 	}
 
 	// Act.
-	err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}})
+	err := c.Apply(&protocolv1.Event{Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}})
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("Apply error = %v, want the turn boundary accepted", err)
 	}
 	c.mu.Lock()
-	served := make([]*frontendv1.TurnAccounting, 0, len(c.completedTerminalBySeq))
+	served := make([]*statev1.TurnAccounting, 0, len(c.completedTerminalBySeq))
 	for _, accounting := range c.completedTerminalBySeq {
 		served = append(served, accounting)
 	}
@@ -2117,11 +2135,11 @@ func TestDivergentTerminalSettlementServesThePersistedAccounting(t *testing.T) {
 // that serves nothing strands the answer with no completion border.
 func TestDivergentTerminalSettlementReleasesTheHeldTerminalResult(t *testing.T) {
 	// Arrange.
-	persisted := &frontendv1.TurnAccounting{TurnId: "t", Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	persisted := &statev1.TurnAccounting{TurnId: "t", Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	push := &fakePusher{}
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
-	c.accountingStore = divergentTurnAccountingStore{persisted: []*frontendv1.TurnAccounting{persisted}}
-	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+	c.accountingStore = divergentTurnAccountingStore{persisted: []*statev1.TurnAccounting{persisted}}
+	if err := c.Apply(&protocolv1.Event{Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Consume(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}}})); err != nil {
@@ -2129,7 +2147,7 @@ func TestDivergentTerminalSettlementReleasesTheHeldTerminalResult(t *testing.T) 
 	}
 
 	// Act.
-	if err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2144,16 +2162,16 @@ func TestDivergentTerminalSettlementReleasesTheHeldTerminalResult(t *testing.T) 
 // must survive the degradation that hides it from the conversation.
 func TestDivergentTerminalSettlementStillLogsTheRefusalAndTheSubstitution(t *testing.T) {
 	// Arrange.
-	persisted := &frontendv1.TurnAccounting{TurnId: "t", Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	persisted := &statev1.TurnAccounting{TurnId: "t", Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	var logs []string
 	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
-	c.accountingStore = divergentTurnAccountingStore{persisted: []*frontendv1.TurnAccounting{persisted}}
-	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+	c.accountingStore = divergentTurnAccountingStore{persisted: []*statev1.TurnAccounting{persisted}}
+	if err := c.Apply(&protocolv1.Event{Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act.
-	if err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2175,12 +2193,12 @@ func TestFailedTerminalSettlementWithoutAPersistedRowStaysDegraded(t *testing.T)
 	var logs []string
 	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
 	c.accountingStore = divergentTurnAccountingStore{}
-	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act.
-	if err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2202,12 +2220,12 @@ func TestFailedTerminalSettlementWithoutAPersistedRowKeepsReducerState(t *testin
 	// Arrange.
 	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
 	c.accountingStore = divergentTurnAccountingStore{}
-	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act.
-	if err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2223,15 +2241,15 @@ func TestFailedTerminalSettlementWithoutAPersistedRowKeepsReducerState(t *testin
 // main-agent usage absorbs extraUsage so the only compare that can differ is
 // the per-model one under test; the result plane names ONLY "model" in
 // model_usage, exactly as the vendor does for a model it never called.
-func resolveSyntheticReconciliationTurn(t *testing.T, logf dlog.Logf, extraModel string, extraUsage *datav1.ApiUsage) *frontendv1.TurnAccounting {
+func resolveSyntheticReconciliationTurn(t *testing.T, logf dlog.Logf, extraModel string, extraUsage *datav1.ApiUsage) *statev1.TurnAccounting {
 	t.Helper()
 	r := newTurnAccountingReducer(logf)
-	r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	r.observe(&protocolv1.Event{Payload: &protocolv1.Event_QueryLifecycle{QueryLifecycle: &protocolv1.QueryLifecycle{
 		QueryInstanceId: "q",
-		Event:           &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: completeRuntimeIdentity()}},
+		Event:           &protocolv1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &protocolv1.QueryRuntimeObserved{Identity: completeRuntimeIdentity()}},
 	}}}, "s")
-	r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
-	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
+	r.observe(&protocolv1.Event{ProducedAtMs: 10, Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}, "s")
+	r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
 	r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4}}}}}), "s")
 	r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m2", Model: extraModel, Usage: extraUsage}}}}), "s")
 	r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{
@@ -2243,11 +2261,11 @@ func resolveSyntheticReconciliationTurn(t *testing.T, logf dlog.Logf, extraModel
 		},
 		ModelUsage: map[string]*datav1.ModelUsage{"model": {InputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4}},
 	}}}), "s")
-	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
-	return r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	r.observe(&protocolv1.Event{RequestId: "t", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
+	return r.resolve(&protocolv1.Event{Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}, 30)
 }
 
-func ledgerMismatchPaths(accounting *frontendv1.TurnAccounting) []string {
+func ledgerMismatchPaths(accounting *statev1.TurnAccounting) []string {
 	for _, problem := range accounting.GetInvalid().GetProblems() {
 		if mismatch := problem.GetTokenLedgerMismatch(); mismatch != nil {
 			return mismatch.GetDifferingFieldPaths()

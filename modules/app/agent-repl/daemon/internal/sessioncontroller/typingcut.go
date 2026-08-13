@@ -35,7 +35,7 @@ package sessioncontroller
 import (
 	"sort"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // notePreviewOpened records the surface a live typing preview was opened on.

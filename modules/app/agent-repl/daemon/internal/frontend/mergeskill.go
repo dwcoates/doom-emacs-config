@@ -28,7 +28,7 @@ import (
 	"strings"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // SkillToolName is the harness's tool for launching a skill. Every invocation of

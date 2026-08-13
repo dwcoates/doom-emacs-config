@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // THE DAEMON'S OWN RE-DRIVE MUST BE UNRENDERABLE.

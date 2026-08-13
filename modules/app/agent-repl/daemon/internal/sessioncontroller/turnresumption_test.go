@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // A BOUNCE MUST NOT SILENTLY THROW AWAY THE TURN IT LANDS ON.
@@ -50,7 +50,7 @@ func TestABounceInterruptingALiveTurnRecordsAResumption(t *testing.T) {
 	// Arrange — a daemon shutdown in stop-shims mode is the canonical bounce:
 	// the shim must die, and the turn it was running is still wanted.
 	m, _, receipts, _ := newResumptionRig(t)
-	client := &stubInterrupter{outcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED}
+	client := &stubInterrupter{outcome: protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED}
 
 	// Act.
 	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", client, nil)
@@ -70,7 +70,7 @@ func TestTheResumptionIsRecordedBeforeTheInterruptIsDelivered(t *testing.T) {
 	// the user's work, so the ORDER is the guarantee, not an implementation
 	// detail. The fake records both on one call log.
 	m, _, receipts, _ := newResumptionRig(t)
-	client := &stubInterrupter{outcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED}
+	client := &stubInterrupter{outcome: protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED}
 
 	// Act.
 	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", client, nil)
@@ -226,7 +226,7 @@ func TestATeardownThatCannotRecordItsResumptionStillTearsDownLoudly(t *testing.T
 	// silent.
 	m, _, receipts, cl := newResumptionRig(t)
 	receipts.resumptionRecordErr = errors.New("state store is read-only")
-	client := &stubInterrupter{outcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED}
+	client := &stubInterrupter{outcome: protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED}
 
 	// Act.
 	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", client, nil)

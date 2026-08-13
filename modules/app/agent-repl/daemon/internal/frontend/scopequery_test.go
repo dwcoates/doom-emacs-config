@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // knownOnly builds a WorkspaceKnown admitting exactly the listed workspaces.

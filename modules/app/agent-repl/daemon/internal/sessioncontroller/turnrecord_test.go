@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // This file covers the session controller's ONE turn record (turnrecord.go):
@@ -191,7 +191,7 @@ func TestTheTurnRecordIsNamedBeforeAnyoneCanObserveTheBoundary(t *testing.T) {
 	}
 
 	// Act.
-	if err := d.consumer.Apply(turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "t_42")); err != nil {
+	if err := d.consumer.Apply(turnStartEvent(protocolv1.Plane_PLANE_STREAM, 1, "t_42")); err != nil {
 		t.Fatalf("Apply(TurnStarted): %v", err)
 	}
 

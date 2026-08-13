@@ -7,34 +7,34 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
-func turnClaimEvent(start bool, seq uint64, id string) *corev1.Event {
-	ev := &corev1.Event{
+func turnClaimEvent(start bool, seq uint64, id string) *protocolv1.Event {
+	ev := &protocolv1.Event{
 		SessionId: "vendor-session",
 		Seq:       seq,
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
+		Class:     protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		RequestId: id,
 	}
 	if start {
-		ev.Payload = &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: id}}
+		ev.Payload = &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: id}}
 	} else {
-		ev.Payload = &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: id}}
+		ev.Payload = &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: id}}
 	}
 	return ev
 }
 
-func turnClaimBridgeEvent(seq uint64, id, previous, current string) *corev1.Event {
-	return &corev1.Event{
+func turnClaimBridgeEvent(seq uint64, id, previous, current string) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId: current,
 		Seq:       seq,
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
+		Class:     protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		RequestId: id,
-		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+		Payload: &protocolv1.Event_TurnClaimBridge{TurnClaimBridge: &protocolv1.TurnClaimBridge{
 			TurnId: id, PreviousSessionId: previous,
 		}},
 	}
@@ -57,7 +57,7 @@ func openTurnClaimManager(t *testing.T, path string) *Manager {
 	return m
 }
 
-func resolveTurnClaim(t *testing.T, m *Manager, ev *corev1.Event) (before, after []string, replayed bool) {
+func resolveTurnClaim(t *testing.T, m *Manager, ev *protocolv1.Event) (before, after []string, replayed bool) {
 	t.Helper()
 	before, after, replayed, err := m.ResolveTurnLifecycle("ws", "daemon-session", "", ev)
 	if err != nil {
@@ -797,7 +797,7 @@ func TestTurnClaimBridgeClassifiesRefusalByWhetherTheClaimIsStillLive(t *testing
 	tests := []struct {
 		name     string
 		seed     func(t *testing.T, m *Manager)
-		bridge   *corev1.Event
+		bridge   *protocolv1.Event
 		wantDead bool
 		wantMsg  string
 	}{
@@ -887,7 +887,7 @@ func TestDeadClaimBridgeRefusalLeavesTheClosedClaimUntouched(t *testing.T) {
 // The four cases every provenance consumer owes, at the durable claim ledger.
 
 // stampedEnd is a TurnEnded for ID produced by ENVELOPEQUERY.
-func stampedEnd(seq uint64, id, envelopeQuery string) *corev1.Event {
+func stampedEnd(seq uint64, id, envelopeQuery string) *protocolv1.Event {
 	ev := turnClaimEvent(false, seq, id)
 	ev.QueryInstanceId = envelopeQuery
 	return ev
@@ -1219,7 +1219,7 @@ func TestASettledDuplicateReplaysCleanlyOnEveryResume(t *testing.T) {
 	// Arrange: a durable stream that CONTAINS the duplicate start, exactly as a
 	// resume re-reads it from the store.
 	path := filepath.Join(t.TempDir(), "state.db")
-	stream := []*corev1.Event{
+	stream := []*protocolv1.Event{
 		turnClaimEvent(true, 10, "turn-settled"),
 		turnClaimEvent(false, 20, "turn-settled"),
 		turnClaimEvent(true, 30, "turn-settled"),

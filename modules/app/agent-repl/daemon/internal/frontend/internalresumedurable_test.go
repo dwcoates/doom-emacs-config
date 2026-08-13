@@ -3,8 +3,8 @@ package frontend
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -19,7 +19,7 @@ import (
 // message and render the daemon's private instruction to the user, possibly
 // years later.
 //
-// It is not. The shim-store persists the WHOLE `corev1.Event` as a
+// It is not. The shim-store persists the WHOLE `protocolv1.Event` as a
 // proto-marshalled blob (`agent-shim/shim-store/internal/db/ingest.go`) and
 // unmarshals it verbatim on replay (`.../db/query.go`), so `Event.request_id`
 // (core.proto field 5) is on disk with everything else.
@@ -31,13 +31,13 @@ import (
 // throughTheStore round-trips an event exactly as the shim-store does — marshal
 // on ingest, unmarshal on replay — so a curation downstream of it is reading
 // rehydrated bytes rather than the object the test built.
-func throughTheStore(t *testing.T, ev *corev1.Event) *corev1.Event {
+func throughTheStore(t *testing.T, ev *protocolv1.Event) *protocolv1.Event {
 	t.Helper()
 	blob, err := proto.Marshal(ev)
 	if err != nil {
 		t.Fatalf("marshal event as the store ingests it: %v", err)
 	}
-	out := &corev1.Event{}
+	out := &protocolv1.Event{}
 	if err := proto.Unmarshal(blob, out); err != nil {
 		t.Fatalf("unmarshal event as the store replays it: %v", err)
 	}
@@ -46,7 +46,7 @@ func throughTheStore(t *testing.T, ev *corev1.Event) *corev1.Event {
 
 // storedUserMessageEvent is one vendor user-message event as the store holds
 // it, carrying requestID on the EVENT — the field the curator filters on.
-func storedUserMessageEvent(t *testing.T, uuid, requestID, body string) *corev1.Event {
+func storedUserMessageEvent(t *testing.T, uuid, requestID, body string) *protocolv1.Event {
 	t.Helper()
 	vendor, err := anypb.New(&datav1.UserMessage{
 		Uuid: uuid,
@@ -57,12 +57,12 @@ func storedUserMessageEvent(t *testing.T, uuid, requestID, body string) *corev1.
 	if err != nil {
 		t.Fatalf("pack vendor user message: %v", err)
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId:    "s1",
 		Seq:          10,
 		ProducedAtMs: 1_700_000_000_000,
 		RequestId:    requestID,
-		Payload:      &corev1.Event_Vendor{Vendor: vendor},
+		Payload:      &protocolv1.Event_Vendor{Vendor: vendor},
 	}
 }
 

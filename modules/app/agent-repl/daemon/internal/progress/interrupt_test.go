@@ -3,8 +3,8 @@ package progress
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // --- the interrupt window (I1) ---------------------------------------------
@@ -15,11 +15,11 @@ import (
 func TestInterruptWindowOpensCarryingTheAckOutcome(t *testing.T) {
 	tests := []struct {
 		name    string
-		outcome corev1.InterruptOutcome
+		outcome protocolv1.InterruptOutcome
 	}{
-		{"a live turn was stopped", corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED},
-		{"the turn had already ended", corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE},
-		{"the stop could not be delivered", corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED},
+		{"a live turn was stopped", protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED},
+		{"the turn had already ended", protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE},
+		{"the stop could not be delivered", protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,7 +40,7 @@ func TestInterruptWindowOpensCarryingTheAckOutcome(t *testing.T) {
 func TestInterruptWindowClearsOnTheNextTurnStart(t *testing.T) {
 	// Arrange — a stop landed and the window is open.
 	h := newHarness(t)
-	h.m.NoteInterrupt(testWS, testSID, corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	h.m.NoteInterrupt(testWS, testSID, protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 	h.drain()
 	// Act.
 	synchronous := h.m.NoteTurnAccepted(testWS, testSID)
@@ -60,13 +60,13 @@ func TestInterruptWindowSurvivesTheStoppedTurnsEnd(t *testing.T) {
 	// Arrange — a turn is running and the user's stop lands.
 	h := newHarness(t)
 	h.openTurn()
-	h.m.NoteInterrupt(testWS, testSID, corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	h.m.NoteInterrupt(testWS, testSID, protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 	h.drain()
 	// Act — the turn the stop ended reports its end.
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId:    testSID,
 		ProducedAtMs: atMs,
-		Payload:      &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{StopReason: "aborted"}},
+		Payload:      &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{StopReason: "aborted"}},
 	})
 	// Assert.
 	if got := h.last().GetInterrupt(); !got.GetActive() {
@@ -79,12 +79,12 @@ func TestInterruptWindowSurvivesTheStoppedTurnsEnd(t *testing.T) {
 func TestASecondInterruptReplacesTheOutcome(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.m.NoteInterrupt(testWS, testSID, corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	h.m.NoteInterrupt(testWS, testSID, protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 	h.drain()
 	// Act.
-	h.m.NoteInterrupt(testWS, testSID, corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	h.m.NoteInterrupt(testWS, testSID, protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 	// Assert.
-	if got := h.last().GetInterrupt().GetOutcome(); got != corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
+	if got := h.last().GetInterrupt().GetOutcome(); got != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
 		t.Fatalf("outcome = %s, want the newest ack's ALREADY_COMPLETE", got)
 	}
 }
@@ -95,7 +95,7 @@ func TestNoteInterruptWithoutAWorkspaceIsIgnored(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	// Act.
-	h.m.NoteInterrupt("", testSID, corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	h.m.NoteInterrupt("", testSID, protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 	// Assert.
 	if got := h.drain(); len(got) != 0 {
 		t.Fatalf("pushed %d view(s), want none", len(got))

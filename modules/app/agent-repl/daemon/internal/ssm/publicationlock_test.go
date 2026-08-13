@@ -3,7 +3,7 @@ package ssm
 import (
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // publicationlock_test.go covers the LOCK-ORDER half of the synchronous

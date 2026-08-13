@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -59,7 +59,7 @@ type fakePrompts struct {
 	// is what the daemon keys the prompt receipt on, so dropping it would be
 	// invisible to a test that only watched the text.
 	promptRequestIDs []string
-	promptOrigins    []corev1.PromptOrigin
+	promptOrigins    []protocolv1.PromptOrigin
 	interrupts       []string
 	// interruptRequestIDs records the command id each stop was carried under, so
 	// a test can prove the frontend's own id reaches the session controller.
@@ -70,7 +70,7 @@ type fakePrompts struct {
 	detachedCancelRequestIDs []string
 	// detachedCancelOutcome is the shim verdict the router reports; nil with
 	// no error means the handler sees an outcome with no arm.
-	detachedCancelOutcome *corev1.DetachedCancelOutcome
+	detachedCancelOutcome *protocolv1.DetachedCancelOutcome
 	// detachedCancelErr fails the route itself, distinct from a verdict.
 	detachedCancelErr error
 	perms             []string
@@ -244,7 +244,7 @@ func (f *fakeDequeueOffers) MergeDequeueOfferID(_ string) (string, bool) {
 	return f.outstanding, f.outstandingOK
 }
 
-func (f *fakePrompts) SubmitPrompt(_ context.Context, ws, requestID, text, _ string, promptOrigin corev1.PromptOrigin) error {
+func (f *fakePrompts) SubmitPrompt(_ context.Context, ws, requestID, text, _ string, promptOrigin protocolv1.PromptOrigin) error {
 	f.prompted = append(f.prompted, ws+":"+text)
 	f.promptRequestIDs = append(f.promptRequestIDs, requestID)
 	f.promptOrigins = append(f.promptOrigins, promptOrigin)
@@ -255,7 +255,7 @@ func (f *fakePrompts) Interrupt(_ context.Context, ws, requestID string) error {
 	f.interruptRequestIDs = append(f.interruptRequestIDs, requestID)
 	return f.err
 }
-func (f *fakePrompts) CancelDetachedAgents(_ context.Context, ws, requestID string) (*corev1.DetachedCancelOutcome, error) {
+func (f *fakePrompts) CancelDetachedAgents(_ context.Context, ws, requestID string) (*protocolv1.DetachedCancelOutcome, error) {
 	f.detachedCancels = append(f.detachedCancels, ws)
 	f.detachedCancelRequestIDs = append(f.detachedCancelRequestIDs, requestID)
 	if f.detachedCancelErr != nil {
@@ -398,14 +398,14 @@ type fakeLifecycle struct {
 }
 
 type fakeHealthRouter struct {
-	status    *corev1.HealthStatus
+	status    *protocolv1.HealthStatus
 	err       error
 	workspace string
 	sessionID string
 	requestID string
 }
 
-func (f *fakeHealthRouter) Health(_ context.Context, workspace, sessionID, requestID string) (*corev1.HealthStatus, error) {
+func (f *fakeHealthRouter) Health(_ context.Context, workspace, sessionID, requestID string) (*protocolv1.HealthStatus, error) {
 	f.workspace, f.sessionID, f.requestID = workspace, sessionID, requestID
 	return f.status, f.err
 }
@@ -653,7 +653,7 @@ func TestCommandHandlerSubmitPromptRoutesToPrompts(t *testing.T) {
 	// Arrange
 	h, p, _, _ := newTestHandler(t)
 	// Act
-	err := h.SubmitPrompt(context.Background(), "/ws1", "r1", &frontendv1.SubmitPromptCmd{Text: "hi", PromptOrigin: corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT})
+	err := h.SubmitPrompt(context.Background(), "/ws1", "r1", &frontendv1.SubmitPromptCmd{Text: "hi", PromptOrigin: protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT})
 	// Assert
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -661,15 +661,15 @@ func TestCommandHandlerSubmitPromptRoutesToPrompts(t *testing.T) {
 	if len(p.prompted) != 1 || p.prompted[0] != "/ws1:hi" {
 		t.Fatalf("prompted = %v", p.prompted)
 	}
-	if len(p.promptOrigins) != 1 || p.promptOrigins[0] != corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT {
+	if len(p.promptOrigins) != 1 || p.promptOrigins[0] != protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT {
 		t.Fatalf("prompt origins = %v, want USER_SENT", p.promptOrigins)
 	}
 }
 
 func TestCommandHandlerSubmitPromptRejectsInvalidOriginBeforeRouting(t *testing.T) {
-	for _, origin := range []corev1.PromptOrigin{
-		corev1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
-		corev1.PromptOrigin(999),
+	for _, origin := range []protocolv1.PromptOrigin{
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
+		protocolv1.PromptOrigin(999),
 	} {
 		t.Run(fmt.Sprint(origin), func(t *testing.T) {
 			h, p, _, _ := newTestHandler(t)
@@ -691,7 +691,7 @@ func TestCommandHandlerSubmitPromptCarriesTheRequestID(t *testing.T) {
 	// Arrange
 	h, p, _, _ := newTestHandler(t)
 	// Act
-	if err := h.SubmitPrompt(context.Background(), "/ws1", "r1", &frontendv1.SubmitPromptCmd{Text: "hi", PromptOrigin: corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT}); err != nil {
+	if err := h.SubmitPrompt(context.Background(), "/ws1", "r1", &frontendv1.SubmitPromptCmd{Text: "hi", PromptOrigin: protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT}); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	// Assert
@@ -741,7 +741,7 @@ func TestCommandHandlerDaemonHealthReturnsExplicitReadiness(t *testing.T) {
 
 func TestCommandHandlerSessionHealthForwardsExactIdentity(t *testing.T) {
 	// Arrange.
-	router := &fakeHealthRouter{status: &corev1.HealthStatus{RequestId: "health-2", Healthy: true, Component: "claude-shim"}}
+	router := &fakeHealthRouter{status: &protocolv1.HealthStatus{RequestId: "health-2", Healthy: true, Component: "claude-shim"}}
 	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
 		CommandHandlerConfig{Health: HealthConfig{Router: router}})
 	if err != nil {
@@ -2207,7 +2207,7 @@ func TestSubmitPromptAcceptsAnAbsoluteWorkspaceKey(t *testing.T) {
 	// Arrange
 	h, p, _, _ := newTestHandler(t)
 	// Act
-	if err := h.SubmitPrompt(context.Background(), "/Users/x/.config/doom", "r1", &frontendv1.SubmitPromptCmd{Text: "hi", PromptOrigin: corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT}); err != nil {
+	if err := h.SubmitPrompt(context.Background(), "/Users/x/.config/doom", "r1", &frontendv1.SubmitPromptCmd{Text: "hi", PromptOrigin: protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT}); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	// Assert
@@ -2397,8 +2397,8 @@ func TestCommandHandlerRestartSessionUnconfiguredErrors(t *testing.T) {
 func TestCancelDetachedAgentsAcksTheCancelledCount(t *testing.T) {
 	// Arrange: the shim reports three agents stopped, by task id.
 	h, p := newGatedHandler(t, false, fakeLiveTasks{})
-	p.detachedCancelOutcome = &corev1.DetachedCancelOutcome{Outcome: &corev1.DetachedCancelOutcome_Cancelled{
-		Cancelled: &corev1.DetachedAgentsCancelled{TaskIds: []string{"t-1", "t-2", "t-3"}},
+	p.detachedCancelOutcome = &protocolv1.DetachedCancelOutcome{Outcome: &protocolv1.DetachedCancelOutcome_Cancelled{
+		Cancelled: &protocolv1.DetachedAgentsCancelled{TaskIds: []string{"t-1", "t-2", "t-3"}},
 	}}
 
 	// Act.
@@ -2416,8 +2416,8 @@ func TestCancelDetachedAgentsAcksTheCancelledCount(t *testing.T) {
 func TestCancelDetachedAgentsRoutesTheCommandRequestID(t *testing.T) {
 	// Arrange.
 	h, p := newGatedHandler(t, false, fakeLiveTasks{})
-	p.detachedCancelOutcome = &corev1.DetachedCancelOutcome{Outcome: &corev1.DetachedCancelOutcome_Cancelled{
-		Cancelled: &corev1.DetachedAgentsCancelled{TaskIds: []string{"t-1"}},
+	p.detachedCancelOutcome = &protocolv1.DetachedCancelOutcome{Outcome: &protocolv1.DetachedCancelOutcome_Cancelled{
+		Cancelled: &protocolv1.DetachedAgentsCancelled{TaskIds: []string{"t-1"}},
 	}}
 
 	// Act.
@@ -2435,8 +2435,8 @@ func TestCancelDetachedAgentsRoutesTheCommandRequestID(t *testing.T) {
 func TestCancelDetachedAgentsRefusesWhenNothingIsRunning(t *testing.T) {
 	// Arrange: the session answers that it has nothing detached.
 	h, p := newGatedHandler(t, false, fakeLiveTasks{})
-	p.detachedCancelOutcome = &corev1.DetachedCancelOutcome{Outcome: &corev1.DetachedCancelOutcome_NothingRunning{
-		NothingRunning: &corev1.NoDetachedAgentsRunning{},
+	p.detachedCancelOutcome = &protocolv1.DetachedCancelOutcome{Outcome: &protocolv1.DetachedCancelOutcome_NothingRunning{
+		NothingRunning: &protocolv1.NoDetachedAgentsRunning{},
 	}}
 
 	// Act.
@@ -2460,8 +2460,8 @@ func TestCancelDetachedAgentsRefusesWhenNothingIsRunning(t *testing.T) {
 func TestCancelDetachedAgentsRefusesWhenUnsupported(t *testing.T) {
 	// Arrange: the session could not be asked at all.
 	h, p := newGatedHandler(t, false, fakeLiveTasks{})
-	p.detachedCancelOutcome = &corev1.DetachedCancelOutcome{Outcome: &corev1.DetachedCancelOutcome_Unsupported{
-		Unsupported: &corev1.DetachedCancelUnsupported{Detail: "no SDK query is constructed for this session"},
+	p.detachedCancelOutcome = &protocolv1.DetachedCancelOutcome{Outcome: &protocolv1.DetachedCancelOutcome_Unsupported{
+		Unsupported: &protocolv1.DetachedCancelUnsupported{Detail: "no SDK query is constructed for this session"},
 	}}
 
 	// Act.
@@ -2503,7 +2503,7 @@ func TestCancelDetachedAgentsSurfacesARouteFailure(t *testing.T) {
 func TestCancelDetachedAgentsRefusesAnArmlessOutcome(t *testing.T) {
 	// Arrange: an outcome with no arm — a contract violation, not an empty stop.
 	h, p := newGatedHandler(t, false, fakeLiveTasks{})
-	p.detachedCancelOutcome = &corev1.DetachedCancelOutcome{}
+	p.detachedCancelOutcome = &protocolv1.DetachedCancelOutcome{}
 
 	// Act.
 	_, err := h.CancelDetachedAgents(context.Background(), "/ws", "c1", &frontendv1.CancelDetachedAgentsCmd{})

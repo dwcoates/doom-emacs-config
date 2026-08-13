@@ -37,8 +37,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/proto"
@@ -97,14 +97,14 @@ func dialStoreProducer(t *testing.T) *storeProducer {
 // cursor_advance is deliberately unset. The sidecar advances a cursor when it
 // has read a file; there is no file here, and EventBatch.cursor_advance is an
 // optional field the store only upserts when non-nil (db.Ingest).
-func (p *storeProducer) write(ev *corev1.Event) *corev1.StoreWriteAck {
+func (p *storeProducer) write(ev *protocolv1.Event) *protocolv1.StoreWriteAck {
 	p.t.Helper()
 	if err := p.conn.SetDeadline(time.Now().Add(frameTimeout)); err != nil {
 		p.t.Fatalf("store conn deadline: %v", err)
 	}
-	if err := wire.WriteAny(p.conn, &corev1.StoreWrite{
+	if err := wire.WriteAny(p.conn, &protocolv1.StoreWrite{
 		Producer: sidecarProducer,
-		Batch:    &corev1.EventBatch{Events: []*corev1.Event{ev}},
+		Batch:    &protocolv1.EventBatch{Events: []*protocolv1.Event{ev}},
 	}); err != nil {
 		p.t.Fatalf("send StoreWrite: %v", err)
 	}
@@ -112,9 +112,9 @@ func (p *storeProducer) write(ev *corev1.Event) *corev1.StoreWriteAck {
 	if err != nil {
 		p.t.Fatalf("read StoreWriteAck: %v", err)
 	}
-	ack, ok := msg.(*corev1.StoreWriteAck)
+	ack, ok := msg.(*protocolv1.StoreWriteAck)
 	if !ok {
-		p.t.Fatalf("store replied %T, want *corev1.StoreWriteAck", msg)
+		p.t.Fatalf("store replied %T, want *protocolv1.StoreWriteAck", msg)
 	}
 	if ack.GetError() != "" {
 		p.t.Fatalf("store rejected the batch: %s", ack.GetError())
@@ -131,14 +131,14 @@ func (p *storeProducer) write(ev *corev1.Event) *corev1.StoreWriteAck {
 //	produced_at_ms producer wall clock   (handler.base, nowMillis)
 //	dedup_key      "clear:<line uuid>"   (handler.clearDedupKey)
 //	payload        ContextCleared{}      (empty message: it has no fields)
-func sidecarClearEvent(vendorSessionID, lineUUID string) *corev1.Event {
-	return &corev1.Event{
+func sidecarClearEvent(vendorSessionID, lineUUID string) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId:    vendorSessionID,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:        protocolv1.Plane_PLANE_FILE,
+		Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		ProducedAtMs: time.Now().UnixMilli(),
 		DedupKey:     clearDedupKey(lineUUID),
-		Payload:      &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}},
+		Payload:      &protocolv1.Event_ContextCleared{ContextCleared: &protocolv1.ContextCleared{}},
 	}
 }
 
@@ -150,15 +150,15 @@ func sidecarClearEvent(vendorSessionID, lineUUID string) *corev1.Event {
 // the following line. There is no outcome field: the boundary line's existence
 // IS the completion record, so the file plane — the sole producer — has nothing
 // but success to report.
-func sidecarCompactEvent(vendorSessionID, boundaryUUID, summary string) *corev1.Event {
-	return &corev1.Event{
+func sidecarCompactEvent(vendorSessionID, boundaryUUID, summary string) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId:    vendorSessionID,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:        protocolv1.Plane_PLANE_FILE,
+		Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		ProducedAtMs: time.Now().UnixMilli(),
 		DedupKey:     compactDedupKey(boundaryUUID),
-		Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{
-			Trigger:    corev1.ContextCompactTrigger_CONTEXT_COMPACT_TRIGGER_MANUAL,
+		Payload: &protocolv1.Event_ContextCompacted{ContextCompacted: &protocolv1.ContextCompacted{
+			Trigger:    protocolv1.ContextCompactTrigger_CONTEXT_COMPACT_TRIGGER_MANUAL,
 			PreTokens:  120_000,
 			PostTokens: 18_000,
 			DurationMs: 4_200,

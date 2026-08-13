@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/shimclient"
@@ -76,7 +76,7 @@ func coldPingRig(t *testing.T) (*Manager, *fakeApplier, *fakeHibernations, *fake
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 	return m, applier, hib, windows, capture
 }
@@ -209,7 +209,7 @@ func TestARealPromptRetiresTheColdVerdict(t *testing.T) {
 	m.mu.Unlock()
 
 	// Act.
-	if err := m.SubmitPrompt(context.Background(), "ws", "req_user", "hello", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "req_user", "hello", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -369,7 +369,7 @@ func TestColdKeepAliveVerdictIsTakenAfterThePingsTurnEnd(t *testing.T) {
 
 // pingResultEvent is a terminal vendor result for turnID carrying one usage
 // reading.
-func pingResultEvent(t *testing.T, turnID string, inputTokens, cacheCreation int64) *corev1.Event {
+func pingResultEvent(t *testing.T, turnID string, inputTokens, cacheCreation int64) *protocolv1.Event {
 	t.Helper()
 	msg := &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{
 		Result: &datav1.ResultMessage{Usage: &datav1.Usage{
@@ -380,9 +380,9 @@ func pingResultEvent(t *testing.T, turnID string, inputTokens, cacheCreation int
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId: "vendor-session", ProducedAtMs: 20, RequestId: turnID,
-		Payload: &corev1.Event_Vendor{Vendor: vendor},
+		Payload: &protocolv1.Event_Vendor{Vendor: vendor},
 	}
 }
 
@@ -399,9 +399,9 @@ func TestTerminalResultReportsItsUncachedCostAgainstTheAccountedTurn(t *testing.
 	c.onTurnResultCost = func(cost turnResultCost) {
 		gotTurnID, gotUncached = cost.turnID, cost.expensiveInputTokens()
 	}
-	if err := c.Apply(&corev1.Event{
-		Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		RequestId: "ka_1", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "ka_1"}},
+	if err := c.Apply(&protocolv1.Event{
+		Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
+		RequestId: "ka_1", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "ka_1"}},
 	}); err != nil {
 		t.Fatalf("Apply TurnStarted: %v", err)
 	}
@@ -434,9 +434,9 @@ func TestTerminalResultWithNoUsageReportsNoCost(t *testing.T) {
 	}
 
 	// Act.
-	if err := c.Consume(&corev1.Event{
+	if err := c.Consume(&protocolv1.Event{
 		SessionId: "vendor-session", ProducedAtMs: 20, RequestId: "ka_1",
-		Payload: &corev1.Event_Vendor{Vendor: vendor},
+		Payload: &protocolv1.Event_Vendor{Vendor: vendor},
 	}); err != nil {
 		t.Fatalf("Consume: %v", err)
 	}

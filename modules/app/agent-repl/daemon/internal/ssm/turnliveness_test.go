@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // This file covers the ONE turn-liveness derivation and the durable end that
@@ -64,13 +64,13 @@ func newSupersedeRig(t *testing.T) (*supersedeRig, *string) {
 }
 
 // turnStarted is the store's `turn_started` at seq, for the named turn.
-func (r *supersedeRig) turnStarted(seq uint64, turnID string) *corev1.Event {
-	return &corev1.Event{
+func (r *supersedeRig) turnStarted(seq uint64, turnID string) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId: r.vendor,
 		Seq:       seq,
-		Plane:     corev1.Plane_PLANE_STREAM,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
 		RequestId: turnID,
-		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: turnID}},
+		Payload:   &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: turnID}},
 	}
 }
 
@@ -189,12 +189,12 @@ func TestTheDurableEndOfAKilledTurnSurvivesIntoTheReplacementsReplay(t *testing.
 func TestASecondFoldOfTheEventStreamFailsHardAndWritesNothing(t *testing.T) {
 	// Arrange.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	ev := &corev1.Event{
+	ev := &protocolv1.Event{
 		SessionId: "s1",
 		Seq:       9,
-		Plane:     corev1.Plane_PLANE_STREAM,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
 		RequestId: "turn-9",
-		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn-9"}},
+		Payload:   &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "turn-9"}},
 	}
 
 	// Act.
