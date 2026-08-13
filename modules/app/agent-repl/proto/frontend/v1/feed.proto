@@ -23,21 +23,20 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // which payloads are pushed but never re-types them — frontends render,
 // never interpret.
 message ConversationDelta {
-  // 2 was session_id. A frontend has no session vocabulary: the only question
-  // it ever asked of that field was "is this push still current", which the
-  // fence answers without naming what rotated.
-  reserved 2;
-  reserved "session_id";
-  // 3 KEPT its number but was renamed items -> messages when ConversationItem
-  // became Message. The name is reserved because this surface is protojson on
-  // the wire, where the FIELD NAME is the wire token: "items" is retired and
-  // must never come back meaning something else.
-  reserved "items";
+  // THERE IS NO SESSION ID ON THIS PUSH, deliberately, and there is none on any
+  // push in this file. A frontend has no session vocabulary: the only question
+  // it ever asks about a push is "is this still current", and `fence` answers
+  // that without naming what rotated. A workspace is the whole address.
+  //
+  // THIS SURFACE TRAVELS AS PROTOJSON, so the FIELD NAME is the wire token, not
+  // the number. Renaming a field here is a breaking wire change even when the
+  // number is untouched, and a name once spent must never come back meaning
+  // something else.
   string workspace = 1;
   // The conversation additions this push carries, oldest first. Each is a
   // complete feed envelope the frontend renders without further resolution.
-  repeated Message messages = 3;
-  uint64 through_seq = 4;  // frontends persist this for reconnect resync
+  repeated Message messages = 2;
+  uint64 through_seq = 3;  // frontends persist this for reconnect resync
   // The workspace's staleness FENCE at the moment the daemon produced this
   // push: an opaque token the client compares BYTE-WISE against the fence on
   // the workspace's current WorkspaceState, and never parses, splits or
@@ -47,7 +46,7 @@ message ConversationDelta {
   // The daemon mints it and is the only thing that can read meaning into it.
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
-  string fence = 5;
+  string fence = 4;
 }
 
 // WHO drove the turn that produced a message.
@@ -155,43 +154,24 @@ message MessageEphemeral {}
 // failure cards, session-level events — keeps an arm of its own, because
 // folding those into AgentEmission would make that message's name untrue.
 //
-// Consumers reconcile by uuid (permission items use the permission request_id
-// as their uuid).
+// Consumers reconcile by uuid.
 message Message {
-  // 18 was api_error (ApiErrorLine). A terminal line now curates to
-  // system_failure below only; a mid-backoff line curates to no message at all
-  // (the retrying window covers it).
-  // 16/17 were compact_boundary/compact_boundary_line, retired in favour of
-  // context_compacted, which carries one coalesced compaction instead of two
-  // plane-shaped halves. Reserved so the wire numbers can never be reused.
-  reserved 16, 17, 18;
-  reserved "api_error", "compact_boundary", "compact_boundary_line";
-  // 10, 12, 13, 14, 15 and 34 were agent-output arms (assistant_message,
-  // tool_use, tool_result, tool_use_result, result, skill_body). They are arms
-  // of AgentEmission, reached through `agent` below. 40 was usage_stamp, which
-  // now rides AgentResponse, the message it stamps.
-  reserved 10, 12, 13, 14, 15, 34, 40;
-  reserved "assistant_message", "tool_use", "tool_result", "tool_use_result",
-      "result", "skill_body", "usage_stamp";
-  // 36/37 were token_utilization and turn_accounting: persistence records
-  // carried verbatim to a renderer that had to digest them itself. The
-  // figures they were read for are resolved elsewhere — a response's stamp on
+  // THERE IS NO PER-KIND AGENT ARM HERE, and there must never be one. Every
+  // agent-produced payload — assistant text, tool use, tool results, skill
+  // bodies, the turn's result — is an arm of AgentEmission and is reached
+  // through `agent` below. An arm added here for one agent output kind would
+  // give that kind two spellings on the wire, and make AgentEmission's name
+  // untrue.
+  //
+  // THIS MESSAGE CARRIES NO PERSISTENCE RECORDS EITHER — no raw usage or
+  // accounting blobs for a renderer to digest itself. The figures a frontend
+  // shows are RESOLVED before they reach it: a response's stamp on
   // AgentResponse, a turn's verdict on FooterAccountingCell, session and
-  // per-model economics on TokenBreakdownView. Nothing on this message
-  // replaces them, because the feed rendered none of it directly.
-  reserved 36, 37;
-  reserved "token_utilization", "turn_accounting";
-  // 38 KEPT its number but was renamed async_bubble -> detached_work when the
-  // bubble stopped being a parallel type and became this message's payload.
-  // The NAME is retired because this surface is protojson on the wire, where
-  // the field name is the wire token.
-  reserved "async_bubble";
-  // 35 KEPT its number but was renamed session_command ->
-  // daemon_intercepted_command, because the old name read as a command issued
-  // TO the session rather than one intercepted FROM the user's input. Same
-  // retirement rule as async_bubble: the name is the wire token here, so
-  // "session_command" is retired and must never come back meaning anything.
-  reserved "session_command";
+  // per-model economics on TokenBreakdownView. The feed renders; it does not
+  // derive.
+  //
+  // As everywhere in this file, the FIELD NAME is the wire token (protojson),
+  // so renaming an arm is a breaking change even at the same number.
 
   // ---- Feed packaging: identity, lineage, ordering, provenance, resolution ----
 
@@ -220,7 +200,7 @@ message Message {
   // phantom feed row, and a page of ten "messages" would silently deliver
   // several turn boundaries and a short screen. Do not lift this field onto
   // Envelope, and do not model an unowned record as an empty MessageLineage.
-  MessageLineage lineage = 6;
+  MessageLineage lineage = 5;
 
   // WHETHER A DURABLE RECORD FOR THIS MESSAGE EXISTS AT ALL. Always set: a
   // message with neither arm is malformed and is rejected loudly rather than
@@ -253,9 +233,9 @@ message Message {
     // is this, INCLUDING the daemon-minted "detached-work:" ids, whose
     // durability comes from the TaskStarted behind them and not from who
     // chose the id.
-    MessageDurable durable = 7;
+    MessageDurable durable = 6;
     // No record for this message exists ANYWHERE, and none ever will.
-    MessageEphemeral ephemeral = 8;
+    MessageEphemeral ephemeral = 7;
   }
 
   // ---- Payload ----
@@ -263,21 +243,18 @@ message Message {
   oneof payload {
     // EVERYTHING the agent produced, in the one vocabulary that also carries
     // a detached agent's output (AsyncAgentUpdate). See AgentEmission.
-    AgentEmission agent = 5;
+    AgentEmission agent = 8;
 
     // ---- Non-agent payloads: things the agent did not emit ----
 
     // The user's own prompt.
-    conversation.v1.UserContent user_message = 11;
-    // 30 was `permission` and 32/33 were `context_cleared`/`context_compacted`.
-    // All three are retired with the core.v1 payloads they carried, and NOTHING
-    // REPLACES THEM — see the reservations at the foot of this message and the
-    // gap note in DESIGN-protobuf-surfaces.md.
-    FailureCardView failure_card = 31;
+    conversation.v1.UserContent user_message = 9;
+    // The daemon's own card for a failure the agent never got to report.
+    FailureCardView failure_card = 10;
     // A slash command the daemon took out of the user's input. Both
     // durability classes ride this arm; which one a given command is, is
     // stated by `durability` above and never inferred from the command.
-    DaemonInterceptedCommandItem daemon_intercepted_command = 35;
+    DaemonInterceptedCommandItem daemon_intercepted_command = 11;
     // A piece of detached work. THIS MESSAGE IS THE WORK — its uuid is the
     // work's id, and its lineage is the work's place in the feed.
     //
@@ -287,27 +264,25 @@ message Message {
     // messages. A detached agent emitting a thousand lines must not insert a
     // thousand rows into the conversation it was dispatched from — those lines
     // are this message's payload, not messages of their own.
-    DetachedWork detached_work = 38;
+    DetachedWork detached_work = 12;
     // The purple-washed summary block a compaction leaves behind. Its own arm
     // so that the wash is a stated kind rather than an inference.
-    CompactionSummaryItem compaction_summary = 39;
+    CompactionSummaryItem compaction_summary = 13;
   }
 
-  // RETIRED PAYLOAD ARMS. Reserved at message level because a `reserved`
-  // statement is not legal inside a `oneof`, and reserved by NAME as well as by
-  // number because this surface is protojson on the wire, where the field name
-  // IS the wire token.
+  // KNOWN GAPS IN THIS PAYLOAD SET — things that ARE messages by this feed's
+  // own test but have no arm above yet. Named here so their absence reads as an
+  // open question rather than a decision. See the gap note in
+  // DESIGN-protobuf-surfaces.md.
   //
-  // - 30 `permission` carried protocol.v1.PermissionItem: the daemon-composed
-  //   request-plus-resolution a client renders and answers. It was declared on
-  //   the shim-wire package and went with the record layer. A permission request
-  //   is still a MESSAGE by this feed's own test, so its absence is a hole.
-  // - 32/33 `context_cleared`/`context_compacted` carried the core.v1 payloads
-  //   verbatim. A context cut is a message by conversation.v1's test — a reader
-  //   scrolling back would notice where the conversation was cut — but no arm
-  //   here names one yet.
-  reserved 30, 32, 33;
-  reserved "permission", "context_cleared", "context_compacted";
+  // - A PERMISSION REQUEST. The daemon-composed request-plus-resolution a
+  //   client renders and answers is a message by this feed's test — it has a
+  //   uuid, it costs a page slot, a reader scrolling back expects to see it —
+  //   and nothing here carries one.
+  // - A CONTEXT CUT (cleared or compacted). A reader scrolling back would
+  //   notice where the conversation was cut, which makes it a message by
+  //   conversation.v1's test, but no arm here names one. `compaction_summary`
+  //   carries the block a compaction LEAVES BEHIND, not the cut itself.
 }
 
 // The detached-work push: MESSAGES that opened, and UPDATES to messages already
@@ -326,11 +301,6 @@ message Message {
 // chatty agent pace the feed of the conversation that dispatched it.
 message DetachedWorkDelta {
   string workspace = 1;
-  // 2 was session_id. A frontend has no session vocabulary: the only question
-  // it ever asked of that field was "is this push still current", which the
-  // fence answers without naming what rotated.
-  reserved 2;
-  reserved "session_id";
   // WHOLE MESSAGES: detached work opening for the first time, or restated in
   // full after a resync. Complete feed envelopes, identical in shape to the ones
   // ConversationDelta carries, so a frontend renders detached work with the same
@@ -341,12 +311,12 @@ message DetachedWorkDelta {
   //
   // Each carries payload arm `detached_work`; a message arriving here with any
   // other payload is a daemon bug and is rejected rather than rendered.
-  repeated Message opened = 3;
+  repeated Message opened = 2;
   // UPDATES to messages already open, in order. Each names its target message by
   // id and mutates that message's payload; none of them is a message.
-  repeated DetachedWorkUpdate updates = 4;
+  repeated DetachedWorkUpdate updates = 3;
   // Frontends persist this for reconnect resync.
-  uint64 through_seq = 5;
+  uint64 through_seq = 4;
   // The workspace's staleness FENCE at the moment the daemon produced this
   // push: an opaque token the client compares BYTE-WISE against the fence on
   // the workspace's current WorkspaceState, and never parses, splits or
@@ -356,7 +326,7 @@ message DetachedWorkDelta {
   // The daemon mints it and is the only thing that can read meaning into it.
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
-  string fence = 6;
+  string fence = 5;
 }
 
 // The compaction summary: the summary the daemon records after a compaction.
@@ -373,20 +343,14 @@ message CompactionSummaryItem {
 
 // Ephemeral live-typing relay (never persisted, never in snapshots).
 message TypingDelta {
-  // 2 was session_id. A frontend has no session vocabulary: the only question
-  // it ever asked of that field was "is this push still current", which the
-  // fence answers without naming what rotated.
-  reserved 2;
-  reserved "session_id";
+  // Addressed by workspace alone — no session id, for the reason stated on
+  // ConversationDelta.
   string workspace = 1;
-  // 3 WAS `delta`, carrying the retired protocol.v1.ContentDelta — the live
-  // typing preview this whole message exists to relay. NOTHING REPLACES IT: the
-  // content model moved to conversation.v1 and arrives on EntryDelivery's `live`
-  // arm, but no frontend-side spelling of a typing preview exists. TypingDelta
-  // is therefore left carrying a workspace and a fence and no content. See the
-  // gap note.
-  reserved 3;
-  reserved "delta";
+  // OPEN GAP: THIS MESSAGE CARRIES NO CONTENT. The live preview it exists to
+  // relay has no frontend-side spelling — the content model lives in
+  // conversation.v1 and arrives on EntryDelivery's `live` arm — so TypingDelta
+  // is currently a workspace, a fence and a target, and nothing to draw. See
+  // the gap note in DESIGN-protobuf-surfaces.md.
   // The workspace's staleness FENCE at the moment the daemon produced this
   // push: an opaque token the client compares BYTE-WISE against the fence on
   // the workspace's current WorkspaceState, and never parses, splits or
@@ -396,11 +360,7 @@ message TypingDelta {
   // The daemon mints it and is the only thing that can read meaning into it.
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
-  string fence = 4;
-  // 5 KEPT its number but was renamed bubble_id -> parent_message_id when
-  // detached work stopped having an id space of its own. The NAME is retired
-  // because this surface is protojson on the wire.
-  reserved "bubble_id";
+  string fence = 2;
   // WHERE THIS PREVIEW BELONGS, and therefore WHAT WILL RETIRE IT.
   //
   // Empty — the ordinary case — means the top-level feed: the preview opens
@@ -418,7 +378,7 @@ message TypingDelta {
   // The daemon knows which of the two it is BEFORE the preview goes out (it
   // is the same fold decision, made in the same place), so no preview it
   // cannot retire is ever created. This is provenance, not a timeout.
-  string parent_message_id = 5;
+  string parent_message_id = 3;
 }
 
 // The daemon's statement that a preview it opened will NEVER be completed.
@@ -433,9 +393,6 @@ message TypingDelta {
 // distinguish that from a slow block, and any client-side deadline would be
 // wrong for exactly the long tool calls users care most about watching.
 message TypingCut {
-  // 2 KEPT its number but was renamed bubble_id -> parent_message_id, for the
-  // same reason TypingDelta's did. The NAME is retired.
-  reserved "bubble_id";
   string workspace = 1;
   // The preview being retired, addressed exactly as the delta that opened it:
   // empty for the top-level feed, or the id of the MESSAGE whose detached work
@@ -461,15 +418,11 @@ message TypingCut {
 // neutral facts the producer observed; the daemon turns those into rows; the
 // panel prints them.
 message SessionInitView {
-  // 2 was session_id. A frontend has no session vocabulary: the only question
-  // it ever asked of that field was "is this push still current", which the
-  // fence answers without naming what rotated.
-  reserved 2;
-  reserved "session_id";
-  // 3 was `init`, the vendor's whole init record. The NAME is retired with it:
-  // nothing on this surface carries a vendor payload any more.
-  reserved 3;
-  reserved "init";
+  // Addressed by workspace alone — no session id, for the reason stated on
+  // ConversationDelta.
+  //
+  // NOTHING ON THIS MESSAGE CARRIES A VENDOR PAYLOAD. The panel gets rows, not
+  // a record to read field by field; that is the whole point of the message.
   string workspace = 1;
 
   // The panel's rows, in render order. EMPTY means no init has landed yet,
@@ -479,7 +432,7 @@ message SessionInitView {
   // The panel splices its own rows (account, model, permission mode) ahead of
   // these, because those come from sources that move independently of an init
   // and are already resolved elsewhere.
-  repeated SessionInitRow rows = 5;
+  repeated SessionInitRow rows = 2;
   // The workspace's staleness FENCE at the moment the daemon produced this
   // push: an opaque token the client compares BYTE-WISE against the fence on
   // the workspace's current WorkspaceState, and never parses, splits or
@@ -489,7 +442,7 @@ message SessionInitView {
   // The daemon mints it and is the only thing that can read meaning into it.
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
-  string fence = 4;
+  string fence = 3;
 }
 
 // One row of the /status panel: a label and the value beside it.

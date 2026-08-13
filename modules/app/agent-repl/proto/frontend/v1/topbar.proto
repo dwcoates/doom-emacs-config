@@ -30,12 +30,6 @@ message TopbarView {
   // The connectivity glyph, resolved: which glyph and which color class to
   // draw, and the tooltip text. The client never maps connectivity enums.
   TopbarConnectivity connectivity = 6;
-  // RETIRED: the flat accounting line the expanded topbar used to print
-  // inline. The topbar no longer states a settled turn's prose in the strip;
-  // it raises a WARNING (see `warnings`) only when there is something wrong to
-  // say, and the sentence lives inside that warning's dropdown.
-  reserved 7;
-  reserved "accounting_line";
   // The workspace's staleness FENCE at the moment the daemon produced this
   // push: an opaque token the client compares BYTE-WISE against the fence on
   // the workspace's current WorkspaceState, and never parses, splits or
@@ -45,9 +39,14 @@ message TopbarView {
   // The daemon mints it and is the only thing that can read meaning into it.
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
-  string fence = 8;
+  string fence = 7;
   // Everything the topbar has to WARN about right now, in display order, each
-  // already resolved into the sentence the client shows. An empty list is the
+  // already resolved into the sentence the client shows.
+  //
+  // THE STRIP STATES NOTHING WHEN NOTHING IS WRONG. A settled turn's accounting
+  // prose is not printed inline; the topbar raises a warning only when there is
+  // something wrong to say, and the sentence lives inside that warning's
+  // dropdown. An empty list is the
   // daemon saying there is nothing wrong, and the client draws no indicator at
   // all rather than a quiet one — a control over an empty list only invites
   // the click that proves it is empty.
@@ -55,7 +54,7 @@ message TopbarView {
   // It is a LIST because a warning is not a property of accounting: a second
   // concern (a degraded watcher, a skewed build) joins this list and reaches
   // the same affordance, instead of growing the strip a second bespoke slot.
-  repeated TopbarWarning warnings = 9;
+  repeated TopbarWarning warnings = 8;
 }
 
 // One thing the topbar is warning about, resolved completely by the daemon.
@@ -73,7 +72,7 @@ message TopbarWarning {
   oneof kind {
     // The settled turn's accounting did not reconcile (incomplete evidence or
     // a contradiction); `text` is the footer cell's own summary.
-    TopbarAccountingWarning accounting = 10;
+    TopbarAccountingWarning accounting = 2;
   }
 }
 

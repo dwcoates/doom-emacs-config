@@ -36,9 +36,9 @@ message FailureCardView {
   // with a different arm here, and the feed reconciles it in place. Appending
   // instead would leave the alarm standing beside its own all-clear.
   oneof lifecycle {
-    FailureCardOpen open = 10;
-    FailureCardResolved resolved = 11;
-    FailureCardTerminal terminal = 12;
+    FailureCardOpen open = 4;
+    FailureCardResolved resolved = 5;
+    FailureCardTerminal terminal = 6;
   }
 }
 
