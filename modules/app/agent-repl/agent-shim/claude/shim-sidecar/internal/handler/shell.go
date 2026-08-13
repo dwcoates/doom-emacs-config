@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"strconv"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
@@ -14,24 +15,25 @@ import (
 var exitMarkerPrefix = []byte("EXIT=")
 
 // maxExitMarkerDigits bounds the digits accepted after `EXIT=`. A shell exit
-// code is 0-255, so anything longer is not the harness's marker and must not
-// be read as one.
+// code is 0-255, so anything longer is not the harness's marker and must not be
+// read as one.
 const maxExitMarkerDigits = 3
 
-// ShellOutputHandler tracks a background shell spool (b*.output). Shell spools
-// carry no structure the sidecar interprets beyond ONE thing (§7.2): the
-// handler emits a byte-count TaskProgress per batch, plus a TaskEnded when the
-// spool's `EXIT=<code>` terminator arrives.
+// ShellOutputHandler tracks a background shell spool.
 //
-// The terminator used to be ignored, which meant a shell task that had plainly
-// finished — and said so, on disk — stayed "running" until the staleness sweep
-// eventually declared it LOST. That is the wrong status (LOST means "we never
-// found out", and here we did find out), and it arrives late. Reading the
-// marker is the total-ingestion mandate applied to the one structured byte a
-// shell spool has.
+// A spool is UNSTRUCTURED BYTES with exactly one structured thing in it: the
+// `EXIT=<code>` terminator the harness appends when the command finishes. So the
+// handler does two things — append the bytes to the run's card as output, and
+// end the card when the marker arrives.
 //
-// Completion is still never GUESSED: absent the marker this handler infers
-// nothing and the staleness policy owns the outcome exactly as before (§7.4).
+// READING THE MARKER IS THE TOTAL-INGESTION MANDATE APPLIED TO THE ONE
+// STRUCTURED BYTE A SPOOL HAS. It used to be ignored, which meant a shell task
+// that had plainly finished — and said so, on disk — stayed running until the
+// staleness sweep eventually declared it LOST. That is the wrong verdict as well
+// as a late one: LOST means we never found out, and here we did.
+//
+// Completion is still never GUESSED. Absent the marker this handler infers
+// nothing and the staleness policy owns the outcome exactly as before.
 type ShellOutputHandler struct {
 	log *logging.Bound
 }
@@ -42,38 +44,44 @@ func NewShellOutputHandler(log *logging.Bound) *ShellOutputHandler {
 	return &ShellOutputHandler{log: log}
 }
 
-// Handle implements Handler.
-func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1.Event {
-	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handling frames=%d bytes_observed=%d", len(frames), ctx.BytesObserved)
+// Handle implements tail.Handler.
+func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*agentshimv1.Entry {
+	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+		LogVerbose("handling frames=%d bytes_observed=%d", len(frames), ctx.BytesObserved)
 	if len(frames) == 0 {
-		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("no frames to convert")
+		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+			LogVerbose("no frames to convert")
 		return nil
 	}
-	events := []*corev1.Event{taskProgressEvent(ctx.SessionID, corev1.Plane_PLANE_FILE, &corev1.TaskProgress{
-		TaskId:        ctx.TaskID,
-		Kind:          corev1.TaskKind_TASK_KIND_SHELL,
-		BytesObserved: ctx.BytesObserved,
-	})}
+	if ctx.TaskID == "" {
+		// A spool with no task identity names no card, so its bytes have nowhere
+		// to accumulate. It is never silently discarded: the sidecar refuses to
+		// tail an unattributed spool at all (see the owner index), so reaching
+		// here means that guarantee broke.
+		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Level: "error"}).
+			Log("shell spool reached the handler with no task identity; its bytes have no card to append to")
+		return nil
+	}
+
+	at := attribute(ctx, frames[0].Offset)
+	var output bytes.Buffer
+	for _, frame := range frames {
+		output.Write(frame.Raw)
+	}
+	entries := []*agentshimv1.Entry{convert.DetachedProgress(at, ctx.TaskID, output.String())}
 
 	code, ok := trailingExitCode(frames[0].Raw, frames[0].Offset)
 	if !ok {
-		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("no terminal exit marker in batch events=%d", len(events))
-		return events
+		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+			LogVerbose("no terminal exit marker in batch entries=%d", len(entries))
+		return entries
 	}
-	status := corev1.TerminalStatus_TERMINAL_STATUS_DONE
-	if code != 0 {
-		status = corev1.TerminalStatus_TERMINAL_STATUS_ERROR
-	}
-	h.log.With(logging.Context{Operation: "exit-marker", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("EXIT=%d status=%s", code, status)
-	events = append(events, taskEndedEvent(ctx.SessionID, corev1.Plane_PLANE_FILE, &corev1.TaskEnded{
-		TaskId:     ctx.TaskID,
-		Kind:       corev1.TaskKind_TASK_KIND_SHELL,
-		Status:     status,
-		OutputPath: ctx.Path,
-		Inference:  "exit-marker",
-	}))
-	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("terminal marker converted events=%d", len(events))
-	return events
+	h.log.With(logging.Context{Operation: "exit-marker", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+		Log("EXIT=%d observed on disk; ending the card on evidence rather than on a silence timeout", code)
+	entries = append(entries, convert.DetachedExited(at, ctx.TaskID, code))
+	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+		LogVerbose("terminal marker converted entries=%d", len(entries))
+	return entries
 }
 
 // trailingExitCode reads the `EXIT=<code>` terminator off the END of a raw

@@ -6,7 +6,7 @@ import (
 	"os"
 	"syscall"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
@@ -49,7 +49,7 @@ func New(path string, codec Codec, h Handler, ctx *Context, log *logging.Bound) 
 // Restore seeds the committed cursor from a recovered CursorState (§7.3 startup
 // recovery). Only offset/carry/file_id are restored; the record counter resumes
 // from 0 (progress counts are advisory, not durable).
-func (t *Tailer) Restore(c *corev1.CursorState) {
+func (t *Tailer) Restore(c *agentshimv1.CursorState) {
 	if c == nil {
 		t.log.With(logging.Context{Operation: "tailer-restore", Path: t.path}).LogVerbose("no recovered cursor supplied")
 		return
@@ -60,13 +60,13 @@ func (t *Tailer) Restore(c *corev1.CursorState) {
 	t.log.With(logging.Context{Operation: "tailer-restore", Path: t.path}).LogVerbose("restored cursor file_id=%q offset=%d carry_bytes=%d", t.fileID, t.offset, len(t.carry))
 }
 
-// PollResult is one batch: the events to write plus the cursor advance to commit
-// atomically with them. Changed is false when the batch is nothing to write:
-// the file had no new bytes, or every frame it did have was deferred by the
-// handler and so neither produced an event nor moved the cursor.
+// PollResult is one batch: the records to write plus the cursor advance to
+// commit atomically with them. Changed is false when the batch is nothing to
+// write: the file had no new bytes, or every frame it did have was deferred by
+// the handler and so neither produced a record nor moved the cursor.
 type PollResult struct {
-	Events  []*corev1.Event
-	Next    *corev1.CursorState
+	Entries []*agentshimv1.Entry
+	Next    *agentshimv1.CursorState
 	Records int64
 	Changed bool
 }
@@ -75,7 +75,7 @@ type PollResult struct {
 func (t *Tailer) FileID() string { return t.fileID }
 
 // Poll reads any appended bytes and returns the resulting batch WITHOUT mutating
-// the committed cursor. The caller writes Events+Next to the store, then calls
+// the committed cursor. The caller writes Entries+Next to the store, then calls
 // Commit(result) on a successful ack.
 func (t *Tailer) Poll() (PollResult, error) {
 	t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path}).LogVerbose("poll start file_id=%q offset=%d carry_bytes=%d records=%d", t.fileID, t.offset, len(t.carry), t.records)
@@ -103,7 +103,7 @@ func (t *Tailer) Poll() (PollResult, error) {
 		// No new bytes; still surface the (possibly reset) cursor so file_id and
 		// a truncation reset commit.
 		result := PollResult{
-			Next:    &corev1.CursorState{FileId: fileID, Path: t.path, Offset: offset, Carry: carry},
+			Next:    &agentshimv1.CursorState{FileId: fileID, Path: t.path, Offset: offset, Carry: carry},
 			Records: records,
 			Changed: offset != t.offset || fileID != t.fileID,
 		}
@@ -135,19 +135,19 @@ func (t *Tailer) Poll() (PollResult, error) {
 	// The tailer can re-read any byte it has not committed past, so it can hand
 	// deferred frames back (Context "deferred frames").
 	t.ctx.Redelivers = true
-	events := t.handler.Handle(frames, t.ctx)
+	entries := t.handler.Handle(frames, t.ctx)
 	newOffset, newCarry, records = t.applyHold(frames, offset, newOffset, newCarry, records)
 
 	result := PollResult{
-		Events:  events,
-		Next:    &corev1.CursorState{FileId: fileID, Path: t.path, Offset: newOffset, Carry: newCarry},
+		Entries: entries,
+		Next:    &agentshimv1.CursorState{FileId: fileID, Path: t.path, Offset: newOffset, Carry: newCarry},
 		Records: records,
 		// A batch whose every frame was deferred moves neither the cursor nor
 		// the store, so it is not a change to write: the next poll re-reads
 		// those same bytes.
-		Changed: newOffset != t.offset || fileID != t.fileID || len(events) > 0,
+		Changed: newOffset != t.offset || fileID != t.fileID || len(entries) > 0,
 	}
-	t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path}).LogVerbose("poll decoded frames=%d events=%d read_bytes=%d next_offset=%d carry_bytes=%d held=%d changed=%t", len(frames), len(events), toRead, result.Next.GetOffset(), len(result.Next.GetCarry()), t.ctx.HeldDeliveries, result.Changed)
+	t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path}).LogVerbose("poll decoded frames=%d entries=%d read_bytes=%d next_offset=%d carry_bytes=%d held=%d changed=%t", len(frames), len(entries), toRead, result.Next.GetOffset(), len(result.Next.GetCarry()), t.ctx.HeldDeliveries, result.Changed)
 	return result, nil
 }
 

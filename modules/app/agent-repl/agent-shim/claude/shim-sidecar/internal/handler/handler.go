@@ -1,117 +1,67 @@
-// Package handler is the sidecar's Layer-2 record→event logic (design §7.2):
-// pure functions with ZERO IO that turn decoded file records into core.Event
-// values. Each handler owns a converter and emits the file-plane twins of the
-// records it reads plus the vendor-neutral lifecycle events the design assigns
-// to that plane (TaskStarted / TaskEnded / TaskProgress).
+// Package handler is the sidecar's record→record layer: pure functions with
+// ZERO IO that turn decoded file records into the stored records the shim-store
+// persists.
+//
+// A handler owns a converter and does three things with a batch of frames:
+// attributes each frame (which session, which detached-work card, which file
+// offset), asks the converter what the record IS, and defers the one record
+// whose meaning depends on a line that may not be written yet.
+//
+// IT NEVER DECIDES WHETHER A RECORD IS INTERESTING. Curation is a downstream
+// concern; ingestion's only job is that every JSON object on disk ends up in the
+// store as a protobuf shape.
 package handler
 
 import (
-	"fmt"
-	"path/filepath"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// Producer is the fixed StoreWrite producer identity for the sidecar (§5.2).
-const Producer = "shim-claude-sidecar"
+// Producer is the fixed StoreEntryWrite producer identity for the sidecar.
+const Producer = convert.Producer
 
 // Context / Kind live in the tail package (tailer-owned attribution); aliased
 // here so handler code reads naturally.
 type Context = tail.Context
 
-// nowMillis is the producer wall clock in unix millis (Event.produced_at_ms).
+// nowMillis is the producer wall clock in unix millis. Overridable in tests.
 var nowMillis = func() int64 { return time.Now().UnixMilli() }
 
-// vendorEvent wraps a data.v1 vendor message as a PERSISTENT file-plane Event.
-// dedupKey is set only where the store cannot derive it (journal); "" lets
-// the store derive uuid:/tur: keys itself.
-func vendorEvent(sessionID string, vendor proto.Message, extras *structpb.Struct, dedupKey string, log *logging.Bound) *corev1.Event {
-	a, err := anypb.New(vendor)
-	if err != nil {
-		// A generated data.v1 message always marshals into Any; a failure is a
-		// build-time impossibility, surfaced loudly rather than dropped.
-		log.With(logging.Context{Operation: "wrap-any", Session: sessionID, Level: "error"}).Log("wrapping %T in Any failed; the record on disk never reaches the store: %v", vendor, err)
-		return nil
-	}
-	return &corev1.Event{
-		SessionId:    sessionID,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		ProducedAtMs: nowMillis(),
-		DedupKey:     dedupKey,
-		Extras:       extras,
-		Payload:      &corev1.Event_Vendor{Vendor: a},
-	}
-}
-
-// base builds the common PERSISTENT lifecycle Event scaffold on a plane.
-func base(sessionID string, plane corev1.Plane) *corev1.Event {
-	return &corev1.Event{
-		SessionId:    sessionID,
-		Plane:        plane,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+// attribute builds the conversion attribution for one frame.
+//
+// `Container` is the detached-work card every record in this file sits inside.
+// It is DERIVED from the task id rather than looked up, which is what lets a
+// spool read after a restart land on the same card as the launch that opened it
+// before one.
+func attribute(ctx *Context, offset int64) convert.Attribution {
+	at := convert.Attribution{
+		SessionID:    ctx.SessionID,
+		Path:         ctx.Path,
+		Offset:       offset,
 		ProducedAtMs: nowMillis(),
 	}
-}
-
-func taskStartedEvent(sessionID string, plane corev1.Plane, ts *corev1.TaskStarted) *corev1.Event {
-	e := base(sessionID, plane)
-	e.Payload = &corev1.Event_TaskStarted{TaskStarted: ts}
-	return e
-}
-
-func taskProgressEvent(sessionID string, plane corev1.Plane, tp *corev1.TaskProgress) *corev1.Event {
-	e := base(sessionID, plane)
-	e.Payload = &corev1.Event_TaskProgress{TaskProgress: tp}
-	return e
-}
-
-func taskEndedEvent(sessionID string, plane corev1.Plane, te *corev1.TaskEnded) *corev1.Event {
-	e := base(sessionID, plane)
-	e.Payload = &corev1.Event_TaskEnded{TaskEnded: te}
-	return e
-}
-
-// unparsedEvent records a record that failed conversion (§5.1). raw is bounded to
-// 64KiB per the core.UnparsedEvent contract.
-func unparsedEvent(sessionID, path string, offset int64, raw []byte, convErr error) *corev1.Event {
-	const cap64 = 64 << 10
-	if len(raw) > cap64 {
-		raw = raw[:cap64]
+	if ctx.Kind != tail.KindSessionTranscript && ctx.TaskID != "" {
+		at.Container = convert.DetachedWorkMessageID(ctx.TaskID)
 	}
-	return &corev1.Event{
-		SessionId:    sessionID,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		ProducedAtMs: nowMillis(),
-		Payload: &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{
-			SourcePath: path,
-			ByteOffset: offset,
-			Raw:        append([]byte(nil), raw...),
-			Error:      convErr.Error(),
-			Producer:   Producer,
-		}},
-	}
+	return at
 }
 
-// shellOutputPath constructs a background shell task's spool output path from its
-// backgroundTaskId and the session's spool dir (design §7.2). Returns "" when the
-// spool dir is unknown.
-func shellOutputPath(spoolDir, backgroundTaskID string) string {
-	if spoolDir == "" || backgroundTaskID == "" {
-		return ""
+// logUnconverted records every record stored WITHOUT an external half.
+//
+// A record with no external half never reaches the daemon and never reaches a
+// page, so it is invisible to the user by construction. That is a legitimate
+// outcome and also the one worth counting: it is the running measure of how much
+// of what the vendor writes this schema does not yet model.
+func logUnconverted(log *logging.Bound, ctx *Context, entries []*agentshimv1.Entry) {
+	for _, entry := range entries {
+		if entry.GetExternal() != nil {
+			continue
+		}
+		log.With(logging.Context{Operation: "unconverted", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+			LogVerbose("record stored with no external half: %s", convert.Describe(entry))
 	}
-	return filepath.Join(spoolDir, backgroundTaskID+".output")
-}
-
-// journalDedupKey is the producer-supplied dedup key for a journal record (§6.4):
-// wf:<run_id>:<key>:<type>. The run_id comes from the journal PATH.
-func journalDedupKey(runID, key, recType string) string {
-	return fmt.Sprintf("wf:%s:%s:%s", runID, key, recType)
 }

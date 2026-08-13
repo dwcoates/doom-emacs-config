@@ -3,7 +3,7 @@ package main
 import (
 	"path/filepath"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
@@ -213,20 +213,33 @@ func (s *sidecar) taskOpen(taskID string) bool {
 	return s.openTasks[taskID]
 }
 
-func (s *sidecar) seedOwners(states []*corev1.OpenTaskState) int {
-	s.log.With(logging.Context{Operation: "seed-spool-owners"}).Log("owner seed entered open_tasks=%d", len(states))
-	n := 0
-	for _, state := range states {
-		ev := state.GetStarted()
-		if ts := ev.GetTaskStarted(); ts != nil {
-			s.markTaskOpen(ts.GetTaskId(), OwnerSourceDurableOpenTask)
-			if s.observeOwner(ts.GetTaskId(), ev.GetSessionId(), ts.GetOutputPath(), OwnerSourceDurableOpenTask) {
-				n++
-			}
-		}
+// seedOwners seeds the spool-owner index from the store's authoritative
+// open-task snapshot.
+//
+// IT CAN NO LONGER SEED ANYTHING. `OpenTaskState.started` carried the record
+// that opened a task — the task id, the session that launched it, and the output
+// path its spool lives at — and it was retired with no successor. What remains
+// says only when a task was last active, which names no task, no session and no
+// path, so there is no association to record.
+//
+// WHAT THIS SEED EXISTED TO PREVENT NOW HAPPENS. A /tmp spool carries no session
+// of its own, and the launch line naming its owner may sit far behind this
+// connection's resumed cursor — so a restart leaves a LIVE task's spool
+// unattributed, and therefore untailed, until its transcript happens to be
+// re-read. The persisted open tasks were exactly that mapping, already fetched.
+//
+// The spool is HELD rather than guessed at, which is the same behavior an
+// unattributed spool has always had: inventing a session, or reading the /tmp
+// path's runtime id as an identity, are the two things this system refuses.
+func (s *sidecar) seedOwners(states []*agentshimv1.OpenTaskState) int {
+	if len(states) == 0 {
+		s.log.With(logging.Context{Operation: "seed-spool-owners"}).LogVerbose("owner seed entered with no persisted open tasks")
+		return 0
 	}
-	s.log.With(logging.Context{Operation: "seed-spool-owners"}).Log("owner seed completed recorded=%d open_tasks=%d", n, len(states))
-	return n
+	s.log.With(logging.Context{Operation: "seed-spool-owners", Level: "error"}).Log(
+		"owner seed produced nothing from %d persisted open task(s): OpenTaskState carries no task, session or output path to seed from; "+
+			"live tasks' spools stay held and unread until their transcripts are re-read", len(states))
+	return 0
 }
 
 func (s *sidecar) noteTaskOwner(taskID, session, outputPath string, source OwnerSource) bool {

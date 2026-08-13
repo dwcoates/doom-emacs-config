@@ -9,7 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
@@ -17,19 +18,26 @@ func testLog() *logging.Bound {
 	return logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
 }
 
-// stubHandler records the frames it saw and emits one event per decoded object.
+// stubEntry is the minimal stored record a stub handler emits per decoded
+// object: enough to carry the attribution the tailer handed it, and nothing
+// else the tailer's own mechanics depend on.
+func stubEntry(sessionID string) *agentshimv1.Entry {
+	return &agentshimv1.Entry{External: &protocolv1.ExternalEntry{SessionId: sessionID}}
+}
+
+// stubHandler records the frames it saw and emits one entry per decoded object.
 type stubHandler struct {
 	batches [][]Frame
 	lastCtx Context
 }
 
-func (s *stubHandler) Handle(fr []Frame, ctx *Context) []*corev1.Event {
+func (s *stubHandler) Handle(fr []Frame, ctx *Context) []*agentshimv1.Entry {
 	s.batches = append(s.batches, fr)
 	s.lastCtx = *ctx
-	var out []*corev1.Event
+	var out []*agentshimv1.Entry
 	for _, f := range fr {
 		if f.Obj != nil {
-			out = append(out, &corev1.Event{SessionId: ctx.SessionID})
+			out = append(out, stubEntry(ctx.SessionID))
 		}
 	}
 	return out
@@ -73,16 +81,16 @@ func TestTailerReadsAppendedLines(t *testing.T) {
 	}
 	tr.Commit(r1)
 	// Assert
-	if len(r1.Events) != 2 || !r1.Changed {
-		t.Fatalf("poll1 events = %d changed=%v, want 2 true", len(r1.Events), r1.Changed)
+	if len(r1.Entries) != 2 || !r1.Changed {
+		t.Fatalf("poll1 entries = %d changed=%v, want 2 true", len(r1.Entries), r1.Changed)
 	}
 	// Act: append a third line.
 	appendFile(t, p, `{"c":3}`+"\n")
 	r2, _ := tr.Poll()
 	tr.Commit(r2)
 	// Assert: only the new line is read.
-	if len(r2.Events) != 1 {
-		t.Fatalf("poll2 events = %d, want 1", len(r2.Events))
+	if len(r2.Entries) != 1 {
+		t.Fatalf("poll2 entries = %d, want 1", len(r2.Entries))
 	}
 	if r2.Next.GetOffset() != int64(len(`{"a":1}`+"\n"+`{"b":2}`+"\n"+`{"c":3}`+"\n")) {
 		t.Fatalf("offset = %d", r2.Next.GetOffset())
@@ -100,8 +108,8 @@ func TestTailerNoNewBytes(t *testing.T) {
 	// Act: poll again with no new bytes.
 	r2, _ := tr.Poll()
 	// Assert
-	if r2.Changed || len(r2.Events) != 0 {
-		t.Fatalf("poll2 changed=%v events=%d, want false 0", r2.Changed, len(r2.Events))
+	if r2.Changed || len(r2.Entries) != 0 {
+		t.Fatalf("poll2 changed=%v entries=%d, want false 0", r2.Changed, len(r2.Entries))
 	}
 }
 
@@ -115,8 +123,8 @@ func TestTailerPartialLineCarriedThenCompleted(t *testing.T) {
 	r1, _ := tr.Poll()
 	tr.Commit(r1)
 	// Assert: one event, carry retained.
-	if len(r1.Events) != 1 {
-		t.Fatalf("poll1 events = %d, want 1", len(r1.Events))
+	if len(r1.Entries) != 1 {
+		t.Fatalf("poll1 entries = %d, want 1", len(r1.Entries))
 	}
 	if len(r1.Next.GetCarry()) == 0 {
 		t.Fatalf("expected carry for the partial line")
@@ -126,8 +134,8 @@ func TestTailerPartialLineCarriedThenCompleted(t *testing.T) {
 	r2, _ := tr.Poll()
 	tr.Commit(r2)
 	// Assert: the reassembled line yields one event.
-	if len(r2.Events) != 1 {
-		t.Fatalf("poll2 events = %d, want 1 (reassembled)", len(r2.Events))
+	if len(r2.Entries) != 1 {
+		t.Fatalf("poll2 entries = %d, want 1 (reassembled)", len(r2.Entries))
 	}
 	if len(r2.Next.GetCarry()) != 0 {
 		t.Fatalf("carry should be drained after completion")
@@ -213,8 +221,8 @@ func TestTailerTruncationResets(t *testing.T) {
 	r2, _ := tr.Poll()
 	tr.Commit(r2)
 	// Assert: cursor reset to 0, the new content read from the top.
-	if len(r2.Events) != 1 {
-		t.Fatalf("post-truncation events = %d, want 1", len(r2.Events))
+	if len(r2.Entries) != 1 {
+		t.Fatalf("post-truncation entries = %d, want 1", len(r2.Entries))
 	}
 	if r2.Next.GetOffset() != int64(len(`{"z":9}`+"\n")) {
 		t.Fatalf("post-truncation offset = %d", r2.Next.GetOffset())
@@ -242,8 +250,8 @@ func TestTailerRotationResets(t *testing.T) {
 	if tr.FileID() == firstID {
 		t.Fatalf("file_id unchanged after rotation")
 	}
-	if len(r2.Events) != 2 {
-		t.Fatalf("post-rotation events = %d, want 2 (full re-read)", len(r2.Events))
+	if len(r2.Entries) != 2 {
+		t.Fatalf("post-rotation entries = %d, want 2 (full re-read)", len(r2.Entries))
 	}
 }
 
@@ -262,11 +270,11 @@ func TestTailerBoundedRead(t *testing.T) {
 		t.Fatalf("bounded offset = %d, want 9", r1.Next.GetOffset())
 	}
 	// Act: drain the rest across further polls.
-	total := len(r1.Events)
+	total := len(r1.Entries)
 	for i := 0; i < 5; i++ {
 		r, _ := tr.Poll()
 		tr.Commit(r)
-		total += len(r.Events)
+		total += len(r.Entries)
 	}
 	// Assert: all three records eventually surfaced.
 	if total != 3 {
@@ -283,13 +291,13 @@ func TestTailerRestoreResumesFromCursor(t *testing.T) {
 	tr, _ := newTailer(t, p)
 	// Prime file_id via a stat, then restore an offset past the first line.
 	fi, _ := os.Stat(p)
-	tr.Restore(&corev1.CursorState{FileId: statID(fi), Path: p, Offset: int64(len(first))})
+	tr.Restore(&agentshimv1.CursorState{FileId: statID(fi), Path: p, Offset: int64(len(first))})
 	// Act
 	r, _ := tr.Poll()
 	tr.Commit(r)
 	// Assert: only the second line is read.
-	if len(r.Events) != 1 {
-		t.Fatalf("events after restore = %d, want 1", len(r.Events))
+	if len(r.Entries) != 1 {
+		t.Fatalf("events after restore = %d, want 1", len(r.Entries))
 	}
 }
 
