@@ -30,7 +30,7 @@
  *     latency from replay rather than lose it. The only other place the number
  *     appears is the turn's terminal result, which arrives when the turn is
  *     already over.
- *   - `tool_progress` → `Heartbeat`, delivered live. It reports liveness and
+ *   - `tool_progress` → `AgentHeartbeat`, delivered live. It reports liveness and
  *     never content.
  *
  * The remaining structural frames (`content_block_start` / `_stop`,
@@ -55,7 +55,7 @@ import {
   ContentArrivingSchema,
   EntrySchema,
   ExternalEntrySchema,
-  HeartbeatSchema,
+  AgentHeartbeatSchema,
   InternalEntrySchema,
   MessageAuthorSchema,
   MessageEntrySchema,
@@ -490,13 +490,13 @@ export function streamEventToResponseTiming(
 }
 
 // ---------------------------------------------------------------------------
-// tool_progress → Heartbeat (LIVE)
+// tool_progress → AgentHeartbeat (LIVE)
 // ---------------------------------------------------------------------------
 
 /**
- * Map a raw `tool_progress` SDK message to a live `Heartbeat`.
+ * Map a raw `tool_progress` SDK message to a live `AgentHeartbeat`.
  *
- * `Heartbeat` reports liveness and NEVER content: IDENTITIES rather than a
+ * `AgentHeartbeat` reports liveness and NEVER content: IDENTITIES rather than a
  * count, because a count cannot be reconciled against what a feed is showing
  * and a set can. The tool's own use-id is the one identity here — the tool
  * NAME, the parent tool call and the elapsed seconds the SDK also reports have
@@ -525,7 +525,7 @@ export function toolProgressToHeartbeat(
   const external = externalEntry(sessionId, producedAt(opts), {
     case: "bookkeeping",
     value: create(BookkeepingEntrySchema, {
-      kind: { case: "heartbeat", value: create(HeartbeatSchema, { liveWorkIds: [toolUseId] }) },
+      kind: { case: "heartbeat", value: create(AgentHeartbeatSchema, { liveWorkIds: [toolUseId] }) },
     }),
   });
   LOGGER.logVerbose({ claude_session_id: sessionId, tool_use_id: toolUseId }, "converted live tool heartbeat");

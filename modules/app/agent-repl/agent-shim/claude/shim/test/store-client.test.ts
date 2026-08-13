@@ -7,7 +7,7 @@ import {
   DegradedState,
   Event,
   EventSchema,
-  HeartbeatSchema,
+  ConnectionHeartbeatSchema,
   HealthCheckSchema,
   HealthStatusSchema,
   StoreWriteAckSchema,
@@ -62,7 +62,7 @@ function fakeStoreAt(socketPath: string, acknowledgeSubscriptions = true): Promi
       if (acknowledgeSubscriptions) {
         peer.onReceive((frame) => {
           if (unpackAs(frame, SubscribeSchema) === undefined) return false;
-          peer.send(HeartbeatSchema, create(HeartbeatSchema, { sentAtMs: 1n }));
+          peer.send(ConnectionHeartbeatSchema, create(ConnectionHeartbeatSchema, { sentAtMs: 1n }));
           return false;
         });
       }
@@ -142,7 +142,7 @@ async function connectedClient(
   return client;
 }
 
-/** The store's post-replay Heartbeat is the standing-tail readiness barrier. */
+/** The store's post-replay ConnectionHeartbeat is the standing-tail readiness barrier. */
 async function awaitSubscriptionReady(client: StoreClient): Promise<void> {
   await until(() => client.isSubscribed(), "standing subscription readiness");
 }
@@ -243,7 +243,7 @@ describe("StoreClient subscribe/write happy path", () => {
     expect(client.isSubscribed()).toBe(false);
 
     // Assert: the readiness heartbeat is the structural state transition.
-    store.latest().send(HeartbeatSchema, create(HeartbeatSchema, { sentAtMs: 1n }));
+    store.latest().send(ConnectionHeartbeatSchema, create(ConnectionHeartbeatSchema, { sentAtMs: 1n }));
     await expect(subscribed).resolves.toBeUndefined();
     expect(client.isSubscribed()).toBe(true);
   });
