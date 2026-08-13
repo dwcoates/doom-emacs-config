@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/shim-store/internal/logging"
 )
 
@@ -20,7 +20,7 @@ const defaultSubBuffer = 1024
 type subscriber struct {
 	id        uint64
 	sessionID string
-	ch        chan *corev1.Event
+	ch        chan *protocolv1.EntryDelivery
 	done      chan struct{}
 	closeOnce sync.Once
 	onDrop    func(subscriberDropReason)
@@ -93,7 +93,7 @@ func (f *fanout) subscribe(sessionID string, onDrop func(subscriberDropReason), 
 	s := &subscriber{
 		id:        f.nextID,
 		sessionID: sessionID,
-		ch:        make(chan *corev1.Event, f.buffer),
+		ch:        make(chan *protocolv1.EntryDelivery, f.buffer),
 		done:      make(chan struct{}),
 		onDrop:    onDrop,
 	}
@@ -133,17 +133,23 @@ func (f *fanout) remove(s *subscriber) bool {
 	return true
 }
 
-// publish broadcasts ev to every subscriber of its session in arrival order.
-// A subscriber whose buffer is full is disconnected rather than blocking the
-// publisher; the workspace-aware requester reconnects and replays.
-func (f *fanout) publish(ev *corev1.Event) {
-	sid := ev.GetSessionId()
+// publish broadcasts one delivery to every subscriber of its session in
+// arrival order. A subscriber whose buffer is full is disconnected rather than
+// blocking the publisher; the workspace-aware requester reconnects and replays.
+//
+// THE STORE ONLY EVER PUBLISHES A `stored` DELIVERY. The `live` arm exists for
+// a record handed straight to the daemon that the store never saw, which by
+// definition cannot arrive here — and the write surface has no way to say "fan
+// this out without storing it" now that EventClass is retired. deliverySession
+// still reads both arms so a routing key is never silently empty.
+func (f *fanout) publish(delivery *protocolv1.EntryDelivery) {
+	sid := deliverySession(delivery)
 
 	f.mu.Lock()
 	var slow []*subscriber
 	for _, s := range f.subs[sid] {
 		select {
-		case s.ch <- ev:
+		case s.ch <- delivery:
 		default:
 			slow = append(slow, s)
 		}
@@ -151,9 +157,22 @@ func (f *fanout) publish(ev *corev1.Event) {
 	f.mu.Unlock()
 
 	for _, s := range slow {
-		f.log.Log(logging.Fields{Operation: "slow-consumer", Session: sid, Subscriber: subscriberName(s.id), Level: "warn"}, "live-tail subscriber disconnected after buffer overflow buffer=%d event_seq=%d event_class=%s", f.buffer, ev.GetSeq(), ev.GetClass())
+		f.log.Log(logging.Fields{Operation: "slow-consumer", Session: sid, Subscriber: subscriberName(s.id), Level: "warn"}, "live-tail subscriber disconnected after buffer overflow buffer=%d entry_seq=%d", f.buffer, delivery.GetStored().GetSeq())
 		f.remove(s)
 		s.drop(subscriberDropSlowConsumer)
+	}
+}
+
+// deliverySession is the fan-out routing key: the VENDOR session id, which both
+// delivery arms carry on the external half they wrap.
+func deliverySession(delivery *protocolv1.EntryDelivery) string {
+	switch d := delivery.GetDelivery().(type) {
+	case *protocolv1.EntryDelivery_Stored:
+		return d.Stored.GetEntry().GetSessionId()
+	case *protocolv1.EntryDelivery_Live:
+		return d.Live.GetEntry().GetSessionId()
+	default:
+		return ""
 	}
 }
 
