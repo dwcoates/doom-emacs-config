@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/shim-store/internal/logging"
 	"google.golang.org/protobuf/proto"
 )
@@ -17,21 +18,29 @@ func nowMillis() int64 { return time.Now().UnixMilli() }
 
 // ReplayStats describes rows successfully handed to a ReplayFrom sink.
 type ReplayStats struct {
-	Events   uint64
+	Entries  uint64
 	FirstSeq uint64
 	LastSeq  uint64
 	Elapsed  time.Duration
 }
 
-// ReplayFrom streams the session's persisted events with seq > fromSeq to
-// yield in seq order. from_seq is EXCLUSIVE (core.proto Subscribe semantics).
-// Only PERSISTENT events are stored, so replay never yields ephemeral events.
+// ReplayFrom streams the session's persisted records with seq > fromSeq to
+// yield in seq order. from_seq is EXCLUSIVE (Subscribe semantics).
+//
+// WHAT IT YIELDS IS A DELIVERY, NOT A RECORD. Each row comes back as an
+// EntryDelivery on its `stored` arm, carrying the position the store assigned
+// and the record's EXTERNAL half only. The internal half stays in the database:
+// the store persists both, and hands back one.
+//
+// Records with no external half are not in `entry` at all, so replay cannot
+// yield one — that is a property of which table they were written to rather
+// than of a filter this statement remembers to apply.
 //
 // The callback-only API is load-bearing: the store server writes each row to
 // the subscriber before SQLite advances to the next row. A slice-returning API
 // would make it possible to buffer an arbitrarily large replay before the
 // first socket write, defeating every downstream activity deadline.
-func (d *DB) ReplayFrom(ctx context.Context, sessionID string, fromSeq uint64, yield func(*corev1.Event) error) (stats ReplayStats, replayErr error) {
+func (d *DB) ReplayFrom(ctx context.Context, sessionID string, fromSeq uint64, yield func(*protocolv1.EntryDelivery) error) (stats ReplayStats, replayErr error) {
 	if yield == nil {
 		panic("shim-store db: ReplayFrom requires a yield callback")
 	}
@@ -40,164 +49,101 @@ func (d *DB) ReplayFrom(ctx context.Context, sessionID string, fromSeq uint64, y
 	// completed replay — reports what the statement cost. A replay's elapsed
 	// time deliberately includes the per-row writes to the subscriber: that is
 	// the interval the store spent holding this query open.
-	defer func() { d.observeQuery(StatementReplay, "event", sessionID, started, int64(stats.Events)) }()
-	fields := logging.Fields{Operation: "replay", Table: "event", Session: sessionID}
+	defer func() { d.observeQuery(StatementReplay, "entry", sessionID, started, int64(stats.Entries)) }()
+	fields := logging.Fields{Operation: "replay", Table: "entry", Session: sessionID}
 	d.log.LogVerbose(fields, "streaming replay query from_seq=%d", fromSeq)
 	rows, err := d.sql.QueryContext(ctx,
-		`SELECT payload FROM event WHERE session_id = ? AND seq > ? ORDER BY seq ASC`,
+		`SELECT seq, payload FROM entry WHERE session_id = ? AND seq > ? ORDER BY seq ASC`,
 		sessionID, fromSeq)
 	if err != nil {
-		return ReplayStats{}, d.queryError("replay", "event", sessionID, fmt.Errorf("shim-store query: replay (session=%q from_seq=%d): %w", sessionID, fromSeq, err))
+		return ReplayStats{}, d.queryError("replay", "entry", sessionID, fmt.Errorf("shim-store query: replay (session=%q from_seq=%d): %w", sessionID, fromSeq, err))
 	}
 	defer rows.Close()
 
 	for rows.Next() {
+		var seq uint64
 		var blob []byte
-		if err := rows.Scan(&blob); err != nil {
-			return stats, d.queryError("replay-scan", "event", sessionID, fmt.Errorf("shim-store query: scanning replay row (session=%q from_seq=%d delivered=%d): %w", sessionID, fromSeq, stats.Events, err))
+		if err := rows.Scan(&seq, &blob); err != nil {
+			return stats, d.queryError("replay-scan", "entry", sessionID, fmt.Errorf("shim-store query: scanning replay row (session=%q from_seq=%d delivered=%d): %w", sessionID, fromSeq, stats.Entries, err))
 		}
-		ev := &corev1.Event{}
-		if err := proto.Unmarshal(blob, ev); err != nil {
-			return stats, d.queryError("replay-unmarshal", "event", sessionID, fmt.Errorf("shim-store query: unmarshaling replay payload (session=%q from_seq=%d delivered=%d): %w", sessionID, fromSeq, stats.Events, err))
+		delivery, err := storedDelivery(seq, blob)
+		if err != nil {
+			return stats, d.queryError("replay-unmarshal", "entry", sessionID, fmt.Errorf("shim-store query: decoding replay row (session=%q from_seq=%d delivered=%d): %w", sessionID, fromSeq, stats.Entries, err))
 		}
-		if err := yield(ev); err != nil {
+		if err := yield(delivery); err != nil {
 			stats.Elapsed = time.Since(started)
 			d.log.LogVerbose(fields, "replay sink stopped stream from_seq=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d cause=%q",
-				fromSeq, stats.Events, stats.FirstSeq, stats.LastSeq, stats.Elapsed.Milliseconds(), err)
+				fromSeq, stats.Entries, stats.FirstSeq, stats.LastSeq, stats.Elapsed.Milliseconds(), err)
 			return stats, err
 		}
-		if stats.Events == 0 {
-			stats.FirstSeq = ev.GetSeq()
+		if stats.Entries == 0 {
+			stats.FirstSeq = seq
 		}
-		stats.Events++
-		stats.LastSeq = ev.GetSeq()
+		stats.Entries++
+		stats.LastSeq = seq
 	}
 	if err := rows.Err(); err != nil {
-		return stats, d.queryError("replay-iterate", "event", sessionID, fmt.Errorf("shim-store query: iterating replay rows (session=%q from_seq=%d delivered=%d first_seq=%d last_seq=%d): %w",
-			sessionID, fromSeq, stats.Events, stats.FirstSeq, stats.LastSeq, err))
+		return stats, d.queryError("replay-iterate", "entry", sessionID, fmt.Errorf("shim-store query: iterating replay rows (session=%q from_seq=%d delivered=%d first_seq=%d last_seq=%d): %w",
+			sessionID, fromSeq, stats.Entries, stats.FirstSeq, stats.LastSeq, err))
 	}
 	stats.Elapsed = time.Since(started)
 	d.log.LogVerbose(fields, "replay query completed from_seq=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d",
-		fromSeq, stats.Events, stats.FirstSeq, stats.LastSeq, stats.Elapsed.Milliseconds())
+		fromSeq, stats.Entries, stats.FirstSeq, stats.LastSeq, stats.Elapsed.Milliseconds())
 	return stats, nil
+}
+
+// externalOf decodes a stored row into the half a reader may see.
+//
+// A row in `entry` was written BECAUSE it had an external half, so one missing
+// here is a corrupt row rather than an unrenderable record, and it is reported
+// as an error instead of delivered as an envelope with nothing in it.
+func externalOf(blob []byte) (*protocolv1.ExternalEntry, error) {
+	entry := &agentshimv1.Entry{}
+	if err := proto.Unmarshal(blob, entry); err != nil {
+		return nil, fmt.Errorf("unmarshaling stored entry: %w", err)
+	}
+	external := entry.GetExternal()
+	if external == nil {
+		return nil, errors.New("stored entry has no external half, but only records with one are written to this table")
+	}
+	return external, nil
+}
+
+// storedDelivery wraps one row in the envelope a subscriber receives.
+func storedDelivery(seq uint64, blob []byte) (*protocolv1.EntryDelivery, error) {
+	external, err := externalOf(blob)
+	if err != nil {
+		return nil, err
+	}
+	return &protocolv1.EntryDelivery{
+		Delivery: &protocolv1.EntryDelivery_Stored{Stored: &protocolv1.StoredEntryDelivery{
+			Seq:   seq,
+			Entry: external,
+		}},
+	}, nil
 }
 
 // MaxSeq returns the highest assigned seq for a session (0 if none).
 func (d *DB) MaxSeq(sessionID string) (uint64, error) {
-	d.log.LogVerbose(logging.Fields{Operation: "max-seq", Table: "event", Session: sessionID}, "querying highest sequence")
+	d.log.LogVerbose(logging.Fields{Operation: "max-seq", Table: "entry", Session: sessionID}, "querying highest sequence")
 	started := time.Now()
 	var v uint64
-	row := d.sql.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM event WHERE session_id = ?`, sessionID)
+	row := d.sql.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM entry WHERE session_id = ?`, sessionID)
 	err := row.Scan(&v)
-	d.observeQuery(StatementMaxSeq, "event", sessionID, started, 1)
+	d.observeQuery(StatementMaxSeq, "entry", sessionID, started, 1)
 	if err != nil {
-		return 0, d.queryError("max-seq", "event", sessionID, fmt.Errorf("shim-store query: max seq (session=%q): %w", sessionID, err))
+		return 0, d.queryError("max-seq", "entry", sessionID, fmt.Errorf("shim-store query: max seq (session=%q): %w", sessionID, err))
 	}
-	d.log.LogVerbose(logging.Fields{Operation: "max-seq", Table: "event", Session: sessionID}, "highest sequence=%d", v)
+	d.log.LogVerbose(logging.Fields{Operation: "max-seq", Table: "entry", Session: sessionID}, "highest sequence=%d", v)
 	return v, nil
 }
 
-// EventsByTask returns a session's events for one extracted task_id, seq order.
-// It exercises the event_task index and is used for task-scoped queries.
-func (d *DB) EventsByTask(sessionID, taskID string) ([]*corev1.Event, error) {
-	d.log.LogVerbose(logging.Fields{Operation: "by-task", Table: "event", Session: sessionID}, "querying task_id=%q", taskID)
-	started := time.Now()
-	var out []*corev1.Event
-	defer func() { d.observeQuery(StatementEventsByTask, "event", sessionID, started, int64(len(out))) }()
-	rows, err := d.sql.Query(
-		`SELECT payload FROM event WHERE session_id = ? AND task_id = ? ORDER BY seq ASC`,
-		sessionID, taskID)
-	if err != nil {
-		return nil, d.queryError("by-task", "event", sessionID, fmt.Errorf("shim-store query: by-task (session=%q task=%q): %w", sessionID, taskID, err))
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var blob []byte
-		if err := rows.Scan(&blob); err != nil {
-			return nil, d.queryError("by-task-scan", "event", sessionID, fmt.Errorf("shim-store query: scanning by-task row: %w", err))
-		}
-		ev := &corev1.Event{}
-		if err := proto.Unmarshal(blob, ev); err != nil {
-			return nil, d.queryError("by-task-unmarshal", "event", sessionID, fmt.Errorf("shim-store query: unmarshaling by-task payload: %w", err))
-		}
-		out = append(out, ev)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, d.queryError("by-task-iterate", "event", sessionID, fmt.Errorf("shim-store query: iterating by-task rows: %w", err))
-	}
-	d.log.LogVerbose(logging.Fields{Operation: "by-task", Table: "event", Session: sessionID}, "task query returned events=%d task_id=%q", len(out), taskID)
-	return out, nil
-}
-
-// OpenTasks returns one persisted TaskStarted plus the latest persisted
-// task-scoped activity time for every (session_id, task_id) that has no
-// persisted TaskEnded. The store uses only indexed envelope columns to select
-// lifecycle state; payloads remain opaque except for unmarshalling the selected
-// start events back onto the wire.
-func (d *DB) OpenTasks() ([]*corev1.OpenTaskState, error) {
-	d.log.LogVerbose(logging.Fields{Operation: "open-tasks", Table: "event"}, "querying persisted task lifecycle state")
-	started := time.Now()
-	var out []*corev1.OpenTaskState
-	defer func() { d.observeQuery(StatementOpenTasks, "event", "", started, int64(len(out))) }()
-	rows, err := d.sql.Query(`
-		SELECT started.payload, (
-		  SELECT active.produced_at
-		  FROM event active
-		  WHERE active.session_id = started.session_id
-		    AND active.task_id = started.task_id
-		  ORDER BY active.seq DESC
-		  LIMIT 1
-		)
-		FROM event started
-		WHERE started.kind = 'TaskStarted'
-		  AND started.task_id IS NOT NULL
-		  AND started.seq = (
-		    SELECT MIN(first_start.seq)
-		    FROM event first_start
-		    WHERE first_start.session_id = started.session_id
-		      AND first_start.task_id = started.task_id
-		      AND first_start.kind = 'TaskStarted'
-		  )
-		  AND NOT EXISTS (
-		    SELECT 1 FROM event ended
-		    WHERE ended.session_id = started.session_id
-		      AND ended.task_id = started.task_id
-		      AND ended.kind = 'TaskEnded'
-		  )
-		ORDER BY started.session_id, started.task_id`)
-	if err != nil {
-		return nil, d.queryError("open-tasks", "event", "", fmt.Errorf("shim-store query: open tasks: %w", err))
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var blob []byte
-		var lastActivityAtMs int64
-		if err := rows.Scan(&blob, &lastActivityAtMs); err != nil {
-			return nil, d.queryError("open-tasks-scan", "event", "", fmt.Errorf("shim-store query: scanning open task: %w", err))
-		}
-		ev := &corev1.Event{}
-		if err := proto.Unmarshal(blob, ev); err != nil {
-			return nil, d.queryError("open-tasks-unmarshal", "event", "", fmt.Errorf("shim-store query: unmarshaling open task start: %w", err))
-		}
-		out = append(out, &corev1.OpenTaskState{
-			Started:          ev,
-			LastActivityAtMs: lastActivityAtMs,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, d.queryError("open-tasks-iterate", "event", "", fmt.Errorf("shim-store query: iterating open tasks: %w", err))
-	}
-	d.log.LogVerbose(logging.Fields{Operation: "open-tasks", Table: "event"}, "open task query returned tasks=%d", len(out))
-	return out, nil
-}
-
 // Cursors returns all persisted file cursors for the sidecar's startup
-// recovery (§7.3). The sidecar resumes each file from its stored offset/carry.
-func (d *DB) Cursors() ([]*corev1.CursorState, error) {
+// recovery. The sidecar resumes each file from its stored offset/carry.
+func (d *DB) Cursors() ([]*agentshimv1.CursorState, error) {
 	d.log.LogVerbose(logging.Fields{Operation: "list-cursors", Table: "cursor"}, "querying all persisted cursors")
 	started := time.Now()
-	var out []*corev1.CursorState
+	var out []*agentshimv1.CursorState
 	defer func() { d.observeQuery(StatementListCursors, "cursor", "", started, int64(len(out))) }()
 	rows, err := d.sql.Query(`SELECT file_id, path, offset, carry FROM cursor`)
 	if err != nil {
@@ -206,7 +152,7 @@ func (d *DB) Cursors() ([]*corev1.CursorState, error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		c := &corev1.CursorState{}
+		c := &agentshimv1.CursorState{}
 		var carry []byte
 		if err := rows.Scan(&c.FileId, &c.Path, &c.Offset, &carry); err != nil {
 			return nil, d.queryError("list-cursors-scan", "cursor", "", fmt.Errorf("shim-store query: scanning cursor row: %w", err))
@@ -222,10 +168,10 @@ func (d *DB) Cursors() ([]*corev1.CursorState, error) {
 }
 
 // Cursor returns one file's persisted cursor, or (nil, nil) if absent.
-func (d *DB) Cursor(fileID string) (*corev1.CursorState, error) {
+func (d *DB) Cursor(fileID string) (*agentshimv1.CursorState, error) {
 	d.log.LogVerbose(logging.Fields{Operation: "cursor", Table: "cursor"}, "querying file_id=%q", fileID)
 	started := time.Now()
-	c := &corev1.CursorState{}
+	c := &agentshimv1.CursorState{}
 	var carry []byte
 	row := d.sql.QueryRow(`SELECT file_id, path, offset, carry FROM cursor WHERE file_id = ?`, fileID)
 	scanErr := row.Scan(&c.FileId, &c.Path, &c.Offset, &carry)
