@@ -31,6 +31,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { PageScope } from "./conversation-page_pb";
+import { file_frontend_v1_conversation_page } from "./conversation-page_pb";
 import type { Message as Message$1 } from "./feed_pb";
 import { file_frontend_v1_feed } from "./feed_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -39,7 +41,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/conversation-history.proto.
  */
 export const file_frontend_v1_conversation_history: GenFile = /*@__PURE__*/
-  fileDesc("CiZmcm9udGVuZC92MS9jb252ZXJzYXRpb24taGlzdG9yeS5wcm90bxILZnJvbnRlbmQudjEiIQoMRmlyc3RQYWdlQ21kEhEKCXdvcmtzcGFjZRgBIAEoCSIgCgtOZXh0UGFnZUNtZBIRCgl3b3Jrc3BhY2UYASABKAki3QQKF0NvbnZlcnNhdGlvbkhpc3RvcnlQYWdlEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpyZXF1ZXN0X2lkGAIgASgJEicKCW1lc3NhZ2VfMRgDIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV8yGAQgASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzMYBSABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEicKCW1lc3NhZ2VfNBgGIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV81GAcgASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzYYCCABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEicKCW1lc3NhZ2VfNxgJIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV84GAogASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzkYCyABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEigKCm1lc3NhZ2VfMTAYDCABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEisKBG1vcmUYDSABKAsyGy5mcm9udGVuZC52MS5IaXN0b3J5SGFzTW9yZUgAEiwKBXN0YXJ0GA4gASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUF0U3RhcnRIABIVCg1saXZlX2pvaW5fc2VxGA8gASgEQg4KDGNvbnRpbnVhdGlvbiIQCg5IaXN0b3J5SGFzTW9yZSIQCg5IaXN0b3J5QXRTdGFydEIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_frontend_v1_feed]);
+  fileDesc("CiZmcm9udGVuZC92MS9jb252ZXJzYXRpb24taGlzdG9yeS5wcm90bxILZnJvbnRlbmQudjEiSAoMRmlyc3RQYWdlQ21kEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgVzY29wZRgCIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZSJHCgtOZXh0UGFnZUNtZBIRCgl3b3Jrc3BhY2UYASABKAkSJQoFc2NvcGUYAiABKAsyFi5mcm9udGVuZC52MS5QYWdlU2NvcGUi3QQKF0NvbnZlcnNhdGlvbkhpc3RvcnlQYWdlEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpyZXF1ZXN0X2lkGAIgASgJEicKCW1lc3NhZ2VfMRgDIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV8yGAQgASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzMYBSABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEicKCW1lc3NhZ2VfNBgGIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV81GAcgASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzYYCCABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEicKCW1lc3NhZ2VfNxgJIAEoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USJwoJbWVzc2FnZV84GAogASgLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRInCgltZXNzYWdlXzkYCyABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEigKCm1lc3NhZ2VfMTAYDCABKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEisKBG1vcmUYDSABKAsyGy5mcm9udGVuZC52MS5IaXN0b3J5SGFzTW9yZUgAEiwKBXN0YXJ0GA4gASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUF0U3RhcnRIABIVCg1saXZlX2pvaW5fc2VxGA8gASgEQg4KDGNvbnRpbnVhdGlvbiIQCg5IaXN0b3J5SGFzTW9yZSIQCg5IaXN0b3J5QXRTdGFydEIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_frontend_v1_conversation_page, file_frontend_v1_feed]);
 
 /**
  * Ask for the MOST RECENT page, and reset this reader's position to it.
@@ -57,6 +59,20 @@ export type FirstPageCmd = Message<"frontend.v1.FirstPageCmd"> & {
    * @generated from field: string workspace = 1;
    */
   workspace: string;
+
+  /**
+   * WHICH CONTAINER this page walks: the feed, or the inside of one message.
+   * The daemon's position is per reader per workspace PER SCOPE, so this also
+   * selects which position is being reset — opening a subagent does not throw
+   * away where the reader was in the feed.
+   *
+   * Unset is NOT a default. A request that does not state its scope is REFUSED,
+   * never read as the feed: defaulting would answer a client that forgot to
+   * name its container with the whole conversation.
+   *
+   * @generated from field: frontend.v1.PageScope scope = 2;
+   */
+  scope?: PageScope | undefined;
 };
 
 /**
@@ -81,6 +97,19 @@ export type NextPageCmd = Message<"frontend.v1.NextPageCmd"> & {
    * @generated from field: string workspace = 1;
    */
   workspace: string;
+
+  /**
+   * WHICH CONTAINER to walk back through. It names the scope, never a position
+   * within it — the daemon still owns where this reader is inside that scope,
+   * so the no-position rule above is untouched.
+   *
+   * Unset is NOT a default and is REFUSED, exactly as on FirstPageCmd: a
+   * load-more that forgot which container it belongs to must not silently walk
+   * back through the feed instead.
+   *
+   * @generated from field: frontend.v1.PageScope scope = 2;
+   */
+  scope?: PageScope | undefined;
 };
 
 /**

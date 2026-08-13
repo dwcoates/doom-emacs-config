@@ -72,6 +72,12 @@ type ConversationPageCmd struct {
 	// ResyncCmd.fence, and deliberately the same token rather than a
 	// paging-specific one.
 	//
+	// WHICH CONTAINER this page walks: the feed, or the inside of one message.
+	// Unset is NOT a default — a request that does not state its scope is
+	// REFUSED, never read as the feed. Defaulting would make a client bug that
+	// forgot to name a subagent indistinguishable from a legitimate cold open,
+	// and would answer it with the whole conversation.
+	Scope *PageScope `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"`
 	// It is the exact fence the client held when it decided to ask for this
 	// page, copied byte-for-byte from the WorkspaceState it was reading at that
 	// moment. Reading current state at transport time instead would let a
@@ -139,6 +145,13 @@ func (x *ConversationPageCmd) GetBefore() *ConversationPageBefore {
 	return nil
 }
 
+func (x *ConversationPageCmd) GetScope() *PageScope {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
 func (x *ConversationPageCmd) GetFence() string {
 	if x != nil {
 		return x.Fence
@@ -164,6 +177,184 @@ func (*ConversationPageCmd_Tail) isConversationPageCmd_Anchor() {}
 
 func (*ConversationPageCmd_Before) isConversationPageCmd_Anchor() {}
 
+// Which container a page walks.
+//
+// A oneof rather than an optional container id: "the feed" and "inside message
+// X" are the only two answers, and an empty string standing for the feed is
+// exactly the ambiguity conversation.v1.MessageParent exists to forbid.
+type PageScope struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Scope:
+	//
+	//	*PageScope_Feed
+	//	*PageScope_Inside
+	Scope         isPageScope_Scope `protobuf_oneof:"scope"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PageScope) Reset() {
+	*x = PageScope{}
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PageScope) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PageScope) ProtoMessage() {}
+
+func (x *PageScope) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PageScope.ProtoReflect.Descriptor instead.
+func (*PageScope) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *PageScope) GetScope() isPageScope_Scope {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
+func (x *PageScope) GetFeed() *PageScopeFeed {
+	if x != nil {
+		if x, ok := x.Scope.(*PageScope_Feed); ok {
+			return x.Feed
+		}
+	}
+	return nil
+}
+
+func (x *PageScope) GetInside() *PageScopeInside {
+	if x != nil {
+		if x, ok := x.Scope.(*PageScope_Inside); ok {
+			return x.Inside
+		}
+	}
+	return nil
+}
+
+type isPageScope_Scope interface {
+	isPageScope_Scope()
+}
+
+type PageScope_Feed struct {
+	// Records whose parent is conversation.v1.MessageParentRoot.
+	Feed *PageScopeFeed `protobuf:"bytes,1,opt,name=feed,proto3,oneof"`
+}
+
+type PageScope_Inside struct {
+	// Records whose parent is conversation.v1.MessageParentInside this message.
+	Inside *PageScopeInside `protobuf:"bytes,2,opt,name=inside,proto3,oneof"`
+}
+
+func (*PageScope_Feed) isPageScope_Scope() {}
+
+func (*PageScope_Inside) isPageScope_Scope() {}
+
+// The top-level conversation: everything the feed renders as a standalone row.
+//
+// An empty message rather than a bool, so that naming the feed and naming a
+// container are the same act at the same cost, and a client never has to choose
+// between two spellings of "where".
+type PageScopeFeed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PageScopeFeed) Reset() {
+	*x = PageScopeFeed{}
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PageScopeFeed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PageScopeFeed) ProtoMessage() {}
+
+func (x *PageScopeFeed) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PageScopeFeed.ProtoReflect.Descriptor instead.
+func (*PageScopeFeed) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{2}
+}
+
+// The inside of one message: the records that message contains.
+type PageScopeInside struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The containing message. It is itself a conversation.v1.MessageEntry, so a
+	// subagent inside a subagent is named the same way at every depth — the
+	// recursion lives in the DATA, not in this type.
+	ContainerMessageId string `protobuf:"bytes,1,opt,name=container_message_id,json=containerMessageId,proto3" json:"container_message_id,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *PageScopeInside) Reset() {
+	*x = PageScopeInside{}
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PageScopeInside) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PageScopeInside) ProtoMessage() {}
+
+func (x *PageScopeInside) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PageScopeInside.ProtoReflect.Descriptor instead.
+func (*PageScopeInside) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *PageScopeInside) GetContainerMessageId() string {
+	if x != nil {
+		return x.ContainerMessageId
+	}
+	return ""
+}
+
 // The tail anchor: start at the newest message and walk backwards.
 type ConversationPageTail struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -182,7 +373,7 @@ type ConversationPageTail struct {
 
 func (x *ConversationPageTail) Reset() {
 	*x = ConversationPageTail{}
-	mi := &file_frontend_v1_conversation_page_proto_msgTypes[1]
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -194,7 +385,7 @@ func (x *ConversationPageTail) String() string {
 func (*ConversationPageTail) ProtoMessage() {}
 
 func (x *ConversationPageTail) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_conversation_page_proto_msgTypes[1]
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -207,7 +398,7 @@ func (x *ConversationPageTail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationPageTail.ProtoReflect.Descriptor instead.
 func (*ConversationPageTail) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{1}
+	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ConversationPageTail) GetLimit() uint32 {
@@ -237,7 +428,7 @@ type ConversationPageBefore struct {
 
 func (x *ConversationPageBefore) Reset() {
 	*x = ConversationPageBefore{}
-	mi := &file_frontend_v1_conversation_page_proto_msgTypes[2]
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -249,7 +440,7 @@ func (x *ConversationPageBefore) String() string {
 func (*ConversationPageBefore) ProtoMessage() {}
 
 func (x *ConversationPageBefore) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_conversation_page_proto_msgTypes[2]
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -262,7 +453,7 @@ func (x *ConversationPageBefore) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationPageBefore.ProtoReflect.Descriptor instead.
 func (*ConversationPageBefore) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{2}
+	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ConversationPageBefore) GetCursor() string {
@@ -332,14 +523,33 @@ type ConversationPage struct {
 	// client compares it BYTE-WISE against the fence on the workspace's current
 	// WorkspaceState and never parses it. Different means stale, and a stale
 	// page is discarded WHOLE rather than partially adopted.
-	Fence         string `protobuf:"bytes,7,opt,name=fence,proto3" json:"fence,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Fence string `protobuf:"bytes,7,opt,name=fence,proto3" json:"fence,omitempty"`
+	// WHICH CONTAINER this page walks, STATED rather than left to be inferred,
+	// so a client can never mistake a page of a subagent's insides for a page of
+	// the feed.
+	//
+	// It is the ECHO of the requested scope, alongside `request_id`. Together
+	// with the `parent` each returned record carries, it is how a client VERIFIES
+	// that the page it got is the page it asked for: the echo proves what was
+	// ASKED, the per-record parent proves what was RECEIVED.
+	Scope *PageScope `protobuf:"bytes,8,opt,name=scope,proto3" json:"scope,omitempty"`
+	// The containers this page's scope sits inside, OUTERMOST FIRST. Empty when
+	// the scope is the feed.
+	//
+	// STATED BY THE DAEMON BECAUSE IT ALREADY WALKED THE CHAIN while resolving
+	// the scope. A cold open deep-linked into a nested container holds no message
+	// map yet and needs the ancestors to render the surrounding cards; walking up
+	// one `parent` hop at a time would cost a round trip per level to learn what
+	// the resolver already knew. It cannot disagree with the parent chain because
+	// it is derived from that chain in the same pass.
+	AncestorMessageIds []string `protobuf:"bytes,9,rep,name=ancestor_message_ids,json=ancestorMessageIds,proto3" json:"ancestor_message_ids,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ConversationPage) Reset() {
 	*x = ConversationPage{}
-	mi := &file_frontend_v1_conversation_page_proto_msgTypes[3]
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -351,7 +561,7 @@ func (x *ConversationPage) String() string {
 func (*ConversationPage) ProtoMessage() {}
 
 func (x *ConversationPage) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_conversation_page_proto_msgTypes[3]
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -364,7 +574,7 @@ func (x *ConversationPage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationPage.ProtoReflect.Descriptor instead.
 func (*ConversationPage) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{3}
+	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ConversationPage) GetWorkspace() string {
@@ -427,6 +637,20 @@ func (x *ConversationPage) GetFence() string {
 	return ""
 }
 
+func (x *ConversationPage) GetScope() *PageScope {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
+func (x *ConversationPage) GetAncestorMessageIds() []string {
+	if x != nil {
+		return x.AncestorMessageIds
+	}
+	return nil
+}
+
 type isConversationPage_Continuation interface {
 	isConversationPage_Continuation()
 }
@@ -457,7 +681,7 @@ type ConversationPageMore struct {
 
 func (x *ConversationPageMore) Reset() {
 	*x = ConversationPageMore{}
-	mi := &file_frontend_v1_conversation_page_proto_msgTypes[4]
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -469,7 +693,7 @@ func (x *ConversationPageMore) String() string {
 func (*ConversationPageMore) ProtoMessage() {}
 
 func (x *ConversationPageMore) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_conversation_page_proto_msgTypes[4]
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -482,7 +706,7 @@ func (x *ConversationPageMore) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationPageMore.ProtoReflect.Descriptor instead.
 func (*ConversationPageMore) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{4}
+	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ConversationPageMore) GetCursor() string {
@@ -506,7 +730,7 @@ type ConversationPageStart struct {
 
 func (x *ConversationPageStart) Reset() {
 	*x = ConversationPageStart{}
-	mi := &file_frontend_v1_conversation_page_proto_msgTypes[5]
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -518,7 +742,7 @@ func (x *ConversationPageStart) String() string {
 func (*ConversationPageStart) ProtoMessage() {}
 
 func (x *ConversationPageStart) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_conversation_page_proto_msgTypes[5]
+	mi := &file_frontend_v1_conversation_page_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -531,24 +755,32 @@ func (x *ConversationPageStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationPageStart.ProtoReflect.Descriptor instead.
 func (*ConversationPageStart) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{5}
+	return file_frontend_v1_conversation_page_proto_rawDescGZIP(), []int{8}
 }
 
 var File_frontend_v1_conversation_page_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_conversation_page_proto_rawDesc = "" +
 	"\n" +
-	"#frontend/v1/conversation-page.proto\x12\vfrontend.v1\x1a\x16frontend/v1/feed.proto\"\xad\x01\n" +
+	"#frontend/v1/conversation-page.proto\x12\vfrontend.v1\x1a\x16frontend/v1/feed.proto\"\xdb\x01\n" +
 	"\x13ConversationPageCmd\x127\n" +
 	"\x04tail\x18\x01 \x01(\v2!.frontend.v1.ConversationPageTailH\x00R\x04tail\x12=\n" +
-	"\x06before\x18\x02 \x01(\v2#.frontend.v1.ConversationPageBeforeH\x00R\x06before\x12\x14\n" +
+	"\x06before\x18\x02 \x01(\v2#.frontend.v1.ConversationPageBeforeH\x00R\x06before\x12,\n" +
+	"\x05scope\x18\x04 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\x12\x14\n" +
 	"\x05fence\x18\x03 \x01(\tR\x05fenceB\b\n" +
-	"\x06anchor\",\n" +
+	"\x06anchor\"~\n" +
+	"\tPageScope\x120\n" +
+	"\x04feed\x18\x01 \x01(\v2\x1a.frontend.v1.PageScopeFeedH\x00R\x04feed\x126\n" +
+	"\x06inside\x18\x02 \x01(\v2\x1c.frontend.v1.PageScopeInsideH\x00R\x06insideB\a\n" +
+	"\x05scope\"\x0f\n" +
+	"\rPageScopeFeed\"C\n" +
+	"\x0fPageScopeInside\x120\n" +
+	"\x14container_message_id\x18\x01 \x01(\tR\x12containerMessageId\",\n" +
 	"\x14ConversationPageTail\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\rR\x05limit\"F\n" +
 	"\x16ConversationPageBefore\x12\x16\n" +
 	"\x06cursor\x18\x01 \x01(\tR\x06cursor\x12\x14\n" +
-	"\x05limit\x18\x02 \x01(\rR\x05limit\"\xc7\x02\n" +
+	"\x05limit\x18\x02 \x01(\rR\x05limit\"\xa7\x03\n" +
 	"\x10ConversationPage\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -557,7 +789,9 @@ const file_frontend_v1_conversation_page_proto_rawDesc = "" +
 	"\x04more\x18\x04 \x01(\v2!.frontend.v1.ConversationPageMoreH\x00R\x04more\x12:\n" +
 	"\x05start\x18\x05 \x01(\v2\".frontend.v1.ConversationPageStartH\x00R\x05start\x12\"\n" +
 	"\rlive_join_seq\x18\x06 \x01(\x04R\vliveJoinSeq\x12\x14\n" +
-	"\x05fence\x18\a \x01(\tR\x05fenceB\x0e\n" +
+	"\x05fence\x18\a \x01(\tR\x05fence\x12,\n" +
+	"\x05scope\x18\b \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\x120\n" +
+	"\x14ancestor_message_ids\x18\t \x03(\tR\x12ancestorMessageIdsB\x0e\n" +
 	"\fcontinuationR\x05items\".\n" +
 	"\x14ConversationPageMore\x12\x16\n" +
 	"\x06cursor\x18\x01 \x01(\tR\x06cursor\"\x17\n" +
@@ -575,27 +809,34 @@ func file_frontend_v1_conversation_page_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_conversation_page_proto_rawDescData
 }
 
-var file_frontend_v1_conversation_page_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_frontend_v1_conversation_page_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_frontend_v1_conversation_page_proto_goTypes = []any{
 	(*ConversationPageCmd)(nil),    // 0: frontend.v1.ConversationPageCmd
-	(*ConversationPageTail)(nil),   // 1: frontend.v1.ConversationPageTail
-	(*ConversationPageBefore)(nil), // 2: frontend.v1.ConversationPageBefore
-	(*ConversationPage)(nil),       // 3: frontend.v1.ConversationPage
-	(*ConversationPageMore)(nil),   // 4: frontend.v1.ConversationPageMore
-	(*ConversationPageStart)(nil),  // 5: frontend.v1.ConversationPageStart
-	(*Message)(nil),                // 6: frontend.v1.Message
+	(*PageScope)(nil),              // 1: frontend.v1.PageScope
+	(*PageScopeFeed)(nil),          // 2: frontend.v1.PageScopeFeed
+	(*PageScopeInside)(nil),        // 3: frontend.v1.PageScopeInside
+	(*ConversationPageTail)(nil),   // 4: frontend.v1.ConversationPageTail
+	(*ConversationPageBefore)(nil), // 5: frontend.v1.ConversationPageBefore
+	(*ConversationPage)(nil),       // 6: frontend.v1.ConversationPage
+	(*ConversationPageMore)(nil),   // 7: frontend.v1.ConversationPageMore
+	(*ConversationPageStart)(nil),  // 8: frontend.v1.ConversationPageStart
+	(*Message)(nil),                // 9: frontend.v1.Message
 }
 var file_frontend_v1_conversation_page_proto_depIdxs = []int32{
-	1, // 0: frontend.v1.ConversationPageCmd.tail:type_name -> frontend.v1.ConversationPageTail
-	2, // 1: frontend.v1.ConversationPageCmd.before:type_name -> frontend.v1.ConversationPageBefore
-	6, // 2: frontend.v1.ConversationPage.messages:type_name -> frontend.v1.Message
-	4, // 3: frontend.v1.ConversationPage.more:type_name -> frontend.v1.ConversationPageMore
-	5, // 4: frontend.v1.ConversationPage.start:type_name -> frontend.v1.ConversationPageStart
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	4, // 0: frontend.v1.ConversationPageCmd.tail:type_name -> frontend.v1.ConversationPageTail
+	5, // 1: frontend.v1.ConversationPageCmd.before:type_name -> frontend.v1.ConversationPageBefore
+	1, // 2: frontend.v1.ConversationPageCmd.scope:type_name -> frontend.v1.PageScope
+	2, // 3: frontend.v1.PageScope.feed:type_name -> frontend.v1.PageScopeFeed
+	3, // 4: frontend.v1.PageScope.inside:type_name -> frontend.v1.PageScopeInside
+	9, // 5: frontend.v1.ConversationPage.messages:type_name -> frontend.v1.Message
+	7, // 6: frontend.v1.ConversationPage.more:type_name -> frontend.v1.ConversationPageMore
+	8, // 7: frontend.v1.ConversationPage.start:type_name -> frontend.v1.ConversationPageStart
+	1, // 8: frontend.v1.ConversationPage.scope:type_name -> frontend.v1.PageScope
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	9, // [9:9] is the sub-list for extension type_name
+	9, // [9:9] is the sub-list for extension extendee
+	0, // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_conversation_page_proto_init() }
@@ -608,7 +849,11 @@ func file_frontend_v1_conversation_page_proto_init() {
 		(*ConversationPageCmd_Tail)(nil),
 		(*ConversationPageCmd_Before)(nil),
 	}
-	file_frontend_v1_conversation_page_proto_msgTypes[3].OneofWrappers = []any{
+	file_frontend_v1_conversation_page_proto_msgTypes[1].OneofWrappers = []any{
+		(*PageScope_Feed)(nil),
+		(*PageScope_Inside)(nil),
+	}
+	file_frontend_v1_conversation_page_proto_msgTypes[6].OneofWrappers = []any{
 		(*ConversationPage_More)(nil),
 		(*ConversationPage_Start)(nil),
 	}
@@ -618,7 +863,7 @@ func file_frontend_v1_conversation_page_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_conversation_page_proto_rawDesc), len(file_frontend_v1_conversation_page_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
