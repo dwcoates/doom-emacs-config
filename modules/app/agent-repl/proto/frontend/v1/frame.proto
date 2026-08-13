@@ -5,21 +5,17 @@ syntax = "proto3";
 
 package frontend.v1;
 
-import "frontend/v1/conversation-history.proto";
 import "frontend/v1/errors.proto";
-import "frontend/v1/failure-card.proto";
 import "frontend/v1/feed.proto";
 import "frontend/v1/footer.proto";
 import "frontend/v1/gate-revival.proto";
 import "frontend/v1/host.proto";
 import "frontend/v1/lifecycle.proto";
 import "frontend/v1/merge.proto";
-import "frontend/v1/permission-card.proto";
 import "frontend/v1/prompt-queue.proto";
 import "frontend/v1/sidebar.proto";
 import "frontend/v1/state.proto";
 import "frontend/v1/tokens-menu.proto";
-import "frontend/v1/tool-call.proto";
 import "frontend/v1/topbar.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
