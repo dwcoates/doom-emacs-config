@@ -80,16 +80,12 @@ message DetachedWork {
   // merge run is a distinct thing to render; every other skill arrives as
   // `skill`.
   //
-  // TODO(respelling): this oneof RE-SPELLS conversation.v1.DetachedWorkKind, and
-  // must not, but it cannot simply be deleted: every arm carries daemon-folded
-  // content with no counterpart in conversation.v1 —
-  //   DetachedWorkAgent.emissions/.fold, DetachedWorkMerge.emissions/.fold,
-  //   DetachedWorkSkill.body/.emissions/.fold, DetachedWorkJournal.rows/.fold,
-  //   DetachedWorkShell.command/.output, DetachedWorkUnclassified.output
-  // Deleting the arms would delete that content off the wire silently. It stays
-  // until the fold has a home of its own; `started.kind` is the authority on
-  // WHICH kind, and this oneof's arm must always agree with it. Note the two are
-  // already drifted: `journal` here is `workflow` there.
+  // WHICH kind this is, is stated exactly once — by `started.kind`, the
+  // producer's own record. The arms below no longer re-spell any of the
+  // producer's content: each keeps ONLY what the daemon itself produced, its
+  // fold and the emissions it folded together. This oneof's arm must always
+  // agree with `started.kind`. Note the two are named differently: `journal`
+  // here is `workflow` there.
   oneof kind {
     DetachedWorkAgent agent = 10;
     DetachedWorkJournal journal = 11;
@@ -111,6 +107,10 @@ message DetachedWorkAgent {
   // The agent's conversation so far, in emission order, in EXACTLY the
   // vocabulary the top-level feed uses. A frontend's renderer for a response, a
   // thinking block or a tool card is the same code in both places.
+  //
+  // TODO(respelling): repeated frontend.v1.AgentEmission may be redundant with
+  // conversation.v1.MessageEntry records whose parent is MessageParentInside
+  // this work; needs a ruling before removal.
   repeated AgentEmission emissions = 1;
   // Tail-cap accounting for `emissions`. See DetachedWorkFold.
   DetachedWorkFold fold = 2;
@@ -130,6 +130,10 @@ message DetachedWorkMerge {
   // vocabulary the top-level feed uses (the same shape as
   // DetachedWorkAgent.emissions, deliberately: a frontend's renderer for a
   // response, a thinking block or a tool card is the same code here).
+  //
+  // TODO(respelling): repeated frontend.v1.AgentEmission may be redundant with
+  // conversation.v1.MessageEntry records whose parent is MessageParentInside
+  // this work; needs a ruling before removal.
   repeated AgentEmission emissions = 1;
   // Tail-cap accounting for `emissions`. See DetachedWorkFold.
   DetachedWorkFold fold = 2;
@@ -144,17 +148,22 @@ message DetachedWorkMerge {
 // user's own next prompt or an interrupt settles it — the same temporal
 // membership the merge arm uses.
 message DetachedWorkSkill {
-  // The skill's name as invoked, verbatim (e.g. "create-or-update-workspace").
-  string skill_name = 1;
-  // The invocation's arguments, verbatim; empty when none were given.
-  string args = 2;
-  // The skill file's contents, resolved daemon-side, rendered verbatim as the
-  // work's own body. Empty until resolution delivers it (see
-  // DetachedWorkSkillUpdate.body); a skill whose file cannot be read keeps an
-  // empty body and the failure surfaces through the ordinary failure channel.
-  string body = 3;
+  // 1 was `skill_name` and 2 was `args`: a second spelling of
+  // conversation.v1.DetachedSkill.skill_name and .args, which the producer
+  // observed at the invocation and states inside `started.kind`. 3 was `body`,
+  // a second spelling of conversation.v1.SkillBodyResolved.body, which the
+  // producer reads out of the transcript. Reserved by number AND by name
+  // because this surface is protojson on the wire, where the field NAME is the
+  // wire token.
+  reserved 1, 2, 3;
+  reserved "skill_name", "args", "body";
+
   // The window's conversation so far, in emission order, in EXACTLY the
   // vocabulary the top-level feed uses.
+  //
+  // TODO(respelling): repeated frontend.v1.AgentEmission may be redundant with
+  // conversation.v1.MessageEntry records whose parent is MessageParentInside
+  // this work; needs a ruling before removal.
   repeated AgentEmission emissions = 4;
   // Tail-cap accounting for `emissions`. See DetachedWorkFold.
   DetachedWorkFold fold = 5;
@@ -167,19 +176,38 @@ message DetachedWorkSkill {
 // logged step. It is not a general-purpose progress table, and work of any
 // other kind never arrives here.
 message DetachedWorkJournal {
-  // The steps logged so far, in order.
-  repeated DetachedWorkJournalRow rows = 1;
-  // Tail-cap accounting for `rows`. See DetachedWorkFold.
+  // 1 was `rows`, together with frontend.v1.DetachedWorkJournalRow and its
+  // status arms: a structured step log the producer reads out of the journal
+  // file, which conversation.v1.WorkflowStep now declares and
+  // conversation.v1.WorkflowStepObserved delivers one step at a time. Reserved
+  // by number AND by name because this surface is protojson on the wire, where
+  // the field NAME is the wire token.
+  reserved 1;
+  reserved "rows";
+
+  // Tail-cap accounting for the folded steps. See DetachedWorkFold.
   DetachedWorkFold fold = 2;
 }
 
 // A backgrounded shell command: an opaque byte spool with a command line.
 message DetachedWorkShell {
-  // The command line that was backgrounded, verbatim, for the work's header.
-  // Empty only when the daemon launched the process without a reconstructible
-  // command line.
-  string command = 1;
+  // 1 was `command`: a second spelling of conversation.v1.DetachedShell.command,
+  // which the producer observed at dispatch and states inside `started.kind`.
+  // Reserved by number AND by name because this surface is protojson on the
+  // wire, where the field NAME is the wire token.
+  reserved 1;
+  reserved "command";
+
   // Everything the command has written so far. See DetachedWorkOutputSpool.
+  //
+  // TODO(respelling): conversation.v1.DetachedWorkProgressed.output is the
+  // producer's counterpart for the BYTES, but it is NARROWER than this spool:
+  // it is a per-record delta with no cursor, while DetachedWorkOutputSpool also
+  // carries `through_offset`, the delivered-bytes cursor that
+  // DetachedWorkOutputAppend.from_offset is checked against. Removing the spool
+  // would delete the anchor gap detection compares to, turning a lost chunk
+  // into a silently applied append. NOT REMOVED; needs a ruling on where the
+  // cursor lives first.
   DetachedWorkOutputSpool output = 2;
 }
 
@@ -193,12 +221,21 @@ message DetachedWorkShell {
 // renderer may not do is guess: an unrecognized tool is not silently treated
 // as a shell, an agent or a workflow.
 message DetachedWorkUnclassified {
-  // The tool that spawned the work, verbatim as the agent named it. This is
-  // the fact that makes the arm useful rather than merely honest: it is what
-  // tells a maintainer which tool needs a classification, and what lets a
-  // frontend label the work with something truer than "unknown".
-  string tool_name = 1;
+  // 1 was `tool_name`: a second spelling of
+  // conversation.v1.DetachedUnclassified.tool_name, which the producer named
+  // when it failed to classify the tool and states inside `started.kind`.
+  // Reserved by number AND by name because this surface is protojson on the
+  // wire, where the field NAME is the wire token.
+  reserved 1;
+  reserved "tool_name";
+
   // Everything the work has written so far. See DetachedWorkOutputSpool.
+  //
+  // TODO(respelling): as on DetachedWorkShell.output — the producer's
+  // counterpart, conversation.v1.DetachedWorkProgressed.output, carries the
+  // bytes but not `through_offset`, the cursor
+  // DetachedWorkOutputAppend.from_offset is checked against. NOT REMOVED; the
+  // cursor needs a home before the spool can go.
   DetachedWorkOutputSpool output = 2;
 }
 
@@ -220,33 +257,6 @@ message DetachedWorkOutputSpool {
   // rejected loudly, not applied.
   uint64 through_offset = 2;
 }
-
-// One logged step of a Workflow run: a dot, a name and a detail line.
-message DetachedWorkJournalRow {
-  // The step's name — the phase or agent it reports on — verbatim.
-  string label = 1;
-  // The step's detail line, verbatim: the result on success, the error text on
-  // failure, the prompt while running.
-  string detail = 2;
-  // The step's state, as arms rather than an enum, so that a state added later
-  // is an arm a reader must handle rather than an integer it silently renders
-  // as something else.
-  oneof status {
-    DetachedWorkStepRunning running = 10;
-    DetachedWorkStepDone done = 11;
-    DetachedWorkStepFailed failed = 12;
-  }
-}
-
-// The step is still executing.
-message DetachedWorkStepRunning {}
-
-// The step completed successfully.
-message DetachedWorkStepDone {}
-
-// The step failed. The failure text is the row's `detail`; this arm carries no
-// second copy of it.
-message DetachedWorkStepFailed {}
 
 // Live-or-settled, expressed as arms so that "settled" and "settled with what
 // outcome" are one indivisible fact. Settled work with no outcome is
@@ -426,7 +436,10 @@ message DetachedWorkJournalUpdate {
   // the daemon does not rewrite history. A frontend that wants one row per
   // step collapses them by label; a frontend that wants the log renders them
   // all. Neither reading is imposed here.
-  repeated DetachedWorkJournalRow rows = 1;
+  //
+  // THE PRODUCER'S OWN STEP RECORD, carried unchanged: the daemon batches which
+  // steps it forwards, it does not restate what a step said.
+  repeated conversation.v1.WorkflowStep rows = 1;
   // The message's fold accounting after applying this update.
   DetachedWorkFold fold = 2;
 }
