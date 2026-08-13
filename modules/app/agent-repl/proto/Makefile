@@ -26,7 +26,6 @@ PROTOS := \
   frontend/v1/agent-response.proto \
   frontend/v1/commands.proto \
   frontend/v1/conversation-history.proto \
-  frontend/v1/conversation-page.proto \
   frontend/v1/detached-work.proto \
   frontend/v1/errors.proto \
   frontend/v1/failure-card.proto \

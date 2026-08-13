@@ -6,7 +6,6 @@ syntax = "proto3";
 package frontend.v1;
 
 import "frontend/v1/conversation-history.proto";
-import "frontend/v1/conversation-page.proto";
 import "frontend/v1/errors.proto";
 import "frontend/v1/failure-card.proto";
 import "frontend/v1/feed.proto";
@@ -35,6 +34,14 @@ message FrontendFrame {
   // when the bubble became a Message payload. The NAME is retired because this
   // surface is protojson on the wire, where the field name is the wire token.
   reserved "async_bubble_delta";
+  // 26 was `conversation_page` (ConversationPage): the CLIENT-ANCHORED history
+  // page, answering the retired ConversationPageCmd. It is gone with its
+  // command — see conversation-history.proto — and `conversation_history_page`
+  // at 28 is the only history page now. Reserved by number AND by name because
+  // this surface is protojson on the wire, where the field NAME is the wire
+  // token.
+  reserved 26;
+  reserved "conversation_page";
   oneof frame {
     StateSnapshot snapshot = 1;
     // THE authority on which session owns a workspace, whether it arrives on
@@ -89,11 +96,6 @@ message FrontendFrame {
     // deliberate bounce stops being indistinguishable from a crash; see
     // RestartPendingView for why it is an edge and never snapshot state.
     RestartPendingView restart_pending = 25;
-    // ONE page of conversation history, answering a ConversationPageCmd. It is
-    // a push rather than a command response because its messages are feed
-    // content, and the command's ack is early by design — see
-    // conversation-page.proto.
-    ConversationPage conversation_page = 26;
     // A preview the daemon opened and can no longer retire. Like TypingDelta
     // it is an EDGE and never snapshot state: a cut describes the end of one
     // preview, and a client that connects afterwards has no preview to retire.
@@ -195,6 +197,14 @@ message StateSnapshot {
 message FrontendCommand {
   string request_id = 1;
   string workspace = 2;
+  // 35 was `conversation_page` (ConversationPageCmd): the CLIENT-ANCHORED
+  // history request, whose tail/before anchors, opaque cursor and echoed fence
+  // were all positions the client held. `first_page`/`next_page` at 36/37 are
+  // the only history verbs now — see conversation-history.proto. Reserved by
+  // number AND by name because this surface is protojson on the wire, where
+  // the field NAME is the wire token.
+  reserved 35;
+  reserved "conversation_page";
   oneof command {
     SubmitPromptCmd submit_prompt = 3;
     InterruptCmd interrupt = 4;
@@ -227,16 +237,11 @@ message FrontendCommand {
     EvictMergeCmd evict_merge = 32;
     AnswerMergeDequeueCmd answer_merge_dequeue = 33;
     CancelDetachedAgentsCmd cancel_detached_agents = 34;
-    // The COLD-OPEN history request, and the load-more that walks backwards
-    // from it. It does not replace `resync` above, which stays the live-page
-    // path — see conversation-page.proto.
-    ConversationPageCmd conversation_page = 35;
     // The positionless history verbs. `first_page` resets this reader's
     // daemon-held position to the newest page; `next_page` walks it one page
     // older and carries NO position of its own, so a reader without an
     // established one is refused rather than silently served the tail. They do
-    // not replace `resync` above, and they will retire `conversation_page`
-    // once every frontend has moved — see conversation-history.proto.
+    // not replace `resync` above — see conversation-history.proto.
     FirstPageCmd first_page = 36;
     NextPageCmd next_page = 37;
   }
