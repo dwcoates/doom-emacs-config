@@ -1,40 +1,60 @@
 # proto/
 
 The agent-shim protocol definitions. The `.proto` files ARE the contract,
-including behavioral semantics as normative comments. Two packages:
-`agentshim.core.v1` (envelope, lifecycle, control plane, store plumbing) and
-`agentshim.frontend.v1` (the daemon→frontend resolved surface, protojson on
-the wire), and `agentshim.conversation.v1` (the vendor-agnostic conversation
-model the producers write and the store persists).
+including behavioral semantics as normative comments.
 
-`conversation.v1` is specified in `FROZEN-conversation-v1.md`: six files in the
-shared package — `external.proto`, `message.proto`, `content.proto`,
-`payloads.proto`, `bookkeeping.proto`, and `tokens.proto`, the shared vocabulary
-that moved down from `frontend.v1` — plus two in
-`agentshim.conversation.internal.v1` (`entry.proto`, `unsupported.proto`). It moved because a DURABLE record names it, and a stored record cannot
-depend on the daemon's resolved output surface.
+## The five surfaces
 
-## `conversation.v1` import discipline — the daemon gets `external.proto` only
+Every message belongs to exactly one, and **the package boundary IS the surface
+boundary** — nothing straddles, so which surface a message is on is a fact the
+compiler checks rather than a convention a reviewer holds. The five are ROOT
+namespaces with no umbrella prefix; `agentshim` names the surface holding
+shim-side internals, so it cannot also be what the other four hang under.
+`DESIGN-protobuf-surfaces.md` is the authority.
 
-A stored record has two halves. `ExternalEntry` may cross the shim→daemon wire;
-`InternalEntry` — which observation plane produced the record, the store's dedup
-key, and anything the producer could not convert — may not.
+| package | directory | holds | importable by |
+|---|---|---|---|
+| `agentshim.v1` | `agentshim/v1/` | shim-side internals: which plane observed a record, the store's write identity, anything a producer could not convert | shim, sidecar, store ONLY |
+| `conversation.v1` | `conversation/v1/` | the message model — `MessageEntry`, its payloads, the content model, `TokenUsage`. Nothing about sessions, turns or machinery | everyone |
+| `protocol.v1` | `protocol/v1/` | what traverses the daemon↔shim boundary and only that boundary: handshakes, commands, receipts, health, replay and page requests, `BookkeepingEntry`, and the `ExternalEntry`/`EntryDelivery` envelopes | shim, daemon |
+| `frontend.v1` | `frontend/v1/` | what reaches a frontend client — forwarded `conversation` records AND novel messages the daemon synthesizes | daemon, webapp |
+| `state.v1` | `state/v1/` | daemon-internal only, including the schema the daemon marshals into its own SQLite store | daemon |
 
-The internal half is its own PROTO PACKAGE, `agentshim.conversation.internal.v1`
-(`entry.proto`, `unsupported.proto`), not merely its own file. That distinction
-is the whole enforcement: every file in one proto package generates into ONE Go
-package, so an `entry.proto` sitting beside `external.proto` in
-`agentshim.conversation.v1` would put `Plane` and `dedup_key` in `conversationv1`
-alongside everything the daemon legitimately imports — free for the taking. A
-separate package is a separate Go import path and a separate TS module.
+**What decides membership is who produces a message and where it is routed** —
+never what it is about. Subject is a judgment call, which is how a message whose
+subject was ambiguous ended up with no home at all.
 
-**No daemon or webapp source may import `agentshim.conversation.internal.v1`.**
-The producers and the store import it freely; it is theirs. `make
-conversation-isolation` (invariant I7) refuses the import at codegen time, in
-.go, .ts and .proto form, with prose deliberately exempt.
+`conversation.v1` **imports nothing**, which is what makes it shareable: it is
+the leaf every other surface depends on. So a shared type lives in the most
+upstream package that needs it, and there is no vocabulary package.
 
-The store's `seq` is NOT in this package. A position is the store's addressing,
-so it rides `core/v1/entry-delivery.proto`, whose `stored`/`live` oneof also
+`BookkeepingEntry` is `protocol`, not `conversation`, and that is the routing
+test doing real work: it is produced by the shim, consumed by the daemon, and
+STOPS there — a client sees it only after the daemon resolves it into a view.
+`ExternalEntry` is `protocol` for the same reason, and it does NOT collapse now
+that bookkeeping is beside it, because the store persists bookkeeping too.
+
+## `agentshim.v1` import discipline — the daemon gets the external half only
+
+A stored record has two halves. `protocol.v1`'s `ExternalEntry` may cross the
+shim→daemon wire; `agentshim.v1`'s internal half — which observation plane
+produced the record, the store's dedup key, and anything the producer could not
+convert — may not.
+
+The internal half is its own PROTO PACKAGE, not merely its own file. That
+distinction is the whole enforcement: every file in one proto package generates
+into ONE Go package, so an `entry.proto` sitting beside `external.proto` would
+put `Plane` and `dedup_key` in the same namespace as everything the daemon
+legitimately imports — free for the taking. A separate package is a separate Go
+import path and a separate TS module.
+
+**No daemon or webapp source may import `agentshim.v1`.** The producers and the
+store import it freely; it is theirs. `make conversation-isolation` (invariant
+I7) refuses the import at codegen time, in .go, .ts and .proto form, with prose
+deliberately exempt.
+
+The store's `seq` is in neither half. A position is the store's addressing, so it
+rides `protocol/v1/entry-delivery.proto`, whose `stored`/`live` oneof also
 replaces the old `retention` field: a live record has no field to put a position
 in, so nothing can advance a resume cursor past a position the store never
 assigned.
@@ -77,22 +97,21 @@ repo-root AGENTS.md wire-protocol rule).
 
 ## Which package does a new message go in?
 
-`core.v1` / `conversation.v1` are SHIM-WIRE packages: they describe what a
-vendor produced. `frontend.v1` is the daemon's resolved surface. Most frontend
-messages compose shim material, which makes the boundary easy to blur.
-
-The test is **is there vendor material under it?** — not which component sends
-it. A message with no underlying vendor message, that never crosses the shim
-UDS, belongs on the frontend surface; putting it in a shim-wire package claims
-the vendor produced something it never did.
+Ask **who produces it, and where is it routed** — the routing test from the
+surface table above. It has one answer per message and is decidable by
+inspection, which "what is it about" is not.
 
 Worked example, spelled out in full in `agent-shim/AGENTS.md`: the daemon-held
 prompt queue is entirely `frontend.v1`. `QueueView` describes a prompt the
 daemon is holding back, which no vendor ever saw; the queue commands are a
 user-facing representation of an interject, whose MECHANISM (`Interrupt` then
-`SubmitPrompt`) is what actually crosses the shim wire. Contrast
-`HeartbeatView`, which is `frontend.v1` but embeds `core.v1.HeartbeatProgress`
-— the vendor material stays in `core.v1`, only the envelope is per-frontend.
+`SubmitPrompt`) is what actually crosses the shim wire, and those are
+`protocol.v1`.
+
+Second worked example: `QueryLifecycle` is ABOUT the SDK query object rather
+than about the conversation, which left it homeless under a subject test. It is
+produced by the shim and routed to the daemon, so it is `protocol.v1`, and there
+is nothing further to decide.
 
 ## Codegen
 
@@ -107,19 +126,25 @@ Dependencies: protoc, protoc-gen-go, @bufbuild/protoc-gen-es.
 
 ## Enforced structural invariants
 
-**I6 — durable isolation.** `frontend/v1/durable.proto` is the persistence
-evidence layer. No other `frontend/v1` schema may import it or name a message
-it declares; what a frontend needs from that evidence reaches it already
-resolved (`ResponseUsageStamp`, `FooterAccountingCell`, `TokenBreakdownView`).
-`check-durable-isolation.sh` enforces it as the `codegen-gate` target, which
-`make go`, `make ts`, and `make lint` all require — so every Makefile route to
-bindings refuses a drifted schema instead of emitting for the coupling, not just
-the linting one. Prose is unconstrained — comments are stripped before matching,
-because naming the durable types is how the files that must not use them explain
-why. `test-check-durable-isolation.sh` (run by `make validate`) drives the gate
-against fixture trees in both directions and drives the real codegen targets
-against a drifted tree through `COMPONENT_DIR`, so neither the gate nor its
-dependency edge can silently degrade.
+**I6 — durable isolation — IS RETIRED, along with `check-durable-isolation.sh`
+and its self-test.** The gate existed only because the persistence evidence
+layer sat INSIDE `frontend/v1` while being definitionally not frontend, so the
+one thing separating the two was a grep over comments-stripped source. That layer
+is `state.v1` now — its own package, its own Go import path, its own TS module —
+and the compiler enforces what the script used to check. A gate that duplicates
+the compiler is a gate that can only ever disagree with it.
+
+**I7 — shim-side isolation.** `agentshim.v1` is the half of a stored record that
+never crosses the shim wire. `check-conversation-isolation.sh` enforces it as a
+`codegen-gate` target, which `make go`, `make ts`, and `make lint` all require —
+so every Makefile route to bindings refuses a drifted tree instead of emitting
+for the coupling and leaving the refusal to review. Prose is unconstrained:
+comments are stripped before matching, because naming the forbidden package in
+the comments of the code that must not use it is how the invariant is taught, and
+a gate that punished the documentation would be deleted in a week.
+`test-check-conversation-isolation.sh` (run by `make validate`) drives the real
+script against fixture trees in both directions — a gate nobody has watched fail
+is not a gate.
 
 New structural gates hang off `codegen-gate`, so they inherit that coverage
 without each having to be wired into every emitting target.
