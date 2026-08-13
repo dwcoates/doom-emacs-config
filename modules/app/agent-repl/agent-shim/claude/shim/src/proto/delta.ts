@@ -1,60 +1,72 @@
 /**
- * Stream relay conversion (design §4.3, §5.2.3).
+ * The STREAM PLANE's live relay, and the only place this shim produces a
+ * `conversation.v1.MessageEntry`.
  *
- * `stream_event` partials (live typing) and `tool_progress` elapsed
- * heartbeats are the event classes that MUST NOT take the store
- * round-trip: they are forwarded shim → daemon directly and never persisted
- * nor replayed. Consumers reconcile per ANTHROPIC MESSAGE ID, REPLACING a
- * streamed preview with the store-delivered final message, so cross-path
- * ordering is irrelevant.
+ * # What the stream plane may and may not say
  *
- * That id — not the SDK envelope `uuid` — is the reconciliation key, because
- * it is the only identity shared by a streaming message and its finished form.
- * The SDK mints a FRESH envelope uuid for every message it emits, including
- * every individual `stream_event`, so keying deltas on it gave each chunk a
- * different id and the frontend rendered one response bubble per chunk instead of
- * growing one. The envelope uuid still identifies a finished conversation
- * ITEM (it is what both planes dedup on, and the only id user turns,
- * attachments and system lines have at all) — it simply cannot identify a
- * message that has not finished being emitted.
+ * The shim watches the SDK as it runs, so it is first to know and it is the
+ * only source for anything not yet written to disk. It is authoritative for
+ * session and turn LIFECYCLE. It is NOT authoritative for conversation
+ * CONTENT — the file plane is, because that is what the vendor itself
+ * recorded — and the shim cannot write settled content at all: a `MessageEntry`
+ * must state its `parent`, and the SDK stream carries no parent pointer.
  *
- * This module maps those two SDK stream messages into their core payloads:
- *   - `stream_event` → `core.ContentDelta` (live text/thinking/tool-input/
- *     signature typing), one per `content_block_delta` frame. Input-json
- *     deltas carry a tool-use identity bound from `content_block_start`.
- *   - `stream_event` → `core.MessageLatency`, one per `message_start` frame
- *     that carries a `ttft_ms` stamp (the ONE progress fact a structural frame
- *     carries; see {@link streamEventToMessageLatency}). Unlike deltas, this
- *     is durable so restored consumers can derive response timing.
- *   - `tool_progress` → `core.HeartbeatProgress`.
- * ContentDelta and HeartbeatProgress are wrapped in an `Event` with
- * `class = EPHEMERAL`. MessageLatency is PERSISTENT. The remaining
- * structural stream_event frames (`content_block_start`/`_stop`/
- * `message_delta`/`message_stop`) carry nothing relayable and yield `null`.
+ * The ONE exception is the live preview. `ContentArriving` is defined as
+ * "handed straight to the daemon by the stream plane", and the completed
+ * message the file plane writes later REPLACES it rather than appending beside
+ * it. Both producers must therefore derive `message_id` from the same vendor
+ * value, which is the ANTHROPIC MESSAGE ID (`msg_…`) — not the SDK envelope
+ * `uuid`, which the SDK mints fresh for every emission including every
+ * individual `stream_event`, so keying on it gave each chunk its own id and the
+ * frontend grew one bubble per chunk.
  *
- * ROUTING CONTRACT: the two event classes have distinct entry points, so the
- * session loop sends typing and heartbeat frames directly to the daemon while
- * it writes MessageLatency through `StoreWrite` before replaying it. See the
- * G4 report for the exact wiring.
+ * # Which route each relay takes
+ *
+ *   - `stream_event` / `content_block_delta` → `ContentArriving`, delivered
+ *     LIVE. Never written, so never positioned, so a consumer has no field in
+ *     which to advance a resume cursor past it.
+ *   - `stream_event` / `message_start` carrying `ttft_ms` → `ResponseTiming`,
+ *     which is DURABLE: a daemon that restarted mid-turn must rebuild the same
+ *     latency from replay rather than lose it. The only other place the number
+ *     appears is the turn's terminal result, which arrives when the turn is
+ *     already over.
+ *   - `tool_progress` → `Heartbeat`, delivered live. It reports liveness and
+ *     never content.
+ *
+ * The remaining structural frames (`content_block_start` / `_stop`,
+ * `message_delta`, `message_stop`) carry nothing relayable and yield `null`.
+ *
+ * # What a preview must refuse to invent
+ *
+ * `MessageParent` is a oneof precisely so "this is a feed row" and "the producer
+ * could not resolve a parent" cannot wear the same value. A preview of a
+ * MAIN-conversation response is legitimately a feed row and says `root`. A
+ * preview of SUBAGENT content sits INSIDE the detached work that spawned it,
+ * and the containing message's id is minted by the file plane from the vendor
+ * uuid of the tool-use record — a value the stream never carries. So a subagent
+ * preview has no legal record to occupy and is REFUSED loudly rather than
+ * emitted as a root, which would render the subagent's typing as a new
+ * top-level row with nothing detecting it.
  */
 import { create } from "@bufbuild/protobuf";
-import { anyPack } from "@bufbuild/protobuf/wkt";
 import {
-  ContentDeltaSchema,
-  EventClass,
-  EventSchema,
-  HeartbeatProgressSchema,
-  MessageLatencySchema,
-  Plane,
-  type Event,
+  AuthorAgentSchema,
+  BookkeepingEntrySchema,
+  ContentArrivingSchema,
+  EntrySchema,
+  ExternalEntrySchema,
+  HeartbeatSchema,
+  InternalEntrySchema,
+  MessageAuthorSchema,
+  MessageEntrySchema,
+  MessageParentRootSchema,
+  MessageParentSchema,
+  PlaneSchema,
+  PlaneStreamSchema,
+  ResponseTimingSchema,
+  type Entry,
+  type ExternalEntry,
 } from "../uds/proto.js";
-import { ClaudeStreamMessageSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
-import {
-  MessageDeltaEventSchema,
-  RawMessageStreamEventSchema,
-  StreamEventSchema,
-} from "../../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
-import { messageDeltaVendorUsage } from "./convert.js";
 import { bindLog } from "../uds/log.js";
 
 const LOGGER = bindLog({ component: "claude-shim-delta", operation: "shim.delta.convert" });
@@ -65,21 +77,22 @@ export interface DeltaOptions {
   /**
    * The Anthropic id of the message currently being streamed, from the
    * `message_start` that opened it (see {@link StreamMessageTracker}). Every
-   * delta of one message carries the same value, which is what lets consumers
-   * grow a single block instead of opening a new one per chunk.
+   * fragment of one message carries the same value, which is what lets a
+   * consumer grow one preview instead of opening a new one per chunk — and what
+   * lets the file plane's settled message REPLACE that preview.
    */
   messageId?: string;
   /**
-   * The query() invocation the shim was running when the frame arrived,
-   * stamped onto the envelope this mapper builds. The mapper is part of the
-   * PRODUCER, so the fact is recorded here rather than inferred downstream
-   * from how the event was delivered. See core.proto's contract.
-   */
-  queryInstanceId?: string;
-  /**
    * The tool-use identity bound to this API content block by its preceding
-   * `content_block_start`. It is required for `input_json_delta` because a
-   * block ordinal cannot identify a durable tool after cross-plane ordering.
+   * `content_block_start`.
+   *
+   * NOTHING CARRIES IT ANY MORE — `ContentArriving` identifies a fragment by
+   * `block_index` alone — but the BINDING is still required for an
+   * `arguments_json` fragment and its absence is still an invariant violation.
+   * A stream that emits tool-argument chunks with no opening tool block is
+   * malformed, and that was always what this check detected; dropping the check
+   * because the field it used to fill is gone would trade a loud failure for a
+   * silently wrong preview.
    */
   toolUseId?: string;
   /** Agent-repl session identity supplied by the owning UDS session. */
@@ -94,8 +107,8 @@ export interface DeltaOptions {
  * is continuous for the life of a shim, so the shim always sees that frame
  * before the deltas that follow it; each tool `content_block_start` similarly
  * binds its API block index to the durable tool-use id before input chunks.
- * Only the DAEMON can attach mid-message, and it recovers the finished
- * message from the store instead.
+ * Only the DAEMON can attach mid-message, and it recovers the finished message
+ * from the store instead.
  */
 export class StreamMessageTracker {
   private messageId = "";
@@ -200,7 +213,7 @@ export class StreamMessageTracker {
       block_index: blockIndex,
       tool_use_id: typeof toolUseId === "string" && toolUseId.length > 0 ? toolUseId : null,
       delta_length: null,
-      delta_arm: "input_json",
+      delta_arm: "arguments_json",
     };
     if (this.messageId.length === 0) {
       this.failIdentityInvariant(baseContext, "missing_api_message_id_at_tool_block_start", "tool block start has no active API message identity");
@@ -235,9 +248,332 @@ export class StreamMessageTracker {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Envelope construction
+// ---------------------------------------------------------------------------
+
 function producedAt(opts: DeltaOptions | undefined): bigint {
   return BigInt(opts?.nowMs ?? Date.now());
 }
+
+/**
+ * The half of a record allowed to leave the shim: which conversation, when the
+ * producer observed it, and one of the two arms.
+ *
+ * `produced_at_ms` sits here rather than on `MessageEntry` because a
+ * bookkeeping entry happened at a moment too — a turn boundary has a time
+ * whether or not anything draws it.
+ */
+function externalEntry(
+  sessionId: string,
+  producedAtMs: bigint,
+  entry: ExternalEntry["entry"],
+): ExternalEntry {
+  return create(ExternalEntrySchema, { sessionId, producedAtMs, entry });
+}
+
+/**
+ * A record the store will hold: the internal half (which plane observed it)
+ * plus the external half the daemon receives by field access.
+ *
+ * `write_id` is left empty for the store client to mint ONCE, because a replay
+ * must re-present the identity the record was first delivered under.
+ */
+function storedEntry(external: ExternalEntry): Entry {
+  return create(EntrySchema, {
+    internal: create(InternalEntrySchema, {
+      plane: create(PlaneSchema, { plane: { case: "stream", value: create(PlaneStreamSchema, {}) } }),
+    }),
+    external,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// stream_event → ContentArriving (LIVE)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a raw `stream_event` SDK message to the live `ContentArriving` record, or
+ * `null` when the frame carries no relayable fragment.
+ *
+ * Returns the record's EXTERNAL half; the caller wraps it in a
+ * `LiveEntryDelivery`, which has no field a store position could go in.
+ *
+ * REFUSALS, each loud and each for a different reason:
+ *   - no in-flight message id: the preview could name no message, so the
+ *     settled message could never replace it and it would grow forever.
+ *   - a `parent_tool_use_id`: subagent content, whose containing message id the
+ *     stream does not carry (see the file header).
+ *   - an `arguments_json` fragment with no bound tool block: a malformed
+ *     stream, which THROWS rather than returning null, exactly as before.
+ */
+export function streamEventToContentArriving(
+  msg: Record<string, unknown>,
+  opts?: DeltaOptions,
+): ExternalEntry | null {
+  const frame = frameOfType(msg, "content_block_delta");
+  if (!frame) return null;
+  const delta = frame["delta"];
+  if (!isObject(delta)) return null;
+
+  const fragment = fragmentOf(delta);
+  if (!fragment) return null;
+
+  const messageId = opts?.messageId ?? "";
+  const blockIndex = typeof frame["index"] === "number" && Number.isInteger(frame["index"]) && frame["index"] >= 0
+    ? frame["index"]
+    : 0;
+
+  if (fragment.case === "argumentsJson" && (typeof opts?.toolUseId !== "string" || opts.toolUseId.length === 0)) {
+    LOGGER.log({
+      level: "error",
+      claude_session_id: sessionOf(msg),
+      agent_repl_session_id: opts?.agentReplSessionId ?? null,
+      api_message_id: messageId || null,
+      block_index: blockIndex,
+      tool_use_id: null,
+      delta_length: fragment.value.length,
+      delta_arm: fragment.case,
+      failed_operation: "stream_arguments_fragment_conversion",
+      outcome: "missing_tool_use_id_binding",
+    }, "arguments_json fragment has no bound tool-use identity");
+    throw new Error("arguments_json fragment has no bound tool-use identity");
+  }
+
+  if (messageId === "") {
+    LOGGER.log({
+      level: "error",
+      claude_session_id: sessionOf(msg),
+      agent_repl_session_id: opts?.agentReplSessionId ?? null,
+      block_index: blockIndex,
+      delta_arm: fragment.case,
+      failed_operation: "stream_content_arriving_conversion",
+      outcome: "unattributed_fragment",
+    }, "content fragment arrived with no in-flight message id and was not relayed");
+    return null;
+  }
+
+  const parentToolUseId = firstString(msg["parent_tool_use_id"], msg["parentToolUseId"]);
+  if (parentToolUseId !== "") {
+    LOGGER.log({
+      level: "error",
+      claude_session_id: sessionOf(msg),
+      agent_repl_session_id: opts?.agentReplSessionId ?? null,
+      api_message_id: messageId,
+      block_index: blockIndex,
+      delta_arm: fragment.case,
+      parent_tool_use_id: parentToolUseId,
+      failed_operation: "stream_content_arriving_conversion",
+      outcome: "unresolvable_detached_parent",
+    }, "subagent content fragment names a parent tool call whose containing message id the stream does not carry; refused rather than emitted as a feed row");
+    return null;
+  }
+
+  const external = externalEntry(sessionOf(msg), producedAt(opts), {
+    case: "message",
+    value: create(MessageEntrySchema, {
+      messageId,
+      // A main-conversation response IS its own feed row, so the row it belongs
+      // to is itself. Storing it is why a page of ten messages costs one pass.
+      topLevelMessageId: messageId,
+      parent: create(MessageParentSchema, {
+        parent: { case: "root", value: create(MessageParentRootSchema, {}) },
+      }),
+      // Resolved by the producer, never inferred by a reader from the arm.
+      author: create(MessageAuthorSchema, {
+        author: { case: "agent", value: create(AuthorAgentSchema, {}) },
+      }),
+      payload: {
+        case: "contentArriving",
+        value: create(ContentArrivingSchema, { blockIndex, fragment }),
+      },
+    }),
+  });
+  LOGGER.logVerbose({
+    claude_session_id: sessionOf(msg),
+    agent_repl_session_id: opts?.agentReplSessionId ?? null,
+    api_message_id: messageId,
+    block_index: blockIndex,
+    delta_arm: fragment.case,
+    delta_length: fragment.value.length,
+  }, "converted live content fragment");
+  return external;
+}
+
+/** The `ContentArriving.fragment` arm for one `content_block_delta.delta`. */
+function fragmentOf(delta: Record<string, unknown>): ContentFragment | null {
+  switch (delta["type"]) {
+    case "text_delta":
+      return { case: "text", value: strOf(delta["text"]) };
+    case "thinking_delta":
+      return { case: "thinking", value: strOf(delta["thinking"]) };
+    case "input_json_delta":
+      // A string because it is INCOMPLETE JSON until the last fragment lands;
+      // typing it as Struct would claim it parses when it does not yet.
+      return { case: "argumentsJson", value: strOf(delta["partial_json"]) };
+    default:
+      // `signature_delta` lands here. The neutral content model has no arm for
+      // it and `ThinkingBlock` carries no signature, so there is nothing to
+      // relay it into and nothing downstream that could use it.
+      return null;
+  }
+}
+
+type ContentFragment =
+  | { case: "text"; value: string }
+  | { case: "thinking"; value: string }
+  | { case: "argumentsJson"; value: string };
+
+// ---------------------------------------------------------------------------
+// stream_event → ResponseTiming (DURABLE)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a raw `stream_event` SDK message to a DURABLE `ResponseTiming` record, or
+ * `null` for a frame that is not a `message_start` or that carries no usable
+ * `ttft_ms` stamp.
+ *
+ * WHY THIS FRAME. `ttft_ms` is a top-level field of the `stream_event` envelope
+ * and the SDK stamps it on the `message_start` that OPENS a streamed assistant
+ * message — never on the `content_block_delta` chunks that follow. So the one
+ * stream frame carrying first-token latency is precisely a frame
+ * {@link streamEventToContentArriving} drops.
+ *
+ * It is BOOKKEEPING, not a message: it measures the conversation rather than
+ * participating in it, which is why it may name a message without ever
+ * spending a page slot.
+ *
+ * `total_ms` is deliberately left at zero here: this frame measures only the
+ * time to the FIRST token, and claiming a total from it would report a
+ * number nobody measured.
+ *
+ * Never throws: a shape it cannot read, or an absent/unusable stamp, yields
+ * `null` rather than a timing nobody observed.
+ */
+export function streamEventToResponseTiming(
+  msg: Record<string, unknown>,
+  opts?: DeltaOptions,
+): Entry | null {
+  if (!frameOfType(msg, "message_start")) return null;
+  const ttft = msg["ttft_ms"];
+  if (typeof ttft !== "number" || !Number.isFinite(ttft) || ttft <= 0) return null;
+
+  // A timing that cannot name the message it measures is not evidence.
+  const messageId = opts?.messageId ?? "";
+  if (messageId === "") {
+    LOGGER.log({
+      level: "error",
+      claude_session_id: sessionOf(msg),
+      agent_repl_session_id: opts?.agentReplSessionId ?? null,
+      ttft_ms: ttft,
+      failed_operation: "stream_response_timing_conversion",
+      outcome: "unattributed_timing",
+    }, "message_start latency arrived with no in-flight message id and was not relayed");
+    return null;
+  }
+
+  const entry = storedEntry(externalEntry(sessionOf(msg), producedAt(opts), {
+    case: "bookkeeping",
+    value: create(BookkeepingEntrySchema, {
+      kind: {
+        case: "responseTiming",
+        value: create(ResponseTimingSchema, {
+          messageId,
+          firstTokenMs: BigInt(Math.trunc(ttft)),
+        }),
+      },
+    }),
+  }));
+  LOGGER.logVerbose({ claude_session_id: sessionOf(msg), message_id: messageId, ttft_ms: ttft },
+    "converted durable response timing");
+  return entry;
+}
+
+// ---------------------------------------------------------------------------
+// tool_progress → Heartbeat (LIVE)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a raw `tool_progress` SDK message to a live `Heartbeat`.
+ *
+ * `Heartbeat` reports liveness and NEVER content: IDENTITIES rather than a
+ * count, because a count cannot be reconciled against what a feed is showing
+ * and a set can. The tool's own use-id is the one identity here — the tool
+ * NAME, the parent tool call and the elapsed seconds the SDK also reports have
+ * no field on this record.
+ *
+ * Returns `null` when the frame names no live work: a heartbeat with an empty
+ * id set asserts "nothing is running", which is a different and much stronger
+ * claim than "this frame told us nothing".
+ */
+export function toolProgressToHeartbeat(
+  msg: Record<string, unknown>,
+  opts?: DeltaOptions,
+): ExternalEntry | null {
+  const sessionId = firstString(msg["session_id"], msg["sessionId"]);
+  const toolUseId = firstString(msg["tool_use_id"], msg["toolUseId"]);
+  if (toolUseId === "") {
+    LOGGER.log({
+      level: "error",
+      claude_session_id: sessionId,
+      agent_repl_session_id: opts?.agentReplSessionId ?? null,
+      failed_operation: "tool_progress_heartbeat_conversion",
+      outcome: "unidentified_live_work",
+    }, "tool_progress named no tool-use id, so it could assert no live work and was not relayed");
+    return null;
+  }
+  const external = externalEntry(sessionId, producedAt(opts), {
+    case: "bookkeeping",
+    value: create(BookkeepingEntrySchema, {
+      kind: { case: "heartbeat", value: create(HeartbeatSchema, { liveWorkIds: [toolUseId] }) },
+    }),
+  });
+  LOGGER.logVerbose({ claude_session_id: sessionId, tool_use_id: toolUseId }, "converted live tool heartbeat");
+  return external;
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch
+// ---------------------------------------------------------------------------
+
+/**
+ * Map one SDK message to the record it hands STRAIGHT to the daemon, or `null`
+ * when it carries none. The caller wraps the result in a `LiveEntryDelivery`.
+ *
+ * `ResponseTiming` deliberately does not pass through here because it must be
+ * stored and replayed.
+ */
+export function toLiveEntry(msg: unknown, opts?: DeltaOptions): ExternalEntry | null {
+  if (!isObject(msg)) return null;
+  switch (msg["type"]) {
+    case "stream_event":
+      return streamEventToContentArriving(msg, opts);
+    case "tool_progress":
+      return toolProgressToHeartbeat(msg, opts);
+    default:
+      return null;
+  }
+}
+
+/**
+ * Map one SDK message to its DURABLE stream-plane relay, or `null` when none
+ * applies. The session loop writes this through the store, whose serial write
+ * chain preserves its order before later terminal records and whose replay
+ * makes it available after a daemon restart.
+ */
+export function toStoredStreamEntry(msg: unknown, opts?: DeltaOptions): Entry | null {
+  if (!isObject(msg) || msg["type"] !== "stream_event") return null;
+  return streamEventToResponseTiming(msg, opts);
+}
+
+/** True iff the live relay — not the persistent converter — owns `msg`. */
+export function isEphemeral(msg: unknown): boolean {
+  return isObject(msg) && (msg["type"] === "stream_event" || msg["type"] === "tool_progress");
+}
+
+// ---------------------------------------------------------------------------
+// Shape helpers
+// ---------------------------------------------------------------------------
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -249,9 +585,7 @@ function isObject(v: unknown): v is Record<string, unknown> {
  *
  * Every stream mapper below is keyed to exactly ONE frame type — that is what
  * makes them mutually exclusive and lets the dispatcher try them in turn — so
- * this unwrap-and-discriminate is the whole of what they have in common. One
- * site owns how the envelope is read, so a third mapper (or a change in the
- * envelope's shape) lands in one place rather than being copied a third time.
+ * this unwrap-and-discriminate is the whole of what they have in common.
  */
 function frameOfType(msg: Record<string, unknown>, type: string): Record<string, unknown> | null {
   const event = msg["event"];
@@ -264,278 +598,6 @@ function sessionOf(msg: Record<string, unknown>): string {
   return strOf(msg["session_id"]);
 }
 
-function ephemeralEvent(
-  sessionId: string,
-  producedAtMs: bigint,
-  payload: Event["payload"],
-  queryInstanceId: string,
-): Event {
-  return create(EventSchema, {
-    sessionId,
-    seq: 0n,
-    plane: Plane.STREAM,
-    class: EventClass.EPHEMERAL,
-    requestId: "",
-    queryInstanceId,
-    producedAtMs,
-    payload,
-  });
-}
-
-/**
- * Map a raw `stream_event` SDK message to an EPHEMERAL `ContentDelta` Event,
- * or `null` for a frame that is not a `content_block_delta` (structural
- * frames carry no live-typing content). A shape it cannot read yields `null`
- * rather than a bogus delta. An `input_json_delta` without the preceding
- * tool-use binding is an invariant violation and throws before constructing
- * an event.
- */
-export function streamEventToContentDelta(
-  msg: Record<string, unknown>,
-  opts?: DeltaOptions,
-): Event | null {
-  const frame = frameOfType(msg, "content_block_delta");
-  if (!frame) return null;
-  const delta = frame["delta"];
-  if (!isObject(delta)) return null;
-
-  const arm = deltaArm(delta);
-  if (!arm) return null;
-
-  // The message being streamed, NOT this event's own envelope uuid: the SDK
-  // mints that fresh per emission, so it differs on every chunk.
-  const uuid = opts?.messageId ?? "";
-  const index = typeof frame["index"] === "number" ? frame["index"] : 0;
-  const estimatedTokens =
-    typeof delta["estimated_tokens"] === "number" && Number.isFinite(delta["estimated_tokens"])
-      ? BigInt(Math.trunc(delta["estimated_tokens"] as number))
-      : 0n;
-
-  if (arm.case === "inputJson" && (typeof opts?.toolUseId !== "string" || opts.toolUseId.length === 0)) {
-    LOGGER.log({
-      level: "error",
-      claude_session_id: sessionOf(msg),
-      agent_repl_session_id: opts?.agentReplSessionId ?? null,
-      api_message_id: uuid || null,
-      block_index: index,
-      tool_use_id: null,
-      delta_length: arm.value.length,
-      delta_arm: arm.case,
-      failed_operation: "stream_input_json_delta_conversion",
-      outcome: "missing_tool_use_id_binding",
-    }, "input_json delta has no bound tool-use identity");
-    throw new Error("input_json delta has no bound tool-use identity");
-  }
-
-  const event = ephemeralEvent(sessionOf(msg), producedAt(opts), {
-    case: "contentDelta",
-    value: create(ContentDeltaSchema, {
-      uuid,
-      blockIndex: index,
-      ...(arm.case === "inputJson" ? { toolUseId: opts!.toolUseId } : {}),
-      delta: arm,
-      estimatedTokens,
-    }),
-  }, opts?.queryInstanceId ?? "");
-  LOGGER.logVerbose({ claude_session_id: sessionOf(msg), agent_repl_session_id: opts?.agentReplSessionId ?? null, api_message_id: uuid, block_index: index, tool_use_id: arm.case === "inputJson" ? opts!.toolUseId : null, delta_arm: arm.case, delta_length: arm.value.length }, "converted ephemeral content delta");
-  return event;
-}
-
-/**
- * Map a raw `stream_event` SDK message to a PERSISTENT `MessageLatency` Event,
- * or `null` for a frame that is not a `message_start` or that carries no
- * `ttft_ms` stamp.
- *
- * WHY THIS FRAME. `ttft_ms` is a top-level field of the `stream_event`
- * envelope, and the SDK stamps it on the `message_start` that OPENS a streamed
- * assistant message — never on the `content_block_delta` chunks that follow.
- * So the one stream frame carrying first-token latency is precisely a frame
- * {@link streamEventToContentDelta} drops. Persisting it as its own payload
- * makes the latency available both mid-turn and after a daemon restart: the
- * only other place the number appears is the turn's terminal result message,
- * which arrives when the turn is already over.
- *
- * The two mappers are mutually exclusive by construction — a `message_start`
- * never yields a ContentDelta and a `content_block_delta` never yields a
- * MessageLatency — so the session router can classify them separately.
- *
- * Never throws: a shape it cannot read, or an absent/unusable stamp, yields
- * `null` rather than a MessageLatency reporting a latency nobody measured.
- */
-export function streamEventToMessageLatency(
-  msg: Record<string, unknown>,
-  opts?: DeltaOptions,
-): Event | null {
-  if (!frameOfType(msg, "message_start")) return null;
-  const ttft = msg["ttft_ms"];
-  if (typeof ttft !== "number" || !Number.isFinite(ttft) || ttft <= 0) return null;
-
-  const event = create(EventSchema, {
-    sessionId: sessionOf(msg),
-    seq: 0n,
-    plane: Plane.STREAM,
-    class: EventClass.PERSISTENT,
-    queryInstanceId: opts?.queryInstanceId ?? "",
-    producedAtMs: producedAt(opts),
-    payload: {
-      case: "messageLatency",
-      value: create(MessageLatencySchema, {
-        // The message this stamp measures, keyed exactly as ContentDelta keys
-        // its own chunks (see StreamMessageTracker), NOT the envelope uuid.
-        uuid: opts?.messageId ?? "",
-        ttftMs: BigInt(Math.trunc(ttft)),
-      }),
-    },
-  });
-  LOGGER.logVerbose({ claude_session_id: sessionOf(msg), message_id: opts?.messageId ?? "", ttft_ms: ttft }, "converted persistent message latency");
-  return event;
-}
-
-/** The ContentDelta oneof arm for one `content_block_delta.delta`, or null. */
-function deltaArm(delta: Record<string, unknown>): ContentDeltaArm | null {
-  switch (delta["type"]) {
-    case "text_delta":
-      return { case: "text", value: strOf(delta["text"]) };
-    case "thinking_delta":
-      return { case: "thinking", value: strOf(delta["thinking"]) };
-    case "input_json_delta":
-      return { case: "inputJson", value: strOf(delta["partial_json"]) };
-    case "signature_delta":
-      return { case: "signature", value: strOf(delta["signature"]) };
-    default:
-      return null;
-  }
-}
-
-type ContentDeltaArm =
-  | { case: "text"; value: string }
-  | { case: "thinking"; value: string }
-  | { case: "inputJson"; value: string }
-  | { case: "signature"; value: string };
-
-/**
- * Map a raw `tool_progress` SDK message to an EPHEMERAL `HeartbeatProgress`
- * Event. Reads both the stream (`tool_use_id`, `elapsed_time_seconds`) and any
- * camelCase disk twin defensively; missing fields coerce to zero values.
- */
-export function toolProgressToHeartbeat(
-  msg: Record<string, unknown>,
-  opts?: DeltaOptions,
-): Event {
-  const sessionId = firstString(msg["session_id"], msg["sessionId"]);
-  const elapsed = firstNumber(msg["elapsed_time_seconds"], msg["elapsedTimeSeconds"], msg["elapsed_seconds"]);
-  const event = ephemeralEvent(sessionId, producedAt(opts), {
-    case: "heartbeatProgress",
-    value: create(HeartbeatProgressSchema, {
-      toolUseId: firstString(msg["tool_use_id"], msg["toolUseId"]),
-      toolName: firstString(msg["tool_name"], msg["toolName"]),
-      parentToolUseId: firstString(msg["parent_tool_use_id"], msg["parentToolUseId"]),
-      elapsedSeconds: elapsed,
-    }),
-  }, opts?.queryInstanceId ?? "");
-  LOGGER.logVerbose({ claude_session_id: sessionId, elapsed_seconds: elapsed }, "converted ephemeral tool heartbeat");
-  return event;
-}
-
-/**
- * Map one SDK message to an EPHEMERAL direct-delivery Event, or `null` when
- * it carries no direct-delivery content. MessageLatency deliberately does not
- * pass through here because it must be stored and replayed.
- */
-export function toEphemeralEvent(msg: unknown, opts?: DeltaOptions): Event | null {
-  if (!isObject(msg)) return null;
-  switch (msg["type"]) {
-    case "stream_event":
-      return streamEventToContentDelta(msg, opts);
-    case "tool_progress":
-      return toolProgressToHeartbeat(msg, opts);
-    default:
-      return null;
-  }
-}
-
-/**
- * Map one SDK message to its PERSISTENT structural relay, or `null` when no
- * durable relay applies. The session loop writes this result through the
- * store, whose serial write chain preserves its order before later terminal
- * events and whose replay makes it available after a daemon restart.
- */
-export function toPersistentEvent(msg: unknown, opts?: DeltaOptions): Event | null {
-  if (!isObject(msg) || msg["type"] !== "stream_event") return null;
-  return streamEventToMessageLatency(msg, opts) ?? streamEventToResponseUsage(msg, opts);
-}
-
-/**
- * Map a `message_delta` frame to a PERSISTENT relay of the vendor's own usage.
- *
- * WHY THIS FRAME IS NO LONGER DROPPED. A turn's token ledger reconciles the
- * per-response stream evidence against the terminal result's totals, and the
- * two could not agree on output_tokens: the assistant message that evidence is
- * built from carries the `message_start` usage SNAPSHOT — final input and cache
- * counters, interim output. The final output_tokens are reported here and
- * nowhere else the daemon can see. One measured live turn summed 563 against
- * the result's 4407, with input reconciling exactly.
- *
- * It is PERSISTENT, like MessageLatency and unlike the typing deltas around it,
- * because a daemon that restarted mid-turn must rebuild the same ledger from
- * replay rather than a differently-reconciled one.
- *
- * Never throws: a frame it cannot read, or one whose usage the modeled contract
- * rejects, yields `null`. An absent correction leaves the ledger reporting its
- * disagreement honestly, which is what a missing correction should look like.
- */
-export function streamEventToResponseUsage(
-  msg: Record<string, unknown>,
-  opts?: DeltaOptions,
-): Event | null {
-  const frame = frameOfType(msg, "message_delta");
-  if (frame === null) return null;
-  const vendorUsage = messageDeltaVendorUsage(frame["usage"]);
-  if (vendorUsage === undefined) return null;
-  // A correction that cannot name the message it corrects is not evidence: the
-  // vendor's message_delta frame is anonymous, and the identity arrives only on
-  // the message_start that opened it (see StreamMessageTracker).
-  const apiMessageId = opts?.messageId ?? "";
-  if (apiMessageId === "") {
-    LOGGER.log({ level: "error", claude_session_id: sessionOf(msg), outcome: "message_delta_usage_unattributed" },
-      "message_delta usage arrived with no in-flight message id and was not relayed");
-    return null;
-  }
-  const event = create(EventSchema, {
-    sessionId: sessionOf(msg),
-    seq: 0n,
-    plane: Plane.STREAM,
-    class: EventClass.PERSISTENT,
-    queryInstanceId: opts?.queryInstanceId ?? "",
-    producedAtMs: producedAt(opts),
-    payload: {
-      case: "vendor",
-      value: anyPack(ClaudeStreamMessageSchema, create(ClaudeStreamMessageSchema, {
-        msg: {
-          case: "streamEvent",
-          value: create(StreamEventSchema, {
-            sessionId: sessionOf(msg),
-            event: create(RawMessageStreamEventSchema, {
-              event: {
-                case: "messageDelta",
-                value: create(MessageDeltaEventSchema, { vendorUsage, apiMessageId }),
-              },
-            }),
-          }),
-        },
-      })),
-    },
-  });
-  LOGGER.logVerbose({ claude_session_id: sessionOf(msg), message_id: apiMessageId, output_tokens: String(vendorUsage.outputTokens) },
-    "converted persistent response usage correction");
-  return event;
-}
-
-/** True iff the delta bypass — not the persistent converter — owns `msg`. */
-export function isEphemeral(msg: unknown): boolean {
-  return isObject(msg) && (msg["type"] === "stream_event" || msg["type"] === "tool_progress");
-}
-
 function strOf(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
@@ -543,9 +605,4 @@ function strOf(v: unknown): string {
 function firstString(...vs: unknown[]): string {
   for (const v of vs) if (typeof v === "string") return v;
   return "";
-}
-
-function firstNumber(...vs: unknown[]): number {
-  for (const v of vs) if (typeof v === "number" && Number.isFinite(v)) return v;
-  return 0;
 }
