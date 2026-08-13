@@ -1088,7 +1088,7 @@ func (c *Client) heartbeatSender(ctx context.Context, ac *activeConn) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := ac.writeMsg(&corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
+			if err := ac.writeMsg(&corev1.ConnectionHeartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
 				// The sender stops here, so the link is on its way down.
 				c.warn("heartbeat send failed: %v", err)
 				return

@@ -542,7 +542,7 @@ func silentThenTalkativeShim(t *testing.T, sessionID string, resume <-chan struc
 	return func(conn net.Conn) {
 		_ = fakeServerHandshake(t, conn, sessionID, "1", false)
 		<-resume
-		mustWriteMsg(t, conn, &corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()})
+		mustWriteMsg(t, conn, &corev1.ConnectionHeartbeat{SentAtMs: time.Now().UnixMilli()})
 		_, _ = wire.ReadAny(conn) // block; the connection outlives the test's asserts
 	}
 }

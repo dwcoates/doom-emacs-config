@@ -60,8 +60,8 @@ func newReplayRig(t *testing.T, serve func(conn net.Conn, req *corev1.ReplayRequ
 }
 
 // replayEvent wraps a store event as the shim would send it back.
-func replayEvent(requestID string, seq uint64) *corev1.ReplayEvent {
-	return &corev1.ReplayEvent{
+func replayEvent(requestID string, seq uint64) *corev1.ReplayEntry {
+	return &corev1.ReplayEntry{
 		RequestId: requestID,
 		Event: &corev1.Event{
 			SessionId: "vendor-uuid",

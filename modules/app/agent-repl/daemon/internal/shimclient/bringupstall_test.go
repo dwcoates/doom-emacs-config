@@ -43,7 +43,7 @@ func TestABusyShimIsNotTimedOutWhileItIsStillFeedingUs(t *testing.T) {
 		defer backlog.Stop()
 		for sent := 0; sent < 24; sent++ {
 			<-backlog.C
-			mustWriteMsg(t, conn, &corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()})
+			mustWriteMsg(t, conn, &corev1.ConnectionHeartbeat{SentAtMs: time.Now().UnixMilli()})
 		}
 		mustWriteMsg(t, conn, &corev1.ShimReady{SessionId: "sess-1"})
 		_, _ = wire.ReadAny(conn) // hold the connection open

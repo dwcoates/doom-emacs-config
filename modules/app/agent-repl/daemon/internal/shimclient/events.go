@@ -51,17 +51,23 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 		// *corev1.Event case above: a replayed event cannot reach dispatchEvent
 		// (and so cannot reach the SSM, the task catalog, or the progress
 		// resolver) because it is not that type. See replay.go.
-		case *corev1.ReplayEvent:
-			c.dispatchReplayEvent(m)
+		case *corev1.ReplayEntry:
+			c.dispatchReplayEntry(m)
 		case *corev1.ReplayDone:
 			c.dispatchReplayDone(m)
 		// THE BOUNDED PAGE. Its failure arm is the *corev1.Nack case above,
 		// which carries this page's own request id — see messagepage.go.
 		case *corev1.MessagePage:
 			c.resolveMessagePage(ac, m)
-		case *corev1.Heartbeat:
+		case *corev1.ConnectionHeartbeat:
 			// Liveness only (already recorded via markRecv). No reply: our own
 			// heartbeatSender covers the reverse direction.
+			//
+			// NOT protocol.v1's `Heartbeat`, which is a DURABLE bookkeeping
+			// record naming the work still running inside a turn. The two are
+			// now siblings in one package, so the plain name resolves to the
+			// other one: this connection-liveness frame must always be spelled
+			// ConnectionHeartbeat, and a mistake between them compiles.
 		case *corev1.ShimReady:
 			// GATE STAGE 3. Nothing else releases AwaitReady.
 			c.dispatchShimReady(ac, m)
