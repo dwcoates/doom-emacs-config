@@ -135,12 +135,26 @@ migrated.** `daemon/`, `webapp/` and `agent-shim/` are mid-rewrite and do not
 build against it, which is the expected steady state until the gaps below are
 reconciled.
 
-A first implementation wave was dispatched across six subsystems and four of the
-six correctly stopped without writing code. The reason, in one line: the contract
-specified what a record IS and never specified how one MOVES. `StoreWrite` still
-carried the retired `EventBatch`, nothing imported the stored record type, and
-the delivery envelope was generated and referenced by nothing. Recorded here so
-nothing is dispatched again before the model is whole.
+**Wave two is in flight**, across six scopes: the shim, the sidecar, the store,
+the wire layer, the daemon and the webapp.
+
+A first wave was dispatched earlier and four of the six correctly stopped without
+writing code. The reason, in one line: the contract specified what a record IS
+and never specified how one MOVES. `StoreWrite` still carried the retired
+`EventBatch`, nothing imported the stored record type, and the delivery envelope
+was generated and referenced by nothing. Kept here because it is the cheapest
+lesson in this document — a record contract with no transport reads as complete
+right up until someone tries to send one.
+
+**The wave stops when all six report**, for one joint review of the collected
+gaps. No structural review, no e2e run and no remediation dispatch happens before
+that review, because remediation is a judgment about the whole set — which is the
+entire point of the gap protocol above.
+
+Every agent in the wave carries the same standing rules: no protobuf edits for
+any reason, scope-exclusive, every other system expected broken as the steady
+state, unit tests only, no backward compatibility, and error-handling coverage
+adapted rather than dropped when a failure changes shape.
 
 ---
 
