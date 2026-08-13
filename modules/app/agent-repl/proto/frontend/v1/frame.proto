@@ -15,7 +15,6 @@ import "frontend/v1/merge.proto";
 import "frontend/v1/prompt-queue.proto";
 import "frontend/v1/sidebar.proto";
 import "frontend/v1/state.proto";
-import "frontend/v1/tokens-menu.proto";
 import "frontend/v1/topbar.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
