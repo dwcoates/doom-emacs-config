@@ -322,6 +322,56 @@ so the fresh-input rate is a SHARE and the expensive share is fresh + write.
   - `TokenCacheRates` is the one surviving stored rate, kept and kept populated
     for exactly that reason, and read by no judgment. New code must not read it.
 
+## `conversation.v1` is what a producer saw, and the daemon only ever adds its own bookkeeping
+
+`conversation.v1` is designed to be rendered DIRECTLY by a frontend. A
+conversation record reaches the GUI as itself: `claude-repld` never synthesizes
+one, and never re-encodes one on its way out. The only thing the daemon
+contributes is its own bookkeeping — facts it worked out that no producer ever
+observed.
+
+**The daemon never synthesizes a conversation record.** A `conversation.v1`
+record states something a PRODUCER observed, and there are exactly two
+producers: `claude-shim`, per session, watching the vendor SDK live — the
+stream plane — and `shim-claude-sidecar`, reading the vendor's on-disk
+transcripts — the file plane. `claude-repld` produces nothing here; it consumes
+what those two wrote. A daemon-minted `conversation.v1` record asserts an
+observation nobody made.
+
+**The daemon never re-encodes one either.** `frontend.v1` CARRIES a
+conversation record and stamps its own bookkeeping alongside it; it adds
+nothing to the record. A `frontend.v1` message that restates a `conversation.v1`
+fact in its own words is a re-spelling, and the translation layer that produces
+it is work that should not exist.
+
+**The test for which side a fact belongs on is who came by it.** Did a producer
+OBSERVE it, or did the daemon WORK IT OUT?
+
+- Observed → `conversation.v1`, and it reaches the frontend unchanged.
+- Worked out → `frontend.v1`, where it is bookkeeping riding alongside.
+
+The worked example is a background shell, because it separates cleanly. Its
+EXIT CODE is observed — a producer watched the process exit 137 — so the code
+is a `conversation.v1` fact. The OUTCOME resolved from that code is the
+daemon's, because a killed process also exits nonzero, and reading the code as
+"it failed" reports a user's own interrupt back to them as an error. So the
+code rides in `conversation.v1`, the verdict rides in `frontend.v1`, and
+neither restates the other.
+
+THIS IS A TARGET, NOT A DESCRIPTION OF THE TREE. The first half holds today:
+`claude-repld` constructs `conversation.v1` messages at exactly three sites,
+all inside `claude-repld.internal.tokenusage.fromCounters()`, and both of its
+callers are converting the daemon's OWN durable records
+(`state.v1.VendorTokenUsage`, `state.v1.TokenUsageTotals`) into the canonical
+shape for display — the daemon reading its own bookkeeping, per the section
+above, not minting conversation. The second half does NOT hold: the webapp
+imports `conversation.v1` in exactly two files (`webapp/src/tokens.ts` and
+`webapp/src/agent-emission.ts`), and everything else arrives as `frontend.v1`
+re-encodings the daemon built from conversation records.
+`frontend.v1.Message`'s payload oneof has no arm that can carry a
+`conversation.v1.MessageEntry` at all, so today the re-encoding is forced by
+the schema rather than chosen.
+
 ## Committing to master means bouncing what you changed
 
 Every component here is a built artifact, and every running process keeps
