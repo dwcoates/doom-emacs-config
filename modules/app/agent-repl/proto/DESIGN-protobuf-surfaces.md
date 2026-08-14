@@ -899,3 +899,89 @@ importable by any surface that needs the same vocabulary with different stamps.
 This is the EXTRACT-rather-than-re-spell heuristic applied literally, and it is
 pure enablement — `MessageEntry` keeps exactly its current semantics, and the
 extraction commits to nothing about what the delivery channels carry.
+
+## Three removals from `frontend.v1`: two dead messages and the durability class
+
+**Decided.** `frontend.v1.RosterNotice`, `frontend.v1.DetachedWorkOutputSpool`,
+and `frontend.v1.Message.durability` — with `MessageDurable` and
+`MessageEphemeral` — are deleted. No reservations; the payload arms renumber
+contiguously, as everywhere in this tree.
+
+**`RosterNotice` was dead outright.** No field in any proto carried it, and no
+source in `daemon/` or `webapp/` named it. The only matches were stale compiled
+binaries. The rail's notice line was designed and never wired; nothing regresses
+because nothing ever consumed one.
+
+**`DetachedWorkOutputSpool` was orphaned and already inert.** No field carried
+it either, so it had no path to any client. Removing it changes NO behavior:
+there was no embedding to break. Its live sibling
+`frontend.v1.DetachedWorkOutputAppend` stays — it is arms 4 and 5 of
+`DetachedWorkUpdate` and carries real traffic.
+
+**`conversation.v1.DetachedWorkProgressed.output` is the spool's counterpart.**
+That was already the consequence recorded under "The output spool's gap
+detection is dropped": with the cursor gone the spool was just bytes, and bytes
+the producer already writes. This deletion is that decision finishing.
+
+The spool's comment held one thing the append's did not — the enumeration of the
+four delta streams a per-frame `seq` would cover (`ConversationDelta`,
+`TypingDelta`, `DetachedWorkDelta`, and the output stream). That sentence moved
+onto `DetachedWorkOutputAppend` rather than being lost.
+
+### A frontend has no conception of durability
+
+**The field was write-only.** `daemon/internal/frontend/durability.go` sets it.
+Nothing reads it. The webapp's decoder assigns `frame.durability` and no renderer,
+router, or state transition ever consults the result; Emacs never looks at all.
+It computed a fact, put it on the wire, and no client used it for anything.
+
+**Its stated justification describes something no client does.** The comment
+argued that without the class, "no durable record exists for this message" is
+indistinguishable from "the record was not found", so a page missing an
+ephemeral card looks like a page that LOST a durable one. That check is real —
+and it is not a client's to make. The daemon owns the store and owns pagination:
+it is the only party that knows what a page was supposed to contain, and the
+only one positioned to notice a durable message the store cannot produce. A
+client holds neither side of the comparison, which is why none was ever written.
+
+**The daemon keeps knowing.** Durability does not stop existing; it stops being
+a wire fact. The classification, and the loud failure when a durable message is
+missing from the store, remain daemon-internal — where the evidence already is.
+
+**What this costs.** `daemon/internal/frontend/durability.go` exists solely to
+compute the deleted field, and the webapp decoder's two loud checks against it
+(both arms set; an ephemeral message naming a parent) lose the input they
+validate. Those are consumer-side consequences of a contract change, resolved in
+the implementation wave and not in the contract commit.
+
+### The ephemeral lineage constraints survive as daemon-side construction invariants
+
+They were stated on `MessageEphemeral`, and they are not wire facts — they are
+rules about how the daemon may build a message. Carried over unchanged in
+substance:
+
+- An ephemeral message is ALWAYS a feed row: empty `parent_message_id`, and
+  `top_level_message_id` equal to its own id.
+- It may NOT be a parent. A durable child naming an ephemeral root would be
+  unreachable by any store query, since a store record can only name ids that
+  exist in the store.
+- It may NOT name a durable parent. Otherwise an ephemeral card attaches itself
+  into a paged conversation it will simply vanish from, leaving a hole where a
+  reader has every reason to expect a message.
+
+**They are refused at construction**, so a violating message cannot be built and
+then noticed; a check applied afterwards is a check something can skip. That was
+true when the class was on the wire and it is true now — the enforcement point
+never moved, only the field it was described next to.
+
+**Membership is unchanged and is decided by whether Claude ever saw the thing**,
+never by who minted the id. A slash command the daemon answers alone never
+reaches the CLI, so the CLI writes nothing; a `system/local_command` record is
+ruled out of the durable set; a failure card the daemon synthesized describes a
+session that failed to start, so there is no transcript for it to live in.
+Conversely a daemon-MINTED id over a real `TaskStarted` is durable, because the
+record exists.
+
+**`ConversationSource` and `Message.source` are untouched.** Provenance is a
+different question — who drove a message, not whether a record exists for it —
+and it stays on the wire.
