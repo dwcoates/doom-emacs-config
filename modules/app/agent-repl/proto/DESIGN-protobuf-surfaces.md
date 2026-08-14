@@ -1,41 +1,97 @@
 # DESIGN: the agent-repl protobuf surfaces
 
-## The five surfaces
+## The six surfaces
 
 Every message belongs to exactly one. **The package boundary IS the surface
 boundary** — nothing straddles, so which surface a message is on is a fact a
-compiler can check rather than a convention a reviewer has to hold.
+compiler can check rather than a convention a reviewer has to hold. All six are
+ROOT namespaces with a `v1` suffix and no umbrella prefix, one directory each
+under `proto/src/`.
 
-| package | holds | importable by |
-|---|---|---|
-| **agentshim** | shim-side internals: which plane observed a record, the store's write identity, anything a producer could not convert | shim, sidecar, store ONLY |
-| **conversation** | the message model the shim generates and the daemon routes to the webapp — `MessageEntry`, its payloads, the content model, `TokenUsage`. Nothing about sessions, turns or machinery | everyone |
-| **protocol** | what traverses the daemon↔shim boundary, and ONLY that boundary, in both directions: handshakes, commands, receipts, health, replay and page requests, and the delivery envelopes that carry conversation records with their position | shim, daemon |
-| **frontend** | what reaches a frontend client. COMPOSED of `conversation` messages the daemon forwards, and ALSO of novel messages the daemon synthesizes — topbar, sidebar, footer, and the rest | daemon, webapp |
-| **state** | daemon-internal only: what no other service uses, including the schema the daemon marshals into its own SQLite store | daemon |
+| package | directory | holds | importable by |
+|---|---|---|---|
+| **conversation.v1** | `conversation/v1/` | the message model — `MessageEntry`, `MessagePayload`, the content model, `TokenUsage`. Imports nothing; the leaf every other surface shares | everyone |
+| **frontend.v1** | `frontend/v1/` | the UI components the webapp renders — `feed`, `topbar`, `sidebar`, `footer`, and the commands those components send | daemon, webapp |
+| **agentrepl.v1** | `agentrepl/v1/` | the agent-repl API surface — `service AgentRepl`, the frame envelope a subscriber receives, the connect snapshot, and the acks | daemon, webapp |
+| **shim.v1** | `shim/v1/` | what traverses the daemon↔shim boundary and only that boundary: handshakes, commands, receipts, health, replay and page requests, `BookkeepingEntry`, and the `ExternalEntry`/`EntryDelivery`/`MessagePage` read half | shim, daemon |
+| **store.v1** | `store/v1/` | the producer-side internal half: which plane observed a record, the store's write identity, anything a producer could not convert | shim, sidecar, store ONLY |
+| **state.v1** | `state/v1/` | daemon-internal only, including the frozen schema the daemon marshals into its own SQLite store | daemon |
 
-**A package is named for its purpose, not its owner.** `state` holds state and
-the daemon owns it; `protocol` describes a wire both ends speak. Naming either
-for the daemon would have said who it belongs to while leaving what it holds to
-be inferred — and in `protocol`'s case would have been actively wrong, since the
-shim produces on it too.
+`BookkeepingEntry` is `shim.v1`, not `conversation.v1`. Bookkeeping is produced
+by the shim and consumed by the daemon, and it STOPS there — a client sees it
+only after the daemon has resolved it into a view.
 
-`BookkeepingEntry` is `protocol`, not `conversation`, and this is the routing
-test doing real work. Bookkeeping is produced by the shim and consumed by the
-daemon, and it STOPS there — a client sees it only after the daemon has resolved
-it into a view. It never reaches the webapp, so it is not part of what routes
-through.
+`ExternalEntry` is `shim.v1` for the same reason: it is the WIRE envelope, and
+it carries either a `conversation.v1.MessageEntry` or a
+`shim.v1.BookkeepingEntry`. It does not collapse now that bookkeeping sits
+beside it, because the store persists bookkeeping too, so a stored record must
+still be able to hold one.
 
-`ExternalEntry` is `protocol` for the same reason: it is the WIRE envelope, and
-it carries either a `conversation.MessageEntry` or a `protocol.BookkeepingEntry`.
-It does not collapse when bookkeeping leaves — the store persists bookkeeping
-too, so a stored record must still be able to hold one.
+## The package names encode OWNERSHIP, not routing
 
-Every package keeps a `v1` suffix, and the five are ROOT namespaces —
-`agentshim.v1`, `conversation.v1`, `protocol.v1`, `frontend.v1`, `state.v1`. There
-is no umbrella prefix: `agentshim` is the name of the surface holding
-shim-specific internals, so it cannot also be the namespace everything else
-hangs under.
+**Decided, and this supersedes the routing test the sections below were written
+under.** The old scheme filed a message by who PRODUCED it and where it was
+ROUTED. The new one files it by what OWNS it. Routing was a good rule for
+deciding a hard case and a bad name for a package: it produced `protocol`, a
+name that describes every one of these six, and `agentshim`, a name that
+describes the process rather than the surface.
+
+**There are two kinds of package, and one exception.**
+
+BOUNDARY packages own envelopes and verbs — `agentrepl`, `shim`, `store`. Each
+is named for the boundary it describes, and what it holds is the vocabulary for
+crossing that boundary.
+
+MODEL packages own the payloads that ride those envelopes — `frontend`,
+`conversation`. Neither describes a wire; both describe a thing that travels on
+one.
+
+`state.v1` is neither, and that is why it is alone in carrying frozen
+field-number constraints. It is not a boundary between two parties and not a
+model anyone shares: it is the daemon's private persistence across its own
+restarts. The other party is the daemon a week from now, which cannot be asked
+to upgrade in lockstep, so a field number there is permanent in a way no wire
+field is.
+
+**The test for `frontend` versus `agentrepl` is: is it DRAWN, or is it CALLED?**
+What the webapp renders is `frontend`. What it calls is `agentrepl`. That
+question has one answer per message and does not require knowing who produced
+it — a `TopbarView` is drawn whether the daemon synthesized it or forwarded it,
+and `Subscribe` is called whether Emacs or the webapp is calling.
+
+**`agentshim` → `store`**, because all four of its files were store surface and
+each said so in its own header. `cursor.proto` is store↔sidecar traffic;
+`write.proto` is how a producer hands a record to the store; `entry.proto` is
+the stored record; `unsupported.proto` states outright that the daemon must
+never import it. The name `agentshim` never described the content — it described
+the repository the code happened to live in, which is how it also ended up
+looking like the namespace everything else should hang under.
+
+**`protocol` → `shim`**, for the daemon↔shim boundary it actually holds. The old
+name was defensible on its own and indefensible in a set of six, all of which
+are protocols.
+
+**`gen/` and `go_package` deliberately did NOT move.** The Go import path is
+still `agentrepl/proto/<pkg>/v1`, so roughly 300 consumer files across the
+daemon, shim, sidecar, store and webapp need no edits at all. Only the SOURCE
+location moved, into `proto/src/<pkg>/v1/`. That is the whole reason a rename of
+this size was affordable: the thing every consumer names is the generated import
+path, and it was left alone.
+
+**Two placements are known to be imperfect, and are open questions rather than
+settled.**
+
+`shim.v1` holds `bookkeeping.proto`, which is session EVIDENCE — a model, not a
+boundary. It is there because the shim produces it and the daemon consumes it,
+which is the old routing test still doing the deciding. Under an ownership test
+it has a weaker claim to a boundary package, and no better home has been argued
+for yet.
+
+`shim.v1` also holds `ConnectionHeartbeat`, `HealthCheck` and `HealthStatus`,
+which ride EVERY UDS hop — including store↔sidecar, where no shim is involved at
+all. A message that crosses a boundary the package is not named for is exactly
+the straddle this scheme exists to make impossible, and it is stated here rather
+than left for someone to discover.
 
 ## Collecting gaps rather than fixing them
 
@@ -1098,3 +1154,237 @@ the two-field invariant and three of its four defect classes no longer exist.
 deleted message. Neither is touched here — this wave is proto and docs — and
 neither is deleted quietly during implementation without saying so. See the
 report accompanying this change for the full list.
+
+## `agentrepl.v1` is a Connect service, and the command oneof is gone
+
+**Decided.** `service AgentRepl` in `agentrepl/v1/service.proto` replaces the
+`FrontendCommand` message: 33 unary methods, one per arm the oneof used to
+carry, plus one server-streaming `Subscribe`. The oneof is DELETED, not kept
+alongside — the service is the method table, and two spellings of one thing is
+the duplication this pass has spent itself removing.
+
+**The verbs get their own file.** `service.proto` holds the service and
+`SubscribeRequest`; `frame.proto` keeps `FrontendFrame`, `StateSnapshot` and
+the acks. Same package, so nothing about the surface boundary changed — the
+split is for readers, who look for verbs in one place and payloads in another,
+and it keeps `frame.proto` from becoming the file where everything is.
+
+**The oneof was already a method table, badly.** Thirty-five arms dispatched by
+a type switch in `daemon/internal/frontend/commands.go`, with a `default:` at
+`:305` returning "the command oneof was empty or unrecognized". That default is
+what an unimplemented method costs today: a runtime refusal a client discovers
+in production. Under a service an unimplemented method does not compile. The
+same trade appears on the response side — one `CommandAck` answered for 33
+different outcomes, and four of its nine fields were commented "Present only
+for X", which is a type check written as prose.
+
+**Connect, not gRPC, and the reason is the clients.** The webapp runs inside an
+Emacs xwidget WebKit view, which cannot speak gRPC — no trailers, no HTTP/2
+frame access from JS. Emacs is the OTHER first-class client, and elisp has no
+gRPC either. Connect is HTTP/1.1-compatible and its unary wire format is an
+ordinary POST with a protojson body, which is exactly what
+`lisp/frontend-uds.el` already builds by hand. The repo also already generates
+TS with `@bufbuild/protoc-gen-es`, and Connect-ES is the same toolchain family,
+so the implementation wave adds a plugin rather than a second codegen story.
+
+### The envelope fields move onto the commands
+
+**Decided: option (a).** `request_id` on every request; `workspace` on the
+workspace-addressed requests only. Not per-method `*Request` wrappers.
+
+**The wrappers were rejected because they double the vocabulary.** Thirty-three
+near-identical two-field messages, each meaningful only when paired with the
+command inside it, is the `FrontendCommand`/`CommandAck` duplication rebuilt at
+a smaller scale. Flattened, the command message IS the request: `MergeWorkspaceCmd`
+handed to a log line or a durable inbox says everything about itself, and there
+is exactly one name for the thing a caller sends.
+
+**`request_id` is NOT made redundant by the call/response pairing, and deleting
+it would have broken three separate things.** The ack answers the call, but a
+command's EFFECT arrives later on the push stream — `ConversationHistoryPage`,
+`DaemonHealthView` and `SessionHealthView` all carry the id back so a client can
+match an effect to the request that caused it. It is also the DURABLE TURN KEY:
+`daemon/internal/statedb/promptreceipt.go:293` refuses a turn claim with no
+request id, and `sessioncontroller/promptdispatch.go:513` refuses a prompt with
+none, because the id becomes the shim's `turn_id`. And the alternative —
+daemon-minted ids returned on the ack — loses a race the client-minted scheme
+does not have: on Connect the ack and the stream are different connections, so a
+push can beat its own ack, and a client that did not mint the id has nothing to
+file the early push under.
+
+**`workspace` is where the flattening actually pays.** A shared envelope handed
+one to every command whether or not it meant anything, and the schema recorded
+the damage in prose: `PauseMergeQueueCmd`'s comment said "the command's
+workspace is ignored". A field the receiver ignores is a field a caller can be
+wrong about. Flattened, workspace-addressing is a fact of the message —
+`ShutdownCmd`, `ScheduleShutdownCmd`, `CancelScheduledShutdownCmd`,
+`PauseMergeQueueCmd`, `ResumeMergeQueueCmd`, `EvictMergeCmd`,
+`CreateWorkspaceCmd`, `WorkspaceMaterializedCmd`, `HostActionCompletedCmd`,
+`DeleteSessionCmd`, `DaemonHealthCmd` and `PublishWorkspaceRosterCmd` simply
+have nowhere to put one. `CreateSessionCmd` keeps `cwd` and gains no second
+`workspace`, because the daemon's workspace key IS the session's absolute cwd
+and two spellings of one path is two things a caller can disagree with itself
+about.
+
+**What this costs, stated plainly.** Three things.
+
+There is no compiler check that a NEW command remembers `request_id`. A wrapper
+would have enforced it structurally; thirty-three hand-written fields enforce it
+by convention. That is the price of not doubling the vocabulary, and it is paid
+knowingly.
+
+The commands that were EMPTY are no longer empty. `CloseWorkspaceCmd`,
+`RestartSessionCmd`, `HibernateWorkspaceCmd`, `CancelDetachedAgentsCmd`,
+`PauseMergeQueueCmd`, `ResumeMergeQueueCmd` and `DaemonHealthCmd` each had `{}`
+as their whole body precisely because the envelope carried their meaning. Their
+comments said so, and those comments are rewritten rather than deleted — the
+argument (the session is the workspace; the command has nothing else to say)
+survives, pointing at a field instead of at an envelope.
+
+And the `frontend.v1` command messages now carry API-surface fields.
+`SubmitPromptCmd` lives in the package of UI components the webapp renders, and
+it gained `request_id`. The precedent was already there — `FirstPageCmd` and
+`NextPageCmd` carried their own `workspace` before this change — and the routing
+test still puts them in `frontend.v1`, since a frontend produces them and the
+daemon consumes them. But the surface line is blurrier than it was, and that is
+a real cost rather than a technicality.
+
+### `client_id`, which the transport used to provide for free
+
+**New, and load-bearing.** `SubscribeRequest.client_id`, repeated on `ResyncCmd`,
+`FirstPageCmd`, `NextPageCmd`, `DaemonHealthCmd` and `SessionHealthCmd`.
+
+Under the WebSocket, one socket carried the commands AND the pushes, so "which
+reader is this" was the socket itself and no field had to say it —
+`daemon/internal/frontend/commands.go:351` reads a connection-minted reader
+identity out of the request context and REFUSES a paging call that arrives
+without one. A service splits the two: a `NextPage` call is its own HTTP request
+with no inherent relationship to any stream. Without a reader name, "the daemon
+holds the reader's place" becomes unimplementable and that refusal at `:351`
+becomes unreachable — which is exactly the kind of silent weakening this
+document exists to refuse. The rule is one sentence: **a command whose effect
+arrives on the push stream rather than in its own ack names the stream it should
+arrive on.** Those five commands, and no others.
+
+It is CLIENT-minted, like `request_id`, for the same race.
+
+### The push channel stays ONE ordered stream
+
+**Decided.** `rpc Subscribe(SubscribeRequest) returns (stream FrontendFrame)`,
+and `StateSnapshot` is the first message ON that stream — not a unary call.
+
+**One stream is the contract, not a convenience.** Everything a client holds is
+built by applying a snapshot and then the deltas that follow it, and "follow" is
+only meaningful within one ordered channel. Per-topic streams would let a
+`WorkspaceState` revision be applied before the snapshot that supersedes it, a
+`TypingCut` retire a preview whose opening frame had not landed, and a
+`ConversationDelta` arrive against a workspace the client has never heard of.
+Nothing on this protocol carries a global sequence a client could repair that
+ordering with, and adding one would be rebuilding the stream inside every
+client.
+
+**The snapshot is not a separate call, and the batching is why it cannot be.**
+`StateSnapshot` may split its `workspaces` across several frames delivered
+back-to-back, with `workspace_total` stating what a complete view is; a client
+holds a partial view until it has applied that many. That is a multi-frame,
+ordered delivery with a completeness rule — it is a stream head, not a response
+body. A unary `GetSnapshot` would also race the deltas it is meant to seed:
+pushes begin the instant the subscription opens, and nothing relates the two
+channels. Snapshot-then-deltas on one connection is the whole recovery story.
+
+**The `command_ack` arm is DELETED from `FrontendFrame`.** An ack is now the
+return value of the call that produced it, so it travels on that call and cannot
+reach a client that did not make it. What still arrives on the stream is a
+command's effect, which is a different thing.
+
+**Host-versus-GUI stays in the LISTENER, and `SubscribeRequest` states no role.**
+Several `StateSnapshot` fields and several `FrontendFrame` arms are host surface
+that `frontend.Server` strips from GUI clients. The distinction is currently the
+transport itself — the host reaches the daemon over its private UDS, a GUI client
+over TCP — and Connect runs over both. A role field would convert an unreachable
+socket into a string anyone may send, which is strictly weaker than what exists.
+
+### Failures stay typed messages, never status codes
+
+**Unchanged, and deliberately restated.** Every unary method returns a message on
+refusal. `CommandAck.failure` is a `FailureKind` with ~71 arms, and both
+frontends RENDER a refusal — the webapp as a failure card, Emacs as a classified
+account. A Connect error code is a number with a string stapled to it, which is
+what `CommandAck.error` was before the classifier replaced it. Converting
+failures to status codes would undo that change and route every refusal back
+through an `err.Error()` funnel.
+
+`InterruptResponse` is the sharpest case: the confirmation CHALLENGE is neither
+success nor failure — the command was understood and deliberately not performed
+— and there is no status code that means that.
+
+### Four per-method responses, and only four
+
+`Interrupt`, `SetModel`, `CreateSession` and `CancelDetachedAgents` return
+`InterruptResponse`, `SetModelResponse`, `CreateSessionResponse` and
+`CancelDetachedAgentsResponse`; the other 29 return `CommandAck`.
+
+Those four are exactly the fields `CommandAck` carried under a "Present only for
+X" comment — `interrupt_confirm_required`, `selected_model`,
+`observed_claude_session_id`, `detached_cancel`. Each was meaningless on 32
+other commands, and the method signature now says what the comment used to. No
+response was invented that carries nothing beyond the ack: `SubmitPrompt`
+returns a plain `CommandAck`, as does every other method with nothing extra to
+say.
+
+**`DaemonHealth` and `SessionHealth` deliberately did NOT get per-method
+responses**, even though `DaemonHealthView` and `SessionHealthView` look like
+the obvious return types. Returning them would convert an asynchronous probe
+into a blocking call, and both views' own comments state the invariant that the
+ack is only a receipt and the VIEW is what Emacs waits on. Changing a probe's
+concurrency is an implementation decision, not a contract cleanup, so the views
+stay pushes and the commands carry `client_id`.
+
+### What the implementation wave must change
+
+The contract is now ahead of every implementation, on purpose. The toolchain is
+untouched in this pass — no Connect plugins, no new dependencies, no `go.mod`
+or `package.json` edits — so `make validate` still emits messages only and the
+service block is parsed and dropped. Adding `protoc-gen-connect-go` and
+`@connectrpc/protoc-gen-connect-es` to the Makefile is the wave's first step,
+not this one's.
+
+**Codegen.** `agentrepl/v1/service.proto` is added to the Makefile's `PROTOS`
+list, and plain `protoc` emits its messages and silently drops the service
+block — which is exactly the intended state until the plugins land.
+
+**Daemon.** The type switch and `CommandHandler` interface in
+`daemon/internal/frontend/commands.go:14-308` become a generated service
+implementation, and its `default:` arm at `:305` disappears along with the
+class of bug it caught. The two "this frame must be a `FrontendCommand`"
+decoders — `daemon/internal/frontend/server.go:2336` and
+`daemon/internal/server/server.go:2030` — lose their subject; Connect does the
+routing and the decoding. The workspace canonicalization choke point
+(`daemon/internal/frontend/workspacekey.go`, called once at
+`server.go:1612`) currently rewrites one envelope field for every command; it
+must become a per-method step, and `checkWorkspaceKey`
+(`daemon/internal/server/frontendcmd.go:796`, eight call sites) must keep
+refusing a display name where a key belongs. The lane keying at
+`daemon/internal/frontend/lanes.go:114` reads the envelope's workspace to pick a
+serialization domain and needs the same treatment. The reader identity at
+`commands.go:351` moves from connection context to `client_id`.
+
+**Webapp.** `webapp/src/frontend-command.ts:395-498` — the exhaustive
+`encodeBody` switch — and `webapp/src/proto-names.ts:131-152`, the arm-name
+table checked at compile time against the generated descriptor, are both
+replaced by generated method stubs. `command-dispatch.ts`'s pending-request map
+and `onAck` correlation stay, because the effect-on-the-stream correlation they
+exist for stays.
+
+**Emacs.** `lisp/frontend-uds.el` hand-builds the envelope
+(`:1412`), holds a runtime allowlist of sendable arms (`:336-401`, enforced at
+`:1402`), and hard-fails an ack with no `request_id` (`:2016`). Under Connect
+the allowlist becomes a URL path per method, and the UDS newline framing at
+`server.go:2215` becomes HTTP over the same socket. The ack-correlation hard
+failure must survive: it is the only place either frontend treats a missing
+correlation id as a protocol violation.
+
+**Stranded, not compensated for.** Every check listed above still compiles
+against a `FrontendCommand` that no longer exists in the schema, and none of it
+is touched here — this wave is proto and docs. The full list, with `file:line`,
+is in the report accompanying this change.

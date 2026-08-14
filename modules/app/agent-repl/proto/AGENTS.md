@@ -15,7 +15,7 @@ authority.
 |---|---|---|---|
 | `conversation.v1` | `conversation/v1/` | the message model — `MessageEntry`, `MessagePayload`, the content model, `TokenUsage`. Imports nothing; the leaf everything shares | everyone |
 | `frontend.v1` | `frontend/v1/` | the UI components the webapp renders — `feed`, `topbar`, `sidebar`, `footer` | daemon, webapp |
-| `agentrepl.v1` | `agentrepl/v1/` | the agent-repl API surface — the endpoints clients call, and the frame/command envelopes | daemon, webapp |
+| `agentrepl.v1` | `agentrepl/v1/` | the agent-repl API surface — `service AgentRepl` (the endpoints clients call), the frame envelope a subscriber receives, the connect snapshot, and the acks | daemon, webapp |
 | `shim.v1` | `shim/v1/` | what traverses the daemon↔shim boundary and only that boundary: handshakes, commands, receipts, health, replay and page requests, `BookkeepingEntry`, and the `ExternalEntry`/`EntryDelivery`/`MessagePage` read half | shim, daemon |
 | `store.v1` | `store/v1/` | the producer-side internal half: which plane observed a record, the store's write identity, anything a producer could not convert | shim, sidecar, store ONLY |
 | `state.v1` | `state/v1/` | daemon-internal only, including the schema the daemon marshals into its own SQLite store | daemon |
