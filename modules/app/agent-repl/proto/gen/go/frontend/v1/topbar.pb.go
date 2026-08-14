@@ -356,74 +356,6 @@ func (x *TopbarConnectivity) GetTitle() string {
 	return ""
 }
 
-// A deliberate request to change an already-live session's model.  The daemon
-// forwards this to the shim and only publishes the shim-confirmed selection.
-// Bootstrap and rebind intentionally have no model field: they observe session
-// state rather than choosing it.  Creation is different — see
-// CreateSessionCmd.model, which is a starting choice, not an observation.
-type SetModelCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See agentrepl.v1.AgentRepl.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace whose live session is being re-modelled. See
-	// agentrepl.v1.AgentRepl.
-	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	Model         string `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetModelCmd) Reset() {
-	*x = SetModelCmd{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetModelCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetModelCmd) ProtoMessage() {}
-
-func (x *SetModelCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetModelCmd.ProtoReflect.Descriptor instead.
-func (*SetModelCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *SetModelCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *SetModelCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *SetModelCmd) GetModel() string {
-	if x != nil {
-		return x.Model
-	}
-	return ""
-}
-
 // Correlated result of the daemon-global health command.  A command ACK alone
 // is only a receipt that the daemon accepted a frame; this view is the
 // assertion Emacs waits for before restoring any workspace.  healthy=false is
@@ -440,7 +372,7 @@ type DaemonHealthView struct {
 
 func (x *DaemonHealthView) Reset() {
 	*x = DaemonHealthView{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[5]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -452,7 +384,7 @@ func (x *DaemonHealthView) String() string {
 func (*DaemonHealthView) ProtoMessage() {}
 
 func (x *DaemonHealthView) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[5]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -465,7 +397,7 @@ func (x *DaemonHealthView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonHealthView.ProtoReflect.Descriptor instead.
 func (*DaemonHealthView) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{5}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *DaemonHealthView) GetRequestId() string {
@@ -513,7 +445,7 @@ type SessionHealthView struct {
 
 func (x *SessionHealthView) Reset() {
 	*x = SessionHealthView{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[6]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -525,7 +457,7 @@ func (x *SessionHealthView) String() string {
 func (*SessionHealthView) ProtoMessage() {}
 
 func (x *SessionHealthView) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[6]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -538,7 +470,7 @@ func (x *SessionHealthView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionHealthView.ProtoReflect.Descriptor instead.
 func (*SessionHealthView) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{6}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SessionHealthView) GetRequestId() string {
@@ -576,145 +508,6 @@ func (x *SessionHealthView) GetReason() string {
 	return ""
 }
 
-// Ask the daemon to assert that every boot-critical global dependency is
-// operational.  The matching DaemonHealthView, not socket existence, is the
-// success criterion.  It is a frontend command because no vendor produces or
-// consumes this daemon-local fact.
-type DaemonHealthCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. The DaemonHealthView pushed in answer echoes this id, which is
-	// how Emacs knows the verdict is the one it asked for.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// WHICH SUBSCRIBE STREAM the DaemonHealthView should be pushed down. See
-	// agentrepl.v1.SubscribeRequest.client_id. Daemon-global otherwise: no
-	// workspace.
-	ClientId      string `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DaemonHealthCmd) Reset() {
-	*x = DaemonHealthCmd{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DaemonHealthCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DaemonHealthCmd) ProtoMessage() {}
-
-func (x *DaemonHealthCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DaemonHealthCmd.ProtoReflect.Descriptor instead.
-func (*DaemonHealthCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *DaemonHealthCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *DaemonHealthCmd) GetClientId() string {
-	if x != nil {
-		return x.ClientId
-	}
-	return ""
-}
-
-// Ask the daemon to prove the entire session route for one restored workspace:
-// daemon registry -> current session controller -> handshaked shim -> shim dependencies.
-// `workspace` is authoritative and must be the session's absolute CWD;
-// `session_id` makes a stale response impossible to use after a rebind.
-//
-// HOST SURFACE, like its view.
-type SessionHealthCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. The SessionHealthView pushed in answer echoes this id.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace whose route is being proved. See agentrepl.v1.AgentRepl.
-	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// WHICH SUBSCRIBE STREAM the SessionHealthView should be pushed down. See
-	// agentrepl.v1.SubscribeRequest.client_id.
-	ClientId      string `protobuf:"bytes,3,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	SessionId     string `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionHealthCmd) Reset() {
-	*x = SessionHealthCmd{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionHealthCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionHealthCmd) ProtoMessage() {}
-
-func (x *SessionHealthCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionHealthCmd.ProtoReflect.Descriptor instead.
-func (*SessionHealthCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *SessionHealthCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *SessionHealthCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *SessionHealthCmd) GetClientId() string {
-	if x != nil {
-		return x.ClientId
-	}
-	return ""
-}
-
-func (x *SessionHealthCmd) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
 // The token-breakdown menu, fully resolved. Sections and rows arrive in
 // display order; the client renders exactly this tree.
 type TokenBreakdownView struct {
@@ -743,7 +536,7 @@ type TokenBreakdownView struct {
 
 func (x *TokenBreakdownView) Reset() {
 	*x = TokenBreakdownView{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[9]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -755,7 +548,7 @@ func (x *TokenBreakdownView) String() string {
 func (*TokenBreakdownView) ProtoMessage() {}
 
 func (x *TokenBreakdownView) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[9]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -768,7 +561,7 @@ func (x *TokenBreakdownView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenBreakdownView.ProtoReflect.Descriptor instead.
 func (*TokenBreakdownView) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{9}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *TokenBreakdownView) GetWorkspace() string {
@@ -805,7 +598,7 @@ type TokenBreakdownSection struct {
 
 func (x *TokenBreakdownSection) Reset() {
 	*x = TokenBreakdownSection{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[10]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -817,7 +610,7 @@ func (x *TokenBreakdownSection) String() string {
 func (*TokenBreakdownSection) ProtoMessage() {}
 
 func (x *TokenBreakdownSection) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[10]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -830,7 +623,7 @@ func (x *TokenBreakdownSection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenBreakdownSection.ProtoReflect.Descriptor instead.
 func (*TokenBreakdownSection) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{10}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *TokenBreakdownSection) GetLabel() string {
@@ -870,7 +663,7 @@ type TokenBreakdownRow struct {
 
 func (x *TokenBreakdownRow) Reset() {
 	*x = TokenBreakdownRow{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[11]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -882,7 +675,7 @@ func (x *TokenBreakdownRow) String() string {
 func (*TokenBreakdownRow) ProtoMessage() {}
 
 func (x *TokenBreakdownRow) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[11]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -895,7 +688,7 @@ func (x *TokenBreakdownRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenBreakdownRow.ProtoReflect.Descriptor instead.
 func (*TokenBreakdownRow) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{11}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *TokenBreakdownRow) GetLabel() string {
@@ -958,12 +751,7 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\x12TopbarConnectivity\x12\x12\n" +
 	"\x04tone\x18\x01 \x01(\tR\x04tone\x12\x14\n" +
 	"\x05glyph\x18\x02 \x01(\tR\x05glyph\x12\x14\n" +
-	"\x05title\x18\x03 \x01(\tR\x05title\"`\n" +
-	"\vSetModelCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x14\n" +
-	"\x05model\x18\x03 \x01(\tR\x05model\"c\n" +
+	"\x05title\x18\x03 \x01(\tR\x05title\"c\n" +
 	"\x10DaemonHealthView\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
@@ -976,18 +764,7 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x18\n" +
 	"\ahealthy\x18\x04 \x01(\bR\ahealthy\x12\x16\n" +
-	"\x06reason\x18\x05 \x01(\tR\x06reason\"M\n" +
-	"\x0fDaemonHealthCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
-	"\tclient_id\x18\x02 \x01(\tR\bclientId\"\x8b\x01\n" +
-	"\x10SessionHealthCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x1b\n" +
-	"\tclient_id\x18\x03 \x01(\tR\bclientId\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x04 \x01(\tR\tsessionId\"\x88\x01\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\"\x88\x01\n" +
 	"\x12TokenBreakdownView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12>\n" +
 	"\bsections\x18\x02 \x03(\v2\".frontend.v1.TokenBreakdownSectionR\bsections\x12\x14\n" +
@@ -1016,34 +793,31 @@ func file_frontend_v1_topbar_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_topbar_proto_rawDescData
 }
 
-var file_frontend_v1_topbar_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_frontend_v1_topbar_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_frontend_v1_topbar_proto_goTypes = []any{
 	(*TopbarView)(nil),              // 0: frontend.v1.TopbarView
 	(*TopbarWarning)(nil),           // 1: frontend.v1.TopbarWarning
 	(*TopbarAccountingWarning)(nil), // 2: frontend.v1.TopbarAccountingWarning
 	(*TopbarConnectivity)(nil),      // 3: frontend.v1.TopbarConnectivity
-	(*SetModelCmd)(nil),             // 4: frontend.v1.SetModelCmd
-	(*DaemonHealthView)(nil),        // 5: frontend.v1.DaemonHealthView
-	(*SessionHealthView)(nil),       // 6: frontend.v1.SessionHealthView
-	(*DaemonHealthCmd)(nil),         // 7: frontend.v1.DaemonHealthCmd
-	(*SessionHealthCmd)(nil),        // 8: frontend.v1.SessionHealthCmd
-	(*TokenBreakdownView)(nil),      // 9: frontend.v1.TokenBreakdownView
-	(*TokenBreakdownSection)(nil),   // 10: frontend.v1.TokenBreakdownSection
-	(*TokenBreakdownRow)(nil),       // 11: frontend.v1.TokenBreakdownRow
-	(*v1.ModelOption)(nil),          // 12: shim.v1.ModelOption
+	(*DaemonHealthView)(nil),        // 4: frontend.v1.DaemonHealthView
+	(*SessionHealthView)(nil),       // 5: frontend.v1.SessionHealthView
+	(*TokenBreakdownView)(nil),      // 6: frontend.v1.TokenBreakdownView
+	(*TokenBreakdownSection)(nil),   // 7: frontend.v1.TokenBreakdownSection
+	(*TokenBreakdownRow)(nil),       // 8: frontend.v1.TokenBreakdownRow
+	(*v1.ModelOption)(nil),          // 9: shim.v1.ModelOption
 }
 var file_frontend_v1_topbar_proto_depIdxs = []int32{
-	12, // 0: frontend.v1.TopbarView.model_options:type_name -> shim.v1.ModelOption
-	3,  // 1: frontend.v1.TopbarView.connectivity:type_name -> frontend.v1.TopbarConnectivity
-	1,  // 2: frontend.v1.TopbarView.warnings:type_name -> frontend.v1.TopbarWarning
-	2,  // 3: frontend.v1.TopbarWarning.accounting:type_name -> frontend.v1.TopbarAccountingWarning
-	10, // 4: frontend.v1.TokenBreakdownView.sections:type_name -> frontend.v1.TokenBreakdownSection
-	11, // 5: frontend.v1.TokenBreakdownSection.rows:type_name -> frontend.v1.TokenBreakdownRow
-	6,  // [6:6] is the sub-list for method output_type
-	6,  // [6:6] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	9, // 0: frontend.v1.TopbarView.model_options:type_name -> shim.v1.ModelOption
+	3, // 1: frontend.v1.TopbarView.connectivity:type_name -> frontend.v1.TopbarConnectivity
+	1, // 2: frontend.v1.TopbarView.warnings:type_name -> frontend.v1.TopbarWarning
+	2, // 3: frontend.v1.TopbarWarning.accounting:type_name -> frontend.v1.TopbarAccountingWarning
+	7, // 4: frontend.v1.TokenBreakdownView.sections:type_name -> frontend.v1.TokenBreakdownSection
+	8, // 5: frontend.v1.TokenBreakdownSection.rows:type_name -> frontend.v1.TokenBreakdownRow
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_topbar_proto_init() }
@@ -1060,7 +834,7 @@ func file_frontend_v1_topbar_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_topbar_proto_rawDesc), len(file_frontend_v1_topbar_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

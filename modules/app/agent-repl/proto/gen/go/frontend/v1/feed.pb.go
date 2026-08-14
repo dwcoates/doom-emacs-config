@@ -24,7 +24,6 @@ import (
 	v1 "agentrepl/proto/conversation/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	structpb "google.golang.org/protobuf/types/known/structpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -2349,93 +2348,6 @@ func (x *FailureCardRef) GetCardUuid() string {
 	return ""
 }
 
-type PermissionAnswerCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See agentrepl.v1.AgentRepl.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace whose shim is blocked on this answer. See
-	// agentrepl.v1.AgentRepl.
-	Workspace           string           `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	PermissionRequestId string           `protobuf:"bytes,3,opt,name=permission_request_id,json=permissionRequestId,proto3" json:"permission_request_id,omitempty"`
-	Allow               bool             `protobuf:"varint,4,opt,name=allow,proto3" json:"allow,omitempty"`
-	UpdatedInput        *structpb.Struct `protobuf:"bytes,5,opt,name=updated_input,json=updatedInput,proto3" json:"updated_input,omitempty"`
-	DenyMessage         string           `protobuf:"bytes,6,opt,name=deny_message,json=denyMessage,proto3" json:"deny_message,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
-}
-
-func (x *PermissionAnswerCmd) Reset() {
-	*x = PermissionAnswerCmd{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[26]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PermissionAnswerCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PermissionAnswerCmd) ProtoMessage() {}
-
-func (x *PermissionAnswerCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[26]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PermissionAnswerCmd.ProtoReflect.Descriptor instead.
-func (*PermissionAnswerCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{26}
-}
-
-func (x *PermissionAnswerCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *PermissionAnswerCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *PermissionAnswerCmd) GetPermissionRequestId() string {
-	if x != nil {
-		return x.PermissionRequestId
-	}
-	return ""
-}
-
-func (x *PermissionAnswerCmd) GetAllow() bool {
-	if x != nil {
-		return x.Allow
-	}
-	return false
-}
-
-func (x *PermissionAnswerCmd) GetUpdatedInput() *structpb.Struct {
-	if x != nil {
-		return x.UpdatedInput
-	}
-	return nil
-}
-
-func (x *PermissionAnswerCmd) GetDenyMessage() string {
-	if x != nil {
-		return x.DenyMessage
-	}
-	return ""
-}
-
 // One piece of detached work, as the payload of the Message that IS it.
 type DetachedWork struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -2461,7 +2373,7 @@ type DetachedWork struct {
 
 func (x *DetachedWork) Reset() {
 	*x = DetachedWork{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[27]
+	mi := &file_frontend_v1_feed_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2473,7 +2385,7 @@ func (x *DetachedWork) String() string {
 func (*DetachedWork) ProtoMessage() {}
 
 func (x *DetachedWork) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[27]
+	mi := &file_frontend_v1_feed_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2486,7 +2398,7 @@ func (x *DetachedWork) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWork.ProtoReflect.Descriptor instead.
 func (*DetachedWork) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{27}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *DetachedWork) GetStarted() *v1.DetachedWorkStarted {
@@ -2533,7 +2445,7 @@ type DetachedWorkLiveness struct {
 
 func (x *DetachedWorkLiveness) Reset() {
 	*x = DetachedWorkLiveness{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[28]
+	mi := &file_frontend_v1_feed_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2545,7 +2457,7 @@ func (x *DetachedWorkLiveness) String() string {
 func (*DetachedWorkLiveness) ProtoMessage() {}
 
 func (x *DetachedWorkLiveness) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[28]
+	mi := &file_frontend_v1_feed_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2558,7 +2470,7 @@ func (x *DetachedWorkLiveness) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkLiveness.ProtoReflect.Descriptor instead.
 func (*DetachedWorkLiveness) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{28}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *DetachedWorkLiveness) GetState() isDetachedWorkLiveness_State {
@@ -2616,7 +2528,7 @@ type DetachedWorkLive struct {
 
 func (x *DetachedWorkLive) Reset() {
 	*x = DetachedWorkLive{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[29]
+	mi := &file_frontend_v1_feed_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2628,7 +2540,7 @@ func (x *DetachedWorkLive) String() string {
 func (*DetachedWorkLive) ProtoMessage() {}
 
 func (x *DetachedWorkLive) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[29]
+	mi := &file_frontend_v1_feed_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2641,7 +2553,7 @@ func (x *DetachedWorkLive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkLive.ProtoReflect.Descriptor instead.
 func (*DetachedWorkLive) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{29}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *DetachedWorkLive) GetLastActivityMs() int64 {
@@ -2676,7 +2588,7 @@ type DetachedWorkSettled struct {
 
 func (x *DetachedWorkSettled) Reset() {
 	*x = DetachedWorkSettled{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[30]
+	mi := &file_frontend_v1_feed_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2688,7 +2600,7 @@ func (x *DetachedWorkSettled) String() string {
 func (*DetachedWorkSettled) ProtoMessage() {}
 
 func (x *DetachedWorkSettled) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[30]
+	mi := &file_frontend_v1_feed_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2701,7 +2613,7 @@ func (x *DetachedWorkSettled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkSettled.ProtoReflect.Descriptor instead.
 func (*DetachedWorkSettled) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{30}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *DetachedWorkSettled) GetSettledAtMs() int64 {
@@ -2738,7 +2650,7 @@ type DetachedWorkOutcomeKilled struct {
 
 func (x *DetachedWorkOutcomeKilled) Reset() {
 	*x = DetachedWorkOutcomeKilled{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[31]
+	mi := &file_frontend_v1_feed_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2750,7 +2662,7 @@ func (x *DetachedWorkOutcomeKilled) String() string {
 func (*DetachedWorkOutcomeKilled) ProtoMessage() {}
 
 func (x *DetachedWorkOutcomeKilled) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[31]
+	mi := &file_frontend_v1_feed_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2763,7 +2675,7 @@ func (x *DetachedWorkOutcomeKilled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkOutcomeKilled.ProtoReflect.Descriptor instead.
 func (*DetachedWorkOutcomeKilled) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{31}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *DetachedWorkOutcomeKilled) GetReason() string {
@@ -2832,7 +2744,7 @@ type DetachedWorkUpdate struct {
 
 func (x *DetachedWorkUpdate) Reset() {
 	*x = DetachedWorkUpdate{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[32]
+	mi := &file_frontend_v1_feed_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2844,7 +2756,7 @@ func (x *DetachedWorkUpdate) String() string {
 func (*DetachedWorkUpdate) ProtoMessage() {}
 
 func (x *DetachedWorkUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[32]
+	mi := &file_frontend_v1_feed_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2857,7 +2769,7 @@ func (x *DetachedWorkUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkUpdate.ProtoReflect.Descriptor instead.
 func (*DetachedWorkUpdate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{32}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *DetachedWorkUpdate) GetMessageId() string {
@@ -3000,7 +2912,7 @@ type DetachedWorkAgentUpdate struct {
 
 func (x *DetachedWorkAgentUpdate) Reset() {
 	*x = DetachedWorkAgentUpdate{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[33]
+	mi := &file_frontend_v1_feed_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3012,7 +2924,7 @@ func (x *DetachedWorkAgentUpdate) String() string {
 func (*DetachedWorkAgentUpdate) ProtoMessage() {}
 
 func (x *DetachedWorkAgentUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[33]
+	mi := &file_frontend_v1_feed_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3025,7 +2937,7 @@ func (x *DetachedWorkAgentUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkAgentUpdate.ProtoReflect.Descriptor instead.
 func (*DetachedWorkAgentUpdate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{33}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *DetachedWorkAgentUpdate) GetEmissions() []*AgentEmission {
@@ -3051,7 +2963,7 @@ type DetachedWorkSkillUpdate struct {
 
 func (x *DetachedWorkSkillUpdate) Reset() {
 	*x = DetachedWorkSkillUpdate{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[34]
+	mi := &file_frontend_v1_feed_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3063,7 +2975,7 @@ func (x *DetachedWorkSkillUpdate) String() string {
 func (*DetachedWorkSkillUpdate) ProtoMessage() {}
 
 func (x *DetachedWorkSkillUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[34]
+	mi := &file_frontend_v1_feed_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3076,7 +2988,7 @@ func (x *DetachedWorkSkillUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkSkillUpdate.ProtoReflect.Descriptor instead.
 func (*DetachedWorkSkillUpdate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{34}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *DetachedWorkSkillUpdate) GetUpdate() isDetachedWorkSkillUpdate_Update {
@@ -3145,7 +3057,7 @@ type DetachedWorkJournalUpdate struct {
 
 func (x *DetachedWorkJournalUpdate) Reset() {
 	*x = DetachedWorkJournalUpdate{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[35]
+	mi := &file_frontend_v1_feed_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3157,7 +3069,7 @@ func (x *DetachedWorkJournalUpdate) String() string {
 func (*DetachedWorkJournalUpdate) ProtoMessage() {}
 
 func (x *DetachedWorkJournalUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[35]
+	mi := &file_frontend_v1_feed_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3170,7 +3082,7 @@ func (x *DetachedWorkJournalUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkJournalUpdate.ProtoReflect.Descriptor instead.
 func (*DetachedWorkJournalUpdate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{35}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *DetachedWorkJournalUpdate) GetRows() []*v1.WorkflowStep {
@@ -3196,7 +3108,7 @@ type DetachedWorkOutputAppend struct {
 
 func (x *DetachedWorkOutputAppend) Reset() {
 	*x = DetachedWorkOutputAppend{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[36]
+	mi := &file_frontend_v1_feed_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3208,7 +3120,7 @@ func (x *DetachedWorkOutputAppend) String() string {
 func (*DetachedWorkOutputAppend) ProtoMessage() {}
 
 func (x *DetachedWorkOutputAppend) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[36]
+	mi := &file_frontend_v1_feed_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3221,7 +3133,7 @@ func (x *DetachedWorkOutputAppend) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkOutputAppend.ProtoReflect.Descriptor instead.
 func (*DetachedWorkOutputAppend) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{36}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *DetachedWorkOutputAppend) GetText() string {
@@ -3243,7 +3155,7 @@ type DetachedWorkLivenessUpdate struct {
 
 func (x *DetachedWorkLivenessUpdate) Reset() {
 	*x = DetachedWorkLivenessUpdate{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[37]
+	mi := &file_frontend_v1_feed_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3255,7 +3167,7 @@ func (x *DetachedWorkLivenessUpdate) String() string {
 func (*DetachedWorkLivenessUpdate) ProtoMessage() {}
 
 func (x *DetachedWorkLivenessUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[37]
+	mi := &file_frontend_v1_feed_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3268,7 +3180,7 @@ func (x *DetachedWorkLivenessUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkLivenessUpdate.ProtoReflect.Descriptor instead.
 func (*DetachedWorkLivenessUpdate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{37}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *DetachedWorkLivenessUpdate) GetLiveness() *DetachedWorkLiveness {
@@ -3298,7 +3210,7 @@ type PageScope struct {
 
 func (x *PageScope) Reset() {
 	*x = PageScope{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[38]
+	mi := &file_frontend_v1_feed_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3310,7 +3222,7 @@ func (x *PageScope) String() string {
 func (*PageScope) ProtoMessage() {}
 
 func (x *PageScope) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[38]
+	mi := &file_frontend_v1_feed_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3323,7 +3235,7 @@ func (x *PageScope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PageScope.ProtoReflect.Descriptor instead.
 func (*PageScope) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{38}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *PageScope) GetScope() isPageScope_Scope {
@@ -3384,7 +3296,7 @@ type PageScopeFeed struct {
 
 func (x *PageScopeFeed) Reset() {
 	*x = PageScopeFeed{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[39]
+	mi := &file_frontend_v1_feed_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3396,7 +3308,7 @@ func (x *PageScopeFeed) String() string {
 func (*PageScopeFeed) ProtoMessage() {}
 
 func (x *PageScopeFeed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[39]
+	mi := &file_frontend_v1_feed_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3409,7 +3321,7 @@ func (x *PageScopeFeed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PageScopeFeed.ProtoReflect.Descriptor instead.
 func (*PageScopeFeed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{39}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{38}
 }
 
 // The inside of one message: the records that message contains.
@@ -3425,7 +3337,7 @@ type PageScopeInside struct {
 
 func (x *PageScopeInside) Reset() {
 	*x = PageScopeInside{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[40]
+	mi := &file_frontend_v1_feed_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3437,7 +3349,7 @@ func (x *PageScopeInside) String() string {
 func (*PageScopeInside) ProtoMessage() {}
 
 func (x *PageScopeInside) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[40]
+	mi := &file_frontend_v1_feed_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3450,7 +3362,7 @@ func (x *PageScopeInside) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PageScopeInside.ProtoReflect.Descriptor instead.
 func (*PageScopeInside) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{40}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *PageScopeInside) GetContainerMessageId() string {
@@ -3458,179 +3370,6 @@ func (x *PageScopeInside) GetContainerMessageId() string {
 		return x.ContainerMessageId
 	}
 	return ""
-}
-
-// Ask for the MOST RECENT page, and reset this reader's position to it.
-//
-// The cold open and the whole recovery story: a client that bounced, rotated
-// its seq space, or lost its place calls this and starts from the bottom.
-type FirstPageCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. The ConversationHistoryPage pushed in answer echoes this id,
-	// so a client can DISCARD a page it is no longer awaiting.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// WHICH READER, and therefore which Subscribe stream the page is pushed down.
-	// The daemon's position is per READER per workspace per scope, and under a
-	// service a paging call no longer shares a socket with the stream that
-	// answers it — so the reader has to name itself. See
-	// agentrepl.v1.SubscribeRequest.client_id.
-	ClientId string `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	// Which conversation. The daemon's position is per reader PER WORKSPACE, so
-	// this is what selects the position being reset.
-	Workspace string `protobuf:"bytes,3,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// WHICH CONTAINER this page walks: the feed, or the inside of one message.
-	// The daemon's position is per reader per workspace PER SCOPE, so this also
-	// selects which position is being reset — opening a subagent does not throw
-	// away where the reader was in the feed.
-	//
-	// Unset is NOT a default. A request that does not state its scope is REFUSED,
-	// never read as the feed: defaulting would answer a client that forgot to
-	// name its container with the whole conversation.
-	Scope         *PageScope `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FirstPageCmd) Reset() {
-	*x = FirstPageCmd{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[41]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FirstPageCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FirstPageCmd) ProtoMessage() {}
-
-func (x *FirstPageCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[41]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FirstPageCmd.ProtoReflect.Descriptor instead.
-func (*FirstPageCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{41}
-}
-
-func (x *FirstPageCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *FirstPageCmd) GetClientId() string {
-	if x != nil {
-		return x.ClientId
-	}
-	return ""
-}
-
-func (x *FirstPageCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *FirstPageCmd) GetScope() *PageScope {
-	if x != nil {
-		return x.Scope
-	}
-	return nil
-}
-
-// Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
-//
-// IT CARRIES NO POSITION, and that absence is the design. From a reader with no
-// established position it is REFUSED rather than answered with the tail:
-// defaulting would turn a client bug into a silent tail read, and "I have no
-// position" already has its own verb.
-type NextPageCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See FirstPageCmd.request_id.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// WHICH READER, and therefore whose position is being walked back and which
-	// stream the page arrives on. See FirstPageCmd.client_id.
-	ClientId  string `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	Workspace string `protobuf:"bytes,3,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// WHICH CONTAINER to walk back through. It names the scope, never a position
-	// within it — the daemon still owns where this reader is inside that scope,
-	// so the no-position rule above is untouched.
-	//
-	// Unset is NOT a default and is REFUSED, exactly as on FirstPageCmd: a
-	// load-more that forgot which container it belongs to must not silently walk
-	// back through the feed instead.
-	Scope         *PageScope `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *NextPageCmd) Reset() {
-	*x = NextPageCmd{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[42]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *NextPageCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*NextPageCmd) ProtoMessage() {}
-
-func (x *NextPageCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[42]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use NextPageCmd.ProtoReflect.Descriptor instead.
-func (*NextPageCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{42}
-}
-
-func (x *NextPageCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *NextPageCmd) GetClientId() string {
-	if x != nil {
-		return x.ClientId
-	}
-	return ""
-}
-
-func (x *NextPageCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *NextPageCmd) GetScope() *PageScope {
-	if x != nil {
-		return x.Scope
-	}
-	return nil
 }
 
 // One page of messages, oldest first.
@@ -3700,7 +3439,7 @@ type ConversationHistoryPage struct {
 
 func (x *ConversationHistoryPage) Reset() {
 	*x = ConversationHistoryPage{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[43]
+	mi := &file_frontend_v1_feed_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3712,7 +3451,7 @@ func (x *ConversationHistoryPage) String() string {
 func (*ConversationHistoryPage) ProtoMessage() {}
 
 func (x *ConversationHistoryPage) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[43]
+	mi := &file_frontend_v1_feed_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3725,7 +3464,7 @@ func (x *ConversationHistoryPage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationHistoryPage.ProtoReflect.Descriptor instead.
 func (*ConversationHistoryPage) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{43}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ConversationHistoryPage) GetWorkspace() string {
@@ -3801,7 +3540,7 @@ type isConversationHistoryPage_Continuation interface {
 
 type ConversationHistoryPage_More struct {
 	// Older history remains. EMPTY on purpose: under this contract "there is
-	// more" is a FACT the client acts on by calling NextPageCmd, not a handle
+	// more" is a FACT the client acts on by calling NextPageRequest, not a handle
 	// it stores. The cursor that used to live here is precisely the position
 	// the client no longer holds.
 	More *HistoryHasMore `protobuf:"bytes,4,opt,name=more,proto3,oneof"`
@@ -3817,7 +3556,7 @@ func (*ConversationHistoryPage_More) isConversationHistoryPage_Continuation() {}
 
 func (*ConversationHistoryPage_Start) isConversationHistoryPage_Continuation() {}
 
-// Older history remains; call NextPageCmd.
+// Older history remains; call NextPageRequest.
 type HistoryHasMore struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -3826,7 +3565,7 @@ type HistoryHasMore struct {
 
 func (x *HistoryHasMore) Reset() {
 	*x = HistoryHasMore{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[44]
+	mi := &file_frontend_v1_feed_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3838,7 +3577,7 @@ func (x *HistoryHasMore) String() string {
 func (*HistoryHasMore) ProtoMessage() {}
 
 func (x *HistoryHasMore) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[44]
+	mi := &file_frontend_v1_feed_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3851,7 +3590,7 @@ func (x *HistoryHasMore) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryHasMore.ProtoReflect.Descriptor instead.
 func (*HistoryHasMore) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{44}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{41}
 }
 
 // There is nothing older. A FACT the daemon established by reading to the floor.
@@ -3863,7 +3602,7 @@ type HistoryAtStart struct {
 
 func (x *HistoryAtStart) Reset() {
 	*x = HistoryAtStart{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[45]
+	mi := &file_frontend_v1_feed_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3875,7 +3614,7 @@ func (x *HistoryAtStart) String() string {
 func (*HistoryAtStart) ProtoMessage() {}
 
 func (x *HistoryAtStart) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[45]
+	mi := &file_frontend_v1_feed_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3888,14 +3627,14 @@ func (x *HistoryAtStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryAtStart.ProtoReflect.Descriptor instead.
 func (*HistoryAtStart) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{45}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{42}
 }
 
 var File_frontend_v1_feed_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\n" +
-	"\x16frontend/v1/feed.proto\x12\vfrontend.v1\x1a\x1dconversation/v1/content.proto\x1a\x1econversation/v1/payloads.proto\x1a\x19agentrepl/v1/shared.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x9a\x01\n" +
+	"\x16frontend/v1/feed.proto\x12\vfrontend.v1\x1a\x1dconversation/v1/content.proto\x1a\x1econversation/v1/payloads.proto\x1a\x19agentrepl/v1/shared.proto\"\x9a\x01\n" +
 	"\x11ConversationDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x120\n" +
 	"\bmessages\x18\x02 \x03(\v2\x14.frontend.v1.MessageR\bmessages\x12\x1f\n" +
@@ -4011,15 +3750,7 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x0eresolved_at_ms\x18\x01 \x01(\x03R\fresolvedAtMs\"\x15\n" +
 	"\x13FailureCardTerminal\"-\n" +
 	"\x0eFailureCardRef\x12\x1b\n" +
-	"\tcard_uuid\x18\x01 \x01(\tR\bcardUuid\"\xfd\x01\n" +
-	"\x13PermissionAnswerCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x122\n" +
-	"\x15permission_request_id\x18\x03 \x01(\tR\x13permissionRequestId\x12\x14\n" +
-	"\x05allow\x18\x04 \x01(\bR\x05allow\x12<\n" +
-	"\rupdated_input\x18\x05 \x01(\v2\x17.google.protobuf.StructR\fupdatedInput\x12!\n" +
-	"\fdeny_message\x18\x06 \x01(\tR\vdenyMessage\"\xcf\x01\n" +
+	"\tcard_uuid\x18\x01 \x01(\tR\bcardUuid\"\xcf\x01\n" +
 	"\fDetachedWork\x12>\n" +
 	"\astarted\x18\x01 \x01(\v2$.conversation.v1.DetachedWorkStartedR\astarted\x12\"\n" +
 	"\rstarted_at_ms\x18\x02 \x01(\x03R\vstartedAtMs\x12=\n" +
@@ -4066,19 +3797,7 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x05scope\"\x0f\n" +
 	"\rPageScopeFeed\"C\n" +
 	"\x0fPageScopeInside\x120\n" +
-	"\x14container_message_id\x18\x01 \x01(\tR\x12containerMessageId\"\x96\x01\n" +
-	"\fFirstPageCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
-	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1c\n" +
-	"\tworkspace\x18\x03 \x01(\tR\tworkspace\x12,\n" +
-	"\x05scope\x18\x04 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"\x95\x01\n" +
-	"\vNextPageCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
-	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1c\n" +
-	"\tworkspace\x18\x03 \x01(\tR\tworkspace\x12,\n" +
-	"\x05scope\x18\x04 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"\x84\x03\n" +
+	"\x14container_message_id\x18\x01 \x01(\tR\x12containerMessageId\"\x84\x03\n" +
 	"\x17ConversationHistoryPage\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -4110,7 +3829,7 @@ func file_frontend_v1_feed_proto_rawDescGZIP() []byte {
 }
 
 var file_frontend_v1_feed_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
+var file_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
 var file_frontend_v1_feed_proto_goTypes = []any{
 	(ConversationSource)(0),              // 0: frontend.v1.ConversationSource
 	(*ConversationDelta)(nil),            // 1: frontend.v1.ConversationDelta
@@ -4139,61 +3858,57 @@ var file_frontend_v1_feed_proto_goTypes = []any{
 	(*FailureCardResolved)(nil),          // 24: frontend.v1.FailureCardResolved
 	(*FailureCardTerminal)(nil),          // 25: frontend.v1.FailureCardTerminal
 	(*FailureCardRef)(nil),               // 26: frontend.v1.FailureCardRef
-	(*PermissionAnswerCmd)(nil),          // 27: frontend.v1.PermissionAnswerCmd
-	(*DetachedWork)(nil),                 // 28: frontend.v1.DetachedWork
-	(*DetachedWorkLiveness)(nil),         // 29: frontend.v1.DetachedWorkLiveness
-	(*DetachedWorkLive)(nil),             // 30: frontend.v1.DetachedWorkLive
-	(*DetachedWorkSettled)(nil),          // 31: frontend.v1.DetachedWorkSettled
-	(*DetachedWorkOutcomeKilled)(nil),    // 32: frontend.v1.DetachedWorkOutcomeKilled
-	(*DetachedWorkUpdate)(nil),           // 33: frontend.v1.DetachedWorkUpdate
-	(*DetachedWorkAgentUpdate)(nil),      // 34: frontend.v1.DetachedWorkAgentUpdate
-	(*DetachedWorkSkillUpdate)(nil),      // 35: frontend.v1.DetachedWorkSkillUpdate
-	(*DetachedWorkJournalUpdate)(nil),    // 36: frontend.v1.DetachedWorkJournalUpdate
-	(*DetachedWorkOutputAppend)(nil),     // 37: frontend.v1.DetachedWorkOutputAppend
-	(*DetachedWorkLivenessUpdate)(nil),   // 38: frontend.v1.DetachedWorkLivenessUpdate
-	(*PageScope)(nil),                    // 39: frontend.v1.PageScope
-	(*PageScopeFeed)(nil),                // 40: frontend.v1.PageScopeFeed
-	(*PageScopeInside)(nil),              // 41: frontend.v1.PageScopeInside
-	(*FirstPageCmd)(nil),                 // 42: frontend.v1.FirstPageCmd
-	(*NextPageCmd)(nil),                  // 43: frontend.v1.NextPageCmd
-	(*ConversationHistoryPage)(nil),      // 44: frontend.v1.ConversationHistoryPage
-	(*HistoryHasMore)(nil),               // 45: frontend.v1.HistoryHasMore
-	(*HistoryAtStart)(nil),               // 46: frontend.v1.HistoryAtStart
-	(*v1.UserContent)(nil),               // 47: conversation.v1.UserContent
-	(*v1.ToolReturned)(nil),              // 48: conversation.v1.ToolReturned
-	(*v1.SkillBodyResolved)(nil),         // 49: conversation.v1.SkillBodyResolved
-	(*v1.DetachedWorkEnded)(nil),         // 50: conversation.v1.DetachedWorkEnded
-	(*v1.AgentSaid)(nil),                 // 51: conversation.v1.AgentSaid
-	(*v1.DetachedWorkStarted)(nil),       // 52: conversation.v1.DetachedWorkStarted
-	(*v1.DetachedWorkKind)(nil),          // 53: conversation.v1.DetachedWorkKind
-	(v11.SessionCommand)(0),              // 54: agentrepl.v1.SessionCommand
-	(*v11.FailureKind)(nil),              // 55: agentrepl.v1.FailureKind
-	(*structpb.Struct)(nil),              // 56: google.protobuf.Struct
-	(*v1.WorkflowStep)(nil),              // 57: conversation.v1.WorkflowStep
+	(*DetachedWork)(nil),                 // 27: frontend.v1.DetachedWork
+	(*DetachedWorkLiveness)(nil),         // 28: frontend.v1.DetachedWorkLiveness
+	(*DetachedWorkLive)(nil),             // 29: frontend.v1.DetachedWorkLive
+	(*DetachedWorkSettled)(nil),          // 30: frontend.v1.DetachedWorkSettled
+	(*DetachedWorkOutcomeKilled)(nil),    // 31: frontend.v1.DetachedWorkOutcomeKilled
+	(*DetachedWorkUpdate)(nil),           // 32: frontend.v1.DetachedWorkUpdate
+	(*DetachedWorkAgentUpdate)(nil),      // 33: frontend.v1.DetachedWorkAgentUpdate
+	(*DetachedWorkSkillUpdate)(nil),      // 34: frontend.v1.DetachedWorkSkillUpdate
+	(*DetachedWorkJournalUpdate)(nil),    // 35: frontend.v1.DetachedWorkJournalUpdate
+	(*DetachedWorkOutputAppend)(nil),     // 36: frontend.v1.DetachedWorkOutputAppend
+	(*DetachedWorkLivenessUpdate)(nil),   // 37: frontend.v1.DetachedWorkLivenessUpdate
+	(*PageScope)(nil),                    // 38: frontend.v1.PageScope
+	(*PageScopeFeed)(nil),                // 39: frontend.v1.PageScopeFeed
+	(*PageScopeInside)(nil),              // 40: frontend.v1.PageScopeInside
+	(*ConversationHistoryPage)(nil),      // 41: frontend.v1.ConversationHistoryPage
+	(*HistoryHasMore)(nil),               // 42: frontend.v1.HistoryHasMore
+	(*HistoryAtStart)(nil),               // 43: frontend.v1.HistoryAtStart
+	(*v1.UserContent)(nil),               // 44: conversation.v1.UserContent
+	(*v1.ToolReturned)(nil),              // 45: conversation.v1.ToolReturned
+	(*v1.SkillBodyResolved)(nil),         // 46: conversation.v1.SkillBodyResolved
+	(*v1.DetachedWorkEnded)(nil),         // 47: conversation.v1.DetachedWorkEnded
+	(*v1.AgentSaid)(nil),                 // 48: conversation.v1.AgentSaid
+	(*v1.DetachedWorkStarted)(nil),       // 49: conversation.v1.DetachedWorkStarted
+	(*v1.DetachedWorkKind)(nil),          // 50: conversation.v1.DetachedWorkKind
+	(v11.SessionCommand)(0),              // 51: agentrepl.v1.SessionCommand
+	(*v11.FailureKind)(nil),              // 52: agentrepl.v1.FailureKind
+	(*v1.WorkflowStep)(nil),              // 53: conversation.v1.WorkflowStep
 }
 var file_frontend_v1_feed_proto_depIdxs = []int32{
 	2,  // 0: frontend.v1.ConversationDelta.messages:type_name -> frontend.v1.Message
 	0,  // 1: frontend.v1.Message.source:type_name -> frontend.v1.ConversationSource
 	8,  // 2: frontend.v1.Message.agent:type_name -> frontend.v1.AgentEmission
-	47, // 3: frontend.v1.Message.user_message:type_name -> conversation.v1.UserContent
+	44, // 3: frontend.v1.Message.user_message:type_name -> conversation.v1.UserContent
 	22, // 4: frontend.v1.Message.failure_card:type_name -> frontend.v1.FailureCardView
 	21, // 5: frontend.v1.Message.daemon_intercepted_command:type_name -> frontend.v1.DaemonInterceptedCommandItem
-	28, // 6: frontend.v1.Message.detached_work:type_name -> frontend.v1.DetachedWork
+	27, // 6: frontend.v1.Message.detached_work:type_name -> frontend.v1.DetachedWork
 	4,  // 7: frontend.v1.Message.compaction_summary:type_name -> frontend.v1.CompactionSummaryItem
 	2,  // 8: frontend.v1.DetachedWorkDelta.opened:type_name -> frontend.v1.Message
-	33, // 9: frontend.v1.DetachedWorkDelta.updates:type_name -> frontend.v1.DetachedWorkUpdate
+	32, // 9: frontend.v1.DetachedWorkDelta.updates:type_name -> frontend.v1.DetachedWorkUpdate
 	7,  // 10: frontend.v1.SessionInitView.rows:type_name -> frontend.v1.SessionInitRow
 	9,  // 11: frontend.v1.AgentEmission.response:type_name -> frontend.v1.AgentResponse
-	48, // 12: frontend.v1.AgentEmission.tool_result:type_name -> conversation.v1.ToolReturned
+	45, // 12: frontend.v1.AgentEmission.tool_result:type_name -> conversation.v1.ToolReturned
 	12, // 13: frontend.v1.AgentEmission.tool_outcome:type_name -> frontend.v1.AgentToolOutcome
-	49, // 14: frontend.v1.AgentEmission.skill_body:type_name -> conversation.v1.SkillBodyResolved
-	50, // 15: frontend.v1.AgentEmission.turn_result:type_name -> conversation.v1.DetachedWorkEnded
-	51, // 16: frontend.v1.AgentResponse.said:type_name -> conversation.v1.AgentSaid
+	46, // 14: frontend.v1.AgentEmission.skill_body:type_name -> conversation.v1.SkillBodyResolved
+	47, // 15: frontend.v1.AgentEmission.turn_result:type_name -> conversation.v1.DetachedWorkEnded
+	48, // 16: frontend.v1.AgentResponse.said:type_name -> conversation.v1.AgentSaid
 	11, // 17: frontend.v1.AgentResponse.usage_stamp:type_name -> frontend.v1.ResponseUsageStamp
 	10, // 18: frontend.v1.AgentResponse.verdicts:type_name -> frontend.v1.ToolCallVerdict
-	52, // 19: frontend.v1.AgentToolOutcome.started:type_name -> conversation.v1.DetachedWorkStarted
-	50, // 20: frontend.v1.AgentToolOutcome.ended:type_name -> conversation.v1.DetachedWorkEnded
-	53, // 21: frontend.v1.TaskEntry.work_kind:type_name -> conversation.v1.DetachedWorkKind
+	49, // 19: frontend.v1.AgentToolOutcome.started:type_name -> conversation.v1.DetachedWorkStarted
+	47, // 20: frontend.v1.AgentToolOutcome.ended:type_name -> conversation.v1.DetachedWorkEnded
+	50, // 21: frontend.v1.TaskEntry.work_kind:type_name -> conversation.v1.DetachedWorkKind
 	14, // 22: frontend.v1.TaskEntry.running:type_name -> frontend.v1.TaskStatusRunning
 	15, // 23: frontend.v1.TaskEntry.done:type_name -> frontend.v1.TaskStatusDone
 	16, // 24: frontend.v1.TaskEntry.error:type_name -> frontend.v1.TaskStatusError
@@ -4201,43 +3916,40 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	18, // 26: frontend.v1.TaskEntry.stopped:type_name -> frontend.v1.TaskStatusStopped
 	19, // 27: frontend.v1.TaskEntry.lost:type_name -> frontend.v1.TaskStatusLost
 	13, // 28: frontend.v1.TaskCatalog.tasks:type_name -> frontend.v1.TaskEntry
-	54, // 29: frontend.v1.DaemonInterceptedCommandItem.command:type_name -> agentrepl.v1.SessionCommand
-	55, // 30: frontend.v1.FailureCardView.kind:type_name -> agentrepl.v1.FailureKind
+	51, // 29: frontend.v1.DaemonInterceptedCommandItem.command:type_name -> agentrepl.v1.SessionCommand
+	52, // 30: frontend.v1.FailureCardView.kind:type_name -> agentrepl.v1.FailureKind
 	23, // 31: frontend.v1.FailureCardView.open:type_name -> frontend.v1.FailureCardOpen
 	24, // 32: frontend.v1.FailureCardView.resolved:type_name -> frontend.v1.FailureCardResolved
 	25, // 33: frontend.v1.FailureCardView.terminal:type_name -> frontend.v1.FailureCardTerminal
-	56, // 34: frontend.v1.PermissionAnswerCmd.updated_input:type_name -> google.protobuf.Struct
-	52, // 35: frontend.v1.DetachedWork.started:type_name -> conversation.v1.DetachedWorkStarted
-	29, // 36: frontend.v1.DetachedWork.liveness:type_name -> frontend.v1.DetachedWorkLiveness
-	30, // 37: frontend.v1.DetachedWorkLiveness.live:type_name -> frontend.v1.DetachedWorkLive
-	31, // 38: frontend.v1.DetachedWorkLiveness.settled:type_name -> frontend.v1.DetachedWorkSettled
-	50, // 39: frontend.v1.DetachedWorkSettled.ended:type_name -> conversation.v1.DetachedWorkEnded
-	32, // 40: frontend.v1.DetachedWorkSettled.killed:type_name -> frontend.v1.DetachedWorkOutcomeKilled
-	34, // 41: frontend.v1.DetachedWorkUpdate.agent:type_name -> frontend.v1.DetachedWorkAgentUpdate
-	36, // 42: frontend.v1.DetachedWorkUpdate.journal:type_name -> frontend.v1.DetachedWorkJournalUpdate
-	37, // 43: frontend.v1.DetachedWorkUpdate.shell:type_name -> frontend.v1.DetachedWorkOutputAppend
-	37, // 44: frontend.v1.DetachedWorkUpdate.unclassified:type_name -> frontend.v1.DetachedWorkOutputAppend
-	38, // 45: frontend.v1.DetachedWorkUpdate.liveness:type_name -> frontend.v1.DetachedWorkLivenessUpdate
-	34, // 46: frontend.v1.DetachedWorkUpdate.merge:type_name -> frontend.v1.DetachedWorkAgentUpdate
-	35, // 47: frontend.v1.DetachedWorkUpdate.skill:type_name -> frontend.v1.DetachedWorkSkillUpdate
-	8,  // 48: frontend.v1.DetachedWorkAgentUpdate.emissions:type_name -> frontend.v1.AgentEmission
-	49, // 49: frontend.v1.DetachedWorkSkillUpdate.body:type_name -> conversation.v1.SkillBodyResolved
-	34, // 50: frontend.v1.DetachedWorkSkillUpdate.emissions:type_name -> frontend.v1.DetachedWorkAgentUpdate
-	57, // 51: frontend.v1.DetachedWorkJournalUpdate.rows:type_name -> conversation.v1.WorkflowStep
-	29, // 52: frontend.v1.DetachedWorkLivenessUpdate.liveness:type_name -> frontend.v1.DetachedWorkLiveness
-	40, // 53: frontend.v1.PageScope.feed:type_name -> frontend.v1.PageScopeFeed
-	41, // 54: frontend.v1.PageScope.inside:type_name -> frontend.v1.PageScopeInside
-	39, // 55: frontend.v1.FirstPageCmd.scope:type_name -> frontend.v1.PageScope
-	39, // 56: frontend.v1.NextPageCmd.scope:type_name -> frontend.v1.PageScope
-	2,  // 57: frontend.v1.ConversationHistoryPage.messages:type_name -> frontend.v1.Message
-	45, // 58: frontend.v1.ConversationHistoryPage.more:type_name -> frontend.v1.HistoryHasMore
-	46, // 59: frontend.v1.ConversationHistoryPage.start:type_name -> frontend.v1.HistoryAtStart
-	39, // 60: frontend.v1.ConversationHistoryPage.scope:type_name -> frontend.v1.PageScope
-	61, // [61:61] is the sub-list for method output_type
-	61, // [61:61] is the sub-list for method input_type
-	61, // [61:61] is the sub-list for extension type_name
-	61, // [61:61] is the sub-list for extension extendee
-	0,  // [0:61] is the sub-list for field type_name
+	49, // 34: frontend.v1.DetachedWork.started:type_name -> conversation.v1.DetachedWorkStarted
+	28, // 35: frontend.v1.DetachedWork.liveness:type_name -> frontend.v1.DetachedWorkLiveness
+	29, // 36: frontend.v1.DetachedWorkLiveness.live:type_name -> frontend.v1.DetachedWorkLive
+	30, // 37: frontend.v1.DetachedWorkLiveness.settled:type_name -> frontend.v1.DetachedWorkSettled
+	47, // 38: frontend.v1.DetachedWorkSettled.ended:type_name -> conversation.v1.DetachedWorkEnded
+	31, // 39: frontend.v1.DetachedWorkSettled.killed:type_name -> frontend.v1.DetachedWorkOutcomeKilled
+	33, // 40: frontend.v1.DetachedWorkUpdate.agent:type_name -> frontend.v1.DetachedWorkAgentUpdate
+	35, // 41: frontend.v1.DetachedWorkUpdate.journal:type_name -> frontend.v1.DetachedWorkJournalUpdate
+	36, // 42: frontend.v1.DetachedWorkUpdate.shell:type_name -> frontend.v1.DetachedWorkOutputAppend
+	36, // 43: frontend.v1.DetachedWorkUpdate.unclassified:type_name -> frontend.v1.DetachedWorkOutputAppend
+	37, // 44: frontend.v1.DetachedWorkUpdate.liveness:type_name -> frontend.v1.DetachedWorkLivenessUpdate
+	33, // 45: frontend.v1.DetachedWorkUpdate.merge:type_name -> frontend.v1.DetachedWorkAgentUpdate
+	34, // 46: frontend.v1.DetachedWorkUpdate.skill:type_name -> frontend.v1.DetachedWorkSkillUpdate
+	8,  // 47: frontend.v1.DetachedWorkAgentUpdate.emissions:type_name -> frontend.v1.AgentEmission
+	46, // 48: frontend.v1.DetachedWorkSkillUpdate.body:type_name -> conversation.v1.SkillBodyResolved
+	33, // 49: frontend.v1.DetachedWorkSkillUpdate.emissions:type_name -> frontend.v1.DetachedWorkAgentUpdate
+	53, // 50: frontend.v1.DetachedWorkJournalUpdate.rows:type_name -> conversation.v1.WorkflowStep
+	28, // 51: frontend.v1.DetachedWorkLivenessUpdate.liveness:type_name -> frontend.v1.DetachedWorkLiveness
+	39, // 52: frontend.v1.PageScope.feed:type_name -> frontend.v1.PageScopeFeed
+	40, // 53: frontend.v1.PageScope.inside:type_name -> frontend.v1.PageScopeInside
+	2,  // 54: frontend.v1.ConversationHistoryPage.messages:type_name -> frontend.v1.Message
+	42, // 55: frontend.v1.ConversationHistoryPage.more:type_name -> frontend.v1.HistoryHasMore
+	43, // 56: frontend.v1.ConversationHistoryPage.start:type_name -> frontend.v1.HistoryAtStart
+	38, // 57: frontend.v1.ConversationHistoryPage.scope:type_name -> frontend.v1.PageScope
+	58, // [58:58] is the sub-list for method output_type
+	58, // [58:58] is the sub-list for method input_type
+	58, // [58:58] is the sub-list for extension type_name
+	58, // [58:58] is the sub-list for extension extendee
+	0,  // [0:58] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_feed_proto_init() }
@@ -4277,11 +3989,11 @@ func file_frontend_v1_feed_proto_init() {
 		(*FailureCardView_Resolved)(nil),
 		(*FailureCardView_Terminal)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[28].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[27].OneofWrappers = []any{
 		(*DetachedWorkLiveness_Live)(nil),
 		(*DetachedWorkLiveness_Settled)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[32].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[31].OneofWrappers = []any{
 		(*DetachedWorkUpdate_Agent)(nil),
 		(*DetachedWorkUpdate_Journal)(nil),
 		(*DetachedWorkUpdate_Shell)(nil),
@@ -4290,15 +4002,15 @@ func file_frontend_v1_feed_proto_init() {
 		(*DetachedWorkUpdate_Merge)(nil),
 		(*DetachedWorkUpdate_Skill)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[34].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[33].OneofWrappers = []any{
 		(*DetachedWorkSkillUpdate_Body)(nil),
 		(*DetachedWorkSkillUpdate_Emissions)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[38].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[37].OneofWrappers = []any{
 		(*PageScope_Feed)(nil),
 		(*PageScope_Inside)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[43].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[40].OneofWrappers = []any{
 		(*ConversationHistoryPage_More)(nil),
 		(*ConversationHistoryPage_Start)(nil),
 	}
@@ -4308,7 +4020,7 @@ func file_frontend_v1_feed_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_feed_proto_rawDesc), len(file_frontend_v1_feed_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   46,
+			NumMessages:   43,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

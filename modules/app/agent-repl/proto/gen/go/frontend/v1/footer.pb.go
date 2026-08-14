@@ -2338,231 +2338,7 @@ func (x *AccountingInvalid) GetProblems() []string {
 	return nil
 }
 
-type SubmitPromptCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See agentrepl.v1.AgentRepl. It is also the DURABLE TURN KEY:
-	// the daemon's prompt-receipt ledger claims and discharges a turn under this
-	// id, so it must be unique across a client's whole lifetime, not merely
-	// in-flight.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace whose session this prompt goes to. See agentrepl.v1.AgentRepl.
-	Workspace      string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	Text           string `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
-	PermissionMode string `protobuf:"bytes,4,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
-	// Required origin selected by the concrete frontend send site. The daemon
-	// rejects UNSPECIFIED rather than guessing which UI or automation acted.
-	PromptOrigin  v11.PromptOrigin `protobuf:"varint,5,opt,name=prompt_origin,json=promptOrigin,proto3,enum=shim.v1.PromptOrigin" json:"prompt_origin,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SubmitPromptCmd) Reset() {
-	*x = SubmitPromptCmd{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[17]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SubmitPromptCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SubmitPromptCmd) ProtoMessage() {}
-
-func (x *SubmitPromptCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[17]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SubmitPromptCmd.ProtoReflect.Descriptor instead.
-func (*SubmitPromptCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{17}
-}
-
-func (x *SubmitPromptCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *SubmitPromptCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *SubmitPromptCmd) GetText() string {
-	if x != nil {
-		return x.Text
-	}
-	return ""
-}
-
-func (x *SubmitPromptCmd) GetPermissionMode() string {
-	if x != nil {
-		return x.PermissionMode
-	}
-	return ""
-}
-
-func (x *SubmitPromptCmd) GetPromptOrigin() v11.PromptOrigin {
-	if x != nil {
-		return x.PromptOrigin
-	}
-	return v11.PromptOrigin(0)
-}
-
-// Stop the running turn. Interrupting a LIVE TURN never asks for
-// confirmation. When no turn is live but subagent tasks are, the daemon
-// refuses with CommandAck.interrupt_confirm_required and performs the
-// interrupt only on a resend carrying confirm_agents=true — stopping working
-// subagents is the one interrupt worth a deliberate second keystroke.
-type InterruptCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See agentrepl.v1.AgentRepl.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace whose turn is being stopped. See agentrepl.v1.AgentRepl.
-	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	ConfirmAgents bool   `protobuf:"varint,3,opt,name=confirm_agents,json=confirmAgents,proto3" json:"confirm_agents,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *InterruptCmd) Reset() {
-	*x = InterruptCmd{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *InterruptCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*InterruptCmd) ProtoMessage() {}
-
-func (x *InterruptCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use InterruptCmd.ProtoReflect.Descriptor instead.
-func (*InterruptCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{18}
-}
-
-func (x *InterruptCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *InterruptCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *InterruptCmd) GetConfirmAgents() bool {
-	if x != nil {
-		return x.ConfirmAgents
-	}
-	return false
-}
-
-// Cancel the workspace session's DETACHED background agents: the subagent,
-// shell and workflow tasks still working after the turn that launched them
-// has ended.
-//
-// WHY IT IS ITS OWN COMMAND RATHER THAN A FLAG ON InterruptCmd. An interrupt
-// stops the TURN. The state this command exists for — main turn over,
-// detached agents still running — is precisely the state in which there is no
-// turn to stop, so an interrupt sent into it is a guaranteed no-op that the
-// shim answers ALREADY_COMPLETE. The one state that raised the interrupt's
-// "cancel the running subagents?" question was the one state its answer could
-// not act on; this command is what that yes now sends.
-//
-// IT CARRIES NO CONFIRMATION ECHO, unlike InterruptCmd.confirm_agents. There
-// is nothing here to confirm: the command's ONLY effect is stopping detached
-// agents, so sending it IS the deliberate second keystroke that flag exists to
-// require. A frontend asks its user before it sends, never after.
-//
-// The session is named by `workspace` below, and the command has nothing else
-// to say.
-type CancelDetachedAgentsCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See agentrepl.v1.AgentRepl.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace whose detached agents are being cancelled. See
-	// agentrepl.v1.AgentRepl.
-	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CancelDetachedAgentsCmd) Reset() {
-	*x = CancelDetachedAgentsCmd{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CancelDetachedAgentsCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CancelDetachedAgentsCmd) ProtoMessage() {}
-
-func (x *CancelDetachedAgentsCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CancelDetachedAgentsCmd.ProtoReflect.Descriptor instead.
-func (*CancelDetachedAgentsCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *CancelDetachedAgentsCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *CancelDetachedAgentsCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-// What a CancelDetachedAgentsCmd did, carried on the command's ack.
+// What a CancelDetachedAgentsRequest did, carried on the command's ack.
 //
 // It is the SHIM's verdict relayed, not a daemon re-derivation — see
 // shim.v1.DetachedCancelOutcome for why only the shim can answer
@@ -2586,7 +2362,7 @@ type DetachedCancelOutcome struct {
 
 func (x *DetachedCancelOutcome) Reset() {
 	*x = DetachedCancelOutcome{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[20]
+	mi := &file_frontend_v1_footer_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2598,7 +2374,7 @@ func (x *DetachedCancelOutcome) String() string {
 func (*DetachedCancelOutcome) ProtoMessage() {}
 
 func (x *DetachedCancelOutcome) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[20]
+	mi := &file_frontend_v1_footer_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2611,7 +2387,7 @@ func (x *DetachedCancelOutcome) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedCancelOutcome.ProtoReflect.Descriptor instead.
 func (*DetachedCancelOutcome) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{20}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DetachedCancelOutcome) GetOutcome() isDetachedCancelOutcome_Outcome {
@@ -2691,7 +2467,7 @@ type DetachedAgentsCancelled struct {
 
 func (x *DetachedAgentsCancelled) Reset() {
 	*x = DetachedAgentsCancelled{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[21]
+	mi := &file_frontend_v1_footer_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2703,7 +2479,7 @@ func (x *DetachedAgentsCancelled) String() string {
 func (*DetachedAgentsCancelled) ProtoMessage() {}
 
 func (x *DetachedAgentsCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[21]
+	mi := &file_frontend_v1_footer_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2716,7 +2492,7 @@ func (x *DetachedAgentsCancelled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedAgentsCancelled.ProtoReflect.Descriptor instead.
 func (*DetachedAgentsCancelled) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{21}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DetachedAgentsCancelled) GetCount() int64 {
@@ -2735,7 +2511,7 @@ type QueueClassificationPending struct {
 
 func (x *QueueClassificationPending) Reset() {
 	*x = QueueClassificationPending{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[22]
+	mi := &file_frontend_v1_footer_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2747,7 +2523,7 @@ func (x *QueueClassificationPending) String() string {
 func (*QueueClassificationPending) ProtoMessage() {}
 
 func (x *QueueClassificationPending) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[22]
+	mi := &file_frontend_v1_footer_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2760,7 +2536,7 @@ func (x *QueueClassificationPending) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueClassificationPending.ProtoReflect.Descriptor instead.
 func (*QueueClassificationPending) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{22}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{19}
 }
 
 // Deliver NOW: interrupt the running turn and submit once it has ended.
@@ -2774,7 +2550,7 @@ type QueueClassificationInterject struct {
 
 func (x *QueueClassificationInterject) Reset() {
 	*x = QueueClassificationInterject{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[23]
+	mi := &file_frontend_v1_footer_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2786,7 +2562,7 @@ func (x *QueueClassificationInterject) String() string {
 func (*QueueClassificationInterject) ProtoMessage() {}
 
 func (x *QueueClassificationInterject) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[23]
+	mi := &file_frontend_v1_footer_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2799,7 +2575,7 @@ func (x *QueueClassificationInterject) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueClassificationInterject.ProtoReflect.Descriptor instead.
 func (*QueueClassificationInterject) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{23}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *QueueClassificationInterject) GetRationale() string {
@@ -2814,10 +2590,10 @@ type QueueClassificationHold struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The classifier's stated reason. Free text for display; never parsed.
 	Rationale string `protobuf:"bytes,1,opt,name=rationale,proto3" json:"rationale,omitempty"`
-	// Set by QueueAcceptCmd: the user has seen and confirmed this hold. View
+	// Set by AcceptQueueEntryRequest: the user has seen and confirmed this hold. View
 	// state only — it changes nothing about when the entry is delivered. It
 	// lives on this arm because confirming a hold is the ONLY thing
-	// QueueAcceptCmd does; no other verdict has anything to accept.
+	// AcceptQueueEntryRequest does; no other verdict has anything to accept.
 	Accepted      bool `protobuf:"varint,2,opt,name=accepted,proto3" json:"accepted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2825,7 +2601,7 @@ type QueueClassificationHold struct {
 
 func (x *QueueClassificationHold) Reset() {
 	*x = QueueClassificationHold{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[24]
+	mi := &file_frontend_v1_footer_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2837,7 +2613,7 @@ func (x *QueueClassificationHold) String() string {
 func (*QueueClassificationHold) ProtoMessage() {}
 
 func (x *QueueClassificationHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[24]
+	mi := &file_frontend_v1_footer_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2850,7 +2626,7 @@ func (x *QueueClassificationHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueClassificationHold.ProtoReflect.Descriptor instead.
 func (*QueueClassificationHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{24}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *QueueClassificationHold) GetRationale() string {
@@ -2879,7 +2655,7 @@ func (x *QueueClassificationHold) GetAccepted() bool {
 // leaves the context in the state the cut was supposed to change, so there is
 // no question left for a model to answer and no model call is spent asking it.
 //
-// THERE IS NO FORCE-THROUGH. QueueForceCmd is refused on one of these for the
+// THERE IS NO FORCE-THROUGH. ForceQueueEntryRequest is refused on one of these for the
 // reason the keep-alive and revival holds refuse it: the force's mechanism is
 // an interrupt, and the interrupt is precisely what must not happen. A user who
 // genuinely wants the cut stopped still has the interrupt command itself, which
@@ -2896,7 +2672,7 @@ type QueueClassificationUninterruptibleTurn struct {
 
 func (x *QueueClassificationUninterruptibleTurn) Reset() {
 	*x = QueueClassificationUninterruptibleTurn{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[25]
+	mi := &file_frontend_v1_footer_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2908,7 +2684,7 @@ func (x *QueueClassificationUninterruptibleTurn) String() string {
 func (*QueueClassificationUninterruptibleTurn) ProtoMessage() {}
 
 func (x *QueueClassificationUninterruptibleTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[25]
+	mi := &file_frontend_v1_footer_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2921,7 +2697,7 @@ func (x *QueueClassificationUninterruptibleTurn) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use QueueClassificationUninterruptibleTurn.ProtoReflect.Descriptor instead.
 func (*QueueClassificationUninterruptibleTurn) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{25}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *QueueClassificationUninterruptibleTurn) GetCommand() v1.SessionCommand {
@@ -2946,7 +2722,7 @@ type QueueClassificationError struct {
 
 func (x *QueueClassificationError) Reset() {
 	*x = QueueClassificationError{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[26]
+	mi := &file_frontend_v1_footer_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2958,7 +2734,7 @@ func (x *QueueClassificationError) String() string {
 func (*QueueClassificationError) ProtoMessage() {}
 
 func (x *QueueClassificationError) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[26]
+	mi := &file_frontend_v1_footer_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2971,7 +2747,7 @@ func (x *QueueClassificationError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueClassificationError.ProtoReflect.Descriptor instead.
 func (*QueueClassificationError) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{26}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *QueueClassificationError) GetDetail() string {
@@ -3027,7 +2803,7 @@ type QueueEntry struct {
 
 func (x *QueueEntry) Reset() {
 	*x = QueueEntry{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[27]
+	mi := &file_frontend_v1_footer_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3039,7 +2815,7 @@ func (x *QueueEntry) String() string {
 func (*QueueEntry) ProtoMessage() {}
 
 func (x *QueueEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[27]
+	mi := &file_frontend_v1_footer_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3052,7 +2828,7 @@ func (x *QueueEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntry.ProtoReflect.Descriptor instead.
 func (*QueueEntry) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{27}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *QueueEntry) GetId() string {
@@ -3215,8 +2991,8 @@ type isQueueEntry_Hold interface {
 
 type QueueEntry_Shutdown struct {
 	// Held by a scheduled shutdown's drain lease. The classifier NEVER runs
-	// on such an entry: the only exits are the user's explicit QueueForceCmd
-	// (deliver now, further delaying the bounce), QueueCancelCmd, or delivery
+	// on such an entry: the only exits are the user's explicit ForceQueueEntryRequest
+	// (deliver now, further delaying the bounce), CancelQueueEntryRequest, or delivery
 	// after the bounce completes. Held entries are durable and survive the
 	// daemon swap, so such a prompt is delayed, never lost. A frontend
 	// renders a dedicated lease explanation from this arm instead of the
@@ -3229,7 +3005,7 @@ type QueueEntry_KeepAlive struct {
 	// runs on such an entry and there is NO force-through: the keep-alive must
 	// complete before the rewind-and-submit can run, so the only exits are
 	// delivery when the ping's turn ends (the daemon rewinds, then submits
-	// this entry) or QueueCancelCmd. A frontend renders a dedicated "waiting
+	// this entry) or CancelQueueEntryRequest. A frontend renders a dedicated "waiting
 	// on a keep-alive response" explanation from this arm instead of the
 	// classification.
 	KeepAlive *QueueEntryKeepAliveHold `protobuf:"bytes,10,opt,name=keep_alive,json=keepAlive,proto3,oneof"`
@@ -3241,7 +3017,7 @@ type QueueEntry_Revival struct {
 	// there is NO force-through: the exits are delivery once the compaction
 	// lands and the gate opens, a loud drop when the revival fails or expires
 	// (a session still asleep can never deliver, so a retained entry would be
-	// a leak, not a delay), or QueueCancelCmd. A frontend renders a dedicated
+	// a leak, not a delay), or CancelQueueEntryRequest. A frontend renders a dedicated
 	// "waiting on the revival's compaction" explanation from this arm instead
 	// of the classification.
 	Revival *QueueEntryRevivalHold `protobuf:"bytes,11,opt,name=revival,proto3,oneof"`
@@ -3275,7 +3051,7 @@ type QueueEntryShutdownHold struct {
 
 func (x *QueueEntryShutdownHold) Reset() {
 	*x = QueueEntryShutdownHold{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[28]
+	mi := &file_frontend_v1_footer_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3287,7 +3063,7 @@ func (x *QueueEntryShutdownHold) String() string {
 func (*QueueEntryShutdownHold) ProtoMessage() {}
 
 func (x *QueueEntryShutdownHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[28]
+	mi := &file_frontend_v1_footer_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3300,7 +3076,7 @@ func (x *QueueEntryShutdownHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntryShutdownHold.ProtoReflect.Descriptor instead.
 func (*QueueEntryShutdownHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{28}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *QueueEntryShutdownHold) GetScheduleId() string {
@@ -3322,7 +3098,7 @@ type QueueEntryKeepAliveHold struct {
 
 func (x *QueueEntryKeepAliveHold) Reset() {
 	*x = QueueEntryKeepAliveHold{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[29]
+	mi := &file_frontend_v1_footer_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3334,7 +3110,7 @@ func (x *QueueEntryKeepAliveHold) String() string {
 func (*QueueEntryKeepAliveHold) ProtoMessage() {}
 
 func (x *QueueEntryKeepAliveHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[29]
+	mi := &file_frontend_v1_footer_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3347,7 +3123,7 @@ func (x *QueueEntryKeepAliveHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntryKeepAliveHold.ProtoReflect.Descriptor instead.
 func (*QueueEntryKeepAliveHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{29}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *QueueEntryKeepAliveHold) GetTurnId() string {
@@ -3370,7 +3146,7 @@ type QueueEntryRevivalHold struct {
 
 func (x *QueueEntryRevivalHold) Reset() {
 	*x = QueueEntryRevivalHold{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[30]
+	mi := &file_frontend_v1_footer_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3382,7 +3158,7 @@ func (x *QueueEntryRevivalHold) String() string {
 func (*QueueEntryRevivalHold) ProtoMessage() {}
 
 func (x *QueueEntryRevivalHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[30]
+	mi := &file_frontend_v1_footer_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3395,7 +3171,7 @@ func (x *QueueEntryRevivalHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntryRevivalHold.ProtoReflect.Descriptor instead.
 func (*QueueEntryRevivalHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{30}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{27}
 }
 
 // The entry waits for its session's shim to restart onto the current build
@@ -3409,7 +3185,7 @@ type QueueEntryBuildRefreshHold struct {
 
 func (x *QueueEntryBuildRefreshHold) Reset() {
 	*x = QueueEntryBuildRefreshHold{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[31]
+	mi := &file_frontend_v1_footer_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3421,7 +3197,7 @@ func (x *QueueEntryBuildRefreshHold) String() string {
 func (*QueueEntryBuildRefreshHold) ProtoMessage() {}
 
 func (x *QueueEntryBuildRefreshHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[31]
+	mi := &file_frontend_v1_footer_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3434,7 +3210,7 @@ func (x *QueueEntryBuildRefreshHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntryBuildRefreshHold.ProtoReflect.Descriptor instead.
 func (*QueueEntryBuildRefreshHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{31}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{28}
 }
 
 // The session's queue, pushed on EVERY change and carried in StateSnapshot.
@@ -3463,7 +3239,7 @@ type QueueView struct {
 
 func (x *QueueView) Reset() {
 	*x = QueueView{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[32]
+	mi := &file_frontend_v1_footer_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3475,7 +3251,7 @@ func (x *QueueView) String() string {
 func (*QueueView) ProtoMessage() {}
 
 func (x *QueueView) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[32]
+	mi := &file_frontend_v1_footer_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3488,7 +3264,7 @@ func (x *QueueView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueView.ProtoReflect.Descriptor instead.
 func (*QueueView) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{32}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *QueueView) GetWorkspace() string {
@@ -3508,198 +3284,6 @@ func (x *QueueView) GetEntries() []*QueueEntry {
 func (x *QueueView) GetFence() string {
 	if x != nil {
 		return x.Fence
-	}
-	return ""
-}
-
-// Deliver this entry NOW — the user overriding the classifier, or not waiting
-// for it. Runs exactly the same interject sequence an INTERJECT verdict does.
-type QueueForceCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See agentrepl.v1.AgentRepl.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace whose queue holds the entry. The queue is per-workspace, so
-	// an entry id alone does not address one. See agentrepl.v1.AgentRepl.
-	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	EntryId       string `protobuf:"bytes,3,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QueueForceCmd) Reset() {
-	*x = QueueForceCmd{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[33]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QueueForceCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QueueForceCmd) ProtoMessage() {}
-
-func (x *QueueForceCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[33]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QueueForceCmd.ProtoReflect.Descriptor instead.
-func (*QueueForceCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{33}
-}
-
-func (x *QueueForceCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *QueueForceCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *QueueForceCmd) GetEntryId() string {
-	if x != nil {
-		return x.EntryId
-	}
-	return ""
-}
-
-// Confirm a HOLD entry. View state only: the entry is still delivered by the
-// ordinary turn-end drain, on the same schedule it already had.
-type QueueAcceptCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See agentrepl.v1.AgentRepl.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace whose queue holds the entry. See agentrepl.v1.AgentRepl.
-	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	EntryId       string `protobuf:"bytes,3,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QueueAcceptCmd) Reset() {
-	*x = QueueAcceptCmd{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[34]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QueueAcceptCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QueueAcceptCmd) ProtoMessage() {}
-
-func (x *QueueAcceptCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[34]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QueueAcceptCmd.ProtoReflect.Descriptor instead.
-func (*QueueAcceptCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{34}
-}
-
-func (x *QueueAcceptCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *QueueAcceptCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *QueueAcceptCmd) GetEntryId() string {
-	if x != nil {
-		return x.EntryId
-	}
-	return ""
-}
-
-// Drop an entry. It is never delivered.
-type QueueCancelCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See agentrepl.v1.AgentRepl.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace whose queue holds the entry. See agentrepl.v1.AgentRepl.
-	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	EntryId       string `protobuf:"bytes,3,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QueueCancelCmd) Reset() {
-	*x = QueueCancelCmd{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[35]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QueueCancelCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QueueCancelCmd) ProtoMessage() {}
-
-func (x *QueueCancelCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[35]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QueueCancelCmd.ProtoReflect.Descriptor instead.
-func (*QueueCancelCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{35}
-}
-
-func (x *QueueCancelCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *QueueCancelCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *QueueCancelCmd) GetEntryId() string {
-	if x != nil {
-		return x.EntryId
 	}
 	return ""
 }
@@ -3850,23 +3434,7 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x14AccountingIncomplete\x12\x18\n" +
 	"\amissing\x18\x01 \x03(\tR\amissing\"/\n" +
 	"\x11AccountingInvalid\x12\x1a\n" +
-	"\bproblems\x18\x01 \x03(\tR\bproblems\"\xc7\x01\n" +
-	"\x0fSubmitPromptCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\x12'\n" +
-	"\x0fpermission_mode\x18\x04 \x01(\tR\x0epermissionMode\x12:\n" +
-	"\rprompt_origin\x18\x05 \x01(\x0e2\x15.shim.v1.PromptOriginR\fpromptOrigin\"r\n" +
-	"\fInterruptCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12%\n" +
-	"\x0econfirm_agents\x18\x03 \x01(\bR\rconfirmAgents\"V\n" +
-	"\x17CancelDetachedAgentsCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\"\xfd\x01\n" +
+	"\bproblems\x18\x01 \x03(\tR\bproblems\"\xfd\x01\n" +
 	"\x15DetachedCancelOutcome\x12D\n" +
 	"\tcancelled\x18\x01 \x01(\v2$.frontend.v1.DetachedAgentsCancelledH\x00R\tcancelled\x12K\n" +
 	"\x0fnothing_running\x18\x02 \x01(\v2 .shim.v1.NoDetachedAgentsRunningH\x00R\x0enothingRunning\x12F\n" +
@@ -3913,22 +3481,7 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\tQueueView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x121\n" +
 	"\aentries\x18\x02 \x03(\v2\x17.frontend.v1.QueueEntryR\aentries\x12\x14\n" +
-	"\x05fence\x18\x03 \x01(\tR\x05fence\"g\n" +
-	"\rQueueForceCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x19\n" +
-	"\bentry_id\x18\x03 \x01(\tR\aentryId\"h\n" +
-	"\x0eQueueAcceptCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x19\n" +
-	"\bentry_id\x18\x03 \x01(\tR\aentryId\"h\n" +
-	"\x0eQueueCancelCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x19\n" +
-	"\bentry_id\x18\x03 \x01(\tR\aentryId*\xb0\x05\n" +
+	"\x05fence\x18\x03 \x01(\tR\x05fence*\xb0\x05\n" +
 	"\vRenderState\x12\x1c\n" +
 	"\x18RENDER_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RENDER_STATE_INIT\x10\x01\x12\x15\n" +
@@ -3991,7 +3544,7 @@ func file_frontend_v1_footer_proto_rawDescGZIP() []byte {
 }
 
 var file_frontend_v1_footer_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_frontend_v1_footer_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
+var file_frontend_v1_footer_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_frontend_v1_footer_proto_goTypes = []any{
 	(RenderState)(0),                               // 0: frontend.v1.RenderState
 	(SessionConnectivity)(0),                       // 1: frontend.v1.SessionConnectivity
@@ -4014,49 +3567,43 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*AccountingComplete)(nil),                     // 18: frontend.v1.AccountingComplete
 	(*AccountingIncomplete)(nil),                   // 19: frontend.v1.AccountingIncomplete
 	(*AccountingInvalid)(nil),                      // 20: frontend.v1.AccountingInvalid
-	(*SubmitPromptCmd)(nil),                        // 21: frontend.v1.SubmitPromptCmd
-	(*InterruptCmd)(nil),                           // 22: frontend.v1.InterruptCmd
-	(*CancelDetachedAgentsCmd)(nil),                // 23: frontend.v1.CancelDetachedAgentsCmd
-	(*DetachedCancelOutcome)(nil),                  // 24: frontend.v1.DetachedCancelOutcome
-	(*DetachedAgentsCancelled)(nil),                // 25: frontend.v1.DetachedAgentsCancelled
-	(*QueueClassificationPending)(nil),             // 26: frontend.v1.QueueClassificationPending
-	(*QueueClassificationInterject)(nil),           // 27: frontend.v1.QueueClassificationInterject
-	(*QueueClassificationHold)(nil),                // 28: frontend.v1.QueueClassificationHold
-	(*QueueClassificationUninterruptibleTurn)(nil), // 29: frontend.v1.QueueClassificationUninterruptibleTurn
-	(*QueueClassificationError)(nil),               // 30: frontend.v1.QueueClassificationError
-	(*QueueEntry)(nil),                             // 31: frontend.v1.QueueEntry
-	(*QueueEntryShutdownHold)(nil),                 // 32: frontend.v1.QueueEntryShutdownHold
-	(*QueueEntryKeepAliveHold)(nil),                // 33: frontend.v1.QueueEntryKeepAliveHold
-	(*QueueEntryRevivalHold)(nil),                  // 34: frontend.v1.QueueEntryRevivalHold
-	(*QueueEntryBuildRefreshHold)(nil),             // 35: frontend.v1.QueueEntryBuildRefreshHold
-	(*QueueView)(nil),                              // 36: frontend.v1.QueueView
-	(*QueueForceCmd)(nil),                          // 37: frontend.v1.QueueForceCmd
-	(*QueueAcceptCmd)(nil),                         // 38: frontend.v1.QueueAcceptCmd
-	(*QueueCancelCmd)(nil),                         // 39: frontend.v1.QueueCancelCmd
-	(*v1.MergeStatus)(nil),                         // 40: agentrepl.v1.MergeStatus
-	(*v1.MergeDequeueOffer)(nil),                   // 41: agentrepl.v1.MergeDequeueOffer
-	(*FailureCardView)(nil),                        // 42: frontend.v1.FailureCardView
-	(*v11.ModelOption)(nil),                        // 43: shim.v1.ModelOption
-	(*v1.HibernationDetail)(nil),                   // 44: agentrepl.v1.HibernationDetail
-	(v11.InterruptOutcome)(0),                      // 45: shim.v1.InterruptOutcome
-	(v11.PromptOrigin)(0),                          // 46: shim.v1.PromptOrigin
-	(*FailureCardRef)(nil),                         // 47: frontend.v1.FailureCardRef
-	(*v11.NoDetachedAgentsRunning)(nil),            // 48: shim.v1.NoDetachedAgentsRunning
-	(*v11.DetachedCancelUnsupported)(nil),          // 49: shim.v1.DetachedCancelUnsupported
-	(v1.SessionCommand)(0),                         // 50: agentrepl.v1.SessionCommand
+	(*DetachedCancelOutcome)(nil),                  // 21: frontend.v1.DetachedCancelOutcome
+	(*DetachedAgentsCancelled)(nil),                // 22: frontend.v1.DetachedAgentsCancelled
+	(*QueueClassificationPending)(nil),             // 23: frontend.v1.QueueClassificationPending
+	(*QueueClassificationInterject)(nil),           // 24: frontend.v1.QueueClassificationInterject
+	(*QueueClassificationHold)(nil),                // 25: frontend.v1.QueueClassificationHold
+	(*QueueClassificationUninterruptibleTurn)(nil), // 26: frontend.v1.QueueClassificationUninterruptibleTurn
+	(*QueueClassificationError)(nil),               // 27: frontend.v1.QueueClassificationError
+	(*QueueEntry)(nil),                             // 28: frontend.v1.QueueEntry
+	(*QueueEntryShutdownHold)(nil),                 // 29: frontend.v1.QueueEntryShutdownHold
+	(*QueueEntryKeepAliveHold)(nil),                // 30: frontend.v1.QueueEntryKeepAliveHold
+	(*QueueEntryRevivalHold)(nil),                  // 31: frontend.v1.QueueEntryRevivalHold
+	(*QueueEntryBuildRefreshHold)(nil),             // 32: frontend.v1.QueueEntryBuildRefreshHold
+	(*QueueView)(nil),                              // 33: frontend.v1.QueueView
+	(*v1.MergeStatus)(nil),                         // 34: agentrepl.v1.MergeStatus
+	(*v1.MergeDequeueOffer)(nil),                   // 35: agentrepl.v1.MergeDequeueOffer
+	(*FailureCardView)(nil),                        // 36: frontend.v1.FailureCardView
+	(*v11.ModelOption)(nil),                        // 37: shim.v1.ModelOption
+	(*v1.HibernationDetail)(nil),                   // 38: agentrepl.v1.HibernationDetail
+	(v11.InterruptOutcome)(0),                      // 39: shim.v1.InterruptOutcome
+	(v11.PromptOrigin)(0),                          // 40: shim.v1.PromptOrigin
+	(*FailureCardRef)(nil),                         // 41: frontend.v1.FailureCardRef
+	(*v11.NoDetachedAgentsRunning)(nil),            // 42: shim.v1.NoDetachedAgentsRunning
+	(*v11.DetachedCancelUnsupported)(nil),          // 43: shim.v1.DetachedCancelUnsupported
+	(v1.SessionCommand)(0),                         // 44: agentrepl.v1.SessionCommand
 }
 var file_frontend_v1_footer_proto_depIdxs = []int32{
 	0,  // 0: frontend.v1.WorkspaceState.state:type_name -> frontend.v1.RenderState
 	1,  // 1: frontend.v1.WorkspaceState.connectivity:type_name -> frontend.v1.SessionConnectivity
 	2,  // 2: frontend.v1.WorkspaceState.status:type_name -> frontend.v1.SessionStatus
 	4,  // 3: frontend.v1.WorkspaceState.active_faults:type_name -> frontend.v1.RuntimeFault
-	40, // 4: frontend.v1.WorkspaceState.merge_status:type_name -> agentrepl.v1.MergeStatus
-	41, // 5: frontend.v1.WorkspaceState.merge_dequeue_offer:type_name -> agentrepl.v1.MergeDequeueOffer
+	34, // 4: frontend.v1.WorkspaceState.merge_status:type_name -> agentrepl.v1.MergeStatus
+	35, // 5: frontend.v1.WorkspaceState.merge_dequeue_offer:type_name -> agentrepl.v1.MergeDequeueOffer
 	3,  // 6: frontend.v1.SessionView.backfill:type_name -> frontend.v1.BackfillState
-	42, // 7: frontend.v1.SessionView.death:type_name -> frontend.v1.FailureCardView
-	43, // 8: frontend.v1.SessionView.model_options:type_name -> shim.v1.ModelOption
-	44, // 9: frontend.v1.SessionView.hibernation:type_name -> agentrepl.v1.HibernationDetail
-	45, // 10: frontend.v1.InterruptWindow.outcome:type_name -> shim.v1.InterruptOutcome
+	36, // 7: frontend.v1.SessionView.death:type_name -> frontend.v1.FailureCardView
+	37, // 8: frontend.v1.SessionView.model_options:type_name -> shim.v1.ModelOption
+	38, // 9: frontend.v1.SessionView.hibernation:type_name -> agentrepl.v1.HibernationDetail
+	39, // 10: frontend.v1.InterruptWindow.outcome:type_name -> shim.v1.InterruptOutcome
 	0,  // 11: frontend.v1.ProgressView.state:type_name -> frontend.v1.RenderState
 	9,  // 12: frontend.v1.ProgressView.compacting:type_name -> frontend.v1.ProgressWindow
 	9,  // 13: frontend.v1.ProgressView.retrying:type_name -> frontend.v1.ProgressWindow
@@ -4071,31 +3618,30 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	14, // 22: frontend.v1.ProgressView.phase:type_name -> frontend.v1.FooterPhase
 	15, // 23: frontend.v1.ProgressView.merge_chip:type_name -> frontend.v1.FooterMergeChip
 	17, // 24: frontend.v1.ProgressView.accounting:type_name -> frontend.v1.FooterAccountingCell
-	46, // 25: frontend.v1.ContextCostAlert.prompt_origin:type_name -> shim.v1.PromptOrigin
-	47, // 26: frontend.v1.FooterFailureRow.card:type_name -> frontend.v1.FailureCardRef
+	40, // 25: frontend.v1.ContextCostAlert.prompt_origin:type_name -> shim.v1.PromptOrigin
+	41, // 26: frontend.v1.FooterFailureRow.card:type_name -> frontend.v1.FailureCardRef
 	18, // 27: frontend.v1.FooterAccountingCell.complete:type_name -> frontend.v1.AccountingComplete
 	19, // 28: frontend.v1.FooterAccountingCell.incomplete:type_name -> frontend.v1.AccountingIncomplete
 	20, // 29: frontend.v1.FooterAccountingCell.invalid:type_name -> frontend.v1.AccountingInvalid
-	46, // 30: frontend.v1.SubmitPromptCmd.prompt_origin:type_name -> shim.v1.PromptOrigin
-	25, // 31: frontend.v1.DetachedCancelOutcome.cancelled:type_name -> frontend.v1.DetachedAgentsCancelled
-	48, // 32: frontend.v1.DetachedCancelOutcome.nothing_running:type_name -> shim.v1.NoDetachedAgentsRunning
-	49, // 33: frontend.v1.DetachedCancelOutcome.unsupported:type_name -> shim.v1.DetachedCancelUnsupported
-	50, // 34: frontend.v1.QueueClassificationUninterruptibleTurn.command:type_name -> agentrepl.v1.SessionCommand
-	26, // 35: frontend.v1.QueueEntry.pending:type_name -> frontend.v1.QueueClassificationPending
-	27, // 36: frontend.v1.QueueEntry.interject:type_name -> frontend.v1.QueueClassificationInterject
-	28, // 37: frontend.v1.QueueEntry.hold_for_turn_end:type_name -> frontend.v1.QueueClassificationHold
-	30, // 38: frontend.v1.QueueEntry.error:type_name -> frontend.v1.QueueClassificationError
-	29, // 39: frontend.v1.QueueEntry.uninterruptible_turn:type_name -> frontend.v1.QueueClassificationUninterruptibleTurn
-	32, // 40: frontend.v1.QueueEntry.shutdown:type_name -> frontend.v1.QueueEntryShutdownHold
-	33, // 41: frontend.v1.QueueEntry.keep_alive:type_name -> frontend.v1.QueueEntryKeepAliveHold
-	34, // 42: frontend.v1.QueueEntry.revival:type_name -> frontend.v1.QueueEntryRevivalHold
-	35, // 43: frontend.v1.QueueEntry.build_refresh:type_name -> frontend.v1.QueueEntryBuildRefreshHold
-	31, // 44: frontend.v1.QueueView.entries:type_name -> frontend.v1.QueueEntry
-	45, // [45:45] is the sub-list for method output_type
-	45, // [45:45] is the sub-list for method input_type
-	45, // [45:45] is the sub-list for extension type_name
-	45, // [45:45] is the sub-list for extension extendee
-	0,  // [0:45] is the sub-list for field type_name
+	22, // 30: frontend.v1.DetachedCancelOutcome.cancelled:type_name -> frontend.v1.DetachedAgentsCancelled
+	42, // 31: frontend.v1.DetachedCancelOutcome.nothing_running:type_name -> shim.v1.NoDetachedAgentsRunning
+	43, // 32: frontend.v1.DetachedCancelOutcome.unsupported:type_name -> shim.v1.DetachedCancelUnsupported
+	44, // 33: frontend.v1.QueueClassificationUninterruptibleTurn.command:type_name -> agentrepl.v1.SessionCommand
+	23, // 34: frontend.v1.QueueEntry.pending:type_name -> frontend.v1.QueueClassificationPending
+	24, // 35: frontend.v1.QueueEntry.interject:type_name -> frontend.v1.QueueClassificationInterject
+	25, // 36: frontend.v1.QueueEntry.hold_for_turn_end:type_name -> frontend.v1.QueueClassificationHold
+	27, // 37: frontend.v1.QueueEntry.error:type_name -> frontend.v1.QueueClassificationError
+	26, // 38: frontend.v1.QueueEntry.uninterruptible_turn:type_name -> frontend.v1.QueueClassificationUninterruptibleTurn
+	29, // 39: frontend.v1.QueueEntry.shutdown:type_name -> frontend.v1.QueueEntryShutdownHold
+	30, // 40: frontend.v1.QueueEntry.keep_alive:type_name -> frontend.v1.QueueEntryKeepAliveHold
+	31, // 41: frontend.v1.QueueEntry.revival:type_name -> frontend.v1.QueueEntryRevivalHold
+	32, // 42: frontend.v1.QueueEntry.build_refresh:type_name -> frontend.v1.QueueEntryBuildRefreshHold
+	28, // 43: frontend.v1.QueueView.entries:type_name -> frontend.v1.QueueEntry
+	44, // [44:44] is the sub-list for method output_type
+	44, // [44:44] is the sub-list for method input_type
+	44, // [44:44] is the sub-list for extension type_name
+	44, // [44:44] is the sub-list for extension extendee
+	0,  // [0:44] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_footer_proto_init() }
@@ -4109,12 +3655,12 @@ func file_frontend_v1_footer_proto_init() {
 		(*FooterAccountingCell_Incomplete)(nil),
 		(*FooterAccountingCell_Invalid)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[20].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[17].OneofWrappers = []any{
 		(*DetachedCancelOutcome_Cancelled)(nil),
 		(*DetachedCancelOutcome_NothingRunning)(nil),
 		(*DetachedCancelOutcome_Unsupported)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[27].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[24].OneofWrappers = []any{
 		(*QueueEntry_Pending)(nil),
 		(*QueueEntry_Interject)(nil),
 		(*QueueEntry_HoldForTurnEnd)(nil),
@@ -4131,7 +3677,7 @@ func file_frontend_v1_footer_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_footer_proto_rawDesc), len(file_frontend_v1_footer_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   36,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

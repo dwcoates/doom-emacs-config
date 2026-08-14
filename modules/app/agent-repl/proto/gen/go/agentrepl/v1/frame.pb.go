@@ -843,248 +843,6 @@ func (x *CommandAck) GetFailureCard() *v1.FailureCardRef {
 	return nil
 }
 
-// Interrupt's answer, which has a THIRD outcome neither ok nor a failure.
-//
-// The interrupt confirmation CHALLENGE is not an error: the command was
-// understood and deliberately not performed, because no turn was live and
-// stopping live subagents deserves an explicit yes. It is returned with
-// ack.ok=false and ack.failure UNSET; the client asks the user and calls
-// Interrupt again with confirm_agents=true.
-//
-// Under the old generic ack this was a field that was meaningless on 32 other
-// commands. Here its presence is scoped by the method's own signature.
-type InterruptResponse struct {
-	state           protoimpl.MessageState    `protogen:"open.v1"`
-	Ack             *CommandAck               `protobuf:"bytes,1,opt,name=ack,proto3" json:"ack,omitempty"`
-	ConfirmRequired *InterruptConfirmRequired `protobuf:"bytes,2,opt,name=confirm_required,json=confirmRequired,proto3" json:"confirm_required,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
-}
-
-func (x *InterruptResponse) Reset() {
-	*x = InterruptResponse{}
-	mi := &file_agentrepl_v1_frame_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *InterruptResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*InterruptResponse) ProtoMessage() {}
-
-func (x *InterruptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_frame_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use InterruptResponse.ProtoReflect.Descriptor instead.
-func (*InterruptResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *InterruptResponse) GetAck() *CommandAck {
-	if x != nil {
-		return x.Ack
-	}
-	return nil
-}
-
-func (x *InterruptResponse) GetConfirmRequired() *InterruptConfirmRequired {
-	if x != nil {
-		return x.ConfirmRequired
-	}
-	return nil
-}
-
-// CancelDetachedAgents' answer: WHAT the cancel did, relayed from the shim.
-//
-// The outcome is set on BOTH the success answer (the `cancelled` arm) and the
-// refusal (`nothing_running` / `unsupported` alongside ack.ok=false), so a
-// client never has to read a refusal's meaning out of `error` text.
-type CancelDetachedAgentsResponse struct {
-	state         protoimpl.MessageState    `protogen:"open.v1"`
-	Ack           *CommandAck               `protobuf:"bytes,1,opt,name=ack,proto3" json:"ack,omitempty"`
-	Outcome       *v1.DetachedCancelOutcome `protobuf:"bytes,2,opt,name=outcome,proto3" json:"outcome,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CancelDetachedAgentsResponse) Reset() {
-	*x = CancelDetachedAgentsResponse{}
-	mi := &file_agentrepl_v1_frame_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CancelDetachedAgentsResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CancelDetachedAgentsResponse) ProtoMessage() {}
-
-func (x *CancelDetachedAgentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_frame_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CancelDetachedAgentsResponse.ProtoReflect.Descriptor instead.
-func (*CancelDetachedAgentsResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *CancelDetachedAgentsResponse) GetAck() *CommandAck {
-	if x != nil {
-		return x.Ack
-	}
-	return nil
-}
-
-func (x *CancelDetachedAgentsResponse) GetOutcome() *v1.DetachedCancelOutcome {
-	if x != nil {
-		return x.Outcome
-	}
-	return nil
-}
-
-// SetModel's answer.
-type SetModelResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	Ack   *CommandAck            `protobuf:"bytes,1,opt,name=ack,proto3" json:"ack,omitempty"`
-	// The shim-confirmed current model, on both success and rejection, so a
-	// frontend never needs an optimistic model state or a local recovery guess.
-	SelectedModel string `protobuf:"bytes,2,opt,name=selected_model,json=selectedModel,proto3" json:"selected_model,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetModelResponse) Reset() {
-	*x = SetModelResponse{}
-	mi := &file_agentrepl_v1_frame_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetModelResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetModelResponse) ProtoMessage() {}
-
-func (x *SetModelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_frame_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetModelResponse.ProtoReflect.Descriptor instead.
-func (*SetModelResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *SetModelResponse) GetAck() *CommandAck {
-	if x != nil {
-		return x.Ack
-	}
-	return nil
-}
-
-func (x *SetModelResponse) GetSelectedModel() string {
-	if x != nil {
-		return x.SelectedModel
-	}
-	return ""
-}
-
-// CreateSession's answer.
-type CreateSessionResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	Ack   *CommandAck            `protobuf:"bytes,1,opt,name=ack,proto3" json:"ack,omitempty"`
-	// FOR OBSERVABILITY ONLY: the vendor conversation uuid the created session
-	// actually landed on, so a client can attribute its logs from its very first
-	// line instead of waiting for the first pushed SessionView.
-	//
-	// A CLIENT MUST NOT PERSIST THIS OR FEED IT BACK. It is an observation of
-	// daemon state at one instant, not a durable fact: the uuid ROTATES (a
-	// /clear or a compact starts a new vendor conversation and resets the
-	// cursors with it), so a stored copy is wrong from the next rotation
-	// onward. The steady-state source is the pushed SessionView, which tracks
-	// rotations; this field only covers the gap before the first push.
-	//
-	// Feeding it back is what this whole change removed — see ResumeMode. The
-	// rule is not enforceable from here, so it is also enforced where it
-	// matters: the Emacs frontend has no persistence path that can reach a
-	// vendor uuid, and a test asserts its state file never contains one.
-	ObservedClaudeSessionId string `protobuf:"bytes,2,opt,name=observed_claude_session_id,json=observedClaudeSessionId,proto3" json:"observed_claude_session_id,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
-}
-
-func (x *CreateSessionResponse) Reset() {
-	*x = CreateSessionResponse{}
-	mi := &file_agentrepl_v1_frame_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateSessionResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateSessionResponse) ProtoMessage() {}
-
-func (x *CreateSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_frame_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateSessionResponse.ProtoReflect.Descriptor instead.
-func (*CreateSessionResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *CreateSessionResponse) GetAck() *CommandAck {
-	if x != nil {
-		return x.Ack
-	}
-	return nil
-}
-
-func (x *CreateSessionResponse) GetObservedClaudeSessionId() string {
-	if x != nil {
-		return x.ObservedClaudeSessionId
-	}
-	return ""
-}
-
 // The challenge payload: what the interrupt would actually stop, so the
 // client can render a concrete question ("interrupt 3 running subagents?")
 // rather than a bare are-you-sure.
@@ -1097,7 +855,7 @@ type InterruptConfirmRequired struct {
 
 func (x *InterruptConfirmRequired) Reset() {
 	*x = InterruptConfirmRequired{}
-	mi := &file_agentrepl_v1_frame_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1109,7 +867,7 @@ func (x *InterruptConfirmRequired) String() string {
 func (*InterruptConfirmRequired) ProtoMessage() {}
 
 func (x *InterruptConfirmRequired) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_frame_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1122,7 +880,7 @@ func (x *InterruptConfirmRequired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptConfirmRequired.ProtoReflect.Descriptor instead.
 func (*InterruptConfirmRequired) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *InterruptConfirmRequired) GetLiveTasks() int64 {
@@ -1130,104 +888,6 @@ func (x *InterruptConfirmRequired) GetLiveTasks() int64 {
 		return x.LiveTasks
 	}
 	return 0
-}
-
-// A replay request carries ONE token of identity, not several.
-//
-// The client says where it had read up to and which fence it held when it
-// decided to ask. It never copies, holds or agrees a session identity or a
-// controller generation: several identities a client must send back in
-// agreement is several ways for a client to send back a disagreement, and the
-// fence already answers the only question they were ever asked together.
-type ResyncCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation with the replay this call provokes. See CommandAck.request_id.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// WHICH WORKSPACE to replay. It was the command envelope's field before the
-	// service existed; a method call has no envelope, so it is stated here.
-	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// WHICH SUBSCRIBE STREAM to replay onto. The replay is a push, and a unary
-	// call no longer shares a socket with the stream that will carry it. See
-	// SubscribeRequest.client_id.
-	ClientId string `protobuf:"bytes,3,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	FromSeq  uint64 `protobuf:"varint,4,opt,name=from_seq,json=fromSeq,proto3" json:"from_seq,omitempty"`
-	// The fence ECHO: the exact fence the client held when it decided to ask
-	// for this replay, copied byte-for-byte from the WorkspaceState it was
-	// reading at that moment.
-	//
-	// It must be captured AT DECISION TIME, not read from current state when
-	// the transport sends, or a delayed request silently rebinds itself to a
-	// newer generation and asks for a replay nobody wanted. The daemon compares
-	// it against the workspace's live fence and REFUSES the command before
-	// replaying anything when they differ.
-	Fence         string `protobuf:"bytes,5,opt,name=fence,proto3" json:"fence,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ResyncCmd) Reset() {
-	*x = ResyncCmd{}
-	mi := &file_agentrepl_v1_frame_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ResyncCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ResyncCmd) ProtoMessage() {}
-
-func (x *ResyncCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_frame_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ResyncCmd.ProtoReflect.Descriptor instead.
-func (*ResyncCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *ResyncCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *ResyncCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *ResyncCmd) GetClientId() string {
-	if x != nil {
-		return x.ClientId
-	}
-	return ""
-}
-
-func (x *ResyncCmd) GetFromSeq() uint64 {
-	if x != nil {
-		return x.FromSeq
-	}
-	return 0
-}
-
-func (x *ResyncCmd) GetFence() string {
-	if x != nil {
-		return x.Fence
-	}
-	return ""
 }
 
 var File_agentrepl_v1_frame_proto protoreflect.FileDescriptor
@@ -1293,29 +953,10 @@ const file_agentrepl_v1_frame_proto_rawDesc = "" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x123\n" +
 	"\afailure\x18\x04 \x01(\v2\x19.agentrepl.v1.FailureKindR\afailure\x12>\n" +
-	"\ffailure_card\x18\x05 \x01(\v2\x1b.frontend.v1.FailureCardRefR\vfailureCard\"\x92\x01\n" +
-	"\x11InterruptResponse\x12*\n" +
-	"\x03ack\x18\x01 \x01(\v2\x18.agentrepl.v1.CommandAckR\x03ack\x12Q\n" +
-	"\x10confirm_required\x18\x02 \x01(\v2&.agentrepl.v1.InterruptConfirmRequiredR\x0fconfirmRequired\"\x88\x01\n" +
-	"\x1cCancelDetachedAgentsResponse\x12*\n" +
-	"\x03ack\x18\x01 \x01(\v2\x18.agentrepl.v1.CommandAckR\x03ack\x12<\n" +
-	"\aoutcome\x18\x02 \x01(\v2\".frontend.v1.DetachedCancelOutcomeR\aoutcome\"e\n" +
-	"\x10SetModelResponse\x12*\n" +
-	"\x03ack\x18\x01 \x01(\v2\x18.agentrepl.v1.CommandAckR\x03ack\x12%\n" +
-	"\x0eselected_model\x18\x02 \x01(\tR\rselectedModel\"\x80\x01\n" +
-	"\x15CreateSessionResponse\x12*\n" +
-	"\x03ack\x18\x01 \x01(\v2\x18.agentrepl.v1.CommandAckR\x03ack\x12;\n" +
-	"\x1aobserved_claude_session_id\x18\x02 \x01(\tR\x17observedClaudeSessionId\"9\n" +
+	"\ffailure_card\x18\x05 \x01(\v2\x1b.frontend.v1.FailureCardRefR\vfailureCard\"9\n" +
 	"\x18InterruptConfirmRequired\x12\x1d\n" +
 	"\n" +
-	"live_tasks\x18\x01 \x01(\x03R\tliveTasks\"\x96\x01\n" +
-	"\tResyncCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x1b\n" +
-	"\tclient_id\x18\x03 \x01(\tR\bclientId\x12\x19\n" +
-	"\bfrom_seq\x18\x04 \x01(\x04R\afromSeq\x12\x14\n" +
-	"\x05fence\x18\x05 \x01(\tR\x05fenceB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"live_tasks\x18\x01 \x01(\x03R\tliveTasksB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_frame_proto_rawDescOnce sync.Once
@@ -1329,98 +970,86 @@ func file_agentrepl_v1_frame_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_frame_proto_rawDescData
 }
 
-var file_agentrepl_v1_frame_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_agentrepl_v1_frame_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_agentrepl_v1_frame_proto_goTypes = []any{
-	(*FrontendFrame)(nil),                // 0: agentrepl.v1.FrontendFrame
-	(*StateSnapshot)(nil),                // 1: agentrepl.v1.StateSnapshot
-	(*CommandAck)(nil),                   // 2: agentrepl.v1.CommandAck
-	(*InterruptResponse)(nil),            // 3: agentrepl.v1.InterruptResponse
-	(*CancelDetachedAgentsResponse)(nil), // 4: agentrepl.v1.CancelDetachedAgentsResponse
-	(*SetModelResponse)(nil),             // 5: agentrepl.v1.SetModelResponse
-	(*CreateSessionResponse)(nil),        // 6: agentrepl.v1.CreateSessionResponse
-	(*InterruptConfirmRequired)(nil),     // 7: agentrepl.v1.InterruptConfirmRequired
-	(*ResyncCmd)(nil),                    // 8: agentrepl.v1.ResyncCmd
-	(*v1.WorkspaceState)(nil),            // 9: frontend.v1.WorkspaceState
-	(*v1.SessionView)(nil),               // 10: frontend.v1.SessionView
-	(*v1.ConversationDelta)(nil),         // 11: frontend.v1.ConversationDelta
-	(*v1.TaskCatalog)(nil),               // 12: frontend.v1.TaskCatalog
-	(*v1.DaemonView)(nil),                // 13: frontend.v1.DaemonView
-	(*v1.SessionInitView)(nil),           // 14: frontend.v1.SessionInitView
-	(*v1.HeartbeatView)(nil),             // 15: frontend.v1.HeartbeatView
-	(*v1.QueueView)(nil),                 // 16: frontend.v1.QueueView
-	(*v1.ProgressView)(nil),              // 17: frontend.v1.ProgressView
-	(*WorkspaceAvailable)(nil),           // 18: agentrepl.v1.WorkspaceAvailable
-	(*HostAction)(nil),                   // 19: agentrepl.v1.HostAction
-	(*v1.DaemonHealthView)(nil),          // 20: frontend.v1.DaemonHealthView
-	(*v1.SessionHealthView)(nil),         // 21: frontend.v1.SessionHealthView
-	(*v1.WorkspaceRoster)(nil),           // 22: frontend.v1.WorkspaceRoster
-	(*ShutdownScheduleView)(nil),         // 23: agentrepl.v1.ShutdownScheduleView
-	(*v1.DetachedWorkDelta)(nil),         // 24: frontend.v1.DetachedWorkDelta
-	(*v1.TopbarView)(nil),                // 25: frontend.v1.TopbarView
-	(*v1.TokenBreakdownView)(nil),        // 26: frontend.v1.TokenBreakdownView
-	(*WorkspaceGateView)(nil),            // 27: agentrepl.v1.WorkspaceGateView
-	(*MergeQueueRoster)(nil),             // 28: agentrepl.v1.MergeQueueRoster
-	(*RestartPendingView)(nil),           // 29: agentrepl.v1.RestartPendingView
-	(*v1.TypingCut)(nil),                 // 30: frontend.v1.TypingCut
-	(*v1.ConversationHistoryPage)(nil),   // 31: frontend.v1.ConversationHistoryPage
-	(*v1.Message)(nil),                   // 32: frontend.v1.Message
-	(*FailureKind)(nil),                  // 33: agentrepl.v1.FailureKind
-	(*v1.FailureCardRef)(nil),            // 34: frontend.v1.FailureCardRef
-	(*v1.DetachedCancelOutcome)(nil),     // 35: frontend.v1.DetachedCancelOutcome
+	(*FrontendFrame)(nil),              // 0: agentrepl.v1.FrontendFrame
+	(*StateSnapshot)(nil),              // 1: agentrepl.v1.StateSnapshot
+	(*CommandAck)(nil),                 // 2: agentrepl.v1.CommandAck
+	(*InterruptConfirmRequired)(nil),   // 3: agentrepl.v1.InterruptConfirmRequired
+	(*v1.WorkspaceState)(nil),          // 4: frontend.v1.WorkspaceState
+	(*v1.SessionView)(nil),             // 5: frontend.v1.SessionView
+	(*v1.ConversationDelta)(nil),       // 6: frontend.v1.ConversationDelta
+	(*v1.TaskCatalog)(nil),             // 7: frontend.v1.TaskCatalog
+	(*v1.DaemonView)(nil),              // 8: frontend.v1.DaemonView
+	(*v1.SessionInitView)(nil),         // 9: frontend.v1.SessionInitView
+	(*v1.HeartbeatView)(nil),           // 10: frontend.v1.HeartbeatView
+	(*v1.QueueView)(nil),               // 11: frontend.v1.QueueView
+	(*v1.ProgressView)(nil),            // 12: frontend.v1.ProgressView
+	(*WorkspaceAvailable)(nil),         // 13: agentrepl.v1.WorkspaceAvailable
+	(*HostAction)(nil),                 // 14: agentrepl.v1.HostAction
+	(*v1.DaemonHealthView)(nil),        // 15: frontend.v1.DaemonHealthView
+	(*v1.SessionHealthView)(nil),       // 16: frontend.v1.SessionHealthView
+	(*v1.WorkspaceRoster)(nil),         // 17: frontend.v1.WorkspaceRoster
+	(*ShutdownScheduleView)(nil),       // 18: agentrepl.v1.ShutdownScheduleView
+	(*v1.DetachedWorkDelta)(nil),       // 19: frontend.v1.DetachedWorkDelta
+	(*v1.TopbarView)(nil),              // 20: frontend.v1.TopbarView
+	(*v1.TokenBreakdownView)(nil),      // 21: frontend.v1.TokenBreakdownView
+	(*WorkspaceGateView)(nil),          // 22: agentrepl.v1.WorkspaceGateView
+	(*MergeQueueRoster)(nil),           // 23: agentrepl.v1.MergeQueueRoster
+	(*RestartPendingView)(nil),         // 24: agentrepl.v1.RestartPendingView
+	(*v1.TypingCut)(nil),               // 25: frontend.v1.TypingCut
+	(*v1.ConversationHistoryPage)(nil), // 26: frontend.v1.ConversationHistoryPage
+	(*v1.Message)(nil),                 // 27: frontend.v1.Message
+	(*FailureKind)(nil),                // 28: agentrepl.v1.FailureKind
+	(*v1.FailureCardRef)(nil),          // 29: frontend.v1.FailureCardRef
 }
 var file_agentrepl_v1_frame_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.FrontendFrame.snapshot:type_name -> agentrepl.v1.StateSnapshot
-	9,  // 1: agentrepl.v1.FrontendFrame.workspace_state:type_name -> frontend.v1.WorkspaceState
-	10, // 2: agentrepl.v1.FrontendFrame.session_view:type_name -> frontend.v1.SessionView
-	11, // 3: agentrepl.v1.FrontendFrame.conversation_delta:type_name -> frontend.v1.ConversationDelta
-	12, // 4: agentrepl.v1.FrontendFrame.task_catalog:type_name -> frontend.v1.TaskCatalog
-	13, // 5: agentrepl.v1.FrontendFrame.daemon_view:type_name -> frontend.v1.DaemonView
-	14, // 6: agentrepl.v1.FrontendFrame.session_init:type_name -> frontend.v1.SessionInitView
-	15, // 7: agentrepl.v1.FrontendFrame.heartbeat:type_name -> frontend.v1.HeartbeatView
-	16, // 8: agentrepl.v1.FrontendFrame.queue:type_name -> frontend.v1.QueueView
-	17, // 9: agentrepl.v1.FrontendFrame.progress:type_name -> frontend.v1.ProgressView
-	18, // 10: agentrepl.v1.FrontendFrame.workspace_available:type_name -> agentrepl.v1.WorkspaceAvailable
-	19, // 11: agentrepl.v1.FrontendFrame.host_action:type_name -> agentrepl.v1.HostAction
-	20, // 12: agentrepl.v1.FrontendFrame.daemon_health:type_name -> frontend.v1.DaemonHealthView
-	21, // 13: agentrepl.v1.FrontendFrame.session_health:type_name -> frontend.v1.SessionHealthView
-	22, // 14: agentrepl.v1.FrontendFrame.workspace_roster:type_name -> frontend.v1.WorkspaceRoster
-	23, // 15: agentrepl.v1.FrontendFrame.shutdown_schedule:type_name -> agentrepl.v1.ShutdownScheduleView
-	24, // 16: agentrepl.v1.FrontendFrame.detached_work_delta:type_name -> frontend.v1.DetachedWorkDelta
-	25, // 17: agentrepl.v1.FrontendFrame.topbar:type_name -> frontend.v1.TopbarView
-	26, // 18: agentrepl.v1.FrontendFrame.token_breakdown:type_name -> frontend.v1.TokenBreakdownView
-	27, // 19: agentrepl.v1.FrontendFrame.workspace_gate:type_name -> agentrepl.v1.WorkspaceGateView
-	28, // 20: agentrepl.v1.FrontendFrame.merge_queue_roster:type_name -> agentrepl.v1.MergeQueueRoster
-	29, // 21: agentrepl.v1.FrontendFrame.restart_pending:type_name -> agentrepl.v1.RestartPendingView
-	30, // 22: agentrepl.v1.FrontendFrame.typing_cut:type_name -> frontend.v1.TypingCut
-	31, // 23: agentrepl.v1.FrontendFrame.conversation_history_page:type_name -> frontend.v1.ConversationHistoryPage
-	9,  // 24: agentrepl.v1.StateSnapshot.workspaces:type_name -> frontend.v1.WorkspaceState
-	10, // 25: agentrepl.v1.StateSnapshot.sessions:type_name -> frontend.v1.SessionView
-	12, // 26: agentrepl.v1.StateSnapshot.catalogs:type_name -> frontend.v1.TaskCatalog
-	13, // 27: agentrepl.v1.StateSnapshot.daemon:type_name -> frontend.v1.DaemonView
-	14, // 28: agentrepl.v1.StateSnapshot.inits:type_name -> frontend.v1.SessionInitView
-	16, // 29: agentrepl.v1.StateSnapshot.queues:type_name -> frontend.v1.QueueView
-	17, // 30: agentrepl.v1.StateSnapshot.progress:type_name -> frontend.v1.ProgressView
-	18, // 31: agentrepl.v1.StateSnapshot.workspace_available:type_name -> agentrepl.v1.WorkspaceAvailable
-	19, // 32: agentrepl.v1.StateSnapshot.host_actions:type_name -> agentrepl.v1.HostAction
-	23, // 33: agentrepl.v1.StateSnapshot.shutdown_schedule:type_name -> agentrepl.v1.ShutdownScheduleView
-	32, // 34: agentrepl.v1.StateSnapshot.detached_work:type_name -> frontend.v1.Message
-	25, // 35: agentrepl.v1.StateSnapshot.topbars:type_name -> frontend.v1.TopbarView
-	26, // 36: agentrepl.v1.StateSnapshot.token_breakdowns:type_name -> frontend.v1.TokenBreakdownView
-	27, // 37: agentrepl.v1.StateSnapshot.workspace_gates:type_name -> agentrepl.v1.WorkspaceGateView
-	28, // 38: agentrepl.v1.StateSnapshot.merge_queue_roster:type_name -> agentrepl.v1.MergeQueueRoster
-	33, // 39: agentrepl.v1.CommandAck.failure:type_name -> agentrepl.v1.FailureKind
-	34, // 40: agentrepl.v1.CommandAck.failure_card:type_name -> frontend.v1.FailureCardRef
-	2,  // 41: agentrepl.v1.InterruptResponse.ack:type_name -> agentrepl.v1.CommandAck
-	7,  // 42: agentrepl.v1.InterruptResponse.confirm_required:type_name -> agentrepl.v1.InterruptConfirmRequired
-	2,  // 43: agentrepl.v1.CancelDetachedAgentsResponse.ack:type_name -> agentrepl.v1.CommandAck
-	35, // 44: agentrepl.v1.CancelDetachedAgentsResponse.outcome:type_name -> frontend.v1.DetachedCancelOutcome
-	2,  // 45: agentrepl.v1.SetModelResponse.ack:type_name -> agentrepl.v1.CommandAck
-	2,  // 46: agentrepl.v1.CreateSessionResponse.ack:type_name -> agentrepl.v1.CommandAck
-	47, // [47:47] is the sub-list for method output_type
-	47, // [47:47] is the sub-list for method input_type
-	47, // [47:47] is the sub-list for extension type_name
-	47, // [47:47] is the sub-list for extension extendee
-	0,  // [0:47] is the sub-list for field type_name
+	4,  // 1: agentrepl.v1.FrontendFrame.workspace_state:type_name -> frontend.v1.WorkspaceState
+	5,  // 2: agentrepl.v1.FrontendFrame.session_view:type_name -> frontend.v1.SessionView
+	6,  // 3: agentrepl.v1.FrontendFrame.conversation_delta:type_name -> frontend.v1.ConversationDelta
+	7,  // 4: agentrepl.v1.FrontendFrame.task_catalog:type_name -> frontend.v1.TaskCatalog
+	8,  // 5: agentrepl.v1.FrontendFrame.daemon_view:type_name -> frontend.v1.DaemonView
+	9,  // 6: agentrepl.v1.FrontendFrame.session_init:type_name -> frontend.v1.SessionInitView
+	10, // 7: agentrepl.v1.FrontendFrame.heartbeat:type_name -> frontend.v1.HeartbeatView
+	11, // 8: agentrepl.v1.FrontendFrame.queue:type_name -> frontend.v1.QueueView
+	12, // 9: agentrepl.v1.FrontendFrame.progress:type_name -> frontend.v1.ProgressView
+	13, // 10: agentrepl.v1.FrontendFrame.workspace_available:type_name -> agentrepl.v1.WorkspaceAvailable
+	14, // 11: agentrepl.v1.FrontendFrame.host_action:type_name -> agentrepl.v1.HostAction
+	15, // 12: agentrepl.v1.FrontendFrame.daemon_health:type_name -> frontend.v1.DaemonHealthView
+	16, // 13: agentrepl.v1.FrontendFrame.session_health:type_name -> frontend.v1.SessionHealthView
+	17, // 14: agentrepl.v1.FrontendFrame.workspace_roster:type_name -> frontend.v1.WorkspaceRoster
+	18, // 15: agentrepl.v1.FrontendFrame.shutdown_schedule:type_name -> agentrepl.v1.ShutdownScheduleView
+	19, // 16: agentrepl.v1.FrontendFrame.detached_work_delta:type_name -> frontend.v1.DetachedWorkDelta
+	20, // 17: agentrepl.v1.FrontendFrame.topbar:type_name -> frontend.v1.TopbarView
+	21, // 18: agentrepl.v1.FrontendFrame.token_breakdown:type_name -> frontend.v1.TokenBreakdownView
+	22, // 19: agentrepl.v1.FrontendFrame.workspace_gate:type_name -> agentrepl.v1.WorkspaceGateView
+	23, // 20: agentrepl.v1.FrontendFrame.merge_queue_roster:type_name -> agentrepl.v1.MergeQueueRoster
+	24, // 21: agentrepl.v1.FrontendFrame.restart_pending:type_name -> agentrepl.v1.RestartPendingView
+	25, // 22: agentrepl.v1.FrontendFrame.typing_cut:type_name -> frontend.v1.TypingCut
+	26, // 23: agentrepl.v1.FrontendFrame.conversation_history_page:type_name -> frontend.v1.ConversationHistoryPage
+	4,  // 24: agentrepl.v1.StateSnapshot.workspaces:type_name -> frontend.v1.WorkspaceState
+	5,  // 25: agentrepl.v1.StateSnapshot.sessions:type_name -> frontend.v1.SessionView
+	7,  // 26: agentrepl.v1.StateSnapshot.catalogs:type_name -> frontend.v1.TaskCatalog
+	8,  // 27: agentrepl.v1.StateSnapshot.daemon:type_name -> frontend.v1.DaemonView
+	9,  // 28: agentrepl.v1.StateSnapshot.inits:type_name -> frontend.v1.SessionInitView
+	11, // 29: agentrepl.v1.StateSnapshot.queues:type_name -> frontend.v1.QueueView
+	12, // 30: agentrepl.v1.StateSnapshot.progress:type_name -> frontend.v1.ProgressView
+	13, // 31: agentrepl.v1.StateSnapshot.workspace_available:type_name -> agentrepl.v1.WorkspaceAvailable
+	14, // 32: agentrepl.v1.StateSnapshot.host_actions:type_name -> agentrepl.v1.HostAction
+	18, // 33: agentrepl.v1.StateSnapshot.shutdown_schedule:type_name -> agentrepl.v1.ShutdownScheduleView
+	27, // 34: agentrepl.v1.StateSnapshot.detached_work:type_name -> frontend.v1.Message
+	20, // 35: agentrepl.v1.StateSnapshot.topbars:type_name -> frontend.v1.TopbarView
+	21, // 36: agentrepl.v1.StateSnapshot.token_breakdowns:type_name -> frontend.v1.TokenBreakdownView
+	22, // 37: agentrepl.v1.StateSnapshot.workspace_gates:type_name -> agentrepl.v1.WorkspaceGateView
+	23, // 38: agentrepl.v1.StateSnapshot.merge_queue_roster:type_name -> agentrepl.v1.MergeQueueRoster
+	28, // 39: agentrepl.v1.CommandAck.failure:type_name -> agentrepl.v1.FailureKind
+	29, // 40: agentrepl.v1.CommandAck.failure_card:type_name -> frontend.v1.FailureCardRef
+	41, // [41:41] is the sub-list for method output_type
+	41, // [41:41] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_frame_proto_init() }
@@ -1461,7 +1090,7 @@ func file_agentrepl_v1_frame_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_frame_proto_rawDesc), len(file_agentrepl_v1_frame_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

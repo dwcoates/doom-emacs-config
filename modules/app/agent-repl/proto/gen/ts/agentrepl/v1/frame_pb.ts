@@ -13,7 +13,7 @@ import type { FailureKind, HostAction, MergeQueueRoster, RestartPendingView, Shu
 import { file_agentrepl_v1_shared } from "./shared_pb";
 import type { ConversationDelta, ConversationHistoryPage, DetachedWorkDelta, FailureCardRef, Message as Message$1, SessionInitView, TaskCatalog, TypingCut } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
-import type { DaemonView, DetachedCancelOutcome, HeartbeatView, ProgressView, QueueView, SessionView, WorkspaceState } from "../../frontend/v1/footer_pb";
+import type { DaemonView, HeartbeatView, ProgressView, QueueView, SessionView, WorkspaceState } from "../../frontend/v1/footer_pb";
 import { file_frontend_v1_footer } from "../../frontend/v1/footer_pb";
 import type { WorkspaceRoster } from "../../frontend/v1/sidebar_pb";
 import { file_frontend_v1_sidebar } from "../../frontend/v1/sidebar_pb";
@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/frame.proto.
  */
 export const file_agentrepl_v1_frame: GenFile = /*@__PURE__*/
-  fileDesc("ChhhZ2VudHJlcGwvdjEvZnJhbWUucHJvdG8SDGFnZW50cmVwbC52MSLGCgoNRnJvbnRlbmRGcmFtZRIvCghzbmFwc2hvdBgBIAEoCzIbLmFnZW50cmVwbC52MS5TdGF0ZVNuYXBzaG90SAASNgoPd29ya3NwYWNlX3N0YXRlGAIgASgLMhsuZnJvbnRlbmQudjEuV29ya3NwYWNlU3RhdGVIABIwCgxzZXNzaW9uX3ZpZXcYAyABKAsyGC5mcm9udGVuZC52MS5TZXNzaW9uVmlld0gAEjwKEmNvbnZlcnNhdGlvbl9kZWx0YRgEIAEoCzIeLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvbkRlbHRhSAASMAoMdGFza19jYXRhbG9nGAUgASgLMhguZnJvbnRlbmQudjEuVGFza0NhdGFsb2dIABIuCgtkYWVtb25fdmlldxgGIAEoCzIXLmZyb250ZW5kLnYxLkRhZW1vblZpZXdIABI0CgxzZXNzaW9uX2luaXQYByABKAsyHC5mcm9udGVuZC52MS5TZXNzaW9uSW5pdFZpZXdIABIvCgloZWFydGJlYXQYCCABKAsyGi5mcm9udGVuZC52MS5IZWFydGJlYXRWaWV3SAASJwoFcXVldWUYCSABKAsyFi5mcm9udGVuZC52MS5RdWV1ZVZpZXdIABItCghwcm9ncmVzcxgKIAEoCzIZLmZyb250ZW5kLnYxLlByb2dyZXNzVmlld0gAEj8KE3dvcmtzcGFjZV9hdmFpbGFibGUYCyABKAsyIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlQXZhaWxhYmxlSAASLwoLaG9zdF9hY3Rpb24YDCABKAsyGC5hZ2VudHJlcGwudjEuSG9zdEFjdGlvbkgAEjYKDWRhZW1vbl9oZWFsdGgYDSABKAsyHS5mcm9udGVuZC52MS5EYWVtb25IZWFsdGhWaWV3SAASOAoOc2Vzc2lvbl9oZWFsdGgYDiABKAsyHi5mcm9udGVuZC52MS5TZXNzaW9uSGVhbHRoVmlld0gAEjgKEHdvcmtzcGFjZV9yb3N0ZXIYDyABKAsyHC5mcm9udGVuZC52MS5Xb3Jrc3BhY2VSb3N0ZXJIABI/ChFzaHV0ZG93bl9zY2hlZHVsZRgQIAEoCzIiLmFnZW50cmVwbC52MS5TaHV0ZG93blNjaGVkdWxlVmlld0gAEj0KE2RldGFjaGVkX3dvcmtfZGVsdGEYESABKAsyHi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtEZWx0YUgAEikKBnRvcGJhchgSIAEoCzIXLmZyb250ZW5kLnYxLlRvcGJhclZpZXdIABI6Cg90b2tlbl9icmVha2Rvd24YEyABKAsyHy5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blZpZXdIABI5Cg53b3Jrc3BhY2VfZ2F0ZRgUIAEoCzIfLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VHYXRlVmlld0gAEjwKEm1lcmdlX3F1ZXVlX3Jvc3RlchgVIAEoCzIeLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlUm9zdGVySAASOwoPcmVzdGFydF9wZW5kaW5nGBYgASgLMiAuYWdlbnRyZXBsLnYxLlJlc3RhcnRQZW5kaW5nVmlld0gAEiwKCnR5cGluZ19jdXQYFyABKAsyFi5mcm9udGVuZC52MS5UeXBpbmdDdXRIABJJChljb252ZXJzYXRpb25faGlzdG9yeV9wYWdlGBggASgLMiQuZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uSGlzdG9yeVBhZ2VIAEIHCgVmcmFtZSKxBgoNU3RhdGVTbmFwc2hvdBIvCgp3b3Jrc3BhY2VzGAEgAygLMhsuZnJvbnRlbmQudjEuV29ya3NwYWNlU3RhdGUSKgoIc2Vzc2lvbnMYAiADKAsyGC5mcm9udGVuZC52MS5TZXNzaW9uVmlldxIqCghjYXRhbG9ncxgDIAMoCzIYLmZyb250ZW5kLnYxLlRhc2tDYXRhbG9nEicKBmRhZW1vbhgEIAEoCzIXLmZyb250ZW5kLnYxLkRhZW1vblZpZXcSKwoFaW5pdHMYBSADKAsyHC5mcm9udGVuZC52MS5TZXNzaW9uSW5pdFZpZXcSJgoGcXVldWVzGAYgAygLMhYuZnJvbnRlbmQudjEuUXVldWVWaWV3EisKCHByb2dyZXNzGAcgAygLMhkuZnJvbnRlbmQudjEuUHJvZ3Jlc3NWaWV3Ej0KE3dvcmtzcGFjZV9hdmFpbGFibGUYCCADKAsyIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlQXZhaWxhYmxlEi4KDGhvc3RfYWN0aW9ucxgJIAMoCzIYLmFnZW50cmVwbC52MS5Ib3N0QWN0aW9uEj0KEXNodXRkb3duX3NjaGVkdWxlGAogASgLMiIuYWdlbnRyZXBsLnYxLlNodXRkb3duU2NoZWR1bGVWaWV3EisKDWRldGFjaGVkX3dvcmsYCyADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEigKB3RvcGJhcnMYDCADKAsyFy5mcm9udGVuZC52MS5Ub3BiYXJWaWV3EjkKEHRva2VuX2JyZWFrZG93bnMYDSADKAsyHy5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blZpZXcSOAoPd29ya3NwYWNlX2dhdGVzGA4gAygLMh8uYWdlbnRyZXBsLnYxLldvcmtzcGFjZUdhdGVWaWV3EjoKEm1lcmdlX3F1ZXVlX3Jvc3RlchgPIAEoCzIeLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlUm9zdGVyEhcKD3dvcmtzcGFjZV90b3RhbBgQIAEoBRIdChV3b3Jrc3BhY2VfYmF0Y2hfaW5kZXgYESABKAUimgEKCkNvbW1hbmRBY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRIKCgJvaxgCIAEoCBINCgVlcnJvchgDIAEoCRIqCgdmYWlsdXJlGAQgASgLMhkuYWdlbnRyZXBsLnYxLkZhaWx1cmVLaW5kEjEKDGZhaWx1cmVfY2FyZBgFIAEoCzIbLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkUmVmInwKEUludGVycnVwdFJlc3BvbnNlEiUKA2FjaxgBIAEoCzIYLmFnZW50cmVwbC52MS5Db21tYW5kQWNrEkAKEGNvbmZpcm1fcmVxdWlyZWQYAiABKAsyJi5hZ2VudHJlcGwudjEuSW50ZXJydXB0Q29uZmlybVJlcXVpcmVkInoKHENhbmNlbERldGFjaGVkQWdlbnRzUmVzcG9uc2USJQoDYWNrGAEgASgLMhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2sSMwoHb3V0Y29tZRgCIAEoCzIiLmZyb250ZW5kLnYxLkRldGFjaGVkQ2FuY2VsT3V0Y29tZSJRChBTZXRNb2RlbFJlc3BvbnNlEiUKA2FjaxgBIAEoCzIYLmFnZW50cmVwbC52MS5Db21tYW5kQWNrEhYKDnNlbGVjdGVkX21vZGVsGAIgASgJImIKFUNyZWF0ZVNlc3Npb25SZXNwb25zZRIlCgNhY2sYASABKAsyGC5hZ2VudHJlcGwudjEuQ29tbWFuZEFjaxIiChpvYnNlcnZlZF9jbGF1ZGVfc2Vzc2lvbl9pZBgCIAEoCSIuChhJbnRlcnJ1cHRDb25maXJtUmVxdWlyZWQSEgoKbGl2ZV90YXNrcxgBIAEoAyJmCglSZXN5bmNDbWQSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl3b3Jrc3BhY2UYAiABKAkSEQoJY2xpZW50X2lkGAMgASgJEhAKCGZyb21fc2VxGAQgASgEEg0KBWZlbmNlGAUgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_shared, file_frontend_v1_feed, file_frontend_v1_footer, file_frontend_v1_sidebar, file_frontend_v1_topbar]);
+  fileDesc("ChhhZ2VudHJlcGwvdjEvZnJhbWUucHJvdG8SDGFnZW50cmVwbC52MSLGCgoNRnJvbnRlbmRGcmFtZRIvCghzbmFwc2hvdBgBIAEoCzIbLmFnZW50cmVwbC52MS5TdGF0ZVNuYXBzaG90SAASNgoPd29ya3NwYWNlX3N0YXRlGAIgASgLMhsuZnJvbnRlbmQudjEuV29ya3NwYWNlU3RhdGVIABIwCgxzZXNzaW9uX3ZpZXcYAyABKAsyGC5mcm9udGVuZC52MS5TZXNzaW9uVmlld0gAEjwKEmNvbnZlcnNhdGlvbl9kZWx0YRgEIAEoCzIeLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvbkRlbHRhSAASMAoMdGFza19jYXRhbG9nGAUgASgLMhguZnJvbnRlbmQudjEuVGFza0NhdGFsb2dIABIuCgtkYWVtb25fdmlldxgGIAEoCzIXLmZyb250ZW5kLnYxLkRhZW1vblZpZXdIABI0CgxzZXNzaW9uX2luaXQYByABKAsyHC5mcm9udGVuZC52MS5TZXNzaW9uSW5pdFZpZXdIABIvCgloZWFydGJlYXQYCCABKAsyGi5mcm9udGVuZC52MS5IZWFydGJlYXRWaWV3SAASJwoFcXVldWUYCSABKAsyFi5mcm9udGVuZC52MS5RdWV1ZVZpZXdIABItCghwcm9ncmVzcxgKIAEoCzIZLmZyb250ZW5kLnYxLlByb2dyZXNzVmlld0gAEj8KE3dvcmtzcGFjZV9hdmFpbGFibGUYCyABKAsyIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlQXZhaWxhYmxlSAASLwoLaG9zdF9hY3Rpb24YDCABKAsyGC5hZ2VudHJlcGwudjEuSG9zdEFjdGlvbkgAEjYKDWRhZW1vbl9oZWFsdGgYDSABKAsyHS5mcm9udGVuZC52MS5EYWVtb25IZWFsdGhWaWV3SAASOAoOc2Vzc2lvbl9oZWFsdGgYDiABKAsyHi5mcm9udGVuZC52MS5TZXNzaW9uSGVhbHRoVmlld0gAEjgKEHdvcmtzcGFjZV9yb3N0ZXIYDyABKAsyHC5mcm9udGVuZC52MS5Xb3Jrc3BhY2VSb3N0ZXJIABI/ChFzaHV0ZG93bl9zY2hlZHVsZRgQIAEoCzIiLmFnZW50cmVwbC52MS5TaHV0ZG93blNjaGVkdWxlVmlld0gAEj0KE2RldGFjaGVkX3dvcmtfZGVsdGEYESABKAsyHi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtEZWx0YUgAEikKBnRvcGJhchgSIAEoCzIXLmZyb250ZW5kLnYxLlRvcGJhclZpZXdIABI6Cg90b2tlbl9icmVha2Rvd24YEyABKAsyHy5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blZpZXdIABI5Cg53b3Jrc3BhY2VfZ2F0ZRgUIAEoCzIfLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VHYXRlVmlld0gAEjwKEm1lcmdlX3F1ZXVlX3Jvc3RlchgVIAEoCzIeLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlUm9zdGVySAASOwoPcmVzdGFydF9wZW5kaW5nGBYgASgLMiAuYWdlbnRyZXBsLnYxLlJlc3RhcnRQZW5kaW5nVmlld0gAEiwKCnR5cGluZ19jdXQYFyABKAsyFi5mcm9udGVuZC52MS5UeXBpbmdDdXRIABJJChljb252ZXJzYXRpb25faGlzdG9yeV9wYWdlGBggASgLMiQuZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uSGlzdG9yeVBhZ2VIAEIHCgVmcmFtZSKxBgoNU3RhdGVTbmFwc2hvdBIvCgp3b3Jrc3BhY2VzGAEgAygLMhsuZnJvbnRlbmQudjEuV29ya3NwYWNlU3RhdGUSKgoIc2Vzc2lvbnMYAiADKAsyGC5mcm9udGVuZC52MS5TZXNzaW9uVmlldxIqCghjYXRhbG9ncxgDIAMoCzIYLmZyb250ZW5kLnYxLlRhc2tDYXRhbG9nEicKBmRhZW1vbhgEIAEoCzIXLmZyb250ZW5kLnYxLkRhZW1vblZpZXcSKwoFaW5pdHMYBSADKAsyHC5mcm9udGVuZC52MS5TZXNzaW9uSW5pdFZpZXcSJgoGcXVldWVzGAYgAygLMhYuZnJvbnRlbmQudjEuUXVldWVWaWV3EisKCHByb2dyZXNzGAcgAygLMhkuZnJvbnRlbmQudjEuUHJvZ3Jlc3NWaWV3Ej0KE3dvcmtzcGFjZV9hdmFpbGFibGUYCCADKAsyIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlQXZhaWxhYmxlEi4KDGhvc3RfYWN0aW9ucxgJIAMoCzIYLmFnZW50cmVwbC52MS5Ib3N0QWN0aW9uEj0KEXNodXRkb3duX3NjaGVkdWxlGAogASgLMiIuYWdlbnRyZXBsLnYxLlNodXRkb3duU2NoZWR1bGVWaWV3EisKDWRldGFjaGVkX3dvcmsYCyADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEigKB3RvcGJhcnMYDCADKAsyFy5mcm9udGVuZC52MS5Ub3BiYXJWaWV3EjkKEHRva2VuX2JyZWFrZG93bnMYDSADKAsyHy5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blZpZXcSOAoPd29ya3NwYWNlX2dhdGVzGA4gAygLMh8uYWdlbnRyZXBsLnYxLldvcmtzcGFjZUdhdGVWaWV3EjoKEm1lcmdlX3F1ZXVlX3Jvc3RlchgPIAEoCzIeLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlUm9zdGVyEhcKD3dvcmtzcGFjZV90b3RhbBgQIAEoBRIdChV3b3Jrc3BhY2VfYmF0Y2hfaW5kZXgYESABKAUimgEKCkNvbW1hbmRBY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRIKCgJvaxgCIAEoCBINCgVlcnJvchgDIAEoCRIqCgdmYWlsdXJlGAQgASgLMhkuYWdlbnRyZXBsLnYxLkZhaWx1cmVLaW5kEjEKDGZhaWx1cmVfY2FyZBgFIAEoCzIbLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkUmVmIi4KGEludGVycnVwdENvbmZpcm1SZXF1aXJlZBISCgpsaXZlX3Rhc2tzGAEgASgDQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_shared, file_frontend_v1_feed, file_frontend_v1_footer, file_frontend_v1_sidebar, file_frontend_v1_topbar]);
 
 /**
  * THE outbound frame. Exactly one arm is set per frame.
@@ -484,134 +484,6 @@ export const CommandAckSchema: GenMessage<CommandAck> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_frame, 2);
 
 /**
- * Interrupt's answer, which has a THIRD outcome neither ok nor a failure.
- *
- * The interrupt confirmation CHALLENGE is not an error: the command was
- * understood and deliberately not performed, because no turn was live and
- * stopping live subagents deserves an explicit yes. It is returned with
- * ack.ok=false and ack.failure UNSET; the client asks the user and calls
- * Interrupt again with confirm_agents=true.
- *
- * Under the old generic ack this was a field that was meaningless on 32 other
- * commands. Here its presence is scoped by the method's own signature.
- *
- * @generated from message agentrepl.v1.InterruptResponse
- */
-export type InterruptResponse = Message<"agentrepl.v1.InterruptResponse"> & {
-  /**
-   * @generated from field: agentrepl.v1.CommandAck ack = 1;
-   */
-  ack?: CommandAck | undefined;
-
-  /**
-   * @generated from field: agentrepl.v1.InterruptConfirmRequired confirm_required = 2;
-   */
-  confirmRequired?: InterruptConfirmRequired | undefined;
-};
-
-/**
- * Describes the message agentrepl.v1.InterruptResponse.
- * Use `create(InterruptResponseSchema)` to create a new message.
- */
-export const InterruptResponseSchema: GenMessage<InterruptResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_frame, 3);
-
-/**
- * CancelDetachedAgents' answer: WHAT the cancel did, relayed from the shim.
- *
- * The outcome is set on BOTH the success answer (the `cancelled` arm) and the
- * refusal (`nothing_running` / `unsupported` alongside ack.ok=false), so a
- * client never has to read a refusal's meaning out of `error` text.
- *
- * @generated from message agentrepl.v1.CancelDetachedAgentsResponse
- */
-export type CancelDetachedAgentsResponse = Message<"agentrepl.v1.CancelDetachedAgentsResponse"> & {
-  /**
-   * @generated from field: agentrepl.v1.CommandAck ack = 1;
-   */
-  ack?: CommandAck | undefined;
-
-  /**
-   * @generated from field: frontend.v1.DetachedCancelOutcome outcome = 2;
-   */
-  outcome?: DetachedCancelOutcome | undefined;
-};
-
-/**
- * Describes the message agentrepl.v1.CancelDetachedAgentsResponse.
- * Use `create(CancelDetachedAgentsResponseSchema)` to create a new message.
- */
-export const CancelDetachedAgentsResponseSchema: GenMessage<CancelDetachedAgentsResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_frame, 4);
-
-/**
- * SetModel's answer.
- *
- * @generated from message agentrepl.v1.SetModelResponse
- */
-export type SetModelResponse = Message<"agentrepl.v1.SetModelResponse"> & {
-  /**
-   * @generated from field: agentrepl.v1.CommandAck ack = 1;
-   */
-  ack?: CommandAck | undefined;
-
-  /**
-   * The shim-confirmed current model, on both success and rejection, so a
-   * frontend never needs an optimistic model state or a local recovery guess.
-   *
-   * @generated from field: string selected_model = 2;
-   */
-  selectedModel: string;
-};
-
-/**
- * Describes the message agentrepl.v1.SetModelResponse.
- * Use `create(SetModelResponseSchema)` to create a new message.
- */
-export const SetModelResponseSchema: GenMessage<SetModelResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_frame, 5);
-
-/**
- * CreateSession's answer.
- *
- * @generated from message agentrepl.v1.CreateSessionResponse
- */
-export type CreateSessionResponse = Message<"agentrepl.v1.CreateSessionResponse"> & {
-  /**
-   * @generated from field: agentrepl.v1.CommandAck ack = 1;
-   */
-  ack?: CommandAck | undefined;
-
-  /**
-   * FOR OBSERVABILITY ONLY: the vendor conversation uuid the created session
-   * actually landed on, so a client can attribute its logs from its very first
-   * line instead of waiting for the first pushed SessionView.
-   *
-   * A CLIENT MUST NOT PERSIST THIS OR FEED IT BACK. It is an observation of
-   * daemon state at one instant, not a durable fact: the uuid ROTATES (a
-   * /clear or a compact starts a new vendor conversation and resets the
-   * cursors with it), so a stored copy is wrong from the next rotation
-   * onward. The steady-state source is the pushed SessionView, which tracks
-   * rotations; this field only covers the gap before the first push.
-   *
-   * Feeding it back is what this whole change removed — see ResumeMode. The
-   * rule is not enforceable from here, so it is also enforced where it
-   * matters: the Emacs frontend has no persistence path that can reach a
-   * vendor uuid, and a test asserts its state file never contains one.
-   *
-   * @generated from field: string observed_claude_session_id = 2;
-   */
-  observedClaudeSessionId: string;
-};
-
-/**
- * Describes the message agentrepl.v1.CreateSessionResponse.
- * Use `create(CreateSessionResponseSchema)` to create a new message.
- */
-export const CreateSessionResponseSchema: GenMessage<CreateSessionResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_frame, 6);
-
-/**
  * The challenge payload: what the interrupt would actually stop, so the
  * client can render a concrete question ("interrupt 3 running subagents?")
  * rather than a bare are-you-sure.
@@ -630,69 +502,5 @@ export type InterruptConfirmRequired = Message<"agentrepl.v1.InterruptConfirmReq
  * Use `create(InterruptConfirmRequiredSchema)` to create a new message.
  */
 export const InterruptConfirmRequiredSchema: GenMessage<InterruptConfirmRequired> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_frame, 7);
-
-/**
- * A replay request carries ONE token of identity, not several.
- *
- * The client says where it had read up to and which fence it held when it
- * decided to ask. It never copies, holds or agrees a session identity or a
- * controller generation: several identities a client must send back in
- * agreement is several ways for a client to send back a disagreement, and the
- * fence already answers the only question they were ever asked together.
- *
- * @generated from message agentrepl.v1.ResyncCmd
- */
-export type ResyncCmd = Message<"agentrepl.v1.ResyncCmd"> & {
-  /**
-   * Correlation with the replay this call provokes. See CommandAck.request_id.
-   *
-   * @generated from field: string request_id = 1;
-   */
-  requestId: string;
-
-  /**
-   * WHICH WORKSPACE to replay. It was the command envelope's field before the
-   * service existed; a method call has no envelope, so it is stated here.
-   *
-   * @generated from field: string workspace = 2;
-   */
-  workspace: string;
-
-  /**
-   * WHICH SUBSCRIBE STREAM to replay onto. The replay is a push, and a unary
-   * call no longer shares a socket with the stream that will carry it. See
-   * SubscribeRequest.client_id.
-   *
-   * @generated from field: string client_id = 3;
-   */
-  clientId: string;
-
-  /**
-   * @generated from field: uint64 from_seq = 4;
-   */
-  fromSeq: bigint;
-
-  /**
-   * The fence ECHO: the exact fence the client held when it decided to ask
-   * for this replay, copied byte-for-byte from the WorkspaceState it was
-   * reading at that moment.
-   *
-   * It must be captured AT DECISION TIME, not read from current state when
-   * the transport sends, or a delayed request silently rebinds itself to a
-   * newer generation and asks for a replay nobody wanted. The daemon compares
-   * it against the workspace's live fence and REFUSES the command before
-   * replaying anything when they differ.
-   *
-   * @generated from field: string fence = 5;
-   */
-  fence: string;
-};
-
-/**
- * Describes the message agentrepl.v1.ResyncCmd.
- * Use `create(ResyncCmdSchema)` to create a new message.
- */
-export const ResyncCmdSchema: GenMessage<ResyncCmd> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_frame, 8);
+  messageDesc(file_agentrepl_v1_frame, 3);
 
