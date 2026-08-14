@@ -1,0 +1,46 @@
+// endpoint_session_health.proto — the SessionHealth endpoint's request and
+// response.
+//
+// ONE ENDPOINT PER FILE: SessionHealthRequest and SessionHealthResponse and
+// nothing else, so the whole of what one method takes and returns is readable in
+// one place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Ask the daemon to prove the entire session route for one restored workspace:
+// daemon registry -> current session controller -> handshaked shim -> shim dependencies.
+// `workspace` is authoritative and must be the session's absolute CWD;
+// `session_id` makes a stale response impossible to use after a rebind.
+//
+// HOST SURFACE, like its view.
+message SessionHealthRequest {
+  // Correlation. The SessionHealthView pushed in answer echoes this id.
+  string request_id = 1;
+  // The workspace whose route is being proved. See agentrepl.v1.AgentRepl.
+  string workspace = 2;
+  // WHICH SUBSCRIBE STREAM the SessionHealthView should be pushed down. See
+  // agentrepl.v1.SubscribeRequest.client_id.
+  string client_id = 3;
+  string session_id = 4;
+}
+
+// SessionHealth's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. As with
+// DaemonHealth the verdict arrives as a pushed SessionHealthView, so this answer
+// carries acceptance only.
+message SessionHealthResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

@@ -1,0 +1,43 @@
+// endpoint_daemon_health.proto — the DaemonHealth endpoint's request and
+// response.
+//
+// ONE ENDPOINT PER FILE: DaemonHealthRequest and DaemonHealthResponse and
+// nothing else, so the whole of what one method takes and returns is readable in
+// one place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Ask the daemon to assert that every boot-critical global dependency is
+// operational.  The matching DaemonHealthView, not socket existence, is the
+// success criterion.  It is a frontend command because no vendor produces or
+// consumes this daemon-local fact.
+message DaemonHealthRequest {
+  // Correlation. The DaemonHealthView pushed in answer echoes this id, which is
+  // how Emacs knows the verdict is the one it asked for.
+  string request_id = 1;
+  // WHICH SUBSCRIBE STREAM the DaemonHealthView should be pushed down. See
+  // agentrepl.v1.SubscribeRequest.client_id. Daemon-global otherwise: no
+  // workspace.
+  string client_id = 2;
+}
+
+// DaemonHealth's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. THE
+// ANSWER IS ONLY A RECEIPT: the assertion Emacs waits on is the DaemonHealthView
+// pushed to the caller's stream, never a field here.
+message DaemonHealthResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

@@ -1,0 +1,43 @@
+// endpoint_workspace_materialized.proto — the WorkspaceMaterialized endpoint's
+// request and response.
+//
+// ONE ENDPOINT PER FILE: WorkspaceMaterializedRequest and
+// WorkspaceMaterializedResponse and nothing else, so the whole of what one
+// method takes and returns is readable in one place. The `endpoint_` prefix is
+// the grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
+// directory is not available here, and for why a request type belongs to
+// agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Emacs has created the perspective/local bookkeeping for the authoritative
+// workspace descriptor.  The daemon uses this durable acknowledgement to
+// release an initial prompt that was held until a visible host workspace
+// exists.
+message WorkspaceMaterializedRequest {
+  // Correlation. See AgentRepl in frame.proto. The job is addressed by
+  // `job_id`, not by a workspace key: the host is acknowledging a
+  // WorkspaceAvailable, and the workspace's key is one of the things that
+  // notification told it.
+  string request_id = 1;
+  string job_id = 2;
+}
+
+// WorkspaceMaterialized's answer: accepted, or the classified account of the
+// refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. The
+// released prompt's progress is a turn, observed on the stream like any other.
+message WorkspaceMaterializedResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

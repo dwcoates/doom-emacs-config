@@ -1,0 +1,65 @@
+// endpoint_revive_session.proto — the ReviveSession endpoint's request and
+// response.
+//
+// ONE ENDPOINT PER FILE: ReviveSessionRequest and ReviveSessionResponse and
+// nothing else, so the whole of what one method takes and returns is readable in
+// one place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The user's revival decision for a hibernated workspace. Revival is LAZY and
+// GATED: the daemon nacks SubmitPromptRequest on a hibernated session, so no
+// model use can precede this choice — a rendering frontend draws the gate
+// from WorkspaceGateView (the host draws it from its session catalog) and
+// sends exactly one of these. The daemon brings
+// the session up along the ordinary create/resume path and, under either
+// gated mode — compact_first or clear — drives that context cut to completion
+// before accepting any prompt.
+message ReviveSessionRequest {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace being revived. See AgentRepl in frame.proto.
+  string workspace = 2;
+  // The choice is a oneof of empty messages, not a bool: "no decision" must
+  // be unrepresentable on the wire, and a third revival mode later is a new
+  // arm rather than a second flag.
+  oneof mode {
+    // Compact the conversation as the first order of business; prompts are
+    // accepted only after compaction lands. This pays the full-context cost
+    // ONCE (compaction is a model call over the whole history) instead of on
+    // every subsequent turn. Its own CompactionScope says how much of the
+    // conversation the compaction may summarize away.
+    ReviveCompactFirst compact_first = 3;
+    // Resume the conversation as-is, full accumulated context and all. The
+    // deliberate "I know it's big" path.
+    ReviveDirect direct = 4;
+    // Discard the conversation outright as the first order of business:
+    // `/clear`, and nothing else. Prompts are accepted only after the clear
+    // lands, on the same gate compact_first stays behind — a prompt answered
+    // ahead of it would pay for the whole context the clear is about to throw
+    // away.
+    ReviveClear clear = 5;
+  }
+}
+
+// ReviveSession's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. Whether
+// the gated context cut has completed is pushed state, not a value knowable at
+// call time.
+message ReviveSessionResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

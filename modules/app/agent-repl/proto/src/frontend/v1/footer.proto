@@ -823,62 +823,7 @@ message AccountingInvalid {
 // Prompt intake: submission, interrupt, and the daemon-held queue of prompts awaiting delivery.
 // ==========================================================================
 
-message SubmitPromptCmd {
-  // Correlation. See agentrepl.v1.AgentRepl. It is also the DURABLE TURN KEY:
-  // the daemon's prompt-receipt ledger claims and discharges a turn under this
-  // id, so it must be unique across a client's whole lifetime, not merely
-  // in-flight.
-  string request_id = 1;
-  // The workspace whose session this prompt goes to. See agentrepl.v1.AgentRepl.
-  string workspace = 2;
-  string text = 3;
-  string permission_mode = 4;
-  // Required origin selected by the concrete frontend send site. The daemon
-  // rejects UNSPECIFIED rather than guessing which UI or automation acted.
-  shim.v1.PromptOrigin prompt_origin = 5;
-}
-
-// Stop the running turn. Interrupting a LIVE TURN never asks for
-// confirmation. When no turn is live but subagent tasks are, the daemon
-// refuses with CommandAck.interrupt_confirm_required and performs the
-// interrupt only on a resend carrying confirm_agents=true — stopping working
-// subagents is the one interrupt worth a deliberate second keystroke.
-message InterruptCmd {
-  // Correlation. See agentrepl.v1.AgentRepl.
-  string request_id = 1;
-  // The workspace whose turn is being stopped. See agentrepl.v1.AgentRepl.
-  string workspace = 2;
-  bool confirm_agents = 3;
-}
-
-// Cancel the workspace session's DETACHED background agents: the subagent,
-// shell and workflow tasks still working after the turn that launched them
-// has ended.
-//
-// WHY IT IS ITS OWN COMMAND RATHER THAN A FLAG ON InterruptCmd. An interrupt
-// stops the TURN. The state this command exists for — main turn over,
-// detached agents still running — is precisely the state in which there is no
-// turn to stop, so an interrupt sent into it is a guaranteed no-op that the
-// shim answers ALREADY_COMPLETE. The one state that raised the interrupt's
-// "cancel the running subagents?" question was the one state its answer could
-// not act on; this command is what that yes now sends.
-//
-// IT CARRIES NO CONFIRMATION ECHO, unlike InterruptCmd.confirm_agents. There
-// is nothing here to confirm: the command's ONLY effect is stopping detached
-// agents, so sending it IS the deliberate second keystroke that flag exists to
-// require. A frontend asks its user before it sends, never after.
-//
-// The session is named by `workspace` below, and the command has nothing else
-// to say.
-message CancelDetachedAgentsCmd {
-  // Correlation. See agentrepl.v1.AgentRepl.
-  string request_id = 1;
-  // The workspace whose detached agents are being cancelled. See
-  // agentrepl.v1.AgentRepl.
-  string workspace = 2;
-}
-
-// What a CancelDetachedAgentsCmd did, carried on the command's ack.
+// What a CancelDetachedAgentsRequest did, carried on the command's ack.
 //
 // It is the SHIM's verdict relayed, not a daemon re-derivation — see
 // shim.v1.DetachedCancelOutcome for why only the shim can answer
@@ -953,10 +898,10 @@ message QueueClassificationInterject {
 message QueueClassificationHold {
   // The classifier's stated reason. Free text for display; never parsed.
   string rationale = 1;
-  // Set by QueueAcceptCmd: the user has seen and confirmed this hold. View
+  // Set by AcceptQueueEntryRequest: the user has seen and confirmed this hold. View
   // state only — it changes nothing about when the entry is delivered. It
   // lives on this arm because confirming a hold is the ONLY thing
-  // QueueAcceptCmd does; no other verdict has anything to accept.
+  // AcceptQueueEntryRequest does; no other verdict has anything to accept.
   bool accepted = 2;
 }
 
@@ -972,7 +917,7 @@ message QueueClassificationHold {
 // leaves the context in the state the cut was supposed to change, so there is
 // no question left for a model to answer and no model call is spent asking it.
 //
-// THERE IS NO FORCE-THROUGH. QueueForceCmd is refused on one of these for the
+// THERE IS NO FORCE-THROUGH. ForceQueueEntryRequest is refused on one of these for the
 // reason the keep-alive and revival holds refuse it: the force's mechanism is
 // an interrupt, and the interrupt is precisely what must not happen. A user who
 // genuinely wants the cut stopped still has the interrupt command itself, which
@@ -1029,8 +974,8 @@ message QueueEntry {
   // running — and the classifier decides when it is delivered.
   oneof hold {
     // Held by a scheduled shutdown's drain lease. The classifier NEVER runs
-    // on such an entry: the only exits are the user's explicit QueueForceCmd
-    // (deliver now, further delaying the bounce), QueueCancelCmd, or delivery
+    // on such an entry: the only exits are the user's explicit ForceQueueEntryRequest
+    // (deliver now, further delaying the bounce), CancelQueueEntryRequest, or delivery
     // after the bounce completes. Held entries are durable and survive the
     // daemon swap, so such a prompt is delayed, never lost. A frontend
     // renders a dedicated lease explanation from this arm instead of the
@@ -1040,7 +985,7 @@ message QueueEntry {
     // runs on such an entry and there is NO force-through: the keep-alive must
     // complete before the rewind-and-submit can run, so the only exits are
     // delivery when the ping's turn ends (the daemon rewinds, then submits
-    // this entry) or QueueCancelCmd. A frontend renders a dedicated "waiting
+    // this entry) or CancelQueueEntryRequest. A frontend renders a dedicated "waiting
     // on a keep-alive response" explanation from this arm instead of the
     // classification.
     QueueEntryKeepAliveHold keep_alive = 10;
@@ -1049,7 +994,7 @@ message QueueEntry {
     // there is NO force-through: the exits are delivery once the compaction
     // lands and the gate opens, a loud drop when the revival fails or expires
     // (a session still asleep can never deliver, so a retained entry would be
-    // a leak, not a delay), or QueueCancelCmd. A frontend renders a dedicated
+    // a leak, not a delay), or CancelQueueEntryRequest. A frontend renders a dedicated
     // "waiting on the revival's compaction" explanation from this arm instead
     // of the classification.
     QueueEntryRevivalHold revival = 11;
@@ -1107,34 +1052,4 @@ message QueueView {
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
   string fence = 3;
-}
-
-// Deliver this entry NOW — the user overriding the classifier, or not waiting
-// for it. Runs exactly the same interject sequence an INTERJECT verdict does.
-message QueueForceCmd {
-  // Correlation. See agentrepl.v1.AgentRepl.
-  string request_id = 1;
-  // The workspace whose queue holds the entry. The queue is per-workspace, so
-  // an entry id alone does not address one. See agentrepl.v1.AgentRepl.
-  string workspace = 2;
-  string entry_id = 3;
-}
-
-// Confirm a HOLD entry. View state only: the entry is still delivered by the
-// ordinary turn-end drain, on the same schedule it already had.
-message QueueAcceptCmd {
-  // Correlation. See agentrepl.v1.AgentRepl.
-  string request_id = 1;
-  // The workspace whose queue holds the entry. See agentrepl.v1.AgentRepl.
-  string workspace = 2;
-  string entry_id = 3;
-}
-
-// Drop an entry. It is never delivered.
-message QueueCancelCmd {
-  // Correlation. See agentrepl.v1.AgentRepl.
-  string request_id = 1;
-  // The workspace whose queue holds the entry. See agentrepl.v1.AgentRepl.
-  string workspace = 2;
-  string entry_id = 3;
 }

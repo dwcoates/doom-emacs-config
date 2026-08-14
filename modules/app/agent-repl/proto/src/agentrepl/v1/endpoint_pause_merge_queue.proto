@@ -1,0 +1,37 @@
+// endpoint_pause_merge_queue.proto — the PauseMergeQueue endpoint's request and
+// response.
+//
+// ONE ENDPOINT PER FILE: PauseMergeQueueRequest and PauseMergeQueueResponse and
+// nothing else, so the whole of what one method takes and returns is readable in
+// one place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Pause the merge queue: the run in flight finishes, nothing new dequeues.
+// Durable across bounces. Idempotent. Daemon-global (the command's
+// workspace is ignored).
+message PauseMergeQueueRequest {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+}
+
+// PauseMergeQueue's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. The
+// pause is idempotent, so there is no second outcome an answer could
+// distinguish.
+message PauseMergeQueueResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

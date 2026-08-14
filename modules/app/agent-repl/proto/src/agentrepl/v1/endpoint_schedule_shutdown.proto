@@ -1,0 +1,44 @@
+// endpoint_schedule_shutdown.proto — the ScheduleShutdown endpoint's request and
+// response.
+//
+// ONE ENDPOINT PER FILE: ScheduleShutdownRequest and ScheduleShutdownResponse
+// and nothing else, so the whole of what one method takes and returns is
+// readable in one place. The `endpoint_` prefix is the grouping, not a directory
+// — see DESIGN-protobuf-surfaces.md for why a directory is not available here,
+// and for why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Schedule a graceful shutdown instead of demanding one now. Takes the
+// drain lease immediately (broadcast via ShutdownScheduleView), blocks new
+// turns daemon-side at the prompt queue, and executes ShutdownRequest semantics
+// the moment every hold clears. Scheduling while a schedule already exists
+// is a loud nack, never a silent replace: the caller must cancel first, so
+// two deploy flows cannot silently merge their intents.
+message ScheduleShutdownRequest {
+  // Correlation. See AgentRepl in frame.proto. Daemon-global: no workspace.
+  string request_id = 1;
+  // Same semantics as ShutdownRequest.stop_shims, fixed at schedule time.
+  bool stop_shims = 2;
+  // Why (for the broadcast view and the durable log). Display only.
+  string cause = 3;
+}
+
+// ScheduleShutdown's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. The
+// minted schedule_id reaches every client on the broadcast ShutdownScheduleView,
+// which is the one place it is stated.
+message ScheduleShutdownResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

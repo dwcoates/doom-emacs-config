@@ -100,20 +100,6 @@ message TopbarConnectivity {
 // forwards untouched, so there was never a second one to declare; every
 // reference now names shim.v1's.
 
-// A deliberate request to change an already-live session's model.  The daemon
-// forwards this to the shim and only publishes the shim-confirmed selection.
-// Bootstrap and rebind intentionally have no model field: they observe session
-// state rather than choosing it.  Creation is different — see
-// CreateSessionCmd.model, which is a starting choice, not an observation.
-message SetModelCmd {
-  // Correlation. See agentrepl.v1.AgentRepl.
-  string request_id = 1;
-  // The workspace whose live session is being re-modelled. See
-  // agentrepl.v1.AgentRepl.
-  string workspace = 2;
-  string model = 3;
-}
-
 // Correlated result of the daemon-global health command.  A command ACK alone
 // is only a receipt that the daemon accepted a frame; this view is the
 // assertion Emacs waits for before restoring any workspace.  healthy=false is
@@ -142,37 +128,6 @@ message SessionHealthView {
   string session_id = 3;
   bool healthy = 4;
   string reason = 5;
-}
-
-// Ask the daemon to assert that every boot-critical global dependency is
-// operational.  The matching DaemonHealthView, not socket existence, is the
-// success criterion.  It is a frontend command because no vendor produces or
-// consumes this daemon-local fact.
-message DaemonHealthCmd {
-  // Correlation. The DaemonHealthView pushed in answer echoes this id, which is
-  // how Emacs knows the verdict is the one it asked for.
-  string request_id = 1;
-  // WHICH SUBSCRIBE STREAM the DaemonHealthView should be pushed down. See
-  // agentrepl.v1.SubscribeRequest.client_id. Daemon-global otherwise: no
-  // workspace.
-  string client_id = 2;
-}
-
-// Ask the daemon to prove the entire session route for one restored workspace:
-// daemon registry -> current session controller -> handshaked shim -> shim dependencies.
-// `workspace` is authoritative and must be the session's absolute CWD;
-// `session_id` makes a stale response impossible to use after a rebind.
-//
-// HOST SURFACE, like its view.
-message SessionHealthCmd {
-  // Correlation. The SessionHealthView pushed in answer echoes this id.
-  string request_id = 1;
-  // The workspace whose route is being proved. See agentrepl.v1.AgentRepl.
-  string workspace = 2;
-  // WHICH SUBSCRIBE STREAM the SessionHealthView should be pushed down. See
-  // agentrepl.v1.SubscribeRequest.client_id.
-  string client_id = 3;
-  string session_id = 4;
 }
 
 // ==========================================================================

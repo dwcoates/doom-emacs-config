@@ -1,0 +1,88 @@
+// endpoint_create_session.proto — the CreateSession endpoint's request and
+// response.
+//
+// ONE ENDPOINT PER FILE: CreateSessionRequest and CreateSessionResponse and
+// nothing else, so the whole of what one method takes and returns is readable in
+// one place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Bring a session up for a workspace. HOST SURFACE: a rendering frontend has
+// no session vocabulary and never calls this.
+message CreateSessionRequest {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // THE WORKSPACE, spelled `cwd` because that is what a session is created
+  // against. It is NOT accompanied by a second `workspace` field: the daemon's
+  // workspace key IS the session's absolute cwd, and two spellings of one path
+  // is two things a caller can disagree with itself about.
+  string cwd = 2;
+  string permission_mode = 3;
+  string config_dir = 4;
+  bool fake = 5;                        // test harness sessions
+  // The caller's DELIBERATE consent to create a session with NO permission
+  // gate. Required whenever permission_mode names a mode that shadows the
+  // shim's canUseTool callback in the fail-OPEN direction
+  // (bypassPermissions): under such a mode the SDK auto-approves every tool
+  // before canUseTool is consulted, so the daemon's whole permission
+  // round-trip never engages and no permission card can ever appear.
+  //
+  // The daemon REFUSES such a create without this flag. The mode is otherwise
+  // one string away from every ordinary create, and "reachable by a typo" is
+  // not an acceptable property for the switch that turns the gate off. It is
+  // a create-time consent only: a session already registered in that mode
+  // still rehydrates after a daemon restart, since refusing there would
+  // silently change a live session's posture.
+  bool allow_ungated = 6;
+
+  // The model this session should START on, empty to accept the shim's own
+  // default.  A caller that has a remembered selection would otherwise have to
+  // create and then immediately SetModel, which races: the session is live and
+  // driveable in between, so its first turn can run on the wrong model.
+  //
+  // This does NOT make the caller authoritative.  The daemon applies it through
+  // the same SetModel path a later change takes, once the shim is wired, and
+  // still publishes only the shim-confirmed selection.  A rejected model fails
+  // the create rather than silently leaving the session on another one.
+  string model = 7;
+
+  // Which conversation to land on. See ResumeMode: this is intent, and the
+  // daemon does the resolving.
+  ResumeMode resume_mode = 8;
+
+  // The conversation to land on, and ONLY meaningful under
+  // RESUME_MODE_EXPLICIT. The daemon rejects a create that sets this under any
+  // other mode rather than quietly ignoring it, because a caller that filled
+  // this in believes it is steering and must be told it is not.
+  string explicit_claude_session_id = 9;
+}
+
+// CreateSession's answer.
+message CreateSessionResponse {
+  CommandAck ack = 1;
+  // FOR OBSERVABILITY ONLY: the vendor conversation uuid the created session
+  // actually landed on, so a client can attribute its logs from its very first
+  // line instead of waiting for the first pushed SessionView.
+  //
+  // A CLIENT MUST NOT PERSIST THIS OR FEED IT BACK. It is an observation of
+  // daemon state at one instant, not a durable fact: the uuid ROTATES (a
+  // /clear or a compact starts a new vendor conversation and resets the
+  // cursors with it), so a stored copy is wrong from the next rotation
+  // onward. The steady-state source is the pushed SessionView, which tracks
+  // rotations; this field only covers the gap before the first push.
+  //
+  // Feeding it back is what this whole change removed — see ResumeMode. The
+  // rule is not enforceable from here, so it is also enforced where it
+  // matters: the Emacs frontend has no persistence path that can reach a
+  // vendor uuid, and a test asserts its state file never contains one.
+  string observed_claude_session_id = 2;
+}

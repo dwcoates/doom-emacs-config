@@ -1,0 +1,58 @@
+// endpoint_first_page.proto — the FirstPage endpoint's request and response.
+//
+// ONE ENDPOINT PER FILE: FirstPageRequest and FirstPageResponse and nothing
+// else, so the whole of what one method takes and returns is readable in one
+// place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Ask for the MOST RECENT page, and reset this reader's position to it.
+//
+// The cold open and the whole recovery story: a client that bounced, rotated
+// its seq space, or lost its place calls this and starts from the bottom.
+message FirstPageRequest {
+  // Correlation. The ConversationHistoryPage pushed in answer echoes this id,
+  // so a client can DISCARD a page it is no longer awaiting.
+  string request_id = 1;
+  // WHICH READER, and therefore which Subscribe stream the page is pushed down.
+  // The daemon's position is per READER per workspace per scope, and under a
+  // service a paging call no longer shares a socket with the stream that
+  // answers it — so the reader has to name itself. See
+  // agentrepl.v1.SubscribeRequest.client_id.
+  string client_id = 2;
+  // Which conversation. The daemon's position is per reader PER WORKSPACE, so
+  // this is what selects the position being reset.
+  string workspace = 3;
+  // WHICH CONTAINER this page walks: the feed, or the inside of one message.
+  // The daemon's position is per reader per workspace PER SCOPE, so this also
+  // selects which position is being reset — opening a subagent does not throw
+  // away where the reader was in the feed.
+  //
+  // Unset is NOT a default. A request that does not state its scope is REFUSED,
+  // never read as the feed: defaulting would answer a client that forgot to
+  // name its container with the whole conversation.
+  frontend.v1.PageScope scope = 4;
+}
+
+// FirstPage's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. The
+// page itself arrives on the caller's Subscribe stream as a
+// ConversationHistoryPage — feed content has exactly one delivery shape here,
+// and it is not this one.
+message FirstPageResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

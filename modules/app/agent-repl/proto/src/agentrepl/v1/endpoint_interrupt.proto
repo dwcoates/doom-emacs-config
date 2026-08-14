@@ -1,0 +1,43 @@
+// endpoint_interrupt.proto — the Interrupt endpoint's request and response.
+//
+// ONE ENDPOINT PER FILE: InterruptRequest and InterruptResponse and nothing
+// else, so the whole of what one method takes and returns is readable in one
+// place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Stop the running turn. Interrupting a LIVE TURN never asks for
+// confirmation. When no turn is live but subagent tasks are, the daemon
+// refuses with CommandAck.interrupt_confirm_required and performs the
+// interrupt only on a resend carrying confirm_agents=true — stopping working
+// subagents is the one interrupt worth a deliberate second keystroke.
+message InterruptRequest {
+  // Correlation. See agentrepl.v1.AgentRepl.
+  string request_id = 1;
+  // The workspace whose turn is being stopped. See agentrepl.v1.AgentRepl.
+  string workspace = 2;
+  bool confirm_agents = 3;
+}
+
+// Interrupt's answer, which has a THIRD outcome neither ok nor a failure.
+//
+// The interrupt confirmation CHALLENGE is not an error: the command was
+// understood and deliberately not performed, because no turn was live and
+// stopping live subagents deserves an explicit yes. It is returned with
+// ack.ok=false and ack.failure UNSET; the client asks the user and calls
+// Interrupt again with confirm_agents=true.
+//
+// Under the old generic ack this was a field that was meaningless on 32 other
+// commands. Here its presence is scoped by the method's own signature.
+message InterruptResponse {
+  CommandAck ack = 1;
+  InterruptConfirmRequired confirm_required = 2;
+}

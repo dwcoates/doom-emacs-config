@@ -1,0 +1,52 @@
+// endpoint_next_page.proto — the NextPage endpoint's request and response.
+//
+// ONE ENDPOINT PER FILE: NextPageRequest and NextPageResponse and nothing else,
+// so the whole of what one method takes and returns is readable in one place.
+// The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
+//
+// IT CARRIES NO POSITION, and that absence is the design. From a reader with no
+// established position it is REFUSED rather than answered with the tail:
+// defaulting would turn a client bug into a silent tail read, and "I have no
+// position" already has its own verb.
+message NextPageRequest {
+  // Correlation. See FirstPageRequest.request_id.
+  string request_id = 1;
+  // WHICH READER, and therefore whose position is being walked back and which
+  // stream the page arrives on. See FirstPageRequest.client_id.
+  string client_id = 2;
+  string workspace = 3;
+  // WHICH CONTAINER to walk back through. It names the scope, never a position
+  // within it — the daemon still owns where this reader is inside that scope,
+  // so the no-position rule above is untouched.
+  //
+  // Unset is NOT a default and is REFUSED, exactly as on FirstPageRequest: a
+  // load-more that forgot which container it belongs to must not silently walk
+  // back through the feed instead.
+  frontend.v1.PageScope scope = 4;
+}
+
+// NextPage's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. The
+// page arrives on the stream, as FirstPage's does, and a reader with no
+// established position is refused through the ack.
+message NextPageResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

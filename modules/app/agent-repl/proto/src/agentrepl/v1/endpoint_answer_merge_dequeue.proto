@@ -1,0 +1,54 @@
+// endpoint_answer_merge_dequeue.proto — the AnswerMergeDequeue endpoint's
+// request and response.
+//
+// ONE ENDPOINT PER FILE: AnswerMergeDequeueRequest and
+// AnswerMergeDequeueResponse and nothing else, so the whole of what one method
+// takes and returns is readable in one place. The `endpoint_` prefix is the
+// grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
+// directory is not available here, and for why a request type belongs to
+// agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The user's answer to a MergeDequeueOffer. Sent by whichever frontend drew
+// the card; the daemon clears the offer on either arm, so declining is a real
+// answer and not merely the absence of one.
+message AnswerMergeDequeueRequest {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace whose offer is being answered — the offer is PUSHED STATE on
+  // WorkspaceState, so it is scoped by workspace and matched within it. See
+  // AgentRepl in frame.proto.
+  string workspace = 2;
+  // The offer being answered. An id that does not match the workspace's
+  // outstanding offer is REFUSED rather than resolved to the current one: a
+  // click on a superseded card must not dequeue the merge the card that
+  // replaced it is asking about.
+  string offer_id = 3;
+  // The answer is a oneof of empty messages, not a bool, for the same reason
+  // ReviveSessionRequest's is: "no answer" must be unrepresentable on the wire.
+  oneof answer {
+    MergeDequeueConfirm dequeue = 4;
+    MergeDequeueDecline keep = 5;
+  }
+}
+
+// AnswerMergeDequeue's answer: accepted, or the classified account of the
+// refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. Both
+// arms clear the offer, and the cleared offer is pushed on WorkspaceState.
+message AnswerMergeDequeueResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

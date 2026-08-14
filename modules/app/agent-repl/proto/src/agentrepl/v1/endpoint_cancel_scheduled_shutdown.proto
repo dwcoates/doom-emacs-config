@@ -1,0 +1,41 @@
+// endpoint_cancel_scheduled_shutdown.proto — the CancelScheduledShutdown
+// endpoint's request and response.
+//
+// ONE ENDPOINT PER FILE: CancelScheduledShutdownRequest and
+// CancelScheduledShutdownResponse and nothing else, so the whole of what one
+// method takes and returns is readable in one place. The `endpoint_` prefix is
+// the grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
+// directory is not available here, and for why a request type belongs to
+// agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Cancel a scheduled shutdown and release the drain lease. schedule_id must
+// match the live schedule; a stale id is a loud nack, so a cancel aimed at
+// an old schedule can never kill a newer one.
+message CancelScheduledShutdownRequest {
+  // Correlation. See AgentRepl in frame.proto. Daemon-global: no workspace.
+  string request_id = 1;
+  // The schedule to cancel, from ShutdownScheduleDraining.schedule_id.
+  string schedule_id = 2;
+}
+
+// CancelScheduledShutdown's answer: accepted, or the classified account of the
+// refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. A stale
+// schedule_id is refused through the ack's classified failure, which is the
+// outcome worth carrying.
+message CancelScheduledShutdownResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

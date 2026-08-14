@@ -1,0 +1,51 @@
+// endpoint_submit_prompt.proto — the SubmitPrompt endpoint's request and
+// response.
+//
+// ONE ENDPOINT PER FILE: SubmitPromptRequest and SubmitPromptResponse and
+// nothing else, so the whole of what one method takes and returns is readable in
+// one place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+import "shim/v1/core.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Send the user's prompt to a workspace's session.
+//
+// The daemon may deliver it, hold it in the prompt queue, or refuse it
+// outright; the response says which, and the prompt's own progress arrives on
+// the Subscribe stream rather than here.
+message SubmitPromptRequest {
+  // Correlation. See agentrepl.v1.AgentRepl. It is also the DURABLE TURN KEY:
+  // the daemon's prompt-receipt ledger claims and discharges a turn under this
+  // id, so it must be unique across a client's whole lifetime, not merely
+  // in-flight.
+  string request_id = 1;
+  // The workspace whose session this prompt goes to. See agentrepl.v1.AgentRepl.
+  string workspace = 2;
+  string text = 3;
+  string permission_mode = 4;
+  // Required origin selected by the concrete frontend send site. The daemon
+  // rejects UNSPECIFIED rather than guessing which UI or automation acted.
+  shim.v1.PromptOrigin prompt_origin = 5;
+}
+
+// SubmitPrompt's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. A
+// prompt that was queued rather than delivered is reported through the ack's
+// failure classification today; if it ever needs a positive queue verdict of its
+// own, this is where it goes.
+message SubmitPromptResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

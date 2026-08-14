@@ -5,42 +5,42 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/frame.proto";
-import "agentrepl/v1/shared.proto";
-import "frontend/v1/feed.proto";
-import "frontend/v1/footer.proto";
-import "frontend/v1/sidebar.proto";
-import "frontend/v1/topbar.proto";
+import "agentrepl/v1/endpoint_accept_queue_entry.proto";
+import "agentrepl/v1/endpoint_answer_merge_dequeue.proto";
+import "agentrepl/v1/endpoint_answer_permission.proto";
+import "agentrepl/v1/endpoint_cancel_detached_agents.proto";
+import "agentrepl/v1/endpoint_cancel_queue_entry.proto";
+import "agentrepl/v1/endpoint_cancel_scheduled_shutdown.proto";
+import "agentrepl/v1/endpoint_client_log.proto";
+import "agentrepl/v1/endpoint_close_workspace.proto";
+import "agentrepl/v1/endpoint_create_session.proto";
+import "agentrepl/v1/endpoint_create_workspace.proto";
+import "agentrepl/v1/endpoint_daemon_health.proto";
+import "agentrepl/v1/endpoint_delete_session.proto";
+import "agentrepl/v1/endpoint_evict_merge.proto";
+import "agentrepl/v1/endpoint_first_page.proto";
+import "agentrepl/v1/endpoint_force_queue_entry.proto";
+import "agentrepl/v1/endpoint_hibernate_workspace.proto";
+import "agentrepl/v1/endpoint_host_action_completed.proto";
+import "agentrepl/v1/endpoint_interrupt.proto";
+import "agentrepl/v1/endpoint_merge_workspace.proto";
+import "agentrepl/v1/endpoint_next_page.proto";
+import "agentrepl/v1/endpoint_open_workspace.proto";
+import "agentrepl/v1/endpoint_pause_merge_queue.proto";
+import "agentrepl/v1/endpoint_publish_workspace_roster.proto";
+import "agentrepl/v1/endpoint_restart_session.proto";
+import "agentrepl/v1/endpoint_resume_merge_queue.proto";
+import "agentrepl/v1/endpoint_resync.proto";
+import "agentrepl/v1/endpoint_revive_session.proto";
+import "agentrepl/v1/endpoint_schedule_shutdown.proto";
+import "agentrepl/v1/endpoint_session_health.proto";
+import "agentrepl/v1/endpoint_set_model.proto";
+import "agentrepl/v1/endpoint_shutdown.proto";
+import "agentrepl/v1/endpoint_submit_prompt.proto";
+import "agentrepl/v1/endpoint_subscribe.proto";
+import "agentrepl/v1/endpoint_workspace_materialized.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
-
-// What Subscribe is called with.
-//
-// IT NAMES THE READER AND NOTHING ELSE. Under the WebSocket this protocol grew
-// up on, one socket carried both the commands and the pushes, so "which reader
-// is this" was the socket itself and no field had to say it. A service splits
-// them: a NextPage call is its own HTTP request and arrives with no inherent
-// relationship to any stream. `client_id` is what restores the association the
-// socket used to provide for free.
-//
-// IT DOES NOT STATE A ROLE, AND MUST NOT. Several fields on StateSnapshot and
-// several arms on FrontendFrame are HOST SURFACE, stripped from every GUI
-// client. That distinction stays in the LISTENER — the host reaches the daemon
-// over its private UDS, a GUI client over the TCP listener — because a role a
-// client declares is a role a client can claim. A field here would convert an
-// unreachable socket into a string anyone may send.
-message SubscribeRequest {
-  // The reader's OWN identity, minted by the client and stable for the life of
-  // this stream. Every command whose effect arrives on this stream rather than
-  // in its own ack (Resync, FirstPage, NextPage, DaemonHealth, SessionHealth)
-  // repeats it, so the daemon knows which stream to push the answer down.
-  //
-  // CLIENT-MINTED, exactly as request_id is, and for the same reason: a client
-  // that generates its own id can correlate a push that beats the ack it was
-  // waiting for. An id the daemon assigned would not exist yet at the moment
-  // the client needs it.
-  string client_id = 1;
-}
 
 // THERE IS NO PAINT ATTESTATION ON THIS SERVICE, AND THERE MUST NEVER BE ONE.
 // No method here reports what a frontend has drawn, and no daemon decision
@@ -77,7 +77,7 @@ message SubscribeRequest {
 //   cwd, never a display name. It appears ONLY on the workspace-addressed
 //   commands. That is the change worth stating: the old envelope handed a
 //   `workspace` to daemon-global commands that had no use for one, to the point
-//   that PauseMergeQueueCmd had to document that the daemon ignored it. A field
+//   that PauseMergeQueueRequest had to document that the daemon ignored it. A field
 //   the receiver ignores is a field a caller can be wrong about, and now those
 //   commands have nowhere to be wrong.
 //
@@ -85,6 +85,15 @@ message SubscribeRequest {
 // below returns a message on refusal — see CommandAck.failure and the
 // FailureKind vocabulary in shared.proto. A refusal is a classified account the
 // frontends RENDER, and a status code is a number with a string stapled to it.
+//
+// EVERY METHOD HAS ITS OWN REQUEST AND RESPONSE TYPE, and they live one
+// endpoint per file in `endpoint_<snake_case_method>.proto` beside this one.
+// Nothing on a signature below is qualified, because a request type is part of
+// the API a client CALLS and this package IS that API — what a client DRAWS is
+// frontend.v1, and a command was never something anyone drew. Sharing
+// CommandAck as the response gave 33 methods one answer type, so no method
+// could grow a field without offering it to the other 32; each now wraps the
+// ack instead. See DESIGN-protobuf-surfaces.md.
 service AgentRepl {
   // THE PUSH CHANNEL, and there is exactly one.
   //
@@ -111,187 +120,187 @@ service AgentRepl {
   // frame; RestartPendingView is a courtesy notice that a teardown is
   // deliberate, never an end-of-stream marker, and a client that misses it
   // treats the disconnect as unexplained exactly as before.
-  rpc Subscribe(SubscribeRequest) returns (stream FrontendFrame);
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 
   // Send the user's prompt to the workspace's session. The daemon may deliver
   // it, hold it in the prompt queue, or refuse it outright (a hibernated
   // session is nacked so no model use can precede a revival decision); the ack
   // says which, and the prompt's own progress arrives on the stream.
-  rpc SubmitPrompt(frontend.v1.SubmitPromptCmd) returns (CommandAck);
+  rpc SubmitPrompt(SubmitPromptRequest) returns (SubmitPromptResponse);
 
   // Stop the workspace's running turn. Answers with confirm_required rather
   // than acting when no turn is live but detached subagents are — see
   // InterruptResponse, which exists because that answer is neither a success
   // nor a failure and could not honestly be spelled as either.
-  rpc Interrupt(frontend.v1.InterruptCmd) returns (InterruptResponse);
+  rpc Interrupt(InterruptRequest) returns (InterruptResponse);
 
   // Answer an outstanding permission card: allow, deny, or allow with edited
   // input. The daemon relays the decision to the shim's canUseTool callback,
   // which is blocked waiting on it, so a permission left unanswered stalls the
   // turn — this is the only method whose absence hangs a session.
-  rpc AnswerPermission(frontend.v1.PermissionAnswerCmd) returns (CommandAck);
+  rpc AnswerPermission(AnswerPermissionRequest) returns (AnswerPermissionResponse);
 
   // Merge the workspace's branch into the target the daemon recorded when it
   // created that workspace. The command states no geometry and names no
-  // handler; see MergeWorkspaceCmd for why a caller that stated either would be
+  // handler; see MergeWorkspaceRequest for why a caller that stated either would be
   // a second owner of the daemon's geometry map.
-  rpc MergeWorkspace(MergeWorkspaceCmd) returns (CommandAck);
+  rpc MergeWorkspace(MergeWorkspaceRequest) returns (MergeWorkspaceResponse);
 
   // Retire the workspace: stop its session, release its worktree bookkeeping,
   // and drop it from the roster. The request carries nothing but the envelope,
   // which is the whole of what a close means.
-  rpc CloseWorkspace(CloseWorkspaceCmd) returns (CommandAck);
+  rpc CloseWorkspace(CloseWorkspaceRequest) returns (CloseWorkspaceResponse);
 
   // Reattach to the workspace's session, or start one when it has none. The
   // request carries RUN PREFERENCES — posture and account — never a session
   // identity: which session a workspace owns is the daemon's ruling.
-  rpc OpenWorkspace(OpenWorkspaceCmd) returns (CommandAck);
+  rpc OpenWorkspace(OpenWorkspaceRequest) returns (OpenWorkspaceResponse);
 
   // Replay the workspace's conversation from the client's last read position.
   // The ack only says the replay was accepted; the records themselves arrive on
   // the caller's Subscribe stream, which is why the request names its
   // client_id. A fence that disagrees with the workspace's live one is REFUSED
   // before anything is replayed.
-  rpc Resync(ResyncCmd) returns (CommandAck);
+  rpc Resync(ResyncRequest) returns (ResyncResponse);
 
   // Bring up a session for a workspace. HOST SURFACE: a rendering frontend has
   // no session vocabulary and never calls this. The response carries the
   // vendor conversation uuid the create landed on, for observability only —
   // see CreateSessionResponse for why a client must not persist it.
-  rpc CreateSession(CreateSessionCmd) returns (CreateSessionResponse);
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
 
   // Tear one session down by identity. HOST SURFACE, like every other method
   // that addresses a session rather than a workspace.
-  rpc DeleteSession(DeleteSessionCmd) returns (CommandAck);
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
 
   // Shut the daemon down now. Session shims are PRESERVED unless the request
   // asks otherwise, because a shim outlives its daemon by design and the next
   // boot reattaches to it for free.
-  rpc Shutdown(ShutdownCmd) returns (CommandAck);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 
   // File one diagnostic line from a frontend into the daemon's log. The daemon
   // WRITES these and does not act on them: a client log is evidence, never a
   // control signal. It exists because the webapp runs inside an xwidget whose
   // JS console nobody can see and nothing persists.
-  rpc ClientLog(ClientLogCmd) returns (CommandAck);
+  rpc ClientLog(ClientLogRequest) returns (ClientLogResponse);
 
   // Deliver a held queue entry NOW — the user overriding the classifier, or not
   // waiting for it. Runs the same interject sequence an INTERJECT verdict does.
-  rpc ForceQueueEntry(frontend.v1.QueueForceCmd) returns (CommandAck);
+  rpc ForceQueueEntry(ForceQueueEntryRequest) returns (ForceQueueEntryResponse);
 
   // Confirm a HOLD entry. View state only: the entry is still delivered by the
   // ordinary turn-end drain, on the schedule it already had.
-  rpc AcceptQueueEntry(frontend.v1.QueueAcceptCmd) returns (CommandAck);
+  rpc AcceptQueueEntry(AcceptQueueEntryRequest) returns (AcceptQueueEntryResponse);
 
   // Drop a queue entry. It is never delivered.
-  rpc CancelQueueEntry(frontend.v1.QueueCancelCmd) returns (CommandAck);
+  rpc CancelQueueEntry(CancelQueueEntryRequest) returns (CancelQueueEntryResponse);
 
   // Request one agent-repl workspace. THE SOLE CREATION INGRESS, for host UI
   // requests and skill-produced JSON dispatches alike; the daemon owns name
   // resolution, worktree creation, session startup and initial prompt delivery.
   // The ack is a receipt that the job was accepted — the workspace itself
   // arrives later as a WorkspaceAvailable frame.
-  rpc CreateWorkspace(CreateWorkspaceCmd) returns (CommandAck);
+  rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse);
 
   // Emacs has built the perspective and local bookkeeping for a
   // WorkspaceAvailable. HOST SURFACE. The daemon holds an initial prompt until
   // this lands, so a prompt never runs against a workspace nobody can see.
-  rpc WorkspaceMaterialized(WorkspaceMaterializedCmd) returns (CommandAck);
+  rpc WorkspaceMaterialized(WorkspaceMaterializedRequest) returns (WorkspaceMaterializedResponse);
 
   // Report the outcome of a HostAction the daemon's durable inbox dispatched.
   // HOST SURFACE. A failed action is PRESERVED with its error rather than
   // dropped, so a UI request Emacs could not perform is still on the books.
-  rpc HostActionCompleted(HostActionCompletedCmd) returns (CommandAck);
+  rpc HostActionCompleted(HostActionCompletedRequest) returns (HostActionCompletedResponse);
 
   // Ask the daemon to assert that every boot-critical global dependency is
   // operational. THE ACK IS ONLY A RECEIPT: the assertion Emacs actually waits
   // on is the DaemonHealthView pushed to the caller's stream, which is why the
   // request names its client_id.
-  rpc DaemonHealth(frontend.v1.DaemonHealthCmd) returns (CommandAck);
+  rpc DaemonHealth(DaemonHealthRequest) returns (DaemonHealthResponse);
 
   // Ask the daemon to prove one restored workspace's whole session route:
   // registry -> session controller -> handshaked shim -> shim dependencies. As
   // with DaemonHealth the verdict arrives as a pushed SessionHealthView, not in
   // this ack. HOST SURFACE.
-  rpc SessionHealth(frontend.v1.SessionHealthCmd) returns (CommandAck);
+  rpc SessionHealth(SessionHealthRequest) returns (SessionHealthResponse);
 
   // HARD RESTART of the workspace's session process, keeping the session
   // record — so the respawn resumes the same vendor conversation and the user
   // loses nothing. What to reach for when a shim is wedged or running
   // superseded code.
-  rpc RestartSession(RestartSessionCmd) returns (CommandAck);
+  rpc RestartSession(RestartSessionRequest) returns (RestartSessionResponse);
 
   // Change a live session's model. The response carries the SHIM-CONFIRMED
   // selection on both success and rejection, so a frontend never holds an
   // optimistic model state; see SetModelResponse.
-  rpc SetModel(frontend.v1.SetModelCmd) returns (SetModelResponse);
+  rpc SetModel(SetModelRequest) returns (SetModelResponse);
 
   // Publish the workspace roster. Emacs is its SINGLE author and this is the
   // only way a roster enters the daemon. A stale, out-of-order revision within
   // the publisher's own epoch is a loud nack rather than a silent drop, so a
   // publisher whose counter fell behind learns it.
-  rpc PublishWorkspaceRoster(frontend.v1.PublishWorkspaceRosterCmd) returns (CommandAck);
+  rpc PublishWorkspaceRoster(PublishWorkspaceRosterRequest) returns (PublishWorkspaceRosterResponse);
 
   // Schedule a graceful shutdown instead of demanding one now: take the drain
   // lease, block new turns at the prompt queue, and shut down when every hold
   // clears. Scheduling over an existing schedule is a loud nack, never a silent
   // replace, so two deploy flows cannot merge their intents.
-  rpc ScheduleShutdown(ScheduleShutdownCmd) returns (CommandAck);
+  rpc ScheduleShutdown(ScheduleShutdownRequest) returns (ScheduleShutdownResponse);
 
   // Cancel a scheduled shutdown and release the drain lease. A schedule_id that
   // does not match the live schedule is a loud nack, so a cancel aimed at an
   // old schedule can never kill a newer one.
-  rpc CancelScheduledShutdown(CancelScheduledShutdownCmd) returns (CommandAck);
+  rpc CancelScheduledShutdown(CancelScheduledShutdownRequest) returns (CancelScheduledShutdownResponse);
 
   // Deliberately hibernate the workspace's session: stop the shim and mark the
   // session hibernated, which is ONE transition with leaving the keep-alive
   // loop. Refused with a loud nack while a turn is live or the merge lease is
   // held — the daemon never discards in-flight work to satisfy a hibernate.
-  rpc HibernateWorkspace(HibernateWorkspaceCmd) returns (CommandAck);
+  rpc HibernateWorkspace(HibernateWorkspaceRequest) returns (HibernateWorkspaceResponse);
 
   // The user's revival decision for a hibernated workspace. Revival is LAZY and
   // GATED: SubmitPrompt is nacked until this lands, so no model use can precede
   // the choice, and a gated mode's context cut runs to completion before any
   // prompt is accepted.
-  rpc ReviveSession(ReviveSessionCmd) returns (CommandAck);
+  rpc ReviveSession(ReviveSessionRequest) returns (ReviveSessionResponse);
 
   // Pause the merge queue: the run in flight finishes, nothing new dequeues.
   // Durable across bounces, idempotent, and DAEMON-GLOBAL — which is why the
   // request names no workspace.
-  rpc PauseMergeQueue(PauseMergeQueueCmd) returns (CommandAck);
+  rpc PauseMergeQueue(PauseMergeQueueRequest) returns (PauseMergeQueueResponse);
 
   // Resume the merge queue. Idempotent and daemon-global, like its pause.
-  rpc ResumeMergeQueue(ResumeMergeQueueCmd) returns (CommandAck);
+  rpc ResumeMergeQueue(ResumeMergeQueueRequest) returns (ResumeMergeQueueResponse);
 
   // Evict ONE waiting queue entry by run id, retiring it with a terminal failed
   // status so the workspace's merge axis resolves immediately. REFUSED when the
   // run id names the running head — only its drain goroutine may retire that —
   // or names nothing outstanding.
-  rpc EvictMerge(EvictMergeCmd) returns (CommandAck);
+  rpc EvictMerge(EvictMergeRequest) returns (EvictMergeResponse);
 
   // Answer a MergeDequeueOffer: take the merge off the queue, or leave it. The
   // daemon clears the offer on either arm, so declining is a real answer and
   // not merely the absence of one, and an offer_id that does not match the
   // workspace's outstanding offer is REFUSED rather than resolved to it.
-  rpc AnswerMergeDequeue(AnswerMergeDequeueCmd) returns (CommandAck);
+  rpc AnswerMergeDequeue(AnswerMergeDequeueRequest) returns (AnswerMergeDequeueResponse);
 
   // Cancel the session's DETACHED background agents — the subagent, shell and
   // workflow tasks still working after the turn that launched them ended. It is
   // not a flag on Interrupt because the state it exists for is precisely the
   // state with no turn to stop. The response relays the SHIM's verdict; see
   // CancelDetachedAgentsResponse.
-  rpc CancelDetachedAgents(frontend.v1.CancelDetachedAgentsCmd) returns (CancelDetachedAgentsResponse);
+  rpc CancelDetachedAgents(CancelDetachedAgentsRequest) returns (CancelDetachedAgentsResponse);
 
   // Ask for the MOST RECENT page of a conversation, and reset this reader's
   // daemon-held position to it. The cold open and the whole recovery story.
   // The page arrives on the caller's Subscribe stream as a
   // ConversationHistoryPage, never in this ack — feed content has exactly one
   // delivery shape here.
-  rpc FirstPage(frontend.v1.FirstPageCmd) returns (CommandAck);
+  rpc FirstPage(FirstPageRequest) returns (FirstPageResponse);
 
   // Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
   // IT CARRIES NO POSITION, and that absence is the design: from a reader with
   // no established position it is REFUSED rather than answered with the tail.
   // The page arrives on the stream, as FirstPage's does.
-  rpc NextPage(frontend.v1.NextPageCmd) returns (CommandAck);
+  rpc NextPage(NextPageRequest) returns (NextPageResponse);
 }

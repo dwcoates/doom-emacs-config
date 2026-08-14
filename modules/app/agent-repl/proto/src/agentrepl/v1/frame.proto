@@ -208,93 +208,9 @@ message CommandAck {
   frontend.v1.FailureCardRef failure_card = 5;
 }
 
-// Interrupt's answer, which has a THIRD outcome neither ok nor a failure.
-//
-// The interrupt confirmation CHALLENGE is not an error: the command was
-// understood and deliberately not performed, because no turn was live and
-// stopping live subagents deserves an explicit yes. It is returned with
-// ack.ok=false and ack.failure UNSET; the client asks the user and calls
-// Interrupt again with confirm_agents=true.
-//
-// Under the old generic ack this was a field that was meaningless on 32 other
-// commands. Here its presence is scoped by the method's own signature.
-message InterruptResponse {
-  CommandAck ack = 1;
-  InterruptConfirmRequired confirm_required = 2;
-}
-
-// CancelDetachedAgents' answer: WHAT the cancel did, relayed from the shim.
-//
-// The outcome is set on BOTH the success answer (the `cancelled` arm) and the
-// refusal (`nothing_running` / `unsupported` alongside ack.ok=false), so a
-// client never has to read a refusal's meaning out of `error` text.
-message CancelDetachedAgentsResponse {
-  CommandAck ack = 1;
-  frontend.v1.DetachedCancelOutcome outcome = 2;
-}
-
-// SetModel's answer.
-message SetModelResponse {
-  CommandAck ack = 1;
-  // The shim-confirmed current model, on both success and rejection, so a
-  // frontend never needs an optimistic model state or a local recovery guess.
-  string selected_model = 2;
-}
-
-// CreateSession's answer.
-message CreateSessionResponse {
-  CommandAck ack = 1;
-  // FOR OBSERVABILITY ONLY: the vendor conversation uuid the created session
-  // actually landed on, so a client can attribute its logs from its very first
-  // line instead of waiting for the first pushed SessionView.
-  //
-  // A CLIENT MUST NOT PERSIST THIS OR FEED IT BACK. It is an observation of
-  // daemon state at one instant, not a durable fact: the uuid ROTATES (a
-  // /clear or a compact starts a new vendor conversation and resets the
-  // cursors with it), so a stored copy is wrong from the next rotation
-  // onward. The steady-state source is the pushed SessionView, which tracks
-  // rotations; this field only covers the gap before the first push.
-  //
-  // Feeding it back is what this whole change removed — see ResumeMode. The
-  // rule is not enforceable from here, so it is also enforced where it
-  // matters: the Emacs frontend has no persistence path that can reach a
-  // vendor uuid, and a test asserts its state file never contains one.
-  string observed_claude_session_id = 2;
-}
-
 // The challenge payload: what the interrupt would actually stop, so the
 // client can render a concrete question ("interrupt 3 running subagents?")
 // rather than a bare are-you-sure.
 message InterruptConfirmRequired {
   int64 live_tasks = 1;
-}
-
-// A replay request carries ONE token of identity, not several.
-//
-// The client says where it had read up to and which fence it held when it
-// decided to ask. It never copies, holds or agrees a session identity or a
-// controller generation: several identities a client must send back in
-// agreement is several ways for a client to send back a disagreement, and the
-// fence already answers the only question they were ever asked together.
-message ResyncCmd {
-  // Correlation with the replay this call provokes. See CommandAck.request_id.
-  string request_id = 1;
-  // WHICH WORKSPACE to replay. It was the command envelope's field before the
-  // service existed; a method call has no envelope, so it is stated here.
-  string workspace = 2;
-  // WHICH SUBSCRIBE STREAM to replay onto. The replay is a push, and a unary
-  // call no longer shares a socket with the stream that will carry it. See
-  // SubscribeRequest.client_id.
-  string client_id = 3;
-  uint64 from_seq = 4;
-  // The fence ECHO: the exact fence the client held when it decided to ask
-  // for this replay, copied byte-for-byte from the WorkspaceState it was
-  // reading at that moment.
-  //
-  // It must be captured AT DECISION TIME, not read from current state when
-  // the transport sends, or a delayed request silently rebinds itself to a
-  // newer generation and asks for a replay nobody wanted. The daemon compares
-  // it against the workspace's live fence and REFUSES the command before
-  // replaying anything when they differ.
-  string fence = 5;
 }
