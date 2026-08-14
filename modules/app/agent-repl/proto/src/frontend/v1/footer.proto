@@ -824,11 +824,18 @@ message AccountingInvalid {
 // ==========================================================================
 
 message SubmitPromptCmd {
-  string text = 1;
-  string permission_mode = 2;
+  // Correlation. See agentrepl.v1.AgentRepl. It is also the DURABLE TURN KEY:
+  // the daemon's prompt-receipt ledger claims and discharges a turn under this
+  // id, so it must be unique across a client's whole lifetime, not merely
+  // in-flight.
+  string request_id = 1;
+  // The workspace whose session this prompt goes to. See agentrepl.v1.AgentRepl.
+  string workspace = 2;
+  string text = 3;
+  string permission_mode = 4;
   // Required origin selected by the concrete frontend send site. The daemon
   // rejects UNSPECIFIED rather than guessing which UI or automation acted.
-  shim.v1.PromptOrigin prompt_origin = 3;
+  shim.v1.PromptOrigin prompt_origin = 5;
 }
 
 // Stop the running turn. Interrupting a LIVE TURN never asks for
@@ -837,7 +844,11 @@ message SubmitPromptCmd {
 // interrupt only on a resend carrying confirm_agents=true — stopping working
 // subagents is the one interrupt worth a deliberate second keystroke.
 message InterruptCmd {
-  bool confirm_agents = 1;
+  // Correlation. See agentrepl.v1.AgentRepl.
+  string request_id = 1;
+  // The workspace whose turn is being stopped. See agentrepl.v1.AgentRepl.
+  string workspace = 2;
+  bool confirm_agents = 3;
 }
 
 // Cancel the workspace session's DETACHED background agents: the subagent,
@@ -857,9 +868,15 @@ message InterruptCmd {
 // agents, so sending it IS the deliberate second keystroke that flag exists to
 // require. A frontend asks its user before it sends, never after.
 //
-// The session is the command envelope's `workspace`; the command has no
-// fields of its own.
-message CancelDetachedAgentsCmd {}
+// The session is named by `workspace` below, and the command has nothing else
+// to say.
+message CancelDetachedAgentsCmd {
+  // Correlation. See agentrepl.v1.AgentRepl.
+  string request_id = 1;
+  // The workspace whose detached agents are being cancelled. See
+  // agentrepl.v1.AgentRepl.
+  string workspace = 2;
+}
 
 // What a CancelDetachedAgentsCmd did, carried on the command's ack.
 //
@@ -1095,16 +1112,29 @@ message QueueView {
 // Deliver this entry NOW — the user overriding the classifier, or not waiting
 // for it. Runs exactly the same interject sequence an INTERJECT verdict does.
 message QueueForceCmd {
-  string entry_id = 1;
+  // Correlation. See agentrepl.v1.AgentRepl.
+  string request_id = 1;
+  // The workspace whose queue holds the entry. The queue is per-workspace, so
+  // an entry id alone does not address one. See agentrepl.v1.AgentRepl.
+  string workspace = 2;
+  string entry_id = 3;
 }
 
 // Confirm a HOLD entry. View state only: the entry is still delivered by the
 // ordinary turn-end drain, on the same schedule it already had.
 message QueueAcceptCmd {
-  string entry_id = 1;
+  // Correlation. See agentrepl.v1.AgentRepl.
+  string request_id = 1;
+  // The workspace whose queue holds the entry. See agentrepl.v1.AgentRepl.
+  string workspace = 2;
+  string entry_id = 3;
 }
 
 // Drop an entry. It is never delivered.
 message QueueCancelCmd {
-  string entry_id = 1;
+  // Correlation. See agentrepl.v1.AgentRepl.
+  string request_id = 1;
+  // The workspace whose queue holds the entry. See agentrepl.v1.AgentRepl.
+  string workspace = 2;
+  string entry_id = 3;
 }
