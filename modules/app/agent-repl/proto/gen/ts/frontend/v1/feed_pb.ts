@@ -23,14 +23,13 @@ import type { AgentSaid, DetachedWorkEnded, DetachedWorkKind, DetachedWorkStarte
 import { file_conversation_v1_payloads } from "../../conversation/v1/payloads_pb";
 import type { FailureKind, SessionCommand } from "../../agentrepl/v1/shared_pb";
 import { file_agentrepl_v1_shared } from "../../agentrepl/v1/shared_pb";
-import { file_google_protobuf_struct } from "@bufbuild/protobuf/wkt";
-import type { JsonObject, Message as Message$1 } from "@bufbuild/protobuf";
+import type { Message as Message$1 } from "@bufbuild/protobuf";
 
 /**
  * Describes the file frontend/v1/feed.proto.
  */
 export const file_frontend_v1_feed: GenFile = /*@__PURE__*/
-  fileDesc("ChZmcm9udGVuZC92MS9mZWVkLnByb3RvEgtmcm9udGVuZC52MSJyChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSJgoIbWVzc2FnZXMYAiADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEhMKC3Rocm91Z2hfc2VxGAMgASgEEg0KBWZlbmNlGAQgASgJIowECgdNZXNzYWdlEgwKBHV1aWQYASABKAkSDQoFdHNfbXMYAiABKAMSEgoKcmVxdWVzdF9pZBgDIAEoCRIvCgZzb3VyY2UYBCABKA4yHy5mcm9udGVuZC52MS5Db252ZXJzYXRpb25Tb3VyY2USHgoRcGFyZW50X21lc3NhZ2VfaWQYBSABKAlIAYgBARIrCgVhZ2VudBgGIAEoCzIaLmZyb250ZW5kLnYxLkFnZW50RW1pc3Npb25IABI0Cgx1c2VyX21lc3NhZ2UYByABKAsyHC5jb252ZXJzYXRpb24udjEuVXNlckNvbnRlbnRIABI0CgxmYWlsdXJlX2NhcmQYCCABKAsyHC5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZFZpZXdIABJPChpkYWVtb25faW50ZXJjZXB0ZWRfY29tbWFuZBgJIAEoCzIpLmZyb250ZW5kLnYxLkRhZW1vbkludGVyY2VwdGVkQ29tbWFuZEl0ZW1IABIyCg1kZXRhY2hlZF93b3JrGAogASgLMhkuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrSAASQAoSY29tcGFjdGlvbl9zdW1tYXJ5GAsgASgLMiIuZnJvbnRlbmQudjEuQ29tcGFjdGlvblN1bW1hcnlJdGVtSABCCQoHcGF5bG9hZEIUChJfcGFyZW50X21lc3NhZ2VfaWQiogEKEURldGFjaGVkV29ya0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIkCgZvcGVuZWQYAiADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEjAKB3VwZGF0ZXMYAyADKAsyHy5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtVcGRhdGUSEwoLdGhyb3VnaF9zZXEYBCABKAQSDQoFZmVuY2UYBSABKAkiYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMiSAoJVHlwaW5nQ3V0EhEKCXdvcmtzcGFjZRgBIAEoCRIZChFwYXJlbnRfbWVzc2FnZV9pZBgCIAEoCRINCgVmZW5jZRgDIAEoCSJeCg9TZXNzaW9uSW5pdFZpZXcSEQoJd29ya3NwYWNlGAEgASgJEikKBHJvd3MYAiADKAsyGy5mcm9udGVuZC52MS5TZXNzaW9uSW5pdFJvdxINCgVmZW5jZRgDIAEoCSIuCg5TZXNzaW9uSW5pdFJvdxINCgVsYWJlbBgBIAEoCRINCgV2YWx1ZRgCIAEoCSKtAgoNQWdlbnRFbWlzc2lvbhIuCghyZXNwb25zZRgBIAEoCzIaLmZyb250ZW5kLnYxLkFnZW50UmVzcG9uc2VIABI0Cgt0b29sX3Jlc3VsdBgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5Ub29sUmV0dXJuZWRIABI1Cgx0b29sX291dGNvbWUYAyABKAsyHS5mcm9udGVuZC52MS5BZ2VudFRvb2xPdXRjb21lSAASOAoKc2tpbGxfYm9keRgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ta2lsbEJvZHlSZXNvbHZlZEgAEjkKC3R1cm5fcmVzdWx0GAUgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0VuZGVkSABCCgoIZW1pc3Npb24inwEKDUFnZW50UmVzcG9uc2USKAoEc2FpZBgBIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudFNhaWQSNAoLdXNhZ2Vfc3RhbXAYAiABKAsyHy5mcm9udGVuZC52MS5SZXNwb25zZVVzYWdlU3RhbXASLgoIdmVyZGljdHMYAyADKAsyHC5mcm9udGVuZC52MS5Ub29sQ2FsbFZlcmRpY3QiQgoPVG9vbENhbGxWZXJkaWN0EhMKC3Rvb2xfdXNlX2lkGAEgASgJEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgCIAEoCSJ1ChJSZXNwb25zZVVzYWdlU3RhbXASHgoWZXhwZW5zaXZlX2lucHV0X3Rva2VucxgBIAEoAxIZChFjYWNoZV9yZWFkX3Rva2VucxgCIAEoAxIVCg1vdXRwdXRfdG9rZW5zGAMgASgDEg0KBW1vZGVsGAQgASgJIrwBChBBZ2VudFRvb2xPdXRjb21lEjcKB3N0YXJ0ZWQYASABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZEgAEjMKBWVuZGVkGAIgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0VuZGVkSAASEwoLdG9vbF91c2VfaWQYAyABKAkSGgoSc3Bhd25lZF9tZXNzYWdlX2lkGAQgASgJQgkKB291dGNvbWUi0gMKCVRhc2tFbnRyeRIPCgd0YXNrX2lkGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJEhMKC291dHB1dF9wYXRoGAMgASgJEhUKDXN0YXJ0ZWRfYXRfbXMYBCABKAMSEwoLZW5kZWRfYXRfbXMYBSABKAMSNAoJd29ya19raW5kGAYgASgLMiEuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0tpbmQSMQoHcnVubmluZxgHIAEoCzIeLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNSdW5uaW5nSAASKwoEZG9uZRgIIAEoCzIbLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNEb25lSAASLQoFZXJyb3IYCSABKAsyHC5mcm9udGVuZC52MS5UYXNrU3RhdHVzRXJyb3JIABIvCgZraWxsZWQYCiABKAsyHS5mcm9udGVuZC52MS5UYXNrU3RhdHVzS2lsbGVkSAASMQoHc3RvcHBlZBgLIAEoCzIeLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNTdG9wcGVkSAASKwoEbG9zdBgMIAEoCzIbLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNMb3N0SABCCAoGc3RhdHVzIhMKEVRhc2tTdGF0dXNSdW5uaW5nIhAKDlRhc2tTdGF0dXNEb25lIhEKD1Rhc2tTdGF0dXNFcnJvciISChBUYXNrU3RhdHVzS2lsbGVkIhMKEVRhc2tTdGF0dXNTdG9wcGVkIhAKDlRhc2tTdGF0dXNMb3N0IlYKC1Rhc2tDYXRhbG9nEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgV0YXNrcxgCIAMoCzIWLmZyb250ZW5kLnYxLlRhc2tFbnRyeRINCgVmZW5jZRgDIAEoCSJNChxEYWVtb25JbnRlcmNlcHRlZENvbW1hbmRJdGVtEi0KB2NvbW1hbmQYASABKA4yHC5hZ2VudHJlcGwudjEuU2Vzc2lvbkNvbW1hbmQiggIKD0ZhaWx1cmVDYXJkVmlldxInCgRraW5kGAEgASgLMhkuYWdlbnRyZXBsLnYxLkZhaWx1cmVLaW5kEg8KB21lc3NhZ2UYAiABKAkSDgoGZGV0YWlsGAMgASgJEiwKBG9wZW4YBCABKAsyHC5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZE9wZW5IABI0CghyZXNvbHZlZBgFIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkUmVzb2x2ZWRIABI0Cgh0ZXJtaW5hbBgGIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVGVybWluYWxIAEILCglsaWZlY3ljbGUiEQoPRmFpbHVyZUNhcmRPcGVuIi0KE0ZhaWx1cmVDYXJkUmVzb2x2ZWQSFgoOcmVzb2x2ZWRfYXRfbXMYASABKAMiFQoTRmFpbHVyZUNhcmRUZXJtaW5hbCIjCg5GYWlsdXJlQ2FyZFJlZhIRCgljYXJkX3V1aWQYASABKAkisAEKE1Blcm1pc3Npb25BbnN3ZXJDbWQSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl3b3Jrc3BhY2UYAiABKAkSHQoVcGVybWlzc2lvbl9yZXF1ZXN0X2lkGAMgASgJEg0KBWFsbG93GAQgASgIEi4KDXVwZGF0ZWRfaW5wdXQYBSABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhQKDGRlbnlfbWVzc2FnZRgGIAEoCSKkAQoMRGV0YWNoZWRXb3JrEjUKB3N0YXJ0ZWQYASABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZBIVCg1zdGFydGVkX2F0X21zGAIgASgDEjMKCGxpdmVuZXNzGAMgASgLMiEuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3MSEQoJd29ya3NwYWNlGAQgASgJIoMBChREZXRhY2hlZFdvcmtMaXZlbmVzcxItCgRsaXZlGAEgASgLMh0uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZUgAEjMKB3NldHRsZWQYAiABKAsyIC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTZXR0bGVkSABCBwoFc3RhdGUiLAoQRGV0YWNoZWRXb3JrTGl2ZRIYChBsYXN0X2FjdGl2aXR5X21zGAEgASgDIpcBChNEZXRhY2hlZFdvcmtTZXR0bGVkEhUKDXNldHRsZWRfYXRfbXMYASABKAMSMQoFZW5kZWQYAiABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWQSNgoGa2lsbGVkGAMgASgLMiYuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrT3V0Y29tZUtpbGxlZCIrChlEZXRhY2hlZFdvcmtPdXRjb21lS2lsbGVkEg4KBnJlYXNvbhgBIAEoCSLGAwoSRGV0YWNoZWRXb3JrVXBkYXRlEhIKCm1lc3NhZ2VfaWQYASABKAkSNQoFYWdlbnQYAiABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtBZ2VudFVwZGF0ZUgAEjkKB2pvdXJuYWwYAyABKAsyJi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtKb3VybmFsVXBkYXRlSAASNgoFc2hlbGwYBCABKAsyJS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtPdXRwdXRBcHBlbmRIABI9Cgx1bmNsYXNzaWZpZWQYBSABKAsyJS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtPdXRwdXRBcHBlbmRIABI7CghsaXZlbmVzcxgGIAEoCzInLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0xpdmVuZXNzVXBkYXRlSAASNQoFbWVyZ2UYByABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtBZ2VudFVwZGF0ZUgAEjUKBXNraWxsGAggASgLMiQuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrU2tpbGxVcGRhdGVIAEIICgZ1cGRhdGUiSAoXRGV0YWNoZWRXb3JrQWdlbnRVcGRhdGUSLQoJZW1pc3Npb25zGAEgAygLMhouZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbiKSAQoXRGV0YWNoZWRXb3JrU2tpbGxVcGRhdGUSMgoEYm9keRgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ta2lsbEJvZHlSZXNvbHZlZEgAEjkKCWVtaXNzaW9ucxgCIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSABCCAoGdXBkYXRlIkgKGURldGFjaGVkV29ya0pvdXJuYWxVcGRhdGUSKwoEcm93cxgBIAMoCzIdLmNvbnZlcnNhdGlvbi52MS5Xb3JrZmxvd1N0ZXAiKAoYRGV0YWNoZWRXb3JrT3V0cHV0QXBwZW5kEgwKBHRleHQYASABKAkiUQoaRGV0YWNoZWRXb3JrTGl2ZW5lc3NVcGRhdGUSMwoIbGl2ZW5lc3MYASABKAsyIS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlbmVzcyJwCglQYWdlU2NvcGUSKgoEZmVlZBgBIAEoCzIaLmZyb250ZW5kLnYxLlBhZ2VTY29wZUZlZWRIABIuCgZpbnNpZGUYAiABKAsyHC5mcm9udGVuZC52MS5QYWdlU2NvcGVJbnNpZGVIAEIHCgVzY29wZSIPCg1QYWdlU2NvcGVGZWVkIi8KD1BhZ2VTY29wZUluc2lkZRIcChRjb250YWluZXJfbWVzc2FnZV9pZBgBIAEoCSJvCgxGaXJzdFBhZ2VDbWQSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgljbGllbnRfaWQYAiABKAkSEQoJd29ya3NwYWNlGAMgASgJEiUKBXNjb3BlGAQgASgLMhYuZnJvbnRlbmQudjEuUGFnZVNjb3BlIm4KC05leHRQYWdlQ21kEhIKCnJlcXVlc3RfaWQYASABKAkSEQoJY2xpZW50X2lkGAIgASgJEhEKCXdvcmtzcGFjZRgDIAEoCRIlCgVzY29wZRgEIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZSKvAgoXQ29udmVyc2F0aW9uSGlzdG9yeVBhZ2USEQoJd29ya3NwYWNlGAEgASgJEhIKCnJlcXVlc3RfaWQYAiABKAkSJgoIbWVzc2FnZXMYAyADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEisKBG1vcmUYBCABKAsyGy5mcm9udGVuZC52MS5IaXN0b3J5SGFzTW9yZUgAEiwKBXN0YXJ0GAUgASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUF0U3RhcnRIABIVCg1saXZlX2pvaW5fc2VxGAYgASgEEiUKBXNjb3BlGAcgASgLMhYuZnJvbnRlbmQudjEuUGFnZVNjb3BlEhwKFGFuY2VzdG9yX21lc3NhZ2VfaWRzGAggAygJQg4KDGNvbnRpbnVhdGlvbiIQCg5IaXN0b3J5SGFzTW9yZSIQCg5IaXN0b3J5QXRTdGFydCp2ChJDb252ZXJzYXRpb25Tb3VyY2USIwofQ09OVkVSU0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEhwKGENPTlZFUlNBVElPTl9TT1VSQ0VfVVNFUhABEh0KGUNPTlZFUlNBVElPTl9TT1VSQ0VfTUVSR0UQAkIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_content, file_conversation_v1_payloads, file_agentrepl_v1_shared, file_google_protobuf_struct]);
+  fileDesc("ChZmcm9udGVuZC92MS9mZWVkLnByb3RvEgtmcm9udGVuZC52MSJyChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSJgoIbWVzc2FnZXMYAiADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEhMKC3Rocm91Z2hfc2VxGAMgASgEEg0KBWZlbmNlGAQgASgJIowECgdNZXNzYWdlEgwKBHV1aWQYASABKAkSDQoFdHNfbXMYAiABKAMSEgoKcmVxdWVzdF9pZBgDIAEoCRIvCgZzb3VyY2UYBCABKA4yHy5mcm9udGVuZC52MS5Db252ZXJzYXRpb25Tb3VyY2USHgoRcGFyZW50X21lc3NhZ2VfaWQYBSABKAlIAYgBARIrCgVhZ2VudBgGIAEoCzIaLmZyb250ZW5kLnYxLkFnZW50RW1pc3Npb25IABI0Cgx1c2VyX21lc3NhZ2UYByABKAsyHC5jb252ZXJzYXRpb24udjEuVXNlckNvbnRlbnRIABI0CgxmYWlsdXJlX2NhcmQYCCABKAsyHC5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZFZpZXdIABJPChpkYWVtb25faW50ZXJjZXB0ZWRfY29tbWFuZBgJIAEoCzIpLmZyb250ZW5kLnYxLkRhZW1vbkludGVyY2VwdGVkQ29tbWFuZEl0ZW1IABIyCg1kZXRhY2hlZF93b3JrGAogASgLMhkuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrSAASQAoSY29tcGFjdGlvbl9zdW1tYXJ5GAsgASgLMiIuZnJvbnRlbmQudjEuQ29tcGFjdGlvblN1bW1hcnlJdGVtSABCCQoHcGF5bG9hZEIUChJfcGFyZW50X21lc3NhZ2VfaWQiogEKEURldGFjaGVkV29ya0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIkCgZvcGVuZWQYAiADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEjAKB3VwZGF0ZXMYAyADKAsyHy5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtVcGRhdGUSEwoLdGhyb3VnaF9zZXEYBCABKAQSDQoFZmVuY2UYBSABKAkiYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMiSAoJVHlwaW5nQ3V0EhEKCXdvcmtzcGFjZRgBIAEoCRIZChFwYXJlbnRfbWVzc2FnZV9pZBgCIAEoCRINCgVmZW5jZRgDIAEoCSJeCg9TZXNzaW9uSW5pdFZpZXcSEQoJd29ya3NwYWNlGAEgASgJEikKBHJvd3MYAiADKAsyGy5mcm9udGVuZC52MS5TZXNzaW9uSW5pdFJvdxINCgVmZW5jZRgDIAEoCSIuCg5TZXNzaW9uSW5pdFJvdxINCgVsYWJlbBgBIAEoCRINCgV2YWx1ZRgCIAEoCSKtAgoNQWdlbnRFbWlzc2lvbhIuCghyZXNwb25zZRgBIAEoCzIaLmZyb250ZW5kLnYxLkFnZW50UmVzcG9uc2VIABI0Cgt0b29sX3Jlc3VsdBgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5Ub29sUmV0dXJuZWRIABI1Cgx0b29sX291dGNvbWUYAyABKAsyHS5mcm9udGVuZC52MS5BZ2VudFRvb2xPdXRjb21lSAASOAoKc2tpbGxfYm9keRgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ta2lsbEJvZHlSZXNvbHZlZEgAEjkKC3R1cm5fcmVzdWx0GAUgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0VuZGVkSABCCgoIZW1pc3Npb24inwEKDUFnZW50UmVzcG9uc2USKAoEc2FpZBgBIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudFNhaWQSNAoLdXNhZ2Vfc3RhbXAYAiABKAsyHy5mcm9udGVuZC52MS5SZXNwb25zZVVzYWdlU3RhbXASLgoIdmVyZGljdHMYAyADKAsyHC5mcm9udGVuZC52MS5Ub29sQ2FsbFZlcmRpY3QiQgoPVG9vbENhbGxWZXJkaWN0EhMKC3Rvb2xfdXNlX2lkGAEgASgJEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgCIAEoCSJ1ChJSZXNwb25zZVVzYWdlU3RhbXASHgoWZXhwZW5zaXZlX2lucHV0X3Rva2VucxgBIAEoAxIZChFjYWNoZV9yZWFkX3Rva2VucxgCIAEoAxIVCg1vdXRwdXRfdG9rZW5zGAMgASgDEg0KBW1vZGVsGAQgASgJIrwBChBBZ2VudFRvb2xPdXRjb21lEjcKB3N0YXJ0ZWQYASABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZEgAEjMKBWVuZGVkGAIgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0VuZGVkSAASEwoLdG9vbF91c2VfaWQYAyABKAkSGgoSc3Bhd25lZF9tZXNzYWdlX2lkGAQgASgJQgkKB291dGNvbWUi0gMKCVRhc2tFbnRyeRIPCgd0YXNrX2lkGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJEhMKC291dHB1dF9wYXRoGAMgASgJEhUKDXN0YXJ0ZWRfYXRfbXMYBCABKAMSEwoLZW5kZWRfYXRfbXMYBSABKAMSNAoJd29ya19raW5kGAYgASgLMiEuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0tpbmQSMQoHcnVubmluZxgHIAEoCzIeLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNSdW5uaW5nSAASKwoEZG9uZRgIIAEoCzIbLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNEb25lSAASLQoFZXJyb3IYCSABKAsyHC5mcm9udGVuZC52MS5UYXNrU3RhdHVzRXJyb3JIABIvCgZraWxsZWQYCiABKAsyHS5mcm9udGVuZC52MS5UYXNrU3RhdHVzS2lsbGVkSAASMQoHc3RvcHBlZBgLIAEoCzIeLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNTdG9wcGVkSAASKwoEbG9zdBgMIAEoCzIbLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNMb3N0SABCCAoGc3RhdHVzIhMKEVRhc2tTdGF0dXNSdW5uaW5nIhAKDlRhc2tTdGF0dXNEb25lIhEKD1Rhc2tTdGF0dXNFcnJvciISChBUYXNrU3RhdHVzS2lsbGVkIhMKEVRhc2tTdGF0dXNTdG9wcGVkIhAKDlRhc2tTdGF0dXNMb3N0IlYKC1Rhc2tDYXRhbG9nEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgV0YXNrcxgCIAMoCzIWLmZyb250ZW5kLnYxLlRhc2tFbnRyeRINCgVmZW5jZRgDIAEoCSJNChxEYWVtb25JbnRlcmNlcHRlZENvbW1hbmRJdGVtEi0KB2NvbW1hbmQYASABKA4yHC5hZ2VudHJlcGwudjEuU2Vzc2lvbkNvbW1hbmQiggIKD0ZhaWx1cmVDYXJkVmlldxInCgRraW5kGAEgASgLMhkuYWdlbnRyZXBsLnYxLkZhaWx1cmVLaW5kEg8KB21lc3NhZ2UYAiABKAkSDgoGZGV0YWlsGAMgASgJEiwKBG9wZW4YBCABKAsyHC5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZE9wZW5IABI0CghyZXNvbHZlZBgFIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkUmVzb2x2ZWRIABI0Cgh0ZXJtaW5hbBgGIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVGVybWluYWxIAEILCglsaWZlY3ljbGUiEQoPRmFpbHVyZUNhcmRPcGVuIi0KE0ZhaWx1cmVDYXJkUmVzb2x2ZWQSFgoOcmVzb2x2ZWRfYXRfbXMYASABKAMiFQoTRmFpbHVyZUNhcmRUZXJtaW5hbCIjCg5GYWlsdXJlQ2FyZFJlZhIRCgljYXJkX3V1aWQYASABKAkipAEKDERldGFjaGVkV29yaxI1CgdzdGFydGVkGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya1N0YXJ0ZWQSFQoNc3RhcnRlZF9hdF9tcxgCIAEoAxIzCghsaXZlbmVzcxgDIAEoCzIhLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0xpdmVuZXNzEhEKCXdvcmtzcGFjZRgEIAEoCSKDAQoURGV0YWNoZWRXb3JrTGl2ZW5lc3MSLQoEbGl2ZRgBIAEoCzIdLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0xpdmVIABIzCgdzZXR0bGVkGAIgASgLMiAuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrU2V0dGxlZEgAQgcKBXN0YXRlIiwKEERldGFjaGVkV29ya0xpdmUSGAoQbGFzdF9hY3Rpdml0eV9tcxgBIAEoAyKXAQoTRGV0YWNoZWRXb3JrU2V0dGxlZBIVCg1zZXR0bGVkX2F0X21zGAEgASgDEjEKBWVuZGVkGAIgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0VuZGVkEjYKBmtpbGxlZBgDIAEoCzImLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dGNvbWVLaWxsZWQiKwoZRGV0YWNoZWRXb3JrT3V0Y29tZUtpbGxlZBIOCgZyZWFzb24YASABKAkixgMKEkRldGFjaGVkV29ya1VwZGF0ZRISCgptZXNzYWdlX2lkGAEgASgJEjUKBWFnZW50GAIgASgLMiQuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrQWdlbnRVcGRhdGVIABI5Cgdqb3VybmFsGAMgASgLMiYuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrSm91cm5hbFVwZGF0ZUgAEjYKBXNoZWxsGAQgASgLMiUuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrT3V0cHV0QXBwZW5kSAASPQoMdW5jbGFzc2lmaWVkGAUgASgLMiUuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrT3V0cHV0QXBwZW5kSAASOwoIbGl2ZW5lc3MYBiABKAsyJy5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlbmVzc1VwZGF0ZUgAEjUKBW1lcmdlGAcgASgLMiQuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrQWdlbnRVcGRhdGVIABI1CgVza2lsbBgIIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya1NraWxsVXBkYXRlSABCCAoGdXBkYXRlIkgKF0RldGFjaGVkV29ya0FnZW50VXBkYXRlEi0KCWVtaXNzaW9ucxgBIAMoCzIaLmZyb250ZW5kLnYxLkFnZW50RW1pc3Npb24ikgEKF0RldGFjaGVkV29ya1NraWxsVXBkYXRlEjIKBGJvZHkYASABKAsyIi5jb252ZXJzYXRpb24udjEuU2tpbGxCb2R5UmVzb2x2ZWRIABI5CgllbWlzc2lvbnMYAiABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtBZ2VudFVwZGF0ZUgAQggKBnVwZGF0ZSJIChlEZXRhY2hlZFdvcmtKb3VybmFsVXBkYXRlEisKBHJvd3MYASADKAsyHS5jb252ZXJzYXRpb24udjEuV29ya2Zsb3dTdGVwIigKGERldGFjaGVkV29ya091dHB1dEFwcGVuZBIMCgR0ZXh0GAEgASgJIlEKGkRldGFjaGVkV29ya0xpdmVuZXNzVXBkYXRlEjMKCGxpdmVuZXNzGAEgASgLMiEuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3MicAoJUGFnZVNjb3BlEioKBGZlZWQYASABKAsyGi5mcm9udGVuZC52MS5QYWdlU2NvcGVGZWVkSAASLgoGaW5zaWRlGAIgASgLMhwuZnJvbnRlbmQudjEuUGFnZVNjb3BlSW5zaWRlSABCBwoFc2NvcGUiDwoNUGFnZVNjb3BlRmVlZCIvCg9QYWdlU2NvcGVJbnNpZGUSHAoUY29udGFpbmVyX21lc3NhZ2VfaWQYASABKAkirwIKF0NvbnZlcnNhdGlvbkhpc3RvcnlQYWdlEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpyZXF1ZXN0X2lkGAIgASgJEiYKCG1lc3NhZ2VzGAMgAygLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRIrCgRtb3JlGAQgASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUhhc01vcmVIABIsCgVzdGFydBgFIAEoCzIbLmZyb250ZW5kLnYxLkhpc3RvcnlBdFN0YXJ0SAASFQoNbGl2ZV9qb2luX3NlcRgGIAEoBBIlCgVzY29wZRgHIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZRIcChRhbmNlc3Rvcl9tZXNzYWdlX2lkcxgIIAMoCUIOCgxjb250aW51YXRpb24iEAoOSGlzdG9yeUhhc01vcmUiEAoOSGlzdG9yeUF0U3RhcnQqdgoSQ29udmVyc2F0aW9uU291cmNlEiMKH0NPTlZFUlNBVElPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIcChhDT05WRVJTQVRJT05fU09VUkNFX1VTRVIQARIdChlDT05WRVJTQVRJT05fU09VUkNFX01FUkdFEAJCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_conversation_v1_content, file_conversation_v1_payloads, file_agentrepl_v1_shared]);
 
 /**
  * Complete (store-round-tripped) conversation additions, composed from the
@@ -1349,53 +1348,6 @@ export const FailureCardRefSchema: GenMessage<FailureCardRef> = /*@__PURE__*/
   messageDesc(file_frontend_v1_feed, 25);
 
 /**
- * @generated from message frontend.v1.PermissionAnswerCmd
- */
-export type PermissionAnswerCmd = Message$1<"frontend.v1.PermissionAnswerCmd"> & {
-  /**
-   * Correlation. See agentrepl.v1.AgentRepl.
-   *
-   * @generated from field: string request_id = 1;
-   */
-  requestId: string;
-
-  /**
-   * The workspace whose shim is blocked on this answer. See
-   * agentrepl.v1.AgentRepl.
-   *
-   * @generated from field: string workspace = 2;
-   */
-  workspace: string;
-
-  /**
-   * @generated from field: string permission_request_id = 3;
-   */
-  permissionRequestId: string;
-
-  /**
-   * @generated from field: bool allow = 4;
-   */
-  allow: boolean;
-
-  /**
-   * @generated from field: google.protobuf.Struct updated_input = 5;
-   */
-  updatedInput?: JsonObject | undefined;
-
-  /**
-   * @generated from field: string deny_message = 6;
-   */
-  denyMessage: string;
-};
-
-/**
- * Describes the message frontend.v1.PermissionAnswerCmd.
- * Use `create(PermissionAnswerCmdSchema)` to create a new message.
- */
-export const PermissionAnswerCmdSchema: GenMessage<PermissionAnswerCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 26);
-
-/**
  * One piece of detached work, as the payload of the Message that IS it.
  *
  * THERE IS ONE ID SPACE: the containing Message's uuid. A routing handle of
@@ -1474,7 +1426,7 @@ export type DetachedWork = Message$1<"frontend.v1.DetachedWork"> & {
  * Use `create(DetachedWorkSchema)` to create a new message.
  */
 export const DetachedWorkSchema: GenMessage<DetachedWork> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 27);
+  messageDesc(file_frontend_v1_feed, 26);
 
 /**
  * Live-or-settled, expressed as arms so that "settled" and "settled with what
@@ -1507,7 +1459,7 @@ export type DetachedWorkLiveness = Message$1<"frontend.v1.DetachedWorkLiveness">
  * Use `create(DetachedWorkLivenessSchema)` to create a new message.
  */
 export const DetachedWorkLivenessSchema: GenMessage<DetachedWorkLiveness> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 28);
+  messageDesc(file_frontend_v1_feed, 27);
 
 /**
  * The work is still running.
@@ -1531,7 +1483,7 @@ export type DetachedWorkLive = Message$1<"frontend.v1.DetachedWorkLive"> & {
  * Use `create(DetachedWorkLiveSchema)` to create a new message.
  */
 export const DetachedWorkLiveSchema: GenMessage<DetachedWorkLive> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 29);
+  messageDesc(file_frontend_v1_feed, 28);
 
 /**
  * The work has finished, one way or another.
@@ -1583,7 +1535,7 @@ export type DetachedWorkSettled = Message$1<"frontend.v1.DetachedWorkSettled"> &
  * Use `create(DetachedWorkSettledSchema)` to create a new message.
  */
 export const DetachedWorkSettledSchema: GenMessage<DetachedWorkSettled> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 30);
+  messageDesc(file_frontend_v1_feed, 29);
 
 /**
  * Stopped from outside before it finished: an explicit stop, a cancellation,
@@ -1606,7 +1558,7 @@ export type DetachedWorkOutcomeKilled = Message$1<"frontend.v1.DetachedWorkOutco
  * Use `create(DetachedWorkOutcomeKilledSchema)` to create a new message.
  */
 export const DetachedWorkOutcomeKilledSchema: GenMessage<DetachedWorkOutcomeKilled> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 31);
+  messageDesc(file_frontend_v1_feed, 30);
 
 /**
  * One incremental push to ONE MESSAGE'S detached-work payload: the message id
@@ -1715,7 +1667,7 @@ export type DetachedWorkUpdate = Message$1<"frontend.v1.DetachedWorkUpdate"> & {
  * Use `create(DetachedWorkUpdateSchema)` to create a new message.
  */
 export const DetachedWorkUpdateSchema: GenMessage<DetachedWorkUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 32);
+  messageDesc(file_frontend_v1_feed, 31);
 
 /**
  * New output from a detached agent.
@@ -1742,7 +1694,7 @@ export type DetachedWorkAgentUpdate = Message$1<"frontend.v1.DetachedWorkAgentUp
  * Use `create(DetachedWorkAgentUpdateSchema)` to create a new message.
  */
 export const DetachedWorkAgentUpdateSchema: GenMessage<DetachedWorkAgentUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 33);
+  messageDesc(file_frontend_v1_feed, 32);
 
 /**
  * One incremental push to a skill message. Body resolution and emission
@@ -1782,7 +1734,7 @@ export type DetachedWorkSkillUpdate = Message$1<"frontend.v1.DetachedWorkSkillUp
  * Use `create(DetachedWorkSkillUpdateSchema)` to create a new message.
  */
 export const DetachedWorkSkillUpdateSchema: GenMessage<DetachedWorkSkillUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 34);
+  messageDesc(file_frontend_v1_feed, 33);
 
 /**
  * New steps in a Workflow run's journal.
@@ -1812,7 +1764,7 @@ export type DetachedWorkJournalUpdate = Message$1<"frontend.v1.DetachedWorkJourn
  * Use `create(DetachedWorkJournalUpdateSchema)` to create a new message.
  */
 export const DetachedWorkJournalUpdateSchema: GenMessage<DetachedWorkJournalUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 35);
+  messageDesc(file_frontend_v1_feed, 34);
 
 /**
  * New bytes on a spool: an APPEND TO ONE MESSAGE'S PAYLOAD.
@@ -1847,7 +1799,7 @@ export type DetachedWorkOutputAppend = Message$1<"frontend.v1.DetachedWorkOutput
  * Use `create(DetachedWorkOutputAppendSchema)` to create a new message.
  */
 export const DetachedWorkOutputAppendSchema: GenMessage<DetachedWorkOutputAppend> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 36);
+  messageDesc(file_frontend_v1_feed, 35);
 
 /**
  * A liveness transition: live to settled, or a settled outcome changing (a
@@ -1869,7 +1821,7 @@ export type DetachedWorkLivenessUpdate = Message$1<"frontend.v1.DetachedWorkLive
  * Use `create(DetachedWorkLivenessUpdateSchema)` to create a new message.
  */
 export const DetachedWorkLivenessUpdateSchema: GenMessage<DetachedWorkLivenessUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 37);
+  messageDesc(file_frontend_v1_feed, 36);
 
 /**
  * Which container a page walks.
@@ -1912,7 +1864,7 @@ export type PageScope = Message$1<"frontend.v1.PageScope"> & {
  * Use `create(PageScopeSchema)` to create a new message.
  */
 export const PageScopeSchema: GenMessage<PageScope> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 38);
+  messageDesc(file_frontend_v1_feed, 37);
 
 /**
  * The top-level conversation: everything the feed renders as a standalone row.
@@ -1931,7 +1883,7 @@ export type PageScopeFeed = Message$1<"frontend.v1.PageScopeFeed"> & {
  * Use `create(PageScopeFeedSchema)` to create a new message.
  */
 export const PageScopeFeedSchema: GenMessage<PageScopeFeed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 39);
+  messageDesc(file_frontend_v1_feed, 38);
 
 /**
  * The inside of one message: the records that message contains.
@@ -1954,117 +1906,7 @@ export type PageScopeInside = Message$1<"frontend.v1.PageScopeInside"> & {
  * Use `create(PageScopeInsideSchema)` to create a new message.
  */
 export const PageScopeInsideSchema: GenMessage<PageScopeInside> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 40);
-
-/**
- * Ask for the MOST RECENT page, and reset this reader's position to it.
- *
- * The cold open and the whole recovery story: a client that bounced, rotated
- * its seq space, or lost its place calls this and starts from the bottom.
- *
- * @generated from message frontend.v1.FirstPageCmd
- */
-export type FirstPageCmd = Message$1<"frontend.v1.FirstPageCmd"> & {
-  /**
-   * Correlation. The ConversationHistoryPage pushed in answer echoes this id,
-   * so a client can DISCARD a page it is no longer awaiting.
-   *
-   * @generated from field: string request_id = 1;
-   */
-  requestId: string;
-
-  /**
-   * WHICH READER, and therefore which Subscribe stream the page is pushed down.
-   * The daemon's position is per READER per workspace per scope, and under a
-   * service a paging call no longer shares a socket with the stream that
-   * answers it — so the reader has to name itself. See
-   * agentrepl.v1.SubscribeRequest.client_id.
-   *
-   * @generated from field: string client_id = 2;
-   */
-  clientId: string;
-
-  /**
-   * Which conversation. The daemon's position is per reader PER WORKSPACE, so
-   * this is what selects the position being reset.
-   *
-   * @generated from field: string workspace = 3;
-   */
-  workspace: string;
-
-  /**
-   * WHICH CONTAINER this page walks: the feed, or the inside of one message.
-   * The daemon's position is per reader per workspace PER SCOPE, so this also
-   * selects which position is being reset — opening a subagent does not throw
-   * away where the reader was in the feed.
-   *
-   * Unset is NOT a default. A request that does not state its scope is REFUSED,
-   * never read as the feed: defaulting would answer a client that forgot to
-   * name its container with the whole conversation.
-   *
-   * @generated from field: frontend.v1.PageScope scope = 4;
-   */
-  scope?: PageScope | undefined;
-};
-
-/**
- * Describes the message frontend.v1.FirstPageCmd.
- * Use `create(FirstPageCmdSchema)` to create a new message.
- */
-export const FirstPageCmdSchema: GenMessage<FirstPageCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 41);
-
-/**
- * Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
- *
- * IT CARRIES NO POSITION, and that absence is the design. From a reader with no
- * established position it is REFUSED rather than answered with the tail:
- * defaulting would turn a client bug into a silent tail read, and "I have no
- * position" already has its own verb.
- *
- * @generated from message frontend.v1.NextPageCmd
- */
-export type NextPageCmd = Message$1<"frontend.v1.NextPageCmd"> & {
-  /**
-   * Correlation. See FirstPageCmd.request_id.
-   *
-   * @generated from field: string request_id = 1;
-   */
-  requestId: string;
-
-  /**
-   * WHICH READER, and therefore whose position is being walked back and which
-   * stream the page arrives on. See FirstPageCmd.client_id.
-   *
-   * @generated from field: string client_id = 2;
-   */
-  clientId: string;
-
-  /**
-   * @generated from field: string workspace = 3;
-   */
-  workspace: string;
-
-  /**
-   * WHICH CONTAINER to walk back through. It names the scope, never a position
-   * within it — the daemon still owns where this reader is inside that scope,
-   * so the no-position rule above is untouched.
-   *
-   * Unset is NOT a default and is REFUSED, exactly as on FirstPageCmd: a
-   * load-more that forgot which container it belongs to must not silently walk
-   * back through the feed instead.
-   *
-   * @generated from field: frontend.v1.PageScope scope = 4;
-   */
-  scope?: PageScope | undefined;
-};
-
-/**
- * Describes the message frontend.v1.NextPageCmd.
- * Use `create(NextPageCmdSchema)` to create a new message.
- */
-export const NextPageCmdSchema: GenMessage<NextPageCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 42);
+  messageDesc(file_frontend_v1_feed, 39);
 
 /**
  * One page of messages, oldest first.
@@ -2121,7 +1963,7 @@ export type ConversationHistoryPage = Message$1<"frontend.v1.ConversationHistory
   continuation: {
     /**
      * Older history remains. EMPTY on purpose: under this contract "there is
-     * more" is a FACT the client acts on by calling NextPageCmd, not a handle
+     * more" is a FACT the client acts on by calling NextPageRequest, not a handle
      * it stores. The cursor that used to live here is precisely the position
      * the client no longer holds.
      *
@@ -2185,10 +2027,10 @@ export type ConversationHistoryPage = Message$1<"frontend.v1.ConversationHistory
  * Use `create(ConversationHistoryPageSchema)` to create a new message.
  */
 export const ConversationHistoryPageSchema: GenMessage<ConversationHistoryPage> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 43);
+  messageDesc(file_frontend_v1_feed, 40);
 
 /**
- * Older history remains; call NextPageCmd.
+ * Older history remains; call NextPageRequest.
  *
  * @generated from message frontend.v1.HistoryHasMore
  */
@@ -2200,7 +2042,7 @@ export type HistoryHasMore = Message$1<"frontend.v1.HistoryHasMore"> & {
  * Use `create(HistoryHasMoreSchema)` to create a new message.
  */
 export const HistoryHasMoreSchema: GenMessage<HistoryHasMore> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 44);
+  messageDesc(file_frontend_v1_feed, 41);
 
 /**
  * There is nothing older. A FACT the daemon established by reading to the floor.
@@ -2215,7 +2057,7 @@ export type HistoryAtStart = Message$1<"frontend.v1.HistoryAtStart"> & {
  * Use `create(HistoryAtStartSchema)` to create a new message.
  */
 export const HistoryAtStartSchema: GenMessage<HistoryAtStart> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 45);
+  messageDesc(file_frontend_v1_feed, 42);
 
 /**
  * WHO drove the turn that produced a message.

@@ -10,11 +10,9 @@
 package agentreplv1
 
 import (
-	v1 "agentrepl/proto/frontend/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -25,242 +23,187 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// What Subscribe is called with.
-//
-// IT NAMES THE READER AND NOTHING ELSE. Under the WebSocket this protocol grew
-// up on, one socket carried both the commands and the pushes, so "which reader
-// is this" was the socket itself and no field had to say it. A service splits
-// them: a NextPage call is its own HTTP request and arrives with no inherent
-// relationship to any stream. `client_id` is what restores the association the
-// socket used to provide for free.
-//
-// IT DOES NOT STATE A ROLE, AND MUST NOT. Several fields on StateSnapshot and
-// several arms on FrontendFrame are HOST SURFACE, stripped from every GUI
-// client. That distinction stays in the LISTENER — the host reaches the daemon
-// over its private UDS, a GUI client over the TCP listener — because a role a
-// client declares is a role a client can claim. A field here would convert an
-// unreachable socket into a string anyone may send.
-type SubscribeRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The reader's OWN identity, minted by the client and stable for the life of
-	// this stream. Every command whose effect arrives on this stream rather than
-	// in its own ack (Resync, FirstPage, NextPage, DaemonHealth, SessionHealth)
-	// repeats it, so the daemon knows which stream to push the answer down.
-	//
-	// CLIENT-MINTED, exactly as request_id is, and for the same reason: a client
-	// that generates its own id can correlate a push that beats the ack it was
-	// waiting for. An id the daemon assigned would not exist yet at the moment
-	// the client needs it.
-	ClientId      string `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SubscribeRequest) Reset() {
-	*x = SubscribeRequest{}
-	mi := &file_agentrepl_v1_service_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SubscribeRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SubscribeRequest) ProtoMessage() {}
-
-func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_service_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
-func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_service_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *SubscribeRequest) GetClientId() string {
-	if x != nil {
-		return x.ClientId
-	}
-	return ""
-}
-
 var File_agentrepl_v1_service_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1aagentrepl/v1/service.proto\x12\fagentrepl.v1\x1a\x18agentrepl/v1/frame.proto\x1a\x19agentrepl/v1/shared.proto\x1a\x16frontend/v1/feed.proto\x1a\x18frontend/v1/footer.proto\x1a\x19frontend/v1/sidebar.proto\x1a\x18frontend/v1/topbar.proto\"/\n" +
-	"\x10SubscribeRequest\x12\x1b\n" +
-	"\tclient_id\x18\x01 \x01(\tR\bclientId2\xd6\x14\n" +
-	"\tAgentRepl\x12J\n" +
-	"\tSubscribe\x12\x1e.agentrepl.v1.SubscribeRequest\x1a\x1b.agentrepl.v1.FrontendFrame0\x01\x12F\n" +
-	"\fSubmitPrompt\x12\x1c.frontend.v1.SubmitPromptCmd\x1a\x18.agentrepl.v1.CommandAck\x12G\n" +
-	"\tInterrupt\x12\x19.frontend.v1.InterruptCmd\x1a\x1f.agentrepl.v1.InterruptResponse\x12N\n" +
-	"\x10AnswerPermission\x12 .frontend.v1.PermissionAnswerCmd\x1a\x18.agentrepl.v1.CommandAck\x12K\n" +
-	"\x0eMergeWorkspace\x12\x1f.agentrepl.v1.MergeWorkspaceCmd\x1a\x18.agentrepl.v1.CommandAck\x12K\n" +
-	"\x0eCloseWorkspace\x12\x1f.agentrepl.v1.CloseWorkspaceCmd\x1a\x18.agentrepl.v1.CommandAck\x12I\n" +
-	"\rOpenWorkspace\x12\x1e.agentrepl.v1.OpenWorkspaceCmd\x1a\x18.agentrepl.v1.CommandAck\x12;\n" +
-	"\x06Resync\x12\x17.agentrepl.v1.ResyncCmd\x1a\x18.agentrepl.v1.CommandAck\x12T\n" +
-	"\rCreateSession\x12\x1e.agentrepl.v1.CreateSessionCmd\x1a#.agentrepl.v1.CreateSessionResponse\x12I\n" +
-	"\rDeleteSession\x12\x1e.agentrepl.v1.DeleteSessionCmd\x1a\x18.agentrepl.v1.CommandAck\x12?\n" +
-	"\bShutdown\x12\x19.agentrepl.v1.ShutdownCmd\x1a\x18.agentrepl.v1.CommandAck\x12A\n" +
-	"\tClientLog\x12\x1a.agentrepl.v1.ClientLogCmd\x1a\x18.agentrepl.v1.CommandAck\x12G\n" +
-	"\x0fForceQueueEntry\x12\x1a.frontend.v1.QueueForceCmd\x1a\x18.agentrepl.v1.CommandAck\x12I\n" +
-	"\x10AcceptQueueEntry\x12\x1b.frontend.v1.QueueAcceptCmd\x1a\x18.agentrepl.v1.CommandAck\x12I\n" +
-	"\x10CancelQueueEntry\x12\x1b.frontend.v1.QueueCancelCmd\x1a\x18.agentrepl.v1.CommandAck\x12M\n" +
-	"\x0fCreateWorkspace\x12 .agentrepl.v1.CreateWorkspaceCmd\x1a\x18.agentrepl.v1.CommandAck\x12Y\n" +
-	"\x15WorkspaceMaterialized\x12&.agentrepl.v1.WorkspaceMaterializedCmd\x1a\x18.agentrepl.v1.CommandAck\x12U\n" +
-	"\x13HostActionCompleted\x12$.agentrepl.v1.HostActionCompletedCmd\x1a\x18.agentrepl.v1.CommandAck\x12F\n" +
-	"\fDaemonHealth\x12\x1c.frontend.v1.DaemonHealthCmd\x1a\x18.agentrepl.v1.CommandAck\x12H\n" +
-	"\rSessionHealth\x12\x1d.frontend.v1.SessionHealthCmd\x1a\x18.agentrepl.v1.CommandAck\x12K\n" +
-	"\x0eRestartSession\x12\x1f.agentrepl.v1.RestartSessionCmd\x1a\x18.agentrepl.v1.CommandAck\x12D\n" +
-	"\bSetModel\x12\x18.frontend.v1.SetModelCmd\x1a\x1e.agentrepl.v1.SetModelResponse\x12Z\n" +
-	"\x16PublishWorkspaceRoster\x12&.frontend.v1.PublishWorkspaceRosterCmd\x1a\x18.agentrepl.v1.CommandAck\x12O\n" +
-	"\x10ScheduleShutdown\x12!.agentrepl.v1.ScheduleShutdownCmd\x1a\x18.agentrepl.v1.CommandAck\x12]\n" +
-	"\x17CancelScheduledShutdown\x12(.agentrepl.v1.CancelScheduledShutdownCmd\x1a\x18.agentrepl.v1.CommandAck\x12S\n" +
-	"\x12HibernateWorkspace\x12#.agentrepl.v1.HibernateWorkspaceCmd\x1a\x18.agentrepl.v1.CommandAck\x12I\n" +
-	"\rReviveSession\x12\x1e.agentrepl.v1.ReviveSessionCmd\x1a\x18.agentrepl.v1.CommandAck\x12M\n" +
-	"\x0fPauseMergeQueue\x12 .agentrepl.v1.PauseMergeQueueCmd\x1a\x18.agentrepl.v1.CommandAck\x12O\n" +
-	"\x10ResumeMergeQueue\x12!.agentrepl.v1.ResumeMergeQueueCmd\x1a\x18.agentrepl.v1.CommandAck\x12C\n" +
+	"\x1aagentrepl/v1/service.proto\x12\fagentrepl.v1\x1a.agentrepl/v1/endpoint_accept_queue_entry.proto\x1a0agentrepl/v1/endpoint_answer_merge_dequeue.proto\x1a-agentrepl/v1/endpoint_answer_permission.proto\x1a2agentrepl/v1/endpoint_cancel_detached_agents.proto\x1a.agentrepl/v1/endpoint_cancel_queue_entry.proto\x1a5agentrepl/v1/endpoint_cancel_scheduled_shutdown.proto\x1a&agentrepl/v1/endpoint_client_log.proto\x1a+agentrepl/v1/endpoint_close_workspace.proto\x1a*agentrepl/v1/endpoint_create_session.proto\x1a,agentrepl/v1/endpoint_create_workspace.proto\x1a)agentrepl/v1/endpoint_daemon_health.proto\x1a*agentrepl/v1/endpoint_delete_session.proto\x1a'agentrepl/v1/endpoint_evict_merge.proto\x1a&agentrepl/v1/endpoint_first_page.proto\x1a-agentrepl/v1/endpoint_force_queue_entry.proto\x1a/agentrepl/v1/endpoint_hibernate_workspace.proto\x1a1agentrepl/v1/endpoint_host_action_completed.proto\x1a%agentrepl/v1/endpoint_interrupt.proto\x1a+agentrepl/v1/endpoint_merge_workspace.proto\x1a%agentrepl/v1/endpoint_next_page.proto\x1a*agentrepl/v1/endpoint_open_workspace.proto\x1a-agentrepl/v1/endpoint_pause_merge_queue.proto\x1a4agentrepl/v1/endpoint_publish_workspace_roster.proto\x1a+agentrepl/v1/endpoint_restart_session.proto\x1a.agentrepl/v1/endpoint_resume_merge_queue.proto\x1a\"agentrepl/v1/endpoint_resync.proto\x1a*agentrepl/v1/endpoint_revive_session.proto\x1a-agentrepl/v1/endpoint_schedule_shutdown.proto\x1a*agentrepl/v1/endpoint_session_health.proto\x1a%agentrepl/v1/endpoint_set_model.proto\x1a$agentrepl/v1/endpoint_shutdown.proto\x1a)agentrepl/v1/endpoint_submit_prompt.proto\x1a%agentrepl/v1/endpoint_subscribe.proto\x1a2agentrepl/v1/endpoint_workspace_materialized.proto2\xde\x18\n" +
+	"\tAgentRepl\x12N\n" +
+	"\tSubscribe\x12\x1e.agentrepl.v1.SubscribeRequest\x1a\x1f.agentrepl.v1.SubscribeResponse0\x01\x12U\n" +
+	"\fSubmitPrompt\x12!.agentrepl.v1.SubmitPromptRequest\x1a\".agentrepl.v1.SubmitPromptResponse\x12L\n" +
+	"\tInterrupt\x12\x1e.agentrepl.v1.InterruptRequest\x1a\x1f.agentrepl.v1.InterruptResponse\x12a\n" +
+	"\x10AnswerPermission\x12%.agentrepl.v1.AnswerPermissionRequest\x1a&.agentrepl.v1.AnswerPermissionResponse\x12[\n" +
+	"\x0eMergeWorkspace\x12#.agentrepl.v1.MergeWorkspaceRequest\x1a$.agentrepl.v1.MergeWorkspaceResponse\x12[\n" +
+	"\x0eCloseWorkspace\x12#.agentrepl.v1.CloseWorkspaceRequest\x1a$.agentrepl.v1.CloseWorkspaceResponse\x12X\n" +
+	"\rOpenWorkspace\x12\".agentrepl.v1.OpenWorkspaceRequest\x1a#.agentrepl.v1.OpenWorkspaceResponse\x12C\n" +
+	"\x06Resync\x12\x1b.agentrepl.v1.ResyncRequest\x1a\x1c.agentrepl.v1.ResyncResponse\x12X\n" +
+	"\rCreateSession\x12\".agentrepl.v1.CreateSessionRequest\x1a#.agentrepl.v1.CreateSessionResponse\x12X\n" +
+	"\rDeleteSession\x12\".agentrepl.v1.DeleteSessionRequest\x1a#.agentrepl.v1.DeleteSessionResponse\x12I\n" +
+	"\bShutdown\x12\x1d.agentrepl.v1.ShutdownRequest\x1a\x1e.agentrepl.v1.ShutdownResponse\x12L\n" +
+	"\tClientLog\x12\x1e.agentrepl.v1.ClientLogRequest\x1a\x1f.agentrepl.v1.ClientLogResponse\x12^\n" +
+	"\x0fForceQueueEntry\x12$.agentrepl.v1.ForceQueueEntryRequest\x1a%.agentrepl.v1.ForceQueueEntryResponse\x12a\n" +
+	"\x10AcceptQueueEntry\x12%.agentrepl.v1.AcceptQueueEntryRequest\x1a&.agentrepl.v1.AcceptQueueEntryResponse\x12a\n" +
+	"\x10CancelQueueEntry\x12%.agentrepl.v1.CancelQueueEntryRequest\x1a&.agentrepl.v1.CancelQueueEntryResponse\x12^\n" +
+	"\x0fCreateWorkspace\x12$.agentrepl.v1.CreateWorkspaceRequest\x1a%.agentrepl.v1.CreateWorkspaceResponse\x12p\n" +
+	"\x15WorkspaceMaterialized\x12*.agentrepl.v1.WorkspaceMaterializedRequest\x1a+.agentrepl.v1.WorkspaceMaterializedResponse\x12j\n" +
+	"\x13HostActionCompleted\x12(.agentrepl.v1.HostActionCompletedRequest\x1a).agentrepl.v1.HostActionCompletedResponse\x12U\n" +
+	"\fDaemonHealth\x12!.agentrepl.v1.DaemonHealthRequest\x1a\".agentrepl.v1.DaemonHealthResponse\x12X\n" +
+	"\rSessionHealth\x12\".agentrepl.v1.SessionHealthRequest\x1a#.agentrepl.v1.SessionHealthResponse\x12[\n" +
+	"\x0eRestartSession\x12#.agentrepl.v1.RestartSessionRequest\x1a$.agentrepl.v1.RestartSessionResponse\x12I\n" +
+	"\bSetModel\x12\x1d.agentrepl.v1.SetModelRequest\x1a\x1e.agentrepl.v1.SetModelResponse\x12s\n" +
+	"\x16PublishWorkspaceRoster\x12+.agentrepl.v1.PublishWorkspaceRosterRequest\x1a,.agentrepl.v1.PublishWorkspaceRosterResponse\x12a\n" +
+	"\x10ScheduleShutdown\x12%.agentrepl.v1.ScheduleShutdownRequest\x1a&.agentrepl.v1.ScheduleShutdownResponse\x12v\n" +
+	"\x17CancelScheduledShutdown\x12,.agentrepl.v1.CancelScheduledShutdownRequest\x1a-.agentrepl.v1.CancelScheduledShutdownResponse\x12g\n" +
+	"\x12HibernateWorkspace\x12'.agentrepl.v1.HibernateWorkspaceRequest\x1a(.agentrepl.v1.HibernateWorkspaceResponse\x12X\n" +
+	"\rReviveSession\x12\".agentrepl.v1.ReviveSessionRequest\x1a#.agentrepl.v1.ReviveSessionResponse\x12^\n" +
+	"\x0fPauseMergeQueue\x12$.agentrepl.v1.PauseMergeQueueRequest\x1a%.agentrepl.v1.PauseMergeQueueResponse\x12a\n" +
+	"\x10ResumeMergeQueue\x12%.agentrepl.v1.ResumeMergeQueueRequest\x1a&.agentrepl.v1.ResumeMergeQueueResponse\x12O\n" +
 	"\n" +
-	"EvictMerge\x12\x1b.agentrepl.v1.EvictMergeCmd\x1a\x18.agentrepl.v1.CommandAck\x12S\n" +
-	"\x12AnswerMergeDequeue\x12#.agentrepl.v1.AnswerMergeDequeueCmd\x1a\x18.agentrepl.v1.CommandAck\x12h\n" +
-	"\x14CancelDetachedAgents\x12$.frontend.v1.CancelDetachedAgentsCmd\x1a*.agentrepl.v1.CancelDetachedAgentsResponse\x12@\n" +
-	"\tFirstPage\x12\x19.frontend.v1.FirstPageCmd\x1a\x18.agentrepl.v1.CommandAck\x12>\n" +
-	"\bNextPage\x12\x18.frontend.v1.NextPageCmd\x1a\x18.agentrepl.v1.CommandAckB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"EvictMerge\x12\x1f.agentrepl.v1.EvictMergeRequest\x1a .agentrepl.v1.EvictMergeResponse\x12g\n" +
+	"\x12AnswerMergeDequeue\x12'.agentrepl.v1.AnswerMergeDequeueRequest\x1a(.agentrepl.v1.AnswerMergeDequeueResponse\x12m\n" +
+	"\x14CancelDetachedAgents\x12).agentrepl.v1.CancelDetachedAgentsRequest\x1a*.agentrepl.v1.CancelDetachedAgentsResponse\x12L\n" +
+	"\tFirstPage\x12\x1e.agentrepl.v1.FirstPageRequest\x1a\x1f.agentrepl.v1.FirstPageResponse\x12I\n" +
+	"\bNextPage\x12\x1d.agentrepl.v1.NextPageRequest\x1a\x1e.agentrepl.v1.NextPageResponseB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
-var (
-	file_agentrepl_v1_service_proto_rawDescOnce sync.Once
-	file_agentrepl_v1_service_proto_rawDescData []byte
-)
-
-func file_agentrepl_v1_service_proto_rawDescGZIP() []byte {
-	file_agentrepl_v1_service_proto_rawDescOnce.Do(func() {
-		file_agentrepl_v1_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_agentrepl_v1_service_proto_rawDesc), len(file_agentrepl_v1_service_proto_rawDesc)))
-	})
-	return file_agentrepl_v1_service_proto_rawDescData
-}
-
-var file_agentrepl_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_agentrepl_v1_service_proto_goTypes = []any{
-	(*SubscribeRequest)(nil),             // 0: agentrepl.v1.SubscribeRequest
-	(*v1.SubmitPromptCmd)(nil),           // 1: frontend.v1.SubmitPromptCmd
-	(*v1.InterruptCmd)(nil),              // 2: frontend.v1.InterruptCmd
-	(*v1.PermissionAnswerCmd)(nil),       // 3: frontend.v1.PermissionAnswerCmd
-	(*MergeWorkspaceCmd)(nil),            // 4: agentrepl.v1.MergeWorkspaceCmd
-	(*CloseWorkspaceCmd)(nil),            // 5: agentrepl.v1.CloseWorkspaceCmd
-	(*OpenWorkspaceCmd)(nil),             // 6: agentrepl.v1.OpenWorkspaceCmd
-	(*ResyncCmd)(nil),                    // 7: agentrepl.v1.ResyncCmd
-	(*CreateSessionCmd)(nil),             // 8: agentrepl.v1.CreateSessionCmd
-	(*DeleteSessionCmd)(nil),             // 9: agentrepl.v1.DeleteSessionCmd
-	(*ShutdownCmd)(nil),                  // 10: agentrepl.v1.ShutdownCmd
-	(*ClientLogCmd)(nil),                 // 11: agentrepl.v1.ClientLogCmd
-	(*v1.QueueForceCmd)(nil),             // 12: frontend.v1.QueueForceCmd
-	(*v1.QueueAcceptCmd)(nil),            // 13: frontend.v1.QueueAcceptCmd
-	(*v1.QueueCancelCmd)(nil),            // 14: frontend.v1.QueueCancelCmd
-	(*CreateWorkspaceCmd)(nil),           // 15: agentrepl.v1.CreateWorkspaceCmd
-	(*WorkspaceMaterializedCmd)(nil),     // 16: agentrepl.v1.WorkspaceMaterializedCmd
-	(*HostActionCompletedCmd)(nil),       // 17: agentrepl.v1.HostActionCompletedCmd
-	(*v1.DaemonHealthCmd)(nil),           // 18: frontend.v1.DaemonHealthCmd
-	(*v1.SessionHealthCmd)(nil),          // 19: frontend.v1.SessionHealthCmd
-	(*RestartSessionCmd)(nil),            // 20: agentrepl.v1.RestartSessionCmd
-	(*v1.SetModelCmd)(nil),               // 21: frontend.v1.SetModelCmd
-	(*v1.PublishWorkspaceRosterCmd)(nil), // 22: frontend.v1.PublishWorkspaceRosterCmd
-	(*ScheduleShutdownCmd)(nil),          // 23: agentrepl.v1.ScheduleShutdownCmd
-	(*CancelScheduledShutdownCmd)(nil),   // 24: agentrepl.v1.CancelScheduledShutdownCmd
-	(*HibernateWorkspaceCmd)(nil),        // 25: agentrepl.v1.HibernateWorkspaceCmd
-	(*ReviveSessionCmd)(nil),             // 26: agentrepl.v1.ReviveSessionCmd
-	(*PauseMergeQueueCmd)(nil),           // 27: agentrepl.v1.PauseMergeQueueCmd
-	(*ResumeMergeQueueCmd)(nil),          // 28: agentrepl.v1.ResumeMergeQueueCmd
-	(*EvictMergeCmd)(nil),                // 29: agentrepl.v1.EvictMergeCmd
-	(*AnswerMergeDequeueCmd)(nil),        // 30: agentrepl.v1.AnswerMergeDequeueCmd
-	(*v1.CancelDetachedAgentsCmd)(nil),   // 31: frontend.v1.CancelDetachedAgentsCmd
-	(*v1.FirstPageCmd)(nil),              // 32: frontend.v1.FirstPageCmd
-	(*v1.NextPageCmd)(nil),               // 33: frontend.v1.NextPageCmd
-	(*FrontendFrame)(nil),                // 34: agentrepl.v1.FrontendFrame
-	(*CommandAck)(nil),                   // 35: agentrepl.v1.CommandAck
-	(*InterruptResponse)(nil),            // 36: agentrepl.v1.InterruptResponse
-	(*CreateSessionResponse)(nil),        // 37: agentrepl.v1.CreateSessionResponse
-	(*SetModelResponse)(nil),             // 38: agentrepl.v1.SetModelResponse
-	(*CancelDetachedAgentsResponse)(nil), // 39: agentrepl.v1.CancelDetachedAgentsResponse
+	(*SubscribeRequest)(nil),                // 0: agentrepl.v1.SubscribeRequest
+	(*SubmitPromptRequest)(nil),             // 1: agentrepl.v1.SubmitPromptRequest
+	(*InterruptRequest)(nil),                // 2: agentrepl.v1.InterruptRequest
+	(*AnswerPermissionRequest)(nil),         // 3: agentrepl.v1.AnswerPermissionRequest
+	(*MergeWorkspaceRequest)(nil),           // 4: agentrepl.v1.MergeWorkspaceRequest
+	(*CloseWorkspaceRequest)(nil),           // 5: agentrepl.v1.CloseWorkspaceRequest
+	(*OpenWorkspaceRequest)(nil),            // 6: agentrepl.v1.OpenWorkspaceRequest
+	(*ResyncRequest)(nil),                   // 7: agentrepl.v1.ResyncRequest
+	(*CreateSessionRequest)(nil),            // 8: agentrepl.v1.CreateSessionRequest
+	(*DeleteSessionRequest)(nil),            // 9: agentrepl.v1.DeleteSessionRequest
+	(*ShutdownRequest)(nil),                 // 10: agentrepl.v1.ShutdownRequest
+	(*ClientLogRequest)(nil),                // 11: agentrepl.v1.ClientLogRequest
+	(*ForceQueueEntryRequest)(nil),          // 12: agentrepl.v1.ForceQueueEntryRequest
+	(*AcceptQueueEntryRequest)(nil),         // 13: agentrepl.v1.AcceptQueueEntryRequest
+	(*CancelQueueEntryRequest)(nil),         // 14: agentrepl.v1.CancelQueueEntryRequest
+	(*CreateWorkspaceRequest)(nil),          // 15: agentrepl.v1.CreateWorkspaceRequest
+	(*WorkspaceMaterializedRequest)(nil),    // 16: agentrepl.v1.WorkspaceMaterializedRequest
+	(*HostActionCompletedRequest)(nil),      // 17: agentrepl.v1.HostActionCompletedRequest
+	(*DaemonHealthRequest)(nil),             // 18: agentrepl.v1.DaemonHealthRequest
+	(*SessionHealthRequest)(nil),            // 19: agentrepl.v1.SessionHealthRequest
+	(*RestartSessionRequest)(nil),           // 20: agentrepl.v1.RestartSessionRequest
+	(*SetModelRequest)(nil),                 // 21: agentrepl.v1.SetModelRequest
+	(*PublishWorkspaceRosterRequest)(nil),   // 22: agentrepl.v1.PublishWorkspaceRosterRequest
+	(*ScheduleShutdownRequest)(nil),         // 23: agentrepl.v1.ScheduleShutdownRequest
+	(*CancelScheduledShutdownRequest)(nil),  // 24: agentrepl.v1.CancelScheduledShutdownRequest
+	(*HibernateWorkspaceRequest)(nil),       // 25: agentrepl.v1.HibernateWorkspaceRequest
+	(*ReviveSessionRequest)(nil),            // 26: agentrepl.v1.ReviveSessionRequest
+	(*PauseMergeQueueRequest)(nil),          // 27: agentrepl.v1.PauseMergeQueueRequest
+	(*ResumeMergeQueueRequest)(nil),         // 28: agentrepl.v1.ResumeMergeQueueRequest
+	(*EvictMergeRequest)(nil),               // 29: agentrepl.v1.EvictMergeRequest
+	(*AnswerMergeDequeueRequest)(nil),       // 30: agentrepl.v1.AnswerMergeDequeueRequest
+	(*CancelDetachedAgentsRequest)(nil),     // 31: agentrepl.v1.CancelDetachedAgentsRequest
+	(*FirstPageRequest)(nil),                // 32: agentrepl.v1.FirstPageRequest
+	(*NextPageRequest)(nil),                 // 33: agentrepl.v1.NextPageRequest
+	(*SubscribeResponse)(nil),               // 34: agentrepl.v1.SubscribeResponse
+	(*SubmitPromptResponse)(nil),            // 35: agentrepl.v1.SubmitPromptResponse
+	(*InterruptResponse)(nil),               // 36: agentrepl.v1.InterruptResponse
+	(*AnswerPermissionResponse)(nil),        // 37: agentrepl.v1.AnswerPermissionResponse
+	(*MergeWorkspaceResponse)(nil),          // 38: agentrepl.v1.MergeWorkspaceResponse
+	(*CloseWorkspaceResponse)(nil),          // 39: agentrepl.v1.CloseWorkspaceResponse
+	(*OpenWorkspaceResponse)(nil),           // 40: agentrepl.v1.OpenWorkspaceResponse
+	(*ResyncResponse)(nil),                  // 41: agentrepl.v1.ResyncResponse
+	(*CreateSessionResponse)(nil),           // 42: agentrepl.v1.CreateSessionResponse
+	(*DeleteSessionResponse)(nil),           // 43: agentrepl.v1.DeleteSessionResponse
+	(*ShutdownResponse)(nil),                // 44: agentrepl.v1.ShutdownResponse
+	(*ClientLogResponse)(nil),               // 45: agentrepl.v1.ClientLogResponse
+	(*ForceQueueEntryResponse)(nil),         // 46: agentrepl.v1.ForceQueueEntryResponse
+	(*AcceptQueueEntryResponse)(nil),        // 47: agentrepl.v1.AcceptQueueEntryResponse
+	(*CancelQueueEntryResponse)(nil),        // 48: agentrepl.v1.CancelQueueEntryResponse
+	(*CreateWorkspaceResponse)(nil),         // 49: agentrepl.v1.CreateWorkspaceResponse
+	(*WorkspaceMaterializedResponse)(nil),   // 50: agentrepl.v1.WorkspaceMaterializedResponse
+	(*HostActionCompletedResponse)(nil),     // 51: agentrepl.v1.HostActionCompletedResponse
+	(*DaemonHealthResponse)(nil),            // 52: agentrepl.v1.DaemonHealthResponse
+	(*SessionHealthResponse)(nil),           // 53: agentrepl.v1.SessionHealthResponse
+	(*RestartSessionResponse)(nil),          // 54: agentrepl.v1.RestartSessionResponse
+	(*SetModelResponse)(nil),                // 55: agentrepl.v1.SetModelResponse
+	(*PublishWorkspaceRosterResponse)(nil),  // 56: agentrepl.v1.PublishWorkspaceRosterResponse
+	(*ScheduleShutdownResponse)(nil),        // 57: agentrepl.v1.ScheduleShutdownResponse
+	(*CancelScheduledShutdownResponse)(nil), // 58: agentrepl.v1.CancelScheduledShutdownResponse
+	(*HibernateWorkspaceResponse)(nil),      // 59: agentrepl.v1.HibernateWorkspaceResponse
+	(*ReviveSessionResponse)(nil),           // 60: agentrepl.v1.ReviveSessionResponse
+	(*PauseMergeQueueResponse)(nil),         // 61: agentrepl.v1.PauseMergeQueueResponse
+	(*ResumeMergeQueueResponse)(nil),        // 62: agentrepl.v1.ResumeMergeQueueResponse
+	(*EvictMergeResponse)(nil),              // 63: agentrepl.v1.EvictMergeResponse
+	(*AnswerMergeDequeueResponse)(nil),      // 64: agentrepl.v1.AnswerMergeDequeueResponse
+	(*CancelDetachedAgentsResponse)(nil),    // 65: agentrepl.v1.CancelDetachedAgentsResponse
+	(*FirstPageResponse)(nil),               // 66: agentrepl.v1.FirstPageResponse
+	(*NextPageResponse)(nil),                // 67: agentrepl.v1.NextPageResponse
 }
 var file_agentrepl_v1_service_proto_depIdxs = []int32{
 	0,  // 0: agentrepl.v1.AgentRepl.Subscribe:input_type -> agentrepl.v1.SubscribeRequest
-	1,  // 1: agentrepl.v1.AgentRepl.SubmitPrompt:input_type -> frontend.v1.SubmitPromptCmd
-	2,  // 2: agentrepl.v1.AgentRepl.Interrupt:input_type -> frontend.v1.InterruptCmd
-	3,  // 3: agentrepl.v1.AgentRepl.AnswerPermission:input_type -> frontend.v1.PermissionAnswerCmd
-	4,  // 4: agentrepl.v1.AgentRepl.MergeWorkspace:input_type -> agentrepl.v1.MergeWorkspaceCmd
-	5,  // 5: agentrepl.v1.AgentRepl.CloseWorkspace:input_type -> agentrepl.v1.CloseWorkspaceCmd
-	6,  // 6: agentrepl.v1.AgentRepl.OpenWorkspace:input_type -> agentrepl.v1.OpenWorkspaceCmd
-	7,  // 7: agentrepl.v1.AgentRepl.Resync:input_type -> agentrepl.v1.ResyncCmd
-	8,  // 8: agentrepl.v1.AgentRepl.CreateSession:input_type -> agentrepl.v1.CreateSessionCmd
-	9,  // 9: agentrepl.v1.AgentRepl.DeleteSession:input_type -> agentrepl.v1.DeleteSessionCmd
-	10, // 10: agentrepl.v1.AgentRepl.Shutdown:input_type -> agentrepl.v1.ShutdownCmd
-	11, // 11: agentrepl.v1.AgentRepl.ClientLog:input_type -> agentrepl.v1.ClientLogCmd
-	12, // 12: agentrepl.v1.AgentRepl.ForceQueueEntry:input_type -> frontend.v1.QueueForceCmd
-	13, // 13: agentrepl.v1.AgentRepl.AcceptQueueEntry:input_type -> frontend.v1.QueueAcceptCmd
-	14, // 14: agentrepl.v1.AgentRepl.CancelQueueEntry:input_type -> frontend.v1.QueueCancelCmd
-	15, // 15: agentrepl.v1.AgentRepl.CreateWorkspace:input_type -> agentrepl.v1.CreateWorkspaceCmd
-	16, // 16: agentrepl.v1.AgentRepl.WorkspaceMaterialized:input_type -> agentrepl.v1.WorkspaceMaterializedCmd
-	17, // 17: agentrepl.v1.AgentRepl.HostActionCompleted:input_type -> agentrepl.v1.HostActionCompletedCmd
-	18, // 18: agentrepl.v1.AgentRepl.DaemonHealth:input_type -> frontend.v1.DaemonHealthCmd
-	19, // 19: agentrepl.v1.AgentRepl.SessionHealth:input_type -> frontend.v1.SessionHealthCmd
-	20, // 20: agentrepl.v1.AgentRepl.RestartSession:input_type -> agentrepl.v1.RestartSessionCmd
-	21, // 21: agentrepl.v1.AgentRepl.SetModel:input_type -> frontend.v1.SetModelCmd
-	22, // 22: agentrepl.v1.AgentRepl.PublishWorkspaceRoster:input_type -> frontend.v1.PublishWorkspaceRosterCmd
-	23, // 23: agentrepl.v1.AgentRepl.ScheduleShutdown:input_type -> agentrepl.v1.ScheduleShutdownCmd
-	24, // 24: agentrepl.v1.AgentRepl.CancelScheduledShutdown:input_type -> agentrepl.v1.CancelScheduledShutdownCmd
-	25, // 25: agentrepl.v1.AgentRepl.HibernateWorkspace:input_type -> agentrepl.v1.HibernateWorkspaceCmd
-	26, // 26: agentrepl.v1.AgentRepl.ReviveSession:input_type -> agentrepl.v1.ReviveSessionCmd
-	27, // 27: agentrepl.v1.AgentRepl.PauseMergeQueue:input_type -> agentrepl.v1.PauseMergeQueueCmd
-	28, // 28: agentrepl.v1.AgentRepl.ResumeMergeQueue:input_type -> agentrepl.v1.ResumeMergeQueueCmd
-	29, // 29: agentrepl.v1.AgentRepl.EvictMerge:input_type -> agentrepl.v1.EvictMergeCmd
-	30, // 30: agentrepl.v1.AgentRepl.AnswerMergeDequeue:input_type -> agentrepl.v1.AnswerMergeDequeueCmd
-	31, // 31: agentrepl.v1.AgentRepl.CancelDetachedAgents:input_type -> frontend.v1.CancelDetachedAgentsCmd
-	32, // 32: agentrepl.v1.AgentRepl.FirstPage:input_type -> frontend.v1.FirstPageCmd
-	33, // 33: agentrepl.v1.AgentRepl.NextPage:input_type -> frontend.v1.NextPageCmd
-	34, // 34: agentrepl.v1.AgentRepl.Subscribe:output_type -> agentrepl.v1.FrontendFrame
-	35, // 35: agentrepl.v1.AgentRepl.SubmitPrompt:output_type -> agentrepl.v1.CommandAck
+	1,  // 1: agentrepl.v1.AgentRepl.SubmitPrompt:input_type -> agentrepl.v1.SubmitPromptRequest
+	2,  // 2: agentrepl.v1.AgentRepl.Interrupt:input_type -> agentrepl.v1.InterruptRequest
+	3,  // 3: agentrepl.v1.AgentRepl.AnswerPermission:input_type -> agentrepl.v1.AnswerPermissionRequest
+	4,  // 4: agentrepl.v1.AgentRepl.MergeWorkspace:input_type -> agentrepl.v1.MergeWorkspaceRequest
+	5,  // 5: agentrepl.v1.AgentRepl.CloseWorkspace:input_type -> agentrepl.v1.CloseWorkspaceRequest
+	6,  // 6: agentrepl.v1.AgentRepl.OpenWorkspace:input_type -> agentrepl.v1.OpenWorkspaceRequest
+	7,  // 7: agentrepl.v1.AgentRepl.Resync:input_type -> agentrepl.v1.ResyncRequest
+	8,  // 8: agentrepl.v1.AgentRepl.CreateSession:input_type -> agentrepl.v1.CreateSessionRequest
+	9,  // 9: agentrepl.v1.AgentRepl.DeleteSession:input_type -> agentrepl.v1.DeleteSessionRequest
+	10, // 10: agentrepl.v1.AgentRepl.Shutdown:input_type -> agentrepl.v1.ShutdownRequest
+	11, // 11: agentrepl.v1.AgentRepl.ClientLog:input_type -> agentrepl.v1.ClientLogRequest
+	12, // 12: agentrepl.v1.AgentRepl.ForceQueueEntry:input_type -> agentrepl.v1.ForceQueueEntryRequest
+	13, // 13: agentrepl.v1.AgentRepl.AcceptQueueEntry:input_type -> agentrepl.v1.AcceptQueueEntryRequest
+	14, // 14: agentrepl.v1.AgentRepl.CancelQueueEntry:input_type -> agentrepl.v1.CancelQueueEntryRequest
+	15, // 15: agentrepl.v1.AgentRepl.CreateWorkspace:input_type -> agentrepl.v1.CreateWorkspaceRequest
+	16, // 16: agentrepl.v1.AgentRepl.WorkspaceMaterialized:input_type -> agentrepl.v1.WorkspaceMaterializedRequest
+	17, // 17: agentrepl.v1.AgentRepl.HostActionCompleted:input_type -> agentrepl.v1.HostActionCompletedRequest
+	18, // 18: agentrepl.v1.AgentRepl.DaemonHealth:input_type -> agentrepl.v1.DaemonHealthRequest
+	19, // 19: agentrepl.v1.AgentRepl.SessionHealth:input_type -> agentrepl.v1.SessionHealthRequest
+	20, // 20: agentrepl.v1.AgentRepl.RestartSession:input_type -> agentrepl.v1.RestartSessionRequest
+	21, // 21: agentrepl.v1.AgentRepl.SetModel:input_type -> agentrepl.v1.SetModelRequest
+	22, // 22: agentrepl.v1.AgentRepl.PublishWorkspaceRoster:input_type -> agentrepl.v1.PublishWorkspaceRosterRequest
+	23, // 23: agentrepl.v1.AgentRepl.ScheduleShutdown:input_type -> agentrepl.v1.ScheduleShutdownRequest
+	24, // 24: agentrepl.v1.AgentRepl.CancelScheduledShutdown:input_type -> agentrepl.v1.CancelScheduledShutdownRequest
+	25, // 25: agentrepl.v1.AgentRepl.HibernateWorkspace:input_type -> agentrepl.v1.HibernateWorkspaceRequest
+	26, // 26: agentrepl.v1.AgentRepl.ReviveSession:input_type -> agentrepl.v1.ReviveSessionRequest
+	27, // 27: agentrepl.v1.AgentRepl.PauseMergeQueue:input_type -> agentrepl.v1.PauseMergeQueueRequest
+	28, // 28: agentrepl.v1.AgentRepl.ResumeMergeQueue:input_type -> agentrepl.v1.ResumeMergeQueueRequest
+	29, // 29: agentrepl.v1.AgentRepl.EvictMerge:input_type -> agentrepl.v1.EvictMergeRequest
+	30, // 30: agentrepl.v1.AgentRepl.AnswerMergeDequeue:input_type -> agentrepl.v1.AnswerMergeDequeueRequest
+	31, // 31: agentrepl.v1.AgentRepl.CancelDetachedAgents:input_type -> agentrepl.v1.CancelDetachedAgentsRequest
+	32, // 32: agentrepl.v1.AgentRepl.FirstPage:input_type -> agentrepl.v1.FirstPageRequest
+	33, // 33: agentrepl.v1.AgentRepl.NextPage:input_type -> agentrepl.v1.NextPageRequest
+	34, // 34: agentrepl.v1.AgentRepl.Subscribe:output_type -> agentrepl.v1.SubscribeResponse
+	35, // 35: agentrepl.v1.AgentRepl.SubmitPrompt:output_type -> agentrepl.v1.SubmitPromptResponse
 	36, // 36: agentrepl.v1.AgentRepl.Interrupt:output_type -> agentrepl.v1.InterruptResponse
-	35, // 37: agentrepl.v1.AgentRepl.AnswerPermission:output_type -> agentrepl.v1.CommandAck
-	35, // 38: agentrepl.v1.AgentRepl.MergeWorkspace:output_type -> agentrepl.v1.CommandAck
-	35, // 39: agentrepl.v1.AgentRepl.CloseWorkspace:output_type -> agentrepl.v1.CommandAck
-	35, // 40: agentrepl.v1.AgentRepl.OpenWorkspace:output_type -> agentrepl.v1.CommandAck
-	35, // 41: agentrepl.v1.AgentRepl.Resync:output_type -> agentrepl.v1.CommandAck
-	37, // 42: agentrepl.v1.AgentRepl.CreateSession:output_type -> agentrepl.v1.CreateSessionResponse
-	35, // 43: agentrepl.v1.AgentRepl.DeleteSession:output_type -> agentrepl.v1.CommandAck
-	35, // 44: agentrepl.v1.AgentRepl.Shutdown:output_type -> agentrepl.v1.CommandAck
-	35, // 45: agentrepl.v1.AgentRepl.ClientLog:output_type -> agentrepl.v1.CommandAck
-	35, // 46: agentrepl.v1.AgentRepl.ForceQueueEntry:output_type -> agentrepl.v1.CommandAck
-	35, // 47: agentrepl.v1.AgentRepl.AcceptQueueEntry:output_type -> agentrepl.v1.CommandAck
-	35, // 48: agentrepl.v1.AgentRepl.CancelQueueEntry:output_type -> agentrepl.v1.CommandAck
-	35, // 49: agentrepl.v1.AgentRepl.CreateWorkspace:output_type -> agentrepl.v1.CommandAck
-	35, // 50: agentrepl.v1.AgentRepl.WorkspaceMaterialized:output_type -> agentrepl.v1.CommandAck
-	35, // 51: agentrepl.v1.AgentRepl.HostActionCompleted:output_type -> agentrepl.v1.CommandAck
-	35, // 52: agentrepl.v1.AgentRepl.DaemonHealth:output_type -> agentrepl.v1.CommandAck
-	35, // 53: agentrepl.v1.AgentRepl.SessionHealth:output_type -> agentrepl.v1.CommandAck
-	35, // 54: agentrepl.v1.AgentRepl.RestartSession:output_type -> agentrepl.v1.CommandAck
-	38, // 55: agentrepl.v1.AgentRepl.SetModel:output_type -> agentrepl.v1.SetModelResponse
-	35, // 56: agentrepl.v1.AgentRepl.PublishWorkspaceRoster:output_type -> agentrepl.v1.CommandAck
-	35, // 57: agentrepl.v1.AgentRepl.ScheduleShutdown:output_type -> agentrepl.v1.CommandAck
-	35, // 58: agentrepl.v1.AgentRepl.CancelScheduledShutdown:output_type -> agentrepl.v1.CommandAck
-	35, // 59: agentrepl.v1.AgentRepl.HibernateWorkspace:output_type -> agentrepl.v1.CommandAck
-	35, // 60: agentrepl.v1.AgentRepl.ReviveSession:output_type -> agentrepl.v1.CommandAck
-	35, // 61: agentrepl.v1.AgentRepl.PauseMergeQueue:output_type -> agentrepl.v1.CommandAck
-	35, // 62: agentrepl.v1.AgentRepl.ResumeMergeQueue:output_type -> agentrepl.v1.CommandAck
-	35, // 63: agentrepl.v1.AgentRepl.EvictMerge:output_type -> agentrepl.v1.CommandAck
-	35, // 64: agentrepl.v1.AgentRepl.AnswerMergeDequeue:output_type -> agentrepl.v1.CommandAck
-	39, // 65: agentrepl.v1.AgentRepl.CancelDetachedAgents:output_type -> agentrepl.v1.CancelDetachedAgentsResponse
-	35, // 66: agentrepl.v1.AgentRepl.FirstPage:output_type -> agentrepl.v1.CommandAck
-	35, // 67: agentrepl.v1.AgentRepl.NextPage:output_type -> agentrepl.v1.CommandAck
+	37, // 37: agentrepl.v1.AgentRepl.AnswerPermission:output_type -> agentrepl.v1.AnswerPermissionResponse
+	38, // 38: agentrepl.v1.AgentRepl.MergeWorkspace:output_type -> agentrepl.v1.MergeWorkspaceResponse
+	39, // 39: agentrepl.v1.AgentRepl.CloseWorkspace:output_type -> agentrepl.v1.CloseWorkspaceResponse
+	40, // 40: agentrepl.v1.AgentRepl.OpenWorkspace:output_type -> agentrepl.v1.OpenWorkspaceResponse
+	41, // 41: agentrepl.v1.AgentRepl.Resync:output_type -> agentrepl.v1.ResyncResponse
+	42, // 42: agentrepl.v1.AgentRepl.CreateSession:output_type -> agentrepl.v1.CreateSessionResponse
+	43, // 43: agentrepl.v1.AgentRepl.DeleteSession:output_type -> agentrepl.v1.DeleteSessionResponse
+	44, // 44: agentrepl.v1.AgentRepl.Shutdown:output_type -> agentrepl.v1.ShutdownResponse
+	45, // 45: agentrepl.v1.AgentRepl.ClientLog:output_type -> agentrepl.v1.ClientLogResponse
+	46, // 46: agentrepl.v1.AgentRepl.ForceQueueEntry:output_type -> agentrepl.v1.ForceQueueEntryResponse
+	47, // 47: agentrepl.v1.AgentRepl.AcceptQueueEntry:output_type -> agentrepl.v1.AcceptQueueEntryResponse
+	48, // 48: agentrepl.v1.AgentRepl.CancelQueueEntry:output_type -> agentrepl.v1.CancelQueueEntryResponse
+	49, // 49: agentrepl.v1.AgentRepl.CreateWorkspace:output_type -> agentrepl.v1.CreateWorkspaceResponse
+	50, // 50: agentrepl.v1.AgentRepl.WorkspaceMaterialized:output_type -> agentrepl.v1.WorkspaceMaterializedResponse
+	51, // 51: agentrepl.v1.AgentRepl.HostActionCompleted:output_type -> agentrepl.v1.HostActionCompletedResponse
+	52, // 52: agentrepl.v1.AgentRepl.DaemonHealth:output_type -> agentrepl.v1.DaemonHealthResponse
+	53, // 53: agentrepl.v1.AgentRepl.SessionHealth:output_type -> agentrepl.v1.SessionHealthResponse
+	54, // 54: agentrepl.v1.AgentRepl.RestartSession:output_type -> agentrepl.v1.RestartSessionResponse
+	55, // 55: agentrepl.v1.AgentRepl.SetModel:output_type -> agentrepl.v1.SetModelResponse
+	56, // 56: agentrepl.v1.AgentRepl.PublishWorkspaceRoster:output_type -> agentrepl.v1.PublishWorkspaceRosterResponse
+	57, // 57: agentrepl.v1.AgentRepl.ScheduleShutdown:output_type -> agentrepl.v1.ScheduleShutdownResponse
+	58, // 58: agentrepl.v1.AgentRepl.CancelScheduledShutdown:output_type -> agentrepl.v1.CancelScheduledShutdownResponse
+	59, // 59: agentrepl.v1.AgentRepl.HibernateWorkspace:output_type -> agentrepl.v1.HibernateWorkspaceResponse
+	60, // 60: agentrepl.v1.AgentRepl.ReviveSession:output_type -> agentrepl.v1.ReviveSessionResponse
+	61, // 61: agentrepl.v1.AgentRepl.PauseMergeQueue:output_type -> agentrepl.v1.PauseMergeQueueResponse
+	62, // 62: agentrepl.v1.AgentRepl.ResumeMergeQueue:output_type -> agentrepl.v1.ResumeMergeQueueResponse
+	63, // 63: agentrepl.v1.AgentRepl.EvictMerge:output_type -> agentrepl.v1.EvictMergeResponse
+	64, // 64: agentrepl.v1.AgentRepl.AnswerMergeDequeue:output_type -> agentrepl.v1.AnswerMergeDequeueResponse
+	65, // 65: agentrepl.v1.AgentRepl.CancelDetachedAgents:output_type -> agentrepl.v1.CancelDetachedAgentsResponse
+	66, // 66: agentrepl.v1.AgentRepl.FirstPage:output_type -> agentrepl.v1.FirstPageResponse
+	67, // 67: agentrepl.v1.AgentRepl.NextPage:output_type -> agentrepl.v1.NextPageResponse
 	34, // [34:68] is the sub-list for method output_type
 	0,  // [0:34] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
@@ -273,21 +216,52 @@ func file_agentrepl_v1_service_proto_init() {
 	if File_agentrepl_v1_service_proto != nil {
 		return
 	}
-	file_agentrepl_v1_frame_proto_init()
-	file_agentrepl_v1_shared_proto_init()
+	file_agentrepl_v1_endpoint_accept_queue_entry_proto_init()
+	file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_init()
+	file_agentrepl_v1_endpoint_answer_permission_proto_init()
+	file_agentrepl_v1_endpoint_cancel_detached_agents_proto_init()
+	file_agentrepl_v1_endpoint_cancel_queue_entry_proto_init()
+	file_agentrepl_v1_endpoint_cancel_scheduled_shutdown_proto_init()
+	file_agentrepl_v1_endpoint_client_log_proto_init()
+	file_agentrepl_v1_endpoint_close_workspace_proto_init()
+	file_agentrepl_v1_endpoint_create_session_proto_init()
+	file_agentrepl_v1_endpoint_create_workspace_proto_init()
+	file_agentrepl_v1_endpoint_daemon_health_proto_init()
+	file_agentrepl_v1_endpoint_delete_session_proto_init()
+	file_agentrepl_v1_endpoint_evict_merge_proto_init()
+	file_agentrepl_v1_endpoint_first_page_proto_init()
+	file_agentrepl_v1_endpoint_force_queue_entry_proto_init()
+	file_agentrepl_v1_endpoint_hibernate_workspace_proto_init()
+	file_agentrepl_v1_endpoint_host_action_completed_proto_init()
+	file_agentrepl_v1_endpoint_interrupt_proto_init()
+	file_agentrepl_v1_endpoint_merge_workspace_proto_init()
+	file_agentrepl_v1_endpoint_next_page_proto_init()
+	file_agentrepl_v1_endpoint_open_workspace_proto_init()
+	file_agentrepl_v1_endpoint_pause_merge_queue_proto_init()
+	file_agentrepl_v1_endpoint_publish_workspace_roster_proto_init()
+	file_agentrepl_v1_endpoint_restart_session_proto_init()
+	file_agentrepl_v1_endpoint_resume_merge_queue_proto_init()
+	file_agentrepl_v1_endpoint_resync_proto_init()
+	file_agentrepl_v1_endpoint_revive_session_proto_init()
+	file_agentrepl_v1_endpoint_schedule_shutdown_proto_init()
+	file_agentrepl_v1_endpoint_session_health_proto_init()
+	file_agentrepl_v1_endpoint_set_model_proto_init()
+	file_agentrepl_v1_endpoint_shutdown_proto_init()
+	file_agentrepl_v1_endpoint_submit_prompt_proto_init()
+	file_agentrepl_v1_endpoint_subscribe_proto_init()
+	file_agentrepl_v1_endpoint_workspace_materialized_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_service_proto_rawDesc), len(file_agentrepl_v1_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   0,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_agentrepl_v1_service_proto_goTypes,
 		DependencyIndexes: file_agentrepl_v1_service_proto_depIdxs,
-		MessageInfos:      file_agentrepl_v1_service_proto_msgTypes,
 	}.Build()
 	File_agentrepl_v1_service_proto = out.File
 	file_agentrepl_v1_service_proto_goTypes = nil

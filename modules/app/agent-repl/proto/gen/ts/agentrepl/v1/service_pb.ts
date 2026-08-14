@@ -5,70 +5,82 @@
 // @generated from file agentrepl/v1/service.proto (package agentrepl.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { CancelDetachedAgentsResponseSchema, CommandAckSchema, CreateSessionResponseSchema, FrontendFrameSchema, InterruptResponseSchema, ResyncCmdSchema, SetModelResponseSchema } from "./frame_pb";
-import { file_agentrepl_v1_frame } from "./frame_pb";
-import type { AnswerMergeDequeueCmdSchema, CancelScheduledShutdownCmdSchema, ClientLogCmdSchema, CloseWorkspaceCmdSchema, CreateSessionCmdSchema, CreateWorkspaceCmdSchema, DeleteSessionCmdSchema, EvictMergeCmdSchema, HibernateWorkspaceCmdSchema, HostActionCompletedCmdSchema, MergeWorkspaceCmdSchema, OpenWorkspaceCmdSchema, PauseMergeQueueCmdSchema, RestartSessionCmdSchema, ResumeMergeQueueCmdSchema, ReviveSessionCmdSchema, ScheduleShutdownCmdSchema, ShutdownCmdSchema, WorkspaceMaterializedCmdSchema } from "./shared_pb";
-import { file_agentrepl_v1_shared } from "./shared_pb";
-import type { FirstPageCmdSchema, NextPageCmdSchema, PermissionAnswerCmdSchema } from "../../frontend/v1/feed_pb";
-import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
-import type { CancelDetachedAgentsCmdSchema, InterruptCmdSchema, QueueAcceptCmdSchema, QueueCancelCmdSchema, QueueForceCmdSchema, SubmitPromptCmdSchema } from "../../frontend/v1/footer_pb";
-import { file_frontend_v1_footer } from "../../frontend/v1/footer_pb";
-import type { PublishWorkspaceRosterCmdSchema } from "../../frontend/v1/sidebar_pb";
-import { file_frontend_v1_sidebar } from "../../frontend/v1/sidebar_pb";
-import type { DaemonHealthCmdSchema, SessionHealthCmdSchema, SetModelCmdSchema } from "../../frontend/v1/topbar_pb";
-import { file_frontend_v1_topbar } from "../../frontend/v1/topbar_pb";
-import type { Message } from "@bufbuild/protobuf";
+import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
+import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { AcceptQueueEntryRequestSchema, AcceptQueueEntryResponseSchema } from "./endpoint_accept_queue_entry_pb";
+import { file_agentrepl_v1_endpoint_accept_queue_entry } from "./endpoint_accept_queue_entry_pb";
+import type { AnswerMergeDequeueRequestSchema, AnswerMergeDequeueResponseSchema } from "./endpoint_answer_merge_dequeue_pb";
+import { file_agentrepl_v1_endpoint_answer_merge_dequeue } from "./endpoint_answer_merge_dequeue_pb";
+import type { AnswerPermissionRequestSchema, AnswerPermissionResponseSchema } from "./endpoint_answer_permission_pb";
+import { file_agentrepl_v1_endpoint_answer_permission } from "./endpoint_answer_permission_pb";
+import type { CancelDetachedAgentsRequestSchema, CancelDetachedAgentsResponseSchema } from "./endpoint_cancel_detached_agents_pb";
+import { file_agentrepl_v1_endpoint_cancel_detached_agents } from "./endpoint_cancel_detached_agents_pb";
+import type { CancelQueueEntryRequestSchema, CancelQueueEntryResponseSchema } from "./endpoint_cancel_queue_entry_pb";
+import { file_agentrepl_v1_endpoint_cancel_queue_entry } from "./endpoint_cancel_queue_entry_pb";
+import type { CancelScheduledShutdownRequestSchema, CancelScheduledShutdownResponseSchema } from "./endpoint_cancel_scheduled_shutdown_pb";
+import { file_agentrepl_v1_endpoint_cancel_scheduled_shutdown } from "./endpoint_cancel_scheduled_shutdown_pb";
+import type { ClientLogRequestSchema, ClientLogResponseSchema } from "./endpoint_client_log_pb";
+import { file_agentrepl_v1_endpoint_client_log } from "./endpoint_client_log_pb";
+import type { CloseWorkspaceRequestSchema, CloseWorkspaceResponseSchema } from "./endpoint_close_workspace_pb";
+import { file_agentrepl_v1_endpoint_close_workspace } from "./endpoint_close_workspace_pb";
+import type { CreateSessionRequestSchema, CreateSessionResponseSchema } from "./endpoint_create_session_pb";
+import { file_agentrepl_v1_endpoint_create_session } from "./endpoint_create_session_pb";
+import type { CreateWorkspaceRequestSchema, CreateWorkspaceResponseSchema } from "./endpoint_create_workspace_pb";
+import { file_agentrepl_v1_endpoint_create_workspace } from "./endpoint_create_workspace_pb";
+import type { DaemonHealthRequestSchema, DaemonHealthResponseSchema } from "./endpoint_daemon_health_pb";
+import { file_agentrepl_v1_endpoint_daemon_health } from "./endpoint_daemon_health_pb";
+import type { DeleteSessionRequestSchema, DeleteSessionResponseSchema } from "./endpoint_delete_session_pb";
+import { file_agentrepl_v1_endpoint_delete_session } from "./endpoint_delete_session_pb";
+import type { EvictMergeRequestSchema, EvictMergeResponseSchema } from "./endpoint_evict_merge_pb";
+import { file_agentrepl_v1_endpoint_evict_merge } from "./endpoint_evict_merge_pb";
+import type { FirstPageRequestSchema, FirstPageResponseSchema } from "./endpoint_first_page_pb";
+import { file_agentrepl_v1_endpoint_first_page } from "./endpoint_first_page_pb";
+import type { ForceQueueEntryRequestSchema, ForceQueueEntryResponseSchema } from "./endpoint_force_queue_entry_pb";
+import { file_agentrepl_v1_endpoint_force_queue_entry } from "./endpoint_force_queue_entry_pb";
+import type { HibernateWorkspaceRequestSchema, HibernateWorkspaceResponseSchema } from "./endpoint_hibernate_workspace_pb";
+import { file_agentrepl_v1_endpoint_hibernate_workspace } from "./endpoint_hibernate_workspace_pb";
+import type { HostActionCompletedRequestSchema, HostActionCompletedResponseSchema } from "./endpoint_host_action_completed_pb";
+import { file_agentrepl_v1_endpoint_host_action_completed } from "./endpoint_host_action_completed_pb";
+import type { InterruptRequestSchema, InterruptResponseSchema } from "./endpoint_interrupt_pb";
+import { file_agentrepl_v1_endpoint_interrupt } from "./endpoint_interrupt_pb";
+import type { MergeWorkspaceRequestSchema, MergeWorkspaceResponseSchema } from "./endpoint_merge_workspace_pb";
+import { file_agentrepl_v1_endpoint_merge_workspace } from "./endpoint_merge_workspace_pb";
+import type { NextPageRequestSchema, NextPageResponseSchema } from "./endpoint_next_page_pb";
+import { file_agentrepl_v1_endpoint_next_page } from "./endpoint_next_page_pb";
+import type { OpenWorkspaceRequestSchema, OpenWorkspaceResponseSchema } from "./endpoint_open_workspace_pb";
+import { file_agentrepl_v1_endpoint_open_workspace } from "./endpoint_open_workspace_pb";
+import type { PauseMergeQueueRequestSchema, PauseMergeQueueResponseSchema } from "./endpoint_pause_merge_queue_pb";
+import { file_agentrepl_v1_endpoint_pause_merge_queue } from "./endpoint_pause_merge_queue_pb";
+import type { PublishWorkspaceRosterRequestSchema, PublishWorkspaceRosterResponseSchema } from "./endpoint_publish_workspace_roster_pb";
+import { file_agentrepl_v1_endpoint_publish_workspace_roster } from "./endpoint_publish_workspace_roster_pb";
+import type { RestartSessionRequestSchema, RestartSessionResponseSchema } from "./endpoint_restart_session_pb";
+import { file_agentrepl_v1_endpoint_restart_session } from "./endpoint_restart_session_pb";
+import type { ResumeMergeQueueRequestSchema, ResumeMergeQueueResponseSchema } from "./endpoint_resume_merge_queue_pb";
+import { file_agentrepl_v1_endpoint_resume_merge_queue } from "./endpoint_resume_merge_queue_pb";
+import type { ResyncRequestSchema, ResyncResponseSchema } from "./endpoint_resync_pb";
+import { file_agentrepl_v1_endpoint_resync } from "./endpoint_resync_pb";
+import type { ReviveSessionRequestSchema, ReviveSessionResponseSchema } from "./endpoint_revive_session_pb";
+import { file_agentrepl_v1_endpoint_revive_session } from "./endpoint_revive_session_pb";
+import type { ScheduleShutdownRequestSchema, ScheduleShutdownResponseSchema } from "./endpoint_schedule_shutdown_pb";
+import { file_agentrepl_v1_endpoint_schedule_shutdown } from "./endpoint_schedule_shutdown_pb";
+import type { SessionHealthRequestSchema, SessionHealthResponseSchema } from "./endpoint_session_health_pb";
+import { file_agentrepl_v1_endpoint_session_health } from "./endpoint_session_health_pb";
+import type { SetModelRequestSchema, SetModelResponseSchema } from "./endpoint_set_model_pb";
+import { file_agentrepl_v1_endpoint_set_model } from "./endpoint_set_model_pb";
+import type { ShutdownRequestSchema, ShutdownResponseSchema } from "./endpoint_shutdown_pb";
+import { file_agentrepl_v1_endpoint_shutdown } from "./endpoint_shutdown_pb";
+import type { SubmitPromptRequestSchema, SubmitPromptResponseSchema } from "./endpoint_submit_prompt_pb";
+import { file_agentrepl_v1_endpoint_submit_prompt } from "./endpoint_submit_prompt_pb";
+import type { SubscribeRequestSchema, SubscribeResponseSchema } from "./endpoint_subscribe_pb";
+import { file_agentrepl_v1_endpoint_subscribe } from "./endpoint_subscribe_pb";
+import type { WorkspaceMaterializedRequestSchema, WorkspaceMaterializedResponseSchema } from "./endpoint_workspace_materialized_pb";
+import { file_agentrepl_v1_endpoint_workspace_materialized } from "./endpoint_workspace_materialized_pb";
 
 /**
  * Describes the file agentrepl/v1/service.proto.
  */
 export const file_agentrepl_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("ChphZ2VudHJlcGwvdjEvc2VydmljZS5wcm90bxIMYWdlbnRyZXBsLnYxIiUKEFN1YnNjcmliZVJlcXVlc3QSEQoJY2xpZW50X2lkGAEgASgJMtYUCglBZ2VudFJlcGwSSgoJU3Vic2NyaWJlEh4uYWdlbnRyZXBsLnYxLlN1YnNjcmliZVJlcXVlc3QaGy5hZ2VudHJlcGwudjEuRnJvbnRlbmRGcmFtZTABEkYKDFN1Ym1pdFByb21wdBIcLmZyb250ZW5kLnYxLlN1Ym1pdFByb21wdENtZBoYLmFnZW50cmVwbC52MS5Db21tYW5kQWNrEkcKCUludGVycnVwdBIZLmZyb250ZW5kLnYxLkludGVycnVwdENtZBofLmFnZW50cmVwbC52MS5JbnRlcnJ1cHRSZXNwb25zZRJOChBBbnN3ZXJQZXJtaXNzaW9uEiAuZnJvbnRlbmQudjEuUGVybWlzc2lvbkFuc3dlckNtZBoYLmFnZW50cmVwbC52MS5Db21tYW5kQWNrEksKDk1lcmdlV29ya3NwYWNlEh8uYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlQ21kGhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2sSSwoOQ2xvc2VXb3Jrc3BhY2USHy5hZ2VudHJlcGwudjEuQ2xvc2VXb3Jrc3BhY2VDbWQaGC5hZ2VudHJlcGwudjEuQ29tbWFuZEFjaxJJCg1PcGVuV29ya3NwYWNlEh4uYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VDbWQaGC5hZ2VudHJlcGwudjEuQ29tbWFuZEFjaxI7CgZSZXN5bmMSFy5hZ2VudHJlcGwudjEuUmVzeW5jQ21kGhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2sSVAoNQ3JlYXRlU2Vzc2lvbhIeLmFnZW50cmVwbC52MS5DcmVhdGVTZXNzaW9uQ21kGiMuYWdlbnRyZXBsLnYxLkNyZWF0ZVNlc3Npb25SZXNwb25zZRJJCg1EZWxldGVTZXNzaW9uEh4uYWdlbnRyZXBsLnYxLkRlbGV0ZVNlc3Npb25DbWQaGC5hZ2VudHJlcGwudjEuQ29tbWFuZEFjaxI/CghTaHV0ZG93bhIZLmFnZW50cmVwbC52MS5TaHV0ZG93bkNtZBoYLmFnZW50cmVwbC52MS5Db21tYW5kQWNrEkEKCUNsaWVudExvZxIaLmFnZW50cmVwbC52MS5DbGllbnRMb2dDbWQaGC5hZ2VudHJlcGwudjEuQ29tbWFuZEFjaxJHCg9Gb3JjZVF1ZXVlRW50cnkSGi5mcm9udGVuZC52MS5RdWV1ZUZvcmNlQ21kGhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2sSSQoQQWNjZXB0UXVldWVFbnRyeRIbLmZyb250ZW5kLnYxLlF1ZXVlQWNjZXB0Q21kGhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2sSSQoQQ2FuY2VsUXVldWVFbnRyeRIbLmZyb250ZW5kLnYxLlF1ZXVlQ2FuY2VsQ21kGhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2sSTQoPQ3JlYXRlV29ya3NwYWNlEiAuYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZUNtZBoYLmFnZW50cmVwbC52MS5Db21tYW5kQWNrElkKFVdvcmtzcGFjZU1hdGVyaWFsaXplZBImLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VNYXRlcmlhbGl6ZWRDbWQaGC5hZ2VudHJlcGwudjEuQ29tbWFuZEFjaxJVChNIb3N0QWN0aW9uQ29tcGxldGVkEiQuYWdlbnRyZXBsLnYxLkhvc3RBY3Rpb25Db21wbGV0ZWRDbWQaGC5hZ2VudHJlcGwudjEuQ29tbWFuZEFjaxJGCgxEYWVtb25IZWFsdGgSHC5mcm9udGVuZC52MS5EYWVtb25IZWFsdGhDbWQaGC5hZ2VudHJlcGwudjEuQ29tbWFuZEFjaxJICg1TZXNzaW9uSGVhbHRoEh0uZnJvbnRlbmQudjEuU2Vzc2lvbkhlYWx0aENtZBoYLmFnZW50cmVwbC52MS5Db21tYW5kQWNrEksKDlJlc3RhcnRTZXNzaW9uEh8uYWdlbnRyZXBsLnYxLlJlc3RhcnRTZXNzaW9uQ21kGhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2sSRAoIU2V0TW9kZWwSGC5mcm9udGVuZC52MS5TZXRNb2RlbENtZBoeLmFnZW50cmVwbC52MS5TZXRNb2RlbFJlc3BvbnNlEloKFlB1Ymxpc2hXb3Jrc3BhY2VSb3N0ZXISJi5mcm9udGVuZC52MS5QdWJsaXNoV29ya3NwYWNlUm9zdGVyQ21kGhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2sSTwoQU2NoZWR1bGVTaHV0ZG93bhIhLmFnZW50cmVwbC52MS5TY2hlZHVsZVNodXRkb3duQ21kGhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2sSXQoXQ2FuY2VsU2NoZWR1bGVkU2h1dGRvd24SKC5hZ2VudHJlcGwudjEuQ2FuY2VsU2NoZWR1bGVkU2h1dGRvd25DbWQaGC5hZ2VudHJlcGwudjEuQ29tbWFuZEFjaxJTChJIaWJlcm5hdGVXb3Jrc3BhY2USIy5hZ2VudHJlcGwudjEuSGliZXJuYXRlV29ya3NwYWNlQ21kGhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2sSSQoNUmV2aXZlU2Vzc2lvbhIeLmFnZW50cmVwbC52MS5SZXZpdmVTZXNzaW9uQ21kGhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2sSTQoPUGF1c2VNZXJnZVF1ZXVlEiAuYWdlbnRyZXBsLnYxLlBhdXNlTWVyZ2VRdWV1ZUNtZBoYLmFnZW50cmVwbC52MS5Db21tYW5kQWNrEk8KEFJlc3VtZU1lcmdlUXVldWUSIS5hZ2VudHJlcGwudjEuUmVzdW1lTWVyZ2VRdWV1ZUNtZBoYLmFnZW50cmVwbC52MS5Db21tYW5kQWNrEkMKCkV2aWN0TWVyZ2USGy5hZ2VudHJlcGwudjEuRXZpY3RNZXJnZUNtZBoYLmFnZW50cmVwbC52MS5Db21tYW5kQWNrElMKEkFuc3dlck1lcmdlRGVxdWV1ZRIjLmFnZW50cmVwbC52MS5BbnN3ZXJNZXJnZURlcXVldWVDbWQaGC5hZ2VudHJlcGwudjEuQ29tbWFuZEFjaxJoChRDYW5jZWxEZXRhY2hlZEFnZW50cxIkLmZyb250ZW5kLnYxLkNhbmNlbERldGFjaGVkQWdlbnRzQ21kGiouYWdlbnRyZXBsLnYxLkNhbmNlbERldGFjaGVkQWdlbnRzUmVzcG9uc2USQAoJRmlyc3RQYWdlEhkuZnJvbnRlbmQudjEuRmlyc3RQYWdlQ21kGhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2sSPgoITmV4dFBhZ2USGC5mcm9udGVuZC52MS5OZXh0UGFnZUNtZBoYLmFnZW50cmVwbC52MS5Db21tYW5kQWNrQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_frame, file_agentrepl_v1_shared, file_frontend_v1_feed, file_frontend_v1_footer, file_frontend_v1_sidebar, file_frontend_v1_topbar]);
-
-/**
- * What Subscribe is called with.
- *
- * IT NAMES THE READER AND NOTHING ELSE. Under the WebSocket this protocol grew
- * up on, one socket carried both the commands and the pushes, so "which reader
- * is this" was the socket itself and no field had to say it. A service splits
- * them: a NextPage call is its own HTTP request and arrives with no inherent
- * relationship to any stream. `client_id` is what restores the association the
- * socket used to provide for free.
- *
- * IT DOES NOT STATE A ROLE, AND MUST NOT. Several fields on StateSnapshot and
- * several arms on FrontendFrame are HOST SURFACE, stripped from every GUI
- * client. That distinction stays in the LISTENER — the host reaches the daemon
- * over its private UDS, a GUI client over the TCP listener — because a role a
- * client declares is a role a client can claim. A field here would convert an
- * unreachable socket into a string anyone may send.
- *
- * @generated from message agentrepl.v1.SubscribeRequest
- */
-export type SubscribeRequest = Message<"agentrepl.v1.SubscribeRequest"> & {
-  /**
-   * The reader's OWN identity, minted by the client and stable for the life of
-   * this stream. Every command whose effect arrives on this stream rather than
-   * in its own ack (Resync, FirstPage, NextPage, DaemonHealth, SessionHealth)
-   * repeats it, so the daemon knows which stream to push the answer down.
-   *
-   * CLIENT-MINTED, exactly as request_id is, and for the same reason: a client
-   * that generates its own id can correlate a push that beats the ack it was
-   * waiting for. An id the daemon assigned would not exist yet at the moment
-   * the client needs it.
-   *
-   * @generated from field: string client_id = 1;
-   */
-  clientId: string;
-};
-
-/**
- * Describes the message agentrepl.v1.SubscribeRequest.
- * Use `create(SubscribeRequestSchema)` to create a new message.
- */
-export const SubscribeRequestSchema: GenMessage<SubscribeRequest> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_service, 0);
+  fileDesc("ChphZ2VudHJlcGwvdjEvc2VydmljZS5wcm90bxIMYWdlbnRyZXBsLnYxMt4YCglBZ2VudFJlcGwSTgoJU3Vic2NyaWJlEh4uYWdlbnRyZXBsLnYxLlN1YnNjcmliZVJlcXVlc3QaHy5hZ2VudHJlcGwudjEuU3Vic2NyaWJlUmVzcG9uc2UwARJVCgxTdWJtaXRQcm9tcHQSIS5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0UmVxdWVzdBoiLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRSZXNwb25zZRJMCglJbnRlcnJ1cHQSHi5hZ2VudHJlcGwudjEuSW50ZXJydXB0UmVxdWVzdBofLmFnZW50cmVwbC52MS5JbnRlcnJ1cHRSZXNwb25zZRJhChBBbnN3ZXJQZXJtaXNzaW9uEiUuYWdlbnRyZXBsLnYxLkFuc3dlclBlcm1pc3Npb25SZXF1ZXN0GiYuYWdlbnRyZXBsLnYxLkFuc3dlclBlcm1pc3Npb25SZXNwb25zZRJbCg5NZXJnZVdvcmtzcGFjZRIjLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVJlcXVlc3QaJC5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VSZXNwb25zZRJbCg5DbG9zZVdvcmtzcGFjZRIjLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZVJlcXVlc3QaJC5hZ2VudHJlcGwudjEuQ2xvc2VXb3Jrc3BhY2VSZXNwb25zZRJYCg1PcGVuV29ya3NwYWNlEiIuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VSZXF1ZXN0GiMuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VSZXNwb25zZRJDCgZSZXN5bmMSGy5hZ2VudHJlcGwudjEuUmVzeW5jUmVxdWVzdBocLmFnZW50cmVwbC52MS5SZXN5bmNSZXNwb25zZRJYCg1DcmVhdGVTZXNzaW9uEiIuYWdlbnRyZXBsLnYxLkNyZWF0ZVNlc3Npb25SZXF1ZXN0GiMuYWdlbnRyZXBsLnYxLkNyZWF0ZVNlc3Npb25SZXNwb25zZRJYCg1EZWxldGVTZXNzaW9uEiIuYWdlbnRyZXBsLnYxLkRlbGV0ZVNlc3Npb25SZXF1ZXN0GiMuYWdlbnRyZXBsLnYxLkRlbGV0ZVNlc3Npb25SZXNwb25zZRJJCghTaHV0ZG93bhIdLmFnZW50cmVwbC52MS5TaHV0ZG93blJlcXVlc3QaHi5hZ2VudHJlcGwudjEuU2h1dGRvd25SZXNwb25zZRJMCglDbGllbnRMb2cSHi5hZ2VudHJlcGwudjEuQ2xpZW50TG9nUmVxdWVzdBofLmFnZW50cmVwbC52MS5DbGllbnRMb2dSZXNwb25zZRJeCg9Gb3JjZVF1ZXVlRW50cnkSJC5hZ2VudHJlcGwudjEuRm9yY2VRdWV1ZUVudHJ5UmVxdWVzdBolLmFnZW50cmVwbC52MS5Gb3JjZVF1ZXVlRW50cnlSZXNwb25zZRJhChBBY2NlcHRRdWV1ZUVudHJ5EiUuYWdlbnRyZXBsLnYxLkFjY2VwdFF1ZXVlRW50cnlSZXF1ZXN0GiYuYWdlbnRyZXBsLnYxLkFjY2VwdFF1ZXVlRW50cnlSZXNwb25zZRJhChBDYW5jZWxRdWV1ZUVudHJ5EiUuYWdlbnRyZXBsLnYxLkNhbmNlbFF1ZXVlRW50cnlSZXF1ZXN0GiYuYWdlbnRyZXBsLnYxLkNhbmNlbFF1ZXVlRW50cnlSZXNwb25zZRJeCg9DcmVhdGVXb3Jrc3BhY2USJC5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlUmVxdWVzdBolLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VSZXNwb25zZRJwChVXb3Jrc3BhY2VNYXRlcmlhbGl6ZWQSKi5hZ2VudHJlcGwudjEuV29ya3NwYWNlTWF0ZXJpYWxpemVkUmVxdWVzdBorLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VNYXRlcmlhbGl6ZWRSZXNwb25zZRJqChNIb3N0QWN0aW9uQ29tcGxldGVkEiguYWdlbnRyZXBsLnYxLkhvc3RBY3Rpb25Db21wbGV0ZWRSZXF1ZXN0GikuYWdlbnRyZXBsLnYxLkhvc3RBY3Rpb25Db21wbGV0ZWRSZXNwb25zZRJVCgxEYWVtb25IZWFsdGgSIS5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoUmVxdWVzdBoiLmFnZW50cmVwbC52MS5EYWVtb25IZWFsdGhSZXNwb25zZRJYCg1TZXNzaW9uSGVhbHRoEiIuYWdlbnRyZXBsLnYxLlNlc3Npb25IZWFsdGhSZXF1ZXN0GiMuYWdlbnRyZXBsLnYxLlNlc3Npb25IZWFsdGhSZXNwb25zZRJbCg5SZXN0YXJ0U2Vzc2lvbhIjLmFnZW50cmVwbC52MS5SZXN0YXJ0U2Vzc2lvblJlcXVlc3QaJC5hZ2VudHJlcGwudjEuUmVzdGFydFNlc3Npb25SZXNwb25zZRJJCghTZXRNb2RlbBIdLmFnZW50cmVwbC52MS5TZXRNb2RlbFJlcXVlc3QaHi5hZ2VudHJlcGwudjEuU2V0TW9kZWxSZXNwb25zZRJzChZQdWJsaXNoV29ya3NwYWNlUm9zdGVyEisuYWdlbnRyZXBsLnYxLlB1Ymxpc2hXb3Jrc3BhY2VSb3N0ZXJSZXF1ZXN0GiwuYWdlbnRyZXBsLnYxLlB1Ymxpc2hXb3Jrc3BhY2VSb3N0ZXJSZXNwb25zZRJhChBTY2hlZHVsZVNodXRkb3duEiUuYWdlbnRyZXBsLnYxLlNjaGVkdWxlU2h1dGRvd25SZXF1ZXN0GiYuYWdlbnRyZXBsLnYxLlNjaGVkdWxlU2h1dGRvd25SZXNwb25zZRJ2ChdDYW5jZWxTY2hlZHVsZWRTaHV0ZG93bhIsLmFnZW50cmVwbC52MS5DYW5jZWxTY2hlZHVsZWRTaHV0ZG93blJlcXVlc3QaLS5hZ2VudHJlcGwudjEuQ2FuY2VsU2NoZWR1bGVkU2h1dGRvd25SZXNwb25zZRJnChJIaWJlcm5hdGVXb3Jrc3BhY2USJy5hZ2VudHJlcGwudjEuSGliZXJuYXRlV29ya3NwYWNlUmVxdWVzdBooLmFnZW50cmVwbC52MS5IaWJlcm5hdGVXb3Jrc3BhY2VSZXNwb25zZRJYCg1SZXZpdmVTZXNzaW9uEiIuYWdlbnRyZXBsLnYxLlJldml2ZVNlc3Npb25SZXF1ZXN0GiMuYWdlbnRyZXBsLnYxLlJldml2ZVNlc3Npb25SZXNwb25zZRJeCg9QYXVzZU1lcmdlUXVldWUSJC5hZ2VudHJlcGwudjEuUGF1c2VNZXJnZVF1ZXVlUmVxdWVzdBolLmFnZW50cmVwbC52MS5QYXVzZU1lcmdlUXVldWVSZXNwb25zZRJhChBSZXN1bWVNZXJnZVF1ZXVlEiUuYWdlbnRyZXBsLnYxLlJlc3VtZU1lcmdlUXVldWVSZXF1ZXN0GiYuYWdlbnRyZXBsLnYxLlJlc3VtZU1lcmdlUXVldWVSZXNwb25zZRJPCgpFdmljdE1lcmdlEh8uYWdlbnRyZXBsLnYxLkV2aWN0TWVyZ2VSZXF1ZXN0GiAuYWdlbnRyZXBsLnYxLkV2aWN0TWVyZ2VSZXNwb25zZRJnChJBbnN3ZXJNZXJnZURlcXVldWUSJy5hZ2VudHJlcGwudjEuQW5zd2VyTWVyZ2VEZXF1ZXVlUmVxdWVzdBooLmFnZW50cmVwbC52MS5BbnN3ZXJNZXJnZURlcXVldWVSZXNwb25zZRJtChRDYW5jZWxEZXRhY2hlZEFnZW50cxIpLmFnZW50cmVwbC52MS5DYW5jZWxEZXRhY2hlZEFnZW50c1JlcXVlc3QaKi5hZ2VudHJlcGwudjEuQ2FuY2VsRGV0YWNoZWRBZ2VudHNSZXNwb25zZRJMCglGaXJzdFBhZ2USHi5hZ2VudHJlcGwudjEuRmlyc3RQYWdlUmVxdWVzdBofLmFnZW50cmVwbC52MS5GaXJzdFBhZ2VSZXNwb25zZRJJCghOZXh0UGFnZRIdLmFnZW50cmVwbC52MS5OZXh0UGFnZVJlcXVlc3QaHi5hZ2VudHJlcGwudjEuTmV4dFBhZ2VSZXNwb25zZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_endpoint_accept_queue_entry, file_agentrepl_v1_endpoint_answer_merge_dequeue, file_agentrepl_v1_endpoint_answer_permission, file_agentrepl_v1_endpoint_cancel_detached_agents, file_agentrepl_v1_endpoint_cancel_queue_entry, file_agentrepl_v1_endpoint_cancel_scheduled_shutdown, file_agentrepl_v1_endpoint_client_log, file_agentrepl_v1_endpoint_close_workspace, file_agentrepl_v1_endpoint_create_session, file_agentrepl_v1_endpoint_create_workspace, file_agentrepl_v1_endpoint_daemon_health, file_agentrepl_v1_endpoint_delete_session, file_agentrepl_v1_endpoint_evict_merge, file_agentrepl_v1_endpoint_first_page, file_agentrepl_v1_endpoint_force_queue_entry, file_agentrepl_v1_endpoint_hibernate_workspace, file_agentrepl_v1_endpoint_host_action_completed, file_agentrepl_v1_endpoint_interrupt, file_agentrepl_v1_endpoint_merge_workspace, file_agentrepl_v1_endpoint_next_page, file_agentrepl_v1_endpoint_open_workspace, file_agentrepl_v1_endpoint_pause_merge_queue, file_agentrepl_v1_endpoint_publish_workspace_roster, file_agentrepl_v1_endpoint_restart_session, file_agentrepl_v1_endpoint_resume_merge_queue, file_agentrepl_v1_endpoint_resync, file_agentrepl_v1_endpoint_revive_session, file_agentrepl_v1_endpoint_schedule_shutdown, file_agentrepl_v1_endpoint_session_health, file_agentrepl_v1_endpoint_set_model, file_agentrepl_v1_endpoint_shutdown, file_agentrepl_v1_endpoint_submit_prompt, file_agentrepl_v1_endpoint_subscribe, file_agentrepl_v1_endpoint_workspace_materialized]);
 
 /**
  * THERE IS NO PAINT ATTESTATION ON THIS SERVICE, AND THERE MUST NEVER BE ONE.
@@ -106,7 +118,7 @@ export const SubscribeRequestSchema: GenMessage<SubscribeRequest> = /*@__PURE__*
  *   cwd, never a display name. It appears ONLY on the workspace-addressed
  *   commands. That is the change worth stating: the old envelope handed a
  *   `workspace` to daemon-global commands that had no use for one, to the point
- *   that PauseMergeQueueCmd had to document that the daemon ignored it. A field
+ *   that PauseMergeQueueRequest had to document that the daemon ignored it. A field
  *   the receiver ignores is a field a caller can be wrong about, and now those
  *   commands have nowhere to be wrong.
  *
@@ -114,6 +126,15 @@ export const SubscribeRequestSchema: GenMessage<SubscribeRequest> = /*@__PURE__*
  * below returns a message on refusal — see CommandAck.failure and the
  * FailureKind vocabulary in shared.proto. A refusal is a classified account the
  * frontends RENDER, and a status code is a number with a string stapled to it.
+ *
+ * EVERY METHOD HAS ITS OWN REQUEST AND RESPONSE TYPE, and they live one
+ * endpoint per file in `endpoint_<snake_case_method>.proto` beside this one.
+ * Nothing on a signature below is qualified, because a request type is part of
+ * the API a client CALLS and this package IS that API — what a client DRAWS is
+ * frontend.v1, and a command was never something anyone drew. Sharing
+ * CommandAck as the response gave 33 methods one answer type, so no method
+ * could grow a field without offering it to the other 32; each now wraps the
+ * ack instead. See DESIGN-protobuf-surfaces.md.
  *
  * @generated from service agentrepl.v1.AgentRepl
  */
@@ -150,7 +171,7 @@ export const AgentRepl: GenService<{
   subscribe: {
     methodKind: "server_streaming";
     input: typeof SubscribeRequestSchema;
-    output: typeof FrontendFrameSchema;
+    output: typeof SubscribeResponseSchema;
   },
   /**
    * Send the user's prompt to the workspace's session. The daemon may deliver
@@ -162,8 +183,8 @@ export const AgentRepl: GenService<{
    */
   submitPrompt: {
     methodKind: "unary";
-    input: typeof SubmitPromptCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof SubmitPromptRequestSchema;
+    output: typeof SubmitPromptResponseSchema;
   },
   /**
    * Stop the workspace's running turn. Answers with confirm_required rather
@@ -175,7 +196,7 @@ export const AgentRepl: GenService<{
    */
   interrupt: {
     methodKind: "unary";
-    input: typeof InterruptCmdSchema;
+    input: typeof InterruptRequestSchema;
     output: typeof InterruptResponseSchema;
   },
   /**
@@ -188,21 +209,21 @@ export const AgentRepl: GenService<{
    */
   answerPermission: {
     methodKind: "unary";
-    input: typeof PermissionAnswerCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof AnswerPermissionRequestSchema;
+    output: typeof AnswerPermissionResponseSchema;
   },
   /**
    * Merge the workspace's branch into the target the daemon recorded when it
    * created that workspace. The command states no geometry and names no
-   * handler; see MergeWorkspaceCmd for why a caller that stated either would be
+   * handler; see MergeWorkspaceRequest for why a caller that stated either would be
    * a second owner of the daemon's geometry map.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.MergeWorkspace
    */
   mergeWorkspace: {
     methodKind: "unary";
-    input: typeof MergeWorkspaceCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof MergeWorkspaceRequestSchema;
+    output: typeof MergeWorkspaceResponseSchema;
   },
   /**
    * Retire the workspace: stop its session, release its worktree bookkeeping,
@@ -213,8 +234,8 @@ export const AgentRepl: GenService<{
    */
   closeWorkspace: {
     methodKind: "unary";
-    input: typeof CloseWorkspaceCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof CloseWorkspaceRequestSchema;
+    output: typeof CloseWorkspaceResponseSchema;
   },
   /**
    * Reattach to the workspace's session, or start one when it has none. The
@@ -225,8 +246,8 @@ export const AgentRepl: GenService<{
    */
   openWorkspace: {
     methodKind: "unary";
-    input: typeof OpenWorkspaceCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof OpenWorkspaceRequestSchema;
+    output: typeof OpenWorkspaceResponseSchema;
   },
   /**
    * Replay the workspace's conversation from the client's last read position.
@@ -239,8 +260,8 @@ export const AgentRepl: GenService<{
    */
   resync: {
     methodKind: "unary";
-    input: typeof ResyncCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof ResyncRequestSchema;
+    output: typeof ResyncResponseSchema;
   },
   /**
    * Bring up a session for a workspace. HOST SURFACE: a rendering frontend has
@@ -252,7 +273,7 @@ export const AgentRepl: GenService<{
    */
   createSession: {
     methodKind: "unary";
-    input: typeof CreateSessionCmdSchema;
+    input: typeof CreateSessionRequestSchema;
     output: typeof CreateSessionResponseSchema;
   },
   /**
@@ -263,8 +284,8 @@ export const AgentRepl: GenService<{
    */
   deleteSession: {
     methodKind: "unary";
-    input: typeof DeleteSessionCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof DeleteSessionRequestSchema;
+    output: typeof DeleteSessionResponseSchema;
   },
   /**
    * Shut the daemon down now. Session shims are PRESERVED unless the request
@@ -275,8 +296,8 @@ export const AgentRepl: GenService<{
    */
   shutdown: {
     methodKind: "unary";
-    input: typeof ShutdownCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof ShutdownRequestSchema;
+    output: typeof ShutdownResponseSchema;
   },
   /**
    * File one diagnostic line from a frontend into the daemon's log. The daemon
@@ -288,8 +309,8 @@ export const AgentRepl: GenService<{
    */
   clientLog: {
     methodKind: "unary";
-    input: typeof ClientLogCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof ClientLogRequestSchema;
+    output: typeof ClientLogResponseSchema;
   },
   /**
    * Deliver a held queue entry NOW — the user overriding the classifier, or not
@@ -299,8 +320,8 @@ export const AgentRepl: GenService<{
    */
   forceQueueEntry: {
     methodKind: "unary";
-    input: typeof QueueForceCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof ForceQueueEntryRequestSchema;
+    output: typeof ForceQueueEntryResponseSchema;
   },
   /**
    * Confirm a HOLD entry. View state only: the entry is still delivered by the
@@ -310,8 +331,8 @@ export const AgentRepl: GenService<{
    */
   acceptQueueEntry: {
     methodKind: "unary";
-    input: typeof QueueAcceptCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof AcceptQueueEntryRequestSchema;
+    output: typeof AcceptQueueEntryResponseSchema;
   },
   /**
    * Drop a queue entry. It is never delivered.
@@ -320,8 +341,8 @@ export const AgentRepl: GenService<{
    */
   cancelQueueEntry: {
     methodKind: "unary";
-    input: typeof QueueCancelCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof CancelQueueEntryRequestSchema;
+    output: typeof CancelQueueEntryResponseSchema;
   },
   /**
    * Request one agent-repl workspace. THE SOLE CREATION INGRESS, for host UI
@@ -334,8 +355,8 @@ export const AgentRepl: GenService<{
    */
   createWorkspace: {
     methodKind: "unary";
-    input: typeof CreateWorkspaceCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof CreateWorkspaceRequestSchema;
+    output: typeof CreateWorkspaceResponseSchema;
   },
   /**
    * Emacs has built the perspective and local bookkeeping for a
@@ -346,8 +367,8 @@ export const AgentRepl: GenService<{
    */
   workspaceMaterialized: {
     methodKind: "unary";
-    input: typeof WorkspaceMaterializedCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof WorkspaceMaterializedRequestSchema;
+    output: typeof WorkspaceMaterializedResponseSchema;
   },
   /**
    * Report the outcome of a HostAction the daemon's durable inbox dispatched.
@@ -358,8 +379,8 @@ export const AgentRepl: GenService<{
    */
   hostActionCompleted: {
     methodKind: "unary";
-    input: typeof HostActionCompletedCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof HostActionCompletedRequestSchema;
+    output: typeof HostActionCompletedResponseSchema;
   },
   /**
    * Ask the daemon to assert that every boot-critical global dependency is
@@ -371,8 +392,8 @@ export const AgentRepl: GenService<{
    */
   daemonHealth: {
     methodKind: "unary";
-    input: typeof DaemonHealthCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof DaemonHealthRequestSchema;
+    output: typeof DaemonHealthResponseSchema;
   },
   /**
    * Ask the daemon to prove one restored workspace's whole session route:
@@ -384,8 +405,8 @@ export const AgentRepl: GenService<{
    */
   sessionHealth: {
     methodKind: "unary";
-    input: typeof SessionHealthCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof SessionHealthRequestSchema;
+    output: typeof SessionHealthResponseSchema;
   },
   /**
    * HARD RESTART of the workspace's session process, keeping the session
@@ -397,8 +418,8 @@ export const AgentRepl: GenService<{
    */
   restartSession: {
     methodKind: "unary";
-    input: typeof RestartSessionCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof RestartSessionRequestSchema;
+    output: typeof RestartSessionResponseSchema;
   },
   /**
    * Change a live session's model. The response carries the SHIM-CONFIRMED
@@ -409,7 +430,7 @@ export const AgentRepl: GenService<{
    */
   setModel: {
     methodKind: "unary";
-    input: typeof SetModelCmdSchema;
+    input: typeof SetModelRequestSchema;
     output: typeof SetModelResponseSchema;
   },
   /**
@@ -422,8 +443,8 @@ export const AgentRepl: GenService<{
    */
   publishWorkspaceRoster: {
     methodKind: "unary";
-    input: typeof PublishWorkspaceRosterCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof PublishWorkspaceRosterRequestSchema;
+    output: typeof PublishWorkspaceRosterResponseSchema;
   },
   /**
    * Schedule a graceful shutdown instead of demanding one now: take the drain
@@ -435,8 +456,8 @@ export const AgentRepl: GenService<{
    */
   scheduleShutdown: {
     methodKind: "unary";
-    input: typeof ScheduleShutdownCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof ScheduleShutdownRequestSchema;
+    output: typeof ScheduleShutdownResponseSchema;
   },
   /**
    * Cancel a scheduled shutdown and release the drain lease. A schedule_id that
@@ -447,8 +468,8 @@ export const AgentRepl: GenService<{
    */
   cancelScheduledShutdown: {
     methodKind: "unary";
-    input: typeof CancelScheduledShutdownCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof CancelScheduledShutdownRequestSchema;
+    output: typeof CancelScheduledShutdownResponseSchema;
   },
   /**
    * Deliberately hibernate the workspace's session: stop the shim and mark the
@@ -460,8 +481,8 @@ export const AgentRepl: GenService<{
    */
   hibernateWorkspace: {
     methodKind: "unary";
-    input: typeof HibernateWorkspaceCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof HibernateWorkspaceRequestSchema;
+    output: typeof HibernateWorkspaceResponseSchema;
   },
   /**
    * The user's revival decision for a hibernated workspace. Revival is LAZY and
@@ -473,8 +494,8 @@ export const AgentRepl: GenService<{
    */
   reviveSession: {
     methodKind: "unary";
-    input: typeof ReviveSessionCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof ReviveSessionRequestSchema;
+    output: typeof ReviveSessionResponseSchema;
   },
   /**
    * Pause the merge queue: the run in flight finishes, nothing new dequeues.
@@ -485,8 +506,8 @@ export const AgentRepl: GenService<{
    */
   pauseMergeQueue: {
     methodKind: "unary";
-    input: typeof PauseMergeQueueCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof PauseMergeQueueRequestSchema;
+    output: typeof PauseMergeQueueResponseSchema;
   },
   /**
    * Resume the merge queue. Idempotent and daemon-global, like its pause.
@@ -495,8 +516,8 @@ export const AgentRepl: GenService<{
    */
   resumeMergeQueue: {
     methodKind: "unary";
-    input: typeof ResumeMergeQueueCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof ResumeMergeQueueRequestSchema;
+    output: typeof ResumeMergeQueueResponseSchema;
   },
   /**
    * Evict ONE waiting queue entry by run id, retiring it with a terminal failed
@@ -508,8 +529,8 @@ export const AgentRepl: GenService<{
    */
   evictMerge: {
     methodKind: "unary";
-    input: typeof EvictMergeCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof EvictMergeRequestSchema;
+    output: typeof EvictMergeResponseSchema;
   },
   /**
    * Answer a MergeDequeueOffer: take the merge off the queue, or leave it. The
@@ -521,8 +542,8 @@ export const AgentRepl: GenService<{
    */
   answerMergeDequeue: {
     methodKind: "unary";
-    input: typeof AnswerMergeDequeueCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof AnswerMergeDequeueRequestSchema;
+    output: typeof AnswerMergeDequeueResponseSchema;
   },
   /**
    * Cancel the session's DETACHED background agents — the subagent, shell and
@@ -535,7 +556,7 @@ export const AgentRepl: GenService<{
    */
   cancelDetachedAgents: {
     methodKind: "unary";
-    input: typeof CancelDetachedAgentsCmdSchema;
+    input: typeof CancelDetachedAgentsRequestSchema;
     output: typeof CancelDetachedAgentsResponseSchema;
   },
   /**
@@ -549,8 +570,8 @@ export const AgentRepl: GenService<{
    */
   firstPage: {
     methodKind: "unary";
-    input: typeof FirstPageCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof FirstPageRequestSchema;
+    output: typeof FirstPageResponseSchema;
   },
   /**
    * Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
@@ -562,8 +583,8 @@ export const AgentRepl: GenService<{
    */
   nextPage: {
     methodKind: "unary";
-    input: typeof NextPageCmdSchema;
-    output: typeof CommandAckSchema;
+    input: typeof NextPageRequestSchema;
+    output: typeof NextPageResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_agentrepl_v1_service, 0);

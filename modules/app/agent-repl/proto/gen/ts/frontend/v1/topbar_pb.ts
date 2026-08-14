@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/topbar.proto.
  */
 export const file_frontend_v1_topbar: GenFile = /*@__PURE__*/
-  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIvwBCgpUb3BiYXJWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRINCgV0aXRsZRgCIAEoCRIUCgxzZXNzaW9uX2xpbmUYAyABKAkSFQoNbW9kZWxfZGlzcGxheRgEIAEoCRIrCg1tb2RlbF9vcHRpb25zGAUgAygLMhQuc2hpbS52MS5Nb2RlbE9wdGlvbhI1Cgxjb25uZWN0aXZpdHkYBiABKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJDb25uZWN0aXZpdHkSDQoFZmVuY2UYByABKAkSLAoId2FybmluZ3MYCCADKAsyGi5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nImEKDVRvcGJhcldhcm5pbmcSDAoEdGV4dBgBIAEoCRI6CgphY2NvdW50aW5nGAIgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudGluZ1dhcm5pbmdIAEIGCgRraW5kIhkKF1RvcGJhckFjY291bnRpbmdXYXJuaW5nIkAKElRvcGJhckNvbm5lY3Rpdml0eRIMCgR0b25lGAEgASgJEg0KBWdseXBoGAIgASgJEg0KBXRpdGxlGAMgASgJIkMKC1NldE1vZGVsQ21kEhIKCnJlcXVlc3RfaWQYASABKAkSEQoJd29ya3NwYWNlGAIgASgJEg0KBW1vZGVsGAMgASgJIkcKEERhZW1vbkhlYWx0aFZpZXcSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdoZWFsdGh5GAIgASgIEg4KBnJlYXNvbhgDIAEoCSJvChFTZXNzaW9uSGVhbHRoVmlldxISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEg8KB2hlYWx0aHkYBCABKAgSDgoGcmVhc29uGAUgASgJIjgKD0RhZW1vbkhlYWx0aENtZBISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCWNsaWVudF9pZBgCIAEoCSJgChBTZXNzaW9uSGVhbHRoQ21kEhIKCnJlcXVlc3RfaWQYASABKAkSEQoJd29ya3NwYWNlGAIgASgJEhEKCWNsaWVudF9pZBgDIAEoCRISCgpzZXNzaW9uX2lkGAQgASgJImwKElRva2VuQnJlYWtkb3duVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSNAoIc2VjdGlvbnMYAiADKAsyIi5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blNlY3Rpb24SDQoFZmVuY2UYAyABKAkiVAoVVG9rZW5CcmVha2Rvd25TZWN0aW9uEg0KBWxhYmVsGAEgASgJEiwKBHJvd3MYAiADKAsyHi5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blJvdyJtChFUb2tlbkJyZWFrZG93blJvdxINCgVsYWJlbBgBIAEoCRIOCgZ0b2tlbnMYAiABKAMSFgoOc2hhcmVfcGVybWlsbGUYAyABKAUSEgoKZW1waGFzaXplZBgEIAEoCBINCgVkZXB0aBgFIAEoBUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_shim_v1_core]);
+  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIvwBCgpUb3BiYXJWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRINCgV0aXRsZRgCIAEoCRIUCgxzZXNzaW9uX2xpbmUYAyABKAkSFQoNbW9kZWxfZGlzcGxheRgEIAEoCRIrCg1tb2RlbF9vcHRpb25zGAUgAygLMhQuc2hpbS52MS5Nb2RlbE9wdGlvbhI1Cgxjb25uZWN0aXZpdHkYBiABKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJDb25uZWN0aXZpdHkSDQoFZmVuY2UYByABKAkSLAoId2FybmluZ3MYCCADKAsyGi5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nImEKDVRvcGJhcldhcm5pbmcSDAoEdGV4dBgBIAEoCRI6CgphY2NvdW50aW5nGAIgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudGluZ1dhcm5pbmdIAEIGCgRraW5kIhkKF1RvcGJhckFjY291bnRpbmdXYXJuaW5nIkAKElRvcGJhckNvbm5lY3Rpdml0eRIMCgR0b25lGAEgASgJEg0KBWdseXBoGAIgASgJEg0KBXRpdGxlGAMgASgJIkcKEERhZW1vbkhlYWx0aFZpZXcSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdoZWFsdGh5GAIgASgIEg4KBnJlYXNvbhgDIAEoCSJvChFTZXNzaW9uSGVhbHRoVmlldxISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEg8KB2hlYWx0aHkYBCABKAgSDgoGcmVhc29uGAUgASgJImwKElRva2VuQnJlYWtkb3duVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSNAoIc2VjdGlvbnMYAiADKAsyIi5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blNlY3Rpb24SDQoFZmVuY2UYAyABKAkiVAoVVG9rZW5CcmVha2Rvd25TZWN0aW9uEg0KBWxhYmVsGAEgASgJEiwKBHJvd3MYAiADKAsyHi5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blJvdyJtChFUb2tlbkJyZWFrZG93blJvdxINCgVsYWJlbBgBIAEoCRIOCgZ0b2tlbnMYAiABKAMSFgoOc2hhcmVfcGVybWlsbGUYAyABKAUSEgoKZW1waGFzaXplZBgEIAEoCBINCgVkZXB0aBgFIAEoBUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_shim_v1_core]);
 
 /**
  * One workspace's topbar, resolved completely by the daemon. The client
@@ -216,44 +216,6 @@ export const TopbarConnectivitySchema: GenMessage<TopbarConnectivity> = /*@__PUR
   messageDesc(file_frontend_v1_topbar, 3);
 
 /**
- * A deliberate request to change an already-live session's model.  The daemon
- * forwards this to the shim and only publishes the shim-confirmed selection.
- * Bootstrap and rebind intentionally have no model field: they observe session
- * state rather than choosing it.  Creation is different — see
- * CreateSessionCmd.model, which is a starting choice, not an observation.
- *
- * @generated from message frontend.v1.SetModelCmd
- */
-export type SetModelCmd = Message<"frontend.v1.SetModelCmd"> & {
-  /**
-   * Correlation. See agentrepl.v1.AgentRepl.
-   *
-   * @generated from field: string request_id = 1;
-   */
-  requestId: string;
-
-  /**
-   * The workspace whose live session is being re-modelled. See
-   * agentrepl.v1.AgentRepl.
-   *
-   * @generated from field: string workspace = 2;
-   */
-  workspace: string;
-
-  /**
-   * @generated from field: string model = 3;
-   */
-  model: string;
-};
-
-/**
- * Describes the message frontend.v1.SetModelCmd.
- * Use `create(SetModelCmdSchema)` to create a new message.
- */
-export const SetModelCmdSchema: GenMessage<SetModelCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 4);
-
-/**
  * Correlated result of the daemon-global health command.  A command ACK alone
  * is only a receipt that the daemon accepted a frame; this view is the
  * assertion Emacs waits for before restoring any workspace.  healthy=false is
@@ -284,7 +246,7 @@ export type DaemonHealthView = Message<"frontend.v1.DaemonHealthView"> & {
  * Use `create(DaemonHealthViewSchema)` to create a new message.
  */
 export const DaemonHealthViewSchema: GenMessage<DaemonHealthView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 5);
+  messageDesc(file_frontend_v1_topbar, 4);
 
 /**
  * Correlated result of the session-specific health command.  The daemon sets
@@ -333,87 +295,7 @@ export type SessionHealthView = Message<"frontend.v1.SessionHealthView"> & {
  * Use `create(SessionHealthViewSchema)` to create a new message.
  */
 export const SessionHealthViewSchema: GenMessage<SessionHealthView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 6);
-
-/**
- * Ask the daemon to assert that every boot-critical global dependency is
- * operational.  The matching DaemonHealthView, not socket existence, is the
- * success criterion.  It is a frontend command because no vendor produces or
- * consumes this daemon-local fact.
- *
- * @generated from message frontend.v1.DaemonHealthCmd
- */
-export type DaemonHealthCmd = Message<"frontend.v1.DaemonHealthCmd"> & {
-  /**
-   * Correlation. The DaemonHealthView pushed in answer echoes this id, which is
-   * how Emacs knows the verdict is the one it asked for.
-   *
-   * @generated from field: string request_id = 1;
-   */
-  requestId: string;
-
-  /**
-   * WHICH SUBSCRIBE STREAM the DaemonHealthView should be pushed down. See
-   * agentrepl.v1.SubscribeRequest.client_id. Daemon-global otherwise: no
-   * workspace.
-   *
-   * @generated from field: string client_id = 2;
-   */
-  clientId: string;
-};
-
-/**
- * Describes the message frontend.v1.DaemonHealthCmd.
- * Use `create(DaemonHealthCmdSchema)` to create a new message.
- */
-export const DaemonHealthCmdSchema: GenMessage<DaemonHealthCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 7);
-
-/**
- * Ask the daemon to prove the entire session route for one restored workspace:
- * daemon registry -> current session controller -> handshaked shim -> shim dependencies.
- * `workspace` is authoritative and must be the session's absolute CWD;
- * `session_id` makes a stale response impossible to use after a rebind.
- *
- * HOST SURFACE, like its view.
- *
- * @generated from message frontend.v1.SessionHealthCmd
- */
-export type SessionHealthCmd = Message<"frontend.v1.SessionHealthCmd"> & {
-  /**
-   * Correlation. The SessionHealthView pushed in answer echoes this id.
-   *
-   * @generated from field: string request_id = 1;
-   */
-  requestId: string;
-
-  /**
-   * The workspace whose route is being proved. See agentrepl.v1.AgentRepl.
-   *
-   * @generated from field: string workspace = 2;
-   */
-  workspace: string;
-
-  /**
-   * WHICH SUBSCRIBE STREAM the SessionHealthView should be pushed down. See
-   * agentrepl.v1.SubscribeRequest.client_id.
-   *
-   * @generated from field: string client_id = 3;
-   */
-  clientId: string;
-
-  /**
-   * @generated from field: string session_id = 4;
-   */
-  sessionId: string;
-};
-
-/**
- * Describes the message frontend.v1.SessionHealthCmd.
- * Use `create(SessionHealthCmdSchema)` to create a new message.
- */
-export const SessionHealthCmdSchema: GenMessage<SessionHealthCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 8);
+  messageDesc(file_frontend_v1_topbar, 5);
 
 /**
  * The token-breakdown menu, fully resolved. Sections and rows arrive in
@@ -461,7 +343,7 @@ export type TokenBreakdownView = Message<"frontend.v1.TokenBreakdownView"> & {
  * Use `create(TokenBreakdownViewSchema)` to create a new message.
  */
 export const TokenBreakdownViewSchema: GenMessage<TokenBreakdownView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 9);
+  messageDesc(file_frontend_v1_topbar, 6);
 
 /**
  * One titled section of the breakdown menu.
@@ -489,7 +371,7 @@ export type TokenBreakdownSection = Message<"frontend.v1.TokenBreakdownSection">
  * Use `create(TokenBreakdownSectionSchema)` to create a new message.
  */
 export const TokenBreakdownSectionSchema: GenMessage<TokenBreakdownSection> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 10);
+  messageDesc(file_frontend_v1_topbar, 7);
 
 /**
  * One row of the breakdown menu. All numbers are resolved; the share is
@@ -542,5 +424,5 @@ export type TokenBreakdownRow = Message<"frontend.v1.TokenBreakdownRow"> & {
  * Use `create(TokenBreakdownRowSchema)` to create a new message.
  */
 export const TokenBreakdownRowSchema: GenMessage<TokenBreakdownRow> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 11);
+  messageDesc(file_frontend_v1_topbar, 8);
 

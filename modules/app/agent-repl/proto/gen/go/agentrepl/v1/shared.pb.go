@@ -350,7 +350,7 @@ func (ResumeMode) EnumDescriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{2}
 }
 
-// The severity of a ClientLogCmd. A closed vocabulary rather than a free
+// The severity of a ClientLogRequest. A closed vocabulary rather than a free
 // string, so a frontend cannot invent a level the daemon has no policy for.
 type ClientLogLevel int32
 
@@ -5689,7 +5689,7 @@ type HibernationDetail_IdleCutoff struct {
 }
 
 type HibernationDetail_Forced struct {
-	// The user forced it via HibernateWorkspaceCmd.
+	// The user forced it via HibernateWorkspaceRequest.
 	Forced *HibernationForced `protobuf:"bytes,3,opt,name=forced,proto3,oneof"`
 }
 
@@ -5848,146 +5848,6 @@ func (x *HibernationCacheExpired) GetTtlMs() int64 {
 	return 0
 }
 
-// The user's revival decision for a hibernated workspace. Revival is LAZY and
-// GATED: the daemon nacks SubmitPromptCmd on a hibernated session, so no
-// model use can precede this choice — a rendering frontend draws the gate
-// from WorkspaceGateView (the host draws it from its session catalog) and
-// sends exactly one of these. The daemon brings
-// the session up along the ordinary create/resume path and, under either
-// gated mode — compact_first or clear — drives that context cut to completion
-// before accepting any prompt.
-type ReviveSessionCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace being revived. See AgentRepl in frame.proto.
-	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// The choice is a oneof of empty messages, not a bool: "no decision" must
-	// be unrepresentable on the wire, and a third revival mode later is a new
-	// arm rather than a second flag.
-	//
-	// Types that are valid to be assigned to Mode:
-	//
-	//	*ReviveSessionCmd_CompactFirst
-	//	*ReviveSessionCmd_Direct
-	//	*ReviveSessionCmd_Clear
-	Mode          isReviveSessionCmd_Mode `protobuf_oneof:"mode"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ReviveSessionCmd) Reset() {
-	*x = ReviveSessionCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[76]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ReviveSessionCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ReviveSessionCmd) ProtoMessage() {}
-
-func (x *ReviveSessionCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[76]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ReviveSessionCmd.ProtoReflect.Descriptor instead.
-func (*ReviveSessionCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{76}
-}
-
-func (x *ReviveSessionCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *ReviveSessionCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *ReviveSessionCmd) GetMode() isReviveSessionCmd_Mode {
-	if x != nil {
-		return x.Mode
-	}
-	return nil
-}
-
-func (x *ReviveSessionCmd) GetCompactFirst() *ReviveCompactFirst {
-	if x != nil {
-		if x, ok := x.Mode.(*ReviveSessionCmd_CompactFirst); ok {
-			return x.CompactFirst
-		}
-	}
-	return nil
-}
-
-func (x *ReviveSessionCmd) GetDirect() *ReviveDirect {
-	if x != nil {
-		if x, ok := x.Mode.(*ReviveSessionCmd_Direct); ok {
-			return x.Direct
-		}
-	}
-	return nil
-}
-
-func (x *ReviveSessionCmd) GetClear() *ReviveClear {
-	if x != nil {
-		if x, ok := x.Mode.(*ReviveSessionCmd_Clear); ok {
-			return x.Clear
-		}
-	}
-	return nil
-}
-
-type isReviveSessionCmd_Mode interface {
-	isReviveSessionCmd_Mode()
-}
-
-type ReviveSessionCmd_CompactFirst struct {
-	// Compact the conversation as the first order of business; prompts are
-	// accepted only after compaction lands. This pays the full-context cost
-	// ONCE (compaction is a model call over the whole history) instead of on
-	// every subsequent turn. Its own CompactionScope says how much of the
-	// conversation the compaction may summarize away.
-	CompactFirst *ReviveCompactFirst `protobuf:"bytes,3,opt,name=compact_first,json=compactFirst,proto3,oneof"`
-}
-
-type ReviveSessionCmd_Direct struct {
-	// Resume the conversation as-is, full accumulated context and all. The
-	// deliberate "I know it's big" path.
-	Direct *ReviveDirect `protobuf:"bytes,4,opt,name=direct,proto3,oneof"`
-}
-
-type ReviveSessionCmd_Clear struct {
-	// Discard the conversation outright as the first order of business:
-	// `/clear`, and nothing else. Prompts are accepted only after the clear
-	// lands, on the same gate compact_first stays behind — a prompt answered
-	// ahead of it would pay for the whole context the clear is about to throw
-	// away.
-	Clear *ReviveClear `protobuf:"bytes,5,opt,name=clear,proto3,oneof"`
-}
-
-func (*ReviveSessionCmd_CompactFirst) isReviveSessionCmd_Mode() {}
-
-func (*ReviveSessionCmd_Direct) isReviveSessionCmd_Mode() {}
-
-func (*ReviveSessionCmd_Clear) isReviveSessionCmd_Mode() {}
-
 // The compact-first revival choice, and WHAT of the conversation the
 // compaction is allowed to summarize away.
 //
@@ -6009,7 +5869,7 @@ type ReviveCompactFirst struct {
 
 func (x *ReviveCompactFirst) Reset() {
 	*x = ReviveCompactFirst{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[77]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6021,7 +5881,7 @@ func (x *ReviveCompactFirst) String() string {
 func (*ReviveCompactFirst) ProtoMessage() {}
 
 func (x *ReviveCompactFirst) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[77]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6034,7 +5894,7 @@ func (x *ReviveCompactFirst) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviveCompactFirst.ProtoReflect.Descriptor instead.
 func (*ReviveCompactFirst) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{77}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *ReviveCompactFirst) GetScope() CompactionScope {
@@ -6053,7 +5913,7 @@ type ReviveDirect struct {
 
 func (x *ReviveDirect) Reset() {
 	*x = ReviveDirect{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[78]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6065,7 +5925,7 @@ func (x *ReviveDirect) String() string {
 func (*ReviveDirect) ProtoMessage() {}
 
 func (x *ReviveDirect) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[78]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6078,7 +5938,7 @@ func (x *ReviveDirect) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviveDirect.ProtoReflect.Descriptor instead.
 func (*ReviveDirect) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{78}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{77}
 }
 
 // The discard-the-conversation revival choice. Empty, and deliberately WITHOUT
@@ -6093,7 +5953,7 @@ type ReviveClear struct {
 
 func (x *ReviveClear) Reset() {
 	*x = ReviveClear{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[79]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6105,7 +5965,7 @@ func (x *ReviveClear) String() string {
 func (*ReviveClear) ProtoMessage() {}
 
 func (x *ReviveClear) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[79]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6118,7 +5978,7 @@ func (x *ReviveClear) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviveClear.ProtoReflect.Descriptor instead.
 func (*ReviveClear) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{79}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{78}
 }
 
 // The workspace's revival gate, resolved and fenced: whether prompts may be
@@ -6151,7 +6011,7 @@ type WorkspaceGateView struct {
 
 func (x *WorkspaceGateView) Reset() {
 	*x = WorkspaceGateView{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[80]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6163,7 +6023,7 @@ func (x *WorkspaceGateView) String() string {
 func (*WorkspaceGateView) ProtoMessage() {}
 
 func (x *WorkspaceGateView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[80]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6176,7 +6036,7 @@ func (x *WorkspaceGateView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceGateView.ProtoReflect.Descriptor instead.
 func (*WorkspaceGateView) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{80}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *WorkspaceGateView) GetWorkspace() string {
@@ -6244,7 +6104,7 @@ type WorkspaceGateOpen struct {
 
 func (x *WorkspaceGateOpen) Reset() {
 	*x = WorkspaceGateOpen{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[81]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6256,7 +6116,7 @@ func (x *WorkspaceGateOpen) String() string {
 func (*WorkspaceGateOpen) ProtoMessage() {}
 
 func (x *WorkspaceGateOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[81]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6269,7 +6129,7 @@ func (x *WorkspaceGateOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceGateOpen.ProtoReflect.Descriptor instead.
 func (*WorkspaceGateOpen) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{81}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{80}
 }
 
 // The workspace's session is asleep and will not take a prompt until the user
@@ -6284,7 +6144,7 @@ type WorkspaceGateHibernated struct {
 
 func (x *WorkspaceGateHibernated) Reset() {
 	*x = WorkspaceGateHibernated{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[82]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6296,7 +6156,7 @@ func (x *WorkspaceGateHibernated) String() string {
 func (*WorkspaceGateHibernated) ProtoMessage() {}
 
 func (x *WorkspaceGateHibernated) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[82]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6309,7 +6169,7 @@ func (x *WorkspaceGateHibernated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceGateHibernated.ProtoReflect.Descriptor instead.
 func (*WorkspaceGateHibernated) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{82}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *WorkspaceGateHibernated) GetDetail() *HibernationDetail {
@@ -6319,182 +6179,9 @@ func (x *WorkspaceGateHibernated) GetDetail() *HibernationDetail {
 	return nil
 }
 
-// Request one agent-repl workspace.  This is the sole creation ingress for
-// both host UI requests (SPC TAB n/N) and skill-produced JSON dispatches.  The
-// daemon owns name resolution, worktree creation, session startup, and initial
-// prompt delivery; a request never asks for a promptless/no-shim workspace.
-type CreateWorkspaceCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto. THERE IS NO `workspace` FIELD:
-	// this command creates one, and `source_workspace` below names the workspace
-	// it was requested from, which is a different question.
-	RequestId            string  `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	RequestedName        string  `protobuf:"bytes,2,opt,name=requested_name,json=requestedName,proto3" json:"requested_name,omitempty"`
-	GitRoot              string  `protobuf:"bytes,3,opt,name=git_root,json=gitRoot,proto3" json:"git_root,omitempty"`
-	BaseCommit           string  `protobuf:"bytes,4,opt,name=base_commit,json=baseCommit,proto3" json:"base_commit,omitempty"`
-	SourceWorkspace      string  `protobuf:"bytes,5,opt,name=source_workspace,json=sourceWorkspace,proto3" json:"source_workspace,omitempty"`
-	SourceDir            string  `protobuf:"bytes,6,opt,name=source_dir,json=sourceDir,proto3" json:"source_dir,omitempty"`
-	InitialPrompt        *string `protobuf:"bytes,7,opt,name=initial_prompt,json=initialPrompt,proto3,oneof" json:"initial_prompt,omitempty"`
-	Priority             string  `protobuf:"bytes,8,opt,name=priority,proto3" json:"priority,omitempty"`
-	Model                string  `protobuf:"bytes,9,opt,name=model,proto3" json:"model,omitempty"`
-	ForkFrom             string  `protobuf:"bytes,10,opt,name=fork_from,json=forkFrom,proto3" json:"fork_from,omitempty"`
-	ForkSessionId        string  `protobuf:"bytes,11,opt,name=fork_session_id,json=forkSessionId,proto3" json:"fork_session_id,omitempty"`
-	PostprocessingPrompt string  `protobuf:"bytes,12,opt,name=postprocessing_prompt,json=postprocessingPrompt,proto3" json:"postprocessing_prompt,omitempty"`
-	BeforeWsMerge        string  `protobuf:"bytes,13,opt,name=before_ws_merge,json=beforeWsMerge,proto3" json:"before_ws_merge,omitempty"`
-	// Explicit session account/safety posture. The daemon must not infer these
-	// from its ambient process when a host asks it to create a workspace.
-	ConfigDir      string `protobuf:"bytes,14,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
-	PermissionMode string `protobuf:"bytes,15,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
-	AllowUngated   bool   `protobuf:"varint,16,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceCmd) Reset() {
-	*x = CreateWorkspaceCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[83]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceCmd) ProtoMessage() {}
-
-func (x *CreateWorkspaceCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[83]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceCmd.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{83}
-}
-
-func (x *CreateWorkspaceCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetRequestedName() string {
-	if x != nil {
-		return x.RequestedName
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetGitRoot() string {
-	if x != nil {
-		return x.GitRoot
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetBaseCommit() string {
-	if x != nil {
-		return x.BaseCommit
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetSourceWorkspace() string {
-	if x != nil {
-		return x.SourceWorkspace
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetSourceDir() string {
-	if x != nil {
-		return x.SourceDir
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetInitialPrompt() string {
-	if x != nil && x.InitialPrompt != nil {
-		return *x.InitialPrompt
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetPriority() string {
-	if x != nil {
-		return x.Priority
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetModel() string {
-	if x != nil {
-		return x.Model
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetForkFrom() string {
-	if x != nil {
-		return x.ForkFrom
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetForkSessionId() string {
-	if x != nil {
-		return x.ForkSessionId
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetPostprocessingPrompt() string {
-	if x != nil {
-		return x.PostprocessingPrompt
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetBeforeWsMerge() string {
-	if x != nil {
-		return x.BeforeWsMerge
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetConfigDir() string {
-	if x != nil {
-		return x.ConfigDir
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetPermissionMode() string {
-	if x != nil {
-		return x.PermissionMode
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceCmd) GetAllowUngated() bool {
-	if x != nil {
-		return x.AllowUngated
-	}
-	return false
-}
-
 // The daemon's authoritative account of a workspace ready for host
 // materialization.  A `WorkspaceAvailable` is retained until Emacs sends
-// WorkspaceMaterializedCmd, so reconnecting Emacs cannot lose it.
+// WorkspaceMaterializedRequest, so reconnecting Emacs cannot lose it.
 type WorkspaceAvailable struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	JobId               string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
@@ -6520,7 +6207,7 @@ type WorkspaceAvailable struct {
 
 func (x *WorkspaceAvailable) Reset() {
 	*x = WorkspaceAvailable{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[84]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6532,7 +6219,7 @@ func (x *WorkspaceAvailable) String() string {
 func (*WorkspaceAvailable) ProtoMessage() {}
 
 func (x *WorkspaceAvailable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[84]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6545,7 +6232,7 @@ func (x *WorkspaceAvailable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceAvailable.ProtoReflect.Descriptor instead.
 func (*WorkspaceAvailable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{84}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *WorkspaceAvailable) GetJobId() string {
@@ -6667,325 +6354,6 @@ func (x *WorkspaceAvailable) GetAllowUngated() bool {
 	return false
 }
 
-// Emacs has created the perspective/local bookkeeping for the authoritative
-// workspace descriptor.  The daemon uses this durable acknowledgement to
-// release an initial prompt that was held until a visible host workspace
-// exists.
-type WorkspaceMaterializedCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto. The job is addressed by
-	// `job_id`, not by a workspace key: the host is acknowledging a
-	// WorkspaceAvailable, and the workspace's key is one of the things that
-	// notification told it.
-	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	JobId         string `protobuf:"bytes,2,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *WorkspaceMaterializedCmd) Reset() {
-	*x = WorkspaceMaterializedCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[85]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *WorkspaceMaterializedCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*WorkspaceMaterializedCmd) ProtoMessage() {}
-
-func (x *WorkspaceMaterializedCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[85]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use WorkspaceMaterializedCmd.ProtoReflect.Descriptor instead.
-func (*WorkspaceMaterializedCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{85}
-}
-
-func (x *WorkspaceMaterializedCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *WorkspaceMaterializedCmd) GetJobId() string {
-	if x != nil {
-		return x.JobId
-	}
-	return ""
-}
-
-// Open a workspace: reattach to the session it already has, or start one when
-// it has none. The fields are the workspace's RUN PREFERENCES — the posture and
-// account a session for this workspace runs under — which the editor owns
-// because they are properties of the checkout, not of any session.
-//
-// There is deliberately NO session identity here. Which session a workspace
-// owns is the daemon's ruling; a frontend that named one would be asserting an
-// answer to a question it cannot hold across a daemon restart.
-type OpenWorkspaceCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace being opened. See AgentRepl in frame.proto.
-	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// The permission posture a session started by this open runs under, empty to
-	// accept the daemon's default. Ignored when the workspace already has a
-	// session: an open never re-postures a live one.
-	PermissionMode string `protobuf:"bytes,3,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
-	// The CLAUDE_CONFIG_DIR — i.e. WHICH ACCOUNT — a session started by this open
-	// runs under. One shared daemon serves every workspace, so its own
-	// environment cannot encode a per-workspace account.
-	//
-	// Empty means the daemon's own default, NOT the absence of a config dir.
-	ConfigDir string `protobuf:"bytes,4,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
-	// Run a session started by this open against the offline scripted SDK.
-	Fake bool `protobuf:"varint,5,opt,name=fake,proto3" json:"fake,omitempty"`
-	// The caller's DELIBERATE consent to start a session with NO permission gate,
-	// required on exactly the same terms as CreateSessionCmd.allow_ungated and
-	// enforced by the same refusal. An open that could reach an ungated posture
-	// without it would be a second, quieter door to the one thing that consent
-	// exists to make loud.
-	AllowUngated  bool `protobuf:"varint,6,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *OpenWorkspaceCmd) Reset() {
-	*x = OpenWorkspaceCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[86]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *OpenWorkspaceCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*OpenWorkspaceCmd) ProtoMessage() {}
-
-func (x *OpenWorkspaceCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[86]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use OpenWorkspaceCmd.ProtoReflect.Descriptor instead.
-func (*OpenWorkspaceCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{86}
-}
-
-func (x *OpenWorkspaceCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *OpenWorkspaceCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *OpenWorkspaceCmd) GetPermissionMode() string {
-	if x != nil {
-		return x.PermissionMode
-	}
-	return ""
-}
-
-func (x *OpenWorkspaceCmd) GetConfigDir() string {
-	if x != nil {
-		return x.ConfigDir
-	}
-	return ""
-}
-
-func (x *OpenWorkspaceCmd) GetFake() bool {
-	if x != nil {
-		return x.Fake
-	}
-	return false
-}
-
-func (x *OpenWorkspaceCmd) GetAllowUngated() bool {
-	if x != nil {
-		return x.AllowUngated
-	}
-	return false
-}
-
-// Retire the workspace. It carried NO fields at all under the old envelope,
-// which was the clearest case of the envelope being a command's whole meaning;
-// now it states that meaning itself.
-type CloseWorkspaceCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace being closed. See AgentRepl in frame.proto.
-	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CloseWorkspaceCmd) Reset() {
-	*x = CloseWorkspaceCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[87]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CloseWorkspaceCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CloseWorkspaceCmd) ProtoMessage() {}
-
-func (x *CloseWorkspaceCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[87]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CloseWorkspaceCmd.ProtoReflect.Descriptor instead.
-func (*CloseWorkspaceCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{87}
-}
-
-func (x *CloseWorkspaceCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *CloseWorkspaceCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-type MergeWorkspaceCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace being merged, as its KEY — the session cwd. Its DISPLAY name
-	// is `workspace_name` below, and the two are deliberately separate fields.
-	// See AgentRepl in frame.proto.
-	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// THE COMMAND STATES NO MERGE GEOMETRY AND NAMES NO HANDLER. It is a bare
-	// request keyed by workspace, and that is deliberate.
-	//
-	// THE DAEMON OWNS THE GEOMETRY MAP (internal/workspace/geometry). It records
-	// a workspace's source branch, source worktree and merge target when it
-	// CREATES the workspace, and derives them at boot for pre-cutover ones, so a
-	// merge command has nothing left to state. A caller that stated it would be
-	// a SECOND OWNER of one map, which is how a cherry-pick once reached a target
-	// the daemon had never heard of. Nor does the command select a handler: there
-	// has only ever been one merge handler, and naming it would invite a caller
-	// to ask for a mechanism the daemon does not dispatch on.
-	ConflictResolvedContinue bool `protobuf:"varint,3,opt,name=conflict_resolved_continue,json=conflictResolvedContinue,proto3" json:"conflict_resolved_continue,omitempty"` // the resolve-and-continue handoff
-	// The workspace's DISPLAY name, for the `merge/<name>` completion tag and the
-	// daemon's merge logs.
-	//
-	// It exists because the `workspace` field above is the daemon's workspace
-	// KEY — the session cwd — exactly as it is for every other command. This
-	// command used to put the bare Emacs name there instead, which
-	// filed every merge state row under a workspace key nothing else used: the
-	// row had no session identity, so its WorkspaceState reached Emacs with an
-	// absent connectivity verdict and was refused, and the merge never tore its
-	// workspace down. The two identities are now separate fields rather than one
-	// slot meaning different things per command.
-	WorkspaceName string `protobuf:"bytes,4,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MergeWorkspaceCmd) Reset() {
-	*x = MergeWorkspaceCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[88]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MergeWorkspaceCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MergeWorkspaceCmd) ProtoMessage() {}
-
-func (x *MergeWorkspaceCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[88]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MergeWorkspaceCmd.ProtoReflect.Descriptor instead.
-func (*MergeWorkspaceCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{88}
-}
-
-func (x *MergeWorkspaceCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *MergeWorkspaceCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *MergeWorkspaceCmd) GetConflictResolvedContinue() bool {
-	if x != nil {
-		return x.ConflictResolvedContinue
-	}
-	return false
-}
-
-func (x *MergeWorkspaceCmd) GetWorkspaceName() string {
-	if x != nil {
-		return x.WorkspaceName
-	}
-	return ""
-}
-
 // A daemon-owned inbox may contain UI-only actions alongside creates.  These
 // typed messages hand those actions to the Emacs host without two processes
 // racing to consume the same JSON file.  They are retained until completed.
@@ -7011,7 +6379,7 @@ type HostAction struct {
 
 func (x *HostAction) Reset() {
 	*x = HostAction{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[89]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7023,7 +6391,7 @@ func (x *HostAction) String() string {
 func (*HostAction) ProtoMessage() {}
 
 func (x *HostAction) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[89]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7036,7 +6404,7 @@ func (x *HostAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostAction.ProtoReflect.Descriptor instead.
 func (*HostAction) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{89}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *HostAction) GetActionId() string {
@@ -7231,7 +6599,7 @@ type HostBootSweepSessionUnwired struct {
 
 func (x *HostBootSweepSessionUnwired) Reset() {
 	*x = HostBootSweepSessionUnwired{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[90]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7243,7 +6611,7 @@ func (x *HostBootSweepSessionUnwired) String() string {
 func (*HostBootSweepSessionUnwired) ProtoMessage() {}
 
 func (x *HostBootSweepSessionUnwired) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[90]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7256,7 +6624,7 @@ func (x *HostBootSweepSessionUnwired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostBootSweepSessionUnwired.ProtoReflect.Descriptor instead.
 func (*HostBootSweepSessionUnwired) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{90}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *HostBootSweepSessionUnwired) GetWorkspace() string {
@@ -7296,7 +6664,7 @@ type HostWorkspaceCreateFailed struct {
 
 func (x *HostWorkspaceCreateFailed) Reset() {
 	*x = HostWorkspaceCreateFailed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[91]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7308,7 +6676,7 @@ func (x *HostWorkspaceCreateFailed) String() string {
 func (*HostWorkspaceCreateFailed) ProtoMessage() {}
 
 func (x *HostWorkspaceCreateFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[91]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7321,7 +6689,7 @@ func (x *HostWorkspaceCreateFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostWorkspaceCreateFailed.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceCreateFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{91}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *HostWorkspaceCreateFailed) GetJobId() string {
@@ -7354,7 +6722,7 @@ type HostSwitchWorkspace struct {
 
 func (x *HostSwitchWorkspace) Reset() {
 	*x = HostSwitchWorkspace{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[92]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7366,7 +6734,7 @@ func (x *HostSwitchWorkspace) String() string {
 func (*HostSwitchWorkspace) ProtoMessage() {}
 
 func (x *HostSwitchWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[92]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7379,7 +6747,7 @@ func (x *HostSwitchWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSwitchWorkspace.ProtoReflect.Descriptor instead.
 func (*HostSwitchWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{92}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *HostSwitchWorkspace) GetDir() string {
@@ -7399,7 +6767,7 @@ type HostSetRepositoryFold struct {
 
 func (x *HostSetRepositoryFold) Reset() {
 	*x = HostSetRepositoryFold{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[93]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7411,7 +6779,7 @@ func (x *HostSetRepositoryFold) String() string {
 func (*HostSetRepositoryFold) ProtoMessage() {}
 
 func (x *HostSetRepositoryFold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[93]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7424,7 +6792,7 @@ func (x *HostSetRepositoryFold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSetRepositoryFold.ProtoReflect.Descriptor instead.
 func (*HostSetRepositoryFold) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{93}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *HostSetRepositoryFold) GetRepoKey() string {
@@ -7450,7 +6818,7 @@ type HostSetSidebarView struct {
 
 func (x *HostSetSidebarView) Reset() {
 	*x = HostSetSidebarView{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[94]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7462,7 +6830,7 @@ func (x *HostSetSidebarView) String() string {
 func (*HostSetSidebarView) ProtoMessage() {}
 
 func (x *HostSetSidebarView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[94]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7475,7 +6843,7 @@ func (x *HostSetSidebarView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSetSidebarView.ProtoReflect.Descriptor instead.
 func (*HostSetSidebarView) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{94}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *HostSetSidebarView) GetView() string {
@@ -7493,7 +6861,7 @@ type HostTaskCreate struct {
 
 func (x *HostTaskCreate) Reset() {
 	*x = HostTaskCreate{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[95]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7505,7 +6873,7 @@ func (x *HostTaskCreate) String() string {
 func (*HostTaskCreate) ProtoMessage() {}
 
 func (x *HostTaskCreate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[95]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7518,7 +6886,7 @@ func (x *HostTaskCreate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostTaskCreate.ProtoReflect.Descriptor instead.
 func (*HostTaskCreate) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{95}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{89}
 }
 
 type HostTaskById struct {
@@ -7530,7 +6898,7 @@ type HostTaskById struct {
 
 func (x *HostTaskById) Reset() {
 	*x = HostTaskById{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[96]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7542,7 +6910,7 @@ func (x *HostTaskById) String() string {
 func (*HostTaskById) ProtoMessage() {}
 
 func (x *HostTaskById) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[96]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7555,7 +6923,7 @@ func (x *HostTaskById) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostTaskById.ProtoReflect.Descriptor instead.
 func (*HostTaskById) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{96}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *HostTaskById) GetId() string {
@@ -7583,7 +6951,7 @@ type HostLegacyCommand struct {
 
 func (x *HostLegacyCommand) Reset() {
 	*x = HostLegacyCommand{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[97]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7595,7 +6963,7 @@ func (x *HostLegacyCommand) String() string {
 func (*HostLegacyCommand) ProtoMessage() {}
 
 func (x *HostLegacyCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[97]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7608,7 +6976,7 @@ func (x *HostLegacyCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostLegacyCommand.ProtoReflect.Descriptor instead.
 func (*HostLegacyCommand) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{97}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *HostLegacyCommand) GetType() string {
@@ -7623,474 +6991,6 @@ func (x *HostLegacyCommand) GetPayload() *structpb.Struct {
 		return x.Payload
 	}
 	return nil
-}
-
-// Completion is host-only.  `ok=false` preserves the action and records the
-// supplied error in the daemon's durable inbox rather than silently dropping
-// a UI request that Emacs could not perform.
-type HostActionCompletedCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto. The action is addressed by
-	// `action_id`; the daemon's inbox is global, so there is no workspace key.
-	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	ActionId      string `protobuf:"bytes,2,opt,name=action_id,json=actionId,proto3" json:"action_id,omitempty"`
-	Ok            bool   `protobuf:"varint,3,opt,name=ok,proto3" json:"ok,omitempty"`
-	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HostActionCompletedCmd) Reset() {
-	*x = HostActionCompletedCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[98]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HostActionCompletedCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HostActionCompletedCmd) ProtoMessage() {}
-
-func (x *HostActionCompletedCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[98]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HostActionCompletedCmd.ProtoReflect.Descriptor instead.
-func (*HostActionCompletedCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{98}
-}
-
-func (x *HostActionCompletedCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *HostActionCompletedCmd) GetActionId() string {
-	if x != nil {
-		return x.ActionId
-	}
-	return ""
-}
-
-func (x *HostActionCompletedCmd) GetOk() bool {
-	if x != nil {
-		return x.Ok
-	}
-	return false
-}
-
-func (x *HostActionCompletedCmd) GetError() string {
-	if x != nil {
-		return x.Error
-	}
-	return ""
-}
-
-type CreateSessionCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// THE WORKSPACE, spelled `cwd` because that is what a session is created
-	// against. It is NOT accompanied by a second `workspace` field: the daemon's
-	// workspace key IS the session's absolute cwd, and two spellings of one path
-	// is two things a caller can disagree with itself about.
-	Cwd            string `protobuf:"bytes,2,opt,name=cwd,proto3" json:"cwd,omitempty"`
-	PermissionMode string `protobuf:"bytes,3,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
-	ConfigDir      string `protobuf:"bytes,4,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
-	Fake           bool   `protobuf:"varint,5,opt,name=fake,proto3" json:"fake,omitempty"` // test harness sessions
-	// The caller's DELIBERATE consent to create a session with NO permission
-	// gate. Required whenever permission_mode names a mode that shadows the
-	// shim's canUseTool callback in the fail-OPEN direction
-	// (bypassPermissions): under such a mode the SDK auto-approves every tool
-	// before canUseTool is consulted, so the daemon's whole permission
-	// round-trip never engages and no permission card can ever appear.
-	//
-	// The daemon REFUSES such a create without this flag. The mode is otherwise
-	// one string away from every ordinary create, and "reachable by a typo" is
-	// not an acceptable property for the switch that turns the gate off. It is
-	// a create-time consent only: a session already registered in that mode
-	// still rehydrates after a daemon restart, since refusing there would
-	// silently change a live session's posture.
-	AllowUngated bool `protobuf:"varint,6,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
-	// The model this session should START on, empty to accept the shim's own
-	// default.  A caller that has a remembered selection would otherwise have to
-	// create and then immediately SetModel, which races: the session is live and
-	// driveable in between, so its first turn can run on the wrong model.
-	//
-	// This does NOT make the caller authoritative.  The daemon applies it through
-	// the same SetModel path a later change takes, once the shim is wired, and
-	// still publishes only the shim-confirmed selection.  A rejected model fails
-	// the create rather than silently leaving the session on another one.
-	Model string `protobuf:"bytes,7,opt,name=model,proto3" json:"model,omitempty"`
-	// Which conversation to land on. See ResumeMode: this is intent, and the
-	// daemon does the resolving.
-	ResumeMode ResumeMode `protobuf:"varint,8,opt,name=resume_mode,json=resumeMode,proto3,enum=agentrepl.v1.ResumeMode" json:"resume_mode,omitempty"`
-	// The conversation to land on, and ONLY meaningful under
-	// RESUME_MODE_EXPLICIT. The daemon rejects a create that sets this under any
-	// other mode rather than quietly ignoring it, because a caller that filled
-	// this in believes it is steering and must be told it is not.
-	ExplicitClaudeSessionId string `protobuf:"bytes,9,opt,name=explicit_claude_session_id,json=explicitClaudeSessionId,proto3" json:"explicit_claude_session_id,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
-}
-
-func (x *CreateSessionCmd) Reset() {
-	*x = CreateSessionCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[99]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateSessionCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateSessionCmd) ProtoMessage() {}
-
-func (x *CreateSessionCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[99]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateSessionCmd.ProtoReflect.Descriptor instead.
-func (*CreateSessionCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{99}
-}
-
-func (x *CreateSessionCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *CreateSessionCmd) GetCwd() string {
-	if x != nil {
-		return x.Cwd
-	}
-	return ""
-}
-
-func (x *CreateSessionCmd) GetPermissionMode() string {
-	if x != nil {
-		return x.PermissionMode
-	}
-	return ""
-}
-
-func (x *CreateSessionCmd) GetConfigDir() string {
-	if x != nil {
-		return x.ConfigDir
-	}
-	return ""
-}
-
-func (x *CreateSessionCmd) GetFake() bool {
-	if x != nil {
-		return x.Fake
-	}
-	return false
-}
-
-func (x *CreateSessionCmd) GetAllowUngated() bool {
-	if x != nil {
-		return x.AllowUngated
-	}
-	return false
-}
-
-func (x *CreateSessionCmd) GetModel() string {
-	if x != nil {
-		return x.Model
-	}
-	return ""
-}
-
-func (x *CreateSessionCmd) GetResumeMode() ResumeMode {
-	if x != nil {
-		return x.ResumeMode
-	}
-	return ResumeMode_RESUME_MODE_UNSPECIFIED
-}
-
-func (x *CreateSessionCmd) GetExplicitClaudeSessionId() string {
-	if x != nil {
-		return x.ExplicitClaudeSessionId
-	}
-	return ""
-}
-
-// Session teardown over UDS (replaces DELETE /sessions/{id}).
-type DeleteSessionCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto. Session teardown is addressed by
-	// identity, not by workspace: the session may already have outlived the
-	// workspace binding a key would resolve through.
-	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	SessionId     string `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DeleteSessionCmd) Reset() {
-	*x = DeleteSessionCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[100]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DeleteSessionCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DeleteSessionCmd) ProtoMessage() {}
-
-func (x *DeleteSessionCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[100]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DeleteSessionCmd.ProtoReflect.Descriptor instead.
-func (*DeleteSessionCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{100}
-}
-
-func (x *DeleteSessionCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *DeleteSessionCmd) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-// HARD RESTART of one workspace's session: stop whatever shim is serving it
-// (including one that outlived a previous daemon, which this daemon never
-// spawned), then bring it up again along the ordinary path.
-//
-// THE SESSION RECORD IS UNCHANGED, so the respawn resumes the same vendor
-// conversation: the user loses nothing and the transcript continues. This is a
-// PROCESS restart, not a new session — what to reach for when the shim is
-// wedged, when it is running superseded code, or when the backend simply needs
-// rebuilding under a conversation worth keeping.
-//
-// A workspace with no live session is a loud nack; a workspace whose session is
-// merely hibernated or severed is brought up, because "restart" and "start" are
-// the same request when nothing is running.
-type RestartSessionCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace whose session is being restarted. See AgentRepl in
-	// frame.proto.
-	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RestartSessionCmd) Reset() {
-	*x = RestartSessionCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[101]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RestartSessionCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RestartSessionCmd) ProtoMessage() {}
-
-func (x *RestartSessionCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[101]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RestartSessionCmd.ProtoReflect.Descriptor instead.
-func (*RestartSessionCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{101}
-}
-
-func (x *RestartSessionCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *RestartSessionCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-// Deliberate, immediate hibernation of one workspace's session: the daemon
-// stops the shim (IntentionalQueryTermination) and marks the session
-// hibernated. Hibernated sessions are structurally outside the keep-alive
-// loop — hibernation and keep-alive-stop are ONE transition, so "hibernated
-// but still pinging" is unrepresentable. Refused with a loud nack while a
-// turn is live or the merge lease is held: the user interrupts first, the
-// daemon never discards in-flight work to satisfy a hibernate.
-type HibernateWorkspaceCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace being hibernated. See AgentRepl in frame.proto.
-	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HibernateWorkspaceCmd) Reset() {
-	*x = HibernateWorkspaceCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[102]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HibernateWorkspaceCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HibernateWorkspaceCmd) ProtoMessage() {}
-
-func (x *HibernateWorkspaceCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[102]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HibernateWorkspaceCmd.ProtoReflect.Descriptor instead.
-func (*HibernateWorkspaceCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{102}
-}
-
-func (x *HibernateWorkspaceCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *HibernateWorkspaceCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-// Graceful daemon shutdown over UDS (replaces Emacs
-// POST /shutdown).
-type ShutdownCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto. Daemon-global: no workspace.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// stop_shims asks the daemon to SIGTERM every session shim on its way out.
-	//
-	// The DEFAULT (false) PRESERVES them. A shim outlives its daemon by design:
-	// it redials the daemon socket forever with backoff and is auto-parked by
-	// the next daemon's listener, so killing it on an orderly shutdown threw
-	// away a live, mid-conversation process the very next boot could have
-	// reattached to for free. Preserving is what makes a daemon bounce cheap.
-	//
-	// The mode exists for the one caller that genuinely needs the old behavior:
-	// a deploy that changed the shim BUNDLE, whose surviving shims would
-	// otherwise keep running the previous build's code (bin/deploy-all.sh
-	// passes it when its stamps show the bundle moved). It is belt-and-braces
-	// alongside the daemon's own version-driven stale-shim refresh, never the
-	// only thing standing between a deploy and stale shims.
-	StopShims     bool `protobuf:"varint,2,opt,name=stop_shims,json=stopShims,proto3" json:"stop_shims,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ShutdownCmd) Reset() {
-	*x = ShutdownCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[103]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ShutdownCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ShutdownCmd) ProtoMessage() {}
-
-func (x *ShutdownCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[103]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ShutdownCmd.ProtoReflect.Descriptor instead.
-func (*ShutdownCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{103}
-}
-
-func (x *ShutdownCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *ShutdownCmd) GetStopShims() bool {
-	if x != nil {
-		return x.StopShims
-	}
-	return false
 }
 
 // The daemon-global scheduled-shutdown lease. Pushed to every connected
@@ -8115,7 +7015,7 @@ type ShutdownScheduleView struct {
 
 func (x *ShutdownScheduleView) Reset() {
 	*x = ShutdownScheduleView{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[104]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8127,7 +7027,7 @@ func (x *ShutdownScheduleView) String() string {
 func (*ShutdownScheduleView) ProtoMessage() {}
 
 func (x *ShutdownScheduleView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[104]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8140,7 +7040,7 @@ func (x *ShutdownScheduleView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownScheduleView.ProtoReflect.Descriptor instead.
 func (*ShutdownScheduleView) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{104}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *ShutdownScheduleView) GetState() isShutdownScheduleView_State {
@@ -8197,7 +7097,7 @@ type ShutdownScheduleIdle struct {
 
 func (x *ShutdownScheduleIdle) Reset() {
 	*x = ShutdownScheduleIdle{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[105]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8209,7 +7109,7 @@ func (x *ShutdownScheduleIdle) String() string {
 func (*ShutdownScheduleIdle) ProtoMessage() {}
 
 func (x *ShutdownScheduleIdle) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[105]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8222,7 +7122,7 @@ func (x *ShutdownScheduleIdle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownScheduleIdle.ProtoReflect.Descriptor instead.
 func (*ShutdownScheduleIdle) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{105}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{93}
 }
 
 // The held lease. The holds list is the complete, live answer to "what is
@@ -8230,8 +7130,8 @@ func (*ShutdownScheduleIdle) Descriptor() ([]byte, []int) {
 // frame alone without deriving it from per-workspace states.
 type ShutdownScheduleDraining struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Identity of this schedule, minted at ScheduleShutdownCmd time.
-	// Correlates CancelScheduledShutdownCmd and QueueEntryShutdownHold to one
+	// Identity of this schedule, minted at ScheduleShutdownRequest time.
+	// Correlates CancelScheduledShutdownRequest and QueueEntryShutdownHold to one
 	// schedule, so a cancel can never race a newer schedule.
 	ScheduleId string `protobuf:"bytes,1,opt,name=schedule_id,json=scheduleId,proto3" json:"schedule_id,omitempty"`
 	// When the lease was taken (epoch ms), for elapsed-time display.
@@ -8240,7 +7140,7 @@ type ShutdownScheduleDraining struct {
 	// "manual restart"). Free text for display; never parsed.
 	Cause string `protobuf:"bytes,3,opt,name=cause,proto3" json:"cause,omitempty"`
 	// Whether the executed shutdown will also SIGTERM every session shim (the
-	// ShutdownCmd.stop_shims semantics, decided at schedule time because the
+	// ShutdownRequest.stop_shims semantics, decided at schedule time because the
 	// decision is a property of WHAT was rebuilt, not of when the drain
 	// finishes). False preserves shims for reattach.
 	StopShims bool `protobuf:"varint,4,opt,name=stop_shims,json=stopShims,proto3" json:"stop_shims,omitempty"`
@@ -8253,7 +7153,7 @@ type ShutdownScheduleDraining struct {
 
 func (x *ShutdownScheduleDraining) Reset() {
 	*x = ShutdownScheduleDraining{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[106]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8265,7 +7165,7 @@ func (x *ShutdownScheduleDraining) String() string {
 func (*ShutdownScheduleDraining) ProtoMessage() {}
 
 func (x *ShutdownScheduleDraining) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[106]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8278,7 +7178,7 @@ func (x *ShutdownScheduleDraining) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownScheduleDraining.ProtoReflect.Descriptor instead.
 func (*ShutdownScheduleDraining) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{106}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *ShutdownScheduleDraining) GetScheduleId() string {
@@ -8340,7 +7240,7 @@ type ShutdownHold struct {
 
 func (x *ShutdownHold) Reset() {
 	*x = ShutdownHold{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[107]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8352,7 +7252,7 @@ func (x *ShutdownHold) String() string {
 func (*ShutdownHold) ProtoMessage() {}
 
 func (x *ShutdownHold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[107]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8365,7 +7265,7 @@ func (x *ShutdownHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownHold.ProtoReflect.Descriptor instead.
 func (*ShutdownHold) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{107}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *ShutdownHold) GetWorkspace() string {
@@ -8407,7 +7307,7 @@ type ShutdownHoldTurn struct {
 
 func (x *ShutdownHoldTurn) Reset() {
 	*x = ShutdownHoldTurn{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[108]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8419,7 +7319,7 @@ func (x *ShutdownHoldTurn) String() string {
 func (*ShutdownHoldTurn) ProtoMessage() {}
 
 func (x *ShutdownHoldTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[108]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8432,7 +7332,7 @@ func (x *ShutdownHoldTurn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownHoldTurn.ProtoReflect.Descriptor instead.
 func (*ShutdownHoldTurn) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{108}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *ShutdownHoldTurn) GetTurnId() string {
@@ -8453,7 +7353,7 @@ type ShutdownHoldTasks struct {
 
 func (x *ShutdownHoldTasks) Reset() {
 	*x = ShutdownHoldTasks{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[109]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8465,7 +7365,7 @@ func (x *ShutdownHoldTasks) String() string {
 func (*ShutdownHoldTasks) ProtoMessage() {}
 
 func (x *ShutdownHoldTasks) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[109]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8478,7 +7378,7 @@ func (x *ShutdownHoldTasks) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownHoldTasks.ProtoReflect.Descriptor instead.
 func (*ShutdownHoldTasks) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{109}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *ShutdownHoldTasks) GetCount() int32 {
@@ -8486,132 +7386,6 @@ func (x *ShutdownHoldTasks) GetCount() int32 {
 		return x.Count
 	}
 	return 0
-}
-
-// Schedule a graceful shutdown instead of demanding one now. Takes the
-// drain lease immediately (broadcast via ShutdownScheduleView), blocks new
-// turns daemon-side at the prompt queue, and executes ShutdownCmd semantics
-// the moment every hold clears. Scheduling while a schedule already exists
-// is a loud nack, never a silent replace: the caller must cancel first, so
-// two deploy flows cannot silently merge their intents.
-type ScheduleShutdownCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto. Daemon-global: no workspace.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// Same semantics as ShutdownCmd.stop_shims, fixed at schedule time.
-	StopShims bool `protobuf:"varint,2,opt,name=stop_shims,json=stopShims,proto3" json:"stop_shims,omitempty"`
-	// Why (for the broadcast view and the durable log). Display only.
-	Cause         string `protobuf:"bytes,3,opt,name=cause,proto3" json:"cause,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ScheduleShutdownCmd) Reset() {
-	*x = ScheduleShutdownCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[110]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ScheduleShutdownCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ScheduleShutdownCmd) ProtoMessage() {}
-
-func (x *ScheduleShutdownCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[110]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ScheduleShutdownCmd.ProtoReflect.Descriptor instead.
-func (*ScheduleShutdownCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{110}
-}
-
-func (x *ScheduleShutdownCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *ScheduleShutdownCmd) GetStopShims() bool {
-	if x != nil {
-		return x.StopShims
-	}
-	return false
-}
-
-func (x *ScheduleShutdownCmd) GetCause() string {
-	if x != nil {
-		return x.Cause
-	}
-	return ""
-}
-
-// Cancel a scheduled shutdown and release the drain lease. schedule_id must
-// match the live schedule; a stale id is a loud nack, so a cancel aimed at
-// an old schedule can never kill a newer one.
-type CancelScheduledShutdownCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto. Daemon-global: no workspace.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The schedule to cancel, from ShutdownScheduleDraining.schedule_id.
-	ScheduleId    string `protobuf:"bytes,2,opt,name=schedule_id,json=scheduleId,proto3" json:"schedule_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CancelScheduledShutdownCmd) Reset() {
-	*x = CancelScheduledShutdownCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[111]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CancelScheduledShutdownCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CancelScheduledShutdownCmd) ProtoMessage() {}
-
-func (x *CancelScheduledShutdownCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[111]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CancelScheduledShutdownCmd.ProtoReflect.Descriptor instead.
-func (*CancelScheduledShutdownCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{111}
-}
-
-func (x *CancelScheduledShutdownCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *CancelScheduledShutdownCmd) GetScheduleId() string {
-	if x != nil {
-		return x.ScheduleId
-	}
-	return ""
 }
 
 // The daemon's notice that it is about to go down ON PURPOSE.
@@ -8653,7 +7427,7 @@ type RestartPendingView struct {
 	// and "stay quiet forever" are both things no announcement may ask for.
 	ExpectedOutageSeconds int32 `protobuf:"varint,2,opt,name=expected_outage_seconds,json=expectedOutageSeconds,proto3" json:"expected_outage_seconds,omitempty"`
 	// Whether this restart also SIGTERMs every session shim (the
-	// ShutdownCmd.stop_shims semantics). A client renders a longer settle when
+	// ShutdownRequest.stop_shims semantics). A client renders a longer settle when
 	// the shims roll too, since a preserved shim is reattached by the next
 	// daemon for free while a rolled one must be respawned.
 	StopShims bool `protobuf:"varint,3,opt,name=stop_shims,json=stopShims,proto3" json:"stop_shims,omitempty"`
@@ -8669,7 +7443,7 @@ type RestartPendingView struct {
 
 func (x *RestartPendingView) Reset() {
 	*x = RestartPendingView{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[112]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8681,7 +7455,7 @@ func (x *RestartPendingView) String() string {
 func (*RestartPendingView) ProtoMessage() {}
 
 func (x *RestartPendingView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[112]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8694,7 +7468,7 @@ func (x *RestartPendingView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartPendingView.ProtoReflect.Descriptor instead.
 func (*RestartPendingView) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{112}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *RestartPendingView) GetCause() string {
@@ -8723,103 +7497,6 @@ func (x *RestartPendingView) GetAnnouncedAtMs() int64 {
 		return x.AnnouncedAtMs
 	}
 	return 0
-}
-
-// A frontend-side diagnostic line, mirrored into the daemon's
-// own on-disk log.
-//
-// WHY THIS EXISTS: the webapp runs inside an Emacs xwidget whose JS console
-// nobody can see and nothing persists, so a delivery-path failure there (a
-// seq-gap loop, a lost replay request, a stalled rAF) left no evidence
-// anywhere at all. A pre-cutover HTTP route carried these; it was deleted with
-// the rest of the legacy plane, and this arm restores the capability on the
-// protobuf channel instead of reviving a second transport.
-//
-// The daemon WRITES these, it does not act on them: a client log is evidence,
-// never a control signal, and is tagged in the log so a line originating in a
-// frontend is never mistaken for one the daemon produced itself.
-type ClientLogCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// WHICH WORKSPACE the reporting frontend was showing. A diagnostic line whose
-	// workspace nobody recorded is evidence about an unnamed session, which is
-	// most of the way to no evidence at all. See AgentRepl in frame.proto.
-	Workspace string         `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	Level     ClientLogLevel `protobuf:"varint,3,opt,name=level,proto3,enum=agentrepl.v1.ClientLogLevel" json:"level,omitempty"`
-	Message   string         `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
-	// Optional structured payload (ids, counters, timings) accompanying the
-	// message. Schemaless on purpose: it is diagnostic evidence whose shape is
-	// the reporting call site's business, and pinning a schema here would make
-	// adding a diagnostic a proto change.
-	Context       *structpb.Struct `protobuf:"bytes,5,opt,name=context,proto3" json:"context,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ClientLogCmd) Reset() {
-	*x = ClientLogCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[113]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ClientLogCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ClientLogCmd) ProtoMessage() {}
-
-func (x *ClientLogCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[113]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ClientLogCmd.ProtoReflect.Descriptor instead.
-func (*ClientLogCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{113}
-}
-
-func (x *ClientLogCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *ClientLogCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *ClientLogCmd) GetLevel() ClientLogLevel {
-	if x != nil {
-		return x.Level
-	}
-	return ClientLogLevel_CLIENT_LOG_LEVEL_UNSPECIFIED
-}
-
-func (x *ClientLogCmd) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
-func (x *ClientLogCmd) GetContext() *structpb.Struct {
-	if x != nil {
-		return x.Context
-	}
-	return nil
 }
 
 // Live progress of the workspace's current (or most recent) merge run.
@@ -8854,7 +7531,7 @@ type MergeStatus struct {
 
 func (x *MergeStatus) Reset() {
 	*x = MergeStatus{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[114]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8866,7 +7543,7 @@ func (x *MergeStatus) String() string {
 func (*MergeStatus) ProtoMessage() {}
 
 func (x *MergeStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[114]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8879,7 +7556,7 @@ func (x *MergeStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatus.ProtoReflect.Descriptor instead.
 func (*MergeStatus) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{114}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{99}
 }
 
 func (x *MergeStatus) GetRunId() string {
@@ -9044,7 +7721,7 @@ type MergeStatusEnqueued struct {
 
 func (x *MergeStatusEnqueued) Reset() {
 	*x = MergeStatusEnqueued{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[115]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9056,7 +7733,7 @@ func (x *MergeStatusEnqueued) String() string {
 func (*MergeStatusEnqueued) ProtoMessage() {}
 
 func (x *MergeStatusEnqueued) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[115]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9069,7 +7746,7 @@ func (x *MergeStatusEnqueued) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusEnqueued.ProtoReflect.Descriptor instead.
 func (*MergeStatusEnqueued) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{115}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *MergeStatusEnqueued) GetPosition() int32 {
@@ -9095,7 +7772,7 @@ type MergeStatusBeforeAction struct {
 
 func (x *MergeStatusBeforeAction) Reset() {
 	*x = MergeStatusBeforeAction{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[116]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9107,7 +7784,7 @@ func (x *MergeStatusBeforeAction) String() string {
 func (*MergeStatusBeforeAction) ProtoMessage() {}
 
 func (x *MergeStatusBeforeAction) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[116]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9120,7 +7797,7 @@ func (x *MergeStatusBeforeAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusBeforeAction.ProtoReflect.Descriptor instead.
 func (*MergeStatusBeforeAction) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{116}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{101}
 }
 
 func (x *MergeStatusBeforeAction) GetPrompt() string {
@@ -9142,7 +7819,7 @@ type MergeStatusCherryPicking struct {
 
 func (x *MergeStatusCherryPicking) Reset() {
 	*x = MergeStatusCherryPicking{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[117]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9154,7 +7831,7 @@ func (x *MergeStatusCherryPicking) String() string {
 func (*MergeStatusCherryPicking) ProtoMessage() {}
 
 func (x *MergeStatusCherryPicking) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[117]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9167,7 +7844,7 @@ func (x *MergeStatusCherryPicking) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusCherryPicking.ProtoReflect.Descriptor instead.
 func (*MergeStatusCherryPicking) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{117}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *MergeStatusCherryPicking) GetCommitsTotal() int32 {
@@ -9210,7 +7887,7 @@ type MergeStatusTesting struct {
 
 func (x *MergeStatusTesting) Reset() {
 	*x = MergeStatusTesting{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[118]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9222,7 +7899,7 @@ func (x *MergeStatusTesting) String() string {
 func (*MergeStatusTesting) ProtoMessage() {}
 
 func (x *MergeStatusTesting) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[118]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9235,7 +7912,7 @@ func (x *MergeStatusTesting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusTesting.ProtoReflect.Descriptor instead.
 func (*MergeStatusTesting) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{118}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{103}
 }
 
 func (x *MergeStatusTesting) GetCommitsTotal() int32 {
@@ -9278,7 +7955,7 @@ type MergeStatusConflict struct {
 
 func (x *MergeStatusConflict) Reset() {
 	*x = MergeStatusConflict{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[119]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9290,7 +7967,7 @@ func (x *MergeStatusConflict) String() string {
 func (*MergeStatusConflict) ProtoMessage() {}
 
 func (x *MergeStatusConflict) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[119]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9303,7 +7980,7 @@ func (x *MergeStatusConflict) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusConflict.ProtoReflect.Descriptor instead.
 func (*MergeStatusConflict) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{119}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{104}
 }
 
 func (x *MergeStatusConflict) GetConflictedSha() string {
@@ -9343,7 +8020,7 @@ type MergeStatusAfterAction struct {
 
 func (x *MergeStatusAfterAction) Reset() {
 	*x = MergeStatusAfterAction{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[120]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[105]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9355,7 +8032,7 @@ func (x *MergeStatusAfterAction) String() string {
 func (*MergeStatusAfterAction) ProtoMessage() {}
 
 func (x *MergeStatusAfterAction) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[120]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[105]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9368,7 +8045,7 @@ func (x *MergeStatusAfterAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusAfterAction.ProtoReflect.Descriptor instead.
 func (*MergeStatusAfterAction) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{120}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{105}
 }
 
 func (x *MergeStatusAfterAction) GetPrompt() string {
@@ -9388,7 +8065,7 @@ type MergeStatusMerged struct {
 
 func (x *MergeStatusMerged) Reset() {
 	*x = MergeStatusMerged{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[121]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9400,7 +8077,7 @@ func (x *MergeStatusMerged) String() string {
 func (*MergeStatusMerged) ProtoMessage() {}
 
 func (x *MergeStatusMerged) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[121]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9413,7 +8090,7 @@ func (x *MergeStatusMerged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusMerged.ProtoReflect.Descriptor instead.
 func (*MergeStatusMerged) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{121}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{106}
 }
 
 func (x *MergeStatusMerged) GetCommitsTotal() int32 {
@@ -9465,7 +8142,7 @@ type MergeStatusFailed struct {
 
 func (x *MergeStatusFailed) Reset() {
 	*x = MergeStatusFailed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[122]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9477,7 +8154,7 @@ func (x *MergeStatusFailed) String() string {
 func (*MergeStatusFailed) ProtoMessage() {}
 
 func (x *MergeStatusFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[122]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9490,7 +8167,7 @@ func (x *MergeStatusFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusFailed.ProtoReflect.Descriptor instead.
 func (*MergeStatusFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{122}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{107}
 }
 
 func (x *MergeStatusFailed) GetCause() string {
@@ -9559,7 +8236,7 @@ type MergeQueueRoster struct {
 
 func (x *MergeQueueRoster) Reset() {
 	*x = MergeQueueRoster{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[123]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9571,7 +8248,7 @@ func (x *MergeQueueRoster) String() string {
 func (*MergeQueueRoster) ProtoMessage() {}
 
 func (x *MergeQueueRoster) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[123]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9584,7 +8261,7 @@ func (x *MergeQueueRoster) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueueRoster.ProtoReflect.Descriptor instead.
 func (*MergeQueueRoster) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{123}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{108}
 }
 
 func (x *MergeQueueRoster) GetPaused() bool {
@@ -9622,7 +8299,7 @@ type MergeRepoQueue struct {
 
 func (x *MergeRepoQueue) Reset() {
 	*x = MergeRepoQueue{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[124]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[109]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9634,7 +8311,7 @@ func (x *MergeRepoQueue) String() string {
 func (*MergeRepoQueue) ProtoMessage() {}
 
 func (x *MergeRepoQueue) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[124]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[109]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9647,7 +8324,7 @@ func (x *MergeRepoQueue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeRepoQueue.ProtoReflect.Descriptor instead.
 func (*MergeRepoQueue) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{124}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{109}
 }
 
 func (x *MergeRepoQueue) GetRepoKey() string {
@@ -9667,7 +8344,7 @@ func (x *MergeRepoQueue) GetEntries() []*MergeQueueEntry {
 type MergeQueueEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The run's identity — the SAME id every MergeStatus for this merge
-	// carries, and the key EvictMergeCmd names. Stable across daemon bounces.
+	// carries, and the key EvictMergeRequest names. Stable across daemon bounces.
 	RunId string `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
 	// The workspace's key (project dir).
 	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
@@ -9689,7 +8366,7 @@ type MergeQueueEntry struct {
 
 func (x *MergeQueueEntry) Reset() {
 	*x = MergeQueueEntry{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[125]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[110]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9701,7 +8378,7 @@ func (x *MergeQueueEntry) String() string {
 func (*MergeQueueEntry) ProtoMessage() {}
 
 func (x *MergeQueueEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[125]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[110]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9714,7 +8391,7 @@ func (x *MergeQueueEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueueEntry.ProtoReflect.Descriptor instead.
 func (*MergeQueueEntry) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{125}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{110}
 }
 
 func (x *MergeQueueEntry) GetRunId() string {
@@ -9814,7 +8491,7 @@ type MergeQueueHeadRunning struct {
 
 func (x *MergeQueueHeadRunning) Reset() {
 	*x = MergeQueueHeadRunning{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[126]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[111]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9826,7 +8503,7 @@ func (x *MergeQueueHeadRunning) String() string {
 func (*MergeQueueHeadRunning) ProtoMessage() {}
 
 func (x *MergeQueueHeadRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[126]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[111]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9839,7 +8516,7 @@ func (x *MergeQueueHeadRunning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueueHeadRunning.ProtoReflect.Descriptor instead.
 func (*MergeQueueHeadRunning) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{126}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{111}
 }
 
 type MergeQueueHeadPausedWaiting struct {
@@ -9850,7 +8527,7 @@ type MergeQueueHeadPausedWaiting struct {
 
 func (x *MergeQueueHeadPausedWaiting) Reset() {
 	*x = MergeQueueHeadPausedWaiting{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[127]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[112]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9862,7 +8539,7 @@ func (x *MergeQueueHeadPausedWaiting) String() string {
 func (*MergeQueueHeadPausedWaiting) ProtoMessage() {}
 
 func (x *MergeQueueHeadPausedWaiting) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[127]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[112]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9875,7 +8552,7 @@ func (x *MergeQueueHeadPausedWaiting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueueHeadPausedWaiting.ProtoReflect.Descriptor instead.
 func (*MergeQueueHeadPausedWaiting) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{127}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{112}
 }
 
 type MergeQueueHeadTerminalOwed struct {
@@ -9886,7 +8563,7 @@ type MergeQueueHeadTerminalOwed struct {
 
 func (x *MergeQueueHeadTerminalOwed) Reset() {
 	*x = MergeQueueHeadTerminalOwed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[128]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[113]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9898,7 +8575,7 @@ func (x *MergeQueueHeadTerminalOwed) String() string {
 func (*MergeQueueHeadTerminalOwed) ProtoMessage() {}
 
 func (x *MergeQueueHeadTerminalOwed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[128]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[113]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9911,160 +8588,7 @@ func (x *MergeQueueHeadTerminalOwed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueueHeadTerminalOwed.ProtoReflect.Descriptor instead.
 func (*MergeQueueHeadTerminalOwed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{128}
-}
-
-// Pause the merge queue: the run in flight finishes, nothing new dequeues.
-// Durable across bounces. Idempotent. Daemon-global (the command's
-// workspace is ignored).
-type PauseMergeQueueCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto.
-	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PauseMergeQueueCmd) Reset() {
-	*x = PauseMergeQueueCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[129]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PauseMergeQueueCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PauseMergeQueueCmd) ProtoMessage() {}
-
-func (x *PauseMergeQueueCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[129]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PauseMergeQueueCmd.ProtoReflect.Descriptor instead.
-func (*PauseMergeQueueCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{129}
-}
-
-func (x *PauseMergeQueueCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-// Resume the merge queue. Idempotent, daemon-global.
-type ResumeMergeQueueCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto.
-	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ResumeMergeQueueCmd) Reset() {
-	*x = ResumeMergeQueueCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[130]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ResumeMergeQueueCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ResumeMergeQueueCmd) ProtoMessage() {}
-
-func (x *ResumeMergeQueueCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[130]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ResumeMergeQueueCmd.ProtoReflect.Descriptor instead.
-func (*ResumeMergeQueueCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{130}
-}
-
-func (x *ResumeMergeQueueCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-// Evict ONE waiting entry by run id. The evicted run receives a terminal
-// failed MergeStatus with an eviction cause, so the workspace's merge axis
-// resolves immediately. REFUSED when run_id names the running head (only its
-// drain goroutine may retire it) or names nothing outstanding.
-type EvictMergeCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto. The merge queue is
-	// daemon-global and a run id names one entry in it, so there is no workspace.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The run id the roster and every MergeStatus carry.
-	RunId         string `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EvictMergeCmd) Reset() {
-	*x = EvictMergeCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[131]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EvictMergeCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EvictMergeCmd) ProtoMessage() {}
-
-func (x *EvictMergeCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[131]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EvictMergeCmd.ProtoReflect.Descriptor instead.
-func (*EvictMergeCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{131}
-}
-
-func (x *EvictMergeCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *EvictMergeCmd) GetRunId() string {
-	if x != nil {
-		return x.RunId
-	}
-	return ""
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{113}
 }
 
 // THE INTERRUPT'S QUEUE HALF, ASKED RATHER THAN PERFORMED.
@@ -10116,7 +8640,7 @@ type MergeDequeueOffer struct {
 
 func (x *MergeDequeueOffer) Reset() {
 	*x = MergeDequeueOffer{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[132]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[114]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10128,7 +8652,7 @@ func (x *MergeDequeueOffer) String() string {
 func (*MergeDequeueOffer) ProtoMessage() {}
 
 func (x *MergeDequeueOffer) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[132]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[114]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10141,7 +8665,7 @@ func (x *MergeDequeueOffer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeDequeueOffer.ProtoReflect.Descriptor instead.
 func (*MergeDequeueOffer) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{132}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{114}
 }
 
 func (x *MergeDequeueOffer) GetOfferId() string {
@@ -10224,7 +8748,7 @@ type MergeDequeueWaiting struct {
 
 func (x *MergeDequeueWaiting) Reset() {
 	*x = MergeDequeueWaiting{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[133]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[115]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10236,7 +8760,7 @@ func (x *MergeDequeueWaiting) String() string {
 func (*MergeDequeueWaiting) ProtoMessage() {}
 
 func (x *MergeDequeueWaiting) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[133]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[115]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10249,7 +8773,7 @@ func (x *MergeDequeueWaiting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeDequeueWaiting.ProtoReflect.Descriptor instead.
 func (*MergeDequeueWaiting) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{133}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{115}
 }
 
 func (x *MergeDequeueWaiting) GetAhead() int32 {
@@ -10293,7 +8817,7 @@ type MergeDequeueRunning struct {
 
 func (x *MergeDequeueRunning) Reset() {
 	*x = MergeDequeueRunning{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[134]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[116]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10305,7 +8829,7 @@ func (x *MergeDequeueRunning) String() string {
 func (*MergeDequeueRunning) ProtoMessage() {}
 
 func (x *MergeDequeueRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[134]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[116]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10318,7 +8842,7 @@ func (x *MergeDequeueRunning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeDequeueRunning.ProtoReflect.Descriptor instead.
 func (*MergeDequeueRunning) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{134}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{116}
 }
 
 func (x *MergeDequeueRunning) GetStatus() *MergeStatus {
@@ -10327,126 +8851,6 @@ func (x *MergeDequeueRunning) GetStatus() *MergeStatus {
 	}
 	return nil
 }
-
-// The user's answer to a MergeDequeueOffer. Sent by whichever frontend drew
-// the card; the daemon clears the offer on either arm, so declining is a real
-// answer and not merely the absence of one.
-type AnswerMergeDequeueCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The workspace whose offer is being answered — the offer is PUSHED STATE on
-	// WorkspaceState, so it is scoped by workspace and matched within it. See
-	// AgentRepl in frame.proto.
-	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// The offer being answered. An id that does not match the workspace's
-	// outstanding offer is REFUSED rather than resolved to the current one: a
-	// click on a superseded card must not dequeue the merge the card that
-	// replaced it is asking about.
-	OfferId string `protobuf:"bytes,3,opt,name=offer_id,json=offerId,proto3" json:"offer_id,omitempty"`
-	// The answer is a oneof of empty messages, not a bool, for the same reason
-	// ReviveSessionCmd's is: "no answer" must be unrepresentable on the wire.
-	//
-	// Types that are valid to be assigned to Answer:
-	//
-	//	*AnswerMergeDequeueCmd_Dequeue
-	//	*AnswerMergeDequeueCmd_Keep
-	Answer        isAnswerMergeDequeueCmd_Answer `protobuf_oneof:"answer"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AnswerMergeDequeueCmd) Reset() {
-	*x = AnswerMergeDequeueCmd{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[135]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AnswerMergeDequeueCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AnswerMergeDequeueCmd) ProtoMessage() {}
-
-func (x *AnswerMergeDequeueCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[135]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AnswerMergeDequeueCmd.ProtoReflect.Descriptor instead.
-func (*AnswerMergeDequeueCmd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{135}
-}
-
-func (x *AnswerMergeDequeueCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *AnswerMergeDequeueCmd) GetWorkspace() string {
-	if x != nil {
-		return x.Workspace
-	}
-	return ""
-}
-
-func (x *AnswerMergeDequeueCmd) GetOfferId() string {
-	if x != nil {
-		return x.OfferId
-	}
-	return ""
-}
-
-func (x *AnswerMergeDequeueCmd) GetAnswer() isAnswerMergeDequeueCmd_Answer {
-	if x != nil {
-		return x.Answer
-	}
-	return nil
-}
-
-func (x *AnswerMergeDequeueCmd) GetDequeue() *MergeDequeueConfirm {
-	if x != nil {
-		if x, ok := x.Answer.(*AnswerMergeDequeueCmd_Dequeue); ok {
-			return x.Dequeue
-		}
-	}
-	return nil
-}
-
-func (x *AnswerMergeDequeueCmd) GetKeep() *MergeDequeueDecline {
-	if x != nil {
-		if x, ok := x.Answer.(*AnswerMergeDequeueCmd_Keep); ok {
-			return x.Keep
-		}
-	}
-	return nil
-}
-
-type isAnswerMergeDequeueCmd_Answer interface {
-	isAnswerMergeDequeueCmd_Answer()
-}
-
-type AnswerMergeDequeueCmd_Dequeue struct {
-	Dequeue *MergeDequeueConfirm `protobuf:"bytes,4,opt,name=dequeue,proto3,oneof"`
-}
-
-type AnswerMergeDequeueCmd_Keep struct {
-	Keep *MergeDequeueDecline `protobuf:"bytes,5,opt,name=keep,proto3,oneof"`
-}
-
-func (*AnswerMergeDequeueCmd_Dequeue) isAnswerMergeDequeueCmd_Answer() {}
-
-func (*AnswerMergeDequeueCmd_Keep) isAnswerMergeDequeueCmd_Answer() {}
 
 // Take the merge off the queue — evict it while waiting, abort it while
 // running.
@@ -10458,7 +8862,7 @@ type MergeDequeueConfirm struct {
 
 func (x *MergeDequeueConfirm) Reset() {
 	*x = MergeDequeueConfirm{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[136]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[117]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10470,7 +8874,7 @@ func (x *MergeDequeueConfirm) String() string {
 func (*MergeDequeueConfirm) ProtoMessage() {}
 
 func (x *MergeDequeueConfirm) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[136]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[117]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10483,7 +8887,7 @@ func (x *MergeDequeueConfirm) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeDequeueConfirm.ProtoReflect.Descriptor instead.
 func (*MergeDequeueConfirm) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{136}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{117}
 }
 
 // Leave the merge alone. The offer is cleared and the merge proceeds.
@@ -10495,7 +8899,7 @@ type MergeDequeueDecline struct {
 
 func (x *MergeDequeueDecline) Reset() {
 	*x = MergeDequeueDecline{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[137]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[118]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10507,7 +8911,7 @@ func (x *MergeDequeueDecline) String() string {
 func (*MergeDequeueDecline) ProtoMessage() {}
 
 func (x *MergeDequeueDecline) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[137]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[118]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10520,7 +8924,7 @@ func (x *MergeDequeueDecline) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeDequeueDecline.ProtoReflect.Descriptor instead.
 func (*MergeDequeueDecline) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{137}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{118}
 }
 
 var file_agentrepl_v1_shared_proto_extTypes = []protoimpl.ExtensionInfo{
@@ -10841,15 +9245,7 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x17HibernationCacheExpired\x12\x1d\n" +
 	"\n" +
 	"elapsed_ms\x18\x01 \x01(\x03R\telapsedMs\x12\x15\n" +
-	"\x06ttl_ms\x18\x02 \x01(\x03R\x05ttlMs\"\x89\x02\n" +
-	"\x10ReviveSessionCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12G\n" +
-	"\rcompact_first\x18\x03 \x01(\v2 .agentrepl.v1.ReviveCompactFirstH\x00R\fcompactFirst\x124\n" +
-	"\x06direct\x18\x04 \x01(\v2\x1a.agentrepl.v1.ReviveDirectH\x00R\x06direct\x121\n" +
-	"\x05clear\x18\x05 \x01(\v2\x19.agentrepl.v1.ReviveClearH\x00R\x05clearB\x06\n" +
-	"\x04mode\"I\n" +
+	"\x06ttl_ms\x18\x02 \x01(\x03R\x05ttlMs\"I\n" +
 	"\x12ReviveCompactFirst\x123\n" +
 	"\x05scope\x18\x01 \x01(\x0e2\x1d.agentrepl.v1.CompactionScopeR\x05scope\"\x0e\n" +
 	"\fReviveDirect\"\r\n" +
@@ -10864,30 +9260,7 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x04gate\"\x13\n" +
 	"\x11WorkspaceGateOpen\"R\n" +
 	"\x17WorkspaceGateHibernated\x127\n" +
-	"\x06detail\x18\x01 \x01(\v2\x1f.agentrepl.v1.HibernationDetailR\x06detail\"\xe0\x04\n" +
-	"\x12CreateWorkspaceCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12%\n" +
-	"\x0erequested_name\x18\x02 \x01(\tR\rrequestedName\x12\x19\n" +
-	"\bgit_root\x18\x03 \x01(\tR\agitRoot\x12\x1f\n" +
-	"\vbase_commit\x18\x04 \x01(\tR\n" +
-	"baseCommit\x12)\n" +
-	"\x10source_workspace\x18\x05 \x01(\tR\x0fsourceWorkspace\x12\x1d\n" +
-	"\n" +
-	"source_dir\x18\x06 \x01(\tR\tsourceDir\x12*\n" +
-	"\x0einitial_prompt\x18\a \x01(\tH\x00R\rinitialPrompt\x88\x01\x01\x12\x1a\n" +
-	"\bpriority\x18\b \x01(\tR\bpriority\x12\x14\n" +
-	"\x05model\x18\t \x01(\tR\x05model\x12\x1b\n" +
-	"\tfork_from\x18\n" +
-	" \x01(\tR\bforkFrom\x12&\n" +
-	"\x0ffork_session_id\x18\v \x01(\tR\rforkSessionId\x123\n" +
-	"\x15postprocessing_prompt\x18\f \x01(\tR\x14postprocessingPrompt\x12&\n" +
-	"\x0fbefore_ws_merge\x18\r \x01(\tR\rbeforeWsMerge\x12\x1d\n" +
-	"\n" +
-	"config_dir\x18\x0e \x01(\tR\tconfigDir\x12'\n" +
-	"\x0fpermission_mode\x18\x0f \x01(\tR\x0epermissionMode\x12#\n" +
-	"\rallow_ungated\x18\x10 \x01(\bR\fallowUngatedB\x11\n" +
-	"\x0f_initial_prompt\"\xc4\x04\n" +
+	"\x06detail\x18\x01 \x01(\v2\x1f.agentrepl.v1.HibernationDetailR\x06detail\"\xc4\x04\n" +
 	"\x12WorkspaceAvailable\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x1d\n" +
 	"\n" +
@@ -10911,30 +9284,7 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\n" +
 	"config_dir\x18\x0f \x01(\tR\tconfigDir\x12'\n" +
 	"\x0fpermission_mode\x18\x10 \x01(\tR\x0epermissionMode\x12#\n" +
-	"\rallow_ungated\x18\x11 \x01(\bR\fallowUngated\"P\n" +
-	"\x18WorkspaceMaterializedCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x15\n" +
-	"\x06job_id\x18\x02 \x01(\tR\x05jobId\"\xd0\x01\n" +
-	"\x10OpenWorkspaceCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12'\n" +
-	"\x0fpermission_mode\x18\x03 \x01(\tR\x0epermissionMode\x12\x1d\n" +
-	"\n" +
-	"config_dir\x18\x04 \x01(\tR\tconfigDir\x12\x12\n" +
-	"\x04fake\x18\x05 \x01(\bR\x04fake\x12#\n" +
-	"\rallow_ungated\x18\x06 \x01(\bR\fallowUngated\"P\n" +
-	"\x11CloseWorkspaceCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\"\xb5\x01\n" +
-	"\x11MergeWorkspaceCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12<\n" +
-	"\x1aconflict_resolved_continue\x18\x03 \x01(\bR\x18conflictResolvedContinue\x12%\n" +
-	"\x0eworkspace_name\x18\x04 \x01(\tR\rworkspaceName\"\xcf\x06\n" +
+	"\rallow_ungated\x18\x11 \x01(\bR\fallowUngated\"\xcf\x06\n" +
 	"\n" +
 	"HostAction\x12\x1b\n" +
 	"\taction_id\x18\x01 \x01(\tR\bactionId\x12N\n" +
@@ -10972,44 +9322,7 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"Z\n" +
 	"\x11HostLegacyCommand\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x121\n" +
-	"\apayload\x18\x02 \x01(\v2\x17.google.protobuf.StructR\apayload\"z\n" +
-	"\x16HostActionCompletedCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
-	"\taction_id\x18\x02 \x01(\tR\bactionId\x12\x0e\n" +
-	"\x02ok\x18\x03 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"\xd2\x02\n" +
-	"\x10CreateSessionCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x10\n" +
-	"\x03cwd\x18\x02 \x01(\tR\x03cwd\x12'\n" +
-	"\x0fpermission_mode\x18\x03 \x01(\tR\x0epermissionMode\x12\x1d\n" +
-	"\n" +
-	"config_dir\x18\x04 \x01(\tR\tconfigDir\x12\x12\n" +
-	"\x04fake\x18\x05 \x01(\bR\x04fake\x12#\n" +
-	"\rallow_ungated\x18\x06 \x01(\bR\fallowUngated\x12\x14\n" +
-	"\x05model\x18\a \x01(\tR\x05model\x129\n" +
-	"\vresume_mode\x18\b \x01(\x0e2\x18.agentrepl.v1.ResumeModeR\n" +
-	"resumeMode\x12;\n" +
-	"\x1aexplicit_claude_session_id\x18\t \x01(\tR\x17explicitClaudeSessionId\"P\n" +
-	"\x10DeleteSessionCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x02 \x01(\tR\tsessionId\"P\n" +
-	"\x11RestartSessionCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\"T\n" +
-	"\x15HibernateWorkspaceCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\"K\n" +
-	"\vShutdownCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
-	"\n" +
-	"stop_shims\x18\x02 \x01(\bR\tstopShims\"\x9f\x01\n" +
+	"\apayload\x18\x02 \x01(\v2\x17.google.protobuf.StructR\apayload\"\x9f\x01\n" +
 	"\x14ShutdownScheduleView\x128\n" +
 	"\x04idle\x18\x01 \x01(\v2\".agentrepl.v1.ShutdownScheduleIdleH\x00R\x04idle\x12D\n" +
 	"\bdraining\x18\x02 \x01(\v2&.agentrepl.v1.ShutdownScheduleDrainingH\x00R\bdrainingB\a\n" +
@@ -11032,31 +9345,13 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x10ShutdownHoldTurn\x12\x17\n" +
 	"\aturn_id\x18\x01 \x01(\tR\x06turnId\")\n" +
 	"\x11ShutdownHoldTasks\x12\x14\n" +
-	"\x05count\x18\x01 \x01(\x05R\x05count\"i\n" +
-	"\x13ScheduleShutdownCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
-	"\n" +
-	"stop_shims\x18\x02 \x01(\bR\tstopShims\x12\x14\n" +
-	"\x05cause\x18\x03 \x01(\tR\x05cause\"\\\n" +
-	"\x1aCancelScheduledShutdownCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1f\n" +
-	"\vschedule_id\x18\x02 \x01(\tR\n" +
-	"scheduleId\"\xa9\x01\n" +
+	"\x05count\x18\x01 \x01(\x05R\x05count\"\xa9\x01\n" +
 	"\x12RestartPendingView\x12\x14\n" +
 	"\x05cause\x18\x01 \x01(\tR\x05cause\x126\n" +
 	"\x17expected_outage_seconds\x18\x02 \x01(\x05R\x15expectedOutageSeconds\x12\x1d\n" +
 	"\n" +
 	"stop_shims\x18\x03 \x01(\bR\tstopShims\x12&\n" +
-	"\x0fannounced_at_ms\x18\x04 \x01(\x03R\rannouncedAtMs\"\xcc\x01\n" +
-	"\fClientLogCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x122\n" +
-	"\x05level\x18\x03 \x01(\x0e2\x1c.agentrepl.v1.ClientLogLevelR\x05level\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\x121\n" +
-	"\acontext\x18\x05 \x01(\v2\x17.google.protobuf.StructR\acontext\"\xa0\x05\n" +
+	"\x0fannounced_at_ms\x18\x04 \x01(\x03R\rannouncedAtMs\"\xa0\x05\n" +
 	"\vMergeStatus\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12-\n" +
 	"\x13phase_started_at_ms\x18\x02 \x01(\x03R\x10phaseStartedAtMs\x12\"\n" +
@@ -11125,17 +9420,7 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x04head\"\x17\n" +
 	"\x15MergeQueueHeadRunning\"\x1d\n" +
 	"\x1bMergeQueueHeadPausedWaiting\"\x1c\n" +
-	"\x1aMergeQueueHeadTerminalOwed\"3\n" +
-	"\x12PauseMergeQueueCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\"4\n" +
-	"\x13ResumeMergeQueueCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\"E\n" +
-	"\rEvictMergeCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x15\n" +
-	"\x06run_id\x18\x02 \x01(\tR\x05runId\"\xf1\x01\n" +
+	"\x1aMergeQueueHeadTerminalOwed\"\xf1\x01\n" +
 	"\x11MergeDequeueOffer\x12\x19\n" +
 	"\boffer_id\x18\x01 \x01(\tR\aofferId\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12 \n" +
@@ -11150,15 +9435,7 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\bposition\x18\x02 \x01(\x05R\bposition\x12\x14\n" +
 	"\x05depth\x18\x03 \x01(\x05R\x05depth\"H\n" +
 	"\x13MergeDequeueRunning\x121\n" +
-	"\x06status\x18\x01 \x01(\v2\x19.agentrepl.v1.MergeStatusR\x06status\"\xf1\x01\n" +
-	"\x15AnswerMergeDequeueCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
-	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x19\n" +
-	"\boffer_id\x18\x03 \x01(\tR\aofferId\x12=\n" +
-	"\adequeue\x18\x04 \x01(\v2!.agentrepl.v1.MergeDequeueConfirmH\x00R\adequeue\x127\n" +
-	"\x04keep\x18\x05 \x01(\v2!.agentrepl.v1.MergeDequeueDeclineH\x00R\x04keepB\b\n" +
-	"\x06answer\"\x15\n" +
+	"\x06status\x18\x01 \x01(\v2\x19.agentrepl.v1.MergeStatusR\x06status\"\x15\n" +
 	"\x13MergeDequeueConfirm\"\x15\n" +
 	"\x13MergeDequeueDecline*\xf3\n" +
 	"\n" +
@@ -11261,7 +9538,7 @@ func file_agentrepl_v1_shared_proto_rawDescGZIP() []byte {
 }
 
 var file_agentrepl_v1_shared_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_agentrepl_v1_shared_proto_msgTypes = make([]protoimpl.MessageInfo, 138)
+var file_agentrepl_v1_shared_proto_msgTypes = make([]protoimpl.MessageInfo, 119)
 var file_agentrepl_v1_shared_proto_goTypes = []any{
 	(SessionCommand)(0),                               // 0: agentrepl.v1.SessionCommand
 	(CompactionScope)(0),                              // 1: agentrepl.v1.CompactionScope
@@ -11343,74 +9620,55 @@ var file_agentrepl_v1_shared_proto_goTypes = []any{
 	(*HibernationIdleCutoff)(nil),                     // 77: agentrepl.v1.HibernationIdleCutoff
 	(*HibernationForced)(nil),                         // 78: agentrepl.v1.HibernationForced
 	(*HibernationCacheExpired)(nil),                   // 79: agentrepl.v1.HibernationCacheExpired
-	(*ReviveSessionCmd)(nil),                          // 80: agentrepl.v1.ReviveSessionCmd
-	(*ReviveCompactFirst)(nil),                        // 81: agentrepl.v1.ReviveCompactFirst
-	(*ReviveDirect)(nil),                              // 82: agentrepl.v1.ReviveDirect
-	(*ReviveClear)(nil),                               // 83: agentrepl.v1.ReviveClear
-	(*WorkspaceGateView)(nil),                         // 84: agentrepl.v1.WorkspaceGateView
-	(*WorkspaceGateOpen)(nil),                         // 85: agentrepl.v1.WorkspaceGateOpen
-	(*WorkspaceGateHibernated)(nil),                   // 86: agentrepl.v1.WorkspaceGateHibernated
-	(*CreateWorkspaceCmd)(nil),                        // 87: agentrepl.v1.CreateWorkspaceCmd
-	(*WorkspaceAvailable)(nil),                        // 88: agentrepl.v1.WorkspaceAvailable
-	(*WorkspaceMaterializedCmd)(nil),                  // 89: agentrepl.v1.WorkspaceMaterializedCmd
-	(*OpenWorkspaceCmd)(nil),                          // 90: agentrepl.v1.OpenWorkspaceCmd
-	(*CloseWorkspaceCmd)(nil),                         // 91: agentrepl.v1.CloseWorkspaceCmd
-	(*MergeWorkspaceCmd)(nil),                         // 92: agentrepl.v1.MergeWorkspaceCmd
-	(*HostAction)(nil),                                // 93: agentrepl.v1.HostAction
-	(*HostBootSweepSessionUnwired)(nil),               // 94: agentrepl.v1.HostBootSweepSessionUnwired
-	(*HostWorkspaceCreateFailed)(nil),                 // 95: agentrepl.v1.HostWorkspaceCreateFailed
-	(*HostSwitchWorkspace)(nil),                       // 96: agentrepl.v1.HostSwitchWorkspace
-	(*HostSetRepositoryFold)(nil),                     // 97: agentrepl.v1.HostSetRepositoryFold
-	(*HostSetSidebarView)(nil),                        // 98: agentrepl.v1.HostSetSidebarView
-	(*HostTaskCreate)(nil),                            // 99: agentrepl.v1.HostTaskCreate
-	(*HostTaskById)(nil),                              // 100: agentrepl.v1.HostTaskById
-	(*HostLegacyCommand)(nil),                         // 101: agentrepl.v1.HostLegacyCommand
-	(*HostActionCompletedCmd)(nil),                    // 102: agentrepl.v1.HostActionCompletedCmd
-	(*CreateSessionCmd)(nil),                          // 103: agentrepl.v1.CreateSessionCmd
-	(*DeleteSessionCmd)(nil),                          // 104: agentrepl.v1.DeleteSessionCmd
-	(*RestartSessionCmd)(nil),                         // 105: agentrepl.v1.RestartSessionCmd
-	(*HibernateWorkspaceCmd)(nil),                     // 106: agentrepl.v1.HibernateWorkspaceCmd
-	(*ShutdownCmd)(nil),                               // 107: agentrepl.v1.ShutdownCmd
-	(*ShutdownScheduleView)(nil),                      // 108: agentrepl.v1.ShutdownScheduleView
-	(*ShutdownScheduleIdle)(nil),                      // 109: agentrepl.v1.ShutdownScheduleIdle
-	(*ShutdownScheduleDraining)(nil),                  // 110: agentrepl.v1.ShutdownScheduleDraining
-	(*ShutdownHold)(nil),                              // 111: agentrepl.v1.ShutdownHold
-	(*ShutdownHoldTurn)(nil),                          // 112: agentrepl.v1.ShutdownHoldTurn
-	(*ShutdownHoldTasks)(nil),                         // 113: agentrepl.v1.ShutdownHoldTasks
-	(*ScheduleShutdownCmd)(nil),                       // 114: agentrepl.v1.ScheduleShutdownCmd
-	(*CancelScheduledShutdownCmd)(nil),                // 115: agentrepl.v1.CancelScheduledShutdownCmd
-	(*RestartPendingView)(nil),                        // 116: agentrepl.v1.RestartPendingView
-	(*ClientLogCmd)(nil),                              // 117: agentrepl.v1.ClientLogCmd
-	(*MergeStatus)(nil),                               // 118: agentrepl.v1.MergeStatus
-	(*MergeStatusEnqueued)(nil),                       // 119: agentrepl.v1.MergeStatusEnqueued
-	(*MergeStatusBeforeAction)(nil),                   // 120: agentrepl.v1.MergeStatusBeforeAction
-	(*MergeStatusCherryPicking)(nil),                  // 121: agentrepl.v1.MergeStatusCherryPicking
-	(*MergeStatusTesting)(nil),                        // 122: agentrepl.v1.MergeStatusTesting
-	(*MergeStatusConflict)(nil),                       // 123: agentrepl.v1.MergeStatusConflict
-	(*MergeStatusAfterAction)(nil),                    // 124: agentrepl.v1.MergeStatusAfterAction
-	(*MergeStatusMerged)(nil),                         // 125: agentrepl.v1.MergeStatusMerged
-	(*MergeStatusFailed)(nil),                         // 126: agentrepl.v1.MergeStatusFailed
-	(*MergeQueueRoster)(nil),                          // 127: agentrepl.v1.MergeQueueRoster
-	(*MergeRepoQueue)(nil),                            // 128: agentrepl.v1.MergeRepoQueue
-	(*MergeQueueEntry)(nil),                           // 129: agentrepl.v1.MergeQueueEntry
-	(*MergeQueueHeadRunning)(nil),                     // 130: agentrepl.v1.MergeQueueHeadRunning
-	(*MergeQueueHeadPausedWaiting)(nil),               // 131: agentrepl.v1.MergeQueueHeadPausedWaiting
-	(*MergeQueueHeadTerminalOwed)(nil),                // 132: agentrepl.v1.MergeQueueHeadTerminalOwed
-	(*PauseMergeQueueCmd)(nil),                        // 133: agentrepl.v1.PauseMergeQueueCmd
-	(*ResumeMergeQueueCmd)(nil),                       // 134: agentrepl.v1.ResumeMergeQueueCmd
-	(*EvictMergeCmd)(nil),                             // 135: agentrepl.v1.EvictMergeCmd
-	(*MergeDequeueOffer)(nil),                         // 136: agentrepl.v1.MergeDequeueOffer
-	(*MergeDequeueWaiting)(nil),                       // 137: agentrepl.v1.MergeDequeueWaiting
-	(*MergeDequeueRunning)(nil),                       // 138: agentrepl.v1.MergeDequeueRunning
-	(*AnswerMergeDequeueCmd)(nil),                     // 139: agentrepl.v1.AnswerMergeDequeueCmd
-	(*MergeDequeueConfirm)(nil),                       // 140: agentrepl.v1.MergeDequeueConfirm
-	(*MergeDequeueDecline)(nil),                       // 141: agentrepl.v1.MergeDequeueDecline
-	(*v1.VendorSessionIdentityUnavailable)(nil),       // 142: shim.v1.VendorSessionIdentityUnavailable
-	(*v1.UnexpectedQueryEof)(nil),                     // 143: shim.v1.UnexpectedQueryEof
-	(*v1.QueryIteratorFailure)(nil),                   // 144: shim.v1.QueryIteratorFailure
-	(*v1.QueryStartupFailure)(nil),                    // 145: shim.v1.QueryStartupFailure
-	(*structpb.Struct)(nil),                           // 146: google.protobuf.Struct
-	(*descriptorpb.EnumValueOptions)(nil),             // 147: google.protobuf.EnumValueOptions
+	(*ReviveCompactFirst)(nil),                        // 80: agentrepl.v1.ReviveCompactFirst
+	(*ReviveDirect)(nil),                              // 81: agentrepl.v1.ReviveDirect
+	(*ReviveClear)(nil),                               // 82: agentrepl.v1.ReviveClear
+	(*WorkspaceGateView)(nil),                         // 83: agentrepl.v1.WorkspaceGateView
+	(*WorkspaceGateOpen)(nil),                         // 84: agentrepl.v1.WorkspaceGateOpen
+	(*WorkspaceGateHibernated)(nil),                   // 85: agentrepl.v1.WorkspaceGateHibernated
+	(*WorkspaceAvailable)(nil),                        // 86: agentrepl.v1.WorkspaceAvailable
+	(*HostAction)(nil),                                // 87: agentrepl.v1.HostAction
+	(*HostBootSweepSessionUnwired)(nil),               // 88: agentrepl.v1.HostBootSweepSessionUnwired
+	(*HostWorkspaceCreateFailed)(nil),                 // 89: agentrepl.v1.HostWorkspaceCreateFailed
+	(*HostSwitchWorkspace)(nil),                       // 90: agentrepl.v1.HostSwitchWorkspace
+	(*HostSetRepositoryFold)(nil),                     // 91: agentrepl.v1.HostSetRepositoryFold
+	(*HostSetSidebarView)(nil),                        // 92: agentrepl.v1.HostSetSidebarView
+	(*HostTaskCreate)(nil),                            // 93: agentrepl.v1.HostTaskCreate
+	(*HostTaskById)(nil),                              // 94: agentrepl.v1.HostTaskById
+	(*HostLegacyCommand)(nil),                         // 95: agentrepl.v1.HostLegacyCommand
+	(*ShutdownScheduleView)(nil),                      // 96: agentrepl.v1.ShutdownScheduleView
+	(*ShutdownScheduleIdle)(nil),                      // 97: agentrepl.v1.ShutdownScheduleIdle
+	(*ShutdownScheduleDraining)(nil),                  // 98: agentrepl.v1.ShutdownScheduleDraining
+	(*ShutdownHold)(nil),                              // 99: agentrepl.v1.ShutdownHold
+	(*ShutdownHoldTurn)(nil),                          // 100: agentrepl.v1.ShutdownHoldTurn
+	(*ShutdownHoldTasks)(nil),                         // 101: agentrepl.v1.ShutdownHoldTasks
+	(*RestartPendingView)(nil),                        // 102: agentrepl.v1.RestartPendingView
+	(*MergeStatus)(nil),                               // 103: agentrepl.v1.MergeStatus
+	(*MergeStatusEnqueued)(nil),                       // 104: agentrepl.v1.MergeStatusEnqueued
+	(*MergeStatusBeforeAction)(nil),                   // 105: agentrepl.v1.MergeStatusBeforeAction
+	(*MergeStatusCherryPicking)(nil),                  // 106: agentrepl.v1.MergeStatusCherryPicking
+	(*MergeStatusTesting)(nil),                        // 107: agentrepl.v1.MergeStatusTesting
+	(*MergeStatusConflict)(nil),                       // 108: agentrepl.v1.MergeStatusConflict
+	(*MergeStatusAfterAction)(nil),                    // 109: agentrepl.v1.MergeStatusAfterAction
+	(*MergeStatusMerged)(nil),                         // 110: agentrepl.v1.MergeStatusMerged
+	(*MergeStatusFailed)(nil),                         // 111: agentrepl.v1.MergeStatusFailed
+	(*MergeQueueRoster)(nil),                          // 112: agentrepl.v1.MergeQueueRoster
+	(*MergeRepoQueue)(nil),                            // 113: agentrepl.v1.MergeRepoQueue
+	(*MergeQueueEntry)(nil),                           // 114: agentrepl.v1.MergeQueueEntry
+	(*MergeQueueHeadRunning)(nil),                     // 115: agentrepl.v1.MergeQueueHeadRunning
+	(*MergeQueueHeadPausedWaiting)(nil),               // 116: agentrepl.v1.MergeQueueHeadPausedWaiting
+	(*MergeQueueHeadTerminalOwed)(nil),                // 117: agentrepl.v1.MergeQueueHeadTerminalOwed
+	(*MergeDequeueOffer)(nil),                         // 118: agentrepl.v1.MergeDequeueOffer
+	(*MergeDequeueWaiting)(nil),                       // 119: agentrepl.v1.MergeDequeueWaiting
+	(*MergeDequeueRunning)(nil),                       // 120: agentrepl.v1.MergeDequeueRunning
+	(*MergeDequeueConfirm)(nil),                       // 121: agentrepl.v1.MergeDequeueConfirm
+	(*MergeDequeueDecline)(nil),                       // 122: agentrepl.v1.MergeDequeueDecline
+	(*v1.VendorSessionIdentityUnavailable)(nil),       // 123: shim.v1.VendorSessionIdentityUnavailable
+	(*v1.UnexpectedQueryEof)(nil),                     // 124: shim.v1.UnexpectedQueryEof
+	(*v1.QueryIteratorFailure)(nil),                   // 125: shim.v1.QueryIteratorFailure
+	(*v1.QueryStartupFailure)(nil),                    // 126: shim.v1.QueryStartupFailure
+	(*structpb.Struct)(nil),                           // 127: google.protobuf.Struct
+	(*descriptorpb.EnumValueOptions)(nil),             // 128: google.protobuf.EnumValueOptions
 }
 var file_agentrepl_v1_shared_proto_depIdxs = []int32{
 	7,   // 0: agentrepl.v1.FailureKind.shim_not_connected:type_name -> agentrepl.v1.FailureShimNotConnected
@@ -11495,10 +9753,10 @@ var file_agentrepl_v1_shared_proto_depIdxs = []int32{
 	5,   // 79: agentrepl.v1.FailureApiRefusal.vendor:type_name -> agentrepl.v1.VendorFailureContext
 	5,   // 80: agentrepl.v1.FailureApiTurnFailed.vendor:type_name -> agentrepl.v1.VendorFailureContext
 	0,   // 81: agentrepl.v1.FailureQueueEntryUninterruptibleTurn.command:type_name -> agentrepl.v1.SessionCommand
-	142, // 82: agentrepl.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> shim.v1.VendorSessionIdentityUnavailable
-	143, // 83: agentrepl.v1.QueryTerminationFailure.unexpected_eof:type_name -> shim.v1.UnexpectedQueryEof
-	144, // 84: agentrepl.v1.QueryTerminationFailure.iterator_failure:type_name -> shim.v1.QueryIteratorFailure
-	145, // 85: agentrepl.v1.QueryTerminationFailure.startup_failure:type_name -> shim.v1.QueryStartupFailure
+	123, // 82: agentrepl.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> shim.v1.VendorSessionIdentityUnavailable
+	124, // 83: agentrepl.v1.QueryTerminationFailure.unexpected_eof:type_name -> shim.v1.UnexpectedQueryEof
+	125, // 84: agentrepl.v1.QueryTerminationFailure.iterator_failure:type_name -> shim.v1.QueryIteratorFailure
+	126, // 85: agentrepl.v1.QueryTerminationFailure.startup_failure:type_name -> shim.v1.QueryStartupFailure
 	71,  // 86: agentrepl.v1.SessionResumeFailure.create:type_name -> agentrepl.v1.SessionResumeFailureCreate
 	72,  // 87: agentrepl.v1.SessionResumeFailure.automatic_restore:type_name -> agentrepl.v1.SessionResumeFailureAutomaticRestore
 	73,  // 88: agentrepl.v1.SessionResumeFailure.transcript_unavailable:type_name -> agentrepl.v1.SessionResumeFailureTranscriptUnavailable
@@ -11508,57 +9766,49 @@ var file_agentrepl_v1_shared_proto_depIdxs = []int32{
 	77,  // 92: agentrepl.v1.HibernationDetail.idle_cutoff:type_name -> agentrepl.v1.HibernationIdleCutoff
 	78,  // 93: agentrepl.v1.HibernationDetail.forced:type_name -> agentrepl.v1.HibernationForced
 	79,  // 94: agentrepl.v1.HibernationDetail.cache_expired:type_name -> agentrepl.v1.HibernationCacheExpired
-	81,  // 95: agentrepl.v1.ReviveSessionCmd.compact_first:type_name -> agentrepl.v1.ReviveCompactFirst
-	82,  // 96: agentrepl.v1.ReviveSessionCmd.direct:type_name -> agentrepl.v1.ReviveDirect
-	83,  // 97: agentrepl.v1.ReviveSessionCmd.clear:type_name -> agentrepl.v1.ReviveClear
-	1,   // 98: agentrepl.v1.ReviveCompactFirst.scope:type_name -> agentrepl.v1.CompactionScope
-	85,  // 99: agentrepl.v1.WorkspaceGateView.open:type_name -> agentrepl.v1.WorkspaceGateOpen
-	86,  // 100: agentrepl.v1.WorkspaceGateView.hibernated:type_name -> agentrepl.v1.WorkspaceGateHibernated
-	76,  // 101: agentrepl.v1.WorkspaceGateHibernated.detail:type_name -> agentrepl.v1.HibernationDetail
-	96,  // 102: agentrepl.v1.HostAction.switch_workspace:type_name -> agentrepl.v1.HostSwitchWorkspace
-	97,  // 103: agentrepl.v1.HostAction.set_repository_fold:type_name -> agentrepl.v1.HostSetRepositoryFold
-	98,  // 104: agentrepl.v1.HostAction.set_sidebar_view:type_name -> agentrepl.v1.HostSetSidebarView
-	99,  // 105: agentrepl.v1.HostAction.task_create:type_name -> agentrepl.v1.HostTaskCreate
-	100, // 106: agentrepl.v1.HostAction.task_toggle_done:type_name -> agentrepl.v1.HostTaskById
-	100, // 107: agentrepl.v1.HostAction.task_open:type_name -> agentrepl.v1.HostTaskById
-	100, // 108: agentrepl.v1.HostAction.task_add_workspace:type_name -> agentrepl.v1.HostTaskById
-	101, // 109: agentrepl.v1.HostAction.legacy_command:type_name -> agentrepl.v1.HostLegacyCommand
-	95,  // 110: agentrepl.v1.HostAction.workspace_create_failed:type_name -> agentrepl.v1.HostWorkspaceCreateFailed
-	94,  // 111: agentrepl.v1.HostAction.boot_sweep_session_unwired:type_name -> agentrepl.v1.HostBootSweepSessionUnwired
-	146, // 112: agentrepl.v1.HostLegacyCommand.payload:type_name -> google.protobuf.Struct
-	2,   // 113: agentrepl.v1.CreateSessionCmd.resume_mode:type_name -> agentrepl.v1.ResumeMode
-	109, // 114: agentrepl.v1.ShutdownScheduleView.idle:type_name -> agentrepl.v1.ShutdownScheduleIdle
-	110, // 115: agentrepl.v1.ShutdownScheduleView.draining:type_name -> agentrepl.v1.ShutdownScheduleDraining
-	111, // 116: agentrepl.v1.ShutdownScheduleDraining.holds:type_name -> agentrepl.v1.ShutdownHold
-	112, // 117: agentrepl.v1.ShutdownHold.turn:type_name -> agentrepl.v1.ShutdownHoldTurn
-	113, // 118: agentrepl.v1.ShutdownHold.tasks:type_name -> agentrepl.v1.ShutdownHoldTasks
-	3,   // 119: agentrepl.v1.ClientLogCmd.level:type_name -> agentrepl.v1.ClientLogLevel
-	146, // 120: agentrepl.v1.ClientLogCmd.context:type_name -> google.protobuf.Struct
-	119, // 121: agentrepl.v1.MergeStatus.enqueued:type_name -> agentrepl.v1.MergeStatusEnqueued
-	120, // 122: agentrepl.v1.MergeStatus.before_action:type_name -> agentrepl.v1.MergeStatusBeforeAction
-	121, // 123: agentrepl.v1.MergeStatus.cherry_picking:type_name -> agentrepl.v1.MergeStatusCherryPicking
-	122, // 124: agentrepl.v1.MergeStatus.testing:type_name -> agentrepl.v1.MergeStatusTesting
-	123, // 125: agentrepl.v1.MergeStatus.conflict:type_name -> agentrepl.v1.MergeStatusConflict
-	124, // 126: agentrepl.v1.MergeStatus.after_action:type_name -> agentrepl.v1.MergeStatusAfterAction
-	125, // 127: agentrepl.v1.MergeStatus.merged:type_name -> agentrepl.v1.MergeStatusMerged
-	126, // 128: agentrepl.v1.MergeStatus.failed:type_name -> agentrepl.v1.MergeStatusFailed
-	128, // 129: agentrepl.v1.MergeQueueRoster.repos:type_name -> agentrepl.v1.MergeRepoQueue
-	129, // 130: agentrepl.v1.MergeRepoQueue.entries:type_name -> agentrepl.v1.MergeQueueEntry
-	130, // 131: agentrepl.v1.MergeQueueEntry.running:type_name -> agentrepl.v1.MergeQueueHeadRunning
-	131, // 132: agentrepl.v1.MergeQueueEntry.paused_waiting:type_name -> agentrepl.v1.MergeQueueHeadPausedWaiting
-	132, // 133: agentrepl.v1.MergeQueueEntry.terminal_owed:type_name -> agentrepl.v1.MergeQueueHeadTerminalOwed
-	137, // 134: agentrepl.v1.MergeDequeueOffer.waiting:type_name -> agentrepl.v1.MergeDequeueWaiting
-	138, // 135: agentrepl.v1.MergeDequeueOffer.running:type_name -> agentrepl.v1.MergeDequeueRunning
-	118, // 136: agentrepl.v1.MergeDequeueRunning.status:type_name -> agentrepl.v1.MergeStatus
-	140, // 137: agentrepl.v1.AnswerMergeDequeueCmd.dequeue:type_name -> agentrepl.v1.MergeDequeueConfirm
-	141, // 138: agentrepl.v1.AnswerMergeDequeueCmd.keep:type_name -> agentrepl.v1.MergeDequeueDecline
-	147, // 139: agentrepl.v1.session_command_spec:extendee -> google.protobuf.EnumValueOptions
-	4,   // 140: agentrepl.v1.session_command_spec:type_name -> agentrepl.v1.SessionCommandSpec
-	141, // [141:141] is the sub-list for method output_type
-	141, // [141:141] is the sub-list for method input_type
-	140, // [140:141] is the sub-list for extension type_name
-	139, // [139:140] is the sub-list for extension extendee
-	0,   // [0:139] is the sub-list for field type_name
+	1,   // 95: agentrepl.v1.ReviveCompactFirst.scope:type_name -> agentrepl.v1.CompactionScope
+	84,  // 96: agentrepl.v1.WorkspaceGateView.open:type_name -> agentrepl.v1.WorkspaceGateOpen
+	85,  // 97: agentrepl.v1.WorkspaceGateView.hibernated:type_name -> agentrepl.v1.WorkspaceGateHibernated
+	76,  // 98: agentrepl.v1.WorkspaceGateHibernated.detail:type_name -> agentrepl.v1.HibernationDetail
+	90,  // 99: agentrepl.v1.HostAction.switch_workspace:type_name -> agentrepl.v1.HostSwitchWorkspace
+	91,  // 100: agentrepl.v1.HostAction.set_repository_fold:type_name -> agentrepl.v1.HostSetRepositoryFold
+	92,  // 101: agentrepl.v1.HostAction.set_sidebar_view:type_name -> agentrepl.v1.HostSetSidebarView
+	93,  // 102: agentrepl.v1.HostAction.task_create:type_name -> agentrepl.v1.HostTaskCreate
+	94,  // 103: agentrepl.v1.HostAction.task_toggle_done:type_name -> agentrepl.v1.HostTaskById
+	94,  // 104: agentrepl.v1.HostAction.task_open:type_name -> agentrepl.v1.HostTaskById
+	94,  // 105: agentrepl.v1.HostAction.task_add_workspace:type_name -> agentrepl.v1.HostTaskById
+	95,  // 106: agentrepl.v1.HostAction.legacy_command:type_name -> agentrepl.v1.HostLegacyCommand
+	89,  // 107: agentrepl.v1.HostAction.workspace_create_failed:type_name -> agentrepl.v1.HostWorkspaceCreateFailed
+	88,  // 108: agentrepl.v1.HostAction.boot_sweep_session_unwired:type_name -> agentrepl.v1.HostBootSweepSessionUnwired
+	127, // 109: agentrepl.v1.HostLegacyCommand.payload:type_name -> google.protobuf.Struct
+	97,  // 110: agentrepl.v1.ShutdownScheduleView.idle:type_name -> agentrepl.v1.ShutdownScheduleIdle
+	98,  // 111: agentrepl.v1.ShutdownScheduleView.draining:type_name -> agentrepl.v1.ShutdownScheduleDraining
+	99,  // 112: agentrepl.v1.ShutdownScheduleDraining.holds:type_name -> agentrepl.v1.ShutdownHold
+	100, // 113: agentrepl.v1.ShutdownHold.turn:type_name -> agentrepl.v1.ShutdownHoldTurn
+	101, // 114: agentrepl.v1.ShutdownHold.tasks:type_name -> agentrepl.v1.ShutdownHoldTasks
+	104, // 115: agentrepl.v1.MergeStatus.enqueued:type_name -> agentrepl.v1.MergeStatusEnqueued
+	105, // 116: agentrepl.v1.MergeStatus.before_action:type_name -> agentrepl.v1.MergeStatusBeforeAction
+	106, // 117: agentrepl.v1.MergeStatus.cherry_picking:type_name -> agentrepl.v1.MergeStatusCherryPicking
+	107, // 118: agentrepl.v1.MergeStatus.testing:type_name -> agentrepl.v1.MergeStatusTesting
+	108, // 119: agentrepl.v1.MergeStatus.conflict:type_name -> agentrepl.v1.MergeStatusConflict
+	109, // 120: agentrepl.v1.MergeStatus.after_action:type_name -> agentrepl.v1.MergeStatusAfterAction
+	110, // 121: agentrepl.v1.MergeStatus.merged:type_name -> agentrepl.v1.MergeStatusMerged
+	111, // 122: agentrepl.v1.MergeStatus.failed:type_name -> agentrepl.v1.MergeStatusFailed
+	113, // 123: agentrepl.v1.MergeQueueRoster.repos:type_name -> agentrepl.v1.MergeRepoQueue
+	114, // 124: agentrepl.v1.MergeRepoQueue.entries:type_name -> agentrepl.v1.MergeQueueEntry
+	115, // 125: agentrepl.v1.MergeQueueEntry.running:type_name -> agentrepl.v1.MergeQueueHeadRunning
+	116, // 126: agentrepl.v1.MergeQueueEntry.paused_waiting:type_name -> agentrepl.v1.MergeQueueHeadPausedWaiting
+	117, // 127: agentrepl.v1.MergeQueueEntry.terminal_owed:type_name -> agentrepl.v1.MergeQueueHeadTerminalOwed
+	119, // 128: agentrepl.v1.MergeDequeueOffer.waiting:type_name -> agentrepl.v1.MergeDequeueWaiting
+	120, // 129: agentrepl.v1.MergeDequeueOffer.running:type_name -> agentrepl.v1.MergeDequeueRunning
+	103, // 130: agentrepl.v1.MergeDequeueRunning.status:type_name -> agentrepl.v1.MergeStatus
+	128, // 131: agentrepl.v1.session_command_spec:extendee -> google.protobuf.EnumValueOptions
+	4,   // 132: agentrepl.v1.session_command_spec:type_name -> agentrepl.v1.SessionCommandSpec
+	133, // [133:133] is the sub-list for method output_type
+	133, // [133:133] is the sub-list for method input_type
+	132, // [132:133] is the sub-list for extension type_name
+	131, // [131:132] is the sub-list for extension extendee
+	0,   // [0:131] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_shared_proto_init() }
@@ -11650,17 +9900,11 @@ func file_agentrepl_v1_shared_proto_init() {
 		(*HibernationDetail_Forced)(nil),
 		(*HibernationDetail_CacheExpired)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[76].OneofWrappers = []any{
-		(*ReviveSessionCmd_CompactFirst)(nil),
-		(*ReviveSessionCmd_Direct)(nil),
-		(*ReviveSessionCmd_Clear)(nil),
-	}
-	file_agentrepl_v1_shared_proto_msgTypes[80].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[79].OneofWrappers = []any{
 		(*WorkspaceGateView_Open)(nil),
 		(*WorkspaceGateView_Hibernated)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[83].OneofWrappers = []any{}
-	file_agentrepl_v1_shared_proto_msgTypes[89].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[83].OneofWrappers = []any{
 		(*HostAction_SwitchWorkspace)(nil),
 		(*HostAction_SetRepositoryFold)(nil),
 		(*HostAction_SetSidebarView)(nil),
@@ -11672,11 +9916,11 @@ func file_agentrepl_v1_shared_proto_init() {
 		(*HostAction_WorkspaceCreateFailed)(nil),
 		(*HostAction_BootSweepSessionUnwired)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[104].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[92].OneofWrappers = []any{
 		(*ShutdownScheduleView_Idle)(nil),
 		(*ShutdownScheduleView_Draining)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[114].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[99].OneofWrappers = []any{
 		(*MergeStatus_Enqueued)(nil),
 		(*MergeStatus_BeforeAction)(nil),
 		(*MergeStatus_CherryPicking)(nil),
@@ -11686,18 +9930,14 @@ func file_agentrepl_v1_shared_proto_init() {
 		(*MergeStatus_Merged)(nil),
 		(*MergeStatus_Failed)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[125].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[110].OneofWrappers = []any{
 		(*MergeQueueEntry_Running)(nil),
 		(*MergeQueueEntry_PausedWaiting)(nil),
 		(*MergeQueueEntry_TerminalOwed)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[132].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[114].OneofWrappers = []any{
 		(*MergeDequeueOffer_Waiting)(nil),
 		(*MergeDequeueOffer_Running)(nil),
-	}
-	file_agentrepl_v1_shared_proto_msgTypes[135].OneofWrappers = []any{
-		(*AnswerMergeDequeueCmd_Dequeue)(nil),
-		(*AnswerMergeDequeueCmd_Keep)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -11705,7 +9945,7 @@ func file_agentrepl_v1_shared_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_shared_proto_rawDesc), len(file_agentrepl_v1_shared_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   138,
+			NumMessages:   119,
 			NumExtensions: 1,
 			NumServices:   0,
 		},
