@@ -985,3 +985,48 @@ record exists.
 **`ConversationSource` and `Message.source` are untouched.** Provenance is a
 different question — who drove a message, not whether a record exists for it —
 and it stays on the wire.
+
+## `ContentArriving` drops `arguments_json`; tool arguments arrive typed and whole
+
+**Decided.** The `fragment` oneof loses its third arm. `ContentArriving` streams
+prose — `text` and `thinking` — and nothing else. Tool arguments reach a client
+exactly once, complete, as `conversation.v1.ToolCallBlock.arguments`.
+
+**The settled form was already typed, and the preview arm contradicted it.**
+`ToolCallBlock.arguments` is a `google.protobuf.Struct` for a stated reason: a
+client renders fields, and re-parsing a string to find them is a second parser
+that can disagree with the first. `arguments_json` was that string, on the same
+content, from the same producer. One surface cannot both forbid a string of
+arguments and ship one.
+
+**It was a vendor leak.** `arguments_json` carried the Claude SDK's
+`input_json_delta` framing intact into `conversation.v1` — the vendor's chunking,
+the vendor's partial-JSON convention, renamed but not converted. That is what
+`11d22f86c` deleted `data.v1` to stop: vendor knowledge reaching the daemon and
+the webapp, which the architecture forbids. A producer that emits partial vendor
+JSON has not converted at the boundary; it has moved the boundary.
+
+**The second parser was not hypothetical — it shipped.**
+`webapp/src/streaming.ts:352` accumulates `item.inputJson += delta.delta`, and
+`webapp/src/catalogue.ts:148` re-stringifies the settled input to match it. That
+is precisely the defect `ToolCallBlock`'s own comment names, built twice in one
+client.
+
+**And a renderer could never draw from a fragment anyway.** `{"file_pa` is not a
+field, a path, or a value. Nothing can be shown until the last chunk lands, so
+streaming the chunks bought an accumulator, an ownership rule, and a validation
+branch, in exchange for no picture.
+
+**What this costs, stated plainly.** The live "watch the agent compose a tool
+call" effect goes away. A tool card now appears with its arguments already
+filled rather than filling in. That is accepted, not overlooked: the effect was
+the only thing the arm delivered, and it was delivered by a consumer
+reconstructing JSON the producer had already parsed once.
+
+**The alternative that was rejected.** The shim could buffer fragments and emit
+progressively-complete `Struct` snapshots — typed the whole way, animating as
+fields settle. It was rejected because JSON does not arrive field-by-field: a
+snapshot can only be emitted when the buffer happens to parse, so the emissions
+are lumpy and arrive in bursts unrelated to how a reader scans a card. That is
+machinery, a partial-parse loop, and a re-send policy, spent on an animation
+worth little.
