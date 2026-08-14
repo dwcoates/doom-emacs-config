@@ -220,7 +220,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
    * THIS IS THE ONLY PLACE LINEAGE LIVES on this contract. Records that are
    * not messages — turn and session boundaries, heartbeats, latency samples,
    * claim bridges, query lifecycle, usage observations, rewinds, file-plane
-   * diagnostics — are protocol.v1.Envelope payloads and are NOT Messages,
+   * diagnostics — are shim.v1.Envelope payloads and are NOT Messages,
    * so they have no field here to populate. That is deliberate and structural:
    * if such a record could carry a top_level_message_id it would become a
    * phantom feed row, and a page of ten "messages" would silently deliver

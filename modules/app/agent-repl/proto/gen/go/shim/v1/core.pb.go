@@ -1,4 +1,4 @@
-// protocol.v1 — what traverses the daemon↔shim boundary, and ONLY that
+// shim.v1 — what traverses the daemon↔shim boundary, and ONLY that
 // boundary, in both directions.
 //
 // THE DURABLE RECORD LAYER THAT USED TO LIVE HERE IS GONE. `Event` and its
@@ -36,9 +36,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: protocol/v1/core.proto
+// source: shim/v1/core.proto
 
-package protocolv1
+package shimv1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -94,11 +94,11 @@ func (x TaskKind) String() string {
 }
 
 func (TaskKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_protocol_v1_core_proto_enumTypes[0].Descriptor()
+	return file_shim_v1_core_proto_enumTypes[0].Descriptor()
 }
 
 func (TaskKind) Type() protoreflect.EnumType {
-	return &file_protocol_v1_core_proto_enumTypes[0]
+	return &file_shim_v1_core_proto_enumTypes[0]
 }
 
 func (x TaskKind) Number() protoreflect.EnumNumber {
@@ -107,7 +107,7 @@ func (x TaskKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TaskKind.Descriptor instead.
 func (TaskKind) EnumDescriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{0}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{0}
 }
 
 // Closed terminal-status vocabulary. LOST is a shim-claude-sidecar inference
@@ -155,11 +155,11 @@ func (x TerminalStatus) String() string {
 }
 
 func (TerminalStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_protocol_v1_core_proto_enumTypes[1].Descriptor()
+	return file_shim_v1_core_proto_enumTypes[1].Descriptor()
 }
 
 func (TerminalStatus) Type() protoreflect.EnumType {
-	return &file_protocol_v1_core_proto_enumTypes[1]
+	return &file_shim_v1_core_proto_enumTypes[1]
 }
 
 func (x TerminalStatus) Number() protoreflect.EnumNumber {
@@ -168,7 +168,7 @@ func (x TerminalStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TerminalStatus.Descriptor instead.
 func (TerminalStatus) EnumDescriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{1}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{1}
 }
 
 // How a session came to exist.
@@ -208,11 +208,11 @@ func (x SessionSource) String() string {
 }
 
 func (SessionSource) Descriptor() protoreflect.EnumDescriptor {
-	return file_protocol_v1_core_proto_enumTypes[2].Descriptor()
+	return file_shim_v1_core_proto_enumTypes[2].Descriptor()
 }
 
 func (SessionSource) Type() protoreflect.EnumType {
-	return &file_protocol_v1_core_proto_enumTypes[2]
+	return &file_shim_v1_core_proto_enumTypes[2]
 }
 
 func (x SessionSource) Number() protoreflect.EnumNumber {
@@ -221,7 +221,7 @@ func (x SessionSource) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SessionSource.Descriptor instead.
 func (SessionSource) EnumDescriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{2}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{2}
 }
 
 // Why a prompt entered the agent-repl submit pipeline.
@@ -372,11 +372,11 @@ func (x PromptOrigin) String() string {
 }
 
 func (PromptOrigin) Descriptor() protoreflect.EnumDescriptor {
-	return file_protocol_v1_core_proto_enumTypes[3].Descriptor()
+	return file_shim_v1_core_proto_enumTypes[3].Descriptor()
 }
 
 func (PromptOrigin) Type() protoreflect.EnumType {
-	return &file_protocol_v1_core_proto_enumTypes[3]
+	return &file_shim_v1_core_proto_enumTypes[3]
 }
 
 func (x PromptOrigin) Number() protoreflect.EnumNumber {
@@ -385,7 +385,7 @@ func (x PromptOrigin) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PromptOrigin.Descriptor instead.
 func (PromptOrigin) EnumDescriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{3}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{3}
 }
 
 // The closed set of model names the CLI reports that are NOT model ids.
@@ -435,11 +435,11 @@ func (x ModelMarker) String() string {
 }
 
 func (ModelMarker) Descriptor() protoreflect.EnumDescriptor {
-	return file_protocol_v1_core_proto_enumTypes[4].Descriptor()
+	return file_shim_v1_core_proto_enumTypes[4].Descriptor()
 }
 
 func (ModelMarker) Type() protoreflect.EnumType {
-	return &file_protocol_v1_core_proto_enumTypes[4]
+	return &file_shim_v1_core_proto_enumTypes[4]
 }
 
 func (x ModelMarker) Number() protoreflect.EnumNumber {
@@ -448,7 +448,7 @@ func (x ModelMarker) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ModelMarker.Descriptor instead.
 func (ModelMarker) EnumDescriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{4}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{4}
 }
 
 // The three-valued outcome of an Interrupt, decided by the SHIM.
@@ -507,11 +507,11 @@ func (x InterruptOutcome) String() string {
 }
 
 func (InterruptOutcome) Descriptor() protoreflect.EnumDescriptor {
-	return file_protocol_v1_core_proto_enumTypes[5].Descriptor()
+	return file_shim_v1_core_proto_enumTypes[5].Descriptor()
 }
 
 func (InterruptOutcome) Type() protoreflect.EnumType {
-	return &file_protocol_v1_core_proto_enumTypes[5]
+	return &file_shim_v1_core_proto_enumTypes[5]
 }
 
 func (x InterruptOutcome) Number() protoreflect.EnumNumber {
@@ -520,7 +520,7 @@ func (x InterruptOutcome) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use InterruptOutcome.Descriptor instead.
 func (InterruptOutcome) EnumDescriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{5}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{5}
 }
 
 type TurnClaimBridge struct {
@@ -538,7 +538,7 @@ type TurnClaimBridge struct {
 
 func (x *TurnClaimBridge) Reset() {
 	*x = TurnClaimBridge{}
-	mi := &file_protocol_v1_core_proto_msgTypes[0]
+	mi := &file_shim_v1_core_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -550,7 +550,7 @@ func (x *TurnClaimBridge) String() string {
 func (*TurnClaimBridge) ProtoMessage() {}
 
 func (x *TurnClaimBridge) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[0]
+	mi := &file_shim_v1_core_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -563,7 +563,7 @@ func (x *TurnClaimBridge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TurnClaimBridge.ProtoReflect.Descriptor instead.
 func (*TurnClaimBridge) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{0}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *TurnClaimBridge) GetTurnId() string {
@@ -619,7 +619,7 @@ type SessionRewound struct {
 
 func (x *SessionRewound) Reset() {
 	*x = SessionRewound{}
-	mi := &file_protocol_v1_core_proto_msgTypes[1]
+	mi := &file_shim_v1_core_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -631,7 +631,7 @@ func (x *SessionRewound) String() string {
 func (*SessionRewound) ProtoMessage() {}
 
 func (x *SessionRewound) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[1]
+	mi := &file_shim_v1_core_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -644,7 +644,7 @@ func (x *SessionRewound) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionRewound.ProtoReflect.Descriptor instead.
 func (*SessionRewound) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{1}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *SessionRewound) GetPreviousVendorSessionId() string {
@@ -711,7 +711,7 @@ type KeepAliveDiscard struct {
 
 func (x *KeepAliveDiscard) Reset() {
 	*x = KeepAliveDiscard{}
-	mi := &file_protocol_v1_core_proto_msgTypes[2]
+	mi := &file_shim_v1_core_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -723,7 +723,7 @@ func (x *KeepAliveDiscard) String() string {
 func (*KeepAliveDiscard) ProtoMessage() {}
 
 func (x *KeepAliveDiscard) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[2]
+	mi := &file_shim_v1_core_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -736,7 +736,7 @@ func (x *KeepAliveDiscard) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeepAliveDiscard.ProtoReflect.Descriptor instead.
 func (*KeepAliveDiscard) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{2}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *KeepAliveDiscard) GetDroppedTurnIds() []string {
@@ -768,7 +768,7 @@ type QueryLifecycle struct {
 
 func (x *QueryLifecycle) Reset() {
 	*x = QueryLifecycle{}
-	mi := &file_protocol_v1_core_proto_msgTypes[3]
+	mi := &file_shim_v1_core_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -780,7 +780,7 @@ func (x *QueryLifecycle) String() string {
 func (*QueryLifecycle) ProtoMessage() {}
 
 func (x *QueryLifecycle) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[3]
+	mi := &file_shim_v1_core_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -793,7 +793,7 @@ func (x *QueryLifecycle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryLifecycle.ProtoReflect.Descriptor instead.
 func (*QueryLifecycle) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{3}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *QueryLifecycle) GetQueryInstanceId() string {
@@ -887,7 +887,7 @@ type QueryCreated struct {
 
 func (x *QueryCreated) Reset() {
 	*x = QueryCreated{}
-	mi := &file_protocol_v1_core_proto_msgTypes[4]
+	mi := &file_shim_v1_core_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -899,7 +899,7 @@ func (x *QueryCreated) String() string {
 func (*QueryCreated) ProtoMessage() {}
 
 func (x *QueryCreated) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[4]
+	mi := &file_shim_v1_core_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -912,7 +912,7 @@ func (x *QueryCreated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryCreated.ProtoReflect.Descriptor instead.
 func (*QueryCreated) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{4}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *QueryCreated) GetRequestedModel() string {
@@ -974,7 +974,7 @@ type FreshQuery struct {
 
 func (x *FreshQuery) Reset() {
 	*x = FreshQuery{}
-	mi := &file_protocol_v1_core_proto_msgTypes[5]
+	mi := &file_shim_v1_core_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -986,7 +986,7 @@ func (x *FreshQuery) String() string {
 func (*FreshQuery) ProtoMessage() {}
 
 func (x *FreshQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[5]
+	mi := &file_shim_v1_core_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -999,7 +999,7 @@ func (x *FreshQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FreshQuery.ProtoReflect.Descriptor instead.
 func (*FreshQuery) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{5}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{5}
 }
 
 // Records construction of a query that resumes a vendor session.
@@ -1013,7 +1013,7 @@ type ResumedQuery struct {
 
 func (x *ResumedQuery) Reset() {
 	*x = ResumedQuery{}
-	mi := &file_protocol_v1_core_proto_msgTypes[6]
+	mi := &file_shim_v1_core_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1025,7 +1025,7 @@ func (x *ResumedQuery) String() string {
 func (*ResumedQuery) ProtoMessage() {}
 
 func (x *ResumedQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[6]
+	mi := &file_shim_v1_core_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1038,7 +1038,7 @@ func (x *ResumedQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumedQuery.ProtoReflect.Descriptor instead.
 func (*ResumedQuery) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{6}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ResumedQuery) GetRequestedVendorSessionId() string {
@@ -1059,7 +1059,7 @@ type QueryRuntimeObserved struct {
 
 func (x *QueryRuntimeObserved) Reset() {
 	*x = QueryRuntimeObserved{}
-	mi := &file_protocol_v1_core_proto_msgTypes[7]
+	mi := &file_shim_v1_core_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1071,7 +1071,7 @@ func (x *QueryRuntimeObserved) String() string {
 func (*QueryRuntimeObserved) ProtoMessage() {}
 
 func (x *QueryRuntimeObserved) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[7]
+	mi := &file_shim_v1_core_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1084,7 +1084,7 @@ func (x *QueryRuntimeObserved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryRuntimeObserved.ProtoReflect.Descriptor instead.
 func (*QueryRuntimeObserved) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{7}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *QueryRuntimeObserved) GetIdentity() *QueryRuntimeIdentity {
@@ -1141,7 +1141,7 @@ type QueryRuntimeIdentity struct {
 
 func (x *QueryRuntimeIdentity) Reset() {
 	*x = QueryRuntimeIdentity{}
-	mi := &file_protocol_v1_core_proto_msgTypes[8]
+	mi := &file_shim_v1_core_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1153,7 +1153,7 @@ func (x *QueryRuntimeIdentity) String() string {
 func (*QueryRuntimeIdentity) ProtoMessage() {}
 
 func (x *QueryRuntimeIdentity) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[8]
+	mi := &file_shim_v1_core_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1166,7 +1166,7 @@ func (x *QueryRuntimeIdentity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryRuntimeIdentity.ProtoReflect.Descriptor instead.
 func (*QueryRuntimeIdentity) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{8}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *QueryRuntimeIdentity) GetVendorSessionId() string {
@@ -1262,7 +1262,7 @@ type EvidenceFingerprint struct {
 
 func (x *EvidenceFingerprint) Reset() {
 	*x = EvidenceFingerprint{}
-	mi := &file_protocol_v1_core_proto_msgTypes[9]
+	mi := &file_shim_v1_core_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1274,7 +1274,7 @@ func (x *EvidenceFingerprint) String() string {
 func (*EvidenceFingerprint) ProtoMessage() {}
 
 func (x *EvidenceFingerprint) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[9]
+	mi := &file_shim_v1_core_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1287,7 +1287,7 @@ func (x *EvidenceFingerprint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvidenceFingerprint.ProtoReflect.Descriptor instead.
 func (*EvidenceFingerprint) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{9}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *EvidenceFingerprint) GetEvidence() isEvidenceFingerprint_Evidence {
@@ -1344,7 +1344,7 @@ type FingerprintUnavailable struct {
 
 func (x *FingerprintUnavailable) Reset() {
 	*x = FingerprintUnavailable{}
-	mi := &file_protocol_v1_core_proto_msgTypes[10]
+	mi := &file_shim_v1_core_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1356,7 +1356,7 @@ func (x *FingerprintUnavailable) String() string {
 func (*FingerprintUnavailable) ProtoMessage() {}
 
 func (x *FingerprintUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[10]
+	mi := &file_shim_v1_core_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1369,7 +1369,7 @@ func (x *FingerprintUnavailable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FingerprintUnavailable.ProtoReflect.Descriptor instead.
 func (*FingerprintUnavailable) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{10}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *FingerprintUnavailable) GetCause() string {
@@ -1405,7 +1405,7 @@ type QueryTerminated struct {
 
 func (x *QueryTerminated) Reset() {
 	*x = QueryTerminated{}
-	mi := &file_protocol_v1_core_proto_msgTypes[11]
+	mi := &file_shim_v1_core_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1417,7 +1417,7 @@ func (x *QueryTerminated) String() string {
 func (*QueryTerminated) ProtoMessage() {}
 
 func (x *QueryTerminated) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[11]
+	mi := &file_shim_v1_core_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1430,7 +1430,7 @@ func (x *QueryTerminated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryTerminated.ProtoReflect.Descriptor instead.
 func (*QueryTerminated) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{11}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *QueryTerminated) GetVendorIdentity() isQueryTerminated_VendorIdentity {
@@ -1560,7 +1560,7 @@ type VendorSessionIdentityUnavailable struct {
 
 func (x *VendorSessionIdentityUnavailable) Reset() {
 	*x = VendorSessionIdentityUnavailable{}
-	mi := &file_protocol_v1_core_proto_msgTypes[12]
+	mi := &file_shim_v1_core_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1572,7 +1572,7 @@ func (x *VendorSessionIdentityUnavailable) String() string {
 func (*VendorSessionIdentityUnavailable) ProtoMessage() {}
 
 func (x *VendorSessionIdentityUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[12]
+	mi := &file_shim_v1_core_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1585,7 +1585,7 @@ func (x *VendorSessionIdentityUnavailable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VendorSessionIdentityUnavailable.ProtoReflect.Descriptor instead.
 func (*VendorSessionIdentityUnavailable) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{12}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{12}
 }
 
 // Records an intentional query termination.
@@ -1599,7 +1599,7 @@ type IntentionalQueryTermination struct {
 
 func (x *IntentionalQueryTermination) Reset() {
 	*x = IntentionalQueryTermination{}
-	mi := &file_protocol_v1_core_proto_msgTypes[13]
+	mi := &file_shim_v1_core_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1611,7 +1611,7 @@ func (x *IntentionalQueryTermination) String() string {
 func (*IntentionalQueryTermination) ProtoMessage() {}
 
 func (x *IntentionalQueryTermination) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[13]
+	mi := &file_shim_v1_core_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1624,7 +1624,7 @@ func (x *IntentionalQueryTermination) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IntentionalQueryTermination.ProtoReflect.Descriptor instead.
 func (*IntentionalQueryTermination) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{13}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *IntentionalQueryTermination) GetReason() string {
@@ -1643,7 +1643,7 @@ type UnexpectedQueryEof struct {
 
 func (x *UnexpectedQueryEof) Reset() {
 	*x = UnexpectedQueryEof{}
-	mi := &file_protocol_v1_core_proto_msgTypes[14]
+	mi := &file_shim_v1_core_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1655,7 +1655,7 @@ func (x *UnexpectedQueryEof) String() string {
 func (*UnexpectedQueryEof) ProtoMessage() {}
 
 func (x *UnexpectedQueryEof) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[14]
+	mi := &file_shim_v1_core_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1668,7 +1668,7 @@ func (x *UnexpectedQueryEof) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnexpectedQueryEof.ProtoReflect.Descriptor instead.
 func (*UnexpectedQueryEof) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{14}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{14}
 }
 
 // Records an error thrown by the SDK iterator.
@@ -1682,7 +1682,7 @@ type QueryIteratorFailure struct {
 
 func (x *QueryIteratorFailure) Reset() {
 	*x = QueryIteratorFailure{}
-	mi := &file_protocol_v1_core_proto_msgTypes[15]
+	mi := &file_shim_v1_core_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1694,7 +1694,7 @@ func (x *QueryIteratorFailure) String() string {
 func (*QueryIteratorFailure) ProtoMessage() {}
 
 func (x *QueryIteratorFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[15]
+	mi := &file_shim_v1_core_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1707,7 +1707,7 @@ func (x *QueryIteratorFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryIteratorFailure.ProtoReflect.Descriptor instead.
 func (*QueryIteratorFailure) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{15}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *QueryIteratorFailure) GetCause() string {
@@ -1728,7 +1728,7 @@ type QueryStartupFailure struct {
 
 func (x *QueryStartupFailure) Reset() {
 	*x = QueryStartupFailure{}
-	mi := &file_protocol_v1_core_proto_msgTypes[16]
+	mi := &file_shim_v1_core_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1740,7 +1740,7 @@ func (x *QueryStartupFailure) String() string {
 func (*QueryStartupFailure) ProtoMessage() {}
 
 func (x *QueryStartupFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[16]
+	mi := &file_shim_v1_core_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1753,7 +1753,7 @@ func (x *QueryStartupFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryStartupFailure.ProtoReflect.Descriptor instead.
 func (*QueryStartupFailure) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{16}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *QueryStartupFailure) GetCause() string {
@@ -1779,7 +1779,7 @@ type DegradedState struct {
 
 func (x *DegradedState) Reset() {
 	*x = DegradedState{}
-	mi := &file_protocol_v1_core_proto_msgTypes[17]
+	mi := &file_shim_v1_core_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1791,7 +1791,7 @@ func (x *DegradedState) String() string {
 func (*DegradedState) ProtoMessage() {}
 
 func (x *DegradedState) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[17]
+	mi := &file_shim_v1_core_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1804,7 +1804,7 @@ func (x *DegradedState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DegradedState.ProtoReflect.Descriptor instead.
 func (*DegradedState) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{17}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DegradedState) GetComponent() string {
@@ -1975,7 +1975,7 @@ type ShimHello struct {
 
 func (x *ShimHello) Reset() {
 	*x = ShimHello{}
-	mi := &file_protocol_v1_core_proto_msgTypes[18]
+	mi := &file_shim_v1_core_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1987,7 +1987,7 @@ func (x *ShimHello) String() string {
 func (*ShimHello) ProtoMessage() {}
 
 func (x *ShimHello) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[18]
+	mi := &file_shim_v1_core_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2000,7 +2000,7 @@ func (x *ShimHello) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShimHello.ProtoReflect.Descriptor instead.
 func (*ShimHello) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{18}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ShimHello) GetSessionId() string {
@@ -2152,7 +2152,7 @@ type DaemonHello struct {
 
 func (x *DaemonHello) Reset() {
 	*x = DaemonHello{}
-	mi := &file_protocol_v1_core_proto_msgTypes[19]
+	mi := &file_shim_v1_core_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2164,7 +2164,7 @@ func (x *DaemonHello) String() string {
 func (*DaemonHello) ProtoMessage() {}
 
 func (x *DaemonHello) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[19]
+	mi := &file_shim_v1_core_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2177,7 +2177,7 @@ func (x *DaemonHello) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonHello.ProtoReflect.Descriptor instead.
 func (*DaemonHello) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{19}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DaemonHello) GetDaemonVersion() string {
@@ -2244,7 +2244,7 @@ type ShimReady struct {
 
 func (x *ShimReady) Reset() {
 	*x = ShimReady{}
-	mi := &file_protocol_v1_core_proto_msgTypes[20]
+	mi := &file_shim_v1_core_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2256,7 +2256,7 @@ func (x *ShimReady) String() string {
 func (*ShimReady) ProtoMessage() {}
 
 func (x *ShimReady) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[20]
+	mi := &file_shim_v1_core_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2269,7 +2269,7 @@ func (x *ShimReady) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShimReady.ProtoReflect.Descriptor instead.
 func (*ShimReady) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{20}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ShimReady) GetSessionId() string {
@@ -2301,14 +2301,14 @@ type SubmitPrompt struct {
 	PermissionMode string                 `protobuf:"bytes,4,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"` // optional override
 	// Required closed attribution. The shim rejects UNSPECIFIED before touching
 	// SDK state and copies this value onto the persistent TurnStarted event.
-	PromptOrigin  PromptOrigin `protobuf:"varint,5,opt,name=prompt_origin,json=promptOrigin,proto3,enum=protocol.v1.PromptOrigin" json:"prompt_origin,omitempty"`
+	PromptOrigin  PromptOrigin `protobuf:"varint,5,opt,name=prompt_origin,json=promptOrigin,proto3,enum=shim.v1.PromptOrigin" json:"prompt_origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SubmitPrompt) Reset() {
 	*x = SubmitPrompt{}
-	mi := &file_protocol_v1_core_proto_msgTypes[21]
+	mi := &file_shim_v1_core_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2320,7 +2320,7 @@ func (x *SubmitPrompt) String() string {
 func (*SubmitPrompt) ProtoMessage() {}
 
 func (x *SubmitPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[21]
+	mi := &file_shim_v1_core_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2333,7 +2333,7 @@ func (x *SubmitPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPrompt.ProtoReflect.Descriptor instead.
 func (*SubmitPrompt) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{21}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SubmitPrompt) GetRequestId() string {
@@ -2385,7 +2385,7 @@ type SetModel struct {
 
 func (x *SetModel) Reset() {
 	*x = SetModel{}
-	mi := &file_protocol_v1_core_proto_msgTypes[22]
+	mi := &file_shim_v1_core_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2397,7 +2397,7 @@ func (x *SetModel) String() string {
 func (*SetModel) ProtoMessage() {}
 
 func (x *SetModel) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[22]
+	mi := &file_shim_v1_core_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2410,7 +2410,7 @@ func (x *SetModel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetModel.ProtoReflect.Descriptor instead.
 func (*SetModel) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{22}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *SetModel) GetRequestId() string {
@@ -2452,7 +2452,7 @@ type QuerySelectedModel struct {
 
 func (x *QuerySelectedModel) Reset() {
 	*x = QuerySelectedModel{}
-	mi := &file_protocol_v1_core_proto_msgTypes[23]
+	mi := &file_shim_v1_core_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2464,7 +2464,7 @@ func (x *QuerySelectedModel) String() string {
 func (*QuerySelectedModel) ProtoMessage() {}
 
 func (x *QuerySelectedModel) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[23]
+	mi := &file_shim_v1_core_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2477,7 +2477,7 @@ func (x *QuerySelectedModel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuerySelectedModel.ProtoReflect.Descriptor instead.
 func (*QuerySelectedModel) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{23}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *QuerySelectedModel) GetRequestId() string {
@@ -2501,7 +2501,7 @@ type ModelOption struct {
 
 func (x *ModelOption) Reset() {
 	*x = ModelOption{}
-	mi := &file_protocol_v1_core_proto_msgTypes[24]
+	mi := &file_shim_v1_core_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2513,7 +2513,7 @@ func (x *ModelOption) String() string {
 func (*ModelOption) ProtoMessage() {}
 
 func (x *ModelOption) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[24]
+	mi := &file_shim_v1_core_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2526,7 +2526,7 @@ func (x *ModelOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelOption.ProtoReflect.Descriptor instead.
 func (*ModelOption) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{24}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ModelOption) GetValue() string {
@@ -2560,7 +2560,7 @@ type ModelCatalog struct {
 
 func (x *ModelCatalog) Reset() {
 	*x = ModelCatalog{}
-	mi := &file_protocol_v1_core_proto_msgTypes[25]
+	mi := &file_shim_v1_core_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2572,7 +2572,7 @@ func (x *ModelCatalog) String() string {
 func (*ModelCatalog) ProtoMessage() {}
 
 func (x *ModelCatalog) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[25]
+	mi := &file_shim_v1_core_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2585,7 +2585,7 @@ func (x *ModelCatalog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCatalog.ProtoReflect.Descriptor instead.
 func (*ModelCatalog) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{25}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ModelCatalog) GetSessionId() string {
@@ -2615,7 +2615,7 @@ type Interrupt struct {
 
 func (x *Interrupt) Reset() {
 	*x = Interrupt{}
-	mi := &file_protocol_v1_core_proto_msgTypes[26]
+	mi := &file_shim_v1_core_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2627,7 +2627,7 @@ func (x *Interrupt) String() string {
 func (*Interrupt) ProtoMessage() {}
 
 func (x *Interrupt) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[26]
+	mi := &file_shim_v1_core_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2640,7 +2640,7 @@ func (x *Interrupt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Interrupt.ProtoReflect.Descriptor instead.
 func (*Interrupt) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{26}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *Interrupt) GetRequestId() string {
@@ -2668,7 +2668,7 @@ type CancelDetachedAgents struct {
 
 func (x *CancelDetachedAgents) Reset() {
 	*x = CancelDetachedAgents{}
-	mi := &file_protocol_v1_core_proto_msgTypes[27]
+	mi := &file_shim_v1_core_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2680,7 +2680,7 @@ func (x *CancelDetachedAgents) String() string {
 func (*CancelDetachedAgents) ProtoMessage() {}
 
 func (x *CancelDetachedAgents) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[27]
+	mi := &file_shim_v1_core_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2693,7 +2693,7 @@ func (x *CancelDetachedAgents) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelDetachedAgents.ProtoReflect.Descriptor instead.
 func (*CancelDetachedAgents) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{27}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *CancelDetachedAgents) GetRequestId() string {
@@ -2727,7 +2727,7 @@ type QueryLiveTasks struct {
 
 func (x *QueryLiveTasks) Reset() {
 	*x = QueryLiveTasks{}
-	mi := &file_protocol_v1_core_proto_msgTypes[28]
+	mi := &file_shim_v1_core_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2739,7 +2739,7 @@ func (x *QueryLiveTasks) String() string {
 func (*QueryLiveTasks) ProtoMessage() {}
 
 func (x *QueryLiveTasks) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[28]
+	mi := &file_shim_v1_core_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2752,7 +2752,7 @@ func (x *QueryLiveTasks) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryLiveTasks.ProtoReflect.Descriptor instead.
 func (*QueryLiveTasks) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{28}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *QueryLiveTasks) GetRequestId() string {
@@ -2780,7 +2780,7 @@ type LiveTaskSet struct {
 
 func (x *LiveTaskSet) Reset() {
 	*x = LiveTaskSet{}
-	mi := &file_protocol_v1_core_proto_msgTypes[29]
+	mi := &file_shim_v1_core_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2792,7 +2792,7 @@ func (x *LiveTaskSet) String() string {
 func (*LiveTaskSet) ProtoMessage() {}
 
 func (x *LiveTaskSet) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[29]
+	mi := &file_shim_v1_core_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2805,7 +2805,7 @@ func (x *LiveTaskSet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LiveTaskSet.ProtoReflect.Descriptor instead.
 func (*LiveTaskSet) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{29}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *LiveTaskSet) GetTaskIds() []string {
@@ -2841,7 +2841,7 @@ type DetachedCancelOutcome struct {
 
 func (x *DetachedCancelOutcome) Reset() {
 	*x = DetachedCancelOutcome{}
-	mi := &file_protocol_v1_core_proto_msgTypes[30]
+	mi := &file_shim_v1_core_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2853,7 +2853,7 @@ func (x *DetachedCancelOutcome) String() string {
 func (*DetachedCancelOutcome) ProtoMessage() {}
 
 func (x *DetachedCancelOutcome) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[30]
+	mi := &file_shim_v1_core_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2866,7 +2866,7 @@ func (x *DetachedCancelOutcome) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedCancelOutcome.ProtoReflect.Descriptor instead.
 func (*DetachedCancelOutcome) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{30}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *DetachedCancelOutcome) GetOutcome() isDetachedCancelOutcome_Outcome {
@@ -2943,7 +2943,7 @@ type DetachedAgentsCancelled struct {
 
 func (x *DetachedAgentsCancelled) Reset() {
 	*x = DetachedAgentsCancelled{}
-	mi := &file_protocol_v1_core_proto_msgTypes[31]
+	mi := &file_shim_v1_core_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2955,7 +2955,7 @@ func (x *DetachedAgentsCancelled) String() string {
 func (*DetachedAgentsCancelled) ProtoMessage() {}
 
 func (x *DetachedAgentsCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[31]
+	mi := &file_shim_v1_core_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2968,7 +2968,7 @@ func (x *DetachedAgentsCancelled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedAgentsCancelled.ProtoReflect.Descriptor instead.
 func (*DetachedAgentsCancelled) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{31}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *DetachedAgentsCancelled) GetTaskIds() []string {
@@ -2992,7 +2992,7 @@ type NoDetachedAgentsRunning struct {
 
 func (x *NoDetachedAgentsRunning) Reset() {
 	*x = NoDetachedAgentsRunning{}
-	mi := &file_protocol_v1_core_proto_msgTypes[32]
+	mi := &file_shim_v1_core_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3004,7 +3004,7 @@ func (x *NoDetachedAgentsRunning) String() string {
 func (*NoDetachedAgentsRunning) ProtoMessage() {}
 
 func (x *NoDetachedAgentsRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[32]
+	mi := &file_shim_v1_core_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3017,7 +3017,7 @@ func (x *NoDetachedAgentsRunning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NoDetachedAgentsRunning.ProtoReflect.Descriptor instead.
 func (*NoDetachedAgentsRunning) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{32}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{32}
 }
 
 // The stop could not be ATTEMPTED at all — the session holds no live query to
@@ -3036,7 +3036,7 @@ type DetachedCancelUnsupported struct {
 
 func (x *DetachedCancelUnsupported) Reset() {
 	*x = DetachedCancelUnsupported{}
-	mi := &file_protocol_v1_core_proto_msgTypes[33]
+	mi := &file_shim_v1_core_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3048,7 +3048,7 @@ func (x *DetachedCancelUnsupported) String() string {
 func (*DetachedCancelUnsupported) ProtoMessage() {}
 
 func (x *DetachedCancelUnsupported) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[33]
+	mi := &file_shim_v1_core_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3061,7 +3061,7 @@ func (x *DetachedCancelUnsupported) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedCancelUnsupported.ProtoReflect.Descriptor instead.
 func (*DetachedCancelUnsupported) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{33}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *DetachedCancelUnsupported) GetDetail() string {
@@ -3076,7 +3076,7 @@ type Ack struct {
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Set only on an Interrupt's ack; UNSPECIFIED on every other command,
 	// whose success is unqualified.
-	InterruptOutcome InterruptOutcome `protobuf:"varint,2,opt,name=interrupt_outcome,json=interruptOutcome,proto3,enum=protocol.v1.InterruptOutcome" json:"interrupt_outcome,omitempty"`
+	InterruptOutcome InterruptOutcome `protobuf:"varint,2,opt,name=interrupt_outcome,json=interruptOutcome,proto3,enum=shim.v1.InterruptOutcome" json:"interrupt_outcome,omitempty"`
 	// Set on the receipt of EITHER model command — a SetModel (the model after
 	// the change) or a QuerySelectedModel (the model with nothing changed).  One
 	// field for both because both answer the same question and both answer it
@@ -3100,7 +3100,7 @@ type Ack struct {
 
 func (x *Ack) Reset() {
 	*x = Ack{}
-	mi := &file_protocol_v1_core_proto_msgTypes[34]
+	mi := &file_shim_v1_core_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3112,7 +3112,7 @@ func (x *Ack) String() string {
 func (*Ack) ProtoMessage() {}
 
 func (x *Ack) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[34]
+	mi := &file_shim_v1_core_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3125,7 +3125,7 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ack.ProtoReflect.Descriptor instead.
 func (*Ack) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{34}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *Ack) GetRequestId() string {
@@ -3176,7 +3176,7 @@ type Nack struct {
 
 func (x *Nack) Reset() {
 	*x = Nack{}
-	mi := &file_protocol_v1_core_proto_msgTypes[35]
+	mi := &file_shim_v1_core_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3188,7 +3188,7 @@ func (x *Nack) String() string {
 func (*Nack) ProtoMessage() {}
 
 func (x *Nack) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[35]
+	mi := &file_shim_v1_core_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3201,7 +3201,7 @@ func (x *Nack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Nack.ProtoReflect.Descriptor instead.
 func (*Nack) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{35}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *Nack) GetRequestId() string {
@@ -3247,7 +3247,7 @@ type Subscribe struct {
 
 func (x *Subscribe) Reset() {
 	*x = Subscribe{}
-	mi := &file_protocol_v1_core_proto_msgTypes[36]
+	mi := &file_shim_v1_core_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3259,7 +3259,7 @@ func (x *Subscribe) String() string {
 func (*Subscribe) ProtoMessage() {}
 
 func (x *Subscribe) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[36]
+	mi := &file_shim_v1_core_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3272,7 +3272,7 @@ func (x *Subscribe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Subscribe.ProtoReflect.Descriptor instead.
 func (*Subscribe) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{36}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *Subscribe) GetSessionId() string {
@@ -3330,7 +3330,7 @@ type ReplayRequest struct {
 
 func (x *ReplayRequest) Reset() {
 	*x = ReplayRequest{}
-	mi := &file_protocol_v1_core_proto_msgTypes[37]
+	mi := &file_shim_v1_core_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3342,7 +3342,7 @@ func (x *ReplayRequest) String() string {
 func (*ReplayRequest) ProtoMessage() {}
 
 func (x *ReplayRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[37]
+	mi := &file_shim_v1_core_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3355,7 +3355,7 @@ func (x *ReplayRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayRequest.ProtoReflect.Descriptor instead.
 func (*ReplayRequest) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{37}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ReplayRequest) GetRequestId() string {
@@ -3413,7 +3413,7 @@ type ReplayEntry struct {
 
 func (x *ReplayEntry) Reset() {
 	*x = ReplayEntry{}
-	mi := &file_protocol_v1_core_proto_msgTypes[38]
+	mi := &file_shim_v1_core_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3425,7 +3425,7 @@ func (x *ReplayEntry) String() string {
 func (*ReplayEntry) ProtoMessage() {}
 
 func (x *ReplayEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[38]
+	mi := &file_shim_v1_core_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3438,7 +3438,7 @@ func (x *ReplayEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayEntry.ProtoReflect.Descriptor instead.
 func (*ReplayEntry) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{38}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ReplayEntry) GetRequestId() string {
@@ -3476,7 +3476,7 @@ type ReplayDone struct {
 
 func (x *ReplayDone) Reset() {
 	*x = ReplayDone{}
-	mi := &file_protocol_v1_core_proto_msgTypes[39]
+	mi := &file_shim_v1_core_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3488,7 +3488,7 @@ func (x *ReplayDone) String() string {
 func (*ReplayDone) ProtoMessage() {}
 
 func (x *ReplayDone) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[39]
+	mi := &file_shim_v1_core_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3501,7 +3501,7 @@ func (x *ReplayDone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayDone.ProtoReflect.Descriptor instead.
 func (*ReplayDone) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{39}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ReplayDone) GetRequestId() string {
@@ -3544,7 +3544,7 @@ type PermissionRequest struct {
 
 func (x *PermissionRequest) Reset() {
 	*x = PermissionRequest{}
-	mi := &file_protocol_v1_core_proto_msgTypes[40]
+	mi := &file_shim_v1_core_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3556,7 +3556,7 @@ func (x *PermissionRequest) String() string {
 func (*PermissionRequest) ProtoMessage() {}
 
 func (x *PermissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[40]
+	mi := &file_shim_v1_core_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3569,7 +3569,7 @@ func (x *PermissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionRequest.ProtoReflect.Descriptor instead.
 func (*PermissionRequest) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{40}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *PermissionRequest) GetRequestId() string {
@@ -3608,7 +3608,7 @@ type PermissionResponse struct {
 
 func (x *PermissionResponse) Reset() {
 	*x = PermissionResponse{}
-	mi := &file_protocol_v1_core_proto_msgTypes[41]
+	mi := &file_shim_v1_core_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3620,7 +3620,7 @@ func (x *PermissionResponse) String() string {
 func (*PermissionResponse) ProtoMessage() {}
 
 func (x *PermissionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[41]
+	mi := &file_shim_v1_core_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3633,7 +3633,7 @@ func (x *PermissionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionResponse.ProtoReflect.Descriptor instead.
 func (*PermissionResponse) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{41}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *PermissionResponse) GetRequestId() string {
@@ -3675,7 +3675,7 @@ type ConnectionHeartbeat struct {
 
 func (x *ConnectionHeartbeat) Reset() {
 	*x = ConnectionHeartbeat{}
-	mi := &file_protocol_v1_core_proto_msgTypes[42]
+	mi := &file_shim_v1_core_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3687,7 +3687,7 @@ func (x *ConnectionHeartbeat) String() string {
 func (*ConnectionHeartbeat) ProtoMessage() {}
 
 func (x *ConnectionHeartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[42]
+	mi := &file_shim_v1_core_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3700,7 +3700,7 @@ func (x *ConnectionHeartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectionHeartbeat.ProtoReflect.Descriptor instead.
 func (*ConnectionHeartbeat) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{42}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ConnectionHeartbeat) GetSentAtMs() int64 {
@@ -3729,7 +3729,7 @@ type HealthCheck struct {
 
 func (x *HealthCheck) Reset() {
 	*x = HealthCheck{}
-	mi := &file_protocol_v1_core_proto_msgTypes[43]
+	mi := &file_shim_v1_core_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3741,7 +3741,7 @@ func (x *HealthCheck) String() string {
 func (*HealthCheck) ProtoMessage() {}
 
 func (x *HealthCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[43]
+	mi := &file_shim_v1_core_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3754,7 +3754,7 @@ func (x *HealthCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheck.ProtoReflect.Descriptor instead.
 func (*HealthCheck) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{43}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *HealthCheck) GetRequestId() string {
@@ -3780,7 +3780,7 @@ type HealthStatus struct {
 
 func (x *HealthStatus) Reset() {
 	*x = HealthStatus{}
-	mi := &file_protocol_v1_core_proto_msgTypes[44]
+	mi := &file_shim_v1_core_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3792,7 +3792,7 @@ func (x *HealthStatus) String() string {
 func (*HealthStatus) ProtoMessage() {}
 
 func (x *HealthStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_core_proto_msgTypes[44]
+	mi := &file_shim_v1_core_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3805,7 +3805,7 @@ func (x *HealthStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthStatus.ProtoReflect.Descriptor instead.
 func (*HealthStatus) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_core_proto_rawDescGZIP(), []int{44}
+	return file_shim_v1_core_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *HealthStatus) GetRequestId() string {
@@ -3836,60 +3836,60 @@ func (x *HealthStatus) GetReason() string {
 	return ""
 }
 
-var file_protocol_v1_core_proto_extTypes = []protoimpl.ExtensionInfo{
+var file_shim_v1_core_proto_extTypes = []protoimpl.ExtensionInfo{
 	{
 		ExtendedType:  (*descriptorpb.EnumValueOptions)(nil),
 		ExtensionType: (*string)(nil),
 		Field:         60001,
-		Name:          "protocol.v1.model_marker_literal",
+		Name:          "shim.v1.model_marker_literal",
 		Tag:           "bytes,60001,opt,name=model_marker_literal",
-		Filename:      "protocol/v1/core.proto",
+		Filename:      "shim/v1/core.proto",
 	},
 }
 
 // Extension fields to descriptorpb.EnumValueOptions.
 var (
 	// optional string model_marker_literal = 60001;
-	E_ModelMarkerLiteral = &file_protocol_v1_core_proto_extTypes[0]
+	E_ModelMarkerLiteral = &file_shim_v1_core_proto_extTypes[0]
 )
 
-var File_protocol_v1_core_proto protoreflect.FileDescriptor
+var File_shim_v1_core_proto protoreflect.FileDescriptor
 
-const file_protocol_v1_core_proto_rawDesc = "" +
+const file_shim_v1_core_proto_rawDesc = "" +
 	"\n" +
-	"\x16protocol/v1/core.proto\x12\vprotocol.v1\x1a google/protobuf/descriptor.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1aprotocol/v1/external.proto\"Z\n" +
+	"\x12shim/v1/core.proto\x12\ashim.v1\x1a google/protobuf/descriptor.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x16shim/v1/external.proto\"Z\n" +
 	"\x0fTurnClaimBridge\x12\x17\n" +
 	"\aturn_id\x18\x01 \x01(\tR\x06turnId\x12.\n" +
-	"\x13previous_session_id\x18\x02 \x01(\tR\x11previousSessionId\"\x87\x02\n" +
+	"\x13previous_session_id\x18\x02 \x01(\tR\x11previousSessionId\"\x83\x02\n" +
 	"\x0eSessionRewound\x12;\n" +
 	"\x1aprevious_vendor_session_id\x18\x01 \x01(\tR\x17previousVendorSessionId\x121\n" +
 	"\x15new_vendor_session_id\x18\x02 \x01(\tR\x12newVendorSessionId\x12,\n" +
-	"\x12retained_leaf_uuid\x18\x03 \x01(\tR\x10retainedLeafUuid\x12M\n" +
-	"\x12keep_alive_discard\x18\x04 \x01(\v2\x1d.protocol.v1.KeepAliveDiscardH\x00R\x10keepAliveDiscardB\b\n" +
+	"\x12retained_leaf_uuid\x18\x03 \x01(\tR\x10retainedLeafUuid\x12I\n" +
+	"\x12keep_alive_discard\x18\x04 \x01(\v2\x19.shim.v1.KeepAliveDiscardH\x00R\x10keepAliveDiscardB\b\n" +
 	"\x06reason\"<\n" +
 	"\x10KeepAliveDiscard\x12(\n" +
-	"\x10dropped_turn_ids\x18\x01 \x03(\tR\x0edroppedTurnIds\"\xb2\x02\n" +
+	"\x10dropped_turn_ids\x18\x01 \x03(\tR\x0edroppedTurnIds\"\xa6\x02\n" +
 	"\x0eQueryLifecycle\x12*\n" +
 	"\x11query_instance_id\x18\x01 \x01(\tR\x0fqueryInstanceId\x12$\n" +
-	"\x0eobserved_at_ms\x18\x02 \x01(\x03R\fobservedAtMs\x125\n" +
-	"\acreated\x18\x03 \x01(\v2\x19.protocol.v1.QueryCreatedH\x00R\acreated\x12N\n" +
-	"\x10runtime_observed\x18\x04 \x01(\v2!.protocol.v1.QueryRuntimeObservedH\x00R\x0fruntimeObserved\x12>\n" +
+	"\x0eobserved_at_ms\x18\x02 \x01(\x03R\fobservedAtMs\x121\n" +
+	"\acreated\x18\x03 \x01(\v2\x15.shim.v1.QueryCreatedH\x00R\acreated\x12J\n" +
+	"\x10runtime_observed\x18\x04 \x01(\v2\x1d.shim.v1.QueryRuntimeObservedH\x00R\x0fruntimeObserved\x12:\n" +
 	"\n" +
-	"terminated\x18\x05 \x01(\v2\x1c.protocol.v1.QueryTerminatedH\x00R\n" +
+	"terminated\x18\x05 \x01(\v2\x18.shim.v1.QueryTerminatedH\x00R\n" +
 	"terminatedB\a\n" +
-	"\x05event\"\xad\x01\n" +
+	"\x05event\"\xa5\x01\n" +
 	"\fQueryCreated\x12'\n" +
-	"\x0frequested_model\x18\x01 \x01(\tR\x0erequestedModel\x12/\n" +
-	"\x05fresh\x18\x02 \x01(\v2\x17.protocol.v1.FreshQueryH\x00R\x05fresh\x125\n" +
-	"\aresumed\x18\x03 \x01(\v2\x19.protocol.v1.ResumedQueryH\x00R\aresumedB\f\n" +
+	"\x0frequested_model\x18\x01 \x01(\tR\x0erequestedModel\x12+\n" +
+	"\x05fresh\x18\x02 \x01(\v2\x13.shim.v1.FreshQueryH\x00R\x05fresh\x121\n" +
+	"\aresumed\x18\x03 \x01(\v2\x15.shim.v1.ResumedQueryH\x00R\aresumedB\f\n" +
 	"\n" +
 	"invocation\"\f\n" +
 	"\n" +
 	"FreshQuery\"M\n" +
 	"\fResumedQuery\x12=\n" +
-	"\x1brequested_vendor_session_id\x18\x01 \x01(\tR\x18requestedVendorSessionId\"U\n" +
-	"\x14QueryRuntimeObserved\x12=\n" +
-	"\bidentity\x18\x01 \x01(\v2!.protocol.v1.QueryRuntimeIdentityR\bidentity\"\xc6\x04\n" +
+	"\x1brequested_vendor_session_id\x18\x01 \x01(\tR\x18requestedVendorSessionId\"Q\n" +
+	"\x14QueryRuntimeObserved\x129\n" +
+	"\bidentity\x18\x01 \x01(\v2\x1d.shim.v1.QueryRuntimeIdentityR\bidentity\"\xb2\x04\n" +
 	"\x14QueryRuntimeIdentity\x12*\n" +
 	"\x11vendor_session_id\x18\x01 \x01(\tR\x0fvendorSessionId\x12'\n" +
 	"\x0feffective_model\x18\x02 \x01(\tR\x0eeffectiveModel\x12\x1f\n" +
@@ -3897,27 +3897,27 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"sdkVersion\x12$\n" +
 	"\x0eshim_build_sha\x18\x04 \x01(\tR\fshimBuildSha\x12&\n" +
 	"\x0ffast_mode_state\x18\x05 \x01(\tR\rfastModeState\x12(\n" +
-	"\x10fast_mode_reason\x18\x06 \x01(\tR\x0efastModeReason\x12M\n" +
-	"\x11effective_options\x18\a \x01(\v2 .protocol.v1.EvidenceFingerprintR\x10effectiveOptions\x12<\n" +
-	"\bsettings\x18\b \x01(\v2 .protocol.v1.EvidenceFingerprintR\bsettings\x126\n" +
-	"\x05tools\x18\t \x01(\v2 .protocol.v1.EvidenceFingerprintR\x05tools\x122\n" +
+	"\x10fast_mode_reason\x18\x06 \x01(\tR\x0efastModeReason\x12I\n" +
+	"\x11effective_options\x18\a \x01(\v2\x1c.shim.v1.EvidenceFingerprintR\x10effectiveOptions\x128\n" +
+	"\bsettings\x18\b \x01(\v2\x1c.shim.v1.EvidenceFingerprintR\bsettings\x122\n" +
+	"\x05tools\x18\t \x01(\v2\x1c.shim.v1.EvidenceFingerprintR\x05tools\x12.\n" +
 	"\x03mcp\x18\n" +
-	" \x01(\v2 .protocol.v1.EvidenceFingerprintR\x03mcp\x12G\n" +
-	"\x0econtext_prefix\x18\v \x01(\v2 .protocol.v1.EvidenceFingerprintR\rcontextPrefix\"\x84\x01\n" +
+	" \x01(\v2\x1c.shim.v1.EvidenceFingerprintR\x03mcp\x12C\n" +
+	"\x0econtext_prefix\x18\v \x01(\v2\x1c.shim.v1.EvidenceFingerprintR\rcontextPrefix\"\x80\x01\n" +
 	"\x13EvidenceFingerprint\x12\x18\n" +
-	"\x06sha256\x18\x01 \x01(\tH\x00R\x06sha256\x12G\n" +
-	"\vunavailable\x18\x02 \x01(\v2#.protocol.v1.FingerprintUnavailableH\x00R\vunavailableB\n" +
+	"\x06sha256\x18\x01 \x01(\tH\x00R\x06sha256\x12C\n" +
+	"\vunavailable\x18\x02 \x01(\v2\x1f.shim.v1.FingerprintUnavailableH\x00R\vunavailableB\n" +
 	"\n" +
 	"\bevidence\".\n" +
 	"\x16FingerprintUnavailable\x12\x14\n" +
-	"\x05cause\x18\x01 \x01(\tR\x05cause\"\x91\x04\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"\xfd\x03\n" +
 	"\x0fQueryTerminated\x12,\n" +
-	"\x11vendor_session_id\x18\x01 \x01(\tH\x00R\x0fvendorSessionId\x12~\n" +
-	"#vendor_session_identity_unavailable\x18\x02 \x01(\v2-.protocol.v1.VendorSessionIdentityUnavailableH\x00R vendorSessionIdentityUnavailable\x12L\n" +
-	"\vintentional\x18\x03 \x01(\v2(.protocol.v1.IntentionalQueryTerminationH\x01R\vintentional\x12H\n" +
-	"\x0eunexpected_eof\x18\x04 \x01(\v2\x1f.protocol.v1.UnexpectedQueryEofH\x01R\runexpectedEof\x12N\n" +
-	"\x10iterator_failure\x18\x05 \x01(\v2!.protocol.v1.QueryIteratorFailureH\x01R\x0fiteratorFailure\x12K\n" +
-	"\x0fstartup_failure\x18\x06 \x01(\v2 .protocol.v1.QueryStartupFailureH\x01R\x0estartupFailureB\x11\n" +
+	"\x11vendor_session_id\x18\x01 \x01(\tH\x00R\x0fvendorSessionId\x12z\n" +
+	"#vendor_session_identity_unavailable\x18\x02 \x01(\v2).shim.v1.VendorSessionIdentityUnavailableH\x00R vendorSessionIdentityUnavailable\x12H\n" +
+	"\vintentional\x18\x03 \x01(\v2$.shim.v1.IntentionalQueryTerminationH\x01R\vintentional\x12D\n" +
+	"\x0eunexpected_eof\x18\x04 \x01(\v2\x1b.shim.v1.UnexpectedQueryEofH\x01R\runexpectedEof\x12J\n" +
+	"\x10iterator_failure\x18\x05 \x01(\v2\x1d.shim.v1.QueryIteratorFailureH\x01R\x0fiteratorFailure\x12G\n" +
+	"\x0fstartup_failure\x18\x06 \x01(\v2\x1c.shim.v1.QueryStartupFailureH\x01R\x0estartupFailureB\x11\n" +
 	"\x0fvendor_identityB\b\n" +
 	"\x06reason\"\"\n" +
 	" VendorSessionIdentityUnavailable\"5\n" +
@@ -3934,7 +3934,7 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"\rdropped_count\x18\x03 \x01(\x04R\fdroppedCount\x12\x1c\n" +
 	"\trecovered\x18\x04 \x01(\bR\trecovered\x12/\n" +
 	"\x11query_instance_id\x18\x05 \x01(\tH\x00R\x0fqueryInstanceId\x88\x01\x01B\x14\n" +
-	"\x12_query_instance_id\"\xa8\x04\n" +
+	"\x12_query_instance_id\"\xa0\x04\n" +
 	"\tShimHello\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
@@ -3947,10 +3947,10 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"\tbuild_sha\x18\b \x01(\tR\bbuildSha\x12&\n" +
 	"\x0factive_turn_ids\x18\t \x03(\tR\ractiveTurnIds\x12*\n" +
 	"\x11query_instance_id\x18\n" +
-	" \x01(\tR\x0fqueryInstanceId\x12W\n" +
-	"\x16query_runtime_identity\x18\v \x01(\v2!.protocol.v1.QueryRuntimeIdentityR\x14queryRuntimeIdentity\x12*\n" +
-	"\x11query_created_seq\x18\f \x01(\x04R\x0fqueryCreatedSeq\x12<\n" +
-	"\rlive_task_set\x18\r \x01(\v2\x18.protocol.v1.LiveTaskSetR\vliveTaskSet\"\xa3\x01\n" +
+	" \x01(\tR\x0fqueryInstanceId\x12S\n" +
+	"\x16query_runtime_identity\x18\v \x01(\v2\x1d.shim.v1.QueryRuntimeIdentityR\x14queryRuntimeIdentity\x12*\n" +
+	"\x11query_created_seq\x18\f \x01(\x04R\x0fqueryCreatedSeq\x128\n" +
+	"\rlive_task_set\x18\r \x01(\v2\x14.shim.v1.LiveTaskSetR\vliveTaskSet\"\xa3\x01\n" +
 	"\vDaemonHello\x12%\n" +
 	"\x0edaemon_version\x18\x01 \x01(\tR\rdaemonVersion\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\x12\x19\n" +
@@ -3960,14 +3960,14 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x19\n" +
 	"\bfrom_seq\x18\x02 \x01(\x04R\afromSeq\x12*\n" +
-	"\x11vendor_session_id\x18\x03 \x01(\tR\x0fvendorSessionId\"\xc2\x01\n" +
+	"\x11vendor_session_id\x18\x03 \x01(\tR\x0fvendorSessionId\"\xbe\x01\n" +
 	"\fSubmitPrompt\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x16\n" +
 	"\x06origin\x18\x03 \x01(\tR\x06origin\x12'\n" +
-	"\x0fpermission_mode\x18\x04 \x01(\tR\x0epermissionMode\x12>\n" +
-	"\rprompt_origin\x18\x05 \x01(\x0e2\x19.protocol.v1.PromptOriginR\fpromptOrigin\"?\n" +
+	"\x0fpermission_mode\x18\x04 \x01(\tR\x0epermissionMode\x12:\n" +
+	"\rprompt_origin\x18\x05 \x01(\x0e2\x15.shim.v1.PromptOriginR\fpromptOrigin\"?\n" +
 	"\bSetModel\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x14\n" +
@@ -3978,11 +3978,11 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"\vModelOption\x12\x14\n" +
 	"\x05value\x18\x01 \x01(\tR\x05value\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12 \n" +
-	"\vdescription\x18\x03 \x01(\tR\vdescription\"_\n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\"[\n" +
 	"\fModelCatalog\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\x120\n" +
-	"\x06models\x18\x02 \x03(\v2\x18.protocol.v1.ModelOptionR\x06models\"*\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12,\n" +
+	"\x06models\x18\x02 \x03(\v2\x14.shim.v1.ModelOptionR\x06models\"*\n" +
 	"\tInterrupt\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\"5\n" +
@@ -3993,24 +3993,24 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\"(\n" +
 	"\vLiveTaskSet\x12\x19\n" +
-	"\btask_ids\x18\x01 \x03(\tR\ataskIds\"\x85\x02\n" +
-	"\x15DetachedCancelOutcome\x12D\n" +
-	"\tcancelled\x18\x01 \x01(\v2$.protocol.v1.DetachedAgentsCancelledH\x00R\tcancelled\x12O\n" +
-	"\x0fnothing_running\x18\x02 \x01(\v2$.protocol.v1.NoDetachedAgentsRunningH\x00R\x0enothingRunning\x12J\n" +
-	"\vunsupported\x18\x03 \x01(\v2&.protocol.v1.DetachedCancelUnsupportedH\x00R\vunsupportedB\t\n" +
+	"\btask_ids\x18\x01 \x03(\tR\ataskIds\"\xf9\x01\n" +
+	"\x15DetachedCancelOutcome\x12@\n" +
+	"\tcancelled\x18\x01 \x01(\v2 .shim.v1.DetachedAgentsCancelledH\x00R\tcancelled\x12K\n" +
+	"\x0fnothing_running\x18\x02 \x01(\v2 .shim.v1.NoDetachedAgentsRunningH\x00R\x0enothingRunning\x12F\n" +
+	"\vunsupported\x18\x03 \x01(\v2\".shim.v1.DetachedCancelUnsupportedH\x00R\vunsupportedB\t\n" +
 	"\aoutcome\"4\n" +
 	"\x17DetachedAgentsCancelled\x12\x19\n" +
 	"\btask_ids\x18\x01 \x03(\tR\ataskIds\"\x19\n" +
 	"\x17NoDetachedAgentsRunning\"3\n" +
 	"\x19DetachedCancelUnsupported\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"\xb1\x02\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"\xa5\x02\n" +
 	"\x03Ack\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12J\n" +
-	"\x11interrupt_outcome\x18\x02 \x01(\x0e2\x1d.protocol.v1.InterruptOutcomeR\x10interruptOutcome\x12%\n" +
-	"\x0eselected_model\x18\x03 \x01(\tR\rselectedModel\x12Z\n" +
-	"\x17detached_cancel_outcome\x18\x04 \x01(\v2\".protocol.v1.DetachedCancelOutcomeR\x15detachedCancelOutcome\x12<\n" +
-	"\rlive_task_set\x18\x05 \x01(\v2\x18.protocol.v1.LiveTaskSetR\vliveTaskSet\"d\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12F\n" +
+	"\x11interrupt_outcome\x18\x02 \x01(\x0e2\x19.shim.v1.InterruptOutcomeR\x10interruptOutcome\x12%\n" +
+	"\x0eselected_model\x18\x03 \x01(\tR\rselectedModel\x12V\n" +
+	"\x17detached_cancel_outcome\x18\x04 \x01(\v2\x1e.shim.v1.DetachedCancelOutcomeR\x15detachedCancelOutcome\x128\n" +
+	"\rlive_task_set\x18\x05 \x01(\v2\x14.shim.v1.LiveTaskSetR\vliveTaskSet\"d\n" +
 	"\x04Nack\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
@@ -4026,11 +4026,11 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"\bfrom_seq\x18\x02 \x01(\x04R\afromSeq\x12\x15\n" +
 	"\x06to_seq\x18\x03 \x01(\x04R\x05toSeq\x12\x1d\n" +
 	"\n" +
-	"max_events\x18\x04 \x01(\rR\tmaxEvents\"^\n" +
+	"max_events\x18\x04 \x01(\rR\tmaxEvents\"Z\n" +
 	"\vReplayEntry\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x120\n" +
-	"\x05entry\x18\x02 \x01(\v2\x1a.protocol.v1.ExternalEntryR\x05entry\"\x7f\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12,\n" +
+	"\x05entry\x18\x02 \x01(\v2\x16.shim.v1.ExternalEntryR\x05entry\"\x7f\n" +
 	"\n" +
 	"ReplayDone\x12\x1d\n" +
 	"\n" +
@@ -4116,111 +4116,111 @@ const file_protocol_v1_core_proto_rawDesc = "" +
 	"\x1dINTERRUPT_OUTCOME_INTERRUPTED\x10\x01\x12&\n" +
 	"\"INTERRUPT_OUTCOME_ALREADY_COMPLETE\x10\x02\x12\x1c\n" +
 	"\x18INTERRUPT_OUTCOME_FAILED\x10\x03:U\n" +
-	"\x14model_marker_literal\x12!.google.protobuf.EnumValueOptions\x18\xe1\xd4\x03 \x01(\tR\x12modelMarkerLiteralB(Z&agentrepl/proto/protocol/v1;protocolv1b\x06proto3"
+	"\x14model_marker_literal\x12!.google.protobuf.EnumValueOptions\x18\xe1\xd4\x03 \x01(\tR\x12modelMarkerLiteralB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
-	file_protocol_v1_core_proto_rawDescOnce sync.Once
-	file_protocol_v1_core_proto_rawDescData []byte
+	file_shim_v1_core_proto_rawDescOnce sync.Once
+	file_shim_v1_core_proto_rawDescData []byte
 )
 
-func file_protocol_v1_core_proto_rawDescGZIP() []byte {
-	file_protocol_v1_core_proto_rawDescOnce.Do(func() {
-		file_protocol_v1_core_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_protocol_v1_core_proto_rawDesc), len(file_protocol_v1_core_proto_rawDesc)))
+func file_shim_v1_core_proto_rawDescGZIP() []byte {
+	file_shim_v1_core_proto_rawDescOnce.Do(func() {
+		file_shim_v1_core_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_shim_v1_core_proto_rawDesc), len(file_shim_v1_core_proto_rawDesc)))
 	})
-	return file_protocol_v1_core_proto_rawDescData
+	return file_shim_v1_core_proto_rawDescData
 }
 
-var file_protocol_v1_core_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_protocol_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
-var file_protocol_v1_core_proto_goTypes = []any{
-	(TaskKind)(0),                            // 0: protocol.v1.TaskKind
-	(TerminalStatus)(0),                      // 1: protocol.v1.TerminalStatus
-	(SessionSource)(0),                       // 2: protocol.v1.SessionSource
-	(PromptOrigin)(0),                        // 3: protocol.v1.PromptOrigin
-	(ModelMarker)(0),                         // 4: protocol.v1.ModelMarker
-	(InterruptOutcome)(0),                    // 5: protocol.v1.InterruptOutcome
-	(*TurnClaimBridge)(nil),                  // 6: protocol.v1.TurnClaimBridge
-	(*SessionRewound)(nil),                   // 7: protocol.v1.SessionRewound
-	(*KeepAliveDiscard)(nil),                 // 8: protocol.v1.KeepAliveDiscard
-	(*QueryLifecycle)(nil),                   // 9: protocol.v1.QueryLifecycle
-	(*QueryCreated)(nil),                     // 10: protocol.v1.QueryCreated
-	(*FreshQuery)(nil),                       // 11: protocol.v1.FreshQuery
-	(*ResumedQuery)(nil),                     // 12: protocol.v1.ResumedQuery
-	(*QueryRuntimeObserved)(nil),             // 13: protocol.v1.QueryRuntimeObserved
-	(*QueryRuntimeIdentity)(nil),             // 14: protocol.v1.QueryRuntimeIdentity
-	(*EvidenceFingerprint)(nil),              // 15: protocol.v1.EvidenceFingerprint
-	(*FingerprintUnavailable)(nil),           // 16: protocol.v1.FingerprintUnavailable
-	(*QueryTerminated)(nil),                  // 17: protocol.v1.QueryTerminated
-	(*VendorSessionIdentityUnavailable)(nil), // 18: protocol.v1.VendorSessionIdentityUnavailable
-	(*IntentionalQueryTermination)(nil),      // 19: protocol.v1.IntentionalQueryTermination
-	(*UnexpectedQueryEof)(nil),               // 20: protocol.v1.UnexpectedQueryEof
-	(*QueryIteratorFailure)(nil),             // 21: protocol.v1.QueryIteratorFailure
-	(*QueryStartupFailure)(nil),              // 22: protocol.v1.QueryStartupFailure
-	(*DegradedState)(nil),                    // 23: protocol.v1.DegradedState
-	(*ShimHello)(nil),                        // 24: protocol.v1.ShimHello
-	(*DaemonHello)(nil),                      // 25: protocol.v1.DaemonHello
-	(*ShimReady)(nil),                        // 26: protocol.v1.ShimReady
-	(*SubmitPrompt)(nil),                     // 27: protocol.v1.SubmitPrompt
-	(*SetModel)(nil),                         // 28: protocol.v1.SetModel
-	(*QuerySelectedModel)(nil),               // 29: protocol.v1.QuerySelectedModel
-	(*ModelOption)(nil),                      // 30: protocol.v1.ModelOption
-	(*ModelCatalog)(nil),                     // 31: protocol.v1.ModelCatalog
-	(*Interrupt)(nil),                        // 32: protocol.v1.Interrupt
-	(*CancelDetachedAgents)(nil),             // 33: protocol.v1.CancelDetachedAgents
-	(*QueryLiveTasks)(nil),                   // 34: protocol.v1.QueryLiveTasks
-	(*LiveTaskSet)(nil),                      // 35: protocol.v1.LiveTaskSet
-	(*DetachedCancelOutcome)(nil),            // 36: protocol.v1.DetachedCancelOutcome
-	(*DetachedAgentsCancelled)(nil),          // 37: protocol.v1.DetachedAgentsCancelled
-	(*NoDetachedAgentsRunning)(nil),          // 38: protocol.v1.NoDetachedAgentsRunning
-	(*DetachedCancelUnsupported)(nil),        // 39: protocol.v1.DetachedCancelUnsupported
-	(*Ack)(nil),                              // 40: protocol.v1.Ack
-	(*Nack)(nil),                             // 41: protocol.v1.Nack
-	(*Subscribe)(nil),                        // 42: protocol.v1.Subscribe
-	(*ReplayRequest)(nil),                    // 43: protocol.v1.ReplayRequest
-	(*ReplayEntry)(nil),                      // 44: protocol.v1.ReplayEntry
-	(*ReplayDone)(nil),                       // 45: protocol.v1.ReplayDone
-	(*PermissionRequest)(nil),                // 46: protocol.v1.PermissionRequest
-	(*PermissionResponse)(nil),               // 47: protocol.v1.PermissionResponse
-	(*ConnectionHeartbeat)(nil),              // 48: protocol.v1.ConnectionHeartbeat
-	(*HealthCheck)(nil),                      // 49: protocol.v1.HealthCheck
-	(*HealthStatus)(nil),                     // 50: protocol.v1.HealthStatus
-	(*ExternalEntry)(nil),                    // 51: protocol.v1.ExternalEntry
+var file_shim_v1_core_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_shim_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
+var file_shim_v1_core_proto_goTypes = []any{
+	(TaskKind)(0),                            // 0: shim.v1.TaskKind
+	(TerminalStatus)(0),                      // 1: shim.v1.TerminalStatus
+	(SessionSource)(0),                       // 2: shim.v1.SessionSource
+	(PromptOrigin)(0),                        // 3: shim.v1.PromptOrigin
+	(ModelMarker)(0),                         // 4: shim.v1.ModelMarker
+	(InterruptOutcome)(0),                    // 5: shim.v1.InterruptOutcome
+	(*TurnClaimBridge)(nil),                  // 6: shim.v1.TurnClaimBridge
+	(*SessionRewound)(nil),                   // 7: shim.v1.SessionRewound
+	(*KeepAliveDiscard)(nil),                 // 8: shim.v1.KeepAliveDiscard
+	(*QueryLifecycle)(nil),                   // 9: shim.v1.QueryLifecycle
+	(*QueryCreated)(nil),                     // 10: shim.v1.QueryCreated
+	(*FreshQuery)(nil),                       // 11: shim.v1.FreshQuery
+	(*ResumedQuery)(nil),                     // 12: shim.v1.ResumedQuery
+	(*QueryRuntimeObserved)(nil),             // 13: shim.v1.QueryRuntimeObserved
+	(*QueryRuntimeIdentity)(nil),             // 14: shim.v1.QueryRuntimeIdentity
+	(*EvidenceFingerprint)(nil),              // 15: shim.v1.EvidenceFingerprint
+	(*FingerprintUnavailable)(nil),           // 16: shim.v1.FingerprintUnavailable
+	(*QueryTerminated)(nil),                  // 17: shim.v1.QueryTerminated
+	(*VendorSessionIdentityUnavailable)(nil), // 18: shim.v1.VendorSessionIdentityUnavailable
+	(*IntentionalQueryTermination)(nil),      // 19: shim.v1.IntentionalQueryTermination
+	(*UnexpectedQueryEof)(nil),               // 20: shim.v1.UnexpectedQueryEof
+	(*QueryIteratorFailure)(nil),             // 21: shim.v1.QueryIteratorFailure
+	(*QueryStartupFailure)(nil),              // 22: shim.v1.QueryStartupFailure
+	(*DegradedState)(nil),                    // 23: shim.v1.DegradedState
+	(*ShimHello)(nil),                        // 24: shim.v1.ShimHello
+	(*DaemonHello)(nil),                      // 25: shim.v1.DaemonHello
+	(*ShimReady)(nil),                        // 26: shim.v1.ShimReady
+	(*SubmitPrompt)(nil),                     // 27: shim.v1.SubmitPrompt
+	(*SetModel)(nil),                         // 28: shim.v1.SetModel
+	(*QuerySelectedModel)(nil),               // 29: shim.v1.QuerySelectedModel
+	(*ModelOption)(nil),                      // 30: shim.v1.ModelOption
+	(*ModelCatalog)(nil),                     // 31: shim.v1.ModelCatalog
+	(*Interrupt)(nil),                        // 32: shim.v1.Interrupt
+	(*CancelDetachedAgents)(nil),             // 33: shim.v1.CancelDetachedAgents
+	(*QueryLiveTasks)(nil),                   // 34: shim.v1.QueryLiveTasks
+	(*LiveTaskSet)(nil),                      // 35: shim.v1.LiveTaskSet
+	(*DetachedCancelOutcome)(nil),            // 36: shim.v1.DetachedCancelOutcome
+	(*DetachedAgentsCancelled)(nil),          // 37: shim.v1.DetachedAgentsCancelled
+	(*NoDetachedAgentsRunning)(nil),          // 38: shim.v1.NoDetachedAgentsRunning
+	(*DetachedCancelUnsupported)(nil),        // 39: shim.v1.DetachedCancelUnsupported
+	(*Ack)(nil),                              // 40: shim.v1.Ack
+	(*Nack)(nil),                             // 41: shim.v1.Nack
+	(*Subscribe)(nil),                        // 42: shim.v1.Subscribe
+	(*ReplayRequest)(nil),                    // 43: shim.v1.ReplayRequest
+	(*ReplayEntry)(nil),                      // 44: shim.v1.ReplayEntry
+	(*ReplayDone)(nil),                       // 45: shim.v1.ReplayDone
+	(*PermissionRequest)(nil),                // 46: shim.v1.PermissionRequest
+	(*PermissionResponse)(nil),               // 47: shim.v1.PermissionResponse
+	(*ConnectionHeartbeat)(nil),              // 48: shim.v1.ConnectionHeartbeat
+	(*HealthCheck)(nil),                      // 49: shim.v1.HealthCheck
+	(*HealthStatus)(nil),                     // 50: shim.v1.HealthStatus
+	(*ExternalEntry)(nil),                    // 51: shim.v1.ExternalEntry
 	(*structpb.Struct)(nil),                  // 52: google.protobuf.Struct
 	(*descriptorpb.EnumValueOptions)(nil),    // 53: google.protobuf.EnumValueOptions
 }
-var file_protocol_v1_core_proto_depIdxs = []int32{
-	8,  // 0: protocol.v1.SessionRewound.keep_alive_discard:type_name -> protocol.v1.KeepAliveDiscard
-	10, // 1: protocol.v1.QueryLifecycle.created:type_name -> protocol.v1.QueryCreated
-	13, // 2: protocol.v1.QueryLifecycle.runtime_observed:type_name -> protocol.v1.QueryRuntimeObserved
-	17, // 3: protocol.v1.QueryLifecycle.terminated:type_name -> protocol.v1.QueryTerminated
-	11, // 4: protocol.v1.QueryCreated.fresh:type_name -> protocol.v1.FreshQuery
-	12, // 5: protocol.v1.QueryCreated.resumed:type_name -> protocol.v1.ResumedQuery
-	14, // 6: protocol.v1.QueryRuntimeObserved.identity:type_name -> protocol.v1.QueryRuntimeIdentity
-	15, // 7: protocol.v1.QueryRuntimeIdentity.effective_options:type_name -> protocol.v1.EvidenceFingerprint
-	15, // 8: protocol.v1.QueryRuntimeIdentity.settings:type_name -> protocol.v1.EvidenceFingerprint
-	15, // 9: protocol.v1.QueryRuntimeIdentity.tools:type_name -> protocol.v1.EvidenceFingerprint
-	15, // 10: protocol.v1.QueryRuntimeIdentity.mcp:type_name -> protocol.v1.EvidenceFingerprint
-	15, // 11: protocol.v1.QueryRuntimeIdentity.context_prefix:type_name -> protocol.v1.EvidenceFingerprint
-	16, // 12: protocol.v1.EvidenceFingerprint.unavailable:type_name -> protocol.v1.FingerprintUnavailable
-	18, // 13: protocol.v1.QueryTerminated.vendor_session_identity_unavailable:type_name -> protocol.v1.VendorSessionIdentityUnavailable
-	19, // 14: protocol.v1.QueryTerminated.intentional:type_name -> protocol.v1.IntentionalQueryTermination
-	20, // 15: protocol.v1.QueryTerminated.unexpected_eof:type_name -> protocol.v1.UnexpectedQueryEof
-	21, // 16: protocol.v1.QueryTerminated.iterator_failure:type_name -> protocol.v1.QueryIteratorFailure
-	22, // 17: protocol.v1.QueryTerminated.startup_failure:type_name -> protocol.v1.QueryStartupFailure
-	14, // 18: protocol.v1.ShimHello.query_runtime_identity:type_name -> protocol.v1.QueryRuntimeIdentity
-	35, // 19: protocol.v1.ShimHello.live_task_set:type_name -> protocol.v1.LiveTaskSet
-	3,  // 20: protocol.v1.SubmitPrompt.prompt_origin:type_name -> protocol.v1.PromptOrigin
-	30, // 21: protocol.v1.ModelCatalog.models:type_name -> protocol.v1.ModelOption
-	37, // 22: protocol.v1.DetachedCancelOutcome.cancelled:type_name -> protocol.v1.DetachedAgentsCancelled
-	38, // 23: protocol.v1.DetachedCancelOutcome.nothing_running:type_name -> protocol.v1.NoDetachedAgentsRunning
-	39, // 24: protocol.v1.DetachedCancelOutcome.unsupported:type_name -> protocol.v1.DetachedCancelUnsupported
-	5,  // 25: protocol.v1.Ack.interrupt_outcome:type_name -> protocol.v1.InterruptOutcome
-	36, // 26: protocol.v1.Ack.detached_cancel_outcome:type_name -> protocol.v1.DetachedCancelOutcome
-	35, // 27: protocol.v1.Ack.live_task_set:type_name -> protocol.v1.LiveTaskSet
-	51, // 28: protocol.v1.ReplayEntry.entry:type_name -> protocol.v1.ExternalEntry
-	52, // 29: protocol.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
-	52, // 30: protocol.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
-	53, // 31: protocol.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
+var file_shim_v1_core_proto_depIdxs = []int32{
+	8,  // 0: shim.v1.SessionRewound.keep_alive_discard:type_name -> shim.v1.KeepAliveDiscard
+	10, // 1: shim.v1.QueryLifecycle.created:type_name -> shim.v1.QueryCreated
+	13, // 2: shim.v1.QueryLifecycle.runtime_observed:type_name -> shim.v1.QueryRuntimeObserved
+	17, // 3: shim.v1.QueryLifecycle.terminated:type_name -> shim.v1.QueryTerminated
+	11, // 4: shim.v1.QueryCreated.fresh:type_name -> shim.v1.FreshQuery
+	12, // 5: shim.v1.QueryCreated.resumed:type_name -> shim.v1.ResumedQuery
+	14, // 6: shim.v1.QueryRuntimeObserved.identity:type_name -> shim.v1.QueryRuntimeIdentity
+	15, // 7: shim.v1.QueryRuntimeIdentity.effective_options:type_name -> shim.v1.EvidenceFingerprint
+	15, // 8: shim.v1.QueryRuntimeIdentity.settings:type_name -> shim.v1.EvidenceFingerprint
+	15, // 9: shim.v1.QueryRuntimeIdentity.tools:type_name -> shim.v1.EvidenceFingerprint
+	15, // 10: shim.v1.QueryRuntimeIdentity.mcp:type_name -> shim.v1.EvidenceFingerprint
+	15, // 11: shim.v1.QueryRuntimeIdentity.context_prefix:type_name -> shim.v1.EvidenceFingerprint
+	16, // 12: shim.v1.EvidenceFingerprint.unavailable:type_name -> shim.v1.FingerprintUnavailable
+	18, // 13: shim.v1.QueryTerminated.vendor_session_identity_unavailable:type_name -> shim.v1.VendorSessionIdentityUnavailable
+	19, // 14: shim.v1.QueryTerminated.intentional:type_name -> shim.v1.IntentionalQueryTermination
+	20, // 15: shim.v1.QueryTerminated.unexpected_eof:type_name -> shim.v1.UnexpectedQueryEof
+	21, // 16: shim.v1.QueryTerminated.iterator_failure:type_name -> shim.v1.QueryIteratorFailure
+	22, // 17: shim.v1.QueryTerminated.startup_failure:type_name -> shim.v1.QueryStartupFailure
+	14, // 18: shim.v1.ShimHello.query_runtime_identity:type_name -> shim.v1.QueryRuntimeIdentity
+	35, // 19: shim.v1.ShimHello.live_task_set:type_name -> shim.v1.LiveTaskSet
+	3,  // 20: shim.v1.SubmitPrompt.prompt_origin:type_name -> shim.v1.PromptOrigin
+	30, // 21: shim.v1.ModelCatalog.models:type_name -> shim.v1.ModelOption
+	37, // 22: shim.v1.DetachedCancelOutcome.cancelled:type_name -> shim.v1.DetachedAgentsCancelled
+	38, // 23: shim.v1.DetachedCancelOutcome.nothing_running:type_name -> shim.v1.NoDetachedAgentsRunning
+	39, // 24: shim.v1.DetachedCancelOutcome.unsupported:type_name -> shim.v1.DetachedCancelUnsupported
+	5,  // 25: shim.v1.Ack.interrupt_outcome:type_name -> shim.v1.InterruptOutcome
+	36, // 26: shim.v1.Ack.detached_cancel_outcome:type_name -> shim.v1.DetachedCancelOutcome
+	35, // 27: shim.v1.Ack.live_task_set:type_name -> shim.v1.LiveTaskSet
+	51, // 28: shim.v1.ReplayEntry.entry:type_name -> shim.v1.ExternalEntry
+	52, // 29: shim.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
+	52, // 30: shim.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
+	53, // 31: shim.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
 	32, // [32:32] is the sub-list for method output_type
 	32, // [32:32] is the sub-list for method input_type
 	32, // [32:32] is the sub-list for extension type_name
@@ -4228,29 +4228,29 @@ var file_protocol_v1_core_proto_depIdxs = []int32{
 	0,  // [0:31] is the sub-list for field type_name
 }
 
-func init() { file_protocol_v1_core_proto_init() }
-func file_protocol_v1_core_proto_init() {
-	if File_protocol_v1_core_proto != nil {
+func init() { file_shim_v1_core_proto_init() }
+func file_shim_v1_core_proto_init() {
+	if File_shim_v1_core_proto != nil {
 		return
 	}
-	file_protocol_v1_external_proto_init()
-	file_protocol_v1_core_proto_msgTypes[1].OneofWrappers = []any{
+	file_shim_v1_external_proto_init()
+	file_shim_v1_core_proto_msgTypes[1].OneofWrappers = []any{
 		(*SessionRewound_KeepAliveDiscard)(nil),
 	}
-	file_protocol_v1_core_proto_msgTypes[3].OneofWrappers = []any{
+	file_shim_v1_core_proto_msgTypes[3].OneofWrappers = []any{
 		(*QueryLifecycle_Created)(nil),
 		(*QueryLifecycle_RuntimeObserved)(nil),
 		(*QueryLifecycle_Terminated)(nil),
 	}
-	file_protocol_v1_core_proto_msgTypes[4].OneofWrappers = []any{
+	file_shim_v1_core_proto_msgTypes[4].OneofWrappers = []any{
 		(*QueryCreated_Fresh)(nil),
 		(*QueryCreated_Resumed)(nil),
 	}
-	file_protocol_v1_core_proto_msgTypes[9].OneofWrappers = []any{
+	file_shim_v1_core_proto_msgTypes[9].OneofWrappers = []any{
 		(*EvidenceFingerprint_Sha256)(nil),
 		(*EvidenceFingerprint_Unavailable)(nil),
 	}
-	file_protocol_v1_core_proto_msgTypes[11].OneofWrappers = []any{
+	file_shim_v1_core_proto_msgTypes[11].OneofWrappers = []any{
 		(*QueryTerminated_VendorSessionId)(nil),
 		(*QueryTerminated_VendorSessionIdentityUnavailable)(nil),
 		(*QueryTerminated_Intentional)(nil),
@@ -4258,8 +4258,8 @@ func file_protocol_v1_core_proto_init() {
 		(*QueryTerminated_IteratorFailure)(nil),
 		(*QueryTerminated_StartupFailure)(nil),
 	}
-	file_protocol_v1_core_proto_msgTypes[17].OneofWrappers = []any{}
-	file_protocol_v1_core_proto_msgTypes[30].OneofWrappers = []any{
+	file_shim_v1_core_proto_msgTypes[17].OneofWrappers = []any{}
+	file_shim_v1_core_proto_msgTypes[30].OneofWrappers = []any{
 		(*DetachedCancelOutcome_Cancelled)(nil),
 		(*DetachedCancelOutcome_NothingRunning)(nil),
 		(*DetachedCancelOutcome_Unsupported)(nil),
@@ -4268,19 +4268,19 @@ func file_protocol_v1_core_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protocol_v1_core_proto_rawDesc), len(file_protocol_v1_core_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_core_proto_rawDesc), len(file_shim_v1_core_proto_rawDesc)),
 			NumEnums:      6,
 			NumMessages:   45,
 			NumExtensions: 1,
 			NumServices:   0,
 		},
-		GoTypes:           file_protocol_v1_core_proto_goTypes,
-		DependencyIndexes: file_protocol_v1_core_proto_depIdxs,
-		EnumInfos:         file_protocol_v1_core_proto_enumTypes,
-		MessageInfos:      file_protocol_v1_core_proto_msgTypes,
-		ExtensionInfos:    file_protocol_v1_core_proto_extTypes,
+		GoTypes:           file_shim_v1_core_proto_goTypes,
+		DependencyIndexes: file_shim_v1_core_proto_depIdxs,
+		EnumInfos:         file_shim_v1_core_proto_enumTypes,
+		MessageInfos:      file_shim_v1_core_proto_msgTypes,
+		ExtensionInfos:    file_shim_v1_core_proto_extTypes,
 	}.Build()
-	File_protocol_v1_core_proto = out.File
-	file_protocol_v1_core_proto_goTypes = nil
-	file_protocol_v1_core_proto_depIdxs = nil
+	File_shim_v1_core_proto = out.File
+	file_shim_v1_core_proto_goTypes = nil
+	file_shim_v1_core_proto_depIdxs = nil
 }

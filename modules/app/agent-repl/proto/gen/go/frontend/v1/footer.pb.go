@@ -17,7 +17,7 @@ package frontendv1
 
 import (
 	v1 "agentrepl/proto/agentrepl/v1"
-	v11 "agentrepl/proto/protocol/v1"
+	v11 "agentrepl/proto/shim/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -1421,7 +1421,7 @@ type InterruptWindow struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Active        bool                   `protobuf:"varint,1,opt,name=active,proto3" json:"active,omitempty"`
 	SinceMs       int64                  `protobuf:"varint,2,opt,name=since_ms,json=sinceMs,proto3" json:"since_ms,omitempty"`
-	Outcome       v11.InterruptOutcome   `protobuf:"varint,3,opt,name=outcome,proto3,enum=protocol.v1.InterruptOutcome" json:"outcome,omitempty"`
+	Outcome       v11.InterruptOutcome   `protobuf:"varint,3,opt,name=outcome,proto3,enum=shim.v1.InterruptOutcome" json:"outcome,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1809,7 +1809,7 @@ type ContextCostAlert struct {
 	// "keep-alive came back cold" alarm — the ping paid full freight, meaning
 	// the cache had already expired — and frontends render it as its own
 	// message rather than a generic expensive-turn note.
-	PromptOrigin  v11.PromptOrigin `protobuf:"varint,5,opt,name=prompt_origin,json=promptOrigin,proto3,enum=protocol.v1.PromptOrigin" json:"prompt_origin,omitempty"`
+	PromptOrigin  v11.PromptOrigin `protobuf:"varint,5,opt,name=prompt_origin,json=promptOrigin,proto3,enum=shim.v1.PromptOrigin" json:"prompt_origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2344,7 +2344,7 @@ type SubmitPromptCmd struct {
 	PermissionMode string                 `protobuf:"bytes,2,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
 	// Required origin selected by the concrete frontend send site. The daemon
 	// rejects UNSPECIFIED rather than guessing which UI or automation acted.
-	PromptOrigin  v11.PromptOrigin `protobuf:"varint,3,opt,name=prompt_origin,json=promptOrigin,proto3,enum=protocol.v1.PromptOrigin" json:"prompt_origin,omitempty"`
+	PromptOrigin  v11.PromptOrigin `protobuf:"varint,3,opt,name=prompt_origin,json=promptOrigin,proto3,enum=shim.v1.PromptOrigin" json:"prompt_origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2507,7 +2507,7 @@ func (*CancelDetachedAgentsCmd) Descriptor() ([]byte, []int) {
 // What a CancelDetachedAgentsCmd did, carried on the command's ack.
 //
 // It is the SHIM's verdict relayed, not a daemon re-derivation — see
-// protocol.v1.DetachedCancelOutcome for why only the shim can answer
+// shim.v1.DetachedCancelOutcome for why only the shim can answer
 // "what was running when this landed?" without racing task end.
 //
 // A ONEOF OF MESSAGES, never a bool: "did it work" cannot distinguish a stop
@@ -2614,10 +2614,10 @@ func (*DetachedCancelOutcome_Unsupported) isDetachedCancelOutcome_Outcome() {}
 
 // Detached work was running and the stop reached every agent counted here.
 //
-// TODO(respelling): this shares a name with protocol.v1.DetachedAgentsCancelled
+// TODO(respelling): this shares a name with shim.v1.DetachedAgentsCancelled
 // but NOT its contents — that one carries `repeated string task_ids`, this one
 // carries `count`, which has no counterpart there. It was therefore not
-// collapsed into protocol.v1's, and DetachedCancelOutcome above stays declared
+// collapsed into shim.v1's, and DetachedCancelOutcome above stays declared
 // here for the same reason: its `cancelled` arm must reference this message.
 type DetachedAgentsCancelled struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -3595,7 +3595,7 @@ var File_frontend_v1_footer_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\n" +
-	"\x18frontend/v1/footer.proto\x12\vfrontend.v1\x1a\x16protocol/v1/core.proto\x1a\x16frontend/v1/feed.proto\x1a\x19agentrepl/v1/shared.proto\"\xa4\x01\n" +
+	"\x18frontend/v1/footer.proto\x12\vfrontend.v1\x1a\x12shim/v1/core.proto\x1a\x16frontend/v1/feed.proto\x1a\x19agentrepl/v1/shared.proto\"\xa4\x01\n" +
 	"\fRuntimeFault\x12\x1c\n" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x1d\n" +
 	"\n" +
@@ -3627,7 +3627,7 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\fmerged_at_ms\x18\x0f \x01(\x03R\n" +
 	"mergedAtMs\x12<\n" +
 	"\fmerge_status\x18\x10 \x01(\v2\x19.agentrepl.v1.MergeStatusR\vmergeStatus\x12O\n" +
-	"\x13merge_dequeue_offer\x18\x11 \x01(\v2\x1f.agentrepl.v1.MergeDequeueOfferR\x11mergeDequeueOffer\"\xa4\x06\n" +
+	"\x13merge_dequeue_offer\x18\x11 \x01(\v2\x1f.agentrepl.v1.MergeDequeueOfferR\x11mergeDequeueOffer\"\xa0\x06\n" +
 	"\vSessionView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -3652,8 +3652,8 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\n" +
 	"config_dir\x18\x11 \x01(\tR\tconfigDir\x126\n" +
 	"\bbackfill\x18\x12 \x01(\x0e2\x1a.frontend.v1.BackfillStateR\bbackfill\x122\n" +
-	"\x05death\x18\x13 \x01(\v2\x1c.frontend.v1.FailureCardViewR\x05death\x12=\n" +
-	"\rmodel_options\x18\x14 \x03(\v2\x18.protocol.v1.ModelOptionR\fmodelOptions\x12A\n" +
+	"\x05death\x18\x13 \x01(\v2\x1c.frontend.v1.FailureCardViewR\x05death\x129\n" +
+	"\rmodel_options\x18\x14 \x03(\v2\x14.shim.v1.ModelOptionR\fmodelOptions\x12A\n" +
 	"\vhibernation\x18\x15 \x01(\v2\x1f.agentrepl.v1.HibernationDetailR\vhibernation\"\xac\x01\n" +
 	"\n" +
 	"DaemonView\x12\x17\n" +
@@ -3672,11 +3672,11 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x06active\x18\x01 \x01(\bR\x06active\x12\x1b\n" +
 	"\tresets_at\x18\x02 \x01(\x03R\bresetsAt\x12 \n" +
 	"\vutilization\x18\x03 \x01(\x01R\vutilization\x12\x16\n" +
-	"\x06status\x18\x04 \x01(\tR\x06status\"}\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\"y\n" +
 	"\x0fInterruptWindow\x12\x16\n" +
 	"\x06active\x18\x01 \x01(\bR\x06active\x12\x19\n" +
-	"\bsince_ms\x18\x02 \x01(\x03R\asinceMs\x127\n" +
-	"\aoutcome\x18\x03 \x01(\x0e2\x1d.protocol.v1.InterruptOutcomeR\aoutcome\"\x9f\t\n" +
+	"\bsince_ms\x18\x02 \x01(\x03R\asinceMs\x123\n" +
+	"\aoutcome\x18\x03 \x01(\x0e2\x19.shim.v1.InterruptOutcomeR\aoutcome\"\x9f\t\n" +
 	"\fProgressView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x14\n" +
 	"\x05fence\x18\x02 \x01(\tR\x05fence\x122\n" +
@@ -3707,13 +3707,13 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"merge_chip\x18\x16 \x01(\v2\x1c.frontend.v1.FooterMergeChipR\tmergeChip\x12A\n" +
 	"\n" +
 	"accounting\x18\x17 \x01(\v2!.frontend.v1.FooterAccountingCellR\n" +
-	"accounting\"\xdf\x01\n" +
+	"accounting\"\xdb\x01\n" +
 	"\x10ContextCostAlert\x12\x17\n" +
 	"\aturn_id\x18\x01 \x01(\tR\x06turnId\x122\n" +
 	"\x15uncached_input_tokens\x18\x02 \x01(\x03R\x13uncachedInputTokens\x12)\n" +
 	"\x10threshold_tokens\x18\x03 \x01(\x03R\x0fthresholdTokens\x12\x13\n" +
-	"\x05at_ms\x18\x04 \x01(\x03R\x04atMs\x12>\n" +
-	"\rprompt_origin\x18\x05 \x01(\x0e2\x19.protocol.v1.PromptOriginR\fpromptOrigin\"S\n" +
+	"\x05at_ms\x18\x04 \x01(\x03R\x04atMs\x12:\n" +
+	"\rprompt_origin\x18\x05 \x01(\x0e2\x15.shim.v1.PromptOriginR\fpromptOrigin\"S\n" +
 	"\vFooterPhase\x12\x12\n" +
 	"\x04word\x18\x01 \x01(\tR\x04word\x12\x12\n" +
 	"\x04tone\x18\x02 \x01(\tR\x04tone\x12\x1c\n" +
@@ -3737,18 +3737,18 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x14AccountingIncomplete\x12\x18\n" +
 	"\amissing\x18\x01 \x03(\tR\amissing\"/\n" +
 	"\x11AccountingInvalid\x12\x1a\n" +
-	"\bproblems\x18\x01 \x03(\tR\bproblems\"\x8e\x01\n" +
+	"\bproblems\x18\x01 \x03(\tR\bproblems\"\x8a\x01\n" +
 	"\x0fSubmitPromptCmd\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12'\n" +
-	"\x0fpermission_mode\x18\x02 \x01(\tR\x0epermissionMode\x12>\n" +
-	"\rprompt_origin\x18\x03 \x01(\x0e2\x19.protocol.v1.PromptOriginR\fpromptOrigin\"5\n" +
+	"\x0fpermission_mode\x18\x02 \x01(\tR\x0epermissionMode\x12:\n" +
+	"\rprompt_origin\x18\x03 \x01(\x0e2\x15.shim.v1.PromptOriginR\fpromptOrigin\"5\n" +
 	"\fInterruptCmd\x12%\n" +
 	"\x0econfirm_agents\x18\x01 \x01(\bR\rconfirmAgents\"\x19\n" +
-	"\x17CancelDetachedAgentsCmd\"\x85\x02\n" +
+	"\x17CancelDetachedAgentsCmd\"\xfd\x01\n" +
 	"\x15DetachedCancelOutcome\x12D\n" +
-	"\tcancelled\x18\x01 \x01(\v2$.frontend.v1.DetachedAgentsCancelledH\x00R\tcancelled\x12O\n" +
-	"\x0fnothing_running\x18\x02 \x01(\v2$.protocol.v1.NoDetachedAgentsRunningH\x00R\x0enothingRunning\x12J\n" +
-	"\vunsupported\x18\x03 \x01(\v2&.protocol.v1.DetachedCancelUnsupportedH\x00R\vunsupportedB\t\n" +
+	"\tcancelled\x18\x01 \x01(\v2$.frontend.v1.DetachedAgentsCancelledH\x00R\tcancelled\x12K\n" +
+	"\x0fnothing_running\x18\x02 \x01(\v2 .shim.v1.NoDetachedAgentsRunningH\x00R\x0enothingRunning\x12F\n" +
+	"\vunsupported\x18\x03 \x01(\v2\".shim.v1.DetachedCancelUnsupportedH\x00R\vunsupportedB\t\n" +
 	"\aoutcome\"/\n" +
 	"\x17DetachedAgentsCancelled\x12\x14\n" +
 	"\x05count\x18\x01 \x01(\x03R\x05count\"\x1c\n" +
@@ -3905,13 +3905,13 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*v1.MergeStatus)(nil),                         // 40: agentrepl.v1.MergeStatus
 	(*v1.MergeDequeueOffer)(nil),                   // 41: agentrepl.v1.MergeDequeueOffer
 	(*FailureCardView)(nil),                        // 42: frontend.v1.FailureCardView
-	(*v11.ModelOption)(nil),                        // 43: protocol.v1.ModelOption
+	(*v11.ModelOption)(nil),                        // 43: shim.v1.ModelOption
 	(*v1.HibernationDetail)(nil),                   // 44: agentrepl.v1.HibernationDetail
-	(v11.InterruptOutcome)(0),                      // 45: protocol.v1.InterruptOutcome
-	(v11.PromptOrigin)(0),                          // 46: protocol.v1.PromptOrigin
+	(v11.InterruptOutcome)(0),                      // 45: shim.v1.InterruptOutcome
+	(v11.PromptOrigin)(0),                          // 46: shim.v1.PromptOrigin
 	(*FailureCardRef)(nil),                         // 47: frontend.v1.FailureCardRef
-	(*v11.NoDetachedAgentsRunning)(nil),            // 48: protocol.v1.NoDetachedAgentsRunning
-	(*v11.DetachedCancelUnsupported)(nil),          // 49: protocol.v1.DetachedCancelUnsupported
+	(*v11.NoDetachedAgentsRunning)(nil),            // 48: shim.v1.NoDetachedAgentsRunning
+	(*v11.DetachedCancelUnsupported)(nil),          // 49: shim.v1.DetachedCancelUnsupported
 	(v1.SessionCommand)(0),                         // 50: agentrepl.v1.SessionCommand
 }
 var file_frontend_v1_footer_proto_depIdxs = []int32{
@@ -3923,9 +3923,9 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	41, // 5: frontend.v1.WorkspaceState.merge_dequeue_offer:type_name -> agentrepl.v1.MergeDequeueOffer
 	3,  // 6: frontend.v1.SessionView.backfill:type_name -> frontend.v1.BackfillState
 	42, // 7: frontend.v1.SessionView.death:type_name -> frontend.v1.FailureCardView
-	43, // 8: frontend.v1.SessionView.model_options:type_name -> protocol.v1.ModelOption
+	43, // 8: frontend.v1.SessionView.model_options:type_name -> shim.v1.ModelOption
 	44, // 9: frontend.v1.SessionView.hibernation:type_name -> agentrepl.v1.HibernationDetail
-	45, // 10: frontend.v1.InterruptWindow.outcome:type_name -> protocol.v1.InterruptOutcome
+	45, // 10: frontend.v1.InterruptWindow.outcome:type_name -> shim.v1.InterruptOutcome
 	0,  // 11: frontend.v1.ProgressView.state:type_name -> frontend.v1.RenderState
 	9,  // 12: frontend.v1.ProgressView.compacting:type_name -> frontend.v1.ProgressWindow
 	9,  // 13: frontend.v1.ProgressView.retrying:type_name -> frontend.v1.ProgressWindow
@@ -3940,15 +3940,15 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	14, // 22: frontend.v1.ProgressView.phase:type_name -> frontend.v1.FooterPhase
 	15, // 23: frontend.v1.ProgressView.merge_chip:type_name -> frontend.v1.FooterMergeChip
 	17, // 24: frontend.v1.ProgressView.accounting:type_name -> frontend.v1.FooterAccountingCell
-	46, // 25: frontend.v1.ContextCostAlert.prompt_origin:type_name -> protocol.v1.PromptOrigin
+	46, // 25: frontend.v1.ContextCostAlert.prompt_origin:type_name -> shim.v1.PromptOrigin
 	47, // 26: frontend.v1.FooterFailureRow.card:type_name -> frontend.v1.FailureCardRef
 	18, // 27: frontend.v1.FooterAccountingCell.complete:type_name -> frontend.v1.AccountingComplete
 	19, // 28: frontend.v1.FooterAccountingCell.incomplete:type_name -> frontend.v1.AccountingIncomplete
 	20, // 29: frontend.v1.FooterAccountingCell.invalid:type_name -> frontend.v1.AccountingInvalid
-	46, // 30: frontend.v1.SubmitPromptCmd.prompt_origin:type_name -> protocol.v1.PromptOrigin
+	46, // 30: frontend.v1.SubmitPromptCmd.prompt_origin:type_name -> shim.v1.PromptOrigin
 	25, // 31: frontend.v1.DetachedCancelOutcome.cancelled:type_name -> frontend.v1.DetachedAgentsCancelled
-	48, // 32: frontend.v1.DetachedCancelOutcome.nothing_running:type_name -> protocol.v1.NoDetachedAgentsRunning
-	49, // 33: frontend.v1.DetachedCancelOutcome.unsupported:type_name -> protocol.v1.DetachedCancelUnsupported
+	48, // 32: frontend.v1.DetachedCancelOutcome.nothing_running:type_name -> shim.v1.NoDetachedAgentsRunning
+	49, // 33: frontend.v1.DetachedCancelOutcome.unsupported:type_name -> shim.v1.DetachedCancelUnsupported
 	50, // 34: frontend.v1.QueueClassificationUninterruptibleTurn.command:type_name -> agentrepl.v1.SessionCommand
 	26, // 35: frontend.v1.QueueEntry.pending:type_name -> frontend.v1.QueueClassificationPending
 	27, // 36: frontend.v1.QueueEntry.interject:type_name -> frontend.v1.QueueClassificationInterject
