@@ -15,11 +15,11 @@
 
 syntax = "proto3";
 
-package agentshim.v1;
+package shim.v1;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "agentrepl/proto/agentshim/v1;agentshimv1";
+option go_package = "agentrepl/proto/shim/v1;shimv1";
 
 // Something one vendor does that no vendor-agnostic feed can show.
 //
