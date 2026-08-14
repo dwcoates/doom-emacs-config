@@ -33,7 +33,7 @@ PROTOS := \
 # The component tree the structural gates scan. Overridable so the gate
 # self-tests can drive the REAL targets against a fixture tree; the default is
 # the schema tree this Makefile generates from.
-COMPONENT_DIR ?= frontend/v1
+COMPONENT_DIR ?= src/frontend/v1
 # The tree I7 scans for forbidden imports. Overridable so the codegen-gate
 # self-test can point it at its own fixture root.
 ISOLATION_ROOT ?= ..
@@ -51,19 +51,19 @@ codegen-gate: conversation-isolation
 
 go: codegen-gate
 	mkdir -p gen/go
-	protoc -I . --go_out=gen/go --go_opt=paths=source_relative $(PROTOS)
+	protoc -I src --go_out=gen/go --go_opt=paths=source_relative $(PROTOS)
 
 ts: codegen-gate
 	mkdir -p gen/ts
 	npx --yes @bufbuild/protoc-gen-es --version >/dev/null
-	protoc -I . \
+	protoc -I src \
 	  --plugin=protoc-gen-es=$$(npx --yes --package=@bufbuild/protoc-gen-es which protoc-gen-es 2>/dev/null || echo ./node_modules/.bin/protoc-gen-es) \
 	  --es_out=gen/ts --es_opt=target=ts $(PROTOS)
 
 # Syntax-check every proto without emitting code, then enforce the structural
 # invariants the syntax check cannot see.
 lint: codegen-gate
-	protoc -I . --descriptor_set_out=/dev/null $(PROTOS)
+	protoc -I src --descriptor_set_out=/dev/null $(PROTOS)
 
 # INVARIANT I6 IS GONE, AND ITS GATE WITH IT. `durable.proto` needed a script
 # only while it sat INSIDE frontend/v1 being definitionally not frontend, so the
@@ -78,10 +78,10 @@ lint: codegen-gate
 # import path and a TS module rather than a convention; this gate refuses the one
 # remaining way to cross it.
 conversation-isolation:
-	./check-conversation-isolation.sh $(ISOLATION_ROOT)
+	./scripts/check-conversation-isolation.sh $(ISOLATION_ROOT)
 
 test-check-conversation-isolation:
-	./test-check-conversation-isolation.sh
+	./scripts/test-check-conversation-isolation.sh
 
 # Regenerate and compare with the exact pre-generation bytes. Comparing with
 # HEAD rejects a correct uncommitted schema edit, which makes the pre-commit
@@ -95,7 +95,7 @@ check-generated:
 	diff -ru "$$before" gen
 
 test-check-generated:
-	./test-check-generated.sh
+	./scripts/test-check-generated.sh
 
 # Validate both the source schema and the checked-in Go/TS generated artifacts.
 validate: lint test-check-conversation-isolation test-check-generated check-generated

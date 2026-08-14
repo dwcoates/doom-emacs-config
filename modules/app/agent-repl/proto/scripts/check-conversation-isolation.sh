@@ -54,7 +54,7 @@
 set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="${1:-$(cd "$THIS_DIR/.." && pwd)}"
+ROOT="${1:-$(cd "$THIS_DIR/../.." && pwd)}"
 
 # The proto package, and the Go import path its bindings generate into. Both
 # forms are checked because a Go file names the import path, not the package.
