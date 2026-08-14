@@ -18,7 +18,7 @@ package agentrepl.v1;
 
 import "google/protobuf/descriptor.proto";
 import "google/protobuf/struct.proto";
-import "protocol/v1/core.proto";
+import "shim/v1/core.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -928,7 +928,7 @@ message QueryTerminationFailure {
     string vendor_session_id = 2;
 
     // Records that the query ended before the SDK exposed a vendor session.
-    protocol.v1.VendorSessionIdentityUnavailable vendor_session_identity_unavailable = 3;
+    shim.v1.VendorSessionIdentityUnavailable vendor_session_identity_unavailable = 3;
   }
 
   // The Unix epoch time at which the termination was observed.
@@ -937,13 +937,13 @@ message QueryTerminationFailure {
   // Identifies the unexpected termination condition without a status enum.
   oneof reason {
     // The SDK iterator ended without an intentional shim shutdown.
-    protocol.v1.UnexpectedQueryEof unexpected_eof = 5;
+    shim.v1.UnexpectedQueryEof unexpected_eof = 5;
 
     // The SDK iterator threw an error, including its complete cause.
-    protocol.v1.QueryIteratorFailure iterator_failure = 6;
+    shim.v1.QueryIteratorFailure iterator_failure = 6;
 
     // Query initialization failed, including its complete cause.
-    protocol.v1.QueryStartupFailure startup_failure = 7;
+    shim.v1.QueryStartupFailure startup_failure = 7;
   }
 }
 

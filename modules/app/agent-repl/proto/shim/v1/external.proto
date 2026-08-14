@@ -14,12 +14,12 @@
 
 syntax = "proto3";
 
-package protocol.v1;
+package shim.v1;
 
-import "protocol/v1/bookkeeping.proto";
+import "shim/v1/bookkeeping.proto";
 import "conversation/v1/message.proto";
 
-option go_package = "agentrepl/proto/protocol/v1;protocolv1";
+option go_package = "agentrepl/proto/shim/v1;shimv1";
 
 // Everything about a record that is eligible to cross the shim→daemon wire.
 //
@@ -29,7 +29,7 @@ option go_package = "agentrepl/proto/protocol/v1;protocolv1";
 // updated on one side only.
 //
 // NO POSITION FIELD, deliberately. The store's `seq` rides the delivery
-// envelope in protocol.v1 (entry-delivery.proto), because a position is
+// envelope in shim.v1 (entry-delivery.proto), because a position is
 // the store's addressing rather than a fact about a conversation — and because
 // entries that never reach the store have no position, so there must be no slot
 // for one to be put in wrongly. A daemon that advanced its resume cursor past a

@@ -16,7 +16,7 @@
 // Shared by the store, the shim and the daemon — all three speak records, so
 // one shape serves every hop.
 //
-// THE DURABLE RECORD IS protocol.v1.ExternalEntry. It used to be `Event`, and
+// THE DURABLE RECORD IS shim.v1.ExternalEntry. It used to be `Event`, and
 // this file said so; that is now false. `Event` was one envelope carrying every
 // observation together with the store's position, the observing plane and the
 // dedup key, and it has been split across the surfaces that own its parts.
@@ -32,11 +32,11 @@
 
 syntax = "proto3";
 
-package protocol.v1;
+package shim.v1;
 
-import "protocol/v1/external.proto";
+import "shim/v1/external.proto";
 
-option go_package = "agentrepl/proto/protocol/v1;protocolv1";
+option go_package = "agentrepl/proto/shim/v1;shimv1";
 
 // Ask for ONE page of messages, running BACKWARD from the anchor. Never a
 // stream, never open-ended.

@@ -11,7 +11,7 @@ syntax = "proto3";
 
 package frontend.v1;
 
-import "protocol/v1/core.proto";
+import "shim/v1/core.proto";
 import "frontend/v1/feed.proto";
 import "agentrepl/v1/shared.proto";
 
@@ -422,7 +422,7 @@ message SessionView {
   FailureCardView death = 19;
   // The SDK-published set this session can deliberately select.  A frontend
   // only renders these choices; it never invents or owns a model selection.
-  repeated protocol.v1.ModelOption model_options = 20;
+  repeated shim.v1.ModelOption model_options = 20;
   // NO PERSISTENCE AGGREGATE RIDES THIS MESSAGE. Token economics is durable
   // evidence with its own home, and what a frontend needs of it arrives
   // already digested as TokenBreakdownView's resolved rows — never as a whole
@@ -576,7 +576,7 @@ message RateLimitWindow {
 message InterruptWindow {
   bool active = 1;
   int64 since_ms = 2;
-  protocol.v1.InterruptOutcome outcome = 3;
+  shim.v1.InterruptOutcome outcome = 3;
 }
 
 message ProgressView {
@@ -724,7 +724,7 @@ message ContextCostAlert {
   // "keep-alive came back cold" alarm — the ping paid full freight, meaning
   // the cache had already expired — and frontends render it as its own
   // message rather than a generic expensive-turn note.
-  protocol.v1.PromptOrigin prompt_origin = 5;
+  shim.v1.PromptOrigin prompt_origin = 5;
 }
 
 // The footer phase cell's props. These are resolved DISPLAY properties, not a
@@ -828,7 +828,7 @@ message SubmitPromptCmd {
   string permission_mode = 2;
   // Required origin selected by the concrete frontend send site. The daemon
   // rejects UNSPECIFIED rather than guessing which UI or automation acted.
-  protocol.v1.PromptOrigin prompt_origin = 3;
+  shim.v1.PromptOrigin prompt_origin = 3;
 }
 
 // Stop the running turn. Interrupting a LIVE TURN never asks for
@@ -864,7 +864,7 @@ message CancelDetachedAgentsCmd {}
 // What a CancelDetachedAgentsCmd did, carried on the command's ack.
 //
 // It is the SHIM's verdict relayed, not a daemon re-derivation — see
-// protocol.v1.DetachedCancelOutcome for why only the shim can answer
+// shim.v1.DetachedCancelOutcome for why only the shim can answer
 // "what was running when this landed?" without racing task end.
 //
 // A ONEOF OF MESSAGES, never a bool: "did it work" cannot distinguish a stop
@@ -874,17 +874,17 @@ message CancelDetachedAgentsCmd {}
 message DetachedCancelOutcome {
   oneof outcome {
     DetachedAgentsCancelled cancelled = 1;
-    protocol.v1.NoDetachedAgentsRunning nothing_running = 2;
-    protocol.v1.DetachedCancelUnsupported unsupported = 3;
+    shim.v1.NoDetachedAgentsRunning nothing_running = 2;
+    shim.v1.DetachedCancelUnsupported unsupported = 3;
   }
 }
 
 // Detached work was running and the stop reached every agent counted here.
 //
-// TODO(respelling): this shares a name with protocol.v1.DetachedAgentsCancelled
+// TODO(respelling): this shares a name with shim.v1.DetachedAgentsCancelled
 // but NOT its contents — that one carries `repeated string task_ids`, this one
 // carries `count`, which has no counterpart there. It was therefore not
-// collapsed into protocol.v1's, and DetachedCancelOutcome above stays declared
+// collapsed into shim.v1's, and DetachedCancelOutcome above stays declared
 // here for the same reason: its `cancelled` arm must reference this message.
 message DetachedAgentsCancelled {
   // How many detached agents were stopped. A COUNT rather than the shim's
@@ -895,7 +895,7 @@ message DetachedAgentsCancelled {
   int64 count = 1;
 }
 
-// TWO OF THE THREE ARMS ABOVE NAME protocol.v1's MESSAGES DIRECTLY. "Nothing
+// TWO OF THE THREE ARMS ABOVE NAME shim.v1's MESSAGES DIRECTLY. "Nothing
 // was running" and "this shim cannot be asked" are shim-wire facts the daemon
 // forwards unchanged, so this package keeps no second copy of them to drift
 // against the originals.

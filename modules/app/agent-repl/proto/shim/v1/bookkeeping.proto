@@ -6,11 +6,11 @@
 
 syntax = "proto3";
 
-package protocol.v1;
+package shim.v1;
 
 import "conversation/v1/tokens.proto";
 
-option go_package = "agentrepl/proto/protocol/v1;protocolv1";
+option go_package = "agentrepl/proto/shim/v1;shimv1";
 
 // A fact about the session that renders as nothing.
 //
