@@ -791,10 +791,15 @@ message FailureCardRef {
 // ==========================================================================
 
 message PermissionAnswerCmd {
-  string permission_request_id = 1;
-  bool allow = 2;
-  google.protobuf.Struct updated_input = 3;
-  string deny_message = 4;
+  // Correlation. See agentrepl.v1.AgentRepl.
+  string request_id = 1;
+  // The workspace whose shim is blocked on this answer. See
+  // agentrepl.v1.AgentRepl.
+  string workspace = 2;
+  string permission_request_id = 3;
+  bool allow = 4;
+  google.protobuf.Struct updated_input = 5;
+  string deny_message = 6;
 }
 
 // ==========================================================================
@@ -1147,9 +1152,18 @@ message PageScopeInside {
 // The cold open and the whole recovery story: a client that bounced, rotated
 // its seq space, or lost its place calls this and starts from the bottom.
 message FirstPageCmd {
+  // Correlation. The ConversationHistoryPage pushed in answer echoes this id,
+  // so a client can DISCARD a page it is no longer awaiting.
+  string request_id = 1;
+  // WHICH READER, and therefore which Subscribe stream the page is pushed down.
+  // The daemon's position is per READER per workspace per scope, and under a
+  // service a paging call no longer shares a socket with the stream that
+  // answers it — so the reader has to name itself. See
+  // agentrepl.v1.SubscribeRequest.client_id.
+  string client_id = 2;
   // Which conversation. The daemon's position is per reader PER WORKSPACE, so
   // this is what selects the position being reset.
-  string workspace = 1;
+  string workspace = 3;
   // WHICH CONTAINER this page walks: the feed, or the inside of one message.
   // The daemon's position is per reader per workspace PER SCOPE, so this also
   // selects which position is being reset — opening a subagent does not throw
@@ -1158,7 +1172,7 @@ message FirstPageCmd {
   // Unset is NOT a default. A request that does not state its scope is REFUSED,
   // never read as the feed: defaulting would answer a client that forgot to
   // name its container with the whole conversation.
-  PageScope scope = 2;
+  PageScope scope = 4;
 }
 
 // Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
@@ -1168,7 +1182,12 @@ message FirstPageCmd {
 // defaulting would turn a client bug into a silent tail read, and "I have no
 // position" already has its own verb.
 message NextPageCmd {
-  string workspace = 1;
+  // Correlation. See FirstPageCmd.request_id.
+  string request_id = 1;
+  // WHICH READER, and therefore whose position is being walked back and which
+  // stream the page arrives on. See FirstPageCmd.client_id.
+  string client_id = 2;
+  string workspace = 3;
   // WHICH CONTAINER to walk back through. It names the scope, never a position
   // within it — the daemon still owns where this reader is inside that scope,
   // so the no-position rule above is untouched.
@@ -1176,7 +1195,7 @@ message NextPageCmd {
   // Unset is NOT a default and is REFUSED, exactly as on FirstPageCmd: a
   // load-more that forgot which container it belongs to must not silently walk
   // back through the feed instead.
-  PageScope scope = 2;
+  PageScope scope = 4;
 }
 
 // One page of messages, oldest first.

@@ -369,8 +369,11 @@ message RosterRowStatusInactive {}
 // stale — see WorkspaceRoster.boot_id — so no publisher ever needs to resync a
 // counter it did not author.
 message PublishWorkspaceRosterCmd {
+  // Correlation. See agentrepl.v1.AgentRepl. The roster is daemon-global — it
+  // IS the set of workspaces — so this command names no workspace.
+  string request_id = 1;
   // The complete roster as of this publication. Always whole, never a delta:
   // the roster is small and Emacs holds the entire model, so a full replace
   // makes a partially-applied roster unrepresentable.
-  WorkspaceRoster roster = 1;
+  WorkspaceRoster roster = 2;
 }

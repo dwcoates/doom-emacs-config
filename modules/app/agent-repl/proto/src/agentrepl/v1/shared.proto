@@ -1068,6 +1068,10 @@ message HibernationCacheExpired {
 // gated mode — compact_first or clear — drives that context cut to completion
 // before accepting any prompt.
 message ReviveSessionCmd {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace being revived. See AgentRepl in frame.proto.
+  string workspace = 2;
   // The choice is a oneof of empty messages, not a bool: "no decision" must
   // be unrepresentable on the wire, and a third revival mode later is a new
   // arm rather than a second flag.
@@ -1077,16 +1081,16 @@ message ReviveSessionCmd {
     // ONCE (compaction is a model call over the whole history) instead of on
     // every subsequent turn. Its own CompactionScope says how much of the
     // conversation the compaction may summarize away.
-    ReviveCompactFirst compact_first = 1;
+    ReviveCompactFirst compact_first = 3;
     // Resume the conversation as-is, full accumulated context and all. The
     // deliberate "I know it's big" path.
-    ReviveDirect direct = 2;
+    ReviveDirect direct = 4;
     // Discard the conversation outright as the first order of business:
     // `/clear`, and nothing else. Prompts are accepted only after the clear
     // lands, on the same gate compact_first stays behind — a prompt answered
     // ahead of it would pay for the whole context the clear is about to throw
     // away.
-    ReviveClear clear = 3;
+    ReviveClear clear = 5;
   }
 }
 
@@ -1185,23 +1189,27 @@ message WorkspaceGateHibernated {
 // daemon owns name resolution, worktree creation, session startup, and initial
 // prompt delivery; a request never asks for a promptless/no-shim workspace.
 message CreateWorkspaceCmd {
-  string requested_name = 1;
-  string git_root = 2;
-  string base_commit = 3;
-  string source_workspace = 4;
-  string source_dir = 5;
-  optional string initial_prompt = 6;
-  string priority = 7;
-  string model = 8;
-  string fork_from = 9;
-  string fork_session_id = 10;
-  string postprocessing_prompt = 11;
-  string before_ws_merge = 12;
+  // Correlation. See AgentRepl in frame.proto. THERE IS NO `workspace` FIELD:
+  // this command creates one, and `source_workspace` below names the workspace
+  // it was requested from, which is a different question.
+  string request_id = 1;
+  string requested_name = 2;
+  string git_root = 3;
+  string base_commit = 4;
+  string source_workspace = 5;
+  string source_dir = 6;
+  optional string initial_prompt = 7;
+  string priority = 8;
+  string model = 9;
+  string fork_from = 10;
+  string fork_session_id = 11;
+  string postprocessing_prompt = 12;
+  string before_ws_merge = 13;
   // Explicit session account/safety posture. The daemon must not infer these
   // from its ambient process when a host asks it to create a workspace.
-  string config_dir = 13;
-  string permission_mode = 14;
-  bool allow_ungated = 15;
+  string config_dir = 14;
+  string permission_mode = 15;
+  bool allow_ungated = 16;
 }
 
 // The daemon's authoritative account of a workspace ready for host
@@ -1232,7 +1240,12 @@ message WorkspaceAvailable {
 // release an initial prompt that was held until a visible host workspace
 // exists.
 message WorkspaceMaterializedCmd {
-  string job_id = 1;
+  // Correlation. See AgentRepl in frame.proto. The job is addressed by
+  // `job_id`, not by a workspace key: the host is acknowledging a
+  // WorkspaceAvailable, and the workspace's key is one of the things that
+  // notification told it.
+  string request_id = 1;
+  string job_id = 2;
 }
 
 // Open a workspace: reattach to the session it already has, or start one when
@@ -1244,29 +1257,47 @@ message WorkspaceMaterializedCmd {
 // owns is the daemon's ruling; a frontend that named one would be asserting an
 // answer to a question it cannot hold across a daemon restart.
 message OpenWorkspaceCmd {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace being opened. See AgentRepl in frame.proto.
+  string workspace = 2;
   // The permission posture a session started by this open runs under, empty to
   // accept the daemon's default. Ignored when the workspace already has a
   // session: an open never re-postures a live one.
-  string permission_mode = 1;
+  string permission_mode = 3;
   // The CLAUDE_CONFIG_DIR — i.e. WHICH ACCOUNT — a session started by this open
   // runs under. One shared daemon serves every workspace, so its own
   // environment cannot encode a per-workspace account.
   //
   // Empty means the daemon's own default, NOT the absence of a config dir.
-  string config_dir = 2;
+  string config_dir = 4;
   // Run a session started by this open against the offline scripted SDK.
-  bool fake = 3;
+  bool fake = 5;
   // The caller's DELIBERATE consent to start a session with NO permission gate,
   // required on exactly the same terms as CreateSessionCmd.allow_ungated and
   // enforced by the same refusal. An open that could reach an ungated posture
   // without it would be a second, quieter door to the one thing that consent
   // exists to make loud.
-  bool allow_ungated = 4;
+  bool allow_ungated = 6;
 }
 
-message CloseWorkspaceCmd {}
+// Retire the workspace. It carried NO fields at all under the old envelope,
+// which was the clearest case of the envelope being a command's whole meaning;
+// now it states that meaning itself.
+message CloseWorkspaceCmd {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace being closed. See AgentRepl in frame.proto.
+  string workspace = 2;
+}
 
 message MergeWorkspaceCmd {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace being merged, as its KEY — the session cwd. Its DISPLAY name
+  // is `workspace_name` below, and the two are deliberately separate fields.
+  // See AgentRepl in frame.proto.
+  string workspace = 2;
   // THE COMMAND STATES NO MERGE GEOMETRY AND NAMES NO HANDLER. It is a bare
   // request keyed by workspace, and that is deliberate.
   //
@@ -1278,19 +1309,19 @@ message MergeWorkspaceCmd {
   // the daemon had never heard of. Nor does the command select a handler: there
   // has only ever been one merge handler, and naming it would invite a caller
   // to ask for a mechanism the daemon does not dispatch on.
-  bool conflict_resolved_continue = 1;  // the resolve-and-continue handoff
+  bool conflict_resolved_continue = 3;  // the resolve-and-continue handoff
   // The workspace's DISPLAY name, for the `merge/<name>` completion tag and the
   // daemon's merge logs.
   //
-  // It exists because the envelope's `workspace` field is the daemon's
-  // workspace KEY — the session cwd — exactly as it is for every other
-  // command. This command used to put the bare Emacs name there instead, which
+  // It exists because the `workspace` field above is the daemon's workspace
+  // KEY — the session cwd — exactly as it is for every other command. This
+  // command used to put the bare Emacs name there instead, which
   // filed every merge state row under a workspace key nothing else used: the
   // row had no session identity, so its WorkspaceState reached Emacs with an
   // absent connectivity verdict and was refused, and the merge never tore its
   // workspace down. The two identities are now separate fields rather than one
   // slot meaning different things per command.
-  string workspace_name = 2;
+  string workspace_name = 4;
 }
 
 // A daemon-owned inbox may contain UI-only actions alongside creates.  These
@@ -1369,9 +1400,12 @@ message HostLegacyCommand {
 // supplied error in the daemon's durable inbox rather than silently dropping
 // a UI request that Emacs could not perform.
 message HostActionCompletedCmd {
-  string action_id = 1;
-  bool ok = 2;
-  string error = 3;
+  // Correlation. See AgentRepl in frame.proto. The action is addressed by
+  // `action_id`; the daemon's inbox is global, so there is no workspace key.
+  string request_id = 1;
+  string action_id = 2;
+  bool ok = 3;
+  string error = 4;
 }
 
 // ==========================================================================
@@ -1438,10 +1472,16 @@ enum ResumeMode {
 }
 
 message CreateSessionCmd {
-  string cwd = 1;
-  string permission_mode = 2;
-  string config_dir = 3;
-  bool fake = 4;                        // test harness sessions
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // THE WORKSPACE, spelled `cwd` because that is what a session is created
+  // against. It is NOT accompanied by a second `workspace` field: the daemon's
+  // workspace key IS the session's absolute cwd, and two spellings of one path
+  // is two things a caller can disagree with itself about.
+  string cwd = 2;
+  string permission_mode = 3;
+  string config_dir = 4;
+  bool fake = 5;                        // test harness sessions
   // The caller's DELIBERATE consent to create a session with NO permission
   // gate. Required whenever permission_mode names a mode that shadows the
   // shim's canUseTool callback in the fail-OPEN direction
@@ -1455,7 +1495,7 @@ message CreateSessionCmd {
   // a create-time consent only: a session already registered in that mode
   // still rehydrates after a daemon restart, since refusing there would
   // silently change a live session's posture.
-  bool allow_ungated = 5;
+  bool allow_ungated = 6;
 
   // The model this session should START on, empty to accept the shim's own
   // default.  A caller that has a remembered selection would otherwise have to
@@ -1466,22 +1506,26 @@ message CreateSessionCmd {
   // the same SetModel path a later change takes, once the shim is wired, and
   // still publishes only the shim-confirmed selection.  A rejected model fails
   // the create rather than silently leaving the session on another one.
-  string model = 6;
+  string model = 7;
 
   // Which conversation to land on. See ResumeMode: this is intent, and the
   // daemon does the resolving.
-  ResumeMode resume_mode = 7;
+  ResumeMode resume_mode = 8;
 
   // The conversation to land on, and ONLY meaningful under
   // RESUME_MODE_EXPLICIT. The daemon rejects a create that sets this under any
   // other mode rather than quietly ignoring it, because a caller that filled
   // this in believes it is steering and must be told it is not.
-  string explicit_claude_session_id = 8;
+  string explicit_claude_session_id = 9;
 }
 
 // Session teardown over UDS (replaces DELETE /sessions/{id}).
 message DeleteSessionCmd {
-  string session_id = 1;
+  // Correlation. See AgentRepl in frame.proto. Session teardown is addressed by
+  // identity, not by workspace: the session may already have outlived the
+  // workspace binding a key would resolve through.
+  string request_id = 1;
+  string session_id = 2;
 }
 
 // HARD RESTART of one workspace's session: stop whatever shim is serving it
@@ -1497,7 +1541,13 @@ message DeleteSessionCmd {
 // A workspace with no live session is a loud nack; a workspace whose session is
 // merely hibernated or severed is brought up, because "restart" and "start" are
 // the same request when nothing is running.
-message RestartSessionCmd {}
+message RestartSessionCmd {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace whose session is being restarted. See AgentRepl in
+  // frame.proto.
+  string workspace = 2;
+}
 
 // Deliberate, immediate hibernation of one workspace's session: the daemon
 // stops the shim (IntentionalQueryTermination) and marks the session
@@ -1506,11 +1556,18 @@ message RestartSessionCmd {}
 // but still pinging" is unrepresentable. Refused with a loud nack while a
 // turn is live or the merge lease is held: the user interrupts first, the
 // daemon never discards in-flight work to satisfy a hibernate.
-message HibernateWorkspaceCmd {}
+message HibernateWorkspaceCmd {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace being hibernated. See AgentRepl in frame.proto.
+  string workspace = 2;
+}
 
 // Graceful daemon shutdown over UDS (replaces Emacs
 // POST /shutdown).
 message ShutdownCmd {
+  // Correlation. See AgentRepl in frame.proto. Daemon-global: no workspace.
+  string request_id = 1;
   // stop_shims asks the daemon to SIGTERM every session shim on its way out.
   //
   // The DEFAULT (false) PRESERVES them. A shim outlives its daemon by design:
@@ -1525,7 +1582,7 @@ message ShutdownCmd {
   // passes it when its stamps show the bundle moved). It is belt-and-braces
   // alongside the daemon's own version-driven stale-shim refresh, never the
   // only thing standing between a deploy and stale shims.
-  bool stop_shims = 1;
+  bool stop_shims = 2;
 }
 
 // The daemon-global scheduled-shutdown lease. Pushed to every connected
@@ -1608,18 +1665,22 @@ message ShutdownHoldTasks { int32 count = 1; }
 // is a loud nack, never a silent replace: the caller must cancel first, so
 // two deploy flows cannot silently merge their intents.
 message ScheduleShutdownCmd {
+  // Correlation. See AgentRepl in frame.proto. Daemon-global: no workspace.
+  string request_id = 1;
   // Same semantics as ShutdownCmd.stop_shims, fixed at schedule time.
-  bool stop_shims = 1;
+  bool stop_shims = 2;
   // Why (for the broadcast view and the durable log). Display only.
-  string cause = 2;
+  string cause = 3;
 }
 
 // Cancel a scheduled shutdown and release the drain lease. schedule_id must
 // match the live schedule; a stale id is a loud nack, so a cancel aimed at
 // an old schedule can never kill a newer one.
 message CancelScheduledShutdownCmd {
+  // Correlation. See AgentRepl in frame.proto. Daemon-global: no workspace.
+  string request_id = 1;
   // The schedule to cancel, from ShutdownScheduleDraining.schedule_id.
-  string schedule_id = 1;
+  string schedule_id = 2;
 }
 
 // The daemon's notice that it is about to go down ON PURPOSE.
@@ -1698,13 +1759,19 @@ enum ClientLogLevel {
 // never a control signal, and is tagged in the log so a line originating in a
 // frontend is never mistaken for one the daemon produced itself.
 message ClientLogCmd {
-  ClientLogLevel level = 1;
-  string message = 2;
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // WHICH WORKSPACE the reporting frontend was showing. A diagnostic line whose
+  // workspace nobody recorded is evidence about an unnamed session, which is
+  // most of the way to no evidence at all. See AgentRepl in frame.proto.
+  string workspace = 2;
+  ClientLogLevel level = 3;
+  string message = 4;
   // Optional structured payload (ids, counters, timings) accompanying the
   // message. Schemaless on purpose: it is diagnostic evidence whose shape is
   // the reporting call site's business, and pinning a schema here would make
   // adding a diagnostic a proto change.
-  google.protobuf.Struct context = 3;
+  google.protobuf.Struct context = 5;
 }
 
 // ==========================================================================
@@ -1869,16 +1936,25 @@ message MergeQueueHeadTerminalOwed {}
 // Pause the merge queue: the run in flight finishes, nothing new dequeues.
 // Durable across bounces. Idempotent. Daemon-global (the command's
 // workspace is ignored).
-message PauseMergeQueueCmd {}
+message PauseMergeQueueCmd {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+}
 // Resume the merge queue. Idempotent, daemon-global.
-message ResumeMergeQueueCmd {}
+message ResumeMergeQueueCmd {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+}
 // Evict ONE waiting entry by run id. The evicted run receives a terminal
 // failed MergeStatus with an eviction cause, so the workspace's merge axis
 // resolves immediately. REFUSED when run_id names the running head (only its
 // drain goroutine may retire it) or names nothing outstanding.
 message EvictMergeCmd {
+  // Correlation. See AgentRepl in frame.proto. The merge queue is
+  // daemon-global and a run id names one entry in it, so there is no workspace.
+  string request_id = 1;
   // The run id the roster and every MergeStatus carry.
-  string run_id = 1;
+  string run_id = 2;
 }
 
 // THE INTERRUPT'S QUEUE HALF, ASKED RATHER THAN PERFORMED.
@@ -1955,16 +2031,22 @@ message MergeDequeueRunning {
 // the card; the daemon clears the offer on either arm, so declining is a real
 // answer and not merely the absence of one.
 message AnswerMergeDequeueCmd {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace whose offer is being answered — the offer is PUSHED STATE on
+  // WorkspaceState, so it is scoped by workspace and matched within it. See
+  // AgentRepl in frame.proto.
+  string workspace = 2;
   // The offer being answered. An id that does not match the workspace's
   // outstanding offer is REFUSED rather than resolved to the current one: a
   // click on a superseded card must not dequeue the merge the card that
   // replaced it is asking about.
-  string offer_id = 1;
+  string offer_id = 3;
   // The answer is a oneof of empty messages, not a bool, for the same reason
   // ReviveSessionCmd's is: "no answer" must be unrepresentable on the wire.
   oneof answer {
-    MergeDequeueConfirm dequeue = 2;
-    MergeDequeueDecline keep = 3;
+    MergeDequeueConfirm dequeue = 4;
+    MergeDequeueDecline keep = 5;
   }
 }
 
