@@ -2046,70 +2046,6 @@ func (x *PublishWorkspaceRosterCmd) GetRoster() *WorkspaceRoster {
 	return nil
 }
 
-// The roster rail's notice line: one fixed slot at the foot of the rail for
-// whatever the last gesture had to say.
-//
-// It renders a SENTENCE and nothing else — no kind, no evidence, no color
-// variation — because that is all a one-line slot under a workspace list can
-// carry. It is the smallest projection of a failure in the product, and it is
-// modeled as its own message rather than as a failure card with most fields
-// ignored, so that what it shows and what it is given are the same thing.
-type RosterNotice struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The line, composed by whoever raised it, rendered verbatim.
-	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
-	// How long the notice stands before clearing itself, milliseconds. It is
-	// the ONE self-dismissing failure surface: a rail notice that persisted
-	// would outlive the gesture it describes. 0 means it stands until replaced.
-	AutoClearMs   int32 `protobuf:"varint,2,opt,name=auto_clear_ms,json=autoClearMs,proto3" json:"auto_clear_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RosterNotice) Reset() {
-	*x = RosterNotice{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[32]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RosterNotice) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RosterNotice) ProtoMessage() {}
-
-func (x *RosterNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[32]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RosterNotice.ProtoReflect.Descriptor instead.
-func (*RosterNotice) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{32}
-}
-
-func (x *RosterNotice) GetText() string {
-	if x != nil {
-		return x.Text
-	}
-	return ""
-}
-
-func (x *RosterNotice) GetAutoClearMs() int32 {
-	if x != nil {
-		return x.AutoClearMs
-	}
-	return 0
-}
-
 var File_frontend_v1_sidebar_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_sidebar_proto_rawDesc = "" +
@@ -2217,10 +2153,7 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x13RosterRowStatusNone\"\x19\n" +
 	"\x17RosterRowStatusInactive\"Q\n" +
 	"\x19PublishWorkspaceRosterCmd\x124\n" +
-	"\x06roster\x18\x01 \x01(\v2\x1c.frontend.v1.WorkspaceRosterR\x06roster\"F\n" +
-	"\fRosterNotice\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\x12\"\n" +
-	"\rauto_clear_ms\x18\x02 \x01(\x05R\vautoClearMsB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
+	"\x06roster\x18\x01 \x01(\v2\x1c.frontend.v1.WorkspaceRosterR\x06rosterB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_frontend_v1_sidebar_proto_rawDescOnce sync.Once
@@ -2234,7 +2167,7 @@ func file_frontend_v1_sidebar_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_sidebar_proto_rawDescData
 }
 
-var file_frontend_v1_sidebar_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_frontend_v1_sidebar_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_frontend_v1_sidebar_proto_goTypes = []any{
 	(*WorkspaceRoster)(nil),               // 0: frontend.v1.WorkspaceRoster
 	(*RosterRepositoryView)(nil),          // 1: frontend.v1.RosterRepositoryView
@@ -2268,7 +2201,6 @@ var file_frontend_v1_sidebar_proto_goTypes = []any{
 	(*RosterRowStatusNone)(nil),           // 29: frontend.v1.RosterRowStatusNone
 	(*RosterRowStatusInactive)(nil),       // 30: frontend.v1.RosterRowStatusInactive
 	(*PublishWorkspaceRosterCmd)(nil),     // 31: frontend.v1.PublishWorkspaceRosterCmd
-	(*RosterNotice)(nil),                  // 32: frontend.v1.RosterNotice
 }
 var file_frontend_v1_sidebar_proto_depIdxs = []int32{
 	1,  // 0: frontend.v1.WorkspaceRoster.repository:type_name -> frontend.v1.RosterRepositoryView
@@ -2353,7 +2285,7 @@ func file_frontend_v1_sidebar_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_sidebar_proto_rawDesc), len(file_frontend_v1_sidebar_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   33,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
