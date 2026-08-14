@@ -49,9 +49,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: agentshim/v1/entry.proto
+// source: shim/v1/entry.proto
 
-package agentshimv1
+package shimv1
 
 import (
 	v1 "agentrepl/proto/protocol/v1"
@@ -98,7 +98,7 @@ type Entry struct {
 
 func (x *Entry) Reset() {
 	*x = Entry{}
-	mi := &file_agentshim_v1_entry_proto_msgTypes[0]
+	mi := &file_shim_v1_entry_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -110,7 +110,7 @@ func (x *Entry) String() string {
 func (*Entry) ProtoMessage() {}
 
 func (x *Entry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_v1_entry_proto_msgTypes[0]
+	mi := &file_shim_v1_entry_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -123,7 +123,7 @@ func (x *Entry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Entry.ProtoReflect.Descriptor instead.
 func (*Entry) Descriptor() ([]byte, []int) {
-	return file_agentshim_v1_entry_proto_rawDescGZIP(), []int{0}
+	return file_shim_v1_entry_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Entry) GetInternal() *InternalEntry {
@@ -212,7 +212,7 @@ type InternalEntry struct {
 
 func (x *InternalEntry) Reset() {
 	*x = InternalEntry{}
-	mi := &file_agentshim_v1_entry_proto_msgTypes[1]
+	mi := &file_shim_v1_entry_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -224,7 +224,7 @@ func (x *InternalEntry) String() string {
 func (*InternalEntry) ProtoMessage() {}
 
 func (x *InternalEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_v1_entry_proto_msgTypes[1]
+	mi := &file_shim_v1_entry_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -237,7 +237,7 @@ func (x *InternalEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InternalEntry.ProtoReflect.Descriptor instead.
 func (*InternalEntry) Descriptor() ([]byte, []int) {
-	return file_agentshim_v1_entry_proto_rawDescGZIP(), []int{1}
+	return file_shim_v1_entry_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *InternalEntry) GetPlane() *Plane {
@@ -342,7 +342,7 @@ type Plane struct {
 
 func (x *Plane) Reset() {
 	*x = Plane{}
-	mi := &file_agentshim_v1_entry_proto_msgTypes[2]
+	mi := &file_shim_v1_entry_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -354,7 +354,7 @@ func (x *Plane) String() string {
 func (*Plane) ProtoMessage() {}
 
 func (x *Plane) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_v1_entry_proto_msgTypes[2]
+	mi := &file_shim_v1_entry_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -367,7 +367,7 @@ func (x *Plane) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Plane.ProtoReflect.Descriptor instead.
 func (*Plane) Descriptor() ([]byte, []int) {
-	return file_agentshim_v1_entry_proto_rawDescGZIP(), []int{2}
+	return file_shim_v1_entry_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Plane) GetPlane() isPlane_Plane {
@@ -425,7 +425,7 @@ type PlaneStream struct {
 
 func (x *PlaneStream) Reset() {
 	*x = PlaneStream{}
-	mi := &file_agentshim_v1_entry_proto_msgTypes[3]
+	mi := &file_shim_v1_entry_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -437,7 +437,7 @@ func (x *PlaneStream) String() string {
 func (*PlaneStream) ProtoMessage() {}
 
 func (x *PlaneStream) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_v1_entry_proto_msgTypes[3]
+	mi := &file_shim_v1_entry_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -450,7 +450,7 @@ func (x *PlaneStream) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlaneStream.ProtoReflect.Descriptor instead.
 func (*PlaneStream) Descriptor() ([]byte, []int) {
-	return file_agentshim_v1_entry_proto_rawDescGZIP(), []int{3}
+	return file_shim_v1_entry_proto_rawDescGZIP(), []int{3}
 }
 
 // Read by the sidecar from what the vendor wrote to disk.
@@ -462,7 +462,7 @@ type PlaneFile struct {
 
 func (x *PlaneFile) Reset() {
 	*x = PlaneFile{}
-	mi := &file_agentshim_v1_entry_proto_msgTypes[4]
+	mi := &file_shim_v1_entry_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -474,7 +474,7 @@ func (x *PlaneFile) String() string {
 func (*PlaneFile) ProtoMessage() {}
 
 func (x *PlaneFile) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_v1_entry_proto_msgTypes[4]
+	mi := &file_shim_v1_entry_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -487,67 +487,67 @@ func (x *PlaneFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlaneFile.ProtoReflect.Descriptor instead.
 func (*PlaneFile) Descriptor() ([]byte, []int) {
-	return file_agentshim_v1_entry_proto_rawDescGZIP(), []int{4}
+	return file_shim_v1_entry_proto_rawDescGZIP(), []int{4}
 }
 
-var File_agentshim_v1_entry_proto protoreflect.FileDescriptor
+var File_shim_v1_entry_proto protoreflect.FileDescriptor
 
-const file_agentshim_v1_entry_proto_rawDesc = "" +
+const file_shim_v1_entry_proto_rawDesc = "" +
 	"\n" +
-	"\x18agentshim/v1/entry.proto\x12\fagentshim.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1aprotocol/v1/external.proto\x1a\x1eagentshim/v1/unsupported.proto\"x\n" +
-	"\x05Entry\x127\n" +
-	"\binternal\x18\x01 \x01(\v2\x1b.agentshim.v1.InternalEntryR\binternal\x126\n" +
-	"\bexternal\x18\x02 \x01(\v2\x1a.protocol.v1.ExternalEntryR\bexternal\"\xe3\x02\n" +
-	"\rInternalEntry\x12)\n" +
-	"\x05plane\x18\x01 \x01(\v2\x13.agentshim.v1.PlaneR\x05plane\x12\x19\n" +
+	"\x13shim/v1/entry.proto\x12\ashim.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1aprotocol/v1/external.proto\x1a\x19shim/v1/unsupported.proto\"s\n" +
+	"\x05Entry\x122\n" +
+	"\binternal\x18\x01 \x01(\v2\x16.shim.v1.InternalEntryR\binternal\x126\n" +
+	"\bexternal\x18\x02 \x01(\v2\x1a.protocol.v1.ExternalEntryR\bexternal\"\xcf\x02\n" +
+	"\rInternalEntry\x12$\n" +
+	"\x05plane\x18\x01 \x01(\v2\x0e.shim.v1.PlaneR\x05plane\x12\x19\n" +
 	"\bwrite_id\x18\x02 \x01(\tR\awriteId\x12<\n" +
-	"\rsource_record\x18\x03 \x01(\v2\x17.google.protobuf.StructR\fsourceRecord\x12L\n" +
-	"\x0fvendor_specific\x18\x04 \x01(\v2!.agentshim.v1.VendorSpecificEntryH\x00R\x0evendorSpecific\x126\n" +
-	"\aunknown\x18\x05 \x01(\v2\x1a.agentshim.v1.UnknownEntryH\x00R\aunknown\x129\n" +
-	"\bunparsed\x18\x06 \x01(\v2\x1b.agentshim.v1.UnparsedEntryH\x00R\bunparsedB\r\n" +
-	"\vunconverted\"t\n" +
-	"\x05Plane\x123\n" +
-	"\x06stream\x18\x01 \x01(\v2\x19.agentshim.v1.PlaneStreamH\x00R\x06stream\x12-\n" +
-	"\x04file\x18\x02 \x01(\v2\x17.agentshim.v1.PlaneFileH\x00R\x04fileB\a\n" +
+	"\rsource_record\x18\x03 \x01(\v2\x17.google.protobuf.StructR\fsourceRecord\x12G\n" +
+	"\x0fvendor_specific\x18\x04 \x01(\v2\x1c.shim.v1.VendorSpecificEntryH\x00R\x0evendorSpecific\x121\n" +
+	"\aunknown\x18\x05 \x01(\v2\x15.shim.v1.UnknownEntryH\x00R\aunknown\x124\n" +
+	"\bunparsed\x18\x06 \x01(\v2\x16.shim.v1.UnparsedEntryH\x00R\bunparsedB\r\n" +
+	"\vunconverted\"j\n" +
+	"\x05Plane\x12.\n" +
+	"\x06stream\x18\x01 \x01(\v2\x14.shim.v1.PlaneStreamH\x00R\x06stream\x12(\n" +
+	"\x04file\x18\x02 \x01(\v2\x12.shim.v1.PlaneFileH\x00R\x04fileB\a\n" +
 	"\x05plane\"\r\n" +
 	"\vPlaneStream\"\v\n" +
-	"\tPlaneFileB*Z(agentrepl/proto/agentshim/v1;agentshimv1b\x06proto3"
+	"\tPlaneFileB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
-	file_agentshim_v1_entry_proto_rawDescOnce sync.Once
-	file_agentshim_v1_entry_proto_rawDescData []byte
+	file_shim_v1_entry_proto_rawDescOnce sync.Once
+	file_shim_v1_entry_proto_rawDescData []byte
 )
 
-func file_agentshim_v1_entry_proto_rawDescGZIP() []byte {
-	file_agentshim_v1_entry_proto_rawDescOnce.Do(func() {
-		file_agentshim_v1_entry_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_agentshim_v1_entry_proto_rawDesc), len(file_agentshim_v1_entry_proto_rawDesc)))
+func file_shim_v1_entry_proto_rawDescGZIP() []byte {
+	file_shim_v1_entry_proto_rawDescOnce.Do(func() {
+		file_shim_v1_entry_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_shim_v1_entry_proto_rawDesc), len(file_shim_v1_entry_proto_rawDesc)))
 	})
-	return file_agentshim_v1_entry_proto_rawDescData
+	return file_shim_v1_entry_proto_rawDescData
 }
 
-var file_agentshim_v1_entry_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
-var file_agentshim_v1_entry_proto_goTypes = []any{
-	(*Entry)(nil),               // 0: agentshim.v1.Entry
-	(*InternalEntry)(nil),       // 1: agentshim.v1.InternalEntry
-	(*Plane)(nil),               // 2: agentshim.v1.Plane
-	(*PlaneStream)(nil),         // 3: agentshim.v1.PlaneStream
-	(*PlaneFile)(nil),           // 4: agentshim.v1.PlaneFile
+var file_shim_v1_entry_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_shim_v1_entry_proto_goTypes = []any{
+	(*Entry)(nil),               // 0: shim.v1.Entry
+	(*InternalEntry)(nil),       // 1: shim.v1.InternalEntry
+	(*Plane)(nil),               // 2: shim.v1.Plane
+	(*PlaneStream)(nil),         // 3: shim.v1.PlaneStream
+	(*PlaneFile)(nil),           // 4: shim.v1.PlaneFile
 	(*v1.ExternalEntry)(nil),    // 5: protocol.v1.ExternalEntry
 	(*structpb.Struct)(nil),     // 6: google.protobuf.Struct
-	(*VendorSpecificEntry)(nil), // 7: agentshim.v1.VendorSpecificEntry
-	(*UnknownEntry)(nil),        // 8: agentshim.v1.UnknownEntry
-	(*UnparsedEntry)(nil),       // 9: agentshim.v1.UnparsedEntry
+	(*VendorSpecificEntry)(nil), // 7: shim.v1.VendorSpecificEntry
+	(*UnknownEntry)(nil),        // 8: shim.v1.UnknownEntry
+	(*UnparsedEntry)(nil),       // 9: shim.v1.UnparsedEntry
 }
-var file_agentshim_v1_entry_proto_depIdxs = []int32{
-	1, // 0: agentshim.v1.Entry.internal:type_name -> agentshim.v1.InternalEntry
-	5, // 1: agentshim.v1.Entry.external:type_name -> protocol.v1.ExternalEntry
-	2, // 2: agentshim.v1.InternalEntry.plane:type_name -> agentshim.v1.Plane
-	6, // 3: agentshim.v1.InternalEntry.source_record:type_name -> google.protobuf.Struct
-	7, // 4: agentshim.v1.InternalEntry.vendor_specific:type_name -> agentshim.v1.VendorSpecificEntry
-	8, // 5: agentshim.v1.InternalEntry.unknown:type_name -> agentshim.v1.UnknownEntry
-	9, // 6: agentshim.v1.InternalEntry.unparsed:type_name -> agentshim.v1.UnparsedEntry
-	3, // 7: agentshim.v1.Plane.stream:type_name -> agentshim.v1.PlaneStream
-	4, // 8: agentshim.v1.Plane.file:type_name -> agentshim.v1.PlaneFile
+var file_shim_v1_entry_proto_depIdxs = []int32{
+	1, // 0: shim.v1.Entry.internal:type_name -> shim.v1.InternalEntry
+	5, // 1: shim.v1.Entry.external:type_name -> protocol.v1.ExternalEntry
+	2, // 2: shim.v1.InternalEntry.plane:type_name -> shim.v1.Plane
+	6, // 3: shim.v1.InternalEntry.source_record:type_name -> google.protobuf.Struct
+	7, // 4: shim.v1.InternalEntry.vendor_specific:type_name -> shim.v1.VendorSpecificEntry
+	8, // 5: shim.v1.InternalEntry.unknown:type_name -> shim.v1.UnknownEntry
+	9, // 6: shim.v1.InternalEntry.unparsed:type_name -> shim.v1.UnparsedEntry
+	3, // 7: shim.v1.Plane.stream:type_name -> shim.v1.PlaneStream
+	4, // 8: shim.v1.Plane.file:type_name -> shim.v1.PlaneFile
 	9, // [9:9] is the sub-list for method output_type
 	9, // [9:9] is the sub-list for method input_type
 	9, // [9:9] is the sub-list for extension type_name
@@ -555,18 +555,18 @@ var file_agentshim_v1_entry_proto_depIdxs = []int32{
 	0, // [0:9] is the sub-list for field type_name
 }
 
-func init() { file_agentshim_v1_entry_proto_init() }
-func file_agentshim_v1_entry_proto_init() {
-	if File_agentshim_v1_entry_proto != nil {
+func init() { file_shim_v1_entry_proto_init() }
+func file_shim_v1_entry_proto_init() {
+	if File_shim_v1_entry_proto != nil {
 		return
 	}
-	file_agentshim_v1_unsupported_proto_init()
-	file_agentshim_v1_entry_proto_msgTypes[1].OneofWrappers = []any{
+	file_shim_v1_unsupported_proto_init()
+	file_shim_v1_entry_proto_msgTypes[1].OneofWrappers = []any{
 		(*InternalEntry_VendorSpecific)(nil),
 		(*InternalEntry_Unknown)(nil),
 		(*InternalEntry_Unparsed)(nil),
 	}
-	file_agentshim_v1_entry_proto_msgTypes[2].OneofWrappers = []any{
+	file_shim_v1_entry_proto_msgTypes[2].OneofWrappers = []any{
 		(*Plane_Stream)(nil),
 		(*Plane_File)(nil),
 	}
@@ -574,17 +574,17 @@ func file_agentshim_v1_entry_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_v1_entry_proto_rawDesc), len(file_agentshim_v1_entry_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_entry_proto_rawDesc), len(file_shim_v1_entry_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_agentshim_v1_entry_proto_goTypes,
-		DependencyIndexes: file_agentshim_v1_entry_proto_depIdxs,
-		MessageInfos:      file_agentshim_v1_entry_proto_msgTypes,
+		GoTypes:           file_shim_v1_entry_proto_goTypes,
+		DependencyIndexes: file_shim_v1_entry_proto_depIdxs,
+		MessageInfos:      file_shim_v1_entry_proto_msgTypes,
 	}.Build()
-	File_agentshim_v1_entry_proto = out.File
-	file_agentshim_v1_entry_proto_goTypes = nil
-	file_agentshim_v1_entry_proto_depIdxs = nil
+	File_shim_v1_entry_proto = out.File
+	file_shim_v1_entry_proto_goTypes = nil
+	file_shim_v1_entry_proto_depIdxs = nil
 }
