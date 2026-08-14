@@ -17,7 +17,7 @@ package frontend.v1;
 
 import "conversation/v1/content.proto";
 import "conversation/v1/payloads.proto";
-import "frontend/v1/shared.proto";
+import "agentrepl/v1/shared.proto";
 import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
@@ -722,7 +722,7 @@ message TaskCatalog {
 // so the completion this comment pairs with currently has nowhere to arrive.
 message DaemonInterceptedCommandItem {
   // The recognized command. Never UNSPECIFIED.
-  SessionCommand command = 1;
+  agentrepl.v1.SessionCommand command = 1;
 }
 
 // A LAUNCHED SKILL'S SKILL.md BODY HAS NO FRONTEND TYPE. It is
@@ -750,7 +750,7 @@ message DaemonInterceptedCommandItem {
 message FailureCardView {
   // WHAT failed, and its evidence. The card takes its color from the kind's
   // side of the vocabulary.
-  FailureKind kind = 1;
+  agentrepl.v1.FailureKind kind = 1;
   // The sentence the card leads with, composed daemon-side. This is what the
   // reader is meant to take away.
   string message = 2;
@@ -1062,7 +1062,7 @@ message DetachedWorkOutputAppend {
   // one: an append that never arrives leaves a silent hole in a transcript that
   // still looks complete. The durable record is intact and a reload repairs it,
   // with no signal to the user that a reload is warranted. A per-frame `seq` on
-  // frontend.v1.FrontendFrame is the cheaper way to get detection back, and would
+  // agentrepl.v1.FrontendFrame is the cheaper way to get detection back, and would
   // cover all three delta streams — ConversationDelta, DetachedWorkDelta and
   // this one — rather than this one alone, for less than a per-stream cursor
   // costs.
