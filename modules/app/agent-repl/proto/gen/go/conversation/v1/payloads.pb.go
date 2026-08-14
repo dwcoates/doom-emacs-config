@@ -1301,8 +1301,8 @@ type DetachedWorkKind_Unclassified struct {
 
 type DetachedWorkKind_Skill struct {
 	// A skill invocation. It owns its own window rather than rendering flat, so
-	// every record the skill produces names this message as its
-	// top_level_message_id and needs no correlation to find its card.
+	// every record the skill produces sits somewhere below this message on the
+	// parent chain and needs no correlation to find its card.
 	Skill *DetachedSkill `protobuf:"bytes,5,opt,name=skill,proto3,oneof"`
 }
 

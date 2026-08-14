@@ -614,8 +614,8 @@ export type DetachedWorkKind = Message<"conversation.v1.DetachedWorkKind"> & {
   } | {
     /**
      * A skill invocation. It owns its own window rather than rendering flat, so
-     * every record the skill produces names this message as its
-     * top_level_message_id and needs no correlation to find its card.
+     * every record the skill produces sits somewhere below this message on the
+     * parent chain and needs no correlation to find its card.
      *
      * @generated from field: conversation.v1.DetachedSkill skill = 5;
      */
