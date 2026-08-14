@@ -12,6 +12,7 @@ syntax = "proto3";
 package frontend.v1;
 
 import "shim/v1/core.proto";
+import "conversation/v1/session_command.proto";
 import "frontend/v1/feed.proto";
 import "agentrepl/v1/shared.proto";
 
@@ -926,7 +927,7 @@ message QueueClassificationUninterruptibleTurn {
   // Which cut is running, so the card can name it. Never UNSPECIFIED: the arm
   // is set only when the daemon recognized the running prompt as one of the
   // two, and an arm that could not say which would explain nothing.
-  agentrepl.v1.SessionCommand command = 1;
+  conversation.v1.SessionCommand command = 1;
 }
 
 // The classifier could not be believed (it answered with neither token, or

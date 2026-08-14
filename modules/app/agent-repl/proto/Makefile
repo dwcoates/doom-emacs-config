@@ -13,6 +13,7 @@
 # service.proto imports them, so they sit between the two.
 PROTOS := \
   conversation/v1/content.proto \
+  conversation/v1/session_command.proto \
   conversation/v1/message.proto \
   conversation/v1/payloads.proto \
   conversation/v1/tokens.proto \
@@ -26,6 +27,7 @@ PROTOS := \
   store/v1/unsupported.proto \
   store/v1/write.proto \
   agentrepl/v1/shared.proto \
+  frontend/v1/failure.proto \
   frontend/v1/feed.proto \
   frontend/v1/topbar.proto \
   frontend/v1/sidebar.proto \
