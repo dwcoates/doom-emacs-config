@@ -6,9 +6,9 @@
 // are store↔sidecar traffic: the sidecar persists a cursor with the records it
 // read at that position, and recovers its cursors from the store at startup.
 // None of it ever crosses the daemon↔shim boundary, so none of it belongs in
-// `protocol.v1`, which describes that boundary and ONLY that boundary.
+// `shim.v1`, which describes that boundary and ONLY that boundary.
 //
-// They lived in `protocol/v1/core.proto` until now purely because the earlier
+// They lived in `shim/v1/core.proto` until now purely because the earlier
 // restructure moved that file wholesale rather than by surface.
 
 syntax = "proto3";

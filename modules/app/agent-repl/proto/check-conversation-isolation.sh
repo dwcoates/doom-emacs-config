@@ -2,7 +2,7 @@
 #
 # INVARIANT I7 — CONVERSATION-INTERNAL ISOLATION, AS A BUILD GATE.
 #
-# A stored conversation record has two halves. protocol.v1's ExternalEntry is the
+# A stored conversation record has two halves. shim.v1's ExternalEntry is the
 # half that may cross the shim→daemon wire; store.v1 is the half that may
 # not — which observation plane produced the record, the key the store deduped it
 # on, and anything the producer could not convert.
