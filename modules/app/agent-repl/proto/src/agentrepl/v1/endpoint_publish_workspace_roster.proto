@@ -1,18 +1,19 @@
 // endpoint_publish_workspace_roster.proto — the PublishWorkspaceRoster
-// endpoint's request and response.
+// endpoint's request, success and error.
 //
-// ONE ENDPOINT PER FILE: PublishWorkspaceRosterRequest and
-// PublishWorkspaceRosterResponse and nothing else, so the whole of what one
-// method takes and returns is readable in one place. The `endpoint_` prefix is
-// the grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
-// directory is not available here, and for why a request type belongs to
-// agentrepl.v1 rather than frontend.v1.
+// ONE ENDPOINT PER FILE: PublishWorkspaceRosterRequest,
+// PublishWorkspaceRosterResponse and the two answers it wraps, and nothing
+// else, so the whole of what one method takes and returns is readable in one
+// place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and
+// for why a request type belongs to agentrepl.v1 rather than frontend.v1.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+import "frontend/v1/failure.proto";
 import "frontend/v1/sidebar.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -22,13 +23,12 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 // Emacs is the roster's SINGLE author; this is the only way a roster enters
 // the daemon. The daemon retains the published roster, folds it into every
 // connect snapshot, and rebroadcasts it — it never synthesizes or amends one.
-// The ack semantics are every other frontend command's: a refused publish (a
-// stale, out-of-order revision WITHIN the publisher's own epoch, or a roster
-// carrying no epoch at all) is a loud nack on the correlated CommandAck, never
-// a silent drop, so a publisher whose revision counter has fallen behind learns
-// it instead of believing it published. A publish from a NEW epoch is never
-// stale — see WorkspaceRoster.boot_id — so no publisher ever needs to resync a
-// counter it did not author.
+// A refused publish (a stale, out-of-order revision WITHIN the publisher's own
+// epoch, or a roster carrying no epoch at all) is a loud nack on this method's
+// own error arm, never a silent drop, so a publisher whose revision counter has
+// fallen behind learns it instead of believing it published. A publish from a
+// NEW epoch is never stale — see WorkspaceRoster.boot_id — so no publisher ever
+// needs to resync a counter it did not author.
 message PublishWorkspaceRosterRequest {
   // Correlation. See agentrepl.v1.AgentRepl. The roster is daemon-global — it
   // IS the set of workspaces — so this command names no workspace.
@@ -39,16 +39,43 @@ message PublishWorkspaceRosterRequest {
   frontend.v1.WorkspaceRoster roster = 2;
 }
 
-// PublishWorkspaceRoster's answer: accepted, or the classified account of the
-// refusal.
+// PublishWorkspaceRoster's answer: exactly one of a success and an error.
 //
-// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
-// directly gave 33 methods one response type, so no method could gain an answer
-// of its own without offering that answer to every other method as well. A
-// refused publish is a loud nack on the ack, which is the whole of what a
-// publisher needs to learn.
+// TWO ARMS, NOT AN `ok` BIT PLUS AN OPTIONAL FAILURE — see
+// AcceptQueueEntryResponse for the whole of that argument.
 message PublishWorkspaceRosterResponse {
-  // Whether the daemon accepted this call, and when it did not, the classified
-  // failure a frontend renders as a card. See CommandAck.
-  CommandAck ack = 1;
+  // Echoed from the request that produced this answer. See
+  // AcceptQueueEntryResponse.request_id.
+  string request_id = 1;
+  oneof response {
+    PublishWorkspaceRosterSuccess success = 2;
+    PublishWorkspaceRosterError error = 3;
+  }
+}
+
+// The roster is retained and fanned out.
+//
+// NO ARMS, AND NO FIELDS. What was published is what the publisher sent; the
+// daemon never amends a roster, so there is nothing about it a receipt could
+// tell the author it does not already know.
+message PublishWorkspaceRosterSuccess {}
+
+// Why the publish was refused.
+message PublishWorkspaceRosterError {
+  oneof error {
+    // No roster retainer is configured. The roster is retained by the
+    // TRANSPORT rather than by the command handler — it is editor-global
+    // surface with no session or workspace of its own, and the thing that must
+    // hold it is the same thing that fans it out and snapshots it on connect —
+    // so an unwired retainer is a loud refusal rather than a nil-deref.
+    RefusalDependencyUnwired roster_retainer_unwired = 1;
+    // The revision is stale or out of order within the publisher's own epoch,
+    // or the roster carries no epoch at all.
+    RefusalRosterRevisionStale revision_stale = 2;
+    // The publish failed for a reason the daemon's classifier could not name.
+    frontend.v1.FailureInternalUnclassified unclassified = 3;
+  }
+  // The feed card this refusal was filed under, when it produced one. See
+  // AcceptQueueEntryError.failure_card.
+  frontend.v1.FailureCardRef failure_card = 4;
 }

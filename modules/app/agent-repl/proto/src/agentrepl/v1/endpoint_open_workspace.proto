@@ -1,17 +1,19 @@
-// endpoint_open_workspace.proto — the OpenWorkspace endpoint's request and
-// response.
+// endpoint_open_workspace.proto — the OpenWorkspace endpoint's request, success
+// and error.
 //
-// ONE ENDPOINT PER FILE: OpenWorkspaceRequest and OpenWorkspaceResponse and
-// nothing else, so the whole of what one method takes and returns is readable in
-// one place. The `endpoint_` prefix is the grouping, not a directory — see
-// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
-// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+// ONE ENDPOINT PER FILE: OpenWorkspaceRequest, OpenWorkspaceResponse and the
+// two answers it wraps, and nothing else, so the whole of what one method takes
+// and returns is readable in one place. The `endpoint_` prefix is the grouping,
+// not a directory — see DESIGN-protobuf-surfaces.md for why a directory is not
+// available here, and for why a request type belongs to agentrepl.v1 rather
+// than frontend.v1.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+import "frontend/v1/failure.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -24,9 +26,9 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 // owns is the daemon's ruling; a frontend that named one would be asserting an
 // answer to a question it cannot hold across a daemon restart.
 message OpenWorkspaceRequest {
-  // Correlation. See AgentRepl in frame.proto.
+  // Correlation. See agentrepl.v1.AgentRepl.
   string request_id = 1;
-  // The workspace being opened. See AgentRepl in frame.proto.
+  // The workspace being opened. See agentrepl.v1.AgentRepl.
   string workspace = 2;
   // The permission posture a session started by this open runs under, empty to
   // accept the daemon's default. Ignored when the workspace already has a
@@ -39,6 +41,11 @@ message OpenWorkspaceRequest {
   // Empty means the daemon's own default, NOT the absence of a config dir.
   string config_dir = 4;
   // Run a session started by this open against the offline scripted SDK.
+  //
+  // A PROPERTY OF THE SESSION, NOT A MODE OF THE REQUEST, so it stays a bool
+  // when the mode flags around it became arms: it says what the started session
+  // talks to, not what kind of open this is, and there is no second act it
+  // could falsely assert.
   bool fake = 5;
   // The caller's DELIBERATE consent to start a session with NO permission gate,
   // required on exactly the same terms as CreateSessionRequest.allow_ungated and
@@ -48,15 +55,49 @@ message OpenWorkspaceRequest {
   bool allow_ungated = 6;
 }
 
-// OpenWorkspace's answer: accepted, or the classified account of the refusal.
+// OpenWorkspace's answer: exactly one of a success and an error.
 //
-// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
-// directly gave 33 methods one response type, so no method could gain an answer
-// of its own without offering that answer to every other method as well. Which
-// session the open landed on is the daemon's ruling and reaches the client as a
-// pushed SessionView, never here.
+// TWO ARMS, NOT AN `ok` BIT PLUS AN OPTIONAL FAILURE — see
+// AcceptQueueEntryResponse for the whole of that argument.
 message OpenWorkspaceResponse {
-  // Whether the daemon accepted this call, and when it did not, the classified
-  // failure a frontend renders as a card. See CommandAck.
-  CommandAck ack = 1;
+  // Echoed from the request that produced this answer. See
+  // AcceptQueueEntryResponse.request_id.
+  string request_id = 1;
+  oneof response {
+    OpenWorkspaceSuccess success = 2;
+    OpenWorkspaceError error = 3;
+  }
+}
+
+// The workspace has a session.
+//
+// NO ARMS, AND NO IDENTITY. Which session the open landed on — and whether it
+// was reattached or freshly started — is the daemon's ruling and reaches the
+// client as a pushed SessionView, never here. A client that read a session
+// identity out of this answer would be holding a second, weaker copy of a
+// ruling that can change under it.
+message OpenWorkspaceSuccess {}
+
+// Why the open was refused.
+message OpenWorkspaceError {
+  oneof error {
+    // The workspace lifecycle refused the open outright.
+    RefusalWorkspaceOpenFailed open_failed = 1;
+    // The session could not be started at all.
+    frontend.v1.FailureSessionStartFailed session_start_failed = 2;
+    // Bring-up did not finish connecting in time.
+    FailureSessionNotEstablished session_not_established = 3;
+    // The workspace has a vendor conversation that could not be reached, and a
+    // blank one will NOT be started in its place.
+    FailureConversationUnresumable conversation_unresumable = 4;
+    // The vendor conversation could not be resumed without breaking continuity.
+    // SHARED EVIDENCE with the drawn arm of the same shape; the arm is what
+    // says this instance answered an open rather than happening on its own.
+    frontend.v1.FailureSessionResumeFailed session_resume_failed = 5;
+    // The open failed for a reason the daemon's classifier could not name.
+    frontend.v1.FailureInternalUnclassified unclassified = 6;
+  }
+  // The feed card this refusal was filed under, when it produced one. See
+  // AcceptQueueEntryError.failure_card.
+  frontend.v1.FailureCardRef failure_card = 7;
 }

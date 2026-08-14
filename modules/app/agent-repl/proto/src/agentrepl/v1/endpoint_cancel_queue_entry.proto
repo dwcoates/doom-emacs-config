@@ -1,17 +1,19 @@
-// endpoint_cancel_queue_entry.proto — the CancelQueueEntry endpoint's request
-// and response.
+// endpoint_cancel_queue_entry.proto — the CancelQueueEntry endpoint's request,
+// success and error.
 //
-// ONE ENDPOINT PER FILE: CancelQueueEntryRequest and CancelQueueEntryResponse
-// and nothing else, so the whole of what one method takes and returns is
-// readable in one place. The `endpoint_` prefix is the grouping, not a directory
-// — see DESIGN-protobuf-surfaces.md for why a directory is not available here,
-// and for why a request type belongs to agentrepl.v1 rather than frontend.v1.
+// ONE ENDPOINT PER FILE: CancelQueueEntryRequest, CancelQueueEntryResponse and
+// the two answers it wraps, and nothing else, so the whole of what one method
+// takes and returns is readable in one place. The `endpoint_` prefix is the
+// grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
+// directory is not available here, and for why a request type belongs to
+// agentrepl.v1 rather than frontend.v1.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+import "frontend/v1/failure.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -21,18 +23,45 @@ message CancelQueueEntryRequest {
   string request_id = 1;
   // The workspace whose queue holds the entry. See agentrepl.v1.AgentRepl.
   string workspace = 2;
+  // Which held entry is being dropped. The queue is per-workspace, so an entry
+  // id alone does not address one.
   string entry_id = 3;
 }
 
-// CancelQueueEntry's answer: accepted, or the classified account of the refusal.
+// CancelQueueEntry's answer: exactly one of a success and an error.
 //
-// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
-// directly gave 33 methods one response type, so no method could gain an answer
-// of its own without offering that answer to every other method as well. The
-// entry's removal from the queue view is the whole observable effect, and it is
-// pushed.
+// TWO ARMS, NOT AN `ok` BIT PLUS AN OPTIONAL FAILURE — see
+// AcceptQueueEntryResponse for the whole of that argument, which is this
+// service's and not this method's.
 message CancelQueueEntryResponse {
-  // Whether the daemon accepted this call, and when it did not, the classified
-  // failure a frontend renders as a card. See CommandAck.
-  CommandAck ack = 1;
+  // Echoed from the request that produced this answer. See
+  // AcceptQueueEntryResponse.request_id.
+  string request_id = 1;
+  oneof response {
+    CancelQueueEntrySuccess success = 2;
+    CancelQueueEntryError error = 3;
+  }
+}
+
+// The entry is off the queue and will not be delivered.
+//
+// NO ARMS, AND NO FIELDS. The entry's removal from the queue view is the whole
+// observable effect, and it is pushed.
+message CancelQueueEntrySuccess {}
+
+// Why the cancel was refused.
+message CancelQueueEntryError {
+  oneof error {
+    // This daemon has no prompt queue wired, so there is no entry to drop.
+    RefusalDependencyUnwired queue_unwired = 1;
+    // No entry with this id is on the workspace's queue. Refused rather than
+    // acked: the user asked for something specific, and pretending to have
+    // dropped it would be worse than saying it is gone.
+    RefusalQueueEntryUnknown entry_unknown = 2;
+    // The queue refused for a reason the daemon's classifier could not name.
+    frontend.v1.FailureInternalUnclassified unclassified = 3;
+  }
+  // The feed card this refusal was filed under, when it produced one. See
+  // AcceptQueueEntryError.failure_card.
+  frontend.v1.FailureCardRef failure_card = 4;
 }

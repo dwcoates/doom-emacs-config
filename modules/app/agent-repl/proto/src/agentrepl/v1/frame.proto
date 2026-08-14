@@ -1,14 +1,16 @@
-// frame.proto — TRANSPORT: the outbound frame envelope, the connect snapshot,
-// and the command acks. THE SERVICE ITSELF is service.proto, beside this file
-// and in this same package: the verbs are declared where a reader looks for
-// verbs, and the payloads they move are declared here.
+// frame.proto — TRANSPORT: the outbound frame envelope and the connect
+// snapshot. THE SERVICE ITSELF is service.proto, beside this file and in this
+// same package: the verbs are declared where a reader looks for verbs, and the
+// payloads they move are declared here.
+//
+// THE ACKS ARE NO LONGER AMONG THEM. They were, and the one type that was all
+// of them is gone; see the note at the foot of this file.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
 import "agentrepl/v1/shared.proto";
-import "frontend/v1/failure.proto";
 import "frontend/v1/feed.proto";
 import "frontend/v1/footer.proto";
 import "frontend/v1/sidebar.proto";
@@ -22,11 +24,15 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 // Renaming an arm is a breaking change every bit as much as renumbering one:
 // a peer that has not shipped the new spelling simply stops seeing the frame.
 //
-// THERE IS NO `command_ack` ARM. An ack is the RETURN VALUE of the method that
-// was called (see AgentRepl in service.proto), so it travels on the call that
-// produced it and cannot be delivered to a client that did not make it. What
-// still arrives here is a command's EFFECT, which lands later and is a
-// different thing.
+// THERE IS NO `command_ack` ARM, AND NO ARM FOR ANY METHOD'S ANSWER. An answer
+// is the RETURN VALUE of the method that was called (see AgentRepl in
+// service.proto), so it travels on the call that produced it and cannot be
+// delivered to a client that did not make it. What still arrives here is a
+// command's EFFECT, which lands later and is a different thing — and the
+// failures that answer NOBODY, which arrive as frontend.v1.FailureCardView
+// inside the deltas below. That second category is not a loophole in the
+// in-band rule: a session dying mid-turn, a rate limit and a shim crash are not
+// answers to anything, so there is no request whose response could carry them.
 message FrontendFrame {
   oneof frame {
     StateSnapshot snapshot = 1;
@@ -180,38 +186,24 @@ message StateSnapshot {
 }
 
 
-// The ordinary answer to a command: was it accepted, and if not, why.
+// THE ACKS ARE GONE, AND SO IS THE ONE TYPE THAT WAS ALL OF THEM.
 //
-// EVERY REFUSAL IS A RETURNED MESSAGE, never a transport error status. A
-// frontend renders a refusal as a failure card, and a card needs a classified
-// cause it can draw — which is what FailureKind is and what a status code is
-// not.
-message CommandAck {
-  // Echoed from the request that produced this ack. It is NOT made redundant by
-  // the call/response pairing: a command's EFFECT arrives later on the Subscribe
-  // stream, in a frame that carries this same id, so the client still needs it
-  // to match an effect to the request that caused it.
-  string request_id = 1;
-  bool ok = 2;
-  string error = 3;
-  // The CLASSIFIED account of a refusal, superseding the free
-  // string above.
-  //
-  // `error` was an err.Error() funnel: every handler failure, every Nack
-  // reason, every truncated replay arrived as raw Go text that Emacs echoed
-  // verbatim and the webapp did not render at all. This is that same failure
-  // run through the daemon's one classifier, so both frontends can show a
-  // refusal as a failure card instead of as a log line or as nothing.
-  // Unset when ok is true.
-  frontend.v1.FailureKind failure = 4;
-  // The feed card this refusal was filed under, when it produced one, so the
-  // client can offer to reveal it instead of restating the account inline.
-  frontend.v1.FailureCardRef failure_card = 5;
-}
-
-// The challenge payload: what the interrupt would actually stop, so the
-// client can render a concrete question ("interrupt 3 running subagents?")
-// rather than a bare are-you-sure.
-message InterruptConfirmRequired {
-  int64 live_tasks = 1;
-}
+// `CommandAck` lived here and was returned, wrapped, by 33 methods: an `ok`
+// bit, a free-text `error`, a classified `failure`, a card reference, and — as
+// each method needed something — a selected model, an observed conversation
+// uuid, a detached-cancel verdict and an interrupt challenge, every one of them
+// meaningless on the other 32. It could represent "not ok with no failure",
+// "ok with a failure", and "ok" carrying a field that named a model for a
+// method that has nothing to do with models.
+//
+// Each method now answers with its OWN two-arm response — see any
+// `endpoint_*.proto` — so every one of those states is unrepresentable, and
+// what a method can be refused for is a closed set the compiler checks rather
+// than a field a handler may or may not have filled. Nothing it carried was
+// dropped: the correlation echo is on every response, the card reference is on
+// every error, and the per-method fields moved onto the per-method success or
+// error that actually has a use for them.
+//
+// `InterruptConfirmRequired` left with it, to endpoint_interrupt.proto. It was
+// declared beside the frames because it began as a push arm; it is an ANSWER
+// now — to one call and no other — so it lives with the call it answers.
