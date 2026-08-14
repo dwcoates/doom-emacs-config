@@ -480,9 +480,9 @@ export const DaemonViewSchema: GenMessage<DaemonView> = /*@__PURE__*/
 
 /**
  * EPHEMERAL long-tool liveness relay: the arm the daemon puts a running tool's
- * liveness on, so a long-running tool stops looking hung. Like TypingDelta it
- * is never persisted and never appears in a StateSnapshot — a frontend that
- * reconnects simply waits for the next heartbeat.
+ * liveness on, so a long-running tool stops looking hung. It is never
+ * persisted and never appears in a StateSnapshot — a frontend that reconnects
+ * simply waits for the next heartbeat.
  *
  * KNOWN GAP: THIS VIEW CURRENTLY HAS NOTHING TO TICK WITH. The per-tool
  * progress a renderer would need (which tool, how long it has been running) is
