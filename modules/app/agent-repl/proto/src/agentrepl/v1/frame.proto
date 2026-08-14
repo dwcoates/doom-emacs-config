@@ -8,6 +8,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/shared.proto";
+import "frontend/v1/failure.proto";
 import "frontend/v1/feed.proto";
 import "frontend/v1/footer.proto";
 import "frontend/v1/sidebar.proto";
@@ -202,7 +203,7 @@ message CommandAck {
   // run through the daemon's one classifier, so both frontends can show a
   // refusal as a failure card instead of as a log line or as nothing.
   // Unset when ok is true.
-  FailureKind failure = 4;
+  frontend.v1.FailureKind failure = 4;
   // The feed card this refusal was filed under, when it produced one, so the
   // client can offer to reveal it instead of restating the account inline.
   frontend.v1.FailureCardRef failure_card = 5;

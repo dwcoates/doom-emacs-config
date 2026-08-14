@@ -17,7 +17,8 @@ package frontend.v1;
 
 import "conversation/v1/content.proto";
 import "conversation/v1/payloads.proto";
-import "agentrepl/v1/shared.proto";
+import "conversation/v1/session_command.proto";
+import "frontend/v1/failure.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
@@ -657,7 +658,7 @@ message TaskCatalog {
 // skill body a launched skill contributes.
 // ==========================================================================
 
-// THE COMMAND SET ITSELF LIVES IN conversation.v1 (shared.proto),
+// THE COMMAND SET ITSELF LIVES IN conversation.v1 (session_command.proto),
 // along with its SessionCommandSpec option. It moved there because a durable
 // conversation record names one — DaemonAnsweredCommand — and a stored record
 // cannot depend on the daemon's resolved output surface. The MENU that renders
@@ -707,7 +708,7 @@ message TaskCatalog {
 // so the completion this comment pairs with currently has nowhere to arrive.
 message DaemonInterceptedCommandItem {
   // The recognized command. Never UNSPECIFIED.
-  agentrepl.v1.SessionCommand command = 1;
+  conversation.v1.SessionCommand command = 1;
 }
 
 // A LAUNCHED SKILL'S SKILL.md BODY HAS NO FRONTEND TYPE. It is
@@ -735,7 +736,7 @@ message DaemonInterceptedCommandItem {
 message FailureCardView {
   // WHAT failed, and its evidence. The card takes its color from the kind's
   // side of the vocabulary.
-  agentrepl.v1.FailureKind kind = 1;
+  FailureKind kind = 1;
   // The sentence the card leads with, composed daemon-side. This is what the
   // reader is meant to take away.
   string message = 2;
