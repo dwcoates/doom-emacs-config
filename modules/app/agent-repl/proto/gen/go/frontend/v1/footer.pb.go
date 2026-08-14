@@ -16,7 +16,8 @@
 package frontendv1
 
 import (
-	v1 "agentrepl/proto/protocol/v1"
+	v1 "agentrepl/proto/agentrepl/v1"
+	v11 "agentrepl/proto/protocol/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -690,7 +691,7 @@ type WorkspaceState struct {
 	// UNSET means this workspace has no merge to report — the merge axis has
 	// never spoken for it, or its axis is cleared. It is never a zero-valued
 	// status standing in for absence.
-	MergeStatus *MergeStatus `protobuf:"bytes,16,opt,name=merge_status,json=mergeStatus,proto3" json:"merge_status,omitempty"`
+	MergeStatus *v1.MergeStatus `protobuf:"bytes,16,opt,name=merge_status,json=mergeStatus,proto3" json:"merge_status,omitempty"`
 	// THE OUTSTANDING QUESTION about taking this workspace's merge off the
 	// queue. See MergeDequeueOffer: an interrupt no longer performs the queue
 	// half, it asks, and this is where the asking lives.
@@ -700,7 +701,7 @@ type WorkspaceState struct {
 	// terminal, or dropped because the merge left the queue on its own. A
 	// frontend draws the card if and only if this field is set, so clearing it
 	// IS how the card comes down; there is no second dismissal channel.
-	MergeDequeueOffer *MergeDequeueOffer `protobuf:"bytes,17,opt,name=merge_dequeue_offer,json=mergeDequeueOffer,proto3" json:"merge_dequeue_offer,omitempty"`
+	MergeDequeueOffer *v1.MergeDequeueOffer `protobuf:"bytes,17,opt,name=merge_dequeue_offer,json=mergeDequeueOffer,proto3" json:"merge_dequeue_offer,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -840,14 +841,14 @@ func (x *WorkspaceState) GetMergedAtMs() int64 {
 	return 0
 }
 
-func (x *WorkspaceState) GetMergeStatus() *MergeStatus {
+func (x *WorkspaceState) GetMergeStatus() *v1.MergeStatus {
 	if x != nil {
 		return x.MergeStatus
 	}
 	return nil
 }
 
-func (x *WorkspaceState) GetMergeDequeueOffer() *MergeDequeueOffer {
+func (x *WorkspaceState) GetMergeDequeueOffer() *v1.MergeDequeueOffer {
 	if x != nil {
 		return x.MergeDequeueOffer
 	}
@@ -929,7 +930,7 @@ type SessionView struct {
 	Death *FailureCardView `protobuf:"bytes,19,opt,name=death,proto3" json:"death,omitempty"`
 	// The SDK-published set this session can deliberately select.  A frontend
 	// only renders these choices; it never invents or owns a model selection.
-	ModelOptions []*v1.ModelOption `protobuf:"bytes,20,rep,name=model_options,json=modelOptions,proto3" json:"model_options,omitempty"`
+	ModelOptions []*v11.ModelOption `protobuf:"bytes,20,rep,name=model_options,json=modelOptions,proto3" json:"model_options,omitempty"`
 	// NO PERSISTENCE AGGREGATE RIDES THIS MESSAGE. Token economics is durable
 	// evidence with its own home, and what a frontend needs of it arrives
 	// already digested as TokenBreakdownView's resolved rows — never as a whole
@@ -938,7 +939,7 @@ type SessionView struct {
 	// Present iff the session is hibernated; the typed account behind the
 	// `hibernated` bool, which stays as its coarse projection.
 	// A frontend renders the revival gate from this.
-	Hibernation   *HibernationDetail `protobuf:"bytes,21,opt,name=hibernation,proto3" json:"hibernation,omitempty"`
+	Hibernation   *v1.HibernationDetail `protobuf:"bytes,21,opt,name=hibernation,proto3" json:"hibernation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1106,14 +1107,14 @@ func (x *SessionView) GetDeath() *FailureCardView {
 	return nil
 }
 
-func (x *SessionView) GetModelOptions() []*v1.ModelOption {
+func (x *SessionView) GetModelOptions() []*v11.ModelOption {
 	if x != nil {
 		return x.ModelOptions
 	}
 	return nil
 }
 
-func (x *SessionView) GetHibernation() *HibernationDetail {
+func (x *SessionView) GetHibernation() *v1.HibernationDetail {
 	if x != nil {
 		return x.Hibernation
 	}
@@ -1420,7 +1421,7 @@ type InterruptWindow struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Active        bool                   `protobuf:"varint,1,opt,name=active,proto3" json:"active,omitempty"`
 	SinceMs       int64                  `protobuf:"varint,2,opt,name=since_ms,json=sinceMs,proto3" json:"since_ms,omitempty"`
-	Outcome       v1.InterruptOutcome    `protobuf:"varint,3,opt,name=outcome,proto3,enum=protocol.v1.InterruptOutcome" json:"outcome,omitempty"`
+	Outcome       v11.InterruptOutcome   `protobuf:"varint,3,opt,name=outcome,proto3,enum=protocol.v1.InterruptOutcome" json:"outcome,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1469,11 +1470,11 @@ func (x *InterruptWindow) GetSinceMs() int64 {
 	return 0
 }
 
-func (x *InterruptWindow) GetOutcome() v1.InterruptOutcome {
+func (x *InterruptWindow) GetOutcome() v11.InterruptOutcome {
 	if x != nil {
 		return x.Outcome
 	}
-	return v1.InterruptOutcome(0)
+	return v11.InterruptOutcome(0)
 }
 
 type ProgressView struct {
@@ -1808,7 +1809,7 @@ type ContextCostAlert struct {
 	// "keep-alive came back cold" alarm — the ping paid full freight, meaning
 	// the cache had already expired — and frontends render it as its own
 	// message rather than a generic expensive-turn note.
-	PromptOrigin  v1.PromptOrigin `protobuf:"varint,5,opt,name=prompt_origin,json=promptOrigin,proto3,enum=protocol.v1.PromptOrigin" json:"prompt_origin,omitempty"`
+	PromptOrigin  v11.PromptOrigin `protobuf:"varint,5,opt,name=prompt_origin,json=promptOrigin,proto3,enum=protocol.v1.PromptOrigin" json:"prompt_origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1871,11 +1872,11 @@ func (x *ContextCostAlert) GetAtMs() int64 {
 	return 0
 }
 
-func (x *ContextCostAlert) GetPromptOrigin() v1.PromptOrigin {
+func (x *ContextCostAlert) GetPromptOrigin() v11.PromptOrigin {
 	if x != nil {
 		return x.PromptOrigin
 	}
-	return v1.PromptOrigin(0)
+	return v11.PromptOrigin(0)
 }
 
 // The footer phase cell's props. These are resolved DISPLAY properties, not a
@@ -2343,7 +2344,7 @@ type SubmitPromptCmd struct {
 	PermissionMode string                 `protobuf:"bytes,2,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
 	// Required origin selected by the concrete frontend send site. The daemon
 	// rejects UNSPECIFIED rather than guessing which UI or automation acted.
-	PromptOrigin  v1.PromptOrigin `protobuf:"varint,3,opt,name=prompt_origin,json=promptOrigin,proto3,enum=protocol.v1.PromptOrigin" json:"prompt_origin,omitempty"`
+	PromptOrigin  v11.PromptOrigin `protobuf:"varint,3,opt,name=prompt_origin,json=promptOrigin,proto3,enum=protocol.v1.PromptOrigin" json:"prompt_origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2392,11 +2393,11 @@ func (x *SubmitPromptCmd) GetPermissionMode() string {
 	return ""
 }
 
-func (x *SubmitPromptCmd) GetPromptOrigin() v1.PromptOrigin {
+func (x *SubmitPromptCmd) GetPromptOrigin() v11.PromptOrigin {
 	if x != nil {
 		return x.PromptOrigin
 	}
-	return v1.PromptOrigin(0)
+	return v11.PromptOrigin(0)
 }
 
 // Stop the running turn. Interrupting a LIVE TURN never asks for
@@ -2571,7 +2572,7 @@ func (x *DetachedCancelOutcome) GetCancelled() *DetachedAgentsCancelled {
 	return nil
 }
 
-func (x *DetachedCancelOutcome) GetNothingRunning() *v1.NoDetachedAgentsRunning {
+func (x *DetachedCancelOutcome) GetNothingRunning() *v11.NoDetachedAgentsRunning {
 	if x != nil {
 		if x, ok := x.Outcome.(*DetachedCancelOutcome_NothingRunning); ok {
 			return x.NothingRunning
@@ -2580,7 +2581,7 @@ func (x *DetachedCancelOutcome) GetNothingRunning() *v1.NoDetachedAgentsRunning 
 	return nil
 }
 
-func (x *DetachedCancelOutcome) GetUnsupported() *v1.DetachedCancelUnsupported {
+func (x *DetachedCancelOutcome) GetUnsupported() *v11.DetachedCancelUnsupported {
 	if x != nil {
 		if x, ok := x.Outcome.(*DetachedCancelOutcome_Unsupported); ok {
 			return x.Unsupported
@@ -2598,11 +2599,11 @@ type DetachedCancelOutcome_Cancelled struct {
 }
 
 type DetachedCancelOutcome_NothingRunning struct {
-	NothingRunning *v1.NoDetachedAgentsRunning `protobuf:"bytes,2,opt,name=nothing_running,json=nothingRunning,proto3,oneof"`
+	NothingRunning *v11.NoDetachedAgentsRunning `protobuf:"bytes,2,opt,name=nothing_running,json=nothingRunning,proto3,oneof"`
 }
 
 type DetachedCancelOutcome_Unsupported struct {
-	Unsupported *v1.DetachedCancelUnsupported `protobuf:"bytes,3,opt,name=unsupported,proto3,oneof"`
+	Unsupported *v11.DetachedCancelUnsupported `protobuf:"bytes,3,opt,name=unsupported,proto3,oneof"`
 }
 
 func (*DetachedCancelOutcome_Cancelled) isDetachedCancelOutcome_Outcome() {}
@@ -2830,7 +2831,7 @@ type QueueClassificationUninterruptibleTurn struct {
 	// Which cut is running, so the card can name it. Never UNSPECIFIED: the arm
 	// is set only when the daemon recognized the running prompt as one of the
 	// two, and an arm that could not say which would explain nothing.
-	Command       SessionCommand `protobuf:"varint,1,opt,name=command,proto3,enum=frontend.v1.SessionCommand" json:"command,omitempty"`
+	Command       v1.SessionCommand `protobuf:"varint,1,opt,name=command,proto3,enum=agentrepl.v1.SessionCommand" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2865,11 +2866,11 @@ func (*QueueClassificationUninterruptibleTurn) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{25}
 }
 
-func (x *QueueClassificationUninterruptibleTurn) GetCommand() SessionCommand {
+func (x *QueueClassificationUninterruptibleTurn) GetCommand() v1.SessionCommand {
 	if x != nil {
 		return x.Command
 	}
-	return SessionCommand_SESSION_COMMAND_UNSPECIFIED
+	return v1.SessionCommand(0)
 }
 
 // The classifier could not be believed (it answered with neither token, or
@@ -3594,7 +3595,7 @@ var File_frontend_v1_footer_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\n" +
-	"\x18frontend/v1/footer.proto\x12\vfrontend.v1\x1a\x16protocol/v1/core.proto\x1a\x16frontend/v1/feed.proto\x1a\x18frontend/v1/shared.proto\"\xa4\x01\n" +
+	"\x18frontend/v1/footer.proto\x12\vfrontend.v1\x1a\x16protocol/v1/core.proto\x1a\x16frontend/v1/feed.proto\x1a\x19agentrepl/v1/shared.proto\"\xa4\x01\n" +
 	"\fRuntimeFault\x12\x1c\n" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x1d\n" +
 	"\n" +
@@ -3603,7 +3604,7 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\n" +
 	"cause_kind\x18\x04 \x01(\tR\tcauseKind\x12 \n" +
 	"\fopened_at_ms\x18\x05 \x01(\x03R\n" +
-	"openedAtMs\"\xfa\x05\n" +
+	"openedAtMs\"\xfc\x05\n" +
 	"\x0eWorkspaceState\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -3624,9 +3625,9 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\ractive_faults\x18\r \x03(\v2\x19.frontend.v1.RuntimeFaultR\factiveFaults\x12(\n" +
 	"\x10merge_lease_held\x18\x0e \x01(\bR\x0emergeLeaseHeld\x12 \n" +
 	"\fmerged_at_ms\x18\x0f \x01(\x03R\n" +
-	"mergedAtMs\x12;\n" +
-	"\fmerge_status\x18\x10 \x01(\v2\x18.frontend.v1.MergeStatusR\vmergeStatus\x12N\n" +
-	"\x13merge_dequeue_offer\x18\x11 \x01(\v2\x1e.frontend.v1.MergeDequeueOfferR\x11mergeDequeueOffer\"\xa3\x06\n" +
+	"mergedAtMs\x12<\n" +
+	"\fmerge_status\x18\x10 \x01(\v2\x19.agentrepl.v1.MergeStatusR\vmergeStatus\x12O\n" +
+	"\x13merge_dequeue_offer\x18\x11 \x01(\v2\x1f.agentrepl.v1.MergeDequeueOfferR\x11mergeDequeueOffer\"\xa4\x06\n" +
 	"\vSessionView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -3652,8 +3653,8 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"config_dir\x18\x11 \x01(\tR\tconfigDir\x126\n" +
 	"\bbackfill\x18\x12 \x01(\x0e2\x1a.frontend.v1.BackfillStateR\bbackfill\x122\n" +
 	"\x05death\x18\x13 \x01(\v2\x1c.frontend.v1.FailureCardViewR\x05death\x12=\n" +
-	"\rmodel_options\x18\x14 \x03(\v2\x18.protocol.v1.ModelOptionR\fmodelOptions\x12@\n" +
-	"\vhibernation\x18\x15 \x01(\v2\x1e.frontend.v1.HibernationDetailR\vhibernation\"\xac\x01\n" +
+	"\rmodel_options\x18\x14 \x03(\v2\x18.protocol.v1.ModelOptionR\fmodelOptions\x12A\n" +
+	"\vhibernation\x18\x15 \x01(\v2\x1f.agentrepl.v1.HibernationDetailR\vhibernation\"\xac\x01\n" +
 	"\n" +
 	"DaemonView\x12\x17\n" +
 	"\aboot_id\x18\x01 \x01(\tR\x06bootId\x12)\n" +
@@ -3756,9 +3757,9 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\trationale\x18\x01 \x01(\tR\trationale\"S\n" +
 	"\x17QueueClassificationHold\x12\x1c\n" +
 	"\trationale\x18\x01 \x01(\tR\trationale\x12\x1a\n" +
-	"\baccepted\x18\x02 \x01(\bR\baccepted\"_\n" +
-	"&QueueClassificationUninterruptibleTurn\x125\n" +
-	"\acommand\x18\x01 \x01(\x0e2\x1b.frontend.v1.SessionCommandR\acommand\"2\n" +
+	"\baccepted\x18\x02 \x01(\bR\baccepted\"`\n" +
+	"&QueueClassificationUninterruptibleTurn\x126\n" +
+	"\acommand\x18\x01 \x01(\x0e2\x1c.agentrepl.v1.SessionCommandR\acommand\"2\n" +
 	"\x18QueueClassificationError\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x92\x06\n" +
 	"\n" +
@@ -3901,29 +3902,29 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*QueueForceCmd)(nil),                          // 37: frontend.v1.QueueForceCmd
 	(*QueueAcceptCmd)(nil),                         // 38: frontend.v1.QueueAcceptCmd
 	(*QueueCancelCmd)(nil),                         // 39: frontend.v1.QueueCancelCmd
-	(*MergeStatus)(nil),                            // 40: frontend.v1.MergeStatus
-	(*MergeDequeueOffer)(nil),                      // 41: frontend.v1.MergeDequeueOffer
+	(*v1.MergeStatus)(nil),                         // 40: agentrepl.v1.MergeStatus
+	(*v1.MergeDequeueOffer)(nil),                   // 41: agentrepl.v1.MergeDequeueOffer
 	(*FailureCardView)(nil),                        // 42: frontend.v1.FailureCardView
-	(*v1.ModelOption)(nil),                         // 43: protocol.v1.ModelOption
-	(*HibernationDetail)(nil),                      // 44: frontend.v1.HibernationDetail
-	(v1.InterruptOutcome)(0),                       // 45: protocol.v1.InterruptOutcome
-	(v1.PromptOrigin)(0),                           // 46: protocol.v1.PromptOrigin
+	(*v11.ModelOption)(nil),                        // 43: protocol.v1.ModelOption
+	(*v1.HibernationDetail)(nil),                   // 44: agentrepl.v1.HibernationDetail
+	(v11.InterruptOutcome)(0),                      // 45: protocol.v1.InterruptOutcome
+	(v11.PromptOrigin)(0),                          // 46: protocol.v1.PromptOrigin
 	(*FailureCardRef)(nil),                         // 47: frontend.v1.FailureCardRef
-	(*v1.NoDetachedAgentsRunning)(nil),             // 48: protocol.v1.NoDetachedAgentsRunning
-	(*v1.DetachedCancelUnsupported)(nil),           // 49: protocol.v1.DetachedCancelUnsupported
-	(SessionCommand)(0),                            // 50: frontend.v1.SessionCommand
+	(*v11.NoDetachedAgentsRunning)(nil),            // 48: protocol.v1.NoDetachedAgentsRunning
+	(*v11.DetachedCancelUnsupported)(nil),          // 49: protocol.v1.DetachedCancelUnsupported
+	(v1.SessionCommand)(0),                         // 50: agentrepl.v1.SessionCommand
 }
 var file_frontend_v1_footer_proto_depIdxs = []int32{
 	0,  // 0: frontend.v1.WorkspaceState.state:type_name -> frontend.v1.RenderState
 	1,  // 1: frontend.v1.WorkspaceState.connectivity:type_name -> frontend.v1.SessionConnectivity
 	2,  // 2: frontend.v1.WorkspaceState.status:type_name -> frontend.v1.SessionStatus
 	4,  // 3: frontend.v1.WorkspaceState.active_faults:type_name -> frontend.v1.RuntimeFault
-	40, // 4: frontend.v1.WorkspaceState.merge_status:type_name -> frontend.v1.MergeStatus
-	41, // 5: frontend.v1.WorkspaceState.merge_dequeue_offer:type_name -> frontend.v1.MergeDequeueOffer
+	40, // 4: frontend.v1.WorkspaceState.merge_status:type_name -> agentrepl.v1.MergeStatus
+	41, // 5: frontend.v1.WorkspaceState.merge_dequeue_offer:type_name -> agentrepl.v1.MergeDequeueOffer
 	3,  // 6: frontend.v1.SessionView.backfill:type_name -> frontend.v1.BackfillState
 	42, // 7: frontend.v1.SessionView.death:type_name -> frontend.v1.FailureCardView
 	43, // 8: frontend.v1.SessionView.model_options:type_name -> protocol.v1.ModelOption
-	44, // 9: frontend.v1.SessionView.hibernation:type_name -> frontend.v1.HibernationDetail
+	44, // 9: frontend.v1.SessionView.hibernation:type_name -> agentrepl.v1.HibernationDetail
 	45, // 10: frontend.v1.InterruptWindow.outcome:type_name -> protocol.v1.InterruptOutcome
 	0,  // 11: frontend.v1.ProgressView.state:type_name -> frontend.v1.RenderState
 	9,  // 12: frontend.v1.ProgressView.compacting:type_name -> frontend.v1.ProgressWindow
@@ -3948,7 +3949,7 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	25, // 31: frontend.v1.DetachedCancelOutcome.cancelled:type_name -> frontend.v1.DetachedAgentsCancelled
 	48, // 32: frontend.v1.DetachedCancelOutcome.nothing_running:type_name -> protocol.v1.NoDetachedAgentsRunning
 	49, // 33: frontend.v1.DetachedCancelOutcome.unsupported:type_name -> protocol.v1.DetachedCancelUnsupported
-	50, // 34: frontend.v1.QueueClassificationUninterruptibleTurn.command:type_name -> frontend.v1.SessionCommand
+	50, // 34: frontend.v1.QueueClassificationUninterruptibleTurn.command:type_name -> agentrepl.v1.SessionCommand
 	26, // 35: frontend.v1.QueueEntry.pending:type_name -> frontend.v1.QueueClassificationPending
 	27, // 36: frontend.v1.QueueEntry.interject:type_name -> frontend.v1.QueueClassificationInterject
 	28, // 37: frontend.v1.QueueEntry.hold_for_turn_end:type_name -> frontend.v1.QueueClassificationHold
@@ -3972,7 +3973,6 @@ func file_frontend_v1_footer_proto_init() {
 		return
 	}
 	file_frontend_v1_feed_proto_init()
-	file_frontend_v1_shared_proto_init()
 	file_frontend_v1_footer_proto_msgTypes[13].OneofWrappers = []any{
 		(*FooterAccountingCell_Complete)(nil),
 		(*FooterAccountingCell_Incomplete)(nil),
