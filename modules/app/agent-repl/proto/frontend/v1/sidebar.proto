@@ -374,20 +374,3 @@ message PublishWorkspaceRosterCmd {
   // makes a partially-applied roster unrepresentable.
   WorkspaceRoster roster = 1;
 }
-
-// The roster rail's notice line: one fixed slot at the foot of the rail for
-// whatever the last gesture had to say.
-//
-// It renders a SENTENCE and nothing else — no kind, no evidence, no color
-// variation — because that is all a one-line slot under a workspace list can
-// carry. It is the smallest projection of a failure in the product, and it is
-// modeled as its own message rather than as a failure card with most fields
-// ignored, so that what it shows and what it is given are the same thing.
-message RosterNotice {
-  // The line, composed by whoever raised it, rendered verbatim.
-  string text = 1;
-  // How long the notice stands before clearing itself, milliseconds. It is
-  // the ONE self-dismissing failure surface: a rail notice that persisted
-  // would outlive the gesture it describes. 0 means it stands until replaced.
-  int32 auto_clear_ms = 2;
-}

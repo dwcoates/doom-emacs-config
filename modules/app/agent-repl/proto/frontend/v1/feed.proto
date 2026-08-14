@@ -1010,29 +1010,6 @@ message DetachedWork {
   string workspace = 4;
 }
 
-// A verbatim byte spool. Just bytes.
-//
-// Deliberately unparsed and unstructured — this output is bytes, and
-// pretending otherwise is how a renderer starts guessing at ANSI, line framing
-// and JSON.
-//
-// THE SPOOL IS PAYLOAD, NOT A STREAM OF MESSAGES. Everything appended to it is
-// this one message's accumulating content; no chunk of it is ever promoted to a
-// feed row of its own.
-message DetachedWorkOutputSpool {
-  // THE SPOOL CARRIES NO DELIVERY CURSOR, and so a dropped append is
-  // indistinguishable from a quiet stretch of output: a transcript with a hole in
-  // it renders as if it were complete. The durable record is intact, so a reload
-  // repairs it; the user simply gets no signal that they should reload. Gap
-  // detection, if it is ever wanted, belongs on the frame — one `seq` on
-  // frontend.v1.FrontendFrame covers all four delta streams (ConversationDelta,
-  // TypingDelta, DetachedWorkDelta and this one) for less than a per-stream
-  // cursor costs.
-
-  // Everything spooled so far, verbatim.
-  string text = 1;
-}
-
 // Live-or-settled, expressed as arms so that "settled" and "settled with what
 // outcome" are one indivisible fact. Settled work with no outcome is
 // unrepresentable.
@@ -1202,7 +1179,9 @@ message DetachedWorkOutputAppend {
   // still looks complete. The durable record is intact and a reload repairs it,
   // with no signal to the user that a reload is warranted. A per-frame `seq` on
   // frontend.v1.FrontendFrame is the cheaper way to get detection back, and would
-  // cover all four delta streams rather than this one.
+  // cover all four delta streams — ConversationDelta, TypingDelta,
+  // DetachedWorkDelta and this one — rather than this one alone, for less than a
+  // per-stream cursor costs.
 
   // The bytes, verbatim, to append.
   string text = 1;
