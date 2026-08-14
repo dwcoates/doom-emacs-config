@@ -22,12 +22,12 @@ PROTOS := \
   agentshim/v1/entry.proto \
   agentshim/v1/unsupported.proto \
   agentshim/v1/write.proto \
-  frontend/v1/shared.proto \
+  agentrepl/v1/shared.proto \
   frontend/v1/feed.proto \
   frontend/v1/topbar.proto \
   frontend/v1/sidebar.proto \
   frontend/v1/footer.proto \
-  frontend/v1/frame.proto \
+  agentrepl/v1/frame.proto \
   state/v1/durable.proto
 
 # The component tree the structural gates scan. Overridable so the gate
