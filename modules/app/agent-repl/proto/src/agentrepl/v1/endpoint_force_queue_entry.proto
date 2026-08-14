@@ -1,0 +1,39 @@
+// endpoint_force_queue_entry.proto — the ForceQueueEntry endpoint's request and
+// response.
+//
+// ONE ENDPOINT PER FILE: ForceQueueEntryRequest and ForceQueueEntryResponse and
+// nothing else, so the whole of what one method takes and returns is readable in
+// one place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Deliver this entry NOW — the user overriding the classifier, or not waiting
+// for it. Runs exactly the same interject sequence an INTERJECT verdict does.
+message ForceQueueEntryRequest {
+  // Correlation. See agentrepl.v1.AgentRepl.
+  string request_id = 1;
+  // The workspace whose queue holds the entry. The queue is per-workspace, so
+  // an entry id alone does not address one. See agentrepl.v1.AgentRepl.
+  string workspace = 2;
+  string entry_id = 3;
+}
+
+// ForceQueueEntry's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. The
+// forced entry's delivery is observed as the queue view changing on the stream.
+message ForceQueueEntryResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

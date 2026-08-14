@@ -355,25 +355,3 @@ message RosterRowStatusMerged {}
 message RosterRowStatusNone {}
 
 message RosterRowStatusInactive {}
-
-// Emacs→daemon publication of the whole workspace roster.
-//
-// Emacs is the roster's SINGLE author; this is the only way a roster enters
-// the daemon. The daemon retains the published roster, folds it into every
-// connect snapshot, and rebroadcasts it — it never synthesizes or amends one.
-// The ack semantics are every other frontend command's: a refused publish (a
-// stale, out-of-order revision WITHIN the publisher's own epoch, or a roster
-// carrying no epoch at all) is a loud nack on the correlated CommandAck, never
-// a silent drop, so a publisher whose revision counter has fallen behind learns
-// it instead of believing it published. A publish from a NEW epoch is never
-// stale — see WorkspaceRoster.boot_id — so no publisher ever needs to resync a
-// counter it did not author.
-message PublishWorkspaceRosterCmd {
-  // Correlation. See agentrepl.v1.AgentRepl. The roster is daemon-global — it
-  // IS the set of workspaces — so this command names no workspace.
-  string request_id = 1;
-  // The complete roster as of this publication. Always whole, never a delta:
-  // the roster is small and Emacs holds the entire model, so a full replace
-  // makes a partially-applied roster unrepresentable.
-  WorkspaceRoster roster = 2;
-}

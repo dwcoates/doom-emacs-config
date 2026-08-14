@@ -1,0 +1,40 @@
+// endpoint_evict_merge.proto — the EvictMerge endpoint's request and response.
+//
+// ONE ENDPOINT PER FILE: EvictMergeRequest and EvictMergeResponse and nothing
+// else, so the whole of what one method takes and returns is readable in one
+// place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Evict ONE waiting entry by run id. The evicted run receives a terminal
+// failed MergeStatus with an eviction cause, so the workspace's merge axis
+// resolves immediately. REFUSED when run_id names the running head (only its
+// drain goroutine may retire it) or names nothing outstanding.
+message EvictMergeRequest {
+  // Correlation. See AgentRepl in frame.proto. The merge queue is
+  // daemon-global and a run id names one entry in it, so there is no workspace.
+  string request_id = 1;
+  // The run id the roster and every MergeStatus carry.
+  string run_id = 2;
+}
+
+// EvictMerge's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. The
+// evicted run's terminal MergeStatus is pushed, and a run id naming the head is
+// refused through the ack.
+message EvictMergeResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

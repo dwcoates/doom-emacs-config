@@ -1,0 +1,55 @@
+// endpoint_cancel_detached_agents.proto — the CancelDetachedAgents endpoint's
+// request and response.
+//
+// ONE ENDPOINT PER FILE: CancelDetachedAgentsRequest and
+// CancelDetachedAgentsResponse and nothing else, so the whole of what one method
+// takes and returns is readable in one place. The `endpoint_` prefix is the
+// grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
+// directory is not available here, and for why a request type belongs to
+// agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+import "frontend/v1/footer.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Cancel the workspace session's DETACHED background agents: the subagent,
+// shell and workflow tasks still working after the turn that launched them
+// has ended.
+//
+// WHY IT IS ITS OWN COMMAND RATHER THAN A FLAG ON InterruptRequest. An interrupt
+// stops the TURN. The state this command exists for — main turn over,
+// detached agents still running — is precisely the state in which there is no
+// turn to stop, so an interrupt sent into it is a guaranteed no-op that the
+// shim answers ALREADY_COMPLETE. The one state that raised the interrupt's
+// "cancel the running subagents?" question was the one state its answer could
+// not act on; this command is what that yes now sends.
+//
+// IT CARRIES NO CONFIRMATION ECHO, unlike InterruptRequest.confirm_agents. There
+// is nothing here to confirm: the command's ONLY effect is stopping detached
+// agents, so sending it IS the deliberate second keystroke that flag exists to
+// require. A frontend asks its user before it sends, never after.
+//
+// The session is named by `workspace` below, and the command has nothing else
+// to say.
+message CancelDetachedAgentsRequest {
+  // Correlation. See agentrepl.v1.AgentRepl.
+  string request_id = 1;
+  // The workspace whose detached agents are being cancelled. See
+  // agentrepl.v1.AgentRepl.
+  string workspace = 2;
+}
+
+// CancelDetachedAgents' answer: WHAT the cancel did, relayed from the shim.
+//
+// The outcome is set on BOTH the success answer (the `cancelled` arm) and the
+// refusal (`nothing_running` / `unsupported` alongside ack.ok=false), so a
+// client never has to read a refusal's meaning out of `error` text.
+message CancelDetachedAgentsResponse {
+  CommandAck ack = 1;
+  frontend.v1.DetachedCancelOutcome outcome = 2;
+}

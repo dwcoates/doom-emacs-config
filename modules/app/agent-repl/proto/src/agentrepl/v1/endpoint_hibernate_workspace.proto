@@ -1,0 +1,45 @@
+// endpoint_hibernate_workspace.proto — the HibernateWorkspace endpoint's request
+// and response.
+//
+// ONE ENDPOINT PER FILE: HibernateWorkspaceRequest and
+// HibernateWorkspaceResponse and nothing else, so the whole of what one method
+// takes and returns is readable in one place. The `endpoint_` prefix is the
+// grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
+// directory is not available here, and for why a request type belongs to
+// agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Deliberate, immediate hibernation of one workspace's session: the daemon
+// stops the shim (IntentionalQueryTermination) and marks the session
+// hibernated. Hibernated sessions are structurally outside the keep-alive
+// loop — hibernation and keep-alive-stop are ONE transition, so "hibernated
+// but still pinging" is unrepresentable. Refused with a loud nack while a
+// turn is live or the merge lease is held: the user interrupts first, the
+// daemon never discards in-flight work to satisfy a hibernate.
+message HibernateWorkspaceRequest {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace being hibernated. See AgentRepl in frame.proto.
+  string workspace = 2;
+}
+
+// HibernateWorkspace's answer: accepted, or the classified account of the
+// refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. The
+// hibernated posture is pushed as WorkspaceGateView, so the refusal path is all
+// this answer has to carry.
+message HibernateWorkspaceResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

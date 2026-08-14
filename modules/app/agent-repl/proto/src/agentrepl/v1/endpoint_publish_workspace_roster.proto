@@ -1,0 +1,54 @@
+// endpoint_publish_workspace_roster.proto — the PublishWorkspaceRoster
+// endpoint's request and response.
+//
+// ONE ENDPOINT PER FILE: PublishWorkspaceRosterRequest and
+// PublishWorkspaceRosterResponse and nothing else, so the whole of what one
+// method takes and returns is readable in one place. The `endpoint_` prefix is
+// the grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
+// directory is not available here, and for why a request type belongs to
+// agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+import "frontend/v1/sidebar.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Emacs→daemon publication of the whole workspace roster.
+//
+// Emacs is the roster's SINGLE author; this is the only way a roster enters
+// the daemon. The daemon retains the published roster, folds it into every
+// connect snapshot, and rebroadcasts it — it never synthesizes or amends one.
+// The ack semantics are every other frontend command's: a refused publish (a
+// stale, out-of-order revision WITHIN the publisher's own epoch, or a roster
+// carrying no epoch at all) is a loud nack on the correlated CommandAck, never
+// a silent drop, so a publisher whose revision counter has fallen behind learns
+// it instead of believing it published. A publish from a NEW epoch is never
+// stale — see WorkspaceRoster.boot_id — so no publisher ever needs to resync a
+// counter it did not author.
+message PublishWorkspaceRosterRequest {
+  // Correlation. See agentrepl.v1.AgentRepl. The roster is daemon-global — it
+  // IS the set of workspaces — so this command names no workspace.
+  string request_id = 1;
+  // The complete roster as of this publication. Always whole, never a delta:
+  // the roster is small and Emacs holds the entire model, so a full replace
+  // makes a partially-applied roster unrepresentable.
+  frontend.v1.WorkspaceRoster roster = 2;
+}
+
+// PublishWorkspaceRoster's answer: accepted, or the classified account of the
+// refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. A
+// refused publish is a loud nack on the ack, which is the whole of what a
+// publisher needs to learn.
+message PublishWorkspaceRosterResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

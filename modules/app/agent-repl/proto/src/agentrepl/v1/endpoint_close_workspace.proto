@@ -1,0 +1,39 @@
+// endpoint_close_workspace.proto — the CloseWorkspace endpoint's request and
+// response.
+//
+// ONE ENDPOINT PER FILE: CloseWorkspaceRequest and CloseWorkspaceResponse and
+// nothing else, so the whole of what one method takes and returns is readable in
+// one place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Retire the workspace. It carried NO fields at all under the old envelope,
+// which was the clearest case of the envelope being a command's whole meaning;
+// now it states that meaning itself.
+message CloseWorkspaceRequest {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace being closed. See AgentRepl in frame.proto.
+  string workspace = 2;
+}
+
+// CloseWorkspace's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. A
+// close's visible effect is the workspace leaving the roster, which every
+// subscriber learns from the stream.
+message CloseWorkspaceResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}
