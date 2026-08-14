@@ -3,11 +3,11 @@
 # INVARIANT I7 — CONVERSATION-INTERNAL ISOLATION, AS A BUILD GATE.
 #
 # A stored conversation record has two halves. protocol.v1's ExternalEntry is the
-# half that may cross the shim→daemon wire; shim.v1 is the half that may
+# half that may cross the shim→daemon wire; store.v1 is the half that may
 # not — which observation plane produced the record, the key the store deduped it
 # on, and anything the producer could not convert.
 #
-# shim.v1 IS ONE OF THE FIVE SURFACES, not a sub-namespace of a shared
+# store.v1 IS ONE OF THE FIVE SURFACES, not a sub-namespace of a shared
 # umbrella. It is named for what it holds — shim-side internals — which is why it
 # cannot also be the prefix conversation, protocol, frontend and state hang under.
 #
@@ -58,8 +58,8 @@ ROOT="${1:-$(cd "$THIS_DIR/.." && pwd)}"
 
 # The proto package, and the Go import path its bindings generate into. Both
 # forms are checked because a Go file names the import path, not the package.
-PROTO_PKG="shim/v1"
-GO_PKG="agentrepl/proto/shim/v1"
+PROTO_PKG="store/v1"
+GO_PKG="agentrepl/proto/store/v1"
 
 if [ ! -d "$ROOT" ]; then
     printf 'conversation-isolation: root %s does not exist\n' "$ROOT" >&2

@@ -13,9 +13,9 @@
 
 syntax = "proto3";
 
-package shim.v1;
+package store.v1;
 
-option go_package = "agentrepl/proto/shim/v1;shimv1";
+option go_package = "agentrepl/proto/store/v1;storev1";
 
 // shim-claude-sidecar file-cursor state, persisted by the store (§6.2 cursor table).
 message CursorState {
