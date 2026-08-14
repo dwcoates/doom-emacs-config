@@ -3,21 +3,21 @@
 The agent-shim protocol definitions. The `.proto` files ARE the contract,
 including behavioral semantics as normative comments.
 
-## The five surfaces
+## The six surfaces
 
 Every message belongs to exactly one, and **the package boundary IS the surface
 boundary** — nothing straddles, so which surface a message is on is a fact the
-compiler checks rather than a convention a reviewer holds. The five are ROOT
-namespaces with no umbrella prefix; `agentshim` names the surface holding
-shim-side internals, so it cannot also be what the other four hang under.
-`DESIGN-protobuf-surfaces.md` is the authority.
+compiler checks rather than a convention a reviewer holds. The six are ROOT
+namespaces with no umbrella prefix. `DESIGN-protobuf-surfaces.md` is the
+authority.
 
 | package | directory | holds | importable by |
 |---|---|---|---|
-| `agentshim.v1` | `agentshim/v1/` | shim-side internals: which plane observed a record, the store's write identity, anything a producer could not convert | shim, sidecar, store ONLY |
-| `conversation.v1` | `conversation/v1/` | the message model — `MessageEntry`, its payloads, the content model, `TokenUsage`. Nothing about sessions, turns or machinery | everyone |
-| `protocol.v1` | `protocol/v1/` | what traverses the daemon↔shim boundary and only that boundary: handshakes, commands, receipts, health, replay and page requests, `BookkeepingEntry`, and the `ExternalEntry`/`EntryDelivery` envelopes | shim, daemon |
-| `frontend.v1` | `frontend/v1/` | what reaches a frontend client — forwarded `conversation` records AND novel messages the daemon synthesizes | daemon, webapp |
+| `conversation.v1` | `conversation/v1/` | the message model — `MessageEntry`, `MessagePayload`, the content model, `TokenUsage`. Imports nothing; the leaf everything shares | everyone |
+| `frontend.v1` | `frontend/v1/` | the UI components the webapp renders — `feed`, `topbar`, `sidebar`, `footer` | daemon, webapp |
+| `agentrepl.v1` | `agentrepl/v1/` | the agent-repl API surface — the endpoints clients call, and the frame/command envelopes | daemon, webapp |
+| `shim.v1` | `shim/v1/` | what traverses the daemon↔shim boundary and only that boundary: handshakes, commands, receipts, health, replay and page requests, `BookkeepingEntry`, and the `ExternalEntry`/`EntryDelivery`/`MessagePage` read half | shim, daemon |
+| `store.v1` | `store/v1/` | the producer-side internal half: which plane observed a record, the store's write identity, anything a producer could not convert | shim, sidecar, store ONLY |
 | `state.v1` | `state/v1/` | daemon-internal only, including the schema the daemon marshals into its own SQLite store | daemon |
 
 **What decides membership is who produces a message and where it is routed** —
@@ -28,16 +28,16 @@ subject was ambiguous ended up with no home at all.
 the leaf every other surface depends on. So a shared type lives in the most
 upstream package that needs it, and there is no vocabulary package.
 
-`BookkeepingEntry` is `protocol`, not `conversation`, and that is the routing
+`BookkeepingEntry` is `shim`, not `conversation`, and that is the routing
 test doing real work: it is produced by the shim, consumed by the daemon, and
 STOPS there — a client sees it only after the daemon resolves it into a view.
-`ExternalEntry` is `protocol` for the same reason, and it does NOT collapse now
+`ExternalEntry` is `shim` for the same reason, and it does NOT collapse now
 that bookkeeping is beside it, because the store persists bookkeeping too.
 
-## `agentshim.v1` import discipline — the daemon gets the external half only
+## `store.v1` import discipline — the daemon gets the external half only
 
-A stored record has two halves. `protocol.v1`'s `ExternalEntry` may cross the
-shim→daemon wire; `agentshim.v1`'s internal half — which observation plane
+A stored record has two halves. `shim.v1`'s `ExternalEntry` may cross the
+shim→daemon wire; `store.v1`'s internal half — which observation plane
 produced the record, the store's dedup key, and anything the producer could not
 convert — may not.
 
@@ -48,45 +48,28 @@ put `Plane` and `dedup_key` in the same namespace as everything the daemon
 legitimately imports — free for the taking. A separate package is a separate Go
 import path and a separate TS module.
 
-**No daemon or webapp source may import `agentshim.v1`.** The producers and the
+**No daemon or webapp source may import `store.v1`.** The producers and the
 store import it freely; it is theirs. `make conversation-isolation` (invariant
 I7) refuses the import at codegen time, in .go, .ts and .proto form, with prose
 deliberately exempt.
 
 The store's `seq` is in neither half. A position is the store's addressing, so it
-rides `protocol/v1/entry-delivery.proto`, whose `stored`/`live` oneof also
+rides `shim/v1/entry-delivery.proto`, whose `stored`/`live` oneof also
 replaces the old `retention` field: a live record has no field to put a position
 in, so nothing can advance a resume cursor past a position the store never
 assigned.
 
-Both gates hang off `codegen-gate`, which `make go`, `make ts` and `make lint`
+The gate hangs off `codegen-gate`, which `make go`, `make ts` and `make lint`
 all require, so no Makefile route can emit bindings for a tree that has drifted.
-Each has a self-test (`make test-check-conversation-isolation`) that drives the
+It has a self-test (`make test-check-conversation-isolation`) that drives the
 real script against fixtures in both directions — a gate nobody has watched fail
 is not a gate.
 
-## `agentshim.data.v1` was DELETED
-
-`data.v1` held a direct transliteration of the Claude SDK's JSONL: 267
-messages whose names, arms, and fields were the vendor's own surface wearing a
-protobuf hat. Nothing in the system was better off for it — a vendor shape
-crossing the wire only moves the vendor knowledge downstream to the daemon and
-the webapp, which is exactly where it must not live.
-
-The replacement inverts the direction. The shim and the sidecar convert the
-vendor's output to a vendor-AGNOSTIC model at the point of production, the
-store persists only that model, and the daemon and webapp never learn a vendor
-name. Anything a producer cannot convert is persisted as an explicit
-unsupported arm rather than as raw vendor material. The contract is written
-out in full in `FROZEN-conversation-v1.md`.
-
 ## The schema is TREATED as vendor-agnostic
 
-The retired `data.v1` shapes were derived from the Claude harness, so the
-schema was not FACTUALLY vendor-agnostic — but it was BELIEVED and TREATED as
-vendor-agnostic everywhere: no consumer may special-case a vendor, and new
-code is written against the schema as if any vendor's shim could produce it.
-`conversation.v1` makes that belief structural instead of aspirational.
+No consumer may special-case a vendor, and new code is written against the
+schema as if any vendor's shim could produce it. `conversation.v1` makes that
+structural rather than aspirational.
 
 **Remediation strategy for adding a new vendor (e.g. codex):** when a new
 vendor's reality does not fit the schema, RESOLVE the incongruity by revising
@@ -106,11 +89,11 @@ prompt queue is entirely `frontend.v1`. `QueueView` describes a prompt the
 daemon is holding back, which no vendor ever saw; the queue commands are a
 user-facing representation of an interject, whose MECHANISM (`Interrupt` then
 `SubmitPrompt`) is what actually crosses the shim wire, and those are
-`protocol.v1`.
+`shim.v1`.
 
 Second worked example: `QueryLifecycle` is ABOUT the SDK query object rather
 than about the conversation, which left it homeless under a subject test. It is
-produced by the shim and routed to the daemon, so it is `protocol.v1`, and there
+produced by the shim and routed to the daemon, so it is `shim.v1`, and there
 is nothing further to decide.
 
 ## Codegen
@@ -126,15 +109,7 @@ Dependencies: protoc, protoc-gen-go, @bufbuild/protoc-gen-es.
 
 ## Enforced structural invariants
 
-**I6 — durable isolation — IS RETIRED, along with `check-durable-isolation.sh`
-and its self-test.** The gate existed only because the persistence evidence
-layer sat INSIDE `frontend/v1` while being definitionally not frontend, so the
-one thing separating the two was a grep over comments-stripped source. That layer
-is `state.v1` now — its own package, its own Go import path, its own TS module —
-and the compiler enforces what the script used to check. A gate that duplicates
-the compiler is a gate that can only ever disagree with it.
-
-**I7 — shim-side isolation.** `agentshim.v1` is the half of a stored record that
+**I7 — shim-side isolation.** `store.v1` is the half of a stored record that
 never crosses the shim wire. `check-conversation-isolation.sh` enforces it as a
 `codegen-gate` target, which `make go`, `make ts`, and `make lint` all require —
 so every Makefile route to bindings refuses a drifted tree instead of emitting
