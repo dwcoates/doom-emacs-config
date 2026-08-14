@@ -1,43 +1,145 @@
-// endpoint_interrupt.proto — the Interrupt endpoint's request and response.
+// endpoint_interrupt.proto — the Interrupt endpoint's request, success and
+// error.
 //
-// ONE ENDPOINT PER FILE: InterruptRequest and InterruptResponse and nothing
-// else, so the whole of what one method takes and returns is readable in one
-// place. The `endpoint_` prefix is the grouping, not a directory — see
-// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
-// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+// ONE ENDPOINT PER FILE: InterruptRequest, InterruptResponse and the answers it
+// wraps, and nothing else, so the whole of what one method takes and returns is
+// readable in one place. The `endpoint_` prefix is the grouping, not a directory
+// — see DESIGN-protobuf-surfaces.md for why a directory is not available here,
+// and for why a request type belongs to agentrepl.v1 rather than frontend.v1.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+import "frontend/v1/failure.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
-// Stop the running turn. Interrupting a LIVE TURN never asks for
-// confirmation. When no turn is live but subagent tasks are, the daemon
-// refuses with CommandAck.interrupt_confirm_required and performs the
-// interrupt only on a resend carrying confirm_agents=true — stopping working
-// subagents is the one interrupt worth a deliberate second keystroke.
+// Stop the running turn.
+//
+// Interrupting a LIVE TURN never asks for confirmation. When no turn is live
+// but subagent tasks are, the daemon answers with confirmation_required and
+// performs the interrupt only on a resend carrying the `confirm_interrupt` arm
+// — stopping working subagents is the one interrupt worth a deliberate second
+// keystroke.
 message InterruptRequest {
   // Correlation. See agentrepl.v1.AgentRepl.
   string request_id = 1;
   // The workspace whose turn is being stopped. See agentrepl.v1.AgentRepl.
   string workspace = 2;
-  bool confirm_agents = 3;
+
+  // WHICH INTERRUPT THIS IS, as arms rather than as a flag.
+  //
+  // It was `bool confirm_agents = 3`, and a bool can lie. Any client could set
+  // it true without ever having shown a user a question, which made "the user
+  // deliberately agreed to stop working subagents" a claim the wire could not
+  // distinguish from "this client wanted the gate to go away". Confirming is an
+  // ACT, and an act gets an arm: a caller that sends `confirm_interrupt` has
+  // sent a DIFFERENT REQUEST, not the same request with an assertion stapled
+  // to it.
+  //
+  // An unset intent is refused rather than read as either arm. Defaulting to
+  // unconfirmed would answer a confirmed resend with the challenge it had
+  // already answered; defaulting to confirmed would stop live subagents with no
+  // question asked, which is precisely what the gate exists to prevent.
+  oneof intent {
+    // The ordinary stop, subject to the confirm gate.
+    InterruptUnconfirmed interrupt = 3;
+    // The user has been shown the challenge and said yes. Sending this arm IS
+    // that yes; nothing else on this request asserts it.
+    InterruptConfirmed confirm_interrupt = 4;
+  }
 }
 
-// Interrupt's answer, which has a THIRD outcome neither ok nor a failure.
+// The ordinary stop. Being set asserts nothing beyond "stop this workspace's
+// turn": the daemon still runs the confirm gate, and may answer with a
+// challenge instead of stopping anything.
+message InterruptUnconfirmed {}
+
+// The stop, sent by a client that has already put the challenge to its user and
+// been told yes. Being set asserts exactly that, and it is the ONLY thing on
+// this surface that asserts it — which is why it is an arm a caller must choose
+// rather than a field a caller may fill.
+message InterruptConfirmed {}
+
+// Interrupt's answer: exactly one of a success and an error.
 //
-// The interrupt confirmation CHALLENGE is not an error: the command was
-// understood and deliberately not performed, because no turn was live and
-// stopping live subagents deserves an explicit yes. It is returned with
-// ack.ok=false and ack.failure UNSET; the client asks the user and calls
-// Interrupt again with confirm_agents=true.
-//
-// Under the old generic ack this was a field that was meaningless on 32 other
-// commands. Here its presence is scoped by the method's own signature.
+// THE CONFIRMATION CHALLENGE IS A SUCCESS, and that is the whole reason this
+// method's success has arms. The command was UNDERSTOOD and CORRECTLY
+// PROCESSED; the answer is a question. Under the shared ack it was returned as
+// `ok=false` with `failure` UNSET — a shape that had to be documented as "the
+// one non-failure refusal" precisely because nothing about it was
+// representable. A refusal that is not a failure is not a refusal.
 message InterruptResponse {
-  CommandAck ack = 1;
-  InterruptConfirmRequired confirm_required = 2;
+  // Echoed from the request that produced this answer. See
+  // AcceptQueueEntryResponse.request_id.
+  string request_id = 1;
+  oneof response {
+    InterruptSuccess success = 2;
+    InterruptError error = 3;
+  }
+}
+
+// The interrupt was understood and correctly processed. WHICH of the two things
+// that means is the arm.
+message InterruptSuccess {
+  oneof outcome {
+    // The stop was delivered.
+    InterruptStopped stopped = 1;
+    // Nothing was delivered, and the client is being asked a question. The
+    // client asks its user and calls Interrupt again with `confirm_interrupt`.
+    InterruptConfirmRequired confirmation_required = 2;
+  }
+}
+
+// The stop reached the shim.
+//
+// NOTHING IS CARRIED BACK ABOUT WHAT IT ENDED. The shim is the sole authority
+// on the verdict — the daemon's view of "no turn" is an observation, not a
+// ruling — and a turn's ending is observed on the stream like every other turn
+// boundary.
+message InterruptStopped {}
+
+// The challenge payload: what the interrupt would actually stop, so the
+// client can render a concrete question ("interrupt 3 running subagents?")
+// rather than a bare are-you-sure.
+//
+// IT LIVES HERE, NOT ON THE FRAME. It used to be a push arm, back when the
+// challenge was something the daemon announced; it is an ANSWER now, to this
+// call and no other, so it lives with the call it answers.
+message InterruptConfirmRequired {
+  // How many subagent tasks are working right now.
+  int64 live_tasks = 1;
+}
+
+// Why the interrupt could not be attempted.
+//
+// THE QUEUE HALF'S FAILURES ARE HERE TOO. An interrupt raises the workspace's
+// merge dequeue offer as well as stopping its turn, and neither half swallows
+// the other's failure: a question that could not be raised must not pass for an
+// interrupt that worked.
+message InterruptError {
+  oneof error {
+    // The workspace key is not an absolute path.
+    RefusalWorkspaceKeyNotAbsolute workspace_key_not_absolute = 1;
+    // The confirm gate's own sources are not wired, so the daemon cannot run
+    // the check the contract requires. Refused rather than skipped: a skipped
+    // gate stops working subagents with no question asked.
+    RefusalDependencyUnwired confirm_gate_unwired = 2;
+    // The workspace has a merge on the queue and no offer store is wired, so
+    // the destructive half of the interrupt is unreachable.
+    RefusalDependencyUnwired merge_dequeue_offers_unwired = 3;
+    // The dequeue question could not be raised.
+    RefusalMergeDequeueOfferUnraisable merge_dequeue_offer_unraisable = 4;
+    // The agent process is not connected, so the stop had nowhere to go.
+    FailureShimNotConnected shim_not_connected = 5;
+    // The stop could not be delivered, so the turn is still running.
+    FailureInterruptUndelivered interrupt_undelivered = 6;
+    // The interrupt failed for a reason the daemon's classifier could not name.
+    frontend.v1.FailureInternalUnclassified unclassified = 7;
+  }
+  // The feed card this refusal was filed under, when it produced one. See
+  // AcceptQueueEntryError.failure_card.
+  frontend.v1.FailureCardRef failure_card = 8;
 }

@@ -1,43 +1,102 @@
 // endpoint_host_action_completed.proto — the HostActionCompleted endpoint's
-// request and response.
+// request, success and error.
 //
-// ONE ENDPOINT PER FILE: HostActionCompletedRequest and
-// HostActionCompletedResponse and nothing else, so the whole of what one method
-// takes and returns is readable in one place. The `endpoint_` prefix is the
-// grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
-// directory is not available here, and for why a request type belongs to
-// agentrepl.v1 rather than frontend.v1.
+// ONE ENDPOINT PER FILE: HostActionCompletedRequest,
+// HostActionCompletedResponse and the two answers it wraps, and nothing else,
+// so the whole of what one method takes and returns is readable in one place.
+// The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and
+// for why a request type belongs to agentrepl.v1 rather than frontend.v1.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+import "frontend/v1/failure.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
-// Completion is host-only.  `ok=false` preserves the action and records the
-// supplied error in the daemon's durable inbox rather than silently dropping
-// a UI request that Emacs could not perform.
+// Completion is host-only.  A failed outcome PRESERVES the action and records
+// the supplied error in the daemon's durable inbox rather than silently
+// dropping a UI request that Emacs could not perform.
 message HostActionCompletedRequest {
-  // Correlation. See AgentRepl in frame.proto. The action is addressed by
+  // Correlation. See agentrepl.v1.AgentRepl. The action is addressed by
   // `action_id`; the daemon's inbox is global, so there is no workspace key.
   string request_id = 1;
+  // The dispatched action being reported on.
   string action_id = 2;
-  bool ok = 3;
-  string error = 4;
+
+  // HOW IT WENT, as arms rather than as a bool with a string beside it.
+  //
+  // It was `bool ok` plus `string error`, which made two nonsense shapes
+  // representable — a success carrying an error, and a failure carrying none —
+  // and left the receiver reading the outcome out of whichever field happened
+  // to be populated. The two are different reports: one closes the action, the
+  // other PRESERVES it on the books with its account attached.
+  //
+  // An unset outcome is refused rather than defaulted. Defaulting to succeeded
+  // would close an action the host never performed; defaulting to failed would
+  // keep one forever that it did.
+  oneof outcome {
+    // Emacs performed the action.
+    HostActionSucceeded succeeded = 3;
+    // Emacs could not perform it. The action stays on the books.
+    HostActionFailed failed = 4;
+  }
 }
 
-// HostActionCompleted's answer: accepted, or the classified account of the
-// refusal.
+// The action was performed and may be retired from the inbox. Being set asserts
+// that the host actually did the thing, which is the only assertion that may
+// discard a durable record.
+message HostActionSucceeded {}
+
+// The action was not performed. Being set asserts the opposite, and is what
+// keeps the record — a failed action is PRESERVED with its error rather than
+// dropped, so a UI request Emacs could not perform is still on the books.
+message HostActionFailed {
+  // What went wrong, in the host's own words, so the preserved record says why
+  // rather than merely that. Empty when the host gave no account.
+  string error = 1;
+}
+
+// HostActionCompleted's answer: exactly one of a success and an error.
 //
-// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
-// directly gave 33 methods one response type, so no method could gain an answer
-// of its own without offering that answer to every other method as well. Filing
-// a completion has no verdict of its own — a failed action is preserved, not
-// re-refused.
+// TWO ARMS, NOT AN `ok` BIT PLUS AN OPTIONAL FAILURE — see
+// AcceptQueueEntryResponse for the whole of that argument. Note that the `ok`
+// bit this method used to carry on its REQUEST is a different bit from the one
+// the shared ack carried on its response, and both are gone.
 message HostActionCompletedResponse {
-  // Whether the daemon accepted this call, and when it did not, the classified
-  // failure a frontend renders as a card. See CommandAck.
-  CommandAck ack = 1;
+  // Echoed from the request that produced this answer. See
+  // AcceptQueueEntryResponse.request_id.
+  string request_id = 1;
+  oneof response {
+    HostActionCompletedSuccess success = 2;
+    HostActionCompletedError error = 3;
+  }
+}
+
+// The completion is filed.
+//
+// NO ARMS, AND NO FIELDS. Filing a completion has no verdict of its own — a
+// failed action is preserved, not re-refused — so this answer reports only that
+// the report itself landed.
+message HostActionCompletedSuccess {}
+
+// Why the completion could not be filed.
+message HostActionCompletedError {
+  oneof error {
+    // The workspace creation manager, which owns the durable inbox, is not
+    // wired.
+    RefusalDependencyUnwired workspace_creation_unwired = 1;
+    // The request states no outcome.
+    RefusalRequiredFieldMissing required_field_missing = 2;
+    // No host action is on the daemon's inbox under this id.
+    RefusalUnknownHostAction action_unknown = 3;
+    // The filing failed for a reason the daemon's classifier could not name.
+    frontend.v1.FailureInternalUnclassified unclassified = 4;
+  }
+  // The feed card this refusal was filed under, when it produced one. See
+  // AcceptQueueEntryError.failure_card.
+  frontend.v1.FailureCardRef failure_card = 5;
 }

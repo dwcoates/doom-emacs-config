@@ -1,17 +1,19 @@
-// endpoint_restart_session.proto — the RestartSession endpoint's request and
-// response.
+// endpoint_restart_session.proto — the RestartSession endpoint's request,
+// success and error.
 //
-// ONE ENDPOINT PER FILE: RestartSessionRequest and RestartSessionResponse and
-// nothing else, so the whole of what one method takes and returns is readable in
-// one place. The `endpoint_` prefix is the grouping, not a directory — see
-// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
-// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+// ONE ENDPOINT PER FILE: RestartSessionRequest, RestartSessionResponse and the
+// two answers it wraps, and nothing else, so the whole of what one method takes
+// and returns is readable in one place. The `endpoint_` prefix is the grouping,
+// not a directory — see DESIGN-protobuf-surfaces.md for why a directory is not
+// available here, and for why a request type belongs to agentrepl.v1 rather
+// than frontend.v1.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+import "frontend/v1/failure.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -29,22 +31,68 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 // merely hibernated or severed is brought up, because "restart" and "start" are
 // the same request when nothing is running.
 message RestartSessionRequest {
-  // Correlation. See AgentRepl in frame.proto.
+  // Correlation. See agentrepl.v1.AgentRepl.
   string request_id = 1;
-  // The workspace whose session is being restarted. See AgentRepl in
-  // frame.proto.
+  // The workspace whose session is being restarted. See agentrepl.v1.AgentRepl.
   string workspace = 2;
 }
 
-// RestartSession's answer: accepted, or the classified account of the refusal.
+// RestartSession's answer: exactly one of a success and an error.
 //
-// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
-// directly gave 33 methods one response type, so no method could gain an answer
-// of its own without offering that answer to every other method as well. The
-// respawned session's identity and readiness reach the client as a pushed
-// SessionView.
+// SYNCHRONOUS, unlike Shutdown: this answer is the user's only report of
+// whether their session came back, so a restart that failed takes the error arm
+// rather than succeeding and leaving them looking at a dead workspace.
 message RestartSessionResponse {
-  // Whether the daemon accepted this call, and when it did not, the classified
-  // failure a frontend renders as a card. See CommandAck.
-  CommandAck ack = 1;
+  // Echoed from the request that produced this answer. See
+  // AcceptQueueEntryResponse.request_id.
+  string request_id = 1;
+  oneof response {
+    RestartSessionSuccess success = 2;
+    RestartSessionError error = 3;
+  }
+}
+
+// The session is back up under a fresh process, on the same record and the same
+// vendor conversation.
+//
+// NO ARMS, AND NO IDENTITY. The respawned session's identity and readiness
+// reach the client as a pushed SessionView.
+//
+// A TERMINAL merge_failed AXIS IS CLEARED ON THIS PATH, and only on it: the
+// clear says "the user acted on that verdict and has an operational session
+// now", which is not true of a restart that failed. Clearing first would take
+// the failure off the screen and leave nothing in its place.
+message RestartSessionSuccess {}
+
+// Why the restart was refused.
+message RestartSessionError {
+  oneof error {
+    // This daemon does not support session restart.
+    RefusalDependencyUnwired restarts_unwired = 1;
+    // The merge-axis clear is not wired. Refused rather than restarting
+    // anyway: a restart that leaves a terminal merge_failed pinned would bring
+    // the session up underneath a verdict nothing can clear.
+    RefusalDependencyUnwired merge_axis_unwired = 2;
+    // The session could not be started at all.
+    frontend.v1.FailureSessionStartFailed session_start_failed = 3;
+    // Bring-up did not finish connecting in time.
+    FailureSessionNotEstablished session_not_established = 4;
+    // The workspace's conversation could not be reached, and a blank one will
+    // NOT be started in its place. A restart that cannot find its
+    // conversation's transcript is a CONTINUITY failure and is classified as
+    // one: returning it raw made it unclassified, so the daemon knew the exact
+    // cause and the user got an unexplained refusal to open their workspace.
+    FailureConversationUnresumable conversation_unresumable = 5;
+    // The vendor conversation could not be resumed without breaking
+    // continuity.
+    frontend.v1.FailureSessionResumeFailed session_resume_failed = 6;
+    // The session came back but its terminal merge_failed axis could not be
+    // cleared.
+    RefusalMergeAxisUnclearable merge_axis_unclearable = 7;
+    // The restart failed for a reason the daemon's classifier could not name.
+    frontend.v1.FailureInternalUnclassified unclassified = 8;
+  }
+  // The feed card this refusal was filed under, when it produced one. See
+  // AcceptQueueEntryError.failure_card.
+  frontend.v1.FailureCardRef failure_card = 9;
 }

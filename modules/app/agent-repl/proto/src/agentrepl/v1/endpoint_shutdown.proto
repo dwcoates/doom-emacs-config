@@ -1,23 +1,25 @@
-// endpoint_shutdown.proto — the Shutdown endpoint's request and response.
+// endpoint_shutdown.proto — the Shutdown endpoint's request, success and error.
 //
-// ONE ENDPOINT PER FILE: ShutdownRequest and ShutdownResponse and nothing else,
-// so the whole of what one method takes and returns is readable in one place.
-// The `endpoint_` prefix is the grouping, not a directory — see
-// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
-// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+// ONE ENDPOINT PER FILE: ShutdownRequest, ShutdownResponse and the two answers
+// it wraps, and nothing else, so the whole of what one method takes and returns
+// is readable in one place. The `endpoint_` prefix is the grouping, not a
+// directory — see DESIGN-protobuf-surfaces.md for why a directory is not
+// available here, and for why a request type belongs to agentrepl.v1 rather
+// than frontend.v1.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+import "frontend/v1/failure.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 // Graceful daemon shutdown over UDS (replaces Emacs
 // POST /shutdown).
 message ShutdownRequest {
-  // Correlation. See AgentRepl in frame.proto. Daemon-global: no workspace.
+  // Correlation. See agentrepl.v1.AgentRepl. Daemon-global: no workspace.
   string request_id = 1;
   // stop_shims asks the daemon to SIGTERM every session shim on its way out.
   //
@@ -33,18 +35,49 @@ message ShutdownRequest {
   // passes it when its stamps show the bundle moved). It is belt-and-braces
   // alongside the daemon's own version-driven stale-shim refresh, never the
   // only thing standing between a deploy and stale shims.
+  //
+  // IT STAYS A BOOL. The mode-flag rule targets a bool that ASSERTS AN ACT the
+  // sender may not have performed; this one states a property of the teardown
+  // being asked for, and both of its values are ordinary requests the daemon
+  // performs as asked. There is nothing here a caller can be dishonest about.
   bool stop_shims = 2;
 }
 
-// Shutdown's answer: accepted, or the classified account of the refusal.
+// Shutdown's answer: exactly one of a success and an error.
 //
-// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
-// directly gave 33 methods one response type, so no method could gain an answer
-// of its own without offering that answer to every other method as well. A
-// daemon on its way out has nothing further to report, and the caller's next
-// evidence is the connection closing.
+// TWO ARMS, NOT AN `ok` BIT PLUS AN OPTIONAL FAILURE — see
+// AcceptQueueEntryResponse for the whole of that argument.
 message ShutdownResponse {
-  // Whether the daemon accepted this call, and when it did not, the classified
-  // failure a frontend renders as a card. See CommandAck.
-  CommandAck ack = 1;
+  // Echoed from the request that produced this answer. See
+  // AcceptQueueEntryResponse.request_id.
+  string request_id = 1;
+  oneof response {
+    ShutdownSuccess success = 2;
+    ShutdownError error = 3;
+  }
+}
+
+// The teardown has begun.
+//
+// NO ARMS, AND NO FIELDS. The teardown runs asynchronously so this answer is
+// delivered before the process exits; a daemon on its way out has nothing
+// further to report, and the caller's next evidence is the connection closing.
+message ShutdownSuccess {}
+
+// Why the shutdown was refused.
+//
+// ONE DERIVED ARM PLUS THE FUNNEL. The handler validates nothing and refuses
+// only when the capability is absent — an unconfigured shutdown is a loud
+// failing answer, never a silent no-op.
+message ShutdownError {
+  oneof error {
+    // This daemon does not support shutdown.
+    RefusalDependencyUnwired shutdown_unwired = 1;
+    // The shutdown was refused for a reason the daemon's classifier could not
+    // name.
+    frontend.v1.FailureInternalUnclassified unclassified = 2;
+  }
+  // The feed card this refusal was filed under, when it produced one. See
+  // AcceptQueueEntryError.failure_card.
+  frontend.v1.FailureCardRef failure_card = 3;
 }

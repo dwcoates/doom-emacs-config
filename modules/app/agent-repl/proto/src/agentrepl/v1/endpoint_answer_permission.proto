@@ -1,17 +1,19 @@
-// endpoint_answer_permission.proto — the AnswerPermission endpoint's request and
-// response.
+// endpoint_answer_permission.proto — the AnswerPermission endpoint's request,
+// success and error.
 //
-// ONE ENDPOINT PER FILE: AnswerPermissionRequest and AnswerPermissionResponse
-// and nothing else, so the whole of what one method takes and returns is
-// readable in one place. The `endpoint_` prefix is the grouping, not a directory
-// — see DESIGN-protobuf-surfaces.md for why a directory is not available here,
-// and for why a request type belongs to agentrepl.v1 rather than frontend.v1.
+// ONE ENDPOINT PER FILE: AnswerPermissionRequest, AnswerPermissionResponse and
+// the two answers it wraps, and nothing else, so the whole of what one method
+// takes and returns is readable in one place. The `endpoint_` prefix is the
+// grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
+// directory is not available here, and for why a request type belongs to
+// agentrepl.v1 rather than frontend.v1.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+import "frontend/v1/failure.proto";
 import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -28,21 +30,96 @@ message AnswerPermissionRequest {
   // The workspace whose shim is blocked on this answer. See
   // agentrepl.v1.AgentRepl.
   string workspace = 2;
+  // Which outstanding permission request is being answered.
   string permission_request_id = 3;
-  bool allow = 4;
-  google.protobuf.Struct updated_input = 5;
-  string deny_message = 6;
+
+  // THE DECISION, as arms rather than as a bool with two orphan fields beside
+  // it.
+  //
+  // It was `bool allow` plus `updated_input` plus `deny_message`, which made
+  // four combinations representable and two of them meaningless: a denial
+  // carrying edited input, and an allow carrying a denial message. Worse, the
+  // three shapes are three different DECISIONS — plain approval, approval of
+  // something the user changed, and refusal — and a bool cannot carry which,
+  // so the receiver had to infer it from which of the neighbouring fields
+  // happened to be populated.
+  //
+  // An unset decision is refused rather than defaulted. The shim's canUseTool
+  // callback is BLOCKED waiting on this, so defaulting to allow would approve a
+  // tool nobody approved and defaulting to deny would refuse one nobody
+  // refused.
+  oneof decision {
+    // Run the tool exactly as the agent proposed it.
+    AnswerPermissionAllow allow = 4;
+    // Run the tool with the input the user edited.
+    AnswerPermissionAllowEdited allow_edited = 5;
+    // Do not run the tool.
+    AnswerPermissionDeny deny = 6;
+  }
 }
 
-// AnswerPermission's answer: accepted, or the classified account of the refusal.
+// Plain approval. Being set asserts that the tool call is to run AS PROPOSED —
+// deliberately carrying no input field, so an approval can never quietly
+// substitute one.
+message AnswerPermissionAllow {}
+
+// Approval of something the user changed. Being set asserts both that the call
+// may run and that what runs is the input below rather than what the agent
+// asked for.
+message AnswerPermissionAllowEdited {
+  // The replacement tool input. Schemaless because a tool's input schema is the
+  // tool's, not this protocol's.
+  google.protobuf.Struct updated_input = 1;
+}
+
+// Refusal. Being set asserts that the tool call must not run.
+message AnswerPermissionDeny {
+  // What to tell the agent, so it can choose another route rather than merely
+  // learning it was blocked. Empty when the user gave no reason.
+  string message = 1;
+}
+
+// AnswerPermission's answer: exactly one of a success and an error.
 //
-// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
-// directly gave 33 methods one response type, so no method could gain an answer
-// of its own without offering that answer to every other method as well. The
-// decision's real effect is the shim's canUseTool callback unblocking, which is
-// observed on the stream, so the ack is the whole of this answer for now.
+// TWO ARMS, NOT AN `ok` BIT PLUS AN OPTIONAL FAILURE — see
+// AcceptQueueEntryResponse for the whole of that argument.
 message AnswerPermissionResponse {
-  // Whether the daemon accepted this call, and when it did not, the classified
-  // failure a frontend renders as a card. See CommandAck.
-  CommandAck ack = 1;
+  // Echoed from the request that produced this answer. See
+  // AcceptQueueEntryResponse.request_id.
+  string request_id = 1;
+  oneof response {
+    AnswerPermissionSuccess success = 2;
+    AnswerPermissionError error = 3;
+  }
+}
+
+// The decision was relayed to the shim.
+//
+// NO ARMS, AND NO FIELDS. The decision's real effect is the shim's canUseTool
+// callback unblocking, which is observed on the stream as the turn continuing.
+message AnswerPermissionSuccess {}
+
+// Why the answer could not be relayed.
+//
+// EVERY ARM HERE LEAVES A TURN STALLED, which is what makes them worth naming
+// separately: this is the only method whose absence hangs a session, so a
+// client that cannot deliver an answer has to know whether to retry it.
+message AnswerPermissionError {
+  oneof error {
+    // The workspace key is not an absolute path.
+    RefusalWorkspaceKeyNotAbsolute workspace_key_not_absolute = 1;
+    // The agent process is not connected, so the answer had nowhere to go.
+    FailureShimNotConnected shim_not_connected = 2;
+    // The agent process received the answer and refused it.
+    FailureShimRejected shim_rejected = 3;
+    // The agent process never acknowledged the answer within its window.
+    FailureShimAckTimeout shim_ack_timeout = 4;
+    // The command addressed something this workspace no longer runs.
+    FailureWorkspaceNotLive workspace_not_live = 5;
+    // The answer failed for a reason the daemon's classifier could not name.
+    frontend.v1.FailureInternalUnclassified unclassified = 6;
+  }
+  // The feed card this refusal was filed under, when it produced one. See
+  // AcceptQueueEntryError.failure_card.
+  frontend.v1.FailureCardRef failure_card = 7;
 }

@@ -676,3 +676,14 @@ message SessionResumeFailureBringUpFailure {
   // The complete cause returned by the driveability gate.
   string cause = 1;
 }
+
+// A failure card that a surface OUTSIDE the feed needs to point at.
+//
+// It exists because a footer row and a command refusal both want to say "see
+// the card", and the card's address is the only thing they need in order to.
+message FailureCardRef {
+  // The Message.uuid of the card to reveal. Empty when the failure
+  // produced no card, and then the referring surface offers no way to reach
+  // one rather than scrolling somewhere arbitrary.
+  string card_uuid = 1;
+}
