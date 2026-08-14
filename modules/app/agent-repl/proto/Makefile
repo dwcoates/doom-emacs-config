@@ -28,6 +28,7 @@ PROTOS := \
   frontend/v1/sidebar.proto \
   frontend/v1/footer.proto \
   agentrepl/v1/frame.proto \
+  agentrepl/v1/service.proto \
   state/v1/durable.proto
 
 # The component tree the structural gates scan. Overridable so the gate
