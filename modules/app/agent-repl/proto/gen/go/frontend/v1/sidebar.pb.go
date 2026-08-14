@@ -1987,75 +1987,6 @@ func (*RosterRowStatusInactive) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{30}
 }
 
-// Emacs→daemon publication of the whole workspace roster.
-//
-// Emacs is the roster's SINGLE author; this is the only way a roster enters
-// the daemon. The daemon retains the published roster, folds it into every
-// connect snapshot, and rebroadcasts it — it never synthesizes or amends one.
-// The ack semantics are every other frontend command's: a refused publish (a
-// stale, out-of-order revision WITHIN the publisher's own epoch, or a roster
-// carrying no epoch at all) is a loud nack on the correlated CommandAck, never
-// a silent drop, so a publisher whose revision counter has fallen behind learns
-// it instead of believing it published. A publish from a NEW epoch is never
-// stale — see WorkspaceRoster.boot_id — so no publisher ever needs to resync a
-// counter it did not author.
-type PublishWorkspaceRosterCmd struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See agentrepl.v1.AgentRepl. The roster is daemon-global — it
-	// IS the set of workspaces — so this command names no workspace.
-	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The complete roster as of this publication. Always whole, never a delta:
-	// the roster is small and Emacs holds the entire model, so a full replace
-	// makes a partially-applied roster unrepresentable.
-	Roster        *WorkspaceRoster `protobuf:"bytes,2,opt,name=roster,proto3" json:"roster,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PublishWorkspaceRosterCmd) Reset() {
-	*x = PublishWorkspaceRosterCmd{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[31]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PublishWorkspaceRosterCmd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PublishWorkspaceRosterCmd) ProtoMessage() {}
-
-func (x *PublishWorkspaceRosterCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[31]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PublishWorkspaceRosterCmd.ProtoReflect.Descriptor instead.
-func (*PublishWorkspaceRosterCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{31}
-}
-
-func (x *PublishWorkspaceRosterCmd) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *PublishWorkspaceRosterCmd) GetRoster() *WorkspaceRoster {
-	if x != nil {
-		return x.Roster
-	}
-	return nil
-}
-
 var File_frontend_v1_sidebar_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_sidebar_proto_rawDesc = "" +
@@ -2161,11 +2092,7 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x1aRosterRowStatusMergeFailed\"\x17\n" +
 	"\x15RosterRowStatusMerged\"\x15\n" +
 	"\x13RosterRowStatusNone\"\x19\n" +
-	"\x17RosterRowStatusInactive\"p\n" +
-	"\x19PublishWorkspaceRosterCmd\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x124\n" +
-	"\x06roster\x18\x02 \x01(\v2\x1c.frontend.v1.WorkspaceRosterR\x06rosterB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
+	"\x17RosterRowStatusInactiveB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_frontend_v1_sidebar_proto_rawDescOnce sync.Once
@@ -2179,7 +2106,7 @@ func file_frontend_v1_sidebar_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_sidebar_proto_rawDescData
 }
 
-var file_frontend_v1_sidebar_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_frontend_v1_sidebar_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_frontend_v1_sidebar_proto_goTypes = []any{
 	(*WorkspaceRoster)(nil),               // 0: frontend.v1.WorkspaceRoster
 	(*RosterRepositoryView)(nil),          // 1: frontend.v1.RosterRepositoryView
@@ -2212,7 +2139,6 @@ var file_frontend_v1_sidebar_proto_goTypes = []any{
 	(*RosterRowStatusMerged)(nil),         // 28: frontend.v1.RosterRowStatusMerged
 	(*RosterRowStatusNone)(nil),           // 29: frontend.v1.RosterRowStatusNone
 	(*RosterRowStatusInactive)(nil),       // 30: frontend.v1.RosterRowStatusInactive
-	(*PublishWorkspaceRosterCmd)(nil),     // 31: frontend.v1.PublishWorkspaceRosterCmd
 }
 var file_frontend_v1_sidebar_proto_depIdxs = []int32{
 	1,  // 0: frontend.v1.WorkspaceRoster.repository:type_name -> frontend.v1.RosterRepositoryView
@@ -2248,12 +2174,11 @@ var file_frontend_v1_sidebar_proto_depIdxs = []int32{
 	29, // 30: frontend.v1.RosterRow.none:type_name -> frontend.v1.RosterRowStatusNone
 	30, // 31: frontend.v1.RosterRow.inactive:type_name -> frontend.v1.RosterRowStatusInactive
 	6,  // 32: frontend.v1.RosterRow.children:type_name -> frontend.v1.RosterRow
-	0,  // 33: frontend.v1.PublishWorkspaceRosterCmd.roster:type_name -> frontend.v1.WorkspaceRoster
-	34, // [34:34] is the sub-list for method output_type
-	34, // [34:34] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	34, // [34:34] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	33, // [33:33] is the sub-list for method output_type
+	33, // [33:33] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_sidebar_proto_init() }
@@ -2297,7 +2222,7 @@ func file_frontend_v1_sidebar_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_sidebar_proto_rawDesc), len(file_frontend_v1_sidebar_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   32,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
