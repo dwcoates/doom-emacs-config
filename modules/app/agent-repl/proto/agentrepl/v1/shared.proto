@@ -1,4 +1,4 @@
-// shared.proto — The frontend.v1 declarations that are NOT any one UI
+// shared.proto — The agentrepl.v1 declarations that are NOT any one UI
 // component's props or events.
 //
 // MEMBERSHIP HERE IS "NOT A COMPONENT", NOT "SHARED BY SEVERAL COMPONENTS".
@@ -14,13 +14,13 @@
 
 syntax = "proto3";
 
-package frontend.v1;
+package agentrepl.v1;
 
 import "google/protobuf/descriptor.proto";
 import "google/protobuf/struct.proto";
 import "protocol/v1/core.proto";
 
-option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 // ==========================================================================
 // SHARED VOCABULARY: the closed session-command set.

@@ -3,15 +3,15 @@
 
 syntax = "proto3";
 
-package frontend.v1;
+package agentrepl.v1;
 
+import "agentrepl/v1/shared.proto";
 import "frontend/v1/feed.proto";
 import "frontend/v1/footer.proto";
-import "frontend/v1/shared.proto";
 import "frontend/v1/sidebar.proto";
 import "frontend/v1/topbar.proto";
 
-option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 // THE outbound frame. Exactly one arm is set per frame.
 //
@@ -23,44 +23,44 @@ message FrontendFrame {
     StateSnapshot snapshot = 1;
     // THE authority on which session owns a workspace, whether it arrives on
     // its own or inside `snapshot`.
-    WorkspaceState workspace_state = 2;
+    frontend.v1.WorkspaceState workspace_state = 2;
     // A catalog entry for ONE session, live or retired. Never a workspace's
     // live identity (see SessionView). HOST SURFACE: never delivered to a GUI
     // client, exactly as StateSnapshot.sessions is stripped.
-    SessionView session_view = 3;
-    ConversationDelta conversation_delta = 4;
-    TaskCatalog task_catalog = 5;
+    frontend.v1.SessionView session_view = 3;
+    frontend.v1.ConversationDelta conversation_delta = 4;
+    frontend.v1.TaskCatalog task_catalog = 5;
     CommandAck command_ack = 6;
-    DaemonView daemon_view = 7;
-    SessionInitView session_init = 8;
-    HeartbeatView heartbeat = 9;
-    QueueView queue = 10;
-    ProgressView progress = 11;
+    frontend.v1.DaemonView daemon_view = 7;
+    frontend.v1.SessionInitView session_init = 8;
+    frontend.v1.HeartbeatView heartbeat = 9;
+    frontend.v1.QueueView queue = 10;
+    frontend.v1.ProgressView progress = 11;
     // Host-only durable workspace lifecycle notification.  The daemon emits
     // this only after the worktree and waiting shim are healthy; Emacs then
     // materializes its perspective and acknowledges it.
     WorkspaceAvailable workspace_available = 12;
     // Host-only durable UI action sourced by the daemon-owned JSON inbox.
     HostAction host_action = 13;
-    DaemonHealthView daemon_health = 14;
-    SessionHealthView session_health = 15;
+    frontend.v1.DaemonHealthView daemon_health = 14;
+    frontend.v1.SessionHealthView session_health = 15;
     // The workspace roster, the sidebar's entire model, previously delivered
     // by Emacs script-injection per webview. Emacs remains the single author;
     // the daemon retains the latest roster, includes it in every connect
     // snapshot, and rebroadcasts on change.
-    WorkspaceRoster workspace_roster = 16;
+    frontend.v1.WorkspaceRoster workspace_roster = 16;
     ShutdownScheduleView shutdown_schedule = 17;
     // Detached work opening as WHOLE MESSAGES, and typed incremental UPDATES to
     // messages already open. Its own frame rather than more ConversationDelta
     // messages, because a detached agent produces at its own rate and must not
     // flood the conversation that dispatched it.
-    DetachedWorkDelta detached_work_delta = 18;
+    frontend.v1.DetachedWorkDelta detached_work_delta = 18;
     // One workspace's topbar, fully resolved. Pushed whenever any fact the
     // topbar renders changes.
-    TopbarView topbar = 19;
+    frontend.v1.TopbarView topbar = 19;
     // One workspace's token-breakdown menu, fully resolved. Pushed whenever
     // the figures change.
-    TokenBreakdownView token_breakdown = 20;
+    frontend.v1.TokenBreakdownView token_breakdown = 20;
     // One workspace's revival gate, resolved and fenced. Pushed on every gate
     // transition (hibernate, revival start, revival settle).
     WorkspaceGateView workspace_gate = 21;
@@ -75,7 +75,7 @@ message FrontendFrame {
     // A preview the daemon opened and can no longer retire. It is an EDGE and
     // never snapshot state: a cut describes the end of one preview, and a
     // client that connects afterwards has no preview to retire.
-    TypingCut typing_cut = 24;
+    frontend.v1.TypingCut typing_cut = 24;
     // ONE page of conversation history, and the ONLY history page on this
     // protocol, answering a FirstPageCmd or a NextPageCmd. A PUSH rather than
     // a response, because its messages are feed content and feed content has
@@ -83,7 +83,7 @@ message FrontendFrame {
     //
     // POSITIONLESS: its reader holds no position and echoes nothing back — the
     // daemon holds the reader's place. See feed.proto.
-    ConversationHistoryPage conversation_history_page = 25;
+    frontend.v1.ConversationHistoryPage conversation_history_page = 25;
   }
 }
 
@@ -97,19 +97,19 @@ message FrontendFrame {
 message StateSnapshot {
   // THE authoritative rulings, one per workspace. Sole source of session
   // ownership for everything in this snapshot.
-  repeated WorkspaceState workspaces = 1;
+  repeated frontend.v1.WorkspaceState workspaces = 1;
   // The session catalog, live and retired alike. Read for per-session facts,
   // never for a workspace's identity (see SessionView). HOST SURFACE:
   // frontend.Server strips it from every GUI client, exactly as it strips the
   // host-only fields below — a rendering frontend's chrome arrives as the
   // resolved component views (`topbars`, `token_breakdowns`,
   // `workspace_gates`) instead.
-  repeated SessionView sessions = 2;
-  repeated TaskCatalog catalogs = 3;
-  DaemonView daemon = 4;
-  repeated SessionInitView inits = 5;
-  repeated QueueView queues = 6;
-  repeated ProgressView progress = 7;
+  repeated frontend.v1.SessionView sessions = 2;
+  repeated frontend.v1.TaskCatalog catalogs = 3;
+  frontend.v1.DaemonView daemon = 4;
+  repeated frontend.v1.SessionInitView inits = 5;
+  repeated frontend.v1.QueueView queues = 6;
+  repeated frontend.v1.ProgressView progress = 7;
   // Host-only durable work.  frontend.Server strips both fields from every
   // GUI client, regardless of observer/painter role.
   repeated WorkspaceAvailable workspace_available = 8;
@@ -122,11 +122,11 @@ message StateSnapshot {
   // reconnecting client resumes a running detached agent rather than starting
   // its fold over. Each carries its own DetachedWorkFold accounting, so the
   // client also knows exactly what it is NOT being shown.
-  repeated Message detached_work = 11;
+  repeated frontend.v1.Message detached_work = 11;
   // The resolved component views, one per workspace, so a connecting client
   // draws its chrome without waiting for each view's first push.
-  repeated TopbarView topbars = 12;
-  repeated TokenBreakdownView token_breakdowns = 13;
+  repeated frontend.v1.TopbarView topbars = 12;
+  repeated frontend.v1.TokenBreakdownView token_breakdowns = 13;
   repeated WorkspaceGateView workspace_gates = 14;
   // The merge queue as of this connect, so a client joining mid-drain renders
   // the queue without waiting for the next mutation.
@@ -176,9 +176,9 @@ message FrontendCommand {
   string request_id = 1;
   string workspace = 2;
   oneof command {
-    SubmitPromptCmd submit_prompt = 3;
-    InterruptCmd interrupt = 4;
-    PermissionAnswerCmd permission_answer = 5;
+    frontend.v1.SubmitPromptCmd submit_prompt = 3;
+    frontend.v1.InterruptCmd interrupt = 4;
+    frontend.v1.PermissionAnswerCmd permission_answer = 5;
     MergeWorkspaceCmd merge_workspace = 6;
     CloseWorkspaceCmd close_workspace = 7;
     OpenWorkspaceCmd open_workspace = 8;
@@ -187,17 +187,17 @@ message FrontendCommand {
     DeleteSessionCmd delete_session = 11;
     ShutdownCmd shutdown = 12;
     ClientLogCmd client_log = 13;
-    QueueForceCmd queue_force = 14;
-    QueueAcceptCmd queue_accept = 15;
-    QueueCancelCmd queue_cancel = 16;
+    frontend.v1.QueueForceCmd queue_force = 14;
+    frontend.v1.QueueAcceptCmd queue_accept = 15;
+    frontend.v1.QueueCancelCmd queue_cancel = 16;
     CreateWorkspaceCmd create_workspace = 17;
     WorkspaceMaterializedCmd workspace_materialized = 18;
     HostActionCompletedCmd host_action_completed = 19;
-    DaemonHealthCmd daemon_health = 20;
-    SessionHealthCmd session_health = 21;
+    frontend.v1.DaemonHealthCmd daemon_health = 20;
+    frontend.v1.SessionHealthCmd session_health = 21;
     RestartSessionCmd restart_session = 22;
-    SetModelCmd set_model = 23;
-    PublishWorkspaceRosterCmd publish_workspace_roster = 24;
+    frontend.v1.SetModelCmd set_model = 23;
+    frontend.v1.PublishWorkspaceRosterCmd publish_workspace_roster = 24;
     ScheduleShutdownCmd schedule_shutdown = 25;
     CancelScheduledShutdownCmd cancel_scheduled_shutdown = 26;
     HibernateWorkspaceCmd hibernate_workspace = 27;
@@ -206,14 +206,14 @@ message FrontendCommand {
     ResumeMergeQueueCmd resume_merge_queue = 30;
     EvictMergeCmd evict_merge = 31;
     AnswerMergeDequeueCmd answer_merge_dequeue = 32;
-    CancelDetachedAgentsCmd cancel_detached_agents = 33;
+    frontend.v1.CancelDetachedAgentsCmd cancel_detached_agents = 33;
     // The positionless history verbs. `first_page` resets this reader's
     // daemon-held position to the newest page; `next_page` walks it one page
     // older and carries NO position of its own, so a reader without an
     // established one is refused rather than silently served the tail. They do
     // not replace `resync` above — see feed.proto.
-    FirstPageCmd first_page = 34;
-    NextPageCmd next_page = 35;
+    frontend.v1.FirstPageCmd first_page = 34;
+    frontend.v1.NextPageCmd next_page = 35;
   }
 }
 
@@ -244,7 +244,7 @@ message CommandAck {
   FailureKind failure = 4;
   // The feed card this refusal was filed under, when it produced one, so the
   // client can offer to reveal it instead of restating the account inline.
-  FailureCardRef failure_card = 5;
+  frontend.v1.FailureCardRef failure_card = 5;
   // The interrupt confirmation CHALLENGE. Not a failure and
   // not an error: the command was understood and deliberately not performed,
   // because no turn was live and stopping live subagents deserves an
@@ -255,7 +255,7 @@ message CommandAck {
   // from the shim. Set on BOTH the success ack (the `cancelled` arm) and the
   // refusal (`nothing_running` / `unsupported` alongside ok=false), so a
   // client never has to read a refusal's meaning out of `error` text.
-  DetachedCancelOutcome detached_cancel = 7;
+  frontend.v1.DetachedCancelOutcome detached_cancel = 7;
   // Present only for SetModelCmd.  It is the shim-confirmed current model on
   // both success and rejection, so a frontend never needs an optimistic model
   // state or a local recovery guess.

@@ -13,7 +13,7 @@ package frontend.v1;
 
 import "protocol/v1/core.proto";
 import "frontend/v1/feed.proto";
-import "frontend/v1/shared.proto";
+import "agentrepl/v1/shared.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
@@ -335,7 +335,7 @@ message WorkspaceState {
   // UNSET means this workspace has no merge to report — the merge axis has
   // never spoken for it, or its axis is cleared. It is never a zero-valued
   // status standing in for absence.
-  MergeStatus merge_status = 16;
+  agentrepl.v1.MergeStatus merge_status = 16;
   // THE OUTSTANDING QUESTION about taking this workspace's merge off the
   // queue. See MergeDequeueOffer: an interrupt no longer performs the queue
   // half, it asks, and this is where the asking lives.
@@ -345,7 +345,7 @@ message WorkspaceState {
   // terminal, or dropped because the merge left the queue on its own. A
   // frontend draws the card if and only if this field is set, so clearing it
   // IS how the card comes down; there is no second dismissal channel.
-  MergeDequeueOffer merge_dequeue_offer = 17;
+  agentrepl.v1.MergeDequeueOffer merge_dequeue_offer = 17;
 }
 
 // A PER-SESSION CATALOG ENTRY, not a statement about who owns a workspace.
@@ -431,7 +431,7 @@ message SessionView {
   // Present iff the session is hibernated; the typed account behind the
   // `hibernated` bool, which stays as its coarse projection.
   // A frontend renders the revival gate from this.
-  HibernationDetail hibernation = 21;
+  agentrepl.v1.HibernationDetail hibernation = 21;
 }
 
 // Whether a session's on-disk transcript has been backfilled into the store.
@@ -964,7 +964,7 @@ message QueueClassificationUninterruptibleTurn {
   // Which cut is running, so the card can name it. Never UNSPECIFIED: the arm
   // is set only when the daemon recognized the running prompt as one of the
   // two, and an arm that could not say which would explain nothing.
-  SessionCommand command = 1;
+  agentrepl.v1.SessionCommand command = 1;
 }
 
 // The classifier could not be believed (it answered with neither token, or
