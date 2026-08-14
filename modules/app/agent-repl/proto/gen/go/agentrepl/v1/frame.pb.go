@@ -5,11 +5,12 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: frontend/v1/frame.proto
+// source: agentrepl/v1/frame.proto
 
-package frontendv1
+package agentreplv1
 
 import (
+	v1 "agentrepl/proto/frontend/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -65,7 +66,7 @@ type FrontendFrame struct {
 
 func (x *FrontendFrame) Reset() {
 	*x = FrontendFrame{}
-	mi := &file_frontend_v1_frame_proto_msgTypes[0]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -77,7 +78,7 @@ func (x *FrontendFrame) String() string {
 func (*FrontendFrame) ProtoMessage() {}
 
 func (x *FrontendFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_frame_proto_msgTypes[0]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -90,7 +91,7 @@ func (x *FrontendFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FrontendFrame.ProtoReflect.Descriptor instead.
 func (*FrontendFrame) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_frame_proto_rawDescGZIP(), []int{0}
+	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *FrontendFrame) GetFrame() isFrontendFrame_Frame {
@@ -109,7 +110,7 @@ func (x *FrontendFrame) GetSnapshot() *StateSnapshot {
 	return nil
 }
 
-func (x *FrontendFrame) GetWorkspaceState() *WorkspaceState {
+func (x *FrontendFrame) GetWorkspaceState() *v1.WorkspaceState {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_WorkspaceState); ok {
 			return x.WorkspaceState
@@ -118,7 +119,7 @@ func (x *FrontendFrame) GetWorkspaceState() *WorkspaceState {
 	return nil
 }
 
-func (x *FrontendFrame) GetSessionView() *SessionView {
+func (x *FrontendFrame) GetSessionView() *v1.SessionView {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_SessionView); ok {
 			return x.SessionView
@@ -127,7 +128,7 @@ func (x *FrontendFrame) GetSessionView() *SessionView {
 	return nil
 }
 
-func (x *FrontendFrame) GetConversationDelta() *ConversationDelta {
+func (x *FrontendFrame) GetConversationDelta() *v1.ConversationDelta {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_ConversationDelta); ok {
 			return x.ConversationDelta
@@ -136,7 +137,7 @@ func (x *FrontendFrame) GetConversationDelta() *ConversationDelta {
 	return nil
 }
 
-func (x *FrontendFrame) GetTaskCatalog() *TaskCatalog {
+func (x *FrontendFrame) GetTaskCatalog() *v1.TaskCatalog {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_TaskCatalog); ok {
 			return x.TaskCatalog
@@ -154,7 +155,7 @@ func (x *FrontendFrame) GetCommandAck() *CommandAck {
 	return nil
 }
 
-func (x *FrontendFrame) GetDaemonView() *DaemonView {
+func (x *FrontendFrame) GetDaemonView() *v1.DaemonView {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_DaemonView); ok {
 			return x.DaemonView
@@ -163,7 +164,7 @@ func (x *FrontendFrame) GetDaemonView() *DaemonView {
 	return nil
 }
 
-func (x *FrontendFrame) GetSessionInit() *SessionInitView {
+func (x *FrontendFrame) GetSessionInit() *v1.SessionInitView {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_SessionInit); ok {
 			return x.SessionInit
@@ -172,7 +173,7 @@ func (x *FrontendFrame) GetSessionInit() *SessionInitView {
 	return nil
 }
 
-func (x *FrontendFrame) GetHeartbeat() *HeartbeatView {
+func (x *FrontendFrame) GetHeartbeat() *v1.HeartbeatView {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_Heartbeat); ok {
 			return x.Heartbeat
@@ -181,7 +182,7 @@ func (x *FrontendFrame) GetHeartbeat() *HeartbeatView {
 	return nil
 }
 
-func (x *FrontendFrame) GetQueue() *QueueView {
+func (x *FrontendFrame) GetQueue() *v1.QueueView {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_Queue); ok {
 			return x.Queue
@@ -190,7 +191,7 @@ func (x *FrontendFrame) GetQueue() *QueueView {
 	return nil
 }
 
-func (x *FrontendFrame) GetProgress() *ProgressView {
+func (x *FrontendFrame) GetProgress() *v1.ProgressView {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_Progress); ok {
 			return x.Progress
@@ -217,7 +218,7 @@ func (x *FrontendFrame) GetHostAction() *HostAction {
 	return nil
 }
 
-func (x *FrontendFrame) GetDaemonHealth() *DaemonHealthView {
+func (x *FrontendFrame) GetDaemonHealth() *v1.DaemonHealthView {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_DaemonHealth); ok {
 			return x.DaemonHealth
@@ -226,7 +227,7 @@ func (x *FrontendFrame) GetDaemonHealth() *DaemonHealthView {
 	return nil
 }
 
-func (x *FrontendFrame) GetSessionHealth() *SessionHealthView {
+func (x *FrontendFrame) GetSessionHealth() *v1.SessionHealthView {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_SessionHealth); ok {
 			return x.SessionHealth
@@ -235,7 +236,7 @@ func (x *FrontendFrame) GetSessionHealth() *SessionHealthView {
 	return nil
 }
 
-func (x *FrontendFrame) GetWorkspaceRoster() *WorkspaceRoster {
+func (x *FrontendFrame) GetWorkspaceRoster() *v1.WorkspaceRoster {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_WorkspaceRoster); ok {
 			return x.WorkspaceRoster
@@ -253,7 +254,7 @@ func (x *FrontendFrame) GetShutdownSchedule() *ShutdownScheduleView {
 	return nil
 }
 
-func (x *FrontendFrame) GetDetachedWorkDelta() *DetachedWorkDelta {
+func (x *FrontendFrame) GetDetachedWorkDelta() *v1.DetachedWorkDelta {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_DetachedWorkDelta); ok {
 			return x.DetachedWorkDelta
@@ -262,7 +263,7 @@ func (x *FrontendFrame) GetDetachedWorkDelta() *DetachedWorkDelta {
 	return nil
 }
 
-func (x *FrontendFrame) GetTopbar() *TopbarView {
+func (x *FrontendFrame) GetTopbar() *v1.TopbarView {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_Topbar); ok {
 			return x.Topbar
@@ -271,7 +272,7 @@ func (x *FrontendFrame) GetTopbar() *TopbarView {
 	return nil
 }
 
-func (x *FrontendFrame) GetTokenBreakdown() *TokenBreakdownView {
+func (x *FrontendFrame) GetTokenBreakdown() *v1.TokenBreakdownView {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_TokenBreakdown); ok {
 			return x.TokenBreakdown
@@ -307,7 +308,7 @@ func (x *FrontendFrame) GetRestartPending() *RestartPendingView {
 	return nil
 }
 
-func (x *FrontendFrame) GetTypingCut() *TypingCut {
+func (x *FrontendFrame) GetTypingCut() *v1.TypingCut {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_TypingCut); ok {
 			return x.TypingCut
@@ -316,7 +317,7 @@ func (x *FrontendFrame) GetTypingCut() *TypingCut {
 	return nil
 }
 
-func (x *FrontendFrame) GetConversationHistoryPage() *ConversationHistoryPage {
+func (x *FrontendFrame) GetConversationHistoryPage() *v1.ConversationHistoryPage {
 	if x != nil {
 		if x, ok := x.Frame.(*FrontendFrame_ConversationHistoryPage); ok {
 			return x.ConversationHistoryPage
@@ -336,22 +337,22 @@ type FrontendFrame_Snapshot struct {
 type FrontendFrame_WorkspaceState struct {
 	// THE authority on which session owns a workspace, whether it arrives on
 	// its own or inside `snapshot`.
-	WorkspaceState *WorkspaceState `protobuf:"bytes,2,opt,name=workspace_state,json=workspaceState,proto3,oneof"`
+	WorkspaceState *v1.WorkspaceState `protobuf:"bytes,2,opt,name=workspace_state,json=workspaceState,proto3,oneof"`
 }
 
 type FrontendFrame_SessionView struct {
 	// A catalog entry for ONE session, live or retired. Never a workspace's
 	// live identity (see SessionView). HOST SURFACE: never delivered to a GUI
 	// client, exactly as StateSnapshot.sessions is stripped.
-	SessionView *SessionView `protobuf:"bytes,3,opt,name=session_view,json=sessionView,proto3,oneof"`
+	SessionView *v1.SessionView `protobuf:"bytes,3,opt,name=session_view,json=sessionView,proto3,oneof"`
 }
 
 type FrontendFrame_ConversationDelta struct {
-	ConversationDelta *ConversationDelta `protobuf:"bytes,4,opt,name=conversation_delta,json=conversationDelta,proto3,oneof"`
+	ConversationDelta *v1.ConversationDelta `protobuf:"bytes,4,opt,name=conversation_delta,json=conversationDelta,proto3,oneof"`
 }
 
 type FrontendFrame_TaskCatalog struct {
-	TaskCatalog *TaskCatalog `protobuf:"bytes,5,opt,name=task_catalog,json=taskCatalog,proto3,oneof"`
+	TaskCatalog *v1.TaskCatalog `protobuf:"bytes,5,opt,name=task_catalog,json=taskCatalog,proto3,oneof"`
 }
 
 type FrontendFrame_CommandAck struct {
@@ -359,23 +360,23 @@ type FrontendFrame_CommandAck struct {
 }
 
 type FrontendFrame_DaemonView struct {
-	DaemonView *DaemonView `protobuf:"bytes,7,opt,name=daemon_view,json=daemonView,proto3,oneof"`
+	DaemonView *v1.DaemonView `protobuf:"bytes,7,opt,name=daemon_view,json=daemonView,proto3,oneof"`
 }
 
 type FrontendFrame_SessionInit struct {
-	SessionInit *SessionInitView `protobuf:"bytes,8,opt,name=session_init,json=sessionInit,proto3,oneof"`
+	SessionInit *v1.SessionInitView `protobuf:"bytes,8,opt,name=session_init,json=sessionInit,proto3,oneof"`
 }
 
 type FrontendFrame_Heartbeat struct {
-	Heartbeat *HeartbeatView `protobuf:"bytes,9,opt,name=heartbeat,proto3,oneof"`
+	Heartbeat *v1.HeartbeatView `protobuf:"bytes,9,opt,name=heartbeat,proto3,oneof"`
 }
 
 type FrontendFrame_Queue struct {
-	Queue *QueueView `protobuf:"bytes,10,opt,name=queue,proto3,oneof"`
+	Queue *v1.QueueView `protobuf:"bytes,10,opt,name=queue,proto3,oneof"`
 }
 
 type FrontendFrame_Progress struct {
-	Progress *ProgressView `protobuf:"bytes,11,opt,name=progress,proto3,oneof"`
+	Progress *v1.ProgressView `protobuf:"bytes,11,opt,name=progress,proto3,oneof"`
 }
 
 type FrontendFrame_WorkspaceAvailable struct {
@@ -391,11 +392,11 @@ type FrontendFrame_HostAction struct {
 }
 
 type FrontendFrame_DaemonHealth struct {
-	DaemonHealth *DaemonHealthView `protobuf:"bytes,14,opt,name=daemon_health,json=daemonHealth,proto3,oneof"`
+	DaemonHealth *v1.DaemonHealthView `protobuf:"bytes,14,opt,name=daemon_health,json=daemonHealth,proto3,oneof"`
 }
 
 type FrontendFrame_SessionHealth struct {
-	SessionHealth *SessionHealthView `protobuf:"bytes,15,opt,name=session_health,json=sessionHealth,proto3,oneof"`
+	SessionHealth *v1.SessionHealthView `protobuf:"bytes,15,opt,name=session_health,json=sessionHealth,proto3,oneof"`
 }
 
 type FrontendFrame_WorkspaceRoster struct {
@@ -403,7 +404,7 @@ type FrontendFrame_WorkspaceRoster struct {
 	// by Emacs script-injection per webview. Emacs remains the single author;
 	// the daemon retains the latest roster, includes it in every connect
 	// snapshot, and rebroadcasts on change.
-	WorkspaceRoster *WorkspaceRoster `protobuf:"bytes,16,opt,name=workspace_roster,json=workspaceRoster,proto3,oneof"`
+	WorkspaceRoster *v1.WorkspaceRoster `protobuf:"bytes,16,opt,name=workspace_roster,json=workspaceRoster,proto3,oneof"`
 }
 
 type FrontendFrame_ShutdownSchedule struct {
@@ -415,19 +416,19 @@ type FrontendFrame_DetachedWorkDelta struct {
 	// messages already open. Its own frame rather than more ConversationDelta
 	// messages, because a detached agent produces at its own rate and must not
 	// flood the conversation that dispatched it.
-	DetachedWorkDelta *DetachedWorkDelta `protobuf:"bytes,18,opt,name=detached_work_delta,json=detachedWorkDelta,proto3,oneof"`
+	DetachedWorkDelta *v1.DetachedWorkDelta `protobuf:"bytes,18,opt,name=detached_work_delta,json=detachedWorkDelta,proto3,oneof"`
 }
 
 type FrontendFrame_Topbar struct {
 	// One workspace's topbar, fully resolved. Pushed whenever any fact the
 	// topbar renders changes.
-	Topbar *TopbarView `protobuf:"bytes,19,opt,name=topbar,proto3,oneof"`
+	Topbar *v1.TopbarView `protobuf:"bytes,19,opt,name=topbar,proto3,oneof"`
 }
 
 type FrontendFrame_TokenBreakdown struct {
 	// One workspace's token-breakdown menu, fully resolved. Pushed whenever
 	// the figures change.
-	TokenBreakdown *TokenBreakdownView `protobuf:"bytes,20,opt,name=token_breakdown,json=tokenBreakdown,proto3,oneof"`
+	TokenBreakdown *v1.TokenBreakdownView `protobuf:"bytes,20,opt,name=token_breakdown,json=tokenBreakdown,proto3,oneof"`
 }
 
 type FrontendFrame_WorkspaceGate struct {
@@ -454,7 +455,7 @@ type FrontendFrame_TypingCut struct {
 	// A preview the daemon opened and can no longer retire. It is an EDGE and
 	// never snapshot state: a cut describes the end of one preview, and a
 	// client that connects afterwards has no preview to retire.
-	TypingCut *TypingCut `protobuf:"bytes,24,opt,name=typing_cut,json=typingCut,proto3,oneof"`
+	TypingCut *v1.TypingCut `protobuf:"bytes,24,opt,name=typing_cut,json=typingCut,proto3,oneof"`
 }
 
 type FrontendFrame_ConversationHistoryPage struct {
@@ -465,7 +466,7 @@ type FrontendFrame_ConversationHistoryPage struct {
 	//
 	// POSITIONLESS: its reader holds no position and echoes nothing back — the
 	// daemon holds the reader's place. See feed.proto.
-	ConversationHistoryPage *ConversationHistoryPage `protobuf:"bytes,25,opt,name=conversation_history_page,json=conversationHistoryPage,proto3,oneof"`
+	ConversationHistoryPage *v1.ConversationHistoryPage `protobuf:"bytes,25,opt,name=conversation_history_page,json=conversationHistoryPage,proto3,oneof"`
 }
 
 func (*FrontendFrame_Snapshot) isFrontendFrame_Frame() {}
@@ -529,19 +530,19 @@ type StateSnapshot struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// THE authoritative rulings, one per workspace. Sole source of session
 	// ownership for everything in this snapshot.
-	Workspaces []*WorkspaceState `protobuf:"bytes,1,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
+	Workspaces []*v1.WorkspaceState `protobuf:"bytes,1,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
 	// The session catalog, live and retired alike. Read for per-session facts,
 	// never for a workspace's identity (see SessionView). HOST SURFACE:
 	// frontend.Server strips it from every GUI client, exactly as it strips the
 	// host-only fields below — a rendering frontend's chrome arrives as the
 	// resolved component views (`topbars`, `token_breakdowns`,
 	// `workspace_gates`) instead.
-	Sessions []*SessionView     `protobuf:"bytes,2,rep,name=sessions,proto3" json:"sessions,omitempty"`
-	Catalogs []*TaskCatalog     `protobuf:"bytes,3,rep,name=catalogs,proto3" json:"catalogs,omitempty"`
-	Daemon   *DaemonView        `protobuf:"bytes,4,opt,name=daemon,proto3" json:"daemon,omitempty"`
-	Inits    []*SessionInitView `protobuf:"bytes,5,rep,name=inits,proto3" json:"inits,omitempty"`
-	Queues   []*QueueView       `protobuf:"bytes,6,rep,name=queues,proto3" json:"queues,omitempty"`
-	Progress []*ProgressView    `protobuf:"bytes,7,rep,name=progress,proto3" json:"progress,omitempty"`
+	Sessions []*v1.SessionView     `protobuf:"bytes,2,rep,name=sessions,proto3" json:"sessions,omitempty"`
+	Catalogs []*v1.TaskCatalog     `protobuf:"bytes,3,rep,name=catalogs,proto3" json:"catalogs,omitempty"`
+	Daemon   *v1.DaemonView        `protobuf:"bytes,4,opt,name=daemon,proto3" json:"daemon,omitempty"`
+	Inits    []*v1.SessionInitView `protobuf:"bytes,5,rep,name=inits,proto3" json:"inits,omitempty"`
+	Queues   []*v1.QueueView       `protobuf:"bytes,6,rep,name=queues,proto3" json:"queues,omitempty"`
+	Progress []*v1.ProgressView    `protobuf:"bytes,7,rep,name=progress,proto3" json:"progress,omitempty"`
 	// Host-only durable work.  frontend.Server strips both fields from every
 	// GUI client, regardless of observer/painter role.
 	WorkspaceAvailable []*WorkspaceAvailable `protobuf:"bytes,8,rep,name=workspace_available,json=workspaceAvailable,proto3" json:"workspace_available,omitempty"`
@@ -554,12 +555,12 @@ type StateSnapshot struct {
 	// reconnecting client resumes a running detached agent rather than starting
 	// its fold over. Each carries its own DetachedWorkFold accounting, so the
 	// client also knows exactly what it is NOT being shown.
-	DetachedWork []*Message `protobuf:"bytes,11,rep,name=detached_work,json=detachedWork,proto3" json:"detached_work,omitempty"`
+	DetachedWork []*v1.Message `protobuf:"bytes,11,rep,name=detached_work,json=detachedWork,proto3" json:"detached_work,omitempty"`
 	// The resolved component views, one per workspace, so a connecting client
 	// draws its chrome without waiting for each view's first push.
-	Topbars         []*TopbarView         `protobuf:"bytes,12,rep,name=topbars,proto3" json:"topbars,omitempty"`
-	TokenBreakdowns []*TokenBreakdownView `protobuf:"bytes,13,rep,name=token_breakdowns,json=tokenBreakdowns,proto3" json:"token_breakdowns,omitempty"`
-	WorkspaceGates  []*WorkspaceGateView  `protobuf:"bytes,14,rep,name=workspace_gates,json=workspaceGates,proto3" json:"workspace_gates,omitempty"`
+	Topbars         []*v1.TopbarView         `protobuf:"bytes,12,rep,name=topbars,proto3" json:"topbars,omitempty"`
+	TokenBreakdowns []*v1.TokenBreakdownView `protobuf:"bytes,13,rep,name=token_breakdowns,json=tokenBreakdowns,proto3" json:"token_breakdowns,omitempty"`
+	WorkspaceGates  []*WorkspaceGateView     `protobuf:"bytes,14,rep,name=workspace_gates,json=workspaceGates,proto3" json:"workspace_gates,omitempty"`
 	// The merge queue as of this connect, so a client joining mid-drain renders
 	// the queue without waiting for the next mutation.
 	MergeQueueRoster *MergeQueueRoster `protobuf:"bytes,15,opt,name=merge_queue_roster,json=mergeQueueRoster,proto3" json:"merge_queue_roster,omitempty"`
@@ -602,7 +603,7 @@ type StateSnapshot struct {
 
 func (x *StateSnapshot) Reset() {
 	*x = StateSnapshot{}
-	mi := &file_frontend_v1_frame_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -614,7 +615,7 @@ func (x *StateSnapshot) String() string {
 func (*StateSnapshot) ProtoMessage() {}
 
 func (x *StateSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_frame_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -627,52 +628,52 @@ func (x *StateSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StateSnapshot.ProtoReflect.Descriptor instead.
 func (*StateSnapshot) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_frame_proto_rawDescGZIP(), []int{1}
+	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *StateSnapshot) GetWorkspaces() []*WorkspaceState {
+func (x *StateSnapshot) GetWorkspaces() []*v1.WorkspaceState {
 	if x != nil {
 		return x.Workspaces
 	}
 	return nil
 }
 
-func (x *StateSnapshot) GetSessions() []*SessionView {
+func (x *StateSnapshot) GetSessions() []*v1.SessionView {
 	if x != nil {
 		return x.Sessions
 	}
 	return nil
 }
 
-func (x *StateSnapshot) GetCatalogs() []*TaskCatalog {
+func (x *StateSnapshot) GetCatalogs() []*v1.TaskCatalog {
 	if x != nil {
 		return x.Catalogs
 	}
 	return nil
 }
 
-func (x *StateSnapshot) GetDaemon() *DaemonView {
+func (x *StateSnapshot) GetDaemon() *v1.DaemonView {
 	if x != nil {
 		return x.Daemon
 	}
 	return nil
 }
 
-func (x *StateSnapshot) GetInits() []*SessionInitView {
+func (x *StateSnapshot) GetInits() []*v1.SessionInitView {
 	if x != nil {
 		return x.Inits
 	}
 	return nil
 }
 
-func (x *StateSnapshot) GetQueues() []*QueueView {
+func (x *StateSnapshot) GetQueues() []*v1.QueueView {
 	if x != nil {
 		return x.Queues
 	}
 	return nil
 }
 
-func (x *StateSnapshot) GetProgress() []*ProgressView {
+func (x *StateSnapshot) GetProgress() []*v1.ProgressView {
 	if x != nil {
 		return x.Progress
 	}
@@ -700,21 +701,21 @@ func (x *StateSnapshot) GetShutdownSchedule() *ShutdownScheduleView {
 	return nil
 }
 
-func (x *StateSnapshot) GetDetachedWork() []*Message {
+func (x *StateSnapshot) GetDetachedWork() []*v1.Message {
 	if x != nil {
 		return x.DetachedWork
 	}
 	return nil
 }
 
-func (x *StateSnapshot) GetTopbars() []*TopbarView {
+func (x *StateSnapshot) GetTopbars() []*v1.TopbarView {
 	if x != nil {
 		return x.Topbars
 	}
 	return nil
 }
 
-func (x *StateSnapshot) GetTokenBreakdowns() []*TokenBreakdownView {
+func (x *StateSnapshot) GetTokenBreakdowns() []*v1.TokenBreakdownView {
 	if x != nil {
 		return x.TokenBreakdowns
 	}
@@ -800,7 +801,7 @@ type FrontendCommand struct {
 
 func (x *FrontendCommand) Reset() {
 	*x = FrontendCommand{}
-	mi := &file_frontend_v1_frame_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -812,7 +813,7 @@ func (x *FrontendCommand) String() string {
 func (*FrontendCommand) ProtoMessage() {}
 
 func (x *FrontendCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_frame_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -825,7 +826,7 @@ func (x *FrontendCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FrontendCommand.ProtoReflect.Descriptor instead.
 func (*FrontendCommand) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_frame_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *FrontendCommand) GetRequestId() string {
@@ -849,7 +850,7 @@ func (x *FrontendCommand) GetCommand() isFrontendCommand_Command {
 	return nil
 }
 
-func (x *FrontendCommand) GetSubmitPrompt() *SubmitPromptCmd {
+func (x *FrontendCommand) GetSubmitPrompt() *v1.SubmitPromptCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_SubmitPrompt); ok {
 			return x.SubmitPrompt
@@ -858,7 +859,7 @@ func (x *FrontendCommand) GetSubmitPrompt() *SubmitPromptCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetInterrupt() *InterruptCmd {
+func (x *FrontendCommand) GetInterrupt() *v1.InterruptCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_Interrupt); ok {
 			return x.Interrupt
@@ -867,7 +868,7 @@ func (x *FrontendCommand) GetInterrupt() *InterruptCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetPermissionAnswer() *PermissionAnswerCmd {
+func (x *FrontendCommand) GetPermissionAnswer() *v1.PermissionAnswerCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_PermissionAnswer); ok {
 			return x.PermissionAnswer
@@ -948,7 +949,7 @@ func (x *FrontendCommand) GetClientLog() *ClientLogCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetQueueForce() *QueueForceCmd {
+func (x *FrontendCommand) GetQueueForce() *v1.QueueForceCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_QueueForce); ok {
 			return x.QueueForce
@@ -957,7 +958,7 @@ func (x *FrontendCommand) GetQueueForce() *QueueForceCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetQueueAccept() *QueueAcceptCmd {
+func (x *FrontendCommand) GetQueueAccept() *v1.QueueAcceptCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_QueueAccept); ok {
 			return x.QueueAccept
@@ -966,7 +967,7 @@ func (x *FrontendCommand) GetQueueAccept() *QueueAcceptCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetQueueCancel() *QueueCancelCmd {
+func (x *FrontendCommand) GetQueueCancel() *v1.QueueCancelCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_QueueCancel); ok {
 			return x.QueueCancel
@@ -1002,7 +1003,7 @@ func (x *FrontendCommand) GetHostActionCompleted() *HostActionCompletedCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetDaemonHealth() *DaemonHealthCmd {
+func (x *FrontendCommand) GetDaemonHealth() *v1.DaemonHealthCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_DaemonHealth); ok {
 			return x.DaemonHealth
@@ -1011,7 +1012,7 @@ func (x *FrontendCommand) GetDaemonHealth() *DaemonHealthCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetSessionHealth() *SessionHealthCmd {
+func (x *FrontendCommand) GetSessionHealth() *v1.SessionHealthCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_SessionHealth); ok {
 			return x.SessionHealth
@@ -1029,7 +1030,7 @@ func (x *FrontendCommand) GetRestartSession() *RestartSessionCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetSetModel() *SetModelCmd {
+func (x *FrontendCommand) GetSetModel() *v1.SetModelCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_SetModel); ok {
 			return x.SetModel
@@ -1038,7 +1039,7 @@ func (x *FrontendCommand) GetSetModel() *SetModelCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetPublishWorkspaceRoster() *PublishWorkspaceRosterCmd {
+func (x *FrontendCommand) GetPublishWorkspaceRoster() *v1.PublishWorkspaceRosterCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_PublishWorkspaceRoster); ok {
 			return x.PublishWorkspaceRoster
@@ -1119,7 +1120,7 @@ func (x *FrontendCommand) GetAnswerMergeDequeue() *AnswerMergeDequeueCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetCancelDetachedAgents() *CancelDetachedAgentsCmd {
+func (x *FrontendCommand) GetCancelDetachedAgents() *v1.CancelDetachedAgentsCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_CancelDetachedAgents); ok {
 			return x.CancelDetachedAgents
@@ -1128,7 +1129,7 @@ func (x *FrontendCommand) GetCancelDetachedAgents() *CancelDetachedAgentsCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetFirstPage() *FirstPageCmd {
+func (x *FrontendCommand) GetFirstPage() *v1.FirstPageCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_FirstPage); ok {
 			return x.FirstPage
@@ -1137,7 +1138,7 @@ func (x *FrontendCommand) GetFirstPage() *FirstPageCmd {
 	return nil
 }
 
-func (x *FrontendCommand) GetNextPage() *NextPageCmd {
+func (x *FrontendCommand) GetNextPage() *v1.NextPageCmd {
 	if x != nil {
 		if x, ok := x.Command.(*FrontendCommand_NextPage); ok {
 			return x.NextPage
@@ -1151,15 +1152,15 @@ type isFrontendCommand_Command interface {
 }
 
 type FrontendCommand_SubmitPrompt struct {
-	SubmitPrompt *SubmitPromptCmd `protobuf:"bytes,3,opt,name=submit_prompt,json=submitPrompt,proto3,oneof"`
+	SubmitPrompt *v1.SubmitPromptCmd `protobuf:"bytes,3,opt,name=submit_prompt,json=submitPrompt,proto3,oneof"`
 }
 
 type FrontendCommand_Interrupt struct {
-	Interrupt *InterruptCmd `protobuf:"bytes,4,opt,name=interrupt,proto3,oneof"`
+	Interrupt *v1.InterruptCmd `protobuf:"bytes,4,opt,name=interrupt,proto3,oneof"`
 }
 
 type FrontendCommand_PermissionAnswer struct {
-	PermissionAnswer *PermissionAnswerCmd `protobuf:"bytes,5,opt,name=permission_answer,json=permissionAnswer,proto3,oneof"`
+	PermissionAnswer *v1.PermissionAnswerCmd `protobuf:"bytes,5,opt,name=permission_answer,json=permissionAnswer,proto3,oneof"`
 }
 
 type FrontendCommand_MergeWorkspace struct {
@@ -1195,15 +1196,15 @@ type FrontendCommand_ClientLog struct {
 }
 
 type FrontendCommand_QueueForce struct {
-	QueueForce *QueueForceCmd `protobuf:"bytes,14,opt,name=queue_force,json=queueForce,proto3,oneof"`
+	QueueForce *v1.QueueForceCmd `protobuf:"bytes,14,opt,name=queue_force,json=queueForce,proto3,oneof"`
 }
 
 type FrontendCommand_QueueAccept struct {
-	QueueAccept *QueueAcceptCmd `protobuf:"bytes,15,opt,name=queue_accept,json=queueAccept,proto3,oneof"`
+	QueueAccept *v1.QueueAcceptCmd `protobuf:"bytes,15,opt,name=queue_accept,json=queueAccept,proto3,oneof"`
 }
 
 type FrontendCommand_QueueCancel struct {
-	QueueCancel *QueueCancelCmd `protobuf:"bytes,16,opt,name=queue_cancel,json=queueCancel,proto3,oneof"`
+	QueueCancel *v1.QueueCancelCmd `protobuf:"bytes,16,opt,name=queue_cancel,json=queueCancel,proto3,oneof"`
 }
 
 type FrontendCommand_CreateWorkspace struct {
@@ -1219,11 +1220,11 @@ type FrontendCommand_HostActionCompleted struct {
 }
 
 type FrontendCommand_DaemonHealth struct {
-	DaemonHealth *DaemonHealthCmd `protobuf:"bytes,20,opt,name=daemon_health,json=daemonHealth,proto3,oneof"`
+	DaemonHealth *v1.DaemonHealthCmd `protobuf:"bytes,20,opt,name=daemon_health,json=daemonHealth,proto3,oneof"`
 }
 
 type FrontendCommand_SessionHealth struct {
-	SessionHealth *SessionHealthCmd `protobuf:"bytes,21,opt,name=session_health,json=sessionHealth,proto3,oneof"`
+	SessionHealth *v1.SessionHealthCmd `protobuf:"bytes,21,opt,name=session_health,json=sessionHealth,proto3,oneof"`
 }
 
 type FrontendCommand_RestartSession struct {
@@ -1231,11 +1232,11 @@ type FrontendCommand_RestartSession struct {
 }
 
 type FrontendCommand_SetModel struct {
-	SetModel *SetModelCmd `protobuf:"bytes,23,opt,name=set_model,json=setModel,proto3,oneof"`
+	SetModel *v1.SetModelCmd `protobuf:"bytes,23,opt,name=set_model,json=setModel,proto3,oneof"`
 }
 
 type FrontendCommand_PublishWorkspaceRoster struct {
-	PublishWorkspaceRoster *PublishWorkspaceRosterCmd `protobuf:"bytes,24,opt,name=publish_workspace_roster,json=publishWorkspaceRoster,proto3,oneof"`
+	PublishWorkspaceRoster *v1.PublishWorkspaceRosterCmd `protobuf:"bytes,24,opt,name=publish_workspace_roster,json=publishWorkspaceRoster,proto3,oneof"`
 }
 
 type FrontendCommand_ScheduleShutdown struct {
@@ -1271,7 +1272,7 @@ type FrontendCommand_AnswerMergeDequeue struct {
 }
 
 type FrontendCommand_CancelDetachedAgents struct {
-	CancelDetachedAgents *CancelDetachedAgentsCmd `protobuf:"bytes,33,opt,name=cancel_detached_agents,json=cancelDetachedAgents,proto3,oneof"`
+	CancelDetachedAgents *v1.CancelDetachedAgentsCmd `protobuf:"bytes,33,opt,name=cancel_detached_agents,json=cancelDetachedAgents,proto3,oneof"`
 }
 
 type FrontendCommand_FirstPage struct {
@@ -1280,11 +1281,11 @@ type FrontendCommand_FirstPage struct {
 	// older and carries NO position of its own, so a reader without an
 	// established one is refused rather than silently served the tail. They do
 	// not replace `resync` above — see feed.proto.
-	FirstPage *FirstPageCmd `protobuf:"bytes,34,opt,name=first_page,json=firstPage,proto3,oneof"`
+	FirstPage *v1.FirstPageCmd `protobuf:"bytes,34,opt,name=first_page,json=firstPage,proto3,oneof"`
 }
 
 type FrontendCommand_NextPage struct {
-	NextPage *NextPageCmd `protobuf:"bytes,35,opt,name=next_page,json=nextPage,proto3,oneof"`
+	NextPage *v1.NextPageCmd `protobuf:"bytes,35,opt,name=next_page,json=nextPage,proto3,oneof"`
 }
 
 func (*FrontendCommand_SubmitPrompt) isFrontendCommand_Command() {}
@@ -1370,7 +1371,7 @@ type CommandAck struct {
 	Failure *FailureKind `protobuf:"bytes,4,opt,name=failure,proto3" json:"failure,omitempty"`
 	// The feed card this refusal was filed under, when it produced one, so the
 	// client can offer to reveal it instead of restating the account inline.
-	FailureCard *FailureCardRef `protobuf:"bytes,5,opt,name=failure_card,json=failureCard,proto3" json:"failure_card,omitempty"`
+	FailureCard *v1.FailureCardRef `protobuf:"bytes,5,opt,name=failure_card,json=failureCard,proto3" json:"failure_card,omitempty"`
 	// The interrupt confirmation CHALLENGE. Not a failure and
 	// not an error: the command was understood and deliberately not performed,
 	// because no turn was live and stopping live subagents deserves an
@@ -1381,7 +1382,7 @@ type CommandAck struct {
 	// from the shim. Set on BOTH the success ack (the `cancelled` arm) and the
 	// refusal (`nothing_running` / `unsupported` alongside ok=false), so a
 	// client never has to read a refusal's meaning out of `error` text.
-	DetachedCancel *DetachedCancelOutcome `protobuf:"bytes,7,opt,name=detached_cancel,json=detachedCancel,proto3" json:"detached_cancel,omitempty"`
+	DetachedCancel *v1.DetachedCancelOutcome `protobuf:"bytes,7,opt,name=detached_cancel,json=detachedCancel,proto3" json:"detached_cancel,omitempty"`
 	// Present only for SetModelCmd.  It is the shim-confirmed current model on
 	// both success and rejection, so a frontend never needs an optimistic model
 	// state or a local recovery guess.
@@ -1409,7 +1410,7 @@ type CommandAck struct {
 
 func (x *CommandAck) Reset() {
 	*x = CommandAck{}
-	mi := &file_frontend_v1_frame_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1421,7 +1422,7 @@ func (x *CommandAck) String() string {
 func (*CommandAck) ProtoMessage() {}
 
 func (x *CommandAck) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_frame_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1434,7 +1435,7 @@ func (x *CommandAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandAck.ProtoReflect.Descriptor instead.
 func (*CommandAck) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_frame_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CommandAck) GetRequestId() string {
@@ -1465,7 +1466,7 @@ func (x *CommandAck) GetFailure() *FailureKind {
 	return nil
 }
 
-func (x *CommandAck) GetFailureCard() *FailureCardRef {
+func (x *CommandAck) GetFailureCard() *v1.FailureCardRef {
 	if x != nil {
 		return x.FailureCard
 	}
@@ -1479,7 +1480,7 @@ func (x *CommandAck) GetInterruptConfirmRequired() *InterruptConfirmRequired {
 	return nil
 }
 
-func (x *CommandAck) GetDetachedCancel() *DetachedCancelOutcome {
+func (x *CommandAck) GetDetachedCancel() *v1.DetachedCancelOutcome {
 	if x != nil {
 		return x.DetachedCancel
 	}
@@ -1512,7 +1513,7 @@ type InterruptConfirmRequired struct {
 
 func (x *InterruptConfirmRequired) Reset() {
 	*x = InterruptConfirmRequired{}
-	mi := &file_frontend_v1_frame_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1524,7 +1525,7 @@ func (x *InterruptConfirmRequired) String() string {
 func (*InterruptConfirmRequired) ProtoMessage() {}
 
 func (x *InterruptConfirmRequired) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_frame_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1537,7 +1538,7 @@ func (x *InterruptConfirmRequired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptConfirmRequired.ProtoReflect.Descriptor instead.
 func (*InterruptConfirmRequired) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_frame_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *InterruptConfirmRequired) GetLiveTasks() int64 {
@@ -1573,7 +1574,7 @@ type ResyncCmd struct {
 
 func (x *ResyncCmd) Reset() {
 	*x = ResyncCmd{}
-	mi := &file_frontend_v1_frame_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1585,7 +1586,7 @@ func (x *ResyncCmd) String() string {
 func (*ResyncCmd) ProtoMessage() {}
 
 func (x *ResyncCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_frame_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_frame_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1598,7 +1599,7 @@ func (x *ResyncCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResyncCmd.ProtoReflect.Descriptor instead.
 func (*ResyncCmd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_frame_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_frame_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ResyncCmd) GetFromSeq() uint64 {
@@ -1615,18 +1616,18 @@ func (x *ResyncCmd) GetFence() string {
 	return ""
 }
 
-var File_frontend_v1_frame_proto protoreflect.FileDescriptor
+var File_agentrepl_v1_frame_proto protoreflect.FileDescriptor
 
-const file_frontend_v1_frame_proto_rawDesc = "" +
+const file_agentrepl_v1_frame_proto_rawDesc = "" +
 	"\n" +
-	"\x17frontend/v1/frame.proto\x12\vfrontend.v1\x1a\x16frontend/v1/feed.proto\x1a\x18frontend/v1/footer.proto\x1a\x18frontend/v1/shared.proto\x1a\x19frontend/v1/sidebar.proto\x1a\x18frontend/v1/topbar.proto\"\xd7\r\n" +
-	"\rFrontendFrame\x128\n" +
-	"\bsnapshot\x18\x01 \x01(\v2\x1a.frontend.v1.StateSnapshotH\x00R\bsnapshot\x12F\n" +
+	"\x18agentrepl/v1/frame.proto\x12\fagentrepl.v1\x1a\x19agentrepl/v1/shared.proto\x1a\x16frontend/v1/feed.proto\x1a\x18frontend/v1/footer.proto\x1a\x19frontend/v1/sidebar.proto\x1a\x18frontend/v1/topbar.proto\"\xdf\r\n" +
+	"\rFrontendFrame\x129\n" +
+	"\bsnapshot\x18\x01 \x01(\v2\x1b.agentrepl.v1.StateSnapshotH\x00R\bsnapshot\x12F\n" +
 	"\x0fworkspace_state\x18\x02 \x01(\v2\x1b.frontend.v1.WorkspaceStateH\x00R\x0eworkspaceState\x12=\n" +
 	"\fsession_view\x18\x03 \x01(\v2\x18.frontend.v1.SessionViewH\x00R\vsessionView\x12O\n" +
 	"\x12conversation_delta\x18\x04 \x01(\v2\x1e.frontend.v1.ConversationDeltaH\x00R\x11conversationDelta\x12=\n" +
-	"\ftask_catalog\x18\x05 \x01(\v2\x18.frontend.v1.TaskCatalogH\x00R\vtaskCatalog\x12:\n" +
-	"\vcommand_ack\x18\x06 \x01(\v2\x17.frontend.v1.CommandAckH\x00R\n" +
+	"\ftask_catalog\x18\x05 \x01(\v2\x18.frontend.v1.TaskCatalogH\x00R\vtaskCatalog\x12;\n" +
+	"\vcommand_ack\x18\x06 \x01(\v2\x18.agentrepl.v1.CommandAckH\x00R\n" +
 	"commandAck\x12:\n" +
 	"\vdaemon_view\x18\a \x01(\v2\x17.frontend.v1.DaemonViewH\x00R\n" +
 	"daemonView\x12A\n" +
@@ -1634,24 +1635,24 @@ const file_frontend_v1_frame_proto_rawDesc = "" +
 	"\theartbeat\x18\t \x01(\v2\x1a.frontend.v1.HeartbeatViewH\x00R\theartbeat\x12.\n" +
 	"\x05queue\x18\n" +
 	" \x01(\v2\x16.frontend.v1.QueueViewH\x00R\x05queue\x127\n" +
-	"\bprogress\x18\v \x01(\v2\x19.frontend.v1.ProgressViewH\x00R\bprogress\x12R\n" +
-	"\x13workspace_available\x18\f \x01(\v2\x1f.frontend.v1.WorkspaceAvailableH\x00R\x12workspaceAvailable\x12:\n" +
-	"\vhost_action\x18\r \x01(\v2\x17.frontend.v1.HostActionH\x00R\n" +
+	"\bprogress\x18\v \x01(\v2\x19.frontend.v1.ProgressViewH\x00R\bprogress\x12S\n" +
+	"\x13workspace_available\x18\f \x01(\v2 .agentrepl.v1.WorkspaceAvailableH\x00R\x12workspaceAvailable\x12;\n" +
+	"\vhost_action\x18\r \x01(\v2\x18.agentrepl.v1.HostActionH\x00R\n" +
 	"hostAction\x12D\n" +
 	"\rdaemon_health\x18\x0e \x01(\v2\x1d.frontend.v1.DaemonHealthViewH\x00R\fdaemonHealth\x12G\n" +
 	"\x0esession_health\x18\x0f \x01(\v2\x1e.frontend.v1.SessionHealthViewH\x00R\rsessionHealth\x12I\n" +
-	"\x10workspace_roster\x18\x10 \x01(\v2\x1c.frontend.v1.WorkspaceRosterH\x00R\x0fworkspaceRoster\x12P\n" +
-	"\x11shutdown_schedule\x18\x11 \x01(\v2!.frontend.v1.ShutdownScheduleViewH\x00R\x10shutdownSchedule\x12P\n" +
+	"\x10workspace_roster\x18\x10 \x01(\v2\x1c.frontend.v1.WorkspaceRosterH\x00R\x0fworkspaceRoster\x12Q\n" +
+	"\x11shutdown_schedule\x18\x11 \x01(\v2\".agentrepl.v1.ShutdownScheduleViewH\x00R\x10shutdownSchedule\x12P\n" +
 	"\x13detached_work_delta\x18\x12 \x01(\v2\x1e.frontend.v1.DetachedWorkDeltaH\x00R\x11detachedWorkDelta\x121\n" +
 	"\x06topbar\x18\x13 \x01(\v2\x17.frontend.v1.TopbarViewH\x00R\x06topbar\x12J\n" +
-	"\x0ftoken_breakdown\x18\x14 \x01(\v2\x1f.frontend.v1.TokenBreakdownViewH\x00R\x0etokenBreakdown\x12G\n" +
-	"\x0eworkspace_gate\x18\x15 \x01(\v2\x1e.frontend.v1.WorkspaceGateViewH\x00R\rworkspaceGate\x12M\n" +
-	"\x12merge_queue_roster\x18\x16 \x01(\v2\x1d.frontend.v1.MergeQueueRosterH\x00R\x10mergeQueueRoster\x12J\n" +
-	"\x0frestart_pending\x18\x17 \x01(\v2\x1f.frontend.v1.RestartPendingViewH\x00R\x0erestartPending\x127\n" +
+	"\x0ftoken_breakdown\x18\x14 \x01(\v2\x1f.frontend.v1.TokenBreakdownViewH\x00R\x0etokenBreakdown\x12H\n" +
+	"\x0eworkspace_gate\x18\x15 \x01(\v2\x1f.agentrepl.v1.WorkspaceGateViewH\x00R\rworkspaceGate\x12N\n" +
+	"\x12merge_queue_roster\x18\x16 \x01(\v2\x1e.agentrepl.v1.MergeQueueRosterH\x00R\x10mergeQueueRoster\x12K\n" +
+	"\x0frestart_pending\x18\x17 \x01(\v2 .agentrepl.v1.RestartPendingViewH\x00R\x0erestartPending\x127\n" +
 	"\n" +
 	"typing_cut\x18\x18 \x01(\v2\x16.frontend.v1.TypingCutH\x00R\ttypingCut\x12b\n" +
 	"\x19conversation_history_page\x18\x19 \x01(\v2$.frontend.v1.ConversationHistoryPageH\x00R\x17conversationHistoryPageB\a\n" +
-	"\x05frame\"\x8f\b\n" +
+	"\x05frame\"\x94\b\n" +
 	"\rStateSnapshot\x12;\n" +
 	"\n" +
 	"workspaces\x18\x01 \x03(\v2\x1b.frontend.v1.WorkspaceStateR\n" +
@@ -1661,70 +1662,70 @@ const file_frontend_v1_frame_proto_rawDesc = "" +
 	"\x06daemon\x18\x04 \x01(\v2\x17.frontend.v1.DaemonViewR\x06daemon\x122\n" +
 	"\x05inits\x18\x05 \x03(\v2\x1c.frontend.v1.SessionInitViewR\x05inits\x12.\n" +
 	"\x06queues\x18\x06 \x03(\v2\x16.frontend.v1.QueueViewR\x06queues\x125\n" +
-	"\bprogress\x18\a \x03(\v2\x19.frontend.v1.ProgressViewR\bprogress\x12P\n" +
-	"\x13workspace_available\x18\b \x03(\v2\x1f.frontend.v1.WorkspaceAvailableR\x12workspaceAvailable\x12:\n" +
-	"\fhost_actions\x18\t \x03(\v2\x17.frontend.v1.HostActionR\vhostActions\x12N\n" +
+	"\bprogress\x18\a \x03(\v2\x19.frontend.v1.ProgressViewR\bprogress\x12Q\n" +
+	"\x13workspace_available\x18\b \x03(\v2 .agentrepl.v1.WorkspaceAvailableR\x12workspaceAvailable\x12;\n" +
+	"\fhost_actions\x18\t \x03(\v2\x18.agentrepl.v1.HostActionR\vhostActions\x12O\n" +
 	"\x11shutdown_schedule\x18\n" +
-	" \x01(\v2!.frontend.v1.ShutdownScheduleViewR\x10shutdownSchedule\x129\n" +
+	" \x01(\v2\".agentrepl.v1.ShutdownScheduleViewR\x10shutdownSchedule\x129\n" +
 	"\rdetached_work\x18\v \x03(\v2\x14.frontend.v1.MessageR\fdetachedWork\x121\n" +
 	"\atopbars\x18\f \x03(\v2\x17.frontend.v1.TopbarViewR\atopbars\x12J\n" +
-	"\x10token_breakdowns\x18\r \x03(\v2\x1f.frontend.v1.TokenBreakdownViewR\x0ftokenBreakdowns\x12G\n" +
-	"\x0fworkspace_gates\x18\x0e \x03(\v2\x1e.frontend.v1.WorkspaceGateViewR\x0eworkspaceGates\x12K\n" +
-	"\x12merge_queue_roster\x18\x0f \x01(\v2\x1d.frontend.v1.MergeQueueRosterR\x10mergeQueueRoster\x12'\n" +
+	"\x10token_breakdowns\x18\r \x03(\v2\x1f.frontend.v1.TokenBreakdownViewR\x0ftokenBreakdowns\x12H\n" +
+	"\x0fworkspace_gates\x18\x0e \x03(\v2\x1f.agentrepl.v1.WorkspaceGateViewR\x0eworkspaceGates\x12L\n" +
+	"\x12merge_queue_roster\x18\x0f \x01(\v2\x1e.agentrepl.v1.MergeQueueRosterR\x10mergeQueueRoster\x12'\n" +
 	"\x0fworkspace_total\x18\x10 \x01(\x05R\x0eworkspaceTotal\x122\n" +
-	"\x15workspace_batch_index\x18\x11 \x01(\x05R\x13workspaceBatchIndex\"\xe1\x13\n" +
+	"\x15workspace_batch_index\x18\x11 \x01(\x05R\x13workspaceBatchIndex\"\xf5\x13\n" +
 	"\x0fFrontendCommand\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
 	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12C\n" +
 	"\rsubmit_prompt\x18\x03 \x01(\v2\x1c.frontend.v1.SubmitPromptCmdH\x00R\fsubmitPrompt\x129\n" +
 	"\tinterrupt\x18\x04 \x01(\v2\x19.frontend.v1.InterruptCmdH\x00R\tinterrupt\x12O\n" +
-	"\x11permission_answer\x18\x05 \x01(\v2 .frontend.v1.PermissionAnswerCmdH\x00R\x10permissionAnswer\x12I\n" +
-	"\x0fmerge_workspace\x18\x06 \x01(\v2\x1e.frontend.v1.MergeWorkspaceCmdH\x00R\x0emergeWorkspace\x12I\n" +
-	"\x0fclose_workspace\x18\a \x01(\v2\x1e.frontend.v1.CloseWorkspaceCmdH\x00R\x0ecloseWorkspace\x12F\n" +
-	"\x0eopen_workspace\x18\b \x01(\v2\x1d.frontend.v1.OpenWorkspaceCmdH\x00R\ropenWorkspace\x120\n" +
-	"\x06resync\x18\t \x01(\v2\x16.frontend.v1.ResyncCmdH\x00R\x06resync\x12F\n" +
+	"\x11permission_answer\x18\x05 \x01(\v2 .frontend.v1.PermissionAnswerCmdH\x00R\x10permissionAnswer\x12J\n" +
+	"\x0fmerge_workspace\x18\x06 \x01(\v2\x1f.agentrepl.v1.MergeWorkspaceCmdH\x00R\x0emergeWorkspace\x12J\n" +
+	"\x0fclose_workspace\x18\a \x01(\v2\x1f.agentrepl.v1.CloseWorkspaceCmdH\x00R\x0ecloseWorkspace\x12G\n" +
+	"\x0eopen_workspace\x18\b \x01(\v2\x1e.agentrepl.v1.OpenWorkspaceCmdH\x00R\ropenWorkspace\x121\n" +
+	"\x06resync\x18\t \x01(\v2\x17.agentrepl.v1.ResyncCmdH\x00R\x06resync\x12G\n" +
 	"\x0ecreate_session\x18\n" +
-	" \x01(\v2\x1d.frontend.v1.CreateSessionCmdH\x00R\rcreateSession\x12F\n" +
-	"\x0edelete_session\x18\v \x01(\v2\x1d.frontend.v1.DeleteSessionCmdH\x00R\rdeleteSession\x126\n" +
-	"\bshutdown\x18\f \x01(\v2\x18.frontend.v1.ShutdownCmdH\x00R\bshutdown\x12:\n" +
+	" \x01(\v2\x1e.agentrepl.v1.CreateSessionCmdH\x00R\rcreateSession\x12G\n" +
+	"\x0edelete_session\x18\v \x01(\v2\x1e.agentrepl.v1.DeleteSessionCmdH\x00R\rdeleteSession\x127\n" +
+	"\bshutdown\x18\f \x01(\v2\x19.agentrepl.v1.ShutdownCmdH\x00R\bshutdown\x12;\n" +
 	"\n" +
-	"client_log\x18\r \x01(\v2\x19.frontend.v1.ClientLogCmdH\x00R\tclientLog\x12=\n" +
+	"client_log\x18\r \x01(\v2\x1a.agentrepl.v1.ClientLogCmdH\x00R\tclientLog\x12=\n" +
 	"\vqueue_force\x18\x0e \x01(\v2\x1a.frontend.v1.QueueForceCmdH\x00R\n" +
 	"queueForce\x12@\n" +
 	"\fqueue_accept\x18\x0f \x01(\v2\x1b.frontend.v1.QueueAcceptCmdH\x00R\vqueueAccept\x12@\n" +
-	"\fqueue_cancel\x18\x10 \x01(\v2\x1b.frontend.v1.QueueCancelCmdH\x00R\vqueueCancel\x12L\n" +
-	"\x10create_workspace\x18\x11 \x01(\v2\x1f.frontend.v1.CreateWorkspaceCmdH\x00R\x0fcreateWorkspace\x12^\n" +
-	"\x16workspace_materialized\x18\x12 \x01(\v2%.frontend.v1.WorkspaceMaterializedCmdH\x00R\x15workspaceMaterialized\x12Y\n" +
-	"\x15host_action_completed\x18\x13 \x01(\v2#.frontend.v1.HostActionCompletedCmdH\x00R\x13hostActionCompleted\x12C\n" +
+	"\fqueue_cancel\x18\x10 \x01(\v2\x1b.frontend.v1.QueueCancelCmdH\x00R\vqueueCancel\x12M\n" +
+	"\x10create_workspace\x18\x11 \x01(\v2 .agentrepl.v1.CreateWorkspaceCmdH\x00R\x0fcreateWorkspace\x12_\n" +
+	"\x16workspace_materialized\x18\x12 \x01(\v2&.agentrepl.v1.WorkspaceMaterializedCmdH\x00R\x15workspaceMaterialized\x12Z\n" +
+	"\x15host_action_completed\x18\x13 \x01(\v2$.agentrepl.v1.HostActionCompletedCmdH\x00R\x13hostActionCompleted\x12C\n" +
 	"\rdaemon_health\x18\x14 \x01(\v2\x1c.frontend.v1.DaemonHealthCmdH\x00R\fdaemonHealth\x12F\n" +
-	"\x0esession_health\x18\x15 \x01(\v2\x1d.frontend.v1.SessionHealthCmdH\x00R\rsessionHealth\x12I\n" +
-	"\x0frestart_session\x18\x16 \x01(\v2\x1e.frontend.v1.RestartSessionCmdH\x00R\x0erestartSession\x127\n" +
+	"\x0esession_health\x18\x15 \x01(\v2\x1d.frontend.v1.SessionHealthCmdH\x00R\rsessionHealth\x12J\n" +
+	"\x0frestart_session\x18\x16 \x01(\v2\x1f.agentrepl.v1.RestartSessionCmdH\x00R\x0erestartSession\x127\n" +
 	"\tset_model\x18\x17 \x01(\v2\x18.frontend.v1.SetModelCmdH\x00R\bsetModel\x12b\n" +
-	"\x18publish_workspace_roster\x18\x18 \x01(\v2&.frontend.v1.PublishWorkspaceRosterCmdH\x00R\x16publishWorkspaceRoster\x12O\n" +
-	"\x11schedule_shutdown\x18\x19 \x01(\v2 .frontend.v1.ScheduleShutdownCmdH\x00R\x10scheduleShutdown\x12e\n" +
-	"\x19cancel_scheduled_shutdown\x18\x1a \x01(\v2'.frontend.v1.CancelScheduledShutdownCmdH\x00R\x17cancelScheduledShutdown\x12U\n" +
-	"\x13hibernate_workspace\x18\x1b \x01(\v2\".frontend.v1.HibernateWorkspaceCmdH\x00R\x12hibernateWorkspace\x12F\n" +
-	"\x0erevive_session\x18\x1c \x01(\v2\x1d.frontend.v1.ReviveSessionCmdH\x00R\rreviveSession\x12M\n" +
-	"\x11pause_merge_queue\x18\x1d \x01(\v2\x1f.frontend.v1.PauseMergeQueueCmdH\x00R\x0fpauseMergeQueue\x12P\n" +
-	"\x12resume_merge_queue\x18\x1e \x01(\v2 .frontend.v1.ResumeMergeQueueCmdH\x00R\x10resumeMergeQueue\x12=\n" +
-	"\vevict_merge\x18\x1f \x01(\v2\x1a.frontend.v1.EvictMergeCmdH\x00R\n" +
-	"evictMerge\x12V\n" +
-	"\x14answer_merge_dequeue\x18  \x01(\v2\".frontend.v1.AnswerMergeDequeueCmdH\x00R\x12answerMergeDequeue\x12\\\n" +
+	"\x18publish_workspace_roster\x18\x18 \x01(\v2&.frontend.v1.PublishWorkspaceRosterCmdH\x00R\x16publishWorkspaceRoster\x12P\n" +
+	"\x11schedule_shutdown\x18\x19 \x01(\v2!.agentrepl.v1.ScheduleShutdownCmdH\x00R\x10scheduleShutdown\x12f\n" +
+	"\x19cancel_scheduled_shutdown\x18\x1a \x01(\v2(.agentrepl.v1.CancelScheduledShutdownCmdH\x00R\x17cancelScheduledShutdown\x12V\n" +
+	"\x13hibernate_workspace\x18\x1b \x01(\v2#.agentrepl.v1.HibernateWorkspaceCmdH\x00R\x12hibernateWorkspace\x12G\n" +
+	"\x0erevive_session\x18\x1c \x01(\v2\x1e.agentrepl.v1.ReviveSessionCmdH\x00R\rreviveSession\x12N\n" +
+	"\x11pause_merge_queue\x18\x1d \x01(\v2 .agentrepl.v1.PauseMergeQueueCmdH\x00R\x0fpauseMergeQueue\x12Q\n" +
+	"\x12resume_merge_queue\x18\x1e \x01(\v2!.agentrepl.v1.ResumeMergeQueueCmdH\x00R\x10resumeMergeQueue\x12>\n" +
+	"\vevict_merge\x18\x1f \x01(\v2\x1b.agentrepl.v1.EvictMergeCmdH\x00R\n" +
+	"evictMerge\x12W\n" +
+	"\x14answer_merge_dequeue\x18  \x01(\v2#.agentrepl.v1.AnswerMergeDequeueCmdH\x00R\x12answerMergeDequeue\x12\\\n" +
 	"\x16cancel_detached_agents\x18! \x01(\v2$.frontend.v1.CancelDetachedAgentsCmdH\x00R\x14cancelDetachedAgents\x12:\n" +
 	"\n" +
 	"first_page\x18\" \x01(\v2\x19.frontend.v1.FirstPageCmdH\x00R\tfirstPage\x127\n" +
 	"\tnext_page\x18# \x01(\v2\x18.frontend.v1.NextPageCmdH\x00R\bnextPageB\t\n" +
-	"\acommand\"\xdb\x03\n" +
+	"\acommand\"\xdd\x03\n" +
 	"\n" +
 	"CommandAck\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\x122\n" +
-	"\afailure\x18\x04 \x01(\v2\x18.frontend.v1.FailureKindR\afailure\x12>\n" +
-	"\ffailure_card\x18\x05 \x01(\v2\x1b.frontend.v1.FailureCardRefR\vfailureCard\x12c\n" +
-	"\x1ainterrupt_confirm_required\x18\x06 \x01(\v2%.frontend.v1.InterruptConfirmRequiredR\x18interruptConfirmRequired\x12K\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\x123\n" +
+	"\afailure\x18\x04 \x01(\v2\x19.agentrepl.v1.FailureKindR\afailure\x12>\n" +
+	"\ffailure_card\x18\x05 \x01(\v2\x1b.frontend.v1.FailureCardRefR\vfailureCard\x12d\n" +
+	"\x1ainterrupt_confirm_required\x18\x06 \x01(\v2&.agentrepl.v1.InterruptConfirmRequiredR\x18interruptConfirmRequired\x12K\n" +
 	"\x0fdetached_cancel\x18\a \x01(\v2\".frontend.v1.DetachedCancelOutcomeR\x0edetachedCancel\x12%\n" +
 	"\x0eselected_model\x18\b \x01(\tR\rselectedModel\x12;\n" +
 	"\x1aobserved_claude_session_id\x18\t \x01(\tR\x17observedClaudeSessionId\"9\n" +
@@ -1733,166 +1734,166 @@ const file_frontend_v1_frame_proto_rawDesc = "" +
 	"live_tasks\x18\x01 \x01(\x03R\tliveTasks\"<\n" +
 	"\tResyncCmd\x12\x19\n" +
 	"\bfrom_seq\x18\x01 \x01(\x04R\afromSeq\x12\x14\n" +
-	"\x05fence\x18\x02 \x01(\tR\x05fenceB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
+	"\x05fence\x18\x02 \x01(\tR\x05fenceB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
-	file_frontend_v1_frame_proto_rawDescOnce sync.Once
-	file_frontend_v1_frame_proto_rawDescData []byte
+	file_agentrepl_v1_frame_proto_rawDescOnce sync.Once
+	file_agentrepl_v1_frame_proto_rawDescData []byte
 )
 
-func file_frontend_v1_frame_proto_rawDescGZIP() []byte {
-	file_frontend_v1_frame_proto_rawDescOnce.Do(func() {
-		file_frontend_v1_frame_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_frontend_v1_frame_proto_rawDesc), len(file_frontend_v1_frame_proto_rawDesc)))
+func file_agentrepl_v1_frame_proto_rawDescGZIP() []byte {
+	file_agentrepl_v1_frame_proto_rawDescOnce.Do(func() {
+		file_agentrepl_v1_frame_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_agentrepl_v1_frame_proto_rawDesc), len(file_agentrepl_v1_frame_proto_rawDesc)))
 	})
-	return file_frontend_v1_frame_proto_rawDescData
+	return file_agentrepl_v1_frame_proto_rawDescData
 }
 
-var file_frontend_v1_frame_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
-var file_frontend_v1_frame_proto_goTypes = []any{
-	(*FrontendFrame)(nil),              // 0: frontend.v1.FrontendFrame
-	(*StateSnapshot)(nil),              // 1: frontend.v1.StateSnapshot
-	(*FrontendCommand)(nil),            // 2: frontend.v1.FrontendCommand
-	(*CommandAck)(nil),                 // 3: frontend.v1.CommandAck
-	(*InterruptConfirmRequired)(nil),   // 4: frontend.v1.InterruptConfirmRequired
-	(*ResyncCmd)(nil),                  // 5: frontend.v1.ResyncCmd
-	(*WorkspaceState)(nil),             // 6: frontend.v1.WorkspaceState
-	(*SessionView)(nil),                // 7: frontend.v1.SessionView
-	(*ConversationDelta)(nil),          // 8: frontend.v1.ConversationDelta
-	(*TaskCatalog)(nil),                // 9: frontend.v1.TaskCatalog
-	(*DaemonView)(nil),                 // 10: frontend.v1.DaemonView
-	(*SessionInitView)(nil),            // 11: frontend.v1.SessionInitView
-	(*HeartbeatView)(nil),              // 12: frontend.v1.HeartbeatView
-	(*QueueView)(nil),                  // 13: frontend.v1.QueueView
-	(*ProgressView)(nil),               // 14: frontend.v1.ProgressView
-	(*WorkspaceAvailable)(nil),         // 15: frontend.v1.WorkspaceAvailable
-	(*HostAction)(nil),                 // 16: frontend.v1.HostAction
-	(*DaemonHealthView)(nil),           // 17: frontend.v1.DaemonHealthView
-	(*SessionHealthView)(nil),          // 18: frontend.v1.SessionHealthView
-	(*WorkspaceRoster)(nil),            // 19: frontend.v1.WorkspaceRoster
-	(*ShutdownScheduleView)(nil),       // 20: frontend.v1.ShutdownScheduleView
-	(*DetachedWorkDelta)(nil),          // 21: frontend.v1.DetachedWorkDelta
-	(*TopbarView)(nil),                 // 22: frontend.v1.TopbarView
-	(*TokenBreakdownView)(nil),         // 23: frontend.v1.TokenBreakdownView
-	(*WorkspaceGateView)(nil),          // 24: frontend.v1.WorkspaceGateView
-	(*MergeQueueRoster)(nil),           // 25: frontend.v1.MergeQueueRoster
-	(*RestartPendingView)(nil),         // 26: frontend.v1.RestartPendingView
-	(*TypingCut)(nil),                  // 27: frontend.v1.TypingCut
-	(*ConversationHistoryPage)(nil),    // 28: frontend.v1.ConversationHistoryPage
-	(*Message)(nil),                    // 29: frontend.v1.Message
-	(*SubmitPromptCmd)(nil),            // 30: frontend.v1.SubmitPromptCmd
-	(*InterruptCmd)(nil),               // 31: frontend.v1.InterruptCmd
-	(*PermissionAnswerCmd)(nil),        // 32: frontend.v1.PermissionAnswerCmd
-	(*MergeWorkspaceCmd)(nil),          // 33: frontend.v1.MergeWorkspaceCmd
-	(*CloseWorkspaceCmd)(nil),          // 34: frontend.v1.CloseWorkspaceCmd
-	(*OpenWorkspaceCmd)(nil),           // 35: frontend.v1.OpenWorkspaceCmd
-	(*CreateSessionCmd)(nil),           // 36: frontend.v1.CreateSessionCmd
-	(*DeleteSessionCmd)(nil),           // 37: frontend.v1.DeleteSessionCmd
-	(*ShutdownCmd)(nil),                // 38: frontend.v1.ShutdownCmd
-	(*ClientLogCmd)(nil),               // 39: frontend.v1.ClientLogCmd
-	(*QueueForceCmd)(nil),              // 40: frontend.v1.QueueForceCmd
-	(*QueueAcceptCmd)(nil),             // 41: frontend.v1.QueueAcceptCmd
-	(*QueueCancelCmd)(nil),             // 42: frontend.v1.QueueCancelCmd
-	(*CreateWorkspaceCmd)(nil),         // 43: frontend.v1.CreateWorkspaceCmd
-	(*WorkspaceMaterializedCmd)(nil),   // 44: frontend.v1.WorkspaceMaterializedCmd
-	(*HostActionCompletedCmd)(nil),     // 45: frontend.v1.HostActionCompletedCmd
-	(*DaemonHealthCmd)(nil),            // 46: frontend.v1.DaemonHealthCmd
-	(*SessionHealthCmd)(nil),           // 47: frontend.v1.SessionHealthCmd
-	(*RestartSessionCmd)(nil),          // 48: frontend.v1.RestartSessionCmd
-	(*SetModelCmd)(nil),                // 49: frontend.v1.SetModelCmd
-	(*PublishWorkspaceRosterCmd)(nil),  // 50: frontend.v1.PublishWorkspaceRosterCmd
-	(*ScheduleShutdownCmd)(nil),        // 51: frontend.v1.ScheduleShutdownCmd
-	(*CancelScheduledShutdownCmd)(nil), // 52: frontend.v1.CancelScheduledShutdownCmd
-	(*HibernateWorkspaceCmd)(nil),      // 53: frontend.v1.HibernateWorkspaceCmd
-	(*ReviveSessionCmd)(nil),           // 54: frontend.v1.ReviveSessionCmd
-	(*PauseMergeQueueCmd)(nil),         // 55: frontend.v1.PauseMergeQueueCmd
-	(*ResumeMergeQueueCmd)(nil),        // 56: frontend.v1.ResumeMergeQueueCmd
-	(*EvictMergeCmd)(nil),              // 57: frontend.v1.EvictMergeCmd
-	(*AnswerMergeDequeueCmd)(nil),      // 58: frontend.v1.AnswerMergeDequeueCmd
-	(*CancelDetachedAgentsCmd)(nil),    // 59: frontend.v1.CancelDetachedAgentsCmd
-	(*FirstPageCmd)(nil),               // 60: frontend.v1.FirstPageCmd
-	(*NextPageCmd)(nil),                // 61: frontend.v1.NextPageCmd
-	(*FailureKind)(nil),                // 62: frontend.v1.FailureKind
-	(*FailureCardRef)(nil),             // 63: frontend.v1.FailureCardRef
-	(*DetachedCancelOutcome)(nil),      // 64: frontend.v1.DetachedCancelOutcome
+var file_agentrepl_v1_frame_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_agentrepl_v1_frame_proto_goTypes = []any{
+	(*FrontendFrame)(nil),                // 0: agentrepl.v1.FrontendFrame
+	(*StateSnapshot)(nil),                // 1: agentrepl.v1.StateSnapshot
+	(*FrontendCommand)(nil),              // 2: agentrepl.v1.FrontendCommand
+	(*CommandAck)(nil),                   // 3: agentrepl.v1.CommandAck
+	(*InterruptConfirmRequired)(nil),     // 4: agentrepl.v1.InterruptConfirmRequired
+	(*ResyncCmd)(nil),                    // 5: agentrepl.v1.ResyncCmd
+	(*v1.WorkspaceState)(nil),            // 6: frontend.v1.WorkspaceState
+	(*v1.SessionView)(nil),               // 7: frontend.v1.SessionView
+	(*v1.ConversationDelta)(nil),         // 8: frontend.v1.ConversationDelta
+	(*v1.TaskCatalog)(nil),               // 9: frontend.v1.TaskCatalog
+	(*v1.DaemonView)(nil),                // 10: frontend.v1.DaemonView
+	(*v1.SessionInitView)(nil),           // 11: frontend.v1.SessionInitView
+	(*v1.HeartbeatView)(nil),             // 12: frontend.v1.HeartbeatView
+	(*v1.QueueView)(nil),                 // 13: frontend.v1.QueueView
+	(*v1.ProgressView)(nil),              // 14: frontend.v1.ProgressView
+	(*WorkspaceAvailable)(nil),           // 15: agentrepl.v1.WorkspaceAvailable
+	(*HostAction)(nil),                   // 16: agentrepl.v1.HostAction
+	(*v1.DaemonHealthView)(nil),          // 17: frontend.v1.DaemonHealthView
+	(*v1.SessionHealthView)(nil),         // 18: frontend.v1.SessionHealthView
+	(*v1.WorkspaceRoster)(nil),           // 19: frontend.v1.WorkspaceRoster
+	(*ShutdownScheduleView)(nil),         // 20: agentrepl.v1.ShutdownScheduleView
+	(*v1.DetachedWorkDelta)(nil),         // 21: frontend.v1.DetachedWorkDelta
+	(*v1.TopbarView)(nil),                // 22: frontend.v1.TopbarView
+	(*v1.TokenBreakdownView)(nil),        // 23: frontend.v1.TokenBreakdownView
+	(*WorkspaceGateView)(nil),            // 24: agentrepl.v1.WorkspaceGateView
+	(*MergeQueueRoster)(nil),             // 25: agentrepl.v1.MergeQueueRoster
+	(*RestartPendingView)(nil),           // 26: agentrepl.v1.RestartPendingView
+	(*v1.TypingCut)(nil),                 // 27: frontend.v1.TypingCut
+	(*v1.ConversationHistoryPage)(nil),   // 28: frontend.v1.ConversationHistoryPage
+	(*v1.Message)(nil),                   // 29: frontend.v1.Message
+	(*v1.SubmitPromptCmd)(nil),           // 30: frontend.v1.SubmitPromptCmd
+	(*v1.InterruptCmd)(nil),              // 31: frontend.v1.InterruptCmd
+	(*v1.PermissionAnswerCmd)(nil),       // 32: frontend.v1.PermissionAnswerCmd
+	(*MergeWorkspaceCmd)(nil),            // 33: agentrepl.v1.MergeWorkspaceCmd
+	(*CloseWorkspaceCmd)(nil),            // 34: agentrepl.v1.CloseWorkspaceCmd
+	(*OpenWorkspaceCmd)(nil),             // 35: agentrepl.v1.OpenWorkspaceCmd
+	(*CreateSessionCmd)(nil),             // 36: agentrepl.v1.CreateSessionCmd
+	(*DeleteSessionCmd)(nil),             // 37: agentrepl.v1.DeleteSessionCmd
+	(*ShutdownCmd)(nil),                  // 38: agentrepl.v1.ShutdownCmd
+	(*ClientLogCmd)(nil),                 // 39: agentrepl.v1.ClientLogCmd
+	(*v1.QueueForceCmd)(nil),             // 40: frontend.v1.QueueForceCmd
+	(*v1.QueueAcceptCmd)(nil),            // 41: frontend.v1.QueueAcceptCmd
+	(*v1.QueueCancelCmd)(nil),            // 42: frontend.v1.QueueCancelCmd
+	(*CreateWorkspaceCmd)(nil),           // 43: agentrepl.v1.CreateWorkspaceCmd
+	(*WorkspaceMaterializedCmd)(nil),     // 44: agentrepl.v1.WorkspaceMaterializedCmd
+	(*HostActionCompletedCmd)(nil),       // 45: agentrepl.v1.HostActionCompletedCmd
+	(*v1.DaemonHealthCmd)(nil),           // 46: frontend.v1.DaemonHealthCmd
+	(*v1.SessionHealthCmd)(nil),          // 47: frontend.v1.SessionHealthCmd
+	(*RestartSessionCmd)(nil),            // 48: agentrepl.v1.RestartSessionCmd
+	(*v1.SetModelCmd)(nil),               // 49: frontend.v1.SetModelCmd
+	(*v1.PublishWorkspaceRosterCmd)(nil), // 50: frontend.v1.PublishWorkspaceRosterCmd
+	(*ScheduleShutdownCmd)(nil),          // 51: agentrepl.v1.ScheduleShutdownCmd
+	(*CancelScheduledShutdownCmd)(nil),   // 52: agentrepl.v1.CancelScheduledShutdownCmd
+	(*HibernateWorkspaceCmd)(nil),        // 53: agentrepl.v1.HibernateWorkspaceCmd
+	(*ReviveSessionCmd)(nil),             // 54: agentrepl.v1.ReviveSessionCmd
+	(*PauseMergeQueueCmd)(nil),           // 55: agentrepl.v1.PauseMergeQueueCmd
+	(*ResumeMergeQueueCmd)(nil),          // 56: agentrepl.v1.ResumeMergeQueueCmd
+	(*EvictMergeCmd)(nil),                // 57: agentrepl.v1.EvictMergeCmd
+	(*AnswerMergeDequeueCmd)(nil),        // 58: agentrepl.v1.AnswerMergeDequeueCmd
+	(*v1.CancelDetachedAgentsCmd)(nil),   // 59: frontend.v1.CancelDetachedAgentsCmd
+	(*v1.FirstPageCmd)(nil),              // 60: frontend.v1.FirstPageCmd
+	(*v1.NextPageCmd)(nil),               // 61: frontend.v1.NextPageCmd
+	(*FailureKind)(nil),                  // 62: agentrepl.v1.FailureKind
+	(*v1.FailureCardRef)(nil),            // 63: frontend.v1.FailureCardRef
+	(*v1.DetachedCancelOutcome)(nil),     // 64: frontend.v1.DetachedCancelOutcome
 }
-var file_frontend_v1_frame_proto_depIdxs = []int32{
-	1,  // 0: frontend.v1.FrontendFrame.snapshot:type_name -> frontend.v1.StateSnapshot
-	6,  // 1: frontend.v1.FrontendFrame.workspace_state:type_name -> frontend.v1.WorkspaceState
-	7,  // 2: frontend.v1.FrontendFrame.session_view:type_name -> frontend.v1.SessionView
-	8,  // 3: frontend.v1.FrontendFrame.conversation_delta:type_name -> frontend.v1.ConversationDelta
-	9,  // 4: frontend.v1.FrontendFrame.task_catalog:type_name -> frontend.v1.TaskCatalog
-	3,  // 5: frontend.v1.FrontendFrame.command_ack:type_name -> frontend.v1.CommandAck
-	10, // 6: frontend.v1.FrontendFrame.daemon_view:type_name -> frontend.v1.DaemonView
-	11, // 7: frontend.v1.FrontendFrame.session_init:type_name -> frontend.v1.SessionInitView
-	12, // 8: frontend.v1.FrontendFrame.heartbeat:type_name -> frontend.v1.HeartbeatView
-	13, // 9: frontend.v1.FrontendFrame.queue:type_name -> frontend.v1.QueueView
-	14, // 10: frontend.v1.FrontendFrame.progress:type_name -> frontend.v1.ProgressView
-	15, // 11: frontend.v1.FrontendFrame.workspace_available:type_name -> frontend.v1.WorkspaceAvailable
-	16, // 12: frontend.v1.FrontendFrame.host_action:type_name -> frontend.v1.HostAction
-	17, // 13: frontend.v1.FrontendFrame.daemon_health:type_name -> frontend.v1.DaemonHealthView
-	18, // 14: frontend.v1.FrontendFrame.session_health:type_name -> frontend.v1.SessionHealthView
-	19, // 15: frontend.v1.FrontendFrame.workspace_roster:type_name -> frontend.v1.WorkspaceRoster
-	20, // 16: frontend.v1.FrontendFrame.shutdown_schedule:type_name -> frontend.v1.ShutdownScheduleView
-	21, // 17: frontend.v1.FrontendFrame.detached_work_delta:type_name -> frontend.v1.DetachedWorkDelta
-	22, // 18: frontend.v1.FrontendFrame.topbar:type_name -> frontend.v1.TopbarView
-	23, // 19: frontend.v1.FrontendFrame.token_breakdown:type_name -> frontend.v1.TokenBreakdownView
-	24, // 20: frontend.v1.FrontendFrame.workspace_gate:type_name -> frontend.v1.WorkspaceGateView
-	25, // 21: frontend.v1.FrontendFrame.merge_queue_roster:type_name -> frontend.v1.MergeQueueRoster
-	26, // 22: frontend.v1.FrontendFrame.restart_pending:type_name -> frontend.v1.RestartPendingView
-	27, // 23: frontend.v1.FrontendFrame.typing_cut:type_name -> frontend.v1.TypingCut
-	28, // 24: frontend.v1.FrontendFrame.conversation_history_page:type_name -> frontend.v1.ConversationHistoryPage
-	6,  // 25: frontend.v1.StateSnapshot.workspaces:type_name -> frontend.v1.WorkspaceState
-	7,  // 26: frontend.v1.StateSnapshot.sessions:type_name -> frontend.v1.SessionView
-	9,  // 27: frontend.v1.StateSnapshot.catalogs:type_name -> frontend.v1.TaskCatalog
-	10, // 28: frontend.v1.StateSnapshot.daemon:type_name -> frontend.v1.DaemonView
-	11, // 29: frontend.v1.StateSnapshot.inits:type_name -> frontend.v1.SessionInitView
-	13, // 30: frontend.v1.StateSnapshot.queues:type_name -> frontend.v1.QueueView
-	14, // 31: frontend.v1.StateSnapshot.progress:type_name -> frontend.v1.ProgressView
-	15, // 32: frontend.v1.StateSnapshot.workspace_available:type_name -> frontend.v1.WorkspaceAvailable
-	16, // 33: frontend.v1.StateSnapshot.host_actions:type_name -> frontend.v1.HostAction
-	20, // 34: frontend.v1.StateSnapshot.shutdown_schedule:type_name -> frontend.v1.ShutdownScheduleView
-	29, // 35: frontend.v1.StateSnapshot.detached_work:type_name -> frontend.v1.Message
-	22, // 36: frontend.v1.StateSnapshot.topbars:type_name -> frontend.v1.TopbarView
-	23, // 37: frontend.v1.StateSnapshot.token_breakdowns:type_name -> frontend.v1.TokenBreakdownView
-	24, // 38: frontend.v1.StateSnapshot.workspace_gates:type_name -> frontend.v1.WorkspaceGateView
-	25, // 39: frontend.v1.StateSnapshot.merge_queue_roster:type_name -> frontend.v1.MergeQueueRoster
-	30, // 40: frontend.v1.FrontendCommand.submit_prompt:type_name -> frontend.v1.SubmitPromptCmd
-	31, // 41: frontend.v1.FrontendCommand.interrupt:type_name -> frontend.v1.InterruptCmd
-	32, // 42: frontend.v1.FrontendCommand.permission_answer:type_name -> frontend.v1.PermissionAnswerCmd
-	33, // 43: frontend.v1.FrontendCommand.merge_workspace:type_name -> frontend.v1.MergeWorkspaceCmd
-	34, // 44: frontend.v1.FrontendCommand.close_workspace:type_name -> frontend.v1.CloseWorkspaceCmd
-	35, // 45: frontend.v1.FrontendCommand.open_workspace:type_name -> frontend.v1.OpenWorkspaceCmd
-	5,  // 46: frontend.v1.FrontendCommand.resync:type_name -> frontend.v1.ResyncCmd
-	36, // 47: frontend.v1.FrontendCommand.create_session:type_name -> frontend.v1.CreateSessionCmd
-	37, // 48: frontend.v1.FrontendCommand.delete_session:type_name -> frontend.v1.DeleteSessionCmd
-	38, // 49: frontend.v1.FrontendCommand.shutdown:type_name -> frontend.v1.ShutdownCmd
-	39, // 50: frontend.v1.FrontendCommand.client_log:type_name -> frontend.v1.ClientLogCmd
-	40, // 51: frontend.v1.FrontendCommand.queue_force:type_name -> frontend.v1.QueueForceCmd
-	41, // 52: frontend.v1.FrontendCommand.queue_accept:type_name -> frontend.v1.QueueAcceptCmd
-	42, // 53: frontend.v1.FrontendCommand.queue_cancel:type_name -> frontend.v1.QueueCancelCmd
-	43, // 54: frontend.v1.FrontendCommand.create_workspace:type_name -> frontend.v1.CreateWorkspaceCmd
-	44, // 55: frontend.v1.FrontendCommand.workspace_materialized:type_name -> frontend.v1.WorkspaceMaterializedCmd
-	45, // 56: frontend.v1.FrontendCommand.host_action_completed:type_name -> frontend.v1.HostActionCompletedCmd
-	46, // 57: frontend.v1.FrontendCommand.daemon_health:type_name -> frontend.v1.DaemonHealthCmd
-	47, // 58: frontend.v1.FrontendCommand.session_health:type_name -> frontend.v1.SessionHealthCmd
-	48, // 59: frontend.v1.FrontendCommand.restart_session:type_name -> frontend.v1.RestartSessionCmd
-	49, // 60: frontend.v1.FrontendCommand.set_model:type_name -> frontend.v1.SetModelCmd
-	50, // 61: frontend.v1.FrontendCommand.publish_workspace_roster:type_name -> frontend.v1.PublishWorkspaceRosterCmd
-	51, // 62: frontend.v1.FrontendCommand.schedule_shutdown:type_name -> frontend.v1.ScheduleShutdownCmd
-	52, // 63: frontend.v1.FrontendCommand.cancel_scheduled_shutdown:type_name -> frontend.v1.CancelScheduledShutdownCmd
-	53, // 64: frontend.v1.FrontendCommand.hibernate_workspace:type_name -> frontend.v1.HibernateWorkspaceCmd
-	54, // 65: frontend.v1.FrontendCommand.revive_session:type_name -> frontend.v1.ReviveSessionCmd
-	55, // 66: frontend.v1.FrontendCommand.pause_merge_queue:type_name -> frontend.v1.PauseMergeQueueCmd
-	56, // 67: frontend.v1.FrontendCommand.resume_merge_queue:type_name -> frontend.v1.ResumeMergeQueueCmd
-	57, // 68: frontend.v1.FrontendCommand.evict_merge:type_name -> frontend.v1.EvictMergeCmd
-	58, // 69: frontend.v1.FrontendCommand.answer_merge_dequeue:type_name -> frontend.v1.AnswerMergeDequeueCmd
-	59, // 70: frontend.v1.FrontendCommand.cancel_detached_agents:type_name -> frontend.v1.CancelDetachedAgentsCmd
-	60, // 71: frontend.v1.FrontendCommand.first_page:type_name -> frontend.v1.FirstPageCmd
-	61, // 72: frontend.v1.FrontendCommand.next_page:type_name -> frontend.v1.NextPageCmd
-	62, // 73: frontend.v1.CommandAck.failure:type_name -> frontend.v1.FailureKind
-	63, // 74: frontend.v1.CommandAck.failure_card:type_name -> frontend.v1.FailureCardRef
-	4,  // 75: frontend.v1.CommandAck.interrupt_confirm_required:type_name -> frontend.v1.InterruptConfirmRequired
-	64, // 76: frontend.v1.CommandAck.detached_cancel:type_name -> frontend.v1.DetachedCancelOutcome
+var file_agentrepl_v1_frame_proto_depIdxs = []int32{
+	1,  // 0: agentrepl.v1.FrontendFrame.snapshot:type_name -> agentrepl.v1.StateSnapshot
+	6,  // 1: agentrepl.v1.FrontendFrame.workspace_state:type_name -> frontend.v1.WorkspaceState
+	7,  // 2: agentrepl.v1.FrontendFrame.session_view:type_name -> frontend.v1.SessionView
+	8,  // 3: agentrepl.v1.FrontendFrame.conversation_delta:type_name -> frontend.v1.ConversationDelta
+	9,  // 4: agentrepl.v1.FrontendFrame.task_catalog:type_name -> frontend.v1.TaskCatalog
+	3,  // 5: agentrepl.v1.FrontendFrame.command_ack:type_name -> agentrepl.v1.CommandAck
+	10, // 6: agentrepl.v1.FrontendFrame.daemon_view:type_name -> frontend.v1.DaemonView
+	11, // 7: agentrepl.v1.FrontendFrame.session_init:type_name -> frontend.v1.SessionInitView
+	12, // 8: agentrepl.v1.FrontendFrame.heartbeat:type_name -> frontend.v1.HeartbeatView
+	13, // 9: agentrepl.v1.FrontendFrame.queue:type_name -> frontend.v1.QueueView
+	14, // 10: agentrepl.v1.FrontendFrame.progress:type_name -> frontend.v1.ProgressView
+	15, // 11: agentrepl.v1.FrontendFrame.workspace_available:type_name -> agentrepl.v1.WorkspaceAvailable
+	16, // 12: agentrepl.v1.FrontendFrame.host_action:type_name -> agentrepl.v1.HostAction
+	17, // 13: agentrepl.v1.FrontendFrame.daemon_health:type_name -> frontend.v1.DaemonHealthView
+	18, // 14: agentrepl.v1.FrontendFrame.session_health:type_name -> frontend.v1.SessionHealthView
+	19, // 15: agentrepl.v1.FrontendFrame.workspace_roster:type_name -> frontend.v1.WorkspaceRoster
+	20, // 16: agentrepl.v1.FrontendFrame.shutdown_schedule:type_name -> agentrepl.v1.ShutdownScheduleView
+	21, // 17: agentrepl.v1.FrontendFrame.detached_work_delta:type_name -> frontend.v1.DetachedWorkDelta
+	22, // 18: agentrepl.v1.FrontendFrame.topbar:type_name -> frontend.v1.TopbarView
+	23, // 19: agentrepl.v1.FrontendFrame.token_breakdown:type_name -> frontend.v1.TokenBreakdownView
+	24, // 20: agentrepl.v1.FrontendFrame.workspace_gate:type_name -> agentrepl.v1.WorkspaceGateView
+	25, // 21: agentrepl.v1.FrontendFrame.merge_queue_roster:type_name -> agentrepl.v1.MergeQueueRoster
+	26, // 22: agentrepl.v1.FrontendFrame.restart_pending:type_name -> agentrepl.v1.RestartPendingView
+	27, // 23: agentrepl.v1.FrontendFrame.typing_cut:type_name -> frontend.v1.TypingCut
+	28, // 24: agentrepl.v1.FrontendFrame.conversation_history_page:type_name -> frontend.v1.ConversationHistoryPage
+	6,  // 25: agentrepl.v1.StateSnapshot.workspaces:type_name -> frontend.v1.WorkspaceState
+	7,  // 26: agentrepl.v1.StateSnapshot.sessions:type_name -> frontend.v1.SessionView
+	9,  // 27: agentrepl.v1.StateSnapshot.catalogs:type_name -> frontend.v1.TaskCatalog
+	10, // 28: agentrepl.v1.StateSnapshot.daemon:type_name -> frontend.v1.DaemonView
+	11, // 29: agentrepl.v1.StateSnapshot.inits:type_name -> frontend.v1.SessionInitView
+	13, // 30: agentrepl.v1.StateSnapshot.queues:type_name -> frontend.v1.QueueView
+	14, // 31: agentrepl.v1.StateSnapshot.progress:type_name -> frontend.v1.ProgressView
+	15, // 32: agentrepl.v1.StateSnapshot.workspace_available:type_name -> agentrepl.v1.WorkspaceAvailable
+	16, // 33: agentrepl.v1.StateSnapshot.host_actions:type_name -> agentrepl.v1.HostAction
+	20, // 34: agentrepl.v1.StateSnapshot.shutdown_schedule:type_name -> agentrepl.v1.ShutdownScheduleView
+	29, // 35: agentrepl.v1.StateSnapshot.detached_work:type_name -> frontend.v1.Message
+	22, // 36: agentrepl.v1.StateSnapshot.topbars:type_name -> frontend.v1.TopbarView
+	23, // 37: agentrepl.v1.StateSnapshot.token_breakdowns:type_name -> frontend.v1.TokenBreakdownView
+	24, // 38: agentrepl.v1.StateSnapshot.workspace_gates:type_name -> agentrepl.v1.WorkspaceGateView
+	25, // 39: agentrepl.v1.StateSnapshot.merge_queue_roster:type_name -> agentrepl.v1.MergeQueueRoster
+	30, // 40: agentrepl.v1.FrontendCommand.submit_prompt:type_name -> frontend.v1.SubmitPromptCmd
+	31, // 41: agentrepl.v1.FrontendCommand.interrupt:type_name -> frontend.v1.InterruptCmd
+	32, // 42: agentrepl.v1.FrontendCommand.permission_answer:type_name -> frontend.v1.PermissionAnswerCmd
+	33, // 43: agentrepl.v1.FrontendCommand.merge_workspace:type_name -> agentrepl.v1.MergeWorkspaceCmd
+	34, // 44: agentrepl.v1.FrontendCommand.close_workspace:type_name -> agentrepl.v1.CloseWorkspaceCmd
+	35, // 45: agentrepl.v1.FrontendCommand.open_workspace:type_name -> agentrepl.v1.OpenWorkspaceCmd
+	5,  // 46: agentrepl.v1.FrontendCommand.resync:type_name -> agentrepl.v1.ResyncCmd
+	36, // 47: agentrepl.v1.FrontendCommand.create_session:type_name -> agentrepl.v1.CreateSessionCmd
+	37, // 48: agentrepl.v1.FrontendCommand.delete_session:type_name -> agentrepl.v1.DeleteSessionCmd
+	38, // 49: agentrepl.v1.FrontendCommand.shutdown:type_name -> agentrepl.v1.ShutdownCmd
+	39, // 50: agentrepl.v1.FrontendCommand.client_log:type_name -> agentrepl.v1.ClientLogCmd
+	40, // 51: agentrepl.v1.FrontendCommand.queue_force:type_name -> frontend.v1.QueueForceCmd
+	41, // 52: agentrepl.v1.FrontendCommand.queue_accept:type_name -> frontend.v1.QueueAcceptCmd
+	42, // 53: agentrepl.v1.FrontendCommand.queue_cancel:type_name -> frontend.v1.QueueCancelCmd
+	43, // 54: agentrepl.v1.FrontendCommand.create_workspace:type_name -> agentrepl.v1.CreateWorkspaceCmd
+	44, // 55: agentrepl.v1.FrontendCommand.workspace_materialized:type_name -> agentrepl.v1.WorkspaceMaterializedCmd
+	45, // 56: agentrepl.v1.FrontendCommand.host_action_completed:type_name -> agentrepl.v1.HostActionCompletedCmd
+	46, // 57: agentrepl.v1.FrontendCommand.daemon_health:type_name -> frontend.v1.DaemonHealthCmd
+	47, // 58: agentrepl.v1.FrontendCommand.session_health:type_name -> frontend.v1.SessionHealthCmd
+	48, // 59: agentrepl.v1.FrontendCommand.restart_session:type_name -> agentrepl.v1.RestartSessionCmd
+	49, // 60: agentrepl.v1.FrontendCommand.set_model:type_name -> frontend.v1.SetModelCmd
+	50, // 61: agentrepl.v1.FrontendCommand.publish_workspace_roster:type_name -> frontend.v1.PublishWorkspaceRosterCmd
+	51, // 62: agentrepl.v1.FrontendCommand.schedule_shutdown:type_name -> agentrepl.v1.ScheduleShutdownCmd
+	52, // 63: agentrepl.v1.FrontendCommand.cancel_scheduled_shutdown:type_name -> agentrepl.v1.CancelScheduledShutdownCmd
+	53, // 64: agentrepl.v1.FrontendCommand.hibernate_workspace:type_name -> agentrepl.v1.HibernateWorkspaceCmd
+	54, // 65: agentrepl.v1.FrontendCommand.revive_session:type_name -> agentrepl.v1.ReviveSessionCmd
+	55, // 66: agentrepl.v1.FrontendCommand.pause_merge_queue:type_name -> agentrepl.v1.PauseMergeQueueCmd
+	56, // 67: agentrepl.v1.FrontendCommand.resume_merge_queue:type_name -> agentrepl.v1.ResumeMergeQueueCmd
+	57, // 68: agentrepl.v1.FrontendCommand.evict_merge:type_name -> agentrepl.v1.EvictMergeCmd
+	58, // 69: agentrepl.v1.FrontendCommand.answer_merge_dequeue:type_name -> agentrepl.v1.AnswerMergeDequeueCmd
+	59, // 70: agentrepl.v1.FrontendCommand.cancel_detached_agents:type_name -> frontend.v1.CancelDetachedAgentsCmd
+	60, // 71: agentrepl.v1.FrontendCommand.first_page:type_name -> frontend.v1.FirstPageCmd
+	61, // 72: agentrepl.v1.FrontendCommand.next_page:type_name -> frontend.v1.NextPageCmd
+	62, // 73: agentrepl.v1.CommandAck.failure:type_name -> agentrepl.v1.FailureKind
+	63, // 74: agentrepl.v1.CommandAck.failure_card:type_name -> frontend.v1.FailureCardRef
+	4,  // 75: agentrepl.v1.CommandAck.interrupt_confirm_required:type_name -> agentrepl.v1.InterruptConfirmRequired
+	64, // 76: agentrepl.v1.CommandAck.detached_cancel:type_name -> frontend.v1.DetachedCancelOutcome
 	77, // [77:77] is the sub-list for method output_type
 	77, // [77:77] is the sub-list for method input_type
 	77, // [77:77] is the sub-list for extension type_name
@@ -1900,17 +1901,13 @@ var file_frontend_v1_frame_proto_depIdxs = []int32{
 	0,  // [0:77] is the sub-list for field type_name
 }
 
-func init() { file_frontend_v1_frame_proto_init() }
-func file_frontend_v1_frame_proto_init() {
-	if File_frontend_v1_frame_proto != nil {
+func init() { file_agentrepl_v1_frame_proto_init() }
+func file_agentrepl_v1_frame_proto_init() {
+	if File_agentrepl_v1_frame_proto != nil {
 		return
 	}
-	file_frontend_v1_feed_proto_init()
-	file_frontend_v1_footer_proto_init()
-	file_frontend_v1_shared_proto_init()
-	file_frontend_v1_sidebar_proto_init()
-	file_frontend_v1_topbar_proto_init()
-	file_frontend_v1_frame_proto_msgTypes[0].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_init()
+	file_agentrepl_v1_frame_proto_msgTypes[0].OneofWrappers = []any{
 		(*FrontendFrame_Snapshot)(nil),
 		(*FrontendFrame_WorkspaceState)(nil),
 		(*FrontendFrame_SessionView)(nil),
@@ -1937,7 +1934,7 @@ func file_frontend_v1_frame_proto_init() {
 		(*FrontendFrame_TypingCut)(nil),
 		(*FrontendFrame_ConversationHistoryPage)(nil),
 	}
-	file_frontend_v1_frame_proto_msgTypes[2].OneofWrappers = []any{
+	file_agentrepl_v1_frame_proto_msgTypes[2].OneofWrappers = []any{
 		(*FrontendCommand_SubmitPrompt)(nil),
 		(*FrontendCommand_Interrupt)(nil),
 		(*FrontendCommand_PermissionAnswer)(nil),
@@ -1976,17 +1973,17 @@ func file_frontend_v1_frame_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_frame_proto_rawDesc), len(file_frontend_v1_frame_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_frame_proto_rawDesc), len(file_agentrepl_v1_frame_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_frontend_v1_frame_proto_goTypes,
-		DependencyIndexes: file_frontend_v1_frame_proto_depIdxs,
-		MessageInfos:      file_frontend_v1_frame_proto_msgTypes,
+		GoTypes:           file_agentrepl_v1_frame_proto_goTypes,
+		DependencyIndexes: file_agentrepl_v1_frame_proto_depIdxs,
+		MessageInfos:      file_agentrepl_v1_frame_proto_msgTypes,
 	}.Build()
-	File_frontend_v1_frame_proto = out.File
-	file_frontend_v1_frame_proto_goTypes = nil
-	file_frontend_v1_frame_proto_depIdxs = nil
+	File_agentrepl_v1_frame_proto = out.File
+	file_agentrepl_v1_frame_proto_goTypes = nil
+	file_agentrepl_v1_frame_proto_depIdxs = nil
 }

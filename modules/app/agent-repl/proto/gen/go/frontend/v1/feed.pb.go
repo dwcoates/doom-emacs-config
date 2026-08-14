@@ -20,6 +20,7 @@
 package frontendv1
 
 import (
+	v11 "agentrepl/proto/agentrepl/v1"
 	v1 "agentrepl/proto/conversation/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -2051,7 +2052,7 @@ func (x *TaskCatalog) GetFence() string {
 type DaemonInterceptedCommandItem struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The recognized command. Never UNSPECIFIED.
-	Command       SessionCommand `protobuf:"varint,1,opt,name=command,proto3,enum=frontend.v1.SessionCommand" json:"command,omitempty"`
+	Command       v11.SessionCommand `protobuf:"varint,1,opt,name=command,proto3,enum=agentrepl.v1.SessionCommand" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2086,11 +2087,11 @@ func (*DaemonInterceptedCommandItem) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{21}
 }
 
-func (x *DaemonInterceptedCommandItem) GetCommand() SessionCommand {
+func (x *DaemonInterceptedCommandItem) GetCommand() v11.SessionCommand {
 	if x != nil {
 		return x.Command
 	}
-	return SessionCommand_SESSION_COMMAND_UNSPECIFIED
+	return v11.SessionCommand(0)
 }
 
 // A failure as a CONVERSATION ITEM rather than as chrome.
@@ -2102,7 +2103,7 @@ type FailureCardView struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// WHAT failed, and its evidence. The card takes its color from the kind's
 	// side of the vocabulary.
-	Kind *FailureKind `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Kind *v11.FailureKind `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
 	// The sentence the card leads with, composed daemon-side. This is what the
 	// reader is meant to take away.
 	Message string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
@@ -2157,7 +2158,7 @@ func (*FailureCardView) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{22}
 }
 
-func (x *FailureCardView) GetKind() *FailureKind {
+func (x *FailureCardView) GetKind() *v11.FailureKind {
 	if x != nil {
 		return x.Kind
 	}
@@ -3889,7 +3890,7 @@ var File_frontend_v1_feed_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\n" +
-	"\x16frontend/v1/feed.proto\x12\vfrontend.v1\x1a\x1dconversation/v1/content.proto\x1a\x1econversation/v1/payloads.proto\x1a\x18frontend/v1/shared.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x9a\x01\n" +
+	"\x16frontend/v1/feed.proto\x12\vfrontend.v1\x1a\x1dconversation/v1/content.proto\x1a\x1econversation/v1/payloads.proto\x1a\x19agentrepl/v1/shared.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x9a\x01\n" +
 	"\x11ConversationDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x120\n" +
 	"\bmessages\x18\x02 \x03(\v2\x14.frontend.v1.MessageR\bmessages\x12\x1f\n" +
@@ -3991,11 +3992,11 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\vTaskCatalog\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12,\n" +
 	"\x05tasks\x18\x02 \x03(\v2\x16.frontend.v1.TaskEntryR\x05tasks\x12\x14\n" +
-	"\x05fence\x18\x03 \x01(\tR\x05fence\"U\n" +
-	"\x1cDaemonInterceptedCommandItem\x125\n" +
-	"\acommand\x18\x01 \x01(\x0e2\x1b.frontend.v1.SessionCommandR\acommand\"\xb2\x02\n" +
-	"\x0fFailureCardView\x12,\n" +
-	"\x04kind\x18\x01 \x01(\v2\x18.frontend.v1.FailureKindR\x04kind\x12\x18\n" +
+	"\x05fence\x18\x03 \x01(\tR\x05fence\"V\n" +
+	"\x1cDaemonInterceptedCommandItem\x126\n" +
+	"\acommand\x18\x01 \x01(\x0e2\x1c.agentrepl.v1.SessionCommandR\acommand\"\xb3\x02\n" +
+	"\x0fFailureCardView\x12-\n" +
+	"\x04kind\x18\x01 \x01(\v2\x19.agentrepl.v1.FailureKindR\x04kind\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
 	"\x06detail\x18\x03 \x01(\tR\x06detail\x122\n" +
 	"\x04open\x18\x04 \x01(\v2\x1c.frontend.v1.FailureCardOpenH\x00R\x04open\x12>\n" +
@@ -4154,8 +4155,8 @@ var file_frontend_v1_feed_proto_goTypes = []any{
 	(*v1.AgentSaid)(nil),                 // 52: conversation.v1.AgentSaid
 	(*v1.DetachedWorkStarted)(nil),       // 53: conversation.v1.DetachedWorkStarted
 	(*v1.DetachedWorkKind)(nil),          // 54: conversation.v1.DetachedWorkKind
-	(SessionCommand)(0),                  // 55: frontend.v1.SessionCommand
-	(*FailureKind)(nil),                  // 56: frontend.v1.FailureKind
+	(v11.SessionCommand)(0),              // 55: agentrepl.v1.SessionCommand
+	(*v11.FailureKind)(nil),              // 56: agentrepl.v1.FailureKind
 	(*structpb.Struct)(nil),              // 57: google.protobuf.Struct
 	(*v1.WorkflowStep)(nil),              // 58: conversation.v1.WorkflowStep
 }
@@ -4190,8 +4191,8 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	19, // 27: frontend.v1.TaskEntry.stopped:type_name -> frontend.v1.TaskStatusStopped
 	20, // 28: frontend.v1.TaskEntry.lost:type_name -> frontend.v1.TaskStatusLost
 	14, // 29: frontend.v1.TaskCatalog.tasks:type_name -> frontend.v1.TaskEntry
-	55, // 30: frontend.v1.DaemonInterceptedCommandItem.command:type_name -> frontend.v1.SessionCommand
-	56, // 31: frontend.v1.FailureCardView.kind:type_name -> frontend.v1.FailureKind
+	55, // 30: frontend.v1.DaemonInterceptedCommandItem.command:type_name -> agentrepl.v1.SessionCommand
+	56, // 31: frontend.v1.FailureCardView.kind:type_name -> agentrepl.v1.FailureKind
 	24, // 32: frontend.v1.FailureCardView.open:type_name -> frontend.v1.FailureCardOpen
 	25, // 33: frontend.v1.FailureCardView.resolved:type_name -> frontend.v1.FailureCardResolved
 	26, // 34: frontend.v1.FailureCardView.terminal:type_name -> frontend.v1.FailureCardTerminal
@@ -4234,7 +4235,6 @@ func file_frontend_v1_feed_proto_init() {
 	if File_frontend_v1_feed_proto != nil {
 		return
 	}
-	file_frontend_v1_shared_proto_init()
 	file_frontend_v1_feed_proto_msgTypes[2].OneofWrappers = []any{
 		(*Message_Agent)(nil),
 		(*Message_UserMessage)(nil),
