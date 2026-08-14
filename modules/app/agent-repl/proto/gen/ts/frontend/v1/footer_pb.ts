@@ -2253,7 +2253,7 @@ export const SessionStatusSchema: GenEnum<SessionStatus> = /*@__PURE__*/
  *            really did deliver into the store.
  *   FAILED   the sidecar could not read part of the transcript. It used to say
  *            so with a core.v1.UnparsedEvent, which was durable and DID reach
- *            the daemon; that arm is now agentshim.v1's unsupported half, which
+ *            the daemon; that arm is now shim.v1's unsupported half, which
  *            deliberately never leaves the shim — so this state currently has no
  *            evidence to resolve from. Surfaced loudly rather than left reading
  *            as "not yet".
