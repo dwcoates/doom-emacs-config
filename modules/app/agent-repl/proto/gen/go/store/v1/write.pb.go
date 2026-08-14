@@ -23,9 +23,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: shim/v1/write.proto
+// source: store/v1/write.proto
 
-package shimv1
+package storev1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -56,7 +56,7 @@ type StoreEntryWrite struct {
 
 func (x *StoreEntryWrite) Reset() {
 	*x = StoreEntryWrite{}
-	mi := &file_shim_v1_write_proto_msgTypes[0]
+	mi := &file_store_v1_write_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -68,7 +68,7 @@ func (x *StoreEntryWrite) String() string {
 func (*StoreEntryWrite) ProtoMessage() {}
 
 func (x *StoreEntryWrite) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_write_proto_msgTypes[0]
+	mi := &file_store_v1_write_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -81,7 +81,7 @@ func (x *StoreEntryWrite) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoreEntryWrite.ProtoReflect.Descriptor instead.
 func (*StoreEntryWrite) Descriptor() ([]byte, []int) {
-	return file_shim_v1_write_proto_rawDescGZIP(), []int{0}
+	return file_store_v1_write_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *StoreEntryWrite) GetProducer() string {
@@ -119,7 +119,7 @@ type EntryBatch struct {
 
 func (x *EntryBatch) Reset() {
 	*x = EntryBatch{}
-	mi := &file_shim_v1_write_proto_msgTypes[1]
+	mi := &file_store_v1_write_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -131,7 +131,7 @@ func (x *EntryBatch) String() string {
 func (*EntryBatch) ProtoMessage() {}
 
 func (x *EntryBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_write_proto_msgTypes[1]
+	mi := &file_store_v1_write_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -144,7 +144,7 @@ func (x *EntryBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntryBatch.ProtoReflect.Descriptor instead.
 func (*EntryBatch) Descriptor() ([]byte, []int) {
-	return file_shim_v1_write_proto_rawDescGZIP(), []int{1}
+	return file_store_v1_write_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *EntryBatch) GetEntries() []*Entry {
@@ -161,42 +161,42 @@ func (x *EntryBatch) GetCursorAdvance() *CursorState {
 	return nil
 }
 
-var File_shim_v1_write_proto protoreflect.FileDescriptor
+var File_store_v1_write_proto protoreflect.FileDescriptor
 
-const file_shim_v1_write_proto_rawDesc = "" +
+const file_store_v1_write_proto_rawDesc = "" +
 	"\n" +
-	"\x13shim/v1/write.proto\x12\ashim.v1\x1a\x14shim/v1/cursor.proto\x1a\x13shim/v1/entry.proto\"X\n" +
+	"\x14store/v1/write.proto\x12\bstore.v1\x1a\x15store/v1/cursor.proto\x1a\x14store/v1/entry.proto\"Y\n" +
 	"\x0fStoreEntryWrite\x12\x1a\n" +
-	"\bproducer\x18\x01 \x01(\tR\bproducer\x12)\n" +
-	"\x05batch\x18\x02 \x01(\v2\x13.shim.v1.EntryBatchR\x05batch\"s\n" +
+	"\bproducer\x18\x01 \x01(\tR\bproducer\x12*\n" +
+	"\x05batch\x18\x02 \x01(\v2\x14.store.v1.EntryBatchR\x05batch\"u\n" +
 	"\n" +
-	"EntryBatch\x12(\n" +
-	"\aentries\x18\x01 \x03(\v2\x0e.shim.v1.EntryR\aentries\x12;\n" +
-	"\x0ecursor_advance\x18\x02 \x01(\v2\x14.shim.v1.CursorStateR\rcursorAdvanceB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"EntryBatch\x12)\n" +
+	"\aentries\x18\x01 \x03(\v2\x0f.store.v1.EntryR\aentries\x12<\n" +
+	"\x0ecursor_advance\x18\x02 \x01(\v2\x15.store.v1.CursorStateR\rcursorAdvanceB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 
 var (
-	file_shim_v1_write_proto_rawDescOnce sync.Once
-	file_shim_v1_write_proto_rawDescData []byte
+	file_store_v1_write_proto_rawDescOnce sync.Once
+	file_store_v1_write_proto_rawDescData []byte
 )
 
-func file_shim_v1_write_proto_rawDescGZIP() []byte {
-	file_shim_v1_write_proto_rawDescOnce.Do(func() {
-		file_shim_v1_write_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_shim_v1_write_proto_rawDesc), len(file_shim_v1_write_proto_rawDesc)))
+func file_store_v1_write_proto_rawDescGZIP() []byte {
+	file_store_v1_write_proto_rawDescOnce.Do(func() {
+		file_store_v1_write_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_store_v1_write_proto_rawDesc), len(file_store_v1_write_proto_rawDesc)))
 	})
-	return file_shim_v1_write_proto_rawDescData
+	return file_store_v1_write_proto_rawDescData
 }
 
-var file_shim_v1_write_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_shim_v1_write_proto_goTypes = []any{
-	(*StoreEntryWrite)(nil), // 0: shim.v1.StoreEntryWrite
-	(*EntryBatch)(nil),      // 1: shim.v1.EntryBatch
-	(*Entry)(nil),           // 2: shim.v1.Entry
-	(*CursorState)(nil),     // 3: shim.v1.CursorState
+var file_store_v1_write_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_store_v1_write_proto_goTypes = []any{
+	(*StoreEntryWrite)(nil), // 0: store.v1.StoreEntryWrite
+	(*EntryBatch)(nil),      // 1: store.v1.EntryBatch
+	(*Entry)(nil),           // 2: store.v1.Entry
+	(*CursorState)(nil),     // 3: store.v1.CursorState
 }
-var file_shim_v1_write_proto_depIdxs = []int32{
-	1, // 0: shim.v1.StoreEntryWrite.batch:type_name -> shim.v1.EntryBatch
-	2, // 1: shim.v1.EntryBatch.entries:type_name -> shim.v1.Entry
-	3, // 2: shim.v1.EntryBatch.cursor_advance:type_name -> shim.v1.CursorState
+var file_store_v1_write_proto_depIdxs = []int32{
+	1, // 0: store.v1.StoreEntryWrite.batch:type_name -> store.v1.EntryBatch
+	2, // 1: store.v1.EntryBatch.entries:type_name -> store.v1.Entry
+	3, // 2: store.v1.EntryBatch.cursor_advance:type_name -> store.v1.CursorState
 	3, // [3:3] is the sub-list for method output_type
 	3, // [3:3] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
@@ -204,28 +204,28 @@ var file_shim_v1_write_proto_depIdxs = []int32{
 	0, // [0:3] is the sub-list for field type_name
 }
 
-func init() { file_shim_v1_write_proto_init() }
-func file_shim_v1_write_proto_init() {
-	if File_shim_v1_write_proto != nil {
+func init() { file_store_v1_write_proto_init() }
+func file_store_v1_write_proto_init() {
+	if File_store_v1_write_proto != nil {
 		return
 	}
-	file_shim_v1_cursor_proto_init()
-	file_shim_v1_entry_proto_init()
+	file_store_v1_cursor_proto_init()
+	file_store_v1_entry_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_write_proto_rawDesc), len(file_shim_v1_write_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_store_v1_write_proto_rawDesc), len(file_store_v1_write_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_shim_v1_write_proto_goTypes,
-		DependencyIndexes: file_shim_v1_write_proto_depIdxs,
-		MessageInfos:      file_shim_v1_write_proto_msgTypes,
+		GoTypes:           file_store_v1_write_proto_goTypes,
+		DependencyIndexes: file_store_v1_write_proto_depIdxs,
+		MessageInfos:      file_store_v1_write_proto_msgTypes,
 	}.Build()
-	File_shim_v1_write_proto = out.File
-	file_shim_v1_write_proto_goTypes = nil
-	file_shim_v1_write_proto_depIdxs = nil
+	File_store_v1_write_proto = out.File
+	file_store_v1_write_proto_goTypes = nil
+	file_store_v1_write_proto_depIdxs = nil
 }
