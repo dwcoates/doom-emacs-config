@@ -1388,3 +1388,103 @@ correlation id as a protocol violation.
 against a `FrontendCommand` that no longer exists in the schema, and none of it
 is touched here — this wave is proto and docs. The full list, with `file:line`,
 is in the report accompanying this change.
+
+## Every endpoint owns its request and response, one file each
+
+This SUPERSEDES "Four per-method responses, and only four" above. That section
+recorded a service whose 33 unary methods shared one `CommandAck` and whose
+signatures reached into `frontend.v1` for their requests. Both are gone.
+
+### A request type is `agentrepl`, never `frontend` — the drawn/called test
+
+`frontend.v1` holds what the webapp RENDERS. `agentrepl.v1` holds what it
+CALLS. A `QueueForceCmd` was never drawn by anybody: it is the wire form of a
+click, addressed to a method on this service, and it reached `frontend.v1` only
+because the component that sends it is drawn there. That is proximity, not
+ownership, and it is exactly the "what is it about" test the surface table
+already rejects for every other message.
+
+The evidence it was wrong: `service.proto` could not state its own API without
+importing four `frontend.v1` files, so a daemon that wanted only the method
+table pulled in the whole feed, footer, sidebar and topbar component model with
+it. A request type that lives on the surface it is sent TO needs no qualifier,
+and none of the 34 signatures carries one now.
+
+Thirteen messages moved: `SubmitPromptCmd`, `InterruptCmd`,
+`PermissionAnswerCmd`, `QueueForceCmd`, `QueueAcceptCmd`, `QueueCancelCmd`,
+`DaemonHealthCmd`, `SessionHealthCmd`, `SetModelCmd`,
+`PublishWorkspaceRosterCmd`, `CancelDetachedAgentsCmd`, `FirstPageCmd`,
+`NextPageCmd`. Each was checked first for a reference from inside `frontend.v1`
+— a view embedding a command would have forced a `frontend.v1` →
+`agentrepl.v1` import and inverted the dependency — and none had one. Every
+reference was prose.
+
+The import direction that remains is the one that was always there:
+`agentrepl.v1` reads `frontend.v1`'s component types where a request genuinely
+carries one (`PublishWorkspaceRosterRequest.roster`,
+`FirstPageRequest.scope`), and `frontend.v1` reads `agentrepl.v1.shared` for
+the failure vocabulary. Nothing new points the wrong way.
+
+### Every method gets its own response, and none of them is `CommandAck`
+
+Sharing `CommandAck` gave 33 methods ONE response type. The cost is not
+hypothetical and the previous section paid it twice: `CommandAck` accumulated
+`interrupt_confirm_required`, `selected_model`, `observed_claude_session_id`
+and `detached_cancel`, each meaningless on 32 other commands, each documented
+with a "Present only for X" comment doing the work a signature should do. The
+four per-method responses that replaced those fields fixed four instances of
+the problem and left the mechanism intact — the 29th method that needs to say
+something still had nowhere to say it but the shared ack.
+
+So every method now returns `<Method>Response`. Where a method genuinely has
+nothing to add, its response WRAPS `CommandAck` in one field rather than being
+`CommandAck`. That wrapper is the whole point: it is a place to put the next
+field without offering it to anyone else. `InterruptResponse`,
+`SetModelResponse`, `CreateSessionResponse` and `CancelDetachedAgentsResponse`
+fold into the scheme unchanged rather than being duplicated beside it.
+
+`DaemonHealth` and `SessionHealth` still do NOT return their views, for the
+reason the superseded section gives: returning `DaemonHealthView` would convert
+an asynchronous probe into a blocking call. Their responses wrap the ack, and
+the verdict is still pushed.
+
+### One file per endpoint, and the `endpoint_` prefix is the grouping
+
+`<Method>Request` and `<Method>Response` live together in
+`agentrepl/v1/endpoint_<snake_case_method>.proto` — `ForceQueueEntry` in
+`endpoint_force_queue_entry.proto`, and nothing else in it. The whole of what
+one method takes and returns is then one file, findable from the method name
+without a search, and a change to one endpoint touches one file instead of
+appending to a 2000-line `shared.proto` that four unrelated surfaces also read.
+
+**They cannot live in a separate directory.** The Makefile generates with
+`--go_opt=paths=source_relative`, so a file's OUTPUT path is its source path:
+every file declaring `package agentrepl.v1` must sit in one directory or the
+Go bindings for one proto package land in two, which does not compile. A
+`src/endpoints/` tree would emit `gen/go/endpoints/...` while the rest of
+`agentrepl.v1` emits `gen/go/agentrepl/v1/...`, and the two halves could not
+refer to each other. The `endpoint_` PREFIX is what a directory would have
+been: it sorts the 34 files together, and `ls src/agentrepl/v1` reads as the
+method table.
+
+### `Subscribe` streams a wrapper, and the wrapper is not free
+
+`Subscribe` returns `stream SubscribeResponse`, a message whose single field is
+a `FrontendFrame`. The alternative was renaming `FrontendFrame` itself, which
+applies the rule with no wrapper at all and no per-message cost.
+
+The wrapper was chosen to PRESERVE THE NAME. `FrontendFrame` is the daemon's,
+the webapp's and the elisp frontend's central vocabulary word for "a thing
+pushed at a client"; retiring it renames a concept across three
+implementations to satisfy a naming convention on one method.
+
+**State the cost plainly: it is paid per frame, on the hot path.** This is the
+channel every conversation delta, every typing preview and every state
+revision travels on. Each one now carries an extra length-delimited nesting
+level — a tag, a length, and one more allocation in every generated decoder.
+Nothing else on this surface pays a per-message price for a naming rule, and
+the rename would have cost nothing at runtime. If the price is ever measured
+and disliked, the remedy is the rename, not a second unwrapped stream. The
+judgement recorded here is that a name three systems already speak is worth
+more than the bytes, but it is close, and the rename is the defensible other
+answer.
