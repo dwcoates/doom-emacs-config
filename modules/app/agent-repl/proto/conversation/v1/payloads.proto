@@ -387,7 +387,7 @@ message DetachedLost {
   string inference = 1;
 }
 
-// A fragment of a message still arriving.
+// A fragment of a message's PROSE still arriving.
 //
 // The stream plane hands these straight to the daemon as they are typed; the
 // file plane writes the completed message afterwards. A consumer REPLACES the
@@ -409,14 +409,16 @@ message ContentArriving {
 
   // What is arriving. Which arm is set says which KIND of block is being
   // extended, so a preview never has to guess what it is showing.
+  //
+  // PROSE ONLY. There is no arm for tool arguments: an argument fragment is
+  // partial vendor JSON, and `{"file_pa` draws nothing, so streaming it bought
+  // a consumer-side parser and no picture. Tool arguments arrive complete,
+  // once, as `ToolCallBlock.arguments` — a typed `Struct`, for the reason that
+  // field already states.
   oneof fragment {
     // Prose, as the agent writes it.
     string text = 2;
     // Reasoning, as the agent reasons.
     string thinking = 3;
-    // Tool arguments, arriving as the agent composes them. A string because it
-    // is INCOMPLETE JSON until the last fragment lands; typing it as Struct
-    // would claim it parses when it does not yet.
-    string arguments_json = 4;
   }
 }
