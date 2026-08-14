@@ -1,14 +1,13 @@
-// shared.proto — The agentrepl.v1 declarations that are NOT any one UI
-// component's props or events.
+// shared.proto — The agentrepl.v1 declarations that are NOT any one endpoint's
+// request or response.
 //
-// MEMBERSHIP HERE IS "NOT A COMPONENT", NOT "SHARED BY SEVERAL COMPONENTS".
-// feed.proto, topbar.proto, sidebar.proto and footer.proto each describe one
-// surface's resolved props and the commands that surface sends. Nothing in
-// this file does. What is here is the vocabulary and the plumbing those
-// surfaces are written against: the closed session-command set, the failure
-// vocabulary, the hibernation gate and its revival decision, the host-driver
-// commands the Emacs host sends, session and daemon lifecycle, and the merge
-// queue.
+// MEMBERSHIP HERE IS "NOT ONE ENDPOINT'S", NOT "SHARED BY SEVERAL ENDPOINTS".
+// The endpoint_*.proto files each describe one method's request, its success
+// and its error. Nothing in this file does. What is here is the vocabulary and
+// the plumbing those endpoints are written against: the refusal vocabulary a
+// call's error arms are drawn from, the hibernation gate and its revival
+// decision, the host-driver commands the Emacs host sends, session and daemon
+// lifecycle, and the merge queue.
 //
 // Each section below keeps the header of the file it came from, verbatim.
 
@@ -16,626 +15,18 @@
 // @generated from file agentrepl/v1/shared.proto (package agentrepl.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenExtension, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, extDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { EnumValueOptions } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_descriptor, file_google_protobuf_struct } from "@bufbuild/protobuf/wkt";
-import type { QueryIteratorFailure, QueryStartupFailure, UnexpectedQueryEof, VendorSessionIdentityUnavailable } from "../../shim/v1/core_pb";
-import { file_shim_v1_core } from "../../shim/v1/core_pb";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { SessionCommand } from "../../conversation/v1/session_command_pb";
+import { file_conversation_v1_session_command } from "../../conversation/v1/session_command_pb";
+import { file_google_protobuf_struct } from "@bufbuild/protobuf/wkt";
 import type { JsonObject, Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/shared.proto.
  */
 export const file_agentrepl_v1_shared: GenFile = /*@__PURE__*/
-  fileDesc("ChlhZ2VudHJlcGwvdjEvc2hhcmVkLnByb3RvEgxhZ2VudHJlcGwudjEiOQoSU2Vzc2lvbkNvbW1hbmRTcGVjEg8KB2xpdGVyYWwYASABKAkSEgoKdGFrZXNfYXJncxgCIAEoCCJhChRWZW5kb3JGYWlsdXJlQ29udGV4dBIZChFjbGF1ZGVfc2Vzc2lvbl9pZBgBIAEoCRIWCg5hcGlfcmVxdWVzdF9pZBgCIAEoCRIWCg5hcGlfbWVzc2FnZV9pZBgDIAEoCSLcIgoLRmFpbHVyZUtpbmQSQwoSc2hpbV9ub3RfY29ubmVjdGVkGAEgASgLMiUuYWdlbnRyZXBsLnYxLkZhaWx1cmVTaGltTm90Q29ubmVjdGVkSAASOgoNc2hpbV9yZWplY3RlZBgCIAEoCzIhLmFnZW50cmVwbC52MS5GYWlsdXJlU2hpbVJlamVjdGVkSAASPwoQc2hpbV9hY2tfdGltZW91dBgDIAEoCzIjLmFnZW50cmVwbC52MS5GYWlsdXJlU2hpbUFja1RpbWVvdXRIABJJChVzaGltX3ZlcnNpb25fbWlzbWF0Y2gYBCABKAsyKC5hZ2VudHJlcGwudjEuRmFpbHVyZVNoaW1WZXJzaW9uTWlzbWF0Y2hIABJFChNzaGltX3NlcV9yZWdyZXNzaW9uGAUgASgLMiYuYWdlbnRyZXBsLnYxLkZhaWx1cmVTaGltU2VxUmVncmVzc2lvbkgAEjoKDXNoaW1fZGVncmFkZWQYBiABKAsyIS5hZ2VudHJlcGwudjEuRmFpbHVyZVNoaW1EZWdyYWRlZEgAElAKGXNoaW1fc3RvcmVfd3JpdGVfcmVqZWN0ZWQYByABKAsyKy5hZ2VudHJlcGwudjEuRmFpbHVyZVNoaW1TdG9yZVdyaXRlUmVqZWN0ZWRIABJCChFxdWVyeV90ZXJtaW5hdGlvbhgIIAEoCzIlLmFnZW50cmVwbC52MS5GYWlsdXJlUXVlcnlUZXJtaW5hdGlvbkgAEj8KEHNoaW1fbm90X3NwYXduZWQYCSABKAsyIy5hZ2VudHJlcGwudjEuRmFpbHVyZVNoaW1Ob3RTcGF3bmVkSAASUQoZc2hpbV9oYW5kc2hha2VfaW5jb21wbGV0ZRgKIAEoCzIsLmFnZW50cmVwbC52MS5GYWlsdXJlU2hpbUhhbmRzaGFrZUluY29tcGxldGVIABI8Cg5zaGltX3VuaGVhbHRoeRgLIAEoCzIiLmFnZW50cmVwbC52MS5GYWlsdXJlU2hpbVVuaGVhbHRoeUgAEk0KF3Nlc3Npb25fbm90X2VzdGFibGlzaGVkGAwgASgLMiouYWdlbnRyZXBsLnYxLkZhaWx1cmVTZXNzaW9uTm90RXN0YWJsaXNoZWRIABJDChJ3b3Jrc3BhY2Vfbm90X2xpdmUYDSABKAsyJS5hZ2VudHJlcGwudjEuRmFpbHVyZVdvcmtzcGFjZU5vdExpdmVIABI+Cg9zZXNzaW9uX2RlbGV0ZWQYDiABKAsyIy5hZ2VudHJlcGwudjEuRmFpbHVyZVNlc3Npb25EZWxldGVkSAASRAoSc2Vzc2lvbl9zdXBlcnNlZGVkGA8gASgLMiYuYWdlbnRyZXBsLnYxLkZhaWx1cmVTZXNzaW9uU3VwZXJzZWRlZEgAEkgKFHJlY29ubmVjdF9zdXBlcnNlZGVkGBAgASgLMiguYWdlbnRyZXBsLnYxLkZhaWx1cmVSZWNvbm5lY3RTdXBlcnNlZGVkSAASQQoRc2Vzc2lvbl9zaGltX2RpZWQYESABKAsyJC5hZ2VudHJlcGwudjEuRmFpbHVyZVNlc3Npb25TaGltRGllZEgAEkcKFHNlc3Npb25fc3RhcnRfZmFpbGVkGBIgASgLMicuYWdlbnRyZXBsLnYxLkZhaWx1cmVTZXNzaW9uU3RhcnRGYWlsZWRIABJJChVzZXNzaW9uX3Jlc3VtZV9mYWlsZWQYEyABKAsyKC5hZ2VudHJlcGwudjEuRmFpbHVyZVNlc3Npb25SZXN1bWVGYWlsZWRIABJQChhjb252ZXJzYXRpb25fdW5yZXN1bWFibGUYFCABKAsyLC5hZ2VudHJlcGwudjEuRmFpbHVyZUNvbnZlcnNhdGlvblVucmVzdW1hYmxlSAASRQoTcmVzdW1lX21vZGVfcmV0aXJlZBgVIAEoCzImLmFnZW50cmVwbC52MS5GYWlsdXJlUmVzdW1lTW9kZVJldGlyZWRIABJTChpzZXNzaW9uX2VuZGVkX3VuY2xhc3NpZmllZBgWIAEoCzItLmFnZW50cmVwbC52MS5GYWlsdXJlU2Vzc2lvbkVuZGVkVW5jbGFzc2lmaWVkSAASTgoYaGlzdG9yeV9yZXB1bGxfaW5fZmxpZ2h0GBcgASgLMiouYWdlbnRyZXBsLnYxLkZhaWx1cmVIaXN0b3J5UmVwdWxsSW5GbGlnaHRIABJPChhoaXN0b3J5X3JlcGxheV90cnVuY2F0ZWQYGCABKAsyKy5hZ2VudHJlcGwudjEuRmFpbHVyZUhpc3RvcnlSZXBsYXlUcnVuY2F0ZWRIABJKChVpbnRlcnJ1cHRfdW5kZWxpdmVyZWQYGSABKAsyKS5hZ2VudHJlcGwudjEuRmFpbHVyZUludGVycnVwdFVuZGVsaXZlcmVkSAASRQoTcXVldWVfZW50cnlfdW53aXJlZBgaIAEoCzImLmFnZW50cmVwbC52MS5GYWlsdXJlUXVldWVFbnRyeVVud2lyZWRIABJTChtxdWV1ZV9lbnRyeV9rZWVwX2FsaXZlX2hlbGQYGyABKAsyLC5hZ2VudHJlcGwudjEuRmFpbHVyZVF1ZXVlRW50cnlLZWVwQWxpdmVIZWxkSAASRAoSc2Vzc2lvbl9oaWJlcm5hdGVkGBwgASgLMiYuYWdlbnRyZXBsLnYxLkZhaWx1cmVTZXNzaW9uSGliZXJuYXRlZEgAElIKGmtlZXBfYWxpdmVfd2luZG93X3VuY2xvc2VkGB0gASgLMiwuYWdlbnRyZXBsLnYxLkZhaWx1cmVLZWVwQWxpdmVXaW5kb3dVbmNsb3NlZEgAElIKGmtlZXBfYWxpdmVfd2luZG93X2ludmVydGVkGB4gASgLMiwuYWdlbnRyZXBsLnYxLkZhaWx1cmVLZWVwQWxpdmVXaW5kb3dJbnZlcnRlZEgAEkcKFGNvbXBhY3Rpb25fY29sZF9yZWFkGB8gASgLMicuYWdlbnRyZXBsLnYxLkZhaWx1cmVDb21wYWN0aW9uQ29sZFJlYWRIABJQChljbGllbnRfbG9nX2lkZW50aXR5X3N0YWxlGCAgASgLMisuYWdlbnRyZXBsLnYxLkZhaWx1cmVDbGllbnRMb2dJZGVudGl0eVN0YWxlSAASSgoVaW50ZXJuYWxfdW5jbGFzc2lmaWVkGCEgASgLMikuYWdlbnRyZXBsLnYxLkZhaWx1cmVJbnRlcm5hbFVuY2xhc3NpZmllZEgAElEKGWFwaV9hdXRoZW50aWNhdGlvbl9mYWlsZWQYIiABKAsyLC5hZ2VudHJlcGwudjEuRmFpbHVyZUFwaUF1dGhlbnRpY2F0aW9uRmFpbGVkSAASQQoRYXBpX2JpbGxpbmdfZXJyb3IYIyABKAsyJC5hZ2VudHJlcGwudjEuRmFpbHVyZUFwaUJpbGxpbmdFcnJvckgAEjsKDmFwaV9yYXRlX2xpbWl0GCQgASgLMiEuYWdlbnRyZXBsLnYxLkZhaWx1cmVBcGlSYXRlTGltaXRIABJFChNhcGlfaW52YWxpZF9yZXF1ZXN0GCUgASgLMiYuYWdlbnRyZXBsLnYxLkZhaWx1cmVBcGlJbnZhbGlkUmVxdWVzdEgAEj8KEGFwaV9zZXJ2ZXJfZXJyb3IYJiABKAsyIy5hZ2VudHJlcGwudjEuRmFpbHVyZUFwaVNlcnZlckVycm9ySAASPAoOYXBpX292ZXJsb2FkZWQYJyABKAsyIi5hZ2VudHJlcGwudjEuRmFpbHVyZUFwaU92ZXJsb2FkZWRIABJPChlhcGlfb2F1dGhfb3JnX25vdF9hbGxvd2VkGCggASgLMiouYWdlbnRyZXBsLnYxLkZhaWx1cmVBcGlPQXV0aE9yZ05vdEFsbG93ZWRIABJEChNhcGlfbW9kZWxfbm90X2ZvdW5kGCkgASgLMiUuYWdlbnRyZXBsLnYxLkZhaWx1cmVBcGlNb2RlbE5vdEZvdW5kSAASPwoQYXBpX25ldHdvcmtfZG93bhgqIAEoCzIjLmFnZW50cmVwbC52MS5GYWlsdXJlQXBpTmV0d29ya0Rvd25IABJDChJhcGlfcmVxdWVzdF9mYWlsZWQYKyABKAsyJS5hZ2VudHJlcGwudjEuRmFpbHVyZUFwaVJlcXVlc3RGYWlsZWRIABI2CgthcGlfdW5rbm93bhgsIAEoCzIfLmFnZW50cmVwbC52MS5GYWlsdXJlQXBpVW5rbm93bkgAEkgKFWFwaV9tYXhfb3V0cHV0X3Rva2VucxgtIAEoCzInLmFnZW50cmVwbC52MS5GYWlsdXJlQXBpTWF4T3V0cHV0VG9rZW5zSAASOQoNYXBpX21heF90dXJucxguIAEoCzIgLmFnZW50cmVwbC52MS5GYWlsdXJlQXBpTWF4VHVybnNIABI7Cg5hcGlfbWF4X2J1ZGdldBgvIAEoCzIhLmFnZW50cmVwbC52MS5GYWlsdXJlQXBpTWF4QnVkZ2V0SAASRQoTYXBpX2V4ZWN1dGlvbl9lcnJvchgwIAEoCzImLmFnZW50cmVwbC52MS5GYWlsdXJlQXBpRXhlY3V0aW9uRXJyb3JIABI2CgthcGlfcmVmdXNhbBgxIAEoCzIfLmFnZW50cmVwbC52MS5GYWlsdXJlQXBpUmVmdXNhbEgAEj0KD2FwaV90dXJuX2ZhaWxlZBgyIAEoCzIiLmFnZW50cmVwbC52MS5GYWlsdXJlQXBpVHVybkZhaWxlZEgAElcKHXByb21wdF9yZWZ1c2VkX2J5X21lcmdlX3N0YXRlGDMgASgLMi4uYWdlbnRyZXBsLnYxLkZhaWx1cmVQcm9tcHRSZWZ1c2VkQnlNZXJnZVN0YXRlSAASXgogcXVldWVfZW50cnlfdW5pbnRlcnJ1cHRpYmxlX3R1cm4YNCABKAsyMi5hZ2VudHJlcGwudjEuRmFpbHVyZVF1ZXVlRW50cnlVbmludGVycnVwdGlibGVUdXJuSAASOgoNdHVybl91bmRyaXZlbhg1IAEoCzIhLmFnZW50cmVwbC52MS5GYWlsdXJlVHVyblVuZHJpdmVuSAASRQoTcmVwbGF5X21hcmtfcmV0aXJlZBg2IAEoCzImLmFnZW50cmVwbC52MS5GYWlsdXJlUmVwbGF5TWFya1JldGlyZWRIABJEChJkYWVtb25fdW5yZWFjaGFibGUYNyABKAsyJi5hZ2VudHJlcGwudjEuRmFpbHVyZURhZW1vblVucmVhY2hhYmxlSAASPAoOd29ya3NwYWNlX2dvbmUYOCABKAsyIi5hZ2VudHJlcGwudjEuRmFpbHVyZVdvcmtzcGFjZUdvbmVIABI2Cgtib290X2ZhaWxlZBg5IAEoCzIfLmFnZW50cmVwbC52MS5GYWlsdXJlQm9vdEZhaWxlZEgAEkcKFGNvbnRyb2xfcGxhbmVfZmFpbGVkGDogASgLMicuYWdlbnRyZXBsLnYxLkZhaWx1cmVDb250cm9sUGxhbmVGYWlsZWRIABJCChFmcmFtZV91bmRlY29kYWJsZRg7IAEoCzIlLmFnZW50cmVwbC52MS5GYWlsdXJlRnJhbWVVbmRlY29kYWJsZUgAEjgKDHN0YWxlX2J1bmRsZRg8IAEoCzIgLmFnZW50cmVwbC52MS5GYWlsdXJlU3RhbGVCdW5kbGVIABI8Cg5jb21tYW5kX3Vuc2VudBg9IAEoCzIiLmFnZW50cmVwbC52MS5GYWlsdXJlQ29tbWFuZFVuc2VudEgAElsKHmNvbW1hbmRfcmVqZWN0aW9uX3VuY2xhc3NpZmllZBg+IAEoCzIxLmFnZW50cmVwbC52MS5GYWlsdXJlQ29tbWFuZFJlamVjdGlvblVuY2xhc3NpZmllZEgAQgYKBGtpbmQiGQoXRmFpbHVyZVNoaW1Ob3RDb25uZWN0ZWQiOQoTRmFpbHVyZVNoaW1SZWplY3RlZBISCgpyZXF1ZXN0X2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSI+ChVGYWlsdXJlU2hpbUFja1RpbWVvdXQSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl3YWl0ZWRfbXMYAiABKAMiSgoaRmFpbHVyZVNoaW1WZXJzaW9uTWlzbWF0Y2gSFAoMc2hpbV92ZXJzaW9uGAEgASgJEhYKDmRhZW1vbl92ZXJzaW9uGAIgASgJIj4KGEZhaWx1cmVTaGltU2VxUmVncmVzc2lvbhILCgNzZXEYASABKAQSFQoNbGFzdF9zZWVuX3NlcRgCIAEoBCIoChNGYWlsdXJlU2hpbURlZ3JhZGVkEhEKCWNvbXBvbmVudBgBIAEoCSJZCh1GYWlsdXJlU2hpbVN0b3JlV3JpdGVSZWplY3RlZBIRCgljb21wb25lbnQYASABKAkSDgoGcmVhc29uGAIgASgJEhUKDWRyb3BwZWRfY291bnQYAyABKAMiUAoXRmFpbHVyZVF1ZXJ5VGVybWluYXRpb24SNQoGZGV0YWlsGAEgASgLMiUuYWdlbnRyZXBsLnYxLlF1ZXJ5VGVybWluYXRpb25GYWlsdXJlIhcKFUZhaWx1cmVTaGltTm90U3Bhd25lZCJDCh5GYWlsdXJlU2hpbUhhbmRzaGFrZUluY29tcGxldGUSEgoKcmVxdWVzdF9pZBgBIAEoCRINCgVjYXVzZRgCIAEoCSJNChRGYWlsdXJlU2hpbVVuaGVhbHRoeRISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCWNvbXBvbmVudBgCIAEoCRIOCgZyZWFzb24YAyABKAkiLQocRmFpbHVyZVNlc3Npb25Ob3RFc3RhYmxpc2hlZBINCgVjYXVzZRgBIAEoCSIZChdGYWlsdXJlV29ya3NwYWNlTm90TGl2ZSIXChVGYWlsdXJlU2Vzc2lvbkRlbGV0ZWQiGgoYRmFpbHVyZVNlc3Npb25TdXBlcnNlZGVkIiwKGkZhaWx1cmVSZWNvbm5lY3RTdXBlcnNlZGVkEg4KBnJlbWVkeRgBIAEoCSIYChZGYWlsdXJlU2Vzc2lvblNoaW1EaWVkIioKGUZhaWx1cmVTZXNzaW9uU3RhcnRGYWlsZWQSDQoFY2F1c2UYASABKAkiUAoaRmFpbHVyZVNlc3Npb25SZXN1bWVGYWlsZWQSMgoGZGV0YWlsGAEgASgLMiIuYWdlbnRyZXBsLnYxLlNlc3Npb25SZXN1bWVGYWlsdXJlImwKHkZhaWx1cmVDb252ZXJzYXRpb25VbnJlc3VtYWJsZRIZChFjbGF1ZGVfc2Vzc2lvbl9pZBgBIAEoCRILCgNjd2QYAiABKAkSEgoKY29uZmlnX2RpchgDIAEoCRIOCgZyZWFzb24YBCABKAkiGgoYRmFpbHVyZVJlc3VtZU1vZGVSZXRpcmVkIjUKH0ZhaWx1cmVTZXNzaW9uRW5kZWRVbmNsYXNzaWZpZWQSEgoKcmF3X3JlYXNvbhgBIAEoCSIeChxGYWlsdXJlSGlzdG9yeVJlcHVsbEluRmxpZ2h0ImkKHUZhaWx1cmVIaXN0b3J5UmVwbGF5VHJ1bmNhdGVkEhAKCGZyb21fc2VxGAEgASgEEhMKC3N0b3BfYXRfc2VxGAIgASgEEhEKCWRlbGl2ZXJlZBgDIAEoAxIOCgZyZWFzb24YBCABKAkiQwoYRmFpbHVyZVJlcGxheU1hcmtSZXRpcmVkEhAKCGZyb21fc2VxGAEgASgEEhUKDWxpdmVfbGFzdF9zZXEYAiABKAQiHQobRmFpbHVyZUludGVycnVwdFVuZGVsaXZlcmVkIjwKGEZhaWx1cmVRdWV1ZUVudHJ5VW53aXJlZBIQCghlbnRyeV9pZBgBIAEoCRIOCgZyZWFzb24YAiABKAkiTgoeRmFpbHVyZVF1ZXVlRW50cnlLZWVwQWxpdmVIZWxkEhAKCGVudHJ5X2lkGAEgASgJEhoKEmtlZXBfYWxpdmVfdHVybl9pZBgCIAEoCSIsChhGYWlsdXJlU2Vzc2lvbkhpYmVybmF0ZWQSEAoIc2luY2VfbXMYASABKAMiMAoeRmFpbHVyZUtlZXBBbGl2ZVdpbmRvd1VuY2xvc2VkEg4KBnJlYXNvbhgBIAEoCSIwCh5GYWlsdXJlS2VlcEFsaXZlV2luZG93SW52ZXJ0ZWQSDgoGcmVhc29uGAEgASgJIjoKGUZhaWx1cmVDb21wYWN0aW9uQ29sZFJlYWQSHQoVdW5jYWNoZWRfaW5wdXRfdG9rZW5zGAEgASgDIh8KHUZhaWx1cmVDbGllbnRMb2dJZGVudGl0eVN0YWxlIiwKG0ZhaWx1cmVJbnRlcm5hbFVuY2xhc3NpZmllZBINCgVjYXVzZRgBIAEoCSJ7Ch5GYWlsdXJlQXBpQXV0aGVudGljYXRpb25GYWlsZWQSMgoGdmVuZG9yGAEgASgLMiIuYWdlbnRyZXBsLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFInMKFkZhaWx1cmVBcGlCaWxsaW5nRXJyb3ISMgoGdmVuZG9yGAEgASgLMiIuYWdlbnRyZXBsLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFInAKE0ZhaWx1cmVBcGlSYXRlTGltaXQSMgoGdmVuZG9yGAEgASgLMiIuYWdlbnRyZXBsLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFInUKGEZhaWx1cmVBcGlJbnZhbGlkUmVxdWVzdBIyCgZ2ZW5kb3IYASABKAsyIi5hZ2VudHJlcGwudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSEwoLaHR0cF9zdGF0dXMYAiABKAUSEAoIYXR0ZW1wdHMYAyABKAUicgoVRmFpbHVyZUFwaVNlcnZlckVycm9yEjIKBnZlbmRvchgBIAEoCzIiLmFnZW50cmVwbC52MS5WZW5kb3JGYWlsdXJlQ29udGV4dBITCgtodHRwX3N0YXR1cxgCIAEoBRIQCghhdHRlbXB0cxgDIAEoBSJxChRGYWlsdXJlQXBpT3ZlcmxvYWRlZBIyCgZ2ZW5kb3IYASABKAsyIi5hZ2VudHJlcGwudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSEwoLaHR0cF9zdGF0dXMYAiABKAUSEAoIYXR0ZW1wdHMYAyABKAUieQocRmFpbHVyZUFwaU9BdXRoT3JnTm90QWxsb3dlZBIyCgZ2ZW5kb3IYASABKAsyIi5hZ2VudHJlcGwudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSEwoLaHR0cF9zdGF0dXMYAiABKAUSEAoIYXR0ZW1wdHMYAyABKAUiXAoXRmFpbHVyZUFwaU1vZGVsTm90Rm91bmQSMgoGdmVuZG9yGAEgASgLMiIuYWdlbnRyZXBsLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0Eg0KBW1vZGVsGAIgASgJIksKFUZhaWx1cmVBcGlOZXR3b3JrRG93bhIyCgZ2ZW5kb3IYASABKAsyIi5hZ2VudHJlcGwudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQidAoXRmFpbHVyZUFwaVJlcXVlc3RGYWlsZWQSMgoGdmVuZG9yGAEgASgLMiIuYWdlbnRyZXBsLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFIm4KEUZhaWx1cmVBcGlVbmtub3duEjIKBnZlbmRvchgBIAEoCzIiLmFnZW50cmVwbC52MS5WZW5kb3JGYWlsdXJlQ29udGV4dBITCgtodHRwX3N0YXR1cxgCIAEoBRIQCghhdHRlbXB0cxgDIAEoBSJPChlGYWlsdXJlQXBpTWF4T3V0cHV0VG9rZW5zEjIKBnZlbmRvchgBIAEoCzIiLmFnZW50cmVwbC52MS5WZW5kb3JGYWlsdXJlQ29udGV4dCJIChJGYWlsdXJlQXBpTWF4VHVybnMSMgoGdmVuZG9yGAEgASgLMiIuYWdlbnRyZXBsLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0IkkKE0ZhaWx1cmVBcGlNYXhCdWRnZXQSMgoGdmVuZG9yGAEgASgLMiIuYWdlbnRyZXBsLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0Ik4KGEZhaWx1cmVBcGlFeGVjdXRpb25FcnJvchIyCgZ2ZW5kb3IYASABKAsyIi5hZ2VudHJlcGwudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQiRwoRRmFpbHVyZUFwaVJlZnVzYWwSMgoGdmVuZG9yGAEgASgLMiIuYWdlbnRyZXBsLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0Il8KFEZhaWx1cmVBcGlUdXJuRmFpbGVkEjIKBnZlbmRvchgBIAEoCzIiLmFnZW50cmVwbC52MS5WZW5kb3JGYWlsdXJlQ29udGV4dBITCgtzdG9wX3JlYXNvbhgCIAEoCSIxCiBGYWlsdXJlUHJvbXB0UmVmdXNlZEJ5TWVyZ2VTdGF0ZRINCgVzdGF0ZRgBIAEoCSIlChNGYWlsdXJlVHVyblVuZHJpdmVuEg4KBnJlYXNvbhgBIAEoCSJnCiRGYWlsdXJlUXVldWVFbnRyeVVuaW50ZXJydXB0aWJsZVR1cm4SEAoIZW50cnlfaWQYASABKAkSLQoHY29tbWFuZBgCIAEoDjIcLmFnZW50cmVwbC52MS5TZXNzaW9uQ29tbWFuZCJEChhGYWlsdXJlRGFlbW9uVW5yZWFjaGFibGUSEgoKY2xvc2VfY29kZRgBIAEoBRIUCgxjbG9zZV9yZWFzb24YAiABKAkiFgoURmFpbHVyZVdvcmtzcGFjZUdvbmUiIgoRRmFpbHVyZUJvb3RGYWlsZWQSDQoFY2F1c2UYASABKAkiOAoZRmFpbHVyZUNvbnRyb2xQbGFuZUZhaWxlZBIMCgR3aGF0GAEgASgJEg0KBWNhdXNlGAIgASgJIjwKF0ZhaWx1cmVGcmFtZVVuZGVjb2RhYmxlEg0KBWNhdXNlGAEgASgJEhIKCmZyYW1lX2hlYWQYAiABKAkiJAoSRmFpbHVyZVN0YWxlQnVuZGxlEg4KBmRldGFpbBgBIAEoCSInChRGYWlsdXJlQ29tbWFuZFVuc2VudBIPCgdjb21tYW5kGAEgASgJIk0KI0ZhaWx1cmVDb21tYW5kUmVqZWN0aW9uVW5jbGFzc2lmaWVkEg8KB2NvbW1hbmQYASABKAkSFQoNZGFlbW9uX3JlYXNvbhgCIAEoCSKLAwoXUXVlcnlUZXJtaW5hdGlvbkZhaWx1cmUSGQoRcXVlcnlfaW5zdGFuY2VfaWQYASABKAkSGwoRdmVuZG9yX3Nlc3Npb25faWQYAiABKAlIABJYCiN2ZW5kb3Jfc2Vzc2lvbl9pZGVudGl0eV91bmF2YWlsYWJsZRgDIAEoCzIpLnNoaW0udjEuVmVuZG9yU2Vzc2lvbklkZW50aXR5VW5hdmFpbGFibGVIABIWCg5vYnNlcnZlZF9hdF9tcxgEIAEoAxI1Cg51bmV4cGVjdGVkX2VvZhgFIAEoCzIbLnNoaW0udjEuVW5leHBlY3RlZFF1ZXJ5RW9mSAESOQoQaXRlcmF0b3JfZmFpbHVyZRgGIAEoCzIdLnNoaW0udjEuUXVlcnlJdGVyYXRvckZhaWx1cmVIARI3Cg9zdGFydHVwX2ZhaWx1cmUYByABKAsyHC5zaGltLnYxLlF1ZXJ5U3RhcnR1cEZhaWx1cmVIAUIRCg92ZW5kb3JfaWRlbnRpdHlCCAoGcmVhc29uIs4EChRTZXNzaW9uUmVzdW1lRmFpbHVyZRIZChFjbGF1ZGVfc2Vzc2lvbl9pZBgBIAEoCRILCgNjd2QYAiABKAkSEgoKY29uZmlnX2RpchgDIAEoCRIbChNyZXNvbHZlZF9jb25maWdfZGlyGAQgASgJEjoKBmNyZWF0ZRgFIAEoCzIoLmFnZW50cmVwbC52MS5TZXNzaW9uUmVzdW1lRmFpbHVyZUNyZWF0ZUgAEk8KEWF1dG9tYXRpY19yZXN0b3JlGAYgASgLMjIuYWdlbnRyZXBsLnYxLlNlc3Npb25SZXN1bWVGYWlsdXJlQXV0b21hdGljUmVzdG9yZUgAElkKFnRyYW5zY3JpcHRfdW5hdmFpbGFibGUYByABKAsyNy5hZ2VudHJlcGwudjEuU2Vzc2lvblJlc3VtZUZhaWx1cmVUcmFuc2NyaXB0VW5hdmFpbGFibGVIARJPChFpZGVudGl0eV9taXNtYXRjaBgIIAEoCzIyLmFnZW50cmVwbC52MS5TZXNzaW9uUmVzdW1lRmFpbHVyZUlkZW50aXR5TWlzbWF0Y2hIARJCChFxdWVyeV90ZXJtaW5hdGlvbhgJIAEoCzIlLmFnZW50cmVwbC52MS5RdWVyeVRlcm1pbmF0aW9uRmFpbHVyZUgBEkwKEGJyaW5nX3VwX2ZhaWx1cmUYCiABKAsyMC5hZ2VudHJlcGwudjEuU2Vzc2lvblJlc3VtZUZhaWx1cmVCcmluZ1VwRmFpbHVyZUgBQgkKB2F0dGVtcHRCBwoFY2F1c2UiHAoaU2Vzc2lvblJlc3VtZUZhaWx1cmVDcmVhdGUiJgokU2Vzc2lvblJlc3VtZUZhaWx1cmVBdXRvbWF0aWNSZXN0b3JlIkMKKVNlc3Npb25SZXN1bWVGYWlsdXJlVHJhbnNjcmlwdFVuYXZhaWxhYmxlEhYKDnNlYXJjaGVkX3BhdGhzGAEgAygJIk0KJFNlc3Npb25SZXN1bWVGYWlsdXJlSWRlbnRpdHlNaXNtYXRjaBIlCh1yZXBsYWNlbWVudF9jbGF1ZGVfc2Vzc2lvbl9pZBgBIAEoCSIzCiJTZXNzaW9uUmVzdW1lRmFpbHVyZUJyaW5nVXBGYWlsdXJlEg0KBWNhdXNlGAEgASgJIt0BChFIaWJlcm5hdGlvbkRldGFpbBIQCghzaW5jZV9tcxgBIAEoAxI6CgtpZGxlX2N1dG9mZhgCIAEoCzIjLmFnZW50cmVwbC52MS5IaWJlcm5hdGlvbklkbGVDdXRvZmZIABIxCgZmb3JjZWQYAyABKAsyHy5hZ2VudHJlcGwudjEuSGliZXJuYXRpb25Gb3JjZWRIABI+Cg1jYWNoZV9leHBpcmVkGAQgASgLMiUuYWdlbnRyZXBsLnYxLkhpYmVybmF0aW9uQ2FjaGVFeHBpcmVkSABCBwoFY2F1c2UiKgoVSGliZXJuYXRpb25JZGxlQ3V0b2ZmEhEKCWN1dG9mZl9tcxgBIAEoAyITChFIaWJlcm5hdGlvbkZvcmNlZCI9ChdIaWJlcm5hdGlvbkNhY2hlRXhwaXJlZBISCgplbGFwc2VkX21zGAEgASgDEg4KBnR0bF9tcxgCIAEoAyJCChJSZXZpdmVDb21wYWN0Rmlyc3QSLAoFc2NvcGUYASABKA4yHS5hZ2VudHJlcGwudjEuQ29tcGFjdGlvblNjb3BlIg4KDFJldml2ZURpcmVjdCINCgtSZXZpdmVDbGVhciKrAQoRV29ya3NwYWNlR2F0ZVZpZXcSEQoJd29ya3NwYWNlGAEgASgJEg0KBWZlbmNlGAIgASgJEi8KBG9wZW4YAyABKAsyHy5hZ2VudHJlcGwudjEuV29ya3NwYWNlR2F0ZU9wZW5IABI7CgpoaWJlcm5hdGVkGAQgASgLMiUuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUdhdGVIaWJlcm5hdGVkSABCBgoEZ2F0ZSITChFXb3Jrc3BhY2VHYXRlT3BlbiJKChdXb3Jrc3BhY2VHYXRlSGliZXJuYXRlZBIvCgZkZXRhaWwYASABKAsyHy5hZ2VudHJlcGwudjEuSGliZXJuYXRpb25EZXRhaWwi+AIKEldvcmtzcGFjZUF2YWlsYWJsZRIOCgZqb2JfaWQYASABKAkSEgoKZmluYWxfbmFtZRgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEg4KBmJyYW5jaBgEIAEoCRIQCghnaXRfcm9vdBgFIAEoCRITCgtiYXNlX2NvbW1pdBgGIAEoCRIYChBzb3VyY2Vfd29ya3NwYWNlGAcgASgJEhIKCnNvdXJjZV9kaXIYCCABKAkSEQoJZm9ya19mcm9tGAkgASgJEhcKD2Zvcmtfc2Vzc2lvbl9pZBgKIAEoCRISCgpzZXNzaW9uX2lkGAsgASgJEhAKCHByaW9yaXR5GAwgASgJEg0KBW1vZGVsGA0gASgJEh0KFWluaXRpYWxfcHJvbXB0X3F1ZXVlZBgOIAEoCBISCgpjb25maWdfZGlyGA8gASgJEhcKD3Blcm1pc3Npb25fbW9kZRgQIAEoCRIVCg1hbGxvd191bmdhdGVkGBEgASgIIpoFCgpIb3N0QWN0aW9uEhEKCWFjdGlvbl9pZBgBIAEoCRI9ChBzd2l0Y2hfd29ya3NwYWNlGAIgASgLMiEuYWdlbnRyZXBsLnYxLkhvc3RTd2l0Y2hXb3Jrc3BhY2VIABJCChNzZXRfcmVwb3NpdG9yeV9mb2xkGAMgASgLMiMuYWdlbnRyZXBsLnYxLkhvc3RTZXRSZXBvc2l0b3J5Rm9sZEgAEjwKEHNldF9zaWRlYmFyX3ZpZXcYBCABKAsyIC5hZ2VudHJlcGwudjEuSG9zdFNldFNpZGViYXJWaWV3SAASMwoLdGFza19jcmVhdGUYBSABKAsyHC5hZ2VudHJlcGwudjEuSG9zdFRhc2tDcmVhdGVIABI2ChB0YXNrX3RvZ2dsZV9kb25lGAYgASgLMhouYWdlbnRyZXBsLnYxLkhvc3RUYXNrQnlJZEgAEi8KCXRhc2tfb3BlbhgHIAEoCzIaLmFnZW50cmVwbC52MS5Ib3N0VGFza0J5SWRIABI4ChJ0YXNrX2FkZF93b3Jrc3BhY2UYCCABKAsyGi5hZ2VudHJlcGwudjEuSG9zdFRhc2tCeUlkSAASOQoObGVnYWN5X2NvbW1hbmQYCSABKAsyHy5hZ2VudHJlcGwudjEuSG9zdExlZ2FjeUNvbW1hbmRIABJKChd3b3Jrc3BhY2VfY3JlYXRlX2ZhaWxlZBgKIAEoCzInLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlQ3JlYXRlRmFpbGVkSAASTwoaYm9vdF9zd2VlcF9zZXNzaW9uX3Vud2lyZWQYCyABKAsyKS5hZ2VudHJlcGwudjEuSG9zdEJvb3RTd2VlcFNlc3Npb25VbndpcmVkSABCCAoGYWN0aW9uIlQKG0hvc3RCb290U3dlZXBTZXNzaW9uVW53aXJlZBIRCgl3b3Jrc3BhY2UYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIOCgZyZWFzb24YAyABKAkiUgoZSG9zdFdvcmtzcGFjZUNyZWF0ZUZhaWxlZBIOCgZqb2JfaWQYASABKAkSFgoOcmVxdWVzdGVkX25hbWUYAiABKAkSDQoFZXJyb3IYAyABKAkiIgoTSG9zdFN3aXRjaFdvcmtzcGFjZRILCgNkaXIYASABKAkiOQoVSG9zdFNldFJlcG9zaXRvcnlGb2xkEhAKCHJlcG9fa2V5GAEgASgJEg4KBmZvbGRlZBgCIAEoCCIiChJIb3N0U2V0U2lkZWJhclZpZXcSDAoEdmlldxgBIAEoCSIQCg5Ib3N0VGFza0NyZWF0ZSIaCgxIb3N0VGFza0J5SWQSCgoCaWQYASABKAkiSwoRSG9zdExlZ2FjeUNvbW1hbmQSDAoEdHlwZRgBIAEoCRIoCgdwYXlsb2FkGAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCKPAQoUU2h1dGRvd25TY2hlZHVsZVZpZXcSMgoEaWRsZRgBIAEoCzIiLmFnZW50cmVwbC52MS5TaHV0ZG93blNjaGVkdWxlSWRsZUgAEjoKCGRyYWluaW5nGAIgASgLMiYuYWdlbnRyZXBsLnYxLlNodXRkb3duU2NoZWR1bGVEcmFpbmluZ0gAQgcKBXN0YXRlIhYKFFNodXRkb3duU2NoZWR1bGVJZGxlIpYBChhTaHV0ZG93blNjaGVkdWxlRHJhaW5pbmcSEwoLc2NoZWR1bGVfaWQYASABKAkSFwoPc2NoZWR1bGVkX2F0X21zGAIgASgDEg0KBWNhdXNlGAMgASgJEhIKCnN0b3Bfc2hpbXMYBCABKAgSKQoFaG9sZHMYBSADKAsyGi5hZ2VudHJlcGwudjEuU2h1dGRvd25Ib2xkIpMBCgxTaHV0ZG93bkhvbGQSEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSLAoEdHVybhgDIAEoCzIeLmFnZW50cmVwbC52MS5TaHV0ZG93bkhvbGRUdXJuEi4KBXRhc2tzGAQgASgLMh8uYWdlbnRyZXBsLnYxLlNodXRkb3duSG9sZFRhc2tzIiMKEFNodXRkb3duSG9sZFR1cm4SDwoHdHVybl9pZBgBIAEoCSIiChFTaHV0ZG93bkhvbGRUYXNrcxINCgVjb3VudBgBIAEoBSJxChJSZXN0YXJ0UGVuZGluZ1ZpZXcSDQoFY2F1c2UYASABKAkSHwoXZXhwZWN0ZWRfb3V0YWdlX3NlY29uZHMYAiABKAUSEgoKc3RvcF9zaGltcxgDIAEoCBIXCg9hbm5vdW5jZWRfYXRfbXMYBCABKAMiowQKC01lcmdlU3RhdHVzEg4KBnJ1bl9pZBgBIAEoCRIbChNwaGFzZV9zdGFydGVkX2F0X21zGAIgASgDEhUKDXVwZGF0ZWRfYXRfbXMYAyABKAMSNQoIZW5xdWV1ZWQYBCABKAsyIS5hZ2VudHJlcGwudjEuTWVyZ2VTdGF0dXNFbnF1ZXVlZEgAEj4KDWJlZm9yZV9hY3Rpb24YBSABKAsyJS5hZ2VudHJlcGwudjEuTWVyZ2VTdGF0dXNCZWZvcmVBY3Rpb25IABJACg5jaGVycnlfcGlja2luZxgGIAEoCzImLmFnZW50cmVwbC52MS5NZXJnZVN0YXR1c0NoZXJyeVBpY2tpbmdIABIzCgd0ZXN0aW5nGAcgASgLMiAuYWdlbnRyZXBsLnYxLk1lcmdlU3RhdHVzVGVzdGluZ0gAEjUKCGNvbmZsaWN0GAggASgLMiEuYWdlbnRyZXBsLnYxLk1lcmdlU3RhdHVzQ29uZmxpY3RIABI8CgxhZnRlcl9hY3Rpb24YCSABKAsyJC5hZ2VudHJlcGwudjEuTWVyZ2VTdGF0dXNBZnRlckFjdGlvbkgAEjEKBm1lcmdlZBgKIAEoCzIfLmFnZW50cmVwbC52MS5NZXJnZVN0YXR1c01lcmdlZEgAEjEKBmZhaWxlZBgLIAEoCzIfLmFnZW50cmVwbC52MS5NZXJnZVN0YXR1c0ZhaWxlZEgAQgcKBXBoYXNlIjYKE01lcmdlU3RhdHVzRW5xdWV1ZWQSEAoIcG9zaXRpb24YASABKAUSDQoFZGVwdGgYAiABKAUiKQoXTWVyZ2VTdGF0dXNCZWZvcmVBY3Rpb24SDgoGcHJvbXB0GAEgASgJIncKGE1lcmdlU3RhdHVzQ2hlcnJ5UGlja2luZxIVCg1jb21taXRzX3RvdGFsGAEgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAIgASgFEhMKC2N1cnJlbnRfc2hhGAMgASgJEhcKD2N1cnJlbnRfc3ViamVjdBgEIAEoCSJxChJNZXJnZVN0YXR1c1Rlc3RpbmcSFQoNY29tbWl0c190b3RhbBgBIAEoBRIWCg5jb21taXRzX2xhbmRlZBgCIAEoBRITCgtjdXJyZW50X3NoYRgDIAEoCRIXCg9jdXJyZW50X3N1YmplY3QYBCABKAkieAoTTWVyZ2VTdGF0dXNDb25mbGljdBIWCg5jb25mbGljdGVkX3NoYRgBIAEoCRIaChJjb25mbGljdGVkX3N1YmplY3QYAiABKAkSFQoNY29tbWl0c190b3RhbBgDIAEoBRIWCg5jb21taXRzX2xhbmRlZBgEIAEoBSIoChZNZXJnZVN0YXR1c0FmdGVyQWN0aW9uEg4KBnByb21wdBgBIAEoCSJGChFNZXJnZVN0YXR1c01lcmdlZBIVCg1jb21taXRzX3RvdGFsGAEgASgFEhoKEmFmdGVyX2FjdGlvbl9lcnJvchgCIAEoCSKUAQoRTWVyZ2VTdGF0dXNGYWlsZWQSDQoFY2F1c2UYASABKAkSFQoNY29tbWl0c190b3RhbBgCIAEoBRIWCg5jb21taXRzX2xhbmRlZBgDIAEoBRITCgtmYWlsaW5nX3NoYRgEIAEoCRIXCg9mYWlsaW5nX3N1YmplY3QYBSABKAkSEwoLZmFpbGVkX2pzb24YBiABKAkiZgoQTWVyZ2VRdWV1ZVJvc3RlchIOCgZwYXVzZWQYASABKAgSFQoNdXBkYXRlZF9hdF9tcxgCIAEoAxIrCgVyZXBvcxgDIAMoCzIcLmFnZW50cmVwbC52MS5NZXJnZVJlcG9RdWV1ZSJSCg5NZXJnZVJlcG9RdWV1ZRIQCghyZXBvX2tleRgBIAEoCRIuCgdlbnRyaWVzGAIgAygLMh0uYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVFbnRyeSKrAgoPTWVyZ2VRdWV1ZUVudHJ5Eg4KBnJ1bl9pZBgBIAEoCRIRCgl3b3Jrc3BhY2UYAiABKAkSFgoOd29ya3NwYWNlX25hbWUYAyABKAkSFQoNc291cmNlX2JyYW5jaBgEIAEoCRI2CgdydW5uaW5nGAUgASgLMiMuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVIZWFkUnVubmluZ0gAEkMKDnBhdXNlZF93YWl0aW5nGAYgASgLMikuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVIZWFkUGF1c2VkV2FpdGluZ0gAEkEKDXRlcm1pbmFsX293ZWQYByABKAsyKC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZUhlYWRUZXJtaW5hbE93ZWRIAEIGCgRoZWFkIhcKFU1lcmdlUXVldWVIZWFkUnVubmluZyIdChtNZXJnZVF1ZXVlSGVhZFBhdXNlZFdhaXRpbmciHAoaTWVyZ2VRdWV1ZUhlYWRUZXJtaW5hbE93ZWQiwwEKEU1lcmdlRGVxdWV1ZU9mZmVyEhAKCG9mZmVyX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIUCgxyYWlzZWRfYXRfbXMYAyABKAMSNAoHd2FpdGluZxgEIAEoCzIhLmFnZW50cmVwbC52MS5NZXJnZURlcXVldWVXYWl0aW5nSAASNAoHcnVubmluZxgFIAEoCzIhLmFnZW50cmVwbC52MS5NZXJnZURlcXVldWVSdW5uaW5nSABCCgoIc3RhbmRpbmciRQoTTWVyZ2VEZXF1ZXVlV2FpdGluZxINCgVhaGVhZBgBIAEoBRIQCghwb3NpdGlvbhgCIAEoBRINCgVkZXB0aBgDIAEoBSJAChNNZXJnZURlcXVldWVSdW5uaW5nEikKBnN0YXR1cxgBIAEoCzIZLmFnZW50cmVwbC52MS5NZXJnZVN0YXR1cyIVChNNZXJnZURlcXVldWVDb25maXJtIhUKE01lcmdlRGVxdWV1ZURlY2xpbmUq8woKDlNlc3Npb25Db21tYW5kEh8KG1NFU1NJT05fQ09NTUFORF9VTlNQRUNJRklFRBAAEicKFVNFU1NJT05fQ09NTUFORF9DTEVBUhABGgySph0ICgYvY2xlYXISLQoXU0VTU0lPTl9DT01NQU5EX0NPTVBBQ1QQAhoQkqYdDAoIL2NvbXBhY3QQARIpChVTRVNTSU9OX0NPTU1BTkRfTU9ERUwQAxoOkqYdCgoGL21vZGVsEAESJQoUU0VTU0lPTl9DT01NQU5EX0NPU1QQBBoLkqYdBwoFL2Nvc3QSJwoVU0VTU0lPTl9DT01NQU5EX1VTQUdFEAUaDJKmHQgKBi91c2FnZRIpChZTRVNTSU9OX0NPTU1BTkRfU1RBVFVTEAYaDZKmHQkKBy9zdGF0dXMSKwoXU0VTU0lPTl9DT01NQU5EX0NPTlRFWFQQBxoOkqYdCgoIL2NvbnRleHQSKQoWU0VTU0lPTl9DT01NQU5EX0NPTkZJRxAIGg2Sph0JCgcvY29uZmlnEiUKFFNFU1NJT05fQ09NTUFORF9IRUxQEAkaC5KmHQcKBS9oZWxwEikKFlNFU1NJT05fQ09NTUFORF9ET0NUT1IQChoNkqYdCQoHL2RvY3RvchInChVTRVNTSU9OX0NPTU1BTkRfTE9HSU4QCxoMkqYdCAoGL2xvZ2luEikKFlNFU1NJT05fQ09NTUFORF9MT0dPVVQQDBoNkqYdCQoHL2xvZ291dBIpChZTRVNTSU9OX0NPTU1BTkRfTUVNT1JZEA0aDZKmHQkKBy9tZW1vcnkSMwobU0VTU0lPTl9DT01NQU5EX1BFUk1JU1NJT05TEA4aEpKmHQ4KDC9wZXJtaXNzaW9ucxIpChZTRVNTSU9OX0NPTU1BTkRfQUdFTlRTEA8aDZKmHQkKBy9hZ2VudHMSIwoTU0VTU0lPTl9DT01NQU5EX01DUBAQGgqSph0GCgQvbWNwEicKFVNFU1NJT05fQ09NTUFORF9IT09LUxARGgySph0ICgYvaG9va3MSNwocU0VTU0lPTl9DT01NQU5EX09VVFBVVF9TVFlMRRASGhWSph0RCg0vb3V0cHV0LXN0eWxlEAESNwodU0VTU0lPTl9DT01NQU5EX1JFTEVBU0VfTk9URVMQExoUkqYdEAoOL3JlbGVhc2Utbm90ZXMSJwoVU0VTU0lPTl9DT01NQU5EX1RPRE9TEBQaDJKmHQgKBi90b2RvcxIrChZTRVNTSU9OX0NPTU1BTkRfRVhQT1JUEBUaD5KmHQsKBy9leHBvcnQQARItChdTRVNTSU9OX0NPTU1BTkRfQUREX0RJUhAWGhCSph0MCggvYWRkLWRpchABEisKFlNFU1NJT05fQ09NTUFORF9SRVNVTUUQFxoPkqYdCwoHL3Jlc3VtZRABEiUKFFNFU1NJT05fQ09NTUFORF9FWElUEBgaC5KmHQcKBS9leGl0Ej0KIFNFU1NJT05fQ09NTUFORF9QUklWQUNZX1NFVFRJTkdTEBkaF5KmHRMKES9wcml2YWN5LXNldHRpbmdzEjEKGlNFU1NJT05fQ09NTUFORF9TVEFUVVNMSU5FEBoaEZKmHQ0KCy9zdGF0dXNsaW5lEjkKHlNFU1NJT05fQ09NTUFORF9URVJNSU5BTF9TRVRVUBAbGhWSph0RCg8vdGVybWluYWwtc2V0dXASIwoTU0VTU0lPTl9DT01NQU5EX1ZJTRAcGgqSph0GCgQvdmltEikKFlNFU1NJT05fQ09NTUFORF9SRVdJTkQQHRoNkqYdCQoHL3Jld2luZBIjChNTRVNTSU9OX0NPTU1BTkRfQlVHEB4aCpKmHQYKBC9idWcqtwEKD0NvbXBhY3Rpb25TY29wZRIgChxDT01QQUNUSU9OX1NDT1BFX1VOU1BFQ0lGSUVEEAASGAoUQ09NUEFDVElPTl9TQ09QRV9BTEwQARIeChpDT01QQUNUSU9OX1NDT1BFX1JFU1BPTlNFUxACEhwKGENPTVBBQ1RJT05fU0NPUEVfUFJPTVBUUxADEioKJkNPTVBBQ1RJT05fU0NPUEVfUFJPTVBUU19BTkRfUkVTUE9OU0VTEAQqXQoKUmVzdW1lTW9kZRIbChdSRVNVTUVfTU9ERV9VTlNQRUNJRklFRBAAEhgKFFJFU1VNRV9NT0RFX0NPTlRJTlVFEAESGAoUUkVTVU1FX01PREVfRVhQTElDSVQQAiqEAQoOQ2xpZW50TG9nTGV2ZWwSIAocQ0xJRU5UX0xPR19MRVZFTF9VTlNQRUNJRklFRBAAEhkKFUNMSUVOVF9MT0dfTEVWRUxfSU5GTxABEhkKFUNMSUVOVF9MT0dfTEVWRUxfV0FSThACEhoKFkNMSUVOVF9MT0dfTEVWRUxfRVJST1IQAzp3ChRzZXNzaW9uX2NvbW1hbmRfc3BlYxIhLmdvb2dsZS5wcm90b2J1Zi5FbnVtVmFsdWVPcHRpb25zGOLUAyABKAsyIC5hZ2VudHJlcGwudjEuU2Vzc2lvbkNvbW1hbmRTcGVjUhJzZXNzaW9uQ29tbWFuZFNwZWNCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_google_protobuf_descriptor, file_google_protobuf_struct, file_shim_v1_core]);
-
-/**
- * Everything about a session command that is a FACT rather than an event: how
- * it is spelled, and whether text after the name belongs to it.
- *
- * Carried as an enum-value OPTION below rather than as traffic, because no
- * frame carries these facts and every process needs the same answer to them —
- * the daemon to recognize a submitted prompt, the webapp to complete and to
- * label one. The three hand-written copies this replaces (the daemon's
- * recognition table, the webapp's SESSION_COMMANDS list, the webapp's
- * SESSION_COMMAND_LABELS table) had nothing comparing them, so they drifted:
- * each was correct on its own and none of them agreed.
- *
- * @generated from message agentrepl.v1.SessionCommandSpec
- */
-export type SessionCommandSpec = Message<"agentrepl.v1.SessionCommandSpec"> & {
-  /**
-   * The command as the user TYPES it, leading slash included — and also the
-   * form a reader is shown. One field for both so a corrected spelling cannot
-   * land in the recognizer while the webapp chip keeps rendering the old one.
-   *
-   * @generated from field: string literal = 1;
-   */
-  literal: string;
-
-  /**
-   * Whether text following the name is an ARGUMENT to this command rather
-   * than prose the user wrote.
-   *
-   * FALSE IS THE DEFAULT AND FALSE IS THE SAFE SIDE. A command that takes no
-   * argument is recognized only as an ENTIRE prompt, so "/status of the build"
-   * stays a prompt and keeps its user message. Marking a command that takes
-   * none as taking some is the one way this table can swallow something a user
-   * genuinely meant to say to the agent — an unrecoverable loss, since a
-   * suppressed prompt is never recovered later.
-   *
-   * @generated from field: bool takes_args = 2;
-   */
-  takesArgs: boolean;
-};
-
-/**
- * Describes the message agentrepl.v1.SessionCommandSpec.
- * Use `create(SessionCommandSpecSchema)` to create a new message.
- */
-export const SessionCommandSpecSchema: GenMessage<SessionCommandSpec> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 0);
-
-/**
- * The vendor conversation and request a vendor-side failure pertains to.
- *
- * This is CONTENT, not addressing: it is a set of facts a card may show so the
- * user can find the conversation or quote the request when asking for help.
- * Nothing routes on it and nothing compares it.
- *
- * @generated from message agentrepl.v1.VendorFailureContext
- */
-export type VendorFailureContext = Message<"agentrepl.v1.VendorFailureContext"> & {
-  /**
-   * The vendor conversation, verbatim. Empty when the failure happened before
-   * one existed.
-   *
-   * @generated from field: string claude_session_id = 1;
-   */
-  claudeSessionId: string;
-
-  /**
-   * The vendor's request correlation id, for quoting in a support report.
-   * Empty when the request never got one.
-   *
-   * @generated from field: string api_request_id = 2;
-   */
-  apiRequestId: string;
-
-  /**
-   * The vendor's message id, when the failure names a specific response.
-   *
-   * @generated from field: string api_message_id = 3;
-   */
-  apiMessageId: string;
-};
-
-/**
- * Describes the message agentrepl.v1.VendorFailureContext.
- * Use `create(VendorFailureContextSchema)` to create a new message.
- */
-export const VendorFailureContextSchema: GenMessage<VendorFailureContext> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 1);
-
-/**
- * WHAT failed. Exactly one arm is always set; an unset FailureKind is a
- * malformed frame and must be rejected rather than rendered as a generic
- * error.
- *
- * TWO PRODUCERS. The daemon mints every arm below 100 — it is the only thing
- * that can see the shim, the store or the vendor. A frontend mints the arms
- * from 100 up, and ONLY those: they are the failures of the frontend's own
- * machinery, which the daemon cannot observe. The split is by number so it
- * cannot drift, and neither producer may set the other's arms.
- *
- * @generated from message agentrepl.v1.FailureKind
- */
-export type FailureKind = Message<"agentrepl.v1.FailureKind"> & {
-  /**
-   * @generated from oneof agentrepl.v1.FailureKind.kind
-   */
-  kind: {
-    /**
-     * ---- MACHINERY failures: agent-repl's own plumbing did not work. Nothing about
-     * the account is implicated and no amount of waiting or re-authenticating
-     * helps. This side of the vocabulary resolves the workspace BLUE. ----
-     * The agent process is not connected.
-     *
-     * @generated from field: agentrepl.v1.FailureShimNotConnected shim_not_connected = 1;
-     */
-    value: FailureShimNotConnected;
-    case: "shimNotConnected";
-  } | {
-    /**
-     * The agent process received the request and refused it.
-     *
-     * @generated from field: agentrepl.v1.FailureShimRejected shim_rejected = 2;
-     */
-    value: FailureShimRejected;
-    case: "shimRejected";
-  } | {
-    /**
-     * The agent process never acknowledged the request within its window.
-     *
-     * @generated from field: agentrepl.v1.FailureShimAckTimeout shim_ack_timeout = 3;
-     */
-    value: FailureShimAckTimeout;
-    case: "shimAckTimeout";
-  } | {
-    /**
-     * The agent process speaks a different protocol version than the daemon.
-     *
-     * @generated from field: agentrepl.v1.FailureShimVersionMismatch shim_version_mismatch = 4;
-     */
-    value: FailureShimVersionMismatch;
-    case: "shimVersionMismatch";
-  } | {
-    /**
-     * The agent process's event stream went backwards.
-     *
-     * @generated from field: agentrepl.v1.FailureShimSeqRegression shim_seq_regression = 5;
-     */
-    value: FailureShimSeqRegression;
-    case: "shimSeqRegression";
-  } | {
-    /**
-     * No traffic is arriving from the agent process.
-     *
-     * @generated from field: agentrepl.v1.FailureShimDegraded shim_degraded = 6;
-     */
-    value: FailureShimDegraded;
-    case: "shimDegraded";
-  } | {
-    /**
-     * The agent process could not write to the store, so conversation is being dropped rather than persisted.
-     *
-     * @generated from field: agentrepl.v1.FailureShimStoreWriteRejected shim_store_write_rejected = 7;
-     */
-    value: FailureShimStoreWriteRejected;
-    case: "shimStoreWriteRejected";
-  } | {
-    /**
-     * The agent sdk query ended unexpectedly — the session is alive but the thing that drives it stopped.
-     *
-     * @generated from field: agentrepl.v1.FailureQueryTermination query_termination = 8;
-     */
-    value: FailureQueryTermination;
-    case: "queryTermination";
-  } | {
-    /**
-     * No agent process was ever started for this workspace, so there is nothing to talk to yet.
-     *
-     * @generated from field: agentrepl.v1.FailureShimNotSpawned shim_not_spawned = 9;
-     */
-    value: FailureShimNotSpawned;
-    case: "shimNotSpawned";
-  } | {
-    /**
-     * The agent process connected but never finished wiring up, so it is present without being usable.
-     *
-     * @generated from field: agentrepl.v1.FailureShimHandshakeIncomplete shim_handshake_incomplete = 10;
-     */
-    value: FailureShimHandshakeIncomplete;
-    case: "shimHandshakeIncomplete";
-  } | {
-    /**
-     * The agent process reported itself unhealthy — a self-diagnosis, not an inference from silence.
-     *
-     * @generated from field: agentrepl.v1.FailureShimUnhealthy shim_unhealthy = 11;
-     */
-    value: FailureShimUnhealthy;
-    case: "shimUnhealthy";
-  } | {
-    /**
-     * Bring-up did not finish connecting in time.
-     *
-     * @generated from field: agentrepl.v1.FailureSessionNotEstablished session_not_established = 12;
-     */
-    value: FailureSessionNotEstablished;
-    case: "sessionNotEstablished";
-  } | {
-    /**
-     * The command addressed something this workspace no longer runs.
-     *
-     * @generated from field: agentrepl.v1.FailureWorkspaceNotLive workspace_not_live = 13;
-     */
-    value: FailureWorkspaceNotLive;
-    case: "workspaceNotLive";
-  } | {
-    /**
-     * The workspace's session was deleted deliberately.
-     *
-     * @generated from field: agentrepl.v1.FailureSessionDeleted session_deleted = 14;
-     */
-    value: FailureSessionDeleted;
-    case: "sessionDeleted";
-  } | {
-    /**
-     * A new session took over this workspace, so the previous one was stopped.
-     *
-     * @generated from field: agentrepl.v1.FailureSessionSuperseded session_superseded = 15;
-     */
-    value: FailureSessionSuperseded;
-    case: "sessionSuperseded";
-  } | {
-    /**
-     * This view is behind: the workspace's live connection changed under it, and the replay it asked for would have come from a generation it never saw.
-     *
-     * @generated from field: agentrepl.v1.FailureReconnectSuperseded reconnect_superseded = 16;
-     */
-    value: FailureReconnectSuperseded;
-    case: "reconnectSuperseded";
-  } | {
-    /**
-     * The agent process exited.
-     *
-     * @generated from field: agentrepl.v1.FailureSessionShimDied session_shim_died = 17;
-     */
-    value: FailureSessionShimDied;
-    case: "sessionShimDied";
-  } | {
-    /**
-     * The session could not be started at all.
-     *
-     * @generated from field: agentrepl.v1.FailureSessionStartFailed session_start_failed = 18;
-     */
-    value: FailureSessionStartFailed;
-    case: "sessionStartFailed";
-  } | {
-    /**
-     * The vendor conversation could not be resumed without breaking continuity.
-     *
-     * @generated from field: agentrepl.v1.FailureSessionResumeFailed session_resume_failed = 19;
-     */
-    value: FailureSessionResumeFailed;
-    case: "sessionResumeFailed";
-  } | {
-    /**
-     * This workspace has a vendor conversation that could not be reached, and a blank one will not be started in its place.
-     *
-     * @generated from field: agentrepl.v1.FailureConversationUnresumable conversation_unresumable = 20;
-     */
-    value: FailureConversationUnresumable;
-    case: "conversationUnresumable";
-  } | {
-    /**
-     * The client asked for a resume mode the daemon no longer supports.
-     *
-     * @generated from field: agentrepl.v1.FailureResumeModeRetired resume_mode_retired = 21;
-     */
-    value: FailureResumeModeRetired;
-    case: "resumeModeRetired";
-  } | {
-    /**
-     * The session ended for a reason the daemon could not classify.
-     *
-     * @generated from field: agentrepl.v1.FailureSessionEndedUnclassified session_ended_unclassified = 22;
-     */
-    value: FailureSessionEndedUnclassified;
-    case: "sessionEndedUnclassified";
-  } | {
-    /**
-     * A history re-pull is already running, so a second one was refused.
-     *
-     * @generated from field: agentrepl.v1.FailureHistoryRepullInFlight history_repull_in_flight = 23;
-     */
-    value: FailureHistoryRepullInFlight;
-    case: "historyRepullInFlight";
-  } | {
-    /**
-     * The history re-pull ended before it reached the live window, so what is on screen has a gap in it.
-     *
-     * @generated from field: agentrepl.v1.FailureHistoryReplayTruncated history_replay_truncated = 24;
-     */
-    value: FailureHistoryReplayTruncated;
-    case: "historyReplayTruncated";
-  } | {
-    /**
-     * The stop could not be delivered, so the turn is still running.
-     *
-     * @generated from field: agentrepl.v1.FailureInterruptUndelivered interrupt_undelivered = 25;
-     */
-    value: FailureInterruptUndelivered;
-    case: "interruptUndelivered";
-  } | {
-    /**
-     * The queued prompt has no attached agent process yet, so it cannot run.
-     *
-     * @generated from field: agentrepl.v1.FailureQueueEntryUnwired queue_entry_unwired = 26;
-     */
-    value: FailureQueueEntryUnwired;
-    case: "queueEntryUnwired";
-  } | {
-    /**
-     * The queued prompt is waiting on a cache keep-alive response and cannot be forced ahead of it.
-     *
-     * @generated from field: agentrepl.v1.FailureQueueEntryKeepAliveHeld queue_entry_keep_alive_held = 27;
-     */
-    value: FailureQueueEntryKeepAliveHeld;
-    case: "queueEntryKeepAliveHeld";
-  } | {
-    /**
-     * The workspace is hibernated; a revival decision is required before prompts are accepted.
-     *
-     * @generated from field: agentrepl.v1.FailureSessionHibernated session_hibernated = 28;
-     */
-    value: FailureSessionHibernated;
-    case: "sessionHibernated";
-  } | {
-    /**
-     * A cache keep-alive window could not be closed, so new conversation is withheld until it is repaired.
-     *
-     * @generated from field: agentrepl.v1.FailureKeepAliveWindowUnclosed keep_alive_window_unclosed = 29;
-     */
-    value: FailureKeepAliveWindowUnclosed;
-    case: "keepAliveWindowUnclosed";
-  } | {
-    /**
-     * A cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation.
-     *
-     * @generated from field: agentrepl.v1.FailureKeepAliveWindowInverted keep_alive_window_inverted = 30;
-     */
-    value: FailureKeepAliveWindowInverted;
-    case: "keepAliveWindowInverted";
-  } | {
-    /**
-     * A compaction re-read the whole conversation at the uncached rate instead of from the prompt cache — the exact cost compaction exists to avoid.
-     *
-     * @generated from field: agentrepl.v1.FailureCompactionColdRead compaction_cold_read = 31;
-     */
-    value: FailureCompactionColdRead;
-    case: "compactionColdRead";
-  } | {
-    /**
-     * A browser log record arrived against a workspace state that had already moved on, so it was not recorded.
-     *
-     * @generated from field: agentrepl.v1.FailureClientLogIdentityStale client_log_identity_stale = 32;
-     */
-    value: FailureClientLogIdentityStale;
-    case: "clientLogIdentityStale";
-  } | {
-    /**
-     * Agent-repl's own machinery failed in a way it could not classify.
-     *
-     * @generated from field: agentrepl.v1.FailureInternalUnclassified internal_unclassified = 33;
-     */
-    value: FailureInternalUnclassified;
-    case: "internalUnclassified";
-  } | {
-    /**
-     * ---- VENDOR failures: the SDK or the vendor backend refused or concluded the
-     * work. Releasing it needs a human or the vendor, never a retry. This side
-     * of the vocabulary resolves the workspace PURPLE. ----
-     * Authentication failed.
-     *
-     * @generated from field: agentrepl.v1.FailureApiAuthenticationFailed api_authentication_failed = 34;
-     */
-    value: FailureApiAuthenticationFailed;
-    case: "apiAuthenticationFailed";
-  } | {
-    /**
-     * A billing problem stopped the request.
-     *
-     * @generated from field: agentrepl.v1.FailureApiBillingError api_billing_error = 35;
-     */
-    value: FailureApiBillingError;
-    case: "apiBillingError";
-  } | {
-    /**
-     * The account is rate limited.
-     *
-     * @generated from field: agentrepl.v1.FailureApiRateLimit api_rate_limit = 36;
-     */
-    value: FailureApiRateLimit;
-    case: "apiRateLimit";
-  } | {
-    /**
-     * The vendor rejected the request as invalid.
-     *
-     * @generated from field: agentrepl.v1.FailureApiInvalidRequest api_invalid_request = 37;
-     */
-    value: FailureApiInvalidRequest;
-    case: "apiInvalidRequest";
-  } | {
-    /**
-     * The vendor returned a server error.
-     *
-     * @generated from field: agentrepl.v1.FailureApiServerError api_server_error = 38;
-     */
-    value: FailureApiServerError;
-    case: "apiServerError";
-  } | {
-    /**
-     * The vendor is overloaded.
-     *
-     * @generated from field: agentrepl.v1.FailureApiOverloaded api_overloaded = 39;
-     */
-    value: FailureApiOverloaded;
-    case: "apiOverloaded";
-  } | {
-    /**
-     * This organization is not allowed to use the api.
-     *
-     * @generated from field: agentrepl.v1.FailureApiOAuthOrgNotAllowed api_oauth_org_not_allowed = 40;
-     */
-    value: FailureApiOAuthOrgNotAllowed;
-    case: "apiOauthOrgNotAllowed";
-  } | {
-    /**
-     * The requested model does not exist.
-     *
-     * @generated from field: agentrepl.v1.FailureApiModelNotFound api_model_not_found = 41;
-     */
-    value: FailureApiModelNotFound;
-    case: "apiModelNotFound";
-  } | {
-    /**
-     * The network never reached the vendor.
-     *
-     * @generated from field: agentrepl.v1.FailureApiNetworkDown api_network_down = 42;
-     */
-    value: FailureApiNetworkDown;
-    case: "apiNetworkDown";
-  } | {
-    /**
-     * The vendor request failed for a reason with no more specific kind.
-     *
-     * @generated from field: agentrepl.v1.FailureApiRequestFailed api_request_failed = 43;
-     */
-    value: FailureApiRequestFailed;
-    case: "apiRequestFailed";
-  } | {
-    /**
-     * The vendor failed for a reason the daemon could not classify.
-     *
-     * @generated from field: agentrepl.v1.FailureApiUnknown api_unknown = 44;
-     */
-    value: FailureApiUnknown;
-    case: "apiUnknown";
-  } | {
-    /**
-     * The response hit the output-token ceiling.
-     *
-     * @generated from field: agentrepl.v1.FailureApiMaxOutputTokens api_max_output_tokens = 45;
-     */
-    value: FailureApiMaxOutputTokens;
-    case: "apiMaxOutputTokens";
-  } | {
-    /**
-     * The turn hit its maximum-turns limit.
-     *
-     * @generated from field: agentrepl.v1.FailureApiMaxTurns api_max_turns = 46;
-     */
-    value: FailureApiMaxTurns;
-    case: "apiMaxTurns";
-  } | {
-    /**
-     * The turn hit its budget limit.
-     *
-     * @generated from field: agentrepl.v1.FailureApiMaxBudget api_max_budget = 47;
-     */
-    value: FailureApiMaxBudget;
-    case: "apiMaxBudget";
-  } | {
-    /**
-     * The turn aborted during execution.
-     *
-     * @generated from field: agentrepl.v1.FailureApiExecutionError api_execution_error = 48;
-     */
-    value: FailureApiExecutionError;
-    case: "apiExecutionError";
-  } | {
-    /**
-     * The model refused the request.
-     *
-     * @generated from field: agentrepl.v1.FailureApiRefusal api_refusal = 49;
-     */
-    value: FailureApiRefusal;
-    case: "apiRefusal";
-  } | {
-    /**
-     * The turn ended abnormally for a reason with no more specific kind.
-     *
-     * @generated from field: agentrepl.v1.FailureApiTurnFailed api_turn_failed = 50;
-     */
-    value: FailureApiTurnFailed;
-    case: "apiTurnFailed";
-  } | {
-    /**
-     * ---- MACHINERY, continued. ----
-     * The daemon refused a user prompt because the workspace's merge machinery holds the session.
-     *
-     * @generated from field: agentrepl.v1.FailurePromptRefusedByMergeState prompt_refused_by_merge_state = 51;
-     */
-    value: FailurePromptRefusedByMergeState;
-    case: "promptRefusedByMergeState";
-  } | {
-    /**
-     * The queued prompt is waiting behind a context cut, which is never interrupted, so it cannot be forced ahead of it.
-     *
-     * @generated from field: agentrepl.v1.FailureQueueEntryUninterruptibleTurn queue_entry_uninterruptible_turn = 52;
-     */
-    value: FailureQueueEntryUninterruptibleTurn;
-    case: "queueEntryUninterruptibleTurn";
-  } | {
-    /**
-     * A turn stood bound with nothing driving it, so the daemon closed it rather than leaving the workspace thinking forever.
-     *
-     * @generated from field: agentrepl.v1.FailureTurnUndriven turn_undriven = 53;
-     */
-    value: FailureTurnUndriven;
-    case: "turnUndriven";
-  } | {
-    /**
-     * The replay mark the client asked from counts in a store seq space the vendor session retired, so no delta above it exists and the client must re-anchor from the conversation's tail.
-     *
-     * @generated from field: agentrepl.v1.FailureReplayMarkRetired replay_mark_retired = 54;
-     */
-    value: FailureReplayMarkRetired;
-    case: "replayMarkRetired";
-  } | {
-    /**
-     * ---- CLIENT-LOCAL failures: the one part of this vocabulary a frontend
-     * mints itself. See the note on FailureKind. All resolve BLUE, because a
-     * frontend can only ever observe its own machinery failing.
-     * The daemon never sets one of these arms.
-     *
-     * @generated from field: agentrepl.v1.FailureDaemonUnreachable daemon_unreachable = 55;
-     */
-    value: FailureDaemonUnreachable;
-    case: "daemonUnreachable";
-  } | {
-    /**
-     * @generated from field: agentrepl.v1.FailureWorkspaceGone workspace_gone = 56;
-     */
-    value: FailureWorkspaceGone;
-    case: "workspaceGone";
-  } | {
-    /**
-     * @generated from field: agentrepl.v1.FailureBootFailed boot_failed = 57;
-     */
-    value: FailureBootFailed;
-    case: "bootFailed";
-  } | {
-    /**
-     * @generated from field: agentrepl.v1.FailureControlPlaneFailed control_plane_failed = 58;
-     */
-    value: FailureControlPlaneFailed;
-    case: "controlPlaneFailed";
-  } | {
-    /**
-     * @generated from field: agentrepl.v1.FailureFrameUndecodable frame_undecodable = 59;
-     */
-    value: FailureFrameUndecodable;
-    case: "frameUndecodable";
-  } | {
-    /**
-     * @generated from field: agentrepl.v1.FailureStaleBundle stale_bundle = 60;
-     */
-    value: FailureStaleBundle;
-    case: "staleBundle";
-  } | {
-    /**
-     * @generated from field: agentrepl.v1.FailureCommandUnsent command_unsent = 61;
-     */
-    value: FailureCommandUnsent;
-    case: "commandUnsent";
-  } | {
-    /**
-     * @generated from field: agentrepl.v1.FailureCommandRejectionUnclassified command_rejection_unclassified = 62;
-     */
-    value: FailureCommandRejectionUnclassified;
-    case: "commandRejectionUnclassified";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message agentrepl.v1.FailureKind.
- * Use `create(FailureKindSchema)` to create a new message.
- */
-export const FailureKindSchema: GenMessage<FailureKind> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 2);
+  fileDesc("ChlhZ2VudHJlcGwvdjEvc2hhcmVkLnByb3RvEgxhZ2VudHJlcGwudjEiGQoXRmFpbHVyZVNoaW1Ob3RDb25uZWN0ZWQiOQoTRmFpbHVyZVNoaW1SZWplY3RlZBISCgpyZXF1ZXN0X2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSI+ChVGYWlsdXJlU2hpbUFja1RpbWVvdXQSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl3YWl0ZWRfbXMYAiABKAMiFwoVRmFpbHVyZVNoaW1Ob3RTcGF3bmVkIkMKHkZhaWx1cmVTaGltSGFuZHNoYWtlSW5jb21wbGV0ZRISCgpyZXF1ZXN0X2lkGAEgASgJEg0KBWNhdXNlGAIgASgJIk0KFEZhaWx1cmVTaGltVW5oZWFsdGh5EhIKCnJlcXVlc3RfaWQYASABKAkSEQoJY29tcG9uZW50GAIgASgJEg4KBnJlYXNvbhgDIAEoCSItChxGYWlsdXJlU2Vzc2lvbk5vdEVzdGFibGlzaGVkEg0KBWNhdXNlGAEgASgJIhkKF0ZhaWx1cmVXb3Jrc3BhY2VOb3RMaXZlIiwKGkZhaWx1cmVSZWNvbm5lY3RTdXBlcnNlZGVkEg4KBnJlbWVkeRgBIAEoCSJsCh5GYWlsdXJlQ29udmVyc2F0aW9uVW5yZXN1bWFibGUSGQoRY2xhdWRlX3Nlc3Npb25faWQYASABKAkSCwoDY3dkGAIgASgJEhIKCmNvbmZpZ19kaXIYAyABKAkSDgoGcmVhc29uGAQgASgJIhoKGEZhaWx1cmVSZXN1bWVNb2RlUmV0aXJlZCIeChxGYWlsdXJlSGlzdG9yeVJlcHVsbEluRmxpZ2h0IkMKGEZhaWx1cmVSZXBsYXlNYXJrUmV0aXJlZBIQCghmcm9tX3NlcRgBIAEoBBIVCg1saXZlX2xhc3Rfc2VxGAIgASgEIh0KG0ZhaWx1cmVJbnRlcnJ1cHRVbmRlbGl2ZXJlZCI8ChhGYWlsdXJlUXVldWVFbnRyeVVud2lyZWQSEAoIZW50cnlfaWQYASABKAkSDgoGcmVhc29uGAIgASgJIk4KHkZhaWx1cmVRdWV1ZUVudHJ5S2VlcEFsaXZlSGVsZBIQCghlbnRyeV9pZBgBIAEoCRIaChJrZWVwX2FsaXZlX3R1cm5faWQYAiABKAkiagokRmFpbHVyZVF1ZXVlRW50cnlVbmludGVycnVwdGlibGVUdXJuEhAKCGVudHJ5X2lkGAEgASgJEjAKB2NvbW1hbmQYAiABKA4yHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbW1hbmQiLAoYRmFpbHVyZVNlc3Npb25IaWJlcm5hdGVkEhAKCHNpbmNlX21zGAEgASgDIh8KHUZhaWx1cmVDbGllbnRMb2dJZGVudGl0eVN0YWxlIjEKIEZhaWx1cmVQcm9tcHRSZWZ1c2VkQnlNZXJnZVN0YXRlEg0KBXN0YXRlGAEgASgJIqwBChRDbGllbnRDb21tYW5kRmFpbHVyZRI0CgZ1bnNlbnQYASABKAsyIi5hZ2VudHJlcGwudjEuRmFpbHVyZUNvbW1hbmRVbnNlbnRIABJTChZyZWplY3Rpb25fdW5jbGFzc2lmaWVkGAIgASgLMjEuYWdlbnRyZXBsLnYxLkZhaWx1cmVDb21tYW5kUmVqZWN0aW9uVW5jbGFzc2lmaWVkSABCCQoHZmFpbHVyZSInChRGYWlsdXJlQ29tbWFuZFVuc2VudBIPCgdjb21tYW5kGAEgASgJIk0KI0ZhaWx1cmVDb21tYW5kUmVqZWN0aW9uVW5jbGFzc2lmaWVkEg8KB2NvbW1hbmQYASABKAkSFQoNZGFlbW9uX3JlYXNvbhgCIAEoCSIzCh5SZWZ1c2FsV29ya3NwYWNlS2V5Tm90QWJzb2x1dGUSEQoJd29ya3NwYWNlGAEgASgJIi4KGFJlZnVzYWxEZXBlbmRlbmN5VW53aXJlZBISCgpkZXBlbmRlbmN5GAEgASgJIiwKG1JlZnVzYWxSZXF1aXJlZEZpZWxkTWlzc2luZxINCgVmaWVsZBgBIAEoCSIzChpSZWZ1c2FsUHJvbXB0T3JpZ2luSW52YWxpZBIVCg1wcm9tcHRfb3JpZ2luGAEgASgFIkMKIlJlZnVzYWxNZXJnZURlcXVldWVPZmZlclVucmFpc2FibGUSDgoGcnVuX2lkGAEgASgJEg0KBWNhdXNlGAIgASgJIiAKHlJlZnVzYWxNZXJnZURlcXVldWVPZmZlckFic2VudCI9Ch1SZWZ1c2FsTWVyZ2VEZXF1ZXVlT2ZmZXJTdGFsZRIcChRvdXRzdGFuZGluZ19vZmZlcl9pZBgBIAEoCSIvCh5SZWZ1c2FsTWVyZ2VEZXF1ZXVlQ2xlYXJGYWlsZWQSDQoFY2F1c2UYASABKAkiKgoZUmVmdXNhbE1lcmdlRGVxdWV1ZUZhaWxlZBINCgVjYXVzZRgBIAEoCSIgCh5SZWZ1c2FsTm9EZXRhY2hlZEFnZW50c1J1bm5pbmciMgogUmVmdXNhbERldGFjaGVkQ2FuY2VsVW5zdXBwb3J0ZWQSDgoGZGV0YWlsGAEgASgJIiMKIVJlZnVzYWxEZXRhY2hlZENhbmNlbE91dGNvbWVVbnNldCIvCh5SZWZ1c2FsTWVyZ2VHZW9tZXRyeVVucmVhZGFibGUSDQoFY2F1c2UYASABKAkiMwoeUmVmdXNhbE1lcmdlR2VvbWV0cnlVbnJlY29yZGVkEhEKCXdvcmtzcGFjZRgBIAEoCSI9Ch1SZWZ1c2FsTWVyZ2VTdGF0ZVVucmVjb3JkYWJsZRINCgVwaGFzZRgBIAEoCRINCgVjYXVzZRgCIAEoCSIsChtSZWZ1c2FsTWVyZ2VFbnF1ZXVlUmVqZWN0ZWQSDQoFY2F1c2UYASABKAkiKgoZUmVmdXNhbE1lcmdlQWJhbmRvbkZhaWxlZBINCgVjYXVzZRgBIAEoCSIsChtSZWZ1c2FsV29ya3NwYWNlQ2xvc2VGYWlsZWQSDQoFY2F1c2UYASABKAkiKwoaUmVmdXNhbFdvcmtzcGFjZU9wZW5GYWlsZWQSDQoFY2F1c2UYASABKAkiIAoeUmVmdXNhbENyZWF0ZVdvcmtzcGFjZU92ZXJXaXJlIiwKGlJlZnVzYWxVbmtub3duV29ya3NwYWNlSm9iEg4KBmpvYl9pZBgBIAEoCSItChhSZWZ1c2FsVW5rbm93bkhvc3RBY3Rpb24SEQoJYWN0aW9uX2lkGAEgASgJIhkKF1JlZnVzYWxNb2RlbFVuY29uZmlybWVkIlMKGlJlZnVzYWxSb3N0ZXJSZXZpc2lvblN0YWxlEhoKEnB1Ymxpc2hlZF9yZXZpc2lvbhgBIAEoBBIZChFyZXRhaW5lZF9yZXZpc2lvbhgCIAEoBCI2Ch9SZWZ1c2FsU2h1dGRvd25BbHJlYWR5U2NoZWR1bGVkEhMKC3NjaGVkdWxlX2lkGAEgASgJIjIKFlJlZnVzYWxTY2hlZHVsZUlkU3RhbGUSGAoQbGl2ZV9zY2hlZHVsZV9pZBgBIAEoCSIzCiFSZWZ1c2FsSGliZXJuYXRlQmxvY2tlZEJ5TGl2ZVdvcmsSDgoGcmVhc29uGAEgASgJIhwKGlJlZnVzYWxSZXZpdmFsTW9kZVVuc3RhdGVkIiUKFFJlZnVzYWxSZXZpdmFsRmFpbGVkEg0KBWNhdXNlGAEgASgJIiwKG1JlZnVzYWxNZXJnZUF4aXNVbmNsZWFyYWJsZRINCgVjYXVzZRgBIAEoCSJBChxSZWZ1c2FsU2Vzc2lvblRlYXJkb3duRmFpbGVkEhIKCnNlc3Npb25faWQYASABKAkSDQoFY2F1c2UYAiABKAkiRgopUmVmdXNhbEV4cGxpY2l0Q29udmVyc2F0aW9uVW5kZXJXcm9uZ01vZGUSGQoRY2xhdWRlX3Nlc3Npb25faWQYASABKAkiLwoYUmVmdXNhbFJlc3VtZU1vZGVVbmtub3duEhMKC3Jlc3VtZV9tb2RlGAEgASgFIjgKGlJlZnVzYWxBY2NvdW50VW5yZXNvbHZhYmxlEgsKA2N3ZBgBIAEoCRINCgVjYXVzZRgCIAEoCSI2ChZSZWZ1c2FsTW9kZWxOb3RBcHBsaWVkEg0KBW1vZGVsGAEgASgJEg0KBWNhdXNlGAIgASgJIl4KJlJlZnVzYWxFc3RhYmxpc2htZW50UHJvYmVNaXNhdHRyaWJ1dGVkEhsKE2Fuc3dlcmVkX3JlcXVlc3RfaWQYASABKAkSFwoPd2FudF9yZXF1ZXN0X2lkGAIgASgJIh4KHFJlZnVzYWxSZWFkZXJJZGVudGl0eU1pc3NpbmciEwoRUmVmdXNhbFBhZ2VBYnNlbnQiHAoaUmVmdXNhbFJlYWRlckhhc05vUG9zaXRpb24iJAoTUmVmdXNhbFJlcGxheUZhaWxlZBINCgVjYXVzZRgBIAEoCSIsChhSZWZ1c2FsUXVldWVFbnRyeVVua25vd24SEAoIZW50cnlfaWQYASABKAkiLwodUmVmdXNhbE1lcmdlUnVuTm90T3V0c3RhbmRpbmcSDgoGcnVuX2lkGAEgASgJIi4KHFJlZnVzYWxNZXJnZVJ1bklzUnVubmluZ0hlYWQSDgoGcnVuX2lkGAEgASgJIi4KHVJlZnVzYWxDbGllbnRMb2dSZWNvcmRJbnZhbGlkEg0KBWNhdXNlGAEgASgJIiwKG1JlZnVzYWxDbGllbnRMb2dVbnBlcnNpc3RlZBINCgVjYXVzZRgBIAEoCSLdAQoRSGliZXJuYXRpb25EZXRhaWwSEAoIc2luY2VfbXMYASABKAMSOgoLaWRsZV9jdXRvZmYYAiABKAsyIy5hZ2VudHJlcGwudjEuSGliZXJuYXRpb25JZGxlQ3V0b2ZmSAASMQoGZm9yY2VkGAMgASgLMh8uYWdlbnRyZXBsLnYxLkhpYmVybmF0aW9uRm9yY2VkSAASPgoNY2FjaGVfZXhwaXJlZBgEIAEoCzIlLmFnZW50cmVwbC52MS5IaWJlcm5hdGlvbkNhY2hlRXhwaXJlZEgAQgcKBWNhdXNlIioKFUhpYmVybmF0aW9uSWRsZUN1dG9mZhIRCgljdXRvZmZfbXMYASABKAMiEwoRSGliZXJuYXRpb25Gb3JjZWQiPQoXSGliZXJuYXRpb25DYWNoZUV4cGlyZWQSEgoKZWxhcHNlZF9tcxgBIAEoAxIOCgZ0dGxfbXMYAiABKAMiQgoSUmV2aXZlQ29tcGFjdEZpcnN0EiwKBXNjb3BlGAEgASgOMh0uYWdlbnRyZXBsLnYxLkNvbXBhY3Rpb25TY29wZSIOCgxSZXZpdmVEaXJlY3QiDQoLUmV2aXZlQ2xlYXIiqwEKEVdvcmtzcGFjZUdhdGVWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRINCgVmZW5jZRgCIAEoCRIvCgRvcGVuGAMgASgLMh8uYWdlbnRyZXBsLnYxLldvcmtzcGFjZUdhdGVPcGVuSAASOwoKaGliZXJuYXRlZBgEIAEoCzIlLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VHYXRlSGliZXJuYXRlZEgAQgYKBGdhdGUiEwoRV29ya3NwYWNlR2F0ZU9wZW4iSgoXV29ya3NwYWNlR2F0ZUhpYmVybmF0ZWQSLwoGZGV0YWlsGAEgASgLMh8uYWdlbnRyZXBsLnYxLkhpYmVybmF0aW9uRGV0YWlsIvgCChJXb3Jrc3BhY2VBdmFpbGFibGUSDgoGam9iX2lkGAEgASgJEhIKCmZpbmFsX25hbWUYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCRIOCgZicmFuY2gYBCABKAkSEAoIZ2l0X3Jvb3QYBSABKAkSEwoLYmFzZV9jb21taXQYBiABKAkSGAoQc291cmNlX3dvcmtzcGFjZRgHIAEoCRISCgpzb3VyY2VfZGlyGAggASgJEhEKCWZvcmtfZnJvbRgJIAEoCRIXCg9mb3JrX3Nlc3Npb25faWQYCiABKAkSEgoKc2Vzc2lvbl9pZBgLIAEoCRIQCghwcmlvcml0eRgMIAEoCRINCgVtb2RlbBgNIAEoCRIdChVpbml0aWFsX3Byb21wdF9xdWV1ZWQYDiABKAgSEgoKY29uZmlnX2RpchgPIAEoCRIXCg9wZXJtaXNzaW9uX21vZGUYECABKAkSFQoNYWxsb3dfdW5nYXRlZBgRIAEoCCKaBQoKSG9zdEFjdGlvbhIRCglhY3Rpb25faWQYASABKAkSPQoQc3dpdGNoX3dvcmtzcGFjZRgCIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0U3dpdGNoV29ya3NwYWNlSAASQgoTc2V0X3JlcG9zaXRvcnlfZm9sZBgDIAEoCzIjLmFnZW50cmVwbC52MS5Ib3N0U2V0UmVwb3NpdG9yeUZvbGRIABI8ChBzZXRfc2lkZWJhcl92aWV3GAQgASgLMiAuYWdlbnRyZXBsLnYxLkhvc3RTZXRTaWRlYmFyVmlld0gAEjMKC3Rhc2tfY3JlYXRlGAUgASgLMhwuYWdlbnRyZXBsLnYxLkhvc3RUYXNrQ3JlYXRlSAASNgoQdGFza190b2dnbGVfZG9uZRgGIAEoCzIaLmFnZW50cmVwbC52MS5Ib3N0VGFza0J5SWRIABIvCgl0YXNrX29wZW4YByABKAsyGi5hZ2VudHJlcGwudjEuSG9zdFRhc2tCeUlkSAASOAoSdGFza19hZGRfd29ya3NwYWNlGAggASgLMhouYWdlbnRyZXBsLnYxLkhvc3RUYXNrQnlJZEgAEjkKDmxlZ2FjeV9jb21tYW5kGAkgASgLMh8uYWdlbnRyZXBsLnYxLkhvc3RMZWdhY3lDb21tYW5kSAASSgoXd29ya3NwYWNlX2NyZWF0ZV9mYWlsZWQYCiABKAsyJy5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZUNyZWF0ZUZhaWxlZEgAEk8KGmJvb3Rfc3dlZXBfc2Vzc2lvbl91bndpcmVkGAsgASgLMikuYWdlbnRyZXBsLnYxLkhvc3RCb290U3dlZXBTZXNzaW9uVW53aXJlZEgAQggKBmFjdGlvbiJUChtIb3N0Qm9vdFN3ZWVwU2Vzc2lvblVud2lyZWQSEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGcmVhc29uGAMgASgJIlIKGUhvc3RXb3Jrc3BhY2VDcmVhdGVGYWlsZWQSDgoGam9iX2lkGAEgASgJEhYKDnJlcXVlc3RlZF9uYW1lGAIgASgJEg0KBWVycm9yGAMgASgJIiIKE0hvc3RTd2l0Y2hXb3Jrc3BhY2USCwoDZGlyGAEgASgJIjkKFUhvc3RTZXRSZXBvc2l0b3J5Rm9sZBIQCghyZXBvX2tleRgBIAEoCRIOCgZmb2xkZWQYAiABKAgiIgoSSG9zdFNldFNpZGViYXJWaWV3EgwKBHZpZXcYASABKAkiEAoOSG9zdFRhc2tDcmVhdGUiGgoMSG9zdFRhc2tCeUlkEgoKAmlkGAEgASgJIksKEUhvc3RMZWdhY3lDb21tYW5kEgwKBHR5cGUYASABKAkSKAoHcGF5bG9hZBgCIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QijwEKFFNodXRkb3duU2NoZWR1bGVWaWV3EjIKBGlkbGUYASABKAsyIi5hZ2VudHJlcGwudjEuU2h1dGRvd25TY2hlZHVsZUlkbGVIABI6CghkcmFpbmluZxgCIAEoCzImLmFnZW50cmVwbC52MS5TaHV0ZG93blNjaGVkdWxlRHJhaW5pbmdIAEIHCgVzdGF0ZSIWChRTaHV0ZG93blNjaGVkdWxlSWRsZSKWAQoYU2h1dGRvd25TY2hlZHVsZURyYWluaW5nEhMKC3NjaGVkdWxlX2lkGAEgASgJEhcKD3NjaGVkdWxlZF9hdF9tcxgCIAEoAxINCgVjYXVzZRgDIAEoCRISCgpzdG9wX3NoaW1zGAQgASgIEikKBWhvbGRzGAUgAygLMhouYWdlbnRyZXBsLnYxLlNodXRkb3duSG9sZCKTAQoMU2h1dGRvd25Ib2xkEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEiwKBHR1cm4YAyABKAsyHi5hZ2VudHJlcGwudjEuU2h1dGRvd25Ib2xkVHVybhIuCgV0YXNrcxgEIAEoCzIfLmFnZW50cmVwbC52MS5TaHV0ZG93bkhvbGRUYXNrcyIjChBTaHV0ZG93bkhvbGRUdXJuEg8KB3R1cm5faWQYASABKAkiIgoRU2h1dGRvd25Ib2xkVGFza3MSDQoFY291bnQYASABKAUicQoSUmVzdGFydFBlbmRpbmdWaWV3Eg0KBWNhdXNlGAEgASgJEh8KF2V4cGVjdGVkX291dGFnZV9zZWNvbmRzGAIgASgFEhIKCnN0b3Bfc2hpbXMYAyABKAgSFwoPYW5ub3VuY2VkX2F0X21zGAQgASgDIqMECgtNZXJnZVN0YXR1cxIOCgZydW5faWQYASABKAkSGwoTcGhhc2Vfc3RhcnRlZF9hdF9tcxgCIAEoAxIVCg11cGRhdGVkX2F0X21zGAMgASgDEjUKCGVucXVldWVkGAQgASgLMiEuYWdlbnRyZXBsLnYxLk1lcmdlU3RhdHVzRW5xdWV1ZWRIABI+Cg1iZWZvcmVfYWN0aW9uGAUgASgLMiUuYWdlbnRyZXBsLnYxLk1lcmdlU3RhdHVzQmVmb3JlQWN0aW9uSAASQAoOY2hlcnJ5X3BpY2tpbmcYBiABKAsyJi5hZ2VudHJlcGwudjEuTWVyZ2VTdGF0dXNDaGVycnlQaWNraW5nSAASMwoHdGVzdGluZxgHIAEoCzIgLmFnZW50cmVwbC52MS5NZXJnZVN0YXR1c1Rlc3RpbmdIABI1Cghjb25mbGljdBgIIAEoCzIhLmFnZW50cmVwbC52MS5NZXJnZVN0YXR1c0NvbmZsaWN0SAASPAoMYWZ0ZXJfYWN0aW9uGAkgASgLMiQuYWdlbnRyZXBsLnYxLk1lcmdlU3RhdHVzQWZ0ZXJBY3Rpb25IABIxCgZtZXJnZWQYCiABKAsyHy5hZ2VudHJlcGwudjEuTWVyZ2VTdGF0dXNNZXJnZWRIABIxCgZmYWlsZWQYCyABKAsyHy5hZ2VudHJlcGwudjEuTWVyZ2VTdGF0dXNGYWlsZWRIAEIHCgVwaGFzZSI2ChNNZXJnZVN0YXR1c0VucXVldWVkEhAKCHBvc2l0aW9uGAEgASgFEg0KBWRlcHRoGAIgASgFIikKF01lcmdlU3RhdHVzQmVmb3JlQWN0aW9uEg4KBnByb21wdBgBIAEoCSJ3ChhNZXJnZVN0YXR1c0NoZXJyeVBpY2tpbmcSFQoNY29tbWl0c190b3RhbBgBIAEoBRIWCg5jb21taXRzX2xhbmRlZBgCIAEoBRITCgtjdXJyZW50X3NoYRgDIAEoCRIXCg9jdXJyZW50X3N1YmplY3QYBCABKAkicQoSTWVyZ2VTdGF0dXNUZXN0aW5nEhUKDWNvbW1pdHNfdG90YWwYASABKAUSFgoOY29tbWl0c19sYW5kZWQYAiABKAUSEwoLY3VycmVudF9zaGEYAyABKAkSFwoPY3VycmVudF9zdWJqZWN0GAQgASgJIngKE01lcmdlU3RhdHVzQ29uZmxpY3QSFgoOY29uZmxpY3RlZF9zaGEYASABKAkSGgoSY29uZmxpY3RlZF9zdWJqZWN0GAIgASgJEhUKDWNvbW1pdHNfdG90YWwYAyABKAUSFgoOY29tbWl0c19sYW5kZWQYBCABKAUiKAoWTWVyZ2VTdGF0dXNBZnRlckFjdGlvbhIOCgZwcm9tcHQYASABKAkiRgoRTWVyZ2VTdGF0dXNNZXJnZWQSFQoNY29tbWl0c190b3RhbBgBIAEoBRIaChJhZnRlcl9hY3Rpb25fZXJyb3IYAiABKAkilAEKEU1lcmdlU3RhdHVzRmFpbGVkEg0KBWNhdXNlGAEgASgJEhUKDWNvbW1pdHNfdG90YWwYAiABKAUSFgoOY29tbWl0c19sYW5kZWQYAyABKAUSEwoLZmFpbGluZ19zaGEYBCABKAkSFwoPZmFpbGluZ19zdWJqZWN0GAUgASgJEhMKC2ZhaWxlZF9qc29uGAYgASgJImYKEE1lcmdlUXVldWVSb3N0ZXISDgoGcGF1c2VkGAEgASgIEhUKDXVwZGF0ZWRfYXRfbXMYAiABKAMSKwoFcmVwb3MYAyADKAsyHC5hZ2VudHJlcGwudjEuTWVyZ2VSZXBvUXVldWUiUgoOTWVyZ2VSZXBvUXVldWUSEAoIcmVwb19rZXkYASABKAkSLgoHZW50cmllcxgCIAMoCzIdLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlRW50cnkiqwIKD01lcmdlUXVldWVFbnRyeRIOCgZydW5faWQYASABKAkSEQoJd29ya3NwYWNlGAIgASgJEhYKDndvcmtzcGFjZV9uYW1lGAMgASgJEhUKDXNvdXJjZV9icmFuY2gYBCABKAkSNgoHcnVubmluZxgFIAEoCzIjLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlSGVhZFJ1bm5pbmdIABJDCg5wYXVzZWRfd2FpdGluZxgGIAEoCzIpLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlSGVhZFBhdXNlZFdhaXRpbmdIABJBCg10ZXJtaW5hbF9vd2VkGAcgASgLMiguYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVIZWFkVGVybWluYWxPd2VkSABCBgoEaGVhZCIXChVNZXJnZVF1ZXVlSGVhZFJ1bm5pbmciHQobTWVyZ2VRdWV1ZUhlYWRQYXVzZWRXYWl0aW5nIhwKGk1lcmdlUXVldWVIZWFkVGVybWluYWxPd2VkIsMBChFNZXJnZURlcXVldWVPZmZlchIQCghvZmZlcl9pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSFAoMcmFpc2VkX2F0X21zGAMgASgDEjQKB3dhaXRpbmcYBCABKAsyIS5hZ2VudHJlcGwudjEuTWVyZ2VEZXF1ZXVlV2FpdGluZ0gAEjQKB3J1bm5pbmcYBSABKAsyIS5hZ2VudHJlcGwudjEuTWVyZ2VEZXF1ZXVlUnVubmluZ0gAQgoKCHN0YW5kaW5nIkUKE01lcmdlRGVxdWV1ZVdhaXRpbmcSDQoFYWhlYWQYASABKAUSEAoIcG9zaXRpb24YAiABKAUSDQoFZGVwdGgYAyABKAUiQAoTTWVyZ2VEZXF1ZXVlUnVubmluZxIpCgZzdGF0dXMYASABKAsyGS5hZ2VudHJlcGwudjEuTWVyZ2VTdGF0dXMiFQoTTWVyZ2VEZXF1ZXVlQ29uZmlybSIVChNNZXJnZURlcXVldWVEZWNsaW5lKrcBCg9Db21wYWN0aW9uU2NvcGUSIAocQ09NUEFDVElPTl9TQ09QRV9VTlNQRUNJRklFRBAAEhgKFENPTVBBQ1RJT05fU0NPUEVfQUxMEAESHgoaQ09NUEFDVElPTl9TQ09QRV9SRVNQT05TRVMQAhIcChhDT01QQUNUSU9OX1NDT1BFX1BST01QVFMQAxIqCiZDT01QQUNUSU9OX1NDT1BFX1BST01QVFNfQU5EX1JFU1BPTlNFUxAEKl0KClJlc3VtZU1vZGUSGwoXUkVTVU1FX01PREVfVU5TUEVDSUZJRUQQABIYChRSRVNVTUVfTU9ERV9DT05USU5VRRABEhgKFFJFU1VNRV9NT0RFX0VYUExJQ0lUEAIqhAEKDkNsaWVudExvZ0xldmVsEiAKHENMSUVOVF9MT0dfTEVWRUxfVU5TUEVDSUZJRUQQABIZChVDTElFTlRfTE9HX0xFVkVMX0lORk8QARIZChVDTElFTlRfTE9HX0xFVkVMX1dBUk4QAhIaChZDTElFTlRfTE9HX0xFVkVMX0VSUk9SEANCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_conversation_v1_session_command, file_google_protobuf_struct]);
 
 /**
  * The agent process is not connected. Nothing was delivered and nothing was lost; the command simply had nowhere to go.
@@ -652,7 +43,7 @@ export type FailureShimNotConnected = Message<"agentrepl.v1.FailureShimNotConnec
  * Use `create(FailureShimNotConnectedSchema)` to create a new message.
  */
 export const FailureShimNotConnectedSchema: GenMessage<FailureShimNotConnected> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 3);
+  messageDesc(file_agentrepl_v1_shared, 0);
 
 /**
  * The agent process received the request and refused it.
@@ -682,7 +73,7 @@ export type FailureShimRejected = Message<"agentrepl.v1.FailureShimRejected"> & 
  * Use `create(FailureShimRejectedSchema)` to create a new message.
  */
 export const FailureShimRejectedSchema: GenMessage<FailureShimRejected> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 4);
+  messageDesc(file_agentrepl_v1_shared, 1);
 
 /**
  * The agent process never acknowledged the request within its window. Whether it ran is unknown, which is the point of saying so.
@@ -712,147 +103,7 @@ export type FailureShimAckTimeout = Message<"agentrepl.v1.FailureShimAckTimeout"
  * Use `create(FailureShimAckTimeoutSchema)` to create a new message.
  */
 export const FailureShimAckTimeoutSchema: GenMessage<FailureShimAckTimeout> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 5);
-
-/**
- * The agent process speaks a different protocol version than the daemon. Both versions are named because the fix is to align them and the user needs to know which way.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureShimVersionMismatch
- */
-export type FailureShimVersionMismatch = Message<"agentrepl.v1.FailureShimVersionMismatch"> & {
-  /**
-   * @generated from field: string shim_version = 1;
-   */
-  shimVersion: string;
-
-  /**
-   * @generated from field: string daemon_version = 2;
-   */
-  daemonVersion: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureShimVersionMismatch.
- * Use `create(FailureShimVersionMismatchSchema)` to create a new message.
- */
-export const FailureShimVersionMismatchSchema: GenMessage<FailureShimVersionMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 6);
-
-/**
- * The agent process's event stream went backwards. A sequence that regresses means events were replayed or lost, so the conversation on screen may not be the conversation that happened.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureShimSeqRegression
- */
-export type FailureShimSeqRegression = Message<"agentrepl.v1.FailureShimSeqRegression"> & {
-  /**
-   * The sequence number that arrived.
-   *
-   * @generated from field: uint64 seq = 1;
-   */
-  seq: bigint;
-
-  /**
-   * The highest sequence already seen, which it should have exceeded.
-   *
-   * @generated from field: uint64 last_seen_seq = 2;
-   */
-  lastSeenSeq: bigint;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureShimSeqRegression.
- * Use `create(FailureShimSeqRegressionSchema)` to create a new message.
- */
-export const FailureShimSeqRegressionSchema: GenMessage<FailureShimSeqRegression> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 7);
-
-/**
- * No traffic is arriving from the agent process. WINDOW-SHAPED: it opens when the silence starts and resolves when traffic returns.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureShimDegraded
- */
-export type FailureShimDegraded = Message<"agentrepl.v1.FailureShimDegraded"> & {
-  /**
-   * Which part of the connection went quiet.
-   *
-   * @generated from field: string component = 1;
-   */
-  component: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureShimDegraded.
- * Use `create(FailureShimDegradedSchema)` to create a new message.
- */
-export const FailureShimDegradedSchema: GenMessage<FailureShimDegraded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 8);
-
-/**
- * The agent process could not write to the store, so conversation is being dropped rather than persisted.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureShimStoreWriteRejected
- */
-export type FailureShimStoreWriteRejected = Message<"agentrepl.v1.FailureShimStoreWriteRejected"> & {
-  /**
-   * Which writer was rejected.
-   *
-   * @generated from field: string component = 1;
-   */
-  component: string;
-
-  /**
-   * The store's stated reason, verbatim.
-   *
-   * @generated from field: string reason = 2;
-   */
-  reason: string;
-
-  /**
-   * How many records were dropped while this was open. The count is the
-   * severity: one is a hiccup, thousands is a lost conversation.
-   *
-   * @generated from field: int64 dropped_count = 3;
-   */
-  droppedCount: bigint;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureShimStoreWriteRejected.
- * Use `create(FailureShimStoreWriteRejectedSchema)` to create a new message.
- */
-export const FailureShimStoreWriteRejectedSchema: GenMessage<FailureShimStoreWriteRejected> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 9);
-
-/**
- * The agent SDK query ended unexpectedly — the session is alive but the thing that drives it stopped.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureQueryTermination
- */
-export type FailureQueryTermination = Message<"agentrepl.v1.FailureQueryTermination"> & {
-  /**
-   * Exact query-lifecycle evidence.
-   *
-   * @generated from field: agentrepl.v1.QueryTerminationFailure detail = 1;
-   */
-  detail?: QueryTerminationFailure | undefined;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureQueryTermination.
- * Use `create(FailureQueryTerminationSchema)` to create a new message.
- */
-export const FailureQueryTerminationSchema: GenMessage<FailureQueryTermination> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 10);
+  messageDesc(file_agentrepl_v1_shared, 2);
 
 /**
  * No agent process was ever started for this workspace, so there is nothing to talk to yet.
@@ -869,7 +120,7 @@ export type FailureShimNotSpawned = Message<"agentrepl.v1.FailureShimNotSpawned"
  * Use `create(FailureShimNotSpawnedSchema)` to create a new message.
  */
 export const FailureShimNotSpawnedSchema: GenMessage<FailureShimNotSpawned> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 11);
+  messageDesc(file_agentrepl_v1_shared, 3);
 
 /**
  * The agent process connected but never finished wiring up, so it is present without being usable.
@@ -899,7 +150,7 @@ export type FailureShimHandshakeIncomplete = Message<"agentrepl.v1.FailureShimHa
  * Use `create(FailureShimHandshakeIncompleteSchema)` to create a new message.
  */
 export const FailureShimHandshakeIncompleteSchema: GenMessage<FailureShimHandshakeIncomplete> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 12);
+  messageDesc(file_agentrepl_v1_shared, 4);
 
 /**
  * The agent process reported ITSELF unhealthy — a self-diagnosis, not an inference from silence.
@@ -934,7 +185,7 @@ export type FailureShimUnhealthy = Message<"agentrepl.v1.FailureShimUnhealthy"> 
  * Use `create(FailureShimUnhealthySchema)` to create a new message.
  */
 export const FailureShimUnhealthySchema: GenMessage<FailureShimUnhealthy> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 13);
+  messageDesc(file_agentrepl_v1_shared, 5);
 
 /**
  * Bring-up did not finish connecting in time.
@@ -957,7 +208,7 @@ export type FailureSessionNotEstablished = Message<"agentrepl.v1.FailureSessionN
  * Use `create(FailureSessionNotEstablishedSchema)` to create a new message.
  */
 export const FailureSessionNotEstablishedSchema: GenMessage<FailureSessionNotEstablished> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 14);
+  messageDesc(file_agentrepl_v1_shared, 6);
 
 /**
  * The command addressed something this workspace no longer runs. The staleness itself is the whole fact: the fence already says the client is behind, and naming what replaced what would hand a renderer an identity it has no use for.
@@ -974,41 +225,7 @@ export type FailureWorkspaceNotLive = Message<"agentrepl.v1.FailureWorkspaceNotL
  * Use `create(FailureWorkspaceNotLiveSchema)` to create a new message.
  */
 export const FailureWorkspaceNotLiveSchema: GenMessage<FailureWorkspaceNotLive> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 15);
-
-/**
- * The workspace's session was deleted deliberately. Not a fault — an account of why the conversation stopped.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureSessionDeleted
- */
-export type FailureSessionDeleted = Message<"agentrepl.v1.FailureSessionDeleted"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.FailureSessionDeleted.
- * Use `create(FailureSessionDeletedSchema)` to create a new message.
- */
-export const FailureSessionDeletedSchema: GenMessage<FailureSessionDeleted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 16);
-
-/**
- * A new session took over this workspace, so the previous one was stopped. A workspace keeps exactly one live session at a time.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureSessionSuperseded
- */
-export type FailureSessionSuperseded = Message<"agentrepl.v1.FailureSessionSuperseded"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.FailureSessionSuperseded.
- * Use `create(FailureSessionSupersededSchema)` to create a new message.
- */
-export const FailureSessionSupersededSchema: GenMessage<FailureSessionSuperseded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 17);
+  messageDesc(file_agentrepl_v1_shared, 7);
 
 /**
  * This view is behind: the workspace's live connection changed under it, and the replay it asked for would have come from a generation it never saw.
@@ -1033,70 +250,7 @@ export type FailureReconnectSuperseded = Message<"agentrepl.v1.FailureReconnectS
  * Use `create(FailureReconnectSupersededSchema)` to create a new message.
  */
 export const FailureReconnectSupersededSchema: GenMessage<FailureReconnectSuperseded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 18);
-
-/**
- * The agent process exited.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureSessionShimDied
- */
-export type FailureSessionShimDied = Message<"agentrepl.v1.FailureSessionShimDied"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.FailureSessionShimDied.
- * Use `create(FailureSessionShimDiedSchema)` to create a new message.
- */
-export const FailureSessionShimDiedSchema: GenMessage<FailureSessionShimDied> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 19);
-
-/**
- * The session could not be started at all.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureSessionStartFailed
- */
-export type FailureSessionStartFailed = Message<"agentrepl.v1.FailureSessionStartFailed"> & {
-  /**
-   * The bring-up failure, verbatim.
-   *
-   * @generated from field: string cause = 1;
-   */
-  cause: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureSessionStartFailed.
- * Use `create(FailureSessionStartFailedSchema)` to create a new message.
- */
-export const FailureSessionStartFailedSchema: GenMessage<FailureSessionStartFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 20);
-
-/**
- * The vendor conversation could not be resumed without breaking continuity.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureSessionResumeFailed
- */
-export type FailureSessionResumeFailed = Message<"agentrepl.v1.FailureSessionResumeFailed"> & {
-  /**
-   * Exact resume-continuity evidence.
-   *
-   * @generated from field: agentrepl.v1.SessionResumeFailure detail = 1;
-   */
-  detail?: SessionResumeFailure | undefined;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureSessionResumeFailed.
- * Use `create(FailureSessionResumeFailedSchema)` to create a new message.
- */
-export const FailureSessionResumeFailedSchema: GenMessage<FailureSessionResumeFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 21);
+  messageDesc(file_agentrepl_v1_shared, 8);
 
 /**
  * This workspace has a vendor conversation that could not be reached, and a blank one will NOT be started in its place. Refusing is the feature: silently starting fresh is how a conversation gets lost.
@@ -1141,7 +295,7 @@ export type FailureConversationUnresumable = Message<"agentrepl.v1.FailureConver
  * Use `create(FailureConversationUnresumableSchema)` to create a new message.
  */
 export const FailureConversationUnresumableSchema: GenMessage<FailureConversationUnresumable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 22);
+  messageDesc(file_agentrepl_v1_shared, 9);
 
 /**
  * The client asked for a resume mode the daemon no longer supports. The client is out of date and needs updating.
@@ -1158,31 +312,7 @@ export type FailureResumeModeRetired = Message<"agentrepl.v1.FailureResumeModeRe
  * Use `create(FailureResumeModeRetiredSchema)` to create a new message.
  */
 export const FailureResumeModeRetiredSchema: GenMessage<FailureResumeModeRetired> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 23);
-
-/**
- * The session ended for a reason the daemon could not classify. Its own inability to explain is the fact, and it is stated rather than dressed as one of the known endings.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureSessionEndedUnclassified
- */
-export type FailureSessionEndedUnclassified = Message<"agentrepl.v1.FailureSessionEndedUnclassified"> & {
-  /**
-   * The raw reason as recorded, so the account is not lost just because it
-   * was not understood.
-   *
-   * @generated from field: string raw_reason = 1;
-   */
-  rawReason: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureSessionEndedUnclassified.
- * Use `create(FailureSessionEndedUnclassifiedSchema)` to create a new message.
- */
-export const FailureSessionEndedUnclassifiedSchema: GenMessage<FailureSessionEndedUnclassified> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 24);
+  messageDesc(file_agentrepl_v1_shared, 10);
 
 /**
  * A history re-pull is already running, so a second one was refused.
@@ -1199,51 +329,7 @@ export type FailureHistoryRepullInFlight = Message<"agentrepl.v1.FailureHistoryR
  * Use `create(FailureHistoryRepullInFlightSchema)` to create a new message.
  */
 export const FailureHistoryRepullInFlightSchema: GenMessage<FailureHistoryRepullInFlight> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 25);
-
-/**
- * The history re-pull ended before it reached the live window, so what is on screen has a gap in it.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureHistoryReplayTruncated
- */
-export type FailureHistoryReplayTruncated = Message<"agentrepl.v1.FailureHistoryReplayTruncated"> & {
-  /**
-   * Where the replay started.
-   *
-   * @generated from field: uint64 from_seq = 1;
-   */
-  fromSeq: bigint;
-
-  /**
-   * Where it was meant to reach.
-   *
-   * @generated from field: uint64 stop_at_seq = 2;
-   */
-  stopAtSeq: bigint;
-
-  /**
-   * How many records it actually delivered.
-   *
-   * @generated from field: int64 delivered = 3;
-   */
-  delivered: bigint;
-
-  /**
-   * Why it stopped short, verbatim.
-   *
-   * @generated from field: string reason = 4;
-   */
-  reason: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureHistoryReplayTruncated.
- * Use `create(FailureHistoryReplayTruncatedSchema)` to create a new message.
- */
-export const FailureHistoryReplayTruncatedSchema: GenMessage<FailureHistoryReplayTruncated> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 26);
+  messageDesc(file_agentrepl_v1_shared, 11);
 
 /**
  * The client's replay mark belongs to a RETIRED store seq space, so the delta it
@@ -1290,7 +376,7 @@ export type FailureReplayMarkRetired = Message<"agentrepl.v1.FailureReplayMarkRe
  * Use `create(FailureReplayMarkRetiredSchema)` to create a new message.
  */
 export const FailureReplayMarkRetiredSchema: GenMessage<FailureReplayMarkRetired> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 27);
+  messageDesc(file_agentrepl_v1_shared, 12);
 
 /**
  * The stop could not be delivered, so the turn is still running.
@@ -1307,7 +393,7 @@ export type FailureInterruptUndelivered = Message<"agentrepl.v1.FailureInterrupt
  * Use `create(FailureInterruptUndeliveredSchema)` to create a new message.
  */
 export const FailureInterruptUndeliveredSchema: GenMessage<FailureInterruptUndelivered> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 28);
+  messageDesc(file_agentrepl_v1_shared, 13);
 
 /**
  * The queued prompt has no attached agent process yet, so it cannot run.
@@ -1337,7 +423,7 @@ export type FailureQueueEntryUnwired = Message<"agentrepl.v1.FailureQueueEntryUn
  * Use `create(FailureQueueEntryUnwiredSchema)` to create a new message.
  */
 export const FailureQueueEntryUnwiredSchema: GenMessage<FailureQueueEntryUnwired> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 29);
+  messageDesc(file_agentrepl_v1_shared, 14);
 
 /**
  * The queued prompt is waiting on a cache keep-alive response and cannot be forced ahead of it.
@@ -1365,7 +451,38 @@ export type FailureQueueEntryKeepAliveHeld = Message<"agentrepl.v1.FailureQueueE
  * Use `create(FailureQueueEntryKeepAliveHeldSchema)` to create a new message.
  */
 export const FailureQueueEntryKeepAliveHeldSchema: GenMessage<FailureQueueEntryKeepAliveHeld> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 30);
+  messageDesc(file_agentrepl_v1_shared, 15);
+
+/**
+ * The queued prompt is waiting behind a context cut, which is never
+ * interrupted, so it cannot be forced ahead of it.
+ *
+ * Resolves the workspace BLUE.
+ *
+ * @generated from message agentrepl.v1.FailureQueueEntryUninterruptibleTurn
+ */
+export type FailureQueueEntryUninterruptibleTurn = Message<"agentrepl.v1.FailureQueueEntryUninterruptibleTurn"> & {
+  /**
+   * Which queued entry, so the card addresses the right row.
+   *
+   * @generated from field: string entry_id = 1;
+   */
+  entryId: string;
+
+  /**
+   * The cut that is running, so the card can name what the prompt is behind.
+   *
+   * @generated from field: conversation.v1.SessionCommand command = 2;
+   */
+  command: SessionCommand;
+};
+
+/**
+ * Describes the message agentrepl.v1.FailureQueueEntryUninterruptibleTurn.
+ * Use `create(FailureQueueEntryUninterruptibleTurnSchema)` to create a new message.
+ */
+export const FailureQueueEntryUninterruptibleTurnSchema: GenMessage<FailureQueueEntryUninterruptibleTurn> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 16);
 
 /**
  * The workspace is hibernated; a revival decision is required before prompts are accepted.
@@ -1388,74 +505,7 @@ export type FailureSessionHibernated = Message<"agentrepl.v1.FailureSessionHiber
  * Use `create(FailureSessionHibernatedSchema)` to create a new message.
  */
 export const FailureSessionHibernatedSchema: GenMessage<FailureSessionHibernated> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 31);
-
-/**
- * A cache keep-alive window could not be closed, so new conversation is withheld until it is repaired.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureKeepAliveWindowUnclosed
- */
-export type FailureKeepAliveWindowUnclosed = Message<"agentrepl.v1.FailureKeepAliveWindowUnclosed"> & {
-  /**
-   * The repair-relevant detail, verbatim.
-   *
-   * @generated from field: string reason = 1;
-   */
-  reason: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureKeepAliveWindowUnclosed.
- * Use `create(FailureKeepAliveWindowUnclosedSchema)` to create a new message.
- */
-export const FailureKeepAliveWindowUnclosedSchema: GenMessage<FailureKeepAliveWindowUnclosed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 32);
-
-/**
- * A cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureKeepAliveWindowInverted
- */
-export type FailureKeepAliveWindowInverted = Message<"agentrepl.v1.FailureKeepAliveWindowInverted"> & {
-  /**
-   * @generated from field: string reason = 1;
-   */
-  reason: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureKeepAliveWindowInverted.
- * Use `create(FailureKeepAliveWindowInvertedSchema)` to create a new message.
- */
-export const FailureKeepAliveWindowInvertedSchema: GenMessage<FailureKeepAliveWindowInverted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 33);
-
-/**
- * A compaction re-read the whole conversation at the uncached rate instead of from the prompt cache — the exact cost compaction exists to avoid.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureCompactionColdRead
- */
-export type FailureCompactionColdRead = Message<"agentrepl.v1.FailureCompactionColdRead"> & {
-  /**
-   * What it cost, so the card states the waste rather than alluding to it.
-   *
-   * @generated from field: int64 uncached_input_tokens = 1;
-   */
-  uncachedInputTokens: bigint;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureCompactionColdRead.
- * Use `create(FailureCompactionColdReadSchema)` to create a new message.
- */
-export const FailureCompactionColdReadSchema: GenMessage<FailureCompactionColdRead> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 34);
+  messageDesc(file_agentrepl_v1_shared, 17);
 
 /**
  * A browser log record arrived against a workspace state that had already moved on, so it was not recorded.
@@ -1472,562 +522,7 @@ export type FailureClientLogIdentityStale = Message<"agentrepl.v1.FailureClientL
  * Use `create(FailureClientLogIdentityStaleSchema)` to create a new message.
  */
 export const FailureClientLogIdentityStaleSchema: GenMessage<FailureClientLogIdentityStale> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 35);
-
-/**
- * Agent-repl's own machinery failed in a way it could not classify. Stated as unclassified rather than filed under a neighbouring kind, because a wrong name is worse than an honest absence.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureInternalUnclassified
- */
-export type FailureInternalUnclassified = Message<"agentrepl.v1.FailureInternalUnclassified"> & {
-  /**
-   * The failure, verbatim.
-   *
-   * @generated from field: string cause = 1;
-   */
-  cause: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureInternalUnclassified.
- * Use `create(FailureInternalUnclassifiedSchema)` to create a new message.
- */
-export const FailureInternalUnclassifiedSchema: GenMessage<FailureInternalUnclassified> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 36);
-
-/**
- * Authentication failed. The account, not the machinery, is what is blocked.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiAuthenticationFailed
- */
-export type FailureApiAuthenticationFailed = Message<"agentrepl.v1.FailureApiAuthenticationFailed"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiAuthenticationFailed.
- * Use `create(FailureApiAuthenticationFailedSchema)` to create a new message.
- */
-export const FailureApiAuthenticationFailedSchema: GenMessage<FailureApiAuthenticationFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 37);
-
-/**
- * A billing problem stopped the request.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiBillingError
- */
-export type FailureApiBillingError = Message<"agentrepl.v1.FailureApiBillingError"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiBillingError.
- * Use `create(FailureApiBillingErrorSchema)` to create a new message.
- */
-export const FailureApiBillingErrorSchema: GenMessage<FailureApiBillingError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 38);
-
-/**
- * The account is rate limited.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiRateLimit
- */
-export type FailureApiRateLimit = Message<"agentrepl.v1.FailureApiRateLimit"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiRateLimit.
- * Use `create(FailureApiRateLimitSchema)` to create a new message.
- */
-export const FailureApiRateLimitSchema: GenMessage<FailureApiRateLimit> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 39);
-
-/**
- * The vendor rejected the request as invalid.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiInvalidRequest
- */
-export type FailureApiInvalidRequest = Message<"agentrepl.v1.FailureApiInvalidRequest"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiInvalidRequest.
- * Use `create(FailureApiInvalidRequestSchema)` to create a new message.
- */
-export const FailureApiInvalidRequestSchema: GenMessage<FailureApiInvalidRequest> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 40);
-
-/**
- * The vendor returned a server error.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiServerError
- */
-export type FailureApiServerError = Message<"agentrepl.v1.FailureApiServerError"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiServerError.
- * Use `create(FailureApiServerErrorSchema)` to create a new message.
- */
-export const FailureApiServerErrorSchema: GenMessage<FailureApiServerError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 41);
-
-/**
- * The vendor is overloaded.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiOverloaded
- */
-export type FailureApiOverloaded = Message<"agentrepl.v1.FailureApiOverloaded"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiOverloaded.
- * Use `create(FailureApiOverloadedSchema)` to create a new message.
- */
-export const FailureApiOverloadedSchema: GenMessage<FailureApiOverloaded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 42);
-
-/**
- * This organization is not allowed to use the API.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiOAuthOrgNotAllowed
- */
-export type FailureApiOAuthOrgNotAllowed = Message<"agentrepl.v1.FailureApiOAuthOrgNotAllowed"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiOAuthOrgNotAllowed.
- * Use `create(FailureApiOAuthOrgNotAllowedSchema)` to create a new message.
- */
-export const FailureApiOAuthOrgNotAllowedSchema: GenMessage<FailureApiOAuthOrgNotAllowed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 43);
-
-/**
- * The requested model does not exist.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiModelNotFound
- */
-export type FailureApiModelNotFound = Message<"agentrepl.v1.FailureApiModelNotFound"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The model that was asked for, so the card names it.
-   *
-   * @generated from field: string model = 2;
-   */
-  model: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiModelNotFound.
- * Use `create(FailureApiModelNotFoundSchema)` to create a new message.
- */
-export const FailureApiModelNotFoundSchema: GenMessage<FailureApiModelNotFound> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 44);
-
-/**
- * The network never reached the vendor. Classed with the vendor rather than with the machinery: nothing local is broken, and the work did not happen.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiNetworkDown
- */
-export type FailureApiNetworkDown = Message<"agentrepl.v1.FailureApiNetworkDown"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiNetworkDown.
- * Use `create(FailureApiNetworkDownSchema)` to create a new message.
- */
-export const FailureApiNetworkDownSchema: GenMessage<FailureApiNetworkDown> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 45);
-
-/**
- * The vendor request failed for a reason with no more specific kind.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiRequestFailed
- */
-export type FailureApiRequestFailed = Message<"agentrepl.v1.FailureApiRequestFailed"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiRequestFailed.
- * Use `create(FailureApiRequestFailedSchema)` to create a new message.
- */
-export const FailureApiRequestFailedSchema: GenMessage<FailureApiRequestFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 46);
-
-/**
- * The vendor failed for a reason the daemon could not classify.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiUnknown
- */
-export type FailureApiUnknown = Message<"agentrepl.v1.FailureApiUnknown"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiUnknown.
- * Use `create(FailureApiUnknownSchema)` to create a new message.
- */
-export const FailureApiUnknownSchema: GenMessage<FailureApiUnknown> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 47);
-
-/**
- * The response hit the output-token ceiling.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiMaxOutputTokens
- */
-export type FailureApiMaxOutputTokens = Message<"agentrepl.v1.FailureApiMaxOutputTokens"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiMaxOutputTokens.
- * Use `create(FailureApiMaxOutputTokensSchema)` to create a new message.
- */
-export const FailureApiMaxOutputTokensSchema: GenMessage<FailureApiMaxOutputTokens> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 48);
-
-/**
- * The turn hit its maximum-turns limit. A limit the user set, reached — not a fault.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiMaxTurns
- */
-export type FailureApiMaxTurns = Message<"agentrepl.v1.FailureApiMaxTurns"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiMaxTurns.
- * Use `create(FailureApiMaxTurnsSchema)` to create a new message.
- */
-export const FailureApiMaxTurnsSchema: GenMessage<FailureApiMaxTurns> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 49);
-
-/**
- * The turn hit its budget limit. Also a chosen limit, reached.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiMaxBudget
- */
-export type FailureApiMaxBudget = Message<"agentrepl.v1.FailureApiMaxBudget"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiMaxBudget.
- * Use `create(FailureApiMaxBudgetSchema)` to create a new message.
- */
-export const FailureApiMaxBudgetSchema: GenMessage<FailureApiMaxBudget> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 50);
-
-/**
- * The turn aborted during execution.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiExecutionError
- */
-export type FailureApiExecutionError = Message<"agentrepl.v1.FailureApiExecutionError"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiExecutionError.
- * Use `create(FailureApiExecutionErrorSchema)` to create a new message.
- */
-export const FailureApiExecutionErrorSchema: GenMessage<FailureApiExecutionError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 51);
-
-/**
- * The model refused the request.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiRefusal
- */
-export type FailureApiRefusal = Message<"agentrepl.v1.FailureApiRefusal"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiRefusal.
- * Use `create(FailureApiRefusalSchema)` to create a new message.
- */
-export const FailureApiRefusalSchema: GenMessage<FailureApiRefusal> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 52);
-
-/**
- * The turn ended abnormally for a reason with no more specific kind.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message agentrepl.v1.FailureApiTurnFailed
- */
-export type FailureApiTurnFailed = Message<"agentrepl.v1.FailureApiTurnFailed"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: agentrepl.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The vendor's own stop reason, verbatim, since this kind is exactly the
-   * case where it did not map to a named one.
-   *
-   * @generated from field: string stop_reason = 2;
-   */
-  stopReason: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureApiTurnFailed.
- * Use `create(FailureApiTurnFailedSchema)` to create a new message.
- */
-export const FailureApiTurnFailedSchema: GenMessage<FailureApiTurnFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 53);
+  messageDesc(file_agentrepl_v1_shared, 18);
 
 /**
  * The daemon refused a USER prompt because the workspace's merge machinery
@@ -2057,230 +552,43 @@ export type FailurePromptRefusedByMergeState = Message<"agentrepl.v1.FailureProm
  * Use `create(FailurePromptRefusedByMergeStateSchema)` to create a new message.
  */
 export const FailurePromptRefusedByMergeStateSchema: GenMessage<FailurePromptRefusedByMergeState> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 54);
+  messageDesc(file_agentrepl_v1_shared, 19);
 
 /**
- * A turn stood bound with nothing driving it, so the daemon closed it rather
- * than leaving the workspace thinking forever.
+ * A frontend's account of a command of its own that it cannot report through
+ * the ordinary two-arm response, because no readable response exists.
  *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureTurnUndriven
+ * @generated from message agentrepl.v1.ClientCommandFailure
  */
-export type FailureTurnUndriven = Message<"agentrepl.v1.FailureTurnUndriven"> & {
+export type ClientCommandFailure = Message<"agentrepl.v1.ClientCommandFailure"> & {
   /**
-   * Which turn, and how long it stood undriven, verbatim.
-   *
-   * @generated from field: string reason = 1;
+   * @generated from oneof agentrepl.v1.ClientCommandFailure.failure
    */
-  reason: string;
+  failure: {
+    /**
+     * Nothing was put on the wire at all.
+     *
+     * @generated from field: agentrepl.v1.FailureCommandUnsent unsent = 1;
+     */
+    value: FailureCommandUnsent;
+    case: "unsent";
+  } | {
+    /**
+     * Something came back and this bundle could not read it.
+     *
+     * @generated from field: agentrepl.v1.FailureCommandRejectionUnclassified rejection_unclassified = 2;
+     */
+    value: FailureCommandRejectionUnclassified;
+    case: "rejectionUnclassified";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
- * Describes the message agentrepl.v1.FailureTurnUndriven.
- * Use `create(FailureTurnUndrivenSchema)` to create a new message.
+ * Describes the message agentrepl.v1.ClientCommandFailure.
+ * Use `create(ClientCommandFailureSchema)` to create a new message.
  */
-export const FailureTurnUndrivenSchema: GenMessage<FailureTurnUndriven> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 55);
-
-/**
- * The queued prompt is waiting behind a context cut, which is never
- * interrupted, so it cannot be forced ahead of it.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureQueueEntryUninterruptibleTurn
- */
-export type FailureQueueEntryUninterruptibleTurn = Message<"agentrepl.v1.FailureQueueEntryUninterruptibleTurn"> & {
-  /**
-   * Which queued entry, so the card addresses the right row.
-   *
-   * @generated from field: string entry_id = 1;
-   */
-  entryId: string;
-
-  /**
-   * The cut that is running, so the card can name what the prompt is behind.
-   *
-   * @generated from field: agentrepl.v1.SessionCommand command = 2;
-   */
-  command: SessionCommand;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureQueueEntryUninterruptibleTurn.
- * Use `create(FailureQueueEntryUninterruptibleTurnSchema)` to create a new message.
- */
-export const FailureQueueEntryUninterruptibleTurnSchema: GenMessage<FailureQueueEntryUninterruptibleTurn> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 56);
-
-/**
- * The connection to the daemon dropped and the frontend is reconnecting.
- * WINDOW-SHAPED and RETRACTED rather than resolved: when the connection comes
- * back the card is removed outright, because a settled "we were disconnected"
- * notice is noise about something the user can already see ended.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureDaemonUnreachable
- */
-export type FailureDaemonUnreachable = Message<"agentrepl.v1.FailureDaemonUnreachable"> & {
-  /**
-   * The socket close code, so the card distinguishes a deliberate close from
-   * a dropped one.
-   *
-   * @generated from field: int32 close_code = 1;
-   */
-  closeCode: number;
-
-  /**
-   * The close reason as the transport gave it. Empty when it gave none.
-   *
-   * @generated from field: string close_reason = 2;
-   */
-  closeReason: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureDaemonUnreachable.
- * Use `create(FailureDaemonUnreachableSchema)` to create a new message.
- */
-export const FailureDaemonUnreachableSchema: GenMessage<FailureDaemonUnreachable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 57);
-
-/**
- * The workspace this page is addressed to no longer exists on the daemon.
- * Never resolves: unlike a dropped connection, there is nothing to come back.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureWorkspaceGone
- */
-export type FailureWorkspaceGone = Message<"agentrepl.v1.FailureWorkspaceGone"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.FailureWorkspaceGone.
- * Use `create(FailureWorkspaceGoneSchema)` to create a new message.
- */
-export const FailureWorkspaceGoneSchema: GenMessage<FailureWorkspaceGone> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 58);
-
-/**
- * The frontend could not start at all.
- *
- * It is the one failure that cannot be carried the way the others are — the
- * machinery that would carry it is the machinery that failed to build. A
- * frontend renders it from whatever it has, before any state exists.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureBootFailed
- */
-export type FailureBootFailed = Message<"agentrepl.v1.FailureBootFailed"> & {
-  /**
-   * Whatever the frontend caught, verbatim.
-   *
-   * @generated from field: string cause = 1;
-   */
-  cause: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureBootFailed.
- * Use `create(FailureBootFailedSchema)` to create a new message.
- */
-export const FailureBootFailedSchema: GenMessage<FailureBootFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 59);
-
-/**
- * A control-plane request the frontend issued outside the command stream (a
- * login, an account switch) failed.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureControlPlaneFailed
- */
-export type FailureControlPlaneFailed = Message<"agentrepl.v1.FailureControlPlaneFailed"> & {
-  /**
-   * Which request, in the frontend's own words, so repeats of DIFFERENT
-   * requests do not reconcile onto one card.
-   *
-   * @generated from field: string what = 1;
-   */
-  what: string;
-
-  /**
-   * The failure, verbatim.
-   *
-   * @generated from field: string cause = 2;
-   */
-  cause: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureControlPlaneFailed.
- * Use `create(FailureControlPlaneFailedSchema)` to create a new message.
- */
-export const FailureControlPlaneFailedSchema: GenMessage<FailureControlPlaneFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 60);
-
-/**
- * A frame from the daemon could not be read and was skipped. Conversation may
- * be missing as a result, which is why it is a card rather than a log line.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureFrameUndecodable
- */
-export type FailureFrameUndecodable = Message<"agentrepl.v1.FailureFrameUndecodable"> & {
-  /**
-   * The decode failure, verbatim.
-   *
-   * @generated from field: string cause = 1;
-   */
-  cause: string;
-
-  /**
-   * The head of the frame that would not decode, for whoever debugs it.
-   *
-   * @generated from field: string frame_head = 2;
-   */
-  frameHead: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureFrameUndecodable.
- * Use `create(FailureFrameUndecodableSchema)` to create a new message.
- */
-export const FailureFrameUndecodableSchema: GenMessage<FailureFrameUndecodable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 61);
-
-/**
- * This page cannot read the daemon's state and reloading did not fix it.
- * Deliberately loud and DELIBERATELY UNRESOLVABLE: the only exit is restarting
- * the view, and offering a self-clearing version of this would hide a page
- * that is silently wrong.
- *
- * Resolves the workspace BLUE.
- *
- * @generated from message agentrepl.v1.FailureStaleBundle
- */
-export type FailureStaleBundle = Message<"agentrepl.v1.FailureStaleBundle"> & {
-  /**
-   * What did not line up, verbatim.
-   *
-   * @generated from field: string detail = 1;
-   */
-  detail: string;
-};
-
-/**
- * Describes the message agentrepl.v1.FailureStaleBundle.
- * Use `create(FailureStaleBundleSchema)` to create a new message.
- */
-export const FailureStaleBundleSchema: GenMessage<FailureStaleBundle> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 62);
+export const ClientCommandFailureSchema: GenMessage<ClientCommandFailure> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 20);
 
 /**
  * A command was never put on the wire because the connection was down. The
@@ -2305,12 +613,19 @@ export type FailureCommandUnsent = Message<"agentrepl.v1.FailureCommandUnsent"> 
  * Use `create(FailureCommandUnsentSchema)` to create a new message.
  */
 export const FailureCommandUnsentSchema: GenMessage<FailureCommandUnsent> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 63);
+  messageDesc(file_agentrepl_v1_shared, 21);
 
 /**
- * A command was refused and the daemon's refusal carried no classified
- * account. The frontend states that it could not classify the refusal rather
- * than picking a kind on the daemon's behalf.
+ * A command was refused and this client could not read the refusal.
+ *
+ * IT USED TO MEAN "the daemon's refusal carried no classified account", and
+ * under the shared ack that was a real and common state: a refusal arrived as
+ * `ok=false` with free text and nothing else. Under the two-arm contract the
+ * daemon has no way to refuse without naming an arm, so what is left is the
+ * narrower case that remains genuinely possible — a peer that named an arm
+ * THIS BUNDLE does not know, because the schema moved and the frontend has not
+ * been rebuilt. The frontend states that it could not classify the refusal
+ * rather than picking an arm on the daemon's behalf.
  *
  * Resolves the workspace BLUE.
  *
@@ -2337,297 +652,196 @@ export type FailureCommandRejectionUnclassified = Message<"agentrepl.v1.FailureC
  * Use `create(FailureCommandRejectionUnclassifiedSchema)` to create a new message.
  */
 export const FailureCommandRejectionUnclassifiedSchema: GenMessage<FailureCommandRejectionUnclassified> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 64);
+  messageDesc(file_agentrepl_v1_shared, 22);
 
 /**
- * Machine-readable evidence that an SDK query terminated unexpectedly.
+ * The command's workspace key is not an absolute path.
  *
- * This message repeats the durable lifecycle record's identity and uses the
- * same typed reason messages, allowing a frontend to diagnose the termination
- * without reconstructing evidence from generic failure prose.
+ * Every session-routed command is keyed by the session's CWD. A frontend that
+ * sends a DISPLAY NAME instead ("doom" rather than "/Users/…/.config/doom")
+ * matches nothing, and without this arm the miss surfaced as "workspace has no
+ * live session", indistinguishable from a genuinely dead session — which is how
+ * a wire-contract violation once read as a session-startup failure for a week.
  *
- * THE ONLY IDENTITIES ON THIS RECORD ARE ONES A CARD CAN SHOW: the query
- * invocation that died, and the VENDOR conversation it was driving. An
- * agent-repl session identity is deliberately absent — a rendering frontend
- * has no vocabulary for one, so it could only carry it, never use it.
- *
- * @generated from message agentrepl.v1.QueryTerminationFailure
+ * @generated from message agentrepl.v1.RefusalWorkspaceKeyNotAbsolute
  */
-export type QueryTerminationFailure = Message<"agentrepl.v1.QueryTerminationFailure"> & {
+export type RefusalWorkspaceKeyNotAbsolute = Message<"agentrepl.v1.RefusalWorkspaceKeyNotAbsolute"> & {
   /**
-   * The unique query() invocation that terminated.
+   * The key as sent, so the refusal names the thing that was wrong rather than
+   * describing it.
    *
-   * @generated from field: string query_instance_id = 1;
+   * @generated from field: string workspace = 1;
    */
-  queryInstanceId: string;
-
-  /**
-   * Identifies the vendor conversation when query initialization exposed it,
-   * or states explicitly that termination preceded vendor identity discovery.
-   *
-   * @generated from oneof agentrepl.v1.QueryTerminationFailure.vendor_identity
-   */
-  vendorIdentity: {
-    /**
-     * The non-empty authoritative Claude conversation UUID for the query.
-     *
-     * @generated from field: string vendor_session_id = 2;
-     */
-    value: string;
-    case: "vendorSessionId";
-  } | {
-    /**
-     * Records that the query ended before the SDK exposed a vendor session.
-     *
-     * @generated from field: shim.v1.VendorSessionIdentityUnavailable vendor_session_identity_unavailable = 3;
-     */
-    value: VendorSessionIdentityUnavailable;
-    case: "vendorSessionIdentityUnavailable";
-  } | { case: undefined; value?: undefined };
-
-  /**
-   * The Unix epoch time at which the termination was observed.
-   *
-   * @generated from field: int64 observed_at_ms = 4;
-   */
-  observedAtMs: bigint;
-
-  /**
-   * Identifies the unexpected termination condition without a status enum.
-   *
-   * @generated from oneof agentrepl.v1.QueryTerminationFailure.reason
-   */
-  reason: {
-    /**
-     * The SDK iterator ended without an intentional shim shutdown.
-     *
-     * @generated from field: shim.v1.UnexpectedQueryEof unexpected_eof = 5;
-     */
-    value: UnexpectedQueryEof;
-    case: "unexpectedEof";
-  } | {
-    /**
-     * The SDK iterator threw an error, including its complete cause.
-     *
-     * @generated from field: shim.v1.QueryIteratorFailure iterator_failure = 6;
-     */
-    value: QueryIteratorFailure;
-    case: "iteratorFailure";
-  } | {
-    /**
-     * Query initialization failed, including its complete cause.
-     *
-     * @generated from field: shim.v1.QueryStartupFailure startup_failure = 7;
-     */
-    value: QueryStartupFailure;
-    case: "startupFailure";
-  } | { case: undefined; value?: undefined };
+  workspace: string;
 };
 
 /**
- * Describes the message agentrepl.v1.QueryTerminationFailure.
- * Use `create(QueryTerminationFailureSchema)` to create a new message.
+ * Describes the message agentrepl.v1.RefusalWorkspaceKeyNotAbsolute.
+ * Use `create(RefusalWorkspaceKeyNotAbsoluteSchema)` to create a new message.
  */
-export const QueryTerminationFailureSchema: GenMessage<QueryTerminationFailure> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 65);
+export const RefusalWorkspaceKeyNotAbsoluteSchema: GenMessage<RefusalWorkspaceKeyNotAbsolute> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 23);
 
 /**
- * Machine-readable evidence that a requested Claude conversation could not
- * be resumed without violating conversation continuity.
+ * The daemon can answer this method in principle but the dependency that
+ * answers it was not injected into this build.
  *
- * It names the VENDOR conversation and nothing else, for the same reason
- * QueryTerminationFailure does: the vendor conversation is what the card
- * shows, and an agent-repl session identity is a vocabulary a rendering
- * frontend does not have.
+ * LOUD RATHER THAN DEGRADED, always. Every one of these sites had the
+ * alternative reading available — carry on silently, skip the gate, treat the
+ * unknown as zero — and every one of them refuses instead, because a capability
+ * that quietly does nothing is indistinguishable from a capability that works.
  *
- * @generated from message agentrepl.v1.SessionResumeFailure
+ * @generated from message agentrepl.v1.RefusalDependencyUnwired
  */
-export type SessionResumeFailure = Message<"agentrepl.v1.SessionResumeFailure"> & {
+export type RefusalDependencyUnwired = Message<"agentrepl.v1.RefusalDependencyUnwired"> & {
   /**
-   * The exact Claude conversation UUID that must remain authoritative.
+   * Which dependency, in the daemon's own words, so a wiring defect is
+   * diagnosable from the refusal alone.
    *
-   * @generated from field: string claude_session_id = 1;
+   * @generated from field: string dependency = 1;
    */
-  claudeSessionId: string;
-
-  /**
-   * The working directory used to locate the Claude transcript.
-   *
-   * @generated from field: string cwd = 2;
-   */
-  cwd: string;
-
-  /**
-   * The configured Claude account root. Empty means the daemon's inherited
-   * Claude configuration root supplies the value.
-   *
-   * @generated from field: string config_dir = 3;
-   */
-  configDir: string;
-
-  /**
-   * The absolute Claude configuration root used for transcript lookup.
-   *
-   * @generated from field: string resolved_config_dir = 4;
-   */
-  resolvedConfigDir: string;
-
-  /**
-   * Identifies the operation whose continuity requirement could not be met.
-   *
-   * @generated from oneof agentrepl.v1.SessionResumeFailure.attempt
-   */
-  attempt: {
-    /**
-     * A frontend requested a session that continues a durable conversation.
-     *
-     * @generated from field: agentrepl.v1.SessionResumeFailureCreate create = 5;
-     */
-    value: SessionResumeFailureCreate;
-    case: "create";
-  } | {
-    /**
-     * A durable agent-repl session required shim reconstruction.
-     *
-     * @generated from field: agentrepl.v1.SessionResumeFailureAutomaticRestore automatic_restore = 6;
-     */
-    value: SessionResumeFailureAutomaticRestore;
-    case: "automaticRestore";
-  } | { case: undefined; value?: undefined };
-
-  /**
-   * Identifies the concrete continuity invariant that prevented restoration.
-   *
-   * @generated from oneof agentrepl.v1.SessionResumeFailure.cause
-   */
-  cause: {
-    /**
-     * No readable transcript exists for the authoritative Claude UUID.
-     *
-     * @generated from field: agentrepl.v1.SessionResumeFailureTranscriptUnavailable transcript_unavailable = 7;
-     */
-    value: SessionResumeFailureTranscriptUnavailable;
-    case: "transcriptUnavailable";
-  } | {
-    /**
-     * A recovery attempt proposed a different Claude UUID or a fresh session.
-     *
-     * @generated from field: agentrepl.v1.SessionResumeFailureIdentityMismatch identity_mismatch = 8;
-     */
-    value: SessionResumeFailureIdentityMismatch;
-    case: "identityMismatch";
-  } | {
-    /**
-     * The exact resumed SDK query terminated before becoming driveable.
-     *
-     * @generated from field: agentrepl.v1.QueryTerminationFailure query_termination = 9;
-     */
-    value: QueryTerminationFailure;
-    case: "queryTermination";
-  } | {
-    /**
-     * Bring-up failed before exact query-termination evidence was available.
-     *
-     * @generated from field: agentrepl.v1.SessionResumeFailureBringUpFailure bring_up_failure = 10;
-     */
-    value: SessionResumeFailureBringUpFailure;
-    case: "bringUpFailure";
-  } | { case: undefined; value?: undefined };
+  dependency: string;
 };
 
 /**
- * Describes the message agentrepl.v1.SessionResumeFailure.
- * Use `create(SessionResumeFailureSchema)` to create a new message.
+ * Describes the message agentrepl.v1.RefusalDependencyUnwired.
+ * Use `create(RefusalDependencyUnwiredSchema)` to create a new message.
  */
-export const SessionResumeFailureSchema: GenMessage<SessionResumeFailure> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 66);
+export const RefusalDependencyUnwiredSchema: GenMessage<RefusalDependencyUnwired> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 24);
 
 /**
- * Marks a resume failure encountered while creating an agent-repl session.
+ * A field this method requires was empty.
  *
- * @generated from message agentrepl.v1.SessionResumeFailureCreate
- */
-export type SessionResumeFailureCreate = Message<"agentrepl.v1.SessionResumeFailureCreate"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.SessionResumeFailureCreate.
- * Use `create(SessionResumeFailureCreateSchema)` to create a new message.
- */
-export const SessionResumeFailureCreateSchema: GenMessage<SessionResumeFailureCreate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 67);
-
-/**
- * Marks a resume failure encountered while restoring an allocated agent-repl
- * session.
+ * Stated as its own arm rather than folded into an unclassified catch-all
+ * because it is the one refusal a client can fix without anybody's help.
  *
- * @generated from message agentrepl.v1.SessionResumeFailureAutomaticRestore
+ * @generated from message agentrepl.v1.RefusalRequiredFieldMissing
  */
-export type SessionResumeFailureAutomaticRestore = Message<"agentrepl.v1.SessionResumeFailureAutomaticRestore"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.SessionResumeFailureAutomaticRestore.
- * Use `create(SessionResumeFailureAutomaticRestoreSchema)` to create a new message.
- */
-export const SessionResumeFailureAutomaticRestoreSchema: GenMessage<SessionResumeFailureAutomaticRestore> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 68);
-
-/**
- * Records every transcript location examined for the authoritative Claude
- * conversation UUID.
- *
- * @generated from message agentrepl.v1.SessionResumeFailureTranscriptUnavailable
- */
-export type SessionResumeFailureTranscriptUnavailable = Message<"agentrepl.v1.SessionResumeFailureTranscriptUnavailable"> & {
+export type RefusalRequiredFieldMissing = Message<"agentrepl.v1.RefusalRequiredFieldMissing"> & {
   /**
-   * Absolute transcript paths that were checked and found unavailable.
+   * The field's wire name, so the client can find it.
    *
-   * @generated from field: repeated string searched_paths = 1;
+   * @generated from field: string field = 1;
    */
-  searchedPaths: string[];
+  field: string;
 };
 
 /**
- * Describes the message agentrepl.v1.SessionResumeFailureTranscriptUnavailable.
- * Use `create(SessionResumeFailureTranscriptUnavailableSchema)` to create a new message.
+ * Describes the message agentrepl.v1.RefusalRequiredFieldMissing.
+ * Use `create(RefusalRequiredFieldMissingSchema)` to create a new message.
  */
-export const SessionResumeFailureTranscriptUnavailableSchema: GenMessage<SessionResumeFailureTranscriptUnavailable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 69);
+export const RefusalRequiredFieldMissingSchema: GenMessage<RefusalRequiredFieldMissing> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 25);
 
 /**
- * Records a rejected recovery attempt that would have resumed another Claude
- * conversation.
+ * The prompt's origin was UNSPECIFIED, or was a value this daemon has no name
+ * for. The daemon rejects rather than guessing which UI or automation acted:
+ * origin is what the turn ledger and every downstream attribution is keyed on.
  *
- * @generated from message agentrepl.v1.SessionResumeFailureIdentityMismatch
+ * @generated from message agentrepl.v1.RefusalPromptOriginInvalid
  */
-export type SessionResumeFailureIdentityMismatch = Message<"agentrepl.v1.SessionResumeFailureIdentityMismatch"> & {
+export type RefusalPromptOriginInvalid = Message<"agentrepl.v1.RefusalPromptOriginInvalid"> & {
   /**
-   * The replacement Claude UUID proposed by recovery. Empty means recovery
-   * would have started a fresh conversation.
+   * The origin as sent. 0 is the UNSPECIFIED case; anything else is a value
+   * this daemon's enum does not contain.
    *
-   * @generated from field: string replacement_claude_session_id = 1;
+   * @generated from field: int32 prompt_origin = 1;
    */
-  replacementClaudeSessionId: string;
+  promptOrigin: number;
 };
 
 /**
- * Describes the message agentrepl.v1.SessionResumeFailureIdentityMismatch.
- * Use `create(SessionResumeFailureIdentityMismatchSchema)` to create a new message.
+ * Describes the message agentrepl.v1.RefusalPromptOriginInvalid.
+ * Use `create(RefusalPromptOriginInvalidSchema)` to create a new message.
  */
-export const SessionResumeFailureIdentityMismatchSchema: GenMessage<SessionResumeFailureIdentityMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 70);
+export const RefusalPromptOriginInvalidSchema: GenMessage<RefusalPromptOriginInvalid> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 26);
 
 /**
- * Records an exact-resume bring-up failure that has no typed query lifecycle
- * record. The original nonblank cause is retained without classifying the
- * command as an unrelated internal failure.
+ * The interrupt's queue half could not raise its question, so the workspace's
+ * queued merge was NOT offered for dequeue.
  *
- * @generated from message agentrepl.v1.SessionResumeFailureBringUpFailure
+ * It refuses the whole interrupt rather than proceeding, because the reading
+ * before this one — evicting the merge unasked — destroyed minutes of someone's
+ * work on one keystroke, and the reading after it would report an interrupt as
+ * complete while its destructive half was silently unreachable.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeDequeueOfferUnraisable
  */
-export type SessionResumeFailureBringUpFailure = Message<"agentrepl.v1.SessionResumeFailureBringUpFailure"> & {
+export type RefusalMergeDequeueOfferUnraisable = Message<"agentrepl.v1.RefusalMergeDequeueOfferUnraisable"> & {
   /**
-   * The complete cause returned by the driveability gate.
+   * The run the question would have been about.
+   *
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * Why the offer could not be raised, verbatim.
+   *
+   * @generated from field: string cause = 2;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalMergeDequeueOfferUnraisable.
+ * Use `create(RefusalMergeDequeueOfferUnraisableSchema)` to create a new message.
+ */
+export const RefusalMergeDequeueOfferUnraisableSchema: GenMessage<RefusalMergeDequeueOfferUnraisable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 27);
+
+/**
+ * The workspace has no outstanding dequeue offer, so there is nothing for this
+ * answer to answer. Refused rather than resolved to whatever question happens
+ * to be up next.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeDequeueOfferAbsent
+ */
+export type RefusalMergeDequeueOfferAbsent = Message<"agentrepl.v1.RefusalMergeDequeueOfferAbsent"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalMergeDequeueOfferAbsent.
+ * Use `create(RefusalMergeDequeueOfferAbsentSchema)` to create a new message.
+ */
+export const RefusalMergeDequeueOfferAbsentSchema: GenMessage<RefusalMergeDequeueOfferAbsent> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 28);
+
+/**
+ * The answered offer is not the workspace's outstanding one. A click on a card
+ * the queue has already superseded must not dequeue the merge its replacement
+ * is asking about.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeDequeueOfferStale
+ */
+export type RefusalMergeDequeueOfferStale = Message<"agentrepl.v1.RefusalMergeDequeueOfferStale"> & {
+  /**
+   * The offer that IS outstanding, so a frontend can tell whether it is
+   * holding a stale card or has lost the thread entirely.
+   *
+   * @generated from field: string outstanding_offer_id = 1;
+   */
+  outstandingOfferId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalMergeDequeueOfferStale.
+ * Use `create(RefusalMergeDequeueOfferStaleSchema)` to create a new message.
+ */
+export const RefusalMergeDequeueOfferStaleSchema: GenMessage<RefusalMergeDequeueOfferStale> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 29);
+
+/**
+ * The answer could not be recorded, so NOTHING was dequeued. The card may still
+ * be up; the daemon does not act on a decision it failed to write down.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeDequeueClearFailed
+ */
+export type RefusalMergeDequeueClearFailed = Message<"agentrepl.v1.RefusalMergeDequeueClearFailed"> & {
+  /**
+   * Why the clear failed, verbatim.
    *
    * @generated from field: string cause = 1;
    */
@@ -2635,11 +849,867 @@ export type SessionResumeFailureBringUpFailure = Message<"agentrepl.v1.SessionRe
 };
 
 /**
- * Describes the message agentrepl.v1.SessionResumeFailureBringUpFailure.
- * Use `create(SessionResumeFailureBringUpFailureSchema)` to create a new message.
+ * Describes the message agentrepl.v1.RefusalMergeDequeueClearFailed.
+ * Use `create(RefusalMergeDequeueClearFailedSchema)` to create a new message.
  */
-export const SessionResumeFailureBringUpFailureSchema: GenMessage<SessionResumeFailureBringUpFailure> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 71);
+export const RefusalMergeDequeueClearFailedSchema: GenMessage<RefusalMergeDequeueClearFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 30);
+
+/**
+ * The offer was cleared and the dequeue itself then failed. Whatever did not
+ * come off the queue is still queued and still merges when its turn comes,
+ * which is why this is reported rather than absorbed.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeDequeueFailed
+ */
+export type RefusalMergeDequeueFailed = Message<"agentrepl.v1.RefusalMergeDequeueFailed"> & {
+  /**
+   * Why the dequeue failed, verbatim.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalMergeDequeueFailed.
+ * Use `create(RefusalMergeDequeueFailedSchema)` to create a new message.
+ */
+export const RefusalMergeDequeueFailedSchema: GenMessage<RefusalMergeDequeueFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 31);
+
+/**
+ * Nothing detached was running, so the cancel reached nothing.
+ *
+ * A REFUSAL RATHER THAN A QUIET SUCCESS. A cancel that stopped nothing is a
+ * keystroke that did nothing, and acking it ok is how a stop control comes to
+ * look like it works when it reaches nothing.
+ *
+ * @generated from message agentrepl.v1.RefusalNoDetachedAgentsRunning
+ */
+export type RefusalNoDetachedAgentsRunning = Message<"agentrepl.v1.RefusalNoDetachedAgentsRunning"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalNoDetachedAgentsRunning.
+ * Use `create(RefusalNoDetachedAgentsRunningSchema)` to create a new message.
+ */
+export const RefusalNoDetachedAgentsRunningSchema: GenMessage<RefusalNoDetachedAgentsRunning> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 32);
+
+/**
+ * The shim could not attempt the stop at all.
+ *
+ * @generated from message agentrepl.v1.RefusalDetachedCancelUnsupported
+ */
+export type RefusalDetachedCancelUnsupported = Message<"agentrepl.v1.RefusalDetachedCancelUnsupported"> & {
+  /**
+   * The shim's own account of why, verbatim.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalDetachedCancelUnsupported.
+ * Use `create(RefusalDetachedCancelUnsupportedSchema)` to create a new message.
+ */
+export const RefusalDetachedCancelUnsupportedSchema: GenMessage<RefusalDetachedCancelUnsupported> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 33);
+
+/**
+ * The shim answered with an outcome that set no arm. A contract violation the
+ * shim client already refuses; naming it keeps the refusal honest if that ever
+ * changes, rather than acking a cancel nobody can account for.
+ *
+ * @generated from message agentrepl.v1.RefusalDetachedCancelOutcomeUnset
+ */
+export type RefusalDetachedCancelOutcomeUnset = Message<"agentrepl.v1.RefusalDetachedCancelOutcomeUnset"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalDetachedCancelOutcomeUnset.
+ * Use `create(RefusalDetachedCancelOutcomeUnsetSchema)` to create a new message.
+ */
+export const RefusalDetachedCancelOutcomeUnsetSchema: GenMessage<RefusalDetachedCancelOutcomeUnset> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 34);
+
+/**
+ * The daemon's merge-geometry record could not be read.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeGeometryUnreadable
+ */
+export type RefusalMergeGeometryUnreadable = Message<"agentrepl.v1.RefusalMergeGeometryUnreadable"> & {
+  /**
+   * The read failure, verbatim.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalMergeGeometryUnreadable.
+ * Use `create(RefusalMergeGeometryUnreadableSchema)` to create a new message.
+ */
+export const RefusalMergeGeometryUnreadableSchema: GenMessage<RefusalMergeGeometryUnreadable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 35);
+
+/**
+ * The workspace has no recorded merge geometry.
+ *
+ * The daemon records a workspace's source branch, source worktree and merge
+ * target when it CREATES the workspace, and derives them at boot for older
+ * ones. A workspace with neither is one whose branch or worktree git cannot
+ * answer for — a detached HEAD, or a worktree that no longer exists — and
+ * merging it would mean guessing which repository to write commits into. It is
+ * NEVER guessed at.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeGeometryUnrecorded
+ */
+export type RefusalMergeGeometryUnrecorded = Message<"agentrepl.v1.RefusalMergeGeometryUnrecorded"> & {
+  /**
+   * The workspace whose geometry is missing, so the refusal names what to
+   * record.
+   *
+   * @generated from field: string workspace = 1;
+   */
+  workspace: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalMergeGeometryUnrecorded.
+ * Use `create(RefusalMergeGeometryUnrecordedSchema)` to create a new message.
+ */
+export const RefusalMergeGeometryUnrecordedSchema: GenMessage<RefusalMergeGeometryUnrecorded> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 36);
+
+/**
+ * A merge phase could not be written to the daemon's durable merge state.
+ *
+ * It refuses the merge, because the first thing a merge attempt does is BECOME
+ * VISIBLE: a merge whose enqueuing mark never landed is a command that vanished
+ * from every UI, which is exactly the trace-free failure the mark exists to
+ * end.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeStateUnrecordable
+ */
+export type RefusalMergeStateUnrecordable = Message<"agentrepl.v1.RefusalMergeStateUnrecordable"> & {
+  /**
+   * Which phase could not be recorded (e.g. "merge_enqueuing"), verbatim.
+   *
+   * @generated from field: string phase = 1;
+   */
+  phase: string;
+
+  /**
+   * The write failure, verbatim.
+   *
+   * @generated from field: string cause = 2;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalMergeStateUnrecordable.
+ * Use `create(RefusalMergeStateUnrecordableSchema)` to create a new message.
+ */
+export const RefusalMergeStateUnrecordableSchema: GenMessage<RefusalMergeStateUnrecordable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 37);
+
+/**
+ * The merge coordinator refused to enqueue the run. The attempt is durably
+ * marked failed before this is returned, so the refusal is on the workspace's
+ * merge axis as well as in this answer.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeEnqueueRejected
+ */
+export type RefusalMergeEnqueueRejected = Message<"agentrepl.v1.RefusalMergeEnqueueRejected"> & {
+  /**
+   * Why the enqueue was refused, verbatim.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalMergeEnqueueRejected.
+ * Use `create(RefusalMergeEnqueueRejectedSchema)` to create a new message.
+ */
+export const RefusalMergeEnqueueRejectedSchema: GenMessage<RefusalMergeEnqueueRejected> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 38);
+
+/**
+ * The workspace's parked merge could not be abandoned, so the close is refused.
+ * Closing anyway would leave the merge lease standing over a workspace nobody
+ * can prompt or resolve.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeAbandonFailed
+ */
+export type RefusalMergeAbandonFailed = Message<"agentrepl.v1.RefusalMergeAbandonFailed"> & {
+  /**
+   * Why the abandon failed, verbatim.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalMergeAbandonFailed.
+ * Use `create(RefusalMergeAbandonFailedSchema)` to create a new message.
+ */
+export const RefusalMergeAbandonFailedSchema: GenMessage<RefusalMergeAbandonFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 39);
+
+/**
+ * The workspace lifecycle refused the close. Its log targets and resolved views
+ * are deliberately NOT released on this path: a refused close leaves a
+ * workspace that is still live, and taking its descriptors away would break the
+ * writers still using them.
+ *
+ * @generated from message agentrepl.v1.RefusalWorkspaceCloseFailed
+ */
+export type RefusalWorkspaceCloseFailed = Message<"agentrepl.v1.RefusalWorkspaceCloseFailed"> & {
+  /**
+   * Why the close failed, verbatim.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalWorkspaceCloseFailed.
+ * Use `create(RefusalWorkspaceCloseFailedSchema)` to create a new message.
+ */
+export const RefusalWorkspaceCloseFailedSchema: GenMessage<RefusalWorkspaceCloseFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 40);
+
+/**
+ * The workspace lifecycle refused the open, or the session it started never
+ * became driveable.
+ *
+ * @generated from message agentrepl.v1.RefusalWorkspaceOpenFailed
+ */
+export type RefusalWorkspaceOpenFailed = Message<"agentrepl.v1.RefusalWorkspaceOpenFailed"> & {
+  /**
+   * Why the open failed, verbatim.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalWorkspaceOpenFailed.
+ * Use `create(RefusalWorkspaceOpenFailedSchema)` to create a new message.
+ */
+export const RefusalWorkspaceOpenFailedSchema: GenMessage<RefusalWorkspaceOpenFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 41);
+
+/**
+ * Workspace creation is not accepted over the wire.
+ *
+ * Creation has exactly ONE ingestion point: a workspace_commands_<uuid>.json
+ * file in the daemon's inbox. A second wire path would let a caller create a
+ * workspace the durable inbox never recorded, so the call is refused here
+ * rather than routed. The remedy is to write the command file.
+ *
+ * @generated from message agentrepl.v1.RefusalCreateWorkspaceOverWire
+ */
+export type RefusalCreateWorkspaceOverWire = Message<"agentrepl.v1.RefusalCreateWorkspaceOverWire"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalCreateWorkspaceOverWire.
+ * Use `create(RefusalCreateWorkspaceOverWireSchema)` to create a new message.
+ */
+export const RefusalCreateWorkspaceOverWireSchema: GenMessage<RefusalCreateWorkspaceOverWire> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 42);
+
+/**
+ * No creation job is on the daemon's books under this id, so there is nothing
+ * to mark materialized.
+ *
+ * @generated from message agentrepl.v1.RefusalUnknownWorkspaceJob
+ */
+export type RefusalUnknownWorkspaceJob = Message<"agentrepl.v1.RefusalUnknownWorkspaceJob"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalUnknownWorkspaceJob.
+ * Use `create(RefusalUnknownWorkspaceJobSchema)` to create a new message.
+ */
+export const RefusalUnknownWorkspaceJobSchema: GenMessage<RefusalUnknownWorkspaceJob> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 43);
+
+/**
+ * No host action is on the daemon's durable inbox under this id, so there is
+ * nothing to complete.
+ *
+ * @generated from message agentrepl.v1.RefusalUnknownHostAction
+ */
+export type RefusalUnknownHostAction = Message<"agentrepl.v1.RefusalUnknownHostAction"> & {
+  /**
+   * @generated from field: string action_id = 1;
+   */
+  actionId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalUnknownHostAction.
+ * Use `create(RefusalUnknownHostActionSchema)` to create a new message.
+ */
+export const RefusalUnknownHostActionSchema: GenMessage<RefusalUnknownHostAction> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 44);
+
+/**
+ * The shim accepted the model change but named no selection, so the daemon has
+ * nothing shim-confirmed to publish. Refused rather than echoed: the whole
+ * point of returning only a confirmed selection is that a frontend never holds
+ * an optimistic model state.
+ *
+ * @generated from message agentrepl.v1.RefusalModelUnconfirmed
+ */
+export type RefusalModelUnconfirmed = Message<"agentrepl.v1.RefusalModelUnconfirmed"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalModelUnconfirmed.
+ * Use `create(RefusalModelUnconfirmedSchema)` to create a new message.
+ */
+export const RefusalModelUnconfirmedSchema: GenMessage<RefusalModelUnconfirmed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 45);
+
+/**
+ * The published roster is a stale, out-of-order revision WITHIN the publisher's
+ * own epoch, or carries no epoch at all.
+ *
+ * A loud nack rather than a silent drop, so a publisher whose revision counter
+ * has fallen behind learns it instead of believing it published. A publish from
+ * a NEW epoch is never stale — see frontend.v1.WorkspaceRoster.boot_id — so no
+ * publisher ever needs to resync a counter it did not author.
+ *
+ * @generated from message agentrepl.v1.RefusalRosterRevisionStale
+ */
+export type RefusalRosterRevisionStale = Message<"agentrepl.v1.RefusalRosterRevisionStale"> & {
+  /**
+   * The revision that was offered.
+   *
+   * @generated from field: uint64 published_revision = 1;
+   */
+  publishedRevision: bigint;
+
+  /**
+   * The revision the daemon is holding, which the offer failed to exceed.
+   *
+   * @generated from field: uint64 retained_revision = 2;
+   */
+  retainedRevision: bigint;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalRosterRevisionStale.
+ * Use `create(RefusalRosterRevisionStaleSchema)` to create a new message.
+ */
+export const RefusalRosterRevisionStaleSchema: GenMessage<RefusalRosterRevisionStale> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 46);
+
+/**
+ * A shutdown is already scheduled. Refused rather than silently replaced, so
+ * two deploy flows cannot merge their intents; the caller cancels first.
+ *
+ * @generated from message agentrepl.v1.RefusalShutdownAlreadyScheduled
+ */
+export type RefusalShutdownAlreadyScheduled = Message<"agentrepl.v1.RefusalShutdownAlreadyScheduled"> & {
+  /**
+   * The schedule that already stands, so the caller can cancel exactly it.
+   *
+   * @generated from field: string schedule_id = 1;
+   */
+  scheduleId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalShutdownAlreadyScheduled.
+ * Use `create(RefusalShutdownAlreadyScheduledSchema)` to create a new message.
+ */
+export const RefusalShutdownAlreadyScheduledSchema: GenMessage<RefusalShutdownAlreadyScheduled> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 47);
+
+/**
+ * The named schedule is not the live one, so the cancel is refused. A cancel
+ * aimed at an old schedule can never kill a newer one.
+ *
+ * @generated from message agentrepl.v1.RefusalScheduleIdStale
+ */
+export type RefusalScheduleIdStale = Message<"agentrepl.v1.RefusalScheduleIdStale"> & {
+  /**
+   * The schedule that IS live. Empty when no schedule stands at all.
+   *
+   * @generated from field: string live_schedule_id = 1;
+   */
+  liveScheduleId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalScheduleIdStale.
+ * Use `create(RefusalScheduleIdStaleSchema)` to create a new message.
+ */
+export const RefusalScheduleIdStaleSchema: GenMessage<RefusalScheduleIdStale> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 48);
+
+/**
+ * The workspace is doing something the hibernate would have to discard — a live
+ * turn, or a held merge lease. The daemon never discards in-flight work to
+ * satisfy a hibernate; the user interrupts first.
+ *
+ * @generated from message agentrepl.v1.RefusalHibernateBlockedByLiveWork
+ */
+export type RefusalHibernateBlockedByLiveWork = Message<"agentrepl.v1.RefusalHibernateBlockedByLiveWork"> & {
+  /**
+   * What is holding it, verbatim, so the card can say what to stop.
+   *
+   * @generated from field: string reason = 1;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalHibernateBlockedByLiveWork.
+ * Use `create(RefusalHibernateBlockedByLiveWorkSchema)` to create a new message.
+ */
+export const RefusalHibernateBlockedByLiveWorkSchema: GenMessage<RefusalHibernateBlockedByLiveWork> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 49);
+
+/**
+ * The revival command carries no mode, or a compact-first arm with no
+ * compaction scope.
+ *
+ * The choice between resuming as-is and compacting — and, when compacting, of
+ * what the summary may swallow — is the user's, and the daemon has no default
+ * for either. Inventing one here would spend the user's context budget on a
+ * choice they were being asked to make.
+ *
+ * @generated from message agentrepl.v1.RefusalRevivalModeUnstated
+ */
+export type RefusalRevivalModeUnstated = Message<"agentrepl.v1.RefusalRevivalModeUnstated"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalRevivalModeUnstated.
+ * Use `create(RefusalRevivalModeUnstatedSchema)` to create a new message.
+ */
+export const RefusalRevivalModeUnstatedSchema: GenMessage<RefusalRevivalModeUnstated> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 50);
+
+/**
+ * The revival was accepted as a decision but the session could not be brought
+ * back up under it.
+ *
+ * @generated from message agentrepl.v1.RefusalRevivalFailed
+ */
+export type RefusalRevivalFailed = Message<"agentrepl.v1.RefusalRevivalFailed"> & {
+  /**
+   * Why bring-up failed, verbatim.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalRevivalFailed.
+ * Use `create(RefusalRevivalFailedSchema)` to create a new message.
+ */
+export const RefusalRevivalFailedSchema: GenMessage<RefusalRevivalFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 51);
+
+/**
+ * The session came back but its terminal merge_failed axis could not be
+ * cleared, so the restart is reported as refused: leaving the verdict pinned
+ * would bring the session up underneath something nothing can clear.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeAxisUnclearable
+ */
+export type RefusalMergeAxisUnclearable = Message<"agentrepl.v1.RefusalMergeAxisUnclearable"> & {
+  /**
+   * Why the clear failed, verbatim.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalMergeAxisUnclearable.
+ * Use `create(RefusalMergeAxisUnclearableSchema)` to create a new message.
+ */
+export const RefusalMergeAxisUnclearableSchema: GenMessage<RefusalMergeAxisUnclearable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 52);
+
+/**
+ * Tearing the session down failed.
+ *
+ * @generated from message agentrepl.v1.RefusalSessionTeardownFailed
+ */
+export type RefusalSessionTeardownFailed = Message<"agentrepl.v1.RefusalSessionTeardownFailed"> & {
+  /**
+   * The session that would not tear down.
+   *
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * Why, verbatim.
+   *
+   * @generated from field: string cause = 2;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalSessionTeardownFailed.
+ * Use `create(RefusalSessionTeardownFailedSchema)` to create a new message.
+ */
+export const RefusalSessionTeardownFailedSchema: GenMessage<RefusalSessionTeardownFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 53);
+
+/**
+ * The create names a conversation under a resume mode that may not name one.
+ *
+ * A uuid supplied under any mode but EXPLICIT is a caller that believes it is
+ * steering. Ignoring it quietly would land the session somewhere the caller did
+ * not ask for and say nothing, so it fails the create instead.
+ *
+ * @generated from message agentrepl.v1.RefusalExplicitConversationUnderWrongMode
+ */
+export type RefusalExplicitConversationUnderWrongMode = Message<"agentrepl.v1.RefusalExplicitConversationUnderWrongMode"> & {
+  /**
+   * The conversation the caller named, so the refusal quotes what it ignored
+   * rather than describing it.
+   *
+   * @generated from field: string claude_session_id = 1;
+   */
+  claudeSessionId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalExplicitConversationUnderWrongMode.
+ * Use `create(RefusalExplicitConversationUnderWrongModeSchema)` to create a new message.
+ */
+export const RefusalExplicitConversationUnderWrongModeSchema: GenMessage<RefusalExplicitConversationUnderWrongMode> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 54);
+
+/**
+ * The create carries a resume mode this daemon's enum does not contain. Refused
+ * rather than read as CONTINUE: answering a different question than the one
+ * asked is the failure mode the whole ResumeMode enum exists to end.
+ *
+ * @generated from message agentrepl.v1.RefusalResumeModeUnknown
+ */
+export type RefusalResumeModeUnknown = Message<"agentrepl.v1.RefusalResumeModeUnknown"> & {
+  /**
+   * The mode as sent.
+   *
+   * @generated from field: int32 resume_mode = 1;
+   */
+  resumeMode: number;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalResumeModeUnknown.
+ * Use `create(RefusalResumeModeUnknownSchema)` to create a new message.
+ */
+export const RefusalResumeModeUnknownSchema: GenMessage<RefusalResumeModeUnknown> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 55);
+
+/**
+ * The account (CLAUDE_CONFIG_DIR) for this workspace could not be resolved.
+ *
+ * The account is decided by the DAEMON, not taken from the frame: the editor
+ * cannot know whether a human SELECTED an account for this workspace in the
+ * webapp. A create that cannot resolve one is refused rather than run under the
+ * daemon's ambient environment.
+ *
+ * @generated from message agentrepl.v1.RefusalAccountUnresolvable
+ */
+export type RefusalAccountUnresolvable = Message<"agentrepl.v1.RefusalAccountUnresolvable"> & {
+  /**
+   * The workspace whose account could not be resolved.
+   *
+   * @generated from field: string cwd = 1;
+   */
+  cwd: string;
+
+  /**
+   * The resolution failure, verbatim.
+   *
+   * @generated from field: string cause = 2;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalAccountUnresolvable.
+ * Use `create(RefusalAccountUnresolvableSchema)` to create a new message.
+ */
+export const RefusalAccountUnresolvableSchema: GenMessage<RefusalAccountUnresolvable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 56);
+
+/**
+ * The session was created but the model the create asked for could not be
+ * applied, so the create is reported failed rather than left on another model.
+ *
+ * A HIBERNATED create does NOT produce this: it has no shim to carry the
+ * change, the record keeps its persisted model, and the revival applies one.
+ *
+ * @generated from message agentrepl.v1.RefusalModelNotApplied
+ */
+export type RefusalModelNotApplied = Message<"agentrepl.v1.RefusalModelNotApplied"> & {
+  /**
+   * The model that was asked for.
+   *
+   * @generated from field: string model = 1;
+   */
+  model: string;
+
+  /**
+   * Why it was not applied, verbatim.
+   *
+   * @generated from field: string cause = 2;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalModelNotApplied.
+ * Use `create(RefusalModelNotAppliedSchema)` to create a new message.
+ */
+export const RefusalModelNotAppliedSchema: GenMessage<RefusalModelNotApplied> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 57);
+
+/**
+ * The establishment probe answered for a different request, so its verdict
+ * cannot be attributed to this create.
+ *
+ * @generated from message agentrepl.v1.RefusalEstablishmentProbeMisattributed
+ */
+export type RefusalEstablishmentProbeMisattributed = Message<"agentrepl.v1.RefusalEstablishmentProbeMisattributed"> & {
+  /**
+   * The request the probe answered for.
+   *
+   * @generated from field: string answered_request_id = 1;
+   */
+  answeredRequestId: string;
+
+  /**
+   * The probe id this create issued.
+   *
+   * @generated from field: string want_request_id = 2;
+   */
+  wantRequestId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalEstablishmentProbeMisattributed.
+ * Use `create(RefusalEstablishmentProbeMisattributedSchema)` to create a new message.
+ */
+export const RefusalEstablishmentProbeMisattributedSchema: GenMessage<RefusalEstablishmentProbeMisattributed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 58);
+
+/**
+ * The call carries no reader identity.
+ *
+ * A conversation reading position is per READER per workspace per scope.
+ * Serving without one would file this reader's place under the empty key, where
+ * the next unidentified reader would inherit it.
+ *
+ * @generated from message agentrepl.v1.RefusalReaderIdentityMissing
+ */
+export type RefusalReaderIdentityMissing = Message<"agentrepl.v1.RefusalReaderIdentityMissing"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalReaderIdentityMissing.
+ * Use `create(RefusalReaderIdentityMissingSchema)` to create a new message.
+ */
+export const RefusalReaderIdentityMissingSchema: GenMessage<RefusalReaderIdentityMissing> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 59);
+
+/**
+ * The daemon produced neither a page nor a failure.
+ *
+ * NEVER A SILENTLY ABSENT PAGE: a client cannot tell one from an empty
+ * conversation, and that ambiguity is the blank-feed bug this protocol's whole
+ * history has been spent closing.
+ *
+ * @generated from message agentrepl.v1.RefusalPageAbsent
+ */
+export type RefusalPageAbsent = Message<"agentrepl.v1.RefusalPageAbsent"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalPageAbsent.
+ * Use `create(RefusalPageAbsentSchema)` to create a new message.
+ */
+export const RefusalPageAbsentSchema: GenMessage<RefusalPageAbsent> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 60);
+
+/**
+ * This reader has no established position in this scope, so there is no
+ * "immediately older" page to serve.
+ *
+ * REFUSED RATHER THAN ANSWERED WITH THE TAIL. Defaulting would turn a client
+ * bug into a silent tail read, and "I have no position" already has its own
+ * verb — FirstPage.
+ *
+ * @generated from message agentrepl.v1.RefusalReaderHasNoPosition
+ */
+export type RefusalReaderHasNoPosition = Message<"agentrepl.v1.RefusalReaderHasNoPosition"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalReaderHasNoPosition.
+ * Use `create(RefusalReaderHasNoPositionSchema)` to create a new message.
+ */
+export const RefusalReaderHasNoPositionSchema: GenMessage<RefusalReaderHasNoPosition> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 61);
+
+/**
+ * The conversation replay could not be served.
+ *
+ * @generated from message agentrepl.v1.RefusalReplayFailed
+ */
+export type RefusalReplayFailed = Message<"agentrepl.v1.RefusalReplayFailed"> & {
+  /**
+   * Why the replay failed, verbatim.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalReplayFailed.
+ * Use `create(RefusalReplayFailedSchema)` to create a new message.
+ */
+export const RefusalReplayFailedSchema: GenMessage<RefusalReplayFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 62);
+
+/**
+ * No entry with this id is on the workspace's queue.
+ *
+ * The user asked for something specific, and pretending to have done it would
+ * be worse than saying it is gone.
+ *
+ * @generated from message agentrepl.v1.RefusalQueueEntryUnknown
+ */
+export type RefusalQueueEntryUnknown = Message<"agentrepl.v1.RefusalQueueEntryUnknown"> & {
+  /**
+   * @generated from field: string entry_id = 1;
+   */
+  entryId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalQueueEntryUnknown.
+ * Use `create(RefusalQueueEntryUnknownSchema)` to create a new message.
+ */
+export const RefusalQueueEntryUnknownSchema: GenMessage<RefusalQueueEntryUnknown> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 63);
+
+/**
+ * The run id names nothing outstanding on the merge queue.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeRunNotOutstanding
+ */
+export type RefusalMergeRunNotOutstanding = Message<"agentrepl.v1.RefusalMergeRunNotOutstanding"> & {
+  /**
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalMergeRunNotOutstanding.
+ * Use `create(RefusalMergeRunNotOutstandingSchema)` to create a new message.
+ */
+export const RefusalMergeRunNotOutstandingSchema: GenMessage<RefusalMergeRunNotOutstanding> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 64);
+
+/**
+ * The run id names the RUNNING head, which only its own drain goroutine may
+ * retire. Evicting it from underneath that goroutine would retire a run that is
+ * still writing to the target.
+ *
+ * @generated from message agentrepl.v1.RefusalMergeRunIsRunningHead
+ */
+export type RefusalMergeRunIsRunningHead = Message<"agentrepl.v1.RefusalMergeRunIsRunningHead"> & {
+  /**
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalMergeRunIsRunningHead.
+ * Use `create(RefusalMergeRunIsRunningHeadSchema)` to create a new message.
+ */
+export const RefusalMergeRunIsRunningHeadSchema: GenMessage<RefusalMergeRunIsRunningHead> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 65);
+
+/**
+ * The browser record failed validation before daemon attribution could
+ * overwrite the workspace and request facts the browser cannot authoritatively
+ * know.
+ *
+ * @generated from message agentrepl.v1.RefusalClientLogRecordInvalid
+ */
+export type RefusalClientLogRecordInvalid = Message<"agentrepl.v1.RefusalClientLogRecordInvalid"> & {
+  /**
+   * What did not validate, verbatim.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalClientLogRecordInvalid.
+ * Use `create(RefusalClientLogRecordInvalidSchema)` to create a new message.
+ */
+export const RefusalClientLogRecordInvalidSchema: GenMessage<RefusalClientLogRecordInvalid> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 66);
+
+/**
+ * The log line could not be written.
+ *
+ * @generated from message agentrepl.v1.RefusalClientLogUnpersisted
+ */
+export type RefusalClientLogUnpersisted = Message<"agentrepl.v1.RefusalClientLogUnpersisted"> & {
+  /**
+   * The write failure, verbatim.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RefusalClientLogUnpersisted.
+ * Use `create(RefusalClientLogUnpersistedSchema)` to create a new message.
+ */
+export const RefusalClientLogUnpersistedSchema: GenMessage<RefusalClientLogUnpersisted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_shared, 67);
 
 /**
  * Why and since when a session is hibernated. Exists so the revival gate can
@@ -2698,7 +1768,7 @@ export type HibernationDetail = Message<"agentrepl.v1.HibernationDetail"> & {
  * Use `create(HibernationDetailSchema)` to create a new message.
  */
 export const HibernationDetailSchema: GenMessage<HibernationDetail> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 72);
+  messageDesc(file_agentrepl_v1_shared, 68);
 
 /**
  * Automatic hibernation at the idle cutoff.
@@ -2720,7 +1790,7 @@ export type HibernationIdleCutoff = Message<"agentrepl.v1.HibernationIdleCutoff"
  * Use `create(HibernationIdleCutoffSchema)` to create a new message.
  */
 export const HibernationIdleCutoffSchema: GenMessage<HibernationIdleCutoff> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 73);
+  messageDesc(file_agentrepl_v1_shared, 69);
 
 /**
  * User-forced hibernation. Empty: the cause IS the arm.
@@ -2735,7 +1805,7 @@ export type HibernationForced = Message<"agentrepl.v1.HibernationForced"> & {
  * Use `create(HibernationForcedSchema)` to create a new message.
  */
 export const HibernationForcedSchema: GenMessage<HibernationForced> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 74);
+  messageDesc(file_agentrepl_v1_shared, 70);
 
 /**
  * Hibernation because the cache went cold before a ping could fire.
@@ -2763,7 +1833,7 @@ export type HibernationCacheExpired = Message<"agentrepl.v1.HibernationCacheExpi
  * Use `create(HibernationCacheExpiredSchema)` to create a new message.
  */
 export const HibernationCacheExpiredSchema: GenMessage<HibernationCacheExpired> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 75);
+  messageDesc(file_agentrepl_v1_shared, 71);
 
 /**
  * The compact-first revival choice, and WHAT of the conversation the
@@ -2794,7 +1864,7 @@ export type ReviveCompactFirst = Message<"agentrepl.v1.ReviveCompactFirst"> & {
  * Use `create(ReviveCompactFirstSchema)` to create a new message.
  */
 export const ReviveCompactFirstSchema: GenMessage<ReviveCompactFirst> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 76);
+  messageDesc(file_agentrepl_v1_shared, 72);
 
 /**
  * Marks the resume-verbatim revival choice. Empty: the choice IS the arm.
@@ -2809,7 +1879,7 @@ export type ReviveDirect = Message<"agentrepl.v1.ReviveDirect"> & {
  * Use `create(ReviveDirectSchema)` to create a new message.
  */
 export const ReviveDirectSchema: GenMessage<ReviveDirect> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 77);
+  messageDesc(file_agentrepl_v1_shared, 73);
 
 /**
  * The discard-the-conversation revival choice. Empty, and deliberately WITHOUT
@@ -2827,7 +1897,7 @@ export type ReviveClear = Message<"agentrepl.v1.ReviveClear"> & {
  * Use `create(ReviveClearSchema)` to create a new message.
  */
 export const ReviveClearSchema: GenMessage<ReviveClear> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 78);
+  messageDesc(file_agentrepl_v1_shared, 74);
 
 /**
  * The workspace's revival gate, resolved and fenced: whether prompts may be
@@ -2883,7 +1953,7 @@ export type WorkspaceGateView = Message<"agentrepl.v1.WorkspaceGateView"> & {
  * Use `create(WorkspaceGateViewSchema)` to create a new message.
  */
 export const WorkspaceGateViewSchema: GenMessage<WorkspaceGateView> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 79);
+  messageDesc(file_agentrepl_v1_shared, 75);
 
 /**
  * Prompts may be sent. The composer is live and no revival decision is
@@ -2899,7 +1969,7 @@ export type WorkspaceGateOpen = Message<"agentrepl.v1.WorkspaceGateOpen"> & {
  * Use `create(WorkspaceGateOpenSchema)` to create a new message.
  */
 export const WorkspaceGateOpenSchema: GenMessage<WorkspaceGateOpen> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 80);
+  messageDesc(file_agentrepl_v1_shared, 76);
 
 /**
  * The workspace's session is asleep and will not take a prompt until the user
@@ -2921,7 +1991,7 @@ export type WorkspaceGateHibernated = Message<"agentrepl.v1.WorkspaceGateHiberna
  * Use `create(WorkspaceGateHibernatedSchema)` to create a new message.
  */
 export const WorkspaceGateHibernatedSchema: GenMessage<WorkspaceGateHibernated> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 81);
+  messageDesc(file_agentrepl_v1_shared, 77);
 
 /**
  * The daemon's authoritative account of a workspace ready for host
@@ -3022,7 +2092,7 @@ export type WorkspaceAvailable = Message<"agentrepl.v1.WorkspaceAvailable"> & {
  * Use `create(WorkspaceAvailableSchema)` to create a new message.
  */
 export const WorkspaceAvailableSchema: GenMessage<WorkspaceAvailable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 82);
+  messageDesc(file_agentrepl_v1_shared, 78);
 
 /**
  * A daemon-owned inbox may contain UI-only actions alongside creates.  These
@@ -3108,7 +2178,7 @@ export type HostAction = Message<"agentrepl.v1.HostAction"> & {
  * Use `create(HostActionSchema)` to create a new message.
  */
 export const HostActionSchema: GenMessage<HostAction> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 83);
+  messageDesc(file_agentrepl_v1_shared, 79);
 
 /**
  * The boot sweep finished with this session left UNWIRED: its shim never
@@ -3152,7 +2222,7 @@ export type HostBootSweepSessionUnwired = Message<"agentrepl.v1.HostBootSweepSes
  * Use `create(HostBootSweepSessionUnwiredSchema)` to create a new message.
  */
 export const HostBootSweepSessionUnwiredSchema: GenMessage<HostBootSweepSessionUnwired> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 84);
+  messageDesc(file_agentrepl_v1_shared, 80);
 
 /**
  * A durably-failed workspace-creation job. It rides the same
@@ -3185,7 +2255,7 @@ export type HostWorkspaceCreateFailed = Message<"agentrepl.v1.HostWorkspaceCreat
  * Use `create(HostWorkspaceCreateFailedSchema)` to create a new message.
  */
 export const HostWorkspaceCreateFailedSchema: GenMessage<HostWorkspaceCreateFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 85);
+  messageDesc(file_agentrepl_v1_shared, 81);
 
 /**
  * @generated from message agentrepl.v1.HostSwitchWorkspace
@@ -3202,7 +2272,7 @@ export type HostSwitchWorkspace = Message<"agentrepl.v1.HostSwitchWorkspace"> & 
  * Use `create(HostSwitchWorkspaceSchema)` to create a new message.
  */
 export const HostSwitchWorkspaceSchema: GenMessage<HostSwitchWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 86);
+  messageDesc(file_agentrepl_v1_shared, 82);
 
 /**
  * @generated from message agentrepl.v1.HostSetRepositoryFold
@@ -3224,7 +2294,7 @@ export type HostSetRepositoryFold = Message<"agentrepl.v1.HostSetRepositoryFold"
  * Use `create(HostSetRepositoryFoldSchema)` to create a new message.
  */
 export const HostSetRepositoryFoldSchema: GenMessage<HostSetRepositoryFold> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 87);
+  messageDesc(file_agentrepl_v1_shared, 83);
 
 /**
  * @generated from message agentrepl.v1.HostSetSidebarView
@@ -3241,7 +2311,7 @@ export type HostSetSidebarView = Message<"agentrepl.v1.HostSetSidebarView"> & {
  * Use `create(HostSetSidebarViewSchema)` to create a new message.
  */
 export const HostSetSidebarViewSchema: GenMessage<HostSetSidebarView> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 88);
+  messageDesc(file_agentrepl_v1_shared, 84);
 
 /**
  * @generated from message agentrepl.v1.HostTaskCreate
@@ -3254,7 +2324,7 @@ export type HostTaskCreate = Message<"agentrepl.v1.HostTaskCreate"> & {
  * Use `create(HostTaskCreateSchema)` to create a new message.
  */
 export const HostTaskCreateSchema: GenMessage<HostTaskCreate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 89);
+  messageDesc(file_agentrepl_v1_shared, 85);
 
 /**
  * @generated from message agentrepl.v1.HostTaskById
@@ -3271,7 +2341,7 @@ export type HostTaskById = Message<"agentrepl.v1.HostTaskById"> & {
  * Use `create(HostTaskByIdSchema)` to create a new message.
  */
 export const HostTaskByIdSchema: GenMessage<HostTaskById> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 90);
+  messageDesc(file_agentrepl_v1_shared, 86);
 
 /**
  * Deliberate structured handoff for the established workspace-command verbs
@@ -3302,7 +2372,7 @@ export type HostLegacyCommand = Message<"agentrepl.v1.HostLegacyCommand"> & {
  * Use `create(HostLegacyCommandSchema)` to create a new message.
  */
 export const HostLegacyCommandSchema: GenMessage<HostLegacyCommand> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 91);
+  messageDesc(file_agentrepl_v1_shared, 87);
 
 /**
  * The daemon-global scheduled-shutdown lease. Pushed to every connected
@@ -3347,7 +2417,7 @@ export type ShutdownScheduleView = Message<"agentrepl.v1.ShutdownScheduleView"> 
  * Use `create(ShutdownScheduleViewSchema)` to create a new message.
  */
 export const ShutdownScheduleViewSchema: GenMessage<ShutdownScheduleView> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 92);
+  messageDesc(file_agentrepl_v1_shared, 88);
 
 /**
  * Deliberately empty: the arm being set IS the state.
@@ -3362,7 +2432,7 @@ export type ShutdownScheduleIdle = Message<"agentrepl.v1.ShutdownScheduleIdle"> 
  * Use `create(ShutdownScheduleIdleSchema)` to create a new message.
  */
 export const ShutdownScheduleIdleSchema: GenMessage<ShutdownScheduleIdle> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 93);
+  messageDesc(file_agentrepl_v1_shared, 89);
 
 /**
  * The held lease. The holds list is the complete, live answer to "what is
@@ -3420,7 +2490,7 @@ export type ShutdownScheduleDraining = Message<"agentrepl.v1.ShutdownScheduleDra
  * Use `create(ShutdownScheduleDrainingSchema)` to create a new message.
  */
 export const ShutdownScheduleDrainingSchema: GenMessage<ShutdownScheduleDraining> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 94);
+  messageDesc(file_agentrepl_v1_shared, 90);
 
 /**
  * One workspace the drain is waiting on, and why. At least one of turn and
@@ -3469,7 +2539,7 @@ export type ShutdownHold = Message<"agentrepl.v1.ShutdownHold"> & {
  * Use `create(ShutdownHoldSchema)` to create a new message.
  */
 export const ShutdownHoldSchema: GenMessage<ShutdownHold> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 95);
+  messageDesc(file_agentrepl_v1_shared, 91);
 
 /**
  * An active turn blocks the drain. Carries the turn id so logs, the webapp,
@@ -3489,7 +2559,7 @@ export type ShutdownHoldTurn = Message<"agentrepl.v1.ShutdownHoldTurn"> & {
  * Use `create(ShutdownHoldTurnSchema)` to create a new message.
  */
 export const ShutdownHoldTurnSchema: GenMessage<ShutdownHoldTurn> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 96);
+  messageDesc(file_agentrepl_v1_shared, 92);
 
 /**
  * Live async tasks block the drain. The count is display-grade summary; the
@@ -3509,7 +2579,7 @@ export type ShutdownHoldTasks = Message<"agentrepl.v1.ShutdownHoldTasks"> & {
  * Use `create(ShutdownHoldTasksSchema)` to create a new message.
  */
 export const ShutdownHoldTasksSchema: GenMessage<ShutdownHoldTasks> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 97);
+  messageDesc(file_agentrepl_v1_shared, 93);
 
 /**
  * The daemon's notice that it is about to go down ON PURPOSE.
@@ -3589,7 +2659,7 @@ export type RestartPendingView = Message<"agentrepl.v1.RestartPendingView"> & {
  * Use `create(RestartPendingViewSchema)` to create a new message.
  */
 export const RestartPendingViewSchema: GenMessage<RestartPendingView> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 98);
+  messageDesc(file_agentrepl_v1_shared, 94);
 
 /**
  * Live progress of the workspace's current (or most recent) merge run.
@@ -3684,7 +2754,7 @@ export type MergeStatus = Message<"agentrepl.v1.MergeStatus"> & {
  * Use `create(MergeStatusSchema)` to create a new message.
  */
 export const MergeStatusSchema: GenMessage<MergeStatus> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 99);
+  messageDesc(file_agentrepl_v1_shared, 95);
 
 /**
  * @generated from message agentrepl.v1.MergeStatusEnqueued
@@ -3708,7 +2778,7 @@ export type MergeStatusEnqueued = Message<"agentrepl.v1.MergeStatusEnqueued"> & 
  * Use `create(MergeStatusEnqueuedSchema)` to create a new message.
  */
 export const MergeStatusEnqueuedSchema: GenMessage<MergeStatusEnqueued> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 100);
+  messageDesc(file_agentrepl_v1_shared, 96);
 
 /**
  * @generated from message agentrepl.v1.MergeStatusBeforeAction
@@ -3727,7 +2797,7 @@ export type MergeStatusBeforeAction = Message<"agentrepl.v1.MergeStatusBeforeAct
  * Use `create(MergeStatusBeforeActionSchema)` to create a new message.
  */
 export const MergeStatusBeforeActionSchema: GenMessage<MergeStatusBeforeAction> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 101);
+  messageDesc(file_agentrepl_v1_shared, 97);
 
 /**
  * @generated from message agentrepl.v1.MergeStatusCherryPicking
@@ -3759,7 +2829,7 @@ export type MergeStatusCherryPicking = Message<"agentrepl.v1.MergeStatusCherryPi
  * Use `create(MergeStatusCherryPickingSchema)` to create a new message.
  */
 export const MergeStatusCherryPickingSchema: GenMessage<MergeStatusCherryPicking> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 102);
+  messageDesc(file_agentrepl_v1_shared, 98);
 
 /**
  * @generated from message agentrepl.v1.MergeStatusTesting
@@ -3793,7 +2863,7 @@ export type MergeStatusTesting = Message<"agentrepl.v1.MergeStatusTesting"> & {
  * Use `create(MergeStatusTestingSchema)` to create a new message.
  */
 export const MergeStatusTestingSchema: GenMessage<MergeStatusTesting> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 103);
+  messageDesc(file_agentrepl_v1_shared, 99);
 
 /**
  * @generated from message agentrepl.v1.MergeStatusConflict
@@ -3825,7 +2895,7 @@ export type MergeStatusConflict = Message<"agentrepl.v1.MergeStatusConflict"> & 
  * Use `create(MergeStatusConflictSchema)` to create a new message.
  */
 export const MergeStatusConflictSchema: GenMessage<MergeStatusConflict> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 104);
+  messageDesc(file_agentrepl_v1_shared, 100);
 
 /**
  * @generated from message agentrepl.v1.MergeStatusAfterAction
@@ -3842,7 +2912,7 @@ export type MergeStatusAfterAction = Message<"agentrepl.v1.MergeStatusAfterActio
  * Use `create(MergeStatusAfterActionSchema)` to create a new message.
  */
 export const MergeStatusAfterActionSchema: GenMessage<MergeStatusAfterAction> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 105);
+  messageDesc(file_agentrepl_v1_shared, 101);
 
 /**
  * @generated from message agentrepl.v1.MergeStatusMerged
@@ -3866,7 +2936,7 @@ export type MergeStatusMerged = Message<"agentrepl.v1.MergeStatusMerged"> & {
  * Use `create(MergeStatusMergedSchema)` to create a new message.
  */
 export const MergeStatusMergedSchema: GenMessage<MergeStatusMerged> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 106);
+  messageDesc(file_agentrepl_v1_shared, 102);
 
 /**
  * @generated from message agentrepl.v1.MergeStatusFailed
@@ -3934,7 +3004,7 @@ export type MergeStatusFailed = Message<"agentrepl.v1.MergeStatusFailed"> & {
  * Use `create(MergeStatusFailedSchema)` to create a new message.
  */
 export const MergeStatusFailedSchema: GenMessage<MergeStatusFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 107);
+  messageDesc(file_agentrepl_v1_shared, 103);
 
 /**
  * The WHOLE merge queue, as the daemon will actually drain it: the global
@@ -3978,7 +3048,7 @@ export type MergeQueueRoster = Message<"agentrepl.v1.MergeQueueRoster"> & {
  * Use `create(MergeQueueRosterSchema)` to create a new message.
  */
 export const MergeQueueRosterSchema: GenMessage<MergeQueueRoster> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 108);
+  messageDesc(file_agentrepl_v1_shared, 104);
 
 /**
  * @generated from message agentrepl.v1.MergeRepoQueue
@@ -4006,7 +3076,7 @@ export type MergeRepoQueue = Message<"agentrepl.v1.MergeRepoQueue"> & {
  * Use `create(MergeRepoQueueSchema)` to create a new message.
  */
 export const MergeRepoQueueSchema: GenMessage<MergeRepoQueue> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 109);
+  messageDesc(file_agentrepl_v1_shared, 105);
 
 /**
  * @generated from message agentrepl.v1.MergeQueueEntry
@@ -4080,7 +3150,7 @@ export type MergeQueueEntry = Message<"agentrepl.v1.MergeQueueEntry"> & {
  * Use `create(MergeQueueEntrySchema)` to create a new message.
  */
 export const MergeQueueEntrySchema: GenMessage<MergeQueueEntry> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 110);
+  messageDesc(file_agentrepl_v1_shared, 106);
 
 /**
  * @generated from message agentrepl.v1.MergeQueueHeadRunning
@@ -4093,7 +3163,7 @@ export type MergeQueueHeadRunning = Message<"agentrepl.v1.MergeQueueHeadRunning"
  * Use `create(MergeQueueHeadRunningSchema)` to create a new message.
  */
 export const MergeQueueHeadRunningSchema: GenMessage<MergeQueueHeadRunning> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 111);
+  messageDesc(file_agentrepl_v1_shared, 107);
 
 /**
  * @generated from message agentrepl.v1.MergeQueueHeadPausedWaiting
@@ -4106,7 +3176,7 @@ export type MergeQueueHeadPausedWaiting = Message<"agentrepl.v1.MergeQueueHeadPa
  * Use `create(MergeQueueHeadPausedWaitingSchema)` to create a new message.
  */
 export const MergeQueueHeadPausedWaitingSchema: GenMessage<MergeQueueHeadPausedWaiting> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 112);
+  messageDesc(file_agentrepl_v1_shared, 108);
 
 /**
  * @generated from message agentrepl.v1.MergeQueueHeadTerminalOwed
@@ -4119,7 +3189,7 @@ export type MergeQueueHeadTerminalOwed = Message<"agentrepl.v1.MergeQueueHeadTer
  * Use `create(MergeQueueHeadTerminalOwedSchema)` to create a new message.
  */
 export const MergeQueueHeadTerminalOwedSchema: GenMessage<MergeQueueHeadTerminalOwed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 113);
+  messageDesc(file_agentrepl_v1_shared, 109);
 
 /**
  * THE INTERRUPT'S QUEUE HALF, ASKED RATHER THAN PERFORMED.
@@ -4200,7 +3270,7 @@ export type MergeDequeueOffer = Message<"agentrepl.v1.MergeDequeueOffer"> & {
  * Use `create(MergeDequeueOfferSchema)` to create a new message.
  */
 export const MergeDequeueOfferSchema: GenMessage<MergeDequeueOffer> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 114);
+  messageDesc(file_agentrepl_v1_shared, 110);
 
 /**
  * The merge is on the queue BEHIND another one, and nothing of it has run.
@@ -4237,7 +3307,7 @@ export type MergeDequeueWaiting = Message<"agentrepl.v1.MergeDequeueWaiting"> & 
  * Use `create(MergeDequeueWaitingSchema)` to create a new message.
  */
 export const MergeDequeueWaitingSchema: GenMessage<MergeDequeueWaiting> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 115);
+  messageDesc(file_agentrepl_v1_shared, 111);
 
 /**
  * The merge IS the head and its run is in flight. Dequeuing it ABORTS that
@@ -4267,7 +3337,7 @@ export type MergeDequeueRunning = Message<"agentrepl.v1.MergeDequeueRunning"> & 
  * Use `create(MergeDequeueRunningSchema)` to create a new message.
  */
 export const MergeDequeueRunningSchema: GenMessage<MergeDequeueRunning> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 116);
+  messageDesc(file_agentrepl_v1_shared, 112);
 
 /**
  * Take the merge off the queue — evict it while waiting, abort it while
@@ -4283,7 +3353,7 @@ export type MergeDequeueConfirm = Message<"agentrepl.v1.MergeDequeueConfirm"> & 
  * Use `create(MergeDequeueConfirmSchema)` to create a new message.
  */
 export const MergeDequeueConfirmSchema: GenMessage<MergeDequeueConfirm> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 117);
+  messageDesc(file_agentrepl_v1_shared, 113);
 
 /**
  * Leave the merge alone. The offer is cleared and the merge proceeds.
@@ -4298,192 +3368,7 @@ export type MergeDequeueDecline = Message<"agentrepl.v1.MergeDequeueDecline"> & 
  * Use `create(MergeDequeueDeclineSchema)` to create a new message.
  */
 export const MergeDequeueDeclineSchema: GenMessage<MergeDequeueDecline> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_shared, 118);
-
-/**
- * A slash command the CLI answers ITSELF, rather than a prompt for the agent.
- *
- * THE CLOSED SET IS THE POINT. The daemon recognizes a submitted prompt as one
- * of these before it forwards it (sessioncontroller/sessioncommand.go), and a
- * recognized command earns NO user message — so the set of things that can
- * suppress one is exactly the set of names below, fixed on the wire and
- * reviewable in one place. A command that is not here is a prompt, and a
- * prompt is always drawn.
- *
- * A custom command (a skill, a project command) is deliberately absent and
- * always will be: those EXPAND into a prompt for the agent, so the text the
- * user typed really is the turn's opening and really does belong in the feed.
- *
- * @generated from enum agentrepl.v1.SessionCommand
- */
-export enum SessionCommand {
-  /**
-   * Never set by the daemon. A receiver seeing UNSPECIFIED is looking at a
-   * malformed frame and must reject it loudly rather than pick a command.
-   *
-   * It carries NO spec, deliberately: it names no command, so there is no
-   * literal to spell and nothing a recognizer could ever match it against.
-   *
-   * @generated from enum value: SESSION_COMMAND_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_CLEAR = 1;
-   */
-  CLEAR = 1,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_COMPACT = 2;
-   */
-  COMPACT = 2,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_MODEL = 3;
-   */
-  MODEL = 3,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_COST = 4;
-   */
-  COST = 4,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_USAGE = 5;
-   */
-  USAGE = 5,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_STATUS = 6;
-   */
-  STATUS = 6,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_CONTEXT = 7;
-   */
-  CONTEXT = 7,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_CONFIG = 8;
-   */
-  CONFIG = 8,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_HELP = 9;
-   */
-  HELP = 9,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_DOCTOR = 10;
-   */
-  DOCTOR = 10,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_LOGIN = 11;
-   */
-  LOGIN = 11,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_LOGOUT = 12;
-   */
-  LOGOUT = 12,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_MEMORY = 13;
-   */
-  MEMORY = 13,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_PERMISSIONS = 14;
-   */
-  PERMISSIONS = 14,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_AGENTS = 15;
-   */
-  AGENTS = 15,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_MCP = 16;
-   */
-  MCP = 16,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_HOOKS = 17;
-   */
-  HOOKS = 17,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_OUTPUT_STYLE = 18;
-   */
-  OUTPUT_STYLE = 18,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_RELEASE_NOTES = 19;
-   */
-  RELEASE_NOTES = 19,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_TODOS = 20;
-   */
-  TODOS = 20,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_EXPORT = 21;
-   */
-  EXPORT = 21,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_ADD_DIR = 22;
-   */
-  ADD_DIR = 22,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_RESUME = 23;
-   */
-  RESUME = 23,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_EXIT = 24;
-   */
-  EXIT = 24,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_PRIVACY_SETTINGS = 25;
-   */
-  PRIVACY_SETTINGS = 25,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_STATUSLINE = 26;
-   */
-  STATUSLINE = 26,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_TERMINAL_SETUP = 27;
-   */
-  TERMINAL_SETUP = 27,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_VIM = 28;
-   */
-  VIM = 28,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_REWIND = 29;
-   */
-  REWIND = 29,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_BUG = 30;
-   */
-  BUG = 30,
-}
-
-/**
- * Describes the enum agentrepl.v1.SessionCommand.
- */
-export const SessionCommandSchema: GenEnum<SessionCommand> = /*@__PURE__*/
-  enumDesc(file_agentrepl_v1_shared, 0);
+  messageDesc(file_agentrepl_v1_shared, 114);
 
 /**
  * What a revival compaction is allowed to summarize away.
@@ -4544,7 +3429,7 @@ export enum CompactionScope {
  * Describes the enum agentrepl.v1.CompactionScope.
  */
 export const CompactionScopeSchema: GenEnum<CompactionScope> = /*@__PURE__*/
-  enumDesc(file_agentrepl_v1_shared, 1);
+  enumDesc(file_agentrepl_v1_shared, 0);
 
 /**
  * Session creation over UDS (replaces Emacs POST /sessions).
@@ -4613,7 +3498,7 @@ export enum ResumeMode {
  * Describes the enum agentrepl.v1.ResumeMode.
  */
 export const ResumeModeSchema: GenEnum<ResumeMode> = /*@__PURE__*/
-  enumDesc(file_agentrepl_v1_shared, 2);
+  enumDesc(file_agentrepl_v1_shared, 1);
 
 /**
  * The severity of a ClientLogRequest. A closed vocabulary rather than a free
@@ -4647,11 +3532,5 @@ export enum ClientLogLevel {
  * Describes the enum agentrepl.v1.ClientLogLevel.
  */
 export const ClientLogLevelSchema: GenEnum<ClientLogLevel> = /*@__PURE__*/
-  enumDesc(file_agentrepl_v1_shared, 3);
-
-/**
- * @generated from extension: agentrepl.v1.SessionCommandSpec session_command_spec = 60002;
- */
-export const session_command_spec: GenExtension<EnumValueOptions, SessionCommandSpec> = /*@__PURE__*/
-  extDesc(file_agentrepl_v1_shared, 0);
+  enumDesc(file_agentrepl_v1_shared, 2);
 
