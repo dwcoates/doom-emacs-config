@@ -2364,7 +2364,7 @@ func (x *DetachedLost) GetInference() string {
 	return ""
 }
 
-// A fragment of a message still arriving.
+// A fragment of a message's PROSE still arriving.
 //
 // The stream plane hands these straight to the daemon as they are typed; the
 // file plane writes the completed message afterwards. A consumer REPLACES the
@@ -2387,11 +2387,16 @@ type ContentArriving struct {
 	// What is arriving. Which arm is set says which KIND of block is being
 	// extended, so a preview never has to guess what it is showing.
 	//
+	// PROSE ONLY. There is no arm for tool arguments: an argument fragment is
+	// partial vendor JSON, and `{"file_pa` draws nothing, so streaming it bought
+	// a consumer-side parser and no picture. Tool arguments arrive complete,
+	// once, as `ToolCallBlock.arguments` — a typed `Struct`, for the reason that
+	// field already states.
+	//
 	// Types that are valid to be assigned to Fragment:
 	//
 	//	*ContentArriving_Text
 	//	*ContentArriving_Thinking
-	//	*ContentArriving_ArgumentsJson
 	Fragment      isContentArriving_Fragment `protobuf_oneof:"fragment"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2459,15 +2464,6 @@ func (x *ContentArriving) GetThinking() string {
 	return ""
 }
 
-func (x *ContentArriving) GetArgumentsJson() string {
-	if x != nil {
-		if x, ok := x.Fragment.(*ContentArriving_ArgumentsJson); ok {
-			return x.ArgumentsJson
-		}
-	}
-	return ""
-}
-
 type isContentArriving_Fragment interface {
 	isContentArriving_Fragment()
 }
@@ -2482,18 +2478,9 @@ type ContentArriving_Thinking struct {
 	Thinking string `protobuf:"bytes,3,opt,name=thinking,proto3,oneof"`
 }
 
-type ContentArriving_ArgumentsJson struct {
-	// Tool arguments, arriving as the agent composes them. A string because it
-	// is INCOMPLETE JSON until the last fragment lands; typing it as Struct
-	// would claim it parses when it does not yet.
-	ArgumentsJson string `protobuf:"bytes,4,opt,name=arguments_json,json=argumentsJson,proto3,oneof"`
-}
-
 func (*ContentArriving_Text) isContentArriving_Fragment() {}
 
 func (*ContentArriving_Thinking) isContentArriving_Fragment() {}
-
-func (*ContentArriving_ArgumentsJson) isContentArriving_Fragment() {}
 
 var File_conversation_v1_payloads_proto protoreflect.FileDescriptor
 
@@ -2609,13 +2596,12 @@ const file_conversation_v1_payloads_proto_rawDesc = "" +
 	"\asummary\x18\x01 \x01(\tR\asummary\"\x13\n" +
 	"\x11DetachedCancelled\",\n" +
 	"\fDetachedLost\x12\x1c\n" +
-	"\tinference\x18\x01 \x01(\tR\tinference\"\x9b\x01\n" +
+	"\tinference\x18\x01 \x01(\tR\tinference\"r\n" +
 	"\x0fContentArriving\x12\x1f\n" +
 	"\vblock_index\x18\x01 \x01(\rR\n" +
 	"blockIndex\x12\x14\n" +
 	"\x04text\x18\x02 \x01(\tH\x00R\x04text\x12\x1c\n" +
-	"\bthinking\x18\x03 \x01(\tH\x00R\bthinking\x12'\n" +
-	"\x0earguments_json\x18\x04 \x01(\tH\x00R\rargumentsJsonB\n" +
+	"\bthinking\x18\x03 \x01(\tH\x00R\bthinkingB\n" +
 	"\n" +
 	"\bfragmentB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
@@ -2765,7 +2751,6 @@ func file_conversation_v1_payloads_proto_init() {
 	file_conversation_v1_payloads_proto_msgTypes[39].OneofWrappers = []any{
 		(*ContentArriving_Text)(nil),
 		(*ContentArriving_Thinking)(nil),
-		(*ContentArriving_ArgumentsJson)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
