@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/topbar.proto.
  */
 export const file_frontend_v1_topbar: GenFile = /*@__PURE__*/
-  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIvwBCgpUb3BiYXJWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRINCgV0aXRsZRgCIAEoCRIUCgxzZXNzaW9uX2xpbmUYAyABKAkSFQoNbW9kZWxfZGlzcGxheRgEIAEoCRIrCg1tb2RlbF9vcHRpb25zGAUgAygLMhQuc2hpbS52MS5Nb2RlbE9wdGlvbhI1Cgxjb25uZWN0aXZpdHkYBiABKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJDb25uZWN0aXZpdHkSDQoFZmVuY2UYByABKAkSLAoId2FybmluZ3MYCCADKAsyGi5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nImEKDVRvcGJhcldhcm5pbmcSDAoEdGV4dBgBIAEoCRI6CgphY2NvdW50aW5nGAIgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudGluZ1dhcm5pbmdIAEIGCgRraW5kIhkKF1RvcGJhckFjY291bnRpbmdXYXJuaW5nIkAKElRvcGJhckNvbm5lY3Rpdml0eRIMCgR0b25lGAEgASgJEg0KBWdseXBoGAIgASgJEg0KBXRpdGxlGAMgASgJIhwKC1NldE1vZGVsQ21kEg0KBW1vZGVsGAEgASgJIkcKEERhZW1vbkhlYWx0aFZpZXcSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdoZWFsdGh5GAIgASgIEg4KBnJlYXNvbhgDIAEoCSJvChFTZXNzaW9uSGVhbHRoVmlldxISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEg8KB2hlYWx0aHkYBCABKAgSDgoGcmVhc29uGAUgASgJIhEKD0RhZW1vbkhlYWx0aENtZCImChBTZXNzaW9uSGVhbHRoQ21kEhIKCnNlc3Npb25faWQYASABKAkibAoSVG9rZW5CcmVha2Rvd25WaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRI0CghzZWN0aW9ucxgCIAMoCzIiLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duU2VjdGlvbhINCgVmZW5jZRgDIAEoCSJUChVUb2tlbkJyZWFrZG93blNlY3Rpb24SDQoFbGFiZWwYASABKAkSLAoEcm93cxgCIAMoCzIeLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duUm93Im0KEVRva2VuQnJlYWtkb3duUm93Eg0KBWxhYmVsGAEgASgJEg4KBnRva2VucxgCIAEoAxIWCg5zaGFyZV9wZXJtaWxsZRgDIAEoBRISCgplbXBoYXNpemVkGAQgASgIEg0KBWRlcHRoGAUgASgFQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_shim_v1_core]);
+  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIvwBCgpUb3BiYXJWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRINCgV0aXRsZRgCIAEoCRIUCgxzZXNzaW9uX2xpbmUYAyABKAkSFQoNbW9kZWxfZGlzcGxheRgEIAEoCRIrCg1tb2RlbF9vcHRpb25zGAUgAygLMhQuc2hpbS52MS5Nb2RlbE9wdGlvbhI1Cgxjb25uZWN0aXZpdHkYBiABKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJDb25uZWN0aXZpdHkSDQoFZmVuY2UYByABKAkSLAoId2FybmluZ3MYCCADKAsyGi5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nImEKDVRvcGJhcldhcm5pbmcSDAoEdGV4dBgBIAEoCRI6CgphY2NvdW50aW5nGAIgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudGluZ1dhcm5pbmdIAEIGCgRraW5kIhkKF1RvcGJhckFjY291bnRpbmdXYXJuaW5nIkAKElRvcGJhckNvbm5lY3Rpdml0eRIMCgR0b25lGAEgASgJEg0KBWdseXBoGAIgASgJEg0KBXRpdGxlGAMgASgJIkMKC1NldE1vZGVsQ21kEhIKCnJlcXVlc3RfaWQYASABKAkSEQoJd29ya3NwYWNlGAIgASgJEg0KBW1vZGVsGAMgASgJIkcKEERhZW1vbkhlYWx0aFZpZXcSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdoZWFsdGh5GAIgASgIEg4KBnJlYXNvbhgDIAEoCSJvChFTZXNzaW9uSGVhbHRoVmlldxISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEg8KB2hlYWx0aHkYBCABKAgSDgoGcmVhc29uGAUgASgJIjgKD0RhZW1vbkhlYWx0aENtZBISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCWNsaWVudF9pZBgCIAEoCSJgChBTZXNzaW9uSGVhbHRoQ21kEhIKCnJlcXVlc3RfaWQYASABKAkSEQoJd29ya3NwYWNlGAIgASgJEhEKCWNsaWVudF9pZBgDIAEoCRISCgpzZXNzaW9uX2lkGAQgASgJImwKElRva2VuQnJlYWtkb3duVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSNAoIc2VjdGlvbnMYAiADKAsyIi5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blNlY3Rpb24SDQoFZmVuY2UYAyABKAkiVAoVVG9rZW5CcmVha2Rvd25TZWN0aW9uEg0KBWxhYmVsGAEgASgJEiwKBHJvd3MYAiADKAsyHi5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blJvdyJtChFUb2tlbkJyZWFrZG93blJvdxINCgVsYWJlbBgBIAEoCRIOCgZ0b2tlbnMYAiABKAMSFgoOc2hhcmVfcGVybWlsbGUYAyABKAUSEgoKZW1waGFzaXplZBgEIAEoCBINCgVkZXB0aBgFIAEoBUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_shim_v1_core]);
 
 /**
  * One workspace's topbar, resolved completely by the daemon. The client
@@ -226,7 +226,22 @@ export const TopbarConnectivitySchema: GenMessage<TopbarConnectivity> = /*@__PUR
  */
 export type SetModelCmd = Message<"frontend.v1.SetModelCmd"> & {
   /**
-   * @generated from field: string model = 1;
+   * Correlation. See agentrepl.v1.AgentRepl.
+   *
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * The workspace whose live session is being re-modelled. See
+   * agentrepl.v1.AgentRepl.
+   *
+   * @generated from field: string workspace = 2;
+   */
+  workspace: string;
+
+  /**
+   * @generated from field: string model = 3;
    */
   model: string;
 };
@@ -329,6 +344,22 @@ export const SessionHealthViewSchema: GenMessage<SessionHealthView> = /*@__PURE_
  * @generated from message frontend.v1.DaemonHealthCmd
  */
 export type DaemonHealthCmd = Message<"frontend.v1.DaemonHealthCmd"> & {
+  /**
+   * Correlation. The DaemonHealthView pushed in answer echoes this id, which is
+   * how Emacs knows the verdict is the one it asked for.
+   *
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * WHICH SUBSCRIBE STREAM the DaemonHealthView should be pushed down. See
+   * agentrepl.v1.SubscribeRequest.client_id. Daemon-global otherwise: no
+   * workspace.
+   *
+   * @generated from field: string client_id = 2;
+   */
+  clientId: string;
 };
 
 /**
@@ -341,8 +372,8 @@ export const DaemonHealthCmdSchema: GenMessage<DaemonHealthCmd> = /*@__PURE__*/
 /**
  * Ask the daemon to prove the entire session route for one restored workspace:
  * daemon registry -> current session controller -> handshaked shim -> shim dependencies.
- * The command's outer workspace is authoritative and must equal the session's
- * CWD; SESSION_ID makes a stale response impossible to use after a rebind.
+ * `workspace` is authoritative and must be the session's absolute CWD;
+ * `session_id` makes a stale response impossible to use after a rebind.
  *
  * HOST SURFACE, like its view.
  *
@@ -350,7 +381,29 @@ export const DaemonHealthCmdSchema: GenMessage<DaemonHealthCmd> = /*@__PURE__*/
  */
 export type SessionHealthCmd = Message<"frontend.v1.SessionHealthCmd"> & {
   /**
-   * @generated from field: string session_id = 1;
+   * Correlation. The SessionHealthView pushed in answer echoes this id.
+   *
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * The workspace whose route is being proved. See agentrepl.v1.AgentRepl.
+   *
+   * @generated from field: string workspace = 2;
+   */
+  workspace: string;
+
+  /**
+   * WHICH SUBSCRIBE STREAM the SessionHealthView should be pushed down. See
+   * agentrepl.v1.SubscribeRequest.client_id.
+   *
+   * @generated from field: string client_id = 3;
+   */
+  clientId: string;
+
+  /**
+   * @generated from field: string session_id = 4;
    */
   sessionId: string;
 };

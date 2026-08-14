@@ -2350,11 +2350,16 @@ func (x *FailureCardRef) GetCardUuid() string {
 }
 
 type PermissionAnswerCmd struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	PermissionRequestId string                 `protobuf:"bytes,1,opt,name=permission_request_id,json=permissionRequestId,proto3" json:"permission_request_id,omitempty"`
-	Allow               bool                   `protobuf:"varint,2,opt,name=allow,proto3" json:"allow,omitempty"`
-	UpdatedInput        *structpb.Struct       `protobuf:"bytes,3,opt,name=updated_input,json=updatedInput,proto3" json:"updated_input,omitempty"`
-	DenyMessage         string                 `protobuf:"bytes,4,opt,name=deny_message,json=denyMessage,proto3" json:"deny_message,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See agentrepl.v1.AgentRepl.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace whose shim is blocked on this answer. See
+	// agentrepl.v1.AgentRepl.
+	Workspace           string           `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	PermissionRequestId string           `protobuf:"bytes,3,opt,name=permission_request_id,json=permissionRequestId,proto3" json:"permission_request_id,omitempty"`
+	Allow               bool             `protobuf:"varint,4,opt,name=allow,proto3" json:"allow,omitempty"`
+	UpdatedInput        *structpb.Struct `protobuf:"bytes,5,opt,name=updated_input,json=updatedInput,proto3" json:"updated_input,omitempty"`
+	DenyMessage         string           `protobuf:"bytes,6,opt,name=deny_message,json=denyMessage,proto3" json:"deny_message,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -2387,6 +2392,20 @@ func (x *PermissionAnswerCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PermissionAnswerCmd.ProtoReflect.Descriptor instead.
 func (*PermissionAnswerCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *PermissionAnswerCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *PermissionAnswerCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
 }
 
 func (x *PermissionAnswerCmd) GetPermissionRequestId() string {
@@ -3447,9 +3466,18 @@ func (x *PageScopeInside) GetContainerMessageId() string {
 // its seq space, or lost its place calls this and starts from the bottom.
 type FirstPageCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. The ConversationHistoryPage pushed in answer echoes this id,
+	// so a client can DISCARD a page it is no longer awaiting.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// WHICH READER, and therefore which Subscribe stream the page is pushed down.
+	// The daemon's position is per READER per workspace per scope, and under a
+	// service a paging call no longer shares a socket with the stream that
+	// answers it — so the reader has to name itself. See
+	// agentrepl.v1.SubscribeRequest.client_id.
+	ClientId string `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	// Which conversation. The daemon's position is per reader PER WORKSPACE, so
 	// this is what selects the position being reset.
-	Workspace string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Workspace string `protobuf:"bytes,3,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// WHICH CONTAINER this page walks: the feed, or the inside of one message.
 	// The daemon's position is per reader per workspace PER SCOPE, so this also
 	// selects which position is being reset — opening a subagent does not throw
@@ -3458,7 +3486,7 @@ type FirstPageCmd struct {
 	// Unset is NOT a default. A request that does not state its scope is REFUSED,
 	// never read as the feed: defaulting would answer a client that forgot to
 	// name its container with the whole conversation.
-	Scope         *PageScope `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
+	Scope         *PageScope `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3493,6 +3521,20 @@ func (*FirstPageCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{41}
 }
 
+func (x *FirstPageCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *FirstPageCmd) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
 func (x *FirstPageCmd) GetWorkspace() string {
 	if x != nil {
 		return x.Workspace
@@ -3514,8 +3556,13 @@ func (x *FirstPageCmd) GetScope() *PageScope {
 // defaulting would turn a client bug into a silent tail read, and "I have no
 // position" already has its own verb.
 type NextPageCmd struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See FirstPageCmd.request_id.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// WHICH READER, and therefore whose position is being walked back and which
+	// stream the page arrives on. See FirstPageCmd.client_id.
+	ClientId  string `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	Workspace string `protobuf:"bytes,3,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// WHICH CONTAINER to walk back through. It names the scope, never a position
 	// within it — the daemon still owns where this reader is inside that scope,
 	// so the no-position rule above is untouched.
@@ -3523,7 +3570,7 @@ type NextPageCmd struct {
 	// Unset is NOT a default and is REFUSED, exactly as on FirstPageCmd: a
 	// load-more that forgot which container it belongs to must not silently walk
 	// back through the feed instead.
-	Scope         *PageScope `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
+	Scope         *PageScope `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3556,6 +3603,20 @@ func (x *NextPageCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use NextPageCmd.ProtoReflect.Descriptor instead.
 func (*NextPageCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *NextPageCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *NextPageCmd) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
 }
 
 func (x *NextPageCmd) GetWorkspace() string {
@@ -3950,12 +4011,15 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x0eresolved_at_ms\x18\x01 \x01(\x03R\fresolvedAtMs\"\x15\n" +
 	"\x13FailureCardTerminal\"-\n" +
 	"\x0eFailureCardRef\x12\x1b\n" +
-	"\tcard_uuid\x18\x01 \x01(\tR\bcardUuid\"\xc0\x01\n" +
-	"\x13PermissionAnswerCmd\x122\n" +
-	"\x15permission_request_id\x18\x01 \x01(\tR\x13permissionRequestId\x12\x14\n" +
-	"\x05allow\x18\x02 \x01(\bR\x05allow\x12<\n" +
-	"\rupdated_input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\fupdatedInput\x12!\n" +
-	"\fdeny_message\x18\x04 \x01(\tR\vdenyMessage\"\xcf\x01\n" +
+	"\tcard_uuid\x18\x01 \x01(\tR\bcardUuid\"\xfd\x01\n" +
+	"\x13PermissionAnswerCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x122\n" +
+	"\x15permission_request_id\x18\x03 \x01(\tR\x13permissionRequestId\x12\x14\n" +
+	"\x05allow\x18\x04 \x01(\bR\x05allow\x12<\n" +
+	"\rupdated_input\x18\x05 \x01(\v2\x17.google.protobuf.StructR\fupdatedInput\x12!\n" +
+	"\fdeny_message\x18\x06 \x01(\tR\vdenyMessage\"\xcf\x01\n" +
 	"\fDetachedWork\x12>\n" +
 	"\astarted\x18\x01 \x01(\v2$.conversation.v1.DetachedWorkStartedR\astarted\x12\"\n" +
 	"\rstarted_at_ms\x18\x02 \x01(\x03R\vstartedAtMs\x12=\n" +
@@ -4002,13 +4066,19 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x05scope\"\x0f\n" +
 	"\rPageScopeFeed\"C\n" +
 	"\x0fPageScopeInside\x120\n" +
-	"\x14container_message_id\x18\x01 \x01(\tR\x12containerMessageId\"Z\n" +
-	"\fFirstPageCmd\x12\x1c\n" +
-	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12,\n" +
-	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"Y\n" +
-	"\vNextPageCmd\x12\x1c\n" +
-	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12,\n" +
-	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"\x84\x03\n" +
+	"\x14container_message_id\x18\x01 \x01(\tR\x12containerMessageId\"\x96\x01\n" +
+	"\fFirstPageCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
+	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1c\n" +
+	"\tworkspace\x18\x03 \x01(\tR\tworkspace\x12,\n" +
+	"\x05scope\x18\x04 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"\x95\x01\n" +
+	"\vNextPageCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
+	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1c\n" +
+	"\tworkspace\x18\x03 \x01(\tR\tworkspace\x12,\n" +
+	"\x05scope\x18\x04 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"\x84\x03\n" +
 	"\x17ConversationHistoryPage\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
