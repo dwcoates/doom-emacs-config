@@ -108,11 +108,11 @@ export const file_agentrepl_v1_service: GenFile = /*@__PURE__*/
  * THE ENVELOPE FIELDS NOW LIVE ON THE COMMANDS THEMSELVES, and this is the one
  * place their meaning is stated.
  *
- *   `request_id` — client-minted correlation, on EVERY request below. It is NOT
- *   made redundant by the call/response pairing. A call returns an ack, but a
- *   command's EFFECT is pushed later on the Subscribe stream in a frame that
- *   carries this same id, and the daemon's durable turn ledger uses it as the
- *   turn key. Correlation outlives the call.
+ *   `request_id` — client-minted correlation, on EVERY request below and echoed
+ *   on every response. It is NOT made redundant by the call/response pairing. A
+ *   call returns an answer, but a command's EFFECT is pushed later on the
+ *   Subscribe stream in a frame that carries this same id, and the daemon's
+ *   durable turn ledger uses it as the turn key. Correlation outlives the call.
  *
  *   `workspace` — the daemon's workspace KEY, which is the session's ABSOLUTE
  *   cwd, never a display name. It appears ONLY on the workspace-addressed
@@ -122,19 +122,30 @@ export const file_agentrepl_v1_service: GenFile = /*@__PURE__*/
  *   the receiver ignores is a field a caller can be wrong about, and now those
  *   commands have nowhere to be wrong.
  *
- * FAILURES ARE RETURNED DATA, NEVER A TRANSPORT STATUS. Every unary method
- * below returns a message on refusal — see CommandAck.failure and the
- * FailureKind vocabulary in shared.proto. A refusal is a classified account the
- * frontends RENDER, and a status code is a number with a string stapled to it.
+ * EVERY RESPONSE IS A TWO-ARM ONEOF: `<Method>Success` or `<Method>Error`, and
+ * never both, never neither. A failure CAUSED BY a request travels in that
+ * request's own response and nowhere else — not as a transport status, whose
+ * whole payload is a number with a string stapled to it, and not on the push
+ * stream, which no caller can correlate to the call it answers.
+ *
+ * EACH `<Method>Error` IS A CLOSED SET OF ARMS derived from that method's real
+ * refusal paths, so a refusal a handler can produce is a case a client can be
+ * made to handle, and a refusal nobody implements is a case that does not
+ * exist. The 33 methods used to share one `CommandAck` whose `ok` bit and
+ * optional failure could be combined into states nothing meant.
+ *
+ * A FAILURE THAT ANSWERS NOBODY IS NOT COVERED BY THAT RULE AND MUST NOT BE.
+ * A session dying mid-turn, a rate limit, a shim crash: these are not answers,
+ * they arrive on the Subscribe stream as frontend.v1.FailureCardView, and they
+ * are named by frontend.v1.FailureKind rather than by any error type here.
+ * Folding them in would delete the failure card.
  *
  * EVERY METHOD HAS ITS OWN REQUEST AND RESPONSE TYPE, and they live one
  * endpoint per file in `endpoint_<snake_case_method>.proto` beside this one.
  * Nothing on a signature below is qualified, because a request type is part of
  * the API a client CALLS and this package IS that API — what a client DRAWS is
- * frontend.v1, and a command was never something anyone drew. Sharing
- * CommandAck as the response gave 33 methods one answer type, so no method
- * could grow a field without offering it to the other 32; each now wraps the
- * ack instead. See DESIGN-protobuf-surfaces.md.
+ * frontend.v1, and a command was never something anyone drew. See
+ * DESIGN-protobuf-surfaces.md.
  *
  * @generated from service agentrepl.v1.AgentRepl
  */
@@ -166,6 +177,11 @@ export const AgentRepl: GenService<{
    * deliberate, never an end-of-stream marker, and a client that misses it
    * treats the disconnect as unexplained exactly as before.
    *
+   * - summary: open the one ordered push channel, seeded by a connect snapshot and followed by every delta, view and failure card the daemon produces.
+   * - request: the reader's own client_id, and nothing else — it is what every command whose effect arrives here names so the daemon knows which stream to push down.
+   * - success: each stream element is one SubscribeResponse carrying one FrontendFrame; there are no arms, because a stream that opened has nothing to distinguish.
+   * - error: none — this is the one method with no error type. A subscription that cannot open fails the connection, and a failure AFTER it opens is by definition not this call's answer: it arrives on the stream itself as a FailureCardView.
+   *
    * @generated from rpc agentrepl.v1.AgentRepl.Subscribe
    */
   subscribe: {
@@ -174,10 +190,10 @@ export const AgentRepl: GenService<{
     output: typeof SubscribeResponseSchema;
   },
   /**
-   * Send the user's prompt to the workspace's session. The daemon may deliver
-   * it, hold it in the prompt queue, or refuse it outright (a hibernated
-   * session is nacked so no model use can precede a revival decision); the ack
-   * says which, and the prompt's own progress arrives on the stream.
+   * - summary: send the user's prompt to the workspace's session, to be delivered now or held in the prompt queue.
+   * - request: the workspace, the text, the turn's permission posture, and a required non-UNSPECIFIED origin naming which UI or automation acted; no arms.
+   * - success: the prompt was accepted; no arms, because whether it was delivered or queued is a classification the daemon reaches asynchronously and pushes as QueueView.
+   * - error: the arms separate a client fault (non-absolute workspace key, invalid origin) from a gate the user must clear (hibernated session, merge machinery holding the session) from a substrate that could not carry it (shim not spawned, not connected, refusing, or silent).
    *
    * @generated from rpc agentrepl.v1.AgentRepl.SubmitPrompt
    */
@@ -187,10 +203,10 @@ export const AgentRepl: GenService<{
     output: typeof SubmitPromptResponseSchema;
   },
   /**
-   * Stop the workspace's running turn. Answers with confirm_required rather
-   * than acting when no turn is live but detached subagents are — see
-   * InterruptResponse, which exists because that answer is neither a success
-   * nor a failure and could not honestly be spelled as either.
+   * - summary: stop the workspace's running turn, and raise the dequeue question for any merge it has on the queue.
+   * - request: an intent oneof — `interrupt` is the ordinary stop subject to the confirm gate, `confirm_interrupt` is the resend a client sends after its user answered the challenge; the arm IS the confirmation, which a bool could have asserted falsely.
+   * - success: `stopped` means the stop reached the shim; `confirmation_required` means nothing was delivered and the client owes its user a question — a success, because the command was understood and correctly processed and the answer is a question.
+   * - error: the arms separate a non-absolute workspace key from the two unwired dependencies that would silently skip the gate or leave the queued merge unreachable, from the dequeue question failing to go up, from the stop failing to land.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.Interrupt
    */
@@ -200,10 +216,10 @@ export const AgentRepl: GenService<{
     output: typeof InterruptResponseSchema;
   },
   /**
-   * Answer an outstanding permission card: allow, deny, or allow with edited
-   * input. The daemon relays the decision to the shim's canUseTool callback,
-   * which is blocked waiting on it, so a permission left unanswered stalls the
-   * turn — this is the only method whose absence hangs a session.
+   * - summary: answer an outstanding permission card, unblocking the shim's canUseTool callback that is waiting on it.
+   * - request: the permission request id plus a decision oneof — `allow` runs the call as proposed, `allow_edited` runs it with the user's replacement input, `deny` refuses it with an optional message for the agent.
+   * - success: the decision was relayed; no arms, because its real effect is the callback unblocking and the turn continuing, which is observed on the stream.
+   * - error: the arms separate a non-absolute workspace key from a shim that is absent, refusing, or silent — and every one of them leaves the turn stalled, which is why this is the only method whose absence hangs a session.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.AnswerPermission
    */
@@ -213,10 +229,10 @@ export const AgentRepl: GenService<{
     output: typeof AnswerPermissionResponseSchema;
   },
   /**
-   * Merge the workspace's branch into the target the daemon recorded when it
-   * created that workspace. The command states no geometry and names no
-   * handler; see MergeWorkspaceRequest for why a caller that stated either would be
-   * a second owner of the daemon's geometry map.
+   * - summary: merge the workspace's branch into the target the daemon recorded when it created that workspace.
+   * - request: the workspace key, its display name, and an intent oneof — `start` enqueues a new run, `resume_after_conflict` continues one already on the queue and already holding its lease; the command states no geometry and names no handler, because a caller that stated either would be a second owner of the daemon's map.
+   * - success: the merge is enqueued or its parked run is resuming; no arms and no position, because the queue's order is pushed as MergeQueueRoster and an admission-time position is stale before a caller renders it.
+   * - error: the arms separate an unstated intent from the geometry ladder (unwired, unreadable, unrecorded) from the visibility mark that must land before anything runs, from the coordinator's own refusal to enqueue.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.MergeWorkspace
    */
@@ -226,9 +242,10 @@ export const AgentRepl: GenService<{
     output: typeof MergeWorkspaceResponseSchema;
   },
   /**
-   * Retire the workspace: stop its session, release its worktree bookkeeping,
-   * and drop it from the roster. The request carries nothing but the envelope,
-   * which is the whole of what a close means.
+   * - summary: retire the workspace — stop its session, release its worktree bookkeeping, and drop it from the roster.
+   * - request: the workspace and nothing else, which is the whole of what a close means; no arms.
+   * - success: the workspace is retired; no arms, and no refusal for work in flight — a close is an explicit user action and the daemon does not overrule the human on their own workspace.
+   * - error: the arms separate a parked merge that could not be abandoned, which must not outlive the workspace its lease was taken over, from the lifecycle refusing the close itself.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.CloseWorkspace
    */
@@ -238,9 +255,10 @@ export const AgentRepl: GenService<{
     output: typeof CloseWorkspaceResponseSchema;
   },
   /**
-   * Reattach to the workspace's session, or start one when it has none. The
-   * request carries RUN PREFERENCES — posture and account — never a session
-   * identity: which session a workspace owns is the daemon's ruling.
+   * - summary: reattach to the workspace's session, or start one when it has none.
+   * - request: the workspace's RUN PREFERENCES — permission posture, account, the scripted-SDK flag and the ungated consent — never a session identity, because which session a workspace owns is the daemon's ruling; no arms.
+   * - success: the workspace has a session; no arms and no identity, which reaches the client as a pushed SessionView instead.
+   * - error: the arms separate a lifecycle that refused outright from the bring-up ladder — start failed, never established — and from the two continuity refusals that exist so a blank conversation is never started over an intact one.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.OpenWorkspace
    */
@@ -250,11 +268,10 @@ export const AgentRepl: GenService<{
     output: typeof OpenWorkspaceResponseSchema;
   },
   /**
-   * Replay the workspace's conversation from the client's last read position.
-   * The ack only says the replay was accepted; the records themselves arrive on
-   * the caller's Subscribe stream, which is why the request names its
-   * client_id. A fence that disagrees with the workspace's live one is REFUSED
-   * before anything is replayed.
+   * - summary: replay the workspace's conversation from the client's last read position onto its Subscribe stream.
+   * - request: the workspace, the reader's client_id, the mark to replay from, and the fence the client held AT DECISION TIME; no arms.
+   * - success: the replay was accepted; no arms and no records, because feed content has exactly one delivery shape on this protocol and it is not a unary response.
+   * - error: the arms separate a fence this daemon never minted — a superseded reconnect, carrying the reload to offer — from an unwired resyncer, from a mark counted in a retired seq space, from a re-pull already running.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.Resync
    */
@@ -264,10 +281,10 @@ export const AgentRepl: GenService<{
     output: typeof ResyncResponseSchema;
   },
   /**
-   * Bring up a session for a workspace. HOST SURFACE: a rendering frontend has
-   * no session vocabulary and never calls this. The response carries the
-   * vendor conversation uuid the create landed on, for observability only —
-   * see CreateSessionResponse for why a client must not persist it.
+   * - summary: bring up a session for a workspace. HOST SURFACE: a rendering frontend has no session vocabulary and never calls this.
+   * - request: the workspace cwd, the posture and account, an optional starting model, and the resume INTENT — which conversation to land on, resolved by the daemon rather than pointed at by the caller.
+   * - success: `established` means the shim is wired and healthy and the session is driveable now; `hibernated` means no shim was spawned and the revival gate stands, so a prompt sent now is nacked. Both carry the vendor uuid the create landed on, for observability only.
+   * - error: the arms are the resume ladder in the order it walks — a conversation named under the wrong mode, a retired mode, an unnamed explicit target, an unwired resolver, a conversation that cannot be resumed and cannot be replaced, an unknown mode — followed by the account, the establishment probe, and the requested model.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.CreateSession
    */
@@ -277,8 +294,10 @@ export const AgentRepl: GenService<{
     output: typeof CreateSessionResponseSchema;
   },
   /**
-   * Tear one session down by identity. HOST SURFACE, like every other method
-   * that addresses a session rather than a workspace.
+   * - summary: tear one session down by identity. HOST SURFACE, like every other method that addresses a session rather than a workspace.
+   * - request: the session id; deliberately not a workspace key, because the session may have outlived the binding a key would resolve through. No arms.
+   * - success: the session is terminal and its shim is stopped; no arms, and its disappearance from the catalog is observed on the stream.
+   * - error: one derived arm — the teardown itself failing, which is also how the registry reports a session id it does not know — plus the classifier's funnel. The set is thin because the handler validates nothing of its own, and inventing more would describe refusals no code performs.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.DeleteSession
    */
@@ -288,9 +307,10 @@ export const AgentRepl: GenService<{
     output: typeof DeleteSessionResponseSchema;
   },
   /**
-   * Shut the daemon down now. Session shims are PRESERVED unless the request
-   * asks otherwise, because a shim outlives its daemon by design and the next
-   * boot reattaches to it for free.
+   * - summary: shut the daemon down now, preserving session shims unless the request asks otherwise.
+   * - request: whether to also SIGTERM every session shim; the default preserves them, because a shim outlives its daemon by design and the next boot reattaches for free. No arms.
+   * - success: the teardown has begun; no arms, because it runs asynchronously and the caller's next evidence is the connection closing.
+   * - error: one derived arm — this daemon has no shutdown wired — plus the funnel. An unconfigured shutdown is a loud failure, never a silent no-op.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.Shutdown
    */
@@ -300,10 +320,10 @@ export const AgentRepl: GenService<{
     output: typeof ShutdownResponseSchema;
   },
   /**
-   * File one diagnostic line from a frontend into the daemon's log. The daemon
-   * WRITES these and does not act on them: a client log is evidence, never a
-   * control signal. It exists because the webapp runs inside an xwidget whose
-   * JS console nobody can see and nothing persists.
+   * - summary: file one diagnostic line from a frontend into the workspace's log. The daemon WRITES these and does not act on them: a client log is evidence, never a control signal.
+   * - request: the reporting workspace, a level from a closed vocabulary, the message, and an optional schemaless context payload; no arms.
+   * - success: the line is in the log; no arms, because a line the daemon wrote has no verdict beyond having been accepted.
+   * - error: the arms separate unwired persistence from a record that failed validation or arrived against a workspace state that had already moved on, from a write that failed — because a client whose evidence is silently dropped is debugging with a log that lies by omission.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.ClientLog
    */
@@ -313,8 +333,10 @@ export const AgentRepl: GenService<{
     output: typeof ClientLogResponseSchema;
   },
   /**
-   * Deliver a held queue entry NOW — the user overriding the classifier, or not
-   * waiting for it. Runs the same interject sequence an INTERJECT verdict does.
+   * - summary: deliver a held queue entry NOW, running the same interject sequence an INTERJECT verdict does.
+   * - request: the workspace and the entry id; the queue is per-workspace, so an entry id alone does not address one. No arms.
+   * - success: the interject sequence ran; no arms, and the delivery is observed as the queue view changing on the stream.
+   * - error: the arms separate an unwired queue and an unknown entry from the three things an entry can be stuck behind — no attached shim, a cache keep-alive, or a context cut, which is never interrupted and whose refusal is therefore permanent for this verb.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.ForceQueueEntry
    */
@@ -324,8 +346,10 @@ export const AgentRepl: GenService<{
     output: typeof ForceQueueEntryResponseSchema;
   },
   /**
-   * Confirm a HOLD entry. View state only: the entry is still delivered by the
-   * ordinary turn-end drain, on the schedule it already had.
+   * - summary: confirm a HOLD entry. View state only: the entry is still delivered by the ordinary turn-end drain, on the schedule it already had.
+   * - request: the workspace and the entry id; no arms.
+   * - success: the hold is confirmed; no arms, because the changed view state is pushed as QueueView.
+   * - error: two derived arms — an unwired queue and an unknown entry id — plus the funnel.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.AcceptQueueEntry
    */
@@ -335,7 +359,10 @@ export const AgentRepl: GenService<{
     output: typeof AcceptQueueEntryResponseSchema;
   },
   /**
-   * Drop a queue entry. It is never delivered.
+   * - summary: drop a queue entry. It is never delivered.
+   * - request: the workspace and the entry id; no arms.
+   * - success: the entry is off the queue; no arms, and its removal from the queue view is the whole observable effect.
+   * - error: two derived arms — an unwired queue and an unknown entry id, the second refused rather than acked because pretending to have dropped something specific is worse than saying it is gone.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.CancelQueueEntry
    */
@@ -345,11 +372,10 @@ export const AgentRepl: GenService<{
     output: typeof CancelQueueEntryResponseSchema;
   },
   /**
-   * Request one agent-repl workspace. THE SOLE CREATION INGRESS, for host UI
-   * requests and skill-produced JSON dispatches alike; the daemon owns name
-   * resolution, worktree creation, session startup and initial prompt delivery.
-   * The ack is a receipt that the job was accepted — the workspace itself
-   * arrives later as a WorkspaceAvailable frame.
+   * - summary: request one agent-repl workspace. THE SOLE CREATION INGRESS, for host UI requests and skill-produced JSON dispatches alike.
+   * - request: the requested name, the repository geometry to cut from, the lineage of who asked, the session posture, and an optional initial prompt held until the host materializes the workspace; no arms.
+   * - success: the job was accepted; no arms, because the workspace itself arrives later as a WorkspaceAvailable frame. Nothing in this daemon produces it today — see the error below.
+   * - error: one arm, and it is unconditional: creation is not accepted over the wire, because a second ingress would let a caller create a workspace the durable inbox never recorded. The remedy is to write the command file.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.CreateWorkspace
    */
@@ -359,9 +385,10 @@ export const AgentRepl: GenService<{
     output: typeof CreateWorkspaceResponseSchema;
   },
   /**
-   * Emacs has built the perspective and local bookkeeping for a
-   * WorkspaceAvailable. HOST SURFACE. The daemon holds an initial prompt until
-   * this lands, so a prompt never runs against a workspace nobody can see.
+   * - summary: report that Emacs has built the perspective and local bookkeeping for a WorkspaceAvailable. HOST SURFACE.
+   * - request: the job id being acknowledged, not a workspace key — the host is acknowledging a notification, and the workspace's key is one of the things that notification told it. No arms.
+   * - success: the acknowledgement is recorded and any held initial prompt is released; no arms, and the released prompt's progress is a turn observed on the stream.
+   * - error: two derived arms — an unwired creation manager and a job id the daemon has no record of — plus the funnel.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.WorkspaceMaterialized
    */
@@ -371,9 +398,10 @@ export const AgentRepl: GenService<{
     output: typeof WorkspaceMaterializedResponseSchema;
   },
   /**
-   * Report the outcome of a HostAction the daemon's durable inbox dispatched.
-   * HOST SURFACE. A failed action is PRESERVED with its error rather than
-   * dropped, so a UI request Emacs could not perform is still on the books.
+   * - summary: report the outcome of a HostAction the daemon's durable inbox dispatched. HOST SURFACE.
+   * - request: the action id and an outcome oneof — `succeeded` retires the action, `failed` PRESERVES it on the books with the host's account attached, so a UI request Emacs could not perform is not silently dropped.
+   * - success: the completion is filed; no arms, because a failed action is preserved rather than re-refused, so filing has no verdict of its own.
+   * - error: the arms separate an unwired creation manager from a request that states no outcome from an action id the inbox has no record of.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.HostActionCompleted
    */
@@ -383,10 +411,10 @@ export const AgentRepl: GenService<{
     output: typeof HostActionCompletedResponseSchema;
   },
   /**
-   * Ask the daemon to assert that every boot-critical global dependency is
-   * operational. THE ACK IS ONLY A RECEIPT: the assertion Emacs actually waits
-   * on is the DaemonHealthView pushed to the caller's stream, which is why the
-   * request names its client_id.
+   * - summary: ask the daemon to assert that every boot-critical global dependency is operational.
+   * - request: the correlation id the answering view will echo, and the client_id of the stream to push it down; no arms.
+   * - success: the check ran — ONLY a receipt, with no arms and no verdict, because the assertion Emacs waits on is the DaemonHealthView pushed to the caller's stream and a false answer there is a completed check rather than a command failure.
+   * - error: two derived arms — a missing request_id, without which the pushed view could never be recognized as this call's answer, and an unwired health checker. An unhealthy daemon is not among them: that is a verdict, and it travels on the view.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.DaemonHealth
    */
@@ -396,10 +424,10 @@ export const AgentRepl: GenService<{
     output: typeof DaemonHealthResponseSchema;
   },
   /**
-   * Ask the daemon to prove one restored workspace's whole session route:
-   * registry -> session controller -> handshaked shim -> shim dependencies. As
-   * with DaemonHealth the verdict arrives as a pushed SessionHealthView, not in
-   * this ack. HOST SURFACE.
+   * - summary: ask the daemon to prove one restored workspace's whole session route — registry, session controller, handshaked shim, shim dependencies. HOST SURFACE.
+   * - request: the workspace, the session the verdict must be about so a rebind cannot make a stale answer usable, and the client_id of the stream to push the view down; no arms.
+   * - success: the probe ran; no arms and no verdict, which arrives as a pushed SessionHealthView.
+   * - error: exactly one derived arm besides the funnel — a missing request_id. A bad workspace key, a missing session_id, an unwired router, a transport failure, a mismatched session and an unhealthy shim are ALL encoded as healthy=false on the view, so Emacs has one honest result type to wait on during restore.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.SessionHealth
    */
@@ -409,10 +437,10 @@ export const AgentRepl: GenService<{
     output: typeof SessionHealthResponseSchema;
   },
   /**
-   * HARD RESTART of the workspace's session process, keeping the session
-   * record — so the respawn resumes the same vendor conversation and the user
-   * loses nothing. What to reach for when a shim is wedged or running
-   * superseded code.
+   * - summary: HARD RESTART of the workspace's session process, keeping the session record so the respawn resumes the same vendor conversation and the user loses nothing.
+   * - request: the workspace; no arms. What to reach for when a shim is wedged or running superseded code.
+   * - success: the session is back under a fresh process, and a terminal merge_failed axis is cleared — after the restart succeeded, never before, because clearing first would take a failure off the screen and leave nothing in its place. No arms.
+   * - error: the arms separate the two unwired dependencies from the bring-up ladder — start failed, never established, conversation unreachable, resume broke continuity — from the merge-axis clear that a successful respawn still owes.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.RestartSession
    */
@@ -422,9 +450,10 @@ export const AgentRepl: GenService<{
     output: typeof RestartSessionResponseSchema;
   },
   /**
-   * Change a live session's model. The response carries the SHIM-CONFIRMED
-   * selection on both success and rejection, so a frontend never holds an
-   * optimistic model state; see SetModelResponse.
+   * - summary: change a live session's model, relayed to the shim, publishing only the shim-confirmed selection.
+   * - request: the workspace and the model; an empty model is refused rather than read as "the default". No arms.
+   * - success: the shim confirmed the change, and carries the selection the session is now on — never empty.
+   * - error: the arms separate a bad workspace key and an empty model from a shim that refused, was absent, or confirmed nothing. The error ALSO carries the shim-confirmed selection, because a frontend must never hold an optimistic model state and a rejected change still has to say what the session is actually on.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.SetModel
    */
@@ -434,10 +463,10 @@ export const AgentRepl: GenService<{
     output: typeof SetModelResponseSchema;
   },
   /**
-   * Publish the workspace roster. Emacs is its SINGLE author and this is the
-   * only way a roster enters the daemon. A stale, out-of-order revision within
-   * the publisher's own epoch is a loud nack rather than a silent drop, so a
-   * publisher whose counter fell behind learns it.
+   * - summary: publish the workspace roster. Emacs is its SINGLE author and this is the only way a roster enters the daemon.
+   * - request: the complete roster, always whole and never a delta, so a partially-applied roster is unrepresentable; no arms.
+   * - success: the roster is retained and fanned out; no arms, because the daemon never amends a roster and has nothing to tell its author it does not already know.
+   * - error: two derived arms — an unwired retainer, and a stale or out-of-order revision within the publisher's own epoch, which is a loud nack so a publisher whose counter fell behind learns it instead of believing it published.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.PublishWorkspaceRoster
    */
@@ -447,10 +476,10 @@ export const AgentRepl: GenService<{
     output: typeof PublishWorkspaceRosterResponseSchema;
   },
   /**
-   * Schedule a graceful shutdown instead of demanding one now: take the drain
-   * lease, block new turns at the prompt queue, and shut down when every hold
-   * clears. Scheduling over an existing schedule is a loud nack, never a silent
-   * replace, so two deploy flows cannot merge their intents.
+   * - summary: schedule a graceful shutdown — take the drain lease, block new turns at the prompt queue, and shut down when every hold clears.
+   * - request: whether the executed shutdown also stops shims, fixed at schedule time because it is a property of what was rebuilt, and a display-only cause; no arms.
+   * - success: the lease is held and new turns are blocked; no arms and no schedule id, which reaches EVERY client on the broadcast ShutdownScheduleView so a cancel is never reasoning about a private copy.
+   * - error: two derived arms — an unwired scheduler, and a schedule that already stands, refused rather than silently replaced so two deploy flows cannot merge their intents.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.ScheduleShutdown
    */
@@ -460,9 +489,10 @@ export const AgentRepl: GenService<{
     output: typeof ScheduleShutdownResponseSchema;
   },
   /**
-   * Cancel a scheduled shutdown and release the drain lease. A schedule_id that
-   * does not match the live schedule is a loud nack, so a cancel aimed at an
-   * old schedule can never kill a newer one.
+   * - summary: cancel a scheduled shutdown and release the drain lease.
+   * - request: the schedule to cancel, from the broadcast ShutdownScheduleDraining.schedule_id; no arms.
+   * - success: the lease is released and turns flow again; no arms, and the cleared lease is broadcast so every client learns it, including those that never sent a cancel.
+   * - error: two derived arms — an unwired scheduler, and an id that is not the live schedule, which is what makes it impossible for a cancel aimed at an old schedule to kill a newer one.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.CancelScheduledShutdown
    */
@@ -472,10 +502,10 @@ export const AgentRepl: GenService<{
     output: typeof CancelScheduledShutdownResponseSchema;
   },
   /**
-   * Deliberately hibernate the workspace's session: stop the shim and mark the
-   * session hibernated, which is ONE transition with leaving the keep-alive
-   * loop. Refused with a loud nack while a turn is live or the merge lease is
-   * held — the daemon never discards in-flight work to satisfy a hibernate.
+   * - summary: deliberately hibernate the workspace's session — stop the shim and mark the session hibernated, which is ONE transition with leaving the keep-alive loop.
+   * - request: the workspace; no arms.
+   * - success: the shim is stopped and the session is hibernated; no arms, and the resulting posture is pushed as WorkspaceGateView for the revival card to read.
+   * - error: the arms separate unwired hibernation from a workspace holding a live turn or the merge lease — the daemon never discards in-flight work to satisfy a hibernate — from a session that is no longer the one controlling the workspace.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.HibernateWorkspace
    */
@@ -485,10 +515,10 @@ export const AgentRepl: GenService<{
     output: typeof HibernateWorkspaceResponseSchema;
   },
   /**
-   * The user's revival decision for a hibernated workspace. Revival is LAZY and
-   * GATED: SubmitPrompt is nacked until this lands, so no model use can precede
-   * the choice, and a gated mode's context cut runs to completion before any
-   * prompt is accepted.
+   * - summary: record the user's revival decision for a hibernated workspace and bring the session back under it.
+   * - request: a mode oneof — `compact_first` with the scope of what the summary may swallow, `direct` to resume as-is, `clear` to discard the conversation; "no decision" is unrepresentable, which is the point of the arms.
+   * - success: the decision was accepted and the session is coming up; an ACCEPTANCE and not a completion, with no arms, because whether a gated context cut has landed is pushed state rather than a value this call can hold.
+   * - error: the arms separate unwired revival from an unstated mode — or a compact-first arm with no scope, which is the same fault — from bring-up failing, including the continuity refusals.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.ReviveSession
    */
@@ -498,9 +528,10 @@ export const AgentRepl: GenService<{
     output: typeof ReviveSessionResponseSchema;
   },
   /**
-   * Pause the merge queue: the run in flight finishes, nothing new dequeues.
-   * Durable across bounces, idempotent, and DAEMON-GLOBAL — which is why the
-   * request names no workspace.
+   * - summary: pause the merge queue — the run in flight finishes, nothing new dequeues. Durable across bounces, idempotent, and DAEMON-GLOBAL, which is why the request names no workspace.
+   * - request: correlation only; no arms.
+   * - success: the pause bit is set; no arms, because an idempotent bit flip leaves the same state either way and that state is pushed on MergeQueueRoster.paused.
+   * - error: the funnel only, and that is an honest gap: this daemon has no PauseMergeQueue handler, so there is no refusal path to derive arms from and none are guessed at.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.PauseMergeQueue
    */
@@ -510,7 +541,10 @@ export const AgentRepl: GenService<{
     output: typeof PauseMergeQueueResponseSchema;
   },
   /**
-   * Resume the merge queue. Idempotent and daemon-global, like its pause.
+   * - summary: resume the merge queue. Idempotent and daemon-global, like its pause.
+   * - request: correlation only; no arms.
+   * - success: the pause bit is clear and the queue drains again; no arms, for its pause's reason.
+   * - error: the funnel only, for PauseMergeQueue's reason and with its caveat — no handler exists to derive arms from.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.ResumeMergeQueue
    */
@@ -520,10 +554,10 @@ export const AgentRepl: GenService<{
     output: typeof ResumeMergeQueueResponseSchema;
   },
   /**
-   * Evict ONE waiting queue entry by run id, retiring it with a terminal failed
-   * status so the workspace's merge axis resolves immediately. REFUSED when the
-   * run id names the running head — only its drain goroutine may retire that —
-   * or names nothing outstanding.
+   * - summary: evict ONE waiting queue entry by run id, retiring it with a terminal failed status so the workspace's merge axis resolves immediately.
+   * - request: the run id the roster and every MergeStatus carry; the queue is daemon-global, so there is no workspace. No arms.
+   * - success: the entry is off the queue and its run is retired; no arms, because the terminal MergeStatus is pushed and restating it would give a client two copies of one verdict.
+   * - error: two arms, and they are this endpoint's own normative text rather than derived from code — the run id naming the RUNNING head, which only its drain goroutine may retire, and naming nothing outstanding. No handler exists yet, so nothing further is invented.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.EvictMerge
    */
@@ -533,10 +567,10 @@ export const AgentRepl: GenService<{
     output: typeof EvictMergeResponseSchema;
   },
   /**
-   * Answer a MergeDequeueOffer: take the merge off the queue, or leave it. The
-   * daemon clears the offer on either arm, so declining is a real answer and
-   * not merely the absence of one, and an offer_id that does not match the
-   * workspace's outstanding offer is REFUSED rather than resolved to it.
+   * - summary: answer a MergeDequeueOffer — take the merge off the queue, or leave it.
+   * - request: the offer id being answered, and an answer oneof of `dequeue` or `keep`; an id that is not the workspace's outstanding one is refused rather than resolved to it, so a click on a superseded card cannot dequeue the merge its replacement is asking about.
+   * - success: the question is answered and the card is down; no arms, because declining is as complete an answer as dequeuing and stating them apart would invite a client to treat one as a non-event.
+   * - error: the arms walk the gates in order — bad key, unwired store, nothing named or nothing decided, no outstanding offer, a stale offer — then the two halves of acting on it, a clear that failed so NOTHING was dequeued, and a dequeue that failed after the card came down.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.AnswerMergeDequeue
    */
@@ -546,11 +580,10 @@ export const AgentRepl: GenService<{
     output: typeof AnswerMergeDequeueResponseSchema;
   },
   /**
-   * Cancel the session's DETACHED background agents — the subagent, shell and
-   * workflow tasks still working after the turn that launched them ended. It is
-   * not a flag on Interrupt because the state it exists for is precisely the
-   * state with no turn to stop. The response relays the SHIM's verdict; see
-   * CancelDetachedAgentsResponse.
+   * - summary: cancel the session's DETACHED background agents — the subagent, shell and workflow tasks still working after the turn that launched them ended.
+   * - request: the workspace and nothing else; it carries no confirmation arm, unlike Interrupt, because sending it IS the deliberate act — the command's only effect is stopping detached agents.
+   * - success: work was found and stopped, carrying how many agents were cancelled; the task ids stay daemon-side, because a frontend renders "cancelled 3 agents" and has no vocabulary for them.
+   * - error: the arms separate a bad workspace key from the shim's three verdicts — nothing was running, the stop could not be attempted, or an outcome with no arm at all. "Nothing running" is a REFUSAL and not a quiet success, because acking a stop that reached nothing is how a stop control comes to look like it works.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.CancelDetachedAgents
    */
@@ -560,11 +593,10 @@ export const AgentRepl: GenService<{
     output: typeof CancelDetachedAgentsResponseSchema;
   },
   /**
-   * Ask for the MOST RECENT page of a conversation, and reset this reader's
-   * daemon-held position to it. The cold open and the whole recovery story.
-   * The page arrives on the caller's Subscribe stream as a
-   * ConversationHistoryPage, never in this ack — feed content has exactly one
-   * delivery shape here.
+   * - summary: ask for the MOST RECENT page of a conversation, and reset this reader's daemon-held position to it. The cold open and the whole recovery story.
+   * - request: the reader's client_id, the workspace, and the SCOPE — the feed, or the inside of one message — which is refused when unset rather than read as the feed. No arms.
+   * - success: the page is served and the position is reset; no arms and no page, because it arrives on the caller's Subscribe stream as a ConversationHistoryPage and feed content has exactly one delivery shape here.
+   * - error: the arms separate a call with no reader identity or no scope from an unwired resyncer, from a superseded view, from a read that failed — and from the daemon producing neither a page nor a failure, which is never allowed to pass for an empty conversation.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.FirstPage
    */
@@ -574,10 +606,10 @@ export const AgentRepl: GenService<{
     output: typeof FirstPageResponseSchema;
   },
   /**
-   * Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
-   * IT CARRIES NO POSITION, and that absence is the design: from a reader with
-   * no established position it is REFUSED rather than answered with the tail.
-   * The page arrives on the stream, as FirstPage's does.
+   * - summary: ask for the page IMMEDIATELY OLDER than the last one served to this reader.
+   * - request: the reader's client_id, the workspace and the scope — and NO POSITION, which is the design: the daemon holds the reader's place.
+   * - success: the older page is served and the position has moved back; no arms and no page, as FirstPage's is, and no end-of-history arm because that is a property of the page rather than of the call.
+   * - error: FirstPage's arms plus the one this method exists to have — a reader with no established position, REFUSED rather than answered with the tail, so a client bug cannot become a silent full-tail read.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.NextPage
    */

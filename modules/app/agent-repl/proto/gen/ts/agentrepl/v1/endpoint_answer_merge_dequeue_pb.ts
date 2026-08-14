@@ -1,10 +1,10 @@
 // endpoint_answer_merge_dequeue.proto — the AnswerMergeDequeue endpoint's
-// request and response.
+// request, success and error.
 //
-// ONE ENDPOINT PER FILE: AnswerMergeDequeueRequest and
-// AnswerMergeDequeueResponse and nothing else, so the whole of what one method
-// takes and returns is readable in one place. The `endpoint_` prefix is the
-// grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
+// ONE ENDPOINT PER FILE: AnswerMergeDequeueRequest, AnswerMergeDequeueResponse
+// and the two answers it wraps, and nothing else, so the whole of what one
+// method takes and returns is readable in one place. The `endpoint_` prefix is
+// the grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
 // directory is not available here, and for why a request type belongs to
 // agentrepl.v1 rather than frontend.v1.
 
@@ -14,17 +14,17 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { CommandAck } from "./frame_pb";
-import { file_agentrepl_v1_frame } from "./frame_pb";
-import type { MergeDequeueConfirm, MergeDequeueDecline } from "./shared_pb";
+import type { MergeDequeueConfirm, MergeDequeueDecline, RefusalDependencyUnwired, RefusalMergeDequeueClearFailed, RefusalMergeDequeueFailed, RefusalMergeDequeueOfferAbsent, RefusalMergeDequeueOfferStale, RefusalRequiredFieldMissing, RefusalWorkspaceKeyNotAbsolute } from "./shared_pb";
 import { file_agentrepl_v1_shared } from "./shared_pb";
+import type { FailureCardRef, FailureInternalUnclassified } from "../../frontend/v1/failure_pb";
+import { file_frontend_v1_failure } from "../../frontend/v1/failure_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/endpoint_answer_merge_dequeue.proto.
  */
 export const file_agentrepl_v1_endpoint_answer_merge_dequeue: GenFile = /*@__PURE__*/
-  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX21lcmdlX2RlcXVldWUucHJvdG8SDGFnZW50cmVwbC52MSLHAQoZQW5zd2VyTWVyZ2VEZXF1ZXVlUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRIQCghvZmZlcl9pZBgDIAEoCRI0CgdkZXF1ZXVlGAQgASgLMiEuYWdlbnRyZXBsLnYxLk1lcmdlRGVxdWV1ZUNvbmZpcm1IABIxCgRrZWVwGAUgASgLMiEuYWdlbnRyZXBsLnYxLk1lcmdlRGVxdWV1ZURlY2xpbmVIAEIICgZhbnN3ZXIiQwoaQW5zd2VyTWVyZ2VEZXF1ZXVlUmVzcG9uc2USJQoDYWNrGAEgASgLMhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2tCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_frame, file_agentrepl_v1_shared]);
+  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX21lcmdlX2RlcXVldWUucHJvdG8SDGFnZW50cmVwbC52MSLHAQoZQW5zd2VyTWVyZ2VEZXF1ZXVlUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRIQCghvZmZlcl9pZBgDIAEoCRI0CgdkZXF1ZXVlGAQgASgLMiEuYWdlbnRyZXBsLnYxLk1lcmdlRGVxdWV1ZUNvbmZpcm1IABIxCgRrZWVwGAUgASgLMiEuYWdlbnRyZXBsLnYxLk1lcmdlRGVxdWV1ZURlY2xpbmVIAEIICgZhbnN3ZXIisAEKGkFuc3dlck1lcmdlRGVxdWV1ZVJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSOgoHc3VjY2VzcxgCIAEoCzInLmFnZW50cmVwbC52MS5BbnN3ZXJNZXJnZURlcXVldWVTdWNjZXNzSAASNgoFZXJyb3IYAyABKAsyJS5hZ2VudHJlcGwudjEuQW5zd2VyTWVyZ2VEZXF1ZXVlRXJyb3JIAEIKCghyZXNwb25zZSIbChlBbnN3ZXJNZXJnZURlcXVldWVTdWNjZXNzIpsFChdBbnN3ZXJNZXJnZURlcXVldWVFcnJvchJSChp3b3Jrc3BhY2Vfa2V5X25vdF9hYnNvbHV0ZRgBIAEoCzIsLmFnZW50cmVwbC52MS5SZWZ1c2FsV29ya3NwYWNlS2V5Tm90QWJzb2x1dGVIABJOChxtZXJnZV9kZXF1ZXVlX29mZmVyc191bndpcmVkGAIgASgLMiYuYWdlbnRyZXBsLnYxLlJlZnVzYWxEZXBlbmRlbmN5VW53aXJlZEgAEksKFnJlcXVpcmVkX2ZpZWxkX21pc3NpbmcYAyABKAsyKS5hZ2VudHJlcGwudjEuUmVmdXNhbFJlcXVpcmVkRmllbGRNaXNzaW5nSAASRAoMb2ZmZXJfYWJzZW50GAQgASgLMiwuYWdlbnRyZXBsLnYxLlJlZnVzYWxNZXJnZURlcXVldWVPZmZlckFic2VudEgAEkIKC29mZmVyX3N0YWxlGAUgASgLMisuYWdlbnRyZXBsLnYxLlJlZnVzYWxNZXJnZURlcXVldWVPZmZlclN0YWxlSAASRAoMY2xlYXJfZmFpbGVkGAYgASgLMiwuYWdlbnRyZXBsLnYxLlJlZnVzYWxNZXJnZURlcXVldWVDbGVhckZhaWxlZEgAEkEKDmRlcXVldWVfZmFpbGVkGAcgASgLMicuYWdlbnRyZXBsLnYxLlJlZnVzYWxNZXJnZURlcXVldWVGYWlsZWRIABJACgx1bmNsYXNzaWZpZWQYCCABKAsyKC5mcm9udGVuZC52MS5GYWlsdXJlSW50ZXJuYWxVbmNsYXNzaWZpZWRIABIxCgxmYWlsdXJlX2NhcmQYCSABKAsyGy5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZFJlZkIHCgVlcnJvckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_shared, file_frontend_v1_failure]);
 
 /**
  * The user's answer to a MergeDequeueOffer. Sent by whichever frontend drew
@@ -35,7 +35,7 @@ export const file_agentrepl_v1_endpoint_answer_merge_dequeue: GenFile = /*@__PUR
  */
 export type AnswerMergeDequeueRequest = Message<"agentrepl.v1.AnswerMergeDequeueRequest"> & {
   /**
-   * Correlation. See AgentRepl in frame.proto.
+   * Correlation. See agentrepl.v1.AgentRepl.
    *
    * @generated from field: string request_id = 1;
    */
@@ -44,7 +44,7 @@ export type AnswerMergeDequeueRequest = Message<"agentrepl.v1.AnswerMergeDequeue
   /**
    * The workspace whose offer is being answered — the offer is PUSHED STATE on
    * WorkspaceState, so it is scoped by workspace and matched within it. See
-   * AgentRepl in frame.proto.
+   * agentrepl.v1.AgentRepl.
    *
    * @generated from field: string workspace = 2;
    */
@@ -63,6 +63,9 @@ export type AnswerMergeDequeueRequest = Message<"agentrepl.v1.AnswerMergeDequeue
   /**
    * The answer is a oneof of empty messages, not a bool, for the same reason
    * ReviveSessionRequest's is: "no answer" must be unrepresentable on the wire.
+   * This request needed no conversion when the mode-flag rule was applied
+   * across the surface — it was already shaped this way, and it is the shape
+   * the rule generalizes.
    *
    * @generated from oneof agentrepl.v1.AnswerMergeDequeueRequest.answer
    */
@@ -89,24 +92,38 @@ export const AnswerMergeDequeueRequestSchema: GenMessage<AnswerMergeDequeueReque
   messageDesc(file_agentrepl_v1_endpoint_answer_merge_dequeue, 0);
 
 /**
- * AnswerMergeDequeue's answer: accepted, or the classified account of the
- * refusal.
+ * AnswerMergeDequeue's answer: exactly one of a success and an error.
  *
- * IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
- * directly gave 33 methods one response type, so no method could gain an answer
- * of its own without offering that answer to every other method as well. Both
- * arms clear the offer, and the cleared offer is pushed on WorkspaceState.
+ * TWO ARMS, NOT AN `ok` BIT PLUS AN OPTIONAL FAILURE — see
+ * AcceptQueueEntryResponse for the whole of that argument.
  *
  * @generated from message agentrepl.v1.AnswerMergeDequeueResponse
  */
 export type AnswerMergeDequeueResponse = Message<"agentrepl.v1.AnswerMergeDequeueResponse"> & {
   /**
-   * Whether the daemon accepted this call, and when it did not, the classified
-   * failure a frontend renders as a card. See CommandAck.
+   * Echoed from the request that produced this answer. See
+   * AcceptQueueEntryResponse.request_id.
    *
-   * @generated from field: agentrepl.v1.CommandAck ack = 1;
+   * @generated from field: string request_id = 1;
    */
-  ack?: CommandAck | undefined;
+  requestId: string;
+
+  /**
+   * @generated from oneof agentrepl.v1.AnswerMergeDequeueResponse.response
+   */
+  response: {
+    /**
+     * @generated from field: agentrepl.v1.AnswerMergeDequeueSuccess success = 2;
+     */
+    value: AnswerMergeDequeueSuccess;
+    case: "success";
+  } | {
+    /**
+     * @generated from field: agentrepl.v1.AnswerMergeDequeueError error = 3;
+     */
+    value: AnswerMergeDequeueError;
+    case: "error";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -115,4 +132,124 @@ export type AnswerMergeDequeueResponse = Message<"agentrepl.v1.AnswerMergeDequeu
  */
 export const AnswerMergeDequeueResponseSchema: GenMessage<AnswerMergeDequeueResponse> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_answer_merge_dequeue, 1);
+
+/**
+ * The question is answered and the card is down.
+ *
+ * NO ARMS. Both answers reach here — a `keep` is as complete an answer as a
+ * `dequeue`, and stating them apart would invite a client to treat one of them
+ * as a non-event. What each did is the request's own arm, echoed by nothing:
+ * the cleared offer and the merge's own status are pushed on WorkspaceState.
+ *
+ * @generated from message agentrepl.v1.AnswerMergeDequeueSuccess
+ */
+export type AnswerMergeDequeueSuccess = Message<"agentrepl.v1.AnswerMergeDequeueSuccess"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerMergeDequeueSuccess.
+ * Use `create(AnswerMergeDequeueSuccessSchema)` to create a new message.
+ */
+export const AnswerMergeDequeueSuccessSchema: GenMessage<AnswerMergeDequeueSuccess> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_merge_dequeue, 2);
+
+/**
+ * Why the answer was refused.
+ *
+ * THE ORDER OF THESE ARMS IS THE ORDER OF THE GATES. The offer id is CHECKED,
+ * not resolved, before anything is cleared; the clear happens before the
+ * dequeue; and a dequeue that fails after a successful clear is reported here
+ * rather than absorbed, because whatever did not come off the queue still
+ * merges when its turn comes.
+ *
+ * @generated from message agentrepl.v1.AnswerMergeDequeueError
+ */
+export type AnswerMergeDequeueError = Message<"agentrepl.v1.AnswerMergeDequeueError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.AnswerMergeDequeueError.error
+   */
+  error: {
+    /**
+     * The workspace key is not an absolute path.
+     *
+     * @generated from field: agentrepl.v1.RefusalWorkspaceKeyNotAbsolute workspace_key_not_absolute = 1;
+     */
+    value: RefusalWorkspaceKeyNotAbsolute;
+    case: "workspaceKeyNotAbsolute";
+  } | {
+    /**
+     * No merge dequeue offer store is wired.
+     *
+     * @generated from field: agentrepl.v1.RefusalDependencyUnwired merge_dequeue_offers_unwired = 2;
+     */
+    value: RefusalDependencyUnwired;
+    case: "mergeDequeueOffersUnwired";
+  } | {
+    /**
+     * The request carries no offer_id, or no answer arm. Both are the same
+     * fault — a command that named nothing or decided nothing — and both are
+     * refused rather than defaulted: defaulting to keep would swallow a
+     * dequeue, and defaulting to dequeue would perform one nobody asked for.
+     *
+     * @generated from field: agentrepl.v1.RefusalRequiredFieldMissing required_field_missing = 3;
+     */
+    value: RefusalRequiredFieldMissing;
+    case: "requiredFieldMissing";
+  } | {
+    /**
+     * The workspace has no outstanding offer, so the question is already gone.
+     *
+     * @generated from field: agentrepl.v1.RefusalMergeDequeueOfferAbsent offer_absent = 4;
+     */
+    value: RefusalMergeDequeueOfferAbsent;
+    case: "offerAbsent";
+  } | {
+    /**
+     * The named offer is not the outstanding one.
+     *
+     * @generated from field: agentrepl.v1.RefusalMergeDequeueOfferStale offer_stale = 5;
+     */
+    value: RefusalMergeDequeueOfferStale;
+    case: "offerStale";
+  } | {
+    /**
+     * The answer could not be recorded, so NOTHING was dequeued.
+     *
+     * @generated from field: agentrepl.v1.RefusalMergeDequeueClearFailed clear_failed = 6;
+     */
+    value: RefusalMergeDequeueClearFailed;
+    case: "clearFailed";
+  } | {
+    /**
+     * The offer was cleared and the dequeue itself failed.
+     *
+     * @generated from field: agentrepl.v1.RefusalMergeDequeueFailed dequeue_failed = 7;
+     */
+    value: RefusalMergeDequeueFailed;
+    case: "dequeueFailed";
+  } | {
+    /**
+     * The answer failed for a reason the daemon's classifier could not name.
+     *
+     * @generated from field: frontend.v1.FailureInternalUnclassified unclassified = 8;
+     */
+    value: FailureInternalUnclassified;
+    case: "unclassified";
+  } | { case: undefined; value?: undefined };
+
+  /**
+   * The feed card this refusal was filed under, when it produced one. See
+   * AcceptQueueEntryError.failure_card.
+   *
+   * @generated from field: frontend.v1.FailureCardRef failure_card = 9;
+   */
+  failureCard?: FailureCardRef | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerMergeDequeueError.
+ * Use `create(AnswerMergeDequeueErrorSchema)` to create a new message.
+ */
+export const AnswerMergeDequeueErrorSchema: GenMessage<AnswerMergeDequeueError> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_merge_dequeue, 3);
 

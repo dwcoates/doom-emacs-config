@@ -1,10 +1,10 @@
-// endpoint_hibernate_workspace.proto — the HibernateWorkspace endpoint's request
-// and response.
+// endpoint_hibernate_workspace.proto — the HibernateWorkspace endpoint's
+// request, success and error.
 //
-// ONE ENDPOINT PER FILE: HibernateWorkspaceRequest and
-// HibernateWorkspaceResponse and nothing else, so the whole of what one method
-// takes and returns is readable in one place. The `endpoint_` prefix is the
-// grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
+// ONE ENDPOINT PER FILE: HibernateWorkspaceRequest, HibernateWorkspaceResponse
+// and the two answers it wraps, and nothing else, so the whole of what one
+// method takes and returns is readable in one place. The `endpoint_` prefix is
+// the grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
 // directory is not available here, and for why a request type belongs to
 // agentrepl.v1 rather than frontend.v1.
 
@@ -14,15 +14,17 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { CommandAck } from "./frame_pb";
-import { file_agentrepl_v1_frame } from "./frame_pb";
+import type { FailureWorkspaceNotLive, RefusalDependencyUnwired, RefusalHibernateBlockedByLiveWork } from "./shared_pb";
+import { file_agentrepl_v1_shared } from "./shared_pb";
+import type { FailureCardRef, FailureInternalUnclassified } from "../../frontend/v1/failure_pb";
+import { file_frontend_v1_failure } from "../../frontend/v1/failure_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/endpoint_hibernate_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_hibernate_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfaGliZXJuYXRlX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkIKGUhpYmVybmF0ZVdvcmtzcGFjZVJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl3b3Jrc3BhY2UYAiABKAkiQwoaSGliZXJuYXRlV29ya3NwYWNlUmVzcG9uc2USJQoDYWNrGAEgASgLMhguYWdlbnRyZXBsLnYxLkNvbW1hbmRBY2tCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_frame]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfaGliZXJuYXRlX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkIKGUhpYmVybmF0ZVdvcmtzcGFjZVJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl3b3Jrc3BhY2UYAiABKAkisAEKGkhpYmVybmF0ZVdvcmtzcGFjZVJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSOgoHc3VjY2VzcxgCIAEoCzInLmFnZW50cmVwbC52MS5IaWJlcm5hdGVXb3Jrc3BhY2VTdWNjZXNzSAASNgoFZXJyb3IYAyABKAsyJS5hZ2VudHJlcGwudjEuSGliZXJuYXRlV29ya3NwYWNlRXJyb3JIAEIKCghyZXNwb25zZSIbChlIaWJlcm5hdGVXb3Jrc3BhY2VTdWNjZXNzIvUCChdIaWJlcm5hdGVXb3Jrc3BhY2VFcnJvchJGChRoaWJlcm5hdGlvbnNfdW53aXJlZBgBIAEoCzImLmFnZW50cmVwbC52MS5SZWZ1c2FsRGVwZW5kZW5jeVVud2lyZWRIABJPChRibG9ja2VkX2J5X2xpdmVfd29yaxgCIAEoCzIvLmFnZW50cmVwbC52MS5SZWZ1c2FsSGliZXJuYXRlQmxvY2tlZEJ5TGl2ZVdvcmtIABJDChJ3b3Jrc3BhY2Vfbm90X2xpdmUYAyABKAsyJS5hZ2VudHJlcGwudjEuRmFpbHVyZVdvcmtzcGFjZU5vdExpdmVIABJACgx1bmNsYXNzaWZpZWQYBCABKAsyKC5mcm9udGVuZC52MS5GYWlsdXJlSW50ZXJuYWxVbmNsYXNzaWZpZWRIABIxCgxmYWlsdXJlX2NhcmQYBSABKAsyGy5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZFJlZkIHCgVlcnJvckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_shared, file_frontend_v1_failure]);
 
 /**
  * Deliberate, immediate hibernation of one workspace's session: the daemon
@@ -37,14 +39,14 @@ export const file_agentrepl_v1_endpoint_hibernate_workspace: GenFile = /*@__PURE
  */
 export type HibernateWorkspaceRequest = Message<"agentrepl.v1.HibernateWorkspaceRequest"> & {
   /**
-   * Correlation. See AgentRepl in frame.proto.
+   * Correlation. See agentrepl.v1.AgentRepl.
    *
    * @generated from field: string request_id = 1;
    */
   requestId: string;
 
   /**
-   * The workspace being hibernated. See AgentRepl in frame.proto.
+   * The workspace being hibernated. See agentrepl.v1.AgentRepl.
    *
    * @generated from field: string workspace = 2;
    */
@@ -59,25 +61,40 @@ export const HibernateWorkspaceRequestSchema: GenMessage<HibernateWorkspaceReque
   messageDesc(file_agentrepl_v1_endpoint_hibernate_workspace, 0);
 
 /**
- * HibernateWorkspace's answer: accepted, or the classified account of the
- * refusal.
+ * HibernateWorkspace's answer: exactly one of a success and an error.
  *
- * IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
- * directly gave 33 methods one response type, so no method could gain an answer
- * of its own without offering that answer to every other method as well. The
- * hibernated posture is pushed as WorkspaceGateView, so the refusal path is all
- * this answer has to carry.
+ * SYNCHRONOUS, for RestartSession's reason: this answer is the user's only
+ * report. A hibernate that was refused must take the error arm rather than
+ * succeeding and leaving the user believing they reclaimed 500MB that is still
+ * in use.
  *
  * @generated from message agentrepl.v1.HibernateWorkspaceResponse
  */
 export type HibernateWorkspaceResponse = Message<"agentrepl.v1.HibernateWorkspaceResponse"> & {
   /**
-   * Whether the daemon accepted this call, and when it did not, the classified
-   * failure a frontend renders as a card. See CommandAck.
+   * Echoed from the request that produced this answer. See
+   * AcceptQueueEntryResponse.request_id.
    *
-   * @generated from field: agentrepl.v1.CommandAck ack = 1;
+   * @generated from field: string request_id = 1;
    */
-  ack?: CommandAck | undefined;
+  requestId: string;
+
+  /**
+   * @generated from oneof agentrepl.v1.HibernateWorkspaceResponse.response
+   */
+  response: {
+    /**
+     * @generated from field: agentrepl.v1.HibernateWorkspaceSuccess success = 2;
+     */
+    value: HibernateWorkspaceSuccess;
+    case: "success";
+  } | {
+    /**
+     * @generated from field: agentrepl.v1.HibernateWorkspaceError error = 3;
+     */
+    value: HibernateWorkspaceError;
+    case: "error";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -86,4 +103,84 @@ export type HibernateWorkspaceResponse = Message<"agentrepl.v1.HibernateWorkspac
  */
 export const HibernateWorkspaceResponseSchema: GenMessage<HibernateWorkspaceResponse> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_hibernate_workspace, 1);
+
+/**
+ * The shim is stopped and the session is marked hibernated.
+ *
+ * NO ARMS, AND NO FIELDS. The hibernated posture — and what put the session to
+ * sleep — is pushed as WorkspaceGateView, which is where the revival card reads
+ * it from.
+ *
+ * @generated from message agentrepl.v1.HibernateWorkspaceSuccess
+ */
+export type HibernateWorkspaceSuccess = Message<"agentrepl.v1.HibernateWorkspaceSuccess"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.HibernateWorkspaceSuccess.
+ * Use `create(HibernateWorkspaceSuccessSchema)` to create a new message.
+ */
+export const HibernateWorkspaceSuccessSchema: GenMessage<HibernateWorkspaceSuccess> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_hibernate_workspace, 2);
+
+/**
+ * Why the hibernate was refused.
+ *
+ * @generated from message agentrepl.v1.HibernateWorkspaceError
+ */
+export type HibernateWorkspaceError = Message<"agentrepl.v1.HibernateWorkspaceError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.HibernateWorkspaceError.error
+   */
+  error: {
+    /**
+     * This daemon does not support workspace hibernation.
+     *
+     * @generated from field: agentrepl.v1.RefusalDependencyUnwired hibernations_unwired = 1;
+     */
+    value: RefusalDependencyUnwired;
+    case: "hibernationsUnwired";
+  } | {
+    /**
+     * The workspace has a live turn or holds the merge lease. The daemon never
+     * discards in-flight work to satisfy a hibernate.
+     *
+     * @generated from field: agentrepl.v1.RefusalHibernateBlockedByLiveWork blocked_by_live_work = 2;
+     */
+    value: RefusalHibernateBlockedByLiveWork;
+    case: "blockedByLiveWork";
+  } | {
+    /**
+     * The command addressed something this workspace no longer runs — the
+     * session named is not the one controlling the workspace.
+     *
+     * @generated from field: agentrepl.v1.FailureWorkspaceNotLive workspace_not_live = 3;
+     */
+    value: FailureWorkspaceNotLive;
+    case: "workspaceNotLive";
+  } | {
+    /**
+     * The hibernate failed for a reason the daemon's classifier could not name.
+     *
+     * @generated from field: frontend.v1.FailureInternalUnclassified unclassified = 4;
+     */
+    value: FailureInternalUnclassified;
+    case: "unclassified";
+  } | { case: undefined; value?: undefined };
+
+  /**
+   * The feed card this refusal was filed under, when it produced one. See
+   * AcceptQueueEntryError.failure_card.
+   *
+   * @generated from field: frontend.v1.FailureCardRef failure_card = 5;
+   */
+  failureCard?: FailureCardRef | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.HibernateWorkspaceError.
+ * Use `create(HibernateWorkspaceErrorSchema)` to create a new message.
+ */
+export const HibernateWorkspaceErrorSchema: GenMessage<HibernateWorkspaceError> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_hibernate_workspace, 3);
 

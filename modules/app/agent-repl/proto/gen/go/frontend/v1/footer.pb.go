@@ -17,6 +17,7 @@ package frontendv1
 
 import (
 	v1 "agentrepl/proto/agentrepl/v1"
+	v12 "agentrepl/proto/conversation/v1"
 	v11 "agentrepl/proto/shim/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -2665,7 +2666,7 @@ type QueueClassificationUninterruptibleTurn struct {
 	// Which cut is running, so the card can name it. Never UNSPECIFIED: the arm
 	// is set only when the daemon recognized the running prompt as one of the
 	// two, and an arm that could not say which would explain nothing.
-	Command       v1.SessionCommand `protobuf:"varint,1,opt,name=command,proto3,enum=agentrepl.v1.SessionCommand" json:"command,omitempty"`
+	Command       v12.SessionCommand `protobuf:"varint,1,opt,name=command,proto3,enum=conversation.v1.SessionCommand" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2700,11 +2701,11 @@ func (*QueueClassificationUninterruptibleTurn) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{22}
 }
 
-func (x *QueueClassificationUninterruptibleTurn) GetCommand() v1.SessionCommand {
+func (x *QueueClassificationUninterruptibleTurn) GetCommand() v12.SessionCommand {
 	if x != nil {
 		return x.Command
 	}
-	return v1.SessionCommand(0)
+	return v12.SessionCommand(0)
 }
 
 // The classifier could not be believed (it answered with neither token, or
@@ -3292,7 +3293,7 @@ var File_frontend_v1_footer_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\n" +
-	"\x18frontend/v1/footer.proto\x12\vfrontend.v1\x1a\x12shim/v1/core.proto\x1a\x16frontend/v1/feed.proto\x1a\x19agentrepl/v1/shared.proto\"\xa4\x01\n" +
+	"\x18frontend/v1/footer.proto\x12\vfrontend.v1\x1a\x12shim/v1/core.proto\x1a%conversation/v1/session_command.proto\x1a\x19frontend/v1/failure.proto\x1a\x16frontend/v1/feed.proto\x1a\x19agentrepl/v1/shared.proto\"\xa4\x01\n" +
 	"\fRuntimeFault\x12\x1c\n" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x1d\n" +
 	"\n" +
@@ -3447,9 +3448,9 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\trationale\x18\x01 \x01(\tR\trationale\"S\n" +
 	"\x17QueueClassificationHold\x12\x1c\n" +
 	"\trationale\x18\x01 \x01(\tR\trationale\x12\x1a\n" +
-	"\baccepted\x18\x02 \x01(\bR\baccepted\"`\n" +
-	"&QueueClassificationUninterruptibleTurn\x126\n" +
-	"\acommand\x18\x01 \x01(\x0e2\x1c.agentrepl.v1.SessionCommandR\acommand\"2\n" +
+	"\baccepted\x18\x02 \x01(\bR\baccepted\"c\n" +
+	"&QueueClassificationUninterruptibleTurn\x129\n" +
+	"\acommand\x18\x01 \x01(\x0e2\x1f.conversation.v1.SessionCommandR\acommand\"2\n" +
 	"\x18QueueClassificationError\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x92\x06\n" +
 	"\n" +
@@ -3590,7 +3591,7 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FailureCardRef)(nil),                         // 41: frontend.v1.FailureCardRef
 	(*v11.NoDetachedAgentsRunning)(nil),            // 42: shim.v1.NoDetachedAgentsRunning
 	(*v11.DetachedCancelUnsupported)(nil),          // 43: shim.v1.DetachedCancelUnsupported
-	(v1.SessionCommand)(0),                         // 44: agentrepl.v1.SessionCommand
+	(v12.SessionCommand)(0),                        // 44: conversation.v1.SessionCommand
 }
 var file_frontend_v1_footer_proto_depIdxs = []int32{
 	0,  // 0: frontend.v1.WorkspaceState.state:type_name -> frontend.v1.RenderState
@@ -3626,7 +3627,7 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	22, // 30: frontend.v1.DetachedCancelOutcome.cancelled:type_name -> frontend.v1.DetachedAgentsCancelled
 	42, // 31: frontend.v1.DetachedCancelOutcome.nothing_running:type_name -> shim.v1.NoDetachedAgentsRunning
 	43, // 32: frontend.v1.DetachedCancelOutcome.unsupported:type_name -> shim.v1.DetachedCancelUnsupported
-	44, // 33: frontend.v1.QueueClassificationUninterruptibleTurn.command:type_name -> agentrepl.v1.SessionCommand
+	44, // 33: frontend.v1.QueueClassificationUninterruptibleTurn.command:type_name -> conversation.v1.SessionCommand
 	23, // 34: frontend.v1.QueueEntry.pending:type_name -> frontend.v1.QueueClassificationPending
 	24, // 35: frontend.v1.QueueEntry.interject:type_name -> frontend.v1.QueueClassificationInterject
 	25, // 36: frontend.v1.QueueEntry.hold_for_turn_end:type_name -> frontend.v1.QueueClassificationHold
@@ -3649,6 +3650,7 @@ func file_frontend_v1_footer_proto_init() {
 	if File_frontend_v1_footer_proto != nil {
 		return
 	}
+	file_frontend_v1_failure_proto_init()
 	file_frontend_v1_feed_proto_init()
 	file_frontend_v1_footer_proto_msgTypes[13].OneofWrappers = []any{
 		(*FooterAccountingCell_Complete)(nil),

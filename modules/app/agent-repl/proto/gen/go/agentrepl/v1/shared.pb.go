@@ -1,14 +1,13 @@
-// shared.proto — The agentrepl.v1 declarations that are NOT any one UI
-// component's props or events.
+// shared.proto — The agentrepl.v1 declarations that are NOT any one endpoint's
+// request or response.
 //
-// MEMBERSHIP HERE IS "NOT A COMPONENT", NOT "SHARED BY SEVERAL COMPONENTS".
-// feed.proto, topbar.proto, sidebar.proto and footer.proto each describe one
-// surface's resolved props and the commands that surface sends. Nothing in
-// this file does. What is here is the vocabulary and the plumbing those
-// surfaces are written against: the closed session-command set, the failure
-// vocabulary, the hibernation gate and its revival decision, the host-driver
-// commands the Emacs host sends, session and daemon lifecycle, and the merge
-// queue.
+// MEMBERSHIP HERE IS "NOT ONE ENDPOINT'S", NOT "SHARED BY SEVERAL ENDPOINTS".
+// The endpoint_*.proto files each describe one method's request, its success
+// and its error. Nothing in this file does. What is here is the vocabulary and
+// the plumbing those endpoints are written against: the refusal vocabulary a
+// call's error arms are drawn from, the hibernation gate and its revival
+// decision, the host-driver commands the Emacs host sends, session and daemon
+// lifecycle, and the merge queue.
 //
 // Each section below keeps the header of the file it came from, verbatim.
 
@@ -21,10 +20,9 @@
 package agentreplv1
 
 import (
-	v1 "agentrepl/proto/shim/v1"
+	v1 "agentrepl/proto/conversation/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
 	structpb "google.golang.org/protobuf/types/known/structpb"
 	reflect "reflect"
 	sync "sync"
@@ -37,156 +35,6 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
-
-// A slash command the CLI answers ITSELF, rather than a prompt for the agent.
-//
-// THE CLOSED SET IS THE POINT. The daemon recognizes a submitted prompt as one
-// of these before it forwards it (sessioncontroller/sessioncommand.go), and a
-// recognized command earns NO user message — so the set of things that can
-// suppress one is exactly the set of names below, fixed on the wire and
-// reviewable in one place. A command that is not here is a prompt, and a
-// prompt is always drawn.
-//
-// A custom command (a skill, a project command) is deliberately absent and
-// always will be: those EXPAND into a prompt for the agent, so the text the
-// user typed really is the turn's opening and really does belong in the feed.
-type SessionCommand int32
-
-const (
-	// Never set by the daemon. A receiver seeing UNSPECIFIED is looking at a
-	// malformed frame and must reject it loudly rather than pick a command.
-	//
-	// It carries NO spec, deliberately: it names no command, so there is no
-	// literal to spell and nothing a recognizer could ever match it against.
-	SessionCommand_SESSION_COMMAND_UNSPECIFIED      SessionCommand = 0
-	SessionCommand_SESSION_COMMAND_CLEAR            SessionCommand = 1
-	SessionCommand_SESSION_COMMAND_COMPACT          SessionCommand = 2
-	SessionCommand_SESSION_COMMAND_MODEL            SessionCommand = 3
-	SessionCommand_SESSION_COMMAND_COST             SessionCommand = 4
-	SessionCommand_SESSION_COMMAND_USAGE            SessionCommand = 5
-	SessionCommand_SESSION_COMMAND_STATUS           SessionCommand = 6
-	SessionCommand_SESSION_COMMAND_CONTEXT          SessionCommand = 7
-	SessionCommand_SESSION_COMMAND_CONFIG           SessionCommand = 8
-	SessionCommand_SESSION_COMMAND_HELP             SessionCommand = 9
-	SessionCommand_SESSION_COMMAND_DOCTOR           SessionCommand = 10
-	SessionCommand_SESSION_COMMAND_LOGIN            SessionCommand = 11
-	SessionCommand_SESSION_COMMAND_LOGOUT           SessionCommand = 12
-	SessionCommand_SESSION_COMMAND_MEMORY           SessionCommand = 13
-	SessionCommand_SESSION_COMMAND_PERMISSIONS      SessionCommand = 14
-	SessionCommand_SESSION_COMMAND_AGENTS           SessionCommand = 15
-	SessionCommand_SESSION_COMMAND_MCP              SessionCommand = 16
-	SessionCommand_SESSION_COMMAND_HOOKS            SessionCommand = 17
-	SessionCommand_SESSION_COMMAND_OUTPUT_STYLE     SessionCommand = 18
-	SessionCommand_SESSION_COMMAND_RELEASE_NOTES    SessionCommand = 19
-	SessionCommand_SESSION_COMMAND_TODOS            SessionCommand = 20
-	SessionCommand_SESSION_COMMAND_EXPORT           SessionCommand = 21
-	SessionCommand_SESSION_COMMAND_ADD_DIR          SessionCommand = 22
-	SessionCommand_SESSION_COMMAND_RESUME           SessionCommand = 23
-	SessionCommand_SESSION_COMMAND_EXIT             SessionCommand = 24
-	SessionCommand_SESSION_COMMAND_PRIVACY_SETTINGS SessionCommand = 25
-	SessionCommand_SESSION_COMMAND_STATUSLINE       SessionCommand = 26
-	SessionCommand_SESSION_COMMAND_TERMINAL_SETUP   SessionCommand = 27
-	SessionCommand_SESSION_COMMAND_VIM              SessionCommand = 28
-	SessionCommand_SESSION_COMMAND_REWIND           SessionCommand = 29
-	SessionCommand_SESSION_COMMAND_BUG              SessionCommand = 30
-)
-
-// Enum value maps for SessionCommand.
-var (
-	SessionCommand_name = map[int32]string{
-		0:  "SESSION_COMMAND_UNSPECIFIED",
-		1:  "SESSION_COMMAND_CLEAR",
-		2:  "SESSION_COMMAND_COMPACT",
-		3:  "SESSION_COMMAND_MODEL",
-		4:  "SESSION_COMMAND_COST",
-		5:  "SESSION_COMMAND_USAGE",
-		6:  "SESSION_COMMAND_STATUS",
-		7:  "SESSION_COMMAND_CONTEXT",
-		8:  "SESSION_COMMAND_CONFIG",
-		9:  "SESSION_COMMAND_HELP",
-		10: "SESSION_COMMAND_DOCTOR",
-		11: "SESSION_COMMAND_LOGIN",
-		12: "SESSION_COMMAND_LOGOUT",
-		13: "SESSION_COMMAND_MEMORY",
-		14: "SESSION_COMMAND_PERMISSIONS",
-		15: "SESSION_COMMAND_AGENTS",
-		16: "SESSION_COMMAND_MCP",
-		17: "SESSION_COMMAND_HOOKS",
-		18: "SESSION_COMMAND_OUTPUT_STYLE",
-		19: "SESSION_COMMAND_RELEASE_NOTES",
-		20: "SESSION_COMMAND_TODOS",
-		21: "SESSION_COMMAND_EXPORT",
-		22: "SESSION_COMMAND_ADD_DIR",
-		23: "SESSION_COMMAND_RESUME",
-		24: "SESSION_COMMAND_EXIT",
-		25: "SESSION_COMMAND_PRIVACY_SETTINGS",
-		26: "SESSION_COMMAND_STATUSLINE",
-		27: "SESSION_COMMAND_TERMINAL_SETUP",
-		28: "SESSION_COMMAND_VIM",
-		29: "SESSION_COMMAND_REWIND",
-		30: "SESSION_COMMAND_BUG",
-	}
-	SessionCommand_value = map[string]int32{
-		"SESSION_COMMAND_UNSPECIFIED":      0,
-		"SESSION_COMMAND_CLEAR":            1,
-		"SESSION_COMMAND_COMPACT":          2,
-		"SESSION_COMMAND_MODEL":            3,
-		"SESSION_COMMAND_COST":             4,
-		"SESSION_COMMAND_USAGE":            5,
-		"SESSION_COMMAND_STATUS":           6,
-		"SESSION_COMMAND_CONTEXT":          7,
-		"SESSION_COMMAND_CONFIG":           8,
-		"SESSION_COMMAND_HELP":             9,
-		"SESSION_COMMAND_DOCTOR":           10,
-		"SESSION_COMMAND_LOGIN":            11,
-		"SESSION_COMMAND_LOGOUT":           12,
-		"SESSION_COMMAND_MEMORY":           13,
-		"SESSION_COMMAND_PERMISSIONS":      14,
-		"SESSION_COMMAND_AGENTS":           15,
-		"SESSION_COMMAND_MCP":              16,
-		"SESSION_COMMAND_HOOKS":            17,
-		"SESSION_COMMAND_OUTPUT_STYLE":     18,
-		"SESSION_COMMAND_RELEASE_NOTES":    19,
-		"SESSION_COMMAND_TODOS":            20,
-		"SESSION_COMMAND_EXPORT":           21,
-		"SESSION_COMMAND_ADD_DIR":          22,
-		"SESSION_COMMAND_RESUME":           23,
-		"SESSION_COMMAND_EXIT":             24,
-		"SESSION_COMMAND_PRIVACY_SETTINGS": 25,
-		"SESSION_COMMAND_STATUSLINE":       26,
-		"SESSION_COMMAND_TERMINAL_SETUP":   27,
-		"SESSION_COMMAND_VIM":              28,
-		"SESSION_COMMAND_REWIND":           29,
-		"SESSION_COMMAND_BUG":              30,
-	}
-)
-
-func (x SessionCommand) Enum() *SessionCommand {
-	p := new(SessionCommand)
-	*p = x
-	return p
-}
-
-func (x SessionCommand) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (SessionCommand) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentrepl_v1_shared_proto_enumTypes[0].Descriptor()
-}
-
-func (SessionCommand) Type() protoreflect.EnumType {
-	return &file_agentrepl_v1_shared_proto_enumTypes[0]
-}
-
-func (x SessionCommand) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use SessionCommand.Descriptor instead.
-func (SessionCommand) EnumDescriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{0}
-}
 
 // What a revival compaction is allowed to summarize away.
 //
@@ -246,11 +94,11 @@ func (x CompactionScope) String() string {
 }
 
 func (CompactionScope) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentrepl_v1_shared_proto_enumTypes[1].Descriptor()
+	return file_agentrepl_v1_shared_proto_enumTypes[0].Descriptor()
 }
 
 func (CompactionScope) Type() protoreflect.EnumType {
-	return &file_agentrepl_v1_shared_proto_enumTypes[1]
+	return &file_agentrepl_v1_shared_proto_enumTypes[0]
 }
 
 func (x CompactionScope) Number() protoreflect.EnumNumber {
@@ -259,7 +107,7 @@ func (x CompactionScope) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CompactionScope.Descriptor instead.
 func (CompactionScope) EnumDescriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{1}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{0}
 }
 
 // Session creation over UDS (replaces Emacs POST /sessions).
@@ -334,11 +182,11 @@ func (x ResumeMode) String() string {
 }
 
 func (ResumeMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentrepl_v1_shared_proto_enumTypes[2].Descriptor()
+	return file_agentrepl_v1_shared_proto_enumTypes[1].Descriptor()
 }
 
 func (ResumeMode) Type() protoreflect.EnumType {
-	return &file_agentrepl_v1_shared_proto_enumTypes[2]
+	return &file_agentrepl_v1_shared_proto_enumTypes[1]
 }
 
 func (x ResumeMode) Number() protoreflect.EnumNumber {
@@ -347,7 +195,7 @@ func (x ResumeMode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ResumeMode.Descriptor instead.
 func (ResumeMode) EnumDescriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{1}
 }
 
 // The severity of a ClientLogRequest. A closed vocabulary rather than a free
@@ -388,11 +236,11 @@ func (x ClientLogLevel) String() string {
 }
 
 func (ClientLogLevel) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentrepl_v1_shared_proto_enumTypes[3].Descriptor()
+	return file_agentrepl_v1_shared_proto_enumTypes[2].Descriptor()
 }
 
 func (ClientLogLevel) Type() protoreflect.EnumType {
-	return &file_agentrepl_v1_shared_proto_enumTypes[3]
+	return &file_agentrepl_v1_shared_proto_enumTypes[2]
 }
 
 func (x ClientLogLevel) Number() protoreflect.EnumNumber {
@@ -401,1268 +249,8 @@ func (x ClientLogLevel) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ClientLogLevel.Descriptor instead.
 func (ClientLogLevel) EnumDescriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{3}
-}
-
-// Everything about a session command that is a FACT rather than an event: how
-// it is spelled, and whether text after the name belongs to it.
-//
-// Carried as an enum-value OPTION below rather than as traffic, because no
-// frame carries these facts and every process needs the same answer to them —
-// the daemon to recognize a submitted prompt, the webapp to complete and to
-// label one. The three hand-written copies this replaces (the daemon's
-// recognition table, the webapp's SESSION_COMMANDS list, the webapp's
-// SESSION_COMMAND_LABELS table) had nothing comparing them, so they drifted:
-// each was correct on its own and none of them agreed.
-type SessionCommandSpec struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The command as the user TYPES it, leading slash included — and also the
-	// form a reader is shown. One field for both so a corrected spelling cannot
-	// land in the recognizer while the webapp chip keeps rendering the old one.
-	Literal string `protobuf:"bytes,1,opt,name=literal,proto3" json:"literal,omitempty"`
-	// Whether text following the name is an ARGUMENT to this command rather
-	// than prose the user wrote.
-	//
-	// FALSE IS THE DEFAULT AND FALSE IS THE SAFE SIDE. A command that takes no
-	// argument is recognized only as an ENTIRE prompt, so "/status of the build"
-	// stays a prompt and keeps its user message. Marking a command that takes
-	// none as taking some is the one way this table can swallow something a user
-	// genuinely meant to say to the agent — an unrecoverable loss, since a
-	// suppressed prompt is never recovered later.
-	TakesArgs     bool `protobuf:"varint,2,opt,name=takes_args,json=takesArgs,proto3" json:"takes_args,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionCommandSpec) Reset() {
-	*x = SessionCommandSpec{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionCommandSpec) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionCommandSpec) ProtoMessage() {}
-
-func (x *SessionCommandSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionCommandSpec.ProtoReflect.Descriptor instead.
-func (*SessionCommandSpec) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *SessionCommandSpec) GetLiteral() string {
-	if x != nil {
-		return x.Literal
-	}
-	return ""
-}
-
-func (x *SessionCommandSpec) GetTakesArgs() bool {
-	if x != nil {
-		return x.TakesArgs
-	}
-	return false
-}
-
-// The vendor conversation and request a vendor-side failure pertains to.
-//
-// This is CONTENT, not addressing: it is a set of facts a card may show so the
-// user can find the conversation or quote the request when asking for help.
-// Nothing routes on it and nothing compares it.
-type VendorFailureContext struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation, verbatim. Empty when the failure happened before
-	// one existed.
-	ClaudeSessionId string `protobuf:"bytes,1,opt,name=claude_session_id,json=claudeSessionId,proto3" json:"claude_session_id,omitempty"`
-	// The vendor's request correlation id, for quoting in a support report.
-	// Empty when the request never got one.
-	ApiRequestId string `protobuf:"bytes,2,opt,name=api_request_id,json=apiRequestId,proto3" json:"api_request_id,omitempty"`
-	// The vendor's message id, when the failure names a specific response.
-	ApiMessageId  string `protobuf:"bytes,3,opt,name=api_message_id,json=apiMessageId,proto3" json:"api_message_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *VendorFailureContext) Reset() {
-	*x = VendorFailureContext{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *VendorFailureContext) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*VendorFailureContext) ProtoMessage() {}
-
-func (x *VendorFailureContext) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use VendorFailureContext.ProtoReflect.Descriptor instead.
-func (*VendorFailureContext) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *VendorFailureContext) GetClaudeSessionId() string {
-	if x != nil {
-		return x.ClaudeSessionId
-	}
-	return ""
-}
-
-func (x *VendorFailureContext) GetApiRequestId() string {
-	if x != nil {
-		return x.ApiRequestId
-	}
-	return ""
-}
-
-func (x *VendorFailureContext) GetApiMessageId() string {
-	if x != nil {
-		return x.ApiMessageId
-	}
-	return ""
-}
-
-// WHAT failed. Exactly one arm is always set; an unset FailureKind is a
-// malformed frame and must be rejected rather than rendered as a generic
-// error.
-//
-// TWO PRODUCERS. The daemon mints every arm below 100 — it is the only thing
-// that can see the shim, the store or the vendor. A frontend mints the arms
-// from 100 up, and ONLY those: they are the failures of the frontend's own
-// machinery, which the daemon cannot observe. The split is by number so it
-// cannot drift, and neither producer may set the other's arms.
-type FailureKind struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Kind:
-	//
-	//	*FailureKind_ShimNotConnected
-	//	*FailureKind_ShimRejected
-	//	*FailureKind_ShimAckTimeout
-	//	*FailureKind_ShimVersionMismatch
-	//	*FailureKind_ShimSeqRegression
-	//	*FailureKind_ShimDegraded
-	//	*FailureKind_ShimStoreWriteRejected
-	//	*FailureKind_QueryTermination
-	//	*FailureKind_ShimNotSpawned
-	//	*FailureKind_ShimHandshakeIncomplete
-	//	*FailureKind_ShimUnhealthy
-	//	*FailureKind_SessionNotEstablished
-	//	*FailureKind_WorkspaceNotLive
-	//	*FailureKind_SessionDeleted
-	//	*FailureKind_SessionSuperseded
-	//	*FailureKind_ReconnectSuperseded
-	//	*FailureKind_SessionShimDied
-	//	*FailureKind_SessionStartFailed
-	//	*FailureKind_SessionResumeFailed
-	//	*FailureKind_ConversationUnresumable
-	//	*FailureKind_ResumeModeRetired
-	//	*FailureKind_SessionEndedUnclassified
-	//	*FailureKind_HistoryRepullInFlight
-	//	*FailureKind_HistoryReplayTruncated
-	//	*FailureKind_InterruptUndelivered
-	//	*FailureKind_QueueEntryUnwired
-	//	*FailureKind_QueueEntryKeepAliveHeld
-	//	*FailureKind_SessionHibernated
-	//	*FailureKind_KeepAliveWindowUnclosed
-	//	*FailureKind_KeepAliveWindowInverted
-	//	*FailureKind_CompactionColdRead
-	//	*FailureKind_ClientLogIdentityStale
-	//	*FailureKind_InternalUnclassified
-	//	*FailureKind_ApiAuthenticationFailed
-	//	*FailureKind_ApiBillingError
-	//	*FailureKind_ApiRateLimit
-	//	*FailureKind_ApiInvalidRequest
-	//	*FailureKind_ApiServerError
-	//	*FailureKind_ApiOverloaded
-	//	*FailureKind_ApiOauthOrgNotAllowed
-	//	*FailureKind_ApiModelNotFound
-	//	*FailureKind_ApiNetworkDown
-	//	*FailureKind_ApiRequestFailed
-	//	*FailureKind_ApiUnknown
-	//	*FailureKind_ApiMaxOutputTokens
-	//	*FailureKind_ApiMaxTurns
-	//	*FailureKind_ApiMaxBudget
-	//	*FailureKind_ApiExecutionError
-	//	*FailureKind_ApiRefusal
-	//	*FailureKind_ApiTurnFailed
-	//	*FailureKind_PromptRefusedByMergeState
-	//	*FailureKind_QueueEntryUninterruptibleTurn
-	//	*FailureKind_TurnUndriven
-	//	*FailureKind_ReplayMarkRetired
-	//	*FailureKind_DaemonUnreachable
-	//	*FailureKind_WorkspaceGone
-	//	*FailureKind_BootFailed
-	//	*FailureKind_ControlPlaneFailed
-	//	*FailureKind_FrameUndecodable
-	//	*FailureKind_StaleBundle
-	//	*FailureKind_CommandUnsent
-	//	*FailureKind_CommandRejectionUnclassified
-	Kind          isFailureKind_Kind `protobuf_oneof:"kind"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureKind) Reset() {
-	*x = FailureKind{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureKind) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureKind) ProtoMessage() {}
-
-func (x *FailureKind) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureKind.ProtoReflect.Descriptor instead.
-func (*FailureKind) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{2}
 }
-
-func (x *FailureKind) GetKind() isFailureKind_Kind {
-	if x != nil {
-		return x.Kind
-	}
-	return nil
-}
-
-func (x *FailureKind) GetShimNotConnected() *FailureShimNotConnected {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ShimNotConnected); ok {
-			return x.ShimNotConnected
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetShimRejected() *FailureShimRejected {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ShimRejected); ok {
-			return x.ShimRejected
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetShimAckTimeout() *FailureShimAckTimeout {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ShimAckTimeout); ok {
-			return x.ShimAckTimeout
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetShimVersionMismatch() *FailureShimVersionMismatch {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ShimVersionMismatch); ok {
-			return x.ShimVersionMismatch
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetShimSeqRegression() *FailureShimSeqRegression {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ShimSeqRegression); ok {
-			return x.ShimSeqRegression
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetShimDegraded() *FailureShimDegraded {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ShimDegraded); ok {
-			return x.ShimDegraded
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetShimStoreWriteRejected() *FailureShimStoreWriteRejected {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ShimStoreWriteRejected); ok {
-			return x.ShimStoreWriteRejected
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetQueryTermination() *FailureQueryTermination {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_QueryTermination); ok {
-			return x.QueryTermination
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetShimNotSpawned() *FailureShimNotSpawned {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ShimNotSpawned); ok {
-			return x.ShimNotSpawned
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetShimHandshakeIncomplete() *FailureShimHandshakeIncomplete {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ShimHandshakeIncomplete); ok {
-			return x.ShimHandshakeIncomplete
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetShimUnhealthy() *FailureShimUnhealthy {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ShimUnhealthy); ok {
-			return x.ShimUnhealthy
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetSessionNotEstablished() *FailureSessionNotEstablished {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_SessionNotEstablished); ok {
-			return x.SessionNotEstablished
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetWorkspaceNotLive() *FailureWorkspaceNotLive {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_WorkspaceNotLive); ok {
-			return x.WorkspaceNotLive
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetSessionDeleted() *FailureSessionDeleted {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_SessionDeleted); ok {
-			return x.SessionDeleted
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetSessionSuperseded() *FailureSessionSuperseded {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_SessionSuperseded); ok {
-			return x.SessionSuperseded
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetReconnectSuperseded() *FailureReconnectSuperseded {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ReconnectSuperseded); ok {
-			return x.ReconnectSuperseded
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetSessionShimDied() *FailureSessionShimDied {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_SessionShimDied); ok {
-			return x.SessionShimDied
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetSessionStartFailed() *FailureSessionStartFailed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_SessionStartFailed); ok {
-			return x.SessionStartFailed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetSessionResumeFailed() *FailureSessionResumeFailed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_SessionResumeFailed); ok {
-			return x.SessionResumeFailed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetConversationUnresumable() *FailureConversationUnresumable {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ConversationUnresumable); ok {
-			return x.ConversationUnresumable
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetResumeModeRetired() *FailureResumeModeRetired {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ResumeModeRetired); ok {
-			return x.ResumeModeRetired
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetSessionEndedUnclassified() *FailureSessionEndedUnclassified {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_SessionEndedUnclassified); ok {
-			return x.SessionEndedUnclassified
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetHistoryRepullInFlight() *FailureHistoryRepullInFlight {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_HistoryRepullInFlight); ok {
-			return x.HistoryRepullInFlight
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetHistoryReplayTruncated() *FailureHistoryReplayTruncated {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_HistoryReplayTruncated); ok {
-			return x.HistoryReplayTruncated
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetInterruptUndelivered() *FailureInterruptUndelivered {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_InterruptUndelivered); ok {
-			return x.InterruptUndelivered
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetQueueEntryUnwired() *FailureQueueEntryUnwired {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_QueueEntryUnwired); ok {
-			return x.QueueEntryUnwired
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetQueueEntryKeepAliveHeld() *FailureQueueEntryKeepAliveHeld {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_QueueEntryKeepAliveHeld); ok {
-			return x.QueueEntryKeepAliveHeld
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetSessionHibernated() *FailureSessionHibernated {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_SessionHibernated); ok {
-			return x.SessionHibernated
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetKeepAliveWindowUnclosed() *FailureKeepAliveWindowUnclosed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_KeepAliveWindowUnclosed); ok {
-			return x.KeepAliveWindowUnclosed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetKeepAliveWindowInverted() *FailureKeepAliveWindowInverted {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_KeepAliveWindowInverted); ok {
-			return x.KeepAliveWindowInverted
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetCompactionColdRead() *FailureCompactionColdRead {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_CompactionColdRead); ok {
-			return x.CompactionColdRead
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetClientLogIdentityStale() *FailureClientLogIdentityStale {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ClientLogIdentityStale); ok {
-			return x.ClientLogIdentityStale
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetInternalUnclassified() *FailureInternalUnclassified {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_InternalUnclassified); ok {
-			return x.InternalUnclassified
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiAuthenticationFailed() *FailureApiAuthenticationFailed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiAuthenticationFailed); ok {
-			return x.ApiAuthenticationFailed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiBillingError() *FailureApiBillingError {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiBillingError); ok {
-			return x.ApiBillingError
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiRateLimit() *FailureApiRateLimit {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiRateLimit); ok {
-			return x.ApiRateLimit
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiInvalidRequest() *FailureApiInvalidRequest {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiInvalidRequest); ok {
-			return x.ApiInvalidRequest
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiServerError() *FailureApiServerError {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiServerError); ok {
-			return x.ApiServerError
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiOverloaded() *FailureApiOverloaded {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiOverloaded); ok {
-			return x.ApiOverloaded
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiOauthOrgNotAllowed() *FailureApiOAuthOrgNotAllowed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiOauthOrgNotAllowed); ok {
-			return x.ApiOauthOrgNotAllowed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiModelNotFound() *FailureApiModelNotFound {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiModelNotFound); ok {
-			return x.ApiModelNotFound
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiNetworkDown() *FailureApiNetworkDown {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiNetworkDown); ok {
-			return x.ApiNetworkDown
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiRequestFailed() *FailureApiRequestFailed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiRequestFailed); ok {
-			return x.ApiRequestFailed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiUnknown() *FailureApiUnknown {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiUnknown); ok {
-			return x.ApiUnknown
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiMaxOutputTokens() *FailureApiMaxOutputTokens {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiMaxOutputTokens); ok {
-			return x.ApiMaxOutputTokens
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiMaxTurns() *FailureApiMaxTurns {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiMaxTurns); ok {
-			return x.ApiMaxTurns
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiMaxBudget() *FailureApiMaxBudget {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiMaxBudget); ok {
-			return x.ApiMaxBudget
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiExecutionError() *FailureApiExecutionError {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiExecutionError); ok {
-			return x.ApiExecutionError
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiRefusal() *FailureApiRefusal {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiRefusal); ok {
-			return x.ApiRefusal
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiTurnFailed() *FailureApiTurnFailed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiTurnFailed); ok {
-			return x.ApiTurnFailed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetPromptRefusedByMergeState() *FailurePromptRefusedByMergeState {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_PromptRefusedByMergeState); ok {
-			return x.PromptRefusedByMergeState
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetQueueEntryUninterruptibleTurn() *FailureQueueEntryUninterruptibleTurn {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_QueueEntryUninterruptibleTurn); ok {
-			return x.QueueEntryUninterruptibleTurn
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetTurnUndriven() *FailureTurnUndriven {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_TurnUndriven); ok {
-			return x.TurnUndriven
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetReplayMarkRetired() *FailureReplayMarkRetired {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ReplayMarkRetired); ok {
-			return x.ReplayMarkRetired
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetDaemonUnreachable() *FailureDaemonUnreachable {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_DaemonUnreachable); ok {
-			return x.DaemonUnreachable
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetWorkspaceGone() *FailureWorkspaceGone {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_WorkspaceGone); ok {
-			return x.WorkspaceGone
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetBootFailed() *FailureBootFailed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_BootFailed); ok {
-			return x.BootFailed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetControlPlaneFailed() *FailureControlPlaneFailed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ControlPlaneFailed); ok {
-			return x.ControlPlaneFailed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetFrameUndecodable() *FailureFrameUndecodable {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_FrameUndecodable); ok {
-			return x.FrameUndecodable
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetStaleBundle() *FailureStaleBundle {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_StaleBundle); ok {
-			return x.StaleBundle
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetCommandUnsent() *FailureCommandUnsent {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_CommandUnsent); ok {
-			return x.CommandUnsent
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetCommandRejectionUnclassified() *FailureCommandRejectionUnclassified {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_CommandRejectionUnclassified); ok {
-			return x.CommandRejectionUnclassified
-		}
-	}
-	return nil
-}
-
-type isFailureKind_Kind interface {
-	isFailureKind_Kind()
-}
-
-type FailureKind_ShimNotConnected struct {
-	// ---- MACHINERY failures: agent-repl's own plumbing did not work. Nothing about
-	// the account is implicated and no amount of waiting or re-authenticating
-	// helps. This side of the vocabulary resolves the workspace BLUE. ----
-	// The agent process is not connected.
-	ShimNotConnected *FailureShimNotConnected `protobuf:"bytes,1,opt,name=shim_not_connected,json=shimNotConnected,proto3,oneof"`
-}
-
-type FailureKind_ShimRejected struct {
-	// The agent process received the request and refused it.
-	ShimRejected *FailureShimRejected `protobuf:"bytes,2,opt,name=shim_rejected,json=shimRejected,proto3,oneof"`
-}
-
-type FailureKind_ShimAckTimeout struct {
-	// The agent process never acknowledged the request within its window.
-	ShimAckTimeout *FailureShimAckTimeout `protobuf:"bytes,3,opt,name=shim_ack_timeout,json=shimAckTimeout,proto3,oneof"`
-}
-
-type FailureKind_ShimVersionMismatch struct {
-	// The agent process speaks a different protocol version than the daemon.
-	ShimVersionMismatch *FailureShimVersionMismatch `protobuf:"bytes,4,opt,name=shim_version_mismatch,json=shimVersionMismatch,proto3,oneof"`
-}
-
-type FailureKind_ShimSeqRegression struct {
-	// The agent process's event stream went backwards.
-	ShimSeqRegression *FailureShimSeqRegression `protobuf:"bytes,5,opt,name=shim_seq_regression,json=shimSeqRegression,proto3,oneof"`
-}
-
-type FailureKind_ShimDegraded struct {
-	// No traffic is arriving from the agent process.
-	ShimDegraded *FailureShimDegraded `protobuf:"bytes,6,opt,name=shim_degraded,json=shimDegraded,proto3,oneof"`
-}
-
-type FailureKind_ShimStoreWriteRejected struct {
-	// The agent process could not write to the store, so conversation is being dropped rather than persisted.
-	ShimStoreWriteRejected *FailureShimStoreWriteRejected `protobuf:"bytes,7,opt,name=shim_store_write_rejected,json=shimStoreWriteRejected,proto3,oneof"`
-}
-
-type FailureKind_QueryTermination struct {
-	// The agent sdk query ended unexpectedly — the session is alive but the thing that drives it stopped.
-	QueryTermination *FailureQueryTermination `protobuf:"bytes,8,opt,name=query_termination,json=queryTermination,proto3,oneof"`
-}
-
-type FailureKind_ShimNotSpawned struct {
-	// No agent process was ever started for this workspace, so there is nothing to talk to yet.
-	ShimNotSpawned *FailureShimNotSpawned `protobuf:"bytes,9,opt,name=shim_not_spawned,json=shimNotSpawned,proto3,oneof"`
-}
-
-type FailureKind_ShimHandshakeIncomplete struct {
-	// The agent process connected but never finished wiring up, so it is present without being usable.
-	ShimHandshakeIncomplete *FailureShimHandshakeIncomplete `protobuf:"bytes,10,opt,name=shim_handshake_incomplete,json=shimHandshakeIncomplete,proto3,oneof"`
-}
-
-type FailureKind_ShimUnhealthy struct {
-	// The agent process reported itself unhealthy — a self-diagnosis, not an inference from silence.
-	ShimUnhealthy *FailureShimUnhealthy `protobuf:"bytes,11,opt,name=shim_unhealthy,json=shimUnhealthy,proto3,oneof"`
-}
-
-type FailureKind_SessionNotEstablished struct {
-	// Bring-up did not finish connecting in time.
-	SessionNotEstablished *FailureSessionNotEstablished `protobuf:"bytes,12,opt,name=session_not_established,json=sessionNotEstablished,proto3,oneof"`
-}
-
-type FailureKind_WorkspaceNotLive struct {
-	// The command addressed something this workspace no longer runs.
-	WorkspaceNotLive *FailureWorkspaceNotLive `protobuf:"bytes,13,opt,name=workspace_not_live,json=workspaceNotLive,proto3,oneof"`
-}
-
-type FailureKind_SessionDeleted struct {
-	// The workspace's session was deleted deliberately.
-	SessionDeleted *FailureSessionDeleted `protobuf:"bytes,14,opt,name=session_deleted,json=sessionDeleted,proto3,oneof"`
-}
-
-type FailureKind_SessionSuperseded struct {
-	// A new session took over this workspace, so the previous one was stopped.
-	SessionSuperseded *FailureSessionSuperseded `protobuf:"bytes,15,opt,name=session_superseded,json=sessionSuperseded,proto3,oneof"`
-}
-
-type FailureKind_ReconnectSuperseded struct {
-	// This view is behind: the workspace's live connection changed under it, and the replay it asked for would have come from a generation it never saw.
-	ReconnectSuperseded *FailureReconnectSuperseded `protobuf:"bytes,16,opt,name=reconnect_superseded,json=reconnectSuperseded,proto3,oneof"`
-}
-
-type FailureKind_SessionShimDied struct {
-	// The agent process exited.
-	SessionShimDied *FailureSessionShimDied `protobuf:"bytes,17,opt,name=session_shim_died,json=sessionShimDied,proto3,oneof"`
-}
-
-type FailureKind_SessionStartFailed struct {
-	// The session could not be started at all.
-	SessionStartFailed *FailureSessionStartFailed `protobuf:"bytes,18,opt,name=session_start_failed,json=sessionStartFailed,proto3,oneof"`
-}
-
-type FailureKind_SessionResumeFailed struct {
-	// The vendor conversation could not be resumed without breaking continuity.
-	SessionResumeFailed *FailureSessionResumeFailed `protobuf:"bytes,19,opt,name=session_resume_failed,json=sessionResumeFailed,proto3,oneof"`
-}
-
-type FailureKind_ConversationUnresumable struct {
-	// This workspace has a vendor conversation that could not be reached, and a blank one will not be started in its place.
-	ConversationUnresumable *FailureConversationUnresumable `protobuf:"bytes,20,opt,name=conversation_unresumable,json=conversationUnresumable,proto3,oneof"`
-}
-
-type FailureKind_ResumeModeRetired struct {
-	// The client asked for a resume mode the daemon no longer supports.
-	ResumeModeRetired *FailureResumeModeRetired `protobuf:"bytes,21,opt,name=resume_mode_retired,json=resumeModeRetired,proto3,oneof"`
-}
-
-type FailureKind_SessionEndedUnclassified struct {
-	// The session ended for a reason the daemon could not classify.
-	SessionEndedUnclassified *FailureSessionEndedUnclassified `protobuf:"bytes,22,opt,name=session_ended_unclassified,json=sessionEndedUnclassified,proto3,oneof"`
-}
-
-type FailureKind_HistoryRepullInFlight struct {
-	// A history re-pull is already running, so a second one was refused.
-	HistoryRepullInFlight *FailureHistoryRepullInFlight `protobuf:"bytes,23,opt,name=history_repull_in_flight,json=historyRepullInFlight,proto3,oneof"`
-}
-
-type FailureKind_HistoryReplayTruncated struct {
-	// The history re-pull ended before it reached the live window, so what is on screen has a gap in it.
-	HistoryReplayTruncated *FailureHistoryReplayTruncated `protobuf:"bytes,24,opt,name=history_replay_truncated,json=historyReplayTruncated,proto3,oneof"`
-}
-
-type FailureKind_InterruptUndelivered struct {
-	// The stop could not be delivered, so the turn is still running.
-	InterruptUndelivered *FailureInterruptUndelivered `protobuf:"bytes,25,opt,name=interrupt_undelivered,json=interruptUndelivered,proto3,oneof"`
-}
-
-type FailureKind_QueueEntryUnwired struct {
-	// The queued prompt has no attached agent process yet, so it cannot run.
-	QueueEntryUnwired *FailureQueueEntryUnwired `protobuf:"bytes,26,opt,name=queue_entry_unwired,json=queueEntryUnwired,proto3,oneof"`
-}
-
-type FailureKind_QueueEntryKeepAliveHeld struct {
-	// The queued prompt is waiting on a cache keep-alive response and cannot be forced ahead of it.
-	QueueEntryKeepAliveHeld *FailureQueueEntryKeepAliveHeld `protobuf:"bytes,27,opt,name=queue_entry_keep_alive_held,json=queueEntryKeepAliveHeld,proto3,oneof"`
-}
-
-type FailureKind_SessionHibernated struct {
-	// The workspace is hibernated; a revival decision is required before prompts are accepted.
-	SessionHibernated *FailureSessionHibernated `protobuf:"bytes,28,opt,name=session_hibernated,json=sessionHibernated,proto3,oneof"`
-}
-
-type FailureKind_KeepAliveWindowUnclosed struct {
-	// A cache keep-alive window could not be closed, so new conversation is withheld until it is repaired.
-	KeepAliveWindowUnclosed *FailureKeepAliveWindowUnclosed `protobuf:"bytes,29,opt,name=keep_alive_window_unclosed,json=keepAliveWindowUnclosed,proto3,oneof"`
-}
-
-type FailureKind_KeepAliveWindowInverted struct {
-	// A cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation.
-	KeepAliveWindowInverted *FailureKeepAliveWindowInverted `protobuf:"bytes,30,opt,name=keep_alive_window_inverted,json=keepAliveWindowInverted,proto3,oneof"`
-}
-
-type FailureKind_CompactionColdRead struct {
-	// A compaction re-read the whole conversation at the uncached rate instead of from the prompt cache — the exact cost compaction exists to avoid.
-	CompactionColdRead *FailureCompactionColdRead `protobuf:"bytes,31,opt,name=compaction_cold_read,json=compactionColdRead,proto3,oneof"`
-}
-
-type FailureKind_ClientLogIdentityStale struct {
-	// A browser log record arrived against a workspace state that had already moved on, so it was not recorded.
-	ClientLogIdentityStale *FailureClientLogIdentityStale `protobuf:"bytes,32,opt,name=client_log_identity_stale,json=clientLogIdentityStale,proto3,oneof"`
-}
-
-type FailureKind_InternalUnclassified struct {
-	// Agent-repl's own machinery failed in a way it could not classify.
-	InternalUnclassified *FailureInternalUnclassified `protobuf:"bytes,33,opt,name=internal_unclassified,json=internalUnclassified,proto3,oneof"`
-}
-
-type FailureKind_ApiAuthenticationFailed struct {
-	// ---- VENDOR failures: the SDK or the vendor backend refused or concluded the
-	// work. Releasing it needs a human or the vendor, never a retry. This side
-	// of the vocabulary resolves the workspace PURPLE. ----
-	// Authentication failed.
-	ApiAuthenticationFailed *FailureApiAuthenticationFailed `protobuf:"bytes,34,opt,name=api_authentication_failed,json=apiAuthenticationFailed,proto3,oneof"`
-}
-
-type FailureKind_ApiBillingError struct {
-	// A billing problem stopped the request.
-	ApiBillingError *FailureApiBillingError `protobuf:"bytes,35,opt,name=api_billing_error,json=apiBillingError,proto3,oneof"`
-}
-
-type FailureKind_ApiRateLimit struct {
-	// The account is rate limited.
-	ApiRateLimit *FailureApiRateLimit `protobuf:"bytes,36,opt,name=api_rate_limit,json=apiRateLimit,proto3,oneof"`
-}
-
-type FailureKind_ApiInvalidRequest struct {
-	// The vendor rejected the request as invalid.
-	ApiInvalidRequest *FailureApiInvalidRequest `protobuf:"bytes,37,opt,name=api_invalid_request,json=apiInvalidRequest,proto3,oneof"`
-}
-
-type FailureKind_ApiServerError struct {
-	// The vendor returned a server error.
-	ApiServerError *FailureApiServerError `protobuf:"bytes,38,opt,name=api_server_error,json=apiServerError,proto3,oneof"`
-}
-
-type FailureKind_ApiOverloaded struct {
-	// The vendor is overloaded.
-	ApiOverloaded *FailureApiOverloaded `protobuf:"bytes,39,opt,name=api_overloaded,json=apiOverloaded,proto3,oneof"`
-}
-
-type FailureKind_ApiOauthOrgNotAllowed struct {
-	// This organization is not allowed to use the api.
-	ApiOauthOrgNotAllowed *FailureApiOAuthOrgNotAllowed `protobuf:"bytes,40,opt,name=api_oauth_org_not_allowed,json=apiOauthOrgNotAllowed,proto3,oneof"`
-}
-
-type FailureKind_ApiModelNotFound struct {
-	// The requested model does not exist.
-	ApiModelNotFound *FailureApiModelNotFound `protobuf:"bytes,41,opt,name=api_model_not_found,json=apiModelNotFound,proto3,oneof"`
-}
-
-type FailureKind_ApiNetworkDown struct {
-	// The network never reached the vendor.
-	ApiNetworkDown *FailureApiNetworkDown `protobuf:"bytes,42,opt,name=api_network_down,json=apiNetworkDown,proto3,oneof"`
-}
-
-type FailureKind_ApiRequestFailed struct {
-	// The vendor request failed for a reason with no more specific kind.
-	ApiRequestFailed *FailureApiRequestFailed `protobuf:"bytes,43,opt,name=api_request_failed,json=apiRequestFailed,proto3,oneof"`
-}
-
-type FailureKind_ApiUnknown struct {
-	// The vendor failed for a reason the daemon could not classify.
-	ApiUnknown *FailureApiUnknown `protobuf:"bytes,44,opt,name=api_unknown,json=apiUnknown,proto3,oneof"`
-}
-
-type FailureKind_ApiMaxOutputTokens struct {
-	// The response hit the output-token ceiling.
-	ApiMaxOutputTokens *FailureApiMaxOutputTokens `protobuf:"bytes,45,opt,name=api_max_output_tokens,json=apiMaxOutputTokens,proto3,oneof"`
-}
-
-type FailureKind_ApiMaxTurns struct {
-	// The turn hit its maximum-turns limit.
-	ApiMaxTurns *FailureApiMaxTurns `protobuf:"bytes,46,opt,name=api_max_turns,json=apiMaxTurns,proto3,oneof"`
-}
-
-type FailureKind_ApiMaxBudget struct {
-	// The turn hit its budget limit.
-	ApiMaxBudget *FailureApiMaxBudget `protobuf:"bytes,47,opt,name=api_max_budget,json=apiMaxBudget,proto3,oneof"`
-}
-
-type FailureKind_ApiExecutionError struct {
-	// The turn aborted during execution.
-	ApiExecutionError *FailureApiExecutionError `protobuf:"bytes,48,opt,name=api_execution_error,json=apiExecutionError,proto3,oneof"`
-}
-
-type FailureKind_ApiRefusal struct {
-	// The model refused the request.
-	ApiRefusal *FailureApiRefusal `protobuf:"bytes,49,opt,name=api_refusal,json=apiRefusal,proto3,oneof"`
-}
-
-type FailureKind_ApiTurnFailed struct {
-	// The turn ended abnormally for a reason with no more specific kind.
-	ApiTurnFailed *FailureApiTurnFailed `protobuf:"bytes,50,opt,name=api_turn_failed,json=apiTurnFailed,proto3,oneof"`
-}
-
-type FailureKind_PromptRefusedByMergeState struct {
-	// ---- MACHINERY, continued. ----
-	// The daemon refused a user prompt because the workspace's merge machinery holds the session.
-	PromptRefusedByMergeState *FailurePromptRefusedByMergeState `protobuf:"bytes,51,opt,name=prompt_refused_by_merge_state,json=promptRefusedByMergeState,proto3,oneof"`
-}
-
-type FailureKind_QueueEntryUninterruptibleTurn struct {
-	// The queued prompt is waiting behind a context cut, which is never interrupted, so it cannot be forced ahead of it.
-	QueueEntryUninterruptibleTurn *FailureQueueEntryUninterruptibleTurn `protobuf:"bytes,52,opt,name=queue_entry_uninterruptible_turn,json=queueEntryUninterruptibleTurn,proto3,oneof"`
-}
-
-type FailureKind_TurnUndriven struct {
-	// A turn stood bound with nothing driving it, so the daemon closed it rather than leaving the workspace thinking forever.
-	TurnUndriven *FailureTurnUndriven `protobuf:"bytes,53,opt,name=turn_undriven,json=turnUndriven,proto3,oneof"`
-}
-
-type FailureKind_ReplayMarkRetired struct {
-	// The replay mark the client asked from counts in a store seq space the vendor session retired, so no delta above it exists and the client must re-anchor from the conversation's tail.
-	ReplayMarkRetired *FailureReplayMarkRetired `protobuf:"bytes,54,opt,name=replay_mark_retired,json=replayMarkRetired,proto3,oneof"`
-}
-
-type FailureKind_DaemonUnreachable struct {
-	// ---- CLIENT-LOCAL failures: the one part of this vocabulary a frontend
-	// mints itself. See the note on FailureKind. All resolve BLUE, because a
-	// frontend can only ever observe its own machinery failing.
-	// The daemon never sets one of these arms.
-	DaemonUnreachable *FailureDaemonUnreachable `protobuf:"bytes,55,opt,name=daemon_unreachable,json=daemonUnreachable,proto3,oneof"`
-}
-
-type FailureKind_WorkspaceGone struct {
-	WorkspaceGone *FailureWorkspaceGone `protobuf:"bytes,56,opt,name=workspace_gone,json=workspaceGone,proto3,oneof"`
-}
-
-type FailureKind_BootFailed struct {
-	BootFailed *FailureBootFailed `protobuf:"bytes,57,opt,name=boot_failed,json=bootFailed,proto3,oneof"`
-}
-
-type FailureKind_ControlPlaneFailed struct {
-	ControlPlaneFailed *FailureControlPlaneFailed `protobuf:"bytes,58,opt,name=control_plane_failed,json=controlPlaneFailed,proto3,oneof"`
-}
-
-type FailureKind_FrameUndecodable struct {
-	FrameUndecodable *FailureFrameUndecodable `protobuf:"bytes,59,opt,name=frame_undecodable,json=frameUndecodable,proto3,oneof"`
-}
-
-type FailureKind_StaleBundle struct {
-	StaleBundle *FailureStaleBundle `protobuf:"bytes,60,opt,name=stale_bundle,json=staleBundle,proto3,oneof"`
-}
-
-type FailureKind_CommandUnsent struct {
-	CommandUnsent *FailureCommandUnsent `protobuf:"bytes,61,opt,name=command_unsent,json=commandUnsent,proto3,oneof"`
-}
-
-type FailureKind_CommandRejectionUnclassified struct {
-	CommandRejectionUnclassified *FailureCommandRejectionUnclassified `protobuf:"bytes,62,opt,name=command_rejection_unclassified,json=commandRejectionUnclassified,proto3,oneof"`
-}
-
-func (*FailureKind_ShimNotConnected) isFailureKind_Kind() {}
-
-func (*FailureKind_ShimRejected) isFailureKind_Kind() {}
-
-func (*FailureKind_ShimAckTimeout) isFailureKind_Kind() {}
-
-func (*FailureKind_ShimVersionMismatch) isFailureKind_Kind() {}
-
-func (*FailureKind_ShimSeqRegression) isFailureKind_Kind() {}
-
-func (*FailureKind_ShimDegraded) isFailureKind_Kind() {}
-
-func (*FailureKind_ShimStoreWriteRejected) isFailureKind_Kind() {}
-
-func (*FailureKind_QueryTermination) isFailureKind_Kind() {}
-
-func (*FailureKind_ShimNotSpawned) isFailureKind_Kind() {}
-
-func (*FailureKind_ShimHandshakeIncomplete) isFailureKind_Kind() {}
-
-func (*FailureKind_ShimUnhealthy) isFailureKind_Kind() {}
-
-func (*FailureKind_SessionNotEstablished) isFailureKind_Kind() {}
-
-func (*FailureKind_WorkspaceNotLive) isFailureKind_Kind() {}
-
-func (*FailureKind_SessionDeleted) isFailureKind_Kind() {}
-
-func (*FailureKind_SessionSuperseded) isFailureKind_Kind() {}
-
-func (*FailureKind_ReconnectSuperseded) isFailureKind_Kind() {}
-
-func (*FailureKind_SessionShimDied) isFailureKind_Kind() {}
-
-func (*FailureKind_SessionStartFailed) isFailureKind_Kind() {}
-
-func (*FailureKind_SessionResumeFailed) isFailureKind_Kind() {}
-
-func (*FailureKind_ConversationUnresumable) isFailureKind_Kind() {}
-
-func (*FailureKind_ResumeModeRetired) isFailureKind_Kind() {}
-
-func (*FailureKind_SessionEndedUnclassified) isFailureKind_Kind() {}
-
-func (*FailureKind_HistoryRepullInFlight) isFailureKind_Kind() {}
-
-func (*FailureKind_HistoryReplayTruncated) isFailureKind_Kind() {}
-
-func (*FailureKind_InterruptUndelivered) isFailureKind_Kind() {}
-
-func (*FailureKind_QueueEntryUnwired) isFailureKind_Kind() {}
-
-func (*FailureKind_QueueEntryKeepAliveHeld) isFailureKind_Kind() {}
-
-func (*FailureKind_SessionHibernated) isFailureKind_Kind() {}
-
-func (*FailureKind_KeepAliveWindowUnclosed) isFailureKind_Kind() {}
-
-func (*FailureKind_KeepAliveWindowInverted) isFailureKind_Kind() {}
-
-func (*FailureKind_CompactionColdRead) isFailureKind_Kind() {}
-
-func (*FailureKind_ClientLogIdentityStale) isFailureKind_Kind() {}
-
-func (*FailureKind_InternalUnclassified) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiAuthenticationFailed) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiBillingError) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiRateLimit) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiInvalidRequest) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiServerError) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiOverloaded) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiOauthOrgNotAllowed) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiModelNotFound) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiNetworkDown) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiRequestFailed) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiUnknown) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiMaxOutputTokens) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiMaxTurns) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiMaxBudget) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiExecutionError) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiRefusal) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiTurnFailed) isFailureKind_Kind() {}
-
-func (*FailureKind_PromptRefusedByMergeState) isFailureKind_Kind() {}
-
-func (*FailureKind_QueueEntryUninterruptibleTurn) isFailureKind_Kind() {}
-
-func (*FailureKind_TurnUndriven) isFailureKind_Kind() {}
-
-func (*FailureKind_ReplayMarkRetired) isFailureKind_Kind() {}
-
-func (*FailureKind_DaemonUnreachable) isFailureKind_Kind() {}
-
-func (*FailureKind_WorkspaceGone) isFailureKind_Kind() {}
-
-func (*FailureKind_BootFailed) isFailureKind_Kind() {}
-
-func (*FailureKind_ControlPlaneFailed) isFailureKind_Kind() {}
-
-func (*FailureKind_FrameUndecodable) isFailureKind_Kind() {}
-
-func (*FailureKind_StaleBundle) isFailureKind_Kind() {}
-
-func (*FailureKind_CommandUnsent) isFailureKind_Kind() {}
-
-func (*FailureKind_CommandRejectionUnclassified) isFailureKind_Kind() {}
 
 // The agent process is not connected. Nothing was delivered and nothing was lost; the command simply had nowhere to go.
 //
@@ -1675,7 +263,7 @@ type FailureShimNotConnected struct {
 
 func (x *FailureShimNotConnected) Reset() {
 	*x = FailureShimNotConnected{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1687,7 +275,7 @@ func (x *FailureShimNotConnected) String() string {
 func (*FailureShimNotConnected) ProtoMessage() {}
 
 func (x *FailureShimNotConnected) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1700,7 +288,7 @@ func (x *FailureShimNotConnected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureShimNotConnected.ProtoReflect.Descriptor instead.
 func (*FailureShimNotConnected) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{0}
 }
 
 // The agent process received the request and refused it.
@@ -1718,7 +306,7 @@ type FailureShimRejected struct {
 
 func (x *FailureShimRejected) Reset() {
 	*x = FailureShimRejected{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1730,7 +318,7 @@ func (x *FailureShimRejected) String() string {
 func (*FailureShimRejected) ProtoMessage() {}
 
 func (x *FailureShimRejected) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1743,7 +331,7 @@ func (x *FailureShimRejected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureShimRejected.ProtoReflect.Descriptor instead.
 func (*FailureShimRejected) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *FailureShimRejected) GetRequestId() string {
@@ -1775,7 +363,7 @@ type FailureShimAckTimeout struct {
 
 func (x *FailureShimAckTimeout) Reset() {
 	*x = FailureShimAckTimeout{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1787,7 +375,7 @@ func (x *FailureShimAckTimeout) String() string {
 func (*FailureShimAckTimeout) ProtoMessage() {}
 
 func (x *FailureShimAckTimeout) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1800,7 +388,7 @@ func (x *FailureShimAckTimeout) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureShimAckTimeout.ProtoReflect.Descriptor instead.
 func (*FailureShimAckTimeout) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *FailureShimAckTimeout) GetRequestId() string {
@@ -1817,281 +405,6 @@ func (x *FailureShimAckTimeout) GetWaitedMs() int64 {
 	return 0
 }
 
-// The agent process speaks a different protocol version than the daemon. Both versions are named because the fix is to align them and the user needs to know which way.
-//
-// Resolves the workspace BLUE.
-type FailureShimVersionMismatch struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShimVersion   string                 `protobuf:"bytes,1,opt,name=shim_version,json=shimVersion,proto3" json:"shim_version,omitempty"`
-	DaemonVersion string                 `protobuf:"bytes,2,opt,name=daemon_version,json=daemonVersion,proto3" json:"daemon_version,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureShimVersionMismatch) Reset() {
-	*x = FailureShimVersionMismatch{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureShimVersionMismatch) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureShimVersionMismatch) ProtoMessage() {}
-
-func (x *FailureShimVersionMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureShimVersionMismatch.ProtoReflect.Descriptor instead.
-func (*FailureShimVersionMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *FailureShimVersionMismatch) GetShimVersion() string {
-	if x != nil {
-		return x.ShimVersion
-	}
-	return ""
-}
-
-func (x *FailureShimVersionMismatch) GetDaemonVersion() string {
-	if x != nil {
-		return x.DaemonVersion
-	}
-	return ""
-}
-
-// The agent process's event stream went backwards. A sequence that regresses means events were replayed or lost, so the conversation on screen may not be the conversation that happened.
-//
-// Resolves the workspace BLUE.
-type FailureShimSeqRegression struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The sequence number that arrived.
-	Seq uint64 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
-	// The highest sequence already seen, which it should have exceeded.
-	LastSeenSeq   uint64 `protobuf:"varint,2,opt,name=last_seen_seq,json=lastSeenSeq,proto3" json:"last_seen_seq,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureShimSeqRegression) Reset() {
-	*x = FailureShimSeqRegression{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureShimSeqRegression) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureShimSeqRegression) ProtoMessage() {}
-
-func (x *FailureShimSeqRegression) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureShimSeqRegression.ProtoReflect.Descriptor instead.
-func (*FailureShimSeqRegression) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *FailureShimSeqRegression) GetSeq() uint64 {
-	if x != nil {
-		return x.Seq
-	}
-	return 0
-}
-
-func (x *FailureShimSeqRegression) GetLastSeenSeq() uint64 {
-	if x != nil {
-		return x.LastSeenSeq
-	}
-	return 0
-}
-
-// No traffic is arriving from the agent process. WINDOW-SHAPED: it opens when the silence starts and resolves when traffic returns.
-//
-// Resolves the workspace BLUE.
-type FailureShimDegraded struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Which part of the connection went quiet.
-	Component     string `protobuf:"bytes,1,opt,name=component,proto3" json:"component,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureShimDegraded) Reset() {
-	*x = FailureShimDegraded{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureShimDegraded) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureShimDegraded) ProtoMessage() {}
-
-func (x *FailureShimDegraded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureShimDegraded.ProtoReflect.Descriptor instead.
-func (*FailureShimDegraded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *FailureShimDegraded) GetComponent() string {
-	if x != nil {
-		return x.Component
-	}
-	return ""
-}
-
-// The agent process could not write to the store, so conversation is being dropped rather than persisted.
-//
-// Resolves the workspace BLUE.
-type FailureShimStoreWriteRejected struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Which writer was rejected.
-	Component string `protobuf:"bytes,1,opt,name=component,proto3" json:"component,omitempty"`
-	// The store's stated reason, verbatim.
-	Reason string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
-	// How many records were dropped while this was open. The count is the
-	// severity: one is a hiccup, thousands is a lost conversation.
-	DroppedCount  int64 `protobuf:"varint,3,opt,name=dropped_count,json=droppedCount,proto3" json:"dropped_count,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureShimStoreWriteRejected) Reset() {
-	*x = FailureShimStoreWriteRejected{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureShimStoreWriteRejected) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureShimStoreWriteRejected) ProtoMessage() {}
-
-func (x *FailureShimStoreWriteRejected) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureShimStoreWriteRejected.ProtoReflect.Descriptor instead.
-func (*FailureShimStoreWriteRejected) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *FailureShimStoreWriteRejected) GetComponent() string {
-	if x != nil {
-		return x.Component
-	}
-	return ""
-}
-
-func (x *FailureShimStoreWriteRejected) GetReason() string {
-	if x != nil {
-		return x.Reason
-	}
-	return ""
-}
-
-func (x *FailureShimStoreWriteRejected) GetDroppedCount() int64 {
-	if x != nil {
-		return x.DroppedCount
-	}
-	return 0
-}
-
-// The agent SDK query ended unexpectedly — the session is alive but the thing that drives it stopped.
-//
-// Resolves the workspace BLUE.
-type FailureQueryTermination struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Exact query-lifecycle evidence.
-	Detail        *QueryTerminationFailure `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureQueryTermination) Reset() {
-	*x = FailureQueryTermination{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureQueryTermination) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureQueryTermination) ProtoMessage() {}
-
-func (x *FailureQueryTermination) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureQueryTermination.ProtoReflect.Descriptor instead.
-func (*FailureQueryTermination) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *FailureQueryTermination) GetDetail() *QueryTerminationFailure {
-	if x != nil {
-		return x.Detail
-	}
-	return nil
-}
-
 // No agent process was ever started for this workspace, so there is nothing to talk to yet.
 //
 // Resolves the workspace BLUE.
@@ -2103,7 +416,7 @@ type FailureShimNotSpawned struct {
 
 func (x *FailureShimNotSpawned) Reset() {
 	*x = FailureShimNotSpawned{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2115,7 +428,7 @@ func (x *FailureShimNotSpawned) String() string {
 func (*FailureShimNotSpawned) ProtoMessage() {}
 
 func (x *FailureShimNotSpawned) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2128,7 +441,7 @@ func (x *FailureShimNotSpawned) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureShimNotSpawned.ProtoReflect.Descriptor instead.
 func (*FailureShimNotSpawned) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{3}
 }
 
 // The agent process connected but never finished wiring up, so it is present without being usable.
@@ -2146,7 +459,7 @@ type FailureShimHandshakeIncomplete struct {
 
 func (x *FailureShimHandshakeIncomplete) Reset() {
 	*x = FailureShimHandshakeIncomplete{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2158,7 +471,7 @@ func (x *FailureShimHandshakeIncomplete) String() string {
 func (*FailureShimHandshakeIncomplete) ProtoMessage() {}
 
 func (x *FailureShimHandshakeIncomplete) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2171,7 +484,7 @@ func (x *FailureShimHandshakeIncomplete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureShimHandshakeIncomplete.ProtoReflect.Descriptor instead.
 func (*FailureShimHandshakeIncomplete) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *FailureShimHandshakeIncomplete) GetRequestId() string {
@@ -2204,7 +517,7 @@ type FailureShimUnhealthy struct {
 
 func (x *FailureShimUnhealthy) Reset() {
 	*x = FailureShimUnhealthy{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2216,7 +529,7 @@ func (x *FailureShimUnhealthy) String() string {
 func (*FailureShimUnhealthy) ProtoMessage() {}
 
 func (x *FailureShimUnhealthy) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2229,7 +542,7 @@ func (x *FailureShimUnhealthy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureShimUnhealthy.ProtoReflect.Descriptor instead.
 func (*FailureShimUnhealthy) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *FailureShimUnhealthy) GetRequestId() string {
@@ -2266,7 +579,7 @@ type FailureSessionNotEstablished struct {
 
 func (x *FailureSessionNotEstablished) Reset() {
 	*x = FailureSessionNotEstablished{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2278,7 +591,7 @@ func (x *FailureSessionNotEstablished) String() string {
 func (*FailureSessionNotEstablished) ProtoMessage() {}
 
 func (x *FailureSessionNotEstablished) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2291,7 +604,7 @@ func (x *FailureSessionNotEstablished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureSessionNotEstablished.ProtoReflect.Descriptor instead.
 func (*FailureSessionNotEstablished) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *FailureSessionNotEstablished) GetCause() string {
@@ -2312,7 +625,7 @@ type FailureWorkspaceNotLive struct {
 
 func (x *FailureWorkspaceNotLive) Reset() {
 	*x = FailureWorkspaceNotLive{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2324,7 +637,7 @@ func (x *FailureWorkspaceNotLive) String() string {
 func (*FailureWorkspaceNotLive) ProtoMessage() {}
 
 func (x *FailureWorkspaceNotLive) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2337,85 +650,7 @@ func (x *FailureWorkspaceNotLive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureWorkspaceNotLive.ProtoReflect.Descriptor instead.
 func (*FailureWorkspaceNotLive) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{15}
-}
-
-// The workspace's session was deleted deliberately. Not a fault — an account of why the conversation stopped.
-//
-// Resolves the workspace BLUE.
-type FailureSessionDeleted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureSessionDeleted) Reset() {
-	*x = FailureSessionDeleted{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[16]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureSessionDeleted) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureSessionDeleted) ProtoMessage() {}
-
-func (x *FailureSessionDeleted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[16]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureSessionDeleted.ProtoReflect.Descriptor instead.
-func (*FailureSessionDeleted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{16}
-}
-
-// A new session took over this workspace, so the previous one was stopped. A workspace keeps exactly one live session at a time.
-//
-// Resolves the workspace BLUE.
-type FailureSessionSuperseded struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureSessionSuperseded) Reset() {
-	*x = FailureSessionSuperseded{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[17]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureSessionSuperseded) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureSessionSuperseded) ProtoMessage() {}
-
-func (x *FailureSessionSuperseded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[17]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureSessionSuperseded.ProtoReflect.Descriptor instead.
-func (*FailureSessionSuperseded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{7}
 }
 
 // This view is behind: the workspace's live connection changed under it, and the replay it asked for would have come from a generation it never saw.
@@ -2433,7 +668,7 @@ type FailureReconnectSuperseded struct {
 
 func (x *FailureReconnectSuperseded) Reset() {
 	*x = FailureReconnectSuperseded{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2445,7 +680,7 @@ func (x *FailureReconnectSuperseded) String() string {
 func (*FailureReconnectSuperseded) ProtoMessage() {}
 
 func (x *FailureReconnectSuperseded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2458,7 +693,7 @@ func (x *FailureReconnectSuperseded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureReconnectSuperseded.ProtoReflect.Descriptor instead.
 func (*FailureReconnectSuperseded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *FailureReconnectSuperseded) GetRemedy() string {
@@ -2466,141 +701,6 @@ func (x *FailureReconnectSuperseded) GetRemedy() string {
 		return x.Remedy
 	}
 	return ""
-}
-
-// The agent process exited.
-//
-// Resolves the workspace BLUE.
-type FailureSessionShimDied struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureSessionShimDied) Reset() {
-	*x = FailureSessionShimDied{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureSessionShimDied) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureSessionShimDied) ProtoMessage() {}
-
-func (x *FailureSessionShimDied) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureSessionShimDied.ProtoReflect.Descriptor instead.
-func (*FailureSessionShimDied) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{19}
-}
-
-// The session could not be started at all.
-//
-// Resolves the workspace BLUE.
-type FailureSessionStartFailed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The bring-up failure, verbatim.
-	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureSessionStartFailed) Reset() {
-	*x = FailureSessionStartFailed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[20]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureSessionStartFailed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureSessionStartFailed) ProtoMessage() {}
-
-func (x *FailureSessionStartFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[20]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureSessionStartFailed.ProtoReflect.Descriptor instead.
-func (*FailureSessionStartFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{20}
-}
-
-func (x *FailureSessionStartFailed) GetCause() string {
-	if x != nil {
-		return x.Cause
-	}
-	return ""
-}
-
-// The vendor conversation could not be resumed without breaking continuity.
-//
-// Resolves the workspace BLUE.
-type FailureSessionResumeFailed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Exact resume-continuity evidence.
-	Detail        *SessionResumeFailure `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureSessionResumeFailed) Reset() {
-	*x = FailureSessionResumeFailed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[21]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureSessionResumeFailed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureSessionResumeFailed) ProtoMessage() {}
-
-func (x *FailureSessionResumeFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[21]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureSessionResumeFailed.ProtoReflect.Descriptor instead.
-func (*FailureSessionResumeFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{21}
-}
-
-func (x *FailureSessionResumeFailed) GetDetail() *SessionResumeFailure {
-	if x != nil {
-		return x.Detail
-	}
-	return nil
 }
 
 // This workspace has a vendor conversation that could not be reached, and a blank one will NOT be started in its place. Refusing is the feature: silently starting fresh is how a conversation gets lost.
@@ -2623,7 +723,7 @@ type FailureConversationUnresumable struct {
 
 func (x *FailureConversationUnresumable) Reset() {
 	*x = FailureConversationUnresumable{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2635,7 +735,7 @@ func (x *FailureConversationUnresumable) String() string {
 func (*FailureConversationUnresumable) ProtoMessage() {}
 
 func (x *FailureConversationUnresumable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2648,7 +748,7 @@ func (x *FailureConversationUnresumable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureConversationUnresumable.ProtoReflect.Descriptor instead.
 func (*FailureConversationUnresumable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{22}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *FailureConversationUnresumable) GetClaudeSessionId() string {
@@ -2690,7 +790,7 @@ type FailureResumeModeRetired struct {
 
 func (x *FailureResumeModeRetired) Reset() {
 	*x = FailureResumeModeRetired{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2702,7 +802,7 @@ func (x *FailureResumeModeRetired) String() string {
 func (*FailureResumeModeRetired) ProtoMessage() {}
 
 func (x *FailureResumeModeRetired) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2715,56 +815,7 @@ func (x *FailureResumeModeRetired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureResumeModeRetired.ProtoReflect.Descriptor instead.
 func (*FailureResumeModeRetired) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{23}
-}
-
-// The session ended for a reason the daemon could not classify. Its own inability to explain is the fact, and it is stated rather than dressed as one of the known endings.
-//
-// Resolves the workspace BLUE.
-type FailureSessionEndedUnclassified struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The raw reason as recorded, so the account is not lost just because it
-	// was not understood.
-	RawReason     string `protobuf:"bytes,1,opt,name=raw_reason,json=rawReason,proto3" json:"raw_reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureSessionEndedUnclassified) Reset() {
-	*x = FailureSessionEndedUnclassified{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[24]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureSessionEndedUnclassified) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureSessionEndedUnclassified) ProtoMessage() {}
-
-func (x *FailureSessionEndedUnclassified) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[24]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureSessionEndedUnclassified.ProtoReflect.Descriptor instead.
-func (*FailureSessionEndedUnclassified) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{24}
-}
-
-func (x *FailureSessionEndedUnclassified) GetRawReason() string {
-	if x != nil {
-		return x.RawReason
-	}
-	return ""
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{10}
 }
 
 // A history re-pull is already running, so a second one was refused.
@@ -2778,7 +829,7 @@ type FailureHistoryRepullInFlight struct {
 
 func (x *FailureHistoryRepullInFlight) Reset() {
 	*x = FailureHistoryRepullInFlight{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2790,7 +841,7 @@ func (x *FailureHistoryRepullInFlight) String() string {
 func (*FailureHistoryRepullInFlight) ProtoMessage() {}
 
 func (x *FailureHistoryRepullInFlight) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2803,82 +854,7 @@ func (x *FailureHistoryRepullInFlight) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureHistoryRepullInFlight.ProtoReflect.Descriptor instead.
 func (*FailureHistoryRepullInFlight) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{25}
-}
-
-// The history re-pull ended before it reached the live window, so what is on screen has a gap in it.
-//
-// Resolves the workspace BLUE.
-type FailureHistoryReplayTruncated struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Where the replay started.
-	FromSeq uint64 `protobuf:"varint,1,opt,name=from_seq,json=fromSeq,proto3" json:"from_seq,omitempty"`
-	// Where it was meant to reach.
-	StopAtSeq uint64 `protobuf:"varint,2,opt,name=stop_at_seq,json=stopAtSeq,proto3" json:"stop_at_seq,omitempty"`
-	// How many records it actually delivered.
-	Delivered int64 `protobuf:"varint,3,opt,name=delivered,proto3" json:"delivered,omitempty"`
-	// Why it stopped short, verbatim.
-	Reason        string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureHistoryReplayTruncated) Reset() {
-	*x = FailureHistoryReplayTruncated{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[26]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureHistoryReplayTruncated) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureHistoryReplayTruncated) ProtoMessage() {}
-
-func (x *FailureHistoryReplayTruncated) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[26]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureHistoryReplayTruncated.ProtoReflect.Descriptor instead.
-func (*FailureHistoryReplayTruncated) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{26}
-}
-
-func (x *FailureHistoryReplayTruncated) GetFromSeq() uint64 {
-	if x != nil {
-		return x.FromSeq
-	}
-	return 0
-}
-
-func (x *FailureHistoryReplayTruncated) GetStopAtSeq() uint64 {
-	if x != nil {
-		return x.StopAtSeq
-	}
-	return 0
-}
-
-func (x *FailureHistoryReplayTruncated) GetDelivered() int64 {
-	if x != nil {
-		return x.Delivered
-	}
-	return 0
-}
-
-func (x *FailureHistoryReplayTruncated) GetReason() string {
-	if x != nil {
-		return x.Reason
-	}
-	return ""
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{11}
 }
 
 // The client's replay mark belongs to a RETIRED store seq space, so the delta it
@@ -2913,7 +889,7 @@ type FailureReplayMarkRetired struct {
 
 func (x *FailureReplayMarkRetired) Reset() {
 	*x = FailureReplayMarkRetired{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[27]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2925,7 +901,7 @@ func (x *FailureReplayMarkRetired) String() string {
 func (*FailureReplayMarkRetired) ProtoMessage() {}
 
 func (x *FailureReplayMarkRetired) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[27]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2938,7 +914,7 @@ func (x *FailureReplayMarkRetired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureReplayMarkRetired.ProtoReflect.Descriptor instead.
 func (*FailureReplayMarkRetired) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{27}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *FailureReplayMarkRetired) GetFromSeq() uint64 {
@@ -2966,7 +942,7 @@ type FailureInterruptUndelivered struct {
 
 func (x *FailureInterruptUndelivered) Reset() {
 	*x = FailureInterruptUndelivered{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[28]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2978,7 +954,7 @@ func (x *FailureInterruptUndelivered) String() string {
 func (*FailureInterruptUndelivered) ProtoMessage() {}
 
 func (x *FailureInterruptUndelivered) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[28]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2991,7 +967,7 @@ func (x *FailureInterruptUndelivered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureInterruptUndelivered.ProtoReflect.Descriptor instead.
 func (*FailureInterruptUndelivered) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{28}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{13}
 }
 
 // The queued prompt has no attached agent process yet, so it cannot run.
@@ -3009,7 +985,7 @@ type FailureQueueEntryUnwired struct {
 
 func (x *FailureQueueEntryUnwired) Reset() {
 	*x = FailureQueueEntryUnwired{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[29]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3021,7 +997,7 @@ func (x *FailureQueueEntryUnwired) String() string {
 func (*FailureQueueEntryUnwired) ProtoMessage() {}
 
 func (x *FailureQueueEntryUnwired) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[29]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3034,7 +1010,7 @@ func (x *FailureQueueEntryUnwired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureQueueEntryUnwired.ProtoReflect.Descriptor instead.
 func (*FailureQueueEntryUnwired) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{29}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *FailureQueueEntryUnwired) GetEntryId() string {
@@ -3065,7 +1041,7 @@ type FailureQueueEntryKeepAliveHeld struct {
 
 func (x *FailureQueueEntryKeepAliveHeld) Reset() {
 	*x = FailureQueueEntryKeepAliveHeld{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[30]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3077,7 +1053,7 @@ func (x *FailureQueueEntryKeepAliveHeld) String() string {
 func (*FailureQueueEntryKeepAliveHeld) ProtoMessage() {}
 
 func (x *FailureQueueEntryKeepAliveHeld) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[30]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3090,7 +1066,7 @@ func (x *FailureQueueEntryKeepAliveHeld) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureQueueEntryKeepAliveHeld.ProtoReflect.Descriptor instead.
 func (*FailureQueueEntryKeepAliveHeld) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{30}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *FailureQueueEntryKeepAliveHeld) GetEntryId() string {
@@ -3107,6 +1083,64 @@ func (x *FailureQueueEntryKeepAliveHeld) GetKeepAliveTurnId() string {
 	return ""
 }
 
+// The queued prompt is waiting behind a context cut, which is never
+// interrupted, so it cannot be forced ahead of it.
+//
+// Resolves the workspace BLUE.
+type FailureQueueEntryUninterruptibleTurn struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which queued entry, so the card addresses the right row.
+	EntryId string `protobuf:"bytes,1,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	// The cut that is running, so the card can name what the prompt is behind.
+	Command       v1.SessionCommand `protobuf:"varint,2,opt,name=command,proto3,enum=conversation.v1.SessionCommand" json:"command,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FailureQueueEntryUninterruptibleTurn) Reset() {
+	*x = FailureQueueEntryUninterruptibleTurn{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FailureQueueEntryUninterruptibleTurn) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FailureQueueEntryUninterruptibleTurn) ProtoMessage() {}
+
+func (x *FailureQueueEntryUninterruptibleTurn) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FailureQueueEntryUninterruptibleTurn.ProtoReflect.Descriptor instead.
+func (*FailureQueueEntryUninterruptibleTurn) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *FailureQueueEntryUninterruptibleTurn) GetEntryId() string {
+	if x != nil {
+		return x.EntryId
+	}
+	return ""
+}
+
+func (x *FailureQueueEntryUninterruptibleTurn) GetCommand() v1.SessionCommand {
+	if x != nil {
+		return x.Command
+	}
+	return v1.SessionCommand(0)
+}
+
 // The workspace is hibernated; a revival decision is required before prompts are accepted.
 //
 // Resolves the workspace BLUE.
@@ -3120,7 +1154,7 @@ type FailureSessionHibernated struct {
 
 func (x *FailureSessionHibernated) Reset() {
 	*x = FailureSessionHibernated{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[31]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3132,7 +1166,7 @@ func (x *FailureSessionHibernated) String() string {
 func (*FailureSessionHibernated) ProtoMessage() {}
 
 func (x *FailureSessionHibernated) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[31]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3145,155 +1179,12 @@ func (x *FailureSessionHibernated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureSessionHibernated.ProtoReflect.Descriptor instead.
 func (*FailureSessionHibernated) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{31}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *FailureSessionHibernated) GetSinceMs() int64 {
 	if x != nil {
 		return x.SinceMs
-	}
-	return 0
-}
-
-// A cache keep-alive window could not be closed, so new conversation is withheld until it is repaired.
-//
-// Resolves the workspace BLUE.
-type FailureKeepAliveWindowUnclosed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The repair-relevant detail, verbatim.
-	Reason        string `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureKeepAliveWindowUnclosed) Reset() {
-	*x = FailureKeepAliveWindowUnclosed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[32]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureKeepAliveWindowUnclosed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureKeepAliveWindowUnclosed) ProtoMessage() {}
-
-func (x *FailureKeepAliveWindowUnclosed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[32]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureKeepAliveWindowUnclosed.ProtoReflect.Descriptor instead.
-func (*FailureKeepAliveWindowUnclosed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{32}
-}
-
-func (x *FailureKeepAliveWindowUnclosed) GetReason() string {
-	if x != nil {
-		return x.Reason
-	}
-	return ""
-}
-
-// A cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation.
-//
-// Resolves the workspace BLUE.
-type FailureKeepAliveWindowInverted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Reason        string                 `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureKeepAliveWindowInverted) Reset() {
-	*x = FailureKeepAliveWindowInverted{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[33]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureKeepAliveWindowInverted) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureKeepAliveWindowInverted) ProtoMessage() {}
-
-func (x *FailureKeepAliveWindowInverted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[33]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureKeepAliveWindowInverted.ProtoReflect.Descriptor instead.
-func (*FailureKeepAliveWindowInverted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{33}
-}
-
-func (x *FailureKeepAliveWindowInverted) GetReason() string {
-	if x != nil {
-		return x.Reason
-	}
-	return ""
-}
-
-// A compaction re-read the whole conversation at the uncached rate instead of from the prompt cache — the exact cost compaction exists to avoid.
-//
-// Resolves the workspace BLUE.
-type FailureCompactionColdRead struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// What it cost, so the card states the waste rather than alluding to it.
-	UncachedInputTokens int64 `protobuf:"varint,1,opt,name=uncached_input_tokens,json=uncachedInputTokens,proto3" json:"uncached_input_tokens,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
-}
-
-func (x *FailureCompactionColdRead) Reset() {
-	*x = FailureCompactionColdRead{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[34]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureCompactionColdRead) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureCompactionColdRead) ProtoMessage() {}
-
-func (x *FailureCompactionColdRead) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[34]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureCompactionColdRead.ProtoReflect.Descriptor instead.
-func (*FailureCompactionColdRead) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{34}
-}
-
-func (x *FailureCompactionColdRead) GetUncachedInputTokens() int64 {
-	if x != nil {
-		return x.UncachedInputTokens
 	}
 	return 0
 }
@@ -3309,7 +1200,7 @@ type FailureClientLogIdentityStale struct {
 
 func (x *FailureClientLogIdentityStale) Reset() {
 	*x = FailureClientLogIdentityStale{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[35]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3321,7 +1212,7 @@ func (x *FailureClientLogIdentityStale) String() string {
 func (*FailureClientLogIdentityStale) ProtoMessage() {}
 
 func (x *FailureClientLogIdentityStale) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[35]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3334,1052 +1225,7 @@ func (x *FailureClientLogIdentityStale) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureClientLogIdentityStale.ProtoReflect.Descriptor instead.
 func (*FailureClientLogIdentityStale) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{35}
-}
-
-// Agent-repl's own machinery failed in a way it could not classify. Stated as unclassified rather than filed under a neighbouring kind, because a wrong name is worse than an honest absence.
-//
-// Resolves the workspace BLUE.
-type FailureInternalUnclassified struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The failure, verbatim.
-	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureInternalUnclassified) Reset() {
-	*x = FailureInternalUnclassified{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[36]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureInternalUnclassified) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureInternalUnclassified) ProtoMessage() {}
-
-func (x *FailureInternalUnclassified) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[36]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureInternalUnclassified.ProtoReflect.Descriptor instead.
-func (*FailureInternalUnclassified) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{36}
-}
-
-func (x *FailureInternalUnclassified) GetCause() string {
-	if x != nil {
-		return x.Cause
-	}
-	return ""
-}
-
-// Authentication failed. The account, not the machinery, is what is blocked.
-//
-// Resolves the workspace PURPLE.
-type FailureApiAuthenticationFailed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiAuthenticationFailed) Reset() {
-	*x = FailureApiAuthenticationFailed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[37]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiAuthenticationFailed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiAuthenticationFailed) ProtoMessage() {}
-
-func (x *FailureApiAuthenticationFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[37]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiAuthenticationFailed.ProtoReflect.Descriptor instead.
-func (*FailureApiAuthenticationFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{37}
-}
-
-func (x *FailureApiAuthenticationFailed) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiAuthenticationFailed) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiAuthenticationFailed) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// A billing problem stopped the request.
-//
-// Resolves the workspace PURPLE.
-type FailureApiBillingError struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiBillingError) Reset() {
-	*x = FailureApiBillingError{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[38]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiBillingError) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiBillingError) ProtoMessage() {}
-
-func (x *FailureApiBillingError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[38]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiBillingError.ProtoReflect.Descriptor instead.
-func (*FailureApiBillingError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{38}
-}
-
-func (x *FailureApiBillingError) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiBillingError) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiBillingError) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The account is rate limited.
-//
-// Resolves the workspace PURPLE.
-type FailureApiRateLimit struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiRateLimit) Reset() {
-	*x = FailureApiRateLimit{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[39]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiRateLimit) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiRateLimit) ProtoMessage() {}
-
-func (x *FailureApiRateLimit) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[39]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiRateLimit.ProtoReflect.Descriptor instead.
-func (*FailureApiRateLimit) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{39}
-}
-
-func (x *FailureApiRateLimit) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiRateLimit) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiRateLimit) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The vendor rejected the request as invalid.
-//
-// Resolves the workspace PURPLE.
-type FailureApiInvalidRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiInvalidRequest) Reset() {
-	*x = FailureApiInvalidRequest{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[40]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiInvalidRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiInvalidRequest) ProtoMessage() {}
-
-func (x *FailureApiInvalidRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[40]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiInvalidRequest.ProtoReflect.Descriptor instead.
-func (*FailureApiInvalidRequest) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{40}
-}
-
-func (x *FailureApiInvalidRequest) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiInvalidRequest) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiInvalidRequest) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The vendor returned a server error.
-//
-// Resolves the workspace PURPLE.
-type FailureApiServerError struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiServerError) Reset() {
-	*x = FailureApiServerError{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[41]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiServerError) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiServerError) ProtoMessage() {}
-
-func (x *FailureApiServerError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[41]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiServerError.ProtoReflect.Descriptor instead.
-func (*FailureApiServerError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{41}
-}
-
-func (x *FailureApiServerError) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiServerError) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiServerError) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The vendor is overloaded.
-//
-// Resolves the workspace PURPLE.
-type FailureApiOverloaded struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiOverloaded) Reset() {
-	*x = FailureApiOverloaded{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[42]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiOverloaded) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiOverloaded) ProtoMessage() {}
-
-func (x *FailureApiOverloaded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[42]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiOverloaded.ProtoReflect.Descriptor instead.
-func (*FailureApiOverloaded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{42}
-}
-
-func (x *FailureApiOverloaded) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiOverloaded) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiOverloaded) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// This organization is not allowed to use the API.
-//
-// Resolves the workspace PURPLE.
-type FailureApiOAuthOrgNotAllowed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiOAuthOrgNotAllowed) Reset() {
-	*x = FailureApiOAuthOrgNotAllowed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[43]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiOAuthOrgNotAllowed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiOAuthOrgNotAllowed) ProtoMessage() {}
-
-func (x *FailureApiOAuthOrgNotAllowed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[43]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiOAuthOrgNotAllowed.ProtoReflect.Descriptor instead.
-func (*FailureApiOAuthOrgNotAllowed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{43}
-}
-
-func (x *FailureApiOAuthOrgNotAllowed) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiOAuthOrgNotAllowed) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiOAuthOrgNotAllowed) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The requested model does not exist.
-//
-// Resolves the workspace PURPLE.
-type FailureApiModelNotFound struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The model that was asked for, so the card names it.
-	Model         string `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiModelNotFound) Reset() {
-	*x = FailureApiModelNotFound{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[44]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiModelNotFound) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiModelNotFound) ProtoMessage() {}
-
-func (x *FailureApiModelNotFound) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[44]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiModelNotFound.ProtoReflect.Descriptor instead.
-func (*FailureApiModelNotFound) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{44}
-}
-
-func (x *FailureApiModelNotFound) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiModelNotFound) GetModel() string {
-	if x != nil {
-		return x.Model
-	}
-	return ""
-}
-
-// The network never reached the vendor. Classed with the vendor rather than with the machinery: nothing local is broken, and the work did not happen.
-//
-// Resolves the workspace PURPLE.
-type FailureApiNetworkDown struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor        *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiNetworkDown) Reset() {
-	*x = FailureApiNetworkDown{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[45]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiNetworkDown) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiNetworkDown) ProtoMessage() {}
-
-func (x *FailureApiNetworkDown) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[45]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiNetworkDown.ProtoReflect.Descriptor instead.
-func (*FailureApiNetworkDown) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{45}
-}
-
-func (x *FailureApiNetworkDown) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-// The vendor request failed for a reason with no more specific kind.
-//
-// Resolves the workspace PURPLE.
-type FailureApiRequestFailed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiRequestFailed) Reset() {
-	*x = FailureApiRequestFailed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[46]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiRequestFailed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiRequestFailed) ProtoMessage() {}
-
-func (x *FailureApiRequestFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[46]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiRequestFailed.ProtoReflect.Descriptor instead.
-func (*FailureApiRequestFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{46}
-}
-
-func (x *FailureApiRequestFailed) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiRequestFailed) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiRequestFailed) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The vendor failed for a reason the daemon could not classify.
-//
-// Resolves the workspace PURPLE.
-type FailureApiUnknown struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiUnknown) Reset() {
-	*x = FailureApiUnknown{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[47]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiUnknown) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiUnknown) ProtoMessage() {}
-
-func (x *FailureApiUnknown) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[47]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiUnknown.ProtoReflect.Descriptor instead.
-func (*FailureApiUnknown) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{47}
-}
-
-func (x *FailureApiUnknown) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiUnknown) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiUnknown) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The response hit the output-token ceiling.
-//
-// Resolves the workspace PURPLE.
-type FailureApiMaxOutputTokens struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor        *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiMaxOutputTokens) Reset() {
-	*x = FailureApiMaxOutputTokens{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[48]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiMaxOutputTokens) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiMaxOutputTokens) ProtoMessage() {}
-
-func (x *FailureApiMaxOutputTokens) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[48]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiMaxOutputTokens.ProtoReflect.Descriptor instead.
-func (*FailureApiMaxOutputTokens) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{48}
-}
-
-func (x *FailureApiMaxOutputTokens) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-// The turn hit its maximum-turns limit. A limit the user set, reached — not a fault.
-//
-// Resolves the workspace PURPLE.
-type FailureApiMaxTurns struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor        *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiMaxTurns) Reset() {
-	*x = FailureApiMaxTurns{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[49]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiMaxTurns) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiMaxTurns) ProtoMessage() {}
-
-func (x *FailureApiMaxTurns) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[49]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiMaxTurns.ProtoReflect.Descriptor instead.
-func (*FailureApiMaxTurns) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{49}
-}
-
-func (x *FailureApiMaxTurns) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-// The turn hit its budget limit. Also a chosen limit, reached.
-//
-// Resolves the workspace PURPLE.
-type FailureApiMaxBudget struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor        *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiMaxBudget) Reset() {
-	*x = FailureApiMaxBudget{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[50]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiMaxBudget) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiMaxBudget) ProtoMessage() {}
-
-func (x *FailureApiMaxBudget) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[50]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiMaxBudget.ProtoReflect.Descriptor instead.
-func (*FailureApiMaxBudget) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{50}
-}
-
-func (x *FailureApiMaxBudget) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-// The turn aborted during execution.
-//
-// Resolves the workspace PURPLE.
-type FailureApiExecutionError struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor        *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiExecutionError) Reset() {
-	*x = FailureApiExecutionError{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[51]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiExecutionError) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiExecutionError) ProtoMessage() {}
-
-func (x *FailureApiExecutionError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[51]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiExecutionError.ProtoReflect.Descriptor instead.
-func (*FailureApiExecutionError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{51}
-}
-
-func (x *FailureApiExecutionError) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-// The model refused the request.
-//
-// Resolves the workspace PURPLE.
-type FailureApiRefusal struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor        *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiRefusal) Reset() {
-	*x = FailureApiRefusal{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[52]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiRefusal) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiRefusal) ProtoMessage() {}
-
-func (x *FailureApiRefusal) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[52]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiRefusal.ProtoReflect.Descriptor instead.
-func (*FailureApiRefusal) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{52}
-}
-
-func (x *FailureApiRefusal) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-// The turn ended abnormally for a reason with no more specific kind.
-//
-// Resolves the workspace PURPLE.
-type FailureApiTurnFailed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The vendor's own stop reason, verbatim, since this kind is exactly the
-	// case where it did not map to a named one.
-	StopReason    string `protobuf:"bytes,2,opt,name=stop_reason,json=stopReason,proto3" json:"stop_reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiTurnFailed) Reset() {
-	*x = FailureApiTurnFailed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[53]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiTurnFailed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiTurnFailed) ProtoMessage() {}
-
-func (x *FailureApiTurnFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[53]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiTurnFailed.ProtoReflect.Descriptor instead.
-func (*FailureApiTurnFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{53}
-}
-
-func (x *FailureApiTurnFailed) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiTurnFailed) GetStopReason() string {
-	if x != nil {
-		return x.StopReason
-	}
-	return ""
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{18}
 }
 
 // The daemon refused a USER prompt because the workspace's merge machinery
@@ -4402,7 +1248,7 @@ type FailurePromptRefusedByMergeState struct {
 
 func (x *FailurePromptRefusedByMergeState) Reset() {
 	*x = FailurePromptRefusedByMergeState{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[54]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4414,7 +1260,7 @@ func (x *FailurePromptRefusedByMergeState) String() string {
 func (*FailurePromptRefusedByMergeState) ProtoMessage() {}
 
 func (x *FailurePromptRefusedByMergeState) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[54]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4427,7 +1273,7 @@ func (x *FailurePromptRefusedByMergeState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailurePromptRefusedByMergeState.ProtoReflect.Descriptor instead.
 func (*FailurePromptRefusedByMergeState) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{54}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *FailurePromptRefusedByMergeState) GetState() string {
@@ -4437,33 +1283,34 @@ func (x *FailurePromptRefusedByMergeState) GetState() string {
 	return ""
 }
 
-// A turn stood bound with nothing driving it, so the daemon closed it rather
-// than leaving the workspace thinking forever.
-//
-// Resolves the workspace BLUE.
-type FailureTurnUndriven struct {
+// A frontend's account of a command of its own that it cannot report through
+// the ordinary two-arm response, because no readable response exists.
+type ClientCommandFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Which turn, and how long it stood undriven, verbatim.
-	Reason        string `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+	// Types that are valid to be assigned to Failure:
+	//
+	//	*ClientCommandFailure_Unsent
+	//	*ClientCommandFailure_RejectionUnclassified
+	Failure       isClientCommandFailure_Failure `protobuf_oneof:"failure"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FailureTurnUndriven) Reset() {
-	*x = FailureTurnUndriven{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[55]
+func (x *ClientCommandFailure) Reset() {
+	*x = ClientCommandFailure{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FailureTurnUndriven) String() string {
+func (x *ClientCommandFailure) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FailureTurnUndriven) ProtoMessage() {}
+func (*ClientCommandFailure) ProtoMessage() {}
 
-func (x *FailureTurnUndriven) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[55]
+func (x *ClientCommandFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4474,396 +1321,53 @@ func (x *FailureTurnUndriven) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FailureTurnUndriven.ProtoReflect.Descriptor instead.
-func (*FailureTurnUndriven) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{55}
+// Deprecated: Use ClientCommandFailure.ProtoReflect.Descriptor instead.
+func (*ClientCommandFailure) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{20}
 }
 
-func (x *FailureTurnUndriven) GetReason() string {
+func (x *ClientCommandFailure) GetFailure() isClientCommandFailure_Failure {
 	if x != nil {
-		return x.Reason
+		return x.Failure
 	}
-	return ""
+	return nil
 }
 
-// The queued prompt is waiting behind a context cut, which is never
-// interrupted, so it cannot be forced ahead of it.
-//
-// Resolves the workspace BLUE.
-type FailureQueueEntryUninterruptibleTurn struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Which queued entry, so the card addresses the right row.
-	EntryId string `protobuf:"bytes,1,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
-	// The cut that is running, so the card can name what the prompt is behind.
-	Command       SessionCommand `protobuf:"varint,2,opt,name=command,proto3,enum=agentrepl.v1.SessionCommand" json:"command,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureQueueEntryUninterruptibleTurn) Reset() {
-	*x = FailureQueueEntryUninterruptibleTurn{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[56]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureQueueEntryUninterruptibleTurn) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureQueueEntryUninterruptibleTurn) ProtoMessage() {}
-
-func (x *FailureQueueEntryUninterruptibleTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[56]
+func (x *ClientCommandFailure) GetUnsent() *FailureCommandUnsent {
 	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
+		if x, ok := x.Failure.(*ClientCommandFailure_Unsent); ok {
+			return x.Unsent
 		}
-		return ms
 	}
-	return mi.MessageOf(x)
+	return nil
 }
 
-// Deprecated: Use FailureQueueEntryUninterruptibleTurn.ProtoReflect.Descriptor instead.
-func (*FailureQueueEntryUninterruptibleTurn) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{56}
-}
-
-func (x *FailureQueueEntryUninterruptibleTurn) GetEntryId() string {
+func (x *ClientCommandFailure) GetRejectionUnclassified() *FailureCommandRejectionUnclassified {
 	if x != nil {
-		return x.EntryId
-	}
-	return ""
-}
-
-func (x *FailureQueueEntryUninterruptibleTurn) GetCommand() SessionCommand {
-	if x != nil {
-		return x.Command
-	}
-	return SessionCommand_SESSION_COMMAND_UNSPECIFIED
-}
-
-// The connection to the daemon dropped and the frontend is reconnecting.
-// WINDOW-SHAPED and RETRACTED rather than resolved: when the connection comes
-// back the card is removed outright, because a settled "we were disconnected"
-// notice is noise about something the user can already see ended.
-//
-// Resolves the workspace BLUE.
-type FailureDaemonUnreachable struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The socket close code, so the card distinguishes a deliberate close from
-	// a dropped one.
-	CloseCode int32 `protobuf:"varint,1,opt,name=close_code,json=closeCode,proto3" json:"close_code,omitempty"`
-	// The close reason as the transport gave it. Empty when it gave none.
-	CloseReason   string `protobuf:"bytes,2,opt,name=close_reason,json=closeReason,proto3" json:"close_reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureDaemonUnreachable) Reset() {
-	*x = FailureDaemonUnreachable{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[57]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureDaemonUnreachable) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureDaemonUnreachable) ProtoMessage() {}
-
-func (x *FailureDaemonUnreachable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[57]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
+		if x, ok := x.Failure.(*ClientCommandFailure_RejectionUnclassified); ok {
+			return x.RejectionUnclassified
 		}
-		return ms
 	}
-	return mi.MessageOf(x)
+	return nil
 }
 
-// Deprecated: Use FailureDaemonUnreachable.ProtoReflect.Descriptor instead.
-func (*FailureDaemonUnreachable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{57}
+type isClientCommandFailure_Failure interface {
+	isClientCommandFailure_Failure()
 }
 
-func (x *FailureDaemonUnreachable) GetCloseCode() int32 {
-	if x != nil {
-		return x.CloseCode
-	}
-	return 0
+type ClientCommandFailure_Unsent struct {
+	// Nothing was put on the wire at all.
+	Unsent *FailureCommandUnsent `protobuf:"bytes,1,opt,name=unsent,proto3,oneof"`
 }
 
-func (x *FailureDaemonUnreachable) GetCloseReason() string {
-	if x != nil {
-		return x.CloseReason
-	}
-	return ""
+type ClientCommandFailure_RejectionUnclassified struct {
+	// Something came back and this bundle could not read it.
+	RejectionUnclassified *FailureCommandRejectionUnclassified `protobuf:"bytes,2,opt,name=rejection_unclassified,json=rejectionUnclassified,proto3,oneof"`
 }
 
-// The workspace this page is addressed to no longer exists on the daemon.
-// Never resolves: unlike a dropped connection, there is nothing to come back.
-//
-// Resolves the workspace BLUE.
-type FailureWorkspaceGone struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
+func (*ClientCommandFailure_Unsent) isClientCommandFailure_Failure() {}
 
-func (x *FailureWorkspaceGone) Reset() {
-	*x = FailureWorkspaceGone{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[58]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureWorkspaceGone) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureWorkspaceGone) ProtoMessage() {}
-
-func (x *FailureWorkspaceGone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[58]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureWorkspaceGone.ProtoReflect.Descriptor instead.
-func (*FailureWorkspaceGone) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{58}
-}
-
-// The frontend could not start at all.
-//
-// It is the one failure that cannot be carried the way the others are — the
-// machinery that would carry it is the machinery that failed to build. A
-// frontend renders it from whatever it has, before any state exists.
-//
-// Resolves the workspace BLUE.
-type FailureBootFailed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Whatever the frontend caught, verbatim.
-	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureBootFailed) Reset() {
-	*x = FailureBootFailed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[59]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureBootFailed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureBootFailed) ProtoMessage() {}
-
-func (x *FailureBootFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[59]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureBootFailed.ProtoReflect.Descriptor instead.
-func (*FailureBootFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{59}
-}
-
-func (x *FailureBootFailed) GetCause() string {
-	if x != nil {
-		return x.Cause
-	}
-	return ""
-}
-
-// A control-plane request the frontend issued outside the command stream (a
-// login, an account switch) failed.
-//
-// Resolves the workspace BLUE.
-type FailureControlPlaneFailed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Which request, in the frontend's own words, so repeats of DIFFERENT
-	// requests do not reconcile onto one card.
-	What string `protobuf:"bytes,1,opt,name=what,proto3" json:"what,omitempty"`
-	// The failure, verbatim.
-	Cause         string `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureControlPlaneFailed) Reset() {
-	*x = FailureControlPlaneFailed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[60]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureControlPlaneFailed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureControlPlaneFailed) ProtoMessage() {}
-
-func (x *FailureControlPlaneFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[60]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureControlPlaneFailed.ProtoReflect.Descriptor instead.
-func (*FailureControlPlaneFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{60}
-}
-
-func (x *FailureControlPlaneFailed) GetWhat() string {
-	if x != nil {
-		return x.What
-	}
-	return ""
-}
-
-func (x *FailureControlPlaneFailed) GetCause() string {
-	if x != nil {
-		return x.Cause
-	}
-	return ""
-}
-
-// A frame from the daemon could not be read and was skipped. Conversation may
-// be missing as a result, which is why it is a card rather than a log line.
-//
-// Resolves the workspace BLUE.
-type FailureFrameUndecodable struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The decode failure, verbatim.
-	Cause string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
-	// The head of the frame that would not decode, for whoever debugs it.
-	FrameHead     string `protobuf:"bytes,2,opt,name=frame_head,json=frameHead,proto3" json:"frame_head,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureFrameUndecodable) Reset() {
-	*x = FailureFrameUndecodable{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[61]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureFrameUndecodable) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureFrameUndecodable) ProtoMessage() {}
-
-func (x *FailureFrameUndecodable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[61]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureFrameUndecodable.ProtoReflect.Descriptor instead.
-func (*FailureFrameUndecodable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{61}
-}
-
-func (x *FailureFrameUndecodable) GetCause() string {
-	if x != nil {
-		return x.Cause
-	}
-	return ""
-}
-
-func (x *FailureFrameUndecodable) GetFrameHead() string {
-	if x != nil {
-		return x.FrameHead
-	}
-	return ""
-}
-
-// This page cannot read the daemon's state and reloading did not fix it.
-// Deliberately loud and DELIBERATELY UNRESOLVABLE: the only exit is restarting
-// the view, and offering a self-clearing version of this would hide a page
-// that is silently wrong.
-//
-// Resolves the workspace BLUE.
-type FailureStaleBundle struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// What did not line up, verbatim.
-	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureStaleBundle) Reset() {
-	*x = FailureStaleBundle{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[62]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureStaleBundle) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureStaleBundle) ProtoMessage() {}
-
-func (x *FailureStaleBundle) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[62]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureStaleBundle.ProtoReflect.Descriptor instead.
-func (*FailureStaleBundle) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{62}
-}
-
-func (x *FailureStaleBundle) GetDetail() string {
-	if x != nil {
-		return x.Detail
-	}
-	return ""
-}
+func (*ClientCommandFailure_RejectionUnclassified) isClientCommandFailure_Failure() {}
 
 // A command was never put on the wire because the connection was down. The
 // distinction from a refusal is the whole point: nothing was decided, so
@@ -4880,7 +1384,7 @@ type FailureCommandUnsent struct {
 
 func (x *FailureCommandUnsent) Reset() {
 	*x = FailureCommandUnsent{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[63]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4892,7 +1396,7 @@ func (x *FailureCommandUnsent) String() string {
 func (*FailureCommandUnsent) ProtoMessage() {}
 
 func (x *FailureCommandUnsent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[63]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4905,7 +1409,7 @@ func (x *FailureCommandUnsent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureCommandUnsent.ProtoReflect.Descriptor instead.
 func (*FailureCommandUnsent) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{63}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *FailureCommandUnsent) GetCommand() string {
@@ -4915,9 +1419,16 @@ func (x *FailureCommandUnsent) GetCommand() string {
 	return ""
 }
 
-// A command was refused and the daemon's refusal carried no classified
-// account. The frontend states that it could not classify the refusal rather
-// than picking a kind on the daemon's behalf.
+// A command was refused and this client could not read the refusal.
+//
+// IT USED TO MEAN "the daemon's refusal carried no classified account", and
+// under the shared ack that was a real and common state: a refusal arrived as
+// `ok=false` with free text and nothing else. Under the two-arm contract the
+// daemon has no way to refuse without naming an arm, so what is left is the
+// narrower case that remains genuinely possible — a peer that named an arm
+// THIS BUNDLE does not know, because the schema moved and the frontend has not
+// been rebuilt. The frontend states that it could not classify the refusal
+// rather than picking an arm on the daemon's behalf.
 //
 // Resolves the workspace BLUE.
 type FailureCommandRejectionUnclassified struct {
@@ -4932,7 +1443,7 @@ type FailureCommandRejectionUnclassified struct {
 
 func (x *FailureCommandRejectionUnclassified) Reset() {
 	*x = FailureCommandRejectionUnclassified{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[64]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4944,7 +1455,7 @@ func (x *FailureCommandRejectionUnclassified) String() string {
 func (*FailureCommandRejectionUnclassified) ProtoMessage() {}
 
 func (x *FailureCommandRejectionUnclassified) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[64]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4957,7 +1468,7 @@ func (x *FailureCommandRejectionUnclassified) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use FailureCommandRejectionUnclassified.ProtoReflect.Descriptor instead.
 func (*FailureCommandRejectionUnclassified) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{64}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *FailureCommandRejectionUnclassified) GetCommand() string {
@@ -4974,57 +1485,37 @@ func (x *FailureCommandRejectionUnclassified) GetDaemonReason() string {
 	return ""
 }
 
-// Machine-readable evidence that an SDK query terminated unexpectedly.
+// The command's workspace key is not an absolute path.
 //
-// This message repeats the durable lifecycle record's identity and uses the
-// same typed reason messages, allowing a frontend to diagnose the termination
-// without reconstructing evidence from generic failure prose.
-//
-// THE ONLY IDENTITIES ON THIS RECORD ARE ONES A CARD CAN SHOW: the query
-// invocation that died, and the VENDOR conversation it was driving. An
-// agent-repl session identity is deliberately absent — a rendering frontend
-// has no vocabulary for one, so it could only carry it, never use it.
-type QueryTerminationFailure struct {
+// Every session-routed command is keyed by the session's CWD. A frontend that
+// sends a DISPLAY NAME instead ("doom" rather than "/Users/…/.config/doom")
+// matches nothing, and without this arm the miss surfaced as "workspace has no
+// live session", indistinguishable from a genuinely dead session — which is how
+// a wire-contract violation once read as a session-startup failure for a week.
+type RefusalWorkspaceKeyNotAbsolute struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The unique query() invocation that terminated.
-	QueryInstanceId string `protobuf:"bytes,1,opt,name=query_instance_id,json=queryInstanceId,proto3" json:"query_instance_id,omitempty"`
-	// Identifies the vendor conversation when query initialization exposed it,
-	// or states explicitly that termination preceded vendor identity discovery.
-	//
-	// Types that are valid to be assigned to VendorIdentity:
-	//
-	//	*QueryTerminationFailure_VendorSessionId
-	//	*QueryTerminationFailure_VendorSessionIdentityUnavailable
-	VendorIdentity isQueryTerminationFailure_VendorIdentity `protobuf_oneof:"vendor_identity"`
-	// The Unix epoch time at which the termination was observed.
-	ObservedAtMs int64 `protobuf:"varint,4,opt,name=observed_at_ms,json=observedAtMs,proto3" json:"observed_at_ms,omitempty"`
-	// Identifies the unexpected termination condition without a status enum.
-	//
-	// Types that are valid to be assigned to Reason:
-	//
-	//	*QueryTerminationFailure_UnexpectedEof
-	//	*QueryTerminationFailure_IteratorFailure
-	//	*QueryTerminationFailure_StartupFailure
-	Reason        isQueryTerminationFailure_Reason `protobuf_oneof:"reason"`
+	// The key as sent, so the refusal names the thing that was wrong rather than
+	// describing it.
+	Workspace     string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *QueryTerminationFailure) Reset() {
-	*x = QueryTerminationFailure{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[65]
+func (x *RefusalWorkspaceKeyNotAbsolute) Reset() {
+	*x = RefusalWorkspaceKeyNotAbsolute{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *QueryTerminationFailure) String() string {
+func (x *RefusalWorkspaceKeyNotAbsolute) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*QueryTerminationFailure) ProtoMessage() {}
+func (*RefusalWorkspaceKeyNotAbsolute) ProtoMessage() {}
 
-func (x *QueryTerminationFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[65]
+func (x *RefusalWorkspaceKeyNotAbsolute) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5035,181 +1526,201 @@ func (x *QueryTerminationFailure) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use QueryTerminationFailure.ProtoReflect.Descriptor instead.
-func (*QueryTerminationFailure) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{65}
+// Deprecated: Use RefusalWorkspaceKeyNotAbsolute.ProtoReflect.Descriptor instead.
+func (*RefusalWorkspaceKeyNotAbsolute) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{23}
 }
 
-func (x *QueryTerminationFailure) GetQueryInstanceId() string {
+func (x *RefusalWorkspaceKeyNotAbsolute) GetWorkspace() string {
 	if x != nil {
-		return x.QueryInstanceId
+		return x.Workspace
 	}
 	return ""
 }
 
-func (x *QueryTerminationFailure) GetVendorIdentity() isQueryTerminationFailure_VendorIdentity {
-	if x != nil {
-		return x.VendorIdentity
-	}
-	return nil
+// The daemon can answer this method in principle but the dependency that
+// answers it was not injected into this build.
+//
+// LOUD RATHER THAN DEGRADED, always. Every one of these sites had the
+// alternative reading available — carry on silently, skip the gate, treat the
+// unknown as zero — and every one of them refuses instead, because a capability
+// that quietly does nothing is indistinguishable from a capability that works.
+type RefusalDependencyUnwired struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which dependency, in the daemon's own words, so a wiring defect is
+	// diagnosable from the refusal alone.
+	Dependency    string `protobuf:"bytes,1,opt,name=dependency,proto3" json:"dependency,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
-func (x *QueryTerminationFailure) GetVendorSessionId() string {
+func (x *RefusalDependencyUnwired) Reset() {
+	*x = RefusalDependencyUnwired{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalDependencyUnwired) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalDependencyUnwired) ProtoMessage() {}
+
+func (x *RefusalDependencyUnwired) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[24]
 	if x != nil {
-		if x, ok := x.VendorIdentity.(*QueryTerminationFailure_VendorSessionId); ok {
-			return x.VendorSessionId
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
 		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalDependencyUnwired.ProtoReflect.Descriptor instead.
+func (*RefusalDependencyUnwired) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *RefusalDependencyUnwired) GetDependency() string {
+	if x != nil {
+		return x.Dependency
 	}
 	return ""
 }
 
-func (x *QueryTerminationFailure) GetVendorSessionIdentityUnavailable() *v1.VendorSessionIdentityUnavailable {
-	if x != nil {
-		if x, ok := x.VendorIdentity.(*QueryTerminationFailure_VendorSessionIdentityUnavailable); ok {
-			return x.VendorSessionIdentityUnavailable
-		}
-	}
-	return nil
+// A field this method requires was empty.
+//
+// Stated as its own arm rather than folded into an unclassified catch-all
+// because it is the one refusal a client can fix without anybody's help.
+type RefusalRequiredFieldMissing struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The field's wire name, so the client can find it.
+	Field         string `protobuf:"bytes,1,opt,name=field,proto3" json:"field,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
-func (x *QueryTerminationFailure) GetObservedAtMs() int64 {
+func (x *RefusalRequiredFieldMissing) Reset() {
+	*x = RefusalRequiredFieldMissing{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalRequiredFieldMissing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalRequiredFieldMissing) ProtoMessage() {}
+
+func (x *RefusalRequiredFieldMissing) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[25]
 	if x != nil {
-		return x.ObservedAtMs
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalRequiredFieldMissing.ProtoReflect.Descriptor instead.
+func (*RefusalRequiredFieldMissing) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *RefusalRequiredFieldMissing) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
+
+// The prompt's origin was UNSPECIFIED, or was a value this daemon has no name
+// for. The daemon rejects rather than guessing which UI or automation acted:
+// origin is what the turn ledger and every downstream attribution is keyed on.
+type RefusalPromptOriginInvalid struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The origin as sent. 0 is the UNSPECIFIED case; anything else is a value
+	// this daemon's enum does not contain.
+	PromptOrigin  int32 `protobuf:"varint,1,opt,name=prompt_origin,json=promptOrigin,proto3" json:"prompt_origin,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalPromptOriginInvalid) Reset() {
+	*x = RefusalPromptOriginInvalid{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalPromptOriginInvalid) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalPromptOriginInvalid) ProtoMessage() {}
+
+func (x *RefusalPromptOriginInvalid) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalPromptOriginInvalid.ProtoReflect.Descriptor instead.
+func (*RefusalPromptOriginInvalid) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *RefusalPromptOriginInvalid) GetPromptOrigin() int32 {
+	if x != nil {
+		return x.PromptOrigin
 	}
 	return 0
 }
 
-func (x *QueryTerminationFailure) GetReason() isQueryTerminationFailure_Reason {
-	if x != nil {
-		return x.Reason
-	}
-	return nil
-}
-
-func (x *QueryTerminationFailure) GetUnexpectedEof() *v1.UnexpectedQueryEof {
-	if x != nil {
-		if x, ok := x.Reason.(*QueryTerminationFailure_UnexpectedEof); ok {
-			return x.UnexpectedEof
-		}
-	}
-	return nil
-}
-
-func (x *QueryTerminationFailure) GetIteratorFailure() *v1.QueryIteratorFailure {
-	if x != nil {
-		if x, ok := x.Reason.(*QueryTerminationFailure_IteratorFailure); ok {
-			return x.IteratorFailure
-		}
-	}
-	return nil
-}
-
-func (x *QueryTerminationFailure) GetStartupFailure() *v1.QueryStartupFailure {
-	if x != nil {
-		if x, ok := x.Reason.(*QueryTerminationFailure_StartupFailure); ok {
-			return x.StartupFailure
-		}
-	}
-	return nil
-}
-
-type isQueryTerminationFailure_VendorIdentity interface {
-	isQueryTerminationFailure_VendorIdentity()
-}
-
-type QueryTerminationFailure_VendorSessionId struct {
-	// The non-empty authoritative Claude conversation UUID for the query.
-	VendorSessionId string `protobuf:"bytes,2,opt,name=vendor_session_id,json=vendorSessionId,proto3,oneof"`
-}
-
-type QueryTerminationFailure_VendorSessionIdentityUnavailable struct {
-	// Records that the query ended before the SDK exposed a vendor session.
-	VendorSessionIdentityUnavailable *v1.VendorSessionIdentityUnavailable `protobuf:"bytes,3,opt,name=vendor_session_identity_unavailable,json=vendorSessionIdentityUnavailable,proto3,oneof"`
-}
-
-func (*QueryTerminationFailure_VendorSessionId) isQueryTerminationFailure_VendorIdentity() {}
-
-func (*QueryTerminationFailure_VendorSessionIdentityUnavailable) isQueryTerminationFailure_VendorIdentity() {
-}
-
-type isQueryTerminationFailure_Reason interface {
-	isQueryTerminationFailure_Reason()
-}
-
-type QueryTerminationFailure_UnexpectedEof struct {
-	// The SDK iterator ended without an intentional shim shutdown.
-	UnexpectedEof *v1.UnexpectedQueryEof `protobuf:"bytes,5,opt,name=unexpected_eof,json=unexpectedEof,proto3,oneof"`
-}
-
-type QueryTerminationFailure_IteratorFailure struct {
-	// The SDK iterator threw an error, including its complete cause.
-	IteratorFailure *v1.QueryIteratorFailure `protobuf:"bytes,6,opt,name=iterator_failure,json=iteratorFailure,proto3,oneof"`
-}
-
-type QueryTerminationFailure_StartupFailure struct {
-	// Query initialization failed, including its complete cause.
-	StartupFailure *v1.QueryStartupFailure `protobuf:"bytes,7,opt,name=startup_failure,json=startupFailure,proto3,oneof"`
-}
-
-func (*QueryTerminationFailure_UnexpectedEof) isQueryTerminationFailure_Reason() {}
-
-func (*QueryTerminationFailure_IteratorFailure) isQueryTerminationFailure_Reason() {}
-
-func (*QueryTerminationFailure_StartupFailure) isQueryTerminationFailure_Reason() {}
-
-// Machine-readable evidence that a requested Claude conversation could not
-// be resumed without violating conversation continuity.
+// The interrupt's queue half could not raise its question, so the workspace's
+// queued merge was NOT offered for dequeue.
 //
-// It names the VENDOR conversation and nothing else, for the same reason
-// QueryTerminationFailure does: the vendor conversation is what the card
-// shows, and an agent-repl session identity is a vocabulary a rendering
-// frontend does not have.
-type SessionResumeFailure struct {
+// It refuses the whole interrupt rather than proceeding, because the reading
+// before this one — evicting the merge unasked — destroyed minutes of someone's
+// work on one keystroke, and the reading after it would report an interrupt as
+// complete while its destructive half was silently unreachable.
+type RefusalMergeDequeueOfferUnraisable struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The exact Claude conversation UUID that must remain authoritative.
-	ClaudeSessionId string `protobuf:"bytes,1,opt,name=claude_session_id,json=claudeSessionId,proto3" json:"claude_session_id,omitempty"`
-	// The working directory used to locate the Claude transcript.
-	Cwd string `protobuf:"bytes,2,opt,name=cwd,proto3" json:"cwd,omitempty"`
-	// The configured Claude account root. Empty means the daemon's inherited
-	// Claude configuration root supplies the value.
-	ConfigDir string `protobuf:"bytes,3,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
-	// The absolute Claude configuration root used for transcript lookup.
-	ResolvedConfigDir string `protobuf:"bytes,4,opt,name=resolved_config_dir,json=resolvedConfigDir,proto3" json:"resolved_config_dir,omitempty"`
-	// Identifies the operation whose continuity requirement could not be met.
-	//
-	// Types that are valid to be assigned to Attempt:
-	//
-	//	*SessionResumeFailure_Create
-	//	*SessionResumeFailure_AutomaticRestore
-	Attempt isSessionResumeFailure_Attempt `protobuf_oneof:"attempt"`
-	// Identifies the concrete continuity invariant that prevented restoration.
-	//
-	// Types that are valid to be assigned to Cause:
-	//
-	//	*SessionResumeFailure_TranscriptUnavailable
-	//	*SessionResumeFailure_IdentityMismatch
-	//	*SessionResumeFailure_QueryTermination
-	//	*SessionResumeFailure_BringUpFailure
-	Cause         isSessionResumeFailure_Cause `protobuf_oneof:"cause"`
+	// The run the question would have been about.
+	RunId string `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	// Why the offer could not be raised, verbatim.
+	Cause         string `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SessionResumeFailure) Reset() {
-	*x = SessionResumeFailure{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[66]
+func (x *RefusalMergeDequeueOfferUnraisable) Reset() {
+	*x = RefusalMergeDequeueOfferUnraisable{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SessionResumeFailure) String() string {
+func (x *RefusalMergeDequeueOfferUnraisable) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SessionResumeFailure) ProtoMessage() {}
+func (*RefusalMergeDequeueOfferUnraisable) ProtoMessage() {}
 
-func (x *SessionResumeFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[66]
+func (x *RefusalMergeDequeueOfferUnraisable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5220,257 +1731,1445 @@ func (x *SessionResumeFailure) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SessionResumeFailure.ProtoReflect.Descriptor instead.
-func (*SessionResumeFailure) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{66}
+// Deprecated: Use RefusalMergeDequeueOfferUnraisable.ProtoReflect.Descriptor instead.
+func (*RefusalMergeDequeueOfferUnraisable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{27}
 }
 
-func (x *SessionResumeFailure) GetClaudeSessionId() string {
+func (x *RefusalMergeDequeueOfferUnraisable) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *RefusalMergeDequeueOfferUnraisable) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// The workspace has no outstanding dequeue offer, so there is nothing for this
+// answer to answer. Refused rather than resolved to whatever question happens
+// to be up next.
+type RefusalMergeDequeueOfferAbsent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalMergeDequeueOfferAbsent) Reset() {
+	*x = RefusalMergeDequeueOfferAbsent{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalMergeDequeueOfferAbsent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalMergeDequeueOfferAbsent) ProtoMessage() {}
+
+func (x *RefusalMergeDequeueOfferAbsent) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalMergeDequeueOfferAbsent.ProtoReflect.Descriptor instead.
+func (*RefusalMergeDequeueOfferAbsent) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{28}
+}
+
+// The answered offer is not the workspace's outstanding one. A click on a card
+// the queue has already superseded must not dequeue the merge its replacement
+// is asking about.
+type RefusalMergeDequeueOfferStale struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The offer that IS outstanding, so a frontend can tell whether it is
+	// holding a stale card or has lost the thread entirely.
+	OutstandingOfferId string `protobuf:"bytes,1,opt,name=outstanding_offer_id,json=outstandingOfferId,proto3" json:"outstanding_offer_id,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *RefusalMergeDequeueOfferStale) Reset() {
+	*x = RefusalMergeDequeueOfferStale{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalMergeDequeueOfferStale) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalMergeDequeueOfferStale) ProtoMessage() {}
+
+func (x *RefusalMergeDequeueOfferStale) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalMergeDequeueOfferStale.ProtoReflect.Descriptor instead.
+func (*RefusalMergeDequeueOfferStale) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *RefusalMergeDequeueOfferStale) GetOutstandingOfferId() string {
+	if x != nil {
+		return x.OutstandingOfferId
+	}
+	return ""
+}
+
+// The answer could not be recorded, so NOTHING was dequeued. The card may still
+// be up; the daemon does not act on a decision it failed to write down.
+type RefusalMergeDequeueClearFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Why the clear failed, verbatim.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalMergeDequeueClearFailed) Reset() {
+	*x = RefusalMergeDequeueClearFailed{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalMergeDequeueClearFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalMergeDequeueClearFailed) ProtoMessage() {}
+
+func (x *RefusalMergeDequeueClearFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalMergeDequeueClearFailed.ProtoReflect.Descriptor instead.
+func (*RefusalMergeDequeueClearFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *RefusalMergeDequeueClearFailed) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// The offer was cleared and the dequeue itself then failed. Whatever did not
+// come off the queue is still queued and still merges when its turn comes,
+// which is why this is reported rather than absorbed.
+type RefusalMergeDequeueFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Why the dequeue failed, verbatim.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalMergeDequeueFailed) Reset() {
+	*x = RefusalMergeDequeueFailed{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalMergeDequeueFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalMergeDequeueFailed) ProtoMessage() {}
+
+func (x *RefusalMergeDequeueFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalMergeDequeueFailed.ProtoReflect.Descriptor instead.
+func (*RefusalMergeDequeueFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *RefusalMergeDequeueFailed) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// Nothing detached was running, so the cancel reached nothing.
+//
+// A REFUSAL RATHER THAN A QUIET SUCCESS. A cancel that stopped nothing is a
+// keystroke that did nothing, and acking it ok is how a stop control comes to
+// look like it works when it reaches nothing.
+type RefusalNoDetachedAgentsRunning struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalNoDetachedAgentsRunning) Reset() {
+	*x = RefusalNoDetachedAgentsRunning{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalNoDetachedAgentsRunning) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalNoDetachedAgentsRunning) ProtoMessage() {}
+
+func (x *RefusalNoDetachedAgentsRunning) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalNoDetachedAgentsRunning.ProtoReflect.Descriptor instead.
+func (*RefusalNoDetachedAgentsRunning) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{32}
+}
+
+// The shim could not attempt the stop at all.
+type RefusalDetachedCancelUnsupported struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The shim's own account of why, verbatim.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalDetachedCancelUnsupported) Reset() {
+	*x = RefusalDetachedCancelUnsupported{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalDetachedCancelUnsupported) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalDetachedCancelUnsupported) ProtoMessage() {}
+
+func (x *RefusalDetachedCancelUnsupported) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalDetachedCancelUnsupported.ProtoReflect.Descriptor instead.
+func (*RefusalDetachedCancelUnsupported) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *RefusalDetachedCancelUnsupported) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+// The shim answered with an outcome that set no arm. A contract violation the
+// shim client already refuses; naming it keeps the refusal honest if that ever
+// changes, rather than acking a cancel nobody can account for.
+type RefusalDetachedCancelOutcomeUnset struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalDetachedCancelOutcomeUnset) Reset() {
+	*x = RefusalDetachedCancelOutcomeUnset{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalDetachedCancelOutcomeUnset) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalDetachedCancelOutcomeUnset) ProtoMessage() {}
+
+func (x *RefusalDetachedCancelOutcomeUnset) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalDetachedCancelOutcomeUnset.ProtoReflect.Descriptor instead.
+func (*RefusalDetachedCancelOutcomeUnset) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{34}
+}
+
+// The daemon's merge-geometry record could not be read.
+type RefusalMergeGeometryUnreadable struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The read failure, verbatim.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalMergeGeometryUnreadable) Reset() {
+	*x = RefusalMergeGeometryUnreadable{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalMergeGeometryUnreadable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalMergeGeometryUnreadable) ProtoMessage() {}
+
+func (x *RefusalMergeGeometryUnreadable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalMergeGeometryUnreadable.ProtoReflect.Descriptor instead.
+func (*RefusalMergeGeometryUnreadable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *RefusalMergeGeometryUnreadable) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// The workspace has no recorded merge geometry.
+//
+// The daemon records a workspace's source branch, source worktree and merge
+// target when it CREATES the workspace, and derives them at boot for older
+// ones. A workspace with neither is one whose branch or worktree git cannot
+// answer for — a detached HEAD, or a worktree that no longer exists — and
+// merging it would mean guessing which repository to write commits into. It is
+// NEVER guessed at.
+type RefusalMergeGeometryUnrecorded struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The workspace whose geometry is missing, so the refusal names what to
+	// record.
+	Workspace     string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalMergeGeometryUnrecorded) Reset() {
+	*x = RefusalMergeGeometryUnrecorded{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalMergeGeometryUnrecorded) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalMergeGeometryUnrecorded) ProtoMessage() {}
+
+func (x *RefusalMergeGeometryUnrecorded) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalMergeGeometryUnrecorded.ProtoReflect.Descriptor instead.
+func (*RefusalMergeGeometryUnrecorded) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *RefusalMergeGeometryUnrecorded) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
+// A merge phase could not be written to the daemon's durable merge state.
+//
+// It refuses the merge, because the first thing a merge attempt does is BECOME
+// VISIBLE: a merge whose enqueuing mark never landed is a command that vanished
+// from every UI, which is exactly the trace-free failure the mark exists to
+// end.
+type RefusalMergeStateUnrecordable struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which phase could not be recorded (e.g. "merge_enqueuing"), verbatim.
+	Phase string `protobuf:"bytes,1,opt,name=phase,proto3" json:"phase,omitempty"`
+	// The write failure, verbatim.
+	Cause         string `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalMergeStateUnrecordable) Reset() {
+	*x = RefusalMergeStateUnrecordable{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalMergeStateUnrecordable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalMergeStateUnrecordable) ProtoMessage() {}
+
+func (x *RefusalMergeStateUnrecordable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalMergeStateUnrecordable.ProtoReflect.Descriptor instead.
+func (*RefusalMergeStateUnrecordable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *RefusalMergeStateUnrecordable) GetPhase() string {
+	if x != nil {
+		return x.Phase
+	}
+	return ""
+}
+
+func (x *RefusalMergeStateUnrecordable) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// The merge coordinator refused to enqueue the run. The attempt is durably
+// marked failed before this is returned, so the refusal is on the workspace's
+// merge axis as well as in this answer.
+type RefusalMergeEnqueueRejected struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Why the enqueue was refused, verbatim.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalMergeEnqueueRejected) Reset() {
+	*x = RefusalMergeEnqueueRejected{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalMergeEnqueueRejected) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalMergeEnqueueRejected) ProtoMessage() {}
+
+func (x *RefusalMergeEnqueueRejected) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalMergeEnqueueRejected.ProtoReflect.Descriptor instead.
+func (*RefusalMergeEnqueueRejected) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *RefusalMergeEnqueueRejected) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// The workspace's parked merge could not be abandoned, so the close is refused.
+// Closing anyway would leave the merge lease standing over a workspace nobody
+// can prompt or resolve.
+type RefusalMergeAbandonFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Why the abandon failed, verbatim.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalMergeAbandonFailed) Reset() {
+	*x = RefusalMergeAbandonFailed{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalMergeAbandonFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalMergeAbandonFailed) ProtoMessage() {}
+
+func (x *RefusalMergeAbandonFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalMergeAbandonFailed.ProtoReflect.Descriptor instead.
+func (*RefusalMergeAbandonFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *RefusalMergeAbandonFailed) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// The workspace lifecycle refused the close. Its log targets and resolved views
+// are deliberately NOT released on this path: a refused close leaves a
+// workspace that is still live, and taking its descriptors away would break the
+// writers still using them.
+type RefusalWorkspaceCloseFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Why the close failed, verbatim.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalWorkspaceCloseFailed) Reset() {
+	*x = RefusalWorkspaceCloseFailed{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalWorkspaceCloseFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalWorkspaceCloseFailed) ProtoMessage() {}
+
+func (x *RefusalWorkspaceCloseFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalWorkspaceCloseFailed.ProtoReflect.Descriptor instead.
+func (*RefusalWorkspaceCloseFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *RefusalWorkspaceCloseFailed) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// The workspace lifecycle refused the open, or the session it started never
+// became driveable.
+type RefusalWorkspaceOpenFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Why the open failed, verbatim.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalWorkspaceOpenFailed) Reset() {
+	*x = RefusalWorkspaceOpenFailed{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalWorkspaceOpenFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalWorkspaceOpenFailed) ProtoMessage() {}
+
+func (x *RefusalWorkspaceOpenFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalWorkspaceOpenFailed.ProtoReflect.Descriptor instead.
+func (*RefusalWorkspaceOpenFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *RefusalWorkspaceOpenFailed) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// Workspace creation is not accepted over the wire.
+//
+// Creation has exactly ONE ingestion point: a workspace_commands_<uuid>.json
+// file in the daemon's inbox. A second wire path would let a caller create a
+// workspace the durable inbox never recorded, so the call is refused here
+// rather than routed. The remedy is to write the command file.
+type RefusalCreateWorkspaceOverWire struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalCreateWorkspaceOverWire) Reset() {
+	*x = RefusalCreateWorkspaceOverWire{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalCreateWorkspaceOverWire) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalCreateWorkspaceOverWire) ProtoMessage() {}
+
+func (x *RefusalCreateWorkspaceOverWire) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalCreateWorkspaceOverWire.ProtoReflect.Descriptor instead.
+func (*RefusalCreateWorkspaceOverWire) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{42}
+}
+
+// No creation job is on the daemon's books under this id, so there is nothing
+// to mark materialized.
+type RefusalUnknownWorkspaceJob struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalUnknownWorkspaceJob) Reset() {
+	*x = RefusalUnknownWorkspaceJob{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalUnknownWorkspaceJob) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalUnknownWorkspaceJob) ProtoMessage() {}
+
+func (x *RefusalUnknownWorkspaceJob) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalUnknownWorkspaceJob.ProtoReflect.Descriptor instead.
+func (*RefusalUnknownWorkspaceJob) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *RefusalUnknownWorkspaceJob) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+// No host action is on the daemon's durable inbox under this id, so there is
+// nothing to complete.
+type RefusalUnknownHostAction struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ActionId      string                 `protobuf:"bytes,1,opt,name=action_id,json=actionId,proto3" json:"action_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalUnknownHostAction) Reset() {
+	*x = RefusalUnknownHostAction{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalUnknownHostAction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalUnknownHostAction) ProtoMessage() {}
+
+func (x *RefusalUnknownHostAction) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalUnknownHostAction.ProtoReflect.Descriptor instead.
+func (*RefusalUnknownHostAction) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *RefusalUnknownHostAction) GetActionId() string {
+	if x != nil {
+		return x.ActionId
+	}
+	return ""
+}
+
+// The shim accepted the model change but named no selection, so the daemon has
+// nothing shim-confirmed to publish. Refused rather than echoed: the whole
+// point of returning only a confirmed selection is that a frontend never holds
+// an optimistic model state.
+type RefusalModelUnconfirmed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalModelUnconfirmed) Reset() {
+	*x = RefusalModelUnconfirmed{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalModelUnconfirmed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalModelUnconfirmed) ProtoMessage() {}
+
+func (x *RefusalModelUnconfirmed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalModelUnconfirmed.ProtoReflect.Descriptor instead.
+func (*RefusalModelUnconfirmed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{45}
+}
+
+// The published roster is a stale, out-of-order revision WITHIN the publisher's
+// own epoch, or carries no epoch at all.
+//
+// A loud nack rather than a silent drop, so a publisher whose revision counter
+// has fallen behind learns it instead of believing it published. A publish from
+// a NEW epoch is never stale — see frontend.v1.WorkspaceRoster.boot_id — so no
+// publisher ever needs to resync a counter it did not author.
+type RefusalRosterRevisionStale struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The revision that was offered.
+	PublishedRevision uint64 `protobuf:"varint,1,opt,name=published_revision,json=publishedRevision,proto3" json:"published_revision,omitempty"`
+	// The revision the daemon is holding, which the offer failed to exceed.
+	RetainedRevision uint64 `protobuf:"varint,2,opt,name=retained_revision,json=retainedRevision,proto3" json:"retained_revision,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *RefusalRosterRevisionStale) Reset() {
+	*x = RefusalRosterRevisionStale{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalRosterRevisionStale) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalRosterRevisionStale) ProtoMessage() {}
+
+func (x *RefusalRosterRevisionStale) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalRosterRevisionStale.ProtoReflect.Descriptor instead.
+func (*RefusalRosterRevisionStale) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *RefusalRosterRevisionStale) GetPublishedRevision() uint64 {
+	if x != nil {
+		return x.PublishedRevision
+	}
+	return 0
+}
+
+func (x *RefusalRosterRevisionStale) GetRetainedRevision() uint64 {
+	if x != nil {
+		return x.RetainedRevision
+	}
+	return 0
+}
+
+// A shutdown is already scheduled. Refused rather than silently replaced, so
+// two deploy flows cannot merge their intents; the caller cancels first.
+type RefusalShutdownAlreadyScheduled struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The schedule that already stands, so the caller can cancel exactly it.
+	ScheduleId    string `protobuf:"bytes,1,opt,name=schedule_id,json=scheduleId,proto3" json:"schedule_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalShutdownAlreadyScheduled) Reset() {
+	*x = RefusalShutdownAlreadyScheduled{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalShutdownAlreadyScheduled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalShutdownAlreadyScheduled) ProtoMessage() {}
+
+func (x *RefusalShutdownAlreadyScheduled) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalShutdownAlreadyScheduled.ProtoReflect.Descriptor instead.
+func (*RefusalShutdownAlreadyScheduled) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *RefusalShutdownAlreadyScheduled) GetScheduleId() string {
+	if x != nil {
+		return x.ScheduleId
+	}
+	return ""
+}
+
+// The named schedule is not the live one, so the cancel is refused. A cancel
+// aimed at an old schedule can never kill a newer one.
+type RefusalScheduleIdStale struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The schedule that IS live. Empty when no schedule stands at all.
+	LiveScheduleId string `protobuf:"bytes,1,opt,name=live_schedule_id,json=liveScheduleId,proto3" json:"live_schedule_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *RefusalScheduleIdStale) Reset() {
+	*x = RefusalScheduleIdStale{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalScheduleIdStale) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalScheduleIdStale) ProtoMessage() {}
+
+func (x *RefusalScheduleIdStale) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalScheduleIdStale.ProtoReflect.Descriptor instead.
+func (*RefusalScheduleIdStale) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *RefusalScheduleIdStale) GetLiveScheduleId() string {
+	if x != nil {
+		return x.LiveScheduleId
+	}
+	return ""
+}
+
+// The workspace is doing something the hibernate would have to discard — a live
+// turn, or a held merge lease. The daemon never discards in-flight work to
+// satisfy a hibernate; the user interrupts first.
+type RefusalHibernateBlockedByLiveWork struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What is holding it, verbatim, so the card can say what to stop.
+	Reason        string `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalHibernateBlockedByLiveWork) Reset() {
+	*x = RefusalHibernateBlockedByLiveWork{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalHibernateBlockedByLiveWork) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalHibernateBlockedByLiveWork) ProtoMessage() {}
+
+func (x *RefusalHibernateBlockedByLiveWork) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalHibernateBlockedByLiveWork.ProtoReflect.Descriptor instead.
+func (*RefusalHibernateBlockedByLiveWork) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *RefusalHibernateBlockedByLiveWork) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+// The revival command carries no mode, or a compact-first arm with no
+// compaction scope.
+//
+// The choice between resuming as-is and compacting — and, when compacting, of
+// what the summary may swallow — is the user's, and the daemon has no default
+// for either. Inventing one here would spend the user's context budget on a
+// choice they were being asked to make.
+type RefusalRevivalModeUnstated struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalRevivalModeUnstated) Reset() {
+	*x = RefusalRevivalModeUnstated{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalRevivalModeUnstated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalRevivalModeUnstated) ProtoMessage() {}
+
+func (x *RefusalRevivalModeUnstated) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalRevivalModeUnstated.ProtoReflect.Descriptor instead.
+func (*RefusalRevivalModeUnstated) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{50}
+}
+
+// The revival was accepted as a decision but the session could not be brought
+// back up under it.
+type RefusalRevivalFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Why bring-up failed, verbatim.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalRevivalFailed) Reset() {
+	*x = RefusalRevivalFailed{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalRevivalFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalRevivalFailed) ProtoMessage() {}
+
+func (x *RefusalRevivalFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalRevivalFailed.ProtoReflect.Descriptor instead.
+func (*RefusalRevivalFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *RefusalRevivalFailed) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// The session came back but its terminal merge_failed axis could not be
+// cleared, so the restart is reported as refused: leaving the verdict pinned
+// would bring the session up underneath something nothing can clear.
+type RefusalMergeAxisUnclearable struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Why the clear failed, verbatim.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalMergeAxisUnclearable) Reset() {
+	*x = RefusalMergeAxisUnclearable{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalMergeAxisUnclearable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalMergeAxisUnclearable) ProtoMessage() {}
+
+func (x *RefusalMergeAxisUnclearable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalMergeAxisUnclearable.ProtoReflect.Descriptor instead.
+func (*RefusalMergeAxisUnclearable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *RefusalMergeAxisUnclearable) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// Tearing the session down failed.
+type RefusalSessionTeardownFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The session that would not tear down.
+	SessionId string `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// Why, verbatim.
+	Cause         string `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalSessionTeardownFailed) Reset() {
+	*x = RefusalSessionTeardownFailed{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalSessionTeardownFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalSessionTeardownFailed) ProtoMessage() {}
+
+func (x *RefusalSessionTeardownFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalSessionTeardownFailed.ProtoReflect.Descriptor instead.
+func (*RefusalSessionTeardownFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *RefusalSessionTeardownFailed) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *RefusalSessionTeardownFailed) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// The create names a conversation under a resume mode that may not name one.
+//
+// A uuid supplied under any mode but EXPLICIT is a caller that believes it is
+// steering. Ignoring it quietly would land the session somewhere the caller did
+// not ask for and say nothing, so it fails the create instead.
+type RefusalExplicitConversationUnderWrongMode struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The conversation the caller named, so the refusal quotes what it ignored
+	// rather than describing it.
+	ClaudeSessionId string `protobuf:"bytes,1,opt,name=claude_session_id,json=claudeSessionId,proto3" json:"claude_session_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *RefusalExplicitConversationUnderWrongMode) Reset() {
+	*x = RefusalExplicitConversationUnderWrongMode{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalExplicitConversationUnderWrongMode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalExplicitConversationUnderWrongMode) ProtoMessage() {}
+
+func (x *RefusalExplicitConversationUnderWrongMode) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalExplicitConversationUnderWrongMode.ProtoReflect.Descriptor instead.
+func (*RefusalExplicitConversationUnderWrongMode) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *RefusalExplicitConversationUnderWrongMode) GetClaudeSessionId() string {
 	if x != nil {
 		return x.ClaudeSessionId
 	}
 	return ""
 }
 
-func (x *SessionResumeFailure) GetCwd() string {
+// The create carries a resume mode this daemon's enum does not contain. Refused
+// rather than read as CONTINUE: answering a different question than the one
+// asked is the failure mode the whole ResumeMode enum exists to end.
+type RefusalResumeModeUnknown struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The mode as sent.
+	ResumeMode    int32 `protobuf:"varint,1,opt,name=resume_mode,json=resumeMode,proto3" json:"resume_mode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalResumeModeUnknown) Reset() {
+	*x = RefusalResumeModeUnknown{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalResumeModeUnknown) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalResumeModeUnknown) ProtoMessage() {}
+
+func (x *RefusalResumeModeUnknown) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalResumeModeUnknown.ProtoReflect.Descriptor instead.
+func (*RefusalResumeModeUnknown) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *RefusalResumeModeUnknown) GetResumeMode() int32 {
+	if x != nil {
+		return x.ResumeMode
+	}
+	return 0
+}
+
+// The account (CLAUDE_CONFIG_DIR) for this workspace could not be resolved.
+//
+// The account is decided by the DAEMON, not taken from the frame: the editor
+// cannot know whether a human SELECTED an account for this workspace in the
+// webapp. A create that cannot resolve one is refused rather than run under the
+// daemon's ambient environment.
+type RefusalAccountUnresolvable struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The workspace whose account could not be resolved.
+	Cwd string `protobuf:"bytes,1,opt,name=cwd,proto3" json:"cwd,omitempty"`
+	// The resolution failure, verbatim.
+	Cause         string `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalAccountUnresolvable) Reset() {
+	*x = RefusalAccountUnresolvable{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalAccountUnresolvable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalAccountUnresolvable) ProtoMessage() {}
+
+func (x *RefusalAccountUnresolvable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalAccountUnresolvable.ProtoReflect.Descriptor instead.
+func (*RefusalAccountUnresolvable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *RefusalAccountUnresolvable) GetCwd() string {
 	if x != nil {
 		return x.Cwd
 	}
 	return ""
 }
 
-func (x *SessionResumeFailure) GetConfigDir() string {
-	if x != nil {
-		return x.ConfigDir
-	}
-	return ""
-}
-
-func (x *SessionResumeFailure) GetResolvedConfigDir() string {
-	if x != nil {
-		return x.ResolvedConfigDir
-	}
-	return ""
-}
-
-func (x *SessionResumeFailure) GetAttempt() isSessionResumeFailure_Attempt {
-	if x != nil {
-		return x.Attempt
-	}
-	return nil
-}
-
-func (x *SessionResumeFailure) GetCreate() *SessionResumeFailureCreate {
-	if x != nil {
-		if x, ok := x.Attempt.(*SessionResumeFailure_Create); ok {
-			return x.Create
-		}
-	}
-	return nil
-}
-
-func (x *SessionResumeFailure) GetAutomaticRestore() *SessionResumeFailureAutomaticRestore {
-	if x != nil {
-		if x, ok := x.Attempt.(*SessionResumeFailure_AutomaticRestore); ok {
-			return x.AutomaticRestore
-		}
-	}
-	return nil
-}
-
-func (x *SessionResumeFailure) GetCause() isSessionResumeFailure_Cause {
+func (x *RefusalAccountUnresolvable) GetCause() string {
 	if x != nil {
 		return x.Cause
 	}
-	return nil
+	return ""
 }
 
-func (x *SessionResumeFailure) GetTranscriptUnavailable() *SessionResumeFailureTranscriptUnavailable {
-	if x != nil {
-		if x, ok := x.Cause.(*SessionResumeFailure_TranscriptUnavailable); ok {
-			return x.TranscriptUnavailable
-		}
-	}
-	return nil
-}
-
-func (x *SessionResumeFailure) GetIdentityMismatch() *SessionResumeFailureIdentityMismatch {
-	if x != nil {
-		if x, ok := x.Cause.(*SessionResumeFailure_IdentityMismatch); ok {
-			return x.IdentityMismatch
-		}
-	}
-	return nil
-}
-
-func (x *SessionResumeFailure) GetQueryTermination() *QueryTerminationFailure {
-	if x != nil {
-		if x, ok := x.Cause.(*SessionResumeFailure_QueryTermination); ok {
-			return x.QueryTermination
-		}
-	}
-	return nil
-}
-
-func (x *SessionResumeFailure) GetBringUpFailure() *SessionResumeFailureBringUpFailure {
-	if x != nil {
-		if x, ok := x.Cause.(*SessionResumeFailure_BringUpFailure); ok {
-			return x.BringUpFailure
-		}
-	}
-	return nil
-}
-
-type isSessionResumeFailure_Attempt interface {
-	isSessionResumeFailure_Attempt()
-}
-
-type SessionResumeFailure_Create struct {
-	// A frontend requested a session that continues a durable conversation.
-	Create *SessionResumeFailureCreate `protobuf:"bytes,5,opt,name=create,proto3,oneof"`
-}
-
-type SessionResumeFailure_AutomaticRestore struct {
-	// A durable agent-repl session required shim reconstruction.
-	AutomaticRestore *SessionResumeFailureAutomaticRestore `protobuf:"bytes,6,opt,name=automatic_restore,json=automaticRestore,proto3,oneof"`
-}
-
-func (*SessionResumeFailure_Create) isSessionResumeFailure_Attempt() {}
-
-func (*SessionResumeFailure_AutomaticRestore) isSessionResumeFailure_Attempt() {}
-
-type isSessionResumeFailure_Cause interface {
-	isSessionResumeFailure_Cause()
-}
-
-type SessionResumeFailure_TranscriptUnavailable struct {
-	// No readable transcript exists for the authoritative Claude UUID.
-	TranscriptUnavailable *SessionResumeFailureTranscriptUnavailable `protobuf:"bytes,7,opt,name=transcript_unavailable,json=transcriptUnavailable,proto3,oneof"`
-}
-
-type SessionResumeFailure_IdentityMismatch struct {
-	// A recovery attempt proposed a different Claude UUID or a fresh session.
-	IdentityMismatch *SessionResumeFailureIdentityMismatch `protobuf:"bytes,8,opt,name=identity_mismatch,json=identityMismatch,proto3,oneof"`
-}
-
-type SessionResumeFailure_QueryTermination struct {
-	// The exact resumed SDK query terminated before becoming driveable.
-	QueryTermination *QueryTerminationFailure `protobuf:"bytes,9,opt,name=query_termination,json=queryTermination,proto3,oneof"`
-}
-
-type SessionResumeFailure_BringUpFailure struct {
-	// Bring-up failed before exact query-termination evidence was available.
-	BringUpFailure *SessionResumeFailureBringUpFailure `protobuf:"bytes,10,opt,name=bring_up_failure,json=bringUpFailure,proto3,oneof"`
-}
-
-func (*SessionResumeFailure_TranscriptUnavailable) isSessionResumeFailure_Cause() {}
-
-func (*SessionResumeFailure_IdentityMismatch) isSessionResumeFailure_Cause() {}
-
-func (*SessionResumeFailure_QueryTermination) isSessionResumeFailure_Cause() {}
-
-func (*SessionResumeFailure_BringUpFailure) isSessionResumeFailure_Cause() {}
-
-// Marks a resume failure encountered while creating an agent-repl session.
-type SessionResumeFailureCreate struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionResumeFailureCreate) Reset() {
-	*x = SessionResumeFailureCreate{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[67]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionResumeFailureCreate) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionResumeFailureCreate) ProtoMessage() {}
-
-func (x *SessionResumeFailureCreate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[67]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionResumeFailureCreate.ProtoReflect.Descriptor instead.
-func (*SessionResumeFailureCreate) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{67}
-}
-
-// Marks a resume failure encountered while restoring an allocated agent-repl
-// session.
-type SessionResumeFailureAutomaticRestore struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionResumeFailureAutomaticRestore) Reset() {
-	*x = SessionResumeFailureAutomaticRestore{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[68]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionResumeFailureAutomaticRestore) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionResumeFailureAutomaticRestore) ProtoMessage() {}
-
-func (x *SessionResumeFailureAutomaticRestore) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[68]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionResumeFailureAutomaticRestore.ProtoReflect.Descriptor instead.
-func (*SessionResumeFailureAutomaticRestore) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{68}
-}
-
-// Records every transcript location examined for the authoritative Claude
-// conversation UUID.
-type SessionResumeFailureTranscriptUnavailable struct {
+// The session was created but the model the create asked for could not be
+// applied, so the create is reported failed rather than left on another model.
+//
+// A HIBERNATED create does NOT produce this: it has no shim to carry the
+// change, the record keeps its persisted model, and the revival applies one.
+type RefusalModelNotApplied struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Absolute transcript paths that were checked and found unavailable.
-	SearchedPaths []string `protobuf:"bytes,1,rep,name=searched_paths,json=searchedPaths,proto3" json:"searched_paths,omitempty"`
+	// The model that was asked for.
+	Model string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	// Why it was not applied, verbatim.
+	Cause         string `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SessionResumeFailureTranscriptUnavailable) Reset() {
-	*x = SessionResumeFailureTranscriptUnavailable{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[69]
+func (x *RefusalModelNotApplied) Reset() {
+	*x = RefusalModelNotApplied{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SessionResumeFailureTranscriptUnavailable) String() string {
+func (x *RefusalModelNotApplied) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SessionResumeFailureTranscriptUnavailable) ProtoMessage() {}
+func (*RefusalModelNotApplied) ProtoMessage() {}
 
-func (x *SessionResumeFailureTranscriptUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[69]
+func (x *RefusalModelNotApplied) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5481,92 +3180,229 @@ func (x *SessionResumeFailureTranscriptUnavailable) ProtoReflect() protoreflect.
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SessionResumeFailureTranscriptUnavailable.ProtoReflect.Descriptor instead.
-func (*SessionResumeFailureTranscriptUnavailable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{69}
+// Deprecated: Use RefusalModelNotApplied.ProtoReflect.Descriptor instead.
+func (*RefusalModelNotApplied) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{57}
 }
 
-func (x *SessionResumeFailureTranscriptUnavailable) GetSearchedPaths() []string {
+func (x *RefusalModelNotApplied) GetModel() string {
 	if x != nil {
-		return x.SearchedPaths
-	}
-	return nil
-}
-
-// Records a rejected recovery attempt that would have resumed another Claude
-// conversation.
-type SessionResumeFailureIdentityMismatch struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The replacement Claude UUID proposed by recovery. Empty means recovery
-	// would have started a fresh conversation.
-	ReplacementClaudeSessionId string `protobuf:"bytes,1,opt,name=replacement_claude_session_id,json=replacementClaudeSessionId,proto3" json:"replacement_claude_session_id,omitempty"`
-	unknownFields              protoimpl.UnknownFields
-	sizeCache                  protoimpl.SizeCache
-}
-
-func (x *SessionResumeFailureIdentityMismatch) Reset() {
-	*x = SessionResumeFailureIdentityMismatch{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[70]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionResumeFailureIdentityMismatch) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionResumeFailureIdentityMismatch) ProtoMessage() {}
-
-func (x *SessionResumeFailureIdentityMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[70]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionResumeFailureIdentityMismatch.ProtoReflect.Descriptor instead.
-func (*SessionResumeFailureIdentityMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{70}
-}
-
-func (x *SessionResumeFailureIdentityMismatch) GetReplacementClaudeSessionId() string {
-	if x != nil {
-		return x.ReplacementClaudeSessionId
+		return x.Model
 	}
 	return ""
 }
 
-// Records an exact-resume bring-up failure that has no typed query lifecycle
-// record. The original nonblank cause is retained without classifying the
-// command as an unrelated internal failure.
-type SessionResumeFailureBringUpFailure struct {
+func (x *RefusalModelNotApplied) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// The establishment probe answered for a different request, so its verdict
+// cannot be attributed to this create.
+type RefusalEstablishmentProbeMisattributed struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The complete cause returned by the driveability gate.
+	// The request the probe answered for.
+	AnsweredRequestId string `protobuf:"bytes,1,opt,name=answered_request_id,json=answeredRequestId,proto3" json:"answered_request_id,omitempty"`
+	// The probe id this create issued.
+	WantRequestId string `protobuf:"bytes,2,opt,name=want_request_id,json=wantRequestId,proto3" json:"want_request_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalEstablishmentProbeMisattributed) Reset() {
+	*x = RefusalEstablishmentProbeMisattributed{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[58]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalEstablishmentProbeMisattributed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalEstablishmentProbeMisattributed) ProtoMessage() {}
+
+func (x *RefusalEstablishmentProbeMisattributed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[58]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalEstablishmentProbeMisattributed.ProtoReflect.Descriptor instead.
+func (*RefusalEstablishmentProbeMisattributed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{58}
+}
+
+func (x *RefusalEstablishmentProbeMisattributed) GetAnsweredRequestId() string {
+	if x != nil {
+		return x.AnsweredRequestId
+	}
+	return ""
+}
+
+func (x *RefusalEstablishmentProbeMisattributed) GetWantRequestId() string {
+	if x != nil {
+		return x.WantRequestId
+	}
+	return ""
+}
+
+// The call carries no reader identity.
+//
+// A conversation reading position is per READER per workspace per scope.
+// Serving without one would file this reader's place under the empty key, where
+// the next unidentified reader would inherit it.
+type RefusalReaderIdentityMissing struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalReaderIdentityMissing) Reset() {
+	*x = RefusalReaderIdentityMissing{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[59]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalReaderIdentityMissing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalReaderIdentityMissing) ProtoMessage() {}
+
+func (x *RefusalReaderIdentityMissing) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[59]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalReaderIdentityMissing.ProtoReflect.Descriptor instead.
+func (*RefusalReaderIdentityMissing) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{59}
+}
+
+// The daemon produced neither a page nor a failure.
+//
+// NEVER A SILENTLY ABSENT PAGE: a client cannot tell one from an empty
+// conversation, and that ambiguity is the blank-feed bug this protocol's whole
+// history has been spent closing.
+type RefusalPageAbsent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalPageAbsent) Reset() {
+	*x = RefusalPageAbsent{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[60]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalPageAbsent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalPageAbsent) ProtoMessage() {}
+
+func (x *RefusalPageAbsent) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[60]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalPageAbsent.ProtoReflect.Descriptor instead.
+func (*RefusalPageAbsent) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{60}
+}
+
+// This reader has no established position in this scope, so there is no
+// "immediately older" page to serve.
+//
+// REFUSED RATHER THAN ANSWERED WITH THE TAIL. Defaulting would turn a client
+// bug into a silent tail read, and "I have no position" already has its own
+// verb — FirstPage.
+type RefusalReaderHasNoPosition struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalReaderHasNoPosition) Reset() {
+	*x = RefusalReaderHasNoPosition{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[61]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalReaderHasNoPosition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalReaderHasNoPosition) ProtoMessage() {}
+
+func (x *RefusalReaderHasNoPosition) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[61]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalReaderHasNoPosition.ProtoReflect.Descriptor instead.
+func (*RefusalReaderHasNoPosition) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{61}
+}
+
+// The conversation replay could not be served.
+type RefusalReplayFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Why the replay failed, verbatim.
 	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SessionResumeFailureBringUpFailure) Reset() {
-	*x = SessionResumeFailureBringUpFailure{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[71]
+func (x *RefusalReplayFailed) Reset() {
+	*x = RefusalReplayFailed{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SessionResumeFailureBringUpFailure) String() string {
+func (x *RefusalReplayFailed) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SessionResumeFailureBringUpFailure) ProtoMessage() {}
+func (*RefusalReplayFailed) ProtoMessage() {}
 
-func (x *SessionResumeFailureBringUpFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[71]
+func (x *RefusalReplayFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5577,12 +3413,246 @@ func (x *SessionResumeFailureBringUpFailure) ProtoReflect() protoreflect.Message
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SessionResumeFailureBringUpFailure.ProtoReflect.Descriptor instead.
-func (*SessionResumeFailureBringUpFailure) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{71}
+// Deprecated: Use RefusalReplayFailed.ProtoReflect.Descriptor instead.
+func (*RefusalReplayFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{62}
 }
 
-func (x *SessionResumeFailureBringUpFailure) GetCause() string {
+func (x *RefusalReplayFailed) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// No entry with this id is on the workspace's queue.
+//
+// The user asked for something specific, and pretending to have done it would
+// be worse than saying it is gone.
+type RefusalQueueEntryUnknown struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EntryId       string                 `protobuf:"bytes,1,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalQueueEntryUnknown) Reset() {
+	*x = RefusalQueueEntryUnknown{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[63]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalQueueEntryUnknown) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalQueueEntryUnknown) ProtoMessage() {}
+
+func (x *RefusalQueueEntryUnknown) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[63]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalQueueEntryUnknown.ProtoReflect.Descriptor instead.
+func (*RefusalQueueEntryUnknown) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{63}
+}
+
+func (x *RefusalQueueEntryUnknown) GetEntryId() string {
+	if x != nil {
+		return x.EntryId
+	}
+	return ""
+}
+
+// The run id names nothing outstanding on the merge queue.
+type RefusalMergeRunNotOutstanding struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalMergeRunNotOutstanding) Reset() {
+	*x = RefusalMergeRunNotOutstanding{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[64]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalMergeRunNotOutstanding) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalMergeRunNotOutstanding) ProtoMessage() {}
+
+func (x *RefusalMergeRunNotOutstanding) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[64]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalMergeRunNotOutstanding.ProtoReflect.Descriptor instead.
+func (*RefusalMergeRunNotOutstanding) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{64}
+}
+
+func (x *RefusalMergeRunNotOutstanding) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+// The run id names the RUNNING head, which only its own drain goroutine may
+// retire. Evicting it from underneath that goroutine would retire a run that is
+// still writing to the target.
+type RefusalMergeRunIsRunningHead struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalMergeRunIsRunningHead) Reset() {
+	*x = RefusalMergeRunIsRunningHead{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[65]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalMergeRunIsRunningHead) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalMergeRunIsRunningHead) ProtoMessage() {}
+
+func (x *RefusalMergeRunIsRunningHead) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[65]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalMergeRunIsRunningHead.ProtoReflect.Descriptor instead.
+func (*RefusalMergeRunIsRunningHead) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{65}
+}
+
+func (x *RefusalMergeRunIsRunningHead) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+// The browser record failed validation before daemon attribution could
+// overwrite the workspace and request facts the browser cannot authoritatively
+// know.
+type RefusalClientLogRecordInvalid struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What did not validate, verbatim.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalClientLogRecordInvalid) Reset() {
+	*x = RefusalClientLogRecordInvalid{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[66]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalClientLogRecordInvalid) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalClientLogRecordInvalid) ProtoMessage() {}
+
+func (x *RefusalClientLogRecordInvalid) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[66]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalClientLogRecordInvalid.ProtoReflect.Descriptor instead.
+func (*RefusalClientLogRecordInvalid) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{66}
+}
+
+func (x *RefusalClientLogRecordInvalid) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// The log line could not be written.
+type RefusalClientLogUnpersisted struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The write failure, verbatim.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalClientLogUnpersisted) Reset() {
+	*x = RefusalClientLogUnpersisted{}
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[67]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalClientLogUnpersisted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalClientLogUnpersisted) ProtoMessage() {}
+
+func (x *RefusalClientLogUnpersisted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[67]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalClientLogUnpersisted.ProtoReflect.Descriptor instead.
+func (*RefusalClientLogUnpersisted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{67}
+}
+
+func (x *RefusalClientLogUnpersisted) GetCause() string {
 	if x != nil {
 		return x.Cause
 	}
@@ -5608,7 +3678,7 @@ type HibernationDetail struct {
 
 func (x *HibernationDetail) Reset() {
 	*x = HibernationDetail{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[72]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5620,7 +3690,7 @@ func (x *HibernationDetail) String() string {
 func (*HibernationDetail) ProtoMessage() {}
 
 func (x *HibernationDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[72]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5633,7 +3703,7 @@ func (x *HibernationDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HibernationDetail.ProtoReflect.Descriptor instead.
 func (*HibernationDetail) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{72}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *HibernationDetail) GetSinceMs() int64 {
@@ -5721,7 +3791,7 @@ type HibernationIdleCutoff struct {
 
 func (x *HibernationIdleCutoff) Reset() {
 	*x = HibernationIdleCutoff{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[73]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5733,7 +3803,7 @@ func (x *HibernationIdleCutoff) String() string {
 func (*HibernationIdleCutoff) ProtoMessage() {}
 
 func (x *HibernationIdleCutoff) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[73]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5746,7 +3816,7 @@ func (x *HibernationIdleCutoff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HibernationIdleCutoff.ProtoReflect.Descriptor instead.
 func (*HibernationIdleCutoff) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{73}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *HibernationIdleCutoff) GetCutoffMs() int64 {
@@ -5765,7 +3835,7 @@ type HibernationForced struct {
 
 func (x *HibernationForced) Reset() {
 	*x = HibernationForced{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[74]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5777,7 +3847,7 @@ func (x *HibernationForced) String() string {
 func (*HibernationForced) ProtoMessage() {}
 
 func (x *HibernationForced) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[74]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5790,7 +3860,7 @@ func (x *HibernationForced) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HibernationForced.ProtoReflect.Descriptor instead.
 func (*HibernationForced) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{74}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{70}
 }
 
 // Hibernation because the cache went cold before a ping could fire.
@@ -5806,7 +3876,7 @@ type HibernationCacheExpired struct {
 
 func (x *HibernationCacheExpired) Reset() {
 	*x = HibernationCacheExpired{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[75]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5818,7 +3888,7 @@ func (x *HibernationCacheExpired) String() string {
 func (*HibernationCacheExpired) ProtoMessage() {}
 
 func (x *HibernationCacheExpired) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[75]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5831,7 +3901,7 @@ func (x *HibernationCacheExpired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HibernationCacheExpired.ProtoReflect.Descriptor instead.
 func (*HibernationCacheExpired) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{75}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *HibernationCacheExpired) GetElapsedMs() int64 {
@@ -5869,7 +3939,7 @@ type ReviveCompactFirst struct {
 
 func (x *ReviveCompactFirst) Reset() {
 	*x = ReviveCompactFirst{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[76]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5881,7 +3951,7 @@ func (x *ReviveCompactFirst) String() string {
 func (*ReviveCompactFirst) ProtoMessage() {}
 
 func (x *ReviveCompactFirst) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[76]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5894,7 +3964,7 @@ func (x *ReviveCompactFirst) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviveCompactFirst.ProtoReflect.Descriptor instead.
 func (*ReviveCompactFirst) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{76}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *ReviveCompactFirst) GetScope() CompactionScope {
@@ -5913,7 +3983,7 @@ type ReviveDirect struct {
 
 func (x *ReviveDirect) Reset() {
 	*x = ReviveDirect{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[77]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5925,7 +3995,7 @@ func (x *ReviveDirect) String() string {
 func (*ReviveDirect) ProtoMessage() {}
 
 func (x *ReviveDirect) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[77]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5938,7 +4008,7 @@ func (x *ReviveDirect) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviveDirect.ProtoReflect.Descriptor instead.
 func (*ReviveDirect) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{77}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{73}
 }
 
 // The discard-the-conversation revival choice. Empty, and deliberately WITHOUT
@@ -5953,7 +4023,7 @@ type ReviveClear struct {
 
 func (x *ReviveClear) Reset() {
 	*x = ReviveClear{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[78]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5965,7 +4035,7 @@ func (x *ReviveClear) String() string {
 func (*ReviveClear) ProtoMessage() {}
 
 func (x *ReviveClear) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[78]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5978,7 +4048,7 @@ func (x *ReviveClear) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviveClear.ProtoReflect.Descriptor instead.
 func (*ReviveClear) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{78}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{74}
 }
 
 // The workspace's revival gate, resolved and fenced: whether prompts may be
@@ -6011,7 +4081,7 @@ type WorkspaceGateView struct {
 
 func (x *WorkspaceGateView) Reset() {
 	*x = WorkspaceGateView{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[79]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6023,7 +4093,7 @@ func (x *WorkspaceGateView) String() string {
 func (*WorkspaceGateView) ProtoMessage() {}
 
 func (x *WorkspaceGateView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[79]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6036,7 +4106,7 @@ func (x *WorkspaceGateView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceGateView.ProtoReflect.Descriptor instead.
 func (*WorkspaceGateView) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{79}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *WorkspaceGateView) GetWorkspace() string {
@@ -6104,7 +4174,7 @@ type WorkspaceGateOpen struct {
 
 func (x *WorkspaceGateOpen) Reset() {
 	*x = WorkspaceGateOpen{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[80]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6116,7 +4186,7 @@ func (x *WorkspaceGateOpen) String() string {
 func (*WorkspaceGateOpen) ProtoMessage() {}
 
 func (x *WorkspaceGateOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[80]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6129,7 +4199,7 @@ func (x *WorkspaceGateOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceGateOpen.ProtoReflect.Descriptor instead.
 func (*WorkspaceGateOpen) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{80}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{76}
 }
 
 // The workspace's session is asleep and will not take a prompt until the user
@@ -6144,7 +4214,7 @@ type WorkspaceGateHibernated struct {
 
 func (x *WorkspaceGateHibernated) Reset() {
 	*x = WorkspaceGateHibernated{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[81]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6156,7 +4226,7 @@ func (x *WorkspaceGateHibernated) String() string {
 func (*WorkspaceGateHibernated) ProtoMessage() {}
 
 func (x *WorkspaceGateHibernated) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[81]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6169,7 +4239,7 @@ func (x *WorkspaceGateHibernated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceGateHibernated.ProtoReflect.Descriptor instead.
 func (*WorkspaceGateHibernated) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{81}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *WorkspaceGateHibernated) GetDetail() *HibernationDetail {
@@ -6207,7 +4277,7 @@ type WorkspaceAvailable struct {
 
 func (x *WorkspaceAvailable) Reset() {
 	*x = WorkspaceAvailable{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[82]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6219,7 +4289,7 @@ func (x *WorkspaceAvailable) String() string {
 func (*WorkspaceAvailable) ProtoMessage() {}
 
 func (x *WorkspaceAvailable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[82]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6232,7 +4302,7 @@ func (x *WorkspaceAvailable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceAvailable.ProtoReflect.Descriptor instead.
 func (*WorkspaceAvailable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{82}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *WorkspaceAvailable) GetJobId() string {
@@ -6379,7 +4449,7 @@ type HostAction struct {
 
 func (x *HostAction) Reset() {
 	*x = HostAction{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[83]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6391,7 +4461,7 @@ func (x *HostAction) String() string {
 func (*HostAction) ProtoMessage() {}
 
 func (x *HostAction) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[83]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6404,7 +4474,7 @@ func (x *HostAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostAction.ProtoReflect.Descriptor instead.
 func (*HostAction) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{83}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *HostAction) GetActionId() string {
@@ -6599,7 +4669,7 @@ type HostBootSweepSessionUnwired struct {
 
 func (x *HostBootSweepSessionUnwired) Reset() {
 	*x = HostBootSweepSessionUnwired{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[84]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6611,7 +4681,7 @@ func (x *HostBootSweepSessionUnwired) String() string {
 func (*HostBootSweepSessionUnwired) ProtoMessage() {}
 
 func (x *HostBootSweepSessionUnwired) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[84]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6624,7 +4694,7 @@ func (x *HostBootSweepSessionUnwired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostBootSweepSessionUnwired.ProtoReflect.Descriptor instead.
 func (*HostBootSweepSessionUnwired) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{84}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *HostBootSweepSessionUnwired) GetWorkspace() string {
@@ -6664,7 +4734,7 @@ type HostWorkspaceCreateFailed struct {
 
 func (x *HostWorkspaceCreateFailed) Reset() {
 	*x = HostWorkspaceCreateFailed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[85]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6676,7 +4746,7 @@ func (x *HostWorkspaceCreateFailed) String() string {
 func (*HostWorkspaceCreateFailed) ProtoMessage() {}
 
 func (x *HostWorkspaceCreateFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[85]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6689,7 +4759,7 @@ func (x *HostWorkspaceCreateFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostWorkspaceCreateFailed.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceCreateFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{85}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *HostWorkspaceCreateFailed) GetJobId() string {
@@ -6722,7 +4792,7 @@ type HostSwitchWorkspace struct {
 
 func (x *HostSwitchWorkspace) Reset() {
 	*x = HostSwitchWorkspace{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[86]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6734,7 +4804,7 @@ func (x *HostSwitchWorkspace) String() string {
 func (*HostSwitchWorkspace) ProtoMessage() {}
 
 func (x *HostSwitchWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[86]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6747,7 +4817,7 @@ func (x *HostSwitchWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSwitchWorkspace.ProtoReflect.Descriptor instead.
 func (*HostSwitchWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{86}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *HostSwitchWorkspace) GetDir() string {
@@ -6767,7 +4837,7 @@ type HostSetRepositoryFold struct {
 
 func (x *HostSetRepositoryFold) Reset() {
 	*x = HostSetRepositoryFold{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[87]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6779,7 +4849,7 @@ func (x *HostSetRepositoryFold) String() string {
 func (*HostSetRepositoryFold) ProtoMessage() {}
 
 func (x *HostSetRepositoryFold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[87]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6792,7 +4862,7 @@ func (x *HostSetRepositoryFold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSetRepositoryFold.ProtoReflect.Descriptor instead.
 func (*HostSetRepositoryFold) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{87}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *HostSetRepositoryFold) GetRepoKey() string {
@@ -6818,7 +4888,7 @@ type HostSetSidebarView struct {
 
 func (x *HostSetSidebarView) Reset() {
 	*x = HostSetSidebarView{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[88]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6830,7 +4900,7 @@ func (x *HostSetSidebarView) String() string {
 func (*HostSetSidebarView) ProtoMessage() {}
 
 func (x *HostSetSidebarView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[88]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6843,7 +4913,7 @@ func (x *HostSetSidebarView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSetSidebarView.ProtoReflect.Descriptor instead.
 func (*HostSetSidebarView) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{88}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *HostSetSidebarView) GetView() string {
@@ -6861,7 +4931,7 @@ type HostTaskCreate struct {
 
 func (x *HostTaskCreate) Reset() {
 	*x = HostTaskCreate{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[89]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6873,7 +4943,7 @@ func (x *HostTaskCreate) String() string {
 func (*HostTaskCreate) ProtoMessage() {}
 
 func (x *HostTaskCreate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[89]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6886,7 +4956,7 @@ func (x *HostTaskCreate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostTaskCreate.ProtoReflect.Descriptor instead.
 func (*HostTaskCreate) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{89}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{85}
 }
 
 type HostTaskById struct {
@@ -6898,7 +4968,7 @@ type HostTaskById struct {
 
 func (x *HostTaskById) Reset() {
 	*x = HostTaskById{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[90]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6910,7 +4980,7 @@ func (x *HostTaskById) String() string {
 func (*HostTaskById) ProtoMessage() {}
 
 func (x *HostTaskById) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[90]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6923,7 +4993,7 @@ func (x *HostTaskById) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostTaskById.ProtoReflect.Descriptor instead.
 func (*HostTaskById) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{90}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *HostTaskById) GetId() string {
@@ -6951,7 +5021,7 @@ type HostLegacyCommand struct {
 
 func (x *HostLegacyCommand) Reset() {
 	*x = HostLegacyCommand{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[91]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6963,7 +5033,7 @@ func (x *HostLegacyCommand) String() string {
 func (*HostLegacyCommand) ProtoMessage() {}
 
 func (x *HostLegacyCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[91]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6976,7 +5046,7 @@ func (x *HostLegacyCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostLegacyCommand.ProtoReflect.Descriptor instead.
 func (*HostLegacyCommand) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{91}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *HostLegacyCommand) GetType() string {
@@ -7015,7 +5085,7 @@ type ShutdownScheduleView struct {
 
 func (x *ShutdownScheduleView) Reset() {
 	*x = ShutdownScheduleView{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[92]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7027,7 +5097,7 @@ func (x *ShutdownScheduleView) String() string {
 func (*ShutdownScheduleView) ProtoMessage() {}
 
 func (x *ShutdownScheduleView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[92]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7040,7 +5110,7 @@ func (x *ShutdownScheduleView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownScheduleView.ProtoReflect.Descriptor instead.
 func (*ShutdownScheduleView) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{92}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *ShutdownScheduleView) GetState() isShutdownScheduleView_State {
@@ -7097,7 +5167,7 @@ type ShutdownScheduleIdle struct {
 
 func (x *ShutdownScheduleIdle) Reset() {
 	*x = ShutdownScheduleIdle{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[93]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7109,7 +5179,7 @@ func (x *ShutdownScheduleIdle) String() string {
 func (*ShutdownScheduleIdle) ProtoMessage() {}
 
 func (x *ShutdownScheduleIdle) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[93]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7122,7 +5192,7 @@ func (x *ShutdownScheduleIdle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownScheduleIdle.ProtoReflect.Descriptor instead.
 func (*ShutdownScheduleIdle) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{93}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{89}
 }
 
 // The held lease. The holds list is the complete, live answer to "what is
@@ -7153,7 +5223,7 @@ type ShutdownScheduleDraining struct {
 
 func (x *ShutdownScheduleDraining) Reset() {
 	*x = ShutdownScheduleDraining{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[94]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7165,7 +5235,7 @@ func (x *ShutdownScheduleDraining) String() string {
 func (*ShutdownScheduleDraining) ProtoMessage() {}
 
 func (x *ShutdownScheduleDraining) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[94]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7178,7 +5248,7 @@ func (x *ShutdownScheduleDraining) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownScheduleDraining.ProtoReflect.Descriptor instead.
 func (*ShutdownScheduleDraining) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{94}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *ShutdownScheduleDraining) GetScheduleId() string {
@@ -7240,7 +5310,7 @@ type ShutdownHold struct {
 
 func (x *ShutdownHold) Reset() {
 	*x = ShutdownHold{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[95]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7252,7 +5322,7 @@ func (x *ShutdownHold) String() string {
 func (*ShutdownHold) ProtoMessage() {}
 
 func (x *ShutdownHold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[95]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7265,7 +5335,7 @@ func (x *ShutdownHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownHold.ProtoReflect.Descriptor instead.
 func (*ShutdownHold) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{95}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *ShutdownHold) GetWorkspace() string {
@@ -7307,7 +5377,7 @@ type ShutdownHoldTurn struct {
 
 func (x *ShutdownHoldTurn) Reset() {
 	*x = ShutdownHoldTurn{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[96]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7319,7 +5389,7 @@ func (x *ShutdownHoldTurn) String() string {
 func (*ShutdownHoldTurn) ProtoMessage() {}
 
 func (x *ShutdownHoldTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[96]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7332,7 +5402,7 @@ func (x *ShutdownHoldTurn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownHoldTurn.ProtoReflect.Descriptor instead.
 func (*ShutdownHoldTurn) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{96}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *ShutdownHoldTurn) GetTurnId() string {
@@ -7353,7 +5423,7 @@ type ShutdownHoldTasks struct {
 
 func (x *ShutdownHoldTasks) Reset() {
 	*x = ShutdownHoldTasks{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[97]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7365,7 +5435,7 @@ func (x *ShutdownHoldTasks) String() string {
 func (*ShutdownHoldTasks) ProtoMessage() {}
 
 func (x *ShutdownHoldTasks) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[97]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7378,7 +5448,7 @@ func (x *ShutdownHoldTasks) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownHoldTasks.ProtoReflect.Descriptor instead.
 func (*ShutdownHoldTasks) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{97}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *ShutdownHoldTasks) GetCount() int32 {
@@ -7443,7 +5513,7 @@ type RestartPendingView struct {
 
 func (x *RestartPendingView) Reset() {
 	*x = RestartPendingView{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[98]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7455,7 +5525,7 @@ func (x *RestartPendingView) String() string {
 func (*RestartPendingView) ProtoMessage() {}
 
 func (x *RestartPendingView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[98]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7468,7 +5538,7 @@ func (x *RestartPendingView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartPendingView.ProtoReflect.Descriptor instead.
 func (*RestartPendingView) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{98}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *RestartPendingView) GetCause() string {
@@ -7531,7 +5601,7 @@ type MergeStatus struct {
 
 func (x *MergeStatus) Reset() {
 	*x = MergeStatus{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[99]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7543,7 +5613,7 @@ func (x *MergeStatus) String() string {
 func (*MergeStatus) ProtoMessage() {}
 
 func (x *MergeStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[99]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7556,7 +5626,7 @@ func (x *MergeStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatus.ProtoReflect.Descriptor instead.
 func (*MergeStatus) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{99}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *MergeStatus) GetRunId() string {
@@ -7721,7 +5791,7 @@ type MergeStatusEnqueued struct {
 
 func (x *MergeStatusEnqueued) Reset() {
 	*x = MergeStatusEnqueued{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[100]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7733,7 +5803,7 @@ func (x *MergeStatusEnqueued) String() string {
 func (*MergeStatusEnqueued) ProtoMessage() {}
 
 func (x *MergeStatusEnqueued) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[100]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7746,7 +5816,7 @@ func (x *MergeStatusEnqueued) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusEnqueued.ProtoReflect.Descriptor instead.
 func (*MergeStatusEnqueued) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{100}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *MergeStatusEnqueued) GetPosition() int32 {
@@ -7772,7 +5842,7 @@ type MergeStatusBeforeAction struct {
 
 func (x *MergeStatusBeforeAction) Reset() {
 	*x = MergeStatusBeforeAction{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[101]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7784,7 +5854,7 @@ func (x *MergeStatusBeforeAction) String() string {
 func (*MergeStatusBeforeAction) ProtoMessage() {}
 
 func (x *MergeStatusBeforeAction) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[101]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7797,7 +5867,7 @@ func (x *MergeStatusBeforeAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusBeforeAction.ProtoReflect.Descriptor instead.
 func (*MergeStatusBeforeAction) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{101}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *MergeStatusBeforeAction) GetPrompt() string {
@@ -7819,7 +5889,7 @@ type MergeStatusCherryPicking struct {
 
 func (x *MergeStatusCherryPicking) Reset() {
 	*x = MergeStatusCherryPicking{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[102]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7831,7 +5901,7 @@ func (x *MergeStatusCherryPicking) String() string {
 func (*MergeStatusCherryPicking) ProtoMessage() {}
 
 func (x *MergeStatusCherryPicking) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[102]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7844,7 +5914,7 @@ func (x *MergeStatusCherryPicking) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusCherryPicking.ProtoReflect.Descriptor instead.
 func (*MergeStatusCherryPicking) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{102}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *MergeStatusCherryPicking) GetCommitsTotal() int32 {
@@ -7887,7 +5957,7 @@ type MergeStatusTesting struct {
 
 func (x *MergeStatusTesting) Reset() {
 	*x = MergeStatusTesting{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[103]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7899,7 +5969,7 @@ func (x *MergeStatusTesting) String() string {
 func (*MergeStatusTesting) ProtoMessage() {}
 
 func (x *MergeStatusTesting) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[103]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7912,7 +5982,7 @@ func (x *MergeStatusTesting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusTesting.ProtoReflect.Descriptor instead.
 func (*MergeStatusTesting) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{103}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{99}
 }
 
 func (x *MergeStatusTesting) GetCommitsTotal() int32 {
@@ -7955,7 +6025,7 @@ type MergeStatusConflict struct {
 
 func (x *MergeStatusConflict) Reset() {
 	*x = MergeStatusConflict{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[104]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7967,7 +6037,7 @@ func (x *MergeStatusConflict) String() string {
 func (*MergeStatusConflict) ProtoMessage() {}
 
 func (x *MergeStatusConflict) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[104]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7980,7 +6050,7 @@ func (x *MergeStatusConflict) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusConflict.ProtoReflect.Descriptor instead.
 func (*MergeStatusConflict) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{104}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *MergeStatusConflict) GetConflictedSha() string {
@@ -8020,7 +6090,7 @@ type MergeStatusAfterAction struct {
 
 func (x *MergeStatusAfterAction) Reset() {
 	*x = MergeStatusAfterAction{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[105]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8032,7 +6102,7 @@ func (x *MergeStatusAfterAction) String() string {
 func (*MergeStatusAfterAction) ProtoMessage() {}
 
 func (x *MergeStatusAfterAction) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[105]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8045,7 +6115,7 @@ func (x *MergeStatusAfterAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusAfterAction.ProtoReflect.Descriptor instead.
 func (*MergeStatusAfterAction) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{105}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{101}
 }
 
 func (x *MergeStatusAfterAction) GetPrompt() string {
@@ -8065,7 +6135,7 @@ type MergeStatusMerged struct {
 
 func (x *MergeStatusMerged) Reset() {
 	*x = MergeStatusMerged{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[106]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8077,7 +6147,7 @@ func (x *MergeStatusMerged) String() string {
 func (*MergeStatusMerged) ProtoMessage() {}
 
 func (x *MergeStatusMerged) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[106]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8090,7 +6160,7 @@ func (x *MergeStatusMerged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusMerged.ProtoReflect.Descriptor instead.
 func (*MergeStatusMerged) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{106}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *MergeStatusMerged) GetCommitsTotal() int32 {
@@ -8142,7 +6212,7 @@ type MergeStatusFailed struct {
 
 func (x *MergeStatusFailed) Reset() {
 	*x = MergeStatusFailed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[107]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8154,7 +6224,7 @@ func (x *MergeStatusFailed) String() string {
 func (*MergeStatusFailed) ProtoMessage() {}
 
 func (x *MergeStatusFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[107]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8167,7 +6237,7 @@ func (x *MergeStatusFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStatusFailed.ProtoReflect.Descriptor instead.
 func (*MergeStatusFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{107}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{103}
 }
 
 func (x *MergeStatusFailed) GetCause() string {
@@ -8236,7 +6306,7 @@ type MergeQueueRoster struct {
 
 func (x *MergeQueueRoster) Reset() {
 	*x = MergeQueueRoster{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[108]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8248,7 +6318,7 @@ func (x *MergeQueueRoster) String() string {
 func (*MergeQueueRoster) ProtoMessage() {}
 
 func (x *MergeQueueRoster) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[108]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8261,7 +6331,7 @@ func (x *MergeQueueRoster) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueueRoster.ProtoReflect.Descriptor instead.
 func (*MergeQueueRoster) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{108}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{104}
 }
 
 func (x *MergeQueueRoster) GetPaused() bool {
@@ -8299,7 +6369,7 @@ type MergeRepoQueue struct {
 
 func (x *MergeRepoQueue) Reset() {
 	*x = MergeRepoQueue{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[109]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[105]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8311,7 +6381,7 @@ func (x *MergeRepoQueue) String() string {
 func (*MergeRepoQueue) ProtoMessage() {}
 
 func (x *MergeRepoQueue) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[109]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[105]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8324,7 +6394,7 @@ func (x *MergeRepoQueue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeRepoQueue.ProtoReflect.Descriptor instead.
 func (*MergeRepoQueue) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{109}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{105}
 }
 
 func (x *MergeRepoQueue) GetRepoKey() string {
@@ -8366,7 +6436,7 @@ type MergeQueueEntry struct {
 
 func (x *MergeQueueEntry) Reset() {
 	*x = MergeQueueEntry{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[110]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8378,7 +6448,7 @@ func (x *MergeQueueEntry) String() string {
 func (*MergeQueueEntry) ProtoMessage() {}
 
 func (x *MergeQueueEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[110]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8391,7 +6461,7 @@ func (x *MergeQueueEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueueEntry.ProtoReflect.Descriptor instead.
 func (*MergeQueueEntry) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{110}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{106}
 }
 
 func (x *MergeQueueEntry) GetRunId() string {
@@ -8491,7 +6561,7 @@ type MergeQueueHeadRunning struct {
 
 func (x *MergeQueueHeadRunning) Reset() {
 	*x = MergeQueueHeadRunning{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[111]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8503,7 +6573,7 @@ func (x *MergeQueueHeadRunning) String() string {
 func (*MergeQueueHeadRunning) ProtoMessage() {}
 
 func (x *MergeQueueHeadRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[111]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8516,7 +6586,7 @@ func (x *MergeQueueHeadRunning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueueHeadRunning.ProtoReflect.Descriptor instead.
 func (*MergeQueueHeadRunning) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{111}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{107}
 }
 
 type MergeQueueHeadPausedWaiting struct {
@@ -8527,7 +6597,7 @@ type MergeQueueHeadPausedWaiting struct {
 
 func (x *MergeQueueHeadPausedWaiting) Reset() {
 	*x = MergeQueueHeadPausedWaiting{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[112]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8539,7 +6609,7 @@ func (x *MergeQueueHeadPausedWaiting) String() string {
 func (*MergeQueueHeadPausedWaiting) ProtoMessage() {}
 
 func (x *MergeQueueHeadPausedWaiting) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[112]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8552,7 +6622,7 @@ func (x *MergeQueueHeadPausedWaiting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueueHeadPausedWaiting.ProtoReflect.Descriptor instead.
 func (*MergeQueueHeadPausedWaiting) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{112}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{108}
 }
 
 type MergeQueueHeadTerminalOwed struct {
@@ -8563,7 +6633,7 @@ type MergeQueueHeadTerminalOwed struct {
 
 func (x *MergeQueueHeadTerminalOwed) Reset() {
 	*x = MergeQueueHeadTerminalOwed{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[113]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[109]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8575,7 +6645,7 @@ func (x *MergeQueueHeadTerminalOwed) String() string {
 func (*MergeQueueHeadTerminalOwed) ProtoMessage() {}
 
 func (x *MergeQueueHeadTerminalOwed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[113]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[109]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8588,7 +6658,7 @@ func (x *MergeQueueHeadTerminalOwed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueueHeadTerminalOwed.ProtoReflect.Descriptor instead.
 func (*MergeQueueHeadTerminalOwed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{113}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{109}
 }
 
 // THE INTERRUPT'S QUEUE HALF, ASKED RATHER THAN PERFORMED.
@@ -8640,7 +6710,7 @@ type MergeDequeueOffer struct {
 
 func (x *MergeDequeueOffer) Reset() {
 	*x = MergeDequeueOffer{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[114]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[110]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8652,7 +6722,7 @@ func (x *MergeDequeueOffer) String() string {
 func (*MergeDequeueOffer) ProtoMessage() {}
 
 func (x *MergeDequeueOffer) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[114]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[110]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8665,7 +6735,7 @@ func (x *MergeDequeueOffer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeDequeueOffer.ProtoReflect.Descriptor instead.
 func (*MergeDequeueOffer) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{114}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{110}
 }
 
 func (x *MergeDequeueOffer) GetOfferId() string {
@@ -8748,7 +6818,7 @@ type MergeDequeueWaiting struct {
 
 func (x *MergeDequeueWaiting) Reset() {
 	*x = MergeDequeueWaiting{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[115]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[111]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8760,7 +6830,7 @@ func (x *MergeDequeueWaiting) String() string {
 func (*MergeDequeueWaiting) ProtoMessage() {}
 
 func (x *MergeDequeueWaiting) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[115]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[111]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8773,7 +6843,7 @@ func (x *MergeDequeueWaiting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeDequeueWaiting.ProtoReflect.Descriptor instead.
 func (*MergeDequeueWaiting) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{115}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{111}
 }
 
 func (x *MergeDequeueWaiting) GetAhead() int32 {
@@ -8817,7 +6887,7 @@ type MergeDequeueRunning struct {
 
 func (x *MergeDequeueRunning) Reset() {
 	*x = MergeDequeueRunning{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[116]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[112]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8829,7 +6899,7 @@ func (x *MergeDequeueRunning) String() string {
 func (*MergeDequeueRunning) ProtoMessage() {}
 
 func (x *MergeDequeueRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[116]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[112]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8842,7 +6912,7 @@ func (x *MergeDequeueRunning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeDequeueRunning.ProtoReflect.Descriptor instead.
 func (*MergeDequeueRunning) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{116}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{112}
 }
 
 func (x *MergeDequeueRunning) GetStatus() *MergeStatus {
@@ -8862,7 +6932,7 @@ type MergeDequeueConfirm struct {
 
 func (x *MergeDequeueConfirm) Reset() {
 	*x = MergeDequeueConfirm{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[117]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[113]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8874,7 +6944,7 @@ func (x *MergeDequeueConfirm) String() string {
 func (*MergeDequeueConfirm) ProtoMessage() {}
 
 func (x *MergeDequeueConfirm) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[117]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[113]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8887,7 +6957,7 @@ func (x *MergeDequeueConfirm) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeDequeueConfirm.ProtoReflect.Descriptor instead.
 func (*MergeDequeueConfirm) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{117}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{113}
 }
 
 // Leave the merge alone. The offer is cleared and the merge proceeds.
@@ -8899,7 +6969,7 @@ type MergeDequeueDecline struct {
 
 func (x *MergeDequeueDecline) Reset() {
 	*x = MergeDequeueDecline{}
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[118]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[114]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8911,7 +6981,7 @@ func (x *MergeDequeueDecline) String() string {
 func (*MergeDequeueDecline) ProtoMessage() {}
 
 func (x *MergeDequeueDecline) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_shared_proto_msgTypes[118]
+	mi := &file_agentrepl_v1_shared_proto_msgTypes[114]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8924,107 +6994,14 @@ func (x *MergeDequeueDecline) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeDequeueDecline.ProtoReflect.Descriptor instead.
 func (*MergeDequeueDecline) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{118}
+	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{114}
 }
-
-var file_agentrepl_v1_shared_proto_extTypes = []protoimpl.ExtensionInfo{
-	{
-		ExtendedType:  (*descriptorpb.EnumValueOptions)(nil),
-		ExtensionType: (*SessionCommandSpec)(nil),
-		Field:         60002,
-		Name:          "agentrepl.v1.session_command_spec",
-		Tag:           "bytes,60002,opt,name=session_command_spec",
-		Filename:      "agentrepl/v1/shared.proto",
-	},
-}
-
-// Extension fields to descriptorpb.EnumValueOptions.
-var (
-	// optional agentrepl.v1.SessionCommandSpec session_command_spec = 60002;
-	E_SessionCommandSpec = &file_agentrepl_v1_shared_proto_extTypes[0]
-)
 
 var File_agentrepl_v1_shared_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\n" +
-	"\x19agentrepl/v1/shared.proto\x12\fagentrepl.v1\x1a google/protobuf/descriptor.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x12shim/v1/core.proto\"M\n" +
-	"\x12SessionCommandSpec\x12\x18\n" +
-	"\aliteral\x18\x01 \x01(\tR\aliteral\x12\x1d\n" +
-	"\n" +
-	"takes_args\x18\x02 \x01(\bR\ttakesArgs\"\x8e\x01\n" +
-	"\x14VendorFailureContext\x12*\n" +
-	"\x11claude_session_id\x18\x01 \x01(\tR\x0fclaudeSessionId\x12$\n" +
-	"\x0eapi_request_id\x18\x02 \x01(\tR\fapiRequestId\x12$\n" +
-	"\x0eapi_message_id\x18\x03 \x01(\tR\fapiMessageId\"\x84,\n" +
-	"\vFailureKind\x12U\n" +
-	"\x12shim_not_connected\x18\x01 \x01(\v2%.agentrepl.v1.FailureShimNotConnectedH\x00R\x10shimNotConnected\x12H\n" +
-	"\rshim_rejected\x18\x02 \x01(\v2!.agentrepl.v1.FailureShimRejectedH\x00R\fshimRejected\x12O\n" +
-	"\x10shim_ack_timeout\x18\x03 \x01(\v2#.agentrepl.v1.FailureShimAckTimeoutH\x00R\x0eshimAckTimeout\x12^\n" +
-	"\x15shim_version_mismatch\x18\x04 \x01(\v2(.agentrepl.v1.FailureShimVersionMismatchH\x00R\x13shimVersionMismatch\x12X\n" +
-	"\x13shim_seq_regression\x18\x05 \x01(\v2&.agentrepl.v1.FailureShimSeqRegressionH\x00R\x11shimSeqRegression\x12H\n" +
-	"\rshim_degraded\x18\x06 \x01(\v2!.agentrepl.v1.FailureShimDegradedH\x00R\fshimDegraded\x12h\n" +
-	"\x19shim_store_write_rejected\x18\a \x01(\v2+.agentrepl.v1.FailureShimStoreWriteRejectedH\x00R\x16shimStoreWriteRejected\x12T\n" +
-	"\x11query_termination\x18\b \x01(\v2%.agentrepl.v1.FailureQueryTerminationH\x00R\x10queryTermination\x12O\n" +
-	"\x10shim_not_spawned\x18\t \x01(\v2#.agentrepl.v1.FailureShimNotSpawnedH\x00R\x0eshimNotSpawned\x12j\n" +
-	"\x19shim_handshake_incomplete\x18\n" +
-	" \x01(\v2,.agentrepl.v1.FailureShimHandshakeIncompleteH\x00R\x17shimHandshakeIncomplete\x12K\n" +
-	"\x0eshim_unhealthy\x18\v \x01(\v2\".agentrepl.v1.FailureShimUnhealthyH\x00R\rshimUnhealthy\x12d\n" +
-	"\x17session_not_established\x18\f \x01(\v2*.agentrepl.v1.FailureSessionNotEstablishedH\x00R\x15sessionNotEstablished\x12U\n" +
-	"\x12workspace_not_live\x18\r \x01(\v2%.agentrepl.v1.FailureWorkspaceNotLiveH\x00R\x10workspaceNotLive\x12N\n" +
-	"\x0fsession_deleted\x18\x0e \x01(\v2#.agentrepl.v1.FailureSessionDeletedH\x00R\x0esessionDeleted\x12W\n" +
-	"\x12session_superseded\x18\x0f \x01(\v2&.agentrepl.v1.FailureSessionSupersededH\x00R\x11sessionSuperseded\x12]\n" +
-	"\x14reconnect_superseded\x18\x10 \x01(\v2(.agentrepl.v1.FailureReconnectSupersededH\x00R\x13reconnectSuperseded\x12R\n" +
-	"\x11session_shim_died\x18\x11 \x01(\v2$.agentrepl.v1.FailureSessionShimDiedH\x00R\x0fsessionShimDied\x12[\n" +
-	"\x14session_start_failed\x18\x12 \x01(\v2'.agentrepl.v1.FailureSessionStartFailedH\x00R\x12sessionStartFailed\x12^\n" +
-	"\x15session_resume_failed\x18\x13 \x01(\v2(.agentrepl.v1.FailureSessionResumeFailedH\x00R\x13sessionResumeFailed\x12i\n" +
-	"\x18conversation_unresumable\x18\x14 \x01(\v2,.agentrepl.v1.FailureConversationUnresumableH\x00R\x17conversationUnresumable\x12X\n" +
-	"\x13resume_mode_retired\x18\x15 \x01(\v2&.agentrepl.v1.FailureResumeModeRetiredH\x00R\x11resumeModeRetired\x12m\n" +
-	"\x1asession_ended_unclassified\x18\x16 \x01(\v2-.agentrepl.v1.FailureSessionEndedUnclassifiedH\x00R\x18sessionEndedUnclassified\x12e\n" +
-	"\x18history_repull_in_flight\x18\x17 \x01(\v2*.agentrepl.v1.FailureHistoryRepullInFlightH\x00R\x15historyRepullInFlight\x12g\n" +
-	"\x18history_replay_truncated\x18\x18 \x01(\v2+.agentrepl.v1.FailureHistoryReplayTruncatedH\x00R\x16historyReplayTruncated\x12`\n" +
-	"\x15interrupt_undelivered\x18\x19 \x01(\v2).agentrepl.v1.FailureInterruptUndeliveredH\x00R\x14interruptUndelivered\x12X\n" +
-	"\x13queue_entry_unwired\x18\x1a \x01(\v2&.agentrepl.v1.FailureQueueEntryUnwiredH\x00R\x11queueEntryUnwired\x12l\n" +
-	"\x1bqueue_entry_keep_alive_held\x18\x1b \x01(\v2,.agentrepl.v1.FailureQueueEntryKeepAliveHeldH\x00R\x17queueEntryKeepAliveHeld\x12W\n" +
-	"\x12session_hibernated\x18\x1c \x01(\v2&.agentrepl.v1.FailureSessionHibernatedH\x00R\x11sessionHibernated\x12k\n" +
-	"\x1akeep_alive_window_unclosed\x18\x1d \x01(\v2,.agentrepl.v1.FailureKeepAliveWindowUnclosedH\x00R\x17keepAliveWindowUnclosed\x12k\n" +
-	"\x1akeep_alive_window_inverted\x18\x1e \x01(\v2,.agentrepl.v1.FailureKeepAliveWindowInvertedH\x00R\x17keepAliveWindowInverted\x12[\n" +
-	"\x14compaction_cold_read\x18\x1f \x01(\v2'.agentrepl.v1.FailureCompactionColdReadH\x00R\x12compactionColdRead\x12h\n" +
-	"\x19client_log_identity_stale\x18  \x01(\v2+.agentrepl.v1.FailureClientLogIdentityStaleH\x00R\x16clientLogIdentityStale\x12`\n" +
-	"\x15internal_unclassified\x18! \x01(\v2).agentrepl.v1.FailureInternalUnclassifiedH\x00R\x14internalUnclassified\x12j\n" +
-	"\x19api_authentication_failed\x18\" \x01(\v2,.agentrepl.v1.FailureApiAuthenticationFailedH\x00R\x17apiAuthenticationFailed\x12R\n" +
-	"\x11api_billing_error\x18# \x01(\v2$.agentrepl.v1.FailureApiBillingErrorH\x00R\x0fapiBillingError\x12I\n" +
-	"\x0eapi_rate_limit\x18$ \x01(\v2!.agentrepl.v1.FailureApiRateLimitH\x00R\fapiRateLimit\x12X\n" +
-	"\x13api_invalid_request\x18% \x01(\v2&.agentrepl.v1.FailureApiInvalidRequestH\x00R\x11apiInvalidRequest\x12O\n" +
-	"\x10api_server_error\x18& \x01(\v2#.agentrepl.v1.FailureApiServerErrorH\x00R\x0eapiServerError\x12K\n" +
-	"\x0eapi_overloaded\x18' \x01(\v2\".agentrepl.v1.FailureApiOverloadedH\x00R\rapiOverloaded\x12f\n" +
-	"\x19api_oauth_org_not_allowed\x18( \x01(\v2*.agentrepl.v1.FailureApiOAuthOrgNotAllowedH\x00R\x15apiOauthOrgNotAllowed\x12V\n" +
-	"\x13api_model_not_found\x18) \x01(\v2%.agentrepl.v1.FailureApiModelNotFoundH\x00R\x10apiModelNotFound\x12O\n" +
-	"\x10api_network_down\x18* \x01(\v2#.agentrepl.v1.FailureApiNetworkDownH\x00R\x0eapiNetworkDown\x12U\n" +
-	"\x12api_request_failed\x18+ \x01(\v2%.agentrepl.v1.FailureApiRequestFailedH\x00R\x10apiRequestFailed\x12B\n" +
-	"\vapi_unknown\x18, \x01(\v2\x1f.agentrepl.v1.FailureApiUnknownH\x00R\n" +
-	"apiUnknown\x12\\\n" +
-	"\x15api_max_output_tokens\x18- \x01(\v2'.agentrepl.v1.FailureApiMaxOutputTokensH\x00R\x12apiMaxOutputTokens\x12F\n" +
-	"\rapi_max_turns\x18. \x01(\v2 .agentrepl.v1.FailureApiMaxTurnsH\x00R\vapiMaxTurns\x12I\n" +
-	"\x0eapi_max_budget\x18/ \x01(\v2!.agentrepl.v1.FailureApiMaxBudgetH\x00R\fapiMaxBudget\x12X\n" +
-	"\x13api_execution_error\x180 \x01(\v2&.agentrepl.v1.FailureApiExecutionErrorH\x00R\x11apiExecutionError\x12B\n" +
-	"\vapi_refusal\x181 \x01(\v2\x1f.agentrepl.v1.FailureApiRefusalH\x00R\n" +
-	"apiRefusal\x12L\n" +
-	"\x0fapi_turn_failed\x182 \x01(\v2\".agentrepl.v1.FailureApiTurnFailedH\x00R\rapiTurnFailed\x12r\n" +
-	"\x1dprompt_refused_by_merge_state\x183 \x01(\v2..agentrepl.v1.FailurePromptRefusedByMergeStateH\x00R\x19promptRefusedByMergeState\x12}\n" +
-	" queue_entry_uninterruptible_turn\x184 \x01(\v22.agentrepl.v1.FailureQueueEntryUninterruptibleTurnH\x00R\x1dqueueEntryUninterruptibleTurn\x12H\n" +
-	"\rturn_undriven\x185 \x01(\v2!.agentrepl.v1.FailureTurnUndrivenH\x00R\fturnUndriven\x12X\n" +
-	"\x13replay_mark_retired\x186 \x01(\v2&.agentrepl.v1.FailureReplayMarkRetiredH\x00R\x11replayMarkRetired\x12W\n" +
-	"\x12daemon_unreachable\x187 \x01(\v2&.agentrepl.v1.FailureDaemonUnreachableH\x00R\x11daemonUnreachable\x12K\n" +
-	"\x0eworkspace_gone\x188 \x01(\v2\".agentrepl.v1.FailureWorkspaceGoneH\x00R\rworkspaceGone\x12B\n" +
-	"\vboot_failed\x189 \x01(\v2\x1f.agentrepl.v1.FailureBootFailedH\x00R\n" +
-	"bootFailed\x12[\n" +
-	"\x14control_plane_failed\x18: \x01(\v2'.agentrepl.v1.FailureControlPlaneFailedH\x00R\x12controlPlaneFailed\x12T\n" +
-	"\x11frame_undecodable\x18; \x01(\v2%.agentrepl.v1.FailureFrameUndecodableH\x00R\x10frameUndecodable\x12E\n" +
-	"\fstale_bundle\x18< \x01(\v2 .agentrepl.v1.FailureStaleBundleH\x00R\vstaleBundle\x12K\n" +
-	"\x0ecommand_unsent\x18= \x01(\v2\".agentrepl.v1.FailureCommandUnsentH\x00R\rcommandUnsent\x12y\n" +
-	"\x1ecommand_rejection_unclassified\x18> \x01(\v21.agentrepl.v1.FailureCommandRejectionUnclassifiedH\x00R\x1ccommandRejectionUnclassifiedB\x06\n" +
-	"\x04kind\"\x19\n" +
+	"\x19agentrepl/v1/shared.proto\x12\fagentrepl.v1\x1a%conversation/v1/session_command.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x19\n" +
 	"\x17FailureShimNotConnected\"L\n" +
 	"\x13FailureShimRejected\x12\x1d\n" +
 	"\n" +
@@ -9033,21 +7010,7 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x15FailureShimAckTimeout\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
-	"\twaited_ms\x18\x02 \x01(\x03R\bwaitedMs\"f\n" +
-	"\x1aFailureShimVersionMismatch\x12!\n" +
-	"\fshim_version\x18\x01 \x01(\tR\vshimVersion\x12%\n" +
-	"\x0edaemon_version\x18\x02 \x01(\tR\rdaemonVersion\"P\n" +
-	"\x18FailureShimSeqRegression\x12\x10\n" +
-	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12\"\n" +
-	"\rlast_seen_seq\x18\x02 \x01(\x04R\vlastSeenSeq\"3\n" +
-	"\x13FailureShimDegraded\x12\x1c\n" +
-	"\tcomponent\x18\x01 \x01(\tR\tcomponent\"z\n" +
-	"\x1dFailureShimStoreWriteRejected\x12\x1c\n" +
-	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\x12#\n" +
-	"\rdropped_count\x18\x03 \x01(\x03R\fdroppedCount\"X\n" +
-	"\x17FailureQueryTermination\x12=\n" +
-	"\x06detail\x18\x01 \x01(\v2%.agentrepl.v1.QueryTerminationFailureR\x06detail\"\x17\n" +
+	"\twaited_ms\x18\x02 \x01(\x03R\bwaitedMs\"\x17\n" +
 	"\x15FailureShimNotSpawned\"U\n" +
 	"\x1eFailureShimHandshakeIncomplete\x12\x1d\n" +
 	"\n" +
@@ -9060,32 +7023,17 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x06reason\x18\x03 \x01(\tR\x06reason\"4\n" +
 	"\x1cFailureSessionNotEstablished\x12\x14\n" +
 	"\x05cause\x18\x01 \x01(\tR\x05cause\"\x19\n" +
-	"\x17FailureWorkspaceNotLive\"\x17\n" +
-	"\x15FailureSessionDeleted\"\x1a\n" +
-	"\x18FailureSessionSuperseded\"4\n" +
+	"\x17FailureWorkspaceNotLive\"4\n" +
 	"\x1aFailureReconnectSuperseded\x12\x16\n" +
-	"\x06remedy\x18\x01 \x01(\tR\x06remedy\"\x18\n" +
-	"\x16FailureSessionShimDied\"1\n" +
-	"\x19FailureSessionStartFailed\x12\x14\n" +
-	"\x05cause\x18\x01 \x01(\tR\x05cause\"X\n" +
-	"\x1aFailureSessionResumeFailed\x12:\n" +
-	"\x06detail\x18\x01 \x01(\v2\".agentrepl.v1.SessionResumeFailureR\x06detail\"\x95\x01\n" +
+	"\x06remedy\x18\x01 \x01(\tR\x06remedy\"\x95\x01\n" +
 	"\x1eFailureConversationUnresumable\x12*\n" +
 	"\x11claude_session_id\x18\x01 \x01(\tR\x0fclaudeSessionId\x12\x10\n" +
 	"\x03cwd\x18\x02 \x01(\tR\x03cwd\x12\x1d\n" +
 	"\n" +
 	"config_dir\x18\x03 \x01(\tR\tconfigDir\x12\x16\n" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason\"\x1a\n" +
-	"\x18FailureResumeModeRetired\"@\n" +
-	"\x1fFailureSessionEndedUnclassified\x12\x1d\n" +
-	"\n" +
-	"raw_reason\x18\x01 \x01(\tR\trawReason\"\x1e\n" +
-	"\x1cFailureHistoryRepullInFlight\"\x90\x01\n" +
-	"\x1dFailureHistoryReplayTruncated\x12\x19\n" +
-	"\bfrom_seq\x18\x01 \x01(\x04R\afromSeq\x12\x1e\n" +
-	"\vstop_at_seq\x18\x02 \x01(\x04R\tstopAtSeq\x12\x1c\n" +
-	"\tdelivered\x18\x03 \x01(\x03R\tdelivered\x12\x16\n" +
-	"\x06reason\x18\x04 \x01(\tR\x06reason\"Y\n" +
+	"\x18FailureResumeModeRetired\"\x1e\n" +
+	"\x1cFailureHistoryRepullInFlight\"Y\n" +
 	"\x18FailureReplayMarkRetired\x12\x19\n" +
 	"\bfrom_seq\x18\x01 \x01(\x04R\afromSeq\x12\"\n" +
 	"\rlive_last_seq\x18\x02 \x01(\x04R\vliveLastSeq\"\x1d\n" +
@@ -9095,142 +7043,116 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\"h\n" +
 	"\x1eFailureQueueEntryKeepAliveHeld\x12\x19\n" +
 	"\bentry_id\x18\x01 \x01(\tR\aentryId\x12+\n" +
-	"\x12keep_alive_turn_id\x18\x02 \x01(\tR\x0fkeepAliveTurnId\"5\n" +
-	"\x18FailureSessionHibernated\x12\x19\n" +
-	"\bsince_ms\x18\x01 \x01(\x03R\asinceMs\"8\n" +
-	"\x1eFailureKeepAliveWindowUnclosed\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason\"8\n" +
-	"\x1eFailureKeepAliveWindowInverted\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason\"O\n" +
-	"\x19FailureCompactionColdRead\x122\n" +
-	"\x15uncached_input_tokens\x18\x01 \x01(\x03R\x13uncachedInputTokens\"\x1f\n" +
-	"\x1dFailureClientLogIdentityStale\"3\n" +
-	"\x1bFailureInternalUnclassified\x12\x14\n" +
-	"\x05cause\x18\x01 \x01(\tR\x05cause\"\x99\x01\n" +
-	"\x1eFailureApiAuthenticationFailed\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x91\x01\n" +
-	"\x16FailureApiBillingError\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x8e\x01\n" +
-	"\x13FailureApiRateLimit\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x93\x01\n" +
-	"\x18FailureApiInvalidRequest\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x90\x01\n" +
-	"\x15FailureApiServerError\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x8f\x01\n" +
-	"\x14FailureApiOverloaded\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x97\x01\n" +
-	"\x1cFailureApiOAuthOrgNotAllowed\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"k\n" +
-	"\x17FailureApiModelNotFound\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05model\"S\n" +
-	"\x15FailureApiNetworkDown\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\"\x92\x01\n" +
-	"\x17FailureApiRequestFailed\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x8c\x01\n" +
-	"\x11FailureApiUnknown\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"W\n" +
-	"\x19FailureApiMaxOutputTokens\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\"P\n" +
-	"\x12FailureApiMaxTurns\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\"Q\n" +
-	"\x13FailureApiMaxBudget\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\"V\n" +
-	"\x18FailureApiExecutionError\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\"O\n" +
-	"\x11FailureApiRefusal\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\"s\n" +
-	"\x14FailureApiTurnFailed\x12:\n" +
-	"\x06vendor\x18\x01 \x01(\v2\".agentrepl.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vstop_reason\x18\x02 \x01(\tR\n" +
-	"stopReason\"8\n" +
-	" FailurePromptRefusedByMergeState\x12\x14\n" +
-	"\x05state\x18\x01 \x01(\tR\x05state\"-\n" +
-	"\x13FailureTurnUndriven\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason\"y\n" +
+	"\x12keep_alive_turn_id\x18\x02 \x01(\tR\x0fkeepAliveTurnId\"|\n" +
 	"$FailureQueueEntryUninterruptibleTurn\x12\x19\n" +
-	"\bentry_id\x18\x01 \x01(\tR\aentryId\x126\n" +
-	"\acommand\x18\x02 \x01(\x0e2\x1c.agentrepl.v1.SessionCommandR\acommand\"\\\n" +
-	"\x18FailureDaemonUnreachable\x12\x1d\n" +
-	"\n" +
-	"close_code\x18\x01 \x01(\x05R\tcloseCode\x12!\n" +
-	"\fclose_reason\x18\x02 \x01(\tR\vcloseReason\"\x16\n" +
-	"\x14FailureWorkspaceGone\")\n" +
-	"\x11FailureBootFailed\x12\x14\n" +
-	"\x05cause\x18\x01 \x01(\tR\x05cause\"E\n" +
-	"\x19FailureControlPlaneFailed\x12\x12\n" +
-	"\x04what\x18\x01 \x01(\tR\x04what\x12\x14\n" +
-	"\x05cause\x18\x02 \x01(\tR\x05cause\"N\n" +
-	"\x17FailureFrameUndecodable\x12\x14\n" +
-	"\x05cause\x18\x01 \x01(\tR\x05cause\x12\x1d\n" +
-	"\n" +
-	"frame_head\x18\x02 \x01(\tR\tframeHead\",\n" +
-	"\x12FailureStaleBundle\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"0\n" +
+	"\bentry_id\x18\x01 \x01(\tR\aentryId\x129\n" +
+	"\acommand\x18\x02 \x01(\x0e2\x1f.conversation.v1.SessionCommandR\acommand\"5\n" +
+	"\x18FailureSessionHibernated\x12\x19\n" +
+	"\bsince_ms\x18\x01 \x01(\x03R\asinceMs\"\x1f\n" +
+	"\x1dFailureClientLogIdentityStale\"8\n" +
+	" FailurePromptRefusedByMergeState\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\"\xcb\x01\n" +
+	"\x14ClientCommandFailure\x12<\n" +
+	"\x06unsent\x18\x01 \x01(\v2\".agentrepl.v1.FailureCommandUnsentH\x00R\x06unsent\x12j\n" +
+	"\x16rejection_unclassified\x18\x02 \x01(\v21.agentrepl.v1.FailureCommandRejectionUnclassifiedH\x00R\x15rejectionUnclassifiedB\t\n" +
+	"\afailure\"0\n" +
 	"\x14FailureCommandUnsent\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\"d\n" +
 	"#FailureCommandRejectionUnclassified\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12#\n" +
-	"\rdaemon_reason\x18\x02 \x01(\tR\fdaemonReason\"\x8d\x04\n" +
-	"\x17QueryTerminationFailure\x12*\n" +
-	"\x11query_instance_id\x18\x01 \x01(\tR\x0fqueryInstanceId\x12,\n" +
-	"\x11vendor_session_id\x18\x02 \x01(\tH\x00R\x0fvendorSessionId\x12z\n" +
-	"#vendor_session_identity_unavailable\x18\x03 \x01(\v2).shim.v1.VendorSessionIdentityUnavailableH\x00R vendorSessionIdentityUnavailable\x12$\n" +
-	"\x0eobserved_at_ms\x18\x04 \x01(\x03R\fobservedAtMs\x12D\n" +
-	"\x0eunexpected_eof\x18\x05 \x01(\v2\x1b.shim.v1.UnexpectedQueryEofH\x01R\runexpectedEof\x12J\n" +
-	"\x10iterator_failure\x18\x06 \x01(\v2\x1d.shim.v1.QueryIteratorFailureH\x01R\x0fiteratorFailure\x12G\n" +
-	"\x0fstartup_failure\x18\a \x01(\v2\x1c.shim.v1.QueryStartupFailureH\x01R\x0estartupFailureB\x11\n" +
-	"\x0fvendor_identityB\b\n" +
-	"\x06reason\"\xe7\x05\n" +
-	"\x14SessionResumeFailure\x12*\n" +
-	"\x11claude_session_id\x18\x01 \x01(\tR\x0fclaudeSessionId\x12\x10\n" +
-	"\x03cwd\x18\x02 \x01(\tR\x03cwd\x12\x1d\n" +
+	"\rdaemon_reason\x18\x02 \x01(\tR\fdaemonReason\">\n" +
+	"\x1eRefusalWorkspaceKeyNotAbsolute\x12\x1c\n" +
+	"\tworkspace\x18\x01 \x01(\tR\tworkspace\":\n" +
+	"\x18RefusalDependencyUnwired\x12\x1e\n" +
 	"\n" +
-	"config_dir\x18\x03 \x01(\tR\tconfigDir\x12.\n" +
-	"\x13resolved_config_dir\x18\x04 \x01(\tR\x11resolvedConfigDir\x12B\n" +
-	"\x06create\x18\x05 \x01(\v2(.agentrepl.v1.SessionResumeFailureCreateH\x00R\x06create\x12a\n" +
-	"\x11automatic_restore\x18\x06 \x01(\v22.agentrepl.v1.SessionResumeFailureAutomaticRestoreH\x00R\x10automaticRestore\x12p\n" +
-	"\x16transcript_unavailable\x18\a \x01(\v27.agentrepl.v1.SessionResumeFailureTranscriptUnavailableH\x01R\x15transcriptUnavailable\x12a\n" +
-	"\x11identity_mismatch\x18\b \x01(\v22.agentrepl.v1.SessionResumeFailureIdentityMismatchH\x01R\x10identityMismatch\x12T\n" +
-	"\x11query_termination\x18\t \x01(\v2%.agentrepl.v1.QueryTerminationFailureH\x01R\x10queryTermination\x12\\\n" +
-	"\x10bring_up_failure\x18\n" +
-	" \x01(\v20.agentrepl.v1.SessionResumeFailureBringUpFailureH\x01R\x0ebringUpFailureB\t\n" +
-	"\aattemptB\a\n" +
-	"\x05cause\"\x1c\n" +
-	"\x1aSessionResumeFailureCreate\"&\n" +
-	"$SessionResumeFailureAutomaticRestore\"R\n" +
-	")SessionResumeFailureTranscriptUnavailable\x12%\n" +
-	"\x0esearched_paths\x18\x01 \x03(\tR\rsearchedPaths\"i\n" +
-	"$SessionResumeFailureIdentityMismatch\x12A\n" +
-	"\x1dreplacement_claude_session_id\x18\x01 \x01(\tR\x1areplacementClaudeSessionId\":\n" +
-	"\"SessionResumeFailureBringUpFailure\x12\x14\n" +
+	"dependency\x18\x01 \x01(\tR\n" +
+	"dependency\"3\n" +
+	"\x1bRefusalRequiredFieldMissing\x12\x14\n" +
+	"\x05field\x18\x01 \x01(\tR\x05field\"A\n" +
+	"\x1aRefusalPromptOriginInvalid\x12#\n" +
+	"\rprompt_origin\x18\x01 \x01(\x05R\fpromptOrigin\"Q\n" +
+	"\"RefusalMergeDequeueOfferUnraisable\x12\x15\n" +
+	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x14\n" +
+	"\x05cause\x18\x02 \x01(\tR\x05cause\" \n" +
+	"\x1eRefusalMergeDequeueOfferAbsent\"Q\n" +
+	"\x1dRefusalMergeDequeueOfferStale\x120\n" +
+	"\x14outstanding_offer_id\x18\x01 \x01(\tR\x12outstandingOfferId\"6\n" +
+	"\x1eRefusalMergeDequeueClearFailed\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"1\n" +
+	"\x19RefusalMergeDequeueFailed\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\" \n" +
+	"\x1eRefusalNoDetachedAgentsRunning\":\n" +
+	" RefusalDetachedCancelUnsupported\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"#\n" +
+	"!RefusalDetachedCancelOutcomeUnset\"6\n" +
+	"\x1eRefusalMergeGeometryUnreadable\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\">\n" +
+	"\x1eRefusalMergeGeometryUnrecorded\x12\x1c\n" +
+	"\tworkspace\x18\x01 \x01(\tR\tworkspace\"K\n" +
+	"\x1dRefusalMergeStateUnrecordable\x12\x14\n" +
+	"\x05phase\x18\x01 \x01(\tR\x05phase\x12\x14\n" +
+	"\x05cause\x18\x02 \x01(\tR\x05cause\"3\n" +
+	"\x1bRefusalMergeEnqueueRejected\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"1\n" +
+	"\x19RefusalMergeAbandonFailed\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"3\n" +
+	"\x1bRefusalWorkspaceCloseFailed\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"2\n" +
+	"\x1aRefusalWorkspaceOpenFailed\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\" \n" +
+	"\x1eRefusalCreateWorkspaceOverWire\"3\n" +
+	"\x1aRefusalUnknownWorkspaceJob\x12\x15\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"7\n" +
+	"\x18RefusalUnknownHostAction\x12\x1b\n" +
+	"\taction_id\x18\x01 \x01(\tR\bactionId\"\x19\n" +
+	"\x17RefusalModelUnconfirmed\"x\n" +
+	"\x1aRefusalRosterRevisionStale\x12-\n" +
+	"\x12published_revision\x18\x01 \x01(\x04R\x11publishedRevision\x12+\n" +
+	"\x11retained_revision\x18\x02 \x01(\x04R\x10retainedRevision\"B\n" +
+	"\x1fRefusalShutdownAlreadyScheduled\x12\x1f\n" +
+	"\vschedule_id\x18\x01 \x01(\tR\n" +
+	"scheduleId\"B\n" +
+	"\x16RefusalScheduleIdStale\x12(\n" +
+	"\x10live_schedule_id\x18\x01 \x01(\tR\x0eliveScheduleId\";\n" +
+	"!RefusalHibernateBlockedByLiveWork\x12\x16\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x1c\n" +
+	"\x1aRefusalRevivalModeUnstated\",\n" +
+	"\x14RefusalRevivalFailed\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"3\n" +
+	"\x1bRefusalMergeAxisUnclearable\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"S\n" +
+	"\x1cRefusalSessionTeardownFailed\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
+	"\x05cause\x18\x02 \x01(\tR\x05cause\"W\n" +
+	")RefusalExplicitConversationUnderWrongMode\x12*\n" +
+	"\x11claude_session_id\x18\x01 \x01(\tR\x0fclaudeSessionId\";\n" +
+	"\x18RefusalResumeModeUnknown\x12\x1f\n" +
+	"\vresume_mode\x18\x01 \x01(\x05R\n" +
+	"resumeMode\"D\n" +
+	"\x1aRefusalAccountUnresolvable\x12\x10\n" +
+	"\x03cwd\x18\x01 \x01(\tR\x03cwd\x12\x14\n" +
+	"\x05cause\x18\x02 \x01(\tR\x05cause\"D\n" +
+	"\x16RefusalModelNotApplied\x12\x14\n" +
+	"\x05model\x18\x01 \x01(\tR\x05model\x12\x14\n" +
+	"\x05cause\x18\x02 \x01(\tR\x05cause\"\x80\x01\n" +
+	"&RefusalEstablishmentProbeMisattributed\x12.\n" +
+	"\x13answered_request_id\x18\x01 \x01(\tR\x11answeredRequestId\x12&\n" +
+	"\x0fwant_request_id\x18\x02 \x01(\tR\rwantRequestId\"\x1e\n" +
+	"\x1cRefusalReaderIdentityMissing\"\x13\n" +
+	"\x11RefusalPageAbsent\"\x1c\n" +
+	"\x1aRefusalReaderHasNoPosition\"+\n" +
+	"\x13RefusalReplayFailed\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"5\n" +
+	"\x18RefusalQueueEntryUnknown\x12\x19\n" +
+	"\bentry_id\x18\x01 \x01(\tR\aentryId\"6\n" +
+	"\x1dRefusalMergeRunNotOutstanding\x12\x15\n" +
+	"\x06run_id\x18\x01 \x01(\tR\x05runId\"5\n" +
+	"\x1cRefusalMergeRunIsRunningHead\x12\x15\n" +
+	"\x06run_id\x18\x01 \x01(\tR\x05runId\"5\n" +
+	"\x1dRefusalClientLogRecordInvalid\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"3\n" +
+	"\x1bRefusalClientLogUnpersisted\x12\x14\n" +
 	"\x05cause\x18\x01 \x01(\tR\x05cause\"\x88\x02\n" +
 	"\x11HibernationDetail\x12\x19\n" +
 	"\bsince_ms\x18\x01 \x01(\x03R\asinceMs\x12F\n" +
@@ -9437,76 +7359,7 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x13MergeDequeueRunning\x121\n" +
 	"\x06status\x18\x01 \x01(\v2\x19.agentrepl.v1.MergeStatusR\x06status\"\x15\n" +
 	"\x13MergeDequeueConfirm\"\x15\n" +
-	"\x13MergeDequeueDecline*\xf3\n" +
-	"\n" +
-	"\x0eSessionCommand\x12\x1f\n" +
-	"\x1bSESSION_COMMAND_UNSPECIFIED\x10\x00\x12'\n" +
-	"\x15SESSION_COMMAND_CLEAR\x10\x01\x1a\f\x92\xa6\x1d\b\n" +
-	"\x06/clear\x12-\n" +
-	"\x17SESSION_COMMAND_COMPACT\x10\x02\x1a\x10\x92\xa6\x1d\f\n" +
-	"\b/compact\x10\x01\x12)\n" +
-	"\x15SESSION_COMMAND_MODEL\x10\x03\x1a\x0e\x92\xa6\x1d\n" +
-	"\n" +
-	"\x06/model\x10\x01\x12%\n" +
-	"\x14SESSION_COMMAND_COST\x10\x04\x1a\v\x92\xa6\x1d\a\n" +
-	"\x05/cost\x12'\n" +
-	"\x15SESSION_COMMAND_USAGE\x10\x05\x1a\f\x92\xa6\x1d\b\n" +
-	"\x06/usage\x12)\n" +
-	"\x16SESSION_COMMAND_STATUS\x10\x06\x1a\r\x92\xa6\x1d\t\n" +
-	"\a/status\x12+\n" +
-	"\x17SESSION_COMMAND_CONTEXT\x10\a\x1a\x0e\x92\xa6\x1d\n" +
-	"\n" +
-	"\b/context\x12)\n" +
-	"\x16SESSION_COMMAND_CONFIG\x10\b\x1a\r\x92\xa6\x1d\t\n" +
-	"\a/config\x12%\n" +
-	"\x14SESSION_COMMAND_HELP\x10\t\x1a\v\x92\xa6\x1d\a\n" +
-	"\x05/help\x12)\n" +
-	"\x16SESSION_COMMAND_DOCTOR\x10\n" +
-	"\x1a\r\x92\xa6\x1d\t\n" +
-	"\a/doctor\x12'\n" +
-	"\x15SESSION_COMMAND_LOGIN\x10\v\x1a\f\x92\xa6\x1d\b\n" +
-	"\x06/login\x12)\n" +
-	"\x16SESSION_COMMAND_LOGOUT\x10\f\x1a\r\x92\xa6\x1d\t\n" +
-	"\a/logout\x12)\n" +
-	"\x16SESSION_COMMAND_MEMORY\x10\r\x1a\r\x92\xa6\x1d\t\n" +
-	"\a/memory\x123\n" +
-	"\x1bSESSION_COMMAND_PERMISSIONS\x10\x0e\x1a\x12\x92\xa6\x1d\x0e\n" +
-	"\f/permissions\x12)\n" +
-	"\x16SESSION_COMMAND_AGENTS\x10\x0f\x1a\r\x92\xa6\x1d\t\n" +
-	"\a/agents\x12#\n" +
-	"\x13SESSION_COMMAND_MCP\x10\x10\x1a\n" +
-	"\x92\xa6\x1d\x06\n" +
-	"\x04/mcp\x12'\n" +
-	"\x15SESSION_COMMAND_HOOKS\x10\x11\x1a\f\x92\xa6\x1d\b\n" +
-	"\x06/hooks\x127\n" +
-	"\x1cSESSION_COMMAND_OUTPUT_STYLE\x10\x12\x1a\x15\x92\xa6\x1d\x11\n" +
-	"\r/output-style\x10\x01\x127\n" +
-	"\x1dSESSION_COMMAND_RELEASE_NOTES\x10\x13\x1a\x14\x92\xa6\x1d\x10\n" +
-	"\x0e/release-notes\x12'\n" +
-	"\x15SESSION_COMMAND_TODOS\x10\x14\x1a\f\x92\xa6\x1d\b\n" +
-	"\x06/todos\x12+\n" +
-	"\x16SESSION_COMMAND_EXPORT\x10\x15\x1a\x0f\x92\xa6\x1d\v\n" +
-	"\a/export\x10\x01\x12-\n" +
-	"\x17SESSION_COMMAND_ADD_DIR\x10\x16\x1a\x10\x92\xa6\x1d\f\n" +
-	"\b/add-dir\x10\x01\x12+\n" +
-	"\x16SESSION_COMMAND_RESUME\x10\x17\x1a\x0f\x92\xa6\x1d\v\n" +
-	"\a/resume\x10\x01\x12%\n" +
-	"\x14SESSION_COMMAND_EXIT\x10\x18\x1a\v\x92\xa6\x1d\a\n" +
-	"\x05/exit\x12=\n" +
-	" SESSION_COMMAND_PRIVACY_SETTINGS\x10\x19\x1a\x17\x92\xa6\x1d\x13\n" +
-	"\x11/privacy-settings\x121\n" +
-	"\x1aSESSION_COMMAND_STATUSLINE\x10\x1a\x1a\x11\x92\xa6\x1d\r\n" +
-	"\v/statusline\x129\n" +
-	"\x1eSESSION_COMMAND_TERMINAL_SETUP\x10\x1b\x1a\x15\x92\xa6\x1d\x11\n" +
-	"\x0f/terminal-setup\x12#\n" +
-	"\x13SESSION_COMMAND_VIM\x10\x1c\x1a\n" +
-	"\x92\xa6\x1d\x06\n" +
-	"\x04/vim\x12)\n" +
-	"\x16SESSION_COMMAND_REWIND\x10\x1d\x1a\r\x92\xa6\x1d\t\n" +
-	"\a/rewind\x12#\n" +
-	"\x13SESSION_COMMAND_BUG\x10\x1e\x1a\n" +
-	"\x92\xa6\x1d\x06\n" +
-	"\x04/bug*\xb7\x01\n" +
+	"\x13MergeDequeueDecline*\xb7\x01\n" +
 	"\x0fCompactionScope\x12 \n" +
 	"\x1cCOMPACTION_SCOPE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14COMPACTION_SCOPE_ALL\x10\x01\x12\x1e\n" +
@@ -9522,8 +7375,7 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x1cCLIENT_LOG_LEVEL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15CLIENT_LOG_LEVEL_INFO\x10\x01\x12\x19\n" +
 	"\x15CLIENT_LOG_LEVEL_WARN\x10\x02\x12\x1a\n" +
-	"\x16CLIENT_LOG_LEVEL_ERROR\x10\x03:w\n" +
-	"\x14session_command_spec\x12!.google.protobuf.EnumValueOptions\x18\xe2\xd4\x03 \x01(\v2 .agentrepl.v1.SessionCommandSpecR\x12sessionCommandSpecB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x16CLIENT_LOG_LEVEL_ERROR\x10\x03B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_shared_proto_rawDescOnce sync.Once
@@ -9537,278 +7389,178 @@ func file_agentrepl_v1_shared_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_shared_proto_rawDescData
 }
 
-var file_agentrepl_v1_shared_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_agentrepl_v1_shared_proto_msgTypes = make([]protoimpl.MessageInfo, 119)
+var file_agentrepl_v1_shared_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_agentrepl_v1_shared_proto_msgTypes = make([]protoimpl.MessageInfo, 115)
 var file_agentrepl_v1_shared_proto_goTypes = []any{
-	(SessionCommand)(0),                               // 0: agentrepl.v1.SessionCommand
-	(CompactionScope)(0),                              // 1: agentrepl.v1.CompactionScope
-	(ResumeMode)(0),                                   // 2: agentrepl.v1.ResumeMode
-	(ClientLogLevel)(0),                               // 3: agentrepl.v1.ClientLogLevel
-	(*SessionCommandSpec)(nil),                        // 4: agentrepl.v1.SessionCommandSpec
-	(*VendorFailureContext)(nil),                      // 5: agentrepl.v1.VendorFailureContext
-	(*FailureKind)(nil),                               // 6: agentrepl.v1.FailureKind
-	(*FailureShimNotConnected)(nil),                   // 7: agentrepl.v1.FailureShimNotConnected
-	(*FailureShimRejected)(nil),                       // 8: agentrepl.v1.FailureShimRejected
-	(*FailureShimAckTimeout)(nil),                     // 9: agentrepl.v1.FailureShimAckTimeout
-	(*FailureShimVersionMismatch)(nil),                // 10: agentrepl.v1.FailureShimVersionMismatch
-	(*FailureShimSeqRegression)(nil),                  // 11: agentrepl.v1.FailureShimSeqRegression
-	(*FailureShimDegraded)(nil),                       // 12: agentrepl.v1.FailureShimDegraded
-	(*FailureShimStoreWriteRejected)(nil),             // 13: agentrepl.v1.FailureShimStoreWriteRejected
-	(*FailureQueryTermination)(nil),                   // 14: agentrepl.v1.FailureQueryTermination
-	(*FailureShimNotSpawned)(nil),                     // 15: agentrepl.v1.FailureShimNotSpawned
-	(*FailureShimHandshakeIncomplete)(nil),            // 16: agentrepl.v1.FailureShimHandshakeIncomplete
-	(*FailureShimUnhealthy)(nil),                      // 17: agentrepl.v1.FailureShimUnhealthy
-	(*FailureSessionNotEstablished)(nil),              // 18: agentrepl.v1.FailureSessionNotEstablished
-	(*FailureWorkspaceNotLive)(nil),                   // 19: agentrepl.v1.FailureWorkspaceNotLive
-	(*FailureSessionDeleted)(nil),                     // 20: agentrepl.v1.FailureSessionDeleted
-	(*FailureSessionSuperseded)(nil),                  // 21: agentrepl.v1.FailureSessionSuperseded
-	(*FailureReconnectSuperseded)(nil),                // 22: agentrepl.v1.FailureReconnectSuperseded
-	(*FailureSessionShimDied)(nil),                    // 23: agentrepl.v1.FailureSessionShimDied
-	(*FailureSessionStartFailed)(nil),                 // 24: agentrepl.v1.FailureSessionStartFailed
-	(*FailureSessionResumeFailed)(nil),                // 25: agentrepl.v1.FailureSessionResumeFailed
-	(*FailureConversationUnresumable)(nil),            // 26: agentrepl.v1.FailureConversationUnresumable
-	(*FailureResumeModeRetired)(nil),                  // 27: agentrepl.v1.FailureResumeModeRetired
-	(*FailureSessionEndedUnclassified)(nil),           // 28: agentrepl.v1.FailureSessionEndedUnclassified
-	(*FailureHistoryRepullInFlight)(nil),              // 29: agentrepl.v1.FailureHistoryRepullInFlight
-	(*FailureHistoryReplayTruncated)(nil),             // 30: agentrepl.v1.FailureHistoryReplayTruncated
-	(*FailureReplayMarkRetired)(nil),                  // 31: agentrepl.v1.FailureReplayMarkRetired
-	(*FailureInterruptUndelivered)(nil),               // 32: agentrepl.v1.FailureInterruptUndelivered
-	(*FailureQueueEntryUnwired)(nil),                  // 33: agentrepl.v1.FailureQueueEntryUnwired
-	(*FailureQueueEntryKeepAliveHeld)(nil),            // 34: agentrepl.v1.FailureQueueEntryKeepAliveHeld
-	(*FailureSessionHibernated)(nil),                  // 35: agentrepl.v1.FailureSessionHibernated
-	(*FailureKeepAliveWindowUnclosed)(nil),            // 36: agentrepl.v1.FailureKeepAliveWindowUnclosed
-	(*FailureKeepAliveWindowInverted)(nil),            // 37: agentrepl.v1.FailureKeepAliveWindowInverted
-	(*FailureCompactionColdRead)(nil),                 // 38: agentrepl.v1.FailureCompactionColdRead
-	(*FailureClientLogIdentityStale)(nil),             // 39: agentrepl.v1.FailureClientLogIdentityStale
-	(*FailureInternalUnclassified)(nil),               // 40: agentrepl.v1.FailureInternalUnclassified
-	(*FailureApiAuthenticationFailed)(nil),            // 41: agentrepl.v1.FailureApiAuthenticationFailed
-	(*FailureApiBillingError)(nil),                    // 42: agentrepl.v1.FailureApiBillingError
-	(*FailureApiRateLimit)(nil),                       // 43: agentrepl.v1.FailureApiRateLimit
-	(*FailureApiInvalidRequest)(nil),                  // 44: agentrepl.v1.FailureApiInvalidRequest
-	(*FailureApiServerError)(nil),                     // 45: agentrepl.v1.FailureApiServerError
-	(*FailureApiOverloaded)(nil),                      // 46: agentrepl.v1.FailureApiOverloaded
-	(*FailureApiOAuthOrgNotAllowed)(nil),              // 47: agentrepl.v1.FailureApiOAuthOrgNotAllowed
-	(*FailureApiModelNotFound)(nil),                   // 48: agentrepl.v1.FailureApiModelNotFound
-	(*FailureApiNetworkDown)(nil),                     // 49: agentrepl.v1.FailureApiNetworkDown
-	(*FailureApiRequestFailed)(nil),                   // 50: agentrepl.v1.FailureApiRequestFailed
-	(*FailureApiUnknown)(nil),                         // 51: agentrepl.v1.FailureApiUnknown
-	(*FailureApiMaxOutputTokens)(nil),                 // 52: agentrepl.v1.FailureApiMaxOutputTokens
-	(*FailureApiMaxTurns)(nil),                        // 53: agentrepl.v1.FailureApiMaxTurns
-	(*FailureApiMaxBudget)(nil),                       // 54: agentrepl.v1.FailureApiMaxBudget
-	(*FailureApiExecutionError)(nil),                  // 55: agentrepl.v1.FailureApiExecutionError
-	(*FailureApiRefusal)(nil),                         // 56: agentrepl.v1.FailureApiRefusal
-	(*FailureApiTurnFailed)(nil),                      // 57: agentrepl.v1.FailureApiTurnFailed
-	(*FailurePromptRefusedByMergeState)(nil),          // 58: agentrepl.v1.FailurePromptRefusedByMergeState
-	(*FailureTurnUndriven)(nil),                       // 59: agentrepl.v1.FailureTurnUndriven
-	(*FailureQueueEntryUninterruptibleTurn)(nil),      // 60: agentrepl.v1.FailureQueueEntryUninterruptibleTurn
-	(*FailureDaemonUnreachable)(nil),                  // 61: agentrepl.v1.FailureDaemonUnreachable
-	(*FailureWorkspaceGone)(nil),                      // 62: agentrepl.v1.FailureWorkspaceGone
-	(*FailureBootFailed)(nil),                         // 63: agentrepl.v1.FailureBootFailed
-	(*FailureControlPlaneFailed)(nil),                 // 64: agentrepl.v1.FailureControlPlaneFailed
-	(*FailureFrameUndecodable)(nil),                   // 65: agentrepl.v1.FailureFrameUndecodable
-	(*FailureStaleBundle)(nil),                        // 66: agentrepl.v1.FailureStaleBundle
-	(*FailureCommandUnsent)(nil),                      // 67: agentrepl.v1.FailureCommandUnsent
-	(*FailureCommandRejectionUnclassified)(nil),       // 68: agentrepl.v1.FailureCommandRejectionUnclassified
-	(*QueryTerminationFailure)(nil),                   // 69: agentrepl.v1.QueryTerminationFailure
-	(*SessionResumeFailure)(nil),                      // 70: agentrepl.v1.SessionResumeFailure
-	(*SessionResumeFailureCreate)(nil),                // 71: agentrepl.v1.SessionResumeFailureCreate
-	(*SessionResumeFailureAutomaticRestore)(nil),      // 72: agentrepl.v1.SessionResumeFailureAutomaticRestore
-	(*SessionResumeFailureTranscriptUnavailable)(nil), // 73: agentrepl.v1.SessionResumeFailureTranscriptUnavailable
-	(*SessionResumeFailureIdentityMismatch)(nil),      // 74: agentrepl.v1.SessionResumeFailureIdentityMismatch
-	(*SessionResumeFailureBringUpFailure)(nil),        // 75: agentrepl.v1.SessionResumeFailureBringUpFailure
-	(*HibernationDetail)(nil),                         // 76: agentrepl.v1.HibernationDetail
-	(*HibernationIdleCutoff)(nil),                     // 77: agentrepl.v1.HibernationIdleCutoff
-	(*HibernationForced)(nil),                         // 78: agentrepl.v1.HibernationForced
-	(*HibernationCacheExpired)(nil),                   // 79: agentrepl.v1.HibernationCacheExpired
-	(*ReviveCompactFirst)(nil),                        // 80: agentrepl.v1.ReviveCompactFirst
-	(*ReviveDirect)(nil),                              // 81: agentrepl.v1.ReviveDirect
-	(*ReviveClear)(nil),                               // 82: agentrepl.v1.ReviveClear
-	(*WorkspaceGateView)(nil),                         // 83: agentrepl.v1.WorkspaceGateView
-	(*WorkspaceGateOpen)(nil),                         // 84: agentrepl.v1.WorkspaceGateOpen
-	(*WorkspaceGateHibernated)(nil),                   // 85: agentrepl.v1.WorkspaceGateHibernated
-	(*WorkspaceAvailable)(nil),                        // 86: agentrepl.v1.WorkspaceAvailable
-	(*HostAction)(nil),                                // 87: agentrepl.v1.HostAction
-	(*HostBootSweepSessionUnwired)(nil),               // 88: agentrepl.v1.HostBootSweepSessionUnwired
-	(*HostWorkspaceCreateFailed)(nil),                 // 89: agentrepl.v1.HostWorkspaceCreateFailed
-	(*HostSwitchWorkspace)(nil),                       // 90: agentrepl.v1.HostSwitchWorkspace
-	(*HostSetRepositoryFold)(nil),                     // 91: agentrepl.v1.HostSetRepositoryFold
-	(*HostSetSidebarView)(nil),                        // 92: agentrepl.v1.HostSetSidebarView
-	(*HostTaskCreate)(nil),                            // 93: agentrepl.v1.HostTaskCreate
-	(*HostTaskById)(nil),                              // 94: agentrepl.v1.HostTaskById
-	(*HostLegacyCommand)(nil),                         // 95: agentrepl.v1.HostLegacyCommand
-	(*ShutdownScheduleView)(nil),                      // 96: agentrepl.v1.ShutdownScheduleView
-	(*ShutdownScheduleIdle)(nil),                      // 97: agentrepl.v1.ShutdownScheduleIdle
-	(*ShutdownScheduleDraining)(nil),                  // 98: agentrepl.v1.ShutdownScheduleDraining
-	(*ShutdownHold)(nil),                              // 99: agentrepl.v1.ShutdownHold
-	(*ShutdownHoldTurn)(nil),                          // 100: agentrepl.v1.ShutdownHoldTurn
-	(*ShutdownHoldTasks)(nil),                         // 101: agentrepl.v1.ShutdownHoldTasks
-	(*RestartPendingView)(nil),                        // 102: agentrepl.v1.RestartPendingView
-	(*MergeStatus)(nil),                               // 103: agentrepl.v1.MergeStatus
-	(*MergeStatusEnqueued)(nil),                       // 104: agentrepl.v1.MergeStatusEnqueued
-	(*MergeStatusBeforeAction)(nil),                   // 105: agentrepl.v1.MergeStatusBeforeAction
-	(*MergeStatusCherryPicking)(nil),                  // 106: agentrepl.v1.MergeStatusCherryPicking
-	(*MergeStatusTesting)(nil),                        // 107: agentrepl.v1.MergeStatusTesting
-	(*MergeStatusConflict)(nil),                       // 108: agentrepl.v1.MergeStatusConflict
-	(*MergeStatusAfterAction)(nil),                    // 109: agentrepl.v1.MergeStatusAfterAction
-	(*MergeStatusMerged)(nil),                         // 110: agentrepl.v1.MergeStatusMerged
-	(*MergeStatusFailed)(nil),                         // 111: agentrepl.v1.MergeStatusFailed
-	(*MergeQueueRoster)(nil),                          // 112: agentrepl.v1.MergeQueueRoster
-	(*MergeRepoQueue)(nil),                            // 113: agentrepl.v1.MergeRepoQueue
-	(*MergeQueueEntry)(nil),                           // 114: agentrepl.v1.MergeQueueEntry
-	(*MergeQueueHeadRunning)(nil),                     // 115: agentrepl.v1.MergeQueueHeadRunning
-	(*MergeQueueHeadPausedWaiting)(nil),               // 116: agentrepl.v1.MergeQueueHeadPausedWaiting
-	(*MergeQueueHeadTerminalOwed)(nil),                // 117: agentrepl.v1.MergeQueueHeadTerminalOwed
-	(*MergeDequeueOffer)(nil),                         // 118: agentrepl.v1.MergeDequeueOffer
-	(*MergeDequeueWaiting)(nil),                       // 119: agentrepl.v1.MergeDequeueWaiting
-	(*MergeDequeueRunning)(nil),                       // 120: agentrepl.v1.MergeDequeueRunning
-	(*MergeDequeueConfirm)(nil),                       // 121: agentrepl.v1.MergeDequeueConfirm
-	(*MergeDequeueDecline)(nil),                       // 122: agentrepl.v1.MergeDequeueDecline
-	(*v1.VendorSessionIdentityUnavailable)(nil),       // 123: shim.v1.VendorSessionIdentityUnavailable
-	(*v1.UnexpectedQueryEof)(nil),                     // 124: shim.v1.UnexpectedQueryEof
-	(*v1.QueryIteratorFailure)(nil),                   // 125: shim.v1.QueryIteratorFailure
-	(*v1.QueryStartupFailure)(nil),                    // 126: shim.v1.QueryStartupFailure
-	(*structpb.Struct)(nil),                           // 127: google.protobuf.Struct
-	(*descriptorpb.EnumValueOptions)(nil),             // 128: google.protobuf.EnumValueOptions
+	(CompactionScope)(0),                              // 0: agentrepl.v1.CompactionScope
+	(ResumeMode)(0),                                   // 1: agentrepl.v1.ResumeMode
+	(ClientLogLevel)(0),                               // 2: agentrepl.v1.ClientLogLevel
+	(*FailureShimNotConnected)(nil),                   // 3: agentrepl.v1.FailureShimNotConnected
+	(*FailureShimRejected)(nil),                       // 4: agentrepl.v1.FailureShimRejected
+	(*FailureShimAckTimeout)(nil),                     // 5: agentrepl.v1.FailureShimAckTimeout
+	(*FailureShimNotSpawned)(nil),                     // 6: agentrepl.v1.FailureShimNotSpawned
+	(*FailureShimHandshakeIncomplete)(nil),            // 7: agentrepl.v1.FailureShimHandshakeIncomplete
+	(*FailureShimUnhealthy)(nil),                      // 8: agentrepl.v1.FailureShimUnhealthy
+	(*FailureSessionNotEstablished)(nil),              // 9: agentrepl.v1.FailureSessionNotEstablished
+	(*FailureWorkspaceNotLive)(nil),                   // 10: agentrepl.v1.FailureWorkspaceNotLive
+	(*FailureReconnectSuperseded)(nil),                // 11: agentrepl.v1.FailureReconnectSuperseded
+	(*FailureConversationUnresumable)(nil),            // 12: agentrepl.v1.FailureConversationUnresumable
+	(*FailureResumeModeRetired)(nil),                  // 13: agentrepl.v1.FailureResumeModeRetired
+	(*FailureHistoryRepullInFlight)(nil),              // 14: agentrepl.v1.FailureHistoryRepullInFlight
+	(*FailureReplayMarkRetired)(nil),                  // 15: agentrepl.v1.FailureReplayMarkRetired
+	(*FailureInterruptUndelivered)(nil),               // 16: agentrepl.v1.FailureInterruptUndelivered
+	(*FailureQueueEntryUnwired)(nil),                  // 17: agentrepl.v1.FailureQueueEntryUnwired
+	(*FailureQueueEntryKeepAliveHeld)(nil),            // 18: agentrepl.v1.FailureQueueEntryKeepAliveHeld
+	(*FailureQueueEntryUninterruptibleTurn)(nil),      // 19: agentrepl.v1.FailureQueueEntryUninterruptibleTurn
+	(*FailureSessionHibernated)(nil),                  // 20: agentrepl.v1.FailureSessionHibernated
+	(*FailureClientLogIdentityStale)(nil),             // 21: agentrepl.v1.FailureClientLogIdentityStale
+	(*FailurePromptRefusedByMergeState)(nil),          // 22: agentrepl.v1.FailurePromptRefusedByMergeState
+	(*ClientCommandFailure)(nil),                      // 23: agentrepl.v1.ClientCommandFailure
+	(*FailureCommandUnsent)(nil),                      // 24: agentrepl.v1.FailureCommandUnsent
+	(*FailureCommandRejectionUnclassified)(nil),       // 25: agentrepl.v1.FailureCommandRejectionUnclassified
+	(*RefusalWorkspaceKeyNotAbsolute)(nil),            // 26: agentrepl.v1.RefusalWorkspaceKeyNotAbsolute
+	(*RefusalDependencyUnwired)(nil),                  // 27: agentrepl.v1.RefusalDependencyUnwired
+	(*RefusalRequiredFieldMissing)(nil),               // 28: agentrepl.v1.RefusalRequiredFieldMissing
+	(*RefusalPromptOriginInvalid)(nil),                // 29: agentrepl.v1.RefusalPromptOriginInvalid
+	(*RefusalMergeDequeueOfferUnraisable)(nil),        // 30: agentrepl.v1.RefusalMergeDequeueOfferUnraisable
+	(*RefusalMergeDequeueOfferAbsent)(nil),            // 31: agentrepl.v1.RefusalMergeDequeueOfferAbsent
+	(*RefusalMergeDequeueOfferStale)(nil),             // 32: agentrepl.v1.RefusalMergeDequeueOfferStale
+	(*RefusalMergeDequeueClearFailed)(nil),            // 33: agentrepl.v1.RefusalMergeDequeueClearFailed
+	(*RefusalMergeDequeueFailed)(nil),                 // 34: agentrepl.v1.RefusalMergeDequeueFailed
+	(*RefusalNoDetachedAgentsRunning)(nil),            // 35: agentrepl.v1.RefusalNoDetachedAgentsRunning
+	(*RefusalDetachedCancelUnsupported)(nil),          // 36: agentrepl.v1.RefusalDetachedCancelUnsupported
+	(*RefusalDetachedCancelOutcomeUnset)(nil),         // 37: agentrepl.v1.RefusalDetachedCancelOutcomeUnset
+	(*RefusalMergeGeometryUnreadable)(nil),            // 38: agentrepl.v1.RefusalMergeGeometryUnreadable
+	(*RefusalMergeGeometryUnrecorded)(nil),            // 39: agentrepl.v1.RefusalMergeGeometryUnrecorded
+	(*RefusalMergeStateUnrecordable)(nil),             // 40: agentrepl.v1.RefusalMergeStateUnrecordable
+	(*RefusalMergeEnqueueRejected)(nil),               // 41: agentrepl.v1.RefusalMergeEnqueueRejected
+	(*RefusalMergeAbandonFailed)(nil),                 // 42: agentrepl.v1.RefusalMergeAbandonFailed
+	(*RefusalWorkspaceCloseFailed)(nil),               // 43: agentrepl.v1.RefusalWorkspaceCloseFailed
+	(*RefusalWorkspaceOpenFailed)(nil),                // 44: agentrepl.v1.RefusalWorkspaceOpenFailed
+	(*RefusalCreateWorkspaceOverWire)(nil),            // 45: agentrepl.v1.RefusalCreateWorkspaceOverWire
+	(*RefusalUnknownWorkspaceJob)(nil),                // 46: agentrepl.v1.RefusalUnknownWorkspaceJob
+	(*RefusalUnknownHostAction)(nil),                  // 47: agentrepl.v1.RefusalUnknownHostAction
+	(*RefusalModelUnconfirmed)(nil),                   // 48: agentrepl.v1.RefusalModelUnconfirmed
+	(*RefusalRosterRevisionStale)(nil),                // 49: agentrepl.v1.RefusalRosterRevisionStale
+	(*RefusalShutdownAlreadyScheduled)(nil),           // 50: agentrepl.v1.RefusalShutdownAlreadyScheduled
+	(*RefusalScheduleIdStale)(nil),                    // 51: agentrepl.v1.RefusalScheduleIdStale
+	(*RefusalHibernateBlockedByLiveWork)(nil),         // 52: agentrepl.v1.RefusalHibernateBlockedByLiveWork
+	(*RefusalRevivalModeUnstated)(nil),                // 53: agentrepl.v1.RefusalRevivalModeUnstated
+	(*RefusalRevivalFailed)(nil),                      // 54: agentrepl.v1.RefusalRevivalFailed
+	(*RefusalMergeAxisUnclearable)(nil),               // 55: agentrepl.v1.RefusalMergeAxisUnclearable
+	(*RefusalSessionTeardownFailed)(nil),              // 56: agentrepl.v1.RefusalSessionTeardownFailed
+	(*RefusalExplicitConversationUnderWrongMode)(nil), // 57: agentrepl.v1.RefusalExplicitConversationUnderWrongMode
+	(*RefusalResumeModeUnknown)(nil),                  // 58: agentrepl.v1.RefusalResumeModeUnknown
+	(*RefusalAccountUnresolvable)(nil),                // 59: agentrepl.v1.RefusalAccountUnresolvable
+	(*RefusalModelNotApplied)(nil),                    // 60: agentrepl.v1.RefusalModelNotApplied
+	(*RefusalEstablishmentProbeMisattributed)(nil),    // 61: agentrepl.v1.RefusalEstablishmentProbeMisattributed
+	(*RefusalReaderIdentityMissing)(nil),              // 62: agentrepl.v1.RefusalReaderIdentityMissing
+	(*RefusalPageAbsent)(nil),                         // 63: agentrepl.v1.RefusalPageAbsent
+	(*RefusalReaderHasNoPosition)(nil),                // 64: agentrepl.v1.RefusalReaderHasNoPosition
+	(*RefusalReplayFailed)(nil),                       // 65: agentrepl.v1.RefusalReplayFailed
+	(*RefusalQueueEntryUnknown)(nil),                  // 66: agentrepl.v1.RefusalQueueEntryUnknown
+	(*RefusalMergeRunNotOutstanding)(nil),             // 67: agentrepl.v1.RefusalMergeRunNotOutstanding
+	(*RefusalMergeRunIsRunningHead)(nil),              // 68: agentrepl.v1.RefusalMergeRunIsRunningHead
+	(*RefusalClientLogRecordInvalid)(nil),             // 69: agentrepl.v1.RefusalClientLogRecordInvalid
+	(*RefusalClientLogUnpersisted)(nil),               // 70: agentrepl.v1.RefusalClientLogUnpersisted
+	(*HibernationDetail)(nil),                         // 71: agentrepl.v1.HibernationDetail
+	(*HibernationIdleCutoff)(nil),                     // 72: agentrepl.v1.HibernationIdleCutoff
+	(*HibernationForced)(nil),                         // 73: agentrepl.v1.HibernationForced
+	(*HibernationCacheExpired)(nil),                   // 74: agentrepl.v1.HibernationCacheExpired
+	(*ReviveCompactFirst)(nil),                        // 75: agentrepl.v1.ReviveCompactFirst
+	(*ReviveDirect)(nil),                              // 76: agentrepl.v1.ReviveDirect
+	(*ReviveClear)(nil),                               // 77: agentrepl.v1.ReviveClear
+	(*WorkspaceGateView)(nil),                         // 78: agentrepl.v1.WorkspaceGateView
+	(*WorkspaceGateOpen)(nil),                         // 79: agentrepl.v1.WorkspaceGateOpen
+	(*WorkspaceGateHibernated)(nil),                   // 80: agentrepl.v1.WorkspaceGateHibernated
+	(*WorkspaceAvailable)(nil),                        // 81: agentrepl.v1.WorkspaceAvailable
+	(*HostAction)(nil),                                // 82: agentrepl.v1.HostAction
+	(*HostBootSweepSessionUnwired)(nil),               // 83: agentrepl.v1.HostBootSweepSessionUnwired
+	(*HostWorkspaceCreateFailed)(nil),                 // 84: agentrepl.v1.HostWorkspaceCreateFailed
+	(*HostSwitchWorkspace)(nil),                       // 85: agentrepl.v1.HostSwitchWorkspace
+	(*HostSetRepositoryFold)(nil),                     // 86: agentrepl.v1.HostSetRepositoryFold
+	(*HostSetSidebarView)(nil),                        // 87: agentrepl.v1.HostSetSidebarView
+	(*HostTaskCreate)(nil),                            // 88: agentrepl.v1.HostTaskCreate
+	(*HostTaskById)(nil),                              // 89: agentrepl.v1.HostTaskById
+	(*HostLegacyCommand)(nil),                         // 90: agentrepl.v1.HostLegacyCommand
+	(*ShutdownScheduleView)(nil),                      // 91: agentrepl.v1.ShutdownScheduleView
+	(*ShutdownScheduleIdle)(nil),                      // 92: agentrepl.v1.ShutdownScheduleIdle
+	(*ShutdownScheduleDraining)(nil),                  // 93: agentrepl.v1.ShutdownScheduleDraining
+	(*ShutdownHold)(nil),                              // 94: agentrepl.v1.ShutdownHold
+	(*ShutdownHoldTurn)(nil),                          // 95: agentrepl.v1.ShutdownHoldTurn
+	(*ShutdownHoldTasks)(nil),                         // 96: agentrepl.v1.ShutdownHoldTasks
+	(*RestartPendingView)(nil),                        // 97: agentrepl.v1.RestartPendingView
+	(*MergeStatus)(nil),                               // 98: agentrepl.v1.MergeStatus
+	(*MergeStatusEnqueued)(nil),                       // 99: agentrepl.v1.MergeStatusEnqueued
+	(*MergeStatusBeforeAction)(nil),                   // 100: agentrepl.v1.MergeStatusBeforeAction
+	(*MergeStatusCherryPicking)(nil),                  // 101: agentrepl.v1.MergeStatusCherryPicking
+	(*MergeStatusTesting)(nil),                        // 102: agentrepl.v1.MergeStatusTesting
+	(*MergeStatusConflict)(nil),                       // 103: agentrepl.v1.MergeStatusConflict
+	(*MergeStatusAfterAction)(nil),                    // 104: agentrepl.v1.MergeStatusAfterAction
+	(*MergeStatusMerged)(nil),                         // 105: agentrepl.v1.MergeStatusMerged
+	(*MergeStatusFailed)(nil),                         // 106: agentrepl.v1.MergeStatusFailed
+	(*MergeQueueRoster)(nil),                          // 107: agentrepl.v1.MergeQueueRoster
+	(*MergeRepoQueue)(nil),                            // 108: agentrepl.v1.MergeRepoQueue
+	(*MergeQueueEntry)(nil),                           // 109: agentrepl.v1.MergeQueueEntry
+	(*MergeQueueHeadRunning)(nil),                     // 110: agentrepl.v1.MergeQueueHeadRunning
+	(*MergeQueueHeadPausedWaiting)(nil),               // 111: agentrepl.v1.MergeQueueHeadPausedWaiting
+	(*MergeQueueHeadTerminalOwed)(nil),                // 112: agentrepl.v1.MergeQueueHeadTerminalOwed
+	(*MergeDequeueOffer)(nil),                         // 113: agentrepl.v1.MergeDequeueOffer
+	(*MergeDequeueWaiting)(nil),                       // 114: agentrepl.v1.MergeDequeueWaiting
+	(*MergeDequeueRunning)(nil),                       // 115: agentrepl.v1.MergeDequeueRunning
+	(*MergeDequeueConfirm)(nil),                       // 116: agentrepl.v1.MergeDequeueConfirm
+	(*MergeDequeueDecline)(nil),                       // 117: agentrepl.v1.MergeDequeueDecline
+	(v1.SessionCommand)(0),                            // 118: conversation.v1.SessionCommand
+	(*structpb.Struct)(nil),                           // 119: google.protobuf.Struct
 }
 var file_agentrepl_v1_shared_proto_depIdxs = []int32{
-	7,   // 0: agentrepl.v1.FailureKind.shim_not_connected:type_name -> agentrepl.v1.FailureShimNotConnected
-	8,   // 1: agentrepl.v1.FailureKind.shim_rejected:type_name -> agentrepl.v1.FailureShimRejected
-	9,   // 2: agentrepl.v1.FailureKind.shim_ack_timeout:type_name -> agentrepl.v1.FailureShimAckTimeout
-	10,  // 3: agentrepl.v1.FailureKind.shim_version_mismatch:type_name -> agentrepl.v1.FailureShimVersionMismatch
-	11,  // 4: agentrepl.v1.FailureKind.shim_seq_regression:type_name -> agentrepl.v1.FailureShimSeqRegression
-	12,  // 5: agentrepl.v1.FailureKind.shim_degraded:type_name -> agentrepl.v1.FailureShimDegraded
-	13,  // 6: agentrepl.v1.FailureKind.shim_store_write_rejected:type_name -> agentrepl.v1.FailureShimStoreWriteRejected
-	14,  // 7: agentrepl.v1.FailureKind.query_termination:type_name -> agentrepl.v1.FailureQueryTermination
-	15,  // 8: agentrepl.v1.FailureKind.shim_not_spawned:type_name -> agentrepl.v1.FailureShimNotSpawned
-	16,  // 9: agentrepl.v1.FailureKind.shim_handshake_incomplete:type_name -> agentrepl.v1.FailureShimHandshakeIncomplete
-	17,  // 10: agentrepl.v1.FailureKind.shim_unhealthy:type_name -> agentrepl.v1.FailureShimUnhealthy
-	18,  // 11: agentrepl.v1.FailureKind.session_not_established:type_name -> agentrepl.v1.FailureSessionNotEstablished
-	19,  // 12: agentrepl.v1.FailureKind.workspace_not_live:type_name -> agentrepl.v1.FailureWorkspaceNotLive
-	20,  // 13: agentrepl.v1.FailureKind.session_deleted:type_name -> agentrepl.v1.FailureSessionDeleted
-	21,  // 14: agentrepl.v1.FailureKind.session_superseded:type_name -> agentrepl.v1.FailureSessionSuperseded
-	22,  // 15: agentrepl.v1.FailureKind.reconnect_superseded:type_name -> agentrepl.v1.FailureReconnectSuperseded
-	23,  // 16: agentrepl.v1.FailureKind.session_shim_died:type_name -> agentrepl.v1.FailureSessionShimDied
-	24,  // 17: agentrepl.v1.FailureKind.session_start_failed:type_name -> agentrepl.v1.FailureSessionStartFailed
-	25,  // 18: agentrepl.v1.FailureKind.session_resume_failed:type_name -> agentrepl.v1.FailureSessionResumeFailed
-	26,  // 19: agentrepl.v1.FailureKind.conversation_unresumable:type_name -> agentrepl.v1.FailureConversationUnresumable
-	27,  // 20: agentrepl.v1.FailureKind.resume_mode_retired:type_name -> agentrepl.v1.FailureResumeModeRetired
-	28,  // 21: agentrepl.v1.FailureKind.session_ended_unclassified:type_name -> agentrepl.v1.FailureSessionEndedUnclassified
-	29,  // 22: agentrepl.v1.FailureKind.history_repull_in_flight:type_name -> agentrepl.v1.FailureHistoryRepullInFlight
-	30,  // 23: agentrepl.v1.FailureKind.history_replay_truncated:type_name -> agentrepl.v1.FailureHistoryReplayTruncated
-	32,  // 24: agentrepl.v1.FailureKind.interrupt_undelivered:type_name -> agentrepl.v1.FailureInterruptUndelivered
-	33,  // 25: agentrepl.v1.FailureKind.queue_entry_unwired:type_name -> agentrepl.v1.FailureQueueEntryUnwired
-	34,  // 26: agentrepl.v1.FailureKind.queue_entry_keep_alive_held:type_name -> agentrepl.v1.FailureQueueEntryKeepAliveHeld
-	35,  // 27: agentrepl.v1.FailureKind.session_hibernated:type_name -> agentrepl.v1.FailureSessionHibernated
-	36,  // 28: agentrepl.v1.FailureKind.keep_alive_window_unclosed:type_name -> agentrepl.v1.FailureKeepAliveWindowUnclosed
-	37,  // 29: agentrepl.v1.FailureKind.keep_alive_window_inverted:type_name -> agentrepl.v1.FailureKeepAliveWindowInverted
-	38,  // 30: agentrepl.v1.FailureKind.compaction_cold_read:type_name -> agentrepl.v1.FailureCompactionColdRead
-	39,  // 31: agentrepl.v1.FailureKind.client_log_identity_stale:type_name -> agentrepl.v1.FailureClientLogIdentityStale
-	40,  // 32: agentrepl.v1.FailureKind.internal_unclassified:type_name -> agentrepl.v1.FailureInternalUnclassified
-	41,  // 33: agentrepl.v1.FailureKind.api_authentication_failed:type_name -> agentrepl.v1.FailureApiAuthenticationFailed
-	42,  // 34: agentrepl.v1.FailureKind.api_billing_error:type_name -> agentrepl.v1.FailureApiBillingError
-	43,  // 35: agentrepl.v1.FailureKind.api_rate_limit:type_name -> agentrepl.v1.FailureApiRateLimit
-	44,  // 36: agentrepl.v1.FailureKind.api_invalid_request:type_name -> agentrepl.v1.FailureApiInvalidRequest
-	45,  // 37: agentrepl.v1.FailureKind.api_server_error:type_name -> agentrepl.v1.FailureApiServerError
-	46,  // 38: agentrepl.v1.FailureKind.api_overloaded:type_name -> agentrepl.v1.FailureApiOverloaded
-	47,  // 39: agentrepl.v1.FailureKind.api_oauth_org_not_allowed:type_name -> agentrepl.v1.FailureApiOAuthOrgNotAllowed
-	48,  // 40: agentrepl.v1.FailureKind.api_model_not_found:type_name -> agentrepl.v1.FailureApiModelNotFound
-	49,  // 41: agentrepl.v1.FailureKind.api_network_down:type_name -> agentrepl.v1.FailureApiNetworkDown
-	50,  // 42: agentrepl.v1.FailureKind.api_request_failed:type_name -> agentrepl.v1.FailureApiRequestFailed
-	51,  // 43: agentrepl.v1.FailureKind.api_unknown:type_name -> agentrepl.v1.FailureApiUnknown
-	52,  // 44: agentrepl.v1.FailureKind.api_max_output_tokens:type_name -> agentrepl.v1.FailureApiMaxOutputTokens
-	53,  // 45: agentrepl.v1.FailureKind.api_max_turns:type_name -> agentrepl.v1.FailureApiMaxTurns
-	54,  // 46: agentrepl.v1.FailureKind.api_max_budget:type_name -> agentrepl.v1.FailureApiMaxBudget
-	55,  // 47: agentrepl.v1.FailureKind.api_execution_error:type_name -> agentrepl.v1.FailureApiExecutionError
-	56,  // 48: agentrepl.v1.FailureKind.api_refusal:type_name -> agentrepl.v1.FailureApiRefusal
-	57,  // 49: agentrepl.v1.FailureKind.api_turn_failed:type_name -> agentrepl.v1.FailureApiTurnFailed
-	58,  // 50: agentrepl.v1.FailureKind.prompt_refused_by_merge_state:type_name -> agentrepl.v1.FailurePromptRefusedByMergeState
-	60,  // 51: agentrepl.v1.FailureKind.queue_entry_uninterruptible_turn:type_name -> agentrepl.v1.FailureQueueEntryUninterruptibleTurn
-	59,  // 52: agentrepl.v1.FailureKind.turn_undriven:type_name -> agentrepl.v1.FailureTurnUndriven
-	31,  // 53: agentrepl.v1.FailureKind.replay_mark_retired:type_name -> agentrepl.v1.FailureReplayMarkRetired
-	61,  // 54: agentrepl.v1.FailureKind.daemon_unreachable:type_name -> agentrepl.v1.FailureDaemonUnreachable
-	62,  // 55: agentrepl.v1.FailureKind.workspace_gone:type_name -> agentrepl.v1.FailureWorkspaceGone
-	63,  // 56: agentrepl.v1.FailureKind.boot_failed:type_name -> agentrepl.v1.FailureBootFailed
-	64,  // 57: agentrepl.v1.FailureKind.control_plane_failed:type_name -> agentrepl.v1.FailureControlPlaneFailed
-	65,  // 58: agentrepl.v1.FailureKind.frame_undecodable:type_name -> agentrepl.v1.FailureFrameUndecodable
-	66,  // 59: agentrepl.v1.FailureKind.stale_bundle:type_name -> agentrepl.v1.FailureStaleBundle
-	67,  // 60: agentrepl.v1.FailureKind.command_unsent:type_name -> agentrepl.v1.FailureCommandUnsent
-	68,  // 61: agentrepl.v1.FailureKind.command_rejection_unclassified:type_name -> agentrepl.v1.FailureCommandRejectionUnclassified
-	69,  // 62: agentrepl.v1.FailureQueryTermination.detail:type_name -> agentrepl.v1.QueryTerminationFailure
-	70,  // 63: agentrepl.v1.FailureSessionResumeFailed.detail:type_name -> agentrepl.v1.SessionResumeFailure
-	5,   // 64: agentrepl.v1.FailureApiAuthenticationFailed.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 65: agentrepl.v1.FailureApiBillingError.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 66: agentrepl.v1.FailureApiRateLimit.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 67: agentrepl.v1.FailureApiInvalidRequest.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 68: agentrepl.v1.FailureApiServerError.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 69: agentrepl.v1.FailureApiOverloaded.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 70: agentrepl.v1.FailureApiOAuthOrgNotAllowed.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 71: agentrepl.v1.FailureApiModelNotFound.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 72: agentrepl.v1.FailureApiNetworkDown.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 73: agentrepl.v1.FailureApiRequestFailed.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 74: agentrepl.v1.FailureApiUnknown.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 75: agentrepl.v1.FailureApiMaxOutputTokens.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 76: agentrepl.v1.FailureApiMaxTurns.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 77: agentrepl.v1.FailureApiMaxBudget.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 78: agentrepl.v1.FailureApiExecutionError.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 79: agentrepl.v1.FailureApiRefusal.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	5,   // 80: agentrepl.v1.FailureApiTurnFailed.vendor:type_name -> agentrepl.v1.VendorFailureContext
-	0,   // 81: agentrepl.v1.FailureQueueEntryUninterruptibleTurn.command:type_name -> agentrepl.v1.SessionCommand
-	123, // 82: agentrepl.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> shim.v1.VendorSessionIdentityUnavailable
-	124, // 83: agentrepl.v1.QueryTerminationFailure.unexpected_eof:type_name -> shim.v1.UnexpectedQueryEof
-	125, // 84: agentrepl.v1.QueryTerminationFailure.iterator_failure:type_name -> shim.v1.QueryIteratorFailure
-	126, // 85: agentrepl.v1.QueryTerminationFailure.startup_failure:type_name -> shim.v1.QueryStartupFailure
-	71,  // 86: agentrepl.v1.SessionResumeFailure.create:type_name -> agentrepl.v1.SessionResumeFailureCreate
-	72,  // 87: agentrepl.v1.SessionResumeFailure.automatic_restore:type_name -> agentrepl.v1.SessionResumeFailureAutomaticRestore
-	73,  // 88: agentrepl.v1.SessionResumeFailure.transcript_unavailable:type_name -> agentrepl.v1.SessionResumeFailureTranscriptUnavailable
-	74,  // 89: agentrepl.v1.SessionResumeFailure.identity_mismatch:type_name -> agentrepl.v1.SessionResumeFailureIdentityMismatch
-	69,  // 90: agentrepl.v1.SessionResumeFailure.query_termination:type_name -> agentrepl.v1.QueryTerminationFailure
-	75,  // 91: agentrepl.v1.SessionResumeFailure.bring_up_failure:type_name -> agentrepl.v1.SessionResumeFailureBringUpFailure
-	77,  // 92: agentrepl.v1.HibernationDetail.idle_cutoff:type_name -> agentrepl.v1.HibernationIdleCutoff
-	78,  // 93: agentrepl.v1.HibernationDetail.forced:type_name -> agentrepl.v1.HibernationForced
-	79,  // 94: agentrepl.v1.HibernationDetail.cache_expired:type_name -> agentrepl.v1.HibernationCacheExpired
-	1,   // 95: agentrepl.v1.ReviveCompactFirst.scope:type_name -> agentrepl.v1.CompactionScope
-	84,  // 96: agentrepl.v1.WorkspaceGateView.open:type_name -> agentrepl.v1.WorkspaceGateOpen
-	85,  // 97: agentrepl.v1.WorkspaceGateView.hibernated:type_name -> agentrepl.v1.WorkspaceGateHibernated
-	76,  // 98: agentrepl.v1.WorkspaceGateHibernated.detail:type_name -> agentrepl.v1.HibernationDetail
-	90,  // 99: agentrepl.v1.HostAction.switch_workspace:type_name -> agentrepl.v1.HostSwitchWorkspace
-	91,  // 100: agentrepl.v1.HostAction.set_repository_fold:type_name -> agentrepl.v1.HostSetRepositoryFold
-	92,  // 101: agentrepl.v1.HostAction.set_sidebar_view:type_name -> agentrepl.v1.HostSetSidebarView
-	93,  // 102: agentrepl.v1.HostAction.task_create:type_name -> agentrepl.v1.HostTaskCreate
-	94,  // 103: agentrepl.v1.HostAction.task_toggle_done:type_name -> agentrepl.v1.HostTaskById
-	94,  // 104: agentrepl.v1.HostAction.task_open:type_name -> agentrepl.v1.HostTaskById
-	94,  // 105: agentrepl.v1.HostAction.task_add_workspace:type_name -> agentrepl.v1.HostTaskById
-	95,  // 106: agentrepl.v1.HostAction.legacy_command:type_name -> agentrepl.v1.HostLegacyCommand
-	89,  // 107: agentrepl.v1.HostAction.workspace_create_failed:type_name -> agentrepl.v1.HostWorkspaceCreateFailed
-	88,  // 108: agentrepl.v1.HostAction.boot_sweep_session_unwired:type_name -> agentrepl.v1.HostBootSweepSessionUnwired
-	127, // 109: agentrepl.v1.HostLegacyCommand.payload:type_name -> google.protobuf.Struct
-	97,  // 110: agentrepl.v1.ShutdownScheduleView.idle:type_name -> agentrepl.v1.ShutdownScheduleIdle
-	98,  // 111: agentrepl.v1.ShutdownScheduleView.draining:type_name -> agentrepl.v1.ShutdownScheduleDraining
-	99,  // 112: agentrepl.v1.ShutdownScheduleDraining.holds:type_name -> agentrepl.v1.ShutdownHold
-	100, // 113: agentrepl.v1.ShutdownHold.turn:type_name -> agentrepl.v1.ShutdownHoldTurn
-	101, // 114: agentrepl.v1.ShutdownHold.tasks:type_name -> agentrepl.v1.ShutdownHoldTasks
-	104, // 115: agentrepl.v1.MergeStatus.enqueued:type_name -> agentrepl.v1.MergeStatusEnqueued
-	105, // 116: agentrepl.v1.MergeStatus.before_action:type_name -> agentrepl.v1.MergeStatusBeforeAction
-	106, // 117: agentrepl.v1.MergeStatus.cherry_picking:type_name -> agentrepl.v1.MergeStatusCherryPicking
-	107, // 118: agentrepl.v1.MergeStatus.testing:type_name -> agentrepl.v1.MergeStatusTesting
-	108, // 119: agentrepl.v1.MergeStatus.conflict:type_name -> agentrepl.v1.MergeStatusConflict
-	109, // 120: agentrepl.v1.MergeStatus.after_action:type_name -> agentrepl.v1.MergeStatusAfterAction
-	110, // 121: agentrepl.v1.MergeStatus.merged:type_name -> agentrepl.v1.MergeStatusMerged
-	111, // 122: agentrepl.v1.MergeStatus.failed:type_name -> agentrepl.v1.MergeStatusFailed
-	113, // 123: agentrepl.v1.MergeQueueRoster.repos:type_name -> agentrepl.v1.MergeRepoQueue
-	114, // 124: agentrepl.v1.MergeRepoQueue.entries:type_name -> agentrepl.v1.MergeQueueEntry
-	115, // 125: agentrepl.v1.MergeQueueEntry.running:type_name -> agentrepl.v1.MergeQueueHeadRunning
-	116, // 126: agentrepl.v1.MergeQueueEntry.paused_waiting:type_name -> agentrepl.v1.MergeQueueHeadPausedWaiting
-	117, // 127: agentrepl.v1.MergeQueueEntry.terminal_owed:type_name -> agentrepl.v1.MergeQueueHeadTerminalOwed
-	119, // 128: agentrepl.v1.MergeDequeueOffer.waiting:type_name -> agentrepl.v1.MergeDequeueWaiting
-	120, // 129: agentrepl.v1.MergeDequeueOffer.running:type_name -> agentrepl.v1.MergeDequeueRunning
-	103, // 130: agentrepl.v1.MergeDequeueRunning.status:type_name -> agentrepl.v1.MergeStatus
-	128, // 131: agentrepl.v1.session_command_spec:extendee -> google.protobuf.EnumValueOptions
-	4,   // 132: agentrepl.v1.session_command_spec:type_name -> agentrepl.v1.SessionCommandSpec
-	133, // [133:133] is the sub-list for method output_type
-	133, // [133:133] is the sub-list for method input_type
-	132, // [132:133] is the sub-list for extension type_name
-	131, // [131:132] is the sub-list for extension extendee
-	0,   // [0:131] is the sub-list for field type_name
+	118, // 0: agentrepl.v1.FailureQueueEntryUninterruptibleTurn.command:type_name -> conversation.v1.SessionCommand
+	24,  // 1: agentrepl.v1.ClientCommandFailure.unsent:type_name -> agentrepl.v1.FailureCommandUnsent
+	25,  // 2: agentrepl.v1.ClientCommandFailure.rejection_unclassified:type_name -> agentrepl.v1.FailureCommandRejectionUnclassified
+	72,  // 3: agentrepl.v1.HibernationDetail.idle_cutoff:type_name -> agentrepl.v1.HibernationIdleCutoff
+	73,  // 4: agentrepl.v1.HibernationDetail.forced:type_name -> agentrepl.v1.HibernationForced
+	74,  // 5: agentrepl.v1.HibernationDetail.cache_expired:type_name -> agentrepl.v1.HibernationCacheExpired
+	0,   // 6: agentrepl.v1.ReviveCompactFirst.scope:type_name -> agentrepl.v1.CompactionScope
+	79,  // 7: agentrepl.v1.WorkspaceGateView.open:type_name -> agentrepl.v1.WorkspaceGateOpen
+	80,  // 8: agentrepl.v1.WorkspaceGateView.hibernated:type_name -> agentrepl.v1.WorkspaceGateHibernated
+	71,  // 9: agentrepl.v1.WorkspaceGateHibernated.detail:type_name -> agentrepl.v1.HibernationDetail
+	85,  // 10: agentrepl.v1.HostAction.switch_workspace:type_name -> agentrepl.v1.HostSwitchWorkspace
+	86,  // 11: agentrepl.v1.HostAction.set_repository_fold:type_name -> agentrepl.v1.HostSetRepositoryFold
+	87,  // 12: agentrepl.v1.HostAction.set_sidebar_view:type_name -> agentrepl.v1.HostSetSidebarView
+	88,  // 13: agentrepl.v1.HostAction.task_create:type_name -> agentrepl.v1.HostTaskCreate
+	89,  // 14: agentrepl.v1.HostAction.task_toggle_done:type_name -> agentrepl.v1.HostTaskById
+	89,  // 15: agentrepl.v1.HostAction.task_open:type_name -> agentrepl.v1.HostTaskById
+	89,  // 16: agentrepl.v1.HostAction.task_add_workspace:type_name -> agentrepl.v1.HostTaskById
+	90,  // 17: agentrepl.v1.HostAction.legacy_command:type_name -> agentrepl.v1.HostLegacyCommand
+	84,  // 18: agentrepl.v1.HostAction.workspace_create_failed:type_name -> agentrepl.v1.HostWorkspaceCreateFailed
+	83,  // 19: agentrepl.v1.HostAction.boot_sweep_session_unwired:type_name -> agentrepl.v1.HostBootSweepSessionUnwired
+	119, // 20: agentrepl.v1.HostLegacyCommand.payload:type_name -> google.protobuf.Struct
+	92,  // 21: agentrepl.v1.ShutdownScheduleView.idle:type_name -> agentrepl.v1.ShutdownScheduleIdle
+	93,  // 22: agentrepl.v1.ShutdownScheduleView.draining:type_name -> agentrepl.v1.ShutdownScheduleDraining
+	94,  // 23: agentrepl.v1.ShutdownScheduleDraining.holds:type_name -> agentrepl.v1.ShutdownHold
+	95,  // 24: agentrepl.v1.ShutdownHold.turn:type_name -> agentrepl.v1.ShutdownHoldTurn
+	96,  // 25: agentrepl.v1.ShutdownHold.tasks:type_name -> agentrepl.v1.ShutdownHoldTasks
+	99,  // 26: agentrepl.v1.MergeStatus.enqueued:type_name -> agentrepl.v1.MergeStatusEnqueued
+	100, // 27: agentrepl.v1.MergeStatus.before_action:type_name -> agentrepl.v1.MergeStatusBeforeAction
+	101, // 28: agentrepl.v1.MergeStatus.cherry_picking:type_name -> agentrepl.v1.MergeStatusCherryPicking
+	102, // 29: agentrepl.v1.MergeStatus.testing:type_name -> agentrepl.v1.MergeStatusTesting
+	103, // 30: agentrepl.v1.MergeStatus.conflict:type_name -> agentrepl.v1.MergeStatusConflict
+	104, // 31: agentrepl.v1.MergeStatus.after_action:type_name -> agentrepl.v1.MergeStatusAfterAction
+	105, // 32: agentrepl.v1.MergeStatus.merged:type_name -> agentrepl.v1.MergeStatusMerged
+	106, // 33: agentrepl.v1.MergeStatus.failed:type_name -> agentrepl.v1.MergeStatusFailed
+	108, // 34: agentrepl.v1.MergeQueueRoster.repos:type_name -> agentrepl.v1.MergeRepoQueue
+	109, // 35: agentrepl.v1.MergeRepoQueue.entries:type_name -> agentrepl.v1.MergeQueueEntry
+	110, // 36: agentrepl.v1.MergeQueueEntry.running:type_name -> agentrepl.v1.MergeQueueHeadRunning
+	111, // 37: agentrepl.v1.MergeQueueEntry.paused_waiting:type_name -> agentrepl.v1.MergeQueueHeadPausedWaiting
+	112, // 38: agentrepl.v1.MergeQueueEntry.terminal_owed:type_name -> agentrepl.v1.MergeQueueHeadTerminalOwed
+	114, // 39: agentrepl.v1.MergeDequeueOffer.waiting:type_name -> agentrepl.v1.MergeDequeueWaiting
+	115, // 40: agentrepl.v1.MergeDequeueOffer.running:type_name -> agentrepl.v1.MergeDequeueRunning
+	98,  // 41: agentrepl.v1.MergeDequeueRunning.status:type_name -> agentrepl.v1.MergeStatus
+	42,  // [42:42] is the sub-list for method output_type
+	42,  // [42:42] is the sub-list for method input_type
+	42,  // [42:42] is the sub-list for extension type_name
+	42,  // [42:42] is the sub-list for extension extendee
+	0,   // [0:42] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_shared_proto_init() }
@@ -9816,95 +7568,20 @@ func file_agentrepl_v1_shared_proto_init() {
 	if File_agentrepl_v1_shared_proto != nil {
 		return
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[2].OneofWrappers = []any{
-		(*FailureKind_ShimNotConnected)(nil),
-		(*FailureKind_ShimRejected)(nil),
-		(*FailureKind_ShimAckTimeout)(nil),
-		(*FailureKind_ShimVersionMismatch)(nil),
-		(*FailureKind_ShimSeqRegression)(nil),
-		(*FailureKind_ShimDegraded)(nil),
-		(*FailureKind_ShimStoreWriteRejected)(nil),
-		(*FailureKind_QueryTermination)(nil),
-		(*FailureKind_ShimNotSpawned)(nil),
-		(*FailureKind_ShimHandshakeIncomplete)(nil),
-		(*FailureKind_ShimUnhealthy)(nil),
-		(*FailureKind_SessionNotEstablished)(nil),
-		(*FailureKind_WorkspaceNotLive)(nil),
-		(*FailureKind_SessionDeleted)(nil),
-		(*FailureKind_SessionSuperseded)(nil),
-		(*FailureKind_ReconnectSuperseded)(nil),
-		(*FailureKind_SessionShimDied)(nil),
-		(*FailureKind_SessionStartFailed)(nil),
-		(*FailureKind_SessionResumeFailed)(nil),
-		(*FailureKind_ConversationUnresumable)(nil),
-		(*FailureKind_ResumeModeRetired)(nil),
-		(*FailureKind_SessionEndedUnclassified)(nil),
-		(*FailureKind_HistoryRepullInFlight)(nil),
-		(*FailureKind_HistoryReplayTruncated)(nil),
-		(*FailureKind_InterruptUndelivered)(nil),
-		(*FailureKind_QueueEntryUnwired)(nil),
-		(*FailureKind_QueueEntryKeepAliveHeld)(nil),
-		(*FailureKind_SessionHibernated)(nil),
-		(*FailureKind_KeepAliveWindowUnclosed)(nil),
-		(*FailureKind_KeepAliveWindowInverted)(nil),
-		(*FailureKind_CompactionColdRead)(nil),
-		(*FailureKind_ClientLogIdentityStale)(nil),
-		(*FailureKind_InternalUnclassified)(nil),
-		(*FailureKind_ApiAuthenticationFailed)(nil),
-		(*FailureKind_ApiBillingError)(nil),
-		(*FailureKind_ApiRateLimit)(nil),
-		(*FailureKind_ApiInvalidRequest)(nil),
-		(*FailureKind_ApiServerError)(nil),
-		(*FailureKind_ApiOverloaded)(nil),
-		(*FailureKind_ApiOauthOrgNotAllowed)(nil),
-		(*FailureKind_ApiModelNotFound)(nil),
-		(*FailureKind_ApiNetworkDown)(nil),
-		(*FailureKind_ApiRequestFailed)(nil),
-		(*FailureKind_ApiUnknown)(nil),
-		(*FailureKind_ApiMaxOutputTokens)(nil),
-		(*FailureKind_ApiMaxTurns)(nil),
-		(*FailureKind_ApiMaxBudget)(nil),
-		(*FailureKind_ApiExecutionError)(nil),
-		(*FailureKind_ApiRefusal)(nil),
-		(*FailureKind_ApiTurnFailed)(nil),
-		(*FailureKind_PromptRefusedByMergeState)(nil),
-		(*FailureKind_QueueEntryUninterruptibleTurn)(nil),
-		(*FailureKind_TurnUndriven)(nil),
-		(*FailureKind_ReplayMarkRetired)(nil),
-		(*FailureKind_DaemonUnreachable)(nil),
-		(*FailureKind_WorkspaceGone)(nil),
-		(*FailureKind_BootFailed)(nil),
-		(*FailureKind_ControlPlaneFailed)(nil),
-		(*FailureKind_FrameUndecodable)(nil),
-		(*FailureKind_StaleBundle)(nil),
-		(*FailureKind_CommandUnsent)(nil),
-		(*FailureKind_CommandRejectionUnclassified)(nil),
+	file_agentrepl_v1_shared_proto_msgTypes[20].OneofWrappers = []any{
+		(*ClientCommandFailure_Unsent)(nil),
+		(*ClientCommandFailure_RejectionUnclassified)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[65].OneofWrappers = []any{
-		(*QueryTerminationFailure_VendorSessionId)(nil),
-		(*QueryTerminationFailure_VendorSessionIdentityUnavailable)(nil),
-		(*QueryTerminationFailure_UnexpectedEof)(nil),
-		(*QueryTerminationFailure_IteratorFailure)(nil),
-		(*QueryTerminationFailure_StartupFailure)(nil),
-	}
-	file_agentrepl_v1_shared_proto_msgTypes[66].OneofWrappers = []any{
-		(*SessionResumeFailure_Create)(nil),
-		(*SessionResumeFailure_AutomaticRestore)(nil),
-		(*SessionResumeFailure_TranscriptUnavailable)(nil),
-		(*SessionResumeFailure_IdentityMismatch)(nil),
-		(*SessionResumeFailure_QueryTermination)(nil),
-		(*SessionResumeFailure_BringUpFailure)(nil),
-	}
-	file_agentrepl_v1_shared_proto_msgTypes[72].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[68].OneofWrappers = []any{
 		(*HibernationDetail_IdleCutoff)(nil),
 		(*HibernationDetail_Forced)(nil),
 		(*HibernationDetail_CacheExpired)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[79].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[75].OneofWrappers = []any{
 		(*WorkspaceGateView_Open)(nil),
 		(*WorkspaceGateView_Hibernated)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[83].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[79].OneofWrappers = []any{
 		(*HostAction_SwitchWorkspace)(nil),
 		(*HostAction_SetRepositoryFold)(nil),
 		(*HostAction_SetSidebarView)(nil),
@@ -9916,11 +7593,11 @@ func file_agentrepl_v1_shared_proto_init() {
 		(*HostAction_WorkspaceCreateFailed)(nil),
 		(*HostAction_BootSweepSessionUnwired)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[92].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[88].OneofWrappers = []any{
 		(*ShutdownScheduleView_Idle)(nil),
 		(*ShutdownScheduleView_Draining)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[99].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[95].OneofWrappers = []any{
 		(*MergeStatus_Enqueued)(nil),
 		(*MergeStatus_BeforeAction)(nil),
 		(*MergeStatus_CherryPicking)(nil),
@@ -9930,12 +7607,12 @@ func file_agentrepl_v1_shared_proto_init() {
 		(*MergeStatus_Merged)(nil),
 		(*MergeStatus_Failed)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[110].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[106].OneofWrappers = []any{
 		(*MergeQueueEntry_Running)(nil),
 		(*MergeQueueEntry_PausedWaiting)(nil),
 		(*MergeQueueEntry_TerminalOwed)(nil),
 	}
-	file_agentrepl_v1_shared_proto_msgTypes[114].OneofWrappers = []any{
+	file_agentrepl_v1_shared_proto_msgTypes[110].OneofWrappers = []any{
 		(*MergeDequeueOffer_Waiting)(nil),
 		(*MergeDequeueOffer_Running)(nil),
 	}
@@ -9944,16 +7621,15 @@ func file_agentrepl_v1_shared_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_shared_proto_rawDesc), len(file_agentrepl_v1_shared_proto_rawDesc)),
-			NumEnums:      4,
-			NumMessages:   119,
-			NumExtensions: 1,
+			NumEnums:      3,
+			NumMessages:   115,
+			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_agentrepl_v1_shared_proto_goTypes,
 		DependencyIndexes: file_agentrepl_v1_shared_proto_depIdxs,
 		EnumInfos:         file_agentrepl_v1_shared_proto_enumTypes,
 		MessageInfos:      file_agentrepl_v1_shared_proto_msgTypes,
-		ExtensionInfos:    file_agentrepl_v1_shared_proto_extTypes,
 	}.Build()
 	File_agentrepl_v1_shared_proto = out.File
 	file_agentrepl_v1_shared_proto_goTypes = nil
