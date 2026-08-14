@@ -30,7 +30,7 @@ import type { JsonObject, Message as Message$1 } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/feed.proto.
  */
 export const file_frontend_v1_feed: GenFile = /*@__PURE__*/
-  fileDesc("ChZmcm9udGVuZC92MS9mZWVkLnByb3RvEgtmcm9udGVuZC52MSJyChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSJgoIbWVzc2FnZXMYAiADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEhMKC3Rocm91Z2hfc2VxGAMgASgEEg0KBWZlbmNlGAQgASgJIkkKDk1lc3NhZ2VMaW5lYWdlEhwKFHRvcF9sZXZlbF9tZXNzYWdlX2lkGAEgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAIgASgJIhAKDk1lc3NhZ2VEdXJhYmxlIhIKEE1lc3NhZ2VFcGhlbWVyYWwi9gQKB01lc3NhZ2USDAoEdXVpZBgBIAEoCRINCgV0c19tcxgCIAEoAxISCgpyZXF1ZXN0X2lkGAMgASgJEi8KBnNvdXJjZRgEIAEoDjIfLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblNvdXJjZRIsCgdsaW5lYWdlGAUgASgLMhsuZnJvbnRlbmQudjEuTWVzc2FnZUxpbmVhZ2USLgoHZHVyYWJsZRgGIAEoCzIbLmZyb250ZW5kLnYxLk1lc3NhZ2VEdXJhYmxlSAASMgoJZXBoZW1lcmFsGAcgASgLMh0uZnJvbnRlbmQudjEuTWVzc2FnZUVwaGVtZXJhbEgAEisKBWFnZW50GAggASgLMhouZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbkgBEjQKDHVzZXJfbWVzc2FnZRgJIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5Vc2VyQ29udGVudEgBEjQKDGZhaWx1cmVfY2FyZBgKIAEoCzIcLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVmlld0gBEk8KGmRhZW1vbl9pbnRlcmNlcHRlZF9jb21tYW5kGAsgASgLMikuZnJvbnRlbmQudjEuRGFlbW9uSW50ZXJjZXB0ZWRDb21tYW5kSXRlbUgBEjIKDWRldGFjaGVkX3dvcmsYDCABKAsyGS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtIARJAChJjb21wYWN0aW9uX3N1bW1hcnkYDSABKAsyIi5mcm9udGVuZC52MS5Db21wYWN0aW9uU3VtbWFyeUl0ZW1IAUIMCgpkdXJhYmlsaXR5QgkKB3BheWxvYWQiogEKEURldGFjaGVkV29ya0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIkCgZvcGVuZWQYAiADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEjAKB3VwZGF0ZXMYAyADKAsyHy5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtVcGRhdGUSEwoLdGhyb3VnaF9zZXEYBCABKAQSDQoFZmVuY2UYBSABKAkiYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMiSgoLVHlwaW5nRGVsdGESEQoJd29ya3NwYWNlGAEgASgJEg0KBWZlbmNlGAIgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAMgASgJIkgKCVR5cGluZ0N1dBIRCgl3b3Jrc3BhY2UYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAkSDQoFZmVuY2UYAyABKAkiXgoPU2Vzc2lvbkluaXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRIpCgRyb3dzGAIgAygLMhsuZnJvbnRlbmQudjEuU2Vzc2lvbkluaXRSb3cSDQoFZmVuY2UYAyABKAkiLgoOU2Vzc2lvbkluaXRSb3cSDQoFbGFiZWwYASABKAkSDQoFdmFsdWUYAiABKAkirQIKDUFnZW50RW1pc3Npb24SLgoIcmVzcG9uc2UYASABKAsyGi5mcm9udGVuZC52MS5BZ2VudFJlc3BvbnNlSAASNAoLdG9vbF9yZXN1bHQYAiABKAsyHS5jb252ZXJzYXRpb24udjEuVG9vbFJldHVybmVkSAASNQoMdG9vbF9vdXRjb21lGAMgASgLMh0uZnJvbnRlbmQudjEuQWdlbnRUb29sT3V0Y29tZUgAEjgKCnNraWxsX2JvZHkYBCABKAsyIi5jb252ZXJzYXRpb24udjEuU2tpbGxCb2R5UmVzb2x2ZWRIABI5Cgt0dXJuX3Jlc3VsdBgFIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEgAQgoKCGVtaXNzaW9uIp8BCg1BZ2VudFJlc3BvbnNlEigKBHNhaWQYASABKAsyGi5jb252ZXJzYXRpb24udjEuQWdlbnRTYWlkEjQKC3VzYWdlX3N0YW1wGAIgASgLMh8uZnJvbnRlbmQudjEuUmVzcG9uc2VVc2FnZVN0YW1wEi4KCHZlcmRpY3RzGAMgAygLMhwuZnJvbnRlbmQudjEuVG9vbENhbGxWZXJkaWN0IkIKD1Rvb2xDYWxsVmVyZGljdBITCgt0b29sX3VzZV9pZBgBIAEoCRIaChJzcGF3bmVkX21lc3NhZ2VfaWQYAiABKAkidQoSUmVzcG9uc2VVc2FnZVN0YW1wEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYASABKAMSGQoRY2FjaGVfcmVhZF90b2tlbnMYAiABKAMSFQoNb3V0cHV0X3Rva2VucxgDIAEoAxINCgVtb2RlbBgEIAEoCSK8AQoQQWdlbnRUb29sT3V0Y29tZRI3CgdzdGFydGVkGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya1N0YXJ0ZWRIABIzCgVlbmRlZBgCIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEgAEhMKC3Rvb2xfdXNlX2lkGAMgASgJEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgEIAEoCUIJCgdvdXRjb21lItIDCglUYXNrRW50cnkSDwoHdGFza19pZBgBIAEoCRITCgtkZXNjcmlwdGlvbhgCIAEoCRITCgtvdXRwdXRfcGF0aBgDIAEoCRIVCg1zdGFydGVkX2F0X21zGAQgASgDEhMKC2VuZGVkX2F0X21zGAUgASgDEjQKCXdvcmtfa2luZBgGIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtLaW5kEjEKB3J1bm5pbmcYByABKAsyHi5mcm9udGVuZC52MS5UYXNrU3RhdHVzUnVubmluZ0gAEisKBGRvbmUYCCABKAsyGy5mcm9udGVuZC52MS5UYXNrU3RhdHVzRG9uZUgAEi0KBWVycm9yGAkgASgLMhwuZnJvbnRlbmQudjEuVGFza1N0YXR1c0Vycm9ySAASLwoGa2lsbGVkGAogASgLMh0uZnJvbnRlbmQudjEuVGFza1N0YXR1c0tpbGxlZEgAEjEKB3N0b3BwZWQYCyABKAsyHi5mcm9udGVuZC52MS5UYXNrU3RhdHVzU3RvcHBlZEgAEisKBGxvc3QYDCABKAsyGy5mcm9udGVuZC52MS5UYXNrU3RhdHVzTG9zdEgAQggKBnN0YXR1cyITChFUYXNrU3RhdHVzUnVubmluZyIQCg5UYXNrU3RhdHVzRG9uZSIRCg9UYXNrU3RhdHVzRXJyb3IiEgoQVGFza1N0YXR1c0tpbGxlZCITChFUYXNrU3RhdHVzU3RvcHBlZCIQCg5UYXNrU3RhdHVzTG9zdCJWCgtUYXNrQ2F0YWxvZxIRCgl3b3Jrc3BhY2UYASABKAkSJQoFdGFza3MYAiADKAsyFi5mcm9udGVuZC52MS5UYXNrRW50cnkSDQoFZmVuY2UYAyABKAkiTAocRGFlbW9uSW50ZXJjZXB0ZWRDb21tYW5kSXRlbRIsCgdjb21tYW5kGAEgASgOMhsuZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmQigQIKD0ZhaWx1cmVDYXJkVmlldxImCgRraW5kGAEgASgLMhguZnJvbnRlbmQudjEuRmFpbHVyZUtpbmQSDwoHbWVzc2FnZRgCIAEoCRIOCgZkZXRhaWwYAyABKAkSLAoEb3BlbhgEIAEoCzIcLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkT3BlbkgAEjQKCHJlc29sdmVkGAUgASgLMiAuZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRSZXNvbHZlZEgAEjQKCHRlcm1pbmFsGAYgASgLMiAuZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRUZXJtaW5hbEgAQgsKCWxpZmVjeWNsZSIRCg9GYWlsdXJlQ2FyZE9wZW4iLQoTRmFpbHVyZUNhcmRSZXNvbHZlZBIWCg5yZXNvbHZlZF9hdF9tcxgBIAEoAyIVChNGYWlsdXJlQ2FyZFRlcm1pbmFsIiMKDkZhaWx1cmVDYXJkUmVmEhEKCWNhcmRfdXVpZBgBIAEoCSKJAQoTUGVybWlzc2lvbkFuc3dlckNtZBIdChVwZXJtaXNzaW9uX3JlcXVlc3RfaWQYASABKAkSDQoFYWxsb3cYAiABKAgSLgoNdXBkYXRlZF9pbnB1dBgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSFAoMZGVueV9tZXNzYWdlGAQgASgJIqQBCgxEZXRhY2hlZFdvcmsSNQoHc3RhcnRlZBgBIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtTdGFydGVkEhUKDXN0YXJ0ZWRfYXRfbXMYAiABKAMSMwoIbGl2ZW5lc3MYAyABKAsyIS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlbmVzcxIRCgl3b3Jrc3BhY2UYBCABKAkiJwoXRGV0YWNoZWRXb3JrT3V0cHV0U3Bvb2wSDAoEdGV4dBgBIAEoCSKDAQoURGV0YWNoZWRXb3JrTGl2ZW5lc3MSLQoEbGl2ZRgBIAEoCzIdLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0xpdmVIABIzCgdzZXR0bGVkGAIgASgLMiAuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrU2V0dGxlZEgAQgcKBXN0YXRlIiwKEERldGFjaGVkV29ya0xpdmUSGAoQbGFzdF9hY3Rpdml0eV9tcxgBIAEoAyKXAQoTRGV0YWNoZWRXb3JrU2V0dGxlZBIVCg1zZXR0bGVkX2F0X21zGAEgASgDEjEKBWVuZGVkGAIgASgLMiIuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0VuZGVkEjYKBmtpbGxlZBgDIAEoCzImLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dGNvbWVLaWxsZWQiKwoZRGV0YWNoZWRXb3JrT3V0Y29tZUtpbGxlZBIOCgZyZWFzb24YASABKAkixgMKEkRldGFjaGVkV29ya1VwZGF0ZRISCgptZXNzYWdlX2lkGAEgASgJEjUKBWFnZW50GAIgASgLMiQuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrQWdlbnRVcGRhdGVIABI5Cgdqb3VybmFsGAMgASgLMiYuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrSm91cm5hbFVwZGF0ZUgAEjYKBXNoZWxsGAQgASgLMiUuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrT3V0cHV0QXBwZW5kSAASPQoMdW5jbGFzc2lmaWVkGAUgASgLMiUuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrT3V0cHV0QXBwZW5kSAASOwoIbGl2ZW5lc3MYBiABKAsyJy5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlbmVzc1VwZGF0ZUgAEjUKBW1lcmdlGAcgASgLMiQuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrQWdlbnRVcGRhdGVIABI1CgVza2lsbBgIIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya1NraWxsVXBkYXRlSABCCAoGdXBkYXRlIkgKF0RldGFjaGVkV29ya0FnZW50VXBkYXRlEi0KCWVtaXNzaW9ucxgBIAMoCzIaLmZyb250ZW5kLnYxLkFnZW50RW1pc3Npb24ikgEKF0RldGFjaGVkV29ya1NraWxsVXBkYXRlEjIKBGJvZHkYASABKAsyIi5jb252ZXJzYXRpb24udjEuU2tpbGxCb2R5UmVzb2x2ZWRIABI5CgllbWlzc2lvbnMYAiABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtBZ2VudFVwZGF0ZUgAQggKBnVwZGF0ZSJIChlEZXRhY2hlZFdvcmtKb3VybmFsVXBkYXRlEisKBHJvd3MYASADKAsyHS5jb252ZXJzYXRpb24udjEuV29ya2Zsb3dTdGVwIigKGERldGFjaGVkV29ya091dHB1dEFwcGVuZBIMCgR0ZXh0GAEgASgJIlEKGkRldGFjaGVkV29ya0xpdmVuZXNzVXBkYXRlEjMKCGxpdmVuZXNzGAEgASgLMiEuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3MicAoJUGFnZVNjb3BlEioKBGZlZWQYASABKAsyGi5mcm9udGVuZC52MS5QYWdlU2NvcGVGZWVkSAASLgoGaW5zaWRlGAIgASgLMhwuZnJvbnRlbmQudjEuUGFnZVNjb3BlSW5zaWRlSABCBwoFc2NvcGUiDwoNUGFnZVNjb3BlRmVlZCIvCg9QYWdlU2NvcGVJbnNpZGUSHAoUY29udGFpbmVyX21lc3NhZ2VfaWQYASABKAkiSAoMRmlyc3RQYWdlQ21kEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgVzY29wZRgCIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZSJHCgtOZXh0UGFnZUNtZBIRCgl3b3Jrc3BhY2UYASABKAkSJQoFc2NvcGUYAiABKAsyFi5mcm9udGVuZC52MS5QYWdlU2NvcGUirwIKF0NvbnZlcnNhdGlvbkhpc3RvcnlQYWdlEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpyZXF1ZXN0X2lkGAIgASgJEiYKCG1lc3NhZ2VzGAMgAygLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRIrCgRtb3JlGAQgASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUhhc01vcmVIABIsCgVzdGFydBgFIAEoCzIbLmZyb250ZW5kLnYxLkhpc3RvcnlBdFN0YXJ0SAASFQoNbGl2ZV9qb2luX3NlcRgGIAEoBBIlCgVzY29wZRgHIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZRIcChRhbmNlc3Rvcl9tZXNzYWdlX2lkcxgIIAMoCUIOCgxjb250aW51YXRpb24iEAoOSGlzdG9yeUhhc01vcmUiEAoOSGlzdG9yeUF0U3RhcnQqdgoSQ29udmVyc2F0aW9uU291cmNlEiMKH0NPTlZFUlNBVElPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIcChhDT05WRVJTQVRJT05fU09VUkNFX1VTRVIQARIdChlDT05WRVJTQVRJT05fU09VUkNFX01FUkdFEAJCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_conversation_v1_content, file_conversation_v1_payloads, file_frontend_v1_shared, file_google_protobuf_struct]);
+  fileDesc("ChZmcm9udGVuZC92MS9mZWVkLnByb3RvEgtmcm9udGVuZC52MSJyChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSJgoIbWVzc2FnZXMYAiADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEhMKC3Rocm91Z2hfc2VxGAMgASgEEg0KBWZlbmNlGAQgASgJIkkKDk1lc3NhZ2VMaW5lYWdlEhwKFHRvcF9sZXZlbF9tZXNzYWdlX2lkGAEgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAIgASgJIoQECgdNZXNzYWdlEgwKBHV1aWQYASABKAkSDQoFdHNfbXMYAiABKAMSEgoKcmVxdWVzdF9pZBgDIAEoCRIvCgZzb3VyY2UYBCABKA4yHy5mcm9udGVuZC52MS5Db252ZXJzYXRpb25Tb3VyY2USLAoHbGluZWFnZRgFIAEoCzIbLmZyb250ZW5kLnYxLk1lc3NhZ2VMaW5lYWdlEisKBWFnZW50GAYgASgLMhouZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbkgAEjQKDHVzZXJfbWVzc2FnZRgHIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5Vc2VyQ29udGVudEgAEjQKDGZhaWx1cmVfY2FyZBgIIAEoCzIcLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVmlld0gAEk8KGmRhZW1vbl9pbnRlcmNlcHRlZF9jb21tYW5kGAkgASgLMikuZnJvbnRlbmQudjEuRGFlbW9uSW50ZXJjZXB0ZWRDb21tYW5kSXRlbUgAEjIKDWRldGFjaGVkX3dvcmsYCiABKAsyGS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtIABJAChJjb21wYWN0aW9uX3N1bW1hcnkYCyABKAsyIi5mcm9udGVuZC52MS5Db21wYWN0aW9uU3VtbWFyeUl0ZW1IAEIJCgdwYXlsb2FkIqIBChFEZXRhY2hlZFdvcmtEZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSJAoGb3BlbmVkGAIgAygLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRIwCgd1cGRhdGVzGAMgAygLMh8uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrVXBkYXRlEhMKC3Rocm91Z2hfc2VxGAQgASgEEg0KBWZlbmNlGAUgASgJImEKFUNvbXBhY3Rpb25TdW1tYXJ5SXRlbRIPCgdzdW1tYXJ5GAEgASgJEhcKD2NvbXBhY3RlZF9hdF9tcxgCIAEoAxIeChZleHBlbnNpdmVfaW5wdXRfdG9rZW5zGAMgASgDIkoKC1R5cGluZ0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRINCgVmZW5jZRgCIAEoCRIZChFwYXJlbnRfbWVzc2FnZV9pZBgDIAEoCSJICglUeXBpbmdDdXQSEQoJd29ya3NwYWNlGAEgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAIgASgJEg0KBWZlbmNlGAMgASgJIl4KD1Nlc3Npb25Jbml0VmlldxIRCgl3b3Jrc3BhY2UYASABKAkSKQoEcm93cxgCIAMoCzIbLmZyb250ZW5kLnYxLlNlc3Npb25Jbml0Um93Eg0KBWZlbmNlGAMgASgJIi4KDlNlc3Npb25Jbml0Um93Eg0KBWxhYmVsGAEgASgJEg0KBXZhbHVlGAIgASgJIq0CCg1BZ2VudEVtaXNzaW9uEi4KCHJlc3BvbnNlGAEgASgLMhouZnJvbnRlbmQudjEuQWdlbnRSZXNwb25zZUgAEjQKC3Rvb2xfcmVzdWx0GAIgASgLMh0uY29udmVyc2F0aW9uLnYxLlRvb2xSZXR1cm5lZEgAEjUKDHRvb2xfb3V0Y29tZRgDIAEoCzIdLmZyb250ZW5kLnYxLkFnZW50VG9vbE91dGNvbWVIABI4Cgpza2lsbF9ib2R5GAQgASgLMiIuY29udmVyc2F0aW9uLnYxLlNraWxsQm9keVJlc29sdmVkSAASOQoLdHVybl9yZXN1bHQYBSABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWRIAEIKCghlbWlzc2lvbiKfAQoNQWdlbnRSZXNwb25zZRIoCgRzYWlkGAEgASgLMhouY29udmVyc2F0aW9uLnYxLkFnZW50U2FpZBI0Cgt1c2FnZV9zdGFtcBgCIAEoCzIfLmZyb250ZW5kLnYxLlJlc3BvbnNlVXNhZ2VTdGFtcBIuCgh2ZXJkaWN0cxgDIAMoCzIcLmZyb250ZW5kLnYxLlRvb2xDYWxsVmVyZGljdCJCCg9Ub29sQ2FsbFZlcmRpY3QSEwoLdG9vbF91c2VfaWQYASABKAkSGgoSc3Bhd25lZF9tZXNzYWdlX2lkGAIgASgJInUKElJlc3BvbnNlVXNhZ2VTdGFtcBIeChZleHBlbnNpdmVfaW5wdXRfdG9rZW5zGAEgASgDEhkKEWNhY2hlX3JlYWRfdG9rZW5zGAIgASgDEhUKDW91dHB1dF90b2tlbnMYAyABKAMSDQoFbW9kZWwYBCABKAkivAEKEEFnZW50VG9vbE91dGNvbWUSNwoHc3RhcnRlZBgBIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtTdGFydGVkSAASMwoFZW5kZWQYAiABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWRIABITCgt0b29sX3VzZV9pZBgDIAEoCRIaChJzcGF3bmVkX21lc3NhZ2VfaWQYBCABKAlCCQoHb3V0Y29tZSLSAwoJVGFza0VudHJ5Eg8KB3Rhc2tfaWQYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSEwoLb3V0cHV0X3BhdGgYAyABKAkSFQoNc3RhcnRlZF9hdF9tcxgEIAEoAxITCgtlbmRlZF9hdF9tcxgFIAEoAxI0Cgl3b3JrX2tpbmQYBiABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZBIxCgdydW5uaW5nGAcgASgLMh4uZnJvbnRlbmQudjEuVGFza1N0YXR1c1J1bm5pbmdIABIrCgRkb25lGAggASgLMhsuZnJvbnRlbmQudjEuVGFza1N0YXR1c0RvbmVIABItCgVlcnJvchgJIAEoCzIcLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNFcnJvckgAEi8KBmtpbGxlZBgKIAEoCzIdLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNLaWxsZWRIABIxCgdzdG9wcGVkGAsgASgLMh4uZnJvbnRlbmQudjEuVGFza1N0YXR1c1N0b3BwZWRIABIrCgRsb3N0GAwgASgLMhsuZnJvbnRlbmQudjEuVGFza1N0YXR1c0xvc3RIAEIICgZzdGF0dXMiEwoRVGFza1N0YXR1c1J1bm5pbmciEAoOVGFza1N0YXR1c0RvbmUiEQoPVGFza1N0YXR1c0Vycm9yIhIKEFRhc2tTdGF0dXNLaWxsZWQiEwoRVGFza1N0YXR1c1N0b3BwZWQiEAoOVGFza1N0YXR1c0xvc3QiVgoLVGFza0NhdGFsb2cSEQoJd29ya3NwYWNlGAEgASgJEiUKBXRhc2tzGAIgAygLMhYuZnJvbnRlbmQudjEuVGFza0VudHJ5Eg0KBWZlbmNlGAMgASgJIkwKHERhZW1vbkludGVyY2VwdGVkQ29tbWFuZEl0ZW0SLAoHY29tbWFuZBgBIAEoDjIbLmZyb250ZW5kLnYxLlNlc3Npb25Db21tYW5kIoECCg9GYWlsdXJlQ2FyZFZpZXcSJgoEa2luZBgBIAEoCzIYLmZyb250ZW5kLnYxLkZhaWx1cmVLaW5kEg8KB21lc3NhZ2UYAiABKAkSDgoGZGV0YWlsGAMgASgJEiwKBG9wZW4YBCABKAsyHC5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZE9wZW5IABI0CghyZXNvbHZlZBgFIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkUmVzb2x2ZWRIABI0Cgh0ZXJtaW5hbBgGIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVGVybWluYWxIAEILCglsaWZlY3ljbGUiEQoPRmFpbHVyZUNhcmRPcGVuIi0KE0ZhaWx1cmVDYXJkUmVzb2x2ZWQSFgoOcmVzb2x2ZWRfYXRfbXMYASABKAMiFQoTRmFpbHVyZUNhcmRUZXJtaW5hbCIjCg5GYWlsdXJlQ2FyZFJlZhIRCgljYXJkX3V1aWQYASABKAkiiQEKE1Blcm1pc3Npb25BbnN3ZXJDbWQSHQoVcGVybWlzc2lvbl9yZXF1ZXN0X2lkGAEgASgJEg0KBWFsbG93GAIgASgIEi4KDXVwZGF0ZWRfaW5wdXQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhQKDGRlbnlfbWVzc2FnZRgEIAEoCSKkAQoMRGV0YWNoZWRXb3JrEjUKB3N0YXJ0ZWQYASABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZBIVCg1zdGFydGVkX2F0X21zGAIgASgDEjMKCGxpdmVuZXNzGAMgASgLMiEuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3MSEQoJd29ya3NwYWNlGAQgASgJIoMBChREZXRhY2hlZFdvcmtMaXZlbmVzcxItCgRsaXZlGAEgASgLMh0uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZUgAEjMKB3NldHRsZWQYAiABKAsyIC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTZXR0bGVkSABCBwoFc3RhdGUiLAoQRGV0YWNoZWRXb3JrTGl2ZRIYChBsYXN0X2FjdGl2aXR5X21zGAEgASgDIpcBChNEZXRhY2hlZFdvcmtTZXR0bGVkEhUKDXNldHRsZWRfYXRfbXMYASABKAMSMQoFZW5kZWQYAiABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWQSNgoGa2lsbGVkGAMgASgLMiYuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrT3V0Y29tZUtpbGxlZCIrChlEZXRhY2hlZFdvcmtPdXRjb21lS2lsbGVkEg4KBnJlYXNvbhgBIAEoCSLGAwoSRGV0YWNoZWRXb3JrVXBkYXRlEhIKCm1lc3NhZ2VfaWQYASABKAkSNQoFYWdlbnQYAiABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtBZ2VudFVwZGF0ZUgAEjkKB2pvdXJuYWwYAyABKAsyJi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtKb3VybmFsVXBkYXRlSAASNgoFc2hlbGwYBCABKAsyJS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtPdXRwdXRBcHBlbmRIABI9Cgx1bmNsYXNzaWZpZWQYBSABKAsyJS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtPdXRwdXRBcHBlbmRIABI7CghsaXZlbmVzcxgGIAEoCzInLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0xpdmVuZXNzVXBkYXRlSAASNQoFbWVyZ2UYByABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtBZ2VudFVwZGF0ZUgAEjUKBXNraWxsGAggASgLMiQuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrU2tpbGxVcGRhdGVIAEIICgZ1cGRhdGUiSAoXRGV0YWNoZWRXb3JrQWdlbnRVcGRhdGUSLQoJZW1pc3Npb25zGAEgAygLMhouZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbiKSAQoXRGV0YWNoZWRXb3JrU2tpbGxVcGRhdGUSMgoEYm9keRgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ta2lsbEJvZHlSZXNvbHZlZEgAEjkKCWVtaXNzaW9ucxgCIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSABCCAoGdXBkYXRlIkgKGURldGFjaGVkV29ya0pvdXJuYWxVcGRhdGUSKwoEcm93cxgBIAMoCzIdLmNvbnZlcnNhdGlvbi52MS5Xb3JrZmxvd1N0ZXAiKAoYRGV0YWNoZWRXb3JrT3V0cHV0QXBwZW5kEgwKBHRleHQYASABKAkiUQoaRGV0YWNoZWRXb3JrTGl2ZW5lc3NVcGRhdGUSMwoIbGl2ZW5lc3MYASABKAsyIS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlbmVzcyJwCglQYWdlU2NvcGUSKgoEZmVlZBgBIAEoCzIaLmZyb250ZW5kLnYxLlBhZ2VTY29wZUZlZWRIABIuCgZpbnNpZGUYAiABKAsyHC5mcm9udGVuZC52MS5QYWdlU2NvcGVJbnNpZGVIAEIHCgVzY29wZSIPCg1QYWdlU2NvcGVGZWVkIi8KD1BhZ2VTY29wZUluc2lkZRIcChRjb250YWluZXJfbWVzc2FnZV9pZBgBIAEoCSJICgxGaXJzdFBhZ2VDbWQSEQoJd29ya3NwYWNlGAEgASgJEiUKBXNjb3BlGAIgASgLMhYuZnJvbnRlbmQudjEuUGFnZVNjb3BlIkcKC05leHRQYWdlQ21kEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgVzY29wZRgCIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZSKvAgoXQ29udmVyc2F0aW9uSGlzdG9yeVBhZ2USEQoJd29ya3NwYWNlGAEgASgJEhIKCnJlcXVlc3RfaWQYAiABKAkSJgoIbWVzc2FnZXMYAyADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEisKBG1vcmUYBCABKAsyGy5mcm9udGVuZC52MS5IaXN0b3J5SGFzTW9yZUgAEiwKBXN0YXJ0GAUgASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUF0U3RhcnRIABIVCg1saXZlX2pvaW5fc2VxGAYgASgEEiUKBXNjb3BlGAcgASgLMhYuZnJvbnRlbmQudjEuUGFnZVNjb3BlEhwKFGFuY2VzdG9yX21lc3NhZ2VfaWRzGAggAygJQg4KDGNvbnRpbnVhdGlvbiIQCg5IaXN0b3J5SGFzTW9yZSIQCg5IaXN0b3J5QXRTdGFydCp2ChJDb252ZXJzYXRpb25Tb3VyY2USIwofQ09OVkVSU0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEhwKGENPTlZFUlNBVElPTl9TT1VSQ0VfVVNFUhABEh0KGUNPTlZFUlNBVElPTl9TT1VSQ0VfTUVSR0UQAkIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_content, file_conversation_v1_payloads, file_frontend_v1_shared, file_google_protobuf_struct]);
 
 /**
  * Complete (store-round-tripped) conversation additions, composed from the
@@ -147,70 +147,6 @@ export const MessageLineageSchema: GenMessage<MessageLineage> = /*@__PURE__*/
   messageDesc(file_frontend_v1_feed, 1);
 
 /**
- * The durable class: a store record exists for this message.
- *
- * EMPTY ON PURPOSE. The message's own uuid is the record's key, so there is
- * nothing to carry that the envelope does not already say; a field here would
- * be a second address for a row already addressable, and the two could
- * disagree. The arm being SET is the entire claim.
- *
- * The claim it makes is checkable and must be checked: a durable message the
- * store cannot produce is corruption, and reporting it as an ordinary miss is
- * how a lost conversation looks like an empty one.
- *
- * @generated from message frontend.v1.MessageDurable
- */
-export type MessageDurable = Message$1<"frontend.v1.MessageDurable"> & {
-};
-
-/**
- * Describes the message frontend.v1.MessageDurable.
- * Use `create(MessageDurableSchema)` to create a new message.
- */
-export const MessageDurableSchema: GenMessage<MessageDurable> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 2);
-
-/**
- * The ephemeral class: no store record exists for this message, and none ever
- * will — not because a write failed or has not landed yet, but because there
- * was never anything to write.
- *
- * MEMBERSHIP IS DECIDED BY WHETHER CLAUDE EVER SAW THE THING, never by who
- * minted the id. A slash command the daemon answers alone (`/model` and its
- * siblings) never reaches the CLI, so the CLI writes nothing; a
- * system/local_command record is ruled out of the durable set; a failure card
- * the daemon synthesized describes a session that failed to start, so there is
- * no transcript for it to live in. Conversely a daemon-MINTED id over a real
- * TaskStarted is durable, because the record exists.
- *
- * THE LINEAGE RULES ARE THIS CLASS'S SHAPE, not advice about it. An ephemeral
- * message is ALWAYS a feed row — empty parent_message_id, top_level_message_id
- * equal to its own id — and it is NEVER at either end of a containment edge
- * crossing the classes:
- *
- *   - It may not be a parent. A durable child naming an ephemeral root would
- *     be unreachable by any store query, since a store record can only name
- *     ids that exist in the store.
- *   - It may not name a durable parent. Otherwise an ephemeral card attaches
- *     itself into a paged conversation that it will simply vanish from,
- *     leaving a hole where a reader has every reason to expect a message.
- *
- * Those are refused at construction, so a violating message cannot be built
- * and then noticed; a check applied afterwards is a check something can skip.
- *
- * @generated from message frontend.v1.MessageEphemeral
- */
-export type MessageEphemeral = Message$1<"frontend.v1.MessageEphemeral"> & {
-};
-
-/**
- * Describes the message frontend.v1.MessageEphemeral.
- * Use `create(MessageEphemeralSchema)` to create a new message.
- */
-export const MessageEphemeralSchema: GenMessage<MessageEphemeral> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 3);
-
-/**
  * One curated conversation addition: FEED PACKAGING wrapped around a payload.
  *
  * The packaging is what the feed knows about a message regardless of what the
@@ -296,57 +232,6 @@ export type Message = Message$1<"frontend.v1.Message"> & {
   lineage?: MessageLineage | undefined;
 
   /**
-   * WHETHER A DURABLE RECORD FOR THIS MESSAGE EXISTS AT ALL. Always set: a
-   * message with neither arm is malformed and is rejected loudly rather than
-   * assumed durable, exactly as an UNSPECIFIED source is.
-   *
-   * WHY THIS IS AN ARM AND NOT A BOOLEAN. A `bool ephemeral` would let a
-   * message that HAS a record claim it has none, and a message that has none
-   * claim a record — two lies the type could tell. Here the class is the set
-   * arm, so the two are mutually exclusive by construction and neither can be
-   * half-stated. It is also why the arms carry no fields: the fact IS the
-   * membership, and any field on either arm would be a second, weaker place
-   * for the same claim to be made differently.
-   *
-   * WHY IT IS STATED AT ALL, rather than discovered by looking. Without it,
-   * "no durable record exists for this message" is indistinguishable from "the
-   * record was not found" — a page missing an ephemeral card looks exactly
-   * like a page that LOST a durable one, and the second is data loss reported
-   * as normal. Stating the class turns the absence into a property a reader
-   * can check, so a durable message missing from the store stays a loud
-   * failure while an ephemeral one missing from it is simply correct.
-   *
-   * IT IS PACKAGING, NOT PAYLOAD, and sits beside lineage for the same reason:
-   * it is a fact about the message whatever the message is, and a per-arm copy
-   * would be a per-arm chance to disagree. It also constrains lineage directly
-   * — see MessageEphemeral — which only works while the two are siblings on
-   * one envelope rather than facts held in two places.
-   *
-   * @generated from oneof frontend.v1.Message.durability
-   */
-  durability: {
-    /**
-     * A record for this message exists in the store, so it can be paged,
-     * replayed and reloaded. Everything the CLI wrote a transcript record for
-     * is this, INCLUDING the daemon-minted "detached-work:" ids, whose
-     * durability comes from the TaskStarted behind them and not from who
-     * chose the id.
-     *
-     * @generated from field: frontend.v1.MessageDurable durable = 6;
-     */
-    value: MessageDurable;
-    case: "durable";
-  } | {
-    /**
-     * No record for this message exists ANYWHERE, and none ever will.
-     *
-     * @generated from field: frontend.v1.MessageEphemeral ephemeral = 7;
-     */
-    value: MessageEphemeral;
-    case: "ephemeral";
-  } | { case: undefined; value?: undefined };
-
-  /**
    * @generated from oneof frontend.v1.Message.payload
    */
   payload: {
@@ -354,7 +239,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
      * EVERYTHING the agent produced, in the one vocabulary that also carries
      * a detached agent's output (AsyncAgentUpdate). See AgentEmission.
      *
-     * @generated from field: frontend.v1.AgentEmission agent = 8;
+     * @generated from field: frontend.v1.AgentEmission agent = 6;
      */
     value: AgentEmission;
     case: "agent";
@@ -362,7 +247,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
     /**
      * The user's own prompt.
      *
-     * @generated from field: conversation.v1.UserContent user_message = 9;
+     * @generated from field: conversation.v1.UserContent user_message = 7;
      */
     value: UserContent;
     case: "userMessage";
@@ -370,17 +255,19 @@ export type Message = Message$1<"frontend.v1.Message"> & {
     /**
      * The daemon's own card for a failure the agent never got to report.
      *
-     * @generated from field: frontend.v1.FailureCardView failure_card = 10;
+     * @generated from field: frontend.v1.FailureCardView failure_card = 8;
      */
     value: FailureCardView;
     case: "failureCard";
   } | {
     /**
-     * A slash command the daemon took out of the user's input. Both
-     * durability classes ride this arm; which one a given command is, is
-     * stated by `durability` above and never inferred from the command.
+     * A slash command the daemon took out of the user's input, whether the
+     * CLI answered it or the daemon answered it alone. This surface does not
+     * distinguish the two: whether a store record exists behind a message is
+     * the daemon's own bookkeeping, not something a frontend renders or acts
+     * on, so it is not stated here.
      *
-     * @generated from field: frontend.v1.DaemonInterceptedCommandItem daemon_intercepted_command = 11;
+     * @generated from field: frontend.v1.DaemonInterceptedCommandItem daemon_intercepted_command = 9;
      */
     value: DaemonInterceptedCommandItem;
     case: "daemonInterceptedCommand";
@@ -396,7 +283,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
      * thousand rows into the conversation it was dispatched from — those lines
      * are this message's payload, not messages of their own.
      *
-     * @generated from field: frontend.v1.DetachedWork detached_work = 12;
+     * @generated from field: frontend.v1.DetachedWork detached_work = 10;
      */
     value: DetachedWork;
     case: "detachedWork";
@@ -405,7 +292,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
      * The purple-washed summary block a compaction leaves behind. Its own arm
      * so that the wash is a stated kind rather than an inference.
      *
-     * @generated from field: frontend.v1.CompactionSummaryItem compaction_summary = 13;
+     * @generated from field: frontend.v1.CompactionSummaryItem compaction_summary = 11;
      */
     value: CompactionSummaryItem;
     case: "compactionSummary";
@@ -417,7 +304,7 @@ export type Message = Message$1<"frontend.v1.Message"> & {
  * Use `create(MessageSchema)` to create a new message.
  */
 export const MessageSchema: GenMessage<Message> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 4);
+  messageDesc(file_frontend_v1_feed, 2);
 
 /**
  * The detached-work push: MESSAGES that opened, and UPDATES to messages already
@@ -495,7 +382,7 @@ export type DetachedWorkDelta = Message$1<"frontend.v1.DetachedWorkDelta"> & {
  * Use `create(DetachedWorkDeltaSchema)` to create a new message.
  */
 export const DetachedWorkDeltaSchema: GenMessage<DetachedWorkDelta> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 5);
+  messageDesc(file_frontend_v1_feed, 3);
 
 /**
  * The compaction summary: the summary the daemon records after a compaction.
@@ -532,7 +419,7 @@ export type CompactionSummaryItem = Message$1<"frontend.v1.CompactionSummaryItem
  * Use `create(CompactionSummaryItemSchema)` to create a new message.
  */
 export const CompactionSummaryItemSchema: GenMessage<CompactionSummaryItem> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 6);
+  messageDesc(file_frontend_v1_feed, 4);
 
 /**
  * Ephemeral live-typing relay (never persisted, never in snapshots).
@@ -597,7 +484,7 @@ export type TypingDelta = Message$1<"frontend.v1.TypingDelta"> & {
  * Use `create(TypingDeltaSchema)` to create a new message.
  */
 export const TypingDeltaSchema: GenMessage<TypingDelta> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 7);
+  messageDesc(file_frontend_v1_feed, 5);
 
 /**
  * The daemon's statement that a preview it opened will NEVER be completed.
@@ -643,7 +530,7 @@ export type TypingCut = Message$1<"frontend.v1.TypingCut"> & {
  * Use `create(TypingCutSchema)` to create a new message.
  */
 export const TypingCutSchema: GenMessage<TypingCut> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 8);
+  messageDesc(file_frontend_v1_feed, 6);
 
 /**
  * The /status panel, RESOLVED: the rows it draws, already labelled and already
@@ -709,7 +596,7 @@ export type SessionInitView = Message$1<"frontend.v1.SessionInitView"> & {
  * Use `create(SessionInitViewSchema)` to create a new message.
  */
 export const SessionInitViewSchema: GenMessage<SessionInitView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 9);
+  messageDesc(file_frontend_v1_feed, 7);
 
 /**
  * One row of the /status panel: a label and the value beside it.
@@ -743,7 +630,7 @@ export type SessionInitRow = Message$1<"frontend.v1.SessionInitRow"> & {
  * Use `create(SessionInitRowSchema)` to create a new message.
  */
 export const SessionInitRowSchema: GenMessage<SessionInitRow> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 10);
+  messageDesc(file_frontend_v1_feed, 8);
 
 /**
  * One thing an agent produced.
@@ -835,7 +722,7 @@ export type AgentEmission = Message$1<"frontend.v1.AgentEmission"> & {
  * Use `create(AgentEmissionSchema)` to create a new message.
  */
 export const AgentEmissionSchema: GenMessage<AgentEmission> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 11);
+  messageDesc(file_frontend_v1_feed, 9);
 
 /**
  * The assistant's spoken turn: the conversation record itself, plus the facts
@@ -902,7 +789,7 @@ export type AgentResponse = Message$1<"frontend.v1.AgentResponse"> & {
  * Use `create(AgentResponseSchema)` to create a new message.
  */
 export const AgentResponseSchema: GenMessage<AgentResponse> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 12);
+  messageDesc(file_frontend_v1_feed, 10);
 
 /**
  * THE DAEMON'S VERDICT THAT ONE TOOL CALL DETACHED WORK, addressed to a call
@@ -960,7 +847,7 @@ export type ToolCallVerdict = Message$1<"frontend.v1.ToolCallVerdict"> & {
  * Use `create(ToolCallVerdictSchema)` to create a new message.
  */
 export const ToolCallVerdictSchema: GenMessage<ToolCallVerdict> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 13);
+  messageDesc(file_frontend_v1_feed, 11);
 
 /**
  * The per-response usage stamp carried by one assistant response.
@@ -1006,7 +893,7 @@ export type ResponseUsageStamp = Message$1<"frontend.v1.ResponseUsageStamp"> & {
  * Use `create(ResponseUsageStampSchema)` to create a new message.
  */
 export const ResponseUsageStampSchema: GenMessage<ResponseUsageStamp> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 14);
+  messageDesc(file_frontend_v1_feed, 12);
 
 /**
  * A tool's TYPED outcome, and the subagent/task chip.
@@ -1083,7 +970,7 @@ export type AgentToolOutcome = Message$1<"frontend.v1.AgentToolOutcome"> & {
  * Use `create(AgentToolOutcomeSchema)` to create a new message.
  */
 export const AgentToolOutcomeSchema: GenMessage<AgentToolOutcome> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 15);
+  messageDesc(file_frontend_v1_feed, 13);
 
 /**
  * One dispatched background task, as the catalog reports it.
@@ -1206,7 +1093,7 @@ export type TaskEntry = Message$1<"frontend.v1.TaskEntry"> & {
  * Use `create(TaskEntrySchema)` to create a new message.
  */
 export const TaskEntrySchema: GenMessage<TaskEntry> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 16);
+  messageDesc(file_frontend_v1_feed, 14);
 
 /**
  * The task is still running. STATED, never inferred from a missing ending:
@@ -1222,7 +1109,7 @@ export type TaskStatusRunning = Message$1<"frontend.v1.TaskStatusRunning"> & {
  * Use `create(TaskStatusRunningSchema)` to create a new message.
  */
 export const TaskStatusRunningSchema: GenMessage<TaskStatusRunning> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 17);
+  messageDesc(file_frontend_v1_feed, 15);
 
 /**
  * The task finished successfully.
@@ -1237,7 +1124,7 @@ export type TaskStatusDone = Message$1<"frontend.v1.TaskStatusDone"> & {
  * Use `create(TaskStatusDoneSchema)` to create a new message.
  */
 export const TaskStatusDoneSchema: GenMessage<TaskStatusDone> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 18);
+  messageDesc(file_frontend_v1_feed, 16);
 
 /**
  * The task finished by failing.
@@ -1252,7 +1139,7 @@ export type TaskStatusError = Message$1<"frontend.v1.TaskStatusError"> & {
  * Use `create(TaskStatusErrorSchema)` to create a new message.
  */
 export const TaskStatusErrorSchema: GenMessage<TaskStatusError> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 19);
+  messageDesc(file_frontend_v1_feed, 17);
 
 /**
  * The task was stopped from outside before it finished.
@@ -1267,7 +1154,7 @@ export type TaskStatusKilled = Message$1<"frontend.v1.TaskStatusKilled"> & {
  * Use `create(TaskStatusKilledSchema)` to create a new message.
  */
 export const TaskStatusKilledSchema: GenMessage<TaskStatusKilled> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 20);
+  messageDesc(file_frontend_v1_feed, 18);
 
 /**
  * The task was stopped deliberately through its own stop affordance. DISTINCT
@@ -1284,7 +1171,7 @@ export type TaskStatusStopped = Message$1<"frontend.v1.TaskStatusStopped"> & {
  * Use `create(TaskStatusStoppedSchema)` to create a new message.
  */
 export const TaskStatusStoppedSchema: GenMessage<TaskStatusStopped> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 21);
+  messageDesc(file_frontend_v1_feed, 19);
 
 /**
  * The daemon lost track of the task — a restart or a vanished process left
@@ -1301,7 +1188,7 @@ export type TaskStatusLost = Message$1<"frontend.v1.TaskStatusLost"> & {
  * Use `create(TaskStatusLostSchema)` to create a new message.
  */
 export const TaskStatusLostSchema: GenMessage<TaskStatusLost> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 22);
+  messageDesc(file_frontend_v1_feed, 20);
 
 /**
  * @generated from message frontend.v1.TaskCatalog
@@ -1342,7 +1229,7 @@ export type TaskCatalog = Message$1<"frontend.v1.TaskCatalog"> & {
  * Use `create(TaskCatalogSchema)` to create a new message.
  */
 export const TaskCatalogSchema: GenMessage<TaskCatalog> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 23);
+  messageDesc(file_frontend_v1_feed, 21);
 
 /**
  * Additive: ONE session command the user invoked, as the feed's record that
@@ -1356,14 +1243,12 @@ export const TaskCatalogSchema: GenMessage<TaskCatalog> = /*@__PURE__*/
  * shape and disagreed on the direction, and the direction is the whole point —
  * nothing downstream ever issues one of these.
  *
- * IT IS THE PAYLOAD OF BOTH DURABILITY CLASSES, and carries no mark of which.
- * A command the CLI handled has a transcript record behind it and rides a
- * DURABLE message; a command the daemon answered alone has no record anywhere
- * and rides an EPHEMERAL one. That distinction is stated once, on the carrying
- * Message's `durability` oneof, rather than restated here: a
- * second copy of it is a second chance for the two to disagree, and the
- * invariant that an ephemeral message is never anyone's parent is enforced
- * where lineage lives, not where the command's name lives.
+ * IT CARRIES NO MARK OF WHETHER A RECORD EXISTS BEHIND IT. A command the CLI
+ * handled has a transcript record; a command the daemon answered alone has no
+ * record anywhere and never will. That difference does not reach this surface
+ * at all — it is daemon bookkeeping, decided and enforced where the store and
+ * pagination live, and nothing a frontend renders or routes on. See the
+ * durability section in DESIGN-protobuf-surfaces.md.
  *
  * WHY IT CARRIES NO TEXT, AND NEVER WILL. `/model` is not something the user
  * SAID to the agent; it is something they DID to the session. Drawing it as a
@@ -1406,7 +1291,7 @@ export type DaemonInterceptedCommandItem = Message$1<"frontend.v1.DaemonIntercep
  * Use `create(DaemonInterceptedCommandItemSchema)` to create a new message.
  */
 export const DaemonInterceptedCommandItemSchema: GenMessage<DaemonInterceptedCommandItem> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 24);
+  messageDesc(file_frontend_v1_feed, 22);
 
 /**
  * A failure as a CONVERSATION ITEM rather than as chrome.
@@ -1479,7 +1364,7 @@ export type FailureCardView = Message$1<"frontend.v1.FailureCardView"> & {
  * Use `create(FailureCardViewSchema)` to create a new message.
  */
 export const FailureCardViewSchema: GenMessage<FailureCardView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 25);
+  messageDesc(file_frontend_v1_feed, 23);
 
 /**
  * The failure is still happening. The card shows its alarm mark and its color.
@@ -1494,7 +1379,7 @@ export type FailureCardOpen = Message$1<"frontend.v1.FailureCardOpen"> & {
  * Use `create(FailureCardOpenSchema)` to create a new message.
  */
 export const FailureCardOpenSchema: GenMessage<FailureCardOpen> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 26);
+  messageDesc(file_frontend_v1_feed, 24);
 
 /**
  * A window-shaped failure has closed. The card settles: it keeps its place in
@@ -1516,7 +1401,7 @@ export type FailureCardResolved = Message$1<"frontend.v1.FailureCardResolved"> &
  * Use `create(FailureCardResolvedSchema)` to create a new message.
  */
 export const FailureCardResolvedSchema: GenMessage<FailureCardResolved> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 27);
+  messageDesc(file_frontend_v1_feed, 25);
 
 /**
  * The failure has no closing edge and never will — a turn that ended, a
@@ -1533,7 +1418,7 @@ export type FailureCardTerminal = Message$1<"frontend.v1.FailureCardTerminal"> &
  * Use `create(FailureCardTerminalSchema)` to create a new message.
  */
 export const FailureCardTerminalSchema: GenMessage<FailureCardTerminal> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 28);
+  messageDesc(file_frontend_v1_feed, 26);
 
 /**
  * A failure card that a surface OUTSIDE the feed needs to point at.
@@ -1559,7 +1444,7 @@ export type FailureCardRef = Message$1<"frontend.v1.FailureCardRef"> & {
  * Use `create(FailureCardRefSchema)` to create a new message.
  */
 export const FailureCardRefSchema: GenMessage<FailureCardRef> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 29);
+  messageDesc(file_frontend_v1_feed, 27);
 
 /**
  * @generated from message frontend.v1.PermissionAnswerCmd
@@ -1591,7 +1476,7 @@ export type PermissionAnswerCmd = Message$1<"frontend.v1.PermissionAnswerCmd"> &
  * Use `create(PermissionAnswerCmdSchema)` to create a new message.
  */
 export const PermissionAnswerCmdSchema: GenMessage<PermissionAnswerCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 30);
+  messageDesc(file_frontend_v1_feed, 28);
 
 /**
  * One piece of detached work, as the payload of the Message that IS it.
@@ -1672,45 +1557,7 @@ export type DetachedWork = Message$1<"frontend.v1.DetachedWork"> & {
  * Use `create(DetachedWorkSchema)` to create a new message.
  */
 export const DetachedWorkSchema: GenMessage<DetachedWork> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 31);
-
-/**
- * A verbatim byte spool. Just bytes.
- *
- * Deliberately unparsed and unstructured — this output is bytes, and
- * pretending otherwise is how a renderer starts guessing at ANSI, line framing
- * and JSON.
- *
- * THE SPOOL IS PAYLOAD, NOT A STREAM OF MESSAGES. Everything appended to it is
- * this one message's accumulating content; no chunk of it is ever promoted to a
- * feed row of its own.
- *
- * THE SPOOL CARRIES NO DELIVERY CURSOR, and so a dropped append is
- * indistinguishable from a quiet stretch of output: a transcript with a hole in
- * it renders as if it were complete. The durable record is intact, so a reload
- * repairs it; the user simply gets no signal that they should reload. Gap
- * detection, if it is ever wanted, belongs on the frame — one `seq` on
- * frontend.v1.FrontendFrame covers all four delta streams (ConversationDelta,
- * TypingDelta, DetachedWorkDelta and this one) for less than a per-stream
- * cursor costs.
- *
- * @generated from message frontend.v1.DetachedWorkOutputSpool
- */
-export type DetachedWorkOutputSpool = Message$1<"frontend.v1.DetachedWorkOutputSpool"> & {
-  /**
-   * Everything spooled so far, verbatim.
-   *
-   * @generated from field: string text = 1;
-   */
-  text: string;
-};
-
-/**
- * Describes the message frontend.v1.DetachedWorkOutputSpool.
- * Use `create(DetachedWorkOutputSpoolSchema)` to create a new message.
- */
-export const DetachedWorkOutputSpoolSchema: GenMessage<DetachedWorkOutputSpool> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 32);
+  messageDesc(file_frontend_v1_feed, 29);
 
 /**
  * Live-or-settled, expressed as arms so that "settled" and "settled with what
@@ -1743,7 +1590,7 @@ export type DetachedWorkLiveness = Message$1<"frontend.v1.DetachedWorkLiveness">
  * Use `create(DetachedWorkLivenessSchema)` to create a new message.
  */
 export const DetachedWorkLivenessSchema: GenMessage<DetachedWorkLiveness> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 33);
+  messageDesc(file_frontend_v1_feed, 30);
 
 /**
  * The work is still running.
@@ -1767,7 +1614,7 @@ export type DetachedWorkLive = Message$1<"frontend.v1.DetachedWorkLive"> & {
  * Use `create(DetachedWorkLiveSchema)` to create a new message.
  */
 export const DetachedWorkLiveSchema: GenMessage<DetachedWorkLive> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 34);
+  messageDesc(file_frontend_v1_feed, 31);
 
 /**
  * The work has finished, one way or another.
@@ -1819,7 +1666,7 @@ export type DetachedWorkSettled = Message$1<"frontend.v1.DetachedWorkSettled"> &
  * Use `create(DetachedWorkSettledSchema)` to create a new message.
  */
 export const DetachedWorkSettledSchema: GenMessage<DetachedWorkSettled> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 35);
+  messageDesc(file_frontend_v1_feed, 32);
 
 /**
  * Stopped from outside before it finished: an explicit stop, a cancellation,
@@ -1842,7 +1689,7 @@ export type DetachedWorkOutcomeKilled = Message$1<"frontend.v1.DetachedWorkOutco
  * Use `create(DetachedWorkOutcomeKilledSchema)` to create a new message.
  */
 export const DetachedWorkOutcomeKilledSchema: GenMessage<DetachedWorkOutcomeKilled> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 36);
+  messageDesc(file_frontend_v1_feed, 33);
 
 /**
  * One incremental push to ONE MESSAGE'S detached-work payload: the message id
@@ -1951,7 +1798,7 @@ export type DetachedWorkUpdate = Message$1<"frontend.v1.DetachedWorkUpdate"> & {
  * Use `create(DetachedWorkUpdateSchema)` to create a new message.
  */
 export const DetachedWorkUpdateSchema: GenMessage<DetachedWorkUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 37);
+  messageDesc(file_frontend_v1_feed, 34);
 
 /**
  * New output from a detached agent.
@@ -1978,7 +1825,7 @@ export type DetachedWorkAgentUpdate = Message$1<"frontend.v1.DetachedWorkAgentUp
  * Use `create(DetachedWorkAgentUpdateSchema)` to create a new message.
  */
 export const DetachedWorkAgentUpdateSchema: GenMessage<DetachedWorkAgentUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 38);
+  messageDesc(file_frontend_v1_feed, 35);
 
 /**
  * One incremental push to a skill message. Body resolution and emission
@@ -2018,7 +1865,7 @@ export type DetachedWorkSkillUpdate = Message$1<"frontend.v1.DetachedWorkSkillUp
  * Use `create(DetachedWorkSkillUpdateSchema)` to create a new message.
  */
 export const DetachedWorkSkillUpdateSchema: GenMessage<DetachedWorkSkillUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 39);
+  messageDesc(file_frontend_v1_feed, 36);
 
 /**
  * New steps in a Workflow run's journal.
@@ -2048,7 +1895,7 @@ export type DetachedWorkJournalUpdate = Message$1<"frontend.v1.DetachedWorkJourn
  * Use `create(DetachedWorkJournalUpdateSchema)` to create a new message.
  */
 export const DetachedWorkJournalUpdateSchema: GenMessage<DetachedWorkJournalUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 40);
+  messageDesc(file_frontend_v1_feed, 37);
 
 /**
  * New bytes on a spool: an APPEND TO ONE MESSAGE'S PAYLOAD.
@@ -2063,7 +1910,9 @@ export const DetachedWorkJournalUpdateSchema: GenMessage<DetachedWorkJournalUpda
  * still looks complete. The durable record is intact and a reload repairs it,
  * with no signal to the user that a reload is warranted. A per-frame `seq` on
  * frontend.v1.FrontendFrame is the cheaper way to get detection back, and would
- * cover all four delta streams rather than this one.
+ * cover all four delta streams — ConversationDelta, TypingDelta,
+ * DetachedWorkDelta and this one — rather than this one alone, for less than a
+ * per-stream cursor costs.
  *
  * @generated from message frontend.v1.DetachedWorkOutputAppend
  */
@@ -2081,7 +1930,7 @@ export type DetachedWorkOutputAppend = Message$1<"frontend.v1.DetachedWorkOutput
  * Use `create(DetachedWorkOutputAppendSchema)` to create a new message.
  */
 export const DetachedWorkOutputAppendSchema: GenMessage<DetachedWorkOutputAppend> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 41);
+  messageDesc(file_frontend_v1_feed, 38);
 
 /**
  * A liveness transition: live to settled, or a settled outcome changing (a
@@ -2103,7 +1952,7 @@ export type DetachedWorkLivenessUpdate = Message$1<"frontend.v1.DetachedWorkLive
  * Use `create(DetachedWorkLivenessUpdateSchema)` to create a new message.
  */
 export const DetachedWorkLivenessUpdateSchema: GenMessage<DetachedWorkLivenessUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 42);
+  messageDesc(file_frontend_v1_feed, 39);
 
 /**
  * Which container a page walks.
@@ -2142,7 +1991,7 @@ export type PageScope = Message$1<"frontend.v1.PageScope"> & {
  * Use `create(PageScopeSchema)` to create a new message.
  */
 export const PageScopeSchema: GenMessage<PageScope> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 43);
+  messageDesc(file_frontend_v1_feed, 40);
 
 /**
  * The top-level conversation: everything the feed renders as a standalone row.
@@ -2161,7 +2010,7 @@ export type PageScopeFeed = Message$1<"frontend.v1.PageScopeFeed"> & {
  * Use `create(PageScopeFeedSchema)` to create a new message.
  */
 export const PageScopeFeedSchema: GenMessage<PageScopeFeed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 44);
+  messageDesc(file_frontend_v1_feed, 41);
 
 /**
  * The inside of one message: the records that message contains.
@@ -2184,7 +2033,7 @@ export type PageScopeInside = Message$1<"frontend.v1.PageScopeInside"> & {
  * Use `create(PageScopeInsideSchema)` to create a new message.
  */
 export const PageScopeInsideSchema: GenMessage<PageScopeInside> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 45);
+  messageDesc(file_frontend_v1_feed, 42);
 
 /**
  * Ask for the MOST RECENT page, and reset this reader's position to it.
@@ -2223,7 +2072,7 @@ export type FirstPageCmd = Message$1<"frontend.v1.FirstPageCmd"> & {
  * Use `create(FirstPageCmdSchema)` to create a new message.
  */
 export const FirstPageCmdSchema: GenMessage<FirstPageCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 46);
+  messageDesc(file_frontend_v1_feed, 43);
 
 /**
  * Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
@@ -2260,7 +2109,7 @@ export type NextPageCmd = Message$1<"frontend.v1.NextPageCmd"> & {
  * Use `create(NextPageCmdSchema)` to create a new message.
  */
 export const NextPageCmdSchema: GenMessage<NextPageCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 47);
+  messageDesc(file_frontend_v1_feed, 44);
 
 /**
  * One page of messages, oldest first.
@@ -2381,7 +2230,7 @@ export type ConversationHistoryPage = Message$1<"frontend.v1.ConversationHistory
  * Use `create(ConversationHistoryPageSchema)` to create a new message.
  */
 export const ConversationHistoryPageSchema: GenMessage<ConversationHistoryPage> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 48);
+  messageDesc(file_frontend_v1_feed, 45);
 
 /**
  * Older history remains; call NextPageCmd.
@@ -2396,7 +2245,7 @@ export type HistoryHasMore = Message$1<"frontend.v1.HistoryHasMore"> & {
  * Use `create(HistoryHasMoreSchema)` to create a new message.
  */
 export const HistoryHasMoreSchema: GenMessage<HistoryHasMore> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 49);
+  messageDesc(file_frontend_v1_feed, 46);
 
 /**
  * There is nothing older. A FACT the daemon established by reading to the floor.
@@ -2411,7 +2260,7 @@ export type HistoryAtStart = Message$1<"frontend.v1.HistoryAtStart"> & {
  * Use `create(HistoryAtStartSchema)` to create a new message.
  */
 export const HistoryAtStartSchema: GenMessage<HistoryAtStart> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 50);
+  messageDesc(file_frontend_v1_feed, 47);
 
 /**
  * WHO drove the turn that produced a message.
