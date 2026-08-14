@@ -50,7 +50,7 @@ option go_package = "agentrepl/proto/protocol/v1;protocolv1";
 //
 // `Plane` said which observation plane produced a record. It is a shim-side
 // fact, and the whole point of splitting a record into halves was that a
-// consumer must not decide anything from it — so it lives on `agentshim.v1`'s
+// consumer must not decide anything from it — so it lives on `shim.v1`'s
 // internal half now, where the daemon's build cannot see it.
 //
 // `EventClass` marked a record PERSISTENT or EPHEMERAL. `EntryDelivery` states
@@ -174,13 +174,13 @@ enum PromptOrigin {
 //   - seq                         -> StoredEntryDelivery.seq. A position is the
 //                                    store's addressing, and only a record the
 //                                    store actually holds has one.
-//   - plane, dedup_key, write_id  -> agentshim.v1's internal half. Shim-side
+//   - plane, dedup_key, write_id  -> shim.v1's internal half. Shim-side
 //                                    facts a consumer must not decide from.
 //   - class                       -> EntryDelivery's stored/live arms, which
 //                                    state the same thing by shape.
 //   - the payload oneof           -> ExternalEntry's message/bookkeeping arms.
-//   - the write batch             -> agentshim.v1's StoreEntryWrite/EntryBatch.
-//   - unparsed records            -> agentshim.v1's unsupported arm, which is
+//   - the write batch             -> shim.v1's StoreEntryWrite/EntryBatch.
+//   - unparsed records            -> shim.v1's unsupported arm, which is
 //                                    deliberately reachable only from the
 //                                    internal half: a record nobody could
 //                                    convert has no external half at all.
@@ -1098,13 +1098,13 @@ message HealthStatus {
 }
 
 // `StoreWrite` and `StoreWriteAck` are RETIRED. The write frame is
-// `agentshim.v1`'s StoreEntryWrite/EntryBatch, and its placement there is the
+// `shim.v1`'s StoreEntryWrite/EntryBatch, and its placement there is the
 // whole point: a write carries the record's INTERNAL half, so putting the frame
 // in a package the daemon imports would hand the daemon `Plane` and `dedup_key`
 // for free. NOTHING REPLACES `StoreWriteAck` — see the gap note.
 
 // `CursorState`, `CursorQuery`, `OpenTaskState` and `CursorList` are GONE FROM
-// THIS PACKAGE, unchanged, to `agentshim/v1/cursor.proto`. They are store↔
+// THIS PACKAGE, unchanged, to `shim/v1/cursor.proto`. They are store↔
 // sidecar traffic and never cross the daemon↔shim boundary this package
 // describes; they sat here only because the restructure moved this file
 // wholesale rather than by surface.

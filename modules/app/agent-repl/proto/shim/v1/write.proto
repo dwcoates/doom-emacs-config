@@ -21,12 +21,12 @@
 
 syntax = "proto3";
 
-package agentshim.v1;
+package shim.v1;
 
-import "agentshim/v1/cursor.proto";
-import "agentshim/v1/entry.proto";
+import "shim/v1/cursor.proto";
+import "shim/v1/entry.proto";
 
-option go_package = "agentrepl/proto/agentshim/v1;agentshimv1";
+option go_package = "agentrepl/proto/shim/v1;shimv1";
 
 // One producer's write of one batch of records.
 message StoreEntryWrite {

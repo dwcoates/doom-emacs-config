@@ -18,10 +18,10 @@ PROTOS := \
   protocol/v1/entry-delivery.proto \
   protocol/v1/external.proto \
   protocol/v1/message-page.proto \
-  agentshim/v1/cursor.proto \
-  agentshim/v1/entry.proto \
-  agentshim/v1/unsupported.proto \
-  agentshim/v1/write.proto \
+  shim/v1/cursor.proto \
+  shim/v1/entry.proto \
+  shim/v1/unsupported.proto \
+  shim/v1/write.proto \
   agentrepl/v1/shared.proto \
   frontend/v1/feed.proto \
   frontend/v1/topbar.proto \
@@ -71,7 +71,7 @@ lint: codegen-gate
 # It is now `state.v1`, its own package, its own Go import path and its own TS
 # module — the compiler enforces what the script used to check.
 
-# INVARIANT I7. agentshim.v1 is the half of a stored record that never crosses
+# INVARIANT I7. shim.v1 is the half of a stored record that never crosses
 # the shim wire — the observation plane, the store's dedup key, and anything the
 # producer could not convert. No daemon or webapp source may import it. It is a
 # separate PACKAGE rather than a separate file precisely so the boundary is a Go
