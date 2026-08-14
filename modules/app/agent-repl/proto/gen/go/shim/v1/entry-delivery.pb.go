@@ -10,9 +10,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: protocol/v1/entry-delivery.proto
+// source: shim/v1/entry-delivery.proto
 
-package protocolv1
+package shimv1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -50,7 +50,7 @@ type EntryDelivery struct {
 
 func (x *EntryDelivery) Reset() {
 	*x = EntryDelivery{}
-	mi := &file_protocol_v1_entry_delivery_proto_msgTypes[0]
+	mi := &file_shim_v1_entry_delivery_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -62,7 +62,7 @@ func (x *EntryDelivery) String() string {
 func (*EntryDelivery) ProtoMessage() {}
 
 func (x *EntryDelivery) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_entry_delivery_proto_msgTypes[0]
+	mi := &file_shim_v1_entry_delivery_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -75,7 +75,7 @@ func (x *EntryDelivery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntryDelivery.ProtoReflect.Descriptor instead.
 func (*EntryDelivery) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_entry_delivery_proto_rawDescGZIP(), []int{0}
+	return file_shim_v1_entry_delivery_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *EntryDelivery) GetDelivery() isEntryDelivery_Delivery {
@@ -140,7 +140,7 @@ type StoredEntryDelivery struct {
 
 func (x *StoredEntryDelivery) Reset() {
 	*x = StoredEntryDelivery{}
-	mi := &file_protocol_v1_entry_delivery_proto_msgTypes[1]
+	mi := &file_shim_v1_entry_delivery_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -152,7 +152,7 @@ func (x *StoredEntryDelivery) String() string {
 func (*StoredEntryDelivery) ProtoMessage() {}
 
 func (x *StoredEntryDelivery) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_entry_delivery_proto_msgTypes[1]
+	mi := &file_shim_v1_entry_delivery_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -165,7 +165,7 @@ func (x *StoredEntryDelivery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoredEntryDelivery.ProtoReflect.Descriptor instead.
 func (*StoredEntryDelivery) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_entry_delivery_proto_rawDescGZIP(), []int{1}
+	return file_shim_v1_entry_delivery_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *StoredEntryDelivery) GetSeq() uint64 {
@@ -198,7 +198,7 @@ type LiveEntryDelivery struct {
 
 func (x *LiveEntryDelivery) Reset() {
 	*x = LiveEntryDelivery{}
-	mi := &file_protocol_v1_entry_delivery_proto_msgTypes[2]
+	mi := &file_shim_v1_entry_delivery_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -210,7 +210,7 @@ func (x *LiveEntryDelivery) String() string {
 func (*LiveEntryDelivery) ProtoMessage() {}
 
 func (x *LiveEntryDelivery) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_entry_delivery_proto_msgTypes[2]
+	mi := &file_shim_v1_entry_delivery_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -223,7 +223,7 @@ func (x *LiveEntryDelivery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LiveEntryDelivery.ProtoReflect.Descriptor instead.
 func (*LiveEntryDelivery) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_entry_delivery_proto_rawDescGZIP(), []int{2}
+	return file_shim_v1_entry_delivery_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *LiveEntryDelivery) GetEntry() *ExternalEntry {
@@ -233,46 +233,46 @@ func (x *LiveEntryDelivery) GetEntry() *ExternalEntry {
 	return nil
 }
 
-var File_protocol_v1_entry_delivery_proto protoreflect.FileDescriptor
+var File_shim_v1_entry_delivery_proto protoreflect.FileDescriptor
 
-const file_protocol_v1_entry_delivery_proto_rawDesc = "" +
+const file_shim_v1_entry_delivery_proto_rawDesc = "" +
 	"\n" +
-	" protocol/v1/entry-delivery.proto\x12\vprotocol.v1\x1a\x1aprotocol/v1/external.proto\"\x8d\x01\n" +
-	"\rEntryDelivery\x12:\n" +
-	"\x06stored\x18\x01 \x01(\v2 .protocol.v1.StoredEntryDeliveryH\x00R\x06stored\x124\n" +
-	"\x04live\x18\x02 \x01(\v2\x1e.protocol.v1.LiveEntryDeliveryH\x00R\x04liveB\n" +
+	"\x1cshim/v1/entry-delivery.proto\x12\ashim.v1\x1a\x16shim/v1/external.proto\"\x85\x01\n" +
+	"\rEntryDelivery\x126\n" +
+	"\x06stored\x18\x01 \x01(\v2\x1c.shim.v1.StoredEntryDeliveryH\x00R\x06stored\x120\n" +
+	"\x04live\x18\x02 \x01(\v2\x1a.shim.v1.LiveEntryDeliveryH\x00R\x04liveB\n" +
 	"\n" +
-	"\bdelivery\"Y\n" +
+	"\bdelivery\"U\n" +
 	"\x13StoredEntryDelivery\x12\x10\n" +
-	"\x03seq\x18\x01 \x01(\x04R\x03seq\x120\n" +
-	"\x05entry\x18\x02 \x01(\v2\x1a.protocol.v1.ExternalEntryR\x05entry\"E\n" +
-	"\x11LiveEntryDelivery\x120\n" +
-	"\x05entry\x18\x01 \x01(\v2\x1a.protocol.v1.ExternalEntryR\x05entryB(Z&agentrepl/proto/protocol/v1;protocolv1b\x06proto3"
+	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12,\n" +
+	"\x05entry\x18\x02 \x01(\v2\x16.shim.v1.ExternalEntryR\x05entry\"A\n" +
+	"\x11LiveEntryDelivery\x12,\n" +
+	"\x05entry\x18\x01 \x01(\v2\x16.shim.v1.ExternalEntryR\x05entryB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
-	file_protocol_v1_entry_delivery_proto_rawDescOnce sync.Once
-	file_protocol_v1_entry_delivery_proto_rawDescData []byte
+	file_shim_v1_entry_delivery_proto_rawDescOnce sync.Once
+	file_shim_v1_entry_delivery_proto_rawDescData []byte
 )
 
-func file_protocol_v1_entry_delivery_proto_rawDescGZIP() []byte {
-	file_protocol_v1_entry_delivery_proto_rawDescOnce.Do(func() {
-		file_protocol_v1_entry_delivery_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_protocol_v1_entry_delivery_proto_rawDesc), len(file_protocol_v1_entry_delivery_proto_rawDesc)))
+func file_shim_v1_entry_delivery_proto_rawDescGZIP() []byte {
+	file_shim_v1_entry_delivery_proto_rawDescOnce.Do(func() {
+		file_shim_v1_entry_delivery_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_shim_v1_entry_delivery_proto_rawDesc), len(file_shim_v1_entry_delivery_proto_rawDesc)))
 	})
-	return file_protocol_v1_entry_delivery_proto_rawDescData
+	return file_shim_v1_entry_delivery_proto_rawDescData
 }
 
-var file_protocol_v1_entry_delivery_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
-var file_protocol_v1_entry_delivery_proto_goTypes = []any{
-	(*EntryDelivery)(nil),       // 0: protocol.v1.EntryDelivery
-	(*StoredEntryDelivery)(nil), // 1: protocol.v1.StoredEntryDelivery
-	(*LiveEntryDelivery)(nil),   // 2: protocol.v1.LiveEntryDelivery
-	(*ExternalEntry)(nil),       // 3: protocol.v1.ExternalEntry
+var file_shim_v1_entry_delivery_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_shim_v1_entry_delivery_proto_goTypes = []any{
+	(*EntryDelivery)(nil),       // 0: shim.v1.EntryDelivery
+	(*StoredEntryDelivery)(nil), // 1: shim.v1.StoredEntryDelivery
+	(*LiveEntryDelivery)(nil),   // 2: shim.v1.LiveEntryDelivery
+	(*ExternalEntry)(nil),       // 3: shim.v1.ExternalEntry
 }
-var file_protocol_v1_entry_delivery_proto_depIdxs = []int32{
-	1, // 0: protocol.v1.EntryDelivery.stored:type_name -> protocol.v1.StoredEntryDelivery
-	2, // 1: protocol.v1.EntryDelivery.live:type_name -> protocol.v1.LiveEntryDelivery
-	3, // 2: protocol.v1.StoredEntryDelivery.entry:type_name -> protocol.v1.ExternalEntry
-	3, // 3: protocol.v1.LiveEntryDelivery.entry:type_name -> protocol.v1.ExternalEntry
+var file_shim_v1_entry_delivery_proto_depIdxs = []int32{
+	1, // 0: shim.v1.EntryDelivery.stored:type_name -> shim.v1.StoredEntryDelivery
+	2, // 1: shim.v1.EntryDelivery.live:type_name -> shim.v1.LiveEntryDelivery
+	3, // 2: shim.v1.StoredEntryDelivery.entry:type_name -> shim.v1.ExternalEntry
+	3, // 3: shim.v1.LiveEntryDelivery.entry:type_name -> shim.v1.ExternalEntry
 	4, // [4:4] is the sub-list for method output_type
 	4, // [4:4] is the sub-list for method input_type
 	4, // [4:4] is the sub-list for extension type_name
@@ -280,13 +280,13 @@ var file_protocol_v1_entry_delivery_proto_depIdxs = []int32{
 	0, // [0:4] is the sub-list for field type_name
 }
 
-func init() { file_protocol_v1_entry_delivery_proto_init() }
-func file_protocol_v1_entry_delivery_proto_init() {
-	if File_protocol_v1_entry_delivery_proto != nil {
+func init() { file_shim_v1_entry_delivery_proto_init() }
+func file_shim_v1_entry_delivery_proto_init() {
+	if File_shim_v1_entry_delivery_proto != nil {
 		return
 	}
-	file_protocol_v1_external_proto_init()
-	file_protocol_v1_entry_delivery_proto_msgTypes[0].OneofWrappers = []any{
+	file_shim_v1_external_proto_init()
+	file_shim_v1_entry_delivery_proto_msgTypes[0].OneofWrappers = []any{
 		(*EntryDelivery_Stored)(nil),
 		(*EntryDelivery_Live)(nil),
 	}
@@ -294,17 +294,17 @@ func file_protocol_v1_entry_delivery_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protocol_v1_entry_delivery_proto_rawDesc), len(file_protocol_v1_entry_delivery_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_entry_delivery_proto_rawDesc), len(file_shim_v1_entry_delivery_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_protocol_v1_entry_delivery_proto_goTypes,
-		DependencyIndexes: file_protocol_v1_entry_delivery_proto_depIdxs,
-		MessageInfos:      file_protocol_v1_entry_delivery_proto_msgTypes,
+		GoTypes:           file_shim_v1_entry_delivery_proto_goTypes,
+		DependencyIndexes: file_shim_v1_entry_delivery_proto_depIdxs,
+		MessageInfos:      file_shim_v1_entry_delivery_proto_msgTypes,
 	}.Build()
-	File_protocol_v1_entry_delivery_proto = out.File
-	file_protocol_v1_entry_delivery_proto_goTypes = nil
-	file_protocol_v1_entry_delivery_proto_depIdxs = nil
+	File_shim_v1_entry_delivery_proto = out.File
+	file_shim_v1_entry_delivery_proto_goTypes = nil
+	file_shim_v1_entry_delivery_proto_depIdxs = nil
 }

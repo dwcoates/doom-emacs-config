@@ -16,7 +16,7 @@
 // Shared by the store, the shim and the daemon — all three speak records, so
 // one shape serves every hop.
 //
-// THE DURABLE RECORD IS protocol.v1.ExternalEntry. It used to be `Event`, and
+// THE DURABLE RECORD IS shim.v1.ExternalEntry. It used to be `Event`, and
 // this file said so; that is now false. `Event` was one envelope carrying every
 // observation together with the store's position, the observing plane and the
 // dedup key, and it has been split across the surfaces that own its parts.
@@ -34,9 +34,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: protocol/v1/message-page.proto
+// source: shim/v1/message-page.proto
 
-package protocolv1
+package shimv1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -78,7 +78,7 @@ type MessagePageRequest struct {
 
 func (x *MessagePageRequest) Reset() {
 	*x = MessagePageRequest{}
-	mi := &file_protocol_v1_message_page_proto_msgTypes[0]
+	mi := &file_shim_v1_message_page_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -90,7 +90,7 @@ func (x *MessagePageRequest) String() string {
 func (*MessagePageRequest) ProtoMessage() {}
 
 func (x *MessagePageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_message_page_proto_msgTypes[0]
+	mi := &file_shim_v1_message_page_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -103,7 +103,7 @@ func (x *MessagePageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessagePageRequest.ProtoReflect.Descriptor instead.
 func (*MessagePageRequest) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_message_page_proto_rawDescGZIP(), []int{0}
+	return file_shim_v1_message_page_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *MessagePageRequest) GetRequestId() string {
@@ -177,7 +177,7 @@ type MessagePageHead struct {
 
 func (x *MessagePageHead) Reset() {
 	*x = MessagePageHead{}
-	mi := &file_protocol_v1_message_page_proto_msgTypes[1]
+	mi := &file_shim_v1_message_page_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -189,7 +189,7 @@ func (x *MessagePageHead) String() string {
 func (*MessagePageHead) ProtoMessage() {}
 
 func (x *MessagePageHead) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_message_page_proto_msgTypes[1]
+	mi := &file_shim_v1_message_page_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -202,7 +202,7 @@ func (x *MessagePageHead) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessagePageHead.ProtoReflect.Descriptor instead.
 func (*MessagePageHead) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_message_page_proto_rawDescGZIP(), []int{1}
+	return file_shim_v1_message_page_proto_rawDescGZIP(), []int{1}
 }
 
 // AT MOST TEN messages and everything composing them, NEWEST FIRST.
@@ -243,7 +243,7 @@ type MessagePage struct {
 
 func (x *MessagePage) Reset() {
 	*x = MessagePage{}
-	mi := &file_protocol_v1_message_page_proto_msgTypes[2]
+	mi := &file_shim_v1_message_page_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -255,7 +255,7 @@ func (x *MessagePage) String() string {
 func (*MessagePage) ProtoMessage() {}
 
 func (x *MessagePage) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_message_page_proto_msgTypes[2]
+	mi := &file_shim_v1_message_page_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -268,7 +268,7 @@ func (x *MessagePage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessagePage.ProtoReflect.Descriptor instead.
 func (*MessagePage) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_message_page_proto_rawDescGZIP(), []int{2}
+	return file_shim_v1_message_page_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *MessagePage) GetRequestId() string {
@@ -424,7 +424,7 @@ type StoredMessage struct {
 
 func (x *StoredMessage) Reset() {
 	*x = StoredMessage{}
-	mi := &file_protocol_v1_message_page_proto_msgTypes[3]
+	mi := &file_shim_v1_message_page_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -436,7 +436,7 @@ func (x *StoredMessage) String() string {
 func (*StoredMessage) ProtoMessage() {}
 
 func (x *StoredMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_message_page_proto_msgTypes[3]
+	mi := &file_shim_v1_message_page_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -449,7 +449,7 @@ func (x *StoredMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoredMessage.ProtoReflect.Descriptor instead.
 func (*StoredMessage) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_message_page_proto_rawDescGZIP(), []int{3}
+	return file_shim_v1_message_page_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *StoredMessage) GetMessageId() string {
@@ -475,7 +475,7 @@ type HistoryRemainsBelow struct {
 
 func (x *HistoryRemainsBelow) Reset() {
 	*x = HistoryRemainsBelow{}
-	mi := &file_protocol_v1_message_page_proto_msgTypes[4]
+	mi := &file_shim_v1_message_page_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -487,7 +487,7 @@ func (x *HistoryRemainsBelow) String() string {
 func (*HistoryRemainsBelow) ProtoMessage() {}
 
 func (x *HistoryRemainsBelow) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_message_page_proto_msgTypes[4]
+	mi := &file_shim_v1_message_page_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -500,7 +500,7 @@ func (x *HistoryRemainsBelow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryRemainsBelow.ProtoReflect.Descriptor instead.
 func (*HistoryRemainsBelow) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_message_page_proto_rawDescGZIP(), []int{4}
+	return file_shim_v1_message_page_proto_rawDescGZIP(), []int{4}
 }
 
 // This page reached the oldest RETAINED message, which is the serving side's
@@ -513,7 +513,7 @@ type HistoryAtRetainedFloor struct {
 
 func (x *HistoryAtRetainedFloor) Reset() {
 	*x = HistoryAtRetainedFloor{}
-	mi := &file_protocol_v1_message_page_proto_msgTypes[5]
+	mi := &file_shim_v1_message_page_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -525,7 +525,7 @@ func (x *HistoryAtRetainedFloor) String() string {
 func (*HistoryAtRetainedFloor) ProtoMessage() {}
 
 func (x *HistoryAtRetainedFloor) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_message_page_proto_msgTypes[5]
+	mi := &file_shim_v1_message_page_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -538,88 +538,88 @@ func (x *HistoryAtRetainedFloor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryAtRetainedFloor.ProtoReflect.Descriptor instead.
 func (*HistoryAtRetainedFloor) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_message_page_proto_rawDescGZIP(), []int{5}
+	return file_shim_v1_message_page_proto_rawDescGZIP(), []int{5}
 }
 
-var File_protocol_v1_message_page_proto protoreflect.FileDescriptor
+var File_shim_v1_message_page_proto protoreflect.FileDescriptor
 
-const file_protocol_v1_message_page_proto_rawDesc = "" +
+const file_shim_v1_message_page_proto_rawDesc = "" +
 	"\n" +
-	"\x1eprotocol/v1/message-page.proto\x12\vprotocol.v1\x1a\x1aprotocol/v1/external.proto\"\xb1\x01\n" +
+	"\x1ashim/v1/message-page.proto\x12\ashim.v1\x1a\x16shim/v1/external.proto\"\xad\x01\n" +
 	"\x12MessagePageRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x02 \x01(\tR\tsessionId\x122\n" +
-	"\x04head\x18\x03 \x01(\v2\x1c.protocol.v1.MessagePageHeadH\x00R\x04head\x12\x1f\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12.\n" +
+	"\x04head\x18\x03 \x01(\v2\x18.shim.v1.MessagePageHeadH\x00R\x04head\x12\x1f\n" +
 	"\n" +
 	"before_seq\x18\x04 \x01(\x04H\x00R\tbeforeSeqB\b\n" +
 	"\x06anchor\"\x11\n" +
-	"\x0fMessagePageHead\"\x8d\x06\n" +
+	"\x0fMessagePageHead\"\xdd\x05\n" +
 	"\vMessagePage\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x127\n" +
-	"\tmessage_1\x18\x02 \x01(\v2\x1a.protocol.v1.StoredMessageR\bmessage1\x127\n" +
-	"\tmessage_2\x18\x03 \x01(\v2\x1a.protocol.v1.StoredMessageR\bmessage2\x127\n" +
-	"\tmessage_3\x18\x04 \x01(\v2\x1a.protocol.v1.StoredMessageR\bmessage3\x127\n" +
-	"\tmessage_4\x18\x05 \x01(\v2\x1a.protocol.v1.StoredMessageR\bmessage4\x127\n" +
-	"\tmessage_5\x18\x06 \x01(\v2\x1a.protocol.v1.StoredMessageR\bmessage5\x127\n" +
-	"\tmessage_6\x18\a \x01(\v2\x1a.protocol.v1.StoredMessageR\bmessage6\x127\n" +
-	"\tmessage_7\x18\b \x01(\v2\x1a.protocol.v1.StoredMessageR\bmessage7\x127\n" +
-	"\tmessage_8\x18\t \x01(\v2\x1a.protocol.v1.StoredMessageR\bmessage8\x127\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x123\n" +
+	"\tmessage_1\x18\x02 \x01(\v2\x16.shim.v1.StoredMessageR\bmessage1\x123\n" +
+	"\tmessage_2\x18\x03 \x01(\v2\x16.shim.v1.StoredMessageR\bmessage2\x123\n" +
+	"\tmessage_3\x18\x04 \x01(\v2\x16.shim.v1.StoredMessageR\bmessage3\x123\n" +
+	"\tmessage_4\x18\x05 \x01(\v2\x16.shim.v1.StoredMessageR\bmessage4\x123\n" +
+	"\tmessage_5\x18\x06 \x01(\v2\x16.shim.v1.StoredMessageR\bmessage5\x123\n" +
+	"\tmessage_6\x18\a \x01(\v2\x16.shim.v1.StoredMessageR\bmessage6\x123\n" +
+	"\tmessage_7\x18\b \x01(\v2\x16.shim.v1.StoredMessageR\bmessage7\x123\n" +
+	"\tmessage_8\x18\t \x01(\v2\x16.shim.v1.StoredMessageR\bmessage8\x123\n" +
 	"\tmessage_9\x18\n" +
-	" \x01(\v2\x1a.protocol.v1.StoredMessageR\bmessage9\x129\n" +
+	" \x01(\v2\x16.shim.v1.StoredMessageR\bmessage9\x125\n" +
 	"\n" +
-	"message_10\x18\v \x01(\v2\x1a.protocol.v1.StoredMessageR\tmessage10\x12\"\n" +
-	"\rlast_page_seq\x18\f \x01(\x04R\vlastPageSeq\x126\n" +
-	"\x04more\x18\r \x01(\v2 .protocol.v1.HistoryRemainsBelowH\x00R\x04more\x12;\n" +
-	"\x05floor\x18\x0e \x01(\v2#.protocol.v1.HistoryAtRetainedFloorH\x00R\x05floorB\n" +
+	"message_10\x18\v \x01(\v2\x16.shim.v1.StoredMessageR\tmessage10\x12\"\n" +
+	"\rlast_page_seq\x18\f \x01(\x04R\vlastPageSeq\x122\n" +
+	"\x04more\x18\r \x01(\v2\x1c.shim.v1.HistoryRemainsBelowH\x00R\x04more\x127\n" +
+	"\x05floor\x18\x0e \x01(\v2\x1f.shim.v1.HistoryAtRetainedFloorH\x00R\x05floorB\n" +
 	"\n" +
-	"\bboundary\"d\n" +
+	"\bboundary\"`\n" +
 	"\rStoredMessage\x12\x1d\n" +
 	"\n" +
-	"message_id\x18\x01 \x01(\tR\tmessageId\x124\n" +
-	"\arecords\x18\x02 \x03(\v2\x1a.protocol.v1.ExternalEntryR\arecords\"\x15\n" +
+	"message_id\x18\x01 \x01(\tR\tmessageId\x120\n" +
+	"\arecords\x18\x02 \x03(\v2\x16.shim.v1.ExternalEntryR\arecords\"\x15\n" +
 	"\x13HistoryRemainsBelow\"\x18\n" +
-	"\x16HistoryAtRetainedFloorB(Z&agentrepl/proto/protocol/v1;protocolv1b\x06proto3"
+	"\x16HistoryAtRetainedFloorB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
-	file_protocol_v1_message_page_proto_rawDescOnce sync.Once
-	file_protocol_v1_message_page_proto_rawDescData []byte
+	file_shim_v1_message_page_proto_rawDescOnce sync.Once
+	file_shim_v1_message_page_proto_rawDescData []byte
 )
 
-func file_protocol_v1_message_page_proto_rawDescGZIP() []byte {
-	file_protocol_v1_message_page_proto_rawDescOnce.Do(func() {
-		file_protocol_v1_message_page_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_protocol_v1_message_page_proto_rawDesc), len(file_protocol_v1_message_page_proto_rawDesc)))
+func file_shim_v1_message_page_proto_rawDescGZIP() []byte {
+	file_shim_v1_message_page_proto_rawDescOnce.Do(func() {
+		file_shim_v1_message_page_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_shim_v1_message_page_proto_rawDesc), len(file_shim_v1_message_page_proto_rawDesc)))
 	})
-	return file_protocol_v1_message_page_proto_rawDescData
+	return file_shim_v1_message_page_proto_rawDescData
 }
 
-var file_protocol_v1_message_page_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
-var file_protocol_v1_message_page_proto_goTypes = []any{
-	(*MessagePageRequest)(nil),     // 0: protocol.v1.MessagePageRequest
-	(*MessagePageHead)(nil),        // 1: protocol.v1.MessagePageHead
-	(*MessagePage)(nil),            // 2: protocol.v1.MessagePage
-	(*StoredMessage)(nil),          // 3: protocol.v1.StoredMessage
-	(*HistoryRemainsBelow)(nil),    // 4: protocol.v1.HistoryRemainsBelow
-	(*HistoryAtRetainedFloor)(nil), // 5: protocol.v1.HistoryAtRetainedFloor
-	(*ExternalEntry)(nil),          // 6: protocol.v1.ExternalEntry
+var file_shim_v1_message_page_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_shim_v1_message_page_proto_goTypes = []any{
+	(*MessagePageRequest)(nil),     // 0: shim.v1.MessagePageRequest
+	(*MessagePageHead)(nil),        // 1: shim.v1.MessagePageHead
+	(*MessagePage)(nil),            // 2: shim.v1.MessagePage
+	(*StoredMessage)(nil),          // 3: shim.v1.StoredMessage
+	(*HistoryRemainsBelow)(nil),    // 4: shim.v1.HistoryRemainsBelow
+	(*HistoryAtRetainedFloor)(nil), // 5: shim.v1.HistoryAtRetainedFloor
+	(*ExternalEntry)(nil),          // 6: shim.v1.ExternalEntry
 }
-var file_protocol_v1_message_page_proto_depIdxs = []int32{
-	1,  // 0: protocol.v1.MessagePageRequest.head:type_name -> protocol.v1.MessagePageHead
-	3,  // 1: protocol.v1.MessagePage.message_1:type_name -> protocol.v1.StoredMessage
-	3,  // 2: protocol.v1.MessagePage.message_2:type_name -> protocol.v1.StoredMessage
-	3,  // 3: protocol.v1.MessagePage.message_3:type_name -> protocol.v1.StoredMessage
-	3,  // 4: protocol.v1.MessagePage.message_4:type_name -> protocol.v1.StoredMessage
-	3,  // 5: protocol.v1.MessagePage.message_5:type_name -> protocol.v1.StoredMessage
-	3,  // 6: protocol.v1.MessagePage.message_6:type_name -> protocol.v1.StoredMessage
-	3,  // 7: protocol.v1.MessagePage.message_7:type_name -> protocol.v1.StoredMessage
-	3,  // 8: protocol.v1.MessagePage.message_8:type_name -> protocol.v1.StoredMessage
-	3,  // 9: protocol.v1.MessagePage.message_9:type_name -> protocol.v1.StoredMessage
-	3,  // 10: protocol.v1.MessagePage.message_10:type_name -> protocol.v1.StoredMessage
-	4,  // 11: protocol.v1.MessagePage.more:type_name -> protocol.v1.HistoryRemainsBelow
-	5,  // 12: protocol.v1.MessagePage.floor:type_name -> protocol.v1.HistoryAtRetainedFloor
-	6,  // 13: protocol.v1.StoredMessage.records:type_name -> protocol.v1.ExternalEntry
+var file_shim_v1_message_page_proto_depIdxs = []int32{
+	1,  // 0: shim.v1.MessagePageRequest.head:type_name -> shim.v1.MessagePageHead
+	3,  // 1: shim.v1.MessagePage.message_1:type_name -> shim.v1.StoredMessage
+	3,  // 2: shim.v1.MessagePage.message_2:type_name -> shim.v1.StoredMessage
+	3,  // 3: shim.v1.MessagePage.message_3:type_name -> shim.v1.StoredMessage
+	3,  // 4: shim.v1.MessagePage.message_4:type_name -> shim.v1.StoredMessage
+	3,  // 5: shim.v1.MessagePage.message_5:type_name -> shim.v1.StoredMessage
+	3,  // 6: shim.v1.MessagePage.message_6:type_name -> shim.v1.StoredMessage
+	3,  // 7: shim.v1.MessagePage.message_7:type_name -> shim.v1.StoredMessage
+	3,  // 8: shim.v1.MessagePage.message_8:type_name -> shim.v1.StoredMessage
+	3,  // 9: shim.v1.MessagePage.message_9:type_name -> shim.v1.StoredMessage
+	3,  // 10: shim.v1.MessagePage.message_10:type_name -> shim.v1.StoredMessage
+	4,  // 11: shim.v1.MessagePage.more:type_name -> shim.v1.HistoryRemainsBelow
+	5,  // 12: shim.v1.MessagePage.floor:type_name -> shim.v1.HistoryAtRetainedFloor
+	6,  // 13: shim.v1.StoredMessage.records:type_name -> shim.v1.ExternalEntry
 	14, // [14:14] is the sub-list for method output_type
 	14, // [14:14] is the sub-list for method input_type
 	14, // [14:14] is the sub-list for extension type_name
@@ -627,17 +627,17 @@ var file_protocol_v1_message_page_proto_depIdxs = []int32{
 	0,  // [0:14] is the sub-list for field type_name
 }
 
-func init() { file_protocol_v1_message_page_proto_init() }
-func file_protocol_v1_message_page_proto_init() {
-	if File_protocol_v1_message_page_proto != nil {
+func init() { file_shim_v1_message_page_proto_init() }
+func file_shim_v1_message_page_proto_init() {
+	if File_shim_v1_message_page_proto != nil {
 		return
 	}
-	file_protocol_v1_external_proto_init()
-	file_protocol_v1_message_page_proto_msgTypes[0].OneofWrappers = []any{
+	file_shim_v1_external_proto_init()
+	file_shim_v1_message_page_proto_msgTypes[0].OneofWrappers = []any{
 		(*MessagePageRequest_Head)(nil),
 		(*MessagePageRequest_BeforeSeq)(nil),
 	}
-	file_protocol_v1_message_page_proto_msgTypes[2].OneofWrappers = []any{
+	file_shim_v1_message_page_proto_msgTypes[2].OneofWrappers = []any{
 		(*MessagePage_More)(nil),
 		(*MessagePage_Floor)(nil),
 	}
@@ -645,17 +645,17 @@ func file_protocol_v1_message_page_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protocol_v1_message_page_proto_rawDesc), len(file_protocol_v1_message_page_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_message_page_proto_rawDesc), len(file_shim_v1_message_page_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_protocol_v1_message_page_proto_goTypes,
-		DependencyIndexes: file_protocol_v1_message_page_proto_depIdxs,
-		MessageInfos:      file_protocol_v1_message_page_proto_msgTypes,
+		GoTypes:           file_shim_v1_message_page_proto_goTypes,
+		DependencyIndexes: file_shim_v1_message_page_proto_depIdxs,
+		MessageInfos:      file_shim_v1_message_page_proto_msgTypes,
 	}.Build()
-	File_protocol_v1_message_page_proto = out.File
-	file_protocol_v1_message_page_proto_goTypes = nil
-	file_protocol_v1_message_page_proto_depIdxs = nil
+	File_shim_v1_message_page_proto = out.File
+	file_shim_v1_message_page_proto_goTypes = nil
+	file_shim_v1_message_page_proto_depIdxs = nil
 }

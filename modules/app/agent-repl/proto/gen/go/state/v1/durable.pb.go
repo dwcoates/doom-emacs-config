@@ -30,7 +30,7 @@ package statev1
 
 import (
 	v1 "agentrepl/proto/conversation/v1"
-	v11 "agentrepl/proto/protocol/v1"
+	v11 "agentrepl/proto/shim/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -3476,7 +3476,7 @@ var File_state_v1_durable_proto protoreflect.FileDescriptor
 
 const file_state_v1_durable_proto_rawDesc = "" +
 	"\n" +
-	"\x16state/v1/durable.proto\x12\bstate.v1\x1a\x16protocol/v1/core.proto\x1a\x1dprotocol/v1/bookkeeping.proto\x1a\x1cconversation/v1/tokens.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x98\x04\n" +
+	"\x16state/v1/durable.proto\x12\bstate.v1\x1a\x12shim/v1/core.proto\x1a\x19shim/v1/bookkeeping.proto\x1a\x1cconversation/v1/tokens.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x98\x04\n" +
 	"\x10TokenUtilization\x121\n" +
 	"\x15agent_repl_session_id\x18\x01 \x01(\tR\x12agentReplSessionId\x12*\n" +
 	"\x11claude_session_id\x18\x02 \x01(\tR\x0fclaudeSessionId\x12 \n" +
@@ -3640,14 +3640,14 @@ const file_state_v1_durable_proto_rawDesc = "" +
 	"%responses_without_generation_duration\x18\x04 \x01(\x03R\"responsesWithoutGenerationDuration\x12=\n" +
 	"\x1ctotal_time_to_first_token_ms\x18\x05 \x01(\x03R\x17totalTimeToFirstTokenMs\x12I\n" +
 	"\"responses_with_time_to_first_token\x18\x06 \x01(\x03R\x1dresponsesWithTimeToFirstToken\x12O\n" +
-	"%responses_without_time_to_first_token\x18\a \x01(\x03R responsesWithoutTimeToFirstToken\"\xec\x04\n" +
+	"%responses_without_time_to_first_token\x18\a \x01(\x03R responsesWithoutTimeToFirstToken\"\xe0\x04\n" +
 	"\x0eTurnAccounting\x12\x17\n" +
 	"\aturn_id\x18\x01 \x01(\tR\x06turnId\x12*\n" +
-	"\x11query_instance_id\x18\x02 \x01(\tR\x0fqueryInstanceId\x12;\n" +
-	"\aruntime\x18\x03 \x01(\v2!.protocol.v1.QueryRuntimeIdentityR\aruntime\x126\n" +
-	"\x06timing\x18\x04 \x01(\v2\x1e.state.v1.TurnAccountingTimingR\x06timing\x12J\n" +
-	"\x0eusage_at_start\x18\x05 \x01(\v2$.protocol.v1.AccountUsageObservationR\fusageAtStart\x12F\n" +
-	"\fusage_at_end\x18\x06 \x01(\v2$.protocol.v1.AccountUsageObservationR\n" +
+	"\x11query_instance_id\x18\x02 \x01(\tR\x0fqueryInstanceId\x127\n" +
+	"\aruntime\x18\x03 \x01(\v2\x1d.shim.v1.QueryRuntimeIdentityR\aruntime\x126\n" +
+	"\x06timing\x18\x04 \x01(\v2\x1e.state.v1.TurnAccountingTimingR\x06timing\x12F\n" +
+	"\x0eusage_at_start\x18\x05 \x01(\v2 .shim.v1.AccountUsageObservationR\fusageAtStart\x12B\n" +
+	"\fusage_at_end\x18\x06 \x01(\v2 .shim.v1.AccountUsageObservationR\n" +
 	"usageAtEnd\x128\n" +
 	"\tresponses\x18\a \x03(\v2\x1a.state.v1.TokenUtilizationR\tresponses\x12J\n" +
 	"\x0ereconciliation\x18\b \x01(\v2\".state.v1.TokenUsageReconciliationR\x0ereconciliation\x12>\n" +
@@ -3769,8 +3769,8 @@ var file_state_v1_durable_proto_goTypes = []any{
 	(*TelemetryRecordMissingPersistenceReceipt)(nil),       // 43: state.v1.TelemetryRecordMissingPersistenceReceipt
 	(*structpb.Struct)(nil),                                // 44: google.protobuf.Struct
 	(*v1.TokenUsage)(nil),                                  // 45: conversation.v1.TokenUsage
-	(*v11.QueryRuntimeIdentity)(nil),                       // 46: protocol.v1.QueryRuntimeIdentity
-	(*v11.AccountUsageObservation)(nil),                    // 47: protocol.v1.AccountUsageObservation
+	(*v11.QueryRuntimeIdentity)(nil),                       // 46: shim.v1.QueryRuntimeIdentity
+	(*v11.AccountUsageObservation)(nil),                    // 47: shim.v1.AccountUsageObservation
 }
 var file_state_v1_durable_proto_depIdxs = []int32{
 	1,  // 0: state.v1.TokenUtilization.main_agent:type_name -> state.v1.TokenUtilizationMainAgent
@@ -3818,10 +3818,10 @@ var file_state_v1_durable_proto_depIdxs = []int32{
 	7,  // 42: state.v1.TokenUsageTotals.output_details:type_name -> state.v1.TokenOutputDetails
 	8,  // 43: state.v1.TokenUsageTotals.cache_rates:type_name -> state.v1.TokenCacheRates
 	26, // 44: state.v1.TokenUsageTotals.timing:type_name -> state.v1.TokenTimingTotals
-	46, // 45: state.v1.TurnAccounting.runtime:type_name -> protocol.v1.QueryRuntimeIdentity
+	46, // 45: state.v1.TurnAccounting.runtime:type_name -> shim.v1.QueryRuntimeIdentity
 	28, // 46: state.v1.TurnAccounting.timing:type_name -> state.v1.TurnAccountingTiming
-	47, // 47: state.v1.TurnAccounting.usage_at_start:type_name -> protocol.v1.AccountUsageObservation
-	47, // 48: state.v1.TurnAccounting.usage_at_end:type_name -> protocol.v1.AccountUsageObservation
+	47, // 47: state.v1.TurnAccounting.usage_at_start:type_name -> shim.v1.AccountUsageObservation
+	47, // 48: state.v1.TurnAccounting.usage_at_end:type_name -> shim.v1.AccountUsageObservation
 	0,  // 49: state.v1.TurnAccounting.responses:type_name -> state.v1.TokenUtilization
 	29, // 50: state.v1.TurnAccounting.reconciliation:type_name -> state.v1.TokenUsageReconciliation
 	30, // 51: state.v1.TurnAccounting.complete:type_name -> state.v1.TurnAccountingComplete

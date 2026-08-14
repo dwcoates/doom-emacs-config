@@ -52,8 +52,8 @@
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_google_protobuf_struct } from "@bufbuild/protobuf/wkt";
-import type { ExternalEntry } from "../../protocol/v1/external_pb";
-import { file_protocol_v1_external } from "../../protocol/v1/external_pb";
+import type { ExternalEntry } from "../../shim/v1/external_pb";
+import { file_shim_v1_external } from "../../shim/v1/external_pb";
 import type { UnknownEntry, UnparsedEntry, VendorSpecificEntry } from "./unsupported_pb";
 import { file_store_v1_unsupported } from "./unsupported_pb";
 import type { JsonObject, Message } from "@bufbuild/protobuf";
@@ -62,7 +62,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/entry.proto.
  */
 export const file_store_v1_entry: GenFile = /*@__PURE__*/
-  fileDesc("ChRzdG9yZS92MS9lbnRyeS5wcm90bxIIc3RvcmUudjEiYAoFRW50cnkSKQoIaW50ZXJuYWwYASABKAsyFy5zdG9yZS52MS5JbnRlcm5hbEVudHJ5EiwKCGV4dGVybmFsGAIgASgLMhoucHJvdG9jb2wudjEuRXh0ZXJuYWxFbnRyeSKSAgoNSW50ZXJuYWxFbnRyeRIeCgVwbGFuZRgBIAEoCzIPLnN0b3JlLnYxLlBsYW5lEhAKCHdyaXRlX2lkGAIgASgJEi4KDXNvdXJjZV9yZWNvcmQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EjgKD3ZlbmRvcl9zcGVjaWZpYxgEIAEoCzIdLnN0b3JlLnYxLlZlbmRvclNwZWNpZmljRW50cnlIABIpCgd1bmtub3duGAUgASgLMhYuc3RvcmUudjEuVW5rbm93bkVudHJ5SAASKwoIdW5wYXJzZWQYBiABKAsyFy5zdG9yZS52MS5VbnBhcnNlZEVudHJ5SABCDQoLdW5jb252ZXJ0ZWQiXgoFUGxhbmUSJwoGc3RyZWFtGAEgASgLMhUuc3RvcmUudjEuUGxhbmVTdHJlYW1IABIjCgRmaWxlGAIgASgLMhMuc3RvcmUudjEuUGxhbmVGaWxlSABCBwoFcGxhbmUiDQoLUGxhbmVTdHJlYW0iCwoJUGxhbmVGaWxlQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_google_protobuf_struct, file_protocol_v1_external, file_store_v1_unsupported]);
+  fileDesc("ChRzdG9yZS92MS9lbnRyeS5wcm90bxIIc3RvcmUudjEiXAoFRW50cnkSKQoIaW50ZXJuYWwYASABKAsyFy5zdG9yZS52MS5JbnRlcm5hbEVudHJ5EigKCGV4dGVybmFsGAIgASgLMhYuc2hpbS52MS5FeHRlcm5hbEVudHJ5IpICCg1JbnRlcm5hbEVudHJ5Eh4KBXBsYW5lGAEgASgLMg8uc3RvcmUudjEuUGxhbmUSEAoId3JpdGVfaWQYAiABKAkSLgoNc291cmNlX3JlY29yZBgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSOAoPdmVuZG9yX3NwZWNpZmljGAQgASgLMh0uc3RvcmUudjEuVmVuZG9yU3BlY2lmaWNFbnRyeUgAEikKB3Vua25vd24YBSABKAsyFi5zdG9yZS52MS5Vbmtub3duRW50cnlIABIrCgh1bnBhcnNlZBgGIAEoCzIXLnN0b3JlLnYxLlVucGFyc2VkRW50cnlIAEINCgt1bmNvbnZlcnRlZCJeCgVQbGFuZRInCgZzdHJlYW0YASABKAsyFS5zdG9yZS52MS5QbGFuZVN0cmVhbUgAEiMKBGZpbGUYAiABKAsyEy5zdG9yZS52MS5QbGFuZUZpbGVIAEIHCgVwbGFuZSINCgtQbGFuZVN0cmVhbSILCglQbGFuZUZpbGVCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_google_protobuf_struct, file_shim_v1_external, file_store_v1_unsupported]);
 
 /**
  * One record as the STORE holds it: the half that may leave, and the half that
@@ -91,11 +91,11 @@ export type Entry = Message<"store.v1.Entry"> & {
 
   /**
    * What may be forwarded. The daemon receives exactly this, carried by the
-   * delivery envelope in protocol.v1 — a field access, not a conversion.
+   * delivery envelope in shim.v1 — a field access, not a conversion.
    *
    * UNSET means the record is unrenderable and has no path to the daemon.
    *
-   * @generated from field: protocol.v1.ExternalEntry external = 2;
+   * @generated from field: shim.v1.ExternalEntry external = 2;
    */
   external?: ExternalEntry | undefined;
 };

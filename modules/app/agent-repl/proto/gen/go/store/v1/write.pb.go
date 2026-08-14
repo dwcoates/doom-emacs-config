@@ -1,15 +1,15 @@
 // write.proto — how a producer hands a record to the store.
 //
 // SHIM-SIDE, and that placement is the whole point. The natural home for a
-// write frame is `protocol.v1` alongside the other transport plumbing — but the
-// daemon imports `protocol.v1` for the delivery envelope, and every file in one
+// write frame is `shim.v1` alongside the other transport plumbing — but the
+// daemon imports `shim.v1` for the delivery envelope, and every file in one
 // proto package generates into ONE Go package. Putting the write frame there
 // would hand the daemon `Entry`, `InternalEntry` and `Plane` for free and make
 // the isolation gate worthless.
 //
 // So the protocol is split the way the RECORD is split. The write half is here,
 // reachable only by the shim, the sidecar and the store. The read half stays in
-// `protocol.v1` and speaks `ExternalEntry`, which is exactly what the daemon is
+// `shim.v1` and speaks `ExternalEntry`, which is exactly what the daemon is
 // entitled to.
 //
 // THIS FILE EXISTS BECAUSE ITS ABSENCE STOPPED THE FIRST IMPLEMENTATION WAVE.

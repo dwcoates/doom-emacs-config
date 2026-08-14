@@ -11,7 +11,7 @@
 package frontendv1
 
 import (
-	v1 "agentrepl/proto/protocol/v1"
+	v1 "agentrepl/proto/shim/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -869,14 +869,14 @@ var File_frontend_v1_topbar_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\n" +
-	"\x18frontend/v1/topbar.proto\x12\vfrontend.v1\x1a\x16protocol/v1/core.proto\"\xda\x02\n" +
+	"\x18frontend/v1/topbar.proto\x12\vfrontend.v1\x1a\x12shim/v1/core.proto\"\xd6\x02\n" +
 	"\n" +
 	"TopbarView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12!\n" +
 	"\fsession_line\x18\x03 \x01(\tR\vsessionLine\x12#\n" +
-	"\rmodel_display\x18\x04 \x01(\tR\fmodelDisplay\x12=\n" +
-	"\rmodel_options\x18\x05 \x03(\v2\x18.protocol.v1.ModelOptionR\fmodelOptions\x12C\n" +
+	"\rmodel_display\x18\x04 \x01(\tR\fmodelDisplay\x129\n" +
+	"\rmodel_options\x18\x05 \x03(\v2\x14.shim.v1.ModelOptionR\fmodelOptions\x12C\n" +
 	"\fconnectivity\x18\x06 \x01(\v2\x1f.frontend.v1.TopbarConnectivityR\fconnectivity\x12\x14\n" +
 	"\x05fence\x18\a \x01(\tR\x05fence\x126\n" +
 	"\bwarnings\x18\b \x03(\v2\x1a.frontend.v1.TopbarWarningR\bwarnings\"s\n" +
@@ -952,10 +952,10 @@ var file_frontend_v1_topbar_proto_goTypes = []any{
 	(*TokenBreakdownView)(nil),      // 9: frontend.v1.TokenBreakdownView
 	(*TokenBreakdownSection)(nil),   // 10: frontend.v1.TokenBreakdownSection
 	(*TokenBreakdownRow)(nil),       // 11: frontend.v1.TokenBreakdownRow
-	(*v1.ModelOption)(nil),          // 12: protocol.v1.ModelOption
+	(*v1.ModelOption)(nil),          // 12: shim.v1.ModelOption
 }
 var file_frontend_v1_topbar_proto_depIdxs = []int32{
-	12, // 0: frontend.v1.TopbarView.model_options:type_name -> protocol.v1.ModelOption
+	12, // 0: frontend.v1.TopbarView.model_options:type_name -> shim.v1.ModelOption
 	3,  // 1: frontend.v1.TopbarView.connectivity:type_name -> frontend.v1.TopbarConnectivity
 	1,  // 2: frontend.v1.TopbarView.warnings:type_name -> frontend.v1.TopbarWarning
 	2,  // 3: frontend.v1.TopbarWarning.accounting:type_name -> frontend.v1.TopbarAccountingWarning
