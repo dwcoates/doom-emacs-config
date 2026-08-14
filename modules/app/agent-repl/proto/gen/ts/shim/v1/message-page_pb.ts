@@ -8,10 +8,23 @@
 // happens to hold ten messages, which is the unbounded scan relocated.
 //
 // The store therefore resolves ownership itself, selecting the ten most recent
-// distinct top_level_message_id values below the anchor and returning every
-// record they own. This is a deliberate, NARROW coupling: the store learns
-// which record belongs to which message, and nothing else about how messages
-// render.
+// distinct FEED ROWS below the anchor and returning every record they own. This
+// is a deliberate, NARROW coupling: the store learns which record belongs to
+// which message, and nothing else about how messages render.
+//
+// OWNERSHIP IS DERIVED AT INGEST, NOT CARRIED ON THE WIRE. A record states only
+// its IMMEDIATE parent (conversation.v1.MessageEntry.parent_message_id, unset
+// when the message sits directly in the feed). The store walks that chain ONCE,
+// at write time, and keeps the feed row it lands on as a column of its own,
+// indexed alongside seq. The page query then selects distinct values of that
+// column below the anchor: one indexed pass, exactly as before.
+//
+// The denormalization did not go away — it MOVED, out of the contract and into
+// the store, which is where the index lives anyway. A reader that had to walk
+// parent pointers at READ time would be performing the unbounded traversal this
+// arrangement exists to remove, and a page query would stop being a single
+// indexed pass. That is why the walk happens once per record at write, and
+// never per page.
 //
 // Shared by the store, the shim and the daemon — all three speak records, so
 // one shape serves every hop.
@@ -254,9 +267,11 @@ export type StoredMessage = Message<"shim.v1.StoredMessage"> & {
    * legitimately owns hundreds of records, and truncating them would deliver a
    * lie about one message rather than fewer messages honestly.
    *
-   * Records for messages NESTED inside this one are included here and carry
-   * this message's id as their top_level_message_id — nesting is reconstructed
-   * by the consumer, and never costs a page slot.
+   * Records for messages NESTED inside this one are included here: each states
+   * only its immediate parent, and the store's ingest-time walk resolved every
+   * one of them to THIS message as their feed row, which is how they were
+   * selected. Nesting is reconstructed by the consumer from those immediate
+   * parents, and never costs a page slot.
    *
    * @generated from field: repeated shim.v1.ExternalEntry records = 2;
    */

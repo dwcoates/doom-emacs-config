@@ -42,10 +42,14 @@ type MessageEntry struct {
 	MessageId string `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	// The message immediately containing this one.
 	//
-	// unset means this message sits directly in the feed, in which case is this
-	// message's own id. Absence is the fact itself, not a placeholder for an
-	// unknown: a message whose parent could not be resolved is a producer fault,
-	// never an empty pointer. Empty is invalid.
+	// UNSET means this message sits directly in the feed. Absence is the fact
+	// itself, not a placeholder for an unknown: a message whose parent could not
+	// be resolved is a producer fault, never an unset pointer. Empty is invalid.
+	//
+	// ONE HOP, NEVER THE ROOT. The feed row a nested message ultimately belongs
+	// to is not stated here and is not on the wire at all: the store derives it
+	// by walking this pointer once at ingest and indexes it itself. See
+	// shim/v1/message-page.proto.
 	ParentMessageId *string `protobuf:"bytes,2,opt,name=parent_message_id,json=parentMessageId,proto3,oneof" json:"parent_message_id,omitempty"`
 	// Who this message is FROM, resolved by the producer rather than inferred by
 	// a reader from which payload arm is set.
