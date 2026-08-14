@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/message.proto.
  */
 export const file_conversation_v1_message: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvbWVzc2FnZS5wcm90bxIPY29udmVyc2F0aW9uLnYxItIBCgxNZXNzYWdlRW50cnkSEgoKbWVzc2FnZV9pZBgBIAEoCRIcChR0b3BfbGV2ZWxfbWVzc2FnZV9pZBgCIAEoCRIuCgZwYXJlbnQYAyABKAsyHi5jb252ZXJzYXRpb24udjEuTWVzc2FnZVBhcmVudBIuCgZhdXRob3IYBCABKAsyHi5jb252ZXJzYXRpb24udjEuTWVzc2FnZUF1dGhvchIwCgdwYXlsb2FkGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VQYXlsb2FkIsYGCg5NZXNzYWdlUGF5bG9hZBIuCgl1c2VyX3NhaWQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRIABIwCgphZ2VudF9zYWlkGAIgASgLMhouY29udmVyc2F0aW9uLnYxLkFnZW50U2FpZEgAEjwKEHBlcm1pc3Npb25fYXNrZWQYAyABKAsyIC5jb252ZXJzYXRpb24udjEuUGVybWlzc2lvbkFza2VkSAASOAoOZmFpbHVyZV9yYWlzZWQYBCABKAsyHi5jb252ZXJzYXRpb24udjEuRmFpbHVyZVJhaXNlZEgAEjIKC2NvbnRleHRfY3V0GAUgASgLMhsuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDdXRIABJFChVkZXRhY2hlZF93b3JrX3N0YXJ0ZWQYBiABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZEgAEksKGGRldGFjaGVkX3dvcmtfcHJvZ3Jlc3NlZBgHIAEoCzInLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtQcm9ncmVzc2VkSAASRwoWd29ya2Zsb3dfc3RlcF9vYnNlcnZlZBgIIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5Xb3JrZmxvd1N0ZXBPYnNlcnZlZEgAEkEKE2RldGFjaGVkX3dvcmtfZW5kZWQYCSABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWRIABJCChNwZXJtaXNzaW9uX2Fuc3dlcmVkGAogASgLMiMuY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BbnN3ZXJlZEgAEjYKDXRvb2xfcmV0dXJuZWQYCyABKAsyHS5jb252ZXJzYXRpb24udjEuVG9vbFJldHVybmVkSAASQQoTc2tpbGxfYm9keV9yZXNvbHZlZBgMIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ta2lsbEJvZHlSZXNvbHZlZEgAEjwKEGNvbnRlbnRfYXJyaXZpbmcYDSABKAsyIC5jb252ZXJzYXRpb24udjEuQ29udGVudEFycml2aW5nSABCCQoHcGF5bG9hZCKFAQoNTWVzc2FnZVBhcmVudBIyCgRyb290GAEgASgLMiIuY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VQYXJlbnRSb290SAASNgoGaW5zaWRlGAIgASgLMiQuY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VQYXJlbnRJbnNpZGVIAEIICgZwYXJlbnQiEwoRTWVzc2FnZVBhcmVudFJvb3QiKQoTTWVzc2FnZVBhcmVudEluc2lkZRISCgptZXNzYWdlX2lkGAEgASgJIrUBCg1NZXNzYWdlQXV0aG9yEisKBHVzZXIYASABKAsyGy5jb252ZXJzYXRpb24udjEuQXV0aG9yVXNlckgAEi0KBWFnZW50GAIgASgLMhwuY29udmVyc2F0aW9uLnYxLkF1dGhvckFnZW50SAASPgoOZGV0YWNoZWRfYWdlbnQYAyABKAsyJC5jb252ZXJzYXRpb24udjEuQXV0aG9yRGV0YWNoZWRBZ2VudEgAQggKBmF1dGhvciIMCgpBdXRob3JVc2VyIg0KC0F1dGhvckFnZW50IjcKE0F1dGhvckRldGFjaGVkQWdlbnQSIAoYZGV0YWNoZWRfd29ya19tZXNzYWdlX2lkGAEgASgJQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_payloads]);
+  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvbWVzc2FnZS5wcm90bxIPY29udmVyc2F0aW9uLnYxIroBCgxNZXNzYWdlRW50cnkSEgoKbWVzc2FnZV9pZBgBIAEoCRIeChFwYXJlbnRfbWVzc2FnZV9pZBgCIAEoCUgAiAEBEi4KBmF1dGhvchgDIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5NZXNzYWdlQXV0aG9yEjAKB3BheWxvYWQYBCABKAsyHy5jb252ZXJzYXRpb24udjEuTWVzc2FnZVBheWxvYWRCFAoSX3BhcmVudF9tZXNzYWdlX2lkIsYGCg5NZXNzYWdlUGF5bG9hZBIuCgl1c2VyX3NhaWQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRIABIwCgphZ2VudF9zYWlkGAIgASgLMhouY29udmVyc2F0aW9uLnYxLkFnZW50U2FpZEgAEjwKEHBlcm1pc3Npb25fYXNrZWQYAyABKAsyIC5jb252ZXJzYXRpb24udjEuUGVybWlzc2lvbkFza2VkSAASOAoOZmFpbHVyZV9yYWlzZWQYBCABKAsyHi5jb252ZXJzYXRpb24udjEuRmFpbHVyZVJhaXNlZEgAEjIKC2NvbnRleHRfY3V0GAUgASgLMhsuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDdXRIABJFChVkZXRhY2hlZF93b3JrX3N0YXJ0ZWQYBiABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZEgAEksKGGRldGFjaGVkX3dvcmtfcHJvZ3Jlc3NlZBgHIAEoCzInLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtQcm9ncmVzc2VkSAASRwoWd29ya2Zsb3dfc3RlcF9vYnNlcnZlZBgIIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5Xb3JrZmxvd1N0ZXBPYnNlcnZlZEgAEkEKE2RldGFjaGVkX3dvcmtfZW5kZWQYCSABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWRIABJCChNwZXJtaXNzaW9uX2Fuc3dlcmVkGAogASgLMiMuY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BbnN3ZXJlZEgAEjYKDXRvb2xfcmV0dXJuZWQYCyABKAsyHS5jb252ZXJzYXRpb24udjEuVG9vbFJldHVybmVkSAASQQoTc2tpbGxfYm9keV9yZXNvbHZlZBgMIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ta2lsbEJvZHlSZXNvbHZlZEgAEjwKEGNvbnRlbnRfYXJyaXZpbmcYDSABKAsyIC5jb252ZXJzYXRpb24udjEuQ29udGVudEFycml2aW5nSABCCQoHcGF5bG9hZCK1AQoNTWVzc2FnZUF1dGhvchIrCgR1c2VyGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkF1dGhvclVzZXJIABItCgVhZ2VudBgCIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BdXRob3JBZ2VudEgAEj4KDmRldGFjaGVkX2FnZW50GAMgASgLMiQuY29udmVyc2F0aW9uLnYxLkF1dGhvckRldGFjaGVkQWdlbnRIAEIICgZhdXRob3IiDAoKQXV0aG9yVXNlciINCgtBdXRob3JBZ2VudCI3ChNBdXRob3JEZXRhY2hlZEFnZW50EiAKGGRldGFjaGVkX3dvcmtfbWVzc2FnZV9pZBgBIAEoCUIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_payloads]);
 
 /**
  * One record BELONGING to one message. Several of these share a message_id and
@@ -42,50 +42,22 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
   messageId: string;
 
   /**
-   * The feed row that message belongs to, and the value a page groups by.
+   * The message immediately containing this one.
    *
-   * EQUALS message_id when the message is itself a feed row; names the
-   * containing message when nested, so a subagent and everything inside it
-   * share one value and therefore one page slot.
+   * unset means this message sits directly in the feed, in which case is this
+   * message's own id. Absence is the fact itself, not a placeholder for an
+   * unknown: a message whose parent could not be resolved is a producer fault,
+   * never an empty pointer. Empty is invalid.
    *
-   * Denormalized on purpose: it is derivable by walking parents, and storing it
-   * is precisely why a page of ten messages costs one indexed pass. It MUST
-   * equal the root of the parent chain; a write that disagrees is corruption,
-   * not a variant.
-   *
-   * @generated from field: string top_level_message_id = 2;
+   * @generated from field: optional string parent_message_id = 2;
    */
-  topLevelMessageId: string;
-
-  /**
-   * Where this message sits: at the root of the feed, or inside another
-   * message.
-   *
-   * A oneof rather than a string, and that is the whole point. As a string,
-   * EMPTY meant two different things — "this is a feed row" and "the producer
-   * could not resolve a parent" — and only the first is legal. At a context
-   * compaction the vendor's physical parent chain is cut, the boundary line
-   * carries no parent, and a separate logical pointer holds the only link back
-   * across it. A producer that reads only the physical chain resolves nothing,
-   * and with a string it would emit an empty value indistinguishable from a
-   * legitimate root — so pre-compaction history becomes unreachable by any walk
-   * and the boundary renders as a new top-level row, with nothing detecting it.
-   *
-   * Here an unresolved parent has no legal record to occupy. The producer must
-   * state which case it is, or fail.
-   *
-   * FIXME: I dont think anything is gained by having this not be a simple `optional string parent_message_id`
-   *        with unset meaning "root level" 
-   *
-   * @generated from field: conversation.v1.MessageParent parent = 3;
-   */
-  parent?: MessageParent | undefined;
+  parentMessageId?: string | undefined;
 
   /**
    * Who this message is FROM, resolved by the producer rather than inferred by
    * a reader from which payload arm is set.
    *
-   * @generated from field: conversation.v1.MessageAuthor author = 4;
+   * @generated from field: conversation.v1.MessageAuthor author = 3;
    */
   author?: MessageAuthor | undefined;
 
@@ -94,7 +66,7 @@ export type MessageEntry = Message<"conversation.v1.MessageEntry"> & {
    * which holds the arms themselves; extracting them changes nothing about what
    * this record means, only about who else can name the same set.
    *
-   * @generated from field: conversation.v1.MessagePayload payload = 5;
+   * @generated from field: conversation.v1.MessagePayload payload = 4;
    */
   payload?: MessagePayload | undefined;
 };
@@ -269,90 +241,14 @@ export const MessagePayloadSchema: GenMessage<MessagePayload> = /*@__PURE__*/
   messageDesc(file_conversation_v1_message, 1);
 
 /**
- * Where a message sits in the feed.
- *
- * Two arms, no third. There is deliberately no "unknown" — a producer that
- * cannot resolve a parent has nothing legal to emit and must fail loudly rather
- * than pick the arm that looks harmless.
- *
- * @generated from message conversation.v1.MessageParent
- */
-export type MessageParent = Message<"conversation.v1.MessageParent"> & {
-  /**
-   * @generated from oneof conversation.v1.MessageParent.parent
-   */
-  parent: {
-    /**
-     * The message sits directly in the feed. `top_level_message_id` is its own
-     * id.
-     *
-     * @generated from field: conversation.v1.MessageParentRoot root = 1;
-     */
-    value: MessageParentRoot;
-    case: "root";
-  } | {
-    /**
-     * The message sits inside another one.
-     *
-     * @generated from field: conversation.v1.MessageParentInside inside = 2;
-     */
-    value: MessageParentInside;
-    case: "inside";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message conversation.v1.MessageParent.
- * Use `create(MessageParentSchema)` to create a new message.
- */
-export const MessageParentSchema: GenMessage<MessageParent> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 2);
-
-/**
- * A feed row: nothing contains this message.
- *
- * @generated from message conversation.v1.MessageParentRoot
- */
-export type MessageParentRoot = Message<"conversation.v1.MessageParentRoot"> & {
-};
-
-/**
- * Describes the message conversation.v1.MessageParentRoot.
- * Use `create(MessageParentRootSchema)` to create a new message.
- */
-export const MessageParentRootSchema: GenMessage<MessageParentRoot> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 3);
-
-/**
- * Contained by another message.
- *
- * @generated from message conversation.v1.MessageParentInside
- */
-export type MessageParentInside = Message<"conversation.v1.MessageParentInside"> & {
-  /**
-   * The message immediately containing this one — one hop, never the root.
-   * Walk `top_level_message_id` for the root; it is stored precisely so no
-   * reader has to walk this.
-   *
-   * @generated from field: string message_id = 1;
-   */
-  messageId: string;
-};
-
-/**
- * Describes the message conversation.v1.MessageParentInside.
- * Use `create(MessageParentInsideSchema)` to create a new message.
- */
-export const MessageParentInsideSchema: GenMessage<MessageParentInside> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 4);
-
-/**
  * Who a message is from.
  *
  * RESOLVED BY THE PRODUCER, never inferred by a reader from which payload arm
  * is set. The two are not the same question: a ToolReturned record is authored
  * by the agent whose message it updates, and an arm-based inference would
  * attribute it to whoever the vendor happened to file it under.
+ *
+ * FIXME: is this actually useful? When is user vs agent vs detached_agent not implicit in the message? 
  *
  * @generated from message conversation.v1.MessageAuthor
  */
@@ -392,7 +288,7 @@ export type MessageAuthor = Message<"conversation.v1.MessageAuthor"> & {
  * Use `create(MessageAuthorSchema)` to create a new message.
  */
 export const MessageAuthorSchema: GenMessage<MessageAuthor> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 5);
+  messageDesc(file_conversation_v1_message, 2);
 
 /**
  * A person, typing into the session.
@@ -407,7 +303,7 @@ export type AuthorUser = Message<"conversation.v1.AuthorUser"> & {
  * Use `create(AuthorUserSchema)` to create a new message.
  */
 export const AuthorUserSchema: GenMessage<AuthorUser> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 6);
+  messageDesc(file_conversation_v1_message, 3);
 
 /**
  * The agent, speaking in the main conversation.
@@ -422,7 +318,7 @@ export type AuthorAgent = Message<"conversation.v1.AuthorAgent"> & {
  * Use `create(AuthorAgentSchema)` to create a new message.
  */
 export const AuthorAgentSchema: GenMessage<AuthorAgent> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 7);
+  messageDesc(file_conversation_v1_message, 4);
 
 /**
  * A subagent, speaking inside its own detached conversation.
@@ -444,5 +340,5 @@ export type AuthorDetachedAgent = Message<"conversation.v1.AuthorDetachedAgent">
  * Use `create(AuthorDetachedAgentSchema)` to create a new message.
  */
 export const AuthorDetachedAgentSchema: GenMessage<AuthorDetachedAgent> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_message, 8);
+  messageDesc(file_conversation_v1_message, 5);
 

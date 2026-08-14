@@ -7,9 +7,9 @@ trap 'rm -rf "$TMP"' EXIT
 
 FIXTURE="$TMP/fixture"
 STUBS="$TMP/stubs"
-mkdir -p "$FIXTURE/gen/go" "$FIXTURE/gen/ts" "$FIXTURE/component" "$STUBS"
-cp "$THIS_DIR/Makefile" "$FIXTURE/Makefile"
-printf 'syntax = "proto3";\n' >"$FIXTURE/fixture.proto"
+mkdir -p "$FIXTURE/gen/go" "$FIXTURE/gen/ts" "$FIXTURE/component" "$FIXTURE/src" "$FIXTURE/scripts" "$STUBS"
+cp "$THIS_DIR/../Makefile" "$FIXTURE/Makefile"
+printf 'syntax = "proto3";\n' >"$FIXTURE/src/fixture.proto"
 
 # The fixture carries the structural gate too, because `go` and `ts` require it:
 # codegen is gated, so a fixture that omitted the gate would be testing a
@@ -17,7 +17,7 @@ printf 'syntax = "proto3";\n' >"$FIXTURE/fixture.proto"
 # root, which has no daemon or webapp tree — hence the stub below, which keeps it
 # from reporting a setup failure while leaving its real behavior to its own
 # self-test.
-cp "$THIS_DIR/check-conversation-isolation.sh" "$FIXTURE/check-conversation-isolation.sh"
+cp "$THIS_DIR/check-conversation-isolation.sh" "$FIXTURE/scripts/check-conversation-isolation.sh"
 mkdir -p "$FIXTURE/daemon"
 printf 'package daemon\n' >"$FIXTURE/daemon/stub.go"
 cat >"$FIXTURE/component/clean.proto" <<'EOF'
