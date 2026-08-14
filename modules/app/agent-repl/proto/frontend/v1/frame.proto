@@ -29,54 +29,53 @@ message FrontendFrame {
     // client, exactly as StateSnapshot.sessions is stripped.
     SessionView session_view = 3;
     ConversationDelta conversation_delta = 4;
-    TypingDelta typing_delta = 5;
-    TaskCatalog task_catalog = 6;
-    CommandAck command_ack = 7;
-    DaemonView daemon_view = 8;
-    SessionInitView session_init = 9;
-    HeartbeatView heartbeat = 10;
-    QueueView queue = 11;
-    ProgressView progress = 12;
+    TaskCatalog task_catalog = 5;
+    CommandAck command_ack = 6;
+    DaemonView daemon_view = 7;
+    SessionInitView session_init = 8;
+    HeartbeatView heartbeat = 9;
+    QueueView queue = 10;
+    ProgressView progress = 11;
     // Host-only durable workspace lifecycle notification.  The daemon emits
     // this only after the worktree and waiting shim are healthy; Emacs then
     // materializes its perspective and acknowledges it.
-    WorkspaceAvailable workspace_available = 13;
+    WorkspaceAvailable workspace_available = 12;
     // Host-only durable UI action sourced by the daemon-owned JSON inbox.
-    HostAction host_action = 14;
-    DaemonHealthView daemon_health = 15;
-    SessionHealthView session_health = 16;
+    HostAction host_action = 13;
+    DaemonHealthView daemon_health = 14;
+    SessionHealthView session_health = 15;
     // The workspace roster, the sidebar's entire model, previously delivered
     // by Emacs script-injection per webview. Emacs remains the single author;
     // the daemon retains the latest roster, includes it in every connect
     // snapshot, and rebroadcasts on change.
-    WorkspaceRoster workspace_roster = 17;
-    ShutdownScheduleView shutdown_schedule = 18;
+    WorkspaceRoster workspace_roster = 16;
+    ShutdownScheduleView shutdown_schedule = 17;
     // Detached work opening as WHOLE MESSAGES, and typed incremental UPDATES to
     // messages already open. Its own frame rather than more ConversationDelta
     // messages, because a detached agent produces at its own rate and must not
     // flood the conversation that dispatched it.
-    DetachedWorkDelta detached_work_delta = 19;
+    DetachedWorkDelta detached_work_delta = 18;
     // One workspace's topbar, fully resolved. Pushed whenever any fact the
     // topbar renders changes.
-    TopbarView topbar = 20;
+    TopbarView topbar = 19;
     // One workspace's token-breakdown menu, fully resolved. Pushed whenever
     // the figures change.
-    TokenBreakdownView token_breakdown = 21;
+    TokenBreakdownView token_breakdown = 20;
     // One workspace's revival gate, resolved and fenced. Pushed on every gate
     // transition (hibernate, revival start, revival settle).
-    WorkspaceGateView workspace_gate = 22;
+    WorkspaceGateView workspace_gate = 21;
     // The WHOLE merge queue, pushed complete on every queue mutation. Never a
     // delta: the roster IS the drain order.
-    MergeQueueRoster merge_queue_roster = 23;
+    MergeQueueRoster merge_queue_roster = 22;
     // The daemon is going down ON PURPOSE, pushed to every gui_stream client
     // and to the Emacs UDS host immediately before teardown. It exists so a
     // deliberate bounce stops being indistinguishable from a crash; see
     // RestartPendingView for why it is an edge and never snapshot state.
-    RestartPendingView restart_pending = 24;
-    // A preview the daemon opened and can no longer retire. Like TypingDelta
-    // it is an EDGE and never snapshot state: a cut describes the end of one
-    // preview, and a client that connects afterwards has no preview to retire.
-    TypingCut typing_cut = 25;
+    RestartPendingView restart_pending = 23;
+    // A preview the daemon opened and can no longer retire. It is an EDGE and
+    // never snapshot state: a cut describes the end of one preview, and a
+    // client that connects afterwards has no preview to retire.
+    TypingCut typing_cut = 24;
     // ONE page of conversation history, and the ONLY history page on this
     // protocol, answering a FirstPageCmd or a NextPageCmd. A PUSH rather than
     // a response, because its messages are feed content and feed content has
@@ -84,7 +83,7 @@ message FrontendFrame {
     //
     // POSITIONLESS: its reader holds no position and echoes nothing back — the
     // daemon holds the reader's place. See feed.proto.
-    ConversationHistoryPage conversation_history_page = 26;
+    ConversationHistoryPage conversation_history_page = 25;
   }
 }
 
