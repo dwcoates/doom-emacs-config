@@ -30,7 +30,7 @@ import type { JsonObject, Message as Message$1 } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/feed.proto.
  */
 export const file_frontend_v1_feed: GenFile = /*@__PURE__*/
-  fileDesc("ChZmcm9udGVuZC92MS9mZWVkLnByb3RvEgtmcm9udGVuZC52MSJyChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSJgoIbWVzc2FnZXMYAiADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEhMKC3Rocm91Z2hfc2VxGAMgASgEEg0KBWZlbmNlGAQgASgJIkkKDk1lc3NhZ2VMaW5lYWdlEhwKFHRvcF9sZXZlbF9tZXNzYWdlX2lkGAEgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAIgASgJIoQECgdNZXNzYWdlEgwKBHV1aWQYASABKAkSDQoFdHNfbXMYAiABKAMSEgoKcmVxdWVzdF9pZBgDIAEoCRIvCgZzb3VyY2UYBCABKA4yHy5mcm9udGVuZC52MS5Db252ZXJzYXRpb25Tb3VyY2USLAoHbGluZWFnZRgFIAEoCzIbLmZyb250ZW5kLnYxLk1lc3NhZ2VMaW5lYWdlEisKBWFnZW50GAYgASgLMhouZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbkgAEjQKDHVzZXJfbWVzc2FnZRgHIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5Vc2VyQ29udGVudEgAEjQKDGZhaWx1cmVfY2FyZBgIIAEoCzIcLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVmlld0gAEk8KGmRhZW1vbl9pbnRlcmNlcHRlZF9jb21tYW5kGAkgASgLMikuZnJvbnRlbmQudjEuRGFlbW9uSW50ZXJjZXB0ZWRDb21tYW5kSXRlbUgAEjIKDWRldGFjaGVkX3dvcmsYCiABKAsyGS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtIABJAChJjb21wYWN0aW9uX3N1bW1hcnkYCyABKAsyIi5mcm9udGVuZC52MS5Db21wYWN0aW9uU3VtbWFyeUl0ZW1IAEIJCgdwYXlsb2FkIqIBChFEZXRhY2hlZFdvcmtEZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSJAoGb3BlbmVkGAIgAygLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRIwCgd1cGRhdGVzGAMgAygLMh8uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrVXBkYXRlEhMKC3Rocm91Z2hfc2VxGAQgASgEEg0KBWZlbmNlGAUgASgJImEKFUNvbXBhY3Rpb25TdW1tYXJ5SXRlbRIPCgdzdW1tYXJ5GAEgASgJEhcKD2NvbXBhY3RlZF9hdF9tcxgCIAEoAxIeChZleHBlbnNpdmVfaW5wdXRfdG9rZW5zGAMgASgDIkoKC1R5cGluZ0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRINCgVmZW5jZRgCIAEoCRIZChFwYXJlbnRfbWVzc2FnZV9pZBgDIAEoCSJICglUeXBpbmdDdXQSEQoJd29ya3NwYWNlGAEgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAIgASgJEg0KBWZlbmNlGAMgASgJIl4KD1Nlc3Npb25Jbml0VmlldxIRCgl3b3Jrc3BhY2UYASABKAkSKQoEcm93cxgCIAMoCzIbLmZyb250ZW5kLnYxLlNlc3Npb25Jbml0Um93Eg0KBWZlbmNlGAMgASgJIi4KDlNlc3Npb25Jbml0Um93Eg0KBWxhYmVsGAEgASgJEg0KBXZhbHVlGAIgASgJIq0CCg1BZ2VudEVtaXNzaW9uEi4KCHJlc3BvbnNlGAEgASgLMhouZnJvbnRlbmQudjEuQWdlbnRSZXNwb25zZUgAEjQKC3Rvb2xfcmVzdWx0GAIgASgLMh0uY29udmVyc2F0aW9uLnYxLlRvb2xSZXR1cm5lZEgAEjUKDHRvb2xfb3V0Y29tZRgDIAEoCzIdLmZyb250ZW5kLnYxLkFnZW50VG9vbE91dGNvbWVIABI4Cgpza2lsbF9ib2R5GAQgASgLMiIuY29udmVyc2F0aW9uLnYxLlNraWxsQm9keVJlc29sdmVkSAASOQoLdHVybl9yZXN1bHQYBSABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWRIAEIKCghlbWlzc2lvbiKfAQoNQWdlbnRSZXNwb25zZRIoCgRzYWlkGAEgASgLMhouY29udmVyc2F0aW9uLnYxLkFnZW50U2FpZBI0Cgt1c2FnZV9zdGFtcBgCIAEoCzIfLmZyb250ZW5kLnYxLlJlc3BvbnNlVXNhZ2VTdGFtcBIuCgh2ZXJkaWN0cxgDIAMoCzIcLmZyb250ZW5kLnYxLlRvb2xDYWxsVmVyZGljdCJCCg9Ub29sQ2FsbFZlcmRpY3QSEwoLdG9vbF91c2VfaWQYASABKAkSGgoSc3Bhd25lZF9tZXNzYWdlX2lkGAIgASgJInUKElJlc3BvbnNlVXNhZ2VTdGFtcBIeChZleHBlbnNpdmVfaW5wdXRfdG9rZW5zGAEgASgDEhkKEWNhY2hlX3JlYWRfdG9rZW5zGAIgASgDEhUKDW91dHB1dF90b2tlbnMYAyABKAMSDQoFbW9kZWwYBCABKAkivAEKEEFnZW50VG9vbE91dGNvbWUSNwoHc3RhcnRlZBgBIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtTdGFydGVkSAASMwoFZW5kZWQYAiABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWRIABITCgt0b29sX3VzZV9pZBgDIAEoCRIaChJzcGF3bmVkX21lc3NhZ2VfaWQYBCABKAlCCQoHb3V0Y29tZSLSAwoJVGFza0VudHJ5Eg8KB3Rhc2tfaWQYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSEwoLb3V0cHV0X3BhdGgYAyABKAkSFQoNc3RhcnRlZF9hdF9tcxgEIAEoAxITCgtlbmRlZF9hdF9tcxgFIAEoAxI0Cgl3b3JrX2tpbmQYBiABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZBIxCgdydW5uaW5nGAcgASgLMh4uZnJvbnRlbmQudjEuVGFza1N0YXR1c1J1bm5pbmdIABIrCgRkb25lGAggASgLMhsuZnJvbnRlbmQudjEuVGFza1N0YXR1c0RvbmVIABItCgVlcnJvchgJIAEoCzIcLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNFcnJvckgAEi8KBmtpbGxlZBgKIAEoCzIdLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNLaWxsZWRIABIxCgdzdG9wcGVkGAsgASgLMh4uZnJvbnRlbmQudjEuVGFza1N0YXR1c1N0b3BwZWRIABIrCgRsb3N0GAwgASgLMhsuZnJvbnRlbmQudjEuVGFza1N0YXR1c0xvc3RIAEIICgZzdGF0dXMiEwoRVGFza1N0YXR1c1J1bm5pbmciEAoOVGFza1N0YXR1c0RvbmUiEQoPVGFza1N0YXR1c0Vycm9yIhIKEFRhc2tTdGF0dXNLaWxsZWQiEwoRVGFza1N0YXR1c1N0b3BwZWQiEAoOVGFza1N0YXR1c0xvc3QiVgoLVGFza0NhdGFsb2cSEQoJd29ya3NwYWNlGAEgASgJEiUKBXRhc2tzGAIgAygLMhYuZnJvbnRlbmQudjEuVGFza0VudHJ5Eg0KBWZlbmNlGAMgASgJIkwKHERhZW1vbkludGVyY2VwdGVkQ29tbWFuZEl0ZW0SLAoHY29tbWFuZBgBIAEoDjIbLmZyb250ZW5kLnYxLlNlc3Npb25Db21tYW5kIoECCg9GYWlsdXJlQ2FyZFZpZXcSJgoEa2luZBgBIAEoCzIYLmZyb250ZW5kLnYxLkZhaWx1cmVLaW5kEg8KB21lc3NhZ2UYAiABKAkSDgoGZGV0YWlsGAMgASgJEiwKBG9wZW4YBCABKAsyHC5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZE9wZW5IABI0CghyZXNvbHZlZBgFIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkUmVzb2x2ZWRIABI0Cgh0ZXJtaW5hbBgGIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVGVybWluYWxIAEILCglsaWZlY3ljbGUiEQoPRmFpbHVyZUNhcmRPcGVuIi0KE0ZhaWx1cmVDYXJkUmVzb2x2ZWQSFgoOcmVzb2x2ZWRfYXRfbXMYASABKAMiFQoTRmFpbHVyZUNhcmRUZXJtaW5hbCIjCg5GYWlsdXJlQ2FyZFJlZhIRCgljYXJkX3V1aWQYASABKAkiiQEKE1Blcm1pc3Npb25BbnN3ZXJDbWQSHQoVcGVybWlzc2lvbl9yZXF1ZXN0X2lkGAEgASgJEg0KBWFsbG93GAIgASgIEi4KDXVwZGF0ZWRfaW5wdXQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhQKDGRlbnlfbWVzc2FnZRgEIAEoCSKkAQoMRGV0YWNoZWRXb3JrEjUKB3N0YXJ0ZWQYASABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZBIVCg1zdGFydGVkX2F0X21zGAIgASgDEjMKCGxpdmVuZXNzGAMgASgLMiEuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3MSEQoJd29ya3NwYWNlGAQgASgJIoMBChREZXRhY2hlZFdvcmtMaXZlbmVzcxItCgRsaXZlGAEgASgLMh0uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZUgAEjMKB3NldHRsZWQYAiABKAsyIC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTZXR0bGVkSABCBwoFc3RhdGUiLAoQRGV0YWNoZWRXb3JrTGl2ZRIYChBsYXN0X2FjdGl2aXR5X21zGAEgASgDIpcBChNEZXRhY2hlZFdvcmtTZXR0bGVkEhUKDXNldHRsZWRfYXRfbXMYASABKAMSMQoFZW5kZWQYAiABKAsyIi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWQSNgoGa2lsbGVkGAMgASgLMiYuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrT3V0Y29tZUtpbGxlZCIrChlEZXRhY2hlZFdvcmtPdXRjb21lS2lsbGVkEg4KBnJlYXNvbhgBIAEoCSLGAwoSRGV0YWNoZWRXb3JrVXBkYXRlEhIKCm1lc3NhZ2VfaWQYASABKAkSNQoFYWdlbnQYAiABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtBZ2VudFVwZGF0ZUgAEjkKB2pvdXJuYWwYAyABKAsyJi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtKb3VybmFsVXBkYXRlSAASNgoFc2hlbGwYBCABKAsyJS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtPdXRwdXRBcHBlbmRIABI9Cgx1bmNsYXNzaWZpZWQYBSABKAsyJS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtPdXRwdXRBcHBlbmRIABI7CghsaXZlbmVzcxgGIAEoCzInLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0xpdmVuZXNzVXBkYXRlSAASNQoFbWVyZ2UYByABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtBZ2VudFVwZGF0ZUgAEjUKBXNraWxsGAggASgLMiQuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrU2tpbGxVcGRhdGVIAEIICgZ1cGRhdGUiSAoXRGV0YWNoZWRXb3JrQWdlbnRVcGRhdGUSLQoJZW1pc3Npb25zGAEgAygLMhouZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbiKSAQoXRGV0YWNoZWRXb3JrU2tpbGxVcGRhdGUSMgoEYm9keRgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Ta2lsbEJvZHlSZXNvbHZlZEgAEjkKCWVtaXNzaW9ucxgCIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSABCCAoGdXBkYXRlIkgKGURldGFjaGVkV29ya0pvdXJuYWxVcGRhdGUSKwoEcm93cxgBIAMoCzIdLmNvbnZlcnNhdGlvbi52MS5Xb3JrZmxvd1N0ZXAiKAoYRGV0YWNoZWRXb3JrT3V0cHV0QXBwZW5kEgwKBHRleHQYASABKAkiUQoaRGV0YWNoZWRXb3JrTGl2ZW5lc3NVcGRhdGUSMwoIbGl2ZW5lc3MYASABKAsyIS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlbmVzcyJwCglQYWdlU2NvcGUSKgoEZmVlZBgBIAEoCzIaLmZyb250ZW5kLnYxLlBhZ2VTY29wZUZlZWRIABIuCgZpbnNpZGUYAiABKAsyHC5mcm9udGVuZC52MS5QYWdlU2NvcGVJbnNpZGVIAEIHCgVzY29wZSIPCg1QYWdlU2NvcGVGZWVkIi8KD1BhZ2VTY29wZUluc2lkZRIcChRjb250YWluZXJfbWVzc2FnZV9pZBgBIAEoCSJICgxGaXJzdFBhZ2VDbWQSEQoJd29ya3NwYWNlGAEgASgJEiUKBXNjb3BlGAIgASgLMhYuZnJvbnRlbmQudjEuUGFnZVNjb3BlIkcKC05leHRQYWdlQ21kEhEKCXdvcmtzcGFjZRgBIAEoCRIlCgVzY29wZRgCIAEoCzIWLmZyb250ZW5kLnYxLlBhZ2VTY29wZSKvAgoXQ29udmVyc2F0aW9uSGlzdG9yeVBhZ2USEQoJd29ya3NwYWNlGAEgASgJEhIKCnJlcXVlc3RfaWQYAiABKAkSJgoIbWVzc2FnZXMYAyADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEisKBG1vcmUYBCABKAsyGy5mcm9udGVuZC52MS5IaXN0b3J5SGFzTW9yZUgAEiwKBXN0YXJ0GAUgASgLMhsuZnJvbnRlbmQudjEuSGlzdG9yeUF0U3RhcnRIABIVCg1saXZlX2pvaW5fc2VxGAYgASgEEiUKBXNjb3BlGAcgASgLMhYuZnJvbnRlbmQudjEuUGFnZVNjb3BlEhwKFGFuY2VzdG9yX21lc3NhZ2VfaWRzGAggAygJQg4KDGNvbnRpbnVhdGlvbiIQCg5IaXN0b3J5SGFzTW9yZSIQCg5IaXN0b3J5QXRTdGFydCp2ChJDb252ZXJzYXRpb25Tb3VyY2USIwofQ09OVkVSU0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEhwKGENPTlZFUlNBVElPTl9TT1VSQ0VfVVNFUhABEh0KGUNPTlZFUlNBVElPTl9TT1VSQ0VfTUVSR0UQAkIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_content, file_conversation_v1_payloads, file_frontend_v1_shared, file_google_protobuf_struct]);
+  fileDesc("ChZmcm9udGVuZC92MS9mZWVkLnByb3RvEgtmcm9udGVuZC52MSJyChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSJgoIbWVzc2FnZXMYAiADKAsyFC5mcm9udGVuZC52MS5NZXNzYWdlEhMKC3Rocm91Z2hfc2VxGAMgASgEEg0KBWZlbmNlGAQgASgJIkkKDk1lc3NhZ2VMaW5lYWdlEhwKFHRvcF9sZXZlbF9tZXNzYWdlX2lkGAEgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAIgASgJIoQECgdNZXNzYWdlEgwKBHV1aWQYASABKAkSDQoFdHNfbXMYAiABKAMSEgoKcmVxdWVzdF9pZBgDIAEoCRIvCgZzb3VyY2UYBCABKA4yHy5mcm9udGVuZC52MS5Db252ZXJzYXRpb25Tb3VyY2USLAoHbGluZWFnZRgFIAEoCzIbLmZyb250ZW5kLnYxLk1lc3NhZ2VMaW5lYWdlEisKBWFnZW50GAYgASgLMhouZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbkgAEjQKDHVzZXJfbWVzc2FnZRgHIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5Vc2VyQ29udGVudEgAEjQKDGZhaWx1cmVfY2FyZBgIIAEoCzIcLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVmlld0gAEk8KGmRhZW1vbl9pbnRlcmNlcHRlZF9jb21tYW5kGAkgASgLMikuZnJvbnRlbmQudjEuRGFlbW9uSW50ZXJjZXB0ZWRDb21tYW5kSXRlbUgAEjIKDWRldGFjaGVkX3dvcmsYCiABKAsyGS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtIABJAChJjb21wYWN0aW9uX3N1bW1hcnkYCyABKAsyIi5mcm9udGVuZC52MS5Db21wYWN0aW9uU3VtbWFyeUl0ZW1IAEIJCgdwYXlsb2FkIqIBChFEZXRhY2hlZFdvcmtEZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSJAoGb3BlbmVkGAIgAygLMhQuZnJvbnRlbmQudjEuTWVzc2FnZRIwCgd1cGRhdGVzGAMgAygLMh8uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrVXBkYXRlEhMKC3Rocm91Z2hfc2VxGAQgASgEEg0KBWZlbmNlGAUgASgJImEKFUNvbXBhY3Rpb25TdW1tYXJ5SXRlbRIPCgdzdW1tYXJ5GAEgASgJEhcKD2NvbXBhY3RlZF9hdF9tcxgCIAEoAxIeChZleHBlbnNpdmVfaW5wdXRfdG9rZW5zGAMgASgDIkgKCVR5cGluZ0N1dBIRCgl3b3Jrc3BhY2UYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAkSDQoFZmVuY2UYAyABKAkiXgoPU2Vzc2lvbkluaXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRIpCgRyb3dzGAIgAygLMhsuZnJvbnRlbmQudjEuU2Vzc2lvbkluaXRSb3cSDQoFZmVuY2UYAyABKAkiLgoOU2Vzc2lvbkluaXRSb3cSDQoFbGFiZWwYASABKAkSDQoFdmFsdWUYAiABKAkirQIKDUFnZW50RW1pc3Npb24SLgoIcmVzcG9uc2UYASABKAsyGi5mcm9udGVuZC52MS5BZ2VudFJlc3BvbnNlSAASNAoLdG9vbF9yZXN1bHQYAiABKAsyHS5jb252ZXJzYXRpb24udjEuVG9vbFJldHVybmVkSAASNQoMdG9vbF9vdXRjb21lGAMgASgLMh0uZnJvbnRlbmQudjEuQWdlbnRUb29sT3V0Y29tZUgAEjgKCnNraWxsX2JvZHkYBCABKAsyIi5jb252ZXJzYXRpb24udjEuU2tpbGxCb2R5UmVzb2x2ZWRIABI5Cgt0dXJuX3Jlc3VsdBgFIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEgAQgoKCGVtaXNzaW9uIp8BCg1BZ2VudFJlc3BvbnNlEigKBHNhaWQYASABKAsyGi5jb252ZXJzYXRpb24udjEuQWdlbnRTYWlkEjQKC3VzYWdlX3N0YW1wGAIgASgLMh8uZnJvbnRlbmQudjEuUmVzcG9uc2VVc2FnZVN0YW1wEi4KCHZlcmRpY3RzGAMgAygLMhwuZnJvbnRlbmQudjEuVG9vbENhbGxWZXJkaWN0IkIKD1Rvb2xDYWxsVmVyZGljdBITCgt0b29sX3VzZV9pZBgBIAEoCRIaChJzcGF3bmVkX21lc3NhZ2VfaWQYAiABKAkidQoSUmVzcG9uc2VVc2FnZVN0YW1wEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYASABKAMSGQoRY2FjaGVfcmVhZF90b2tlbnMYAiABKAMSFQoNb3V0cHV0X3Rva2VucxgDIAEoAxINCgVtb2RlbBgEIAEoCSK8AQoQQWdlbnRUb29sT3V0Y29tZRI3CgdzdGFydGVkGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya1N0YXJ0ZWRIABIzCgVlbmRlZBgCIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEgAEhMKC3Rvb2xfdXNlX2lkGAMgASgJEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgEIAEoCUIJCgdvdXRjb21lItIDCglUYXNrRW50cnkSDwoHdGFza19pZBgBIAEoCRITCgtkZXNjcmlwdGlvbhgCIAEoCRITCgtvdXRwdXRfcGF0aBgDIAEoCRIVCg1zdGFydGVkX2F0X21zGAQgASgDEhMKC2VuZGVkX2F0X21zGAUgASgDEjQKCXdvcmtfa2luZBgGIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtLaW5kEjEKB3J1bm5pbmcYByABKAsyHi5mcm9udGVuZC52MS5UYXNrU3RhdHVzUnVubmluZ0gAEisKBGRvbmUYCCABKAsyGy5mcm9udGVuZC52MS5UYXNrU3RhdHVzRG9uZUgAEi0KBWVycm9yGAkgASgLMhwuZnJvbnRlbmQudjEuVGFza1N0YXR1c0Vycm9ySAASLwoGa2lsbGVkGAogASgLMh0uZnJvbnRlbmQudjEuVGFza1N0YXR1c0tpbGxlZEgAEjEKB3N0b3BwZWQYCyABKAsyHi5mcm9udGVuZC52MS5UYXNrU3RhdHVzU3RvcHBlZEgAEisKBGxvc3QYDCABKAsyGy5mcm9udGVuZC52MS5UYXNrU3RhdHVzTG9zdEgAQggKBnN0YXR1cyITChFUYXNrU3RhdHVzUnVubmluZyIQCg5UYXNrU3RhdHVzRG9uZSIRCg9UYXNrU3RhdHVzRXJyb3IiEgoQVGFza1N0YXR1c0tpbGxlZCITChFUYXNrU3RhdHVzU3RvcHBlZCIQCg5UYXNrU3RhdHVzTG9zdCJWCgtUYXNrQ2F0YWxvZxIRCgl3b3Jrc3BhY2UYASABKAkSJQoFdGFza3MYAiADKAsyFi5mcm9udGVuZC52MS5UYXNrRW50cnkSDQoFZmVuY2UYAyABKAkiTAocRGFlbW9uSW50ZXJjZXB0ZWRDb21tYW5kSXRlbRIsCgdjb21tYW5kGAEgASgOMhsuZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmQigQIKD0ZhaWx1cmVDYXJkVmlldxImCgRraW5kGAEgASgLMhguZnJvbnRlbmQudjEuRmFpbHVyZUtpbmQSDwoHbWVzc2FnZRgCIAEoCRIOCgZkZXRhaWwYAyABKAkSLAoEb3BlbhgEIAEoCzIcLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkT3BlbkgAEjQKCHJlc29sdmVkGAUgASgLMiAuZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRSZXNvbHZlZEgAEjQKCHRlcm1pbmFsGAYgASgLMiAuZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRUZXJtaW5hbEgAQgsKCWxpZmVjeWNsZSIRCg9GYWlsdXJlQ2FyZE9wZW4iLQoTRmFpbHVyZUNhcmRSZXNvbHZlZBIWCg5yZXNvbHZlZF9hdF9tcxgBIAEoAyIVChNGYWlsdXJlQ2FyZFRlcm1pbmFsIiMKDkZhaWx1cmVDYXJkUmVmEhEKCWNhcmRfdXVpZBgBIAEoCSKJAQoTUGVybWlzc2lvbkFuc3dlckNtZBIdChVwZXJtaXNzaW9uX3JlcXVlc3RfaWQYASABKAkSDQoFYWxsb3cYAiABKAgSLgoNdXBkYXRlZF9pbnB1dBgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSFAoMZGVueV9tZXNzYWdlGAQgASgJIqQBCgxEZXRhY2hlZFdvcmsSNQoHc3RhcnRlZBgBIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtTdGFydGVkEhUKDXN0YXJ0ZWRfYXRfbXMYAiABKAMSMwoIbGl2ZW5lc3MYAyABKAsyIS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlbmVzcxIRCgl3b3Jrc3BhY2UYBCABKAkigwEKFERldGFjaGVkV29ya0xpdmVuZXNzEi0KBGxpdmUYASABKAsyHS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtMaXZlSAASMwoHc2V0dGxlZBgCIAEoCzIgLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya1NldHRsZWRIAEIHCgVzdGF0ZSIsChBEZXRhY2hlZFdvcmtMaXZlEhgKEGxhc3RfYWN0aXZpdHlfbXMYASABKAMilwEKE0RldGFjaGVkV29ya1NldHRsZWQSFQoNc2V0dGxlZF9hdF9tcxgBIAEoAxIxCgVlbmRlZBgCIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZBI2CgZraWxsZWQYAyABKAsyJi5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtPdXRjb21lS2lsbGVkIisKGURldGFjaGVkV29ya091dGNvbWVLaWxsZWQSDgoGcmVhc29uGAEgASgJIsYDChJEZXRhY2hlZFdvcmtVcGRhdGUSEgoKbWVzc2FnZV9pZBgBIAEoCRI1CgVhZ2VudBgCIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSAASOQoHam91cm5hbBgDIAEoCzImLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0pvdXJuYWxVcGRhdGVIABI2CgVzaGVsbBgEIAEoCzIlLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dHB1dEFwcGVuZEgAEj0KDHVuY2xhc3NpZmllZBgFIAEoCzIlLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya091dHB1dEFwcGVuZEgAEjsKCGxpdmVuZXNzGAYgASgLMicuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrTGl2ZW5lc3NVcGRhdGVIABI1CgVtZXJnZRgHIAEoCzIkLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0FnZW50VXBkYXRlSAASNQoFc2tpbGwYCCABKAsyJC5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtTa2lsbFVwZGF0ZUgAQggKBnVwZGF0ZSJIChdEZXRhY2hlZFdvcmtBZ2VudFVwZGF0ZRItCgllbWlzc2lvbnMYASADKAsyGi5mcm9udGVuZC52MS5BZ2VudEVtaXNzaW9uIpIBChdEZXRhY2hlZFdvcmtTa2lsbFVwZGF0ZRIyCgRib2R5GAEgASgLMiIuY29udmVyc2F0aW9uLnYxLlNraWxsQm9keVJlc29sdmVkSAASOQoJZW1pc3Npb25zGAIgASgLMiQuZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrQWdlbnRVcGRhdGVIAEIICgZ1cGRhdGUiSAoZRGV0YWNoZWRXb3JrSm91cm5hbFVwZGF0ZRIrCgRyb3dzGAEgAygLMh0uY29udmVyc2F0aW9uLnYxLldvcmtmbG93U3RlcCIoChhEZXRhY2hlZFdvcmtPdXRwdXRBcHBlbmQSDAoEdGV4dBgBIAEoCSJRChpEZXRhY2hlZFdvcmtMaXZlbmVzc1VwZGF0ZRIzCghsaXZlbmVzcxgBIAEoCzIhLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0xpdmVuZXNzInAKCVBhZ2VTY29wZRIqCgRmZWVkGAEgASgLMhouZnJvbnRlbmQudjEuUGFnZVNjb3BlRmVlZEgAEi4KBmluc2lkZRgCIAEoCzIcLmZyb250ZW5kLnYxLlBhZ2VTY29wZUluc2lkZUgAQgcKBXNjb3BlIg8KDVBhZ2VTY29wZUZlZWQiLwoPUGFnZVNjb3BlSW5zaWRlEhwKFGNvbnRhaW5lcl9tZXNzYWdlX2lkGAEgASgJIkgKDEZpcnN0UGFnZUNtZBIRCgl3b3Jrc3BhY2UYASABKAkSJQoFc2NvcGUYAiABKAsyFi5mcm9udGVuZC52MS5QYWdlU2NvcGUiRwoLTmV4dFBhZ2VDbWQSEQoJd29ya3NwYWNlGAEgASgJEiUKBXNjb3BlGAIgASgLMhYuZnJvbnRlbmQudjEuUGFnZVNjb3BlIq8CChdDb252ZXJzYXRpb25IaXN0b3J5UGFnZRIRCgl3b3Jrc3BhY2UYASABKAkSEgoKcmVxdWVzdF9pZBgCIAEoCRImCghtZXNzYWdlcxgDIAMoCzIULmZyb250ZW5kLnYxLk1lc3NhZ2USKwoEbW9yZRgEIAEoCzIbLmZyb250ZW5kLnYxLkhpc3RvcnlIYXNNb3JlSAASLAoFc3RhcnQYBSABKAsyGy5mcm9udGVuZC52MS5IaXN0b3J5QXRTdGFydEgAEhUKDWxpdmVfam9pbl9zZXEYBiABKAQSJQoFc2NvcGUYByABKAsyFi5mcm9udGVuZC52MS5QYWdlU2NvcGUSHAoUYW5jZXN0b3JfbWVzc2FnZV9pZHMYCCADKAlCDgoMY29udGludWF0aW9uIhAKDkhpc3RvcnlIYXNNb3JlIhAKDkhpc3RvcnlBdFN0YXJ0KnYKEkNvbnZlcnNhdGlvblNvdXJjZRIjCh9DT05WRVJTQVRJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASHAoYQ09OVkVSU0FUSU9OX1NPVVJDRV9VU0VSEAESHQoZQ09OVkVSU0FUSU9OX1NPVVJDRV9NRVJHRRACQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_conversation_v1_content, file_conversation_v1_payloads, file_frontend_v1_shared, file_google_protobuf_struct]);
 
 /**
  * Complete (store-round-tripped) conversation additions, composed from the
@@ -422,71 +422,6 @@ export const CompactionSummaryItemSchema: GenMessage<CompactionSummaryItem> = /*
   messageDesc(file_frontend_v1_feed, 4);
 
 /**
- * Ephemeral live-typing relay (never persisted, never in snapshots).
- *
- * @generated from message frontend.v1.TypingDelta
- */
-export type TypingDelta = Message$1<"frontend.v1.TypingDelta"> & {
-  /**
-   * Addressed by workspace alone — no session id, for the reason stated on
-   * ConversationDelta.
-   *
-   * @generated from field: string workspace = 1;
-   */
-  workspace: string;
-
-  /**
-   * OPEN GAP: THIS MESSAGE CARRIES NO CONTENT. The live preview it exists to
-   * relay has no frontend-side spelling — the content model lives in
-   * conversation.v1 and arrives on EntryDelivery's `live` arm — so TypingDelta
-   * is currently a workspace, a fence and a target, and nothing to draw. See
-   * the gap note in DESIGN-protobuf-surfaces.md.
-   * The workspace's staleness FENCE at the moment the daemon produced this
-   * push: an opaque token the client compares BYTE-WISE against the fence on
-   * the workspace's current WorkspaceState, and never parses, splits or
-   * interprets. Equal means current; different means stale, and a stale push
-   * is discarded whole rather than partially adopted.
-   *
-   * The daemon mints it and is the only thing that can read meaning into it.
-   * A client that learned to decode it would be depending on a fact this
-   * contract does not offer, and the token's composition is free to change.
-   *
-   * @generated from field: string fence = 2;
-   */
-  fence: string;
-
-  /**
-   * WHERE THIS PREVIEW BELONGS, and therefore WHAT WILL RETIRE IT.
-   *
-   * Empty — the ordinary case — means the top-level feed: the preview opens
-   * there and is retired by the authoritative record of the same block
-   * landing there.
-   *
-   * Set means the preview belongs INSIDE the named MESSAGE — detached work
-   * whose payload is folding this record — and must never be opened on the
-   * top-level feed, because the record it previews will never land there at
-   * all. A top-level preview of it could therefore never be retired, and would
-   * spin "streaming input…" with no body for the life of the page. It is
-   * retired instead by that message's OWN authoritative record — the next
-   * `DetachedWorkUpdate` addressed to this id.
-   *
-   * The daemon knows which of the two it is BEFORE the preview goes out (it
-   * is the same fold decision, made in the same place), so no preview it
-   * cannot retire is ever created. This is provenance, not a timeout.
-   *
-   * @generated from field: string parent_message_id = 3;
-   */
-  parentMessageId: string;
-};
-
-/**
- * Describes the message frontend.v1.TypingDelta.
- * Use `create(TypingDeltaSchema)` to create a new message.
- */
-export const TypingDeltaSchema: GenMessage<TypingDelta> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 5);
-
-/**
  * The daemon's statement that a preview it opened will NEVER be completed.
  *
  * A preview is retired by the authoritative record of the block it previews.
@@ -530,7 +465,7 @@ export type TypingCut = Message$1<"frontend.v1.TypingCut"> & {
  * Use `create(TypingCutSchema)` to create a new message.
  */
 export const TypingCutSchema: GenMessage<TypingCut> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 6);
+  messageDesc(file_frontend_v1_feed, 5);
 
 /**
  * The /status panel, RESOLVED: the rows it draws, already labelled and already
@@ -596,7 +531,7 @@ export type SessionInitView = Message$1<"frontend.v1.SessionInitView"> & {
  * Use `create(SessionInitViewSchema)` to create a new message.
  */
 export const SessionInitViewSchema: GenMessage<SessionInitView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 7);
+  messageDesc(file_frontend_v1_feed, 6);
 
 /**
  * One row of the /status panel: a label and the value beside it.
@@ -630,7 +565,7 @@ export type SessionInitRow = Message$1<"frontend.v1.SessionInitRow"> & {
  * Use `create(SessionInitRowSchema)` to create a new message.
  */
 export const SessionInitRowSchema: GenMessage<SessionInitRow> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 8);
+  messageDesc(file_frontend_v1_feed, 7);
 
 /**
  * One thing an agent produced.
@@ -722,7 +657,7 @@ export type AgentEmission = Message$1<"frontend.v1.AgentEmission"> & {
  * Use `create(AgentEmissionSchema)` to create a new message.
  */
 export const AgentEmissionSchema: GenMessage<AgentEmission> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 9);
+  messageDesc(file_frontend_v1_feed, 8);
 
 /**
  * The assistant's spoken turn: the conversation record itself, plus the facts
@@ -789,7 +724,7 @@ export type AgentResponse = Message$1<"frontend.v1.AgentResponse"> & {
  * Use `create(AgentResponseSchema)` to create a new message.
  */
 export const AgentResponseSchema: GenMessage<AgentResponse> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 10);
+  messageDesc(file_frontend_v1_feed, 9);
 
 /**
  * THE DAEMON'S VERDICT THAT ONE TOOL CALL DETACHED WORK, addressed to a call
@@ -847,7 +782,7 @@ export type ToolCallVerdict = Message$1<"frontend.v1.ToolCallVerdict"> & {
  * Use `create(ToolCallVerdictSchema)` to create a new message.
  */
 export const ToolCallVerdictSchema: GenMessage<ToolCallVerdict> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 11);
+  messageDesc(file_frontend_v1_feed, 10);
 
 /**
  * The per-response usage stamp carried by one assistant response.
@@ -893,7 +828,7 @@ export type ResponseUsageStamp = Message$1<"frontend.v1.ResponseUsageStamp"> & {
  * Use `create(ResponseUsageStampSchema)` to create a new message.
  */
 export const ResponseUsageStampSchema: GenMessage<ResponseUsageStamp> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 12);
+  messageDesc(file_frontend_v1_feed, 11);
 
 /**
  * A tool's TYPED outcome, and the subagent/task chip.
@@ -970,7 +905,7 @@ export type AgentToolOutcome = Message$1<"frontend.v1.AgentToolOutcome"> & {
  * Use `create(AgentToolOutcomeSchema)` to create a new message.
  */
 export const AgentToolOutcomeSchema: GenMessage<AgentToolOutcome> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 13);
+  messageDesc(file_frontend_v1_feed, 12);
 
 /**
  * One dispatched background task, as the catalog reports it.
@@ -1093,7 +1028,7 @@ export type TaskEntry = Message$1<"frontend.v1.TaskEntry"> & {
  * Use `create(TaskEntrySchema)` to create a new message.
  */
 export const TaskEntrySchema: GenMessage<TaskEntry> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 14);
+  messageDesc(file_frontend_v1_feed, 13);
 
 /**
  * The task is still running. STATED, never inferred from a missing ending:
@@ -1109,7 +1044,7 @@ export type TaskStatusRunning = Message$1<"frontend.v1.TaskStatusRunning"> & {
  * Use `create(TaskStatusRunningSchema)` to create a new message.
  */
 export const TaskStatusRunningSchema: GenMessage<TaskStatusRunning> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 15);
+  messageDesc(file_frontend_v1_feed, 14);
 
 /**
  * The task finished successfully.
@@ -1124,7 +1059,7 @@ export type TaskStatusDone = Message$1<"frontend.v1.TaskStatusDone"> & {
  * Use `create(TaskStatusDoneSchema)` to create a new message.
  */
 export const TaskStatusDoneSchema: GenMessage<TaskStatusDone> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 16);
+  messageDesc(file_frontend_v1_feed, 15);
 
 /**
  * The task finished by failing.
@@ -1139,7 +1074,7 @@ export type TaskStatusError = Message$1<"frontend.v1.TaskStatusError"> & {
  * Use `create(TaskStatusErrorSchema)` to create a new message.
  */
 export const TaskStatusErrorSchema: GenMessage<TaskStatusError> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 17);
+  messageDesc(file_frontend_v1_feed, 16);
 
 /**
  * The task was stopped from outside before it finished.
@@ -1154,7 +1089,7 @@ export type TaskStatusKilled = Message$1<"frontend.v1.TaskStatusKilled"> & {
  * Use `create(TaskStatusKilledSchema)` to create a new message.
  */
 export const TaskStatusKilledSchema: GenMessage<TaskStatusKilled> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 18);
+  messageDesc(file_frontend_v1_feed, 17);
 
 /**
  * The task was stopped deliberately through its own stop affordance. DISTINCT
@@ -1171,7 +1106,7 @@ export type TaskStatusStopped = Message$1<"frontend.v1.TaskStatusStopped"> & {
  * Use `create(TaskStatusStoppedSchema)` to create a new message.
  */
 export const TaskStatusStoppedSchema: GenMessage<TaskStatusStopped> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 19);
+  messageDesc(file_frontend_v1_feed, 18);
 
 /**
  * The daemon lost track of the task — a restart or a vanished process left
@@ -1188,7 +1123,7 @@ export type TaskStatusLost = Message$1<"frontend.v1.TaskStatusLost"> & {
  * Use `create(TaskStatusLostSchema)` to create a new message.
  */
 export const TaskStatusLostSchema: GenMessage<TaskStatusLost> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 20);
+  messageDesc(file_frontend_v1_feed, 19);
 
 /**
  * @generated from message frontend.v1.TaskCatalog
@@ -1229,7 +1164,7 @@ export type TaskCatalog = Message$1<"frontend.v1.TaskCatalog"> & {
  * Use `create(TaskCatalogSchema)` to create a new message.
  */
 export const TaskCatalogSchema: GenMessage<TaskCatalog> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 21);
+  messageDesc(file_frontend_v1_feed, 20);
 
 /**
  * Additive: ONE session command the user invoked, as the feed's record that
@@ -1291,7 +1226,7 @@ export type DaemonInterceptedCommandItem = Message$1<"frontend.v1.DaemonIntercep
  * Use `create(DaemonInterceptedCommandItemSchema)` to create a new message.
  */
 export const DaemonInterceptedCommandItemSchema: GenMessage<DaemonInterceptedCommandItem> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 22);
+  messageDesc(file_frontend_v1_feed, 21);
 
 /**
  * A failure as a CONVERSATION ITEM rather than as chrome.
@@ -1364,7 +1299,7 @@ export type FailureCardView = Message$1<"frontend.v1.FailureCardView"> & {
  * Use `create(FailureCardViewSchema)` to create a new message.
  */
 export const FailureCardViewSchema: GenMessage<FailureCardView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 23);
+  messageDesc(file_frontend_v1_feed, 22);
 
 /**
  * The failure is still happening. The card shows its alarm mark and its color.
@@ -1379,7 +1314,7 @@ export type FailureCardOpen = Message$1<"frontend.v1.FailureCardOpen"> & {
  * Use `create(FailureCardOpenSchema)` to create a new message.
  */
 export const FailureCardOpenSchema: GenMessage<FailureCardOpen> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 24);
+  messageDesc(file_frontend_v1_feed, 23);
 
 /**
  * A window-shaped failure has closed. The card settles: it keeps its place in
@@ -1401,7 +1336,7 @@ export type FailureCardResolved = Message$1<"frontend.v1.FailureCardResolved"> &
  * Use `create(FailureCardResolvedSchema)` to create a new message.
  */
 export const FailureCardResolvedSchema: GenMessage<FailureCardResolved> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 25);
+  messageDesc(file_frontend_v1_feed, 24);
 
 /**
  * The failure has no closing edge and never will — a turn that ended, a
@@ -1418,7 +1353,7 @@ export type FailureCardTerminal = Message$1<"frontend.v1.FailureCardTerminal"> &
  * Use `create(FailureCardTerminalSchema)` to create a new message.
  */
 export const FailureCardTerminalSchema: GenMessage<FailureCardTerminal> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 26);
+  messageDesc(file_frontend_v1_feed, 25);
 
 /**
  * A failure card that a surface OUTSIDE the feed needs to point at.
@@ -1444,7 +1379,7 @@ export type FailureCardRef = Message$1<"frontend.v1.FailureCardRef"> & {
  * Use `create(FailureCardRefSchema)` to create a new message.
  */
 export const FailureCardRefSchema: GenMessage<FailureCardRef> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 27);
+  messageDesc(file_frontend_v1_feed, 26);
 
 /**
  * @generated from message frontend.v1.PermissionAnswerCmd
@@ -1476,7 +1411,7 @@ export type PermissionAnswerCmd = Message$1<"frontend.v1.PermissionAnswerCmd"> &
  * Use `create(PermissionAnswerCmdSchema)` to create a new message.
  */
 export const PermissionAnswerCmdSchema: GenMessage<PermissionAnswerCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 28);
+  messageDesc(file_frontend_v1_feed, 27);
 
 /**
  * One piece of detached work, as the payload of the Message that IS it.
@@ -1557,7 +1492,7 @@ export type DetachedWork = Message$1<"frontend.v1.DetachedWork"> & {
  * Use `create(DetachedWorkSchema)` to create a new message.
  */
 export const DetachedWorkSchema: GenMessage<DetachedWork> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 29);
+  messageDesc(file_frontend_v1_feed, 28);
 
 /**
  * Live-or-settled, expressed as arms so that "settled" and "settled with what
@@ -1590,7 +1525,7 @@ export type DetachedWorkLiveness = Message$1<"frontend.v1.DetachedWorkLiveness">
  * Use `create(DetachedWorkLivenessSchema)` to create a new message.
  */
 export const DetachedWorkLivenessSchema: GenMessage<DetachedWorkLiveness> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 30);
+  messageDesc(file_frontend_v1_feed, 29);
 
 /**
  * The work is still running.
@@ -1614,7 +1549,7 @@ export type DetachedWorkLive = Message$1<"frontend.v1.DetachedWorkLive"> & {
  * Use `create(DetachedWorkLiveSchema)` to create a new message.
  */
 export const DetachedWorkLiveSchema: GenMessage<DetachedWorkLive> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 31);
+  messageDesc(file_frontend_v1_feed, 30);
 
 /**
  * The work has finished, one way or another.
@@ -1666,7 +1601,7 @@ export type DetachedWorkSettled = Message$1<"frontend.v1.DetachedWorkSettled"> &
  * Use `create(DetachedWorkSettledSchema)` to create a new message.
  */
 export const DetachedWorkSettledSchema: GenMessage<DetachedWorkSettled> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 32);
+  messageDesc(file_frontend_v1_feed, 31);
 
 /**
  * Stopped from outside before it finished: an explicit stop, a cancellation,
@@ -1689,7 +1624,7 @@ export type DetachedWorkOutcomeKilled = Message$1<"frontend.v1.DetachedWorkOutco
  * Use `create(DetachedWorkOutcomeKilledSchema)` to create a new message.
  */
 export const DetachedWorkOutcomeKilledSchema: GenMessage<DetachedWorkOutcomeKilled> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 33);
+  messageDesc(file_frontend_v1_feed, 32);
 
 /**
  * One incremental push to ONE MESSAGE'S detached-work payload: the message id
@@ -1798,7 +1733,7 @@ export type DetachedWorkUpdate = Message$1<"frontend.v1.DetachedWorkUpdate"> & {
  * Use `create(DetachedWorkUpdateSchema)` to create a new message.
  */
 export const DetachedWorkUpdateSchema: GenMessage<DetachedWorkUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 34);
+  messageDesc(file_frontend_v1_feed, 33);
 
 /**
  * New output from a detached agent.
@@ -1825,7 +1760,7 @@ export type DetachedWorkAgentUpdate = Message$1<"frontend.v1.DetachedWorkAgentUp
  * Use `create(DetachedWorkAgentUpdateSchema)` to create a new message.
  */
 export const DetachedWorkAgentUpdateSchema: GenMessage<DetachedWorkAgentUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 35);
+  messageDesc(file_frontend_v1_feed, 34);
 
 /**
  * One incremental push to a skill message. Body resolution and emission
@@ -1865,7 +1800,7 @@ export type DetachedWorkSkillUpdate = Message$1<"frontend.v1.DetachedWorkSkillUp
  * Use `create(DetachedWorkSkillUpdateSchema)` to create a new message.
  */
 export const DetachedWorkSkillUpdateSchema: GenMessage<DetachedWorkSkillUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 36);
+  messageDesc(file_frontend_v1_feed, 35);
 
 /**
  * New steps in a Workflow run's journal.
@@ -1895,7 +1830,7 @@ export type DetachedWorkJournalUpdate = Message$1<"frontend.v1.DetachedWorkJourn
  * Use `create(DetachedWorkJournalUpdateSchema)` to create a new message.
  */
 export const DetachedWorkJournalUpdateSchema: GenMessage<DetachedWorkJournalUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 37);
+  messageDesc(file_frontend_v1_feed, 36);
 
 /**
  * New bytes on a spool: an APPEND TO ONE MESSAGE'S PAYLOAD.
@@ -1910,9 +1845,9 @@ export const DetachedWorkJournalUpdateSchema: GenMessage<DetachedWorkJournalUpda
  * still looks complete. The durable record is intact and a reload repairs it,
  * with no signal to the user that a reload is warranted. A per-frame `seq` on
  * frontend.v1.FrontendFrame is the cheaper way to get detection back, and would
- * cover all four delta streams — ConversationDelta, TypingDelta,
- * DetachedWorkDelta and this one — rather than this one alone, for less than a
- * per-stream cursor costs.
+ * cover all three delta streams — ConversationDelta, DetachedWorkDelta and
+ * this one — rather than this one alone, for less than a per-stream cursor
+ * costs.
  *
  * @generated from message frontend.v1.DetachedWorkOutputAppend
  */
@@ -1930,7 +1865,7 @@ export type DetachedWorkOutputAppend = Message$1<"frontend.v1.DetachedWorkOutput
  * Use `create(DetachedWorkOutputAppendSchema)` to create a new message.
  */
 export const DetachedWorkOutputAppendSchema: GenMessage<DetachedWorkOutputAppend> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 38);
+  messageDesc(file_frontend_v1_feed, 37);
 
 /**
  * A liveness transition: live to settled, or a settled outcome changing (a
@@ -1952,7 +1887,7 @@ export type DetachedWorkLivenessUpdate = Message$1<"frontend.v1.DetachedWorkLive
  * Use `create(DetachedWorkLivenessUpdateSchema)` to create a new message.
  */
 export const DetachedWorkLivenessUpdateSchema: GenMessage<DetachedWorkLivenessUpdate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 39);
+  messageDesc(file_frontend_v1_feed, 38);
 
 /**
  * Which container a page walks.
@@ -1991,7 +1926,7 @@ export type PageScope = Message$1<"frontend.v1.PageScope"> & {
  * Use `create(PageScopeSchema)` to create a new message.
  */
 export const PageScopeSchema: GenMessage<PageScope> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 40);
+  messageDesc(file_frontend_v1_feed, 39);
 
 /**
  * The top-level conversation: everything the feed renders as a standalone row.
@@ -2010,7 +1945,7 @@ export type PageScopeFeed = Message$1<"frontend.v1.PageScopeFeed"> & {
  * Use `create(PageScopeFeedSchema)` to create a new message.
  */
 export const PageScopeFeedSchema: GenMessage<PageScopeFeed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 41);
+  messageDesc(file_frontend_v1_feed, 40);
 
 /**
  * The inside of one message: the records that message contains.
@@ -2033,7 +1968,7 @@ export type PageScopeInside = Message$1<"frontend.v1.PageScopeInside"> & {
  * Use `create(PageScopeInsideSchema)` to create a new message.
  */
 export const PageScopeInsideSchema: GenMessage<PageScopeInside> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 42);
+  messageDesc(file_frontend_v1_feed, 41);
 
 /**
  * Ask for the MOST RECENT page, and reset this reader's position to it.
@@ -2072,7 +2007,7 @@ export type FirstPageCmd = Message$1<"frontend.v1.FirstPageCmd"> & {
  * Use `create(FirstPageCmdSchema)` to create a new message.
  */
 export const FirstPageCmdSchema: GenMessage<FirstPageCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 43);
+  messageDesc(file_frontend_v1_feed, 42);
 
 /**
  * Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
@@ -2109,7 +2044,7 @@ export type NextPageCmd = Message$1<"frontend.v1.NextPageCmd"> & {
  * Use `create(NextPageCmdSchema)` to create a new message.
  */
 export const NextPageCmdSchema: GenMessage<NextPageCmd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 44);
+  messageDesc(file_frontend_v1_feed, 43);
 
 /**
  * One page of messages, oldest first.
@@ -2230,7 +2165,7 @@ export type ConversationHistoryPage = Message$1<"frontend.v1.ConversationHistory
  * Use `create(ConversationHistoryPageSchema)` to create a new message.
  */
 export const ConversationHistoryPageSchema: GenMessage<ConversationHistoryPage> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 45);
+  messageDesc(file_frontend_v1_feed, 44);
 
 /**
  * Older history remains; call NextPageCmd.
@@ -2245,7 +2180,7 @@ export type HistoryHasMore = Message$1<"frontend.v1.HistoryHasMore"> & {
  * Use `create(HistoryHasMoreSchema)` to create a new message.
  */
 export const HistoryHasMoreSchema: GenMessage<HistoryHasMore> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 46);
+  messageDesc(file_frontend_v1_feed, 45);
 
 /**
  * There is nothing older. A FACT the daemon established by reading to the floor.
@@ -2260,7 +2195,7 @@ export type HistoryAtStart = Message$1<"frontend.v1.HistoryAtStart"> & {
  * Use `create(HistoryAtStartSchema)` to create a new message.
  */
 export const HistoryAtStartSchema: GenMessage<HistoryAtStart> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_feed, 47);
+  messageDesc(file_frontend_v1_feed, 46);
 
 /**
  * WHO drove the turn that produced a message.

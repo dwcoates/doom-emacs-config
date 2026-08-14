@@ -1145,6 +1145,13 @@ export const DetachedLostSchema: GenMessage<DetachedLost> = /*@__PURE__*/
  * message_id — which is why both producers must derive that id from the same
  * vendor value.
  *
+ * THIS IS THE ONLY SPELLING OF LIVE TYPING. There is no frontend-side model of
+ * a preview: the content model lives here, in conversation.v1, and reaches the
+ * daemon on EntryDelivery's `live` arm — handed straight over, never written,
+ * never positioned. A frontend.v1 message that carried a workspace, a fence and
+ * a target but nothing to draw existed once and was deleted for exactly that
+ * reason; see DESIGN-protobuf-surfaces.md.
+ *
  * @generated from message conversation.v1.ContentArriving
  */
 export type ContentArriving = Message<"conversation.v1.ContentArriving"> & {

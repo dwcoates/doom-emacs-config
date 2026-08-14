@@ -2371,6 +2371,13 @@ func (x *DetachedLost) GetInference() string {
 // preview with the settled message rather than appending beside it, matching on
 // message_id — which is why both producers must derive that id from the same
 // vendor value.
+//
+// THIS IS THE ONLY SPELLING OF LIVE TYPING. There is no frontend-side model of
+// a preview: the content model lives here, in conversation.v1, and reaches the
+// daemon on EntryDelivery's `live` arm — handed straight over, never written,
+// never positioned. A frontend.v1 message that carried a workspace, a fence and
+// a target but nothing to draw existed once and was deleted for exactly that
+// reason; see DESIGN-protobuf-surfaces.md.
 type ContentArriving struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Which block of the message this extends. The index into the settled
