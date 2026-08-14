@@ -1,17 +1,19 @@
-// endpoint_session_health.proto — the SessionHealth endpoint's request and
-// response.
+// endpoint_session_health.proto — the SessionHealth endpoint's request, success
+// and error.
 //
-// ONE ENDPOINT PER FILE: SessionHealthRequest and SessionHealthResponse and
-// nothing else, so the whole of what one method takes and returns is readable in
-// one place. The `endpoint_` prefix is the grouping, not a directory — see
-// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
-// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+// ONE ENDPOINT PER FILE: SessionHealthRequest, SessionHealthResponse and the
+// two answers it wraps, and nothing else, so the whole of what one method takes
+// and returns is readable in one place. The `endpoint_` prefix is the grouping,
+// not a directory — see DESIGN-protobuf-surfaces.md for why a directory is not
+// available here, and for why a request type belongs to agentrepl.v1 rather
+// than frontend.v1.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+import "frontend/v1/failure.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -29,18 +31,49 @@ message SessionHealthRequest {
   // WHICH SUBSCRIBE STREAM the SessionHealthView should be pushed down. See
   // agentrepl.v1.SubscribeRequest.client_id.
   string client_id = 3;
+  // The session the verdict must be about, so a response cannot be used after
+  // a rebind moved the workspace onto a different one.
   string session_id = 4;
 }
 
-// SessionHealth's answer: accepted, or the classified account of the refusal.
+// SessionHealth's answer: exactly one of a success and an error.
 //
-// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
-// directly gave 33 methods one response type, so no method could gain an answer
-// of its own without offering that answer to every other method as well. As with
-// DaemonHealth the verdict arrives as a pushed SessionHealthView, so this answer
-// carries acceptance only.
+// TWO ARMS, NOT AN `ok` BIT PLUS AN OPTIONAL FAILURE — see
+// AcceptQueueEntryResponse for the whole of that argument.
 message SessionHealthResponse {
-  // Whether the daemon accepted this call, and when it did not, the classified
-  // failure a frontend renders as a card. See CommandAck.
-  CommandAck ack = 1;
+  // Echoed from the request that produced this answer. See
+  // AcceptQueueEntryResponse.request_id.
+  string request_id = 1;
+  oneof response {
+    SessionHealthSuccess success = 2;
+    SessionHealthError error = 3;
+  }
+}
+
+// The probe ran.
+//
+// NO ARMS, AND NO VERDICT. As with DaemonHealth the verdict arrives as a pushed
+// SessionHealthView; this answer carries acceptance only.
+message SessionHealthSuccess {}
+
+// Why the probe could not be run.
+//
+// EXACTLY ONE DERIVED ARM BESIDES THE FUNNEL, and the shortness of this list is
+// itself the contract. A non-absolute workspace key, a missing session_id, an
+// unwired router, a transport failure, a mismatched session and an unhealthy
+// shim are ALL encoded as healthy=false ON THE VIEW rather than as refusals
+// here, so that Emacs has ONE honest result type to wait on during restore
+// instead of two channels to reconcile. The only thing that can refuse the call
+// itself is the absence of the correlation the view would be pushed under.
+message SessionHealthError {
+  oneof error {
+    // The request carries no request_id, so no pushed view could be attributed
+    // to it.
+    RefusalRequiredFieldMissing required_field_missing = 1;
+    // The probe failed for a reason the daemon's classifier could not name.
+    frontend.v1.FailureInternalUnclassified unclassified = 2;
+  }
+  // The feed card this refusal was filed under, when it produced one. See
+  // AcceptQueueEntryError.failure_card.
+  frontend.v1.FailureCardRef failure_card = 3;
 }

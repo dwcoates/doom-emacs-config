@@ -1,17 +1,19 @@
-// endpoint_submit_prompt.proto — the SubmitPrompt endpoint's request and
-// response.
+// endpoint_submit_prompt.proto — the SubmitPrompt endpoint's request, success
+// and error.
 //
-// ONE ENDPOINT PER FILE: SubmitPromptRequest and SubmitPromptResponse and
-// nothing else, so the whole of what one method takes and returns is readable in
-// one place. The `endpoint_` prefix is the grouping, not a directory — see
-// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
-// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+// ONE ENDPOINT PER FILE: SubmitPromptRequest, SubmitPromptResponse and the two
+// answers it wraps, and nothing else, so the whole of what one method takes and
+// returns is readable in one place. The `endpoint_` prefix is the grouping, not
+// a directory — see DESIGN-protobuf-surfaces.md for why a directory is not
+// available here, and for why a request type belongs to agentrepl.v1 rather
+// than frontend.v1.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+import "frontend/v1/failure.proto";
 import "shim/v1/core.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -29,23 +31,72 @@ message SubmitPromptRequest {
   string request_id = 1;
   // The workspace whose session this prompt goes to. See agentrepl.v1.AgentRepl.
   string workspace = 2;
+  // What the user typed.
   string text = 3;
+  // The permission posture this prompt's turn runs under, empty to keep the
+  // session's own.
   string permission_mode = 4;
   // Required origin selected by the concrete frontend send site. The daemon
   // rejects UNSPECIFIED rather than guessing which UI or automation acted.
   shim.v1.PromptOrigin prompt_origin = 5;
 }
 
-// SubmitPrompt's answer: accepted, or the classified account of the refusal.
+// SubmitPrompt's answer: exactly one of a success and an error.
 //
-// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
-// directly gave 33 methods one response type, so no method could gain an answer
-// of its own without offering that answer to every other method as well. A
-// prompt that was queued rather than delivered is reported through the ack's
-// failure classification today; if it ever needs a positive queue verdict of its
-// own, this is where it goes.
+// TWO ARMS, NOT AN `ok` BIT PLUS AN OPTIONAL FAILURE — see
+// AcceptQueueEntryResponse for the whole of that argument.
 message SubmitPromptResponse {
-  // Whether the daemon accepted this call, and when it did not, the classified
-  // failure a frontend renders as a card. See CommandAck.
-  CommandAck ack = 1;
+  // Echoed from the request that produced this answer. It is ALSO the turn key
+  // here, so this echo is what a client matches its turn's whole subsequent
+  // life against. See AcceptQueueEntryResponse.request_id.
+  string request_id = 1;
+  oneof response {
+    SubmitPromptSuccess success = 2;
+    SubmitPromptError error = 3;
+  }
+}
+
+// The prompt was accepted.
+//
+// NO ARMS. Whether it was delivered straight through or held in the prompt
+// queue is not knowable at call time and is not stated here: the queue's
+// verdict is a classification the daemon reaches asynchronously, and the client
+// learns it from the workspace's pushed QueueView. If a positive queue verdict
+// ever becomes knowable synchronously, this is where its arms go.
+message SubmitPromptSuccess {}
+
+// Why the prompt was refused.
+//
+// A REFUSED PROMPT IS NEVER A LOST PROMPT on any arm below: nothing here
+// discards what the user typed, and each arm names something that must change
+// before the same text can be sent again.
+message SubmitPromptError {
+  oneof error {
+    // The workspace key is not an absolute path.
+    RefusalWorkspaceKeyNotAbsolute workspace_key_not_absolute = 1;
+    // The origin was UNSPECIFIED or unknown to this daemon.
+    RefusalPromptOriginInvalid prompt_origin_invalid = 2;
+    // The workspace is hibernated. Refused so that NO MODEL USE can precede the
+    // user's revival decision; the remedy is ReviveSession.
+    FailureSessionHibernated session_hibernated = 3;
+    // The workspace's merge machinery holds the session. The session answers
+    // again when the merge resolves, or when the user interrupts or evicts it.
+    FailurePromptRefusedByMergeState refused_by_merge_state = 4;
+    // No agent process was ever started for this workspace.
+    FailureShimNotSpawned shim_not_spawned = 5;
+    // The agent process is not connected, so the prompt had nowhere to go.
+    FailureShimNotConnected shim_not_connected = 6;
+    // The agent process received the prompt and refused it.
+    FailureShimRejected shim_rejected = 7;
+    // The agent process never acknowledged the prompt within its window.
+    FailureShimAckTimeout shim_ack_timeout = 8;
+    // The command addressed something this workspace no longer runs.
+    FailureWorkspaceNotLive workspace_not_live = 9;
+    // The prompt was refused for a reason the daemon's classifier could not
+    // name.
+    frontend.v1.FailureInternalUnclassified unclassified = 10;
+  }
+  // The feed card this refusal was filed under, when it produced one. See
+  // AcceptQueueEntryError.failure_card.
+  frontend.v1.FailureCardRef failure_card = 11;
 }

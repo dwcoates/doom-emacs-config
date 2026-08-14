@@ -772,16 +772,11 @@ message FailureCardResolved {
 // invites waiting and this one does not.
 message FailureCardTerminal {}
 
-// A failure card that a surface OUTSIDE the feed needs to point at.
-//
-// It exists because a footer row and a command refusal both want to say "see
-// the card", and the card's address is the only thing they need in order to.
-message FailureCardRef {
-  // The Message.uuid of the card to reveal. Empty when the failure
-  // produced no card, and then the referring surface offers no way to reach
-  // one rather than scrolling somewhere arbitrary.
-  string card_uuid = 1;
-}
+// FailureCardRef LIVES IN failure.proto, beside the vocabulary the card it
+// points at is drawn from. It moved there when the refusal half of that
+// vocabulary moved to agentrepl.v1: an `agentrepl.v1.<Method>Error` carries a
+// card reference, and reaching into feed.proto for it would have been the
+// inverted import again in a smaller costume.
 
 // ==========================================================================
 // The permission card.

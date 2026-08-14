@@ -13,6 +13,7 @@ package frontend.v1;
 
 import "shim/v1/core.proto";
 import "conversation/v1/session_command.proto";
+import "frontend/v1/failure.proto";
 import "frontend/v1/feed.proto";
 import "agentrepl/v1/shared.proto";
 

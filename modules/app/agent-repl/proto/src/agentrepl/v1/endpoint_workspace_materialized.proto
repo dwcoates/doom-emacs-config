@@ -1,18 +1,19 @@
 // endpoint_workspace_materialized.proto — the WorkspaceMaterialized endpoint's
-// request and response.
+// request, success and error.
 //
-// ONE ENDPOINT PER FILE: WorkspaceMaterializedRequest and
-// WorkspaceMaterializedResponse and nothing else, so the whole of what one
-// method takes and returns is readable in one place. The `endpoint_` prefix is
-// the grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
-// directory is not available here, and for why a request type belongs to
-// agentrepl.v1 rather than frontend.v1.
+// ONE ENDPOINT PER FILE: WorkspaceMaterializedRequest,
+// WorkspaceMaterializedResponse and the two answers it wraps, and nothing else,
+// so the whole of what one method takes and returns is readable in one place.
+// The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and
+// for why a request type belongs to agentrepl.v1 rather than frontend.v1.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/frame.proto";
+import "agentrepl/v1/shared.proto";
+import "frontend/v1/failure.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -21,23 +22,49 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 // release an initial prompt that was held until a visible host workspace
 // exists.
 message WorkspaceMaterializedRequest {
-  // Correlation. See AgentRepl in frame.proto. The job is addressed by
+  // Correlation. See agentrepl.v1.AgentRepl. The job is addressed by
   // `job_id`, not by a workspace key: the host is acknowledging a
   // WorkspaceAvailable, and the workspace's key is one of the things that
   // notification told it.
   string request_id = 1;
+  // The creation job being acknowledged.
   string job_id = 2;
 }
 
-// WorkspaceMaterialized's answer: accepted, or the classified account of the
-// refusal.
+// WorkspaceMaterialized's answer: exactly one of a success and an error.
 //
-// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
-// directly gave 33 methods one response type, so no method could gain an answer
-// of its own without offering that answer to every other method as well. The
-// released prompt's progress is a turn, observed on the stream like any other.
+// TWO ARMS, NOT AN `ok` BIT PLUS AN OPTIONAL FAILURE — see
+// AcceptQueueEntryResponse for the whole of that argument.
 message WorkspaceMaterializedResponse {
-  // Whether the daemon accepted this call, and when it did not, the classified
-  // failure a frontend renders as a card. See CommandAck.
-  CommandAck ack = 1;
+  // Echoed from the request that produced this answer. See
+  // AcceptQueueEntryResponse.request_id.
+  string request_id = 1;
+  oneof response {
+    WorkspaceMaterializedSuccess success = 2;
+    WorkspaceMaterializedError error = 3;
+  }
+}
+
+// The acknowledgement is durably recorded and any held initial prompt is
+// released.
+//
+// NO ARMS, AND NO FIELDS. The released prompt's progress is a turn, observed on
+// the stream like any other.
+message WorkspaceMaterializedSuccess {}
+
+// Why the acknowledgement was refused.
+message WorkspaceMaterializedError {
+  oneof error {
+    // The workspace creation manager is not wired, so there is nothing holding
+    // a prompt to release.
+    RefusalDependencyUnwired workspace_creation_unwired = 1;
+    // No creation job is on the daemon's books under this id.
+    RefusalUnknownWorkspaceJob job_unknown = 2;
+    // The acknowledgement failed for a reason the daemon's classifier could not
+    // name.
+    frontend.v1.FailureInternalUnclassified unclassified = 3;
+  }
+  // The feed card this refusal was filed under, when it produced one. See
+  // AcceptQueueEntryError.failure_card.
+  frontend.v1.FailureCardRef failure_card = 4;
 }
