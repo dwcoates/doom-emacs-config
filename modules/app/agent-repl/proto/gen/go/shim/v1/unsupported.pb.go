@@ -17,9 +17,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: agentshim/v1/unsupported.proto
+// source: shim/v1/unsupported.proto
 
-package agentshimv1
+package shimv1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -53,7 +53,7 @@ type VendorSpecificEntry struct {
 
 func (x *VendorSpecificEntry) Reset() {
 	*x = VendorSpecificEntry{}
-	mi := &file_agentshim_v1_unsupported_proto_msgTypes[0]
+	mi := &file_shim_v1_unsupported_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -65,7 +65,7 @@ func (x *VendorSpecificEntry) String() string {
 func (*VendorSpecificEntry) ProtoMessage() {}
 
 func (x *VendorSpecificEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_v1_unsupported_proto_msgTypes[0]
+	mi := &file_shim_v1_unsupported_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -78,7 +78,7 @@ func (x *VendorSpecificEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VendorSpecificEntry.ProtoReflect.Descriptor instead.
 func (*VendorSpecificEntry) Descriptor() ([]byte, []int) {
-	return file_agentshim_v1_unsupported_proto_rawDescGZIP(), []int{0}
+	return file_shim_v1_unsupported_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *VendorSpecificEntry) GetKind() string {
@@ -113,7 +113,7 @@ type UnknownEntry struct {
 
 func (x *UnknownEntry) Reset() {
 	*x = UnknownEntry{}
-	mi := &file_agentshim_v1_unsupported_proto_msgTypes[1]
+	mi := &file_shim_v1_unsupported_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -125,7 +125,7 @@ func (x *UnknownEntry) String() string {
 func (*UnknownEntry) ProtoMessage() {}
 
 func (x *UnknownEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_v1_unsupported_proto_msgTypes[1]
+	mi := &file_shim_v1_unsupported_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -138,7 +138,7 @@ func (x *UnknownEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnknownEntry.ProtoReflect.Descriptor instead.
 func (*UnknownEntry) Descriptor() ([]byte, []int) {
-	return file_agentshim_v1_unsupported_proto_rawDescGZIP(), []int{1}
+	return file_shim_v1_unsupported_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *UnknownEntry) GetDiscriminator() string {
@@ -183,7 +183,7 @@ type UnparsedEntry struct {
 
 func (x *UnparsedEntry) Reset() {
 	*x = UnparsedEntry{}
-	mi := &file_agentshim_v1_unsupported_proto_msgTypes[2]
+	mi := &file_shim_v1_unsupported_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -195,7 +195,7 @@ func (x *UnparsedEntry) String() string {
 func (*UnparsedEntry) ProtoMessage() {}
 
 func (x *UnparsedEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_v1_unsupported_proto_msgTypes[2]
+	mi := &file_shim_v1_unsupported_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -208,7 +208,7 @@ func (x *UnparsedEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnparsedEntry.ProtoReflect.Descriptor instead.
 func (*UnparsedEntry) Descriptor() ([]byte, []int) {
-	return file_agentshim_v1_unsupported_proto_rawDescGZIP(), []int{2}
+	return file_shim_v1_unsupported_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *UnparsedEntry) GetSource() string {
@@ -239,11 +239,11 @@ func (x *UnparsedEntry) GetRaw() string {
 	return ""
 }
 
-var File_agentshim_v1_unsupported_proto protoreflect.FileDescriptor
+var File_shim_v1_unsupported_proto protoreflect.FileDescriptor
 
-const file_agentshim_v1_unsupported_proto_rawDesc = "" +
+const file_shim_v1_unsupported_proto_rawDesc = "" +
 	"\n" +
-	"\x1eagentshim/v1/unsupported.proto\x12\fagentshim.v1\x1a\x1cgoogle/protobuf/struct.proto\"T\n" +
+	"\x19shim/v1/unsupported.proto\x12\ashim.v1\x1a\x1cgoogle/protobuf/struct.proto\"T\n" +
 	"\x13VendorSpecificEntry\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12)\n" +
 	"\x03raw\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x03raw\"\x90\x01\n" +
@@ -256,30 +256,30 @@ const file_agentshim_v1_unsupported_proto_rawDesc = "" +
 	"\x06offset\x18\x02 \x01(\x04R\x06offset\x12\x1f\n" +
 	"\vparse_error\x18\x03 \x01(\tR\n" +
 	"parseError\x12\x10\n" +
-	"\x03raw\x18\x04 \x01(\tR\x03rawB*Z(agentrepl/proto/agentshim/v1;agentshimv1b\x06proto3"
+	"\x03raw\x18\x04 \x01(\tR\x03rawB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
-	file_agentshim_v1_unsupported_proto_rawDescOnce sync.Once
-	file_agentshim_v1_unsupported_proto_rawDescData []byte
+	file_shim_v1_unsupported_proto_rawDescOnce sync.Once
+	file_shim_v1_unsupported_proto_rawDescData []byte
 )
 
-func file_agentshim_v1_unsupported_proto_rawDescGZIP() []byte {
-	file_agentshim_v1_unsupported_proto_rawDescOnce.Do(func() {
-		file_agentshim_v1_unsupported_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_agentshim_v1_unsupported_proto_rawDesc), len(file_agentshim_v1_unsupported_proto_rawDesc)))
+func file_shim_v1_unsupported_proto_rawDescGZIP() []byte {
+	file_shim_v1_unsupported_proto_rawDescOnce.Do(func() {
+		file_shim_v1_unsupported_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_shim_v1_unsupported_proto_rawDesc), len(file_shim_v1_unsupported_proto_rawDesc)))
 	})
-	return file_agentshim_v1_unsupported_proto_rawDescData
+	return file_shim_v1_unsupported_proto_rawDescData
 }
 
-var file_agentshim_v1_unsupported_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
-var file_agentshim_v1_unsupported_proto_goTypes = []any{
-	(*VendorSpecificEntry)(nil), // 0: agentshim.v1.VendorSpecificEntry
-	(*UnknownEntry)(nil),        // 1: agentshim.v1.UnknownEntry
-	(*UnparsedEntry)(nil),       // 2: agentshim.v1.UnparsedEntry
+var file_shim_v1_unsupported_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_shim_v1_unsupported_proto_goTypes = []any{
+	(*VendorSpecificEntry)(nil), // 0: shim.v1.VendorSpecificEntry
+	(*UnknownEntry)(nil),        // 1: shim.v1.UnknownEntry
+	(*UnparsedEntry)(nil),       // 2: shim.v1.UnparsedEntry
 	(*structpb.Struct)(nil),     // 3: google.protobuf.Struct
 }
-var file_agentshim_v1_unsupported_proto_depIdxs = []int32{
-	3, // 0: agentshim.v1.VendorSpecificEntry.raw:type_name -> google.protobuf.Struct
-	3, // 1: agentshim.v1.UnknownEntry.raw:type_name -> google.protobuf.Struct
+var file_shim_v1_unsupported_proto_depIdxs = []int32{
+	3, // 0: shim.v1.VendorSpecificEntry.raw:type_name -> google.protobuf.Struct
+	3, // 1: shim.v1.UnknownEntry.raw:type_name -> google.protobuf.Struct
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
@@ -287,26 +287,26 @@ var file_agentshim_v1_unsupported_proto_depIdxs = []int32{
 	0, // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_agentshim_v1_unsupported_proto_init() }
-func file_agentshim_v1_unsupported_proto_init() {
-	if File_agentshim_v1_unsupported_proto != nil {
+func init() { file_shim_v1_unsupported_proto_init() }
+func file_shim_v1_unsupported_proto_init() {
+	if File_shim_v1_unsupported_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_v1_unsupported_proto_rawDesc), len(file_agentshim_v1_unsupported_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_unsupported_proto_rawDesc), len(file_shim_v1_unsupported_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_agentshim_v1_unsupported_proto_goTypes,
-		DependencyIndexes: file_agentshim_v1_unsupported_proto_depIdxs,
-		MessageInfos:      file_agentshim_v1_unsupported_proto_msgTypes,
+		GoTypes:           file_shim_v1_unsupported_proto_goTypes,
+		DependencyIndexes: file_shim_v1_unsupported_proto_depIdxs,
+		MessageInfos:      file_shim_v1_unsupported_proto_msgTypes,
 	}.Build()
-	File_agentshim_v1_unsupported_proto = out.File
-	file_agentshim_v1_unsupported_proto_goTypes = nil
-	file_agentshim_v1_unsupported_proto_depIdxs = nil
+	File_shim_v1_unsupported_proto = out.File
+	file_shim_v1_unsupported_proto_goTypes = nil
+	file_shim_v1_unsupported_proto_depIdxs = nil
 }

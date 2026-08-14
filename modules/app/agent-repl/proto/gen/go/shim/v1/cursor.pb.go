@@ -15,9 +15,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: agentshim/v1/cursor.proto
+// source: shim/v1/cursor.proto
 
-package agentshimv1
+package shimv1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -47,7 +47,7 @@ type CursorState struct {
 
 func (x *CursorState) Reset() {
 	*x = CursorState{}
-	mi := &file_agentshim_v1_cursor_proto_msgTypes[0]
+	mi := &file_shim_v1_cursor_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -59,7 +59,7 @@ func (x *CursorState) String() string {
 func (*CursorState) ProtoMessage() {}
 
 func (x *CursorState) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_v1_cursor_proto_msgTypes[0]
+	mi := &file_shim_v1_cursor_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -72,7 +72,7 @@ func (x *CursorState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorState.ProtoReflect.Descriptor instead.
 func (*CursorState) Descriptor() ([]byte, []int) {
-	return file_agentshim_v1_cursor_proto_rawDescGZIP(), []int{0}
+	return file_shim_v1_cursor_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *CursorState) GetFileId() string {
@@ -114,7 +114,7 @@ type CursorQuery struct {
 
 func (x *CursorQuery) Reset() {
 	*x = CursorQuery{}
-	mi := &file_agentshim_v1_cursor_proto_msgTypes[1]
+	mi := &file_shim_v1_cursor_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -126,7 +126,7 @@ func (x *CursorQuery) String() string {
 func (*CursorQuery) ProtoMessage() {}
 
 func (x *CursorQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_v1_cursor_proto_msgTypes[1]
+	mi := &file_shim_v1_cursor_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -139,7 +139,7 @@ func (x *CursorQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorQuery.ProtoReflect.Descriptor instead.
 func (*CursorQuery) Descriptor() ([]byte, []int) {
-	return file_agentshim_v1_cursor_proto_rawDescGZIP(), []int{1}
+	return file_shim_v1_cursor_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *CursorQuery) GetFileId() string {
@@ -162,7 +162,7 @@ type OpenTaskState struct {
 
 func (x *OpenTaskState) Reset() {
 	*x = OpenTaskState{}
-	mi := &file_agentshim_v1_cursor_proto_msgTypes[2]
+	mi := &file_shim_v1_cursor_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -174,7 +174,7 @@ func (x *OpenTaskState) String() string {
 func (*OpenTaskState) ProtoMessage() {}
 
 func (x *OpenTaskState) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_v1_cursor_proto_msgTypes[2]
+	mi := &file_shim_v1_cursor_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -187,7 +187,7 @@ func (x *OpenTaskState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTaskState.ProtoReflect.Descriptor instead.
 func (*OpenTaskState) Descriptor() ([]byte, []int) {
-	return file_agentshim_v1_cursor_proto_rawDescGZIP(), []int{2}
+	return file_shim_v1_cursor_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *OpenTaskState) GetLastActivityAtMs() int64 {
@@ -214,7 +214,7 @@ type CursorList struct {
 
 func (x *CursorList) Reset() {
 	*x = CursorList{}
-	mi := &file_agentshim_v1_cursor_proto_msgTypes[3]
+	mi := &file_shim_v1_cursor_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -226,7 +226,7 @@ func (x *CursorList) String() string {
 func (*CursorList) ProtoMessage() {}
 
 func (x *CursorList) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_v1_cursor_proto_msgTypes[3]
+	mi := &file_shim_v1_cursor_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -239,7 +239,7 @@ func (x *CursorList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorList.ProtoReflect.Descriptor instead.
 func (*CursorList) Descriptor() ([]byte, []int) {
-	return file_agentshim_v1_cursor_proto_rawDescGZIP(), []int{3}
+	return file_shim_v1_cursor_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CursorList) GetCursors() []*CursorState {
@@ -263,11 +263,11 @@ func (x *CursorList) GetOpenTasksAuthoritative() bool {
 	return false
 }
 
-var File_agentshim_v1_cursor_proto protoreflect.FileDescriptor
+var File_shim_v1_cursor_proto protoreflect.FileDescriptor
 
-const file_agentshim_v1_cursor_proto_rawDesc = "" +
+const file_shim_v1_cursor_proto_rawDesc = "" +
 	"\n" +
-	"\x19agentshim/v1/cursor.proto\x12\fagentshim.v1\"h\n" +
+	"\x14shim/v1/cursor.proto\x12\ashim.v1\"h\n" +
 	"\vCursorState\x12\x17\n" +
 	"\afile_id\x18\x01 \x01(\tR\x06fileId\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x16\n" +
@@ -276,36 +276,36 @@ const file_agentshim_v1_cursor_proto_rawDesc = "" +
 	"\vCursorQuery\x12\x17\n" +
 	"\afile_id\x18\x01 \x01(\tR\x06fileId\">\n" +
 	"\rOpenTaskState\x12-\n" +
-	"\x13last_activity_at_ms\x18\x01 \x01(\x03R\x10lastActivityAtMs\"\xb7\x01\n" +
+	"\x13last_activity_at_ms\x18\x01 \x01(\x03R\x10lastActivityAtMs\"\xad\x01\n" +
 	"\n" +
-	"CursorList\x123\n" +
-	"\acursors\x18\x01 \x03(\v2\x19.agentshim.v1.CursorStateR\acursors\x12:\n" +
+	"CursorList\x12.\n" +
+	"\acursors\x18\x01 \x03(\v2\x14.shim.v1.CursorStateR\acursors\x125\n" +
 	"\n" +
-	"open_tasks\x18\x02 \x03(\v2\x1b.agentshim.v1.OpenTaskStateR\topenTasks\x128\n" +
-	"\x18open_tasks_authoritative\x18\x03 \x01(\bR\x16openTasksAuthoritativeB*Z(agentrepl/proto/agentshim/v1;agentshimv1b\x06proto3"
+	"open_tasks\x18\x02 \x03(\v2\x16.shim.v1.OpenTaskStateR\topenTasks\x128\n" +
+	"\x18open_tasks_authoritative\x18\x03 \x01(\bR\x16openTasksAuthoritativeB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
-	file_agentshim_v1_cursor_proto_rawDescOnce sync.Once
-	file_agentshim_v1_cursor_proto_rawDescData []byte
+	file_shim_v1_cursor_proto_rawDescOnce sync.Once
+	file_shim_v1_cursor_proto_rawDescData []byte
 )
 
-func file_agentshim_v1_cursor_proto_rawDescGZIP() []byte {
-	file_agentshim_v1_cursor_proto_rawDescOnce.Do(func() {
-		file_agentshim_v1_cursor_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_agentshim_v1_cursor_proto_rawDesc), len(file_agentshim_v1_cursor_proto_rawDesc)))
+func file_shim_v1_cursor_proto_rawDescGZIP() []byte {
+	file_shim_v1_cursor_proto_rawDescOnce.Do(func() {
+		file_shim_v1_cursor_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_shim_v1_cursor_proto_rawDesc), len(file_shim_v1_cursor_proto_rawDesc)))
 	})
-	return file_agentshim_v1_cursor_proto_rawDescData
+	return file_shim_v1_cursor_proto_rawDescData
 }
 
-var file_agentshim_v1_cursor_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
-var file_agentshim_v1_cursor_proto_goTypes = []any{
-	(*CursorState)(nil),   // 0: agentshim.v1.CursorState
-	(*CursorQuery)(nil),   // 1: agentshim.v1.CursorQuery
-	(*OpenTaskState)(nil), // 2: agentshim.v1.OpenTaskState
-	(*CursorList)(nil),    // 3: agentshim.v1.CursorList
+var file_shim_v1_cursor_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_shim_v1_cursor_proto_goTypes = []any{
+	(*CursorState)(nil),   // 0: shim.v1.CursorState
+	(*CursorQuery)(nil),   // 1: shim.v1.CursorQuery
+	(*OpenTaskState)(nil), // 2: shim.v1.OpenTaskState
+	(*CursorList)(nil),    // 3: shim.v1.CursorList
 }
-var file_agentshim_v1_cursor_proto_depIdxs = []int32{
-	0, // 0: agentshim.v1.CursorList.cursors:type_name -> agentshim.v1.CursorState
-	2, // 1: agentshim.v1.CursorList.open_tasks:type_name -> agentshim.v1.OpenTaskState
+var file_shim_v1_cursor_proto_depIdxs = []int32{
+	0, // 0: shim.v1.CursorList.cursors:type_name -> shim.v1.CursorState
+	2, // 1: shim.v1.CursorList.open_tasks:type_name -> shim.v1.OpenTaskState
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
@@ -313,26 +313,26 @@ var file_agentshim_v1_cursor_proto_depIdxs = []int32{
 	0, // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_agentshim_v1_cursor_proto_init() }
-func file_agentshim_v1_cursor_proto_init() {
-	if File_agentshim_v1_cursor_proto != nil {
+func init() { file_shim_v1_cursor_proto_init() }
+func file_shim_v1_cursor_proto_init() {
+	if File_shim_v1_cursor_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_v1_cursor_proto_rawDesc), len(file_agentshim_v1_cursor_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_cursor_proto_rawDesc), len(file_shim_v1_cursor_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_agentshim_v1_cursor_proto_goTypes,
-		DependencyIndexes: file_agentshim_v1_cursor_proto_depIdxs,
-		MessageInfos:      file_agentshim_v1_cursor_proto_msgTypes,
+		GoTypes:           file_shim_v1_cursor_proto_goTypes,
+		DependencyIndexes: file_shim_v1_cursor_proto_depIdxs,
+		MessageInfos:      file_shim_v1_cursor_proto_msgTypes,
 	}.Build()
-	File_agentshim_v1_cursor_proto = out.File
-	file_agentshim_v1_cursor_proto_goTypes = nil
-	file_agentshim_v1_cursor_proto_depIdxs = nil
+	File_shim_v1_cursor_proto = out.File
+	file_shim_v1_cursor_proto_goTypes = nil
+	file_shim_v1_cursor_proto_depIdxs = nil
 }
