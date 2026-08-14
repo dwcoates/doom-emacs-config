@@ -1,0 +1,64 @@
+// endpoint_merge_workspace.proto — the MergeWorkspace endpoint's request and
+// response.
+//
+// ONE ENDPOINT PER FILE: MergeWorkspaceRequest and MergeWorkspaceResponse and
+// nothing else, so the whole of what one method takes and returns is readable in
+// one place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Merge the workspace's branch into the target the daemon recorded when it
+// created that workspace.
+message MergeWorkspaceRequest {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace being merged, as its KEY — the session cwd. Its DISPLAY name
+  // is `workspace_name` below, and the two are deliberately separate fields.
+  // See AgentRepl in frame.proto.
+  string workspace = 2;
+  // THE COMMAND STATES NO MERGE GEOMETRY AND NAMES NO HANDLER. It is a bare
+  // request keyed by workspace, and that is deliberate.
+  //
+  // THE DAEMON OWNS THE GEOMETRY MAP (internal/workspace/geometry). It records
+  // a workspace's source branch, source worktree and merge target when it
+  // CREATES the workspace, and derives them at boot for pre-cutover ones, so a
+  // merge command has nothing left to state. A caller that stated it would be
+  // a SECOND OWNER of one map, which is how a cherry-pick once reached a target
+  // the daemon had never heard of. Nor does the command select a handler: there
+  // has only ever been one merge handler, and naming it would invite a caller
+  // to ask for a mechanism the daemon does not dispatch on.
+  bool conflict_resolved_continue = 3;  // the resolve-and-continue handoff
+  // The workspace's DISPLAY name, for the `merge/<name>` completion tag and the
+  // daemon's merge logs.
+  //
+  // It exists because the `workspace` field above is the daemon's workspace
+  // KEY — the session cwd — exactly as it is for every other command. This
+  // command used to put the bare Emacs name there instead, which
+  // filed every merge state row under a workspace key nothing else used: the
+  // row had no session identity, so its WorkspaceState reached Emacs with an
+  // absent connectivity verdict and was refused, and the merge never tore its
+  // workspace down. The two identities are now separate fields rather than one
+  // slot meaning different things per command.
+  string workspace_name = 4;
+}
+
+// MergeWorkspace's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. The
+// merge's own progress is pushed as MergeStatus, so nothing but acceptance is
+// knowable at call time.
+message MergeWorkspaceResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

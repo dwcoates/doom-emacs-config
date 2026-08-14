@@ -1,0 +1,62 @@
+// endpoint_open_workspace.proto — the OpenWorkspace endpoint's request and
+// response.
+//
+// ONE ENDPOINT PER FILE: OpenWorkspaceRequest and OpenWorkspaceResponse and
+// nothing else, so the whole of what one method takes and returns is readable in
+// one place. The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Open a workspace: reattach to the session it already has, or start one when
+// it has none. The fields are the workspace's RUN PREFERENCES — the posture and
+// account a session for this workspace runs under — which the editor owns
+// because they are properties of the checkout, not of any session.
+//
+// There is deliberately NO session identity here. Which session a workspace
+// owns is the daemon's ruling; a frontend that named one would be asserting an
+// answer to a question it cannot hold across a daemon restart.
+message OpenWorkspaceRequest {
+  // Correlation. See AgentRepl in frame.proto.
+  string request_id = 1;
+  // The workspace being opened. See AgentRepl in frame.proto.
+  string workspace = 2;
+  // The permission posture a session started by this open runs under, empty to
+  // accept the daemon's default. Ignored when the workspace already has a
+  // session: an open never re-postures a live one.
+  string permission_mode = 3;
+  // The CLAUDE_CONFIG_DIR — i.e. WHICH ACCOUNT — a session started by this open
+  // runs under. One shared daemon serves every workspace, so its own
+  // environment cannot encode a per-workspace account.
+  //
+  // Empty means the daemon's own default, NOT the absence of a config dir.
+  string config_dir = 4;
+  // Run a session started by this open against the offline scripted SDK.
+  bool fake = 5;
+  // The caller's DELIBERATE consent to start a session with NO permission gate,
+  // required on exactly the same terms as CreateSessionRequest.allow_ungated and
+  // enforced by the same refusal. An open that could reach an ungated posture
+  // without it would be a second, quieter door to the one thing that consent
+  // exists to make loud.
+  bool allow_ungated = 6;
+}
+
+// OpenWorkspace's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. Which
+// session the open landed on is the daemon's ruling and reaches the client as a
+// pushed SessionView, never here.
+message OpenWorkspaceResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

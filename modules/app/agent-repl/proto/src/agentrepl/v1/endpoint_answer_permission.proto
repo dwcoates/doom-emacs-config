@@ -1,0 +1,48 @@
+// endpoint_answer_permission.proto — the AnswerPermission endpoint's request and
+// response.
+//
+// ONE ENDPOINT PER FILE: AnswerPermissionRequest and AnswerPermissionResponse
+// and nothing else, so the whole of what one method takes and returns is
+// readable in one place. The `endpoint_` prefix is the grouping, not a directory
+// — see DESIGN-protobuf-surfaces.md for why a directory is not available here,
+// and for why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Answer an outstanding permission card: allow, deny, or allow with edited
+// input.
+//
+// The request arm this answers is shim.v1.PermissionItem, carried on
+// frontend.v1.Message; the answer is this service's own request type, because
+// what a client CALLS is agentrepl and what it DRAWS is frontend.
+message AnswerPermissionRequest {
+  // Correlation. See agentrepl.v1.AgentRepl.
+  string request_id = 1;
+  // The workspace whose shim is blocked on this answer. See
+  // agentrepl.v1.AgentRepl.
+  string workspace = 2;
+  string permission_request_id = 3;
+  bool allow = 4;
+  google.protobuf.Struct updated_input = 5;
+  string deny_message = 6;
+}
+
+// AnswerPermission's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. The
+// decision's real effect is the shim's canUseTool callback unblocking, which is
+// observed on the stream, so the ack is the whole of this answer for now.
+message AnswerPermissionResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

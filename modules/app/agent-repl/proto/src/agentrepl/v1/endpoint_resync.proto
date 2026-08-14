@@ -1,0 +1,58 @@
+// endpoint_resync.proto — the Resync endpoint's request and response.
+//
+// ONE ENDPOINT PER FILE: ResyncRequest and ResyncResponse and nothing else, so
+// the whole of what one method takes and returns is readable in one place. The
+// `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// A replay request carries ONE token of identity, not several.
+//
+// The client says where it had read up to and which fence it held when it
+// decided to ask. It never copies, holds or agrees a session identity or a
+// controller generation: several identities a client must send back in
+// agreement is several ways for a client to send back a disagreement, and the
+// fence already answers the only question they were ever asked together.
+message ResyncRequest {
+  // Correlation with the replay this call provokes. See CommandAck.request_id.
+  string request_id = 1;
+  // WHICH WORKSPACE to replay. It was the command envelope's field before the
+  // service existed; a method call has no envelope, so it is stated here.
+  string workspace = 2;
+  // WHICH SUBSCRIBE STREAM to replay onto. The replay is a push, and a unary
+  // call no longer shares a socket with the stream that will carry it. See
+  // SubscribeRequest.client_id.
+  string client_id = 3;
+  uint64 from_seq = 4;
+  // The fence ECHO: the exact fence the client held when it decided to ask
+  // for this replay, copied byte-for-byte from the WorkspaceState it was
+  // reading at that moment.
+  //
+  // It must be captured AT DECISION TIME, not read from current state when
+  // the transport sends, or a delayed request silently rebinds itself to a
+  // newer generation and asks for a replay nobody wanted. The daemon compares
+  // it against the workspace's live fence and REFUSES the command before
+  // replaying anything when they differ.
+  string fence = 5;
+}
+
+// Resync's answer: accepted, or the classified account of the refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. The
+// replayed records themselves arrive on the caller's Subscribe stream, so this
+// answer says only that the replay was accepted.
+message ResyncResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

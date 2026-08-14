@@ -1,0 +1,37 @@
+// endpoint_set_model.proto — the SetModel endpoint's request and response.
+//
+// ONE ENDPOINT PER FILE: SetModelRequest and SetModelResponse and nothing else,
+// so the whole of what one method takes and returns is readable in one place.
+// The `endpoint_` prefix is the grouping, not a directory — see
+// DESIGN-protobuf-surfaces.md for why a directory is not available here, and for
+// why a request type belongs to agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// A deliberate request to change an already-live session's model.  The daemon
+// forwards this to the shim and only publishes the shim-confirmed selection.
+// Bootstrap and rebind intentionally have no model field: they observe session
+// state rather than choosing it.  Creation is different — see
+// CreateSessionRequest.model, which is a starting choice, not an observation.
+message SetModelRequest {
+  // Correlation. See agentrepl.v1.AgentRepl.
+  string request_id = 1;
+  // The workspace whose live session is being re-modelled. See
+  // agentrepl.v1.AgentRepl.
+  string workspace = 2;
+  string model = 3;
+}
+
+// SetModel's answer.
+message SetModelResponse {
+  CommandAck ack = 1;
+  // The shim-confirmed current model, on both success and rejection, so a
+  // frontend never needs an optimistic model state or a local recovery guess.
+  string selected_model = 2;
+}

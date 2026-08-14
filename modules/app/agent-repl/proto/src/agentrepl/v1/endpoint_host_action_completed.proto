@@ -1,0 +1,43 @@
+// endpoint_host_action_completed.proto — the HostActionCompleted endpoint's
+// request and response.
+//
+// ONE ENDPOINT PER FILE: HostActionCompletedRequest and
+// HostActionCompletedResponse and nothing else, so the whole of what one method
+// takes and returns is readable in one place. The `endpoint_` prefix is the
+// grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
+// directory is not available here, and for why a request type belongs to
+// agentrepl.v1 rather than frontend.v1.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/frame.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Completion is host-only.  `ok=false` preserves the action and records the
+// supplied error in the daemon's durable inbox rather than silently dropping
+// a UI request that Emacs could not perform.
+message HostActionCompletedRequest {
+  // Correlation. See AgentRepl in frame.proto. The action is addressed by
+  // `action_id`; the daemon's inbox is global, so there is no workspace key.
+  string request_id = 1;
+  string action_id = 2;
+  bool ok = 3;
+  string error = 4;
+}
+
+// HostActionCompleted's answer: accepted, or the classified account of the
+// refusal.
+//
+// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
+// directly gave 33 methods one response type, so no method could gain an answer
+// of its own without offering that answer to every other method as well. Filing
+// a completion has no verdict of its own — a failed action is preserved, not
+// re-refused.
+message HostActionCompletedResponse {
+  // Whether the daemon accepted this call, and when it did not, the classified
+  // failure a frontend renders as a card. See CommandAck.
+  CommandAck ack = 1;
+}

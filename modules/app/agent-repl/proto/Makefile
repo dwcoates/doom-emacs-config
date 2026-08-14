@@ -8,6 +8,9 @@
 
 # Listed by SURFACE, most upstream first. conversation imports nothing, so it
 # leads; state is daemon-internal and depends on everything, so it trails.
+# The agentrepl/v1/endpoint_*.proto block is the per-endpoint request and
+# response types: they import frame.proto and the frontend components, and
+# service.proto imports them, so they sit between the two.
 PROTOS := \
   conversation/v1/content.proto \
   conversation/v1/message.proto \
@@ -28,6 +31,40 @@ PROTOS := \
   frontend/v1/sidebar.proto \
   frontend/v1/footer.proto \
   agentrepl/v1/frame.proto \
+  agentrepl/v1/endpoint_accept_queue_entry.proto \
+  agentrepl/v1/endpoint_answer_merge_dequeue.proto \
+  agentrepl/v1/endpoint_answer_permission.proto \
+  agentrepl/v1/endpoint_cancel_detached_agents.proto \
+  agentrepl/v1/endpoint_cancel_queue_entry.proto \
+  agentrepl/v1/endpoint_cancel_scheduled_shutdown.proto \
+  agentrepl/v1/endpoint_client_log.proto \
+  agentrepl/v1/endpoint_close_workspace.proto \
+  agentrepl/v1/endpoint_create_session.proto \
+  agentrepl/v1/endpoint_create_workspace.proto \
+  agentrepl/v1/endpoint_daemon_health.proto \
+  agentrepl/v1/endpoint_delete_session.proto \
+  agentrepl/v1/endpoint_evict_merge.proto \
+  agentrepl/v1/endpoint_first_page.proto \
+  agentrepl/v1/endpoint_force_queue_entry.proto \
+  agentrepl/v1/endpoint_hibernate_workspace.proto \
+  agentrepl/v1/endpoint_host_action_completed.proto \
+  agentrepl/v1/endpoint_interrupt.proto \
+  agentrepl/v1/endpoint_merge_workspace.proto \
+  agentrepl/v1/endpoint_next_page.proto \
+  agentrepl/v1/endpoint_open_workspace.proto \
+  agentrepl/v1/endpoint_pause_merge_queue.proto \
+  agentrepl/v1/endpoint_publish_workspace_roster.proto \
+  agentrepl/v1/endpoint_restart_session.proto \
+  agentrepl/v1/endpoint_resume_merge_queue.proto \
+  agentrepl/v1/endpoint_resync.proto \
+  agentrepl/v1/endpoint_revive_session.proto \
+  agentrepl/v1/endpoint_schedule_shutdown.proto \
+  agentrepl/v1/endpoint_session_health.proto \
+  agentrepl/v1/endpoint_set_model.proto \
+  agentrepl/v1/endpoint_shutdown.proto \
+  agentrepl/v1/endpoint_submit_prompt.proto \
+  agentrepl/v1/endpoint_subscribe.proto \
+  agentrepl/v1/endpoint_workspace_materialized.proto \
   agentrepl/v1/service.proto \
   state/v1/durable.proto
 
