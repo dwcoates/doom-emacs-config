@@ -5858,6 +5858,10 @@ func (x *HibernationCacheExpired) GetTtlMs() int64 {
 // before accepting any prompt.
 type ReviveSessionCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace being revived. See AgentRepl in frame.proto.
+	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// The choice is a oneof of empty messages, not a bool: "no decision" must
 	// be unrepresentable on the wire, and a third revival mode later is a new
 	// arm rather than a second flag.
@@ -5900,6 +5904,20 @@ func (x *ReviveSessionCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ReviveSessionCmd.ProtoReflect.Descriptor instead.
 func (*ReviveSessionCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{76}
+}
+
+func (x *ReviveSessionCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ReviveSessionCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
 }
 
 func (x *ReviveSessionCmd) GetMode() isReviveSessionCmd_Mode {
@@ -5946,13 +5964,13 @@ type ReviveSessionCmd_CompactFirst struct {
 	// ONCE (compaction is a model call over the whole history) instead of on
 	// every subsequent turn. Its own CompactionScope says how much of the
 	// conversation the compaction may summarize away.
-	CompactFirst *ReviveCompactFirst `protobuf:"bytes,1,opt,name=compact_first,json=compactFirst,proto3,oneof"`
+	CompactFirst *ReviveCompactFirst `protobuf:"bytes,3,opt,name=compact_first,json=compactFirst,proto3,oneof"`
 }
 
 type ReviveSessionCmd_Direct struct {
 	// Resume the conversation as-is, full accumulated context and all. The
 	// deliberate "I know it's big" path.
-	Direct *ReviveDirect `protobuf:"bytes,2,opt,name=direct,proto3,oneof"`
+	Direct *ReviveDirect `protobuf:"bytes,4,opt,name=direct,proto3,oneof"`
 }
 
 type ReviveSessionCmd_Clear struct {
@@ -5961,7 +5979,7 @@ type ReviveSessionCmd_Clear struct {
 	// lands, on the same gate compact_first stays behind — a prompt answered
 	// ahead of it would pay for the whole context the clear is about to throw
 	// away.
-	Clear *ReviveClear `protobuf:"bytes,3,opt,name=clear,proto3,oneof"`
+	Clear *ReviveClear `protobuf:"bytes,5,opt,name=clear,proto3,oneof"`
 }
 
 func (*ReviveSessionCmd_CompactFirst) isReviveSessionCmd_Mode() {}
@@ -6306,24 +6324,28 @@ func (x *WorkspaceGateHibernated) GetDetail() *HibernationDetail {
 // daemon owns name resolution, worktree creation, session startup, and initial
 // prompt delivery; a request never asks for a promptless/no-shim workspace.
 type CreateWorkspaceCmd struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	RequestedName        string                 `protobuf:"bytes,1,opt,name=requested_name,json=requestedName,proto3" json:"requested_name,omitempty"`
-	GitRoot              string                 `protobuf:"bytes,2,opt,name=git_root,json=gitRoot,proto3" json:"git_root,omitempty"`
-	BaseCommit           string                 `protobuf:"bytes,3,opt,name=base_commit,json=baseCommit,proto3" json:"base_commit,omitempty"`
-	SourceWorkspace      string                 `protobuf:"bytes,4,opt,name=source_workspace,json=sourceWorkspace,proto3" json:"source_workspace,omitempty"`
-	SourceDir            string                 `protobuf:"bytes,5,opt,name=source_dir,json=sourceDir,proto3" json:"source_dir,omitempty"`
-	InitialPrompt        *string                `protobuf:"bytes,6,opt,name=initial_prompt,json=initialPrompt,proto3,oneof" json:"initial_prompt,omitempty"`
-	Priority             string                 `protobuf:"bytes,7,opt,name=priority,proto3" json:"priority,omitempty"`
-	Model                string                 `protobuf:"bytes,8,opt,name=model,proto3" json:"model,omitempty"`
-	ForkFrom             string                 `protobuf:"bytes,9,opt,name=fork_from,json=forkFrom,proto3" json:"fork_from,omitempty"`
-	ForkSessionId        string                 `protobuf:"bytes,10,opt,name=fork_session_id,json=forkSessionId,proto3" json:"fork_session_id,omitempty"`
-	PostprocessingPrompt string                 `protobuf:"bytes,11,opt,name=postprocessing_prompt,json=postprocessingPrompt,proto3" json:"postprocessing_prompt,omitempty"`
-	BeforeWsMerge        string                 `protobuf:"bytes,12,opt,name=before_ws_merge,json=beforeWsMerge,proto3" json:"before_ws_merge,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto. THERE IS NO `workspace` FIELD:
+	// this command creates one, and `source_workspace` below names the workspace
+	// it was requested from, which is a different question.
+	RequestId            string  `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	RequestedName        string  `protobuf:"bytes,2,opt,name=requested_name,json=requestedName,proto3" json:"requested_name,omitempty"`
+	GitRoot              string  `protobuf:"bytes,3,opt,name=git_root,json=gitRoot,proto3" json:"git_root,omitempty"`
+	BaseCommit           string  `protobuf:"bytes,4,opt,name=base_commit,json=baseCommit,proto3" json:"base_commit,omitempty"`
+	SourceWorkspace      string  `protobuf:"bytes,5,opt,name=source_workspace,json=sourceWorkspace,proto3" json:"source_workspace,omitempty"`
+	SourceDir            string  `protobuf:"bytes,6,opt,name=source_dir,json=sourceDir,proto3" json:"source_dir,omitempty"`
+	InitialPrompt        *string `protobuf:"bytes,7,opt,name=initial_prompt,json=initialPrompt,proto3,oneof" json:"initial_prompt,omitempty"`
+	Priority             string  `protobuf:"bytes,8,opt,name=priority,proto3" json:"priority,omitempty"`
+	Model                string  `protobuf:"bytes,9,opt,name=model,proto3" json:"model,omitempty"`
+	ForkFrom             string  `protobuf:"bytes,10,opt,name=fork_from,json=forkFrom,proto3" json:"fork_from,omitempty"`
+	ForkSessionId        string  `protobuf:"bytes,11,opt,name=fork_session_id,json=forkSessionId,proto3" json:"fork_session_id,omitempty"`
+	PostprocessingPrompt string  `protobuf:"bytes,12,opt,name=postprocessing_prompt,json=postprocessingPrompt,proto3" json:"postprocessing_prompt,omitempty"`
+	BeforeWsMerge        string  `protobuf:"bytes,13,opt,name=before_ws_merge,json=beforeWsMerge,proto3" json:"before_ws_merge,omitempty"`
 	// Explicit session account/safety posture. The daemon must not infer these
 	// from its ambient process when a host asks it to create a workspace.
-	ConfigDir      string `protobuf:"bytes,13,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
-	PermissionMode string `protobuf:"bytes,14,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
-	AllowUngated   bool   `protobuf:"varint,15,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
+	ConfigDir      string `protobuf:"bytes,14,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
+	PermissionMode string `protobuf:"bytes,15,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
+	AllowUngated   bool   `protobuf:"varint,16,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -6356,6 +6378,13 @@ func (x *CreateWorkspaceCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use CreateWorkspaceCmd.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{83}
+}
+
+func (x *CreateWorkspaceCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *CreateWorkspaceCmd) GetRequestedName() string {
@@ -6643,8 +6672,13 @@ func (x *WorkspaceAvailable) GetAllowUngated() bool {
 // release an initial prompt that was held until a visible host workspace
 // exists.
 type WorkspaceMaterializedCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto. The job is addressed by
+	// `job_id`, not by a workspace key: the host is acknowledging a
+	// WorkspaceAvailable, and the workspace's key is one of the things that
+	// notification told it.
+	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	JobId         string `protobuf:"bytes,2,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6679,6 +6713,13 @@ func (*WorkspaceMaterializedCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{85}
 }
 
+func (x *WorkspaceMaterializedCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *WorkspaceMaterializedCmd) GetJobId() string {
 	if x != nil {
 		return x.JobId
@@ -6696,24 +6737,28 @@ func (x *WorkspaceMaterializedCmd) GetJobId() string {
 // answer to a question it cannot hold across a daemon restart.
 type OpenWorkspaceCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace being opened. See AgentRepl in frame.proto.
+	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// The permission posture a session started by this open runs under, empty to
 	// accept the daemon's default. Ignored when the workspace already has a
 	// session: an open never re-postures a live one.
-	PermissionMode string `protobuf:"bytes,1,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
+	PermissionMode string `protobuf:"bytes,3,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
 	// The CLAUDE_CONFIG_DIR — i.e. WHICH ACCOUNT — a session started by this open
 	// runs under. One shared daemon serves every workspace, so its own
 	// environment cannot encode a per-workspace account.
 	//
 	// Empty means the daemon's own default, NOT the absence of a config dir.
-	ConfigDir string `protobuf:"bytes,2,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
+	ConfigDir string `protobuf:"bytes,4,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
 	// Run a session started by this open against the offline scripted SDK.
-	Fake bool `protobuf:"varint,3,opt,name=fake,proto3" json:"fake,omitempty"`
+	Fake bool `protobuf:"varint,5,opt,name=fake,proto3" json:"fake,omitempty"`
 	// The caller's DELIBERATE consent to start a session with NO permission gate,
 	// required on exactly the same terms as CreateSessionCmd.allow_ungated and
 	// enforced by the same refusal. An open that could reach an ungated posture
 	// without it would be a second, quieter door to the one thing that consent
 	// exists to make loud.
-	AllowUngated  bool `protobuf:"varint,4,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
+	AllowUngated  bool `protobuf:"varint,6,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6748,6 +6793,20 @@ func (*OpenWorkspaceCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{86}
 }
 
+func (x *OpenWorkspaceCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *OpenWorkspaceCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
 func (x *OpenWorkspaceCmd) GetPermissionMode() string {
 	if x != nil {
 		return x.PermissionMode
@@ -6776,8 +6835,15 @@ func (x *OpenWorkspaceCmd) GetAllowUngated() bool {
 	return false
 }
 
+// Retire the workspace. It carried NO fields at all under the old envelope,
+// which was the clearest case of the envelope being a command's whole meaning;
+// now it states that meaning itself.
 type CloseWorkspaceCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace being closed. See AgentRepl in frame.proto.
+	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6812,8 +6878,28 @@ func (*CloseWorkspaceCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{87}
 }
 
+func (x *CloseWorkspaceCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CloseWorkspaceCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
 type MergeWorkspaceCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace being merged, as its KEY — the session cwd. Its DISPLAY name
+	// is `workspace_name` below, and the two are deliberately separate fields.
+	// See AgentRepl in frame.proto.
+	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// THE COMMAND STATES NO MERGE GEOMETRY AND NAMES NO HANDLER. It is a bare
 	// request keyed by workspace, and that is deliberate.
 	//
@@ -6825,19 +6911,19 @@ type MergeWorkspaceCmd struct {
 	// the daemon had never heard of. Nor does the command select a handler: there
 	// has only ever been one merge handler, and naming it would invite a caller
 	// to ask for a mechanism the daemon does not dispatch on.
-	ConflictResolvedContinue bool `protobuf:"varint,1,opt,name=conflict_resolved_continue,json=conflictResolvedContinue,proto3" json:"conflict_resolved_continue,omitempty"` // the resolve-and-continue handoff
+	ConflictResolvedContinue bool `protobuf:"varint,3,opt,name=conflict_resolved_continue,json=conflictResolvedContinue,proto3" json:"conflict_resolved_continue,omitempty"` // the resolve-and-continue handoff
 	// The workspace's DISPLAY name, for the `merge/<name>` completion tag and the
 	// daemon's merge logs.
 	//
-	// It exists because the envelope's `workspace` field is the daemon's
-	// workspace KEY — the session cwd — exactly as it is for every other
-	// command. This command used to put the bare Emacs name there instead, which
+	// It exists because the `workspace` field above is the daemon's workspace
+	// KEY — the session cwd — exactly as it is for every other command. This
+	// command used to put the bare Emacs name there instead, which
 	// filed every merge state row under a workspace key nothing else used: the
 	// row had no session identity, so its WorkspaceState reached Emacs with an
 	// absent connectivity verdict and was refused, and the merge never tore its
 	// workspace down. The two identities are now separate fields rather than one
 	// slot meaning different things per command.
-	WorkspaceName string `protobuf:"bytes,2,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
+	WorkspaceName string `protobuf:"bytes,4,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6870,6 +6956,20 @@ func (x *MergeWorkspaceCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use MergeWorkspaceCmd.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{88}
+}
+
+func (x *MergeWorkspaceCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *MergeWorkspaceCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
 }
 
 func (x *MergeWorkspaceCmd) GetConflictResolvedContinue() bool {
@@ -7529,10 +7629,13 @@ func (x *HostLegacyCommand) GetPayload() *structpb.Struct {
 // supplied error in the daemon's durable inbox rather than silently dropping
 // a UI request that Emacs could not perform.
 type HostActionCompletedCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ActionId      string                 `protobuf:"bytes,1,opt,name=action_id,json=actionId,proto3" json:"action_id,omitempty"`
-	Ok            bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
-	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto. The action is addressed by
+	// `action_id`; the daemon's inbox is global, so there is no workspace key.
+	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ActionId      string `protobuf:"bytes,2,opt,name=action_id,json=actionId,proto3" json:"action_id,omitempty"`
+	Ok            bool   `protobuf:"varint,3,opt,name=ok,proto3" json:"ok,omitempty"`
+	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7567,6 +7670,13 @@ func (*HostActionCompletedCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{98}
 }
 
+func (x *HostActionCompletedCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *HostActionCompletedCmd) GetActionId() string {
 	if x != nil {
 		return x.ActionId
@@ -7589,11 +7699,17 @@ func (x *HostActionCompletedCmd) GetError() string {
 }
 
 type CreateSessionCmd struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Cwd            string                 `protobuf:"bytes,1,opt,name=cwd,proto3" json:"cwd,omitempty"`
-	PermissionMode string                 `protobuf:"bytes,2,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
-	ConfigDir      string                 `protobuf:"bytes,3,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
-	Fake           bool                   `protobuf:"varint,4,opt,name=fake,proto3" json:"fake,omitempty"` // test harness sessions
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// THE WORKSPACE, spelled `cwd` because that is what a session is created
+	// against. It is NOT accompanied by a second `workspace` field: the daemon's
+	// workspace key IS the session's absolute cwd, and two spellings of one path
+	// is two things a caller can disagree with itself about.
+	Cwd            string `protobuf:"bytes,2,opt,name=cwd,proto3" json:"cwd,omitempty"`
+	PermissionMode string `protobuf:"bytes,3,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
+	ConfigDir      string `protobuf:"bytes,4,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
+	Fake           bool   `protobuf:"varint,5,opt,name=fake,proto3" json:"fake,omitempty"` // test harness sessions
 	// The caller's DELIBERATE consent to create a session with NO permission
 	// gate. Required whenever permission_mode names a mode that shadows the
 	// shim's canUseTool callback in the fail-OPEN direction
@@ -7607,7 +7723,7 @@ type CreateSessionCmd struct {
 	// a create-time consent only: a session already registered in that mode
 	// still rehydrates after a daemon restart, since refusing there would
 	// silently change a live session's posture.
-	AllowUngated bool `protobuf:"varint,5,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
+	AllowUngated bool `protobuf:"varint,6,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
 	// The model this session should START on, empty to accept the shim's own
 	// default.  A caller that has a remembered selection would otherwise have to
 	// create and then immediately SetModel, which races: the session is live and
@@ -7617,15 +7733,15 @@ type CreateSessionCmd struct {
 	// the same SetModel path a later change takes, once the shim is wired, and
 	// still publishes only the shim-confirmed selection.  A rejected model fails
 	// the create rather than silently leaving the session on another one.
-	Model string `protobuf:"bytes,6,opt,name=model,proto3" json:"model,omitempty"`
+	Model string `protobuf:"bytes,7,opt,name=model,proto3" json:"model,omitempty"`
 	// Which conversation to land on. See ResumeMode: this is intent, and the
 	// daemon does the resolving.
-	ResumeMode ResumeMode `protobuf:"varint,7,opt,name=resume_mode,json=resumeMode,proto3,enum=agentrepl.v1.ResumeMode" json:"resume_mode,omitempty"`
+	ResumeMode ResumeMode `protobuf:"varint,8,opt,name=resume_mode,json=resumeMode,proto3,enum=agentrepl.v1.ResumeMode" json:"resume_mode,omitempty"`
 	// The conversation to land on, and ONLY meaningful under
 	// RESUME_MODE_EXPLICIT. The daemon rejects a create that sets this under any
 	// other mode rather than quietly ignoring it, because a caller that filled
 	// this in believes it is steering and must be told it is not.
-	ExplicitClaudeSessionId string `protobuf:"bytes,8,opt,name=explicit_claude_session_id,json=explicitClaudeSessionId,proto3" json:"explicit_claude_session_id,omitempty"`
+	ExplicitClaudeSessionId string `protobuf:"bytes,9,opt,name=explicit_claude_session_id,json=explicitClaudeSessionId,proto3" json:"explicit_claude_session_id,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -7658,6 +7774,13 @@ func (x *CreateSessionCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use CreateSessionCmd.ProtoReflect.Descriptor instead.
 func (*CreateSessionCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{99}
+}
+
+func (x *CreateSessionCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *CreateSessionCmd) GetCwd() string {
@@ -7718,8 +7841,12 @@ func (x *CreateSessionCmd) GetExplicitClaudeSessionId() string {
 
 // Session teardown over UDS (replaces DELETE /sessions/{id}).
 type DeleteSessionCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto. Session teardown is addressed by
+	// identity, not by workspace: the session may already have outlived the
+	// workspace binding a key would resolve through.
+	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	SessionId     string `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7754,6 +7881,13 @@ func (*DeleteSessionCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{100}
 }
 
+func (x *DeleteSessionCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *DeleteSessionCmd) GetSessionId() string {
 	if x != nil {
 		return x.SessionId
@@ -7775,7 +7909,12 @@ func (x *DeleteSessionCmd) GetSessionId() string {
 // merely hibernated or severed is brought up, because "restart" and "start" are
 // the same request when nothing is running.
 type RestartSessionCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace whose session is being restarted. See AgentRepl in
+	// frame.proto.
+	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7810,6 +7949,20 @@ func (*RestartSessionCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{101}
 }
 
+func (x *RestartSessionCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *RestartSessionCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
 // Deliberate, immediate hibernation of one workspace's session: the daemon
 // stops the shim (IntentionalQueryTermination) and marks the session
 // hibernated. Hibernated sessions are structurally outside the keep-alive
@@ -7818,7 +7971,11 @@ func (*RestartSessionCmd) Descriptor() ([]byte, []int) {
 // turn is live or the merge lease is held: the user interrupts first, the
 // daemon never discards in-flight work to satisfy a hibernate.
 type HibernateWorkspaceCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace being hibernated. See AgentRepl in frame.proto.
+	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7853,10 +8010,26 @@ func (*HibernateWorkspaceCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{102}
 }
 
+func (x *HibernateWorkspaceCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *HibernateWorkspaceCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
 // Graceful daemon shutdown over UDS (replaces Emacs
 // POST /shutdown).
 type ShutdownCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto. Daemon-global: no workspace.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// stop_shims asks the daemon to SIGTERM every session shim on its way out.
 	//
 	// The DEFAULT (false) PRESERVES them. A shim outlives its daemon by design:
@@ -7871,7 +8044,7 @@ type ShutdownCmd struct {
 	// passes it when its stamps show the bundle moved). It is belt-and-braces
 	// alongside the daemon's own version-driven stale-shim refresh, never the
 	// only thing standing between a deploy and stale shims.
-	StopShims     bool `protobuf:"varint,1,opt,name=stop_shims,json=stopShims,proto3" json:"stop_shims,omitempty"`
+	StopShims     bool `protobuf:"varint,2,opt,name=stop_shims,json=stopShims,proto3" json:"stop_shims,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7904,6 +8077,13 @@ func (x *ShutdownCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ShutdownCmd.ProtoReflect.Descriptor instead.
 func (*ShutdownCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{103}
+}
+
+func (x *ShutdownCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *ShutdownCmd) GetStopShims() bool {
@@ -8316,10 +8496,12 @@ func (x *ShutdownHoldTasks) GetCount() int32 {
 // two deploy flows cannot silently merge their intents.
 type ScheduleShutdownCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto. Daemon-global: no workspace.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Same semantics as ShutdownCmd.stop_shims, fixed at schedule time.
-	StopShims bool `protobuf:"varint,1,opt,name=stop_shims,json=stopShims,proto3" json:"stop_shims,omitempty"`
+	StopShims bool `protobuf:"varint,2,opt,name=stop_shims,json=stopShims,proto3" json:"stop_shims,omitempty"`
 	// Why (for the broadcast view and the durable log). Display only.
-	Cause         string `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`
+	Cause         string `protobuf:"bytes,3,opt,name=cause,proto3" json:"cause,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8354,6 +8536,13 @@ func (*ScheduleShutdownCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{110}
 }
 
+func (x *ScheduleShutdownCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *ScheduleShutdownCmd) GetStopShims() bool {
 	if x != nil {
 		return x.StopShims
@@ -8373,8 +8562,10 @@ func (x *ScheduleShutdownCmd) GetCause() string {
 // an old schedule can never kill a newer one.
 type CancelScheduledShutdownCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto. Daemon-global: no workspace.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// The schedule to cancel, from ShutdownScheduleDraining.schedule_id.
-	ScheduleId    string `protobuf:"bytes,1,opt,name=schedule_id,json=scheduleId,proto3" json:"schedule_id,omitempty"`
+	ScheduleId    string `protobuf:"bytes,2,opt,name=schedule_id,json=scheduleId,proto3" json:"schedule_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8407,6 +8598,13 @@ func (x *CancelScheduledShutdownCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use CancelScheduledShutdownCmd.ProtoReflect.Descriptor instead.
 func (*CancelScheduledShutdownCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{111}
+}
+
+func (x *CancelScheduledShutdownCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *CancelScheduledShutdownCmd) GetScheduleId() string {
@@ -8541,14 +8739,20 @@ func (x *RestartPendingView) GetAnnouncedAtMs() int64 {
 // never a control signal, and is tagged in the log so a line originating in a
 // frontend is never mistaken for one the daemon produced itself.
 type ClientLogCmd struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Level   ClientLogLevel         `protobuf:"varint,1,opt,name=level,proto3,enum=agentrepl.v1.ClientLogLevel" json:"level,omitempty"`
-	Message string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// WHICH WORKSPACE the reporting frontend was showing. A diagnostic line whose
+	// workspace nobody recorded is evidence about an unnamed session, which is
+	// most of the way to no evidence at all. See AgentRepl in frame.proto.
+	Workspace string         `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Level     ClientLogLevel `protobuf:"varint,3,opt,name=level,proto3,enum=agentrepl.v1.ClientLogLevel" json:"level,omitempty"`
+	Message   string         `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
 	// Optional structured payload (ids, counters, timings) accompanying the
 	// message. Schemaless on purpose: it is diagnostic evidence whose shape is
 	// the reporting call site's business, and pinning a schema here would make
 	// adding a diagnostic a proto change.
-	Context       *structpb.Struct `protobuf:"bytes,3,opt,name=context,proto3" json:"context,omitempty"`
+	Context       *structpb.Struct `protobuf:"bytes,5,opt,name=context,proto3" json:"context,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8581,6 +8785,20 @@ func (x *ClientLogCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ClientLogCmd.ProtoReflect.Descriptor instead.
 func (*ClientLogCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{113}
+}
+
+func (x *ClientLogCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ClientLogCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
 }
 
 func (x *ClientLogCmd) GetLevel() ClientLogLevel {
@@ -9700,7 +9918,9 @@ func (*MergeQueueHeadTerminalOwed) Descriptor() ([]byte, []int) {
 // Durable across bounces. Idempotent. Daemon-global (the command's
 // workspace is ignored).
 type PauseMergeQueueCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto.
+	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9735,9 +9955,18 @@ func (*PauseMergeQueueCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{129}
 }
 
+func (x *PauseMergeQueueCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 // Resume the merge queue. Idempotent, daemon-global.
 type ResumeMergeQueueCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto.
+	RequestId     string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9772,14 +10001,24 @@ func (*ResumeMergeQueueCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{130}
 }
 
+func (x *ResumeMergeQueueCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 // Evict ONE waiting entry by run id. The evicted run receives a terminal
 // failed MergeStatus with an eviction cause, so the workspace's merge axis
 // resolves immediately. REFUSED when run_id names the running head (only its
 // drain goroutine may retire it) or names nothing outstanding.
 type EvictMergeCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto. The merge queue is
+	// daemon-global and a run id names one entry in it, so there is no workspace.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// The run id the roster and every MergeStatus carry.
-	RunId         string `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	RunId         string `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9812,6 +10051,13 @@ func (x *EvictMergeCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use EvictMergeCmd.ProtoReflect.Descriptor instead.
 func (*EvictMergeCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{131}
+}
+
+func (x *EvictMergeCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *EvictMergeCmd) GetRunId() string {
@@ -10087,11 +10333,17 @@ func (x *MergeDequeueRunning) GetStatus() *MergeStatus {
 // answer and not merely the absence of one.
 type AnswerMergeDequeueCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See AgentRepl in frame.proto.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace whose offer is being answered — the offer is PUSHED STATE on
+	// WorkspaceState, so it is scoped by workspace and matched within it. See
+	// AgentRepl in frame.proto.
+	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// The offer being answered. An id that does not match the workspace's
 	// outstanding offer is REFUSED rather than resolved to the current one: a
 	// click on a superseded card must not dequeue the merge the card that
 	// replaced it is asking about.
-	OfferId string `protobuf:"bytes,1,opt,name=offer_id,json=offerId,proto3" json:"offer_id,omitempty"`
+	OfferId string `protobuf:"bytes,3,opt,name=offer_id,json=offerId,proto3" json:"offer_id,omitempty"`
 	// The answer is a oneof of empty messages, not a bool, for the same reason
 	// ReviveSessionCmd's is: "no answer" must be unrepresentable on the wire.
 	//
@@ -10134,6 +10386,20 @@ func (*AnswerMergeDequeueCmd) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_shared_proto_rawDescGZIP(), []int{135}
 }
 
+func (x *AnswerMergeDequeueCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *AnswerMergeDequeueCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
 func (x *AnswerMergeDequeueCmd) GetOfferId() string {
 	if x != nil {
 		return x.OfferId
@@ -10171,11 +10437,11 @@ type isAnswerMergeDequeueCmd_Answer interface {
 }
 
 type AnswerMergeDequeueCmd_Dequeue struct {
-	Dequeue *MergeDequeueConfirm `protobuf:"bytes,2,opt,name=dequeue,proto3,oneof"`
+	Dequeue *MergeDequeueConfirm `protobuf:"bytes,4,opt,name=dequeue,proto3,oneof"`
 }
 
 type AnswerMergeDequeueCmd_Keep struct {
-	Keep *MergeDequeueDecline `protobuf:"bytes,3,opt,name=keep,proto3,oneof"`
+	Keep *MergeDequeueDecline `protobuf:"bytes,5,opt,name=keep,proto3,oneof"`
 }
 
 func (*AnswerMergeDequeueCmd_Dequeue) isAnswerMergeDequeueCmd_Answer() {}
@@ -10575,11 +10841,14 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x17HibernationCacheExpired\x12\x1d\n" +
 	"\n" +
 	"elapsed_ms\x18\x01 \x01(\x03R\telapsedMs\x12\x15\n" +
-	"\x06ttl_ms\x18\x02 \x01(\x03R\x05ttlMs\"\xcc\x01\n" +
-	"\x10ReviveSessionCmd\x12G\n" +
-	"\rcompact_first\x18\x01 \x01(\v2 .agentrepl.v1.ReviveCompactFirstH\x00R\fcompactFirst\x124\n" +
-	"\x06direct\x18\x02 \x01(\v2\x1a.agentrepl.v1.ReviveDirectH\x00R\x06direct\x121\n" +
-	"\x05clear\x18\x03 \x01(\v2\x19.agentrepl.v1.ReviveClearH\x00R\x05clearB\x06\n" +
+	"\x06ttl_ms\x18\x02 \x01(\x03R\x05ttlMs\"\x89\x02\n" +
+	"\x10ReviveSessionCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12G\n" +
+	"\rcompact_first\x18\x03 \x01(\v2 .agentrepl.v1.ReviveCompactFirstH\x00R\fcompactFirst\x124\n" +
+	"\x06direct\x18\x04 \x01(\v2\x1a.agentrepl.v1.ReviveDirectH\x00R\x06direct\x121\n" +
+	"\x05clear\x18\x05 \x01(\v2\x19.agentrepl.v1.ReviveClearH\x00R\x05clearB\x06\n" +
 	"\x04mode\"I\n" +
 	"\x12ReviveCompactFirst\x123\n" +
 	"\x05scope\x18\x01 \x01(\x0e2\x1d.agentrepl.v1.CompactionScopeR\x05scope\"\x0e\n" +
@@ -10595,27 +10864,29 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x04gate\"\x13\n" +
 	"\x11WorkspaceGateOpen\"R\n" +
 	"\x17WorkspaceGateHibernated\x127\n" +
-	"\x06detail\x18\x01 \x01(\v2\x1f.agentrepl.v1.HibernationDetailR\x06detail\"\xc1\x04\n" +
-	"\x12CreateWorkspaceCmd\x12%\n" +
-	"\x0erequested_name\x18\x01 \x01(\tR\rrequestedName\x12\x19\n" +
-	"\bgit_root\x18\x02 \x01(\tR\agitRoot\x12\x1f\n" +
-	"\vbase_commit\x18\x03 \x01(\tR\n" +
+	"\x06detail\x18\x01 \x01(\v2\x1f.agentrepl.v1.HibernationDetailR\x06detail\"\xe0\x04\n" +
+	"\x12CreateWorkspaceCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12%\n" +
+	"\x0erequested_name\x18\x02 \x01(\tR\rrequestedName\x12\x19\n" +
+	"\bgit_root\x18\x03 \x01(\tR\agitRoot\x12\x1f\n" +
+	"\vbase_commit\x18\x04 \x01(\tR\n" +
 	"baseCommit\x12)\n" +
-	"\x10source_workspace\x18\x04 \x01(\tR\x0fsourceWorkspace\x12\x1d\n" +
+	"\x10source_workspace\x18\x05 \x01(\tR\x0fsourceWorkspace\x12\x1d\n" +
 	"\n" +
-	"source_dir\x18\x05 \x01(\tR\tsourceDir\x12*\n" +
-	"\x0einitial_prompt\x18\x06 \x01(\tH\x00R\rinitialPrompt\x88\x01\x01\x12\x1a\n" +
-	"\bpriority\x18\a \x01(\tR\bpriority\x12\x14\n" +
-	"\x05model\x18\b \x01(\tR\x05model\x12\x1b\n" +
-	"\tfork_from\x18\t \x01(\tR\bforkFrom\x12&\n" +
-	"\x0ffork_session_id\x18\n" +
-	" \x01(\tR\rforkSessionId\x123\n" +
-	"\x15postprocessing_prompt\x18\v \x01(\tR\x14postprocessingPrompt\x12&\n" +
-	"\x0fbefore_ws_merge\x18\f \x01(\tR\rbeforeWsMerge\x12\x1d\n" +
+	"source_dir\x18\x06 \x01(\tR\tsourceDir\x12*\n" +
+	"\x0einitial_prompt\x18\a \x01(\tH\x00R\rinitialPrompt\x88\x01\x01\x12\x1a\n" +
+	"\bpriority\x18\b \x01(\tR\bpriority\x12\x14\n" +
+	"\x05model\x18\t \x01(\tR\x05model\x12\x1b\n" +
+	"\tfork_from\x18\n" +
+	" \x01(\tR\bforkFrom\x12&\n" +
+	"\x0ffork_session_id\x18\v \x01(\tR\rforkSessionId\x123\n" +
+	"\x15postprocessing_prompt\x18\f \x01(\tR\x14postprocessingPrompt\x12&\n" +
+	"\x0fbefore_ws_merge\x18\r \x01(\tR\rbeforeWsMerge\x12\x1d\n" +
 	"\n" +
-	"config_dir\x18\r \x01(\tR\tconfigDir\x12'\n" +
-	"\x0fpermission_mode\x18\x0e \x01(\tR\x0epermissionMode\x12#\n" +
-	"\rallow_ungated\x18\x0f \x01(\bR\fallowUngatedB\x11\n" +
+	"config_dir\x18\x0e \x01(\tR\tconfigDir\x12'\n" +
+	"\x0fpermission_mode\x18\x0f \x01(\tR\x0epermissionMode\x12#\n" +
+	"\rallow_ungated\x18\x10 \x01(\bR\fallowUngatedB\x11\n" +
 	"\x0f_initial_prompt\"\xc4\x04\n" +
 	"\x12WorkspaceAvailable\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x1d\n" +
@@ -10640,19 +10911,30 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\n" +
 	"config_dir\x18\x0f \x01(\tR\tconfigDir\x12'\n" +
 	"\x0fpermission_mode\x18\x10 \x01(\tR\x0epermissionMode\x12#\n" +
-	"\rallow_ungated\x18\x11 \x01(\bR\fallowUngated\"1\n" +
-	"\x18WorkspaceMaterializedCmd\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"\x93\x01\n" +
-	"\x10OpenWorkspaceCmd\x12'\n" +
-	"\x0fpermission_mode\x18\x01 \x01(\tR\x0epermissionMode\x12\x1d\n" +
+	"\rallow_ungated\x18\x11 \x01(\bR\fallowUngated\"P\n" +
+	"\x18WorkspaceMaterializedCmd\x12\x1d\n" +
 	"\n" +
-	"config_dir\x18\x02 \x01(\tR\tconfigDir\x12\x12\n" +
-	"\x04fake\x18\x03 \x01(\bR\x04fake\x12#\n" +
-	"\rallow_ungated\x18\x04 \x01(\bR\fallowUngated\"\x13\n" +
-	"\x11CloseWorkspaceCmd\"x\n" +
-	"\x11MergeWorkspaceCmd\x12<\n" +
-	"\x1aconflict_resolved_continue\x18\x01 \x01(\bR\x18conflictResolvedContinue\x12%\n" +
-	"\x0eworkspace_name\x18\x02 \x01(\tR\rworkspaceName\"\xcf\x06\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x15\n" +
+	"\x06job_id\x18\x02 \x01(\tR\x05jobId\"\xd0\x01\n" +
+	"\x10OpenWorkspaceCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12'\n" +
+	"\x0fpermission_mode\x18\x03 \x01(\tR\x0epermissionMode\x12\x1d\n" +
+	"\n" +
+	"config_dir\x18\x04 \x01(\tR\tconfigDir\x12\x12\n" +
+	"\x04fake\x18\x05 \x01(\bR\x04fake\x12#\n" +
+	"\rallow_ungated\x18\x06 \x01(\bR\fallowUngated\"P\n" +
+	"\x11CloseWorkspaceCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\"\xb5\x01\n" +
+	"\x11MergeWorkspaceCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12<\n" +
+	"\x1aconflict_resolved_continue\x18\x03 \x01(\bR\x18conflictResolvedContinue\x12%\n" +
+	"\x0eworkspace_name\x18\x04 \x01(\tR\rworkspaceName\"\xcf\x06\n" +
 	"\n" +
 	"HostAction\x12\x1b\n" +
 	"\taction_id\x18\x01 \x01(\tR\bactionId\x12N\n" +
@@ -10690,30 +10972,44 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"Z\n" +
 	"\x11HostLegacyCommand\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x121\n" +
-	"\apayload\x18\x02 \x01(\v2\x17.google.protobuf.StructR\apayload\"[\n" +
-	"\x16HostActionCompletedCmd\x12\x1b\n" +
-	"\taction_id\x18\x01 \x01(\tR\bactionId\x12\x0e\n" +
-	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xb3\x02\n" +
-	"\x10CreateSessionCmd\x12\x10\n" +
-	"\x03cwd\x18\x01 \x01(\tR\x03cwd\x12'\n" +
-	"\x0fpermission_mode\x18\x02 \x01(\tR\x0epermissionMode\x12\x1d\n" +
+	"\apayload\x18\x02 \x01(\v2\x17.google.protobuf.StructR\apayload\"z\n" +
+	"\x16HostActionCompletedCmd\x12\x1d\n" +
 	"\n" +
-	"config_dir\x18\x03 \x01(\tR\tconfigDir\x12\x12\n" +
-	"\x04fake\x18\x04 \x01(\bR\x04fake\x12#\n" +
-	"\rallow_ungated\x18\x05 \x01(\bR\fallowUngated\x12\x14\n" +
-	"\x05model\x18\x06 \x01(\tR\x05model\x129\n" +
-	"\vresume_mode\x18\a \x01(\x0e2\x18.agentrepl.v1.ResumeModeR\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
+	"\taction_id\x18\x02 \x01(\tR\bactionId\x12\x0e\n" +
+	"\x02ok\x18\x03 \x01(\bR\x02ok\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\xd2\x02\n" +
+	"\x10CreateSessionCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x10\n" +
+	"\x03cwd\x18\x02 \x01(\tR\x03cwd\x12'\n" +
+	"\x0fpermission_mode\x18\x03 \x01(\tR\x0epermissionMode\x12\x1d\n" +
+	"\n" +
+	"config_dir\x18\x04 \x01(\tR\tconfigDir\x12\x12\n" +
+	"\x04fake\x18\x05 \x01(\bR\x04fake\x12#\n" +
+	"\rallow_ungated\x18\x06 \x01(\bR\fallowUngated\x12\x14\n" +
+	"\x05model\x18\a \x01(\tR\x05model\x129\n" +
+	"\vresume_mode\x18\b \x01(\x0e2\x18.agentrepl.v1.ResumeModeR\n" +
 	"resumeMode\x12;\n" +
-	"\x1aexplicit_claude_session_id\x18\b \x01(\tR\x17explicitClaudeSessionId\"1\n" +
+	"\x1aexplicit_claude_session_id\x18\t \x01(\tR\x17explicitClaudeSessionId\"P\n" +
 	"\x10DeleteSessionCmd\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"\x13\n" +
-	"\x11RestartSessionCmd\"\x17\n" +
-	"\x15HibernateWorkspaceCmd\",\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\"P\n" +
+	"\x11RestartSessionCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\"T\n" +
+	"\x15HibernateWorkspaceCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\"K\n" +
 	"\vShutdownCmd\x12\x1d\n" +
 	"\n" +
-	"stop_shims\x18\x01 \x01(\bR\tstopShims\"\x9f\x01\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
+	"\n" +
+	"stop_shims\x18\x02 \x01(\bR\tstopShims\"\x9f\x01\n" +
 	"\x14ShutdownScheduleView\x128\n" +
 	"\x04idle\x18\x01 \x01(\v2\".agentrepl.v1.ShutdownScheduleIdleH\x00R\x04idle\x12D\n" +
 	"\bdraining\x18\x02 \x01(\v2&.agentrepl.v1.ShutdownScheduleDrainingH\x00R\bdrainingB\a\n" +
@@ -10736,24 +11032,31 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x10ShutdownHoldTurn\x12\x17\n" +
 	"\aturn_id\x18\x01 \x01(\tR\x06turnId\")\n" +
 	"\x11ShutdownHoldTasks\x12\x14\n" +
-	"\x05count\x18\x01 \x01(\x05R\x05count\"J\n" +
+	"\x05count\x18\x01 \x01(\x05R\x05count\"i\n" +
 	"\x13ScheduleShutdownCmd\x12\x1d\n" +
 	"\n" +
-	"stop_shims\x18\x01 \x01(\bR\tstopShims\x12\x14\n" +
-	"\x05cause\x18\x02 \x01(\tR\x05cause\"=\n" +
-	"\x1aCancelScheduledShutdownCmd\x12\x1f\n" +
-	"\vschedule_id\x18\x01 \x01(\tR\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
+	"\n" +
+	"stop_shims\x18\x02 \x01(\bR\tstopShims\x12\x14\n" +
+	"\x05cause\x18\x03 \x01(\tR\x05cause\"\\\n" +
+	"\x1aCancelScheduledShutdownCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1f\n" +
+	"\vschedule_id\x18\x02 \x01(\tR\n" +
 	"scheduleId\"\xa9\x01\n" +
 	"\x12RestartPendingView\x12\x14\n" +
 	"\x05cause\x18\x01 \x01(\tR\x05cause\x126\n" +
 	"\x17expected_outage_seconds\x18\x02 \x01(\x05R\x15expectedOutageSeconds\x12\x1d\n" +
 	"\n" +
 	"stop_shims\x18\x03 \x01(\bR\tstopShims\x12&\n" +
-	"\x0fannounced_at_ms\x18\x04 \x01(\x03R\rannouncedAtMs\"\x8f\x01\n" +
-	"\fClientLogCmd\x122\n" +
-	"\x05level\x18\x01 \x01(\x0e2\x1c.agentrepl.v1.ClientLogLevelR\x05level\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x121\n" +
-	"\acontext\x18\x03 \x01(\v2\x17.google.protobuf.StructR\acontext\"\xa0\x05\n" +
+	"\x0fannounced_at_ms\x18\x04 \x01(\x03R\rannouncedAtMs\"\xcc\x01\n" +
+	"\fClientLogCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x122\n" +
+	"\x05level\x18\x03 \x01(\x0e2\x1c.agentrepl.v1.ClientLogLevelR\x05level\x12\x18\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\x121\n" +
+	"\acontext\x18\x05 \x01(\v2\x17.google.protobuf.StructR\acontext\"\xa0\x05\n" +
 	"\vMergeStatus\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12-\n" +
 	"\x13phase_started_at_ms\x18\x02 \x01(\x03R\x10phaseStartedAtMs\x12\"\n" +
@@ -10822,11 +11125,17 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\x04head\"\x17\n" +
 	"\x15MergeQueueHeadRunning\"\x1d\n" +
 	"\x1bMergeQueueHeadPausedWaiting\"\x1c\n" +
-	"\x1aMergeQueueHeadTerminalOwed\"\x14\n" +
-	"\x12PauseMergeQueueCmd\"\x15\n" +
-	"\x13ResumeMergeQueueCmd\"&\n" +
-	"\rEvictMergeCmd\x12\x15\n" +
-	"\x06run_id\x18\x01 \x01(\tR\x05runId\"\xf1\x01\n" +
+	"\x1aMergeQueueHeadTerminalOwed\"3\n" +
+	"\x12PauseMergeQueueCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\"4\n" +
+	"\x13ResumeMergeQueueCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\"E\n" +
+	"\rEvictMergeCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x15\n" +
+	"\x06run_id\x18\x02 \x01(\tR\x05runId\"\xf1\x01\n" +
 	"\x11MergeDequeueOffer\x12\x19\n" +
 	"\boffer_id\x18\x01 \x01(\tR\aofferId\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12 \n" +
@@ -10841,11 +11150,14 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\bposition\x18\x02 \x01(\x05R\bposition\x12\x14\n" +
 	"\x05depth\x18\x03 \x01(\x05R\x05depth\"H\n" +
 	"\x13MergeDequeueRunning\x121\n" +
-	"\x06status\x18\x01 \x01(\v2\x19.agentrepl.v1.MergeStatusR\x06status\"\xb4\x01\n" +
-	"\x15AnswerMergeDequeueCmd\x12\x19\n" +
-	"\boffer_id\x18\x01 \x01(\tR\aofferId\x12=\n" +
-	"\adequeue\x18\x02 \x01(\v2!.agentrepl.v1.MergeDequeueConfirmH\x00R\adequeue\x127\n" +
-	"\x04keep\x18\x03 \x01(\v2!.agentrepl.v1.MergeDequeueDeclineH\x00R\x04keepB\b\n" +
+	"\x06status\x18\x01 \x01(\v2\x19.agentrepl.v1.MergeStatusR\x06status\"\xf1\x01\n" +
+	"\x15AnswerMergeDequeueCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x19\n" +
+	"\boffer_id\x18\x03 \x01(\tR\aofferId\x12=\n" +
+	"\adequeue\x18\x04 \x01(\v2!.agentrepl.v1.MergeDequeueConfirmH\x00R\adequeue\x127\n" +
+	"\x04keep\x18\x05 \x01(\v2!.agentrepl.v1.MergeDequeueDeclineH\x00R\x04keepB\b\n" +
 	"\x06answer\"\x15\n" +
 	"\x13MergeDequeueConfirm\"\x15\n" +
 	"\x13MergeDequeueDecline*\xf3\n" +

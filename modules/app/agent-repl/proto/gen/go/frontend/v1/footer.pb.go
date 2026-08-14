@@ -2339,12 +2339,19 @@ func (x *AccountingInvalid) GetProblems() []string {
 }
 
 type SubmitPromptCmd struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Text           string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
-	PermissionMode string                 `protobuf:"bytes,2,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See agentrepl.v1.AgentRepl. It is also the DURABLE TURN KEY:
+	// the daemon's prompt-receipt ledger claims and discharges a turn under this
+	// id, so it must be unique across a client's whole lifetime, not merely
+	// in-flight.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace whose session this prompt goes to. See agentrepl.v1.AgentRepl.
+	Workspace      string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Text           string `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
+	PermissionMode string `protobuf:"bytes,4,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
 	// Required origin selected by the concrete frontend send site. The daemon
 	// rejects UNSPECIFIED rather than guessing which UI or automation acted.
-	PromptOrigin  v11.PromptOrigin `protobuf:"varint,3,opt,name=prompt_origin,json=promptOrigin,proto3,enum=shim.v1.PromptOrigin" json:"prompt_origin,omitempty"`
+	PromptOrigin  v11.PromptOrigin `protobuf:"varint,5,opt,name=prompt_origin,json=promptOrigin,proto3,enum=shim.v1.PromptOrigin" json:"prompt_origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2379,6 +2386,20 @@ func (*SubmitPromptCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{17}
 }
 
+func (x *SubmitPromptCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SubmitPromptCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
 func (x *SubmitPromptCmd) GetText() string {
 	if x != nil {
 		return x.Text
@@ -2406,8 +2427,12 @@ func (x *SubmitPromptCmd) GetPromptOrigin() v11.PromptOrigin {
 // interrupt only on a resend carrying confirm_agents=true — stopping working
 // subagents is the one interrupt worth a deliberate second keystroke.
 type InterruptCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ConfirmAgents bool                   `protobuf:"varint,1,opt,name=confirm_agents,json=confirmAgents,proto3" json:"confirm_agents,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See agentrepl.v1.AgentRepl.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace whose turn is being stopped. See agentrepl.v1.AgentRepl.
+	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	ConfirmAgents bool   `protobuf:"varint,3,opt,name=confirm_agents,json=confirmAgents,proto3" json:"confirm_agents,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2442,6 +2467,20 @@ func (*InterruptCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{18}
 }
 
+func (x *InterruptCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *InterruptCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
 func (x *InterruptCmd) GetConfirmAgents() bool {
 	if x != nil {
 		return x.ConfirmAgents
@@ -2466,10 +2505,15 @@ func (x *InterruptCmd) GetConfirmAgents() bool {
 // agents, so sending it IS the deliberate second keystroke that flag exists to
 // require. A frontend asks its user before it sends, never after.
 //
-// The session is the command envelope's `workspace`; the command has no
-// fields of its own.
+// The session is named by `workspace` below, and the command has nothing else
+// to say.
 type CancelDetachedAgentsCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See agentrepl.v1.AgentRepl.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace whose detached agents are being cancelled. See
+	// agentrepl.v1.AgentRepl.
+	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2502,6 +2546,20 @@ func (x *CancelDetachedAgentsCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use CancelDetachedAgentsCmd.ProtoReflect.Descriptor instead.
 func (*CancelDetachedAgentsCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *CancelDetachedAgentsCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CancelDetachedAgentsCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
 }
 
 // What a CancelDetachedAgentsCmd did, carried on the command's ack.
@@ -3457,8 +3515,13 @@ func (x *QueueView) GetFence() string {
 // Deliver this entry NOW — the user overriding the classifier, or not waiting
 // for it. Runs exactly the same interject sequence an INTERJECT verdict does.
 type QueueForceCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	EntryId       string                 `protobuf:"bytes,1,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See agentrepl.v1.AgentRepl.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace whose queue holds the entry. The queue is per-workspace, so
+	// an entry id alone does not address one. See agentrepl.v1.AgentRepl.
+	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	EntryId       string `protobuf:"bytes,3,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3493,6 +3556,20 @@ func (*QueueForceCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{33}
 }
 
+func (x *QueueForceCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *QueueForceCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
 func (x *QueueForceCmd) GetEntryId() string {
 	if x != nil {
 		return x.EntryId
@@ -3503,8 +3580,12 @@ func (x *QueueForceCmd) GetEntryId() string {
 // Confirm a HOLD entry. View state only: the entry is still delivered by the
 // ordinary turn-end drain, on the same schedule it already had.
 type QueueAcceptCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	EntryId       string                 `protobuf:"bytes,1,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See agentrepl.v1.AgentRepl.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace whose queue holds the entry. See agentrepl.v1.AgentRepl.
+	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	EntryId       string `protobuf:"bytes,3,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3539,6 +3620,20 @@ func (*QueueAcceptCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{34}
 }
 
+func (x *QueueAcceptCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *QueueAcceptCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
 func (x *QueueAcceptCmd) GetEntryId() string {
 	if x != nil {
 		return x.EntryId
@@ -3548,8 +3643,12 @@ func (x *QueueAcceptCmd) GetEntryId() string {
 
 // Drop an entry. It is never delivered.
 type QueueCancelCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	EntryId       string                 `protobuf:"bytes,1,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See agentrepl.v1.AgentRepl.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace whose queue holds the entry. See agentrepl.v1.AgentRepl.
+	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	EntryId       string `protobuf:"bytes,3,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3582,6 +3681,20 @@ func (x *QueueCancelCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use QueueCancelCmd.ProtoReflect.Descriptor instead.
 func (*QueueCancelCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *QueueCancelCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *QueueCancelCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
 }
 
 func (x *QueueCancelCmd) GetEntryId() string {
@@ -3737,14 +3850,23 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x14AccountingIncomplete\x12\x18\n" +
 	"\amissing\x18\x01 \x03(\tR\amissing\"/\n" +
 	"\x11AccountingInvalid\x12\x1a\n" +
-	"\bproblems\x18\x01 \x03(\tR\bproblems\"\x8a\x01\n" +
-	"\x0fSubmitPromptCmd\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\x12'\n" +
-	"\x0fpermission_mode\x18\x02 \x01(\tR\x0epermissionMode\x12:\n" +
-	"\rprompt_origin\x18\x03 \x01(\x0e2\x15.shim.v1.PromptOriginR\fpromptOrigin\"5\n" +
-	"\fInterruptCmd\x12%\n" +
-	"\x0econfirm_agents\x18\x01 \x01(\bR\rconfirmAgents\"\x19\n" +
-	"\x17CancelDetachedAgentsCmd\"\xfd\x01\n" +
+	"\bproblems\x18\x01 \x03(\tR\bproblems\"\xc7\x01\n" +
+	"\x0fSubmitPromptCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x12\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\x12'\n" +
+	"\x0fpermission_mode\x18\x04 \x01(\tR\x0epermissionMode\x12:\n" +
+	"\rprompt_origin\x18\x05 \x01(\x0e2\x15.shim.v1.PromptOriginR\fpromptOrigin\"r\n" +
+	"\fInterruptCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12%\n" +
+	"\x0econfirm_agents\x18\x03 \x01(\bR\rconfirmAgents\"V\n" +
+	"\x17CancelDetachedAgentsCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\"\xfd\x01\n" +
 	"\x15DetachedCancelOutcome\x12D\n" +
 	"\tcancelled\x18\x01 \x01(\v2$.frontend.v1.DetachedAgentsCancelledH\x00R\tcancelled\x12K\n" +
 	"\x0fnothing_running\x18\x02 \x01(\v2 .shim.v1.NoDetachedAgentsRunningH\x00R\x0enothingRunning\x12F\n" +
@@ -3791,13 +3913,22 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\tQueueView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x121\n" +
 	"\aentries\x18\x02 \x03(\v2\x17.frontend.v1.QueueEntryR\aentries\x12\x14\n" +
-	"\x05fence\x18\x03 \x01(\tR\x05fence\"*\n" +
-	"\rQueueForceCmd\x12\x19\n" +
-	"\bentry_id\x18\x01 \x01(\tR\aentryId\"+\n" +
-	"\x0eQueueAcceptCmd\x12\x19\n" +
-	"\bentry_id\x18\x01 \x01(\tR\aentryId\"+\n" +
-	"\x0eQueueCancelCmd\x12\x19\n" +
-	"\bentry_id\x18\x01 \x01(\tR\aentryId*\xb0\x05\n" +
+	"\x05fence\x18\x03 \x01(\tR\x05fence\"g\n" +
+	"\rQueueForceCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x19\n" +
+	"\bentry_id\x18\x03 \x01(\tR\aentryId\"h\n" +
+	"\x0eQueueAcceptCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x19\n" +
+	"\bentry_id\x18\x03 \x01(\tR\aentryId\"h\n" +
+	"\x0eQueueCancelCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x19\n" +
+	"\bentry_id\x18\x03 \x01(\tR\aentryId*\xb0\x05\n" +
 	"\vRenderState\x12\x1c\n" +
 	"\x18RENDER_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RENDER_STATE_INIT\x10\x01\x12\x15\n" +

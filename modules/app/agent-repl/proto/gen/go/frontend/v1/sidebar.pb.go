@@ -2001,10 +2001,13 @@ func (*RosterRowStatusInactive) Descriptor() ([]byte, []int) {
 // counter it did not author.
 type PublishWorkspaceRosterCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See agentrepl.v1.AgentRepl. The roster is daemon-global — it
+	// IS the set of workspaces — so this command names no workspace.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// The complete roster as of this publication. Always whole, never a delta:
 	// the roster is small and Emacs holds the entire model, so a full replace
 	// makes a partially-applied roster unrepresentable.
-	Roster        *WorkspaceRoster `protobuf:"bytes,1,opt,name=roster,proto3" json:"roster,omitempty"`
+	Roster        *WorkspaceRoster `protobuf:"bytes,2,opt,name=roster,proto3" json:"roster,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2037,6 +2040,13 @@ func (x *PublishWorkspaceRosterCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PublishWorkspaceRosterCmd.ProtoReflect.Descriptor instead.
 func (*PublishWorkspaceRosterCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *PublishWorkspaceRosterCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *PublishWorkspaceRosterCmd) GetRoster() *WorkspaceRoster {
@@ -2151,9 +2161,11 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x1aRosterRowStatusMergeFailed\"\x17\n" +
 	"\x15RosterRowStatusMerged\"\x15\n" +
 	"\x13RosterRowStatusNone\"\x19\n" +
-	"\x17RosterRowStatusInactive\"Q\n" +
-	"\x19PublishWorkspaceRosterCmd\x124\n" +
-	"\x06roster\x18\x01 \x01(\v2\x1c.frontend.v1.WorkspaceRosterR\x06rosterB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
+	"\x17RosterRowStatusInactive\"p\n" +
+	"\x19PublishWorkspaceRosterCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x124\n" +
+	"\x06roster\x18\x02 \x01(\v2\x1c.frontend.v1.WorkspaceRosterR\x06rosterB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_frontend_v1_sidebar_proto_rawDescOnce sync.Once

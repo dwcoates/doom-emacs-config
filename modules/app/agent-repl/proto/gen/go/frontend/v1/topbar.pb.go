@@ -362,8 +362,13 @@ func (x *TopbarConnectivity) GetTitle() string {
 // state rather than choosing it.  Creation is different — see
 // CreateSessionCmd.model, which is a starting choice, not an observation.
 type SetModelCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Model         string                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. See agentrepl.v1.AgentRepl.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace whose live session is being re-modelled. See
+	// agentrepl.v1.AgentRepl.
+	Workspace     string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Model         string `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -396,6 +401,20 @@ func (x *SetModelCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SetModelCmd.ProtoReflect.Descriptor instead.
 func (*SetModelCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SetModelCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SetModelCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
 }
 
 func (x *SetModelCmd) GetModel() string {
@@ -562,7 +581,14 @@ func (x *SessionHealthView) GetReason() string {
 // success criterion.  It is a frontend command because no vendor produces or
 // consumes this daemon-local fact.
 type DaemonHealthCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. The DaemonHealthView pushed in answer echoes this id, which is
+	// how Emacs knows the verdict is the one it asked for.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// WHICH SUBSCRIBE STREAM the DaemonHealthView should be pushed down. See
+	// agentrepl.v1.SubscribeRequest.client_id. Daemon-global otherwise: no
+	// workspace.
+	ClientId      string `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -597,15 +623,36 @@ func (*DaemonHealthCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{7}
 }
 
+func (x *DaemonHealthCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *DaemonHealthCmd) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
 // Ask the daemon to prove the entire session route for one restored workspace:
 // daemon registry -> current session controller -> handshaked shim -> shim dependencies.
-// The command's outer workspace is authoritative and must equal the session's
-// CWD; SESSION_ID makes a stale response impossible to use after a rebind.
+// `workspace` is authoritative and must be the session's absolute CWD;
+// `session_id` makes a stale response impossible to use after a rebind.
 //
 // HOST SURFACE, like its view.
 type SessionHealthCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation. The SessionHealthView pushed in answer echoes this id.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The workspace whose route is being proved. See agentrepl.v1.AgentRepl.
+	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// WHICH SUBSCRIBE STREAM the SessionHealthView should be pushed down. See
+	// agentrepl.v1.SubscribeRequest.client_id.
+	ClientId      string `protobuf:"bytes,3,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	SessionId     string `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -638,6 +685,27 @@ func (x *SessionHealthCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SessionHealthCmd.ProtoReflect.Descriptor instead.
 func (*SessionHealthCmd) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *SessionHealthCmd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SessionHealthCmd) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
+func (x *SessionHealthCmd) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
 }
 
 func (x *SessionHealthCmd) GetSessionId() string {
@@ -890,9 +958,12 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\x12TopbarConnectivity\x12\x12\n" +
 	"\x04tone\x18\x01 \x01(\tR\x04tone\x12\x14\n" +
 	"\x05glyph\x18\x02 \x01(\tR\x05glyph\x12\x14\n" +
-	"\x05title\x18\x03 \x01(\tR\x05title\"#\n" +
-	"\vSetModelCmd\x12\x14\n" +
-	"\x05model\x18\x01 \x01(\tR\x05model\"c\n" +
+	"\x05title\x18\x03 \x01(\tR\x05title\"`\n" +
+	"\vSetModelCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x14\n" +
+	"\x05model\x18\x03 \x01(\tR\x05model\"c\n" +
 	"\x10DaemonHealthView\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
@@ -905,11 +976,18 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x18\n" +
 	"\ahealthy\x18\x04 \x01(\bR\ahealthy\x12\x16\n" +
-	"\x06reason\x18\x05 \x01(\tR\x06reason\"\x11\n" +
-	"\x0fDaemonHealthCmd\"1\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\"M\n" +
+	"\x0fDaemonHealthCmd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
+	"\tclient_id\x18\x02 \x01(\tR\bclientId\"\x8b\x01\n" +
 	"\x10SessionHealthCmd\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"\x88\x01\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12\x1b\n" +
+	"\tclient_id\x18\x03 \x01(\tR\bclientId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\"\x88\x01\n" +
 	"\x12TokenBreakdownView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12>\n" +
 	"\bsections\x18\x02 \x03(\v2\".frontend.v1.TokenBreakdownSectionR\bsections\x12\x14\n" +
