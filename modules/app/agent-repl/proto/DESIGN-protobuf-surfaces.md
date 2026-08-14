@@ -763,12 +763,21 @@ and both output TODOs close.
 
 ## The store indexes `parent`, and the database is NUKED rather than migrated
 
-**Decided.** `entry` gains a `parent_message_id` column, extracted at ingest
-exactly as `top_level_message_id` already is, and an index
-`entry(session_id, parent_message_id, seq)` mirroring `entry_message_owner`.
-Without it `frontend.v1.PageScopeInside` is a scan: `parent` lives inside the
-opaque `payload` BLOB, and `top_level_message_id` cannot substitute because a
-subagent and a subagent inside IT share one value.
+**Decided.** `entry` gains a `parent_message_id` column, extracted at ingest,
+and an index `entry(session_id, parent_message_id, seq)` mirroring
+`entry_message_owner`. Without it `frontend.v1.PageScopeInside` is a scan:
+`parent` lives inside the opaque `payload` BLOB, and the owning feed row cannot
+substitute because a subagent and a subagent inside IT share one value.
+
+**Superseded in part — see "Lineage is one optional field, and the root moves
+into the store" below.** That section was written when a record carried BOTH its
+immediate parent and its root on the wire, so this column was merely the second
+of two extractions. The root has since left the wire entirely. The column and
+the index decided here are unchanged and still wanted; what changed is their
+company. `parent_message_id` is now the ONLY lineage value extracted from the
+record, and the owner column feeding `entry_message_owner` is DERIVED by walking
+that parent chain at ingest rather than read off the record. The nuke-rather-
+than-migrate posture below covers that change too.
 
 **NO MIGRATION AND NO BACKFILL.** The store database is NUKED as needed and is
 to be regarded as EMPTY. Nothing is written to carry old rows forward.
@@ -1030,3 +1039,62 @@ snapshot can only be emitted when the buffer happens to parse, so the emissions
 are lumpy and arrive in bursts unrelated to how a reader scans a card. That is
 machinery, a partial-parse loop, and a re-send policy, spent on an animation
 worth little.
+
+## Lineage is one optional field, and the root moves into the store
+
+**Decided.** `conversation.v1.MessageEntry` states containment with a single
+`optional string parent_message_id`. Unset means the message sits directly in
+the feed; empty is invalid, not a third answer. `top_level_message_id` is gone
+from the wire, and so are `MessageParent`, `MessageParentRoot` and
+`MessageParentInside` — the oneof that used to spell "root or inside" is now the
+presence or absence of one field.
+
+**`frontend.v1.MessageLineage` is deleted.** Reduced to a single optional field
+it was a pure wrapper around what `conversation.v1` spells as a bare field, which
+is the same shape `AgentToolResult`, `SkillBodyItem` and
+`DetachedWorkSkillBodyResolved` were deleted for in this pass. The field moves
+onto `frontend.v1.Message` as `optional string parent_message_id = 5`, taking the
+tag `lineage` held. The argument that came with it survives verbatim in
+substance: containment sits in the PACKAGING half because it is a fact about the
+message regardless of what the message is, and non-message records —
+`shim.v1.Envelope` payloads — must never gain the field. Under the new spelling
+that prohibition is SHARPER, not weaker: unset is precisely the spelling for
+"sits directly in the feed", so a parent pointer on an Envelope would make every
+turn boundary and heartbeat a top-level feed row.
+
+**The denormalization moved into the store.** The store still resolves page
+ownership itself and a page is still bounded by MESSAGES, not records — a page
+bounded by record count is a fragment, and the reader asking again until it holds
+ten messages is the unbounded scan relocated. What changed is where the owning
+feed row comes from. The record states only its immediate parent; the store walks
+that chain ONCE at ingest and keeps the resolved feed row as a column of its own,
+indexed alongside seq. The page query still selects distinct values of that
+column below the anchor. One indexed pass, unchanged. The denormalization was
+never wrong — it was in the wrong place, on a wire where every consumer had to
+carry it, rather than in the store where the index already lives.
+
+**What this costs, stated plainly.** Two things.
+
+The store now walks the parent chain once per record at write. That is work the
+producer used to do, moved; it is bounded by nesting depth and paid on ingest
+rather than per page, which is the trade that keeps reads flat. A store that
+receives a child before its parent must handle that ordering itself — the wire no
+longer hands it a root it can trust without the parent being present.
+
+And a record no longer carries its own root, so nothing on the wire can be
+cross-checked against it. The old `MessageLineage` comment called a write whose
+root disagreed with its parent chain "CORRUPTION, not a variant", and the daemon
+audits for exactly that. Under the new model there is no second copy to disagree
+with, which removes the drift risk and removes the detection along with it. The
+class of bug those checks caught cannot occur; the class where the single parent
+pointer itself is simply wrong is now undetectable at the boundary, because there
+is nothing to compare it to. That is accepted: one copy that can be wrong is
+strictly better than two copies that can disagree, but it is not free, and it is
+not the same as being checked.
+
+**Stranded, not compensated for.** `daemon/internal/frontend/lineage.go` audits
+the two-field invariant and three of its four defect classes no longer exist.
+`daemon/internal/frontend/detachedwork.go:240` (`FeedRowLineage`) constructs the
+deleted message. Neither is touched here — this wave is proto and docs — and
+neither is deleted quietly during implementation without saying so. See the
+report accompanying this change for the full list.
