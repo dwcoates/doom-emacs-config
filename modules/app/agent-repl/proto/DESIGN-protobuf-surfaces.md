@@ -1488,3 +1488,206 @@ and disliked, the remedy is the rename, not a second unwrapped stream. The
 judgement recorded here is that a name three systems already speak is worth
 more than the bytes, but it is close, and the rename is the defensible other
 answer.
+
+## Every endpoint answers with a success or an error, and the failure vocabulary splits by drawn and called
+
+The previous section gave every method its own response type and then put the
+same thing inside all of them. `<Method>Response` wrapped `CommandAck`: an `ok`
+bit, a free-text `error`, a classified `failure`, a card reference, and four
+per-method fields meaningless on the other 32 methods. The wrapper was
+described as "a place to put the next field without offering it to anyone
+else", and it was — but the field everyone still shared was the ANSWER itself.
+
+Every response is now a two-arm oneof.
+
+```proto
+message ForceQueueEntryResponse {
+  string request_id = 1;
+  oneof response {
+    ForceQueueEntrySuccess success = 2;
+    ForceQueueEntryError   error   = 3;
+  }
+}
+```
+
+**What this makes unrepresentable is the point.** `CommandAck` could carry
+`ok=false` with `failure` unset, which the interrupt challenge actually used
+and which had to be documented as "the one non-failure refusal" — a refusal
+that is not a refusal. It could carry `ok=true` with a `failure` set. It could
+carry `ok=true` with a `selected_model` on a method that has nothing to do with
+models. Three states nothing meant, reachable by any producer, and every
+consumer had to decide independently what to do with them. None of the three
+exists now.
+
+### Errors are structured and IN BAND
+
+A failure caused by a request travels in that request's response and nowhere
+else. Not as a transport status — a status code is a number with a string
+stapled to it, and what a frontend draws is a classified account with typed
+evidence. Not on the push stream, which no caller can correlate to the call it
+answers.
+
+### The async boundary, which is NOT a loophole
+
+The rule above is about failures that ANSWER something. A failure that happens
+on its own — a session dying mid-turn, a rate limit, a shim crash — is nobody's
+answer, and there is no request whose response could carry it. Those stay on
+the push stream as `frontend.v1.FailureCardView`, delivered inside
+`agentrepl.v1.SubscribeResponse`.
+
+This distinction is load-bearing and easy to lose. "No out-of-band errors",
+over-applied, deletes the failure card: the thing that tells a user their
+session died while they were reading. The test is not "is this an error", it is
+"is this an ANSWER". A shim that crashed answered no question anyone asked.
+
+### The `FailureKind` split, and the inverted import it removes
+
+`agentrepl.v1.FailureKind` served both roles from one 62-arm oneof, and the
+evidence that it must not is in the imports. `src/frontend/v1/feed.proto` line
+20 imported `agentrepl/v1/shared.proto` so that
+`frontend.v1.FailureCardView.kind` could be an `agentrepl.v1.FailureKind` — a
+MODEL package importing a BOUNDARY package, backwards under the ownership
+scheme this document establishes. The model surface reached into the API
+surface because the API surface owned the word for "what went wrong".
+
+The vocabulary splits by the drawn/called test:
+
+- **Drawn** — arms the feed renders because nothing asked: the whole vendor
+  family, `FailureShimDegraded`, `FailureSessionShimDied`,
+  `FailureQueryTermination`, `FailureTurnUndriven`, the keep-alive windows, the
+  session-lifecycle endings, and the six client-local arms a frontend mints
+  about its own machinery. These are `frontend.v1.FailureKind`, in the new
+  `frontend/v1/failure.proto`.
+- **Called** — arms that answer a command: `FailurePromptRefusedByMergeState`,
+  `FailureQueueEntryUninterruptibleTurn`, `FailureSessionHibernated`,
+  `FailureReconnectSuperseded`, `FailureConversationUnresumable`,
+  `FailureInterruptUndelivered`, the shim-delivery family, and the rest. These
+  stay in `agentrepl.v1` and become the arms the per-method error oneofs draw
+  from.
+
+**`src/frontend/v1/feed.proto` now imports no `agentrepl/v1/*` at all.** That
+required moving one more thing: `SessionCommand`, which feed.proto also named.
+It goes to `conversation.v1`, where feed.proto's own comment had already
+claimed it lived, and where the argument that moved it out of `frontend.v1` in
+the first place — a stored conversation record cannot depend on the daemon's
+resolved output surface — is satisfied rather than reversed. A vocabulary that
+the feed, the footer, the daemon's recognizer and an agentrepl refusal all read
+belongs in the leaf every surface may import.
+
+### Nothing is duplicated across the split
+
+A few failures are genuinely BOTH an event and an answer. An SDK query that
+terminated is drawn when it happens mid-turn and answers a `CreateSession` when
+it happens during bring-up; `SessionResumeFailure`'s own `attempt` oneof has
+said so all along, with a `create` arm and an `automatic_restore` arm.
+`FailureInternalUnclassified` is the daemon's one classifier funnel, and the
+daemon runs that funnel over both paths.
+
+They are not duplicated. The EVIDENCE message is declared once, in
+`frontend.v1`, and named from both sides; the ARM is what says whether an
+instance is an answer or an event. `agentrepl.v1` may import `frontend.v1`, and
+the reverse is exactly what the split removed, so the direction works out. The
+split is of the KIND ONEOF, not of the vocabulary.
+
+### Request modes are arms, because a bool can lie
+
+`agentrepl.v1.InterruptRequest` carried `bool confirm_agents = 3`. Any client
+could set it true without ever having shown a user a question — the wire could
+not distinguish "the user deliberately agreed to stop working subagents" from
+"this client wanted the gate to go away". Confirming is an ACT, and an act gets
+an arm:
+
+```proto
+oneof intent {
+  agentrepl.v1.InterruptUnconfirmed interrupt = 3;
+  agentrepl.v1.InterruptConfirmed   confirm_interrupt = 4;
+}
+```
+
+A caller that sends `confirm_interrupt` has sent a DIFFERENT REQUEST, not the
+same request with an assertion stapled to it.
+
+The same test was applied across the surface. Converted:
+`AnswerPermissionRequest`'s `bool allow` plus its two orphan fields, which made
+a denial-carrying-edited-input and an allow-carrying-a-denial-message
+representable; `MergeWorkspaceRequest`'s `conflict_resolved_continue`, whose
+two values are two different commands the daemon branches on before anything
+else it does; `HostActionCompletedRequest`'s `ok` plus `error`, where one
+outcome retires a durable record and the other preserves it.
+`AnswerMergeDequeueRequest` and `ReviveSessionRequest` needed no conversion —
+they were already the shape the rule generalizes from.
+
+Deliberately NOT converted, and each is a judgement worth stating.
+`ShutdownRequest.stop_shims` and `fake` state a PROPERTY of what is being asked
+for, not an act the sender may not have performed; both values are ordinary
+requests the daemon performs as asked. `allow_ungated` IS a consent flag and is
+exactly the shape that can lie, but the act it attests to is the caller's own
+rather than a prior round-trip, and what makes it safe is that it is required
+and refused when absent. `CreateSessionRequest.resume_mode` stays an enum: its
+retired tag 2 must remain REFUSABLE, and a oneof cannot refuse a field that
+simply vanishes on decode.
+
+### "Confirm first" is a SUCCESS
+
+The interrupt confirmation challenge was returned as `ok=false` with `failure`
+unset, and the daemon's own comment called it "THE ONE NON-FAILURE REFUSAL".
+The command was understood, correctly processed, and deliberately not
+performed. That is not an error. The answer is a question.
+
+```proto
+message agentrepl.v1.InterruptSuccess {
+  oneof outcome {
+    agentrepl.v1.InterruptStopped         stopped = 1;
+    agentrepl.v1.InterruptConfirmRequired confirmation_required = 2;
+  }
+}
+```
+
+`InterruptConfirmRequired` moves out of `frame.proto` with it. It was declared
+beside the frames because it began life as a push arm; it answers one call and
+no other now, so it lives with the call it answers, and its `FrontendFrame` arm
+is gone.
+
+The same reading gives `CreateSessionSuccess` two arms —
+`CreateSessionEstablished` and `CreateSessionHibernated` — because a create
+that met the revival gate has NO SHIM, and reporting it as a bare success is
+how a create came to claim a healthy shim for a session that had none.
+
+### Per-method errors, DERIVED not invented
+
+`<Method>Error`'s arms are the failures that method can actually produce, read
+off the daemon: the create-over-wire refusal and the nil-retainer in
+`daemon/internal/frontend/commands.go`; the unwired-dependency family, the
+`checkWorkspaceKey` sites and the semantic gates in
+`daemon/internal/server/frontendcmd.go`; the nine `CreateSessionCmd` rules in
+`daemon/internal/server/createestablish.go`.
+
+Most of those refusals had no wire spelling at all. They were `fmt.Errorf` text
+that reached Emacs as an echo and the webapp as nothing, which is why the
+`Refusal*` prefix exists beside the older `Failure*` one: the prefix records
+whether a frontend already had a renderer for it.
+
+**No method gets a catch-all to fill its oneof.** Where a handler genuinely has
+an unclassified funnel, the arm names it, because the daemon really does emit
+`internal.unclassified` and hiding that would be a worse lie than stating it.
+Where a method has one derived refusal, it gets one — `DeleteSession` and
+`Shutdown` say so out loud rather than padding. Three methods —
+`PauseMergeQueue`, `ResumeMergeQueue` and `EvictMerge` — have NO daemon handler
+at all, so there was nothing to derive from; the first two carry only the
+funnel and say why, and `EvictMerge` carries exactly the two refusals its own
+normative text has always promised and nothing more.
+
+### The cost: a large webapp change
+
+Every response site in the webapp must switch on a oneof. There is no longer an
+`ack.ok` to test, no `ack.error` to render, and no shared `CommandAck` type to
+write one handler against — each of the 34 methods has its own success and its
+own closed error set, and the code that reads them has to know which. That is
+the price of making an unhandled refusal a compile error instead of a
+`default:` nobody wrote.
+
+The elisp frontend pays a smaller version of the same bill, and the daemon pays
+the largest one: its handlers return `error` today and the classifier turns
+every one of them into a `FailureKind`, so the funnel has to become a
+per-method arm selection. None of that is done here — this is the contract
+change, and the systems that produce and consume it follow.
