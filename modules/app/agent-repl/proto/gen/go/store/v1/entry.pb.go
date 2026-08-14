@@ -54,7 +54,7 @@
 package storev1
 
 import (
-	v1 "agentrepl/proto/protocol/v1"
+	v1 "agentrepl/proto/shim/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -88,7 +88,7 @@ type Entry struct {
 	// What stays behind. Written to the store, never forwarded.
 	Internal *InternalEntry `protobuf:"bytes,1,opt,name=internal,proto3" json:"internal,omitempty"`
 	// What may be forwarded. The daemon receives exactly this, carried by the
-	// delivery envelope in protocol.v1 — a field access, not a conversion.
+	// delivery envelope in shim.v1 — a field access, not a conversion.
 	//
 	// UNSET means the record is unrenderable and has no path to the daemon.
 	External      *v1.ExternalEntry `protobuf:"bytes,2,opt,name=external,proto3" json:"external,omitempty"`
@@ -494,10 +494,10 @@ var File_store_v1_entry_proto protoreflect.FileDescriptor
 
 const file_store_v1_entry_proto_rawDesc = "" +
 	"\n" +
-	"\x14store/v1/entry.proto\x12\bstore.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1aprotocol/v1/external.proto\x1a\x1astore/v1/unsupported.proto\"t\n" +
+	"\x14store/v1/entry.proto\x12\bstore.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x16shim/v1/external.proto\x1a\x1astore/v1/unsupported.proto\"p\n" +
 	"\x05Entry\x123\n" +
-	"\binternal\x18\x01 \x01(\v2\x17.store.v1.InternalEntryR\binternal\x126\n" +
-	"\bexternal\x18\x02 \x01(\v2\x1a.protocol.v1.ExternalEntryR\bexternal\"\xd3\x02\n" +
+	"\binternal\x18\x01 \x01(\v2\x17.store.v1.InternalEntryR\binternal\x122\n" +
+	"\bexternal\x18\x02 \x01(\v2\x16.shim.v1.ExternalEntryR\bexternal\"\xd3\x02\n" +
 	"\rInternalEntry\x12%\n" +
 	"\x05plane\x18\x01 \x01(\v2\x0f.store.v1.PlaneR\x05plane\x12\x19\n" +
 	"\bwrite_id\x18\x02 \x01(\tR\awriteId\x12<\n" +
@@ -532,7 +532,7 @@ var file_store_v1_entry_proto_goTypes = []any{
 	(*Plane)(nil),               // 2: store.v1.Plane
 	(*PlaneStream)(nil),         // 3: store.v1.PlaneStream
 	(*PlaneFile)(nil),           // 4: store.v1.PlaneFile
-	(*v1.ExternalEntry)(nil),    // 5: protocol.v1.ExternalEntry
+	(*v1.ExternalEntry)(nil),    // 5: shim.v1.ExternalEntry
 	(*structpb.Struct)(nil),     // 6: google.protobuf.Struct
 	(*VendorSpecificEntry)(nil), // 7: store.v1.VendorSpecificEntry
 	(*UnknownEntry)(nil),        // 8: store.v1.UnknownEntry
@@ -540,7 +540,7 @@ var file_store_v1_entry_proto_goTypes = []any{
 }
 var file_store_v1_entry_proto_depIdxs = []int32{
 	1, // 0: store.v1.Entry.internal:type_name -> store.v1.InternalEntry
-	5, // 1: store.v1.Entry.external:type_name -> protocol.v1.ExternalEntry
+	5, // 1: store.v1.Entry.external:type_name -> shim.v1.ExternalEntry
 	2, // 2: store.v1.InternalEntry.plane:type_name -> store.v1.Plane
 	6, // 3: store.v1.InternalEntry.source_record:type_name -> google.protobuf.Struct
 	7, // 4: store.v1.InternalEntry.vendor_specific:type_name -> store.v1.VendorSpecificEntry

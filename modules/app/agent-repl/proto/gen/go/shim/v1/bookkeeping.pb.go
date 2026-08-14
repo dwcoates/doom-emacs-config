@@ -8,9 +8,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: protocol/v1/bookkeeping.proto
+// source: shim/v1/bookkeeping.proto
 
-package protocolv1
+package shimv1
 
 import (
 	v1 "agentrepl/proto/conversation/v1"
@@ -62,7 +62,7 @@ type BookkeepingEntry struct {
 
 func (x *BookkeepingEntry) Reset() {
 	*x = BookkeepingEntry{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[0]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -74,7 +74,7 @@ func (x *BookkeepingEntry) String() string {
 func (*BookkeepingEntry) ProtoMessage() {}
 
 func (x *BookkeepingEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[0]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -87,7 +87,7 @@ func (x *BookkeepingEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BookkeepingEntry.ProtoReflect.Descriptor instead.
 func (*BookkeepingEntry) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{0}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *BookkeepingEntry) GetKind() isBookkeepingEntry_Kind {
@@ -323,7 +323,7 @@ type SessionBegan struct {
 
 func (x *SessionBegan) Reset() {
 	*x = SessionBegan{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[1]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -335,7 +335,7 @@ func (x *SessionBegan) String() string {
 func (*SessionBegan) ProtoMessage() {}
 
 func (x *SessionBegan) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[1]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -348,7 +348,7 @@ func (x *SessionBegan) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionBegan.ProtoReflect.Descriptor instead.
 func (*SessionBegan) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{1}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *SessionBegan) GetModel() string {
@@ -447,7 +447,7 @@ type SessionAuth struct {
 
 func (x *SessionAuth) Reset() {
 	*x = SessionAuth{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[2]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -459,7 +459,7 @@ func (x *SessionAuth) String() string {
 func (*SessionAuth) ProtoMessage() {}
 
 func (x *SessionAuth) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[2]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -472,7 +472,7 @@ func (x *SessionAuth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionAuth.ProtoReflect.Descriptor instead.
 func (*SessionAuth) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{2}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SessionAuth) GetAuth() isSessionAuth_Auth {
@@ -527,7 +527,7 @@ type AuthSubscription struct {
 
 func (x *AuthSubscription) Reset() {
 	*x = AuthSubscription{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[3]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -539,7 +539,7 @@ func (x *AuthSubscription) String() string {
 func (*AuthSubscription) ProtoMessage() {}
 
 func (x *AuthSubscription) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[3]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -552,7 +552,7 @@ func (x *AuthSubscription) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthSubscription.ProtoReflect.Descriptor instead.
 func (*AuthSubscription) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{3}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{3}
 }
 
 // Authenticated with an API key.
@@ -568,7 +568,7 @@ type AuthApiKey struct {
 
 func (x *AuthApiKey) Reset() {
 	*x = AuthApiKey{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[4]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -580,7 +580,7 @@ func (x *AuthApiKey) String() string {
 func (*AuthApiKey) ProtoMessage() {}
 
 func (x *AuthApiKey) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[4]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -593,7 +593,7 @@ func (x *AuthApiKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthApiKey.ProtoReflect.Descriptor instead.
 func (*AuthApiKey) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{4}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *AuthApiKey) GetSource() string {
@@ -617,7 +617,7 @@ type FastMode struct {
 
 func (x *FastMode) Reset() {
 	*x = FastMode{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[5]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -629,7 +629,7 @@ func (x *FastMode) String() string {
 func (*FastMode) ProtoMessage() {}
 
 func (x *FastMode) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[5]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -642,7 +642,7 @@ func (x *FastMode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FastMode.ProtoReflect.Descriptor instead.
 func (*FastMode) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{5}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *FastMode) GetState() isFastMode_State {
@@ -695,7 +695,7 @@ type FastModeOn struct {
 
 func (x *FastModeOn) Reset() {
 	*x = FastModeOn{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[6]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -707,7 +707,7 @@ func (x *FastModeOn) String() string {
 func (*FastModeOn) ProtoMessage() {}
 
 func (x *FastModeOn) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[6]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -720,7 +720,7 @@ func (x *FastModeOn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FastModeOn.ProtoReflect.Descriptor instead.
 func (*FastModeOn) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{6}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{6}
 }
 
 // Accelerated mode is not active.
@@ -736,7 +736,7 @@ type FastModeOff struct {
 
 func (x *FastModeOff) Reset() {
 	*x = FastModeOff{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[7]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -748,7 +748,7 @@ func (x *FastModeOff) String() string {
 func (*FastModeOff) ProtoMessage() {}
 
 func (x *FastModeOff) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[7]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -761,7 +761,7 @@ func (x *FastModeOff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FastModeOff.ProtoReflect.Descriptor instead.
 func (*FastModeOff) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{7}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *FastModeOff) GetReason() string {
@@ -784,7 +784,7 @@ type SessionMcpServer struct {
 
 func (x *SessionMcpServer) Reset() {
 	*x = SessionMcpServer{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[8]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -796,7 +796,7 @@ func (x *SessionMcpServer) String() string {
 func (*SessionMcpServer) ProtoMessage() {}
 
 func (x *SessionMcpServer) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[8]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -809,7 +809,7 @@ func (x *SessionMcpServer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionMcpServer.ProtoReflect.Descriptor instead.
 func (*SessionMcpServer) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{8}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SessionMcpServer) GetName() string {
@@ -840,7 +840,7 @@ type McpServerHealth struct {
 
 func (x *McpServerHealth) Reset() {
 	*x = McpServerHealth{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[9]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -852,7 +852,7 @@ func (x *McpServerHealth) String() string {
 func (*McpServerHealth) ProtoMessage() {}
 
 func (x *McpServerHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[9]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -865,7 +865,7 @@ func (x *McpServerHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpServerHealth.ProtoReflect.Descriptor instead.
 func (*McpServerHealth) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{9}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *McpServerHealth) GetHealth() isMcpServerHealth_Health {
@@ -918,7 +918,7 @@ type McpServerConnected struct {
 
 func (x *McpServerConnected) Reset() {
 	*x = McpServerConnected{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[10]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -930,7 +930,7 @@ func (x *McpServerConnected) String() string {
 func (*McpServerConnected) ProtoMessage() {}
 
 func (x *McpServerConnected) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[10]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -943,7 +943,7 @@ func (x *McpServerConnected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpServerConnected.ProtoReflect.Descriptor instead.
 func (*McpServerConnected) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{10}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{10}
 }
 
 // The server did not come up.
@@ -958,7 +958,7 @@ type McpServerFailed struct {
 
 func (x *McpServerFailed) Reset() {
 	*x = McpServerFailed{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[11]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -970,7 +970,7 @@ func (x *McpServerFailed) String() string {
 func (*McpServerFailed) ProtoMessage() {}
 
 func (x *McpServerFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[11]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -983,7 +983,7 @@ func (x *McpServerFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpServerFailed.ProtoReflect.Descriptor instead.
 func (*McpServerFailed) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{11}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *McpServerFailed) GetError() string {
@@ -1005,7 +1005,7 @@ type SessionPlugin struct {
 
 func (x *SessionPlugin) Reset() {
 	*x = SessionPlugin{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[12]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1017,7 +1017,7 @@ func (x *SessionPlugin) String() string {
 func (*SessionPlugin) ProtoMessage() {}
 
 func (x *SessionPlugin) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[12]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1030,7 +1030,7 @@ func (x *SessionPlugin) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionPlugin.ProtoReflect.Descriptor instead.
 func (*SessionPlugin) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{12}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SessionPlugin) GetName() string {
@@ -1062,7 +1062,7 @@ type SessionEnded struct {
 
 func (x *SessionEnded) Reset() {
 	*x = SessionEnded{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[13]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1074,7 +1074,7 @@ func (x *SessionEnded) String() string {
 func (*SessionEnded) ProtoMessage() {}
 
 func (x *SessionEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[13]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1087,7 +1087,7 @@ func (x *SessionEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionEnded.ProtoReflect.Descriptor instead.
 func (*SessionEnded) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{13}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SessionEnded) GetReason() isSessionEnded_Reason {
@@ -1156,7 +1156,7 @@ type SessionEndedNormally struct {
 
 func (x *SessionEndedNormally) Reset() {
 	*x = SessionEndedNormally{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[14]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1168,7 +1168,7 @@ func (x *SessionEndedNormally) String() string {
 func (*SessionEndedNormally) ProtoMessage() {}
 
 func (x *SessionEndedNormally) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[14]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1181,7 +1181,7 @@ func (x *SessionEndedNormally) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionEndedNormally.ProtoReflect.Descriptor instead.
 func (*SessionEndedNormally) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{14}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{14}
 }
 
 // It closed because something failed.
@@ -1195,7 +1195,7 @@ type SessionEndedByError struct {
 
 func (x *SessionEndedByError) Reset() {
 	*x = SessionEndedByError{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[15]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1207,7 +1207,7 @@ func (x *SessionEndedByError) String() string {
 func (*SessionEndedByError) ProtoMessage() {}
 
 func (x *SessionEndedByError) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[15]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1220,7 +1220,7 @@ func (x *SessionEndedByError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionEndedByError.ProtoReflect.Descriptor instead.
 func (*SessionEndedByError) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{15}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SessionEndedByError) GetDetail() string {
@@ -1239,7 +1239,7 @@ type SessionEndedByShutdown struct {
 
 func (x *SessionEndedByShutdown) Reset() {
 	*x = SessionEndedByShutdown{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[16]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1251,7 +1251,7 @@ func (x *SessionEndedByShutdown) String() string {
 func (*SessionEndedByShutdown) ProtoMessage() {}
 
 func (x *SessionEndedByShutdown) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[16]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1264,7 +1264,7 @@ func (x *SessionEndedByShutdown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionEndedByShutdown.ProtoReflect.Descriptor instead.
 func (*SessionEndedByShutdown) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{16}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{16}
 }
 
 // A turn began.
@@ -1279,7 +1279,7 @@ type TurnBegan struct {
 
 func (x *TurnBegan) Reset() {
 	*x = TurnBegan{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[17]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1291,7 +1291,7 @@ func (x *TurnBegan) String() string {
 func (*TurnBegan) ProtoMessage() {}
 
 func (x *TurnBegan) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[17]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1304,7 +1304,7 @@ func (x *TurnBegan) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TurnBegan.ProtoReflect.Descriptor instead.
 func (*TurnBegan) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{17}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *TurnBegan) GetTurnId() string {
@@ -1332,7 +1332,7 @@ type TurnEnded struct {
 
 func (x *TurnEnded) Reset() {
 	*x = TurnEnded{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[18]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1344,7 +1344,7 @@ func (x *TurnEnded) String() string {
 func (*TurnEnded) ProtoMessage() {}
 
 func (x *TurnEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[18]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1357,7 +1357,7 @@ func (x *TurnEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TurnEnded.ProtoReflect.Descriptor instead.
 func (*TurnEnded) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{18}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *TurnEnded) GetTurnId() string {
@@ -1441,7 +1441,7 @@ type TurnCompleted struct {
 
 func (x *TurnCompleted) Reset() {
 	*x = TurnCompleted{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[19]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1453,7 +1453,7 @@ func (x *TurnCompleted) String() string {
 func (*TurnCompleted) ProtoMessage() {}
 
 func (x *TurnCompleted) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[19]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1466,7 +1466,7 @@ func (x *TurnCompleted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TurnCompleted.ProtoReflect.Descriptor instead.
 func (*TurnCompleted) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{19}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{19}
 }
 
 // A user-commanded stop ended it, and the producer saw that stop acknowledged.
@@ -1478,7 +1478,7 @@ type TurnInterrupted struct {
 
 func (x *TurnInterrupted) Reset() {
 	*x = TurnInterrupted{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[20]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1490,7 +1490,7 @@ func (x *TurnInterrupted) String() string {
 func (*TurnInterrupted) ProtoMessage() {}
 
 func (x *TurnInterrupted) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[20]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1503,7 +1503,7 @@ func (x *TurnInterrupted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TurnInterrupted.ProtoReflect.Descriptor instead.
 func (*TurnInterrupted) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{20}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{20}
 }
 
 // It stopped for a reason nobody observed.
@@ -1518,7 +1518,7 @@ type TurnEndedUnexplained struct {
 
 func (x *TurnEndedUnexplained) Reset() {
 	*x = TurnEndedUnexplained{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[21]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1530,7 +1530,7 @@ func (x *TurnEndedUnexplained) String() string {
 func (*TurnEndedUnexplained) ProtoMessage() {}
 
 func (x *TurnEndedUnexplained) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[21]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1543,7 +1543,7 @@ func (x *TurnEndedUnexplained) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TurnEndedUnexplained.ProtoReflect.Descriptor instead.
 func (*TurnEndedUnexplained) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{21}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *TurnEndedUnexplained) GetInference() string {
@@ -1573,7 +1573,7 @@ type AgentHeartbeat struct {
 
 func (x *AgentHeartbeat) Reset() {
 	*x = AgentHeartbeat{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[22]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1585,7 +1585,7 @@ func (x *AgentHeartbeat) String() string {
 func (*AgentHeartbeat) ProtoMessage() {}
 
 func (x *AgentHeartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[22]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1598,7 +1598,7 @@ func (x *AgentHeartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentHeartbeat.ProtoReflect.Descriptor instead.
 func (*AgentHeartbeat) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{22}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *AgentHeartbeat) GetLiveWorkIds() []string {
@@ -1625,7 +1625,7 @@ type ResponseTiming struct {
 
 func (x *ResponseTiming) Reset() {
 	*x = ResponseTiming{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[23]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1637,7 +1637,7 @@ func (x *ResponseTiming) String() string {
 func (*ResponseTiming) ProtoMessage() {}
 
 func (x *ResponseTiming) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[23]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1650,7 +1650,7 @@ func (x *ResponseTiming) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResponseTiming.ProtoReflect.Descriptor instead.
 func (*ResponseTiming) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{23}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ResponseTiming) GetMessageId() string {
@@ -1706,7 +1706,7 @@ type ResponseUsageCorrected struct {
 
 func (x *ResponseUsageCorrected) Reset() {
 	*x = ResponseUsageCorrected{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[24]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1718,7 +1718,7 @@ func (x *ResponseUsageCorrected) String() string {
 func (*ResponseUsageCorrected) ProtoMessage() {}
 
 func (x *ResponseUsageCorrected) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[24]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1731,7 +1731,7 @@ func (x *ResponseUsageCorrected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResponseUsageCorrected.ProtoReflect.Descriptor instead.
 func (*ResponseUsageCorrected) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{24}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ResponseUsageCorrected) GetApiMessageId() string {
@@ -1761,7 +1761,7 @@ type ProducerDiagnostic struct {
 
 func (x *ProducerDiagnostic) Reset() {
 	*x = ProducerDiagnostic{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[25]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1773,7 +1773,7 @@ func (x *ProducerDiagnostic) String() string {
 func (*ProducerDiagnostic) ProtoMessage() {}
 
 func (x *ProducerDiagnostic) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[25]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1786,7 +1786,7 @@ func (x *ProducerDiagnostic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProducerDiagnostic.ProtoReflect.Descriptor instead.
 func (*ProducerDiagnostic) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{25}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ProducerDiagnostic) GetOperation() string {
@@ -1816,7 +1816,7 @@ type SessionIdentityChanged struct {
 
 func (x *SessionIdentityChanged) Reset() {
 	*x = SessionIdentityChanged{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[26]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1828,7 +1828,7 @@ func (x *SessionIdentityChanged) String() string {
 func (*SessionIdentityChanged) ProtoMessage() {}
 
 func (x *SessionIdentityChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[26]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1841,7 +1841,7 @@ func (x *SessionIdentityChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionIdentityChanged.ProtoReflect.Descriptor instead.
 func (*SessionIdentityChanged) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{26}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *SessionIdentityChanged) GetPreviousSessionId() string {
@@ -1893,7 +1893,7 @@ type AccountUsageObservation struct {
 
 func (x *AccountUsageObservation) Reset() {
 	*x = AccountUsageObservation{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[27]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1905,7 +1905,7 @@ func (x *AccountUsageObservation) String() string {
 func (*AccountUsageObservation) ProtoMessage() {}
 
 func (x *AccountUsageObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[27]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1918,7 +1918,7 @@ func (x *AccountUsageObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccountUsageObservation.ProtoReflect.Descriptor instead.
 func (*AccountUsageObservation) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{27}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *AccountUsageObservation) GetQueryInstanceId() string {
@@ -2058,7 +2058,7 @@ type TurnStartUsageBoundary struct {
 
 func (x *TurnStartUsageBoundary) Reset() {
 	*x = TurnStartUsageBoundary{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[28]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2070,7 +2070,7 @@ func (x *TurnStartUsageBoundary) String() string {
 func (*TurnStartUsageBoundary) ProtoMessage() {}
 
 func (x *TurnStartUsageBoundary) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[28]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2083,7 +2083,7 @@ func (x *TurnStartUsageBoundary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TurnStartUsageBoundary.ProtoReflect.Descriptor instead.
 func (*TurnStartUsageBoundary) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{28}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{28}
 }
 
 // Marks an observation taken after the terminal result is received.
@@ -2095,7 +2095,7 @@ type TurnEndUsageBoundary struct {
 
 func (x *TurnEndUsageBoundary) Reset() {
 	*x = TurnEndUsageBoundary{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[29]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2107,7 +2107,7 @@ func (x *TurnEndUsageBoundary) String() string {
 func (*TurnEndUsageBoundary) ProtoMessage() {}
 
 func (x *TurnEndUsageBoundary) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[29]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2120,7 +2120,7 @@ func (x *TurnEndUsageBoundary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TurnEndUsageBoundary.ProtoReflect.Descriptor instead.
 func (*TurnEndUsageBoundary) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{29}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{29}
 }
 
 // Contains subscription-usage windows returned by the usage service.
@@ -2134,7 +2134,7 @@ type AccountUsageAvailable struct {
 
 func (x *AccountUsageAvailable) Reset() {
 	*x = AccountUsageAvailable{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[30]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2146,7 +2146,7 @@ func (x *AccountUsageAvailable) String() string {
 func (*AccountUsageAvailable) ProtoMessage() {}
 
 func (x *AccountUsageAvailable) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[30]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2159,7 +2159,7 @@ func (x *AccountUsageAvailable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccountUsageAvailable.ProtoReflect.Descriptor instead.
 func (*AccountUsageAvailable) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{30}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *AccountUsageAvailable) GetFiveHour() *UsageWindow {
@@ -2182,7 +2182,7 @@ type UsageWindow struct {
 
 func (x *UsageWindow) Reset() {
 	*x = UsageWindow{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[31]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2194,7 +2194,7 @@ func (x *UsageWindow) String() string {
 func (*UsageWindow) ProtoMessage() {}
 
 func (x *UsageWindow) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[31]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2207,7 +2207,7 @@ func (x *UsageWindow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageWindow.ProtoReflect.Descriptor instead.
 func (*UsageWindow) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{31}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *UsageWindow) GetUtilizationPercent() float64 {
@@ -2242,7 +2242,7 @@ type AccountUsageUnavailable struct {
 
 func (x *AccountUsageUnavailable) Reset() {
 	*x = AccountUsageUnavailable{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[32]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2254,7 +2254,7 @@ func (x *AccountUsageUnavailable) String() string {
 func (*AccountUsageUnavailable) ProtoMessage() {}
 
 func (x *AccountUsageUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[32]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2267,7 +2267,7 @@ func (x *AccountUsageUnavailable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccountUsageUnavailable.ProtoReflect.Descriptor instead.
 func (*AccountUsageUnavailable) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{32}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *AccountUsageUnavailable) GetReason() isAccountUsageUnavailable_Reason {
@@ -2354,7 +2354,7 @@ type UsageServiceUnavailable struct {
 
 func (x *UsageServiceUnavailable) Reset() {
 	*x = UsageServiceUnavailable{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[33]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2366,7 +2366,7 @@ func (x *UsageServiceUnavailable) String() string {
 func (*UsageServiceUnavailable) ProtoMessage() {}
 
 func (x *UsageServiceUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[33]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2379,7 +2379,7 @@ func (x *UsageServiceUnavailable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageServiceUnavailable.ProtoReflect.Descriptor instead.
 func (*UsageServiceUnavailable) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{33}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{33}
 }
 
 // Marks absence of the five-hour window.
@@ -2391,7 +2391,7 @@ type FiveHourWindowUnavailable struct {
 
 func (x *FiveHourWindowUnavailable) Reset() {
 	*x = FiveHourWindowUnavailable{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[34]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2403,7 +2403,7 @@ func (x *FiveHourWindowUnavailable) String() string {
 func (*FiveHourWindowUnavailable) ProtoMessage() {}
 
 func (x *FiveHourWindowUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[34]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2416,7 +2416,7 @@ func (x *FiveHourWindowUnavailable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FiveHourWindowUnavailable.ProtoReflect.Descriptor instead.
 func (*FiveHourWindowUnavailable) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{34}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{34}
 }
 
 // Marks absence of utilization within the five-hour window.
@@ -2428,7 +2428,7 @@ type UtilizationUnavailable struct {
 
 func (x *UtilizationUnavailable) Reset() {
 	*x = UtilizationUnavailable{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[35]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2440,7 +2440,7 @@ func (x *UtilizationUnavailable) String() string {
 func (*UtilizationUnavailable) ProtoMessage() {}
 
 func (x *UtilizationUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[35]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2453,7 +2453,7 @@ func (x *UtilizationUnavailable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UtilizationUnavailable.ProtoReflect.Descriptor instead.
 func (*UtilizationUnavailable) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{35}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{35}
 }
 
 // Records an error encountered while sampling account usage.
@@ -2467,7 +2467,7 @@ type UsageSamplingFailure struct {
 
 func (x *UsageSamplingFailure) Reset() {
 	*x = UsageSamplingFailure{}
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[36]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2479,7 +2479,7 @@ func (x *UsageSamplingFailure) String() string {
 func (*UsageSamplingFailure) ProtoMessage() {}
 
 func (x *UsageSamplingFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_bookkeeping_proto_msgTypes[36]
+	mi := &file_shim_v1_bookkeeping_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2492,7 +2492,7 @@ func (x *UsageSamplingFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageSamplingFailure.ProtoReflect.Descriptor instead.
 func (*UsageSamplingFailure) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_bookkeeping_proto_rawDescGZIP(), []int{36}
+	return file_shim_v1_bookkeeping_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *UsageSamplingFailure) GetCause() string {
@@ -2502,73 +2502,73 @@ func (x *UsageSamplingFailure) GetCause() string {
 	return ""
 }
 
-var File_protocol_v1_bookkeeping_proto protoreflect.FileDescriptor
+var File_shim_v1_bookkeeping_proto protoreflect.FileDescriptor
 
-const file_protocol_v1_bookkeeping_proto_rawDesc = "" +
+const file_shim_v1_bookkeeping_proto_rawDesc = "" +
 	"\n" +
-	"\x1dprotocol/v1/bookkeeping.proto\x12\vprotocol.v1\x1a\x1cconversation/v1/tokens.proto\"\x8f\x06\n" +
-	"\x10BookkeepingEntry\x12@\n" +
-	"\rsession_began\x18\x01 \x01(\v2\x19.protocol.v1.SessionBeganH\x00R\fsessionBegan\x12@\n" +
-	"\rsession_ended\x18\x02 \x01(\v2\x19.protocol.v1.SessionEndedH\x00R\fsessionEnded\x127\n" +
+	"\x19shim/v1/bookkeeping.proto\x12\ashim.v1\x1a\x1cconversation/v1/tokens.proto\"\xe7\x05\n" +
+	"\x10BookkeepingEntry\x12<\n" +
+	"\rsession_began\x18\x01 \x01(\v2\x15.shim.v1.SessionBeganH\x00R\fsessionBegan\x12<\n" +
+	"\rsession_ended\x18\x02 \x01(\v2\x15.shim.v1.SessionEndedH\x00R\fsessionEnded\x123\n" +
 	"\n" +
-	"turn_began\x18\x03 \x01(\v2\x16.protocol.v1.TurnBeganH\x00R\tturnBegan\x127\n" +
+	"turn_began\x18\x03 \x01(\v2\x12.shim.v1.TurnBeganH\x00R\tturnBegan\x123\n" +
 	"\n" +
-	"turn_ended\x18\x04 \x01(\v2\x16.protocol.v1.TurnEndedH\x00R\tturnEnded\x12;\n" +
-	"\theartbeat\x18\x05 \x01(\v2\x1b.protocol.v1.AgentHeartbeatH\x00R\theartbeat\x12F\n" +
-	"\x0fresponse_timing\x18\x06 \x01(\v2\x1b.protocol.v1.ResponseTimingH\x00R\x0eresponseTiming\x12R\n" +
-	"\x13producer_diagnostic\x18\a \x01(\v2\x1f.protocol.v1.ProducerDiagnosticH\x00R\x12producerDiagnostic\x12_\n" +
-	"\x18session_identity_changed\x18\b \x01(\v2#.protocol.v1.SessionIdentityChangedH\x00R\x16sessionIdentityChanged\x12b\n" +
-	"\x19account_usage_observation\x18\t \x01(\v2$.protocol.v1.AccountUsageObservationH\x00R\x17accountUsageObservation\x12_\n" +
+	"turn_ended\x18\x04 \x01(\v2\x12.shim.v1.TurnEndedH\x00R\tturnEnded\x127\n" +
+	"\theartbeat\x18\x05 \x01(\v2\x17.shim.v1.AgentHeartbeatH\x00R\theartbeat\x12B\n" +
+	"\x0fresponse_timing\x18\x06 \x01(\v2\x17.shim.v1.ResponseTimingH\x00R\x0eresponseTiming\x12N\n" +
+	"\x13producer_diagnostic\x18\a \x01(\v2\x1b.shim.v1.ProducerDiagnosticH\x00R\x12producerDiagnostic\x12[\n" +
+	"\x18session_identity_changed\x18\b \x01(\v2\x1f.shim.v1.SessionIdentityChangedH\x00R\x16sessionIdentityChanged\x12^\n" +
+	"\x19account_usage_observation\x18\t \x01(\v2 .shim.v1.AccountUsageObservationH\x00R\x17accountUsageObservation\x12[\n" +
 	"\x18response_usage_corrected\x18\n" +
-	" \x01(\v2#.protocol.v1.ResponseUsageCorrectedH\x00R\x16responseUsageCorrectedB\x06\n" +
-	"\x04kind\"\xaf\x03\n" +
+	" \x01(\v2\x1f.shim.v1.ResponseUsageCorrectedH\x00R\x16responseUsageCorrectedB\x06\n" +
+	"\x04kind\"\x9f\x03\n" +
 	"\fSessionBegan\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x10\n" +
 	"\x03cwd\x18\x02 \x01(\tR\x03cwd\x12#\n" +
-	"\ragent_version\x18\x03 \x01(\tR\fagentVersion\x12,\n" +
-	"\x04auth\x18\x04 \x01(\v2\x18.protocol.v1.SessionAuthR\x04auth\x12!\n" +
-	"\foutput_style\x18\x05 \x01(\tR\voutputStyle\x122\n" +
-	"\tfast_mode\x18\x06 \x01(\v2\x15.protocol.v1.FastModeR\bfastMode\x12\x16\n" +
+	"\ragent_version\x18\x03 \x01(\tR\fagentVersion\x12(\n" +
+	"\x04auth\x18\x04 \x01(\v2\x14.shim.v1.SessionAuthR\x04auth\x12!\n" +
+	"\foutput_style\x18\x05 \x01(\tR\voutputStyle\x12.\n" +
+	"\tfast_mode\x18\x06 \x01(\v2\x11.shim.v1.FastModeR\bfastMode\x12\x16\n" +
 	"\x06skills\x18\a \x03(\tR\x06skills\x12\x1c\n" +
-	"\tsubagents\x18\b \x03(\tR\tsubagents\x12>\n" +
-	"\vmcp_servers\x18\t \x03(\v2\x1d.protocol.v1.SessionMcpServerR\n" +
-	"mcpServers\x124\n" +
+	"\tsubagents\x18\b \x03(\tR\tsubagents\x12:\n" +
+	"\vmcp_servers\x18\t \x03(\v2\x19.shim.v1.SessionMcpServerR\n" +
+	"mcpServers\x120\n" +
 	"\aplugins\x18\n" +
-	" \x03(\v2\x1a.protocol.v1.SessionPluginR\aplugins\x12!\n" +
-	"\fmemory_paths\x18\v \x03(\tR\vmemoryPaths\"\x8e\x01\n" +
-	"\vSessionAuth\x12C\n" +
-	"\fsubscription\x18\x01 \x01(\v2\x1d.protocol.v1.AuthSubscriptionH\x00R\fsubscription\x122\n" +
-	"\aapi_key\x18\x02 \x01(\v2\x17.protocol.v1.AuthApiKeyH\x00R\x06apiKeyB\x06\n" +
+	" \x03(\v2\x16.shim.v1.SessionPluginR\aplugins\x12!\n" +
+	"\fmemory_paths\x18\v \x03(\tR\vmemoryPaths\"\x86\x01\n" +
+	"\vSessionAuth\x12?\n" +
+	"\fsubscription\x18\x01 \x01(\v2\x19.shim.v1.AuthSubscriptionH\x00R\fsubscription\x12.\n" +
+	"\aapi_key\x18\x02 \x01(\v2\x13.shim.v1.AuthApiKeyH\x00R\x06apiKeyB\x06\n" +
 	"\x04auth\"\x12\n" +
 	"\x10AuthSubscription\"$\n" +
 	"\n" +
 	"AuthApiKey\x12\x16\n" +
-	"\x06source\x18\x01 \x01(\tR\x06source\"l\n" +
-	"\bFastMode\x12)\n" +
-	"\x02on\x18\x01 \x01(\v2\x17.protocol.v1.FastModeOnH\x00R\x02on\x12,\n" +
-	"\x03off\x18\x02 \x01(\v2\x18.protocol.v1.FastModeOffH\x00R\x03offB\a\n" +
+	"\x06source\x18\x01 \x01(\tR\x06source\"d\n" +
+	"\bFastMode\x12%\n" +
+	"\x02on\x18\x01 \x01(\v2\x13.shim.v1.FastModeOnH\x00R\x02on\x12(\n" +
+	"\x03off\x18\x02 \x01(\v2\x14.shim.v1.FastModeOffH\x00R\x03offB\a\n" +
 	"\x05state\"\f\n" +
 	"\n" +
 	"FastModeOn\"%\n" +
 	"\vFastModeOff\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason\"\\\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\"X\n" +
 	"\x10SessionMcpServer\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x124\n" +
-	"\x06health\x18\x02 \x01(\v2\x1c.protocol.v1.McpServerHealthR\x06health\"\x94\x01\n" +
-	"\x0fMcpServerHealth\x12?\n" +
-	"\tconnected\x18\x01 \x01(\v2\x1f.protocol.v1.McpServerConnectedH\x00R\tconnected\x126\n" +
-	"\x06failed\x18\x02 \x01(\v2\x1c.protocol.v1.McpServerFailedH\x00R\x06failedB\b\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x120\n" +
+	"\x06health\x18\x02 \x01(\v2\x18.shim.v1.McpServerHealthR\x06health\"\x8c\x01\n" +
+	"\x0fMcpServerHealth\x12;\n" +
+	"\tconnected\x18\x01 \x01(\v2\x1b.shim.v1.McpServerConnectedH\x00R\tconnected\x122\n" +
+	"\x06failed\x18\x02 \x01(\v2\x18.shim.v1.McpServerFailedH\x00R\x06failedB\b\n" +
 	"\x06health\"\x14\n" +
 	"\x12McpServerConnected\"'\n" +
 	"\x0fMcpServerFailed\x12\x14\n" +
 	"\x05error\x18\x01 \x01(\tR\x05error\"=\n" +
 	"\rSessionPlugin\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\"\xe0\x01\n" +
-	"\fSessionEnded\x12?\n" +
-	"\bnormally\x18\x01 \x01(\v2!.protocol.v1.SessionEndedNormallyH\x00R\bnormally\x12=\n" +
-	"\bby_error\x18\x02 \x01(\v2 .protocol.v1.SessionEndedByErrorH\x00R\abyError\x12F\n" +
-	"\vby_shutdown\x18\x03 \x01(\v2#.protocol.v1.SessionEndedByShutdownH\x00R\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\"\xd4\x01\n" +
+	"\fSessionEnded\x12;\n" +
+	"\bnormally\x18\x01 \x01(\v2\x1d.shim.v1.SessionEndedNormallyH\x00R\bnormally\x129\n" +
+	"\bby_error\x18\x02 \x01(\v2\x1c.shim.v1.SessionEndedByErrorH\x00R\abyError\x12B\n" +
+	"\vby_shutdown\x18\x03 \x01(\v2\x1f.shim.v1.SessionEndedByShutdownH\x00R\n" +
 	"byShutdownB\b\n" +
 	"\x06reason\"\x16\n" +
 	"\x14SessionEndedNormally\"-\n" +
@@ -2576,12 +2576,12 @@ const file_protocol_v1_bookkeeping_proto_rawDesc = "" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x18\n" +
 	"\x16SessionEndedByShutdown\"$\n" +
 	"\tTurnBegan\x12\x17\n" +
-	"\aturn_id\x18\x01 \x01(\tR\x06turnId\"\xf4\x01\n" +
+	"\aturn_id\x18\x01 \x01(\tR\x06turnId\"\xe8\x01\n" +
 	"\tTurnEnded\x12\x17\n" +
-	"\aturn_id\x18\x01 \x01(\tR\x06turnId\x12:\n" +
-	"\tcompleted\x18\x02 \x01(\v2\x1a.protocol.v1.TurnCompletedH\x00R\tcompleted\x12@\n" +
-	"\vinterrupted\x18\x03 \x01(\v2\x1c.protocol.v1.TurnInterruptedH\x00R\vinterrupted\x12E\n" +
-	"\vunexplained\x18\x04 \x01(\v2!.protocol.v1.TurnEndedUnexplainedH\x00R\vunexplainedB\t\n" +
+	"\aturn_id\x18\x01 \x01(\tR\x06turnId\x126\n" +
+	"\tcompleted\x18\x02 \x01(\v2\x16.shim.v1.TurnCompletedH\x00R\tcompleted\x12<\n" +
+	"\vinterrupted\x18\x03 \x01(\v2\x18.shim.v1.TurnInterruptedH\x00R\vinterrupted\x12A\n" +
+	"\vunexplained\x18\x04 \x01(\v2\x1d.shim.v1.TurnEndedUnexplainedH\x00R\vunexplainedB\t\n" +
 	"\aoutcome\"\x0f\n" +
 	"\rTurnCompleted\"\x11\n" +
 	"\x0fTurnInterrupted\"4\n" +
@@ -2602,134 +2602,134 @@ const file_protocol_v1_bookkeeping_proto_rawDesc = "" +
 	"\x06detail\x18\x02 \x01(\tR\x06detail\"`\n" +
 	"\x16SessionIdentityChanged\x12.\n" +
 	"\x13previous_session_id\x18\x01 \x01(\tR\x11previousSessionId\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xae\x04\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x9e\x04\n" +
 	"\x17AccountUsageObservation\x12*\n" +
 	"\x11query_instance_id\x18\x01 \x01(\tR\x0fqueryInstanceId\x12\x17\n" +
 	"\aturn_id\x18\x02 \x01(\tR\x06turnId\x12$\n" +
 	"\x0eboundary_at_ms\x18\x03 \x01(\x03R\fboundaryAtMs\x12$\n" +
 	"\x0eobserved_at_ms\x18\x04 \x01(\x03R\fobservedAtMs\x12*\n" +
 	"\x11sample_latency_ms\x18\x05 \x01(\x03R\x0fsampleLatencyMs\x12+\n" +
-	"\x11subscription_type\x18\x06 \x01(\tR\x10subscriptionType\x12D\n" +
+	"\x11subscription_type\x18\x06 \x01(\tR\x10subscriptionType\x12@\n" +
 	"\n" +
-	"turn_start\x18\a \x01(\v2#.protocol.v1.TurnStartUsageBoundaryH\x00R\tturnStart\x12>\n" +
-	"\bturn_end\x18\b \x01(\v2!.protocol.v1.TurnEndUsageBoundaryH\x00R\aturnEnd\x12B\n" +
-	"\tavailable\x18\t \x01(\v2\".protocol.v1.AccountUsageAvailableH\x01R\tavailable\x12H\n" +
+	"turn_start\x18\a \x01(\v2\x1f.shim.v1.TurnStartUsageBoundaryH\x00R\tturnStart\x12:\n" +
+	"\bturn_end\x18\b \x01(\v2\x1d.shim.v1.TurnEndUsageBoundaryH\x00R\aturnEnd\x12>\n" +
+	"\tavailable\x18\t \x01(\v2\x1e.shim.v1.AccountUsageAvailableH\x01R\tavailable\x12D\n" +
 	"\vunavailable\x18\n" +
-	" \x01(\v2$.protocol.v1.AccountUsageUnavailableH\x01R\vunavailableB\n" +
+	" \x01(\v2 .shim.v1.AccountUsageUnavailableH\x01R\vunavailableB\n" +
 	"\n" +
 	"\bboundaryB\t\n" +
 	"\aoutcome\"\x18\n" +
 	"\x16TurnStartUsageBoundary\"\x16\n" +
-	"\x14TurnEndUsageBoundary\"N\n" +
-	"\x15AccountUsageAvailable\x125\n" +
-	"\tfive_hour\x18\x01 \x01(\v2\x18.protocol.v1.UsageWindowR\bfiveHour\"`\n" +
+	"\x14TurnEndUsageBoundary\"J\n" +
+	"\x15AccountUsageAvailable\x121\n" +
+	"\tfive_hour\x18\x01 \x01(\v2\x14.shim.v1.UsageWindowR\bfiveHour\"`\n" +
 	"\vUsageWindow\x12/\n" +
 	"\x13utilization_percent\x18\x01 \x01(\x01R\x12utilizationPercent\x12 \n" +
 	"\fresets_at_ms\x18\x02 \x01(\x03R\n" +
-	"resetsAtMs\"\x85\x03\n" +
-	"\x17AccountUsageUnavailable\x12W\n" +
-	"\x13service_unavailable\x18\x01 \x01(\v2$.protocol.v1.UsageServiceUnavailableH\x00R\x12serviceUnavailable\x12W\n" +
-	"\x12window_unavailable\x18\x02 \x01(\v2&.protocol.v1.FiveHourWindowUnavailableH\x00R\x11windowUnavailable\x12^\n" +
-	"\x17utilization_unavailable\x18\x03 \x01(\v2#.protocol.v1.UtilizationUnavailableH\x00R\x16utilizationUnavailable\x12N\n" +
-	"\x10sampling_failure\x18\x04 \x01(\v2!.protocol.v1.UsageSamplingFailureH\x00R\x0fsamplingFailureB\b\n" +
+	"resetsAtMs\"\xf5\x02\n" +
+	"\x17AccountUsageUnavailable\x12S\n" +
+	"\x13service_unavailable\x18\x01 \x01(\v2 .shim.v1.UsageServiceUnavailableH\x00R\x12serviceUnavailable\x12S\n" +
+	"\x12window_unavailable\x18\x02 \x01(\v2\".shim.v1.FiveHourWindowUnavailableH\x00R\x11windowUnavailable\x12Z\n" +
+	"\x17utilization_unavailable\x18\x03 \x01(\v2\x1f.shim.v1.UtilizationUnavailableH\x00R\x16utilizationUnavailable\x12J\n" +
+	"\x10sampling_failure\x18\x04 \x01(\v2\x1d.shim.v1.UsageSamplingFailureH\x00R\x0fsamplingFailureB\b\n" +
 	"\x06reason\"\x19\n" +
 	"\x17UsageServiceUnavailable\"\x1b\n" +
 	"\x19FiveHourWindowUnavailable\"\x18\n" +
 	"\x16UtilizationUnavailable\",\n" +
 	"\x14UsageSamplingFailure\x12\x14\n" +
-	"\x05cause\x18\x01 \x01(\tR\x05causeB(Z&agentrepl/proto/protocol/v1;protocolv1b\x06proto3"
+	"\x05cause\x18\x01 \x01(\tR\x05causeB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
-	file_protocol_v1_bookkeeping_proto_rawDescOnce sync.Once
-	file_protocol_v1_bookkeeping_proto_rawDescData []byte
+	file_shim_v1_bookkeeping_proto_rawDescOnce sync.Once
+	file_shim_v1_bookkeeping_proto_rawDescData []byte
 )
 
-func file_protocol_v1_bookkeeping_proto_rawDescGZIP() []byte {
-	file_protocol_v1_bookkeeping_proto_rawDescOnce.Do(func() {
-		file_protocol_v1_bookkeeping_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_protocol_v1_bookkeeping_proto_rawDesc), len(file_protocol_v1_bookkeeping_proto_rawDesc)))
+func file_shim_v1_bookkeeping_proto_rawDescGZIP() []byte {
+	file_shim_v1_bookkeeping_proto_rawDescOnce.Do(func() {
+		file_shim_v1_bookkeeping_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_shim_v1_bookkeeping_proto_rawDesc), len(file_shim_v1_bookkeeping_proto_rawDesc)))
 	})
-	return file_protocol_v1_bookkeeping_proto_rawDescData
+	return file_shim_v1_bookkeeping_proto_rawDescData
 }
 
-var file_protocol_v1_bookkeeping_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
-var file_protocol_v1_bookkeeping_proto_goTypes = []any{
-	(*BookkeepingEntry)(nil),          // 0: protocol.v1.BookkeepingEntry
-	(*SessionBegan)(nil),              // 1: protocol.v1.SessionBegan
-	(*SessionAuth)(nil),               // 2: protocol.v1.SessionAuth
-	(*AuthSubscription)(nil),          // 3: protocol.v1.AuthSubscription
-	(*AuthApiKey)(nil),                // 4: protocol.v1.AuthApiKey
-	(*FastMode)(nil),                  // 5: protocol.v1.FastMode
-	(*FastModeOn)(nil),                // 6: protocol.v1.FastModeOn
-	(*FastModeOff)(nil),               // 7: protocol.v1.FastModeOff
-	(*SessionMcpServer)(nil),          // 8: protocol.v1.SessionMcpServer
-	(*McpServerHealth)(nil),           // 9: protocol.v1.McpServerHealth
-	(*McpServerConnected)(nil),        // 10: protocol.v1.McpServerConnected
-	(*McpServerFailed)(nil),           // 11: protocol.v1.McpServerFailed
-	(*SessionPlugin)(nil),             // 12: protocol.v1.SessionPlugin
-	(*SessionEnded)(nil),              // 13: protocol.v1.SessionEnded
-	(*SessionEndedNormally)(nil),      // 14: protocol.v1.SessionEndedNormally
-	(*SessionEndedByError)(nil),       // 15: protocol.v1.SessionEndedByError
-	(*SessionEndedByShutdown)(nil),    // 16: protocol.v1.SessionEndedByShutdown
-	(*TurnBegan)(nil),                 // 17: protocol.v1.TurnBegan
-	(*TurnEnded)(nil),                 // 18: protocol.v1.TurnEnded
-	(*TurnCompleted)(nil),             // 19: protocol.v1.TurnCompleted
-	(*TurnInterrupted)(nil),           // 20: protocol.v1.TurnInterrupted
-	(*TurnEndedUnexplained)(nil),      // 21: protocol.v1.TurnEndedUnexplained
-	(*AgentHeartbeat)(nil),            // 22: protocol.v1.AgentHeartbeat
-	(*ResponseTiming)(nil),            // 23: protocol.v1.ResponseTiming
-	(*ResponseUsageCorrected)(nil),    // 24: protocol.v1.ResponseUsageCorrected
-	(*ProducerDiagnostic)(nil),        // 25: protocol.v1.ProducerDiagnostic
-	(*SessionIdentityChanged)(nil),    // 26: protocol.v1.SessionIdentityChanged
-	(*AccountUsageObservation)(nil),   // 27: protocol.v1.AccountUsageObservation
-	(*TurnStartUsageBoundary)(nil),    // 28: protocol.v1.TurnStartUsageBoundary
-	(*TurnEndUsageBoundary)(nil),      // 29: protocol.v1.TurnEndUsageBoundary
-	(*AccountUsageAvailable)(nil),     // 30: protocol.v1.AccountUsageAvailable
-	(*UsageWindow)(nil),               // 31: protocol.v1.UsageWindow
-	(*AccountUsageUnavailable)(nil),   // 32: protocol.v1.AccountUsageUnavailable
-	(*UsageServiceUnavailable)(nil),   // 33: protocol.v1.UsageServiceUnavailable
-	(*FiveHourWindowUnavailable)(nil), // 34: protocol.v1.FiveHourWindowUnavailable
-	(*UtilizationUnavailable)(nil),    // 35: protocol.v1.UtilizationUnavailable
-	(*UsageSamplingFailure)(nil),      // 36: protocol.v1.UsageSamplingFailure
+var file_shim_v1_bookkeeping_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
+var file_shim_v1_bookkeeping_proto_goTypes = []any{
+	(*BookkeepingEntry)(nil),          // 0: shim.v1.BookkeepingEntry
+	(*SessionBegan)(nil),              // 1: shim.v1.SessionBegan
+	(*SessionAuth)(nil),               // 2: shim.v1.SessionAuth
+	(*AuthSubscription)(nil),          // 3: shim.v1.AuthSubscription
+	(*AuthApiKey)(nil),                // 4: shim.v1.AuthApiKey
+	(*FastMode)(nil),                  // 5: shim.v1.FastMode
+	(*FastModeOn)(nil),                // 6: shim.v1.FastModeOn
+	(*FastModeOff)(nil),               // 7: shim.v1.FastModeOff
+	(*SessionMcpServer)(nil),          // 8: shim.v1.SessionMcpServer
+	(*McpServerHealth)(nil),           // 9: shim.v1.McpServerHealth
+	(*McpServerConnected)(nil),        // 10: shim.v1.McpServerConnected
+	(*McpServerFailed)(nil),           // 11: shim.v1.McpServerFailed
+	(*SessionPlugin)(nil),             // 12: shim.v1.SessionPlugin
+	(*SessionEnded)(nil),              // 13: shim.v1.SessionEnded
+	(*SessionEndedNormally)(nil),      // 14: shim.v1.SessionEndedNormally
+	(*SessionEndedByError)(nil),       // 15: shim.v1.SessionEndedByError
+	(*SessionEndedByShutdown)(nil),    // 16: shim.v1.SessionEndedByShutdown
+	(*TurnBegan)(nil),                 // 17: shim.v1.TurnBegan
+	(*TurnEnded)(nil),                 // 18: shim.v1.TurnEnded
+	(*TurnCompleted)(nil),             // 19: shim.v1.TurnCompleted
+	(*TurnInterrupted)(nil),           // 20: shim.v1.TurnInterrupted
+	(*TurnEndedUnexplained)(nil),      // 21: shim.v1.TurnEndedUnexplained
+	(*AgentHeartbeat)(nil),            // 22: shim.v1.AgentHeartbeat
+	(*ResponseTiming)(nil),            // 23: shim.v1.ResponseTiming
+	(*ResponseUsageCorrected)(nil),    // 24: shim.v1.ResponseUsageCorrected
+	(*ProducerDiagnostic)(nil),        // 25: shim.v1.ProducerDiagnostic
+	(*SessionIdentityChanged)(nil),    // 26: shim.v1.SessionIdentityChanged
+	(*AccountUsageObservation)(nil),   // 27: shim.v1.AccountUsageObservation
+	(*TurnStartUsageBoundary)(nil),    // 28: shim.v1.TurnStartUsageBoundary
+	(*TurnEndUsageBoundary)(nil),      // 29: shim.v1.TurnEndUsageBoundary
+	(*AccountUsageAvailable)(nil),     // 30: shim.v1.AccountUsageAvailable
+	(*UsageWindow)(nil),               // 31: shim.v1.UsageWindow
+	(*AccountUsageUnavailable)(nil),   // 32: shim.v1.AccountUsageUnavailable
+	(*UsageServiceUnavailable)(nil),   // 33: shim.v1.UsageServiceUnavailable
+	(*FiveHourWindowUnavailable)(nil), // 34: shim.v1.FiveHourWindowUnavailable
+	(*UtilizationUnavailable)(nil),    // 35: shim.v1.UtilizationUnavailable
+	(*UsageSamplingFailure)(nil),      // 36: shim.v1.UsageSamplingFailure
 	(*v1.TokenUsage)(nil),             // 37: conversation.v1.TokenUsage
 }
-var file_protocol_v1_bookkeeping_proto_depIdxs = []int32{
-	1,  // 0: protocol.v1.BookkeepingEntry.session_began:type_name -> protocol.v1.SessionBegan
-	13, // 1: protocol.v1.BookkeepingEntry.session_ended:type_name -> protocol.v1.SessionEnded
-	17, // 2: protocol.v1.BookkeepingEntry.turn_began:type_name -> protocol.v1.TurnBegan
-	18, // 3: protocol.v1.BookkeepingEntry.turn_ended:type_name -> protocol.v1.TurnEnded
-	22, // 4: protocol.v1.BookkeepingEntry.heartbeat:type_name -> protocol.v1.AgentHeartbeat
-	23, // 5: protocol.v1.BookkeepingEntry.response_timing:type_name -> protocol.v1.ResponseTiming
-	25, // 6: protocol.v1.BookkeepingEntry.producer_diagnostic:type_name -> protocol.v1.ProducerDiagnostic
-	26, // 7: protocol.v1.BookkeepingEntry.session_identity_changed:type_name -> protocol.v1.SessionIdentityChanged
-	27, // 8: protocol.v1.BookkeepingEntry.account_usage_observation:type_name -> protocol.v1.AccountUsageObservation
-	24, // 9: protocol.v1.BookkeepingEntry.response_usage_corrected:type_name -> protocol.v1.ResponseUsageCorrected
-	2,  // 10: protocol.v1.SessionBegan.auth:type_name -> protocol.v1.SessionAuth
-	5,  // 11: protocol.v1.SessionBegan.fast_mode:type_name -> protocol.v1.FastMode
-	8,  // 12: protocol.v1.SessionBegan.mcp_servers:type_name -> protocol.v1.SessionMcpServer
-	12, // 13: protocol.v1.SessionBegan.plugins:type_name -> protocol.v1.SessionPlugin
-	3,  // 14: protocol.v1.SessionAuth.subscription:type_name -> protocol.v1.AuthSubscription
-	4,  // 15: protocol.v1.SessionAuth.api_key:type_name -> protocol.v1.AuthApiKey
-	6,  // 16: protocol.v1.FastMode.on:type_name -> protocol.v1.FastModeOn
-	7,  // 17: protocol.v1.FastMode.off:type_name -> protocol.v1.FastModeOff
-	9,  // 18: protocol.v1.SessionMcpServer.health:type_name -> protocol.v1.McpServerHealth
-	10, // 19: protocol.v1.McpServerHealth.connected:type_name -> protocol.v1.McpServerConnected
-	11, // 20: protocol.v1.McpServerHealth.failed:type_name -> protocol.v1.McpServerFailed
-	14, // 21: protocol.v1.SessionEnded.normally:type_name -> protocol.v1.SessionEndedNormally
-	15, // 22: protocol.v1.SessionEnded.by_error:type_name -> protocol.v1.SessionEndedByError
-	16, // 23: protocol.v1.SessionEnded.by_shutdown:type_name -> protocol.v1.SessionEndedByShutdown
-	19, // 24: protocol.v1.TurnEnded.completed:type_name -> protocol.v1.TurnCompleted
-	20, // 25: protocol.v1.TurnEnded.interrupted:type_name -> protocol.v1.TurnInterrupted
-	21, // 26: protocol.v1.TurnEnded.unexplained:type_name -> protocol.v1.TurnEndedUnexplained
-	37, // 27: protocol.v1.ResponseUsageCorrected.usage:type_name -> conversation.v1.TokenUsage
-	28, // 28: protocol.v1.AccountUsageObservation.turn_start:type_name -> protocol.v1.TurnStartUsageBoundary
-	29, // 29: protocol.v1.AccountUsageObservation.turn_end:type_name -> protocol.v1.TurnEndUsageBoundary
-	30, // 30: protocol.v1.AccountUsageObservation.available:type_name -> protocol.v1.AccountUsageAvailable
-	32, // 31: protocol.v1.AccountUsageObservation.unavailable:type_name -> protocol.v1.AccountUsageUnavailable
-	31, // 32: protocol.v1.AccountUsageAvailable.five_hour:type_name -> protocol.v1.UsageWindow
-	33, // 33: protocol.v1.AccountUsageUnavailable.service_unavailable:type_name -> protocol.v1.UsageServiceUnavailable
-	34, // 34: protocol.v1.AccountUsageUnavailable.window_unavailable:type_name -> protocol.v1.FiveHourWindowUnavailable
-	35, // 35: protocol.v1.AccountUsageUnavailable.utilization_unavailable:type_name -> protocol.v1.UtilizationUnavailable
-	36, // 36: protocol.v1.AccountUsageUnavailable.sampling_failure:type_name -> protocol.v1.UsageSamplingFailure
+var file_shim_v1_bookkeeping_proto_depIdxs = []int32{
+	1,  // 0: shim.v1.BookkeepingEntry.session_began:type_name -> shim.v1.SessionBegan
+	13, // 1: shim.v1.BookkeepingEntry.session_ended:type_name -> shim.v1.SessionEnded
+	17, // 2: shim.v1.BookkeepingEntry.turn_began:type_name -> shim.v1.TurnBegan
+	18, // 3: shim.v1.BookkeepingEntry.turn_ended:type_name -> shim.v1.TurnEnded
+	22, // 4: shim.v1.BookkeepingEntry.heartbeat:type_name -> shim.v1.AgentHeartbeat
+	23, // 5: shim.v1.BookkeepingEntry.response_timing:type_name -> shim.v1.ResponseTiming
+	25, // 6: shim.v1.BookkeepingEntry.producer_diagnostic:type_name -> shim.v1.ProducerDiagnostic
+	26, // 7: shim.v1.BookkeepingEntry.session_identity_changed:type_name -> shim.v1.SessionIdentityChanged
+	27, // 8: shim.v1.BookkeepingEntry.account_usage_observation:type_name -> shim.v1.AccountUsageObservation
+	24, // 9: shim.v1.BookkeepingEntry.response_usage_corrected:type_name -> shim.v1.ResponseUsageCorrected
+	2,  // 10: shim.v1.SessionBegan.auth:type_name -> shim.v1.SessionAuth
+	5,  // 11: shim.v1.SessionBegan.fast_mode:type_name -> shim.v1.FastMode
+	8,  // 12: shim.v1.SessionBegan.mcp_servers:type_name -> shim.v1.SessionMcpServer
+	12, // 13: shim.v1.SessionBegan.plugins:type_name -> shim.v1.SessionPlugin
+	3,  // 14: shim.v1.SessionAuth.subscription:type_name -> shim.v1.AuthSubscription
+	4,  // 15: shim.v1.SessionAuth.api_key:type_name -> shim.v1.AuthApiKey
+	6,  // 16: shim.v1.FastMode.on:type_name -> shim.v1.FastModeOn
+	7,  // 17: shim.v1.FastMode.off:type_name -> shim.v1.FastModeOff
+	9,  // 18: shim.v1.SessionMcpServer.health:type_name -> shim.v1.McpServerHealth
+	10, // 19: shim.v1.McpServerHealth.connected:type_name -> shim.v1.McpServerConnected
+	11, // 20: shim.v1.McpServerHealth.failed:type_name -> shim.v1.McpServerFailed
+	14, // 21: shim.v1.SessionEnded.normally:type_name -> shim.v1.SessionEndedNormally
+	15, // 22: shim.v1.SessionEnded.by_error:type_name -> shim.v1.SessionEndedByError
+	16, // 23: shim.v1.SessionEnded.by_shutdown:type_name -> shim.v1.SessionEndedByShutdown
+	19, // 24: shim.v1.TurnEnded.completed:type_name -> shim.v1.TurnCompleted
+	20, // 25: shim.v1.TurnEnded.interrupted:type_name -> shim.v1.TurnInterrupted
+	21, // 26: shim.v1.TurnEnded.unexplained:type_name -> shim.v1.TurnEndedUnexplained
+	37, // 27: shim.v1.ResponseUsageCorrected.usage:type_name -> conversation.v1.TokenUsage
+	28, // 28: shim.v1.AccountUsageObservation.turn_start:type_name -> shim.v1.TurnStartUsageBoundary
+	29, // 29: shim.v1.AccountUsageObservation.turn_end:type_name -> shim.v1.TurnEndUsageBoundary
+	30, // 30: shim.v1.AccountUsageObservation.available:type_name -> shim.v1.AccountUsageAvailable
+	32, // 31: shim.v1.AccountUsageObservation.unavailable:type_name -> shim.v1.AccountUsageUnavailable
+	31, // 32: shim.v1.AccountUsageAvailable.five_hour:type_name -> shim.v1.UsageWindow
+	33, // 33: shim.v1.AccountUsageUnavailable.service_unavailable:type_name -> shim.v1.UsageServiceUnavailable
+	34, // 34: shim.v1.AccountUsageUnavailable.window_unavailable:type_name -> shim.v1.FiveHourWindowUnavailable
+	35, // 35: shim.v1.AccountUsageUnavailable.utilization_unavailable:type_name -> shim.v1.UtilizationUnavailable
+	36, // 36: shim.v1.AccountUsageUnavailable.sampling_failure:type_name -> shim.v1.UsageSamplingFailure
 	37, // [37:37] is the sub-list for method output_type
 	37, // [37:37] is the sub-list for method input_type
 	37, // [37:37] is the sub-list for extension type_name
@@ -2737,12 +2737,12 @@ var file_protocol_v1_bookkeeping_proto_depIdxs = []int32{
 	0,  // [0:37] is the sub-list for field type_name
 }
 
-func init() { file_protocol_v1_bookkeeping_proto_init() }
-func file_protocol_v1_bookkeeping_proto_init() {
-	if File_protocol_v1_bookkeeping_proto != nil {
+func init() { file_shim_v1_bookkeeping_proto_init() }
+func file_shim_v1_bookkeeping_proto_init() {
+	if File_shim_v1_bookkeeping_proto != nil {
 		return
 	}
-	file_protocol_v1_bookkeeping_proto_msgTypes[0].OneofWrappers = []any{
+	file_shim_v1_bookkeeping_proto_msgTypes[0].OneofWrappers = []any{
 		(*BookkeepingEntry_SessionBegan)(nil),
 		(*BookkeepingEntry_SessionEnded)(nil),
 		(*BookkeepingEntry_TurnBegan)(nil),
@@ -2754,35 +2754,35 @@ func file_protocol_v1_bookkeeping_proto_init() {
 		(*BookkeepingEntry_AccountUsageObservation)(nil),
 		(*BookkeepingEntry_ResponseUsageCorrected)(nil),
 	}
-	file_protocol_v1_bookkeeping_proto_msgTypes[2].OneofWrappers = []any{
+	file_shim_v1_bookkeeping_proto_msgTypes[2].OneofWrappers = []any{
 		(*SessionAuth_Subscription)(nil),
 		(*SessionAuth_ApiKey)(nil),
 	}
-	file_protocol_v1_bookkeeping_proto_msgTypes[5].OneofWrappers = []any{
+	file_shim_v1_bookkeeping_proto_msgTypes[5].OneofWrappers = []any{
 		(*FastMode_On)(nil),
 		(*FastMode_Off)(nil),
 	}
-	file_protocol_v1_bookkeeping_proto_msgTypes[9].OneofWrappers = []any{
+	file_shim_v1_bookkeeping_proto_msgTypes[9].OneofWrappers = []any{
 		(*McpServerHealth_Connected)(nil),
 		(*McpServerHealth_Failed)(nil),
 	}
-	file_protocol_v1_bookkeeping_proto_msgTypes[13].OneofWrappers = []any{
+	file_shim_v1_bookkeeping_proto_msgTypes[13].OneofWrappers = []any{
 		(*SessionEnded_Normally)(nil),
 		(*SessionEnded_ByError)(nil),
 		(*SessionEnded_ByShutdown)(nil),
 	}
-	file_protocol_v1_bookkeeping_proto_msgTypes[18].OneofWrappers = []any{
+	file_shim_v1_bookkeeping_proto_msgTypes[18].OneofWrappers = []any{
 		(*TurnEnded_Completed)(nil),
 		(*TurnEnded_Interrupted)(nil),
 		(*TurnEnded_Unexplained)(nil),
 	}
-	file_protocol_v1_bookkeeping_proto_msgTypes[27].OneofWrappers = []any{
+	file_shim_v1_bookkeeping_proto_msgTypes[27].OneofWrappers = []any{
 		(*AccountUsageObservation_TurnStart)(nil),
 		(*AccountUsageObservation_TurnEnd)(nil),
 		(*AccountUsageObservation_Available)(nil),
 		(*AccountUsageObservation_Unavailable)(nil),
 	}
-	file_protocol_v1_bookkeeping_proto_msgTypes[32].OneofWrappers = []any{
+	file_shim_v1_bookkeeping_proto_msgTypes[32].OneofWrappers = []any{
 		(*AccountUsageUnavailable_ServiceUnavailable)(nil),
 		(*AccountUsageUnavailable_WindowUnavailable)(nil),
 		(*AccountUsageUnavailable_UtilizationUnavailable)(nil),
@@ -2792,17 +2792,17 @@ func file_protocol_v1_bookkeeping_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protocol_v1_bookkeeping_proto_rawDesc), len(file_protocol_v1_bookkeeping_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_bookkeeping_proto_rawDesc), len(file_shim_v1_bookkeeping_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_protocol_v1_bookkeeping_proto_goTypes,
-		DependencyIndexes: file_protocol_v1_bookkeeping_proto_depIdxs,
-		MessageInfos:      file_protocol_v1_bookkeeping_proto_msgTypes,
+		GoTypes:           file_shim_v1_bookkeeping_proto_goTypes,
+		DependencyIndexes: file_shim_v1_bookkeeping_proto_depIdxs,
+		MessageInfos:      file_shim_v1_bookkeeping_proto_msgTypes,
 	}.Build()
-	File_protocol_v1_bookkeeping_proto = out.File
-	file_protocol_v1_bookkeeping_proto_goTypes = nil
-	file_protocol_v1_bookkeeping_proto_depIdxs = nil
+	File_shim_v1_bookkeeping_proto = out.File
+	file_shim_v1_bookkeeping_proto_goTypes = nil
+	file_shim_v1_bookkeeping_proto_depIdxs = nil
 }

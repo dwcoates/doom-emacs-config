@@ -16,9 +16,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: protocol/v1/external.proto
+// source: shim/v1/external.proto
 
-package protocolv1
+package shimv1
 
 import (
 	v1 "agentrepl/proto/conversation/v1"
@@ -44,7 +44,7 @@ const (
 // updated on one side only.
 //
 // NO POSITION FIELD, deliberately. The store's `seq` rides the delivery
-// envelope in protocol.v1 (entry-delivery.proto), because a position is
+// envelope in shim.v1 (entry-delivery.proto), because a position is
 // the store's addressing rather than a fact about a conversation — and because
 // entries that never reach the store have no position, so there must be no slot
 // for one to be put in wrongly. A daemon that advanced its resume cursor past a
@@ -94,7 +94,7 @@ type ExternalEntry struct {
 
 func (x *ExternalEntry) Reset() {
 	*x = ExternalEntry{}
-	mi := &file_protocol_v1_external_proto_msgTypes[0]
+	mi := &file_shim_v1_external_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -106,7 +106,7 @@ func (x *ExternalEntry) String() string {
 func (*ExternalEntry) ProtoMessage() {}
 
 func (x *ExternalEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_v1_external_proto_msgTypes[0]
+	mi := &file_shim_v1_external_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -119,7 +119,7 @@ func (x *ExternalEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExternalEntry.ProtoReflect.Descriptor instead.
 func (*ExternalEntry) Descriptor() ([]byte, []int) {
-	return file_protocol_v1_external_proto_rawDescGZIP(), []int{0}
+	return file_shim_v1_external_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *ExternalEntry) GetSessionId() string {
@@ -201,40 +201,40 @@ func (*ExternalEntry_Message) isExternalEntry_Entry() {}
 
 func (*ExternalEntry_Bookkeeping) isExternalEntry_Entry() {}
 
-var File_protocol_v1_external_proto protoreflect.FileDescriptor
+var File_shim_v1_external_proto protoreflect.FileDescriptor
 
-const file_protocol_v1_external_proto_rawDesc = "" +
+const file_shim_v1_external_proto_rawDesc = "" +
 	"\n" +
-	"\x1aprotocol/v1/external.proto\x12\vprotocol.v1\x1a\x1dprotocol/v1/bookkeeping.proto\x1a\x1dconversation/v1/message.proto\"\xdb\x01\n" +
+	"\x16shim/v1/external.proto\x12\ashim.v1\x1a\x19shim/v1/bookkeeping.proto\x1a\x1dconversation/v1/message.proto\"\xd7\x01\n" +
 	"\rExternalEntry\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12$\n" +
 	"\x0eproduced_at_ms\x18\x02 \x01(\x03R\fproducedAtMs\x129\n" +
-	"\amessage\x18\x03 \x01(\v2\x1d.conversation.v1.MessageEntryH\x00R\amessage\x12A\n" +
-	"\vbookkeeping\x18\x04 \x01(\v2\x1d.protocol.v1.BookkeepingEntryH\x00R\vbookkeepingB\a\n" +
-	"\x05entryB(Z&agentrepl/proto/protocol/v1;protocolv1b\x06proto3"
+	"\amessage\x18\x03 \x01(\v2\x1d.conversation.v1.MessageEntryH\x00R\amessage\x12=\n" +
+	"\vbookkeeping\x18\x04 \x01(\v2\x19.shim.v1.BookkeepingEntryH\x00R\vbookkeepingB\a\n" +
+	"\x05entryB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
-	file_protocol_v1_external_proto_rawDescOnce sync.Once
-	file_protocol_v1_external_proto_rawDescData []byte
+	file_shim_v1_external_proto_rawDescOnce sync.Once
+	file_shim_v1_external_proto_rawDescData []byte
 )
 
-func file_protocol_v1_external_proto_rawDescGZIP() []byte {
-	file_protocol_v1_external_proto_rawDescOnce.Do(func() {
-		file_protocol_v1_external_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_protocol_v1_external_proto_rawDesc), len(file_protocol_v1_external_proto_rawDesc)))
+func file_shim_v1_external_proto_rawDescGZIP() []byte {
+	file_shim_v1_external_proto_rawDescOnce.Do(func() {
+		file_shim_v1_external_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_shim_v1_external_proto_rawDesc), len(file_shim_v1_external_proto_rawDesc)))
 	})
-	return file_protocol_v1_external_proto_rawDescData
+	return file_shim_v1_external_proto_rawDescData
 }
 
-var file_protocol_v1_external_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
-var file_protocol_v1_external_proto_goTypes = []any{
-	(*ExternalEntry)(nil),    // 0: protocol.v1.ExternalEntry
+var file_shim_v1_external_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_shim_v1_external_proto_goTypes = []any{
+	(*ExternalEntry)(nil),    // 0: shim.v1.ExternalEntry
 	(*v1.MessageEntry)(nil),  // 1: conversation.v1.MessageEntry
-	(*BookkeepingEntry)(nil), // 2: protocol.v1.BookkeepingEntry
+	(*BookkeepingEntry)(nil), // 2: shim.v1.BookkeepingEntry
 }
-var file_protocol_v1_external_proto_depIdxs = []int32{
-	1, // 0: protocol.v1.ExternalEntry.message:type_name -> conversation.v1.MessageEntry
-	2, // 1: protocol.v1.ExternalEntry.bookkeeping:type_name -> protocol.v1.BookkeepingEntry
+var file_shim_v1_external_proto_depIdxs = []int32{
+	1, // 0: shim.v1.ExternalEntry.message:type_name -> conversation.v1.MessageEntry
+	2, // 1: shim.v1.ExternalEntry.bookkeeping:type_name -> shim.v1.BookkeepingEntry
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
@@ -242,13 +242,13 @@ var file_protocol_v1_external_proto_depIdxs = []int32{
 	0, // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_protocol_v1_external_proto_init() }
-func file_protocol_v1_external_proto_init() {
-	if File_protocol_v1_external_proto != nil {
+func init() { file_shim_v1_external_proto_init() }
+func file_shim_v1_external_proto_init() {
+	if File_shim_v1_external_proto != nil {
 		return
 	}
-	file_protocol_v1_bookkeeping_proto_init()
-	file_protocol_v1_external_proto_msgTypes[0].OneofWrappers = []any{
+	file_shim_v1_bookkeeping_proto_init()
+	file_shim_v1_external_proto_msgTypes[0].OneofWrappers = []any{
 		(*ExternalEntry_Message)(nil),
 		(*ExternalEntry_Bookkeeping)(nil),
 	}
@@ -256,17 +256,17 @@ func file_protocol_v1_external_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protocol_v1_external_proto_rawDesc), len(file_protocol_v1_external_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_external_proto_rawDesc), len(file_shim_v1_external_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_protocol_v1_external_proto_goTypes,
-		DependencyIndexes: file_protocol_v1_external_proto_depIdxs,
-		MessageInfos:      file_protocol_v1_external_proto_msgTypes,
+		GoTypes:           file_shim_v1_external_proto_goTypes,
+		DependencyIndexes: file_shim_v1_external_proto_depIdxs,
+		MessageInfos:      file_shim_v1_external_proto_msgTypes,
 	}.Build()
-	File_protocol_v1_external_proto = out.File
-	file_protocol_v1_external_proto_goTypes = nil
-	file_protocol_v1_external_proto_depIdxs = nil
+	File_shim_v1_external_proto = out.File
+	file_shim_v1_external_proto_goTypes = nil
+	file_shim_v1_external_proto_depIdxs = nil
 }

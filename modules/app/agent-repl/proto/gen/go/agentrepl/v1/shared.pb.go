@@ -21,7 +21,7 @@
 package agentreplv1
 
 import (
-	v1 "agentrepl/proto/protocol/v1"
+	v1 "agentrepl/proto/shim/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
@@ -10278,7 +10278,7 @@ var File_agentrepl_v1_shared_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\n" +
-	"\x19agentrepl/v1/shared.proto\x12\fagentrepl.v1\x1a google/protobuf/descriptor.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x16protocol/v1/core.proto\"M\n" +
+	"\x19agentrepl/v1/shared.proto\x12\fagentrepl.v1\x1a google/protobuf/descriptor.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x12shim/v1/core.proto\"M\n" +
 	"\x12SessionCommandSpec\x12\x18\n" +
 	"\aliteral\x18\x01 \x01(\tR\aliteral\x12\x1d\n" +
 	"\n" +
@@ -10528,15 +10528,15 @@ const file_agentrepl_v1_shared_proto_rawDesc = "" +
 	"\acommand\x18\x01 \x01(\tR\acommand\"d\n" +
 	"#FailureCommandRejectionUnclassified\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12#\n" +
-	"\rdaemon_reason\x18\x02 \x01(\tR\fdaemonReason\"\x9d\x04\n" +
+	"\rdaemon_reason\x18\x02 \x01(\tR\fdaemonReason\"\x8d\x04\n" +
 	"\x17QueryTerminationFailure\x12*\n" +
 	"\x11query_instance_id\x18\x01 \x01(\tR\x0fqueryInstanceId\x12,\n" +
-	"\x11vendor_session_id\x18\x02 \x01(\tH\x00R\x0fvendorSessionId\x12~\n" +
-	"#vendor_session_identity_unavailable\x18\x03 \x01(\v2-.protocol.v1.VendorSessionIdentityUnavailableH\x00R vendorSessionIdentityUnavailable\x12$\n" +
-	"\x0eobserved_at_ms\x18\x04 \x01(\x03R\fobservedAtMs\x12H\n" +
-	"\x0eunexpected_eof\x18\x05 \x01(\v2\x1f.protocol.v1.UnexpectedQueryEofH\x01R\runexpectedEof\x12N\n" +
-	"\x10iterator_failure\x18\x06 \x01(\v2!.protocol.v1.QueryIteratorFailureH\x01R\x0fiteratorFailure\x12K\n" +
-	"\x0fstartup_failure\x18\a \x01(\v2 .protocol.v1.QueryStartupFailureH\x01R\x0estartupFailureB\x11\n" +
+	"\x11vendor_session_id\x18\x02 \x01(\tH\x00R\x0fvendorSessionId\x12z\n" +
+	"#vendor_session_identity_unavailable\x18\x03 \x01(\v2).shim.v1.VendorSessionIdentityUnavailableH\x00R vendorSessionIdentityUnavailable\x12$\n" +
+	"\x0eobserved_at_ms\x18\x04 \x01(\x03R\fobservedAtMs\x12D\n" +
+	"\x0eunexpected_eof\x18\x05 \x01(\v2\x1b.shim.v1.UnexpectedQueryEofH\x01R\runexpectedEof\x12J\n" +
+	"\x10iterator_failure\x18\x06 \x01(\v2\x1d.shim.v1.QueryIteratorFailureH\x01R\x0fiteratorFailure\x12G\n" +
+	"\x0fstartup_failure\x18\a \x01(\v2\x1c.shim.v1.QueryStartupFailureH\x01R\x0estartupFailureB\x11\n" +
 	"\x0fvendor_identityB\b\n" +
 	"\x06reason\"\xe7\x05\n" +
 	"\x14SessionResumeFailure\x12*\n" +
@@ -11093,10 +11093,10 @@ var file_agentrepl_v1_shared_proto_goTypes = []any{
 	(*AnswerMergeDequeueCmd)(nil),                     // 139: agentrepl.v1.AnswerMergeDequeueCmd
 	(*MergeDequeueConfirm)(nil),                       // 140: agentrepl.v1.MergeDequeueConfirm
 	(*MergeDequeueDecline)(nil),                       // 141: agentrepl.v1.MergeDequeueDecline
-	(*v1.VendorSessionIdentityUnavailable)(nil),       // 142: protocol.v1.VendorSessionIdentityUnavailable
-	(*v1.UnexpectedQueryEof)(nil),                     // 143: protocol.v1.UnexpectedQueryEof
-	(*v1.QueryIteratorFailure)(nil),                   // 144: protocol.v1.QueryIteratorFailure
-	(*v1.QueryStartupFailure)(nil),                    // 145: protocol.v1.QueryStartupFailure
+	(*v1.VendorSessionIdentityUnavailable)(nil),       // 142: shim.v1.VendorSessionIdentityUnavailable
+	(*v1.UnexpectedQueryEof)(nil),                     // 143: shim.v1.UnexpectedQueryEof
+	(*v1.QueryIteratorFailure)(nil),                   // 144: shim.v1.QueryIteratorFailure
+	(*v1.QueryStartupFailure)(nil),                    // 145: shim.v1.QueryStartupFailure
 	(*structpb.Struct)(nil),                           // 146: google.protobuf.Struct
 	(*descriptorpb.EnumValueOptions)(nil),             // 147: google.protobuf.EnumValueOptions
 }
@@ -11183,10 +11183,10 @@ var file_agentrepl_v1_shared_proto_depIdxs = []int32{
 	5,   // 79: agentrepl.v1.FailureApiRefusal.vendor:type_name -> agentrepl.v1.VendorFailureContext
 	5,   // 80: agentrepl.v1.FailureApiTurnFailed.vendor:type_name -> agentrepl.v1.VendorFailureContext
 	0,   // 81: agentrepl.v1.FailureQueueEntryUninterruptibleTurn.command:type_name -> agentrepl.v1.SessionCommand
-	142, // 82: agentrepl.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> protocol.v1.VendorSessionIdentityUnavailable
-	143, // 83: agentrepl.v1.QueryTerminationFailure.unexpected_eof:type_name -> protocol.v1.UnexpectedQueryEof
-	144, // 84: agentrepl.v1.QueryTerminationFailure.iterator_failure:type_name -> protocol.v1.QueryIteratorFailure
-	145, // 85: agentrepl.v1.QueryTerminationFailure.startup_failure:type_name -> protocol.v1.QueryStartupFailure
+	142, // 82: agentrepl.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> shim.v1.VendorSessionIdentityUnavailable
+	143, // 83: agentrepl.v1.QueryTerminationFailure.unexpected_eof:type_name -> shim.v1.UnexpectedQueryEof
+	144, // 84: agentrepl.v1.QueryTerminationFailure.iterator_failure:type_name -> shim.v1.QueryIteratorFailure
+	145, // 85: agentrepl.v1.QueryTerminationFailure.startup_failure:type_name -> shim.v1.QueryStartupFailure
 	71,  // 86: agentrepl.v1.SessionResumeFailure.create:type_name -> agentrepl.v1.SessionResumeFailureCreate
 	72,  // 87: agentrepl.v1.SessionResumeFailure.automatic_restore:type_name -> agentrepl.v1.SessionResumeFailureAutomaticRestore
 	73,  // 88: agentrepl.v1.SessionResumeFailure.transcript_unavailable:type_name -> agentrepl.v1.SessionResumeFailureTranscriptUnavailable
