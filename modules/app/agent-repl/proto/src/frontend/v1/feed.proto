@@ -73,39 +73,6 @@ enum ConversationSource {
   CONVERSATION_SOURCE_MERGE = 2;
 }
 
-// The two containment facts every message carries, in one message so no
-// producer can supply half of them and no consumer can read them from two
-// different shapes.
-//
-// SPAWN IS NOT CONTAINMENT. A message whose work was started by another
-// message's tool call is NOT thereby contained by it: provenance lives on
-// origin_tool_use_id, and lineage lives here. Conflating them is what made
-// "is a top-level bubble a top-level message" unanswerable.
-message MessageLineage {
-  // The feed row this message ultimately belongs to — the ancestor whose own
-  // parent is the feed itself.
-  //
-  // ALWAYS SET, including on a top-level message, where it equals that
-  // message's own id. It is never empty and never inferred: a reader that had
-  // to walk parent pointers to find the root would be performing the unbounded
-  // traversal this field exists to remove, and a page query would stop being a
-  // single indexed pass.
-  //
-  // DENORMALIZED ON PURPOSE. It is derivable by walking parent_message_id to
-  // its end, and storing it anyway is the entire reason a page of ten messages
-  // costs one query. The cost is that it can drift: it MUST equal the root of
-  // the parent chain, and a write that disagrees is CORRUPTION, not a variant.
-  string top_level_message_id = 1;
-
-  // The message immediately containing this one — ONE HOP, never the root.
-  //
-  // EMPTY means this message sits directly in the feed, in which case
-  // top_level_message_id is this message's own id. Absence is the fact itself,
-  // not a placeholder for an unknown: a message whose parent could not be
-  // resolved is a producer fault, never an empty pointer.
-  string parent_message_id = 2;
-}
-
 // One curated conversation addition: FEED PACKAGING wrapped around a payload.
 //
 // The packaging is what the feed knows about a message regardless of what the
@@ -146,8 +113,26 @@ message Message {
   // so a resync or transcript replay reproduces the same verdict instead of
   // re-deriving it from state that has since moved on.
   ConversationSource source = 4;
-  // WHAT CONTAINS THIS MESSAGE. Always present — see MessageLineage, whose
-  // top_level_message_id is never empty and is self-referential on a feed row.
+  // WHAT CONTAINS THIS MESSAGE: the message immediately containing it — ONE
+  // HOP, never the root. Mirrors conversation.v1.MessageEntry.parent_message_id
+  // exactly, so containment has one spelling across both surfaces.
+  //
+  // UNSET means this message sits directly in the feed. Absence is the fact
+  // itself, not a placeholder for an unknown: a message whose parent could not
+  // be resolved is a producer fault, never an unset pointer. Empty is invalid.
+  //
+  // SPAWN IS NOT CONTAINMENT. A message whose work was started by another
+  // message's tool call is NOT thereby contained by it: provenance lives on
+  // origin_tool_use_id, and containment lives here. Conflating them is what
+  // made "is a top-level bubble a top-level message" unanswerable.
+  //
+  // THE ROOT IS NOT ON THE WIRE. A feed row is reached by following this
+  // pointer to its end, and no record restates the ancestor it lands on. The
+  // store DERIVES that ancestor at ingest and indexes it as a column of its
+  // own, which is what keeps a page of ten messages a single indexed pass; see
+  // shim/v1/message-page.proto. Denormalizing it back onto this contract would
+  // put a second copy of a fact on the wire for every consumer to disagree
+  // with, and buy nothing the store's own column does not already buy.
   //
   // It sits in the PACKAGING half rather than inside any payload arm because
   // containment is a fact about the message regardless of what the message is,
@@ -155,16 +140,17 @@ message Message {
   // tag for the same reason uuid and source are: this is what the feed knows
   // before it knows what it is looking at.
   //
-  // THIS IS THE ONLY PLACE LINEAGE LIVES on this contract. Records that are
+  // THIS IS THE ONLY PLACE CONTAINMENT LIVES on this contract. Records that are
   // not messages — turn and session boundaries, heartbeats, latency samples,
   // claim bridges, query lifecycle, usage observations, rewinds, file-plane
   // diagnostics — are shim.v1.Envelope payloads and are NOT Messages,
   // so they have no field here to populate. That is deliberate and structural:
-  // if such a record could carry a top_level_message_id it would become a
-  // phantom feed row, and a page of ten "messages" would silently deliver
-  // several turn boundaries and a short screen. Do not lift this field onto
-  // Envelope, and do not model an unowned record as an empty MessageLineage.
-  MessageLineage lineage = 5;
+  // if such a record could carry a parent pointer it would become a phantom
+  // feed row — and unset, the very spelling for "sits directly in the feed",
+  // would make EVERY one of them a top-level row, so a page of ten "messages"
+  // would silently deliver several turn boundaries and a short screen. Do not
+  // lift this field onto Envelope.
+  optional string parent_message_id = 5;
 
   // ---- Payload ----
 
@@ -497,7 +483,7 @@ message ToolCallVerdict {
   // PROVENANCE, NEVER CONTAINMENT. The named message is a feed row in its own
   // right, and a frontend that read this as "that message lives inside this
   // card" would nest an unbounded thing inside a bounded one. Containment is
-  // MessageLineage's alone.
+  // Message.parent_message_id's alone.
   string spawned_message_id = 2;
 }
 
@@ -824,7 +810,7 @@ message PermissionAnswerCmd {
 // containment, a timestamp and content that accumulates — which is the
 // definition of a Message and not of a second, parallel kind of thing. So it
 // carries NO id of its own (the containing Message's uuid IS its id) and NO
-// parent pointer of its own (feed.proto's MessageLineage is the one containment
+// parent pointer of its own (Message.parent_message_id is the one containment
 // relation). What lives here is the PAYLOAD: what kind of work it is, what it
 // is called, whether it is still running, and what it has produced.
 //
@@ -852,7 +838,7 @@ message DetachedWork {
   // THERE IS ONE CONTAINMENT TREE, and it is the message tree. A parent pointer
   // for detached work would be a second tree walking only detached work, which
   // could disagree with the real one. Containment is stated exactly once, on
-  // MessageLineage.parent_message_id.
+  // frontend.v1.Message.parent_message_id.
   //
   // WHAT A PRODUCER OBSERVED IS SPELLED ONCE, WHERE IT WAS OBSERVED. The
   // originating tool call and the label live inside `started`, in the producer's
@@ -883,7 +869,7 @@ message DetachedWork {
   // CONTAINED CONTENT IS NOT CARRIED HERE. A detached agent's conversation, a
   // merge run's, a skill window's, a workflow's steps are reached by PAGING:
   // frontend.v1.PageScopeInside naming THIS message's id walks the records whose
-  // parent is conversation.v1.MessageParentInside it, at any depth, with the same
+  // parent chain reaches THIS message's id, at any depth, with the same
   // command and renderer the feed uses.
 
   // The workspace this work runs under — the same key every workspace-scoped
@@ -1127,12 +1113,16 @@ message DetachedWorkLivenessUpdate {
 //
 // A oneof rather than an optional container id: "the feed" and "inside message
 // X" are the only two answers, and an empty string standing for the feed is
-// exactly the ambiguity conversation.v1.MessageParent exists to forbid.
+// exactly the ambiguity conversation.v1.MessageEntry forbids by leaving
+// parent_message_id UNSET rather than empty — an unset pointer is the fact "in
+// the feed", and an empty string is invalid, not a third answer.
 message PageScope {
   oneof scope {
-    // Records whose parent is conversation.v1.MessageParentRoot.
+    // Records for messages with NO parent_message_id: the ones sitting directly
+    // in the feed.
     PageScopeFeed feed = 1;
-    // Records whose parent is conversation.v1.MessageParentInside this message.
+    // Records for messages whose parent chain reaches this message, at any
+    // depth.
     PageScopeInside inside = 2;
   }
 }

@@ -200,8 +200,8 @@ message DetachedWorkKind {
     // We could not tell, which is stated rather than guessed.
     DetachedUnclassified unclassified = 4;
     // A skill invocation. It owns its own window rather than rendering flat, so
-    // every record the skill produces names this message as its
-    // top_level_message_id and needs no correlation to find its card.
+    // every record the skill produces sits somewhere below this message on the
+    // parent chain and needs no correlation to find its card.
     DetachedSkill skill = 5;
     // A merge run: the conversation a merge drives through the workspace's OWN
     // session. NO TOOL SPAWNS IT — the daemon opens it when it classifies the
