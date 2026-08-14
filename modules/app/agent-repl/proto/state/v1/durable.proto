@@ -24,9 +24,9 @@ syntax = "proto3";
 
 package state.v1;
 
-import "protocol/v1/core.proto";
+import "shim/v1/core.proto";
 
-import "protocol/v1/bookkeeping.proto";
+import "shim/v1/bookkeeping.proto";
 import "conversation/v1/tokens.proto";
 import "google/protobuf/struct.proto";
 
@@ -463,16 +463,16 @@ message TurnAccounting {
   string query_instance_id = 2;
 
   // Identifies the runtime configuration that served the turn.
-  protocol.v1.QueryRuntimeIdentity runtime = 3;
+  shim.v1.QueryRuntimeIdentity runtime = 3;
 
   // Contains exact wall-clock and elapsed timing measurements.
   TurnAccountingTiming timing = 4;
 
   // Contains the account-usage sample taken before prompt submission.
-  protocol.v1.AccountUsageObservation usage_at_start = 5;
+  shim.v1.AccountUsageObservation usage_at_start = 5;
 
   // Contains the account-usage sample taken after the terminal result.
-  protocol.v1.AccountUsageObservation usage_at_end = 6;
+  shim.v1.AccountUsageObservation usage_at_end = 6;
 
   // Contains every response-level token record, including subagents.
   repeated TokenUtilization responses = 7;

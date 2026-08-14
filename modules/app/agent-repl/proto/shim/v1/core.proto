@@ -1,4 +1,4 @@
-// protocol.v1 — what traverses the daemon↔shim boundary, and ONLY that
+// shim.v1 — what traverses the daemon↔shim boundary, and ONLY that
 // boundary, in both directions.
 //
 // THE DURABLE RECORD LAYER THAT USED TO LIVE HERE IS GONE. `Event` and its
@@ -34,13 +34,13 @@
 
 syntax = "proto3";
 
-package protocol.v1;
+package shim.v1;
 
 import "google/protobuf/descriptor.proto";
 import "google/protobuf/struct.proto";
-import "protocol/v1/external.proto";
+import "shim/v1/external.proto";
 
-option go_package = "agentrepl/proto/protocol/v1;protocolv1";
+option go_package = "agentrepl/proto/shim/v1;shimv1";
 
 // ---------------------------------------------------------------------------
 // Enums

@@ -13,11 +13,11 @@ PROTOS := \
   conversation/v1/message.proto \
   conversation/v1/payloads.proto \
   conversation/v1/tokens.proto \
-  protocol/v1/bookkeeping.proto \
-  protocol/v1/core.proto \
-  protocol/v1/entry-delivery.proto \
-  protocol/v1/external.proto \
-  protocol/v1/message-page.proto \
+  shim/v1/bookkeeping.proto \
+  shim/v1/core.proto \
+  shim/v1/entry-delivery.proto \
+  shim/v1/external.proto \
+  shim/v1/message-page.proto \
   store/v1/cursor.proto \
   store/v1/entry.proto \
   store/v1/unsupported.proto \

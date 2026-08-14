@@ -33,12 +33,12 @@ newFixture() {
     cat >"$root/daemon/internal/frontend/translate.go" <<'EOF'
 package frontend
 
-import protocolv1 "agentrepl/proto/protocol/v1"
+import shimv1 "agentrepl/proto/shim/v1"
 
-func Render(e *protocolv1.ExternalEntry) string { return e.GetSessionId() }
+func Render(e *shimv1.ExternalEntry) string { return e.GetSessionId() }
 EOF
     cat >"$root/webapp/src/store.ts" <<'EOF'
-import type { ExternalEntry } from "../proto/protocol/v1/external_pb.js";
+import type { ExternalEntry } from "../proto/shim/v1/external_pb.js";
 export const sid = (e: ExternalEntry): string => e.sessionId;
 EOF
     # The producer's import is legitimate and must NEVER be reported.

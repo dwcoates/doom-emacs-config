@@ -50,7 +50,7 @@ syntax = "proto3";
 package store.v1;
 
 import "google/protobuf/struct.proto";
-import "protocol/v1/external.proto";
+import "shim/v1/external.proto";
 import "store/v1/unsupported.proto";
 
 option go_package = "agentrepl/proto/store/v1;storev1";
@@ -73,10 +73,10 @@ message Entry {
   InternalEntry internal = 1;
 
   // What may be forwarded. The daemon receives exactly this, carried by the
-  // delivery envelope in protocol.v1 — a field access, not a conversion.
+  // delivery envelope in shim.v1 — a field access, not a conversion.
   //
   // UNSET means the record is unrenderable and has no path to the daemon.
-  protocol.v1.ExternalEntry external = 2;
+  shim.v1.ExternalEntry external = 2;
 }
 
 // The half of a record that never crosses the shim→daemon wire.
