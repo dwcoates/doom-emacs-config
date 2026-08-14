@@ -1,10 +1,10 @@
 // endpoint_answer_merge_dequeue.proto — the AnswerMergeDequeue endpoint's
-// request and response.
+// request, success and error.
 //
-// ONE ENDPOINT PER FILE: AnswerMergeDequeueRequest and
-// AnswerMergeDequeueResponse and nothing else, so the whole of what one method
-// takes and returns is readable in one place. The `endpoint_` prefix is the
-// grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
+// ONE ENDPOINT PER FILE: AnswerMergeDequeueRequest, AnswerMergeDequeueResponse
+// and the two answers it wraps, and nothing else, so the whole of what one
+// method takes and returns is readable in one place. The `endpoint_` prefix is
+// the grouping, not a directory — see DESIGN-protobuf-surfaces.md for why a
 // directory is not available here, and for why a request type belongs to
 // agentrepl.v1 rather than frontend.v1.
 
@@ -17,6 +17,7 @@
 package agentreplv1
 
 import (
+	v1 "agentrepl/proto/frontend/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -36,11 +37,11 @@ const (
 // answer and not merely the absence of one.
 type AnswerMergeDequeueRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Correlation. See AgentRepl in frame.proto.
+	// Correlation. See agentrepl.v1.AgentRepl.
 	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// The workspace whose offer is being answered — the offer is PUSHED STATE on
 	// WorkspaceState, so it is scoped by workspace and matched within it. See
-	// AgentRepl in frame.proto.
+	// agentrepl.v1.AgentRepl.
 	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// The offer being answered. An id that does not match the workspace's
 	// outstanding offer is REFUSED rather than resolved to the current one: a
@@ -49,6 +50,9 @@ type AnswerMergeDequeueRequest struct {
 	OfferId string `protobuf:"bytes,3,opt,name=offer_id,json=offerId,proto3" json:"offer_id,omitempty"`
 	// The answer is a oneof of empty messages, not a bool, for the same reason
 	// ReviveSessionRequest's is: "no answer" must be unrepresentable on the wire.
+	// This request needed no conversion when the mode-flag rule was applied
+	// across the surface — it was already shaped this way, and it is the shape
+	// the rule generalizes.
 	//
 	// Types that are valid to be assigned to Answer:
 	//
@@ -151,18 +155,20 @@ func (*AnswerMergeDequeueRequest_Dequeue) isAnswerMergeDequeueRequest_Answer() {
 
 func (*AnswerMergeDequeueRequest_Keep) isAnswerMergeDequeueRequest_Answer() {}
 
-// AnswerMergeDequeue's answer: accepted, or the classified account of the
-// refusal.
+// AnswerMergeDequeue's answer: exactly one of a success and an error.
 //
-// IT WRAPS CommandAck RATHER THAN BEING CommandAck. Returning the shared ack
-// directly gave 33 methods one response type, so no method could gain an answer
-// of its own without offering that answer to every other method as well. Both
-// arms clear the offer, and the cleared offer is pushed on WorkspaceState.
+// TWO ARMS, NOT AN `ok` BIT PLUS AN OPTIONAL FAILURE — see
+// AcceptQueueEntryResponse for the whole of that argument.
 type AnswerMergeDequeueResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Whether the daemon accepted this call, and when it did not, the classified
-	// failure a frontend renders as a card. See CommandAck.
-	Ack           *CommandAck `protobuf:"bytes,1,opt,name=ack,proto3" json:"ack,omitempty"`
+	// Echoed from the request that produced this answer. See
+	// AcceptQueueEntryResponse.request_id.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Types that are valid to be assigned to Response:
+	//
+	//	*AnswerMergeDequeueResponse_Success
+	//	*AnswerMergeDequeueResponse_Error
+	Response      isAnswerMergeDequeueResponse_Response `protobuf_oneof:"response"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -197,18 +203,307 @@ func (*AnswerMergeDequeueResponse) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *AnswerMergeDequeueResponse) GetAck() *CommandAck {
+func (x *AnswerMergeDequeueResponse) GetRequestId() string {
 	if x != nil {
-		return x.Ack
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *AnswerMergeDequeueResponse) GetResponse() isAnswerMergeDequeueResponse_Response {
+	if x != nil {
+		return x.Response
 	}
 	return nil
 }
+
+func (x *AnswerMergeDequeueResponse) GetSuccess() *AnswerMergeDequeueSuccess {
+	if x != nil {
+		if x, ok := x.Response.(*AnswerMergeDequeueResponse_Success); ok {
+			return x.Success
+		}
+	}
+	return nil
+}
+
+func (x *AnswerMergeDequeueResponse) GetError() *AnswerMergeDequeueError {
+	if x != nil {
+		if x, ok := x.Response.(*AnswerMergeDequeueResponse_Error); ok {
+			return x.Error
+		}
+	}
+	return nil
+}
+
+type isAnswerMergeDequeueResponse_Response interface {
+	isAnswerMergeDequeueResponse_Response()
+}
+
+type AnswerMergeDequeueResponse_Success struct {
+	Success *AnswerMergeDequeueSuccess `protobuf:"bytes,2,opt,name=success,proto3,oneof"`
+}
+
+type AnswerMergeDequeueResponse_Error struct {
+	Error *AnswerMergeDequeueError `protobuf:"bytes,3,opt,name=error,proto3,oneof"`
+}
+
+func (*AnswerMergeDequeueResponse_Success) isAnswerMergeDequeueResponse_Response() {}
+
+func (*AnswerMergeDequeueResponse_Error) isAnswerMergeDequeueResponse_Response() {}
+
+// The question is answered and the card is down.
+//
+// NO ARMS. Both answers reach here — a `keep` is as complete an answer as a
+// `dequeue`, and stating them apart would invite a client to treat one of them
+// as a non-event. What each did is the request's own arm, echoed by nothing:
+// the cleared offer and the merge's own status are pushed on WorkspaceState.
+type AnswerMergeDequeueSuccess struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerMergeDequeueSuccess) Reset() {
+	*x = AnswerMergeDequeueSuccess{}
+	mi := &file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerMergeDequeueSuccess) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerMergeDequeueSuccess) ProtoMessage() {}
+
+func (x *AnswerMergeDequeueSuccess) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerMergeDequeueSuccess.ProtoReflect.Descriptor instead.
+func (*AnswerMergeDequeueSuccess) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_rawDescGZIP(), []int{2}
+}
+
+// Why the answer was refused.
+//
+// THE ORDER OF THESE ARMS IS THE ORDER OF THE GATES. The offer id is CHECKED,
+// not resolved, before anything is cleared; the clear happens before the
+// dequeue; and a dequeue that fails after a successful clear is reported here
+// rather than absorbed, because whatever did not come off the queue still
+// merges when its turn comes.
+type AnswerMergeDequeueError struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Error:
+	//
+	//	*AnswerMergeDequeueError_WorkspaceKeyNotAbsolute
+	//	*AnswerMergeDequeueError_MergeDequeueOffersUnwired
+	//	*AnswerMergeDequeueError_RequiredFieldMissing
+	//	*AnswerMergeDequeueError_OfferAbsent
+	//	*AnswerMergeDequeueError_OfferStale
+	//	*AnswerMergeDequeueError_ClearFailed
+	//	*AnswerMergeDequeueError_DequeueFailed
+	//	*AnswerMergeDequeueError_Unclassified
+	Error isAnswerMergeDequeueError_Error `protobuf_oneof:"error"`
+	// The feed card this refusal was filed under, when it produced one. See
+	// AcceptQueueEntryError.failure_card.
+	FailureCard   *v1.FailureCardRef `protobuf:"bytes,9,opt,name=failure_card,json=failureCard,proto3" json:"failure_card,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerMergeDequeueError) Reset() {
+	*x = AnswerMergeDequeueError{}
+	mi := &file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerMergeDequeueError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerMergeDequeueError) ProtoMessage() {}
+
+func (x *AnswerMergeDequeueError) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerMergeDequeueError.ProtoReflect.Descriptor instead.
+func (*AnswerMergeDequeueError) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *AnswerMergeDequeueError) GetError() isAnswerMergeDequeueError_Error {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
+func (x *AnswerMergeDequeueError) GetWorkspaceKeyNotAbsolute() *RefusalWorkspaceKeyNotAbsolute {
+	if x != nil {
+		if x, ok := x.Error.(*AnswerMergeDequeueError_WorkspaceKeyNotAbsolute); ok {
+			return x.WorkspaceKeyNotAbsolute
+		}
+	}
+	return nil
+}
+
+func (x *AnswerMergeDequeueError) GetMergeDequeueOffersUnwired() *RefusalDependencyUnwired {
+	if x != nil {
+		if x, ok := x.Error.(*AnswerMergeDequeueError_MergeDequeueOffersUnwired); ok {
+			return x.MergeDequeueOffersUnwired
+		}
+	}
+	return nil
+}
+
+func (x *AnswerMergeDequeueError) GetRequiredFieldMissing() *RefusalRequiredFieldMissing {
+	if x != nil {
+		if x, ok := x.Error.(*AnswerMergeDequeueError_RequiredFieldMissing); ok {
+			return x.RequiredFieldMissing
+		}
+	}
+	return nil
+}
+
+func (x *AnswerMergeDequeueError) GetOfferAbsent() *RefusalMergeDequeueOfferAbsent {
+	if x != nil {
+		if x, ok := x.Error.(*AnswerMergeDequeueError_OfferAbsent); ok {
+			return x.OfferAbsent
+		}
+	}
+	return nil
+}
+
+func (x *AnswerMergeDequeueError) GetOfferStale() *RefusalMergeDequeueOfferStale {
+	if x != nil {
+		if x, ok := x.Error.(*AnswerMergeDequeueError_OfferStale); ok {
+			return x.OfferStale
+		}
+	}
+	return nil
+}
+
+func (x *AnswerMergeDequeueError) GetClearFailed() *RefusalMergeDequeueClearFailed {
+	if x != nil {
+		if x, ok := x.Error.(*AnswerMergeDequeueError_ClearFailed); ok {
+			return x.ClearFailed
+		}
+	}
+	return nil
+}
+
+func (x *AnswerMergeDequeueError) GetDequeueFailed() *RefusalMergeDequeueFailed {
+	if x != nil {
+		if x, ok := x.Error.(*AnswerMergeDequeueError_DequeueFailed); ok {
+			return x.DequeueFailed
+		}
+	}
+	return nil
+}
+
+func (x *AnswerMergeDequeueError) GetUnclassified() *v1.FailureInternalUnclassified {
+	if x != nil {
+		if x, ok := x.Error.(*AnswerMergeDequeueError_Unclassified); ok {
+			return x.Unclassified
+		}
+	}
+	return nil
+}
+
+func (x *AnswerMergeDequeueError) GetFailureCard() *v1.FailureCardRef {
+	if x != nil {
+		return x.FailureCard
+	}
+	return nil
+}
+
+type isAnswerMergeDequeueError_Error interface {
+	isAnswerMergeDequeueError_Error()
+}
+
+type AnswerMergeDequeueError_WorkspaceKeyNotAbsolute struct {
+	// The workspace key is not an absolute path.
+	WorkspaceKeyNotAbsolute *RefusalWorkspaceKeyNotAbsolute `protobuf:"bytes,1,opt,name=workspace_key_not_absolute,json=workspaceKeyNotAbsolute,proto3,oneof"`
+}
+
+type AnswerMergeDequeueError_MergeDequeueOffersUnwired struct {
+	// No merge dequeue offer store is wired.
+	MergeDequeueOffersUnwired *RefusalDependencyUnwired `protobuf:"bytes,2,opt,name=merge_dequeue_offers_unwired,json=mergeDequeueOffersUnwired,proto3,oneof"`
+}
+
+type AnswerMergeDequeueError_RequiredFieldMissing struct {
+	// The request carries no offer_id, or no answer arm. Both are the same
+	// fault — a command that named nothing or decided nothing — and both are
+	// refused rather than defaulted: defaulting to keep would swallow a
+	// dequeue, and defaulting to dequeue would perform one nobody asked for.
+	RequiredFieldMissing *RefusalRequiredFieldMissing `protobuf:"bytes,3,opt,name=required_field_missing,json=requiredFieldMissing,proto3,oneof"`
+}
+
+type AnswerMergeDequeueError_OfferAbsent struct {
+	// The workspace has no outstanding offer, so the question is already gone.
+	OfferAbsent *RefusalMergeDequeueOfferAbsent `protobuf:"bytes,4,opt,name=offer_absent,json=offerAbsent,proto3,oneof"`
+}
+
+type AnswerMergeDequeueError_OfferStale struct {
+	// The named offer is not the outstanding one.
+	OfferStale *RefusalMergeDequeueOfferStale `protobuf:"bytes,5,opt,name=offer_stale,json=offerStale,proto3,oneof"`
+}
+
+type AnswerMergeDequeueError_ClearFailed struct {
+	// The answer could not be recorded, so NOTHING was dequeued.
+	ClearFailed *RefusalMergeDequeueClearFailed `protobuf:"bytes,6,opt,name=clear_failed,json=clearFailed,proto3,oneof"`
+}
+
+type AnswerMergeDequeueError_DequeueFailed struct {
+	// The offer was cleared and the dequeue itself failed.
+	DequeueFailed *RefusalMergeDequeueFailed `protobuf:"bytes,7,opt,name=dequeue_failed,json=dequeueFailed,proto3,oneof"`
+}
+
+type AnswerMergeDequeueError_Unclassified struct {
+	// The answer failed for a reason the daemon's classifier could not name.
+	Unclassified *v1.FailureInternalUnclassified `protobuf:"bytes,8,opt,name=unclassified,proto3,oneof"`
+}
+
+func (*AnswerMergeDequeueError_WorkspaceKeyNotAbsolute) isAnswerMergeDequeueError_Error() {}
+
+func (*AnswerMergeDequeueError_MergeDequeueOffersUnwired) isAnswerMergeDequeueError_Error() {}
+
+func (*AnswerMergeDequeueError_RequiredFieldMissing) isAnswerMergeDequeueError_Error() {}
+
+func (*AnswerMergeDequeueError_OfferAbsent) isAnswerMergeDequeueError_Error() {}
+
+func (*AnswerMergeDequeueError_OfferStale) isAnswerMergeDequeueError_Error() {}
+
+func (*AnswerMergeDequeueError_ClearFailed) isAnswerMergeDequeueError_Error() {}
+
+func (*AnswerMergeDequeueError_DequeueFailed) isAnswerMergeDequeueError_Error() {}
+
+func (*AnswerMergeDequeueError_Unclassified) isAnswerMergeDequeueError_Error() {}
 
 var File_agentrepl_v1_endpoint_answer_merge_dequeue_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_rawDesc = "" +
 	"\n" +
-	"0agentrepl/v1/endpoint_answer_merge_dequeue.proto\x12\fagentrepl.v1\x1a\x18agentrepl/v1/frame.proto\x1a\x19agentrepl/v1/shared.proto\"\xf5\x01\n" +
+	"0agentrepl/v1/endpoint_answer_merge_dequeue.proto\x12\fagentrepl.v1\x1a\x19agentrepl/v1/shared.proto\x1a\x19frontend/v1/failure.proto\"\xf5\x01\n" +
 	"\x19AnswerMergeDequeueRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
@@ -216,9 +511,27 @@ const file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_rawDesc = "" +
 	"\boffer_id\x18\x03 \x01(\tR\aofferId\x12=\n" +
 	"\adequeue\x18\x04 \x01(\v2!.agentrepl.v1.MergeDequeueConfirmH\x00R\adequeue\x127\n" +
 	"\x04keep\x18\x05 \x01(\v2!.agentrepl.v1.MergeDequeueDeclineH\x00R\x04keepB\b\n" +
-	"\x06answer\"H\n" +
-	"\x1aAnswerMergeDequeueResponse\x12*\n" +
-	"\x03ack\x18\x01 \x01(\v2\x18.agentrepl.v1.CommandAckR\x03ackB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x06answer\"\xcb\x01\n" +
+	"\x1aAnswerMergeDequeueResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12C\n" +
+	"\asuccess\x18\x02 \x01(\v2'.agentrepl.v1.AnswerMergeDequeueSuccessH\x00R\asuccess\x12=\n" +
+	"\x05error\x18\x03 \x01(\v2%.agentrepl.v1.AnswerMergeDequeueErrorH\x00R\x05errorB\n" +
+	"\n" +
+	"\bresponse\"\x1b\n" +
+	"\x19AnswerMergeDequeueSuccess\"\xb5\x06\n" +
+	"\x17AnswerMergeDequeueError\x12k\n" +
+	"\x1aworkspace_key_not_absolute\x18\x01 \x01(\v2,.agentrepl.v1.RefusalWorkspaceKeyNotAbsoluteH\x00R\x17workspaceKeyNotAbsolute\x12i\n" +
+	"\x1cmerge_dequeue_offers_unwired\x18\x02 \x01(\v2&.agentrepl.v1.RefusalDependencyUnwiredH\x00R\x19mergeDequeueOffersUnwired\x12a\n" +
+	"\x16required_field_missing\x18\x03 \x01(\v2).agentrepl.v1.RefusalRequiredFieldMissingH\x00R\x14requiredFieldMissing\x12Q\n" +
+	"\foffer_absent\x18\x04 \x01(\v2,.agentrepl.v1.RefusalMergeDequeueOfferAbsentH\x00R\vofferAbsent\x12N\n" +
+	"\voffer_stale\x18\x05 \x01(\v2+.agentrepl.v1.RefusalMergeDequeueOfferStaleH\x00R\n" +
+	"offerStale\x12Q\n" +
+	"\fclear_failed\x18\x06 \x01(\v2,.agentrepl.v1.RefusalMergeDequeueClearFailedH\x00R\vclearFailed\x12P\n" +
+	"\x0edequeue_failed\x18\a \x01(\v2'.agentrepl.v1.RefusalMergeDequeueFailedH\x00R\rdequeueFailed\x12N\n" +
+	"\funclassified\x18\b \x01(\v2(.frontend.v1.FailureInternalUnclassifiedH\x00R\funclassified\x12>\n" +
+	"\ffailure_card\x18\t \x01(\v2\x1b.frontend.v1.FailureCardRefR\vfailureCardB\a\n" +
+	"\x05errorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_rawDescOnce sync.Once
@@ -232,23 +545,43 @@ func file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_rawDescGZIP() []byte 
 	return file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_goTypes = []any{
-	(*AnswerMergeDequeueRequest)(nil),  // 0: agentrepl.v1.AnswerMergeDequeueRequest
-	(*AnswerMergeDequeueResponse)(nil), // 1: agentrepl.v1.AnswerMergeDequeueResponse
-	(*MergeDequeueConfirm)(nil),        // 2: agentrepl.v1.MergeDequeueConfirm
-	(*MergeDequeueDecline)(nil),        // 3: agentrepl.v1.MergeDequeueDecline
-	(*CommandAck)(nil),                 // 4: agentrepl.v1.CommandAck
+	(*AnswerMergeDequeueRequest)(nil),      // 0: agentrepl.v1.AnswerMergeDequeueRequest
+	(*AnswerMergeDequeueResponse)(nil),     // 1: agentrepl.v1.AnswerMergeDequeueResponse
+	(*AnswerMergeDequeueSuccess)(nil),      // 2: agentrepl.v1.AnswerMergeDequeueSuccess
+	(*AnswerMergeDequeueError)(nil),        // 3: agentrepl.v1.AnswerMergeDequeueError
+	(*MergeDequeueConfirm)(nil),            // 4: agentrepl.v1.MergeDequeueConfirm
+	(*MergeDequeueDecline)(nil),            // 5: agentrepl.v1.MergeDequeueDecline
+	(*RefusalWorkspaceKeyNotAbsolute)(nil), // 6: agentrepl.v1.RefusalWorkspaceKeyNotAbsolute
+	(*RefusalDependencyUnwired)(nil),       // 7: agentrepl.v1.RefusalDependencyUnwired
+	(*RefusalRequiredFieldMissing)(nil),    // 8: agentrepl.v1.RefusalRequiredFieldMissing
+	(*RefusalMergeDequeueOfferAbsent)(nil), // 9: agentrepl.v1.RefusalMergeDequeueOfferAbsent
+	(*RefusalMergeDequeueOfferStale)(nil),  // 10: agentrepl.v1.RefusalMergeDequeueOfferStale
+	(*RefusalMergeDequeueClearFailed)(nil), // 11: agentrepl.v1.RefusalMergeDequeueClearFailed
+	(*RefusalMergeDequeueFailed)(nil),      // 12: agentrepl.v1.RefusalMergeDequeueFailed
+	(*v1.FailureInternalUnclassified)(nil), // 13: frontend.v1.FailureInternalUnclassified
+	(*v1.FailureCardRef)(nil),              // 14: frontend.v1.FailureCardRef
 }
 var file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_depIdxs = []int32{
-	2, // 0: agentrepl.v1.AnswerMergeDequeueRequest.dequeue:type_name -> agentrepl.v1.MergeDequeueConfirm
-	3, // 1: agentrepl.v1.AnswerMergeDequeueRequest.keep:type_name -> agentrepl.v1.MergeDequeueDecline
-	4, // 2: agentrepl.v1.AnswerMergeDequeueResponse.ack:type_name -> agentrepl.v1.CommandAck
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4,  // 0: agentrepl.v1.AnswerMergeDequeueRequest.dequeue:type_name -> agentrepl.v1.MergeDequeueConfirm
+	5,  // 1: agentrepl.v1.AnswerMergeDequeueRequest.keep:type_name -> agentrepl.v1.MergeDequeueDecline
+	2,  // 2: agentrepl.v1.AnswerMergeDequeueResponse.success:type_name -> agentrepl.v1.AnswerMergeDequeueSuccess
+	3,  // 3: agentrepl.v1.AnswerMergeDequeueResponse.error:type_name -> agentrepl.v1.AnswerMergeDequeueError
+	6,  // 4: agentrepl.v1.AnswerMergeDequeueError.workspace_key_not_absolute:type_name -> agentrepl.v1.RefusalWorkspaceKeyNotAbsolute
+	7,  // 5: agentrepl.v1.AnswerMergeDequeueError.merge_dequeue_offers_unwired:type_name -> agentrepl.v1.RefusalDependencyUnwired
+	8,  // 6: agentrepl.v1.AnswerMergeDequeueError.required_field_missing:type_name -> agentrepl.v1.RefusalRequiredFieldMissing
+	9,  // 7: agentrepl.v1.AnswerMergeDequeueError.offer_absent:type_name -> agentrepl.v1.RefusalMergeDequeueOfferAbsent
+	10, // 8: agentrepl.v1.AnswerMergeDequeueError.offer_stale:type_name -> agentrepl.v1.RefusalMergeDequeueOfferStale
+	11, // 9: agentrepl.v1.AnswerMergeDequeueError.clear_failed:type_name -> agentrepl.v1.RefusalMergeDequeueClearFailed
+	12, // 10: agentrepl.v1.AnswerMergeDequeueError.dequeue_failed:type_name -> agentrepl.v1.RefusalMergeDequeueFailed
+	13, // 11: agentrepl.v1.AnswerMergeDequeueError.unclassified:type_name -> frontend.v1.FailureInternalUnclassified
+	14, // 12: agentrepl.v1.AnswerMergeDequeueError.failure_card:type_name -> frontend.v1.FailureCardRef
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_init() }
@@ -256,11 +589,24 @@ func file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_init() {
 	if File_agentrepl_v1_endpoint_answer_merge_dequeue_proto != nil {
 		return
 	}
-	file_agentrepl_v1_frame_proto_init()
 	file_agentrepl_v1_shared_proto_init()
 	file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_msgTypes[0].OneofWrappers = []any{
 		(*AnswerMergeDequeueRequest_Dequeue)(nil),
 		(*AnswerMergeDequeueRequest_Keep)(nil),
+	}
+	file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_msgTypes[1].OneofWrappers = []any{
+		(*AnswerMergeDequeueResponse_Success)(nil),
+		(*AnswerMergeDequeueResponse_Error)(nil),
+	}
+	file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_msgTypes[3].OneofWrappers = []any{
+		(*AnswerMergeDequeueError_WorkspaceKeyNotAbsolute)(nil),
+		(*AnswerMergeDequeueError_MergeDequeueOffersUnwired)(nil),
+		(*AnswerMergeDequeueError_RequiredFieldMissing)(nil),
+		(*AnswerMergeDequeueError_OfferAbsent)(nil),
+		(*AnswerMergeDequeueError_OfferStale)(nil),
+		(*AnswerMergeDequeueError_ClearFailed)(nil),
+		(*AnswerMergeDequeueError_DequeueFailed)(nil),
+		(*AnswerMergeDequeueError_Unclassified)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -268,7 +614,7 @@ func file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_rawDesc), len(file_agentrepl_v1_endpoint_answer_merge_dequeue_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
