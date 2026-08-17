@@ -51,8 +51,8 @@ within each. A later stage opens only after every earlier one is settled; any
 stage may be reopened at any time, and reopening reopens every decision
 downstream of it, enumerated by name.
 
-1. **`conversation.v1`** — `content` → `message` → `payloads` →
-   `session_command` → `tokens`.
+1. **`conversation.v1`** — `message` → `payloads` → `content` → `tokens` →
+   `session_command`.
 2. **`frontend.v1`** — `sidebar` → `topbar` → `footer` → `failure` → `feed`.
 3. **`agentrepl.v1`**, from the empty service, in three sub-stages:
    - 3a. RPC inventory — every method by name and one-line purpose, no
@@ -60,10 +60,32 @@ downstream of it, enumerated by name.
    - 3b. Cross-endpoint conventions — including the invariants the deleted
      `service.proto` header carried and this record did not carry forward.
    - 3c. Per-endpoint shapes — one new `endpoint_*.proto` at a time.
-4. **`shim.v1`** — `core` → `bookkeeping` → `entry-delivery` → `external` →
-   `message-page`.
-5. **`store.v1`** — `entry` → `write` → `cursor` → `unsupported`.
+4. **`shim.v1`** — `core` → `entry-delivery` → `message-page` → `external` →
+   `bookkeeping`.
+5. **`store.v1`** — `write` → `entry` → `cursor` → `unsupported`.
 6. **`state.v1`** — `durable.proto`.
+
+**Within a stage, files are walked TOP-DOWN BY CONTAINMENT.** The user's
+second amendment, made after the sequence was first accepted: the file
+declaring the highest-level (outermost) message goes first, then the files it
+imports, down to the leaves, so a leaf is never designed before the message
+that embeds it has said what it needs. The concrete order is MECHANICAL — read
+off the intra-package import graph, importer before imported — and was
+recomputed for stages 1, 4 and 5 above (`message.proto` imports `payloads`,
+which imports `content` and `tokens`; `core`/`entry-delivery`/`message-page`
+all import `external`, which imports `bookkeeping`; `write` imports `entry`
+and `cursor`, `entry` imports `unsupported`). Stage 2's component files have
+no containment relation, so their order stays as the user accepted it.
+`tokens` before `session_command` is arbitrary between two leaves. This
+convention is being added to the `/create-or-update-protobufs` skill itself by
+a one-shot workspace dispatched at the same moment.
+
+**Retracted by this amendment.** The `content.proto` increment sketched
+before the amendment (ThinkingBlock as a two-arm oneof, ImageBlock's location
+split into path/url arms, UnsupportedBlock.raw's exception stated at the
+field, ToolCallBlock.arguments deferred to its own increment) is WITHDRAWN
+unagreed and returns when `content.proto` comes up in the top-down order — by
+then `payloads.proto` will have said what it needs from it.
 
 **The amendments the user made, and why.** The first proposal put
 `frontend.v1` before `conversation.v1`, and the file order within stages 3–6
