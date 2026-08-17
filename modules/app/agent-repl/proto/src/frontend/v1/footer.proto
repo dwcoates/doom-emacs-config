@@ -336,8 +336,11 @@ message FooterSubStatusBlockedVendorError {}
 // ---- 3. StatusActivity — finest, dynamic ----------------------------------
 
 // The finest line: typed KINDS whose payload is mostly text the daemon
-// composed. A new thing to say is a new arm; `note` is the daemon's free line
-// for a thing that has no kind yet.
+// composed. A new thing to say is a new arm — THERE IS NO FREE-TEXT ESCAPE
+// HERE. A line with no kind belongs only where the daemon genuinely cannot
+// classify, and that place is the error route's unclassified funnel on the
+// failure card; an activity the daemon can name but has no arm for is a
+// modeling gap, and the fix is the arm, not a note.
 message FooterStatusActivity {
   oneof activity {
     FooterStatusActivityMergingCommit merging_commit = 1;
@@ -346,7 +349,6 @@ message FooterStatusActivity {
     FooterStatusActivityAuthenticating authenticating = 4;
     FooterStatusActivityBlockedOnUser blocked_on_user = 5;
     FooterStatusActivityRateLimited rate_limited = 6;
-    FooterStatusActivityNote note = 7;
   }
 }
 // The commit a merge is landing right now.
@@ -396,11 +398,6 @@ message FooterAllowance {
   // arms when it is.
   string status = 4;
 }
-// The daemon's free line for a thing that has no kind yet.
-message FooterStatusActivityNote {
-  string text = 1;
-}
-
 // ---- 4. Clock ------------------------------------------------------------
 
 // The turn clock. UNSET = no turn in flight; the cell renders idle.
