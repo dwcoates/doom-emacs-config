@@ -114,6 +114,51 @@ that transport.
 
 ## Landed changes
 
+### `footer.proto` closes: PLUMBING leaves `frontend.v1`; three state enums and `HeartbeatView` die
+
+**What changed.**
+
+- DELETED outright: `RenderState`, `SessionConnectivity`, `SessionStatus` —
+  three state ENUMS (a live violation of the state rule) whose only readers
+  were the daemon's resolvers; their projections are now the footer's
+  `FooterStatus`/`FooterSubStatus`, the sidebar's `RosterRowStatus` and the
+  topbar's `TopbarConnectivity`. And `HeartbeatView` — its own comment said it
+  had nothing to tick with.
+- MOVED VERBATIM to `agentrepl/v1/host_surface_pending.proto` — a HOLDING
+  FILE, explicitly not a design, deleted when stage 3 has placed or deleted
+  every message in it: `RuntimeFault`, `WorkspaceState` (with the three enum
+  fields `reserved` and marked "STAGE 3"), `SessionView`, `BackfillState`,
+  `DaemonView`, `DetachedCancelOutcome`, `DetachedAgentsCancelled`. These are
+  the daemon's resolution inputs and the HOST surface Emacs reads (session
+  identity, controller generation, catalog entries, backfill, boot id) plus
+  one RPC ack payload — none is drawn.
+- `footer.proto` now imports only `conversation/v1/message.proto` and
+  `conversation/v1/turn.proto`; `frontend.v1` no longer imports `shim.v1` or
+  `agentrepl.v1` from the footer. Every `frontend.v1` file except `feed.proto`
+  and `failure.proto` (their turns next) compiles.
+
+**Why, in the user's terms.** "Your read sounds good." On heartbeats: "still
+useful for animation on status? Or maybe status should just be repeated to
+simulate heartbeats" — answered: animation is client-side for as long as the
+status arm is active (a state, not a push); LIVENESS is a property of the
+connection, so it becomes a STAGE-3b convention (every component stream
+carries a keepalive at cadence C; a client that hears nothing for T marks the
+component stale) rather than a heartbeat arm on each view or an identical
+view re-pushed with a second meaning. The "long tool still working" evidence,
+when the daemon has any, is a `StatusActivity` update.
+
+**Consequences.**
+
+- The daemon's SSM keeps its state machine internally; the wire carries only
+  the projections. `daemon/internal/ssm/resolve.go`'s rank table stays; the
+  `frontendv1.RenderState` Go type it emits does not.
+- The `fence` every component view carries is anchored on
+  `WorkspaceState.fence`, which is now in the holding file — STAGE-3b decides
+  fence vs stream order vs keepalive together.
+- Stage 3 owes: a host stream/response set for what Emacs reads out of
+  `WorkspaceState`/`SessionView`/`DaemonView`; the `DetachedCancelOutcome` ack
+  arms; and the deletion of the holding file.
+
 ### `frontend.v1/footer.proto` — StatusActivity settled: six typed arms, no free-text escape
 
 **What changed.** `FooterStatusActivityNote { string text }` and its `note`

@@ -1,0 +1,311 @@
+// host_surface_pending.proto — HOLDING FILE, NOT A DESIGN. What left
+// frontend/v1/footer.proto because nothing draws it: the daemon's resolution
+// inputs and the HOST surface Emacs reads (session identity, controller
+// generation, catalog entries, backfill, boot id), plus one RPC ack payload.
+// Every message below is VERBATIM from where it was and is judged at stage 3
+// (agentrepl.v1 inventory → conventions → shapes); the three state ENUMS were
+// NOT carried — they die into the daemon's resolver, whose projections are the
+// footer's, sidebar's and topbar's oneofs. This file is deleted when stage 3
+// has placed or deleted every message in it.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "frontend/v1/feed.proto";
+import "conversation/v1/api.proto";
+import "agentrepl/v1/shared.proto";
+import "shim/v1/core.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+
+// What a CancelDetachedAgentsRequest did, carried on the command's ack.
+//
+// It is the SHIM's verdict relayed, not a daemon re-derivation — see
+// shim.v1.DetachedCancelOutcome for why only the shim can answer
+// "what was running when this landed?" without racing task end.
+//
+// A ONEOF OF MESSAGES, never a bool: "did it work" cannot distinguish a stop
+// that reached three agents from a session that had nothing to stop from a
+// session that could not be asked, and a frontend renders those three
+// differently.
+message DetachedCancelOutcome {
+  oneof outcome {
+    DetachedAgentsCancelled cancelled = 1;
+    shim.v1.NoDetachedAgentsRunning nothing_running = 2;
+    shim.v1.DetachedCancelUnsupported unsupported = 3;
+  }
+}
+
+// Detached work was running and the stop reached every agent counted here.
+//
+// TODO(respelling): this shares a name with shim.v1.DetachedAgentsCancelled
+// but NOT its contents — that one carries `repeated string task_ids`, this one
+// carries `count`, which has no counterpart there. It was therefore not
+// collapsed into shim.v1's, and DetachedCancelOutcome above stays declared
+// here for the same reason: its `cancelled` arm must reference this message.
+message DetachedAgentsCancelled {
+  // How many detached agents were stopped. A COUNT rather than the shim's
+  // task ids: a task id is daemon-internal bookkeeping a frontend has no
+  // vocabulary for, and what a frontend renders is "cancelled 3 agents". The
+  // ids stay on the shim-wire arm, where the daemon uses them to settle
+  // exactly those agents' detached-work messages.
+  int64 count = 1;
+}
+
+// TWO OF THE THREE ARMS ABOVE NAME shim.v1's MESSAGES DIRECTLY. "Nothing
+// was running" and "this shim cannot be asked" are shim-wire facts the daemon
+// forwards unchanged, so this package keeps no second copy of them to drift
+// against the originals.
+//
+// THE DAEMON STILL REFUSES ON THE `nothing_running` ARM (the ack carries
+// ok=false alongside it): a cancel that stopped nothing is a keystroke that did
+// nothing, and reporting it as success is how a stop that silently missed looks
+// exactly like a stop that worked.
+
+// ---- the per-workspace state, the per-session catalog entry, and their inputs ----
+
+// A runtime fault is explanatory evidence scoped to exactly one
+// session-controller generation. A close edge can close only its matching
+// (component, fault_type) window, and a retired generation's faults can never
+// affect its replacement.
+message RuntimeFault {
+  string component = 1;
+  string fault_type = 2;
+  string impact = 3;
+  string cause_kind = 4;
+  int64 opened_at_ms = 5;
+}
+
+// THE resolved per-workspace state, plus the inputs snapshot that produced
+// it (for debuggability: a frontend can show WHY a state was resolved).
+//
+// IDENTITY AUTHORITY: this message is the SOLE authority for which session
+// owns a workspace. `session_id` below is the daemon session-state machine's
+// ruling, revisioned like every other field here, and a rotation to a new
+// owning session arrives as a new revision of this message. No consumer may
+// take a workspace's live session identity from any other frame.
+message WorkspaceState {
+  string workspace = 1;
+  // THE workspace's owning session, and the only field on this protocol that
+  // may bind it. A consumer adopts this value and nothing else as "which
+  // session am I talking to for this workspace".
+  //
+  // HOST SURFACE. Emacs manages sessions — it creates, deletes and revives
+  // them — so it needs the identity itself. No webapp-facing message carries
+  // this field or anything derived from it; a rendering frontend reads
+  // `fence` below instead, which answers the only question it ever had.
+  string session_id = 2;
+  // THE workspace's authoritative staleness fence, and the value every fenced
+  // push is compared against.
+  //
+  // It is this message's own projection of the identity above: the daemon
+  // mints a new fence whenever the workspace's owning session or its
+  // controller generation rotates, so "the fence changed" and "what I was
+  // talking to was replaced" are the same event. Publishing the projection
+  // rather than the identity is what lets a rendering frontend answer
+  // current-vs-stale without ever holding a session vocabulary.
+  //
+  // OPAQUE. Compared byte-wise, never parsed. Its composition is the daemon's
+  // and is free to change without a wire change, which is only true for as
+  // long as nothing reads structure into it.
+  string fence = 3;
+  // Primary UX projection resolved by the daemon. This is retained for merge
+  // and context-cut presentation; it is not the authority for connectivity or
+  // session status.
+  // STAGE 3: was `RenderState state = 4` — the enum died into the resolver.
+  reserved 4;
+  // Resolution inputs (SSM):
+  bool turn_active = 5;
+  int64 live_task_count = 6;
+  string cause_kind = 7;  // event kind that caused this transition
+  uint64 cause_seq = 8;   // store seq when event-caused (0 = daemon-local)
+  int64 at_ms = 9;
+  // STAGE 3: were `SessionConnectivity connectivity = 10` and `SessionStatus
+  // status = 11` — both enums died into the resolver.
+  reserved 10, 11;
+  // HOST SURFACE, like session_id above: the identity of the session
+  // controller generation currently operating the session, which Emacs uses to
+  // scope health probes and fault windows. A rendering frontend never reads
+  // it — the fence is this identity's projection, re-minted on every rotation,
+  // and answers the only question a renderer has.
+  string controller_generation_id = 12;
+  repeated RuntimeFault active_faults = 13;
+  // Whether merge.Coordinator holds the exclusivity lease on this workspace's
+  // shim. While held, USER prompting is blocked (the merge owns the session)
+  // and every message the session produces carries
+  // CONVERSATION_SOURCE_MERGE.
+  bool merge_lease_held = 14;
+  // WHEN this workspace's merge landed, in unix millis. 0 means it has never
+  // reached `merged`, which is the only reading of absence: a merged
+  // workspace always carries the instant it merged at.
+  //
+  // WRITTEN ONCE, at the `merged` transition, and never moved afterwards.
+  // `merge_status` reports whichever run is currently newest and can
+  // therefore be superseded; this is the durable record that the merge
+  // LANDED, so a later transition on any axis leaves it exactly where it was.
+  //
+  // It is its own persisted fact rather than a re-derivation over the state
+  // log, so a frontend ordering a recently-merged section reads the identical
+  // instant from every push, snapshot and resync.
+  int64 merged_at_ms = 15;
+  // THE merge run's live progress, and the ONLY merge-run surface on this
+  // message. See MergeStatus. IT NAMES A RUN, carries the phase as WHICH oneof
+  // arm is set, and reports the queue place the run was actually ADMITTED at.
+  // There is deliberately no second, flatter form of these facts on this
+  // message: two forms of one fact can disagree on a single frame, so the
+  // resolved run is the only one that exists.
+  //
+  // UNSET means this workspace has no merge to report — the merge axis has
+  // never spoken for it, or its axis is cleared. It is never a zero-valued
+  // status standing in for absence.
+  agentrepl.v1.MergeStatus merge_status = 16;
+  // THE OUTSTANDING QUESTION about taking this workspace's merge off the
+  // queue. See MergeDequeueOffer: an interrupt no longer performs the queue
+  // half, it asks, and this is where the asking lives.
+  //
+  // UNSET means there is nothing to answer — no offer was ever raised, or the
+  // one that was has been answered, superseded by the merge reaching its own
+  // terminal, or dropped because the merge left the queue on its own. A
+  // frontend draws the card if and only if this field is set, so clearing it
+  // IS how the card comes down; there is no second dismissal channel.
+  agentrepl.v1.MergeDequeueOffer merge_dequeue_offer = 17;
+}
+
+// A PER-SESSION CATALOG ENTRY, not a statement about who owns a workspace.
+//
+// This message is published for retired, superseded, terminal and hibernated
+// sessions exactly as it is for the live one — `terminal` and `death` below
+// exist precisely so a dead session still has a view. A connect snapshot
+// therefore carries several of these for the same `workspace`, in no
+// authority order.
+//
+// SO: NO CONSUMER MAY ADOPT `session_id` BELOW AS A WORKSPACE'S LIVE SESSION
+// IDENTITY. WorkspaceState is the sole authority for that (see its comment).
+// A consumer that binds identity from this message under last-writer-wins
+// will rebind to whichever entry happened to arrive last — including a dead
+// one — and then address the daemon with a stale session under the current
+// controller generation, which the daemon refuses as an identity mismatch.
+// That is a real, observed outage, not a hypothetical.
+message SessionView {
+  // HOST SURFACE. Emacs creates, deletes, revives and catalogs sessions, so
+  // it reads sessions as sessions. A rendering frontend does not: the facts it
+  // used to take from here reach it as fenced component views instead —
+  // WorkspaceGateView for the hibernation gate, TopbarView for the identity
+  // line, TokenBreakdownView for economics, and a resolved failure card for a
+  // terminal session's account.
+  string workspace = 1;
+  // WHICH session this catalog entry describes — a correlation key, never a
+  // binding. It says "the facts below belong to this session"; it does not
+  // say "this session owns `workspace`". Only WorkspaceState.session_id says
+  // that.
+  string session_id = 2;
+  string model = 3;
+  string slug = 4;
+  string title = 5;
+  int64 total_tokens = 6;
+  double total_cost_usd = 7;
+  int64 context_window = 8;
+  string permission_mode = 9;
+  // Whether the daemon holds a LIVE SESSION CONTROLLER for this session's
+  // workspace — i.e. a shim is attached, or its client is reconnecting to one.
+  //
+  // IT IS THE ONE FIELD ON THIS MESSAGE THAT IS NOT DURABLE, and that is
+  // exactly why it exists. Every other field here is read off the registry
+  // record, which survives a daemon restart; a frontend that judges "is this
+  // workspace already up?" from those sees a non-terminal, fully-backfilled
+  // record and concludes YES against a daemon that has no session controller
+  // for it at all. Emacs's switch-ensure did precisely that, so after a daemon
+  // restart switching to an unwired workspace skipped its openWorkspace and
+  // the workspace never bootstrapped.
+  //
+  // The field had NO producer before that bug; the name always meant this.
+  bool shim_attached = 10;
+  // Resume/rebind keys the webapp lost in the cutover.
+  string claude_session_id = 11;
+  string cwd = 12;
+  // GET /sessions parity so Emacs can drop HTTP entirely.
+  bool terminal = 13;
+  bool rehydratable = 14;
+  bool hibernated = 15;
+  int64 pending_permissions = 16;
+  // Account identity — the CLAUDE_CONFIG_DIR the session's
+  // shim runs against (account switching is daemon-executed, webapp-initiated).
+  string config_dir = 17;
+  // Whether this session's on-disk transcript has been read
+  // into the store — the NEVER-BLUE completion signal (see BackfillState).
+  BackfillState backfill = 18;
+  // The TYPED account of why this session is terminal, and the ONLY
+  // reader-facing account of it.
+  //
+  // CLASSIFIED ONCE, DAEMON-SIDE, never a free string: a frontend that is
+  // handed prose cannot know what class of failure it describes, so it cannot
+  // color it, group it, or offer the right remedy. Typed, the dead-state card
+  // renders it the way every other failure renders. Unset while the session
+  // lives.
+  FailureCardView death = 19;
+  // The SDK-published set this session can deliberately select.  A frontend
+  // only renders these choices; it never invents or owns a model selection.
+  repeated conversation.v1.ModelOption model_options = 20;
+  // NO PERSISTENCE AGGREGATE RIDES THIS MESSAGE. Token economics is durable
+  // evidence with its own home, and what a frontend needs of it arrives
+  // already digested as TokenBreakdownView's resolved rows — never as a whole
+  // aggregate a renderer is expected to re-derive rows from itself.
+  //
+  // Present iff the session is hibernated; the typed account behind the
+  // `hibernated` bool, which stays as its coarse projection.
+  // A frontend renders the revival gate from this.
+  agentrepl.v1.HibernationDetail hibernation = 21;
+}
+
+// Whether a session's on-disk transcript has been backfilled into the store.
+//
+// This is the completion signal the never-blue contract needs: a workspace
+// whose session is LIVE but whose history never arrived is still blue, and
+// "live" alone cannot tell those apart. DAEMON-RESOLVED, never frontend-
+// derived, and carried on SessionView so it rides every connect snapshot.
+//
+// DERIVED, not reported. The sidecar has no channel to the daemon at all: it
+// writes to the shim-store, discards the store's own StoreWriteAck, keeps its
+// cursor per-FILE (dev:inode) rather than per-session, and emits no terminal
+// marker for a finished file. So the daemon reads the only evidence that
+// actually reaches it — the event stream — and the mapping is:
+//
+//   PENDING  a transcript exists on disk for this session's cwd, but no
+//            file-plane event has arrived for it yet.
+//   DONE     at least one file-plane record has arrived, so the file plane
+//            really did deliver into the store.
+//   FAILED   the sidecar could not read part of the transcript. It used to say
+//            so with a core.v1.UnparsedEvent, which was durable and DID reach
+//            the daemon; that arm is now store.v1's unsupported half, which
+//            deliberately never leaves the shim — so this state currently has no
+//            evidence to resolve from. Surfaced loudly rather than left reading
+//            as "not yet".
+//
+// KNOWN LIMITATION — a sidecar read error that is NOT a malformed line (a
+// permission error, an unreadable project dir) is only logged sidecar-side and
+// retried every second forever, with nothing durable written. It therefore
+// manifests here as a PENDING that never advances, not as FAILED. Closing that
+// needs a sidecar report the wire does not carry today; the cheapest honest
+// paths are the StoreWriteAck the sidecar currently throws away, or a status
+// event on its store connection.
+enum BackfillState {
+  // No transcript on disk for this session's cwd: a genuinely fresh
+  // workspace with nothing to backfill. NOT "unknown" — an empty workspace
+  // is a real, correct answer, and it is what a blue workspace should be.
+  BACKFILL_STATE_UNSPECIFIED = 0;
+  BACKFILL_STATE_PENDING = 1;
+  BACKFILL_STATE_DONE = 2;
+  BACKFILL_STATE_FAILED = 3;
+}
+
+// Daemon-level identity/liveness Emacs read from GET /sessions'
+// envelope (boot detection, version-mismatch warnings, binary staleness).
+message DaemonView {
+  string boot_id = 1;
+  string protocol_version = 2;
+  int64 daemon_binary_mtime_ms = 3;
+  string daemon_version = 4;
+}
+
