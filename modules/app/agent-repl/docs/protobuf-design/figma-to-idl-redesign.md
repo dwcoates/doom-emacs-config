@@ -106,6 +106,76 @@ that transport.
 
 ## Landed changes
 
+### `conversation.v1/tool_call.proto`: typed tool arms, `ToolCallId`, outcome and scope arms
+
+**What changed.**
+
+- `ToolCallId { string value }` is new: the typed identity of a tool call,
+  the same remedy as `MessageId`. `ToolCallBlock.tool_call_id` and
+  `ToolReturned.tool_call_id` embed it. `DetachedWorkStarted.origin_tool_call_id`
+  (still a `string`) converts at `detached_work.proto`'s turn.
+- `ToolCallBlock` loses `string tool_name` and `google.protobuf.Struct
+  arguments`; it gains `oneof call` with fourteen arms — thirteen typed tools
+  (`bash`, `read`, `write`, `edit`, `grep`, `glob`, `agent`, `workflow`,
+  `skill`, `send_message`, `task_create`, `task_update`, `task_stop`) and
+  `unmodeled { string tool_name; Struct arguments }`. THE ARM IS THE TOOL;
+  a name beside a typed arm would be a second spelling.
+- `ToolCallGrep.output` is a oneof (`GrepOutputContent { line_numbers,
+  context_* }`, `GrepOutputFilesWithMatches {}`, `GrepOutputCount {}`), not
+  an enum: line numbers and context exist only in content mode.
+- `TaskStatus` is a oneof of four empty arms; `ToolCallTaskUpdate` uses it as
+  `optional`, with every other field `optional` because an update carries
+  only what changed.
+- `ToolReturned` loses `bool is_error` and `content`; it gains `oneof outcome`
+  with `ToolReturnedSucceeded { content }` and `ToolReturnedFailed { content }`.
+- `PermissionAllowed` loses `bool for_session`; it gains `oneof scope` with
+  `PermissionAllowedOnce {}` and `PermissionAllowedForSession {}`.
+- `PermissionAsked` unchanged; its comment now states WHY it carries the call
+  whole (stream-plane timing).
+
+**Why, in the user's terms.** "Toolcalls look good." The typing removes a
+client deriving from an untyped blob: the webapp branched on `tool_name` in
+eight places (`render.ts:1691-1740`, `async-stream.ts:146-190`,
+`permission-preview.ts:33-45`, `stream-member.ts:94`) to dig `command`,
+`file_path`, `pattern`, `summary`, `skill`, `status` out of a Struct by string
+key. The thirteen typed tools are exactly the tools those sites branch on. The
+grep oneof came from the user's heuristic, stated during this increment: if
+any value of an enum corresponds to adjacent information exclusive to that
+value, that is a strong (sufficient, not necessary) indicator the enum should
+be a oneof with the exclusive information confined to the arm.
+
+**Two untyped fields, each ACCEPTED as a cost by its own selection.**
+
+- `ToolCallUnmodeled.arguments` (`Struct`) — the producer holds no schema for
+  a tool an MCP server registered at runtime; nothing branches on a key
+  inside it.
+- `ToolCallWorkflow.args` (`Value`) — arbitrary user-authored JSON only the
+  workflow script reads; the producer cannot know its shape and nothing
+  renders from it.
+
+**Consequences.**
+
+- The thirteen arms' field sets are the vendor's public tool schemas AS
+  KNOWN, not read off the shim: the comment on `ToolCallBlock` says so, and
+  the implementation wave VERIFIES each arm against real transcripts before
+  the shim converts into it. A vendor field no arm carries is not lost — the
+  store's internal half retains the source record when conversion dropped
+  structure (superseded record, "A record may be partially convertible").
+- `conversation.v1` is no longer vendor-TOOL-neutral: it names Claude Code's
+  built-in tools. It remains vendor-CONTENT-neutral (the block model). This
+  was weighed against keeping `Struct` and having the daemon resolve a typed
+  per-tool card in `frontend.v1`; the user chose typing at the record.
+- The shim's converter grows a per-tool switch; adding a tool later is adding
+  an arm, and an unhandled arm is a compile-surfaced gap in every consumer.
+- Every consumer of `tool_name` — the webapp's eight sites, the daemon's
+  async classification (`Agent`/`Task`/`Workflow` by name), permission
+  preview — reads the arm instead. `Task` (the older name for `Agent`) maps
+  onto the `agent` arm at conversion; the wire does not carry the alias.
+- The `StopInterrupted` question stays open for `agent.proto`: whether any
+  producer observes `interrupted` as a stop reason.
+- Open, NOT modeled: an allow carrying the user's EDITED input
+  (`updatedInput`). Whether the transcript preserves it is unverified.
+
 ### `conversation.v1` is one file per concern: `message.proto` keeps the record and the arm oneof, the arm bodies move to dedicated files
 
 **What changed.** The regrouped `message.proto` was split along its section
