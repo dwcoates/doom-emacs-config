@@ -17,8 +17,8 @@ superseded record), no `frontend.v1` component data has any path to the webapp
 at all. The composition rule is nowhere in force.
 
 The redesign walks every surface, ONE `.proto` FILE AT A TIME, in the order
-`frontend.v1` → `agentrepl.v1` → `conversation.v1` → `shim.v1` → `store.v1` →
-`state.v1`. For `agentrepl.v1` the RPC inventory is hashed out explicitly first,
+settled under "The iteration sequence, as walked" below (`conversation.v1`
+first, then `frontend.v1`, `agentrepl.v1`, `shim.v1`, `store.v1`, `state.v1`). For `agentrepl.v1` the RPC inventory is hashed out explicitly first,
 then the shapes.
 
 ## The record this supersedes
@@ -105,6 +105,26 @@ is carried in, not re-walked; the sequence's stage 3 designs endpoints on
 that transport.
 
 ## Landed changes
+
+### `conversation.v1/user.proto`: shapes unchanged, `UserSaid` comment states its two readings
+
+**What changed.** No shape change. `UserSaid`'s comment now states (a) the
+nested-prompt reading — under a `DetachedAgent` container it is the spawning
+agent's prompt, read from the parent chain, which `MessageAuthor`'s deletion
+made implicit; and (b) that a session command is NOT a `UserSaid`, because
+the daemon recognizes one before forwarding and it earns no user message
+(`session_command.proto:66`), whereas a custom command/skill expands into a
+prompt and is one.
+
+**Why, in the user's terms.** Approved. The user asked the UX reason for
+`UserContent` being a repeated block list rather than text + images: a person
+interleaves words and pictures, the vendor's user message is an ordered block
+array, and the feed draws it in composed order — one text + repeated images
+would lose placement and force one text run.
+
+**Consequences.** None new. Considered and NOT proposed: a `UserSaid` arm for
+a session command — never a record by `session_command.proto`'s own rule;
+`session_command.proto` stays a leaf and is judged at its own turn.
 
 ### `conversation.v1/agent.proto`: `ThinkingBlock` as two arms, `StopRefusal` added, comments repaired
 

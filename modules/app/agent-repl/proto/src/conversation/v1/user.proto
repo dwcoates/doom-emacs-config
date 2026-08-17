@@ -8,7 +8,17 @@ import "conversation/v1/content_blocks.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
-// Something a person typed. The opening of a turn.
+// Something a person typed — the opening of a turn — or, when nested inside
+// detached agent work, the prompt that work was given by whoever spawned it.
+// Which of the two is read from the parent chain, never from a field: at the
+// top level it is a person, under a DetachedAgent it is the spawning agent's
+// prompt.
+//
+// A SESSION COMMAND IS NOT ONE OF THESE. The daemon recognizes `/clear`,
+// `/compact`, `/model` … (session_command.proto) before forwarding a prompt,
+// and a recognized command earns no user message; a custom command or skill
+// EXPANDS into a prompt, and the text the user typed really is the turn's
+// opening and really is one of these.
 message UserSaid {
   // What they typed, and anything they attached. NOT a bare TextBlock: a person
   // pastes images, and a single block could not hold one alongside their words.
