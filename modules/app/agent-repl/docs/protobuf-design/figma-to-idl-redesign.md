@@ -106,6 +106,32 @@ that transport.
 
 ## Landed changes
 
+### `conversation.v1/api.proto`: `FailureRaised` → `ApiRequestFailed`, with the vendor's error kinds as arms
+
+**What changed.** `FailureRaised { summary, detail, retry_in_ms }` becomes
+`ApiRequestFailed { string message; oneof kind { rate_limited, overloaded,
+authentication_failed, permission_denied, invalid_request,
+request_too_large, not_found, internal, unmodeled { type } } }`.
+`retry_after_ms` is `optional` and lives ONLY on `ApiRateLimited` and
+`ApiOverloaded`. The `MessagePayload` arm renames `failure_raised` →
+`api_request_failed` (tag 4 unchanged).
+
+**Why, in the user's terms.** "Looks good." The concern is the API's own
+outcome, and the vendor's error taxonomy is a documented closed set
+(400/401/403/404/413/429/500/529 with named types), so it is arms plus
+`unmodeled`, not two prose strings. The zero-sentinel `retry_in_ms` becomes
+presence, confined by adjacent-exclusivity to the two arms it applies to.
+Recoverability stays the daemon's judgement.
+
+**Consequences.**
+
+- Every consumer of `FailureRaised`/`failure_raised` (daemon translate,
+  webapp decoder, elisp) renames and switches on `kind`.
+- To verify at implementation: whether the producer sees the error TYPE
+  structured (SDK error object) or only the CLI's `"API Error: 429 …"` text.
+  If only text, the arm is derived from the status code that text carries,
+  and the wave records that derivation as the producer's, once.
+
 ### `conversation.v1/context_cut.proto`: `ContextTokenDelta` shared by both cuts
 
 **What changed.** New `ContextTokenDelta { int64 tokens_before; int64

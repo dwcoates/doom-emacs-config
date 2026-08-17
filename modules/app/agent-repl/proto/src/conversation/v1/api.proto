@@ -8,30 +8,80 @@ package conversation.v1;
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
-// A failure the PRODUCER OBSERVED and the vendor RECORDED.
+// A request to the vendor API failed, and the vendor RECORDED that it did.
 //
-// NARROW ON PURPOSE, and the narrowing is the point. A failure card the daemon
-// SYNTHESIZED — a session that never started, a store write the shim rejected —
-// is not this: nothing observed it and no transcript holds it, so it has no
-// producer and cannot be an entry at all. That is `frontend.v1.FailureCardView`,
-// which the daemon mints and pushes.
+// NARROW ON PURPOSE. A failure card the daemon SYNTHESIZED — a session that
+// never started, a store write the shim rejected — is not this: nothing
+// observed it and no transcript holds it. That is `frontend.v1`'s failure
+// card, which the daemon mints and pushes. What lands here is the vendor's
+// own recorded error, which the CLI writes to its transcript and the sidecar
+// reads back; a reader scrolling back must see that the turn failed rather
+// than find it merely absent.
 //
-// What lands here is the other kind: the vendor's own recorded error, which the
-// CLI writes to its transcript and the sidecar reads back. It is durable
-// because the vendor made it durable, and a reader scrolling back must see that
-// the turn failed rather than find it merely absent.
-//
-// NO RECOVERY CLASSIFICATION HERE. Whether anything can be done about a failure
-// is the daemon's judgement (`internal/errclass`), and it reaches a client
-// already resolved on FailureCardView. A producer stating it too would be a
-// second authority on one question, and the two would disagree.
-message FailureRaised {
-  // What went wrong, as the vendor reported it.
-  string summary = 1;
-  // The underlying detail, for someone who wants it. Held apart from the
-  // summary so a client can show one without the other.
-  string detail = 2;
-  // How long the vendor said it would wait before retrying, in millis. Zero
-  // means it said nothing — NOT that it will retry immediately.
-  int64 retry_in_ms = 3;
+// THE KIND IS THE VENDOR'S, NOT A CLASSIFICATION. The arm names the error
+// type the API itself declares (its documented closed set); whether anything
+// can be DONE about it is the daemon's judgement and reaches a client already
+// resolved on the failure card. A producer stating recoverability here would
+// be a second authority on one question.
+message ApiRequestFailed {
+  // What went wrong, as the vendor worded it. Held apart from the kind so a
+  // client can show the sentence without switching on the arm.
+  string message = 1;
+  oneof kind {
+    // 429. The only kind that carries a retry hint, so the hint lives here.
+    ApiRateLimited rate_limited = 2;
+    // 529. The API is overloaded; also carries the retry hint when given.
+    ApiOverloaded overloaded = 3;
+    // 401 — the credential was rejected.
+    ApiAuthenticationFailed authentication_failed = 4;
+    // 403 — the credential lacks permission for this request.
+    ApiPermissionDenied permission_denied = 5;
+    // 400 — the request itself was malformed or refused.
+    ApiInvalidRequest invalid_request = 6;
+    // 413 — the request exceeded the size limit.
+    ApiRequestTooLarge request_too_large = 7;
+    // 404 — the model or resource does not exist.
+    ApiNotFound not_found = 8;
+    // 500 — the API's own internal error.
+    ApiInternal internal = 9;
+    // A type the API declared that this schema does not model, kept by name.
+    ApiUnmodeledError unmodeled = 10;
+  }
+}
+
+// The API rate-limited the request.
+message ApiRateLimited {
+  // How long the vendor said to wait before retrying, in millis, WHEN it said.
+  // Unset means it said nothing — which is different from "retry now".
+  optional int64 retry_after_ms = 1;
+}
+
+// The API was overloaded.
+message ApiOverloaded {
+  // As ApiRateLimited.retry_after_ms.
+  optional int64 retry_after_ms = 1;
+}
+
+// The credential was rejected.
+message ApiAuthenticationFailed {}
+
+// The credential lacks permission for this request.
+message ApiPermissionDenied {}
+
+// The request itself was malformed or refused.
+message ApiInvalidRequest {}
+
+// The request exceeded the size limit.
+message ApiRequestTooLarge {}
+
+// The model or resource does not exist.
+message ApiNotFound {}
+
+// The API's own internal error.
+message ApiInternal {}
+
+// An error type this schema does not model.
+message ApiUnmodeledError {
+  // The vendor's type string, so a later schema knows what to add.
+  string type = 1;
 }

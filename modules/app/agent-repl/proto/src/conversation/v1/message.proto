@@ -94,8 +94,8 @@ message MessagePayload {
     // act, not a dialog the daemon invented.
     PermissionAsked permission_asked = 3;
 
-    // Something went wrong, stated as a card the user reads and acts on.
-    FailureRaised failure_raised = 4;
+    // A request to the vendor API failed, and the vendor recorded that it did.
+    ApiRequestFailed api_request_failed = 4;
 
     // The conversation was CUT here. It is a message because a reader must see
     // where, rather than merely finding the history shorter than they left it.
