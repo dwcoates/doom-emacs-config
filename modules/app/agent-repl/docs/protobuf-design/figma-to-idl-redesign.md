@@ -106,6 +106,31 @@ that transport.
 
 ## Landed changes
 
+### `conversation.v1/context_cut.proto`: `ContextTokenDelta` shared by both cuts
+
+**What changed.** New `ContextTokenDelta { int64 tokens_before; int64
+tokens_after }`. `ContextCleared` (was empty) gains `ContextTokenDelta tokens
+= 1`; `ContextCompacted` loses its two bare `int64`s and gains
+`ContextTokenDelta tokens = 2` beside `summary`. `ContextCut` unchanged.
+
+**Why, in the user's terms.** "Clearing context doesn't mean context goes to
+zero — there's still system prompt and skills and whatnot that get reloaded
+into context." So a clear has a before/after exactly as a compaction does,
+and one message carries it for both. This is a duplicated-VALUE-per-arm case
+made into a shared TYPE within the namespace — allowed, because it is one
+fact (a size change) with one canonical form, not two arms re-spelling each
+other.
+
+**Consequences.**
+
+- The producer must observe the post-clear context size. If the vendor does
+  not report it on a clear, `tokens_after` cannot be filled honestly; the
+  implementation wave verifies what the CLI writes on `/clear` before the
+  field is populated, and surfaces a gap rather than writing zero.
+- Consumers reading `ContextCompacted.tokens_before/after` read
+  `.tokens.tokens_before/after`.
+- Naming: "delta" carries endpoints, not a difference; the comment says why.
+
 ### `conversation.v1/content_blocks.proto`: `ImageBlock` location as two arms; `UnsupportedBlock` is not a fallback
 
 **What changed.** `ImageBlock.source` (a string that was "a path or URL")

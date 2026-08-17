@@ -19,17 +19,37 @@ message ContextCut {
   }
 }
 
+// What the cut did to the context's size: how many tokens it held before,
+// and how many after. NAMED FOR WHAT IT DESCRIBES — the change a cut made —
+// though it carries the two endpoints rather than a difference, because a
+// reader wants to see "180k → 12k", and a difference alone cannot show that.
+//
+// Every cut has one, INCLUDING a clear: clearing does not empty the context.
+// The system prompt, loaded skills, memory files and the like are reloaded,
+// so `tokens_after` is small, not zero — and stating it is what lets a reader
+// see that rather than assume it.
+message ContextTokenDelta {
+  // Tokens in context immediately before the cut.
+  int64 tokens_before = 1;
+  // Tokens in context immediately after the cut, once whatever survives or
+  // is reloaded is counted.
+  int64 tokens_after = 2;
+}
+
 // History was discarded with nothing left in its place.
-message ContextCleared {}
+message ContextCleared {
+  // What the clear did to the context's size. Not zero after: see
+  // ContextTokenDelta.
+  ContextTokenDelta tokens = 1;
+}
 
 // History was replaced by a summary of itself.
 message ContextCompacted {
-  // The summary that replaced the history, which the feed shows in its place so
-  // the cut is not a hole. AgentContent because the summary is the agent's own
-  // prose about what it is discarding.
+  // The summary that replaced the history, which the feed shows in its place
+  // so the cut is not a hole. AgentContent because the summary is the agent's
+  // own prose about what it is discarding.
   AgentContent summary = 1;
-  // What the context measured before and after, so a reader can see what the
-  // compaction bought rather than being told it happened.
-  int64 tokens_before = 2;
-  int64 tokens_after = 3;
+  // What the compaction did to the context's size, so a reader can see what
+  // it bought rather than being told it happened.
+  ContextTokenDelta tokens = 2;
 }
