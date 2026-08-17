@@ -1,24 +1,501 @@
-// footer.proto — The consolidated progress footer.
+// footer.proto — THE FOOTER: the workspace's status strip, and (increment 2)
+// its expanded section. Per-workspace; resolved by the daemon.
 //
-// (The daemon-held prompt queue moved to prompt_queue.proto: it is its own
-// component with its own stream, not the footer's. There is no footer
-// composer — the composer is host-native.)
+// THE MAIN STRIP, left to right — resolution INCREASES left to right, and all
+// three status sections are TYPED, each "less" typed than the last by carrying
+// more of its information in text fields:
 //
-// It also carries the plumbing the footer and every other surface resolve
-// against — the per-workspace state, the per-session catalog entry, and their
-// closed vocabularies — in the PLUMBING section below.
+//   ┌───────────┬─────────────────────┬──────────────────────────────┬───────┬─────────────────────────┐
+//   │ merging   │ cherry-picking 3/7  │ 4f2a1c: fold tokens into api │ 0:42  │ 18.2k in · 3.1k thought │
+//   └───────────┴─────────────────────┴──────────────────────────────┴───────┴─────────────────────────┘
+//     Status      SubStatus             StatusActivity                 Clock   Tokens
+//     coarsest ──────────── resolution increases ────────────► finest
+//
+//   Status         the coarsest state, one word + color, a small closed set;
+//                  `interrupted` is a status like any other, cleared by the
+//                  next status update.
+//   SubStatus      the step WITHIN the status, typed per status family, with
+//                  the small facts a step has (queue position, commit counts).
+//   StatusActivity the finest, DYNAMIC line: typed KINDS whose payload is
+//                  mostly text the daemon composed.
+//   Clock          how long the current turn has been running.
+//   Tokens         this turn's cost so far; opens the token-breakdown menu.
+//
+// Gone from the strip: the interrupt chip (an `interrupted` status now), and
+// the counters (held → the daemon-hold tray's heading; permissions → the
+// feed's cards; tasks → the tray/sheet).
+//
+// EVERY FIELD IS AN ELEMENT MESSAGE, nested as the UI nests. The daemon
+// resolves every level; the client renders and derives nothing — there is no
+// client-side precedence between windows, no phase→word table, no mapping of
+// any state to a color.
 
 syntax = "proto3";
 
 package frontend.v1;
 
-import "shim/v1/core.proto";
 import "conversation/v1/api.proto";
 import "frontend/v1/failure.proto";
 import "frontend/v1/feed.proto";
 import "agentrepl/v1/shared.proto";
+import "shim/v1/core.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// ==========================================================================
+// THE FOOTER VIEW
+// ==========================================================================
+
+// The footer, resolved completely by the daemon.
+message FooterView {
+  // The workspace this footer belongs to. STAGE-3b decides whether a
+  // per-workspace stream's element still carries it.
+  FooterWorkspace workspace = 1;
+  // The staleness fence for this push. STAGE-3b decides whether cross-stream
+  // fencing survives per-component streams.
+  FooterFence fence = 2;
+  // The main strip.
+  FooterStrip strip = 3;
+  // The expanded section (rows below the strip, and the sheet). Declared
+  // empty here; filled by the next increment.
+  FooterExpanded expanded = 4;
+}
+
+// The workspace the footer belongs to.
+message FooterWorkspace {
+  // Absolute worktree dir.
+  string dir = 1;
+}
+
+// The staleness fence for this push: opaque, compared byte-wise, never parsed.
+message FooterFence {
+  string token = 1;
+}
+
+// The expanded section. FILLED BY THE NEXT INCREMENT — empty here on purpose,
+// not a guess at its elements.
+message FooterExpanded {}
+
+// ==========================================================================
+// THE MAIN STRIP
+// ==========================================================================
+
+// The main strip: five slots, left to right.
+message FooterStrip {
+  FooterStatus status = 1;
+  // Unset when the status has no substructure (waiting, interrupted,
+  // background, asleep).
+  FooterSubStatus sub_status = 2;
+  // Unset when the daemon has nothing finer to say.
+  FooterStatusActivity activity = 3;
+  FooterClock clock = 4;
+  FooterTokens tokens = 5;
+}
+
+// ---- 1. Status — coarsest -------------------------------------------------
+
+// The coarsest state. THE SET ARM IS THE STATUS; every arm is EMPTY, being
+// set is the whole assertion. Each arm's color is the shared render-colors
+// vocabulary's, one per arm, resolved by the daemon into the CSS class the
+// client applies; the client holds no table.
+message FooterStatus {
+  oneof status {
+    // Nothing running, route proven usable (ready, or a response unread).
+    FooterStatusIdle idle = 1;
+    // A turn is in flight (submitting, thinking, clearing, compacting).
+    FooterStatusThinking thinking = 2;
+    // Parked on YOU — a permission, a question.
+    FooterStatusWaiting waiting = 3;
+    // The last turn was interrupted; cleared by the next status update.
+    FooterStatusInterrupted interrupted = 4;
+    // A merge run owns the session.
+    FooterStatusMerging merging = 5;
+    // No foreground turn, but detached work is live.
+    FooterStatusBackground background = 6;
+    // The vendor or the account said no (auth, usage limit, persistent
+    // 4xx/5xx). A REPORT of the last turn's conclusion; gates nothing.
+    FooterStatusBlocked blocked = 7;
+    // Hibernated on purpose; nothing is wrong.
+    FooterStatusAsleep asleep = 8;
+    // The route Emacs→daemon→shim is compromised on OUR side (starting,
+    // degraded, severed, dead, start failed).
+    FooterStatusDisconnected disconnected = 9;
+  }
+}
+message FooterStatusIdle {}
+message FooterStatusThinking {}
+message FooterStatusWaiting {}
+message FooterStatusInterrupted {}
+message FooterStatusMerging {}
+message FooterStatusBackground {}
+message FooterStatusBlocked {}
+message FooterStatusAsleep {}
+message FooterStatusDisconnected {}
+
+// ---- 2. SubStatus — the step within the status ----------------------------
+
+// The step WITHIN the status, typed per status family. The family arm set
+// here MUST agree with FooterStatus's arm: a `merging` sub-status under an
+// `idle` status is a daemon fault, rejected loudly.
+message FooterSubStatus {
+  oneof sub_status {
+    FooterSubStatusThinking thinking = 1;
+    FooterSubStatusMerging merging = 2;
+    FooterSubStatusDisconnected disconnected = 3;
+    FooterSubStatusIdle idle = 4;
+    FooterSubStatusBlocked blocked = 5;
+  }
+}
+
+// The steps of a turn in flight.
+message FooterSubStatusThinking {
+  oneof step {
+    // A prompt is committed and not yet acked by the shim.
+    FooterSubStatusThinkingSubmitting submitting = 1;
+    // The agent is working.
+    FooterSubStatusThinkingThinking thinking = 2;
+    // The conversation is being cleared.
+    FooterSubStatusThinkingClearing clearing = 3;
+    // The context is being compacted.
+    FooterSubStatusThinkingCompacting compacting = 4;
+  }
+}
+message FooterSubStatusThinkingSubmitting {}
+message FooterSubStatusThinkingThinking {}
+message FooterSubStatusThinkingClearing {}
+message FooterSubStatusThinkingCompacting {}
+
+// The steps of a merge run — the run's own phase vocabulary, projected.
+message FooterSubStatusMerging {
+  oneof step {
+    // The first instant of a merge, before anything durable exists for it.
+    FooterSubStatusMergingEnqueuing enqueuing = 1;
+    // Waiting behind other workspaces' merges.
+    FooterSubStatusMergingQueued queued = 2;
+    // The configured before-action is running.
+    FooterSubStatusMergingBeforeAction before_action = 3;
+    // Commits are landing one at a time.
+    FooterSubStatusMergingCherryPicking cherry_picking = 4;
+    // The landed commit is under test.
+    FooterSubStatusMergingTesting testing = 5;
+    // Stopped on a conflict awaiting resolution.
+    FooterSubStatusMergingConflict conflict = 6;
+    // The configured after-action is running.
+    FooterSubStatusMergingAfterAction after_action = 7;
+    // The run failed.
+    FooterSubStatusMergingFailed failed = 8;
+    // The run settled successfully.
+    FooterSubStatusMergingMerged merged = 9;
+  }
+}
+message FooterSubStatusMergingEnqueuing {}
+// The queue place the run was admitted at.
+message FooterSubStatusMergingQueued {
+  // 1-based position in its repo's queue.
+  int32 position = 1;
+  // How many are queued in that repo.
+  int32 depth = 2;
+}
+message FooterSubStatusMergingBeforeAction {
+  // The configured action, for display.
+  string action = 1;
+}
+message FooterSubStatusMergingCherryPicking {
+  int32 commits_total = 1;
+  int32 commits_landed = 2;
+}
+message FooterSubStatusMergingTesting {
+  int32 commits_total = 1;
+  // The commit under test is landed but ungated.
+  int32 commits_landed = 2;
+}
+message FooterSubStatusMergingConflict {}
+message FooterSubStatusMergingAfterAction {
+  // The configured action, for display.
+  string action = 1;
+}
+message FooterSubStatusMergingFailed {}
+message FooterSubStatusMergingMerged {}
+
+// The ways the route can be compromised.
+message FooterSubStatusDisconnected {
+  oneof step {
+    // A bring-up is in flight; the route is not yet proven.
+    FooterSubStatusDisconnectedStarting starting = 1;
+    // Running, but with an open fault on the route.
+    FooterSubStatusDisconnectedDegraded degraded = 2;
+    // The backing process is gone; the workspace is recoverable.
+    FooterSubStatusDisconnectedSevered severed = 3;
+    // Terminal: no live session backs the workspace.
+    FooterSubStatusDisconnectedDead dead = 4;
+    // The bring-up failed outright.
+    FooterSubStatusDisconnectedStartFailed start_failed = 5;
+  }
+}
+message FooterSubStatusDisconnectedStarting {}
+message FooterSubStatusDisconnectedDegraded {}
+message FooterSubStatusDisconnectedSevered {}
+message FooterSubStatusDisconnectedDead {}
+message FooterSubStatusDisconnectedStartFailed {}
+
+// The two flavors of idle.
+message FooterSubStatusIdle {
+  oneof step {
+    // Live, proven usable, nothing to read.
+    FooterSubStatusIdleReady ready = 1;
+    // The turn finished and its response is unread.
+    FooterSubStatusIdleDone done = 2;
+  }
+}
+message FooterSubStatusIdleReady {}
+message FooterSubStatusIdleDone {}
+
+// What the vendor/account said no about.
+message FooterSubStatusBlocked {
+  oneof step {
+    FooterSubStatusBlockedAuth auth = 1;
+    FooterSubStatusBlockedUsageLimit usage_limit = 2;
+    FooterSubStatusBlockedVendorError vendor_error = 3;
+  }
+}
+message FooterSubStatusBlockedAuth {}
+message FooterSubStatusBlockedUsageLimit {}
+message FooterSubStatusBlockedVendorError {}
+
+// ---- 3. StatusActivity — finest, dynamic ----------------------------------
+
+// The finest line: typed KINDS whose payload is mostly text the daemon
+// composed. A new thing to say is a new arm; `note` is the daemon's free line
+// for a thing that has no kind yet.
+message FooterStatusActivity {
+  oneof activity {
+    FooterStatusActivityMergingCommit merging_commit = 1;
+    FooterStatusActivityHook hook = 2;
+    FooterStatusActivityRetrying retrying = 3;
+    FooterStatusActivityAuthenticating authenticating = 4;
+    FooterStatusActivityBlockedOnUser blocked_on_user = 5;
+    FooterStatusActivityRateLimited rate_limited = 6;
+    FooterStatusActivityNote note = 7;
+  }
+}
+// The commit a merge is landing right now.
+message FooterStatusActivityMergingCommit {
+  string sha = 1;
+  string subject = 2;
+}
+// A hook is running.
+message FooterStatusActivityHook {
+  string name = 1;
+}
+// The vendor call is being retried.
+message FooterStatusActivityRetrying {
+  int32 attempt = 1;
+  // The retry's status summary, verbatim.
+  string status = 2;
+}
+// An auth prompt is up.
+message FooterStatusActivityAuthenticating {
+  // The auth prompt line, verbatim.
+  string line = 1;
+}
+// The session reports it is parked on the user (requires_action) — a fact the
+// daemon cannot otherwise see, so a permission count alone under-reports it.
+message FooterStatusActivityBlockedOnUser {
+  string detail = 1;
+}
+// The rate-limit rung. The vendor bills TWO independent allowances (rolling
+// five-hour session, seven-day weekly) reported through one event; both
+// figures are shown so a reader can tell WHICH allowance the newsworthy
+// percentage belongs to.
+message FooterStatusActivityRateLimited {
+  FooterAllowance session = 1;
+  FooterAllowance weekly = 2;
+}
+// One allowance's last report. PRESENT means the vendor has reported it at
+// all; `newsworthy` is the narrower claim that the report was anything other
+// than a plain "allowed", which is what put the rung up.
+message FooterAllowance {
+  bool newsworthy = 1;
+  // Epoch SECONDS, the vendor event's own unit.
+  int64 resets_at_s = 2;
+  // 0..1.
+  double utilization = 3;
+  // The vendor's status word, verbatim (e.g. "allowed_warning"). Kept
+  // verbatim because the vendor's full vocabulary is not in evidence; typed
+  // arms when it is.
+  string status = 4;
+}
+// The daemon's free line for a thing that has no kind yet.
+message FooterStatusActivityNote {
+  string text = 1;
+}
+
+// ---- 4. Clock ------------------------------------------------------------
+
+// The turn clock. UNSET = no turn in flight; the cell renders idle.
+message FooterClock {
+  optional int64 turn_started_at_ms = 1;
+}
+
+// ---- 5. Tokens -----------------------------------------------------------
+
+// This turn's cost so far. Click opens the token-breakdown menu (its own
+// component). Deliberately NO output-token ticker: the running output figure
+// is unwanted; session-wide and per-model figures are the breakdown's.
+message FooterTokens {
+  // THIS TURN's cumulative EXPENSIVE input — the canonical TokenUsage
+  // input_misses total (written + unwritten), summed across the turn's
+  // responses; cache READS excluded, which is the whole point. Resolved once
+  // by the daemon; rendered verbatim.
+  int64 input_tokens = 1;
+  // Estimated thinking tokens so far this turn (latest-wins ticker).
+  int64 thinking_tokens = 2;
+  // First-token latency of the current message; unset until known.
+  optional int64 ttft_ms = 3;
+}
+
+// ==========================================================================
+// PENDING INCREMENT 2 — the expanded section's messages, kept VERBATIM until
+// their increment: the rows below the strip and the sheet.
+// ==========================================================================
+
+// One turn's excessive expensive-input observation. Computed daemon-side from
+// the turn's result usage as the canonical TokenUsage.input_misses total —
+// both misses together — because the vendor marks nearly all input cacheable:
+// a cold prompt surfaces as `written` while `unwritten` stays near zero even on
+// a full re-ingest.
+message ContextCostAlert {
+  // The turn that crossed the threshold.
+  string turn_id = 1;
+  // The observed expensive cost: the canonical TokenUsage.input_misses total
+  // (written + unwritten), resolved by internal/tokenusage.ExpensiveInput.
+  int64 uncached_input_tokens = 2;
+  // The configured threshold that tripped (default 20000), carried so the
+  // rendering can say "N over M" without knowing daemon config.
+  int64 threshold_tokens = 3;
+  // When the result carrying the usage arrived, unix millis.
+  int64 at_ms = 4;
+  // The turn's attribution, verbatim. A CACHE_KEEP_ALIVE origin here is the
+  // "keep-alive came back cold" alarm — the ping paid full freight, meaning
+  // the cache had already expired — and frontends render it as its own
+  // message rather than a generic expensive-turn note.
+  shim.v1.PromptOrigin prompt_origin = 5;
+}
+// The footer's failure row: the daemon's classified failure as one line.
+//
+// Deliberately a PROJECTION and not the card. The row is one ellipsised line
+// in a fixed-height strip; it shows the sentence, takes its color from the
+// failure's side of the vocabulary, and offers to reveal the card that has the
+// rest. It carries no evidence and no resolution stamp because it renders
+// neither: the row stands until the next turn starts, which is a different
+// lifetime from the card's window.
+message FooterFailureRow {
+  // The sentence, verbatim — the same one the card leads with.
+  string message = 1;
+  // Which side of the failure vocabulary this is, resolved to a color-class
+  // name from the shared render-colors table. The row does not carry the kind
+  // itself: it renders one line and has no use for typed evidence.
+  string tone = 2;
+  // The card to reveal when the row is activated. An empty ref means the row
+  // is not clickable — it never scrolls somewhere arbitrary to look useful.
+  FailureCardRef card = 3;
+}
+// The footer's turn-accounting cell, fully resolved.
+//
+// A turn's accounting is a RECONCILIATION: the daemon compares the usage each
+// response reported against the totals the terminal result claimed, and the
+// cell reports whether that reconciliation held. The comparison, the verdict
+// and the prose are all the daemon's — the client renders a string and picks a
+// class from the verdict arm.
+message FooterAccountingCell {
+  // The cell's text and tooltip, composed daemon-side and rendered verbatim
+  // (the figures a healthy turn shows: quota, duration, token dimensions,
+  // cache hit rate, subagent count, throughput).
+  string summary = 1;
+  // WHETHER the accounting reconciled, as arms rather than a flag, so that a
+  // verdict and the evidence it implies arrive together and a client cannot
+  // render "invalid" with nothing to say about why.
+  oneof verdict {
+    AccountingComplete complete = 2;
+    AccountingIncomplete incomplete = 3;
+    AccountingInvalid invalid = 4;
+  }
+}
+
+// The turn reconciled: every figure in `summary` is backed by evidence.
+message AccountingComplete {}
+
+// The turn's accounting arrived without all of its evidence, so the figures
+// shown are partial. Not a contradiction — an absence.
+message AccountingIncomplete {
+  // What was missing, one display-ready phrase per gap, in display order
+  // (e.g. "usage at turn start was never sampled"). The daemon composes the
+  // prose; the client concatenates and renders, and parses nothing. Never
+  // empty when this arm is set — an incompleteness with nothing to name is a
+  // daemon fault, not a renderable state.
+  repeated string missing = 1;
+}
+
+// The turn's accounting CONTRADICTS itself: the responses and the result
+// disagree about what was spent. Distinct from incomplete, because the
+// evidence is present and does not add up.
+message AccountingInvalid {
+  // What contradicts what, one display-ready phrase per problem, in display
+  // order (e.g. "per-model totals disagree between responses and result").
+  // The daemon composes the prose from its own reconciliation records; the
+  // client renders the strings and parses nothing. Never empty when this arm
+  // is set.
+  repeated string problems = 1;
+}
+
+// ==========================================================================
+// PENDING — an ack payload that is called, not drawn; its fate is stage 3.
+// ==========================================================================
+
+
+// What a CancelDetachedAgentsRequest did, carried on the command's ack.
+//
+// It is the SHIM's verdict relayed, not a daemon re-derivation — see
+// shim.v1.DetachedCancelOutcome for why only the shim can answer
+// "what was running when this landed?" without racing task end.
+//
+// A ONEOF OF MESSAGES, never a bool: "did it work" cannot distinguish a stop
+// that reached three agents from a session that had nothing to stop from a
+// session that could not be asked, and a frontend renders those three
+// differently.
+message DetachedCancelOutcome {
+  oneof outcome {
+    DetachedAgentsCancelled cancelled = 1;
+    shim.v1.NoDetachedAgentsRunning nothing_running = 2;
+    shim.v1.DetachedCancelUnsupported unsupported = 3;
+  }
+}
+
+// Detached work was running and the stop reached every agent counted here.
+//
+// TODO(respelling): this shares a name with shim.v1.DetachedAgentsCancelled
+// but NOT its contents — that one carries `repeated string task_ids`, this one
+// carries `count`, which has no counterpart there. It was therefore not
+// collapsed into shim.v1's, and DetachedCancelOutcome above stays declared
+// here for the same reason: its `cancelled` arm must reference this message.
+message DetachedAgentsCancelled {
+  // How many detached agents were stopped. A COUNT rather than the shim's
+  // task ids: a task id is daemon-internal bookkeeping a frontend has no
+  // vocabulary for, and what a frontend renders is "cancelled 3 agents". The
+  // ids stay on the shim-wire arm, where the daemon uses them to settle
+  // exactly those agents' detached-work messages.
+  int64 count = 1;
+}
+
+// TWO OF THE THREE ARMS ABOVE NAME shim.v1's MESSAGES DIRECTLY. "Nothing
+// was running" and "this shim cannot be asked" are shim-wire facts the daemon
+// forwards unchanged, so this package keeps no second copy of them to drift
+// against the originals.
+//
+// THE DAEMON STILL REFUSES ON THE `nothing_running` ARM (the ack carries
+// ok=false alongside it): a cancel that stopped nothing is a keystroke that did
+// nothing, and reporting it as success is how a stop that silently missed looks
+// exactly like a stop that worked.
 
 // ==========================================================================
 // PLUMBING: the resolved per-workspace state and the per-session catalog
@@ -516,356 +993,3 @@ message HeartbeatView {
   string fence = 2;
 }
 
-// ---------------------------------------------------------------------------
-// The consolidated progress footer (F1).
-//
-// ONE daemon-resolved frame carrying the footer's EPHEMERAL input: the live
-// tickers, the activity windows, and the ephemeral counts. It replaces the
-// constellation of scattered in-flight indicators the webapp used to derive
-// for itself (the thinking/working/retrying tail rows and the pulse
-// machinery that orbited them).
-//
-// The footer's PHASE is not here. It is the workspace's one authoritative
-// render state, which arrives as WorkspaceState (see the deprecated `state`
-// below for why the copy that used to live here was removed).
-//
-// Resolved by daemon/internal/progress, a SIBLING of the SSM: it folds the
-// same store event stream plus the ephemeral relays into a latest-wins
-// ProgressView per workspace, pushed on change and carried in StateSnapshot.
-// Frontends RENDER it; they never re-derive any of it.
-//
-// Deliberately NO output-token ticker. The token cell shows the CURRENT
-// TURN's cumulative INPUT tokens (cached + uncached) only; the running
-// output-token figure is explicitly unwanted, so the message_delta usage
-// relay is out of this frame's scope entirely. Session-wide and per-model
-// token figures are topbar territory (SessionView) and never appear here.
-// ---------------------------------------------------------------------------
-
-// An activity window: open until cleared. Each window is its own message so
-// window-specific detail has a home rather than being flattened into a
-// stringly-typed status.
-message ProgressWindow {
-  bool active = 1;
-  int64 since_ms = 2;
-  // Window-specific detail (a hook name, an auth prompt line, a retry's
-  // attempt/status summary). Free text for display; never parsed.
-  string detail = 3;
-}
-
-// One ALLOWANCE's rate-limit window, which carries structured detail no other
-// window needs (a reset deadline and a utilization fraction).
-//
-// PRESENT means the vendor has reported this allowance at all, and the figures
-// are the last report's. `active` is the narrower claim that the report was
-// NEWSWORTHY — anything other than a plain "allowed" — which is what decides
-// whether the rung outranks the ordinary activity the footer would otherwise
-// show. The two are deliberately separate: an allowance sitting at 12% is not
-// news, but it is exactly the figure a reader needs beside the allowance that
-// IS, and dropping the message for it is what left the footer unable to say
-// which of the two allowances the percentage it showed belonged to.
-message RateLimitWindow {
-  bool active = 1;
-  int64 resets_at = 2;    // epoch SECONDS (the vendor event's own unit)
-  double utilization = 3;
-  string status = 4;      // e.g. "allowed_warning"
-}
-
-// The interrupt window. Opens the moment the shim's ack
-// lands — the outcome is decided ATOMICALLY on that ack (core.proto
-// InterruptOutcome: the shim's single-threaded liveness check is the
-// answer), so there is no outcome-pending phase to represent. Clears when
-// the next turn starts. `outcome` is carried so ALREADY_COMPLETE and FAILED
-// render distinctly even though neither moves the workspace's phase.
-message InterruptWindow {
-  bool active = 1;
-  int64 since_ms = 2;
-  shim.v1.InterruptOutcome outcome = 3;
-}
-
-message ProgressView {
-  // WHICH WORKSPACE this footer belongs to, and the only addressing this view
-  // carries. It names no session: correlation is exactly what the fence below
-  // does, and it does it without handing a renderer a session vocabulary.
-  string workspace = 1;
-  // The workspace's staleness FENCE at the moment the daemon produced this
-  // push: an opaque token the client compares BYTE-WISE against the fence on
-  // the workspace's current WorkspaceState, and never parses, splits or
-  // interprets. Equal means current; different means stale, and a stale push
-  // is discarded whole rather than partially adopted.
-  //
-  // The daemon mints it and is the only thing that can read meaning into it.
-  // A client that learned to decode it would be depending on a fact this
-  // contract does not offer, and the token's composition is free to change.
-  string fence = 2;
-
-  // DEPRECATED (F5), and no longer populated by the resolver.
-  //
-  // It was a COPY of the SSM's verdict kept in a second message, refreshed
-  // only on this resolver's own triggers. A workspace that acquired a
-  // progress fact before the SSM's state reached this resolver got a view
-  // seeded INIT, and nothing ever corrected it — which is why the footer read
-  // "starting" against an already-green tab until the first prompt moved the
-  // phase. A second copy of an authoritative fact has no correct refresh
-  // policy; the only fix is to stop keeping one.
-  //
-  // The footer now reads the phase off the WorkspaceState the SSM pushes,
-  // which every frontend already receives. The field stays on the wire until
-  // the approval-gated removal pass (proto/AGENTS.md), so an older frontend
-  // decoding an older log still reads what it always did.
-  RenderState state = 3 [deprecated = true];
-
-  // Turn clock: 0 = no turn in flight.
-  int64 turn_started_at_ms = 4;
-
-  // Live tickers (latest-wins), coalesced daemon-side so a high-frequency
-  // source cannot drive the frame rate.
-  int64 thinking_tokens = 5;   // data.ThinkingTokens.estimated_tokens
-  // THIS TURN's cumulative EXPENSIVE input, resolved by the daemon: the
-  // canonical TokenUsage.input_misses total — both misses, written and
-  // unwritten — summed across the turn's assistant messages. Cache READS are
-  // excluded, which is the whole point of the figure. This is the canonical
-  // expensive sum and the frontend renders it verbatim; see the daemon's one
-  // derivation (internal/tokenusage.ExpensiveInput) and the module AGENTS.md
-  // section "One canonical token shape, and the daemon owns every judgment
-  // taken from it".
-  int64 input_tokens = 6;
-  int64 ttft_ms = 7;           // first-token latency of the current message
-
-  // Activity windows: open until cleared.
-  ProgressWindow compacting = 8;       // data.StatusMessage status="compacting"
-  ProgressWindow retrying = 9;         // data.ApiRetry, else the ApiErrorLine
-                                       // retry family (see §retry sourcing)
-  ProgressWindow authenticating = 10;  // data.AuthStatus
-  ProgressWindow hook = 11;            // data.HookStarted / HookResponse
-
-  // The vendor bills TWO independent allowances and reports them through the
-  // SAME data.RateLimitEvent, distinguished only by its `rate_limit_type`:
-  // the rolling five-hour session window, and the seven-day weekly window
-  // (whose per-model and overage-included variants are the same allowance
-  // reported with a narrower scope).
-  //
-  // They get a field each because they are separate facts with separate
-  // deadlines and separate severities. Folding both into one window meant the
-  // last event won, so a weekly figure deep into its allowance was displayed
-  // under the session's name — a reader saw "91% of your session" for a number
-  // that was really the week's, and had no way to tell the two apart.
-  RateLimitWindow rate_limited = 12;          // rate_limit_type "five_hour"
-  RateLimitWindow rate_limited_weekly = 13;   // rate_limit_type "seven_day*"
-
-  // The session itself reporting it is parked on the USER
-  // (data.SessionStateChanged state="requires_action").
-  //
-  // NOT A PHASE. `state` above remains the SSM's verdict and the SSM remains
-  // the sole phase authority; this is an activity window like every other one
-  // here, and it exists because it carries a fact the daemon cannot otherwise
-  // see: the session can be blocked on an interaction the daemon holds no
-  // count for, so `pending_permissions` alone under-reports "waiting on you".
-  ProgressWindow blocked = 14;
-
-  // See InterruptWindow. Ack-opened, next-turn-cleared.
-  InterruptWindow interrupt = 15;
-
-  // The CLASSIFIED error state (F4), and the sole reader-facing account of a
-  // failure on this footer. It carries its own addressing, so nothing else
-  // here needs a second field to point at the failure with.
-  //
-  // TYPED RATHER THAN PROSE, because prose has to be colored by whoever renders
-  // it: a footer handed daemon-authored text can only pick a hardcoded red no
-  // other surface consulted. Carrying the classified failure lets the row take
-  // its color from the same table the card and the workspace do.
-  // Persists until the next turn starts, when it clears; set from a terminal
-  // ApiErrorLine (retries exhausted) or an errored turn end.
-  FooterFailureRow failure = 16;
-
-  // Set when a turn's UNCACHED input cost crossed the alert threshold — the
-  // loud "this prompt re-ingested context" signal. Rendered red in the center
-  // footer (the webapp progress footer, displayed inside the Emacs webview);
-  // Emacs additionally surfaces it in the webview window's mode line, the
-  // only footer surface native Emacs owns. Persists until the next turn
-  // starts, like `failure`. Unset means the last turn was cache-efficient,
-  // which is the only reading of absence.
-  ContextCostAlert expensive_turn = 17;
-
-  // Counts (ephemeral, session-scoped):
-  int64 pending_permissions = 18;
-  int64 queue_depth = 19;
-  int64 live_task_count = 20;
-
-  // The phase word, resolved: exactly what the footer's
-  // phase cell renders. Replaces the client-side RenderState→word/tone/
-  // breathing table. The footer's own copy of the phase fact
-  // (duplicate-don't-share): WorkspaceState remains the authority for state;
-  // this is its footer projection.
-  FooterPhase phase = 21;
-  // The merge chip, resolved: exactly the text and tooltip
-  // the chip renders, or absent when no merge run is publishing. The footer's
-  // own projection of MergeStatus (which other surfaces keep reading for their
-  // own projections).
-  FooterMergeChip merge_chip = 22;
-  // The turn-accounting cell, resolved: the composed summary and the verdict
-  // that classes it. Absent when no turn has settled yet.
-  FooterAccountingCell accounting = 23;
-}
-
-// One turn's excessive expensive-input observation. Computed daemon-side from
-// the turn's result usage as the canonical TokenUsage.input_misses total —
-// both misses together — because the vendor marks nearly all input cacheable:
-// a cold prompt surfaces as `written` while `unwritten` stays near zero even on
-// a full re-ingest.
-message ContextCostAlert {
-  // The turn that crossed the threshold.
-  string turn_id = 1;
-  // The observed expensive cost: the canonical TokenUsage.input_misses total
-  // (written + unwritten), resolved by internal/tokenusage.ExpensiveInput.
-  int64 uncached_input_tokens = 2;
-  // The configured threshold that tripped (default 20000), carried so the
-  // rendering can say "N over M" without knowing daemon config.
-  int64 threshold_tokens = 3;
-  // When the result carrying the usage arrived, unix millis.
-  int64 at_ms = 4;
-  // The turn's attribution, verbatim. A CACHE_KEEP_ALIVE origin here is the
-  // "keep-alive came back cold" alarm — the ping paid full freight, meaning
-  // the cache had already expired — and frontends render it as its own
-  // message rather than a generic expensive-turn note.
-  shim.v1.PromptOrigin prompt_origin = 5;
-}
-
-// The footer phase cell's props. These are resolved DISPLAY properties, not a
-// state: the state lives in WorkspaceState; the daemon projects it into the
-// exact strings/flags the cell draws, so the client holds no mapping table.
-message FooterPhase {
-  // The word the cell renders, verbatim (e.g. "thinking", "compacting").
-  string word = 1;
-  // Vocabulary color-class name for the cell (shared render-colors table).
-  string tone = 2;
-  // Whether the word carries the breathing animation. True exactly for the
-  // active phases; the client applies the animation without knowing which
-  // phases are active.
-  bool breathing = 3;
-}
-
-// The footer merge chip's props: the composed text ("merge queued 2/3") and
-// its tooltip, resolved daemon-side from the merge run's own status. Absence
-// of this message = no chip.
-message FooterMergeChip {
-  // Chip text, verbatim.
-  string text = 1;
-  // Tooltip, verbatim.
-  string title = 2;
-}
-
-// The footer's failure row: the daemon's classified failure as one line.
-//
-// Deliberately a PROJECTION and not the card. The row is one ellipsised line
-// in a fixed-height strip; it shows the sentence, takes its color from the
-// failure's side of the vocabulary, and offers to reveal the card that has the
-// rest. It carries no evidence and no resolution stamp because it renders
-// neither: the row stands until the next turn starts, which is a different
-// lifetime from the card's window.
-message FooterFailureRow {
-  // The sentence, verbatim — the same one the card leads with.
-  string message = 1;
-  // Which side of the failure vocabulary this is, resolved to a color-class
-  // name from the shared render-colors table. The row does not carry the kind
-  // itself: it renders one line and has no use for typed evidence.
-  string tone = 2;
-  // The card to reveal when the row is activated. An empty ref means the row
-  // is not clickable — it never scrolls somewhere arbitrary to look useful.
-  FailureCardRef card = 3;
-}
-
-// The footer's turn-accounting cell, fully resolved.
-//
-// A turn's accounting is a RECONCILIATION: the daemon compares the usage each
-// response reported against the totals the terminal result claimed, and the
-// cell reports whether that reconciliation held. The comparison, the verdict
-// and the prose are all the daemon's — the client renders a string and picks a
-// class from the verdict arm.
-message FooterAccountingCell {
-  // The cell's text and tooltip, composed daemon-side and rendered verbatim
-  // (the figures a healthy turn shows: quota, duration, token dimensions,
-  // cache hit rate, subagent count, throughput).
-  string summary = 1;
-  // WHETHER the accounting reconciled, as arms rather than a flag, so that a
-  // verdict and the evidence it implies arrive together and a client cannot
-  // render "invalid" with nothing to say about why.
-  oneof verdict {
-    AccountingComplete complete = 2;
-    AccountingIncomplete incomplete = 3;
-    AccountingInvalid invalid = 4;
-  }
-}
-
-// The turn reconciled: every figure in `summary` is backed by evidence.
-message AccountingComplete {}
-
-// The turn's accounting arrived without all of its evidence, so the figures
-// shown are partial. Not a contradiction — an absence.
-message AccountingIncomplete {
-  // What was missing, one display-ready phrase per gap, in display order
-  // (e.g. "usage at turn start was never sampled"). The daemon composes the
-  // prose; the client concatenates and renders, and parses nothing. Never
-  // empty when this arm is set — an incompleteness with nothing to name is a
-  // daemon fault, not a renderable state.
-  repeated string missing = 1;
-}
-
-// The turn's accounting CONTRADICTS itself: the responses and the result
-// disagree about what was spent. Distinct from incomplete, because the
-// evidence is present and does not add up.
-message AccountingInvalid {
-  // What contradicts what, one display-ready phrase per problem, in display
-  // order (e.g. "per-model totals disagree between responses and result").
-  // The daemon composes the prose from its own reconciliation records; the
-  // client renders the strings and parses nothing. Never empty when this arm
-  // is set.
-  repeated string problems = 1;
-}
-
-// ==========================================================================
-// Prompt intake: submission, interrupt, and the daemon-held queue of prompts awaiting delivery.
-// ==========================================================================
-
-// What a CancelDetachedAgentsRequest did, carried on the command's ack.
-//
-// It is the SHIM's verdict relayed, not a daemon re-derivation — see
-// shim.v1.DetachedCancelOutcome for why only the shim can answer
-// "what was running when this landed?" without racing task end.
-//
-// A ONEOF OF MESSAGES, never a bool: "did it work" cannot distinguish a stop
-// that reached three agents from a session that had nothing to stop from a
-// session that could not be asked, and a frontend renders those three
-// differently.
-message DetachedCancelOutcome {
-  oneof outcome {
-    DetachedAgentsCancelled cancelled = 1;
-    shim.v1.NoDetachedAgentsRunning nothing_running = 2;
-    shim.v1.DetachedCancelUnsupported unsupported = 3;
-  }
-}
-
-// Detached work was running and the stop reached every agent counted here.
-//
-// TODO(respelling): this shares a name with shim.v1.DetachedAgentsCancelled
-// but NOT its contents — that one carries `repeated string task_ids`, this one
-// carries `count`, which has no counterpart there. It was therefore not
-// collapsed into shim.v1's, and DetachedCancelOutcome above stays declared
-// here for the same reason: its `cancelled` arm must reference this message.
-message DetachedAgentsCancelled {
-  // How many detached agents were stopped. A COUNT rather than the shim's
-  // task ids: a task id is daemon-internal bookkeeping a frontend has no
-  // vocabulary for, and what a frontend renders is "cancelled 3 agents". The
-  // ids stay on the shim-wire arm, where the daemon uses them to settle
-  // exactly those agents' detached-work messages.
-  int64 count = 1;
-}
-
-// TWO OF THE THREE ARMS ABOVE NAME shim.v1's MESSAGES DIRECTLY. "Nothing
-// was running" and "this shim cannot be asked" are shim-wire facts the daemon
-// forwards unchanged, so this package keeps no second copy of them to drift
-// against the originals.
-//
-// THE DAEMON STILL REFUSES ON THE `nothing_running` ARM (the ack carries
-// ok=false alongside it): a cancel that stopped nothing is a keystroke that did
-// nothing, and reporting it as success is how a stop that silently missed looks
-// exactly like a stop that worked.
