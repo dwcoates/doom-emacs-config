@@ -1691,3 +1691,106 @@ the largest one: its handlers return `error` today and the classifier turns
 every one of them into a `FailureKind`, so the funnel has to become a
 per-method arm selection. None of that is done here — this is the contract
 change, and the systems that produce and consume it follow.
+
+## The `service.proto` redesign walks a settled iteration sequence
+
+**Decided.** The redesign that deletes `FrontendFrame` and `StateSnapshot` is
+walked in four stages, highest abstraction first, and a later stage opens only
+after every earlier one is settled:
+
+1. **Transport shape** — whether server-initiated data arrives on one
+   multiplexed stream or on one stream per component.
+2. **Endpoint inventory** — every method by name and one-line purpose, with no
+   shapes attached. This is where each of the outbound god-message's arms is
+   classified as an answer to an existing call, a push endpoint of its own, or
+   homeless, and where the connect snapshot's fields are ruled on one at a
+   time.
+3. **Cross-endpoint conventions** — the rules binding every endpoint at once.
+4. **Per-endpoint request and response shapes**, one endpoint at a time.
+
+The user accepted the default order unamended.
+
+**Transport goes first because it decides whether the rest is coherent.**
+Deleting the outbound god-message is only a real deletion under one of the two
+transport answers; under the other it is a rename, because a single multiplexed
+stream still needs one message enumerating everything that can travel on it.
+
+**STAGE 1 EXPLICITLY REOPENS A DECISION THIS DOCUMENT ALREADY RECORDS AS
+SETTLED** — see "The push channel stays ONE ordered stream" above. Reopening it
+reopens every decision recorded downstream of it, including "`Subscribe`
+streams a wrapper, and the wrapper is not free" and the connect snapshot's
+multi-frame batching rule. Nothing downstream of the transport decision is kept
+merely because it was written down before.
+
+**Recorded so the rejected alternative is not re-proposed in good faith.** The
+per-topic-stream design was already argued and refused, for three concrete
+ordering failures: a workspace revision applied before the snapshot that
+supersedes it, a typing cut retiring a preview whose opening frame never
+landed, and a conversation delta arriving against a workspace the client has
+never heard of. Any reopening must answer those three by construction or it
+loses to them again. The orchestrator re-proposed exactly this alternative in
+this session before reading the recorded refusal, which is precisely the
+failure the "record why the alternatives lost" rule exists to prevent.
+
+## The one multiplexed push stream is REVERSED: one stream per component
+
+**Decided, and it overturns "The push channel stays ONE ordered stream" above.**
+That decision stands retracted. `Subscribe`, `SubscribeRequest`,
+`SubscribeResponse`, `FrontendFrame` and `StateSnapshot` are deleted outright,
+and `frame.proto` and `endpoint_subscribe.proto` are deleted with them. Server
+-initiated data will arrive on one server-streaming endpoint per UI component,
+each in its own `endpoint_` file, and the component's stream is the only place
+that component's data travels.
+
+**WHY, in the user's terms.** `FrontendFrame` is a god-message and a
+god-message should be straight up deleted, not relocated. Every message belongs
+in the endpoint file of the endpoint that carries it, with only genuinely small
+reusable messages living anywhere shared. The connect snapshot was called
+horrifically disorganized, and it is: seventeen fields of unrelated shape, four
+of them documented as host surface that a runtime filter strips before a GUI
+client sees them.
+
+**What the reversal buys, structurally.** Host-only data is stripped today by
+`frontend.Server` at runtime, per-field, on a shared envelope — a correlation,
+not a guarantee, and a missed strip leaks. One stream per component makes that
+authorization a property of the METHOD: a GUI client does not call the host
+component's Watch endpoint, so there is no field to scrub and a missed scrub
+stops being representable.
+
+**What it costs, ACCEPTED BY THE USER as the price.** The previous decision
+refused per-topic streams for three concrete ordering failures. Two of them
+dissolve, and the third does not:
+
+- A workspace revision applied before the snapshot that supersedes it —
+  DISSOLVES. Both are elements of the same component's stream, which is
+  totally ordered.
+- A typing cut retiring a preview whose opening never landed — DOES NOT
+  DISSOLVE under this answer. Typing and conversation are two components and
+  therefore two streams, but one ordering domain. The partition chosen is by
+  COMPONENT, not by ordering domain, so every such pair needs its own fencing
+  answer rather than getting one for free.
+- A conversation delta naming a workspace the client has never heard of —
+  DOES NOT DISSOLVE. Workspace identity and conversation content are different
+  domains under any partition. One stream guaranteed this by position; N
+  streams must answer it at every cross-stream reference.
+
+The user chose the component partition knowing both surviving failures. They
+are not deferred — they are the substance of a cross-endpoint convention that
+the conventions stage must settle, and no component's stream is designed as
+though its references were free.
+
+**Two things left deliberately dangling on disk.** The `Resync`, `FirstPage`
+and `NextPage` docstrings still describe their answers arriving on "the
+Subscribe stream", which no longer exists. Those three are exactly the
+out-of-band answers the redesign exists to reclassify, so the references are
+kept visible as open questions rather than patched into plausible-sounding
+prose. Separately, `SubscribeRequest.client_id` carried the definition of a
+reader's identity as "stable for the life of this stream"; with N streams that
+phrase has no referent, while the `client_id` FIELD survives independently on
+the three requests above. What a reader's identity is scoped to is a
+conventions-stage question and is not answered here.
+
+**The build is broken by this change and that is intended.** The consuming
+systems are rewritten by the implementation fan-out; blocking a settled
+structural decision on downstream compilation is how a design document and the
+schema on disk come to disagree.
