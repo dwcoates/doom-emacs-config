@@ -106,6 +106,67 @@ that transport.
 
 ## Landed changes
 
+### `conversation.v1/detached_work.proto`: the origin call is the whole description; `DetachedWorkKind` and `DetachedMerge` are gone
+
+**What changed.**
+
+- `DetachedWorkStarted { string origin_tool_call_id; string label;
+  DetachedWorkKind kind }` becomes `DetachedWorkStarted { ToolCallBlock
+  origin }`.
+- DELETED: `DetachedWorkKind` and all six arms — `DetachedAgent`,
+  `DetachedShell`, `DetachedWorkflow`, `DetachedSkill`,
+  `DetachedUnclassified`, `DetachedMerge`.
+- `DetachedLost { string inference }` becomes `DetachedLost { oneof how {
+  file_vanished, went_silent, swept_up } }` with three empty arm messages.
+- `DetachedWorkProgressed`, `WorkflowStepObserved`, `WorkflowStep` and its
+  three arms, `SkillBodyResolved`, `DetachedWorkEnded`, `DetachedProcessExit`,
+  `DetachedSucceeded`, `DetachedFailed`, `DetachedCancelled` — unchanged.
+- The file now imports `tool_call.proto`.
+
+**Why, in the user's terms.**
+
+- The kind IS the origin call's `call` arm now that `ToolCallBlock` is typed:
+  `bash` (run_in_background) is a shell, `agent` a subagent, `workflow` a
+  workflow, `skill` a skill, `unmodeled` an unmodeled tool that detached.
+  `DetachedShell.command`, `DetachedSkill.skill_name/args` and
+  `DetachedUnclassified.tool_name` were re-spellings of `ToolCallBash.command`,
+  `ToolCallSkill.skill/args`, `ToolCallUnmodeled.tool_name`. Import the
+  encompassing message; answer 5 (already represented). `label` was a
+  presentation the daemon resolves from the origin (answer 2).
+- `DetachedMerge` — THE USER'S RULING, verbatim in substance: "Merge is a
+  daemon-synthesized action: workspace merging can be represented specially
+  on the frontend, but it's not something the vendor has any knowledge of. It
+  can never be 'detached' because the agent isn't orchestrating it, the
+  daemon is, exclusively." Dropped from this surface (answer 3, abstraction
+  leak). It resolved a contradiction the file carried in its own comments
+  ("NO TOOL SPAWNS IT — the daemon opens it" vs `message.proto`'s "the daemon
+  is not an author here").
+- `DetachedLost.inference` — three enumerated ways in its own comment; a
+  closed set that answers "how did we conclude this" is a oneof.
+
+**A STAGE-2 REQUIREMENT this creates, recorded so it is not lost.** The user
+wants merging supported in the conversation as a `frontend.v1` feature: a
+daemon-synthesized feed item that COALESCES every vendor record produced
+while the merge ran (the merge is a Claude skill execution under the hood,
+plus the resulting actions/responses) into ONE feed entry, and the daemon —
+not any producer — determines which `AgentSaid`/`ToolReturned`/… belong to
+that item. `frontend/v1/feed.proto`'s turn must model that row.
+
+**Consequences.**
+
+- `frontend/v1/feed.proto:587` references `conversation.v1.DetachedWorkKind`
+  and no longer compiles; `conversation.v1` does. Intended — `frontend.v1` is
+  stage 2 and is redesigned there; the break is not patched around.
+- The daemon's async classification by tool NAME (`Agent`/`Task`/`Workflow`)
+  becomes a switch on `origin.call`; the webapp's `asyncShape`/`classifyAsyncSource`
+  likewise. Cards derive their label from `origin` server-side.
+- A producer that emits `DetachedWorkStarted` must hold the originating
+  `ToolCallBlock` at detachment time; the shim sees the call before the result
+  that reveals detachment, so it does. The sidecar reading history has the
+  call in the same transcript.
+- Open, flagged not decided: whether a *skill* is really "detached" work (its
+  records are the main agent's; the nesting is a UI window). Naming only.
+
 ### `conversation.v1/api.proto`: `FailureRaised` → `ApiRequestFailed`, with the vendor's error kinds as arms
 
 **What changed.** `FailureRaised { summary, detail, retry_in_ms }` becomes
