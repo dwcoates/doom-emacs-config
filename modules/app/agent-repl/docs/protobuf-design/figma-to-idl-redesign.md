@@ -114,6 +114,68 @@ that transport.
 
 ## Landed changes
 
+### `frontend.v1/sidebar.proto`: daemon-resolved, global, view-only; `revision`/`boot_id` gone; `RosterSection` shared
+
+**Two settlements above the shapes, both by selection.**
+
+- SCOPE — GLOBAL. The sidebar's stream carries no `workspace`; every webview
+  (one per workspace) watches the same roster and the daemon's stream order
+  is the only order. Recorded together with the rendering topology it rests
+  on: one WKWebView xwidget per workspace, bound for life, in its own pinned
+  Emacs buffer (`lisp/frontend.el:847`), each with its own already-
+  workspace-scoped socket (`webapp/src/address.ts:71`); consolidation to one
+  webview was REFUSED (four objections in the discussion: buffer/xwidget
+  binding, per-workspace socket, `SPC .` alignment, no cross-view sharing of
+  process memory anyway), and endpoint-per-component ≠ connection-per-
+  component — component streams multiplex over the one socket a webview
+  already opens.
+- FILE CONTENTS — VIEW ONLY. The user chose AGAINST the orchestrator's
+  recommendation (view + events per figma→idl). The superseded record's
+  "a request type is `agentrepl`, never `frontend`" (drawn/called) STANDS,
+  unreopened: sidebar clicks are `agentrepl.v1` requests with plain fields.
+  Recorded so the figma→idl "events in the same file" reading is not
+  re-proposed for the other components: in this tree, events are called,
+  not drawn.
+
+**What changed in the file.**
+
+- `WorkspaceRoster.revision` and `boot_id` DELETED with the whole
+  epoch/monotonicity comment — no outside publisher, nothing to order. Fields
+  renumber: `view` 1–2, `recently_merged` 3, `current_dir` 4, `nav_dir` 5.
+- `RosterRepoSection` and `RosterTaskSection` now WRAP the shared
+  `RosterSection { rows, folded, label }` with their own key (`repo_key`;
+  `task_id` + `done`); `RosterTaskSection.title` becomes `section.label`.
+  The user's amendment: "RosterSection should be reused."
+- `RosterRow.last_viewed_at_ms` and `merged_at_ms` are `optional` (presence,
+  not zero sentinels).
+- Header and `status` comment rewritten for ONE resolver (the daemon
+  coarsens `RenderState` onto the dot); the "sidebar.el's wire table is the
+  third face" sentence is gone. Arm set unchanged (26 empty arms); `none`
+  re-described as "registered, no session ever created".
+- Kept, marked for stage 3a: `nav_dir` and `folded` — UI preference the
+  daemon holds only if an `agentrepl.v1` verb tells it; else deleted or made
+  webview-local there.
+
+**Why, in the user's terms.** "Looks good", with the `RosterSection` reuse.
+Emacs has nothing to do with `WorkspaceRoster` under the settled model: "it
+can only register a workspace, and select a workspace. It doesn't have any
+need to be able to work with the underlying workspace representation message
+for the frontend."
+
+**Consequences.**
+
+- `frontend.v1` sidebar messages now flow in exactly ONE direction, daemon →
+  webapp; the old inbound `agentrepl.v1` import of `sidebar.proto` for
+  `PublishWorkspaceRosterRequest.roster` never returns.
+- The webapp's `rosterFromFrame` staleness check on `revision`/`boot_id`, the
+  elisp publisher and the daemon roster retainer are deleted in the wave.
+- Consumers reading `RosterRepoSection.rows/folded/label` and
+  `RosterTaskSection.rows/title` read `.section.*`.
+- `RosterRow.dir` stays a bare `string`. A typed workspace identity is a
+  real question (same argument as `MessageId`), but the fact originates at
+  the daemon; where a daemon-owned identity type lives is a stage-3
+  conventions call, flagged.
+
 ### Sidebar producer settled: the DAEMON owns the roster; Emacs sends COMMANDS, not state (no proto landed yet)
 
 **Decided (stage 2, `sidebar.proto`, above any shape).** `WorkspaceRoster`
