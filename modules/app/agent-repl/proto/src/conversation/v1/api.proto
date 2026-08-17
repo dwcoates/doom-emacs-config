@@ -1,4 +1,6 @@
-// failure.proto — FAILURES a producer observed and the vendor recorded.
+// api.proto — THE VENDOR API'S OWN OUTCOMES: what the API itself recorded about
+// a request — today its failures; the actor here is the API, not the agent,
+// the user, or a tool.
 
 syntax = "proto3";
 
