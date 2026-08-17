@@ -114,6 +114,50 @@ that transport.
 
 ## Landed changes
 
+### `frontend.v1/failure.proto`: the vendor family shrinks to what nothing recorded; `shim.v1` projected out
+
+**What changed.** `FailureKind` goes from 40 arms to 28: machinery 1–17
+unchanged; VENDOR is now five arms — `vendor_max_turns`, `vendor_max_budget`,
+`vendor_execution_error`, `vendor_turn_failed`, `vendor_network_down`
+(18–22, messages renamed `FailureVendor*`, each still carrying
+`VendorFailureContext`); client-local 23–28 unchanged (renumbered). DELETED:
+the ten API-class arms and their `FailureApi*` evidence messages
+(authentication, billing, rate limit, invalid request, server error,
+overloaded, oauth-org, model-not-found, request-failed, unknown), and
+`api_refusal`, `api_max_output_tokens`. The four `shim.v1` types
+`QueryTerminationFailure` named are PROJECTED into local messages
+(`QueryTerminationVendorIdentityUnavailable`, `…UnexpectedEof`,
+`…IteratorFailure {cause}`, `…StartupFailure {cause}`); the `shim.v1` import
+is gone. `VendorFailureContext`, `FailureCardRef` and every machinery
+evidence message unchanged. Compiles.
+
+**Why, in the user's terms.** It stays a shared vocabulary file (the user:
+"unless failure needs to be reused in other files, I don't see the point" —
+it IS reused: `agentrepl.v1` error arms name its evidence), so the feed's
+card stays in `feed.proto` and there are no `*_card.proto` files. The vendor
+cut: a vendor API failure the vendor RECORDED is a
+`conversation.v1.ApiRequestFailed` record and reaches the feed as its own row
+(the daemon resolves it into a frontend-shaped card there, per the
+precedence principle); a synthesized failure card carrying the same fact
+would draw one failure twice. Only what nothing recorded — the SDK ending
+the query on its own terms, or no response at all — is a card kind here.
+`api_refusal`/`api_max_output_tokens` are `StopReason` arms on `AgentSaid`
+(answer 5). The user: "let's proceed."
+
+**Consequences.**
+
+- `daemon/internal/errclass` classifies API failures into
+  `ApiRequestFailed.kind` for the record path, not into ten `FailureKind`
+  arms; the ten `errclass` types that mapped to them lose their frontend
+  arm.
+- The wave must VERIFY that every vendor API failure the daemon sees LIVE
+  also lands as a transcript record; if some do not, the feed would miss
+  them and this decision reopens.
+- `agentrepl.v1` error arms (stage 3) that named the deleted vendor evidence
+  now name `FailureVendor*` or the record type.
+- The user asked to PAUSE at the end of stage 2 for approval before
+  continuing to stage 3.
+
 ### PRINCIPLE: figma→idl takes precedence over no-respell at the backend→frontend boundary (no proto landed)
 
 **Decided, the user's words spat back and confirmed:** `frontend.v1` is
