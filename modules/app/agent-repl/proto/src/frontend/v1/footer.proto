@@ -45,28 +45,11 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
 // The footer, resolved completely by the daemon.
 message FooterView {
-  // The workspace this footer belongs to. STAGE-3b decides whether a
-  // per-workspace stream's element still carries it.
-  FooterWorkspace workspace = 1;
-  // The staleness fence for this push. STAGE-3b decides whether cross-stream
-  // fencing survives per-component streams.
-  FooterFence fence = 2;
   // The main strip.
-  FooterStrip strip = 3;
+  FooterStrip strip = 1;
   // The expanded section (rows below the strip, and the sheet). Declared
   // empty here; filled by the next increment.
-  FooterExpanded expanded = 4;
-}
-
-// The workspace the footer belongs to.
-message FooterWorkspace {
-  // Absolute worktree dir.
-  string dir = 1;
-}
-
-// The staleness fence for this push: opaque, compared byte-wise, never parsed.
-message FooterFence {
-  string token = 1;
+  FooterExpanded expanded = 2;
 }
 
 // The expanded section, opened by activating the strip: RESTRICTED TO ROWS,

@@ -33,27 +33,10 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // The tray, resolved by the daemon and pushed on EVERY change. An empty
 // items list is a meaningful value (the tray is empty), not an absent one.
 message DaemonHoldTray {
-  // The workspace this tray belongs to. STAGE-3b decides whether a
-  // per-workspace stream's element still carries it.
-  DaemonHoldWorkspace workspace = 1;
-  // The staleness fence for this push. STAGE-3b decides whether cross-stream
-  // fencing survives per-component streams.
-  DaemonHoldFence fence = 2;
   // The tray's heading, composed by the daemon (e.g. "held (3)").
-  DaemonHoldHeading heading = 3;
+  DaemonHoldHeading heading = 1;
   // The held things, in display order.
-  repeated DaemonHoldItem items = 4;
-}
-
-// The workspace the tray belongs to.
-message DaemonHoldWorkspace {
-  // Absolute worktree dir.
-  string dir = 1;
-}
-
-// The staleness fence for this push: opaque, compared byte-wise, never parsed.
-message DaemonHoldFence {
-  string token = 1;
+  repeated DaemonHoldItem items = 2;
 }
 
 // The tray's heading.

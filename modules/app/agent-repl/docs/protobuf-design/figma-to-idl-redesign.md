@@ -114,6 +114,41 @@ that transport.
 
 ## Landed changes
 
+### `workspace` and `fence` leave every `frontend.v1` view (YAGNI); the feed page carries no `scope`
+
+**What changed.** `TopbarWorkspace`/`TopbarFence`,
+`TokenBreakdownWorkspace`/`TokenBreakdownFence`,
+`DaemonHoldWorkspace`/`DaemonHoldFence`, `FooterWorkspace`/`FooterFence` and
+their view fields are DELETED; the views renumber contiguously. (The
+sidebar's `RosterRowWorkspace` stays — it is the ROW's identity on a global
+stream, not addressing.) All frontend files compile except `feed.proto`.
+
+**Why, in the user's terms — three questions, answered.**
+
+- "Why is FeedWorkspace needed? Is that not implicit in the URL?" — It is:
+  every component stream is per-workspace, so the workspace is the stream's.
+  "Okay, let's drop it then. YAGNI." Dropped everywhere, not deferred to 3b.
+- "What is fence … do we need this then?" — It guarded the old MULTIPLEXED
+  stream against a late push from a retired session generation. With one
+  ordered stream per component per workspace a push cannot overtake a newer
+  one on its own stream, and cross-stream staleness has no comparison target
+  (`WorkspaceState.fence` left `frontend.v1`). Liveness is the keepalive,
+  ordering is the stream. Dropped; if a cross-stream generation check is
+  ever needed it is one convention field at 3b.
+- "Is scope implicit in ancestors?" — Yes: the last breadcrumb IS the
+  container the page is of, and no crumbs = the top-level feed; `scope` on
+  the page was a second spelling. It survives only as a REQUEST parameter at
+  stage 3. And `ancestors` as bare ids would have made the client resolve
+  labels — a derivation — so it becomes a drawn element,
+  `FeedBreadcrumbs { repeated FeedBreadcrumb { MessageId target; string
+  label } }`, outermost first, empty for the top-level feed.
+
+**Consequences.** This SETTLES two of the STAGE-3b questions early, by the
+user's ruling: per-workspace addressing is the stream's, and there is no
+fence. The daemon's fence minting and the webapp's byte-compare gate are
+deleted in the wave. `feed.proto`'s container is `FeedPage { rows; edge;
+breadcrumbs }`.
+
 ### `frontend.v1/failure.proto`: the vendor family shrinks to what nothing recorded; `shim.v1` projected out
 
 **What changed.** `FailureKind` goes from 40 arms to 28: machinery 1–17
