@@ -1,0 +1,40 @@
+// status_panel.proto — THE /status PANEL: label/value rows the daemon resolves
+// from the session's init facts (conversation.v1 SessionBegan) — version,
+// working directory, auth, plugins, memory. Its own component; opened by the
+// /status command; how it is fetched or streamed is stage 3's.
+//
+// It used to carry the vendor's init record whole and the panel computed every
+// value client-side — five derivations, five places to disagree. The daemon
+// resolves the rows now; the panel prints them.
+//
+// THAT THE DAEMON ANSWERS /status LOCALLY IS AN IMPLEMENTATION DETAIL the UI
+// never sees: there is no "intercepted command" row anywhere. What the UI has
+// is this panel.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// The panel, resolved. EMPTY rows means no init has landed yet, which the
+// panel draws as the rows it owns and nothing more — absence rendering
+// absence, rather than a spinner standing in for a fact. The panel splices its
+// own rows (account, model, permission mode) ahead of these, because those
+// come from sources that move independently of an init and are already
+// resolved elsewhere.
+message StatusPanelView {
+  // In render order.
+  repeated StatusPanelRow rows = 1;
+}
+
+// One row: a label and the value beside it. A STRING VALUE ON PURPOSE: every
+// row is a word or a phrase — a count, a joined list, a version, a resolved
+// auth word — so typing the value as anything richer would only invite a
+// renderer to reformat it. The daemon decided what it says.
+message StatusPanelRow {
+  // As shown: "Version", "Working directory", "Auth".
+  string label = 1;
+  // As shown. Never empty — the daemon OMITS a row it has no value for.
+  string value = 2;
+}

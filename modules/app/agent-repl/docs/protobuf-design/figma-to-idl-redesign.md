@@ -114,6 +114,46 @@ that transport.
 
 ## Landed changes
 
+### `frontend.v1/feed.proto`: the container — `FeedRow` (nine kinds) and `FeedPage`; `status_panel.proto` split out; the whole tree compiles again
+
+**The drawing agreed with the user** (in the file header): the feed as a
+scrolling list of rows — user, agent (with tool cards), detached bubble,
+permission card, synthesized failure card, api-failure row, context-cut
+divider, merge bubble, live preview — plus the paging edge. "I don't think
+we need to change anything here on the UI organization front."
+
+**What changed.**
+
+- `FeedRow { MessageId id; MessageId parent; TurnId turn; oneof row { user,
+  agent, detached, permission, failure, api_failure, context_cut, merge,
+  preview } }` — a row is the unit; a live update re-pushes the WHOLE ROW
+  (upsert by id). `FeedPage { repeated FeedRow rows; oneof edge { has_more
+  {cursor}; at_start {} }; FeedBreadcrumbs breadcrumbs }`;
+  `FeedBreadcrumb { MessageId target; string label }`.
+- The nine kind messages are declared EMPTY, each filled at its own
+  increment; the old bodies (`AgentEmission`, `AgentResponse`,
+  `ToolCallVerdict`, `ResponseUsageStamp`, `AgentToolOutcome`,
+  `FailureCardView` + lifecycle, the `DetachedWork*` family) are kept
+  VERBATIM under a "PENDING" banner and judged kind by kind.
+- DELETED: `Message` (→ `FeedRow`), `ConversationDelta`, `DetachedWorkDelta`,
+  `TypingCut` (transport arms of the dead stream; the live channel's shape is
+  stage 3's), `TaskCatalog`/`TaskEntry`/`TaskStatus*` (superseded by the
+  detached bubble and the footer's expanded rows), `CompactionSummaryItem`
+  (folds into the context-cut divider), `PageScope*`,
+  `ConversationHistoryPage`, `HistoryHasMore`/`HistoryAtStart` (→ `FeedPage`
+  + edge; scope survives only as a stage-3 request parameter),
+  `DaemonInterceptedCommandItem` — the user: "should not be discernible by
+  the UI, it seems like an implementation detail" (answer 3).
+- `SessionInitView`/`SessionInitRow` → NEW `status_panel.proto`
+  (`StatusPanelView { repeated StatusPanelRow { label; value } }`, no
+  workspace/fence): the `/status` panel is its own component opened by the
+  command, not a feed row.
+- EVERY PACKAGE COMPILES for the first time since the transport reversal.
+
+**Consequences.** Nine kind increments follow, one at a time, each judged
+under the precedence principle (a resolved element, not an embedded record).
+The `agentrepl.v1` holding file compiles now that `feed.proto` does.
+
 ### `workspace` and `fence` leave every `frontend.v1` view (YAGNI); the feed page carries no `scope`
 
 **What changed.** `TopbarWorkspace`/`TopbarFence`,
