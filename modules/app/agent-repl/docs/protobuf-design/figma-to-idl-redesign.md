@@ -51,8 +51,11 @@ within each. A later stage opens only after every earlier one is settled; any
 stage may be reopened at any time, and reopening reopens every decision
 downstream of it, enumerated by name.
 
-1. **`conversation.v1`** — `message` → `payloads` → `content` → `tokens` →
-   `session_command`.
+1. **`conversation.v1`** — `message` → `tool_call` → `agent` → `user` →
+   `content_blocks` → `context_cut` → `failure` → `detached_work` →
+   `tokens` → `session_command` (the per-concern file set after the folds
+   and split recorded under Landed changes; originally `message` →
+   `payloads` → `content` → `tokens` → `session_command`).
 2. **`frontend.v1`** — `sidebar` → `topbar` → `footer` → `failure` → `feed`.
 3. **`agentrepl.v1`**, from the empty service, in three sub-stages:
    - 3a. RPC inventory — every method by name and one-line purpose, no
@@ -148,7 +151,9 @@ review, one import for whoever needs only that concern.
   `content_blocks` → `context_cut` → `failure` → `detached_work` → `tokens` →
   `session_command`, walked one file per increment.
 - File name is `tool_call.proto` (snake_case, matching `session_command.proto`),
-  not the `toolcall.proto` the user typed; the user may rename.
+  not the `toolcall.proto` the user typed; the user may rename. The user DID
+  rename the other two: `agent_response.proto` → `agent.proto` and
+  `user_message.proto` → `user.proto` (the names above are the renamed ones).
 - A consumer that imported `content.proto` or `payloads.proto` for one type
   now imports the concern file that owns it — narrower, and the compiler says
   which.
