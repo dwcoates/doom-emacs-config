@@ -45,3 +45,43 @@ re-litigated here:
   as the price and owed a conventions-stage answer.
 
 ## Landed changes
+
+### `agentrepl.v1` starts from a clean slate: every RPC and every `endpoint_*.proto` is deleted
+
+**What changed.** All 34 `endpoint_*.proto` files under `src/agentrepl/v1/`
+are deleted, and `service AgentRepl` is emptied to `{}`. `service.proto`
+survives as the file the RPCs will be re-added to, one at a time, each with
+its own `endpoint_<snake_case_method>.proto`. `shared.proto` is NOT deleted:
+it is the only `agentrepl.v1` file anything outside the package imports
+(`frontend/v1/footer.proto` reads it for `MergeStatus`, `MergeDequeueOffer`,
+`HibernationDetail`), and its fate is decided at the `frontend.v1` footer step
+and the `agentrepl.v1` conventions step, not by this deletion.
+
+**Why, in the user's terms.** We are going to end up nuking a lot of
+`agentrepl.v1` RPCs and their `endpoint_*` files anyway; what is there now is
+so far removed from what we want to land that it is better to start from
+scratch than to confuse ourselves with preexisting junk.
+
+**Consequences, stated so they are not silently lost.**
+
+- The old `service.proto` header carried normative prose that is NOT
+  automatically carried forward: the "no paint attestation on this service"
+  invariant, the `request_id`/`workspace`/`client_id` envelope-field
+  semantics, and the protojson-on-the-wire note. Each re-enters at the
+  `agentrepl.v1` conventions sub-stage as its own question. None is settled
+  by having once been written.
+- The 34 deleted files were the ONLY spelling of the per-method error arms
+  (`Refusal*` messages derived from daemon handlers, per the superseded
+  record's "Per-method errors, DERIVED not invented"). That derivation
+  evidence — which handler emits which refusal — is in the superseded
+  record's prose and in git history (`4b0d6aa4c^`), not on disk. When an
+  endpoint is re-added, its error arms are re-derived, and the old file is
+  reference material, not a template.
+- The build was already broken by the transport reversal; this widens the
+  break to every daemon, webapp and elisp site that named a request or
+  response type. That is intended, per the land-whether-or-not-it-breaks rule.
+- Ten deleted endpoint files carried the comment "see
+  DESIGN-protobuf-surfaces.md for why a directory is not available here" (the
+  `--go_opt=paths=source_relative` argument for the `endpoint_` prefix). The
+  argument still holds and lives in the superseded record; re-added files
+  cite the new record.
