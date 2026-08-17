@@ -114,6 +114,49 @@ that transport.
 
 ## Landed changes
 
+### `frontend.v1/footer.proto` increment 2: the expanded section is rows of in-flight detached work, and nothing else
+
+**The drawing agreed with the user:**
+
+```
+├──────────────────────────────────────────────────────────────────┤
+│ ⚙ Explore   "find the roster resolver"               0:31   ▸ │  subagent  → click: its feed bubble
+│ ⛓ workflow  review-changes · verify 3/5              2:10   ▸ │  workflow  → click: its feed bubble
+│ $ bash      go test ./...                            1:04   ▸ │  shell     → click: its feed bubble
+```
+
+**What changed.** `FooterExpanded { repeated FooterExpandedRow rows }`;
+`FooterExpandedRow { conversation.v1.MessageId target; FooterExpandedRowRuntime
+runtime { started_at_ms }; oneof row { FooterExpandedSubagent {agent_type,
+description}; FooterExpandedWorkflow {name, current_step};
+FooterExpandedShell {command}; FooterExpandedUnmodeled {tool_name} } }`.
+Each row is a jump target: `target` is the item's `DetachedWorkStarted`
+message, and activating the row navigates to that feed bubble. No heading
+(the strip is the header; an invented "in flight (3)" title was dropped
+because it maps to no UI element). `footer.proto` imports
+`conversation/v1/message.proto` for `MessageId`.
+
+**Why, in the user's terms.** "The expanded section should be fundamentally
+restricted to rows. Those rows should have one of some number of types, and
+they should be reserved for asynchronous work … clicking the SubAgent takes
+you to the subagent's feed-level bubble, clicking the Workflow takes you to
+the workflow's feed-level bubble." The row kinds are exactly the detachable
+origins of `ToolCallBlock.call` (`agent`, `workflow`, background `bash`), plus
+`unmodeled` so detached unmodeled work cannot vanish from the list; a skill is
+not async work.
+
+**Homeless as a result — the user rules, one at a time (five answers):**
+the four rows the orchestrator first drew all had homes elsewhere and are
+NOT footer: failure line → the feed's failure card + the `blocked` status
+(answer 5); gate line → the `asleep`/`merging` statuses (5); merge note →
+`SubStatus`/`StatusActivity` (5). Two messages remain under the "PENDING
+INCREMENT 2" banner awaiting the ruling: `ContextCostAlert` (the
+expensive-turn alert — a daemon-synthesized feed card? an activity note?) and
+`FooterAccountingCell` + `Accounting*` (the settled turn's reconciliation —
+the topbar's `TopbarAccountingWarning` today references "the footer cell's
+evidence", so the verdict arms need a home if the cell goes).
+`FooterFailureRow` is deleted outright (answer 5).
+
 ### `frontend.v1/footer.proto` increment 1: the main strip, reimagined as three typed resolution levels
 
 **The drawing agreed with the user (his reimagining of the strip):**

@@ -1,5 +1,5 @@
-// footer.proto — THE FOOTER: the workspace's status strip, and (increment 2)
-// its expanded section. Per-workspace; resolved by the daemon.
+// footer.proto — THE FOOTER: the workspace's status strip, and its expanded
+// section of in-flight detached work. Per-workspace; resolved by the daemon.
 //
 // THE MAIN STRIP, left to right — resolution INCREASES left to right, and all
 // three status sections are TYPED, each "less" typed than the last by carrying
@@ -35,6 +35,7 @@ syntax = "proto3";
 package frontend.v1;
 
 import "conversation/v1/api.proto";
+import "conversation/v1/message.proto";
 import "frontend/v1/failure.proto";
 import "frontend/v1/feed.proto";
 import "agentrepl/v1/shared.proto";
@@ -72,9 +73,78 @@ message FooterFence {
   string token = 1;
 }
 
-// The expanded section. FILLED BY THE NEXT INCREMENT — empty here on purpose,
-// not a guess at its elements.
-message FooterExpanded {}
+// The expanded section, opened by activating the strip: RESTRICTED TO ROWS,
+// one per detached work item live right now, and nothing else. Each row is a
+// JUMP TARGET — activating it navigates to the item's feed-level bubble. No
+// heading: the strip is the header. Empty rows = nothing running.
+//
+//   ├──────────────────────────────────────────────────────────────────┤
+//   │ ⚙ Explore   "find the roster resolver"               0:31   ▸ │  subagent
+//   │ ⛓ workflow  review-changes · verify 3/5              2:10   ▸ │  workflow
+//   │ $ bash      go test ./...                            1:04   ▸ │  shell
+//
+// The failure line, expensive-turn line, gate line and accounting cell that
+// once lived here have homes elsewhere: the feed's failure card and the
+// `blocked` status; an activity note; the `asleep`/`merging` statuses; the
+// topbar's accounting warning and the token-breakdown menu.
+message FooterExpanded {
+  // In display order, as the daemon orders them.
+  repeated FooterExpandedRow rows = 1;
+}
+
+// One live detached work item. The row KIND is the arm — exactly the
+// detachable origins of a tool call (a subagent, a workflow, a background
+// shell, an unmodeled tool that nonetheless detached). Each arm's text is the
+// daemon's projection of the item's origin call — this component's own copy,
+// not a link into the feed row's data.
+message FooterExpandedRow {
+  // The feed bubble this row jumps to — the item's DetachedWorkStarted
+  // message.
+  conversation.v1.MessageId target = 1;
+  // How long it has been running.
+  FooterExpandedRowRuntime runtime = 2;
+  oneof row {
+    FooterExpandedSubagent subagent = 3;
+    FooterExpandedWorkflow workflow = 4;
+    FooterExpandedShell shell = 5;
+    FooterExpandedUnmodeled unmodeled = 6;
+  }
+}
+
+// When the item started, so the row can show a running clock.
+message FooterExpandedRowRuntime {
+  int64 started_at_ms = 1;
+}
+
+// A subagent running detached.
+message FooterExpandedSubagent {
+  // Which agent definition ran it (e.g. "Explore", "general-purpose").
+  string agent_type = 1;
+  // The agent's short description — what the row shows.
+  string description = 2;
+}
+
+// A workflow running detached.
+message FooterExpandedWorkflow {
+  // The workflow's name (a saved name, or a label the daemon derives for an
+  // inline script).
+  string name = 1;
+  // The step it is on, as the daemon composes it (e.g. "verify 3/5"); empty
+  // when no step has been observed yet.
+  string current_step = 2;
+}
+
+// A shell command running in the background.
+message FooterExpandedShell {
+  // The command line, verbatim.
+  string command = 1;
+}
+
+// An unmodeled tool that detached — kept in the list so it cannot vanish.
+message FooterExpandedUnmodeled {
+  // The tool as the agent named it.
+  string tool_name = 1;
+}
 
 // ==========================================================================
 // THE MAIN STRIP
@@ -380,25 +450,6 @@ message ContextCostAlert {
   // the cache had already expired — and frontends render it as its own
   // message rather than a generic expensive-turn note.
   shim.v1.PromptOrigin prompt_origin = 5;
-}
-// The footer's failure row: the daemon's classified failure as one line.
-//
-// Deliberately a PROJECTION and not the card. The row is one ellipsised line
-// in a fixed-height strip; it shows the sentence, takes its color from the
-// failure's side of the vocabulary, and offers to reveal the card that has the
-// rest. It carries no evidence and no resolution stamp because it renders
-// neither: the row stands until the next turn starts, which is a different
-// lifetime from the card's window.
-message FooterFailureRow {
-  // The sentence, verbatim — the same one the card leads with.
-  string message = 1;
-  // Which side of the failure vocabulary this is, resolved to a color-class
-  // name from the shared render-colors table. The row does not carry the kind
-  // itself: it renders one line and has no use for typed evidence.
-  string tone = 2;
-  // The card to reveal when the row is activated. An empty ref means the row
-  // is not clickable — it never scrolls somewhere arbitrary to look useful.
-  FailureCardRef card = 3;
 }
 // The footer's turn-accounting cell, fully resolved.
 //
