@@ -106,6 +106,46 @@ that transport.
 
 ## Landed changes
 
+### `conversation.v1/agent.proto`: `ThinkingBlock` as two arms, `StopRefusal` added, comments repaired
+
+**What changed.**
+
+- `ThinkingBlock` loses `string text` + `bool redacted`; it gains
+  `oneof thinking { ThinkingBlockShown shown { text }; ThinkingBlockRedacted
+  redacted {} }`.
+- `StopReason` gains `StopRefusal refusal = 5`; `unsupported` renumbers to 6.
+  `StopInterrupted` is KEPT, with a note written on the arm that no producer
+  is yet verified to observe it as a stop reason (it may only exist as a
+  user-role "[Request interrupted]" record).
+- `ContentArriving`: shape unchanged; `block_index` is stated as the
+  zero-based NODE index into `AgentContent.blocks`; the "tool arguments are a
+  typed Struct" sentence now says they arrive typed as `ToolCallBlock.call`;
+  the dead `DESIGN-protobuf-surfaces.md` pointer now names the superseded
+  file.
+- `AgentSaid`, `AgentContent`, `AgentContentBlock` unchanged.
+
+**Why, in the user's terms.** Approved as sketched. Two questions were asked
+and closed on the way: (1) `AgentStopped` as its own payload arm instead of
+`StopReason` on `AgentSaid` — NO, every settled response has both content and
+a stop reason (one turn is several `AgentSaid`, each with its own
+`stop_reason`), and turn-level "the agent stopped" is `shim.v1` bookkeeping;
+(2) `content` and `stop_reason` as a oneof — NO, they always coexist:
+`stop_reason` says how the content ENDED (tool_call with blocks present,
+max_tokens with truncated blocks, refusal with empty blocks), and a oneof
+would make the ordinary tool-call response unrepresentable.
+
+**Consequences.**
+
+- Every consumer reading `ThinkingBlock.text`/`.redacted` switches on the
+  arm; a renderer that showed "reasoning hidden" for `redacted=true` reads
+  `redacted` presence instead.
+- `StopRefusal` is a new arm every consumer's stop switch must handle
+  (compile-surfaced). `stop_sequence` and `pause_turn` deliberately remain
+  `unsupported`.
+- The `StopInterrupted` question is owed an answer at the shim's turn
+  (`shim.v1`, stage 4) or by the implementation wave; if no producer sets it,
+  the arm is deleted then, not silently kept.
+
 ### `conversation.v1/tool_call.proto`: typed tool arms, `ToolCallId`, outcome and scope arms
 
 **What changed.**
