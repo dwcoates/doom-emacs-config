@@ -44,6 +44,41 @@ re-litigated here:
   conversation-delta; cross-stream workspace references) accepted by the user
   as the price and owed a conventions-stage answer.
 
+## The iteration sequence, as walked
+
+**Settled.** Six stages, one per surface, walked ONE `.proto` FILE AT A TIME
+within each. A later stage opens only after every earlier one is settled; any
+stage may be reopened at any time, and reopening reopens every decision
+downstream of it, enumerated by name.
+
+1. **`conversation.v1`** — `content` → `message` → `payloads` →
+   `session_command` → `tokens`.
+2. **`frontend.v1`** — `sidebar` → `topbar` → `footer` → `failure` → `feed`.
+3. **`agentrepl.v1`**, from the empty service, in three sub-stages:
+   - 3a. RPC inventory — every method by name and one-line purpose, no
+     shapes, each ruled on one at a time.
+   - 3b. Cross-endpoint conventions — including the invariants the deleted
+     `service.proto` header carried and this record did not carry forward.
+   - 3c. Per-endpoint shapes — one new `endpoint_*.proto` at a time.
+4. **`shim.v1`** — `core` → `bookkeeping` → `entry-delivery` → `external` →
+   `message-page`.
+5. **`store.v1`** — `entry` → `write` → `cursor` → `unsupported`.
+6. **`state.v1`** — `durable.proto`.
+
+**The amendments the user made, and why.** The first proposal put
+`frontend.v1` before `conversation.v1`, and the file order within stages 3–6
+was proposed by the orchestrator. The user moved `conversation.v1` FIRST
+because the consumer-first order would have had every `frontend.v1` message
+that embeds a `conversation.v1` type reopened by the leaf changing underneath
+it — the leaf every other surface imports is settled before its importers.
+The user also ordered the `agentrepl.v1` clean slate BEFORE the sequence was
+settled (see the landed change below), so stage 3 begins from
+`service AgentRepl {}` rather than from the old method table. The remaining
+orders were accepted as proposed. The stage-1 transport decision from the
+superseded record — Connect, one server-streaming endpoint per component —
+is carried in, not re-walked; the sequence's stage 3 designs endpoints on
+that transport.
+
 ## Landed changes
 
 ### `agentrepl.v1` starts from a clean slate: every RPC and every `endpoint_*.proto` is deleted
