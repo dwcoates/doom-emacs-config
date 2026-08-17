@@ -1,6 +1,6 @@
 // api.proto — THE VENDOR API'S OWN OUTCOMES: what the API itself recorded about
-// a request — its usage accounting, and its failures. The actor here is the
-// API, not the agent, the user, or a tool.
+// a request — its usage accounting, its failures, and the models it offers.
+// The actor here is the API, not the agent, the user, or a tool.
 
 syntax = "proto3";
 
@@ -84,6 +84,24 @@ message ApiInternal {}
 message ApiUnmodeledError {
   // The vendor's type string, so a later schema knows what to add.
   string type = 1;
+}
+
+// A model the vendor API offers for selection.
+//
+// The live query is the only authority on selectable model ids for a
+// session/account: the shim reports the list it learned, the daemon forwards
+// it, the topbar and footer render it. It is an API FACT, so it lives with
+// the API's other facts and every surface imports it from here — shim.v1's
+// ModelCatalog included. A second declaration on any surface is a
+// re-spelling.
+message ModelOption {
+  // The id the API accepts (e.g. "claude-opus-5") — the value a selection
+  // sends back.
+  string value = 1;
+  // The name a selector shows for it.
+  string display_name = 2;
+  // A one-line description, when the vendor gives one; empty otherwise.
+  string description = 3;
 }
 
 // ---------------------------------------------------------------------------

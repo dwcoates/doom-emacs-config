@@ -1,76 +1,127 @@
-// topbar.proto — The topbar: title, session line, model selector, connectivity glyph.
+// topbar.proto — THE TOPBAR: workspace, title, session line, model selector,
+// connectivity glyph, warning strip. Per-workspace; resolved by the daemon.
 //
-// It also carries the token-breakdown counter menu the topbar opens.
+// EVERY FIELD OF THE VIEW IS AN ELEMENT MESSAGE. Reading TopbarView
+// enumerates the topbar's subcomponents; each element's props are its own
+// message, so the UI's partition is a fact of the schema and no value rides
+// bare where it could be conflated with a neighbor. Where the same fact also
+// appears in another component's view (the workspace, the fence), THAT
+// component wraps it in ITS OWN message — two dedicated wrappers of one fact
+// imply two separate subcomponents, which is exactly the information a shared
+// wrapper would lose.
+//
+// The token-breakdown menu the topbar opens is its own component and its own
+// file: token_breakdown.proto.
 
 syntax = "proto3";
 
 package frontend.v1;
 
-import "shim/v1/core.proto";
+import "conversation/v1/api.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
 // One workspace's topbar, resolved completely by the daemon. The client
-// renders these fields verbatim; nothing here is derived client-side.
+// renders each element verbatim and derives nothing.
 message TopbarView {
-  // The workspace this topbar describes; addressing only, never displayed
-  // differently than given.
-  string workspace = 1;
-  // The exact title line the topbar shows (workspace name, or name + branch
-  // when the daemon resolves a branch worth showing). Pre-composed so the
-  // client never concatenates identity fragments.
-  string title = 2;
-  // The session identity line shown in the hover/expanded state, verbatim.
-  string session_line = 3;
-  // The model selector's current selection, as the display string the
-  // selector button shows (e.g. "opus-5"). Empty means the selector renders
-  // its placeholder.
-  string model_display = 4;
+  // The workspace this topbar belongs to — its own subcomponent, and the
+  // stream's addressing. STAGE-3b decides whether a per-workspace stream's
+  // element still carries it; the wrapper is what stays either way.
+  TopbarWorkspace workspace = 1;
+  // The staleness fence for this push. STAGE-3b decides whether cross-stream
+  // fencing survives per-component streams; the wrapper is what stays.
+  TopbarFence fence = 2;
+  // The title line.
+  TopbarTitle title = 3;
+  // The session identity line (hover/expanded state).
+  TopbarSessionLine session_line = 4;
+  // The model selector: current selection and the selectable list.
+  TopbarModelSelector model_selector = 5;
+  // The connectivity glyph.
+  TopbarConnectivity connectivity = 6;
+  // The warning strip.
+  TopbarWarningStrip warnings = 7;
+}
+
+// The workspace the topbar belongs to.
+message TopbarWorkspace {
+  // Absolute worktree dir — the identity every workspace-scoped stream and
+  // command uses; never displayed differently than given.
+  string dir = 1;
+}
+
+// The staleness fence for this push: an opaque token the client compares
+// BYTE-WISE against the fence on the workspace's current WorkspaceState, and
+// never parses, splits or interprets. Equal means current; different means
+// stale, and a stale push is discarded whole rather than partially adopted.
+// The daemon mints it and is the only thing that can read meaning into it.
+message TopbarFence {
+  string token = 1;
+}
+
+// The title line the topbar shows.
+message TopbarTitle {
+  // Pre-composed (workspace name, or name + branch when the daemon resolves a
+  // branch worth showing); the client never concatenates identity fragments.
+  string text = 1;
+}
+
+// The session identity line, shown in the hover/expanded state.
+message TopbarSessionLine {
+  // Verbatim.
+  string text = 1;
+}
+
+// The model selector: what is selected, and what may be.
+message TopbarModelSelector {
+  // The current selection, WHOLE — the button shows its display_name. UNSET
+  // means no selection and the button renders its placeholder; presence, not
+  // an empty display string.
+  conversation.v1.ModelOption selected = 1;
   // The selectable models, in display order. The selector renders exactly
   // this list.
-  repeated shim.v1.ModelOption model_options = 5;
-  // The connectivity glyph, resolved: which glyph and which color class to
-  // draw, and the tooltip text. The client never maps connectivity enums.
-  TopbarConnectivity connectivity = 6;
-  // The workspace's staleness FENCE at the moment the daemon produced this
-  // push: an opaque token the client compares BYTE-WISE against the fence on
-  // the workspace's current WorkspaceState, and never parses, splits or
-  // interprets. Equal means current; different means stale, and a stale push
-  // is discarded whole rather than partially adopted.
-  //
-  // The daemon mints it and is the only thing that can read meaning into it.
-  // A client that learned to decode it would be depending on a fact this
-  // contract does not offer, and the token's composition is free to change.
-  string fence = 7;
-  // Everything the topbar has to WARN about right now, in display order, each
-  // already resolved into the sentence the client shows.
-  //
-  // THE STRIP STATES NOTHING WHEN NOTHING IS WRONG. A settled turn's accounting
-  // prose is not printed inline; the topbar raises a warning only when there is
-  // something wrong to say, and the sentence lives inside that warning's
-  // dropdown. An empty list is the
-  // daemon saying there is nothing wrong, and the client draws no indicator at
-  // all rather than a quiet one — a control over an empty list only invites
-  // the click that proves it is empty.
-  //
-  // It is a LIST because a warning is not a property of accounting: a second
-  // concern (a degraded watcher, a skewed build) joins this list and reaches
-  // the same affordance, instead of growing the strip a second bespoke slot.
-  repeated TopbarWarning warnings = 8;
+  repeated conversation.v1.ModelOption options = 2;
+}
+
+// The connectivity indicator, fully resolved: a literal glyph, a literal
+// tooltip, and a tone naming a color class from the shared render-colors
+// vocabulary (proto/vocab/render-colors.json — the one deliberate shared
+// authority, so the topbar and the footer paint one condition one color).
+// The STATE it derives from is the session's connectivity, resolved by the
+// daemon; the client never maps that state itself.
+message TopbarConnectivity {
+  // Vocabulary color-class name: "none" | "blue" | "teal" | "green".
+  string tone = 1;
+  // The literal glyph character(s) the indicator draws.
+  string glyph = 2;
+  // Tooltip text, verbatim.
+  string title = 3;
+}
+
+// The warning strip: everything the topbar has to WARN about right now.
+//
+// THE STRIP STATES NOTHING WHEN NOTHING IS WRONG. An empty list is the daemon
+// saying there is nothing wrong, and the client draws no indicator at all
+// rather than a quiet one — a control over an empty list only invites the
+// click that proves it is empty. It is a LIST because a warning is not a
+// property of accounting: a second concern (a degraded watcher, a skewed
+// build) joins this list and reaches the same affordance.
+message TopbarWarningStrip {
+  // In display order, each already resolved into the sentence the client
+  // shows.
+  repeated TopbarWarning warnings = 1;
 }
 
 // One thing the topbar is warning about, resolved completely by the daemon.
-//
 // The client renders `text` verbatim and NEVER re-derives it: the same
-// reconciliation the footer's accounting cell reports has exactly one author,
-// and a renderer that re-composed the sentence would be a second one.
+// reconciliation the footer's accounting cell reports has exactly one author.
 message TopbarWarning {
-  // The warning's display-ready sentence, composed daemon-side. Never empty —
-  // a warning with nothing to say is a daemon fault, not a renderable state.
+  // The warning's display-ready sentence. Never empty — a warning with
+  // nothing to say is a daemon fault, not a renderable state.
   string text = 1;
-  // WHICH concern raised this warning, as arms of messages rather than a state
-  // enum, so a kind arrives together with whatever evidence that kind implies
-  // and a new kind cannot be added as a bare tag the client must interpret.
+  // WHICH concern raised this warning, as arms of messages rather than a
+  // state enum, so a kind arrives together with whatever evidence that kind
+  // implies and a new kind cannot be added as a bare tag.
   oneof kind {
     // The settled turn's accounting did not reconcile (incomplete evidence or
     // a contradiction); `text` is the footer cell's own summary.
@@ -79,106 +130,6 @@ message TopbarWarning {
 }
 
 // The accounting warning's kind arm. It carries no fields of its own: the
-// evidence behind the verdict is the footer accounting cell's, which states it
-// as arms, and duplicating it here would be a second copy to drift.
+// evidence behind the verdict is the footer accounting cell's, which states
+// it as arms, and duplicating it here would be a second copy to drift.
 message TopbarAccountingWarning {}
-
-// The topbar's connectivity indicator, fully resolved. `tone` names a color
-// class from the shared render-colors vocabulary table (the one deliberate
-// shared authority — see design note 4); `glyph` and `title` are literal.
-message TopbarConnectivity {
-  // Vocabulary color-class name (e.g. "ok", "degraded", "severed").
-  string tone = 1;
-  // The literal glyph character(s) the indicator draws.
-  string glyph = 2;
-  // Tooltip text, verbatim.
-  string title = 3;
-}
-
-// frontend.v1.ModelOption was declared here, field for field identical to
-// shim.v1.ModelOption. A model option is a shim-wire fact the daemon
-// forwards untouched, so there was never a second one to declare; every
-// reference now names shim.v1's.
-
-// Correlated result of the daemon-global health command.  A command ACK alone
-// is only a receipt that the daemon accepted a frame; this view is the
-// assertion Emacs waits for before restoring any workspace.  healthy=false is
-// always accompanied by a non-empty reason, so no client can mistake a failed
-// observation for readiness.
-message DaemonHealthView {
-  string request_id = 1;
-  bool healthy = 2;
-  string reason = 3;
-}
-
-// Correlated result of the session-specific health command.  The daemon sets
-// healthy=true only when the named live session controller has a handshaked
-// shim and that shim has proved its own dependency health (including its store
-// connection).
-// WORKSPACE is the absolute CWD, matching every session-routed frontend
-// command; SESSION_ID prevents an old response from satisfying a newer
-// restored binding.
-//
-// HOST SURFACE: the probe names the session it is proving a route to, so it
-// keeps session identity. The topbar's own rendered connectivity is
-// TopbarConnectivity, which is resolved and names nothing.
-message SessionHealthView {
-  string request_id = 1;
-  string workspace = 2;
-  string session_id = 3;
-  bool healthy = 4;
-  string reason = 5;
-}
-
-// ==========================================================================
-// The token-breakdown counter menu.
-// ==========================================================================
-
-// The token-breakdown menu, fully resolved. Sections and rows arrive in
-// display order; the client renders exactly this tree.
-message TokenBreakdownView {
-  // WORKSPACE-ADDRESSED, never session-addressed. A frontend has no session
-  // vocabulary; the only currency question it ever asks is "is this push still
-  // current", which the fence below answers without naming what rotated.
-  //
-  // The workspace this breakdown describes.
-  string workspace = 1;
-  // Menu sections, in display order (e.g. "this turn", "session", per-model).
-  repeated TokenBreakdownSection sections = 2;
-  // The workspace's staleness FENCE at the moment the daemon produced this
-  // push: an opaque token the client compares BYTE-WISE against the fence on
-  // the workspace's current WorkspaceState, and never parses, splits or
-  // interprets. Equal means current; different means stale, and a stale push
-  // is discarded whole rather than partially adopted.
-  //
-  // The daemon mints it and is the only thing that can read meaning into it.
-  // A client that learned to decode it would be depending on a fact this
-  // contract does not offer, and the token's composition is free to change.
-  string fence = 3;
-}
-
-// One titled section of the breakdown menu.
-message TokenBreakdownSection {
-  // Section heading, verbatim.
-  string label = 1;
-  // Rows, in display order.
-  repeated TokenBreakdownRow rows = 2;
-}
-
-// One row of the breakdown menu. All numbers are resolved; the share is
-// precomputed so the client does no arithmetic.
-message TokenBreakdownRow {
-  // Row label, verbatim (e.g. "uncached input", "fresh input", "cache read").
-  string label = 1;
-  // The row's token count.
-  int64 tokens = 2;
-  // The row's share of its section's basis, in permille (0-1000), already
-  // rounded. -1 means "no share applies to this row" and the client omits
-  // the percentage; 0 is a real zero percent.
-  int32 share_permille = 3;
-  // True when the row is a headline (rendered unindented/emphasized), false
-  // for detail rows. Layout fact resolved daemon-side.
-  bool emphasized = 4;
-  // Indent depth for nested detail rows; 0 = top level.
-  int32 depth = 5;
-}

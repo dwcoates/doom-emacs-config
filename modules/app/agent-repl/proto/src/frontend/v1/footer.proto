@@ -12,6 +12,7 @@ syntax = "proto3";
 package frontend.v1;
 
 import "shim/v1/core.proto";
+import "conversation/v1/api.proto";
 import "conversation/v1/session_command.proto";
 import "frontend/v1/failure.proto";
 import "frontend/v1/feed.proto";
@@ -424,7 +425,7 @@ message SessionView {
   FailureCardView death = 19;
   // The SDK-published set this session can deliberately select.  A frontend
   // only renders these choices; it never invents or owns a model selection.
-  repeated shim.v1.ModelOption model_options = 20;
+  repeated conversation.v1.ModelOption model_options = 20;
   // NO PERSISTENCE AGGREGATE RIDES THIS MESSAGE. Token economics is durable
   // evidence with its own home, and what a frontend needs of it arrives
   // already digested as TokenBreakdownView's resolved rows — never as a whole
