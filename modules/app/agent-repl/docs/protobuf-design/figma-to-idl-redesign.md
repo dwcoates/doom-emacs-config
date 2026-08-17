@@ -106,6 +106,25 @@ that transport.
 
 ## Landed changes
 
+### `conversation.v1/tokens.proto` folds into `api.proto`
+
+**What changed.** `tokens.proto` is DELETED; `TokenUsage`, `TokenCacheHits`
+and `TokenCacheMisses` move VERBATIM into `api.proto` under a "USAGE
+ACCOUNTING" section banner that carries the old file's provenance header.
+No shape change. Importers repointed: `conversation/v1/agent.proto`,
+`shim/v1/bookkeeping.proto`, `state/v1/durable.proto` now import
+`conversation/v1/api.proto`. Every non-frontend package compiles.
+
+**Why, in the user's terms.** Approved as proposed: `TokenUsage` is the API's
+own accounting of a request — the same actor as `ApiRequestFailed` — so one
+file per concern puts them together: "the vendor API's outcomes: what it
+charged, or why it refused".
+
+**Consequences.** `conversation.v1` is now eight files: `message`,
+`tool_call`, `agent`, `user`, `content_blocks`, `context_cut`, `api`,
+`detached_work`, plus `session_command` (next and last). `state.v1` and
+`shim.v1` gained no new dependency, only a renamed import.
+
 ### `conversation.v1/detached_work.proto`: the origin call is the whole description; `DetachedWorkKind` and `DetachedMerge` are gone
 
 **What changed.**
