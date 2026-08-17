@@ -106,6 +106,36 @@ that transport.
 
 ## Landed changes
 
+### `conversation.v1/content_blocks.proto`: `ImageBlock` location as two arms; `UnsupportedBlock` is not a fallback
+
+**What changed.** `ImageBlock.source` (a string that was "a path or URL")
+becomes `oneof location { ImageBlockPath path { path }; ImageBlockUrl url
+{ url } }`; `media_type` renumbers to 3. `TextBlock` unchanged.
+`UnsupportedBlock`'s shape is unchanged; its message comment now says, at the
+user's instruction, that it is NOT A FALLBACK: populated only for a block
+whose shape is genuinely, realistically unknowable in schema, never because
+modeling was inconvenient, the shape varies, or "we'll type it later" — a
+recognizable kind found in it is a producer defect.
+
+**Why, in the user's terms.** "Looks good, but update the docstring for
+UnsupportedBlock to inform readers/users that this block should only be
+populated by messages that are truly not realistically knowable in schema,
+and not as a lazy fallback."
+
+**Untyped field, ACCEPTED as a cost.** `UnsupportedBlock.raw` (`Struct`) —
+the one qualifying reason: the producer holds no schema for a block kind it
+has never seen; nothing renders from it. Accepted by the user explicitly in
+the same breath as the docstring instruction.
+
+**Consequences.**
+
+- Consumers reading `ImageBlock.source` switch on the arm; a renderer that
+  sniffed `://` to choose between `<img src>` and a file fetch reads the arm.
+- The sidecar's/shim's converters must NOT route a knowable block here; the
+  implementation wave audits every `UnsupportedBlock` construction site
+  against the vendor's block kinds and models what is knowable (the vendor's
+  document/PDF block is the likely first candidate).
+
 ### `conversation.v1/user.proto`: shapes unchanged, `UserSaid` comment states its two readings
 
 **What changed.** No shape change. `UserSaid`'s comment now states (a) the
