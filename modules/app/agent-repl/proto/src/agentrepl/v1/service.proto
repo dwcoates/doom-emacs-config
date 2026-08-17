@@ -37,7 +37,6 @@ import "agentrepl/v1/endpoint_session_health.proto";
 import "agentrepl/v1/endpoint_set_model.proto";
 import "agentrepl/v1/endpoint_shutdown.proto";
 import "agentrepl/v1/endpoint_submit_prompt.proto";
-import "agentrepl/v1/endpoint_subscribe.proto";
 import "agentrepl/v1/endpoint_workspace_materialized.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -59,7 +58,7 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 // compile. There is no second spelling of a command anywhere on this surface —
 // the oneof is gone, not kept alongside.
 //
-// PROTOJSON ON THE WIRE, exactly as FrontendFrame is: a request field's NAME is
+// PROTOJSON ON THE WIRE, exactly as every pushed element is: a request field's NAME is
 // its wire token, so renaming one breaks every peer that has not shipped the
 // new spelling. The METHOD name is a wire token too, because it is the URL path
 // Connect posts to.
@@ -69,9 +68,10 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 //
 //   `request_id` — client-minted correlation, on EVERY request below and echoed
 //   on every response. It is NOT made redundant by the call/response pairing. A
-//   call returns an answer, but a command's EFFECT is pushed later on the
-//   Subscribe stream in a frame that carries this same id, and the daemon's
-//   durable turn ledger uses it as the turn key. Correlation outlives the call.
+//   call returns an answer, but a command's EFFECT is pushed later on whichever
+//   push stream carries the affected component, in an element carrying this
+//   same id, and the daemon's durable turn ledger uses it as the turn key.
+//   Correlation outlives the call.
 //
 //   `workspace` — the daemon's workspace KEY, which is the session's ABSOLUTE
 //   cwd, never a display name. It appears ONLY on the workspace-addressed
@@ -95,9 +95,19 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 //
 // A FAILURE THAT ANSWERS NOBODY IS NOT COVERED BY THAT RULE AND MUST NOT BE.
 // A session dying mid-turn, a rate limit, a shim crash: these are not answers,
-// they arrive on the Subscribe stream as frontend.v1.FailureCardView, and they
-// are named by frontend.v1.FailureKind rather than by any error type here.
-// Folding them in would delete the failure card.
+// they arrive on a push stream as frontend.v1.FailureCardView, and they are
+// named by frontend.v1.FailureKind rather than by any error type here. Folding
+// them in would delete the failure card.
+//
+// THERE ARE NO PUSH ENDPOINTS ON THIS SERVICE YET, AND THAT IS DELIBERATE.
+// The one multiplexed `Subscribe` stream and the `FrontendFrame` god-message it
+// carried are DELETED as of this change. Server-initiated data will arrive on
+// one stream per UI component, and every one of those endpoints is designed in
+// the endpoint-inventory stage that follows. Until then this service declares
+// only its unary methods, and several docstrings below still refer to a push
+// stream that no longer has a declaration — those references are LIVE OPEN
+// QUESTIONS, not oversights, and each is answered when its component's stream
+// is designed. See DESIGN-protobuf-surfaces.md.
 //
 // EVERY METHOD HAS ITS OWN REQUEST AND RESPONSE TYPE, and they live one
 // endpoint per file in `endpoint_<snake_case_method>.proto` beside this one.
@@ -106,38 +116,6 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 // frontend.v1, and a command was never something anyone drew. See
 // DESIGN-protobuf-surfaces.md.
 service AgentRepl {
-  // THE PUSH CHANNEL, and there is exactly one.
-  //
-  // ONE ORDERED STREAM IS THE CONTRACT, NOT A CONVENIENCE. Everything a client
-  // holds is built by applying a snapshot and then the deltas that follow it,
-  // and "follow" is only meaningful within a single ordered channel. Split this
-  // into per-topic streams and a WorkspaceState revision could be applied
-  // before the snapshot that supersedes it, a TypingCut could retire a preview
-  // its opening frame had not yet delivered, and a ConversationDelta could
-  // arrive against a workspace the client has never heard of. Nothing in this
-  // protocol carries a global sequence that would let a client repair that
-  // ordering itself, and adding one would be rebuilding the stream inside the
-  // clients.
-  //
-  // THE SNAPSHOT IS THE FIRST THING ON IT — one StateSnapshot frame, or several
-  // back-to-back when the connect delivery batches its workspaces (see
-  // StateSnapshot's batching notes). It is deliberately NOT a unary call of its
-  // own: a separate call races the stream it is supposed to seed, because
-  // deltas begin flowing the instant the subscription opens and nothing relates
-  // the two channels. Snapshot-then-deltas on one connection is precisely the
-  // invariant that makes a reconnecting client's state recoverable.
-  //
-  // THE STREAM ENDS ONLY WHEN THE CONNECTION DOES. There is no completion
-  // frame; RestartPendingView is a courtesy notice that a teardown is
-  // deliberate, never an end-of-stream marker, and a client that misses it
-  // treats the disconnect as unexplained exactly as before.
-  //
-  // - summary: open the one ordered push channel, seeded by a connect snapshot and followed by every delta, view and failure card the daemon produces.
-  // - request: the reader's own client_id, and nothing else — it is what every command whose effect arrives here names so the daemon knows which stream to push down.
-  // - success: each stream element is one SubscribeResponse carrying one FrontendFrame; there are no arms, because a stream that opened has nothing to distinguish.
-  // - error: none — this is the one method with no error type. A subscription that cannot open fails the connection, and a failure AFTER it opens is by definition not this call's answer: it arrives on the stream itself as a FailureCardView.
-  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
-
   // - summary: send the user's prompt to the workspace's session, to be delivered now or held in the prompt queue.
   // - request: the workspace, the text, the turn's permission posture, and a required non-UNSPECIFIED origin naming which UI or automation acted; no arms.
   // - success: the prompt was accepted; no arms, because whether it was delivered or queued is a classification the daemon reaches asynchronously and pushes as QueueView.
