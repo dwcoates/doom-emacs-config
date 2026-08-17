@@ -114,6 +114,31 @@ that transport.
 
 ## Landed changes
 
+### `frontend.v1/footer.proto` — StatusActivity settled: six typed arms, no free-text escape
+
+**What changed.** `FooterStatusActivityNote { string text }` and its `note`
+arm are DELETED. `FooterStatusActivity` is six typed kinds: merging_commit,
+hook, retrying, authenticating, blocked_on_user, rate_limited.
+
+**Why, in the user's terms.** "Intuitively, it seems like it's floating in
+the ether? Shouldn't this be specific to the error route?" — Yes: a line with
+no kind belongs only where the daemon genuinely CANNOT classify, and that
+place already exists — the error route's unclassified funnel on the failure
+card. An activity the daemon can name but has no arm for is a modeling gap;
+the fix is the arm. Same stance as `UnsupportedBlock`'s "not a fallback",
+applied one step further: not even a guarded escape.
+
+**Left as landed, flagged:** `FooterStatusActivityRetrying.status` and
+`FooterAllowance.status` carry the vendor's verbatim status words — the
+vendor's full vocabularies are not in evidence; typed arms when they are.
+`rate_limited` stays an activity (transient, outranks ordinary windows) rather
+than a `blocked` sub-status.
+
+**The footer strip is now at submessage resolution end to end**: Status (9
+empty arms), SubStatus (5 families), StatusActivity (6 kinds), Clock, Tokens
+(5 elements), and the expanded rows. What remains in `footer.proto` is the
+PLUMBING block and `DetachedCancelOutcome`, both awaiting the user's ruling.
+
 ### `frontend.v1/footer.proto` — the Tokens section's submessages; `ContextCostAlert` and the accounting cell find their home
 
 **The drawing agreed with the user:**
