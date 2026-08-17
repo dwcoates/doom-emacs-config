@@ -103,6 +103,49 @@ that transport.
 
 ## Landed changes
 
+### `content.proto` folds into `message.proto` too, and the file is regrouped by concern
+
+**What changed.** `content.proto` is DELETED; its eleven messages moved
+VERBATIM into `message.proto`, which now imports `tokens.proto` and
+`google/protobuf/struct.proto` directly. `frontend/v1/feed.proto`'s import of
+`content.proto` was removed (it already imports `message.proto`). The whole
+file was then REORDERED into contiguous sections, each under a banner comment,
+with every message's text and leading comment unchanged: THE RECORD
+(`MessageId`, `MessageEntry`, `MessagePayload`) → TOOL CALLS (`ToolCallBlock`,
+`ToolResultContent`, `ToolResultContentBlock`, `ToolReturned`, the four
+`Permission*`) → THE AGENT'S RESPONSE (`AgentSaid`, `AgentContent`,
+`AgentContentBlock`, `ThinkingBlock`, `StopReason` and its five arms,
+`ContentArriving`) → THE USER'S MESSAGE (`UserSaid`, `UserContent`,
+`UserContentBlock`) → BLOCKS COMMON TO EVERY AUTHOR (`TextBlock`,
+`ImageBlock`, `UnsupportedBlock`) → CUTS AND FAILURES (`ContextCut` and its
+arms, `FailureRaised`) → DETACHED WORK (all twenty-one). The two deleted file
+headers ("neutral by design", "narrowed per site") and the floating "a tool
+returning is NOT a block" comment were carried into the new file header and
+the tool-call section banner respectively; nothing else was dropped.
+
+**Why, in the user's terms.** A holistic view: "I can't know if
+`ToolResultContent` is the right message to use because we don't have it
+visible in this file and thus you haven't grouped them together for me to
+see." Grouping by concern rather than by oneof-arm order is the convention
+being added to the skill by the second one-shot workspace
+(`proto-group-by-concern`); this is its first application. Sketching now walks
+the file SECTION BY SECTION — tool calls, then the agent's response, then the
+user, common blocks, cuts and failures, detached work — one concern per
+increment.
+
+**Consequences.**
+
+- `conversation.v1` is now three files: `message.proto` (the record model
+  whole, 730 lines), `tokens.proto`, `session_command.proto`. Whether
+  `tokens.proto` also folds is not decided; it comes up in its own turn.
+- The regrouping is a pure reorder — no message changed shape, `protoc`
+  compiles the package — but it is a real diff and any binding regeneration
+  will churn declaration order in generated code. Harmless; noted.
+- The tool-call section sketched before the fold (`ToolCallId`,
+  `ToolReturned` outcome arms, `PermissionAllowed` scope arms) is
+  re-presented WITH `ToolCallBlock`, `ToolResultContent` and
+  `ToolResultContentBlock` in view, which is what the user asked for.
+
 ### `conversation.v1/message.proto`: a typed `MessageId`, `MessageAuthor` deleted, and `payloads.proto` folded in
 
 **What changed.**
