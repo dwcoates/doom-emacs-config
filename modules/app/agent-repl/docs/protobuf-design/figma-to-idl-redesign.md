@@ -106,6 +106,33 @@ that transport.
 
 ## Landed changes
 
+### `conversation.v1/session_command.proto`: no change — STAGE 1 COMPLETE
+
+**What changed.** Nothing. `SessionCommand` stays an enum (a closed set of
+command names, not a state; its per-value facts are schema options, not
+sibling fields, so the adjacent-exclusivity test passes), `SessionCommandSpec`
+stays an enum-value option, and the file stays in `conversation.v1` as the
+leaf every surface reads.
+
+**Why, in the user's terms.** Approved. The `context_cut` fold considered
+earlier is refused: `ContextCut` is a record, `SessionCommand` a vocabulary no
+record carries — different concerns.
+
+**Stage 1 (`conversation.v1`) is complete** at this commit. The package is
+nine files — `message`, `tool_call`, `agent`, `user`, `content_blocks`,
+`context_cut`, `api`, `detached_work`, `session_command` — and compiles.
+`frontend.v1` does not (`feed.proto` names deleted `conversation.v1` types),
+which is stage 2's starting condition, by design.
+
+**Carried into stage 2 as requirements from stage 1:**
+
+- A daemon-synthesized MERGE feed item that coalesces the vendor records
+  produced while a merge ran (from `detached_work.proto`).
+- Typed identities to embed instead of strings: `MessageId`, `ToolCallId`.
+- The tool card's per-tool presentation is resolved by the daemon from
+  `ToolCallBlock.call`; the client never digs.
+- `StopInterrupted` producer question owed to stage 4 / the wave.
+
 ### `conversation.v1/tokens.proto` folds into `api.proto`
 
 **What changed.** `tokens.proto` is DELETED; `TokenUsage`, `TokenCacheHits`
