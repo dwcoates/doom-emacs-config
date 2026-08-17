@@ -103,6 +103,70 @@ that transport.
 
 ## Landed changes
 
+### `conversation.v1/message.proto`: a typed `MessageId`, `MessageAuthor` deleted, and `payloads.proto` folded in
+
+**What changed.**
+
+- `MessageId { string value }` is new — the typed identity of a message.
+  `MessageEntry.message_id` and `MessageEntry.parent_message_id` are now
+  `MessageId`, and the `optional` on the parent is gone because message-typed
+  presence is native and an empty identity is unrepresentable.
+- `MessageAuthor`, `AuthorUser`, `AuthorAgent`, `AuthorDetachedAgent` and
+  `MessageEntry.author` are DELETED. `MessageEntry` renumbers contiguously to
+  `message_id = 1`, `parent_message_id = 2`, `payload = 3`.
+- `payloads.proto` is DELETED and its 413 lines of arm bodies (`UserSaid`
+  through `ContentArriving`) moved VERBATIM into `message.proto` below
+  `MessagePayload`. `message.proto` now imports `content.proto` and
+  `tokens.proto` directly. `frontend/v1/feed.proto`'s import of
+  `payloads.proto` was repointed at `message.proto` — the one edit outside the
+  file, mechanical, so the fold does not leave a dangling import.
+- The `MessagePayload` ARM SET (13 arms) is confirmed unchanged at this level:
+  names and purposes only; the bodies' shapes are the next increment.
+
+**Why, in the user's terms.**
+
+- `MessageId`: the superseded record already named a bare `string message_id`
+  on another surface an identity re-spelling — "can be assigned any string at
+  all". A re-spelling can only be remedied by importing the owner's type, and
+  the owner had no type. Now it does; every surface embeds it.
+- `MessageAuthor`: the field carried the user's own `FIXME: is this actually
+  useful?`, and it is not. Author is fully derivable from payload arm plus
+  parent chain (an `AgentSaid` under a detached-agent container is the
+  subagent; at top level it is the agent; `ToolReturned` always updates the
+  agent's response). Two spellings of one fact, exactly what dropping
+  `top_level_message_id` removed before. Answer 5 of five: already
+  represented. `AuthorDetachedAgent.detached_work_message_id` was the parent
+  chain restated.
+- The fold: the user asked for `MessagePayload` "in the same file"; on
+  clarification, that meant the whole payload model — record, what it can say,
+  and what each thing it says looks like — reads as ONE file. The
+  `MessagePayload` extraction itself survives (a oneof is not a type;
+  extraction is what lets another surface embed the payload set with its own
+  stamps).
+
+**Consequences.**
+
+- Every consumer holding a message id as `string` — daemon, webapp, elisp,
+  shim, sidecar, store, and every other proto surface (`shim.v1`, `store.v1`,
+  `frontend.v1`, `state.v1`) — now has a typed field to embed and a bare
+  scalar to retire. Those surfaces are walked later in this sequence; each
+  will meet `MessageId` as an existing type. The `tool_call_id` and
+  `origin_tool_call_id` scalars are NOT touched here: they are vendor-minted
+  correlation values, and whether they get the same treatment is a
+  `payloads`-shape question next.
+- The old `ToolReturned` arm comment argued from `author` ("author stays the
+  AGENT on this record"); with the field gone the comment was rewritten to
+  state the same fact without it. That is the one comment edited outside the
+  agreed sketch, and it is recorded here because it is.
+- `content.proto:123` still says "It is `ToolReturned` in payloads.proto";
+  the file no longer exists. Left for `content.proto`'s own turn.
+- The store's parent-chain walk at ingest and the daemon's lineage audit read
+  a `string`; both now read a `MessageId.value`. Implementation-wave work,
+  not contract.
+
+**Verified.** `protoc` compiles `conversation/v1/*.proto` after the fold.
+Nothing outside `conversation.v1` referenced `MessageAuthor` or its arms.
+
 ### `agentrepl.v1` starts from a clean slate: every RPC and every `endpoint_*.proto` is deleted
 
 **What changed.** All 34 `endpoint_*.proto` files under `src/agentrepl/v1/`
