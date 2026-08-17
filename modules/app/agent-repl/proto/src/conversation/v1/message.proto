@@ -1,6 +1,6 @@
 // message.proto — records that BELONG to a conversation message: the record,
 // its identity, and what a record can say. The BODIES of what it says live one
-// file per concern — tool_call.proto, agent_response.proto, user_message.proto,
+// file per concern — tool_call.proto, agent.proto, user.proto,
 // context_cut.proto, failure.proto, detached_work.proto — and the blocks those
 // bodies are made of in content_blocks.proto.
 //
@@ -11,12 +11,12 @@ syntax = "proto3";
 
 package conversation.v1;
 
-import "conversation/v1/agent_response.proto";
+import "conversation/v1/agent.proto";
 import "conversation/v1/context_cut.proto";
 import "conversation/v1/detached_work.proto";
 import "conversation/v1/failure.proto";
 import "conversation/v1/tool_call.proto";
-import "conversation/v1/user_message.proto";
+import "conversation/v1/user.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
