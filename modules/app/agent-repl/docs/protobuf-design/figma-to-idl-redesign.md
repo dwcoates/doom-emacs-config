@@ -114,6 +114,57 @@ that transport.
 
 ## Landed changes
 
+### `frontend.v1/footer.proto` — the Tokens section's submessages; `ContextCostAlert` and the accounting cell find their home
+
+**The drawing agreed with the user:**
+
+```
+│ 18.2k in · 3.1k thought  ⚠  ✓ │
+     input     thinking     │  └ accounting verdict badge (hover: phrases)
+                            └ expensive-turn alarm (hover: "41k over 20k")
+```
+
+**What changed.** `FooterTokens` is five element messages, ALL siblings:
+`FooterTokensInput {tokens}`, `FooterTokensThinking {tokens}`,
+`FooterTokensFirstToken {latency_ms}`, `FooterTokensExpensiveTurn`,
+`FooterTokensAccounting`. `ContextCostAlert` → `FooterTokensExpensiveTurn
+{ TurnId turn; uncached_input_tokens; threshold_tokens; at_ms; oneof origin
+{ prompt {}; cold_keep_alive {} } }` — the shim's 27-value `PromptOrigin`
+PROJECTED to the two cases the alarm renders differently, verified against
+`shim/v1/core.proto:97-140`; `frontend.v1` no longer names `PromptOrigin`.
+`FooterAccountingCell` + `Accounting*` → `FooterTokensAccounting { summary;
+oneof verdict { complete; incomplete{missing}; invalid{problems} } }` and
+`FooterTokensAccounting*` arms. The "PENDING INCREMENT 2" block is gone.
+
+**Why, in the user's terms — and a rejected shape, kept visible.**
+
+- "ContextCostAlert needs to be modeled in the token protobuf shipped for the
+  corresponding footer section" — done; and the accounting verdict is a fact
+  about the turn's tokens, so it sits on the same cell as a badge; the
+  topbar's `TopbarAccountingWarning` points at THIS.
+- The user asked whether the cell had mutually exclusive siblings. The
+  orchestrator first proposed a `live` / `settled` oneof; the user's next
+  questions dissolved it: first-token is per MESSAGE (unset until the current
+  message's first token, then held) and excludes nothing; the expensive-turn
+  alarm renders THE MOMENT it trips (mid-turn), so it is not a "settled" fact;
+  the cell always shows ONE turn's cost at increasing completeness, and a new
+  turn resets it. So: siblings, no mode oneof; the only exclusivities are
+  `verdict` and `origin`.
+- The user then asked, non-rhetorically, why not an event shape —
+  `oneof { update{ oneof {input|thinking|expensive} }; done{ accounting } }`.
+  Answer recorded: it models the TRANSPORT (a change sequence), not the VIEW.
+  The client would accumulate updates into the cell (client-side derivation;
+  a fence discard or reconnect loses a field with no whole push to recover
+  from); the inner oneof claims input and thinking are never drawn together
+  (they always are); `done` would erase the figures when the verdict lands;
+  and ordering becomes load-bearing inside one component. Every component
+  here is pushed WHOLE; if a ticker's rate ever mattered, the fix is
+  daemon-side coalescing, not deltas on the wire. The user: "okay proceed".
+
+**Consequences.** `daemon/internal/progress` publishes the whole cell per
+change and projects `PromptOrigin` to two arms; the webapp's expensive-turn
+and accounting renderers read the tokens cell.
+
 ### `frontend.v1/footer.proto` increment 2: the expanded section is rows of in-flight detached work, and nothing else
 
 **The drawing agreed with the user:**

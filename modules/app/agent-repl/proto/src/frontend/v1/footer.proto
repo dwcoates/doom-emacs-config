@@ -36,6 +36,7 @@ package frontend.v1;
 
 import "conversation/v1/api.proto";
 import "conversation/v1/message.proto";
+import "conversation/v1/turn.proto";
 import "frontend/v1/failure.proto";
 import "frontend/v1/feed.proto";
 import "agentrepl/v1/shared.proto";
@@ -409,93 +410,118 @@ message FooterClock {
 
 // ---- 5. Tokens -----------------------------------------------------------
 
-// This turn's cost so far. Click opens the token-breakdown menu (its own
-// component). Deliberately NO output-token ticker: the running output figure
-// is unwanted; session-wide and per-model figures are the breakdown's.
-message FooterTokens {
-  // THIS TURN's cumulative EXPENSIVE input — the canonical TokenUsage
-  // input_misses total (written + unwritten), summed across the turn's
-  // responses; cache READS excluded, which is the whole point. Resolved once
-  // by the daemon; rendered verbatim.
-  int64 input_tokens = 1;
-  // Estimated thinking tokens so far this turn (latest-wins ticker).
-  int64 thinking_tokens = 2;
-  // First-token latency of the current message; unset until known.
-  optional int64 ttft_ms = 3;
-}
-
-// ==========================================================================
-// PENDING INCREMENT 2 — the expanded section's messages, kept VERBATIM until
-// their increment: the rows below the strip and the sheet.
-// ==========================================================================
-
-// One turn's excessive expensive-input observation. Computed daemon-side from
-// the turn's result usage as the canonical TokenUsage.input_misses total —
-// both misses together — because the vendor marks nearly all input cacheable:
-// a cold prompt surfaces as `written` while `unwritten` stays near zero even on
-// a full re-ingest.
-message ContextCostAlert {
-  // The turn that crossed the threshold.
-  string turn_id = 1;
-  // The observed expensive cost: the canonical TokenUsage.input_misses total
-  // (written + unwritten), resolved by internal/tokenusage.ExpensiveInput.
-  int64 uncached_input_tokens = 2;
-  // The configured threshold that tripped (default 20000), carried so the
-  // rendering can say "N over M" without knowing daemon config.
-  int64 threshold_tokens = 3;
-  // When the result carrying the usage arrived, unix millis.
-  int64 at_ms = 4;
-  // The turn's attribution, verbatim. A CACHE_KEEP_ALIVE origin here is the
-  // "keep-alive came back cold" alarm — the ping paid full freight, meaning
-  // the cache had already expired — and frontends render it as its own
-  // message rather than a generic expensive-turn note.
-  shim.v1.PromptOrigin prompt_origin = 5;
-}
-// The footer's turn-accounting cell, fully resolved.
+// One turn's cost — the running turn, or the last turn until a new one
+// starts. Figures accumulate while it runs; the alarm appears the moment it
+// trips; the verdict appears once the turn settles. A new turn resets all.
+// EVERY FIELD IS AN ELEMENT: the drawn figures and badges of the cell, all
+// present at once — none is exclusive with another. Click opens the
+// token-breakdown menu (its own component). Deliberately NO output-token
+// ticker: the running output figure is unwanted; session-wide and per-model
+// figures are the breakdown's.
 //
-// A turn's accounting is a RECONCILIATION: the daemon compares the usage each
-// response reported against the totals the terminal result claimed, and the
-// cell reports whether that reconciliation held. The comparison, the verdict
-// and the prose are all the daemon's — the client renders a string and picks a
-// class from the verdict arm.
-message FooterAccountingCell {
-  // The cell's text and tooltip, composed daemon-side and rendered verbatim
-  // (the figures a healthy turn shows: quota, duration, token dimensions,
-  // cache hit rate, subagent count, throughput).
+//   │ 18.2k in · 3.1k thought  ⚠  ✓ │
+//        input     thinking     │  └ accounting verdict badge (hover: the phrases)
+//                               └ expensive-turn alarm (hover: "41k over 20k")
+message FooterTokens {
+  FooterTokensInput input = 1;
+  FooterTokensThinking thinking = 2;
+  FooterTokensFirstToken first_token = 3;
+  // Set the moment the turn's uncached input crosses the threshold, and kept
+  // until the next turn starts. Unset = cache-efficient so far.
+  FooterTokensExpensiveTurn expensive_turn = 4;
+  // Set once the turn has settled; unset while it runs.
+  FooterTokensAccounting accounting = 5;
+}
+
+// THIS TURN's cumulative EXPENSIVE input — the canonical TokenUsage
+// input_misses total (written + unwritten), summed across the turn's
+// responses; cache READS excluded, which is the whole point. Resolved once by
+// the daemon; rendered verbatim.
+message FooterTokensInput {
+  int64 tokens = 1;
+}
+
+// Estimated thinking tokens so far this turn (latest-wins ticker, coalesced
+// daemon-side so a high-frequency source cannot drive the frame rate).
+message FooterTokensThinking {
+  int64 tokens = 1;
+}
+
+// First-token latency of the CURRENT MESSAGE (a turn is several API
+// responses; each has its own). Unset until the current message's first token
+// lands; holds until the next message starts.
+message FooterTokensFirstToken {
+  int64 latency_ms = 1;
+}
+
+// "This prompt re-ingested context." Computed daemon-side from the turn's
+// usage as the canonical input_misses total (written + unwritten), because
+// the vendor marks nearly all input cacheable: a cold prompt surfaces as
+// `written` while `unwritten` stays near zero even on a full re-ingest.
+// Rendered red; the host also surfaces it in its own mode line.
+message FooterTokensExpensiveTurn {
+  // The turn that crossed the threshold.
+  conversation.v1.TurnId turn = 1;
+  // The observed expensive cost.
+  int64 uncached_input_tokens = 2;
+  // The configured threshold that tripped, so the rendering can say "N over
+  // M" without knowing daemon config.
+  int64 threshold_tokens = 3;
+  // When the usage that tripped it arrived, epoch ms.
+  int64 at_ms = 4;
+  // WHY the turn ran, PROJECTED to the two cases the alarm renders
+  // differently. The shim's full prompt-origin vocabulary stops at the
+  // daemon.
+  oneof origin {
+    // An ordinary turn — a user's prompt, a command, a merge action.
+    FooterTokensExpensiveTurnPrompt prompt = 5;
+    // A cache keep-alive ping that came back COLD: it paid full freight,
+    // meaning the cache had already expired — its own alarm.
+    FooterTokensExpensiveTurnColdKeepAlive cold_keep_alive = 6;
+  }
+}
+message FooterTokensExpensiveTurnPrompt {}
+message FooterTokensExpensiveTurnColdKeepAlive {}
+
+// The settled turn's reconciliation. The daemon compared the usage each
+// response reported against the totals the terminal result claimed; the
+// comparison, the verdict and the prose are all the daemon's — the client
+// renders a badge from the verdict arm and the summary as its tooltip.
+message FooterTokensAccounting {
+  // The composed summary (the figures a healthy turn shows: quota, duration,
+  // token dimensions, cache hit rate, subagent count, throughput), rendered
+  // verbatim as the tooltip.
   string summary = 1;
   // WHETHER the accounting reconciled, as arms rather than a flag, so that a
   // verdict and the evidence it implies arrive together and a client cannot
   // render "invalid" with nothing to say about why.
   oneof verdict {
-    AccountingComplete complete = 2;
-    AccountingIncomplete incomplete = 3;
-    AccountingInvalid invalid = 4;
+    FooterTokensAccountingComplete complete = 2;
+    FooterTokensAccountingIncomplete incomplete = 3;
+    FooterTokensAccountingInvalid invalid = 4;
   }
 }
 
 // The turn reconciled: every figure in `summary` is backed by evidence.
-message AccountingComplete {}
+message FooterTokensAccountingComplete {}
 
 // The turn's accounting arrived without all of its evidence, so the figures
 // shown are partial. Not a contradiction — an absence.
-message AccountingIncomplete {
+message FooterTokensAccountingIncomplete {
   // What was missing, one display-ready phrase per gap, in display order
   // (e.g. "usage at turn start was never sampled"). The daemon composes the
   // prose; the client concatenates and renders, and parses nothing. Never
-  // empty when this arm is set — an incompleteness with nothing to name is a
-  // daemon fault, not a renderable state.
+  // empty when this arm is set.
   repeated string missing = 1;
 }
 
 // The turn's accounting CONTRADICTS itself: the responses and the result
 // disagree about what was spent. Distinct from incomplete, because the
 // evidence is present and does not add up.
-message AccountingInvalid {
+message FooterTokensAccountingInvalid {
   // What contradicts what, one display-ready phrase per problem, in display
   // order (e.g. "per-model totals disagree between responses and result").
-  // The daemon composes the prose from its own reconciliation records; the
-  // client renders the strings and parses nothing. Never empty when this arm
-  // is set.
+  // Never empty when this arm is set.
   repeated string problems = 1;
 }
 
