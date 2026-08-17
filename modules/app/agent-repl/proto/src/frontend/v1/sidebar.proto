@@ -16,6 +16,28 @@
 // VIEW ONLY. The sidebar's clicks (open, close, create, merge, hibernate,
 // navigate) are agentrepl.v1 requests with plain fields — a request type is
 // agentrepl, never frontend (the drawn/called test, which stands).
+//
+// THE MESSAGE TREE IS THE UI TREE. Every drawn box is one message and every
+// message is one drawn box, nesting equal, and no value rides bare:
+//
+//   ┌─ WORKSPACES ──────────────────────────┐  WorkspaceRoster
+//   │ ▾ repo-name                           │  RosterRepoSection → header
+//   │   ● row-name                    3m    │  RosterRow: status · name · when
+//   │ ▌ ● current-row                 now   │  RosterRowCurrent highlight
+//   │   ┌ branch  …  ┐                      │  RosterRowDetail (expanded)
+//   │   │ from    …  │                      │    three independently-omitted lines
+//   │   │ summary …  │                      │
+//   │   └────────────┘                      │
+//   │   ? closed-row  (greyed)        5d    │  inactive arm · RosterRowClosed
+//   │ ▸ Recently Merged            (3)      │  RosterMergedSection (folded)
+//   └───────────────────────────────────────┘
+//
+// A repo section and the recently-merged section share one header shape
+// (label + fold); a task section's header also carries the task's done
+// check, so it is its own header message rather than a shared one with a
+// field that means nothing for repos.
+
+
 
 syntax = "proto3";
 
@@ -28,9 +50,8 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // Always whole, never a delta — the model is small, so a full replace makes a
 // partially-applied roster unrepresentable.
 message WorkspaceRoster {
-  // The active grouping. THE SET ARM IS THE GROUPING — there is no separate
-  // mode value to disagree with the payload, and the rows of the inactive
-  // grouping are simply absent rather than carried and ignored.
+  // The active grouping. THE SET ARM IS THE GROUPING — the rows of the
+  // inactive grouping are simply absent rather than carried and ignored.
   oneof view {
     // Group by repository: the default, one section per repo.
     RosterRepositoryView repository = 1;
@@ -38,25 +59,31 @@ message WorkspaceRoster {
     // they serve.
     RosterTaskView task = 2;
   }
-
   // Workspaces whose merge has settled, hoisted out of the grouping above and
-  // rendered under BOTH views. Hoisted because a merged workspace's repo or
-  // task is no longer the interesting fact about it — that it is done is.
-  RosterSection recently_merged = 3;
-
-  // Absolute worktree dir of the selected workspace — the last
-  // SelectWorkspace the daemon received — empty when there is none. The dir
-  // is the identity: compared against RosterRow.dir, never against a display
-  // name, which is not unique.
-  string current_dir = 4;
-
-  // Absolute worktree dir the keyboard-navigation cursor rests on, empty when
-  // there is none. Distinct from current_dir on purpose: the cursor moves
-  // through the roster without switching workspaces.
+  // rendered under BOTH views: that they are done is the interesting fact.
+  RosterMergedSection recently_merged = 3;
+  // The selected workspace — the last SelectWorkspace the daemon received.
+  // UNSET when there is none.
+  RosterCurrentWorkspace current = 4;
+  // The keyboard-navigation cursor. Distinct from `current`: the cursor moves
+  // through the roster without switching workspaces. UNSET when none.
   //
   // SUPPLIED BY A STAGE-3a RPC OR DELETED THERE: the daemon does not observe
-  // Emacs's cursor unless an agentrepl.v1 verb tells it.
-  string nav_dir = 5;
+  // the editor's cursor unless an agentrepl.v1 verb tells it.
+  RosterNavCursor nav = 5;
+}
+
+// The selected workspace, by identity. Compared against RosterRowWorkspace,
+// never against a display name, which is not unique.
+message RosterCurrentWorkspace {
+  // Absolute worktree dir.
+  string dir = 1;
+}
+
+// The row the keyboard cursor rests on, by identity.
+message RosterNavCursor {
+  // Absolute worktree dir.
+  string dir = 1;
 }
 
 // The repository grouping's sections, in the order they render.
@@ -72,63 +99,97 @@ message RosterTaskView {
   repeated RosterTaskSection sections = 1;
 }
 
-// One repository's workspaces: the shared section shell, keyed by repository.
+// One repository's section: identity, header, rows.
 message RosterRepoSection {
-  // Stable key identifying the repository, and the fold state's key. Identity,
-  // not decoration: the fold a user sets must survive a roster republish, so
-  // renaming what a section is CALLED can never orphan it.
+  // The repository's stable identity — the fold key and the join key; a
+  // section can be relabelled without becoming a different section.
+  RosterRepoKey key = 1;
+  // The header box: label and fold toggle.
+  RosterSectionHeader header = 2;
+  // The rows below the header.
+  RosterRows rows = 3;
+}
+
+// A repository's stable identity.
+message RosterRepoKey {
   string repo_key = 1;
-  // The rows, the fold, and the display label (the daemon derives the label
-  // from repo_key: the project directory's basename, or the unknown-repo
-  // sentinel spelled out).
-  RosterSection section = 2;
 }
 
-// One task's workspaces: the shared section shell, keyed by task.
+// One task's section: identity, header (with the done check), rows.
 message RosterTaskSection {
-  // Stable task identity. The ID is the identity, NOT the title: a task can
-  // be renamed without becoming a different task.
+  // The task's stable identity — the ID, NOT the title: a task can be renamed
+  // without becoming a different task.
+  RosterTaskKey key = 1;
+  // The header box: label, fold toggle, done check.
+  RosterTaskSectionHeader header = 2;
+  // The rows below the header.
+  RosterRows rows = 3;
+}
+
+// A task's stable identity.
+message RosterTaskKey {
   string task_id = 1;
-  // Whether the task is complete. This axis exists ONLY here — a repository
-  // is never "done", so RosterRepoSection has no counterpart and cannot be
-  // asked a question that has no answer.
-  bool done = 2;
-  // The rows, the fold, and the display label (the task's title).
-  RosterSection section = 3;
 }
 
-// The section shell every grouping shares: rows, fold, label. Used bare by
-// recently_merged, which has no key of its own (the roster carries exactly
-// one such section), and wrapped by the repo and task sections, which add
-// theirs.
-message RosterSection {
-  // The section's workspaces, in render order.
+// The recently-merged section: header and rows. It has no key of its own —
+// the roster carries exactly one, so its fold identity is fixed.
+message RosterMergedSection {
+  RosterSectionHeader header = 1;
+  RosterRows rows = 2;
+}
+
+// A section header as repos and the merged section draw it: label + fold.
+message RosterSectionHeader {
+  RosterLabel label = 1;
+  RosterFold folded = 2;
+}
+
+// A task section's header: label + fold + the task's done check. Its own
+// message because the done axis exists ONLY for tasks — a repository is never
+// "done", and a shared header with a done field would carry a value that
+// means nothing there.
+message RosterTaskSectionHeader {
+  RosterLabel label = 1;
+  RosterFold folded = 2;
+  RosterTaskDone done = 3;
+}
+
+// A section's display label. DISPLAY ONLY, never the identity: the repo key
+// or task id beside the header is. Carried so the heading has one author.
+message RosterLabel {
+  string text = 1;
+}
+
+// A section's fold toggle. A folded section STILL CARRIES its rows — folding
+// is a display state, so the client hides the rows rather than the resolver
+// omitting them, and unfolding needs no republish.
+//
+// FOLD STATE IS UI PREFERENCE. Carried so the resolver, not each client,
+// decides; supplied by a stage-3a RPC or made webview-local there.
+message RosterFold {
+  bool folded = 1;
+}
+
+// A task's done check.
+message RosterTaskDone {
+  bool done = 1;
+}
+
+// The rows region of a section, in render order.
+message RosterRows {
   repeated RosterRow rows = 1;
-
-  // Whether the section renders collapsed. A folded section STILL CARRIES its
-  // rows — folding is a display state, so the client hides the rows rather
-  // than the resolver omitting them, and unfolding needs no republish.
-  //
-  // FOLD STATE IS UI PREFERENCE. Carried here so the resolver, not each
-  // client, decides; supplied by a stage-3a RPC or made webview-local there.
-  bool folded = 2;
-
-  // The section's human display label. DISPLAY ONLY, and never the identity:
-  // the repo key or task id beside this shell is. Carried rather than derived
-  // client-side so the heading has one author; empty when the resolver has
-  // no label to offer.
-  string label = 3;
 }
 
-// One workspace in the sidebar.
+// One workspace in the sidebar: a row line (status dot, name, when-column,
+// current highlight, receded styling), its nested family, and its detail
+// panel.
 message RosterRow {
-  // Absolute worktree dir. THE IDENTITY, and the join key to every
-  // workspace-scoped stream and command: a gesture on this row travels back to
-  // the daemon as this dir. Names collide across repos; dirs do not.
-  string dir = 1;
+  // The workspace this row IS — its identity, and the join key every gesture
+  // on the row travels back with. Names collide across repos; dirs do not.
+  RosterRowWorkspace workspace = 1;
 
-  // Display name, for rendering only. Never an identity or a join key.
-  string name = 2;
+  // The row's display name.
+  RosterRowName name = 2;
 
   // The workspace's lifecycle AS THE DAEMON RESOLVES IT: its own RenderState
   // coarsened onto the dot vocabulary (idle and ready draw as one dot), plus
@@ -204,47 +265,93 @@ message RosterRow {
     RosterRowStatusInactive inactive = 26;
   }
 
-  // Whether this row is the selected workspace. Redundant with a dir
-  // comparison against WorkspaceRoster.current_dir and deliberately so: the
-  // resolver states it once, so no client can compute it differently.
-  bool current = 27;
+  // Whether this row is the selected workspace — the row's highlight bar.
+  // Redundant with a comparison against WorkspaceRoster.current and
+  // deliberately so: the resolver states it once, so no client can compute
+  // it differently.
+  RosterRowCurrent current = 27;
 
   // Nested workspaces (a spawned family under its parent), in render order.
   repeated RosterRow children = 28;
 
-  // When the user last selected this workspace, in epoch MILLISECONDS —
-  // stamped by the daemon on SelectWorkspace. Drives the row's when-column,
-  // the relative-age text the rail renders on the right ("3m", "2h"). UNSET
-  // MEANS NEVER SELECTED and renders as no age at all; presence, not a zero
-  // sentinel.
-  optional int64 last_viewed_at_ms = 29;
+  // The when-column at the row's right edge.
+  RosterRowWhen when = 29;
 
-  // When this workspace's merge settled, in epoch MILLISECONDS. UNSET MEANS
-  // NOT MERGED. Takes precedence over last_viewed_at_ms in the when-column
-  // for a merged row: once a workspace is done, how long ago it merged is the
-  // fact worth showing.
-  optional int64 merged_at_ms = 30;
+  // The expanded detail panel under the row.
+  RosterRowDetail detail = 30;
 
-  // The workspace's own git branch, for the expanded detail panel. Display
-  // only — the join key is dir. EMPTY MEANS UNKNOWN: the row renders without
-  // the branch line rather than with a blank one.
-  string branch = 31;
+  // Whether the row renders RECEDED (greyed): the workspace exists and is
+  // switchable, but its agent-repl panes are dismissed. Deliberately NOT a
+  // status arm: closed is orthogonal to the lifecycle — a closed workspace
+  // still has one.
+  RosterRowClosed closed = 31;
+}
 
-  // The branch this workspace was cut from and merges back into, for the
-  // detail panel. Display only, same emptiness rule as branch.
-  string parent_branch = 32;
+// The workspace a row is: absolute worktree dir, THE IDENTITY.
+message RosterRowWorkspace {
+  string dir = 1;
+}
 
-  // A short human summary of what the workspace is doing, shown as the detail
-  // panel's prose line — the workspace's last prompt summary. EMPTY MEANS
-  // NONE and the line is omitted rather than rendered blank.
-  string summary = 33;
+// A row's display name. Never an identity or a join key.
+message RosterRowName {
+  string text = 1;
+}
 
-  // Whether the workspace is closed: it still exists and is still switchable,
-  // but its agent-repl panes are dismissed. Renders RECEDED (greyed), the
-  // same treatment a merged row gets. Deliberately NOT a status arm: closed
-  // is orthogonal to the lifecycle — a closed workspace still has one — so
-  // it rides alongside the oneof rather than displacing an arm inside it.
-  bool closed = 34;
+// The row's selected-workspace highlight.
+message RosterRowCurrent {
+  bool current = 1;
+}
+
+// The when-column: ONE value, chosen by the daemon. Merged wins over last
+// selected when both exist; the client renders whichever arm arrives and
+// applies no precedence of its own. UNSET oneof = nothing to show (never
+// selected, not merged) — the column is empty, not "0ms ago".
+message RosterRowWhen {
+  oneof shown {
+    RosterRowWhenLastSelected last_selected = 1;
+    RosterRowWhenMerged merged = 2;
+  }
+}
+
+// When the user last selected the workspace, in epoch MILLISECONDS — stamped
+// by the daemon on SelectWorkspace. Renders as relative age ("3m", "2h").
+message RosterRowWhenLastSelected {
+  int64 at_ms = 1;
+}
+
+// When the workspace's merge settled, in epoch MILLISECONDS.
+message RosterRowWhenMerged {
+  int64 at_ms = 1;
+}
+
+// The expanded detail panel: three lines, each its own sub-element, each
+// PRESENT or ABSENT by message presence rather than by an empty string. An
+// absent line is omitted, not rendered blank.
+message RosterRowDetail {
+  RosterRowDetailBranch branch = 1;
+  RosterRowDetailParentBranch parent_branch = 2;
+  RosterRowDetailSummary summary = 3;
+}
+
+// The workspace's own git branch. Display only — the join key is the dir.
+message RosterRowDetailBranch {
+  string name = 1;
+}
+
+// The branch this workspace was cut from and merges back into. Display only.
+message RosterRowDetailParentBranch {
+  string name = 1;
+}
+
+// A short human summary of what the workspace is doing — the workspace's
+// last prompt summary.
+message RosterRowDetailSummary {
+  string text = 1;
+}
+
+// The row's receded styling.
+message RosterRowClosed {
+  bool closed = 1;
 }
 
 // The roster row statuses. Each is EMPTY BY DESIGN — being set is the entire
