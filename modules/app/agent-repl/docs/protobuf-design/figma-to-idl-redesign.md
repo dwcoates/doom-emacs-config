@@ -52,7 +52,7 @@ stage may be reopened at any time, and reopening reopens every decision
 downstream of it, enumerated by name.
 
 1. **`conversation.v1`** — `message` → `tool_call` → `agent` → `user` →
-   `content_blocks` → `context_cut` → `failure` → `detached_work` →
+   `content_blocks` → `context_cut` → `api` → `detached_work` →
    `tokens` → `session_command` (the per-concern file set after the folds
    and split recorded under Landed changes; originally `message` →
    `payloads` → `content` → `tokens` → `session_command`).
@@ -123,7 +123,7 @@ banners, every message VERBATIM, into:
 - `content_blocks.proto` — `TextBlock`, `ImageBlock`, `UnsupportedBlock`, and
   the "neutral by design" / "narrowed per site" preamble.
 - `context_cut.proto` — `ContextCut`, `ContextCleared`, `ContextCompacted`.
-- `failure.proto` — `FailureRaised`.
+- `api.proto` (first `failure.proto`, renamed) — `FailureRaised`.
 - `detached_work.proto` — all twenty-one detached-work messages.
 - `tokens.proto`, `session_command.proto` — untouched.
 
@@ -148,12 +148,17 @@ review, one import for whoever needs only that concern.
   yet (`detached_work` will import `tool_call` once `origin_tool_call_id`
   becomes a `ToolCallId`). Top-down order within stage 1 is therefore
   `message` → `tool_call` → `agent` → `user` →
-  `content_blocks` → `context_cut` → `failure` → `detached_work` → `tokens` →
+  `content_blocks` → `context_cut` → `api` → `detached_work` → `tokens` →
   `session_command`, walked one file per increment.
 - File name is `tool_call.proto` (snake_case, matching `session_command.proto`),
   not the `toolcall.proto` the user typed; the user may rename. The user DID
   rename the other two: `agent_response.proto` → `agent.proto` and
-  `user_message.proto` → `user.proto` (the names above are the renamed ones).
+  `user_message.proto` → `user.proto`, and `failure.proto` → `api.proto` (the names
+  above are the renamed ones). `api.proto`'s concern is the vendor API's OWN
+  outcomes — the actor is the API, not agent/user/tool — which is why
+  `FailureRaised` did not fold into `agent.proto`: the agent said nothing.
+  Open for `tokens.proto`'s turn: `TokenUsage` is also an API fact, so
+  whether `tokens.proto` folds into `api.proto`.
 - A consumer that imported `content.proto` or `payloads.proto` for one type
   now imports the concern file that owns it — narrower, and the compiler says
   which.
