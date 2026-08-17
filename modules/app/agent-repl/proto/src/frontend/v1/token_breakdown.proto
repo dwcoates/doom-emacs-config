@@ -1,0 +1,73 @@
+// token_breakdown.proto — THE TOKEN-BREAKDOWN MENU the topbar opens: titled
+// sections of rows. Its own component, its own file. Per-workspace; resolved
+// by the daemon.
+//
+// EVERY FIELD OF THE VIEW IS AN ELEMENT MESSAGE (see topbar.proto). The
+// workspace and the fence are wrapped in THIS component's own messages, not
+// shared with the topbar's: two dedicated wrappers of one fact imply two
+// separate subcomponents.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// The token-breakdown menu, fully resolved. Sections and rows arrive in
+// display order; the client renders exactly this tree.
+message TokenBreakdownView {
+  // The workspace this breakdown describes. WORKSPACE-ADDRESSED, never
+  // session-addressed: a frontend has no session vocabulary. STAGE-3b decides
+  // whether a per-workspace stream's element still carries it.
+  TokenBreakdownWorkspace workspace = 1;
+  // The staleness fence for this push. STAGE-3b decides whether cross-stream
+  // fencing survives per-component streams.
+  TokenBreakdownFence fence = 2;
+  // Menu sections, in display order (e.g. "this turn", "session", per-model).
+  repeated TokenBreakdownSection sections = 3;
+}
+
+// The workspace the breakdown describes.
+message TokenBreakdownWorkspace {
+  // Absolute worktree dir.
+  string dir = 1;
+}
+
+// The staleness fence for this push: opaque, compared byte-wise against the
+// workspace's current WorkspaceState fence, never parsed. See TopbarFence.
+message TokenBreakdownFence {
+  string token = 1;
+}
+
+// One titled section of the breakdown menu.
+message TokenBreakdownSection {
+  // The section heading.
+  TokenBreakdownHeading heading = 1;
+  // Rows, in display order.
+  repeated TokenBreakdownRow rows = 2;
+}
+
+// A section's heading.
+message TokenBreakdownHeading {
+  // Verbatim.
+  string text = 1;
+}
+
+// One row of the breakdown menu — the row IS the element, and these are its
+// props. All numbers are resolved; the share is precomputed so the client
+// does no arithmetic.
+message TokenBreakdownRow {
+  // Row label, verbatim (e.g. "uncached input", "fresh input", "cache read").
+  string label = 1;
+  // The row's token count.
+  int64 tokens = 2;
+  // The row's share of its section's basis, in permille (0-1000), already
+  // rounded. UNSET means no share applies to this row and the client omits
+  // the percentage; 0 is a real zero percent. Presence, not a -1 sentinel.
+  optional int32 share_permille = 3;
+  // True when the row is a headline (rendered unindented/emphasized), false
+  // for detail rows. Layout fact resolved daemon-side.
+  bool emphasized = 4;
+  // Indent depth for nested detail rows; 0 = top level.
+  int32 depth = 5;
+}

@@ -36,6 +36,7 @@ syntax = "proto3";
 
 package shim.v1;
 
+import "conversation/v1/api.proto";
 import "google/protobuf/descriptor.proto";
 import "google/protobuf/struct.proto";
 import "shim/v1/external.proto";
@@ -776,15 +777,11 @@ message QuerySelectedModel {
 // The shim's SDK-provided model menu.  This is published rather than inferred
 // by a frontend, because the live query is the only authority on selectable
 // model ids for this session/account.
-message ModelOption {
-  string value = 1;
-  string display_name = 2;
-  string description = 3;
-}
-
+// (ModelOption itself is conversation.v1's — an API fact every surface
+// imports from conversation/v1/api.proto; the shim declares no copy.)
 message ModelCatalog {
   string session_id = 1;
-  repeated ModelOption models = 2;
+  repeated conversation.v1.ModelOption models = 2;
 }
 
 // Stop the current turn via the SDK's interrupt(). There is exactly one kind

@@ -114,6 +114,71 @@ that transport.
 
 ## Landed changes
 
+### `frontend.v1/topbar.proto`: every field an element message; health views out; `ModelOption` moves to `conversation.v1`; the breakdown menu gets its own file
+
+**A NEW CONVENTION, stated by the user during this increment and being added
+to the skill by a one-shot subagent (`proto-ui-element-messages`):** in
+figma→idl / SDUI, a component's view message contains NO dangling primitives
+— EVERY field, including ones like `workspace` that carry addressing, is
+wrapped in a dedicated, appropriately-named message, so the UI's
+subcomponents are implicit in the schema and no field is conflated with a
+neighbor. And when the SAME fact appears in two component views, each
+component wraps it in ITS OWN message (`TopbarWorkspace`,
+`TokenBreakdownWorkspace`) rather than sharing one — "that's EXACTLY
+PERFECT: duplicate information represented with dedicated messages implies
+separate UI subcomponents." The orchestrator's first two sketches (scalars
+allowed for addressing; a shared wrapper considered) were both corrected by
+the user; both corrections are the convention now.
+
+**What changed.**
+
+- `TopbarView` is seven element messages and nothing else: `TopbarWorkspace
+  { dir }`, `TopbarFence { token }`, `TopbarTitle { text }`,
+  `TopbarSessionLine { text }`, `TopbarModelSelector { ModelOption selected;
+  repeated ModelOption options }`, `TopbarConnectivity` (unchanged shape),
+  `TopbarWarningStrip { repeated TopbarWarning }`. `model_display` (a string)
+  is gone — the selection is the whole option, presence = selected.
+- `DaemonHealthView` and `SessionHealthView` DELETED from `frontend.v1`: not
+  drawn by anything, they are the answers to two host commands and become
+  `agentrepl.v1` responses at stage 3 (`bool healthy + string reason` → a
+  healthy/unhealthy oneof there).
+- `shim.v1.ModelOption` DELETED; `conversation.v1.ModelOption` ADDED to
+  `api.proto` (an API fact: the models the vendor offers), reopening stage 1
+  ADDITIVELY — nothing landed in `api.proto` changes. `shim/v1/core.proto`'s
+  `ModelCatalog.models` and `frontend/v1/footer.proto:427` repoint to it;
+  `frontend.v1` no longer imports `shim.v1` from the topbar (footer still
+  does, its turn next).
+- `token_breakdown.proto` is a NEW FILE holding `TokenBreakdownView` and its
+  tree, moved out of `topbar.proto`; `TokenBreakdownWorkspace`,
+  `TokenBreakdownFence`, `TokenBreakdownHeading` are new element wrappers;
+  `share_permille` is `optional` (was a -1 sentinel).
+- `TopbarConnectivity.tone` stays a string: a color-class NAME from the
+  shared `proto/vocab/render-colors.json` vocabulary, a rendering token, not
+  a state. The state it derives from (`SessionConnectivity`, footer.proto) is
+  an enum and is raised at the footer's turn.
+- `workspace` and `fence` are KEPT (wrapped) and marked STAGE-3b: whether a
+  per-workspace stream's element still names its workspace, and whether
+  cross-stream fencing survives per-component streams, are conventions.
+
+**Why, in the user's terms.** "This message looks good, I approve" — after
+the two corrections above.
+
+**Consequences.**
+
+- The daemon's topbar resolver (`daemon/internal/frontend/topbar.go`) and
+  the webapp's topbar renderer read element messages; the health-view
+  producers move to stage-3 RPC handlers.
+- Every consumer of `shim.v1.ModelOption` (shim, daemon, webapp) reads
+  `conversation.v1.ModelOption`.
+- RETROACTIVE, PENDING THE USER'S CALL: `sidebar.proto`'s `RosterRow` has
+  dangling primitives that are elements (`dir`, `name`, `branch`,
+  `parent_branch`, `summary`); the same convention applies there as a
+  follow-up increment (`RosterRowName`, `RosterRowDetail {…}`, etc.).
+- The typed workspace identity question (one `WorkspaceRef` type vs
+  per-component wrappers) is ANSWERED by the convention: per-component
+  wrappers, because they name subcomponents. A shared identity TYPE may still
+  be wanted for `agentrepl.v1` requests (stage 3), where nothing is drawn.
+
 ### `frontend.v1/sidebar.proto`: daemon-resolved, global, view-only; `revision`/`boot_id` gone; `RosterSection` shared
 
 **Two settlements above the shapes, both by selection.**
