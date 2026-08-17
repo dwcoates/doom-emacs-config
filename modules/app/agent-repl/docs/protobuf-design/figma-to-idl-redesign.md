@@ -51,11 +51,12 @@ within each. A later stage opens only after every earlier one is settled; any
 stage may be reopened at any time, and reopening reopens every decision
 downstream of it, enumerated by name.
 
-1. **`conversation.v1`** — `message` → `tool_call` → `agent` → `user` →
-   `content_blocks` → `context_cut` → `api` → `detached_work` →
-   `tokens` → `session_command` (the per-concern file set after the folds
-   and split recorded under Landed changes; originally `message` →
-   `payloads` → `content` → `tokens` → `session_command`).
+1. **`conversation.v1`** — COMPLETE at `363323f1b`. Walked `message` →
+   `tool_call` → `agent` → `user` → `content_blocks` → `context_cut` → `api`
+   → `detached_work` → `session_command` (the per-concern file set after the
+   folds and split recorded under Landed changes; `tokens` folded into `api`
+   on its turn; originally `message` → `payloads` → `content` → `tokens` →
+   `session_command`).
 2. **`frontend.v1`** — `sidebar` → `topbar` → `footer` → `failure` → `feed`.
 3. **`agentrepl.v1`**, from the empty service, in three sub-stages:
    - 3a. RPC inventory — every method by name and one-line purpose, no
@@ -79,16 +80,23 @@ which imports `content` and `tokens`; `core`/`entry-delivery`/`message-page`
 all import `external`, which imports `bookkeeping`; `write` imports `entry`
 and `cursor`, `entry` imports `unsupported`). Stage 2's component files have
 no containment relation, so their order stays as the user accepted it.
-`tokens` before `session_command` is arbitrary between two leaves. This
-convention is being added to the `/create-or-update-protobufs` skill itself by
-a one-shot workspace dispatched at the same moment.
+`tokens` before `session_command` was arbitrary between two leaves (moot once
+`tokens` folded into `api`). This convention was added to the
+`/create-or-update-protobufs` skill by a one-shot subagent — PR "walk one
+package's proto files top-down by containment" (explanation-engine #7447,
+MERGED). Two sibling conventions from this session landed the same way:
+"add group-by-concern convention" (#7449, MERGED) and "add
+adjacent-exclusivity enum-to-oneof test" (#7448, open — CI green, merge-queue
+add pending a GitHub outage).
 
 **Retracted by this amendment.** The `content.proto` increment sketched
 before the amendment (ThinkingBlock as a two-arm oneof, ImageBlock's location
 split into path/url arms, UnsupportedBlock.raw's exception stated at the
 field, ToolCallBlock.arguments deferred to its own increment) is WITHDRAWN
 unagreed and returns when `content.proto` comes up in the top-down order — by
-then `payloads.proto` will have said what it needs from it.
+then `payloads.proto` will have said what it needs from it. (It did return, as
+`content_blocks.proto`, and landed at `3b55689e3` with the same three
+decisions.)
 
 **The amendments the user made, and why.** The first proposal put
 `frontend.v1` before `conversation.v1`, and the file order within stages 3–6
@@ -616,7 +624,7 @@ scratch than to confuse ourselves with preexisting junk.
   (`Refusal*` messages derived from daemon handlers, per the superseded
   record's "Per-method errors, DERIVED not invented"). That derivation
   evidence — which handler emits which refusal — is in the superseded
-  record's prose and in git history (`4b0d6aa4c^`), not on disk. When an
+  record's prose and in git history (`cfc849d60^`), not on disk. When an
   endpoint is re-added, its error arms are re-derived, and the old file is
   reference material, not a template.
 - The build was already broken by the transport reversal; this widens the
