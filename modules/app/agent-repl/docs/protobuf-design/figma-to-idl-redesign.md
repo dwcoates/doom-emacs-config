@@ -114,6 +114,33 @@ that transport.
 
 ## Landed changes
 
+### PRINCIPLE: figma→idl takes precedence over no-respell at the backend→frontend boundary (no proto landed)
+
+**Decided, the user's words spat back and confirmed:** `frontend.v1` is
+composed ONLY of element messages shaped for the drawn element. When an
+element's props derive from an internal type — a `conversation.v1` record, a
+`shim.v1` wire type, a daemon-internal fact — the DAEMON RESOLVES a
+frontend-shaped message for that element: a deliberate re-spelling of the
+internal fact into UI vocabulary. "One canonical form / never re-spell /
+import the encompassing message" yields to figma→idl at that boundary.
+
+**Why it is safe there and nowhere else.** The daemon is the single resolver,
+so the frontend copy is a resolved VALUE re-published on every change and
+self-corrects like any duplicated value; the internal type keeps its one
+canonical form for records/transport; the frontend never becomes a second
+AUTHOR of the fact, only a projection of it. NOT licensed: re-spelling within
+`conversation.v1`/`shim.v1`/`store.v1`; `frontend.v1` re-declaring another
+surface's type for any reason other than drawing; typed identities
+(`MessageId`, `TurnId`, `ToolCallId`) are still imported — join keys, not
+props. Being added to the skill by a one-shot subagent
+(`proto-figma-idl-precedence`), genericized.
+
+**REOPENED BY NAME.** The superseded record's "`frontend.v1` stops flattening
+`AgentSaid`; it carries it whole and stamps alongside" was the no-respell
+rule applied across exactly this boundary. Under this principle the feed's
+agent card may be a resolved element message rather than an embed — decided
+at `feed.proto`'s turn, not kept by default.
+
 ### `footer.proto` closes: PLUMBING leaves `frontend.v1`; three state enums and `HeartbeatView` die
 
 **What changed.**
