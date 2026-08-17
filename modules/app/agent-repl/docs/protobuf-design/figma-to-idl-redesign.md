@@ -114,6 +114,78 @@ that transport.
 
 ## Landed changes
 
+### `frontend.v1/footer.proto` increment 1: the main strip, reimagined as three typed resolution levels
+
+**The drawing agreed with the user (his reimagining of the strip):**
+
+```
+│ merging   │ cherry-picking 3/7  │ 4f2a1c: fold tokens into api │ 0:42 │ 18.2k in · 3.1k thought │
+  Status      SubStatus             StatusActivity                 Clock   Tokens
+  coarsest ──────────── resolution increases left → right ────────► finest
+```
+
+**What changed.** `ProgressView` is replaced by `FooterView { FooterWorkspace;
+FooterFence; FooterStrip; FooterExpanded (empty, increment 2) }`.
+`FooterStrip { FooterStatus; FooterSubStatus; FooterStatusActivity;
+FooterClock; FooterTokens }`:
+
+- `FooterStatus` — nine EMPTY arms: idle, thinking, waiting, interrupted,
+  merging, background, blocked, asleep, disconnected. The coarsest state;
+  color per arm from the shared vocabulary, resolved by the daemon.
+- `FooterSubStatus` — a oneof of per-status FAMILIES, each a oneof of steps
+  with the step's small facts: thinking {submitting, thinking, clearing,
+  compacting}; merging {enqueuing, queued{position,depth},
+  before_action{action}, cherry_picking{commits}, testing{commits}, conflict,
+  after_action{action}, failed, merged} — the merge run's own phase
+  vocabulary projected; disconnected {starting, degraded, severed, dead,
+  start_failed}; idle {ready, done}; blocked {auth, usage_limit,
+  vendor_error}. Unset for statuses with no substructure.
+- `FooterStatusActivity` — typed KINDS whose payload is mostly composed text:
+  merging_commit{sha,subject}, hook{name}, retrying{attempt,status},
+  authenticating{line}, blocked_on_user{detail}, rate_limited{session,weekly
+  FooterAllowance}, note{text} (the daemon's free line for a thing with no
+  kind yet).
+- `FooterClock { optional turn_started_at_ms }`; `FooterTokens
+  { input_tokens; thinking_tokens; optional ttft_ms }`.
+
+DELETED: `ProgressWindow`, `RateLimitWindow`, `InterruptWindow`,
+`FooterPhase`, `FooterMergeChip`, the deprecated `ProgressView.state` copy,
+the interrupt chip (an `interrupted` status now), and the counters
+(`pending_permissions`, `queue_depth`, `live_task_count` — held → the tray's
+heading; permissions → the feed's cards; tasks → the tray/sheet).
+KEPT VERBATIM under a "PENDING INCREMENT 2" banner: `ContextCostAlert`,
+`FooterFailureRow`, `FooterAccountingCell`, `Accounting*`; under "PENDING":
+`DetachedCancelOutcome`/`DetachedAgentsCancelled` (an ack payload, stage 3);
+and the whole PLUMBING section (`RenderState`, `SessionConnectivity`,
+`SessionStatus` enums, `RuntimeFault`, `WorkspaceState`, `SessionView`,
+`BackfillState`, `DaemonView`, `HeartbeatView`) — not drawn anywhere; its
+home is decided after the footer.
+
+**Why, in the user's terms.** "The main phase should be on the left … quite
+general, so no 'merge testing', just 'merging'. The second section should be
+where the finer resolution comes in. The third section [interrupt chip] I
+don't see a reason for at all; we should have an 'interrupted' main status
+cleared on subsequent status update. The fourth section, activity, should be
+the finest resolution … dynamic output as determined by the daemon. Clock and
+tokens are good. Counters can go." And: "the first three should all be typed
+(just each 'less' typed than the next by having more of its information
+implicit in text fields)." Names chosen by the user: Status, SubStatus,
+StatusActivity.
+
+**Consequences.**
+
+- The daemon's footer resolver picks ONE activity (today `ProgressView`
+  ships all windows and the webapp applies precedence — client derivation,
+  gone) and projects the interrupt outcome to a status, so `frontend.v1` no
+  longer names `shim.v1.InterruptOutcome`.
+- The status/sub-status arm sets are the daemon's `RenderState` re-cut along
+  the six colors + merge family; whether `RenderState` itself survives (it is
+  a state ENUM, a live violation) is the PLUMBING decision.
+- `FooterAllowance.status` stays the vendor's verbatim word: the vendor's full
+  rate-limit vocabulary is not in evidence; typed arms when it is.
+- Rows and sheet (failure row, expensive-turn row, merge note, gate row,
+  accounting cell) are increment 2, drawing first.
+
 ### `frontend.v1/daemon_hold.proto` (was `prompt_queue.proto`): the held tray; `conversation.v1/turn.proto` adds `TurnId`
 
 **CORRECTION, KEPT VISIBLE.** The seven-arm `DaemonHold` type and its
