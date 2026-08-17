@@ -1,0 +1,104 @@
+// tool_call.proto — TOOL CALLS: the call, its result content, its return, and
+// the permission gate.
+//
+// A tool returning is NOT a block. It is `ToolReturned`, an UPDATE arm on the
+// message that made the call. Modeling it as a block would have required an
+// author to own it, and the only author on offer was the user — who did not
+// run the tool.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/content_blocks.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// The agent decided to call a tool.
+message ToolCallBlock {
+  // The id the RESULT will name. This is the only correlation between a call
+  // and its result, and it comes from the vendor.
+  string tool_call_id = 1;
+  // The tool as the agent named it — `Bash`, `Read`, an MCP tool's full name.
+  // A plain string because the set is open: MCP servers add tools at runtime,
+  // so an enum here would be wrong within a day.
+  string tool_name = 2;
+  // The arguments, as the agent supplied them. Structured rather than a string
+  // because a client renders fields, and re-parsing a string to find them is a
+  // second parser that can disagree with the first.
+  google.protobuf.Struct arguments = 3;
+}
+
+// What a TOOL returned.
+//
+// Narrow like UserContent and separate from it on purpose: the vendor delivers
+// tool results inside user-role records, and reusing the user's own union here
+// would preserve that accident in a schema built to erase it. A tool result is
+// not something a person said.
+message ToolResultContent {
+  // In the order the tool produced them.
+  repeated ToolResultContentBlock blocks = 1;
+}
+
+// One block of a tool's output.
+message ToolResultContentBlock {
+  oneof block {
+    // The tool's textual output.
+    TextBlock text = 1;
+    // An image the tool produced — a screenshot, a rendered chart.
+    ImageBlock image = 2;
+    // A block whose kind we do not model.
+    UnsupportedBlock unsupported = 3;
+  }
+}
+
+// A tool the agent called has returned.
+//
+// An UPDATE arm rather than a content block, carrying the message_id of the
+// message that made the call, so the result folds onto the tool card without a
+// correlation pass and costs no page slot.
+//
+// The vendor delivers these inside user-role records. That is a transport
+// accident of its API, and this shape is where it stops.
+message ToolReturned {
+  // The call this answers, which the agent supplied when it made the call.
+  string tool_call_id = 1;
+  // What the tool returned, for the reader.
+  ToolResultContent content = 2;
+  // The tool FAILED. A separate fact from empty content, because a tool that
+  // returned nothing and a tool that errored are different things to render.
+  bool is_error = 3;
+}
+
+// A permission the agent asked for.
+message PermissionAsked {
+  // What the agent wants to do, so the user can answer knowing what they allow.
+  ToolCallBlock requested = 1;
+}
+
+// The answer to a permission the agent asked for.
+message PermissionAnswered {
+  oneof answer {
+    PermissionAllowed allowed = 1;
+    PermissionDenied denied = 2;
+    // The question went away without an answer — the turn ended, the session
+    // stopped. Distinct from denial, which is a decision the user made.
+    PermissionAbandoned abandoned = 3;
+  }
+}
+
+// The user allowed the call.
+message PermissionAllowed {
+  // The user allowed this kind of call from now on, not just this one.
+  bool for_session = 1;
+}
+
+// The user refused the call.
+message PermissionDenied {
+  // What the user said when denying, which the agent reads as feedback.
+  string reason = 1;
+}
+
+// Nobody ever answered, and the question is no longer live.
+message PermissionAbandoned {}

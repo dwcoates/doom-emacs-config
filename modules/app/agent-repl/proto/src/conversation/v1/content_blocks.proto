@@ -1,0 +1,52 @@
+// content_blocks.proto — BLOCKS COMMON TO EVERY AUTHOR: text, images, and the
+// unmodeled.
+//
+// THE CONTENT MODEL IS NEUTRAL BY DESIGN. The vendor's own content model has
+// seventeen block kinds named for its API surface — MCP tool use, server tool
+// use, web search result, code execution result, container upload. Those are
+// all the same two facts wearing different names: a tool was CALLED, and a
+// tool RETURNED. This models the facts and lets the tool's own name carry the
+// rest.
+//
+// THE BLOCK SET IS NARROWED PER SITE, and there is deliberately no shared
+// `Content`. One union with every arm would make a user message carrying
+// reasoning, or a tool result carrying a tool call, representable and
+// meaningless. Three unions — UserContent, AgentContent, ToolResultContent,
+// each in the file of the author it belongs to — hold only what can
+// legitimately appear where it appears, and make those unbuildable instead of
+// merely wrong. The cost is a duplicated arm list; the repo's rule is duplicate
+// over share, because mutual exclusivity is worth more than deduplication.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// Words meant to be read as they are.
+message TextBlock {
+  // The text, verbatim. Markdown is a rendering choice a client makes; nothing
+  // here declares a format, because the producer does not know one.
+  string text = 1;
+}
+
+// An image, carried by REFERENCE rather than by value.
+message ImageBlock {
+  // Where the image lives. A path or URL rather than bytes: a conversation
+  // record is replayed many times, and inlining megabytes into something
+  // replayed is how a feed becomes slow.
+  string source = 1;
+  // The MIME type, so a client knows what it is fetching before it fetches it.
+  string media_type = 2;
+}
+
+// A block whose kind this schema does not model, kept whole so the decision to
+// not model it stays reversible from stored data.
+message UnsupportedBlock {
+  // What the vendor called it, so a later schema knows what to model.
+  string kind = 1;
+  // The block entire and verbatim, so nothing is lost by not understanding it.
+  google.protobuf.Struct raw = 2;
+}
