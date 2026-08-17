@@ -1,14 +1,17 @@
-// topbar.proto — THE TOPBAR: workspace, title, session line, model selector,
+// topbar.proto — THE TOPBAR: title, session line, model selector,
 // connectivity glyph, warning strip. Per-workspace; resolved by the daemon.
 //
 // EVERY FIELD OF THE VIEW IS AN ELEMENT MESSAGE. Reading TopbarView
 // enumerates the topbar's subcomponents; each element's props are its own
 // message, so the UI's partition is a fact of the schema and no value rides
 // bare where it could be conflated with a neighbor. Where the same fact also
-// appears in another component's view (the workspace, the fence), THAT
-// component wraps it in ITS OWN message — two dedicated wrappers of one fact
-// imply two separate subcomponents, which is exactly the information a shared
-// wrapper would lose.
+// appears in another component's view, THAT component wraps it in ITS OWN
+// message — two dedicated wrappers of one fact imply two separate
+// subcomponents, which is exactly the information a shared wrapper would lose.
+//
+// NO WORKSPACE, NO FENCE: the topbar's stream is per-workspace, so the
+// workspace is the stream's, and one ordered stream per component needs no
+// staleness token — a push cannot overtake a newer one on its own stream.
 //
 // The token-breakdown menu the topbar opens is its own component and its own
 // file: token_breakdown.proto.
@@ -24,39 +27,16 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // One workspace's topbar, resolved completely by the daemon. The client
 // renders each element verbatim and derives nothing.
 message TopbarView {
-  // The workspace this topbar belongs to — its own subcomponent, and the
-  // stream's addressing. STAGE-3b decides whether a per-workspace stream's
-  // element still carries it; the wrapper is what stays either way.
-  TopbarWorkspace workspace = 1;
-  // The staleness fence for this push. STAGE-3b decides whether cross-stream
-  // fencing survives per-component streams; the wrapper is what stays.
-  TopbarFence fence = 2;
   // The title line.
-  TopbarTitle title = 3;
+  TopbarTitle title = 1;
   // The session identity line (hover/expanded state).
-  TopbarSessionLine session_line = 4;
+  TopbarSessionLine session_line = 2;
   // The model selector: current selection and the selectable list.
-  TopbarModelSelector model_selector = 5;
+  TopbarModelSelector model_selector = 3;
   // The connectivity glyph.
-  TopbarConnectivity connectivity = 6;
+  TopbarConnectivity connectivity = 4;
   // The warning strip.
-  TopbarWarningStrip warnings = 7;
-}
-
-// The workspace the topbar belongs to.
-message TopbarWorkspace {
-  // Absolute worktree dir — the identity every workspace-scoped stream and
-  // command uses; never displayed differently than given.
-  string dir = 1;
-}
-
-// The staleness fence for this push: an opaque token the client compares
-// BYTE-WISE against the fence on the workspace's current WorkspaceState, and
-// never parses, splits or interprets. Equal means current; different means
-// stale, and a stale push is discarded whole rather than partially adopted.
-// The daemon mints it and is the only thing that can read meaning into it.
-message TopbarFence {
-  string token = 1;
+  TopbarWarningStrip warnings = 5;
 }
 
 // The title line the topbar shows.
