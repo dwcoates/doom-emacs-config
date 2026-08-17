@@ -1,0 +1,35 @@
+// context_cut.proto — CUTS: the conversation was cut here, and the reader must
+// see where.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/agent_response.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// The conversation was cut here, and the reader must see where.
+message ContextCut {
+  oneof cut {
+    // Everything before this was discarded outright.
+    ContextCleared cleared = 1;
+    // Everything before this was summarized into what follows.
+    ContextCompacted compacted = 2;
+  }
+}
+
+// History was discarded with nothing left in its place.
+message ContextCleared {}
+
+// History was replaced by a summary of itself.
+message ContextCompacted {
+  // The summary that replaced the history, which the feed shows in its place so
+  // the cut is not a hole. AgentContent because the summary is the agent's own
+  // prose about what it is discarding.
+  AgentContent summary = 1;
+  // What the context measured before and after, so a reader can see what the
+  // compaction bought rather than being told it happened.
+  int64 tokens_before = 2;
+  int64 tokens_after = 3;
+}

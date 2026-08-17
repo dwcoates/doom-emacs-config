@@ -1,0 +1,35 @@
+// failure.proto — FAILURES a producer observed and the vendor recorded.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// A failure the PRODUCER OBSERVED and the vendor RECORDED.
+//
+// NARROW ON PURPOSE, and the narrowing is the point. A failure card the daemon
+// SYNTHESIZED — a session that never started, a store write the shim rejected —
+// is not this: nothing observed it and no transcript holds it, so it has no
+// producer and cannot be an entry at all. That is `frontend.v1.FailureCardView`,
+// which the daemon mints and pushes.
+//
+// What lands here is the other kind: the vendor's own recorded error, which the
+// CLI writes to its transcript and the sidecar reads back. It is durable
+// because the vendor made it durable, and a reader scrolling back must see that
+// the turn failed rather than find it merely absent.
+//
+// NO RECOVERY CLASSIFICATION HERE. Whether anything can be done about a failure
+// is the daemon's judgement (`internal/errclass`), and it reaches a client
+// already resolved on FailureCardView. A producer stating it too would be a
+// second authority on one question, and the two would disagree.
+message FailureRaised {
+  // What went wrong, as the vendor reported it.
+  string summary = 1;
+  // The underlying detail, for someone who wants it. Held apart from the
+  // summary so a client can show one without the other.
+  string detail = 2;
+  // How long the vendor said it would wait before retrying, in millis. Zero
+  // means it said nothing — NOT that it will retry immediately.
+  int64 retry_in_ms = 3;
+}
