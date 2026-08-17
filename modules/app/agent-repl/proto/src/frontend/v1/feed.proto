@@ -15,7 +15,6 @@ syntax = "proto3";
 
 package frontend.v1;
 
-import "conversation/v1/content.proto";
 import "conversation/v1/message.proto";
 import "conversation/v1/session_command.proto";
 import "frontend/v1/failure.proto";
