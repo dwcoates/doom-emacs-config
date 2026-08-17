@@ -8,7 +8,7 @@ syntax = "proto3";
 
 package shim.v1;
 
-import "conversation/v1/tokens.proto";
+import "conversation/v1/api.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 

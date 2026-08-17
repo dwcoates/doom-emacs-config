@@ -6,7 +6,7 @@ syntax = "proto3";
 package conversation.v1;
 
 import "conversation/v1/content_blocks.proto";
-import "conversation/v1/tokens.proto";
+import "conversation/v1/api.proto";
 import "conversation/v1/tool_call.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";

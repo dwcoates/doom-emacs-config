@@ -27,7 +27,7 @@ package state.v1;
 import "shim/v1/core.proto";
 
 import "shim/v1/bookkeeping.proto";
-import "conversation/v1/tokens.proto";
+import "conversation/v1/api.proto";
 import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/state/v1;statev1";
