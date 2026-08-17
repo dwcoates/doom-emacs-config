@@ -1,0 +1,26 @@
+// turn.proto — THE IDENTITY OF A TURN, shared vocabulary.
+//
+// Not a record fact — no MessageEntry carries it — but a vocabulary every
+// surface reads: an agentrepl.v1 submission is answered with one, the daemon
+// holds a prompt under one, the shim's turn bookkeeping names one, and the
+// daemon stamps the feed rows a turn produced with one. A vocabulary every
+// surface reads lives in the leaf every surface may import (the same argument
+// that put SessionCommand here).
+
+syntax = "proto3";
+
+package conversation.v1;
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// The identity of a turn.
+//
+// MINTED BY THE DAEMON, never by a client: the daemon decides when a
+// submission becomes a turn, drives turns of its own (a cache keep-alive ping,
+// a merge), and forwards the id to the shim as its turn id. A client learns a
+// turn's id from the response to the request that opened it and from the
+// views the daemon pushes; it never invents one. Opaque to every reader,
+// never parsed; equality is the only question asked of it.
+message TurnId {
+  string value = 1;
+}

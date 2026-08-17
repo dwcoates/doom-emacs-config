@@ -114,6 +114,82 @@ that transport.
 
 ## Landed changes
 
+### `frontend.v1/daemon_hold.proto` (was `prompt_queue.proto`): the held tray; `conversation.v1/turn.proto` adds `TurnId`
+
+**CORRECTION, KEPT VISIBLE.** The seven-arm `DaemonHold` type and its
+`hold.proto` proposed in the previous entry are WITHDRAWN. The user doubted
+`hibernated` belonged; the daemon's evidence agreed and went further:
+`ErrSessionHibernated` is raised on open/create (`createestablish.go:372`,
+`openfailure.go:52`) — the revival GATE, holding nothing;
+`ErrPromptRefusedByMergeState` REFUSES a prompt (`mergepromptgate.go:71`),
+holding nothing; the uninterruptible context cut is a CLASSIFICATION verdict.
+The four real holds (shutdown drain, keep-alive turn, revival pending, build
+refresh) are exactly the arms already on disk and are entry-scoped. ROOT
+CAUSE of the error: the orchestrator generalized from the WORD "not yet"
+across refusals, gates and holds without checking which of them held
+anything. There is no shared hold type; the hold oneof stays on the entry.
+
+**What changed.**
+
+- `prompt_queue.proto` → `daemon_hold.proto`. `QueueView` → `DaemonHoldTray {
+  DaemonHoldWorkspace; DaemonHoldFence; DaemonHoldHeading; repeated
+  DaemonHoldItem }`; `DaemonHoldItem { oneof item { HeldPrompt prompt;
+  HeldOffer offer } }`.
+- `QueueEntry` → `HeldPrompt { conversation.v1.TurnId turn;
+  conversation.v1.UserSaid said; HeldPromptQueuedAt queued_at; oneof
+  classification (5 arms, renamed `HeldPrompt*`, semantics verbatim); oneof
+  hold (4 arms, renamed, semantics verbatim) }`. `QueueClassificationHold.
+  accepted` (bool) is `HeldPromptAccepted { bool }` inside the
+  hold_for_turn_end arm. `HeldPromptKeepAliveHold.turn_id` (string) is
+  `TurnId turn`.
+- NEW `HeldOffer { oneof offer { HeldOfferMergeDequeue merge_dequeue } }` —
+  a question the daemon holds for the user's answer; the merge-dequeue card's
+  home. `HeldOfferMergeDequeue` is EMPTY ON PURPOSE: its body is decided when
+  `agentrepl.v1.MergeDequeueOffer` is walked (stage 3), not guessed here.
+- NEW `conversation/v1/turn.proto` — `TurnId { string value }`, reopening
+  stage 1 additively. Shared vocabulary in the leaf (the `SessionCommand`
+  argument): a submission's response returns one, the tray holds under one,
+  the shim's turn bookkeeping names one, feed rows are stamped with one.
+
+**Why, in the user's terms — the questions that shaped it.**
+
+- "Should HeldPrompt be implemented in terms of conversation.v1.UserSaid?" —
+  YES: a held prompt IS a `UserSaid` not yet forwarded; `string text` was a
+  partial re-spelling of `UserContent` that would drop images. Consequence:
+  `SubmitPromptRequest` (stage 3c) carries `UserSaid` too — one canonical form
+  client → daemon → tray → shim → record.
+- "Should there be a canonical identifier?" — YES, and there were TWO: the
+  daemon-minted `QueueEntry.id` (`queue.go:591`) and the client's `request_id`
+  carried on the same entry (`queue.go:32`), which becomes the shim's turn id
+  (`core.proto:252`). One identity: the turn.
+- "Who mints these IDs? I'm concerned the webapp might be minting prompt
+  ids." — Today clients do (`fe-80-fdb1`), justified by a race the one-stream
+  design had (a push could beat its ack). Under SDUI clients reconcile
+  nothing, so THE DAEMON MINTS `TurnId`; `SubmitPromptSuccess` returns it. A
+  client-minted idempotency key on the request is a separate stage-3b
+  question and is not the turn's identity.
+- "How does the webapp's feed resolve a response to a request?" — it
+  doesn't: unary responses answer requests; the daemon STAMPS feed rows of a
+  turn with `TurnId` (the existing stamps-alongside pattern), so a client that
+  wants to highlight its own prompt matches the id it was returned; every
+  other effect is a pushed view update. Optimistic rows and the client's
+  pending-request map (`command-dispatch.ts` `onAck`) go away.
+- Hibernation/revival gate: NOT a tray item — a workspace-level gate;
+  placement still open for the footer drawing.
+
+**Consequences.**
+
+- The tray's stream is `WatchDaemonHolds` (stage 3a); the footer counter reads
+  "N held".
+- `daemon/internal/sessioncontroller/queue.go` drops `newQueueEntryID()`; the
+  entry is keyed by the daemon-minted turn id, and duplicate submissions are
+  refused by idempotency key rather than by a second id.
+- `promptreceipt.go`'s "refuse a turn claim with no request id" becomes
+  "refuse a duplicate idempotency key"; the guarantee survives, the owner
+  changes.
+- Stage 4 (`shim.v1`): `turn_id`/`request_id` strings become `TurnId`.
+- Stage 2 `feed.proto`: rows of a turn carry a `TurnId` stamp.
+
 ### The prompt queue leaves `footer.proto`: `prompt_queue.proto`, its own component and stream
 
 **What changed.** The "daemon-held prompt queue" section — `QueueView`,
