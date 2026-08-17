@@ -114,6 +114,51 @@ that transport.
 
 ## Landed changes
 
+### The prompt queue leaves `footer.proto`: `prompt_queue.proto`, its own component and stream
+
+**What changed.** The "daemon-held prompt queue" section — `QueueView`,
+`QueueEntry`, the five `QueueClassification*` arms, the four `QueueEntry*Hold`
+arms — moved VERBATIM into `frontend/v1/prompt_queue.proto`. `footer.proto`'s
+header no longer claims prompt intake or a composer; its unused
+`session_command` import is dropped. Shapes are unchanged by the move and are
+judged in the queue file's own increment.
+
+**Why, in the user's terms — three questions, answered in order.**
+
+- "Are we modeling the prompt queue as part of the footer?" — No, and the
+  first footer drawing was wrong: the webapp renders queued prompts as
+  `queued-card`s (`render.ts:507-570`), the composer is HOST-native (Emacs
+  runs the webview with `composer=0`), and the footer strip carries only the
+  `N queued` counter.
+- "Where do queued prompts come from? The daemon, right?" — Yes,
+  exclusively: a prompt submitted while a turn runs is held, classified and
+  delivered later by the daemon; the vendor never sees it until then, so it
+  is daemon-owned pending intent, correctly absent from `conversation.v1`.
+- "Do we want the UI component of the queue to be in the feed? Or should it
+  be separate and monitored separately?" — SEPARATE: the feed is history +
+  the live turn (scrolls, pages, appends); the queue is the FUTURE
+  (whole-list-replaced on every change). Drawn as its own "pending" tray at
+  the feed's tail, above the footer; own stream (`WatchPromptQueue`, stage
+  3a); the feed knows nothing about it. Agreed: "okay makes sense".
+
+**A vocabulary decision recorded here, to be landed at the queue's shape
+increment:** the daemon's "NOT YET" appears in six places with three
+spellings (per-entry hold arms; `WorkspaceState.merge_lease_held`;
+hibernation/revival gate; scheduled-shutdown drain; the uninterruptible
+context cut; `Failure*` refusal arms). One type — `DaemonHold`, a oneof of
+reasons (merge lease, hibernated, revival pending, shutdown drain, keep-alive
+turn, build refresh, context cut) — declared once in `frontend/v1/hold.proto`
+and EMBEDDED wherever a view or response says "not yet": `QueueEntry.hold`,
+a footer gate element, the host stream Emacs watches (it owns the composer),
+and stage-3 error arms. It is a TYPE with no RPC of its own. What does NOT
+generalize: the queue's classification verdict (interject / hold-for-turn-end
+/ pending / error) — that is ordering, not deferral.
+
+**Consequences.** `footer.proto` shrinks to the strip, rows and sheet plus
+the PLUMBING section, whose fate is the footer increment's; the webapp's
+queued-card rendering moves from the feed renderer to a tray component; the
+feed's paging never sees a queued entry.
+
 ### `frontend.v1/sidebar.proto` follow-up: the message tree is the UI tree
 
 **What changed.** No semantics change; the element-message and
