@@ -53,14 +53,28 @@ message AgentContentBlock {
 }
 
 // Reasoning the agent showed on its way to an answer.
+//
+// TWO ARMS, NOT text+bool. `string text` beside `bool redacted` made
+// "redacted, but text is set" representable — a bool that can lie. The set
+// arm IS the fact: either the reasoning is here, or the vendor withheld it,
+// never both.
 message ThinkingBlock {
-  // The reasoning itself. May be empty when the vendor redacted it, which is
-  // different from the agent not having reasoned — see `redacted`.
-  string text = 1;
-  // The vendor withheld the content. Stated rather than left as empty text, so
-  // a client can say "reasoning was hidden" instead of showing nothing.
-  bool redacted = 2;
+  oneof thinking {
+    ThinkingBlockShown shown = 1;
+    ThinkingBlockRedacted redacted = 2;
+  }
 }
+
+// The reasoning was shown.
+message ThinkingBlockShown {
+  // The reasoning itself, verbatim. Never empty: an agent that reasoned and
+  // was not redacted said something.
+  string text = 1;
+}
+
+// The vendor withheld the reasoning. Empty on purpose: the redaction is the
+// whole assertion, and a payload would be a second place to disagree with it.
+message ThinkingBlockRedacted {}
 
 // Why an agent response ended where it did.
 message StopReason {
@@ -71,10 +85,19 @@ message StopReason {
     StopToolCall tool_call = 2;
     // The response hit its length ceiling.
     StopMaxTokens max_tokens = 3;
-    // Something interrupted it.
+    // Something interrupted it. NOTE: it is unverified whether any producer
+    // observes this as a stop reason rather than as a user-role
+    // "[Request interrupted]" record; the arm stands until the shim's
+    // evidence says which.
     StopInterrupted interrupted = 4;
-    // The vendor gave a reason we do not model.
-    StopUnsupported unsupported = 5;
+    // The model DECLINED to continue. A real thing to render — "the agent
+    // refused" is not "the agent finished" — and the vendor states it as its
+    // own reason, so it is an arm rather than an `unsupported` a client
+    // cannot act on.
+    StopRefusal refusal = 5;
+    // The vendor gave a reason we do not model (today: `stop_sequence`,
+    // `pause_turn` — nothing here renders either differently from end_turn).
+    StopUnsupported unsupported = 6;
   }
 }
 
@@ -89,6 +112,9 @@ message StopMaxTokens {}
 
 // The response was cut short by something outside it.
 message StopInterrupted {}
+
+// The model declined to continue the response.
+message StopRefusal {}
 
 // A stop reason this schema does not model.
 message StopUnsupported {
@@ -109,11 +135,12 @@ message StopUnsupported {
 // daemon on EntryDelivery's `live` arm — handed straight over, never written,
 // never positioned. A frontend.v1 message that carried a workspace, a fence and
 // a target but nothing to draw existed once and was deleted for exactly that
-// reason; see DESIGN-protobuf-surfaces.md.
+// reason; see DESIGN-protobuf-surfaces.superseded.md.
 message ContentArriving {
-  // Which block of the message this extends. The index into the settled
-  // message's content, so two reasoning fragments from one response land on
-  // their own previews rather than both on the first.
+  // Which block of the message this extends: the zero-based index into the
+  // settled message's `AgentContent.blocks` (the first block is 0), so two
+  // reasoning fragments from one response land on their own previews rather
+  // than both on the first.
   uint32 block_index = 1;
 
   // What is arriving. Which arm is set says which KIND of block is being
@@ -122,8 +149,7 @@ message ContentArriving {
   // PROSE ONLY. There is no arm for tool arguments: an argument fragment is
   // partial vendor JSON, and `{"file_pa` draws nothing, so streaming it bought
   // a consumer-side parser and no picture. Tool arguments arrive complete,
-  // once, as `ToolCallBlock.arguments` — a typed `Struct`, for the reason that
-  // field already states.
+  // once, typed, as the `call` arm of `ToolCallBlock`.
   oneof fragment {
     // Prose, as the agent writes it.
     string text = 2;
