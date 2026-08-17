@@ -114,6 +114,57 @@ that transport.
 
 ## Landed changes
 
+### Sidebar producer settled: the DAEMON owns the roster; Emacs sends COMMANDS, not state (no proto landed yet)
+
+**Decided (stage 2, `sidebar.proto`, above any shape).** `WorkspaceRoster`
+becomes a daemon-RESOLVED `frontend.v1` view. Emacs's contribution collapses
+to commands over `agentrepl.v1` — in the user's words, "Emacs only needs to
+REGISTER a workspace (subsequently the daemon tracks the information like
+parentage, dir, etc.), and to SELECT a workspace (when the user switches tabs
+in Emacs) … two separate messages passed along two separate RPCs, like
+`RegisterWorkspace` and `SelectWorkspace`." The exact RPC names and set are
+stage-3a inventory; the PRINCIPLE is settled here.
+
+**Why.** Today Emacs authors the whole roster (`sidebar.el`), re-deriving each
+row's status from what the daemon told it into a second vocabulary
+(`RosterRowStatus`), which the webapp maps a third time — three spellings of
+one status, and the source of the done-vs-interrupted class of bug. The
+daemon already owns `dir` (registry), 24 of 26 status arms (`RenderState`),
+branch/merge facts and summaries; the roster UNIVERSE and the selection were
+the only genuinely Emacs-held facts, and both are events, not state.
+
+**What it removes, and why each removal is safe.**
+
+- `WorkspaceRoster.revision`, `boot_id` and the epoch/monotonicity rules —
+  they guarded against an out-of-order STATE publish; a command has no stale
+  roster to resurrect. The daemon's own stream ordering replaces them.
+- Emacs's `publishWorkspaceRoster` path and the daemon's roster retainer
+  (`daemon/internal/frontend/roster.go`) — the daemon resolves, so there is
+  nothing to retain from outside.
+- `RosterRow.current` / `last_viewed_at_ms` as Emacs-supplied — the daemon
+  stamps both on `SelectWorkspace`.
+- `closed` vs gone — marked by the daemon from the open/close/unregister
+  traffic it already brokers.
+- The presence-snapshot alternative the orchestrator proposed first
+  (`WorkspacePresence` per row) — REJECTED by the user in favor of commands;
+  recorded so it is not re-proposed.
+
+**Residue, decided at stage 3a:** `nav_dir` (the Emacs keyboard cursor
+riding the roster), the repo/task grouping mode and section folds are UI
+preference, not workspace fact — either webview-local or one small
+`SetRosterView`-style RPC.
+
+**Consequences.**
+
+- Daemon restart: the registry is durable; Emacs re-registers idempotently on
+  reconnect (`RegisterWorkspace` must be idempotent by `dir`).
+- Every consumer of `revision`/`boot_id` (elisp publisher, daemon retainer,
+  webapp `rosterFromFrame` staleness check) is deleted in the wave.
+- The `sidebar.el` status table (24 arms) is deleted; the daemon's roster
+  resolver coarsens `RenderState` onto the sidebar's dot vocabulary once.
+- Scope (global stream, no `workspace`) and file contents (view vs
+  view+events) remain the two open sidebar questions above the shapes.
+
 ### `conversation.v1/session_command.proto`: no change — STAGE 1 COMPLETE
 
 **What changed.** Nothing. `SessionCommand` stays an enum (a closed set of
