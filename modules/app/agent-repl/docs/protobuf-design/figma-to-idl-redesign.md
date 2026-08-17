@@ -114,6 +114,49 @@ that transport.
 
 ## Landed changes
 
+### `frontend.v1/sidebar.proto` follow-up: the message tree is the UI tree
+
+**What changed.** No semantics change; the element-message and
+message-tree-is-UI-tree conventions applied. Every bare field became a
+message and every drawn box became one message with nesting equal:
+
+- `WorkspaceRoster { view; RosterMergedSection recently_merged;
+  RosterCurrentWorkspace current { dir }; RosterNavCursor nav { dir } }`.
+- `RosterRepoSection { RosterRepoKey key; RosterSectionHeader header;
+  RosterRows rows }`; `RosterTaskSection { RosterTaskKey key;
+  RosterTaskSectionHeader header; RosterRows rows }`;
+  `RosterMergedSection { RosterSectionHeader header; RosterRows rows }`.
+- `RosterSectionHeader { RosterLabel; RosterFold }` shared by repo and merged
+  sections; `RosterTaskSectionHeader { RosterLabel; RosterFold;
+  RosterTaskDone }` its own, because the done check is drawn IN the task
+  header and repos have none — the user's earlier `RosterSection` reuse
+  survives as the shared header + `RosterRows`, not as one message
+  coalescing header and rows.
+- `RosterRow { RosterRowWorkspace; RosterRowName; status (26 arms,
+  unchanged); RosterRowCurrent; children; RosterRowWhen; RosterRowDetail;
+  RosterRowClosed }`.
+- `RosterRowWhen` is a ONEOF — `last_selected { at_ms }` | `merged
+  { at_ms }` — chosen by the daemon: precedence (merged wins) is resolved
+  server-side, and the client renders whichever arm arrives (the user's
+  correction of the orchestrator's two-optional-fields sketch).
+- `RosterRowDetail { RosterRowDetailBranch; RosterRowDetailParentBranch;
+  RosterRowDetailSummary }` — three lines, each present/absent by message
+  presence, not empty string.
+- The file header carries the ASCII layout the shapes were checked against.
+
+**Why, in the user's terms.** "Are our messages making this organization
+implicit? Or are we coalescing adjacent fields into different components in
+the UI hierarchy?" — the answer was that two places coalesced (section header
+vs rows; the three detail lines), and both were re-partitioned. Approved:
+"apply your RosterSection changes you just suggested, then let's move on."
+The constraint itself — message tree = UI tree, ASCII-checked, agreed with
+the user BEFORE shapes are sketched — is being added to the skill by a
+one-shot subagent (`proto-message-tree-mirrors-ui-tree`).
+
+**Consequences.** Renderers read one message per box; presence replaces the
+empty-string and zero-sentinel conventions in the row; the webapp's
+when-column precedence code is deleted (the daemon decides).
+
 ### `frontend.v1/topbar.proto`: every field an element message; health views out; `ModelOption` moves to `conversation.v1`; the breakdown menu gets its own file
 
 **A NEW CONVENTION, stated by the user during this increment and being added
