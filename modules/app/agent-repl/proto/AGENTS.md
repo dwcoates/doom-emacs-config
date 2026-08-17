@@ -8,8 +8,10 @@ including behavioral semantics as normative comments.
 Every message belongs to exactly one, and **the package boundary IS the surface
 boundary** — nothing straddles, so which surface a message is on is a fact the
 compiler checks rather than a convention a reviewer holds. The six are ROOT
-namespaces with no umbrella prefix. `DESIGN-protobuf-surfaces.md` is the
-authority.
+namespaces with no umbrella prefix. The design record is
+`../docs/protobuf-design/figma-to-idl-redesign.md`; the earlier record it
+supersedes is kept as `DESIGN-protobuf-surfaces.superseded.md`, and every
+decision there stands unless the new record reopens it by name.
 
 | package | directory | holds | importable by |
 |---|---|---|---|
