@@ -1,0 +1,36 @@
+// user_message.proto — THE USER'S MESSAGE: what a person typed.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/content_blocks.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// Something a person typed. The opening of a turn.
+message UserSaid {
+  // What they typed, and anything they attached. NOT a bare TextBlock: a person
+  // pastes images, and a single block could not hold one alongside their words.
+  UserContent content = 1;
+}
+
+// What a PERSON said, as an ordered sequence of blocks. No reasoning and no
+// tool calls, because a person produces neither.
+message UserContent {
+  // In the order the person composed them, which is the order they are shown.
+  repeated UserContentBlock blocks = 1;
+}
+
+// One block of what a person said.
+message UserContentBlock {
+  oneof block {
+    // Words the person typed.
+    TextBlock text = 1;
+    // An image they pasted or attached.
+    ImageBlock image = 2;
+    // A block whose kind we do not model. It renders as nothing and is kept so
+    // the decision is reversible.
+    UnsupportedBlock unsupported = 3;
+  }
+}

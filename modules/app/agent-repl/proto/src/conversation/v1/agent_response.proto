@@ -1,0 +1,133 @@
+// agent_response.proto — THE AGENT'S RESPONSE: what it said, how it stopped,
+// and the preview of it still arriving.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/content_blocks.proto";
+import "conversation/v1/tokens.proto";
+import "conversation/v1/tool_call.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// One response from the agent.
+message AgentSaid {
+  // The response entire: prose, reasoning, and tool calls, in order.
+  AgentContent content = 1;
+  // What this response cost, in the ONE canonical token shape. Carried because
+  // it is evidence about THIS message; the footer's aggregate figures are
+  // resolved by the daemon from many of these and are not this.
+  TokenUsage usage = 2;
+  // The model that produced it, since a conversation can span models and the
+  // cost of a message is not readable without knowing which. It sits beside the
+  // usage rather than inside it because it describes the RESPONSE, not the
+  // counters.
+  string model = 3;
+  // Why the agent stopped. A oneof rather than a string because the set is
+  // closed and a client branches on it.
+  StopReason stop_reason = 4;
+}
+
+// What the AGENT said in one response: prose, the reasoning behind it, and the
+// tools it decided to call, in the order it produced them.
+message AgentContent {
+  // In production order, which is what makes "it thought, then said this, then
+  // called that" readable without a second ordering field.
+  repeated AgentContentBlock blocks = 1;
+}
+
+// One block of an agent response.
+message AgentContentBlock {
+  oneof block {
+    // Words meant for the reader.
+    TextBlock text = 1;
+    // Reasoning the agent showed. Held apart from text because a client may
+    // legitimately collapse or hide it, and cannot do that if it is text.
+    ThinkingBlock thinking = 2;
+    // The agent called a tool.
+    ToolCallBlock tool_call = 3;
+    // A block whose kind we do not model.
+    UnsupportedBlock unsupported = 4;
+  }
+}
+
+// Reasoning the agent showed on its way to an answer.
+message ThinkingBlock {
+  // The reasoning itself. May be empty when the vendor redacted it, which is
+  // different from the agent not having reasoned — see `redacted`.
+  string text = 1;
+  // The vendor withheld the content. Stated rather than left as empty text, so
+  // a client can say "reasoning was hidden" instead of showing nothing.
+  bool redacted = 2;
+}
+
+// Why an agent response ended where it did.
+message StopReason {
+  oneof reason {
+    // The agent finished speaking.
+    StopEndTurn end_turn = 1;
+    // The agent called a tool and is waiting for it.
+    StopToolCall tool_call = 2;
+    // The response hit its length ceiling.
+    StopMaxTokens max_tokens = 3;
+    // Something interrupted it.
+    StopInterrupted interrupted = 4;
+    // The vendor gave a reason we do not model.
+    StopUnsupported unsupported = 5;
+  }
+}
+
+// The agent had nothing further to say.
+message StopEndTurn {}
+
+// The agent stopped to wait for a tool it called.
+message StopToolCall {}
+
+// The response was truncated at its output ceiling.
+message StopMaxTokens {}
+
+// The response was cut short by something outside it.
+message StopInterrupted {}
+
+// A stop reason this schema does not model.
+message StopUnsupported {
+  // What the vendor called it, so a later schema knows what to add.
+  string reason = 1;
+}
+
+// A fragment of a message's PROSE still arriving.
+//
+// The stream plane hands these straight to the daemon as they are typed; the
+// file plane writes the completed message afterwards. A consumer REPLACES the
+// preview with the settled message rather than appending beside it, matching on
+// message_id — which is why both producers must derive that id from the same
+// vendor value.
+//
+// THIS IS THE ONLY SPELLING OF LIVE TYPING. There is no frontend-side model of
+// a preview: the content model lives here, in conversation.v1, and reaches the
+// daemon on EntryDelivery's `live` arm — handed straight over, never written,
+// never positioned. A frontend.v1 message that carried a workspace, a fence and
+// a target but nothing to draw existed once and was deleted for exactly that
+// reason; see DESIGN-protobuf-surfaces.md.
+message ContentArriving {
+  // Which block of the message this extends. The index into the settled
+  // message's content, so two reasoning fragments from one response land on
+  // their own previews rather than both on the first.
+  uint32 block_index = 1;
+
+  // What is arriving. Which arm is set says which KIND of block is being
+  // extended, so a preview never has to guess what it is showing.
+  //
+  // PROSE ONLY. There is no arm for tool arguments: an argument fragment is
+  // partial vendor JSON, and `{"file_pa` draws nothing, so streaming it bought
+  // a consumer-side parser and no picture. Tool arguments arrive complete,
+  // once, as `ToolCallBlock.arguments` — a typed `Struct`, for the reason that
+  // field already states.
+  oneof fragment {
+    // Prose, as the agent writes it.
+    string text = 2;
+    // Reasoning, as the agent reasons.
+    string thinking = 3;
+  }
+}

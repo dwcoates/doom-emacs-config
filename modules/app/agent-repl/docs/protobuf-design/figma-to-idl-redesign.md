@@ -103,6 +103,56 @@ that transport.
 
 ## Landed changes
 
+### `conversation.v1` is one file per concern: `message.proto` keeps the record and the arm oneof, the arm bodies move to dedicated files
+
+**What changed.** The regrouped `message.proto` was split along its section
+banners, every message VERBATIM, into:
+
+- `message.proto` — `MessageId`, `MessageEntry`, `MessagePayload` (the record
+  and WHAT it can say); imports every body file below.
+- `tool_call.proto` — `ToolCallBlock`, `ToolResultContent`,
+  `ToolResultContentBlock`, `ToolReturned`, `PermissionAsked`,
+  `PermissionAnswered`, `PermissionAllowed`, `PermissionDenied`,
+  `PermissionAbandoned`.
+- `agent_response.proto` — `AgentSaid`, `AgentContent`, `AgentContentBlock`,
+  `ThinkingBlock`, `StopReason` and its five arms, `ContentArriving`.
+- `user_message.proto` — `UserSaid`, `UserContent`, `UserContentBlock`.
+- `content_blocks.proto` — `TextBlock`, `ImageBlock`, `UnsupportedBlock`, and
+  the "neutral by design" / "narrowed per site" preamble.
+- `context_cut.proto` — `ContextCut`, `ContextCleared`, `ContextCompacted`.
+- `failure.proto` — `FailureRaised`.
+- `detached_work.proto` — all twenty-one detached-work messages.
+- `tokens.proto`, `session_command.proto` — untouched.
+
+`frontend/v1/feed.proto` now imports the four body files it actually
+references (`agent_response`, `detached_work`, `tool_call`, `user_message`)
+instead of `message.proto`, which it did not use. Every package except the
+deliberately empty `agentrepl.v1` compiles.
+
+**Why, in the user's terms.** "The message.proto that contains the message +
+payload arm, but the arm implementations themselves are in dedicated files —
+so all the tool-related stuff is in toolcall.proto, etc." Grouping by concern
+at FILE granularity, not just section granularity: a concern is one file, one
+review, one import for whoever needs only that concern.
+
+**Consequences.**
+
+- The intra-package import graph is now: `message` → every body file;
+  `agent_response` → `content_blocks`, `tokens`, `tool_call` (an
+  `AgentContentBlock` holds a `ToolCallBlock`); `context_cut` →
+  `agent_response` (a compaction summary is `AgentContent`); `tool_call` and
+  `user_message` → `content_blocks`; `detached_work` and `failure` → nothing
+  yet (`detached_work` will import `tool_call` once `origin_tool_call_id`
+  becomes a `ToolCallId`). Top-down order within stage 1 is therefore
+  `message` → `tool_call` → `agent_response` → `user_message` →
+  `content_blocks` → `context_cut` → `failure` → `detached_work` → `tokens` →
+  `session_command`, walked one file per increment.
+- File name is `tool_call.proto` (snake_case, matching `session_command.proto`),
+  not the `toolcall.proto` the user typed; the user may rename.
+- A consumer that imported `content.proto` or `payloads.proto` for one type
+  now imports the concern file that owns it — narrower, and the compiler says
+  which.
+
 ### `content.proto` folds into `message.proto` too, and the file is regrouped by concern
 
 **What changed.** `content.proto` is DELETED; its eleven messages moved

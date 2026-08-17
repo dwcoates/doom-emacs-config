@@ -1,0 +1,224 @@
+// detached_work.proto — DETACHED WORK: what detached, what it produced, and how
+// it ended.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// Work that DETACHED from the turn and now runs alongside it.
+message DetachedWorkStarted {
+  // The tool call that spawned it. Every detachment originates from one, and
+  // this is what draws the line from the card back to the call.
+  string origin_tool_call_id = 1;
+  // What to call it in the feed, resolved by the producer.
+  string label = 2;
+  // What kind of thing detached, which decides how its output is read.
+  DetachedWorkKind kind = 3;
+}
+
+// What kind of work detached.
+//
+// SIX ARMS, matching what the daemon already resolves (frontend.v1's
+// DetachedWork). An earlier draft had four and silently dropped `merge` and
+// `skill`, which is how a contract quietly deletes a feature: a merge-driven
+// turn and a skill invocation would both have arrived as `unclassified` and
+// rendered as a nameless spool.
+message DetachedWorkKind {
+  oneof kind {
+    // A subagent: a whole conversation happening elsewhere.
+    DetachedAgent agent = 1;
+    // A background shell command.
+    DetachedShell shell = 2;
+    // A workflow with its own journal.
+    DetachedWorkflow workflow = 3;
+    // We could not tell, which is stated rather than guessed.
+    DetachedUnclassified unclassified = 4;
+    // A skill invocation. It owns its own window rather than rendering flat, so
+    // every record the skill produces sits somewhere below this message on the
+    // parent chain and needs no correlation to find its card.
+    DetachedSkill skill = 5;
+    // A merge run: the conversation a merge drives through the workspace's OWN
+    // session. NO TOOL SPAWNS IT — the daemon opens it when it classifies the
+    // merge skill's invocation — so its origin_tool_call_id is empty, which is
+    // the one detachment for which that is not a producer fault.
+    DetachedMerge merge = 6;
+  }
+}
+
+// A subagent running its own conversation.
+message DetachedAgent {}
+
+// A shell command running in the background.
+message DetachedShell {
+  // The command as invoked, verbatim. This is what the producer SAW dispatched,
+  // carried so a card can show WHAT is running rather than only that something
+  // is. Empty only when the producer observed a launch with no reconstructible
+  // command line.
+  string command = 1;
+}
+
+// A workflow with its own journal of steps.
+message DetachedWorkflow {}
+
+// A skill invocation, which owns its own window.
+//
+// `merge` is the one skill with an arm of its own; every other skill arrives
+// here. The distinction is not cosmetic — a merge run drives the workspace's
+// own session and carries no skill file to show.
+message DetachedSkill {
+  // The skill's name as invoked, verbatim (e.g. "create-or-update-workspace").
+  string skill_name = 1;
+  // The invocation's arguments, verbatim; empty when none were given.
+  string args = 2;
+}
+
+// A merge run, driving the workspace's own session.
+message DetachedMerge {}
+
+// Detached work we could not classify. Stated rather than defaulted into one of
+// the known kinds, because a wrong kind renders wrong output confidently.
+message DetachedUnclassified {
+  // The tool we could not classify, so the card can still name it.
+  string tool_name = 1;
+}
+
+// Output accumulating into detached work already open.
+message DetachedWorkProgressed {
+  // Output since the last record, appended in seq order. A DELTA rather than
+  // the whole spool, because the whole spool re-sent on every update is how a
+  // long-running shell costs more to watch than to run.
+  string output = 1;
+}
+
+// A journal step was OBSERVED in detached workflow work already open.
+//
+// ONE STEP AT A TIME, not a repeated field on DetachedWorkflow, because that is
+// how the producer sees them: the journal file grows and the producer reads the
+// new step, exactly as DetachedWorkProgressed reads new output. A whole list
+// re-sent per step is how watching a long workflow costs more than running it.
+//
+// It carries the message_id of the detached work it belongs to, exactly as
+// DetachedWorkProgressed does, so it folds onto that card without correlation.
+message WorkflowStepObserved {
+  // The step, as read out of the journal.
+  WorkflowStep step = 1;
+}
+
+// One step of a workflow's journal, as the producer read it.
+//
+// STRUCTURED AT THE SOURCE. A journal file states a step's label, its detail and
+// its status separately, so they are carried separately. The alternative —
+// flattening them into DetachedWorkProgressed.output — forces every consumer to
+// parse the structure back out of prose, and two consumers parsing the same
+// prose is two chances to disagree about what a step said.
+message WorkflowStep {
+  // The step's name — the phase or agent it reports on — verbatim.
+  string label = 1;
+  // The step's detail line, verbatim: the result on success, the error text on
+  // failure, the prompt while running.
+  string detail = 2;
+  // The step's state, as arms rather than an enum, so a state added later is an
+  // arm a reader must handle rather than an integer it silently renders as
+  // something else. THE SET ARM IS THE STATE; there is no separate status value
+  // to fall out of step with it.
+  oneof status {
+    WorkflowStepRunning running = 3;
+    WorkflowStepDone done = 4;
+    WorkflowStepFailed failed = 5;
+  }
+}
+
+// The step is still executing.
+message WorkflowStepRunning {}
+
+// The step completed successfully.
+message WorkflowStepDone {}
+
+// The step failed. The failure text is the step's `detail`; this arm carries no
+// second copy of it.
+message WorkflowStepFailed {}
+
+// A skill file's contents, delivered as the SKILL's own body.
+//
+// AN UPDATE, not part of DetachedWorkStarted, because the harness writes the
+// body as a SEPARATE transcript record — a `user` line flagged isMeta — which
+// the producer reads after the call that opened the work.
+//
+// IT REPLACES WHOLE rather than appending, unlike DetachedWorkProgressed. The
+// body is delivered once, and a re-read overwrites with the same bytes instead
+// of doubling them.
+//
+// It carries the SKILL MESSAGE's own message_id, which is what makes the old
+// daemon-side correlation unnecessary: the record states which skill it belongs
+// to instead of a reader reconstructing it by walking a chain through isMeta
+// records.
+message SkillBodyResolved {
+  // The skill file's contents, verbatim markdown. A skill IS a markdown
+  // document, so it is carried and rendered as one.
+  string body = 1;
+}
+
+// Detached work reached an end.
+message DetachedWorkEnded {
+  oneof outcome {
+    DetachedSucceeded succeeded = 1;
+    DetachedFailed failed = 2;
+    // It was stopped on purpose.
+    DetachedCancelled cancelled = 3;
+    // We stopped hearing from it. DISTINCT from failure: we do not know that it
+    // failed, only that we cannot see it any more.
+    DetachedLost lost = 4;
+  }
+  // The exit status of the underlying process, for work that IS one — a
+  // backgrounded shell, or unclassified work the producer ran as a process.
+  // UNSET for work that never had an exit status of its own (an agent, a
+  // workflow), and that absence is the only reading of "this work did not exit,
+  // it concluded".
+  //
+  // EVIDENCE, NEVER THE VERDICT. A killed process also exits nonzero, so the
+  // exit status cannot decide the `outcome` arm and the `outcome` arm cannot
+  // reconstruct the exit status. The outcome is resolved separately by the
+  // consumer that owns that judgment; the two must never be derived from each
+  // other. This field exists so a shell's card can show "exited 137" beside the
+  // verdict rather than an unexplained red dot.
+  DetachedProcessExit process_exit = 5;
+}
+
+// A process's exit status, exactly as the operating system reported it.
+//
+// A record of an OBSERVATION, which is why it lives here rather than with the
+// consumer: a producer watched a process leave and read its status.
+message DetachedProcessExit {
+  // The exit code as the shell reports it. A signal-terminated process reports
+  // the conventional 128+N form, because that is literally what its exit status
+  // is. 0 is a real zero and always means clean exit.
+  int32 code = 1;
+}
+
+// It finished and did what it was asked.
+message DetachedSucceeded {
+  // What it reported on the way out, for the card's collapsed line.
+  string summary = 1;
+}
+
+// It finished and did not.
+message DetachedFailed {
+  // What went wrong, for the card's collapsed line.
+  string summary = 1;
+}
+
+// Someone stopped it deliberately.
+message DetachedCancelled {}
+
+// We lost sight of it.
+//
+// A SEPARATE OUTCOME FROM FAILURE, deliberately. Folding it into failure would
+// have this system assert something it did not observe: that the work died.
+message DetachedLost {
+  // How we concluded it: the file vanished, it went silent, a sweep found it.
+  // Carried so "we watched it exit" is distinguishable from "we stopped
+  // hearing from it".
+  string inference = 1;
+}
