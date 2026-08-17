@@ -15,10 +15,10 @@ syntax = "proto3";
 
 package frontend.v1;
 
-import "conversation/v1/agent_response.proto";
+import "conversation/v1/agent.proto";
 import "conversation/v1/detached_work.proto";
 import "conversation/v1/tool_call.proto";
-import "conversation/v1/user_message.proto";
+import "conversation/v1/user.proto";
 import "conversation/v1/session_command.proto";
 import "frontend/v1/failure.proto";
 

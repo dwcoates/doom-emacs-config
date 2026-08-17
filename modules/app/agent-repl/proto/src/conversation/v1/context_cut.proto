@@ -5,7 +5,7 @@ syntax = "proto3";
 
 package conversation.v1;
 
-import "conversation/v1/agent_response.proto";
+import "conversation/v1/agent.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 

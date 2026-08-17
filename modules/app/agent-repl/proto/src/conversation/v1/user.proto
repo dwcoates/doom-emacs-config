@@ -1,4 +1,4 @@
-// user_message.proto — THE USER'S MESSAGE: what a person typed.
+// user.proto — THE USER'S MESSAGE: what a person typed.
 
 syntax = "proto3";
 

@@ -1,4 +1,4 @@
-// agent_response.proto — THE AGENT'S RESPONSE: what it said, how it stopped,
+// agent.proto — THE AGENT'S RESPONSE: what it said, how it stopped,
 // and the preview of it still arriving.
 
 syntax = "proto3";
