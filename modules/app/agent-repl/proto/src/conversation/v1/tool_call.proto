@@ -1,5 +1,5 @@
-// tool_call.proto — TOOL CALLS: the call, its result content, its return, and
-// the permission gate.
+// tool_call.proto — TOOL CALLS: the call, its arguments, its result content,
+// its return, and the permission gate.
 //
 // A tool returning is NOT a block. It is `ToolReturned`, an UPDATE arm on the
 // message that made the call. Modeling it as a block would have required an
@@ -15,19 +15,270 @@ import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
+// The identity of a tool call, minted by the vendor when the agent made it.
+// A TYPE, not a bare string, for the same reason MessageId is: it is the only
+// correlation between a call and its return, its permission, and the work it
+// detached, and every field on every surface holding one embeds this.
+message ToolCallId {
+  // The vendor-minted identity, opaque to every reader. Never empty.
+  string value = 1;
+}
+
 // The agent decided to call a tool.
+//
+// THE ARM IS THE TOOL. Which tool was called is stated by which `call` arm is
+// set, and the arm's fields are that tool's arguments, typed. There is no
+// separate `tool_name` for a modeled tool: a name beside a typed arm is a
+// second spelling of one fact. Tools this schema does not model — MCP tools
+// an external server registered at runtime, and built-ins nothing here treats
+// specially — arrive on `unmodeled`, which carries the name.
+//
+// WHY TYPED. A consumer that renders "the command" of a Bash call, or "the
+// file" of an Edit, must know that Bash has a `command` and Edit a
+// `file_path`. Under a Struct that knowledge lived in every consumer, each
+// digging by string key; here it lives once, in the arm.
+//
+// The field sets are the vendor's tool schemas AS OBSERVED by the producer;
+// the implementation verifies each against real transcripts. A field the
+// vendor adds later that no arm carries is not lost: the store's internal
+// half retains the source record whenever conversion dropped structure.
 message ToolCallBlock {
-  // The id the RESULT will name. This is the only correlation between a call
-  // and its result, and it comes from the vendor.
-  string tool_call_id = 1;
-  // The tool as the agent named it — `Bash`, `Read`, an MCP tool's full name.
-  // A plain string because the set is open: MCP servers add tools at runtime,
-  // so an enum here would be wrong within a day.
-  string tool_name = 2;
-  // The arguments, as the agent supplied them. Structured rather than a string
-  // because a client renders fields, and re-parsing a string to find them is a
-  // second parser that can disagree with the first.
-  google.protobuf.Struct arguments = 3;
+  // The id the RESULT will name; the only correlation between a call and its
+  // result, and it comes from the vendor.
+  ToolCallId tool_call_id = 1;
+  oneof call {
+    ToolCallBash bash = 2;
+    ToolCallRead read = 3;
+    ToolCallWrite write = 4;
+    ToolCallEdit edit = 5;
+    ToolCallGrep grep = 6;
+    ToolCallGlob glob = 7;
+    ToolCallAgent agent = 8;
+    ToolCallWorkflow workflow = 9;
+    ToolCallSkill skill = 10;
+    ToolCallSendMessage send_message = 11;
+    ToolCallTaskCreate task_create = 12;
+    ToolCallTaskUpdate task_update = 13;
+    ToolCallTaskStop task_stop = 14;
+    ToolCallUnmodeled unmodeled = 15;
+  }
+}
+
+// A shell command.
+message ToolCallBash {
+  // The command line, verbatim. What a card shows.
+  string command = 1;
+  // The agent's one-line description of what the command does, when given.
+  string description = 2;
+  // Timeout in milliseconds, when the agent set one. Unset means the tool's
+  // default, which the producer does not know and does not state.
+  optional int64 timeout_ms = 3;
+  // The agent asked for the command to run detached. When true, a
+  // DetachedWorkStarted with kind `shell` follows on its own message.
+  bool run_in_background = 4;
+}
+
+// A file read.
+message ToolCallRead {
+  // Absolute path of the file read.
+  string file_path = 1;
+  // First line to read, when the agent asked for a range. Unset means the top.
+  optional int64 offset = 2;
+  // Number of lines to read, when the agent bounded it. Unset means the tool's
+  // default.
+  optional int64 limit = 3;
+  // Page range for a PDF, verbatim (e.g. "1-5"), when given.
+  string pages = 4;
+}
+
+// A file write, whole.
+message ToolCallWrite {
+  // Absolute path written.
+  string file_path = 1;
+  // The full content written. Carried whole because it IS what happened;
+  // a card previews the first N bytes, which is rendering, not the record.
+  string content = 2;
+}
+
+// An in-place edit.
+message ToolCallEdit {
+  // Absolute path edited.
+  string file_path = 1;
+  // The text replaced, verbatim.
+  string old_string = 2;
+  // The text it was replaced with, verbatim.
+  string new_string = 3;
+  // Every occurrence, not just the first.
+  bool replace_all = 4;
+}
+
+// A content search.
+message ToolCallGrep {
+  // The regex, verbatim. What a card shows.
+  string pattern = 1;
+  // Directory or file searched, when narrowed. Empty means the working tree.
+  string path = 2;
+  // A filename glob narrowing the search, when given.
+  string glob = 3;
+  // A file-type narrowing the search, when given (e.g. "go", "ts").
+  string type = 4;
+  // Case-insensitive match.
+  bool case_insensitive = 5;
+  // Multiline mode: patterns may span lines.
+  bool multiline = 6;
+  // Cap on returned lines, when set. Applies in every output mode.
+  optional int32 head_limit = 7;
+  // What the tool was asked to emit. A ONEOF, not an enum: line numbers and
+  // context exist only in `content` mode, so they live inside that arm rather
+  // than beside a mode value they are meaningless for.
+  oneof output {
+    GrepOutputContent content = 8;
+    GrepOutputFilesWithMatches files_with_matches = 9;
+    GrepOutputCount count = 10;
+  }
+}
+
+// Grep emits the matching lines. The only mode where line numbers and context
+// exist.
+message GrepOutputContent {
+  // Prefix each line with its line number.
+  bool line_numbers = 1;
+  // Lines of context after / before / around each match, when asked for.
+  optional int32 context_after = 2;
+  optional int32 context_before = 3;
+  optional int32 context_around = 4;
+}
+
+// Grep emits only the paths that matched.
+message GrepOutputFilesWithMatches {}
+
+// Grep emits match counts per file.
+message GrepOutputCount {}
+
+// A filename search.
+message ToolCallGlob {
+  // The glob pattern, verbatim.
+  string pattern = 1;
+  // Directory searched, when narrowed. Empty means the working tree.
+  string path = 2;
+}
+
+// A subagent was spawned. When it ran detached, a DetachedWorkStarted with
+// kind `agent` follows on its own message.
+message ToolCallAgent {
+  // The agent's short description — what a card shows.
+  string description = 1;
+  // The full prompt handed to the subagent.
+  string prompt = 2;
+  // Which agent definition ran it (e.g. "general-purpose", "Explore").
+  string subagent_type = 3;
+  // Model override, when the agent set one; empty inherits.
+  string model = 4;
+  // The subagent runs detached from the turn.
+  bool run_in_background = 5;
+  // Isolation requested ("worktree", "remote"), when any; empty means none.
+  string isolation = 6;
+}
+
+// A workflow script was run. When detached, a DetachedWorkStarted with kind
+// `workflow` follows on its own message.
+message ToolCallWorkflow {
+  oneof source {
+    // A saved workflow, by name.
+    string name = 1;
+    // An inline script, verbatim.
+    string script = 2;
+    // A script file, by path.
+    string script_path = 3;
+  }
+  // The `args` value handed to the script.
+  //
+  // UNTYPED BY NECESSITY: it is arbitrary user-authored JSON whose shape only
+  // the script that reads it knows. The producer cannot type it and nothing
+  // renders from it; it is carried so the record is complete. Accepted as a
+  // cost in the design record.
+  google.protobuf.Value args = 4;
+  // A prior run resumed, when the call named one.
+  string resume_from_run_id = 5;
+}
+
+// A skill was invoked.
+message ToolCallSkill {
+  // The skill's name as invoked (e.g. "create-or-update-workspace").
+  string skill = 1;
+  // The invocation's arguments, verbatim; empty when none.
+  string args = 2;
+}
+
+// A message was sent to another agent or session.
+message ToolCallSendMessage {
+  // The recipient, as named in the call.
+  string to = 1;
+  // The full message body.
+  string message = 2;
+  // The one-line preview a UI shows instead of the body, when given.
+  string summary = 3;
+}
+
+// A task-list entry was created.
+message ToolCallTaskCreate {
+  // The task's subject line.
+  string subject = 1;
+  // Its full description.
+  string description = 2;
+  // The present-continuous form shown while it runs, when given.
+  string active_form = 3;
+}
+
+// A task-list entry was updated. Every field is optional because an update
+// carries only what changed; unset means "not touched".
+message ToolCallTaskUpdate {
+  // Which task.
+  string task_id = 1;
+  // The status it moved to, when the update moved it. THE ARM IS THE STATE.
+  optional TaskStatus status = 2;
+  optional string subject = 3;
+  optional string description = 4;
+  optional string active_form = 5;
+  // Who owns it now, when reassigned.
+  optional string owner = 6;
+}
+
+// A task-list status. A oneof of empty arms, per the state rule.
+message TaskStatus {
+  oneof status {
+    TaskStatusPending pending = 1;
+    TaskStatusInProgress in_progress = 2;
+    TaskStatusCompleted completed = 3;
+    TaskStatusDeleted deleted = 4;
+  }
+}
+message TaskStatusPending {}
+message TaskStatusInProgress {}
+message TaskStatusCompleted {}
+message TaskStatusDeleted {}
+
+// A background task was stopped.
+message ToolCallTaskStop {
+  // Which task.
+  string task_id = 1;
+}
+
+// A tool this schema does not model: an MCP tool, or a built-in nothing here
+// treats specially.
+message ToolCallUnmodeled {
+  // The tool as the agent named it — an MCP tool's full name, or the built-in.
+  // A plain string because the set is open: MCP servers add tools at runtime.
+  string tool_name = 1;
+  // The arguments, as the agent supplied them.
+  //
+  // UNTYPED BY NECESSITY, and this is the one reason that qualifies: the
+  // producer holds no schema for a tool it did not define — an MCP server
+  // registered it at runtime — so it cannot type what it relays. Structured
+  // rather than a string so a generic card can at least list fields without
+  // re-parsing. Nothing branches on a key inside it; a tool that needs that
+  // gets an arm. Accepted as a cost in the design record.
+  google.protobuf.Struct arguments = 2;
 }
 
 // What a TOOL returned.
@@ -56,22 +307,42 @@ message ToolResultContentBlock {
 // A tool the agent called has returned.
 //
 // An UPDATE arm rather than a content block, carrying the message_id of the
-// message that made the call, so the result folds onto the tool card without a
-// correlation pass and costs no page slot.
+// message that made the call, so the result folds onto the tool card without
+// a correlation pass and costs no page slot. The vendor delivers these inside
+// user-role records; that is a transport accident of its API, and this shape
+// is where it stops.
 //
-// The vendor delivers these inside user-role records. That is a transport
-// accident of its API, and this shape is where it stops.
+// TWO ARMS, NOT content+bool. `is_error` beside `content` made "errored, with
+// success content" representable. The set arm IS the outcome; each arm
+// carries its own content, because a failed tool still returned something to
+// read (the error text) and a reader draws it differently.
 message ToolReturned {
   // The call this answers, which the agent supplied when it made the call.
-  string tool_call_id = 1;
+  ToolCallId tool_call_id = 1;
+  oneof outcome {
+    ToolReturnedSucceeded succeeded = 2;
+    ToolReturnedFailed failed = 3;
+  }
+}
+
+// The tool returned normally.
+message ToolReturnedSucceeded {
   // What the tool returned, for the reader.
-  ToolResultContent content = 2;
-  // The tool FAILED. A separate fact from empty content, because a tool that
-  // returned nothing and a tool that errored are different things to render.
-  bool is_error = 3;
+  ToolResultContent content = 1;
+}
+
+// The tool failed.
+message ToolReturnedFailed {
+  // What the tool returned on failure — the error text, as the tool wrote it,
+  // in the same block model as a normal return.
+  ToolResultContent content = 1;
 }
 
 // A permission the agent asked for.
+//
+// Carries the call WHOLE rather than only its id: the ask arrives on the
+// stream plane, and the AgentSaid holding the same call may not have been
+// written by the file plane yet, so a card must be drawable from this alone.
 message PermissionAsked {
   // What the agent wants to do, so the user can answer knowing what they allow.
   ToolCallBlock requested = 1;
@@ -89,10 +360,20 @@ message PermissionAnswered {
 }
 
 // The user allowed the call.
+//
+// SCOPE IS AN ARM, NOT A BOOL. "Allow once" and "allow for the session" are
+// two different answers the user gave; a `bool for_session` made the default
+// answer the unset one, and an unset bool cannot be told from a false one.
 message PermissionAllowed {
-  // The user allowed this kind of call from now on, not just this one.
-  bool for_session = 1;
+  oneof scope {
+    PermissionAllowedOnce once = 1;
+    PermissionAllowedForSession for_session = 2;
+  }
 }
+// The user allowed this one call.
+message PermissionAllowedOnce {}
+// The user allowed this kind of call for the rest of the session.
+message PermissionAllowedForSession {}
 
 // The user refused the call.
 message PermissionDenied {
