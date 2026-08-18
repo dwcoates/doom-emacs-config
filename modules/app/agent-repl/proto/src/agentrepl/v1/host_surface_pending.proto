@@ -244,7 +244,7 @@ message SessionView {
   // color it, group it, or offer the right remedy. Typed, the dead-state card
   // renders it the way every other failure renders. Unset while the session
   // lives.
-  frontend.v1.FailureCardView death = 19;
+  frontend.v1.FeedFailure death = 19;
   // The SDK-published set this session can deliberately select.  A frontend
   // only renders these choices; it never invents or owns a model selection.
   repeated conversation.v1.ModelOption model_options = 20;

@@ -374,17 +374,20 @@ message FeedDetachedLabel {
   string text = 1;
 }
 
-// When it started, and when it ended (unset while live) — the head's clock.
+// When it started — the head's running clock while live.
 message FeedDetachedRuntime {
   int64 started_at_ms = 1;
-  optional int64 ended_at_ms = 2;
 }
 
 // Still running.
 message FeedDetachedLive {}
 
-// Reached an end: the outcome, and the process exit when it was a process.
+// Reached an end: when, the outcome, and the process exit when it was a
+// process. `ended_at_ms` lives HERE, not on the runtime, because it means
+// nothing while live (adjacent-exclusivity).
 message FeedDetachedSettled {
+  // Epoch ms; the head's clock stops here.
+  int64 ended_at_ms = 6;
   oneof outcome {
     FeedDetachedSucceeded succeeded = 1;
     FeedDetachedFailed failed = 2;
@@ -526,7 +529,60 @@ message FeedPermissionDenied {
   string reason = 1;
 }
 message FeedPermissionAbandoned {}
-message FeedFailure {}
+// ⑤ A failure that happened ON ITS OWN — nothing asked — as a conversation
+// item, at the point where it happened. The ONLY row that draws a failure
+// whole. Re-pushed under the SAME id when its lifecycle moves (open →
+// resolved), and the feed replaces it in place rather than appending the
+// all-clear beside the alarm.
+//
+//   │  ✕  API iterator failed — the SDK threw mid-turn         open ● │  headline
+//   │     QueryIteratorFailure: "socket hang up" · 14:02:11           │  detail
+//   │     ▸ evidence                                                  │  evidence (folded)
+//   │     resolved 14:03:02                                           │  lifecycle
+message FeedFailure {
+  FeedFailureHeadline headline = 1;
+  // The raw account, in a quieter register. Unset when there is none.
+  FeedFailureDetail detail = 2;
+  FeedFailureEvidence evidence = 3;
+  // THE ARM IS THE LIFECYCLE.
+  oneof lifecycle {
+    FeedFailureOpen open = 4;
+    FeedFailureResolved resolved = 5;
+    FeedFailureTerminal terminal = 6;
+  }
+}
+
+// The sentence the card leads with, composed daemon-side, and the color class
+// from the kind's side of the vocabulary — the client never maps kind→color.
+message FeedFailureHeadline {
+  string text = 1;
+  string tone = 2;
+}
+
+// The raw account beneath the sentence: evidence for whoever debugs this,
+// not the sentence itself.
+message FeedFailureDetail {
+  string text = 1;
+}
+
+// The typed evidence, folded. The shared failure vocabulary IS the evidence:
+// the same arms agentrepl.v1's error responses name.
+message FeedFailureEvidence {
+  FailureKind kind = 1;
+}
+
+// Still happening: the alarm mark and its color.
+message FeedFailureOpen {}
+
+// A window-shaped failure closed: the card keeps its place, drops to a muted
+// register, and stamps when it ended.
+message FeedFailureResolved {
+  int64 at_ms = 1;
+}
+
+// No closing edge, ever — a turn that ended, an account block. Distinct from
+// open, because open invites waiting and this does not.
+message FeedFailureTerminal {}
 message FeedApiFailure {}
 message FeedContextCut {}
 message FeedMerge {}
@@ -535,48 +591,4 @@ message FeedPreview {}
 // ==========================================================================
 // PENDING — old bodies, verbatim, judged one kind at a time.
 // ==========================================================================
-
-// A failure as a CONVERSATION ITEM rather than as chrome.
-//
-// A user whose workspace changed color needs to find out WHY from the
-// conversation itself, at the point in it where the failure happened. Chrome
-// scrolls away and carries no correlation between a report and its all-clear.
-message FailureCardView {
-  // WHAT failed, and its evidence. The card takes its color from the kind's
-  // side of the vocabulary.
-  FailureKind kind = 1;
-  // The sentence the card leads with, composed daemon-side. This is what the
-  // reader is meant to take away.
-  string message = 2;
-  // The raw account, shown beneath the sentence in a quieter register. It is
-  // evidence for whoever debugs this, not the sentence itself, and it is
-  // deliberately allowed to be empty.
-  string detail = 3;
-  // HOW this card ends, as arms, so that an open alarm and its all-clear can
-  // never be the same shape with a different number in it.
-  //
-  // A window-shaped failure is re-sent under the SAME Message.uuid
-  // with a different arm here, and the feed reconciles it in place. Appending
-  // instead would leave the alarm standing beside its own all-clear.
-  oneof lifecycle {
-    FailureCardOpen open = 4;
-    FailureCardResolved resolved = 5;
-    FailureCardTerminal terminal = 6;
-  }
-}
-
-// A window-shaped failure has closed. The card settles: it keeps its place in
-// the conversation, drops to a muted register, and stamps when it ended.
-message FailureCardResolved {
-  // When it closed, unix millis.
-  int64 resolved_at_ms = 1;
-}
-
-// The failure is still happening. The card shows its alarm mark and its color.
-message FailureCardOpen {}
-
-// The failure has no closing edge and never will — a turn that ended, a
-// refusal, an account block. Distinct from `open`, because an open card
-// invites waiting and this one does not.
-message FailureCardTerminal {}
 
