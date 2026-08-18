@@ -117,7 +117,61 @@ message FeedBreadcrumb {
 // walked, and deleted then.
 // ==========================================================================
 
-message FeedUserRow {}
+// ① What a person typed — or, nested inside a detached bubble, the prompt
+// that work was given. The daemon resolves the row: the author label, and the
+// blocks the person composed, in order.
+//
+//   │  You  ▏fix the flaky reconnect test      │
+//   │       ▏[image: screenshot.png]           │
+//         author  body (blocks: text · image · unsupported)
+message FeedUserRow {
+  // The author label ("You" — or the spawning agent's name under a bubble).
+  FeedUserAuthor author = 1;
+  // The blocks the person composed.
+  FeedUserBody body = 2;
+}
+
+// The author label of a user row.
+message FeedUserAuthor {
+  string label = 1;
+}
+
+// The blocks the person composed, in order, resolved for drawing.
+message FeedUserBody {
+  repeated FeedUserBlock blocks = 1;
+}
+
+// One drawn block of a user row.
+message FeedUserBlock {
+  oneof block {
+    FeedTextBlock text = 1;
+    FeedImageBlock image = 2;
+    FeedUnsupportedBlock unsupported = 3;
+  }
+}
+
+// ---- the feed's drawn block vocabulary, shared by every row kind in this
+// ---- file that draws content blocks --------------------------------------
+
+// Text, drawn as markdown.
+message FeedTextBlock {
+  string text = 1;
+}
+
+// An image the webview can fetch. The daemon RESOLVES the record's reference
+// (a host path, or a URL) into a `src` a browser can load — that resolution
+// is the daemon's, never the client's.
+message FeedImageBlock {
+  string src = 1;
+  // Alt text, resolved (a filename, a caption); may be empty.
+  string alt = 2;
+}
+
+// A block the schema does not model, drawn as "unsupported block: <kind>".
+// The raw stays in the record; the row never carries it.
+message FeedUnsupportedBlock {
+  string kind = 1;
+}
 message FeedAgentRow {}
 message FeedDetachedBubble {}
 message FeedPermissionCard {}
