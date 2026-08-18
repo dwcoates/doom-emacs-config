@@ -1,13 +1,12 @@
 // failure.proto — THE FAILURE VOCABULARY A SURFACE DRAWS, and the typed
 // evidence every failure carries.
 //
-// One closed oneof naming every way work can fail ON ITS OWN, plus the typed
-// evidence each kind carries. It is a VOCABULARY FILE, not a component file:
-// nothing here describes a card, a row or a cell. Surfaces embed FailureKind in
-// their own resolved props and render it their own way — the feed's card
-// (feed.proto), the footer's row (footer.proto), the roster's notice
-// (sidebar.proto). One vocabulary, per-surface carriers, exactly as
-// tokens.proto is one economics vocabulary behind several resolved views.
+// One closed oneof naming every way work can fail ON ITS OWN WITHOUT
+// IMPLICATING A FEED ENTRY, plus the typed evidence every failure carries —
+// including the evidence for entry-correlated failures, which the feed's own
+// per-kind `error` arms import from here. It is a VOCABULARY FILE, not a
+// component file: nothing here describes a card, a row or a cell. Surfaces
+// embed the evidence in their own resolved props and render it their own way.
 //
 // WHY IT IS frontend.v1 AND NOT agentrepl.v1. This vocabulary used to live in
 // `agentrepl/v1/shared.proto` and serve two jobs at once: the account a command
@@ -67,21 +66,30 @@ message VendorFailureContext {
   string api_message_id = 3;
 }
 
-// WHAT failed, WHEN NOTHING ASKED. Exactly one arm is always set; an unset
-// FailureKind is a malformed frame and must be rejected rather than rendered as
-// a generic error.
+// WHAT failed, WHEN NOTHING ASKED AND NO ENTRY IS IMPLICATED. Exactly one arm
+// is always set; an unset FailureKind is a malformed frame and must be
+// rejected rather than rendered as a generic error.
 //
-// EVERY ARM HERE IS AN EVENT, NEVER AN ANSWER. A failure that answers a request
-// travels in that request's own `agentrepl.v1.<Method>Response.error` and is
-// not representable here. What is left is exactly the set of failures that
-// happen on their own — which is also exactly the set a feed has to draw,
-// because there is no call for them to be attached to.
+// EVERY ARM HERE IS AN EVENT, NEVER AN ANSWER, AND NEVER A ROW. A failure that
+// answers a request travels in that request's own
+// `agentrepl.v1.<Method>Response.error`. A failure that CORRELATES TO A FEED
+// ENTRY — a response that never settled, a tool that failed, a bubble that was
+// lost, a merge that did not land, a page that could not be completed — is
+// that entry's OWN `error` arm in feed.proto, which imports the evidence
+// message directly (FailureQueryTermination, FailureVendor*, FailureTurnUndriven,
+// FailureKeepAliveWindow*, FailureHistoryReplayTruncated,
+// FailureCompactionColdRead are declared below for exactly that). What is left
+// HERE is the residue that is inherently entry-less: the session dying, the
+// shim degrading, the daemon's own unclassifiable fault, the client's own
+// machinery. None of it is a conversation fact; it is footer/topbar/gate state,
+// and the arms exist so agentrepl.v1 error responses and the host surface can
+// name them.
 //
-// TWO PRODUCERS. The daemon mints every arm below 35 — it is the only thing
-// that can see the shim, the store or the vendor. A frontend mints the arms
-// from 35 up, and ONLY those: they are the failures of the frontend's own
-// machinery, which the daemon cannot observe. The split is by number so it
-// cannot drift, and neither producer may set the other's arms.
+// TWO PRODUCERS. The daemon mints the machinery arms — it is the only thing
+// that can see the shim, the store or the vendor. A frontend mints the
+// client-local arms, and ONLY those: they are the failures of the frontend's
+// own machinery, which the daemon cannot observe. Neither producer may set the
+// other's arms.
 message FailureKind {
   oneof kind {
 
@@ -96,55 +104,30 @@ message FailureKind {
     FailureShimDegraded shim_degraded = 3;
     // The agent process could not write to the store, so conversation is being dropped rather than persisted.
     FailureShimStoreWriteRejected shim_store_write_rejected = 4;
-    // The agent sdk query ended unexpectedly — the session is alive but the thing that drives it stopped.
-    FailureQueryTermination query_termination = 5;
     // The workspace's session was deleted deliberately.
-    FailureSessionDeleted session_deleted = 6;
+    FailureSessionDeleted session_deleted = 5;
     // A new session took over this workspace, so the previous one was stopped.
-    FailureSessionSuperseded session_superseded = 7;
+    FailureSessionSuperseded session_superseded = 6;
     // The agent process exited.
-    FailureSessionShimDied session_shim_died = 8;
+    FailureSessionShimDied session_shim_died = 7;
     // The session could not be started at all.
-    FailureSessionStartFailed session_start_failed = 9;
+    FailureSessionStartFailed session_start_failed = 8;
     // The vendor conversation could not be resumed without breaking continuity.
-    FailureSessionResumeFailed session_resume_failed = 10;
+    FailureSessionResumeFailed session_resume_failed = 9;
     // The session ended for a reason the daemon could not classify.
-    FailureSessionEndedUnclassified session_ended_unclassified = 11;
-    // The history re-pull ended before it reached the live window, so what is on screen has a gap in it.
-    FailureHistoryReplayTruncated history_replay_truncated = 12;
-    // A cache keep-alive window could not be closed, so new conversation is withheld until it is repaired.
-    FailureKeepAliveWindowUnclosed keep_alive_window_unclosed = 13;
-    // A cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation.
-    FailureKeepAliveWindowInverted keep_alive_window_inverted = 14;
-    // A compaction re-read the whole conversation at the uncached rate instead of from the prompt cache — the exact cost compaction exists to avoid.
-    FailureCompactionColdRead compaction_cold_read = 15;
-    // A turn stood bound with nothing driving it, so the daemon closed it rather than leaving the workspace thinking forever.
-    FailureTurnUndriven turn_undriven = 16;
+    FailureSessionEndedUnclassified session_ended_unclassified = 10;
     // Agent-repl's own machinery failed in a way it could not classify.
-    FailureInternalUnclassified internal_unclassified = 17;
-
-    // ---- VENDOR failures: the SDK ended the query on its own terms, or no
-    // response came at all. NOTHING HERE HAS A RECORD: a vendor API failure
-    // the vendor RECORDED (auth, rate limit, overloaded, invalid request, …)
-    // is a conversation.v1.ApiRequestFailed record and reaches the feed as
-    // its own row — drawing it here too would draw one failure twice. Only
-    // what nothing recorded is a synthesized card.
-    FailureVendorMaxTurns vendor_max_turns = 18;
-    FailureVendorMaxBudget vendor_max_budget = 19;
-    FailureVendorExecutionError vendor_execution_error = 20;
-    FailureVendorTurnFailed vendor_turn_failed = 21;
-    FailureVendorNetworkDown vendor_network_down = 22;
+    FailureInternalUnclassified internal_unclassified = 11;
 
     // ---- CLIENT-LOCAL failures: the one part of this vocabulary a frontend
-    // mints itself. See the note on FailureKind. All resolve BLUE, because a
-    // frontend can only ever observe its own machinery failing.
-    // The daemon never sets one of these arms.
-    FailureDaemonUnreachable daemon_unreachable = 23;
-    FailureWorkspaceGone workspace_gone = 24;
-    FailureBootFailed boot_failed = 25;
-    FailureControlPlaneFailed control_plane_failed = 26;
-    FailureFrameUndecodable frame_undecodable = 27;
-    FailureStaleBundle stale_bundle = 28;
+    // mints itself. All resolve BLUE, because a frontend can only ever
+    // observe its own machinery failing. The daemon never sets one of these.
+    FailureDaemonUnreachable daemon_unreachable = 12;
+    FailureWorkspaceGone workspace_gone = 13;
+    FailureBootFailed boot_failed = 14;
+    FailureControlPlaneFailed control_plane_failed = 15;
+    FailureFrameUndecodable frame_undecodable = 16;
+    FailureStaleBundle stale_bundle = 17;
   }
 }
 
