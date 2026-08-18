@@ -114,6 +114,92 @@ that transport.
 
 ## Landed changes
 
+### `feed.proto`: EVERY row kind carries `oneof result { update | success | error }`; kinds ⑤ `FeedFailure` and ⑨ `FeedPreview` are DELETED; `FailureKind` shrinks to the entry-less residue
+
+**Why, in the user's terms — the conversation, in order.**
+
+- Asked what the live preview IS in the UI (the type-out of the agent's
+  response before it settles, at the tail, same id as the settled row), the
+  user: "shouldn't that be WITHIN the streamable messages themselves, rather
+  than adjacent them?" — i.e. a state arm on `FeedAgent`, not a ninth kind.
+  Agreed: one drawn box in two states, and it surfaced an on-disk
+  adjacent-exclusivity defect — the usage stamp sat on the head but means
+  nothing while arriving.
+- The user then generalized: `update` and `success` over `arriving`/
+  `settled`, PLUS an `error` arm, and "all feed arms should have their own
+  error representation represented in internal arms" — `oneof result {
+  update (if applicable) | success | error }` on every kind. Rulings: (1)
+  flatten to ONE level everywhere (option b) rather than keep `state →
+  outcome` — "rewrite approved"; (2) kinds that cannot update or fail carry a
+  ONE-ARM oneof; (3) `FeedFailure` is not needed "unless the error
+  specifically and inherently does not correlate to any feed entry";
+  everything else is that entry's own error.
+
+**What changed.**
+
+- `FeedRow` is SEVEN kinds: user, agent, detached, permission, api_failure,
+  context_cut, merge (renumbered 4–10). `FeedFailure` (+ headline/detail/
+  evidence/lifecycle) and `FeedPreview` deleted.
+- `FeedAgent { head{author}; result { update{prose-so-far blocks: text |
+  thinking} | success{usage stamp; blocks; stop notice} | error{partial
+  blocks; headline; oneof reason — the failure.proto evidence messages
+  imported whole: query_termination, vendor_max_turns, vendor_max_budget,
+  vendor_execution_error, vendor_turn_failed, vendor_network_down,
+  turn_undriven, keep_alive_window_unclosed/_inverted } } }`. The row exists
+  from the first `ContentArriving` fragment under its future `AgentSaid` id.
+- `FeedTool.result { update | success{ returned{blocks} | detached{bubble} }
+  | error{ failed{blocks} | denied{reason} } }`.
+- `FeedDetached.result { update | success{ended_at_ms, summary, exit} |
+  error{ended_at_ms, exit, reason { failed | cancelled | lost }} }`; the head
+  keeps only constant props; steps → `update|success|error`.
+- `FeedPermission.result { update (open) | success{ allowed_once |
+  allowed_for_session | denied; at_ms } | error{ abandoned; at_ms } }` — a
+  DENIAL IS AN ANSWER (domain outcome, not a failure).
+- `FeedApiFailure.result { error{headline, message, when} }` — one arm, and it
+  is `error`: the row IS a failure.
+- `FeedContextCut.result { success{tokens; cut{cleared|compacted}} }` — one
+  arm; `compacted` gains a `cold_read` NOTICE (`FailureCompactionColdRead`
+  imported) — a compaction that read cold still compacted.
+- `FeedMerge.result { update | success{ended_at_ms, commit} |
+  error{ended_at_ms, reason { failed | abandoned }} }`; each
+  `FeedMergePhase.result { update | success{ended_at_ms, summary} |
+  error{ended_at_ms, summary} }`.
+- `FeedPage.result { success{rows, edge, breadcrumbs} | error{headline;
+  history_replay_truncated} }` — a page that could not be completed is the
+  PAGE's error, not a row.
+- `failure.proto`: `FailureKind` shrinks 28 → 17 arms (renumbered): machinery
+  session/shim/internal residue + client-local. The entry-correlated arms
+  (query_termination, turn_undriven, keep_alive_window_*,
+  history_replay_truncated, compaction_cold_read, the five vendor arms) leave
+  the oneof; their EVIDENCE MESSAGES stay, imported by feed.proto's error
+  arms. Header rewritten to say so. `host_surface_pending.proto`'s
+  `SessionView.death` repoints to `FailureKind` (holding file, stage 3).
+
+**Two corrections to what the orchestrator said in the conversation, kept
+visible.** (a) It first mapped `history_replay_truncated` and
+`compaction_cold_read` to `FeedContextCut.error`; on writing them, the first
+is a PAGE failure (the re-pull, not a cut) and the second is a cost notice on
+a compaction that happened, so they landed as `FeedPage.error` and a
+`cold_read` notice on `compacted`. (b) `shim_store_write_rejected` was listed
+as entry-correlated ("the entry being written"); the daemon has no row for a
+write that never landed, so it stays in `FailureKind`.
+
+**Consequences.**
+
+- The webapp's separate `BubbleTyping` line under a bubble
+  (`async-render.ts:336`) goes away — a subagent's streaming is a nested
+  `FeedAgent` in `update`; `smooth.ts` paces the reveal off the row's update.
+- A stream that dies can no longer leave a cursor blinking: the daemon
+  pushes the row's `error` arm under the same id.
+- Every client renderer switches on `result` the same way for every kind and
+  for the page; the daemon's row resolvers emit the terminal arm with
+  `ended_at_ms` inside it.
+- `FeedApiFailure` stays a row (the vendor may record an API failure with no
+  `AgentSaid` at all); whether it should instead be the in-flight
+  `FeedAgent.error` when one exists is FLAGGED, not decided.
+- Failures in `FailureKind`'s residue are drawn by footer/topbar/gate state
+  and named by stage-3 error responses; nothing draws them as rows.
+
 ### `feed.proto` kind ⑧: `FeedMerge` — a tabbed phase bubble, the queue as its first tab
 
 **The drawing agreed with the user** (in the kind's comment): a merge bubble
