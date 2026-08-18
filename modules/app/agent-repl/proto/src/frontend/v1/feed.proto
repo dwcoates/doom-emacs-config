@@ -583,7 +583,36 @@ message FeedFailureResolved {
 // No closing edge, ever — a turn that ended, an account block. Distinct from
 // open, because open invites waiting and this does not.
 message FeedFailureTerminal {}
-message FeedApiFailure {}
+// ⑥ The vendor's own RECORDED API failure (a conversation.v1.ApiRequestFailed
+// record), drawn as a row at the point it happened. Terminal by nature: the
+// vendor recorded it once, and nothing resolves it. A resolved element — the
+// daemon composes the sentence and color from the record's kind; the record
+// keeps its canonical form.
+//
+//   │  ✕ API 429 rate limited — retry in 20s                14:02:11 │  headline · when
+//   │    "request tokens exceeded your per-minute rate limit"        │  the vendor's message
+message FeedApiFailure {
+  FeedApiFailureHeadline headline = 1;
+  // The vendor's own message, verbatim, in a quieter register.
+  FeedApiFailureMessage message = 2;
+  FeedApiFailureWhen when = 3;
+}
+
+// The sentence and color class the daemon composed from the record's kind.
+message FeedApiFailureHeadline {
+  string text = 1;
+  string tone = 2;
+}
+
+// The vendor's message, verbatim.
+message FeedApiFailureMessage {
+  string text = 1;
+}
+
+// When the vendor recorded it, epoch ms.
+message FeedApiFailureWhen {
+  int64 at_ms = 1;
+}
 message FeedContextCut {}
 message FeedMerge {}
 message FeedPreview {}
