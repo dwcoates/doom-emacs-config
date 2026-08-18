@@ -613,7 +613,59 @@ message FeedApiFailureMessage {
 message FeedApiFailureWhen {
   int64 at_ms = 1;
 }
-message FeedContextCut {}
+// ⑦ THE CONTEXT-CUT DIVIDER — the conversation was cut here, and a reader
+// scrolling back must see where. Drawn from conversation.v1.ContextCut.
+message FeedContextCut {
+  // The divider's label ("context compacted", "context cleared").
+  FeedContextCutLabel label = 1;
+  // What the cut did to the context's size, drawn on the divider. EVERY cut
+  // has one, including a clear: clearing reloads the system prompt, skills
+  // and memory, so the after side is small rather than zero, and showing it
+  // is what lets a reader see that.
+  FeedContextCutTokens tokens = 2;
+  // THE ARM IS THE KIND OF CUT.
+  oneof cut {
+    FeedContextCutCleared cleared = 3;
+    FeedContextCutCompacted compacted = 4;
+  }
+}
+
+// The divider's label, verbatim.
+message FeedContextCutLabel {
+  string text = 1;
+}
+
+// The size change the divider draws, as "180k → 12k". Both sides are already
+// formatted by the daemon; the client renders them verbatim and does no
+// arithmetic and no unit rounding of its own.
+message FeedContextCutTokens {
+  // Tokens in context immediately before the cut, formatted for display.
+  string before_text = 1;
+  // Tokens in context immediately after the cut, formatted for display.
+  string after_text = 2;
+}
+
+// The history was discarded outright, with nothing left in its place — the
+// divider has nothing to expand.
+message FeedContextCutCleared {}
+
+// The history was COMPRESSED: what came before was replaced by the agent's
+// own condensed rendering of it, which the divider draws folded so the cut is
+// not a hole in the conversation.
+message FeedContextCutCompacted {
+  FeedContextCutSummary summary = 1;
+  FeedContextCutFold fold = 2;
+}
+
+// The compression of the preceding conversation, drawn as markdown.
+message FeedContextCutSummary {
+  string markdown = 1;
+}
+
+// Whether the compression is drawn folded.
+message FeedContextCutFold {
+  bool folded = 1;
+}
 message FeedMerge {}
 message FeedPreview {}
 
