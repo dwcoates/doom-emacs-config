@@ -12,7 +12,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "frontend/v1/feed.proto";
+import "frontend/v1/failure.proto";
 import "conversation/v1/api.proto";
 import "agentrepl/v1/shared.proto";
 import "shim/v1/core.proto";
@@ -244,7 +244,7 @@ message SessionView {
   // color it, group it, or offer the right remedy. Typed, the dead-state card
   // renders it the way every other failure renders. Unset while the session
   // lives.
-  frontend.v1.FeedFailure death = 19;
+  frontend.v1.FailureKind death = 19; // STAGE 3: was FeedFailure (deleted — a session death is not a feed row)
   // The SDK-published set this session can deliberately select.  A frontend
   // only renders these choices; it never invents or owns a model selection.
   repeated conversation.v1.ModelOption model_options = 20;
