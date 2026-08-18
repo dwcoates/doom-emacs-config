@@ -57,11 +57,10 @@ message SubmitPromptCommandPanel {
   }
 }
 
-// The submission was refused. ARM SET DERIVED, NOT INVENTED: filled at this
-// endpoint's 3c turn from the daemon's real refusal sites, spelled per the
-// 3b conventions.
+// The submission was refused. EMPTY ON PURPOSE — an empty oneof is not legal
+// proto, so the `reason` oneof is added WITH its first arms at this
+// endpoint's 3c turn, DERIVED from the daemon's real refusal sites (e.g. no
+// session, merge lease held, drain refusing) and spelled per the 3b
+// conventions.
 message SubmitPromptError {
-  oneof reason {
-    // (empty until 3c: e.g. no session, merge lease held, drain refusing.)
-  }
 }
