@@ -14,9 +14,9 @@
 //   │    ┌ Read  lisp/frontend.el                     ✓ ┐                  │     tool card
 //   │  ⚙ Explore  "find the roster resolver"    0:31  ▸ 3 msgs            │  ③ detached bubble (nested rows inside)
 //   │  ? Permission  Bash: git push …  [allow] [always] [deny]            │  ④ permission
-//   │  ✕ API 429 rate limited — retry in 20s                              │  ⑤ api-failure row (record)
-//   │  ── context compacted · 180k → 12k ── ▸ summary                     │  ⑥ context-cut divider
-//   │  ⇄ merge · branch → master   queue ✓ │ tests ● 8/12   ▸ 12 msgs     │  ⑦ merge bubble (tabbed phases)
+//   │  ● Claude  ✕ API 429 rate limited — retry in 20s                    │  ② agent, FAILED (error arm)
+//   │  ── context compacted · 180k → 12k ── ▸ summary                     │  ⑤ context-cut divider
+//   │  ⇄ merge · branch → master   queue ✓ │ tests ● 8/12   ▸ 12 msgs     │  ⑥ merge bubble (tabbed phases)
 //   │  ● Claude  Let me look at the roster resolv▍                        │  ② agent, still ARRIVING (update arm)
 //   └─────────────────────────────────────────────────────────────────────┘
 //
@@ -77,9 +77,8 @@ message FeedRow {
     FeedAgent agent = 5;
     FeedDetached detached = 6;
     FeedPermission permission = 7;
-    FeedApiFailure api_failure = 8;
-    FeedContextCut context_cut = 9;
-    FeedMerge merge = 10;
+    FeedContextCut context_cut = 8;
+    FeedMerge merge = 9;
   }
 }
 
@@ -595,44 +594,7 @@ message FeedPermissionError {
   int64 at_ms = 2;
 }
 message FeedPermissionAbandoned {}
-// ⑤ The vendor's own RECORDED API failure (a conversation.v1.ApiRequestFailed
-// record), drawn as a row at the point it happened. Terminal by nature: the
-// vendor recorded it once, and nothing resolves it. A resolved element — the
-// daemon composes the sentence and color from the record's kind; the record
-// keeps its canonical form.
-//
-//   │  ✕ API 429 rate limited — retry in 20s                14:02:11 │  headline · when
-//   │    "request tokens exceeded your per-minute rate limit"        │  the vendor's message
-message FeedApiFailure {
-  // ONE ARM, and it is `error`: this row IS a failure and is nothing else.
-  oneof result {
-    FeedApiFailureError error = 1;
-  }
-}
-// The recorded failure, drawn.
-message FeedApiFailureError {
-  FeedApiFailureHeadline headline = 1;
-  // The vendor's own message, verbatim, in a quieter register.
-  FeedApiFailureMessage message = 2;
-  FeedApiFailureWhen when = 3;
-}
-
-// The sentence and color class the daemon composed from the record's kind.
-message FeedApiFailureHeadline {
-  string text = 1;
-  string tone = 2;
-}
-
-// The vendor's message, verbatim.
-message FeedApiFailureMessage {
-  string text = 1;
-}
-
-// When the vendor recorded it, epoch ms.
-message FeedApiFailureWhen {
-  int64 at_ms = 1;
-}
-// ⑥ THE CONTEXT-CUT DIVIDER — the conversation was cut here, and a reader
+// ⑤ THE CONTEXT-CUT DIVIDER — the conversation was cut here, and a reader
 // scrolling back must see where. Drawn from conversation.v1.ContextCut.
 message FeedContextCut {
   // The divider's label ("context compacted", "context cleared").
@@ -702,7 +664,7 @@ message FeedContextCutSummary {
 message FeedContextCutFold {
   bool folded = 1;
 }
-// ⑦ A WORKSPACE MERGE, coalesced into ONE bubble. The daemon orchestrates the
+// ⑥ A WORKSPACE MERGE, coalesced into ONE bubble. The daemon orchestrates the
 // merge (a skill run under the hood) and DECIDES which records belong to it;
 // the vendor knows nothing about any of it. The bubble's body is a TAB STRIP:
 // one tab per phase the run actually entered, in entry order.
