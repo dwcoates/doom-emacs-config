@@ -114,6 +114,13 @@ that transport.
 
 ## Landed changes
 
+### Stage 3, FOOTER section: one RPC
+
+**Settled ("sounds good").** WatchFooter — per-workspace stream of FooterView,
+whole-replaced. Nothing else: the strip's states are daemon-resolved, the
+tokens cell rides the view, and an expanded row's click is client-side
+navigation to a feed bubble by MessageId — no command exists in this section.
+
 ### Stage 3, TOPBAR section: two RPCs; the breakdown menu nests INTO TopbarView
 
 **Settled.** WatchTopbar — per-workspace stream of TopbarView, WHOLE; and
