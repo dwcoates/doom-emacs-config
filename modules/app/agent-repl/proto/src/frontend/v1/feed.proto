@@ -666,7 +666,262 @@ message FeedContextCutSummary {
 message FeedContextCutFold {
   bool folded = 1;
 }
-message FeedMerge {}
+// ⑧ A WORKSPACE MERGE, coalesced into ONE bubble. The daemon orchestrates the
+// merge (a skill run under the hood) and DECIDES which records belong to it;
+// the vendor knows nothing about any of it. The bubble's body is a TAB STRIP:
+// one tab per phase the run actually entered, in entry order.
+//
+//   │ ⇄ merge  DWC/fix-flaky → master           6:31  ● merging  ▾      │
+//   │ ┌───────────────────────────────────────────────────────────────┐ │
+//   │ │ queue ✓ │ rebase ✓ │ conflicts ✓ 3 │ tests ● 8/12            │ │
+//   │ ├───────────────────────────────────────────────────────────────┤ │
+//   │ │  │ ⚙ agent ▏fixing TestReconnect…                            │ │
+//   │ └───────────────────────────────────────────────────────────────┘ │
+message FeedMerge {
+  FeedMergeHead head = 1;
+  // The phases entered so far, in entry order — the tab strip. APPEND-ONLY:
+  // a tab appears BECAUSE that work began, so there is no pending tab, and a
+  // phase never reopens. A second round of a phase is a SECOND TAB
+  // ("conflicts (2)"), deliberately, so an abnormal second pass looks
+  // abnormal without any badge saying so.
+  repeated FeedMergePhase phases = 2;
+}
+
+// The bubble's head line — the merge as a whole. WHAT it is doing right now
+// is the last tab, not a field here.
+message FeedMergeHead {
+  FeedMergeGlyph glyph = 1;
+  FeedMergeLabel label = 2;
+  FeedMergeRuntime runtime = 3;
+  // THE ARM IS THE STATE.
+  oneof state {
+    FeedMergeLive live = 4;
+    FeedMergeSettled settled = 5;
+  }
+  FeedMergeFold fold = 6;
+}
+
+// The kind glyph, a name from the shared vocabulary ("merge").
+message FeedMergeGlyph {
+  string icon = 1;
+}
+
+// The branch line, resolved ("DWC/fix-flaky-test → master").
+message FeedMergeLabel {
+  string text = 1;
+}
+
+// When the merge was enqueued — the head's running clock while live.
+message FeedMergeRuntime {
+  int64 started_at_ms = 1;
+}
+
+// Still in the queue or still merging.
+message FeedMergeLive {}
+
+// Reached an end: when, and what happened. `ended_at_ms` lives HERE because
+// it means nothing while live.
+message FeedMergeSettled {
+  int64 ended_at_ms = 1;
+  oneof outcome {
+    FeedMergeMerged merged = 2;
+    FeedMergeFailed failed = 3;
+    FeedMergeAbandoned abandoned = 4;
+  }
+}
+
+// It landed; the head shows the commit it produced.
+message FeedMergeMerged {
+  string commit = 1;
+}
+
+// The run gave up; a resolved sentence for the collapsed line.
+message FeedMergeFailed {
+  string summary = 1;
+}
+
+// Taken off the queue before it ever reached the front.
+message FeedMergeAbandoned {}
+
+// The ▸/▾ state. UI preference the daemon holds; see the roster's fold.
+message FeedMergeFold {
+  bool folded = 1;
+}
+
+// ONE TAB of the merge bubble. A tab draws from exactly two things and
+// derives nothing: its label, and its state (which picks the badge's
+// treatment). Whatever DETAIL the badge shows comes from the kind arm, which
+// is already resolved.
+message FeedMergePhase {
+  // The tab's label, resolved by the daemon, round number included
+  // ("conflicts (2)"). The client counts nothing.
+  FeedMergePhaseLabel label = 1;
+  // THE ARM IS THE BADGE. Monotonic: live once, settled once, never reopened
+  // — a repeat of this work is a new tab, not this one going live again.
+  oneof state {
+    FeedMergePhaseLive live = 2;
+    FeedMergePhaseSettled settled = 3;
+  }
+  // THE ARM IS WHAT THIS PHASE IS, and carries the evidence that phase has.
+  oneof kind {
+    FeedMergePhaseQueue queue = 4;
+    FeedMergePhaseRebasing rebasing = 5;
+    FeedMergePhaseResolving resolving = 6;
+    FeedMergePhaseBuilding building = 7;
+    FeedMergePhaseTesting testing = 8;
+    FeedMergePhaseLanding landing = 9;
+  }
+}
+
+// The tab's label.
+message FeedMergePhaseLabel {
+  string text = 1;
+}
+
+// This phase is the one running.
+message FeedMergePhaseLive {}
+
+// This phase finished.
+message FeedMergePhaseSettled {
+  int64 ended_at_ms = 1;
+  oneof outcome {
+    FeedMergePhaseSucceeded succeeded = 2;
+    FeedMergePhaseFailed failed = 3;
+  }
+}
+
+// Finished cleanly; the tab's badge shows this summary when there is one
+// ("3 files", "0844824").
+message FeedMergePhaseSucceeded {
+  string summary = 1;
+}
+
+// Finished badly; a resolved sentence ("3 tests still failing").
+message FeedMergePhaseFailed {
+  string summary = 1;
+}
+
+// ==========================================================================
+// The merge phases. Each carries its own evidence, and the working phases
+// each carry their nested rows' count — the records the agent produced doing
+// that phase's work, parented to the PHASE rather than to the merge, so
+// "which pass produced this fix" is answerable by structure.
+// ==========================================================================
+
+// WAITING IN THE QUEUE. Its content is a SNAPSHOT, replacing the previous one
+// whole — there are no deltas and no ordering to reconcile, exactly as a
+// background shell's spool is replaced whole. The daemon republishes on any
+// queue change AND on any phase change at the front, which is what makes a
+// waiting user see motion rather than a static "3 ahead".
+//
+// It has no records of its own: nothing is being done here.
+//
+// WHEN THIS WORKSPACE REACHES THE FRONT the tab SETTLES, frozen on its last
+// snapshot ("you were #1 of 4"), and the phase tabs take over. It does not
+// keep updating — the front workspace is shown nothing about the queue,
+// because a merging user cares about the merge, not about who is behind
+// them.
+message FeedMergePhaseQueue {
+  FeedMergeQueue queue = 1;
+}
+
+// The queue, as this workspace sees it. Every workspace appears exactly once,
+// and WHICH ENTRY THE READER IS is `current` — structurally, never by
+// comparing ids.
+message FeedMergeQueue {
+  // Ahead of us, front-first.
+  repeated FeedMergeQueueEntry ahead = 1;
+  // Us. The "you are here" row.
+  FeedMergeQueueEntry current = 2;
+  // Behind us, front-first.
+  repeated FeedMergeQueueEntry behind = 3;
+}
+
+// One workspace in the queue — the same drawn row wherever it sits.
+message FeedMergeQueueEntry {
+  FeedMergeQueueWorkspace workspace = 1;
+  FeedMergeQueueLabel label = 2;
+  // THE ARM IS WHAT THIS WORKSPACE IS DOING. Only the front entry is ever
+  // `merging`, and only `merging` has a phase to report.
+  oneof status {
+    FeedMergeQueueMerging merging = 3;
+    FeedMergeQueueWaiting waiting = 4;
+  }
+}
+
+// Which workspace this row names, so the row is a jump target.
+message FeedMergeQueueWorkspace {
+  string value = 1;
+}
+
+// The row's label, resolved ("DWC/roster-resolver").
+message FeedMergeQueueLabel {
+  string text = 1;
+}
+
+// At the front and running. This MIRRORS that workspace's own merge bubble:
+// the SAME phase messages its tab strip uses, imported rather than respelled,
+// so the two never drift.
+message FeedMergeQueueMerging {
+  oneof phase {
+    FeedMergePhaseRebasing rebasing = 1;
+    FeedMergePhaseResolving resolving = 2;
+    FeedMergePhaseBuilding building = 3;
+    FeedMergePhaseTesting testing = 4;
+    FeedMergePhaseLanding landing = 5;
+  }
+}
+
+// Waiting its turn; nothing to report beyond who it is.
+message FeedMergeQueueWaiting {}
+
+// Bringing the branch up to date on its base.
+message FeedMergePhaseRebasing {
+  // The base, resolved ("master @ 0844824").
+  string base = 1;
+  FeedMergePhaseRowCount rows = 2;
+}
+
+// The agent is resolving conflicts. This is the phase that makes the bubble
+// read as an agent bubble at all.
+message FeedMergePhaseResolving {
+  // The conflicted paths, in display order.
+  repeated string paths = 1;
+  // The one being worked right now, when the daemon can name it.
+  string current_path = 2;
+  FeedMergePhaseRowCount rows = 3;
+}
+
+// Building after the resolution.
+message FeedMergePhaseBuilding {
+  // The build's live line, resolved ("compiling daemon").
+  string detail = 1;
+  FeedMergePhaseRowCount rows = 2;
+}
+
+// Running the suite; the agent fixes what it breaks, which is more records.
+message FeedMergePhaseTesting {
+  // Which suite ("elisp", "webapp", "e2e"), resolved.
+  string suite = 1;
+  // Progress, composed by the daemon ("8/12"); the client counts nothing.
+  string progress = 2;
+  FeedMergePhaseRowCount rows = 3;
+}
+
+// Landing the result: the push, the queue interaction, the commit produced.
+// The merge's own narration — the skill's initiating prompt, the closing
+// message — is THIS phase's records, which is why the body is uniformly tabs
+// and carries no loose rows.
+message FeedMergePhaseLanding {
+  FeedMergePhaseRowCount rows = 1;
+}
+
+// How many nested rows this phase has. The rows themselves are ordinary
+// FeedRows whose `parent` is the phase, paged through the same page and
+// breadcrumbs as the feed.
+message FeedMergePhaseRowCount {
+  int32 count = 1;
+}
 message FeedPreview {}
 
 // ==========================================================================
