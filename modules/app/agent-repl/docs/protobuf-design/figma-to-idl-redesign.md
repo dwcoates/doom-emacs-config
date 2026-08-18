@@ -114,6 +114,13 @@ that transport.
 
 ## Landed changes
 
+### `feed.proto` kind ⑥: `FeedApiFailure`
+
+**What changed.** `FeedApiFailure { FeedApiFailureHeadline {text, tone};
+FeedApiFailureMessage {text}; FeedApiFailureWhen {at_ms} }` — the recorded
+`conversation.v1.ApiRequestFailed` drawn as a terminal row; the daemon
+composes sentence and color from the record's kind. "Okay."
+
 ### `feed.proto` kind ⑤: `FeedFailure`; `FeedDetachedRuntime.ended_at_ms` moves into `Settled`
 
 **What changed.** `FeedFailure { FeedFailureHeadline {text, tone};
