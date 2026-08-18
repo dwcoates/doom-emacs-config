@@ -114,6 +114,24 @@ that transport.
 
 ## Landed changes
 
+### Stage 3, DAEMON-HOLD TRAY section: three RPCs
+
+**Settled ("looks good").**
+
+1. WatchDaemonHolds — per-workspace DaemonHoldTray stream, whole-replaced.
+2. UpdateHeldPrompt — ONE verb per the user's consolidation ("all held prompt
+   updates along one channel"), the AnswerPermission precedent: `{ TurnId;
+   oneof action { release (deliver now — today's "force") | drop (discard) } }`.
+   A later action is a new arm; the refusal vocabulary (no such hold, already
+   delivered) is declared once.
+3. AnswerHeldOffer — its own verb, NOT folded into UpdateHeldPrompt: an offer
+   is a different item kind with answers of its own shape (merge-dequeue
+   keep/release today), and one RPC whose arms half-apply per item kind would
+   reintroduce adjacent-exclusivity.
+
+**The old table's third queue verb ("accept") is DEAD: accept is the default.**
+A held prompt delivers itself when its hold clears; waiting requires no verb.
+
 ### Stage 3, FOOTER section: one RPC
 
 **Settled ("sounds good").** WatchFooter — per-workspace stream of FooterView,
