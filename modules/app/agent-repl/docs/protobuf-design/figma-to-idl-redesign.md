@@ -114,6 +114,28 @@ that transport.
 
 ## Landed changes
 
+### Stage 3, FEED section: the RPC inventory — five RPCs
+
+**Settled ("okay i'm sold").** Names and purposes only; shapes are 3c:
+
+1. WatchFeed — ONE server stream of FeedRow upserts per workspace, top-level
+   and nested rows alike; the client routes by `parent`. One stream, not one
+   per container: nesting is data, not topology, and reconnect is one re-open.
+2. GetFeedPage — unary; a FeedPage for a container (top-level, a bubble, a
+   merge phase) from a cursor. Replaces FirstPage/NextPage/Resync.
+3. SubmitPrompt — a UserSaid; returns the daemon-minted TurnId or a typed
+   refusal.
+4. Interrupt — "stop that", with a TARGET ONEOF: the running turn, or a
+   detached bubble by MessageId. The user's fold: CancelDetachedWork "is
+   essentially an interrupt" — one user intent, one verb, the difference
+   lives in the target arm, the refusal vocabulary is shared. The old
+   Interrupt's second job (the merge-dequeue trigger) is already dead — that
+   moved to the held-offer answer in stage 2.
+5. AnswerPermission — allow once / allow for session / deny, by ToolCallId.
+
+**Consequences.** CancelDetachedAgents does not return; the daemon routes the
+target arm to the vendor query interrupt or the task stop respectively.
+
 ### STAGE 3a SETTLED: `agentrepl.v1`'s seven sections, the walk order
 
 **Settled ("looks good, let's settle").** The service is organized by
