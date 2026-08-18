@@ -114,6 +114,46 @@ that transport.
 
 ## Landed changes
 
+### STAGE 3a SETTLED: `agentrepl.v1`'s seven sections, the walk order
+
+**Settled ("looks good, let's settle").** The service is organized by
+COMPONENT, not by mechanism — each drawn component owns its stream, its pulls
+and its commands together (the figma→idl file rule applied to the API), plus
+two non-drawn sections. The RPC names below are SCOPING ONLY; each section's
+actual RPC set is settled one RPC at a time at its turn:
+
+1. Feed — stream, paging, prompt/interrupt/permission/cancel-detached.
+2. Sidebar — roster stream, workspace-lifecycle clicks, view preferences.
+3. Topbar — stream, model selector, session token-breakdown delivery.
+4. Footer — stream.
+5. Daemon-hold tray — stream, held-prompt/offer actions.
+6. Command panels — programmatically-rendered slash commands (/status today;
+   /context, /login later — the section is named for the CLASS, so a later
+   command is a new panel kind, not a new section). Generalized from the
+   orchestrator's too-specific "status panel".
+7. Host — register/select workspace, report-backs, host stream, shutdown
+   scheduling, health, merge-queue control, client log relay (that one's
+   caller is the webapp, noted; Host = the non-drawn operational surface).
+
+**The transport reasoning re-verified with the user on the way (Connect
+stands, not reopened).** The user probed whether commands should ride the
+feed's connection ("one connection for feed, along which commands are sent
+and updates received") and whether Connect forgoes bidirectional RPC. Answers
+recorded: browser fetch cannot do gRPC bidi (no duplex request in WebKit, no
+trailers, no half-close — the page never owns the connection); the
+"protobuf-powered WebSocket" is what agent-repl HAS today, and its cost is
+the hand-rolled correlation layer (requestId, pending-ack map, ack-vs-push
+races) that Connect deletes by making commands ordinary unary requests; all
+endpoints multiplex over the ONE HTTP/2 connection, so one-connection is true
+at the socket level and endpoint-per-component at the API level. The user:
+"ah got it, that makes a lot of sense."
+
+**Dropped from the old table at this level** (each re-judged, not silently):
+PublishWorkspaceRoster (Emacs no longer authors the roster);
+FirstPage/NextPage/Resync (→ feed paging + streams); CreateSession/
+DeleteSession (subsumed by workspace open/close — whether delete-without-
+close is real is FLAGGED for the sidebar section's turn).
+
 ### `token_breakdown.proto` folds into `topbar.proto`
 
 **What changed.** The file is deleted; `TokenBreakdownView`, `TokenBreakdownSection`,
