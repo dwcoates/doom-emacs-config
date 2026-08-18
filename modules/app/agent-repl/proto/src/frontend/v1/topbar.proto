@@ -35,6 +35,11 @@ message TopbarView {
   TopbarConnectivity connectivity = 4;
   // The warning strip.
   TopbarWarningStrip warnings = 5;
+  // The token-breakdown menu — the SESSION's accounting, drawn when the user
+  // opens it. ALWAYS POPULATED, exactly as a folded section still carries its
+  // rows: the client hides it until opened, so opening needs no round-trip
+  // and the open menu stays current with every push.
+  TokenBreakdownView token_breakdown = 6;
 }
 
 // The title line the topbar shows.
