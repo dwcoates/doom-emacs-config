@@ -114,6 +114,36 @@ that transport.
 
 ## Landed changes
 
+### `feed.proto` kind ③: `FeedDetachedBubble`; child naming settled as FAMILY prefix
+
+**Naming (the user's ruling, option b).** Children of a row kind take the
+FAMILY prefix, not the full parent name: `FeedUserAuthor`, `FeedAgentHead`,
+`FeedToolHeadline`, `FeedDetachedHead` — the kind suffix (`Row`/`Card`/
+`Bubble`) appears only on the top-level kind message. `FeedToolCard*`
+children renamed to `FeedTool*` accordingly. "Bubble" is this codebase's word
+for a collapsible container of nested rows (the user's own phrasing; the
+webapp's `async-bubble.ts`); Row = a line-ish item, Card = a boxed item
+without nested rows.
+
+**What changed.** `FeedDetachedBubble { FeedDetachedHead head; oneof body {
+agent {row count} | shell {spool} | workflow {steps} | skill {doc, row
+count} | unmodeled {row count} } }`; `FeedDetachedHead { glyph; label;
+runtime {started, optional ended}; oneof state { live | settled { outcome
+succeeded|failed|cancelled|lost{how}; exit } }; fold }`. Nested rows are
+ordinary `FeedRow`s with `parent` = the bubble, paged via the same
+page/breadcrumbs. DELETED old bodies: `DetachedWork`, `DetachedWorkLiveness`
+/`Live`/`Settled`, `DetachedWorkOutcomeKilled`, and every `DetachedWork*Update`
+/`OutputAppend` delta message — a row upsert replaces the whole bubble.
+
+**Why, in the user's terms.** "Your protos look fine" with the naming
+ruling. Kind is the arm (mirrors `ToolCallBlock.call`'s detachable arms +
+unmodeled); label/glyph resolved from the origin; the shell spool is a
+resolved whole with `truncated` for paging inside the bubble.
+
+**Consequences.** The webapp's `async-bubble.ts` reads one bubble message;
+its 3-tier identity ladder and append handling go. The daemon caps the spool
+it sends and serves the rest as pages inside the bubble.
+
 ### `feed.proto` kind ②: `FeedAgentRow` — head, blocks (prose · thinking · tool card), stop notice
 
 **What changed.** `FeedAgentRow { FeedAgentHead {author, usage stamp};
