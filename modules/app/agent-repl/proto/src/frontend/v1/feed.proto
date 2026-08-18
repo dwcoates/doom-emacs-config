@@ -14,12 +14,24 @@
 //   │    ┌ Read  lisp/frontend.el                     ✓ ┐                  │     tool card
 //   │  ⚙ Explore  "find the roster resolver"    0:31  ▸ 3 msgs            │  ③ detached bubble (nested rows inside)
 //   │  ? Permission  Bash: git push …  [allow] [always] [deny]            │  ④ permission
-//   │  ✕ API Error 529 — retries exhausted        resolved 14:03          │  ⑤ failure card (synthesized)
-//   │  ✕ API 429 rate limited — retry in 20s                              │  ⑥ api-failure row (record)
-//   │  ── context compacted · 180k → 12k ── ▸ summary                     │  ⑦ context-cut divider
-//   │  ↻ merge · branch → master   cherry-picking 3/7  ▸ 12 msgs          │  ⑧ merge bubble (coalesces the run)
-//   │  ● Claude  typing▍                                                  │  ⑨ live preview
+//   │  ✕ API 429 rate limited — retry in 20s                              │  ⑤ api-failure row (record)
+//   │  ── context compacted · 180k → 12k ── ▸ summary                     │  ⑥ context-cut divider
+//   │  ⇄ merge · branch → master   queue ✓ │ tests ● 8/12   ▸ 12 msgs     │  ⑦ merge bubble (tabbed phases)
+//   │  ● Claude  Let me look at the roster resolv▍                        │  ② agent, still ARRIVING (update arm)
 //   └─────────────────────────────────────────────────────────────────────┘
+//
+// EVERY ROW KIND CARRIES `oneof result { update | success | error }` — the
+// same shape every agentrepl.v1 response has, applied to a drawn row. `update`
+// (where a kind has one) is the row while its fact is still in flight — a
+// response arriving, a tool running, a bubble live, a permission open, a
+// merge queued or merging. `success` is the settled fact. `error` is the
+// kind's OWN failure, modeled IN the kind: a response that never settled, a
+// tool that failed or was denied, a bubble that failed / was cancelled / was
+// lost, a merge that failed. Kinds that cannot fail or update carry a
+// ONE-ARM oneof, deliberately, so every row switches the same way. There is
+// NO general "failure row": a failure that correlates to no entry — a
+// session dying, the shim degrading, the client's own machinery — is not a
+// conversation fact; it is footer/topbar/gate state (see failure.proto).
 //
 // EVERY ROW KIND IS ITS OWN MESSAGE, and every row's element is a message the
 // daemon RESOLVED for drawing — figma→idl takes precedence over embedding a
@@ -50,7 +62,7 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // One row of the feed. THE ARM IS THE KIND.
 message FeedRow {
   // The row's identity — the record's MessageId, or a daemon-minted one for a
-  // synthesized row (failure, merge, preview). The upsert key: a
+  // synthesized row (a merge). The upsert key: a
   // later push with the same id REPLACES this row whole.
   conversation.v1.MessageId id = 1;
   // The containing bubble's id, when nested (inside a detached bubble or the
@@ -65,16 +77,23 @@ message FeedRow {
     FeedAgent agent = 5;
     FeedDetached detached = 6;
     FeedPermission permission = 7;
-    FeedFailure failure = 8;
-    FeedApiFailure api_failure = 9;
-    FeedContextCut context_cut = 10;
-    FeedMerge merge = 11;
-    FeedPreview preview = 12;
+    FeedApiFailure api_failure = 8;
+    FeedContextCut context_cut = 9;
+    FeedMerge merge = 10;
   }
 }
 
-// A page of rows, as the daemon serves it for a container.
+// A page of rows, as the daemon serves it for a container. THE ARM IS THE
+// RESULT: the page, or why it could not be completed.
 message FeedPage {
+  oneof result {
+    FeedPageSuccess success = 1;
+    FeedPageError error = 2;
+  }
+}
+
+// The page.
+message FeedPageSuccess {
   // Oldest → newest.
   repeated FeedRow rows = 1;
   // Whether older rows exist beyond this page. THE ARM IS THE EDGE.
@@ -86,6 +105,21 @@ message FeedPage {
   // open deep inside nesting draws for context, and how a client knows which
   // container this page is OF (the last crumb). EMPTY = the top-level feed.
   FeedBreadcrumbs breadcrumbs = 4;
+}
+
+// The page could not be completed. Drawn where the rows would be, with the
+// daemon's sentence and the typed evidence.
+message FeedPageError {
+  FeedPageErrorHeadline headline = 1;
+  oneof kind {
+    // The history re-pull ended before it reached the live window, so what
+    // is on screen has a gap in it.
+    FailureHistoryReplayTruncated history_replay_truncated = 2;
+  }
+}
+message FeedPageErrorHeadline {
+  string text = 1;
+  string tone = 2;
 }
 
 // Older rows exist; ask again with this cursor.
@@ -127,8 +161,16 @@ message FeedBreadcrumb {
 message FeedUser {
   // The author label ("You" — or the spawning agent's name under a bubble).
   FeedUserAuthor author = 1;
+  // ONE ARM: a user row is never in flight and never fails.
+  oneof result {
+    FeedUserSuccess success = 2;
+  }
+}
+
+// The row's content.
+message FeedUserSuccess {
   // The blocks the person composed.
-  FeedUserBody body = 2;
+  FeedUserBody body = 1;
 }
 
 // The author label of a user row.
@@ -244,12 +286,11 @@ message FeedTool {
   conversation.v1.ToolCallId call = 1;
   FeedToolHeadline headline = 2;
   FeedToolArguments arguments = 3;
-  // THE ARM IS THE OUTCOME.
-  oneof outcome {
-    FeedToolRunning running = 4;
-    FeedToolReturned returned = 5;
-    FeedToolDetached detached = 6;
-    FeedToolDenied denied = 7;
+  // THE ARM IS THE STATE.
+  oneof result {
+    FeedToolUpdate update = 4;
+    FeedToolSuccess success = 5;
+    FeedToolError error = 6;
   }
 }
 
@@ -274,21 +315,41 @@ message FeedToolArgument {
 }
 
 // The tool has not returned yet.
-message FeedToolRunning {}
+message FeedToolUpdate {}
 
-// The tool returned. THE ARM IS WHETHER IT SUCCEEDED; each carries its own
-// drawn result blocks.
-message FeedToolReturned {
-  oneof result {
-    FeedToolResultSucceeded succeeded = 1;
-    FeedToolResultFailed failed = 2;
+// The call went well. THE ARM IS HOW: it returned, or it detached into work
+// of its own.
+message FeedToolSuccess {
+  oneof outcome {
+    FeedToolReturned returned = 1;
+    FeedToolDetached detached = 2;
   }
 }
-message FeedToolResultSucceeded {
+// The tool returned; its result, drawn.
+message FeedToolReturned {
   repeated FeedToolResultBlock blocks = 1;
 }
-message FeedToolResultFailed {
+// The call detached into work of its own; the card links to its bubble.
+message FeedToolDetached {
+  conversation.v1.MessageId bubble = 1;
+}
+
+// The call did not go well. THE ARM IS WHY: the tool returned an error, or
+// the user denied it.
+message FeedToolError {
+  oneof reason {
+    FeedToolFailed failed = 1;
+    FeedToolDenied denied = 2;
+  }
+}
+// The tool returned an error; its account, drawn.
+message FeedToolFailed {
   repeated FeedToolResultBlock blocks = 1;
+}
+// The call was denied by the user.
+message FeedToolDenied {
+  // What the user said, when they said anything.
+  string reason = 1;
 }
 // One drawn block of a tool result.
 message FeedToolResultBlock {
@@ -297,17 +358,6 @@ message FeedToolResultBlock {
     FeedImageBlock image = 2;
     FeedUnsupportedBlock unsupported = 3;
   }
-}
-
-// The call detached into work of its own; the card links to its bubble.
-message FeedToolDetached {
-  conversation.v1.MessageId bubble = 1;
-}
-
-// The call was denied by the user.
-message FeedToolDenied {
-  // What the user said, when they said anything.
-  string reason = 1;
 }
 
 // A stop worth drawing. Unset for end_turn / tool_call.
@@ -336,30 +386,32 @@ message FeedAgentStopUnsupported {
 //   │  $ bash  go test ./...                      1:04 ● live  ▸ output │  shell: the spool
 //   │  ⛓ workflow  review-changes                 2:10 ● live  ▸ 5 steps│  workflow: journal steps
 //   │  ✎ skill  create-or-update-pr                     ✓ done  ▸ body  │  skill: SKILL.md + nested rows
-//   │  ⚙ Explore  "…"                        1:12 ✕ failed: timed out    │  settled: outcome replaces liveness
+//   │  ⚙ Explore  "…"                        1:12 ✕ failed: timed out    │  error: outcome replaces liveness
 message FeedDetached {
   FeedDetachedHead head = 1;
+  // THE ARM IS THE STATE — drawn as the head's badge.
+  oneof result {
+    FeedDetachedUpdate update = 2;
+    FeedDetachedSuccess success = 3;
+    FeedDetachedError error = 4;
+  }
   // THE ARM IS THE KIND — what the bubble contains and how it is drawn.
   oneof body {
-    FeedDetachedAgentBody agent = 2;
-    FeedDetachedShellBody shell = 3;
-    FeedDetachedWorkflowBody workflow = 4;
-    FeedDetachedSkillBody skill = 5;
-    FeedDetachedUnmodeledBody unmodeled = 6;
+    FeedDetachedAgentBody agent = 5;
+    FeedDetachedShellBody shell = 6;
+    FeedDetachedWorkflowBody workflow = 7;
+    FeedDetachedSkillBody skill = 8;
+    FeedDetachedUnmodeledBody unmodeled = 9;
   }
 }
 
-// The bubble's head line.
+// The bubble's head line: the constant props. The state badge is the
+// bubble's `result`.
 message FeedDetachedHead {
   FeedDetachedGlyph glyph = 1;
   FeedDetachedLabel label = 2;
   FeedDetachedRuntime runtime = 3;
-  // THE ARM IS THE STATE: live, or settled with its outcome.
-  oneof state {
-    FeedDetachedLive live = 4;
-    FeedDetachedSettled settled = 5;
-  }
-  FeedDetachedFold fold = 6;
+  FeedDetachedFold fold = 4;
 }
 
 // The kind glyph, a name from the shared vocabulary ("agent", "bash",
@@ -380,26 +432,30 @@ message FeedDetachedRuntime {
 }
 
 // Still running.
-message FeedDetachedLive {}
+message FeedDetachedUpdate {}
 
-// Reached an end: when, the outcome, and the process exit when it was a
-// process. `ended_at_ms` lives HERE, not on the runtime, because it means
-// nothing while live (adjacent-exclusivity).
-message FeedDetachedSettled {
+// Ended well: when, the collapsed line's summary, and the process exit when
+// it was a process. `ended_at_ms` lives on the terminal arms, not on the
+// runtime, because it means nothing while live (adjacent-exclusivity).
+message FeedDetachedSuccess {
   // Epoch ms; the head's clock stops here.
-  int64 ended_at_ms = 6;
-  oneof outcome {
-    FeedDetachedSucceeded succeeded = 1;
+  int64 ended_at_ms = 1;
+  // The collapsed line's summary, resolved.
+  string summary = 2;
+  // Unset for work that never had an exit status of its own.
+  FeedDetachedExit exit = 3;
+}
+
+// Ended badly: when, why, and the process exit when it was a process. THE
+// ARM IS WHY.
+message FeedDetachedError {
+  int64 ended_at_ms = 1;
+  oneof reason {
     FeedDetachedFailed failed = 2;
     FeedDetachedCancelled cancelled = 3;
     FeedDetachedLost lost = 4;
   }
-  // Unset for work that never had an exit status of its own.
   FeedDetachedExit exit = 5;
-}
-message FeedDetachedSucceeded {
-  // The collapsed line's summary, resolved.
-  string summary = 1;
 }
 message FeedDetachedFailed {
   string summary = 1;
@@ -457,15 +513,15 @@ message FeedDetachedSpool {
 message FeedDetachedStep {
   string label = 1;
   string detail = 2;
-  oneof status {
-    FeedDetachedStepRunning running = 3;
-    FeedDetachedStepDone done = 4;
-    FeedDetachedStepFailed failed = 5;
+  oneof result {
+    FeedDetachedStepUpdate update = 3;
+    FeedDetachedStepSuccess success = 4;
+    FeedDetachedStepError error = 5;
   }
 }
-message FeedDetachedStepRunning {}
-message FeedDetachedStepDone {}
-message FeedDetachedStepFailed {}
+message FeedDetachedStepUpdate {}
+message FeedDetachedStepSuccess {}
+message FeedDetachedStepError {}
 // The skill file's body, markdown, drawn as a document.
 message FeedDetachedSkillDoc {
   string markdown = 1;
@@ -477,15 +533,17 @@ message FeedDetachedSkillDoc {
 //   │  ? Permission   Bash  $ git push --force origin main         │  headline
 //   │    ▸ arguments                                               │  arguments fold
 //   │    [allow once] [allow for session] [deny…]                  │  answer bar (open)
-//   │  ✓ allowed for session · 14:02                               │  answered: verdict line replaces the bar
+//   │  ✓ allowed for session · 14:02                               │  success: verdict line replaces the bar
+//   │  – went unanswered · 14:05                                   │  error: the question went away
 message FeedPermission {
   conversation.v1.ToolCallId call = 1;
   FeedPermissionHeadline headline = 2;
   FeedPermissionArguments arguments = 3;
   // THE ARM IS THE STATE.
-  oneof state {
-    FeedPermissionOpen open = 4;
-    FeedPermissionAnswered answered = 5;
+  oneof result {
+    FeedPermissionUpdate update = 4;
+    FeedPermissionSuccess success = 5;
+    FeedPermissionError error = 6;
   }
 }
 
@@ -507,20 +565,18 @@ message FeedPermissionArgument {
 
 // Awaiting the user: the answer bar is drawn. Its buttons send agentrepl.v1
 // requests; nothing about them is a field here.
-message FeedPermissionOpen {}
+message FeedPermissionUpdate {}
 
-// Answered. THE ARM IS THE ANSWER.
-message FeedPermissionAnswered {
+// Answered. THE ARM IS THE ANSWER. A denial is an ANSWER — the user was asked
+// and said no — which is why it is here and not under error.
+message FeedPermissionSuccess {
   oneof answer {
     FeedPermissionAllowedOnce allowed_once = 1;
     FeedPermissionAllowedForSession allowed_for_session = 2;
     FeedPermissionDenied denied = 3;
-    // The question went away without an answer — the turn ended, the session
-    // stopped.
-    FeedPermissionAbandoned abandoned = 4;
   }
-  // When it was answered (or abandoned), epoch ms.
-  int64 at_ms = 5;
+  // When it was answered, epoch ms.
+  int64 at_ms = 4;
 }
 message FeedPermissionAllowedOnce {}
 message FeedPermissionAllowedForSession {}
@@ -528,62 +584,18 @@ message FeedPermissionDenied {
   // What the user said, when they said anything.
   string reason = 1;
 }
-message FeedPermissionAbandoned {}
-// ⑤ A failure that happened ON ITS OWN — nothing asked — as a conversation
-// item, at the point where it happened. The ONLY row that draws a failure
-// whole. Re-pushed under the SAME id when its lifecycle moves (open →
-// resolved), and the feed replaces it in place rather than appending the
-// all-clear beside the alarm.
-//
-//   │  ✕  API iterator failed — the SDK threw mid-turn         open ● │  headline
-//   │     QueryIteratorFailure: "socket hang up" · 14:02:11           │  detail
-//   │     ▸ evidence                                                  │  evidence (folded)
-//   │     resolved 14:03:02                                           │  lifecycle
-message FeedFailure {
-  FeedFailureHeadline headline = 1;
-  // The raw account, in a quieter register. Unset when there is none.
-  FeedFailureDetail detail = 2;
-  FeedFailureEvidence evidence = 3;
-  // THE ARM IS THE LIFECYCLE.
-  oneof lifecycle {
-    FeedFailureOpen open = 4;
-    FeedFailureResolved resolved = 5;
-    FeedFailureTerminal terminal = 6;
+
+// The question went away without an answer — the turn ended, the session
+// stopped. THE ARM IS HOW.
+message FeedPermissionError {
+  oneof reason {
+    FeedPermissionAbandoned abandoned = 1;
   }
+  // When it went away, epoch ms.
+  int64 at_ms = 2;
 }
-
-// The sentence the card leads with, composed daemon-side, and the color class
-// from the kind's side of the vocabulary — the client never maps kind→color.
-message FeedFailureHeadline {
-  string text = 1;
-  string tone = 2;
-}
-
-// The raw account beneath the sentence: evidence for whoever debugs this,
-// not the sentence itself.
-message FeedFailureDetail {
-  string text = 1;
-}
-
-// The typed evidence, folded. The shared failure vocabulary IS the evidence:
-// the same arms agentrepl.v1's error responses name.
-message FeedFailureEvidence {
-  FailureKind kind = 1;
-}
-
-// Still happening: the alarm mark and its color.
-message FeedFailureOpen {}
-
-// A window-shaped failure closed: the card keeps its place, drops to a muted
-// register, and stamps when it ended.
-message FeedFailureResolved {
-  int64 at_ms = 1;
-}
-
-// No closing edge, ever — a turn that ended, an account block. Distinct from
-// open, because open invites waiting and this does not.
-message FeedFailureTerminal {}
-// ⑥ The vendor's own RECORDED API failure (a conversation.v1.ApiRequestFailed
+message FeedPermissionAbandoned {}
+// ⑤ The vendor's own RECORDED API failure (a conversation.v1.ApiRequestFailed
 // record), drawn as a row at the point it happened. Terminal by nature: the
 // vendor recorded it once, and nothing resolves it. A resolved element — the
 // daemon composes the sentence and color from the record's kind; the record
@@ -592,6 +604,13 @@ message FeedFailureTerminal {}
 //   │  ✕ API 429 rate limited — retry in 20s                14:02:11 │  headline · when
 //   │    "request tokens exceeded your per-minute rate limit"        │  the vendor's message
 message FeedApiFailure {
+  // ONE ARM, and it is `error`: this row IS a failure and is nothing else.
+  oneof result {
+    FeedApiFailureError error = 1;
+  }
+}
+// The recorded failure, drawn.
+message FeedApiFailureError {
   FeedApiFailureHeadline headline = 1;
   // The vendor's own message, verbatim, in a quieter register.
   FeedApiFailureMessage message = 2;
@@ -613,20 +632,29 @@ message FeedApiFailureMessage {
 message FeedApiFailureWhen {
   int64 at_ms = 1;
 }
-// ⑦ THE CONTEXT-CUT DIVIDER — the conversation was cut here, and a reader
+// ⑥ THE CONTEXT-CUT DIVIDER — the conversation was cut here, and a reader
 // scrolling back must see where. Drawn from conversation.v1.ContextCut.
 message FeedContextCut {
   // The divider's label ("context compacted", "context cleared").
   FeedContextCutLabel label = 1;
+  // ONE ARM: a cut is a recorded fact; it is never in flight and it does not
+  // fail (a compaction that read cold still compacted — see the cold-read
+  // notice on the compacted arm).
+  oneof result {
+    FeedContextCutSuccess success = 2;
+  }
+}
+// The cut, drawn.
+message FeedContextCutSuccess {
   // What the cut did to the context's size, drawn on the divider. EVERY cut
   // has one, including a clear: clearing reloads the system prompt, skills
   // and memory, so the after side is small rather than zero, and showing it
   // is what lets a reader see that.
-  FeedContextCutTokens tokens = 2;
+  FeedContextCutTokens tokens = 1;
   // THE ARM IS THE KIND OF CUT.
   oneof cut {
-    FeedContextCutCleared cleared = 3;
-    FeedContextCutCompacted compacted = 4;
+    FeedContextCutCleared cleared = 2;
+    FeedContextCutCompacted compacted = 3;
   }
 }
 
@@ -655,6 +683,14 @@ message FeedContextCutCleared {}
 message FeedContextCutCompacted {
   FeedContextCutSummary summary = 1;
   FeedContextCutFold fold = 2;
+  // Set when the compaction re-read the whole conversation at the uncached
+  // rate — the cost compaction exists to avoid. A NOTICE on a compaction
+  // that happened, not a failure of it; drawn as a warning on the divider.
+  FeedContextCutColdRead cold_read = 3;
+}
+// The compaction read cold; the evidence, imported whole from failure.proto.
+message FeedContextCutColdRead {
+  FailureCompactionColdRead evidence = 1;
 }
 
 // The compression of the preceding conversation, drawn as markdown.
@@ -666,7 +702,7 @@ message FeedContextCutSummary {
 message FeedContextCutFold {
   bool folded = 1;
 }
-// ⑧ A WORKSPACE MERGE, coalesced into ONE bubble. The daemon orchestrates the
+// ⑦ A WORKSPACE MERGE, coalesced into ONE bubble. The daemon orchestrates the
 // merge (a skill run under the hood) and DECIDES which records belong to it;
 // the vendor knows nothing about any of it. The bubble's body is a TAB STRIP:
 // one tab per phase the run actually entered, in entry order.
@@ -679,26 +715,27 @@ message FeedContextCutFold {
 //   │ └───────────────────────────────────────────────────────────────┘ │
 message FeedMerge {
   FeedMergeHead head = 1;
+  // THE ARM IS THE STATE of the merge as a whole — the head's badge. WHAT it
+  // is doing right now is the last tab, not a field here.
+  oneof result {
+    FeedMergeUpdate update = 2;
+    FeedMergeSuccess success = 3;
+    FeedMergeError error = 4;
+  }
   // The phases entered so far, in entry order — the tab strip. APPEND-ONLY:
   // a tab appears BECAUSE that work began, so there is no pending tab, and a
   // phase never reopens. A second round of a phase is a SECOND TAB
   // ("conflicts (2)"), deliberately, so an abnormal second pass looks
   // abnormal without any badge saying so.
-  repeated FeedMergePhase phases = 2;
+  repeated FeedMergePhase phases = 5;
 }
 
-// The bubble's head line — the merge as a whole. WHAT it is doing right now
-// is the last tab, not a field here.
+// The bubble's head line: the constant props.
 message FeedMergeHead {
   FeedMergeGlyph glyph = 1;
   FeedMergeLabel label = 2;
   FeedMergeRuntime runtime = 3;
-  // THE ARM IS THE STATE.
-  oneof state {
-    FeedMergeLive live = 4;
-    FeedMergeSettled settled = 5;
-  }
-  FeedMergeFold fold = 6;
+  FeedMergeFold fold = 4;
 }
 
 // The kind glyph, a name from the shared vocabulary ("merge").
@@ -717,29 +754,27 @@ message FeedMergeRuntime {
 }
 
 // Still in the queue or still merging.
-message FeedMergeLive {}
+message FeedMergeUpdate {}
 
-// Reached an end: when, and what happened. `ended_at_ms` lives HERE because
-// it means nothing while live.
-message FeedMergeSettled {
+// It landed: when, and the commit it produced. `ended_at_ms` lives on the
+// terminal arms because it means nothing while live.
+message FeedMergeSuccess {
   int64 ended_at_ms = 1;
-  oneof outcome {
-    FeedMergeMerged merged = 2;
-    FeedMergeFailed failed = 3;
-    FeedMergeAbandoned abandoned = 4;
+  string commit = 2;
+}
+
+// It did not land: when, and why. THE ARM IS WHY.
+message FeedMergeError {
+  int64 ended_at_ms = 1;
+  oneof reason {
+    FeedMergeFailed failed = 2;
+    FeedMergeAbandoned abandoned = 3;
   }
 }
-
-// It landed; the head shows the commit it produced.
-message FeedMergeMerged {
-  string commit = 1;
-}
-
 // The run gave up; a resolved sentence for the collapsed line.
 message FeedMergeFailed {
   string summary = 1;
 }
-
 // Taken off the queue before it ever reached the front.
 message FeedMergeAbandoned {}
 
@@ -756,20 +791,22 @@ message FeedMergePhase {
   // The tab's label, resolved by the daemon, round number included
   // ("conflicts (2)"). The client counts nothing.
   FeedMergePhaseLabel label = 1;
-  // THE ARM IS THE BADGE. Monotonic: live once, settled once, never reopened
-  // — a repeat of this work is a new tab, not this one going live again.
-  oneof state {
-    FeedMergePhaseLive live = 2;
-    FeedMergePhaseSettled settled = 3;
+  // THE ARM IS THE BADGE. Monotonic: update once, then success or error, never
+  // reopened — a repeat of this work is a new tab, not this one going live
+  // again.
+  oneof result {
+    FeedMergePhaseUpdate update = 2;
+    FeedMergePhaseSuccess success = 3;
+    FeedMergePhaseError error = 4;
   }
   // THE ARM IS WHAT THIS PHASE IS, and carries the evidence that phase has.
   oneof kind {
-    FeedMergePhaseQueue queue = 4;
-    FeedMergePhaseRebasing rebasing = 5;
-    FeedMergePhaseResolving resolving = 6;
-    FeedMergePhaseBuilding building = 7;
-    FeedMergePhaseTesting testing = 8;
-    FeedMergePhaseLanding landing = 9;
+    FeedMergePhaseQueue queue = 5;
+    FeedMergePhaseRebasing rebasing = 6;
+    FeedMergePhaseResolving resolving = 7;
+    FeedMergePhaseBuilding building = 8;
+    FeedMergePhaseTesting testing = 9;
+    FeedMergePhaseLanding landing = 10;
   }
 }
 
@@ -779,26 +816,19 @@ message FeedMergePhaseLabel {
 }
 
 // This phase is the one running.
-message FeedMergePhaseLive {}
+message FeedMergePhaseUpdate {}
 
-// This phase finished.
-message FeedMergePhaseSettled {
+// Finished cleanly: when, and the badge's summary when there is one ("3
+// files", "0844824").
+message FeedMergePhaseSuccess {
   int64 ended_at_ms = 1;
-  oneof outcome {
-    FeedMergePhaseSucceeded succeeded = 2;
-    FeedMergePhaseFailed failed = 3;
-  }
+  string summary = 2;
 }
 
-// Finished cleanly; the tab's badge shows this summary when there is one
-// ("3 files", "0844824").
-message FeedMergePhaseSucceeded {
-  string summary = 1;
-}
-
-// Finished badly; a resolved sentence ("3 tests still failing").
-message FeedMergePhaseFailed {
-  string summary = 1;
+// Finished badly: when, and a resolved sentence ("3 tests still failing").
+message FeedMergePhaseError {
+  int64 ended_at_ms = 1;
+  string summary = 2;
 }
 
 // ==========================================================================
@@ -922,7 +952,6 @@ message FeedMergePhaseLanding {
 message FeedMergePhaseRowCount {
   int32 count = 1;
 }
-message FeedPreview {}
 
 // ==========================================================================
 // PENDING — old bodies, verbatim, judged one kind at a time.
