@@ -114,6 +114,31 @@ that transport.
 
 ## Landed changes
 
+### COMMAND PANELS section dissolves into the feed's SubmitPrompt; the endpoint lands (the first agentrepl.v1 RPC)
+
+**The user's model.** "The client sends normal user requests, and the daemon
+MIGHT respond with a 'this is a programmatically handled command' message —
+the webapp shouldn't know what's programmatically handled; that's up to the
+daemon, transparently." So RunCommandPanel never exists, the recognition
+table lives only in the daemon, and the SECTION LIST DROPS TO SIX: feed,
+sidebar, topbar, footer, daemon-hold tray, host.
+
+**What landed ("looks good").** `endpoint_submit_prompt.proto` + the first
+rpc on the empty service. SubmitPromptRequest { UserSaid }; response
+result { success | error }; success outcome { turn { TurnId } | command_panel
+{ oneof panel { frontend.v1.StatusPanelView status } } } — both ANSWERS per
+the domain-outcome rule; a HELD prompt is a `turn` success (the tray shows
+the hold, not an error). agentrepl.v1 composing frontend.v1 is the
+composition rule in force. The error arm set is DELIBERATELY EMPTY until this
+endpoint's 3c turn (derived from the daemon's real refusal sites, spelled per
+3b). Deliberately absent: a client idempotency key (3b question), workspace
+(the connection's), any echo of the prompt (the feed pushes the row).
+
+**Consequences.** A new panel command (/context, /login) is a new panel arm
+deployed daemon-side; old clients fail to match loudly instead of mis-sending
+it as a prompt. StatusPanelView stays a frontend.v1 component; only its
+transport is settled (unary, in the submit response — no stream, no fetch).
+
 ### Stage 3, DAEMON-HOLD TRAY section: three RPCs
 
 **Settled ("looks good").**
