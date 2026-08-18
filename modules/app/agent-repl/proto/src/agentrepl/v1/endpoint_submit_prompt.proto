@@ -1,0 +1,67 @@
+// endpoint_submit_prompt.proto — SubmitPrompt: the composer's submission,
+// verbatim. FEED section. The client does NOT recognize slash commands —
+// recognition is the daemon's, transparently: the success oneof is where the
+// answer forks (a prompt's minted turn, or a programmatically handled
+// command's panel).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "conversation/v1/turn.proto";
+import "conversation/v1/user.proto";
+import "frontend/v1/status_panel.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// What the user typed, submitted whole.
+message SubmitPromptRequest {
+  // The composed prompt — one canonical form client → daemon → tray → shim →
+  // record (a held prompt IS a UserSaid).
+  conversation.v1.UserSaid said = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message SubmitPromptResponse {
+  oneof result {
+    SubmitPromptSuccess success = 1;
+    SubmitPromptError error = 2;
+  }
+}
+
+// The submission was accepted. THE ARM IS WHAT THE SUBMISSION WAS — both are
+// ANSWERS, never failures.
+message SubmitPromptSuccess {
+  oneof outcome {
+    // It is a prompt: the daemon minted the turn (delivered now or held — a
+    // hold is visible in the tray, not an error here).
+    SubmitPromptTurn turn = 1;
+    // It is a programmatically handled command: here is its panel, resolved.
+    SubmitPromptCommandPanel command_panel = 2;
+  }
+}
+
+// The minted turn — what a client matches against FeedRow.turn to find its
+// own prompt. Nothing else returns here: every visible effect arrives on the
+// component streams.
+message SubmitPromptTurn {
+  conversation.v1.TurnId turn = 1;
+}
+
+// The recognized command's panel. THE ARM IS WHICH COMMAND was recognized; a
+// new programmatically handled command is a new arm, deployed daemon-side —
+// clients render the arm and know no command names.
+message SubmitPromptCommandPanel {
+  oneof panel {
+    frontend.v1.StatusPanelView status = 1;
+  }
+}
+
+// The submission was refused. ARM SET DERIVED, NOT INVENTED: filled at this
+// endpoint's 3c turn from the daemon's real refusal sites, spelled per the
+// 3b conventions.
+message SubmitPromptError {
+  oneof reason {
+    // (empty until 3c: e.g. no session, merge lease held, drain refusing.)
+  }
+}
