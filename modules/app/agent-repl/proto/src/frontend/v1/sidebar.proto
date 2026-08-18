@@ -50,27 +50,18 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // Always whole, never a delta — the model is small, so a full replace makes a
 // partially-applied roster unrepresentable.
 message WorkspaceRoster {
-  // The active grouping. THE SET ARM IS THE GROUPING — the rows of the
-  // inactive grouping are simply absent rather than carried and ignored.
-  oneof view {
-    // Group by repository: the default, one section per repo.
-    RosterRepositoryView repository = 1;
-    // Group by task: one section per task, workspaces filed under the task
-    // they serve.
-    RosterTaskView task = 2;
-  }
-  // Workspaces whose merge has settled, hoisted out of the grouping above and
-  // rendered under BOTH views: that they are done is the interesting fact.
+  // BOTH groupings, fully resolved. WHICH ONE IS DRAWN is webview-local
+  // preference (stage-3 ruling): the client shows one pane and hides the
+  // other — a selection between two resolved views, exactly as folding hides
+  // rows, never a derivation.
+  RosterRepositoryView repository = 1;
+  RosterTaskView task = 2;
+  // Workspaces whose merge has settled, hoisted out of the groupings above
+  // and rendered under BOTH: that they are done is the interesting fact.
   RosterMergedSection recently_merged = 3;
   // The selected workspace — the last SelectWorkspace the daemon received.
   // UNSET when there is none.
   RosterCurrentWorkspace current = 4;
-  // The keyboard-navigation cursor. Distinct from `current`: the cursor moves
-  // through the roster without switching workspaces. UNSET when none.
-  //
-  // SUPPLIED BY A STAGE-3a RPC OR DELETED THERE: the daemon does not observe
-  // the editor's cursor unless an agentrepl.v1 verb tells it.
-  RosterNavCursor nav = 5;
 }
 
 // The selected workspace, by identity. Compared against RosterRowWorkspace,
@@ -80,11 +71,6 @@ message RosterCurrentWorkspace {
   string dir = 1;
 }
 
-// The row the keyboard cursor rests on, by identity.
-message RosterNavCursor {
-  // Absolute worktree dir.
-  string dir = 1;
-}
 
 // The repository grouping's sections, in the order they render.
 message RosterRepositoryView {
@@ -138,20 +124,19 @@ message RosterMergedSection {
   RosterRows rows = 2;
 }
 
-// A section header as repos and the merged section draw it: label + fold.
+// A section header as repos and the merged section draw it. Fold state is
+// WEBVIEW-LOCAL (stage-3 ruling) and is no element of this view.
 message RosterSectionHeader {
   RosterLabel label = 1;
-  RosterFold folded = 2;
 }
 
-// A task section's header: label + fold + the task's done check. Its own
-// message because the done axis exists ONLY for tasks — a repository is never
+// A task section's header: label + the task's done check. Its own message
+// because the done axis exists ONLY for tasks — a repository is never
 // "done", and a shared header with a done field would carry a value that
 // means nothing there.
 message RosterTaskSectionHeader {
   RosterLabel label = 1;
-  RosterFold folded = 2;
-  RosterTaskDone done = 3;
+  RosterTaskDone done = 2;
 }
 
 // A section's display label. DISPLAY ONLY, never the identity: the repo key
@@ -160,15 +145,6 @@ message RosterLabel {
   string text = 1;
 }
 
-// A section's fold toggle. A folded section STILL CARRIES its rows — folding
-// is a display state, so the client hides the rows rather than the resolver
-// omitting them, and unfolding needs no republish.
-//
-// FOLD STATE IS UI PREFERENCE. Carried so the resolver, not each client,
-// decides; supplied by a stage-3a RPC or made webview-local there.
-message RosterFold {
-  bool folded = 1;
-}
 
 // A task's done check.
 message RosterTaskDone {

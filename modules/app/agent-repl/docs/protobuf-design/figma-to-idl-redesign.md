@@ -114,6 +114,37 @@ that transport.
 
 ## Landed changes
 
+### Stage 3, SIDEBAR section: the RPC inventory — nine RPCs; roster UI prefs go webview-local (stage-2 sidebar shape reopened by name)
+
+**Settled.** Names and purposes only; shapes are 3c:
+
+1. WatchWorkspaceRoster — the GLOBAL roster stream (the one stream with no
+   workspace). Renamed from WatchRoster by the user.
+2. CreateWorkspace, 3. OpenWorkspace, 4. CloseWorkspace, 5. MergeWorkspace,
+   6. HibernateWorkspace — one verb each; EACH IS ONE RPC SHAPE FOR BOTH
+   CALLERS (the webapp's roster clicks AND Emacs — Emacs speaks the same
+   messages as protojson over its transport; Connect serves JSON natively, so
+   one schema, two codecs). The user's instruction.
+7. ReviveWorkspace, 8. RestartWorkspace — renamed from *Session by the user:
+   the workspace is the address; one live session per workspace is the rule.
+9. (none) — SetWorkspaceRosterView NEVER EXISTS, see below.
+
+**Roster UI preferences: WEBVIEW-LOCAL (the user's selection, recommended).**
+The stage-2 sidebar shape is REOPENED BY NAME and re-landed: grouping mode,
+section folds and the nav cursor leave WorkspaceRoster. Folds and cursor are
+per-client by nature (a shared fold would fold every webview; the cursor is
+where YOUR keyboard is, and daemon-holding it makes every keystroke a
+round-trip echoed to all webviews). Consequence of local grouping: the roster
+carries BOTH groupings fully resolved (`repository` and `task` as siblings,
+no longer a oneof) and the client draws the pane its local preference picks —
+a selection between resolved views, like folding, never a derivation.
+DELETED: RosterNavCursor, RosterFold, WorkspaceRoster.nav, the view oneof;
+headers lose their fold element (task header renumbers).
+
+**Flagged, still open for this section's 3c turn:** whether
+delete-session-without-close is real (the old CreateSession/DeleteSession
+pair), or CloseWorkspace is the only teardown.
+
 ### Stage 3, FEED section: the RPC inventory — five RPCs
 
 **Settled ("okay i'm sold").** Names and purposes only; shapes are 3c:
