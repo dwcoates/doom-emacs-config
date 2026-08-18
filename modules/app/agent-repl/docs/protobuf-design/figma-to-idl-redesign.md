@@ -114,6 +114,32 @@ that transport.
 
 ## Landed changes
 
+### `feed.proto`: kind suffixes dropped (`FeedUser`, `FeedAgent`, `FeedDetached`, `FeedTool`, …); kind ④ `FeedPermission`
+
+**Naming ruling.** The user asked what a "card" and a "bubble" ARE at the UI
+level. Answer: chrome patterns the orchestrator named (line / boxed panel /
+collapsible container) — real as CSS, not schema facts, and already
+misapplied once (`FeedApiFailureRow` would draw with the failure card's
+chrome). Dropped: every top-level kind is the family name (`FeedUser`,
+`FeedAgent`, `FeedDetached`, `FeedPermission`, `FeedFailure`,
+`FeedApiFailure`, `FeedContextCut`, `FeedMerge`, `FeedPreview`; `FeedToolCard`
+→ `FeedTool`), children already family-prefixed. If two kinds ever share a
+DRAWN frame element with props, it becomes an element message they embed —
+schema when there is a box, never a suffix.
+
+**Why some kinds have headline/arguments and others not** (the user's
+question): the differentiator is WHAT the element is about — `FeedTool`,
+`FeedPermission` and (reduced) `FeedDetached`'s head draw a TOOL CALL, so
+each has its own headline/arguments wrappers filled by the daemon from the
+same origin (per-component copies, not a shared type; a `FeedCard` union
+was considered and refused — the tool card is nested in the agent row, not
+a top-level row, and an intermediate node must be a drawn box).
+
+**What changed.** `FeedPermission { ToolCallId call; FeedPermissionHeadline;
+FeedPermissionArguments {lines}; oneof state { open {} | answered { oneof
+answer { allowed_once | allowed_for_session | denied{reason} | abandoned };
+at_ms } } }`. Buttons are `agentrepl.v1` requests (stage 3).
+
 ### `feed.proto` kind ③: `FeedDetachedBubble`; child naming settled as FAMILY prefix
 
 **Naming (the user's ruling, option b).** Children of a row kind take the

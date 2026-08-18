@@ -50,7 +50,7 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // One row of the feed. THE ARM IS THE KIND.
 message FeedRow {
   // The row's identity — the record's MessageId, or a daemon-minted one for a
-  // synthesized row (failure card, merge bubble, preview). The upsert key: a
+  // synthesized row (failure, merge, preview). The upsert key: a
   // later push with the same id REPLACES this row whole.
   conversation.v1.MessageId id = 1;
   // The containing bubble's id, when nested (inside a detached bubble or the
@@ -61,15 +61,15 @@ message FeedRow {
   // row that belongs to no turn (a context-cut divider, a boot failure).
   conversation.v1.TurnId turn = 3;
   oneof row {
-    FeedUserRow user = 4;
-    FeedAgentRow agent = 5;
-    FeedDetachedBubble detached = 6;
-    FeedPermissionCard permission = 7;
-    FeedFailureCard failure = 8;
-    FeedApiFailureRow api_failure = 9;
-    FeedContextCutDivider context_cut = 10;
-    FeedMergeBubble merge = 11;
-    FeedTypingPreview preview = 12;
+    FeedUser user = 4;
+    FeedAgent agent = 5;
+    FeedDetached detached = 6;
+    FeedPermission permission = 7;
+    FeedFailure failure = 8;
+    FeedApiFailure api_failure = 9;
+    FeedContextCut context_cut = 10;
+    FeedMerge merge = 11;
+    FeedPreview preview = 12;
   }
 }
 
@@ -124,7 +124,7 @@ message FeedBreadcrumb {
 //   │  You  ▏fix the flaky reconnect test      │
 //   │       ▏[image: screenshot.png]           │
 //         author  body (blocks: text · image · unsupported)
-message FeedUserRow {
+message FeedUser {
   // The author label ("You" — or the spawning agent's name under a bubble).
   FeedUserAuthor author = 1;
   // The blocks the person composed.
@@ -187,7 +187,7 @@ message FeedUnsupportedBlock {
 // canonical form; this row is the daemon's projection of it for drawing —
 // including each tool card's per-tool presentation, which the daemon derives
 // from ToolCallBlock.call ONCE, so no client knows that Bash has a `command`.
-message FeedAgentRow {
+message FeedAgent {
   FeedAgentHead head = 1;
   // In production order.
   repeated FeedAgentBlock blocks = 2;
@@ -220,7 +220,7 @@ message FeedAgentBlock {
   oneof block {
     FeedTextBlock prose = 1;
     FeedAgentThinking thinking = 2;
-    FeedToolCard tool = 3;
+    FeedTool tool = 3;
   }
 }
 
@@ -239,7 +239,7 @@ message FeedAgentThinkingShown {
 message FeedAgentThinkingRedacted {}
 
 // A tool card: what was called, its arguments (folded), and how it went.
-message FeedToolCard {
+message FeedTool {
   // The join key to the permission card, the detached bubble and the record.
   conversation.v1.ToolCallId call = 1;
   FeedToolHeadline headline = 2;
@@ -337,7 +337,7 @@ message FeedAgentStopUnsupported {
 //   │  ⛓ workflow  review-changes                 2:10 ● live  ▸ 5 steps│  workflow: journal steps
 //   │  ✎ skill  create-or-update-pr                     ✓ done  ▸ body  │  skill: SKILL.md + nested rows
 //   │  ⚙ Explore  "…"                        1:12 ✕ failed: timed out    │  settled: outcome replaces liveness
-message FeedDetachedBubble {
+message FeedDetached {
   FeedDetachedHead head = 1;
   // THE ARM IS THE KIND — what the bubble contains and how it is drawn.
   oneof body {
@@ -467,12 +467,70 @@ message FeedDetachedStepFailed {}
 message FeedDetachedSkillDoc {
   string markdown = 1;
 }
-message FeedPermissionCard {}
-message FeedFailureCard {}
-message FeedApiFailureRow {}
-message FeedContextCutDivider {}
-message FeedMergeBubble {}
-message FeedTypingPreview {}
+// ④ A permission the agent asked for, and how it was answered. Joined to its
+// tool card by the call id; draws the same tool-call presentation with ITS
+// OWN wrappers (two components, one origin, per-component copies).
+//
+//   │  ? Permission   Bash  $ git push --force origin main         │  headline
+//   │    ▸ arguments                                               │  arguments fold
+//   │    [allow once] [allow for session] [deny…]                  │  answer bar (open)
+//   │  ✓ allowed for session · 14:02                               │  answered: verdict line replaces the bar
+message FeedPermission {
+  conversation.v1.ToolCallId call = 1;
+  FeedPermissionHeadline headline = 2;
+  FeedPermissionArguments arguments = 3;
+  // THE ARM IS THE STATE.
+  oneof state {
+    FeedPermissionOpen open = 4;
+    FeedPermissionAnswered answered = 5;
+  }
+}
+
+// The call's headline, resolved by the daemon (icon · title · subtitle).
+message FeedPermissionHeadline {
+  string icon = 1;
+  string title = 2;
+  string subtitle = 3;
+}
+
+// The call's arguments, folded: label/value lines the daemon composed.
+message FeedPermissionArguments {
+  repeated FeedPermissionArgument lines = 1;
+}
+message FeedPermissionArgument {
+  string label = 1;
+  string value = 2;
+}
+
+// Awaiting the user: the answer bar is drawn. Its buttons send agentrepl.v1
+// requests; nothing about them is a field here.
+message FeedPermissionOpen {}
+
+// Answered. THE ARM IS THE ANSWER.
+message FeedPermissionAnswered {
+  oneof answer {
+    FeedPermissionAllowedOnce allowed_once = 1;
+    FeedPermissionAllowedForSession allowed_for_session = 2;
+    FeedPermissionDenied denied = 3;
+    // The question went away without an answer — the turn ended, the session
+    // stopped.
+    FeedPermissionAbandoned abandoned = 4;
+  }
+  // When it was answered (or abandoned), epoch ms.
+  int64 at_ms = 5;
+}
+message FeedPermissionAllowedOnce {}
+message FeedPermissionAllowedForSession {}
+message FeedPermissionDenied {
+  // What the user said, when they said anything.
+  string reason = 1;
+}
+message FeedPermissionAbandoned {}
+message FeedFailure {}
+message FeedApiFailure {}
+message FeedContextCut {}
+message FeedMerge {}
+message FeedPreview {}
 
 // ==========================================================================
 // PENDING — old bodies, verbatim, judged one kind at a time.
