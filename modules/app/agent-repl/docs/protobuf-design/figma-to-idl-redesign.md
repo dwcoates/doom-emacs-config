@@ -114,6 +114,26 @@ that transport.
 
 ## Landed changes
 
+### `token_breakdown.proto` folds into `topbar.proto`
+
+**What changed.** The file is deleted; `TokenBreakdownView`, `TokenBreakdownSection`,
+`TokenBreakdownHeading`, `TokenBreakdownRow` move verbatim into `topbar.proto`
+under a banner. The banner states the uncoupling: the breakdown is the
+SESSION's accounting, opened by the topbar; the footer's turn-level tokens are
+a different fact and a different component, never a shared type.
+
+**Why, in the user's terms.** "Token_breakdown should be in topbar" — the menu
+is the topbar's subcomponent, so its messages live in the topbar's component
+file; a separate file wrongly presented it as a sibling component. The
+orchestrator's suggestion to re-home it under the footer is RETRACTED: the
+topbar's token figure is the SESSION's, the footer's is the TURN's — different
+values, architecturally uncoupled (checked: TokenBreakdownView's only consumer
+is the topbar menu; the footer already has its own FooterTokens* messages).
+
+**Consequences.** Stage-3 sections: no token-breakdown section; its delivery
+(pushed vs fetched on open) is settled in the TOPBAR section's turn. If the
+footer ever grows a turn-breakdown menu it gets footer.proto-family messages.
+
 ### `feed.proto`: `FeedApiFailure` folds into `FeedAgent.error` — SIX row kinds
 
 **What changed.** `FeedApiFailure*` deleted; `FeedRow` is user, agent,
