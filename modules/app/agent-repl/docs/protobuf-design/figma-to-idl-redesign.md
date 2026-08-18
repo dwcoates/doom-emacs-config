@@ -114,6 +114,30 @@ that transport.
 
 ## Landed changes
 
+### `feed.proto` kind ②: `FeedAgentRow` — head, blocks (prose · thinking · tool card), stop notice
+
+**What changed.** `FeedAgentRow { FeedAgentHead {author, usage stamp};
+repeated FeedAgentBlock { prose | thinking {shown{text,tokens} | redacted} |
+FeedToolCard }; FeedAgentStopNotice {max_tokens|interrupted|refusal|
+unsupported} }`. `FeedToolCard { ToolCallId call; FeedToolCardHeadline
+{icon,title,subtitle}; FeedToolCardArguments {lines}; oneof outcome {
+running | returned {succeeded{blocks} | failed{blocks}} | detached {bubble
+MessageId} | denied {reason} } }`. DELETED old bodies: `AgentEmission`,
+`AgentResponse`, `ToolCallVerdict`, `ResponseUsageStamp`,
+`AgentToolOutcome`.
+
+**Why, in the user's terms.** "Sounds good." A resolved element under the
+precedence principle — this is the reopened "carries `AgentSaid` whole"
+decision, decided: NOT embedded. The per-tool headline/arguments are the
+daemon's projection of `ToolCallBlock.call`, so the "Bash has a `command`"
+knowledge lives once, in the resolver. `ToolCallVerdict.spawned_message_id`
+became the `detached {bubble}` outcome; the stop notice draws only stops
+worth drawing.
+
+**Consequences.** `daemon/internal/frontend/translate.go`'s re-encoding
+becomes the row resolver; the webapp's `render.ts` per-tool branches
+(`render.ts:1691-1740`) are deleted — it draws headline/arguments verbatim.
+
 ### `feed.proto` kind ①: `FeedUserRow`, and the feed's drawn block vocabulary
 
 **What changed.** `FeedUserRow { FeedUserAuthor author {label};
