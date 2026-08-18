@@ -242,20 +242,20 @@ message FeedAgentThinkingRedacted {}
 message FeedToolCard {
   // The join key to the permission card, the detached bubble and the record.
   conversation.v1.ToolCallId call = 1;
-  FeedToolCardHeadline headline = 2;
-  FeedToolCardArguments arguments = 3;
+  FeedToolHeadline headline = 2;
+  FeedToolArguments arguments = 3;
   // THE ARM IS THE OUTCOME.
   oneof outcome {
-    FeedToolCardRunning running = 4;
-    FeedToolCardReturned returned = 5;
-    FeedToolCardDetached detached = 6;
-    FeedToolCardDenied denied = 7;
+    FeedToolRunning running = 4;
+    FeedToolReturned returned = 5;
+    FeedToolDetached detached = 6;
+    FeedToolDenied denied = 7;
   }
 }
 
 // The card's headline: per-tool presentation the DAEMON resolves ("Read ·
 // lisp/frontend.el:840-880", "Bash · $ go test ./...").
-message FeedToolCardHeadline {
+message FeedToolHeadline {
   // A glyph name from the shared vocabulary ("read", "bash", "agent", …).
   string icon = 1;
   string title = 2;
@@ -265,20 +265,20 @@ message FeedToolCardHeadline {
 
 // The arguments, folded open on demand: label/value lines the daemon composed
 // from the call's arm; a value may be long (a Write's content, a Bash command).
-message FeedToolCardArguments {
-  repeated FeedToolCardArgument lines = 1;
+message FeedToolArguments {
+  repeated FeedToolArgument lines = 1;
 }
-message FeedToolCardArgument {
+message FeedToolArgument {
   string label = 1;
   string value = 2;
 }
 
 // The tool has not returned yet.
-message FeedToolCardRunning {}
+message FeedToolRunning {}
 
 // The tool returned. THE ARM IS WHETHER IT SUCCEEDED; each carries its own
 // drawn result blocks.
-message FeedToolCardReturned {
+message FeedToolReturned {
   oneof result {
     FeedToolResultSucceeded succeeded = 1;
     FeedToolResultFailed failed = 2;
@@ -300,12 +300,12 @@ message FeedToolResultBlock {
 }
 
 // The call detached into work of its own; the card links to its bubble.
-message FeedToolCardDetached {
+message FeedToolDetached {
   conversation.v1.MessageId bubble = 1;
 }
 
 // The call was denied by the user.
-message FeedToolCardDenied {
+message FeedToolDenied {
   // What the user said, when they said anything.
   string reason = 1;
 }
@@ -325,7 +325,148 @@ message FeedAgentStopRefusal {}
 message FeedAgentStopUnsupported {
   string reason = 1;
 }
-message FeedDetachedBubble {}
+// ③ Work that detached — a subagent, a background shell, a workflow, a skill's
+// own window — as a collapsible BUBBLE: a head, and a body by kind. Its
+// nested rows are ordinary FeedRows whose `parent` is this bubble, paged
+// through the same page and breadcrumbs as the feed; the bubble carries only
+// their count.
+//
+//   │  ⚙ Explore  "find the roster resolver"      0:31 ● live  ▸ 3 msgs │  head
+//   │    │  You  ▏find the roster resolver…                              │  nested rows
+//   │  $ bash  go test ./...                      1:04 ● live  ▸ output │  shell: the spool
+//   │  ⛓ workflow  review-changes                 2:10 ● live  ▸ 5 steps│  workflow: journal steps
+//   │  ✎ skill  create-or-update-pr                     ✓ done  ▸ body  │  skill: SKILL.md + nested rows
+//   │  ⚙ Explore  "…"                        1:12 ✕ failed: timed out    │  settled: outcome replaces liveness
+message FeedDetachedBubble {
+  FeedDetachedHead head = 1;
+  // THE ARM IS THE KIND — what the bubble contains and how it is drawn.
+  oneof body {
+    FeedDetachedAgentBody agent = 2;
+    FeedDetachedShellBody shell = 3;
+    FeedDetachedWorkflowBody workflow = 4;
+    FeedDetachedSkillBody skill = 5;
+    FeedDetachedUnmodeledBody unmodeled = 6;
+  }
+}
+
+// The bubble's head line.
+message FeedDetachedHead {
+  FeedDetachedGlyph glyph = 1;
+  FeedDetachedLabel label = 2;
+  FeedDetachedRuntime runtime = 3;
+  // THE ARM IS THE STATE: live, or settled with its outcome.
+  oneof state {
+    FeedDetachedLive live = 4;
+    FeedDetachedSettled settled = 5;
+  }
+  FeedDetachedFold fold = 6;
+}
+
+// The kind glyph, a name from the shared vocabulary ("agent", "bash",
+// "workflow", "skill", "tool").
+message FeedDetachedGlyph {
+  string icon = 1;
+}
+
+// The label, resolved by the daemon from the origin call (the agent's
+// description, the shell's command, the workflow's name, the skill's name).
+message FeedDetachedLabel {
+  string text = 1;
+}
+
+// When it started, and when it ended (unset while live) — the head's clock.
+message FeedDetachedRuntime {
+  int64 started_at_ms = 1;
+  optional int64 ended_at_ms = 2;
+}
+
+// Still running.
+message FeedDetachedLive {}
+
+// Reached an end: the outcome, and the process exit when it was a process.
+message FeedDetachedSettled {
+  oneof outcome {
+    FeedDetachedSucceeded succeeded = 1;
+    FeedDetachedFailed failed = 2;
+    FeedDetachedCancelled cancelled = 3;
+    FeedDetachedLost lost = 4;
+  }
+  // Unset for work that never had an exit status of its own.
+  FeedDetachedExit exit = 5;
+}
+message FeedDetachedSucceeded {
+  // The collapsed line's summary, resolved.
+  string summary = 1;
+}
+message FeedDetachedFailed {
+  string summary = 1;
+}
+message FeedDetachedCancelled {}
+// We lost sight of it — a resolved sentence for the collapsed line ("the
+// transcript vanished", "went silent for 10m").
+message FeedDetachedLost {
+  string how = 1;
+}
+// The process's exit code, exactly as reported ("exited 137").
+message FeedDetachedExit {
+  int32 code = 1;
+}
+
+// The ▸/▾ state. UI preference the daemon holds; see the roster's fold.
+message FeedDetachedFold {
+  bool folded = 1;
+}
+
+// A subagent: its rows are nested FeedRows; the bubble carries their count.
+message FeedDetachedAgentBody {
+  FeedDetachedRowCount rows = 1;
+}
+// A background shell: its output spool, resolved whole (a row upsert
+// replaces it; there are no append deltas — the row is the unit).
+message FeedDetachedShellBody {
+  FeedDetachedSpool output = 1;
+}
+// A workflow: its journal steps.
+message FeedDetachedWorkflowBody {
+  repeated FeedDetachedStep steps = 1;
+}
+// A skill's window: its SKILL.md body, and its nested rows' count.
+message FeedDetachedSkillBody {
+  FeedDetachedSkillDoc body = 1;
+  FeedDetachedRowCount rows = 2;
+}
+// An unmodeled tool that detached: rows only.
+message FeedDetachedUnmodeledBody {
+  FeedDetachedRowCount rows = 1;
+}
+
+// How many nested rows the bubble holds ("▸ 3 msgs").
+message FeedDetachedRowCount {
+  int64 count = 1;
+}
+// A shell's output spool. `truncated` when the daemon capped what it sends
+// and the rest is reachable by paging inside the bubble.
+message FeedDetachedSpool {
+  string text = 1;
+  bool truncated = 2;
+}
+// One journal step. THE ARM IS THE STATE.
+message FeedDetachedStep {
+  string label = 1;
+  string detail = 2;
+  oneof status {
+    FeedDetachedStepRunning running = 3;
+    FeedDetachedStepDone done = 4;
+    FeedDetachedStepFailed failed = 5;
+  }
+}
+message FeedDetachedStepRunning {}
+message FeedDetachedStepDone {}
+message FeedDetachedStepFailed {}
+// The skill file's body, markdown, drawn as a document.
+message FeedDetachedSkillDoc {
+  string markdown = 1;
+}
 message FeedPermissionCard {}
 message FeedFailureCard {}
 message FeedApiFailureRow {}
@@ -371,235 +512,6 @@ message FailureCardView {
 message FailureCardResolved {
   // When it closed, unix millis.
   int64 resolved_at_ms = 1;
-}
-
-// One piece of detached work, as the payload of the Message that IS it.
-message DetachedWork {
-  // THERE IS ONE ID SPACE: the containing Message's uuid. A routing handle of
-  // this payload's own would be a second id space that had to be bridged to the
-  // first, and the bridge is pure cost.
-  //
-  // THERE IS ONE CONTAINMENT TREE, and it is the message tree. A parent pointer
-  // for detached work would be a second tree walking only detached work, which
-  // could disagree with the real one. Containment is stated exactly once, on
-  // frontend.v1.Message.parent_message_id.
-  //
-  // WHAT A PRODUCER OBSERVED IS SPELLED ONCE, WHERE IT WAS OBSERVED. The
-  // originating tool call and the label live inside `started`, in the producer's
-  // own words; this surface restates neither, so there is nothing here to drift
-  // against.
-  //
-  // THIS SURFACE TRAVELS AS PROTOJSON, so a field NAME is the wire token, not
-  // just documentation — renaming a field breaks the wire exactly as renumbering
-  // it would.
-
-  // THE PRODUCER'S OWN RECORD of the detachment, embedded whole rather than
-  // copied out field by field. Everything a producer observed about the work
-  // starting — which tool call spawned it, what it is called, what kind of thing
-  // it is — reaches the frontend exactly as it was recorded, so this surface has
-  // no second spelling of those facts to fall out of step with.
-  conversation.v1.DetachedWorkStarted started = 1;
-  // When the work was launched, unix millis.
-  int64 started_at_ms = 2;
-  // Live or settled, and with what outcome. See DetachedWorkLiveness.
-  DetachedWorkLiveness liveness = 3;
-  // WHICH KIND OF WORK THIS IS, IS STATED EXACTLY ONCE: `started.kind`, a
-  // conversation.v1.DetachedWorkKind. This surface carries no per-kind arm of
-  // its own, because an arm set to a kind is the same word said a second time in
-  // a second spelling (`journal` here against `workflow` there), which is a drift
-  // opportunity for no gain. Every kind — agent, workflow, shell, unclassified,
-  // merge, skill — is a DetachedWorkKind value and nothing else.
-  //
-  // CONTAINED CONTENT IS NOT CARRIED HERE. A detached agent's conversation, a
-  // merge run's, a skill window's, a workflow's steps are reached by PAGING:
-  // frontend.v1.PageScopeInside naming THIS message's id walks the records whose
-  // parent chain reaches THIS message's id, at any depth, with the same
-  // command and renderer the feed uses.
-
-  // The workspace this work runs under — the same key every workspace-scoped
-  // frame carries. It exists so a snapshot can scope detached work to the
-  // client's workspace exactly as it scopes every other per-workspace family;
-  // deltas already carry the key on their envelope (DetachedWorkDelta.workspace),
-  // and the two are always equal.
-  string workspace = 4;
-}
-
-// Live-or-settled, expressed as arms so that "settled" and "settled with what
-// outcome" are one indivisible fact. Settled work with no outcome is
-// unrepresentable.
-message DetachedWorkLiveness {
-  oneof state {
-    DetachedWorkLive live = 1;
-    DetachedWorkSettled settled = 2;
-  }
-}
-
-// The work is still running.
-message DetachedWorkLive {
-  // When the daemon last saw this work produce anything, unix millis. 0 means
-  // it has produced nothing since launch. It supports a "quiet for a while"
-  // affordance and is NOT a liveness verdict: a silent agent is still a live
-  // agent.
-  int64 last_activity_ms = 1;
-}
-
-// The work has finished, one way or another.
-message DetachedWorkSettled {
-  // THE OUTCOME IS THE PRODUCER'S WORD, and this surface does not get a second
-  // one. How the work ended, and — for work that was a process — the exit status
-  // it left with, are things a producer OBSERVED, so they are stated where they
-  // were observed, in conversation.v1.DetachedWorkEnded. A local re-spelling
-  // could only be a smaller vocabulary: it would lack `lost`, and work whose
-  // ending was never observed would have to be reported as an ending that was.
-
-  // When it finished, unix millis. Daemon bookkeeping: the moment this system
-  // learned of the ending, which is not the moment the work ended.
-  int64 settled_at_ms = 1;
-  // THE PRODUCER'S OWN RECORD of the ending, embedded whole: which outcome it
-  // reached, and — for work that was a process — the exit status it left with.
-  // A consumer reads the verdict and the evidence from one place, in the
-  // vocabulary the producer wrote them in.
-  conversation.v1.DetachedWorkEnded ended = 2;
-  // TODO(respelling): `killed` has NO counterpart in
-  // conversation.v1.DetachedWorkEnded and so was not folded into `ended`. Its
-  // nearest neighbour, conversation.v1.DetachedCancelled, is empty and cannot
-  // carry `reason` — the attribution of WHO stopped the work. Deleting this
-  // would delete that attribution off the wire silently. It is a plain field
-  // rather than a oneof arm now that its siblings live in `ended`; when set, it
-  // annotates the `cancelled` arm and never contradicts it.
-  DetachedWorkOutcomeKilled killed = 3;
-}
-
-// Stopped from outside before it finished: an explicit stop, a cancellation,
-// a session teardown. Distinct from error because the work did not fail — it
-// was not allowed to conclude.
-message DetachedWorkOutcomeKilled {
-  // Who or what stopped it, resolved for display. Empty when unattributed.
-  string reason = 1;
-}
-
-// One incremental push to ONE MESSAGE'S detached-work payload: the message id
-// routes it, the arm types it.
-//
-// AN UPDATE, NOT A MESSAGE. It is addressed to a message that already exists
-// and mutates that message's payload in place. It carries no uuid, no lineage
-// and no timestamp of its own, because it is not a thing the feed contains —
-// it is a change to a thing the feed already contains. Promoting each one to a
-// Message would let an agent running for an hour insert a feed row per line,
-// which is exactly what pagination cannot survive.
-//
-// Never a re-send of the whole message either: an agent running for an hour
-// would otherwise re-transmit its entire transcript on every new line.
-message DetachedWorkUpdate {
-  // THIS SURFACE TRAVELS AS PROTOJSON, so the field NAME below is the wire
-  // token: renaming it breaks every producer and consumer of this update.
-
-  // WHICH MESSAGE this lands on — the uuid of a Message whose payload is
-  // DetachedWork. Must name a message the receiver has already opened; an
-  // update for an unknown id is a gap and must be rejected loudly and resynced,
-  // never buffered in the hope its message shows up.
-  string message_id = 1;
-  // WHAT changed. The arm MUST match the work's kind — a journal update
-  // addressed to shell work is a daemon bug and is rejected, not coerced. Only
-  // `liveness` is kind-independent.
-  //
-  // `shell` and `unclassified` are distinct arms carrying the SAME message:
-  // the arm names which kind the update is for, while the payload is one byte
-  // append in both cases. The two kinds differ in what they ARE, not in how
-  // their output arrives, so there is no axis along which a duplicated pair of
-  // append messages could evolve apart.
-  //
-  // `merge` carries the SAME message as `agent` for exactly that reason: a
-  // merge run's emissions arrive precisely as a detached agent's do, so the
-  // arm names the kind while the payload has no axis to evolve apart on.
-  //
-  // TODO(respelling): seven arms carry only FIVE distinct types —
-  // `agent`/`merge` are both DetachedWorkAgentUpdate, and `shell`/`unclassified`
-  // are both DetachedWorkOutputAppend. The arms are therefore typed by the
-  // work's KIND when what an update actually varies by is its SHAPE: emissions,
-  // byte append, journal rows, skill body, liveness. Kind is already stated once
-  // on the message (conversation.v1.DetachedWorkStarted.kind), so restating it
-  // here is the same duplication the `kind` oneof was deleted for. Whether these
-  // collapse to shape-typed arms needs a ruling; this oneof is NOT changed
-  // meanwhile, because its arms route live traffic.
-  oneof update {
-    DetachedWorkAgentUpdate agent = 2;
-    DetachedWorkJournalUpdate journal = 3;
-    DetachedWorkOutputAppend shell = 4;
-    DetachedWorkOutputAppend unclassified = 5;
-    DetachedWorkLivenessUpdate liveness = 6;
-    DetachedWorkAgentUpdate merge = 7;
-    DetachedWorkSkillUpdate skill = 8;
-  }
-}
-
-// New output from a detached agent.
-message DetachedWorkAgentUpdate {
-  // The emissions produced since the last update, in order. THE SAME message
-  // the top-level feed carries — see AgentEmission. A frontend appends these
-  // to the work's emission list and renders them with its ordinary feed
-  // renderers.
-  //
-  // These are EMISSIONS APPENDED TO ONE MESSAGE, not messages of their own: a
-  // detached agent's thousand lines are a thousand additions to one feed row.
-  repeated AgentEmission emissions = 1;
-}
-
-// One incremental push to a skill message. Body resolution and emission
-// appends are different events with different lifetimes, so they are arms
-// rather than co-set fields.
-message DetachedWorkSkillUpdate {
-  oneof update {
-    // The skill file's contents, resolved — the conversation record whole.
-    // Replaces the message's body rather than appending; delivered once in the
-    // ordinary case. WHICH message it lands on is stated once, by the
-    // containing DetachedWorkUpdate.message_id.
-    conversation.v1.SkillBodyResolved body = 1;
-    // Emissions appended to the window, exactly as a detached agent's.
-    DetachedWorkAgentUpdate emissions = 2;
-  }
-}
-
-// New steps in a Workflow run's journal.
-message DetachedWorkJournalUpdate {
-  // Rows logged since the last update, in order.
-  //
-  // Rows are APPEND-ONLY and are never revised in place: a step that starts
-  // running and later completes emits a running row and then a done row, and
-  // the daemon does not rewrite history. A frontend that wants one row per
-  // step collapses them by label; a frontend that wants the log renders them
-  // all. Neither reading is imposed here.
-  //
-  // THE PRODUCER'S OWN STEP RECORD, carried unchanged: the daemon batches which
-  // steps it forwards, it does not restate what a step said.
-  repeated conversation.v1.WorkflowStep rows = 1;
-}
-
-// New bytes on a spool: an APPEND TO ONE MESSAGE'S PAYLOAD.
-//
-// A byte append is emphatically not a message. It has no identity, no lineage
-// and no place of its own in the feed; it is addressed to the message whose
-// spool it extends (DetachedWorkUpdate.message_id) and is applied to that
-// message's accumulating content.
-message DetachedWorkOutputAppend {
-  // AN APPEND CARRIES NO OFFSET, so a lost append cannot be told from a quiet
-  // one: an append that never arrives leaves a silent hole in a transcript that
-  // still looks complete. The durable record is intact and a reload repairs it,
-  // with no signal to the user that a reload is warranted. A per-frame `seq` on
-  // agentrepl.v1.FrontendFrame is the cheaper way to get detection back, and would
-  // cover all three delta streams — ConversationDelta, DetachedWorkDelta and
-  // this one — rather than this one alone, for less than a per-stream cursor
-  // costs.
-
-  // The bytes, verbatim, to append.
-  string text = 1;
-}
-
-// A liveness transition: live to settled, or a settled outcome changing (a
-// running agent that is then killed).
-message DetachedWorkLivenessUpdate {
-  // The work's liveness after the transition.
-  DetachedWorkLiveness liveness = 1;
 }
 
 // The failure is still happening. The card shows its alarm mark and its color.
