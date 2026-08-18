@@ -114,6 +114,27 @@ that transport.
 
 ## Landed changes
 
+### `feed.proto`: `FeedApiFailure` folds into `FeedAgent.error` — SIX row kinds
+
+**What changed.** `FeedApiFailure*` deleted; `FeedRow` is user, agent,
+detached, permission, context_cut, merge (renumbered 4–9).
+`FeedAgentError.reason` gains `api_request_failed { FeedAgentApiFailureMessage
+{text}; FeedAgentApiFailureWhen {at_ms} }` — the vendor's recorded
+`conversation.v1.ApiRequestFailed`, drawn as the failure of the response it
+refused. When the vendor refused before a single token, the row is CREATED BY
+the failure: its id is the `ApiRequestFailed` record's, `partial` is empty,
+the head still names the author.
+
+**Why, in the user's terms.** "FeedApiFailure should be folded into the agent
+oneof, yes" — closing the flag from the previous entry. An API failure IS the
+response failing; a separate row drew one fact as two kinds.
+
+**Consequences.** The daemon's feed resolver keys a refused-before-first-token
+response's row on the `ApiRequestFailed` record id, and on the `AgentSaid`'s
+id otherwise (the two never coexist for one response). No row kind is
+error-only any more; the one-arm kinds are `FeedUser {success}` and
+`FeedContextCut {success}`.
+
 ### `feed.proto`: EVERY row kind carries `oneof result { update | success | error }`; kinds ⑤ `FeedFailure` and ⑨ `FeedPreview` are DELETED; `FailureKind` shrinks to the entry-less residue
 
 **Why, in the user's terms — the conversation, in order.**
