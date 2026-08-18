@@ -114,6 +114,104 @@ that transport.
 
 ## Landed changes
 
+### `feed.proto` kind ⑧: `FeedMerge` — a tabbed phase bubble, the queue as its first tab
+
+**The drawing agreed with the user** (in the kind's comment): a merge bubble
+whose head is the branch line + clock + live/settled, and whose body is a TAB
+STRIP — `queue ✓ │ rebase ✓ │ conflicts ✓ 3 │ tests ● 8/12` — with the
+selected tab's nested rows beneath.
+
+**What changed.** `FeedMerge { FeedMergeHead head; repeated FeedMergePhase
+phases }`. `FeedMergeHead { glyph; label; runtime; oneof state { live |
+settled { ended_at_ms; oneof outcome { merged{commit} | failed{summary} |
+abandoned } } }; fold }`. `FeedMergePhase { FeedMergePhaseLabel label; oneof
+state { live | settled { ended_at_ms; oneof outcome { succeeded{summary} |
+failed{summary} } } }; oneof kind { queue | rebasing{base} |
+resolving{paths, current_path} | building{detail} | testing{suite, progress}
+| landing } }` — every working kind carries a `FeedMergePhaseRowCount`; the
+queue kind carries `FeedMergeQueue { repeated ahead; current; repeated
+behind }` of `FeedMergeQueueEntry { workspace; label; oneof status {
+merging { oneof phase — the same FeedMergePhase* messages } | waiting } }`.
+
+**Why, in the user's terms — the conversation that shaped it, in order.**
+
+- The orchestrator first proposed a merge row modeled like `FeedDetached`
+  (head with `queued`/`running`/`settled`, nested rows). The user: "we haven't
+  actually decided on the merge UI" — waiting in the queue and merging at
+  the head are two different representations. The orchestrator then argued
+  the WAITING half was live state, not conversation, and belonged in a
+  tray; the user DISAGREED: "the waiting half is part of the conversation.
+  it's analogous to the other async bubbles (when running async bash you're
+  'waiting' for the output, which is populated in the bubble)". One bubble
+  for both. RETRACTED and recorded: the tray argument was wrong on the
+  bubble analogy — a bubble's early life is exactly "waiting".
+- `merging` "should most certainly not carry nothing" — conflict resolution
+  is agent emission under the hood, so the bubble "turns into a sort of
+  agent bubble". First answer: a phase oneof on the head. The user's
+  amendment: the phases are SEPARATE BUBBLES coalesced under TABS.
+- A repeat pass (tests break, resolve again): option (b) — a SECOND tab, "no
+  special allowance there; visually you want it apparent there's been two
+  rounds of something that should normally be one." Consequence accepted:
+  phases are APPEND-ONLY and each is MONOTONIC (live once, settled once);
+  the tab label carries the round ("conflicts (2)"), resolved by the daemon.
+- `FeedMergePhase` is only for phases the run ACTUALLY ENTERED — a tab
+  appears because work began; there is no pending tab.
+- The user: "a queued merge should be just another phase — another Merge
+  bubble, and therefore typically the first tab." This dissolved the
+  `ahead`-vs-`phases` body oneof entirely; body = tabs.
+- The queue tab's content is a SNAPSHOT replaced whole on every publish (the
+  user: "every new update overwrites the content already existing"), like a
+  shell spool; the daemon republishes on any queue change AND on any phase
+  change at the front, so a waiting user sees the front's progress. The
+  user's shape: the same message reaches every workspace in the queue; the
+  head workspace's status is `merging` and it is SHOWN NOTHING about the
+  queue ("it doesn't need to, it's merging"). The queue tab does not keep
+  updating once we reach the front — it settles and the phase tabs take over.
+- The user proposed a four-field `ws_merging / ws_ahead / ws_current /
+  ws_behind` shape; the orchestrator MISREAD it as double-naming the head
+  and objected — the objection was wrong (the user's status oneof made
+  `merging` and placement exclusive) and was withdrawn. The landed shape
+  keeps the user's structural position (`ahead`/`current`/`behind`, so
+  "you are here" is never derived by comparing ids) with one entry type and
+  the front's status as an arm on its entry.
+- The tab BADGE (asked by the user as a thing to nail down before wrapping
+  feed): a tab draws from exactly two fields — its label and its state arm,
+  which picks the treatment (`live` / `settled{succeeded|failed}`); the
+  badge's detail is the kind arm's resolved evidence. No enum, no client
+  mapping.
+
+**Consequences.**
+
+- Nested rows parent to the PHASE, not to the merge, so "which pass produced
+  this fix" is structural. The `landing` phase owns the merge's own narration
+  (initiating prompt, closing message), so the body has no loose rows.
+- The mirrored front-workspace phase in a queue entry imports the real
+  `FeedMergePhase*` messages — one vocabulary for tab badge and queue row.
+- Deliberately NOT reused: `FeedDetached*`. A merge is not detached work
+  (daemon-orchestrated, has a `queued` life the vendor has no arm for), and
+  two families = two drawn components.
+- Stage 3 owes: the merge-queue push cadence (on every front-phase change)
+  and `FeedMergeQueueWorkspace` as a jump target across workspaces.
+
+### `feed.proto` kind ⑦: `FeedContextCut` — the divider, with the token delta modeled
+
+**What changed.** `FeedContextCut { FeedContextCutLabel {text};
+FeedContextCutTokens {before_text, after_text}; oneof cut { cleared {} |
+compacted { FeedContextCutSummary {markdown}; FeedContextCutFold } } }`.
+
+**Why, in the user's terms.** The first sketch composed the sizes into the
+divider's line and had `cleared` empty; the user: "there's tokens before +
+after in the conversation equivalents, which should be modeled" — so the
+delta is its own element, a sibling of the cut oneof because EVERY cut has
+one (a clear reloads system prompt/skills/memory, so after is small, not
+zero). And the compacted comment was wrong: "it's not a summary of what was
+discarded, it's a compression of the previous conversation" — reworded.
+
+**Consequences.** Both sides are daemon-formatted strings; the client does no
+arithmetic and no unit rounding. The summary is markdown the daemon flattens
+from the record's `AgentContent` (prose only — a compaction summary has no
+tool calls).
+
 ### `feed.proto` kind ⑥: `FeedApiFailure`
 
 **What changed.** `FeedApiFailure { FeedApiFailureHeadline {text, tone};
