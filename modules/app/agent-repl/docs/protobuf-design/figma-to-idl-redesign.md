@@ -114,6 +114,38 @@ that transport.
 
 ## Landed changes
 
+### Stage 3, TOPBAR section: two RPCs; the breakdown menu nests INTO TopbarView
+
+**Settled.** WatchTopbar — per-workspace stream of TopbarView, WHOLE; and
+SetModel. Nothing else.
+
+**The walk that got there, in the user's terms.** The orchestrator proposed
+fetch-on-open for the breakdown menu; the user: "shouldn't token updates be
+streamed? I don't see a pull architecture there being correct" — right, a
+token figure changes while you look at it. The orchestrator then proposed a
+separate WatchTokenBreakdown stream; the user: just WatchTopbar, tokens along
+the same channel. The orchestrator then proposed a two-arm partial-replace
+oneof (topbar | token_breakdown); the user: "the token breakdown is PART of
+topbar — one level deeper" — so TopbarView gains `token_breakdown = 6` and
+the stream is the plain view, whole. The partial-replace oneof is RETRACTED
+as a delta creeping back in; the topbar is a few hundred bytes and whole-view
+replace is the convention. Confirmed semantics: no oneofs among the view's
+elements (none are mutually exclusive — a push can carry a new warning AND
+fresher tokens, because a push is the whole topbar as it now stands, never an
+event naming what changed); the breakdown is ALWAYS POPULATED, like a folded
+section still carrying its rows, so opening the menu needs no round-trip.
+
+**Presence ruling (the user asked about `optional` on warnings).** Message
+fields carry presence natively; the convention is: EVERY element of a view is
+always set, and "nothing to show" is expressed INSIDE the element (an empty
+warnings list is the daemon saying nothing is wrong; the selector's unset
+`selected` is the documented no-selection). An optional strip would spell "no
+warnings" two ways. An unset element is a malformed frame, not a state.
+
+**Consequences.** The TokenBreakdown* messages keep their names (the menu is
+its own family). The daemon's topbar resolver owns session accounting
+composition on every push.
+
 ### Stage 3, SIDEBAR section: the RPC inventory — nine RPCs; roster UI prefs go webview-local (stage-2 sidebar shape reopened by name)
 
 **Settled.** Names and purposes only; shapes are 3c:
