@@ -114,6 +114,25 @@ that transport.
 
 ## Landed changes
 
+### `feed.proto` kind ①: `FeedUserRow`, and the feed's drawn block vocabulary
+
+**What changed.** `FeedUserRow { FeedUserAuthor author {label};
+FeedUserBody body { repeated FeedUserBlock } }`; `FeedUserBlock` = oneof
+`FeedTextBlock {text}` | `FeedImageBlock {src, alt}` | `FeedUnsupportedBlock
+{kind}`. The three block messages are the feed's DRAWN block vocabulary,
+shared by every row kind in this file.
+
+**Why, in the user's terms.** "Sounds okay" — after asking what the row is
+for: it draws a `UserSaid` record, the user's own prompt in the history
+(the webapp renders these today). A resolved element, not an embedded
+`UserSaid` (precedence principle): the record's image reference (a host path
+or a URL) becomes a `src` the webview can fetch — a resolution only the
+daemon can make; `unsupported` draws its kind only, the raw stays in the
+record.
+
+**Consequences.** The daemon's feed resolver serves images (or maps paths to
+served URLs); the webapp's user-card renderer reads blocks, not the record.
+
 ### `frontend.v1/feed.proto`: the container — `FeedRow` (nine kinds) and `FeedPage`; `status_panel.proto` split out; the whole tree compiles again
 
 **The drawing agreed with the user** (in the file header): the feed as a
