@@ -114,6 +114,29 @@ that transport.
 
 ## Landed changes
 
+### `feed.proto` kind ⑤: `FeedFailure`; `FeedDetachedRuntime.ended_at_ms` moves into `Settled`
+
+**What changed.** `FeedFailure { FeedFailureHeadline {text, tone};
+FeedFailureDetail {text} (unset when none); FeedFailureEvidence
+{ FailureKind kind }; oneof lifecycle { open | resolved{at_ms} | terminal } }`.
+DELETED: `FailureCardView`, `FailureCardOpen/Resolved/Terminal`. The holding
+file's `SessionView.death` now names `frontend.v1.FeedFailure`.
+`FeedDetachedRuntime` loses `ended_at_ms`; it lives on `FeedDetachedSettled`
+— it means nothing while live (adjacent-exclusivity, caught in the audit the
+user asked for).
+
+**Why, in the user's terms.** "Yes" — with two instructions: no serialized-
+shape comments at line ends in the protos (checked: none exist in any landed
+file — that style was only in the orchestrator's chat sketches, and it stops
+there too; every field keeps a description above it); and an audit of the
+feed kinds so far for (a) mutual exclusivity modeled as oneofs and (b) real
+mapping to UI components — reported in the conversation; the one defect
+found is the `ended_at_ms` fix above.
+
+**Consequences.** `FailureKind` is embedded as the drawn evidence — the one
+place the shared vocabulary type rightly sits inside a frontend element,
+because it IS what is drawn and `agentrepl.v1` names the same arms.
+
 ### `feed.proto`: kind suffixes dropped (`FeedUser`, `FeedAgent`, `FeedDetached`, `FeedTool`, …); kind ④ `FeedPermission`
 
 **Naming ruling.** The user asked what a "card" and a "bubble" ARE at the UI
