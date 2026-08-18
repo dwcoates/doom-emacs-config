@@ -13,8 +13,6 @@
 // workspace is the stream's, and one ordered stream per component needs no
 // staleness token — a push cannot overtake a newer one on its own stream.
 //
-// The token-breakdown menu the topbar opens is its own component and its own
-// file: token_breakdown.proto.
 
 syntax = "proto3";
 
@@ -113,3 +111,49 @@ message TopbarWarning {
 // evidence behind the verdict is the footer accounting cell's, which states
 // it as arms, and duplicating it here would be a second copy to drift.
 message TopbarAccountingWarning {}
+
+// ==========================================================================
+// THE TOKEN-BREAKDOWN MENU the topbar opens: titled sections of rows. The
+// SESSION's accounting — the footer's turn-level tokens are a different fact
+// and a different component (footer.proto), deliberately uncoupled.
+// ==========================================================================
+
+// The token-breakdown menu, fully resolved. Sections and rows arrive in
+// display order; the client renders exactly this tree.
+message TokenBreakdownView {
+  // Menu sections, in display order (e.g. "this turn", "session", per-model).
+  repeated TokenBreakdownSection sections = 1;
+}
+
+// One titled section of the breakdown menu.
+message TokenBreakdownSection {
+  // The section heading.
+  TokenBreakdownHeading heading = 1;
+  // Rows, in display order.
+  repeated TokenBreakdownRow rows = 2;
+}
+
+// A section's heading.
+message TokenBreakdownHeading {
+  // Verbatim.
+  string text = 1;
+}
+
+// One row of the breakdown menu — the row IS the element, and these are its
+// props. All numbers are resolved; the share is precomputed so the client
+// does no arithmetic.
+message TokenBreakdownRow {
+  // Row label, verbatim (e.g. "uncached input", "fresh input", "cache read").
+  string label = 1;
+  // The row's token count.
+  int64 tokens = 2;
+  // The row's share of its section's basis, in permille (0-1000), already
+  // rounded. UNSET means no share applies to this row and the client omits
+  // the percentage; 0 is a real zero percent. Presence, not a -1 sentinel.
+  optional int32 share_permille = 3;
+  // True when the row is a headline (rendered unindented/emphasized), false
+  // for detail rows. Layout fact resolved daemon-side.
+  bool emphasized = 4;
+  // Indent depth for nested detail rows; 0 = top level.
+  int32 depth = 5;
+}
