@@ -6,13 +6,13 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/workspace.proto";
+import "workspace/v1/workspace.proto";
 import "conversation/v1/tool_call.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message AnswerPermissionRequest {
-  WorkspaceRef workspace = 1;
+  workspace.v1.WorkspaceRef workspace = 1;
   // WHICH ask — the permission row's (and tool card's) join key.
   conversation.v1.ToolCallId call = 2;
   // THE ARM IS THE ANSWER, and it must match the card's body: verdicts

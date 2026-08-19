@@ -9,13 +9,15 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/workspace.proto";
+import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message RegisterWorkspaceRequest {
-  // The workspace's address — all Emacs supplies.
-  WorkspaceRef workspace = 1;
+  // The worktree's path, in whatever spelling the host has. A PATH, not an
+  // identity: the daemon normalizes it and MINTS the identity, which the
+  // response returns.
+  string dir = 1;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -26,7 +28,11 @@ message RegisterWorkspaceResponse {
   }
 }
 // Registered (or already was — idempotence makes the two one answer).
-message RegisterWorkspaceSuccess {}
+message RegisterWorkspaceSuccess {
+  // The workspace's daemon-minted identity — what every later call and every
+  // view uses; the path the host sent is never the identity.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
 // EMPTY ON PURPOSE: arms DERIVED at the wave (dir does not exist, not a
 // worktree the daemon can adopt, …), spelled per 3b.
 message RegisterWorkspaceError {

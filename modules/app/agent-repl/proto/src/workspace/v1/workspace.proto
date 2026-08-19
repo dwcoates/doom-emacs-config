@@ -1,0 +1,37 @@
+// workspace.proto — THE WORKSPACE IDENTITY VOCABULARY: the leaf package for
+// facts specific to a workspace that more than one surface shares. Imported
+// by frontend.v1 (join keys on drawn elements) and agentrepl.v1 (request
+// addressing) alike; imports nothing.
+//
+// IDENTITIES ARE DAEMON-MINTED ECHO TOKENS. A path has many spellings
+// ("$HOME/x", "~/x", "~/x/"), so a client-supplied path is never an
+// identity: the daemon mints the id (RegisterWorkspace returns it,
+// CreateWorkspace returns it, every view embeds it), and clients hand it
+// back unchanged.
+
+syntax = "proto3";
+
+package workspace.v1;
+
+option go_package = "agentrepl/proto/workspace/v1;workspacev1";
+
+// A workspace, as the daemon identifies it.
+message WorkspaceRef {
+  // The sole supported workspace identifier — daemon-minted, opaque,
+  // compared byte-wise, never parsed or derived from a path by a client.
+  string id = 1;
+  // The workspace's normalized worktree directory, for display and for
+  // opening files. NOT an identifier — paths have many spellings; `id` is
+  // the identity.
+  string dir = 2;
+}
+
+// A repository, as the daemon identifies it — the same minting logic as
+// WorkspaceRef, for the same reason. Clients get one from the roster's repo
+// sections and hand it back (CreateWorkspace).
+message RepositoryRef {
+  // The sole supported repository identifier — daemon-minted, opaque.
+  string id = 1;
+  // The repository's normalized main-worktree directory. NOT an identifier.
+  string dir = 2;
+}

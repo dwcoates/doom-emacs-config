@@ -6,14 +6,14 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/workspace.proto";
+import "workspace/v1/workspace.proto";
 import "frontend/v1/topbar.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 // Opens the stream.
 message WatchTopbarRequest {
-  WorkspaceRef workspace = 1;
+  workspace.v1.WorkspaceRef workspace = 1;
 }
 
 // The current topbar view, delivered live.
