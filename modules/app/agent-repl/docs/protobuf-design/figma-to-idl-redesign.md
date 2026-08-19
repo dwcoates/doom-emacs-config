@@ -114,6 +114,27 @@ that transport.
 
 ## Landed changes
 
+### 3c: WatchTopbar + SetModel land; `AgentModel` — the typed-echo-token pattern (stage-1 api.proto reopened additively)
+
+**The user's pattern, stated and codified.** "We should have a message
+encapsulating fields that are dynamically determined by the backend and
+reused by the frontend in future requests — the frontend can't/shouldn't
+know the supported values — wrapped so the reuse is obvious." Named the
+TYPED ECHO TOKEN: the provider mints a wrapper message, embeds it in what it
+serves, and the request field is the SAME type echoed back unchanged — the
+round-trip becomes a schema fact, and a client that invents a value is typed
+as wrong rather than merely told not to. Dispatched to the skill as a
+one-shot subagent (worktree proto-echo-token).
+
+**What changed ("your agent model protobuf suggestion looks good").**
+conversation/v1/api.proto: new `AgentModel { name }`; `ModelOption.value`
+(string) becomes `AgentModel model = 1` — the token inside each served
+option. endpoint_watch_topbar.proto: WatchTopbarRequest { WorkspaceRef } →
+stream frontend.v1.TopbarView. endpoint_set_model.proto: SetModelRequest
+{ WorkspaceRef; conversation.v1.AgentModel model } → success {} | error {}
+(arms derived at the wave: model not among served options, no session). The
+TOPBAR service section is complete.
+
 ### 3c: the six remaining sidebar verbs land — the SIDEBAR section is complete
 
 **What changed ("those all look simple, let's land them").** Six endpoint
