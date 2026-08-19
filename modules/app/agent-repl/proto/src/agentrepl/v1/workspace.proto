@@ -1,0 +1,26 @@
+// workspace.proto — the SHARED workspace vocabulary of this package: types
+// more than one endpoint needs. Anything one endpoint owns stays in its own
+// endpoint_<rpc>.proto; only genuinely shared types live here.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// A workspace, by the daemon registry's key (3b convention: every
+// per-workspace request and stream-open carries one). An ADDRESS: requests
+// are CALLED, not drawn, so ONE shared identity type is right here — unlike
+// frontend.v1, where each component wraps the fact it draws in its own
+// element. Per-request parameters never ride it.
+message WorkspaceRef {
+  // Absolute worktree dir.
+  string dir = 1;
+}
+
+// A repository, by its main worktree dir (the roster's repo key). An ADDRESS,
+// like WorkspaceRef — and NOT a WorkspaceRef, because a repo and a workspace
+// are different addresses (a workspace being created has no dir yet).
+message RepositoryRef {
+  string dir = 1;
+}
