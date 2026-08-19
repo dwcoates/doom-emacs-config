@@ -34,6 +34,7 @@ import "agentrepl/v1/endpoint_answer_held_offer.proto";
 import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
 import "agentrepl/v1/endpoint_update_merge_queue.proto";
 import "agentrepl/v1/endpoint_daemon_health.proto";
+import "agentrepl/v1/endpoint_session_health.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -129,4 +130,8 @@ service AgentRepl {
   // Is the daemon itself healthy? Unhealthy is an ANSWER. See
   // endpoint_daemon_health.proto.
   rpc DaemonHealth(DaemonHealthRequest) returns (DaemonHealthResponse);
+
+  // Is this workspace's session healthy? Unhealthy is an ANSWER. See
+  // endpoint_session_health.proto.
+  rpc SessionHealth(SessionHealthRequest) returns (SessionHealthResponse);
 }
