@@ -31,6 +31,7 @@ import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
 import "agentrepl/v1/endpoint_answer_held_offer.proto";
+import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -112,4 +113,10 @@ service AgentRepl {
   // Answer a question the daemon parked in the tray. See
   // endpoint_answer_held_offer.proto.
   rpc AnswerHeldOffer(AnswerHeldOfferRequest) returns (AnswerHeldOfferResponse);
+
+  // ---- DAEMON ADMIN ----
+
+  // The deploy tooling's drain-and-exit control. See
+  // endpoint_update_shutdown_schedule.proto.
+  rpc UpdateShutdownSchedule(UpdateShutdownScheduleRequest) returns (UpdateShutdownScheduleResponse);
 }
