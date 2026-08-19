@@ -1,0 +1,62 @@
+// endpoint_client_log.proto — ClientLog: a console-less client hands the
+// daemon one diagnostic record for the durable log. DAEMON ADMIN section.
+// Today's caller is the webapp (an xwidget's JS console is invisible and
+// nothing persists it, so a webapp malfunction would otherwise leave no
+// evidence anywhere); any console-less client uses it identically. Emacs
+// never calls it — it has durable logs of its own.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ClientLogRequest {
+  WorkspaceRef workspace = 1;
+  ClientLogRecord record = 2;
+}
+
+// One diagnostic record, written to the daemon's on-disk structured log
+// beside the workspace's other telemetry.
+message ClientLogRecord {
+  // THE ARM IS THE LEVEL.
+  oneof level {
+    ClientLogLevelDebug debug = 1;
+    ClientLogLevelInfo info = 2;
+    ClientLogLevelWarn warn = 3;
+    ClientLogLevelError error = 4;
+  }
+  // Stable machine-readable operation name ("command-dispatch.deferred").
+  string operation = 5;
+  // The human sentence.
+  string message = 6;
+  // Free-shape diagnostic context, as the call site composed it.
+  //
+  // UNTYPED BY EXCEPTION (accepted cost, see the design record): the
+  // producer is FUNDAMENTALLY UNABLE to declare this shape — arbitrary
+  // per-call-site diagnostic key/values whose whole purpose is to carry
+  // whatever that call site had in hand; no schema can exist ahead of the
+  // sites. Nothing routes on it, nothing renders it; it is written to the
+  // log verbatim for a human debugger.
+  google.protobuf.Struct context = 7;
+}
+message ClientLogLevelDebug {}
+message ClientLogLevelInfo {}
+message ClientLogLevelWarn {}
+message ClientLogLevelError {}
+
+// THE ARM IS THE OUTCOME.
+message ClientLogResponse {
+  oneof result {
+    ClientLogSuccess success = 1;
+    ClientLogError error = 2;
+  }
+}
+// Written.
+message ClientLogSuccess {}
+// EMPTY ON PURPOSE: arms DERIVED at the wave, spelled per 3b.
+message ClientLogError {
+}
