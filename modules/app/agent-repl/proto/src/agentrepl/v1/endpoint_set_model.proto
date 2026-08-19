@@ -1,0 +1,35 @@
+// endpoint_set_model.proto — SetModel: the topbar selector's pick. TOPBAR
+// section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+import "conversation/v1/api.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetModelRequest {
+  WorkspaceRef workspace = 1;
+  // The chosen model — the typed echo token from one of the selector's own
+  // options (conversation.v1.ModelOption.model), handed back unchanged. A
+  // client never invents one.
+  conversation.v1.AgentModel model = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetModelResponse {
+  oneof result {
+    SetModelSuccess success = 1;
+    SetModelError error = 2;
+  }
+}
+
+// Done; the selector's new state arrives on the topbar stream.
+message SetModelSuccess {}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (model not among the
+// served options, no session, …), spelled per 3b.
+message SetModelError {
+}
