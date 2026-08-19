@@ -114,6 +114,15 @@ that transport.
 
 ## Landed changes
 
+### 3c: UpdateMergeQueue lands
+
+**What changed ("looks good").** endpoint_update_merge_queue.proto: request
+oneof action { pause | resume | evict{WorkspaceRef} }; success {} | error {}
+(arms derived: already paused, not paused, no such queued merge).
+Consolidates PauseMergeQueue/ResumeMergeQueue/EvictMerge. Purely inbound —
+the queue's visible state rides the merge bubbles' queue tabs and the
+roster's status arms.
+
 ### 3c: UpdateShutdownSchedule lands — DAEMON ADMIN section opens
 
 **What changed ("okay these look good").** endpoint_update_shutdown_schedule
