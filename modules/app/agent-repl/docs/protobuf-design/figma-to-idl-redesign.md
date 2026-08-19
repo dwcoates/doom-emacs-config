@@ -114,6 +114,14 @@ that transport.
 
 ## Landed changes
 
+### 3c: RegisterWorkspace lands — HOST section opens
+
+**What changed ("looks good").** endpoint_register_workspace.proto: request
+is JUST { WorkspaceRef } — no name, parent, or branch; the daemon derives
+everything from the dir (the settled "Emacs registers; the daemon tracks"
+model). IDEMPOTENT BY DIR — re-registration after reconnect/daemon restart
+is the normal path, one success answer. Error arms empty until derived.
+
 ### 3c: ClientLog lands — DAEMON ADMIN section complete
 
 **What changed.** endpoint_client_log.proto: request { WorkspaceRef;
