@@ -114,6 +114,15 @@ that transport.
 
 ## Landed changes
 
+### 3c: SessionHealth lands
+
+**What changed ("looks good").** endpoint_session_health.proto: request
+{ WorkspaceRef }; response result { success { healthy | unhealthy{ repeated
+SessionFault } } | error {} }. SessionFault = DaemonFault's discipline
+({detail} now, kind oneof added with derived arms at the wave, from the
+session controller's real fault sites) but DELIBERATELY ITS OWN TYPE — two
+fault vocabularies with different producers, not one shared one.
+
 ### 3c: DaemonHealth lands — typed fault classes + dynamic detail
 
 **What changed ("okay").** endpoint_daemon_health.proto: DaemonHealthRequest
