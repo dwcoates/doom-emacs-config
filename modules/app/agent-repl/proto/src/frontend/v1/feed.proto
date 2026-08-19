@@ -52,6 +52,7 @@ import "conversation/v1/message.proto";
 import "conversation/v1/tool_call.proto";
 import "conversation/v1/turn.proto";
 import "frontend/v1/failure.proto";
+import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
@@ -908,9 +909,10 @@ message FeedMergeQueueEntry {
   }
 }
 
-// Which workspace this row names, so the row is a jump target.
+// Which workspace this row names, so the row is a jump target — the
+// imported join key.
 message FeedMergeQueueWorkspace {
-  string value = 1;
+  workspace.v1.WorkspaceRef workspace = 1;
 }
 
 // The row's label, resolved ("DWC/roster-resolver").

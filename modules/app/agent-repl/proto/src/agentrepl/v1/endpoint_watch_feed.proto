@@ -17,7 +17,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/workspace.proto";
+import "workspace/v1/workspace.proto";
 import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -25,7 +25,7 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 // Opens the stream.
 message WatchFeedRequest {
   // The workspace whose feed to watch.
-  WorkspaceRef workspace = 1;
+  workspace.v1.WorkspaceRef workspace = 1;
 }
 
 // One feed row upsert, delivered live.
