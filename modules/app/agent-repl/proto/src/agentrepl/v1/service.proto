@@ -32,6 +32,7 @@ import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
 import "agentrepl/v1/endpoint_answer_held_offer.proto";
 import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
+import "agentrepl/v1/endpoint_update_merge_queue.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -119,4 +120,8 @@ service AgentRepl {
   // The deploy tooling's drain-and-exit control. See
   // endpoint_update_shutdown_schedule.proto.
   rpc UpdateShutdownSchedule(UpdateShutdownScheduleRequest) returns (UpdateShutdownScheduleResponse);
+
+  // Operator control of the merge queue. See
+  // endpoint_update_merge_queue.proto.
+  rpc UpdateMergeQueue(UpdateMergeQueueRequest) returns (UpdateMergeQueueResponse);
 }
