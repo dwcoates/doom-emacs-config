@@ -114,6 +114,13 @@ that transport.
 
 ## Landed changes
 
+### 3c: SelectWorkspace lands
+
+**What changed ("looks good").** endpoint_select_workspace.proto: request
+{ WorkspaceRef }; success {} (the roster stream carries the new `current`) |
+error {} (arms derived: unregistered workspace). Idempotent — re-selecting
+the current workspace is a success.
+
 ### 3c: RegisterWorkspace lands — HOST section opens
 
 **What changed ("looks good").** endpoint_register_workspace.proto: request
