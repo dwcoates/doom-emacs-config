@@ -114,6 +114,22 @@ that transport.
 
 ## Landed changes
 
+### 3c: Interrupt lands — the folded stop verb; the pending file sheds its ack payload
+
+**What changed ("okay").** `endpoint_interrupt.proto`: InterruptRequest
+{ WorkspaceRef; oneof target { turn | detached(MessageId) } }; success
+outcome { interrupted_turn | interrupted_detached{count} | nothing_running };
+error empty until derived. rpc Interrupt on the service.
+
+**Absorbed.** The pending file's DetachedCancelOutcome/DetachedAgentsCancelled
+are DELETED (its shim.v1 import too): `nothing_running` moves from the old
+"refused with ok=false" to a SUCCESS ANSWER per the domain-outcome rule — the
+old comment's worry ("a stop that missed looks like one that worked") is
+answered by the arm being distinct, not by mis-classing a quiet session as a
+failure; `count` keeps its frontend-vocabulary rationale (shim task ids stay
+on the shim wire); shim.v1's DetachedCancelUnsupported becomes a derived
+ERROR arm at the wave.
+
 ### 3c: GetFeedPage lands — no cursor exists on the wire
 
 **The user's ruling.** "Cursor should be totally unknown to frontend. It
