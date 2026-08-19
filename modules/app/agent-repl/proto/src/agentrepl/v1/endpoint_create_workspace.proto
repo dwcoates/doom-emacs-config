@@ -1,0 +1,47 @@
+// endpoint_create_workspace.proto — CreateWorkspace: a new workspace in a
+// repository. SIDEBAR section. THE DAEMON DOES THE CREATING — it derives the
+// name (slug → branch → worktree dir), creates the branch and worktree, and
+// registers the workspace; no client supplies a name and no host
+// materialization round-trip exists. Callers learn the identity from the
+// response; everything else (roster row, status) arrives on the roster
+// stream.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+import "conversation/v1/user.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message CreateWorkspaceRequest {
+  // The repository to create in.
+  RepositoryRef repository = 1;
+  // The initial prompt the new workspace's session starts with. UNSET = an
+  // empty workspace; presence, never an empty UserSaid. Also the naming
+  // input: the daemon derives the slug from it when present.
+  optional conversation.v1.UserSaid initial_prompt = 2;
+  // The ref to branch from. UNSET = the repo's default branch resolution;
+  // presence, not an empty-string sentinel.
+  optional string base_ref = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message CreateWorkspaceResponse {
+  oneof result {
+    CreateWorkspaceSuccess success = 1;
+    CreateWorkspaceError error = 2;
+  }
+}
+
+// The created workspace's identity — the dir the daemon minted. Everything
+// else arrives on the roster stream.
+message CreateWorkspaceSuccess {
+  WorkspaceRef workspace = 1;
+}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown repository,
+// base ref does not resolve, worktree creation failed, …), spelled per 3b.
+message CreateWorkspaceError {
+}

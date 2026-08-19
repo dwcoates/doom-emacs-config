@@ -18,6 +18,7 @@ import "agentrepl/v1/endpoint_get_feed_page.proto";
 import "agentrepl/v1/endpoint_interrupt.proto";
 import "agentrepl/v1/endpoint_answer_permission.proto";
 import "agentrepl/v1/endpoint_watch_workspace_roster.proto";
+import "agentrepl/v1/endpoint_create_workspace.proto";
 import "frontend/v1/sidebar.proto";
 import "frontend/v1/feed.proto";
 

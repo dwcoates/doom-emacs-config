@@ -6,7 +6,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/workspace_ref.proto";
+import "agentrepl/v1/workspace.proto";
 import "conversation/v1/message.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
