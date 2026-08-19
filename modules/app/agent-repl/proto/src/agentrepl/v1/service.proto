@@ -35,6 +35,7 @@ import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
 import "agentrepl/v1/endpoint_update_merge_queue.proto";
 import "agentrepl/v1/endpoint_daemon_health.proto";
 import "agentrepl/v1/endpoint_session_health.proto";
+import "agentrepl/v1/endpoint_client_log.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -134,4 +135,8 @@ service AgentRepl {
   // Is this workspace's session healthy? Unhealthy is an ANSWER. See
   // endpoint_session_health.proto.
   rpc SessionHealth(SessionHealthRequest) returns (SessionHealthResponse);
+
+  // A console-less client's diagnostic record, into the durable log. See
+  // endpoint_client_log.proto.
+  rpc ClientLog(ClientLogRequest) returns (ClientLogResponse);
 }
