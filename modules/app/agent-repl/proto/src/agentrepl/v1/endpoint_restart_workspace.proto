@@ -1,0 +1,39 @@
+// endpoint_restart_workspace.proto — RestartWorkspace. SIDEBAR section.
+// Bounces ONLY the workspace's shim: rebuild it if out of date, restart the
+// shim process. Never the webapp, never the daemon.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message RestartWorkspaceRequest {
+  WorkspaceRef workspace = 1;
+  // FALSE: a GRACEFUL restart — wait until no turn is in flight and the
+  // agent runs no async/background tasks, holding incoming prompts via the
+  // daemon hold (visible in the tray) until the bounce completes.
+  // TRUE: a FORCED restart — interrupt the shim (stop the current turn and
+  // any background tasks), then bounce immediately. The daemon does NOT
+  // resume the agent afterwards; continuing is the user's, with a
+  // subsequent prompt.
+  bool force = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message RestartWorkspaceResponse {
+  oneof result {
+    RestartWorkspaceSuccess success = 1;
+    RestartWorkspaceError error = 2;
+  }
+}
+
+// The restart is accepted (graceful: scheduled behind the in-flight work;
+// forced: under way). Every visible effect arrives on the streams.
+message RestartWorkspaceSuccess {}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+message RestartWorkspaceError {
+}
