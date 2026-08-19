@@ -1,0 +1,21 @@
+// endpoint_watch_footer.proto — WatchFooter: the footer's stream. FOOTER
+// section. Per-workspace; the response wraps the view, whole.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+import "frontend/v1/footer.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Opens the stream.
+message WatchFooterRequest {
+  WorkspaceRef workspace = 1;
+}
+
+// One push: the footer, whole-replaced.
+message WatchFooterResponse {
+  frontend.v1.FooterView footer = 1;
+}
