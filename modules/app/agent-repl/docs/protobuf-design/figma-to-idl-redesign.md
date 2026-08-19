@@ -114,6 +114,25 @@ that transport.
 
 ## Landed changes
 
+### 3c: GetFeedPage lands — no cursor exists on the wire
+
+**The user's ruling.** "Cursor should be totally unknown to frontend. It
+should only be able to get the first page, and the next page, for the given
+source." The DAEMON holds each container's walk position (one webview per
+workspace = one reader per container); `first` resets the walk to the newest
+page, `next` continues older, and a `next` with no walk standing is a
+refusal, not an empty page.
+
+**What changed ("okay").** `endpoint_get_feed_page.proto`:
+GetFeedPageRequest { WorkspaceRef; oneof container { top_level |
+parent(MessageId) }; oneof page { first | next } }; response
+{ frontend.v1.FeedPage success | GetFeedPageError error } — TWO error layers
+on purpose (response error = not served: unknown workspace/container,
+next-with-no-walk; page error = served with a hole). Error arms empty until
+derived. NO page-size parameter — the daemon picks. And in feed.proto,
+FeedPageHasMore LOSES its cursor field — an empty arm, purely "older rows
+exist".
+
 ### 3c: WatchFeed lands; `WorkspaceRef` declared
 
 **What changed ("okay let's continue").** `workspace_ref.proto` — the 3b
