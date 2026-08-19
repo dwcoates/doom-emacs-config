@@ -1,0 +1,28 @@
+// endpoint_watch_feed.proto — WatchFeed: the feed's live half. FEED section.
+// ONE stream per workspace carrying EVERY row upsert, top-level and nested
+// alike; the client routes by FeedRow.parent. History is GetFeedPage's; this
+// stream is what changes NOW.
+//
+// THE STREAM'S MESSAGE IS frontend.v1.FeedRow ITSELF, whole — an upsert by
+// FeedRow.id: a new row, or a replacement of one already shown (an arriving
+// response's re-push, a settled tool, a moved merge phase). Views only ride
+// streams — there is no keepalive frame (liveness layers elsewhere: the
+// daemon observes shim silence and publishes it as facts; a dead pipe fails
+// the connection; a wedged publisher is the daemon watchdog's to surface) —
+// and a refused open (unknown workspace) closes the stream at the transport,
+// so no wrapper message exists. A reconnect RE-OPENS and re-pulls pages:
+// the stream is "now", never "since" — there is no resume token.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_ref.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Opens the stream.
+message WatchFeedRequest {
+  // The workspace whose feed to watch.
+  WorkspaceRef workspace = 1;
+}
