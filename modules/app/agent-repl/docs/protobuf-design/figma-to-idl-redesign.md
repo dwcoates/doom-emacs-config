@@ -114,6 +114,22 @@ that transport.
 
 ## Landed changes
 
+### 3c: ClientLog lands — DAEMON ADMIN section complete
+
+**What changed.** endpoint_client_log.proto: request { WorkspaceRef;
+ClientLogRecord { oneof level { ClientLogLevelDebug|Info|Warn|Error (the
+user's naming) }; operation; message; Struct context } }; response
+{ success {} | error {} }.
+
+**Untyped field, ACCEPTED as a cost (the exception, stated at the field).**
+ClientLogRecord.context is a Struct: arbitrary per-call-site diagnostic
+key/values whose whole purpose is to carry whatever the call site had in
+hand — no schema can exist ahead of the sites; nothing routes on or renders
+it; it is written verbatim to the daemon's on-disk log for a human debugger.
+The purpose of the RPC itself, restated for the record: the webapp runs in
+an xwidget whose JS console is invisible and unpersisted, so without this
+relay a webapp malfunction leaves no evidence anywhere; Emacs never calls it.
+
 ### 3c: SessionHealth lands
 
 **What changed ("looks good").** endpoint_session_health.proto: request
