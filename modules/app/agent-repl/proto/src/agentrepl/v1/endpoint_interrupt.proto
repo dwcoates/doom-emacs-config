@@ -6,13 +6,13 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/workspace.proto";
+import "workspace/v1/workspace.proto";
 import "conversation/v1/message.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message InterruptRequest {
-  WorkspaceRef workspace = 1;
+  workspace.v1.WorkspaceRef workspace = 1;
   oneof target {
     // The running turn (the vendor query interrupt).
     InterruptTurn turn = 2;

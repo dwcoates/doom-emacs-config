@@ -43,6 +43,8 @@ syntax = "proto3";
 
 package frontend.v1;
 
+import "workspace/v1/workspace.proto";
+
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
 // One complete, self-contained picture of the sidebar.
@@ -67,8 +69,9 @@ message WorkspaceRoster {
 // The selected workspace, by identity. Compared against RosterRowWorkspace,
 // never against a display name, which is not unique.
 message RosterCurrentWorkspace {
-  // Absolute worktree dir.
-  string dir = 1;
+  // The selected workspace's identity, imported — the join key, never a
+  // display path (the row's own elements carry what is drawn).
+  workspace.v1.WorkspaceRef workspace = 1;
 }
 
 
@@ -96,9 +99,10 @@ message RosterRepoSection {
   RosterRows rows = 3;
 }
 
-// A repository's stable identity.
+// A repository's stable identity — the imported join key (and the echo
+// token CreateWorkspace takes back).
 message RosterRepoKey {
-  string repo_key = 1;
+  workspace.v1.RepositoryRef repository = 1;
 }
 
 // One task's section: identity, header (with the done check), rows.
@@ -263,9 +267,10 @@ message RosterRow {
   RosterRowClosed closed = 31;
 }
 
-// The workspace a row is: absolute worktree dir, THE IDENTITY.
+// The workspace a row is — the imported join key every workspace-addressed
+// call echoes back.
 message RosterRowWorkspace {
-  string dir = 1;
+  workspace.v1.WorkspaceRef workspace = 1;
 }
 
 // A row's display name. Never an identity or a join key.

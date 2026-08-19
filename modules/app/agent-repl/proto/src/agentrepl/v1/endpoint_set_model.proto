@@ -5,13 +5,13 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/workspace.proto";
+import "workspace/v1/workspace.proto";
 import "conversation/v1/api.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message SetModelRequest {
-  WorkspaceRef workspace = 1;
+  workspace.v1.WorkspaceRef workspace = 1;
   // The chosen model — the typed echo token from one of the selector's own
   // options (conversation.v1.ModelOption.model), handed back unchanged. A
   // client never invents one.

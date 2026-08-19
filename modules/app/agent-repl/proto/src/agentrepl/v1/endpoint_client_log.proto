@@ -9,13 +9,13 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/workspace.proto";
+import "workspace/v1/workspace.proto";
 import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message ClientLogRequest {
-  WorkspaceRef workspace = 1;
+  workspace.v1.WorkspaceRef workspace = 1;
   ClientLogRecord record = 2;
 }
 

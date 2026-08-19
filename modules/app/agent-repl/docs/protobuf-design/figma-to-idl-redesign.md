@@ -114,6 +114,35 @@ that transport.
 
 ## Landed changes
 
+### `workspace.v1` — a NEW LEAF PACKAGE for workspace identity; the identities are daemon-minted echo tokens
+
+**The user's rulings.** (1) A path is never an identity — "directories can be
+represented in many ways" — so RegisterWorkspace PROVIDES the path (string
+dir, any spelling) and the daemon MINTS the identifier, returned on success.
+(2) WorkspaceRef = { id (sole supported identifier, opaque); dir (normalized
+directory, NOT to be used as an identifier) }. (3) Workspace-specific shared
+dependencies live in a LEAF PACKAGE — frontend.v1 must not import
+agentrepl.v1 (confirmed it does not today; that direction was already
+removed in stage 2 and stays removed).
+
+**What changed.** NEW proto/src/workspace/v1/workspace.proto: WorkspaceRef
+{id, dir} and RepositoryRef {id, dir} (same minting logic — a repo's
+main-worktree path has the same spelling problem; clients get one from the
+roster's repo sections). agentrepl/v1/workspace.proto DELETED; every
+agentrepl.v1 endpoint repoints to workspace.v1 (qualified). RegisterWorkspace:
+request { string dir }, success { workspace.v1.WorkspaceRef } — the echo-token
+loop for workspace identity. frontend.v1 imports the leaf: RosterRowWorkspace,
+RosterCurrentWorkspace, RosterRepoKey and FeedMergeQueueWorkspace now EMBED
+the imported refs (identity join keys are imported, never respelled — closing
+stage 2's "typed workspace identity" flag with answer (b), and retyping the
+roster/queue wrappers that had carried bare dir/value strings).
+
+**Consequences.** The enumerated leaf contents are ONLY WorkspaceRef and
+RepositoryRef today; a later workspace-specific shared fact joins the
+package rather than a boundary package. The daemon owns normalization; a
+client that constructs an id (rather than echoing one) is typed as wrong in
+intent though not mechanically — the id's opacity comment is the contract.
+
 ### ReportHostAction NEVER EXISTS — the daemon→host command loop is deleted ("yeah delete them")
 
 **Reopens the host-section settlement's item 2 (the report-back fold).** The

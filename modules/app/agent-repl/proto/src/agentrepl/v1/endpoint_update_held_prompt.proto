@@ -11,13 +11,13 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/workspace.proto";
+import "workspace/v1/workspace.proto";
 import "conversation/v1/turn.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message UpdateHeldPromptRequest {
-  WorkspaceRef workspace = 1;
+  workspace.v1.WorkspaceRef workspace = 1;
   // WHICH held prompt — the daemon-minted turn it is held under, echoed from
   // the tray entry.
   conversation.v1.TurnId turn = 2;
