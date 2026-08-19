@@ -36,6 +36,7 @@ import "agentrepl/v1/endpoint_update_merge_queue.proto";
 import "agentrepl/v1/endpoint_daemon_health.proto";
 import "agentrepl/v1/endpoint_session_health.proto";
 import "agentrepl/v1/endpoint_client_log.proto";
+import "agentrepl/v1/endpoint_register_workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -139,4 +140,10 @@ service AgentRepl {
   // A console-less client's diagnostic record, into the durable log. See
   // endpoint_client_log.proto.
   rpc ClientLog(ClientLogRequest) returns (ClientLogResponse);
+
+  // ---- HOST ----
+
+  // Emacs announces a workspace exists; idempotent by dir. See
+  // endpoint_register_workspace.proto.
+  rpc RegisterWorkspace(RegisterWorkspaceRequest) returns (RegisterWorkspaceResponse);
 }
