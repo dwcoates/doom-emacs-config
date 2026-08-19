@@ -114,6 +114,30 @@ that transport.
 
 ## Landed changes
 
+### 3c: CreateWorkspace lands — the daemon names AND creates; the package file model settled (`workspace.proto` shared vocabulary)
+
+**File model (the user's ruling).** agentrepl.v1 is exactly: service.proto
+(all RPC signatures), endpoint_<rpc>.proto (that RPC's request/response), and
+<shared-package>.proto files for what MORE THAN ONE endpoint needs. So
+workspace_ref.proto is FOLDED into a new workspace.proto (WorkspaceRef +
+RepositoryRef), and no repository_ref.proto exists.
+
+**CreateWorkspace ("i agree with the protos").** THE DAEMON DOES THE
+CREATING — the user: it should name the workspace "because it's the thing
+actually creating the workspace worktree/branch/etc". It derives the slug
+(from the initial prompt when present) → branch → worktree dir, runs the git
+itself, registers the workspace; NO host materialization round-trip exists —
+Emacs sees the workspace on the roster and opens its buffer. This supersedes
+the orchestrator's host-report-back guess. "Name" was clarified as the
+coupled branch name / worktree dir / display name, no abstract identifier;
+the dir IS the identity and returns as CreateWorkspaceSuccess.workspace.
+Request: RepositoryRef + optional UserSaid initial_prompt + optional
+base_ref (both optionals per the new skill convention — presence, never
+sentinels; skill PRs #7490 bool→oneof and #7491 optional-null both MERGED).
+RepositoryRef is an ADDRESS like WorkspaceRef — base_ref stays a request
+parameter, per adjacent-exclusivity, and ref types stay pure addresses.
+Error arms empty until derived.
+
 ### 3c: WatchWorkspaceRoster lands — the one global stream
 
 **What changed (the user approved the workspace-management RPC prototypes).**

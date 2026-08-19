@@ -11,7 +11,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/workspace_ref.proto";
+import "agentrepl/v1/workspace.proto";
 import "conversation/v1/message.proto";
 import "frontend/v1/feed.proto";
 
