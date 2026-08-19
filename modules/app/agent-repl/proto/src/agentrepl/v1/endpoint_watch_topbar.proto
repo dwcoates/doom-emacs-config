@@ -1,16 +1,23 @@
 // endpoint_watch_topbar.proto — WatchTopbar: the topbar's stream. TOPBAR
-// section. Per-workspace; the stream's message is frontend.v1.TopbarView
-// itself, whole — the session token-breakdown menu rides inside it.
+// section. Per-workspace; the response wraps frontend.v1.TopbarView itself,
+// whole — the session token-breakdown menu rides inside it.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
 import "agentrepl/v1/workspace.proto";
+import "frontend/v1/topbar.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 // Opens the stream.
 message WatchTopbarRequest {
   WorkspaceRef workspace = 1;
+}
+
+// The current topbar view, delivered live.
+message WatchTopbarResponse {
+  // The topbar view, whole.
+  frontend.v1.TopbarView topbar = 1;
 }

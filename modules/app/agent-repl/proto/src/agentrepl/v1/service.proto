@@ -27,19 +27,19 @@ import "agentrepl/v1/endpoint_revive_workspace.proto";
 import "agentrepl/v1/endpoint_restart_workspace.proto";
 import "agentrepl/v1/endpoint_watch_topbar.proto";
 import "agentrepl/v1/endpoint_set_model.proto";
-import "frontend/v1/topbar.proto";
-import "frontend/v1/sidebar.proto";
-import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 service AgentRepl {
   // ---- FEED ----
 
+  // The composer's submission, whole; the daemon recognizes programmatically
+  // handled commands transparently. See endpoint_submit_prompt.proto.
+  rpc SubmitPrompt(SubmitPromptRequest) returns (SubmitPromptResponse);
+
   // The feed's live half: every row upsert for one workspace, top-level and
-  // nested alike. The stream's message is the row itself, whole. See
-  // endpoint_watch_feed.proto.
-  rpc WatchFeed(WatchFeedRequest) returns (stream frontend.v1.FeedRow);
+  // nested alike. See endpoint_watch_feed.proto.
+  rpc WatchFeed(WatchFeedRequest) returns (stream WatchFeedResponse);
 
   // The feed's history half: a page of rows for one container, "first" or
   // "next" — the daemon holds the walk. See endpoint_get_feed_page.proto.
@@ -53,7 +53,41 @@ service AgentRepl {
   // endpoint_answer_permission.proto.
   rpc AnswerPermission(AnswerPermissionRequest) returns (AnswerPermissionResponse);
 
-  // The composer's submission, whole; the daemon recognizes programmatically
-  // handled commands transparently. See endpoint_submit_prompt.proto.
-  rpc SubmitPrompt(SubmitPromptRequest) returns (SubmitPromptResponse);
+  // ---- SIDEBAR ----
+
+  // The one global stream: the roster, whole, for every webview alike. See
+  // endpoint_watch_workspace_roster.proto.
+  rpc WatchWorkspaceRoster(WatchWorkspaceRosterRequest) returns (stream WatchWorkspaceRosterResponse);
+
+  // A new workspace in a repository; the daemon names and creates everything.
+  // See endpoint_create_workspace.proto.
+  rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse);
+
+  // Open a registered-but-closed workspace.
+  rpc OpenWorkspace(OpenWorkspaceRequest) returns (OpenWorkspaceResponse);
+
+  // Tear down a workspace's editor state without merging — the only teardown.
+  rpc CloseWorkspace(CloseWorkspaceRequest) returns (CloseWorkspaceResponse);
+
+  // Enqueue this workspace's merge; its life from there is the feed's bubble.
+  rpc MergeWorkspace(MergeWorkspaceRequest) returns (MergeWorkspaceResponse);
+
+  // Put the workspace to sleep.
+  rpc HibernateWorkspace(HibernateWorkspaceRequest) returns (HibernateWorkspaceResponse);
+
+  // Wake a hibernated workspace.
+  rpc ReviveWorkspace(ReviveWorkspaceRequest) returns (ReviveWorkspaceResponse);
+
+  // Bounce the workspace's shim (rebuild if stale); graceful unless forced.
+  // See endpoint_restart_workspace.proto.
+  rpc RestartWorkspace(RestartWorkspaceRequest) returns (RestartWorkspaceResponse);
+
+  // ---- TOPBAR ----
+
+  // The topbar's stream: the view, whole (the token-breakdown menu inside).
+  rpc WatchTopbar(WatchTopbarRequest) returns (stream WatchTopbarResponse);
+
+  // The selector's pick: the typed echo token handed back. See
+  // endpoint_set_model.proto.
+  rpc SetModel(SetModelRequest) returns (SetModelResponse);
 }
