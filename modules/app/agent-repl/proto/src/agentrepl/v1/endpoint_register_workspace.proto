@@ -1,0 +1,33 @@
+// endpoint_register_workspace.proto — RegisterWorkspace: Emacs announces a
+// workspace exists. HOST section. IDEMPOTENT BY DIR: re-registering after a
+// reconnect or daemon restart is the normal path, never an error — the
+// daemon's registry is durable, and registration reconciles rather than
+// duplicates. Everything about the workspace beyond its address (parentage,
+// branch, repo) the daemon derives itself from the dir.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message RegisterWorkspaceRequest {
+  // The workspace's address — all Emacs supplies.
+  WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message RegisterWorkspaceResponse {
+  oneof result {
+    RegisterWorkspaceSuccess success = 1;
+    RegisterWorkspaceError error = 2;
+  }
+}
+// Registered (or already was — idempotence makes the two one answer).
+message RegisterWorkspaceSuccess {}
+// EMPTY ON PURPOSE: arms DERIVED at the wave (dir does not exist, not a
+// worktree the daemon can adopt, …), spelled per 3b.
+message RegisterWorkspaceError {
+}
