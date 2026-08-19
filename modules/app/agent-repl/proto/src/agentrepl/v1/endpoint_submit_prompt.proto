@@ -19,6 +19,10 @@ message SubmitPromptRequest {
   // The composed prompt — one canonical form client → daemon → tray → shim →
   // record (a held prompt IS a UserSaid).
   conversation.v1.UserSaid said = 1;
+  // Client-minted; the daemon refuses duplicates by it, so a retried request
+  // is not a second turn (3b: SubmitPrompt is the one verb where a duplicate
+  // is costly and undetectable).
+  string idempotency_key = 2;
 }
 
 // THE ARM IS THE OUTCOME.

@@ -114,6 +114,51 @@ that transport.
 
 ## Landed changes
 
+### 3c: AnswerPermission lands; kind ④ reopened — the permission card gains a QUESTIONS body (AskUserQuestion); SubmitPrompt gains its idempotency key
+
+**The user's probe that found the gap.** "I'm not seeing how multiple
+selection, user-input, etc are being handled — this is the AskUserQuestion
+feature, right? Do we need to research the SDK api?" Researched in the shim's
+own contract rather than asserted: the SDK has ONE gate (canUseTool → the
+shim's PermissionRequest/PermissionResponse round-trip, core.proto:1043, with
+allow-with-edits via updated_input), and AskUserQuestion is a TOOL riding
+that same gate — its input is questions[]{question, header, options{label,
+description}, multiSelect}, its answer is an allow whose updated_input
+carries the selections. The sketched verdict-only endpoint could not carry
+answers; the drawn card could not draw a question.
+
+**feed.proto (stage-2 reopen).** FeedPermission gains `oneof body { tool
+{headline, arguments} | questions }`; FeedPermissionQuestions is the batch
+(1–4); each FeedPermissionQuestion is text + header + `oneof options
+{ single_select | multi_select }` — the user's shape: THE ARM IS THE
+SELECTION MODE (radios vs checkboxes), replacing the orchestrator's bool,
+with dedicated arm messages so a mode-specific prop later (a "pick at most
+N") lands on its arm. The mode is PER QUESTION because the SDK puts
+multiSelect on each question — one batch can mix a radio and a checkbox
+question, so lifting it to the body was unrepresentable. Free-text "Other"
+is always offered by the drawn card, never an option. FeedPermissionSuccess
+gains the `answered_questions` arm: given answers, one per question, each
+{header, chosen[], other_text}, drawn as the verdict line.
+
+**endpoint_answer_permission.proto.** Request { WorkspaceRef; ToolCallId;
+oneof answer { allow_once | allow_for_session | deny{reason} | answers } };
+AnswerPermissionAnswers = one AnswerPermissionAnswer per question in batch
+order {chosen[], other_text}; the daemon translates to
+allow-with-updated_input. Body/answer mismatch is a refusal. Success is
+"delivered" — the card's state change arrives on the feed stream. Error
+empty until derived.
+
+**SubmitPromptRequest** gains `idempotency_key = 2` (the 3b retrofit).
+
+**Flagged, not modeled:** general allow-with-edits (editing a Bash command
+before allowing) — the shim wire supports it; no UI exists today.
+
+**Skill update dispatched** (one-shot subagent, worktree
+proto-bool-mode-oneof): a boolean that selects the INTERPRETATION of
+adjacent data is a two-arm oneof of dedicated (possibly identically-shaped)
+arm messages, never an adjacent bool — genericized, per the user's
+instruction.
+
 ### 3c: Interrupt lands — the folded stop verb; the pending file sheds its ack payload
 
 **What changed ("okay").** `endpoint_interrupt.proto`: InterruptRequest

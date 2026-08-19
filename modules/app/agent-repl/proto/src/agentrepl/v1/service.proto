@@ -16,6 +16,7 @@ import "agentrepl/v1/endpoint_submit_prompt.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
 import "agentrepl/v1/endpoint_get_feed_page.proto";
 import "agentrepl/v1/endpoint_interrupt.proto";
+import "agentrepl/v1/endpoint_answer_permission.proto";
 import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -35,6 +36,10 @@ service AgentRepl {
   // "Stop that": the running turn, or a detached bubble's work — the arm is
   // the target. See endpoint_interrupt.proto.
   rpc Interrupt(InterruptRequest) returns (InterruptResponse);
+
+  // The permission card's verdicts and the question card's answers. See
+  // endpoint_answer_permission.proto.
+  rpc AnswerPermission(AnswerPermissionRequest) returns (AnswerPermissionResponse);
 
   // The composer's submission, whole; the daemon recognizes programmatically
   // handled commands transparently. See endpoint_submit_prompt.proto.
