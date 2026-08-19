@@ -1,0 +1,45 @@
+// endpoint_update_merge_queue.proto — UpdateMergeQueue: operator control of
+// the daemon's merge queue. DAEMON ADMIN section. Purely inbound; the
+// queue's visible state rides the merge bubbles' queue tabs and the roster's
+// status arms. Consolidates the old PauseMergeQueue / ResumeMergeQueue /
+// EvictMerge trio.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateMergeQueueRequest {
+  // THE ARM IS THE ACTION.
+  oneof action {
+    // Stop admitting merges to the front; queued merges hold in place.
+    UpdateMergeQueuePause pause = 1;
+    // Resume admitting.
+    UpdateMergeQueueResume resume = 2;
+    // Take ONE workspace's merge off the queue.
+    UpdateMergeQueueEvict evict = 3;
+  }
+}
+message UpdateMergeQueuePause {}
+message UpdateMergeQueueResume {}
+message UpdateMergeQueueEvict {
+  // Whose merge to evict.
+  WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message UpdateMergeQueueResponse {
+  oneof result {
+    UpdateMergeQueueSuccess success = 1;
+    UpdateMergeQueueError error = 2;
+  }
+}
+// Done; the bubbles and roster reflect it.
+message UpdateMergeQueueSuccess {}
+// EMPTY ON PURPOSE: arms DERIVED at the wave (already paused, not paused,
+// no such queued merge), spelled per 3b.
+message UpdateMergeQueueError {
+}
