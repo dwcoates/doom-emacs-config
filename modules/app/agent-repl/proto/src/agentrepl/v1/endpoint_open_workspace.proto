@@ -1,0 +1,29 @@
+// endpoint_open_workspace.proto — OpenWorkspace. SIDEBAR section.
+// Open a registered-but-closed workspace: the daemon brings its session up; the roster row moves accordingly.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message OpenWorkspaceRequest {
+  WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message OpenWorkspaceResponse {
+  oneof result {
+    OpenWorkspaceSuccess success = 1;
+    OpenWorkspaceError error = 2;
+  }
+}
+
+// Done; every visible effect arrives on the streams.
+message OpenWorkspaceSuccess {}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+message OpenWorkspaceError {
+}
