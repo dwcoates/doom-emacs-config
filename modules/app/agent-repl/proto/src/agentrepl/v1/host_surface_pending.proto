@@ -15,54 +15,9 @@ package agentrepl.v1;
 import "frontend/v1/failure.proto";
 import "conversation/v1/api.proto";
 import "agentrepl/v1/shared.proto";
-import "shim/v1/core.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
-
-// What a CancelDetachedAgentsRequest did, carried on the command's ack.
-//
-// It is the SHIM's verdict relayed, not a daemon re-derivation — see
-// shim.v1.DetachedCancelOutcome for why only the shim can answer
-// "what was running when this landed?" without racing task end.
-//
-// A ONEOF OF MESSAGES, never a bool: "did it work" cannot distinguish a stop
-// that reached three agents from a session that had nothing to stop from a
-// session that could not be asked, and a frontend renders those three
-// differently.
-message DetachedCancelOutcome {
-  oneof outcome {
-    DetachedAgentsCancelled cancelled = 1;
-    shim.v1.NoDetachedAgentsRunning nothing_running = 2;
-    shim.v1.DetachedCancelUnsupported unsupported = 3;
-  }
-}
-
-// Detached work was running and the stop reached every agent counted here.
-//
-// TODO(respelling): this shares a name with shim.v1.DetachedAgentsCancelled
-// but NOT its contents — that one carries `repeated string task_ids`, this one
-// carries `count`, which has no counterpart there. It was therefore not
-// collapsed into shim.v1's, and DetachedCancelOutcome above stays declared
-// here for the same reason: its `cancelled` arm must reference this message.
-message DetachedAgentsCancelled {
-  // How many detached agents were stopped. A COUNT rather than the shim's
-  // task ids: a task id is daemon-internal bookkeeping a frontend has no
-  // vocabulary for, and what a frontend renders is "cancelled 3 agents". The
-  // ids stay on the shim-wire arm, where the daemon uses them to settle
-  // exactly those agents' detached-work messages.
-  int64 count = 1;
-}
-
-// TWO OF THE THREE ARMS ABOVE NAME shim.v1's MESSAGES DIRECTLY. "Nothing
-// was running" and "this shim cannot be asked" are shim-wire facts the daemon
-// forwards unchanged, so this package keeps no second copy of them to drift
-// against the originals.
-//
-// THE DAEMON STILL REFUSES ON THE `nothing_running` ARM (the ack carries
-// ok=false alongside it): a cancel that stopped nothing is a keystroke that did
-// nothing, and reporting it as success is how a stop that silently missed looks
-// exactly like a stop that worked.
 
 // ---- the per-workspace state, the per-session catalog entry, and their inputs ----
 

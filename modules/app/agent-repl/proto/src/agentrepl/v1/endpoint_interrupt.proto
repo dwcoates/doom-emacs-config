@@ -1,0 +1,61 @@
+// endpoint_interrupt.proto — Interrupt: "stop that". FEED section. One user
+// intent, two targets; THE ARM IS THE TARGET. (CancelDetachedAgents does not
+// return; this verb absorbed it.)
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_ref.proto";
+import "conversation/v1/message.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message InterruptRequest {
+  WorkspaceRef workspace = 1;
+  oneof target {
+    // The running turn (the vendor query interrupt).
+    InterruptTurn turn = 2;
+    // A detached bubble's work, by its row's id (the task stop).
+    conversation.v1.MessageId detached = 3;
+  }
+}
+message InterruptTurn {}
+
+// THE ARM IS THE OUTCOME.
+message InterruptResponse {
+  oneof result {
+    InterruptSuccess success = 1;
+    InterruptError error = 2;
+  }
+}
+
+// THE ARM IS WHAT THE STOP DID — a frontend renders these differently, so a
+// bool cannot carry it. `nothing_running` is an ANSWER, never a failure: the
+// stop found the session already quiet, which is a legitimate reply to a
+// legitimate ask ("a stop that missed" is distinguishable BY THE ARM, not by
+// mis-classing it as an error).
+message InterruptSuccess {
+  oneof outcome {
+    // The turn was interrupted.
+    InterruptedTurn interrupted_turn = 1;
+    // The detached work was stopped.
+    InterruptedDetached interrupted_detached = 2;
+    // Nothing was running.
+    InterruptNothingRunning nothing_running = 3;
+  }
+}
+message InterruptedTurn {}
+message InterruptedDetached {
+  // How many detached agents the stop reached ("cancelled 3 agents"). The
+  // shim's task ids stay on the shim wire — daemon bookkeeping a frontend
+  // has no vocabulary for.
+  int64 count = 1;
+}
+message InterruptNothingRunning {}
+
+// EMPTY ON PURPOSE: refusal arms are DERIVED at the wave (e.g. the shim
+// cannot be asked — today's shim.v1 DetachedCancelUnsupported — is a real
+// failure and lands here), spelled per 3b.
+message InterruptError {
+}
