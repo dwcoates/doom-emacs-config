@@ -114,6 +114,23 @@ that transport.
 
 ## Landed changes
 
+### 3c: UpdateShutdownSchedule lands — DAEMON ADMIN section opens
+
+**What changed ("okay these look good").** endpoint_update_shutdown_schedule
+.proto: request oneof action { schedule{at_ms} | cancel | now }; success {} |
+error {} (arms derived: nothing scheduled to cancel, a newer schedule
+stands). Consolidates ScheduleShutdown/CancelScheduledShutdown/Shutdown.
+
+**Clarified for the record (the user asked what it is for and why elisp).**
+No UX motivation exists — it is DEPLOY TOOLING's drain-and-exit control,
+purely inbound; elisp is merely today's plumbing to reach it, and nothing
+about the schedule is pushed outward on this verb. The user-visible
+consequences ride surfaces already modeled: held prompts in the tray during
+the drain, footer status. Kept in agentrepl.v1 (typed, one service) rather
+than a side mechanism. Review discipline correction, also applied from here
+on: an RPC is presented with BOTH its request and response, one RPC at a
+time unless RPCs genuinely share messages.
+
 ### 3c: WatchFooter, WatchDaemonHolds, UpdateHeldPrompt, AnswerHeldOffer land — FOOTER and DAEMON-HOLD TRAY sections complete
 
 **What changed ("makes sense", after the UX walk).** Four endpoint files +
