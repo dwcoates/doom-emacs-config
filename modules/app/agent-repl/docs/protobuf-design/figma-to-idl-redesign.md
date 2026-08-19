@@ -114,6 +114,23 @@ that transport.
 
 ## Landed changes
 
+### ReportHostAction NEVER EXISTS — the daemon→host command loop is deleted ("yeah delete them")
+
+**Reopens the host-section settlement's item 2 (the report-back fold).** The
+old pair: HostActionCompleted (Emacs reporting on a daemon-DISPATCHED action,
+by action_id, over the old push-stream inbox) and WorkspaceMaterialized
+(Emacs reporting its local buffer/perspective bookkeeping done). Both die
+with nothing in their place: the daemon no longer gives Emacs orders — Emacs
+watches the streams and REACTS (a workspace appears on the roster → open its
+buffers; closes → tear down), same as the webapp; and the daemon never waits
+on Emacs's buffers, so "I finished setting up" has no listener (answers 3
+and 4: the inbox was an abstraction leak of the old push stream, and the
+report is a dead feature). If a real daemon→host ask surfaces at the wave,
+it re-enters as its own designed verb, never a generic action envelope.
+
+**The HOST section is therefore three RPCs**: RegisterWorkspace,
+SelectWorkspace (landed), and WatchHost (next — the pending-file judgment).
+
 ### 3c: SelectWorkspace lands
 
 **What changed ("looks good").** endpoint_select_workspace.proto: request
