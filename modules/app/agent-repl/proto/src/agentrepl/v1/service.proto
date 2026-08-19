@@ -14,6 +14,7 @@ package agentrepl.v1;
 
 import "agentrepl/v1/endpoint_submit_prompt.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
+import "agentrepl/v1/endpoint_get_feed_page.proto";
 import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -25,6 +26,10 @@ service AgentRepl {
   // nested alike. The stream's message is the row itself, whole. See
   // endpoint_watch_feed.proto.
   rpc WatchFeed(WatchFeedRequest) returns (stream frontend.v1.FeedRow);
+
+  // The feed's history half: a page of rows for one container, "first" or
+  // "next" — the daemon holds the walk. See endpoint_get_feed_page.proto.
+  rpc GetFeedPage(GetFeedPageRequest) returns (GetFeedPageResponse);
 
   // The composer's submission, whole; the daemon recognizes programmatically
   // handled commands transparently. See endpoint_submit_prompt.proto.
