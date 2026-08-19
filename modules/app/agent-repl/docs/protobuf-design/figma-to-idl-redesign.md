@@ -114,6 +114,47 @@ that transport.
 
 ## Landed changes
 
+### Stage 3, HOST and DAEMON-ADMIN sections settled — the section walk is COMPLETE (seven sections)
+
+**Settled ("sounds fine, let's continue"), on the orchestrator's stated
+recommendations, each confirmable below.**
+
+1. The former Host section SPLITS: **Host** (RegisterWorkspace,
+   SelectWorkspace, WatchHost, ReportHostAction) and **Daemon admin**
+   (UpdateShutdownSchedule, UpdateMergeQueue, DaemonHealth, SessionHealth,
+   ClientLog) — the admin verbs are not host-natured; Emacs is just today's
+   caller. Sections: feed, sidebar, topbar, footer, daemon-hold tray, host,
+   daemon admin.
+2. Consolidations per the established pattern: UpdateShutdownSchedule
+   { schedule | cancel | now }; UpdateMergeQueue { pause | resume |
+   evict{workspace} }; WorkspaceMaterialized + HostActionCompleted fold into
+   ReportHostAction { oneof action } with arms derived at 3c from what Emacs
+   actually reports.
+3. COMPOSER GATING IS A RESOLVED ELEMENT on the host stream ("open" /
+   "blocked: merging" / "blocked: reviving" as arms), never raw bools
+   (merge_lease_held, hibernated) Emacs maps — the figma→idl gray-zone
+   ruling: what Emacs DRAWS arrives resolved; what it coordinates with
+   (session_id, generation, backfill, lifecycle booleans it does not draw)
+   stays coordination residue, exempt.
+4. Facts with no Emacs need LEAVE the host surface (each already has its
+   drawn home): model/model_options, total_tokens/total_cost_usd/
+   context_window, permission_mode/pending_permissions, merge_status,
+   merged_at_ms. Also dead: fence (stage 2 deleted fencing), the
+   merge_dequeue_offer (the tray's HeldOffer).
+5. BackfillState (the never-blue signal Emacs reads) converts enum → oneof;
+   `failed` carries typed evidence, shaped at 3c. Its known limitation (a
+   sidecar read error that is not a malformed line manifests as PENDING
+   forever) is carried in the pending file's comment and stays owed.
+6. DELETE-WITHOUT-CLOSE IS DEAD: CloseWorkspace is the only teardown; no
+   DeleteSession returns.
+7. DetachedCancelOutcome/DetachedAgentsCancelled are not stream output: they
+   become the folded Interrupt{detached}'s success arms at 3c.
+
+**The full fact-by-fact enumeration of the host stream's contents** (what is
+carried vs re-homed vs deleted) was walked with the user in conversation and
+is the 3c worksheet for WatchHost; the pending file is deleted when 3c has
+placed or deleted every message in it.
+
 ### COMMAND PANELS section dissolves into the feed's SubmitPrompt; the endpoint lands (the first agentrepl.v1 RPC)
 
 **The user's model.** "The client sends normal user requests, and the daemon
