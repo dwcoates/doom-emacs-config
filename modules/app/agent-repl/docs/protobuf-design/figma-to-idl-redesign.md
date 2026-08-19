@@ -114,6 +114,15 @@ that transport.
 
 ## Landed changes
 
+### 3c: WatchWorkspaceRoster lands — the one global stream
+
+**What changed (the user approved the workspace-management RPC prototypes).**
+`endpoint_watch_workspace_roster.proto`: WatchWorkspaceRosterRequest {} —
+empty on purpose, the roster is global — and the stream's message is
+frontend.v1.WorkspaceRoster itself, whole. The SIDEBAR service section opens.
+The bool→oneof skill convention is PR "create-or-update-protobufs:
+mode-selecting bool is a two-arm oneof" (explanation-engine #7490, queued).
+
 ### 3c: AnswerPermission lands; kind ④ reopened — the permission card gains a QUESTIONS body (AskUserQuestion); SubmitPrompt gains its idempotency key
 
 **The user's probe that found the gap.** "I'm not seeing how multiple
