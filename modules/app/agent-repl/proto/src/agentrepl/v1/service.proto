@@ -25,6 +25,9 @@ import "agentrepl/v1/endpoint_merge_workspace.proto";
 import "agentrepl/v1/endpoint_hibernate_workspace.proto";
 import "agentrepl/v1/endpoint_revive_workspace.proto";
 import "agentrepl/v1/endpoint_restart_workspace.proto";
+import "agentrepl/v1/endpoint_watch_topbar.proto";
+import "agentrepl/v1/endpoint_set_model.proto";
+import "frontend/v1/topbar.proto";
 import "frontend/v1/sidebar.proto";
 import "frontend/v1/feed.proto";
 
