@@ -114,6 +114,45 @@ that transport.
 
 ## Landed changes
 
+### STAGE 3b SETTLED: the cross-endpoint conventions
+
+**Settled ("the conventions are sound yes" for 1–2; "kay proceed" on the
+orchestrator's recommendations for 3–6).**
+
+1. RESPONSE SPELLING: every response is `oneof result { <Method>Success
+   success = 1; <Method>Error error = 2; }` — the standing convention, the
+   package's one spelling (already in force on SubmitPrompt).
+2. ERROR DERIVATION: every `<Method>Error`'s arms are DERIVED from the
+   daemon's real refusal sites, never invented; entry-less failures name
+   failure.proto evidence types.
+3. KEEPALIVE: an EXPLICIT IN-BAND FRAME, not a transport ping — every
+   component stream's message is `oneof { <view> | keepalive {} }` at cadence
+   C; a client hearing nothing for T marks the component stale. An h2 ping
+   proves the connection lives, not that THIS component's resolver lives;
+   the guarded failure is a wedged publisher, which only an in-band frame
+   disproves. C and T are implementation-wave constants, not schema.
+4. WORKSPACE ADDRESSING: a shared typed identity `WorkspaceRef { string dir }`
+   in agentrepl.v1, a field on every per-workspace request and stream-open.
+   Requests are CALLED, not drawn, so a shared identity type is right here
+   (the stage-2 flag answered); the URL-param approach left addressing
+   outside the schema.
+5. IDEMPOTENCY: a client-minted `idempotency_key` on SubmitPrompt ONLY — the
+   one verb where a duplicate is costly and undetectable (a retried
+   answer/interrupt/close is naturally idempotent by its target). The daemon
+   refuses duplicates by key — the guarantee that replaced
+   newQueueEntryID()/promptreceipt's request-id refusal.
+6. OLD HEADER RESIDUE: "no paint attestation" carries forward as a
+   service-level comment (responses never claim anything was rendered); the
+   request_id/client_id envelope DIES (Connect's unary response IS the
+   correlation; no client identity is load-bearing — ClientLog names its
+   caller in-band); protojson note carries forward as fact (Connect serves
+   binary or JSON per client; elisp uses JSON).
+
+**Consequences.** Every stream message defined at 3c is a two-arm oneof
+(view | keepalive). SubmitPromptRequest gains `idempotency_key` at its 3c
+turn. WorkspaceRef is declared once in agentrepl.v1 when the first
+per-workspace endpoint lands at 3c.
+
 ### Stage 3, HOST and DAEMON-ADMIN sections settled — the section walk is COMPLETE (seven sections)
 
 **Settled ("sounds fine, let's continue"), on the orchestrator's stated
