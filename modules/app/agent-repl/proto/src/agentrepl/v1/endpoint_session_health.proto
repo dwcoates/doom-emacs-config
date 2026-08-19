@@ -1,0 +1,53 @@
+// endpoint_session_health.proto — SessionHealth: is this workspace's session
+// healthy? DAEMON ADMIN section. The per-workspace counterpart of
+// DaemonHealth; same verdict shape, ITS OWN fault type — a session's fault
+// classes are not the daemon's, so SessionFault is deliberately not
+// DaemonFault even while both await their derived arms.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SessionHealthRequest {
+  WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME. error = the question could not be ANSWERED
+// (unknown workspace); UNHEALTHY IS AN ANSWER, never an error.
+message SessionHealthResponse {
+  oneof result {
+    SessionHealthSuccess success = 1;
+    SessionHealthError error = 2;
+  }
+}
+
+// THE ARM IS THE VERDICT.
+message SessionHealthSuccess {
+  oneof health {
+    SessionHealthy healthy = 1;
+    SessionUnhealthy unhealthy = 2;
+  }
+}
+message SessionHealthy {}
+
+// Unhealthy: the standing faults, each typed.
+message SessionUnhealthy {
+  repeated SessionFault faults = 1;
+}
+
+// One standing fault — DaemonFault's discipline, the session controller's
+// vocabulary: a dynamic detail now, the kind oneof ADDED WITH its first
+// derived arms at the wave, from the controller's real fault sites.
+message SessionFault {
+  // The dynamic account, verbatim — supplements the kind, never replaces it.
+  string detail = 1;
+}
+
+// EMPTY ON PURPOSE: arms DERIVED at the wave (unknown workspace, …), spelled
+// per 3b.
+message SessionHealthError {
+}
