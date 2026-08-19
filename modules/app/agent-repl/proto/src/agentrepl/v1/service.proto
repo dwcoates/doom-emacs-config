@@ -27,6 +27,10 @@ import "agentrepl/v1/endpoint_revive_workspace.proto";
 import "agentrepl/v1/endpoint_restart_workspace.proto";
 import "agentrepl/v1/endpoint_watch_topbar.proto";
 import "agentrepl/v1/endpoint_set_model.proto";
+import "agentrepl/v1/endpoint_watch_footer.proto";
+import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
+import "agentrepl/v1/endpoint_update_held_prompt.proto";
+import "agentrepl/v1/endpoint_answer_held_offer.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -90,4 +94,22 @@ service AgentRepl {
   // The selector's pick: the typed echo token handed back. See
   // endpoint_set_model.proto.
   rpc SetModel(SetModelRequest) returns (SetModelResponse);
+
+  // ---- FOOTER ----
+
+  // The footer's stream: the view, whole.
+  rpc WatchFooter(WatchFooterRequest) returns (stream WatchFooterResponse);
+
+  // ---- DAEMON-HOLD TRAY ----
+
+  // The tray's stream: the tray, whole.
+  rpc WatchDaemonHolds(WatchDaemonHoldsRequest) returns (stream WatchDaemonHoldsResponse);
+
+  // Act on a held prompt: deliver now, or discard. See
+  // endpoint_update_held_prompt.proto.
+  rpc UpdateHeldPrompt(UpdateHeldPromptRequest) returns (UpdateHeldPromptResponse);
+
+  // Answer a question the daemon parked in the tray. See
+  // endpoint_answer_held_offer.proto.
+  rpc AnswerHeldOffer(AnswerHeldOfferRequest) returns (AnswerHeldOfferResponse);
 }
