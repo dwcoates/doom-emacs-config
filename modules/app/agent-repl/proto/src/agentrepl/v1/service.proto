@@ -13,11 +13,18 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/endpoint_submit_prompt.proto";
+import "agentrepl/v1/endpoint_watch_feed.proto";
+import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 service AgentRepl {
   // ---- FEED ----
+
+  // The feed's live half: every row upsert for one workspace, top-level and
+  // nested alike. The stream's message is the row itself, whole. See
+  // endpoint_watch_feed.proto.
+  rpc WatchFeed(WatchFeedRequest) returns (stream frontend.v1.FeedRow);
 
   // The composer's submission, whole; the daemon recognizes programmatically
   // handled commands transparently. See endpoint_submit_prompt.proto.

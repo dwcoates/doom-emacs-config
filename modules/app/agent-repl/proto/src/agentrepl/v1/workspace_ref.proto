@@ -1,0 +1,16 @@
+// workspace_ref.proto — THE WORKSPACE IDENTITY every per-workspace request
+// and stream-open carries (3b convention). Requests are CALLED, not drawn,
+// so ONE shared identity type is right here — unlike frontend.v1, where each
+// component wraps the fact it draws in its own element.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// A workspace, by the daemon registry's key.
+message WorkspaceRef {
+  // Absolute worktree dir.
+  string dir = 1;
+}
