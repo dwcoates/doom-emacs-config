@@ -223,8 +223,15 @@ message HeldOffer {
   }
 }
 
-// The merge-dequeue question. ITS BODY IS DECIDED WHEN agentrepl.v1's
-// MergeDequeueOffer IS WALKED (shared.proto, stage 3): the facts it carries
-// move here or are embedded here; nothing about them is settled by this
-// placement. Empty until then, on purpose — not a guess at its fields.
-message HeldOfferMergeDequeue {}
+// The merge-dequeue question, resolved for drawing: the daemon composes the
+// sentence ("interrupting — keep your merge's queue slot, or release it?");
+// the card draws it and offers the two answers, which are AnswerHeldOffer's
+// arms (keep | release), never fields here.
+message HeldOfferMergeDequeue {
+  HeldOfferHeadline headline = 1;
+}
+
+// The sentence an offer card leads with, composed daemon-side.
+message HeldOfferHeadline {
+  string text = 1;
+}
