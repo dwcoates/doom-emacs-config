@@ -1,0 +1,220 @@
+// endpoint_watch_host_workspace.proto — WatchHostWorkspace: the host-facing
+// view of ONE workspace. HOST section. Emacs opens one subscription per
+// workspace it has open; the daemon streams that workspace's host state,
+// whole-replaced per push. NOT DRAWN (the exempt non-GUI residue): Emacs
+// uses it to correlate processes, gate its composer, and manage buffers —
+// rendering fixed treatments per arm, never mapping values.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message WatchHostWorkspaceRequest {
+  // The workspace whose host state to watch — the daemon-minted identity,
+  // echoed from registration or the roster.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+message WatchHostWorkspaceResponse {
+  // The workspace's host state, whole-replaced per push.
+  HostWorkspace host = 1;
+}
+
+// The host-facing state of one workspace: what Emacs needs to correlate
+// processes, gate its composer, and manage buffers — nothing a webview draws.
+message HostWorkspace {
+  // The session axis. THE ARM IS WHETHER A SESSION EXISTS; the existing
+  // arm's own oneof is its standing. Everything that only means anything in
+  // one standing lives INSIDE that standing's arm.
+  oneof session {
+    // Registered, but no session was ever created for it.
+    HostSessionNone none = 1;
+    // A session exists (current: live, ended, or hibernated).
+    HostSessionExisting existing = 2;
+  }
+  // What Emacs names the workspace's buffers from — a sibling of the
+  // lifecycle because a buffer needs a name in every standing.
+  HostWorkspaceNaming naming = 3;
+}
+
+message HostSessionNone {}
+
+// A session that exists: its identity, and its standing.
+message HostSessionExisting {
+  // The session's identity — common to every standing, which is why it
+  // lives here rather than repeated per arm. Sessions rotate under one
+  // workspace; this is what distinguishes them, and what Emacs correlates
+  // transcripts, health probes and fault windows against.
+  HostSessionId id = 1;
+  // THE ARM IS THE STANDING.
+  oneof standing {
+    HostSessionLive live = 2;
+    HostSessionTerminal terminal = 3;
+    HostSessionHibernated hibernated = 4;
+  }
+}
+
+message HostSessionLive {
+  // The controller generation operating the session. Rotates on restart
+  // without the session id changing; fault windows are scoped to it.
+  HostGenerationId generation = 1;
+  // Whether the session's shim process is attached right now. False while
+  // the daemon is between shim starts (crash, restart under way) — what
+  // distinguishes "live but momentarily unwired" from "up".
+  bool shim_attached = 2;
+  // The vendor's own identifiers for the session's conversation. THE ARM IS
+  // THE VENDOR. Unset while no vendor conversation exists yet.
+  oneof vendor_info {
+    HostVendorClaude claude = 3;
+  }
+  // Whether the on-disk transcript has reached the store — the never-blue
+  // signal: a live session whose history never arrived is not ready to show.
+  HostBackfill backfill = 4;
+  // Whether prompting is allowed right now. THE ARM IS THE GATE — only a
+  // LIVE session has an open question here; the other lifecycle arms are
+  // blocked by their own nature, which the arm itself states. Emacs renders
+  // the arm verbatim.
+  oneof composer {
+    HostComposerOpen open = 5;
+    // A merge owns the session (the merge lease).
+    HostComposerMerging merging = 6;
+    // The daemon is draining toward a scheduled shutdown.
+    HostComposerDraining draining = 7;
+    // The workspace's shim is being restarted (graceful RestartWorkspace).
+    HostComposerRestarting restarting = 8;
+  }
+  // Standing faults scoped to `generation`, for doctor output; a fault
+  // window dies with its generation, which is why these live on the LIVE
+  // arm and nowhere else.
+  repeated HostFault faults = 9;
+}
+
+message HostSessionTerminal {
+  // Whether a new session can resume this one's vendor conversation. False
+  // means reopening starts a fresh conversation.
+  bool rehydratable = 1;
+}
+
+message HostSessionHibernated {
+  // The typed account of the hibernation, from which the revival gate
+  // renders.
+  HostHibernation detail = 1;
+  // THE ARM IS THE STANDING: parked, or revival under way.
+  oneof standing {
+    HostHibernationParked parked = 2;
+    HostHibernationReviving reviving = 3;
+  }
+}
+message HostHibernationParked {}
+message HostHibernationReviving {}
+
+// A daemon-minted session identity — the echo token Emacs correlates by.
+message HostSessionId {
+  string value = 1;
+}
+
+// A daemon-minted controller-generation identity; rotates on restart within
+// one session. Scopes fault windows and health probes.
+message HostGenerationId {
+  string value = 1;
+}
+
+// The vendor conversation's identifiers, for transcripts and support reports.
+message HostVendorClaude {
+  // The vendor conversation id.
+  string session_id = 1;
+  // The account the session runs against (its CLAUDE_CONFIG_DIR) — which
+  // login this conversation belongs to.
+  string config_dir = 2;
+}
+
+// What Emacs names buffers from. Facts only — their DRAWN home is the
+// topbar's title elements.
+message HostWorkspaceNaming {
+  // The short machine-friendly name ("fix-flaky-reconnect"). UNSET until the
+  // daemon has derived one.
+  optional string slug = 1;
+  // The human title. UNSET until the vendor supplies one.
+  optional string title = 2;
+}
+
+// Whether the on-disk transcript has been backfilled into the store. THE ARM
+// IS THE STATE.
+message HostBackfill {
+  oneof state {
+    // No transcript exists on disk: a genuinely fresh workspace.
+    HostBackfillNone none = 1;
+    // A transcript exists, but no file-plane event has arrived yet.
+    HostBackfillPending pending = 2;
+    // The file plane delivered into the store.
+    HostBackfillDone done = 3;
+    // Part of the transcript could not be read.
+    HostBackfillFailed failed = 4;
+  }
+}
+message HostBackfillNone {}
+message HostBackfillPending {}
+message HostBackfillDone {}
+message HostBackfillFailed {
+  // The sidecar's account, verbatim. (Known evidence gap: a non-parse read
+  // error today manifests as pending-forever, not failed — carried from the
+  // old BackfillState comment, owed to the wave.)
+  string detail = 1;
+}
+
+message HostComposerOpen {}
+message HostComposerMerging {}
+message HostComposerDraining {}
+message HostComposerRestarting {}
+
+// One standing fault — the dynamic account now; the kind oneof is added WITH
+// its first derived arms at the wave, from the controller's real fault sites
+// (the old RuntimeFault's component/fault_type/impact/cause strings become
+// arms then).
+message HostFault {
+  // The dynamic account, verbatim — supplements the kind, never replaces it.
+  string detail = 1;
+  // When the fault window opened, epoch ms.
+  int64 opened_at_ms = 2;
+}
+
+// The hibernation account, from which the revival gate renders. THE ARM IS
+// THE CAUSE (carried verbatim from the retired agentrepl.v1
+// HibernationDetail).
+message HostHibernation {
+  // When the session entered hibernation, unix millis.
+  int64 since_ms = 1;
+  oneof cause {
+    // The keep-alive loop reached its configured maximum: idle time crossed
+    // the cutoff, so the daemon stopped pinging and hibernated in the same
+    // transition (the two are one act by construction).
+    HostHibernationIdleCutoff idle_cutoff = 2;
+    // The user forced it via HibernateWorkspaceRequest.
+    HostHibernationForced forced = 3;
+    // The keep-alive loop discovered the expected cache TTL had already
+    // elapsed before a ping could fire (laptop sleep, daemon downtime).
+    // Pinging a cold cache would pay full re-ingest cost for nothing, so
+    // the discovery IS the hibernate transition — reported loudly rather
+    // than silently absorbed.
+    HostHibernationCacheExpired cache_expired = 4;
+  }
+}
+// Automatic hibernation at the idle cutoff.
+message HostHibernationIdleCutoff {
+  // The configured cutoff that tripped, millis — carried so the gate can say
+  // "asleep after Nh idle" without the host knowing daemon config.
+  int64 cutoff_ms = 1;
+}
+// User-forced hibernation. Empty: the cause IS the arm.
+message HostHibernationForced {}
+// Hibernation because the cache went cold before a ping could fire.
+message HostHibernationCacheExpired {
+  // How long the session had actually been idle when the check ran, millis.
+  int64 elapsed_ms = 1;
+  // The expected cache TTL the elapsed time exceeded, millis.
+  int64 ttl_ms = 2;
+}

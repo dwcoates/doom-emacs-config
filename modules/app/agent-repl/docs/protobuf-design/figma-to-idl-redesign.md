@@ -114,6 +114,48 @@ that transport.
 
 ## Landed changes
 
+### 3c: WatchHostWorkspace lands; `host_surface_pending.proto` is DELETED — every agentrepl.v1 section complete
+
+**What changed ("okay looks good", after three user restructurings).**
+endpoint_watch_host_workspace.proto: request { workspace.v1.WorkspaceRef };
+response wraps HostWorkspace whole. HostWorkspace = { oneof session { none |
+existing }; naming }. HostSessionExisting hoists the shared HostSessionId
+(the user's factoring) over oneof standing { live | terminal{rehydratable} |
+hibernated{detail; parked|reviving} }. HostSessionLive carries generation,
+shim_attached, oneof vendor_info { HostVendorClaude{session_id, config_dir} }
+(the user's restructure of the bare vendor strings), HostBackfill (the
+BackfillState enum converted: none|pending|done|failed{detail}), oneof
+composer { open | merging | draining | restarting } and the
+generation-scoped faults — the last two RELOCATED INTO the live arm at the
+user's prompting (adjacent exclusivity: hibernated+open was representable
+nonsense as a sibling; a fault window dies with its generation).
+HostComposerGate/Blocked and the composed gate sentence DIE — the other
+lifecycle arms are blocked by their own nature, and Emacs rendering a fixed
+treatment per arm is ordinary oneof rendering. HostHibernation* carried
+verbatim from HibernationDetail (since_ms; idle_cutoff{cutoff_ms} | forced |
+cache_expired{elapsed_ms, ttl_ms}). HostWorkspaceNaming { optional slug,
+optional title } replaces the bare slug/title strings the user called out.
+
+**DELETED: host_surface_pending.proto, entirely** — every message placed or
+ruled dead per the settled worksheet (WorkspaceState with its fence and SSM
+snapshot fields, SessionView, RuntimeFault→HostFault's future arms,
+BackfillState→HostBackfill, merge fields → the feed bubble / roster / tray).
+
+**The flow, recorded because the user asked for it twice**: Emacs connects,
+RegisterWorkspace(dir)→minted ref per known worktree; per OPEN workspace one
+WatchHostWorkspace(ref) subscription (snapshot first, whole-replace on
+change); closes cancel; a daemon restart drops streams and Emacs re-registers
+and re-subscribes. The daemon never calls Emacs. The earlier global-stream
+sketch (empty request, WorkspaceRef keying each entry) was REJECTED by the
+user — workspace-dependent and workspace-independent channels must be
+distinct types; the ref moved from the entries into the request, and no
+daemon-level host stream exists until a daemon-level pushed fact needs one.
+
+**Left dangling, surfaced**: agentrepl/v1/shared.proto is now imported by
+NOTHING (its MergeStatus/MergeDequeueOffer/Refusal*/HibernationDetail all
+superseded or carried); and frontend.v1's HeldOfferMergeDequeue body is
+still empty-on-purpose awaiting its walk.
+
 ### `workspace.v1` — a NEW LEAF PACKAGE for workspace identity; the identities are daemon-minted echo tokens
 
 **The user's rulings.** (1) A path is never an identity — "directories can be
