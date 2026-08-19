@@ -114,6 +114,109 @@ that transport.
 
 ## Landed changes
 
+### WHAT A TURN IS, verified against the SDK; and DETACHED WORK gets one stream per item
+
+**THE DEFINITION (the user's, verified at his instruction).** A TURN is the
+window during which the main thread cannot ACCEPT a prompt — where ACCEPTING
+means the prompt is fed into context and produces output tokens. Being able to
+TYPE a prompt, and having one handled, are different facts.
+
+**HOW IT WAS VERIFIED, recorded so nobody re-purchases it.** The user asked
+which method to use before any claim was made; the SDK's own type surface was
+chosen over web research or our shim's behavior, because it is authoritative
+for the exact version we run. In
+`agent-shim/claude/shim/node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts`
+(version 0.3.220):
+
+- The vendor CLI holds a COMMAND QUEUE. A prompt submitted during a turn is
+  ENQUEUED, not handled.
+- A queued prompt runs AS ITS OWN LATER TURN: the docs name "the drain loop,
+  which starts the next queued turn immediately", and describe a batch being
+  "dequeued and coalesced into one turn".
+- The queue is first-class on the wire: `interrupt()` returns `still_queued`
+  ("uuids of async user messages that survive this interrupt... These WILL run
+  unless cancelled first"), with `cancel_queued: true` to sweep them and
+  `cancel_async_message` to drop one by uuid. Capabilities
+  `interrupt_receipt_v1` / `interrupt_cancel_queued_v1` gate both.
+
+So the definition is CONFIRMED, not inferred: a prompt is handled iff no turn
+is in flight on the main thread. Detached work and subagent-addressed messages
+are outside a turn entirely — the queue docs state subagent-addressed messages
+are out of scope for the main-thread queue.
+
+**CLI vs SDK, stated because the record needs the distinction.** "The CLI" is
+the Claude Code executable; the SDK (`@anthropic-ai/claude-agent-sdk`) SPAWNS
+it as a subprocess (`pathToClaudeCodeExecutable`, `spawnClaudeCodeProcess`) and
+drives it over stdio. The QUEUE LIVES IN THE CLI, so its enqueue-vs-handle
+behavior is a Claude Code fact our stack can only observe, never alter. They
+version independently, which is why `system/init` advertises `capabilities` for
+feature detection rather than version sniffing.
+
+**ONE STREAM PER DETACHED ITEM (the user's proposal).** A session has a turn
+stream plus one stream per in-flight detached item; a stream ends iff its work
+concludes, so "zero item streams" IS "no detached work in flight" — liveness
+becomes structural instead of derived. It deletes the phantom-task reconciler
+(`daemon/internal/sessioncontroller/phantomtask.go`) and `QueryLiveTasks`'
+steady-state role.
+
+**THE DISCRIMINATOR IS THE USER'S TURN DEFINITION, and the vendor makes it
+observable.** `SDKBackgroundTasksChangedMessage` (`system:background_tasks_changed`,
+sdk.d.ts:2913) is "the full set of live background tasks, emitted whenever
+membership changes (start, completion, kill, A FOREGROUND AGENT BEING
+BACKGROUNDED)" — a LEVEL signal with REPLACE semantics, existing expressly "so
+a missed bookend cannot wedge a stale running indicator". Membership in that
+set IS "not blocking the main thread". So detachment is a fact with a DEFINED
+INSTANT (the membership change), not a property of how work was launched —
+`run_in_background: true` is merely the common way to enter the set at birth.
+Ctrl+B (`backgroundTasks(toolUseId?)`) MIGRATES an item from the turn stream to
+its own stream, and is an announced membership change rather than a corner
+case.
+
+**ANNOUNCEMENT RIDES THE SPAWNING STREAM; there is NO roster stream.** The turn
+stream announces what the turn spawns, AS IT HAPPENS (not batched at turn end);
+an item's stream announces what IT spawns. One rule applied recursively, so the
+stream tree mirrors the work tree and provenance is implicit in which stream
+announced an item. The alternative — a session-scoped roster stream publishing
+the live set — was considered and REJECTED: it is a second authority for a fact
+the streams already state structurally.
+
+**A CORRECTION, KEPT VISIBLE.** The orchestrator claimed a turn-scoped
+announcement could not work because "at the instant the response is written the
+SDK has not spawned anything yet", and used that to argue for the roster
+stream. WRONG: the shim's own fixture shows `task_started` is emitted DURING
+the turn, before the turn's result. The claim was true only of a submit
+answered at ACCEPTANCE (today's `Ack`), which the orchestrator had silently
+assumed. ROOT CAUSE: reasoning from the current unary-ack shape while designing
+a streaming one. The user's push ("are you sure?") is what surfaced it. Its
+consequence — that the TURN MUST BE A STREAM, because it is the announcement
+channel for work that outlives it — is a load-bearing conclusion of the
+correction, not of the original claim.
+
+**Consequences, each accepted.**
+
+- CANCELLING AN ITEM IS A CALL, never closing the stream client-side: the
+  landed bounded-stream convention reads a stream ending without a terminal
+  frame as a TRANSPORT FAILURE, so a client-side close would be misread as one.
+  The item's stream then concludes with its failure arm.
+- `ShimHello.live_task_set` SURVIVES, on a new footing: the level is
+  per-CLI-process and emits nothing at startup, so a REATTACHING daemon — which
+  was not there for the announcements — must be told the current membership
+  once, at the handshake. The orchestrator first claimed the streams killed it;
+  they do not. A cold CLI start correctly resets to empty, because a dead CLI's
+  background tasks are dead too.
+- The daemon must NEVER pair start/end edges to maintain membership; the SDK
+  states ordering between the level and the edges is unspecified. The SHIM
+  consumes the level and presents a derived contract; the vendor's warning
+  binds the shim, not the daemon.
+- `skip_transcript` on `task_started` marks ambient/housekeeping work. It rides
+  the stream as a RENDERING property — the stream still opens, because ambient
+  work is live work that must be cancellable and must not wedge an indicator.
+- Cross-stream live ORDERING is not meaningful and is not the daemon's to
+  track: the store's seq is the durable order and each item renders in its own
+  component. The orchestrator raised this as a concern; the user rejected it and
+  the orchestrator withdrew it.
+
+
 ### STAGE 4 AMENDED: shim.v1 is designed as an RPC SERVICE, walked suites -> inventory -> shapes; FOUR sections settled
 
 **The user's amendment.** "I'm thinking we should give shim.v1 the same
