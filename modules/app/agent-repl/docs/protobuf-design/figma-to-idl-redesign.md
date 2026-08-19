@@ -114,6 +114,27 @@ that transport.
 
 ## Landed changes
 
+### CONVENTION (3b addition): every rpc returns `<RpcName>Response`; CORRECTION: ten rpcs had silently missed the service block
+
+**The user's ruling.** No rpc returns a foreign type directly — a stream of a
+frontend view returns `stream <RpcName>Response` wrapping the view as its
+single field, declared in that rpc's endpoint file. Landed by a sonnet
+subagent for the three violations (WatchFeedResponse{row},
+WatchWorkspaceRosterResponse{roster}, WatchTopbarResponse{topbar}); every
+later endpoint follows it directly.
+
+**CORRECTION, KEPT VISIBLE.** The subagent's report exposed that
+service.proto held only FIVE rpcs: the orchestrator's earlier service-block
+edits for the sidebar and topbar sections (WatchWorkspaceRoster,
+CreateWorkspace, the six workspace verbs, WatchTopbar, SetModel) had
+SILENTLY NO-OP'D — python str.replace anchored on text that was not in the
+file (it assumed AnswerPermission closed the block; SubmitPrompt did), and
+nothing asserted the replacement took. The endpoint files and design entries
+were always right; only the service block lagged. Rebuilt whole with all 15
+rpcs in section order, compiles. ROOT CAUSE: unasserted textual replaces on
+a file whose shape had drifted; the fix discipline is asserting every
+replace (as the feed.proto edits did) or rebuilding the block wholesale.
+
 ### 3c: WatchTopbar + SetModel land; `AgentModel` — the typed-echo-token pattern (stage-1 api.proto reopened additively)
 
 **The user's pattern, stated and codified.** "We should have a message
