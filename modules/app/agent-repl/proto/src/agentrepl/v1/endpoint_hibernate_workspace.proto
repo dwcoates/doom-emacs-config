@@ -1,0 +1,29 @@
+// endpoint_hibernate_workspace.proto — HibernateWorkspace. SIDEBAR section.
+// Put the workspace to sleep: the daemon stands its session down; revival is ReviveWorkspace.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message HibernateWorkspaceRequest {
+  WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message HibernateWorkspaceResponse {
+  oneof result {
+    HibernateWorkspaceSuccess success = 1;
+    HibernateWorkspaceError error = 2;
+  }
+}
+
+// Done; every visible effect arrives on the streams.
+message HibernateWorkspaceSuccess {}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+message HibernateWorkspaceError {
+}

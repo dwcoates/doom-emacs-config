@@ -1,0 +1,29 @@
+// endpoint_merge_workspace.proto — MergeWorkspace. SIDEBAR section.
+// Enqueue this workspace's merge. Success means ENQUEUED — the merge's whole life from the queue onward is the feed's merge bubble; the merge targets the workspace's parent by definition, and the daemon decides everything else.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message MergeWorkspaceRequest {
+  WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message MergeWorkspaceResponse {
+  oneof result {
+    MergeWorkspaceSuccess success = 1;
+    MergeWorkspaceError error = 2;
+  }
+}
+
+// Done; every visible effect arrives on the streams.
+message MergeWorkspaceSuccess {}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+message MergeWorkspaceError {
+}

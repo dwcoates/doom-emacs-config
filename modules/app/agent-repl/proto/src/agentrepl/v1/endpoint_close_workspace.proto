@@ -1,0 +1,29 @@
+// endpoint_close_workspace.proto — CloseWorkspace. SIDEBAR section.
+// Tear down a workspace's editor state without merging. THE ONLY TEARDOWN — no delete-without-close exists (stage-3 ruling).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message CloseWorkspaceRequest {
+  WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message CloseWorkspaceResponse {
+  oneof result {
+    CloseWorkspaceSuccess success = 1;
+    CloseWorkspaceError error = 2;
+  }
+}
+
+// Done; every visible effect arrives on the streams.
+message CloseWorkspaceSuccess {}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+message CloseWorkspaceError {
+}
