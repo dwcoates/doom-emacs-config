@@ -114,6 +114,76 @@ that transport.
 
 ## Landed changes
 
+### STAGE 4 AMENDED: shim.v1 is designed as an RPC SERVICE, walked suites -> inventory -> shapes; FOUR sections settled
+
+**The user's amendment.** "I'm thinking we should give shim.v1 the same
+treatment as agentrepl.v1: Connect RPC service + endpoint_*.proto files. We
+devise the RPC suites first, then the RPCs within each, then the
+request/response protobufs for each RPC one at a time, landing after each."
+
+**What this REPLACES.** Stage 4's recorded walk order was by FILE (`core` ->
+`entry-delivery` -> `message-page` -> `external` -> `bookkeeping`, top-down by
+containment). That order is RETIRED for this stage: the package is now walked
+by SERVICE structure — 4a suites, 4b per-suite RPC inventory, 4c per-RPC
+request+response shapes one at a time. The record files (`external`,
+`bookkeeping`, `message-page`) are walked as shared-package VOCABULARY when an
+endpoint needs them, not as increments of their own. The 3b conventions carry
+in unchanged (response spelling, errors derived not invented, no keepalive).
+The pattern was codified into the skill by a one-shot subagent — PR
+"docs(create-or-update-protobufs): RPC-service file model and
+suites-inventory-shapes iteration" (explanation-engine #7496, MERGED).
+
+**Process correction, kept visible.** The orchestrator's first suite proposal
+was derived by mapping the existing files one-by-one onto services. The user
+rejected the method itself: "this sounds like bad process... we need to have a
+holistic view of the files, and work out a service architecture from that."
+ROOT CAUSE: taking the on-disk decomposition as the specification — the same
+inversion the skill's homeless-message rule forbids, applied to files rather
+than messages. The sections below were derived after reading all five files
+whole.
+
+**THE FOUR SECTIONS (settled, "sounds good").**
+
+1. SESSION — wiring the session up, identity and rotation, health, teardown,
+   session-level bookkeeping, AND the session state that conditions turns:
+   model (catalog, selection, change) and permission mode.
+2. TURN — submitting a prompt, the turn's own stream (its content, its spawn
+   announcements, its permission asks), interrupting it, and the CLI's prompt
+   QUEUE.
+3. DETACHED WORK — the per-item stream (its content, its spawns, its
+   permission asks), stopping an item, and backgrounding in-flight foreground
+   work.
+4. HISTORY — bounded reads of durable conversation: paged reads and replay
+   ranges.
+
+**Two sections the orchestrator proposed and the USER dissolved, with the
+verification that settled each.**
+
+- PERMISSION is not a section. The user: "are model and permission not a part
+  of turn?" Half right, and the half that is wrong is the useful one. A
+  canUseTool ask belongs to whichever unit is RUNNING A TOOL — the turn, but
+  equally a backgrounded subagent with no turn open — so the ASK is a frame on
+  the asking unit's stream and the ANSWER is a call addressed to that unit.
+  One concern, split across two sections by the unit that owns it, never a
+  section of its own.
+- MODEL is not part of a turn. VERIFIED in the SDK we run
+  (@anthropic-ai/claude-agent-sdk 0.3.220, sdk.d.ts:2327): `setModel(model?)`
+  is "Change the model used for SUBSEQUENT RESPONSES", callable mid-turn and
+  effective inside one (a turn holds several responses); `setPermissionMode`
+  (sdk.d.ts:2300) is "for the current SESSION". Both are session state that
+  CONDITIONS turns, so both live in SESSION.
+
+**There is NO standing live-conversation stream.** Live content rides the turn
+stream and the item streams (see the detached-work entry); what remains of
+"conversation" is HISTORY, pulled and bounded, which is why section 4 is named
+for it. This is a real departure from the current package, where a standing
+Subscribe carries every live record.
+
+**Work order the user set:** turn + detached work first (turn leading, since it
+announces detached work and its frame shape is the one detached mirrors), then
+the remaining sections.
+
+
 ### STAGE 4 CONVENTION: a BOUNDED stream's every frame is `oneof result { update | success | failure }`; standing streams have no terminal arm
 
 **Settled ("i'm fine with flattened version, just for consistency's sake").**
