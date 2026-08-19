@@ -114,6 +114,22 @@ that transport.
 
 ## Landed changes
 
+### 3c: DaemonHealth lands — typed fault classes + dynamic detail
+
+**What changed ("okay").** endpoint_daemon_health.proto: DaemonHealthRequest
+{}; response result { success { oneof health { healthy | unhealthy{ repeated
+DaemonFault } } } | error {} }. UNHEALTHY IS AN ANSWER, never an error.
+
+**The user's ruling on fault representation.** Typed fault arms, "with
+supported string for dynamic error details as needed — general classes of
+failures represented with messages (recursively) as far as readily doable,
+but always supporting detailed dynamic information by way of strings."
+DaemonFault = { string detail } + a kind oneof ADDED WITH its first derived
+arms at the wave (empty oneofs are illegal; inventing arms would violate
+derived-not-invented). The pending file's RuntimeFault (string component/
+fault_type/impact/cause) is this message's ancestor and is judged INTO those
+arms at the host stream's turn.
+
 ### 3c: UpdateMergeQueue lands
 
 **What changed ("looks good").** endpoint_update_merge_queue.proto: request
