@@ -114,6 +114,38 @@ that transport.
 
 ## Landed changes
 
+### STAGE 4 CONVENTION: a BOUNDED stream's every frame is `oneof result { update | success | failure }`; standing streams have no terminal arm
+
+**Settled ("i'm fine with flattened version, just for consistency's sake").**
+Every frame of a stream that CONCLUDES carries a one-level oneof: an update, or
+one of the two terminal arms. A conclusion is therefore a MESSAGE the producer
+sends, never the stream merely stopping — so a stream that ends WITHOUT a
+terminal frame is a transport failure and is read as one, never as work
+concluding. This is `ReplayDone`'s existing discipline ("a replay that simply
+stops streaming would be indistinguishable from one still in flight")
+generalized to every bounded stream in the package.
+
+**One level, not two.** The user sketched `result { update | done }` with
+`done { success | failure }` and then chose the FLATTENED spelling for
+CONSISTENCY with the stage-2 feed-row ruling (`oneof result { update |
+success | error }`, "option b, rewrite approved"), noting the nested sketch was
+only more edifying as a demonstration. The orchestrator raised the nesting as
+defensible ONLY if `Done` carried fields common to both outcomes (a conclusion
+instant, a final accounting stamp); consistency won over that possibility, and
+a shared terminal fact is duplicated across the two arms if one appears —
+exactly the duplication the feed rows already accept.
+
+**SCOPE: bounded streams only.** A turn stream and a detached-work stream
+conclude and carry the terminal arms. The session's STANDING conversation
+stream does not conclude, and giving it a terminal arm would invent an ending
+it does not have.
+
+**Does not reopen the keepalive retraction.** A terminal frame is a real fact
+the producer knows and states, which is the opposite of a keepalive — a ping
+standing in for a fact nobody observed. The 3b layering (the party that can see
+the silence reports it) is untouched.
+
+
 ### shared.proto DELETED; HeldOfferMergeDequeue gets its body — STAGE 3 (agentrepl.v1) COMPLETE
 
 **What changed ("1 - yes, drop; 2 - okay let's handle").**
