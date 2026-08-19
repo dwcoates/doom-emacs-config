@@ -114,6 +114,20 @@ that transport.
 
 ## Landed changes
 
+### 3c: WatchFeed lands; `WorkspaceRef` declared
+
+**What changed ("okay let's continue").** `workspace_ref.proto` — the 3b
+shared identity, `WorkspaceRef { string dir }` (one shared type here, unlike
+frontend.v1's per-element wrappers, because requests are called, not drawn).
+`endpoint_watch_feed.proto` — `WatchFeedRequest { WorkspaceRef workspace }`;
+the stream's message is `frontend.v1.FeedRow` ITSELF, whole (an upsert by id).
+`rpc WatchFeed(WatchFeedRequest) returns (stream frontend.v1.FeedRow)`.
+
+**Settled with it.** A refused open closes the stream at the transport (no
+in-band error arm until a real need shows); NO resume token — a reconnect
+re-opens and re-pulls pages, the stream is "now" never "since" (a resume
+token would rebuild the fence machinery stage 2 deleted).
+
 ### 3b REOPENED: the keepalive convention is RETRACTED — no keepalive frames anywhere
 
 **The user's challenge, at WatchFeed's 3c turn.** An in-band keepalive arm
