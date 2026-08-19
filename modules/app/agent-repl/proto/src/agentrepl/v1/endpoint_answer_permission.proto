@@ -1,0 +1,62 @@
+// endpoint_answer_permission.proto — AnswerPermission: the permission card's
+// buttons and the question card's submission. FEED section. Joined to the
+// ask by the call id.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_ref.proto";
+import "conversation/v1/tool_call.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AnswerPermissionRequest {
+  WorkspaceRef workspace = 1;
+  // WHICH ask — the permission row's (and tool card's) join key.
+  conversation.v1.ToolCallId call = 2;
+  // THE ARM IS THE ANSWER, and it must match the card's body: verdicts
+  // answer a tool body, answers answer a questions body — a mismatch is a
+  // refusal.
+  oneof answer {
+    AnswerPermissionAllowOnce allow_once = 3;
+    AnswerPermissionAllowForSession allow_for_session = 4;
+    AnswerPermissionDeny deny = 5;
+    AnswerPermissionAnswers answers = 6;
+  }
+}
+message AnswerPermissionAllowOnce {}
+message AnswerPermissionAllowForSession {}
+message AnswerPermissionDeny {
+  // What the user said, when they said anything.
+  string reason = 1;
+}
+
+// The question card's answers, ONE PER QUESTION in the batch's order; the
+// daemon translates them to the SDK's allow-with-updated-input
+// (shim.v1.PermissionResponse.updated_input).
+message AnswerPermissionAnswers {
+  repeated AnswerPermissionAnswer answers = 1;
+}
+message AnswerPermissionAnswer {
+  // Chosen option labels, verbatim; several iff the question was
+  // multi-select; empty when only other_text answers.
+  repeated string chosen = 1;
+  // The free-text "Other" answer; empty when options were chosen.
+  string other_text = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message AnswerPermissionResponse {
+  oneof result {
+    AnswerPermissionSuccess success = 1;
+    AnswerPermissionError error = 2;
+  }
+}
+// "Delivered", nothing more: the card's state change arrives on the feed
+// stream as the row's re-push, never here.
+message AnswerPermissionSuccess {}
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (no such ask, already
+// answered, body/answer mismatch, …), spelled per 3b.
+message AnswerPermissionError {
+}

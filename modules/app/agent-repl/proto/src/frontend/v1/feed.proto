@@ -535,14 +535,66 @@ message FeedDetachedSkillDoc {
 //   │  – went unanswered · 14:05                                   │  error: the question went away
 message FeedPermission {
   conversation.v1.ToolCallId call = 1;
-  FeedPermissionHeadline headline = 2;
-  FeedPermissionArguments arguments = 3;
+  // WHAT IS BEING ASKED. THE ARM IS THE BODY the card draws.
+  oneof body {
+    // An ordinary tool wants to run: headline + arguments + verdict bar.
+    FeedPermissionTool tool = 2;
+    // The agent asked the user a question (the AskUserQuestion tool),
+    // RESOLVED into drawn questions — the client never parses tool input.
+    FeedPermissionQuestions questions = 3;
+  }
   // THE ARM IS THE STATE.
   oneof result {
     FeedPermissionUpdate update = 4;
     FeedPermissionSuccess success = 5;
     FeedPermissionError error = 6;
   }
+}
+
+// An ordinary tool's ask: what would run, drawn.
+message FeedPermissionTool {
+  FeedPermissionHeadline headline = 1;
+  FeedPermissionArguments arguments = 2;
+}
+
+// The question card: a batch of 1–4 questions, each drawn with its options.
+message FeedPermissionQuestions {
+  repeated FeedPermissionQuestion questions = 1;
+}
+
+// One question of the batch.
+message FeedPermissionQuestion {
+  // The question sentence, verbatim.
+  FeedPermissionQuestionText text = 1;
+  // The short chip label ("Pizza").
+  FeedPermissionQuestionHeader header = 2;
+  // THE ARM IS THE SELECTION MODE: radios or checkboxes. A mode-specific
+  // prop later (a "pick at most N") lands on its arm without touching the
+  // other.
+  oneof options {
+    FeedPermissionSingleSelect single_select = 3;
+    FeedPermissionMultiSelect multi_select = 4;
+  }
+}
+message FeedPermissionQuestionText {
+  string text = 1;
+}
+message FeedPermissionQuestionHeader {
+  string text = 1;
+}
+// Pick exactly one.
+message FeedPermissionSingleSelect {
+  repeated FeedPermissionQuestionOption options = 1;
+}
+// Tick any number.
+message FeedPermissionMultiSelect {
+  repeated FeedPermissionQuestionOption options = 1;
+}
+// One option. Free-text "Other" is ALWAYS offered by the drawn card and is
+// no option here.
+message FeedPermissionQuestionOption {
+  string label = 1;
+  string description = 2;
 }
 
 // The call's headline, resolved by the daemon (icon · title · subtitle).
@@ -572,9 +624,25 @@ message FeedPermissionSuccess {
     FeedPermissionAllowedOnce allowed_once = 1;
     FeedPermissionAllowedForSession allowed_for_session = 2;
     FeedPermissionDenied denied = 3;
+    // A questions body was answered; drawn as the verdict line
+    // ("Pizza: Margherita").
+    FeedPermissionAnsweredQuestions answered_questions = 5;
   }
   // When it was answered, epoch ms.
   int64 at_ms = 4;
+}
+
+// The given answers, one per question in the batch's order.
+message FeedPermissionAnsweredQuestions {
+  repeated FeedPermissionGivenAnswer answers = 1;
+}
+message FeedPermissionGivenAnswer {
+  // The question's chip label, so the line reads without the question.
+  string header = 1;
+  // Chosen option labels, verbatim; several iff the question was multi.
+  repeated string chosen = 2;
+  // The free-text "Other" answer; empty when options were chosen.
+  string other_text = 3;
 }
 message FeedPermissionAllowedOnce {}
 message FeedPermissionAllowedForSession {}
