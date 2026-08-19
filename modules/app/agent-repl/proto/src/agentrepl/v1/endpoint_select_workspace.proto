@@ -1,0 +1,30 @@
+// endpoint_select_workspace.proto — SelectWorkspace: the user switched to
+// this workspace in the editor. HOST section. The daemon stamps `current`
+// and the row's last-selected instant; the roster stream reflects it.
+// IDEMPOTENT: re-selecting the already-current workspace is a success.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SelectWorkspaceRequest {
+  WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message SelectWorkspaceResponse {
+  oneof result {
+    SelectWorkspaceSuccess success = 1;
+    SelectWorkspaceError error = 2;
+  }
+}
+// Selected; the roster stream carries the new `current`.
+message SelectWorkspaceSuccess {}
+// EMPTY ON PURPOSE: arms DERIVED at the wave (unregistered workspace),
+// spelled per 3b.
+message SelectWorkspaceError {
+}
