@@ -121,11 +121,10 @@ message FeedPageErrorHeadline {
   string tone = 2;
 }
 
-// Older rows exist; ask again with this cursor.
-message FeedPageHasMore {
-  // Opaque continuation, minted by the daemon; never parsed.
-  string cursor = 1;
-}
+// Older rows exist — ask for the next page. NO CURSOR: the daemon holds each
+// container's walk position (stage-3 ruling); this arm is purely the fact
+// that the walk has not reached the start.
+message FeedPageHasMore {}
 
 // This page reaches the beginning of the container.
 message FeedPageAtStart {}

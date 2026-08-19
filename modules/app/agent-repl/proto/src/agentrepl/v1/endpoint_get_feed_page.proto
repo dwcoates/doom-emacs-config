@@ -1,0 +1,57 @@
+// endpoint_get_feed_page.proto — GetFeedPage: the feed's history half. FEED
+// section. A page of rows for ONE container, walked into the past.
+//
+// NO CURSOR EXISTS ON THE WIRE. The client speaks only "first" and "next";
+// the DAEMON holds each container's walk position (one webview per workspace,
+// so one reader per container). `first` resets the walk to the newest page;
+// `next` continues older from where the walk stands, and a `next` with no
+// walk standing is a refusal, not an empty page.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_ref.proto";
+import "conversation/v1/message.proto";
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message GetFeedPageRequest {
+  WorkspaceRef workspace = 1;
+  // WHICH container's rows. THE ARM IS THE SCOPE.
+  oneof container {
+    // The top-level feed.
+    GetFeedPageTopLevel top_level = 2;
+    // Inside a bubble or a merge phase, by its row's id.
+    conversation.v1.MessageId parent = 3;
+  }
+  // WHICH page of the walk. THE ARM IS THE ASK.
+  oneof page {
+    // The newest page; the walk resets to it.
+    GetFeedPageFirst first = 4;
+    // The next-older page from where this container's walk stands.
+    GetFeedPageNext next = 5;
+  }
+}
+message GetFeedPageTopLevel {}
+message GetFeedPageFirst {}
+message GetFeedPageNext {}
+
+// THE ARM IS THE OUTCOME. Two error layers exist ON PURPOSE: this response's
+// error = the request could not be served (unknown workspace or container, a
+// next with no walk); the page's own error (frontend.v1.FeedPageError) = the
+// page was served but the history has a hole. Distinct facts.
+message GetFeedPageResponse {
+  oneof result {
+    // The page — FeedPage carries its own success/error split, so the
+    // response's success IS the page.
+    frontend.v1.FeedPage success = 1;
+    GetFeedPageError error = 2;
+  }
+}
+
+// EMPTY ON PURPOSE (the SubmitPromptError precedent): the refusal arms are
+// DERIVED from the daemon's real refusal sites at the wave, spelled per 3b.
+message GetFeedPageError {
+}
