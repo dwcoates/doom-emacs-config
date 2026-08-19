@@ -3,7 +3,7 @@
 // alike; the client routes by FeedRow.parent. History is GetFeedPage's; this
 // stream is what changes NOW.
 //
-// THE STREAM'S MESSAGE IS frontend.v1.FeedRow ITSELF, whole — an upsert by
+// THE RESPONSE WRAPS frontend.v1.FeedRow ITSELF, whole — an upsert by
 // FeedRow.id: a new row, or a replacement of one already shown (an arriving
 // response's re-push, a settled tool, a moved merge phase). Views only ride
 // streams — there is no keepalive frame (liveness layers elsewhere: the
@@ -18,6 +18,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/workspace.proto";
+import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -25,4 +26,10 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 message WatchFeedRequest {
   // The workspace whose feed to watch.
   WorkspaceRef workspace = 1;
+}
+
+// One feed row upsert, delivered live.
+message WatchFeedResponse {
+  // The upserted row, whole.
+  frontend.v1.FeedRow row = 1;
 }
