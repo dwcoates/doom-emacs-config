@@ -114,6 +114,36 @@ that transport.
 
 ## Landed changes
 
+### 3b REOPENED: the keepalive convention is RETRACTED — no keepalive frames anywhere
+
+**The user's challenge, at WatchFeed's 3c turn.** An in-band keepalive arm
+"bleeds implementation details"; the shim already heartbeats from the SDK, so
+source-of-truth liveness should manifest from the actual source of truth; and
+keepalive only fires when nothing is happening, when staleness is not a
+user-facing fact.
+
+**Retracted, with the layering that replaces it (each layer already modeled):**
+
+1. Source-of-truth silence (SDK/shim quiet mid-turn): the DAEMON observes it —
+   FailureShimDegraded (window-shaped) + footer status arms. Real facts from
+   the party that can see the silence, not pings.
+2. Daemon↔client pipe death: the connection fails; the client library sees it
+   and unary calls fail loudly. No frame detects a dead pipe better.
+3. A wedged publisher behind a healthy connection is a DAEMON-INTERNAL fault:
+   the daemon's own watchdog surfaces it (RuntimeFault / DaemonHealth), not N
+   clients timing frame cadence per stream.
+
+ROOT CAUSE of the error: the orchestrator carried the stage-2 "keepalive
+convention" forward from the HeartbeatView deletion without re-asking WHO
+should detect each silence; putting the detector in every client was the same
+client-derivation failure the redesign removes elsewhere.
+
+**Consequences.** Stream messages carry views only: WatchFeed's stream message
+is plain FeedRow (the oneof wrapper returns only if a real second arm — e.g.
+an in-band error — is ever agreed). No stream defined at 3c gets a keepalive
+arm. The stage-2 footer entry's "liveness is the keepalive" sentence is
+superseded by this layering.
+
 ### STAGE 3b SETTLED: the cross-endpoint conventions
 
 **Settled ("the conventions are sound yes" for 1–2; "kay proceed" on the
