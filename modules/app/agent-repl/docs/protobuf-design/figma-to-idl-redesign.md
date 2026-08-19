@@ -114,6 +114,22 @@ that transport.
 
 ## Landed changes
 
+### 3c: WatchFooter, WatchDaemonHolds, UpdateHeldPrompt, AnswerHeldOffer land — FOOTER and DAEMON-HOLD TRAY sections complete
+
+**What changed ("makes sense", after the UX walk).** Four endpoint files +
+four rpcs (19 total). WatchFooter / WatchDaemonHolds: { WorkspaceRef } →
+stream <Rpc>Response wrapping the view whole. UpdateHeldPrompt:
+{ WorkspaceRef; TurnId turn; oneof action { release | drop } } — the TurnId
+is the echo-token loop closed: minted at submission
+(SubmitPromptSuccess.turn), served inside the tray's HeldPrompt entry,
+handed back unchanged; release = deliver NOW (interrupting the running turn
+when that is what delivery takes), drop = discard (the composer takes the
+text back); doing nothing is the normal path. AnswerHeldOffer: addressed by
+OFFER KIND (a workspace has at most one offer of a kind standing — a token
+would over-address); merge_dequeue { keep | release }. All success arms are
+"done — the tray's new state arrives on its stream"; error arms empty until
+derived. The echo-token skill convention merged as explanation-engine #7492.
+
 ### CONVENTION (3b addition): every rpc returns `<RpcName>Response`; CORRECTION: ten rpcs had silently missed the service block
 
 **The user's ruling.** No rpc returns a foreign type directly — a stream of a
