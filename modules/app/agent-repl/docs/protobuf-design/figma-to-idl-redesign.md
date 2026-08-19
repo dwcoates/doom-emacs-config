@@ -114,6 +114,22 @@ that transport.
 
 ## Landed changes
 
+### shared.proto DELETED; HeldOfferMergeDequeue gets its body — STAGE 3 (agentrepl.v1) COMPLETE
+
+**What changed ("1 - yes, drop; 2 - okay let's handle").**
+agentrepl/v1/shared.proto deleted — imported by nothing; its contents all
+superseded (MergeStatus → the feed bubble; MergeDequeueOffer → the tray's
+HeldOffer; HibernationDetail → HostHibernation; the Refusal* messages remain
+reference material in git history for deriving error arms at the wave).
+frontend.v1 HeldOfferMergeDequeue = { HeldOfferHeadline {text} } — the daemon
+composes the sentence; the two answers are AnswerHeldOffer's arms, never
+fields of the card.
+
+**Stage 3 closes**: agentrepl.v1 is service.proto (27 rpcs, seven sections),
+one endpoint_*.proto per rpc, and nothing else; workspace.v1 is the identity
+leaf. Stages remaining per the settled sequence: 4 (shim.v1), 5 (store.v1),
+6 (state.v1).
+
 ### 3c: WatchHostWorkspace lands; `host_surface_pending.proto` is DELETED — every agentrepl.v1 section complete
 
 **What changed ("okay looks good", after three user restructurings).**
