@@ -1,0 +1,44 @@
+// endpoint_update_shutdown_schedule.proto — UpdateShutdownSchedule: the
+// deploy tooling's drain-and-exit control. DAEMON ADMIN section. Purely
+// inbound — no schedule information is pushed anywhere on this verb; the
+// user-visible consequences arrive on the existing surfaces (held prompts in
+// the tray during the drain, footer status). Consolidates the old
+// ScheduleShutdown / CancelScheduledShutdown / Shutdown trio.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateShutdownScheduleRequest {
+  // THE ARM IS THE ACTION.
+  oneof action {
+    UpdateShutdownScheduleSchedule schedule = 1;
+    UpdateShutdownScheduleCancel cancel = 2;
+    UpdateShutdownScheduleNow now = 3;
+  }
+}
+// Drain then exit at/after this instant: finish in-flight turns, hold new
+// prompts (tray-visible), exit when quiet.
+message UpdateShutdownScheduleSchedule {
+  int64 at_ms = 1;
+}
+// Drop the standing schedule; resume normal intake.
+message UpdateShutdownScheduleCancel {}
+// Exit now: stop accepting work, flush in-flight writes, go.
+message UpdateShutdownScheduleNow {}
+
+// THE ARM IS THE OUTCOME.
+message UpdateShutdownScheduleResponse {
+  oneof result {
+    UpdateShutdownScheduleSuccess success = 1;
+    UpdateShutdownScheduleError error = 2;
+  }
+}
+// The action is armed (schedule), cleared (cancel), or under way (now).
+message UpdateShutdownScheduleSuccess {}
+// EMPTY ON PURPOSE: arms DERIVED at the wave (nothing scheduled to cancel,
+// a newer schedule already stands), spelled per 3b.
+message UpdateShutdownScheduleError {
+}
