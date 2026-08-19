@@ -114,6 +114,31 @@ that transport.
 
 ## Landed changes
 
+### 3c: the six remaining sidebar verbs land — the SIDEBAR section is complete
+
+**What changed ("those all look simple, let's land them").** Six endpoint
+files, each `{ WorkspaceRef } → { success {} | error {} }` with errors
+derived later: OpenWorkspace, CloseWorkspace (the only teardown),
+MergeWorkspace (success = ENQUEUED; the merge's life from there is the
+feed's bubble; it targets the workspace's parent by definition),
+HibernateWorkspace, ReviveWorkspace, and RestartWorkspace.
+
+**RestartWorkspace, per the user's spec.** It bounces ONLY the workspace's
+shim (rebuild if out of date + restart the process), with `bool force`:
+false = GRACEFUL — wait until no turn is in flight and no async/background
+tasks run, holding incoming prompts via the daemon hold (tray-visible)
+meanwhile; true = FORCED — interrupt the shim (current turn + background
+tasks), bounce immediately, and do NOT resume the agent afterwards —
+continuing is the user's, with a subsequent prompt. (`force` is a bool, not
+a two-arm oneof, consistent with the new skill convention's scope: no
+adjacent data changes interpretation under it. The graceful hold implies a
+FIFTH daemon-hold reason — restart pending — for the tray's hold oneof:
+flagged for the tray shapes at the wave.)
+
+**Consequences.** No MergeWorkspace parameters exist (no target override);
+no RestartWorkspace webapp/daemon rebuild semantics — never the webapp,
+never the daemon. The sidebar section's eight RPCs are all on the service.
+
 ### 3c: CreateWorkspace lands — the daemon names AND creates; the package file model settled (`workspace.proto` shared vocabulary)
 
 **File model (the user's ruling).** agentrepl.v1 is exactly: service.proto
