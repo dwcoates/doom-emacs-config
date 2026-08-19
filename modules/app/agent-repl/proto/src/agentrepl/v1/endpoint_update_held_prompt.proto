@@ -1,0 +1,50 @@
+// endpoint_update_held_prompt.proto — UpdateHeldPrompt: the tray's actions on
+// a held PROMPT. DAEMON-HOLD TRAY section. Doing nothing is the normal path —
+// a held prompt delivers itself when its hold clears; these are the two ways
+// to not wait.
+//
+// The prompt is identified by its TurnId — the TYPED ECHO TOKEN loop: the
+// daemon minted it at submission (SubmitPromptSuccess.turn), served it inside
+// the tray's HeldPrompt entry, and the client hands it back unchanged.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace.proto";
+import "conversation/v1/turn.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateHeldPromptRequest {
+  WorkspaceRef workspace = 1;
+  // WHICH held prompt — the daemon-minted turn it is held under, echoed from
+  // the tray entry.
+  conversation.v1.TurnId turn = 2;
+  // THE ARM IS THE ACTION.
+  oneof action {
+    // Deliver NOW — override the hold (interrupting the running turn when
+    // that is what delivery takes).
+    UpdateHeldPromptRelease release = 3;
+    // Discard it, never delivered (the composer takes the text back).
+    UpdateHeldPromptDrop drop = 4;
+  }
+}
+message UpdateHeldPromptRelease {}
+message UpdateHeldPromptDrop {}
+
+// THE ARM IS THE OUTCOME.
+message UpdateHeldPromptResponse {
+  oneof result {
+    UpdateHeldPromptSuccess success = 1;
+    UpdateHeldPromptError error = 2;
+  }
+}
+
+// Done; the tray's new state arrives on its stream.
+message UpdateHeldPromptSuccess {}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (no such hold, already
+// delivered), spelled per 3b.
+message UpdateHeldPromptError {
+}
