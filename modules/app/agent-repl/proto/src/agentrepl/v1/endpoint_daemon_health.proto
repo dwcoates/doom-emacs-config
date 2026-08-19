@@ -1,0 +1,53 @@
+// endpoint_daemon_health.proto — DaemonHealth: is the daemon itself healthy?
+// DAEMON ADMIN section. The health ANSWER deleted from frontend.v1 at the
+// topbar step — a response, never a view. Asked by doctor tooling and the
+// host's probes.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Nothing to ask beyond "you?".
+message DaemonHealthRequest {}
+
+// THE ARM IS THE OUTCOME. error = the question could not be ANSWERED;
+// UNHEALTHY IS AN ANSWER, never an error.
+message DaemonHealthResponse {
+  oneof result {
+    DaemonHealthSuccess success = 1;
+    DaemonHealthError error = 2;
+  }
+}
+
+// THE ARM IS THE VERDICT.
+message DaemonHealthSuccess {
+  oneof health {
+    DaemonHealthy healthy = 1;
+    DaemonUnhealthy unhealthy = 2;
+  }
+}
+message DaemonHealthy {}
+
+// Unhealthy: the standing faults, each typed.
+message DaemonUnhealthy {
+  repeated DaemonFault faults = 1;
+}
+
+// One standing fault. THE KIND IS A TYPED ARM — classes as messages,
+// recursively, as far as readily doable — PLUS a dynamic detail for what
+// only prose can carry.
+message DaemonFault {
+  // The dynamic account, verbatim — supplements the kind, never replaces it.
+  string detail = 1;
+  // THE KIND ONEOF IS ADDED WITH ITS FIRST DERIVED ARMS at the wave (an
+  // empty oneof is not legal proto): derived from the daemon's real fault
+  // sites, never invented. The pending file's RuntimeFault (string
+  // component/fault_type/impact/cause) is this message's ancestor and is
+  // judged INTO these arms at the host stream's turn.
+}
+
+// EMPTY ON PURPOSE: arms DERIVED at the wave, spelled per 3b.
+message DaemonHealthError {
+}
