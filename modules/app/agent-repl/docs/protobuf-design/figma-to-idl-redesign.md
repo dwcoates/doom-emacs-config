@@ -114,6 +114,47 @@ that transport.
 
 ## Landed changes
 
+### NO `seq` ON THE DAEMON-FACING WIRE: history is first/next with an OPAQUE continuation token, and the turn stream carries no position
+
+**The user's ruling.** "Not sure if there's a legitimate reason for the daemon
+to know about the seq value... the daemon only needs to ask the shim for the
+first page, and then subsequently use whatever identifier is returned to get
+the next page... I'm not sure if that identifier needs to be a leaky
+abstraction (seq)... and I'm definitely not thinking that turn needs to return
+it at all (this is additional complexity because the turn handler in daemon now
+needs to integrate with the history handler, which seems just bad)."
+
+**The coupling argument is the decisive one**: a turn frame carrying positions
+makes the turn handler a participant in history, which is the wrong seam.
+
+**The one real need, unpacked and satisfied without seq.** The daemon's only
+position-shaped need is CATCH-UP AFTER ITS OWN DOWNTIME — a turn can run while
+the daemon restarts, and its session state machine, accounting and turn ledger
+need those durable records (today read by seq range). That need is ordered
+PAGINATION, not seq. So the page identifier is an OPAQUE CONTINUATION TOKEN
+minted by the shim and echoed back verbatim (the typed-echo-token convention);
+`seq` stays the store's addressing, exactly as the current design already says
+("a position is the store's addressing, not a fact about a conversation").
+
+**Settled consequences.**
+
+- The turn stream's content frame carries THE RECORD AND NOTHING ELSE — no
+  position, no stored/live distinction.
+- History is `first` / `next`, as `GetFeedPage` settled one layer up.
+- The daemon persists an OPAQUE TOKEN instead of a number, so advancing a
+  cursor past a position the store never assigned becomes UNREPRESENTABLE
+  rather than guarded — the hazard `EntryDelivery`'s stored/live split was
+  built to prevent.
+
+**A DELIBERATE divergence from GetFeedPage, stated so it does not read as an
+inconsistency.** There the DAEMON holds each container's walk position and the
+webapp says only first/next, because a webview's walk dies with the webview.
+Here the token is a value the DAEMON PERSISTS rather than a position the shim
+remembers for it, because the daemon must survive its OWN restart and resume
+where it left off. Same no-leaky-cursor discipline, different holder, for a
+stated reason.
+
+
 ### 4b TURN SECTION: two rpcs — SubmitPrompt + UpdatePrompt; the DAEMON is the only queue and the only submitter; the heartbeat concept LEAVES shim.v1
 
 **THE INVENTORY (the user's consolidation).** Two rpcs: `SubmitPrompt` (open a
