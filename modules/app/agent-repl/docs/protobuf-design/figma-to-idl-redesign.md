@@ -114,6 +114,50 @@ that transport.
 
 ## Landed changes
 
+### REVERSION: stage 1 (conversation.v1) is RE-ENTERED to design the PROTOCOL model; the decisions this reopens, by name
+
+**Why the reversion.** conversation.v1 was recorded COMPLETE at `363323f1b` as
+the shared record model. The datalayer/protocol split makes it something else —
+the PROTOCOL model, shaped for consumer concerns — so its shapes are re-decided
+rather than renamed. Per the skill's reopen rule the downstream decisions are
+enumerated here before the stage is re-entered, and none is silently kept.
+
+**Taken as the reason to detour rather than push on**: the sequence put
+conversation.v1 FIRST precisely so importers are not reopened by the leaf
+changing underneath them. Sketching shim.v1's turn stream — a carrier for this
+model — before the model is settled would be the bottom-up inversion the
+sequence exists to prevent.
+
+**REOPENED, BY NAME.**
+
+- THE GRANULARITY COLLISION, which is a SHAPE question and not a rename. One
+  type, `MessageId`, currently names two granularities: a RECORD's identity
+  (`MessageEntry.message_id`) and a RENDERABLE ROW's identity
+  (`StoredMessage.message_id`, the thing a page counts). Every settled decision
+  that embedded `MessageId` therefore has an unresolved question about WHICH it
+  meant:
+  - stage 2 `feed.proto`: `FeedRow.id`, `FeedRow.parent`, `FeedBreadcrumb.target`
+    — all ROW identities.
+  - stage 2 `footer.proto`: `FooterExpandedRow.target` — a jump target, a ROW.
+  - stage 3 `endpoint_get_feed_page.proto`: the `parent` container arm — a ROW.
+  - stage 3 `endpoint_interrupt.proto`: the detached target — an item, whose
+    granularity is now a question.
+- EVERY conversation.v1 TYPE NAME the settled stages embed, which move with the
+  protocol model: `MessageId`, `MessageEntry`, `MessagePayload`, `UserSaid`,
+  `AgentSaid`, `AgentContent`, `ToolCallId`, `ToolCallBlock`, `ToolReturned`,
+  the `Permission*` family, `ApiRequestFailed`, `ContextCut`, the
+  `DetachedWork*` family, `ContentArriving`, `StopReason`. Consumers in
+  frontend.v1 (feed, footer, topbar, daemon_hold) and agentrepl.v1
+  (submit_prompt, get_feed_page, interrupt, answer_permission, set_model) are
+  repointed as each family settles.
+- STAGE 4's turn-stream content arm, which was mid-sketch. Its content frame is
+  a settled import once this stage closes.
+
+**NOT reopened.** `TurnId` (already the coarsest unit and already correctly
+named), the stage-2 figma→idl view shapes themselves, the stage-3 service
+sections and RPC inventories, and every convention landed in 3b and stage 4.
+
+
 ### THE DATALAYER AND THE PROTOCOL BECOME TWO MODELS: `StoreEntry` (persistence) and conversation.v1's Turn family (protocol)
 
 **The user's ruling.** "Current ExternalEntry should probably be just folded
