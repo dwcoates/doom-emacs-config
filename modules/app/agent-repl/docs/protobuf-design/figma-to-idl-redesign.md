@@ -114,6 +114,79 @@ that transport.
 
 ## Landed changes
 
+### THE DATALAYER AND THE PROTOCOL BECOME TWO MODELS: `StoreEntry` (persistence) and conversation.v1's Turn family (protocol)
+
+**The user's ruling.** "Current ExternalEntry should probably be just folded
+along with InternalEntry into a StoreEntry message (we'll want to be careful
+about this), and what's in conversation.v1 is the TurnResponse/TurnToolCall/
+whatever model we settle on, which would be a protocol version of the message
+(with StoreEntry being the datalayer level of the model)."
+
+**How the argument got there, including the orchestrator's WRONG objection.**
+The orchestrator objected that the split already existed — persistence concerns
+quarantined in `store.v1.InternalEntry`, `conversation.v1` being the neutral
+domain model the store merely embeds — and warned a protocol respelling would
+be a THIRD spelling with no divergence detection. The user asked it to CONFIRM
+that `ExternalEntry` is not sent to the store. IT IS: `store.v1.Entry` embeds
+it (`store/v1/entry.proto:79`) and `EntryBatch` carries `repeated Entry`, so
+the write path hands the store both halves. `ExternalEntry` is therefore not
+"the protocol half" at all — it is the SHARED half, written AND served, which
+makes `conversation.v1.MessageEntry` genuinely the persisted shape. ROOT CAUSE
+of the orchestrator's error: it took `external` to mean "the outward-facing
+projection" from the name and the daemon-import discipline, without checking the
+write path. The objection collapsed on the fact and the user's position was
+correct.
+
+**The granularity collision this fixes, surfaced on the way.** One word,
+"message", carries THREE granularities in the current package: a RECORD (one
+thing that happened — `MessageEntry`), a RENDERABLE ROW (a unit composed of
+many records, which is what a page counts — `StoredMessage.message_id`,
+`message-page.proto`'s "one of them can own hundreds of durable records"), and a
+TURN (a prompt and everything it produced). `MessageEntry.message_id` and
+`StoredMessage.message_id` are the SAME TYPE naming DIFFERENT granularities.
+That collision is the symptom of one model serving both persistence and
+consumption.
+
+**What is settled.**
+
+- `store.v1` owns the DATALAYER model: `StoreEntry`, folding today's
+  `InternalEntry` and the contents of `shim.v1.ExternalEntry`. Shaped for
+  storage concerns — provenance, dedup, position, unconvertible material.
+- `conversation.v1` owns the PROTOCOL model: the Turn family
+  (`TurnResponse`/`TurnToolCall`/detached work and the rest, exact names
+  settled at their increments). Shaped for CONSUMER concerns.
+- The SHIM owns the mapping, being the component that writes persistence and
+  serves the protocol. ONE mapping, one place, one author.
+- `shim.v1.ExternalEntry` therefore ceases to exist as a shared half; the
+  daemon-facing wire carries the protocol model.
+
+**Accepted costs, stated because the redesign has otherwise held the
+no-respell rule throughout.**
+
+- A hand-maintained mapping has NO COMPILER to detect divergence. The mitigation
+  is owed to the wave: tests that FAIL when a field is added on one side and not
+  mapped.
+- The guarantee being given up is the current design's "producing the daemon's
+  view is the field access `entry.external`, so there is no mapping function
+  that can forget a field, drift, or be updated on one side only". That
+  guarantee was real; it is traded for two models each shaped for its own
+  consumer.
+- `BookkeepingEntry` is NOT renamed into the Turn family: its arms
+  (`SessionBegan`, `SessionEnded`, `SessionIdentityChanged`,
+  `AccountUsageObservation`) are SESSION-scoped, not turn-scoped, and a
+  `Turn...` container would misname over half of them. Its no-message-id
+  property is deliberate and stays: a page counts messages, so a boundary fact
+  able to name one would silently spend a page slot.
+- "Be careful about this" is the user's own caveat on the fold, recorded as
+  such.
+
+**The convention is being generalized into the skill** by a one-shot subagent
+(worktree proto-datalayer-vs-protocol): a persistence model and a
+client-protocol model of the same data are legitimately different, licensed by a
+SINGLE owner of the mapping, and it does not license two spellings on either
+side, an unowned mapping, or restating typed identities.
+
+
 ### STANDING POLICY: the STORE IS NUKED, NEVER MIGRATED — no backfill, no hydration, no schema migration
 
 **The user's instruction, verbatim in substance.** "The store will be entirely
