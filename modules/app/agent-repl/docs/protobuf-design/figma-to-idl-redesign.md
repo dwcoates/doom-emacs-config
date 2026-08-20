@@ -114,6 +114,46 @@ that transport.
 
 ## Landed changes
 
+### THE PROTOCOL MODEL IS NODES, NOT A LOG: identity per THING, upserted ("model two, for sure")
+
+**The two candidates, and what separated them.** Model 1 (today) gives identity
+PER ARRIVAL: a draft (`ContentArriving`) and its final (`AgentSaid`) are
+separate entries with separate ids, and a tool return is an entry joined to its
+call by `tool_call_id`. Model 2 gives identity PER THING: a response holds one
+identity from its first fragment to its last, growth is a re-send of that node,
+and a return is an ARM of its call rather than a separate entry.
+
+**Why model 2.** `frontend.v1` ALREADY consumes model 2 — a `FeedRow` upserted
+by id, with `FeedAgent.result.update` carrying prose-so-far — so today the
+DAEMON converts 1 to 2, and the stage-2 record states the bridge outright: "the
+row exists from the first `ContentArriving` fragment under its future
+`AgentSaid` id". That is a consumer minting an identity for a record it has not
+seen, which is the oddest thing in the current design. With the shim now the
+boundary owner and mapper, the fold belongs there.
+
+**Two orchestrator errors on the way, kept visible.** (1) It claimed of the flat
+log that "nobody consumes it that way", implying batch assembly; the user
+corrected it — the log DOES drive incremental rendering, entry by entry. The
+real distinction is not batch-vs-incremental but WHAT AN UPDATE IS ADDRESSED TO.
+(2) Asked repeatedly to explain the distinction, the orchestrator explained it
+in prose three times before showing two small proto blocks, at which point the
+user settled it immediately. ROOT CAUSE: explaining a schema distinction in a
+medium that cannot express it. A skill convention was dispatched for this
+(worktree proto-examples-over-prose): every concept, distinction or concern put
+to the user carries exemplifying protobuf whenever a schema can illustrate it.
+
+**Consequences.**
+
+- `ContentArriving` as a payload arm DIES; prose-so-far becomes the response
+  node's `update` arm.
+- `ToolReturned` as a standalone entry DIES; the return becomes the tool-call
+  node's success/failure arm.
+- The SHIM performs the fold — accumulating fragments into a response,
+  attaching a return to its call, applying usage corrections — and the flat
+  faithful log stays on the datalayer side (`StoreEntry`).
+- The daemon stops inventing identities for records it has not seen.
+
+
 ### REVERSION: stage 1 (conversation.v1) is RE-ENTERED to design the PROTOCOL model; the decisions this reopens, by name
 
 **Why the reversion.** conversation.v1 was recorded COMPLETE at `363323f1b` as
