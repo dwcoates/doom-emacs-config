@@ -114,6 +114,23 @@ that transport.
 
 ## Landed changes
 
+### NO COLLECTIVE NOUN for the protocol model's units: the stream frame names the kinds directly
+
+**Settled ("(c) I agree with too").** The orchestrator had been calling the
+protocol model's units "nodes"; the user asked for a better term. Three shapes
+were offered — a `TurnItem` container, a `TurnPart` container, or NO collective
+noun with the stream frame's oneof naming the concrete kinds. The third was
+chosen: there is no abstract container message, so a response and a tool call
+are DELIVERED INDEPENDENTLY, each stamped with its `TurnId`, and nothing has to
+name the category they share.
+
+**Words ruled out, with reasons, so they are not re-proposed.** "element" —
+figma→idl owns it for UI elements; "entry" — `StoreEntry` owns it on the
+datalayer side and reusing it re-blurs the split just made; "event" — these
+units have state and SETTLE, which events do not; "node" — the orchestrator's
+own placeholder, rejected by the user.
+
+
 ### THE PROTOCOL MODEL IS NODES, NOT A LOG: identity per THING, upserted ("model two, for sure")
 
 **The two candidates, and what separated them.** Model 1 (today) gives identity
