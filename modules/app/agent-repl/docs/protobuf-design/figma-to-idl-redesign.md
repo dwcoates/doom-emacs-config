@@ -114,6 +114,31 @@ that transport.
 
 ## Landed changes
 
+### STANDING POLICY: the STORE IS NUKED, NEVER MIGRATED — no backfill, no hydration, no schema migration
+
+**The user's instruction, verbatim in substance.** "The store will be entirely
+nuked of its contents, so we don't care about backfilling/hydrating/migrating
+the database, and should explicitly avoid this. During development process, we
+should be nuking the store as needed and never trying to persist it."
+
+**What this LICENSES, and it is load-bearing for the whole redesign.** Every
+renaming, re-shaping and re-homing in this redesign may break the durable
+schema freely. No migration path is designed, no dual-read is written, no
+compatibility arm is kept alive for old rows, and no field is retained merely
+because persisted data names it. A durable-compatibility argument is NOT a
+reason to keep a shape.
+
+**What it FORBIDS.** An implementation agent must NOT write backfill,
+hydration, or migration code for the store, and must NOT preserve a message,
+field or arm on durable-compatibility grounds. Where existing contents are in
+the way, the store is DROPPED and recreated.
+
+**Why it is recorded here.** A downstream implementer arriving fresh would
+otherwise treat the durable store as a constraint — it is the one artifact in
+the system that looks like it must be migrated — and would either preserve dead
+shapes or spend the wave writing migrations the user explicitly does not want.
+
+
 ### NO `seq` ON THE DAEMON-FACING WIRE: history is first/next with an OPAQUE continuation token, and the turn stream carries no position
 
 **The user's ruling.** "Not sure if there's a legitimate reason for the daemon
