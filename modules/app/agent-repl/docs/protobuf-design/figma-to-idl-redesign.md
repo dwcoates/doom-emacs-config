@@ -114,6 +114,98 @@ that transport.
 
 ## Landed changes
 
+### 4b TURN SECTION: two rpcs — SubmitPrompt + UpdatePrompt; the DAEMON is the only queue and the only submitter; the heartbeat concept LEAVES shim.v1
+
+**THE INVENTORY (the user's consolidation).** Two rpcs: `SubmitPrompt` (open a
+prompt's stream) and `UpdatePrompt` (speak to an open one, `oneof action
+{ interrupt | answer_permission }`). The user's framing: "shouldn't answer
+permission/interrupt/cancel be part of one request RPC... so the bifurcation is
+submitting a prompt and updating a prompt, semantically." Both are mid-flight
+INPUTS to work in progress and differ only in what they say; each arm carries
+its own exclusive payload, which is what makes it a proper oneof.
+
+**Submit and the turn are ONE rpc.** A separate watch verb would need a turn id
+minted by something and would reopen the accepted-vs-attached gap the bring-up
+gate exists to eliminate. Submitting IS opening the turn.
+
+**THE DAEMON IS THE QUEUE — the agent binary's queue is never ours.** The
+orchestrator proposed modelling a `queued` frame for prompts the agent binary
+enqueues; the user rejected the premise: "sounds a little like queued is being
+handled by the shim. that sounds wrong. seems that if a turn is in flight
+(connect is there) that the daemon should immediately know that?" Correct — the
+daemon holds every turn stream, so it knows in-flight structurally, and it
+already holds waiting prompts in the daemon-hold tray. Two queues was the
+defect. So: the daemon submits ONLY when no turn is in flight, an open stream
+means a RUNNING turn, and `SubmitPrompt` REFUSES if one is already in flight —
+a HARD FAULT that should be logically impossible, never a state to manage.
+CONSEQUENCES: `CancelQueuedPrompt` never exists; `still_queued`/`cancel_queued`
+become defensive evidence (non-empty means something submitted behind our back,
+a fault to surface); the tray is the ONE authority for waiting prompts.
+
+**ONE SUBMITTER, and the shim's YIELD obligation is what makes it structural.**
+The orchestrator surfaced the hole: the shim's own cache keep-alive turns
+occupy the main thread without the daemon submitting, making the daemon a
+SECOND submitter and the invariant merely probable. Two fixes were offered
+(daemon drives keep-alives; or shim announces them). The user chose a third:
+keep-alives stay ENTIRELY INSIDE THE SHIM as an implementation detail. That is
+sound ONLY because the shim already discharges the guarantor — a keep-alive
+YIELDS to real work, discarding trailing keep-alive turns before a real prompt
+(`SessionRewound` + `KeepAliveDiscard`). That obligation is hereby the
+invariant's guarantor rather than an optimization.
+
+**Keep-alives are invisible on the CONTROL plane, visible on the RECORD
+plane.** They make real API calls, so their cost lands in accounting whether or
+not anything announces them, and `KeepAliveDiscard.dropped_turn_ids` marks the
+discarded turns superseded for readers to exclude ("never deleted, only
+excluded from replay"). No control-plane signal is needed or wanted. OWED TO
+THE HISTORY SECTION: a paged read must handle superseded turns.
+
+**THE HEARTBEAT CONCEPT LEAVES shim.v1 ENTIRELY.** Asked what the heartbeats
+would map to in the new architecture, the answer is that they dissolve:
+
+- `ConnectionHeartbeat` -> NOTHING. Transport liveness is HTTP/2's; 3b already
+  retracted in-band pings.
+- Liveness of a work item -> THE STREAM BEING OPEN. No frame states it.
+- `AgentHeartbeat.live_work_ids` (the set) -> THE SET OF OPEN ITEM STREAMS. The
+  daemon holds it rather than receiving it.
+- The vendor's per-item `tool_progress` detail -> AN UPDATE FRAME on that
+  work's own stream (the turn's stream for in-turn tool use, the item's stream
+  for detached work).
+
+So both heartbeat messages DIE. `AgentHeartbeat` additionally should not be
+DURABLE at all: replaying "this was running" long after it ended tells a reader
+nothing — a dead feature in the durable plane, not a message needing a home.
+
+**Facts the current schema DISCARDS that now get modelled, because they finally
+have a place.** Verified against `sdk.d.ts`'s `SDKToolProgressMessage`: the
+vendor sends `elapsed_time_seconds`, an explicit `heartbeat?: boolean`,
+`subagent_type`, and a `subagent_retry` block (agent_id, attempt, max_retries,
+retry_delay_ms, error_status, error_category) — all of which our
+`AgentHeartbeat` flattens to a bare id list. The retry block in particular
+finally gives the footer's existing `retrying` activity arm a real producer.
+
+**A retraction, kept visible.** The orchestrator proposed and then withdrew a
+`HeartbeatKeepAlive` arm on a typed heartbeat oneof. It has NO upstream source
+— nothing the vendor sends is about cache warming — so it would have been a
+shim invention relaying a fact the daemon does not need. ROOT CAUSE: designing
+a control-plane signal for a fact that already reaches the daemon on the record
+plane.
+
+**VOCABULARY, owed as a sweep.** Bare "CLI" is retired as ambiguous. VERIFIED
+layering: the SDK (`@anthropic-ai/claude-agent-sdk`, npm 0.3.220) SPAWNS the
+Claude Code binary — its own `manifest.json` ships per-platform binaries named
+`claude` (~256MB, checksummed, engine version 2.1.220, a DIFFERENT number from
+the npm package's) and drives it with `--input-format stream-json
+--output-format stream-json` (`pathToClaudeCodeExecutable`,
+`spawnClaudeCodeProcess`). The SDK is a thin client; the ENGINE — prompt queue,
+permissions, task lifecycle, compaction, plugins, OAuth — lives in the binary,
+which is WHY Claude Code has features the SDK does not. The user's initial read
+(Claude Code wraps the SDK) is inverted. Agreed vocabulary: "the agent binary"
+for the engine, "the SDK" for the npm wrapper, "the vendor" for the
+Claude-vs-other axis. OWED: sweep bare "CLI" from the shim's AGENTS.md and the
+proto docs.
+
+
 ### WHAT A TURN IS, verified against the SDK; and DETACHED WORK gets one stream per item
 
 **THE DEFINITION (the user's, verified at his instruction).** A TURN is the
