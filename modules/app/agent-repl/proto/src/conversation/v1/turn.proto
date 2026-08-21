@@ -413,3 +413,100 @@ message ReadPath {
   // The path as the tool resolved it.
   string path = 1;
 }
+
+// One hunk of a unified diff, as the producer's structured patch states it.
+// Stated rather than computed: the producer diffs at the moment of the change,
+// so context lines and line numbers describe the file as it actually was, and no
+// consumer re-reads a file that a later change has already moved on from.
+message FilePatchHunk {
+  // Where the hunk sits in the file as it was.
+  FilePatchHunkRange old_range = 1;
+  // Where it sits in the file as it now is.
+  FilePatchHunkRange new_range = 2;
+  // The hunk's lines in unified-diff form, each carrying its own leading marker,
+  // so context, additions and removals are ONE ordered sequence rather than
+  // three lists a consumer has to interleave correctly to draw.
+  repeated string lines = 3;
+}
+
+// A span of lines in one version of a file.
+message FilePatchHunkRange {
+  // First line of the span, one-based, so a card numbers its lines the way the
+  // file does.
+  uint32 start = 1;
+  // How many lines the span covers.
+  uint32 lines = 2;
+}
+
+// The agent wrote a file: handed over its whole new contents, creating it or
+// replacing what was there. Distinct from an edit, which matches and replaces a
+// string inside a file that must already contain it.
+message TurnAgentWrite {
+  oneof result {
+    TurnAgentWriteSuccess success = 1;
+    TurnAgentWriteFailure failure = 2;
+  }
+}
+
+// The file was written.
+message TurnAgentWriteSuccess {
+  // Which file.
+  ReadPath path = 1;
+
+  // Whether the file existed beforehand. The producer's own distinction, so a
+  // creation is never drawn as a rewrite of nothing.
+  oneof outcome {
+    TurnAgentWriteCreated created = 2;
+    TurnAgentWriteUpdated updated = 3;
+  }
+
+  // What changed, as hunks. For a creation every line is an addition. The
+  // producer diffs after the fact precisely so a card can show the CHANGE
+  // rather than the whole file it was handed.
+  repeated FilePatchHunk patch = 4;
+
+  // Whether the user altered the proposed content at the permission gate before
+  // accepting it. Carried because it is the only signal that what landed is not
+  // what the agent proposed — a card drawing the agent's version when the user
+  // changed it would be showing something that never happened.
+  bool user_modified = 5;
+}
+
+// The file did not exist before this write.
+message TurnAgentWriteCreated {}
+
+// The file existed and its contents were replaced.
+message TurnAgentWriteUpdated {}
+
+// The write did not happen. Arms are DERIVED from the producer's real sites at
+// the implementation wave; empty until then.
+message TurnAgentWriteFailure {}
+
+// The agent edited a file: replaced a matched string, which must have been
+// present and (unless every occurrence was requested) unique.
+message TurnAgentEdit {
+  oneof result {
+    TurnAgentEditSuccess success = 1;
+    TurnAgentEditFailure failure = 2;
+  }
+}
+
+// The edit applied.
+message TurnAgentEditSuccess {
+  // Which file.
+  ReadPath path = 1;
+
+  // What changed, as hunks — SEVERAL when every occurrence was replaced, so the
+  // occurrence count is an observable rather than a flag the consumer must
+  // reconcile against the hunks it was given.
+  repeated FilePatchHunk patch = 2;
+
+  // Whether the user altered the proposed edit at the permission gate before it
+  // applied.
+  bool user_modified = 3;
+}
+
+// The edit did not apply — the string was absent, or was not unique and every
+// occurrence was not requested. Arms are DERIVED from the producer's real sites
+// at the wave; empty until then.
+message TurnAgentEditFailure {}
