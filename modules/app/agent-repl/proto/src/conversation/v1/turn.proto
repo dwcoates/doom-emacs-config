@@ -361,18 +361,31 @@ message TurnAgentTaskId {
 // to the user. Drawn as a disclosure that sits open while it runs and collapses
 // once it settles.
 message TurnAgentThinking {
-  // Where the reasoning stands. Expect any number of updates followed by
-  // exactly one terminal arm.
+  // Where the reasoning stands. Expect exactly one start, then any number of
+  // updates, then exactly one terminal arm.
   oneof result {
+    // This stream is now carrying this reasoning: the block has opened and
+    // nothing has arrived in it yet. A consumer opens the disclosure with its
+    // live indicator and no text.
+    TurnAgentThinkingStart start = 1;
     // Still reasoning. A consumer shows a live indicator and, if there is text,
     // the reasoning so far.
-    TurnAgentThinkingUpdate update = 1;
+    TurnAgentThinkingUpdate update = 2;
     // Reasoning finished; collapse the disclosure and stop the indicator.
-    TurnAgentThinkingSuccess success = 2;
+    TurnAgentThinkingSuccess success = 3;
     // Reasoning ended without finishing.
-    TurnAgentThinkingFailure failure = 3;
+    TurnAgentThinkingFailure failure = 4;
   }
 }
+
+// A reasoning block this stream has begun carrying, with nothing in it yet.
+//
+// EMPTY ON PURPOSE, AND IT IS WHY THIS ARM EXISTS. The update arm carries
+// reasoning CUMULATIVELY, so "opened, nothing said yet" could otherwise only be
+// spelled as an update carrying an empty string — a sentinel standing in for a
+// state. The arm states it instead. No start instant rides here: nothing draws a
+// clock against reasoning, and a field no consumer reads is a field that decays.
+message TurnAgentThinkingStart {}
 
 // Reasoning is arriving. The consumer draws a live indicator; whether it can
 // draw any TEXT depends on the arm.
@@ -431,9 +444,13 @@ message TurnAgentThinkingWithheld {}
 // cannot know while writing one, since it depends on nothing further arriving;
 // the turn's own conclusion names it.
 message TurnAgentResponse {
-  // Where this block of prose stands. Expect any number of updates followed by
-  // exactly one terminal arm.
+  // Where this block of prose stands. Expect exactly one start, then any number
+  // of updates, then exactly one terminal arm.
   oneof result {
+    // This stream is now carrying this block: it has opened and no prose has
+    // arrived yet. A consumer draws the empty bubble, which is what makes the
+    // agent visibly begin answering before the first token lands.
+    TurnAgentResponseStart start = 4;
     // Prose is still arriving; the bubble is visibly building.
     TurnAgentResponseUpdate update = 1;
     // The block finished. Note this says nothing about the TURN finishing —
@@ -445,6 +462,13 @@ message TurnAgentResponse {
     TurnAgentResponseFailure failure = 3;
   }
 }
+
+// A prose block this stream has begun carrying, with nothing in it yet.
+//
+// EMPTY ON PURPOSE, for the same reason the reasoning start is: the update arm
+// carries prose CUMULATIVELY, so an opened-but-silent block would otherwise be
+// an update carrying an empty string — a sentinel standing in for a state.
+message TurnAgentResponseStart {}
 
 // Prose is arriving; the bubble is visibly building.
 message TurnAgentResponseUpdate {
@@ -498,14 +522,15 @@ message TurnAgentResponseProse {
 
 // The agent read a file.
 message TurnAgentRead {
-  // Where the read stands. The update arm ANNOUNCES the call so the item can be
+  // Where the read stands. The start arm ANNOUNCES the call so the item can be
   // drawn while it runs: without it the first frame a consumer ever receives is
   // the terminal one, and a call in progress would be undrawable because the
   // item would not yet exist.
   oneof result {
-    // The call was issued and is running. Sent ONCE, when the call is issued —
-    // never once per heartbeat.
-    TurnAgentReadRunning update = 1;
+    // This stream is now carrying this read. Sent ONCE per stream, when the
+    // call is issued. There is no update arm: a read has no growth — nothing
+    // observes it between its issue and its return.
+    TurnAgentReadStart start = 1;
     // The file was read, whole or in part.
     TurnAgentReadSuccess success = 2;
     // The read did not happen at all — no contents, partial or otherwise.
@@ -513,13 +538,13 @@ message TurnAgentRead {
   }
 }
 
-// A read that has been issued and has not yet returned.
+// A read this stream has begun carrying.
 //
 // SELF-DESCRIBING, like every frame of an upserted unit: it repeats the path
 // rather than relying on the consumer to have kept an earlier frame, because a
 // frame that only makes sense beside its predecessor cannot be the first one a
 // late-joining consumer receives.
-message TurnAgentReadRunning {
+message TurnAgentReadStart {
   // Which file is being read. Drawn as the item's headline.
   ReadPath path = 1;
   // When the read began, so a consumer can draw how long it has been waiting.
@@ -613,11 +638,12 @@ message FilePatchHunkRange {
 // replacing what was there. Distinct from an edit, which matches and replaces a
 // string inside a file that must already contain it.
 message TurnAgentWrite {
-  // Where the write stands. The update arm announces the call so the item is
+  // Where the write stands. The start arm announces the call so the item is
   // drawable before the write returns.
   oneof result {
-    // The call was issued and is running. Sent ONCE, at issue.
-    TurnAgentWriteRunning update = 1;
+    // This stream is now carrying this write. Sent ONCE per stream, at issue.
+    // There is no update arm: a write has no growth.
+    TurnAgentWriteStart start = 1;
     // The file was written, and the change is described as hunks.
     TurnAgentWriteSuccess success = 2;
     // The write did not happen; the file is as it was.
@@ -625,8 +651,8 @@ message TurnAgentWrite {
   }
 }
 
-// A write that has been issued and has not yet returned.
-message TurnAgentWriteRunning {
+// A write this stream has begun carrying.
+message TurnAgentWriteStart {
   // Which file is being written. Drawn as the item's headline. NOTHING is said
   // here about whether it will be created or overwritten: that is the outcome's
   // to state, and claiming it now would be a guess the success arm could
@@ -676,11 +702,12 @@ message TurnAgentWriteFailure {}
 // The agent edited a file: replaced a matched string, which must have been
 // present and (unless every occurrence was requested) unique.
 message TurnAgentEdit {
-  // Where the edit stands. The update arm announces the call so the item is
+  // Where the edit stands. The start arm announces the call so the item is
   // drawable before the edit returns.
   oneof result {
-    // The call was issued and is running. Sent ONCE, at issue.
-    TurnAgentEditRunning update = 1;
+    // This stream is now carrying this edit. Sent ONCE per stream, at issue.
+    // There is no update arm: a edit has no growth.
+    TurnAgentEditStart start = 1;
     // The edit applied to at least one occurrence.
     TurnAgentEditSuccess success = 2;
     // The edit did not apply — commonly because the matched text was absent, or was not unique when only one occurrence was requested.
@@ -688,8 +715,8 @@ message TurnAgentEdit {
   }
 }
 
-// An edit that has been issued and has not yet returned.
-message TurnAgentEditRunning {
+// An edit this stream has begun carrying.
+message TurnAgentEditStart {
   // Which file is being edited. Drawn as the item's headline. The matched and
   // replacement text are deliberately absent: a consumer draws the CHANGE from
   // the success arm's hunks, and the raw strings would be a second, unresolved
@@ -727,12 +754,13 @@ message TurnAgentEditFailure {}
 
 // The agent searched file CONTENTS for a pattern.
 message TurnAgentGrep {
-  // Where the search stands. The update arm announces the call: a search over a
+  // Where the search stands. The start arm announces the call: a search over a
   // large tree is not instant, and without an announcement the item would not
   // exist until it finished.
   oneof result {
-    // The call was issued and is running. Sent ONCE, at issue.
-    TurnAgentGrepRunning update = 1;
+    // This stream is now carrying this search. Sent ONCE per stream, at issue.
+    // There is no update arm: a search reports nothing until it is done.
+    TurnAgentGrepStart start = 1;
     // The search ran. Matching nothing is a success with an empty answer, not a failure — the caller asked a question and got one.
     TurnAgentGrepSuccess success = 2;
     // The search could not run at all.
@@ -755,8 +783,8 @@ message TurnAgentGrepQuery {
   optional string glob = 3;
 }
 
-// A search that has been issued and has not yet returned.
-message TurnAgentGrepRunning {
+// A search this stream has begun carrying.
+message TurnAgentGrepStart {
   // What is being searched for. Drawn as the item's headline.
   TurnAgentGrepQuery query = 1;
   // When the search began.
@@ -868,11 +896,12 @@ message TurnAgentGrepFailure {}
 
 // The agent matched file PATHS against a pattern.
 message TurnAgentGlob {
-  // Where the match stands. The update arm announces the call, for the same
+  // Where the match stands. The start arm announces the call, for the same
   // reason the search's does: a walk over a large tree is not instant.
   oneof result {
-    // The call was issued and is running. Sent ONCE, at issue.
-    TurnAgentGlobRunning update = 1;
+    // This stream is now carrying this match. Sent ONCE per stream, at issue.
+    // There is no update arm: a match reports nothing until it is done.
+    TurnAgentGlobStart start = 1;
     // The match ran. Matching nothing is a success with an empty list.
     TurnAgentGlobSuccess success = 2;
     // The match could not run at all.
@@ -890,8 +919,8 @@ message TurnAgentGlobQuery {
   optional string path = 2;
 }
 
-// A match that has been issued and has not yet returned.
-message TurnAgentGlobRunning {
+// A match this stream has begun carrying.
+message TurnAgentGlobStart {
   // What is being matched. Drawn as the item's headline.
   TurnAgentGlobQuery query = 1;
   // When the walk began.
@@ -980,12 +1009,16 @@ message TurnAgentBash {
   // than for any other tool: a shell command routinely runs for minutes, and
   // without an announcement the item would not exist for the whole of that.
   oneof result {
-    // The call was issued and is running. Sent ONCE, at issue.
-    TurnAgentBashRunning update = 1;
+    // This stream is now carrying this command. Sent ONCE per stream, at issue —
+    // and AGAIN on the work's own stream if the command detaches, because a
+    // stream's first frame can never presume a frame delivered on another one.
+    TurnAgentBashStart start = 1;
+    // New output since the last frame on this stream.
+    TurnAgentBashUpdate update = 2;
     // The command reached the shell and the shell reported on it.
-    TurnAgentBashSuccess success = 2;
+    TurnAgentBashSuccess success = 3;
     // The call could not be performed at all.
-    TurnAgentBashFailure failure = 3;
+    TurnAgentBashFailure failure = 4;
   }
 }
 
@@ -996,13 +1029,44 @@ message TurnAgentBashCommand {
   string line = 1;
 }
 
-// A command that has been issued and has not yet returned.
-message TurnAgentBashRunning {
+// A command this stream has begun carrying.
+//
+// `start` MEANS "THIS STREAM NOW CARRIES THIS WORK", NOT "THIS WORK BEGAN". A
+// command issued in a turn and then detached is announced twice — once on the
+// turn's stream, once on its own — under ONE identity, so the second is an
+// upsert rather than a new unit. The second announcement repeats the ORIGINAL
+// instant below, so a drawn clock does not reset when the work moves.
+message TurnAgentBashStart {
   // What is running. Drawn as the item's headline.
   TurnAgentBashCommand command = 1;
   // When the shell was handed the command, so a consumer can draw how long it
   // has been running.
   TurnToolCallStartedAt started_at = 2;
+}
+
+// Output that accumulated since the last frame on this stream.
+//
+// EXPECT THIS ARM ONLY ONCE THE COMMAND HAS DETACHED. A foreground command's
+// output is observable NOWHERE while it runs — no producer writes it anywhere a
+// reader can reach until the call returns — so an in-turn shell item goes
+// straight from `start` to a terminal arm. Incremental output exists only for a
+// command that became background work, whose accumulating output is read from
+// the file written for it.
+message TurnAgentBashUpdate {
+  // The bytes added since the previous frame. A DELTA, not the whole spool: the
+  // whole spool re-sent per frame is how watching a long command costs more than
+  // running it. Deliberately UNPARSED and NOT line-split — a delta can begin and
+  // end mid-line, so imposing lines here would impose a structure the output
+  // does not have.
+  string new_output = 1;
+
+  // The offset these bytes START at, as a GAP DETECTOR rather than addressing.
+  //
+  // It MUST equal the number of bytes the consumer has already accumulated for
+  // this unit. Anything else means bytes were lost, and the consumer REFUSES the
+  // frame rather than concatenating across a hole and drawing output that never
+  // existed. Never seeked to: this is an append-only sequence.
+  uint64 from_offset = 2;
 }
 
 // A command that reached the shell, and what became of it.
