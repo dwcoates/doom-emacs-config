@@ -27,6 +27,10 @@ message ApiRequestFailed {
   // What went wrong, as the vendor worded it. Held apart from the kind so a
   // client can show the sentence without switching on the arm.
   string message = 1;
+  // Which class of failure this was, so a consumer can decide whether waiting
+  // helps, whether the user must act, or whether the request itself was wrong.
+  // The set follows the vendor's documented error taxonomy; a class it adds
+  // later arrives as `unmodeled` rather than as a silently mishandled value.
   oneof kind {
     // 429. The only kind that carries a retry hint, so the hint lives here.
     ApiRateLimited rate_limited = 2;
@@ -102,6 +106,10 @@ message AgentModel {
   string name = 1;
 }
 
+// One model a session may run under, as offered by the vendor for this account.
+// Served as a list for a selector to draw; a selection echoes back the embedded
+// identity rather than any of the display text, so a client never constructs a
+// model id of its own.
 message ModelOption {
   // The model's identity — what a selection echoes back.
   AgentModel model = 1;

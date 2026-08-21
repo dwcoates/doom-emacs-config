@@ -24,6 +24,8 @@ option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 // views the daemon pushes; it never invents one. Opaque to every reader,
 // never parsed; equality is the only question asked of it.
 message TurnId {
+  // The daemon-minted identifier. Treat as an opaque token: compare it for
+  // equality, echo it back unchanged, and never parse or construct one.
   string value = 1;
 }
 
@@ -43,6 +45,9 @@ message TurnId {
 // with it, which is the only distinction that matters at this level: pipe it
 // back on the turn's own stream, or go open a stream of its own for it.
 message TurnUpdate {
+  // Whether the work stays inside this turn or has left it. The two demand
+  // different handling rather than different rendering, which is why they are
+  // separated at this level.
   oneof update {
     // Work happening WITHIN the turn. Everything about it arrives on the turn's
     // stream, and it cannot outlive the turn.
@@ -66,20 +71,45 @@ message TurnProgress {
   // no accounting figure rides the envelope, where it would be meaningless for
   // a file read or a search.
   oneof progress_item {
+    // The agent's reasoning on the way to an answer. May be withheld entirely,
+    // in which case there is nothing to draw.
     TurnAgentThinking thinking = 2;
+    // Prose the agent addressed to the user. A turn holds several: the
+    // commentary between tool calls and the answer at the end are both this.
     TurnAgentResponse response = 3;
+    // The agent asking the user to choose between options, and waiting for the
+    // answer before it can continue.
     TurnAgentQuestion question = 4;
+    // The agent invoking a skill, which arrives over several frames — the
+    // invocation first, then what the skill contributed.
     TurnAgentSkillUse skill_use = 5;
+    // The agent reading a file.
     TurnAgentRead read = 6;
+    // The agent replacing a file's contents wholesale, or creating it.
     TurnAgentWrite write = 7;
+    // The agent replacing a matched string inside an existing file.
     TurnAgentEdit edit = 8;
+    // The agent searching file contents for a pattern.
     TurnAgentGrep grep = 9;
+    // The agent matching file paths against a pattern.
     TurnAgentGlob glob = 10;
+    // The agent running a shell command. The only tool here whose output
+    // arrives incrementally while it runs.
     TurnAgentBash bash = 11;
+    // The agent spawning a subagent. Expect a detached-work frame to follow
+    // when the spawn is backgrounded rather than awaited.
     TurnAgentAgentCreate agent = 12;
+    // The agent running a workflow, which reports step by step.
     TurnAgentWorkflow workflow = 13;
+    // A tool this contract does not model — an MCP server's tool, or one added
+    // after this schema was written. Present so unmodelled work is still
+    // visible rather than silently absent.
     TurnAgentUnmodeled unmodeled = 14;
+    // The agent sending a message to another agent.
     TurnAgentSendMessage send_message = 15;
+    // The agent creating or altering an entry in the task tracker. Arrives in
+    // whichever turn the acting agent was running in, so a task edited across
+    // several turns produces several of these.
     TurnAgentTaskAct task_act = 16;
   }
 }
@@ -87,6 +117,11 @@ message TurnProgress {
 // The identity of one unit of in-turn work. Opaque; equality is the only
 // question asked of it.
 message TurnProgressItemId {
+  // The unit's identifier for the life of that unit — from its first frame to
+  // its last — so repeated frames upsert one element rather than appending new
+  // ones. For a tool call this is the call's own identity as the producer
+  // reported it; for the agent's reasoning or prose it identifies the block.
+  // Opaque: compare for equality, never parse.
   string value = 1;
 }
 
@@ -135,8 +170,12 @@ message TurnDetachableWorkCreated {
 // a kind absent here cannot claim to be detached, which is what makes
 // "reasoning ran in the background" unbuildable rather than merely wrong.
 message TurnDetachableWork {
+  // Which kind of work left the turn. The set is deliberately small: only work
+  // that can outlive the agent that started it appears here.
   oneof work {
+    // A subagent, spawned to run independently of the turn that asked for it.
     TurnAgentAgentCreate agent = 1;
+    // A shell command left running after the turn that started it ended.
     TurnAgentBash bash = 2;
   }
 }
@@ -144,6 +183,9 @@ message TurnDetachableWork {
 // The identity of one unit of detached work, and the handle a stop is aimed at.
 // Opaque; equality is the only question asked of it.
 message DetachedWorkId {
+  // The detached work's identifier: the key its own stream is opened under, and
+  // the handle a stop is addressed to. Opaque: compare for equality, never
+  // parse or construct one.
   string value = 1;
 }
 
@@ -164,8 +206,13 @@ message TurnAgentTaskAct {
 
   // What the agent did. Stopping is not an arm here: it is a change whose
   // resulting status is `killed`, so there is one way to say it rather than two.
+  // What the agent did to the tracker. The arm decides whether a consumer adds
+  // an entry or updates one it already holds; what the entry now IS comes from
+  // `state` either way.
   oneof act {
+    // The task did not exist before this. Add it.
     TurnAgentTaskCreated created = 2;
+    // The task existed and was altered. Replace what is held for it.
     TurnAgentTaskChanged changed = 3;
   }
 
@@ -199,11 +246,20 @@ message TurnAgentTaskState {
   // compiler-surfaced gap rather than an unhandled value. The set is the
   // vendor's own rather than invented here.
   oneof status {
+    // Recorded but not begun.
     TurnAgentTaskPending pending = 4;
+    // Being worked on now — the only status carrying a phrasing to show while
+    // it runs.
     TurnAgentTaskRunning running = 5;
+    // Done, having achieved what it described.
     TurnAgentTaskCompleted completed = 6;
+    // Done, having failed to. Distinct from `killed`: the work was attempted
+    // and did not succeed.
     TurnAgentTaskFailed failed = 7;
+    // Ended by something stopping it rather than by resolving either way.
     TurnAgentTaskKilled killed = 8;
+    // Begun and suspended, expected to resume. Not a terminal status: a later
+    // act can move it back to running.
     TurnAgentTaskPaused paused = 9;
   }
 }
@@ -237,6 +293,9 @@ message TurnAgentTaskPaused {}
 // The tracker's identity for one task. Opaque to every reader, never parsed;
 // equality is the only question asked of it.
 message TurnAgentTaskId {
+  // The tracker's identifier for the task. Stable across turns and across
+  // agents, so acts arriving on different streams join here. Opaque: compare
+  // for equality, never parse.
   string value = 1;
 }
 
@@ -253,9 +312,15 @@ message TurnAgentTaskId {
 // to the user. Drawn as a disclosure that sits open while it runs and collapses
 // once it settles.
 message TurnAgentThinking {
+  // Where the reasoning stands. Expect any number of updates followed by
+  // exactly one terminal arm.
   oneof result {
+    // Still reasoning. A consumer shows a live indicator and, if there is text,
+    // the reasoning so far.
     TurnAgentThinkingUpdate update = 1;
+    // Reasoning finished; collapse the disclosure and stop the indicator.
     TurnAgentThinkingSuccess success = 2;
+    // Reasoning ended without finishing.
     TurnAgentThinkingFailure failure = 3;
   }
 }
@@ -263,6 +328,8 @@ message TurnAgentThinking {
 // Reasoning is arriving. The consumer draws a live indicator; whether it can
 // draw any TEXT depends on the arm.
 message TurnAgentThinkingUpdate {
+  // Whether there is any reasoning text to show. Both arms mean the model is
+  // reasoning; only one of them can be drawn.
   oneof reasoning {
     // Text is streaming, and is drawn as it arrives.
     TurnAgentThinkingText text = 1;
@@ -279,7 +346,10 @@ message TurnAgentThinkingSuccess {
   // settles withheld, and the consumer then draws nothing rather than an empty
   // card.
   oneof reasoning {
+    // The reasoning, in full.
     TurnAgentThinkingText text = 1;
+    // The reasoning was withheld throughout. A consumer draws nothing at all
+    // for this block once it settles — not an empty card.
     TurnAgentThinkingWithheld withheld = 2;
   }
   // What the reasoning cost. Charged separately from the answer, which is why a
@@ -295,6 +365,9 @@ message TurnAgentThinkingFailure {}
 // The reasoning text as it stands. Plain text rather than markdown: it is drawn
 // verbatim and monospace, as a scratchpad rather than as prose.
 message TurnAgentThinkingText {
+  // The reasoning so far, or in full once settled. Everything said up to this
+  // point rather than a delta, so a consumer that missed a frame is correct
+  // again after the next one and accumulates nothing itself.
   string text = 1;
 }
 
@@ -309,9 +382,17 @@ message TurnAgentThinkingWithheld {}
 // cannot know while writing one, since it depends on nothing further arriving;
 // the turn's own conclusion names it.
 message TurnAgentResponse {
+  // Where this block of prose stands. Expect any number of updates followed by
+  // exactly one terminal arm.
   oneof result {
+    // Prose is still arriving; the bubble is visibly building.
     TurnAgentResponseUpdate update = 1;
+    // The block finished. Note this says nothing about the TURN finishing —
+    // several blocks settle in a turn, and which one answered it is stated by
+    // the turn's own conclusion.
     TurnAgentResponseSuccess success = 2;
+    // The block ended without completing. Whatever prose had arrived is still
+    // carried and still shown.
     TurnAgentResponseFailure failure = 3;
   }
 }
@@ -355,6 +436,9 @@ message TurnAgentResponseFailureReason {}
 
 // Prose the agent said, as markdown for the consumer to render.
 message TurnAgentResponseProse {
+  // What the agent said, as markdown for the consumer to render. Everything
+  // said up to this point rather than a delta, so nothing is accumulated
+  // client-side and a missed frame self-corrects on the next one.
   string markdown = 1;
 }
 
@@ -365,8 +449,11 @@ message TurnAgentResponseProse {
 
 // The agent read a file.
 message TurnAgentRead {
+  // How it ended. There is no update arm: a read either returns or fails, and nothing draws a partial one.
   oneof result {
+    // The file was read, whole or in part.
     TurnAgentReadSuccess success = 1;
+    // The read did not happen at all — no contents, partial or otherwise.
     TurnAgentReadFailure failure = 2;
   }
 }
@@ -381,7 +468,10 @@ message TurnAgentReadSuccess {
   // whole read carries no truncation vocabulary and a short one cannot omit the
   // figure that makes it legible.
   oneof extent {
+    // The file came back entire. Nothing further can be fetched.
     TurnAgentReadWhole whole = 2;
+    // The file was long, so only its leading portion came back. More exists,
+    // and a consumer may offer to fetch it.
     TurnAgentReadHead head = 3;
   }
 }
@@ -442,8 +532,11 @@ message FilePatchHunkRange {
 // replacing what was there. Distinct from an edit, which matches and replaces a
 // string inside a file that must already contain it.
 message TurnAgentWrite {
+  // How it ended. There is no update arm: the file is written or it is not.
   oneof result {
+    // The file was written, and the change is described as hunks.
     TurnAgentWriteSuccess success = 1;
+    // The write did not happen; the file is as it was.
     TurnAgentWriteFailure failure = 2;
   }
 }
@@ -456,7 +549,10 @@ message TurnAgentWriteSuccess {
   // Whether the file existed beforehand. The producer's own distinction, so a
   // creation is never drawn as a rewrite of nothing.
   oneof outcome {
+    // The file did not exist before. Every hunk line is an addition.
     TurnAgentWriteCreated created = 2;
+    // The file existed and its contents were replaced. The hunks describe what
+    // changed rather than the whole new file.
     TurnAgentWriteUpdated updated = 3;
   }
 
@@ -485,8 +581,11 @@ message TurnAgentWriteFailure {}
 // The agent edited a file: replaced a matched string, which must have been
 // present and (unless every occurrence was requested) unique.
 message TurnAgentEdit {
+  // How it ended. There is no update arm: an edit applies or it does not.
   oneof result {
+    // The edit applied to at least one occurrence.
     TurnAgentEditSuccess success = 1;
+    // The edit did not apply — commonly because the matched text was absent, or was not unique when only one occurrence was requested.
     TurnAgentEditFailure failure = 2;
   }
 }
@@ -519,8 +618,11 @@ message TurnAgentEditFailure {}
 
 // The agent searched file CONTENTS for a pattern.
 message TurnAgentGrep {
+  // How it ended. There is no update arm: there is no partial search result anything draws.
   oneof result {
+    // The search ran. Matching nothing is a success with an empty answer, not a failure — the caller asked a question and got one.
     TurnAgentGrepSuccess success = 1;
+    // The search could not run at all.
     TurnAgentGrepFailure failure = 2;
   }
 }
@@ -533,8 +635,14 @@ message TurnAgentGrepSuccess {
   // is why each carries only what applies to it: a count-mode search knows no
   // filenames, and a filenames-mode search knows no matching lines.
   oneof matches {
+    // The matching lines themselves. Expect this when the call asked for
+    // content.
     TurnAgentGrepContent content = 1;
+    // Only the files that contained a match — no lines. Expect this when the
+    // call asked for filenames.
     TurnAgentGrepFiles files = 2;
+    // Only how many matches there were. Expect this when the call asked for a
+    // count.
     TurnAgentGrepCount count = 3;
   }
 }
@@ -551,7 +659,10 @@ message TurnAgentGrepContent {
   // large tree, so a short answer is ordinary rather than exceptional; the set
   // arm says which case this is.
   oneof extent {
+    // Every matching line is here.
     TurnAgentGrepContentAll all = 2;
+    // The answer stops short. A consumer should say so rather than presenting
+    // it as the full result.
     TurnAgentGrepContentPartial partial = 3;
   }
 }
@@ -582,7 +693,9 @@ message TurnAgentGrepFiles {
 
   // Whether these are all the matching files.
   oneof extent {
+    // Every matching file is listed.
     TurnAgentGrepFilesAll all = 2;
+    // The list stops short of every matching file.
     TurnAgentGrepFilesPartial partial = 3;
   }
 }
@@ -615,8 +728,11 @@ message TurnAgentGrepFailure {}
 
 // The agent matched file PATHS against a pattern.
 message TurnAgentGlob {
+  // How it ended. There is no update arm: there is no partial match result anything draws.
   oneof result {
+    // The match ran. Matching nothing is a success with an empty list.
     TurnAgentGlobSuccess success = 1;
+    // The match could not run at all.
     TurnAgentGlobFailure failure = 2;
   }
 }
@@ -628,7 +744,9 @@ message TurnAgentGlobSuccess {
 
   // Whether these are all the matching paths.
   oneof extent {
+    // Every matching path is listed.
     TurnAgentGlobAll all = 2;
+    // The list stops short. How much was left out may itself be approximate.
     TurnAgentGlobPartial partial = 3;
   }
 }
@@ -650,7 +768,10 @@ message TurnAgentGlobPartial {
   // total: "42 more" and "at least 42 more" are different claims, and only one
   // of them is safe to make.
   oneof omitted {
+    // The omitted figure is exact and may be drawn as such.
     TurnAgentGlobOmittedExact exact = 2;
+    // The omitted figure is a floor. Draw it as "at least N", never as a
+    // total — the real number may be larger and is unknown.
     TurnAgentGlobOmittedAtLeast at_least = 3;
   }
 }

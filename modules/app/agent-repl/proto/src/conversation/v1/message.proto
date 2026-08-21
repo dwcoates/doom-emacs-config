@@ -1,148 +1,66 @@
-// message.proto — records that BELONG to a conversation message: the record,
-// its identity, and what a record can say. The BODIES of what it says live one
-// file per concern — tool_call.proto, agent.proto, user.proto,
-// context_cut.proto, api.proto, detached_work.proto — and the blocks those
-// bodies are made of in content_blocks.proto.
-//
-// The unit a page counts is a message, not a record. Several records share one
-// message_id and fold, in seq order, into the single thing the feed draws.
+// There's work the agent streams back in real time (responses and whatnot),
+// there's detached work (background bash call, subagent, etc) that requires
+// subsequent connections along which to stream the responses OUTSIDE of the
+// context of the turn, and there's NOT detached work, that inherently happens
+// exclusively during the course of the turn, but ALSO to which we want to
+// stream the results of to the corresponding bullet. An example: Skill *always*
+// and *inherently* corresponds to the given turn -- it cannot be detached --
+// BUT, we want to stream back various messages that correspond tot he skill
+// invokation (one fo the invocation itself, one afterwards that contains the
+// read contents of the skill, and potentially more i'm not aware of, and the
+// former should result in the rendering of the teal-background bubble, and the
+// latter should be used to populate the bubble when it arrives. So, it's
+// happening IN that turn, but across MULTIPLE updates along the connection).
+// And this is true for a lot of stuff (Bash calls will also stream back
+// results, as will read calls potentially. so i'm wondering how these are being
+// ORGANIZED in the protobuf (those messages that have the potential to have
+// updates subsequently streamed along the connection that are SPECIFIC to them
+// should be grouped into a single message along which the idenficiation for
+// that element should be attached. This is the reason for TurnProgress.progress_item_id)
 
-syntax = "proto3";
 
-package conversation.v1;
-
-import "conversation/v1/agent.proto";
-import "conversation/v1/context_cut.proto";
-import "conversation/v1/detached_work.proto";
-import "conversation/v1/api.proto";
-import "conversation/v1/tool_call.proto";
-import "conversation/v1/user.proto";
-
-option go_package = "agentrepl/proto/conversation/v1;conversationv1";
-
-// The identity of a message, minted by the producing plane.
-//
-// A TYPE, not a bare string, so that every field on every surface that holds
-// a message identity is typed as one: a `string message_id` can be assigned
-// any string at all, a MessageId can only be assigned a MessageId. This is the
-// canonical form; no surface re-spells it as a scalar (the "identity" form of
-// re-spelling).
-message MessageId {
-  // The producer-minted identity, opaque to every reader. Never empty. Both
-  // planes (stream and file) derive it from the same vendor value, which is
-  // what lets a preview be replaced by the settled message it previewed.
-  string value = 1;
+messgge TurnResponse { // eh, whatever the correct name for this is
+    oneof response {
+        TurnUpdate update = 1;
+        TurnSuccess success = 2;
+        TurnFailure failure = 2;
+    }
 }
 
-// One record BELONGING to one message. Several of these share a message_id
-// and fold, in the seq order their carrying envelope states, into the single
-// thing the feed draws. THE IDS ARE THE SAME ON EVERY RECORD, whatever its
-// payload does with the message: "opens", "updates" and "composes" are three
-// payloads, not three record shapes.
-message MessageEntry {
-  // The message this record belongs to. Records sharing it fold together, so a
-  // consumer needs no correlation pass to attach an update to what it updates.
-  MessageId message_id = 1;
-
-  // The message immediately containing this one.
-  //
-  // UNSET means this message sits directly in the feed. Absence is the fact
-  // itself: a message whose parent could not be resolved is a producer fault,
-  // never an unset pointer. Message-typed, so presence is native and an empty
-  // identity is unrepresentable rather than merely invalid.
-  //
-  // ONE HOP, NEVER THE ROOT. The feed row a nested message ultimately belongs
-  // to is not on the wire: the store derives it by walking this pointer once at
-  // ingest and indexes it itself. See shim/v1/message-page.proto.
-  MessageId parent_message_id = 2;
-
-  // What this record says about the message it belongs to.
-  MessagePayload payload = 3;
+message TurnUpdate {
+    oneof update {
+        TurnProgress update = 1; // no new connection is needed with the shim, just pipe the data back
+        TurnDetachedWork detached_work = 1; // new connection is needed with the shim, don't pipe any data back, make the connection, and let it handle the data piping back to frontend
+    }
 }
 
-// WHAT A RECORD CAN SAY, as a type rather than as a oneof buried in
-// MessageEntry.
-//
-// A `oneof` IS NOT A TYPE and cannot be imported: proto3 offers no way to name
-// `MessageEntry.payload` from another file. That left any surface needing the
-// same payload vocabulary with different stamps exactly two options — import
-// MessageEntry whole, inheriting identity and ordering stamps it wanted to set
-// itself, or write the arms out again. Writing them out again is the mechanical
-// origin of every agent-output re-spelling on frontend.v1, and this extraction
-// is what removes the pressure that produced them.
-//
-// It is PURE ENABLEMENT. MessageEntry embeds this and keeps exactly the
-// semantics it had; nothing about a durable record's meaning moves with the
-// arms, and the extraction commits to nothing about what any other surface
-// chooses to carry.
-message MessagePayload {
-  // The three groups below are a reading aid, not a schema distinction: every
-  // arm is carried by a record with the same ids, so the group an arm sits in
-  // changes nothing about the record.
-  oneof payload {
-    // ---- Records that OPEN the message they name ----
+message TurnProgress {
+    TurnUpdateId progress_item_id = 1; // if an item has more progress in the future, it neesd to have its corresponding UI element updated, and thus an id is needed
+    TokenUsage token_usage_update = 2;
+    oneof progress_item {
+        // note below the distinction between thinking and resopnse. let's verify that this jives with the actual data being used to render in the UI. I might be getting mixed up on thinking vs response
+        TurnAgentThinking thinking = 3;   // the NON-GREEN-BORDER purbple bubbles
+        TurnAgentResponse response = 4;   // the GREEN-BORDER purple bubble
+        TurnAgentQuestion question = 5; // when the agent wants to ask a question via AskUserQuestion toolcall
+        TurnAgentSkillUse skill_use = 6; // also inherently confined to a turn -- a subagent doing a skill call would have it confined to THEIR turn
+        TurnAgentRead read = 4;
+        TurnAgentWrite write = 5;
+        TurnAgentEdit edit = 6;
+        TurnAgentGrep grep = 7;
+        TurnAgentBash bash = 1;        
+        TurnAgentAgentCreate agent = 2;
+    }
+}
 
-    // Something a person typed. The opening of a turn.
-    UserSaid user_said = 1;
+message TurnDetachedWork {
+    // both of these are the sole things in TurnProgress.agent_update that can be realisitically detached (let's see if we can thing of more)
+    // we probably need to work out what the UI reflection is of this (e.g., detached agent is subagent in the expanded footer, but wahat about detached bash? That should probably be a row in the expanded footer too, but we probably also dont want to intermix agent and bash, so many a tab selection scheme for the extended footer is worthwhile, such that the user can view bash and agent as separate tabs to list the memebers in the expanded footer)
+    oneof detached_work {
+        TurnAgentBash bash = 1;        
+        TurnAgentAgentCreate agent = 2;
+    }
+}
 
-    // Something the agent said: its content blocks, and the usage its response
-    // reported.
-    AgentSaid agent_said = 2;
-
-    // A permission the agent ASKED FOR. It is a message because the agent
-    // really did ask and the user really does answer — it is a conversational
-    // act, not a dialog the daemon invented.
-    PermissionAsked permission_asked = 3;
-
-    // A request to the vendor API failed, and the vendor recorded that it did.
-    ApiRequestFailed api_request_failed = 4;
-
-    // The conversation was CUT here. It is a message because a reader must see
-    // where, rather than merely finding the history shorter than they left it.
-    ContextCut context_cut = 5;
-
-    // Work that DETACHED from the turn and now runs alongside it — a subagent,
-    // a background shell, a workflow. It is a feed row naming itself, so a page
-    // of ten rows is ten bounded things rather than ten trees.
-    DetachedWorkStarted detached_work_started = 6;
-
-    // ---- Records that UPDATE a message already opened ----
-    // They carry the same message_id, so attaching them needs no correlation
-    // and costs no additional page slot.
-
-    // Output accumulating into detached work already open.
-    DetachedWorkProgressed detached_work_progressed = 7;
-
-    // A journal step observed in detached workflow work already open. It
-    // carries the message_id of the detached work it belongs to, exactly as
-    // detached_work_progressed does, so it folds onto that card without
-    // correlation. Structured rather than folded into the progress string,
-    // because the producer read it structured.
-    WorkflowStepObserved workflow_step_observed = 8;
-
-    // Detached work reached an end, with the outcome it reached.
-    DetachedWorkEnded detached_work_ended = 9;
-
-    // The user answered a permission the agent asked for.
-    PermissionAnswered permission_answered = 10;
-
-    // A tool the agent called returned. It carries the message_id of the
-    // message that MADE the call, so the result folds onto that tool card.
-    //
-    // The vendor files tool results under user-role records, which is the
-    // accident this arm exists to not inherit: the message this record updates
-    // is the agent's response, whoever the vendor filed the result under.
-    ToolReturned tool_returned = 11;
-
-    // A skill file's contents, resolved onto the skill's own message. Replaces
-    // whole rather than appending.
-    SkillBodyResolved skill_body_resolved = 12;
-
-    // ---- Records that COMPOSE a message, arriving before it is whole ----
-
-    // A fragment of content still arriving, handed straight to the daemon by
-    // the stream plane. The completed message the file plane writes later
-    // REPLACES the preview rather than appending beside it.
-    ContentArriving content_arriving = 13;
-  }
+message TurnId {
+    string id = 1;
 }
