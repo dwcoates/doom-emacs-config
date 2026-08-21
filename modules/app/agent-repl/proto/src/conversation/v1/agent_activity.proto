@@ -69,6 +69,25 @@ message AgentActivity {
   // and depth beyond one cannot be resolved from call identities at all.
   AgentId agent_id = 17;
 
+  // WHAT THIS UNIT'S API RESPONSE COST, when this is the unit carrying it.
+  //
+  // ON THE ENVELOPE RATHER THAN IN THE ARMS, because usage is a fact about an
+  // API RESPONSE and not about any one unit of work. One response frequently
+  // yields SEVERAL units — an assistant message holding three tool calls
+  // becomes three units — and most kinds of work have no cost of their own at
+  // all, so a consumer aggregating cost would otherwise have to look for the
+  // same fact in a dozen arms that can never carry it.
+  //
+  // EXACTLY ONE UNIT PER API RESPONSE CARRIES IT: the unit for the response's
+  // FIRST content block. Every other unit of that response leaves it UNSET. A
+  // producer that stamped it on each unit of a response would make any
+  // consumer summing units over-count the bill by the number of blocks.
+  //
+  // SO ABSENCE MEANS "not the unit carrying its response's usage", NEVER "this
+  // cost nothing". A consumer SUMS this across units and must not read it as a
+  // per-unit price.
+  optional TokenUsage usage = 19;
+
   // WHICH unit this concerns, so a later update reaches the same one rather
   // than appearing as a new one. A unit is identified per THING: the agent's
   // reasoning and its prose are separate units, each holding its identity
@@ -449,9 +468,6 @@ message AgentThinkingSuccess {
     // for this block once it settles — not an empty card.
     AgentThinkingWithheld withheld = 2;
   }
-  // What the reasoning cost. Charged separately from the answer, which is why a
-  // footer draws a thinking figure beside the input one.
-  conversation.v1.TokenUsage token_usage = 3;
 }
 
 // Reasoning ended without finishing. Arms are DERIVED from the producer's real
@@ -510,21 +526,12 @@ message AgentResponseUpdate {
   // Everything said SO FAR, not a delta. A consumer that missed a frame is
   // correct again after the next one, and nothing is accumulated client-side.
   AgentResponseProse prose = 1;
-  // The accounting as it stands. Input and cache figures are final from the
-  // moment the message opens; the output figure is interim and is restated
-  // later. Carried on the update because a footer draws a live token figure
-  // during a turn rather than only after it.
-  conversation.v1.TokenUsage token_usage = 2;
 }
 
 // The block finished; the bubble stops building.
 message AgentResponseSuccess {
   // What was said, whole.
   AgentResponseProse prose = 1;
-  // The settled accounting, replacing every interim figure this unit reported.
-  // Per response rather than per turn, because a turn holds several and each is
-  // its own request.
-  conversation.v1.TokenUsage token_usage = 2;
 }
 
 // The block ended without completing.
@@ -533,10 +540,8 @@ message AgentResponseFailure {
   // answer is still shown rather than discarded. May be empty — a refusal can
   // precede any text at all.
   AgentResponseProse prose = 1;
-  // What the attempt cost, since a response that failed was still charged.
-  conversation.v1.TokenUsage token_usage = 2;
   // Why it ended. Arms are DERIVED from the producer's real sites at the wave.
-  AgentResponseFailureReason reason = 3;
+  AgentResponseFailureReason reason = 2;
 }
 
 // Why a response ended without completing. Empty until its arms are derived.
