@@ -510,3 +510,163 @@ message TurnAgentEditSuccess {
 // occurrence was not requested. Arms are DERIVED from the producer's real sites
 // at the wave; empty until then.
 message TurnAgentEditFailure {}
+
+// ==========================================================================
+// The search tools. Both answer with a list that may stop short of every match,
+// and both state that fact as an arm rather than as two counts a consumer
+// compares — so "was this truncated?" is read off the schema instead of derived.
+// ==========================================================================
+
+// The agent searched file CONTENTS for a pattern.
+message TurnAgentGrep {
+  oneof result {
+    TurnAgentGrepSuccess success = 1;
+    TurnAgentGrepFailure failure = 2;
+  }
+}
+
+// The search ran. A search that matched nothing is a success with an empty
+// answer, never a failure: the caller asked a question and got one.
+message TurnAgentGrepSuccess {
+  // WHICH SHAPE of answer this is, matching the shape the call asked for. The
+  // three are genuinely different answers rather than three views of one, which
+  // is why each carries only what applies to it: a count-mode search knows no
+  // filenames, and a filenames-mode search knows no matching lines.
+  oneof matches {
+    TurnAgentGrepContent content = 1;
+    TurnAgentGrepFiles files = 2;
+    TurnAgentGrepCount count = 3;
+  }
+}
+
+// The matching lines themselves.
+message TurnAgentGrepContent {
+  // The matching lines as the search rendered them, including whatever
+  // line-number and context decoration the call requested. Rendered by the
+  // search rather than reassembled here, so what a reader sees is what the
+  // agent saw.
+  string content = 1;
+
+  // Whether these are ALL the matching lines. A search caps its own output on a
+  // large tree, so a short answer is ordinary rather than exceptional; the set
+  // arm says which case this is.
+  oneof extent {
+    TurnAgentGrepContentAll all = 2;
+    TurnAgentGrepContentPartial partial = 3;
+  }
+}
+
+// Every matching line is present.
+message TurnAgentGrepContentAll {
+  // How many matching lines there were — all of them shown.
+  uint32 lines_returned = 1;
+}
+
+// The answer stops short of every matching line.
+message TurnAgentGrepContentPartial {
+  // How many matching lines are present here.
+  uint32 lines_returned = 1;
+  // How many matching lines were left out. The OMITTED figure rather than a
+  // total, because that is what a reader is shown ("42 more not shown") and
+  // because a total invites every consumer to subtract; the total is recoverable
+  // by addition where anything needs it.
+  uint32 lines_omitted = 2;
+}
+
+// Only the files that contained a match, without the matching lines.
+message TurnAgentGrepFiles {
+  // The matching paths, in the order the search returned them. That order is
+  // the search's own and carries no ranking; a consumer that wants another
+  // order sorts, and does not read meaning into this one.
+  repeated string paths = 1;
+
+  // Whether these are all the matching files.
+  oneof extent {
+    TurnAgentGrepFilesAll all = 2;
+    TurnAgentGrepFilesPartial partial = 3;
+  }
+}
+
+// Every matching file is present.
+message TurnAgentGrepFilesAll {
+  // How many files matched — all of them listed.
+  uint32 files_returned = 1;
+}
+
+// The list stops short of every matching file.
+message TurnAgentGrepFilesPartial {
+  // How many files are listed here.
+  uint32 files_returned = 1;
+  // How many matching files were left out.
+  uint32 files_omitted = 2;
+}
+
+// Only how many matches there were. No completeness arm: a count is either
+// produced or the search failed, and a partial count would be a number with no
+// stated meaning.
+message TurnAgentGrepCount {
+  // Total matches across every file searched.
+  uint32 matches = 1;
+}
+
+// The search could not run. Arms are DERIVED from the producer's real sites at
+// the implementation wave; empty until then.
+message TurnAgentGrepFailure {}
+
+// The agent matched file PATHS against a pattern.
+message TurnAgentGlob {
+  oneof result {
+    TurnAgentGlobSuccess success = 1;
+    TurnAgentGlobFailure failure = 2;
+  }
+}
+
+// The match ran. Matching nothing is a success with an empty list.
+message TurnAgentGlobSuccess {
+  // The matching paths, in the order the search returned them.
+  repeated string paths = 1;
+
+  // Whether these are all the matching paths.
+  oneof extent {
+    TurnAgentGlobAll all = 2;
+    TurnAgentGlobPartial partial = 3;
+  }
+}
+
+// Every matching path is present.
+message TurnAgentGlobAll {
+  // How many paths matched — all of them listed.
+  uint32 files_returned = 1;
+}
+
+// The list stops short of every matching path.
+message TurnAgentGlobPartial {
+  // How many paths are listed here.
+  uint32 files_returned = 1;
+
+  // How many were left out — and whether that figure can be trusted as exact.
+  // The underlying search can cap its OWN counting, in which case the producer
+  // knows only a floor. Stated as arms so a consumer never draws a floor as a
+  // total: "42 more" and "at least 42 more" are different claims, and only one
+  // of them is safe to make.
+  oneof omitted {
+    TurnAgentGlobOmittedExact exact = 2;
+    TurnAgentGlobOmittedAtLeast at_least = 3;
+  }
+}
+
+// The omitted figure is exact.
+message TurnAgentGlobOmittedExact {
+  // How many matching paths were left out.
+  uint32 files_omitted = 1;
+}
+
+// The omitted figure is a lower bound, because the search stopped counting.
+message TurnAgentGlobOmittedAtLeast {
+  // At least this many matching paths were left out; there may be more.
+  uint32 files_omitted_at_least = 1;
+}
+
+// The match could not run. Arms are DERIVED from the producer's real sites at
+// the implementation wave; empty until then.
+message TurnAgentGlobFailure {}
