@@ -114,6 +114,55 @@ that transport.
 
 ## Landed changes
 
+### Grep and glob bodies land; the COMPLETENESS FACTORING pattern, and the landed-comment standard
+
+**What changed ("looks good then").** `TurnAgentGrep` = { success | failure },
+success carrying `oneof matches { content | files | count }` — the vendor's
+`GrepOutput` is one flat object whose fields apply PER MODE (content/numLines
+for content mode, filenames/numFiles for files mode, numMatches for count mode),
+so each arm carries only what applies. `TurnAgentGlob` = { success | failure }
+over paths plus a completeness arm.
+
+**THE FACTORING PATTERN the user named, now a skill convention.** The
+orchestrator wrote `uint32 lines = 2; uint32 total_lines = 3;`. The user: "two
+adjacent fields for which the value of one depends on the value of the other
+screams oneof factor." Correct, and it is a special case of adjacent
+exclusivity — `total_*` means nothing when the answer is complete. Factored to
+`oneof extent { all | partial }`, and CRUCIALLY the partial arm carries what was
+OMITTED rather than a total: that is the figure a reader is shown ("42 more not
+shown"), it needs no arithmetic, and a total is recoverable by addition. Sent to
+the skill by a one-shot subagent (worktree proto-complete-vs-partial).
+
+**A second completeness distinction, nested.** Glob's own total can be a FLOOR —
+the underlying search caps its own counting, which the vendor states explicitly
+(`countIsComplete`). Rather than a bool qualifying a number, the omitted figure
+carries `oneof omitted { exact | at_least }`, because "42 more" and "at least 42
+more" are different claims and only one is safe to draw.
+
+**Dropped from the vendor's outputs, each for a stated reason**: grep's
+`appliedLimit`/`appliedOffset` (the partial arm already says the answer is short;
+the cap that produced it is the producer's business), and glob's `durationMs`
+(nothing draws it).
+
+**Domain outcomes, restated at these shapes**: a search that matched NOTHING is
+a success with an empty answer, never a failure — the caller asked a question and
+got one. Neither tool has an update arm: there is no partial grep anything draws.
+
+**THE LANDED-COMMENT STANDARD, set by the user as a standing rule.** Every
+landed message and field carries documentation written FOR A FUTURE INTEGRATOR —
+what it is in domain terms, why the shape exists and what it rules out, how and
+when to use it, producer obligations, and integration gotchas (a floor that must
+not be drawn as a total, a resolved value that must not be re-derived, an order
+that carries no ranking). Design knowledge established in conversation is
+CARRIED INTO the comment, because knowledge that lives only in this document is
+unavailable at the call site. And a HARD PROHIBITION, permanent rather than
+sketch-scoped: landed comments NEVER reference the development process — no
+earlier drafts, no objections, no amendments, no "used to be". State the result
+and its reasoning as a standing fact about the contract; the history belongs
+here, in the record, and nowhere else. Dispatched to the skill by a one-shot
+subagent (worktree proto-comment-standard).
+
+
 ### Write and edit bodies land on the VENDOR's structured patch, not a reconstruction of it
 
 **The user's challenge that changed the design.** The orchestrator had the shim
