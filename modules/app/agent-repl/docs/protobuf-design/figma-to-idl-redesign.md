@@ -114,6 +114,79 @@ that transport.
 
 ## Landed changes
 
+### Thinking and response bodies land; the `update` arm is per-kind, and usage rides both arms
+
+**What changed ("looks good, let's proceed").** `TurnAgentThinking` and
+`TurnAgentResponse` gain their bodies. Thinking: update/success/failure, with
+both the update and the success carrying `oneof reasoning { text | withheld }`,
+and usage on the success. Response: update/success/failure, prose-so-far on the
+update, whole prose on the success, partial prose on the failure, and usage on
+ALL THREE.
+
+**THE `update` ARM IS PER-KIND, derived not blanket.** The user proposed
+dropping `update` entirely — growth as repeated `success` frames. Resisted, and
+the reason is drawn: thinking's disclosure sits OPEN with a live indicator while
+arriving and COLLAPSES when settled (`render.ts:852-859`), so repeated successes
+make "collapse now" unrepresentable and `success` stops meaning finished. The
+rule adopted instead: an `update` arm exists IFF the kind has an intermediate
+state a consumer draws differently. Response and bash have one; grep, glob and a
+task act do not, and get two arms.
+
+**IDENTITY IS THE ENVELOPE'S, never a field on the kind.** The user asked how
+two `TurnAgentBash` frames are told apart. `TurnProgress.progress_item_id`
+answers it. Inferring instead — "a new update after a success is a new call" —
+BREAKS OUTRIGHT, because the agent issues PARALLEL tool calls in one message and
+their updates interleave. Ids come from the vendor where one exists
+(`tool_use_id`, already how the webapp keys tool cards) and from
+`messageId`+block index for text and thinking. Settled with it: the SHIM mints
+ONE id per unit for its whole life, replacing the webapp's current
+preview-id-then-record-uuid switch that is deduped by hand
+(`store.ts:138-146`).
+
+**USAGE ON THE UPDATE ARM, the user's catch.** The orchestrator put usage only
+on `success`. Wrong: the vendor states usage when the message OPENS — final
+input and cache counters, INTERIM output — and restates it on a later stream
+frame, which `ResponseUsageCorrected`'s own comment already documents and the
+fixture confirms (`message_start` carries usage, `message_delta` carries it
+again). So usage rides the update too, and the footer's live token figure has a
+producer.
+
+**A bookkeeping arm dies as a consequence.**
+`BookkeepingEntry.response_usage_corrected` exists ONLY because a flat log
+cannot restate a record — "a producer that could only state usage on the
+response would have to either withhold the response until the turn ended or
+restate it, and neither is available to it". Under upsert semantics restating IS
+the mechanism, so the correction is simply the next frame.
+
+**FINALITY IS NOT MODELLED HERE, and the tracing that settled why.** The user
+asked what the three bubble states are at the SDK level. Traced: (1) the
+streaming updates are `content_block_delta`/`text_delta` frames drawn as a
+preview; (2) a NON-green-bordered purple bubble between tool calls is a SETTLED
+text block — an `assistant` message's block that arrived whole; (3) the
+green-bordered one is THE SAME THING, plus a border the client assigns when the
+turn's `result` lands, to whichever top-level text block was last
+(`finalResponses`, `render.ts:2092`). So (1) and (3) are the same SDK object and
+finality is NOT a wire fact — `nav.ts:73` says so outright: "Finality is not a
+wire fact — it is derived per render". Since a producer cannot know while
+writing a response whether anything follows it, the turn's own conclusion names
+the answering response rather than a finality field living here.
+
+**Unsettled, flagged rather than assumed.** `stop_reason` would be the natural
+discriminator ("tool_use" intermediate, "end_turn" final), but every assistant
+message in our own fixture reports `end_turn`, INCLUDING turns carrying
+`tool_use` blocks (six occurrences, all `end_turn`). Either the fixture is
+unfaithful there or the agent binary normalizes it; settling that needs a real
+transcript, and it decides only whether the producer could state finality
+directly.
+
+**What thinking IS, recorded because it was asked and is not obvious from the
+schema**: the model's scratchpad — reasoning on the way to an answer, not
+addressed to the user, collapsed by default, frequently WITHHELD entirely
+(adaptive-thinking models emit the block and a signature with no text, so the
+UI draws no card at all and nothing survives once it closes), and charged as its
+own token class, which is why a footer draws a thinking figure.
+
+
 ### The task tracker: acts, not task lifecycles; and the rule for when a unit earns its own stream
 
 **What changed.** `turn.proto` gains `TurnAgentTaskAct` = { task; oneof act
