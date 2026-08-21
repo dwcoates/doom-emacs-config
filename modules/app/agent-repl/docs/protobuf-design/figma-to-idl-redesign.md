@@ -114,6 +114,141 @@ that transport.
 
 ## Landed changes
 
+### The shell body lands; and EVERY TOOL GAINS AN ANNOUNCEMENT ARM — the item must exist before it concludes
+
+**What changed ("okay looks good then").** `TurnAgentBash` = { update |
+success | failure }, success = { command; oneof outcome { completed |
+interrupted } }, each outcome carrying `TurnAgentBashOutput` = `oneof form
+{ text | image }`, text carrying stdout, stderr and a whole/partial extent arm.
+`TurnDetachableWorkDetached` gains a `cause` oneof; `TurnDetachableWork`'s arms
+repoint at description types; read, write, edit, grep and glob each gain an
+`update` arm; grep and glob gain the query elements they were missing; a shared
+`TurnToolCallStartedAt` lands.
+
+**THE HOLE THE USER'S QUESTION OPENED, which is the important part of this
+increment.** The orchestrator wrote that the SDK's per-call progress message
+"carries elapsed time and a heartbeat flag and NO output". The user read that
+back as an argument FOR an update arm carrying elapsed time. That reading
+exposed something neither of us had stated: with two arms only, THE FIRST FRAME
+A CONSUMER EVER RECEIVES FOR A TOOL ITEM IS ITS TERMINAL ONE. A command running
+four minutes is undrawable for four minutes, because the item does not exist
+until it is over. This was NOT bash-specific — read, write, edit, grep and glob
+had all landed with two arms and the same hole.
+
+**The fix, and why the elapsed figure is NOT what goes in it.** The update arm
+ANNOUNCES the call, sent ONCE at issue, carrying the call's identifying element
+and a START INSTANT. A consumer animates its own clock from that instant. An
+elapsed count on the wire was considered and rejected twice over: it is a second
+authority for a value derivable from one instant, and it arrives at the
+producer's heartbeat cadence, so a drawn clock would jump to network timing
+instead of ticking. This is the pattern the contract already uses
+(`FeedDetachedHead.runtime`, `FooterExpandedRowRuntime` both carry a start and
+nothing else).
+
+**The per-kind update rule SURVIVES INTACT.** It says an update arm exists iff
+the kind has an intermediate state a consumer draws differently. What changed is
+the ANSWER for every tool: *running* is that state. The rule was never wrong;
+it had been applied while assuming an announcement came from somewhere else,
+and it does not.
+
+**A SECOND DEFECT this surfaced, in already-landed shapes.** Grep and glob
+carried NO pattern anywhere — their success bodies are pure outcome, so the
+protocol model could not describe a grep call at all. Read and write happened to
+carry a path and hid the gap. Fixed by `TurnAgentGrepQuery` / `TurnAgentGlobQuery`
+on BOTH the announcement and the success arm. The duplication is required, not
+tolerated: under model 2 a frame is an upsert of the whole unit, so a success
+frame omitting the query would LOSE it for any consumer that missed the
+announcement.
+
+**A THIRD DEFECT, in `TurnDetachableWork`.** Its arms named the PROGRESS-ITEM
+types (`TurnAgentBash`, `TurnAgentAgentCreate`), whose bodies are outcome
+oneofs. Work being announced has no outcome, so those types could not say what
+the work IS — the one thing a consumer with no earlier frame needs. The arms now
+name description types (`TurnDetachableWorkBash { command }`;
+`TurnDetachableWorkAgent` is owed at the agent increment).
+
+**THE USER'S STRUCTURAL CORRECTION on backgrounding, and the SDK confirmation
+he asked for.** The orchestrator had sketched a `backgrounded` outcome arm on
+the shell item. The user: shouldn't that be the DetachedWork message, with a
+detached-work stream established? Correct, and the arm is gone. VERIFIED at the
+SDK type surface from four independent directions: `BashInput.run_in_background`;
+`BashOutput.backgroundTaskId` / `backgroundedByUser` ("Ctrl+B") /
+`timedOutAfterMs` ("auto-backgrounded"); `BackgroundTaskSummary.type` documented
+as "'shell', 'subagent', 'monitor', 'workflow'" WITH a shell-only `command`
+field, so shell membership in the live-background set is designed, not
+incidental; and `stopTask(taskId)` / `backgroundTasks(toolUseId?)` addressing
+tasks with no kind restriction.
+
+**So the shell item's result is legitimately NEVER RESOLVED when a command
+backgrounds** — it did not conclude, it MOVED, and the detached frame naming it
+is what says so. The three backgrounding causes moved onto
+`TurnDetachableWorkDetached` where detachment is actually stated, and ALL THREE
+land on `detached` rather than `created`, including a `run_in_background` call:
+such a call is streamed as a progress item first, so it always has an item it
+detached FROM — it simply never has a foreground running phase.
+
+**THE OUTPUT PRODUCER IS OURS, NOT THE VENDOR'S — verified, and load-bearing.**
+The SDK exposes NO route that returns a background task's output; the whole
+28-method control surface was enumerated and nothing fetches it, and
+`task_progress` for a shell carries `{total_tokens, tool_uses, duration_ms}` and
+no bytes. Every byte of detached shell output on this contract therefore comes
+from the SIDECAR tailing the spool file the agent binary writes
+(`shim-sidecar/internal/handler/shell.go`), terminated by its `EXIT=<code>`
+line. The user's reading — "we CAN pipe the output along, it just comes from the
+sidecar" — is exactly right, and nothing about the shape changes. What changes is
+who is accountable: a vendor route breaking surfaces at the type surface on the
+next upgrade, while a sidecar route breaking is a file format or path we do not
+own changing underneath us, with no type to fail against.
+
+**Dropped from the vendor's output, each for a stated reason.** No exit code
+exists on `BashOutput` at all (the whole interface was read), so none is
+modelled — a command's own output is the only account of how it went.
+`rawOutputPath` (an MCP concern, not a shell one); `backgroundCwdHint`,
+`returnCodeInterpretation`, `noOutputExpected`, `staleReadFileStateHint`,
+`ghRateLimitHint` (all documented as MODEL-FACING notes — text written for the
+agent to read, which nothing draws); `structuredContent` (untyped `unknown[]`,
+and modelling it would be guessing at a shape).
+
+**FLAGGED, not modelled: `BashOutput.gitOperation`.** Explicitly marked
+client-facing — "lets clients render git activity without re-parsing stdout" —
+carrying commit sha and kind, push branch, and PR number/action. Nothing drawn
+consumes it: the merge bubble is DAEMON-orchestrated merges, not the agent's own
+git commands. If agent-made commits should be drawn as something other than
+shell output, that is a UI decision and a new element, not a field here.
+
+**NON-OBVIOUS IMPLEMENTATION CONSEQUENCES, named concretely.**
+
+- The shim must emit an announcement frame at `content_block_start` for EVERY
+  tool call, not only at the tool's return. It has the call at that point (the
+  verified `run_in_background` trace shows the call streamed before
+  `task_started`), so no new observation is needed — but the emit site is new,
+  and there are six kinds of it.
+- The shim owns the start instant. It must stamp it at the announcement and NOT
+  restate an elapsed figure, discarding the vendor's `elapsed_time_seconds` and
+  `heartbeat` (`sdk.d.ts:4553-4572`) rather than forwarding them.
+- The vendor's `heartbeat` flag is the ONLY evidence of a wedged tool call, and
+  under this shape nothing on the wire carries it. Consistent with the settled
+  layering — the party that can see the silence reports it — so the SHIM must
+  surface a wedge as the item's `failure` arm. That obligation is now
+  load-bearing rather than incidental, and it is recorded here because nothing
+  in the schema implies it.
+- `webapp/src/async-bubble.ts`'s offset-checked append handling and its spool
+  decoder stay RELEVANT for detached shells (the spool is still a delta stream
+  on that surface) but its 3-tier identity ladder still goes, per the feed
+  entry.
+- Grep and glob renumber their result arms and gain a field at tag 4; every
+  consumer switching on those oneofs recompiles.
+
+**Recorded to the VETTING REGISTER** (`figma-to-idl-redesign.vetting.md`, new
+this increment): that the sidecar is a SECOND producer needing its own
+verification pass, and that `fake-query.ts` — the shim's hand-written stand-in
+for the SDK's `query()` — can only ever confirm our own reading, since we wrote
+it and it agrees with us wherever we are wrong. Two landed decisions rest on it
+alone, one load-bearing (that a spawn is announced DURING the turn, which is why
+the turn must be a stream at all). The user called this "a highly solveable
+problem": the fix is to build the fake's scripts FROM captured transcripts
+rather than by hand, so it stops being able to agree with us by construction.
+
 ### Every landed field, oneof and message carries documentation; the standard is a skill convention
 
 **What changed.** A full documentation pass over the four `.proto` files

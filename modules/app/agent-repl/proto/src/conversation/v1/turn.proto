@@ -152,10 +152,45 @@ message TurnDetachedWork {
 message TurnDetachableWorkDetached {
   // The in-turn unit this work was, before it left.
   //
-  // NO PAYLOAD BESIDE IT, deliberately: the consumer already received this
+  // NO WORK PAYLOAD BESIDE IT, deliberately: the consumer already received this
   // work's description as the progress unit named here, and restating it would
   // be a second copy able to disagree with the first.
   TurnProgressItemId detached_from_id = 1;
+
+  // HOW it came to be detached. Each arm is drawn differently and one carries a
+  // figure, so the set arm is the cause rather than a flag beside it.
+  //
+  // ALL THREE ARRIVE ON THIS ARM RATHER THAN ON `created`, INCLUDING work that
+  // asked for the background up front: such a call is streamed as a progress
+  // item before it backgrounds, so it always has an item it detached FROM — it
+  // simply never has a foreground running phase.
+  oneof cause {
+    // The agent asked for the background at the call site. The ordinary path.
+    TurnDetachedCauseRequested requested = 2;
+    // A person backgrounded running work by hand. Worth distinguishing from the
+    // others: the agent did not choose it and may not expect it.
+    TurnDetachedCauseByUser by_user = 3;
+    // The work outlived its own timeout and was backgrounded rather than
+    // killed.
+    TurnDetachedCauseTimedOut timed_out = 4;
+  }
+}
+
+// The agent asked for the background when it made the call.
+message TurnDetachedCauseRequested {}
+
+// A person backgrounded the running work by hand.
+message TurnDetachedCauseByUser {}
+
+// The work exceeded its own timeout and was moved to the background instead of
+// being killed.
+message TurnDetachedCauseTimedOut {
+  // The timeout that was exceeded, in milliseconds.
+  //
+  // THE CONFIGURED LIMIT, NOT THE WORK'S RUNTIME. The work is still running
+  // when this arrives, so its runtime is not yet a fact; drawing this figure as
+  // an elapsed time would state something untrue.
+  uint64 timeout_ms = 1;
 }
 
 // Work that is detached from the moment the consumer hears of it, so nothing
@@ -170,14 +205,28 @@ message TurnDetachableWorkCreated {
 // a kind absent here cannot claim to be detached, which is what makes
 // "reasoning ran in the background" unbuildable rather than merely wrong.
 message TurnDetachableWork {
-  // Which kind of work left the turn. The set is deliberately small: only work
-  // that can outlive the agent that started it appears here.
+  // Which kind of work left the turn, DESCRIBED rather than concluded. The set
+  // is deliberately small: only work that can outlive the agent that started it
+  // appears here.
+  //
+  // THESE ARMS NAME DESCRIPTION TYPES, NOT THE PROGRESS-ITEM TYPES OF THE SAME
+  // WORK. A progress item's body states an OUTCOME, and work being announced
+  // has no outcome yet — so a progress-item type here could not say what the
+  // work IS, which is the one thing a consumer with no earlier frame needs.
   oneof work {
     // A subagent, spawned to run independently of the turn that asked for it.
-    TurnAgentAgentCreate agent = 1;
+    TurnDetachableWorkAgent agent = 1;
     // A shell command left running after the turn that started it ended.
-    TurnAgentBash bash = 2;
+    TurnDetachableWorkBash bash = 2;
   }
+}
+
+// A detached shell command, described so a consumer that never saw an in-turn
+// frame for it can still draw it.
+message TurnDetachableWorkBash {
+  // The command line. The same element the in-turn item carries, because it is
+  // the same fact drawn the same way.
+  TurnAgentBashCommand command = 1;
 }
 
 // The identity of one unit of detached work, and the handle a stop is aimed at.
@@ -449,13 +498,32 @@ message TurnAgentResponseProse {
 
 // The agent read a file.
 message TurnAgentRead {
-  // How it ended. There is no update arm: a read either returns or fails, and nothing draws a partial one.
+  // Where the read stands. The update arm ANNOUNCES the call so the item can be
+  // drawn while it runs: without it the first frame a consumer ever receives is
+  // the terminal one, and a call in progress would be undrawable because the
+  // item would not yet exist.
   oneof result {
+    // The call was issued and is running. Sent ONCE, when the call is issued —
+    // never once per heartbeat.
+    TurnAgentReadRunning update = 1;
     // The file was read, whole or in part.
-    TurnAgentReadSuccess success = 1;
+    TurnAgentReadSuccess success = 2;
     // The read did not happen at all — no contents, partial or otherwise.
-    TurnAgentReadFailure failure = 2;
+    TurnAgentReadFailure failure = 3;
   }
+}
+
+// A read that has been issued and has not yet returned.
+//
+// SELF-DESCRIBING, like every frame of an upserted unit: it repeats the path
+// rather than relying on the consumer to have kept an earlier frame, because a
+// frame that only makes sense beside its predecessor cannot be the first one a
+// late-joining consumer receives.
+message TurnAgentReadRunning {
+  // Which file is being read. Drawn as the item's headline.
+  ReadPath path = 1;
+  // When the read began, so a consumer can draw how long it has been waiting.
+  TurnToolCallStartedAt started_at = 2;
 }
 
 // The file was read.
@@ -504,6 +572,19 @@ message ReadPath {
   string path = 1;
 }
 
+// When a tool call was handed to whatever performs it.
+//
+// A consumer ANIMATES ITS OWN CLOCK from this instant and the producer never
+// restates an elapsed figure. Two reasons, and the second is the load-bearing
+// one: an elapsed count on the wire would be a second authority for a value
+// derivable from one instant, and it would arrive at the producer's heartbeat
+// cadence, so a drawn clock would jump to network timing instead of ticking.
+message TurnToolCallStartedAt {
+  // Milliseconds since the Unix epoch. A wall-clock instant rather than a
+  // duration, because a duration is stale the moment it is serialized.
+  int64 at_ms = 1;
+}
+
 // One hunk of a unified diff, as the producer's structured patch states it.
 // Stated rather than computed: the producer diffs at the moment of the change,
 // so context lines and line numbers describe the file as it actually was, and no
@@ -532,13 +613,27 @@ message FilePatchHunkRange {
 // replacing what was there. Distinct from an edit, which matches and replaces a
 // string inside a file that must already contain it.
 message TurnAgentWrite {
-  // How it ended. There is no update arm: the file is written or it is not.
+  // Where the write stands. The update arm announces the call so the item is
+  // drawable before the write returns.
   oneof result {
+    // The call was issued and is running. Sent ONCE, at issue.
+    TurnAgentWriteRunning update = 1;
     // The file was written, and the change is described as hunks.
-    TurnAgentWriteSuccess success = 1;
+    TurnAgentWriteSuccess success = 2;
     // The write did not happen; the file is as it was.
-    TurnAgentWriteFailure failure = 2;
+    TurnAgentWriteFailure failure = 3;
   }
+}
+
+// A write that has been issued and has not yet returned.
+message TurnAgentWriteRunning {
+  // Which file is being written. Drawn as the item's headline. NOTHING is said
+  // here about whether it will be created or overwritten: that is the outcome's
+  // to state, and claiming it now would be a guess the success arm could
+  // contradict.
+  ReadPath path = 1;
+  // When the write began.
+  TurnToolCallStartedAt started_at = 2;
 }
 
 // The file was written.
@@ -581,13 +676,27 @@ message TurnAgentWriteFailure {}
 // The agent edited a file: replaced a matched string, which must have been
 // present and (unless every occurrence was requested) unique.
 message TurnAgentEdit {
-  // How it ended. There is no update arm: an edit applies or it does not.
+  // Where the edit stands. The update arm announces the call so the item is
+  // drawable before the edit returns.
   oneof result {
+    // The call was issued and is running. Sent ONCE, at issue.
+    TurnAgentEditRunning update = 1;
     // The edit applied to at least one occurrence.
-    TurnAgentEditSuccess success = 1;
+    TurnAgentEditSuccess success = 2;
     // The edit did not apply — commonly because the matched text was absent, or was not unique when only one occurrence was requested.
-    TurnAgentEditFailure failure = 2;
+    TurnAgentEditFailure failure = 3;
   }
+}
+
+// An edit that has been issued and has not yet returned.
+message TurnAgentEditRunning {
+  // Which file is being edited. Drawn as the item's headline. The matched and
+  // replacement text are deliberately absent: a consumer draws the CHANGE from
+  // the success arm's hunks, and the raw strings would be a second, unresolved
+  // description of the same thing.
+  ReadPath path = 1;
+  // When the edit began.
+  TurnToolCallStartedAt started_at = 2;
 }
 
 // The edit applied.
@@ -618,18 +727,49 @@ message TurnAgentEditFailure {}
 
 // The agent searched file CONTENTS for a pattern.
 message TurnAgentGrep {
-  // How it ended. There is no update arm: there is no partial search result anything draws.
+  // Where the search stands. The update arm announces the call: a search over a
+  // large tree is not instant, and without an announcement the item would not
+  // exist until it finished.
   oneof result {
+    // The call was issued and is running. Sent ONCE, at issue.
+    TurnAgentGrepRunning update = 1;
     // The search ran. Matching nothing is a success with an empty answer, not a failure — the caller asked a question and got one.
-    TurnAgentGrepSuccess success = 1;
+    TurnAgentGrepSuccess success = 2;
     // The search could not run at all.
-    TurnAgentGrepFailure failure = 2;
+    TurnAgentGrepFailure failure = 3;
   }
+}
+
+// What was searched for. Carried on EVERY frame of the search, not only the
+// announcement, because each frame of an upserted unit stands alone.
+message TurnAgentGrepQuery {
+  // The pattern, as the caller wrote it. Drawn verbatim and never interpreted:
+  // the regex dialect belongs to whatever performs the search.
+  string pattern = 1;
+  // Where the search was rooted. UNSET means the caller named no root and the
+  // performer chose one, so a consumer draws no scope rather than inventing a
+  // default it cannot know.
+  optional string path = 2;
+  // A filename filter narrowing which files were searched. UNSET means every
+  // file under the root was eligible.
+  optional string glob = 3;
+}
+
+// A search that has been issued and has not yet returned.
+message TurnAgentGrepRunning {
+  // What is being searched for. Drawn as the item's headline.
+  TurnAgentGrepQuery query = 1;
+  // When the search began.
+  TurnToolCallStartedAt started_at = 2;
 }
 
 // The search ran. A search that matched nothing is a success with an empty
 // answer, never a failure: the caller asked a question and got one.
 message TurnAgentGrepSuccess {
+  // What was searched for, repeated here so a settled search frame describes
+  // itself without the announcement beside it.
+  TurnAgentGrepQuery query = 4;
+
   // WHICH SHAPE of answer this is, matching the shape the call asked for. The
   // three are genuinely different answers rather than three views of one, which
   // is why each carries only what applies to it: a count-mode search knows no
@@ -728,17 +868,42 @@ message TurnAgentGrepFailure {}
 
 // The agent matched file PATHS against a pattern.
 message TurnAgentGlob {
-  // How it ended. There is no update arm: there is no partial match result anything draws.
+  // Where the match stands. The update arm announces the call, for the same
+  // reason the search's does: a walk over a large tree is not instant.
   oneof result {
+    // The call was issued and is running. Sent ONCE, at issue.
+    TurnAgentGlobRunning update = 1;
     // The match ran. Matching nothing is a success with an empty list.
-    TurnAgentGlobSuccess success = 1;
+    TurnAgentGlobSuccess success = 2;
     // The match could not run at all.
-    TurnAgentGlobFailure failure = 2;
+    TurnAgentGlobFailure failure = 3;
   }
+}
+
+// What was matched against. Carried on every frame, so each stands alone.
+message TurnAgentGlobQuery {
+  // The pattern, as the caller wrote it. Drawn verbatim; the glob dialect
+  // belongs to whatever performs the walk.
+  string pattern = 1;
+  // Where the walk was rooted. UNSET means the caller named no root and the
+  // performer chose one.
+  optional string path = 2;
+}
+
+// A match that has been issued and has not yet returned.
+message TurnAgentGlobRunning {
+  // What is being matched. Drawn as the item's headline.
+  TurnAgentGlobQuery query = 1;
+  // When the walk began.
+  TurnToolCallStartedAt started_at = 2;
 }
 
 // The match ran. Matching nothing is a success with an empty list.
 message TurnAgentGlobSuccess {
+  // What was matched against, repeated here so a settled match frame describes
+  // itself without the announcement beside it.
+  TurnAgentGlobQuery query = 4;
+
   // The matching paths, in the order the search returned them.
   repeated string paths = 1;
 
@@ -791,3 +956,150 @@ message TurnAgentGlobOmittedAtLeast {
 // The match could not run. Arms are DERIVED from the producer's real sites at
 // the implementation wave; empty until then.
 message TurnAgentGlobFailure {}
+
+// ---- The shell: a command, what it said, and where it went ----
+
+// The agent running a shell command.
+//
+// A FOREGROUND SHELL CALL HAS NO OUTPUT UNTIL IT RETURNS. Nothing observes a
+// running command's output on this surface: the producer's per-call progress
+// signal carries elapsed time and a liveness flag and no bytes, and the output
+// arrives once, whole, at the return. Incremental output exists only for a
+// BACKGROUNDED command, and a backgrounded command is detached work travelling
+// on its own stream — so a growing spool is that stream's business, never this
+// item's.
+//
+// THIS ITEM'S RESULT IS LEGITIMATELY NEVER RESOLVED FOR A COMMAND THAT
+// BACKGROUNDS. Such a command did not CONCLUDE, it MOVED: the detached-work
+// frame naming this item is what says so, and a consumer that has seen it stops
+// expecting a terminal frame here and follows the work's own stream instead. An
+// arm here saying "backgrounded" would be a second announcement of one fact,
+// and the two could disagree about whether the work left.
+message TurnAgentBash {
+  // Where the call stands. The update arm announces it, which matters more here
+  // than for any other tool: a shell command routinely runs for minutes, and
+  // without an announcement the item would not exist for the whole of that.
+  oneof result {
+    // The call was issued and is running. Sent ONCE, at issue.
+    TurnAgentBashRunning update = 1;
+    // The command reached the shell and the shell reported on it.
+    TurnAgentBashSuccess success = 2;
+    // The call could not be performed at all.
+    TurnAgentBashFailure failure = 3;
+  }
+}
+
+// The command the agent ran.
+message TurnAgentBashCommand {
+  // The command line, verbatim and unparsed. A consumer draws it and never
+  // interprets it: a shell line's meaning belongs to the shell.
+  string line = 1;
+}
+
+// A command that has been issued and has not yet returned.
+message TurnAgentBashRunning {
+  // What is running. Drawn as the item's headline.
+  TurnAgentBashCommand command = 1;
+  // When the shell was handed the command, so a consumer can draw how long it
+  // has been running.
+  TurnToolCallStartedAt started_at = 2;
+}
+
+// A command that reached the shell, and what became of it.
+//
+// A NONZERO EXIT IS STILL THIS ARM. The failure arm is for a call that could not
+// be performed; a command that ran and failed ran, and what it printed is the
+// answer the caller wanted. There is no exit code on this shape because no
+// producer states one for a foreground command — a command's own output is the
+// only account of how it went.
+message TurnAgentBashSuccess {
+  // What was run, repeated here so a settled frame describes itself.
+  TurnAgentBashCommand command = 1;
+
+  // How it ended. Both arms carry output and differ only in treatment, but the
+  // difference is worth drawing: an interrupted command's last lines are usually
+  // the reason it was cut.
+  oneof outcome {
+    // The command ran to completion. The ordinary path.
+    TurnAgentBashCompleted completed = 2;
+    // The command was cut short before finishing.
+    TurnAgentBashInterrupted interrupted = 3;
+  }
+}
+
+// A command that ran to completion.
+message TurnAgentBashCompleted {
+  // Everything the command said. ALWAYS SET, even for a command that said
+  // nothing: an empty output still draws its header, so a reader can tell "ran
+  // and was silent" from "has not run".
+  TurnAgentBashOutput output = 1;
+}
+
+// A command cut short before it finished.
+message TurnAgentBashInterrupted {
+  // What the command had said by the time it was cut. Drawn as a completed
+  // command's output is, under an interrupted treatment.
+  TurnAgentBashOutput output = 1;
+}
+
+// What a command said, in the form it said it.
+message TurnAgentBashOutput {
+  // Which form the output takes. A command whose output is image data is not
+  // text with a flag beside it — the two are drawn by different renderers
+  // entirely, so the set arm IS the form.
+  oneof form {
+    // Ordinary character output. Expect this for all but a handful of
+    // image-producing commands.
+    TurnAgentBashOutputText text = 1;
+    // The output is image data rather than characters. Draw it as an image;
+    // there is no text to show.
+    TurnAgentBashOutputImage image = 2;
+  }
+}
+
+// Character output, with the two streams kept apart.
+message TurnAgentBashOutputText {
+  // Standard output, verbatim and unparsed.
+  string stdout = 1;
+
+  // Standard error, verbatim and unparsed.
+  //
+  // KEPT SEPARATE FROM STDOUT RATHER THAN INTERLEAVED. A consumer that wants
+  // them woven can concatenate, while one handed a single blob can never pull
+  // them apart again — and no producer here states an interleaving order worth
+  // preserving, so weaving them would fabricate one.
+  string stderr = 2;
+
+  // Whether this is everything the command said. The set arm states it, so no
+  // consumer compares a length against a total to find out.
+  oneof extent {
+    // Everything the command said is carried above.
+    TurnAgentBashOutputWhole whole = 3;
+    // The output was too large to carry inline and was cut.
+    TurnAgentBashOutputPartial partial = 4;
+  }
+}
+
+// Everything the command said is carried above.
+message TurnAgentBashOutputWhole {}
+
+// The output was cut because it was too large to carry inline.
+message TurnAgentBashOutputPartial {
+  // How many bytes were left out — STATED, never derived by subtracting from a
+  // total. This is the figure a consumer draws ("1.2 MB more not shown"), and
+  // the full size stays recoverable by addition if anything needs it.
+  uint64 bytes_omitted = 1;
+}
+
+// Image data the command produced instead of text.
+message TurnAgentBashOutputImage {
+  // The image bytes as the command emitted them.
+  bytes data = 1;
+  // The IANA media type of `data`, so a consumer need not sniff the bytes to
+  // decide how to decode them.
+  string media_type = 2;
+}
+
+// The call could not be performed. Arms are DERIVED from the producer's real
+// sites at the implementation wave; empty until then.
+message TurnAgentBashFailure {}
