@@ -41,11 +41,16 @@ message DaemonHoldTray {
 
 // The tray's heading.
 message DaemonHoldHeading {
+  // The heading line, composed by the daemon. Drawn verbatim; a client never
+  // assembles a count or a summary of its own from the items below.
   string text = 1;
 }
 
 // One held thing. THE ARM IS THE KIND.
 message DaemonHoldItem {
+  // Which kind of held thing this is. The two are answered differently — a
+  // prompt is released or dropped, an offer is answered — so a consumer routes
+  // on the arm rather than on anything inside it.
   oneof item {
     // A prompt the daemon is holding for delivery.
     HeldPrompt prompt = 1;
@@ -79,14 +84,22 @@ message HeldPrompt {
   // rationale cannot arrive with no verdict to explain and an acceptance
   // cannot be set on an entry no classifier held.
   oneof classification {
+    // A classifier is still deciding. Expect this arm to be replaced by one of
+    // the verdicts below.
     HeldPromptClassifying classifying = 4;
+    // The verdict is that this prompt should interrupt the running turn rather
+    // than wait for it.
     HeldPromptInterject interject = 5;
+    // The verdict is that this prompt waits for the running turn to end.
     HeldPromptHoldForTurnEnd hold_for_turn_end = 6;
     // No classifier ran and none will: the turn in front of this entry is a
     // context cut, which is never interrupted. Delivery is the ordinary
     // turn-end drain's, so this arm changes WHO decided rather than WHEN the
     // prompt runs.
     HeldPromptUninterruptibleTurn uninterruptible_turn = 7;
+    // The classifier itself failed, so no verdict exists. The prompt is still
+    // held and still deliverable; what is missing is the advice, not the
+    // prompt.
     HeldPromptClassificationError classification_error = 8;
   }
   // WHAT is holding this entry, when something other than a running turn is.
@@ -102,9 +115,16 @@ message HeldPrompt {
   // THESE FOUR ARE THE WHOLE SET, and they are entry-scoped. A merge lease or
   // a hibernated session are NOT holds — they refuse, and hold nothing.
   oneof hold {
+    // The daemon is draining toward a scheduled shutdown and is not admitting
+    // new work.
     HeldPromptShutdownHold shutdown = 9;
+    // A cache keep-alive turn holds the session; it yields to real work, so the
+    // wait is brief.
     HeldPromptKeepAliveHold keep_alive = 10;
+    // The session is being revived and cannot accept a prompt until it is up.
     HeldPromptRevivalHold revival = 11;
+    // The session's build is being refreshed onto a newer one before it takes
+    // more work.
     HeldPromptBuildRefreshHold build_refresh = 12;
   }
 }
@@ -137,6 +157,9 @@ message HeldPromptHoldForTurnEnd {
 
 // The user's confirmation of a hold.
 message HeldPromptAccepted {
+  // True once the user has confirmed the hold. False means the confirmation has
+  // not been given yet, not that it was declined — a declined hold is dropped
+  // and leaves the tray entirely.
   bool accepted = 1;
 }
 
@@ -214,6 +237,9 @@ message HeldPromptBuildRefreshHold {}
 
 // A question the daemon holds for the user's answer. THE ARM IS THE QUESTION.
 message HeldOffer {
+  // Which question is being asked. The arm determines both the card drawn and
+  // the answers available, so a consumer switches on it rather than inspecting
+  // the payload.
   oneof offer {
     // Take this workspace's merge off the queue? Raised by an interrupt during
     // a merge; cleared by the answer, by the merge reaching its own terminal,
@@ -228,10 +254,15 @@ message HeldOffer {
 // the card draws it and offers the two answers, which are AnswerHeldOffer's
 // arms (keep | release), never fields here.
 message HeldOfferMergeDequeue {
+  // The sentence the card leads with, composed by the daemon. The two answers
+  // are not fields here — they are the answer request's arms — so this message
+  // carries only what is drawn.
   HeldOfferHeadline headline = 1;
 }
 
 // The sentence an offer card leads with, composed daemon-side.
 message HeldOfferHeadline {
+  // The composed sentence, drawn verbatim. Never assembled client-side from
+  // the offer's kind.
   string text = 1;
 }
