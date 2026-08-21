@@ -114,6 +114,63 @@ that transport.
 
 ## Landed changes
 
+### conversation.v1's TURN UPDATE MODEL lands: TurnUpdate / TurnProgress / TurnDetachedWork
+
+**What changed ("yeah looks great").** `turn.proto` gains the protocol model's
+update structure. `TurnUpdate`'s arm states WHAT THE CONSUMER MUST DO — pipe it
+back on the turn's stream (`progress`) or open a stream of its own for it
+(`detached_work`) — which the user identified as the axis that matters at this
+level. `TurnProgress` = { progress_item_id; oneof progress_item } over thirteen
+kinds. `TurnDetachedWork` = { work; oneof origin { detached | created } }.
+`TurnDetachableWork` is a SMALL separate type (agent, bash) so a kind absent
+from it cannot claim to be detached.
+
+**THE FACTUAL QUESTION THE USER FORCED, and its answer.** The orchestrator had
+modelled detachment as always a TRANSITION of an item already announced as
+progress. The user doubted it: can work be created detached with no in-turn
+update at all? ANSWER: YES, and the SDK type proves it — `SDKTaskStartedMessage`
+carries `tool_use_id?` as OPTIONAL, so a task can exist with NO originating tool
+call (ambient/housekeeping work, which also carries `skip_transcript`). For the
+ordinary `run_in_background` path the call IS streamed first
+(`content_block_start name="Task"` -> `input_json_delta {run_in_background:true}`
+-> `task_started` -> `tool_result "Agent running in the background with ID"`),
+so there the call is never invisible — it simply never has a foreground RUNNING
+phase. Both arms are therefore real, and the user's two-message shape is the
+correct one.
+
+**Amendments the orchestrator made to the user's sketch, each with its reason.**
+(1) `token_usage_update` left the `TurnProgress` envelope — a read, a search or
+a shell call has no token cost, so an envelope field is meaningless for most
+arms; usage rides the arms that have it. (2) Three kinds the sketch omitted were
+added: glob, workflow, unmodeled. (3) `TurnDetachableWorkDetached` carries NO
+work payload beside the id — the consumer already received the description as
+the progress unit named there, and a second copy could disagree with the first.
+(4) The vendor's task handle moved to the `TurnDetachedWork` envelope, since
+both origin arms have one. (5) The top-level `oneof result { update | success |
+failure }` is NOT in conversation.v1: a turn concludes on the stream that
+carries it, so the terminal arms belong to that rpc's response in shim.v1 —
+which also resolves the `TurnResponse` vs `TurnAgentResponse` name collision the
+user had flagged as unsettled in his own sketch.
+
+**Verified, so it is not re-derived.** Identity is per BLOCK, not per response:
+the webapp's item kinds are `user-turn | text | thinking | tool | permission |
+result | failure`, `thinking` has its own renderer distinct from the response's
+`TextStream`, and BOTH are keyed by `blockId` (`itemKey`, render.ts). So the
+agent's reasoning and its prose are separate units, each holding one identity
+across its fragments.
+
+**OWED, not decided.** Ambient work carries `skip_transcript` ("consumers should
+hide this from the inline transcript; it may still appear in a tasks panel") —
+live, cancellable work that must not be drawn as a bubble. Either
+`TurnDetachableWorkCreated` carries that flag or ambient tasks are excluded from
+this surface; raised with the user, still open. Also owed: a ruling on
+`SendMessage` / `TaskCreate` / `TaskUpdate` / `TaskStop`, which have no drawn
+treatment (own arms, folded into unmodeled, or absent from the protocol).
+
+**The package does not compile**, by design: every `TurnAgent*` arm body lands
+at its own increment.
+
+
 ### NO COLLECTIVE NOUN for the protocol model's units: the stream frame names the kinds directly
 
 **Settled ("(c) I agree with too").** The orchestrator had been calling the
