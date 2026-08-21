@@ -1650,3 +1650,99 @@ message AgentQuestionUnanswered {}
 // The question could not be put to the user. Arms are DERIVED from the
 // producer's real refusal sites at the implementation wave; empty until then.
 message AgentQuestionFailure {}
+
+// ---- The skill: an invocation, and the document it loaded ----
+
+// The agent invoking a skill.
+//
+// A SKILL IS INSTRUCTIONS LOADED INTO THIS AGENT'S CONTEXT, not another agent
+// and not a subprocess. Invoking one puts a markdown document in front of the
+// same agent, which then carries on working with it in view.
+//
+// THE INVOCATION'S OWN RETURN IS WORTHLESS TO DRAW: the producer answers the
+// call with a bare acknowledgement that restates the skill's name. What is worth
+// carrying is the DOCUMENT, which arrives afterwards as a separate injected
+// context record linked back to this call — so this unit settles when the
+// document lands, not when the acknowledgement returns.
+//
+// NOTHING DELIMITS A SKILL'S SCOPE, and this unit therefore contains no nested
+// work. There is no skill-ended record, no boundary marker, and no producer
+// statement about where a skill's influence stops; work the agent does after
+// loading a skill is its own ordinary activity. A surface that wishes to draw
+// subsequent work under a skill heading is making a PRESENTATION choice, which
+// belongs to whatever resolves that surface — a nested arm here would oblige a
+// producer to invent an end that nothing observes.
+message AgentSkillUse {
+  // Where the invocation stands. No update arm: there are two frames, the
+  // invocation and the document, and nothing arrives in between.
+  oneof result {
+    // This stream is now carrying this invocation. Sent ONCE per stream, at
+    // issue.
+    AgentSkillUseStart start = 1;
+    // The skill loaded, and here is what it put in front of the agent.
+    AgentSkillUseSuccess success = 2;
+    // The skill could not be loaded — commonly an unknown name, or one filtered
+    // out of the session's enabled set. Arms are DERIVED from the producer's
+    // real refusal sites at the implementation wave; empty until then.
+    AgentSkillUseFailure failure = 3;
+  }
+}
+
+// An invocation this stream has begun carrying.
+message AgentSkillUseStart {
+  // Which skill is being loaded.
+  AgentSkillName skill = 1;
+  // The arguments the invocation carried. UNSET when the skill was invoked bare,
+  // which is common — presence rather than an empty string, so "no arguments"
+  // and "an empty argument" stay distinguishable.
+  optional string args = 2;
+  // When the invocation was issued.
+  AgentActivityStartedAt started_at = 3;
+}
+
+// A skill's name, as invoked.
+message AgentSkillName {
+  // The name the agent named, verbatim. Matches the skill's own declared name or
+  // its directory name, and may be plugin-qualified.
+  string name = 1;
+}
+
+// The skill loaded, and what it contributed.
+message AgentSkillUseSuccess {
+  // Which skill loaded, repeated so a settled frame describes itself.
+  AgentSkillName skill = 1;
+
+  // The document the skill put in front of the agent.
+  AgentSkillDocument document = 2;
+
+  // What invoking it permits. UNSET when the skill declared no allowances, which
+  // is distinct from declaring an empty set.
+  optional AgentSkillAllowedTools allowed_tools = 3;
+}
+
+// A skill's contents, as the agent received them.
+message AgentSkillDocument {
+  // The document verbatim, as markdown. A skill IS a markdown document, so it is
+  // carried and rendered as one rather than parsed into fields — its structure
+  // is the author's prose, not a schema.
+  string markdown = 1;
+}
+
+// The tool allowances a skill brings with it.
+//
+// WORTH DRAWING because it states what invoking the skill PERMITS, which is a
+// fact about consent rather than about the document's content: a reader deciding
+// whether a skill should have run wants to know it was allowed to write files.
+message AgentSkillAllowedTools {
+  // The tools the skill is permitted, by name, as the producer lists them.
+  //
+  // BARE NAMES rather than the typed tool vocabulary, deliberately: these are
+  // ALLOWANCES, not calls — no arguments accompany them — so there is no typed
+  // call here for a name to be a second spelling of. A name may also cover a
+  // tool this contract does not model at all.
+  repeated string tool_names = 1;
+}
+
+// The skill could not be loaded. Arms are DERIVED from the producer's real
+// refusal sites at the implementation wave; empty until then.
+message AgentSkillUseFailure {}

@@ -114,6 +114,79 @@ that transport.
 
 ## Landed changes
 
+### The skill body lands, from REAL TRANSCRIPT EVIDENCE: the document is not the tool return, and nothing delimits a skill's scope
+
+**What changed ("your model looks perfect").** `AgentSkillUse` = { start |
+success | failure }. Start carries the skill name, optional args and the start
+instant. Success carries the name, the DOCUMENT as markdown, and the tool
+allowances the skill brings. No update arm, and NO NESTED WORK.
+
+**THE RESEARCH METHOD, at the user's instruction.** He asked for the skill's
+handling to be researched "in the SDK/JSONL at the source of truth, not our
+existing code" — the orchestrator had been reasoning from our own sidecar and
+webapp. Two findings followed that our own code obscured, and one of them
+contradicts what our current model claims.
+
+**FIRST: `Skill` HAS NO TYPED SHAPE AT ALL.** There is no `SkillInput` or
+`SkillOutput` in the vendor's tool-types surface — the only skill-adjacent types
+are `ProposeSkills*`, which are a different feature. So unlike every other tool
+body in this file, this one rests entirely on observed transcripts.
+
+**SECOND: THE FOUR-RECORD SEQUENCE, read out of a real transcript.**
+
+1. `assistant` with a `tool_use` block, `name: "Skill"`, `input: {skill, args}`,
+   id T.
+2. `user` with a `tool_result` for T whose content is the bare string
+   `"Launching skill: <name>"`, plus `toolUseResult {commandName, success}`.
+   THE DOCUMENT IS NOT HERE.
+3. `user` with `isMeta: true` and `sourceToolUseID: T`, whose text block IS the
+   skill document verbatim.
+4. `attachment` with `{type: "command_permissions", allowedTools: [...]}` — the
+   tool allowances the skill brings.
+
+**WHAT THIS CORRECTS.** The old model's `SkillBodyResolved` was right that a body
+arrives separately, but our sidecar correlates it by keeping a skill-NAME map and
+matching what arrives next (`convert/detached.go:65`). That is unnecessary:
+`sourceToolUseID` links the document DIRECTLY to the invoking call, so the
+correlation the contract needs is structural and free rather than positional and
+fragile. Recorded because the fragile version is already in production and will
+look deliberate to whoever reads it next.
+
+**WHY SUCCESS CARRIES THE DOCUMENT RATHER THAN THE RETURN.** The tool's own
+answer restates the skill's name and says nothing else, so a unit that settled on
+it would settle with nothing to draw. The unit therefore settles when the
+DOCUMENT lands, which is after the acknowledgement — the shim holds the unit open
+across the two records.
+
+**NOTHING DELIMITS A SKILL'S SCOPE, and the contract says so rather than
+inventing one.** There is no skill-ended record, no boundary marker, and no
+producer statement about where a skill's influence stops — verified by direct
+transcript inspection, not inferred from our code's silence. So `AgentSkillUse`
+has NO nested arm, unlike the subagent: work the agent does after loading a skill
+is its own ordinary activity.
+
+**THE ACCEPTED COST, stated because it changes today's behavior.** The webapp
+currently draws a skill as a container whose body is the document and whose nested
+rows are the agent's subsequent emissions (`async-render.ts:226`). Under this
+model that container is a PRESENTATION choice belonging to whatever resolves the
+surface, not a protocol fact. A surface may still draw subsequent work under a
+skill heading — but it does so on its own authority, and the protocol never
+claims an extent it cannot observe. The alternative — a recursive arm carrying the
+same agent id — was weighed and refused: it would oblige a producer to invent an
+end that nothing observes.
+
+**`allowedTools` IS CARRIED, and it is a fact about CONSENT rather than
+content.** A reader deciding whether a skill should have run wants to know it was
+permitted to write files. The names are BARE STRINGS rather than the typed tool
+vocabulary, for the same reason the subagent's activity label is: these are
+allowances, not calls, so there is no typed call for a name to be a second
+spelling of — and an allowance may name a tool this contract does not model.
+
+**Presence, not sentinels, in two places.** `args` is optional because a skill is
+commonly invoked bare, and an empty argument must stay distinguishable from no
+argument. `allowed_tools` is optional because declaring NO allowances differs from
+declaring an empty set.
+
 ### The question body lands: ECHOED VALUES rather than tokens or order, and failure scoped to the ASK
 
 **What changed.** `AgentQuestion` = { start | success | failure }, success
