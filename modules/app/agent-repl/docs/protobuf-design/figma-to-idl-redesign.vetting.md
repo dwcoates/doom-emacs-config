@@ -10,9 +10,16 @@ system outside this contract that was not verified at the time it was made,
 and where verifying it earlier would have blocked the design for no good
 reason. The design proceeds on the assumption; this document records the debt.
 
-An item does NOT belong here when it is an implementation task, a known gap
-with a decided answer, or a question the design record already settles. Those
-live in the record or in the wave's own work.
+An item does NOT belong under **Items** when it is an implementation task, a
+known gap with a decided answer, or a question the design record already
+settles.
+
+A KNOWN GAP WITH A DECIDED ANSWER that a LATER STAGE must honour is different
+from both, and it is tracked separately under **Owed to later stages** below.
+Such an item needs no investigation — the answer is settled — but it will be
+silently lost if the stage that must act on it never learns anything depends on
+it. The two lists are kept apart because they are discharged differently: an
+item under **Items** is VERIFIED, an item under **Owed** is IMPLEMENTED.
 
 Each item states, at minimum:
 
@@ -156,5 +163,40 @@ durable fix is to build the fake's scripts FROM captured transcripts rather
 than by hand, so it stops being able to agree with us by construction; that is
 a test-infrastructure change, and it is the reason this item is recorded as
 solvable rather than as a standing limitation.
+
+**Status.** OPEN.
+
+## Owed to later stages
+
+Settled requirements a later stage must honour. Nothing here needs
+investigating; each needs DOING, by a stage that would otherwise have no reason
+to know it matters.
+
+### A. `StoreEntry` must index a unit's OWN identity (owed to stage 5, `store.v1`)
+
+**What is required.** The datalayer model must carry a unit's own identity as an
+INDEXED column, so a record can be looked up by the unit it belongs to rather
+than only by position or by feed-row owner.
+
+**Why, and who depends on it.** `start` is emitted per STREAM rather than per
+unit, so work that detaches is announced twice and the second announcement must
+repeat the ORIGINAL instant — otherwise a drawn clock resets when work merely
+moves. For an ordinary detach the shim still holds that instant. After a SHIM
+RESTART it does not, and still-live background work must be re-announced anyway
+(the path `ShimHello.live_task_set` exists for), so the instant is read back out
+of the store.
+
+**What is in the way.** The store is not indexable that way today. `entry` is
+keyed `PRIMARY KEY (session_id, seq)`, with a dedup index on `write_id` and two
+indexes on `top_level_message_id` — the FEED-ROW OWNER column derived by the
+ingest-time parent walk, NOT the unit's own identity
+(`shim-store/internal/db/db.go:156-172`). A lookup by unit id would be a scan.
+
+**Why it is recorded rather than left to stage 5's judgment.** Under model 2 the
+unit's id becomes the record's own identity, so the column is natural and stage 5
+might well add it unprompted — but nothing in the schema says a RESTART PATH
+depends on it, so a stage 5 that omitted the index would look correct and break
+re-announcement only after a shim bounce, which is exactly the failure nobody
+reproduces on purpose.
 
 **Status.** OPEN.
