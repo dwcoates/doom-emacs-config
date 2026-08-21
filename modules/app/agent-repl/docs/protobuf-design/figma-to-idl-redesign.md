@@ -114,6 +114,37 @@ that transport.
 
 ## Landed changes
 
+### The re-announced `start` instant is RECOVERED FROM THE STORE, not held in memory — a REQUIREMENT on stage 5
+
+**The user's ruling, confirming and improving the orchestrator's note.** The
+previous entry recorded that the shim must retain a unit's first-observation
+instant "for the unit's whole life". The user: "the store should have this
+information, and should be indexable on the [unit's] id. So as long as the id is
+provided to the detached work, it's fine." Correct, and it removes an in-memory
+obligation the orchestrator had stated as though it were unavoidable.
+
+**Why it holds.** The join key already exists — `TurnDetachableWorkDetached`
+carries the unit's `TurnProgressItemId` — and under model 2 the `start` frame is
+itself a record, so its instant is DURABLE rather than merely remembered. The
+second announcement reads the first.
+
+**The path this actually serves is SHIM RESTART, not the ordinary detach.** For a
+normal detachment the shim still holds the instant and no lookup happens. The
+lookup exists because after a shim bounce, still-live background work must be
+re-announced and the shim no longer has it — the same scenario
+`ShimHello.live_task_set` already exists for. So this is one more fact the
+reattach path must recover, not a new mechanism.
+
+**THE REQUIREMENT ON STAGE 5, recorded so it is not designed away.** The store is
+NOT indexable on a unit's id today. `entry` is keyed `PRIMARY KEY (session_id,
+seq)`, with a dedup index on `write_id` and two indexes on
+`top_level_message_id` — which is the FEED-ROW OWNER column derived by the
+ingest-time parent walk, NOT the unit's own identity
+(`shim-store/internal/db/db.go:156-172`). A lookup by unit id would be a scan.
+Under model 2 the unit's id becomes the record's own identity, so `StoreEntry`
+must carry it as an INDEXED column. Stage 5 owns that, and would otherwise have
+no way to know anything depends on it.
+
 ### THE `start` / `update` RULE: `start` means "this stream now carries this unit"; a kind has `update` IFF something produces growth for it
 
 **What changed ("your start audit suggested changes look good").** `read`,
