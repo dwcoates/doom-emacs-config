@@ -114,6 +114,97 @@ that transport.
 
 ## Landed changes
 
+### THE `start` / `update` RULE: `start` means "this stream now carries this unit"; a kind has `update` IFF something produces growth for it
+
+**What changed ("your start audit suggested changes look good").** `read`,
+`write`, `edit`, `grep` and `glob` rename their first arm `update` -> `start`
+(types `*Running` -> `*Start`) and have NO update arm. `bash` splits into
+`start` + a real `update` carrying an output delta and its offset. `thinking`
+and `response` GAIN a `start` arm, each empty. One rule now holds across the
+family.
+
+**THE RULE the user's stream observation produced.** `start` announces that THIS
+STREAM is now carrying this unit — it does NOT mean the work began. `update`
+reports GROWTH. A kind has an update arm IFF something actually produces growth
+for it. So `start` is universal and `update` is EARNED: today only bash (once
+detached), thinking and response earn one.
+
+**THE DEFECT THIS FIXED, which was the opposite assignment in both
+directions.** The five file and search tools had been given an arm named for
+growth they can never have, while the two kinds that genuinely grow had no
+announcement at all. The orchestrator introduced the first error in the previous
+increment; the second predated it. The user found both by asking whether the
+`start` semantics generalized beyond bash.
+
+**Why thinking and response needed it, which is more than symmetry.** Their
+update arm carries text CUMULATIVELY. So "the block opened and nothing has
+arrived yet" could only be spelled as an update carrying an EMPTY STRING — a
+sentinel standing in for a state, which this contract forbids everywhere else.
+The start arm states it properly, and it is the frame that makes a thinking
+disclosure open with its live indicator, and an empty response bubble appear,
+BEFORE the first token lands. Both start messages are EMPTY and carry no start
+instant: nothing draws a clock against reasoning or prose, and a field no
+consumer reads is a field that decays.
+
+**THE USER'S DETACHMENT QUESTION, and why the answer is a rule rather than an
+exemption.** If a command starts in a turn and then detaches, does its new
+stream never send `start`? The user's instinct was that this is fine. It is —
+but not because a missing announcement is harmless: because the detached stream
+RE-SENDS `start`. Three reasons converge, and the second is decisive.
+
+- Model 2 makes it the MECHANISM, not a duplication: identity is per thing,
+  growth is a re-send, and a frame is an upsert of the whole unit. Re-announcing
+  one unit under one id on its new stream is how the model already works.
+- THE DAEMON MUST SURVIVE ITS OWN RESTART. A stream whose first frame presumes a
+  frame delivered before the restart is unrecoverable, and daemon-restart
+  catch-up is a settled requirement of this design.
+- Every other landed shape is already self-describing for this reason — grep's
+  query rides both its announcement and its success arm.
+
+So: EVERY STREAM THAT CARRIES A UNIT OPENS WITH THAT UNIT'S `start`, and the
+second announcement repeats the ORIGINAL start instant, so a drawn clock does
+not reset when work moves between streams.
+
+**FOREGROUND SHELL OUTPUT IS OBSERVABLE NOWHERE — verified against what the
+sidecar can actually reach.** The user asked whether the sidecar could be
+adjusted to read a running command's output. It cannot, and the reason is where
+the bytes are. The sidecar tails exactly four kinds of file, all written by the
+agent binary: session transcripts, subagent transcripts, workflow journals
+(`internal/discover/discover.go:83-91`), and `tasks/*.output` spools — PER-TASK
+files, so only background work has one. A foreground command's output exists in
+NO file while it runs; it reaches the transcript only inside the completed tool
+result. Nor can we fix it from our side: we do not run the process, the agent
+binary does, so a foreground spool would be a vendor change. `bash`'s update arm
+is therefore structurally DETACH-ONLY, and its comment says so, because an
+integrator would otherwise wait for frames that never come.
+
+**A CLAIM THE USER CHALLENGED, now under empirical investigation rather than
+asserted.** The orchestrator stated that `BashOutput.persistedOutputPath` is
+written at completion. That was INFERRED from the field's doc comment ("set when
+output is too large for inline"), never observed. The user: "are you sure?" — and
+dispatched an agent to run a long-lived high-output command and watch whether the
+persisted file appears and GROWS during execution. If it does, foreground
+commands have an incremental producer after all and the detach-only statement
+above is wrong; the shape does not change, only the producer note. Recorded here
+because a design note resting on a doc comment is exactly the class of debt the
+vetting register exists to hold, and this one was caught in flight rather than
+after landing.
+
+**NON-OBVIOUS IMPLEMENTATION CONSEQUENCES.**
+
+- The shim emits a `start` frame per unit PER STREAM, not per unit. Detaching
+  work therefore produces two starts, and the shim must carry the ORIGINAL
+  instant into the second — a first-observation timestamp it must retain for the
+  unit's whole life rather than stamping at emit time.
+- `TurnAgentResponseStart` takes tag 4, out of numeric order, because the update
+  and terminal arms keep their landed tags; the arm ORDER in the file reads
+  start-first for legibility. Nothing depends on tag order, and renumbering the
+  settled arms would churn every consumer for nothing.
+- The webapp's response renderer must draw an empty bubble on `start`, which is
+  a behavior it does not have today: it currently creates the bubble on the
+  first text delta (`render.ts`, the `TextStream` path), so the bubble's
+  appearance moves earlier by one frame.
+
 ### The shell body lands; and EVERY TOOL GAINS AN ANNOUNCEMENT ARM — the item must exist before it concludes
 
 **What changed ("okay looks good then").** `TurnAgentBash` = { update |
