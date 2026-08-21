@@ -114,6 +114,61 @@ that transport.
 
 ## Landed changes
 
+### IDENTITY VOCABULARY: the four identifier spaces, what each names, and which are NOT interchangeable
+
+**Why this is recorded.** Four identifiers in this design were being used
+loosely, and two of them were conflated outright by the orchestrator. An
+implementer who joins on the wrong one gets plausible, silently wrong
+attribution — a subagent's work drawn as its caller's. So each is defined here
+once, with the evidence.
+
+**`agent_id` (the vendor's) — WHICH AGENT INSTANCE.** Its own identifier space.
+It appears as `AgentOutput.agentId`, as `SubagentStopHookInput.agent_id`, and as
+`parent_agent_id` on `SessionMessage` — the last documented as "agentId of the
+subagent that spawned this subagent, or null when this message belongs to a
+depth-1 subagent (spawned by the main loop) or to the main session itself". THAT
+FIELD IS THE PROOF THE SPACE IS ITS OWN: depth greater than one cannot be
+resolved from call ids at all.
+
+**`tool_use_id` (the vendor's) — WHICH TOOL CALL.** For a Task call this
+identifies THE SPAWN, not the agent it spawned. The two are adjacent fields on
+the same message (`sdk.d.ts:3630-3631`), and `SessionMessage` carries
+`parent_tool_use_id` AND `parent_agent_id` separately.
+
+**A CONFLATION, KEPT VISIBLE.** The orchestrator claimed the spawning call's id
+"IS the subagent's identity", and used that to argue an agent id on the wire
+would be a second spelling of what the envelope already stated. WRONG on both
+counts: the envelope states a CALL, and the vendor keeps the two spaces
+separate. The user rejected the inference on exactly that ground — "the task
+that spawns the agent is not the agent itself" — before it was checked, and the
+check confirmed him. ROOT CAUSE: reasoning from where an id HAPPENS TO COME FROM
+(unit ids are sourced from `tool_use_id` where one exists) to what the id MEANS.
+Provenance is not semantics.
+
+**`activity_id` (ours) — WHICH UNIT OF WORK.** The stable identity of one unit
+from its first frame to its last: the thing every frame for that unit is an
+upsert of, and the thing a nested unit is scoped under. Minted by the SHIM, one
+per unit for the unit's whole life, sourced from `tool_use_id` where the vendor
+has one and from message id plus block index for text and reasoning. IT NAMES
+WORK, NEVER AN AGENT — so a nested unit's `activity_id` says what a subagent was
+DOING and says nothing about WHICH subagent.
+
+**`TurnId` (ours) — WHICH TURN.** The window during which the main thread cannot
+accept a prompt. Daemon-minted, returned at submission, and unrelated to the
+three above.
+
+**NOT INTERCHANGEABLE, stated because each pairing was at some point treated as
+one thing:** an agent is not its spawning call; a unit of work is not the agent
+doing it; and a turn is neither.
+
+**STILL OPEN, and owed to stage 5.** Whether `activity_id` and the store's
+per-record identity are the same value. Under model 2 the unit's id IS the
+record's identity, and the no-respell rule says a typed identity is imported
+rather than restated, so they SHOULD coincide — but the store's
+`top_level_message_id` is a THIRD and coarser thing (the feed-row owner column)
+and must not be conflated with either. This is the granularity collision the
+stage-1 reversion already reopened by name.
+
 ### The re-announced `start` instant is RECOVERED FROM THE STORE, not held in memory — a REQUIREMENT on stage 5
 
 **The user's ruling, confirming and improving the orchestrator's note.** The
