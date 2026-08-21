@@ -24,3 +24,121 @@ option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 message TurnId {
   string value = 1;
 }
+
+// ==========================================================================
+// WHAT A RUNNING TURN SAYS. The update model of the conversation PROTOCOL:
+// units identified per THING and upserted, never per arrival — a unit holds one
+// identity from its first fragment to its last, and growth is a re-send of that
+// unit. The faithful per-observation log is the datalayer's shape (store.v1),
+// and the shim maps between them.
+//
+// The turn's TERMINAL frames are not here: a turn concludes on the stream that
+// carries it, so its success and failure arms belong to that rpc's response in
+// shim.v1, alongside the `update` arm that wraps this model.
+// ==========================================================================
+
+// Something a running turn has to say. The arm states WHAT THE CONSUMER MUST DO
+// with it, which is the only distinction that matters at this level: pipe it
+// back on the turn's own stream, or go open a stream of its own for it.
+message TurnUpdate {
+  oneof update {
+    // Work happening WITHIN the turn. Everything about it arrives on the turn's
+    // stream, and it cannot outlive the turn.
+    TurnProgress progress = 1;
+    // Work that now has a life of its own OUTSIDE the turn. Nothing further
+    // about it arrives here; the consumer opens the stream named by its handle.
+    TurnDetachedWork detached_work = 2;
+  }
+}
+
+// One unit of in-turn work, at whatever state it has reached.
+message TurnProgress {
+  // WHICH unit this concerns, so a later update reaches the same one rather
+  // than appearing as a new one. A unit is identified per THING: the agent's
+  // reasoning and its prose are separate units, each holding its identity
+  // across every fragment that composes it.
+  TurnProgressItemId progress_item_id = 1;
+
+  // WHAT KIND of work it is. Each kind carries its own state and its own
+  // payload, so a field is never present for a kind it means nothing to — and
+  // no accounting figure rides the envelope, where it would be meaningless for
+  // a file read or a search.
+  oneof progress_item {
+    TurnAgentThinking thinking = 2;
+    TurnAgentResponse response = 3;
+    TurnAgentQuestion question = 4;
+    TurnAgentSkillUse skill_use = 5;
+    TurnAgentRead read = 6;
+    TurnAgentWrite write = 7;
+    TurnAgentEdit edit = 8;
+    TurnAgentGrep grep = 9;
+    TurnAgentGlob glob = 10;
+    TurnAgentBash bash = 11;
+    TurnAgentAgentCreate agent = 12;
+    TurnAgentWorkflow workflow = 13;
+    TurnAgentUnmodeled unmodeled = 14;
+  }
+}
+
+// The identity of one unit of in-turn work. Opaque; equality is the only
+// question asked of it.
+message TurnProgressItemId {
+  string value = 1;
+}
+
+// Work that has left the turn. It is announced HERE and nowhere else after
+// this: the consumer opens the stream named by `work`, and everything the work
+// produces from then on arrives there.
+message TurnDetachedWork {
+  // The handle the work is addressed by: the stream is opened under it, and a
+  // stop is aimed at it. On the envelope rather than in either arm below,
+  // because both arms have one and it is the same fact either way.
+  DetachedWorkId work = 1;
+
+  // HOW it came to be detached. The two are genuinely different situations for
+  // a consumer: one continues an element it is already drawing, the other has
+  // no element yet and must be told what the work IS.
+  oneof origin {
+    // It was already streaming progress in this turn and was then backgrounded.
+    TurnDetachableWorkDetached detached = 2;
+    // It never had an in-turn progress update: either it was created detached
+    // outright, or the agent announced it with no originating call at all.
+    TurnDetachableWorkCreated created = 3;
+  }
+}
+
+// Work that was drawn as in-turn progress and has now left the turn. One
+// identity spans the move, so the element already on screen continues rather
+// than being replaced by a second one describing the same work.
+message TurnDetachableWorkDetached {
+  // The in-turn unit this work was, before it left.
+  //
+  // NO PAYLOAD BESIDE IT, deliberately: the consumer already received this
+  // work's description as the progress unit named here, and restating it would
+  // be a second copy able to disagree with the first.
+  TurnProgressItemId detached_from_id = 1;
+}
+
+// Work that is detached from the moment the consumer hears of it, so nothing
+// has described it yet.
+message TurnDetachableWorkCreated {
+  // What was created, since there is no earlier frame that says.
+  TurnDetachableWork work_created = 1;
+}
+
+// The kinds of work that can exist detached from a turn. Deliberately a SMALL
+// set, and deliberately its own type rather than a reuse of the in-turn kinds:
+// a kind absent here cannot claim to be detached, which is what makes
+// "reasoning ran in the background" unbuildable rather than merely wrong.
+message TurnDetachableWork {
+  oneof work {
+    TurnAgentAgentCreate agent = 1;
+    TurnAgentBash bash = 2;
+  }
+}
+
+// The identity of one unit of detached work, and the handle a stop is aimed at.
+// Opaque; equality is the only question asked of it.
+message DetachedWorkId {
+  string value = 1;
+}
