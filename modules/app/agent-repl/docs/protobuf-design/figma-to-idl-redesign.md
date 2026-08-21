@@ -114,6 +114,43 @@ that transport.
 
 ## Landed changes
 
+### Every landed field, oneof and message carries documentation; the standard is a skill convention
+
+**What changed.** A full documentation pass over the four `.proto` files
+reworked in this wave. Coverage before and after, counted as declarations
+(field, oneof and message) carrying a preceding comment:
+
+| File | Before | After |
+|---|---|---|
+| `conversation/v1/turn.proto` | 131/205 | 205/205 |
+| `conversation/v1/api.proto` | 38/40 | 40/40 |
+| `frontend/v1/daemon_hold.proto` | 37/51 | 51/51 |
+| `workspace/v1/workspace.proto` | 6/6 | 6/6 |
+
+**The systematic omission the audit exposed.** Nearly every gap was a `oneof`
+ARM LINE. The arm's target message was documented; the line selecting it was
+bare. That is precisely backwards for a reader: the arm line is where a
+consumer decides whether to handle the case at all, so the arm line is where
+"expect this when …" belongs, and the message body is where the payload's
+meaning belongs.
+
+**What a landed comment must carry.** Why the declaration exists, when
+precisely a producer sets it and a consumer sees it, what the consumer does
+with it, and any integration gotcha established while it was designed — for
+example that a glob floor is drawn as "at least N" and never as a total, that
+prose and reasoning text are cumulative rather than deltas so nothing
+accumulates client-side, that a settled response block does not mean the turn
+settled, that a withheld thinking block draws nothing at all rather than an
+empty card, and that a task in the paused arm is not terminal.
+
+**What it must never carry.** Any reference to the development process. A
+comment states the standing fact; it never narrates how the shape was reached,
+what it used to be, or who asked for it. That history is this document's job.
+
+**Codified.** `/create-or-update-protobufs` now requires this standard of every
+landing, so a landing with an undocumented declaration is incomplete rather
+than merely untidy.
+
 ### Grep and glob bodies land; the COMPLETENESS FACTORING pattern, and the landed-comment standard
 
 **What changed ("looks good then").** `TurnAgentGrep` = { success | failure },
