@@ -269,3 +269,20 @@ rendering. This was raised explicitly as a possibility rather than a ruling. The
 REQUIREMENT it addresses is settled; this particular means of meeting it is not.
 
 **Status.** OPEN.
+
+### D. The thinking-token estimate needs its own representation (owed to a `conversation.v1` increment)
+
+**What is required.** A type for the thinking figure a footer draws, distinct
+from `TokenUsage`.
+
+**Why.** `usage` contains NO thinking-token field. The figure comes from a
+separate channel (`system/thinking_tokens` -> `estimated_tokens`,
+`estimated_tokens_delta`) and is an ESTIMATE, not a billed amount. Borrowing
+`TokenUsage` for it would invite a consumer to add an estimate into a bill.
+Removing the misattributed field from the thinking arm left the figure with no
+representation at all, so the footer's thinking cell currently has no producer.
+
+**Also unmodelled.** `usage.output_tokens_details` appears in real transcripts
+and `TokenUsage` does not carry it.
+
+**Status.** OPEN.
