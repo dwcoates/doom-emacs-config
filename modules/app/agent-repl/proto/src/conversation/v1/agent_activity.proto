@@ -22,6 +22,8 @@ syntax = "proto3";
 package conversation.v1;
 
 import "conversation/v1/api.proto";
+import "conversation/v1/tool_call.proto";
+import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
@@ -1847,3 +1849,83 @@ message AgentSendMessageResumedRecipient {}
 // The message could not be delivered. Arms are DERIVED from the producer's real
 // refusal sites at the implementation wave; empty until then.
 message AgentSendMessageFailure {}
+
+// ---- The unmodeled tool: work this contract does not describe ----
+
+// A tool call this contract does not model — an MCP server's tool, or one the
+// vendor added after this schema was written.
+//
+// NOT A FALLBACK. This arm is for a tool whose schema genuinely cannot be known
+// to the producer, never for one whose modelling was merely inconvenient or
+// deferred. A recognizable built-in arriving here is a PRODUCER DEFECT, not a
+// legitimate use of the arm.
+//
+// SURFACE IT QUIETLY, BUT DO SURFACE IT. A consumer is expected to make the
+// user aware that unmodeled work occurred — silence would let a growing blind
+// spot go unnoticed — while NOT treating it as an error: the tool very likely
+// ran correctly, and the only thing wrong is that this contract cannot describe
+// it. What a consumer must not do is dump the raw arguments into a view: an
+// unstructured blob is unreadable and does not help anyone decide whether the
+// tool deserves an arm of its own.
+message AgentUnmodeled {
+  // Where the call stands. No update arm: this contract holds no knowledge of
+  // any unmodeled tool's streaming behavior, and an arm with no producer would
+  // be an invitation to invent one.
+  oneof result {
+    // This stream is now carrying this call. Sent ONCE per stream, at issue.
+    AgentUnmodeledStart start = 1;
+    // The tool returned.
+    AgentUnmodeledSuccess success = 2;
+    // The tool failed. Arms are DERIVED from the producer's real sites at the
+    // implementation wave; empty until then.
+    AgentUnmodeledFailure failure = 3;
+  }
+}
+
+// A call this stream has begun carrying.
+message AgentUnmodeledStart {
+  // The tool as the agent named it — an MCP tool's qualified name, or a built-in
+  // this schema has not caught up with.
+  //
+  // A PLAIN STRING BECAUSE THE SET IS GENUINELY OPEN: servers register tools at
+  // runtime, so no closed vocabulary can exist. This is the value a consumer
+  // groups by when deciding whether a tool is seen often enough to deserve
+  // modelling.
+  string tool_name = 1;
+
+  // The arguments as the agent supplied them.
+  //
+  // UNTYPED BY NECESSITY, and this is the one reason that qualifies: the
+  // producer holds no schema for a tool it did not define. Structured rather
+  // than a string so a generic view can list fields without re-parsing, but
+  // NOTHING BRANCHES ON A KEY INSIDE IT — a tool that needs that gets an arm of
+  // its own instead.
+  google.protobuf.Struct arguments = 2;
+
+  // When the call was issued.
+  AgentActivityStartedAt started_at = 3;
+}
+
+// The tool returned.
+message AgentUnmodeledSuccess {
+  // The tool as the agent named it, repeated so a settled frame describes
+  // itself.
+  string tool_name = 1;
+
+  // What it returned. TYPED, unlike the arguments above: a tool result is text
+  // and image blocks whichever tool produced it, so no untyped escape is needed
+  // on this side.
+  ToolResultContent content = 2;
+}
+
+// The tool failed.
+//
+// Arms are DERIVED from the producer's real sites at the implementation wave.
+// The content is carried now because an unmodeled tool's own error text is the
+// only account of what went wrong that anyone has.
+message AgentUnmodeledFailure {
+  // The tool as the agent named it.
+  string tool_name = 1;
+  // What it said when it failed, verbatim.
+  ToolResultContent content = 2;
+}
