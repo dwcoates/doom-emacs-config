@@ -11,6 +11,8 @@ syntax = "proto3";
 
 package conversation.v1;
 
+import "conversation/v1/api.proto";
+
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
 // The identity of a turn.
@@ -236,4 +238,122 @@ message TurnAgentTaskPaused {}
 // equality is the only question asked of it.
 message TurnAgentTaskId {
   string value = 1;
+}
+
+// ==========================================================================
+// The agent's own output: its reasoning, and what it says. Two kinds rather
+// than one, because reasoning can be entirely absent from the transcript while
+// a response never is — and because they are drawn in different places.
+//
+// Both are identified by TurnProgress.progress_item_id, never by a field of
+// their own, so two blocks arriving at once cannot merge.
+// ==========================================================================
+
+// The agent's reasoning: its scratchpad on the way to an answer, not addressed
+// to the user. Drawn as a disclosure that sits open while it runs and collapses
+// once it settles.
+message TurnAgentThinking {
+  oneof result {
+    TurnAgentThinkingUpdate update = 1;
+    TurnAgentThinkingSuccess success = 2;
+    TurnAgentThinkingFailure failure = 3;
+  }
+}
+
+// Reasoning is arriving. The consumer draws a live indicator; whether it can
+// draw any TEXT depends on the arm.
+message TurnAgentThinkingUpdate {
+  oneof reasoning {
+    // Text is streaming, and is drawn as it arrives.
+    TurnAgentThinkingText text = 1;
+    // The model is reasoning and withholding the text — it emits the block and
+    // a signature but no text at all. There is nothing to draw but a live
+    // indicator, and nothing whatever once it settles.
+    TurnAgentThinkingWithheld withheld = 2;
+  }
+}
+
+// Reasoning finished; the disclosure collapses.
+message TurnAgentThinkingSuccess {
+  // The reasoning, whole. The same two arms as while arriving: a withheld block
+  // settles withheld, and the consumer then draws nothing rather than an empty
+  // card.
+  oneof reasoning {
+    TurnAgentThinkingText text = 1;
+    TurnAgentThinkingWithheld withheld = 2;
+  }
+  // What the reasoning cost. Charged separately from the answer, which is why a
+  // footer draws a thinking figure beside the input one.
+  conversation.v1.TokenUsage token_usage = 3;
+}
+
+// Reasoning ended without finishing. Arms are DERIVED from the producer's real
+// sites at the implementation wave; empty until then, because an invented arm
+// is worse than an absent one.
+message TurnAgentThinkingFailure {}
+
+// The reasoning text as it stands. Plain text rather than markdown: it is drawn
+// verbatim and monospace, as a scratchpad rather than as prose.
+message TurnAgentThinkingText {
+  string text = 1;
+}
+
+// The model is reasoning but says nothing about it.
+message TurnAgentThinkingWithheld {}
+
+// What the agent says to the user. One of these per text block the agent emits,
+// so a turn holds SEVERAL: the commentary between tool calls and the answer at
+// the end are the same kind of thing, differing only in what followed them.
+//
+// WHICH of them answered the turn is deliberately not stated here. A producer
+// cannot know while writing one, since it depends on nothing further arriving;
+// the turn's own conclusion names it.
+message TurnAgentResponse {
+  oneof result {
+    TurnAgentResponseUpdate update = 1;
+    TurnAgentResponseSuccess success = 2;
+    TurnAgentResponseFailure failure = 3;
+  }
+}
+
+// Prose is arriving; the bubble is visibly building.
+message TurnAgentResponseUpdate {
+  // Everything said SO FAR, not a delta. A consumer that missed a frame is
+  // correct again after the next one, and nothing is accumulated client-side.
+  TurnAgentResponseProse prose = 1;
+  // The accounting as it stands. Input and cache figures are final from the
+  // moment the message opens; the output figure is interim and is restated
+  // later. Carried on the update because a footer draws a live token figure
+  // during a turn rather than only after it.
+  conversation.v1.TokenUsage token_usage = 2;
+}
+
+// The block finished; the bubble stops building.
+message TurnAgentResponseSuccess {
+  // What was said, whole.
+  TurnAgentResponseProse prose = 1;
+  // The settled accounting, replacing every interim figure this unit reported.
+  // Per response rather than per turn, because a turn holds several and each is
+  // its own request.
+  conversation.v1.TokenUsage token_usage = 2;
+}
+
+// The block ended without completing.
+message TurnAgentResponseFailure {
+  // What had been said when it ended, carried because a truncated or refused
+  // answer is still shown rather than discarded. May be empty — a refusal can
+  // precede any text at all.
+  TurnAgentResponseProse prose = 1;
+  // What the attempt cost, since a response that failed was still charged.
+  conversation.v1.TokenUsage token_usage = 2;
+  // Why it ended. Arms are DERIVED from the producer's real sites at the wave.
+  TurnAgentResponseFailureReason reason = 3;
+}
+
+// Why a response ended without completing. Empty until its arms are derived.
+message TurnAgentResponseFailureReason {}
+
+// Prose the agent said, as markdown for the consumer to render.
+message TurnAgentResponseProse {
+  string markdown = 1;
 }
