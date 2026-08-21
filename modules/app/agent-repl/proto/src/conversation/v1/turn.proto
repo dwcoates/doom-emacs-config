@@ -357,3 +357,59 @@ message TurnAgentResponseFailureReason {}
 message TurnAgentResponseProse {
   string markdown = 1;
 }
+
+// ==========================================================================
+// The plain file and search tools. None carries an update arm: a read, a write,
+// an edit or a search either returns or fails, and nothing draws a partial one.
+// ==========================================================================
+
+// The agent read a file.
+message TurnAgentRead {
+  oneof result {
+    TurnAgentReadSuccess success = 1;
+    TurnAgentReadFailure failure = 2;
+  }
+}
+
+// The file was read.
+message TurnAgentReadSuccess {
+  // Which file. One fact in one form, embedded by whoever draws it rather than
+  // restated, and the value a highlighter's grammar is chosen from.
+  ReadPath path = 1;
+
+  // How much of the file came back. The set arm IS whether more exists, so a
+  // whole read carries no truncation vocabulary and a short one cannot omit the
+  // figure that makes it legible.
+  oneof extent {
+    TurnAgentReadWhole whole = 2;
+    TurnAgentReadHead head = 3;
+  }
+}
+
+// The file came back entire.
+message TurnAgentReadWhole {
+  // Everything the file holds.
+  string contents = 1;
+}
+
+// The file was long, so only its leading portion came back.
+message TurnAgentReadHead {
+  // The leading portion, cut on a line boundary. A HEAD rather than a slice from
+  // the middle, deliberately: a highlighter reading from offset zero has correct
+  // context, while text beginning mid-string or mid-comment is mis-highlighted
+  // until it happens to resync.
+  string contents = 1;
+  // What the whole file holds, so a consumer states "showing 200 of 4,312"
+  // without arithmetic and without a second request.
+  uint32 total_lines = 2;
+}
+
+// The read did not happen. Arms are DERIVED from the producer's real sites at
+// the implementation wave; empty until then.
+message TurnAgentReadFailure {}
+
+// A path a file tool acted on.
+message ReadPath {
+  // The path as the tool resolved it.
+  string path = 1;
+}
