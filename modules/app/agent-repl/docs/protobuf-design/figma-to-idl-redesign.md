@@ -114,6 +114,91 @@ that transport.
 
 ## Landed changes
 
+### The question body lands: ECHOED VALUES rather than tokens or order, and failure scoped to the ASK
+
+**What changed.** `AgentQuestion` = { start | success | failure }, success
+carrying `oneof outcome { answered | unanswered }`. A batch of one to four
+questions, each with a per-question single/multi select arm over options. An
+answer names its question and its picked options by ECHOING the values it was
+served.
+
+**THE PRODUCER'S ANSWER SHAPE IS A SERIALIZATION, NOT A MODEL — and the contract
+refuses to mirror it.** Its output carries answers as a MAP KEYED BY QUESTION
+TEXT, with multiple selections COMMA-JOINED into one string, and per-question
+annotations keyed by question text again. Joining on prose breaks when two
+questions read alike; comma-joining is unrecoverable for any label containing a
+comma. The shim undoes both at the boundary.
+
+**THREE CANDIDATE KEYS, and why the third won.**
+
+- POSITION (answers in batch order). The orchestrator proposed it. The user
+  objected in principle to making order load-bearing, and was right: nothing
+  about the producer's data is ordered, so the order would have been an invention
+  the shim maintained.
+- A MINTED TOKEN per question and per option, per the typed-echo-token
+  convention. The orchestrator proposed this next. The user rejected it because
+  IT REQUIRES THE SHIM TO TRACK STATE — a token means nothing without a stored
+  mapping back to the text the producer keys on.
+- ECHOING THE VALUE ITSELF, the user's proposal and what landed. The question's
+  TEXT and the option's LABEL are the producer's own keys, so echoing them lets
+  the shim reconstruct the producer call from the answer alone, with NOTHING
+  remembered. The echoed values are typed on both sides (`AgentQuestionText`,
+  `AgentQuestionOptionLabel`) rather than bare strings, per the echo-token
+  convention's actual requirement — the convention is about the value being ONE
+  TYPE across the round trip, not about the value being opaque.
+
+**A refinement the user made to his own proposal.** He first suggested the answer
+carry the whole question and option MESSAGES; then: "it's probably better to just
+have the question/choice text embedded in the answer protos rather than the full
+question protos themselves. The consumer can resolve that just fine." So an
+answer carries the two echoed values and not the descriptions, previews or
+headers, which nothing echoes.
+
+**Why validation costs nothing, recorded because it is the objection an echo
+usually loses to.** A client could in principle echo a question nobody asked.
+The shim is ALREADY HOLDING the pending permission callback while the turn
+blocks — it must, in order to answer it — so it has the original ask in hand by
+construction and can check the echo without storing anything new. The echo is
+stateless in the sense that matters: no NEW state, not merely relocated state.
+
+**FAILURE IS SCOPED TO THE ASK, by the user's correction.** The orchestrator gave
+the failure arm a cause oneof splitting "could not ask" from "could not apply the
+answer". The user: the arm "should only support failures to ASK THE QUESTION,
+because, well, it's about questions. Whatever the connection route is for
+RESPONDING WITH AN ANSWER should support the ANSWER failure handling." Correct,
+and it needs no new machinery — the answer travels on its own unary call, and the
+response-outcome convention already gives that call its own failure arm. So the
+arm here is empty like every other in this file. ROOT CAUSE of the error:
+modelling failure causes for an exchange whose mechanics are stage 4's and not
+yet settled, which is derived-not-invented applied backwards.
+
+**THE EXCHANGE'S MECHANICS, stated because the user asked and it looked like it
+might need bidirectional RPC.** An ask BLOCKS the turn it is in. The question
+arrives as a frame on the server stream carrying the unit, and the answer returns
+as a SEPARATE UNARY CALL — the `UpdatePrompt { interrupt | answer_permission }`
+verb settled at 4b. Two directions, two calls; no bidirectional exchange is
+required, which is why the transport decision never needed one.
+
+**Domain outcomes.** An ask that NOBODY ANSWERED is a success carrying the
+`unanswered` arm, not a failure — the producer has an idle timeout, so the agent
+proceeds without a choice and a consumer draws the ask as expired rather than
+pending forever. And the free-text escape is ALWAYS offered by the drawn card
+whether or not the agent asked for one, so an answer may carry free text even
+where the options looked exhaustive.
+
+**Dropped from the producer's output, each for a stated reason**: the echoed
+`multiSelect` flag (the question's own arm states it), and the idle-timeout
+duration (nothing draws "it waited ninety seconds").
+
+**UNCERTAIN AND RECORDED AS SUCH.** The answer carries BOTH a free-text field
+and a note field, because the producer has two separate fields — one that
+substitutes for a choice and one described as notes the user added to their
+selection. The orchestrator is INFERRING that distinction from the field
+descriptions and has NOT observed either in use, nor confirmed that the
+substitute-for-a-choice field is the free-text escape rather than something else.
+The user accepted carrying both; the verification is owed on the vetting
+register.
+
 ### THE FAMILY IS RENAMED `Turn*` -> `Agent*`; `AgentActivity` carries `agent_id` and RECURSES — one shape for the main agent, an awaited subagent, and detached work
 
 **What changed ("looks great, let's do it").** Twenty-six name changes across
