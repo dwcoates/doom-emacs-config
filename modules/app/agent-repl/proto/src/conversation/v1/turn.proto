@@ -44,79 +44,110 @@ message TurnId {
 // Something a running turn has to say. The arm states WHAT THE CONSUMER MUST DO
 // with it, which is the only distinction that matters at this level: pipe it
 // back on the turn's own stream, or go open a stream of its own for it.
-message TurnUpdate {
+message AgentUpdate {
   // Whether the work stays inside this turn or has left it. The two demand
   // different handling rather than different rendering, which is why they are
   // separated at this level.
   oneof update {
     // Work happening WITHIN the turn. Everything about it arrives on the turn's
     // stream, and it cannot outlive the turn.
-    TurnProgress progress = 1;
+    AgentActivity activity = 1;
     // Work that now has a life of its own OUTSIDE the turn. Nothing further
     // about it arrives here; the consumer opens the stream named by its handle.
-    TurnDetachedWork detached_work = 2;
+    AgentDetachedWork detached_work = 2;
   }
 }
 
 // One unit of in-turn work, at whatever state it has reached.
-message TurnProgress {
+message AgentActivity {
+  // WHICH AGENT did this work: the main-thread agent, or a subagent at any
+  // depth.
+  //
+  // PRESENT AT EVERY LEVEL — the turn's top level, an awaited subagent's nested
+  // activity, and a detached item's own stream alike — so ONE shape serves all
+  // three and no consumer infers attribution from which stream a frame arrived
+  // on. It is NOT derivable from the enclosing unit: a spawn's identity names
+  // the CALL that created an agent, which is a different thing from the agent,
+  // and depth beyond one cannot be resolved from call identities at all.
+  AgentId agent_id = 17;
+
   // WHICH unit this concerns, so a later update reaches the same one rather
   // than appearing as a new one. A unit is identified per THING: the agent's
   // reasoning and its prose are separate units, each holding its identity
   // across every fragment that composes it.
-  TurnProgressItemId progress_item_id = 1;
+  //
+  // IT NAMES WORK, NEVER AN AGENT. On the `subagent_activity` arm below this is
+  // the SPAWN — the containment path — and the unit the frame actually upserts
+  // is the INNERMOST activity_id. A consumer keys its store on the innermost
+  // and reads the outer ones as ancestry.
+  AgentActivityId activity_id = 1;
 
   // WHAT KIND of work it is. Each kind carries its own state and its own
   // payload, so a field is never present for a kind it means nothing to — and
   // no accounting figure rides the envelope, where it would be meaningless for
   // a file read or a search.
-  oneof progress_item {
+  oneof item {
     // The agent's reasoning on the way to an answer. May be withheld entirely,
     // in which case there is nothing to draw.
-    TurnAgentThinking thinking = 2;
+    AgentThinking thinking = 2;
     // Prose the agent addressed to the user. A turn holds several: the
     // commentary between tool calls and the answer at the end are both this.
-    TurnAgentResponse response = 3;
+    AgentResponse response = 3;
     // The agent asking the user to choose between options, and waiting for the
     // answer before it can continue.
-    TurnAgentQuestion question = 4;
+    AgentQuestion question = 4;
     // The agent invoking a skill, which arrives over several frames — the
     // invocation first, then what the skill contributed.
-    TurnAgentSkillUse skill_use = 5;
+    AgentSkillUse skill_use = 5;
     // The agent reading a file.
-    TurnAgentRead read = 6;
+    AgentRead read = 6;
     // The agent replacing a file's contents wholesale, or creating it.
-    TurnAgentWrite write = 7;
+    AgentWrite write = 7;
     // The agent replacing a matched string inside an existing file.
-    TurnAgentEdit edit = 8;
+    AgentEdit edit = 8;
     // The agent searching file contents for a pattern.
-    TurnAgentGrep grep = 9;
+    AgentGrep grep = 9;
     // The agent matching file paths against a pattern.
-    TurnAgentGlob glob = 10;
+    AgentGlob glob = 10;
     // The agent running a shell command. The only tool here whose output
     // arrives incrementally while it runs.
-    TurnAgentBash bash = 11;
-    // The agent spawning a subagent. Expect a detached-work frame to follow
-    // when the spawn is backgrounded rather than awaited.
-    TurnAgentAgentCreate agent = 12;
+    AgentBash bash = 11;
+    // The agent spawning a subagent, and that spawn's own lifecycle — the
+    // prompt it was given, its progress, and the report and totals it settles
+    // with.
+    AgentSubagent subagent = 12;
+    // WORK DONE BY a subagent this agent spawned, carried whole rather than
+    // referenced.
+    //
+    // THE RECURSION IS THE POINT: a subagent does everything an agent does,
+    // including spawning subagents, so its work is the SAME shape at unbounded
+    // depth and a consumer handles it with the same code it handles this level
+    // with. The nested frame carries its own `agent_id`, so each level states
+    // whose work it is without the reader walking back up.
+    //
+    // Expect this arm for an AWAITED subagent, whose work rides its caller's
+    // stream. A DETACHED subagent's work arrives on that work's own stream
+    // instead, as ordinary top-level activity — the same shape either way,
+    // which is why detachment changes no consumer's parsing.
+    AgentActivity subagent_activity = 18;
     // The agent running a workflow, which reports step by step.
-    TurnAgentWorkflow workflow = 13;
+    AgentWorkflow workflow = 13;
     // A tool this contract does not model — an MCP server's tool, or one added
     // after this schema was written. Present so unmodelled work is still
     // visible rather than silently absent.
-    TurnAgentUnmodeled unmodeled = 14;
+    AgentUnmodeled unmodeled = 14;
     // The agent sending a message to another agent.
-    TurnAgentSendMessage send_message = 15;
+    AgentSendMessage send_message = 15;
     // The agent creating or altering an entry in the task tracker. Arrives in
     // whichever turn the acting agent was running in, so a task edited across
     // several turns produces several of these.
-    TurnAgentTaskAct task_act = 16;
+    AgentTaskAct task_act = 16;
   }
 }
 
 // The identity of one unit of in-turn work. Opaque; equality is the only
 // question asked of it.
-message TurnProgressItemId {
+message AgentActivityId {
   // The unit's identifier for the life of that unit — from its first frame to
   // its last — so repeated frames upsert one element rather than appending new
   // ones. For a tool call this is the call's own identity as the producer
@@ -128,7 +159,7 @@ message TurnProgressItemId {
 // Work that has left the turn. It is announced HERE and nowhere else after
 // this: the consumer opens the stream named by `work`, and everything the work
 // produces from then on arrives there.
-message TurnDetachedWork {
+message AgentDetachedWork {
   // The handle the work is addressed by: the stream is opened under it, and a
   // stop is aimed at it. On the envelope rather than in either arm below,
   // because both arms have one and it is the same fact either way.
@@ -139,23 +170,23 @@ message TurnDetachedWork {
   // no element yet and must be told what the work IS.
   oneof origin {
     // It was already streaming progress in this turn and was then backgrounded.
-    TurnDetachableWorkDetached detached = 2;
+    DetachedWorkDetached detached = 2;
     // It never had an in-turn progress update: either it was created detached
     // outright, or the agent announced it with no originating call at all.
-    TurnDetachableWorkCreated created = 3;
+    DetachedWorkCreated created = 3;
   }
 }
 
 // Work that was drawn as in-turn progress and has now left the turn. One
 // identity spans the move, so the element already on screen continues rather
 // than being replaced by a second one describing the same work.
-message TurnDetachableWorkDetached {
+message DetachedWorkDetached {
   // The in-turn unit this work was, before it left.
   //
   // NO WORK PAYLOAD BESIDE IT, deliberately: the consumer already received this
   // work's description as the progress unit named here, and restating it would
   // be a second copy able to disagree with the first.
-  TurnProgressItemId detached_from_id = 1;
+  AgentActivityId detached_from_id = 1;
 
   // HOW it came to be detached. Each arm is drawn differently and one carries a
   // figure, so the set arm is the cause rather than a flag beside it.
@@ -166,25 +197,25 @@ message TurnDetachableWorkDetached {
   // simply never has a foreground running phase.
   oneof cause {
     // The agent asked for the background at the call site. The ordinary path.
-    TurnDetachedCauseRequested requested = 2;
+    DetachedCauseRequested requested = 2;
     // A person backgrounded running work by hand. Worth distinguishing from the
     // others: the agent did not choose it and may not expect it.
-    TurnDetachedCauseByUser by_user = 3;
+    DetachedCauseByUser by_user = 3;
     // The work outlived its own timeout and was backgrounded rather than
     // killed.
-    TurnDetachedCauseTimedOut timed_out = 4;
+    DetachedCauseTimedOut timed_out = 4;
   }
 }
 
 // The agent asked for the background when it made the call.
-message TurnDetachedCauseRequested {}
+message DetachedCauseRequested {}
 
 // A person backgrounded the running work by hand.
-message TurnDetachedCauseByUser {}
+message DetachedCauseByUser {}
 
 // The work exceeded its own timeout and was moved to the background instead of
 // being killed.
-message TurnDetachedCauseTimedOut {
+message DetachedCauseTimedOut {
   // The timeout that was exceeded, in milliseconds.
   //
   // THE CONFIGURED LIMIT, NOT THE WORK'S RUNTIME. The work is still running
@@ -195,38 +226,44 @@ message TurnDetachedCauseTimedOut {
 
 // Work that is detached from the moment the consumer hears of it, so nothing
 // has described it yet.
-message TurnDetachableWorkCreated {
+message DetachedWorkCreated {
   // What was created, since there is no earlier frame that says.
-  TurnDetachableWork work_created = 1;
+  DetachableWork work_created = 1;
 }
 
 // The kinds of work that can exist detached from a turn. Deliberately a SMALL
 // set, and deliberately its own type rather than a reuse of the in-turn kinds:
 // a kind absent here cannot claim to be detached, which is what makes
 // "reasoning ran in the background" unbuildable rather than merely wrong.
-message TurnDetachableWork {
-  // Which kind of work left the turn, DESCRIBED rather than concluded. The set
-  // is deliberately small: only work that can outlive the agent that started it
-  // appears here.
+message DetachableWork {
+  // Which kind of work left the turn. The set is deliberately small: only work
+  // that can outlive the agent that started it appears here.
   //
-  // THESE ARMS NAME DESCRIPTION TYPES, NOT THE PROGRESS-ITEM TYPES OF THE SAME
-  // WORK. A progress item's body states an OUTCOME, and work being announced
-  // has no outcome yet — so a progress-item type here could not say what the
-  // work IS, which is the one thing a consumer with no earlier frame needs.
+  // THESE NAME THE UNIT TYPES THEMSELVES. Each carries a `start` arm that
+  // describes the work, so a unit type can announce work a consumer has never
+  // seen — which is what a separate description type would otherwise have been
+  // for.
   oneof work {
     // A subagent, spawned to run independently of the turn that asked for it.
-    TurnDetachableWorkAgent agent = 1;
+    AgentSubagent subagent = 1;
     // A shell command left running after the turn that started it ended.
-    TurnDetachableWorkBash bash = 2;
+    AgentBash bash = 2;
   }
 }
 
-// A detached shell command, described so a consumer that never saw an in-turn
-// frame for it can still draw it.
-message TurnDetachableWorkBash {
-  // The command line. The same element the in-turn item carries, because it is
-  // the same fact drawn the same way.
-  TurnAgentBashCommand command = 1;
+
+// The identity of one agent instance: the main-thread agent, or a subagent at
+// any depth.
+//
+// OPAQUE; equality is the only question asked of it. Deliberately its OWN space,
+// distinct from the identity of the call that spawned the agent — a spawn is a
+// unit of the caller's work, and the agent it produced is a different thing. A
+// consumer asking "whose work is this" reads this and never the enclosing unit's
+// identity.
+message AgentId {
+  // The producer's identifier for the agent instance, carried verbatim. Compare
+  // for equality; never parse or construct one.
+  string value = 1;
 }
 
 // The identity of one unit of detached work, and the handle a stop is aimed at.
@@ -248,10 +285,10 @@ message DetachedWorkId {
 
 // One act the agent performed on the task tracker, drawn in the turn — or the
 // detached stream — the acting agent was running on.
-message TurnAgentTaskAct {
+message AgentTaskAct {
   // Which task the act concerned. The tracker's identity, not this turn's, so a
   // task edited from several turns remains one task.
-  TurnAgentTaskId task = 1;
+  AgentTaskId task = 1;
 
   // What the agent did. Stopping is not an arm here: it is a change whose
   // resulting status is `killed`, so there is one way to say it rather than two.
@@ -260,26 +297,26 @@ message TurnAgentTaskAct {
   // `state` either way.
   oneof act {
     // The task did not exist before this. Add it.
-    TurnAgentTaskCreated created = 2;
+    AgentTaskCreated created = 2;
     // The task existed and was altered. Replace what is held for it.
-    TurnAgentTaskChanged changed = 3;
+    AgentTaskChanged changed = 3;
   }
 
   // Where the act left the task, resolved by the producer, so no consumer
   // replays a sequence of acts to learn what a task currently is.
-  TurnAgentTaskState state = 4;
+  AgentTaskState state = 4;
 }
 
 // The task did not exist before this act. The arm carries nothing: what the
 // task now IS rides `state`, and a second copy here could disagree with it.
-message TurnAgentTaskCreated {}
+message AgentTaskCreated {}
 
 // The task existed and this act altered it. Carries nothing, for the same
 // reason as above.
-message TurnAgentTaskChanged {}
+message AgentTaskChanged {}
 
 // A task as it stands after an act.
-message TurnAgentTaskState {
+message AgentTaskState {
   // The task's subject line.
   string subject = 1;
   // Its full description.
@@ -296,28 +333,28 @@ message TurnAgentTaskState {
   // vendor's own rather than invented here.
   oneof status {
     // Recorded but not begun.
-    TurnAgentTaskPending pending = 4;
+    AgentTaskPending pending = 4;
     // Being worked on now — the only status carrying a phrasing to show while
     // it runs.
-    TurnAgentTaskRunning running = 5;
+    AgentTaskRunning running = 5;
     // Done, having achieved what it described.
-    TurnAgentTaskCompleted completed = 6;
+    AgentTaskCompleted completed = 6;
     // Done, having failed to. Distinct from `killed`: the work was attempted
     // and did not succeed.
-    TurnAgentTaskFailed failed = 7;
+    AgentTaskFailed failed = 7;
     // Ended by something stopping it rather than by resolving either way.
-    TurnAgentTaskKilled killed = 8;
+    AgentTaskKilled killed = 8;
     // Begun and suspended, expected to resume. Not a terminal status: a later
     // act can move it back to running.
-    TurnAgentTaskPaused paused = 9;
+    AgentTaskPaused paused = 9;
   }
 }
 
 // Created, not started.
-message TurnAgentTaskPending {}
+message AgentTaskPending {}
 
 // Being worked on now.
-message TurnAgentTaskRunning {
+message AgentTaskRunning {
   // The present-continuous phrasing to show while it runs ("running the
   // migration"), as the agent supplied it. It lives here because it means
   // nothing for a task that is not running. Unset when the agent gave none —
@@ -327,21 +364,21 @@ message TurnAgentTaskRunning {
 }
 
 // Finished, having done what it said it would.
-message TurnAgentTaskCompleted {}
+message AgentTaskCompleted {}
 
 // Finished, having failed to do it.
-message TurnAgentTaskFailed {}
+message AgentTaskFailed {}
 
 // Ended because something stopped it, rather than because it resolved either
 // way.
-message TurnAgentTaskKilled {}
+message AgentTaskKilled {}
 
 // Started and suspended, expected to resume.
-message TurnAgentTaskPaused {}
+message AgentTaskPaused {}
 
 // The tracker's identity for one task. Opaque to every reader, never parsed;
 // equality is the only question asked of it.
-message TurnAgentTaskId {
+message AgentTaskId {
   // The tracker's identifier for the task. Stable across turns and across
   // agents, so acts arriving on different streams join here. Opaque: compare
   // for equality, never parse.
@@ -353,28 +390,28 @@ message TurnAgentTaskId {
 // than one, because reasoning can be entirely absent from the transcript while
 // a response never is — and because they are drawn in different places.
 //
-// Both are identified by TurnProgress.progress_item_id, never by a field of
+// Both are identified by AgentActivity.activity_id, never by a field of
 // their own, so two blocks arriving at once cannot merge.
 // ==========================================================================
 
 // The agent's reasoning: its scratchpad on the way to an answer, not addressed
 // to the user. Drawn as a disclosure that sits open while it runs and collapses
 // once it settles.
-message TurnAgentThinking {
+message AgentThinking {
   // Where the reasoning stands. Expect exactly one start, then any number of
   // updates, then exactly one terminal arm.
   oneof result {
     // This stream is now carrying this reasoning: the block has opened and
     // nothing has arrived in it yet. A consumer opens the disclosure with its
     // live indicator and no text.
-    TurnAgentThinkingStart start = 1;
+    AgentThinkingStart start = 1;
     // Still reasoning. A consumer shows a live indicator and, if there is text,
     // the reasoning so far.
-    TurnAgentThinkingUpdate update = 2;
+    AgentThinkingUpdate update = 2;
     // Reasoning finished; collapse the disclosure and stop the indicator.
-    TurnAgentThinkingSuccess success = 3;
+    AgentThinkingSuccess success = 3;
     // Reasoning ended without finishing.
-    TurnAgentThinkingFailure failure = 4;
+    AgentThinkingFailure failure = 4;
   }
 }
 
@@ -385,34 +422,34 @@ message TurnAgentThinking {
 // spelled as an update carrying an empty string — a sentinel standing in for a
 // state. The arm states it instead. No start instant rides here: nothing draws a
 // clock against reasoning, and a field no consumer reads is a field that decays.
-message TurnAgentThinkingStart {}
+message AgentThinkingStart {}
 
 // Reasoning is arriving. The consumer draws a live indicator; whether it can
 // draw any TEXT depends on the arm.
-message TurnAgentThinkingUpdate {
+message AgentThinkingUpdate {
   // Whether there is any reasoning text to show. Both arms mean the model is
   // reasoning; only one of them can be drawn.
   oneof reasoning {
     // Text is streaming, and is drawn as it arrives.
-    TurnAgentThinkingText text = 1;
+    AgentThinkingText text = 1;
     // The model is reasoning and withholding the text — it emits the block and
     // a signature but no text at all. There is nothing to draw but a live
     // indicator, and nothing whatever once it settles.
-    TurnAgentThinkingWithheld withheld = 2;
+    AgentThinkingWithheld withheld = 2;
   }
 }
 
 // Reasoning finished; the disclosure collapses.
-message TurnAgentThinkingSuccess {
+message AgentThinkingSuccess {
   // The reasoning, whole. The same two arms as while arriving: a withheld block
   // settles withheld, and the consumer then draws nothing rather than an empty
   // card.
   oneof reasoning {
     // The reasoning, in full.
-    TurnAgentThinkingText text = 1;
+    AgentThinkingText text = 1;
     // The reasoning was withheld throughout. A consumer draws nothing at all
     // for this block once it settles — not an empty card.
-    TurnAgentThinkingWithheld withheld = 2;
+    AgentThinkingWithheld withheld = 2;
   }
   // What the reasoning cost. Charged separately from the answer, which is why a
   // footer draws a thinking figure beside the input one.
@@ -422,11 +459,11 @@ message TurnAgentThinkingSuccess {
 // Reasoning ended without finishing. Arms are DERIVED from the producer's real
 // sites at the implementation wave; empty until then, because an invented arm
 // is worse than an absent one.
-message TurnAgentThinkingFailure {}
+message AgentThinkingFailure {}
 
 // The reasoning text as it stands. Plain text rather than markdown: it is drawn
 // verbatim and monospace, as a scratchpad rather than as prose.
-message TurnAgentThinkingText {
+message AgentThinkingText {
   // The reasoning so far, or in full once settled. Everything said up to this
   // point rather than a delta, so a consumer that missed a frame is correct
   // again after the next one and accumulates nothing itself.
@@ -434,7 +471,7 @@ message TurnAgentThinkingText {
 }
 
 // The model is reasoning but says nothing about it.
-message TurnAgentThinkingWithheld {}
+message AgentThinkingWithheld {}
 
 // What the agent says to the user. One of these per text block the agent emits,
 // so a turn holds SEVERAL: the commentary between tool calls and the answer at
@@ -443,23 +480,23 @@ message TurnAgentThinkingWithheld {}
 // WHICH of them answered the turn is deliberately not stated here. A producer
 // cannot know while writing one, since it depends on nothing further arriving;
 // the turn's own conclusion names it.
-message TurnAgentResponse {
+message AgentResponse {
   // Where this block of prose stands. Expect exactly one start, then any number
   // of updates, then exactly one terminal arm.
   oneof result {
     // This stream is now carrying this block: it has opened and no prose has
     // arrived yet. A consumer draws the empty bubble, which is what makes the
     // agent visibly begin answering before the first token lands.
-    TurnAgentResponseStart start = 4;
+    AgentResponseStart start = 4;
     // Prose is still arriving; the bubble is visibly building.
-    TurnAgentResponseUpdate update = 1;
+    AgentResponseUpdate update = 1;
     // The block finished. Note this says nothing about the TURN finishing —
     // several blocks settle in a turn, and which one answered it is stated by
     // the turn's own conclusion.
-    TurnAgentResponseSuccess success = 2;
+    AgentResponseSuccess success = 2;
     // The block ended without completing. Whatever prose had arrived is still
     // carried and still shown.
-    TurnAgentResponseFailure failure = 3;
+    AgentResponseFailure failure = 3;
   }
 }
 
@@ -468,13 +505,13 @@ message TurnAgentResponse {
 // EMPTY ON PURPOSE, for the same reason the reasoning start is: the update arm
 // carries prose CUMULATIVELY, so an opened-but-silent block would otherwise be
 // an update carrying an empty string — a sentinel standing in for a state.
-message TurnAgentResponseStart {}
+message AgentResponseStart {}
 
 // Prose is arriving; the bubble is visibly building.
-message TurnAgentResponseUpdate {
+message AgentResponseUpdate {
   // Everything said SO FAR, not a delta. A consumer that missed a frame is
   // correct again after the next one, and nothing is accumulated client-side.
-  TurnAgentResponseProse prose = 1;
+  AgentResponseProse prose = 1;
   // The accounting as it stands. Input and cache figures are final from the
   // moment the message opens; the output figure is interim and is restated
   // later. Carried on the update because a footer draws a live token figure
@@ -483,9 +520,9 @@ message TurnAgentResponseUpdate {
 }
 
 // The block finished; the bubble stops building.
-message TurnAgentResponseSuccess {
+message AgentResponseSuccess {
   // What was said, whole.
-  TurnAgentResponseProse prose = 1;
+  AgentResponseProse prose = 1;
   // The settled accounting, replacing every interim figure this unit reported.
   // Per response rather than per turn, because a turn holds several and each is
   // its own request.
@@ -493,22 +530,22 @@ message TurnAgentResponseSuccess {
 }
 
 // The block ended without completing.
-message TurnAgentResponseFailure {
+message AgentResponseFailure {
   // What had been said when it ended, carried because a truncated or refused
   // answer is still shown rather than discarded. May be empty — a refusal can
   // precede any text at all.
-  TurnAgentResponseProse prose = 1;
+  AgentResponseProse prose = 1;
   // What the attempt cost, since a response that failed was still charged.
   conversation.v1.TokenUsage token_usage = 2;
   // Why it ended. Arms are DERIVED from the producer's real sites at the wave.
-  TurnAgentResponseFailureReason reason = 3;
+  AgentResponseFailureReason reason = 3;
 }
 
 // Why a response ended without completing. Empty until its arms are derived.
-message TurnAgentResponseFailureReason {}
+message AgentResponseFailureReason {}
 
 // Prose the agent said, as markdown for the consumer to render.
-message TurnAgentResponseProse {
+message AgentResponseProse {
   // What the agent said, as markdown for the consumer to render. Everything
   // said up to this point rather than a delta, so nothing is accumulated
   // client-side and a missed frame self-corrects on the next one.
@@ -521,7 +558,7 @@ message TurnAgentResponseProse {
 // ==========================================================================
 
 // The agent read a file.
-message TurnAgentRead {
+message AgentRead {
   // Where the read stands. The start arm ANNOUNCES the call so the item can be
   // drawn while it runs: without it the first frame a consumer ever receives is
   // the terminal one, and a call in progress would be undrawable because the
@@ -530,11 +567,11 @@ message TurnAgentRead {
     // This stream is now carrying this read. Sent ONCE per stream, when the
     // call is issued. There is no update arm: a read has no growth — nothing
     // observes it between its issue and its return.
-    TurnAgentReadStart start = 1;
+    AgentReadStart start = 1;
     // The file was read, whole or in part.
-    TurnAgentReadSuccess success = 2;
+    AgentReadSuccess success = 2;
     // The read did not happen at all — no contents, partial or otherwise.
-    TurnAgentReadFailure failure = 3;
+    AgentReadFailure failure = 3;
   }
 }
 
@@ -544,15 +581,15 @@ message TurnAgentRead {
 // rather than relying on the consumer to have kept an earlier frame, because a
 // frame that only makes sense beside its predecessor cannot be the first one a
 // late-joining consumer receives.
-message TurnAgentReadStart {
+message AgentReadStart {
   // Which file is being read. Drawn as the item's headline.
   ReadPath path = 1;
   // When the read began, so a consumer can draw how long it has been waiting.
-  TurnToolCallStartedAt started_at = 2;
+  AgentActivityStartedAt started_at = 2;
 }
 
 // The file was read.
-message TurnAgentReadSuccess {
+message AgentReadSuccess {
   // Which file. One fact in one form, embedded by whoever draws it rather than
   // restated, and the value a highlighter's grammar is chosen from.
   ReadPath path = 1;
@@ -562,21 +599,21 @@ message TurnAgentReadSuccess {
   // figure that makes it legible.
   oneof extent {
     // The file came back entire. Nothing further can be fetched.
-    TurnAgentReadWhole whole = 2;
+    AgentReadWhole whole = 2;
     // The file was long, so only its leading portion came back. More exists,
     // and a consumer may offer to fetch it.
-    TurnAgentReadHead head = 3;
+    AgentReadHead head = 3;
   }
 }
 
 // The file came back entire.
-message TurnAgentReadWhole {
+message AgentReadWhole {
   // Everything the file holds.
   string contents = 1;
 }
 
 // The file was long, so only its leading portion came back.
-message TurnAgentReadHead {
+message AgentReadHead {
   // The leading portion, cut on a line boundary. A HEAD rather than a slice from
   // the middle, deliberately: a highlighter reading from offset zero has correct
   // context, while text beginning mid-string or mid-comment is mis-highlighted
@@ -589,7 +626,7 @@ message TurnAgentReadHead {
 
 // The read did not happen. Arms are DERIVED from the producer's real sites at
 // the implementation wave; empty until then.
-message TurnAgentReadFailure {}
+message AgentReadFailure {}
 
 // A path a file tool acted on.
 message ReadPath {
@@ -604,7 +641,7 @@ message ReadPath {
 // one: an elapsed count on the wire would be a second authority for a value
 // derivable from one instant, and it would arrive at the producer's heartbeat
 // cadence, so a drawn clock would jump to network timing instead of ticking.
-message TurnToolCallStartedAt {
+message AgentActivityStartedAt {
   // Milliseconds since the Unix epoch. A wall-clock instant rather than a
   // duration, because a duration is stale the moment it is serialized.
   int64 at_ms = 1;
@@ -637,33 +674,33 @@ message FilePatchHunkRange {
 // The agent wrote a file: handed over its whole new contents, creating it or
 // replacing what was there. Distinct from an edit, which matches and replaces a
 // string inside a file that must already contain it.
-message TurnAgentWrite {
+message AgentWrite {
   // Where the write stands. The start arm announces the call so the item is
   // drawable before the write returns.
   oneof result {
     // This stream is now carrying this write. Sent ONCE per stream, at issue.
     // There is no update arm: a write has no growth.
-    TurnAgentWriteStart start = 1;
+    AgentWriteStart start = 1;
     // The file was written, and the change is described as hunks.
-    TurnAgentWriteSuccess success = 2;
+    AgentWriteSuccess success = 2;
     // The write did not happen; the file is as it was.
-    TurnAgentWriteFailure failure = 3;
+    AgentWriteFailure failure = 3;
   }
 }
 
 // A write this stream has begun carrying.
-message TurnAgentWriteStart {
+message AgentWriteStart {
   // Which file is being written. Drawn as the item's headline. NOTHING is said
   // here about whether it will be created or overwritten: that is the outcome's
   // to state, and claiming it now would be a guess the success arm could
   // contradict.
   ReadPath path = 1;
   // When the write began.
-  TurnToolCallStartedAt started_at = 2;
+  AgentActivityStartedAt started_at = 2;
 }
 
 // The file was written.
-message TurnAgentWriteSuccess {
+message AgentWriteSuccess {
   // Which file.
   ReadPath path = 1;
 
@@ -671,10 +708,10 @@ message TurnAgentWriteSuccess {
   // creation is never drawn as a rewrite of nothing.
   oneof outcome {
     // The file did not exist before. Every hunk line is an addition.
-    TurnAgentWriteCreated created = 2;
+    AgentWriteCreated created = 2;
     // The file existed and its contents were replaced. The hunks describe what
     // changed rather than the whole new file.
-    TurnAgentWriteUpdated updated = 3;
+    AgentWriteUpdated updated = 3;
   }
 
   // What changed, as hunks. For a creation every line is an addition. The
@@ -690,44 +727,44 @@ message TurnAgentWriteSuccess {
 }
 
 // The file did not exist before this write.
-message TurnAgentWriteCreated {}
+message AgentWriteCreated {}
 
 // The file existed and its contents were replaced.
-message TurnAgentWriteUpdated {}
+message AgentWriteUpdated {}
 
 // The write did not happen. Arms are DERIVED from the producer's real sites at
 // the implementation wave; empty until then.
-message TurnAgentWriteFailure {}
+message AgentWriteFailure {}
 
 // The agent edited a file: replaced a matched string, which must have been
 // present and (unless every occurrence was requested) unique.
-message TurnAgentEdit {
+message AgentEdit {
   // Where the edit stands. The start arm announces the call so the item is
   // drawable before the edit returns.
   oneof result {
     // This stream is now carrying this edit. Sent ONCE per stream, at issue.
     // There is no update arm: a edit has no growth.
-    TurnAgentEditStart start = 1;
+    AgentEditStart start = 1;
     // The edit applied to at least one occurrence.
-    TurnAgentEditSuccess success = 2;
+    AgentEditSuccess success = 2;
     // The edit did not apply — commonly because the matched text was absent, or was not unique when only one occurrence was requested.
-    TurnAgentEditFailure failure = 3;
+    AgentEditFailure failure = 3;
   }
 }
 
 // An edit this stream has begun carrying.
-message TurnAgentEditStart {
+message AgentEditStart {
   // Which file is being edited. Drawn as the item's headline. The matched and
   // replacement text are deliberately absent: a consumer draws the CHANGE from
   // the success arm's hunks, and the raw strings would be a second, unresolved
   // description of the same thing.
   ReadPath path = 1;
   // When the edit began.
-  TurnToolCallStartedAt started_at = 2;
+  AgentActivityStartedAt started_at = 2;
 }
 
 // The edit applied.
-message TurnAgentEditSuccess {
+message AgentEditSuccess {
   // Which file.
   ReadPath path = 1;
 
@@ -744,7 +781,7 @@ message TurnAgentEditSuccess {
 // The edit did not apply — the string was absent, or was not unique and every
 // occurrence was not requested. Arms are DERIVED from the producer's real sites
 // at the wave; empty until then.
-message TurnAgentEditFailure {}
+message AgentEditFailure {}
 
 // ==========================================================================
 // The search tools. Both answer with a list that may stop short of every match,
@@ -753,24 +790,24 @@ message TurnAgentEditFailure {}
 // ==========================================================================
 
 // The agent searched file CONTENTS for a pattern.
-message TurnAgentGrep {
+message AgentGrep {
   // Where the search stands. The start arm announces the call: a search over a
   // large tree is not instant, and without an announcement the item would not
   // exist until it finished.
   oneof result {
     // This stream is now carrying this search. Sent ONCE per stream, at issue.
     // There is no update arm: a search reports nothing until it is done.
-    TurnAgentGrepStart start = 1;
+    AgentGrepStart start = 1;
     // The search ran. Matching nothing is a success with an empty answer, not a failure — the caller asked a question and got one.
-    TurnAgentGrepSuccess success = 2;
+    AgentGrepSuccess success = 2;
     // The search could not run at all.
-    TurnAgentGrepFailure failure = 3;
+    AgentGrepFailure failure = 3;
   }
 }
 
 // What was searched for. Carried on EVERY frame of the search, not only the
 // announcement, because each frame of an upserted unit stands alone.
-message TurnAgentGrepQuery {
+message AgentGrepQuery {
   // The pattern, as the caller wrote it. Drawn verbatim and never interpreted:
   // the regex dialect belongs to whatever performs the search.
   string pattern = 1;
@@ -784,19 +821,19 @@ message TurnAgentGrepQuery {
 }
 
 // A search this stream has begun carrying.
-message TurnAgentGrepStart {
+message AgentGrepStart {
   // What is being searched for. Drawn as the item's headline.
-  TurnAgentGrepQuery query = 1;
+  AgentGrepQuery query = 1;
   // When the search began.
-  TurnToolCallStartedAt started_at = 2;
+  AgentActivityStartedAt started_at = 2;
 }
 
 // The search ran. A search that matched nothing is a success with an empty
 // answer, never a failure: the caller asked a question and got one.
-message TurnAgentGrepSuccess {
+message AgentGrepSuccess {
   // What was searched for, repeated here so a settled search frame describes
   // itself without the announcement beside it.
-  TurnAgentGrepQuery query = 4;
+  AgentGrepQuery query = 4;
 
   // WHICH SHAPE of answer this is, matching the shape the call asked for. The
   // three are genuinely different answers rather than three views of one, which
@@ -805,18 +842,18 @@ message TurnAgentGrepSuccess {
   oneof matches {
     // The matching lines themselves. Expect this when the call asked for
     // content.
-    TurnAgentGrepContent content = 1;
+    AgentGrepContent content = 1;
     // Only the files that contained a match — no lines. Expect this when the
     // call asked for filenames.
-    TurnAgentGrepFiles files = 2;
+    AgentGrepFiles files = 2;
     // Only how many matches there were. Expect this when the call asked for a
     // count.
-    TurnAgentGrepCount count = 3;
+    AgentGrepCount count = 3;
   }
 }
 
 // The matching lines themselves.
-message TurnAgentGrepContent {
+message AgentGrepContent {
   // The matching lines as the search rendered them, including whatever
   // line-number and context decoration the call requested. Rendered by the
   // search rather than reassembled here, so what a reader sees is what the
@@ -828,21 +865,21 @@ message TurnAgentGrepContent {
   // arm says which case this is.
   oneof extent {
     // Every matching line is here.
-    TurnAgentGrepContentAll all = 2;
+    AgentGrepContentAll all = 2;
     // The answer stops short. A consumer should say so rather than presenting
     // it as the full result.
-    TurnAgentGrepContentPartial partial = 3;
+    AgentGrepContentPartial partial = 3;
   }
 }
 
 // Every matching line is present.
-message TurnAgentGrepContentAll {
+message AgentGrepContentAll {
   // How many matching lines there were — all of them shown.
   uint32 lines_returned = 1;
 }
 
 // The answer stops short of every matching line.
-message TurnAgentGrepContentPartial {
+message AgentGrepContentPartial {
   // How many matching lines are present here.
   uint32 lines_returned = 1;
   // How many matching lines were left out. The OMITTED figure rather than a
@@ -853,7 +890,7 @@ message TurnAgentGrepContentPartial {
 }
 
 // Only the files that contained a match, without the matching lines.
-message TurnAgentGrepFiles {
+message AgentGrepFiles {
   // The matching paths, in the order the search returned them. That order is
   // the search's own and carries no ranking; a consumer that wants another
   // order sorts, and does not read meaning into this one.
@@ -862,20 +899,20 @@ message TurnAgentGrepFiles {
   // Whether these are all the matching files.
   oneof extent {
     // Every matching file is listed.
-    TurnAgentGrepFilesAll all = 2;
+    AgentGrepFilesAll all = 2;
     // The list stops short of every matching file.
-    TurnAgentGrepFilesPartial partial = 3;
+    AgentGrepFilesPartial partial = 3;
   }
 }
 
 // Every matching file is present.
-message TurnAgentGrepFilesAll {
+message AgentGrepFilesAll {
   // How many files matched — all of them listed.
   uint32 files_returned = 1;
 }
 
 // The list stops short of every matching file.
-message TurnAgentGrepFilesPartial {
+message AgentGrepFilesPartial {
   // How many files are listed here.
   uint32 files_returned = 1;
   // How many matching files were left out.
@@ -885,32 +922,32 @@ message TurnAgentGrepFilesPartial {
 // Only how many matches there were. No completeness arm: a count is either
 // produced or the search failed, and a partial count would be a number with no
 // stated meaning.
-message TurnAgentGrepCount {
+message AgentGrepCount {
   // Total matches across every file searched.
   uint32 matches = 1;
 }
 
 // The search could not run. Arms are DERIVED from the producer's real sites at
 // the implementation wave; empty until then.
-message TurnAgentGrepFailure {}
+message AgentGrepFailure {}
 
 // The agent matched file PATHS against a pattern.
-message TurnAgentGlob {
+message AgentGlob {
   // Where the match stands. The start arm announces the call, for the same
   // reason the search's does: a walk over a large tree is not instant.
   oneof result {
     // This stream is now carrying this match. Sent ONCE per stream, at issue.
     // There is no update arm: a match reports nothing until it is done.
-    TurnAgentGlobStart start = 1;
+    AgentGlobStart start = 1;
     // The match ran. Matching nothing is a success with an empty list.
-    TurnAgentGlobSuccess success = 2;
+    AgentGlobSuccess success = 2;
     // The match could not run at all.
-    TurnAgentGlobFailure failure = 3;
+    AgentGlobFailure failure = 3;
   }
 }
 
 // What was matched against. Carried on every frame, so each stands alone.
-message TurnAgentGlobQuery {
+message AgentGlobQuery {
   // The pattern, as the caller wrote it. Drawn verbatim; the glob dialect
   // belongs to whatever performs the walk.
   string pattern = 1;
@@ -920,18 +957,18 @@ message TurnAgentGlobQuery {
 }
 
 // A match this stream has begun carrying.
-message TurnAgentGlobStart {
+message AgentGlobStart {
   // What is being matched. Drawn as the item's headline.
-  TurnAgentGlobQuery query = 1;
+  AgentGlobQuery query = 1;
   // When the walk began.
-  TurnToolCallStartedAt started_at = 2;
+  AgentActivityStartedAt started_at = 2;
 }
 
 // The match ran. Matching nothing is a success with an empty list.
-message TurnAgentGlobSuccess {
+message AgentGlobSuccess {
   // What was matched against, repeated here so a settled match frame describes
   // itself without the announcement beside it.
-  TurnAgentGlobQuery query = 4;
+  AgentGlobQuery query = 4;
 
   // The matching paths, in the order the search returned them.
   repeated string paths = 1;
@@ -939,20 +976,20 @@ message TurnAgentGlobSuccess {
   // Whether these are all the matching paths.
   oneof extent {
     // Every matching path is listed.
-    TurnAgentGlobAll all = 2;
+    AgentGlobAll all = 2;
     // The list stops short. How much was left out may itself be approximate.
-    TurnAgentGlobPartial partial = 3;
+    AgentGlobPartial partial = 3;
   }
 }
 
 // Every matching path is present.
-message TurnAgentGlobAll {
+message AgentGlobAll {
   // How many paths matched — all of them listed.
   uint32 files_returned = 1;
 }
 
 // The list stops short of every matching path.
-message TurnAgentGlobPartial {
+message AgentGlobPartial {
   // How many paths are listed here.
   uint32 files_returned = 1;
 
@@ -963,28 +1000,28 @@ message TurnAgentGlobPartial {
   // of them is safe to make.
   oneof omitted {
     // The omitted figure is exact and may be drawn as such.
-    TurnAgentGlobOmittedExact exact = 2;
+    AgentGlobOmittedExact exact = 2;
     // The omitted figure is a floor. Draw it as "at least N", never as a
     // total — the real number may be larger and is unknown.
-    TurnAgentGlobOmittedAtLeast at_least = 3;
+    AgentGlobOmittedAtLeast at_least = 3;
   }
 }
 
 // The omitted figure is exact.
-message TurnAgentGlobOmittedExact {
+message AgentGlobOmittedExact {
   // How many matching paths were left out.
   uint32 files_omitted = 1;
 }
 
 // The omitted figure is a lower bound, because the search stopped counting.
-message TurnAgentGlobOmittedAtLeast {
+message AgentGlobOmittedAtLeast {
   // At least this many matching paths were left out; there may be more.
   uint32 files_omitted_at_least = 1;
 }
 
 // The match could not run. Arms are DERIVED from the producer's real sites at
 // the implementation wave; empty until then.
-message TurnAgentGlobFailure {}
+message AgentGlobFailure {}
 
 // ---- The shell: a command, what it said, and where it went ----
 
@@ -1004,7 +1041,7 @@ message TurnAgentGlobFailure {}
 // expecting a terminal frame here and follows the work's own stream instead. An
 // arm here saying "backgrounded" would be a second announcement of one fact,
 // and the two could disagree about whether the work left.
-message TurnAgentBash {
+message AgentBash {
   // Where the call stands. The update arm announces it, which matters more here
   // than for any other tool: a shell command routinely runs for minutes, and
   // without an announcement the item would not exist for the whole of that.
@@ -1012,18 +1049,18 @@ message TurnAgentBash {
     // This stream is now carrying this command. Sent ONCE per stream, at issue —
     // and AGAIN on the work's own stream if the command detaches, because a
     // stream's first frame can never presume a frame delivered on another one.
-    TurnAgentBashStart start = 1;
+    AgentBashStart start = 1;
     // New output since the last frame on this stream.
-    TurnAgentBashUpdate update = 2;
+    AgentBashUpdate update = 2;
     // The command reached the shell and the shell reported on it.
-    TurnAgentBashSuccess success = 3;
+    AgentBashSuccess success = 3;
     // The call could not be performed at all.
-    TurnAgentBashFailure failure = 4;
+    AgentBashFailure failure = 4;
   }
 }
 
 // The command the agent ran.
-message TurnAgentBashCommand {
+message AgentBashCommand {
   // The command line, verbatim and unparsed. A consumer draws it and never
   // interprets it: a shell line's meaning belongs to the shell.
   string line = 1;
@@ -1036,12 +1073,12 @@ message TurnAgentBashCommand {
 // turn's stream, once on its own — under ONE identity, so the second is an
 // upsert rather than a new unit. The second announcement repeats the ORIGINAL
 // instant below, so a drawn clock does not reset when the work moves.
-message TurnAgentBashStart {
+message AgentBashStart {
   // What is running. Drawn as the item's headline.
-  TurnAgentBashCommand command = 1;
+  AgentBashCommand command = 1;
   // When the shell was handed the command, so a consumer can draw how long it
   // has been running.
-  TurnToolCallStartedAt started_at = 2;
+  AgentActivityStartedAt started_at = 2;
 }
 
 // Output that accumulated since the last frame on this stream.
@@ -1052,7 +1089,7 @@ message TurnAgentBashStart {
 // straight from `start` to a terminal arm. Incremental output exists only for a
 // command that became background work, whose accumulating output is read from
 // the file written for it.
-message TurnAgentBashUpdate {
+message AgentBashUpdate {
   // The bytes added since the previous frame. A DELTA, not the whole spool: the
   // whole spool re-sent per frame is how watching a long command costs more than
   // running it. Deliberately UNPARSED and NOT line-split — a delta can begin and
@@ -1076,53 +1113,53 @@ message TurnAgentBashUpdate {
 // answer the caller wanted. There is no exit code on this shape because no
 // producer states one for a foreground command — a command's own output is the
 // only account of how it went.
-message TurnAgentBashSuccess {
+message AgentBashSuccess {
   // What was run, repeated here so a settled frame describes itself.
-  TurnAgentBashCommand command = 1;
+  AgentBashCommand command = 1;
 
   // How it ended. Both arms carry output and differ only in treatment, but the
   // difference is worth drawing: an interrupted command's last lines are usually
   // the reason it was cut.
   oneof outcome {
     // The command ran to completion. The ordinary path.
-    TurnAgentBashCompleted completed = 2;
+    AgentBashCompleted completed = 2;
     // The command was cut short before finishing.
-    TurnAgentBashInterrupted interrupted = 3;
+    AgentBashInterrupted interrupted = 3;
   }
 }
 
 // A command that ran to completion.
-message TurnAgentBashCompleted {
+message AgentBashCompleted {
   // Everything the command said. ALWAYS SET, even for a command that said
   // nothing: an empty output still draws its header, so a reader can tell "ran
   // and was silent" from "has not run".
-  TurnAgentBashOutput output = 1;
+  AgentBashOutput output = 1;
 }
 
 // A command cut short before it finished.
-message TurnAgentBashInterrupted {
+message AgentBashInterrupted {
   // What the command had said by the time it was cut. Drawn as a completed
   // command's output is, under an interrupted treatment.
-  TurnAgentBashOutput output = 1;
+  AgentBashOutput output = 1;
 }
 
 // What a command said, in the form it said it.
-message TurnAgentBashOutput {
+message AgentBashOutput {
   // Which form the output takes. A command whose output is image data is not
   // text with a flag beside it — the two are drawn by different renderers
   // entirely, so the set arm IS the form.
   oneof form {
     // Ordinary character output. Expect this for all but a handful of
     // image-producing commands.
-    TurnAgentBashOutputText text = 1;
+    AgentBashOutputText text = 1;
     // The output is image data rather than characters. Draw it as an image;
     // there is no text to show.
-    TurnAgentBashOutputImage image = 2;
+    AgentBashOutputImage image = 2;
   }
 }
 
 // Character output, with the two streams kept apart.
-message TurnAgentBashOutputText {
+message AgentBashOutputText {
   // Standard output, verbatim and unparsed.
   string stdout = 1;
 
@@ -1138,17 +1175,17 @@ message TurnAgentBashOutputText {
   // consumer compares a length against a total to find out.
   oneof extent {
     // Everything the command said is carried above.
-    TurnAgentBashOutputWhole whole = 3;
+    AgentBashOutputWhole whole = 3;
     // The output was too large to carry inline and was cut.
-    TurnAgentBashOutputPartial partial = 4;
+    AgentBashOutputPartial partial = 4;
   }
 }
 
 // Everything the command said is carried above.
-message TurnAgentBashOutputWhole {}
+message AgentBashOutputWhole {}
 
 // The output was cut because it was too large to carry inline.
-message TurnAgentBashOutputPartial {
+message AgentBashOutputPartial {
   // How many bytes were left out — STATED, never derived by subtracting from a
   // total. This is the figure a consumer draws ("1.2 MB more not shown"), and
   // the full size stays recoverable by addition if anything needs it.
@@ -1156,7 +1193,7 @@ message TurnAgentBashOutputPartial {
 }
 
 // Image data the command produced instead of text.
-message TurnAgentBashOutputImage {
+message AgentBashOutputImage {
   // The image bytes as the command emitted them.
   bytes data = 1;
   // The IANA media type of `data`, so a consumer need not sniff the bytes to
@@ -1166,4 +1203,247 @@ message TurnAgentBashOutputImage {
 
 // The call could not be performed. Arms are DERIVED from the producer's real
 // sites at the implementation wave; empty until then.
-message TurnAgentBashFailure {}
+message AgentBashFailure {}
+
+// ---- The subagent: a spawn, its progress, and its report ----
+
+// The agent spawning a subagent.
+//
+// ONE UNIT, ONE LIFECYCLE, WHICHEVER STREAM CARRIES IT. Detachment moves which
+// stream this unit's frames arrive on and changes nothing about the unit. An
+// awaited spawn concludes on its caller's stream; a detached one concludes on
+// its own. Detachment is stated ONLY by the detached-work frame naming this
+// unit, never by an arm here.
+//
+// THE PRODUCER'S OWN SPLIT IS NOT REFLECTED HERE, DELIBERATELY. The underlying
+// tool returns a full report when the spawn is awaited and a bare launch
+// acknowledgement when it is backgrounded, and the shim maps BOTH onto this one
+// lifecycle. Likewise an awaited spawn may report no progress while a detached
+// one does. A consumer that had to know which of those the producer used would
+// be learning a calling convention in order to draw a bubble.
+//
+// WHAT THE SUBAGENT ACTUALLY DID IS NOT HERE. Its reasoning, prose and tool
+// calls are AgentActivity of their own — nested under this unit's caller on the
+// `subagent_activity` arm when awaited, or arriving on the work's own stream
+// when detached. This unit carries the spawn's own lifecycle and nothing else,
+// so the two never disagree about what the subagent said.
+message AgentSubagent {
+  // Where the spawn stands. Expect exactly one start per stream, then any number
+  // of updates, then exactly one terminal arm.
+  oneof result {
+    // This stream is now carrying this spawn. Sent ONCE per stream, at issue —
+    // and AGAIN on the work's own stream if the spawn detaches.
+    AgentSubagentStart start = 1;
+    // The subagent is working, and here is where it has got to.
+    AgentSubagentUpdate update = 2;
+    // The subagent finished and reported. The ORDINARY conclusion, on whichever
+    // stream is carrying the unit.
+    AgentSubagentSuccess success = 3;
+    // The spawn could not be performed, or the subagent ended without
+    // reporting. Arms are DERIVED from the producer's real sites at the
+    // implementation wave; empty until then.
+    AgentSubagentFailure failure = 4;
+  }
+}
+
+// A spawn this stream has begun carrying.
+message AgentSubagentStart {
+  // What the subagent was asked to do, and how it was configured.
+  AgentSubagentPrompt prompt = 1;
+  // When the spawn was issued, so a consumer can draw how long it has run.
+  AgentActivityStartedAt started_at = 2;
+}
+
+// WHAT A SUBAGENT WAS ASKED TO DO, and how it was configured. Carried on every
+// frame of the spawn, so each frame stands alone rather than making sense only
+// beside its predecessor.
+message AgentSubagentPrompt {
+  // A few words naming the task, written by the caller for a reader. This is
+  // the label a bubble or a footer row draws; it is NOT the instruction.
+  string description = 1;
+
+  // The full instruction the subagent was given. Drawn only where there is room
+  // for it — a bubble's body, not its head — since it is frequently long.
+  string text = 2;
+
+  // Which specialized agent was asked for. UNSET means the caller named none
+  // and the default was used, so a consumer draws no type rather than inventing
+  // a name it cannot know.
+  optional string subagent_type = 3;
+
+  // A name making the subagent addressable while it runs, so other work can
+  // send it messages. UNSET means it was spawned unnamed and is addressable
+  // only by its identity.
+  optional string requested_name = 4;
+
+  // The model the caller asked for, overriding whatever the agent's own
+  // definition would have chosen. UNSET means no override was requested and the
+  // definition or the parent decided — a consumer must NOT draw the parent's
+  // model here, because it cannot know the definition did not override it.
+  optional AgentModel requested_model = 5;
+
+  // Where the subagent was asked to run. The set arm IS the isolation, so a
+  // spawn in the caller's own tree carries no isolation vocabulary at all.
+  oneof isolation {
+    // In the caller's own working tree, sharing its files. The default.
+    AgentSubagentIsolationNone none = 6;
+    // In a temporary git worktree, so its edits cannot collide with the
+    // caller's or another subagent's.
+    AgentSubagentIsolationWorktree worktree = 7;
+    // In a remote cloud environment. Such a spawn ALWAYS runs detached, and its
+    // work is NOT observable through the streams this contract carries — expect
+    // a start and then nothing further on this unit.
+    AgentSubagentIsolationRemote remote = 8;
+  }
+}
+
+// The subagent shares the caller's working tree.
+message AgentSubagentIsolationNone {}
+
+// The subagent was given a temporary git worktree of its own.
+//
+// EMPTY ON PURPOSE: which worktree it got is not known until it reports, so the
+// location rides the success arm rather than being claimed at issue.
+message AgentSubagentIsolationWorktree {}
+
+// The subagent was launched into a remote cloud environment.
+message AgentSubagentIsolationRemote {}
+
+// The subagent is working. Carries a WHOLE-STATE snapshot, never a delta: each
+// frame states where the run has got to, so a consumer that missed a frame is
+// not wrong, only briefly behind.
+message AgentSubagentUpdate {
+  // What it was asked to do, repeated so this frame stands alone.
+  AgentSubagentPrompt prompt = 1;
+
+  // What the run has spent so far.
+  AgentSubagentProgress progress = 2;
+
+  // What the subagent says it is doing, in its own words. UNSET when it has
+  // offered none, in which case a consumer draws the description and nothing
+  // finer rather than an empty line.
+  optional AgentSubagentNote note = 3;
+
+  // The tool it is running right now. UNSET between calls, which is a real and
+  // common state rather than a gap in reporting.
+  optional AgentSubagentActivityLabel activity = 4;
+}
+
+// What a run has spent, while it is still running.
+//
+// COARSER THAN THE SETTLED TOTALS ON PURPOSE — this is what the producer states
+// mid-run, and it is superseded by the full accounting at conclusion. A consumer
+// draws these as live figures and must NOT treat the token figure as an
+// accounting fact: it is a running sum, not a reconciled charge.
+message AgentSubagentProgress {
+  // Wall-clock milliseconds since the spawn began, as the producer counts it.
+  uint64 duration_ms = 1;
+  // How many tool calls it has made so far.
+  uint32 tool_use_count = 2;
+  // Tokens consumed so far, as one figure. The full breakdown is not available
+  // until the run settles.
+  uint64 total_tokens = 3;
+}
+
+// What the subagent says it is doing.
+message AgentSubagentNote {
+  // Its own one-line account of current progress, drawn verbatim.
+  string text = 1;
+}
+
+// The tool a subagent is running right now.
+message AgentSubagentActivityLabel {
+  // The tool's name as the producer reports it, drawn as an activity label.
+  //
+  // A BARE NAME AND NOT A TYPED CALL, because no arguments accompany it — this
+  // says WHAT IS RUNNING, not what was asked of it. It is therefore not a second
+  // spelling of the typed tool vocabulary: there is no typed call here for it to
+  // disagree with.
+  string tool_name = 1;
+}
+
+// A subagent's report and what its run cost.
+message AgentSubagentSuccess {
+  // What it was asked to do, repeated so a settled frame describes itself.
+  AgentSubagentPrompt prompt = 1;
+
+  // The subagent's own final report.
+  AgentSubagentReport report = 2;
+
+  // What the run cost and what it did.
+  AgentSubagentTotals totals = 3;
+
+  // Which models actually ran it, in the order they were used. MORE THAN ONE
+  // ENTRY MEANS THE MODEL CHANGED MID-RUN, which is worth drawing: the report
+  // was not written by a single model. One entry is the ordinary case.
+  repeated AgentModel models_used = 4;
+
+  // Where it worked, when it was given a worktree of its own. UNSET for a
+  // subagent that shared its caller's tree.
+  //
+  // NOT INSIDE THE PROMPT'S ISOLATION ARM, deliberately: that arm states what
+  // was ASKED FOR at issue, and this states what was ACTUALLY USED, which is
+  // only knowable now.
+  optional AgentSubagentWorktree worktree = 5;
+}
+
+// A subagent's final report, as it wrote it.
+message AgentSubagentReport {
+  // The report itself. THE SUBAGENT'S OWN WORDS, RENDERED AND NEVER PARSED: the
+  // producer hands over a structured report rather than the text it sent its
+  // caller, so nothing needs to strip a trailer or recover fields out of prose.
+  AgentResponseProse prose = 1;
+}
+
+// What a subagent's run cost and what it did with it.
+//
+// DRAWN AS A SUMMARY LINE under a settled bubble — "18 tool uses · 2m 14s · 340
+// lines added". The counts are CARRIED rather than derived by counting the
+// nested activity, so a consumer that has paged the nested units away still
+// draws the summary.
+message AgentSubagentTotals {
+  // How long the run took, wall-clock, in milliseconds. A settled figure, unlike
+  // the clock a consumer animates from a start instant.
+  uint64 duration_ms = 1;
+  // What the run charged. The subagent's OWN consumption, never including its
+  // caller's.
+  TokenUsage usage = 2;
+  // How many tool calls it made in total, including kinds not broken out below.
+  uint32 tool_use_count = 3;
+  // What kinds of work it did. UNSET when the producer reported no breakdown, in
+  // which case a consumer draws the count above and nothing finer.
+  optional AgentSubagentToolStats tool_stats = 4;
+}
+
+// A breakdown of what a subagent spent its tool calls on.
+message AgentSubagentToolStats {
+  // How many files it read.
+  uint32 read_count = 1;
+  // How many searches it ran.
+  uint32 search_count = 2;
+  // How many shell commands it ran.
+  uint32 bash_count = 3;
+  // How many files it changed.
+  uint32 edit_file_count = 4;
+  // Lines added across every change it made.
+  uint32 lines_added = 5;
+  // Lines removed across every change it made.
+  uint32 lines_removed = 6;
+  // Tool calls of every other kind, so the broken-out counts plus this one
+  // account for the total entirely and a reader can tell nothing was silently
+  // dropped.
+  uint32 other_tool_count = 7;
+}
+
+// The temporary worktree a subagent was given.
+message AgentSubagentWorktree {
+  // Its path on disk, so a reader can find the work after the fact.
+  string path = 1;
+  // The branch created for it.
+  string branch = 2;
+}
+
+// The spawn could not be performed, or the subagent ended without reporting.
+// Arms are DERIVED from the producer's real sites at the implementation wave;
+// empty until then.
+message AgentSubagentFailure {}

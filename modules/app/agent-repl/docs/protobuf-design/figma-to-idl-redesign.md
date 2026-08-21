@@ -114,6 +114,131 @@ that transport.
 
 ## Landed changes
 
+### THE FAMILY IS RENAMED `Turn*` -> `Agent*`; `AgentActivity` carries `agent_id` and RECURSES — one shape for the main agent, an awaited subagent, and detached work
+
+**What changed ("looks great, let's do it").** Twenty-six name changes across
+~90 messages: `TurnProgress` -> `AgentActivity`, `TurnProgressItemId` ->
+`AgentActivityId`, `TurnUpdate` -> `AgentUpdate`, `TurnAgent*` -> `Agent*`
+throughout, `TurnToolCallStartedAt` -> `AgentActivityStartedAt`,
+`TurnDetachableWork*` -> the `Detached*` family. `TurnId` is UNTOUCHED. New:
+`AgentId`; `AgentActivity.agent_id`; the recursive `subagent_activity` arm; the
+whole `AgentSubagent` family. `DetachableWork`'s arms revert to naming the unit
+types, and `DetachedWorkBash` is deleted.
+
+**WHY THE RENAME, in the user's terms.** He asked for the model to be AGNOSTIC
+to whether an agent is the main agent or a subagent — "the subagent
+representation should be the same as the turn representation itself, because
+they can do the same things: have responses, thinking, tokens, bash, skill, etc
+calls, or even more salient: subagents themselves. So we want a representation
+that gives us this recursiveness, and agnosticism." The vocabulary was never a
+TURN's; it is WHAT AN AGENT DOES, and a turn is merely the window in which the
+main agent does it. The name was making a window own a vocabulary.
+
+**THE RECURSION IS IN THE SCHEMA, NOT IN A POINTER — and the reason is
+PROTOCOL-DRIVEN DEVELOPMENT.** Three models were weighed.
+
+- Announcement-only, with attribution left to the data: REJECTED, it has no
+  link at all. A subsequent activity frame carries only its own identity, so a
+  consumer could attribute it only BY POSITION — everything after the
+  announcement belongs to the subagent until something says otherwise. That is
+  stateful, order-dependent decoding, and it breaks the moment a caller
+  interleaves its own work with an awaited subagent's, or two subagents run.
+- A flat `owner` pointer: viable, and what the orchestrator proposed.
+- TRUE RECURSION, chosen. The user's argument: with oneof arms mapping to
+  FUNCTIONS, recursion in the schema makes the recursion in the CODE fall out —
+  the same subroutine that handles a turn's activity handles a subagent's,
+  rather than the tree being reassembled from ids by logic the schema does not
+  imply. The skill's own handoff rule agrees: the protobufs are a close
+  representation of the implementation architecture, not merely its wire form.
+
+**THE ORCHESTRATOR'S WRAPPER WAS UNNECESSARY, and the user removed it.** It had
+proposed `AgentSubagentActivity { subagent_id; AgentActivity }` — a thin wrapper
+carrying the owner beside the nested work. The user: the nested `AgentActivity`
+already suffices. Correct once `agent_id` rides the envelope, so the arm is
+simply `AgentActivity subagent_activity`.
+
+**`agent_id` ON THE ENVELOPE, and the reversal that produced it.** The
+orchestrator argued an agent id would be a SECOND SPELLING of what the envelope
+already stated, since unit ids are sourced from the spawning call. WRONG, and
+the user rejected the inference before it was checked — "the task that spawns the
+agent is not the agent itself". Verified: `agent_id` and `tool_use_id` are
+adjacent fields on one message (`sdk.d.ts:3630-3631`), and `SessionMessage`
+carries `parent_tool_use_id` AND `parent_agent_id` separately, the latter
+existing precisely because depth beyond one cannot be resolved from call ids.
+See the identity-vocabulary entry for the four spaces and what each names. So
+`agent_id` rides EVERY activity frame at every level, and one shape now serves
+the turn's top level, an awaited subagent's nested activity, and a detached
+item's own stream.
+
+**THE UPSERT RULE, settled because the recursion forced the question.** On the
+`subagent_activity` arm the outer `activity_id` is the SPAWN — the containment
+path — and the unit the frame upserts is the INNERMOST one. A consumer keys its
+store on the innermost identity and reads the outer ones as ancestry. Without
+this rule stated, a consumer keying on the outermost id would have every nested
+frame of one subagent overwrite the last.
+
+**`DetachableWork` REVERTS, and the amendment that introduced description types
+is withdrawn.** Two increments ago its arms were changed from the unit types to
+dedicated description types, because a unit type's body was an outcome oneof and
+could not describe work a consumer had never seen. The universal `start` arm
+removed that objection — a start arm IS the description — so the arms name
+`AgentSubagent` and `AgentBash` again and `DetachedWorkBash` is deleted. ROOT
+CAUSE of the detour: the description types were a workaround for a missing
+announcement frame, invented before the announcement was.
+
+**The subagent's own lifecycle and its WORK are deliberately separate.**
+`AgentSubagent` carries the spawn — prompt, progress, report, totals — and
+NOTHING about what the subagent said. Its reasoning, prose and tool calls are
+`AgentActivity` of their own. Two places describing the same output could
+disagree; one cannot.
+
+**The producer's own split is NOT reflected in the contract, per the user's
+ruling.** The tool returns a full report when a spawn is awaited and a bare
+launch acknowledgement when backgrounded, and an awaited spawn may report no
+progress while a detached one does. Both are shim implementation details: the
+shim maps them onto ONE lifecycle. A consumer that had to know which shape the
+producer used would be learning a calling convention in order to draw a bubble.
+
+**Kept from the vendor, each drawn**: the description and instruction, the
+requested subagent type, the addressable name, the requested model override, the
+isolation choice, mid-run progress (duration, tool count, running token sum), the
+subagent's note and current tool label, the report, settled totals with full
+usage, the tool-stat breakdown, `models_used` (more than one entry means a
+mid-run model swap), and the worktree path and branch.
+
+**Two shapes stated deliberately rather than by default.** The isolation choice
+is SPLIT across arms — the prompt's oneof says what was ASKED FOR, and the
+success arm's worktree says what was ACTUALLY USED, because the path does not
+exist until the run reports. And `AgentSubagentActivityLabel.tool_name` is a
+BARE STRING rather than the typed tool vocabulary: no arguments accompany it, so
+it is an activity label rather than a call, and there is no typed call for it to
+be a second spelling of.
+
+**A REMOTE spawn is modelled and explicitly unobservable.** The isolation oneof
+has a `remote` arm because the vendor has one, and its comment states that such
+work runs detached in a cloud environment and produces nothing further on this
+unit — a start and then silence. Better than omitting the arm and having remote
+spawns look like broken local ones.
+
+**NON-OBVIOUS IMPLEMENTATION CONSEQUENCES.**
+
+- `AgentActivity` is now RECURSIVE, so every consumer's activity handler must be
+  re-entrant. That is the point of the shape, but a handler written as a flat
+  switch will silently ignore nested work rather than failing.
+- The shim must attribute every frame to an agent. For the main thread that is a
+  constant; for a subagent it is the vendor's `agent_id`, which appears on
+  forwarded subagent messages and on the tool return.
+- `DetachableWork` naming the unit types means the detached-work announcement
+  now carries a full unit frame rather than a small description — larger on the
+  wire, and the shim must have the unit's start state to hand when it announces.
+- Every consumer of the ~90 renamed types recompiles. Nothing outside
+  `conversation.v1` referenced them yet, because the arm bodies were landing
+  incrementally and no importer had been repointed.
+
+**OWED, and recorded on the vetting register rather than assumed**: that the
+shim must set `forwardSubagentText`, without which a subagent's prose and
+reasoning never reach us at all and the recursive arms have no producer.
+
 ### IDENTITY VOCABULARY: the four identifier spaces, what each names, and which are NOT interchangeable
 
 **Why this is recorded.** Four identifiers in this design were being used
