@@ -77,6 +77,8 @@ message TurnProgress {
     TurnAgentAgentCreate agent = 12;
     TurnAgentWorkflow workflow = 13;
     TurnAgentUnmodeled unmodeled = 14;
+    TurnAgentSendMessage send_message = 15;
+    TurnAgentTaskAct task_act = 16;
   }
 }
 
@@ -140,5 +142,98 @@ message TurnDetachableWork {
 // The identity of one unit of detached work, and the handle a stop is aimed at.
 // Opaque; equality is the only question asked of it.
 message DetachedWorkId {
+  string value = 1;
+}
+
+// ==========================================================================
+// The task tracker. A task is inherently bound to the agent working it — there
+// is no backgrounded form of it, unlike a shell call or a subagent spawn — so
+// what travels is the ACT the agent performed, on whatever stream that agent is
+// running on. A task created in one turn and completed from another (or from a
+// detached agent that owns it) is one task, joined by its tracker identity.
+// ==========================================================================
+
+// One act the agent performed on the task tracker, drawn in the turn — or the
+// detached stream — the acting agent was running on.
+message TurnAgentTaskAct {
+  // Which task the act concerned. The tracker's identity, not this turn's, so a
+  // task edited from several turns remains one task.
+  TurnAgentTaskId task = 1;
+
+  // What the agent did. Stopping is not an arm here: it is a change whose
+  // resulting status is `killed`, so there is one way to say it rather than two.
+  oneof act {
+    TurnAgentTaskCreated created = 2;
+    TurnAgentTaskChanged changed = 3;
+  }
+
+  // Where the act left the task, resolved by the producer, so no consumer
+  // replays a sequence of acts to learn what a task currently is.
+  TurnAgentTaskState state = 4;
+}
+
+// The task did not exist before this act. The arm carries nothing: what the
+// task now IS rides `state`, and a second copy here could disagree with it.
+message TurnAgentTaskCreated {}
+
+// The task existed and this act altered it. Carries nothing, for the same
+// reason as above.
+message TurnAgentTaskChanged {}
+
+// A task as it stands after an act.
+message TurnAgentTaskState {
+  // The task's subject line.
+  string subject = 1;
+  // Its full description.
+  string description = 2;
+
+  // Which agent it is assigned to, when it is assigned to one. Unset for a task
+  // the agent created for itself and has not handed off, which is the ordinary
+  // case. Presence rather than an empty-string sentinel.
+  optional string owner = 3;
+
+  // Where it stands. Arms rather than an enum, so a status arrives with the
+  // evidence it implies and a status the vendor adds later is a
+  // compiler-surfaced gap rather than an unhandled value. The set is the
+  // vendor's own rather than invented here.
+  oneof status {
+    TurnAgentTaskPending pending = 4;
+    TurnAgentTaskRunning running = 5;
+    TurnAgentTaskCompleted completed = 6;
+    TurnAgentTaskFailed failed = 7;
+    TurnAgentTaskKilled killed = 8;
+    TurnAgentTaskPaused paused = 9;
+  }
+}
+
+// Created, not started.
+message TurnAgentTaskPending {}
+
+// Being worked on now.
+message TurnAgentTaskRunning {
+  // The present-continuous phrasing to show while it runs ("running the
+  // migration"), as the agent supplied it. It lives here because it means
+  // nothing for a task that is not running. Unset when the agent gave none —
+  // the tool's parameter is optional — and a consumer then shows the subject
+  // rather than inventing a phrasing.
+  optional string active_form = 1;
+}
+
+// Finished, having done what it said it would.
+message TurnAgentTaskCompleted {}
+
+// Finished, having failed to do it.
+message TurnAgentTaskFailed {}
+
+// Ended because something stopped it, rather than because it resolved either
+// way.
+message TurnAgentTaskKilled {}
+
+// Started and suspended, expected to resume.
+message TurnAgentTaskPaused {}
+
+// The tracker's identity for one task. Opaque to every reader, never parsed;
+// equality is the only question asked of it.
+message TurnAgentTaskId {
   string value = 1;
 }
