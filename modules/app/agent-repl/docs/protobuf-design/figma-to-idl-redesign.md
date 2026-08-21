@@ -209,8 +209,23 @@ binary does, so a foreground spool would be a vendor change. `bash`'s update arm
 is therefore structurally DETACH-ONLY, and its comment says so, because an
 integrator would otherwise wait for frames that never come.
 
-**A CLAIM THE USER CHALLENGED, now under empirical investigation rather than
-asserted.** The orchestrator stated that `BashOutput.persistedOutputPath` is
+**A CLAIM THE USER CHALLENGED — NOW OBSERVED RATHER THAN INFERRED, AND
+CONFIRMED.** Measured empirically at the user's instruction: a foreground
+command producing 603,300 bytes over ~75s, with the inline cap (observed at
+~30KB) crossed within the first ~4 seconds, polled at ~1s intervals for the
+command's whole runtime across two independent runs. NOTHING appeared in the
+`tool-results` directory while the command ran; the file materialized at process
+exit ALREADY AT ITS FINAL SIZE. So `persistedOutputPath` is a post-completion
+artifact and the detach-only statement above STANDS. Two limits on the evidence,
+stated so nobody over-reads it: the write path itself lives in a compiled binary
+and was not inspected, so this rests on external behavior; and a first attempt
+produced a FALSE NEGATIVE because `find` is shell-aliased to a shim that errored
+on the poller's syntax — that run was correctly discarded rather than counted as
+support. RECORDED SO IT IS NEVER RE-PURCHASED: there is no incremental producer
+for foreground shell output through this mechanism, and the only live path is
+backgrounding, which is the already-known `tasks/*.output` spool.
+
+**The superseded wording, kept visible.** The orchestrator stated that `BashOutput.persistedOutputPath` is
 written at completion. That was INFERRED from the field's doc comment ("set when
 output is too large for inline"), never observed. The user: "are you sure?" — and
 dispatched an agent to run a long-lived high-output command and watch whether the
