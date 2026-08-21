@@ -114,6 +114,74 @@ that transport.
 
 ## Landed changes
 
+### The task tracker: acts, not task lifecycles; and the rule for when a unit earns its own stream
+
+**What changed.** `turn.proto` gains `TurnAgentTaskAct` = { task; oneof act
+{ created | changed }; state } plus `TurnAgentTaskState` (subject, description,
+optional owner, status oneof) and `TurnAgentTaskId`. The `send_message` arm
+lands beside it. The shown/hidden presentation oneof on
+`TurnDetachableWorkCreated` is DROPPED.
+
+**THE RULE the user's questions produced, which generalizes beyond tasks.** A
+unit earns its own stream IFF something produces updates for it OUTSIDE any
+turn. A shell call and a subagent qualify — the process keeps running and
+emitting after the turn ends, and the vendor confirms membership in its
+live-background-task set. A task tracker entry does NOT: every change to it is
+an agent calling a tool, and every tool call happens inside some turn, so a
+per-task stream would be the shim re-broadcasting turn events onto a channel it
+invented rather than reflecting one.
+
+**The distinction the user drew, in his terms.** A task "is inherently tied to
+an agent, and can't be backgrounded (well, the agent can be backgrounded, but
+relative to an agent, it cannot be backgrounded, like, say, bash call can)". So
+two axes: work DETACHABLE from its agent (bash, subagent spawn — the closed
+`TurnDetachableWork` set) versus work BOUND to its agent (thinking, responses,
+reads, greps, task acts, skill use, questions). Bound work still changes streams
+— not by detaching, but because the AGENT is on a different stream when it is a
+backgrounded subagent. Consequence: a task created in one turn and completed by
+a detached agent that owns it arrives as two acts on two different streams,
+joined by `TurnAgentTaskId`.
+
+**ACTS versus LIFECYCLES — an orchestrator conflation the user caught.** The
+orchestrator first modelled `TurnAgentTaskUpdate` with `update`/`success`/
+`failure` arms. Those describe the TASK's lifecycle, which spans turns, while a
+progress item is one ACT, which is instantaneous. An act has a tool-call
+outcome; a task has a lifecycle; they cannot share one oneof. ROOT CAUSE:
+applying the bounded-stream frame convention to something that is not a stream.
+The landed shape separates them — the arm says WHAT HAPPENED, `state` says WHERE
+IT LEFT THE TASK — so every consumer reads `state` regardless of the arm and the
+arm only decides whether to add a row or update one. Both act arms are therefore
+EMPTY, including `created`: the user asked whether `owner` belonged on the
+create, and it does not, because `state` rides every act and a second copy could
+disagree with it.
+
+**Adjacent-exclusivity fix, also the user's catch.** `active_form` was a sibling
+optional on the state; it means nothing for a task that is not running, so it
+moved INTO `TurnAgentTaskRunning`.
+
+**Status arms are the VENDOR's set, not invented**: pending, running, completed,
+failed, killed, paused — taken from the SDK's own task patch type
+(`'pending' | 'running' | 'completed' | 'failed' | 'killed' | 'paused'`). The
+orchestrator's first sketch had four and was corrected against the type. And
+`stopped` is NOT an act arm: stopping is a change whose resulting status is
+`killed`, so there is one spelling rather than two.
+
+**The shown/hidden drop, and why.** Ambient work (`skip_transcript`) was going
+to get a two-arm presentation oneof. The user: an observer "seems like it's a
+normal agent response arm" — correct. The only concrete generator found in the
+SDK is an auto-spawned background OBSERVER (`observer` on an agent definition:
+"receives read-only activity digests and reports via the ObserverReport tool; it
+never participates in the task"), which is an ordinary agent spawn; and no
+producer in THIS stack is known to set the flag. Derived-not-invented applies:
+the arm waits for a real producer.
+
+**Still owed.** Whether `ToolCallTaskStop.task_id` names the same id space as
+the vendor's background `task_id` — it does not change this shape (the producer
+is an agent in a turn either way), but it decides whether a Stop tool call and a
+`stopTask` control request can target the same object. Implementation-wave
+question, recorded so it is not re-litigated as a contract one.
+
+
 ### conversation.v1's TURN UPDATE MODEL lands: TurnUpdate / TurnProgress / TurnDetachedWork
 
 **What changed ("yeah looks great").** `turn.proto` gains the protocol model's
