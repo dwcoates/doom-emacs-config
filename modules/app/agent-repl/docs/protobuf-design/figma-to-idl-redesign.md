@@ -114,6 +114,80 @@ that transport.
 
 ## Landed changes
 
+### TOKEN USAGE MOVES TO THE `AgentActivity` ENVELOPE, with a one-unit-per-response rule; thinking's usage field DIES
+
+**What changed ("makes sense").** `optional TokenUsage usage` lands on
+`AgentActivity` beside the arm oneof. It is REMOVED from `AgentThinkingSuccess`
+and from all three `AgentResponse` arms. `AgentSubagentTotals.usage` stays.
+
+**THIS REVERSES A DECISION RECORDED EARLIER IN THIS WAVE.** The turn-update-model
+entry removed usage from the envelope on adjacent-exclusivity grounds — "a read,
+a search or a shell call has no token cost, so an envelope field is meaningless
+for most arms; usage rides the arms that have it." The user reopened it on
+aggregation grounds: the daemon must float usage up to the topbar and the footer,
+and "it shouldn't have to look in 15 arms for that data."
+
+**THE MEASUREMENT THAT SETTLED IT, and it defeated the orchestrator's own first
+answer too.** The orchestrator agreed with the reopen; the user then pushed back,
+reasoning that if usage genuinely belongs only to responses and thinking then
+confining it to those arms is preferable. Measured across ~13,000 assistant
+messages in three real transcripts:
+
+| assistant message contains | count |
+|---|---|
+| `tool_use` only — no text, no thinking | 5,714 |
+| `thinking`, no text | 4,673 |
+| `text` only | 2,666 |
+| `thinking` AND `text` | 1 |
+
+FORTY-FOUR PERCENT OF ASSISTANT MESSAGES CONSIST PURELY OF TOOL CALLS, and every
+one carries usage — because usage is a property of the API RESPONSE, not of what
+the response contains. Confining usage to the thinking and response arms would
+therefore DROP the accounting for 5,714 responses. That is lost data, not a
+modelling preference, and it is what decided the question.
+
+Incidentally the double-count the orchestrator had worried about — one message
+holding both thinking and text, so two arms reporting one figure — occurs ONCE in
+13,000. It was not the reason to move the field.
+
+**THE EXHAUSTIVE ENUMERATION OF USAGE CARRIERS, recorded so nobody re-derives
+it.** Three, and only three:
+
+1. `assistant` messages -> `message.usage`. 13,057 occurrences. ONE PER API
+   RESPONSE. This is what the envelope field carries.
+2. `user` messages carrying a subagent's completion -> `toolUseResult.usage` and
+   `totalTokens`. 5 occurrences. The subagent's OWN consumption, which is why
+   `AgentSubagentTotals.usage` is a different fact and stays where it is.
+3. `SDKThinkingTokensMessage` (`system/thinking_tokens`) -> `estimated_tokens`,
+   `estimated_tokens_delta`. Present in the SDK's type surface, ZERO occurrences
+   in the transcripts examined.
+
+TOOL CALLS THEMSELVES CARRY NO USAGE. The user asked this directly and the answer
+is no — a tool result is a USER message and has none.
+
+**THE ONE-UNIT-PER-RESPONSE RULE, which is what makes the envelope safe.** The
+user's instruction was to "ensure that it's set everywhere it can be". Taken
+literally that breaks the aggregation it exists for: one response yields several
+units, so stamping each of a three-tool-call message's units with the same usage
+makes any consumer summing units over-count threefold. So EXACTLY ONE UNIT PER
+RESPONSE carries it — the unit for the response's FIRST content block, chosen
+because block order is deterministic and needs no judgment — and every other unit
+of that response leaves it unset. Absence therefore means "not the unit carrying
+its response's usage", never "this cost nothing", and the comment says so.
+
+**THINKING'S USAGE FIELD WAS ALWAYS WRONG, on a fact discovered here.** There is
+NO thinking-token field inside `usage` at all. The thinking figure a footer draws
+comes from the separate `thinking_tokens` channel and is an ESTIMATE, not a billed
+amount. So `AgentThinkingSuccess.token_usage` was never the cost of thinking; it
+was the enclosing response's bill, attached to the wrong unit. Removing it fixes a
+misattribution rather than merely relocating a field.
+
+**OWED, recorded on the vetting register**: the thinking estimate has no
+representation now. It needs its own type rather than borrowing `TokenUsage`,
+precisely because it is estimated rather than billed and a consumer must not add
+it to a bill. Also unmodelled: `usage.output_tokens_details`, which appears in
+real transcripts and `TokenUsage` does not carry.
+
 ### The unmodeled-tool body lands; and its INTEGRATION REQUIREMENT is unlike every other arm's
 
 **What changed ("seems good").** `AgentUnmodeled` = { start | success |
