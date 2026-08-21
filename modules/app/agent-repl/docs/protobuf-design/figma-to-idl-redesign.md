@@ -114,6 +114,61 @@ that transport.
 
 ## Landed changes
 
+### Write and edit bodies land on the VENDOR's structured patch, not a reconstruction of it
+
+**The user's challenge that changed the design.** The orchestrator had the shim
+building diff hunks itself — locating each match, capturing context lines at
+edit time — and argued at length for why context had to be captured rather than
+reconstructed. The user pushed back: "are you SURE this information isn't
+returned by the SDK? Seems very surprising that it wouldn't be", noting Claude
+Code plainly draws context around edits.
+
+**It is returned, fully structured.** `SDKAssistantMessage` carries a per-tool
+structured output object — "the tool's full Output object, not the string
+content sent to the model... keyed by the matching tool_use block's name" — and
+`sdk-tools.d.ts` declares them. `FileEditOutput` = { filePath, oldString,
+newString, originalFile, structuredPatch[{oldStart, oldLines, newStart, newLines,
+lines[]}], userModified, replaceAll, gitDiff? }. `FileWriteOutput` = { type:
+"create"|"update", filePath, content, structuredPatch[...], originalFile,
+gitDiff?, userModified? }. ROOT CAUSE of the error: the orchestrator reasoned
+from the tool's INPUT schema and never looked for a structured output type, then
+built an elaborate justification for work the producer already does.
+
+**What landed.** `FilePatchHunk` = { FilePatchHunkRange old_range;
+FilePatchHunkRange new_range; repeated string lines } with the ranges
+encapsulated at the user's instruction rather than four bare integers.
+`TurnAgentWriteSuccess` = { path; oneof outcome { created | updated }; patch;
+user_modified } — the outcome arms being the vendor's own `type:
+"create"|"update"`. `TurnAgentEditSuccess` = { path; patch; user_modified }.
+Neither has an update arm.
+
+**Write versus edit, since the distinction was unclear and is worth recording.**
+The difference is in the INPUT, not the output. `FileWriteInput` = { file_path,
+content } — hands over the whole new contents, creating the file or replacing it
+wholesale. `FileEditInput` = { file_path, old_string, new_string, replace_all? }
+— a surgical string replacement that must match, and must match uniquely unless
+every occurrence was asked for. BOTH return a structured patch because the
+producer diffs after the fact so a UI can draw the CHANGE rather than a whole
+file; hunks are the presentation of the change, not a description of the
+operation.
+
+**`replace_all` needs no field.** Its effect is the number of hunks, so the
+occurrence count is an observable rather than a claim a consumer must reconcile.
+
+**`user_modified` is the allow-with-edits observable.** The vendor: "True when
+the user edited the proposed content in the permission dialog before accepting."
+It is the only signal that what landed is not what the agent proposed. Today it
+is always false in this stack because our permission card offers no editing
+affordance — the shim's `PermissionResponse.updated_input` supports it and no UI
+does, already flagged in stage 3 — so the field is what makes the result honest
+the moment that affordance is built, with no further contract change.
+
+**Deliberately dropped from the vendor's output**: `originalFile` (the entire
+pre-change file, which the hunks already summarise) and `gitDiff` (its counts
+are derivable from the hunks, and its repository fields belong to a different
+concern).
+
+
 ### The read tool: extent as a two-arm oneof; who highlights, and where the layers divide
 
 **What changed ("b seems best", "no need for range, so two arms is fine").**
