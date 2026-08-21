@@ -200,3 +200,29 @@ re-announcement only after a shim bounce, which is exactly the failure nobody
 reproduces on purpose.
 
 **Status.** OPEN.
+
+### B. The shim must set `forwardSubagentText` (owed to the implementation wave)
+
+**What is required.** The shim's query options must enable subagent text
+forwarding. `agent-shim/claude/shim/src/main.ts:314` sets
+`includePartialMessages: true` and does NOT set `forwardSubagentText`.
+
+**Why, and who depends on it.** The vendor's default forwards only a subagent's
+`tool_use` and `tool_result` blocks — documented as "enough for a heartbeat
+counter". A subagent's PROSE AND REASONING are not forwarded at all unless the
+option is set. The protocol model represents a subagent's activity with the same
+vocabulary as any agent's, including responses and thinking, so without this
+option those arms have NO PRODUCER and a nested transcript cannot be drawn — the
+contract would declare facts nothing ever fills.
+
+**Why it is recorded rather than left to the wave to notice.** Nothing in the
+schema mentions a producer option, and the failure is SILENT AND PARTIAL: nested
+tool calls would appear correctly while nested prose simply never arrived, which
+reads as "the subagent did not say anything" rather than as a misconfiguration.
+
+**A cost to weigh at the wave, not a reason to skip it.** Forwarding a full
+subagent conversation is strictly more traffic and more records than the default,
+and a session with many subagents pays it. The alternative is not drawing nested
+transcripts at all.
+
+**Status.** OPEN.
