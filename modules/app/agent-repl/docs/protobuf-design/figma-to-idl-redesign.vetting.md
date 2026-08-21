@@ -226,3 +226,24 @@ and a session with many subagents pays it. The alternative is not drawing nested
 transcripts at all.
 
 **Status.** OPEN.
+
+### 6. Whether a question's free-text answer and its selection note are two distinct facts
+
+**The assumption.** The producer's question output carries two separate
+text-bearing fields — one that appears to be the free-text escape a user types
+instead of picking an option, and one described as notes the user added to their
+selection — and they are genuinely different facts rather than two spellings of
+one.
+
+**What is affected.** `AgentQuestionAnswer.free_text` and
+`AgentQuestionAnswer.note`. If they are the same fact, one field is a
+respelling and goes. If the substitute-for-a-choice field turns out to be
+something else entirely, `free_text` has no producer and the drawn card's
+free-text escape has nowhere to land.
+
+**How to verify it.** Pose a question through the real harness, answer it in
+three ways — pick an option only, type free text only, and pick an option while
+adding a remark — and read which fields the tool output carries in each case.
+The type surface cannot distinguish them.
+
+**Status.** OPEN.
