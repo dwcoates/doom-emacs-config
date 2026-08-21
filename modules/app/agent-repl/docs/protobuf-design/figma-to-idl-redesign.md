@@ -114,6 +114,58 @@ that transport.
 
 ## Landed changes
 
+### The unmodeled-tool body lands; and its INTEGRATION REQUIREMENT is unlike every other arm's
+
+**What changed ("seems good").** `AgentUnmodeled` = { start | success |
+failure }. Start carries the tool name as a plain string, the arguments as a
+`Struct`, and the start instant. Success and failure each carry the name and
+typed `ToolResultContent`. No update arm.
+
+**Typed on one side, untyped on the other, and the asymmetry is the point.** The
+ARGUMENTS need the untyped escape — the producer holds no schema for a tool it
+did not define, which is the one qualifying reason, already accepted twice in
+this contract. The RESULT does not: a tool result is text and image blocks
+whichever tool produced it, so it is `ToolResultContent` like any other tool's.
+
+**NOT A FALLBACK, stated at the message.** Same stance as `UnsupportedBlock`: this
+arm is for a tool whose schema genuinely cannot be known, never for one whose
+modelling was inconvenient or deferred, and a recognizable built-in arriving here
+is a PRODUCER DEFECT. Written down because this is precisely the arm that rots
+quietly if it is not.
+
+**THE INTEGRATION REQUIREMENT THE USER SET OUT, which no other arm has.** This
+message must be surfaced to the user, but the requirements pull in two directions
+and both must hold:
+
+- AWARE, BUT NOT LOUDLY. Silence lets a growing blind spot go unnoticed. But an
+  unmodeled tool is not an error — the tool very likely ran correctly, and the
+  only thing wrong is that this contract cannot describe it. So it must not be
+  drawn as a failure.
+- COMPREHENSIBLE FOR REMEDIATION. The purpose of surfacing it is that someone can
+  decide whether the tool deserves an arm of its own. A raw dump of the arguments
+  serves that badly: an unstructured blob is illegible in a UI and tells a reader
+  nothing actionable. So what surfaces must be an ABBREVIATED, LEGIBLE form.
+- ITS HOME IS THE TOPBAR'S ALERT SURFACE, in the dropdown — not the feed, where
+  it would read as part of the conversation, and not a failure card.
+
+**AN IDEA THE USER RAISED AND EXPLICITLY DID NOT DECIDE.** Classify the
+arguments' STRUCTURE programmatically, and when a structure is one the daemon's
+state manager has never seen before, run a small fast model over it to produce a
+plain-English summary fit for rendering. His words: "just an idea, not saying we
+SHOULD do that, but we should note all this information when we land." Recorded
+as an idea, NOT as a decision — so a later implementer neither treats it as
+agreed nor re-invents it from scratch. What IS settled is the requirement it was
+proposed to satisfy: abbreviated and legible, never a dump.
+
+**CONSEQUENCE: a stage-2 reopen is owed.** `frontend.v1`'s topbar has a
+`TopbarWarningStrip` of warnings, and this needs a warning kind of its own plus
+the dropdown treatment described above. That is a frontend increment, recorded on
+the vetting register's owed list rather than guessed at here.
+
+**No update arm, for a reason worth stating.** This contract holds no knowledge
+of any unmodeled tool's streaming behavior. An update arm would be an invitation
+to invent a producer that does not exist.
+
 ### The send-message body lands: ADDRESSED at the call, RESOLVED at the outcome; the delivery arm is a cost fact
 
 **What changed ("option a looks best").** `AgentSendMessage` = { start | success

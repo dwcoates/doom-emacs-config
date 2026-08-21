@@ -247,3 +247,25 @@ adding a remark — and read which fields the tool output carries in each case.
 The type surface cannot distinguish them.
 
 **Status.** OPEN.
+
+### C. The topbar needs an alert kind for unmodeled tool calls (owed to a `frontend.v1` increment)
+
+**What is required.** `TopbarWarningStrip` needs a warning kind for "unmodeled
+work occurred", with a dropdown treatment that renders an ABBREVIATED, LEGIBLE
+account of the call — never a dump of its untyped arguments.
+
+**Why, and the two constraints that pull against each other.** An unmodeled tool
+call must reach the user so a blind spot does not grow unnoticed, but it is NOT
+an error — the tool very likely ran correctly and only this contract's coverage
+is at fault. So it cannot be drawn as a failure, and it cannot be drawn as
+nothing. The purpose of surfacing it is remediation: someone decides whether the
+tool deserves a modelled arm, which requires a legible summary rather than raw
+structure.
+
+**An idea recorded as an idea, not a decision.** Classify the arguments'
+structure programmatically and, when the structure is novel to the daemon's state
+manager, run a small fast model over it to produce a plain-English summary for
+rendering. This was raised explicitly as a possibility rather than a ruling. The
+REQUIREMENT it addresses is settled; this particular means of meeting it is not.
+
+**Status.** OPEN.
