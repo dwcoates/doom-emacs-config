@@ -1746,3 +1746,104 @@ message AgentSkillAllowedTools {
 // The skill could not be loaded. Arms are DERIVED from the producer's real
 // refusal sites at the implementation wave; empty until then.
 message AgentSkillUseFailure {}
+
+// ---- The message to another agent ----
+
+// The agent sending a message to another agent.
+//
+// WHY THIS IS VISIBLE AT ALL: without it, cross-agent communication happens
+// unseen and its effects appear without causes — a subagent's bubble resumes
+// activity with nothing to explain why. This unit is that explanation.
+//
+// THE BODY IS NEVER DRAWN. A relayed message is frequently long, so the caller
+// supplies a one-line summary for display and the body rides along for the
+// recipient. A surface draws the recipient and the summary; it must not fall
+// back to the body when no summary was given, since dumping a relay into a feed
+// is the outcome the summary exists to prevent.
+message AgentSendMessage {
+  // Where the send stands. No update arm: a message is sent once and either
+  // reaches the recipient's queue or does not.
+  oneof result {
+    // This stream is now carrying this send. Sent ONCE per stream, at issue.
+    AgentSendMessageStart start = 1;
+    // The message reached the recipient, or the recipient was woken to receive
+    // it.
+    AgentSendMessageSuccess success = 2;
+    // The message could not be delivered. Arms are DERIVED from the producer's
+    // real refusal sites at the implementation wave; empty until then.
+    AgentSendMessageFailure failure = 3;
+  }
+}
+
+// A send this stream has begun carrying.
+message AgentSendMessageStart {
+  // WHO THE CALLER ADDRESSED, exactly as written — which may be an agent's
+  // identity OR a human-readable name a spawn was given.
+  //
+  // DELIBERATELY NOT A TYPED AgentId: at the moment of the call the recipient is
+  // unresolved, and typing it as an identity would claim a resolution nobody has
+  // performed yet. The resolved identity appears on the success arm.
+  string addressed_to = 1;
+
+  // The one-line preview a surface draws in place of the body. UNSET when the
+  // caller supplied none, in which case a surface draws the recipient alone —
+  // never the body.
+  optional AgentSendMessageSummary summary = 2;
+
+  // The message itself, carried for the record and for the recipient. NOT FOR
+  // DISPLAY; see the summary above.
+  AgentSendMessageBody body = 3;
+
+  // When the send was issued.
+  AgentActivityStartedAt started_at = 4;
+}
+
+// The one-line preview of a message.
+message AgentSendMessageSummary {
+  // The summary as the caller wrote it, drawn verbatim.
+  string text = 1;
+}
+
+// A message's full text.
+message AgentSendMessageBody {
+  // The body verbatim. Retained so history is complete and the record can be
+  // read back, not so a feed can render it.
+  string text = 1;
+}
+
+// The message reached its recipient.
+message AgentSendMessageSuccess {
+  // WHICH AGENT it reached, resolved. This is the identity the addressed string
+  // above turned out to name, and it is what joins this send to the recipient's
+  // own activity — so a reader can follow a message to the work it caused.
+  AgentId recipient_agent_id = 1;
+
+  // How it got there. The two differ in a way a reader cares about: one costs
+  // nothing beyond the message, the other RESTARTED A DORMANT AGENT, which
+  // begins consuming tokens again.
+  oneof delivery {
+    // The recipient was already running; the message waits for it to reach its
+    // next tool round. Nothing was started.
+    AgentSendMessageQueuedToLive queued_to_live = 2;
+    // The recipient was not running and WAS RESUMED in order to receive this
+    // message. A reader treats this as the cause of that agent's renewed
+    // activity and its renewed cost.
+    AgentSendMessageResumedRecipient resumed_recipient = 3;
+  }
+}
+
+// The recipient was already running and the message is queued for it.
+message AgentSendMessageQueuedToLive {}
+
+// The recipient was dormant and was restarted to receive the message.
+//
+// EMPTY DESPITE THE PRODUCER SAYING MORE. Its answer distinguishes a recipient
+// that had no active task from one that had already stopped, but that
+// distinction exists ONLY inside a prose sentence written for the model to read.
+// Recovering it would mean parsing that sentence, so this arm states the fact
+// that is structurally available and no more.
+message AgentSendMessageResumedRecipient {}
+
+// The message could not be delivered. Arms are DERIVED from the producer's real
+// refusal sites at the implementation wave; empty until then.
+message AgentSendMessageFailure {}
