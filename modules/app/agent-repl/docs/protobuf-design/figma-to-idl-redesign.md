@@ -114,6 +114,68 @@ that transport.
 
 ## Landed changes
 
+### The send-message body lands: ADDRESSED at the call, RESOLVED at the outcome; the delivery arm is a cost fact
+
+**What changed ("option a looks best").** `AgentSendMessage` = { start | success
+| failure }. Start carries the addressed recipient as a plain STRING, an optional
+summary, the body, and the start instant. Success carries the RESOLVED
+`AgentId` plus `oneof delivery { queued_to_live | resumed_recipient }`.
+
+**THE ADDRESSED/RESOLVED SPLIT, which is the whole of the user's choice.** Two
+options were put to him: carry the recipient as a typed `AgentId` from the start,
+or carry what the caller wrote at the call and the resolved identity at the
+outcome. He took the latter. The reason it matters: the caller addresses a
+recipient by identity OR by a human-readable NAME a spawn was given, and at the
+instant of the call nothing has resolved which agent that is. Typing it as an
+identity up front would claim a resolution nobody had performed.
+
+**THE UX JUSTIFICATION, checked in the existing implementation rather than
+assumed.** The webapp already draws this tool, and deliberately minimally: the
+card is one line, `-> recipient: summary`, and the full body is NEVER drawn
+(`render.ts:1706-1711`) because a relayed message is frequently long. A
+SUCCESSFUL delivery renders nothing at all (`render.ts:1776-1782`) — "the
+successful delivery echo adds nothing over the summary line" — while errors fall
+through so failures stay loud. The purpose, in one sentence: without this card,
+cross-agent communication is invisible and a subagent's bubble resumes activity
+with nothing to explain why.
+
+**EVIDENCE: 384 real results surveyed, not a type read.** The tool has NO typed
+shape in the vendor's surface, so the shape came from transcripts. Input is
+`{to, summary, message}`. Result is `{success, message, resumedAgentId?, pin?}`
+— `success` and `message` in 384/384, `resumedAgentId` in 218/384, `pin
+{id, name, ref}` in 381/384.
+
+**THE OUTCOME IS ENCODED IN PROSE, and only two thirds of it is recoverable.**
+Three distinct sentences appear: "Message queued for delivery to X at its next
+tool round" (recipient live, no `resumedAgentId`); "Agent X had no active task;
+resumed from transcript in the background"; and "Agent X was stopped
+(completed); resumed it in the background". The presence of `resumedAgentId` is
+the ONLY structured discriminator, so it separates live-delivery from
+resumed-recipient and nothing more. The further distinction — WHY the recipient
+needed resuming — exists only inside a sentence written for the model to read,
+and recovering it would mean parsing prose. `AgentSendMessageResumedRecipient` is
+therefore EMPTY, with its comment stating that the producer says more and that
+the remainder is deliberately not recovered.
+
+**WHY THE DELIVERY ARM EARNS ITS PLACE even though nothing draws it today.**
+`resumed_recipient` means A DORMANT AGENT WAS WOKEN and is consuming tokens
+again. That is a real user-visible consequence with no other producer, and it is
+the causal link between one agent's send and another's renewed cost. Recorded as
+a NEW drawn fact this contract makes available rather than one it owes an
+existing surface.
+
+**Dropped from the producer's result, each for a stated reason.** The prose
+`message` (its two recoverable facts are structural once the delivery arm
+exists, and carrying it would invite a surface to draw a sentence instead of
+rendering an arm); `pin.name` (equal to `pin.id` in every sample observed —
+these were unnamed agents); and `pin.ref` (a short handle nothing in this stack
+uses).
+
+**A gotcha stated at the field.** A surface must NOT fall back to the body when
+no summary was supplied. Dumping a relay into a feed is precisely the outcome the
+summary exists to prevent, so the absence of a summary means "draw the recipient
+alone".
+
 ### The skill body lands, from REAL TRANSCRIPT EVIDENCE: the document is not the tool return, and nothing delimits a skill's scope
 
 **What changed ("your model looks perfect").** `AgentSkillUse` = { start |
