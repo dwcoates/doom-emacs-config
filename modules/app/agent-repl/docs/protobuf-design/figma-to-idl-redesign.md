@@ -114,6 +114,53 @@ that transport.
 
 ## Landed changes
 
+### The read tool: extent as a two-arm oneof; who highlights, and where the layers divide
+
+**What changed ("b seems best", "no need for range, so two arms is fine").**
+`TurnAgentRead` = { success | failure }, no update arm — a read either returns
+or fails and nothing draws a partial one. Success = { ReadPath path; oneof
+extent { whole | head } }, where `head` carries `total_lines`. A truncation BOOL
+was rejected in favour of the arm, per the mode-selecting-bool convention: a
+whole read then carries no truncation vocabulary, and a short one cannot omit the
+figure that makes it legible. A third `range` arm for the tool's own
+offset/limit was offered and declined.
+
+**A HEAD, never a middle slice.** A short read is always the file's leading
+portion, because a highlighter reading from offset zero has correct context while
+text beginning mid-string or mid-comment is mis-highlighted until it happens to
+resync.
+
+**Highlighting: the daemon owns it, and the client stops deciding.** The user
+asked whether truncated content can still be highlighted. Investigated: the
+webapp does NOT use tree-sitter — it uses HIGHLIGHT.JS core with twenty
+registered grammars, plus `languageForPath` and `highlightCode`
+(`webapp/src/highlight.ts`). Being a regex/state-machine highlighter rather than
+a parser, it handles a head fragment fine. The user then ruled that the parser
+belongs in the daemon ("fast Go that can call out to a C parser"), so the daemon
+highlights and the client paints spans it is handed. CONSEQUENCES:
+`languageForPath` and `highlightCode` leave the webapp, highlight.js and its
+twenty grammars leave the bundle, and the daemon needs a grammar set at least as
+wide or files silently lose highlighting they have today.
+
+**A retraction, kept visible.** The orchestrator argued resolved spans would
+make the wire "much bigger". WRONG — packed varint deltas of (offset, length,
+class) run the same order as the text itself. The user challenged it and the
+claim was withdrawn; it had been asserted without estimating.
+
+**The layer division, restated because the user corrected the orchestrator's
+framing.** `conversation.v1` is the shim→daemon protocol AND the shared
+conversation vocabulary that `frontend.v1` embeds — not a frontend-only surface,
+and not exclusively the wire. So for a read: the PATH is embedded by the view
+verbatim (one fact, one form), the CONTENTS are resolved by the daemon into
+highlight spans (the one thing a client must not derive), and the truncation
+becomes a composed affordance ("showing 200 of 4,312") rather than a bare bool
+the client formats.
+
+**Owed to frontend.v1's turn.** `FeedToolReadSpan.token_class` should be a
+closed arm set rather than a string, since it names a paint class the stylesheet
+must have a rule for.
+
+
 ### Thinking and response bodies land; the `update` arm is per-kind, and usage rides both arms
 
 **What changed ("looks good, let's proceed").** `TurnAgentThinking` and
