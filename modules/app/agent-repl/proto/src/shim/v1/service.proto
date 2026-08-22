@@ -12,6 +12,7 @@ import "shim/v1/endpoint_detach_foreground.proto";
 import "shim/v1/endpoint_get_session_diagnostics.proto";
 import "shim/v1/endpoint_kill_session.proto";
 import "shim/v1/endpoint_kill_turn.proto";
+import "shim/v1/endpoint_read_history.proto";
 import "shim/v1/endpoint_set_session_model.proto";
 import "shim/v1/endpoint_set_session_permission_mode.proto";
 import "shim/v1/endpoint_start_session.proto";
@@ -100,4 +101,11 @@ service Shim {
   // Move in-flight turn work onto its own stream (Ctrl-B). The turn then
   // announces it as detached, and the consumer opens the matching Watch.
   rpc DetachForeground(DetachForegroundRequest) returns (DetachForegroundResponse);
+
+  // ---- History: bounded reads of one agent's durable past ----
+
+  // One page of one agent's history, newest first, from the newest or from
+  // a page already received. Serves cold open, scroll-back, and the daemon's
+  // own catch-up after a restart alike.
+  rpc ReadHistory(ReadHistoryRequest) returns (ReadHistoryResponse);
 }

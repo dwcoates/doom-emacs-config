@@ -1,0 +1,55 @@
+// endpoint_read_history.proto — ReadHistory: one page of one agent's durable
+// history, backward from the newest or from a page already received. The
+// same read serves a feed page on cold open or scroll-back AND the daemon's
+// own catch-up after its restart: catch-up is ordered pagination, never a
+// position.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/history.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Which agent's history, and where in it.
+message ReadHistoryRequest {
+  // WHOSE history: the agent whose children are wanted — the main agent
+  // (its identity is SessionStarted.main_agent_id), a subagent, or a
+  // workflow's agent. An unknown agent is a refusal.
+  conversation.v1.AgentId agent = 1;
+  // WHERE: the newest page, or the one below a page already received.
+  oneof position {
+    // Anchor at the newest entry held. Empty: the newest is a fact the
+    // serving side resolves, never a value the caller supplies.
+    ReadHistoryFirst first = 2;
+    // Continue below a page already received, echoing its continuation.
+    conversation.v1.HistoryContinuation next = 3;
+  }
+}
+
+// Anchor at the newest entry.
+message ReadHistoryFirst {}
+
+// THE ARM IS THE OUTCOME.
+message ReadHistoryResponse {
+  oneof result {
+    ReadHistorySuccess success = 1;
+    ReadHistoryFailure failure = 2;
+  }
+}
+
+// The page. An EMPTY page with `floor` is a legitimate answer for an agent
+// with no history yet.
+message ReadHistorySuccess {
+  conversation.v1.HistoryPage page = 1;
+}
+
+// Not served. `kind` arms are DERIVED at the wave from the shim's real
+// refusal sites: an unknown agent, a continuation the store no longer
+// honors, the store unavailable.
+message ReadHistoryFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+}
