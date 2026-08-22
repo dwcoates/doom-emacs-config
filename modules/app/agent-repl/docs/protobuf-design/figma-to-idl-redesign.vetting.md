@@ -316,3 +316,27 @@ after the session that produced it has ended, and the only durable answer is the
 store.
 
 **Status.** OPEN.
+
+### F. Four files still name `conversation.v1.MessageId` and must be repointed (owed to stages 2 and 3)
+
+**What is required.** `message.proto` is DELETED. Four files still declare fields
+of its `MessageId` type and must be repointed as their stages are re-walked:
+
+- `agentrepl/v1/endpoint_get_feed_page.proto` — the parent container arm.
+- `agentrepl/v1/endpoint_interrupt.proto` — the detached target.
+- `frontend/v1/feed.proto` — five fields: the row's identity, its parent, a
+  breadcrumb target, and a bubble reference.
+- `frontend/v1/footer.proto` — an expanded row's jump target.
+
+**What each becomes.** Every one of them is a ROW or TARGET identity, which is
+the granularity collision the stage-1 reversion flagged by name: one type was
+serving both a record's identity and a renderable row's. Under the settled model
+those are `AgentActivityId` where the target is a unit of work and `AgentId`
+where it is an agent's container.
+
+**One more reference, already dying.** `shim/v1/external.proto` declares a
+`MessageEntry` field. That message is superseded by the datalayer/protocol split
+and goes with it rather than being repointed. Remaining mentions elsewhere are
+comment text only.
+
+**Status.** OPEN.
