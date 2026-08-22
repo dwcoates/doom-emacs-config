@@ -12,6 +12,8 @@ import "shim/v1/endpoint_start_turn.proto";
 import "shim/v1/endpoint_update_turn.proto";
 import "shim/v1/endpoint_detach_foreground.proto";
 import "shim/v1/endpoint_open_session.proto";
+import "shim/v1/endpoint_set_model.proto";
+import "shim/v1/endpoint_set_permission_mode.proto";
 import "shim/v1/endpoint_watch_session.proto";
 import "shim/v1/endpoint_stop_bash.proto";
 import "shim/v1/endpoint_update_subagent.proto";
@@ -34,6 +36,12 @@ service Shim {
   // identity rotation, the query dying, model and fast-mode changes, MCP
   // health, account usage. Nothing synthetic — the shim's own health is pulled.
   rpc WatchSession(WatchSessionRequest) returns (stream WatchSessionResponse);
+  // Change the model from the next turn on. Resolves after the current turn
+  // ends; refused IMMEDIATELY with the cold cost when the context exceeds the
+  // request's threshold and no remediation is named.
+  rpc SetModel(SetModelRequest) returns (SetModelResponse);
+  // Change the session's permission mode for every gate from now on.
+  rpc SetPermissionMode(SetPermissionModeRequest) returns (SetPermissionModeResponse);
 
   // ---- Turn: submitting a prompt, the turn's own stream, speaking to it ----
 
