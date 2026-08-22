@@ -114,6 +114,29 @@ that transport.
 
 ## Landed changes
 
+### The workflow update carries ONE activity, not a batch; timeliness is a stated producer obligation
+
+**What changed ("let's do singular").** `AgentWorkflowUpdate.agent_activities`
+(repeated) becomes `agent_activity` (singular).
+
+**THE REASON THE USER GAVE, CORRECTED.** He proposed singular to force the shim
+to stream immediately rather than buffer. Singular does NOT do that: a producer
+can still accumulate and then emit several singular frames in a burst, so the
+shape removes the ABILITY TO EXPRESS a batch without removing the ability to
+delay one. Timeliness is a producer behavior and the schema cannot enforce it.
+
+**What singular actually buys, and it is enough.** One frame carries one unit as
+everywhere else in this contract, so this stops being the only place a frame
+carries many. And frame size stays bounded — a COLD READ ingests an entire run's
+history at once, and a batched frame would have no cap on what it carried.
+Nothing is lost: a consumer renders five activities identically whether they
+arrived together or apart.
+
+**So the obligation is STATED rather than implied.** The comment now requires a
+producer to emit as observed and not buffer, with the reason: work already
+observed and withheld makes a run look stalled. The user's intent is preserved by
+saying it, which is the only place it could have been enforced.
+
 ### `run_id` is a RESUME handle, not a stream handle — it moves into the placement arms and `AgentWorkflowRun` dissolves
 
 **What changed ("sounds good").** `AgentWorkflowRun` is DELETED. The workflow's

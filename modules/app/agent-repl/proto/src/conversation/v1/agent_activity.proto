@@ -2050,20 +2050,30 @@ message AgentWorkflowNotice {
   string text = 1;
 }
 
-// Work this run's agents have done since the last frame.
+// One thing an agent of this run did.
 //
 // A CARRIER AND NOTHING ELSE. It holds no state about the run itself, so a
-// consumer upserts each activity below by that activity's OWN identity and
+// consumer upserts the activity below by that activity's OWN identity and
 // changes nothing about the run on account of this frame.
+//
+// ONE ACTIVITY PER FRAME, NEVER A BATCH. A frame carries exactly one unit here as
+// it does everywhere else in this contract, which keeps frame size bounded — a
+// cold read ingests an entire run's history at once, and a batched frame would
+// have no cap on what it carried.
+//
+// PRODUCER OBLIGATION: EMIT AS OBSERVED, DO NOT BUFFER. A producer that
+// accumulated activity and released it in bursts would satisfy this shape while
+// defeating its purpose — the singular field cannot enforce timeliness, so it is
+// stated here instead. A run's progress is watched live, and work already
+// observed and withheld is a run that looks stalled.
 message AgentWorkflowUpdate {
-  // The activity, in the order the producer observed it. Each entry carries the
-  // identity of the agent that did it, so a consumer places it without this
-  // frame saying anything about ancestry.
+  // What was done. Carries the identity of the agent that did it, so a consumer
+  // places it without this frame saying anything about ancestry.
   //
   // AN AGENT'S FIRST APPEARANCE HERE IS ITS ANNOUNCEMENT — the producer records a
   // step starting, and that record is what tells a consumer the agent exists and
   // that a container should be drawn for it.
-  repeated AgentActivity agent_activities = 1;
+  AgentActivity agent_activity = 1;
 }
 
 // The run finished.
