@@ -161,6 +161,35 @@ turn on a subagent, so the queue has no drain there.
 
 ## Landed changes
 
+### 4c: `SetModel` and `SetPermissionMode` land; a model switch is a COLD CACHE and shares OpenSession's remediation vocabulary
+
+**What changed (the user's spec for SetModel; SetPermissionMode "you can
+handle yourself").** `endpoint_set_model.proto`: request { AgentModel;
+uint64 cold_threshold_tokens; optional SessionColdRemediation }; response
+{ success {} | failure { oneof cause { SessionCold cold }; detail } }.
+`endpoint_set_permission_mode.proto`: request { AgentPermissionMode };
+response { success {} | failure { detail } }. `SessionUpdate` gains
+`permission_mode_changed` (a standing grant's `set_mode` can change it too, so
+one authoritative statement is needed). `SessionCold`'s comment now names the
+second way a context goes cold: the model changing, since a cache is per
+model.
+
+**SetModel's two rules, the user's.** (1) It RESOLVES AFTER THE CURRENT TURN
+ENDS — a turn is answered by one model throughout; with no turn open it
+resolves at once. This departs from the SDK's mid-turn `setModel` on purpose:
+the vendor permits it, the product does not want it. (2) It is REFUSED
+IMMEDIATELY — before any waiting — when the context exceeds a threshold THE
+REQUEST NAMES, because the switch re-reads everything at full price; the
+failure carries `SessionCold` and the retry names a `SessionColdRemediation`.
+Same messages as OpenSession on both sides, same shim handling.
+
+**Why the threshold is in the request.** It is daemon policy (cost
+tolerance, user preference) stated per call, not a shim constant; the shim
+only measures.
+
+**Both successes are EMPTY**: the new state arrives on WatchSession as the one
+authoritative statement.
+
 ### 4c: `WatchSession` lands — `SessionUpdate` in `session.proto`; `BookkeepingEntry` is DEAD, arm by arm; shim diagnostics become a PULL
 
 **What changed (the user's two corrections, then land).** `session.proto`
