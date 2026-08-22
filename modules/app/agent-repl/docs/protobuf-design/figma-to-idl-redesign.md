@@ -114,6 +114,44 @@ that transport.
 
 ## Landed changes
 
+### `run_id` is a RESUME handle, not a stream handle — it moves into the placement arms and `AgentWorkflowRun` dissolves
+
+**What changed ("sounds good").** `AgentWorkflowRun` is DELETED. The workflow's
+name becomes a plain field on the start arm. `run_id` moves into
+`AgentWorkflowPlacementLocal`; the remote arm's `session_url` is documented as
+the resume handle for that placement. `resumed_from` becomes a bare optional
+string. The success and failure arms stop repeating a run identity.
+
+**THE TWO VENDOR VALUES ARE DIFFERENT FACTS, which is what the orchestrator had
+conflated.** `taskId` is the background task's identity — always present, what
+the live-background set tracks and what a stop aims at. `runId` is documented as
+the "local workflow run identifier for resumeFromRunId" — the RESUME handle,
+which is also the run's directory name, and which is ABSENT for a remote run
+because the session URL serves that role there. So the envelope's
+`DetachedWorkId` is the task id and nothing else, and `run_id` never belonged
+beside it.
+
+**WHY THE PLACEMENT ARMS, and not an optional field.** The user asked whether a
+workflow-only value should be confined to the workflow messages; it should, and
+one level further. A resume handle ALWAYS exists — it is simply a DIFFERENT
+handle per placement — so putting `run_id` on the local arm and naming
+`session_url` as the remote one removes the optional entirely and makes the
+adjacent-exclusivity explicit: `run_id` means nothing when a run is remote.
+
+**Two consequences that fall out.** `AgentWorkflowRun` reduced to a bare name and
+stopped deserving to be a message. And the success and failure arms no longer
+repeat a run identity — a frame's own identity already says which run it belongs
+to, so `AgentWorkflowFailure`'s awkward optional run (optional only because a
+pre-launch rejection had no run id) disappears with it.
+
+**Different lifetimes, stated at the field.** The detached-work identity
+addresses LIVE work and dies with it; the run id OUTLIVES the run, being both how
+a later invocation reuses its results and where the producer keeps its files.
+
+**STILL OPEN.** Whether a workflow agent's creation should NAME its run rather
+than relying on which stream it arrived on — the same positional-provenance
+concern this contract has refused elsewhere.
+
 ### The workflow lands as DETACHED WORK ONLY, and is the one unit that CONTAINS other units — STAGE 1's arm bodies are COMPLETE
 
 **What changed ("ship this motherfucker").** `AgentActivity.item` LOSES its
