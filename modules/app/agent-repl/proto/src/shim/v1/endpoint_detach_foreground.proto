@@ -1,0 +1,35 @@
+// endpoint_detach_foreground.proto — DetachForeground: move in-flight turn
+// work onto its own stream (the user's Ctrl-B).
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// What to background.
+message DetachForegroundRequest {
+  // The in-flight turn unit: a bash or a subagent the turn's stream announced
+  // and has not concluded. Any other unit is a refusal.
+  conversation.v1.AgentActivityId unit = 1;
+}
+
+// THE ARM IS THE OUTCOME OF THE CALL — never of the work.
+message DetachForegroundResponse {
+  oneof result {
+    DetachForegroundSuccess success = 1;
+    DetachForegroundFailure failure = 2;
+  }
+}
+
+// Detached. The turn's stream announces `detached_work.detached` naming the new handle; the consumer opens the matching Watch.
+message DetachForegroundSuccess {}
+
+// Not detached: no such unit, already concluded, not a detachable kind. `kind` arms are DERIVED at the wave from the shim's real refusal
+// sites.
+message DetachForegroundFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+}

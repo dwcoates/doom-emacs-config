@@ -24,6 +24,16 @@ option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 // concluding. Declared once so the turn's stream and a detached subagent's
 // stream are one shape and one handler.
 message AgentFrame {
+  // WHICH AGENT this frame is about: the main-thread agent, or a subagent at
+  // any depth. FRAMES ARE FLAT AND THIS IS THE WHOLE OF THEIR ATTRIBUTION — a
+  // subagent's work is never nested inside its spawn; it arrives as frames
+  // carrying its own identity, on whichever stream carries it (the spawning
+  // turn's for an awaited spawn, its own for a detached one, the run's for a
+  // workflow's agent). A consumer routes by this value alone, into whatever it
+  // drew when it saw the agent's creation; nothing on the wire carries
+  // ancestry, because placement comes from the request when history is read
+  // and from the consumer's own drawn structure when frames arrive live.
+  AgentId agent_id = 4;
   oneof result {
     // The agent is running and here is something it did, or is blocked on.
     AgentUpdate update = 1;
@@ -192,13 +202,13 @@ message AgentWorkflowUpdate {
     // is no actor to name and no unit of anyone's work to identify, so wrapping
     // it would require inventing both.
     AgentSubagentStart agent_start = 1;
-    // Something an agent of this run has to say — the same vocabulary as any
-    // agent's stream: read-only work, work it detached, or a question or
-    // permission it is now BLOCKED on, which UpdateWorkflow answers. Every arm
-    // carries the identity of the agent concerned, so a consumer places it
-    // without this frame saying anything about ancestry. Tag 2 is RETIRED
-    // (it carried activity alone, which had no arm for a blocked agent).
-    AgentUpdate agent_update = 3;
+    // A FRAME of one of this run's agents — exactly what that agent's own
+    // stream would carry: its work, work it detached, a question or permission
+    // it is BLOCKED on (which UpdateWorkflow answers), and its own ending. The
+    // frame names its agent, so a consumer places it without this message
+    // saying anything about ancestry. Tags 2 and 3 are RETIRED (they carried
+    // activity alone, with no arm for a blocked or finished agent).
+    AgentFrame agent_frame = 4;
   }
 }
 

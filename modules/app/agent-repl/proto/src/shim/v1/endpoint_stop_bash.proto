@@ -1,0 +1,34 @@
+// endpoint_stop_bash.proto — StopBash: kill a backgrounded shell command, the
+// only input a process takes.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/detached_work.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Which command to kill.
+message StopBashRequest {
+  // WHICH item. Not a live shell: refused.
+  conversation.v1.DetachedWorkId work = 1;
+}
+
+// THE ARM IS THE OUTCOME OF THE CALL — never of the work.
+message StopBashResponse {
+  oneof result {
+    StopBashSuccess success = 1;
+    StopBashFailure failure = 2;
+  }
+}
+
+// The kill was sent; the stream concludes with the unit's `interrupted` outcome.
+message StopBashSuccess {}
+
+// Not sent: no such item, already ended. `kind` arms are DERIVED at the wave from the shim's real refusal
+// sites.
+message StopBashFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+}
