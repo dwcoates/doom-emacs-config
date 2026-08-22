@@ -114,6 +114,42 @@ that transport.
 
 ## Landed changes
 
+### 4c: `UpdatePrompt` lands — THREE actions, not two; `AgentQuestionId` is the question's own identity
+
+**What changed ("let's land after those changes").**
+`endpoint_update_prompt.proto`: request { TurnId; oneof action { interrupt |
+answer_question { AgentQuestionId ask; AgentQuestionAnswered answered } |
+answer_permission { AgentActivityId ask; oneof decision { AgentPermissionAllowed
+| AgentPermissionDeniedByUser } } } }; response { success {} | failure
+{ detail } }. `rpc UpdatePrompt` on the service. In `question.proto`,
+`AgentQuestion.id` is retyped from `AgentActivityId` to NEW `AgentQuestionId`.
+
+**Three arms, reopening 4b's two.** 4b settled `{ interrupt |
+answer_permission }` when a question was still a tool riding the permission
+gate. Today's split of question from permission makes their answers distinct
+shapes, so the oneof gains an arm rather than overloading one.
+
+**THE IDENTITY CORRECTION, the user's catch.** "AgentActivityId in the ask is
+weird to me. question asking isn't in agent activity anymore, no?" Correct —
+the name says "names WORK", and a question is no longer work. The two blocking
+kinds differ: a PERMISSION's id IS a unit-of-work id on purpose (consent joins
+to the tool unit it gates, which carries the same identity if the gate opens),
+so it keeps `AgentActivityId`; a QUESTION joins to no unit, so it gets its own
+space. Names are premises: a wrong one here would have had a consumer looking
+for a tool unit that never comes.
+
+**Reuse over respelling, twice.** The question answer carries
+`AgentQuestionAnswered` WHOLE — the same type the success frame restates, so
+the shim validates by comparing the echo against the batch it is already
+holding. The permission decision carries `AgentPermissionAllowed` (once |
+standing) and `AgentPermissionDeniedByUser` directly, minus the two arms no
+user can say (`abandoned`, `policy`).
+
+**Success is EMPTY on purpose.** The ask's new state arrives as its next frame
+on the turn's stream; restating it in the unary response would be a second
+authority. Failure arms are derived at the wave (no turn open, wrong turn, no
+such ask, already decided, shape mismatch).
+
 ### 4c: `SubmitPrompt` lands — the first shim.v1 rpc; `prompt_origin.proto` split out; the keep-alive leaves the shim API entirely
 
 **What changed ("looks great").** `shim/v1/service.proto` with its TURN section

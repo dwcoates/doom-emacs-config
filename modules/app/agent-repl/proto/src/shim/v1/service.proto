@@ -9,6 +9,7 @@ syntax = "proto3";
 package shim.v1;
 
 import "shim/v1/endpoint_submit_prompt.proto";
+import "shim/v1/endpoint_update_prompt.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
@@ -23,4 +24,10 @@ service Shim {
   // submitter, so a second call while one stream is open is a daemon fault
   // and is refused, never queued.
   rpc SubmitPrompt(SubmitPromptRequest) returns (stream SubmitPromptResponse);
+
+  // Speak to THE open turn. Unary: each action has its own outcome, which a
+  // request-stream frame could not carry. Answers return NOTHING about the
+  // ask's new state — that arrives as the unit's next frame on the turn's
+  // stream, like every other state change.
+  rpc UpdatePrompt(UpdatePromptRequest) returns (UpdatePromptResponse);
 }
