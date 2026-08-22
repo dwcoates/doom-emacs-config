@@ -114,6 +114,99 @@ that transport.
 
 ## Landed changes
 
+### The workflow lands as DETACHED WORK ONLY, and is the one unit that CONTAINS other units — STAGE 1's arm bodies are COMPLETE
+
+**What changed ("ship this motherfucker").** `AgentActivity.item` LOSES its
+`workflow` arm (tag 13 retired, not reused). `DetachableWork` gains
+`AgentWorkflow workflow = 3`. The `AgentWorkflow` family lands: { start | update
+| success | failure }, where the update arm carries `repeated AgentActivity`.
+
+**WHY DETACHED-ONLY, verified at the source.** A workflow CANNOT be
+synchronous, confirmed two independent ways: its input has no blocking option at
+all (compare bash and the subagent, which each have an explicit
+`run_in_background` — a tool that can go either way says so), and its output's
+status values are only `async_launched` and `remote_launched`, with no
+`completed`, unlike the subagent's output which has one precisely because a spawn
+can be awaited. So an activity arm for it could only ever have reported
+"launched", with everything real happening elsewhere.
+
+**The orchestrator's counter-argument, raised and dissolved.** It objected that
+dropping the arm loses the turn's record of the agent having started a
+workflow — the same "effects without causes" problem that justified send_message
+existing. Wrong: a detached-work announcement rides the SPAWNING stream, so the
+turn's stream still says a workflow was launched here. The trace survives without
+an arm.
+
+**THE STRUCTURAL PROBLEM THE USER FOUND, and how it was closed.** He asked
+repeatedly where a workflow's subagents were modelled, and the orchestrator kept
+answering with behavior rather than shape — "they arrive as flat activity on the
+run's stream" — until he named the constraint: detached work is ONE CONNECTION PER
+ITEM, so there was literally nowhere for that activity to be returned. The
+orchestrator conceded the container did not exist and that it had been letting
+stage-4 reasoning drive stage-1 shapes. THE USER'S ANSWER was the update arm:
+`AgentWorkflowUpdate { repeated AgentActivity }`. The run's stream stays one
+type, and the run's progress IS its agents' work, so the arm is honest rather
+than a workaround.
+
+**Two orchestrator objections to that arm, both withdrawn.** (1) That `repeated`
+made it a delta with no gap detection. Wrong — the stream is ordered and the
+bounded-stream convention already reads a stream ending without a terminal frame
+as a transport failure, so frames cannot vanish silently; the bash offset exists
+for a different reason (resuming a byte position, which identified units do not
+need). (2) That two identities in one frame made upsert ambiguous. Wrong — the
+update arm carries NO run state, so nothing about the run is upserted and each
+activity upserts by its own identity. The user pushed on both and both collapsed.
+
+**THIS IS THE ONLY UNIT THAT CONTAINS OTHER UNITS, and the justification is
+stated at the message.** A workflow is the only kind of work that is a PROGRAM
+rather than an action. It does NOT reintroduce the recursion that was retracted:
+the shim needs only to know which run an activity came from, which it knows from
+the directory it read it out of, and a workflow agent that spawns its own agent
+arrives flat in the same update — so no lineage is maintained anywhere.
+
+**AN AGENT'S FIRST APPEARANCE IS ITS ANNOUNCEMENT.** A workflow's agents are
+created by the script, so no activity unit announces them the way
+`AgentSubagentStart.created_agent_id` announces an agent-spawned one. The run's
+journal records a step STARTING, and that record is the announcement — the
+sidecar converts a real record rather than synthesizing anything.
+
+**Shape decisions changed from the pre-detour draft, each on evidence.**
+
+- THE `source` ONEOF IS GONE. The producer persists a script for EVERY
+  invocation and returns its path, so inline-versus-named-versus-path was a
+  distinction with no consequence and the empty `SourceInline` arm was dishonest
+  about the script being unavailable. Replaced by `AgentWorkflowScript { path }`,
+  always set.
+- RESUME BECAME AN OPTIONAL FIELD rather than a source arm, being orthogonal to
+  where the script came from. When set it tells a reader the run may have cost far
+  less than its agent count suggests, because unchanged steps returned cached
+  results.
+- THE REMOTE ARM NO LONGER CLAIMS UNOBSERVABILITY. The orchestrator had asserted
+  a remote run's work cannot be followed, which was inference from the session
+  living elsewhere and was never checked. It now states only what is known.
+- `warning` BECAME `notice`, because the producer calls it a non-blocking
+  heads-up and the word "warning" invites drawing it as a problem.
+
+**A PROCESS ERROR, recorded.** An earlier attempt landed a workflow body that had
+been drafted BEFORE the flat-model detour and never re-presented afterwards. The
+orchestrator had asked a COMPOUND question — land the reversion and the workflow
+body together? — and read assent as covering both. The user caught it: "we did a
+detour to update the agent, which we should have, but did not return to
+workflow." The body was reverted and re-proposed from scratch. ROOT CAUSE: a
+compound agreement request cannot be answered separately, so it cannot be refused
+separately either.
+
+**STILL OPEN, named rather than buried.** Whether `AgentWorkflowRun.run_id` and
+the envelope's `DetachedWorkId` are the same value spelled twice; and whether a
+workflow agent's creation should NAME its run rather than relying on which stream
+it arrived on.
+
+**STAGE 1's ARM BODIES ARE NOW COMPLETE.** Every arm of `AgentActivity.item` has
+a body, and `agent_activity.proto` compiles — 492 documented declarations across
+15 activity kinds plus the detached-work and workflow families. What stage 1 still
+owes is the `MessageId` repoint in four stage-2 and stage-3 files, which is those
+stages' work.
+
 ### RECURSION IS RETRACTED: subagent activity is FLAT, attributed by `agent_id`
 
 **What changed ("okay go for it").** `AgentActivity.subagent_activity` is

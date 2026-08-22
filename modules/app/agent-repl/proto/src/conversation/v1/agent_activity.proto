@@ -140,8 +140,6 @@ message AgentActivity {
     // prompt it was given, its progress, and the report and totals it settles
     // with.
     AgentSubagent subagent = 12;
-    // The agent running a workflow, which reports step by step.
-    AgentWorkflow workflow = 13;
     // A tool this contract does not model — an MCP server's tool, or one added
     // after this schema was written. Present so unmodelled work is still
     // visible rather than silently absent.
@@ -258,6 +256,11 @@ message DetachableWork {
     AgentSubagent subagent = 1;
     // A shell command left running after the turn that started it ended.
     AgentBash bash = 2;
+    // A workflow run. UNLIKE THE OTHER TWO it appears ONLY here and has no
+    // in-turn activity arm at all, because the producer offers no synchronous
+    // form — a workflow is detached from birth and always reaches
+    // AgentDetachedWork through its `created` arm rather than `detached`.
+    AgentWorkflow workflow = 3;
   }
 }
 
@@ -1938,3 +1941,165 @@ message AgentUnmodeledFailure {
   // What it said when it failed, verbatim.
   ToolResultContent content = 2;
 }
+
+// ---- The workflow: a program that orchestrates subagents ----
+
+// A workflow run: a script that orchestrates subagents.
+//
+// ALWAYS DETACHED. The producer's launch answer reports only that a run started,
+// never that one finished, and there is no option asking for a blocking run — so
+// a workflow's frames arrive on the run's OWN stream and never on the stream of
+// the turn that launched it.
+//
+// THIS UNIT IS THE ONLY ONE THAT CONTAINS OTHER UNITS, and that is deliberate
+// rather than a leak: a workflow is the only kind of work that is a PROGRAM
+// rather than an action, so its progress simply IS the work of the agents its
+// script spawned. Those agents arrive inside the update arm below, each carrying
+// its own identity, at any depth and flat — a workflow agent that spawns an agent
+// of its own arrives the same way, so nothing anywhere maintains a lineage.
+message AgentWorkflow {
+  // Where the run stands. Expect one start, then any number of updates, then one
+  // terminal arm.
+  oneof result {
+    // This stream is now carrying this run.
+    AgentWorkflowStart start = 1;
+    // Work its agents have done since the last frame.
+    AgentWorkflowUpdate update = 2;
+    // The run finished.
+    AgentWorkflowSuccess success = 3;
+    // The run could not be launched, or ended without finishing.
+    AgentWorkflowFailure failure = 4;
+  }
+}
+
+// A run this stream has begun carrying.
+message AgentWorkflowStart {
+  // Which workflow, and which run of it.
+  AgentWorkflowRun run = 1;
+
+  // Where the script that ran is kept. ALWAYS SET: the producer persists a
+  // script for every invocation, whether it was supplied inline, named, or read
+  // from a path — so there is no "the script is unavailable" case and no need for
+  // a oneof over how it was supplied.
+  AgentWorkflowScript script = 2;
+
+  // The run this one resumed, when it resumed one. UNSET for a fresh run. When
+  // set, the run's unchanged steps returned CACHED results instead of
+  // re-running, so a reader knows it may have cost far less than the number of
+  // agents it reports would suggest.
+  optional AgentWorkflowRun resumed_from = 3;
+
+  // Where the run executes.
+  oneof placement {
+    // In this process, alongside the agent that launched it.
+    AgentWorkflowPlacementLocal local = 4;
+    // In a remote environment, reachable at the session below.
+    AgentWorkflowPlacementRemote remote = 5;
+  }
+
+  // A non-blocking notice about the run's conditions — for example that local
+  // state diverges from what a remote run will clone. UNSET is the ordinary
+  // case. A consumer draws it as a notice, NEVER as a failure: the run
+  // proceeded.
+  optional AgentWorkflowNotice notice = 6;
+
+  // When the run was launched.
+  AgentActivityStartedAt started_at = 7;
+}
+
+// Which workflow, and which run of it.
+message AgentWorkflowRun {
+  // The workflow's own declared name, as its script states it.
+  string name = 1;
+  // The identity of THIS run: the handle its stream is opened under, and the
+  // value a later invocation names to resume it. Opaque — compare for equality,
+  // never parse or construct one.
+  string run_id = 2;
+}
+
+// Where a run's script is kept.
+message AgentWorkflowScript {
+  // The path the producer persisted it at. A reader opens this to see what
+  // actually ran; an author edits it and re-runs from the same path. The script
+  // itself is deliberately NOT carried on the wire — a whole program costs far
+  // more than anything drawn from it is worth.
+  string path = 1;
+}
+
+// The run executes in this process.
+message AgentWorkflowPlacementLocal {}
+
+// The run executes remotely.
+message AgentWorkflowPlacementRemote {
+  // Where the remote session can be opened. Carried because a reader who cannot
+  // follow the run here needs somewhere to go.
+  string session_url = 1;
+}
+
+// A non-blocking notice about a run's conditions.
+message AgentWorkflowNotice {
+  // The notice, verbatim.
+  string text = 1;
+}
+
+// Work this run's agents have done since the last frame.
+//
+// A CARRIER AND NOTHING ELSE. It holds no state about the run itself, so a
+// consumer upserts each activity below by that activity's OWN identity and
+// changes nothing about the run on account of this frame.
+message AgentWorkflowUpdate {
+  // The activity, in the order the producer observed it. Each entry carries the
+  // identity of the agent that did it, so a consumer places it without this
+  // frame saying anything about ancestry.
+  //
+  // AN AGENT'S FIRST APPEARANCE HERE IS ITS ANNOUNCEMENT — the producer records a
+  // step starting, and that record is what tells a consumer the agent exists and
+  // that a container should be drawn for it.
+  repeated AgentActivity agent_activities = 1;
+}
+
+// The run finished.
+message AgentWorkflowSuccess {
+  // Which run, repeated so a settled frame describes itself.
+  AgentWorkflowRun run = 1;
+  // What the run reported at the end, when it reported anything. UNSET when it
+  // finished without a summary, which is not a failure.
+  optional AgentWorkflowSummary summary = 2;
+}
+
+// A run's closing account of itself.
+message AgentWorkflowSummary {
+  // The summary, verbatim.
+  string text = 1;
+}
+
+// The run could not be launched, or ended without finishing.
+message AgentWorkflowFailure {
+  // Which run, when one was ever assigned. UNSET when the failure PRECEDED the
+  // run existing at all — a script rejected before launch has no run identity,
+  // which is why this is optional rather than required.
+  optional AgentWorkflowRun run = 1;
+
+  // Why it failed. Two arms because the first is structurally distinguishable
+  // rather than inferred: the producer reports a rejected script separately from
+  // anything that can happen once a run has begun.
+  oneof cause {
+    // The script did not compile and the run never started. The message is
+    // carried because the author's next action is to fix the script and this is
+    // the only account of what was wrong with it.
+    AgentWorkflowScriptRejected script_rejected = 2;
+    // The run started and ended without finishing. Arms are DERIVED from the
+    // producer's real sites at the implementation wave; empty until then.
+    AgentWorkflowRunEnded run_ended = 3;
+  }
+}
+
+// The script did not compile and the run never started.
+message AgentWorkflowScriptRejected {
+  // What the producer said was wrong with it, verbatim.
+  string error = 1;
+}
+
+// The run started and ended without finishing. Arms are DERIVED from the
+// producer's real sites at the implementation wave; empty until then.
+message AgentWorkflowRunEnded {}
