@@ -1,0 +1,121 @@
+// session.proto — THE SESSION'S OPENING: what a session is once it can accept
+// a prompt, what a cold context costs, and what can be done about it.
+//
+// Declared here rather than in the shim's endpoint because these facts cross
+// every surface: a cold context is something the USER decides about — a
+// warning that resuming is expensive, and a choice of remediation the daemon
+// then carries into its next open — so the shapes are conversation vocabulary,
+// not the wire between two processes.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/api.proto";
+import "conversation/v1/detached_work.proto";
+import "conversation/v1/turn.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// A session that can accept a prompt. Everything here is a FACT AT OPENING;
+// anything that changes later arrives as session updates, never here twice.
+message SessionOpened {
+  // The vendor's identity for this session — what a later resume names and
+  // what the store scopes by. May differ from the one asked for when the
+  // vendor rotated it; the vendor's answer wins.
+  string vendor_session_id = 1;
+  // Who is driving: the shim's build and the SDK it embeds.
+  SessionRuntime runtime = 2;
+  // The model actually in effect, which may differ from the one requested.
+  AgentModel effective_model = 3;
+  // The models this session may switch to, each an echo token a model change
+  // accepts.
+  repeated ModelOption model_catalog = 4;
+
+  // WHAT IS ALREADY RUNNING — why an opening states it at all: a daemon that
+  // restarted was not there for the announcements, so it is told the
+  // membership once, here. A fresh session has nothing live.
+  //
+  // The turn in flight, if one is. UNSET when the main thread is idle.
+  optional TurnId turn_in_flight = 5;
+  // Every detached item live now, each exactly as its spawning stream would
+  // have announced it, so a consumer opens the matching stream for each.
+  repeated AgentDetachedWork live_work = 6;
+}
+
+// The shim and the SDK it drives. Fixed for the process; stated once.
+message SessionRuntime {
+  // The shim's build commit.
+  string shim_build_sha = 1;
+  // The vendor SDK package version the shim embeds.
+  string sdk_version = 2;
+}
+
+// A context whose prompt cache has lapsed: resuming it as-is would re-read
+// the whole context at full price on the first prompt. The facts a decision
+// needs, read from the transcript WITHOUT a model call.
+message SessionCold {
+  // Tokens the context held at the last request — what a cold read re-reads.
+  uint64 context_tokens = 1;
+  // When the last request was made, in unix millis.
+  int64 last_request_at_ms = 2;
+  // The cache lifetime that lapsed, in millis (the vendor's 5-minute or
+  // 1-hour tier, whichever the last request used).
+  int64 cache_ttl_ms = 3;
+  // The model the resume asked for, echoed so the choice is made against the
+  // price of THAT model's reads.
+  AgentModel requested_model = 4;
+}
+
+// What to do with a cold context. The set arm is the remediation; each costs
+// something different, and the choice is the user's or the daemon's policy,
+// never the shim's.
+message SessionColdRemediation {
+  oneof remediation {
+    // Resume as-is and accept the cold read.
+    SessionColdPay pay = 1;
+    // Discard the context; keep the session identity. The cheapest, and it
+    // forgets everything.
+    SessionColdClear clear = 2;
+    // Summarize the context into a fresh one. NOT CHEAP: the summary is a
+    // cold read plus output; its payoff is every turn after it.
+    SessionColdCompact compact = 3;
+  }
+}
+
+// Accept the cold read.
+message SessionColdPay {}
+
+// Discard the context.
+message SessionColdClear {}
+
+// Compact the context. IMPLEMENTED BY THE SHIM, not by the vendor's own
+// compaction: a throwaway session reads the transcript and writes the
+// summary, then the real session is initialized from the compacted
+// transcript. No consumer ever sees the throwaway.
+message SessionColdCompact {
+  // The model that writes the summary — chosen for this job, not the
+  // session's model; a cheaper model often suffices.
+  AgentModel model = 1;
+  // WHAT is summarized. The set arm is the scope; each is a different trade
+  // between fidelity and size.
+  oneof scope {
+    // The whole transcript: prompts, responses, tool calls and their results.
+    SessionCompactFull full = 2;
+    // The user's prompts alone.
+    SessionCompactPromptsOnly prompts_only = 3;
+    // The agent's responses alone.
+    SessionCompactResponsesOnly responses_only = 4;
+    // Prompts and responses, without tool traffic.
+    SessionCompactPromptsAndResponses prompts_and_responses = 5;
+  }
+}
+
+// The whole transcript.
+message SessionCompactFull {}
+// The user's prompts alone.
+message SessionCompactPromptsOnly {}
+// The agent's responses alone.
+message SessionCompactResponsesOnly {}
+// Prompts and responses, without tool traffic.
+message SessionCompactPromptsAndResponses {}
