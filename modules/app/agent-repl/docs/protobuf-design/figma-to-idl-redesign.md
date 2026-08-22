@@ -114,6 +114,15 @@ that transport.
 
 ## Landed changes
 
+### `question.proto` — the `AgentQuestion` family leaves `agent_activity.proto`
+
+**What changed ("shouldn't it be extracted to question.proto?").** The seventeen
+`AgentQuestion*` messages move VERBATIM to `question.proto`, imported by
+`agent.proto`. No shape change. Same rule as `permission.proto`: a unit that
+rides `AgentUpdate` directly rather than the activity envelope is its own
+concern and its own file. `agent_activity.proto` now holds only what rides
+`AgentActivity.item`, plus the identities.
+
 ### `AgentUpdate` becomes the CONSUMER-OBLIGATION oneof: question and permission leave activity; the PERMISSION GATE lands (`permission.proto`)
 
 **What changed ("looks good").** `AgentUpdate` = { activity | detached_work |

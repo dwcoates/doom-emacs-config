@@ -12,6 +12,7 @@ import "conversation/v1/agent_activity.proto";
 import "conversation/v1/api.proto";
 import "conversation/v1/detached_work.proto";
 import "conversation/v1/permission.proto";
+import "conversation/v1/question.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
