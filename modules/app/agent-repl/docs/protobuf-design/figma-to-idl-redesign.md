@@ -114,6 +114,57 @@ that transport.
 
 ## Landed changes
 
+### A workflow's agents are ANNOUNCED explicitly: the update arm becomes a oneof, and a subagent's description turns optional
+
+**What changed ("sounds good").** `AgentWorkflowUpdate` becomes `oneof update
+{ AgentSubagentStart agent_start | AgentActivity agent_activity }`.
+`AgentSubagentPrompt.description` becomes `optional`.
+
+**WHY THE ANNOUNCEMENT CANNOT BE AN `AgentActivity`.** That envelope states WHICH
+AGENT DID a unit of work. A workflow's agents are created BY THE SCRIPT, so
+there is no actor to name in `agent_id` and no unit of anyone's work to identify
+in `activity_id` — wrapping the announcement would require inventing both. The
+user's oneof is therefore not a convenience; it is the only honest shape.
+
+**THIS CLOSES THE ONE IMPLICIT LAYER.** Previously a workflow's top-level agents
+existed only by first appearance, while every layer beneath them had a real
+announcement (their own spawns are ordinary subagent calls). Now every agent in
+the tree is announced, and nothing is inferred from arrival order.
+
+**THE EXHAUSTIVE JOURNAL SURVEY that prompted it.** 132 journals, 1,013 records,
+exactly two shapes: `{type: started, key, agentId}` and `{type: result, key,
+agentId, result}`. NOTHING in a journal is non-agent-scoped — no phases, no
+run-level events, no completion, no errors — so the update arm covers the whole
+of it and no category of update is missing.
+
+**WHAT THE PER-AGENT META FILE ADDS, and it is why the announcement can be
+populated at all.** Every workflow agent has an `agent-<id>.meta.json` beside its
+transcript: `agentType` and `spawnDepth` always, plus `model`,
+`spawnedWithWorktree` and `worktreePath` on 158 of 524. Verified separately: the
+agent's PROMPT is the first user message of its own transcript. So the
+announcement can carry the instruction, the subagent type, the model and the
+isolation.
+
+**`description` HAS NO PRODUCER on this path, so it turns optional.** A script's
+`agent()` call may label a step, but that label reaches no artifact a reader can
+recover. Rather than synthesize one, the field states its absence and the comment
+tells a consumer to fall back to the subagent type or the instruction's opening.
+
+**TWO FACTS FROM THE SURVEY that are not yet addressed anywhere.**
+
+- 524 `started` records against 489 `result` records: 35 agents started and never
+  produced one. Nothing in a journal distinguishes "still running" from "died",
+  so a container for such an agent would stay open indefinitely.
+- NOTHING IN A JOURNAL EVER SAYS THE RUN FINISHED. The `success` and `failure`
+  arms have no producer there at all; their only possible source is the run
+  leaving the vendor's live-background set, which is the same membership signal
+  already settled for detached work. That dependency is real and was not
+  previously written down.
+
+**Sidecar consequence.** Ingesting the per-agent transcripts is not sufficient on
+its own — the meta file must be read alongside each one, since it is the only
+source for type, model and worktree.
+
 ### The workflow update carries ONE activity, not a batch; timeliness is a stated producer obligation
 
 **What changed ("let's do singular").** `AgentWorkflowUpdate.agent_activities`

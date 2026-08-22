@@ -1270,7 +1270,12 @@ message AgentSubagentStart {
 message AgentSubagentPrompt {
   // A few words naming the task, written by the caller for a reader. This is
   // the label a bubble or a footer row draws; it is NOT the instruction.
-  string description = 1;
+  //
+  // UNSET FOR AN AGENT A WORKFLOW SCRIPT SPAWNED. The producer records no
+  // description for those — the script may label a step, but that label reaches
+  // no artifact a reader can recover — so a consumer falls back to the subagent
+  // type, or to the instruction's opening, rather than drawing an empty label.
+  optional string description = 1;
 
   // The full instruction the subagent was given. Drawn only where there is room
   // for it — a bubble's body, not its head — since it is frequently long.
@@ -2067,13 +2072,23 @@ message AgentWorkflowNotice {
 // stated here instead. A run's progress is watched live, and work already
 // observed and withheld is a run that looks stalled.
 message AgentWorkflowUpdate {
-  // What was done. Carries the identity of the agent that did it, so a consumer
-  // places it without this frame saying anything about ancestry.
-  //
-  // AN AGENT'S FIRST APPEARANCE HERE IS ITS ANNOUNCEMENT — the producer records a
-  // step starting, and that record is what tells a consumer the agent exists and
-  // that a container should be drawn for it.
-  AgentActivity agent_activity = 1;
+  // Whether this frame announces an agent or reports work.
+  oneof update {
+    // AN AGENT OF THIS RUN CAME INTO EXISTENCE. A consumer draws a container for
+    // it, keyed by the identity inside, and every later frame naming that
+    // identity routes into it.
+    //
+    // CARRIED BARE RATHER THAN INSIDE AN AgentActivity, and the reason is
+    // structural: that envelope states WHICH AGENT DID a piece of work, and a
+    // workflow's agents are created BY THE SCRIPT rather than by any agent. There
+    // is no actor to name and no unit of anyone's work to identify, so wrapping
+    // it would require inventing both.
+    AgentSubagentStart agent_start = 1;
+    // Something an agent of this run did. Carries the identity of the agent that
+    // did it, so a consumer places it without this frame saying anything about
+    // ancestry.
+    AgentActivity agent_activity = 2;
+  }
 }
 
 // The run finished.
