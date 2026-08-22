@@ -1,0 +1,23 @@
+// endpoint_watch_workflow.proto — WatchWorkflow: follow a workflow run.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/detached_work.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Which run to follow.
+message WatchWorkflowRequest {
+  // WHICH item — the handle its announcement carried. Not a live run: refused.
+  conversation.v1.DetachedWorkId work = 1;
+}
+
+// One frame: the workflow unit itself. Opens with the run's `start`, then its
+// agents' announcements and their frames, then the terminal arm when the run
+// leaves the live-background set.
+message WatchWorkflowResponse {
+  conversation.v1.AgentWorkflow workflow = 1;
+}

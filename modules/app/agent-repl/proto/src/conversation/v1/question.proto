@@ -23,10 +23,7 @@ option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 // stream carrying this unit, and the answer returns as a SEPARATE unary call —
 // two directions, two calls, never one bidirectional exchange.
 message AgentQuestion {
-  // WHICH AGENT is asking — a subagent asks too, and the answer routes to it.
-  // Carried here because this unit rides AgentUpdate directly, outside the
-  // activity envelope that attributes read-only work.
-  AgentId agent_id = 4;
+  // Tag 4 is RETIRED: the asking agent is named by the carrying frame.
   // WHICH ASK, so the answer names it and later frames upsert it. Its OWN
   // identity space: a question joins to no unit of work, unlike a permission,
   // whose identity is the tool unit it gates.
