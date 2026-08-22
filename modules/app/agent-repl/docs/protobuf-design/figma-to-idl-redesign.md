@@ -161,6 +161,23 @@ turn on a subagent, so the queue has no drain there.
 
 ## Landed changes
 
+### 4c: `GetSessionDiagnostics` lands — the shim's health is PULLED ("you can land it yourself")
+
+**What changed.** `session.proto` gains `SessionDiagnostics { oneof health
+{ healthy | unhealthy { repeated SessionFault } }; repeated
+SessionDegradedWindow }`, with `SessionDegradedWindow { component; reason;
+began_at_ms; oneof extent { open | closed { ended_at_ms; dropped_count } } }`.
+`endpoint_get_session_diagnostics.proto`: empty request; success wraps the
+diagnostics; unhealthy is an ANSWER inside success, per the domain-outcome
+rule. `SessionFault` follows `DaemonFault`'s discipline: `{ component; detail }`
+now, a `kind` oneof added with its first derived arms at the wave.
+
+**Why a window with an extent oneof.** The old `DegradedState` carried
+`recovered` (bool) beside `dropped_count`, which is meaningless until
+recovery — the mode-selecting-bool defect. The closed arm owns the count.
+Windows are kept since the shim started, so a daemon asking after the fact
+still learns what was dropped.
+
 ### 4c: `SetModel` and `SetPermissionMode` land; a model switch is a COLD CACHE and shares OpenSession's remediation vocabulary
 
 **What changed (the user's spec for SetModel; SetPermissionMode "you can
