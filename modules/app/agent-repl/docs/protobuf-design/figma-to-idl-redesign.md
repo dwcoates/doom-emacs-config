@@ -187,8 +187,15 @@ Same messages as OpenSession on both sides, same shim handling.
 tolerance, user preference) stated per call, not a shim constant; the shim
 only measures.
 
-**Both successes are EMPTY**: the new state arrives on WatchSession as the one
-authoritative statement.
+**A PROCESS ERROR, recorded.** The orchestrator landed SetModel on reading the
+user's spec as agreement; the user had approved only SetPermissionMode. The
+landed text was shown back point by point and approved after two amendments:
+`SetModelSuccess` wraps `SessionModelChanged` (the conversation.v1 fact, per
+the extraction rule applied to every session rpc), and `SessionCold` gains
+`oneof reason { lapsed { cache_ttl_ms } | model_switch }` — the TTL was
+meaningless for a model switch, an adjacent-exclusivity defect caught on
+reading the landed text back. ROOT CAUSE: a spec stated in prose was taken as
+the agreement the sketch still owed.
 
 ### 4c: `WatchSession` lands — `SessionUpdate` in `session.proto`; `BookkeepingEntry` is DEAD, arm by arm; shim diagnostics become a PULL
 
