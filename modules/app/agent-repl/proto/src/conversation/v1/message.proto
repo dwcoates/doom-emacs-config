@@ -64,3 +64,37 @@ message TurnDetachedWork {
 message TurnId {
     string id = 1;
 }
+
+
+  // Exactly one option may be picked.
+  message AgentQuestionSingleSelect {
+    // The options offered, in the order they were offered.
+    repeated AgentQuestionMutexOption options = 1;
+    optional int32 selected_option_idx = 2;
+  }
+
+  // Any number of options may be picked. Its own message rather than a shared one,
+  // so a later cap ("pick at most three") lands here and not on the single-select.
+  message AgentQuestionMultiSelect {
+    // The options offered, in the order they were offered.
+    repeated AgentQuestionOption options = 1;
+  }
+
+message AgentQuestionOption {
+    optional 
+    AgentQuestionMutexOption choice = 1;
+}
+
+  message AgentQuestionOption {
+    // The choice as the user sees it — a few words. Also the value an answer names
+    // when reporting this option was picked.
+    string label = 1;
+
+    // What picking it means, or what follows from it. Drawn beneath the label.
+    string description = 2;
+
+    // Content shown when the option has focus — a mockup, a code sketch, a
+    // diagram — for comparing options side by side. UNSET for an option with
+    // nothing to preview, which is the common case.
+    optional string preview = 3;
+  }
