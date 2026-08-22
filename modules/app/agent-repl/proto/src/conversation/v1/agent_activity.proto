@@ -61,12 +61,21 @@ message AgentActivity {
   // WHICH AGENT did this work: the main-thread agent, or a subagent at any
   // depth.
   //
-  // PRESENT AT EVERY LEVEL — the turn's top level, an awaited subagent's nested
-  // activity, and a detached item's own stream alike — so ONE shape serves all
-  // three and no consumer infers attribution from which stream a frame arrived
-  // on. It is NOT derivable from the enclosing unit: a spawn's identity names
-  // the CALL that created an agent, which is a different thing from the agent,
-  // and depth beyond one cannot be resolved from call identities at all.
+  // FRAMES ARE FLAT AND THIS IS THE WHOLE OF THEIR ATTRIBUTION. A subagent's
+  // work is NOT nested inside its spawn — it arrives as ordinary activity
+  // carrying its own agent identity, at any depth, whether the spawn was awaited
+  // or detached. So a consumer routes a frame by this value alone, into whatever
+  // it drew when it saw that agent's creation, and NOTHING on the wire carries
+  // ancestry.
+  //
+  // WHY NOT NESTED: nesting would oblige the PRODUCER to maintain a live lineage
+  // trace — a subagent of a subagent of a subagent — which is state a vendor
+  // adapter has no business holding. Placement instead comes from the REQUEST
+  // when history is read (a page names the parent whose items it wants) and from
+  // the consumer's own drawn structure when frames arrive live.
+  //
+  // It is NOT derivable from the spawn's identity either: a spawn names the CALL
+  // that created an agent, which is a different thing from the agent.
   AgentId agent_id = 17;
 
   // WHAT THIS UNIT'S API RESPONSE COST, when this is the unit carrying it.
@@ -93,10 +102,8 @@ message AgentActivity {
   // reasoning and its prose are separate units, each holding its identity
   // across every fragment that composes it.
   //
-  // IT NAMES WORK, NEVER AN AGENT. On the `subagent_activity` arm below this is
-  // the SPAWN — the containment path — and the unit the frame actually upserts
-  // is the INNERMOST activity_id. A consumer keys its store on the innermost
-  // and reads the outer ones as ancestry.
+  // IT NAMES WORK, NEVER AN AGENT. Every frame is one level deep, so the unit a
+  // frame upserts is never ambiguous: it is this identity, always.
   AgentActivityId activity_id = 1;
 
   // WHAT KIND of work it is. Each kind carries its own state and its own
@@ -133,20 +140,6 @@ message AgentActivity {
     // prompt it was given, its progress, and the report and totals it settles
     // with.
     AgentSubagent subagent = 12;
-    // WORK DONE BY a subagent this agent spawned, carried whole rather than
-    // referenced.
-    //
-    // THE RECURSION IS THE POINT: a subagent does everything an agent does,
-    // including spawning subagents, so its work is the SAME shape at unbounded
-    // depth and a consumer handles it with the same code it handles this level
-    // with. The nested frame carries its own `agent_id`, so each level states
-    // whose work it is without the reader walking back up.
-    //
-    // Expect this arm for an AWAITED subagent, whose work rides its caller's
-    // stream. A DETACHED subagent's work arrives on that work's own stream
-    // instead, as ordinary top-level activity — the same shape either way,
-    // which is why detachment changes no consumer's parsing.
-    AgentActivity subagent_activity = 18;
     // The agent running a workflow, which reports step by step.
     AgentWorkflow workflow = 13;
     // A tool this contract does not model — an MCP server's tool, or one added
@@ -1251,6 +1244,17 @@ message AgentSubagent {
 
 // A spawn this stream has begun carrying.
 message AgentSubagentStart {
+  // THE AGENT THIS SPAWN CREATED — the join key the whole flat model rests on.
+  //
+  // A consumer draws a container for this agent on seeing this frame and keys it
+  // by this identity; every later frame carrying the same identity routes into
+  // that container, and a request for this agent's items names it. Without it a
+  // subagent's work could not be placed at all, since frames carry no ancestry.
+  //
+  // DISTINCT FROM THIS UNIT'S OWN identity, which names the SPAWN — a unit of
+  // the calling agent's work — rather than the agent that resulted from it.
+  AgentId created_agent_id = 4;
+
   // What the subagent was asked to do, and how it was configured.
   AgentSubagentPrompt prompt = 1;
   // When the spawn was issued, so a consumer can draw how long it has run.
@@ -1934,3 +1938,171 @@ message AgentUnmodeledFailure {
   // What it said when it failed, verbatim.
   ToolResultContent content = 2;
 }
+
+// ---- The workflow: a script that orchestrates subagents ----
+
+// The agent running a workflow.
+//
+// A WORKFLOW IS A SCRIPT THAT SPAWNS SUBAGENTS. Its steps are not a vocabulary
+// of their own — each step IS a subagent, and its work arrives as ordinary flat
+// activity carrying that agent's own identity, exactly as any other subagent's
+// does. What THIS unit carries is the run: which workflow, which run of it, where
+// the script came from, and how it ended.
+//
+// A RUN'S CONSTITUENTS ARE THEREFORE NOT ENUMERATED HERE. A consumer learns them
+// the same way it learns any agent's work — by asking for the items belonging to
+// an agent it has seen created. Nothing on this unit lists them, and nothing
+// needs to.
+//
+// A WORKFLOW IS ALWAYS DETACHED. The producer offers no synchronous form at all,
+// so this unit's terminal frame arrives on the run's own stream rather than on
+// the stream of the turn that launched it.
+message AgentWorkflow {
+  // Where the run stands. No update arm: everything the run's own journal
+  // reports is the start or the result of one of its subagents, which those
+  // subagents' own units already state.
+  oneof result {
+    // This stream is now carrying this run. Sent ONCE per stream, at launch —
+    // and again on the run's own stream, since a run always detaches.
+    AgentWorkflowStart start = 1;
+    // The run finished.
+    AgentWorkflowSuccess success = 2;
+    // The run could not be launched, or ended without finishing.
+    AgentWorkflowFailure failure = 3;
+  }
+}
+
+// A run this stream has begun carrying.
+message AgentWorkflowStart {
+  // Which workflow, and which run of it.
+  AgentWorkflowRun run = 1;
+
+  // Where the script came from. The set arm matters to a reader because one arm
+  // means the run may have cost far less than its step count suggests.
+  oneof source {
+    // A script supplied inline at the call.
+    AgentWorkflowSourceInline inline = 2;
+    // A predefined workflow invoked by name.
+    AgentWorkflowSourceNamed named = 3;
+    // A script read from a path on disk — how an edited script is re-run.
+    AgentWorkflowSourcePath path = 4;
+    // A prior run resumed, reusing cached results for unchanged steps.
+    AgentWorkflowSourceResumed resumed = 5;
+  }
+
+  // Where the run executes. The set arm decides whether its work is observable
+  // at all.
+  oneof placement {
+    // In this process. Its subagents' activity is recorded like any other's.
+    AgentWorkflowPlacementLocal local = 6;
+    // In a remote environment. ITS WORK IS NOT OBSERVABLE here — expect a start
+    // and then nothing until it settles, if it settles.
+    AgentWorkflowPlacementRemote remote = 7;
+  }
+
+  // A non-blocking notice about the run's conditions, when the producer gave
+  // one. UNSET is the ordinary case. A consumer draws it as a notice, NEVER as a
+  // failure — the run proceeded.
+  optional AgentWorkflowWarning warning = 8;
+
+  // When the run was launched.
+  AgentActivityStartedAt started_at = 9;
+}
+
+// Which workflow, and which run of it.
+message AgentWorkflowRun {
+  // The workflow's declared name.
+  string name = 1;
+  // The identity of THIS run, which a later invocation names in order to resume
+  // it. Opaque: compare for equality, never parse or construct one.
+  string run_id = 2;
+}
+
+// A script supplied inline at the call.
+//
+// THE SCRIPT ITSELF IS NOT CARRIED. The producer persists it and it is reachable
+// by path on any re-run; putting a whole program on this wire would cost far more
+// than anything drawn from it is worth.
+message AgentWorkflowSourceInline {}
+
+// A predefined workflow invoked by name.
+message AgentWorkflowSourceNamed {
+  // The name as invoked, which may differ from the script's own declared name.
+  string invoked_name = 1;
+}
+
+// A script read from a path on disk.
+message AgentWorkflowSourcePath {
+  // The path, so a reader can find the script that ran.
+  string script_path = 1;
+}
+
+// A prior run resumed.
+message AgentWorkflowSourceResumed {
+  // The run being resumed. Its unchanged steps return cached results instead of
+  // re-running, so a reader knows this run may have cost far less than the
+  // number of steps it reports would suggest.
+  string resumed_run_id = 1;
+}
+
+// The run executes in this process.
+message AgentWorkflowPlacementLocal {}
+
+// The run executes remotely.
+message AgentWorkflowPlacementRemote {
+  // Where the remote session can be opened, since its work cannot be followed
+  // here.
+  string session_url = 1;
+}
+
+// A non-blocking notice about a run's conditions.
+message AgentWorkflowWarning {
+  // The notice, verbatim.
+  string text = 1;
+}
+
+// The run finished.
+message AgentWorkflowSuccess {
+  // Which run, repeated so a settled frame describes itself.
+  AgentWorkflowRun run = 1;
+  // What the run reported at the end, when it reported anything. UNSET when it
+  // finished without a summary, which is not a failure.
+  optional AgentWorkflowSummary summary = 2;
+}
+
+// A run's closing account of itself.
+message AgentWorkflowSummary {
+  // The summary, verbatim.
+  string text = 1;
+}
+
+// The run could not be launched, or ended without finishing.
+message AgentWorkflowFailure {
+  // Which run, when one was ever assigned. UNSET when the failure PRECEDED the
+  // run existing — a script rejected before launch has no run identity, which is
+  // why this is optional rather than required.
+  optional AgentWorkflowRun run = 1;
+
+  // Why it failed. Two arms because one of them is structurally distinguishable
+  // rather than inferred: the producer reports a rejected script separately from
+  // anything that happens after a run begins.
+  oneof cause {
+    // The script did not compile and the run never started. Carried because the
+    // author's next action is to fix the script, and this message is the only
+    // account of what was wrong with it.
+    AgentWorkflowScriptRejected script_rejected = 2;
+    // The run started and ended without finishing. Arms are DERIVED from the
+    // producer's real sites at the implementation wave; empty until then.
+    AgentWorkflowRunEnded run_ended = 3;
+  }
+}
+
+// The script did not compile and the run never started.
+message AgentWorkflowScriptRejected {
+  // What the producer said was wrong with it, verbatim.
+  string error = 1;
+}
+
+// The run started and ended without finishing. Arms are DERIVED from the
+// producer's real sites at the implementation wave; empty until then.
+message AgentWorkflowRunEnded {}
