@@ -195,6 +195,51 @@ closing is a normal act; the rule now binds the PRODUCER side only (a stream
 the producer ends without a terminal frame is the failure).
 
 ## Landed changes
+### The shim, store and sidecar hold NO VARIABLE-SIZE STATE — every observation costs a constant number of single indexed lookups
+
+**Stated 2026-08-22, in the user's terms.** "We shouldn't be managing state
+in shim/store/sidecar implicitly or explicitly … variable amounts of
+information (stacks, queues, trees, etc) rather than static information (e.g.
+doing a single parent id lookup is fine, that counts as static; having to do a
+variable number of such lookups, e.g. to determine lineage, is not static)."
+The daemon is NOT bound by this; it is the one component allowed to hold
+state.
+
+**What it settles for the store.** The store is the FLAT LOG of statically
+translated observations — one row per SDK message, JSONL record, sidecar file
+event, or shim-only observation (permission gate, detachment, interrupt,
+keep-alive mark) — and every row carries its join keys AT WRITE TIME: unit
+id, agent id, logical session, plane, keep-alive mark, and the ROOT id below.
+The shim folds a page of rows into `AgentFrame`s with a constant number of
+lookups per row, in the same subroutine that folds the live stream. The
+WatchSession entry's sentence "the store persists whatever streams carry" is
+SUPERSEDED: frames are derived, rows are persisted.
+
+**Audit of the settled design against the principle.** Static already: tool
+return → call, skill document → call, created agent → spawn, re-announced
+start instant (Owed A), `AgentSuccess.answer` (last response of the turn),
+keep-alive rollback point, a page of an agent's children (Owed H), one pending
+ask per agent.
+
+**Ruling 1 — lineage is a DENORMALIZED ROOT, the user's design.** `KillTurn`'s
+transitive set was recorded as "the one bounded exception"; it is a lineage
+walk and is withdrawn as an exception. Instead every row is stamped with its
+top-level ancestor at insert: one lookup of the parent's stored root, then
+stamp — an inductive invariant, constant per insert, so "everything spawned
+under X" is one indexed query. VERIFIED at the type surface (KillTurn entry):
+the vendor names a task's owning AGENT but never its owning TURN, so the stamp
+is required, not optional.
+
+**Rulings still owed.** (2) Detachment from the vendor's
+`background_tasks_changed` LEVEL is a diff against the previous level, a
+retained set; the static alternatives are storing each level as rows and
+checking membership per id of the received message, or taking "entered" from
+the `task_started` EDGE (the no-edge-pairing rule binds the daemon, not the
+shim). (3) Cumulative prose on `update` frames is a per-open-block text
+accumulator — bounded in count, variable in size; either the principle admits
+one growing buffer per unit, or `update` carries DELTAS and the accumulator
+moves to the daemon.
+
 
 ### STAGE 4 CLOSE-OUT SWEEP: the five old `shim.v1` files are DELETED; `ModelMarker` moves to `api.proto` — STAGE 4 (shim.v1) COMPLETE
 
