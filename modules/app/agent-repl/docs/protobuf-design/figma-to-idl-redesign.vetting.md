@@ -352,3 +352,25 @@ and goes with it rather than being repointed. Remaining mentions elsewhere are
 comment text only.
 
 **Status.** OPEN.
+
+### G. Keep-alive turns are FIRST-CLASS in the store as never-served, and context is rolled back before the next real prompt (owed to stage 5 and the implementation wave)
+
+**What is required.** The shim's cache keep-alive is invisible to the daemon's
+API — no request arm, no rpc, no `PromptOrigin` value. Three things must
+therefore hold without the daemon's help: (1) the store indexes keep-alive
+turns so that no page ever returns them and no activity from them is routed to
+the daemon; (2) before a real prompt is submitted, the shim ROLLS BACK the
+vendor's context to just after the last real prompt, so real turns never build
+on keep-alive context; (3) the keep-alive prompt text is the shim's own.
+
+**Why, and who depends on it.** The daemon believes the main thread is idle
+between real turns. A keep-alive that leaked into a page, a feed, or an
+accounting sum would be a prompt nobody submitted; a keep-alive left in
+context would change the model's answers to real prompts.
+
+**What exists today.** `SessionRewound` and `KeepAliveDiscard.dropped_turn_ids`
+already claim the rollback and the exclusion. Whether the rewind is RELIABLE
+against the vendor's actual transcript is unverified — that is the vetting
+half of this item; the store index is the stage-5 half.
+
+**Status.** OPEN.

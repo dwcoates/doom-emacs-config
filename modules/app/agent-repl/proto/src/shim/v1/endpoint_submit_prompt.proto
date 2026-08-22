@@ -1,0 +1,49 @@
+// endpoint_submit_prompt.proto — SubmitPrompt: one prompt in, one turn out.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/turn.proto";
+import "conversation/v1/user.proto";
+import "shim/v1/prompt_origin.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// The prompt the daemon is handing over NOW. Nothing here is a queue entry:
+// by the time this is sent the daemon has already decided no turn is in
+// flight, and the shim submits it to the agent binary immediately.
+message SubmitPromptRequest {
+  // The turn's identity, MINTED BY THE DAEMON and adopted by the shim: every
+  // durable record the turn produces is stamped with it, and UpdatePrompt
+  // addresses the open turn by it. The shim never mints one of its own.
+  conversation.v1.TurnId turn = 1;
+  // The prompt, in the one canonical form that travels client → daemon →
+  // tray → here → record.
+  conversation.v1.UserSaid said = 2;
+  // WHO CAUSED this prompt — a human send site, a daemon-driven merge step.
+  // Closed attribution copied onto the turn's durable record so a stored turn
+  // can be traced to the exact situation that caused it.
+  PromptOrigin origin = 3;
+}
+
+// One frame of the turn. THE ARM IS WHAT THE STREAM IS SAYING: growth, or one
+// of the two ways the main agent's stream ends. The three arms are the
+// conversation's own agent-stream vocabulary, shared with a detached
+// subagent's stream, so one handler serves both. A stream that ends WITHOUT a
+// terminal frame is a TRANSPORT FAILURE and is read as one — never as the
+// turn concluding.
+message SubmitPromptResponse {
+  oneof result {
+    // The turn is running: read-only activity, work that detached, or a
+    // question or permission the turn is now BLOCKED on until UpdatePrompt
+    // answers it.
+    conversation.v1.AgentUpdate update = 1;
+    // The turn ended on its own terms or at the user's command; the main
+    // thread can accept a prompt again.
+    conversation.v1.AgentSuccess success = 2;
+    // The turn could not run, or died under the shim.
+    conversation.v1.AgentFailure failure = 3;
+  }
+}

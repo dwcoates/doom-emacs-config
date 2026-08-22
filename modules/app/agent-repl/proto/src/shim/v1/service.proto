@@ -1,0 +1,26 @@
+// service.proto — shim.v1: every rpc signature, sectioned by suite. Each
+// rpc's request and response live in endpoint_<rpc>.proto; shared vocabulary
+// lives in its own file only when more than one endpoint needs it.
+//
+// NO PAINT ATTESTATION: a response never claims anything was rendered.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "shim/v1/endpoint_submit_prompt.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// The shim: the vendor adapter the daemon drives, one per session.
+service Shim {
+  // ---- Turn: submitting a prompt, the turn's own stream, speaking to it ----
+
+  // Open THE turn. The response stream IS the turn: it opens when the shim
+  // hands the prompt to the agent binary and concludes with a terminal frame
+  // when the main thread can accept a prompt again. AT MOST ONE is open per
+  // session, STRUCTURALLY: the daemon is the only queue and the only
+  // submitter, so a second call while one stream is open is a daemon fault
+  // and is refused, never queued.
+  rpc SubmitPrompt(SubmitPromptRequest) returns (stream SubmitPromptResponse);
+}

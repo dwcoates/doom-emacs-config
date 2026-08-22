@@ -114,6 +114,51 @@ that transport.
 
 ## Landed changes
 
+### 4c: `SubmitPrompt` lands — the first shim.v1 rpc; `prompt_origin.proto` split out; the keep-alive leaves the shim API entirely
+
+**What changed ("looks great").** `shim/v1/service.proto` with its TURN section
+and `rpc SubmitPrompt(SubmitPromptRequest) returns (stream SubmitPromptResponse)`.
+`endpoint_submit_prompt.proto`: request { TurnId; UserSaid; PromptOrigin };
+stream frame `oneof result { conversation.v1.AgentUpdate | AgentSuccess |
+AgentFailure }`. `PromptOrigin` moves VERBATIM from `core.proto` to
+`prompt_origin.proto` (an enum of send sites, no exclusive siblings, needed by
+SESSION's bookkeeping too), MINUS `PROMPT_ORIGIN_CACHE_KEEP_ALIVE` (tag 27
+retired).
+
+**ONE TURN, STRUCTURALLY.** The user: "There is only one turn in flight,
+conceptually, and thus there should only be one turn connection between
+daemon<->shim structurally." The rpc comment states it: a second call while a
+stream is open is a daemon fault, refused, never queued.
+
+**THE FRAME IS conversation.v1's OWN VOCABULARY.** Nothing shim-specific rides
+the turn: the three arms are `agent.proto`'s, shared with a detached
+subagent's stream, so one consumer handler serves both.
+
+**THE KEEP-ALIVE IS NOT A PROMPT THE DAEMON SUBMITS — reaffirming 4b, after a
+reopen the user considered and declined.** He first proposed a `keep_alive`
+request arm (and then a separate rpc) so the daemon never treats it as a
+prompt with dynamic text. The orchestrator pointed out that 4b had already
+settled keep-alives as ENTIRELY INSIDE THE SHIM — the daemon never submits
+one, so nothing keep-alive-shaped is on the wire at all, which satisfies the
+goal more strongly. The user: "entirely in the shim is fine too. it's really
+its responsibility to know what the vendor requires." So the enum value goes,
+and no rpc is added.
+
+**REQUIREMENTS STATED WITH IT, recorded as owed (vetting register, Owed G).**
+(1) Keep-alive turns must be FIRST-CLASS IN THE STORE as never-served: indexed
+so no page returns them and no activity is routed to the daemon. (2) A real
+prompt must ROLL BACK context to just after the last real prompt, so the next
+turn does not build on keep-alive context; `SessionRewound` +
+`KeepAliveDiscard` already claim this, and its reliability is a vetting item.
+(3) The shim determines the keep-alive prompt text under the hood.
+
+**Superseded by this landing.** `core.proto`'s `SubmitPrompt` message
+(`request_id`, `text`, `origin` string, `permission_mode`) — permission mode is
+SESSION state, request ids are Connect's, and text became `UserSaid`.
+`bookkeeping.proto`'s `TurnEnded.unexplained` has no successor: a stream
+ending without a terminal frame IS the transport failure. Both die when their
+files are walked.
+
 ### `session_command.proto` → `slash_command.proto`; `context_cut.proto` folds into it; `ContextCompacted.summary` retyped
 
 **What changed (the user's proposal, "adapt it so it fits").** File renamed.
