@@ -1,0 +1,20 @@
+// endpoint_watch_session.proto — WatchSession: the standing stream of
+// session-level facts as they manifest upstream.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/session.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Nothing to say: the session is the connection's.
+message WatchSessionRequest {}
+
+// One frame: the session update, whole. STANDING — no terminal arm; the
+// stream ends only with the session, and a stream ending otherwise is a
+// transport failure.
+message WatchSessionResponse {
+  conversation.v1.SessionUpdate update = 1;
+}
