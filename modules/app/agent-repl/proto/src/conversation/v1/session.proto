@@ -13,6 +13,7 @@ package conversation.v1;
 
 import "conversation/v1/api.proto";
 import "conversation/v1/detached_work.proto";
+import "conversation/v1/permission.proto";
 import "conversation/v1/turn.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
@@ -51,9 +52,11 @@ message SessionRuntime {
   string sdk_version = 2;
 }
 
-// A context whose prompt cache has lapsed: resuming it as-is would re-read
-// the whole context at full price on the first prompt. The facts a decision
-// needs, read from the transcript WITHOUT a model call.
+// A context whose prompt cache would not serve the next request: the cache
+// LAPSED (a resume after the TTL), or the MODEL IS CHANGING (a cache is per
+// model, so a switch re-reads everything whatever the TTL). Either way the
+// next request would re-read the whole context at full price. The facts a
+// decision needs, read from the transcript WITHOUT a model call.
 message SessionCold {
   // Tokens the context held at the last request — what a cold read re-reads.
   uint64 context_tokens = 1;
@@ -62,8 +65,8 @@ message SessionCold {
   // The cache lifetime that lapsed, in millis (the vendor's 5-minute or
   // 1-hour tier, whichever the last request used).
   int64 cache_ttl_ms = 3;
-  // The model the resume asked for, echoed so the choice is made against the
-  // price of THAT model's reads.
+  // The model the request asked for, echoed so the choice is made against
+  // the price of THAT model's reads.
   AgentModel requested_model = 4;
 }
 
@@ -145,6 +148,10 @@ message SessionUpdate {
     SessionMcpServer mcp_server = 5;
     // The account's usage allowance was observed.
     SessionAccountUsage account_usage = 6;
+    // The session's permission mode changed — by SetPermissionMode, or by a
+    // standing permission grant that set it. Stated here even when the
+    // consumer asked for it, so one place is authoritative.
+    SessionPermissionModeChanged permission_mode_changed = 7;
   }
 }
 
@@ -177,6 +184,12 @@ message SessionQueryUnexpectedEof {}
 message SessionQueryIteratorFailure {
   // The thrown cause, verbatim.
   string cause = 1;
+}
+
+// The permission mode now in effect for the session.
+message SessionPermissionModeChanged {
+  // The mode now in effect.
+  AgentPermissionMode permission_mode = 1;
 }
 
 // The model in effect for subsequent responses.
