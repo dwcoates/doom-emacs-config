@@ -15,7 +15,7 @@ option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 // prompt.
 //
 // A SESSION COMMAND IS NOT ONE OF THESE. The daemon recognizes `/clear`,
-// `/compact`, `/model` … (session_command.proto) before forwarding a prompt,
+// `/compact`, `/model` … (slash_command.proto) before forwarding a prompt,
 // and a recognized command earns no user message; a custom command or skill
 // EXPANDS into a prompt, and the text the user typed really is the turn's
 // opening and really is one of these.
