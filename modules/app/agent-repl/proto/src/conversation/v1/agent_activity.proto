@@ -88,9 +88,8 @@ message AgentActivity {
     // Prose the agent addressed to the user. A turn holds several: the
     // commentary between tool calls and the answer at the end are both this.
     AgentResponse response = 3;
-    // The agent asking the user to choose between options, and waiting for the
-    // answer before it can continue.
-    AgentQuestion question = 4;
+    // Tag 4 is RETIRED: the question lives on AgentUpdate, not here, because it
+    // is not read-only work — it blocks the agent on an answer.
     // The agent invoking a skill, which arrives over several frames — the
     // invocation first, then what the skill contributed.
     AgentSkillUse skill_use = 5;
@@ -1338,6 +1337,13 @@ message AgentSubagentFailure {}
 // stream carrying this unit, and the answer returns as a SEPARATE unary call —
 // two directions, two calls, never one bidirectional exchange.
 message AgentQuestion {
+  // WHICH AGENT is asking — a subagent asks too, and the answer routes to it.
+  // Carried here because this unit rides AgentUpdate directly, outside the
+  // activity envelope that attributes read-only work.
+  AgentId agent_id = 4;
+  // WHICH ASK, so the answer names it and later frames upsert it. Sourced from
+  // the asking call's identity, like any tool unit's.
+  AgentActivityId id = 5;
   // Where the ask stands. No update arm: an ask is posed once and answered
   // once, and a half-answered question is still just an open question.
   oneof result {

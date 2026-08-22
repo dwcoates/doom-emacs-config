@@ -114,6 +114,68 @@ that transport.
 
 ## Landed changes
 
+### `AgentUpdate` becomes the CONSUMER-OBLIGATION oneof: question and permission leave activity; the PERMISSION GATE lands (`permission.proto`)
+
+**What changed ("looks good").** `AgentUpdate` = { activity | detached_work |
+question | permission }. `AgentQuestion` leaves `AgentActivity.item` (tag 4
+retired) and gains `agent_id` + `id`. NEW `permission.proto`: `AgentPermission
+{ agent_id; id; start | success | failure }` — start carries the vendor's
+rendered prompt (title / display name / description), an optional trigger
+(blocked path | ask rule | note), the offered STANDING as a typed echo token,
+and the start instant; success is { allowed { once | standing } | denied
+{ by_user | by_policy } | abandoned }. The standing's change vocabulary
+(add/replace/remove rules, set mode, add/remove directories, destination,
+behavior) is typed whole from the vendor's `PermissionUpdate` union.
+
+**THE USER'S PRINCIPLE, which reorganizes the top level.** The routing oneof's
+arm is the consumer's OBLIGATION: activity is READ-ONLY ("this is what
+happened"); detached work means OPEN a stream; a question and a permission mean
+the agent is BLOCKED and the user must WRITE BACK on the update channel — a
+choice, or consent. "So they are all semantically unique wrt what the
+subsequent push interaction should/can look like from the daemon to the shim."
+Hiding the two blocking kinds inside activity made the read-only arm lie.
+
+**ARE PERMISSION AND QUESTION THE SAME THING? At the SDK, yes; in meaning, no.**
+VERIFIED at the type surface (`sdk.d.ts:206-266`, `PermissionResult` at 2114,
+`SDKPermissionDeniedMessage` at 4166) and in the shim's `canUseTool`
+(`session.ts`): ONE gate exists, every tool passes through it, and
+`AskUserQuestion` is a tool whose answer is an `allow` carrying `updatedInput`.
+So the mechanism is shared; the MEANING is not — for a question the gate is the
+answer's transport and "allow" means nothing as consent; for every other tool
+the gate IS consent. Two kinds, one producer path. The user ruled them
+different messages.
+
+**Identity is carried by each blocking kind, NOT hoisted.** Outside the
+activity envelope the two units need `agent_id` (a subagent asks too, and the
+answer routes to it) and an ask identity. The user: option (a) "is needed not
+just preferable", because `AgentActivity` keeps its own `agent_id` (the
+workflow's update carries activity directly) and `detached_work` is keyed by a
+different identity, so nothing can sit above the oneof once.
+
+**The gate is NOT the tool's outcome.** An allowed tool then runs as an
+ordinary activity unit under the SAME identity (the `tool_use_id`-sourced one);
+a denied tool never starts and has no activity frames. So the eleven tool
+families are untouched, and consent joins to work by identity.
+
+**Facts from the SDK carried into the shape.** The vendor RENDERS the prompt
+sentence (`title`, `displayName`, `description`), so no consumer composes one
+from tool+arguments. `suggestions` is a classic echo token — the vendor mints
+what "always allow" means and a standing grant returns it verbatim. A policy
+denial (`system/permission_denied`: classifier, `dontAsk`, deny rule) is a
+denial with NO open ask, hence `denied.policy` distinct from `denied.user`.
+`matchedAskRule` marks a rule-forced prompt hosts must not auto-approve.
+
+**Out of scope, named.** Allow-with-edits (`updatedInput` on an ordinary tool):
+write/edit already expose `user_modified`, and the answer verb is stage 4's.
+The permission MODE as SESSION state (setPermissionMode) is the SESSION
+section's; it appears here only as a value inside an echoed standing.
+
+**Consequences.** `frontend.v1`'s `FeedPermission` and
+`agentrepl.v1.AnswerPermission` repoint to this unit at their turns (the
+answer's arms — once / standing / deny / question answers — now have a typed
+source). The shim must emit `AgentPermission.start` from `canUseTool` and
+`success` from its own resolve, and `denied.policy` from the system message.
+
 ### `conversation.v1` REORGANIZED by concern: `agent.proto` (the stream's three arms, with `AgentSuccess`/`AgentFailure` NEW), `detached_work.proto`, `workflow.proto`; `ApiRequestFailed` finds its home
 
 **What changed ("let's land").** Four files now carry the protocol model.
