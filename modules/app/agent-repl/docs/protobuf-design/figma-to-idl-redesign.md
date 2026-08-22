@@ -114,6 +114,69 @@ that transport.
 
 ## Landed changes
 
+### `conversation.v1` REORGANIZED by concern: `agent.proto` (the stream's three arms, with `AgentSuccess`/`AgentFailure` NEW), `detached_work.proto`, `workflow.proto`; `ApiRequestFailed` finds its home
+
+**What changed ("let's land").** Four files now carry the protocol model.
+`agent.proto` holds `AgentUpdate` (moved verbatim) plus NEW `AgentSuccess
+{ completed { optional answer } | interrupted }` and `AgentFailure
+{ api_request_failed }`. `detached_work.proto` holds the eight `Detached*`
+messages verbatim; `workflow.proto` holds the twelve `AgentWorkflow*`
+messages verbatim, imported by `detached_work.proto` for `DetachableWork`'s
+third arm. `agent_activity.proto` keeps `AgentActivity`, the identities, and
+every other unit family; its stale header (which still described the
+recursive arm and said the terminal frames live in shim.v1) is corrected.
+`api.proto` is unchanged — the user judged it fine.
+
+**WHY THE TERMINAL ARMS MOVE INTO conversation.v1, which REOPENS amendment
+(5) of the turn-update-model entry.** That entry put success and failure on
+the rpc's response in shim.v1. The user's observation: `agent_activity.proto`'s
+top-level message was `AgentUpdate`, which makes a reader EXPECT `AgentSuccess`
+and `AgentFailure` beside it — and `ApiRequestFailed` had nowhere else to go.
+The resolution keeps both decisions true: the three arm MESSAGES live here, as
+the frame vocabulary of ANY agent's bounded stream (the main agent's turn and a
+detached subagent's stream alike — the agnosticism settled at the rename), and
+the `oneof result` that selects among them is each rpc's stream frame in
+shim.v1. So shim.v1's `SubmitPrompt` and the detached-work stream will both
+wrap these, and a consumer handles a turn and a subagent stream with one switch.
+
+**`ApiRequestFailed` IS AN AGENT-LEVEL FAILURE, not a response unit's.** The
+orchestrator had proposed folding it into `AgentResponseFailureReason`; the user
+placed it on `AgentFailure` — the vendor refusing a request ends the AGENT's
+stream, it is not a property of one prose block. `feed.proto`'s earlier fold of
+the API failure into `FeedAgent.error` is re-judged at its repoint.
+
+**Two shapes from the withdrawn SubmitPrompt sketch that survive here.**
+`AgentCompleted.answer` names the answering response (finality stated by the
+producer that knows it, never derived from position; optional because a
+refusal or ceiling may leave no prose). `AgentInterrupted` is the acknowledged
+user stop, an accusation needing evidence, as `TurnInterrupted` already was.
+`TurnEnded.unexplained` has no successor: under the bounded-stream convention a
+stream ending without a terminal frame IS the transport failure, recorded by
+the daemon on its own side.
+
+**WITHDRAWN, and why.** The sketch's `permission_ask` stream frame. The user
+could not see what it did or why it sat beside `AgentActivity`; the answer is
+that awaiting permission is a STATE OF THE TOOL UNIT, so it belongs in the
+unit lifecycle here, not as a shim.v1 sibling. That gap (the vendor's
+`canUseTool` gate is not a transcript block, so no arm announces it) is still
+OPEN and is the next conversation.v1 increment before stage 4 resumes.
+
+**Corrected, on observed evidence.** The token-usage entry claimed "there is NO
+thinking-token field inside `usage` at all" — read off the type surface. Real
+transcripts carry `usage.output_tokens_details.thinking_tokens` (324 non-zero
+of ~73k usage objects), so `TokenUsage.output_thinking_tokens` HAS a billed
+producer and stands. Owed item D shrinks to the live ESTIMATE channel
+(`system/thinking_tokens`) if anything ever draws it. Also observed and NOT
+modelled, by the user's ruling that `api.proto` is fine: `cache_creation`'s
+5m/1h split, `cache_missed_input_tokens` + `cache_miss_reason`,
+`iterations[]`, `server_tool_use`, `service_tier`, `inference_geo`, `speed`.
+Recorded so the survey is not re-purchased.
+
+**Import graph now**: `agent` → `agent_activity`, `api`, `detached_work`;
+`detached_work` → `agent_activity`, `workflow`; `workflow` → `agent_activity`;
+`agent_activity` → `api`, `content_blocks`. No cycles. Walk order top-down:
+`agent` → `detached_work` → `workflow` → `agent_activity` → leaves.
+
 ### The OLD record model is DELETED from `conversation.v1`: `agent.proto`, `tool_call.proto`, `detached_work.proto`, `message.proto` are gone
 
 **What changed ("let's delete").** Four files deleted. `ToolResultContent` and

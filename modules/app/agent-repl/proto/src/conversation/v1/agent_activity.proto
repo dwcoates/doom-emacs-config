@@ -1,5 +1,5 @@
-// agent_activity.proto — WHAT AN AGENT DOES, and the recursion that makes one
-// shape serve every agent.
+// agent_activity.proto — WHAT AN AGENT DOES: one vocabulary of units for every
+// agent.
 //
 // The update model of the conversation PROTOCOL: units identified per THING and
 // upserted, never per arrival — a unit holds one identity from its first
@@ -10,12 +10,12 @@
 // THIS VOCABULARY IS NOT A TURN'S. It is what an AGENT does, and a turn is
 // merely the window in which the main-thread agent does it. A subagent does the
 // identical set of things — reasoning, prose, tool calls, and subagents of its
-// own — so its work is the SAME shape at unbounded depth, carried on the
-// recursive arm of AgentActivity. That is why nothing here is named for a turn.
+// own — and its work arrives FLAT, as ordinary units carrying its own agent
+// identity. That is why nothing here is named for a turn.
 //
-// A turn's TERMINAL frames are not here either: a turn concludes on the stream
-// that carries it, so its success and failure arms belong to that rpc's
-// response in shim.v1.
+// What an agent's STREAM says — growth, success, failure — is agent.proto; what
+// leaves a stream is detached_work.proto; the workflow, the one unit that
+// contains other units, is workflow.proto.
 
 syntax = "proto3";
 
@@ -26,35 +26,6 @@ import "conversation/v1/content_blocks.proto";
 import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
-
-// ==========================================================================
-// WHAT A RUNNING TURN SAYS. The update model of the conversation PROTOCOL:
-// units identified per THING and upserted, never per arrival — a unit holds one
-// identity from its first fragment to its last, and growth is a re-send of that
-// unit. The faithful per-observation log is the datalayer's shape (store.v1),
-// and the shim maps between them.
-//
-// The turn's TERMINAL frames are not here: a turn concludes on the stream that
-// carries it, so its success and failure arms belong to that rpc's response in
-// shim.v1, alongside the `update` arm that wraps this model.
-// ==========================================================================
-
-// Something a running turn has to say. The arm states WHAT THE CONSUMER MUST DO
-// with it, which is the only distinction that matters at this level: pipe it
-// back on the turn's own stream, or go open a stream of its own for it.
-message AgentUpdate {
-  // Whether the work stays inside this turn or has left it. The two demand
-  // different handling rather than different rendering, which is why they are
-  // separated at this level.
-  oneof update {
-    // Work happening WITHIN the turn. Everything about it arrives on the turn's
-    // stream, and it cannot outlive the turn.
-    AgentActivity activity = 1;
-    // Work that now has a life of its own OUTSIDE the turn. Nothing further
-    // about it arrives here; the consumer opens the stream named by its handle.
-    AgentDetachedWork detached_work = 2;
-  }
-}
 
 // One unit of in-turn work, at whatever state it has reached.
 message AgentActivity {
@@ -164,107 +135,6 @@ message AgentActivityId {
   string value = 1;
 }
 
-// Work that has left the turn. It is announced HERE and nowhere else after
-// this: the consumer opens the stream named by `work`, and everything the work
-// produces from then on arrives there.
-message AgentDetachedWork {
-  // The handle the work is addressed by: the stream is opened under it, and a
-  // stop is aimed at it. On the envelope rather than in either arm below,
-  // because both arms have one and it is the same fact either way.
-  DetachedWorkId work = 1;
-
-  // HOW it came to be detached. The two are genuinely different situations for
-  // a consumer: one continues an element it is already drawing, the other has
-  // no element yet and must be told what the work IS.
-  oneof origin {
-    // It was already streaming progress in this turn and was then backgrounded.
-    DetachedWorkDetached detached = 2;
-    // It never had an in-turn progress update: either it was created detached
-    // outright, or the agent announced it with no originating call at all.
-    DetachedWorkCreated created = 3;
-  }
-}
-
-// Work that was drawn as in-turn progress and has now left the turn. One
-// identity spans the move, so the element already on screen continues rather
-// than being replaced by a second one describing the same work.
-message DetachedWorkDetached {
-  // The in-turn unit this work was, before it left.
-  //
-  // NO WORK PAYLOAD BESIDE IT, deliberately: the consumer already received this
-  // work's description as the progress unit named here, and restating it would
-  // be a second copy able to disagree with the first.
-  AgentActivityId detached_from_id = 1;
-
-  // HOW it came to be detached. Each arm is drawn differently and one carries a
-  // figure, so the set arm is the cause rather than a flag beside it.
-  //
-  // ALL THREE ARRIVE ON THIS ARM RATHER THAN ON `created`, INCLUDING work that
-  // asked for the background up front: such a call is streamed as a progress
-  // item before it backgrounds, so it always has an item it detached FROM — it
-  // simply never has a foreground running phase.
-  oneof cause {
-    // The agent asked for the background at the call site. The ordinary path.
-    DetachedCauseRequested requested = 2;
-    // A person backgrounded running work by hand. Worth distinguishing from the
-    // others: the agent did not choose it and may not expect it.
-    DetachedCauseByUser by_user = 3;
-    // The work outlived its own timeout and was backgrounded rather than
-    // killed.
-    DetachedCauseTimedOut timed_out = 4;
-  }
-}
-
-// The agent asked for the background when it made the call.
-message DetachedCauseRequested {}
-
-// A person backgrounded the running work by hand.
-message DetachedCauseByUser {}
-
-// The work exceeded its own timeout and was moved to the background instead of
-// being killed.
-message DetachedCauseTimedOut {
-  // The timeout that was exceeded, in milliseconds.
-  //
-  // THE CONFIGURED LIMIT, NOT THE WORK'S RUNTIME. The work is still running
-  // when this arrives, so its runtime is not yet a fact; drawing this figure as
-  // an elapsed time would state something untrue.
-  uint64 timeout_ms = 1;
-}
-
-// Work that is detached from the moment the consumer hears of it, so nothing
-// has described it yet.
-message DetachedWorkCreated {
-  // What was created, since there is no earlier frame that says.
-  DetachableWork work_created = 1;
-}
-
-// The kinds of work that can exist detached from a turn. Deliberately a SMALL
-// set, and deliberately its own type rather than a reuse of the in-turn kinds:
-// a kind absent here cannot claim to be detached, which is what makes
-// "reasoning ran in the background" unbuildable rather than merely wrong.
-message DetachableWork {
-  // Which kind of work left the turn. The set is deliberately small: only work
-  // that can outlive the agent that started it appears here.
-  //
-  // THESE NAME THE UNIT TYPES THEMSELVES. Each carries a `start` arm that
-  // describes the work, so a unit type can announce work a consumer has never
-  // seen — which is what a separate description type would otherwise have been
-  // for.
-  oneof work {
-    // A subagent, spawned to run independently of the turn that asked for it.
-    AgentSubagent subagent = 1;
-    // A shell command left running after the turn that started it ended.
-    AgentBash bash = 2;
-    // A workflow run. UNLIKE THE OTHER TWO it appears ONLY here and has no
-    // in-turn activity arm at all, because the producer offers no synchronous
-    // form — a workflow is detached from birth and always reaches
-    // AgentDetachedWork through its `created` arm rather than `detached`.
-    AgentWorkflow workflow = 3;
-  }
-}
-
-
 // The identity of one agent instance: the main-thread agent, or a subagent at
 // any depth.
 //
@@ -276,15 +146,6 @@ message DetachableWork {
 message AgentId {
   // The producer's identifier for the agent instance, carried verbatim. Compare
   // for equality; never parse or construct one.
-  string value = 1;
-}
-
-// The identity of one unit of detached work, and the handle a stop is aimed at.
-// Opaque; equality is the only question asked of it.
-message DetachedWorkId {
-  // The detached work's identifier: the key its own stream is opened under, and
-  // the handle a stop is addressed to. Opaque: compare for equality, never
-  // parse or construct one.
   string value = 1;
 }
 
@@ -1971,186 +1832,3 @@ message AgentUnmodeledFailure {
   // What it said when it failed, verbatim.
   ToolResultContent content = 2;
 }
-
-// ---- The workflow: a program that orchestrates subagents ----
-
-// A workflow run: a script that orchestrates subagents.
-//
-// ALWAYS DETACHED. The producer's launch answer reports only that a run started,
-// never that one finished, and there is no option asking for a blocking run — so
-// a workflow's frames arrive on the run's OWN stream and never on the stream of
-// the turn that launched it.
-//
-// THIS UNIT IS THE ONLY ONE THAT CONTAINS OTHER UNITS, and that is deliberate
-// rather than a leak: a workflow is the only kind of work that is a PROGRAM
-// rather than an action, so its progress simply IS the work of the agents its
-// script spawned. Those agents arrive inside the update arm below, each carrying
-// its own identity, at any depth and flat — a workflow agent that spawns an agent
-// of its own arrives the same way, so nothing anywhere maintains a lineage.
-message AgentWorkflow {
-  // Where the run stands. Expect one start, then any number of updates, then one
-  // terminal arm.
-  oneof result {
-    // This stream is now carrying this run.
-    AgentWorkflowStart start = 1;
-    // Work its agents have done since the last frame.
-    AgentWorkflowUpdate update = 2;
-    // The run finished.
-    AgentWorkflowSuccess success = 3;
-    // The run could not be launched, or ended without finishing.
-    AgentWorkflowFailure failure = 4;
-  }
-}
-
-// A run this stream has begun carrying.
-message AgentWorkflowStart {
-  // The workflow's own declared name, as its script states it.
-  string name = 1;
-
-  // Where the script that ran is kept. ALWAYS SET: the producer persists a
-  // script for every invocation, whether it was supplied inline, named, or read
-  // from a path — so there is no "the script is unavailable" case and no need for
-  // a oneof over how it was supplied.
-  AgentWorkflowScript script = 2;
-
-  // The run this one resumed, when it resumed one. UNSET for a fresh run. When
-  // set, the run's unchanged steps returned CACHED results instead of
-  // re-running, so a reader knows it may have cost far less than the number of
-  // agents it reports would suggest.
-  //
-  // A BARE HANDLE rather than a described run: resuming needs only the value the
-  // producer accepts, and it is the same kind of handle the placement arm below
-  // carries for this run.
-  optional string resumed_from = 3;
-
-  // Where the run executes. EACH ARM CARRIES ITS OWN RESUME HANDLE, because the
-  // producer uses a different one per placement and neither means anything for
-  // the other.
-  oneof placement {
-    // In this process, alongside the agent that launched it.
-    AgentWorkflowPlacementLocal local = 4;
-    // In a remote environment.
-    AgentWorkflowPlacementRemote remote = 5;
-  }
-
-  // A non-blocking notice about the run's conditions — for example that local
-  // state diverges from what a remote run will clone. UNSET is the ordinary
-  // case. A consumer draws it as a notice, NEVER as a failure: the run
-  // proceeded.
-  optional AgentWorkflowNotice notice = 6;
-
-  // When the run was launched.
-  AgentActivityStartedAt started_at = 7;
-}
-
-// Where a run's script is kept.
-message AgentWorkflowScript {
-  // The path the producer persisted it at. A reader opens this to see what
-  // actually ran; an author edits it and re-runs from the same path. The script
-  // itself is deliberately NOT carried on the wire — a whole program costs far
-  // more than anything drawn from it is worth.
-  string path = 1;
-}
-
-// The run executes in this process.
-message AgentWorkflowPlacementLocal {
-  // This run's identifier, and the value a later invocation names to resume it.
-  //
-  // NOT THE HANDLE ITS STREAM OPENS UNDER — that is the detached-work identity on
-  // the envelope, which addresses live work and dies with it. This one OUTLIVES
-  // the run: it is how a later invocation reuses this run's results, and it is
-  // also where the producer keeps the run's files. Opaque; compare for equality,
-  // never parse or construct one.
-  string run_id = 1;
-}
-
-// The run executes remotely.
-message AgentWorkflowPlacementRemote {
-  // Where the remote session can be opened.
-  //
-  // ALSO THE RESUME HANDLE for a remote run — the producer issues no run
-  // identifier in this case, which is why the two placements carry different
-  // fields rather than sharing one.
-  string session_url = 1;
-}
-
-// A non-blocking notice about a run's conditions.
-message AgentWorkflowNotice {
-  // The notice, verbatim.
-  string text = 1;
-}
-
-// One thing an agent of this run did.
-//
-// A CARRIER AND NOTHING ELSE. It holds no state about the run itself, so a
-// consumer upserts the activity below by that activity's OWN identity and
-// changes nothing about the run on account of this frame.
-//
-// ONE ACTIVITY PER FRAME, NEVER A BATCH. A frame carries exactly one unit here as
-// it does everywhere else in this contract, which keeps frame size bounded — a
-// cold read ingests an entire run's history at once, and a batched frame would
-// have no cap on what it carried.
-//
-// PRODUCER OBLIGATION: EMIT AS OBSERVED, DO NOT BUFFER. A producer that
-// accumulated activity and released it in bursts would satisfy this shape while
-// defeating its purpose — the singular field cannot enforce timeliness, so it is
-// stated here instead. A run's progress is watched live, and work already
-// observed and withheld is a run that looks stalled.
-message AgentWorkflowUpdate {
-  // Whether this frame announces an agent or reports work.
-  oneof update {
-    // AN AGENT OF THIS RUN CAME INTO EXISTENCE. A consumer draws a container for
-    // it, keyed by the identity inside, and every later frame naming that
-    // identity routes into it.
-    //
-    // CARRIED BARE RATHER THAN INSIDE AN AgentActivity, and the reason is
-    // structural: that envelope states WHICH AGENT DID a piece of work, and a
-    // workflow's agents are created BY THE SCRIPT rather than by any agent. There
-    // is no actor to name and no unit of anyone's work to identify, so wrapping
-    // it would require inventing both.
-    AgentSubagentStart agent_start = 1;
-    // Something an agent of this run did. Carries the identity of the agent that
-    // did it, so a consumer places it without this frame saying anything about
-    // ancestry.
-    AgentActivity agent_activity = 2;
-  }
-}
-
-// The run finished.
-message AgentWorkflowSuccess {
-  // What the run reported at the end, when it reported anything. UNSET when it
-  // finished without a summary, which is not a failure.
-  optional AgentWorkflowSummary summary = 1;
-}
-
-// A run's closing account of itself.
-message AgentWorkflowSummary {
-  // The summary, verbatim.
-  string text = 1;
-}
-
-// The run could not be launched, or ended without finishing.
-message AgentWorkflowFailure {
-  // Why it failed. Two arms because the first is structurally distinguishable
-  // rather than inferred: the producer reports a rejected script separately from
-  // anything that can happen once a run has begun.
-  oneof cause {
-    // The script did not compile and the run never started. The message is
-    // carried because the author's next action is to fix the script and this is
-    // the only account of what was wrong with it.
-    AgentWorkflowScriptRejected script_rejected = 1;
-    // The run started and ended without finishing. Arms are DERIVED from the
-    // producer's real sites at the implementation wave; empty until then.
-    AgentWorkflowRunEnded run_ended = 2;
-  }
-}
-
-// The script did not compile and the run never started.
-message AgentWorkflowScriptRejected {
-  // What the producer said was wrong with it, verbatim.
-  string error = 1;
-}
-
-// The run started and ended without finishing. Arms are DERIVED from the
-// producer's real sites at the implementation wave; empty until then.
-message AgentWorkflowRunEnded {}

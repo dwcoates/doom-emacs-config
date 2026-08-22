@@ -285,7 +285,7 @@ representation at all, so the footer's thinking cell currently has no producer.
 **Also unmodelled.** `usage.output_tokens_details` appears in real transcripts
 and `TokenUsage` does not carry it.
 
-**Status.** OPEN.
+**Status.** PARTLY SETTLED (2026-08-22): `usage.output_tokens_details.thinking_tokens` IS present in real transcripts (324 non-zero occurrences), so `TokenUsage.output_thinking_tokens` has a billed producer and the "no thinking field" claim is retracted. What remains owed is a type for the live ESTIMATE channel, if a surface draws it.
 
 ### E. A workflow's per-agent transcripts are never ingested (owed to the implementation wave)
 
