@@ -10,6 +10,7 @@ package shim.v1;
 
 import "shim/v1/endpoint_start_turn.proto";
 import "shim/v1/endpoint_update_turn.proto";
+import "shim/v1/endpoint_close_session.proto";
 import "shim/v1/endpoint_detach_foreground.proto";
 import "shim/v1/endpoint_get_session_diagnostics.proto";
 import "shim/v1/endpoint_open_session.proto";
@@ -46,6 +47,9 @@ service Shim {
   // Ask the shim how it is: its health and its degraded windows. A pull, at
   // the daemon's cadence.
   rpc GetSessionDiagnostics(GetSessionDiagnosticsRequest) returns (GetSessionDiagnosticsResponse);
+  // Orderly teardown. Refuses while anything is live unless forced; a forced
+  // close names what it killed.
+  rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
 
   // ---- Turn: submitting a prompt, the turn's own stream, speaking to it ----
 

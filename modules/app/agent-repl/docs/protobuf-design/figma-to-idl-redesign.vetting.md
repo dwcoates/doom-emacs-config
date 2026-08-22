@@ -209,6 +209,23 @@ resumed session's first usage reflects the compacted size.
 
 **Status.** OPEN.
 
+### 9. Whether the vendor's background tasks survive the query closing
+
+**The assumption.** CloseSession refuses while detached work is live because
+killing the query may kill the work: a backgrounded shell and a subagent are
+presumed children of the agent binary.
+
+**What is affected.** `CloseSessionRequest.force` semantics and whether a
+non-forced close with live work must refuse. If tasks survive the binary,
+the next OpenSession reports them via `SessionOpened.live_work` and a close
+could be legal without force.
+
+**How to verify it.** Background a long shell via the SDK, end the query
+cleanly, and observe whether the process and its spool file continue; then
+resume the session and check `background_tasks_changed` membership.
+
+**Status.** OPEN.
+
 ## Owed to later stages
 
 Settled requirements a later stage must honour. Nothing here needs
