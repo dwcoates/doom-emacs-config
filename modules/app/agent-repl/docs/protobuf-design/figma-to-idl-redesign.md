@@ -114,6 +114,43 @@ that transport.
 
 ## Landed changes
 
+### The OLD record model is DELETED from `conversation.v1`: `agent.proto`, `tool_call.proto`, `detached_work.proto`, `message.proto` are gone
+
+**What changed ("let's delete").** Four files deleted. `ToolResultContent` and
+`ToolResultContentBlock` — the only two messages `agent_activity.proto`
+still used from `tool_call.proto` (the unmodeled tool's typed result) — move
+VERBATIM into `agent_activity.proto` under their own banner; that file now
+imports `content_blocks.proto` directly. Everything else in the three files
+was the record model the protocol model replaced: `AgentSaid`/`AgentContent`/
+`ContentArriving`/`ThinkingBlock`, the thirteen `ToolCall*` arms,
+`ToolReturned`, the `Permission*` family, and the whole old `DetachedWork*`
+lifecycle. `message.proto` the user deleted by hand as junk.
+
+**Why now, in the user's terms.** Stepping back from stage 4: the orchestrator
+sketched `SubmitPrompt` and the user could not see what the sketch's
+permission-ask frame was doing or why it sat beside `AgentActivity`, and
+questioned whether detached work belonged inside the activity envelope at all.
+Both questions are about the UNIT LIFECYCLE in `conversation.v1` being
+incomplete, and dead files were obscuring what the new model actually holds.
+Stage 4 is not entered until `conversation.v1` is clean and whole.
+
+**What is NOT reopened.** `context_cut.proto` stays, dangling on the deleted
+`AgentContent`: it models DAEMON post-processing of shim data, which is a later
+increment, not a stage already owed. `api.proto` stays and is walked next — it
+is a shim-dependency file and should already be fully accounted for.
+
+**Homeless after this deletion, to be judged one at a time (not ported).**
+`StopReason` (the vendor states it; no unit arm carries it today), the
+permission GATE as a state of a tool unit (the vendor's `canUseTool` is not a
+transcript block, so no arm announces "awaiting permission"), and
+`ApiRequestFailed`'s placement in the activity vocabulary.
+
+**Consequences.** `frontend/v1/feed.proto` and `footer.proto`,
+`agentrepl/v1/endpoint_get_feed_page/interrupt/answer_permission.proto` and
+`shim/v1/external.proto` import deleted files — the stage-2/3 repoints already
+owed as vetting item F, now widened to these types. `AnswerPermission`'s
+`ToolCallId` becomes `AgentActivityId` at its repoint.
+
 ### A workflow's agents are ANNOUNCED explicitly: the update arm becomes a oneof, and a subagent's description turns optional
 
 **What changed ("sounds good").** `AgentWorkflowUpdate` becomes `oneof update
