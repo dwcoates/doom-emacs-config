@@ -286,3 +286,33 @@ representation at all, so the footer's thinking cell currently has no producer.
 and `TokenUsage` does not carry it.
 
 **Status.** OPEN.
+
+### E. A workflow's per-agent transcripts are never ingested (owed to the implementation wave)
+
+**What is required.** The sidecar must discover and tail
+`projects/<project>/<session>/subagents/workflows/wf_<id>/agent-<id>.jsonl`, so a
+workflow's constituent agents reach the store as records like any other
+subagent's.
+
+**What is in the way.** Discovery globs only the run's JOURNAL
+(`internal/discover/discover.go:86` matches `workflows/wf_*/journal.jsonl`). The
+per-agent transcripts sit in the SAME directory — seven of them in the run
+inspected, each with a `.meta.json` beside it — and match no discovery pattern,
+so they are never read. Ordinary subagent transcripts ARE ingested
+(`discover.go:132`, `KindAgentTranscript`), which is what makes the omission easy
+to miss: the mechanism exists and is simply not pointed at this directory.
+
+**Why it matters under the flat subagent model.** A workflow's agents get a
+creation record and an agent identity, so the frontend draws a bubble for each
+and can ask for its items by identity. There would be NOTHING TO SERVE. Worse,
+the journal IS ingested but only as flattened prose lines — its own converter
+states "THE RENDERING IS LOSSY AND THAT IS A KNOWN COST" — so the run appears to
+have been recorded while the actual work was discarded.
+
+**The general form of the requirement, stated because it outlives this one bug.**
+Anything a bubble can be drawn for must be RESOLVABLE FROM THE STORE, not from a
+file that happens to still exist. A historical bubble is expanded days later,
+after the session that produced it has ended, and the only durable answer is the
+store.
+
+**Status.** OPEN.
