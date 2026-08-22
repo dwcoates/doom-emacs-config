@@ -194,7 +194,6 @@ client-side close is a transport failure": for Watch streams a consumer
 closing is a normal act; the rule now binds the PRODUCER side only (a stream
 the producer ends without a terminal frame is the failure).
 
-## Landed changes
 ### The shim, store and sidecar hold NO VARIABLE-SIZE STATE — every observation costs a constant number of single indexed lookups
 
 **Stated 2026-08-22, in the user's terms.** "We shouldn't be managing state
@@ -241,6 +240,7 @@ one growing buffer per unit, or `update` carries DELTAS and the accumulator
 moves to the daemon.
 
 
+## Landed changes
 ### STAGE 4 CLOSE-OUT SWEEP: the five old `shim.v1` files are DELETED; `ModelMarker` moves to `api.proto` — STAGE 4 (shim.v1) COMPLETE
 
 **What changed ("looks good").** `core.proto`, `bookkeeping.proto`,
