@@ -12,6 +12,7 @@ import "shim/v1/endpoint_start_turn.proto";
 import "shim/v1/endpoint_update_turn.proto";
 import "shim/v1/endpoint_detach_foreground.proto";
 import "shim/v1/endpoint_open_session.proto";
+import "shim/v1/endpoint_watch_session.proto";
 import "shim/v1/endpoint_stop_bash.proto";
 import "shim/v1/endpoint_update_subagent.proto";
 import "shim/v1/endpoint_update_workflow.proto";
@@ -29,6 +30,10 @@ service Shim {
   // accepted. A cold context is REFUSED with its cost until the daemon names
   // a remediation; the shim begins its keep-alive cadence before answering.
   rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
+  // The standing stream of session-level facts as they manifest upstream:
+  // identity rotation, the query dying, model and fast-mode changes, MCP
+  // health, account usage. Nothing synthetic — the shim's own health is pulled.
+  rpc WatchSession(WatchSessionRequest) returns (stream WatchSessionResponse);
 
   // ---- Turn: submitting a prompt, the turn's own stream, speaking to it ----
 

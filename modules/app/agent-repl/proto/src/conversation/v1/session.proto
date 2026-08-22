@@ -119,3 +119,160 @@ message SessionCompactPromptsOnly {}
 message SessionCompactResponsesOnly {}
 // Prompts and responses, without tool traffic.
 message SessionCompactPromptsAndResponses {}
+
+// ---- The session's LIVE facts: what changes after opening ----
+
+// One frame of the session's standing stream: a session-level fact that
+// changed, AS IT MANIFESTS upstream. No terminal arm — the stream ends only
+// with the session. Every arm is a fact ABOUT the session; nothing about any
+// turn or unit rides here, because each of those has a stream of its own, and
+// nothing synthetic rides here either — the shim's own health is PULLED, not
+// pushed.
+message SessionUpdate {
+  oneof update {
+    // The vendor gave the session a new identity mid-session.
+    SessionIdentityRotated identity_rotated = 1;
+    // The query died. DUPLICATED ON PURPOSE: every open stream — a turn's, a
+    // subagent's, a run's — also concludes with its own failure, but a
+    // consumer with no stream open still needs to know the session is over.
+    SessionQueryDied query_died = 2;
+    // The effective model changed — by SetModel, or by the vendor. Stated here
+    // even when the consumer asked for it, so one place is authoritative.
+    SessionModelChanged model_changed = 3;
+    // The vendor's fast mode switched.
+    SessionFastMode fast_mode = 4;
+    // One MCP server's health changed.
+    SessionMcpServer mcp_server = 5;
+    // The account's usage allowance was observed.
+    SessionAccountUsage account_usage = 6;
+  }
+}
+
+// The vendor rotated the session's identity. The store scopes by this id, so
+// a consumer re-keys; the previous id is carried so the two halves join.
+message SessionIdentityRotated {
+  // The identity before the rotation.
+  string previous_vendor_session_id = 1;
+  // The identity from now on.
+  string vendor_session_id = 2;
+  // The vendor's stated reason, verbatim; its vocabulary is not in evidence.
+  string reason = 3;
+}
+
+// The query ended on its own. THE ARM IS HOW; an orderly close is
+// CloseSession's success, and a failure to start is OpenSession's failure.
+message SessionQueryDied {
+  oneof cause {
+    // The agent binary's stream ended without a close.
+    SessionQueryUnexpectedEof unexpected_eof = 1;
+    // The SDK's iterator threw.
+    SessionQueryIteratorFailure iterator_failure = 2;
+  }
+}
+
+// The agent binary's stream ended without a close.
+message SessionQueryUnexpectedEof {}
+
+// The SDK's iterator threw.
+message SessionQueryIteratorFailure {
+  // The thrown cause, verbatim.
+  string cause = 1;
+}
+
+// The model in effect for subsequent responses.
+message SessionModelChanged {
+  // The model now in effect.
+  AgentModel effective_model = 1;
+}
+
+// Fast mode. THE ARM IS THE STATE; off carries the vendor's reason.
+message SessionFastMode {
+  oneof state {
+    SessionFastModeOn on = 1;
+    SessionFastModeOff off = 2;
+  }
+}
+
+// Fast mode is in effect.
+message SessionFastModeOn {}
+
+// Fast mode is not in effect.
+message SessionFastModeOff {
+  // The vendor's reason, verbatim.
+  string reason = 1;
+}
+
+// One MCP server, by name, and its health now.
+message SessionMcpServer {
+  // The server's configured name.
+  string name = 1;
+  // THE ARM IS THE HEALTH.
+  oneof health {
+    SessionMcpServerConnected connected = 2;
+    SessionMcpServerFailed failed = 3;
+  }
+}
+
+// The server is connected.
+message SessionMcpServerConnected {}
+
+// The server failed to connect or dropped.
+message SessionMcpServerFailed {
+  // The error, verbatim.
+  string error = 1;
+}
+
+// What the account's allowance looked like when sampled. LIVE, whenever the
+// shim observes it — not pinned to a turn boundary.
+message SessionAccountUsage {
+  // When it was sampled, in unix millis.
+  int64 observed_at_ms = 1;
+  // The vendor's subscription word, verbatim; its vocabulary is not in
+  // evidence.
+  string subscription_type = 2;
+  // THE ARM IS WHETHER A FIGURE WAS READ.
+  oneof outcome {
+    SessionAccountUsageAvailable available = 3;
+    SessionAccountUsageUnavailable unavailable = 4;
+  }
+}
+
+// A figure was read.
+message SessionAccountUsageAvailable {
+  // The rolling five-hour window.
+  SessionUsageWindow five_hour = 1;
+}
+
+// One allowance window's figures.
+message SessionUsageWindow {
+  // How much of the window is used, 0–100.
+  double utilization_percent = 1;
+  // When the window resets, in unix millis.
+  int64 resets_at_ms = 2;
+}
+
+// Why no figure could be read. THE ARM IS THE REASON.
+message SessionAccountUsageUnavailable {
+  oneof reason {
+    // The usage service did not answer.
+    SessionUsageServiceUnavailable service_unavailable = 1;
+    // The service answered without a five-hour window.
+    SessionUsageWindowUnavailable window_unavailable = 2;
+    // The window carried no utilization figure.
+    SessionUsageUtilizationUnavailable utilization_unavailable = 3;
+    // The shim's own sampling failed.
+    SessionUsageSamplingFailure sampling_failure = 4;
+  }
+}
+
+// The usage service did not answer.
+message SessionUsageServiceUnavailable {}
+// The service answered without a five-hour window.
+message SessionUsageWindowUnavailable {}
+// The window carried no utilization figure.
+message SessionUsageUtilizationUnavailable {}
+// The shim's own sampling failed.
+message SessionUsageSamplingFailure {
+  // The cause, verbatim.
+  string cause = 1;
+}
