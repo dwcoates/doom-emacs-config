@@ -37,6 +37,7 @@ syntax = "proto3";
 package shim.v1;
 
 import "conversation/v1/api.proto";
+import "shim/v1/prompt_origin.proto";
 import "google/protobuf/descriptor.proto";
 import "google/protobuf/struct.proto";
 import "shim/v1/external.proto";
@@ -85,79 +86,6 @@ enum SessionSource {
   SESSION_SOURCE_FRESH = 1;
   SESSION_SOURCE_RESUME = 2;
   SESSION_SOURCE_COMPACT_CONTINUE = 3;
-}
-
-// Why a prompt entered the agent-repl submit pipeline.
-//
-// This is a closed, durable attribution vocabulary rather than the free-form
-// SubmitPrompt.origin diagnostic string. Every frontend send site and every
-// daemon-generated submit site MUST choose a non-UNSPECIFIED value, and Emacs
-// send sites intentionally never share a value: a stored TurnStarted can
-// therefore be traced back to the exact editor situation that caused it.
-enum PromptOrigin {
-  PROMPT_ORIGIN_UNSPECIFIED = 0;
-
-  // Emacs-originated sends. Each value has exactly one production send site.
-  PROMPT_ORIGIN_USER_SENT = 1;
-  PROMPT_ORIGIN_USER_SENT_AND_HIDE = 2;
-  PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT = 3;
-  PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX = 4;
-  PROMPT_ORIGIN_USER_SENT_WITH_PREFIX = 5;
-  PROMPT_ORIGIN_METAPROMPT_READ = 6;
-  PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS = 7;
-  PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT = 8;
-  PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT = 9;
-  PROMPT_ORIGIN_COMMAND_UPDATE_PR = 10;
-  PROMPT_ORIGIN_COMMAND_REBASE = 11;
-  PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR = 12;
-  PROMPT_ORIGIN_PANEL_SELECTION = 13;
-  PROMPT_ORIGIN_DEFERRED_PROMPT = 14;
-  PROMPT_ORIGIN_LEGACY_HOST_PROMPT = 15;
-  PROMPT_ORIGIN_GNS_SOCKETS_CLOSE = 16;
-  PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT = 17;
-  PROMPT_ORIGIN_EXPLAIN_CONFIG = 18;
-
-  // Other producers remain explicit without being mislabeled as Emacs.
-  PROMPT_ORIGIN_WEBAPP_USER_SENT = 19;
-  PROMPT_ORIGIN_WEBAPP_CARD_ACTION = 20;
-  PROMPT_ORIGIN_WORKSPACE_CREATED = 21;
-  PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR = 22;
-  PROMPT_ORIGIN_MERGE_TEST_REPAIR = 23;
-  PROMPT_ORIGIN_MERGE_BEFORE_ACTION = 24;
-  PROMPT_ORIGIN_MERGE_AFTER_ACTION = 25;
-  PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME = 26;
-
-  // Daemon-generated cache keep-alive ping: a minimal prompt ("respond with
-  // only '.', no tool calls or changes") submitted after turn inactivity to
-  // refresh the vendor prompt cache before its TTL expires. Turns with this
-  // origin are conversation-plumbing, not conversation: every consumer
-  // (frontend rendering, replay floors, transcript projection) excludes them
-  // unconditionally, and the shim discards them from the vendor transcript
-  // via rewind (SessionRewound) before the next real prompt is submitted, so
-  // they can never contaminate the model's context either.
-  PROMPT_ORIGIN_CACHE_KEEP_ALIVE = 27;
-
-  // Daemon-generated re-drive of a turn a planned bounce interrupted.
-  //
-  // A restart that has to take the shim with it (the shim bundle changed, or
-  // the shim is dead) interrupts whatever turn was running. The vendor SDK has
-  // no resume-the-interrupted-turn primitive — `resume`, `continue` and
-  // `resumeSessionAt` all restore CONTEXT and none restarts an aborted turn —
-  // so the successor daemon has to submit an instruction to continue the work.
-  //
-  // THE SUBMIT IS INVISIBLE AND THE TURN IS NOT. Unlike CACHE_KEEP_ALIVE, whose
-  // whole turn is conversation-plumbing that every consumer excludes, this
-  // turn's OUTPUT is the continuation of work the user asked for and belongs in
-  // the conversation at the interrupted turn's position. Only the daemon's own
-  // instruction is hidden, and it is hidden at the curator rather than by
-  // origin (the daemon drops the `user_message` whose request id carries the
-  // internal re-drive marker), so this value never has to be consulted to
-  // decide what renders.
-  //
-  // What it IS for: saying WHY a turn is running. A status surface reads this
-  // to report "resumed after restart" instead of presenting work the user did
-  // not just ask for as though they had.
-  PROMPT_ORIGIN_RESUME_AFTER_RESTART = 28;
 }
 
 // ---------------------------------------------------------------------------
