@@ -1,0 +1,73 @@
+// agent.proto — WHAT AN AGENT'S STREAM SAYS: growth, or one of the two ways it
+// ends. Agnostic between the main agent (whose stream is the turn) and a
+// detached subagent (whose stream is its own): one vocabulary, one handler.
+// The oneof that selects among these three is the carrying stream's frame, in
+// shim.v1; this file declares the arms, never the frame.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/api.proto";
+import "conversation/v1/detached_work.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// Something a running agent has to say. The arm states WHAT THE CONSUMER MUST
+// DO with it: pipe it back on this agent's own stream, or open a stream of its
+// own for it.
+message AgentUpdate {
+  // Whether the work stays with this agent's stream or has left it.
+  oneof update {
+    // Work happening on this agent's stream. Everything about it arrives here,
+    // and it cannot outlive the stream.
+    AgentActivity activity = 1;
+    // Work that now has a life of its own OUTSIDE this stream. Nothing further
+    // about it arrives here; the consumer opens the stream named by its handle.
+    AgentDetachedWork detached_work = 2;
+  }
+}
+
+// The agent's stream ended on terms the consumer asked for. THE ARM IS HOW —
+// both are answers, never failures. For the main agent this is the instant
+// the main thread can accept a prompt again.
+message AgentSuccess {
+  oneof outcome {
+    // The agent finished on its own.
+    AgentCompleted completed = 1;
+    // A user-commanded stop was acknowledged by the agent binary and the agent
+    // ended because of it. An ACCUSATION the producer must have evidence for:
+    // only an acknowledged stop sets it.
+    AgentInterrupted interrupted = 2;
+  }
+}
+
+// The agent ran to its own end.
+message AgentCompleted {
+  // The response unit that is the agent's ANSWER — the last top-level prose it
+  // produced — so a consumer marks it final without deriving finality from
+  // position. UNSET when no prose was produced at all (a refusal with empty
+  // content, a token ceiling hit before anything was said); absence is not an
+  // error.
+  optional AgentActivityId answer = 1;
+}
+
+// The agent was stopped at the user's command. Units open when the stop landed
+// have ALREADY received their own failure frames on this stream; nothing about
+// them is restated here.
+message AgentInterrupted {}
+
+// The agent's stream ended because something broke. Every arm is a fact the
+// producer OBSERVED; a stream that merely stops sending is a transport failure
+// and is never reported as one of these.
+message AgentFailure {
+  oneof failure {
+    // The vendor API refused or failed a request and RECORDED that it did, so
+    // the agent could not continue. The vendor's own error taxonomy, imported
+    // whole from api.proto.
+    ApiRequestFailed api_request_failed = 1;
+    // Further arms DERIVED from the shim's real failure sites at the wave (the
+    // vendor ending the query on its own terms, the agent binary dying).
+  }
+}
