@@ -161,6 +161,49 @@ turn on a subagent, so the queue has no drain there.
 
 ## Landed changes
 
+### 4c: `WatchSession` lands — `SessionUpdate` in `session.proto`; `BookkeepingEntry` is DEAD, arm by arm; shim diagnostics become a PULL
+
+**What changed (the user's two corrections, then land).** `session.proto`
+gains `SessionUpdate { identity_rotated | query_died | model_changed |
+fast_mode | mcp_server | account_usage }` and its arm messages.
+`endpoint_watch_session.proto`: empty request; standing stream wrapping
+`SessionUpdate`. No diagnostic arm.
+
+**"IS WATCHSESSION JUST A RESPELLING OF BOOKKEEPING?" No — and the user's
+sharper claim holds: there is no third category.** Every fact is either about
+a TURN (its stream says it) or about the SESSION (this stream says it). The
+old `BookkeepingEntry`'s reason to exist — "retrieved by seq range, never
+counted in a page" — was a workaround for a flat log where a page counted
+records; a page now counts UNITS and the store persists whatever streams
+carry, so the special retrieval path dies with seq. The ten arms, each with
+its equivalent: `session_began` → OpenSession success; `session_ended` →
+CloseSession success or `query_died`; `turn_began` → StartTurn's stream
+opening; `turn_ended` → StartTurn's terminal frame (no `unexplained`
+successor); `heartbeat` → none (the open-stream set); `response_timing` →
+none (derived from the response unit's frame instants); `producer_diagnostic`
+→ a pull rpc; `session_identity_changed` → `identity_rotated`;
+`account_usage_observation` → `account_usage`, no longer turn-pinned;
+`response_usage_corrected` → none (the next frame IS the correction).
+
+**TWO CORRECTIONS.** (1) `query_died` is DUPLICATED on purpose: each open
+stream (a turn's, a subagent's, a run's) also concludes with its own failure,
+but a consumer with no stream open still needs the session-level fact — the
+same reasoning as `model_changed` being stated even when the consumer asked
+for it. (2) DIAGNOSTICS ARE PULLED. The user: this stream "is for notable
+information as it manifests, and this is a synthetic manifestation" — the shim
+intermixing upstream happenings with periodic self-reports at its own cadence.
+So the arm is dropped and inventory item 6 `CheckHealth` becomes
+`GetSessionDiagnostics`, one pull returning health and degraded windows.
+
+**Dropped from the old usage observation, each by name**: `query_instance_id`
+and `turn_id` and the turn-boundary oneof (no longer sampled at boundaries),
+`sample_latency_ms` (nothing draws it). Only the five-hour window is carried,
+because only it was ever sampled; the footer's WEEKLY allowance has no
+producer here — flagged.
+
+**Kept as verbatim vendor strings, vocabulary not in evidence**: the
+rotation `reason`, `subscription_type`, fast-mode `reason`.
+
 ### 4c: `OpenSession` lands — the SESSION section opens; `conversation.v1/session.proto` holds the opened-session and cold-context vocabulary
 
 **What changed ("everything looks good", with the extraction).**
