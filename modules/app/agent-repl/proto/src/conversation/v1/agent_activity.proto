@@ -1974,8 +1974,8 @@ message AgentWorkflow {
 
 // A run this stream has begun carrying.
 message AgentWorkflowStart {
-  // Which workflow, and which run of it.
-  AgentWorkflowRun run = 1;
+  // The workflow's own declared name, as its script states it.
+  string name = 1;
 
   // Where the script that ran is kept. ALWAYS SET: the producer persists a
   // script for every invocation, whether it was supplied inline, named, or read
@@ -1987,13 +1987,19 @@ message AgentWorkflowStart {
   // set, the run's unchanged steps returned CACHED results instead of
   // re-running, so a reader knows it may have cost far less than the number of
   // agents it reports would suggest.
-  optional AgentWorkflowRun resumed_from = 3;
+  //
+  // A BARE HANDLE rather than a described run: resuming needs only the value the
+  // producer accepts, and it is the same kind of handle the placement arm below
+  // carries for this run.
+  optional string resumed_from = 3;
 
-  // Where the run executes.
+  // Where the run executes. EACH ARM CARRIES ITS OWN RESUME HANDLE, because the
+  // producer uses a different one per placement and neither means anything for
+  // the other.
   oneof placement {
     // In this process, alongside the agent that launched it.
     AgentWorkflowPlacementLocal local = 4;
-    // In a remote environment, reachable at the session below.
+    // In a remote environment.
     AgentWorkflowPlacementRemote remote = 5;
   }
 
@@ -2007,16 +2013,6 @@ message AgentWorkflowStart {
   AgentActivityStartedAt started_at = 7;
 }
 
-// Which workflow, and which run of it.
-message AgentWorkflowRun {
-  // The workflow's own declared name, as its script states it.
-  string name = 1;
-  // The identity of THIS run: the handle its stream is opened under, and the
-  // value a later invocation names to resume it. Opaque — compare for equality,
-  // never parse or construct one.
-  string run_id = 2;
-}
-
 // Where a run's script is kept.
 message AgentWorkflowScript {
   // The path the producer persisted it at. A reader opens this to see what
@@ -2027,12 +2023,24 @@ message AgentWorkflowScript {
 }
 
 // The run executes in this process.
-message AgentWorkflowPlacementLocal {}
+message AgentWorkflowPlacementLocal {
+  // This run's identifier, and the value a later invocation names to resume it.
+  //
+  // NOT THE HANDLE ITS STREAM OPENS UNDER — that is the detached-work identity on
+  // the envelope, which addresses live work and dies with it. This one OUTLIVES
+  // the run: it is how a later invocation reuses this run's results, and it is
+  // also where the producer keeps the run's files. Opaque; compare for equality,
+  // never parse or construct one.
+  string run_id = 1;
+}
 
 // The run executes remotely.
 message AgentWorkflowPlacementRemote {
-  // Where the remote session can be opened. Carried because a reader who cannot
-  // follow the run here needs somewhere to go.
+  // Where the remote session can be opened.
+  //
+  // ALSO THE RESUME HANDLE for a remote run — the producer issues no run
+  // identifier in this case, which is why the two placements carry different
+  // fields rather than sharing one.
   string session_url = 1;
 }
 
@@ -2060,11 +2068,9 @@ message AgentWorkflowUpdate {
 
 // The run finished.
 message AgentWorkflowSuccess {
-  // Which run, repeated so a settled frame describes itself.
-  AgentWorkflowRun run = 1;
   // What the run reported at the end, when it reported anything. UNSET when it
   // finished without a summary, which is not a failure.
-  optional AgentWorkflowSummary summary = 2;
+  optional AgentWorkflowSummary summary = 1;
 }
 
 // A run's closing account of itself.
@@ -2075,11 +2081,6 @@ message AgentWorkflowSummary {
 
 // The run could not be launched, or ended without finishing.
 message AgentWorkflowFailure {
-  // Which run, when one was ever assigned. UNSET when the failure PRECEDED the
-  // run existing at all — a script rejected before launch has no run identity,
-  // which is why this is optional rather than required.
-  optional AgentWorkflowRun run = 1;
-
   // Why it failed. Two arms because the first is structurally distinguishable
   // rather than inferred: the producer reports a rejected script separately from
   // anything that can happen once a run has begun.
@@ -2087,10 +2088,10 @@ message AgentWorkflowFailure {
     // The script did not compile and the run never started. The message is
     // carried because the author's next action is to fix the script and this is
     // the only account of what was wrong with it.
-    AgentWorkflowScriptRejected script_rejected = 2;
+    AgentWorkflowScriptRejected script_rejected = 1;
     // The run started and ended without finishing. Arms are DERIVED from the
     // producer's real sites at the implementation wave; empty until then.
-    AgentWorkflowRunEnded run_ended = 3;
+    AgentWorkflowRunEnded run_ended = 2;
   }
 }
 
