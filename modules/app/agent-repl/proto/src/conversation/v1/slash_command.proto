@@ -1,5 +1,8 @@
-// session_command.proto — the closed set of slash commands the CLI answers
-// ITSELF, and the schema-carried facts about each one.
+// slash_command.proto — SLASH COMMANDS: the closed set the agent binary answers
+// ITSELF, the schema-carried facts about each one, and the DAEMON-SYNTHESIZED
+// outcomes of the command family that reshapes context (/clear, /compact — and
+// the binary's own automatic compaction, which is the same cut by another
+// trigger).
 //
 // IT IS conversation.v1 BECAUSE EVERY OTHER SURFACE NEEDS IT AND IT NEEDS
 // NONE OF THEM. It arrived in this tree in frontend.v1's slash-menu.proto,
@@ -19,6 +22,7 @@ syntax = "proto3";
 
 package conversation.v1;
 
+import "conversation/v1/agent_activity.proto";
 import "google/protobuf/descriptor.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
@@ -114,4 +118,51 @@ enum SessionCommand {
   SESSION_COMMAND_VIM = 28 [(session_command_spec) = {literal: "/vim"}];
   SESSION_COMMAND_REWIND = 29 [(session_command_spec) = {literal: "/rewind"}];
   SESSION_COMMAND_BUG = 30 [(session_command_spec) = {literal: "/bug"}];
+}
+
+// ---- Context cuts: what /clear, /compact and auto-compaction leave behind ----
+
+// The conversation was cut here, and the reader must see where.
+message ContextCut {
+  oneof cut {
+    // Everything before this was discarded outright.
+    ContextCleared cleared = 1;
+    // Everything before this was summarized into what follows.
+    ContextCompacted compacted = 2;
+  }
+}
+
+// What the cut did to the context's size: how many tokens it held before,
+// and how many after. NAMED FOR WHAT IT DESCRIBES — the change a cut made —
+// though it carries the two endpoints rather than a difference, because a
+// reader wants to see "180k → 12k", and a difference alone cannot show that.
+//
+// Every cut has one, INCLUDING a clear: clearing does not empty the context.
+// The system prompt, loaded skills, memory files and the like are reloaded,
+// so `tokens_after` is small, not zero — and stating it is what lets a reader
+// see that rather than assume it.
+message ContextTokenDelta {
+  // Tokens in context immediately before the cut.
+  int64 tokens_before = 1;
+  // Tokens in context immediately after the cut, once whatever survives or
+  // is reloaded is counted.
+  int64 tokens_after = 2;
+}
+
+// History was discarded with nothing left in its place.
+message ContextCleared {
+  // What the clear did to the context's size. Not zero after: see
+  // ContextTokenDelta.
+  ContextTokenDelta tokens = 1;
+}
+
+// History was replaced by a summary of itself.
+message ContextCompacted {
+  // The summary that replaced the history, which the feed shows in its place
+  // so the cut is not a hole. AgentResponseProse because the summary is the agent's
+  // own prose — a compression of the prior conversation, rendered as markdown.
+  AgentResponseProse summary = 1;
+  // What the compaction did to the context's size, so a reader can see what
+  // it bought rather than being told it happened.
+  ContextTokenDelta tokens = 2;
 }
