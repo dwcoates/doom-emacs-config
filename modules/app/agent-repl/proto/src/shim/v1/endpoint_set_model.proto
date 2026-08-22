@@ -44,9 +44,11 @@ message SetModelResponse {
   }
 }
 
-// Switched, and the turn boundary has passed. Empty: the model now in effect
-// arrives as SessionUpdate.model_changed, the one authoritative statement.
-message SetModelSuccess {}
+// Switched, and the turn boundary has passed. Carries the model now in effect
+// — the same fact SessionUpdate.model_changed states on the standing stream.
+message SetModelSuccess {
+  conversation.v1.SessionModelChanged model_changed = 1;
+}
 
 // Not switched. THE ARM IS WHY.
 message SetModelFailure {
