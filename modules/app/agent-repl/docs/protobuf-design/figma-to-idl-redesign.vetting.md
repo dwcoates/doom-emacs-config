@@ -190,6 +190,25 @@ with `'next'` and `'later'`.
 
 **Status.** OPEN.
 
+### 8. Whether the SDK can initialize a session from a transcript the shim wrote (the compaction remediation)
+
+**The assumption.** `SessionColdCompact` is implementable: the shim runs a
+throwaway session that summarizes the transcript, writes a compacted
+transcript, and initializes the REAL session from it, preserving the vendor
+session identity.
+
+**What is affected.** The `compact` arm of `SessionColdRemediation`. If no
+route exists, the arm either dissolves into the vendor's own `/compact`
+(losing the model and scope choices) or requires a different mechanism.
+
+**How to verify it.** Three candidates at the type surface: the `@alpha`
+`sessionStore` option, `forkSession`, and writing the JSONL the agent binary
+reads on `resume` (including a `compact_boundary` record in the vendor's own
+format, `sdk.d.ts:2945`). Try each against a probe session and confirm the
+resumed session's first usage reflects the compacted size.
+
+**Status.** OPEN.
+
 ## Owed to later stages
 
 Settled requirements a later stage must honour. Nothing here needs

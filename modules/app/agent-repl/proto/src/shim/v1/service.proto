@@ -11,6 +11,7 @@ package shim.v1;
 import "shim/v1/endpoint_start_turn.proto";
 import "shim/v1/endpoint_update_turn.proto";
 import "shim/v1/endpoint_detach_foreground.proto";
+import "shim/v1/endpoint_open_session.proto";
 import "shim/v1/endpoint_stop_bash.proto";
 import "shim/v1/endpoint_update_subagent.proto";
 import "shim/v1/endpoint_update_workflow.proto";
@@ -22,6 +23,13 @@ option go_package = "agentrepl/proto/shim/v1;shimv1";
 
 // The shim: the vendor adapter the daemon drives, one per session.
 service Shim {
+  // ---- Session: opening, the standing session stream, state that conditions turns, teardown ----
+
+  // Bind to a vendor session and bring it to the point where a prompt can be
+  // accepted. A cold context is REFUSED with its cost until the daemon names
+  // a remediation; the shim begins its keep-alive cadence before answering.
+  rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
+
   // ---- Turn: submitting a prompt, the turn's own stream, speaking to it ----
 
   // Open THE turn. The response stream IS the turn: it opens when the shim

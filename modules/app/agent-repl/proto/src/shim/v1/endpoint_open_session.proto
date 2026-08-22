@@ -1,0 +1,86 @@
+// endpoint_open_session.proto — OpenSession: bind the shim to one vendor
+// session and bring it to the point where a prompt can be ACCEPTED.
+//
+// RESOLVES WHEN A PROMPT CAN BE ACCEPTED — which is the shim's own readiness,
+// not a vendor signal: the agent binary emits nothing on resume and its
+// `init` arrives only with the first turn. Opening costs no model call.
+//
+// COLD CONTEXT IS REFUSED, NEVER SILENTLY PAID. A resume whose prompt cache
+// has lapsed would re-read the whole context at full price on the first
+// prompt. The shim detects that from the transcript alone and answers with
+// the `cold` failure; the daemon then reopens with an explicit remediation.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/api.proto";
+import "conversation/v1/permission.proto";
+import "conversation/v1/session.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// What the daemon wants driven, and how.
+message OpenSessionRequest {
+  // How the session comes to exist. The set arm is the source.
+  oneof source {
+    // A new vendor session, empty context.
+    OpenSessionFresh fresh = 1;
+    // An existing vendor session. Refused with `cold` when its cache has
+    // lapsed and no remediation is named.
+    OpenSessionResume resume = 2;
+  }
+  // The model to start on — an echo of a served option, as the daemon last
+  // knew it. The answer reports the EFFECTIVE model, and the answer wins.
+  conversation.v1.AgentModel model = 3;
+  // The permission mode the session starts in. Session state, changed later
+  // by SetPermissionMode; never per prompt.
+  conversation.v1.AgentPermissionMode permission_mode = 4;
+}
+
+// A new vendor session.
+message OpenSessionFresh {}
+
+// Resume an existing vendor session.
+message OpenSessionResume {
+  // The vendor's own identity for it, as a previous OpenSession reported.
+  string vendor_session_id = 1;
+  // What to do about a cold context. UNSET means "refuse if cold" — the
+  // daemon's first attempt, which learns the cost before paying it. Set only
+  // on the reopen that follows a `cold` failure; a warm context ignores it.
+  optional conversation.v1.SessionColdRemediation cold_remediation = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message OpenSessionResponse {
+  oneof result {
+    OpenSessionSuccess success = 1;
+    OpenSessionFailure failure = 2;
+  }
+}
+
+// The session can accept a prompt.
+//
+// PRODUCER OBLIGATION: before this is returned the shim has ALREADY begun its
+// cache keep-alive cadence, so a warm context stays warm while the user is
+// still typing, and a context opened under `pay` takes its cold read here —
+// in the background, once — rather than on the user's first prompt. The
+// cadence has STARTED; the read need not have finished. The keep-alive is the
+// shim's own mechanism and never appears on this wire.
+message OpenSessionSuccess {
+  // The opened session, whole — the same facts every surface reads.
+  conversation.v1.SessionOpened session = 1;
+}
+
+// The session could not be opened as asked. THE ARM IS WHY.
+message OpenSessionFailure {
+  oneof cause {
+    // The context is cold and no remediation was named: here is what
+    // resuming would cost, so a remediation can be chosen.
+    conversation.v1.SessionCold cold = 1;
+    // Further arms DERIVED at the wave from the shim's real sites (the agent
+    // binary failing to start, an unknown session id).
+  }
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 2;
+}
