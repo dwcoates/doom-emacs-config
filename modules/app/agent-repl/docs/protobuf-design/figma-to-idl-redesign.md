@@ -196,6 +196,40 @@ the producer ends without a terminal frame is the failure).
 
 ## Landed changes
 
+### STAGE 4 CLOSE-OUT SWEEP: the five old `shim.v1` files are DELETED; `ModelMarker` moves to `api.proto` — STAGE 4 (shim.v1) COMPLETE
+
+**What changed ("looks good").** `core.proto`, `bookkeeping.proto`,
+`external.proto`, `entry-delivery.proto`, `message-page.proto` deleted.
+`ModelMarker` and its `model_marker_literal` extension move VERBATIM to
+`conversation/v1/api.proto` beside `AgentModel` (a vendor value that is not a
+model is an API fact; ten live consumers in daemon, shim and webapp). The
+package is now exactly the file model: `service.proto`, eighteen
+`endpoint_*.proto`, and `prompt_origin.proto` as the one shared file.
+
+**The sweep, by disposition** (every declaration was enumerated to the user
+and ruled on). `core.proto`'s 48 remaining declarations: the handshake
+family → `StartSession`/`SessionStarted`; the turn family → `StartTurn`,
+`UpdateTurn`, `KillTurn`; the detached family → the per-kind `Update*`/`Stop*`
+and `SessionStarted.live_work`; the session family → `SetSessionModel`,
+`WatchSession.query_died`, `GetSessionDiagnostics`; the transport family
+(`Ack`, `Nack`, `ConnectionHeartbeat`, `Subscribe`, `Replay*`,
+`PermissionRequest`/`Response`) DEAD under Connect, the Watch streams,
+`AgentPermission` + `AgentInput`; `SessionRewound`/`KeepAliveDiscard`
+shim-internal (Owed G). `bookkeeping.proto`'s ten arms dispersed as recorded
+at WatchSession. The three flat-log files superseded by the datalayer/protocol
+split, `AgentFrame`, and `ReadHistory`.
+
+**Dark until their stages**: `store/v1/entry.proto` imported `external.proto`
+and `state/v1/durable.proto` imported `core.proto` and `bookkeeping.proto`;
+both packages no longer compile, by the land-whether-or-not-it-breaks rule,
+and are walked at stages 5 and 6.
+
+**Stage 4 is complete.** Remaining per the settled sequence: 5 (`store.v1`),
+6 (`state.v1`), then the design-complete gate, the vetting register, and the
+reconciliation handoff. The stage-2 and stage-3 repoints owed at item F
+(`MessageId` → the new identities; `FeedPermission` and `AnswerPermission` →
+`AgentPermission`/`AgentAnswer`) remain owed.
+
 ### 4c: `ReadHistory` lands — the HISTORY section; a page is ONE AGENT's children; the main agent has an identity and nothing is nil
 
 **What changed ("great, let's ship").** NEW `conversation/v1/history.proto`:
