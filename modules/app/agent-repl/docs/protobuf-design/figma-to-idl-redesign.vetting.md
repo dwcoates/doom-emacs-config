@@ -315,6 +315,18 @@ file that happens to still exist. A historical bubble is expanded days later,
 after the session that produced it has ended, and the only durable answer is the
 store.
 
+**MEASURED, so the scope is not guessed.** 1,168 ordinary subagent transcripts
+sit at `subagents/agent-<id>.jsonl` and ARE ingested. 93 sit at
+`subagents/workflows/wf_<id>/agent-<id>.jsonl` and are NOT. Identical file shape,
+identical meaning; the discovery pattern simply stops one directory level short.
+
+**WHY THIS IS NOW LOAD-BEARING RATHER THAN DESIRABLE.** The settled model makes a
+workflow's agents announce themselves through the journal's `started` records,
+which the sidecar already reads — so the frontend WILL draw a container per
+workflow agent. The contents of those containers come from the per-agent
+transcripts. Unfixed, every one of them opens onto nothing, and the failure looks
+like empty bubbles rather than like missing ingestion.
+
 **Status.** OPEN.
 
 ### F. Four files still name `conversation.v1.MessageId` and must be repointed (owed to stages 2 and 3)
