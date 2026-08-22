@@ -110,8 +110,10 @@ message DetachableWork {
     // A workflow run. UNLIKE THE OTHER TWO it appears ONLY here and has no
     // in-turn activity arm at all, because the producer offers no synchronous
     // form — a workflow is detached from birth and always reaches
-    // AgentDetachedWork through its `created` arm rather than `detached`.
-    AgentWorkflow workflow = 3;
+    // AgentDetachedWork through its `created` arm rather than `detached`. So
+    // the announcement carries the run's START DESCRIPTION alone: the run's
+    // frames arrive only on its own stream, never here.
+    AgentWorkflowStart workflow = 3;
   }
 }
 
