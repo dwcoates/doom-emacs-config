@@ -161,6 +161,35 @@ turn on a subagent, so the queue has no drain there.
 
 ## Landed changes
 
+### 4c: `CloseSession` lands — refuses while anything is live unless forced; both outcomes NAME the work
+
+**What changed ("yes land").** `session.proto` gains `SessionClosed { idle |
+forced { optional interrupted_turn; repeated stopped_work } }` and
+`SessionLive { optional turn_in_flight; repeated live_work }`.
+`endpoint_close_session.proto`: request { bool force }; success wraps
+`SessionClosed`; failure { oneof cause { SessionLive live }; detail }.
+
+**The user's ruling.** Refuse while live, unless the request says force. The
+daemon is the one decider of what dies; a close that cascaded stops would
+hide three decisions inside one verb. `force` is a plain bool by the
+`RestartWorkspace.force` precedent (no adjacent data changes meaning under
+it).
+
+**What the response carries that the bool does not.** A forced close NAMES
+what it killed so the consumer concludes the elements it was drawing; a
+refusal NAMES what is live so the daemon can stop selectively rather than
+force blindly.
+
+**Unverified, on the register as item 9**: whether the vendor's background
+tasks survive the query closing. If a backgrounded shell is a child of the
+agent binary, a non-forced close with live work is the only safe answer and
+"refuse" is exactly right; if they survive, the next OpenSession would report
+them and a close-with-live-work could be legal.
+
+**The SESSION section is complete**: OpenSession, WatchSession, SetModel,
+SetPermissionMode, GetSessionDiagnostics, CloseSession. Remaining in stage 4:
+`WatchTurn` (TURN reattach) and the HISTORY section.
+
 ### 4c: `GetSessionDiagnostics` lands — the shim's health is PULLED ("you can land it yourself")
 
 **What changed.** `session.proto` gains `SessionDiagnostics { oneof health

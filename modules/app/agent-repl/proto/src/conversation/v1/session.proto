@@ -371,3 +371,36 @@ message SessionDegradedClosed {
   // that never reached the store, frames never sent.
   uint64 dropped_count = 2;
 }
+
+// ---- Closing ----
+
+// The session was closed. THE ARM IS HOW: idle, or by force over live work.
+message SessionClosed {
+  oneof how {
+    // Nothing was live; the query ended cleanly.
+    SessionClosedIdle idle = 1;
+    // Live work was killed to close. Names what died, so the consumer can
+    // conclude the elements it was drawing for them.
+    SessionClosedForced forced = 2;
+  }
+}
+
+// Closed with nothing live.
+message SessionClosedIdle {}
+
+// Closed by force.
+message SessionClosedForced {
+  // The turn that was interrupted, if one was in flight.
+  optional TurnId interrupted_turn = 1;
+  // Every detached item that was stopped.
+  repeated DetachedWorkId stopped_work = 2;
+}
+
+// The session could not be closed because work is live and force was not
+// asked. Names the work, so the consumer can stop it itself or ask for force.
+message SessionLive {
+  // The turn in flight, if one is.
+  optional TurnId turn_in_flight = 1;
+  // Every detached item live now.
+  repeated DetachedWorkId live_work = 2;
+}
