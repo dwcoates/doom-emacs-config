@@ -1,0 +1,85 @@
+// endpoint_update_prompt.proto — UpdatePrompt: mid-flight input to the open
+// turn. Three things the daemon can say to a running turn, and nothing else:
+// stop, a choice, consent.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/permission.proto";
+import "conversation/v1/question.proto";
+import "conversation/v1/turn.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Input to a turn already in flight.
+message UpdatePromptRequest {
+  // WHICH turn — the id the daemon minted and SubmitPrompt opened. A turn
+  // that is not the open one is a refusal, never a silent no-op, so a late
+  // answer cannot land on the wrong turn.
+  conversation.v1.TurnId turn = 1;
+  // WHAT is being said. The set arm is the action; each carries only its
+  // own payload.
+  oneof action {
+    // Stop the turn. Its stream then concludes with AgentSuccess.interrupted
+    // once the agent binary acknowledges; this call returns before that.
+    UpdatePromptInterrupt interrupt = 2;
+    // Answer a question the turn is blocked on.
+    UpdatePromptAnswerQuestion answer_question = 3;
+    // Decide a permission the turn is blocked on.
+    UpdatePromptAnswerPermission answer_permission = 4;
+  }
+}
+
+// A user-commanded stop. Carries nothing: the target is the turn, and the
+// reason is always the user.
+message UpdatePromptInterrupt {}
+
+// The user's choices for one open ask.
+message UpdatePromptAnswerQuestion {
+  // WHICH ask, as its start frame named it. Always one this turn's stream
+  // announced and has not concluded.
+  conversation.v1.AgentQuestionId ask = 1;
+  // The answers, one per question in the ask, each naming its question and
+  // its picked options by ECHOING the served values — the same type the
+  // success frame will carry, so the round trip is one vocabulary.
+  conversation.v1.AgentQuestionAnswered answered = 2;
+}
+
+// The user's decision on one open permission ask.
+message UpdatePromptAnswerPermission {
+  // WHICH ask, as its start frame named it — which is also the identity of
+  // the tool unit the decision gates.
+  conversation.v1.AgentActivityId ask = 1;
+  // The decision. Allow once, allow with the vendor's echoed standing, or
+  // deny with a reason the model will read — the same arms the success frame
+  // will carry, minus `abandoned` and `policy`, which no user can say.
+  oneof decision {
+    conversation.v1.AgentPermissionAllowed allowed = 2;
+    conversation.v1.AgentPermissionDeniedByUser denied = 3;
+  }
+}
+
+// THE ARM IS THE OUTCOME OF THE CALL — never of the turn.
+message UpdatePromptResponse {
+  oneof result {
+    // The input was delivered to the agent binary. What it changed arrives
+    // on the turn's stream.
+    UpdatePromptSuccess success = 1;
+    // The input could not be delivered.
+    UpdatePromptFailure failure = 2;
+  }
+}
+
+// Delivered. Empty: there is nothing to say that the stream will not say
+// better, and saying it twice invites two authorities.
+message UpdatePromptSuccess {}
+
+// Not delivered. `kind` arms are DERIVED at the wave from the shim's real
+// refusal sites: no turn open, a different turn open, no such ask, an ask
+// already decided, an answer whose shape does not match the ask.
+message UpdatePromptFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+}
