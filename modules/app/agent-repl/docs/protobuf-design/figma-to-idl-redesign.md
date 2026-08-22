@@ -161,6 +161,30 @@ turn on a subagent, so the queue has no drain there.
 
 ## Landed changes
 
+### `AgentInput { stop | answer | prompt }` lands — the ONE write vocabulary for any live agent; `UpdateTurn` carries it
+
+**What changed ("let's use the same api for the subagents").** `agent.proto`
+gains `AgentInput` and `AgentStop`; `UpdateTurnRequest` is `{ TurnId; AgentInput
+input }`. The core principle made literal: `UpdateSubagent` will carry the
+identical type, differing only in its address.
+
+**WHAT A SUBAGENT IS, verified, because the principle needed it.** At the type
+surface (`AgentInput` in sdk-tools, `task_notification`) and in 231 observed
+`SendMessage` results: a subagent is spawned by an agent's `Agent` call with a
+commission; it runs that commission to COMPLETION and the task ends; it
+persists only as transcript + identity; the next message RESUMES it as a new
+run ("had no active task; resumed from transcript", 78×). So it is analogous
+to a turn — one run per input. The ONLY input route to it is another agent's
+`SendMessage` tool; no SDK route lets a human address a subagent directly, so
+"click a subagent and prompt it" has no vendor path today and the shim must
+relay or drive the resume itself — recorded with item 7.
+
+**THE ONE ASYMMETRY, and how it is absorbed.** A LIVE subagent accepts a
+message at its next tool round without being stopped (observed); whether the
+main agent does is UNVERIFIED (vetting item 7). The user's ruling: keep one
+API and resolve the inconsistency INSIDE THE SHIM — `prompt` to a turn and to
+a subagent may land differently, and the consumer never learns which.
+
 ### `AgentFrame` and `AgentAnswer` extracted; `StartTurn`/`UpdateTurn` renamed; the permission gets its OWN identity; question answer types renamed
 
 **What changed ("yep agreed"; "update the names as you see fit").**

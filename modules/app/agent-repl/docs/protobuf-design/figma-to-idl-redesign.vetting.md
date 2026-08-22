@@ -166,6 +166,30 @@ solvable rather than as a standing limitation.
 
 **Status.** OPEN.
 
+### 7. Whether the MAIN agent accepts a prompt mid-turn at its next tool round, as a subagent does
+
+**The assumption.** `AgentInput.prompt` is one arm for the main agent and a
+detached subagent alike, and the shim resolves per kind how it lands. For a
+LIVE subagent the landing is OBSERVED (123 real results: "queued for delivery
+to X at its next tool round"). For the main agent it is NOT: the interrupt
+docs (`sdk.d.ts:3487`) say a mid-turn main-thread prompt is enqueued and
+"coalesced into one turn" the drain loop starts AFTER the current one, while
+`SDKUserMessage.priority: 'now' | 'next' | 'later'` (`sdk.d.ts:4592`) exists
+UNDOCUMENTED and reads like a next-tool-round injection.
+
+**What is affected.** Nothing in the schema — the arm stands either way. It
+decides what "deliver now" to a busy main agent MEANS in the shim: a steer at
+the next tool round (if `priority: 'now'` does that), or the only alternative,
+a hard interrupt followed by a resubmit. The daemon's classifier today knows
+only the latter (`interject`).
+
+**How to verify it.** Send a main-thread user message with `priority: 'now'`
+while a turn with several tool calls is running, and observe in the transcript
+whether it lands between tool calls of THAT turn or opens a new one. Repeat
+with `'next'` and `'later'`.
+
+**Status.** OPEN.
+
 ## Owed to later stages
 
 Settled requirements a later stage must honour. Nothing here needs

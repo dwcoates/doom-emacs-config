@@ -1,6 +1,6 @@
 // endpoint_update_turn.proto — UpdateTurn: mid-flight input to the open
-// turn. Three things the daemon can say to a running turn, and nothing else:
-// stop, a choice, consent.
+// turn. The one input vocabulary every live agent
+// takes, addressed to the main agent's turn.
 
 syntax = "proto3";
 
@@ -11,26 +11,15 @@ import "conversation/v1/turn.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
-// Input to a turn already in flight.
+// Input to the open turn.
 message UpdateTurnRequest {
-  // WHICH turn — the id the daemon minted and StartTurn opened. A turn
-  // that is not the open one is a refusal, never a silent no-op, so a late
-  // answer cannot land on the wrong turn.
+  // WHICH turn — the id the daemon minted and StartTurn opened. A turn that
+  // is not the open one is a refusal, never a silent no-op, so a late answer
+  // cannot land on the wrong turn.
   conversation.v1.TurnId turn = 1;
-  // WHAT is being said. The set arm is the action; each carries only its
-  // own payload.
-  oneof action {
-    // Stop the turn. Its stream then concludes with AgentSuccess.interrupted
-    // once the agent binary acknowledges; this call returns before that.
-    UpdateTurnInterrupt interrupt = 2;
-    // Answer a question or decide a permission the turn is blocked on.
-    conversation.v1.AgentAnswer answer = 3;
-  }
+  // What is being said — the one input vocabulary every live agent takes.
+  conversation.v1.AgentInput input = 2;
 }
-
-// A user-commanded stop. Carries nothing: the target is the turn, and the
-// reason is always the user.
-message UpdateTurnInterrupt {}
 
 // THE ARM IS THE OUTCOME OF THE CALL — never of the turn.
 message UpdateTurnResponse {
