@@ -161,6 +161,36 @@ turn on a subagent, so the queue has no drain there.
 
 ## Landed changes
 
+### The workflow's FRAME moves into `agent.proto`; its update carries `AgentUpdate`; success gains `interrupted`; the announcement carries the START description only
+
+**What changed ("UpdateWorkflow needs to carry AgentUpdate, of course";
+"AgentWorkflowUpdate and the high-level messages should be in agent.proto").**
+`AgentWorkflow`, `AgentWorkflowUpdate`, `AgentWorkflowSuccess` (now `oneof
+outcome { completed { optional summary } | interrupted }`), `AgentWorkflowFailure`
+and its two cause arms move VERBATIM (bar the two shape changes) from
+`workflow.proto` to `agent.proto` under their own banner. `AgentWorkflowUpdate`'s
+activity arm (tag 2) is RETIRED; tag 3 `agent_update` carries `AgentUpdate`.
+`DetachableWork.workflow` is retyped `AgentWorkflow` → `AgentWorkflowStart`.
+`workflow.proto` keeps the run's DESCRIPTION (start, script, placement, notice,
+summary) and imports only `agent_activity.proto`.
+
+**THE CYCLE, which forced the file move.** `AgentUpdate → AgentDetachedWork →
+DetachableWork.workflow → AgentWorkflow → AgentWorkflowUpdate → AgentUpdate` is
+a genuine type recursion (a workflow's agents are agents), and protobuf permits
+recursive messages but not cyclic imports. The user placed the frame-level
+workflow messages in `agent.proto`, beside every other stream vocabulary.
+
+**WHY THE ANNOUNCEMENT CARRIES ONLY THE START.** A workflow is never carried
+by a turn; a spawning stream only ever ANNOUNCES one, and its frames arrive
+solely on `WatchWorkflow`. So the `DetachableWork` arm names the description,
+not the frame — which is also what breaks the import cycle at the right seam.
+
+**Why `AgentUpdate` and not `AgentActivity`.** A workflow's agent hits the
+permission gate and may pose questions; with bare activity those had no arm
+and `UpdateWorkflow.answer` would have had nothing to answer. And
+`interrupted` exists so a stop has a terminal arm to conclude on, as bash and
+the agent frame already do.
+
 ### `AgentInput { stop | answer | prompt }` lands — the ONE write vocabulary for any live agent; `UpdateTurn` carries it
 
 **What changed ("let's use the same api for the subagents").** `agent.proto`

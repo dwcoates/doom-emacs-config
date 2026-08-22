@@ -14,6 +14,7 @@ import "conversation/v1/detached_work.proto";
 import "conversation/v1/permission.proto";
 import "conversation/v1/question.proto";
 import "conversation/v1/user.proto";
+import "conversation/v1/workflow.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
@@ -133,3 +134,119 @@ message AgentFailure {
     // vendor ending the query on its own terms, the agent binary dying).
   }
 }
+
+// ---- The workflow run's frame: the one unit that contains agents ----
+
+// ALWAYS DETACHED. The producer's launch answer reports only that a run started,
+// never that one finished, and there is no option asking for a blocking run — so
+// a workflow's frames arrive on the run's OWN stream and never on the stream of
+// the turn that launched it.
+//
+// THIS UNIT IS THE ONLY ONE THAT CONTAINS OTHER UNITS, and that is deliberate
+// rather than a leak: a workflow is the only kind of work that is a PROGRAM
+// rather than an action, so its progress simply IS the work of the agents its
+// script spawned. Those agents arrive inside the update arm below, each carrying
+// its own identity, at any depth and flat — a workflow agent that spawns an agent
+// of its own arrives the same way, so nothing anywhere maintains a lineage.
+message AgentWorkflow {
+  // Where the run stands. Expect one start, then any number of updates, then one
+  // terminal arm.
+  oneof result {
+    // This stream is now carrying this run.
+    AgentWorkflowStart start = 1;
+    // Work its agents have done since the last frame.
+    AgentWorkflowUpdate update = 2;
+    // The run finished.
+    AgentWorkflowSuccess success = 3;
+    // The run could not be launched, or ended without finishing.
+    AgentWorkflowFailure failure = 4;
+  }
+}
+
+// One thing an agent of this run did.
+//
+// A CARRIER AND NOTHING ELSE. It holds no state about the run itself, so a
+// consumer upserts the activity below by that activity's OWN identity and
+// changes nothing about the run on account of this frame.
+//
+// ONE ACTIVITY PER FRAME, NEVER A BATCH. A frame carries exactly one unit here as
+// it does everywhere else in this contract, which keeps frame size bounded — a
+// cold read ingests an entire run's history at once, and a batched frame would
+// have no cap on what it carried.
+//
+// PRODUCER OBLIGATION: EMIT AS OBSERVED, DO NOT BUFFER. A producer that
+// accumulated activity and released it in bursts would satisfy this shape while
+// defeating its purpose — the singular field cannot enforce timeliness, so it is
+// stated here instead. A run's progress is watched live, and work already
+// observed and withheld is a run that looks stalled.
+message AgentWorkflowUpdate {
+  // Whether this frame announces an agent or reports work.
+  oneof update {
+    // AN AGENT OF THIS RUN CAME INTO EXISTENCE. A consumer draws a container for
+    // it, keyed by the identity inside, and every later frame naming that
+    // identity routes into it.
+    //
+    // CARRIED BARE RATHER THAN INSIDE AN AgentActivity, and the reason is
+    // structural: that envelope states WHICH AGENT DID a piece of work, and a
+    // workflow's agents are created BY THE SCRIPT rather than by any agent. There
+    // is no actor to name and no unit of anyone's work to identify, so wrapping
+    // it would require inventing both.
+    AgentSubagentStart agent_start = 1;
+    // Something an agent of this run has to say — the same vocabulary as any
+    // agent's stream: read-only work, work it detached, or a question or
+    // permission it is now BLOCKED on, which UpdateWorkflow answers. Every arm
+    // carries the identity of the agent concerned, so a consumer places it
+    // without this frame saying anything about ancestry. Tag 2 is RETIRED
+    // (it carried activity alone, which had no arm for a blocked agent).
+    AgentUpdate agent_update = 3;
+  }
+}
+
+// The run ended on terms the consumer asked for. THE ARM IS HOW — both are
+// answers, never failures.
+message AgentWorkflowSuccess {
+  oneof outcome {
+    // The run finished on its own.
+    AgentWorkflowCompleted completed = 1;
+    // A user-commanded stop was acknowledged and the run ended because of it.
+    // Agents live when the stop landed have already received their own
+    // terminal frames in this stream.
+    AgentWorkflowInterrupted interrupted = 2;
+  }
+}
+
+// The run finished on its own.
+message AgentWorkflowCompleted {
+  // What the run reported at the end, when it reported anything. UNSET when it
+  // finished without a summary, which is not a failure.
+  optional AgentWorkflowSummary summary = 1;
+}
+
+// The run was stopped at the user's command.
+message AgentWorkflowInterrupted {}
+
+// The run could not be launched, or ended without finishing.
+message AgentWorkflowFailure {
+  // Why it failed. Two arms because the first is structurally distinguishable
+  // rather than inferred: the producer reports a rejected script separately from
+  // anything that can happen once a run has begun.
+  oneof cause {
+    // The script did not compile and the run never started. The message is
+    // carried because the author's next action is to fix the script and this is
+    // the only account of what was wrong with it.
+    AgentWorkflowScriptRejected script_rejected = 1;
+    // The run started and ended without finishing. Arms are DERIVED from the
+    // producer's real sites at the implementation wave; empty until then.
+    AgentWorkflowRunEnded run_ended = 2;
+  }
+}
+
+// The script did not compile and the run never started.
+message AgentWorkflowScriptRejected {
+  // What the producer said was wrong with it, verbatim.
+  string error = 1;
+}
+
+// The run started and ended without finishing. Arms are DERIVED from the
+// producer's real sites at the implementation wave; empty until then.
+message AgentWorkflowRunEnded {}
