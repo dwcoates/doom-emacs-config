@@ -1,0 +1,224 @@
+// question.proto — THE QUESTION: the agent posing choices to the user and
+// blocking on the answer. Rides AgentUpdate directly rather than the activity
+// envelope, because it is not read-only work: the agent cannot continue until
+// the user writes a choice back on the update channel.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// The agent asking the user to choose, and waiting for the answer.
+//
+// THIS IS THE RECORD OF THE ASK, not the card that draws it. The ask reaches the
+// user through the permission gate — a tool that asks a question rides the same
+// gate as any other tool call — so the drawn card and its buttons are
+// frontend.v1's, resolved from this. What lives here is what was asked and what
+// came back, so history replays without the card.
+//
+// AN ASK BLOCKS THE TURN IT IS IN. The question arrives as a frame on the
+// stream carrying this unit, and the answer returns as a SEPARATE unary call —
+// two directions, two calls, never one bidirectional exchange.
+message AgentQuestion {
+  // WHICH AGENT is asking — a subagent asks too, and the answer routes to it.
+  // Carried here because this unit rides AgentUpdate directly, outside the
+  // activity envelope that attributes read-only work.
+  AgentId agent_id = 4;
+  // WHICH ASK, so the answer names it and later frames upsert it. Sourced from
+  // the asking call's identity, like any tool unit's.
+  AgentActivityId id = 5;
+  // Where the ask stands. No update arm: an ask is posed once and answered
+  // once, and a half-answered question is still just an open question.
+  oneof result {
+    // This stream is now carrying this ask, and it is open. Sent ONCE per
+    // stream, when the question is posed.
+    AgentQuestionStart start = 1;
+    // The ask concluded — with the user's choices, or with nobody answering.
+    AgentQuestionSuccess success = 2;
+    // THE QUESTION COULD NOT BE PUT TO THE USER. Scoped to the ASK alone: a
+    // failure to APPLY an answer is not here, because the answer travels on its
+    // own call and that call's response owns its own failures. Arms are DERIVED
+    // from the producer's real refusal sites at the implementation wave; empty
+    // until then.
+    AgentQuestionFailure failure = 3;
+  }
+}
+
+// An ask this stream has begun carrying, still open.
+message AgentQuestionStart {
+  // What is being asked.
+  AgentQuestionBatch batch = 1;
+  // When the ask was posed, so a consumer can draw how long the user has been
+  // waiting on it.
+  AgentActivityStartedAt started_at = 2;
+}
+
+// The questions posed together, as one ask.
+//
+// ONE ASK CAN POSE SEVERAL QUESTIONS — the producer permits between one and
+// four — and they are answered together rather than one at a time. So the batch
+// is the unit, and a single question is merely a batch of one.
+message AgentQuestionBatch {
+  // The questions, in the order they were posed. THE ORDER IS PRESENTATIONAL
+  // ONLY: every answer names the question it answers, so nothing joins by
+  // position and reordering loses no meaning.
+  repeated AgentQuestionAsked questions = 1;
+}
+
+// One question, and the choices offered for it.
+message AgentQuestionAsked {
+  // The question itself. Carried as its own type because AN ANSWER ECHOES IT
+  // BACK UNCHANGED — it is the value that says which question is being answered,
+  // so it is one type on both sides rather than a bare string on each.
+  AgentQuestionText question = 1;
+
+  // A very short label for the question — a chip or tag, a few words at most —
+  // so a compact surface can name the question without its full text. Never
+  // echoed, so a plain string.
+  string header = 2;
+
+  // How many choices the user may pick. The set arm IS the mode, so a
+  // mode-specific rule later lands on its arm rather than beside both.
+  //
+  // THE MODE IS PER QUESTION, NEVER PER ASK: one batch can mix a pick-one
+  // question with a pick-any one, so a consumer reads it here and must not lift
+  // it to the batch.
+  oneof choices {
+    // Exactly one option may be picked. Drawn as radios.
+    AgentQuestionSingleSelect single_select = 3;
+    // Any number of options may be picked. Drawn as checkboxes.
+    AgentQuestionMultiSelect multi_select = 4;
+  }
+}
+
+// The text of a posed question, and the value an answer echoes to say which
+// question it answers.
+//
+// THE PRODUCER'S OWN KEY IS THIS TEXT. Its answers arrive as a map keyed by
+// question text, so the text is not merely a label — it is the identity the
+// producer recognises, which is why an answer carries it rather than an index or
+// a minted token. A consumer COPIES it back verbatim and never edits it.
+message AgentQuestionText {
+  // The question as the agent phrased it, verbatim.
+  string text = 1;
+}
+
+// Exactly one option may be picked.
+message AgentQuestionSingleSelect {
+  // The options offered, in the order they were offered.
+  repeated AgentQuestionOption options = 1;
+}
+
+// Any number of options may be picked.
+//
+// ITS OWN MESSAGE rather than a shared one with the single-select, so a later
+// mode-specific rule — a "pick at most three" cap — lands here without touching
+// the pick-one case.
+message AgentQuestionMultiSelect {
+  // The options offered, in the order they were offered.
+  repeated AgentQuestionOption options = 1;
+}
+
+// One offered choice.
+message AgentQuestionOption {
+  // The choice as the user sees it, and the value an answer echoes to say this
+  // option was picked. Its own type for the same reason the question text is.
+  AgentQuestionOptionLabel label = 1;
+
+  // What picking it means, or what follows from it. Drawn beneath the label.
+  // Never echoed, so a plain string.
+  string description = 2;
+
+  // Content shown when the option has focus — a mockup, a code sketch, a
+  // diagram — for comparing options side by side. UNSET for an option with
+  // nothing to preview, which is the common case.
+  optional string preview = 3;
+}
+
+// The label of an offered option, and the value an answer echoes to name it.
+//
+// THE PRODUCER IDENTIFIES A PICKED OPTION BY THIS LABEL — its answers name
+// options by their display text — so the label is the identity as well as the
+// caption. A consumer copies it back verbatim.
+message AgentQuestionOptionLabel {
+  // The option's display text, verbatim.
+  string label = 1;
+}
+
+// The ask concluded.
+message AgentQuestionSuccess {
+  // What was asked, repeated so a settled frame describes itself.
+  AgentQuestionBatch batch = 1;
+
+  // How it concluded. NOBODY ANSWERING IS AN ANSWER to a legitimate ask rather
+  // than a failure of it, so it is an arm here and not in the failure arm.
+  oneof outcome {
+    // The user answered.
+    AgentQuestionAnswered answered = 2;
+    // The ask went unanswered and stopped waiting. The agent proceeded without
+    // a choice, so a consumer draws the ask as expired rather than as pending
+    // forever.
+    AgentQuestionUnanswered unanswered = 3;
+  }
+}
+
+// The user's answers.
+message AgentQuestionAnswered {
+  // One answer per question. UNORDERED: each names the question it answers, so
+  // a consumer must not assume these arrive in the batch's order.
+  repeated AgentQuestionAnswer answers = 1;
+}
+
+// What the user chose for one question.
+message AgentQuestionAnswer {
+  // WHICH question this answers, echoed verbatim from the ask. Named explicitly
+  // rather than inferred from position, so no order is load-bearing and an
+  // answer cannot drift onto the wrong question.
+  AgentQuestionText question = 1;
+
+  // The options picked, echoed verbatim from the ones offered. EMPTY when the
+  // user picked none of them and answered only in free text below.
+  repeated AgentQuestionChoice chosen = 2;
+
+  // What the user typed instead of, or alongside, the offered options.
+  //
+  // AN ASK ALWAYS OFFERS A FREE-TEXT ESCAPE whether or not the agent asked for
+  // one, so this may be set even for a question whose options looked
+  // exhaustive. UNSET when the user typed nothing.
+  optional AgentQuestionFreeText free_text = 3;
+
+  // A remark the user attached to their selection. DISTINCT FROM THE FREE TEXT
+  // ABOVE: this annotates a choice rather than substituting for one. UNSET when
+  // none was added.
+  optional AgentQuestionNote note = 4;
+}
+
+// One picked option.
+message AgentQuestionChoice {
+  // The label of the option picked, echoed verbatim. A consumer recovers the
+  // option's description by matching this against the question that offered it,
+  // and must NOT assume a match exists if the ask has since been re-posed.
+  AgentQuestionOptionLabel label = 1;
+}
+
+// What the user typed rather than picking.
+message AgentQuestionFreeText {
+  // The text, verbatim.
+  string text = 1;
+}
+
+// A remark the user attached to a selection.
+message AgentQuestionNote {
+  // The remark, verbatim.
+  string text = 1;
+}
+
+// The ask went unanswered and stopped waiting.
+message AgentQuestionUnanswered {}
+
+// The question could not be put to the user. Arms are DERIVED from the
+// producer's real refusal sites at the implementation wave; empty until then.
+message AgentQuestionFailure {}
