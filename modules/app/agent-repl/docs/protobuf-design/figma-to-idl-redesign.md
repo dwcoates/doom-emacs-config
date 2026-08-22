@@ -114,6 +114,27 @@ that transport.
 
 ## Landed changes
 
+### `session_command.proto` → `slash_command.proto`; `context_cut.proto` folds into it; `ContextCompacted.summary` retyped
+
+**What changed (the user's proposal, "adapt it so it fits").** File renamed.
+`ContextCut`, `ContextTokenDelta`, `ContextCleared`, `ContextCompacted` move
+in verbatim under a banner; `context_cut.proto` deleted. The one adaptation:
+`ContextCompacted.summary` was `AgentContent` (a deleted record type) and is
+now `AgentResponseProse` — the summary is the agent's markdown prose, the
+same type every response unit carries. `daemon_hold.proto`'s import repointed.
+
+**Why, in the user's terms.** A context cut "is really for wrapping the /clear
+command and providing a daemon-synthesized handling for it" — so every
+slash-command wrapper lives with the command set. One refinement stated in the
+header: the binary also compacts AUTOMATICALLY, so `ContextCut` is the outcome
+of the context-reshaping command family by ANY trigger, which is still that
+family's concern.
+
+**Consequences.** `slash_command.proto` now imports `agent_activity.proto`
+(no cycle: nothing in the activity file imports it). The ContextCut producer
+question from stage 1 stands unchanged (what the binary writes on `/clear`
+decides whether `tokens_after` can be filled honestly).
+
 ### `question.proto` — the `AgentQuestion` family leaves `agent_activity.proto`
 
 **What changed ("shouldn't it be extracted to question.proto?").** The seventeen
