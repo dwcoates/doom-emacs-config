@@ -304,3 +304,70 @@ message SessionUsageSamplingFailure {
   // The cause, verbatim.
   string cause = 1;
 }
+
+// ---- The shim's own health: PULLED by the daemon, never pushed ----
+
+// The shim's account of its own health at the instant it was asked. A
+// SYNTHETIC fact — the shim reporting on itself at the daemon's cadence —
+// which is why it is pulled rather than mixed into the standing stream of
+// upstream happenings.
+message SessionDiagnostics {
+  // THE ARM IS THE VERDICT. Unhealthy is an ANSWER, never a failure of the
+  // call that asked.
+  oneof health {
+    SessionHealthy healthy = 1;
+    SessionUnhealthy unhealthy = 2;
+  }
+  // Every degraded window the shim has recorded since it started, open or
+  // closed, oldest first. Kept so a daemon that asks after the fact still
+  // learns what was lost.
+  repeated SessionDegradedWindow degraded_windows = 3;
+}
+
+// Nothing is wrong with the shim itself.
+message SessionHealthy {}
+
+// Something is wrong with the shim itself.
+message SessionUnhealthy {
+  // Each fault standing now.
+  repeated SessionFault faults = 1;
+}
+
+// One fault of the shim's own.
+message SessionFault {
+  // Which part of the shim (its store client, its converter, its sidecar
+  // link, …).
+  string component = 1;
+  // The fault, for a human and for logs. A `kind` oneof is added WITH its
+  // first derived arms at the wave, from the shim's real fault sites.
+  string detail = 2;
+}
+
+// A window during which one component of the shim was degraded. THE ARM IS
+// WHETHER IT HAS CLOSED, and only a closed window knows what was lost.
+message SessionDegradedWindow {
+  // Which part of the shim.
+  string component = 1;
+  // Why it degraded, as the shim stated when the window opened.
+  string reason = 2;
+  // When the window opened, in unix millis.
+  int64 began_at_ms = 3;
+  oneof extent {
+    // Still degraded.
+    SessionDegradedOpen open = 4;
+    // Recovered.
+    SessionDegradedClosed closed = 5;
+  }
+}
+
+// The window is still open.
+message SessionDegradedOpen {}
+
+// The window closed.
+message SessionDegradedClosed {
+  // When it closed, in unix millis.
+  int64 ended_at_ms = 1;
+  // How many observations the component dropped while degraded — records
+  // that never reached the store, frames never sent.
+  uint64 dropped_count = 2;
+}
