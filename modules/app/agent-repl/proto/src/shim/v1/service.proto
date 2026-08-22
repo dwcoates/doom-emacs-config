@@ -10,6 +10,13 @@ package shim.v1;
 
 import "shim/v1/endpoint_start_turn.proto";
 import "shim/v1/endpoint_update_turn.proto";
+import "shim/v1/endpoint_detach_foreground.proto";
+import "shim/v1/endpoint_stop_bash.proto";
+import "shim/v1/endpoint_update_subagent.proto";
+import "shim/v1/endpoint_update_workflow.proto";
+import "shim/v1/endpoint_watch_bash.proto";
+import "shim/v1/endpoint_watch_subagent.proto";
+import "shim/v1/endpoint_watch_workflow.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
@@ -30,4 +37,25 @@ service Shim {
   // ask's new state — that arrives as the unit's next frame on the turn's
   // stream, like every other state change.
   rpc UpdateTurn(UpdateTurnRequest) returns (UpdateTurnResponse);
+
+  // ---- Detached work: one stream per live item, and the writes each kind accepts ----
+
+  // Follow a subagent's RUN: the agent's own frame, the same as a turn's.
+  rpc WatchSubagent(WatchSubagentRequest) returns (stream WatchSubagentResponse);
+  // Write to a subagent: the one input vocabulary every live agent takes.
+  rpc UpdateSubagent(UpdateSubagentRequest) returns (UpdateSubagentResponse);
+
+  // Follow a backgrounded shell command: the bash unit itself.
+  rpc WatchBash(WatchBashRequest) returns (stream WatchBashResponse);
+  // Kill a backgrounded shell command — the only input a process takes.
+  rpc StopBash(StopBashRequest) returns (StopBashResponse);
+
+  // Follow a workflow run: the workflow unit itself, carrying its agents' frames.
+  rpc WatchWorkflow(WatchWorkflowRequest) returns (stream WatchWorkflowResponse);
+  // Write to a workflow run: the one input vocabulary every live agent takes.
+  rpc UpdateWorkflow(UpdateWorkflowRequest) returns (UpdateWorkflowResponse);
+
+  // Move in-flight turn work onto its own stream (Ctrl-B). The turn then
+  // announces it as detached, and the consumer opens the matching Watch.
+  rpc DetachForeground(DetachForegroundRequest) returns (DetachForegroundResponse);
 }

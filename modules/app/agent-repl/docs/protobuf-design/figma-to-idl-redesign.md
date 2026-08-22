@@ -161,6 +161,49 @@ turn on a subagent, so the queue has no drain there.
 
 ## Landed changes
 
+### 4c: the DETACHED WORK section lands — seven bespoke rpcs; `AgentFrame` carries `agent_id`; a workflow's update carries its agents' FRAMES
+
+**What changed ("that looks mostly correct", with three corrections).**
+`service.proto` gains the section: `WatchSubagent`/`UpdateSubagent`,
+`WatchBash`/`StopBash`, `WatchWorkflow`/`UpdateWorkflow`, `DetachForeground`,
+one endpoint file each. Every Watch wraps its kind's frame whole
+(`AgentFrame`, `AgentBash`, `AgentWorkflow`); `UpdateSubagent` and
+`UpdateWorkflow` carry `AgentInput`; `StopBash` carries nothing but the
+handle; `DetachForeground` names the turn unit by `AgentActivityId`.
+`AgentFrame` gains `agent_id`, which LEAVES `AgentActivity` (tag 17
+retired), `AgentQuestion` (tag 4) and `AgentPermission` (tag 1).
+`AgentWorkflowUpdate`'s second arm is `AgentFrame agent_frame` (tags 2 and 3
+retired).
+
+**WHY BESPOKE RPCS PER KIND, the user's ruling.** "The update api changes
+depending on that (you can send a prompt to a detached agent, but you can't
+send one to bash)." A generic update would have had arms that half-apply.
+
+**THE THREE CORRECTIONS, each following from the frame being the shared
+currency.** (1) `UpdateWorkflow` carries `AgentInput`, not `AgentAnswer` —
+same idea as `UpdateSubagent`; how a prompt lands on a run is the shim's.
+(2) A workflow's update carries `AgentFrame`, not `AgentUpdate` — so a
+workflow agent FINISHING (its `AgentSuccess`) finally has an arm, which bare
+activity never gave it. (3) `agent_id` rides `AgentFrame`, because the frame
+is now what the turn, the subagent stream and the workflow's update all carry;
+putting it on the activity (the earlier ruling) predated the frame existing.
+Attribution moved up one level, once, and the flat-frames guarantee is
+unchanged.
+
+**THE ADDRESS SPLIT.** WATCH by `DetachedWorkId`, because a stream is one RUN
+and the handle names the run. UPDATE a subagent by `AgentId`, because a prompt
+may target an agent whose run has finished and then no run handle exists; a
+stop or answer to an agent with no live run is a refusal. Bash and workflow
+never outlive a run, so both their verbs take the run handle.
+
+**Stated at the Watch responses, because a late joiner depends on it.** Every
+stream opens with the unit's `start` repeating the ORIGINAL instant; a prompt
+to a finished subagent starts a new run, announced on the prompting stream and
+followed by a new `WatchSubagent`.
+
+**Stage 4's TURN and DETACHED WORK sections are complete.** Remaining: SESSION
+and HISTORY.
+
 ### The workflow's FRAME moves into `agent.proto`; its update carries `AgentUpdate`; success gains `interrupted`; the announcement carries the START description only
 
 **What changed ("UpdateWorkflow needs to carry AgentUpdate, of course";

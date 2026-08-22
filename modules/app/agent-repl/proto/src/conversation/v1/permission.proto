@@ -18,8 +18,7 @@ option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
 // A tool call waiting on, or decided by, the user's consent.
 message AgentPermission {
-  // WHICH AGENT is asking — a subagent's tool calls are gated too.
-  AgentId agent_id = 1;
+  // Tag 1 is RETIRED: the asking agent is named by the carrying frame.
   // WHICH ASK — the permission's OWN identity, as a question has its own.
   AgentPermissionId id = 2;
   // WHICH CALL it gates: the tool unit that will carry this identity if the

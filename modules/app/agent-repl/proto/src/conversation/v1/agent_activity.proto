@@ -29,25 +29,8 @@ option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
 // One unit of in-turn work, at whatever state it has reached.
 message AgentActivity {
-  // WHICH AGENT did this work: the main-thread agent, or a subagent at any
-  // depth.
-  //
-  // FRAMES ARE FLAT AND THIS IS THE WHOLE OF THEIR ATTRIBUTION. A subagent's
-  // work is NOT nested inside its spawn — it arrives as ordinary activity
-  // carrying its own agent identity, at any depth, whether the spawn was awaited
-  // or detached. So a consumer routes a frame by this value alone, into whatever
-  // it drew when it saw that agent's creation, and NOTHING on the wire carries
-  // ancestry.
-  //
-  // WHY NOT NESTED: nesting would oblige the PRODUCER to maintain a live lineage
-  // trace — a subagent of a subagent of a subagent — which is state a vendor
-  // adapter has no business holding. Placement instead comes from the REQUEST
-  // when history is read (a page names the parent whose items it wants) and from
-  // the consumer's own drawn structure when frames arrive live.
-  //
-  // It is NOT derivable from the spawn's identity either: a spawn names the CALL
-  // that created an agent, which is a different thing from the agent.
-  AgentId agent_id = 17;
+  // Tag 17 is RETIRED: the agent an activity belongs to is named by the frame
+  // that carries it (AgentFrame.agent_id), never here.
 
   // WHAT THIS UNIT'S API RESPONSE COST, when this is the unit carrying it.
   //

@@ -1,0 +1,23 @@
+// endpoint_watch_bash.proto — WatchBash: follow a backgrounded shell command.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/detached_work.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Which command to follow.
+message WatchBashRequest {
+  // WHICH item — the handle its announcement carried. Not a live shell: refused.
+  conversation.v1.DetachedWorkId work = 1;
+}
+
+// One frame: the bash unit itself. Opens with `start` (the command, the
+// ORIGINAL instant), then output deltas with their offsets, then the terminal
+// arm at the process's exit.
+message WatchBashResponse {
+  conversation.v1.AgentBash bash = 1;
+}

@@ -1,0 +1,27 @@
+// endpoint_watch_subagent.proto — WatchSubagent: follow one RUN of a subagent.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/detached_work.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Which run to follow.
+message WatchSubagentRequest {
+  // WHICH item — the handle its announcement carried on the spawning stream.
+  // A handle that is not a live subagent run is a refusal.
+  conversation.v1.DetachedWorkId work = 1;
+}
+
+// One frame of the run: the agent frame, whole — the same shape as a turn's.
+// The stream OPENS with the subagent's own `start` (repeating the ORIGINAL
+// instant) so a consumer that joins late needs no earlier frame, and
+// CONCLUDES with a terminal arm when the run does. A prompt to a finished
+// subagent starts a NEW run, announced on the prompting stream like any other
+// detached work and followed by a new call here.
+message WatchSubagentResponse {
+  conversation.v1.AgentFrame frame = 1;
+}
