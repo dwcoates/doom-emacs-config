@@ -27,9 +27,10 @@ message AgentQuestion {
   // Carried here because this unit rides AgentUpdate directly, outside the
   // activity envelope that attributes read-only work.
   AgentId agent_id = 4;
-  // WHICH ASK, so the answer names it and later frames upsert it. Sourced from
-  // the asking call's identity, like any tool unit's.
-  AgentActivityId id = 5;
+  // WHICH ASK, so the answer names it and later frames upsert it. Its OWN
+  // identity space: a question joins to no unit of work, unlike a permission,
+  // whose identity is the tool unit it gates.
+  AgentQuestionId id = 5;
   // Where the ask stands. No update arm: an ask is posed once and answered
   // once, and a half-answered question is still just an open question.
   oneof result {
@@ -222,3 +223,10 @@ message AgentQuestionUnanswered {}
 // The question could not be put to the user. Arms are DERIVED from the
 // producer's real refusal sites at the implementation wave; empty until then.
 message AgentQuestionFailure {}
+
+// The identity of one ask. Opaque; equality is the only question asked of it.
+message AgentQuestionId {
+  // Minted by the shim from the asking call, held for the ask's whole life so
+  // its frames upsert one element and an answer names exactly one ask.
+  string value = 1;
+}
