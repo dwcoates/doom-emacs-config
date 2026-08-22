@@ -1,0 +1,37 @@
+// endpoint_start_turn.proto — StartTurn: one prompt in, the turn out.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/turn.proto";
+import "conversation/v1/user.proto";
+import "shim/v1/prompt_origin.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// The prompt the daemon is handing over NOW. Nothing here is a queue entry:
+// by the time this is sent the daemon has already decided no turn is in
+// flight, and the shim submits it to the agent binary immediately.
+message StartTurnRequest {
+  // The turn's identity, MINTED BY THE DAEMON and adopted by the shim: every
+  // durable record the turn produces is stamped with it, and UpdateTurn
+  // addresses the open turn by it. The shim never mints one of its own.
+  conversation.v1.TurnId turn = 1;
+  // The prompt, in the one canonical form that travels client → daemon →
+  // tray → here → record.
+  conversation.v1.UserSaid said = 2;
+  // WHO CAUSED this prompt — a human send site, a daemon-driven merge step.
+  // Closed attribution copied onto the turn's durable record so a stored turn
+  // can be traced to the exact situation that caused it.
+  PromptOrigin origin = 3;
+}
+
+// One frame of the turn: the agent frame, whole. The main agent's stream and a
+// detached subagent's stream are the same shape, so one handler serves both.
+message StartTurnResponse {
+  // The frame. Its terminal arms end the turn; a stream that ends without one
+  // is a transport failure.
+  conversation.v1.AgentFrame frame = 1;
+}
