@@ -112,7 +112,94 @@ superseded record — Connect, one server-streaming endpoint per component —
 is carried in, not re-walked; the sequence's stage 3 designs endpoints on
 that transport.
 
+## Core design principles
+
+Project-wide principles the user stated as FACT. Each is an authority over
+every later sketch: a shape that contradicts one is re-partitioned before it
+is offered, or the contradiction is put to the user as a deliberate question.
+
+### A subagent is handled EXACTLY as the turn is — by the daemon, and on the daemon↔shim API
+
+**Stated 2026-08-22, in the user's terms.** "A core design principle here is
+that subagents are internally handled exactly the same as turn from the
+daemon's perspective and daemon<->shim api." The motivating UX: click a
+subagent in the frontend and the webapp renders THAT subagent as the
+first-class view — its feed, its composer, its held prompts — and submitting
+a prompt routes to the subagent, with queued prompts presented exactly as they
+are for the main agent from the main view.
+
+**What it implies for the contract.**
+
+- The write surface to a live agent is ONE type (`AgentInput { stop | answer
+  | prompt }`), carried identically by the turn's update rpc and the
+  subagent's; the requests differ ONLY in the address.
+- Prompt QUEUING is daemon-side and kind-agnostic: a prompt to a busy
+  subagent is held, classified, and delivered (interrupting if that is what
+  delivery takes) by the same machinery as for the turn. `prompt` is
+  therefore legal on both writes; "send a message to a subagent" is the
+  daemon deciding when to deliver, not the vendor's steer-at-next-tool-round,
+  which is the shim's mechanism underneath.
+- The read surface is likewise one type: `AgentFrame` is the frame of the
+  turn's stream and of a subagent's stream.
+- The same holds for workflow and bash in principle — the same update API as
+  in the turn band — and is MOOT in practice: a workflow is never carried by
+  a turn, and a process has no input but stop.
+
+**What it does NOT claim.** Nothing about bash or workflow becomes
+agent-shaped; a process and a script are not agents.
+
+**Reopened by name.** The DETACHED WORK inventory's `UpdateSubagent` as a
+superset of `UpdateTurn` (withdrawn: they are the same type); the orchestrator's
+reading that a main agent takes no prompt mid-turn while a subagent does (both
+follow one rule, whichever it is).
+
+**Open questions it raises, to settle at the DETACHED WORK shapes.** Whether
+"no prompt to a busy agent; the daemon holds it" is the one rule for both;
+whether a subagent's stream is addressed by `DetachedWorkId` or by `AgentId`;
+and who delivers a held prompt to an IDLE subagent — today nothing starts a
+turn on a subagent, so the queue has no drain there.
+
 ## Landed changes
+
+### `AgentFrame` and `AgentAnswer` extracted; `StartTurn`/`UpdateTurn` renamed; the permission gets its OWN identity; question answer types renamed
+
+**What changed ("yep agreed"; "update the names as you see fit").**
+`agent.proto` gains `AgentFrame { update | success | failure }` and
+`AgentAnswer { question_answer | permission_decision }`. `StartTurnResponse`
+(was `SubmitPromptResponse`) wraps `AgentFrame` whole; `UpdateTurnRequest`
+(was `UpdatePromptRequest`) is `{ TurnId; oneof { interrupt | AgentAnswer
+answer } }`. `permission.proto`: `AgentPermission.id` is NEW
+`AgentPermissionId`, and the gated tool unit is an explicit `gated_call`
+(`AgentActivityId`); `AgentPermissionDecision` lands as the write-back.
+`question.proto`: `AgentQuestionAnswered` → `AgentQuestionAnswers`,
+`AgentQuestionAnswer` (per question) → `AgentQuestionSelection`, and NEW
+`AgentQuestionAnswer { ask; answers }` is the write-back.
+
+**WHY THE FRAME ONEOF MOVED INTO conversation.v1, reversing the previous
+entry's split.** The user, on the detached-work inventory: every watch was
+described as "same as X's own ABC", and "this to me screams extraction". The
+one thing repeated was the result oneof, so it is declared ONCE per kind —
+`AgentFrame` for agents; `AgentBash` and `AgentWorkflow` already are theirs —
+and every stream response wraps its kind's frame whole. One handler per kind.
+
+**THE RENAME, the user's.** `SubmitPrompt`/`UpdatePrompt` named the prompt;
+the rpcs act on the TURN. `StartTurn` opens it (the stream is the turn),
+`UpdateTurn` writes to it. `agentrepl.v1.SubmitPrompt` keeps its name: there
+a user really submits a prompt and the daemon decides what it becomes.
+
+**THE PERMISSION IDENTITY, the user's second catch.** `AgentActivityId` was
+doing two jobs on the permission — its identity and the join to the gated
+tool unit. "It isn't an activity arm anymore." Split: the identity is the
+permission's own, the join is an explicit field. Names are premises.
+
+**Question naming collision, resolved.** The landed `AgentQuestionAnswered
+{ repeated AgentQuestionAnswer }` used "answered"/"answer" for batch/element,
+leaving no name for the write-back. Renamed top-down: `Answers` (batch),
+`Selection` (one question's choices), `Answer` (the write-back).
+
+**Superseded within this landing.** `UpdateTurnRequest`'s inline `{ interrupt
+| answer }` oneof is replaced by `AgentInput` at the next increment, per the
+core principle above.
 
 ### 4c: `UpdatePrompt` lands — THREE actions, not two; `AgentQuestionId` is the question's own identity
 
