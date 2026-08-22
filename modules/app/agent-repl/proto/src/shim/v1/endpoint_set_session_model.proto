@@ -1,4 +1,4 @@
-// endpoint_set_model.proto — SetModel: change the model for every response
+// endpoint_set_session_model.proto — SetSessionModel: change the model for every response
 // from the NEXT turn on.
 //
 // RESOLVES AFTER THE CURRENT TURN ENDS, never mid-turn: the switch takes
@@ -8,7 +8,7 @@
 //
 // A MODEL SWITCH IS A COLD CACHE. The prompt cache is per model, so the next
 // request re-reads the whole context whatever the TTL. The same discipline as
-// OpenSession applies: the request names the size above which that cost is
+// StartSession applies: the request names the size above which that cost is
 // NOT to be paid unasked; a larger context is refused IMMEDIATELY — before
 // any waiting — with the cost, and the daemon retries naming a remediation.
 
@@ -22,7 +22,7 @@ import "conversation/v1/session.proto";
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
 // Which model, and what a cold switch may cost.
-message SetModelRequest {
+message SetSessionModelRequest {
   // The model — an echo of a served option. One not in the catalog is a
   // refusal.
   conversation.v1.AgentModel model = 1;
@@ -37,21 +37,21 @@ message SetModelRequest {
 }
 
 // THE ARM IS THE OUTCOME.
-message SetModelResponse {
+message SetSessionModelResponse {
   oneof result {
-    SetModelSuccess success = 1;
-    SetModelFailure failure = 2;
+    SetSessionModelSuccess success = 1;
+    SetSessionModelFailure failure = 2;
   }
 }
 
 // Switched, and the turn boundary has passed. Carries the model now in effect
 // — the same fact SessionUpdate.model_changed states on the standing stream.
-message SetModelSuccess {
+message SetSessionModelSuccess {
   conversation.v1.SessionModelChanged model_changed = 1;
 }
 
 // Not switched. THE ARM IS WHY.
-message SetModelFailure {
+message SetSessionModelFailure {
   oneof cause {
     // The context exceeds the threshold and no remediation was named: here
     // is what the switch would cost, so a remediation can be chosen.

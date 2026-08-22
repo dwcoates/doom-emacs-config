@@ -1,4 +1,4 @@
-// endpoint_open_session.proto — OpenSession: bind the shim to one vendor
+// endpoint_start_session.proto — StartSession: bind the shim to one vendor
 // session and bring it to the point where a prompt can be ACCEPTED.
 //
 // RESOLVES WHEN A PROMPT CAN BE ACCEPTED — which is the shim's own readiness,
@@ -20,42 +20,49 @@ import "conversation/v1/session.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
-// What the daemon wants driven, and how.
-message OpenSessionRequest {
-  // How the session comes to exist. The set arm is the source.
+// What the daemon wants driven, and how. UNARY: the daemon persists the
+// identity the answer carries and ATTACHES with WatchSession; spawning and
+// attaching are decoupled because the session outlives the daemon.
+message StartSessionRequest {
+  // How the session comes to exist. The set arm is the source, and each
+  // carries only what that source needs.
   oneof source {
     // A new vendor session, empty context.
-    OpenSessionFresh fresh = 1;
+    StartSessionFresh fresh = 1;
     // An existing vendor session. Refused with `cold` when its cache has
     // lapsed and no remediation is named.
-    OpenSessionResume resume = 2;
+    StartSessionResume resume = 2;
   }
-  // The model to start on — an echo of a served option, as the daemon last
-  // knew it. The answer reports the EFFECTIVE model, and the answer wins.
-  conversation.v1.AgentModel model = 3;
-  // The permission mode the session starts in. Session state, changed later
-  // by SetPermissionMode; never per prompt.
-  conversation.v1.AgentPermissionMode permission_mode = 4;
 }
 
-// A new vendor session.
-message OpenSessionFresh {}
+// A new vendor session. Carries what nothing can recover: the model and the
+// mode to begin with.
+message StartSessionFresh {
+  // The model to start on — an echo of a served option.
+  conversation.v1.AgentModel model = 1;
+  // The permission mode to start in. Session state, changed later by
+  // SetSessionPermissionMode; never per prompt.
+  conversation.v1.AgentPermissionMode permission_mode = 2;
+}
 
-// Resume an existing vendor session.
-message OpenSessionResume {
-  // The vendor's own identity for it, as a previous OpenSession reported.
+// Resume an existing vendor session. Carries NO model and NO mode: the SDK
+// records both in the transcript per response and per prompt but does not
+// restore them, so the shim reads the last of each back and passes them —
+// the answer reports what was recovered.
+message StartSessionResume {
+  // The vendor's own identity for it, as a previous StartSession reported.
   string vendor_session_id = 1;
   // What to do about a cold context. UNSET means "refuse if cold" — the
   // daemon's first attempt, which learns the cost before paying it. Set only
-  // on the reopen that follows a `cold` failure; a warm context ignores it.
+  // on the retry that follows a `cold` failure; a warm context ignores it.
   optional conversation.v1.SessionColdRemediation cold_remediation = 2;
 }
 
 // THE ARM IS THE OUTCOME.
-message OpenSessionResponse {
+message StartSessionResponse {
   oneof result {
-    OpenSessionSuccess success = 1;
-    OpenSessionFailure failure = 2;
+    StartSessionSuccess success = 1;
+    StartSessionFailure failure = 2;
   }
 }
 
@@ -67,13 +74,13 @@ message OpenSessionResponse {
 // in the background, once — rather than on the user's first prompt. The
 // cadence has STARTED; the read need not have finished. The keep-alive is the
 // shim's own mechanism and never appears on this wire.
-message OpenSessionSuccess {
+message StartSessionSuccess {
   // The opened session, whole — the same facts every surface reads.
-  conversation.v1.SessionOpened session = 1;
+  conversation.v1.SessionStarted session = 1;
 }
 
 // The session could not be opened as asked. THE ARM IS WHY.
-message OpenSessionFailure {
+message StartSessionFailure {
   oneof cause {
     // The context is cold and no remediation was named: here is what
     // resuming would cost, so a remediation can be chosen.
