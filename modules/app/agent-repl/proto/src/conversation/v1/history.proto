@@ -1,0 +1,75 @@
+// history.proto — A BOUNDED, BACKWARD READ of one agent's durable history.
+//
+// THE PAGE'S SCOPE IS THE AGENT. Every entry is a child of the agent the
+// request named — the main agent included, which has an identity like any
+// other and is never "nil" — so an entry carries no placement of its own:
+// where it sits is the request's fact, and what it is is the entry's.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/turn.proto";
+import "conversation/v1/user.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// One page: a contiguous run of an agent's history, NEWEST FIRST, and
+// whether older history remains.
+message HistoryPage {
+  // The entries, newest first. A turn may straddle pages: entries are units
+  // that upsert by identity, so a split costs a consumer nothing.
+  repeated HistoryEntry entries = 1;
+  // WHETHER older history remains — never how much, never where.
+  oneof boundary {
+    // Older entries remain below this page.
+    HistoryMore more = 2;
+    // This page reached the oldest RETAINED entry. Retention is the serving
+    // side's own fact; it says so rather than letting a caller infer a
+    // beginning from a short page.
+    HistoryFloor floor = 3;
+  }
+}
+
+// One thing in an agent's history. THE ARM IS WHAT IT IS.
+message HistoryEntry {
+  oneof entry {
+    // A prompt delivered to this agent.
+    HistoryPrompt user_prompt = 1;
+    // A frame of this agent in its SETTLED state — a unit as it ended, a
+    // question or permission as it concluded, a detached-work announcement,
+    // or the terminal arm that says how a turn ended. No `start` is replayed:
+    // by the upsert rule the settled frame carries the start's facts.
+    AgentFrame agent_frame = 2;
+  }
+}
+
+// A prompt in history, under the identity the daemon minted for it at
+// submission — the same id the client drew its row under and the shim adopted
+// on delivery, so nothing is reconciled between the optimistic row and the
+// record that comes back.
+message HistoryPrompt {
+  // The prompt's identity.
+  TurnId id = 1;
+  // What was said.
+  UserSaid said = 2;
+}
+
+// Older entries remain below this page.
+message HistoryMore {
+  // Where the next page starts. Opaque; echoed verbatim.
+  HistoryContinuation continuation = 1;
+}
+
+// This page reached the oldest retained entry.
+message HistoryFloor {}
+
+// Where a backward read continues. MINTED BY THE PRODUCER, echoed verbatim,
+// never parsed: a consumer that constructs one is typed as wrong in intent. A
+// continuation names a place the caller has DEMONSTRABLY BEEN, and walks
+// away from the history rather than into it.
+message HistoryContinuation {
+  // The opaque value.
+  string value = 1;
+}

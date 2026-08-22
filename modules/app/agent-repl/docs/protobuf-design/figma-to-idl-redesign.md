@@ -196,6 +196,66 @@ the producer ends without a terminal frame is the failure).
 
 ## Landed changes
 
+### 4c: `ReadHistory` lands — the HISTORY section; a page is ONE AGENT's children; the main agent has an identity and nothing is nil
+
+**What changed ("great, let's ship").** NEW `conversation/v1/history.proto`:
+`HistoryPage { repeated HistoryEntry entries (newest first); oneof boundary
+{ more { HistoryContinuation } | floor } }`, `HistoryEntry { oneof entry
+{ HistoryPrompt user_prompt | AgentFrame agent_frame } }`, `HistoryPrompt
+{ TurnId id; UserSaid said }`, `HistoryContinuation { value }` (opaque,
+echoed). `endpoint_read_history.proto`: request { AgentId agent; oneof
+position { first | next(continuation) } }; success wraps the page; failure
+arms derived (unknown agent, stale continuation, store unavailable).
+`SessionStarted` gains `main_agent_id`. Eighteen rpcs; stage 4's four
+sections are all landed.
+
+**THE PAGE'S SCOPE IS THE AGENT, and that is the whole of placement.** The
+orchestrator kept stamping each entry with a `TurnId`; the user: a history
+page "can be requested for something that was NOT a turn" — a subagent, a
+workflow's agent — and "the HistoryEntry already IMPLICITLY corresponds to an
+agent, because we've specified the parent id." So an entry carries no
+placement; the request's agent is it. Entries are `UserSaid | AgentFrame`,
+the user's own shape.
+
+**THE MAIN AGENT IS AN AGENT, the user's ruling, and nil dies.** Rather than
+"parent nil means top level", the main agent has an `AgentId` like any other:
+the store's parent column is never nil, a prompt's parent is always the agent
+it was sent to, every frame's `agent_id` is real, and the request's container
+collapsed from `top_level | parent(AgentId)` to `AgentId`.
+
+**ROTATION, the user's worry, and the decoupling that answers it.** If the
+main agent's id were the vendor session id, a rotation mid-page would split
+the agent's history. So the two identities are DECOUPLED: `main_agent_id` is
+OURS — shim-minted on the first fresh start, store-persisted, reported
+unchanged on every later start — and `SessionIdentityRotated` changes only
+the vendor handle the shim resumes by. A subagent's `AgentId` already behaves
+this way (the vendor's `agentId` survives its runs). Shim-minted rather than
+daemon-minted so a fresh daemon resuming an old store has one authority.
+
+**THE PROMPT'S ID IS THE DAEMON'S, and nothing is reconciled.** The daemon
+mints it at submission and returns it so the client draws the row at once;
+on delivery the shim ADOPTS it (`StartTurnRequest.turn`) and writes the
+record under it; history returns it as `HistoryPrompt.id`. The vendor's own
+`uuid`/`promptId` stay in the store's internal half. Whether the type keeps
+the name `TurnId` or becomes `PromptId` is an open naming question, separate
+from history: under the parity principle the daemon mints one per delivered
+prompt to ANY agent.
+
+**Terminal arms ARE entries.** `AgentSuccess`/`AgentFailure` frames appear in
+history; they are the only record of how a turn ended and the feed's stop
+notice has no other source. No `start` is replayed: the settled frame carries
+the start's facts by the upsert rule.
+
+**OWED TO STAGE 5 (vetting register, Owed H).** The store scopes by the
+LOGICAL session / main agent id, with the vendor session id as a mutable
+attribute; the parent column is never nil; "N most recent children of agent
+X" is an indexed query on `agent_id`, not the old ingest-time feed-row walk.
+
+**Flagged, not modelled.** `PromptOrigin` on a history prompt (a merge-driven
+prompt may draw differently; it is shim.v1 today and would have to move
+down); whether an UNSETTLED unit (the turn died mid-unit) appears as its
+last frame or is dropped.
+
 ### 4c: the SESSION and TURN sections RESTRUCTURED around spawn / attach / end — `StartSession`, `WatchTurn`, `KillSession`, `KillTurn`; `StartTurn` goes unary; resume recovers model and mode from the transcript
 
 **What changed ("yes").** Renames: `OpenSession` → `StartSession`

@@ -12,6 +12,7 @@ syntax = "proto3";
 package conversation.v1;
 
 import "conversation/v1/api.proto";
+import "conversation/v1/agent_activity.proto";
 import "conversation/v1/detached_work.proto";
 import "conversation/v1/permission.proto";
 import "conversation/v1/turn.proto";
@@ -34,6 +35,14 @@ message SessionStarted {
   // The permission mode in effect: asked for on a fresh start, recovered
   // from the transcript on a resume (recorded per prompt, not restored).
   AgentPermissionMode permission_mode = 7;
+  // THE MAIN AGENT'S IDENTITY. The main agent is an agent like any other —
+  // every frame it produces carries this, every prompt delivered to it is
+  // its child, and its history is read by naming it — so nothing anywhere is
+  // "nil for top level". OURS AND STABLE: minted by the shim on the first
+  // fresh start, persisted with the session, and reported unchanged on every
+  // later start; a vendor session rotation changes `vendor_session_id` and
+  // never this, so a rotation never splits the main agent's history.
+  AgentId main_agent_id = 8;
   // The models this session may switch to, each an echo token a model change
   // accepts.
   repeated ModelOption model_catalog = 4;

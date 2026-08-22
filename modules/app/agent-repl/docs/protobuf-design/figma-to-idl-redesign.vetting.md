@@ -434,3 +434,20 @@ against the vendor's actual transcript is unverified — that is the vetting
 half of this item; the store index is the stage-5 half.
 
 **Status.** OPEN.
+
+### H. The store scopes by the LOGICAL session, never nils a parent, and indexes children by agent (owed to stage 5, `store.v1`)
+
+**What is required.** (1) The store's session scope is the logical session
+(keyed by `main_agent_id`), with `vendor_session_id` a mutable attribute a
+rotation updates — today it scopes seq, dedup and fan-out by the vendor id.
+(2) Every record's parent is an `AgentId`, never nil: the main agent's
+children carry the main agent's id. (3) "The N most recent children of agent
+X, newest first, from a continuation" is one indexed query on the parent
+column, replacing the ingest-time feed-row-owner walk. (4) Keep-alive turns
+are never returned by it (Owed G).
+
+**Why, and who depends on it.** `ReadHistory` is addressed by agent and
+promises a rotation never splits a page; `SessionStarted.main_agent_id`
+promises the id is stable across starts; both are store facts.
+
+**Status.** OPEN.
