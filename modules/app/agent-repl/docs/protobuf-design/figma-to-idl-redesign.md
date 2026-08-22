@@ -159,7 +159,87 @@ whether a subagent's stream is addressed by `DetachedWorkId` or by `AgentId`;
 and who delivers a held prompt to an IDLE subagent — today nothing starts a
 turn on a subagent, so the queue has no drain there.
 
+### Sessions and turns OUTLIVE the daemon — so SPAWNING, ATTACHING and ENDING are three decoupled acts
+
+**Stated 2026-08-22, in the user's terms.** "These sessions/turns exist outside
+of the daemon's lifetime, and therefore the spawning of them, and the
+attaching to them, should be decoupled so the daemon can record the
+session/turn identifiers in session state manager, such that on restart it
+can simply run the corresponding Watch to handle."
+
+**What it implies for the contract.**
+
+- SPAWN is unary and returns (or adopts) an identity the daemon persists:
+  `StartSession`, `StartTurn`. A Watch is never how something is created.
+- ATTACH is a Watch stream that creates nothing and ENDS NOTHING: a consumer
+  closing it — gracefully, which a shutting-down daemon must do, or abruptly,
+  which the shim tolerates the same way — leaves the work running and the
+  information accumulating. `WatchTurn` opens by REPLAYING from the turn's
+  beginning, so attaching late or after a restart misses nothing.
+- END is a Kill that refuses while work is live unless forced, and names
+  what it killed: `KillSession` (the turn if open and EVERY live task,
+  whichever turn spawned it) and `KillTurn` (the main agent and what THIS
+  turn spawned, transitively, nothing else). The narrow stops
+  (`UpdateTurn.stop`, `UpdateSubagent.stop`, `StopBash`) remain single-target
+  interrupts.
+
+**What it does NOT claim.** No `CloseXConnection` rpcs: cancelling the Watch
+stream IS the graceful close in Connect, and a verb would duplicate the
+transport's own act.
+
+**Reopened by name.** 4b's "submit and the turn are ONE rpc" — the fused
+`StartTurn` stream. The accepted-vs-attached gap it existed to eliminate is
+closed by `WatchTurn`'s replay instead. Also the bounded-stream rule that "a
+client-side close is a transport failure": for Watch streams a consumer
+closing is a normal act; the rule now binds the PRODUCER side only (a stream
+the producer ends without a terminal frame is the failure).
+
 ## Landed changes
+
+### 4c: the SESSION and TURN sections RESTRUCTURED around spawn / attach / end — `StartSession`, `WatchTurn`, `KillSession`, `KillTurn`; `StartTurn` goes unary; resume recovers model and mode from the transcript
+
+**What changed ("yes").** Renames: `OpenSession` → `StartSession`
+(`SessionOpened` → `SessionStarted`), `CloseSession` → `KillSession`
+(`SessionClosed` → `SessionKilled`), `SetModel` → `SetSessionModel`,
+`SetPermissionMode` → `SetSessionPermissionMode`. `StartTurn` becomes UNARY
+(success `{}`: the prompt was accepted); NEW `WatchTurn(TurnId)` is the turn's
+stream, replaying from the beginning and refusing a concluded turn (that is
+HISTORY's). NEW `KillTurn { TurnId; bool force }` → `TurnKilled { agent_only
+| forced { stopped_work } }` / `TurnLive { live_work }`, in `turn.proto`.
+`StartSessionRequest`'s model and mode move INTO the `fresh` arm; `resume`
+carries only the id and the optional remediation; `SessionStarted` gains
+`permission_mode`. Seventeen rpcs on the service.
+
+**Stop ≠ Kill, the user's distinction.** `UpdateTurn.stop` interrupts the
+main agent alone and leaves what it spawned running. `KillTurn` ends the main
+agent AND everything the turn spawned, transitively — refusing while any of
+that is live unless forced, naming it. `KillSession` ends everything live in
+the process, whichever turn spawned it. VERIFIED at the type surface: the
+vendor's `background_tasks_changed` IS the live set (so KillSession needs no
+tracking), but nothing names a task's TURN — a task carries only its spawning
+`tool_use_id`, and `parent_agent_id` beyond depth 1 — so KillTurn's refusal
+list needs the shim to keep `task → spawning call → turn`. That is the ONE
+bounded exception to "no tree anywhere": spawn provenance, kept for kill
+purposes only, never on the wire except inside a refusal.
+
+**RESUME RECOVERS MODEL AND MODE — a correction, kept visible.** The
+orchestrator claimed permission mode was "not recoverable" on resume. WRONG:
+every `user` record in the JSONL carries `permissionMode` at top level (4,722
+occurrences in real sessions) and every `assistant` record carries `model`.
+What IS true, observed in the probe: the SDK does NOT RESTORE either — a
+resume with no options ran on the default model, not the session's
+`claude-haiku-4-5`. So both are recorded, neither restored, and the shim reads
+the last of each back and passes them; the answer reports what was recovered.
+ROOT CAUSE: reading "not restored" as "not recorded". The user's instinct —
+"the shim should know the model and permission mode" — was right.
+
+**The model-switch rule, the user's aside.** `SessionCold.model_switch` fires
+ONLY when the requested model differs from the transcript's last; a same-model
+resume is judged by the lifetime alone, and within it nothing fires. Stated at
+the arm.
+
+**Recorded as a core principle** (section above): spawn / attach / end are
+decoupled because sessions and turns outlive the daemon.
 
 ### 4c: `CloseSession` lands — refuses while anything is live unless forced; both outcomes NAME the work
 
