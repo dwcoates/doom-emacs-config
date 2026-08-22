@@ -161,6 +161,69 @@ turn on a subagent, so the queue has no drain there.
 
 ## Landed changes
 
+### 4c: `OpenSession` lands — the SESSION section opens; `conversation.v1/session.proto` holds the opened-session and cold-context vocabulary
+
+**What changed ("everything looks good", with the extraction).**
+`endpoint_open_session.proto`: request { oneof source { fresh | resume
+{ vendor_session_id; optional SessionColdRemediation } }; AgentModel model;
+AgentPermissionMode permission_mode }; response { success { SessionOpened }
+| failure { oneof cause { SessionCold cold }; detail } }. NEW
+`conversation/v1/session.proto`: `SessionOpened` (vendor id, runtime,
+effective model, catalog, turn in flight, live detached work),
+`SessionRuntime`, `SessionCold` (context tokens, last request instant, the
+TTL that lapsed, requested model), `SessionColdRemediation { pay | clear |
+compact { model; scope { full | prompts_only | responses_only |
+prompts_and_responses } } }`.
+
+**THE HIGH-LEVEL CONTRACT, worked out before any shape at the user's
+instruction.** OpenSession RESOLVES WHEN A PROMPT CAN BE ACCEPTED. It returns
+only facts fixed at handshake; anything that changes later is WatchSession's.
+And a COLD CONTEXT IS REFUSED, NEVER SILENTLY PAID: the shim must not load a
+lapsed context into the model unasked, so a bare resume of a cold session
+fails with the cost, and the daemon reopens naming a remediation.
+
+**VERIFIED EMPIRICALLY, because the protocol rests on it.** (1) `query({resume})`
+makes NO API call and emits NOTHING — a resumed probe session sent no prompt
+for 15s and produced zero messages, not even `system/init`; `init` arrived
+only WITH the first prompt, and the first assistant usage was `cache_read 0,
+cache_creation 23,683` (the cold read, landing on the first prompt). So the
+shim can refuse before any cost, and "can accept a prompt" is the SHIM's
+readiness, not a vendor signal. (2) Compaction is therefore a cold read PLUS
+output, never the cheap path; its payoff is later turns, and the comment says
+so. (3) `SESSION_SOURCE_COMPACT_CONTINUE` was ours (one daemon reference,
+`metaprompt.go:16`), not a vendor mode — the SDK has only `resume` and
+`continue` (most-recent-in-cwd, which the daemon never needs); the source
+oneof is `fresh | resume`.
+
+**COMPACTION IS OURS, the user's design.** Daemon-directed, shim-implemented:
+the request names the MODEL that writes the summary and the SCOPE (four arms);
+the shim runs a throwaway session that summarizes, then initializes the real
+session from the compacted transcript. Owed (vetting): whether the SDK can
+initialize a session from a transcript we wrote (`sessionStore` is `@alpha`;
+`forkSession` and writing the binary's JSONL are the other candidates), and
+whether our bookkeeping survives the vendor's `compact_boundary` format.
+
+**KEEP-ALIVES BEGIN BEFORE SUCCESS IS RETURNED — a producer obligation
+stated at the message.** A warm context stays warm while the user types; a
+`pay` resume takes its cold read at open, in the background, rather than on
+the first prompt. The CADENCE has started; the read need not have finished.
+
+**WHY THE FIELDS LIVE IN conversation.v1.** The user: these "are going to
+become externally-facing conversation messages" — a cold context is a warning
+the USER sees and a remediation the USER chooses, carried back through the
+daemon into the next open. So the shapes are conversation vocabulary and the
+endpoint wraps them whole.
+
+**Dropped from the old handshake, each by name**: `from_seq` /
+`query_created_seq` (no seq on the wire), `protocol_version` /
+`daemon_version` (the package version is the protocol), `query_instance_id`
+(the query is shim-internal), fast mode and the cache-evidence fingerprints
+(they change — WatchSession), `turn_in_flight` bool + `active_turn_ids` (one
+turn, typed).
+
+**Inventory consequence.** `WatchTurn(TurnId)` is REQUIRED to reattach to a
+turn in flight after a daemon restart; added to the TURN section's inventory.
+
 ### 4c: the DETACHED WORK section lands — seven bespoke rpcs; `AgentFrame` carries `agent_id`; a workflow's update carries its agents' FRAMES
 
 **What changed ("that looks mostly correct", with three corrections).**
