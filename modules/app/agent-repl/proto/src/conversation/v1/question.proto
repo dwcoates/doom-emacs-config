@@ -158,7 +158,7 @@ message AgentQuestionSuccess {
   // than a failure of it, so it is an arm here and not in the failure arm.
   oneof outcome {
     // The user answered.
-    AgentQuestionAnswered answered = 2;
+    AgentQuestionAnswers answered = 2;
     // The ask went unanswered and stopped waiting. The agent proceeded without
     // a choice, so a consumer draws the ask as expired rather than as pending
     // forever.
@@ -166,15 +166,15 @@ message AgentQuestionSuccess {
   }
 }
 
-// The user's answers.
-message AgentQuestionAnswered {
+// The user's answers to one ask, one per question.
+message AgentQuestionAnswers {
   // One answer per question. UNORDERED: each names the question it answers, so
   // a consumer must not assume these arrive in the batch's order.
-  repeated AgentQuestionAnswer answers = 1;
+  repeated AgentQuestionSelection answers = 1;
 }
 
-// What the user chose for one question.
-message AgentQuestionAnswer {
+// What the user chose for ONE question of the ask.
+message AgentQuestionSelection {
   // WHICH question this answers, echoed verbatim from the ask. Named explicitly
   // rather than inferred from position, so no order is load-bearing and an
   // answer cannot drift onto the wrong question.
@@ -229,4 +229,15 @@ message AgentQuestionId {
   // Minted by the shim from the asking call, held for the ask's whole life so
   // its frames upsert one element and an answer names exactly one ask.
   string value = 1;
+}
+
+// The user's answer to one open ask — what a consumer WRITES BACK. Carries the
+// same `AgentQuestionAnswers` the success frame will restate, so the producer
+// validates by comparing the echo against the batch it is already holding.
+message AgentQuestionAnswer {
+  // WHICH ask, as its start frame named it.
+  AgentQuestionId ask = 1;
+  // The answers, one per question, each echoing the served question text and
+  // option labels.
+  AgentQuestionAnswers answers = 2;
 }

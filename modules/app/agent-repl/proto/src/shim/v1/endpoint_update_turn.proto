@@ -1,0 +1,56 @@
+// endpoint_update_turn.proto — UpdateTurn: mid-flight input to the open
+// turn. Three things the daemon can say to a running turn, and nothing else:
+// stop, a choice, consent.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/turn.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Input to a turn already in flight.
+message UpdateTurnRequest {
+  // WHICH turn — the id the daemon minted and StartTurn opened. A turn
+  // that is not the open one is a refusal, never a silent no-op, so a late
+  // answer cannot land on the wrong turn.
+  conversation.v1.TurnId turn = 1;
+  // WHAT is being said. The set arm is the action; each carries only its
+  // own payload.
+  oneof action {
+    // Stop the turn. Its stream then concludes with AgentSuccess.interrupted
+    // once the agent binary acknowledges; this call returns before that.
+    UpdateTurnInterrupt interrupt = 2;
+    // Answer a question or decide a permission the turn is blocked on.
+    conversation.v1.AgentAnswer answer = 3;
+  }
+}
+
+// A user-commanded stop. Carries nothing: the target is the turn, and the
+// reason is always the user.
+message UpdateTurnInterrupt {}
+
+// THE ARM IS THE OUTCOME OF THE CALL — never of the turn.
+message UpdateTurnResponse {
+  oneof result {
+    // The input was delivered to the agent binary. What it changed arrives
+    // on the turn's stream.
+    UpdateTurnSuccess success = 1;
+    // The input could not be delivered.
+    UpdateTurnFailure failure = 2;
+  }
+}
+
+// Delivered. Empty: there is nothing to say that the stream will not say
+// better, and saying it twice invites two authorities.
+message UpdateTurnSuccess {}
+
+// Not delivered. `kind` arms are DERIVED at the wave from the shim's real
+// refusal sites: no turn open, a different turn open, no such ask, an ask
+// already decided, an answer whose shape does not match the ask.
+message UpdateTurnFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+}

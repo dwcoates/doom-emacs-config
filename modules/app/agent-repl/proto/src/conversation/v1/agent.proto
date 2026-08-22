@@ -1,8 +1,8 @@
 // agent.proto — WHAT AN AGENT'S STREAM SAYS: growth, or one of the two ways it
 // ends. Agnostic between the main agent (whose stream is the turn) and a
 // detached subagent (whose stream is its own): one vocabulary, one handler.
-// The oneof that selects among these three is the carrying stream's frame, in
-// shim.v1; this file declares the arms, never the frame.
+// AgentFrame is the frame itself, wrapped whole by every stream that carries an
+// agent; AgentAnswer is what a consumer writes back when the agent is blocked.
 
 syntax = "proto3";
 
@@ -15,6 +15,35 @@ import "conversation/v1/permission.proto";
 import "conversation/v1/question.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// One frame of an agent's bounded stream. THE ARM IS WHAT THE STREAM IS
+// SAYING: growth, or one of the two ways it ends. A stream that ends WITHOUT a
+// terminal arm is a TRANSPORT FAILURE and is read as one — never as the agent
+// concluding. Declared once so the turn's stream and a detached subagent's
+// stream are one shape and one handler.
+message AgentFrame {
+  oneof result {
+    // The agent is running and here is something it did, or is blocked on.
+    AgentUpdate update = 1;
+    // The agent ended on terms the consumer asked for.
+    AgentSuccess success = 2;
+    // The agent ended because something broke.
+    AgentFailure failure = 3;
+  }
+}
+
+// What a consumer WRITES BACK to an agent that is blocked: the counterpart of
+// AgentUpdate's two blocking arms, one answer each. Declared once so every
+// write rpc — to the turn, to a detached subagent, to a workflow's agent —
+// carries the same shape.
+message AgentAnswer {
+  oneof answer {
+    // The user's choices for an open question.
+    AgentQuestionAnswer question_answer = 1;
+    // The user's decision on an open permission.
+    AgentPermissionDecision permission_decision = 2;
+  }
+}
 
 // Something a running agent has to say. The arm states WHAT THE CONSUMER MUST
 // DO with it: pipe it back on this agent's own stream, or open a stream of its

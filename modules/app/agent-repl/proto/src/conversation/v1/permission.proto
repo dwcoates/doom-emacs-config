@@ -20,17 +20,42 @@ option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 message AgentPermission {
   // WHICH AGENT is asking — a subagent's tool calls are gated too.
   AgentId agent_id = 1;
-  // WHICH CALL is gated: the identity the tool's own activity unit will carry
-  // if the gate opens, so a consumer joins the consent to the work it allowed.
-  AgentActivityId id = 2;
+  // WHICH ASK — the permission's OWN identity, as a question has its own.
+  AgentPermissionId id = 2;
+  // WHICH CALL it gates: the tool unit that will carry this identity if the
+  // gate opens. Consent joins to work by this explicit field, never by sharing
+  // an identity space with it.
+  AgentActivityId gated_call = 3;
   // Where the gate stands. No update arm: asked once, decided once.
   oneof result {
     // This stream is now carrying this ask, and it is open.
-    AgentPermissionStart start = 3;
+    AgentPermissionStart start = 4;
     // The gate was decided — opened or closed — which is the ANSWER either way.
-    AgentPermissionSuccess success = 4;
+    AgentPermissionSuccess success = 5;
     // The ask could not be put to the user. Arms DERIVED at the wave.
-    AgentPermissionFailure failure = 5;
+    AgentPermissionFailure failure = 6;
+  }
+}
+
+// The identity of one permission ask. Opaque; equality is the only question
+// asked of it.
+message AgentPermissionId {
+  // Minted by the shim when the gate opens, held for the ask's whole life so
+  // its frames upsert one element and a decision names exactly one ask.
+  string value = 1;
+}
+
+// The user's decision on one open ask — what a consumer WRITES BACK. The same
+// arms the success frame will restate, minus `abandoned` and `policy`, which
+// no user can say.
+message AgentPermissionDecision {
+  // WHICH ask, as its start frame named it.
+  AgentPermissionId ask = 1;
+  // The decision: allow once, allow with the vendor's echoed standing, or deny
+  // with a reason the model will read.
+  oneof decision {
+    AgentPermissionAllowed allowed = 2;
+    AgentPermissionDeniedByUser denied = 3;
   }
 }
 
