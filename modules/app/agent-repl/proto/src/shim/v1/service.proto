@@ -11,6 +11,7 @@ package shim.v1;
 import "shim/v1/endpoint_start_turn.proto";
 import "shim/v1/endpoint_update_turn.proto";
 import "shim/v1/endpoint_detach_foreground.proto";
+import "shim/v1/endpoint_get_session_diagnostics.proto";
 import "shim/v1/endpoint_open_session.proto";
 import "shim/v1/endpoint_set_model.proto";
 import "shim/v1/endpoint_set_permission_mode.proto";
@@ -42,6 +43,9 @@ service Shim {
   rpc SetModel(SetModelRequest) returns (SetModelResponse);
   // Change the session's permission mode for every gate from now on.
   rpc SetPermissionMode(SetPermissionModeRequest) returns (SetPermissionModeResponse);
+  // Ask the shim how it is: its health and its degraded windows. A pull, at
+  // the daemon's cadence.
+  rpc GetSessionDiagnostics(GetSessionDiagnosticsRequest) returns (GetSessionDiagnosticsResponse);
 
   // ---- Turn: submitting a prompt, the turn's own stream, speaking to it ----
 
