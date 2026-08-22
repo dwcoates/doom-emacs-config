@@ -114,11 +114,12 @@ that transport.
 
 ## Landed changes
 
-### RECURSION IS RETRACTED: subagent activity is FLAT, attributed by `agent_id`; and the workflow body lands
+### RECURSION IS RETRACTED: subagent activity is FLAT, attributed by `agent_id`
 
 **What changed ("okay go for it").** `AgentActivity.subagent_activity` is
-DELETED. `AgentSubagentStart` gains `created_agent_id`. The `AgentWorkflow` body
-lands with no recursive arm. `message.proto` is deleted (see its own entry).
+DELETED. `AgentSubagentStart` gains `created_agent_id`. `message.proto` is deleted (see
+its own entry). THE WORKFLOW BODY DOES NOT LAND HERE — see the note at the end
+of this entry.
 
 **WHY THE RECURSION WENT, in the user's terms.** It "requires the shim to be too
 'smart': no longer a simple vendor-adapter and message recorder, it's now
@@ -176,39 +177,29 @@ contract stays silent and the policy can be tuned without a wire change. The use
 observed that one level down is "99% of the information cared about" at almost
 none of the cost of going deeper.
 
-**THE WORKFLOW BODY, and what the evidence allowed.** `AgentWorkflow` =
-{ start | success | failure }. Start carries the run's name and identity, a
-`source` oneof (inline script, named, path, resumed) and a `placement` oneof
-(local, remote), plus an optional non-blocking warning. Success carries an
-optional summary. Failure carries an OPTIONAL run identity — a script rejected
-before launch never had one — over a cause oneof separating a rejected script from
-a run that started and ended.
+**THE WORKFLOW BODY IS NOT LANDED, and the process error is recorded.** The
+orchestrator asked a COMPOUND question — whether to land the flat-model reversion
+and the workflow body together — read the user's assent as covering both, and
+landed a workflow shape that had been drafted BEFORE the flat model and never
+re-presented once the flat model changed its premises. The user caught it: "we did
+a detour to update the agent, which we should have, but did not return to
+workflow." The body was reverted; the flat-model reversion, which WAS agreed,
+stands. ROOT CAUSE: a compound agreement request, which cannot be answered
+separately and so cannot be refused separately.
 
-**No update arm and no enumeration, both on evidence.** A run's journal holds only
-`{type: started|result, key, agentId, result?}` — one pair per agent call — which
-is exactly what those subagents' own units already state. And the run's
-constituents are not listed anywhere on this unit: a consumer learns them by
-asking for the items of an agent it saw created, like any other agent's work.
-
-**A LANDED CLAIM CORRECTED.** `detached_work.proto` asserts that "a journal file
-states a step's label, its detail and its status separately". FALSE against the
-real file, which has no label, no detail and no status. Nor does the sidecar
-produce that shape: it flattens each record to a prose line, and its own comment
-concedes "THE RENDERING IS LOSSY AND THAT IS A KNOWN COST… a journal record's
-structure does not survive into the store."
-
-**PHASE GROUPING HAS NO PRODUCER, and that is an evidence gap rather than a
-choice.** A script declares its phases in `meta` and each agent call may name
-one, but NEITHER reaches any readable artifact — the journal has no phase and the
-per-agent meta holds only `{agentType, spawnDepth, model}`. Recovering it would
-mean interpreting the script's control flow. So the fan-out-by-phase view a
-workflow's data seems to invite cannot be drawn, and making it possible is a
-PRODUCER change, not a schema one.
-
-**A workflow is ALWAYS detached** — the producer's status values are only
-`async_launched` and `remote_launched`, with no synchronous form. Worth
-contrasting with the subagent, where the same suspicion was raised and the
-producer turned out to offer a synchronous path after all.
+**What the workflow research established is NOT lost, and is recorded here so the
+increment resumes from evidence rather than repeating it.** A run's journal holds
+only `{type: started|result, key, agentId, result?}` — one pair per agent call,
+which is what those subagents' own units already state. PHASE GROUPING HAS NO
+PRODUCER: a script declares its phases in `meta` and each agent call may name one,
+but neither reaches any readable artifact, since the journal has no phase and the
+per-agent meta holds only `{agentType, spawnDepth, model}`. A LANDED CLAIM IS
+WRONG: `detached_work.proto` asserts a journal "states a step's label, its detail
+and its status separately", which is false against the real file, and the
+sidecar's own converter concedes its rendering is lossy. And a workflow is ALWAYS
+DETACHED — the producer's only status values are `async_launched` and
+`remote_launched`, with no synchronous form, in contrast to the subagent where the
+same suspicion was raised and a synchronous path turned out to exist.
 
 ### TOKEN USAGE MOVES TO THE `AgentActivity` ENVELOPE, with a one-unit-per-response rule; thinking's usage field DIES
 
