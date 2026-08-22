@@ -62,13 +62,28 @@ message SessionCold {
   uint64 context_tokens = 1;
   // When the last request was made, in unix millis.
   int64 last_request_at_ms = 2;
-  // The cache lifetime that lapsed, in millis (the vendor's 5-minute or
-  // 1-hour tier, whichever the last request used).
-  int64 cache_ttl_ms = 3;
   // The model the request asked for, echoed so the choice is made against
   // the price of THAT model's reads.
-  AgentModel requested_model = 4;
+  AgentModel requested_model = 3;
+  // WHY the cache would not serve. The set arm is the reason; only a lapse
+  // has a lifetime to report.
+  oneof reason {
+    // The cache lifetime passed since the last request.
+    SessionColdLapsed lapsed = 4;
+    // The model is changing, and a cache is per model.
+    SessionColdModelSwitch model_switch = 5;
+  }
 }
+
+// The cache lapsed.
+message SessionColdLapsed {
+  // The lifetime that lapsed, in millis (the vendor's 5-minute or 1-hour
+  // tier, whichever the last request used).
+  int64 cache_ttl_ms = 1;
+}
+
+// The model is changing.
+message SessionColdModelSwitch {}
 
 // What to do with a cold context. The set arm is the remediation; each costs
 // something different, and the choice is the user's or the daemon's policy,
