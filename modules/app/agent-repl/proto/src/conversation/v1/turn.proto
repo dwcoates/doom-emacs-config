@@ -11,6 +11,8 @@ syntax = "proto3";
 
 package conversation.v1;
 
+import "conversation/v1/detached_work.proto";
+
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
 // The identity of a turn.
@@ -25,4 +27,29 @@ message TurnId {
   // The daemon-minted identifier. Treat as an opaque token: compare it for
   // equality, echo it back unchanged, and never parse or construct one.
   string value = 1;
+}
+
+// The turn was killed. THE ARM IS HOW.
+message TurnKilled {
+  oneof how {
+    // Nothing it spawned was live; the main agent was interrupted.
+    TurnKilledAgentOnly agent_only = 1;
+    // Work this turn spawned was killed with it. Names what died.
+    TurnKilledForced forced = 2;
+  }
+}
+
+// Only the main agent was interrupted.
+message TurnKilledAgentOnly {}
+
+// Spawned work was killed with the turn.
+message TurnKilledForced {
+  // Every detached item this turn spawned, transitively, that was stopped.
+  repeated DetachedWorkId stopped_work = 1;
+}
+
+// The turn could not be killed without force: work it spawned is live.
+message TurnLive {
+  // Every detached item this turn spawned, transitively, that is live now.
+  repeated DetachedWorkId live_work = 1;
 }

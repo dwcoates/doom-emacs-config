@@ -1,0 +1,29 @@
+// endpoint_watch_turn.proto — WatchTurn: ATTACH to the open turn. Opens by
+// REPLAYING the turn from its beginning — every unit's `start` with its
+// original instant, then everything since — so a consumer that attaches
+// late, or after its own restart, misses nothing, and the gap between
+// StartTurn and WatchTurn costs nothing. A consumer closing this stream ends
+// NOTHING; the turn runs on.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/turn.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Which turn to attach to.
+message WatchTurnRequest {
+  // WHICH turn. A turn that is not the open one is a refusal: a concluded
+  // turn is history, read through the HISTORY section, never watched.
+  conversation.v1.TurnId turn = 1;
+}
+
+// One frame: the agent frame, whole — the same shape as a subagent's stream.
+// The first frames REPLAY the turn so far; then the stream is live; the
+// terminal arm ends it.
+message WatchTurnResponse {
+  conversation.v1.AgentFrame frame = 1;
+}

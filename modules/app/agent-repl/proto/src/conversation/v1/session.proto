@@ -1,4 +1,4 @@
-// session.proto — THE SESSION'S OPENING: what a session is once it can accept
+// session.proto — THE SESSION'S START: what a session is once it can accept
 // a prompt, what a cold context costs, and what can be done about it.
 //
 // Declared here rather than in the shim's endpoint because these facts cross
@@ -18,17 +18,22 @@ import "conversation/v1/turn.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
-// A session that can accept a prompt. Everything here is a FACT AT OPENING;
+// A session that can accept a prompt. Everything here is a FACT AT START;
 // anything that changes later arrives as session updates, never here twice.
-message SessionOpened {
+message SessionStarted {
   // The vendor's identity for this session — what a later resume names and
   // what the store scopes by. May differ from the one asked for when the
   // vendor rotated it; the vendor's answer wins.
   string vendor_session_id = 1;
   // Who is driving: the shim's build and the SDK it embeds.
   SessionRuntime runtime = 2;
-  // The model actually in effect, which may differ from the one requested.
+  // The model actually in effect: the one asked for on a fresh start, or the
+  // one recovered from the transcript on a resume (the SDK records it per
+  // response but does NOT restore it; the shim reads it back and passes it).
   AgentModel effective_model = 3;
+  // The permission mode in effect: asked for on a fresh start, recovered
+  // from the transcript on a resume (recorded per prompt, not restored).
+  AgentPermissionMode permission_mode = 7;
   // The models this session may switch to, each an echo token a model change
   // accepts.
   repeated ModelOption model_catalog = 4;
@@ -70,7 +75,9 @@ message SessionCold {
   oneof reason {
     // The cache lifetime passed since the last request.
     SessionColdLapsed lapsed = 4;
-    // The model is changing, and a cache is per model.
+    // The model is changing, and a cache is per model. Fires ONLY when the
+    // model asked for DIFFERS from the transcript's last; a same-model resume
+    // is judged by the lifetime alone, and within it nothing fires.
     SessionColdModelSwitch model_switch = 5;
   }
 }
@@ -154,7 +161,7 @@ message SessionUpdate {
     // subagent's, a run's — also concludes with its own failure, but a
     // consumer with no stream open still needs to know the session is over.
     SessionQueryDied query_died = 2;
-    // The effective model changed — by SetModel, or by the vendor. Stated here
+    // The effective model changed — by SetSessionModel, or by the vendor. Stated here
     // even when the consumer asked for it, so one place is authoritative.
     SessionModelChanged model_changed = 3;
     // The vendor's fast mode switched.
@@ -163,7 +170,7 @@ message SessionUpdate {
     SessionMcpServer mcp_server = 5;
     // The account's usage allowance was observed.
     SessionAccountUsage account_usage = 6;
-    // The session's permission mode changed — by SetPermissionMode, or by a
+    // The session's permission mode changed — by SetSessionPermissionMode, or by a
     // standing permission grant that set it. Stated here even when the
     // consumer asked for it, so one place is authoritative.
     SessionPermissionModeChanged permission_mode_changed = 7;
@@ -182,7 +189,7 @@ message SessionIdentityRotated {
 }
 
 // The query ended on its own. THE ARM IS HOW; an orderly close is
-// CloseSession's success, and a failure to start is OpenSession's failure.
+// KillSession's success, and a failure to start is StartSession's failure.
 message SessionQueryDied {
   oneof cause {
     // The agent binary's stream ended without a close.
@@ -372,31 +379,32 @@ message SessionDegradedClosed {
   uint64 dropped_count = 2;
 }
 
-// ---- Closing ----
+// ---- Killing ----
 
-// The session was closed. THE ARM IS HOW: idle, or by force over live work.
-message SessionClosed {
+// The session was killed. THE ARM IS HOW: idle, or by force over live work.
+message SessionKilled {
   oneof how {
     // Nothing was live; the query ended cleanly.
-    SessionClosedIdle idle = 1;
-    // Live work was killed to close. Names what died, so the consumer can
-    // conclude the elements it was drawing for them.
-    SessionClosedForced forced = 2;
+    SessionKilledIdle idle = 1;
+    // Live work was killed with it — the turn if one was open, and EVERY
+    // live task, whichever turn spawned it. Names what died, so the consumer
+    // can conclude the elements it was drawing for them.
+    SessionKilledForced forced = 2;
   }
 }
 
-// Closed with nothing live.
-message SessionClosedIdle {}
+// Killed with nothing live.
+message SessionKilledIdle {}
 
-// Closed by force.
-message SessionClosedForced {
+// Killed by force.
+message SessionKilledForced {
   // The turn that was interrupted, if one was in flight.
   optional TurnId interrupted_turn = 1;
   // Every detached item that was stopped.
   repeated DetachedWorkId stopped_work = 2;
 }
 
-// The session could not be closed because work is live and force was not
+// The session could not be killed because work is live and force was not
 // asked. Names the work, so the consumer can stop it itself or ask for force.
 message SessionLive {
   // The turn in flight, if one is.

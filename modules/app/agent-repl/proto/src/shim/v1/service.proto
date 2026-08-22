@@ -8,64 +8,77 @@ syntax = "proto3";
 
 package shim.v1;
 
-import "shim/v1/endpoint_start_turn.proto";
-import "shim/v1/endpoint_update_turn.proto";
-import "shim/v1/endpoint_close_session.proto";
 import "shim/v1/endpoint_detach_foreground.proto";
 import "shim/v1/endpoint_get_session_diagnostics.proto";
-import "shim/v1/endpoint_open_session.proto";
-import "shim/v1/endpoint_set_model.proto";
-import "shim/v1/endpoint_set_permission_mode.proto";
-import "shim/v1/endpoint_watch_session.proto";
+import "shim/v1/endpoint_kill_session.proto";
+import "shim/v1/endpoint_kill_turn.proto";
+import "shim/v1/endpoint_set_session_model.proto";
+import "shim/v1/endpoint_set_session_permission_mode.proto";
+import "shim/v1/endpoint_start_session.proto";
+import "shim/v1/endpoint_start_turn.proto";
 import "shim/v1/endpoint_stop_bash.proto";
 import "shim/v1/endpoint_update_subagent.proto";
+import "shim/v1/endpoint_update_turn.proto";
 import "shim/v1/endpoint_update_workflow.proto";
 import "shim/v1/endpoint_watch_bash.proto";
+import "shim/v1/endpoint_watch_session.proto";
 import "shim/v1/endpoint_watch_subagent.proto";
+import "shim/v1/endpoint_watch_turn.proto";
 import "shim/v1/endpoint_watch_workflow.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
-// The shim: the vendor adapter the daemon drives, one per session.
+// The shim: the vendor adapter the daemon drives, one per session. Sessions
+// and turns OUTLIVE the daemon, so for each the three acts are decoupled:
+// SPAWN it (unary, returns an identity the daemon persists), ATTACH to it (a
+// Watch stream that creates nothing and ends nothing — a consumer closing it
+// leaves the work running; a daemon shutting down closes its Watches
+// gracefully and the shim tolerates an abrupt close the same way), and END it
+// (a Kill, which refuses while work is live unless forced).
 service Shim {
-  // ---- Session: opening, the standing session stream, state that conditions turns, teardown ----
+  // ---- Session: spawn, attach, condition, inspect, end ----
 
-  // Bind to a vendor session and bring it to the point where a prompt can be
-  // accepted. A cold context is REFUSED with its cost until the daemon names
-  // a remediation; the shim begins its keep-alive cadence before answering.
-  rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
-  // The standing stream of session-level facts as they manifest upstream:
-  // identity rotation, the query dying, model and fast-mode changes, MCP
-  // health, account usage. Nothing synthetic — the shim's own health is pulled.
+  // SPAWN: bind to a vendor session and bring it to the point where a prompt
+  // can be accepted. A cold context is REFUSED with its cost until a
+  // remediation is named; the shim begins its keep-alive cadence before
+  // answering.
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  // ATTACH: the standing stream of session-level facts as they manifest
+  // upstream. The facts fixed at start are StartSession's; nothing synthetic
+  // rides here — the shim's own health is pulled.
   rpc WatchSession(WatchSessionRequest) returns (stream WatchSessionResponse);
   // Change the model from the next turn on. Resolves after the current turn
   // ends; refused IMMEDIATELY with the cold cost when the context exceeds the
   // request's threshold and no remediation is named.
-  rpc SetModel(SetModelRequest) returns (SetModelResponse);
+  rpc SetSessionModel(SetSessionModelRequest) returns (SetSessionModelResponse);
   // Change the session's permission mode for every gate from now on.
-  rpc SetPermissionMode(SetPermissionModeRequest) returns (SetPermissionModeResponse);
+  rpc SetSessionPermissionMode(SetSessionPermissionModeRequest) returns (SetSessionPermissionModeResponse);
   // Ask the shim how it is: its health and its degraded windows. A pull, at
   // the daemon's cadence.
   rpc GetSessionDiagnostics(GetSessionDiagnosticsRequest) returns (GetSessionDiagnosticsResponse);
-  // Orderly teardown. Refuses while anything is live unless forced; a forced
-  // close names what it killed.
-  rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
+  // END: the session and EVERYTHING live in it — the turn if one is open and
+  // every live task, whichever turn spawned it. Refuses while anything is
+  // live unless forced; names what it killed.
+  rpc KillSession(KillSessionRequest) returns (KillSessionResponse);
 
-  // ---- Turn: submitting a prompt, the turn's own stream, speaking to it ----
+  // ---- Turn: spawn, attach, speak to it, end ----
 
-  // Open THE turn. The response stream IS the turn: it opens when the shim
-  // hands the prompt to the agent binary and concludes with a terminal frame
-  // when the main thread can accept a prompt again. AT MOST ONE is open per
-  // session, STRUCTURALLY: the daemon is the only queue and the only
-  // submitter, so a second call while one stream is open is a daemon fault
-  // and is refused, never queued.
-  rpc StartTurn(StartTurnRequest) returns (stream StartTurnResponse);
-
-  // Speak to THE open turn. Unary: each action has its own outcome, which a
-  // request-stream frame could not carry. Answers return NOTHING about the
-  // ask's new state — that arrives as the unit's next frame on the turn's
-  // stream, like every other state change.
+  // SPAWN: hand the prompt to the agent binary; returns once it is ACCEPTED.
+  // AT MOST ONE turn is open per session, STRUCTURALLY: the daemon is the
+  // only queue and the only submitter, so a second call while one is open is
+  // a daemon fault, refused, never queued.
+  rpc StartTurn(StartTurnRequest) returns (StartTurnResponse);
+  // ATTACH: the turn's stream — the agent frame, the same as a subagent's.
+  // Opens by REPLAYING the turn from its beginning, so attaching late or after
+  // a restart misses nothing; concludes with the turn's terminal frame.
+  rpc WatchTurn(WatchTurnRequest) returns (stream WatchTurnResponse);
+  // Speak to the open turn: stop the main agent alone, answer what it is
+  // blocked on, or prompt it.
   rpc UpdateTurn(UpdateTurnRequest) returns (UpdateTurnResponse);
+  // END: the main agent AND everything this turn spawned, transitively —
+  // nothing else. Refuses while any of that is live unless forced; names
+  // what it killed.
+  rpc KillTurn(KillTurnRequest) returns (KillTurnResponse);
 
   // ---- Detached work: one stream per live item, and the writes each kind accepts ----
 

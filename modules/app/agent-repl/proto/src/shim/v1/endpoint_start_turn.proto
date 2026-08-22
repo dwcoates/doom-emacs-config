@@ -1,10 +1,12 @@
-// endpoint_start_turn.proto — StartTurn: one prompt in, the turn out.
+// endpoint_start_turn.proto — StartTurn: SPAWN the turn. Unary: returns once
+// the prompt is ACCEPTED, never waits for the turn. The daemon persists the
+// TurnId it minted and ATTACHES with WatchTurn; spawning and attaching are
+// decoupled because the turn outlives the daemon.
 
 syntax = "proto3";
 
 package shim.v1;
 
-import "conversation/v1/agent.proto";
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
 import "shim/v1/prompt_origin.proto";
@@ -28,10 +30,23 @@ message StartTurnRequest {
   PromptOrigin origin = 3;
 }
 
-// One frame of the turn: the agent frame, whole. The main agent's stream and a
-// detached subagent's stream are the same shape, so one handler serves both.
+// THE ARM IS THE OUTCOME OF THE CALL — whether the prompt was ACCEPTED.
+// Nothing about the turn itself returns here: the turn is WatchTurn's.
 message StartTurnResponse {
-  // The frame. Its terminal arms end the turn; a stream that ends without one
-  // is a transport failure.
-  conversation.v1.AgentFrame frame = 1;
+  oneof result {
+    StartTurnSuccess success = 1;
+    StartTurnFailure failure = 2;
+  }
+}
+
+// The prompt was accepted and the turn is open. Empty: the id was the
+// daemon's, and everything the turn produces is WatchTurn's.
+message StartTurnSuccess {}
+
+// Not accepted. `kind` arms are DERIVED at the wave from the shim's real
+// refusal sites: a turn already open (the daemon fault), no session, the
+// agent binary refusing the prompt.
+message StartTurnFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
 }
