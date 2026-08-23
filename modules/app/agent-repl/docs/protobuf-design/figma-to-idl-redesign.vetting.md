@@ -226,6 +226,25 @@ resume the session and check `background_tasks_changed` membership.
 
 **Status.** OPEN.
 
+### 10. Whether backgrounding a FOREGROUND agent (Ctrl+B) fires a `task_started` edge
+
+**The assumption.** The shim detects every entry into the live-background
+set from the `task_started` EDGE alone (principle #3 forbids diffing the
+level). The level's doc comment lists "a foreground agent being backgrounded"
+as a membership change; `SDKTaskStartedMessage`'s doc does not say it fires
+for that transition.
+
+**What is affected.** `AgentDetachedWork`'s `detached` origin for a Ctrl-B'd
+agent: if no edge fires, the shim must take that one transition from
+`SDKTaskUpdatedMessage` or from the relayed level, and the frame's producer
+note changes; the shape does not.
+
+**How to verify it.** Background a running foreground subagent via
+`backgroundTasks(toolUseId)` and record which system messages arrive, in
+order.
+
+**Status.** OPEN.
+
 ## Owed to later stages
 
 Settled requirements a later stage must honour. Nothing here needs
