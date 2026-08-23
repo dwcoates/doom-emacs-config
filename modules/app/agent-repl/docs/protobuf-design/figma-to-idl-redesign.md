@@ -254,6 +254,32 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `update` frames carry FRAGMENTS: `AgentResponseUpdate` and `AgentThinkingUpdate` retyped to deltas; the settled text rides the terminal arms only
+
+**What changed ("looks good").** `AgentResponseUpdate { new_markdown }`;
+`AgentThinkingUpdate.text` is NEW `AgentThinkingTextDelta { new_text }`;
+`AgentResponseProse` and `AgentThinkingText` keep their shapes and are now
+documented as the WHOLE text carried on the terminal arms only (success, and
+failure's partial prose). The two `start` arms' comments, which justified the
+empty arm by the old cumulative rule, are reworded.
+
+**Why, in the user's terms.** Principle #3, ruling 3: the shim forwards what
+CHANGED and accumulates nothing; gluing, coalescing or forwarding fragments is
+the daemon's choice. This REOPENS the thinking/response entry's
+"prose-so-far, not a delta" and supersedes it.
+
+**No offset, the user's ruling.** A gap-detecting `from_offset` on the
+`AgentBashUpdate` pattern was offered and refused: a lost fragment "is
+evident in the response", and the terminal frame carries the whole text, so
+the settled bubble self-corrects. Bash keeps its offset (its spool has no
+settled whole to recover from).
+
+**Consequences.** The daemon's feed resolver now owns the prose buffer per
+in-flight unit (`FeedAgent.update` still carries prose-so-far to the webapp —
+that is a daemon-resolved VALUE, unchanged); the shim's response accumulator
+is deleted; `slash_command.proto`'s `ContextCompacted.summary` keeps
+`AgentResponseProse` as a whole text, unaffected.
+
 ### STAGE 4 CLOSE-OUT SWEEP: the five old `shim.v1` files are DELETED; `ModelMarker` moves to `api.proto` — STAGE 4 (shim.v1) COMPLETE
 
 **What changed ("looks good").** `core.proto`, `bookkeeping.proto`,
