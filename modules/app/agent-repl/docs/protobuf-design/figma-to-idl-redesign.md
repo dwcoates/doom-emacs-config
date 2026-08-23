@@ -246,9 +246,11 @@ for paging, only for kill scope and session scope. A unit's later frames
 upserts of the same unit — so the tree is agent → units. The one container
 that is not an agent is a WORKFLOW RUN, whose agents the script created; so
 the stored `parent` is a oneof { AgentId agent | DetachedWorkId workflow_run },
-and `top_level` stays an `AgentId` (the main agent). OPEN: whether
-`ReadHistory`'s address becomes that same oneof or a run's agent list is
-served only by the `WatchWorkflow` replay.
+and `top_level` stays an `AgentId` (the main agent). SETTLED, the user: "workflows aren't loaded by page, the SUBAGENTS WITHIN
+are" — `ReadHistory` stays addressed by `AgentId`; a run's agents are
+announced on the run's stream and each is paged like any other agent; the
+`workflow_run` parent arm exists only so those rows have a non-nil parent
+for scope, and no query pages by it.
 
 **Audit of the settled design against the principle.** Static already: tool
 return → call, skill document → call, created agent → spawn, re-announced
