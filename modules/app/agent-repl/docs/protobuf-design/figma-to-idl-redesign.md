@@ -69,6 +69,21 @@ downstream of it, enumerated by name.
 5. **`store.v1`** — `write` → `entry` → `cursor` → `unsupported`.
 6. **`state.v1`** — `durable.proto`.
 
+**Amendment (2026-08-22): a FRONTEND REMEDIATION PASS follows stage 6.**
+The user: "after state, we've got a lot of remediation to do for frontend
+… lots of new things have been made available for UX in our progress. Those
+need to have reflections in frontend.proto, AND in the UI itself." Stage 2
+is reopened BY NAME after stage 6, walked figma→idl with the ASCII drawing
+agreed before each shape, covering (a) the owed repoints (Owed F) and (b)
+every UX fact stages 1, 4 and 5 made available that `frontend.v1` does not
+yet draw: the permission gate as its own unit and the question batch; a
+subagent as a first-class view with its own feed, composer and held
+prompts; the cold-context warning and the user's remediation choice; kill
+and stop refusals that NAME live work; session diagnostics and degraded
+windows; per-kind detached-work streams; history addressed by agent;
+fragment-fed live bubbles. The UI implementation of each is fan-out work,
+not contract work, and is carried to `/cross-system-fanout` with the drawings.
+
 **Within a stage, files are walked TOP-DOWN BY CONTAINMENT.** The user's
 second amendment, made after the sequence was first accepted: the file
 declaring the highest-level (outermost) message goes first, then the files it
