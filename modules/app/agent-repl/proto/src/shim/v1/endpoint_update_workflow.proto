@@ -7,6 +7,7 @@ package shim.v1;
 
 import "conversation/v1/agent.proto";
 import "conversation/v1/detached_work.proto";
+import "conversation/v1/turn.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
@@ -29,7 +30,20 @@ message UpdateWorkflowResponse {
 }
 
 // Delivered; what it changed arrives on the run's stream.
-message UpdateWorkflowSuccess {}
+message UpdateWorkflowSuccess {
+  // What the input became. THE ARM MIRRORS THE INPUT: a prompt yields the
+  // prompt as delivered (to the run's agent the shim resolved); a stop or an
+  // answer yields nothing beyond "done" — the new state arrives on the stream.
+  oneof outcome {
+    // The `prompt` input, as delivered.
+    conversation.v1.AgentPrompt prompt = 1;
+    // A `stop` or `answer` input was delivered.
+    UpdateWorkflowDelivered delivered = 2;
+  }
+}
+
+// A stop or answer reached the run; nothing is restated here.
+message UpdateWorkflowDelivered {}
 
 // Not delivered: no such run, no such ask, an input this kind cannot take. `kind` arms are DERIVED at the wave from the shim's real refusal
 // sites.

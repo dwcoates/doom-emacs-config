@@ -11,7 +11,6 @@ package conversation.v1;
 
 import "conversation/v1/agent.proto";
 import "conversation/v1/turn.proto";
-import "conversation/v1/user.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
@@ -36,24 +35,13 @@ message HistoryPage {
 message HistoryEntry {
   oneof entry {
     // A prompt delivered to this agent.
-    HistoryPrompt user_prompt = 1;
+    AgentPrompt user_prompt = 1;
     // A frame of this agent in its SETTLED state — a unit as it ended, a
     // question or permission as it concluded, a detached-work announcement,
     // or the terminal arm that says how a turn ended. No `start` is replayed:
     // by the upsert rule the settled frame carries the start's facts.
     AgentFrame agent_frame = 2;
   }
-}
-
-// A prompt in history, under the identity the daemon minted for it at
-// submission — the same id the client drew its row under and the shim adopted
-// on delivery, so nothing is reconciled between the optimistic row and the
-// record that comes back.
-message HistoryPrompt {
-  // The prompt's identity.
-  TurnId id = 1;
-  // What was said.
-  UserSaid said = 2;
 }
 
 // Older entries remain below this page.

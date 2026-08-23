@@ -11,7 +11,9 @@ syntax = "proto3";
 
 package conversation.v1;
 
+import "conversation/v1/agent_activity.proto";
 import "conversation/v1/detached_work.proto";
+import "conversation/v1/user.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
@@ -27,6 +29,23 @@ message TurnId {
   // The daemon-minted identifier. Treat as an opaque token: compare it for
   // equality, echo it back unchanged, and never parse or construct one.
   string value = 1;
+}
+
+// A prompt AS DELIVERED to an agent — the one canonical form of "the user
+// said this to that agent", returned by the rpc that delivered it, persisted
+// by the store, and replayed by history. The same message in all three places
+// so nothing is reconciled: the client draws the row under `id` at
+// submission, the shim adopts `id` on delivery, and the record that comes back
+// is this.
+message AgentPrompt {
+  // The prompt's identity, daemon-minted at submission and adopted by the shim.
+  TurnId id = 1;
+  // The agent the prompt was delivered to — the main agent for a turn, a
+  // subagent or a workflow agent when addressed directly. Never unset: a
+  // prompt always has exactly one recipient.
+  AgentId agent = 2;
+  // What was said.
+  UserSaid said = 3;
 }
 
 // The turn was killed. THE ARM IS HOW.

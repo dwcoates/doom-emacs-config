@@ -292,6 +292,28 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `AgentPrompt` is the ONE form of a delivered prompt: returned by the delivering rpc, persisted by the store, replayed by history; `HistoryPrompt` deleted
+
+**What changed ("looks great").** `conversation/v1/turn.proto` gains
+`AgentPrompt { TurnId id; AgentId agent; UserSaid said }`. `HistoryEntry.user_prompt`
+is retyped to it and `HistoryPrompt` is deleted. `StartTurnSuccess` wraps it;
+`UpdateSubagentSuccess` and `UpdateWorkflowSuccess` become `oneof outcome
+{ AgentPrompt prompt | *Delivered }`, mirroring the input arm.
+
+**Why, in the user's terms.** The store entry sketch had an envelope `parent`
+beside `AgentFrame.agent_id` — the user asked whether that was a different
+agent; it was the same one, so the envelope duplicated the frame's own field.
+The only frames with no agent were prompts and session updates. The user:
+the rpc that sends a `UserSaid` should RETURN a message carrying TurnId,
+AgentId and UserSaid, "then we can reuse that instead of HistoryPrompt, which
+is a respelling of that info". So the delivered prompt is a conversation
+fact with one form, and the store indexes `agent` straight out of the frame.
+
+**Consequences.** `StoreEntry` carries no parent column at all: the agent is
+read from `AgentFrame.agent_id` or `AgentPrompt.agent`, and a `SessionUpdate`
+row is the main agent's. The shim must resolve the recipient agent before
+answering `StartTurn`.
+
 ### `update` frames carry FRAGMENTS: `AgentResponseUpdate` and `AgentThinkingUpdate` retyped to deltas; the settled text rides the terminal arms only
 
 **What changed ("looks good").** `AgentResponseUpdate { new_markdown }`;
