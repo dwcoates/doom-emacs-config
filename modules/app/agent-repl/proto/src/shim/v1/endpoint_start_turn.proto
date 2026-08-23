@@ -41,7 +41,11 @@ message StartTurnResponse {
 
 // The prompt was accepted and the turn is open. Empty: the id was the
 // daemon's, and everything the turn produces is WatchTurn's.
-message StartTurnSuccess {}
+message StartTurnSuccess {
+  // The prompt as delivered: the daemon's id adopted, the recipient resolved
+  // (the main agent), the text as accepted. The same message history replays.
+  conversation.v1.AgentPrompt prompt = 1;
+}
 
 // Not accepted. `kind` arms are DERIVED at the wave from the shim's real
 // refusal sites: a turn already open (the daemon fault), no session, the
