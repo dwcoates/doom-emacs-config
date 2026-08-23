@@ -229,16 +229,29 @@ under X" is one indexed query. VERIFIED at the type surface (KillTurn entry):
 the vendor names a task's owning AGENT but never its owning TURN, so the stamp
 is required, not optional.
 
-**Rulings still owed.** (2) Detachment from the vendor's
-`background_tasks_changed` LEVEL is a diff against the previous level, a
-retained set; the static alternatives are storing each level as rows and
-checking membership per id of the received message, or taking "entered" from
-the `task_started` EDGE (the no-edge-pairing rule binds the daemon, not the
-shim). (3) Cumulative prose on `update` frames is a per-open-block text
-accumulator — bounded in count, variable in size; either the principle admits
-one growing buffer per unit, or `update` carries DELTAS and the accumulator
-moves to the daemon.
+**Ruling 2 — detachment is read from the EDGES; the LEVEL is relayed, never
+diffed.** CONFIRMED at the type surface (`sdk.d.ts:2915`, contradicting the
+user's name-reading of both as deltas): `task_started`/`task_notification` are
+EDGE bookends and `background_tasks_changed` is "the full set … REPLACE
+semantics … do not correlate it with the edge stream". A diff against the
+previous level is a retained set, so the shim takes "entered" from
+`task_started` and "left" from `task_notification` — one frame per message —
+and relays the level verbatim as a session fact for the daemon, which may
+hold the set. `KillSession`'s "every live task" is the vendor's own
+`backgroundTasks()` answer, not a shim set. The no-edge-pairing rule binds the
+daemon's INDICATOR only. VETTING: whether a foreground agent backgrounded by
+Ctrl+B also fires a `task_started` edge (the level's doc names it; the edge's
+does not).
 
+**Ruling 3 — `update` frames carry DELTAS, never cumulative text.** The
+user: "the shim should only be returning what CHANGED … how those deltas are
+handled is up to the daemon (maybe it coalesces them, maybe it forwards them
+as they arrive) — not the shim." This REOPENS the thinking/response entry's
+"prose-so-far, not a delta" and retypes `AgentResponseUpdate` and
+`AgentThinkingUpdate` on `AgentBashUpdate`'s existing delta-plus-offset
+pattern; the start arms' comments, which justified themselves by the
+cumulative rule, are reworded. The accumulator moves to the daemon, where
+state is allowed.
 
 ## Landed changes
 ### STAGE 4 CLOSE-OUT SWEEP: the five old `shim.v1` files are DELETED; `ModelMarker` moves to `api.proto` — STAGE 4 (shim.v1) COMPLETE
