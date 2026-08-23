@@ -204,15 +204,24 @@ variable number of such lookups, e.g. to determine lineage, is not static)."
 The daemon is NOT bound by this; it is the one component allowed to hold
 state.
 
-**What it settles for the store.** The store is the FLAT LOG of statically
-translated observations — one row per SDK message, JSONL record, sidecar file
-event, or shim-only observation (permission gate, detachment, interrupt,
-keep-alive mark) — and every row carries its join keys AT WRITE TIME: unit
-id, agent id, logical session, plane, keep-alive mark, and the ROOT id below.
-The shim folds a page of rows into `AgentFrame`s with a constant number of
-lookups per row, in the same subroutine that folds the live stream. The
-WatchSession entry's sentence "the store persists whatever streams carry" is
-SUPERSEDED: frames are derived, rows are persisted.
+**What it settles for the store — the user's ruling, superseding the
+orchestrator's flat-log leaning.** "The store should be writing
+conversation.v1 to the database." The shim and the sidecar resolve each
+`conversation.v1` frame at write time with a CONSTANT number of single
+lookups (a tool return finds its call by `tool_use_id`; a skill document its
+call by `sourceToolUseID`; a spawned agent its spawn; a re-announced start its
+original instant by unit id) — which is static by the principle's own test —
+and the store holds the resolved frames, indexed as below. Rows are
+conversation.v1 messages; no record-granular vendor vocabulary is persisted.
+The WatchSession entry's "the store persists whatever streams carry" STANDS.
+
+**Indexing, the user's architectural notes (not schema).** Every stored
+message carries its PARENT id and its TOP-LEVEL id, and both are indexed. The
+top-level id is set AT INSERTION to the parent's stored top-level id — one
+lookup — so by induction every descendant, however deep, carries the very
+top level, and no insert ever walks more than one step. Prompts are stored
+as messages in their own right, with parent and top-level recorded the same
+way.
 
 **Audit of the settled design against the principle.** Static already: tool
 return → call, skill document → call, created agent → spawn, re-announced
