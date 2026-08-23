@@ -273,11 +273,8 @@ message AgentThinking {
 
 // A reasoning block this stream has begun carrying, with nothing in it yet.
 //
-// EMPTY ON PURPOSE, AND IT IS WHY THIS ARM EXISTS. The update arm carries
-// reasoning CUMULATIVELY, so "opened, nothing said yet" could otherwise only be
-// spelled as an update carrying an empty string — a sentinel standing in for a
-// state. The arm states it instead. No start instant rides here: nothing draws a
-// clock against reasoning, and a field no consumer reads is a field that decays.
+// EMPTY ON PURPOSE, for the same reason the prose start is. No start instant
+// rides here: nothing draws a clock against reasoning.
 message AgentThinkingStart {}
 
 // Reasoning is arriving. The consumer draws a live indicator; whether it can
@@ -286,13 +283,21 @@ message AgentThinkingUpdate {
   // Whether there is any reasoning text to show. Both arms mean the model is
   // reasoning; only one of them can be drawn.
   oneof reasoning {
-    // Text is streaming, and is drawn as it arrives.
-    AgentThinkingText text = 1;
+    // A fragment of reasoning text is streaming.
+    AgentThinkingTextDelta text = 1;
     // The model is reasoning and withholding the text — it emits the block and
     // a signature but no text at all. There is nothing to draw but a live
     // indicator, and nothing whatever once it settles.
     AgentThinkingWithheld withheld = 2;
   }
+}
+
+// One fragment of reasoning text, on the same terms as the prose update: the
+// producer accumulates nothing, the consumer concatenates, and the terminal
+// frame carries the whole text regardless.
+message AgentThinkingTextDelta {
+  // The text added since the previous frame; may split a word or line.
+  string new_text = 1;
 }
 
 // Reasoning finished; the disclosure collapses.
@@ -314,12 +319,9 @@ message AgentThinkingSuccess {
 // is worse than an absent one.
 message AgentThinkingFailure {}
 
-// The reasoning text as it stands. Plain text rather than markdown: it is drawn
-// verbatim and monospace, as a scratchpad rather than as prose.
+// The reasoning in full, as settled — carried only on the terminal arms, for
+// the same reason the settled prose is.
 message AgentThinkingText {
-  // The reasoning so far, or in full once settled. Everything said up to this
-  // point rather than a delta, so a consumer that missed a frame is correct
-  // again after the next one and accumulates nothing itself.
   string text = 1;
 }
 
@@ -355,16 +357,22 @@ message AgentResponse {
 
 // A prose block this stream has begun carrying, with nothing in it yet.
 //
-// EMPTY ON PURPOSE, for the same reason the reasoning start is: the update arm
-// carries prose CUMULATIVELY, so an opened-but-silent block would otherwise be
-// an update carrying an empty string — a sentinel standing in for a state.
+// EMPTY ON PURPOSE: the update arm carries only what ARRIVED, so an
+// opened-but-silent block would otherwise be an update carrying an empty
+// fragment — a sentinel standing in for a state. The arm states it instead.
 message AgentResponseStart {}
 
 // Prose is arriving; the bubble is visibly building.
+//
+// A FRAGMENT, NEVER THE WHOLE TEXT. The producer forwards each fragment as
+// the vendor emits it and accumulates nothing; concatenation, coalescing and
+// pacing are the consumer's. A fragment lost in transit is not detected here
+// and is not recovered here: the terminal frame carries the whole text, so the
+// settled bubble is always right.
 message AgentResponseUpdate {
-  // Everything said SO FAR, not a delta. A consumer that missed a frame is
-  // correct again after the next one, and nothing is accumulated client-side.
-  AgentResponseProse prose = 1;
+  // The markdown added since the previous frame. May begin or end mid-word,
+  // mid-line or mid-construct: a fragment has no structure of its own.
+  string new_markdown = 1;
 }
 
 // The block finished; the bubble stops building.
@@ -386,11 +394,10 @@ message AgentResponseFailure {
 // Why a response ended without completing. Empty until its arms are derived.
 message AgentResponseFailureReason {}
 
-// Prose the agent said, as markdown for the consumer to render.
+// What the agent said, as markdown for the consumer to render. THE WHOLE
+// TEXT, as settled — carried only on the terminal arms, so a settled frame
+// describes itself and a consumer that missed every fragment still has it.
 message AgentResponseProse {
-  // What the agent said, as markdown for the consumer to render. Everything
-  // said up to this point rather than a delta, so nothing is accumulated
-  // client-side and a missed frame self-corrects on the next one.
   string markdown = 1;
 }
 
