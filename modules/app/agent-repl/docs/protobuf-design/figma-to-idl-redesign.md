@@ -238,6 +238,18 @@ top level, and no insert ever walks more than one step. Prompts are stored
 as messages in their own right, with parent and top-level recorded the same
 way.
 
+**A PAGE IS "IMMEDIATE CHILDREN OF X", the user's definition, and nothing
+has a tool call as parent.** A history page is the rows whose IMMEDIATE
+parent is the addressed container, newest first; `top_level` is never used
+for paging, only for kill scope and session scope. A unit's later frames
+(a bash update, a tool return) are not children of anything — they are
+upserts of the same unit — so the tree is agent → units. The one container
+that is not an agent is a WORKFLOW RUN, whose agents the script created; so
+the stored `parent` is a oneof { AgentId agent | DetachedWorkId workflow_run },
+and `top_level` stays an `AgentId` (the main agent). OPEN: whether
+`ReadHistory`'s address becomes that same oneof or a run's agent list is
+served only by the `WatchWorkflow` replay.
+
 **Audit of the settled design against the principle.** Static already: tool
 return → call, skill document → call, created agent → spawn, re-announced
 start instant (Owed A), `AgentSuccess.answer` (last response of the turn),
