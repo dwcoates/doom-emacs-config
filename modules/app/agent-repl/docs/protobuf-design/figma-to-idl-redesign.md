@@ -328,6 +328,30 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `GetLiveWork` lands — the OPEN-OBLIGATIONS verb ("okay seems reasonable")
+
+**What changed.** `endpoint_get_live_work.proto`: empty request; success
+{ live_agents; live_workflows; live_detached } — ids only, from the three
+tables' non-terminal rows; failure derived. Eight rpcs on the service.
+
+**The semantics the user probed to settlement.** "Live" is a claim about the
+RECORD, not the world — "a start was written and no terminal ever was" —
+so it cannot go stale; a five-second bounce and a two-week-old workspace run
+the identical procedure. The SHIM (never the sidecar, which is a copier
+whose only recovery is cursors) calls it once at session start and resolves
+every item: re-adopt what the revived vendor process actually has (reported
+as SessionStarted.live_work), WRITE the closing terminal for what did not
+survive (dual-write closes the record and puts the stop notice in the feed).
+The invariant: every started thing eventually gets a terminal row, by
+observation or by reconciliation. Deleting the verb was weighed: it would
+make restarted background work invisible-but-running and dead work
+spin forever.
+
+**Rename considered, declined.** `WriteBatch` → `WriteSidecarBatch` was
+proposed and withdrawn: the shim also writes batches (stream-plane facts,
+spill replays); only cursor_advance is sidecar-specific and already states
+its absence.
+
 ### store.v1 `GetWorkflow` lands ("looks great")
 
 **What changed.** `endpoint_get_workflow.proto`: request { DetachedWorkId };
