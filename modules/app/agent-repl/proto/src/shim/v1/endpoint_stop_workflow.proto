@@ -1,0 +1,36 @@
+// endpoint_stop_workflow.proto — StopWorkflow: end a run. The run's agents
+// are addressed individually (UpdateSubagent); the RUN's only addressable
+// act is stopping it.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/detached_work.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Stop one run.
+message StopWorkflowRequest {
+  // The handle the run's announcement carried, echoed verbatim.
+  conversation.v1.DetachedWorkId work = 1;
+}
+
+// Delivered, or refused.
+message StopWorkflowResponse {
+  oneof result {
+    StopWorkflowSuccess success = 1;
+    StopWorkflowFailure failure = 2;
+  }
+}
+
+// The stop reached the run. Its outcome arrives as the watch's terminal
+// frame; nothing is restated here.
+message StopWorkflowSuccess {}
+
+// Not delivered. `kind` arms are DERIVED at the wave from the shim's real
+// refusal sites (unknown handle, run already concluded).
+message StopWorkflowFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+}
