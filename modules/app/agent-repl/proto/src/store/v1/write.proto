@@ -23,7 +23,6 @@ syntax = "proto3";
 
 package store.v1;
 
-import "store/v1/cursor.proto";
 import "store/v1/entry.proto";
 
 option go_package = "agentrepl/proto/store/v1;storev1";
@@ -53,4 +52,37 @@ message EntryBatch {
   // Where the producer had read to when it produced these. Unset for
   // stream-plane producers, which have no file to be positioned in.
   CursorState cursor_advance = 2;
+}
+
+// ---- The sidecar's file cursor: where each tailed file has been read to ----
+//
+// Persisted by the store so a restarted sidecar resumes exactly where it left
+// off — no re-read duplicates, no outage holes. The position becomes durable
+// in the SAME transaction as the records read at it (`EntryBatch.cursor_advance`),
+// which is the whole exactly-once guarantee.
+
+// Where one file has been read to.
+message CursorState {
+  // The file's stable identity ("dev:inode"), surviving renames — the vendor
+  // rotates and renames transcript files, and a path-keyed cursor would
+  // restart such a file from zero.
+  string file_id = 1;
+  // The path the file was last seen at, for reopening and for a human.
+  string path = 2;
+  // The byte offset the NEXT read starts at.
+  int64 offset = 3;
+  // A bounded partial-line carry: the bytes of an incomplete final line, so
+  // a line split across two reads is parsed once and whole.
+  bytes carry = 4;
+}
+
+// Startup recovery: the sidecar asks the store for its persisted cursors.
+message CursorQuery {
+  // UNSET asks for every cursor; set asks for one file's.
+  optional string file_id = 1;
+}
+
+// The store's answer: every requested cursor, from durable state.
+message CursorList {
+  repeated CursorState cursors = 1;
 }
