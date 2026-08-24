@@ -328,6 +328,12 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### Rename: `ReadPage` → `ReadAgentPage` ("we only paginate on agents, so names carry AgentPage, not Page")
+
+**What changed.** The rpc, its endpoint file and its whole message family
+(`ReadAgentPageRequest/Response/Success/Failure/More/Floor`) rename; the
+open's page arms repoint. Pure rename, no shape change.
+
 ### `OpenAgentSession` + `WatchAgentSession` land; `ReadPage` loses its first arm — OPEN answers "where am I", WATCH is a pure tail
 
 **What changed (the user's factoring and names).**
