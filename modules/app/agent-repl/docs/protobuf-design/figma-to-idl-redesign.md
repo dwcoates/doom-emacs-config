@@ -328,6 +328,18 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `WriteBatch` lands — the write gains the ack the old socket never had; `StoreEntryWrite` dies
+
+**What changed ("land it").** `endpoint_write_batch.proto`:
+request { producer; EntryBatch batch }; response { success {} | failure
+{ detail } }. `StoreEntryWrite` is DELETED — under Connect the rpc is the
+envelope, and a separate carrier would be a second spelling. Success means
+DURABLE (records + cursor advance, one transaction), with replay absorption
+via write_id documented as the same arm; failure means NOTHING committed, so
+the producer's spill holds and replays. The old UDS protocol acked nothing —
+a producer learned failure only by connection death; the success arm is what
+lets the shim's spill retire batches on acknowledgment.
+
 ### `store.v1` adopts the standard service file model ("we really should have service.proto, endpoint_*.proto, and store.proto for datatypes")
 
 **What changed.** `read.proto` is split into
