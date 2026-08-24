@@ -328,6 +328,32 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The store becomes a Connect service; `ReadPage` lands — the first read verb
+
+**What changed ("let's use Connect RPCs here as well"; "we can land the page
+RPC").** NEW `store/v1/service.proto` (`service ShimStore`, callers the shim
+and sidecar only) and `endpoint_read_page.proto`: request { AgentId book;
+uint32 page_size; oneof position { first | next { StoreItemPointer after } } };
+success { lines (newest first); oneof boundary { more { StoreItemPointer
+last_item } | floor } }; failure arms derived. `StoreItemPointer` is opaque
+and store-minted, stable across upserts because ORDER IS BY THE UNIT'S FIRST
+INSERT, never its last write — a unit settling mid-walk cannot teleport
+across a continuation.
+
+**The user's pagination spec.** Page size rides the REQUEST so it can vary
+across calls of one walk; `next` carries ONLY the pointer to the previous
+page's last item, which the previous response's `more` arm served — no
+memory of the previous page's size anywhere.
+
+**The read inventory this opens** (names settled in conversation, shapes at
+their turns): GetItem (by upsert_key: re-announcement, late-join),
+GetRun (a run's frames by typed identity), GetLiveWork (non-terminal runs —
+the ONLY producer of resume-time `live_work`, since the vendor's level is
+per-process and empty at startup; audit E), GetLastPrompt (keep-alive
+rollback point, may fold into others), GetCursors (already shaped),
+GetSessionFacts (main_agent_id for resume). The old UDS Subscribe surface is
+superseded.
+
 ### RETRACTION: `DetachedWorkId` STAYS — it is the uniform CONNECTION token, and the mapping is the producer's
 
 **The verdict it retracts.** An earlier verdict in this stage (unlanded on
