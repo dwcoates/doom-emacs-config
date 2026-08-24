@@ -1,0 +1,73 @@
+// endpoint_get_workflow.proto — GetWorkflow: the unary OPEN of a workflow
+// run — its description, and either a way to follow it or how it ended.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/detached_work.proto";
+import "conversation/v1/workflow.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Which run.
+message GetWorkflowRequest {
+  // The handle the run's announcement carried, echoed verbatim.
+  conversation.v1.DetachedWorkId work = 1;
+}
+
+// The run, or why it could not be served.
+message GetWorkflowResponse {
+  oneof result {
+    GetWorkflowSuccess success = 1;
+    GetWorkflowFailure failure = 2;
+  }
+}
+
+// The run as it stands: its description, and either a way to follow it or
+// how it ended.
+message GetWorkflowSuccess {
+  // The run's description — the ONLY place it is served; the watch never
+  // repeats it.
+  conversation.v1.AgentWorkflowStart start = 1;
+  // THE ARM IS THE RUN'S STANDING. The token exists only while there is
+  // something to watch — served here and nowhere else, so watching REQUIRES
+  // getting, and a concluded run is an answer rather than a dead token.
+  oneof standing {
+    GetWorkflowLive live = 2;
+    GetWorkflowEnded ended = 3;
+  }
+}
+
+// Live: follow it with the token.
+message GetWorkflowLive {
+  // Opaque, shim-minted at THIS get — never the DetachedWorkId itself, so a
+  // caller cannot watch a run it did not get.
+  WorkflowWatchToken watch = 1;
+  // The subagent level as of this answer, so the daemon can open per-agent
+  // connections before the first watch frame arrives.
+  conversation.v1.AgentWorkflowUpdate subagents = 2;
+}
+
+// Concluded: how it ended, in the run stream's own terminal vocabulary —
+// embedded, not respelled, so the fact has one form wherever it appears.
+message GetWorkflowEnded {
+  oneof outcome {
+    conversation.v1.AgentWorkflowSuccess success = 1;
+    conversation.v1.AgentWorkflowFailure failure = 2;
+  }
+}
+
+// The get could not be served. `kind` arms are DERIVED at the wave from the
+// shim's real refusal sites (unknown or invalid detached-work handle).
+message GetWorkflowFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+}
+
+// The address of one gettable run's watch: opaque, shim-minted, echoed
+// verbatim, never parsed or constructed by a caller.
+message WorkflowWatchToken {
+  string value = 1;
+}

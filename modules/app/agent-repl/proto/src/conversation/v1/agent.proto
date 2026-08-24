@@ -173,44 +173,35 @@ message AgentWorkflow {
   }
 }
 
-// One thing an agent of this run did.
-//
-// A CARRIER AND NOTHING ELSE. It holds no state about the run itself, so a
-// consumer upserts the activity below by that activity's OWN identity and
-// changes nothing about the run on account of this frame.
-//
-// ONE ACTIVITY PER FRAME, NEVER A BATCH. A frame carries exactly one unit here as
-// it does everywhere else in this contract, which keeps frame size bounded — a
-// cold read ingests an entire run's history at once, and a batched frame would
-// have no cap on what it carried.
-//
-// PRODUCER OBLIGATION: EMIT AS OBSERVED, DO NOT BUFFER. A producer that
-// accumulated activity and released it in bursts would satisfy this shape while
-// defeating its purpose — the singular field cannot enforce timeliness, so it is
-// stated here instead. A run's progress is watched live, and work already
-// observed and withheld is a run that looks stalled.
+// A STATELESS LEVEL, replace semantics: every frame carries ALL of the run's
+// top-level subagents, and a consumer swaps its picture for the payload. A
+// late or restarted watcher is whole after one frame; nothing is paged,
+// because a run is small by nature and this contract deliberately supports
+// no workflow history. The run's stream says nothing about what its agents
+// DO — the daemon opens an ordinary per-agent connection for each, exactly
+// as for any subagent.
 message AgentWorkflowUpdate {
-  // Whether this frame announces an agent or reports work.
-  oneof update {
-    // AN AGENT OF THIS RUN CAME INTO EXISTENCE. A consumer draws a container for
-    // it, keyed by the identity inside, and every later frame naming that
-    // identity routes into it.
-    //
-    // CARRIED BARE RATHER THAN INSIDE AN AgentActivity, and the reason is
-    // structural: that envelope states WHICH AGENT DID a piece of work, and a
-    // workflow's agents are created BY THE SCRIPT rather than by any agent. There
-    // is no actor to name and no unit of anyone's work to identify, so wrapping
-    // it would require inventing both.
-    AgentSubagentStart agent_start = 1;
-    // A FRAME of one of this run's agents — exactly what that agent's own
-    // stream would carry: its work, work it detached, a question or permission
-    // it is BLOCKED on (which UpdateWorkflow answers), and its own ending. The
-    // frame names its agent, so a consumer places it without this message
-    // saying anything about ancestry. Tags 2 and 3 are RETIRED (they carried
-    // activity alone, with no arm for a blocked or finished agent).
-    AgentFrame agent_frame = 4;
+  // Every top-level agent the script has spawned, in spawn order.
+  repeated AgentWorkflowSubagent all_subagents = 1;
+}
+
+// One of the run's agents: its spawn description, and whether it is live.
+message AgentWorkflowSubagent {
+  // The spawn as announced — carries the created agent's identity, which is
+  // what the daemon watches.
+  AgentSubagentStart agent_start = 1;
+  // Whether the agent is still running. THE ARM IS THE LIVENESS.
+  oneof liveness {
+    AgentWorkflowSubagentLive live = 2;
+    AgentWorkflowSubagentEnded ended = 3;
   }
 }
+
+// The agent is running; its own stream is live.
+message AgentWorkflowSubagentLive {}
+
+// The agent has ended; its own stream carried how.
+message AgentWorkflowSubagentEnded {}
 
 // The run ended on terms the consumer asked for. THE ARM IS HOW — both are
 // answers, never failures.

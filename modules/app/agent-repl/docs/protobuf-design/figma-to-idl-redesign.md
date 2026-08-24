@@ -328,6 +328,45 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The WORKFLOW pipe collapses: the run stream is a STATELESS LEVEL of its subagents; Get/Watch/Stop replace Watch/Update; the daemon owns the fan-out
+
+**What changed (the user's restructure across three messages).**
+`conversation.v1`: `AgentWorkflowUpdate` is retyped to `{ repeated
+AgentWorkflowSubagent all_subagents }` — REPLACE semantics, every frame the
+whole list — with `AgentWorkflowSubagent { AgentSubagentStart agent_start;
+oneof liveness { live | ended } }` (the user's `bool is_alive` landed as the
+standing two-arm oneof). The `agent_frame` arm is RETIRED. `shim.v1`:
+`endpoint_get_workflow.proto` (request { DetachedWorkId }; success { start;
+oneof standing { live { WorkflowWatchToken; current level } | ended
+{ embedded AgentWorkflowSuccess|Failure } } }); `endpoint_watch_workflow.proto`
+rewritten (request { the token }; bounded stream { update | success |
+failure }, no start arm — the get answered it);
+`endpoint_update_workflow.proto` DELETED, replaced by
+`endpoint_stop_workflow.proto` (the run's only addressable act; prompts and
+answers to a run's agents go through `UpdateSubagent` by `AgentId`).
+
+**Why, in the user's terms.** The old `agent_frame` arm multiplexed every
+agent's whole stream through the run's connection — "paralleling the agent
+streaming architecture across systems". The shim/sidecar/store "should be
+very stupid": they say an agent EXISTS; "the daemon needs to use that
+information to create the necessary connection as it sees fit" — a workflow
+agent is exactly a subagent from the daemon's perspective, the parity
+principle applied instead of duplicated. The level is stateless because
+workflows are small and deliberately have no history/pagination support.
+
+**The open/watch bifurcation, applied here too.** The token lives INSIDE the
+`live` arm (meaningless once ended — adjacent exclusivity), so a concluded
+run's get is an ANSWER, not a dead token. Each verb owns its failure
+vocabulary (unknown handle vs unknown token); where the run's terminal fact
+appears it EMBEDS the stream's terminal messages rather than respelling.
+
+**Consequences.** The `UpdateWorkflowSuccess` prompt-mirror from the
+AgentPrompt landing dies with its endpoint. The store's workflow row shrinks
+to start + latest level + terminal (one upserted row); a store `GetWorkflow`
+read verb serves it — next increment. `AgentInput`'s comment claiming the
+workflow update carries it is stale and is corrected at the next
+conversation.v1 touch.
+
 ### `WriteBatch` lands — the write gains the ack the old socket never had; `StoreEntryWrite` dies
 
 **What changed ("land it").** `endpoint_write_batch.proto`:
