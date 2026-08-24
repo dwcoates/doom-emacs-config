@@ -328,6 +328,37 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `detached_work` moves UP into `AgentFrame`; the frame's oneof IS the datalayer route; the routing and schema settlements
+
+**What changed ("looks good … let's land").** `AgentFrame.result` becomes
+`{ update | success | failure | detached_work }` (tag 5); `AgentUpdate`
+loses its `detached_work` arm (tag 2 retired) and is now purely
+conversation content `{ activity | question | permission }`. Consumers that
+switched on AgentUpdate for the open-a-stream obligation switch on
+AgentFrame — same information, one level up.
+
+**The routing rule the arms now state (the user's design, kicked around to
+settlement).** `update` → the entry table, as a page line of the agent's
+book; `success`/`failure` → BOTH entry (the stop notice has no other
+source) and the agent row's terminal columns, one transaction;
+`detached_work` → the lifecycle table for its kind (agent, workflow,
+detached_work), NEVER a page line — the spawning call is already one. The
+`AgentWorkflow` arms route without any shape change: start → workflow row,
+update level → AGENT rows upserted (`spawned_by_workflow`, spawn columns,
+liveness), terminal → workflow terminal columns; the level is stored
+nowhere and is the join.
+
+**Schema settlements from the same conversation.** Prompts and frames share
+ONE entry table (one position space is what makes "everything after the last
+real prompt" — the rollback — a range query; `turn_id` a nullable column or
+1:1 side table; a prompts "table" is a partial index, never a second
+position space). The dedicated tables are PRIMARY for their facts (the
+earlier projections-rebuildable-from-entry idea is superseded); verbs read
+tables, entry is canonical for content; every write lands in exactly ONE
+table, decided by its wire arm, plus the success/failure dual-write. The
+`agent` table carries `spawned_by_agent` XOR `spawned_by_workflow` (main:
+neither); "agents of run W" is one indexed query and IS GetWorkflow's level.
+
 ### STAGE 5 SCHEMA ARCHITECTURE: four tables, canonical homes, and the columns-vs-blob line ("it's the queryable and joinable stuff")
 
 **Settled with the user, as architecture guidance for the store

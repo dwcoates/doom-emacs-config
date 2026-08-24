@@ -34,13 +34,23 @@ message AgentFrame {
   // ancestry, because placement comes from the request when history is read
   // and from the consumer's own drawn structure when frames arrive live.
   AgentId agent_id = 4;
+  // THE ARM IS BOTH the consumer's obligation and the datalayer's route.
   oneof result {
-    // The agent is running and here is something it did, or is blocked on.
+    // Conversation content: the agent did something, or is blocked on the
+    // user. The consumer reads or writes back; the store lands it as a page
+    // line of this agent's book.
     AgentUpdate update = 1;
-    // The agent ended on terms the consumer asked for.
+    // The agent ended on terms the consumer asked for. Lands BOTH as a page
+    // line (the feed's stop notice has no other source) and as the agent's
+    // terminal state.
     AgentSuccess success = 2;
-    // The agent ended because something broke.
+    // The agent ended because something broke. Lands as success does.
     AgentFailure failure = 3;
+    // Work left this agent's stream for a life of its own. The consumer opens
+    // the connection its handle names; the store lands it in the lifecycle
+    // record for its kind, never as a page line — the spawning CALL is
+    // already one.
+    AgentDetachedWork detached_work = 5;
   }
 }
 
@@ -85,16 +95,16 @@ message AgentAnswer {
 // own for it.
 message AgentUpdate {
   // THE ARM IS THE CONSUMER'S OBLIGATION. Activity is read-only — it happened
-  // and nothing is owed. Detached work must be followed on its own stream. A
-  // question and a permission both BLOCK the agent until the user writes back
-  // on the update channel, and differ in what is written: a choice, or consent.
+  // and nothing is owed. A question and a permission both BLOCK the agent
+  // until the user writes back on the update channel, and differ in what is
+  // written: a choice, or consent. Every arm is conversation content and
+  // lands as a page line. Tag 2 (detached_work) is RETIRED: leaving the
+  // stream is a frame-level fact, stated on AgentFrame beside the terminal
+  // arms.
   oneof update {
     // Work happening on this agent's stream. Everything about it arrives here,
     // and it cannot outlive the stream.
     AgentActivity activity = 1;
-    // Work that now has a life of its own OUTSIDE this stream. Nothing further
-    // about it arrives here; the consumer opens the stream named by its handle.
-    AgentDetachedWork detached_work = 2;
     // The agent is blocked on the user's CHOICE among options it posed.
     AgentQuestion question = 3;
     // The agent is blocked on the user's CONSENT to run a tool it called.
