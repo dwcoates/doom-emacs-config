@@ -18,14 +18,12 @@ import "shim/v1/endpoint_set_session_permission_mode.proto";
 import "shim/v1/endpoint_start_session.proto";
 import "shim/v1/endpoint_start_turn.proto";
 import "shim/v1/endpoint_stop_bash.proto";
-import "shim/v1/endpoint_update_subagent.proto";
-import "shim/v1/endpoint_update_turn.proto";
+import "shim/v1/endpoint_watch_agent.proto";
+import "shim/v1/endpoint_update_agent.proto";
 import "shim/v1/endpoint_get_workflow.proto";
 import "shim/v1/endpoint_stop_workflow.proto";
 import "shim/v1/endpoint_watch_bash.proto";
 import "shim/v1/endpoint_watch_session.proto";
-import "shim/v1/endpoint_watch_subagent.proto";
-import "shim/v1/endpoint_watch_turn.proto";
 import "shim/v1/endpoint_watch_workflow.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
@@ -63,31 +61,25 @@ service Shim {
   // live unless forced; names what it killed.
   rpc KillSession(KillSessionRequest) returns (KillSessionResponse);
 
-  // ---- Turn: spawn, attach, speak to it, end ----
+  // ---- Agent: start a turn on any agent, watch any agent, speak to it ----
 
-  // SPAWN: hand the prompt to the agent binary; returns once it is ACCEPTED.
-  // AT MOST ONE turn is open per session, STRUCTURALLY: the daemon is the
-  // only queue and the only submitter, so a second call while one is open is
-  // a daemon fault, refused, never queued.
+  // SPAWN a turn on any agent — target unset is the session's prompt
+  // thread. Unary: returns once the prompt is accepted; the response's
+  // `prompt.agent` is the WatchAgent address.
   rpc StartTurn(StartTurnRequest) returns (StartTurnResponse);
-  // ATTACH: the turn's stream — the agent frame, the same as a subagent's.
-  // Opens by REPLAYING the turn from its beginning, so attaching late or after
-  // a restart misses nothing; concludes with the turn's terminal frame.
-  rpc WatchTurn(WatchTurnRequest) returns (stream WatchTurnResponse);
-  // Speak to the open turn: stop the main agent alone, answer what it is
-  // blocked on, or prompt it.
-  rpc UpdateTurn(UpdateTurnRequest) returns (UpdateTurnResponse);
-  // END: the main agent AND everything this turn spawned, transitively —
-  // nothing else. Refuses while any of that is live unless forced; names
-  // what it killed.
+
+  // ONE stream for any agent: opens with a page (full, or the gap above the
+  // caller's own mark), then tails. Ends nothing; close it freely.
+  rpc WatchAgent(WatchAgentRequest) returns (stream WatchAgentResponse);
+
+  // Stop an agent, or answer the ask it is blocked on. Never a prompt.
+  rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse);
+
+  // END the turn: the agent and everything THIS turn spawned, transitively.
+  // Refuses while any of that is live unless forced, naming it.
   rpc KillTurn(KillTurnRequest) returns (KillTurnResponse);
 
   // ---- Detached work: one stream per live item, and the writes each kind accepts ----
-
-  // Follow a subagent's RUN: the agent's own frame, the same as a turn's.
-  rpc WatchSubagent(WatchSubagentRequest) returns (stream WatchSubagentResponse);
-  // Write to a subagent: the one input vocabulary every live agent takes.
-  rpc UpdateSubagent(UpdateSubagentRequest) returns (UpdateSubagentResponse);
 
   // Follow a backgrounded shell command: the bash unit itself.
   rpc WatchBash(WatchBashRequest) returns (stream WatchBashResponse);
