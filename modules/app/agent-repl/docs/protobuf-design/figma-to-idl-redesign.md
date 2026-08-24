@@ -328,6 +328,44 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### STAGE 5 OPENS: `StoreEntry` lands — the storage envelope around conversation.v1; pageability is the PRODUCER's arm; one opaque `upsert_key`
+
+**What changed ("let's land this").** `store/v1/entry.proto` REWRITTEN:
+`StoreEntry { Plane; write_id; upsert_key; oneof entry { StoreAgentUpdate |
+conversation.v1.SessionUpdate } }`; `StoreAgentUpdate { AgentId top_level;
+oneof agent_info { StorePageLine serveable_frame | StoreAgentItem
+unserveable_frame | StoreAgentBash bash | StoreAgentWorkflow workflow } }`;
+`StorePageLine { AgentId page_agent_id; StoreAgentItem }`; `StoreAgentItem
+{ AgentPrompt | AgentFrame }`; the two run wrappers carry the run's identity
+(bash: `AgentActivityId`; workflow: `AgentId`). `Entry`, `InternalEntry` and
+the `shim.v1.ExternalEntry` import are DELETED; `Plane` keeps its two arms;
+`write.proto`'s batch carries `StoreEntry`.
+
+**The shape is the USER's sketch**, arrived at through: the store writes
+conversation.v1 (not a flat vendor log); a page is the contiguous items of
+ONE book; non-item frames (a bash update) must be structurally unable to
+appear in a page, so PAGEABILITY IS DECIDED BY THE PRODUCER — a page line
+NAMES its book (`page_agent_id`), unserveable material has no book, and run
+frames are not page lines at all. The earlier `parent_item`/anchor
+construction DISSOLVED when the user ruled each block its own feed item.
+
+**`upsert_key`, the user's rule.** One opaque producer-minted key; the store
+holds one row per key and a write supersedes it whole. "The store should
+have a single place it looks for a given property, never multiple places for
+a given column" — the mapping (TurnId, unit id, run id) is the shim's and
+sidecar's, never the store's.
+
+**`top_level`, the user's taxonomy.** The nearest NON-SYNC ancestor (main
+agent or detached-work agent, never a sync subagent), copied from the
+parent's row at insert.
+
+**Dangling, named.** `unsupported.proto`'s three residue bodies and the old
+`source_record` kept-whole field have no carrier on `StoreEntry` yet —
+judged at `unsupported.proto`'s walk, not silently dropped. `OpenTaskState`
+and the read verbs are `cursor.proto`'s walk. The store implementation's
+schema (session_id/seq/top_level_message_id) is superseded wholesale under
+nuke-never-migrate.
+
 ### `AgentPrompt` is the ONE form of a delivered prompt: returned by the delivering rpc, persisted by the store, replayed by history; `HistoryPrompt` deleted
 
 **What changed ("looks great").** `conversation/v1/turn.proto` gains
