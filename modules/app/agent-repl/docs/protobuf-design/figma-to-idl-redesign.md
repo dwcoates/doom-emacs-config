@@ -328,6 +328,42 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### STAGE 5 SCHEMA ARCHITECTURE: four tables, canonical homes, and the columns-vs-blob line ("it's the queryable and joinable stuff")
+
+**Settled with the user, as architecture guidance for the store
+implementation (the store.v1 wire contract is unchanged by it).** Four
+tables, each the ONE canonical home of one kind of fact:
+
+- `agent` — one row per `AgentId`, main agent included; THE source for agent
+  metadata: `spawned_by` (an agent, a workflow, or nothing for main), the
+  unpacked `AgentSubagentStart` fields, `started_at`, `ended_at` (NULL =
+  live).
+- `workflow` — one row per run, keyed by the announced handle; `spawned_by`
+  + origin unit, the unpacked `AgentWorkflowStart` fields, the terminal once
+  ended. THE SUBAGENT LEVEL IS NEVER STORED: it is the join (agents whose
+  `spawned_by` is the run, with their liveness), so agent liveness has
+  exactly one home.
+- `entry` — the page lines: a QUERYABLE SPINE (`upsert_key` PK,
+  `book_agent_id` indexed and NULL for unserveable, `write_id` unique,
+  plane, first-insert position) around a SERIALIZED frame the store never
+  opens.
+- `detached_work` — one row per detached non-agent run (bash today):
+  the handle, kind, origin unit, owner agent, unpacked latest state,
+  `ended_at`.
+
+**The columns-vs-blob line, the user's rule.** "Not ALL shapes need to map
+… it's the queryable and joinable stuff": agent, workflow and detached_work
+are UNPACKED to columns (the store filters and joins on them); `entry`'s
+frame stays serialized (the activity vocabulary is content, and unpacking it
+would put every conversation.v1 churn into DDL and two mapping directions
+for nothing the store ever queries). Mapping tests per the persistence-model
+principle guard the unpacked three.
+
+**What the verbs become.** `GetWorkflow` = one workflow row + the agent
+join; `GetLiveWork` = the two `ended_at IS NULL` scans; the page verbs =
+the entry spine. Every foreign key is stamped at insert with one lookup,
+per principle #3.
+
 ### The WORKFLOW pipe collapses: the run stream is a STATELESS LEVEL of its subagents; Get/Watch/Stop replace Watch/Update; the daemon owns the fan-out
 
 **What changed (the user's restructure across three messages).**
