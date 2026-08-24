@@ -1,0 +1,52 @@
+// endpoint_get_live_work.proto — GetLiveWork: the OPEN OBLIGATIONS — every
+// started thing the record holds no terminal for.
+//
+// NOT a claim about the world: "live" here means "a start was written and no
+// terminal ever was", which is timeless and cannot go stale. The SHIM calls
+// this once at session start and resolves every item — re-adopting what the
+// revived vendor process actually has (reporting it as live work), and
+// WRITING the closing terminal itself for what did not survive, so the set
+// shrinks to empty either way and the invariant "every started thing
+// eventually gets a terminal row" holds across any gap in observation. The
+// sidecar never calls this: it is a copier with no view of liveness, and its
+// recovery is GetSidecarCursors.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/detached_work.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Ask for every open obligation.
+message GetLiveWorkRequest {}
+
+// The set, or why it could not be read.
+message GetLiveWorkResponse {
+  oneof result {
+    GetLiveWorkSuccess success = 1;
+    GetLiveWorkFailure failure = 2;
+  }
+}
+
+// The open obligations, from the three tables' non-terminal rows. Empty
+// lists are the ordinary answer for an idle session. IDS ONLY: the caller
+// follows up per item (GetWorkflow, OpenAgentSession, the detached row's
+// state), which the reconciliation does anyway.
+message GetLiveWorkSuccess {
+  // Agents with no terminal frame: detached subagents, workflow agents.
+  repeated conversation.v1.AgentId live_agents = 1;
+  // Workflow runs with no terminal.
+  repeated conversation.v1.DetachedWorkId live_workflows = 2;
+  // Non-agent detached runs (bash) with no terminal.
+  repeated conversation.v1.DetachedWorkId live_detached = 3;
+}
+
+// The set could not be read. `kind` arms are DERIVED at the wave from the
+// store's real failure sites.
+message GetLiveWorkFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+}
