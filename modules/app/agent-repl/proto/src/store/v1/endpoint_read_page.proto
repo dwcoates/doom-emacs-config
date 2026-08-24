@@ -17,24 +17,11 @@ message ReadPageRequest {
   // How many lines this page may hold. The caller's budget per call, so it
   // can vary across calls of one walk.
   uint32 page_size = 2;
-  // Where this page begins. THE ARM IS THE POSITION.
-  oneof position {
-    // The newest page.
-    ReadPageFirst first = 3;
-    // The page older than the item the pointer names — the pointer served by
-    // the previous response, echoed verbatim. Carries no page size and no
-    // memory of the previous page's size.
-    ReadPageNext next = 4;
-  }
-}
-
-// Start from the newest line.
-message ReadPageFirst {}
-
-// Continue an existing walk, older.
-message ReadPageNext {
-  // The last item of the previously returned page.
-  StoreItemPointer after = 1;
+  // The page begins strictly OLDER than the item this pointer names — the
+  // pointer served by a previous page's `more` arm or by a streamed line,
+  // echoed verbatim. There is no first-page arm: the first page is
+  // OpenAgentSession's answer, and this verb only ever walks older.
+  StoreItemPointer after = 3;
 }
 
 // The page, or why it could not be served.
