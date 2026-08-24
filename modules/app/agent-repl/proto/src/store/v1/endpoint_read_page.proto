@@ -1,0 +1,80 @@
+// endpoint_read_page.proto — ReadPage's request and response, and everything
+// private to them.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "store/v1/store.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// The store's page read: N page lines of one book, newest first.
+message ReadPageRequest {
+  // The book: the agent whose page lines are wanted.
+  conversation.v1.AgentId book = 1;
+  // How many lines this page may hold. The caller's budget per call, so it
+  // can vary across calls of one walk.
+  uint32 page_size = 2;
+  // Where this page begins. THE ARM IS THE POSITION.
+  oneof position {
+    // The newest page.
+    ReadPageFirst first = 3;
+    // The page older than the item the pointer names — the pointer served by
+    // the previous response, echoed verbatim. Carries no page size and no
+    // memory of the previous page's size.
+    ReadPageNext next = 4;
+  }
+}
+
+// Start from the newest line.
+message ReadPageFirst {}
+
+// Continue an existing walk, older.
+message ReadPageNext {
+  // The last item of the previously returned page.
+  StoreItemPointer after = 1;
+}
+
+// The page, or why it could not be served.
+message ReadPageResponse {
+  oneof result {
+    ReadPageSuccess success = 1;
+    ReadPageFailure failure = 2;
+  }
+}
+
+// The page as served.
+message ReadPageSuccess {
+  // The lines, newest first. At most page_size of them.
+  repeated StorePageLine lines = 1;
+  // Whether older lines remain. THE ARM IS THE COMPLETENESS.
+  oneof boundary {
+    ReadPageMore more = 2;
+    ReadPageFloor floor = 3;
+  }
+}
+
+// Older lines exist below this page.
+message ReadPageMore {
+  // Points at this page's LAST (oldest) item; the next request echoes it.
+  StoreItemPointer last_item = 1;
+}
+
+// This page reached the oldest retained line.
+message ReadPageFloor {}
+
+// The page could not be served. `kind` arms are DERIVED at the wave from the
+// store's real refusal sites (unknown book, stale pointer).
+message ReadPageFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+}
+
+// An opaque, store-minted position of one item in one book's order. Echoed
+// verbatim, never parsed or constructed by a caller; stable across upserts
+// because order is by the unit's FIRST insert, not its last write.
+message StoreItemPointer {
+  string value = 1;
+}
