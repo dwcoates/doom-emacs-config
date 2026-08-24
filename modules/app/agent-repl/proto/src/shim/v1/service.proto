@@ -20,7 +20,8 @@ import "shim/v1/endpoint_start_turn.proto";
 import "shim/v1/endpoint_stop_bash.proto";
 import "shim/v1/endpoint_update_subagent.proto";
 import "shim/v1/endpoint_update_turn.proto";
-import "shim/v1/endpoint_update_workflow.proto";
+import "shim/v1/endpoint_get_workflow.proto";
+import "shim/v1/endpoint_stop_workflow.proto";
 import "shim/v1/endpoint_watch_bash.proto";
 import "shim/v1/endpoint_watch_session.proto";
 import "shim/v1/endpoint_watch_subagent.proto";
@@ -93,10 +94,16 @@ service Shim {
   // Kill a backgrounded shell command — the only input a process takes.
   rpc StopBash(StopBashRequest) returns (StopBashResponse);
 
-  // Follow a workflow run: the workflow unit itself, carrying its agents' frames.
+  // The unary open of a run: its description, and either the watch token or
+  // how it ended.
+  rpc GetWorkflow(GetWorkflowRequest) returns (GetWorkflowResponse);
+
+  // The tail of one gotten run: subagent levels, then the terminal frame.
   rpc WatchWorkflow(WatchWorkflowRequest) returns (stream WatchWorkflowResponse);
-  // Write to a workflow run: the one input vocabulary every live agent takes.
-  rpc UpdateWorkflow(UpdateWorkflowRequest) returns (UpdateWorkflowResponse);
+
+  // End a run. Its agents are addressed individually; the run's only
+  // addressable act is stopping it.
+  rpc StopWorkflow(StopWorkflowRequest) returns (StopWorkflowResponse);
 
   // Move in-flight turn work onto its own stream (Ctrl-B). The turn then
   // announces it as detached, and the consumer opens the matching Watch.
