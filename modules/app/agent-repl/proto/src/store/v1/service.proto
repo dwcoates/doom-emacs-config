@@ -1,0 +1,21 @@
+// service.proto — the store's Connect service: every rpc signature, organized
+// in commented sections, one endpoint_<rpc>.proto per rpc.
+//
+// CALLERS ARE THE SHIM AND THE SIDECAR, never the daemon: the daemon's read
+// path is shim.v1 (ReadHistory and the Watch streams), and the isolation
+// discipline in store.proto's header applies to this service whole.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "store/v1/endpoint_read_page.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+service ShimStore {
+  // ---- Reads: what the shim recovers and serves from durable state ----
+
+  // A page of one book's lines, newest first. Backs shim.v1's ReadHistory.
+  rpc ReadPage(ReadPageRequest) returns (ReadPageResponse);
+}
