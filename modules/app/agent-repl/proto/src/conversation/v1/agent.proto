@@ -13,7 +13,6 @@ import "conversation/v1/api.proto";
 import "conversation/v1/detached_work.proto";
 import "conversation/v1/permission.proto";
 import "conversation/v1/question.proto";
-import "conversation/v1/user.proto";
 import "conversation/v1/workflow.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
@@ -67,9 +66,8 @@ message AgentInput {
     AgentStop stop = 1;
     // Answer a question or decide a permission it is blocked on.
     AgentAnswer answer = 2;
-    // A prompt addressed to it. The daemon decides WHEN this is sent (held,
-    // or delivered now); the producer decides HOW it lands.
-    UserSaid prompt = 3;
+    // Tag 3 (prompt) is RETIRED: a prompt to ANY agent is StartTurn with a
+    // target, so there is exactly one way to say it.
   }
 }
 

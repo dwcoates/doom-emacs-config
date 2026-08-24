@@ -328,6 +328,42 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The AGENT CONSOLIDATION lands: StartTurn targets ANY agent; ONE `WatchAgent` opens-with-a-page; `UpdateAgent` replaces the per-kind updates; "main agent" leaves the API
+
+**What changed (settled across the exchange; "sounds good" + the WatchAgent
+correction).** shim.v1's TURN section becomes the AGENT section:
+`StartTurnRequest` gains `optional AgentId target` (UNSET = the session's
+prompt thread, resolved by the shim; SET = any agent — subagent, workflow
+agent — with per-kind delivery the caller never learns). NEW
+`endpoint_watch_agent.proto`: `WatchAgent { optional target; page_size;
+optional HistoryPointer known_through }` → a standing stream whose FIRST
+frame is the opening page (full repaint, or only entries newer than the
+caller's own mark) and whose tail is one pointered entry per write. NEW
+`endpoint_update_agent.proto`: `UpdateAgent { optional target; AgentInput }`
+— stop and answer only. DELETED: `WatchTurn`, `UpdateTurn`, `WatchSubagent`,
+`UpdateSubagent` and their files. `ReadHistory` goes NEXT-ONLY
+(`{ optional target; page_size; HistoryPointer after }`) — the first page is
+WatchAgent's opening frame. `conversation.v1`: `AgentInput.prompt` RETIRED
+(a prompt to ANY agent is StartTurn — one way to say each thing);
+`history.proto` gains `HistoryPointer` (replacing `HistoryContinuation`) and
+`HistoryEntryAt { at; entry }`, with `HistoryPage.entries` pointered and
+`HistoryMore` carrying the last entry's pointer; `SessionStarted` LOSES
+`main_agent_id`.
+
+**Why, in the user's terms.** "Watching the main agent and watching a
+subagent is the same API"; nothing StartTurn does is main-specific once the
+target defaults; the id sources ARE the API (StartTurn's `prompt.agent`, the
+spawn announcements, workflow levels), so an OpenAgentSession verb and its
+token were rejected — "that's ALREADY covered" — and the store's
+known-through trick carries the repaint/catch-up split instead. "Main agent"
+survives only inside the shim and as the store's scope (Owed H unchanged);
+no consumer ever sees it.
+
+**Discharged / superseded.** The recorded WatchTurn open/watch reopen is
+discharged. `SessionStarted.main_agent_id` (the history entry that added it)
+is superseded; the store still scopes by the logical session internally.
+The one-turn-in-flight rule becomes per-agent, stated at StartTurn.
+
 ### STAGE 6 OPENS: the SSM's purpose is WORKSPACE STATE — rename to WSM; the durable evidence layer's premises re-examined
 
 **Settled with the user, above any shape.** The daemon's SSM exists to manage

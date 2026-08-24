@@ -1,7 +1,7 @@
 // endpoint_kill_turn.proto — KillTurn: END the turn — the main agent AND
 // everything this turn spawned, transitively — and nothing else. Refuses
 // while any spawned work is live unless forced. Distinct from
-// UpdateTurn.stop, which interrupts the main agent alone and leaves what it
+// UpdateAgent.stop, which interrupts one agent alone and leaves what it
 // spawned running.
 
 syntax = "proto3";

@@ -1,12 +1,13 @@
-// endpoint_start_turn.proto — StartTurn: SPAWN the turn. Unary: returns once
-// the prompt is ACCEPTED, never waits for the turn. The daemon persists the
-// TurnId it minted and ATTACHES with WatchTurn; spawning and attaching are
-// decoupled because the turn outlives the daemon.
+// endpoint_start_turn.proto — StartTurn: SPAWN a turn on ANY agent. Unary:
+// returns once the prompt is ACCEPTED, never waits for the turn. Spawning
+// and attaching are decoupled because the turn outlives the daemon; the
+// response's `prompt.agent` is the WatchAgent address.
 
 syntax = "proto3";
 
 package shim.v1;
 
+import "conversation/v1/agent_activity.proto";
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
 import "shim/v1/prompt_origin.proto";
@@ -18,8 +19,8 @@ option go_package = "agentrepl/proto/shim/v1;shimv1";
 // flight, and the shim submits it to the agent binary immediately.
 message StartTurnRequest {
   // The turn's identity, MINTED BY THE DAEMON and adopted by the shim: every
-  // durable record the turn produces is stamped with it, and UpdateTurn
-  // addresses the open turn by it. The shim never mints one of its own.
+  // durable record the turn produces is stamped with it, and the open turn is
+  // addressed by it. The shim never mints one of its own.
   conversation.v1.TurnId turn = 1;
   // The prompt, in the one canonical form that travels client → daemon →
   // tray → here → record.
@@ -28,10 +29,16 @@ message StartTurnRequest {
   // Closed attribution copied onto the turn's durable record so a stored turn
   // can be traced to the exact situation that caused it.
   PromptOrigin origin = 3;
+  // WHOM the prompt addresses. UNSET = the session's prompt thread — the
+  // shim resolves which agent that is, and the daemon never holds the
+  // concept. SET = this agent (a subagent, a workflow's agent): the shim
+  // delivers per kind (a steer to a live one, a resume to a finished one),
+  // and the caller never learns which.
+  optional conversation.v1.AgentId target = 4;
 }
 
 // THE ARM IS THE OUTCOME OF THE CALL — whether the prompt was ACCEPTED.
-// Nothing about the turn itself returns here: the turn is WatchTurn's.
+// Nothing about the turn itself returns here: the turn is WatchAgent's.
 message StartTurnResponse {
   oneof result {
     StartTurnSuccess success = 1;
@@ -40,10 +47,10 @@ message StartTurnResponse {
 }
 
 // The prompt was accepted and the turn is open. Empty: the id was the
-// daemon's, and everything the turn produces is WatchTurn's.
+// daemon's, and everything the turn produces is WatchAgent's.
 message StartTurnSuccess {
-  // The prompt as delivered: the daemon's id adopted, the recipient resolved
-  // (the main agent), the text as accepted. The same message history replays.
+  // The prompt as delivered: the daemon's id adopted, the recipient resolved,
+  // the text as accepted. `prompt.agent` is the address for WatchAgent. The same message history replays.
   conversation.v1.AgentPrompt prompt = 1;
 }
 

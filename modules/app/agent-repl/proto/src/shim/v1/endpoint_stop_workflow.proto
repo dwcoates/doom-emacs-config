@@ -1,5 +1,5 @@
 // endpoint_stop_workflow.proto — StopWorkflow: end a run. The run's agents
-// are addressed individually (UpdateSubagent); the RUN's only addressable
+// are addressed individually (StartTurn / UpdateAgent); the RUN's only addressable
 // act is stopping it.
 
 syntax = "proto3";
