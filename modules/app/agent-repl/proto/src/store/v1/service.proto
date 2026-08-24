@@ -13,6 +13,7 @@ package store.v1;
 
 
 import "store/v1/endpoint_get_sidecar_cursors.proto";
+import "store/v1/endpoint_get_workflow.proto";
 import "store/v1/endpoint_open_agent_session.proto";
 import "store/v1/endpoint_read_agent_page.proto";
 import "store/v1/endpoint_watch_agent_session.proto";
@@ -32,6 +33,10 @@ service ShimStore {
   // An OLDER page of one book, walking down from a served pointer. The first
   // page is OpenAgentSession's answer; this verb only continues.
   rpc ReadAgentPage(ReadAgentPageRequest) returns (ReadAgentPageResponse);
+
+  // One workflow run's stored state: description, derived agent level,
+  // terminal if ended. Serves the shim's own GetWorkflow endpoint.
+  rpc GetWorkflow(GetWorkflowRequest) returns (GetWorkflowResponse);
 
   // ---- Recovery: what a restarted producer reads back ----
 

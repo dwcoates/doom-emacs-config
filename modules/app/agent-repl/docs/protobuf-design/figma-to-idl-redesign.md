@@ -328,6 +328,17 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### store.v1 `GetWorkflow` lands ("looks great")
+
+**What changed.** `endpoint_get_workflow.proto`: request { DetachedWorkId };
+success { AgentWorkflowStart (from the workflow row's columns); oneof
+standing { live { the DERIVED level } | ended { the terminal, embedded
+stream vocabulary } } }; failure derived. The level is computed at serve
+time from the agent table, stored nowhere. The shim's own GetWorkflow serves
+from this, adding only the watch token. `ended` deliberately carries no
+level; a caller wanting a dead run's spawn list is a later additive arm if
+ever needed.
+
 ### `detached_work` moves UP into `AgentFrame`; the frame's oneof IS the datalayer route; the routing and schema settlements
 
 **What changed ("looks good … let's land").** `AgentFrame.result` becomes
