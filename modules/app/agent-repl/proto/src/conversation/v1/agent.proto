@@ -13,6 +13,7 @@ import "conversation/v1/api.proto";
 import "conversation/v1/detached_work.proto";
 import "conversation/v1/permission.proto";
 import "conversation/v1/question.proto";
+import "conversation/v1/user.proto";
 import "conversation/v1/workflow.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
@@ -66,8 +67,11 @@ message AgentInput {
     AgentStop stop = 1;
     // Answer a question or decide a permission it is blocked on.
     AgentAnswer answer = 2;
-    // Tag 3 (prompt) is RETIRED: a prompt to ANY agent is StartTurn with a
-    // target, so there is exactly one way to say it.
+    // A prompt addressed to an EXISTING agent — a subagent, a workflow's
+    // agent. The producer decides HOW it lands per kind (a steer to a live
+    // one, a resume to a finished one), and the caller never learns which.
+    // The session's own turns are never spoken this way: they are StartTurn.
+    UserSaid prompt = 3;
   }
 }
 
