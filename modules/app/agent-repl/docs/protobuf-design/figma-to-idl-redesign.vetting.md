@@ -82,7 +82,13 @@ meaningless without the first.
    genuinely out of scope. This is the direction that finds SILENT OMISSIONS,
    and it is the one that cannot be done by reading our own protos.
 
-**Status.** OPEN. Blocked on nothing; runs once the last arm body lands.
+**Status.** RUN (2026-08-22/24), results persisted at
+`docs/protobuf-design/audit/` — five reports (A: SDK stream messages, B:
+per-tool I/O types, C: real JSONL corpus 641k records, D: sidecar file
+sources, E: control surface), each a per-field forward/reverse
+classification. FINDINGS NOT YET JUDGED: the unsupported/non-static lists
+await the design conversation; each judged finding re-enters the sketch loop
+per the register's rules.
 
 ### 2. Whether a shell's detachment announces itself the way a subagent's does
 
