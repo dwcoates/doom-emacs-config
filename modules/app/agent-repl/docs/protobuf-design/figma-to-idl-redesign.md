@@ -328,6 +328,38 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `OpenAgentSession` + `WatchAgentSession` land; `ReadPage` loses its first arm — OPEN answers "where am I", WATCH is a pure tail
+
+**What changed (the user's factoring and names).**
+`endpoint_open_agent_session.proto`: request { AgentId agent; page_size;
+optional StoreItemPointer known_through }; success { AgentSessionPage page
+(lines each with their pointer; boundary more|floor); AgentSessionToken
+watch }. `endpoint_watch_agent_session.proto`: request { the token, echoed };
+STANDING stream of `StoreLineAt` (one frame per written line, upserts
+included). `ReadPageRequest.position` collapses to a required `after`
+pointer — there is no first-page request semantics anywhere; the first page
+is always the OPEN's answer.
+
+**The design, in the user's terms.** Pages and watching are DECOUPLED: the
+open is a bounded unary answer, the watch a pure tail addressed by an
+opaque store-minted token — "a hash of the actual session identifier, so the
+client MUST call open to subsequently watch" — which also pins the tail to
+begin exactly after the page's newest item. `known_through` is the caller's
+own high-water mark: UNSET = repaint (a reopened historical workspace paints
+the first page whole); SET = catch-up after a shim bounce (the page carries
+only newer items; a gap wider than page_size is walked older via ReadPage
+until the caller meets its own mark). The store deliberately tracks NOTHING
+about what it previously served. Every streamed line carries its pointer so
+the caller always holds a current mark.
+
+**REOPENED BY NAME, for their stages.** (1) Stage 4's `WatchTurn` "opens by
+replaying from the turn's beginning" — under this pattern the shim boundary
+gets the same open/watch split and the watch carries only new lines. (2) The
+`agentrepl.v1` feed surface at the frontend remediation pass: open/resume
+answers with the first page; `WatchFeed` becomes tail-only. The user: the
+same pattern "should be paralleled at the shim boundary … and when the
+frontend creates or resumes a workspace".
+
 ### The store becomes a Connect service; `ReadPage` lands — the first read verb
 
 **What changed ("let's use Connect RPCs here as well"; "we can land the page
