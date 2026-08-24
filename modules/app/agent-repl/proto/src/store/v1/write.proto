@@ -48,7 +48,7 @@ message StoreEntryWrite {
 // which is a recovery, not a guarantee.
 message EntryBatch {
   // The records, in the order the producer observed them.
-  repeated Entry entries = 1;
+  repeated StoreEntry entries = 1;
 
   // Where the producer had read to when it produced these. Unset for
   // stream-plane producers, which have no file to be positioned in.

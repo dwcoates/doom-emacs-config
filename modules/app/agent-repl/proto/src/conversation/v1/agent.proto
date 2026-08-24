@@ -260,14 +260,3 @@ message AgentWorkflowScriptRejected {
 // The run started and ended without finishing. Arms are DERIVED from the
 // producer's real sites at the implementation wave; empty until then.
 message AgentWorkflowRunEnded {}
-
-2. 🧭 Best current alternative: two partial paths exist, each missing something this PR needs.
-├── 2.1. GetGameState(game_state_key) reads a cached state but requires the caller to already hold the key, which only CEE's keying feature can derive.
-│   └── 2.1.1. Worked example: -d '{"game_state_key":"a1b2c3..."}' against chesscom.ceac
-
-becomes
-
-2. 🧭 Best current alternative: two partial paths exist, each missing something this PR needs.
-├── 2.1. GetGameState(game_state_key) reads a cached state but requires the caller to already hold
-│   │    the key, which only CEE's keying feature can derive.
-│   └── 2.1.1. Worked example: -d '{"game_state_key":"a1b2c3..."}' against chesscom.ceac

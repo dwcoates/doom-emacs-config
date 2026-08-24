@@ -1,47 +1,20 @@
-// entry.proto — the stored record, and the half of it that never leaves.
-//
-// PACKAGE CONTRACT: conversation.v1 is the VENDOR-AGNOSTIC model of a
-// conversation. The shim and the sidecar convert their vendor's output into it
-// at the point of production; the store persists only this; the daemon and the
-// webapp consume only this and never learn a vendor's name. Anything a producer
-// cannot convert lands as an explicit internal arm rather than as raw vendor
-// material, so eager conversion at the edge costs no fidelity.
-//
-// This package REPLACES agentshim.data.v1, which was a direct transliteration
-// of Claude's JSONL and SDK stream — 267 messages whose names and arms were the
-// vendor's own API surface, which meant every consumer that read one had to
-// know the vendor to understand it.
+// entry.proto — the stored record: a conversation.v1 fact inside the storage
+// envelope.
 //
 // ============================ IMPORT DISCIPLINE ============================
 //
 // THE DAEMON MUST NEVER IMPORT THIS PACKAGE.
 //
-// Everything the daemon is entitled to see is conversation.v1. This
-// package holds the shim-side half: which observation plane produced a record,
-// the key the store deduped it on, and the records we could not convert at all.
-// Those are implementation details of the shim, the sidecar and the store, and
-// the daemon was previously reading them to make decisions it should have made
-// from a record's own meaning.
+// Everything the daemon is entitled to see is conversation.v1, served over
+// shim.v1. This package holds the storage half: which observation plane
+// produced a record, the keys the store dedupes and upserts on, and whether a
+// record may ever be served. Those are implementation details of the shim,
+// the sidecar and the store.
 //
-// IT IS A SEPARATE PROTO PACKAGE, NOT MERELY A SEPARATE FILE, and that is the
-// whole reason the discipline is real. Every file in one proto package
-// generates into ONE Go package, so `entry.proto` and `external.proto` sitting
-// side by side in conversation.v1 would both land in
-// `conversationv1` — and a daemon that imported the external half would get
-// `Plane` in the same namespace, for free. A separate package is a separate Go
-// import path and a separate TypeScript module.
-//
-// IT IS NOT NAMED `internal`, AND THAT WAS A REAL BUG. An earlier draft called
-// it agentshim.v1, which put Go's `internal/` keyword in
-// the generated import path — and that keyword means "importable only from code
-// rooted at the parent directory", which here is the generated proto tree
-// itself. So the shim, the sidecar AND the store were all locked out of the
-// type they exist to write. The keyword enforced the exact opposite of the
-// intent, and enforced it so completely that nothing compiled far enough to
-// notice.
-//
-// check-conversation-isolation.sh refuses the import at codegen time, so the
-// violation is a build failure rather than a review note.
+// IT IS A SEPARATE PROTO PACKAGE, NOT MERELY A SEPARATE FILE: every file in
+// one proto package generates into ONE Go package, so a daemon importing any
+// of it would get all of it for free. check-conversation-isolation.sh refuses
+// the import at codegen time.
 //
 // ==========================================================================
 
@@ -49,129 +22,91 @@ syntax = "proto3";
 
 package store.v1;
 
-import "google/protobuf/struct.proto";
-import "shim/v1/external.proto";
-import "store/v1/unsupported.proto";
+import "conversation/v1/agent.proto";
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/session.proto";
+import "conversation/v1/turn.proto";
 
 option go_package = "agentrepl/proto/store/v1;storev1";
 
-// One record as the STORE holds it: the half that may leave, and the half that
-// may not.
-//
-// A PRODUCT, NOT A SUM. Both fields can be set on one record and usually are —
-// this is not a choice between an internal record and an external one. Every
-// stored record has an internal half (at minimum, which producer observed it);
-// records that are eligible to reach the daemon also have an external half.
-//
-// A RECORD WITH NO EXTERNAL HALF IS THE UNRENDERABLE CASE. Something we could
-// not convert is stored whole and has simply nothing to hand over — not an arm
-// the daemon must remember to skip, but no external field set at all. That is
-// what makes "an unconvertible record cannot reach a page" a fact about the
-// record's shape rather than a rule a query applies.
-message Entry {
-  // What stays behind. Written to the store, never forwarded.
-  InternalEntry internal = 1;
-
-  // What may be forwarded. The daemon receives exactly this, carried by the
-  // delivery envelope in shim.v1 — a field access, not a conversion.
-  //
-  // UNSET means the record is unrenderable and has no path to the daemon.
-  shim.v1.ExternalEntry external = 2;
-}
-
-// The half of a record that never crosses the shim→daemon wire.
-//
-// Everything here is an implementation detail of the shim, the sidecar or the
-// store. The daemon's build does not include this type, so none of it can be
-// read downstream by accident.
-message InternalEntry {
-  // WHICH PRODUCER observed this. Attribution, and the shim's own business.
-  //
-  // The daemon used to read this to decide whether a turn boundary was
-  // authoritative — an abstraction leak, because "is this boundary
-  // authoritative" is a property of the BOUNDARY and belongs in its own arm.
-  // Producers still record who saw what, for reconciliation when two accounts
-  // disagree; nothing downstream sees it.
+// One write: a conversation.v1 fact inside the storage envelope.
+message StoreEntry {
+  // Which producer observed this (shim stream | sidecar file).
   Plane plane = 1;
 
-  // THERE IS NO CROSS-PLANE DEDUPLICATION HERE, and none is needed: the two
-  // planes no longer observe the same fact. The shim writes no MessageEntry
-  // records at all — it cannot, having no parent pointer on the SDK stream — so
-  // conversation content reaches the store from the sidecar alone and there are
-  // no twins to collapse.
-  //
-  // The cost of that, accepted deliberately: content is durable only once the
-  // CLI flushes to disk and the sidecar reads it. Writing from both planes
-  // bought latency, and this is the price of the lineage the current design
-  // requires.
-
-  // The STABLE WRITE IDENTITY, minted once by the producer when the record is
-  // first handed to a store write, and never regenerated — not for a retry, not
-  // for a replay after the store bounced underneath the producer.
-  //
-  // THIS IS ABOUT ONE PRODUCER'S RE-DELIVERY OF ONE RECORD, not about two
-  // producers' views of one fact. A batch that reached the store
-  // but whose ack was lost has to be replayed, because from the producer's side
-  // an unacked batch and a never-delivered batch are indistinguishable. Without
-  // this the store writes it twice; with it the replay is a no-op.
-  //
-  // Empty means the producer supplied no write identity, and such a record is
-  // not replay-idempotent. The store enforces uniqueness only over non-empty
-  // values.
+  // Replay dedup: minted once per WRITE, never regenerated; a redelivered
+  // batch is absorbed as a no-op.
   string write_id = 2;
 
-  // THE PRODUCER'S SOURCE RECORD, kept whole when converting it to `external`
-  // dropped structure.
-  //
-  // NOT the same job as `unconverted` below, and the two are not alternatives.
-  // `unconverted` is for a record with NOTHING renderable; this is for one that
-  // renders fine and is ALSO more than its rendering. A workflow journal line
-  // becomes a single DetachedWorkProgressed string, so every other key in the
-  // source object had nowhere to go — the record was durably less than what was
-  // on disk.
-  //
-  // SHIM-SIDE, WHICH IS WHY IT IS SAFE. Vendor-shaped material in the internal
-  // half is structurally unreachable from the daemon (check-conversation-
-  // isolation.sh), so keeping it whole costs no vendor-agnosticism downstream.
-  // That is exactly what makes eager conversion at the edge a reversible bet.
-  //
-  // UNSET when the conversion was faithful. It is not a copy of every record.
-  google.protobuf.Struct source_record = 3;
+  // The row this write REPLACES: the store holds one row per upsert_key and
+  // this write supersedes it whole. Opaque to the store — the producer maps
+  // it (a prompt's TurnId, a unit's activity id, a run's id); the store has
+  // exactly one place it looks, never a per-kind rule.
+  string upsert_key = 3;
 
-  // Set when there is nothing to hand the daemon: a record we could not place.
-  //
-  // UNSET on every ordinary record — this is not a category every entry falls
-  // into, it is the residue. These arms were previously wrapped in an
-  // `UnsupportedEntry` that sat as a third arm beside message and bookkeeping,
-  // which put a thing nobody can render in the same list as the two things
-  // everybody renders. Unwrapping it here says what it always meant:
-  // unsupported IS internal.
-  //
-  // THIS IS WHAT MAKES EAGER CONVERSION SAFE. Converting vendor output to the
-  // neutral model at the edge would be a lossy bet if anything unconvertible
-  // were dropped. It is not dropped: it lands durably and whole, so the
-  // decision to not model it stays reversible from stored data.
-  oneof unconverted {
-    // A fact specific to one vendor, understood but not carried into a
-    // vendor-agnostic feed. The follow-up is a CONVERTER, if it turns out to be
-    // portable after all.
-    VendorSpecificEntry vendor_specific = 4;
-
-    // A record we PARSED but do not MODEL. The follow-up is a MODEL.
-    UnknownEntry unknown = 5;
-
-    // A record we could not PARSE at all — a failure rather than a gap.
-    UnparsedEntry unparsed = 6;
+  // What kind of fact this is. THE ARM IS THE KIND.
+  oneof entry {
+    StoreAgentUpdate agent_update = 4;
+    conversation.v1.SessionUpdate session_update = 5;
   }
+}
+
+// A fact about an agent's work, and whether it may ever be served.
+message StoreAgentUpdate {
+  // The nearest NON-SYNC ancestor: the turn's main agent or a detached-work
+  // agent, never a sync subagent — which live stream carried this work.
+  // Copied from the parent's row at insert (one lookup).
+  conversation.v1.AgentId top_level = 1;
+
+  // THE PRODUCER DECIDES PAGEABILITY. A page line names its book; every
+  // other arm is structurally unable to appear in any page.
+  oneof agent_info {
+    // A line in some agent's book.
+    StorePageLine serveable_frame = 2;
+    // Never served to anyone: keep-alive material and its kin. No book.
+    StoreAgentItem unserveable_frame = 3;
+    // A detached shell run's frame. Not paginatable.
+    StoreAgentBash bash = 4;
+    // A workflow run's frame. Not paginatable.
+    StoreAgentWorkflow workflow = 5;
+  }
+}
+
+// One line of one agent's book.
+message StorePageLine {
+  // The book: the agent whose page this line renders in. A pagination query
+  // filters on this and nothing else.
+  conversation.v1.AgentId page_agent_id = 1;
+  // The line itself.
+  StoreAgentItem agent_item = 2;
+}
+
+// A servable conversation fact: a prompt or an agent's frame.
+message StoreAgentItem {
+  oneof item {
+    conversation.v1.AgentPrompt agent_prompt = 1;
+    conversation.v1.AgentFrame agent_frame = 2;
+  }
+}
+
+// A detached shell run's frame, wrapped with the unit id the spawning stream
+// announced, so a reader holding the announcement resolves the run's state.
+message StoreAgentBash {
+  conversation.v1.AgentActivityId run = 1;
+  conversation.v1.AgentBash frame = 2;
+}
+
+// A workflow run's frame, wrapped with the run's agent identity for the same
+// join (a run is an agent-shaped container).
+message StoreAgentWorkflow {
+  conversation.v1.AgentId run = 1;
+  conversation.v1.AgentWorkflow frame = 2;
 }
 
 // Which producer observed a record.
 //
-// TWO ARMS, NOT THREE. An earlier draft had a `synthetic` arm for the daemon
-// stating something it inferred. The daemon has no store write path at all —
-// every StoreWrite producer is the shim, the sidecar, or the store itself, and
-// daemon-synthesized turn closes live in the daemon's own statedb — so that arm
-// named a producer that cannot exist here.
+// TWO ARMS, NOT THREE: every StoreEntryWrite producer is the shim or the
+// sidecar; the daemon has no store write path at all.
 message Plane {
   oneof plane {
     // The shim, watching the SDK as it runs. First to know, and the only source
