@@ -328,6 +328,27 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### STAGE 6 OPENS: the SSM's purpose is WORKSPACE STATE — rename to WSM; the durable evidence layer's premises re-examined
+
+**Settled with the user, above any shape.** The daemon's SSM exists to manage
+WORKSPACE state — "what workspaces are open currently, what workspaces are
+merging and what the merge queue status is" — and is to be RENAMED WSM
+(workspace state manager). It tracks at a much higher level than the store,
+which owns agent-response information. A comb of the current implementation
+against this categorization is running; whatever does not fall inside it is
+enumerated and re-homed by decision, not ported.
+
+**A correction of the orchestrator, kept visible.** The orchestrator called
+`durable.proto`'s frozen-replay premise VOID under nuke-never-migrate; the
+user: it is NOT void — it is an OPERATIONAL prescription, merely not relevant
+during development. The constraints return once the schema ships.
+
+**Also noted at stage open.** `durable.proto` is dark (its two deleted
+shim.v1 imports); usage evidence now reaches the daemon on the same streams
+as everything else (envelope usage, account_usage session updates), so the
+stage's central question is what the daemon must durably hold that the store
+does not.
+
 ### `GetLiveWork` lands — the OPEN-OBLIGATIONS verb ("okay seems reasonable")
 
 **What changed.** `endpoint_get_live_work.proto`: empty request; success
