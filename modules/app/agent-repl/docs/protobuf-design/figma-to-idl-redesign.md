@@ -328,6 +328,17 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `store.v1` adopts the standard service file model ("we really should have service.proto, endpoint_*.proto, and store.proto for datatypes")
+
+**What changed.** `read.proto` is split into
+`endpoint_open_agent_session.proto`, `endpoint_watch_agent_session.proto`,
+`endpoint_read_agent_page.proto`; `GetSidecarCursors`'s shapes move to
+`endpoint_get_sidecar_cursors.proto`; the cross-endpoint page vocabulary
+(`StoreItemPointer`, `StoreLineAt`, `AgentSessionToken`, `AgentSessionPage`,
+the More/Floor arms) moves into `store.proto` beside the record, the write
+batch and the cursor. This supersedes the one-file-reads fold from earlier
+today; no shape changed.
+
 ### `GetSidecarCursors` lands ("you can land it immediately")
 
 **What changed.** `CursorQuery`/`CursorList` become

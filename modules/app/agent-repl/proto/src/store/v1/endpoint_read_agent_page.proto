@@ -1,0 +1,52 @@
+// endpoint_read_agent_page.proto — ReadAgentPage: an OLDER page of one
+// book, walking down from a served pointer. The first page is
+// OpenAgentSession's answer; this verb only continues.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "store/v1/store.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// The store's page read: N page lines of one book, newest first.
+message ReadAgentPageRequest {
+  // The book: the agent whose page lines are wanted.
+  conversation.v1.AgentId book = 1;
+  // How many lines this page may hold. The caller's budget per call, so it
+  // can vary across calls of one walk.
+  uint32 page_size = 2;
+  // The page begins strictly OLDER than the item this pointer names — the
+  // pointer served by a previous page's `more` arm or by a streamed line,
+  // echoed verbatim. There is no first-page arm: the first page is
+  // OpenAgentSession's answer, and this verb only ever walks older.
+  StoreItemPointer after = 3;
+}
+
+// The page, or why it could not be served.
+message ReadAgentPageResponse {
+  oneof result {
+    ReadAgentPageSuccess success = 1;
+    ReadAgentPageFailure failure = 2;
+  }
+}
+
+// The page as served.
+message ReadAgentPageSuccess {
+  // The lines, newest first. At most page_size of them.
+  repeated StorePageLine lines = 1;
+  // Whether older lines remain. THE ARM IS THE COMPLETENESS.
+  oneof boundary {
+    ReadAgentPageMore more = 2;
+    ReadAgentPageFloor floor = 3;
+  }
+}
+
+// The page could not be served. `kind` arms are DERIVED at the wave from the
+// store's real refusal sites (unknown book, stale pointer).
+message ReadAgentPageFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+}

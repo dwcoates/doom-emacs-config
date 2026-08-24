@@ -1,6 +1,7 @@
 // service.proto — the store's Connect service: every rpc signature, organized
-// in commented sections. Shapes live in read.proto (reads) and store.proto
-// (the record, the write batch, the cursor).
+// in commented sections, one endpoint_<rpc>.proto per rpc; store.proto holds
+// the shared datatypes (the record, the write batch, the cursor, the page
+// vocabulary).
 //
 // CALLERS ARE THE SHIM AND THE SIDECAR, never the daemon: the daemon's read
 // path is shim.v1 (ReadHistory and the Watch streams), and the isolation
@@ -11,8 +12,10 @@ syntax = "proto3";
 package store.v1;
 
 
-import "store/v1/read.proto";
-import "store/v1/store.proto";
+import "store/v1/endpoint_get_sidecar_cursors.proto";
+import "store/v1/endpoint_open_agent_session.proto";
+import "store/v1/endpoint_read_agent_page.proto";
+import "store/v1/endpoint_watch_agent_session.proto";
 
 option go_package = "agentrepl/proto/store/v1;storev1";
 
