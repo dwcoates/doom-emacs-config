@@ -328,6 +328,30 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### RETRACTION: `DetachedWorkId` STAYS — it is the uniform CONNECTION token, and the mapping is the producer's
+
+**The verdict it retracts.** An earlier verdict in this stage (unlanded on
+the wire; discussed while shaping the store) removed `DetachedWorkId` in
+favor of addressing detached work by its underlying identity —
+`AgentActivityId` for bash, `AgentId` for subagent and workflow.
+
+**The user's ruling.** "The detached work id is returned because it makes
+creating the subsequent connection from daemon to shim the same regardless
+of the detached work (just check the id). If the producer maps to it
+differently depending on the underlying message, that's fine, but it
+shouldn't be the CONSUMER doing that." It is the typed-echo-token pattern:
+the announcement serves the handle, the daemon echoes it to Watch/Stop, one
+code path for every kind.
+
+**What survives from the discussion.** `UpdateSubagent` keeps `AgentId` (a
+prompt targets the AGENT, which may have no live run — addressing, not a
+connection); the store's run wrappers keep their typed identities
+(`StoreAgentBash.run` = `AgentActivityId`, `StoreAgentWorkflow.run` =
+`AgentId`) because the store joins on identity; the shim owns the
+handle↔identity mapping (one lookup, `task_started` carries both). The
+"placement { foreground | detached }" settled-frame idea and the
+`HistoryEntry` announcement-comment question remain open, unaffected.
+
 ### `store.v1` becomes ONE FILE (`store.proto`); the unserved oneof lands — keepalive beside the three residue arms
 
 **What changed (the user's sketch).** `write.proto`, `entry.proto`,
