@@ -238,6 +238,24 @@ top level, and no insert ever walks more than one step. Prompts are stored
 as messages in their own right, with parent and top-level recorded the same
 way.
 
+**PAGINATION HAS TWO KEYS — AGENT for lineage, PARENT ITEM for assembly —
+and the page query is anchors-then-children ("exactly what I meant, and
+important to get right").** A bare `agent_id = X limit N` falls into the trap
+the user named: one vendor API response arrives as SEVERAL block units
+(thinking, prose, tool calls), every one a row under X, so N rows is one
+response's first blocks rather than N items. So every row carries two keys,
+both static at insert: its AGENT (who did it — lineage), and its PARENT ITEM
+— the response it is a block of, keyed by the response's ANCHOR unit (the
+same first-block unit the usage rule singles out; one lookup by the vendor's
+`message.id`). Prompts and anchors are PARENT-LESS. A page of agent X is: the
+N most recent parent-less rows of X, then every row whose parent item is one
+of those — two indexed queries, constant per row, no walk; the page reads as
+"N responses, each with all its blocks", the shape `FeedAgent` already draws.
+Containers (subagent, workflow run) remain doors: their contents are rows
+under the CHILD's own agent id, never swept into X's page. `top_level` is
+never used for paging. The "no collective noun" ruling stands: the response
+is an index key in the store, never a message on the wire.
+
 **A PAGE IS "IMMEDIATE CHILDREN OF X", the user's definition, and nothing
 has a tool call as parent.** A history page is the rows whose IMMEDIATE
 parent is the addressed container, newest first; `top_level` is never used
