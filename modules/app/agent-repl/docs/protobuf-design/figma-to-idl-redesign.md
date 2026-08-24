@@ -256,6 +256,24 @@ under the CHILD's own agent id, never swept into X's page. `top_level` is
 never used for paging. The "no collective noun" ruling stands: the response
 is an index key in the store, never a message on the wire.
 
+**THE THREE LINEAGE KEYS, the user's taxonomy.** (1) `top_level` — the
+nearest NON-SYNC ancestor: the turn's main agent or a detached-work agent,
+never a sync subagent; equivalently, which live stream carried the work.
+Denormalized at insert by the same one-lookup induction as the root stamp:
+top_level(X) = X when X is main-or-detached, else the parent's stored
+top_level. It makes "kill a detached subagent's whole subtree" and
+"attribute a sync subagent's work to its stream" one indexed query each.
+(2) The PARENT AGENT — the immediate agent running the thing, sync subagents
+included — read from the frame (`AgentFrame.agent_id`, `AgentPrompt.agent`),
+indexed, never restated on the envelope; it is THE pagination key, so a sync
+subagent is exactly ONE item in its parent's page (its spawn unit) while its
+own constituents carry it as their parent agent. (3) `parent_item` — the
+within-response anchor grouping, per the two-key entry above. An earlier
+`top_level`-as-main-agent column is superseded: the main agent is constant
+per logical-session scope (Owed H) and names no column. OPEN: whether
+detachable spawn rows also carry a TURN stamp so `KillTurn`'s transitive
+refusal list is one query, or the daemon resolves that from its own state.
+
 **A PAGE IS "IMMEDIATE CHILDREN OF X", the user's definition, and nothing
 has a tool call as parent.** A history page is the rows whose IMMEDIATE
 parent is the addressed container, newest first; `top_level` is never used
