@@ -9,13 +9,22 @@ syntax = "proto3";
 
 package store.v1;
 
+import "store/v1/endpoint_open_agent_session.proto";
 import "store/v1/endpoint_read_page.proto";
+import "store/v1/endpoint_watch_agent_session.proto";
 
 option go_package = "agentrepl/proto/store/v1;storev1";
 
 service ShimStore {
   // ---- Reads: what the shim recovers and serves from durable state ----
 
-  // A page of one book's lines, newest first. Backs shim.v1's ReadHistory.
+  // Open one agent's reading session: the first page plus the watch token.
+  rpc OpenAgentSession(OpenAgentSessionRequest) returns (OpenAgentSessionResponse);
+
+  // The pure tail of an opened reading session.
+  rpc WatchAgentSession(WatchAgentSessionRequest) returns (stream WatchAgentSessionResponse);
+
+  // An OLDER page of one book, walking down from a served pointer. The first
+  // page is OpenAgentSession's answer; this verb only continues.
   rpc ReadPage(ReadPageRequest) returns (ReadPageResponse);
 }
