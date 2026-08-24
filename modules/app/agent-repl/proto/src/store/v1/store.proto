@@ -188,16 +188,6 @@ message StoreUnparsed {
 // The write half is reachable only by the shim, the sidecar and the store;
 // the daemon never sees it.
 
-// One producer's write of one batch of records.
-message StoreEntryWrite {
-  // Which producer is writing, for attribution in the store's own logs.
-  // "claude-shim:<session>" or "shim-claude-sidecar".
-  string producer = 1;
-
-  // The records, and the cursor advance that must commit with them.
-  EntryBatch batch = 2;
-}
-
 // A batch of records, and the reader position that becomes durable with them.
 //
 // THE CURSOR RIDES WITH THE RECORDS ON PURPOSE. The sidecar's exactly-once

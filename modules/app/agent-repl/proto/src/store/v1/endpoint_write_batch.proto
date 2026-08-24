@@ -1,0 +1,42 @@
+// endpoint_write_batch.proto — WriteBatch: one producer's write of one batch,
+// with the cursor advance that must commit in the same transaction.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "store/v1/store.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// One producer's write. The rpc is the envelope: no separate carrier message
+// exists, so the write's shape has exactly one spelling.
+message WriteBatchRequest {
+  // Which producer is writing, for attribution in the store's own logs.
+  // "claude-shim:<session>" or "shim-claude-sidecar".
+  string producer = 1;
+  // The records, and the reader position that becomes durable with them.
+  EntryBatch batch = 2;
+}
+
+// Durable, or nothing.
+message WriteBatchResponse {
+  oneof result {
+    WriteBatchSuccess success = 1;
+    WriteBatchFailure failure = 2;
+  }
+}
+
+// The batch is DURABLE — records and cursor advance committed as one
+// transaction. A replayed batch whose write_ids all landed before is this
+// same arm: absorption is success, and the producer's spill can retire the
+// batch either way.
+message WriteBatchSuccess {}
+
+// Nothing was committed: the transaction failed whole, so the producer's
+// spill holds the batch and replays it. `kind` arms are DERIVED at the wave
+// from the store's real failure sites.
+message WriteBatchFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+}

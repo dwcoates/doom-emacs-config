@@ -16,6 +16,7 @@ import "store/v1/endpoint_get_sidecar_cursors.proto";
 import "store/v1/endpoint_open_agent_session.proto";
 import "store/v1/endpoint_read_agent_page.proto";
 import "store/v1/endpoint_watch_agent_session.proto";
+import "store/v1/endpoint_write_batch.proto";
 
 option go_package = "agentrepl/proto/store/v1;storev1";
 
@@ -37,4 +38,9 @@ service ShimStore {
   // The sidecar's persisted file cursors, for resuming every tailed file
   // exactly where the last committed batch left it.
   rpc GetSidecarCursors(GetSidecarCursorsRequest) returns (GetSidecarCursorsResponse);
+
+  // ---- Writes: how a producer hands records to the store ----
+
+  // One batch, durable or nothing, cursor advance in the same transaction.
+  rpc WriteBatch(WriteBatchRequest) returns (WriteBatchResponse);
 }
