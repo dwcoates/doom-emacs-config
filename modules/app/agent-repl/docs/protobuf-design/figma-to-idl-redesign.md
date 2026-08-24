@@ -328,6 +328,24 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `store.v1` becomes ONE FILE (`store.proto`); the unserved oneof lands — keepalive beside the three residue arms
+
+**What changed (the user's sketch).** `write.proto`, `entry.proto`,
+`unsupported.proto` merge into `store.proto` (18 messages).
+`StoreAgentUpdate.unserveable_frame` is replaced by `StoreUnservedItem
+unserved_item { keepalive (StoreAgentItem) | StoreVendorSpecific |
+StoreUnknown | StoreUnparsed }` — THE ARM IS WHY it cannot be served: no
+book, or unconvertible. The residue bodies carry over verbatim under
+`Store*` names; `UnsupportedEntry`-era wrappers stay dead.
+
+**Consequences.** `top_level` is documented UNSET when unresolvable (an
+unparsed record may name no agent). The residue thereby rides the same
+envelope as everything else — one `upsert_key` space, one write path — and
+the old separate `unconverted` table's reason to exist goes with it. STILL
+HOMELESS, flagged not landed: the old `source_record` kept-whole field (a
+faithful conversion that was nonetheless LESS than the source); the user has
+not yet said where or whether it returns.
+
 ### `cursor.proto` folds into `write.proto`; `OpenTaskState` and the authoritative bool DIE
 
 **What changed ("should this just be in write.proto?" — yes).** `CursorState`,
