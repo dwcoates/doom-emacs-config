@@ -63,16 +63,17 @@ service Shim {
 
   // ---- Agent: start a turn on any agent, watch any agent, speak to it ----
 
-  // SPAWN a turn on any agent — target unset is the session's prompt
-  // thread. Unary: returns once the prompt is accepted; the response's
-  // `prompt.agent` is the WatchAgent address.
+  // SPAWN the session's turn — the main agent's verb only. Unary: returns
+  // once the prompt is accepted, WITH the first page; `prompt.agent` is the
+  // WatchAgent address. An existing agent is prompted with UpdateAgent.
   rpc StartTurn(StartTurnRequest) returns (StartTurnResponse);
 
   // ONE stream for any agent: opens with a page (full, or the gap above the
   // caller's own mark), then tails. Ends nothing; close it freely.
   rpc WatchAgent(WatchAgentRequest) returns (stream WatchAgentResponse);
 
-  // Stop an agent, or answer the ask it is blocked on. Never a prompt.
+  // Speak to an existing agent: stop it, answer its open ask, or prompt it
+  // (a subagent, a workflow agent — never the session's own turn).
   rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse);
 
   // END the turn: the agent and everything THIS turn spawned, transitively.

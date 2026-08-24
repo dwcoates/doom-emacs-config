@@ -1,13 +1,13 @@
-// endpoint_start_turn.proto — StartTurn: SPAWN a turn on ANY agent. Unary:
-// returns once the prompt is ACCEPTED, never waits for the turn. Spawning
-// and attaching are decoupled because the turn outlives the daemon; the
-// response's `prompt.agent` is the WatchAgent address.
+// endpoint_start_turn.proto — StartTurn: SPAWN the session's turn. THE MAIN
+// AGENT'S VERB ONLY — an existing agent is prompted with UpdateAgent. Unary:
+// returns once the prompt is ACCEPTED, with the first page, never waiting
+// for the turn; the response's `prompt.agent` is the WatchAgent address.
 
 syntax = "proto3";
 
 package shim.v1;
 
-import "conversation/v1/agent_activity.proto";
+import "conversation/v1/history.proto";
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
 import "shim/v1/prompt_origin.proto";
@@ -29,12 +29,11 @@ message StartTurnRequest {
   // Closed attribution copied onto the turn's durable record so a stored turn
   // can be traced to the exact situation that caused it.
   PromptOrigin origin = 3;
-  // WHOM the prompt addresses. UNSET = the session's prompt thread — the
-  // shim resolves which agent that is, and the daemon never holds the
-  // concept. SET = this agent (a subagent, a workflow's agent): the shim
-  // delivers per kind (a steer to a live one, a resume to a finished one),
-  // and the caller never learns which.
-  optional conversation.v1.AgentId target = 4;
+  // The opening page's budget.
+  uint32 page_size = 4;
+  // The newest entry the caller already holds. UNSET = repaint: a full first
+  // page rides the response. SET = catch-up: only entries newer than this.
+  optional conversation.v1.HistoryPointer known_through = 5;
 }
 
 // THE ARM IS THE OUTCOME OF THE CALL — whether the prompt was ACCEPTED.

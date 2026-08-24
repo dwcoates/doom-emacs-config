@@ -1,6 +1,6 @@
-// endpoint_update_agent.proto — UpdateAgent: speak to a live agent — stop
-// it, or answer the question or permission it is blocked on. One rpc for
-// every agent kind; a PROMPT is never an update (that is StartTurn).
+// endpoint_update_agent.proto — UpdateAgent: speak to an EXISTING agent —
+// stop it, answer the ask it is blocked on, or prompt it. One rpc for every
+// agent kind. The session's own turns are never started here: StartTurn.
 
 syntax = "proto3";
 
@@ -15,7 +15,7 @@ option go_package = "agentrepl/proto/shim/v1;shimv1";
 message UpdateAgentRequest {
   // WHOM. UNSET = the session's prompt thread, resolved by the shim.
   optional conversation.v1.AgentId target = 1;
-  // What is said: stop, or an answer to an open ask.
+  // What is said: stop, an answer to an open ask, or a prompt.
   conversation.v1.AgentInput input = 2;
 }
 

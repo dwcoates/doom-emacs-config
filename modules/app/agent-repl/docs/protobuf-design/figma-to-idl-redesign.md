@@ -328,6 +328,24 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### CORRECTION to the agent consolidation: `StartTurn` is the MAIN AGENT's verb and returns the FIRST PAGE; `AgentInput.prompt` returns; `UpdateAgent` prompts existing agents
+
+**What changed (the user's rejection of the target field).** `StartTurn`
+loses `optional target` and gains the store-open semantics: request
+{ turn; said; origin; page_size; optional known_through }, success
+{ AgentPrompt prompt; HistoryPage page } — one call paints and submits, and
+`prompt.agent` is the WatchAgent address. `AgentInput.prompt` (tag 3) is
+RESTORED: a prompt to an EXISTING agent (a subagent, a workflow's agent)
+rides `UpdateAgent`, with delivery per kind the shim's as already ruled.
+`WatchAgent` and `ReadHistory` unchanged.
+
+**The distinction, in the user's terms.** "StartTurn principally differs in
+that it returns in the response the first page (like it is in the store)"
+— it is the session's own verb; other agents are reached by ids the API
+already serves. A subagent's FIRST prompt needs no verb at all: REVIEWED and
+confirmed covered — `AgentSubagentStart.prompt` (`AgentSubagentPrompt.text`
+plus description/type/name/model/isolation) rides every frame of the spawn.
+
 ### The AGENT CONSOLIDATION lands: StartTurn targets ANY agent; ONE `WatchAgent` opens-with-a-page; `UpdateAgent` replaces the per-kind updates; "main agent" leaves the API
 
 **What changed (settled across the exchange; "sounds good" + the WatchAgent
