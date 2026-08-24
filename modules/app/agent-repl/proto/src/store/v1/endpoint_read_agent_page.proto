@@ -1,4 +1,4 @@
-// endpoint_read_page.proto — ReadPage's request and response, and everything
+// endpoint_read_agent_page.proto — ReadAgentPage's request and response, and everything
 // private to them.
 
 syntax = "proto3";
@@ -11,7 +11,7 @@ import "store/v1/store.proto";
 option go_package = "agentrepl/proto/store/v1;storev1";
 
 // The store's page read: N page lines of one book, newest first.
-message ReadPageRequest {
+message ReadAgentPageRequest {
   // The book: the agent whose page lines are wanted.
   conversation.v1.AgentId book = 1;
   // How many lines this page may hold. The caller's budget per call, so it
@@ -25,36 +25,36 @@ message ReadPageRequest {
 }
 
 // The page, or why it could not be served.
-message ReadPageResponse {
+message ReadAgentPageResponse {
   oneof result {
-    ReadPageSuccess success = 1;
-    ReadPageFailure failure = 2;
+    ReadAgentPageSuccess success = 1;
+    ReadAgentPageFailure failure = 2;
   }
 }
 
 // The page as served.
-message ReadPageSuccess {
+message ReadAgentPageSuccess {
   // The lines, newest first. At most page_size of them.
   repeated StorePageLine lines = 1;
   // Whether older lines remain. THE ARM IS THE COMPLETENESS.
   oneof boundary {
-    ReadPageMore more = 2;
-    ReadPageFloor floor = 3;
+    ReadAgentPageMore more = 2;
+    ReadAgentPageFloor floor = 3;
   }
 }
 
 // Older lines exist below this page.
-message ReadPageMore {
+message ReadAgentPageMore {
   // Points at this page's LAST (oldest) item; the next request echoes it.
   StoreItemPointer last_item = 1;
 }
 
 // This page reached the oldest retained line.
-message ReadPageFloor {}
+message ReadAgentPageFloor {}
 
 // The page could not be served. `kind` arms are DERIVED at the wave from the
 // store's real refusal sites (unknown book, stale pointer).
-message ReadPageFailure {
+message ReadAgentPageFailure {
   // The store's account, for a human and for logs; never switched on.
   string detail = 1;
 }
