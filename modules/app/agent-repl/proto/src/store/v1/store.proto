@@ -237,29 +237,48 @@ message CursorState {
   bytes carry = 4;
 }
 
-// Startup recovery: the sidecar asks the store for its persisted cursors.
-message GetSidecarCursorsRequest {
-  // UNSET asks for every cursor; set asks for one file's.
-  optional string file_id = 1;
+// ---- Page vocabulary shared across the read endpoints ----
+
+// An opaque, store-minted position of one item in one book's order. Echoed
+// verbatim, never parsed or constructed by a caller; stable across upserts
+// because order is by the unit's FIRST insert, not its last write.
+message StoreItemPointer {
+  string value = 1;
 }
 
-// The cursors, or why they could not be served.
-message GetSidecarCursorsResponse {
-  oneof result {
-    GetSidecarCursorsSuccess success = 1;
-    GetSidecarCursorsFailure failure = 2;
+// One line and its position, so the caller always holds a reconnect and
+// paging pointer for the newest thing it has seen.
+message StoreLineAt {
+  // This line's position in its book's order.
+  StoreItemPointer at = 1;
+  // The line itself.
+  StorePageLine line = 2;
+}
+
+// Older lines exist below this page.
+message ReadAgentPageMore {
+  // Points at this page's LAST (oldest) item; the next request echoes it.
+  StoreItemPointer last_item = 1;
+}
+
+// This page reached the oldest retained line.
+message ReadAgentPageFloor {}
+
+// The address of one opened reading session: an opaque, store-minted token —
+// a hash of the underlying identity, never the identity itself, so watching
+// REQUIRES opening. Echoed verbatim, never parsed or constructed.
+message AgentSessionToken {
+  string value = 1;
+}
+
+// The opening page, newest first.
+message AgentSessionPage {
+  // The lines, each with its pointer.
+  repeated StoreLineAt lines = 1;
+  // Whether older lines remain below the page (or below known_through when it
+  // bounded the page). THE ARM IS THE COMPLETENESS.
+  oneof boundary {
+    ReadAgentPageMore more = 2;
+    ReadAgentPageFloor floor = 3;
   }
-}
-
-// Every requested cursor, from durable state. Empty is a legitimate answer:
-// a fresh store has no cursors and the sidecar starts every file from zero.
-message GetSidecarCursorsSuccess {
-  repeated CursorState cursors = 1;
-}
-
-// The cursors could not be read. `kind` arms are DERIVED at the wave from the
-// store's real failure sites.
-message GetSidecarCursorsFailure {
-  // The store's account, for a human and for logs; never switched on.
-  string detail = 1;
 }
