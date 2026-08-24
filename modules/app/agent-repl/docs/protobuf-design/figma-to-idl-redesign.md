@@ -328,6 +328,24 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `cursor.proto` folds into `write.proto`; `OpenTaskState` and the authoritative bool DIE
+
+**What changed ("should this just be in write.proto?" — yes).** `CursorState`,
+`CursorQuery`, `CursorList` move into `write.proto` under a banner —
+one concern: how a producer writes and resumes; `EntryBatch` already embeds
+the cursor and nothing else imported the file. `cursor.proto` deleted.
+DELETED with it: `OpenTaskState` (a timestamp that could not name WHICH task
+— live-work recovery now reads the run rows) and
+`CursorList.open_tasks`/`open_tasks_authoritative` (an old-store
+compatibility crutch, dead under nuke-never-migrate).
+`CursorQuery.file_id` goes `optional` (empty-means-all was a sentinel).
+
+**The high-level, settled first at the user's prompting.** The cursor is
+invisible machinery whose UX is "after any crash or deploy, history has no
+gaps and no repeated messages". It rides the BATCH, not the entry: one read
+position yields many entries, it is a file bookmark rather than a
+conversation fact, and stream-plane writes have no file to be positioned in.
+
 ### STAGE 5 OPENS: `StoreEntry` lands — the storage envelope around conversation.v1; pageability is the PRODUCER's arm; one opaque `upsert_key`
 
 **What changed ("let's land this").** `store/v1/entry.proto` REWRITTEN:
