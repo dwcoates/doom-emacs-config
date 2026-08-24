@@ -1,0 +1,39 @@
+// endpoint_update_agent.proto — UpdateAgent: speak to a live agent — stop
+// it, or answer the question or permission it is blocked on. One rpc for
+// every agent kind; a PROMPT is never an update (that is StartTurn).
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// The input and its address.
+message UpdateAgentRequest {
+  // WHOM. UNSET = the session's prompt thread, resolved by the shim.
+  optional conversation.v1.AgentId target = 1;
+  // What is said: stop, or an answer to an open ask.
+  conversation.v1.AgentInput input = 2;
+}
+
+// Delivered, or refused.
+message UpdateAgentResponse {
+  oneof result {
+    UpdateAgentSuccess success = 1;
+    UpdateAgentFailure failure = 2;
+  }
+}
+
+// The input reached the agent. Nothing is restated: the ask's new state and
+// the stop's acknowledgment arrive as the agent's next frames.
+message UpdateAgentSuccess {}
+
+// Not delivered: unknown agent, no open ask, a stop with nothing running.
+// `kind` arms are DERIVED at the wave from the shim's real refusal sites.
+message UpdateAgentFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+}

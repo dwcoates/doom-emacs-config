@@ -17,9 +17,10 @@ option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 // One page: a contiguous run of an agent's history, NEWEST FIRST, and
 // whether older history remains.
 message HistoryPage {
-  // The entries, newest first. A turn may straddle pages: entries are units
-  // that upsert by identity, so a split costs a consumer nothing.
-  repeated HistoryEntry entries = 1;
+  // The entries, newest first, each with its pointer. A turn may straddle
+  // pages: entries are units that upsert by identity, so a split costs a
+  // consumer nothing.
+  repeated HistoryEntryAt entries = 1;
   // WHETHER older history remains — never how much, never where.
   oneof boundary {
     // Older entries remain below this page.
@@ -29,6 +30,16 @@ message HistoryPage {
     // beginning from a short page.
     HistoryFloor floor = 3;
   }
+}
+
+// One entry and its position, so the caller always holds a pointer for the
+// newest thing it has seen — the reconnect mark and the older-pages walk key.
+message HistoryEntryAt {
+  // This entry's position in the agent's order. Stable across upserts:
+  // order is by the entry's FIRST appearance, never its last write.
+  HistoryPointer at = 1;
+  // The entry itself.
+  HistoryEntry entry = 2;
 }
 
 // One thing in an agent's history. THE ARM IS WHAT IT IS.
@@ -46,18 +57,17 @@ message HistoryEntry {
 
 // Older entries remain below this page.
 message HistoryMore {
-  // Where the next page starts. Opaque; echoed verbatim.
-  HistoryContinuation continuation = 1;
+  // Points at this page's LAST (oldest) entry; the next request echoes it.
+  HistoryPointer last_entry = 1;
 }
 
 // This page reached the oldest retained entry.
 message HistoryFloor {}
 
-// Where a backward read continues. MINTED BY THE PRODUCER, echoed verbatim,
-// never parsed: a consumer that constructs one is typed as wrong in intent. A
-// continuation names a place the caller has DEMONSTRABLY BEEN, and walks
-// away from the history rather than into it.
-message HistoryContinuation {
+// An opaque, producer-minted position of one entry in one agent's order.
+// Echoed verbatim, never parsed or constructed: a pointer names a place the
+// caller has DEMONSTRABLY BEEN.
+message HistoryPointer {
   // The opaque value.
   string value = 1;
 }

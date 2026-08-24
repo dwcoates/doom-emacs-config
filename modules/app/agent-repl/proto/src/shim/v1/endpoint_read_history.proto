@@ -1,8 +1,8 @@
-// endpoint_read_history.proto — ReadHistory: one page of one agent's durable
-// history, backward from the newest or from a page already received. The
-// same read serves a feed page on cold open or scroll-back AND the daemon's
-// own catch-up after its restart: catch-up is ordered pagination, never a
-// position.
+// endpoint_read_history.proto — ReadHistory: an OLDER page of one agent's
+// durable history, walking down from a served pointer. There is no
+// first-page arm: the first page is WatchAgent's opening frame, and this
+// verb only continues — scroll-back, and walking a catch-up gap down to the
+// caller's own mark.
 
 syntax = "proto3";
 
@@ -15,22 +15,16 @@ option go_package = "agentrepl/proto/shim/v1;shimv1";
 
 // Which agent's history, and where in it.
 message ReadHistoryRequest {
-  // WHOSE history: the agent whose children are wanted — the main agent
-  // (its identity is SessionStarted.main_agent_id), a subagent, or a
-  // workflow's agent. An unknown agent is a refusal.
-  conversation.v1.AgentId agent = 1;
-  // WHERE: the newest page, or the one below a page already received.
-  oneof position {
-    // Anchor at the newest entry held. Empty: the newest is a fact the
-    // serving side resolves, never a value the caller supplies.
-    ReadHistoryFirst first = 2;
-    // Continue below a page already received, echoing its continuation.
-    conversation.v1.HistoryContinuation next = 3;
-  }
+  // WHOSE history. UNSET = the session's prompt thread, resolved by the
+  // shim; an unknown agent is a refusal.
+  optional conversation.v1.AgentId target = 1;
+  // This page's budget.
+  uint32 page_size = 2;
+  // The page begins strictly OLDER than the entry this pointer names — a
+  // pointer served by a page's `more` arm or by a watched entry, echoed
+  // verbatim.
+  conversation.v1.HistoryPointer after = 3;
 }
-
-// Anchor at the newest entry.
-message ReadHistoryFirst {}
 
 // THE ARM IS THE OUTCOME.
 message ReadHistoryResponse {
