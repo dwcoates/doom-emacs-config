@@ -328,6 +328,14 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `GetSidecarCursors` lands ("you can land it immediately")
+
+**What changed.** `CursorQuery`/`CursorList` become
+`GetSidecarCursorsRequest` and a canonical-outcome
+`GetSidecarCursorsResponse { success { cursors } | failure { detail } }` on
+the service under a RECOVERY section; empty success is documented as the
+fresh-store answer.
+
 ### The three read endpoint files fold into `read.proto` — store.v1 is `store.proto` + `read.proto` + `service.proto`
 
 **What changed ("i think we just need a read.proto, not dedicated files").**

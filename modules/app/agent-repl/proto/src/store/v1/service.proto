@@ -12,6 +12,7 @@ package store.v1;
 
 
 import "store/v1/read.proto";
+import "store/v1/store.proto";
 
 option go_package = "agentrepl/proto/store/v1;storev1";
 
@@ -27,4 +28,10 @@ service ShimStore {
   // An OLDER page of one book, walking down from a served pointer. The first
   // page is OpenAgentSession's answer; this verb only continues.
   rpc ReadAgentPage(ReadAgentPageRequest) returns (ReadAgentPageResponse);
+
+  // ---- Recovery: what a restarted producer reads back ----
+
+  // The sidecar's persisted file cursors, for resuming every tailed file
+  // exactly where the last committed batch left it.
+  rpc GetSidecarCursors(GetSidecarCursorsRequest) returns (GetSidecarCursorsResponse);
 }

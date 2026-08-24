@@ -238,12 +238,28 @@ message CursorState {
 }
 
 // Startup recovery: the sidecar asks the store for its persisted cursors.
-message CursorQuery {
+message GetSidecarCursorsRequest {
   // UNSET asks for every cursor; set asks for one file's.
   optional string file_id = 1;
 }
 
-// The store's answer: every requested cursor, from durable state.
-message CursorList {
+// The cursors, or why they could not be served.
+message GetSidecarCursorsResponse {
+  oneof result {
+    GetSidecarCursorsSuccess success = 1;
+    GetSidecarCursorsFailure failure = 2;
+  }
+}
+
+// Every requested cursor, from durable state. Empty is a legitimate answer:
+// a fresh store has no cursors and the sidecar starts every file from zero.
+message GetSidecarCursorsSuccess {
   repeated CursorState cursors = 1;
+}
+
+// The cursors could not be read. `kind` arms are DERIVED at the wave from the
+// store's real failure sites.
+message GetSidecarCursorsFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
 }
