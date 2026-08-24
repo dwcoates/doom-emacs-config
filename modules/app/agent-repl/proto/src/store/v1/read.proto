@@ -1,0 +1,161 @@
+// read.proto — the store's read surface: opening an agent's reading session,
+// tailing it, and walking older pages. One file: the reads are one concern
+// with one caller (the shim), and every shape here serves the open/watch/page
+// triad.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "store/v1/store.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// ---- OpenAgentSession: the first page and the watch token ----
+
+// Open one agent's reading session: the first page, and the address of the
+// tail that follows it.
+message OpenAgentSessionRequest {
+  // The agent whose lines are wanted.
+  conversation.v1.AgentId agent = 1;
+  // The opening page's budget.
+  uint32 page_size = 2;
+  // The newest item the caller already holds. UNSET = repaint: a full first
+  // page. SET = catch-up: the page carries only items NEWER than this, never
+  // it or anything older. The store tracks nothing about what it previously
+  // served — the caller states its own high-water mark.
+  optional StoreItemPointer known_through = 3;
+}
+
+// The page, or why it could not be served.
+message OpenAgentSessionResponse {
+  oneof result {
+    OpenAgentSessionSuccess success = 1;
+    OpenAgentSessionFailure failure = 2;
+  }
+}
+
+// Where the caller now is, and how to follow along.
+message OpenAgentSessionSuccess {
+  // The first page, newest first (bounded by known_through when given). When
+  // the gap since known_through exceeds page_size, the page holds the newest
+  // page_size items and `more` points into the gap — the caller walks older
+  // via ReadAgentPage until it meets its own mark.
+  AgentSessionPage page = 1;
+  // The watch address: opaque, store-minted at THIS open, pinning the tail to
+  // begin exactly after this page's newest item — nothing is missed or
+  // doubled between page and stream. A caller cannot watch an agent it did
+  // not open.
+  AgentSessionToken watch = 2;
+}
+
+// The open could not be served. `kind` arms are DERIVED at the wave from the
+// store's real refusal sites (unknown agent, stale pointer).
+message OpenAgentSessionFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+}
+
+// The opening page, newest first.
+message AgentSessionPage {
+  // The lines, each with its pointer.
+  repeated StoreLineAt lines = 1;
+  // Whether older lines remain below the page (or below known_through when it
+  // bounded the page). THE ARM IS THE COMPLETENESS.
+  oneof boundary {
+    ReadAgentPageMore more = 2;
+    ReadAgentPageFloor floor = 3;
+  }
+}
+
+// One line and its position, so the caller always holds a reconnect and
+// paging pointer for the newest thing it has seen.
+message StoreLineAt {
+  // This line's position in its book's order.
+  StoreItemPointer at = 1;
+  // The line itself.
+  StorePageLine line = 2;
+}
+
+// The address of one opened reading session: an opaque, store-minted token —
+// a hash of the underlying identity, never the identity itself, so watching
+// REQUIRES opening. Echoed verbatim, never parsed or constructed.
+message AgentSessionToken {
+  string value = 1;
+}
+
+// ---- WatchAgentSession: the pure tail ----
+
+// Follow one opened reading session.
+message WatchAgentSessionRequest {
+  // The token OpenAgentSession served, echoed verbatim.
+  AgentSessionToken watch = 1;
+}
+
+// A STANDING stream: one frame per line as it is written — upserts included,
+// each frame an item's whole latest state, beginning exactly after the
+// opening page's newest item. No terminal arm: the store concludes nothing,
+// and terminal facts ride the lines themselves.
+message WatchAgentSessionResponse {
+  // The line, with its pointer — the caller's next high-water mark.
+  StoreLineAt line = 1;
+}
+
+// ---- ReadAgentPage: older pages, walking down from a served pointer ----
+
+// The store's page read: N page lines of one book, newest first.
+message ReadAgentPageRequest {
+  // The book: the agent whose page lines are wanted.
+  conversation.v1.AgentId book = 1;
+  // How many lines this page may hold. The caller's budget per call, so it
+  // can vary across calls of one walk.
+  uint32 page_size = 2;
+  // The page begins strictly OLDER than the item this pointer names — the
+  // pointer served by a previous page's `more` arm or by a streamed line,
+  // echoed verbatim. There is no first-page arm: the first page is
+  // OpenAgentSession's answer, and this verb only ever walks older.
+  StoreItemPointer after = 3;
+}
+
+// The page, or why it could not be served.
+message ReadAgentPageResponse {
+  oneof result {
+    ReadAgentPageSuccess success = 1;
+    ReadAgentPageFailure failure = 2;
+  }
+}
+
+// The page as served.
+message ReadAgentPageSuccess {
+  // The lines, newest first. At most page_size of them.
+  repeated StorePageLine lines = 1;
+  // Whether older lines remain. THE ARM IS THE COMPLETENESS.
+  oneof boundary {
+    ReadAgentPageMore more = 2;
+    ReadAgentPageFloor floor = 3;
+  }
+}
+
+// Older lines exist below this page.
+message ReadAgentPageMore {
+  // Points at this page's LAST (oldest) item; the next request echoes it.
+  StoreItemPointer last_item = 1;
+}
+
+// This page reached the oldest retained line.
+message ReadAgentPageFloor {}
+
+// The page could not be served. `kind` arms are DERIVED at the wave from the
+// store's real refusal sites (unknown book, stale pointer).
+message ReadAgentPageFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+}
+
+// An opaque, store-minted position of one item in one book's order. Echoed
+// verbatim, never parsed or constructed by a caller; stable across upserts
+// because order is by the unit's FIRST insert, not its last write.
+message StoreItemPointer {
+  string value = 1;
+}

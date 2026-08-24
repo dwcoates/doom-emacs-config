@@ -328,6 +328,14 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The three read endpoint files fold into `read.proto` — store.v1 is `store.proto` + `read.proto` + `service.proto`
+
+**What changed ("i think we just need a read.proto, not dedicated files").**
+`endpoint_open_agent_session.proto`, `endpoint_watch_agent_session.proto`,
+`endpoint_read_agent_page.proto` merge verbatim into `read.proto` under
+per-rpc banners; the per-endpoint file model is set aside for this small
+single-caller package. No shape change.
+
 ### Rename: `ReadPage` → `ReadAgentPage` ("we only paginate on agents, so names carry AgentPage, not Page")
 
 **What changed.** The rpc, its endpoint file and its whole message family
