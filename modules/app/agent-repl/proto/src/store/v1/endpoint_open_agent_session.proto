@@ -1,0 +1,54 @@
+// endpoint_open_agent_session.proto — OpenAgentSession: the unary OPEN that
+// answers with the first page and the watch token.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "store/v1/store.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Open one agent's reading session: the first page, and the address of the
+// tail that follows it.
+message OpenAgentSessionRequest {
+  // The agent whose lines are wanted.
+  conversation.v1.AgentId agent = 1;
+  // The opening page's budget.
+  uint32 page_size = 2;
+  // The newest item the caller already holds. UNSET = repaint: a full first
+  // page. SET = catch-up: the page carries only items NEWER than this, never
+  // it or anything older. The store tracks nothing about what it previously
+  // served — the caller states its own high-water mark.
+  optional StoreItemPointer known_through = 3;
+}
+
+// The page, or why it could not be served.
+message OpenAgentSessionResponse {
+  oneof result {
+    OpenAgentSessionSuccess success = 1;
+    OpenAgentSessionFailure failure = 2;
+  }
+}
+
+// Where the caller now is, and how to follow along.
+message OpenAgentSessionSuccess {
+  // The first page, newest first (bounded by known_through when given). When
+  // the gap since known_through exceeds page_size, the page holds the newest
+  // page_size items and `more` points into the gap — the caller walks older
+  // via ReadAgentPage until it meets its own mark.
+  AgentSessionPage page = 1;
+  // The watch address: opaque, store-minted at THIS open, pinning the tail to
+  // begin exactly after this page's newest item — nothing is missed or
+  // doubled between page and stream. A caller cannot watch an agent it did
+  // not open.
+  AgentSessionToken watch = 2;
+}
+
+// The open could not be served. `kind` arms are DERIVED at the wave from the
+// store's real refusal sites (unknown agent, stale pointer).
+message OpenAgentSessionFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+}
