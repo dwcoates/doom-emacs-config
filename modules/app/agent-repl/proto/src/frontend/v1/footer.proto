@@ -41,7 +41,7 @@ syntax = "proto3";
 
 package frontend.v1;
 
-import "conversation/v1/agent_activity.proto";
+import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
@@ -560,9 +560,9 @@ message FooterExpandedAgents {
 
 // One live subagent's line: glyph · type · description · tokens · clock · ▸.
 message FooterAgentRow {
-  // Jump target: the subagent's identity, which keys its feed bubble.
-  // Echoed into navigation, never parsed.
-  conversation.v1.AgentId target = 1;
+  // Jump target: the subagent bubble's FeedId, exactly as the feed served
+  // it. Echoed into navigation, never parsed.
+  FeedId target = 1;
   // The subagent type ("Explore") — the row's leading label.
   FooterAgentRowLabel label = 2;
   // The commission's description. UNSET when the spawn carried none; the
@@ -610,10 +610,14 @@ message FooterExpandedTasks {
 
 // One task's line: status glyph · subject · (active form while running).
 message FooterTaskRow {
+  // Jump target: the task's feed bubble, exactly as the feed served it —
+  // activating the row navigates there, the same affordance the agent and
+  // shell rows carry.
+  FeedId target = 1;
   // The glyph element; the set arm picks the treatment.
-  FooterTaskRowStatus status = 1;
+  FooterTaskRowStatus status = 2;
   // The task's subject line, drawn verbatim.
-  FooterTaskRowSubject subject = 2;
+  FooterTaskRowSubject subject = 3;
 }
 // The row's subject element.
 message FooterTaskRowSubject {
@@ -674,8 +678,8 @@ message FooterExpandedShells {
 
 // One live shell's line: $ · command · clock · ▸.
 message FooterShellRow {
-  // Jump target: the shell unit's identity, which keys its feed bubble.
-  conversation.v1.AgentActivityId target = 1;
+  // Jump target: the shell bubble's FeedId, exactly as the feed served it.
+  FeedId target = 1;
   // The command line being run.
   FooterShellRowCommand command = 2;
   // The row's clock. The client ticks from the instant.

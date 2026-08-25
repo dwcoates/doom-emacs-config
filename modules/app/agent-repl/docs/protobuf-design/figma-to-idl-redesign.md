@@ -328,6 +328,113 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The FEED's container lands remediated: one opaque FeedId; feed-within-feed; the row taxonomy (sync activity / terminal / detached wrappers / blocking / meta); AgentActivity respelled figma→idl; terminal-as-row
+
+**IDENTITY ("maybe there should be a simple canonical feedid").** One opaque
+daemon-minted string. The daemon ENCODES the identity of what the row DRAWS
+(a unit, a task id, an agent id, an ask id, or a daemon fact for a
+synthesized row) and DECODES it on echo — mint and resolve are encode/
+decode, no id table, stable across pushes/restarts. The typed identity
+spaces are FULLY HIDDEN from the frontend ("the frontend only cares what
+bubble the thing needs to go into"); the one typed survivor is the TurnId
+stamp for own-prompt matching. An earlier typed-oneof FeedRowId (and a
+FeedRow/FeedRowId structural split) was iterated away by the user: the
+parallel id-arm/kind-arm oneofs could co-vary illegally. UPSERTS ARE
+UNIVERSAL — every row replaces whole by id; what varies is only which
+identity the id is minted from, under the rule "one row per drawn subject"
+(a response row per unit; ONE task bubble fed by many acts; a subagent
+bubble keyed by the agent, not its spawn call).
+
+**FEED-WITHIN-FEED (the user: "agent bubbles are literally their own
+feeds").** A subagent bubble — sync OR detached, one FeedSubagent component
+— is a SUB-FEED: same row vocabulary, its own connection and pages. The
+bubble row's own FeedId IS the sub-feed's address (a FeedContainer element
+was proposed and dropped as a second copy of the row's id). TWO KINDS OF
+NESTING: real sub-feeds (agent bubbles; connection = placement, rows carry
+no parent) vs PRESENTATION nesting (`parent`: merge-phase rows, work under
+a skill heading). The agentrepl feed verbs follow at their repoint:
+OpenFeed { workspace; optional FeedId } → first page + FeedWatchToken;
+WatchFeed { token } → pure tail of one feed (response unchanged: one
+FeedRow per frame); GetFeedPage keeps the older-pages walk — shapes agreed
+in conversation, LANDED AT THE VERBS' OWN INCREMENT.
+
+**THE ROW TAXONOMY, the user's organizing principle.** user_prompt /
+agent_prompt / activity / turn_ended / detached_subagent / detached_shell /
+permission / question / context_cut:
+
+- PROMPTS ARE TWO SIBLING KINDS: FeedUserPrompt (renamed from FeedUser,
+  family renamed with it) and FeedAgentPrompt — "conceptually extremely
+  similar (agent sends prompt to another agent, vs user sends prompt to an
+  agent)"; the agent one wears an ORANGE BORDER, appears on the sender's
+  feed as the send and the recipient's as the delivery. This relocated
+  SendMessage out of activity (it had first landed there as a card; the
+  user: it is a prompt).
+- FeedTurnActivity = SYNCHRONOUS TURN PROGRESS, whoever drives it:
+  { response | simple_tool_call | skill | task | merge | subagent(sync) }.
+  MERGE IS ACTIVITY by the user's ruling: "from the user's perspective the
+  turn has not concluded while a Merge is in flight" — the container was
+  renamed from FeedAgentActivity to FeedTurnActivity because merge is the
+  one arm the agent does not author.
+- FeedSimpleToolCall GENERALIZES read/write/edit/grep/glob/foreground-bash:
+  one shared grey-bubble shell (VERIFIED in the webapp: .tool-card — grey
+  --card background, bordered, agent-column cap width, already a standalone
+  .feed-item sibling of the bubbles, teal for skill/agent, amber for merge)
+  with a per-tool oneof for tool-specific content. Shell sectioning to be
+  read off the drawn cards at its increment.
+- THINKING IS DROPPED from the feed (the user: not rendered there; footer
+  only). UNMODELED IS DROPPED from the feed → the topbar warning dropdown
+  (and the detached-unmodeled footer chip/panel had already moved there).
+- TASKS get the subagent-analogous treatment: a bubble in the feed AND
+  footer rows that jump to it (FooterTaskRow gains a FeedId target —
+  landed). FeedTask is keyed by the TRACKER task, not any act's unit.
+- DETACHED WRAPPERS: FeedDetachedSubagent/FeedDetachedShell wrap THE SAME
+  drawn component their sync forms use (FeedSubagent; FeedShell) — sync-vs-
+  detached is placement, never a second drawing; the old FeedDetached
+  (generic head + body oneof) died as door-keyed coalescing of different
+  components.
+
+**TERMINAL-AS-ROW ("we'll also need to model when a response is
+terminal").** The user proposed connection-lifecycle terminality (WatchFeed
+ending with typed arms); the orchestrator surfaced the two constraints —
+history must replay how a settled turn ended (the terminal is the stop
+notice's only source), and the bounded-stream convention forbids a bare
+close meaning anything — and the agreed synthesis is FeedTurnEnded, A ROW:
+{ concluded | errored | interrupted }, streamed and paged like any row.
+Liveness is structural ON THE DATA: no terminal row for the current turn =
+live; WatchFeed stays standing across turns; a dead connection stays a
+transport failure. It sits at ROW level, not in activity ("it's not agent
+activity" — the user's oneof, realized as the row arm).
+
+**Facts re-verified for this settlement.** Multiple responses per turn is
+the normal case (the ~13k-message survey; AgentSuccess.answer exists
+because finality is positional nowhere). Skill scope attribution: NO — no
+SDK/transcript delimiter; only the document links via sourceToolUseID;
+nesting under a skill stays a presentation choice. Sync agents at a feed's
+top level are unambiguous: another agent only ever appears AS its bubble;
+activity rows always belong to the feed's own agent (request-scoped
+placement, the store rule's frontend face).
+
+**What died in feed.proto.** The FeedAgent family (head+blocks composition
+— one-unit-per-row makes the tool card the row, matching both the store's
+"each block is its own feed item" and the DOM), the FeedTool family, the
+FeedDetached family, the old FeedPermission body (questions inside it —
+FeedPermission and FeedQuestion are now separate skeleton kinds re-derived
+from AgentPermission/AgentQuestion at their increments), FeedAgentStopNotice
+(superseded by FeedTurnEnded). FeedUserPrompt (renamed), FeedContextCut and
+FeedMerge families carried verbatim; kind bodies for
+response/simple_tool_call/skill/task/subagent/shell/agent_prompt/
+turn_ended/permission/question are declared skeletons filled at their own
+increments; git history is reference material, not a template.
+
+**Consequences.** The daemon's feed resolver keys rows by drawn subject and
+switches per DetachableWork arm to the kind components (subagent arm and
+sync spawn converge on FeedSubagent; bash → FeedShell; workflow → nothing,
+deferred; unmodeled → topbar). The webapp routes strictly by FeedId, opens
+one connection per expanded bubble, and its parent-routing applies only to
+presentation nesting. agentrepl.v1's endpoint_watch_feed / endpoint_get_feed_page /
+endpoint_interrupt do not compile until their repoint increment (interrupt's
+detached target becomes a FeedId echo).
+
 ### The FOOTER lands remediated: selection-keyed expanded panels; the tokens CELL shrinks to one figure; live-work CHIPS; the task tracker gets its drawn home; WORKFLOWS ARE DEFERRED WHOLESALE
 
 **The strip ("looks good" across the iteration).** Status | SubStatus |
