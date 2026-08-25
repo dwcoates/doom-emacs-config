@@ -406,8 +406,63 @@ message FeedDiffLineAdded {}
 message FeedDiffLineRemoved {}
 message FeedDiffLineContext {}
 
-// The skill card. Body at its own increment.
-message FeedSkill {}
+// The teal skill card: the agent loading a skill. The card's substance is
+// the DOCUMENT the skill contributed (folded, capped); work the agent does
+// afterwards is ordinary activity, which the daemon MAY nest under this row
+// by `parent` — a presentation choice, since nothing delimits a skill's
+// scope at the source.
+message FeedSkill {
+  // The invocation as one composed line — "/graphify" or "/workspace merge
+  // DWC/fix-flaky" — the line a user would have typed. Daemon-composed.
+  FeedSkillInvocation invocation = 1;
+  // The card's state.
+  oneof outcome {
+    // Invoked; the document has not landed yet (it arrives after the
+    // tool's own acknowledgement — the unit settles on the document).
+    FeedSkillRunning running = 2;
+    // Loaded: the document and what it was permitted.
+    FeedSkillLoaded loaded = 3;
+    // The invocation failed; the text is the daemon's composed reason.
+    FeedSkillFailed failed = 4;
+    // The permission gate refused it; nothing was loaded.
+    FeedSkillDenied denied = 5;
+  }
+}
+// The invocation-line element.
+message FeedSkillInvocation {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+// Invoked, document pending. Empty: the head badge is the indicator.
+message FeedSkillRunning {}
+// The loaded state.
+message FeedSkillLoaded {
+  // The skill's document, folded by default; markdown rendered by the
+  // client's prose renderer.
+  FeedSkillDocument document = 1;
+  // The consent line — which tools the skill brought allowances for
+  // ("allows: Bash, Write"), composed by the daemon. UNSET when the skill
+  // declared none; absence draws no line, never an empty one.
+  FeedSkillAllowances allowances = 2;
+}
+// The document element.
+message FeedSkillDocument {
+  // The SKILL.md body, markdown, verbatim.
+  string markdown = 1;
+}
+// The allowances element.
+message FeedSkillAllowances {
+  // The composed sentence, drawn verbatim.
+  string text = 1;
+}
+// The failed state.
+message FeedSkillFailed {
+  // The daemon's composed reason, drawn verbatim.
+  string text = 1;
+}
+// The denied state. Empty: the badge says it; consent is the permission
+// card's story.
+message FeedSkillDenied {}
 
 // The task bubble. Body at its own increment; keyed by the tracker task.
 message FeedTask {}
