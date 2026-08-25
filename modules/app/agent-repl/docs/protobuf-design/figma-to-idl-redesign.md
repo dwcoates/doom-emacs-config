@@ -328,6 +328,30 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### THE FRONTEND REMEDIATION PASS OPENS — stage 2 reopened by name; the walk starts at the FOOTER (expanded footer figma→idl in depth)
+
+**The stage open, in the user's terms.** "The protos we landed were good when
+we landed them, but we found and added a lot of missing functionality" —
+frontend.v1 must now reflect everything stages 4–6 made available. Named
+first: WORKFLOWS, now comprehensively supported, need their frontend.v1
+shape, their UI/UX, and the daemon architecture that follows ("the daemon is
+going to need to be able to resolve a given workflow to all its toplevel
+agents, differentiating them from the subagents those toplevel agents
+themselves spawn").
+
+**Direction stated by the user (to iterate, not yet settled shapes).**
+
+- A workflow's subagents do NOT enter the feed; they are shown in the FOOTER
+  only. Normal (agent-spawned) subagents keep both: an Agent bubble in the
+  feed AND a listing in the expanded footer.
+- The expanded footer's content DEPENDS on the main-strip selection: clicking
+  a live-work summary chip (e.g. "3 Agents") on the strip's right side opens
+  the expanded section listing exactly those items, one per line, with
+  per-item metadata (token usage, duration, …) whose organization is to be
+  figured out in the drawing.
+- The walk starts with the FOOTER's figma→idl in depth (the expanded footer
+  especially), per the settled ASCII-drawing-first discipline.
+
 ### STAGE 6 COMPLETE: `state.v1` is DELETED — the WSM's durable state is DDL, not proto
 
 **What changed ("this looks good, i approve").** `state/v1/durable.proto` is
