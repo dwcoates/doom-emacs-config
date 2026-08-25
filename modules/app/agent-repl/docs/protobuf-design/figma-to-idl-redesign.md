@@ -328,6 +328,21 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `FeedSkill` lands — the teal document card
+
+**What changed ("looks great").** FeedSkill { invocation (the composed
+"/skill args" line); oneof outcome { running (document pending — the unit
+settles on the DOCUMENT, which arrives after the tool's own
+acknowledgement) | loaded { document (SKILL.md markdown, folded) |
+allowances (composed consent line, UNSET = none declared) } | failed
+{ composed reason } | denied } }.
+
+**Why its own card, not a SimpleToolCall arm.** Its body is a markdown
+document with a fold — a different drawn component than the four output
+forms — and the teal wash marks a conversation-of-its-own. Post-skill
+nesting stays a `parent` presentation choice (nothing delimits a skill's
+scope at the source, per the skill landing's transcript verification).
+
 ### `FeedSimpleToolCall` lands — one shell, output by DRAWN FORM; heartbeats become first-class shim→daemon feedback (a recorded reopen)
 
 **The drawing agreed first** (read off render.ts/CSS, in the message
