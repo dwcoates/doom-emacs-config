@@ -328,6 +328,18 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `ReadHistory` regains its FIRST arm — a subagent's cold paint reads it
+
+**What changed (the user's catch).** `StartTurn`'s first page is the MAIN
+agent's only, so a subagent bubble painted from scratch (a bounced frontend)
+had no first-page verb. `ReadHistoryRequest` regains `oneof position
+{ first | after (HistoryPointer) }`. The daemon's cold-paint sequence for a
+subagent: ReadHistory(first) → WatchAgent with the page's newest pointer as
+known_through, pinning the tail to exactly after the page. An
+OpenAgentSession+token split was re-weighed and declined again: the single
+WatchAgent stream plus the pointer handoff pins the same seam without a
+token.
+
 ### CORRECTION to the agent consolidation: `StartTurn` is the MAIN AGENT's verb and returns the FIRST PAGE; `AgentInput.prompt` returns; `UpdateAgent` prompts existing agents
 
 **What changed (the user's rejection of the target field).** `StartTurn`
