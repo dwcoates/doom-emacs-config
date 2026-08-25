@@ -328,6 +328,16 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `FeedTask` lands — the task bubble is the task AS IT STANDS
+
+**What changed ("look good").** FeedTask { status (six-arm projection,
+running{active_form}); subject; optional description; optional owner
+(composed line) }. One row per tracker task, upserted by every act; the
+footer checklist rows jump here. DELIBERATE OMISSION, recorded: no act
+history inside the bubble — current state only; act-by-act narration, if
+ever wanted, is presentation-nested rows later, never fields here. The
+status family is its own (one fact, two views with the footer's checklist).
+
 ### `FeedSkill` lands — the teal document card
 
 **What changed ("looks great").** FeedSkill { invocation (the composed
