@@ -219,8 +219,54 @@ message FeedTurnActivity {
   }
 }
 
-// The prose bubble. Body at its own increment.
-message FeedResponse {}
+// The prose bubble — one response unit of this feed's agent, left-rail. A
+// turn holds several. THE ARM IS THE STATE, and the row upserts through it.
+message FeedResponse {
+  // The response's cost corner ("2.1k"), daemon-formatted, meaningful in
+  // EVERY state: interim while arriving (the vendor states usage when the
+  // response opens and restates it as it grows), final once settled, the
+  // last observed figure on a broken bubble. UNSET when no usage has been
+  // observed yet — absence draws no stamp, never a zero.
+  FeedResponseUsageStamp usage = 1;
+  oneof result {
+    // Still arriving: the prose so far. The DAEMON accumulates the shim's
+    // fragments and re-pushes the row; the client renders what arrives and
+    // accumulates nothing (a missed push self-corrects on the next one).
+    FeedResponseUpdate update = 2;
+    // Settled whole.
+    FeedResponseSuccess success = 3;
+    // Died mid-arrival: the prose that landed stays drawn, marked broken.
+    // WHY it died is the turn's terminal row (FeedTurnEnded.errored) — this
+    // arm only says this bubble is the one it cut short.
+    FeedResponseError error = 4;
+  }
+}
+
+// The arriving state's prose.
+message FeedResponseUpdate {
+  // Markdown so far, drawn as it stands; type-out pacing is the client's.
+  FeedResponseProse prose = 1;
+}
+// The settled state.
+message FeedResponseSuccess {
+  // The whole markdown.
+  FeedResponseProse prose = 1;
+}
+// The broken state: what landed before the death.
+message FeedResponseError {
+  // The partial markdown, kept on screen.
+  FeedResponseProse prose = 1;
+}
+// The bubble's markdown element.
+message FeedResponseProse {
+  // Markdown, rendered by the client's prose renderer.
+  string markdown = 1;
+}
+// The cost-corner element.
+message FeedResponseUsageStamp {
+  // The formatted figure, drawn verbatim.
+  string text = 1;
+}
 
 // The shared grey tool-call bubble. Shell and per-tool arms at its own
 // increment, derived from the drawn sectioning of today's tool cards.
