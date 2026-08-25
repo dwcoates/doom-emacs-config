@@ -13,6 +13,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/endpoint_submit_prompt.proto";
+import "agentrepl/v1/endpoint_open_feed.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
 import "agentrepl/v1/endpoint_get_feed_page.proto";
 import "agentrepl/v1/endpoint_interrupt.proto";
@@ -51,6 +52,9 @@ service AgentRepl {
 
   // The feed's live half: every row upsert for one workspace, top-level and
   // nested alike. See endpoint_watch_feed.proto.
+  // Opens ONE feed (root, or a subagent bubble's sub-feed): answers with the
+  // newest page and mints the token WatchFeed echoes.
+  rpc OpenFeed(OpenFeedRequest) returns (OpenFeedResponse);
   rpc WatchFeed(WatchFeedRequest) returns (stream WatchFeedResponse);
 
   // The feed's history half: a page of rows for one container, "first" or

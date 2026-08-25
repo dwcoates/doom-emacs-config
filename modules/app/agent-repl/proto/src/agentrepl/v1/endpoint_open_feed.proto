@@ -1,0 +1,47 @@
+// endpoint_open_feed.proto — OpenFeed: opens ONE feed — the workspace's root
+// feed, or a subagent bubble's sub-feed. FEED section. Answers with the
+// feed's newest page and mints the watch token WatchFeed echoes; the client
+// paints the page, then tails. Called when a workspace view opens (root) and
+// when a bubble is expanded (sub-feed); a collapsed bubble's token is simply
+// abandoned.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+import "agentrepl/v1/feed_token.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message OpenFeedRequest {
+  // The workspace whose feed universe this is.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // WHICH feed. UNSET = the workspace's root feed. SET = a sub-feed the
+  // client was shown — a subagent bubble row's own FeedId, which addresses
+  // the feed within it. Only served ids open; a client never constructs one.
+  frontend.v1.FeedId feed = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message OpenFeedResponse {
+  oneof result {
+    OpenFeedSuccess success = 1;
+    OpenFeedError error = 2;
+  }
+}
+
+// The open's answer: paint, then tail.
+message OpenFeedSuccess {
+  // The feed's newest page, ready to draw before the tail begins.
+  frontend.v1.FeedPage page = 1;
+  // The tail's address, pinned to begin exactly after this page's newest
+  // row. Echoed verbatim to WatchFeed.
+  FeedWatchToken watch = 2;
+}
+
+// EMPTY ON PURPOSE: the refusal arms are DERIVED from the daemon's real
+// refusal sites at the wave (an unregistered workspace; a feed id that does
+// not decode or names a bubble this workspace does not own), spelled per 3b.
+message OpenFeedError {}
