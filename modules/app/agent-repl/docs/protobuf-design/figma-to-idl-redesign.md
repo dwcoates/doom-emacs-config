@@ -328,6 +328,41 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### STAGE 6 COMPLETE: `state.v1` is DELETED — the WSM's durable state is DDL, not proto
+
+**What changed ("this looks good, i approve").** `state/v1/durable.proto` is
+deleted and the `state.v1` package ceases to exist. Its only stored uses —
+`TokenUtilization` and `TurnAccounting` blob rows — lose their producer:
+usage rides the store's frames and aggregates are derived on read. The
+daemon's durable state needs no wire shape at all: it has one producer and
+one consumer (the daemon itself), so it is internal DDL under the same
+columns-vs-blob rule as the store.
+
+**The approved WSM schema (architecture guidance, recorded not proto).**
+Seven tables: `workspace` (lifecycle arm + since, current merge phase,
+last activity), `merge_queue` (repo-ordered positions), `merge_lease` (one
+open window per repo), `workspace_merged` (set-once), `held_prompt`
+(TurnId PK; UserSaid as the one content BLOB; classification and hold
+reason as columns), `session_binding` (workspace → mutable
+vendor_session_id + last known model/mode for pre-attach display),
+`shutdown_schedule`. Merge phase HISTORY stays out — the merge bubble's
+rows are conversation content the daemon synthesizes into the feed.
+
+**What dies with today's state.db, each with its replacement** (from the
+enumeration the user walked): turn ledger → open WatchAgent streams + store
+entries; prompt receipts → StartTurn; keep-alive windows → shim-internal
+(Owed G); reader positions and compaction gate → client-held pointers and
+the shim's store reads; connectivity/fault ledgers → stream lifetimes +
+pulled diagnostics; token evidence → store frames; failure cards → frames
+and resolved views.
+
+**Architecture rulings recorded with it.** statedb stays an IN-PROCESS
+library (one SQLite file, one writer): a service split was weighed and
+declined — the store earned its process boundary by having two producer
+processes; daemon state has one, and the single file's value is cross-table
+atomicity. The SSM→WSM rename and the shed of the six non-workspace
+families (audit F) are implementation-wave work carried with this stage.
+
 ### `ReadHistory` regains its FIRST arm — a subagent's cold paint reads it
 
 **What changed (the user's catch).** `StartTurn`'s first page is the MAIN
