@@ -328,6 +328,52 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `FeedSimpleToolCall` lands — one shell, output by DRAWN FORM; heartbeats become first-class shim→daemon feedback (a recorded reopen)
+
+**The drawing agreed first** (read off render.ts/CSS, in the message
+comment): head (purple tool name + status badge) / one composed input line /
+dashed divider / capped output. The six tools' variance is entirely in the
+input phrasing and the output form.
+
+**What changed ("yeah looks good").** FeedSimpleToolCall { name; input
+(ONE composed line — the daemon owns per-tool phrasing, including a write's
+created-vs-updated wording); oneof outcome { running { last_progress } |
+returned | denied } }. FeedToolCallReturned { oneof verdict { succeeded |
+failed }; oneof form { text | code { spans; omitted } | diff { arm-typed
+lines } | lines { lines; omitted } } }. GENERICIZED per the user's ruling:
+the arms are presentation forms, not tools — "unless there needs to be
+specially supported information, it should be genericized" — so the client
+holds no per-tool knowledge and a tool-specific affordance is a schema
+change by design. What did not survive genericization, and where it lands:
+created/updated → the input line's wording; read's head-of-N and glob's
+at-least floor → the composed `omitted` sentence (the completeness arms
+collapse to daemon prose at this boundary — the client draws, never
+compares); bash's exit → the verdict badge. FeedCodeSpan keeps a STRING
+paint_class with the closed-arm-set flag carried in its comment (owed as
+before); FeedDiffLine is arm-typed for color (header|added|removed|context,
+text prefix-free).
+
+**HEARTBEATS AS FIRST-CLASS FEEDBACK — the user's reopen of the shell
+landing's discard.** That landing had the shim DISCARD the vendor's
+per-call heartbeat/elapsed; the user: the shim should surface beats to the
+daemon as responses — the timeout still yields the shim's failure exactly
+as ruled, but the daemon also gets feedback to reflect into the feed. This
+is consistent with the 4b dissolution (what died was the shim-invented
+connection ping and the id-list heartbeat; the vendor's per-item
+tool_progress was already mapped to "an update frame on that work's own
+stream", and its retry block already feeds the footer's retrying arm).
+Division of authority: shim owns the wedge RULING (failure on timeout,
+unchanged); daemon relays the latest beat into FeedToolCallRunning
+.last_progress by re-pushing the row; the client ticks "quiet for N s"
+locally from the instant — no cadence timing, no client threshold. The
+in-between state ("beats stopped, shim has not ruled") is deliberately
+unrepresented: one ruling beats a two-stage alarm.
+
+**QUEUED, its own increment: the conversation.v1 update-arm reopen** —
+per-tool progress arms (the tool kinds EARN an update arm now that the
+relay produces one), reopening the start/update rule's "only bash, thinking
+and response earn one" enumeration and the shell landing's discard note.
+
 ### `FeedResponse` lands — the prose bubble; usage rides the ENVELOPE, live in every state
 
 **What changed ("land").** FeedResponse { FeedResponseUsageStamp usage

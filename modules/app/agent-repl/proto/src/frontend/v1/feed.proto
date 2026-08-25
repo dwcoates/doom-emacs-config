@@ -268,9 +268,143 @@ message FeedResponseUsageStamp {
   string text = 1;
 }
 
-// The shared grey tool-call bubble. Shell and per-tool arms at its own
-// increment, derived from the drawn sectioning of today's tool cards.
-message FeedSimpleToolCall {}
+// The grey tool-call bubble: one shared shell — head (name + badge), the
+// call as one composed input line, and an output section by DRAWN FORM. The
+// daemon composes every per-tool specific (the input line's phrasing, which
+// output form, the omitted floors), so the client holds NO per-tool
+// knowledge: a tool-specific affordance would be a new arm, which is the
+// figma→idl posture on purpose.
+message FeedSimpleToolCall {
+  // ① HEAD: the tool's name, drawn verbatim ("Bash", "Read", "Grep").
+  FeedToolCallName name = 1;
+  // ② INPUT: the call as ONE composed line — "$ go test ./...",
+  // "src/render.ts", "grep: FeedRow". The daemon owns the phrasing; a
+  // created-vs-updated write, say, is worded here.
+  FeedToolCallInput input = 2;
+  // The call's state; the badge and the output section ride the arms.
+  oneof outcome {
+    // Running — no output yet; the head's badge is the indicator, and the
+    // arm carries the last sign of life the daemon observed.
+    FeedToolCallRunning running = 3;
+    // Returned, with its verdict and output.
+    FeedToolCallReturned returned = 4;
+    // The permission gate refused it; it never ran. No output section.
+    FeedToolCallDenied denied = 5;
+  }
+}
+// The head's name element.
+message FeedToolCallName {
+  // The tool name, drawn verbatim.
+  string text = 1;
+}
+// The input line element.
+message FeedToolCallInput {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+// The running state. The daemon re-pushes the row on each vendor progress
+// beat; the client ticks "quiet for N s" locally from the instant — no
+// cadence timing, no client threshold. The wedge RULING stays the shim's:
+// a stalled call arrives as `returned.failed` with the shim's wedge text.
+message FeedToolCallRunning {
+  // The last sign of life the daemon observed. UNSET before the first beat.
+  FeedToolCallLastProgress last_progress = 1;
+}
+// The last-observed-progress element.
+message FeedToolCallLastProgress {
+  // When the vendor last reported this call alive, epoch ms.
+  int64 at_ms = 1;
+}
+// The denied state. Empty: the head's badge says denied, and the consent
+// story is the permission card's — this card only shows the call never ran.
+message FeedToolCallDenied {}
+
+// ③ OUTPUT, below the dashed divider, plus the badge's verdict.
+message FeedToolCallReturned {
+  // The ok / err badge. A failed call's output is its error text, drawn in
+  // the same forms.
+  oneof verdict {
+    FeedToolCallSucceeded succeeded = 1;
+    FeedToolCallFailed failed = 2;
+  }
+  // WHAT THE OUTPUT IS, by drawn form — the only axis the tools genuinely
+  // differ on.
+  oneof form {
+    // Plain text: bash stdout/stderr, a count, a bare summary.
+    FeedToolCallTextOutput text = 3;
+    // Syntax-highlighted code (a read): daemon-resolved spans, client
+    // paints them.
+    FeedToolCallCodeOutput code = 4;
+    // A colored diff (a write or edit).
+    FeedToolCallDiffOutput diff = 5;
+    // A line list: grep matches, glob paths.
+    FeedToolCallLinesOutput lines = 6;
+  }
+}
+// The call succeeded. Empty: the arm is the badge.
+message FeedToolCallSucceeded {}
+// The call failed. Empty: the arm is the badge; the output carries the
+// error text.
+message FeedToolCallFailed {}
+
+// The plain-text output form.
+message FeedToolCallTextOutput {
+  // The text, drawn verbatim (the client caps visible height, not content).
+  string text = 1;
+}
+// The highlighted-code output form.
+message FeedToolCallCodeOutput {
+  // The code as paint spans, in order; concatenating their text is the code.
+  repeated FeedCodeSpan spans = 1;
+  // "showing 200 of 4,312" — present iff truncated. Always a HEAD of the
+  // file, never a middle slice, so the highlighting context is sound.
+  FeedToolCallOmitted omitted = 2;
+}
+// The diff output form.
+message FeedToolCallDiffOutput {
+  // The diff's lines, in order, each arm-typed for its color.
+  repeated FeedDiffLine lines = 1;
+}
+// The line-list output form.
+message FeedToolCallLinesOutput {
+  // The lines, drawn verbatim in order.
+  repeated string lines = 1;
+  // "42 more" / "at least 42 more" — the composed floor, present iff the
+  // list is short. Display only; implies no retrieval.
+  FeedToolCallOmitted omitted = 2;
+}
+// The composed truncation line, shared by the forms that can be short.
+message FeedToolCallOmitted {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
+
+// One paint span of highlighted code.
+message FeedCodeSpan {
+  // The span's text, verbatim.
+  string text = 1;
+  // The paint class the stylesheet keys on ("keyword", "string", "comment").
+  // A closed arm set is owed in this vocabulary's place once the daemon's
+  // highlighter fixes the class inventory; until then the client must treat
+  // an unknown class as unstyled text, never an error.
+  string paint_class = 2;
+}
+// One diff line; the arm is the color.
+message FeedDiffLine {
+  // Which kind of line, picking the treatment.
+  oneof kind {
+    FeedDiffLineHeader header = 1;    // a hunk header ("@@ -3,7 +3,9 @@")
+    FeedDiffLineAdded added = 2;      // an added line
+    FeedDiffLineRemoved removed = 3;  // a removed line
+    FeedDiffLineContext context = 4;  // an unchanged context line
+  }
+  // The line's text, without any +/- prefix — the arm carries that fact.
+  string text = 5;
+}
+message FeedDiffLineHeader {}
+message FeedDiffLineAdded {}
+message FeedDiffLineRemoved {}
+message FeedDiffLineContext {}
 
 // The skill card. Body at its own increment.
 message FeedSkill {}
