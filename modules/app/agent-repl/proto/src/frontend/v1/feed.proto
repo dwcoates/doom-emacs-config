@@ -565,12 +565,83 @@ message FeedDetachedShell {
   FeedShell shell = 1;
 }
 
-// A SUBAGENT BUBBLE — sync or detached, one component. THE BUBBLE IS A FEED:
-// its rows are not carried by this view or this feed's stream — the client
-// opens them as a sub-feed addressed by THIS ROW's own FeedId (OpenFeed on
-// expand, cancel the watch on collapse). The body carries only what the
-// collapsed bubble draws; elements at its own increment.
-message FeedSubagent {}
+// A SUBAGENT BUBBLE — sync or detached, one component. THE BUBBLE IS A
+// FEED: its rows are never carried here — the client opens them as a
+// sub-feed addressed by THIS ROW's own FeedId (OpenFeed on expand, cancel
+// the watch on collapse). This message is the COLLAPSED HEAD, carried on
+// the parent feed so every bubble — settled history included — paints from
+// the parent's one connection; the child's own connection exists only
+// while expanded.
+message FeedSubagent {
+  // The subagent type ("Explore") — the head's leading label.
+  FeedSubagentLabel label = 1;
+  // The commission's description. UNSET when the spawn carried none; the
+  // head then draws the label alone, never a synthesized description.
+  FeedSubagentDescription description = 2;
+  // The running token sum ("12.4k tok"), daemon-formatted, re-pushed as it
+  // grows and final once settled. UNSET before any usage is observed.
+  FeedSubagentTokens tokens = 3;
+  // The head's clock. The client ticks from the instant.
+  FeedSubagentRuntime runtime = 4;
+  // The head's state: the live dot, or the settled treatment.
+  oneof state {
+    FeedSubagentLive live = 5;
+    FeedSubagentSettled settled = 6;
+  }
+}
+// The label element.
+message FeedSubagentLabel {
+  // The label text, drawn verbatim.
+  string text = 1;
+}
+// The description element.
+message FeedSubagentDescription {
+  // The description, drawn verbatim.
+  string text = 1;
+}
+// The token-sum element.
+message FeedSubagentTokens {
+  // The formatted figure, drawn verbatim.
+  string text = 1;
+}
+// The clock element.
+message FeedSubagentRuntime {
+  // When the run began, epoch ms — the ORIGINAL instant; detaching does not
+  // reset it. The client ticks.
+  int64 started_at_ms = 1;
+}
+// Live: the dot, plus the last sign of life (the same heartbeat feedback
+// the tool card carries — the subagent's progress channel produces it).
+message FeedSubagentLive {
+  // The last progress the daemon observed. UNSET before the first beat.
+  FeedSubagentLastProgress last_progress = 1;
+}
+// The last-progress element.
+message FeedSubagentLastProgress {
+  // Epoch ms; the client ticks "quiet for N s" locally.
+  int64 at_ms = 1;
+}
+// Settled: when, and how.
+message FeedSubagentSettled {
+  // When the run ended, epoch ms — the clock stops here.
+  int64 ended_at_ms = 1;
+  // How it ended; the arm picks the treatment.
+  oneof outcome {
+    // Ran to completion.
+    FeedSubagentSucceeded succeeded = 2;
+    // Ended on its own failure.
+    FeedSubagentFailed failed = 3;
+    // Stopped by hand (an interrupt, a kill naming it).
+    FeedSubagentCancelled cancelled = 4;
+    // We STOPPED BEING ABLE TO SEE IT — not known to have failed; the word
+    // carries the distinction, so it never draws as a plain failure.
+    FeedSubagentLost lost = 5;
+  }
+}
+message FeedSubagentSucceeded {}
+message FeedSubagentFailed {}
+message FeedSubagentCancelled {}
+message FeedSubagentLost {}
 
 // A shell bubble: command head, spool body. Elements at its own increment.
 message FeedShell {}
