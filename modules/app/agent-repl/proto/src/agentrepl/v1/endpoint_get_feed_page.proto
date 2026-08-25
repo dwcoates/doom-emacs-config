@@ -1,40 +1,35 @@
-// endpoint_get_feed_page.proto — GetFeedPage: the feed's history half. FEED
-// section. A page of rows for ONE container, walked into the past.
+// endpoint_get_feed_page.proto — GetFeedPage: the older-pages walk of ONE
+// feed. FEED section. The first page of a feed is OpenFeed's answer; this
+// verb walks the pages beyond it into the past.
 //
 // NO CURSOR EXISTS ON THE WIRE. The client speaks only "first" and "next";
-// the DAEMON holds each container's walk position (one webview per workspace,
-// so one reader per container). `first` resets the walk to the newest page;
-// `next` continues older from where the walk stands, and a `next` with no
-// walk standing is a refusal, not an empty page.
+// the DAEMON holds each feed's walk position (one webview per workspace, so
+// one reader per feed). `first` resets the walk to the newest page; `next`
+// continues older from where the walk stands, and a `next` with no walk
+// standing is a refusal, not an empty page.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
 import "workspace/v1/workspace.proto";
-import "conversation/v1/message.proto";
 import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message GetFeedPageRequest {
   workspace.v1.WorkspaceRef workspace = 1;
-  // WHICH container's rows. THE ARM IS THE SCOPE.
-  oneof container {
-    // The top-level feed.
-    GetFeedPageTopLevel top_level = 2;
-    // Inside a bubble or a merge phase, by its row's id.
-    conversation.v1.MessageId parent = 3;
-  }
+  // WHICH feed. UNSET = the workspace's root feed; SET = a sub-feed's
+  // address (a subagent bubble row's own FeedId), echoed as served.
+  frontend.v1.FeedId feed = 2;
   // WHICH page of the walk. THE ARM IS THE ASK.
   oneof page {
     // The newest page; the walk resets to it.
-    GetFeedPageFirst first = 4;
-    // The next-older page from where this container's walk stands.
-    GetFeedPageNext next = 5;
+    GetFeedPageFirst first = 3;
+    // The next-older page from where this feed's walk stands.
+    GetFeedPageNext next = 4;
   }
 }
-message GetFeedPageTopLevel {}
 message GetFeedPageFirst {}
 message GetFeedPageNext {}
 

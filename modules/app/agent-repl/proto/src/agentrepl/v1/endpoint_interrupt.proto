@@ -7,7 +7,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "workspace/v1/workspace.proto";
-import "conversation/v1/message.proto";
+import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -16,8 +16,9 @@ message InterruptRequest {
   oneof target {
     // The running turn (the vendor query interrupt).
     InterruptTurn turn = 2;
-    // A detached bubble's work, by its row's id (the task stop).
-    conversation.v1.MessageId detached = 3;
+    // A detached bubble's work, by the bubble row's FeedId exactly as the
+    // feed served it (the daemon decodes it and issues the task stop).
+    frontend.v1.FeedId detached = 3;
   }
 }
 message InterruptTurn {}
