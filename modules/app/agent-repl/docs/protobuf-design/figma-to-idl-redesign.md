@@ -328,6 +328,34 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The FEED VERBS repoint lands: OpenFeed mints the tail token; WatchFeed goes token-addressed; GetFeedPage walks ONE feed; Interrupt echoes FeedId
+
+**What changed (shapes agreed in conversation at the container settlement:
+"that looks correct" / "great").** NEW endpoint_open_feed.proto —
+OpenFeed { WorkspaceRef; optional frontend.v1.FeedId feed (UNSET = the root
+feed; SET = a subagent bubble's sub-feed) } → success { the newest FeedPage;
+FeedWatchToken } | failure (arms derived). NEW agentrepl/v1/feed_token.proto
+(shared file — two endpoints need it): FeedWatchToken, opaque, minted by the
+open, pinning the tail exactly after the answered page — the store's
+open/watch bifurcation paralleled at the frontend boundary, discharging the
+reopen recorded at the store's OpenAgentSession landing ("the agentrepl.v1
+feed surface at the frontend remediation pass"). endpoint_watch_feed.proto
+REWRITTEN: request is the echoed token alone (workspace-scoped by mint);
+response unchanged (one whole FeedRow per frame); the stream is STANDING
+across turns — a turn's end is the FeedTurnEnded ROW, never the stream
+concluding, and any non-client-cancelled end is a transport failure.
+endpoint_get_feed_page.proto: the container oneof (top_level |
+parent(MessageId)) collapses to the same optional FeedId address; first/next
+and the daemon-held walk unchanged; GetFeedPageTopLevel deleted.
+endpoint_interrupt.proto: the detached target retypes MessageId →
+frontend.v1.FeedId, echoed as served (the daemon decodes and issues the
+stop). service.proto gains rpc OpenFeed in the FEED section.
+
+**Consequences.** One connection per OPEN feed: the client opens the root on
+view-open and each bubble on expand, abandons tokens on collapse. The
+remaining compile break is endpoint_answer_permission.proto alone (its
+ToolCallId — the permission walk's turn).
+
 ### The FEED's container lands remediated: one opaque FeedId; feed-within-feed; the row taxonomy (sync activity / terminal / detached wrappers / blocking / meta); AgentActivity respelled figma→idl; terminal-as-row
 
 **IDENTITY ("maybe there should be a simple canonical feedid").** One opaque
