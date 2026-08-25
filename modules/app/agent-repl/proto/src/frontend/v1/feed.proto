@@ -1,55 +1,54 @@
-// feed.proto — THE FEED: a scrolling list of ROWS, paged into the past,
-// appended and updated live. Per-workspace; resolved by the daemon.
+// feed.proto — THE FEED: the conversation surface, and the ONE component
+// that is SELF-SIMILAR — a subagent bubble IS a feed (same row vocabulary,
+// its own pages and its own live tail), so "the feed" is really a UNIVERSE
+// of feeds per workspace: the root feed, plus one per agent bubble.
 //
-// UNLIKE EVERY OTHER COMPONENT, THE FEED IS NOT WHOLE-REPLACED. A ROW is the
-// unit: each row is a whole element keyed by its message id, and a live update
-// re-pushes the WHOLE ROW (upsert by id), never a partial. How rows travel —
-// a page on request, upserts on the stream — is stage 3's; what a row IS is
-// this file's.
+// THE ROW TAXONOMY — the row oneof's organizing principle, stated once:
 //
-//   ┌─ feed ──────────────────────────────────────────────────────────────┐
-//   │ ▴ load earlier…                                                     │  edge
-//   │  You  ▏fix the flaky reconnect test                                 │  ① user
-//   │  ● Claude  I'll look at the reconnect path first.                   │  ② agent (prose · ▸thinking · tool cards)
-//   │    ┌ Read  lisp/frontend.el                     ✓ ┐                  │     tool card
-//   │  ⚙ Explore  "find the roster resolver"    0:31  ▸ 3 msgs            │  ③ detached bubble (nested rows inside)
-//   │  ? Permission  Bash: git push …  [allow] [always] [deny]            │  ④ permission
-//   │  ● Claude  ✕ API 429 rate limited — retry in 20s                    │  ② agent, FAILED (error arm)
-//   │  ── context compacted · 180k → 12k ── ▸ summary                     │  ⑤ context-cut divider
-//   │  ⇄ merge · branch → master   queue ✓ │ tests ● 8/12   ▸ 12 msgs     │  ⑥ merge bubble (tabbed phases)
-//   │  ● Claude  Let me look at the roster resolv▍                        │  ② agent, still ARRIVING (update arm)
-//   └─────────────────────────────────────────────────────────────────────┘
+//   user_prompt /  a prompt: user-authored, or agent-addressed (an agent
+//   agent_prompt   prompting another agent — same shape of thing, different
+//                  author; the agent one wears an orange border).
+//   activity       SYNCHRONOUS TURN PROGRESS, whoever drives it: the agent's
+//                  responses, tool calls, skills,
+//                  task-tracker acts — and the daemon-orchestrated MERGE,
+//                  because from the user's perspective the turn has not
+//                  concluded while a merge is in flight.
+//   turn_ended     how a turn ENDED. Not work — the terminal fact, a row so
+//                  that history replays it and liveness is structural: no
+//                  terminal row for the current turn = the turn is live. A
+//                  connection dying without one stays a transport failure.
+//   detached_*     ASYNC work, one wrapper per kind, each wrapping the SAME
+//                  drawn component its synchronous form uses where one
+//                  exists — sync-vs-detached is placement, never a second
+//                  drawing.
+//   permission /   the turn BLOCKED on the user: consent, or a choice. Two
+//   question       cards, mirroring the conversation-level split.
+//   context_cut    META: the feed itself changed shape here.
 //
-// EVERY ROW KIND CARRIES `oneof result { update | success | error }` — the
-// same shape every agentrepl.v1 response has, applied to a drawn row. `update`
-// (where a kind has one) is the row while its fact is still in flight — a
-// response arriving, a tool running, a bubble live, a permission open, a
-// merge queued or merging. `success` is the settled fact. `error` is the
-// kind's OWN failure, modeled IN the kind: a response that never settled, a
-// tool that failed or was denied, a bubble that failed / was cancelled / was
-// lost, a merge that failed. Kinds that cannot fail or update carry a
-// ONE-ARM oneof, deliberately, so every row switches the same way. There is
-// NO general "failure row": a failure that correlates to no entry — a
-// session dying, the shim degrading, the client's own machinery — is not a
-// conversation fact; it is footer/topbar/gate state (see failure.proto).
+// IDENTITY IS ONE OPAQUE STRING. FeedId is daemon-minted from the identity
+// of what the row DRAWS — a unit, a task, an agent, or a daemon fact for a
+// synthesized row — never from whichever frame delivered the update. The
+// typed identity spaces (unit, agent, task, ask) stop at the daemon; the
+// frontend holds only "which row" and "inside what". EVERY row upserts: a
+// push carrying an already-seen id replaces that row whole, which is how a
+// response grows in place and how many task acts feed one task bubble.
 //
-// EVERY ROW KIND IS ITS OWN MESSAGE, and every row's element is a message the
-// daemon RESOLVED for drawing — figma→idl takes precedence over embedding a
-// conversation.v1 record verbatim (the record keeps its one canonical form;
-// the row is its projection). Typed identities (MessageId, TurnId,
-// ToolCallId) are imported, never restated.
+// EVERY ROW IS A RESOLVED ELEMENT — never an embedded conversation.v1
+// record (the figma→idl precedence). Typed identities do not appear here at
+// all, with ONE exception: the TurnId stamp, which a client matches against
+// the turn its own submission returned.
 //
-// NO WORKSPACE, NO FENCE, NO SCOPE ON THE PAGE: the stream is per-workspace
-// and ordered; the last breadcrumb IS the container a page is of.
+// NO WORKSPACE, NO FENCE, NO SCOPE ON THE PAGE: a feed connection is opened
+// per feed (OpenFeed → first page + watch token; WatchFeed → the tail), so
+// THE CONNECTION IS THE PLACEMENT — a subagent's rows never name a parent,
+// they arrive on the bubble's own feed. `parent` exists only for
+// PRESENTATION nesting within one feed (a merge phase's rows, work grouped
+// under a skill heading). The last breadcrumb is the container a page is of.
 
 syntax = "proto3";
 
 package frontend.v1;
 
-import "conversation/v1/agent.proto";
-import "conversation/v1/detached_work.proto";
-import "conversation/v1/message.proto";
-import "conversation/v1/tool_call.proto";
 import "conversation/v1/turn.proto";
 import "frontend/v1/failure.proto";
 import "workspace/v1/workspace.proto";
@@ -57,33 +56,73 @@ import "workspace/v1/workspace.proto";
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
 // ==========================================================================
-// THE CONTAINER: a row, and a page of rows.
+// THE CONTAINER: identity, a row, and a page of rows.
 // ==========================================================================
 
-// One row of the feed. THE ARM IS THE KIND.
+// A feed row's identity — and, for a bubble row, the address of the sub-feed
+// within it (one id names both, so a footer jump target and an OpenFeed
+// address are the same value). Opaque and daemon-minted: the daemon encodes
+// the underlying identity of what the row draws and decodes it on echo, so
+// it keeps no id table and the same row gets the same id across pushes,
+// restarts and replays. Echoed by clients (navigation, parenting, OpenFeed),
+// never parsed, never constructed.
+message FeedId {
+  // The opaque value.
+  string value = 1;
+}
+
+// One row of the feed. THE ARM IS THE KIND — see the file header for the
+// taxonomy.
 message FeedRow {
-  // The row's identity — the record's MessageId, or a daemon-minted one for a
-  // synthesized row (a merge). The upsert key: a
-  // later push with the same id REPLACES this row whole.
-  conversation.v1.MessageId id = 1;
-  // The containing bubble's id, when nested (inside a detached bubble or the
-  // merge bubble). UNSET for a top-level row.
-  conversation.v1.MessageId parent = 2;
+  // The row's identity: the UPSERT KEY (a later push with the same id
+  // replaces this row whole), and the value every reference carries — a
+  // parent, a breadcrumb, a footer jump target.
+  FeedId id = 1;
+  // PRESENTATION NESTING ONLY: the containing row, when this row is drawn
+  // inside one on the SAME feed (a merge phase's rows, work grouped under a
+  // skill heading). UNSET for a top-level row. A subagent's rows never carry
+  // this — they arrive on the bubble's OWN feed connection.
+  FeedRowParent parent = 2;
   // The turn this row belongs to — the daemon's stamp; what a client matches
   // its SubmitPromptSuccess.turn against to find its own prompt. Unset for a
-  // row that belongs to no turn (a context-cut divider, a boot failure).
+  // row that belongs to no turn (a context-cut divider).
   conversation.v1.TurnId turn = 3;
+  // What the row is. Each kind is a daemon-resolved element family.
   oneof row {
-    FeedUser user = 4;
-    FeedAgent agent = 5;
-    FeedDetached detached = 6;
-    FeedPermission permission = 7;
-    FeedContextCut context_cut = 8;
-    FeedMerge merge = 9;
+    // What a person typed — or, on a subagent's feed, the commission or a
+    // message another agent delivered.
+    FeedUserPrompt user_prompt = 4;
+    // A prompt one AGENT addressed to another — conceptually the user kind's
+    // sibling, differing only in author. Drawn as a prompt bubble with an
+    // orange border. It appears on the SENDER's feed as the outgoing send
+    // and on the recipient's as the delivered prompt — one kind, both ends.
+    FeedAgentPrompt agent_prompt = 5;
+    // One unit of the turn's synchronous progress.
+    FeedTurnActivity activity = 6;
+    // How a turn ended. The terminal fact as a row, so history replays it
+    // and its ABSENCE for the current turn is what "live" means.
+    FeedTurnEnded turn_ended = 7;
+    // A detached subagent's bubble — the same drawn component as a sync
+    // spawn, placed by this wrapper because it outlives its turn.
+    FeedDetachedSubagent detached_subagent = 8;
+    // A detached shell's bubble.
+    FeedDetachedShell detached_shell = 9;
+    // The turn blocked on consent.
+    FeedPermission permission = 10;
+    // The turn blocked on a choice the agent posed.
+    FeedQuestion question = 11;
+    // The feed changed shape here: a clear or a compaction.
+    FeedContextCut context_cut = 12;
   }
 }
 
-// A page of rows, as the daemon serves it for a container. THE ARM IS THE
+// The containing row's identity, for presentation nesting.
+message FeedRowParent {
+  // The container row's FeedId, exactly as that row carried it.
+  FeedId row = 1;
+}
+
+// A page of rows, as the daemon serves it for one feed. THE ARM IS THE
 // RESULT: the page, or why it could not be completed.
 message FeedPage {
   oneof result {
@@ -103,7 +142,7 @@ message FeedPageSuccess {
   }
   // The chain of containers ABOVE these rows, outermost first — what a cold
   // open deep inside nesting draws for context, and how a client knows which
-  // container this page is OF (the last crumb). EMPTY = the top-level feed.
+  // container this page is OF (the last crumb). EMPTY = the feed's own top.
   FeedBreadcrumbs breadcrumbs = 4;
 }
 
@@ -123,11 +162,11 @@ message FeedPageErrorHeadline {
 }
 
 // Older rows exist — ask for the next page. NO CURSOR: the daemon holds each
-// container's walk position (stage-3 ruling); this arm is purely the fact
-// that the walk has not reached the start.
+// feed's walk position; this arm is purely the fact that the walk has not
+// reached the start.
 message FeedPageHasMore {}
 
-// This page reaches the beginning of the container.
+// This page reaches the beginning of the feed.
 message FeedPageAtStart {}
 
 // The breadcrumb trail above a nested page.
@@ -139,16 +178,120 @@ message FeedBreadcrumbs {
 // One crumb: the container it names, and the label the daemon resolved for
 // it (the subagent's description, the merge's branch line).
 message FeedBreadcrumb {
-  conversation.v1.MessageId target = 1;
+  // The container row's identity, echoed into navigation.
+  FeedId target = 1;
+  // The daemon-resolved label, drawn verbatim.
   string label = 2;
 }
 
 // ==========================================================================
-// THE ROW KINDS — each FILLED AT ITS OWN INCREMENT, one at a time. Empty here
-// on purpose: not a guess at their elements. The old bodies they replace are
-// kept VERBATIM below the line under "PENDING", to be judged as each kind is
-// walked, and deleted then.
+// SYNCHRONOUS TURN PROGRESS — the activity kind and its unit presentations.
+// The unit bodies land at their own increments; each is declared here so the
+// carve is on disk.
 // ==========================================================================
+
+// One unit of the turn's synchronous progress, whoever drives it. The arm is
+// the drawn presentation.
+message FeedTurnActivity {
+  oneof unit {
+    // The left-rail prose bubble, fragment-fed while arriving; carries the
+    // response usage stamp. A turn holds SEVERAL — commentary between tool
+    // calls and the final answer are all this.
+    FeedResponse response = 1;
+    // The grey tool-call bubble: one shared shell (headline, badge,
+    // arguments, output), with a per-tool arm inside for what only that
+    // tool draws. Read, write, edit, grep, glob, and a FOREGROUND shell.
+    FeedSimpleToolCall simple_tool_call = 2;
+    // The teal skill card: name, document fold, allowances. Subsequent work
+    // may nest under it by `parent` — a presentation choice, since nothing
+    // delimits a skill's scope at the source.
+    FeedSkill skill = 3;
+    // A task bubble — ONE row per tracker task, upserted by every act that
+    // touches it, across turns and agents alike.
+    FeedTask task = 4;
+    // The merge bubble. Daemon-orchestrated, but from the user's
+    // perspective the turn has not concluded while it runs — so it is
+    // activity, the one arm the agent does not author.
+    FeedMerge merge = 5;
+    // A SYNC subagent's bubble — the same drawn component the detached
+    // wrapper carries; a bubble is a sub-feed either way.
+    FeedSubagent subagent = 6;
+  }
+}
+
+// The prose bubble. Body at its own increment.
+message FeedResponse {}
+
+// The shared grey tool-call bubble. Shell and per-tool arms at its own
+// increment, derived from the drawn sectioning of today's tool cards.
+message FeedSimpleToolCall {}
+
+// The skill card. Body at its own increment.
+message FeedSkill {}
+
+// The task bubble. Body at its own increment; keyed by the tracker task.
+message FeedTask {}
+
+// ==========================================================================
+// THE TURN'S TERMINAL — a row, so history replays how every turn ended.
+// ==========================================================================
+
+// How a turn ended. THE ARM IS HOW. Its absence for the current turn is what
+// "the turn is live" means — anchored on data, not on any connection's
+// lifetime. Bodies at this kind's own increment.
+message FeedTurnEnded {
+  oneof outcome {
+    // The turn ran to its own conclusion.
+    FeedTurnEndedConcluded concluded = 1;
+    // The turn died on an error (an API refusal, a query death).
+    FeedTurnEndedErrored errored = 2;
+    // The user stopped it — directly, or by a prompt that interrupted.
+    FeedTurnEndedInterrupted interrupted = 3;
+  }
+}
+message FeedTurnEndedConcluded {}
+message FeedTurnEndedErrored {}
+message FeedTurnEndedInterrupted {}
+
+// ==========================================================================
+// ASYNC WORK — one wrapper per kind, adjacent to activity because it
+// OUTLIVES the turn; each wraps the same drawn component its sync form uses.
+// ==========================================================================
+
+// A detached subagent's placement wrapper.
+message FeedDetachedSubagent {
+  // The bubble — identical to the sync arm's; the wrapper carries the
+  // placement fact, never a second drawing.
+  FeedSubagent subagent = 1;
+}
+
+// A detached shell's placement wrapper.
+message FeedDetachedShell {
+  // The shell bubble: command head + spool body. Body at its own increment.
+  FeedShell shell = 1;
+}
+
+// A SUBAGENT BUBBLE — sync or detached, one component. THE BUBBLE IS A FEED:
+// its rows are not carried by this view or this feed's stream — the client
+// opens them as a sub-feed addressed by THIS ROW's own FeedId (OpenFeed on
+// expand, cancel the watch on collapse). The body carries only what the
+// collapsed bubble draws; elements at its own increment.
+message FeedSubagent {}
+
+// A shell bubble: command head, spool body. Elements at its own increment.
+message FeedShell {}
+
+// ==========================================================================
+// BLOCKING THE TURN ON THE USER — consent, and a choice. Bodies re-derived
+// from conversation.v1's AgentPermission / AgentQuestion at their own
+// increments (the typed sources the earlier shapes predated).
+// ==========================================================================
+
+// The consent card. Body at its own increment.
+message FeedPermission {}
+
+// The question card — the choice the agent posed. Body at its own increment.
+message FeedQuestion {}
 
 // ① What a person typed — or, nested inside a detached bubble, the prompt
 // that work was given. The daemon resolves the row: the author label, and the
@@ -157,33 +300,33 @@ message FeedBreadcrumb {
 //   │  You  ▏fix the flaky reconnect test      │
 //   │       ▏[image: screenshot.png]           │
 //         author  body (blocks: text · image · unsupported)
-message FeedUser {
+message FeedUserPrompt {
   // The author label ("You" — or the spawning agent's name under a bubble).
-  FeedUserAuthor author = 1;
+  FeedUserPromptAuthor author = 1;
   // ONE ARM: a user row is never in flight and never fails.
   oneof result {
-    FeedUserSuccess success = 2;
+    FeedUserPromptSuccess success = 2;
   }
 }
 
 // The row's content.
-message FeedUserSuccess {
+message FeedUserPromptSuccess {
   // The blocks the person composed.
-  FeedUserBody body = 1;
+  FeedUserPromptBody body = 1;
 }
 
 // The author label of a user row.
-message FeedUserAuthor {
+message FeedUserPromptAuthor {
   string label = 1;
 }
 
 // The blocks the person composed, in order, resolved for drawing.
-message FeedUserBody {
-  repeated FeedUserBlock blocks = 1;
+message FeedUserPromptBody {
+  repeated FeedUserPromptBlock blocks = 1;
 }
 
 // One drawn block of a user row.
-message FeedUserBlock {
+message FeedUserPromptBlock {
   oneof block {
     FeedTextBlock text = 1;
     FeedImageBlock image = 2;
@@ -213,455 +356,13 @@ message FeedImageBlock {
 message FeedUnsupportedBlock {
   string kind = 1;
 }
-// ② One agent response: its head, then its blocks in production order, then a
-// stop notice when the stop is worth drawing.
-//
-//   │  ● Claude                              opus-5 · 1.2k in · 340 out │  head
-//   │    I'll look at the reconnect path first.                         │  prose
-//   │    ▸ thinking · 412 tokens                                        │  thinking (collapsed)
-//   │    ┌ Read  lisp/frontend.el:840-880                       ✓ ┐     │  tool card
-//   │    │  ▸ result (42 lines)                                    │     │
-//   │    └────────────────────────────────────────────────────────┘     │
-//   │    ⚠ stopped: hit the output limit                                │  stop notice
-//
-// A RESOLVED ELEMENT, not an embedded AgentSaid: the record keeps its one
-// canonical form; this row is the daemon's projection of it for drawing —
-// including each tool card's per-tool presentation, which the daemon derives
-// from ToolCallBlock.call ONCE, so no client knows that Bash has a `command`.
-message FeedAgent {
-  FeedAgentHead head = 1;
-  // In production order.
-  repeated FeedAgentBlock blocks = 2;
-  // Unset for end_turn and tool_call — the ordinary endings draw nothing.
-  FeedAgentStopNotice stop = 3;
-}
 
-// The row's head: who, and what it cost.
-message FeedAgentHead {
-  FeedAgentAuthor author = 1;
-  FeedAgentUsageStamp usage = 2;
-}
+// ①b A prompt one agent addressed to another — the user kind's sibling,
+// drawn as a prompt bubble with an ORANGE BORDER. On the sender's feed it is
+// the outgoing send (with the recipient named); on the recipient's feed, the
+// delivered prompt. Body at its own increment.
+message FeedAgentPrompt {}
 
-// The author label ("Claude", or the subagent's name inside a bubble).
-message FeedAgentAuthor {
-  string label = 1;
-}
-
-// The response's cost, resolved into the figures the head shows.
-message FeedAgentUsageStamp {
-  string model = 1;
-  int64 input_tokens = 2;
-  int64 output_tokens = 3;
-  // A composed cache line ("91% cached"), may be empty.
-  string cache_summary = 4;
-}
-
-// One drawn block of an agent row.
-message FeedAgentBlock {
-  oneof block {
-    FeedTextBlock prose = 1;
-    FeedAgentThinking thinking = 2;
-    FeedTool tool = 3;
-  }
-}
-
-// Reasoning the agent showed, drawn collapsed. THE ARM IS THE FACT.
-message FeedAgentThinking {
-  oneof thinking {
-    FeedAgentThinkingShown shown = 1;
-    FeedAgentThinkingRedacted redacted = 2;
-  }
-}
-message FeedAgentThinkingShown {
-  string text = 1;
-  // Resolved for the collapsed line ("▸ thinking · 412 tokens").
-  int64 tokens = 2;
-}
-message FeedAgentThinkingRedacted {}
-
-// A tool card: what was called, its arguments (folded), and how it went.
-message FeedTool {
-  // The join key to the permission card, the detached bubble and the record.
-  conversation.v1.ToolCallId call = 1;
-  FeedToolHeadline headline = 2;
-  FeedToolArguments arguments = 3;
-  // THE ARM IS THE STATE.
-  oneof result {
-    FeedToolUpdate update = 4;
-    FeedToolSuccess success = 5;
-    FeedToolError error = 6;
-  }
-}
-
-// The card's headline: per-tool presentation the DAEMON resolves ("Read ·
-// lisp/frontend.el:840-880", "Bash · $ go test ./...").
-message FeedToolHeadline {
-  // A glyph name from the shared vocabulary ("read", "bash", "agent", …).
-  string icon = 1;
-  string title = 2;
-  // May be empty.
-  string subtitle = 3;
-}
-
-// The arguments, folded open on demand: label/value lines the daemon composed
-// from the call's arm; a value may be long (a Write's content, a Bash command).
-message FeedToolArguments {
-  repeated FeedToolArgument lines = 1;
-}
-message FeedToolArgument {
-  string label = 1;
-  string value = 2;
-}
-
-// The tool has not returned yet.
-message FeedToolUpdate {}
-
-// The call went well. THE ARM IS HOW: it returned, or it detached into work
-// of its own.
-message FeedToolSuccess {
-  oneof outcome {
-    FeedToolReturned returned = 1;
-    FeedToolDetached detached = 2;
-  }
-}
-// The tool returned; its result, drawn.
-message FeedToolReturned {
-  repeated FeedToolResultBlock blocks = 1;
-}
-// The call detached into work of its own; the card links to its bubble.
-message FeedToolDetached {
-  conversation.v1.MessageId bubble = 1;
-}
-
-// The call did not go well. THE ARM IS WHY: the tool returned an error, or
-// the user denied it.
-message FeedToolError {
-  oneof reason {
-    FeedToolFailed failed = 1;
-    FeedToolDenied denied = 2;
-  }
-}
-// The tool returned an error; its account, drawn.
-message FeedToolFailed {
-  repeated FeedToolResultBlock blocks = 1;
-}
-// The call was denied by the user.
-message FeedToolDenied {
-  // What the user said, when they said anything.
-  string reason = 1;
-}
-// One drawn block of a tool result.
-message FeedToolResultBlock {
-  oneof block {
-    FeedTextBlock text = 1;
-    FeedImageBlock image = 2;
-    FeedUnsupportedBlock unsupported = 3;
-  }
-}
-
-// A stop worth drawing. Unset for end_turn / tool_call.
-message FeedAgentStopNotice {
-  oneof reason {
-    FeedAgentStopMaxTokens max_tokens = 1;
-    FeedAgentStopInterrupted interrupted = 2;
-    FeedAgentStopRefusal refusal = 3;
-    FeedAgentStopUnsupported unsupported = 4;
-  }
-}
-message FeedAgentStopMaxTokens {}
-message FeedAgentStopInterrupted {}
-message FeedAgentStopRefusal {}
-message FeedAgentStopUnsupported {
-  string reason = 1;
-}
-// ③ Work that detached — a subagent, a background shell, a workflow, a skill's
-// own window — as a collapsible BUBBLE: a head, and a body by kind. Its
-// nested rows are ordinary FeedRows whose `parent` is this bubble, paged
-// through the same page and breadcrumbs as the feed; the bubble carries only
-// their count.
-//
-//   │  ⚙ Explore  "find the roster resolver"      0:31 ● live  ▸ 3 msgs │  head
-//   │    │  You  ▏find the roster resolver…                              │  nested rows
-//   │  $ bash  go test ./...                      1:04 ● live  ▸ output │  shell: the spool
-//   │  ⛓ workflow  review-changes                 2:10 ● live  ▸ 5 steps│  workflow: journal steps
-//   │  ✎ skill  create-or-update-pr                     ✓ done  ▸ body  │  skill: SKILL.md + nested rows
-//   │  ⚙ Explore  "…"                        1:12 ✕ failed: timed out    │  error: outcome replaces liveness
-message FeedDetached {
-  FeedDetachedHead head = 1;
-  // THE ARM IS THE STATE — drawn as the head's badge.
-  oneof result {
-    FeedDetachedUpdate update = 2;
-    FeedDetachedSuccess success = 3;
-    FeedDetachedError error = 4;
-  }
-  // THE ARM IS THE KIND — what the bubble contains and how it is drawn.
-  oneof body {
-    FeedDetachedAgentBody agent = 5;
-    FeedDetachedShellBody shell = 6;
-    FeedDetachedWorkflowBody workflow = 7;
-    FeedDetachedSkillBody skill = 8;
-    FeedDetachedUnmodeledBody unmodeled = 9;
-  }
-}
-
-// The bubble's head line: the constant props. The state badge is the
-// bubble's `result`.
-message FeedDetachedHead {
-  FeedDetachedGlyph glyph = 1;
-  FeedDetachedLabel label = 2;
-  FeedDetachedRuntime runtime = 3;
-  FeedDetachedFold fold = 4;
-}
-
-// The kind glyph, a name from the shared vocabulary ("agent", "bash",
-// "workflow", "skill", "tool").
-message FeedDetachedGlyph {
-  string icon = 1;
-}
-
-// The label, resolved by the daemon from the origin call (the agent's
-// description, the shell's command, the workflow's name, the skill's name).
-message FeedDetachedLabel {
-  string text = 1;
-}
-
-// When it started — the head's running clock while live.
-message FeedDetachedRuntime {
-  int64 started_at_ms = 1;
-}
-
-// Still running.
-message FeedDetachedUpdate {}
-
-// Ended well: when, the collapsed line's summary, and the process exit when
-// it was a process. `ended_at_ms` lives on the terminal arms, not on the
-// runtime, because it means nothing while live (adjacent-exclusivity).
-message FeedDetachedSuccess {
-  // Epoch ms; the head's clock stops here.
-  int64 ended_at_ms = 1;
-  // The collapsed line's summary, resolved.
-  string summary = 2;
-  // Unset for work that never had an exit status of its own.
-  FeedDetachedExit exit = 3;
-}
-
-// Ended badly: when, why, and the process exit when it was a process. THE
-// ARM IS WHY.
-message FeedDetachedError {
-  int64 ended_at_ms = 1;
-  oneof reason {
-    FeedDetachedFailed failed = 2;
-    FeedDetachedCancelled cancelled = 3;
-    FeedDetachedLost lost = 4;
-  }
-  FeedDetachedExit exit = 5;
-}
-message FeedDetachedFailed {
-  string summary = 1;
-}
-message FeedDetachedCancelled {}
-// We lost sight of it — a resolved sentence for the collapsed line ("the
-// transcript vanished", "went silent for 10m").
-message FeedDetachedLost {
-  string how = 1;
-}
-// The process's exit code, exactly as reported ("exited 137").
-message FeedDetachedExit {
-  int32 code = 1;
-}
-
-// The ▸/▾ state. UI preference the daemon holds; see the roster's fold.
-message FeedDetachedFold {
-  bool folded = 1;
-}
-
-// A subagent: its rows are nested FeedRows; the bubble carries their count.
-message FeedDetachedAgentBody {
-  FeedDetachedRowCount rows = 1;
-}
-// A background shell: its output spool, resolved whole (a row upsert
-// replaces it; there are no append deltas — the row is the unit).
-message FeedDetachedShellBody {
-  FeedDetachedSpool output = 1;
-}
-// A workflow: its journal steps.
-message FeedDetachedWorkflowBody {
-  repeated FeedDetachedStep steps = 1;
-}
-// A skill's window: its SKILL.md body, and its nested rows' count.
-message FeedDetachedSkillBody {
-  FeedDetachedSkillDoc body = 1;
-  FeedDetachedRowCount rows = 2;
-}
-// An unmodeled tool that detached: rows only.
-message FeedDetachedUnmodeledBody {
-  FeedDetachedRowCount rows = 1;
-}
-
-// How many nested rows the bubble holds ("▸ 3 msgs").
-message FeedDetachedRowCount {
-  int64 count = 1;
-}
-// A shell's output spool. `truncated` when the daemon capped what it sends
-// and the rest is reachable by paging inside the bubble.
-message FeedDetachedSpool {
-  string text = 1;
-  bool truncated = 2;
-}
-// One journal step. THE ARM IS THE STATE.
-message FeedDetachedStep {
-  string label = 1;
-  string detail = 2;
-  oneof result {
-    FeedDetachedStepUpdate update = 3;
-    FeedDetachedStepSuccess success = 4;
-    FeedDetachedStepError error = 5;
-  }
-}
-message FeedDetachedStepUpdate {}
-message FeedDetachedStepSuccess {}
-message FeedDetachedStepError {}
-// The skill file's body, markdown, drawn as a document.
-message FeedDetachedSkillDoc {
-  string markdown = 1;
-}
-// ④ A permission the agent asked for, and how it was answered. Joined to its
-// tool card by the call id; draws the same tool-call presentation with ITS
-// OWN wrappers (two components, one origin, per-component copies).
-//
-//   │  ? Permission   Bash  $ git push --force origin main         │  headline
-//   │    ▸ arguments                                               │  arguments fold
-//   │    [allow once] [allow for session] [deny…]                  │  answer bar (open)
-//   │  ✓ allowed for session · 14:02                               │  success: verdict line replaces the bar
-//   │  – went unanswered · 14:05                                   │  error: the question went away
-message FeedPermission {
-  conversation.v1.ToolCallId call = 1;
-  // WHAT IS BEING ASKED. THE ARM IS THE BODY the card draws.
-  oneof body {
-    // An ordinary tool wants to run: headline + arguments + verdict bar.
-    FeedPermissionTool tool = 2;
-    // The agent asked the user a question (the AskUserQuestion tool),
-    // RESOLVED into drawn questions — the client never parses tool input.
-    FeedPermissionQuestions questions = 3;
-  }
-  // THE ARM IS THE STATE.
-  oneof result {
-    FeedPermissionUpdate update = 4;
-    FeedPermissionSuccess success = 5;
-    FeedPermissionError error = 6;
-  }
-}
-
-// An ordinary tool's ask: what would run, drawn.
-message FeedPermissionTool {
-  FeedPermissionHeadline headline = 1;
-  FeedPermissionArguments arguments = 2;
-}
-
-// The question card: a batch of 1–4 questions, each drawn with its options.
-message FeedPermissionQuestions {
-  repeated FeedPermissionQuestion questions = 1;
-}
-
-// One question of the batch.
-message FeedPermissionQuestion {
-  // The question sentence, verbatim.
-  FeedPermissionQuestionText text = 1;
-  // The short chip label ("Pizza").
-  FeedPermissionQuestionHeader header = 2;
-  // THE ARM IS THE SELECTION MODE: radios or checkboxes. A mode-specific
-  // prop later (a "pick at most N") lands on its arm without touching the
-  // other.
-  oneof options {
-    FeedPermissionSingleSelect single_select = 3;
-    FeedPermissionMultiSelect multi_select = 4;
-  }
-}
-message FeedPermissionQuestionText {
-  string text = 1;
-}
-message FeedPermissionQuestionHeader {
-  string text = 1;
-}
-// Pick exactly one.
-message FeedPermissionSingleSelect {
-  repeated FeedPermissionQuestionOption options = 1;
-}
-// Tick any number.
-message FeedPermissionMultiSelect {
-  repeated FeedPermissionQuestionOption options = 1;
-}
-// One option. Free-text "Other" is ALWAYS offered by the drawn card and is
-// no option here.
-message FeedPermissionQuestionOption {
-  string label = 1;
-  string description = 2;
-}
-
-// The call's headline, resolved by the daemon (icon · title · subtitle).
-message FeedPermissionHeadline {
-  string icon = 1;
-  string title = 2;
-  string subtitle = 3;
-}
-
-// The call's arguments, folded: label/value lines the daemon composed.
-message FeedPermissionArguments {
-  repeated FeedPermissionArgument lines = 1;
-}
-message FeedPermissionArgument {
-  string label = 1;
-  string value = 2;
-}
-
-// Awaiting the user: the answer bar is drawn. Its buttons send agentrepl.v1
-// requests; nothing about them is a field here.
-message FeedPermissionUpdate {}
-
-// Answered. THE ARM IS THE ANSWER. A denial is an ANSWER — the user was asked
-// and said no — which is why it is here and not under error.
-message FeedPermissionSuccess {
-  oneof answer {
-    FeedPermissionAllowedOnce allowed_once = 1;
-    FeedPermissionAllowedForSession allowed_for_session = 2;
-    FeedPermissionDenied denied = 3;
-    // A questions body was answered; drawn as the verdict line
-    // ("Pizza: Margherita").
-    FeedPermissionAnsweredQuestions answered_questions = 5;
-  }
-  // When it was answered, epoch ms.
-  int64 at_ms = 4;
-}
-
-// The given answers, one per question in the batch's order.
-message FeedPermissionAnsweredQuestions {
-  repeated FeedPermissionGivenAnswer answers = 1;
-}
-message FeedPermissionGivenAnswer {
-  // The question's chip label, so the line reads without the question.
-  string header = 1;
-  // Chosen option labels, verbatim; several iff the question was multi.
-  repeated string chosen = 2;
-  // The free-text "Other" answer; empty when options were chosen.
-  string other_text = 3;
-}
-message FeedPermissionAllowedOnce {}
-message FeedPermissionAllowedForSession {}
-message FeedPermissionDenied {
-  // What the user said, when they said anything.
-  string reason = 1;
-}
-
-// The question went away without an answer — the turn ended, the session
-// stopped. THE ARM IS HOW.
-message FeedPermissionError {
-  oneof reason {
-    FeedPermissionAbandoned abandoned = 1;
-  }
-  // When it went away, epoch ms.
-  int64 at_ms = 2;
-}
-message FeedPermissionAbandoned {}
 // ⑤ THE CONTEXT-CUT DIVIDER — the conversation was cut here, and a reader
 // scrolling back must see where. Drawn from conversation.v1.ContextCut.
 message FeedContextCut {
@@ -732,6 +433,7 @@ message FeedContextCutSummary {
 message FeedContextCutFold {
   bool folded = 1;
 }
+
 // ⑥ A WORKSPACE MERGE, coalesced into ONE bubble. The daemon orchestrates the
 // merge (a skill run under the hood) and DECIDES which records belong to it;
 // the vendor knows nothing about any of it. The bubble's body is a TAB STRIP:
@@ -987,4 +689,3 @@ message FeedMergePhaseRowCount {
 // ==========================================================================
 // PENDING — old bodies, verbatim, judged one kind at a time.
 // ==========================================================================
-
