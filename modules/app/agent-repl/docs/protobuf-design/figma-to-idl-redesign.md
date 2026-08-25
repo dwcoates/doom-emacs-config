@@ -328,6 +328,27 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `FeedResponse` lands — the prose bubble; usage rides the ENVELOPE, live in every state
+
+**What changed ("land").** FeedResponse { FeedResponseUsageStamp usage
+(optional-by-presence); oneof result { update { prose } | success { prose }
+| error { prose } } }, with FeedResponseProse { markdown } and the stamp a
+daemon-formatted string. The user hoisted usage from the success arm to the
+envelope: the vendor states usage when a response OPENS and restates it as
+it grows (verified at the thinking/response landing), so the stamp is live
+while arriving, final once settled, last-observed on a broken bubble;
+absence draws no stamp, never a zero.
+
+**The error arm carries NO reason, on purpose.** WHY a response died is the
+turn terminal row's fact (FeedTurnEnded.errored) — one failure, one home;
+the row's arm only marks which bubble was cut short and keeps its partial
+prose drawn.
+
+**Open, flagged.** The final-answer treatment (the old green border on the
+turn's answering response, which AgentSuccess.completed.answer names) is
+deliberately unmodeled here pending the user's call — likely a resolved
+marker on success if kept, possibly redundant beside the terminal row.
+
 ### The FEED VERBS repoint lands: OpenFeed mints the tail token; WatchFeed goes token-addressed; GetFeedPage walks ONE feed; Interrupt echoes FeedId
 
 **What changed (shapes agreed in conversation at the container settlement:
