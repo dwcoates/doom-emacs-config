@@ -328,6 +328,29 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `FeedSubagent` lands — the collapsed head rides the PARENT feed; identifier-only rows weighed and declined
+
+**What changed.** FeedSubagent { label; optional description; optional
+tokens (formatted running sum); runtime { started_at_ms }; oneof state
+{ live { last_progress } | settled { ended_at_ms; oneof outcome
+{ succeeded | failed | cancelled | lost } } } }. One component for sync and
+detached; the body is the sub-feed (opened by the row's own FeedId), so the
+message is exactly the collapsed head. `lost` keeps its own word — we
+stopped seeing it, not known failed. Live carries the same last-progress
+heartbeat feedback as the tool card (the subagent progress channel).
+
+**The user's spitball, weighed and declined with reasons recorded.**
+"Should subagents be handled exclusively as dedicated WatchFeed calls —
+row carries only the identifier?" NO, on two grounds (transport was NOT
+one — streams multiplex over the one socket): (1) HISTORY — most bubbles
+in a feed are settled; identifier-only rows would demand a live connection
+per settled bubble just to draw "✓ Explore · 2:10", inverting pulled
+history vs pushed live; (2) STREAM UNIFORMITY — the head is the parent's
+fact about its child, and routing it over the child's connection would
+grow the sub-feed stream a second frame kind (row | head). What survives
+of the instinct IS the design: the identifier is how expand reaches the
+content (OpenFeed(id)); only the collapsed head rides the parent.
+
 ### `FeedTask` lands — the task bubble is the task AS IT STANDS
 
 **What changed ("look good").** FeedTask { status (six-arm projection,
