@@ -1,14 +1,16 @@
-// footer.proto — THE FOOTER: the workspace's status strip, and its expanded
-// section of in-flight detached work. Per-workspace; resolved by the daemon.
+// footer.proto — THE FOOTER: the workspace's status strip, its selectable
+// cells and chips, and the expanded section their selection opens.
+// Per-workspace; resolved by the daemon.
 //
-// THE MAIN STRIP, left to right — resolution INCREASES left to right, and all
-// three status sections are TYPED, each "less" typed than the last by carrying
-// more of its information in text fields:
+// THE MAIN STRIP, left to right — resolution INCREASES left to right across
+// the three status sections, each TYPED, each "less" typed than the last by
+// carrying more of its information in text fields; then the turn's figures;
+// then the live-work chips, right-aligned:
 //
-//   ┌───────────┬─────────────────────┬──────────────────────────────┬───────┬─────────────────────────┐
-//   │ merging   │ cherry-picking 3/7  │ 4f2a1c: fold tokens into api │ 0:42  │ 18.2k in · 3.1k thought │
-//   └───────────┴─────────────────────┴──────────────────────────────┴───────┴─────────────────────────┘
-//     Status      SubStatus             StatusActivity                 Clock   Tokens
+//   ┌───────────┬─────────────────────┬──────────────────────────────┬───────┬───────────────┬─────────────┐
+//   │ merging   │ cherry-picking 3/7  │ 4f2a1c: fold tokens into api │ 0:42  │ 18.2k in ⚠ ✓ │ ⚙3 ☑3/7 $2 │
+//   └───────────┴─────────────────────┴──────────────────────────────┴───────┴───────────────┴─────────────┘
+//     Status      SubStatus             StatusActivity                 Clock   Tokens cell     LiveWork chips
 //     coarsest ──────────── resolution increases ────────────► finest
 //
 //   Status         the coarsest state, one word + color, a small closed set;
@@ -19,23 +21,27 @@
 //   StatusActivity the finest, DYNAMIC line: typed KINDS whose payload is
 //                  mostly text the daemon composed.
 //   Clock          how long the current turn has been running.
-//   Tokens         this turn's cost so far; opens the token-breakdown menu.
+//   Tokens cell    the turn's uncached-input figure with two glyphs; a click
+//                  target opening the token panel.
+//   LiveWork chips ⚙ live subagents · ☑ the task tracker · $ live shells —
+//                  each a click target opening its panel.
 //
-// Gone from the strip: the interrupt chip (an `interrupted` status now), and
-// the counters (held → the daemon-hold tray's heading; permissions → the
-// feed's cards; tasks → the tray/sheet).
+// THE EXPANDED SECTION opens above the strip when a selectable element (the
+// tokens cell or a chip) is selected. The selection is WEBVIEW-LOCAL, so the
+// daemon ships EVERY panel fully resolved on every push and the client draws
+// whichever one the local selection picks — opening a panel needs no
+// round-trip (the folded-menu convention).
 //
 // EVERY FIELD IS AN ELEMENT MESSAGE, nested as the UI nests. The daemon
 // resolves every level; the client renders and derives nothing — there is no
 // client-side precedence between windows, no phase→word table, no mapping of
-// any state to a color.
+// any state to a color, and no counting of panel rows to label a chip.
 
 syntax = "proto3";
 
 package frontend.v1;
 
-import "conversation/v1/message.proto";
-import "conversation/v1/turn.proto";
+import "conversation/v1/agent_activity.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
@@ -43,102 +49,41 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // THE FOOTER VIEW
 // ==========================================================================
 
-// The footer, resolved completely by the daemon.
+// The footer: the always-drawn strip plus the expanded section's panels.
+// EVERY panel is always resolved on every push: which panel is open is a
+// webview-local selection the daemon never learns.
 message FooterView {
-  // The main strip.
+  // The one-line strip at the bottom of the workspace view. Always drawn.
   FooterStrip strip = 1;
-  // The expanded section (rows below the strip, and the sheet). Declared
-  // empty here; filled by the next increment.
+  // The expanded section's content, one panel per selectable strip element.
+  // Drawn only while a strip element is selected; the selection picks which.
   FooterExpanded expanded = 2;
-}
-
-// The expanded section, opened by activating the strip: RESTRICTED TO ROWS,
-// one per detached work item live right now, and nothing else. Each row is a
-// JUMP TARGET — activating it navigates to the item's feed-level bubble. No
-// heading: the strip is the header. Empty rows = nothing running.
-//
-//   ├──────────────────────────────────────────────────────────────────┤
-//   │ ⚙ Explore   "find the roster resolver"               0:31   ▸ │  subagent
-//   │ ⛓ workflow  review-changes · verify 3/5              2:10   ▸ │  workflow
-//   │ $ bash      go test ./...                            1:04   ▸ │  shell
-//
-// The failure line, expensive-turn line, gate line and accounting cell that
-// once lived here have homes elsewhere: the feed's failure card and the
-// `blocked` status; an activity note; the `asleep`/`merging` statuses; the
-// topbar's accounting warning and the token-breakdown menu.
-message FooterExpanded {
-  // In display order, as the daemon orders them.
-  repeated FooterExpandedRow rows = 1;
-}
-
-// One live detached work item. The row KIND is the arm — exactly the
-// detachable origins of a tool call (a subagent, a workflow, a background
-// shell, an unmodeled tool that nonetheless detached). Each arm's text is the
-// daemon's projection of the item's origin call — this component's own copy,
-// not a link into the feed row's data.
-message FooterExpandedRow {
-  // The feed bubble this row jumps to — the item's DetachedWorkStarted
-  // message.
-  conversation.v1.MessageId target = 1;
-  // How long it has been running.
-  FooterExpandedRowRuntime runtime = 2;
-  oneof row {
-    FooterExpandedSubagent subagent = 3;
-    FooterExpandedWorkflow workflow = 4;
-    FooterExpandedShell shell = 5;
-    FooterExpandedUnmodeled unmodeled = 6;
-  }
-}
-
-// When the item started, so the row can show a running clock.
-message FooterExpandedRowRuntime {
-  int64 started_at_ms = 1;
-}
-
-// A subagent running detached.
-message FooterExpandedSubagent {
-  // Which agent definition ran it (e.g. "Explore", "general-purpose").
-  string agent_type = 1;
-  // The agent's short description — what the row shows.
-  string description = 2;
-}
-
-// A workflow running detached.
-message FooterExpandedWorkflow {
-  // The workflow's name (a saved name, or a label the daemon derives for an
-  // inline script).
-  string name = 1;
-  // The step it is on, as the daemon composes it (e.g. "verify 3/5"); empty
-  // when no step has been observed yet.
-  string current_step = 2;
-}
-
-// A shell command running in the background.
-message FooterExpandedShell {
-  // The command line, verbatim.
-  string command = 1;
-}
-
-// An unmodeled tool that detached — kept in the list so it cannot vanish.
-message FooterExpandedUnmodeled {
-  // The tool as the agent named it.
-  string tool_name = 1;
 }
 
 // ==========================================================================
 // THE MAIN STRIP
 // ==========================================================================
 
-// The main strip: five slots, left to right.
+// The strip's elements, left to right. Status, sub-status and activity are
+// the three typed resolution levels (coarsest → finest); clock and tokens
+// are the turn's figures; the live-work chips sit right-aligned.
 message FooterStrip {
+  // Coarsest state of the workspace. Colors the strip; one arm always set.
   FooterStatus status = 1;
-  // Unset when the status has no substructure (waiting, interrupted,
-  // background, asleep).
+  // The step within the status. Unset when the status has no substructure
+  // (waiting, interrupted, background, asleep).
   FooterSubStatus sub_status = 2;
-  // Unset when the daemon has nothing finer to say.
+  // The finest, dynamic line. Unset when the daemon has nothing finer to say.
   FooterStatusActivity activity = 3;
+  // The turn clock. The client ticks from the carried instant.
   FooterClock clock = 4;
-  FooterTokens tokens = 5;
+  // The tokens CELL: the turn's uncached-input figure plus two glyphs, and
+  // the click target that opens FooterExpandedTokens. The full breakdown
+  // lives in that panel, never here.
+  FooterTokensCell tokens = 5;
+  // The live-work chips, right-aligned. Each chip is a click target opening
+  // its panel.
+  FooterLiveWorkChips live_work = 6;
 }
 
 // ---- 1. Status — coarsest -------------------------------------------------
@@ -383,119 +328,368 @@ message FooterClock {
   optional int64 turn_started_at_ms = 1;
 }
 
-// ---- 5. Tokens -----------------------------------------------------------
+// ---- 5. Tokens cell -------------------------------------------------------
 
-// One turn's cost — the running turn, or the last turn until a new one
-// starts. Figures accumulate while it runs; the alarm appears the moment it
-// trips; the verdict appears once the turn settles. A new turn resets all.
-// EVERY FIELD IS AN ELEMENT: the drawn figures and badges of the cell, all
-// present at once — none is exclusive with another. Click opens the
-// token-breakdown menu (its own component). Deliberately NO output-token
-// ticker: the running output figure is unwanted; session-wide and per-model
-// figures are the breakdown's.
-//
-//   │ 18.2k in · 3.1k thought  ⚠  ✓ │
-//        input     thinking     │  └ accounting verdict badge (hover: the phrases)
-//                               └ expensive-turn alarm (hover: "41k over 20k")
-message FooterTokens {
-  FooterTokensInput input = 1;
-  FooterTokensThinking thinking = 2;
-  FooterTokensFirstToken first_token = 3;
-  // Set the moment the turn's uncached input crosses the threshold, and kept
-  // until the next turn starts. Unset = cache-efficient so far.
-  FooterTokensExpensiveTurn expensive_turn = 4;
-  // Set once the turn has settled; unset while it runs.
-  FooterTokensAccounting accounting = 5;
+// The strip's tokens cell. Deliberately ONE figure: the turn's uncached
+// input tokens — the number that costs money at full price — with the alarm
+// and accounting verdict reduced to glyphs. Everything else (thinking,
+// cache figures, first-token latency, alarm detail, verdict evidence) is
+// FooterExpandedTokens' content, reached by clicking this cell. Figures
+// accumulate while the turn runs; a new turn resets the cell.
+message FooterTokensCell {
+  // The turn's uncached input figure, daemon-formatted ("18.2k in") from the
+  // canonical TokenUsage input_misses total (written + unwritten; cache
+  // READS excluded, which is the whole point). The client draws it verbatim
+  // — no arithmetic, no unit rounding.
+  FooterTokensCellInput input = 1;
+  // The expensive-turn alarm glyph (⚠). PRESENT iff the alarm tripped this
+  // turn; presence IS the glyph, and the composed sentence is the panel's
+  // alarm line. Kept until the next turn starts.
+  FooterTokensCellAlarm alarm = 2;
+  // The accounting verdict badge. UNSET while the turn runs (no verdict
+  // yet); set once the settled turn is reconciled.
+  FooterTokensCellVerdict verdict = 3;
 }
 
-// THIS TURN's cumulative EXPENSIVE input — the canonical TokenUsage
-// input_misses total (written + unwritten), summed across the turn's
-// responses; cache READS excluded, which is the whole point. Resolved once by
-// the daemon; rendered verbatim.
-message FooterTokensInput {
-  int64 tokens = 1;
+// The cell's figure. Wrapped so the cell's one number is its own element and
+// a later prop (a tone, a tooltip) lands here without touching the cell.
+message FooterTokensCellInput {
+  // The formatted figure, exactly as drawn ("18.2k in").
+  string text = 1;
 }
 
-// Estimated thinking tokens so far this turn (latest-wins ticker, coalesced
-// daemon-side so a high-frequency source cannot drive the frame rate).
-message FooterTokensThinking {
-  int64 tokens = 1;
-}
+// The tripped-alarm glyph. Empty on purpose: being set is the whole fact —
+// "this turn crossed the cost threshold" — and the evidence is the panel's
+// alarm line, never a second copy here.
+message FooterTokensCellAlarm {}
 
-// First-token latency of the CURRENT MESSAGE (a turn is several API
-// responses; each has its own). Unset until the current message's first token
-// lands; holds until the next message starts.
-message FooterTokensFirstToken {
-  int64 latency_ms = 1;
-}
-
-// "This prompt re-ingested context." Computed daemon-side from the turn's
-// usage as the canonical input_misses total (written + unwritten), because
-// the vendor marks nearly all input cacheable: a cold prompt surfaces as
-// `written` while `unwritten` stays near zero even on a full re-ingest.
-// Rendered red; the host also surfaces it in its own mode line.
-message FooterTokensExpensiveTurn {
-  // The turn that crossed the threshold.
-  conversation.v1.TurnId turn = 1;
-  // The observed expensive cost.
-  int64 uncached_input_tokens = 2;
-  // The configured threshold that tripped, so the rendering can say "N over
-  // M" without knowing daemon config.
-  int64 threshold_tokens = 3;
-  // When the usage that tripped it arrived, epoch ms.
-  int64 at_ms = 4;
-  // WHY the turn ran, PROJECTED to the two cases the alarm renders
-  // differently. The shim's full prompt-origin vocabulary stops at the
-  // daemon.
-  oneof origin {
-    // An ordinary turn — a user's prompt, a command, a merge action.
-    FooterTokensExpensiveTurnPrompt prompt = 5;
-    // A cache keep-alive ping that came back COLD: it paid full freight,
-    // meaning the cache had already expired — its own alarm.
-    FooterTokensExpensiveTurnColdKeepAlive cold_keep_alive = 6;
-  }
-}
-message FooterTokensExpensiveTurnPrompt {}
-message FooterTokensExpensiveTurnColdKeepAlive {}
-
-// The settled turn's reconciliation. The daemon compared the usage each
-// response reported against the totals the terminal result claimed; the
-// comparison, the verdict and the prose are all the daemon's — the client
-// renders a badge from the verdict arm and the summary as its tooltip.
-message FooterTokensAccounting {
-  // The composed summary (the figures a healthy turn shows: quota, duration,
-  // token dimensions, cache hit rate, subagent count, throughput), rendered
-  // verbatim as the tooltip.
-  string summary = 1;
-  // WHETHER the accounting reconciled, as arms rather than a flag, so that a
-  // verdict and the evidence it implies arrive together and a client cannot
-  // render "invalid" with nothing to say about why.
+// The accounting badge. The set arm picks the glyph treatment; the evidence
+// behind it is the panel's verdict line, never this badge.
+message FooterTokensCellVerdict {
+  // Which verdict the settled turn's reconciliation reached. Exactly one arm
+  // is set; the arms are mutually exclusive readings of one reconciliation.
   oneof verdict {
-    FooterTokensAccountingComplete complete = 2;
-    FooterTokensAccountingIncomplete incomplete = 3;
-    FooterTokensAccountingInvalid invalid = 4;
+    // Every response's usage was observed and the sums reconcile (✓).
+    FooterTokensCellVerdictComplete complete = 1;
+    // Some responses carried no usage, so the figures are a floor (✗).
+    FooterTokensCellVerdictIncomplete incomplete = 2;
+    // The observed usage contradicts itself (✗) — a producer defect.
+    FooterTokensCellVerdictInvalid invalid = 3;
   }
 }
+// Reconciliation succeeded. Empty: the arm is the whole fact.
+message FooterTokensCellVerdictComplete {}
+// Usage is missing for part of the turn. Empty here — the missing-evidence
+// prose is the panel line's.
+message FooterTokensCellVerdictIncomplete {}
+// Usage is self-contradictory. Empty here — the problem list is the panel
+// line's.
+message FooterTokensCellVerdictInvalid {}
 
-// The turn reconciled: every figure in `summary` is backed by evidence.
-message FooterTokensAccountingComplete {}
+// ---- 6. Live-work chips ----------------------------------------------------
 
-// The turn's accounting arrived without all of its evidence, so the figures
-// shown are partial. Not a contradiction — an absence.
-message FooterTokensAccountingIncomplete {
-  // What was missing, one display-ready phrase per gap, in display order
-  // (e.g. "usage at turn start was never sampled"). The daemon composes the
-  // prose; the client concatenates and renders, and parses nothing. Never
-  // empty when this arm is set.
-  repeated string missing = 1;
+// The live-work chips. An UNSET chip is NOT DRAWN — nothing of that kind
+// exists right now — so a quiet workspace shows no chips at all. A set chip
+// carries its count, daemon-resolved: the client never counts panel rows to
+// label a chip, even though the rows arrive in the same push (duplicate,
+// don't share). Detached UNMODELED work has no chip: its surfacing home is
+// the topbar's warning dropdown.
+message FooterLiveWorkChips {
+  // ⚙ — live agent-spawned subagents (the ones with feed bubbles). Set iff
+  // at least one is live.
+  FooterChipAgents agents = 1;
+  // ☑ — the task tracker's progress. Set iff the tracker is non-empty; a
+  // task chip is about the LIST existing, not about anything running.
+  FooterChipTasks tasks = 2;
+  // $ — live detached shells. Set iff at least one is running.
+  FooterChipShells shells = 3;
+}
+// The agents chip's props.
+message FooterChipAgents {
+  // How many agent rows the agents panel holds. At least 1 when this chip
+  // is set (a zero-count chip is expressed by leaving the chip unset).
+  uint32 count = 1;
+}
+// The tasks chip's props, drawn as "☑ 3/7". A progress fraction, both
+// figures always drawn — NOT a completeness pair: neither count qualifies
+// the other, so no oneof factoring applies.
+message FooterChipTasks {
+  // How many tracker tasks are completed.
+  uint32 done = 1;
+  // How many tracker tasks exist in total. At least 1 when the chip is set.
+  uint32 total = 2;
+}
+// The shells chip's props.
+message FooterChipShells {
+  // How many detached shells are live. At least 1 when the chip is set.
+  uint32 count = 1;
 }
 
-// The turn's accounting CONTRADICTS itself: the responses and the result
-// disagree about what was spent. Distinct from incomplete, because the
-// evidence is present and does not add up.
-message FooterTokensAccountingInvalid {
-  // What contradicts what, one display-ready phrase per problem, in display
-  // order (e.g. "per-model totals disagree between responses and result").
-  // Never empty when this arm is set.
-  repeated string problems = 1;
+// ==========================================================================
+// THE EXPANDED SECTION
+// ==========================================================================
+
+// One panel per selectable strip element. ALL panels arrive populated on
+// every push; the webview-local selection picks which one is drawn. A panel
+// whose subject is empty (no live shells, say) still arrives — as an empty
+// row list — because its chip is then unset and nothing can select it.
+message FooterExpanded {
+  // The turn's token breakdown — the tokens cell's expansion.
+  FooterExpandedTokens tokens = 1;
+  // The live agent-spawned subagents — the ⚙ chip's expansion.
+  FooterExpandedAgents agents = 2;
+  // The task tracker's checklist — the ☑ chip's expansion.
+  FooterExpandedTasks tasks = 3;
+  // The live detached shells — the $ chip's expansion.
+  FooterExpandedShells shells = 4;
+}
+
+// ---- The tokens panel ------------------------------------------------------
+
+// The TURN's token accounting (distinct from the topbar's SESSION breakdown
+// — a different fact and a different component), one line per figure, name
+// dim and value bright. NOT a list: these are heterogeneous facts, so each
+// line is its own dedicated field. Every line message is ALWAYS SET so the
+// panel's shape is stable while the turn runs; a line whose figure is not
+// yet known carries no value and draws its name with an empty slot. Values
+// are daemon-formatted strings — the client does no arithmetic and no unit
+// rounding.
+message FooterExpandedTokens {
+  // "input (uncached)" — the same figure the strip's cell shows, repeated
+  // here as a line (the cell and the line are two drawn elements of one
+  // resolved value).
+  FooterTokensLineInput input = 1;
+  // "input (cache read)" — input tokens served from cache.
+  FooterTokensLineCacheRead cache_read = 2;
+  // "input (cache write)" — input tokens written to cache this turn.
+  FooterTokensLineCacheWrite cache_write = 3;
+  // "output" — all output tokens, thinking included.
+  FooterTokensLineOutput output = 4;
+  // "thinking" — the output subclass, drawn indented under output. A
+  // consumer must NOT add it to output: it is already inside it.
+  FooterTokensLineThinking thinking = 5;
+  // "first token" — latency to the current response's first token. A
+  // duration, not a token count; same line layout, different unit.
+  FooterTokensLineFirstToken first_token = 6;
+  // The alarm's detail line. PRESENT iff the alarm tripped (mirrors the
+  // cell's glyph); carries the composed sentence.
+  FooterTokensLineAlarm alarm = 7;
+  // The verdict's detail line. UNSET while the turn runs (mirrors the
+  // cell's badge); set once reconciled.
+  FooterTokensLineVerdict verdict = 8;
+}
+
+// The uncached-input line.
+message FooterTokensLineInput {
+  // The formatted figure ("18.2k"). UNSET = figure not yet known this turn;
+  // the line still draws, with an empty slot.
+  optional string value = 1;
+}
+// The cache-read line.
+message FooterTokensLineCacheRead {
+  // The formatted figure. UNSET = draw the empty slot.
+  optional string value = 1;
+}
+// The cache-write line.
+message FooterTokensLineCacheWrite {
+  // The formatted figure. UNSET = draw the empty slot.
+  optional string value = 1;
+}
+// The output line.
+message FooterTokensLineOutput {
+  // The formatted figure. UNSET = draw the empty slot.
+  optional string value = 1;
+}
+// The thinking line (output subclass; drawn indented).
+message FooterTokensLineThinking {
+  // The formatted figure. UNSET = draw the empty slot.
+  optional string value = 1;
+}
+// The first-token latency line.
+message FooterTokensLineFirstToken {
+  // The formatted duration ("412ms"). UNSET until the current response's
+  // first token lands; held afterwards for the rest of the turn.
+  optional string value = 1;
+}
+// The tripped alarm's line. Exists only while the cell's glyph does.
+message FooterTokensLineAlarm {
+  // The daemon-composed sentence ("expensive turn — 41k over 20k"). Drawn
+  // verbatim; the sentence also states WHY the turn ran when that changes
+  // the reading (an ordinary prompt vs a cache keep-alive that came back
+  // cold — its own alarm, phrased as such by the daemon).
+  string text = 1;
+}
+// The verdict's line. The set arm picks the treatment; the text is the
+// composed evidence the badge alone could not carry.
+message FooterTokensLineVerdict {
+  // Which verdict the reconciliation reached — always the same arm as the
+  // cell's badge, with the evidence attached where an arm has any.
+  oneof verdict {
+    // Reconciled cleanly. No evidence to show; the line draws its ✓ alone.
+    FooterTokensLineVerdictComplete complete = 1;
+    // Figures are a floor; the text says what is missing.
+    FooterTokensLineVerdictIncomplete incomplete = 2;
+    // Figures contradict; the text names the problems.
+    FooterTokensLineVerdictInvalid invalid = 3;
+  }
+}
+// The clean-reconciliation line. Empty: the arm is the whole fact.
+message FooterTokensLineVerdictComplete {}
+// The floor verdict's evidence.
+message FooterTokensLineVerdictIncomplete {
+  // Daemon-composed ("2 responses missing usage"). Drawn verbatim.
+  string text = 1;
+}
+// The contradiction verdict's evidence.
+message FooterTokensLineVerdictInvalid {
+  // Daemon-composed problem summary. Drawn verbatim.
+  string text = 1;
+}
+
+// ---- The agents panel ------------------------------------------------------
+
+// The live agent-spawned subagents — the subagents that ALSO have feed
+// bubbles. One row per live subagent; each row is a jump target to its
+// bubble. Rows leave the list when the subagent's run ends. A TRUE LIST:
+// every row is the same kind of thing.
+message FooterExpandedAgents {
+  // The rows, in the daemon's order (spawn order). Empty when nothing is
+  // live — the chip is then unset and the panel unreachable.
+  repeated FooterAgentRow rows = 1;
+}
+
+// One live subagent's line: glyph · type · description · tokens · clock · ▸.
+message FooterAgentRow {
+  // Jump target: the subagent's identity, which keys its feed bubble.
+  // Echoed into navigation, never parsed.
+  conversation.v1.AgentId target = 1;
+  // The subagent type ("Explore") — the row's leading label.
+  FooterAgentRowLabel label = 2;
+  // The commission's description. UNSET when the spawn carried none; the
+  // row then draws the label alone, never a synthesized description.
+  FooterAgentRowDescription description = 3;
+  // The subagent's running token sum, daemon-formatted.
+  FooterAgentRowTokens tokens = 4;
+  // The row's clock. The client ticks from the instant.
+  FooterAgentRowRuntime runtime = 5;
+}
+// The row's type label.
+message FooterAgentRowLabel {
+  // The label text, drawn verbatim ("Explore").
+  string text = 1;
+}
+// The row's description element.
+message FooterAgentRowDescription {
+  // The description, drawn verbatim (the spawn's short commission).
+  string text = 1;
+}
+// The row's token element.
+message FooterAgentRowTokens {
+  // The formatted running sum ("12.4k tok"). Re-pushed as it grows.
+  string text = 1;
+}
+// The row's clock element. Carries only the start instant: the client draws
+// its own ticking elapsed time, so the clock never jumps to push cadence.
+message FooterAgentRowRuntime {
+  // When the subagent's run began, epoch ms. The ORIGINAL instant — it does
+  // not reset if the work re-announces on another stream.
+  int64 started_at_ms = 1;
+}
+
+// ---- The tasks panel -------------------------------------------------------
+
+// The task tracker's checklist — the CURRENT list, resolved by the daemon,
+// so no consumer replays tracker acts to learn what the tasks are. One row
+// per task, in the tracker's order; done and open tasks alike stay listed
+// (the chip's fraction is this list's summary).
+message FooterExpandedTasks {
+  // The rows, in the daemon's order. Empty when the tracker is empty — the
+  // chip is then unset and the panel unreachable.
+  repeated FooterTaskRow rows = 1;
+}
+
+// One task's line: status glyph · subject · (active form while running).
+message FooterTaskRow {
+  // The glyph element; the set arm picks the treatment.
+  FooterTaskRowStatus status = 1;
+  // The task's subject line, drawn verbatim.
+  FooterTaskRowSubject subject = 2;
+}
+// The row's subject element.
+message FooterTaskRowSubject {
+  // The subject text, drawn verbatim.
+  string text = 1;
+}
+// The row's status element. The DRAWN PROJECTION of the tracker's status —
+// the arm picks the glyph, so a bool checkbox (which would collapse
+// running, failed, killed and paused into "unchecked") is unrepresentable.
+message FooterTaskRowStatus {
+  // The tracker status, projected to what the checklist draws distinctly.
+  oneof status {
+    // ☐ — not started.
+    FooterTaskRowPending pending = 1;
+    // Spinner — in progress, with the in-progress phrasing when given.
+    FooterTaskRowRunning running = 2;
+    // ☑ — done.
+    FooterTaskRowCompleted completed = 3;
+    // ✗ — the task failed.
+    FooterTaskRowFailed failed = 4;
+    // ✗ — the task was stopped by hand.
+    FooterTaskRowKilled killed = 5;
+    // ⏸ — deliberately on hold.
+    FooterTaskRowPaused paused = 6;
+  }
+}
+// Not started. Empty: the arm is the whole fact.
+message FooterTaskRowPending {}
+// In progress.
+message FooterTaskRowRunning {
+  // The in-progress phrasing ("Running the migration…"). UNSET when the
+  // agent gave none; the row then draws the subject alone.
+  FooterTaskRowActiveForm active_form = 1;
+}
+// The running row's phrasing element.
+message FooterTaskRowActiveForm {
+  // The phrasing, drawn verbatim in place of the subject while running.
+  string text = 1;
+}
+// Done. Empty: the arm is the whole fact.
+message FooterTaskRowCompleted {}
+// Failed. Empty: the arm is the whole fact.
+message FooterTaskRowFailed {}
+// Stopped by hand. Empty: the arm is the whole fact.
+message FooterTaskRowKilled {}
+// On hold. Empty: the arm is the whole fact.
+message FooterTaskRowPaused {}
+
+// ---- The shells panel ------------------------------------------------------
+
+// The live detached shells. One row per running background command; each
+// row jumps to the shell's feed bubble. No token element — a shell has no
+// token cost. A TRUE LIST, like the agents panel.
+message FooterExpandedShells {
+  // One row per live shell, in the daemon's order. Empty when none.
+  repeated FooterShellRow rows = 1;
+}
+
+// One live shell's line: $ · command · clock · ▸.
+message FooterShellRow {
+  // Jump target: the shell unit's identity, which keys its feed bubble.
+  conversation.v1.AgentActivityId target = 1;
+  // The command line being run.
+  FooterShellRowCommand command = 2;
+  // The row's clock. The client ticks from the instant.
+  FooterShellRowRuntime runtime = 3;
+}
+// The row's command element.
+message FooterShellRowCommand {
+  // The command text, drawn verbatim (the daemon may truncate for width —
+  // what arrives is what is drawn).
+  string text = 1;
+}
+// The row's clock element.
+message FooterShellRowRuntime {
+  // When the command began, epoch ms. The ORIGINAL instant — detaching from
+  // the turn does not reset it.
+  int64 started_at_ms = 1;
 }

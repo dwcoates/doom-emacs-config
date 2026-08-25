@@ -328,6 +328,74 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The FOOTER lands remediated: selection-keyed expanded panels; the tokens CELL shrinks to one figure; live-work CHIPS; the task tracker gets its drawn home; WORKFLOWS ARE DEFERRED WHOLESALE
+
+**The strip ("looks good" across the iteration).** Status | SubStatus |
+StatusActivity | Clock | the TOKENS CELL | the LIVE-WORK CHIPS
+(right-aligned). The cell is ONE figure — the turn's uncached input — plus
+two glyphs (alarm ⚠, accounting badge); thinking leaves the strip. The
+chips are ⚙ agents (count), ☑ tasks (done/total fraction), $ shells
+(count); an unset chip is not drawn (presence-gated on liveness /
+tracker-non-empty). Cell and chips are click targets; the selection is
+WEBVIEW-LOCAL, so the daemon ships EVERY expanded panel fully resolved on
+every push (the folded-menu convention) and the client draws whichever the
+selection picks.
+
+**The expanded panels.** Tokens: NOT a list — heterogeneous facts, one
+dedicated line-element each (uncached input, cache read, cache write,
+output, thinking indented under output, first-token latency, the alarm
+sentence when tripped, the verdict line with evidence text on the
+incomplete/invalid arms); lines are always set with optional values so the
+panel shape is stable mid-turn. Agents and shells: TRUE LISTS (repeated of
+one row type) — label/description/tokens/runtime rows for subagents,
+command/runtime for shells, each row a jump target. Tasks: a list too — the
+checklist; the "checkbox" is NOT a bool but the drawn projection of the
+tracker's six-arm status (a bool would collapse running/failed/killed/
+paused), running carrying the optional active-form phrasing.
+
+**The user's rulings on the way.**
+
+- WORKFLOWS ARE KICKED DOWN THE ROAD: no footer support, no frontend.v1
+  support, no daemon handling — a later feature added at a later date. The
+  drawn workflow panel from the drawing iteration is withdrawn; the run
+  bubble/richer view research (jobs-list default, graph secondary, per
+  GitHub Actions/Temporal/Airflow) is recorded with it for that later turn.
+- The unmodeled chip is REMOVED: detached-unmodeled surfacing belongs to
+  the topbar's warning dropdown (re-aligning with the unmodeled-tool
+  entry's "its home is the topbar's alert surface"). The unmodeled panel
+  dies with the chip (a panel with no chip is unreachable).
+- The tasks chip's two counts are a progress fraction, both always drawn —
+  explicitly NOT the completeness-oneof case, stated at the message.
+
+**The TASKS research that reopened the gap (the user asked "is that a huge
+gap?").** conversation.v1 is NOT the gap: AgentTaskAct { AgentTaskId;
+created|changed; AgentTaskState { subject; description; optional owner;
+status pending|running{active_form}|completed|failed|killed|paused } }
+rides AgentActivity arm 16, state on every act. The GAP was frontend:
+stage 2 deleted TaskCatalog/TaskEntry as "superseded by the detached
+bubble and the footer's expanded rows", but the landed rows were
+detached-work only — the tracker had NO drawn home. This landing closes
+it. FLAGGED, not solved: cold paint of the CURRENT task list — acts are
+history entries, so a cold consumer has no snapshot; the daemon must hold
+or recover the list (its source at the wave).
+
+**What died in footer.proto.** The old FooterExpandedRow family (its
+MessageId target was already dead — this also discharges the footer's
+share of Owed F), the five-sibling FooterTokens cell
+(Input/Thinking/FirstToken/ExpensiveTurn/Accounting), the structured
+FooterTokensExpensiveTurn (TurnId/counts/threshold/origin arms — the alarm
+is now the cell glyph + the daemon-composed panel sentence, whose phrasing
+states the prompt-vs-cold-keep-alive origin), and FooterTokensAccounting
+(summary+verdict → cell badge + panel verdict line; the hover-tooltip
+treatment is replaced by lines). Imports: message.proto/turn.proto →
+agent_activity.proto (AgentId, AgentActivityId jump targets).
+
+**Embedded decisions, accepted.** Daemon-formatted figure strings
+throughout (no client rounding, the context-cut precedent); typed-identity
+jump targets (AgentId for a subagent row, AgentActivityId for a shell row)
+anticipating the feed remediation keying bubbles by those; clocks carry
+only the start instant and the client ticks.
+
 ### THE FRONTEND REMEDIATION PASS OPENS — stage 2 reopened by name; the walk starts at the FOOTER (expanded footer figma→idl in depth)
 
 **The stage open, in the user's terms.** "The protos we landed were good when
