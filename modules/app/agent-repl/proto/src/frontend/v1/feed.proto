@@ -464,8 +464,67 @@ message FeedSkillFailed {
 // card's story.
 message FeedSkillDenied {}
 
-// The task bubble. Body at its own increment; keyed by the tracker task.
-message FeedTask {}
+// A task bubble: ONE row per tracker task, upserted by every act that
+// touches it, across turns and agents alike — the bubble always shows the
+// task AS IT NOW STANDS, never an act-by-act history. The footer's
+// checklist rows jump here.
+message FeedTask {
+  // The status element; the set arm picks the glyph treatment, mirroring
+  // the checklist's projection (its own family — one fact, two views).
+  FeedTaskStatus status = 1;
+  // The task's subject line, drawn verbatim.
+  FeedTaskSubject subject = 2;
+  // The task's longer description. UNSET when the tracker holds none.
+  FeedTaskDescription description = 3;
+  // Who it is assigned to, composed ("assigned: Explore"). UNSET when
+  // unassigned; absence draws no line.
+  FeedTaskOwner owner = 4;
+}
+// The subject element.
+message FeedTaskSubject {
+  // The subject text, drawn verbatim.
+  string text = 1;
+}
+// The description element.
+message FeedTaskDescription {
+  // The description, drawn verbatim.
+  string text = 1;
+}
+// The owner line element.
+message FeedTaskOwner {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+// The status element — the tracker status projected to the drawn treatments.
+message FeedTaskStatus {
+  // Which treatment; exactly one arm set.
+  oneof status {
+    FeedTaskPending pending = 1;      // ☐
+    FeedTaskRunning running = 2;      // spinner + active form
+    FeedTaskCompleted completed = 3;  // ☑
+    FeedTaskFailed failed = 4;        // ✗
+    FeedTaskKilled killed = 5;        // ✗, stopped by hand
+    FeedTaskPaused paused = 6;        // ⏸
+  }
+}
+// Not started. Empty: the arm is the whole fact.
+message FeedTaskPending {}
+// In progress.
+message FeedTaskRunning {
+  // The in-progress phrasing ("Running the migration…"). UNSET when the
+  // agent gave none; the bubble then draws the subject alone.
+  FeedTaskActiveForm active_form = 1;
+}
+// The active-form element.
+message FeedTaskActiveForm {
+  // The phrasing, drawn verbatim.
+  string text = 1;
+}
+// Done. Empty arms: each is its whole fact.
+message FeedTaskCompleted {}
+message FeedTaskFailed {}
+message FeedTaskKilled {}
+message FeedTaskPaused {}
 
 // ==========================================================================
 // THE TURN'S TERMINAL — a row, so history replays how every turn ended.
