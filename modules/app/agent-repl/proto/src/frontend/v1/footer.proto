@@ -114,6 +114,9 @@ message FooterStatus {
     // The route Emacs→daemon→shim is compromised on OUR side (starting,
     // degraded, severed, dead, start failed).
     FooterStatusDisconnected disconnected = 9;
+    // The workspace is being closed — or the close is blocked; the
+    // sub-status says which.
+    FooterStatusClosing closing = 10;
   }
 }
 message FooterStatusIdle {}
@@ -125,6 +128,7 @@ message FooterStatusBackground {}
 message FooterStatusBlocked {}
 message FooterStatusAsleep {}
 message FooterStatusDisconnected {}
+message FooterStatusClosing {}
 
 // ---- 2. SubStatus — the step within the status ----------------------------
 
@@ -138,6 +142,8 @@ message FooterSubStatus {
     FooterSubStatusDisconnected disconnected = 3;
     FooterSubStatusIdle idle = 4;
     FooterSubStatusBlocked blocked = 5;
+    // The closing status's step.
+    FooterSubStatusClosing closing = 6;
   }
 }
 
@@ -256,6 +262,18 @@ message FooterSubStatusBlockedAuth {}
 message FooterSubStatusBlockedUsageLimit {}
 message FooterSubStatusBlockedVendorError {}
 
+// The closing family.
+message FooterSubStatusClosing {
+  // The step. One arm today; a graceful-drain step would join it.
+  oneof step {
+    // The close cannot proceed: work is in flight. The activity line
+    // carries the daemon's reasons.
+    FooterSubStatusCloseBlocked blocked = 1;
+  }
+}
+// Blocked. Empty: the arm is the fact; the reasons are the activity's.
+message FooterSubStatusCloseBlocked {}
+
 // ---- 3. StatusActivity — finest, dynamic ----------------------------------
 
 // The finest line: typed KINDS whose payload is mostly text the daemon
@@ -272,6 +290,9 @@ message FooterStatusActivity {
     FooterStatusActivityAuthenticating authenticating = 4;
     FooterStatusActivityBlockedOnUser blocked_on_user = 5;
     FooterStatusActivityRateLimited rate_limited = 6;
+    // WHY the close is blocked, in concise plain English resolved by the
+    // daemon ("a turn is in flight; 2 subagents and a shell are running").
+    FooterStatusActivityCloseBlocked close_blocked = 7;
   }
 }
 // The commit a merge is landing right now.
@@ -310,6 +331,12 @@ message FooterStatusActivityRateLimited {
 // One allowance's last report. PRESENT means the vendor has reported it at
 // all; `newsworthy` is the narrower claim that the report was anything other
 // than a plain "allowed", which is what put the rung up.
+// The close-blocked reasons line.
+message FooterStatusActivityCloseBlocked {
+  // The composed reasons, drawn verbatim.
+  string text = 1;
+}
+
 message FooterAllowance {
   bool newsworthy = 1;
   // Epoch SECONDS, the vendor event's own unit.

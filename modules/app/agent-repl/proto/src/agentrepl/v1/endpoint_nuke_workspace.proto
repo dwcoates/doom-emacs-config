@@ -1,0 +1,32 @@
+// endpoint_nuke_workspace.proto — NukeWorkspace: DATA DESTRUCTION. SIDEBAR
+// section. The worktree and branch are DELETED — "nuke" is reserved for
+// exactly this, the one verb that destroys data. A live session is killed
+// first (KillWorkspace's semantics, implied); then the filesystem goes.
+// Unrecoverable by design. The host command is a thin wrapper: send, await
+// the ack, then tear the tab down.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message NukeWorkspaceRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message NukeWorkspaceResponse {
+  oneof result {
+    // Gone — session dead, worktree and branch deleted; the roster's new
+    // state arrives on its stream.
+    NukeWorkspaceSuccess success = 1;
+    NukeWorkspaceError error = 2;
+  }
+}
+message NukeWorkspaceSuccess {}
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unregistered
+// workspace, a worktree the daemon does not own, a git failure mid-delete).
+message NukeWorkspaceError {}
