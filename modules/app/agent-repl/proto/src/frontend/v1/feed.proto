@@ -350,6 +350,16 @@ message FeedToolCallReturned {
     // A line list: grep matches, glob paths.
     FeedToolCallLinesOutput lines = 6;
   }
+  // The IDE's findings against this change, one composed line each, drawn
+  // below the output. Present iff the edit raised any — a later re-push of
+  // the settled card adds them when they arrive.
+  optional FeedToolCallDiagnostics diagnostics = 7;
+}
+// The diagnostics element.
+message FeedToolCallDiagnostics {
+  // The composed lines ("render.ts:214 · error · 'x' is never used"),
+  // client-capped.
+  repeated string lines = 1;
 }
 // The call succeeded. Empty: the arm is the badge.
 message FeedToolCallSucceeded {}

@@ -931,6 +931,13 @@ message AgentWrite {
     AgentWriteSuccess success = 2;
     // The write did not happen; the file is as it was.
     AgentWriteFailure failure = 3;
+    // Diagnostics the connected IDE's language server raised against this
+    // change, injected by the vendor AFTER the result (new findings only,
+    // never the file's standing lint state). Arrives as a frame of this
+    // same unit following the terminal — a consequence, not a state: the
+    // consumer applies it to the settled card. No frame ever says "none
+    // are coming"; absence is simply no such frame.
+    AgentDiagnosticsReport diagnostics = 5;
   }
 }
 
@@ -1005,6 +1012,13 @@ message AgentEdit {
     AgentEditSuccess success = 2;
     // The edit did not apply — commonly because the matched text was absent, or was not unique when only one occurrence was requested.
     AgentEditFailure failure = 3;
+    // Diagnostics the connected IDE's language server raised against this
+    // change, injected by the vendor AFTER the result (new findings only,
+    // never the file's standing lint state). Arrives as a frame of this
+    // same unit following the terminal — a consequence, not a state: the
+    // consumer applies it to the settled card. No frame ever says "none
+    // are coming"; absence is simply no such frame.
+    AgentDiagnosticsReport diagnostics = 5;
   }
 }
 
@@ -2463,4 +2477,52 @@ enum AgentHookEvent {
   AGENT_HOOK_EVENT_FILE_CHANGED = 29;
   AGENT_HOOK_EVENT_DIRECTORY_ADDED = 30;
   AGENT_HOOK_EVENT_MESSAGE_DISPLAY = 31;
+}
+
+// ==========================================================================
+// IDE diagnostics: the connected editor's language server reporting what a
+// write or edit BROKE, injected by the vendor after the change's result.
+// Rides the write/edit unit's own oneof as a post-terminal consequence arm.
+// PRODUCER NOTE, load-bearing: the vendor's record carries no tool-call id;
+// the join to its change is by ADJACENCY (the record follows the result),
+// so the shim holds one remembered "last write/edit unit" value — constant,
+// and stated here because nothing in the schema implies it.
+// ==========================================================================
+
+// One injected diagnostics report.
+message AgentDiagnosticsReport {
+  // Per-file findings, in the vendor's order.
+  repeated AgentDiagnosticsFile files = 1;
+}
+// One file's findings.
+message AgentDiagnosticsFile {
+  // The file, as the vendor names it.
+  string path = 1;
+  // The findings, in order.
+  repeated AgentDiagnostic diagnostics = 2;
+}
+// One finding.
+message AgentDiagnostic {
+  // The severity — the LSP's closed scalar set.
+  AgentDiagnosticSeverity severity = 1;
+  // The message, verbatim.
+  string message = 2;
+  // The producing tool ("eslint", "gopls"). UNSET when unstated.
+  optional string source = 3;
+  // The rule or code ("no-unused-vars"). UNSET when unstated.
+  optional string code = 4;
+  // Where the finding starts, zero-based line. Character precision is
+  // deliberately dropped — nothing draws columns.
+  int32 start_line = 5;
+  // Where it ends, zero-based line.
+  int32 end_line = 6;
+}
+// The LSP severity vocabulary — a closed set of scalar literals, never a
+// state of anything.
+enum AgentDiagnosticSeverity {
+  AGENT_DIAGNOSTIC_SEVERITY_UNSPECIFIED = 0;
+  AGENT_DIAGNOSTIC_SEVERITY_ERROR = 1;
+  AGENT_DIAGNOSTIC_SEVERITY_WARNING = 2;
+  AGENT_DIAGNOSTIC_SEVERITY_INFORMATION = 3;
+  AGENT_DIAGNOSTIC_SEVERITY_HINT = 4;
 }

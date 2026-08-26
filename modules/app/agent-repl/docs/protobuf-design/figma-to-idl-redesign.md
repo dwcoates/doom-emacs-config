@@ -328,6 +328,33 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### IDE DIAGNOSTICS land as a POST-TERMINAL CONSEQUENCE ARM on write/edit — not an activity kind, not an update
+
+**The iteration, each turn the user's.** (1) First sketched as a dedicated
+activity kind; the user asked WHEN it happens (after Write/Edit, IDE
+connected, new findings only) and ruled it belongs to the change's own
+unit. (2) Success-only was rejected — the diagnostics arrive on a SEPARATE
+record, so the unit demonstrably has post-result composition. (3) An
+update arm was considered (with a one-record lookahead to keep success
+final) and REFINED by the user: `update` keeps its pre-terminal meaning;
+the report is its own `diagnostics` ARM arriving AFTER the terminal — a
+CONSEQUENCE frame the consumer applies to the settled card; no frame ever
+says "none are coming".
+
+**What changed.** AgentWrite.result and AgentEdit.result each gain
+`AgentDiagnosticsReport diagnostics = 5`; the report family lands
+(per-file findings: severity enum (LSP's closed scalar set), message,
+optional source/code, start/end lines — character precision deliberately
+dropped). PRODUCER NOTE stated at the family banner: the vendor's record
+carries NO tool-call id — the join is by ADJACENCY, one remembered
+last-write/edit-unit value in the shim, constant and recorded. frontend:
+FeedToolCallReturned gains optional diagnostics { composed lines }, drawn
+below the output on a later re-push of the settled card.
+
+**Also settled in this exchange (the user's formatting rule, saved to
+memory):** sketches always show the ENCOMPASSING message with a path
+comment; fields may be elided within it; never floating fields.
+
 ### The HOOK FAMILY lands (orchestrator's hand) — quiet by default, loud on refusal; stop hooks never touch the turn terminal
 
 **conversation.v1.** AgentActivity.item gains `hook` (tag 21): AgentHook
