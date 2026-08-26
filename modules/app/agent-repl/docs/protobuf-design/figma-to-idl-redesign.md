@@ -328,6 +328,45 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### HIBERNATION'S MACHINERY COLLAPSES to an idle-shutdown sweep; the last contract trace neutralizes; the removal plan is named wave work
+
+**The user's rulings, completing the hibernation arc.** (1) ReviveWorkspace
+already died; OpenWorkspace just opens, reviving under the hood when
+needed. (2) Hibernation's PURPOSE examined and affirmed: each open
+workspace is a shim + vendor binary (real memory) and keepalive spend, so
+an idle-cutoff shutdown is useful — but it is "entirely an implementation
+detail of the daemon to save memory": NO frontend (webapp or emacs)
+knowledge, NO daemon API surface. (3) The machinery COLLAPSES accordingly:
+what survives is the idle-cutoff sweep (shim stopped past cutoff; at most
+one registry bit) plus the ORDINARY resume path — sessions outlive
+processes by design (StartSession.resume), the host stream already says
+shim_attached=false, and the cost story is the cold gate. The leases,
+revival modes/holds/gates, hibernation states and bootsweep hibernation
+verdicts existed to manage an explicit-revival distinction the contract no
+longer has: they move from KEEP to DELETE in the plan.
+
+**The last contract trace, neutralized.** HeldPromptRevivalHold →
+HeldPromptSessionStartingHold (tag 11, arm renamed `session_starting`):
+"the session is still coming up" — a cold resume, a chosen compaction
+landing — with the same no-classifier/no-force/loud-drop semantics. No
+frontend word says hibernation anywhere now.
+
+**THE REMOVAL PLAN (named implementation-wave work; full inventory in the
+enumeration agent's report, summarized here).** ELISP: teal tab treatment,
+💤 glyph, roster label+decoders, RENDER_STATE/CONNECTIVITY hibernated
+decoders, the hibernate command + SPC o z, the RPC client path and error
+copy, open-progress arm, ~8 test blocks. DAEMON: the two wire states, the
+topbar teal arm, the revival gate and its pushes, the Hibernate/Revive
+handlers and user-forced entrypoints, the SessionHibernated failure-kind
+encode (refusal retired outright — prompting a parked workspace just
+works), six e2e suites — PLUS, per ruling (3), the leases/holds/gates
+machinery, keeping only the idle sweep + resume. WEBAPP: hibernation.ts
+whole (741 lines), the gate DOM/CSS, adapter/store/command arms, teal
+variables. Ambiguity dispositions: SPC o c bring-up behavior kept with
+generalized wording; the frontend-state live-branch guard dies with the
+decoder; teal dies (palette contracts to five, cross-system);
+log/diagnostic prose kept and reworded lazily.
+
 ### HIBERNATION LEAVES THE CONTRACT ENTIRELY — an agentrepl implementation detail; revival is implicit
 
 **The user's ruling.** "I'm not sure that emacs should know about
