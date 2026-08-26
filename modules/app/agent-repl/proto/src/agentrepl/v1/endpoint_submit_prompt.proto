@@ -11,6 +11,7 @@ package agentrepl.v1;
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
 import "frontend/v1/status_panel.proto";
+import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -23,6 +24,13 @@ message SubmitPromptRequest {
   // is not a second turn (3b: SubmitPrompt is the one verb where a duplicate
   // is costly and undetectable).
   string idempotency_key = 2;
+  // WHICH view's composer this came from. UNSET = the workspace's root feed
+  // — the session's own prompt thread, held/classified/delivered by the
+  // daemon as always. SET = a subagent bubble's feed, echoed as served: the
+  // prompt is addressed to THAT agent, and the daemon delivers it through
+  // the same hold-and-deliver machinery (the shim's UpdateAgent.prompt
+  // underneath). Command recognition is unchanged either way.
+  optional frontend.v1.FeedId feed = 3;
 }
 
 // THE ARM IS THE OUTCOME.
