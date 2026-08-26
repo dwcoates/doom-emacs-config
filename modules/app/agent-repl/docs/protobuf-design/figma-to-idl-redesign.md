@@ -328,6 +328,25 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### Session diagnostics join the topbar dropdown — the FRONTEND REMEDIATION PASS IS COMPLETE
+
+**What changed ("looks good").** TopbarWarning gains two detail arms:
+session_fault { component; detail — verbatim from the shim } and
+degraded_window { component; reason; began_at_ms; oneof extent { open |
+closed { ended_at_ms; dropped_count } } } — one warning per fault/window;
+the daemon pulls GetSessionDiagnostics at its own cadence and a healthy
+pull retracts on the next push. This closes the pass inventory's
+session-diagnostics item; the kill/stop-refusal item closed as
+wave-derivation guidance (a live-work refusal arm's derivation NAMES the
+work where a payload is wanted; the footer's standing display is the
+default naming).
+
+**THE FRONTEND REMEDIATION PASS (the reopened stage 2) IS COMPLETE.** What
+follows per the settled sequence: the AUDIT JUDGING (reports A–G, one
+finding at a time — the user's "at the very end" deferral now due), then
+the design-complete gate with the consequences recap, the vetting
+register, reconciliation, and the /cross-system-fanout handoff.
+
 ### Held prompts BLOCK a close — the quiet set is complete
 
 **The user's ruling ("held prompts should absolutely block a close").** A
