@@ -64,6 +64,45 @@ message ImageBlockUrl {
   string url = 1;
 }
 
+// A FILE PUT IN FRONT OF THE READER BY REFERENCE AND BY VALUE BOTH: the path
+// it came from, and the text that was actually placed in context.
+//
+// NOT AN ImageBlock's by-reference treatment, deliberately: an attached file's
+// content is what the model was shown, and a consumer re-reading the path would
+// be reading the file AS IT IS NOW rather than as it was attached. The two
+// differ the moment anything edits it.
+message FileBlock {
+  // The path the content came from, as resolved.
+  string path = 1;
+  // A shorter path to SHOW instead — repo-relative, home-relative. UNSET when
+  // the producer offered none, in which case the path above is drawn.
+  optional string display_path = 2;
+  // The text placed in context, verbatim.
+  string content = 3;
+  // The one-based line the content starts at, so a consumer can number the
+  // lines the way the file does. One for an attachment taken from the top.
+  uint32 start_line = 4;
+
+  // Whether this is the whole file. The set arm states it, so no consumer
+  // compares a line count against a total to find out.
+  oneof extent {
+    // Everything the file holds is carried above.
+    FileBlockWhole whole = 5;
+    // Only part of the file is carried.
+    FileBlockPartial partial = 6;
+  }
+}
+
+// The whole file is carried.
+message FileBlockWhole {}
+
+// Only part of the file is carried.
+message FileBlockPartial {
+  // How many of the file's lines were left out — STATED, never derived by
+  // subtracting from a total. The total stays recoverable by addition.
+  uint32 lines_omitted = 1;
+}
+
 // A block whose kind this schema does not model, kept whole so the decision
 // to not model it stays reversible from stored data.
 //
