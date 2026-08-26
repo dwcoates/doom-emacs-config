@@ -287,7 +287,7 @@ merge instant, so that is what the arrangement carries."
   "Tombstoned registrations do not enter the roster."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "live" "/tmp/live")
-    (agent-repl-test--sidebar-ws "tomb" "/tmp/tomb" :nuked-at 1.0)
+    (agent-repl-test--sidebar-ws "tomb" "/tmp/tomb" :killed-at 1.0)
     (should (equal (agent-repl--sidebar-entries)
                    '(("live" . "/tmp/live"))))))
 
@@ -324,10 +324,10 @@ merge instant, so that is what the arrangement carries."
                      '(("kept" . "/tmp/kept")))))))
 
 (ert-deftest agent-repl-test-sidebar-entries-drops-tombstoned-workspace ()
-  "A tombstoned (nuked) registration leaves the roster even with a persp."
+  "A tombstoned (killed) registration leaves the roster even with a persp."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "kept" "/tmp/kept")
-    (agent-repl-test--sidebar-ws "tomb" "/tmp/tomb" :nuked-at 1.0)
+    (agent-repl-test--sidebar-ws "tomb" "/tmp/tomb" :killed-at 1.0)
     (agent-repl-test--sidebar-with-persps '("kept" "tomb")
       (should (equal (agent-repl--sidebar-entries)
                      '(("kept" . "/tmp/kept")))))))
@@ -451,7 +451,7 @@ otherwise answer `not open' for every workspace and empty the sidebar."
 (ert-deftest agent-repl-test-sidebar-build-tombstoned-parent-roots-child ()
   "A child whose parent workspace is tombstoned roots in its own repo."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "parent" "/tmp/parent" :nuked-at 1.0)
+    (agent-repl-test--sidebar-ws "parent" "/tmp/parent" :killed-at 1.0)
     (agent-repl-test--sidebar-ws "child" "/tmp/child"
                                  :source-ws-dir "/tmp/parent")
     (let* ((roster (car (agent-repl--sidebar-build)))

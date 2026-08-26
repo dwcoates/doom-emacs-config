@@ -388,8 +388,8 @@ open."
 `xwidget-kill-buffer-query-function' (on `kill-buffer-query-functions')
 raises a blocking yes-or-no minibuffer prompt for any buffer holding
 xwidgets; every frontend kill site is an INTENTIONAL teardown (rebind,
-close-panel, workspace nuke), so the prompt is suppressed — left in
-place it deadlocks non-interactive callers like the nuke hook."
+close-panel, workspace kill), so the prompt is suppressed — left in
+place it deadlocks non-interactive callers like the kill hook."
   (let ((kill-buffer-query-functions nil))
     (kill-buffer buf)))
 
@@ -403,7 +403,7 @@ takes a workspace\='s webview down for a later remount — close-panel, the
 bundle remount, the restart verb\='s bounce — goes through here so neither
 half can be forgotten at one of them.
 
-The nuke path deliberately does NOT: tombstoning nils the plist keys
+The kill path deliberately does NOT: tombstoning nils the plist keys
 itself, and the put would resurrect the record."
   (agent-repl--frontend-kill-webview buf)
   (agent-repl--ws-put ws :frontend-buffer nil))
@@ -1132,7 +1132,7 @@ turns every open workspace into one the sweep can actually repair.
 Returns `:pending' when a mount was started, and nil when WS is not
 entitled to one.  The refusals are all preconditions, not failures:
 
-  - a DEAD or nuked workspace, or one whose frontend is not the gui;
+  - a DEAD or killed workspace, or one whose frontend is not the gui;
   - a workspace already holding a live webview buffer (this is
     idempotent by design — every driver may call it freely);
   - a TERMINALLY FENCED workspace (`agent-repl--open-fence-active-p'):
@@ -1226,7 +1226,7 @@ the open path would classify it.
 
 Refusals, all preconditions rather than failures:
 
-  - `:not-live'          a dead or nuked workspace;
+  - `:not-live'          a dead or killed workspace;
   - `:not-gui'           a workspace whose frontend is not the web gui;
   - `:merge-completed'   a merged workspace, restored data-only with no
                          session — a CLOSED workspace, and an automatic
@@ -1724,7 +1724,7 @@ runs and the async ladder sees the same state it always did."
   "Kill the current workspace's webview buffer (the session stays alive).
 The daemon session is NOT deleted — reopening the panel reattaches to
 it with full replayed history; session teardown belongs to the
-workspace nuke path (`agent-repl-ws-del-hook')."
+workspace kill path (`agent-repl-ws-del-hook')."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (_ (unless ws (user-error "agent-repl: no current workspace")))
@@ -1739,14 +1739,14 @@ workspace nuke path (`agent-repl-ws-del-hook')."
 ;;;; ---- Workspace teardown -----------------------------------------------------
 
 (defun agent-repl--frontend-release-workspace-webview (ws)
-  "Kill WS's webview buffer on nuke (for `agent-repl-ws-del-hook').
+  "Kill WS's webview buffer on kill (for `agent-repl-ws-del-hook').
 Tombstoning only nils the plist keys — without this the buffer (a live
 WKWebView holding an open WebSocket) would outlive the workspace.
 Runs pre-tombstone, while `:frontend-buffer' is still readable."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
     (if (buffer-live-p buf)
         (progn
-          (agent-repl--log ws "frontend webview released on nuke: %s" (buffer-name buf))
+          (agent-repl--log ws "frontend webview released on kill: %s" (buffer-name buf))
           (agent-repl--frontend-kill-webview buf))
       (agent-repl--log-verbose ws "frontend webview release: skipped=no-live-webview"))))
 

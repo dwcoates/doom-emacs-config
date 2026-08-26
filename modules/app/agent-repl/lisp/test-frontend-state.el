@@ -1730,7 +1730,7 @@ first."
   "A tombstoned path is invisible to shared live-only resolver callers."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "closed" :project-dir "/Users/x/closed")
-    (agent-repl--ws-put "closed" :nuked-at (current-time))
+    (agent-repl--ws-put "closed" :killed-at (current-time))
     (should-not (agent-repl--frontend-ws-name "/Users/x/closed"))))
 
 (ert-deftest agent-repl-test-tombstoned-workspace-state-retains-without-runtime-mutation ()
@@ -1738,7 +1738,7 @@ first."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--frontend-workspace-state-views (make-hash-table :test 'equal)))
       (agent-repl--ws-put "closed" :project-dir "/Users/x/closed")
-      (agent-repl--ws-put "closed" :nuked-at (current-time))
+      (agent-repl--ws-put "closed" :killed-at (current-time))
       (should-not
        (agent-repl-test--apply-workspace-state
         '(:workspace "/Users/x/closed" :state "RENDER_STATE_HIBERNATED")))

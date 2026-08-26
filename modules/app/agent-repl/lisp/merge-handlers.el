@@ -369,8 +369,8 @@ a card whose queue place advances does not re-narrate either."
 (add-hook 'agent-repl-ws-state-transition-functions
           #'agent-repl--merge-echo-dequeue-offer)
 
-(defun agent-repl--merge-kill-on-merged (ws new _previous)
-  "Kill WS's editor workspace when its merge lands.
+(defun agent-repl--merge-close-on-merged (ws new _previous)
+  "Close WS's editor workspace when its merge lands.
 Subscriber for `agent-repl-ws-state-transition-functions'.  A merged
 workspace is concluded — the work is on the target branch and nothing
 the user can do to the tab is useful — so the tab must DIE, not merely
@@ -382,7 +382,7 @@ once, marching the whole Recently Merged rail back into the tab-bar.
 Keyed on the pushed state alone, NOT on the transition edge: a
 `:merged' re-push against a still-open tab (the bounce case above, or a
 tab opened while this subscriber was not yet loaded) must converge to
-closed, so a same-state re-push kills too.  Once the tab is gone
+closed, so a same-state re-push closes too.  Once the tab is gone
 `agent-repl--ws-open-p' is nil and re-pushes are no-ops.
 
 The close PRESERVES the `agent-repl--workspaces' entry (data-only, the
@@ -394,13 +394,13 @@ classify the entry as merged rather than dead."
   (when (and (eq new :merged)
              (agent-repl--ws-open-p ws))
     (agent-repl--log ws
-                     "merge-kill-on-merged: merge landed for open workspace ws=%s — killing its tab (entry preserved)"
+                     "merge-close-on-merged: merge landed for open workspace ws=%s — closing its tab (entry preserved)"
                      ws)
     (agent-repl--ws-put ws :merge-completed t)
     (agent-repl--close-workspace ws 'preserve-entry)))
 
 (add-hook 'agent-repl-ws-state-transition-functions
-          #'agent-repl--merge-kill-on-merged)
+          #'agent-repl--merge-close-on-merged)
 
 (provide 'merge-handlers)
 

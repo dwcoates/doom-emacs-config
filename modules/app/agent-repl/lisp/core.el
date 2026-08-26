@@ -598,9 +598,9 @@ so names are generated without any leading slash."
   "Why the current teardown is happening, for log attribution.
 Every entry point that kills an agent session or tears down a
 workspace let-binds this to a short human-readable cause string
-\(e.g. \"interactive nuke command\", \"merged-clear idle timer (auto)\")
+\(e.g. \"interactive kill command\", \"merged-clear idle timer (auto)\")
 for the dynamic extent of the teardown.  The shared chokepoints
-\(`agent-repl--nuke-one-workspace', `agent-repl--finish-workspace',
+\(`agent-repl--kill-one-workspace', `agent-repl--finish-workspace',
 `agent-repl--ws-del', the frontend kill dispatch) read it into their
 log lines so the log always answers HOW a session was killed.  A nil
 value logs as \"unattributed(BUG: bind agent-repl--kill-cause)\" —
@@ -2477,7 +2477,7 @@ is a non-nil name unequal to WS.  Buffers with no owner (nil) — e.g. magit,
 file, or other non-agent buffers that persp-mode swept into a perspective
 or window — are NOT foreign and stay eligible for teardown.  Guards against
 persp-mode drifting another workspace's live agent panel into this persp,
-which would otherwise nuke that workspace's session along with WS's own."
+which would otherwise kill that workspace's session along with WS's own."
   (let ((owner (agent-repl--buffer-owner buf)))
     (and owner (not (equal owner ws)))))
 

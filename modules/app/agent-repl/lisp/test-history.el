@@ -1703,7 +1703,7 @@ of stamping a fresh timestamp on every write."
 
 (ert-deftest agent-repl-test-state-save-includes-last-killed-at ()
   "state-save serializes `:last-killed-at' when the ws plist carries it
-\(populated by `agent-repl--nuke-one-workspace')."
+\(populated by `agent-repl--kill-one-workspace')."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-killed-" t))
           (killed '(23000 0 0 0)))

@@ -8,7 +8,7 @@
 ;;
 ;; Hiding happens at the PERSP layer, not at render time: when the mode is
 ;; toggled ON every matching workspace is legitimately killed via
-;; `agent-repl--nuke-one-workspace' (Claude session, buffers, and persp
+;; `agent-repl--kill-one-workspace' (Claude session, buffers, and persp
 ;; all torn down) and tombstoned with a `:hidden-project-dir' marker.
 ;; Because the matching workspaces leave `persp-names-cache' entirely, the
 ;; surviving tab numbers stay contiguous and `SPC <n>' resolves to the
@@ -192,8 +192,8 @@ file no longer pokes `agent-repl--workspaces' directly per the
   "Kill every live workspace whose project-dir lives under a hide prefix.
 Each match is stamped with the `:hidden-project-dir' plist marker (so
 `agent-repl--hide-project-dirs--restore' can later distinguish it
-from a workspace the user nuked by hand) and then torn down via
-`agent-repl--nuke-one-workspace', which kills its Claude session,
+from a workspace the user killed by hand) and then torn down via
+`agent-repl--kill-one-workspace', which kills its Claude session,
 buffers, and persp.  The teardown tombstones the hash entry; the
 marker is not a runtime key so it survives the tombstone.
 
@@ -210,7 +210,7 @@ Returns the list of workspace names that were hidden."
         (agent-repl--ws-put ws :hidden-project-dir t)
         (condition-case err
             (progn
-              (agent-repl--nuke-one-workspace ws)
+              (agent-repl--kill-one-workspace ws)
               (agent-repl--log
                ws "hide-project-dirs: hide complete ws=%s marker-set=t" ws))
           (error

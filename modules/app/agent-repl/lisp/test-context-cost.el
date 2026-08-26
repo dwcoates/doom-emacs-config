@@ -118,7 +118,7 @@ presence IS the alarm's lifetime — there is no local timer to expire it."
   "A tombstoned ProgressView records no alert and does not reject."
   (agent-repl-test--with-cost-state
     (agent-repl--ws-put "closed" :project-dir "/closed")
-    (agent-repl--ws-put "closed" :nuked-at (current-time))
+    (agent-repl--ws-put "closed" :killed-at (current-time))
     (should-not
      (agent-repl--context-cost-apply
       (agent-repl-test--cost-progress "/closed" (agent-repl-test--cost-alert))))

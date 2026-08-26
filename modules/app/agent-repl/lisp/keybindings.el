@@ -183,7 +183,7 @@ frontend, so applying it cross-workspace would kill the wrong session
 workspace from inside a workspace-switch handler, the named workspace's
 session has already been torn down by the sweep and the current
 workspace's session must be left alone).  Callers that need to kill a
-specific named workspace's session (the nuke / kill / sweep paths)
+specific named workspace's session (the kill / close / sweep paths)
 handle teardown explicitly through the frontend registry's kill
 dispatch before invoking `+workspace/kill'."
   (let ((target (or name (agent-repl--ws-current-name)))
@@ -217,7 +217,7 @@ Defaults to the current workspace when it is registered (so RET picks
 the obvious target).  Signals `user-error' when no workspaces exist.
 
 Filters out tombstoned entries via `agent-repl--live-ws-names' — a
-nuked workspace's identity record survives in the hash for
+killed workspace's identity record survives in the hash for
 `--ws-dir' callers, but it must not surface in interactive pickers."
   (let* ((known (agent-repl--live-ws-names))
          (current (agent-repl--ws-current-name))
@@ -233,38 +233,38 @@ nuked workspace's identity record survives in the hash for
                         prompt current default (length known) selected)
       selected)))
 
-(defun agent-repl--nukeable-workspace-names ()
-  "Return candidate names for the nuke/kill picker.
+(defun agent-repl--killable-workspace-names ()
+  "Return candidate names for the kill/close picker.
 Union of live agent-repl workspaces (`agent-repl--live-ws-names')
 and tab-bar workspaces (`agent-repl--ws-all-names'), preserving the live
 entries first.  Tab-bar entries whose agent-repl session has been
 torn down (or never existed) are included so the user can dispatch a
 plain persp/doom kill on stray tabs through the same picker — the
-dispatcher (`agent-repl--nuke-or-kill-workspace') decides per-entry
+dispatcher (`agent-repl--kill-or-close-workspace') decides per-entry
 whether to run the agent-repl teardown or a bare `+workspace/kill'."
   (let* ((live (agent-repl--live-ws-names))
          (tabbar (agent-repl--ws-all-names))
          (extras (cl-remove-if (lambda (n) (member n live)) tabbar)))
     (append live extras)))
 
-(defun agent-repl--read-nukeable-workspace (prompt)
-  "Prompt for a workspace to nuke/kill.
-Candidates come from `agent-repl--nukeable-workspace-names': live
+(defun agent-repl--read-killable-workspace (prompt)
+  "Prompt for a workspace to kill/close.
+Candidates come from `agent-repl--killable-workspace-names': live
 agent-repl workspaces plus tab-bar workspaces whose agent has
 already been killed.  Defaults to the current workspace when it
 appears in the candidate list.  Signals `user-error' when no
 candidates exist."
-  (let* ((known (agent-repl--nukeable-workspace-names))
+  (let* ((known (agent-repl--killable-workspace-names))
          (current (agent-repl--ws-current-name))
          (default (and current (member current known) current)))
     (unless known
       (agent-repl--log current
-                        "read-nukeable-workspace: rejected prompt=%S current=%S candidate-count=0"
+                        "read-killable-workspace: rejected prompt=%S current=%S candidate-count=0"
                         prompt current)
-      (user-error "No workspaces available to nuke/kill"))
+      (user-error "No workspaces available to kill/close"))
     (let ((selected (completing-read prompt known nil t nil nil default)))
       (agent-repl--log selected
-                        "read-nukeable-workspace: prompt=%S current=%S default=%S candidate-count=%d selected=%S"
+                        "read-killable-workspace: prompt=%S current=%S default=%S candidate-count=%d selected=%S"
                         prompt current default (length known) selected)
       selected)))
 
@@ -830,14 +830,14 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
        :desc "One-shot explanation-engine edit, pick model (PR on success)" "C-S-o" #'agent-repl-create-explanation-engine-oneshot-workspace-with-model
        :desc "Amend last doom one-shot (send/queue)"   "M-o" #'agent-repl-amend-doom-oneshot-prompt
        :desc "Amend last explanation-engine one-shot (send/queue)" "M-S-o" #'agent-repl-amend-explanation-engine-oneshot-prompt
-       :desc "Kill workspace"           "d" #'agent-repl-kill-workspace
+       :desc "Close workspace"          "d" #'agent-repl-close-workspace
        :desc "Update GitHub PR description"  "r" #'agent-repl-update-pr
        :desc "Rebase branch onto origin/master" "b" #'agent-repl-rebase-onto-origin-master
        (:prefix ("c" . "conversation")
         :desc "Select transcript to resume" "s" #'agent-repl-select-transcript
         :desc "Restore latest in all workspaces" "r" #'agent-repl-restore-latest-transcripts)
-       :desc "Nuke workspace"           "x" #'agent-repl-nuke-workspace
-       :desc "Nuke ALL workspaces"      "X" #'agent-repl-nuke-all-workspaces
+       :desc "Kill workspace"           "x" #'agent-repl-kill-workspace
+       :desc "Kill ALL workspaces"      "X" #'agent-repl-kill-all-workspaces
        :desc "Paste workspace clipboard" "p" #'agent-repl-paste-clipboard
        :desc "Toggle debug logging"    "D" #'agent-repl-debug/toggle-logging
        :desc "Set durable log level"   "L" #'agent-repl-debug/set-log-file-level

@@ -2126,7 +2126,7 @@ into this persp, and nuking it would wipe that workspace's running session."
       (when (buffer-live-p foreign) (kill-buffer foreign)))))
 
 (ert-deftest agent-repl-test-panels-kill-workspace-buffers/kills-own-owned ()
-  "kill-workspace-buffers kills a buffer owned by the workspace being nuked."
+  "kill-workspace-buffers kills a buffer owned by the workspace being killed."
   (let ((persp-mode t)
         (own (get-buffer-create "*agent-panel-this-ws*")))
     (with-current-buffer own
@@ -2364,7 +2364,7 @@ restored as the selected window, causing `+workspace/kill's fallback
 
 Dedicated windows cause `switch-to-buffer' to fall back to pop-up
 behavior and split, which is what produced the spurious splash buffer
-window after a nuke."
+window after a kill."
   (agent-repl-test--with-clean-state
     (let* ((regular-buf (get-buffer-create "*regular-buf*"))
            (dedicated-buf (get-buffer-create "*dedicated-buf*"))

@@ -828,51 +828,51 @@ input buffer is left intact and Claude is not contacted."
   (interactive)
   (agent-repl-create-or-update-pr-paste '(no-self-certified)))
 
-;; `agent-repl--nuke-one-workspace' moved into `workspace.el' during
+;; `agent-repl--kill-one-workspace' moved into `workspace.el' during
 ;; the persp-mode integration extraction (see AGENTS.md, "NEVER
 ;; manipulate third-party internals from a high-level layer").  It is
 ;; the canonical `+workspace/kill' call site and therefore belongs at
 ;; the integration boundary, not at the orchestration layer.
 
-(defun agent-repl--nuke-or-kill-workspace (ws)
-  "Dispatch a nuke vs. plain persp-kill on WS based on liveness.
+(defun agent-repl--kill-or-close-workspace (ws)
+  "Dispatch a kill vs. plain persp-kill on WS based on liveness.
 
 When WS is a live agent-repl workspace
 \(`agent-repl--ws-live-p'), runs the full
-`agent-repl--nuke-one-workspace' teardown and returns the symbol
-`nuke'.  Otherwise WS is a tab-bar-only workspace (either a
+`agent-repl--kill-one-workspace' teardown and returns the symbol
+`kill'.  Otherwise WS is a tab-bar-only workspace (either a
 tombstoned agent-repl entry whose persp still exists or a persp
 that was never registered with agent-repl); in that case runs a
 bare `+workspace/kill' guarded by `+workspace-exists-p' and returns
-the symbol `kill'.
+the symbol `close'.
 
-Shared by the interactive `agent-repl-nuke-workspace' and
-`agent-repl-kill-workspace' commands so the picker (which
+Shared by the interactive `agent-repl-kill-workspace' and
+`agent-repl-close-workspace' commands so the picker (which
 deliberately offers both kinds of candidates via
-`agent-repl--nukeable-workspace-names') can hand the chosen WS to a
+`agent-repl--killable-workspace-names') can hand the chosen WS to a
 single routing point."
-  (agent-repl--log ws "nuke-or-kill-workspace: ENTRY ws=%s live=%s"
+  (agent-repl--log ws "kill-or-close-workspace: ENTRY ws=%s live=%s"
                     ws (if (agent-repl--ws-live-p ws) "t" "nil"))
   (cond
    ((agent-repl--ws-live-p ws)
-    (agent-repl--nuke-one-workspace ws)
-    'nuke)
+    (agent-repl--kill-one-workspace ws)
+    'kill)
    (t
-    (agent-repl--log ws "nuke-or-kill: ws not live, routing to +workspace/kill")
+    (agent-repl--log ws "kill-or-close: ws not live, routing to +workspace/kill")
     (when (and (agent-repl--ws-system-available-p)
                (agent-repl--ws-exists-p ws))
       (condition-case err
           (agent-repl--ws-kill ws)
-        (error (agent-repl--log ws "nuke-or-kill: +workspace/kill error: %S" err))))
-    'kill)))
+        (error (agent-repl--log ws "kill-or-close: +workspace/kill error: %S" err))))
+    'close)))
 
-(defun agent-repl-nuke-workspace (&optional ws)
+(defun agent-repl-kill-workspace (&optional ws)
   "Tear down a agent-repl workspace: session, buffers, persp, and hashmap entry.
 Persisted state.el (priority, per-environment session-id) is preserved
 so the workspace can be re-opened later and resume its Claude session.
 When called interactively without WS, prompts to select from the union
 of live agent-repl workspaces and tab-bar workspaces
-\(`agent-repl--nukeable-workspace-names'), defaulting to the current
+\(`agent-repl--killable-workspace-names'), defaulting to the current
 workspace when it appears in that candidate list.  Programmatic
 callers (e.g. the workspace-commands dispatch) pass WS directly to
 skip the prompt.
@@ -887,48 +887,48 @@ No confirmation prompt: teardown is immediate.  Persisted state.el is
 preserved, so re-opening the workspace later resumes the Claude
 session — accidental invocations are easily recoverable."
   (interactive)
-  (let* ((ws (or ws (agent-repl--read-nukeable-workspace "Nuke workspace: ")))
+  (let* ((ws (or ws (agent-repl--read-killable-workspace "Kill workspace: ")))
          (t0 (float-time))
          (agent-repl--kill-cause (or agent-repl--kill-cause
-                                     "interactive nuke command (agent-repl-nuke-workspace)")))
-    (agent-repl--log ws "nuke-workspace: ENTRY ws=%s" ws)
-    (let ((action (agent-repl--nuke-or-kill-workspace ws)))
+                                     "interactive kill command (agent-repl-kill-workspace)")))
+    (agent-repl--log ws "kill-workspace: ENTRY ws=%s" ws)
+    (let ((action (agent-repl--kill-or-close-workspace ws)))
       (agent-repl--log ws
-                        "nuke-workspace: nuke-or-kill-workspace returned action=%s elapsed=%.3fs — about to force-mode-line-update"
+                        "kill-workspace: kill-or-close-workspace returned action=%s elapsed=%.3fs — about to force-mode-line-update"
                         action (- (float-time) t0))
       (force-mode-line-update t)
       (agent-repl--log ws
-                        "nuke-workspace: force-mode-line-update done elapsed=%.3fs — about to message"
+                        "kill-workspace: force-mode-line-update done elapsed=%.3fs — about to message"
                         (- (float-time) t0))
-      (message (if (eq action 'nuke)
-                   "Nuked workspace: %s"
-                 "Killed persp workspace: %s")
+      (message (if (eq action 'kill)
+                   "Killed workspace: %s"
+                 "Closed persp workspace: %s")
                ws)
-      (agent-repl--log ws "nuke-workspace: COMPLETE ws=%s action=%s total-elapsed=%.3fs"
+      (agent-repl--log ws "kill-workspace: COMPLETE ws=%s action=%s total-elapsed=%.3fs"
                         ws action (- (float-time) t0)))))
 
-(defun agent-repl-nuke-all-workspaces ()
+(defun agent-repl-kill-all-workspaces ()
   "Tear down ALL agent-repl workspaces.
 Iterates every workspace registered in `agent-repl--workspaces' and
-applies the same teardown as `agent-repl-nuke-workspace' to each.
+applies the same teardown as `agent-repl-kill-workspace' to each.
 Persisted state.el for each project is preserved.
 Prompts once with the count before proceeding."
   (interactive)
   (let* ((known (agent-repl--live-ws-names))
          (count (length known)))
     (unless known (user-error "No agent-repl workspaces registered"))
-    (unless (y-or-n-p (format "Nuke ALL %d agent-repl workspace(s)? This kills processes and buffers but preserves on-disk state. "
+    (unless (y-or-n-p (format "Kill ALL %d agent-repl workspace(s)? This kills processes and buffers but preserves on-disk state. "
                               count))
       (user-error "Aborted"))
-    (agent-repl--log (agent-repl--ws-current-log-name) "nuke-all-workspaces: count=%d" count)
+    (agent-repl--log (agent-repl--ws-current-log-name) "kill-all-workspaces: count=%d" count)
     ;; Snapshot keys before iterating; each call mutates the hash.
-    (let ((agent-repl--kill-cause "interactive nuke-all command (agent-repl-nuke-all-workspaces)"))
+    (let ((agent-repl--kill-cause "interactive kill-all command (agent-repl-kill-all-workspaces)"))
       (dolist (ws known)
-        (agent-repl--nuke-one-workspace ws)))
+        (agent-repl--kill-one-workspace ws)))
     (force-mode-line-update t)
-    (message "Nuked %d workspace(s)" count)))
+    (message "Killed %d workspace(s)" count)))
 
-(defun agent-repl-nuke-restored-workspaces ()
+(defun agent-repl-kill-restored-workspaces ()
   "Tear down every workspace that was restored this session.
 Tears down only the workspaces tracked in
 `agent-repl--restored-workspaces' (those established by
@@ -937,36 +937,36 @@ from-archive entry point); workspaces the user created manually
 before or after the restore are left alone.  Persisted state.el for
 each project is preserved.  Prompts once with the count before
 proceeding.  Same per-workspace teardown as
-`agent-repl-nuke-workspace'."
+`agent-repl-kill-workspace'."
   (interactive)
   (let* ((restored (cl-remove-if-not
                     (lambda (ws) (agent-repl--ws-get ws :project-dir))
                     agent-repl--restored-workspaces))
          (count (length restored)))
     (unless restored
-      (user-error "No restored agent-repl workspaces to nuke"))
-    (unless (y-or-n-p (format "Nuke %d restored agent-repl workspace(s)? This kills processes and buffers but preserves on-disk state. "
+      (user-error "No restored agent-repl workspaces to kill"))
+    (unless (y-or-n-p (format "Kill %d restored agent-repl workspace(s)? This kills processes and buffers but preserves on-disk state. "
                               count))
       (user-error "Aborted"))
     (agent-repl--log (agent-repl--ws-current-log-name)
-                      "nuke-restored-workspaces: count=%d" count)
-    (let ((agent-repl--kill-cause "interactive nuke-restored command (agent-repl-nuke-restored-workspaces)"))
+                      "kill-restored-workspaces: count=%d" count)
+    (let ((agent-repl--kill-cause "interactive kill-restored command (agent-repl-kill-restored-workspaces)"))
       (dolist (ws restored)
-        (agent-repl--nuke-one-workspace ws)))
+        (agent-repl--kill-one-workspace ws)))
     (force-mode-line-update t)
-    (message "Nuked %d restored workspace(s)" count)))
+    (message "Killed %d restored workspace(s)" count)))
 
-(defun agent-repl-kill-workspace (&optional ws)
+(defun agent-repl-close-workspace (&optional ws)
   "Tear down a agent-repl workspace and preserve its persisted state.
-Alias for `agent-repl-nuke-workspace' — both functions go through
-`agent-repl--nuke-or-kill-workspace', which preserves the on-disk
+Alias for `agent-repl-kill-workspace' — both functions go through
+`agent-repl--kill-or-close-workspace', which preserves the on-disk
 per-project state file on the live-agent-repl path and falls back to
 a plain `+workspace/kill' for tab-bar workspaces whose claude has
 already been killed.  Retained as a separate command for callers /
-muscle-memory that bind `kill' semantics distinctly from `nuke'.
+muscle-memory that bind `close' semantics distinctly from `kill'.
 
 Prompts to select from the union of live agent-repl workspaces and
-tab-bar workspaces (`agent-repl--nukeable-workspace-names'),
+tab-bar workspaces (`agent-repl--killable-workspace-names'),
 defaulting to the current workspace when it appears in that candidate
 list.  Programmatic callers (e.g. the workspace-commands dispatch)
 pass WS directly to skip the prompt.
@@ -975,14 +975,14 @@ No confirmation prompt: teardown is immediate.  Persisted state.el is
 preserved, so re-opening the workspace later resumes the Claude
 session — accidental invocations are easily recoverable."
   (interactive)
-  (let* ((ws (or ws (agent-repl--read-nukeable-workspace "Kill workspace: ")))
+  (let* ((ws (or ws (agent-repl--read-killable-workspace "Close workspace: ")))
          (agent-repl--kill-cause (or agent-repl--kill-cause
-                                     "interactive kill command (agent-repl-kill-workspace)"))
-         (action (agent-repl--nuke-or-kill-workspace ws)))
+                                     "interactive close command (agent-repl-close-workspace)"))
+         (action (agent-repl--kill-or-close-workspace ws)))
     (force-mode-line-update t)
-    (message (if (eq action 'nuke)
-                 "Killed workspace: %s"
-               "Killed persp workspace: %s")
+    (message (if (eq action 'kill)
+                 "Closed workspace: %s"
+               "Closed persp workspace: %s")
              ws)))
 
 (defun agent-repl-copy-reference ()
@@ -1127,7 +1127,7 @@ best-effort and must never block the live save)."
 
 (defcustom agent-repl-snapshot-tombstone-max-age 0
   "Seconds a tombstoned workspace is kept in the live roster snapshot.
-A tombstone is an identity-only record for a nuked workspace, retained so
+A tombstone is an identity-only record for a killed workspace, retained so
 a reopen/revival can still resolve its `:project-dir' and worktree source.
 Tombstones are re-collected, re-swept and re-serialized on EVERY roster
 write, which is the dominant cost of a write once tombstones outnumber
@@ -1211,8 +1211,8 @@ unambiguously labeled as a tombstone dump, and is subject to the same
              (if live-only
                  ;; Live-only: every tombstone qualifies, stamped or not.
                  t
-               (let ((nuked-at (agent-repl--ws-get ws :nuked-at)))
-                 (and nuked-at (time-less-p nuked-at cutoff)))))
+               (let ((killed-at (agent-repl--ws-get ws :killed-at)))
+                 (and killed-at (time-less-p killed-at cutoff)))))
            (agent-repl--ws-tombstoned-names))))
     (when expired
       (agent-repl--with-error-logging "snapshot-evict-expired-tombstones"
@@ -1221,7 +1221,7 @@ unambiguously labeled as a tombstone dump, and is subject to the same
                  (lambda (ws)
                    (cons ws (append
                              (list :project-dir (agent-repl--ws-get ws :project-dir)
-                                   :nuked-at (agent-repl--ws-get ws :nuked-at))
+                                   :killed-at (agent-repl--ws-get ws :killed-at))
                              (when (agent-repl--ws-get ws :hidden-project-dir)
                                (list :hidden-project-dir t))
                              (agent-repl--worktree-snapshot-fields ws))))
@@ -1330,10 +1330,10 @@ Populated incrementally as each entry of the snapshot loader (either
 the current file or an archived file via
 `agent-repl-load-workspace-snapshot-from-archive') successfully calls
 `agent-repl--establish-workspace'.  Used by
-`agent-repl-nuke-restored-workspaces' to nuke only the restored
+`agent-repl-kill-restored-workspaces' to kill only the restored
 workspaces while sparing any workspaces the user created manually before
 or after the restore.  Entries are removed when their workspace is
-nuked individually via `agent-repl--nuke-one-workspace'.")
+killed individually via `agent-repl--kill-one-workspace'.")
 
 (defun agent-repl--snapshot-save-safe-p (live-count)
   "Return non-nil when save may proceed with LIVE-COUNT entries.
@@ -1380,7 +1380,7 @@ repo-less directory instead of a re-added worktree."
 (defun agent-repl--collect-snapshot-entries ()
   "Return a list of workspace snapshot entries.
 Each entry has the shape
-\(NAME :project-dir DIR [:nuked-at TIME] [:hidden-project-dir t]
+\(NAME :project-dir DIR [:killed-at TIME] [:hidden-project-dir t]
       [:worktree-p t] [:source-ws-dir DIR]).
 Sourced from `agent-repl--workspaces'.  Includes every workspace
 whose plist has a non-nil `:project-dir'.  `:priority' is deliberately
@@ -1395,15 +1395,15 @@ revival path (`agent-repl--picker-recreate-directory') loses the source
 repo and can only make a plain empty directory rather than re-add the
 worktree.  Each is emitted only when set.
 
-Tombstoned entries (`:nuked-at' set) ARE included so the tombstone
-survives across Emacs restart — otherwise a nuked workspace's identity
+Tombstoned entries (`:killed-at' set) ARE included so the tombstone
+survives across Emacs restart — otherwise a killed workspace's identity
 record would resurrect as live on next load.  Live entries omit
-`:nuked-at' entirely so the on-disk format stays minimal for the common
+`:killed-at' entirely so the on-disk format stays minimal for the common
 case.
 
 A tombstone killed by `agent-repl-toggle-hide-project-dirs' also
 carries `:hidden-project-dir' so the next session can tell it apart
-from a workspace the user nuked by hand and restore it on unhide.
+from a workspace the user killed by hand and restore it on unhide.
 
 Order: cache-ordered live prefix followed by tombstones.
 
@@ -1413,7 +1413,7 @@ in cache order).  Live entries NOT in `persp-names-cache' are excluded
 when the cache is bound — they have no current tab-bar presence and
 saving them as live would cause the snapshot loader to re-establish
 them as new tabs on the next load (the source of unexpected workspace
-resurrection after kills that bypassed agent-repl's nuke path).
+resurrection after kills that bypassed agent-repl's kill path).
 
 Tombstones are sourced via `--ws-tombstoned-names' and appended after
 the live prefix, preserving their identity records across restarts.
@@ -1440,11 +1440,11 @@ restarts."
           (let* ((plist (agent-repl--ws-plist ws))
                  (dir (plist-get plist :project-dir)))
             (when dir
-              (let ((tomb (plist-get plist :nuked-at))
+              (let ((tomb (plist-get plist :killed-at))
                     (hidden (plist-get plist :hidden-project-dir)))
                 (push (cons ws (append
                                 (if tomb
-                                    (append (list :project-dir dir :nuked-at tomb)
+                                    (append (list :project-dir dir :killed-at tomb)
                                             (when hidden (list :hidden-project-dir t)))
                                   (list :project-dir dir))
                                 (agent-repl--worktree-snapshot-fields ws)))
@@ -1470,9 +1470,9 @@ restarts."
              #'identity
              (mapcar (lambda (ws)
                        (when-let ((dir (agent-repl--ws-get ws :project-dir)))
-                         (let ((tomb (agent-repl--ws-get ws :nuked-at))
+                         (let ((tomb (agent-repl--ws-get ws :killed-at))
                                (hidden (agent-repl--ws-get ws :hidden-project-dir)))
-                           (cons ws (append (list :project-dir dir :nuked-at tomb)
+                           (cons ws (append (list :project-dir dir :killed-at tomb)
                                             (when hidden (list :hidden-project-dir t))
                                             (agent-repl--worktree-snapshot-fields ws))))))
                      (agent-repl--ws-tombstoned-names)))))
@@ -1624,7 +1624,7 @@ on every state mutation."
 (defun agent-repl-update-workspace-snapshot ()
   "Force-write the current live workspace roster to the snapshot file.
 Captures every workspace in `agent-repl--workspaces' with a
-`:project-dir' (the same set offered by `agent-repl-nuke-workspace')
+`:project-dir' (the same set offered by `agent-repl-kill-workspace')
 and overwrites `agent-repl-workspace-snapshot-file' unconditionally.
 
 Unlike `agent-repl-save-workspace-snapshot', this command bypasses the
@@ -1855,7 +1855,7 @@ Each call:
   ;; snapshot-loaded entries tombstoned in a prior session, and `--ws-live-p'
   ;; must agree with the post-establish state from here on.
   (agent-repl--ws-put ws :project-dir dir)
-  (agent-repl--ws-put ws :nuked-at nil)
+  (agent-repl--ws-put ws :killed-at nil)
   (agent-repl--log ws "establish-workspace: begin ws=%s dir=%s" ws dir)
   (agent-repl--with-error-logging (format "establish-workspace[%s]" ws)
     ;; Create the persp and tag it with `+workspace-project' so a later
@@ -1907,7 +1907,7 @@ Each call:
     ;; `find-file-hook') that is free to tombstone or re-key this workspace,
     ;; and everything below must see the established state.
     (agent-repl--ws-put ws :project-dir dir)
-    (agent-repl--ws-put ws :nuked-at nil)
+    (agent-repl--ws-put ws :killed-at nil)
     ;; Hydrate the priority badge then reseat this ws into its priority
     ;; slot, via the shared opener step so `SPC p p' and snapshot/worktree
     ;; restore agree on ordering.  The reorder is skipped mid-snapshot-load
@@ -2017,7 +2017,7 @@ can call finish without worrying whether a normal finish already ran."
       (setq agent-repl--snapshot-load-state nil))))
 
 (defun agent-repl--snapshot-load-close-main ()
-  "Nuke the `main' workspace left over from Doom's startup, if it still exists.
+  "Kill the `main' workspace left over from Doom's startup, if it still exists.
 Doom always creates `+workspaces-main' (typically \"main\") at startup;
 the snapshot loader replaces it with the real workspace set, so this
 artifact is never useful and we tear it down to keep the tabline
@@ -2028,7 +2028,7 @@ Naturally idempotent (guarded by `agent-repl--ws-exists-p'), so later
 entries in the same load may call it again for free.  Absent main, the
 function is a no-op.
 
-NUKE semantics (vs. a plain `+workspace/kill'): we first sweep every
+KILL semantics (vs. a plain `+workspace/kill'): we first sweep every
 buffer that belongs to the persp via
 `agent-repl--kill-workspace-buffers' (dashboard, scratch, file
 buffers, etc.) and only then drop the persp itself.  A bare
@@ -2044,10 +2044,10 @@ step is logged but never propagated — finish must remain robust."
       (agent-repl--log nil "snapshot-load: nuking 'main' workspace artifact main=%s" main)
       (condition-case err
           (agent-repl--kill-workspace-buffers main)
-        (error (agent-repl--log nil "snapshot-load: nuke-main kill-buffers error: %S" err)))
+        (error (agent-repl--log nil "snapshot-load: kill-main kill-buffers error: %S" err)))
       (condition-case err
           (agent-repl--ws-kill main)
-        (error (agent-repl--log nil "snapshot-load: nuke-main persp-kill error: %S" err))))))
+        (error (agent-repl--log nil "snapshot-load: kill-main persp-kill error: %S" err))))))
 
 (defun agent-repl--snapshot-load-on-loaded (ws &optional _marker)
   "Ws-fully-loaded hook handler: advance the snapshot load queue iff WS is awaited.
@@ -2086,7 +2086,7 @@ failure to WS and keeps the loader moving:
   `--establish-workspace' returned) to `:load-error', so the END line and
   the iteration counter both describe what really happened,
 - WS is untagged from `agent-repl--restored-workspaces' so a later
-  `agent-repl-nuke-restored-workspaces' sweep of the restore batch leaves
+  `agent-repl-kill-restored-workspaces' sweep of the restore batch leaves
   the faulted workspace standing for the user to inspect,
 - the half-established persp/tab is deliberately left in place rather than
   torn down.  `--establish-workspace' already returned, so the tab, its
@@ -2194,7 +2194,7 @@ the error-routing `condition-case'."
                 (progn
                   (agent-repl--establish-workspace ws dir)
                   (agent-repl--reorder-workspace-to-front ws)
-                  ;; A real workspace now exists — safe to nuke `main'.
+                  ;; A real workspace now exists — safe to kill `main'.
                   (agent-repl--snapshot-load-close-main))
               (error
                (agent-repl--warn nil "snapshot-load: failed-restore establish err ws=%s err=%S" ws err))))
@@ -2235,7 +2235,7 @@ the error-routing `condition-case'."
                     (plist-put agent-repl--snapshot-load-state :loaded
                                (1+ (plist-get agent-repl--snapshot-load-state :loaded))))
               ;; A real workspace now exists (this entry's tab was just
-              ;; created) — safe to nuke Doom's leftover startup `main'.
+              ;; created) — safe to kill Doom's leftover startup `main'.
               ;; No-op on later entries once main is already gone.
               (agent-repl--snapshot-load-close-main)
               (cond
@@ -2245,14 +2245,14 @@ the error-routing `condition-case'."
                 ;; up in before the 2s idle loader fired).  Do NOT tag as
                 ;; restored — this ws wasn't actually established by the
                 ;; loader, it was already alive.  Tagging it would make
-                ;; `agent-repl-nuke-restored-workspaces' incorrectly
+                ;; `agent-repl-kill-restored-workspaces' incorrectly
                 ;; sweep the user's pre-existing workspace.
                 (agent-repl--log ws "snapshot-load: ws=%s already ready — advancing without waiting" ws)
                 (agent-repl--snapshot-load-step))
                (t
                 ;; WHY: tag this ws as restored-this-session so the user
-                ;; can later nuke only the restore-batch via
-                ;; `agent-repl-nuke-restored-workspaces' without
+                ;; can later kill only the restore-batch via
+                ;; `agent-repl-kill-restored-workspaces' without
                 ;; touching workspaces they created by hand or were
                 ;; already in.  Accumulates across multiple loads (incl.
                 ;; from-archive) so subsequent restores expand — never
@@ -2339,21 +2339,21 @@ gate for each live shim/store route."
            (orphan-tombstone-p
             (lambda (e)
               (let ((plist (cdr e)))
-                (and (plist-get plist :nuked-at)
+                (and (plist-get plist :killed-at)
                      (let ((dir (plist-get plist :project-dir)))
                        (and (stringp dir) (not (file-directory-p dir))))))))
            (orphans (cl-remove-if-not orphan-tombstone-p normalized))
-           ;; Partition: tombstoned entries (`:nuked-at' present) are
+           ;; Partition: tombstoned entries (`:killed-at' present) are
            ;; identity-only records — restore them directly to the hash
            ;; without queueing them for establish (which would create a
            ;; persp + start claude for a workspace the user already
-           ;; nuked).  Live entries follow the original establish queue.
+           ;; killed).  Live entries follow the original establish queue.
            (tombstones (cl-remove-if-not
-                        (lambda (e) (and (plist-get (cdr e) :nuked-at)
+                        (lambda (e) (and (plist-get (cdr e) :killed-at)
                                          (not (funcall orphan-tombstone-p e))))
                         normalized))
            (queue (cl-remove-if
-                   (lambda (e) (plist-get (cdr e) :nuked-at))
+                   (lambda (e) (plist-get (cdr e) :killed-at))
                    normalized))
            (origin-ws (agent-repl--ws-current-name)))
       ;; Written back BEFORE anything else in the load runs, so a directory
@@ -2378,16 +2378,16 @@ gate for each live shim/store route."
         (let ((ws (car entry))
               (plist (cdr entry)))
           (agent-repl--ws-put ws :project-dir (plist-get plist :project-dir))
-          (agent-repl--ws-put ws :nuked-at (plist-get plist :nuked-at))
+          (agent-repl--ws-put ws :killed-at (plist-get plist :killed-at))
           ;; Carry the hide marker so `agent-repl-toggle-hide-project-dirs'
-          ;; can tell a hide-killed tombstone from a hand-nuked one and
+          ;; can tell a hide-killed tombstone from a hand-killed one and
           ;; restore only the former on unhide.
           (agent-repl--ws-put ws :hidden-project-dir
                                (plist-get plist :hidden-project-dir))
           (agent-repl--log ws "snapshot-load: restored tombstone ws=%s dir=%s hidden=%s"
                             ws (plist-get plist :project-dir)
                             (if (plist-get plist :hidden-project-dir) "t" "nil"))))
-      ;; Doom's startup `main' workspace is nuked once the FIRST entry
+      ;; Doom's startup `main' workspace is killed once the FIRST entry
       ;; has been established (see `agent-repl--snapshot-load-close-main'),
       ;; not here at load BEGIN: `main' is the only workspace alive right
       ;; now, and killing it before another one exists would leave the
@@ -2641,7 +2641,7 @@ through `--initialize-ws-env' for merged entries)."
     (agent-repl--ws-put ws :project-dir dir)
     ;; Merged workspaces are a re-registration path; clear any prior
     ;; tombstone so `--ws-live-p' agrees the entry is back in play.
-    (agent-repl--ws-put ws :nuked-at nil)
+    (agent-repl--ws-put ws :killed-at nil)
     (let* ((state-file (agent-repl--state-file-for-read dir))
            (saved (and state-file
                        (file-exists-p state-file)
@@ -2741,7 +2741,7 @@ both the plist cache and `recentf-list' lag filesystem deletions."
 ;;   workspace's create/kill time is irrelevant to ordering.  Never-viewed
 ;;   workspaces sink to the bottom.
 ;; - Selecting a live workspace switches to it; selecting a removed
-;;   (killed / nuked / merged) workspace revives it from persisted state,
+;;   (closed / killed / merged) workspace revives it from persisted state,
 ;;   recreating its worktree/directory first when missing — the only
 ;;   filesystem-existence check happens then, at selection time, never on
 ;;   every picker invocation.
@@ -3195,7 +3195,7 @@ code, so revival failures are diagnosable from the error alone."
   "Ensure DIR exists on disk before reviving workspace NAME.
 The ONLY filesystem-existence check in the picker, run at selection time
 so `SPC p p' never polls the disk for every candidate.  No-op when DIR
-already exists (the common case — kill / nuke / merge leave the worktree
+already exists (the common case — kill / kill / merge leave the worktree
 in place); delegates to `agent-repl--picker-recreate-directory' when DIR
 is missing."
   (if (and dir (not (file-directory-p dir)))
@@ -3268,7 +3268,7 @@ name Doom's `+workspaces-switch-to-project-h' derives for the persp."
   (let ((ws (or (agent-repl--ws-name-for-dir dir)
                 (file-name-nondirectory (directory-file-name dir)))))
     (agent-repl--ws-put ws :project-dir dir)
-    (agent-repl--ws-put ws :nuked-at nil)
+    (agent-repl--ws-put ws :killed-at nil)
     (agent-repl--snapshot-save-request)
     ws))
 

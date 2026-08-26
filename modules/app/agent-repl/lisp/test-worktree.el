@@ -893,32 +893,32 @@ display-buffer."
 
 ;;;; ---- Tests: close-workspace ----
 
-(ert-deftest agent-repl-test-close-workspace-delegates-to-nuke ()
-  "`--close-workspace' delegates to `--nuke-one-workspace' with the same ws."
+(ert-deftest agent-repl-test-close-workspace-delegates-to-kill ()
+  "`--close-workspace' delegates to `--kill-one-workspace' with the same ws."
   (let ((received :unset))
-    (cl-letf (((symbol-function 'agent-repl--nuke-one-workspace)
+    (cl-letf (((symbol-function 'agent-repl--kill-one-workspace)
                (lambda (ws &optional _preserve)
                  (setq received ws))))
       (agent-repl--close-workspace "feature-one")
       (should (equal received "feature-one")))))
 
 (ert-deftest agent-repl-test-close-workspace-default-drops-entry ()
-  "`--close-workspace' without PRESERVE-ENTRY passes nil to the nuke primitive.
+  "`--close-workspace' without PRESERVE-ENTRY passes nil to the kill primitive.
 Standalone close (skill dispatch path) should fully drop the registry
 entry — merge's preserve-entry behavior is opt-in only."
   (let ((received-preserve :unset))
-    (cl-letf (((symbol-function 'agent-repl--nuke-one-workspace)
+    (cl-letf (((symbol-function 'agent-repl--kill-one-workspace)
                (lambda (_ws &optional preserve)
                  (setq received-preserve preserve))))
       (agent-repl--close-workspace "feature-one")
       (should (null received-preserve)))))
 
 (ert-deftest agent-repl-test-close-workspace-preserve-entry-passes-through ()
-  "`--close-workspace' threads PRESERVE-ENTRY to the nuke primitive.
+  "`--close-workspace' threads PRESERVE-ENTRY to the kill primitive.
 This is the merge-completion path: the hashmap entry must survive close
 so the merged workspace stays registered until explicit finish."
   (let ((received-preserve :unset))
-    (cl-letf (((symbol-function 'agent-repl--nuke-one-workspace)
+    (cl-letf (((symbol-function 'agent-repl--kill-one-workspace)
                (lambda (_ws &optional preserve)
                  (setq received-preserve preserve))))
       (agent-repl--close-workspace "feature-one" 'preserve-entry)
@@ -1667,7 +1667,7 @@ no timeout timer is scheduled — there is nothing left to deadline."
 (ert-deftest agent-repl-test-finish-workspace-non-worktree ()
   "Finishing a non-worktree workspace tombstones state and kills persp.
 Post-tombstone-refactor, finish-workspace no longer removes the hash
-entry — it stamps `:nuked-at' via `--ws-del'.  This test pins both the
+entry — it stamps `:killed-at' via `--ws-del'.  This test pins both the
 persp-kill and the resulting tombstone marker."
   (agent-repl-test--with-clean-state
     (let ((persp-killed nil))
@@ -1677,8 +1677,8 @@ persp-kill and the resulting tombstone marker."
                 ((symbol-function 'persp-kill) (lambda (ws) (setq persp-killed ws))))
         (agent-repl--finish-workspace "ws1")
         (should (equal persp-killed "ws1"))
-        ;; Tombstoned: entry survives with `:nuked-at', not live.
-        (should (agent-repl--ws-get "ws1" :nuked-at))
+        ;; Tombstoned: entry survives with `:killed-at', not live.
+        (should (agent-repl--ws-get "ws1" :killed-at))
         (should-not (agent-repl--ws-live-p "ws1"))))))
 
 (ert-deftest agent-repl-test-finish-workspace-with-worktree ()
@@ -1712,7 +1712,7 @@ liveness flip."
               ((symbol-function 'persp-kill) (lambda (_ws) nil)))
       (agent-repl--finish-workspace "DWC/foo")
       (should-not (agent-repl--ws-live-p "foo"))
-      (should (agent-repl--ws-get "foo" :nuked-at)))))
+      (should (agent-repl--ws-get "foo" :killed-at)))))
 
 (ert-deftest agent-repl-test-finish-workspace-kills-through-frontend-registry ()
   "finish-workspace kills WS's agent session through the frontend
@@ -2963,7 +2963,7 @@ were reached without the wrapper stub."
 (ert-deftest agent-repl-test-ws-name-for-dir-skips-tombstoned-match ()
   "Reverse lookup remains live-only after moving iteration behind workspace.el."
   (agent-repl-test--with-clean-state
-    (puthash "tomb" '(:project-dir "/shared/" :nuked-at (1 2 3))
+    (puthash "tomb" '(:project-dir "/shared/" :killed-at (1 2 3))
              agent-repl--workspaces)
     (puthash "live" '(:project-dir "/shared/") agent-repl--workspaces)
     (cl-letf (((symbol-function 'agent-repl--path-canonical) #'identity))

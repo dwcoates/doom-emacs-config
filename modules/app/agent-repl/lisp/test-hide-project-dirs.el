@@ -24,7 +24,7 @@
   "Register WS as a tombstone marked `:hidden-project-dir' with `:project-dir' DIR."
   (puthash ws
            (list :project-dir dir
-                 :nuked-at (current-time)
+                 :killed-at (current-time)
                  :hidden-project-dir t)
            agent-repl--workspaces))
 
@@ -151,7 +151,7 @@ locally."
   (agent-repl-test--with-clean-state
     (agent-repl-hide-project-dirs-test--register "ws-live" "/tmp/live")
     (puthash "ws-plain-tomb"
-             (list :project-dir "/tmp/pt" :nuked-at (current-time))
+             (list :project-dir "/tmp/pt" :killed-at (current-time))
              agent-repl--workspaces)
     (should-not (member "ws-live"
                         (agent-repl--hide-project-dirs--hidden-workspace-names)))
@@ -169,22 +169,22 @@ locally."
 
 ;;;; ---- --hide ----
 
-(ert-deftest agent-repl-test-hide-project-dirs-hide-marks-and-nukes ()
-  "--hide stamps `:hidden-project-dir' and nukes every matching workspace."
+(ert-deftest agent-repl-test-hide-project-dirs-hide-marks-and-kills ()
+  "--hide stamps `:hidden-project-dir' and kills every matching workspace."
   (agent-repl-test--with-clean-state
     (agent-repl-hide-project-dirs-test--with-prefixes
         (list (expand-file-name "~/workspace/ChessCom"))
-      (let ((nuked nil))
+      (let ((killed nil))
         (agent-repl-hide-project-dirs-test--register
          "ws-cc1" (expand-file-name "~/workspace/ChessCom/a"))
         (agent-repl-hide-project-dirs-test--register
          "ws-cc2" (expand-file-name "~/workspace/ChessCom/b"))
-        (cl-letf (((symbol-function 'agent-repl--nuke-one-workspace)
-                   (lambda (ws &optional _preserve) (push ws nuked))))
+        (cl-letf (((symbol-function 'agent-repl--kill-one-workspace)
+                   (lambda (ws &optional _preserve) (push ws killed))))
           (let ((hidden (agent-repl--hide-project-dirs--hide)))
             (should (equal (sort (copy-sequence hidden) #'string<)
                            '("ws-cc1" "ws-cc2")))
-            (should (equal (sort nuked #'string<) '("ws-cc1" "ws-cc2")))
+            (should (equal (sort killed #'string<) '("ws-cc1" "ws-cc2")))
             (should (agent-repl--ws-get "ws-cc1" :hidden-project-dir))
             (should (agent-repl--ws-get "ws-cc2" :hidden-project-dir))))))))
 
@@ -193,31 +193,31 @@ locally."
   (agent-repl-test--with-clean-state
     (agent-repl-hide-project-dirs-test--with-prefixes
         (list (expand-file-name "~/workspace/ChessCom"))
-      (let ((nuked nil))
+      (let ((killed nil))
         (agent-repl-hide-project-dirs-test--register
          "ws-other" (expand-file-name "~/code/x"))
-        (cl-letf (((symbol-function 'agent-repl--nuke-one-workspace)
-                   (lambda (ws &optional _preserve) (push ws nuked))))
+        (cl-letf (((symbol-function 'agent-repl--kill-one-workspace)
+                   (lambda (ws &optional _preserve) (push ws killed))))
           (agent-repl--hide-project-dirs--hide)
-          (should-not nuked)
+          (should-not killed)
           (should-not (agent-repl--ws-get "ws-other" :hidden-project-dir)))))))
 
 (ert-deftest agent-repl-test-hide-project-dirs-hide-skips-current ()
-  "--hide never marks or nukes the current workspace even when it matches."
+  "--hide never marks or kills the current workspace even when it matches."
   (agent-repl-test--with-clean-state
     (agent-repl-hide-project-dirs-test--with-prefixes
         (list (expand-file-name "~/workspace/ChessCom"))
-      (let ((nuked nil))
+      (let ((killed nil))
         (agent-repl-hide-project-dirs-test--register
          "ws-cur" (expand-file-name "~/workspace/ChessCom/cur"))
         (agent-repl-hide-project-dirs-test--register
          "ws-cc2" (expand-file-name "~/workspace/ChessCom/b"))
         (cl-letf (((symbol-function '+workspace-current-name)
                    (lambda () "ws-cur"))
-                  ((symbol-function 'agent-repl--nuke-one-workspace)
-                   (lambda (ws &optional _preserve) (push ws nuked))))
+                  ((symbol-function 'agent-repl--kill-one-workspace)
+                   (lambda (ws &optional _preserve) (push ws killed))))
           (agent-repl--hide-project-dirs--hide)
-          (should (equal nuked '("ws-cc2")))
+          (should (equal killed '("ws-cc2")))
           (should-not (agent-repl--ws-get "ws-cur" :hidden-project-dir)))))))
 
 ;;;; ---- --restore ----
@@ -242,8 +242,8 @@ locally."
   "--restore ignores tombstones that lack the `:hidden-project-dir' marker."
   (agent-repl-test--with-clean-state
     (let ((established nil))
-      (puthash "ws-hand-nuked"
-               (list :project-dir "/tmp/hn" :nuked-at (current-time))
+      (puthash "ws-hand-killed"
+               (list :project-dir "/tmp/hn" :killed-at (current-time))
                agent-repl--workspaces)
       (cl-letf (((symbol-function 'agent-repl--establish-workspace)
                  (lambda (ws _dir) (push ws established))))

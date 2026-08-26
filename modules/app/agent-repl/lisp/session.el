@@ -375,7 +375,7 @@ state-save.  Callers already guard on `agent-repl--agent-running-p'."
                       ws root state-present-p (if saved "yes" "no")
                       (if project-dir-hint "yes" "no")
                       (or active-env-hint "nil"))
-    ;; Clear any pre-existing `:nuked-at' tombstone before writing the
+    ;; Clear any pre-existing `:killed-at' tombstone before writing the
     ;; identity keys below.  A workspace being re-initialized is, by
     ;; definition, live again; leaving the tombstone in place would let
     ;; `agent-repl--ws-live-p' return nil right after a successful init.
@@ -391,7 +391,7 @@ state-save.  Callers already guard on `agent-repl--agent-running-p'."
                           ws target owner)
         (error "agent-repl--initialize-ws-env: refusing to register ws=%s for %s — live workspace %s already owns it"
                ws target owner))
-      (agent-repl--ws-put ws :nuked-at nil)
+      (agent-repl--ws-put ws :killed-at nil)
       (agent-repl--ws-put ws :project-dir target))
     (agent-repl--ws-put ws :active-env
                          (or (and saved (plist-get saved :active-env))

@@ -1428,7 +1428,7 @@ end had merely decided to attempt."
       ;; Act / Assert
       (should (eq :pending (agent-repl--frontend-rebind-workspaces-after-restart))))))
 
-;;;; ---- release on nuke ------------------------------------------------------------
+;;;; ---- release on kill ------------------------------------------------------------
 
 ;;;; ---- never-blue: the workspace-switch ensure ---------------------------
 ;;

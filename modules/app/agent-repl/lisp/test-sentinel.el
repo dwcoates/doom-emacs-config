@@ -316,7 +316,7 @@ old raw-hash iteration semantics for a sole matching historical entry."
     (let ((root (agent-repl--path-canonical "/home/user/project"))
           (registered-names-called nil))
       (agent-repl--ws-put "tombstoned-ws" :project-dir root)
-      (agent-repl--ws-put "tombstoned-ws" :nuked-at t)
+      (agent-repl--ws-put "tombstoned-ws" :killed-at t)
       (cl-letf (((symbol-function 'agent-repl--git-root)
                  (lambda (_d) root))
                 ((symbol-function 'agent-repl--ws-registered-names)

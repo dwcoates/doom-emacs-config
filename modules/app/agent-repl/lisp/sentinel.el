@@ -86,7 +86,7 @@ wrong perspective."
         (setq match (or (cl-find-if
                          (lambda (ws)
                            (and (agent-repl--ws-get ws :active-env)
-                                (not (agent-repl--ws-get ws :nuked-at))))
+                                (not (agent-repl--ws-get ws :killed-at))))
                          candidates)
                         (car candidates)))
         (when (> (length candidates) 1)

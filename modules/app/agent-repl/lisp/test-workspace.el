@@ -65,7 +65,7 @@
     (agent-repl--ws-del "ws1")
     (let ((snapshot (agent-repl--ws-plist "ws1")))
       (should (equal (plist-get snapshot :project-dir) "/tmp/ws1"))
-      (should (plist-get snapshot :nuked-at)))))
+      (should (plist-get snapshot :killed-at)))))
 
 (ert-deftest agent-repl-test-ws-plist-rejects-unknown-workspace ()
   "ws-plist makes an invalid serialization target fail loudly."
@@ -346,7 +346,7 @@ producer of the leak can be identified from the message alone."
 (ert-deftest agent-repl-test-ws-del-clears-runtime-key ()
   "ws-del clears every key listed in `agent-repl--ws-runtime-keys'.
 Asserts a representative runtime key (`:pending-show-panels') is reset to
-nil so post-nuke passes don't act on stale runtime intent."
+nil so post-kill passes don't act on stale runtime intent."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (agent-repl--ws-put "ws1" :pending-show-panels t)
@@ -429,14 +429,14 @@ priority badge without the user having to re-rank it."
     (agent-repl--ws-del "ws1")
     (should (eq (agent-repl--ws-get "ws1" :priority) :p1))))
 
-(ert-deftest agent-repl-test-ws-del-stamps-nuked-at ()
-  "ws-del stamps `:nuked-at' with a non-nil time value — the marker
+(ert-deftest agent-repl-test-ws-del-stamps-killed-at ()
+  "ws-del stamps `:killed-at' with a non-nil time value — the marker
 read by `--ws-live-p' and the snapshot persistence layer to distinguish
 tombstones from live entries."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (agent-repl--ws-del "ws1")
-    (should (agent-repl--ws-get "ws1" :nuked-at))))
+    (should (agent-repl--ws-get "ws1" :killed-at))))
 
 (ert-deftest agent-repl-test-ws-del-bumps-last-killed-at ()
   "ws-del bumps `:last-killed-at' so the picker's sort-by-last-killed
@@ -528,12 +528,12 @@ the affected peers."
   "`--ws-del' tombstones the target's own entry rather than removing it —
 the post-tombstone-refactor invariant.  The peer-cache sweep above still
 fires; this test pins that the same call also leaves the target entry
-intact (just with `:nuked-at' stamped)."
+intact (just with `:killed-at' stamped)."
   (agent-repl-test--with-clean-state
     (puthash "doomed" '(:project-dir "/tmp/x") agent-repl--workspaces)
     (agent-repl--ws-del "doomed")
     (should (gethash "doomed" agent-repl--workspaces))
-    (should (agent-repl--ws-get "doomed" :nuked-at))
+    (should (agent-repl--ws-get "doomed" :killed-at))
     (should (equal (agent-repl--ws-get "doomed" :project-dir) "/tmp/x"))))
 
 ;;;; ---- Tests: ws-live-p (moved from test-core.el) ----
@@ -546,7 +546,7 @@ intact (just with `:nuked-at' stamped)."
 
 (ert-deftest agent-repl-test-ws-live-p-returns-nil-for-tombstone ()
   "ws-live-p returns nil for a tombstoned entry — the predicate that
-keeps tab-bar/picker/state-updater from surfacing nuked workspaces."
+keeps tab-bar/picker/state-updater from surfacing killed workspaces."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (agent-repl--ws-del "ws1")
@@ -562,7 +562,7 @@ keeps tab-bar/picker/state-updater from surfacing nuked workspaces."
 (ert-deftest agent-repl-test-live-ws-names-excludes-tombstones ()
   "live-ws-names returns only non-tombstoned hash keys, regardless of
 insertion order — the single helper every hash iterator routes through
-to avoid surfacing nuked workspaces."
+to avoid surfacing killed workspaces."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "alive" :project-dir "/tmp/alive")
     (agent-repl--ws-put "dead" :project-dir "/tmp/dead")
@@ -662,24 +662,24 @@ no OTHER owner."
       (should-not (agent-repl--ws-dir-owner dir "owner")))))
 
 (ert-deftest agent-repl-test-ws-dir-owner-ignores-tombstoned ()
-  "ws-dir-owner ignores a tombstoned (`:nuked-at') entry owning the dir, so a
+  "ws-dir-owner ignores a tombstoned (`:killed-at') entry owning the dir, so a
 dead shadow never counts as the owner."
   (agent-repl-test--with-clean-state
     (let ((dir (agent-repl--path-canonical "/home/user/proj")))
       (agent-repl--ws-put "dead" :project-dir dir)
-      (agent-repl--ws-put "dead" :nuked-at '(1 2 3 4))
+      (agent-repl--ws-put "dead" :killed-at '(1 2 3 4))
       (should-not (agent-repl--ws-dir-owner dir)))))
 
 ;;;; ---- Tests: --ws-known-p ----
 
 (ert-deftest agent-repl-test-ws-known-p-returns-t-for-live-entry ()
-  "A workspace with a hash entry and no :nuked-at is known."
+  "A workspace with a hash entry and no :killed-at is known."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (should (agent-repl--ws-known-p "ws1"))))
 
 (ert-deftest agent-repl-test-ws-known-p-returns-t-for-tombstoned-entry ()
-  "A tombstoned workspace (entry + :nuked-at set) is still known."
+  "A tombstoned workspace (entry + :killed-at set) is still known."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (agent-repl--ws-del "ws1")
@@ -736,7 +736,7 @@ dead shadow never counts as the owner."
     (should (agent-repl--ws-tombstoned-p "ws1"))))
 
 (ert-deftest agent-repl-test-ws-tombstoned-p-returns-nil-for-live-entry ()
-  "A live workspace (no :nuked-at) is not tombstoned."
+  "A live workspace (no :killed-at) is not tombstoned."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (should-not (agent-repl--ws-tombstoned-p "ws1"))))
@@ -769,16 +769,16 @@ dead shadow never counts as the owner."
     (agent-repl--ws-del "hidden-ws")
     (should (agent-repl--ws-hide-tombstoned-p "hidden-ws"))))
 
-(ert-deftest agent-repl-test-ws-hide-tombstoned-p-returns-nil-for-nuke-tombstoned ()
+(ert-deftest agent-repl-test-ws-hide-tombstoned-p-returns-nil-for-kill-tombstoned ()
   "A workspace tombstoned without the hide marker returns nil even though it is tombstoned."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "nuked-ws" :project-dir "/tmp/x")
-    (agent-repl--ws-del "nuked-ws")
-    (should (agent-repl--ws-tombstoned-p "nuked-ws"))
-    (should-not (agent-repl--ws-hide-tombstoned-p "nuked-ws"))))
+    (agent-repl--ws-put "killed-ws" :project-dir "/tmp/x")
+    (agent-repl--ws-del "killed-ws")
+    (should (agent-repl--ws-tombstoned-p "killed-ws"))
+    (should-not (agent-repl--ws-hide-tombstoned-p "killed-ws"))))
 
 (ert-deftest agent-repl-test-ws-hide-tombstoned-p-returns-nil-for-live-marker ()
-  "A live workspace carrying the marker but no :nuked-at returns nil.
+  "A live workspace carrying the marker but no :killed-at returns nil.
 Predicate is a conjunction of tombstone state AND reason marker."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "live-ws" :project-dir "/tmp/x")
@@ -793,17 +793,17 @@ Predicate is a conjunction of tombstone state AND reason marker."
 ;;;; ---- Tests: --ws-hide-tombstoned-names ----
 
 (ert-deftest agent-repl-test-ws-hide-tombstoned-names-returns-hide-tombstones-only ()
-  "Enumerator returns hide-tombstoned ws but excludes nuke-tombstoned and live ws."
+  "Enumerator returns hide-tombstoned ws but excludes kill-tombstoned and live ws."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "hidden1" :project-dir "/tmp/a")
     (agent-repl--ws-put "hidden1" :hidden-project-dir t)
     (agent-repl--ws-del "hidden1")
-    (agent-repl--ws-put "nuked"   :project-dir "/tmp/b")
-    (agent-repl--ws-del "nuked")
+    (agent-repl--ws-put "killed"   :project-dir "/tmp/b")
+    (agent-repl--ws-del "killed")
     (agent-repl--ws-put "live"    :project-dir "/tmp/c")
     (let ((names (agent-repl--ws-hide-tombstoned-names)))
       (should (equal names '("hidden1")))
-      (should-not (member "nuked" names))
+      (should-not (member "killed" names))
       (should-not (member "live" names)))))
 
 (ert-deftest agent-repl-test-ws-hide-tombstoned-names-sorted-by-name ()
@@ -824,7 +824,7 @@ Predicate is a conjunction of tombstone state AND reason marker."
 ;;;; ---- Tests: --ws-render-status nil for hide-tombstoned ----
 
 (ert-deftest agent-repl-test-ws-render-status-nil-for-hide-tombstoned ()
-  "Render-status returns nil for hide-tombstoned ws, collapsed with nuke-tombstoned."
+  "Render-status returns nil for hide-tombstoned ws, collapsed with kill-tombstoned."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "hidden" :project-dir "/tmp/x")
     (agent-repl--ws-put "hidden" :agent-state :thinking)
@@ -926,7 +926,7 @@ Predicate is a conjunction of tombstone state AND reason marker."
 
 (ert-deftest agent-repl-test-ws-list-names-includes-tombstoned-if-in-cache ()
   "A tombstoned ws that still appears in persp-names-cache is listed.
-This case is rare in production (the nuke path removes from cache
+This case is rare in production (the kill path removes from cache
 before tombstoning), but the predicate is `--ws-known-p' which is
 true for tombstoned, so the list includes it.  Documents the
 contract explicitly so a renderer relying on it stays predictable."
@@ -2603,15 +2603,15 @@ must keep seeing what persp-mode actually says."
                               (string-match-p "merge not finished" line)))
                        logged)))))
 
-(ert-deftest agent-repl-test-nuke-refuses-merging-workspace-before-teardown ()
-  "`--nuke-one-workspace' aborts BEFORE any teardown step mutates state."
+(ert-deftest agent-repl-test-kill-refuses-merging-workspace-before-teardown ()
+  "`--kill-one-workspace' aborts BEFORE any teardown step mutates state."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
     (agent-repl--ws-put "ws" :pushed-render-state :merging)
     (let ((saved nil))
       (cl-letf (((symbol-function 'agent-repl--state-save)
                  (lambda (&rest _) (setq saved t))))
-        (should-error (agent-repl--nuke-one-workspace "ws") :type 'user-error))
+        (should-error (agent-repl--kill-one-workspace "ws") :type 'user-error))
       (should-not saved)
       (should (agent-repl--ws-get "ws" :project-dir)))))
 
@@ -2746,7 +2746,7 @@ The screen must only demote names that could not be routed at all."
         ;; Assert
         (should-not switched)))))
 
-(ert-deftest agent-repl-test-nuke-one-workspace-lands-the-user-after-teardown ()
+(ert-deftest agent-repl-test-kill-one-workspace-lands-the-user-after-teardown ()
   "Tearing a workspace down always ends by naming where the user is left."
   ;; Arrange
   (agent-repl-test--with-clean-state
@@ -2759,11 +2759,11 @@ The screen must only demote names that could not be routed at all."
                 ((symbol-function 'agent-repl--land-after-teardown)
                  (lambda (ws) (setq landed ws))))
         ;; Act
-        (agent-repl--nuke-one-workspace "ws")
+        (agent-repl--kill-one-workspace "ws")
         ;; Assert
         (should (equal landed "ws"))))))
 
-(ert-deftest agent-repl-test-nuke-one-workspace-survives-a-failing-landing ()
+(ert-deftest agent-repl-test-kill-one-workspace-survives-a-failing-landing ()
   "A landing that signals is warned about and never aborts the teardown."
   ;; Arrange
   (agent-repl-test--with-clean-state
@@ -2779,7 +2779,7 @@ The screen must only demote names that could not be routed at all."
                 ((symbol-function 'agent-repl--warn)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
         ;; Act
-        (agent-repl--nuke-one-workspace "ws")
+        (agent-repl--kill-one-workspace "ws")
         ;; Assert — the failure is surfaced and the teardown still finishes.
         (should (seq-find (lambda (l) (string-match-p "land-after-teardown error" l))
                           warned))

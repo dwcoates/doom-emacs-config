@@ -47,11 +47,11 @@
 ;;     agent-repl--workspaces' below.
 ;;
 ;;   - `--ws-del' does NOT `remhash'.  It tombstones (stamps
-;;     `:nuked-at', clears every key in `--ws-runtime-keys').  The
+;;     `:killed-at', clears every key in `--ws-runtime-keys').  The
 ;;     identity keys (`:project-dir', `:created-at', `:ws-id',
 ;;     `:source-ws-dir', `:priority', the `:merge-completed*' family)
 ;;     survive so reverse-lookups, picker sort, and merged-state
-;;     rendering keep working past nuke.
+;;     rendering keep working past kill.
 
 ;;; Code:
 
@@ -179,7 +179,7 @@ of buffers, processes, or environment structs."
   (let ((plist (gethash ws agent-repl--workspaces)))
     (agent-repl--log-verbose
      ws "ws-plist: ws=%s key-count=%s tombstoned=%s"
-     ws (/ (length plist) 2) (if (plist-get plist :nuked-at) "t" "nil"))
+     ws (/ (length plist) 2) (if (plist-get plist :killed-at) "t" "nil"))
     (copy-sequence plist)))
 
 (defun agent-repl--ws-rename-state (old-ws new-ws new-project-dir)
@@ -309,7 +309,7 @@ arguments signal `user-error' before any workspace is mutated."
             ws
             "ws-rewrite-source-back-refs: REWROTE ws=%s source-dir=%s -> %s source-ws-name-cleared=t tombstoned=%s"
             ws source-dir canonical-new
-            (if (plist-get plist :nuked-at) "t" "nil"))))))
+            (if (plist-get plist :killed-at) "t" "nil"))))))
      agent-repl--workspaces)
     (agent-repl--log nil
                      "ws-rewrite-source-back-refs: DONE old-source-dir=%s new-source-dir=%s rewritten=%d"
@@ -430,11 +430,11 @@ and the `:merge-completed*' family.  Preserving `:project-dir' across tombstone
 is what lets `agent-repl--ws-dir' callers (magit-status, async git,
 ws-id hashing) keep working on a persp that outlives its agent-repl
 session — the failure mode that previously surfaced as
-`no :project-dir for workspace X' errors after a nuke.")
+`no :project-dir for workspace X' errors after a kill.")
 
 (defun agent-repl--ws-live-p (ws)
   "Return non-nil iff WS is a live (non-tombstoned) registered workspace.
-A workspace is live when it has a hash entry AND no `:nuked-at'
+A workspace is live when it has a hash entry AND no `:killed-at'
 tombstone marker.  The single liveness predicate used by every hash
 iterator that previously relied on the implicit `presence == live'
 invariant (picker, periodic state updater, reverse-lookup) so
@@ -445,7 +445,7 @@ happens to be the empty list (`nil') is still counted as present —
 distinguishing `key absent' from `key bound to ()'."
   (let ((plist (gethash ws agent-repl--workspaces 'agent-repl--ws-absent)))
     (and (not (eq plist 'agent-repl--ws-absent))
-         (null (plist-get plist :nuked-at)))))
+         (null (plist-get plist :killed-at)))))
 
 (defun agent-repl--live-ws-names ()
   "Return the list of live workspace names (hash keys minus tombstones).
@@ -527,11 +527,11 @@ path-keyed stub."
 Runs while the runtime keys (`agent-repl--ws-runtime-keys') are still
 readable, so consumers can release external resources keyed on them.
 Handlers must not signal: a teardown hook that errors would abort the
-nuke midway.")
+kill midway.")
 
 (defun agent-repl--ws-del (ws)
   "Tombstone workspace WS instead of removing its hash entry.
-Stamps `:nuked-at' with the current time, clears every key in
+Stamps `:killed-at' with the current time, clears every key in
 `agent-repl--ws-runtime-keys' (frontend buffer / proc refs, timers,
 session-bound state), and preserves identity/historical keys
 (`:project-dir', `:created-at', `:last-killed-at', `:priority',
@@ -539,7 +539,7 @@ session-bound state), and preserves identity/historical keys
 remains in `agent-repl--workspaces' so `agent-repl--ws-dir' and
 reverse-lookups still resolve, but `agent-repl--ws-live-p' returns
 nil and every filtered iterator (picker, periodic updater)
-ignores the entry — preserving the prior UX of `nuke removes the
+ignores the entry — preserving the prior UX of `kill removes the
 workspace from view' without destroying the identity record.
 
 Sweeps peers' cached `:source-ws-name' so a tombstoned WS can never be
@@ -561,7 +561,7 @@ log line preserves the pre-existing diagnostic shape."
       (dolist (key agent-repl--ws-runtime-keys)
         (agent-repl--ws-put ws key nil))
       (agent-repl--ws-put ws :last-killed-at (current-time))
-      (agent-repl--ws-put ws :nuked-at (current-time)))
+      (agent-repl--ws-put ws :killed-at (current-time)))
     ;; Keep this as the operation's final normal log.  Consumers use it as
     ;; the canonical completed-tombstone record after setter advice settles.
     (agent-repl--log ws "ws-del: ws=%s had-entry=%s (tombstone) kill-cause=%s"
@@ -620,12 +620,12 @@ no-silent-fallback rule).  Returns nil on success."
     (user-error "agent-repl: %s: workspace %S is not registered" context ws)))
 
 (defun agent-repl--ws-tombstoned-p (ws)
-  "Return non-nil iff WS is known AND has `:nuked-at' set.
+  "Return non-nil iff WS is known AND has `:killed-at' set.
 Complementary to `--ws-live-p' over `--ws-known-p': a known ws is
 either live or tombstoned, never both.  Unknown ws returns nil.
 
 A tombstone may additionally carry a REASON marker explaining why
-the entry was nuked, layered on top of the `:nuked-at' stamp:
+the entry was killed, layered on top of the `:killed-at' stamp:
 
   - `:hidden-project-dir t' — the entry was killed by
     `agent-repl-hide-project-dirs-mode' and is eligible for restore
@@ -637,17 +637,17 @@ reasons because every renderer treats them identically
 \(`--ws-render-status' returns nil for every reason); callers that
 need to distinguish reasons use the reason-specific helper."
   (and (agent-repl--ws-known-p ws)
-       (not (null (agent-repl--ws-get ws :nuked-at)))))
+       (not (null (agent-repl--ws-get ws :killed-at)))))
 
 (defun agent-repl--ws-hide-tombstoned-p (ws)
   "Return non-nil iff WS is tombstoned for the hide-project-dirs reason.
 True when WS is `--ws-tombstoned-p' AND carries `:hidden-project-dir t'
 on its plist (the marker stamped by
-`agent-repl--hide-project-dirs--hide' before the nuke).  Used by the
+`agent-repl--hide-project-dirs--hide' before the kill).  Used by the
 restore path to enumerate the tombstones it owns without sweeping in
-nuke-by-hand tombstones it does not.
+kill-by-hand tombstones it does not.
 
-Unknown ws returns nil.  Live ws (no `:nuked-at') returns nil even
+Unknown ws returns nil.  Live ws (no `:killed-at') returns nil even
 if `:hidden-project-dir' happens to be t — the predicate is a
 conjunction of tombstone state and reason marker."
   (and (agent-repl--ws-tombstoned-p ws)
@@ -1117,13 +1117,13 @@ user as a completed teardown."
   (when (agent-repl--ws-merge-unfinished-p ws)
     (let ((state (agent-repl--ws-get ws :pushed-render-state)))
       (agent-repl--log ws
-                        "nuke-one-workspace: REFUSED ws=%s state=%s — merge not finished"
+                        "kill-one-workspace: REFUSED ws=%s state=%s — merge not finished"
                         ws state)
       (user-error
        "Cannot tear down workspace '%s': its merge is still %s"
        ws (substring (symbol-name state) 1)))))
 
-(defun agent-repl--nuke-one-workspace (ws &optional preserve-entry)
+(defun agent-repl--kill-one-workspace (ws &optional preserve-entry)
   "Tear down a single agent-repl workspace WS without prompting.
 
 REFUSES (via `agent-repl--assert-mergeable-teardown') any workspace whose
@@ -1134,19 +1134,19 @@ and buffers, removes WS from `agent-repl--workspaces', kills every
 remaining buffer (and attached process) that belongs to the persp via
 `agent-repl--kill-workspace-buffers', and finally kills the persp
 workspace via `+workspace/kill'.  Designed to be reusable from
-`agent-repl-nuke-workspace' (one-shot),
-`agent-repl-nuke-all-workspaces' (loop), and
-`agent-repl-kill-workspace'.
+`agent-repl-kill-workspace' (one-shot),
+`agent-repl-kill-all-workspaces' (loop), and
+`agent-repl-close-workspace'.
 
 When PRESERVE-ENTRY is non-nil, the `agent-repl--workspaces' hashmap
 entry is retained — every other teardown step runs as usual (agent
 session, buffers, persp), but the ws plist survives so the workspace's
 merged state stays visible to the surviving renderers until the user
 explicitly `finish'es it.  This is the merge-completed teardown path;
-standard nuke/kill callers pass nil and the entry is dropped.
+standard kill/close callers pass nil and the entry is dropped.
 
 Persisted state (`<project>/.claude/emacs/state.el', including the
-captured per-environment session-id) is ALWAYS preserved — nuke is
+captured per-environment session-id) is ALWAYS preserved — kill is
 purely an in-memory teardown.  An explicit `--state-save' runs at the
 top of the function so the file reflects the latest in-memory state
 even if downstream teardown errors before the redundant state-save in
@@ -1166,7 +1166,7 @@ by `workspace.el' (see file Commentary and AGENTS.md).  It is the
 only `+workspace/kill' call site inside agent-repl outside the
 finish-workspace path."
   (agent-repl--assert-mergeable-teardown ws)
-  (agent-repl--log ws "nuke-one-workspace: ENTRY ws=%s preserve-entry=%s kill-cause=%s cache=%S"
+  (agent-repl--log ws "kill-one-workspace: ENTRY ws=%s preserve-entry=%s kill-cause=%s cache=%S"
                     ws (if preserve-entry "t" "nil")
                     (agent-repl--kill-cause-str)
                     (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
@@ -1181,30 +1181,30 @@ finish-workspace path."
   ;; erroring.  The teardown path also calls state-save, but wrapping
   ;; ours up front guarantees preservation even if a downstream step
   ;; signals before that secondary save can run.  Wrapped in
-  ;; condition-case so a save error doesn't abort the nuke itself.
+  ;; condition-case so a save error doesn't abort the kill itself.
   (condition-case err
       (agent-repl--state-save ws)
-    (error (agent-repl--warn ws "nuke-one-workspace: pre-teardown state-save error: %S" err)))
+    (error (agent-repl--warn ws "kill-one-workspace: pre-teardown state-save error: %S" err)))
   (unwind-protect
       (progn
-        (agent-repl--log ws "nuke-one-workspace: calling frontend kill-fn ws=%s" ws)
+        (agent-repl--log ws "kill-one-workspace: calling frontend kill-fn ws=%s" ws)
         (condition-case err
             (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)
-          (error (agent-repl--warn ws "nuke-one-workspace: frontend kill-fn error: %S" err)))
-        (agent-repl--log ws "nuke-one-workspace: frontend kill-fn returned ws=%s" ws))
+          (error (agent-repl--warn ws "kill-one-workspace: frontend kill-fn error: %S" err)))
+        (agent-repl--log ws "kill-one-workspace: frontend kill-fn returned ws=%s" ws))
     ;; Cleanup: always remove the hashmap entry regardless of any error
     ;; in the steps above (unless PRESERVE-ENTRY was requested).
     ;; Persisted state.el is intentionally NOT touched here — see the
     ;; docstring.
     (if preserve-entry
-        (agent-repl--log ws "nuke-one-workspace: ws-del decision=preserve-entry")
-      (agent-repl--log ws "nuke-one-workspace: ws-del decision=tombstone")
+        (agent-repl--log ws "kill-one-workspace: ws-del decision=preserve-entry")
+      (agent-repl--log ws "kill-one-workspace: ws-del decision=tombstone")
       (condition-case err
           (agent-repl--ws-del ws)
-        (error (agent-repl--warn ws "nuke-one-workspace: ws-del error: %S" err))))
+        (error (agent-repl--warn ws "kill-one-workspace: ws-del error: %S" err))))
     ;; WHY: keep `agent-repl--restored-workspaces' consistent with the
-    ;; live hash — a ws that's been nuked is no longer a restore-batch
-    ;; member, so a follow-up `nuke-restored-workspaces' won't try to
+    ;; live hash — a ws that's been killed is no longer a restore-batch
+    ;; member, so a follow-up `kill-restored-workspaces' won't try to
     ;; re-tear-down a stale name.  The defvar lives in commands.el; we
     ;; treat it as the snapshot-restore module's state and mutate
     ;; through the var directly (forward defvar at the top of this file).
@@ -1216,11 +1216,11 @@ finish-workspace path."
     ;; hashmap; this sweep catches file buffers, magit buffers, auxiliary shells,
     ;; or anything else the user opened while inside the workspace so
     ;; nothing is orphaned after the persp goes away.
-    (agent-repl--log ws "nuke-one-workspace: calling kill-workspace-buffers ws=%s" ws)
+    (agent-repl--log ws "kill-one-workspace: calling kill-workspace-buffers ws=%s" ws)
     (condition-case err
         (agent-repl--kill-workspace-buffers ws)
-      (error (agent-repl--warn ws "nuke-one-workspace: kill-workspace-buffers error: %S" err)))
-    (agent-repl--log ws "nuke-one-workspace: kill-workspace-buffers returned ws=%s" ws)
+      (error (agent-repl--warn ws "kill-one-workspace: kill-workspace-buffers error: %S" err)))
+    (agent-repl--log ws "kill-one-workspace: kill-workspace-buffers returned ws=%s" ws)
     ;; Kill the persp workspace last so all internal state is already
     ;; cleaned up before the UI workspace disappears.
     ;;
@@ -1244,29 +1244,29 @@ finish-workspace path."
                             (+workspace-exists-p ws))))
           (agent-repl--log
            ws
-           "nuke-one-workspace: persp-kill decision=%s system-available=%s exists-fn-bound=%s"
+           "kill-one-workspace: persp-kill decision=%s system-available=%s exists-fn-bound=%s"
            (if exists "kill" "skip")
            (if system-available "t" "nil")
            (if exists-fn-bound "t" "nil"))
           (when exists
-          (agent-repl--log ws "nuke-one-workspace: pre-persp-kill ws=%s cache=%S"
+          (agent-repl--log ws "kill-one-workspace: pre-persp-kill ws=%s cache=%S"
                             ws persp-names-cache)
           (+workspace/kill ws)
-          (agent-repl--log ws "nuke-one-workspace: post-persp-kill ws=%s in-cache=%s cache=%S"
+          (agent-repl--log ws "kill-one-workspace: post-persp-kill ws=%s in-cache=%s cache=%S"
                             ws (if (member ws persp-names-cache) "t" "nil") persp-names-cache)))
-      (error (agent-repl--warn ws "nuke-one-workspace: workspace-kill error: %S" err)))
+      (error (agent-repl--warn ws "kill-one-workspace: workspace-kill error: %S" err)))
     ;; The perspective the user was standing in may be the one just killed, so
     ;; where they end up is CHOSEN here rather than inherited from whatever
     ;; persp-mode left selected — see `agent-repl--land-after-teardown'.
     (condition-case err
         (agent-repl--land-after-teardown ws)
-      (error (agent-repl--warn ws "nuke-one-workspace: land-after-teardown error: %S" err)))
+      (error (agent-repl--warn ws "kill-one-workspace: land-after-teardown error: %S" err)))
     ;; The workspace is now gone from both the hash (tombstoned, unless
     ;; PRESERVE-ENTRY) and the tab bar, so its sidebar row is gone too.
     ;; Repaint immediately rather than letting the row outlive its tab
     ;; until the 1Hz signature tick notices.
-    (agent-repl--ws-repaint-sidebar ws "nuke-one-workspace")
-    (agent-repl--log ws "nuke-one-workspace: DONE ws=%s all-cleanup-complete" ws)))
+    (agent-repl--ws-repaint-sidebar ws "kill-one-workspace")
+    (agent-repl--log ws "kill-one-workspace: DONE ws=%s all-cleanup-complete" ws)))
 
 (defun agent-repl--reorder-workspace-by-priority (ws)
   "Reorder workspace WS in `persp-names-cache' by its `:priority'.
@@ -1305,7 +1305,7 @@ route through it; they may not mutate `persp-names-cache' directly."
       ;; `agent-repl-set-priority'), the cache ends up holding a different
       ;; object than the persp's stored name, and `persp-kill' silently
       ;; fails to remove the workspace from the cache later.  The result
-      ;; is a tab-bar entry that survives nuke and re-duplicates on
+      ;; is a tab-bar entry that survives kill and re-duplicates on
       ;; subsequent recreations.  Recovering the canonical string via
       ;; `(car (member ws cache))' (which uses `equal') keeps identity
       ;; aligned with the persp internal name.

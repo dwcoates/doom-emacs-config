@@ -175,10 +175,10 @@ current workspace, not NAME)."
         (agent-repl--read-known-workspace "Pick: ")
         (should-not captured-default)))))
 
-;;;; ---- Tests: agent-repl--nukeable-workspace-names ----
+;;;; ---- Tests: agent-repl--killable-workspace-names ----
 
-(ert-deftest agent-repl-test-nukeable-workspace-names/union-live-and-tabbar ()
-  "nukeable-workspace-names returns the union of live ws and tab-bar names.
+(ert-deftest agent-repl-test-killable-workspace-names/union-live-and-tabbar ()
+  "killable-workspace-names returns the union of live ws and tab-bar names.
 Live entries appear before any tab-bar-only entries; tab-bar entries
 that duplicate a live name are dropped.  Order WITHIN the live set is
 not guaranteed (`hash-table-keys' is unordered), so the live block is
@@ -188,7 +188,7 @@ checked as a set rather than a positional sequence."
     (agent-repl--ws-put "live2" :project-dir "/tmp/live2")
     (cl-letf (((symbol-function '+workspace-list-names)
                (lambda () '("live1" "tabbar-only" "live2" "stray"))))
-      (let* ((result (agent-repl--nukeable-workspace-names))
+      (let* ((result (agent-repl--killable-workspace-names))
              (live-prefix (cl-subseq result 0 2))
              (extras-suffix (cl-subseq result 2)))
         ;; The first 2 entries are exactly the live set (order-agnostic).
@@ -200,49 +200,49 @@ checked as a set rather than a positional sequence."
         (should (= 1 (cl-count "live1" result :test #'equal)))
         (should (= 1 (cl-count "live2" result :test #'equal)))))))
 
-(ert-deftest agent-repl-test-nukeable-workspace-names/excludes-tombstoned ()
-  "nukeable-workspace-names omits tombstoned agent-repl entries whose
+(ert-deftest agent-repl-test-killable-workspace-names/excludes-tombstoned ()
+  "killable-workspace-names omits tombstoned agent-repl entries whose
 persp is also gone from the tab-bar.  A tombstoned entry whose persp
 still exists IS included (via the tab-bar branch)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "tomb-no-persp" :project-dir "/tmp/a")
-    (agent-repl--ws-put "tomb-no-persp" :nuked-at (current-time))
+    (agent-repl--ws-put "tomb-no-persp" :killed-at (current-time))
     (agent-repl--ws-put "tomb-with-persp" :project-dir "/tmp/b")
-    (agent-repl--ws-put "tomb-with-persp" :nuked-at (current-time))
+    (agent-repl--ws-put "tomb-with-persp" :killed-at (current-time))
     (cl-letf (((symbol-function '+workspace-list-names)
                (lambda () '("tomb-with-persp"))))
-      (let ((result (agent-repl--nukeable-workspace-names)))
+      (let ((result (agent-repl--killable-workspace-names)))
         (should-not (member "tomb-no-persp" result))
         (should (member "tomb-with-persp" result))))))
 
-(ert-deftest agent-repl-test-nukeable-workspace-names/empty-when-nothing-registered ()
-  "nukeable-workspace-names returns empty when there are no live or tab-bar ws."
+(ert-deftest agent-repl-test-killable-workspace-names/empty-when-nothing-registered ()
+  "killable-workspace-names returns empty when there are no live or tab-bar ws."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-list-names) (lambda () nil)))
-      (should-not (agent-repl--nukeable-workspace-names)))))
+      (should-not (agent-repl--killable-workspace-names)))))
 
-;;;; ---- Tests: agent-repl--read-nukeable-workspace ----
+;;;; ---- Tests: agent-repl--read-killable-workspace ----
 
-(ert-deftest agent-repl-test-read-nukeable-workspace/no-candidates ()
-  "read-nukeable-workspace signals user-error when no live or tab-bar ws exist."
+(ert-deftest agent-repl-test-read-killable-workspace/no-candidates ()
+  "read-killable-workspace signals user-error when no live or tab-bar ws exist."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-list-names) (lambda () nil)))
-      (should-error (agent-repl--read-nukeable-workspace "Pick: ")
+      (should-error (agent-repl--read-killable-workspace "Pick: ")
                     :type 'user-error))))
 
-(ert-deftest agent-repl-test-read-nukeable-workspace/includes-tabbar-only-ws ()
-  "read-nukeable-workspace offers tab-bar-only ws in the completion list."
+(ert-deftest agent-repl-test-read-killable-workspace/includes-tabbar-only-ws ()
+  "read-killable-workspace offers tab-bar-only ws in the completion list."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-list-names)
                (lambda () '("stray-persp")))
               ((symbol-function '+workspace-current-name) (lambda () "main"))
               ((symbol-function 'completing-read)
                (lambda (_p coll &rest _) (car coll))))
-      (should (equal (agent-repl--read-nukeable-workspace "Pick: ")
+      (should (equal (agent-repl--read-killable-workspace "Pick: ")
                      "stray-persp")))))
 
-(ert-deftest agent-repl-test-read-nukeable-workspace/defaults-to-current-when-tabbar-only ()
-  "read-nukeable-workspace defaults to current ws when it's in the tab-bar
+(ert-deftest agent-repl-test-read-killable-workspace/defaults-to-current-when-tabbar-only ()
+  "read-killable-workspace defaults to current ws when it's in the tab-bar
 even if it has no live agent-repl entry."
   (agent-repl-test--with-clean-state
     (let ((captured-default nil))
@@ -254,65 +254,65 @@ even if it has no live agent-repl entry."
                  (lambda (_p _c _pr _r _h _hv default)
                    (setq captured-default default)
                    default)))
-        (agent-repl--read-nukeable-workspace "Pick: ")
+        (agent-repl--read-killable-workspace "Pick: ")
         (should (equal captured-default "current-persp"))))))
 
-;;;; ---- Tests: agent-repl--nuke-or-kill-workspace ----
+;;;; ---- Tests: agent-repl--kill-or-close-workspace ----
 
-(ert-deftest agent-repl-test-nuke-or-kill-workspace/live-ws-runs-nuke ()
-  "nuke-or-kill-workspace runs the full nuke teardown for a live ws."
+(ert-deftest agent-repl-test-kill-or-close-workspace/live-ws-runs-kill ()
+  "kill-or-close-workspace runs the full kill teardown for a live ws."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "live" :project-dir "/tmp/live")
-    (let ((nuked nil)
+    (let ((killed nil)
           (persp-killed nil))
-      (cl-letf (((symbol-function 'agent-repl--nuke-one-workspace)
-                 (lambda (ws &optional _preserve) (setq nuked ws)))
+      (cl-letf (((symbol-function 'agent-repl--kill-one-workspace)
+                 (lambda (ws &optional _preserve) (setq killed ws)))
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq persp-killed ws))))
-        (let ((result (agent-repl--nuke-or-kill-workspace "live")))
-          (should (eq result 'nuke))
-          (should (equal nuked "live"))
+        (let ((result (agent-repl--kill-or-close-workspace "live")))
+          (should (eq result 'kill))
+          (should (equal killed "live"))
           (should-not persp-killed))))))
 
-(ert-deftest agent-repl-test-nuke-or-kill-workspace/tombstoned-ws-runs-persp-kill ()
-  "nuke-or-kill-workspace falls back to +workspace/kill for a tombstoned ws
-whose persp still exists.  MUST NOT call --nuke-one-workspace — there
+(ert-deftest agent-repl-test-kill-or-close-workspace/tombstoned-ws-runs-persp-kill ()
+  "kill-or-close-workspace falls back to +workspace/kill for a tombstoned ws
+whose persp still exists.  MUST NOT call --kill-one-workspace — there
 is no live agent-repl session to tear down."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "tomb" :project-dir "/tmp/tomb")
-    (agent-repl--ws-put "tomb" :nuked-at (current-time))
-    (let ((nuked nil)
+    (agent-repl--ws-put "tomb" :killed-at (current-time))
+    (let ((killed nil)
           (persp-killed nil)
           (persp-mode t))
-      (cl-letf (((symbol-function 'agent-repl--nuke-one-workspace)
-                 (lambda (ws &optional _preserve) (setq nuked ws)))
+      (cl-letf (((symbol-function 'agent-repl--kill-one-workspace)
+                 (lambda (ws &optional _preserve) (setq killed ws)))
                 ((symbol-function '+workspace-exists-p) (lambda (_n) t))
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq persp-killed ws))))
-        (let ((result (agent-repl--nuke-or-kill-workspace "tomb")))
-          (should (eq result 'kill))
+        (let ((result (agent-repl--kill-or-close-workspace "tomb")))
+          (should (eq result 'close))
           (should (equal persp-killed "tomb"))
-          (should-not nuked))))))
+          (should-not killed))))))
 
-(ert-deftest agent-repl-test-nuke-or-kill-workspace/never-registered-ws-runs-persp-kill ()
-  "nuke-or-kill-workspace handles a persp that was never agent-repl-registered.
-Routes through +workspace/kill (no live entry, nothing to nuke)."
+(ert-deftest agent-repl-test-kill-or-close-workspace/never-registered-ws-runs-persp-kill ()
+  "kill-or-close-workspace handles a persp that was never agent-repl-registered.
+Routes through +workspace/kill (no live entry, nothing to kill)."
   (agent-repl-test--with-clean-state
-    (let ((nuked nil)
+    (let ((killed nil)
           (persp-killed nil)
           (persp-mode t))
-      (cl-letf (((symbol-function 'agent-repl--nuke-one-workspace)
-                 (lambda (ws &optional _preserve) (setq nuked ws)))
+      (cl-letf (((symbol-function 'agent-repl--kill-one-workspace)
+                 (lambda (ws &optional _preserve) (setq killed ws)))
                 ((symbol-function '+workspace-exists-p) (lambda (_n) t))
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq persp-killed ws))))
-        (let ((result (agent-repl--nuke-or-kill-workspace "never-known")))
-          (should (eq result 'kill))
+        (let ((result (agent-repl--kill-or-close-workspace "never-known")))
+          (should (eq result 'close))
           (should (equal persp-killed "never-known"))
-          (should-not nuked))))))
+          (should-not killed))))))
 
-(ert-deftest agent-repl-test-nuke-or-kill-workspace/skips-persp-kill-when-persp-gone ()
-  "nuke-or-kill-workspace MUST NOT call +workspace/kill when the persp is
+(ert-deftest agent-repl-test-kill-or-close-workspace/skips-persp-kill-when-persp-gone ()
+  "kill-or-close-workspace MUST NOT call +workspace/kill when the persp is
 already missing from the cache — that would emit the spurious
 `'<ws>' workspace doesn't exist' warning in the echo area."
   (agent-repl-test--with-clean-state
@@ -321,8 +321,8 @@ already missing from the cache — that would emit the spurious
       (cl-letf (((symbol-function '+workspace-exists-p) (lambda (_n) nil))
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq persp-killed ws))))
-        (let ((result (agent-repl--nuke-or-kill-workspace "ghost")))
-          (should (eq result 'kill))
+        (let ((result (agent-repl--kill-or-close-workspace "ghost")))
+          (should (eq result 'close))
           (should-not persp-killed))))))
 
 ;;;; ---- Tests: agent-repl-set-priority ----
@@ -508,7 +508,7 @@ contains no `modules/app/agent-repl/config.el', reload falls back to
 rather than truly removing every key.  Runtime state (e.g. `:agent-state'
 seeded via `--ws-set') is cleared, identity keys (`:priority') survive,
 and `--ws-live-p' flips to nil.  This is the same teardown contract as
-nuke/kill — obliterate just adds an owned-buffer sweep on top.
+kill/close — obliterate just adds an owned-buffer sweep on top.
 
 NB: the obliterate function's docstring still says \"removes all state\",
 which now overstates what it does post-tombstone.  If the intent is for
@@ -525,7 +525,7 @@ this test doesn't pin."
     ;; Runtime keys cleared, tombstone stamped, no longer live.
     (should-not (agent-repl--ws-state "ws1"))
     (should-not (agent-repl--ws-live-p "ws1"))
-    (should (agent-repl--ws-get "ws1" :nuked-at))
+    (should (agent-repl--ws-get "ws1" :killed-at))
     ;; Identity keys survive across tombstone.
     (should (equal (agent-repl--ws-get "ws1" :priority) "p1"))
     (should (equal (agent-repl--ws-get "ws1" :project-dir) "/tmp/ws1"))))

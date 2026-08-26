@@ -181,7 +181,7 @@ encode."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "ws-live" :idle)
     (agent-repl--ws-set-agent-state "ws-tombstoned" :thinking)
-    (agent-repl--ws-put "ws-tombstoned" :nuked-at "2026-07-27T00:00:00Z")
+    (agent-repl--ws-put "ws-tombstoned" :killed-at "2026-07-27T00:00:00Z")
     (let* ((snap (agent-repl--workspace-status-snapshot))
            (workspaces (cdr (assoc "workspaces" snap))))
       (should (gethash "ws-live" workspaces))

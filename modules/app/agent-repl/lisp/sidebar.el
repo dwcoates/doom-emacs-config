@@ -501,7 +501,7 @@ rows are included (they are visible and selectable).")
 (defun agent-repl--sidebar-rostered-p (name)
   "Return non-nil when live workspace NAME still belongs in the roster.
 A workspace that has left the tab bar is GONE, and a gone workspace
-gets no row at all: its perspective was killed, its entry nuked, or
+gets no row at all: its perspective was killed, its entry tombstoned, or
 both, and the sidebar must not keep offering a row the user cannot
 switch to.  Membership is therefore `agent-repl--ws-open-p' —
 perspective presence — not mere registration.
