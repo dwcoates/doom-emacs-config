@@ -19,6 +19,7 @@ import "agentrepl/v1/endpoint_get_feed_page.proto";
 import "agentrepl/v1/endpoint_interrupt.proto";
 import "agentrepl/v1/endpoint_answer_permission.proto";
 import "agentrepl/v1/endpoint_answer_question.proto";
+import "agentrepl/v1/endpoint_answer_cold_gate.proto";
 import "agentrepl/v1/endpoint_watch_workspace_roster.proto";
 import "agentrepl/v1/endpoint_create_workspace.proto";
 import "agentrepl/v1/endpoint_open_workspace.proto";
@@ -71,6 +72,8 @@ service AgentRepl {
   rpc AnswerPermission(AnswerPermissionRequest) returns (AnswerPermissionResponse);
   // The question card's submission — answers echo the served values.
   rpc AnswerQuestion(AnswerQuestionRequest) returns (AnswerQuestionResponse);
+  // The cold-context gate's buttons — pay, clear, or compact{model, scope}.
+  rpc AnswerColdGate(AnswerColdGateRequest) returns (AnswerColdGateResponse);
 
   // ---- SIDEBAR ----
 

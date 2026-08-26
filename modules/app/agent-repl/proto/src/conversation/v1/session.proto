@@ -122,28 +122,24 @@ message SessionColdCompact {
   // The model that writes the summary — chosen for this job, not the
   // session's model; a cheaper model often suffices.
   AgentModel model = 1;
-  // WHAT is summarized. The set arm is the scope; each is a different trade
-  // between fidelity and size.
-  oneof scope {
-    // The whole transcript: prompts, responses, tool calls and their results.
-    SessionCompactFull full = 2;
-    // The user's prompts alone.
-    SessionCompactPromptsOnly prompts_only = 3;
-    // The agent's responses alone.
-    SessionCompactResponsesOnly responses_only = 4;
-    // Prompts and responses, without tool traffic.
-    SessionCompactPromptsAndResponses prompts_and_responses = 5;
-  }
+  // WHAT is summarized — each value a different trade between fidelity and
+  // size. Never UNSPECIFIED in a valid request.
+  SessionCompactScope scope = 2;
 }
 
-// The whole transcript.
-message SessionCompactFull {}
-// The user's prompts alone.
-message SessionCompactPromptsOnly {}
-// The agent's responses alone.
-message SessionCompactResponsesOnly {}
-// Prompts and responses, without tool traffic.
-message SessionCompactPromptsAndResponses {}
+// The compaction scopes: a closed set of scalar choices (no state, no
+// per-value exclusive siblings), so an enum by the convention's own
+// carve-out. One canonical vocabulary — the frontend's cold-gate menu and
+// the answer verb import it, never respell it.
+enum SessionCompactScope {
+  SESSION_COMPACT_SCOPE_UNSPECIFIED = 0;
+  // The whole transcript: prompts, responses, tool calls and their results.
+  SESSION_COMPACT_SCOPE_ALL = 1;
+  // The user's prompts alone.
+  SESSION_COMPACT_SCOPE_PROMPTS = 2;
+  // The agent's responses alone.
+  SESSION_COMPACT_SCOPE_RESPONSES = 3;
+}
 
 // ---- The session's LIVE facts: what changes after opening ----
 

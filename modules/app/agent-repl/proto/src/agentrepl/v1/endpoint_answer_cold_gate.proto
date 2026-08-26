@@ -1,0 +1,54 @@
+// endpoint_answer_cold_gate.proto — AnswerColdGate: the cold-context gate's
+// buttons. FEED section. Success is "accepted" — the gate's resolved trace
+// and the reopened session's facts arrive on the feed and its sibling
+// streams, never restated here.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+import "conversation/v1/api.proto";
+import "conversation/v1/session.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AnswerColdGateRequest {
+  // The workspace whose gate this answers.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The gate row, exactly as the feed served it.
+  frontend.v1.FeedId gate = 2;
+  // Which button. THE ARM IS THE REMEDIATION, mirroring
+  // conversation.v1.SessionColdRemediation's three forms.
+  oneof choice {
+    // Pay & resume: take the cold read now, in the background.
+    AnswerColdGatePay pay = 3;
+    // Clear context and resume fresh.
+    AnswerColdGateClear clear = 4;
+    // Compact first, then resume from the compacted transcript.
+    AnswerColdGateCompact compact = 5;
+  }
+}
+message AnswerColdGatePay {}
+message AnswerColdGateClear {}
+// The compact button's payload.
+message AnswerColdGateCompact {
+  // The summarizer, echoed from the gate's menu.
+  conversation.v1.AgentModel model = 1;
+  // The chosen type — one of the menu's served values; never UNSPECIFIED.
+  conversation.v1.SessionCompactScope scope = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message AnswerColdGateResponse {
+  oneof result {
+    AnswerColdGateSuccess success = 1;
+    AnswerColdGateError error = 2;
+  }
+}
+// Accepted. Empty on purpose — the resolution is the feed's push.
+message AnswerColdGateSuccess {}
+// EMPTY ON PURPOSE: arms derived at the wave (no gate standing, a model or
+// scope the menu never served).
+message AnswerColdGateError {}

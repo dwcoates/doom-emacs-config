@@ -49,6 +49,8 @@ syntax = "proto3";
 
 package frontend.v1;
 
+import "conversation/v1/api.proto";
+import "conversation/v1/session.proto";
 import "conversation/v1/turn.proto";
 import "frontend/v1/failure.proto";
 import "workspace/v1/workspace.proto";
@@ -113,6 +115,11 @@ message FeedRow {
     FeedQuestion question = 11;
     // The feed changed shape here: a clear or a compaction.
     FeedContextCut context_cut = 12;
+    // The cold-context gate: a resume or model switch was refused cold and
+    // the user must choose a remediation. While STANDING it owns the
+    // composer; once resolved it stays in history as the trace of the
+    // choice.
+    FeedColdGate cold_gate = 13;
   }
 }
 
@@ -1090,6 +1097,85 @@ message FeedAgentPromptBlock {
     FeedImageBlock image = 2;
     FeedUnsupportedBlock unsupported = 3;
   }
+}
+
+// ==========================================================================
+// THE COLD-CONTEXT GATE — a row beside the meta kinds. DATA, not prose: the
+// daemon relays the shim's SessionCold facts and the client owns the
+// wording, the formatting and the ticking (a deliberate departure from the
+// daemon-formats precedent, because the gate's facts are raw counts and
+// instants rather than resolved presentation).
+// ==========================================================================
+
+// The cold-context gate row.
+message FeedColdGate {
+  oneof state {
+    // Awaiting the user's choice; the composer is this gate's.
+    FeedColdGateStanding standing = 1;
+    // Chosen; drawn as the one-line trace of what was done.
+    FeedColdGateResolved resolved = 2;
+  }
+}
+// The standing gate's facts.
+message FeedColdGateStanding {
+  // How much context the resume would re-read at full price. Raw count;
+  // the client formats.
+  FeedColdGateContextTokens context_tokens = 1;
+  // When the session last spoke to the vendor — the client derives and
+  // ticks "lapsed 2h ago" from it.
+  FeedColdGateLastRequest last_request = 2;
+  // The session's model — what the re-read would run on.
+  FeedColdGateModel model = 3;
+  // The compact submenu: summarizers and the offered compaction types.
+  FeedColdGateCompactMenu compact = 4;
+}
+// The token-figure element.
+message FeedColdGateContextTokens {
+  // The count, raw.
+  int64 tokens = 1;
+}
+// The lapse element.
+message FeedColdGateLastRequest {
+  // Epoch ms of the last vendor request.
+  int64 at_ms = 1;
+}
+// The model element.
+message FeedColdGateModel {
+  // The typed identity, imported; the client draws its name.
+  conversation.v1.AgentModel model = 1;
+}
+// The compact submenu.
+message FeedColdGateCompactMenu {
+  // The summarizer choices, in display order — echo tokens.
+  repeated FeedColdGateModelOption models = 1;
+  // The offered compaction types, in display order (normally all three).
+  // The answer verb's scope must be one of these served values.
+  repeated conversation.v1.SessionCompactScope scopes = 2;
+}
+// One offered summarizer.
+message FeedColdGateModelOption {
+  // The token: served here, echoed verbatim by the answer's compact arm.
+  conversation.v1.AgentModel model = 1;
+}
+// The resolved trace: which remediation was chosen, and when.
+message FeedColdGateResolved {
+  // When the choice landed, epoch ms.
+  int64 at_ms = 1;
+  // Which remediation.
+  oneof choice {
+    FeedColdGateResolvedPay pay = 2;
+    FeedColdGateResolvedClear clear = 3;
+    FeedColdGateResolvedCompact compact = 4;
+  }
+}
+// Paid the cold read.
+message FeedColdGateResolvedPay {}
+// Cleared the context.
+message FeedColdGateResolvedClear {}
+// Compacted first.
+message FeedColdGateResolvedCompact {
+  // The summarizer that wrote it.
+  FeedColdGateModel model = 1;
 }
 
 // ⑤ THE CONTEXT-CUT DIVIDER — the conversation was cut here, and a reader
