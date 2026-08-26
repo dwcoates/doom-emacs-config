@@ -328,6 +328,30 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### INJECTED CONTEXT lands — AgentContextInjected + the footer's LOADING status family
+
+**The iteration, each turn the user's.** A feed card was drawn and
+REJECTED for ephemerality; a footer 📎 chip + panel was proposed and
+KILLED by the concurrency test — the user's criterion sharpened twice
+(per-turn, then STRICTLY SIMULTANEOUS), and the honest answer is that an
+injection has ZERO DURATION, so nothing is ever concurrently in flight
+(per-turn multiplicity is real — 70 of 442 injecting turns carry ≥2, max
+11 — but as residency, not activity). The user then ruled: a DEDICATED
+status + sub-status, no extended-footer support.
+
+**What changed.** conversation.v1: AgentActivity.item gains
+`context_injected` (tag 22): AgentContextInjected { memory { path;
+content } | skills { repeated { name; optional path; optional content } } }
+— arrives whole, no lifecycle. frontend footer: FooterStatus gains
+`loading` (11, MOMENTARY per the interrupted precedent); FooterSubStatus
+gains the loading family { memory | invoked | discovered | listing }
+(underscoreless per the user); FooterStatusActivity gains
+`context_injected` { composed text — the specific item }. A moment reads
+"loading · memory · webapp/CLAUDE.md", falling back on the next frame.
+
+**Also dispatched**: the encompassing-message-with-path-comment sketch
+convention to the skill (one-shot), after the user's formatting correction.
+
 ### IDE DIAGNOSTICS land as a POST-TERMINAL CONSEQUENCE ARM on write/edit — not an activity kind, not an update
 
 **The iteration, each turn the user's.** (1) First sketched as a dedicated
