@@ -24,8 +24,9 @@ import "agentrepl/v1/endpoint_watch_workspace_roster.proto";
 import "agentrepl/v1/endpoint_create_workspace.proto";
 import "agentrepl/v1/endpoint_open_workspace.proto";
 import "agentrepl/v1/endpoint_close_workspace.proto";
+import "agentrepl/v1/endpoint_kill_workspace.proto";
+import "agentrepl/v1/endpoint_nuke_workspace.proto";
 import "agentrepl/v1/endpoint_merge_workspace.proto";
-import "agentrepl/v1/endpoint_hibernate_workspace.proto";
 import "agentrepl/v1/endpoint_revive_workspace.proto";
 import "agentrepl/v1/endpoint_restart_workspace.proto";
 import "agentrepl/v1/endpoint_watch_topbar.proto";
@@ -90,12 +91,14 @@ service AgentRepl {
 
   // Tear down a workspace's editor state without merging — the only teardown.
   rpc CloseWorkspace(CloseWorkspaceRequest) returns (CloseWorkspaceResponse);
+  // The big red button: forced session death, never blocks, data survives.
+  rpc KillWorkspace(KillWorkspaceRequest) returns (KillWorkspaceResponse);
+  // Data destruction: kill if live, then delete worktree and branch.
+  rpc NukeWorkspace(NukeWorkspaceRequest) returns (NukeWorkspaceResponse);
 
   // Enqueue this workspace's merge; its life from there is the feed's bubble.
   rpc MergeWorkspace(MergeWorkspaceRequest) returns (MergeWorkspaceResponse);
 
-  // Put the workspace to sleep.
-  rpc HibernateWorkspace(HibernateWorkspaceRequest) returns (HibernateWorkspaceResponse);
 
   // Wake a hibernated workspace.
   rpc ReviveWorkspace(ReviveWorkspaceRequest) returns (ReviveWorkspaceResponse);
