@@ -530,21 +530,99 @@ message FeedTaskPaused {}
 // THE TURN'S TERMINAL — a row, so history replays how every turn ended.
 // ==========================================================================
 
-// How a turn ended. THE ARM IS HOW. Its absence for the current turn is what
+// How a turn ended. THE ARM IS HOW; its absence for the current turn is what
 // "the turn is live" means — anchored on data, not on any connection's
-// lifetime. Bodies at this kind's own increment.
+// lifetime. Every turn gets one, a quiet conclusion included: the row's
+// EXISTENCE is the liveness anchor, drawing is the arm's business.
 message FeedTurnEnded {
+  // When the turn ended, epoch ms — where the footer clock stopped.
+  int64 ended_at_ms = 1;
   oneof outcome {
     // The turn ran to its own conclusion.
-    FeedTurnEndedConcluded concluded = 1;
-    // The turn died on an error (an API refusal, a query death).
-    FeedTurnEndedErrored errored = 2;
+    FeedTurnEndedConcluded concluded = 2;
+    // The turn died; the arm inside names the cause.
+    FeedTurnEndedErrored errored = 3;
     // The user stopped it — directly, or by a prompt that interrupted.
-    FeedTurnEndedInterrupted interrupted = 3;
+    FeedTurnEndedInterrupted interrupted = 4;
   }
 }
-message FeedTurnEndedConcluded {}
-message FeedTurnEndedErrored {}
+
+// The turn ran to its own end. NO arms: a conclusion is a conclusion.
+message FeedTurnEndedConcluded {
+  // THE ANSWERING RESPONSE — the row the client draws the final-answer
+  // treatment on (the green border), named by the producer. UNSET when the
+  // turn ended with no answering prose; absence draws no border anywhere.
+  FeedId answer = 1;
+}
+
+// The turn died. THE ARM IS THE CAUSE — the vendor API taxonomy respelled
+// for drawing, plus the two vendor stops and the query's own death. Info is
+// per-arm: only the kinds that HAVE a fact carry one.
+message FeedTurnEndedErrored {
+  // The vendor's own sentence, when one was recorded. UNSET for causes with
+  // no vendor wording (a query death); the arm still names the cause.
+  FeedTurnErrorMessage message = 1;
+  oneof error {
+    // 429 — rate limited; may carry the vendor's wait.
+    FeedTurnErrorRateLimited rate_limited = 2;
+    // 529 — the API overloaded; may carry the wait.
+    FeedTurnErrorOverloaded overloaded = 3;
+    // 401 — the credential was rejected; the user must re-authenticate.
+    FeedTurnErrorAuthenticationFailed authentication_failed = 4;
+    // 403 — the credential lacks permission for this request.
+    FeedTurnErrorPermissionDenied permission_denied = 5;
+    // 400 — the request itself was malformed or refused.
+    FeedTurnErrorInvalidRequest invalid_request = 6;
+    // 413 — the request exceeded the size limit.
+    FeedTurnErrorRequestTooLarge request_too_large = 7;
+    // 404 — the model or resource does not exist.
+    FeedTurnErrorNotFound not_found = 8;
+    // 500 — the API's own internal error.
+    FeedTurnErrorInternal internal = 9;
+    // An API error class this schema does not model, kept by name.
+    FeedTurnErrorVendorUnmodeled vendor_unmodeled = 10;
+    // The vendor stopped at its output ceiling; whatever prose landed may
+    // be cut short.
+    FeedTurnErrorMaxTokens max_tokens = 11;
+    // The vendor refused to continue; there is no answer prose.
+    FeedTurnErrorRefusal refusal = 12;
+    // The query process died out from under the turn.
+    FeedTurnErrorQueryDied query_died = 13;
+  }
+}
+// The vendor's sentence element.
+message FeedTurnErrorMessage {
+  // The wording, drawn verbatim.
+  string text = 1;
+}
+// Rate limited.
+message FeedTurnErrorRateLimited {
+  // The vendor's wait, when it gave one — the client counts down from it.
+  // UNSET = it said nothing, which is different from "retry now".
+  optional int64 retry_after_ms = 1;
+}
+// Overloaded.
+message FeedTurnErrorOverloaded {
+  // As rate_limited's wait.
+  optional int64 retry_after_ms = 1;
+}
+message FeedTurnErrorAuthenticationFailed {}
+message FeedTurnErrorPermissionDenied {}
+message FeedTurnErrorInvalidRequest {}
+message FeedTurnErrorRequestTooLarge {}
+message FeedTurnErrorNotFound {}
+message FeedTurnErrorInternal {}
+// The unmodeled class, kept by name so it is never silently mishandled.
+message FeedTurnErrorVendorUnmodeled {
+  // The vendor's type name, drawn verbatim.
+  string type = 1;
+}
+message FeedTurnErrorMaxTokens {}
+message FeedTurnErrorRefusal {}
+message FeedTurnErrorQueryDied {}
+
+// The user stopped the turn — directly, or by a prompt that interrupted.
+// An accusation with evidence: stated only on the acknowledged stop.
 message FeedTurnEndedInterrupted {}
 
 // ==========================================================================
