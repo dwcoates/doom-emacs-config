@@ -328,6 +328,23 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The topbar WARNING DROPDOWN lands remediated — list + per-kind overlay; the two unmodeled re-homings arrive
+
+**What changed ("looks good", after the user's list+overlay restructure).**
+TopbarWarningStrip = the last warnings newest-first, daemon-capped; each
+TopbarWarning = { line (the dropdown row's sentence) ; oneof detail — the
+click's OVERLAY content }: accounting { composed evidence lines — the
+topbar's OWN resolved copy now that an overlay draws it; the old
+carries-nothing stance was right for a hover badge, wrong for an overlay },
+unmodeled_tool { tool_name; abbreviated legible argument_lines — never a
+dump, never a failure; one warning per distinct tool name }, and
+detached_unmodeled { tool_name; started_at_ms — one warning per live item;
+the fact the footer chips deliberately dropped, surfaced so it can never
+vanish }. This discharges the stage-2 reopen the unmodeled-tool landing
+recorded ("its home is the topbar's alert surface, in the dropdown") and
+the footer landing's re-homing of detached-unmodeled. The
+small-model-summarization idea remains an idea, unmodeled.
+
 ### `AnswerQuestion` lands — the sibling verb; echo-the-value end to end
 
 **What changed ("looks good").** NEW endpoint_answer_question.proto:

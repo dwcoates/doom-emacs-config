@@ -89,33 +89,75 @@ message TopbarConnectivity {
 // click that proves it is empty. It is a LIST because a warning is not a
 // property of accounting: a second concern (a degraded watcher, a skewed
 // build) joins this list and reaches the same affordance.
+// The warning dropdown: the last warnings, newest first, capped by the
+// daemon. Each entry is one line in the list; clicking it opens the
+// entry's DETAIL OVERLAY, whose content the kind arm carries.
 message TopbarWarningStrip {
-  // In display order, each already resolved into the sentence the client
-  // shows.
+  // The list, newest first. Empty = nothing is wrong; the strip draws
+  // nothing.
   repeated TopbarWarning warnings = 1;
 }
 
-// One thing the topbar is warning about, resolved completely by the daemon.
-// The client renders `text` verbatim and NEVER re-derives it: the same
-// reconciliation the footer's accounting cell reports has exactly one author.
+// One warning: its list line, and the overlay behind the click.
 message TopbarWarning {
-  // The warning's display-ready sentence. Never empty — a warning with
-  // nothing to say is a daemon fault, not a renderable state.
-  string text = 1;
-  // WHICH concern raised this warning, as arms of messages rather than a
-  // state enum, so a kind arrives together with whatever evidence that kind
-  // implies and a new kind cannot be added as a bare tag.
-  oneof kind {
-    // The settled turn's accounting did not reconcile (incomplete evidence or
-    // a contradiction); `text` is the footer cell's own summary.
-    TopbarAccountingWarning accounting = 2;
+  // The dropdown row's sentence, drawn verbatim. Never empty.
+  TopbarWarningLine line = 1;
+  // WHICH concern, carrying that kind's overlay content — the expanded
+  // detail a click reveals.
+  oneof detail {
+    TopbarAccountingWarningDetail accounting = 2;
+    TopbarUnmodeledToolWarningDetail unmodeled_tool = 3;
+    TopbarDetachedUnmodeledWarningDetail detached_unmodeled = 4;
   }
 }
+// The list-line element.
+message TopbarWarningLine {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
 
-// The accounting warning's kind arm. It carries no fields of its own: the
-// evidence behind the verdict is the footer accounting cell's, which states
-// it as arms, and duplicating it here would be a second copy to drift.
-message TopbarAccountingWarning {}
+// The accounting overlay: the reconciliation's evidence, composed — this
+// component's OWN resolved copy (duplicate, don't share: the footer's
+// verdict line is the same fact drawn in its place; the resolver
+// re-publishes both).
+message TopbarAccountingWarningDetail {
+  // One composed evidence line each ("2 responses missing usage"), in
+  // display order.
+  repeated TopbarWarningDetailLine lines = 1;
+}
+// A shared detail-line element WITHIN this dropdown family.
+message TopbarWarningDetailLine {
+  // The line, drawn verbatim.
+  string text = 1;
+}
+
+// The unmodeled-tool overlay: what ran, in an ABBREVIATED, LEGIBLE form a
+// reader can act on (decide whether the tool deserves an arm) — never a raw
+// argument dump, and never drawn as a failure: the tool very likely ran
+// fine; the only thing wrong is that this contract cannot describe it.
+message TopbarUnmodeledToolWarningDetail {
+  // The tool's name, verbatim from the producer.
+  TopbarUnmodeledToolName tool_name = 1;
+  // The daemon's abbreviated account of the call's arguments, one legible
+  // line each. Empty when the daemon could not compose any — the name alone
+  // then carries the overlay.
+  repeated TopbarWarningDetailLine argument_lines = 2;
+}
+// The name element.
+message TopbarUnmodeledToolName {
+  // Verbatim.
+  string text = 1;
+}
+
+// The detached-unmodeled overlay: unmodeled work running DETACHED — the
+// live-work fact the footer's chips deliberately do not carry; surfaced
+// here so it can never vanish. One warning per live item.
+message TopbarDetachedUnmodeledWarningDetail {
+  // The tool's name, verbatim.
+  TopbarUnmodeledToolName tool_name = 1;
+  // When it started, epoch ms — the overlay's clock; the client ticks.
+  int64 started_at_ms = 2;
+}
 
 // ==========================================================================
 // THE TOKEN-BREAKDOWN MENU the topbar opens: titled sections of rows. The
