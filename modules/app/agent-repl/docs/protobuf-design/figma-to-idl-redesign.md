@@ -328,6 +328,35 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### HIBERNATION LEAVES THE CONTRACT ENTIRELY — an agentrepl implementation detail; revival is implicit
+
+**The user's ruling.** "I'm not sure that emacs should know about
+hibernation at all… all the useful information that's practically cared
+about by the user is implicit in the compaction warning" — a hibernated
+workspace only matters because keepalives are gone, which only matters
+because of the context cache, which the COLD GATE already fully surfaces.
+
+**What died (all four sites).** ReviveWorkspace (endpoint + rpc — revival
+becomes IMPLICIT: a prompt to a parked workspace revives it under the
+hood, cost story = the cold gate); the host stream's `hibernated` standing
+arm and the whole HostHibernation* family (parked/reviving; the
+idle-cutoff/forced/cache-expired causes); FooterStatusAsleep; and
+RosterRowStatusHibernated.
+
+**The committed consequence, stated plainly.** The frontend can no longer
+distinguish a parked workspace from an idle one anywhere: a parked session
+presents on the host stream as `live` with `shim_attached = false` ("the
+session exists and serves on demand" — the composer stays open, typing
+revives), the footer shows `idle`, the roster shows the ordinary dot. The
+distinction surfaces only as the cold gate, when it has a cost. The WSM's
+hibernation MACHINERY (idle cutoff, parking, revival) is untouched — it
+just stopped being a wire fact.
+
+**Detour queued next (the user's ask): the ELISP hibernation integrations
+sweep** — enumerate and remove every Emacs-side hibernation surface (the
+teal tab-bar treatment for hibernated workspaces, any hibernate/revive
+commands and API plumbing) so the implementation matches the contract.
+
 ### CLOSE / KILL / NUKE land as the workspace verb triad; HibernateWorkspace DIES; the footer's close-blocked treatment lands
 
 **The settled semantics (the user's, across the iteration).** THREE verbs,
