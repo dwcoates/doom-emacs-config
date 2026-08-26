@@ -328,6 +328,33 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The HOOK FAMILY lands (orchestrator's hand) — quiet by default, loud on refusal; stop hooks never touch the turn terminal
+
+**conversation.v1.** AgentActivity.item gains `hook` (tag 21): AgentHook
+{ start { hook_name; AgentHookEvent (the vendor's 31 HOOK_EVENTS literals
+verbatim, a genuine closed scalar set); optional gated_call; started_at }
+| succeeded { command; exit_code; duration_ms; optional output
+{stdout, stderr} } | blocking_error { command; blocking_text } |
+non_blocking_error { command; exit_code; duration_ms; optional output } |
+cancelled }.
+
+**The UI ("sounds great", drawing agreed).** A SUCCEEDED hook draws
+NOTHING (35k of them — quiet automation stays quiet; an audit view is a
+later panel, never feed noise); live runs fill the footer's existing
+hook{name} activity; FAILURES draw: frontend FeedTurnActivity gains `hook`
+→ FeedHook { headline; optional gated_call (FeedId link to the refused
+call's card); blocked { the hook's refusal text — loud } | failed
+{ exit chip; capped output } }.
+
+**The user's correction, superseding the sketch's roll-up.** Stop hooks
+fire AFTER a stop and never determine how the turn ended — "that's the
+turn api's responsibility (and we should trust that it handles it)". No
+FeedTurnEnded hook arm exists; the AgentStopHookSummary payload idea is
+WITHDRAWN; benign stop summaries get no frame (the per-hook units already
+carry each run). The SIMPLE-ADD wave's AgentFailure stop_hook_prevented/
+hook_stopped arms are on the orchestrator-review list under the same
+scrutiny.
+
 ### PROCESS RULING: subagents never design protobufs; the new-family dispatch killed; the SIMPLE-ADD wave owes orchestrator review
 
 **The user's ruling ("i dont want subagents to be designing protobufs").**
