@@ -361,9 +361,10 @@ simply stop carrying task rows; no endpoint shape changes.
 
 **Also clarified on the way.** "Task" in TaskStop/TaskOutput is the vendor's
 background-work sense (shells/subagents), NOT the tracker; tracker items are
-stopped only by TaskUpdate's status. OPEN: whether TaskGet/TaskList (and
-TodoWrite where AgentTaskAct's producer maps it) also need exempt-set
-membership so their calls do not land as AgentUnmodeled.
+stopped only by TaskUpdate's status. SETTLED ("yes exempt list"):
+TaskGet and TaskList join the exempt set — quiet tracker reads, dropped at
+the shim, never AgentUnmodeled. (TodoWrite stays MODELED: it is a producer
+route of AgentTaskAct, a batch of tracker acts.)
 
 ### CORE PRINCIPLE: conversation.v1 carries the vendor's fields even when NO UI maps them — marked EXPECTED UNMAPPED at the field
 
