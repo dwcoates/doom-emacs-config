@@ -328,6 +328,28 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The RECONCILIATION PRESCRIPTION settled — per-subsystem agents; deleted-or-respelled tests DIE; the main agent architects the replacement coverage
+
+**The user's prescription (dispatched to the skill by one-shot).**
+
+- Reconciliation runs PER SUBSYSTEM: bindings regenerated once, then one
+  adaptation agent per system (elisp, daemon, shim, store, sidecar,
+  webapp) in isolated worktrees, merged as each passes.
+- THE TEST RULE: any test referencing a DELETED symbol, or a RESPELLED one
+  (points at a genuinely different structure — not a mere rename), is
+  DELETED, never adapted. Pure renames adapt mechanically. An adaptation
+  that would require deciding what behavior should now be is a surfaced
+  gap, not an adaptation.
+- REPLACEMENT COVERAGE IS ARCHITECTURE WORK, THE MAIN AGENT'S ONLY ("main
+  agent is smarter"): for every deleted test the orchestrator determines
+  the REPLACEMENT TESTS TO BE ADDED and records ONLY those forward specs —
+  the deletion itself never appears in any document. Routing: unit/
+  integration replacements → that subsystem's SUBSYSTEM-SPECIFIC
+  IMPLEMENTATION PLANNING DOCUMENT (the fanout subagent's reference);
+  e2e replacements → the MAIN IMPLEMENTATION DOCUMENT (the orchestrator's
+  reference). These two document kinds are NEW — introduced by this
+  prescription.
+
 ### AUDIT JUDGING OPENS — finding 1 lands: the STOP TAXONOMY gets its conversation.v1 arms
 
 **The judging protocol.** Findings one at a time, five-answer test, contract
