@@ -490,7 +490,7 @@ mount itself is the boundary under mock: batch Emacs has no xwidgets."
 ;; registry carries no such field), so eligibility has to resolve the gui
 ;; through the same predicate the open path resolves it through.
 (defconst agent-repl-test--recovery-restored-plist
-  '(:project-dir "/w/feed-tail" :nuked-at nil :active-env :bare-metal
+  '(:project-dir "/w/feed-tail" :killed-at nil :active-env :bare-metal
     :repl-state :idle :priority 3 :worktree-p t :source-ws-dir "/w/parent")
   "The registry entry a snapshot-restored gui workspace comes back as.")
 

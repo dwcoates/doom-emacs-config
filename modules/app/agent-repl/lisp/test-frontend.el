@@ -1643,7 +1643,7 @@ drifting silently out of step with the others."
 (ert-deftest agent-repl-test-frontend-kill-webview-suppresses-query-prompt ()
   "Webview kills bypass kill-buffer query functions.
 The xwidget query fn raises a blocking yes-or-no prompt, which would
-deadlock the non-interactive nuke hook."
+deadlock the non-interactive kill hook."
   ;; Arrange — a query fn that refuses every kill.
   (let ((buf (generate-new-buffer "*fake-webview*"))
         (kill-buffer-query-functions (list (lambda () nil))))
@@ -1790,8 +1790,8 @@ cwd, so a reopened workspace reattaches to the same record."
         ;; Assert
         (should (null commands))))))
 
-(ert-deftest agent-repl-test-frontend-webview-killed-on-ws-nuke ()
-  "The nuke hook kills the webview so the WKWebView never outlives the ws."
+(ert-deftest agent-repl-test-frontend-webview-killed-on-ws-kill ()
+  "The kill hook kills the webview so the WKWebView never outlives the ws."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((buf (generate-new-buffer "*fake-webview*")))
@@ -2822,10 +2822,10 @@ pre-creation that ever reaches it is the defect these tests cover."
       ;; Assert
       (should (null agent-repl-test--precreate-urls)))))
 
-(ert-deftest agent-repl-test-frontend-precreate-skips-a-nuked-workspace ()
+(ert-deftest agent-repl-test-frontend-precreate-skips-a-killed-workspace ()
   "A tombstoned workspace is not given a page."
   ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui :nuked-at 1)
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui :killed-at 1)
     (agent-repl-test--with-precreate-boundaries _displayed
       ;; Act
       (agent-repl--frontend-precreate-webview "ws1")
@@ -2845,14 +2845,14 @@ pre-creation that ever reaches it is the defect these tests cover."
 
 ;; The fixture below is the shape a startup restore actually leaves behind
 ;; (`agent-repl--establish-workspace' + `agent-repl--initialize-ws-env'):
-;; `:project-dir' and a cleared `:nuked-at', the hydrated env, and the
+;; `:project-dir' and a cleared `:killed-at', the hydrated env, and the
 ;; display/priority state read back off the project's state.el.  There is NO
 ;; `:frontend' key — only a DELIBERATE choice is persisted, so a restored
 ;; workspace resolves its presentation from the default — and no `:type' key,
 ;; which the registry has never carried at all.  Idealizing the entry with an
 ;; explicit `:frontend gui' is what hid this bug.
 (defconst agent-repl-test--restored-ws-plist
-  '(:project-dir "/w/feed-tail" :nuked-at nil :active-env :bare-metal
+  '(:project-dir "/w/feed-tail" :killed-at nil :active-env :bare-metal
     :repl-state :idle :priority 3 :worktree-p t :source-ws-dir "/w/parent")
   "The registry entry a snapshot-restored gui workspace comes back as.")
 

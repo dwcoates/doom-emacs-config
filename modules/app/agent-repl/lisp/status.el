@@ -269,7 +269,7 @@ STATE is one of:
                Set when a merge lands
                (alongside `:merge-completed t').  Takes precedence
                over `:dead' so the 🔀 badge survives the post-merge
-               nuke-and-poll cycle that would otherwise mark the
+               kill-and-poll cycle that would otherwise mark the
                now-sessionless workspace dead.
   :dead      — agent session gone
 
@@ -2285,7 +2285,7 @@ parameters, and the watchdog cleanup result."
 Doom's stock `+workspace--message-body' builds the echo-area string as
 `<tabline> | <message>', so every `+workspace-message' / `+workspace-error'
 call (e.g. the `Deleted '<ws>' workspace' notification emitted by
-`+workspace/kill' inside `agent-repl--nuke-one-workspace's merge-teardown
+`+workspace/kill' inside `agent-repl--kill-one-workspace's merge-teardown
 path) briefly flashes the full workspaces tabline in the minibuffer.
 
 Mirrors the rationale for the `+workspace/display' override above: the
@@ -2778,10 +2778,10 @@ the only observer that can reset state.
 
 No-op in four cases:
 - `:repl-state' is already `:dead' (idempotent on the poll path).
-- `:repl-state' is `:merged' — the workspace was nuked after a
+- `:repl-state' is `:merged' — the workspace was killed after a
   successful merge and `:merged' takes precedence over `:dead'.
   Without this guard, the next poll would clobber the merge badge.
-- `:repl-state' is `:merge-failed' — the workspace was nuked after
+- `:repl-state' is `:merge-failed' — the workspace was killed after
   a silent-failure merge and `:merge-failed' is the canonical badge
   for that state (routed under MERGED, not orphaned as :dead).  Without this guard, the next poll would re-classify the
   workspace as plain `:dead' and the MERGED-section semantics would
