@@ -328,6 +328,50 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### CLOSE / KILL / NUKE land as the workspace verb triad; HibernateWorkspace DIES; the footer's close-blocked treatment lands
+
+**The settled semantics (the user's, across the iteration).** THREE verbs,
+all with Emacs commands that are THIN WRAPPERS — send the request, await
+the daemon's ack, then tear the tab down; every piece of real machinery is
+the daemon's:
+
+- CloseWorkspace (SPC j x) — the USER's close, a VIEW act: fast ack, tab
+  gone, the daemon↔shim session UNTOUCHED (keepalives continue; the
+  workspace is merely unviewed). REQUIRES QUIET: a busy workspace refuses
+  and the refusal manifests in the FOOTER — status `closing`, sub-status
+  `close blocked`, and the daemon's composed plain-English reasons as the
+  activity line ("a turn is in flight; 2 subagents and a shell are
+  running"). The response carries only the `blocked` cause arm; the footer
+  owns the reasons. The user waits or interrupts the work normally.
+- KillWorkspace — the BIG RED BUTTON: forced session death (connections
+  AND the shim itself; the shim's forced kill underneath). Never blocks,
+  never warns, checks nothing. Worktree and branch survive. This is the
+  better-named replacement for the StopAgentShim idea, which never landed.
+- NukeWorkspace — DATA DESTRUCTION: kill first if live, then delete the
+  worktree and branch. "Nuke" is reserved for exactly the verb that
+  destroys data — consistent with the elisp rename (the old emacs "nuke"
+  never destroyed data).
+
+**HibernateWorkspace is DELETED** (endpoint + rpc): hibernation is an
+INACTIVITY policy, never an explicit act — "i don't think it should ever
+be done explicitly." ReviveWorkspace STANDS (waking a parked workspace is
+explicit). The WSM's hibernation machinery is untouched; only the verb
+dies.
+
+**Also settled on the way (recorded at the earlier entry, refined here).**
+Attach/detach of daemon↔shim streams is never a semantic act; no verb
+closes just a connection. The earlier stage-3 reading of CloseWorkspace as
+"the only teardown" is SUPERSEDED by this triad.
+
+**Footer changes.** FooterStatus + `closing` (10); FooterSubStatusClosing
+{ blocked } family; FooterStatusActivityCloseBlocked { composed text } —
+the footer's own composed-text convention (the cold gate's data-not-prose
+ruling is component-bounded and does not apply here).
+
+**Open still**: whether HELD PROMPTS block a close (the tray question) —
+unruled; and the sub-status family anticipates a graceful-drain step if
+one is ever wanted.
+
 ### CLOSE vs KILL settled — semantics, vocabulary, and where the refusal surfaces
 
 **The user's rulings, stated plainly.** (1) Closing a workspace with active

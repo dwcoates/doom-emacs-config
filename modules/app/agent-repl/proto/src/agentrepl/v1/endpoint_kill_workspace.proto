@@ -1,0 +1,33 @@
+// endpoint_kill_workspace.proto — KillWorkspace: the big red button. SIDEBAR
+// section. Forced session death: the daemon tears down its shim connections
+// AND the shim itself — the shim's forced kill underneath, so the turn and
+// every live task die with it. NEVER blocks, NEVER warns, checks nothing:
+// killing the work IS the stated intent. The worktree and branch SURVIVE —
+// destroying data is NukeWorkspace's, never this verb's. The host command
+// is a thin wrapper: send, await the ack, then tear the tab down.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message KillWorkspaceRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message KillWorkspaceResponse {
+  oneof result {
+    // Dead — connections down, shim gone; the roster's new state arrives on
+    // its stream.
+    KillWorkspaceSuccess success = 1;
+    KillWorkspaceError error = 2;
+  }
+}
+message KillWorkspaceSuccess {}
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unregistered
+// workspace; nothing live to kill is a SUCCESS, not an error).
+message KillWorkspaceError {}

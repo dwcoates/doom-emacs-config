@@ -1,5 +1,16 @@
-// endpoint_close_workspace.proto — CloseWorkspace. SIDEBAR section.
-// Tear down a workspace's editor state without merging. THE ONLY TEARDOWN — no delete-without-close exists (stage-3 ruling).
+// endpoint_close_workspace.proto — CloseWorkspace: the USER's close. SIDEBAR
+// section. Closing is a VIEW act: the workspace leaves the tab-bar and its
+// buffers close, but the daemon↔shim session is UNTOUCHED — keepalives and
+// everything else continue; the workspace is merely unviewed. The host
+// command is a thin wrapper: send, await the ack, then tear the tab down —
+// every piece of real machinery is the daemon's.
+//
+// A close REQUIRES QUIET: no turn in flight, no live async work. A busy
+// workspace refuses, and the refusal MANIFESTS IN THE FOOTER (status
+// `closing`, sub-status `close blocked`, the daemon's composed reasons as
+// the activity line) — pushed on the footer stream beside this response, so
+// this response never restates the reasons. The user waits or interrupts
+// the work the normal way, then closes again.
 
 syntax = "proto3";
 
@@ -13,17 +24,24 @@ message CloseWorkspaceRequest {
   workspace.v1.WorkspaceRef workspace = 1;
 }
 
-// THE ARM IS THE OUTCOME.
+// THE ARM IS THE OUTCOME. Fast by design: the quiet check is an in-memory
+// answer, so the ack never waits on the shim.
 message CloseWorkspaceResponse {
   oneof result {
+    // Quiet — closed; the host proceeds with its view teardown, and the
+    // roster's new state arrives on its stream.
     CloseWorkspaceSuccess success = 1;
     CloseWorkspaceError error = 2;
   }
 }
-
-// Done; every visible effect arrives on the streams.
 message CloseWorkspaceSuccess {}
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+// THE ARM IS THE REFUSAL.
 message CloseWorkspaceError {
+  oneof cause {
+    // Work is in flight; the footer's close-blocked state carries the
+    // reasons. Further arms DERIVED at the wave.
+    CloseWorkspaceBlocked blocked = 1;
+  }
 }
+message CloseWorkspaceBlocked {}
