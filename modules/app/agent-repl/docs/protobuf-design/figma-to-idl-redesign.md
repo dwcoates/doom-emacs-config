@@ -328,6 +328,21 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `FeedShell` lands — the spool is a whole-replaced TAIL; a non-zero exit is COMPLETED
+
+**What changed ("looks good").** FeedShell { command; runtime; optional
+spool { tail text; composed omitted line } ; oneof state { live
+{ last_progress — spool growth IS the beat } | settled { ended_at_ms;
+optional exit { code }; oneof outcome { completed | cancelled | lost } } } }.
+Snapshot semantics: the daemon caps and replaces the tail whole; the client
+appends nothing (the old offset-append machinery stays dead).
+
+**Two judgments recorded.** NO `failed` outcome arm — a non-zero exit still
+COMPLETED; the exit chip carries the verdict and "failure" is the reader's
+judgment of the code. And the old "page older spool inside the bubble"
+affordance is DROPPED — tail + composed omitted line only; display implies
+no retrieval. Exit is optional because the spool terminator may be absent.
+
 ### `FeedSubagent` lands — the collapsed head rides the PARENT feed; identifier-only rows weighed and declined
 
 **What changed.** FeedSubagent { label; optional description; optional

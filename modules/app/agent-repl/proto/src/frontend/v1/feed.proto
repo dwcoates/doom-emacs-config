@@ -643,8 +643,88 @@ message FeedSubagentFailed {}
 message FeedSubagentCancelled {}
 message FeedSubagentLost {}
 
-// A shell bubble: command head, spool body. Elements at its own increment.
-message FeedShell {}
+// A SHELL BUBBLE: a background command and its spool. NOT a feed — a shell
+// has no rows, only output — so the body rides the row itself: the spool's
+// TAIL, capped by the daemon and replaced whole on every push (snapshot
+// semantics; the client renders what arrives and appends nothing).
+message FeedShell {
+  // The command line, drawn verbatim ("$" chrome is the client's).
+  FeedShellCommand command = 1;
+  // The head's clock. The client ticks from the instant.
+  FeedShellRuntime runtime = 2;
+  // The spool tail. Present from the first output; UNSET while the command
+  // has produced none.
+  FeedShellSpool spool = 3;
+  // The head's state.
+  oneof state {
+    FeedShellLive live = 4;
+    FeedShellSettled settled = 5;
+  }
+}
+// The command element.
+message FeedShellCommand {
+  // The command text, drawn verbatim.
+  string text = 1;
+}
+// The clock element.
+message FeedShellRuntime {
+  // When the command began, epoch ms — the ORIGINAL instant; detaching from
+  // the turn does not reset it. The client ticks.
+  int64 started_at_ms = 1;
+}
+// The spool element: the output's tail as it now stands.
+message FeedShellSpool {
+  // The tail text, drawn verbatim, daemon-capped.
+  string text = 1;
+  // "1,204 earlier lines not shown" — the composed truncation line,
+  // present iff the daemon capped. Display only; implies no retrieval.
+  FeedShellOmitted omitted = 2;
+}
+// The truncation-line element.
+message FeedShellOmitted {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
+// Live: the dot, plus the last sign of life (spool growth IS the beat —
+// the daemon stamps it on each append it observes).
+message FeedShellLive {
+  // The last output the daemon observed. UNSET before the first byte.
+  FeedShellLastProgress last_progress = 1;
+}
+// The last-progress element.
+message FeedShellLastProgress {
+  // Epoch ms; the client ticks "quiet for N s" locally.
+  int64 at_ms = 1;
+}
+// Settled: when, and how.
+message FeedShellSettled {
+  // When the command ended, epoch ms.
+  int64 ended_at_ms = 1;
+  // The exit code, when the spool's terminator carried one. UNSET when it
+  // did not — absence draws no chip, never a zero.
+  FeedShellExit exit = 2;
+  // How it ended; the arm picks the treatment.
+  oneof outcome {
+    // The process exited on its own; the exit chip says how it went — a
+    // non-zero exit still COMPLETED, and "failure" is the reader's judgment
+    // of the code, never an arm.
+    FeedShellCompleted completed = 3;
+    // Stopped by hand.
+    FeedShellCancelled cancelled = 4;
+    // We stopped being able to see it — spool gone or silent past the
+    // shim's ruling; not known to have failed.
+    FeedShellLost lost = 5;
+  }
+}
+// The exit-code chip element.
+message FeedShellExit {
+  // The code, drawn as the chip ("exit 0" / "exit 1"); tone is the
+  // client's mapping of zero vs non-zero.
+  int32 code = 1;
+}
+message FeedShellCompleted {}
+message FeedShellCancelled {}
+message FeedShellLost {}
 
 // ==========================================================================
 // BLOCKING THE TURN ON THE USER — consent, and a choice. Bodies re-derived
