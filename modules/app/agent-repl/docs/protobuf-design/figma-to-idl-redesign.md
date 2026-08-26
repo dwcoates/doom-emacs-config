@@ -328,6 +328,23 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `FeedQuestion` lands — the choice card; answers ride the row for cold repaint
+
+**What changed ("question stuff looks good", after the coupling question).**
+FeedQuestion { repeated FeedQuestionItem (1–4: header chip; text — an ECHO
+VALUE; per-question single_select | multi_select over options whose labels
+are echo values, descriptions optional); oneof state { open | answered
+{ at_ms; per-question GivenAnswer { header; chosen labels; optional
+other_text } } | expired { at_ms } } }. The free-text escape is always
+drawn. Expiry is the producer's idle timeout, drawn as expired never
+pending.
+
+**The user's coupling question, answered and recorded at the message.** Why
+do answers live beside questions? The card is one drawn box in two lives —
+form, then verdict lines — and a COLD REPAINT of a settled card has only
+the row to draw from, so the choices must ride it. Same upsert-through-
+states pattern as the permission card.
+
 ### The explicit-`optional` sweep lands across every package (Opus subagent, `aace177a1`)
 
 **What changed.** 37 nilable message fields gained the explicit `optional`

@@ -895,8 +895,105 @@ message FeedPermissionAbandoned {
   int64 at_ms = 1;
 }
 
-// The question card — the choice the agent posed. Body at its own increment.
-message FeedQuestion {}
+// The question card: the turn blocked on a choice the agent posed — a batch
+// of one to four questions, radios or checkboxes per question. Answers are
+// an agentrepl verb echoing this row's FeedId plus the SERVED VALUES
+// (question text, option labels — the echo-the-value convention); the
+// card's state change arrives as this row's re-push. The free-text "Other"
+// escape is ALWAYS drawn, whether or not the agent asked for one.
+message FeedQuestion {
+  // The questions, in the batch's order (one to four).
+  repeated FeedQuestionItem questions = 1;
+  // The ask's state.
+  oneof state {
+    FeedQuestionOpen open = 2;
+    FeedQuestionAnswered answered = 3;
+    FeedQuestionExpired expired = 4;
+  }
+}
+// One question of the batch.
+message FeedQuestionItem {
+  // The question's short chip label ("Auth method").
+  FeedQuestionHeader header = 1;
+  // The question text — also the ECHO VALUE the answer names the question
+  // by, so it is drawn AND handed back verbatim.
+  FeedQuestionText text = 2;
+  // THE ARM IS THE SELECTION MODE: radios or checkboxes. Per question,
+  // because one batch can mix them.
+  oneof options {
+    FeedQuestionSingleSelect single_select = 3;
+    FeedQuestionMultiSelect multi_select = 4;
+  }
+}
+// The chip element.
+message FeedQuestionHeader {
+  // The chip text, drawn verbatim.
+  string text = 1;
+}
+// The question-text element.
+message FeedQuestionText {
+  // The text, drawn verbatim and echoed verbatim.
+  string text = 1;
+}
+// Radios: pick exactly one.
+message FeedQuestionSingleSelect {
+  // The options, in order.
+  repeated FeedQuestionOption options = 1;
+}
+// Checkboxes: tick any number — where an "at most N" cap lands later.
+message FeedQuestionMultiSelect {
+  // The options, in order.
+  repeated FeedQuestionOption options = 1;
+}
+// One option.
+message FeedQuestionOption {
+  // The option's label — drawn, and the ECHO VALUE a selection hands back.
+  FeedQuestionOptionLabel label = 1;
+  // The explanatory line under the label. UNSET when the agent gave none.
+  optional FeedQuestionOptionDescription description = 2;
+}
+// The label element.
+message FeedQuestionOptionLabel {
+  // The label, drawn verbatim and echoed verbatim.
+  string text = 1;
+}
+// The description element.
+message FeedQuestionOptionDescription {
+  // The description, drawn verbatim.
+  string text = 1;
+}
+// Open: awaiting the user's choices.
+message FeedQuestionOpen {}
+// Answered: what was given, per question, drawn as the verdict lines. The
+// answers ride the row because the settled card is drawn from the row alone
+// — a cold repaint has nothing else to draw the choices from.
+message FeedQuestionAnswered {
+  // When the answers landed, epoch ms.
+  int64 at_ms = 1;
+  // One per question, in the batch's order.
+  repeated FeedQuestionGivenAnswer answers = 2;
+}
+// One question's given answer.
+message FeedQuestionGivenAnswer {
+  // The question's chip, repeated here so the verdict line stands alone.
+  FeedQuestionHeader header = 1;
+  // The chosen labels, in choice order. Empty when the answer was free
+  // text alone.
+  repeated string chosen = 2;
+  // The free-text answer or note, when one was typed.
+  optional FeedQuestionOtherText other_text = 3;
+}
+// The free-text element.
+message FeedQuestionOtherText {
+  // The text, drawn verbatim.
+  string text = 1;
+}
+// The ask expired unanswered (the producer's idle timeout) — the agent
+// proceeded without a choice; drawn as expired, never as pending forever.
+message FeedQuestionExpired {
+  // When it expired, epoch ms.
+  int64 at_ms = 1;
+}
 
 // ① What a person typed — or, nested inside a detached bubble, the prompt
 // that work was given. The daemon resolves the row: the author label, and the
