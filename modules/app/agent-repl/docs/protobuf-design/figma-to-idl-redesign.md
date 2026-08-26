@@ -328,6 +328,19 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### PROCESS RULING: subagents never design protobufs; the new-family dispatch killed; the SIMPLE-ADD wave owes orchestrator review
+
+**The user's ruling ("i dont want subagents to be designing protobufs").**
+Subagents collect, classify, enumerate and research; every SHAPE is the
+orchestrator's sketch, the user's agreement, the orchestrator's landing —
+which is the skill's own "Who writes, and who never writes", now applied
+to remediation waves too. The in-flight new-family agent was KILLED before
+it edited anything; its six settled families (hooks, diagnostics, injected
+context, mode transitions, retraction, new tool arms) return through the
+ordinary sketch loop. The landed SIMPLE-ADD wave (`c7814df86`) stands
+pending a full ORCHESTRATOR REVIEW of its text and judgment calls, brought
+to the user as review items and amended by hand.
+
 ### The documentation re-vet lands: 11 of 13 no-producer claims REFUTED; batch-2 rulings so far
 
 **The re-vet (Opus, SDK doc surface + official docs), vindicating the
