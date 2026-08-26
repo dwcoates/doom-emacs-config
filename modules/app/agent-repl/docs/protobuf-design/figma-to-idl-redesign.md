@@ -328,6 +328,43 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### THE EXEMPT SET is specified — known built-ins deliberately NOT modeled; TaskStop and TaskOutput join it; tasks go FOOTER-ONLY (FeedTask dies)
+
+**The EXEMPT SET, the user's spec ("things that dont make it in the protos,
+but also aren't 'unmodeled', they're known 'not going to model'").** A third
+category beside modeled and unmodeled: a KNOWN vendor built-in the contract
+deliberately does not carry. An exempt tool's calls are DROPPED at the shim —
+they must NOT be emitted as AgentUnmodeled (that arm keeps meaning "genuinely
+unknowable", its producer-defect stance intact) and must NOT trip the
+topbar's unmodeled warning. The fidelity principle (vendor fields always
+carried) governs fields OF MODELED tools; whole tools can be exempt. Members
+so far: **TaskStop** (kills background work; the stopped work's own stream
+already settles cancelled and its bubble/footer rows reflect that) and
+**TaskOutput** (reads a background task's spool, observed shape
+{retrieval_status, task{task_id, task_type, status, description, output,
+exitCode}} — the spool is already drawn in the work's bubble). The sketched
+AgentTaskStop/AgentTaskOutput arms are WITHDRAWN unlanded ("I dont like
+updating the conversation protos with dead stuff").
+
+**Tasks are FOOTER-ONLY (the user's simplification).** The tracker draws
+solely as the footer's ☑ chip + expanded checklist; a single board-bubble
+(tabs per task, keyed by the session's one implicit board — TaskListInput is
+{} and no set id exists at the type surface) was drawn and set aside for
+simplicity. Inventory mapping: TaskCreate = new row + denominator bump;
+TaskUpdate/TodoWrite = row upsert (deleted removes); TaskGet/TaskList =
+quiet reads, drawn nowhere; TaskStop/TaskOutput = exempt per above.
+
+**What died.** FeedTurnActivity's task arm (tag 4 RETIRED) and the whole
+FeedTask family (12 messages); FooterTaskRow.target (tag 1 RETIRED — no
+bubble to jump to; agent and shell rows keep theirs). WatchFeed/GetFeedPage
+simply stop carrying task rows; no endpoint shape changes.
+
+**Also clarified on the way.** "Task" in TaskStop/TaskOutput is the vendor's
+background-work sense (shells/subagents), NOT the tracker; tracker items are
+stopped only by TaskUpdate's status. OPEN: whether TaskGet/TaskList (and
+TodoWrite where AgentTaskAct's producer maps it) also need exempt-set
+membership so their calls do not land as AgentUnmodeled.
+
 ### CORE PRINCIPLE: conversation.v1 carries the vendor's fields even when NO UI maps them — marked EXPECTED UNMAPPED at the field
 
 **The principle, in the user's terms (2026-08-26).** "Let's always include

@@ -670,10 +670,8 @@ message FooterExpandedTasks {
 
 // One task's line: status glyph · subject · (active form while running).
 message FooterTaskRow {
-  // Jump target: the task's feed bubble, exactly as the feed served it —
-  // activating the row navigates there, the same affordance the agent and
-  // shell rows carry.
-  FeedId target = 1;
+  // Tag 1 is RETIRED: tracker tasks have no feed bubble, so the row is not a
+  // jump target (unlike the agent and shell rows).
   // The glyph element; the set arm picks the treatment.
   FooterTaskRowStatus status = 2;
   // The task's subject line, drawn verbatim.
