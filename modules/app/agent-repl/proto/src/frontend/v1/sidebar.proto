@@ -63,7 +63,7 @@ message WorkspaceRoster {
   RosterMergedSection recently_merged = 3;
   // The selected workspace — the last SelectWorkspace the daemon received.
   // UNSET when there is none.
-  RosterCurrentWorkspace current = 4;
+  optional RosterCurrentWorkspace current = 4;
 }
 
 // The selected workspace, by identity. Compared against RosterRowWorkspace,
