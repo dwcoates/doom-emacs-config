@@ -82,11 +82,11 @@ message FeedRow {
   // inside one on the SAME feed (a merge phase's rows, work grouped under a
   // skill heading). UNSET for a top-level row. A subagent's rows never carry
   // this — they arrive on the bubble's OWN feed connection.
-  FeedRowParent parent = 2;
+  optional FeedRowParent parent = 2;
   // The turn this row belongs to — the daemon's stamp; what a client matches
   // its SubmitPromptSuccess.turn against to find its own prompt. Unset for a
   // row that belongs to no turn (a context-cut divider).
-  conversation.v1.TurnId turn = 3;
+  optional conversation.v1.TurnId turn = 3;
   // What the row is. Each kind is a daemon-resolved element family.
   oneof row {
     // What a person typed — or, on a subagent's feed, the commission or a
@@ -227,7 +227,7 @@ message FeedResponse {
   // response opens and restates it as it grows), final once settled, the
   // last observed figure on a broken bubble. UNSET when no usage has been
   // observed yet — absence draws no stamp, never a zero.
-  FeedResponseUsageStamp usage = 1;
+  optional FeedResponseUsageStamp usage = 1;
   oneof result {
     // Still arriving: the prose so far. The DAEMON accumulates the shim's
     // fragments and re-pushes the row; the client renders what arrives and
@@ -308,7 +308,7 @@ message FeedToolCallInput {
 // a stalled call arrives as `returned.failed` with the shim's wedge text.
 message FeedToolCallRunning {
   // The last sign of life the daemon observed. UNSET before the first beat.
-  FeedToolCallLastProgress last_progress = 1;
+  optional FeedToolCallLastProgress last_progress = 1;
 }
 // The last-observed-progress element.
 message FeedToolCallLastProgress {
@@ -358,7 +358,7 @@ message FeedToolCallCodeOutput {
   repeated FeedCodeSpan spans = 1;
   // "showing 200 of 4,312" — present iff truncated. Always a HEAD of the
   // file, never a middle slice, so the highlighting context is sound.
-  FeedToolCallOmitted omitted = 2;
+  optional FeedToolCallOmitted omitted = 2;
 }
 // The diff output form.
 message FeedToolCallDiffOutput {
@@ -371,7 +371,7 @@ message FeedToolCallLinesOutput {
   repeated string lines = 1;
   // "42 more" / "at least 42 more" — the composed floor, present iff the
   // list is short. Display only; implies no retrieval.
-  FeedToolCallOmitted omitted = 2;
+  optional FeedToolCallOmitted omitted = 2;
 }
 // The composed truncation line, shared by the forms that can be short.
 message FeedToolCallOmitted {
@@ -443,7 +443,7 @@ message FeedSkillLoaded {
   // The consent line — which tools the skill brought allowances for
   // ("allows: Bash, Write"), composed by the daemon. UNSET when the skill
   // declared none; absence draws no line, never an empty one.
-  FeedSkillAllowances allowances = 2;
+  optional FeedSkillAllowances allowances = 2;
 }
 // The document element.
 message FeedSkillDocument {
@@ -475,10 +475,10 @@ message FeedTask {
   // The task's subject line, drawn verbatim.
   FeedTaskSubject subject = 2;
   // The task's longer description. UNSET when the tracker holds none.
-  FeedTaskDescription description = 3;
+  optional FeedTaskDescription description = 3;
   // Who it is assigned to, composed ("assigned: Explore"). UNSET when
   // unassigned; absence draws no line.
-  FeedTaskOwner owner = 4;
+  optional FeedTaskOwner owner = 4;
 }
 // The subject element.
 message FeedTaskSubject {
@@ -513,7 +513,7 @@ message FeedTaskPending {}
 message FeedTaskRunning {
   // The in-progress phrasing ("Running the migration…"). UNSET when the
   // agent gave none; the bubble then draws the subject alone.
-  FeedTaskActiveForm active_form = 1;
+  optional FeedTaskActiveForm active_form = 1;
 }
 // The active-form element.
 message FeedTaskActiveForm {
@@ -552,7 +552,7 @@ message FeedTurnEndedConcluded {
   // THE ANSWERING RESPONSE — the row the client draws the final-answer
   // treatment on (the green border), named by the producer. UNSET when the
   // turn ended with no answering prose; absence draws no border anywhere.
-  FeedId answer = 1;
+  optional FeedId answer = 1;
 }
 
 // The turn died. THE ARM IS THE CAUSE — the vendor API taxonomy respelled
@@ -561,7 +561,7 @@ message FeedTurnEndedConcluded {
 message FeedTurnEndedErrored {
   // The vendor's own sentence, when one was recorded. UNSET for causes with
   // no vendor wording (a query death); the arm still names the cause.
-  FeedTurnErrorMessage message = 1;
+  optional FeedTurnErrorMessage message = 1;
   oneof error {
     // 429 — rate limited; may carry the vendor's wait.
     FeedTurnErrorRateLimited rate_limited = 2;
@@ -655,10 +655,10 @@ message FeedSubagent {
   FeedSubagentLabel label = 1;
   // The commission's description. UNSET when the spawn carried none; the
   // head then draws the label alone, never a synthesized description.
-  FeedSubagentDescription description = 2;
+  optional FeedSubagentDescription description = 2;
   // The running token sum ("12.4k tok"), daemon-formatted, re-pushed as it
   // grows and final once settled. UNSET before any usage is observed.
-  FeedSubagentTokens tokens = 3;
+  optional FeedSubagentTokens tokens = 3;
   // The head's clock. The client ticks from the instant.
   FeedSubagentRuntime runtime = 4;
   // The head's state: the live dot, or the settled treatment.
@@ -692,7 +692,7 @@ message FeedSubagentRuntime {
 // the tool card carries — the subagent's progress channel produces it).
 message FeedSubagentLive {
   // The last progress the daemon observed. UNSET before the first beat.
-  FeedSubagentLastProgress last_progress = 1;
+  optional FeedSubagentLastProgress last_progress = 1;
 }
 // The last-progress element.
 message FeedSubagentLastProgress {
@@ -732,7 +732,7 @@ message FeedShell {
   FeedShellRuntime runtime = 2;
   // The spool tail. Present from the first output; UNSET while the command
   // has produced none.
-  FeedShellSpool spool = 3;
+  optional FeedShellSpool spool = 3;
   // The head's state.
   oneof state {
     FeedShellLive live = 4;
@@ -756,7 +756,7 @@ message FeedShellSpool {
   string text = 1;
   // "1,204 earlier lines not shown" — the composed truncation line,
   // present iff the daemon capped. Display only; implies no retrieval.
-  FeedShellOmitted omitted = 2;
+  optional FeedShellOmitted omitted = 2;
 }
 // The truncation-line element.
 message FeedShellOmitted {
@@ -767,7 +767,7 @@ message FeedShellOmitted {
 // the daemon stamps it on each append it observes).
 message FeedShellLive {
   // The last output the daemon observed. UNSET before the first byte.
-  FeedShellLastProgress last_progress = 1;
+  optional FeedShellLastProgress last_progress = 1;
 }
 // The last-progress element.
 message FeedShellLastProgress {
@@ -780,7 +780,7 @@ message FeedShellSettled {
   int64 ended_at_ms = 1;
   // The exit code, when the spool's terminator carried one. UNSET when it
   // did not — absence draws no chip, never a zero.
-  FeedShellExit exit = 2;
+  optional FeedShellExit exit = 2;
   // How it ended; the arm picks the treatment.
   oneof outcome {
     // The process exited on its own; the exit chip says how it went — a
@@ -1049,7 +1049,7 @@ message FeedContextCutCompacted {
   // Set when the compaction re-read the whole conversation at the uncached
   // rate — the cost compaction exists to avoid. A NOTICE on a compaction
   // that happened, not a failure of it; drawn as a warning on the divider.
-  FeedContextCutColdRead cold_read = 3;
+  optional FeedContextCutColdRead cold_read = 3;
 }
 // The compaction read cold; the evidence, imported whole from failure.proto.
 message FeedContextCutColdRead {

@@ -59,7 +59,7 @@ message StoreAgentUpdate {
   // agent, never a sync subagent — which live stream carried this work.
   // Copied from the parent's row at insert (one lookup). UNSET only when it
   // is unresolvable — an unparsed or unknown record may name no agent at all.
-  conversation.v1.AgentId top_level = 1;
+  optional conversation.v1.AgentId top_level = 1;
 
   // THE PRODUCER DECIDES PAGEABILITY. A page line names its book; every
   // other arm is structurally unable to appear in any page.
@@ -202,7 +202,7 @@ message EntryBatch {
 
   // Where the producer had read to when it produced these. Unset for
   // stream-plane producers, which have no file to be positioned in.
-  CursorState cursor_advance = 2;
+  optional CursorState cursor_advance = 2;
 }
 
 // ---- The sidecar's file cursor: where each tailed file has been read to ----
