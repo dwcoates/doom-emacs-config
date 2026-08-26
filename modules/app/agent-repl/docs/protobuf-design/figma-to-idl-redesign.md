@@ -328,6 +328,23 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### conversation.v1: `AgentToolCallProgress` lands — the heartbeat relay's arm on nine tool kinds
+
+**What changed ("looks good"; the reopen queued at the FeedSimpleToolCall
+landing).** NEW shared `AgentToolCallProgress { last_progress_at_ms }` — the
+vendor's per-call beat relayed as observed, never a shim-invented ping; the
+shim keeps the wedge RULING (timeout still settles the unit's failure). A
+`progress` arm joins the result oneof of read, write, edit, grep, glob,
+bash, skill_use, send_message and unmodeled (next free tag each). The
+start/update rule SURVIVES INTACT: progress is a THIRD arm kind — a beat,
+not growth — so `update` stays earned by growth alone.
+
+**Boundaries drawn.** The SUBAGENT keeps its existing richer progress (the
+vendor's subagent channel carries tokens/duration/retry; a beat would be a
+lesser second spelling). TASK ACTS get no arm (an act is instantaneous).
+STORE: no change needed — a progress frame is an ordinary upsert of its
+unit's page line; the unit's row simply carries a fresher frame.
+
 ### The topbar WARNING DROPDOWN lands remediated — list + per-kind overlay; the two unmodeled re-homings arrive
 
 **What changed ("looks good", after the user's list+overlay restructure).**
