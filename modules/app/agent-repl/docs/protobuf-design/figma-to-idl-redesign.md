@@ -328,6 +328,17 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### RETRACT-1/2 DROPPED — the refusal-fallback retraction is not modeled
+
+**The ruling ("lets forget about it").** The vendor's retraction fields
+(`SDKAssistantMessage.supersedes`, `SDKModelRefusalFallbackMessage
+.retracted_message_uuids`) are declared-only at the type surface, fire only
+on the model-refusal fallback path, and have zero observed occurrences across
+the 14,349-file corpus (the transcript is strictly append-only on disk); the
+earlier batch-2 lean toward an AgentRetraction frame is withdrawn. If the
+fallback path is ever observed emitting them, the question reopens with a
+real producer in hand.
+
 ### ATTACH-3's out-of-band user edit is DROPPED — vendor cache plumbing, not a conversation fact
 
 **The ruling ("this seems like something we dont want to support then"),
