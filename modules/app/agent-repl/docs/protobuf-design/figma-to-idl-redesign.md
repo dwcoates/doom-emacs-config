@@ -328,6 +328,40 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The documentation re-vet lands: 11 of 13 no-producer claims REFUTED; batch-2 rulings so far
+
+**The re-vet (Opus, SDK doc surface + official docs), vindicating the
+corrected evidence standard.** KEEP, refuted as no-producer: Grep (real
+default-allowed built-in; corpus absence was tool-deferral), Glob's
+structured output ("absent on results persisted by CLI versions predating
+this field" — the corpus predates the field; mirror the SDK's optional
+pair, not a required extent), bash isImage and interrupted, subagent
+models_used (multi-entry is the field's documented purpose),
+requested_name and note (SendMessage addressability; task progress
+summary), all five workflow fields (resumeFromRunId, sessionUrl, warning,
+script-rejection error, TaskStop kill), the question note/free-text
+distinction (declared verbatim — the owed verification is DISCHARGED),
+clear-keeps-session-id (SDKConversationResetMessage), MCP error text (on
+Query.mcpServerStatus(), not init's impoverished copy — wire the shim
+there), DetachedCauseByUser (TaskStop), permission vocabulary (the live
+gate). RE-COMMENT as SHIM-authored, not delete: SessionIdentityRotated
+.reason; SessionColdLapsed cache TTL (derive the tier from observed
+ephemeral_5m/1h; prefer a tier enum over ms). SURVIVING QUESTIONS, two:
+NOPROD-6 (async completions carry one scalar vs sync's full usage — shape
+ruling pending) and NOPROD-12c (detached timeout has no vendor surface —
+keep only as a shim-imposed deadline, pending). Methodological note
+recorded for the register: three claims failed by inspecting the
+impoverished copy of a structure (init.mcp_servers vs mcpServerStatus();
+transcript vs live gate; Messages-API schema vs toolUseResult).
+
+**Batch-2 rulings so far.** HOOKS: full hook activity family (start/
+settled with outcomes incl. blocking; event vocabulary; stop roll-up) —
+the footer's hook activity gains its producer. ATTACH-2: an LSP
+diagnostics activity kind (the diagnostics card). ATTACH-3: a SessionUpdate
+arm (per-workspace by construction — the user's scoping question answered:
+one session = one workspace), drawn as a feed notice. ATTACH-5: COVERED by
+the landed UserPromptProvenance queued arm — no new shape.
+
 ### EVIDENCE STANDARD CORRECTED: corpus absence is NOT deletion evidence; the SIMPLE-ADD wave lands; batch judging opens
 
 **The user's correction, a standing rule.** "Not seeing it in the
