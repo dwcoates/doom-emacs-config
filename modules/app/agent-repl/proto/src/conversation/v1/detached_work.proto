@@ -24,6 +24,17 @@ message AgentDetachedWork {
   // because both arms have one and it is the same fact either way.
   DetachedWorkId work = 1;
 
+  // WHERE THE WORK'S OUTPUT IS ACCUMULATING. UNSET when the producer named no
+  // file — an awaited-then-detached subagent whose frames still arrive is the
+  // ordinary case.
+  //
+  // THE SPOOL IS FREQUENTLY THE ONLY PLACE THE WORK EXISTS. A backgrounded
+  // subagent's prose reaches no stream at all; it is written here and nowhere
+  // else, so an announcement without the path leaves the work unreachable. It
+  // is also what a reader that RESTARTED needs in order to re-open the spool
+  // it was following, since the handle above addresses live work only.
+  optional DetachedWorkOutput output = 4;
+
   // HOW it came to be detached. The two are genuinely different situations for
   // a consumer: one continues an element it is already drawing, the other has
   // no element yet and must be told what the work IS.
@@ -35,6 +46,30 @@ message AgentDetachedWork {
     DetachedWorkCreated created = 3;
   }
 }
+
+// The file a detached unit's output is being written to.
+message DetachedWorkOutput {
+  // Its path on the host the producer runs on. Meaningful only to a reader on
+  // that host.
+  string path = 1;
+
+  // WHETHER THIS READER MAY OPEN IT. The set arm is the answer, because the
+  // two are drawn differently: an unreadable spool is a path shown for the
+  // record, while a readable one is something a surface can offer to follow.
+  oneof readability {
+    // The file may be opened and followed.
+    DetachedWorkOutputReadable readable = 2;
+    // The file exists but this reader may not open it — a remote placement, a
+    // permission the producer did not grant.
+    DetachedWorkOutputUnreadable unreadable = 3;
+  }
+}
+
+// The output file may be opened.
+message DetachedWorkOutputReadable {}
+
+// The output file may not be opened by this reader.
+message DetachedWorkOutputUnreadable {}
 
 // Work that was drawn as in-turn progress and has now left the turn. One
 // identity spans the move, so the element already on screen continues rather

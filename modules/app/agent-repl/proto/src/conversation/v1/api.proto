@@ -50,6 +50,18 @@ message ApiRequestFailed {
     ApiNotFound not_found = 8;
     // 500 — the API's own internal error.
     ApiInternal internal = 9;
+    // The account cannot be charged for this request — an exhausted spend
+    // limit, a lapsed payment method. The user must act on their billing,
+    // which is why it is not folded into `permission_denied`.
+    ApiBillingError billing_error = 11;
+    // The credential's organization is not permitted to use this deployment
+    // at all. Distinct from `permission_denied`: the refusal is about the ORG
+    // rather than about this request's scope, so no per-request change helps.
+    ApiOauthOrgNotAllowed oauth_org_not_allowed = 12;
+    // The request asked for more output tokens than the model will produce.
+    // The request itself must be made smaller; retrying it unchanged cannot
+    // succeed.
+    ApiMaxOutputTokens max_output_tokens = 13;
     // A type the API declared that this schema does not model, kept by name.
     ApiUnmodeledError unmodeled = 10;
   }
@@ -86,6 +98,15 @@ message ApiNotFound {}
 // The API's own internal error.
 message ApiInternal {}
 
+// The account cannot be charged for this request.
+message ApiBillingError {}
+
+// The credential's organization is not permitted to use this deployment.
+message ApiOauthOrgNotAllowed {}
+
+// The request asked for more output than the model will produce.
+message ApiMaxOutputTokens {}
+
 // An error type this schema does not model.
 message ApiUnmodeledError {
   // The vendor's type string, so a later schema knows what to add.
@@ -119,6 +140,67 @@ message ModelOption {
   string display_name = 2;
   // A one-line description, when the vendor gives one; empty otherwise.
   string description = 3;
+
+  // What this particular model can do. UNSET when the vendor reported no
+  // capability block for it, in which case a selector must not assume any
+  // capability either way.
+  //
+  // WHY IT RIDES THE OFFER: fast mode and auto mode are per-model, so a
+  // surface that offers either without consulting the selected model's
+  // capabilities is offering something that will be refused.
+  optional ModelCapabilities capabilities = 4;
+}
+
+// What one model can do, as the vendor declares it.
+message ModelCapabilities {
+  // The id the vendor resolves this option to when it is selected — an alias
+  // ("sonnet") names a dated id. UNSET when the vendor stated no resolution,
+  // in which case the option's own id is what runs.
+  optional AgentModel resolved_model = 1;
+
+  // Whether a reasoning-effort level may be asked for, and which levels this
+  // model accepts. THE ARM IS THE ANSWER, so a model that takes no effort
+  // carries no level list to be misread as "every level".
+  oneof effort_support {
+    // The model does not take a reasoning-effort level; asking for one is a
+    // request it will refuse.
+    ModelEffortUnsupported effort_unsupported = 2;
+    // The model takes a reasoning-effort level, and these are the levels.
+    ModelEffortSupported effort_supported = 3;
+  }
+
+  // Whether the model adjusts its own thinking budget rather than holding to
+  // the level asked for.
+  bool supports_adaptive_thinking = 4;
+  // Whether the vendor's fast mode may be turned on for this model.
+  bool supports_fast_mode = 5;
+  // Whether the vendor's auto permission mode may be used with this model.
+  bool supports_auto_mode = 6;
+}
+
+// The model takes no reasoning-effort level.
+message ModelEffortUnsupported {}
+
+// The model takes a reasoning-effort level.
+message ModelEffortSupported {
+  // The levels this model accepts, in the vendor's own order. A level absent
+  // here is refused by this model even though another model accepts it.
+  repeated AgentEffortLevel levels = 1;
+}
+
+// How much reasoning a response was asked to spend before answering.
+//
+// A closed set of scalar choices with no per-value payload and no exclusive
+// sibling — an enum by the convention's own carve-out, and one canonical
+// vocabulary so a model's accepted levels and a response's reported level are
+// the same values.
+enum AgentEffortLevel {
+  AGENT_EFFORT_LEVEL_UNSPECIFIED = 0;
+  AGENT_EFFORT_LEVEL_LOW = 1;
+  AGENT_EFFORT_LEVEL_MEDIUM = 2;
+  AGENT_EFFORT_LEVEL_HIGH = 3;
+  // Above `high`: the vendor's largest reasoning budget.
+  AGENT_EFFORT_LEVEL_XHIGH = 4;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +268,81 @@ message TokenUsage {
   // Zero when the vendor reported no thinking tokens, which is also what a
   // response with no extended thinking reports.
   uint64 output_thinking_tokens = 4;
+
+  // Whether this request was billed at the refusal-fallback discount. UNSET
+  // when no fallback was in play at all, which is the ordinary case — absence
+  // is NOT "the credit was refused", which is the `not_applied` arm below.
+  optional TokenFallbackCredit fallback_credit = 5;
+
+  // Why the prompt cache did not serve what it might have. UNSET when the
+  // vendor reported no cache diagnostics for the request; a full cache hit
+  // also reports none.
+  optional TokenCacheMissDiagnostics cache_miss = 6;
 }
+
+// Whether a refusal-fallback response was billed at a discount.
+//
+// A REFUSAL FALLBACK RE-RUNS A REQUEST ON A SECOND MODEL, so the account would
+// otherwise pay twice for one answer. The vendor may credit the first attempt,
+// and states here whether it did.
+message TokenFallbackCredit {
+  // THE ARM IS WHETHER THE CREDIT APPLIED.
+  oneof status {
+    // The credit applied; the figures above are already net of it.
+    TokenFallbackCreditRedeemed redeemed = 1;
+    // The credit did not apply, and the vendor said why.
+    TokenFallbackCreditNotApplied not_applied = 2;
+  }
+}
+
+// The credit applied.
+message TokenFallbackCreditRedeemed {}
+
+// The credit did not apply.
+message TokenFallbackCreditNotApplied {
+  // The vendor's reason word, verbatim; its vocabulary is not settled and it
+  // is shown rather than switched on.
+  string reason = 1;
+  // What would have to be removed from the request for the credit to apply,
+  // as the vendor names those parts. Empty when it named none — the condition
+  // may not be one the caller can act on.
+  repeated string remove_to_redeem = 2;
+}
+
+// Why the prompt cache missed. Carried because a surface that reports a cold
+// or expensive request cannot otherwise say what made it one — and the answer
+// determines whether anything can be done about it (a changed system prompt is
+// the caller's doing; an unavailable cache is not).
+message TokenCacheMissDiagnostics {
+  // How many input tokens were processed fresh BECAUSE of the miss, as the
+  // vendor attributes them. Not a fourth counter beside the buckets above:
+  // this is the vendor's own attribution and is not summed with them.
+  uint64 missed_input_tokens = 1;
+
+  // WHAT INVALIDATED THE CACHE. The set arm is the reason.
+  oneof reason {
+    // A different model ran, and a prompt cache is per model.
+    TokenCacheMissModelChanged model_changed = 2;
+    // The system prompt differed from the cached prefix.
+    TokenCacheMissSystemChanged system_changed = 3;
+    // The tool definitions differed from the cached prefix.
+    TokenCacheMissToolsChanged tools_changed = 4;
+    // The message history differed from the cached prefix.
+    TokenCacheMissMessagesChanged messages_changed = 5;
+    // The message the cached prefix ended at was no longer present.
+    TokenCacheMissPreviousMessageNotFound previous_message_not_found = 6;
+    // The cache itself could not be consulted. Nothing about the request
+    // caused this.
+    TokenCacheMissUnavailable unavailable = 7;
+  }
+}
+
+message TokenCacheMissModelChanged {}
+message TokenCacheMissSystemChanged {}
+message TokenCacheMissToolsChanged {}
+message TokenCacheMissMessagesChanged {}
+message TokenCacheMissPreviousMessageNotFound {}
+message TokenCacheMissUnavailable {}
 
 // The prompt input this request did not have to process, because the prompt
 // cache already held it.
