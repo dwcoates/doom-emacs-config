@@ -115,6 +115,10 @@ message FooterStatus {
     // The workspace is being closed — or the close is blocked; the
     // sub-status says which.
     FooterStatusClosing closing = 10;
+    // The agent is taking context on — a memory file, a skill. MOMENTARY,
+    // the `interrupted` precedent: it stands until the next status update
+    // clears it, because the intake itself has no duration.
+    FooterStatusLoading loading = 11;
   }
 }
 message FooterStatusIdle {}
@@ -126,6 +130,7 @@ message FooterStatusBackground {}
 message FooterStatusBlocked {}
 message FooterStatusDisconnected {}
 message FooterStatusClosing {}
+message FooterStatusLoading {}
 
 // ---- 2. SubStatus — the step within the status ----------------------------
 
@@ -141,6 +146,8 @@ message FooterSubStatus {
     FooterSubStatusBlocked blocked = 5;
     // The closing status's step.
     FooterSubStatusClosing closing = 6;
+    // The loading status's step: which kind of intake.
+    FooterSubStatusLoading loading = 7;
   }
 }
 
@@ -271,6 +278,26 @@ message FooterSubStatusClosing {
 // Blocked. Empty: the arm is the fact; the reasons are the activity's.
 message FooterSubStatusCloseBlocked {}
 
+// The loading family. Each arm is one intake kind; the activity line
+// carries the specific item.
+message FooterSubStatusLoading {
+  oneof step {
+    // A CLAUDE.md-family file entered context (the session-start tree, or
+    // a mid-turn directory touch).
+    FooterSubStatusLoadingMemory memory = 1;
+    // A skill's content expanded into context from a slash invocation.
+    FooterSubStatusLoadingInvoked invoked = 2;
+    // Dynamically found skills joined the available set.
+    FooterSubStatusLoadingDiscovered discovered = 3;
+    // The skill listing itself was re-injected — the available set changed.
+    FooterSubStatusLoadingListing listing = 4;
+  }
+}
+message FooterSubStatusLoadingMemory {}
+message FooterSubStatusLoadingInvoked {}
+message FooterSubStatusLoadingDiscovered {}
+message FooterSubStatusLoadingListing {}
+
 // ---- 3. StatusActivity — finest, dynamic ----------------------------------
 
 // The finest line: typed KINDS whose payload is mostly text the daemon
@@ -290,6 +317,9 @@ message FooterStatusActivity {
     // WHY the close is blocked, in concise plain English resolved by the
     // daemon ("a turn is in flight; 2 subagents and a shell are running").
     FooterStatusActivityCloseBlocked close_blocked = 7;
+    // The specific item taken on, composed by the daemon
+    // ("webapp/CLAUDE.md", "graphify", "3 skills from ~/.claude/skills").
+    FooterStatusActivityContextInjected context_injected = 8;
   }
 }
 // The commit a merge is landing right now.
@@ -331,6 +361,12 @@ message FooterStatusActivityRateLimited {
 // The close-blocked reasons line.
 message FooterStatusActivityCloseBlocked {
   // The composed reasons, drawn verbatim.
+  string text = 1;
+}
+
+// The injection line's element.
+message FooterStatusActivityContextInjected {
+  // The composed line, drawn verbatim.
   string text = 1;
 }
 

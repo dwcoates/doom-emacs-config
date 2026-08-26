@@ -125,6 +125,10 @@ message AgentActivity {
     // agent's work. The largest record class the vendor writes; a blocking
     // outcome is a refusal the user must be able to understand.
     AgentHook hook = 21;
+    // Context the vendor SILENTLY pulled into the conversation — a memory
+    // file, a discovered or invoked skill — with no tool call announcing
+    // it. Surfaced so the user can see what shaped the agent's behavior.
+    AgentContextInjected context_injected = 22;
   }
 }
 
@@ -2525,4 +2529,45 @@ enum AgentDiagnosticSeverity {
   AGENT_DIAGNOSTIC_SEVERITY_WARNING = 2;
   AGENT_DIAGNOSTIC_SEVERITY_INFORMATION = 3;
   AGENT_DIAGNOSTIC_SEVERITY_HINT = 4;
+}
+
+// ==========================================================================
+// Injected context: what the vendor silently pulled into the conversation.
+// An injection is INSTANTANEOUS — one record, no lifecycle — so the unit
+// arrives whole. Multiple injections per turn are routine; everything
+// injected stays resident until a clear or compaction drops it.
+// ==========================================================================
+
+// One silent injection.
+message AgentContextInjected {
+  // What was injected. THE ARM IS THE SOURCE KIND.
+  oneof injected {
+    // A memory file (CLAUDE.md-family) pulled in by path discovery — the
+    // session-start tree, or a mid-turn directory touch.
+    AgentInjectedMemory memory = 1;
+    // Skills discovered or invoked WITHOUT a tool call.
+    AgentInjectedSkills skills = 2;
+  }
+}
+// The injected memory file.
+message AgentInjectedMemory {
+  // The file's path, as the vendor names it.
+  string path = 1;
+  // Its content as injected, verbatim.
+  string content = 2;
+}
+// The injected skills.
+message AgentInjectedSkills {
+  // One entry per skill, in the vendor's order.
+  repeated AgentInjectedSkill skills = 1;
+}
+// One injected skill.
+message AgentInjectedSkill {
+  // The skill's name, verbatim.
+  string name = 1;
+  // Its path. UNSET when the vendor gave none (a dynamic-discovery delta
+  // names the directory, not each file).
+  optional string path = 2;
+  // Its content as injected. UNSET when only the listing was injected.
+  optional string content = 3;
 }
