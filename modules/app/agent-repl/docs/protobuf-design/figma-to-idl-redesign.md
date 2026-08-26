@@ -328,6 +328,18 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `AnswerQuestion` lands — the sibling verb; echo-the-value end to end
+
+**What changed ("looks good").** NEW endpoint_answer_question.proto:
+request { WorkspaceRef; FeedId question; repeated AnswerQuestionAnswer
+{ question_text (echoed — never position); chosen labels (echoed); optional
+other_text (legal beside choices and alone) } }; success empty (delivered);
+error arms derived (unknown card, answered/expired, an echo the batch never
+served, multi-pick on single-select). rpc AnswerQuestion joins the FEED
+section — 29 rpcs. The split from AnswerPermission mirrors the
+conversation-level permission/question split and the held-offer precedent:
+different item kind, different answer shape, own verb.
+
 ### `AnswerPermission` repoints — FeedId echo, the landed card's arms; the WHOLE TREE COMPILES again
 
 **What changed ("looks good").** endpoint_answer_permission.proto rewritten:

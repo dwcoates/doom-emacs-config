@@ -1,0 +1,54 @@
+// endpoint_answer_question.proto — AnswerQuestion: the question card's
+// submission. FEED section. Its own verb beside AnswerPermission (a choice
+// is a different item kind with a different answer shape); success is
+// "delivered" — the card's verdict lines arrive as the row's re-push.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AnswerQuestionRequest {
+  // The workspace whose card this is.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The question card's row, exactly as the feed served it.
+  frontend.v1.FeedId question = 2;
+  // One answer per question in the batch, in any order — each names its
+  // question by ECHOING the served text, never by position.
+  repeated AnswerQuestionAnswer answers = 3;
+}
+// One question's answer.
+message AnswerQuestionAnswer {
+  // The question's text, echoed verbatim from the card — how the daemon
+  // (and the shim behind it) reconstruct which question this answers.
+  string question_text = 1;
+  // The chosen option labels, echoed verbatim from the card. Empty when the
+  // answer is free text alone.
+  repeated string chosen = 2;
+  // The free-text answer or note, when typed. UNSET = none. Legal beside
+  // choices (a note on a selection) and alone (the "Other" escape).
+  optional AnswerQuestionOtherText other_text = 3;
+}
+// The free-text element.
+message AnswerQuestionOtherText {
+  // The text, relayed verbatim.
+  string text = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message AnswerQuestionResponse {
+  oneof result {
+    AnswerQuestionSuccess success = 1;
+    AnswerQuestionError error = 2;
+  }
+}
+// Delivered. Empty on purpose — the verdict is the feed's push.
+message AnswerQuestionSuccess {}
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown card, already
+// answered or expired, an echoed question or label the batch never served,
+// a multi-pick on a single-select).
+message AnswerQuestionError {}
