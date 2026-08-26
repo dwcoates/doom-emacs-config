@@ -129,6 +129,10 @@ message AgentActivity {
     // file, a discovered or invoked skill — with no tool call announcing
     // it. Surfaced so the user can see what shaped the agent's behavior.
     AgentContextInjected context_injected = 22;
+    // The agent fetching one URL's content and reading it.
+    AgentWebFetch web_fetch = 23;
+    // The agent running a web search and receiving result links.
+    AgentWebSearch web_search = 24;
   }
 }
 
@@ -2236,6 +2240,160 @@ message AgentSendMessageResumedRecipient {}
 message AgentSendMessageFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
+}
+
+// ---- The web fetch: one URL's content, read by the agent ----
+
+// The agent fetching one URL and reading its content. Standard family shape:
+// start announces, progress is the vendor's beat, success/failure settle.
+message AgentWebFetch {
+  // Where the fetch stands.
+  oneof result {
+    // This stream is now carrying this fetch. Sent ONCE per stream, at issue.
+    // There is no update arm: a fetch reports nothing until it is done.
+    AgentWebFetchStart start = 1;
+    // The vendor's liveness beat while the fetch runs. NOT an update — no
+    // growth is reported — a frame like any other, upserting the unit.
+    AgentToolCallProgress progress = 2;
+    // The fetch ran and answered. An HTTP error page is still this arm —
+    // the status says how the server answered.
+    AgentWebFetchSuccess success = 3;
+    // The fetch could not run at all (network refused, blocked domain).
+    AgentWebFetchFailure failure = 4;
+  }
+}
+
+// The fetch as issued.
+message AgentWebFetchStart {
+  // What is being fetched, carried on every frame.
+  AgentWebFetchTarget target = 1;
+  // When the call was issued; a drawn clock ticks from this.
+  int64 started_at_ms = 2;
+}
+
+// What was fetched. Carried on EVERY frame of the fetch, not only the
+// announcement, because each frame of an upserted unit stands alone.
+message AgentWebFetchTarget {
+  // The URL, as the caller gave it. Consumers draw it as a hyperlink.
+  string url = 1;
+}
+
+// The fetch's answer.
+message AgentWebFetchSuccess {
+  // What was fetched, restated so the settled frame stands alone.
+  AgentWebFetchTarget target = 1;
+  // How the server answered. A 404 is a served answer, not a tool failure;
+  // consumers badge this beside the verdict.
+  AgentWebFetchHttpStatus status = 2;
+  // The fetched content as the vendor rendered it for the model — markdown
+  // prose, never raw HTML.
+  string result = 3;
+  // The response size in bytes, as the vendor measured it. EXPECTED UNMAPPED:
+  // no UI surface draws it today; carried for fidelity.
+  uint64 bytes = 4;
+  // How long the fetch took, in milliseconds, as the vendor measured it.
+  // EXPECTED UNMAPPED: drawn clocks tick from the start instant instead.
+  uint64 duration_ms = 5;
+  // TRUE when the URL resolved to a Claude Artifact and was read through the
+  // artifact route rather than a plain HTTP fetch. EXPECTED UNMAPPED: no UI
+  // surface distinguishes it today; declared-only at the vendor type surface.
+  bool artifact_read = 6;
+}
+
+// The HTTP status the fetch got.
+message AgentWebFetchHttpStatus {
+  // The numeric status code (200, 404, ...).
+  uint32 code = 1;
+  // The vendor's status text ("OK", "Not Found").
+  string text = 2;
+}
+
+// The fetch never ran.
+message AgentWebFetchFailure {
+  // What was asked for, restated so the settled frame stands alone.
+  AgentWebFetchTarget target = 1;
+  // Why it could not run, in the shared tool-failure vocabulary.
+  AgentToolFailure failure = 2;
+}
+
+// ---- The web search: a query, and the links it found ----
+
+// The agent running a web search. Standard family shape.
+message AgentWebSearch {
+  // Where the search stands.
+  oneof result {
+    // This stream is now carrying this search. Sent ONCE per stream, at issue.
+    AgentWebSearchStart start = 1;
+    // The vendor's liveness beat while the search runs.
+    AgentToolCallProgress progress = 2;
+    // The search ran. Finding nothing is a success with an empty answer.
+    AgentWebSearchSuccess success = 3;
+    // The search could not run at all.
+    AgentWebSearchFailure failure = 4;
+  }
+}
+
+// The search as issued.
+message AgentWebSearchStart {
+  // What was searched for, carried on every frame.
+  AgentWebSearchQuery query = 1;
+  // When the call was issued; a drawn clock ticks from this.
+  int64 started_at_ms = 2;
+}
+
+// What was searched for.
+message AgentWebSearchQuery {
+  // The search terms as the caller wrote them, drawn verbatim.
+  string terms = 1;
+}
+
+// The search's answer.
+message AgentWebSearchSuccess {
+  // What was searched for, restated so the settled frame stands alone.
+  AgentWebSearchQuery query = 1;
+  // The results in the order the engine served them. The producer's array is
+  // heterogeneous — link objects mixed with bare narration strings — so each
+  // entry is one of the two, and order is preserved across both kinds.
+  repeated AgentWebSearchResult results = 2;
+  // How many searches the engine ran to produce this answer. EXPECTED
+  // UNMAPPED: no UI surface draws it today; carried for fidelity.
+  uint32 search_count = 3;
+  // How long the search took, in seconds, in the vendor's own unit. EXPECTED
+  // UNMAPPED: drawn clocks tick from the start instant instead.
+  double duration_seconds = 4;
+}
+
+// One entry of the engine's answer.
+message AgentWebSearchResult {
+  // Which kind of entry this is.
+  oneof entry {
+    // A found page — the product of the call.
+    AgentWebSearchLink link = 1;
+    // The engine's own narration line between links, kept in order.
+    AgentWebSearchNote note = 2;
+  }
+}
+
+// A found page.
+message AgentWebSearchLink {
+  // The page's title, the row's drawn text.
+  string title = 1;
+  // The page's URL. Consumers draw it as a hyperlink.
+  string url = 2;
+}
+
+// A narration line the engine interleaved with the links.
+message AgentWebSearchNote {
+  // The line, drawn verbatim.
+  string text = 1;
+}
+
+// The search never ran.
+message AgentWebSearchFailure {
+  // What was asked for, restated so the settled frame stands alone.
+  AgentWebSearchQuery query = 1;
+  // Why it could not run, in the shared tool-failure vocabulary.
+  AgentToolFailure failure = 2;
 }
 
 // ---- The unmodeled tool: work this contract does not describe ----
