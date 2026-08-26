@@ -328,6 +328,29 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### ATTACH-3's out-of-band user edit is DROPPED — vendor cache plumbing, not a conversation fact
+
+**The ruling ("this seems like something we dont want to support then"),
+after the evidence settled what the record IS.** The `edited_text_file`
+attachment fires when the vendor composes the agent's next API request: it
+re-checks every file the agent has read or written this session and, for any
+that changed on disk since, injects the fresh contents. Measured across the
+corpus (470 notices): 450 were for files the agent itself had edited or
+written, 121 previously read, 20 neither; the preceding record is whatever
+tool result came next (Bash 369, a fresh user prompt 98) — never coupled to
+Read/Write/Edit. Its payload is the file's fresh numbered text: it is the
+vendor refreshing the MODEL's stale copy so edits do not land against stale
+text (the same tracking behind the "File has been modified since read" Edit
+error). "The user" is the vendor's authorship guess — a linter, a git
+checkout, or another session trips it identically.
+
+**Why dropped.** It is cache-invalidation plumbing between the vendor and its
+own model, drawn nowhere even in the vendor's own UI; relaying it would model
+the pipeline, not the domain. This closes the ATTACH-3 remainder (the
+SessionUpdate-arm sketch and the later AgentContextInjected user_edit
+grouping are both withdrawn — the grouping was refuted as
+mechanism-not-semantics before the drop settled the question entirely).
+
 ### INJECTED CONTEXT lands — AgentContextInjected + the footer's LOADING status family
 
 **The iteration, each turn the user's.** A feed card was drawn and
