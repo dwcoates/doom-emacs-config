@@ -328,6 +328,26 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### AUDIT JUDGING OPENS — finding 1 lands: the STOP TAXONOMY gets its conversation.v1 arms
+
+**The judging protocol.** Findings one at a time, five-answer test, contract
+changes as ordinary increments — walked in load-bearing order. IN PARALLEL,
+an Opus (xhigh) subagent is re-auditing EVERY vendor surface (SDK types,
+real JSONL, journals/meta/spools) against the CURRENT conversation.v1,
+verifying the stale A–E reports and consolidating every no-home-no-reason
+gap into audit/GAPS-consolidated.md — collection only, no remediation; the
+judging continues from that document.
+
+**Finding 1 ("yes, we need to add those fields").** The vendor's stop facts
+(stop_reason, stop_details) had no producer arms while FeedTurnEnded now
+draws max-tokens/refusal notices. LANDED: AgentResponseFailureReason gains
+{ max_tokens | refused { optional vendor explanation } |
+context_window_exceeded | aborted }. Deliberately WITHOUT arms, stated at
+the message: pause_turn (the vendor resumes it itself), compaction (the
+context cut is that fact's home), stop_sequence (unused). NO AgentFailure
+change: turn-level max-tokens/refusal renderings resolve from the LAST
+response's failure reason — one home for the fact.
+
 ### Session diagnostics join the topbar dropdown — the FRONTEND REMEDIATION PASS IS COMPLETE
 
 **What changed ("looks good").** TopbarWarning gains two detail arms:

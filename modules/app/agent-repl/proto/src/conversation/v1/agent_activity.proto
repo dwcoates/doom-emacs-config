@@ -401,8 +401,36 @@ message AgentResponseFailure {
   AgentResponseFailureReason reason = 2;
 }
 
-// Why a response ended without completing. Empty until its arms are derived.
-message AgentResponseFailureReason {}
+// Why a response ended without completing. The arms are the vendor's own
+// stop facts, carried so a consumer never infers the ending from the prose.
+// Vendor stops deliberately WITHOUT arms here: `pause_turn` (the vendor
+// resumes it itself — nothing ended), `compaction` (the context cut is that
+// fact's home), `stop_sequence` (unused by this product).
+message AgentResponseFailureReason {
+  oneof reason {
+    // The vendor stopped at its output ceiling; the prose is cut short.
+    AgentResponseStoppedAtMaxTokens max_tokens = 1;
+    // The vendor refused to continue, with its explanation when it gave one.
+    AgentResponseRefused refused = 2;
+    // The context window was exceeded; nothing more could be read or said.
+    AgentResponseContextWindowExceeded context_window_exceeded = 3;
+    // The response was cut by a user-commanded stop mid-arrival.
+    AgentResponseAborted aborted = 4;
+  }
+}
+message AgentResponseStoppedAtMaxTokens {}
+// The refusal, with the vendor's own account.
+message AgentResponseRefused {
+  // The vendor's stated explanation. UNSET when it gave none.
+  optional AgentResponseRefusalExplanation explanation = 1;
+}
+// The explanation element.
+message AgentResponseRefusalExplanation {
+  // The vendor's wording, verbatim.
+  string text = 1;
+}
+message AgentResponseContextWindowExceeded {}
+message AgentResponseAborted {}
 
 // What the agent said, as markdown for the consumer to render. THE WHOLE
 // TEXT, as settled — carried only on the terminal arms, so a settled frame
