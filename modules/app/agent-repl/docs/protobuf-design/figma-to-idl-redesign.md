@@ -328,6 +328,23 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The explicit-`optional` sweep lands across every package (Opus subagent, `aace177a1`)
+
+**What changed.** 37 nilable message fields gained the explicit `optional`
+keyword across feed (20), footer (11), store (2 — `StoreAgentUpdate.top_level`,
+`EntryBatch.cursor_advance`), sidebar (`WorkspaceRoster.current`), topbar
+(`TopbarModelSelector.selected`), and the two feed-verb `feed` addresses.
+Post-edit protoc output verified byte-identical to the pre-edit baseline
+(only the known `endpoint_answer_permission.proto` break remains).
+
+**Borderline judgments recorded so they are not re-litigated**: the footer's
+expanded panels stay bare ("always resolved on every push"); RosterRow's
+current/closed stay bare (their bool carries the state, presence is not the
+signal); the host-surface facts stated as unconditional stay bare;
+`AgentPrompt.agent` stays bare ("never unset"); always-set elements
+(TopbarView.token_breakdown, FeedPage.breadcrumbs, AgentWorkflowStart.script,
+AgentBash output) stay bare.
+
 ### `FeedPermission` lands — the consent card from the typed source; the standing token stays daemon-side; NEW CONVENTION: nilable message fields carry explicit `optional`
 
 **What changed ("looks good").** FeedPermission { headline (vendor-rendered
