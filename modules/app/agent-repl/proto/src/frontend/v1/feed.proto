@@ -803,10 +803,37 @@ message FeedUnsupportedBlock {
 }
 
 // ①b A prompt one agent addressed to another — the user kind's sibling,
-// drawn as a prompt bubble with an ORANGE BORDER. On the sender's feed it is
-// the outgoing send (with the recipient named); on the recipient's feed, the
-// delivered prompt. Body at its own increment.
-message FeedAgentPrompt {}
+// drawn as a prompt bubble with an ORANGE BORDER. ONE component, both ends:
+// on the sender's feed it is the outgoing send, on the recipient's the
+// delivered prompt; only the address line differs, and the daemon composes
+// it for whichever feed it resolves.
+message FeedAgentPrompt {
+  // The address line — "→ Explore" on the sender's feed, "from Plan" on
+  // the recipient's. Daemon-composed, drawn verbatim.
+  FeedAgentPromptAddress address = 1;
+  // The prompt's content, in composed order — the feed's shared drawn
+  // block vocabulary. Long bodies fold/cap as client presentation, like
+  // any long prompt.
+  FeedAgentPromptBody body = 2;
+}
+// The address element.
+message FeedAgentPromptAddress {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+// The body element.
+message FeedAgentPromptBody {
+  // The blocks, in order.
+  repeated FeedAgentPromptBlock blocks = 1;
+}
+// One block of the prompt; the arm is what it is (the shared vocabulary).
+message FeedAgentPromptBlock {
+  oneof block {
+    FeedTextBlock text = 1;
+    FeedImageBlock image = 2;
+    FeedUnsupportedBlock unsupported = 3;
+  }
+}
 
 // ⑤ THE CONTEXT-CUT DIVIDER — the conversation was cut here, and a reader
 // scrolling back must see where. Drawn from conversation.v1.ContextCut.
