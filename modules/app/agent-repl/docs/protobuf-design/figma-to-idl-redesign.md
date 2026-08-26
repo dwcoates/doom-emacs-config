@@ -328,6 +328,17 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `AnswerPermission` repoints — FeedId echo, the landed card's arms; the WHOLE TREE COMPILES again
+
+**What changed ("looks good").** endpoint_answer_permission.proto rewritten:
+request { WorkspaceRef; frontend.v1.FeedId permission (the card's row,
+echoed as served; the standing echo token stays daemon-side); oneof answer
+{ allow_once | allow_standing (legal only when the card carried
+standing_offered) | deny { optional relayed reason } } }; success empty
+(delivered — the card's new state is the feed's push); error arms derived
+at the wave. The old ToolCallId shape and its embedded question-answers arm
+die — question answers become the sibling AnswerQuestion verb, next.
+
 ### `FeedQuestion` lands — the choice card; answers ride the row for cold repaint
 
 **What changed ("question stuff looks good", after the coupling question).**

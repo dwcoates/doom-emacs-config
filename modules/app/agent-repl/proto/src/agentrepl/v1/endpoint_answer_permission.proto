@@ -1,49 +1,44 @@
-// endpoint_answer_permission.proto — AnswerPermission: the permission card's
-// buttons and the question card's submission. FEED section. Joined to the
-// ask by the call id.
+// endpoint_answer_permission.proto — AnswerPermission: the consent card's
+// buttons. FEED section. Success is "delivered" — the card's new state
+// arrives as the row's re-push, never restated here.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
 import "workspace/v1/workspace.proto";
-import "conversation/v1/tool_call.proto";
+import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message AnswerPermissionRequest {
+  // The workspace whose card this is.
   workspace.v1.WorkspaceRef workspace = 1;
-  // WHICH ask — the permission row's (and tool card's) join key.
-  conversation.v1.ToolCallId call = 2;
-  // THE ARM IS THE ANSWER, and it must match the card's body: verdicts
-  // answer a tool body, answers answer a questions body — a mismatch is a
-  // refusal.
+  // The permission card's row, exactly as the feed served it. The daemon
+  // decodes it to the ask's identity; the STANDING echo token stays
+  // daemon-side and is supplied to the shim when the arm picks standing.
+  frontend.v1.FeedId permission = 2;
+  // Which button.
   oneof answer {
+    // Allow this call alone.
     AnswerPermissionAllowOnce allow_once = 3;
-    AnswerPermissionAllowForSession allow_for_session = 4;
+    // Allow with standing — legal only when the card carried
+    // standing_offered; refused otherwise.
+    AnswerPermissionAllowStanding allow_standing = 4;
+    // Refuse the call; the agent proceeds without it.
     AnswerPermissionDeny deny = 5;
-    AnswerPermissionAnswers answers = 6;
   }
 }
 message AnswerPermissionAllowOnce {}
-message AnswerPermissionAllowForSession {}
+message AnswerPermissionAllowStanding {}
+// The refusal, with the user's optional reason relayed to the agent.
 message AnswerPermissionDeny {
-  // What the user said, when they said anything.
-  string reason = 1;
+  // Why, when the user typed one. UNSET = no reason given.
+  optional AnswerPermissionDenyReason reason = 1;
 }
-
-// The question card's answers, ONE PER QUESTION in the batch's order; the
-// daemon translates them to the SDK's allow-with-updated-input
-// (shim.v1.PermissionResponse.updated_input).
-message AnswerPermissionAnswers {
-  repeated AnswerPermissionAnswer answers = 1;
-}
-message AnswerPermissionAnswer {
-  // Chosen option labels, verbatim; several iff the question was
-  // multi-select; empty when only other_text answers.
-  repeated string chosen = 1;
-  // The free-text "Other" answer; empty when options were chosen.
-  string other_text = 2;
+message AnswerPermissionDenyReason {
+  // The reason text, relayed verbatim.
+  string text = 1;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -53,10 +48,9 @@ message AnswerPermissionResponse {
     AnswerPermissionError error = 2;
   }
 }
-// "Delivered", nothing more: the card's state change arrives on the feed
-// stream as the row's re-push, never here.
+// Delivered. Empty on purpose: the card's new state is the feed's to push —
+// restating it here would be a second authority.
 message AnswerPermissionSuccess {}
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (no such ask, already
-// answered, body/answer mismatch, …), spelled per 3b.
-message AnswerPermissionError {
-}
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown card, already
+// answered, standing picked with none offered, no session).
+message AnswerPermissionError {}
