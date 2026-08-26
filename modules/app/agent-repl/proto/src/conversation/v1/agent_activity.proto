@@ -51,6 +51,24 @@ message AgentActivity {
   // per-unit price.
   optional TokenUsage usage = 19;
 
+  // THE REASONING EFFORT THIS UNIT'S API RESPONSE RAN AT, when this is the
+  // unit carrying it. On the envelope for exactly the reason `usage` is: it
+  // is a fact about an API RESPONSE, and a response yields several units.
+  //
+  // UNSET means the producer reported no effort level for the response —
+  // never that the effort was low. A consumer that draws it must draw nothing
+  // when it is absent.
+  optional AgentEffortLevel effort = 18;
+
+  // WHAT THIS UNIT IS ATTRIBUTABLE TO beyond the agent that produced it: the
+  // skill whose instructions were in view, the plugin the tool came from.
+  //
+  // UNSET when the producer attributed the unit to nothing in particular,
+  // which is the ordinary case. NOT ancestry and not a container: this is a
+  // label the producer stamped on the record, and a consumer that groups by
+  // it is making a presentation choice.
+  optional AgentActivityAttribution attribution = 20;
+
   // WHICH unit this concerns, so a later update reaches the same one rather
   // than appearing as a new one. A unit is identified per THING: the agent's
   // reasoning and its prose are separate units, each holding its identity
@@ -106,6 +124,16 @@ message AgentActivity {
   }
 }
 
+// What a unit of work is attributable to beyond its agent.
+message AgentActivityAttribution {
+  // The skill whose instructions were in view when the work happened. UNSET
+  // when none was.
+  optional AgentSkillName skill = 1;
+  // The plugin the work came from, by the name the producer reports. UNSET
+  // when the work came from no plugin.
+  optional string plugin = 2;
+}
+
 // The identity of one unit of in-turn work. Opaque; equality is the only
 // question asked of it.
 message AgentActivityId {
@@ -115,6 +143,44 @@ message AgentActivityId {
   // reported it; for the agent's reasoning or prose it identifies the block.
   // Opaque: compare for equality, never parse.
   string value = 1;
+}
+
+// WHAT A FAILED TOOL CALL SAID, in one shape shared by every tool's failure
+// arm.
+//
+// ONE PAYLOAD RATHER THAN TWELVE, deliberately: the vendor states a failed
+// call's account in exactly one place — the error content of the tool result —
+// whichever tool failed, so twelve per-tool spellings of it would be twelve
+// names for one fact. Where a tool's failure has structure BEYOND that account
+// (a stopped subagent, a rejected task act), the tool's own failure message
+// carries that structure as arms BESIDE this payload.
+//
+// THIS IS THE ACCOUNT, NOT A CLASSIFICATION. Nothing here says whether the
+// failure is retryable or whose fault it was; a consumer shows the text.
+message AgentToolFailure {
+  // What the tool said when it failed, verbatim and by block, exactly as it
+  // would have said a successful result.
+  //
+  // UNSET when the producer observed a failed call with no error content at
+  // all — which happens, and is different from an empty text block. A consumer
+  // then draws the failure with no detail rather than an empty card.
+  optional ToolResultContent content = 1;
+
+  // When the call settled as failed. UNSET when the producer observed no
+  // instant for the settle.
+  optional AgentActivitySettledAt settled_at = 2;
+}
+
+// When a tool call reached its outcome.
+//
+// THE COMPANION OF AgentActivityStartedAt, and the reason a settled item can
+// state a duration at all: a consumer animates a clock from the start instant
+// while the call runs, and freezes it at this instant once the call settles.
+// Without it a settled card either keeps ticking or loses the elapsed figure
+// entirely.
+message AgentActivitySettledAt {
+  // Milliseconds since the Unix epoch, as the producer observed the settle.
+  int64 at_ms = 1;
 }
 
 // The vendor's per-call progress beat, relayed as observed: the call is
@@ -166,6 +232,9 @@ message AgentTaskAct {
     AgentTaskCreated created = 2;
     // The task existed and was altered. Replace what is held for it.
     AgentTaskChanged changed = 3;
+    // The tracker REFUSED the act. Nothing was added and nothing changed;
+    // `state` below carries the task as it still stands, unaltered.
+    AgentTaskRejected rejected = 5;
   }
 
   // Where the act left the task, resolved by the producer, so no consumer
@@ -180,6 +249,13 @@ message AgentTaskCreated {}
 // The task existed and this act altered it. Carries nothing, for the same
 // reason as above.
 message AgentTaskChanged {}
+
+// The tracker refused the act. The task is unchanged, so `state` describes it
+// as it still stands rather than as the act would have left it.
+message AgentTaskRejected {
+  // What the tracker said was wrong with the act.
+  optional AgentToolFailure error = 1;
+}
 
 // A task as it stands after an act.
 message AgentTaskState {
@@ -213,7 +289,22 @@ message AgentTaskState {
     // Begun and suspended, expected to resume. Not a terminal status: a later
     // act can move it back to running.
     AgentTaskPaused paused = 9;
+    // Removed from the tracker. Distinct from every ending above: the task
+    // was not resolved, it was retracted, and a consumer drops the entry
+    // rather than drawing it as finished.
+    AgentTaskDeleted deleted = 10;
   }
+
+  // THE TRACKER IS A DAG, NOT A LIST. A task may declare what it blocks and
+  // what blocks it, and a surface that draws the entries in tracker order
+  // without these is hiding the ordering the author actually stated.
+  //
+  // Tasks this one blocks — none of them may proceed until this resolves.
+  // Empty when it blocks nothing.
+  repeated AgentTaskId blocks = 11;
+  // Tasks blocking this one. Empty when nothing blocks it, which is what a
+  // task ready to be worked looks like.
+  repeated AgentTaskId blocked_by = 12;
 }
 
 // Created, not started.
@@ -241,6 +332,9 @@ message AgentTaskKilled {}
 
 // Started and suspended, expected to resume.
 message AgentTaskPaused {}
+
+// Removed from the tracker.
+message AgentTaskDeleted {}
 
 // The tracker's identity for one task. Opaque to every reader, never parsed;
 // equality is the only question asked of it.
@@ -300,6 +394,25 @@ message AgentThinkingUpdate {
     // indicator, and nothing whatever once it settles.
     AgentThinkingWithheld withheld = 2;
   }
+
+  // THE VENDOR'S RUNNING ESTIMATE of what this reasoning has cost so far.
+  //
+  // AN ESTIMATE AND NOT A CHARGE, which is why it is not TokenUsage: the
+  // billed figure arrives at settle as `TokenUsage.output_thinking_tokens`,
+  // and the two will differ. Drawn as a live counter under a withheld block,
+  // which is otherwise the one thing in a turn that shows nothing at all
+  // while it runs. UNSET when the vendor reported no estimate.
+  optional AgentThinkingTokenEstimate estimated = 3;
+}
+
+// What the vendor estimates a reasoning block has cost so far.
+message AgentThinkingTokenEstimate {
+  // The running estimate, whole — not a delta. A consumer draws this figure.
+  uint64 estimated_tokens = 1;
+  // How much the estimate grew since the previous frame, as the vendor stated
+  // it. Carried for a consumer pacing an animation; the figure to DRAW is the
+  // whole one above.
+  uint64 estimated_tokens_delta = 2;
 }
 
 // One fragment of reasoning text, on the same terms as the prose update: the
@@ -327,7 +440,10 @@ message AgentThinkingSuccess {
 // Reasoning ended without finishing. Arms are DERIVED from the producer's real
 // sites at the implementation wave; empty until then, because an invented arm
 // is worse than an absent one.
-message AgentThinkingFailure {}
+message AgentThinkingFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
 
 // The reasoning in full, as settled — carried only on the terminal arms, for
 // the same reason the settled prose is.
@@ -389,7 +505,55 @@ message AgentResponseUpdate {
 message AgentResponseSuccess {
   // What was said, whole.
   AgentResponseProse prose = 1;
+
+  // WHO ACTUALLY WROTE THIS PROSE. The set arm is the answer.
+  //
+  // THIS EXISTS BECAUSE THE VENDOR SYNTHESIZES ERROR NOTICES AS ASSISTANT
+  // PROSE. "API Error: connection closed mid-response" and "you have hit your
+  // monthly spend limit" arrive in the same shape as an answer, so a consumer
+  // that trusts the shape draws an outage as something the agent said. Only
+  // the producer, which sees the vendor's own markers, can tell them apart;
+  // by the time the prose reaches a consumer the evidence is gone.
+  //
+  // UNSET means the producer did not evaluate authorship, NOT that the prose
+  // is the model's — a consumer must not read absence as a guarantee.
+  oneof authorship {
+    // The model wrote it. The ordinary case.
+    AgentResponseFromModel from_model = 2;
+    // The vendor's own tooling wrote it as a notice to the user; no model
+    // produced these words. Draw it as a notice, never as the agent's answer.
+    AgentResponseSynthesizedNotice synthesized_notice = 3;
+  }
 }
+
+// The model wrote the prose.
+message AgentResponseFromModel {}
+
+// The prose is a notice the vendor synthesized, not something the model said.
+message AgentResponseSynthesizedNotice {
+  // WHAT THE NOTICE IS ABOUT, so a surface can route it — an allowance
+  // exhausted is actionable, a transient warning is not.
+  oneof subject {
+    // The account has run out of its allowance and cannot proceed.
+    AgentNoticeUsageLimit usage_limit = 1;
+    // The account moved between allowance tiers or windows.
+    AgentNoticeUsageTransition usage_transition = 2;
+    // The account is approaching a limit but is not yet blocked.
+    AgentNoticeUsageWarning usage_warning = 3;
+    // The producer recognized the prose as synthesized but matched it to no
+    // known subject. The text is all a consumer has.
+    AgentNoticeUnclassified unclassified = 4;
+  }
+
+  // The HTTP status the vendor attached to the notice, when it attached one.
+  // UNSET when it did not — most notices carry none.
+  optional int32 http_status = 5;
+}
+
+message AgentNoticeUsageLimit {}
+message AgentNoticeUsageTransition {}
+message AgentNoticeUsageWarning {}
+message AgentNoticeUnclassified {}
 
 // The block ended without completing.
 message AgentResponseFailure {
@@ -404,8 +568,8 @@ message AgentResponseFailure {
 // Why a response ended without completing. The arms are the vendor's own
 // stop facts, carried so a consumer never infers the ending from the prose.
 // Vendor stops deliberately WITHOUT arms here: `pause_turn` (the vendor
-// resumes it itself — nothing ended), `compaction` (the context cut is that
-// fact's home), `stop_sequence` (unused by this product).
+// resumes it itself — nothing ended) and `compaction` (the context cut is that
+// fact's home).
 message AgentResponseFailureReason {
   oneof reason {
     // The vendor stopped at its output ceiling; the prose is cut short.
@@ -416,13 +580,67 @@ message AgentResponseFailureReason {
     AgentResponseContextWindowExceeded context_window_exceeded = 3;
     // The response was cut by a user-commanded stop mid-arrival.
     AgentResponseAborted aborted = 4;
+    // The model emitted one of the request's stop sequences and stopped
+    // there. The prose is complete as far as the model meant it, but it ended
+    // on a boundary the CALLER set rather than on the model's own ending —
+    // which is why it is a stop rather than a success.
+    AgentResponseStoppedAtStopSequence stop_sequence = 5;
   }
 }
+message AgentResponseStoppedAtStopSequence {}
 message AgentResponseStoppedAtMaxTokens {}
 // The refusal, with the vendor's own account.
 message AgentResponseRefused {
   // The vendor's stated explanation. UNSET when it gave none.
   optional AgentResponseRefusalExplanation explanation = 1;
+
+  // WHICH SAFETY CATEGORY the refusal fell under. UNSET when the vendor
+  // classified the refusal into none — absence is not a category it declined
+  // to name.
+  //
+  // Carried because the category is what tells a reader whether a refusal is
+  // about the request's SUBJECT or about the shape of what was asked for, and
+  // those lead to different next actions.
+  optional AgentRefusalCategory category = 2;
+
+  // The model that refused. UNSET when the vendor did not name it, in which
+  // case the session's effective model is the best a reader has.
+  //
+  // WORTH CARRYING SEPARATELY: a refusal may be answered by a fallback on a
+  // DIFFERENT model, so the session's effective model at read time is not
+  // reliably the one that refused.
+  optional AgentModel original_model = 3;
+
+  // A model the vendor suggests would not refuse. UNSET when it suggested
+  // none. USER-ACTIONABLE: this is the one part of a refusal a surface can
+  // offer to act on.
+  optional AgentModel recommended_model = 4;
+
+  // The vendor's own handle for a billing credit against this refused
+  // attempt, quotable when the charge is disputed. UNSET when it issued none.
+  // Opaque: carried and shown, never parsed.
+  optional string fallback_credit_token = 5;
+
+  // Whether the vendor asserts a prefill claim against this refusal — its own
+  // statement that the refused attempt was partially prefilled and is
+  // therefore chargeable differently. UNSET when it asserted nothing either
+  // way, which is not the same as asserting `false`.
+  optional bool fallback_has_prefill_claim = 6;
+}
+
+// The safety categories a refusal can fall under, as the vendor names them.
+//
+// A closed set of scalar labels with no per-value payload and no exclusive
+// sibling, so an enum by the convention's own carve-out. A category the vendor
+// adds later arrives as UNSPECIFIED, which a consumer draws as "refused
+// without a stated category" — the same as absence.
+enum AgentRefusalCategory {
+  AGENT_REFUSAL_CATEGORY_UNSPECIFIED = 0;
+  AGENT_REFUSAL_CATEGORY_CYBER = 1;
+  AGENT_REFUSAL_CATEGORY_BIO = 2;
+  AGENT_REFUSAL_CATEGORY_FRONTIER_LLM = 3;
+  AGENT_REFUSAL_CATEGORY_REASONING_EXTRACTION = 4;
+  AGENT_REFUSAL_CATEGORY_GENERAL_HARMS = 5;
 }
 // The explanation element.
 message AgentResponseRefusalExplanation {
@@ -477,6 +695,11 @@ message AgentReadStart {
   ReadPath path = 1;
   // When the read began, so a consumer can draw how long it has been waiting.
   AgentActivityStartedAt started_at = 2;
+  // The page range the caller asked for, as written, when the read named one.
+  // MEANINGFUL ONLY FOR A PAGED DOCUMENT (a PDF); UNSET for every other read,
+  // which is the ordinary case. Carried verbatim: the range grammar belongs to
+  // the tool that parses it.
+  optional string requested_pages = 3;
 }
 
 // The file was read.
@@ -494,7 +717,26 @@ message AgentReadSuccess {
     // The file was long, so only its leading portion came back. More exists,
     // and a consumer may offer to fetch it.
     AgentReadHead head = 3;
+    // The file is an IMAGE and came back as image data. Not text with a flag
+    // beside it: an image read is drawn by a different renderer entirely,
+    // which is why it is its own arm rather than a `whole` carrying base64.
+    AgentReadImage image = 4;
+    // The file is a PDF and came back as document data.
+    AgentReadPdf pdf = 5;
+    // The file is a notebook and came back as cells rather than as lines.
+    AgentReadNotebook notebook = 6;
+    // The file was too large to carry back at all, so the tool split it to a
+    // directory. NOTHING OF THE CONTENT IS HERE; the consumer is told where it
+    // went.
+    AgentReadSplitToDirectory split_to_directory = 7;
+    // The file has not changed since it was last read, so the tool returned
+    // nothing rather than the contents again. Without this arm an elided read
+    // is indistinguishable from an empty file.
+    AgentReadUnchanged unchanged = 8;
   }
+
+  // When the read settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 9;
 }
 
 // The file came back entire.
@@ -502,6 +744,90 @@ message AgentReadWhole {
   // Everything the file holds.
   string contents = 1;
 }
+
+// The file is an image, and came back as image data.
+message AgentReadImage {
+  // The image bytes as the tool returned them.
+  bytes data = 1;
+  // The IANA media type of `data`, so a consumer need not sniff the bytes.
+  string media_type = 2;
+  // How large the file is on disk. Stated because the bytes above may have
+  // been re-encoded or downscaled, so their length is not the file's size.
+  uint64 original_size_bytes = 3;
+  // The image's dimensions, as the tool measured them. UNSET when it measured
+  // none.
+  optional AgentReadImageDimensions dimensions = 4;
+}
+
+// An image read's two sizes: what the file is, and what was handed to the
+// model. THEY DIFFER whenever the tool downscaled to fit a budget, and a
+// surface that draws only one of them cannot say that happened.
+message AgentReadImageDimensions {
+  // The image's own width in pixels.
+  uint32 original_width = 1;
+  // The image's own height in pixels.
+  uint32 original_height = 2;
+  // The width the model was shown.
+  uint32 display_width = 3;
+  // The height the model was shown.
+  uint32 display_height = 4;
+}
+
+// The file is a PDF, and came back as document data.
+message AgentReadPdf {
+  // The document bytes as the tool returned them — the whole file, or the
+  // pages `AgentReadStart.requested_pages` asked for.
+  bytes data = 1;
+  // How large the file is on disk, which differs from `data`'s length whenever
+  // a page range was taken.
+  uint64 original_size_bytes = 2;
+}
+
+// The file is a notebook, and came back as cells.
+message AgentReadNotebook {
+  // The notebook's cells, in document order.
+  //
+  // UNTYPED BY NECESSITY, and this is the one reason that qualifies: a
+  // notebook cell's shape is the notebook FORMAT's, which the producer does
+  // not hold a schema for and which varies by kernel and by format version.
+  // Structured rather than a string so a generic view can list a cell's fields
+  // without re-parsing; NOTHING BRANCHES ON A KEY INSIDE IT.
+  repeated google.protobuf.Struct cells = 1;
+}
+
+// The file was too large to return, so the tool wrote it out in pieces.
+message AgentReadSplitToDirectory {
+  // The directory the pieces were written to, so a reader — or the agent's
+  // next call — can reach them.
+  string output_dir = 1;
+  // How many pieces it was split into.
+  uint32 part_count = 2;
+  // How large the file is on disk.
+  uint64 original_size_bytes = 3;
+}
+
+// The file was unchanged since it was last read, so nothing came back.
+//
+// A SUCCESS WITH NO CONTENT, not a failure and not an empty file: the tool
+// deliberately elided the contents because the reader already has them.
+message AgentReadUnchanged {
+  // WHAT THE ELISION IS RELATIVE TO. The set arm is the answer, because the
+  // two mean different things to a reader: one says "you read this yourself",
+  // the other says "this was placed in context before you asked".
+  oneof basis {
+    // Unchanged since an earlier read in this same session.
+    AgentReadUnchangedSincePriorRead prior_read = 1;
+    // Unchanged since the tool SEEDED it into context without a read of its
+    // own — so there is no earlier read frame for a consumer to point at.
+    AgentReadUnchangedSinceSeeded seeded = 2;
+  }
+}
+
+// Unchanged since an earlier read in this session.
+message AgentReadUnchangedSincePriorRead {}
+
+// Unchanged since the contents were seeded into context without a read.
+message AgentReadUnchangedSinceSeeded {}
 
 // The file was long, so only its leading portion came back.
 message AgentReadHead {
@@ -513,11 +839,32 @@ message AgentReadHead {
   // What the whole file holds, so a consumer states "showing 200 of 4,312"
   // without arithmetic and without a second request.
   uint32 total_lines = 2;
+
+  // WHAT CUT IT. The set arm matters because the two cuts have different
+  // guarantees: a line cap always lands on a line boundary, and a token cap
+  // does not — a consumer that assumes whole lines will draw a truncated one
+  // as if it were complete.
+  oneof cut {
+    // Cut at a line budget, on a line boundary.
+    AgentReadCutAtLineCap line_cap = 3;
+    // Cut at a TOKEN budget. The last line carried may be incomplete, and the
+    // line count above is therefore a count of lines STARTED, not finished.
+    AgentReadCutAtTokenCap token_cap = 4;
+  }
 }
+
+// The read was cut at a line budget.
+message AgentReadCutAtLineCap {}
+
+// The read was cut at a token budget, possibly mid-line.
+message AgentReadCutAtTokenCap {}
 
 // The read did not happen. Arms are DERIVED from the producer's real sites at
 // the implementation wave; empty until then.
-message AgentReadFailure {}
+message AgentReadFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
 
 // A path a file tool acted on.
 message ReadPath {
@@ -619,6 +966,9 @@ message AgentWriteSuccess {
   // what the agent proposed — a card drawing the agent's version when the user
   // changed it would be showing something that never happened.
   bool user_modified = 5;
+
+  // When the write settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 6;
 }
 
 // The file did not exist before this write.
@@ -629,7 +979,10 @@ message AgentWriteUpdated {}
 
 // The write did not happen. Arms are DERIVED from the producer's real sites at
 // the implementation wave; empty until then.
-message AgentWriteFailure {}
+message AgentWriteFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
 
 // The agent edited a file: replaced a matched string, which must have been
 // present and (unless every occurrence was requested) unique.
@@ -675,12 +1028,18 @@ message AgentEditSuccess {
   // Whether the user altered the proposed edit at the permission gate before it
   // applied.
   bool user_modified = 3;
+
+  // When the edit settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 4;
 }
 
 // The edit did not apply — the string was absent, or was not unique and every
 // occurrence was not requested. Arms are DERIVED from the producer's real sites
 // at the wave; empty until then.
-message AgentEditFailure {}
+message AgentEditFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
 
 // ==========================================================================
 // The search tools. Both answer with a list that may stop short of every match,
@@ -721,6 +1080,16 @@ message AgentGrepQuery {
   // A filename filter narrowing which files were searched. UNSET means every
   // file under the root was eligible.
   optional string glob = 3;
+  // A language or file-type filter, as the search names its types ("go",
+  // "rust"). UNSET means no type filter was applied — which is different from
+  // a filter that matched every type.
+  optional string file_type = 4;
+  // Whether the pattern was matched without regard to case. Carried because
+  // case-insensitivity is invisible in the rendered result: the same output
+  // could have come from either mode, and only this says which.
+  bool case_insensitive = 5;
+  // Whether the pattern was allowed to match across line boundaries.
+  bool multiline = 6;
 }
 
 // A search this stream has begun carrying.
@@ -753,6 +1122,9 @@ message AgentGrepSuccess {
     // count.
     AgentGrepCount count = 3;
   }
+
+  // When the search settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 5;
 }
 
 // The matching lines themselves.
@@ -832,7 +1204,10 @@ message AgentGrepCount {
 
 // The search could not run. Arms are DERIVED from the producer's real sites at
 // the implementation wave; empty until then.
-message AgentGrepFailure {}
+message AgentGrepFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
 
 // The agent matched file PATHS against a pattern.
 message AgentGlob {
@@ -887,6 +1262,9 @@ message AgentGlobSuccess {
     // The list stops short. How much was left out may itself be approximate.
     AgentGlobPartial partial = 3;
   }
+
+  // When the walk settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 5;
 }
 
 // Every matching path is present.
@@ -928,7 +1306,10 @@ message AgentGlobOmittedAtLeast {
 
 // The match could not run. Arms are DERIVED from the producer's real sites at
 // the implementation wave; empty until then.
-message AgentGlobFailure {}
+message AgentGlobFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
 
 // ---- The shell: a command, what it said, and where it went ----
 
@@ -975,7 +1356,32 @@ message AgentBashCommand {
   // The command line, verbatim and unparsed. A consumer draws it and never
   // interprets it: a shell line's meaning belongs to the shell.
   string line = 1;
+
+  // The agent's own one-line account of what the command does, written for a
+  // reader rather than for the shell. UNSET when the agent supplied none, in
+  // which case a consumer draws the line above and nothing finer.
+  optional string description = 2;
+
+  // WHETHER THE COMMAND RAN INSIDE THE SANDBOX. The set arm is the answer.
+  //
+  // CONSENT-RELEVANT, which is why it is stated rather than assumed: a command
+  // that ran with the sandbox deliberately disabled reached the host directly,
+  // and is otherwise indistinguishable from one that did not. UNSET means the
+  // producer reported nothing either way — a consumer must NOT read absence as
+  // "sandboxed".
+  oneof sandbox {
+    // The command ran inside the sandbox. The ordinary path.
+    AgentBashSandboxed sandboxed = 3;
+    // The sandbox was deliberately disabled for this command.
+    AgentBashSandboxDisabled sandbox_disabled = 4;
+  }
 }
+
+// The command ran inside the sandbox.
+message AgentBashSandboxed {}
+
+// The sandbox was deliberately disabled for this command.
+message AgentBashSandboxDisabled {}
 
 // A command this stream has begun carrying.
 //
@@ -1021,9 +1427,7 @@ message AgentBashUpdate {
 //
 // A NONZERO EXIT IS STILL THIS ARM. The failure arm is for a call that could not
 // be performed; a command that ran and failed ran, and what it printed is the
-// answer the caller wanted. There is no exit code on this shape because no
-// producer states one for a foreground command — a command's own output is the
-// only account of how it went.
+// answer the caller wanted.
 message AgentBashSuccess {
   // What was run, repeated here so a settled frame describes itself.
   AgentBashCommand command = 1;
@@ -1037,6 +1441,9 @@ message AgentBashSuccess {
     // The command was cut short before finishing.
     AgentBashInterrupted interrupted = 3;
   }
+
+  // When the call settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 4;
 }
 
 // A command that ran to completion.
@@ -1045,13 +1452,67 @@ message AgentBashCompleted {
   // nothing: an empty output still draws its header, so a reader can tell "ran
   // and was silent" from "has not run".
   AgentBashOutput output = 1;
+
+  // HOW THE SHELL SAID IT ENDED.
+  //
+  // UNSET FOR A FOREGROUND COMMAND, where no producer states a termination and
+  // the command's own output is the only account of how it went. SET FOR A
+  // DETACHED SHELL, whose spool is terminated by the shell itself — so the
+  // fact exists for exactly one of the two paths, and stating it as absent for
+  // the other is the honest shape.
+  optional AgentBashTermination termination = 2;
 }
+
+// How a shell said a command ended. The set arm is the answer, because an exit
+// code and a kill are different endings and only one of them has a number.
+message AgentBashTermination {
+  oneof how {
+    // The command exited and the shell reported its status.
+    AgentBashExited exited = 1;
+    // The command was killed by a signal and never reported a status.
+    AgentBashKilled killed = 2;
+  }
+}
+
+// The command exited on its own.
+message AgentBashExited {
+  // The exit status the shell reported. Zero means success; anything else is
+  // the command's own verdict on itself, NOT a failure of the call.
+  int32 code = 1;
+}
+
+// The command was killed and never reported a status.
+message AgentBashKilled {}
 
 // A command cut short before it finished.
 message AgentBashInterrupted {
   // What the command had said by the time it was cut. Drawn as a completed
   // command's output is, under an interrupted treatment.
   AgentBashOutput output = 1;
+
+  // WHY it was cut. UNSET when the producer stated no cause. Worth
+  // distinguishing: a command a person stopped is a decision, and one its own
+  // timeout cut is a limit a reader may want to raise.
+  //
+  // A command a person BACKGROUNDED is deliberately not an arm here: it did
+  // not end, it moved, and the detached-work frame naming this unit is what
+  // says so.
+  oneof cause {
+    // A person stopped it.
+    AgentBashInterruptedByUser by_user = 2;
+    // It outlived its own timeout.
+    AgentBashInterruptedByTimeout timed_out = 3;
+  }
+}
+
+// A person stopped the command.
+message AgentBashInterruptedByUser {}
+
+// The command outlived its own timeout.
+message AgentBashInterruptedByTimeout {
+  // The timeout that was exceeded, in milliseconds. THE CONFIGURED LIMIT, not
+  // the command's runtime.
+  uint64 timeout_ms = 1;
 }
 
 // What a command said, in the form it said it.
@@ -1101,6 +1562,23 @@ message AgentBashOutputPartial {
   // total. This is the figure a consumer draws ("1.2 MB more not shown"), and
   // the full size stays recoverable by addition if anything needs it.
   uint64 bytes_omitted = 1;
+
+  // Where the WHOLE output was spilled, when the producer kept it. UNSET when
+  // it kept nothing, in which case the omitted bytes are gone.
+  //
+  // WITHOUT THIS A TRUNCATION IS A DEAD END: a consumer offered "1.2 MB more
+  // not shown" has nothing to offer the user next.
+  optional AgentBashSpilledOutput spilled = 2;
+}
+
+// The file the whole of a command's output was written to.
+message AgentBashSpilledOutput {
+  // Its path on the host the producer runs on. Meaningful only to a reader on
+  // that host.
+  string path = 1;
+  // How large the whole output is, in bytes — the figure a consumer shows
+  // before offering to open it.
+  uint64 size_bytes = 2;
 }
 
 // Image data the command produced instead of text.
@@ -1114,7 +1592,10 @@ message AgentBashOutputImage {
 
 // The call could not be performed. Arms are DERIVED from the producer's real
 // sites at the implementation wave; empty until then.
-message AgentBashFailure {}
+message AgentBashFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
 
 // ---- The subagent: a spawn, its progress, and its report ----
 
@@ -1174,6 +1655,28 @@ message AgentSubagentStart {
   AgentSubagentPrompt prompt = 1;
   // When the spawn was issued, so a consumer can draw how long it has run.
   AgentActivityStartedAt started_at = 2;
+
+  // How deep this spawn sits below the main-thread agent — zero for a subagent
+  // the main agent spawned, one for a subagent of that, and so on.
+  //
+  // NOT ANCESTRY AND NOT A PARENT LINK: it is a single number the producer
+  // stamps on the spawn, and it names no other agent. A surface uses it to
+  // decide how much nesting to draw, never to reconstruct a tree. UNSET when
+  // the producer reported no depth.
+  optional uint32 spawn_depth = 5;
+
+  // The directory the subagent was started in. UNSET when the producer
+  // reported none, in which case it started where its caller was.
+  optional string working_dir = 6;
+
+  // WHETHER THE VENDOR ASKED THAT THIS SUBAGENT'S TRANSCRIPT NOT BE SHOWN.
+  //
+  // A RENDERING REQUEST, NOT A PERMISSION. The work still happened and its
+  // frames still arrive; the vendor is saying its transcript is noise for this
+  // spawn. A surface may honor it by collapsing the container by default. It
+  // must NOT be read as a reason to discard the frames or to hide that the
+  // subagent ran.
+  bool transcript_suppressed = 7;
 }
 
 // WHAT A SUBAGENT WAS ASKED TO DO, and how it was configured. Carried on every
@@ -1209,6 +1712,14 @@ message AgentSubagentPrompt {
   // model here, because it cannot know the definition did not override it.
   optional AgentModel requested_model = 5;
 
+  // Whether the subagent was FORKED from the caller — started holding the
+  // caller's conversation rather than only the instruction above.
+  //
+  // Worth drawing: a fork's answer may rest on context that appears nowhere in
+  // its own prompt, so a reader judging its report from the instruction alone
+  // would be judging it on a fraction of what it saw.
+  bool forked_from_caller = 9;
+
   // Where the subagent was asked to run. The set arm IS the isolation, so a
   // spawn in the caller's own tree carries no isolation vocabulary at all.
   oneof isolation {
@@ -1234,7 +1745,18 @@ message AgentSubagentIsolationNone {}
 message AgentSubagentIsolationWorktree {}
 
 // The subagent was launched into a remote cloud environment.
-message AgentSubagentIsolationRemote {}
+//
+// THE HANDLES ARRIVE WITH THE LAUNCH, NOT WITH THE REQUEST, so both are unset
+// on the frame that announces the intent and set once the remote answered.
+message AgentSubagentIsolationRemote {
+  // Where the remote session can be opened. THE ONLY WAY TO SEE THIS
+  // SUBAGENT'S WORK — a remote spawn's frames do not travel on the streams
+  // this contract carries. UNSET until the launch reported it.
+  optional string session_url = 1;
+  // The remote's own handle for the run, quotable to it. UNSET until the
+  // launch reported it. Opaque: compare for equality, never parse.
+  optional string remote_task_id = 2;
+}
 
 // The subagent is working. Carries a WHOLE-STATE snapshot, never a delta: each
 // frame states where the run has got to, so a consumer that missed a frame is
@@ -1254,6 +1776,33 @@ message AgentSubagentUpdate {
   // The tool it is running right now. UNSET between calls, which is a real and
   // common state rather than a gap in reporting.
   optional AgentSubagentActivityLabel activity = 4;
+
+  // THE RUN FAILED AND IS BEING TRIED AGAIN. UNSET on an ordinary update,
+  // which is what a first attempt looks like.
+  //
+  // Carried because a retried run costs what its attempts cost together, and
+  // because a subagent that has silently burned three attempts looks identical
+  // to one making slow progress.
+  optional AgentSubagentRetry retry = 5;
+}
+
+// A subagent attempt that failed and is being made again.
+message AgentSubagentRetry {
+  // Which attempt is about to run, one-based — so `2` means the first attempt
+  // failed.
+  uint32 attempt = 1;
+  // How many attempts will be made in total before the spawn is failed.
+  uint32 max_retries = 2;
+  // How long the producer will wait before the next attempt, in milliseconds.
+  // UNSET when it stated no delay.
+  optional uint64 retry_delay_ms = 3;
+  // The status the failed attempt returned, as the producer worded it. UNSET
+  // when it stated none.
+  optional string error_status = 4;
+  // The producer's own classification of the failure, verbatim; its vocabulary
+  // is not settled and it is shown rather than switched on. UNSET when it
+  // classified nothing.
+  optional string error_category = 5;
 }
 
 // What a run has spent, while it is still running.
@@ -1312,6 +1861,19 @@ message AgentSubagentSuccess {
   // was ASKED FOR at issue, and this states what was ACTUALLY USED, which is
   // only knowable now.
   optional AgentSubagentWorktree worktree = 5;
+
+  // The agent type that ACTUALLY ran, when the producer resolved the requested
+  // one to something else — a name that no longer exists, a default standing
+  // in. UNSET when the producer named none.
+  //
+  // BESIDE `AgentSubagentPrompt.subagent_type` RATHER THAN REPLACING IT, for
+  // the same reason the worktree is beside the isolation: the prompt states
+  // what was ASKED FOR, and a spawn that quietly resolved to a different type
+  // is only visible when both are present.
+  optional string resolved_subagent_type = 6;
+
+  // When the spawn settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 7;
 }
 
 // A subagent's final report, as it wrote it.
@@ -1320,6 +1882,17 @@ message AgentSubagentReport {
   // producer hands over a structured report rather than the text it sent its
   // caller, so nothing needs to strip a trailer or recover fields out of prose.
   AgentResponseProse prose = 1;
+
+  // A structured result the subagent wrote ALONGSIDE its prose, when it wrote
+  // one. UNSET is the ordinary case: most subagents report in prose alone.
+  //
+  // UNTYPED BY NECESSITY, and this is the one reason that qualifies: the shape
+  // is AUTHORED BY THE SUBAGENT ITSELF for whatever asked for it, so no schema
+  // can exist here — one run reports findings, another reports a refutation
+  // and a file path. Carried structured rather than flattened into the prose
+  // by string concatenation, which is what happened before and lost the shape
+  // for good. NOTHING BRANCHES ON A KEY INSIDE IT.
+  optional google.protobuf.Struct structured_result = 2;
 }
 
 // What a subagent's run cost and what it did with it.
@@ -1360,6 +1933,12 @@ message AgentSubagentToolStats {
   // account for the total entirely and a reader can tell nothing was silently
   // dropped.
   uint32 other_tool_count = 7;
+
+  // How many frames the run consumed — the producer's own count of model
+  // round-trips inside the subagent. NOT a tool count and never summed with
+  // the counters above: it is the denominator a per-frame cost is read
+  // against.
+  uint32 frame_count = 8;
 }
 
 // The temporary worktree a subagent was given.
@@ -1368,12 +1947,57 @@ message AgentSubagentWorktree {
   string path = 1;
   // The branch created for it.
   string branch = 2;
+
+  // WHERE THE WORKTREE CAME FROM. UNSET when the producer stated nothing. The
+  // two are different for a reader chasing the work: one tree was made for
+  // this spawn and is expected to disappear, the other belongs to something
+  // else and will still be there.
+  oneof provenance {
+    // Created for this spawn.
+    AgentSubagentWorktreeCreated created = 3;
+    // Inherited from whatever spawned it, and shared with it.
+    AgentSubagentWorktreeInherited inherited = 4;
+  }
+
+  // WHAT BECAME OF IT once the run ended. UNSET while the run is live and when
+  // the producer reported nothing. A tree left behind is a real consequence a
+  // reader must be able to see — it holds uncommitted work and it holds disk.
+  oneof cleanup {
+    // Removed cleanly; nothing is left on disk.
+    AgentSubagentWorktreeRemoved removed = 5;
+    // Still on disk after the run ended.
+    AgentSubagentWorktreeRetained retained = 6;
+  }
 }
 
+// The worktree was created for this spawn.
+message AgentSubagentWorktreeCreated {}
+
+// The worktree was inherited from whatever spawned this subagent.
+message AgentSubagentWorktreeInherited {}
+
+// The worktree was removed cleanly.
+message AgentSubagentWorktreeRemoved {}
+
+// The worktree is still on disk.
+message AgentSubagentWorktreeRetained {}
+
 // The spawn could not be performed, or the subagent ended without reporting.
-// Arms are DERIVED from the producer's real sites at the implementation wave;
-// empty until then.
-message AgentSubagentFailure {}
+message AgentSubagentFailure {
+  // What the spawn said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+
+  // WHY the run ended without a report, when the producer distinguished it
+  // from an ordinary failure. UNSET means the account above is all there is.
+  oneof cause {
+    // A person stopped the subagent by hand. Not a fault: the run did what it
+    // was told, and a consumer must not draw it as an error.
+    AgentSubagentStoppedByUser stopped_by_user = 2;
+  }
+}
+
+// A person stopped the subagent by hand.
+message AgentSubagentStoppedByUser {}
 
 // ---- The skill: an invocation, and the document it loaded ----
 
@@ -1446,6 +2070,9 @@ message AgentSkillUseSuccess {
   // What invoking it permits. UNSET when the skill declared no allowances, which
   // is distinct from declaring an empty set.
   optional AgentSkillAllowedTools allowed_tools = 3;
+
+  // When the invocation settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 4;
 }
 
 // A skill's contents, as the agent received them.
@@ -1473,7 +2100,10 @@ message AgentSkillAllowedTools {
 
 // The skill could not be loaded. Arms are DERIVED from the producer's real
 // refusal sites at the implementation wave; empty until then.
-message AgentSkillUseFailure {}
+message AgentSkillUseFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
 
 // ---- The message to another agent ----
 
@@ -1562,6 +2192,9 @@ message AgentSendMessageSuccess {
     // activity and its renewed cost.
     AgentSendMessageResumedRecipient resumed_recipient = 3;
   }
+
+  // When the send settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 4;
 }
 
 // The recipient was already running and the message is queued for it.
@@ -1578,7 +2211,10 @@ message AgentSendMessageResumedRecipient {}
 
 // The message could not be delivered. Arms are DERIVED from the producer's real
 // refusal sites at the implementation wave; empty until then.
-message AgentSendMessageFailure {}
+message AgentSendMessageFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
 
 // ---- The unmodeled tool: work this contract does not describe ----
 
@@ -1663,6 +2299,15 @@ message AgentUnmodeledStart {
 
   // When the call was issued.
   AgentActivityStartedAt started_at = 3;
+
+  // WHICH MCP SERVER SERVED THE TOOL, when one did.
+  //
+  // The tool name above is qualified and a consumer COULD split it — but the
+  // qualification grammar is the vendor's and a server whose own name contains
+  // the separator would be split wrongly. Stated rather than parsed. UNSET for
+  // a built-in this schema has not caught up with, which is the other reason a
+  // call lands here.
+  optional string mcp_server = 4;
 }
 
 // The tool returned.
@@ -1675,6 +2320,12 @@ message AgentUnmodeledSuccess {
   // and image blocks whichever tool produced it, so no untyped escape is needed
   // on this side.
   ToolResultContent content = 2;
+
+  // Which MCP server served the tool, when one did. UNSET for a built-in.
+  optional string mcp_server = 3;
+
+  // When the call settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 4;
 }
 
 // The tool failed.
@@ -1687,5 +2338,10 @@ message AgentUnmodeledFailure {
   string tool_name = 1;
   // What it said when it failed, verbatim.
   ToolResultContent content = 2;
+  // Which MCP server served the tool, when one did. UNSET for a built-in this
+  // schema has not caught up with.
+  optional string mcp_server = 3;
+  // When the call settled as failed. UNSET when no instant was observed.
+  optional AgentActivitySettledAt settled_at = 4;
 }
 

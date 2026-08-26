@@ -299,7 +299,23 @@ message AgentPermissionDenied {
     // auto-mode classifier. The only denial that never had an open ask: a
     // consumer sees `start` and this in one frame, or this alone.
     AgentPermissionDeniedByPolicy policy = 2;
+    // NOBODY REFUSED. The deciding machinery could not be reached — the
+    // auto-mode classifier's model was unavailable — so the call was denied
+    // for want of a decision.
+    //
+    // ITS OWN ARM BECAUSE IT IS NOT A JUDGEMENT. Drawn as a user refusal it
+    // accuses the user of something they did not do; drawn as policy it
+    // implies a rule that does not exist. It is also the only denial here that
+    // RETRYING may resolve.
+    AgentPermissionDeniedForWantOfDecider undecidable = 3;
   }
+}
+
+// The deciding machinery was unavailable, so the call was denied by default.
+message AgentPermissionDeniedForWantOfDecider {
+  // What the producer said was unavailable, verbatim, when it said. UNSET when
+  // it gave no account.
+  optional string detail = 1;
 }
 
 // The user refused.
@@ -322,5 +338,8 @@ message AgentPermissionDeniedByPolicy {
 // The ask expired with no decision.
 message AgentPermissionAbandoned {}
 
-// The ask could not be put to the user. Empty until its arms are derived.
-message AgentPermissionFailure {}
+// The ask could not be put to the user.
+message AgentPermissionFailure {
+  // What the gate said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}

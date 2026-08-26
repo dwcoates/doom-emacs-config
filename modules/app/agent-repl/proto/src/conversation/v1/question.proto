@@ -217,9 +217,11 @@ message AgentQuestionNote {
 // The ask went unanswered and stopped waiting.
 message AgentQuestionUnanswered {}
 
-// The question could not be put to the user. Arms are DERIVED from the
-// producer's real refusal sites at the implementation wave; empty until then.
-message AgentQuestionFailure {}
+// The question could not be put to the user.
+message AgentQuestionFailure {
+  // What the ask said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
 
 // The identity of one ask. Opaque; equality is the only question asked of it.
 message AgentQuestionId {
