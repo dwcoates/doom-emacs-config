@@ -5,8 +5,10 @@
 // command is a thin wrapper: send, await the ack, then tear the tab down —
 // every piece of real machinery is the daemon's.
 //
-// A close REQUIRES QUIET: no turn in flight, no live async work. A busy
-// workspace refuses, and the refusal MANIFESTS IN THE FOOTER (status
+// A close REQUIRES QUIET: no turn in flight, no live async work, and NO
+// HELD PROMPTS — a held prompt is undelivered user intent, and a close may
+// never silently discard it; the user releases or drops it in the tray
+// first. A busy workspace refuses, and the refusal MANIFESTS IN THE FOOTER (status
 // `closing`, sub-status `close blocked`, the daemon's composed reasons as
 // the activity line) — pushed on the footer stream beside this response, so
 // this response never restates the reasons. The user waits or interrupts

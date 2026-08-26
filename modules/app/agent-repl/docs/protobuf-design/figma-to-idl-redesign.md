@@ -328,6 +328,17 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### Held prompts BLOCK a close — the quiet set is complete
+
+**The user's ruling ("held prompts should absolutely block a close").** A
+held prompt is undelivered user intent; a close may never silently discard
+it. The closable condition is now: no turn in flight, no live async work,
+no held prompts. The user clears a hold via the tray's existing verbs
+(release or drop). Stated at CloseWorkspace's endpoint; the footer's
+close-blocked reasons line names held prompts like any other blocker. A
+standing cold gate, the task tracker's contents, and a parked (shim-less)
+session remain NON-blocking.
+
 ### HIBERNATION'S MACHINERY COLLAPSES to an idle-shutdown sweep; the last contract trace neutralizes; the removal plan is named wave work
 
 **The user's rulings, completing the hibernation arc.** (1) ReviveWorkspace
