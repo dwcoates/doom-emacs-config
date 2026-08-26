@@ -1802,12 +1802,12 @@ callers that need to keep rendering WS afterwards (e.g. renderers
 showing its merge-completed state) can continue to do so until an
 explicit `finish' fires.
 
-Thin wrapper over `agent-repl--nuke-one-workspace' — the same teardown
-primitive used by the interactive nuke/kill commands.  Naming this
+Thin wrapper over `agent-repl--kill-one-workspace' — the same teardown
+primitive used by the interactive kill/close commands.  Naming this
 entry point separately lets `agent-repl--handle-close-command' spell
 close-as-composition at its call site without duplicating the underlying
 primitive."
-  (agent-repl--nuke-one-workspace ws preserve-entry))
+  (agent-repl--kill-one-workspace ws preserve-entry))
 
 (defun agent-repl--finish-workspace (ws)
   "Tear down WS: kill agent session, state, persp, and worktree.
@@ -2018,7 +2018,7 @@ what decides where a NEW worktree actually goes."
   "Resolve the on-disk project directory for workspace NAME.
 
 Used by `agent-repl--handle-open-command' to reopen a workspace that
-was previously closed or nuked.  Neither close nor nuke removes the
+was previously closed or killed.  Neither close nor kill removes the
 git worktree or its per-project state.el from disk (only `finish'
 does), so the directory a reopen targets is expected to still exist.
 
@@ -2053,7 +2053,7 @@ only branch 1 is attempted."
   "Handle an \"open\" workspace command CMD.
 
 Re-establishes the editor UI for an EXISTING workspace that was
-previously closed or nuked — its git worktree and per-project state.el
+previously closed or killed — its git worktree and per-project state.el
 remain on disk, but its Doom perspective and agent session were torn
 down.  Resolves CMD's `workspace' name to an on-disk directory via
 `agent-repl--resolve-open-workspace-dir' (preferring a surviving
@@ -2914,7 +2914,7 @@ to DIR, or nil.
 Reverse lookup over `agent-repl--workspaces'.  First match wins —
 canonical paths are unique per LIVE workspace by construction.
 
-Skips tombstoned entries (`:nuked-at' set) so a previously-nuked
+Skips tombstoned entries (`:killed-at' set) so a previously-killed
 workspace's preserved `:project-dir' cannot shadow a live workspace
 that subsequently registers at the same canonical path."
   (if (not dir)

@@ -2753,9 +2753,9 @@ unattributed teardown is visible in the log rather than silently blank."
 
 (ert-deftest agent-repl-test-kill-cause-str-returns-bound-cause ()
   "A let-bound kill-cause is returned verbatim for the log line."
-  (let ((agent-repl--kill-cause "interactive nuke command (test)"))
+  (let ((agent-repl--kill-cause "interactive kill command (test)"))
     (should (equal (agent-repl--kill-cause-str)
-                   "interactive nuke command (test)"))))
+                   "interactive kill command (test)"))))
 
 ;;;; ---- Tests: assert-main-thread ----
 

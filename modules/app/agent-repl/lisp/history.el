@@ -342,7 +342,7 @@ then the value persisted in the existing on-disk state file, then
 `current-time' as a final fallback — so the first state-save for a
 project stamps a creation date that subsequent saves preserve.
 `:last-killed-at' is written through unchanged when set on the ws plist
-\(nuke flows populate it before calling state-save), and falls back to
+\(kill flows populate it before calling state-save), and falls back to
 the previously-persisted value to avoid clobbering on stray saves that
 do not represent a kill.
 

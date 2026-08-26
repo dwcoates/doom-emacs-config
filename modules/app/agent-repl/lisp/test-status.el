@@ -3735,7 +3735,7 @@ col `<= frame-width - 1' (visible)."
 (ert-deftest agent-repl-test-workspace-message-body-advice-strips-tabline ()
   "Override returns ONLY the message text — no tabline prefix, no ` | ' separator.
 Pins the merge-teardown contract: when `+workspace/kill' (called via
-`agent-repl--nuke-one-workspace' during the merge-completed close) hits
+`agent-repl--kill-one-workspace' during the merge-completed close) hits
 `+workspace--message-body', the resulting echo-area string must not flash
 the workspaces tabline."
   (let ((result (agent-repl--workspace-message-body-advice

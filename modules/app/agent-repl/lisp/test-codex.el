@@ -362,7 +362,7 @@ The git-check skip is mandatory: headless spawns run from
           (agent-repl-default-backend 'claude))
       (agent-repl--ws-put "gone" :project-dir "/tmp/p")
       (agent-repl--ws-put "gone" :backend 'codex)
-      (agent-repl--ws-put "gone" :nuked-at 123)
+      (agent-repl--ws-put "gone" :killed-at 123)
       (should (member "gone" (agent-repl--ws-registered-names)))
       (should-not (agent-repl--ws-live-p "gone"))
       (should (agent-repl--codex-in-use-p)))))

@@ -279,7 +279,7 @@ buffer rather than failing on the dedicated side window."
   "When the workspace is untracked (agent-repl--ws-dir errors), falls back
 to `default-directory' so magit still opens without signalling.
 Repro: SPC g g from the main \"doom\" workspace or after a workspace's
-hash entry has been nuked."
+hash entry has been killed."
   (agent-repl-test--with-clean-state
     (let ((magit-status-args nil)
           (default-directory "/tmp/fallback-dir/"))

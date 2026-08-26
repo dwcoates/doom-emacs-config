@@ -24,7 +24,7 @@
 ;;     is `claude_session_id' (the CLI uuid), which is what a future
 ;;     persistence layer stores for `resume'.
 ;;   - `agent-repl-ws-del-hook' releases the daemon session when the
-;;     workspace is nuked (best-effort: a dead daemon only logs).
+;;     workspace is killed (best-effort: a dead daemon only logs).
 ;;
 ;; All external I/O funnels through the transport's single boundary wrapper
 ;; `agent-repl--uds-connect' (frontend-uds.el), registered in

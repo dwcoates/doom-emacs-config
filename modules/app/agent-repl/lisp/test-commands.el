@@ -1587,18 +1587,18 @@ find nothing and drop the very text it exists to save."
   "Default base flags do not include --skip-tests."
   (should-not (member "--skip-tests" agent-repl-create-or-update-pr-base-flags)))
 
-;;;; ---- agent-repl-nuke-workspace ----
+;;;; ---- agent-repl-kill-workspace ----
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/no-workspaces ()
-  "nuke-workspace signals user-error when no live agent-repl ws AND no
+(ert-deftest agent-repl-cmd-test-kill-workspace/no-workspaces ()
+  "kill-workspace signals user-error when no live agent-repl ws AND no
 tab-bar ws are available — the picker has no candidates to offer."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-list-names) (lambda () nil)))
-      (should-error (agent-repl-nuke-workspace) :type 'user-error))))
+      (should-error (agent-repl-kill-workspace) :type 'user-error))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/kills-session-and-tombstones-hashmap ()
-  "nuke-workspace kills session, kills persp workspace, and tombstones hashmap entry.
-Post-tombstone-refactor, the hash entry survives with `:nuked-at' stamped
+(ert-deftest agent-repl-cmd-test-kill-workspace/kills-session-and-tombstones-hashmap ()
+  "kill-workspace kills session, kills persp workspace, and tombstones hashmap entry.
+Post-tombstone-refactor, the hash entry survives with `:killed-at' stamped
 rather than being removed; `--ws-live-p' is the predicate that filters
 tombstones out of the tab-bar/picker."
   (agent-repl-test--with-clean-state
@@ -1617,14 +1617,14 @@ tombstones out of the tab-bar/picker."
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq persp-killed ws)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-workspace)
+        (agent-repl-kill-workspace)
         (should (equal session-killed "doomed"))
         (should (equal persp-killed "doomed"))
         (should-not (agent-repl--ws-live-p "doomed"))
-        (should (agent-repl--ws-get "doomed" :nuked-at))))))
+        (should (agent-repl--ws-get "doomed" :killed-at))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/no-confirmation-prompt ()
-  "nuke-workspace MUST NOT prompt for confirmation.  Teardown is
+(ert-deftest agent-repl-cmd-test-kill-workspace/no-confirmation-prompt ()
+  "kill-workspace MUST NOT prompt for confirmation.  Teardown is
 immediate — persisted state.el is preserved so accidental invocations
 are recoverable by reopening the project."
   (agent-repl-test--with-clean-state
@@ -1639,13 +1639,13 @@ are recoverable by reopening the project."
                 ((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-workspace)
+        (agent-repl-kill-workspace)
         (should-not prompted)
         (should-not (agent-repl--ws-live-p "doomed"))
-        (should (agent-repl--ws-get "doomed" :nuked-at))))))
+        (should (agent-repl--ws-get "doomed" :killed-at))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/kills-persp-workspace ()
-  "nuke-workspace calls +workspace/kill to tear down the persp workspace."
+(ert-deftest agent-repl-cmd-test-kill-workspace/kills-persp-workspace ()
+  "kill-workspace calls +workspace/kill to tear down the persp workspace."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (let ((killed-ws nil)
@@ -1659,11 +1659,11 @@ are recoverable by reopening the project."
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq killed-ws ws)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-workspace)
+        (agent-repl-kill-workspace)
         (should (equal killed-ws "doomed"))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/no-persp-still-tombstones-hashmap ()
-  "nuke-workspace tombstones hashmap entry even when persp workspace doesn't exist."
+(ert-deftest agent-repl-cmd-test-kill-workspace/no-persp-still-tombstones-hashmap ()
+  "kill-workspace tombstones hashmap entry even when persp workspace doesn't exist."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ghost" :project-dir "/tmp/ghost")
     (cl-letf (((symbol-function 'completing-read)
@@ -1672,12 +1672,12 @@ are recoverable by reopening the project."
               ((symbol-function 'agent-repl--gui-kill) #'ignore)
               ((symbol-function '+workspace-exists-p) (lambda (_n) nil))
               ((symbol-function 'force-mode-line-update) #'ignore))
-      (agent-repl-nuke-workspace)
+      (agent-repl-kill-workspace)
       (should-not (agent-repl--ws-live-p "ghost"))
-      (should (agent-repl--ws-get "ghost" :nuked-at)))))
+      (should (agent-repl--ws-get "ghost" :killed-at)))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/skips-persp-kill-when-workspace-already-gone ()
-  "When the persp is already gone from the cache, nuke MUST NOT call
+(ert-deftest agent-repl-cmd-test-kill-workspace/skips-persp-kill-when-workspace-already-gone ()
+  "When the persp is already gone from the cache, kill MUST NOT call
 `+workspace/kill' — that call would emit the user-visible warning
 `'<ws>' workspace doesn't exist' in the echo area.
 
@@ -1712,11 +1712,11 @@ returns nil for a missing workspace."
                 ((symbol-function '+workspace/kill)
                  (lambda (_ws) (setq kill-called t)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-workspace)
+        (agent-repl-kill-workspace)
         (should-not kill-called)))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/tombstones-hashmap-when-frontend-kill-errors ()
-  "nuke-workspace still tombstones the hashmap entry when the frontend's
+(ert-deftest agent-repl-cmd-test-kill-workspace/tombstones-hashmap-when-frontend-kill-errors ()
+  "kill-workspace still tombstones the hashmap entry when the frontend's
 kill dispatch errors.
 The teardown error must not prevent the tombstone — otherwise the entry
 would stay `live' from `--ws-live-p''s perspective while its runtime
@@ -1730,12 +1730,12 @@ state is corrupted, leaving the picker showing a half-dead entry."
                (lambda (_ws) (error "simulated frontend-kill failure")))
               ((symbol-function '+workspace-exists-p) (lambda (_n) nil))
               ((symbol-function 'force-mode-line-update) #'ignore))
-      (agent-repl-nuke-workspace)
+      (agent-repl-kill-workspace)
       (should-not (agent-repl--ws-live-p "doomed"))
-      (should (agent-repl--ws-get "doomed" :nuked-at)))))
+      (should (agent-repl--ws-get "doomed" :killed-at)))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/tombstones-hashmap-when-workspace-kill-errors ()
-  "nuke-workspace still tombstones the hashmap entry when +workspace/kill errors."
+(ert-deftest agent-repl-cmd-test-kill-workspace/tombstones-hashmap-when-workspace-kill-errors ()
+  "kill-workspace still tombstones the hashmap entry when +workspace/kill errors."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (cl-letf (((symbol-function 'completing-read)
@@ -1747,19 +1747,19 @@ state is corrupted, leaving the picker showing a half-dead entry."
               ((symbol-function '+workspace/kill)
                (lambda (_ws) (error "simulated workspace-kill failure")))
               ((symbol-function 'force-mode-line-update) #'ignore))
-      (agent-repl-nuke-workspace)
+      (agent-repl-kill-workspace)
       (should-not (agent-repl--ws-live-p "doomed"))
-      (should (agent-repl--ws-get "doomed" :nuked-at)))))
+      (should (agent-repl--ws-get "doomed" :killed-at)))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/preserves-state-file ()
-  "nuke-workspace MUST preserve the per-project state.el so the
+(ert-deftest agent-repl-cmd-test-kill-workspace/preserves-state-file ()
+  "kill-workspace MUST preserve the per-project state.el so the
 captured session-id survives the in-memory teardown.  The next time
 the same project is opened, `--initialize-ws-env' reads this file and
 launches Claude with `--continue', resuming the prior session.  A
-nuke that wipes state.el would force a fresh session each time, which
+kill that wipes state.el would force a fresh session each time, which
 is the regression this test pins."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "agent-nuke-" t)))
+    (let ((tmpdir (make-temp-file "agent-kill-" t)))
       (unwind-protect
           (let ((state-file (agent-repl--state-file tmpdir)))
             (agent-repl-test--seed-file state-file "(:session-id \"keep-abc\")")
@@ -1779,12 +1779,12 @@ is the regression this test pins."
                       ((symbol-function 'agent-repl--state-save) #'ignore)
                       ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                       ((symbol-function 'force-mode-line-update) #'ignore))
-              (agent-repl-nuke-workspace)
+              (agent-repl-kill-workspace)
               (should (file-exists-p state-file))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/saves-state-before-teardown ()
-  "nuke-workspace runs `--state-save' BEFORE any teardown so session-id
+(ert-deftest agent-repl-cmd-test-kill-workspace/saves-state-before-teardown ()
+  "kill-workspace runs `--state-save' BEFORE any teardown so session-id
 is persisted even if a downstream step (the frontend kill dispatch,
 ws-del, persp kill) signals.  Order assertion: state-save called at
 least once before the frontend kill dispatch."
@@ -1800,7 +1800,7 @@ least once before the frontend kill dispatch."
                  (lambda (_ws) (push 'frontend-kill events)))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-workspace)
+        (agent-repl-kill-workspace)
         ;; Reverse so events are in chronological order.
         (let ((ordered (reverse events)))
           (should (memq 'state-save ordered))
@@ -1809,8 +1809,8 @@ least once before the frontend kill dispatch."
           (should (< (cl-position 'state-save ordered)
                      (cl-position 'frontend-kill ordered))))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/kills-workspace-buffers ()
-  "nuke-workspace invokes kill-workspace-buffers so every persp buffer is torn down."
+(ert-deftest agent-repl-cmd-test-kill-workspace/kills-workspace-buffers ()
+  "kill-workspace invokes kill-workspace-buffers so every persp buffer is torn down."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (let ((kwb-arg nil))
@@ -1822,11 +1822,11 @@ least once before the frontend kill dispatch."
                  (lambda (ws) (setq kwb-arg ws)))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-workspace)
+        (agent-repl-kill-workspace)
         (should (equal kwb-arg "doomed"))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/kills-buffers-even-when-frontend-kill-errors ()
-  "nuke-workspace still sweeps persp buffers when the frontend kill
+(ert-deftest agent-repl-cmd-test-kill-workspace/kills-buffers-even-when-frontend-kill-errors ()
+  "kill-workspace still sweeps persp buffers when the frontend kill
 dispatch throws.
 kill-workspace-buffers lives in the `unwind-protect' cleanup so the
 buffer sweep is not skipped by an earlier teardown failure."
@@ -1842,11 +1842,11 @@ buffer sweep is not skipped by an earlier teardown failure."
                  (lambda (_ws) (setq kwb-called t)))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-workspace)
+        (agent-repl-kill-workspace)
         (should kwb-called)))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/workspace-kill-runs-after-buffer-sweep ()
-  "nuke-workspace kills the persp buffers BEFORE tearing down the persp itself.
+(ert-deftest agent-repl-cmd-test-kill-workspace/workspace-kill-runs-after-buffer-sweep ()
+  "kill-workspace kills the persp buffers BEFORE tearing down the persp itself.
 Reversing the order would make the buffer sweep a no-op because the
 persp would already be gone before the buffer sweep ran."
   (agent-repl-test--with-clean-state
@@ -1863,28 +1863,28 @@ persp would already be gone before the buffer sweep ran."
                 ((symbol-function '+workspace/kill)
                  (lambda (_ws) (push 'persp-kill call-order)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-workspace)
+        (agent-repl-kill-workspace)
         (should (equal (nreverse call-order) '(kwb persp-kill)))))))
 
-;;;; ---- agent-repl-nuke-all-workspaces ----
+;;;; ---- agent-repl-kill-all-workspaces ----
 
-(ert-deftest agent-repl-cmd-test-nuke-all/no-workspaces ()
-  "nuke-all-workspaces signals user-error when hashmap is empty."
+(ert-deftest agent-repl-cmd-test-kill-all/no-workspaces ()
+  "kill-all-workspaces signals user-error when hashmap is empty."
   (agent-repl-test--with-clean-state
-    (should-error (agent-repl-nuke-all-workspaces) :type 'user-error)))
+    (should-error (agent-repl-kill-all-workspaces) :type 'user-error)))
 
-(ert-deftest agent-repl-cmd-test-nuke-all/aborts-on-deny ()
-  "nuke-all-workspaces does nothing when user answers no."
+(ert-deftest agent-repl-cmd-test-kill-all/aborts-on-deny ()
+  "kill-all-workspaces does nothing when user answers no."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (agent-repl--ws-put "ws2" :project-dir "/tmp/ws2")
     (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) nil)))
-      (should-error (agent-repl-nuke-all-workspaces) :type 'user-error)
+      (should-error (agent-repl-kill-all-workspaces) :type 'user-error)
       (should (gethash "ws1" agent-repl--workspaces))
       (should (gethash "ws2" agent-repl--workspaces)))))
 
-(ert-deftest agent-repl-cmd-test-nuke-all/iterates-every-workspace ()
-  "nuke-all-workspaces tears down every registered workspace."
+(ert-deftest agent-repl-cmd-test-kill-all/iterates-every-workspace ()
+  "kill-all-workspaces tears down every registered workspace."
   (agent-repl-test--with-clean-state
     (dolist (n '("ws1" "ws2" "ws3"))
       (agent-repl--ws-put n :project-dir (format "/tmp/%s" n)))
@@ -1894,45 +1894,45 @@ persp would already be gone before the buffer sweep ran."
                 ((symbol-function 'agent-repl--gui-kill)
                  (lambda (ws) (push ws torn-down)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-all-workspaces)
+        (agent-repl-kill-all-workspaces)
         (should (= 3 (length torn-down)))
         (should (member "ws1" torn-down))
         (should (member "ws2" torn-down))
         (should (member "ws3" torn-down))
-        ;; Post-tombstone: hash entries survive with `:nuked-at' but no
+        ;; Post-tombstone: hash entries survive with `:killed-at' but no
         ;; entry remains live.  Use the live-name helper as the assertion.
         (should-not (agent-repl--live-ws-names))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-all/prompt-includes-count ()
-  "nuke-all-workspaces' confirmation prompt includes the workspace count."
+(ert-deftest agent-repl-cmd-test-kill-all/prompt-includes-count ()
+  "kill-all-workspaces' confirmation prompt includes the workspace count."
   (agent-repl-test--with-clean-state
     (dolist (n '("a" "b"))
       (agent-repl--ws-put n :project-dir (format "/tmp/%s" n)))
     (let ((seen-prompt nil))
       (cl-letf (((symbol-function 'y-or-n-p)
                  (lambda (prompt) (setq seen-prompt prompt) nil)))
-        (ignore-errors (agent-repl-nuke-all-workspaces))
+        (ignore-errors (agent-repl-kill-all-workspaces))
         (should (string-match-p "ALL 2" seen-prompt))))))
 
-;;;; ---- agent-repl-nuke-restored-workspaces ----
+;;;; ---- agent-repl-kill-restored-workspaces ----
 
-(ert-deftest agent-repl-cmd-test-nuke-restored/no-restored ()
-  "nuke-restored-workspaces errors when the restored set is empty."
+(ert-deftest agent-repl-cmd-test-kill-restored/no-restored ()
+  "kill-restored-workspaces errors when the restored set is empty."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-    (should-error (agent-repl-nuke-restored-workspaces) :type 'user-error)))
+    (should-error (agent-repl-kill-restored-workspaces) :type 'user-error)))
 
-(ert-deftest agent-repl-cmd-test-nuke-restored/aborts-on-deny ()
-  "nuke-restored-workspaces does nothing when user answers no."
+(ert-deftest agent-repl-cmd-test-kill-restored/aborts-on-deny ()
+  "kill-restored-workspaces does nothing when user answers no."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (push "ws1" agent-repl--restored-workspaces)
     (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) nil)))
-      (should-error (agent-repl-nuke-restored-workspaces) :type 'user-error)
+      (should-error (agent-repl-kill-restored-workspaces) :type 'user-error)
       (should (agent-repl--ws-get "ws1" :project-dir)))))
 
-(ert-deftest agent-repl-cmd-test-nuke-restored/only-restored-are-torn-down ()
-  "nuke-restored-workspaces tears down only restored workspaces, sparing manual ones."
+(ert-deftest agent-repl-cmd-test-kill-restored/only-restored-are-torn-down ()
+  "kill-restored-workspaces tears down only restored workspaces, sparing manual ones."
   (agent-repl-test--with-clean-state
     (dolist (n '("restored1" "restored2" "manual"))
       (agent-repl--ws-put n :project-dir (format "/tmp/%s" n)))
@@ -1943,7 +1943,7 @@ persp would already be gone before the buffer sweep ran."
                 ((symbol-function 'agent-repl--gui-kill)
                  (lambda (ws) (push ws torn-down)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-restored-workspaces)
+        (agent-repl-kill-restored-workspaces)
         (should (= 2 (length torn-down)))
         (should (member "restored1" torn-down))
         (should (member "restored2" torn-down))
@@ -1953,14 +1953,14 @@ persp would already be gone before the buffer sweep ran."
         (should (agent-repl--ws-get "manual" :project-dir))
         ;; Restored entries are tombstoned, not removed — `:project-dir'
         ;; is preserved across tombstone (identity key), so assert the
-        ;; live-p flip and the `:nuked-at' stamp instead.
+        ;; live-p flip and the `:killed-at' stamp instead.
         (should-not (agent-repl--ws-live-p "restored1"))
         (should-not (agent-repl--ws-live-p "restored2"))
-        (should (agent-repl--ws-get "restored1" :nuked-at))
-        (should (agent-repl--ws-get "restored2" :nuked-at))))))
+        (should (agent-repl--ws-get "restored1" :killed-at))
+        (should (agent-repl--ws-get "restored2" :killed-at))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-restored/prompt-includes-count ()
-  "nuke-restored-workspaces' confirmation prompt includes the restored count."
+(ert-deftest agent-repl-cmd-test-kill-restored/prompt-includes-count ()
+  "kill-restored-workspaces' confirmation prompt includes the restored count."
   (agent-repl-test--with-clean-state
     (dolist (n '("a" "b" "c"))
       (agent-repl--ws-put n :project-dir (format "/tmp/%s" n)))
@@ -1968,13 +1968,13 @@ persp would already be gone before the buffer sweep ran."
     (let ((seen-prompt nil))
       (cl-letf (((symbol-function 'y-or-n-p)
                  (lambda (prompt) (setq seen-prompt prompt) nil)))
-        (ignore-errors (agent-repl-nuke-restored-workspaces))
+        (ignore-errors (agent-repl-kill-restored-workspaces))
         (should (string-match-p "3 restored" seen-prompt))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-restored/skips-stale-names ()
-  "nuke-restored-workspaces ignores names in the restored list with no live ws.
+(ert-deftest agent-repl-cmd-test-kill-restored/skips-stale-names ()
+  "kill-restored-workspaces ignores names in the restored list with no live ws.
 Avoids a user-error on the unprompted path when a name was removed from
-the live hash (e.g., by individual nuke) but stayed on the list."
+the live hash (e.g., by individual kill) but stayed on the list."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "live" :project-dir "/tmp/live")
     (setq agent-repl--restored-workspaces '("live" "stale"))
@@ -1984,11 +1984,11 @@ the live hash (e.g., by individual nuke) but stayed on the list."
                 ((symbol-function 'agent-repl--gui-kill)
                  (lambda (ws) (push ws torn-down)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-restored-workspaces)
+        (agent-repl-kill-restored-workspaces)
         (should (equal torn-down '("live")))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-one/drops-from-restored-list ()
-  "Individual nuke removes the ws from `agent-repl--restored-workspaces'."
+(ert-deftest agent-repl-cmd-test-kill-one/drops-from-restored-list ()
+  "Individual kill removes the ws from `agent-repl--restored-workspaces'."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (agent-repl--ws-put "ws2" :project-dir "/tmp/ws2")
@@ -1996,11 +1996,11 @@ the live hash (e.g., by individual nuke) but stayed on the list."
     (let ((persp-mode nil))
       (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl--nuke-one-workspace "ws1")
+        (agent-repl--kill-one-workspace "ws1")
         (should (equal agent-repl--restored-workspaces '("ws2")))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-one/preserve-entry-keeps-hash ()
-  "Calling `--nuke-one-workspace' with PRESERVE-ENTRY non-nil retains
+(ert-deftest agent-repl-cmd-test-kill-one/preserve-entry-keeps-hash ()
+  "Calling `--kill-one-workspace' with PRESERVE-ENTRY non-nil retains
 the hash entry so a merged workspace stays registered until
 `--finish-workspace' removes it.  Every other teardown step still
 runs."
@@ -2010,24 +2010,24 @@ runs."
     (let ((persp-mode nil))
       (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl--nuke-one-workspace "merged-ws" 'preserve-entry)
+        (agent-repl--kill-one-workspace "merged-ws" 'preserve-entry)
         (should (gethash "merged-ws" agent-repl--workspaces))
         (should (eq (agent-repl--ws-get "merged-ws" :merge-completed) t))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-one/no-preserve-tombstones-hash ()
-  "Default `--nuke-one-workspace' (no PRESERVE-ENTRY) tombstones the
+(ert-deftest agent-repl-cmd-test-kill-one/no-preserve-tombstones-hash ()
+  "Default `--kill-one-workspace' (no PRESERVE-ENTRY) tombstones the
 hash entry.  Guards against an accidental flip of the default that
 would leak live ws plists past teardown.  Post-tombstone-refactor the
-entry survives with `:nuked-at' stamped — `--ws-live-p' is the
+entry survives with `:killed-at' stamped — `--ws-live-p' is the
 predicate that keeps it out of every UI/runtime iterator."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (let ((persp-mode nil))
       (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl--nuke-one-workspace "ws1")
+        (agent-repl--kill-one-workspace "ws1")
         (should-not (agent-repl--ws-live-p "ws1"))
-        (should (agent-repl--ws-get "ws1" :nuked-at))))))
+        (should (agent-repl--ws-get "ws1" :killed-at))))))
 
 ;;;; ---- register-merged-workspace + state-merge-completed-p ----
 
@@ -2285,10 +2285,10 @@ swallows the signal so subsequent queue entries still get processed."
         (delete-directory failed-dir t)
         (delete-directory later-dir t)))))
 
-;;;; ---- snapshot-load: main workspace nuked after first restore ----
+;;;; ---- snapshot-load: main workspace killed after first restore ----
 
 (ert-deftest agent-repl-cmd-test-snapshot-load/close-main-runs-after-first-establish ()
-  "Doom's startup `main' workspace is nuked right after the first entry
+  "Doom's startup `main' workspace is killed right after the first entry
 is established — not at load BEGIN, where `main' would still be the
 only workspace alive."
   (agent-repl-test--with-clean-state
@@ -2323,7 +2323,7 @@ fire at all rather than leave the frame with zero workspaces."
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--write-sexp-file
-             snapshot-file `(("ws-nuked" :project-dir ,proj-dir :nuked-at "2024-01-01")))
+             snapshot-file `(("ws-killed" :project-dir ,proj-dir :killed-at "2024-01-01")))
             (cl-letf (((symbol-function 'agent-repl--snapshot-load-close-main)
                        (lambda () (cl-incf close-calls)))
                       ((symbol-function 'run-with-timer)
@@ -2413,16 +2413,16 @@ route-to-register-merged branch."
       (delete-file tmp-merged)
       (delete-file tmp-plain))))
 
-;;;; ---- agent-repl-kill-workspace ----
+;;;; ---- agent-repl-close-workspace ----
 
-(ert-deftest agent-repl-cmd-test-kill-workspace/no-workspaces ()
+(ert-deftest agent-repl-cmd-test-close-workspace/no-workspaces ()
   "kill-workspace signals user-error when no live agent-repl ws AND no
 tab-bar ws are available — the picker has no candidates to offer."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-list-names) (lambda () nil)))
-      (should-error (agent-repl-kill-workspace) :type 'user-error))))
+      (should-error (agent-repl-close-workspace) :type 'user-error))))
 
-(ert-deftest agent-repl-cmd-test-kill-workspace/no-confirmation-prompt ()
+(ert-deftest agent-repl-cmd-test-close-workspace/no-confirmation-prompt ()
   "kill-workspace MUST NOT prompt for confirmation.  Teardown is
 immediate — persisted state.el is preserved so accidental invocations
 are recoverable by reopening the project."
@@ -2438,14 +2438,14 @@ are recoverable by reopening the project."
                 ((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-kill-workspace)
+        (agent-repl-close-workspace)
         (should-not prompted)
         (should-not (agent-repl--ws-live-p "doomed"))
-        (should (agent-repl--ws-get "doomed" :nuked-at))))))
+        (should (agent-repl--ws-get "doomed" :killed-at))))))
 
-(ert-deftest agent-repl-cmd-test-kill-workspace/kills-session-and-tombstones-hashmap ()
+(ert-deftest agent-repl-cmd-test-close-workspace/kills-session-and-tombstones-hashmap ()
   "kill-workspace kills session, kills persp workspace, and tombstones hashmap entry.
-Same tombstone semantics as nuke — `--ws-del' is the single teardown
+Same tombstone semantics as kill — `--ws-del' is the single teardown
 primitive both routes through."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doomed" :project-dir "/tmp/doomed")
@@ -2463,15 +2463,15 @@ primitive both routes through."
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq persp-killed ws)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-kill-workspace)
+        (agent-repl-close-workspace)
         (should (equal session-killed "doomed"))
         (should (equal persp-killed "doomed"))
         (should-not (agent-repl--ws-live-p "doomed"))
-        (should (agent-repl--ws-get "doomed" :nuked-at))))))
+        (should (agent-repl--ws-get "doomed" :killed-at))))))
 
-(ert-deftest agent-repl-cmd-test-kill-workspace/preserves-state-file ()
+(ert-deftest agent-repl-cmd-test-close-workspace/preserves-state-file ()
   "kill-workspace must NOT unlink the .agent-repl-state file.
-This is the whole point of the kill (vs nuke) split: priority and
+This is the whole point of the kill (vs kill) split: priority and
 per-environment session-id live in that file and need to survive a
 kill so the workspace can be re-opened with its identity intact."
   (agent-repl-test--with-clean-state
@@ -2486,11 +2486,11 @@ kill so the workspace can be re-opened with its identity intact."
                       ((symbol-function 'agent-repl--gui-kill) #'ignore)
                       ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                       ((symbol-function 'force-mode-line-update) #'ignore))
-              (agent-repl-kill-workspace)
+              (agent-repl-close-workspace)
               (should (file-exists-p state-file))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-cmd-test-kill-workspace/kills-workspace-buffers ()
+(ert-deftest agent-repl-cmd-test-close-workspace/kills-workspace-buffers ()
   "kill-workspace invokes kill-workspace-buffers so every persp buffer is torn down."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doomed" :project-dir "/tmp/doomed")
@@ -2503,11 +2503,11 @@ kill so the workspace can be re-opened with its identity intact."
                  (lambda (ws) (setq kwb-arg ws)))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-kill-workspace)
+        (agent-repl-close-workspace)
         (should (equal kwb-arg "doomed"))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/tabbar-only-routes-to-persp-kill ()
-  "nuke-workspace on a tab-bar-only ws (agent already killed) routes
+(ert-deftest agent-repl-cmd-test-kill-workspace/tabbar-only-routes-to-persp-kill ()
+  "kill-workspace on a tab-bar-only ws (agent already killed) routes
 through `+workspace/kill' and does NOT call the agent-repl teardown.
 The ws has no live `agent-repl--workspaces' entry but its persp is
 still in `+workspace-list-names', so the picker offers it and the
@@ -2527,14 +2527,14 @@ dispatcher chooses the plain-kill branch."
                 ((symbol-function 'agent-repl--gui-kill)
                  (lambda (_ws) (setq frontend-kill-called t)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-workspace)
+        (agent-repl-kill-workspace)
         (should (equal persp-killed "stray-persp"))
         ;; The agent-repl teardown MUST NOT run for a non-live ws.
         (should-not frontend-kill-called)))))
 
-(ert-deftest agent-repl-cmd-test-kill-workspace/tabbar-only-routes-to-persp-kill ()
+(ert-deftest agent-repl-cmd-test-close-workspace/tabbar-only-routes-to-persp-kill ()
   "kill-workspace on a tab-bar-only ws routes through `+workspace/kill'
-\(symmetric with the nuke-workspace test above)."
+\(symmetric with the kill-workspace test above)."
   (agent-repl-test--with-clean-state
     (let ((persp-killed nil)
           (frontend-kill-called nil)
@@ -2550,18 +2550,18 @@ dispatcher chooses the plain-kill branch."
                 ((symbol-function 'agent-repl--gui-kill)
                  (lambda (_ws) (setq frontend-kill-called t)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-kill-workspace)
+        (agent-repl-close-workspace)
         (should (equal persp-killed "stray-persp"))
         (should-not frontend-kill-called)))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/tombstoned-with-persp-routes-to-persp-kill ()
-  "nuke-workspace on a tombstoned ws (agent killed but persp still in
+(ert-deftest agent-repl-cmd-test-kill-workspace/tombstoned-with-persp-routes-to-persp-kill ()
+  "kill-workspace on a tombstoned ws (agent killed but persp still in
 tab-bar) routes through `+workspace/kill'.  The hash entry already has
-`:nuked-at' set so `--ws-live-p' returns nil; the picker still offers
+`:killed-at' set so `--ws-live-p' returns nil; the picker still offers
 the ws via the tab-bar branch and the dispatcher does the plain kill."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "tomb" :project-dir "/tmp/tomb")
-    (agent-repl--ws-put "tomb" :nuked-at (current-time))
+    (agent-repl--ws-put "tomb" :killed-at (current-time))
     (let ((persp-killed nil)
           (frontend-kill-called nil)
           (persp-mode t))
@@ -2576,7 +2576,7 @@ the ws via the tab-bar branch and the dispatcher does the plain kill."
                 ((symbol-function 'agent-repl--gui-kill)
                  (lambda (_ws) (setq frontend-kill-called t)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl-nuke-workspace)
+        (agent-repl-kill-workspace)
         (should (equal persp-killed "tomb"))
         (should-not frontend-kill-called)))))
 
@@ -2775,7 +2775,7 @@ live prefix so its identity record survives restart."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "alpha" :project-dir "/tmp/alpha")
     (puthash "orphan-tomb"
-             (list :project-dir "/tmp/orphan" :nuked-at (current-time))
+             (list :project-dir "/tmp/orphan" :killed-at (current-time))
              agent-repl--workspaces)
     (let ((persp-names-cache '("alpha")))
       (let* ((entries (agent-repl--collect-snapshot-entries))
@@ -2884,28 +2884,28 @@ the workspaces in tab-bar order."
 (ert-deftest agent-repl-cmd-test-collect-snapshot-entries/hidden-tombstone-carries-marker ()
   "`--collect-snapshot-entries' tags a tombstone killed by the
 hide-project-dirs toggle with `:hidden-project-dir' so the next session
-can tell it apart from a hand-nuked workspace."
+can tell it apart from a hand-killed workspace."
   (agent-repl-test--with-clean-state
     (puthash "ws-cc"
              (list :project-dir "/tmp/cc"
-                   :nuked-at (current-time)
+                   :killed-at (current-time)
                    :hidden-project-dir t)
              agent-repl--workspaces)
     (let* ((entries (agent-repl--collect-snapshot-entries))
            (plist (cdr (assoc "ws-cc" entries))))
-      (should (plist-get plist :nuked-at))
+      (should (plist-get plist :killed-at))
       (should (eq (plist-get plist :hidden-project-dir) t)))))
 
 (ert-deftest agent-repl-cmd-test-collect-snapshot-entries/plain-tombstone-omits-marker ()
   "`--collect-snapshot-entries' does NOT add `:hidden-project-dir' to a
-tombstone the user nuked by hand (no hide marker on the live plist)."
+tombstone the user killed by hand (no hide marker on the live plist)."
   (agent-repl-test--with-clean-state
     (puthash "ws-tomb"
-             (list :project-dir "/tmp/t" :nuked-at (current-time))
+             (list :project-dir "/tmp/t" :killed-at (current-time))
              agent-repl--workspaces)
     (let* ((entries (agent-repl--collect-snapshot-entries))
            (plist (cdr (assoc "ws-tomb" entries))))
-      (should (plist-get plist :nuked-at))
+      (should (plist-get plist :killed-at))
       (should-not (plist-member plist :hidden-project-dir)))))
 
 (ert-deftest agent-repl-cmd-test-write-workspace-snapshot/round-trips-hide-enabled ()
@@ -2961,7 +2961,7 @@ from the snapshot's `:hide-project-dirs-enabled' key."
             (agent-repl--write-sexp-file
              snapshot-file
              `(:workspaces (("ws-cc" :project-dir "/tmp/cc"
-                             :nuked-at ,(current-time)
+                             :killed-at ,(current-time)
                              :hidden-project-dir t))
                :hide-project-dirs-enabled t))
             (agent-repl-load-workspace-snapshot)
@@ -3032,7 +3032,7 @@ are born under the last-chosen frontend."
             (agent-repl--write-sexp-file
              snapshot-file
              `(:workspaces (("ws-cc" :project-dir "/tmp/cc"
-                             :nuked-at ,(current-time)))
+                             :killed-at ,(current-time)))
                :default-frontend gui))
             (agent-repl-load-workspace-snapshot)
             (should (eq agent-repl-default-frontend 'gui)))
@@ -3049,7 +3049,7 @@ are born under the last-chosen frontend."
             (agent-repl--write-sexp-file
              snapshot-file
              `(:workspaces (("ws-cc" :project-dir "/tmp/cc"
-                             :nuked-at ,(current-time)))))
+                             :killed-at ,(current-time)))))
             (agent-repl-load-workspace-snapshot)
             (should (eq agent-repl-default-frontend 'gui)))
         (delete-file snapshot-file)))))
@@ -3069,12 +3069,12 @@ tombstone so a later unhide can re-establish it."
             (agent-repl--write-sexp-file
              snapshot-file
              `(:workspaces (("ws-cc" :project-dir ,project
-                             :nuked-at ,(current-time)
+                             :killed-at ,(current-time)
                              :hidden-project-dir t))
                :hide-project-dirs-enabled t))
             (agent-repl-load-workspace-snapshot)
             (should (agent-repl--ws-get "ws-cc" :hidden-project-dir))
-            (should (agent-repl--ws-get "ws-cc" :nuked-at)))
+            (should (agent-repl--ws-get "ws-cc" :killed-at)))
         (delete-file snapshot-file)
         (delete-directory project t)))))
 
@@ -3087,7 +3087,7 @@ tombstone so a later unhide can re-establish it."
             (agent-repl--write-sexp-file
              snapshot-file
              `(:workspaces (("ws-gone" :project-dir "/nonexistent/gone"
-                             :nuked-at ,(current-time)))))
+                             :killed-at ,(current-time)))))
             (agent-repl-load-workspace-snapshot)
             (should-not (agent-repl--ws-known-p "ws-gone")))
         (delete-file snapshot-file)))))
@@ -3103,7 +3103,7 @@ never encountered again."
             (agent-repl--write-sexp-file
              snapshot-file
              `(:workspaces (("ws-gone" :project-dir "/nonexistent/gone"
-                             :nuked-at ,(current-time)))))
+                             :killed-at ,(current-time)))))
             (agent-repl-load-workspace-snapshot)
             (let ((on-disk (plist-get (agent-repl--read-workspace-snapshot snapshot-file)
                                       :workspaces)))
@@ -3120,7 +3120,7 @@ never encountered again."
             (agent-repl--write-sexp-file
              snapshot-file
              `(:workspaces (("ws-kept" :project-dir ,project
-                             :nuked-at ,(current-time)))))
+                             :killed-at ,(current-time)))))
             (agent-repl-load-workspace-snapshot)
             (should (agent-repl--ws-known-p "ws-kept"))
             (let ((on-disk (plist-get (agent-repl--read-workspace-snapshot snapshot-file)
@@ -3139,7 +3139,7 @@ never encountered again."
             (agent-repl--write-sexp-file
              snapshot-file
              `(:workspaces (("ws-kept" :project-dir ,project
-                             :nuked-at ,(current-time)))))
+                             :killed-at ,(current-time)))))
             (let ((before (nth 5 (file-attributes snapshot-file))))
               (agent-repl-load-workspace-snapshot)
               (should (equal before (nth 5 (file-attributes snapshot-file))))))
@@ -3439,7 +3439,7 @@ once per existing entry, passing the snapshot's `ws' name."
 (ert-deftest agent-repl-cmd-test-load-workspace-snapshot/tracks-restored-workspaces ()
   "load-workspace-snapshot records each successfully established entry on
 `agent-repl--restored-workspaces' so a later
-`agent-repl-nuke-restored-workspaces' can target only the restore batch.
+`agent-repl-kill-restored-workspaces' can target only the restore batch.
 Workspaces that go through the actually-establish branch (NOT the
 already-ready short-circuit) must be tagged."
   (agent-repl-test--with-clean-state
@@ -3474,7 +3474,7 @@ already-ready short-circuit) must be tagged."
 tagged as restored.  Such workspaces were already alive before the loader
 ran (the origin ws the user was sitting in, or any other ws the agent was
 already up in before the 2s idle loader fired).  Tagging them would make
-`nuke-restored-workspaces' incorrectly sweep the user's pre-existing
+`kill-restored-workspaces' incorrectly sweep the user's pre-existing
 workspace."
   (agent-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "agent-snap-"))
@@ -3509,7 +3509,7 @@ workspace."
   "A snapshot entry whose project-dir is gone is NOT added to the restored list.
 Only entries the loader actually established (`:loaded') are tracked —
 skipped entries (`:skipped' branch) must not pollute the set, otherwise
-`nuke-restored-workspaces' would try to tear down ghosts."
+`kill-restored-workspaces' would try to tear down ghosts."
   (agent-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "agent-snap-"))
           (real-dir (make-temp-file "agent-proj-real-" t)))
@@ -3535,7 +3535,7 @@ skipped entries (`:skipped' branch) must not pollute the set, otherwise
 (ert-deftest agent-repl-cmd-test-load-workspace-snapshot/accumulates-across-loads ()
   "Successive snapshot loads union (not replace) `agent-repl--restored-workspaces'.
 Loading from-archive after a normal load must not drop the first batch's
-restored names — both batches are restore-origin and the nuke-restored
+restored names — both batches are restore-origin and the kill-restored
 path needs to see both."
   (agent-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "agent-snap-"))
@@ -3836,7 +3836,7 @@ Older entries (lexicographically earliest filenames) are pruned."
     (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
           (agent-repl--snapshot-loaded-p t))
       (agent-repl--ws-put "old" :project-dir "/tmp/old")
-      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 30))
+      (agent-repl--ws-put "old" :killed-at (agent-repl-cmd-test--days-ago 30))
       (agent-repl--snapshot-evict-expired-tombstones)
       (should-not (agent-repl--ws-known-p "old")))))
 
@@ -3846,7 +3846,7 @@ Older entries (lexicographically earliest filenames) are pruned."
     (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
           (agent-repl--snapshot-loaded-p t))
       (agent-repl--ws-put "recent" :project-dir "/tmp/recent")
-      (agent-repl--ws-put "recent" :nuked-at (agent-repl-cmd-test--days-ago 3))
+      (agent-repl--ws-put "recent" :killed-at (agent-repl-cmd-test--days-ago 3))
       (agent-repl--snapshot-evict-expired-tombstones)
       (should (agent-repl--ws-known-p "recent")))))
 
@@ -3861,12 +3861,12 @@ Older entries (lexicographically earliest filenames) are pruned."
       (should (agent-repl--ws-live-p "live")))))
 
 (ert-deftest agent-repl-cmd-test-tombstone-evict/unstamped-tombstone-retained ()
-  "A tombstone with no `:nuked-at' stamp is retained — age is unprovable."
+  "A tombstone with no `:killed-at' stamp is retained — age is unprovable."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
           (agent-repl--snapshot-loaded-p t))
       (agent-repl--ws-put "unstamped" :project-dir "/tmp/unstamped")
-      (agent-repl--ws-put "unstamped" :nuked-at nil)
+      (agent-repl--ws-put "unstamped" :killed-at nil)
       (agent-repl--snapshot-evict-expired-tombstones)
       (should (agent-repl--ws-known-p "unstamped")))))
 
@@ -3878,7 +3878,7 @@ that the main roster file names only live workspaces."
     (let ((agent-repl-snapshot-tombstone-max-age 0)
           (agent-repl--snapshot-loaded-p t))
       (agent-repl--ws-put "old" :project-dir "/tmp/old")
-      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 365))
+      (agent-repl--ws-put "old" :killed-at (agent-repl-cmd-test--days-ago 365))
       (agent-repl--snapshot-evict-expired-tombstones)
       (should-not (agent-repl--ws-known-p "old")))))
 
@@ -3888,20 +3888,20 @@ that the main roster file names only live workspaces."
     (let ((agent-repl-snapshot-tombstone-max-age nil)
           (agent-repl--snapshot-loaded-p t))
       (agent-repl--ws-put "old" :project-dir "/tmp/old")
-      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 365))
+      (agent-repl--ws-put "old" :killed-at (agent-repl-cmd-test--days-ago 365))
       (agent-repl--snapshot-evict-expired-tombstones)
       (should-not (agent-repl--ws-known-p "old")))))
 
 (ert-deftest agent-repl-cmd-test-tombstone-evict/live-only-archives-recent-tombstone ()
-  "LIVE-ONLY mode archives even a just-nuked tombstone — unlike the aged
+  "LIVE-ONLY mode archives even a just-killed tombstone — unlike the aged
 policy, there is no grace window at all."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-snapshot-tombstone-max-age 0)
           (agent-repl--snapshot-loaded-p t))
-      (agent-repl--ws-put "just-nuked" :project-dir "/tmp/just-nuked")
-      (agent-repl--ws-put "just-nuked" :nuked-at (current-time))
+      (agent-repl--ws-put "just-killed" :project-dir "/tmp/just-killed")
+      (agent-repl--ws-put "just-killed" :killed-at (current-time))
       (agent-repl--snapshot-evict-expired-tombstones)
-      (should-not (agent-repl--ws-known-p "just-nuked")))))
+      (should-not (agent-repl--ws-known-p "just-killed")))))
 
 (ert-deftest agent-repl-cmd-test-tombstone-evict/live-only-archive-file-is-loadable ()
   "The live-only archive file is a loadable snapshot, clearly labeled."
@@ -3909,7 +3909,7 @@ policy, there is no grace window at all."
     (let ((agent-repl-snapshot-tombstone-max-age 0)
           (agent-repl--snapshot-loaded-p t))
       (agent-repl--ws-put "old" :project-dir "/tmp/old")
-      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 1))
+      (agent-repl--ws-put "old" :killed-at (agent-repl-cmd-test--days-ago 1))
       (agent-repl--snapshot-evict-expired-tombstones)
       (let* ((archive-dir (agent-repl--workspace-snapshot-archive-dir))
              (files (directory-files archive-dir t "live-only-tombstones\\.el\\'"))
@@ -3928,16 +3928,16 @@ workspaces — every tombstone, any age, has been archived out."
                   (= 0 agent-repl-snapshot-tombstone-max-age)))
       (agent-repl--ws-put "live" :project-dir "/tmp/live")
       (agent-repl--ws-put "old" :project-dir "/tmp/old")
-      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 1))
-      (agent-repl--ws-put "just-nuked" :project-dir "/tmp/just-nuked")
-      (agent-repl--ws-put "just-nuked" :nuked-at (current-time))
+      (agent-repl--ws-put "old" :killed-at (agent-repl-cmd-test--days-ago 1))
+      (agent-repl--ws-put "just-killed" :project-dir "/tmp/just-killed")
+      (agent-repl--ws-put "just-killed" :killed-at (current-time))
       (agent-repl-save-workspace-snapshot)
       (let ((entries (plist-get (agent-repl--read-workspace-snapshot
                                  agent-repl-workspace-snapshot-file)
                                 :workspaces)))
         (should (assoc "live" entries))
         (should-not (assoc "old" entries))
-        (should-not (assoc "just-nuked" entries))))))
+        (should-not (assoc "just-killed" entries))))))
 
 (ert-deftest agent-repl-cmd-test-tombstone-evict/archive-file-is-loadable ()
   "Evicted tombstones land in an archive file the snapshot reader parses,
@@ -3946,7 +3946,7 @@ so they remain reachable through the archive picker."
     (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
           (agent-repl--snapshot-loaded-p t))
       (agent-repl--ws-put "old" :project-dir "/tmp/old")
-      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 30))
+      (agent-repl--ws-put "old" :killed-at (agent-repl-cmd-test--days-ago 30))
       (agent-repl--snapshot-evict-expired-tombstones)
       (let* ((archive-dir (agent-repl--workspace-snapshot-archive-dir))
              (files (directory-files archive-dir t "expired-tombstones\\.el\\'"))
@@ -3962,7 +3962,7 @@ so they remain reachable through the archive picker."
     (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
           (agent-repl--snapshot-loaded-p t))
       (agent-repl--ws-put "old" :project-dir "/tmp/old")
-      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 30))
+      (agent-repl--ws-put "old" :killed-at (agent-repl-cmd-test--days-ago 30))
       (agent-repl--snapshot-evict-expired-tombstones)
       (should (cl-some (lambda (c) (string-match-p "expired-tombstones" (cdr c)))
                        (agent-repl--snapshot-archive-candidates))))))
@@ -3974,7 +3974,7 @@ so they remain reachable through the archive picker."
           (agent-repl--snapshot-loaded-p t))
       (agent-repl--ws-put "live" :project-dir "/tmp/live")
       (agent-repl--ws-put "old" :project-dir "/tmp/old")
-      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 30))
+      (agent-repl--ws-put "old" :killed-at (agent-repl-cmd-test--days-ago 30))
       (agent-repl-save-workspace-snapshot)
       (let ((entries (plist-get (agent-repl--read-workspace-snapshot
                                  agent-repl-workspace-snapshot-file)
@@ -3988,7 +3988,7 @@ so they remain reachable through the archive picker."
           (agent-repl--snapshot-loaded-p t))
       (agent-repl--ws-put "live" :project-dir "/tmp/live")
       (agent-repl--ws-put "old" :project-dir "/tmp/old")
-      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 30))
+      (agent-repl--ws-put "old" :killed-at (agent-repl-cmd-test--days-ago 30))
       (agent-repl-save-workspace-snapshot)
       (let ((entries (plist-get (agent-repl--read-workspace-snapshot
                                  agent-repl-workspace-snapshot-file)
@@ -4002,7 +4002,7 @@ eviction is never allowed to outrun the durable copy."
     (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
           (agent-repl--snapshot-loaded-p t))
       (agent-repl--ws-put "old" :project-dir "/tmp/old")
-      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 30))
+      (agent-repl--ws-put "old" :killed-at (agent-repl-cmd-test--days-ago 30))
       (cl-letf (((symbol-function 'make-directory)
                  (lambda (&rest _) (error "disk full"))))
         (agent-repl--snapshot-evict-expired-tombstones))
@@ -5133,7 +5133,7 @@ call, making deferred closures synchronous in tests."
   (agent-repl-test--with-clean-state
     (let ((ws (agent-repl--onboard-register-workspace "/tmp/onboard-fresh/")))
       (should (equal ws "onboard-fresh"))
-      (should-not (agent-repl--ws-get ws :nuked-at)))))
+      (should-not (agent-repl--ws-get ws :killed-at)))))
 
 (ert-deftest agent-repl-cmd-test-add-project-workspace/rejects-non-directory ()
   "add-project-workspace signals a user-error for a non-directory path."
@@ -5710,10 +5710,10 @@ pushes to.  PROTECTED-P is a boolean controlling
       (agent-repl-switch-right)
       (should (equal switched '("main"))))))
 
-;;;; ---- nuke-one-workspace :last-killed-at stamping ----
+;;;; ---- kill-one-workspace :last-killed-at stamping ----
 
-(ert-deftest agent-repl-cmd-test-nuke-one/stamps-last-killed-at-on-ws-plist ()
-  "`--nuke-one-workspace' records `:last-killed-at' on the ws plist so the
+(ert-deftest agent-repl-cmd-test-kill-one/stamps-last-killed-at-on-ws-plist ()
+  "`--kill-one-workspace' records `:last-killed-at' on the ws plist so the
 project picker (`SPC p p') can surface most-recently-killed projects
 to the top and color the kill-date column."
   (agent-repl-test--with-clean-state
@@ -5722,11 +5722,11 @@ to the top and color the kill-date column."
       (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'agent-repl--state-save) #'ignore)
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl--nuke-one-workspace "ws1" 'preserve-entry)
+        (agent-repl--kill-one-workspace "ws1" 'preserve-entry)
         (should (agent-repl--ws-get "ws1" :last-killed-at))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-one/state-save-sees-last-killed-at ()
-  "`--nuke-one-workspace' stamps `:last-killed-at' BEFORE the pre-teardown
+(ert-deftest agent-repl-cmd-test-kill-one/state-save-sees-last-killed-at ()
+  "`--kill-one-workspace' stamps `:last-killed-at' BEFORE the pre-teardown
 state-save runs, so the on-disk state.el reflects the kill timestamp
 even if downstream teardown errors before the redundant save fires."
   (agent-repl-test--with-clean-state
@@ -5738,7 +5738,7 @@ even if downstream teardown errors before the redundant save fires."
                  (lambda (ws)
                    (setq saw-killed-at (agent-repl--ws-get ws :last-killed-at))))
                 ((symbol-function 'force-mode-line-update) #'ignore))
-        (agent-repl--nuke-one-workspace "ws1" 'preserve-entry)
+        (agent-repl--kill-one-workspace "ws1" 'preserve-entry)
         (should saw-killed-at)))))
 
 ;;;; ---- Project picker (SPC p p) helpers ----
@@ -5871,7 +5871,7 @@ kill times present — those are irrelevant to ordering."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "live" :project-dir "/tmp/live")
     (agent-repl--ws-put "dead" :project-dir "/tmp/dead")
-    (agent-repl--ws-put "dead" :nuked-at '(1 2 3))
+    (agent-repl--ws-put "dead" :killed-at '(1 2 3))
     (let ((entries (agent-repl--known-workspace-entries)))
       (should (equal (cdr (assoc "live" entries)) "/tmp/live"))
       (should (equal (cdr (assoc "dead" entries)) "/tmp/dead")))))
@@ -5962,7 +5962,7 @@ on-disk state file so dead workspaces still show real dates."
       (unwind-protect
           (progn
             (agent-repl--ws-put "ws-t" :project-dir tmpdir)
-            (agent-repl--ws-put "ws-t" :nuked-at '(20000 0 0 0))
+            (agent-repl--ws-put "ws-t" :killed-at '(20000 0 0 0))
             (let ((s (agent-repl--picker-workspace-summary "ws-t" tmpdir)))
               (should (equal (plist-get s :workspace-name) "ws-t"))
               (should-not (plist-get s :live-p))))

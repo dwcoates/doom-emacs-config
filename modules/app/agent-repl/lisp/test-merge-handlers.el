@@ -720,7 +720,7 @@ post-merge action all under one pushed `:merging'."
   (should (memq #'agent-repl--merge-echo-pushed-state
                 agent-repl-ws-state-transition-functions)))
 
-;;;; ---- Tests: merge-kill-on-merged (a landed merge kills the tab) ----
+;;;; ---- Tests: merge-close-on-merged (a landed merge closes the tab) ----
 
 (defmacro agent-repl-test--with-kill-capture (open-p closes puts &rest body)
   "Run BODY with the kill subscriber's collaborators stubbed.
@@ -741,47 +741,47 @@ OPEN-P is the value `agent-repl--ws-open-p' returns.  CLOSES collects
                 (lambda (&rest _) nil)))
        ,@body)))
 
-(ert-deftest agent-repl-test-merge-kill-closes-an-open-workspace-on-merged ()
+(ert-deftest agent-repl-test-merge-close-closes-an-open-workspace-on-merged ()
   "A pushed `:merged' against an open tab kills the workspace."
   (agent-repl-test--with-kill-capture t closes _puts
-    (agent-repl--merge-kill-on-merged "ws-a" :merged :merging)
+    (agent-repl--merge-close-on-merged "ws-a" :merged :merging)
     (should (equal closes '(("ws-a" . preserve-entry))))))
 
-(ert-deftest agent-repl-test-merge-kill-preserves-the-workspaces-entry ()
+(ert-deftest agent-repl-test-merge-close-preserves-the-workspaces-entry ()
   "The kill closes with `preserve-entry' — the data-only entry survives."
   (agent-repl-test--with-kill-capture t closes _puts
-    (agent-repl--merge-kill-on-merged "ws-a" :merged :merging)
+    (agent-repl--merge-close-on-merged "ws-a" :merged :merging)
     (should (eq (cdar closes) 'preserve-entry))))
 
-(ert-deftest agent-repl-test-merge-kill-stamps-merge-completed-first ()
+(ert-deftest agent-repl-test-merge-close-stamps-merge-completed-first ()
   "`:merge-completed' is recorded so the closed entry classifies as merged."
   (agent-repl-test--with-kill-capture t _closes puts
-    (agent-repl--merge-kill-on-merged "ws-a" :merged :merging)
+    (agent-repl--merge-close-on-merged "ws-a" :merged :merging)
     (should (equal puts '(("ws-a" :merge-completed t))))))
 
-(ert-deftest agent-repl-test-merge-kill-ignores-a-closed-workspace ()
+(ert-deftest agent-repl-test-merge-close-ignores-a-closed-workspace ()
   "A `:merged' push for an already-closed tab is a no-op."
   (agent-repl-test--with-kill-capture nil closes _puts
-    (agent-repl--merge-kill-on-merged "ws-a" :merged :merging)
+    (agent-repl--merge-close-on-merged "ws-a" :merged :merging)
     (should-not closes)))
 
-(ert-deftest agent-repl-test-merge-kill-ignores-non-merged-states ()
+(ert-deftest agent-repl-test-merge-close-ignores-non-merged-states ()
   "No other pushed state kills a workspace."
   (agent-repl-test--with-kill-capture t closes _puts
     (dolist (state '(:merging :merge-queued :merge-conflict :merge-failed
                      :ready :init :hibernated))
-      (agent-repl--merge-kill-on-merged "ws-a" state :merging))
+      (agent-repl--merge-close-on-merged "ws-a" state :merging))
     (should-not closes)))
 
-(ert-deftest agent-repl-test-merge-kill-fires-on-a-same-state-re-push ()
+(ert-deftest agent-repl-test-merge-close-fires-on-a-same-state-re-push ()
   "A `:merged' -> `:merged' re-push against an open tab still kills.
 The convergence case: a daemon bounce re-pushes `:merged' for a tab
 that was open while the subscriber was absent or the state flapped."
   (agent-repl-test--with-kill-capture t closes _puts
-    (agent-repl--merge-kill-on-merged "ws-a" :merged :merged)
+    (agent-repl--merge-close-on-merged "ws-a" :merged :merged)
     (should (equal closes '(("ws-a" . preserve-entry))))))
 
-(ert-deftest agent-repl-test-merge-kill-ignores-a-merged-merge-phase ()
+(ert-deftest agent-repl-test-merge-close-ignores-a-merged-merge-phase ()
   "A `:merged' MergeStatus PHASE under a non-merged render state does not kill.
 The tab dies on the daemon's resolved render state, never on the merge
 axis's own report, so the two can never disagree about whether the
@@ -790,12 +790,12 @@ workspace is gone."
     (cl-letf (((symbol-function 'agent-repl--ws-get)
                (lambda (_ws key)
                  (when (eq key :pushed-merge-status) '(:phase :merged)))))
-      (agent-repl--merge-kill-on-merged "ws-a" :merging :merging))
+      (agent-repl--merge-close-on-merged "ws-a" :merging :merging))
     (should-not closes)))
 
-(ert-deftest agent-repl-test-merge-kill-is-subscribed-to-the-transition-hook ()
+(ert-deftest agent-repl-test-merge-close-is-subscribed-to-the-transition-hook ()
   "The kill subscriber is registered on the transition hook."
-  (should (memq #'agent-repl--merge-kill-on-merged
+  (should (memq #'agent-repl--merge-close-on-merged
                 agent-repl-ws-state-transition-functions)))
 
 ;;;; ---- Tests: the removed surface stays removed ----

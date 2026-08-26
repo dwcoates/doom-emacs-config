@@ -1039,7 +1039,7 @@ exist, or the persp slot holds a symbol sentinel rather than a real
 perspective.  Each buffer is killed inside its own `condition-case' so
 one bad buffer cannot block the rest.  File-visiting buffers are
 marked unmodified before killing so `kill-buffer' does not prompt —
-the user has already confirmed the destructive nuke.
+the user has already confirmed the destructive kill.
 
 Agent buffers owned by a different workspace (see
 `agent-repl--foreign-owned-buffer-p') are skipped, not killed: persp-mode

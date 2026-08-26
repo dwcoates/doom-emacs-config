@@ -386,7 +386,7 @@ workspace's `:project-dir' and clears any saved `:fullscreen-config'
 (the saved pre-panel layout is moot once magit replaces the current
 window).  When the workspace is NOT tracked by agent-repl (e.g.,
 the main \"doom\" workspace, or a workspace whose entry has been
-nuked), falls back to `default-directory' so magit still opens and
+killed), falls back to `default-directory' so magit still opens and
 skips the `:fullscreen-config' write to avoid creating a stub entry
 (see `agent-repl--ws-put' STUB-CREATE warning).
 

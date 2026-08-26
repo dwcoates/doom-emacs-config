@@ -124,7 +124,7 @@ Answered by `agent-repl--frontend-precreate-refusal' — the SAME
 eligibility the mount itself applies — so the queue can never hold a
 workspace the mount would then refuse, nor skip one it would accept.
 It is re-asked here as well as at the mount because a workspace can be
-killed, nuked, merged or fenced during the seconds a paced queue takes
+closed, killed, merged or fenced during the seconds a paced queue takes
 to drain, and a page for it must not appear afterwards."
   (null (agent-repl--frontend-precreate-refusal ws)))
 
