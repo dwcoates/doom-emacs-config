@@ -328,6 +328,42 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The COLD-CONTEXT GATE lands as a FEED ROW; the compaction scope becomes ONE ENUM, four→three
+
+**The drawing agreed first**: the gate across the feed's tail, composer
+owned while standing — headline, cost, parenthetical, and the three buttons
+with the compact submenu (model + type).
+
+**The iteration, each ruling the user's.** (1) No `none` arm — absence is
+the none (the earlier two-arm none oneof died; then ColdGateStanding
+flattened away with it). (2) DATA, NOT PROSE: the daemon serves raw facts
+(token count, last-request instant, the model) and the CLIENT owns wording,
+formatting and ticking — a recorded departure from the daemon-formats
+precedent, bounded to this component because its facts are counts and
+instants, not resolved presentation. (3) NOT its own component/stream — a
+ROW beside the meta kinds (FeedRow.cold_gate = 13), which also buys cold
+paint from pages and a RESOLVED trace in history: FeedColdGate { standing
+{ context_tokens; last_request; model; compact menu } | resolved { at_ms;
+pay | clear | compact{model} } }. (4) The compaction TYPE is selectable in
+the menu, and it is an ENUM — the orchestrator's presence-per-option
+modeling was rejected ("you can only select one scope"); a compaction scope
+is a genuine closed scalar set (the convention's own non-state carve-out),
+so ONE canonical `conversation.v1.SessionCompactScope { ALL | PROMPTS |
+RESPONSES }` is declared at the conversation level and imported by the menu
+(`repeated scopes` = the offered radios) and the verb — never respelled.
+
+**The conversation.v1 REOPEN, confirmed.** SessionColdCompact's four-arm
+scope oneof (full | prompts_only | responses_only | prompts_and_responses)
+reshapes to the enum and PROMPTS_AND_RESPONSES DIES, per the user's
+three-type ruling ("the types being all/prompts/responses").
+
+**The verb.** NEW endpoint_answer_cold_gate.proto: { WorkspaceRef; FeedId
+gate (echoed as served); pay | clear | compact { AgentModel echoed from the
+menu; SessionCompactScope } } → success empty (the resolution is the
+feed's push) | error (derived: no gate standing, unserved model or scope).
+rpc AnswerColdGate joins the FEED section — 30 rpcs. No WatchColdGate
+exists: the gate streams and pages as a row.
+
 ### conversation.v1: `AgentToolCallProgress` lands — the heartbeat relay's arm on nine tool kinds
 
 **What changed ("looks good"; the reopen queued at the FeedSimpleToolCall
