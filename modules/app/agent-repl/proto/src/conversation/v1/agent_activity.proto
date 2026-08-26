@@ -117,6 +117,16 @@ message AgentActivityId {
   string value = 1;
 }
 
+// The vendor's per-call progress beat, relayed as observed: the call is
+// alive. A RELAY of an observed fact, never a shim-invented ping — the shim
+// forwards the beat and keeps the wedge RULING for itself (a stalled call
+// still settles as the unit's failure when the shim's timeout trips). One
+// canonical form, embedded by every tool kind's progress arm.
+message AgentToolCallProgress {
+  // When the vendor last reported this call alive, epoch ms, as observed.
+  int64 last_progress_at_ms = 1;
+}
+
 // The identity of one agent instance: the main-thread agent, or a subagent at
 // any depth.
 //
@@ -417,6 +427,10 @@ message AgentRead {
     // call is issued. There is no update arm: a read has no growth — nothing
     // observes it between its issue and its return.
     AgentReadStart start = 1;
+    // The vendor's liveness beat while the call runs. NOT an update — no
+    // growth is reported — and consumed by the daemon into the drawn
+    // last-progress facts; a frame like any other, upserting the unit.
+    AgentToolCallProgress progress = 4;
     // The file was read, whole or in part.
     AgentReadSuccess success = 2;
     // The read did not happen at all — no contents, partial or otherwise.
@@ -530,6 +544,10 @@ message AgentWrite {
     // This stream is now carrying this write. Sent ONCE per stream, at issue.
     // There is no update arm: a write has no growth.
     AgentWriteStart start = 1;
+    // The vendor's liveness beat while the call runs. NOT an update — no
+    // growth is reported — and consumed by the daemon into the drawn
+    // last-progress facts; a frame like any other, upserting the unit.
+    AgentToolCallProgress progress = 4;
     // The file was written, and the change is described as hunks.
     AgentWriteSuccess success = 2;
     // The write did not happen; the file is as it was.
@@ -594,6 +612,10 @@ message AgentEdit {
     // This stream is now carrying this edit. Sent ONCE per stream, at issue.
     // There is no update arm: a edit has no growth.
     AgentEditStart start = 1;
+    // The vendor's liveness beat while the call runs. NOT an update — no
+    // growth is reported — and consumed by the daemon into the drawn
+    // last-progress facts; a frame like any other, upserting the unit.
+    AgentToolCallProgress progress = 4;
     // The edit applied to at least one occurrence.
     AgentEditSuccess success = 2;
     // The edit did not apply — commonly because the matched text was absent, or was not unique when only one occurrence was requested.
@@ -647,6 +669,10 @@ message AgentGrep {
     // This stream is now carrying this search. Sent ONCE per stream, at issue.
     // There is no update arm: a search reports nothing until it is done.
     AgentGrepStart start = 1;
+    // The vendor's liveness beat while the call runs. NOT an update — no
+    // growth is reported — and consumed by the daemon into the drawn
+    // last-progress facts; a frame like any other, upserting the unit.
+    AgentToolCallProgress progress = 4;
     // The search ran. Matching nothing is a success with an empty answer, not a failure — the caller asked a question and got one.
     AgentGrepSuccess success = 2;
     // The search could not run at all.
@@ -788,6 +814,10 @@ message AgentGlob {
     // This stream is now carrying this match. Sent ONCE per stream, at issue.
     // There is no update arm: a match reports nothing until it is done.
     AgentGlobStart start = 1;
+    // The vendor's liveness beat while the call runs. NOT an update — no
+    // growth is reported — and consumed by the daemon into the drawn
+    // last-progress facts; a frame like any other, upserting the unit.
+    AgentToolCallProgress progress = 4;
     // The match ran. Matching nothing is a success with an empty list.
     AgentGlobSuccess success = 2;
     // The match could not run at all.
@@ -901,6 +931,10 @@ message AgentBash {
     AgentBashStart start = 1;
     // New output since the last frame on this stream.
     AgentBashUpdate update = 2;
+    // The vendor's liveness beat while the call runs. NOT an update — no
+    // growth is reported — and consumed by the daemon into the drawn
+    // last-progress facts; a frame like any other, upserting the unit.
+    AgentToolCallProgress progress = 5;
     // The command reached the shell and the shell reported on it.
     AgentBashSuccess success = 3;
     // The call could not be performed at all.
@@ -1341,6 +1375,10 @@ message AgentSkillUse {
     // This stream is now carrying this invocation. Sent ONCE per stream, at
     // issue.
     AgentSkillUseStart start = 1;
+    // The vendor's liveness beat while the call runs. NOT an update — no
+    // growth is reported — and consumed by the daemon into the drawn
+    // last-progress facts; a frame like any other, upserting the unit.
+    AgentToolCallProgress progress = 4;
     // The skill loaded, and here is what it put in front of the agent.
     AgentSkillUseSuccess success = 2;
     // The skill could not be loaded — commonly an unknown name, or one filtered
@@ -1428,6 +1466,10 @@ message AgentSendMessage {
   oneof result {
     // This stream is now carrying this send. Sent ONCE per stream, at issue.
     AgentSendMessageStart start = 1;
+    // The vendor's liveness beat while the call runs. NOT an update — no
+    // growth is reported — and consumed by the daemon into the drawn
+    // last-progress facts; a frame like any other, upserting the unit.
+    AgentToolCallProgress progress = 4;
     // The message reached the recipient, or the recipient was woken to receive
     // it.
     AgentSendMessageSuccess success = 2;
@@ -1559,6 +1601,10 @@ message AgentUnmodeled {
   oneof result {
     // This stream is now carrying this call. Sent ONCE per stream, at issue.
     AgentUnmodeledStart start = 1;
+    // The vendor's liveness beat while the call runs. NOT an update — no
+    // growth is reported — and consumed by the daemon into the drawn
+    // last-progress facts; a frame like any other, upserting the unit.
+    AgentToolCallProgress progress = 4;
     // The tool returned.
     AgentUnmodeledSuccess success = 2;
     // The tool failed. Arms are DERIVED from the producer's real sites at the
