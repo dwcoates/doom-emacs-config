@@ -328,6 +328,23 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `FeedTurnEnded` bodies land — concluded is BARE; errors are the API taxonomy respelled, per-arm info only
+
+**What changed ("looks good", after the user struck the concluded arms).**
+FeedTurnEnded { ended_at_ms; oneof { concluded { FeedId answer — the
+final-answer border target, closing the FeedResponse flag } | errored |
+interrupted } }. The orchestrator's concluded-notice oneof (quiet |
+max_tokens | refusal) was REJECTED: "max tokens and refusal are errors,
+essentially" — both moved into errored's cause arms. Errored was first
+sketched as generic headline+detail strings; the user rejected that too —
+"error information should be specific to the error types" — so the arms are
+conversation.v1 api.proto's nine-kind vendor taxonomy RESPELLED figma→idl
+(FeedTurnError*: rate_limited/overloaded carry optional retry_after_ms so
+the client ticks a countdown; vendor_unmodeled keeps the type name; six
+empty arms), plus max_tokens, refusal, and query_died. The envelope carries
+the vendor's own sentence when recorded (UNSET for wordless causes).
+Interrupted stays the acknowledged-stop accusation.
+
 ### `FeedAgentPrompt` lands — one orange prompt bubble, both ends of the relay
 
 **What changed ("okay").** FeedAgentPrompt { address (composed — "→ Explore"
