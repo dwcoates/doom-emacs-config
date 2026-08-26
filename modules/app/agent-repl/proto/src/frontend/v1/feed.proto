@@ -311,6 +311,14 @@ message FeedToolCallName {
 message FeedToolCallInput {
   // The composed line, drawn verbatim.
   string text = 1;
+  // UNSET = plain text; SET = the line is drawn as a hyperlink to this URL
+  // (a WebFetch card's fetched page, say).
+  optional FeedToolCallInputLink link = 2;
+}
+// The input line's hyperlink target.
+message FeedToolCallInputLink {
+  // Where the line links when activated.
+  string url = 1;
 }
 // The running state. The daemon re-pushes the row on each vendor progress
 // beat; the client ticks "quiet for N s" locally from the instant — no
@@ -349,6 +357,8 @@ message FeedToolCallReturned {
     FeedToolCallDiffOutput diff = 5;
     // A line list: grep matches, glob paths.
     FeedToolCallLinesOutput lines = 6;
+    // A link list: web search results, each row a clickable title.
+    FeedToolCallLinksOutput links = 8;
   }
   // The IDE's findings against this change, one composed line each, drawn
   // below the output. Present iff the edit raised any — a later re-push of
@@ -392,6 +402,26 @@ message FeedToolCallLinesOutput {
   // "42 more" / "at least 42 more" — the composed floor, present iff the
   // list is short. Display only; implies no retrieval.
   optional FeedToolCallOmitted omitted = 2;
+}
+// The link-list output form: web search results.
+message FeedToolCallLinksOutput {
+  // The rows, drawn in order.
+  repeated FeedToolCallLink links = 1;
+  // "9 more not shown" — the composed omitted line, present iff the list is
+  // capped. Display only; implies no retrieval.
+  optional FeedToolCallOmitted omitted = 2;
+}
+// One row of the link list.
+message FeedToolCallLink {
+  // The row's drawn text — the page title, or the engine's narration line.
+  string text = 1;
+  // UNSET = a narration row, not clickable; SET = the row links here.
+  optional FeedToolCallLinkUrl url = 2;
+}
+// A link row's hyperlink target.
+message FeedToolCallLinkUrl {
+  // Where the row links when activated.
+  string url = 1;
 }
 // The composed truncation line, shared by the forms that can be short.
 message FeedToolCallOmitted {

@@ -328,6 +328,76 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### CORE PRINCIPLE: conversation.v1 carries the vendor's fields even when NO UI maps them — marked EXPECTED UNMAPPED at the field
+
+**The principle, in the user's terms (2026-08-26).** "Let's always include
+fields in the conversation protos, even if they are unsupported in the UI,
+and just include comments for the protobufs explaining that they are
+expected to be unmapped." conversation.v1 is a fidelity layer; UI-relevance
+gates frontend.v1 only.
+
+**Consequences.** A vendor field with no drawn consumer still lands, with an
+EXPECTED UNMAPPED comment naming that no surface draws it; "nothing draws
+it" is no longer a reason to drop from conversation.v1 (it remains one for
+frontend.v1). **Reopens by name**: the recorded drops justified solely by
+"nothing draws it" (grep appliedLimit/appliedOffset, glob durationMs, the
+send-message pin.ref, bash structured fields, and kin) — to be re-judged as
+a sweep at the audit's end, not silently.
+
+**What it does NOT claim.** No relay of vendor identity spaces (uuid,
+message.id stay shim-side), and no license for JSON-in-a-string — unmapped
+fields are still fully typed.
+
+### WebFetch and WebSearch land — typed arms end to end; the feed gains a LINKS output form and a clickable input line
+
+**The drawings agreed first, landed verbatim per the new rule:**
+
+```
++-FeedSimpleToolCall (WebFetch)----------------------------+
+| WebFetch                                     ok 200 · 2s |
+| fetch anthropic.com/news/claude-fable-5                  |  <- input line, now a hyperlink
+| - - - - - - - - - - - - - - - - - - - - - - - - - - - -  |
+| Claude Fable 5 and Mythos 5 are Anthropic's new...       |  <- existing text form, capped
++----------------------------------------------------------+
+
++-FeedSimpleToolCall (WebSearch)---------------------------+
+| WebSearch                                        ok · 4s |
+| search "claude agent sdk retraction"                     |
+| - - - - - - - - - - - - - - - - - - - - - - - - - - - -  |
+| Claude Agent SDK Reference — anthropic.com/docs/agent    |  <- NEW links form: title rows,
+| Model refusals in the API — anthropic.com/refusals       |     each a clickable hyperlink
+| 9 more not shown                                         |  <- composed omitted line
++----------------------------------------------------------+
+```
+
+**conversation.v1 (TOOLIO-17/18 discharged).** AgentActivity.item gains
+web_fetch (23) and web_search (24), both on the family's standard
+start | progress | success | failure shape with the shared AgentToolFailure
+payload and AgentToolCallProgress beat. Fetch: target URL on every frame;
+success carries the HTTP status (code + text — an error page is a SUCCESS,
+the status is the badge), the vendor-rendered markdown result, and the
+EXPECTED UNMAPPED trio bytes / duration_ms / artifact_read (the last =
+the URL resolved to a Claude Artifact; declared-only at the type surface).
+Search: query on every frame; success carries the heterogeneous result list
+typed as link{title,url} | note{narration} entries in served order, plus
+EXPECTED UNMAPPED search_count / duration_seconds. This entry is the first
+application of the fidelity principle above.
+
+**frontend.v1.** FeedToolCallInput gains optional link (the composed line
+draws as a hyperlink — the user: all URLs are clickable); the returned
+form oneof gains FeedToolCallLinksOutput (tag 8): link rows (text +
+optional url — narration rows have none) + the shared composed omitted
+line. WebFetch needs no new form: body = the text form, status = the badge.
+
+**Dropped nowhere**: under the fidelity principle nothing from the two
+vendor outputs was dropped; durations/bytes/counts ride conversation.v1
+unmapped, and only frontend.v1 omits them (clocks tick from the start
+instant).
+
+**Next per the walk**: the "long tail" (TOOLIO-28: ToolSearch, Monitor,
+ScheduleWakeup, TaskStop, TaskOutput, worktree/artifact tools) and
+NotebookEdit (TOOLIO-24), each awaiting its ruling.
+
 ### RETRACT-1/2 DROPPED — the refusal-fallback retraction is not modeled
 
 **The ruling ("lets forget about it").** The vendor's retraction fields
