@@ -810,8 +810,90 @@ message FeedShellLost {}
 // increments (the typed sources the earlier shapes predated).
 // ==========================================================================
 
-// The consent card. Body at its own increment.
-message FeedPermission {}
+// The consent card: the turn blocked on the user's permission for one gated
+// call. Buttons (allow once / always allow / deny) are agentrepl verbs
+// echoing this row's FeedId; the card's state change arrives as this row's
+// re-push.
+message FeedPermission {
+  // The vendor's rendered sentence ("Claude wants to read foo.txt") —
+  // resolved end to end; no consumer composes it from the tool.
+  FeedPermissionHeadline headline = 1;
+  // The qualifying subtitle. UNSET when the vendor gave none.
+  optional FeedPermissionSubtitle subtitle = 2;
+  // Why the gate fired, composed ("path outside the allowed directories:
+  // /etc/hosts"). UNSET when it was simply the default for this tool.
+  optional FeedPermissionTriggerNote trigger = 3;
+  // The gated call's argument preview, one composed line per argument.
+  FeedPermissionArguments arguments = 4;
+  // PRESENT iff the vendor offered a standing form — presence is what makes
+  // the "always allow" button drawable. The standing's CONTENT (the typed
+  // echo token) never reaches the client: the daemon holds it and hands it
+  // back to the shim when the answer verb picks standing.
+  optional FeedPermissionStandingOffered standing_offered = 5;
+  // The ask's state.
+  oneof state {
+    FeedPermissionOpen open = 6;
+    FeedPermissionAnswered answered = 7;
+    FeedPermissionAbandoned abandoned = 8;
+  }
+}
+// The headline element.
+message FeedPermissionHeadline {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
+// The subtitle element.
+message FeedPermissionSubtitle {
+  // The subtitle, drawn verbatim.
+  string text = 1;
+}
+// The trigger-note element.
+message FeedPermissionTriggerNote {
+  // The composed note, drawn verbatim. An ask-rule trigger is worded so a
+  // reader knows the prompt was user-configured and must not be
+  // auto-approved.
+  string text = 1;
+}
+// The argument-preview element.
+message FeedPermissionArguments {
+  // The composed lines, in order, drawn verbatim.
+  repeated string lines = 1;
+}
+// The always-allow affordance marker. Empty: presence is the fact.
+message FeedPermissionStandingOffered {}
+// Open: awaiting the user. Empty — the card's chrome says waiting; how long
+// is the row's own clock concern (drawn from arrival, client-side).
+message FeedPermissionOpen {}
+// Answered: how, and when.
+message FeedPermissionAnswered {
+  // When the answer landed, epoch ms.
+  int64 at_ms = 1;
+  // The verdict line's treatment. A DENIAL IS AN ANSWER, not an error.
+  oneof answer {
+    // Allowed for this call alone.
+    FeedPermissionAllowedOnce allowed_once = 2;
+    // Allowed with standing — the vendor stops asking for this form.
+    FeedPermissionAllowedStanding allowed_standing = 3;
+    // The user said no; the agent proceeds without the call.
+    FeedPermissionDeniedByUser denied_by_user = 4;
+    // Policy said no with NO open ask (a rule, dontAsk); worded so it never
+    // reads as the user's act.
+    FeedPermissionDeniedByPolicy denied_by_policy = 5;
+  }
+}
+message FeedPermissionAllowedOnce {}
+message FeedPermissionAllowedStanding {}
+message FeedPermissionDeniedByUser {}
+// The policy denial's composed wording.
+message FeedPermissionDeniedByPolicy {
+  // The reason, drawn verbatim ("denied by rule").
+  string text = 1;
+}
+// The ask went away unanswered — the turn ended, the session stopped.
+message FeedPermissionAbandoned {
+  // When it went away, epoch ms.
+  int64 at_ms = 1;
+}
 
 // The question card — the choice the agent posed. Body at its own increment.
 message FeedQuestion {}

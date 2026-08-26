@@ -328,6 +328,25 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `FeedPermission` lands — the consent card from the typed source; the standing token stays daemon-side; NEW CONVENTION: nilable message fields carry explicit `optional`
+
+**What changed ("looks good").** FeedPermission { headline (vendor-rendered
+sentence); optional subtitle; optional trigger note (composed; ask-rule
+wording forbids auto-approve); arguments (composed preview lines);
+optional standing_offered (empty marker — presence draws the "always
+allow" button); oneof state { open | answered { at_ms; allowed_once |
+allowed_standing | denied_by_user | denied_by_policy{composed reason} } |
+abandoned { at_ms } } }. A denial is an ANSWER; a policy denial is worded
+never to read as the user's act. THE STANDING ECHO TOKEN NEVER REACHES THE
+CLIENT: the daemon holds it and supplies it to the shim when the answer
+verb picks standing — the card carries presence only.
+
+**NEW CONVENTION (the user's, dispatched to the skill by one-shot):**
+nilable MESSAGE fields always carry the explicit `optional` keyword — never
+bare message-presence — so maybe-absent reads off the schema at a glance. A
+repo-wide sweep of all packages is dispatched to an Opus subagent; this
+landing already conforms.
+
 ### `FeedTurnEnded` bodies land — concluded is BARE; errors are the API taxonomy respelled, per-arm info only
 
 **What changed ("looks good", after the user struck the concluded arms).**
