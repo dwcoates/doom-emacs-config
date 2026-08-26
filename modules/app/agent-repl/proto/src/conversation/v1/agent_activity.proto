@@ -121,6 +121,10 @@ message AgentActivity {
     // whichever turn the acting agent was running in, so a task edited across
     // several turns produces several of these.
     AgentTaskAct task_act = 16;
+    // A HOOK ran — the user's own configured automation firing around the
+    // agent's work. The largest record class the vendor writes; a blocking
+    // outcome is a refusal the user must be able to understand.
+    AgentHook hook = 21;
   }
 }
 
@@ -2345,3 +2349,118 @@ message AgentUnmodeledFailure {
   optional AgentActivitySettledAt settled_at = 4;
 }
 
+// ==========================================================================
+// Hooks: the user's own configured automation, firing around the agent's
+// work. Quiet by default in the UI — a succeeded hook draws nothing; a
+// failing one draws a card, and a blocking one is a refusal the user must
+// be able to understand. Stop hooks fire AFTER a turn's stop and never
+// determine how the turn ended — the turn's own terminal is authoritative.
+// ==========================================================================
+
+// One hook execution, an activity unit like any other (identified,
+// upserted by its frames).
+message AgentHook {
+  // Where the execution stands. THE ARM IS THE OUTCOME once settled.
+  oneof result {
+    // The hook fired: which hook, on which event, gating which call.
+    AgentHookStart start = 1;
+    // Ran and succeeded, with its output.
+    AgentHookSucceeded succeeded = 2;
+    // BLOCKED the gated action — the refusal text is the whole point.
+    AgentHookBlockingError blocking_error = 3;
+    // Failed without blocking anything.
+    AgentHookNonBlockingError non_blocking_error = 4;
+    // Cancelled before it finished.
+    AgentHookCancelled cancelled = 5;
+  }
+}
+// The announcement.
+message AgentHookStart {
+  // The hook's configured name, verbatim.
+  string hook_name = 1;
+  // Which lifecycle event fired it — the vendor's closed literal set, a
+  // genuine non-state scalar vocabulary.
+  AgentHookEvent event = 2;
+  // The tool call this firing gates or follows. UNSET for events with no
+  // call (a session start, a stop, a prompt submission).
+  optional AgentActivityId gated_call = 3;
+  // When it fired.
+  AgentActivityStartedAt started_at = 4;
+}
+// Ran and succeeded.
+message AgentHookSucceeded {
+  // The command that ran, verbatim.
+  string command = 1;
+  // Its exit code.
+  int32 exit_code = 2;
+  // How long it ran, millis.
+  int64 duration_ms = 3;
+  // What it printed. UNSET when it printed nothing.
+  optional AgentHookOutput output = 4;
+}
+// A hook's printed output.
+message AgentHookOutput {
+  // stdout, verbatim.
+  string stdout = 1;
+  // stderr, verbatim.
+  string stderr = 2;
+}
+// The hook refused the gated action; the agent proceeds without it.
+message AgentHookBlockingError {
+  // The command that ran, verbatim.
+  string command = 1;
+  // The hook's stated reason — what the user reads to understand the
+  // refusal.
+  string blocking_text = 2;
+}
+// The hook itself failed; nothing was blocked.
+message AgentHookNonBlockingError {
+  // The command that ran, verbatim.
+  string command = 1;
+  // Its exit code.
+  int32 exit_code = 2;
+  // How long it ran, millis.
+  int64 duration_ms = 3;
+  // What it printed. UNSET when it printed nothing.
+  optional AgentHookOutput output = 4;
+}
+// Cancelled before finishing. Empty: the arm is the whole fact.
+message AgentHookCancelled {}
+
+// The vendor's hook-event vocabulary, verbatim from its HOOK_EVENTS list.
+// A closed set of scalar literals — which event fired a hook — never a
+// state of anything, so an enum by the convention's own carve-out.
+enum AgentHookEvent {
+  AGENT_HOOK_EVENT_UNSPECIFIED = 0;
+  AGENT_HOOK_EVENT_PRE_TOOL_USE = 1;
+  AGENT_HOOK_EVENT_POST_TOOL_USE = 2;
+  AGENT_HOOK_EVENT_POST_TOOL_USE_FAILURE = 3;
+  AGENT_HOOK_EVENT_POST_TOOL_BATCH = 4;
+  AGENT_HOOK_EVENT_NOTIFICATION = 5;
+  AGENT_HOOK_EVENT_USER_PROMPT_SUBMIT = 6;
+  AGENT_HOOK_EVENT_USER_PROMPT_EXPANSION = 7;
+  AGENT_HOOK_EVENT_SESSION_START = 8;
+  AGENT_HOOK_EVENT_SESSION_END = 9;
+  AGENT_HOOK_EVENT_STOP = 10;
+  AGENT_HOOK_EVENT_STOP_FAILURE = 11;
+  AGENT_HOOK_EVENT_SUBAGENT_START = 12;
+  AGENT_HOOK_EVENT_SUBAGENT_STOP = 13;
+  AGENT_HOOK_EVENT_PRE_COMPACT = 14;
+  AGENT_HOOK_EVENT_POST_COMPACT = 15;
+  AGENT_HOOK_EVENT_PERMISSION_REQUEST = 16;
+  AGENT_HOOK_EVENT_PERMISSION_DENIED = 17;
+  AGENT_HOOK_EVENT_SETUP = 18;
+  AGENT_HOOK_EVENT_TEAMMATE_IDLE = 19;
+  AGENT_HOOK_EVENT_TASK_CREATED = 20;
+  AGENT_HOOK_EVENT_TASK_COMPLETED = 21;
+  AGENT_HOOK_EVENT_ELICITATION = 22;
+  AGENT_HOOK_EVENT_ELICITATION_RESULT = 23;
+  AGENT_HOOK_EVENT_CONFIG_CHANGE = 24;
+  AGENT_HOOK_EVENT_WORKTREE_CREATE = 25;
+  AGENT_HOOK_EVENT_WORKTREE_REMOVE = 26;
+  AGENT_HOOK_EVENT_INSTRUCTIONS_LOADED = 27;
+  AGENT_HOOK_EVENT_CWD_CHANGED = 28;
+  AGENT_HOOK_EVENT_FILE_CHANGED = 29;
+  AGENT_HOOK_EVENT_DIRECTORY_ADDED = 30;
+  AGENT_HOOK_EVENT_MESSAGE_DISPLAY = 31;
+}

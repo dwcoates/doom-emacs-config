@@ -223,6 +223,9 @@ message FeedTurnActivity {
     // A SYNC subagent's bubble — the same drawn component the detached
     // wrapper carries; a bubble is a sub-feed either way.
     FeedSubagent subagent = 6;
+    // A FAILING hook's card — blocked (loud) or failed (ordinary). A
+    // succeeded hook draws NOTHING: quiet automation stays quiet.
+    FeedHook hook = 7;
   }
 }
 
@@ -532,6 +535,51 @@ message FeedTaskCompleted {}
 message FeedTaskFailed {}
 message FeedTaskKilled {}
 message FeedTaskPaused {}
+
+// A failing hook's card — the grey tool-card shell, hook-flavored. Only
+// failures draw; the tone rides the arm.
+message FeedHook {
+  // The head line, composed ("hook blocked: protect-master (PreToolUse)").
+  FeedHookHeadline headline = 1;
+  // A reference to the gated call's card, when the firing gated one —
+  // drawn as the "▸ gated:" link. UNSET for call-less events.
+  optional FeedHookGatedCall gated_call = 2;
+  // Which failure, picking the tone.
+  oneof outcome {
+    // The hook REFUSED the gated action — the loud treatment; the text is
+    // the hook's own stated reason, drawn verbatim.
+    FeedHookBlocked blocked = 3;
+    // The hook itself failed; ordinary card with the capped output.
+    FeedHookFailed failed = 4;
+  }
+}
+// The headline element.
+message FeedHookHeadline {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+// The gated-call link element.
+message FeedHookGatedCall {
+  // The gated call's row, exactly as the feed served it.
+  FeedId row = 1;
+}
+// The blocked (loud) outcome.
+message FeedHookBlocked {
+  // The hook's refusal text, drawn verbatim.
+  string reason = 1;
+}
+// The failed (ordinary) outcome.
+message FeedHookFailed {
+  // The exit chip ("exit 1").
+  int32 exit_code = 1;
+  // The capped output text, drawn verbatim. UNSET when none.
+  optional FeedHookOutput output = 2;
+}
+// The output element.
+message FeedHookOutput {
+  // The text, drawn verbatim; the client caps visible height.
+  string text = 1;
+}
 
 // ==========================================================================
 // THE TURN'S TERMINAL — a row, so history replays how every turn ended.
