@@ -328,6 +328,19 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### `FeedAgentPrompt` lands — one orange prompt bubble, both ends of the relay
+
+**What changed ("okay").** FeedAgentPrompt { address (composed — "→ Explore"
+sender-side, "from Plan" recipient-side); body { repeated blocks of the
+feed's shared drawn vocabulary } }. One component for the outgoing send and
+the delivered prompt.
+
+**A recorded departure from the old SendMessage card.** That card NEVER drew
+the body (relays run long; summary-only, with a stated gotcha). Under the
+user's "same as a normal user prompt" ruling the body IS drawn, with
+fold/cap as client presentation. The old gotcha is superseded by this
+choice.
+
 ### `FeedShell` lands — the spool is a whole-replaced TAIL; a non-zero exit is COMPLETED
 
 **What changed ("looks good").** FeedShell { command; runtime; optional
