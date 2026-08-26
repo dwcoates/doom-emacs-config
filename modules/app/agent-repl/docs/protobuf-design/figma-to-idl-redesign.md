@@ -328,6 +328,29 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### CLOSE vs KILL settled — semantics, vocabulary, and where the refusal surfaces
+
+**The user's rulings, stated plainly.** (1) Closing a workspace with active
+work is a USER-FACING ERROR, and that error MANIFESTS IN THE FOOTER (shape
+to be designed). (2) Killing a turn/session in flight KILLS IT — never an
+error; kill is the stated intent, so no refusal exists on that path. (3)
+The vocabulary discrepancy is settled by renaming DOOM-SPEAK to match
+agent-repl-speak: doom's "kill" (remove the workspace from the editor —
+tab-bar, buffers, editor state; worktree survives) becomes "close"; doom's
+"nuke" (the harder destroy) becomes "kill". An Opus subagent is executing
+the elisp-only symbol rename in modules/app/agent-repl (Go/TS/protos
+untouched — their vocabulary was already right).
+
+**The distinction that motivated it (from the compare/contrast).** Kill
+targets WORK the user is looking at — naming is free, refusal is senseless.
+Close targets the CONTAINER, and the collision with live work is
+incidental — the refusal's job is to redirect attention to work the user
+was not thinking about, which is why it deserves a designed surface rather
+than a bare error.
+
+**Open, being designed next**: when exactly a workspace is closable; how
+the close refusal surfaces in the footer; the Emacs close UX.
+
 ### The COLD-CONTEXT GATE lands as a FEED ROW; the compaction scope becomes ONE ENUM, four→three
 
 **The drawing agreed first**: the gate across the feed's tail, composer
