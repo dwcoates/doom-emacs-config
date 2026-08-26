@@ -72,9 +72,9 @@ message FooterStrip {
   FooterStatus status = 1;
   // The step within the status. Unset when the status has no substructure
   // (waiting, interrupted, background, asleep).
-  FooterSubStatus sub_status = 2;
+  optional FooterSubStatus sub_status = 2;
   // The finest, dynamic line. Unset when the daemon has nothing finer to say.
-  FooterStatusActivity activity = 3;
+  optional FooterStatusActivity activity = 3;
   // The turn clock. The client ticks from the carried instant.
   FooterClock clock = 4;
   // The tokens CELL: the turn's uncached-input figure plus two glyphs, and
@@ -345,10 +345,10 @@ message FooterTokensCell {
   // The expensive-turn alarm glyph (⚠). PRESENT iff the alarm tripped this
   // turn; presence IS the glyph, and the composed sentence is the panel's
   // alarm line. Kept until the next turn starts.
-  FooterTokensCellAlarm alarm = 2;
+  optional FooterTokensCellAlarm alarm = 2;
   // The accounting verdict badge. UNSET while the turn runs (no verdict
   // yet); set once the settled turn is reconciled.
-  FooterTokensCellVerdict verdict = 3;
+  optional FooterTokensCellVerdict verdict = 3;
 }
 
 // The cell's figure. Wrapped so the cell's one number is its own element and
@@ -397,12 +397,12 @@ message FooterTokensCellVerdictInvalid {}
 message FooterLiveWorkChips {
   // ⚙ — live agent-spawned subagents (the ones with feed bubbles). Set iff
   // at least one is live.
-  FooterChipAgents agents = 1;
+  optional FooterChipAgents agents = 1;
   // ☑ — the task tracker's progress. Set iff the tracker is non-empty; a
   // task chip is about the LIST existing, not about anything running.
-  FooterChipTasks tasks = 2;
+  optional FooterChipTasks tasks = 2;
   // $ — live detached shells. Set iff at least one is running.
-  FooterChipShells shells = 3;
+  optional FooterChipShells shells = 3;
 }
 // The agents chip's props.
 message FooterChipAgents {
@@ -473,10 +473,10 @@ message FooterExpandedTokens {
   FooterTokensLineFirstToken first_token = 6;
   // The alarm's detail line. PRESENT iff the alarm tripped (mirrors the
   // cell's glyph); carries the composed sentence.
-  FooterTokensLineAlarm alarm = 7;
+  optional FooterTokensLineAlarm alarm = 7;
   // The verdict's detail line. UNSET while the turn runs (mirrors the
   // cell's badge); set once reconciled.
-  FooterTokensLineVerdict verdict = 8;
+  optional FooterTokensLineVerdict verdict = 8;
 }
 
 // The uncached-input line.
@@ -567,7 +567,7 @@ message FooterAgentRow {
   FooterAgentRowLabel label = 2;
   // The commission's description. UNSET when the spawn carried none; the
   // row then draws the label alone, never a synthesized description.
-  FooterAgentRowDescription description = 3;
+  optional FooterAgentRowDescription description = 3;
   // The subagent's running token sum, daemon-formatted.
   FooterAgentRowTokens tokens = 4;
   // The row's clock. The client ticks from the instant.
@@ -650,7 +650,7 @@ message FooterTaskRowPending {}
 message FooterTaskRowRunning {
   // The in-progress phrasing ("Running the migration…"). UNSET when the
   // agent gave none; the row then draws the subject alone.
-  FooterTaskRowActiveForm active_form = 1;
+  optional FooterTaskRowActiveForm active_form = 1;
 }
 // The running row's phrasing element.
 message FooterTaskRowActiveForm {

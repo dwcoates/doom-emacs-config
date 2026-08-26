@@ -21,7 +21,7 @@ message GetFeedPageRequest {
   workspace.v1.WorkspaceRef workspace = 1;
   // WHICH feed. UNSET = the workspace's root feed; SET = a sub-feed's
   // address (a subagent bubble row's own FeedId), echoed as served.
-  frontend.v1.FeedId feed = 2;
+  optional frontend.v1.FeedId feed = 2;
   // WHICH page of the walk. THE ARM IS THE ASK.
   oneof page {
     // The newest page; the walk resets to it.

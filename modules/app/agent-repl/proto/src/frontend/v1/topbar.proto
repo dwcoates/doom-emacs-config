@@ -60,7 +60,7 @@ message TopbarModelSelector {
   // The current selection, WHOLE — the button shows its display_name. UNSET
   // means no selection and the button renders its placeholder; presence, not
   // an empty display string.
-  conversation.v1.ModelOption selected = 1;
+  optional conversation.v1.ModelOption selected = 1;
   // The selectable models, in display order. The selector renders exactly
   // this list.
   repeated conversation.v1.ModelOption options = 2;

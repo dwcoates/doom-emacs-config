@@ -21,7 +21,7 @@ message OpenFeedRequest {
   // WHICH feed. UNSET = the workspace's root feed. SET = a sub-feed the
   // client was shown — a subagent bubble row's own FeedId, which addresses
   // the feed within it. Only served ids open; a client never constructs one.
-  frontend.v1.FeedId feed = 2;
+  optional frontend.v1.FeedId feed = 2;
 }
 
 // THE ARM IS THE OUTCOME.
