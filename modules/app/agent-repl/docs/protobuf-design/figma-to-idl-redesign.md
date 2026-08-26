@@ -328,6 +328,44 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### EVIDENCE STANDARD CORRECTED: corpus absence is NOT deletion evidence; the SIMPLE-ADD wave lands; batch judging opens
+
+**The user's correction, a standing rule.** "Not seeing it in the
+transcripts could just be because I simply have not used the feature yet"
+— absence from the personal corpus proves NON-USE, never NON-SUPPORT.
+Deletion/no-producer verdicts require DOCUMENTATION-GRADE evidence: the
+SDK's own doc comments, official docs, release notes, web research —
+corpus absence demoted to supporting color. A research subagent is
+re-vetting every NOPROD claim on that standard; the batch-1 picks for
+NOPROD-1 (delete Grep) and NOPROD-2 (retype Glob) are SUSPENDED pending
+it, since they rested on the rejected basis. Batch-1 rulings that stand:
+NOPROD-4 KEEP (the user plans to use bash image output), NOPROD-5 KEEP
+(the live shim is the interrupt's producer), NOPROD-7 KEEP repeated,
+NOPROD-8 KEEP; NOPROD-3 kicked for discussion; NOPROD-6 under discussion
+(the async completion record carries one scalar; the daemon can derive the
+breakdown by summing the frames it already holds).
+
+**The SIMPLE-ADD wave landed (`c7814df86`, Opus subagent, one commit,
+whole tree compiles).** 21 remediation groups: the vendor handshake block
+on SessionStarted; sixteen turn-stop error arms; refusal detail; read
+extent arms (image/pdf/notebook/split/unchanged); the shared
+AgentToolFailure payload filling all twelve empty *Failure{} arms; run
+accounting (cost in micro_usd, per-model usage, latency) on both
+terminals; sixteen new SessionUpdate arms; skill/plugin attribution;
+settle instants; prompt provenance on UserSaid; compaction detail + new
+cut arms; bash termination/sandbox/spill; detached-work output path;
+subagent isolation/retry/meta fields; workflow phases and totals; task
+tracker deleted/blocked/rejected; interrupt provenance arms; permission
+decider-absent arm; model capabilities; API class arms + synthesized-
+notice authorship; cache-miss diagnostics; the user-content file block.
+Its judgment calls and vendor-identity skips are in the agent report
+(notably: backgrounding routed to AgentSuccess.backgrounded; money as
+int64 micro_usd; uuid-typed parts of STOP-9/IDENT-3/IDENT-4/RETRACT-5/
+COMPACT-4/RETRACT-8 skipped for the hard bucket; IDENT-17 parent_agent_id
+skipped as contradicting the ancestry ruling). ORCHESTRATOR REVIEW of the
+landed text against the conventions is owed before the design-complete
+gate.
+
 ### The RECONCILIATION PRESCRIPTION settled — per-subsystem agents; deleted-or-respelled tests DIE; the main agent architects the replacement coverage
 
 **The user's prescription (dispatched to the skill by one-shot).**
