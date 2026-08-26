@@ -33,7 +33,7 @@ message HostWorkspace {
   oneof session {
     // Registered, but no session was ever created for it.
     HostSessionNone none = 1;
-    // A session exists (current: live, ended, or hibernated).
+    // A session exists (current: live or ended).
     HostSessionExisting existing = 2;
   }
   // What Emacs names the workspace's buffers from — a sibling of the
@@ -54,7 +54,6 @@ message HostSessionExisting {
   oneof standing {
     HostSessionLive live = 2;
     HostSessionTerminal terminal = 3;
-    HostSessionHibernated hibernated = 4;
   }
 }
 
@@ -99,18 +98,6 @@ message HostSessionTerminal {
   bool rehydratable = 1;
 }
 
-message HostSessionHibernated {
-  // The typed account of the hibernation, from which the revival gate
-  // renders.
-  HostHibernation detail = 1;
-  // THE ARM IS THE STANDING: parked, or revival under way.
-  oneof standing {
-    HostHibernationParked parked = 2;
-    HostHibernationReviving reviving = 3;
-  }
-}
-message HostHibernationParked {}
-message HostHibernationReviving {}
 
 // A daemon-minted session identity — the echo token Emacs correlates by.
 message HostSessionId {
@@ -182,39 +169,3 @@ message HostFault {
   int64 opened_at_ms = 2;
 }
 
-// The hibernation account, from which the revival gate renders. THE ARM IS
-// THE CAUSE (carried verbatim from the retired agentrepl.v1
-// HibernationDetail).
-message HostHibernation {
-  // When the session entered hibernation, unix millis.
-  int64 since_ms = 1;
-  oneof cause {
-    // The keep-alive loop reached its configured maximum: idle time crossed
-    // the cutoff, so the daemon stopped pinging and hibernated in the same
-    // transition (the two are one act by construction).
-    HostHibernationIdleCutoff idle_cutoff = 2;
-    // The user forced it via HibernateWorkspaceRequest.
-    HostHibernationForced forced = 3;
-    // The keep-alive loop discovered the expected cache TTL had already
-    // elapsed before a ping could fire (laptop sleep, daemon downtime).
-    // Pinging a cold cache would pay full re-ingest cost for nothing, so
-    // the discovery IS the hibernate transition — reported loudly rather
-    // than silently absorbed.
-    HostHibernationCacheExpired cache_expired = 4;
-  }
-}
-// Automatic hibernation at the idle cutoff.
-message HostHibernationIdleCutoff {
-  // The configured cutoff that tripped, millis — carried so the gate can say
-  // "asleep after Nh idle" without the host knowing daemon config.
-  int64 cutoff_ms = 1;
-}
-// User-forced hibernation. Empty: the cause IS the arm.
-message HostHibernationForced {}
-// Hibernation because the cache went cold before a ping could fire.
-message HostHibernationCacheExpired {
-  // How long the session had actually been idle when the check ran, millis.
-  int64 elapsed_ms = 1;
-  // The expected cache TTL the elapsed time exceeded, millis.
-  int64 ttl_ms = 2;
-}

@@ -71,7 +71,7 @@ message FooterStrip {
   // Coarsest state of the workspace. Colors the strip; one arm always set.
   FooterStatus status = 1;
   // The step within the status. Unset when the status has no substructure
-  // (waiting, interrupted, background, asleep).
+  // (waiting, interrupted, background).
   optional FooterSubStatus sub_status = 2;
   // The finest, dynamic line. Unset when the daemon has nothing finer to say.
   optional FooterStatusActivity activity = 3;
@@ -109,8 +109,6 @@ message FooterStatus {
     // The vendor or the account said no (auth, usage limit, persistent
     // 4xx/5xx). A REPORT of the last turn's conclusion; gates nothing.
     FooterStatusBlocked blocked = 7;
-    // Hibernated on purpose; nothing is wrong.
-    FooterStatusAsleep asleep = 8;
     // The route Emacs→daemon→shim is compromised on OUR side (starting,
     // degraded, severed, dead, start failed).
     FooterStatusDisconnected disconnected = 9;
@@ -126,7 +124,6 @@ message FooterStatusInterrupted {}
 message FooterStatusMerging {}
 message FooterStatusBackground {}
 message FooterStatusBlocked {}
-message FooterStatusAsleep {}
 message FooterStatusDisconnected {}
 message FooterStatusClosing {}
 

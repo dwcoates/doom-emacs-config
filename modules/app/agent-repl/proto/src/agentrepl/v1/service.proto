@@ -27,7 +27,6 @@ import "agentrepl/v1/endpoint_close_workspace.proto";
 import "agentrepl/v1/endpoint_kill_workspace.proto";
 import "agentrepl/v1/endpoint_nuke_workspace.proto";
 import "agentrepl/v1/endpoint_merge_workspace.proto";
-import "agentrepl/v1/endpoint_revive_workspace.proto";
 import "agentrepl/v1/endpoint_restart_workspace.proto";
 import "agentrepl/v1/endpoint_watch_topbar.proto";
 import "agentrepl/v1/endpoint_set_model.proto";
@@ -100,8 +99,6 @@ service AgentRepl {
   rpc MergeWorkspace(MergeWorkspaceRequest) returns (MergeWorkspaceResponse);
 
 
-  // Wake a hibernated workspace.
-  rpc ReviveWorkspace(ReviveWorkspaceRequest) returns (ReviveWorkspaceResponse);
 
   // Bounce the workspace's shim (rebuild if stale); graceful unless forced.
   // See endpoint_restart_workspace.proto.

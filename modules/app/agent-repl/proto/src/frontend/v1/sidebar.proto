@@ -13,7 +13,7 @@
 // and the daemon's stream order is the only order — there is no publisher
 // epoch to reconcile, because there is no outside publisher.
 //
-// VIEW ONLY. The sidebar's clicks (open, close, create, merge, hibernate,
+// VIEW ONLY. The sidebar's clicks (open, close, create, merge,
 // navigate) are agentrepl.v1 requests with plain fields — a request type is
 // agentrepl, never frontend (the drawn/called test, which stands).
 //
@@ -209,8 +209,6 @@ message RosterRow {
     RosterRowStatusInit init = 13;
     // The session's backing process is gone but the workspace is recoverable.
     RosterRowStatusSevered severed = 14;
-    // Deliberately parked, resumable on demand.
-    RosterRowStatusHibernated hibernated = 15;
     // Startup failed outright.
     RosterRowStatusStartFailed start_failed = 16;
     // Running, but with a compromised route.
@@ -362,7 +360,6 @@ message RosterRowStatusInit {}
 
 message RosterRowStatusSevered {}
 
-message RosterRowStatusHibernated {}
 
 message RosterRowStatusStartFailed {}
 
