@@ -4,7 +4,9 @@
 #   Go  → gen/go/...   (consumed by daemon/, agent-shim/shim-store/, agent-shim/claude/shim-sidecar/)
 #   TS  → gen/ts/...   (consumed by agent-shim/claude/shim/, webapp/)
 #
-# Requires: protoc, protoc-gen-go, and @bufbuild/protoc-gen-es (via npx).
+# Requires: protoc, protoc-gen-go, protoc-gen-connect-go (Connect service
+# handler interfaces — message types alone cannot serve an rpc), and
+# @bufbuild/protoc-gen-es (via npx).
 
 # The proto set is DISCOVERED from src/ so the Makefile can never hold a
 # stale hand-maintained list: every .proto under the six surface roots is
@@ -32,7 +34,8 @@ codegen-gate: conversation-isolation
 
 go: codegen-gate
 	mkdir -p gen/go
-	protoc -I src --go_out=gen/go --go_opt=paths=source_relative $(PROTOS)
+	protoc -I src --go_out=gen/go --go_opt=paths=source_relative \
+	  --connect-go_out=gen/go --connect-go_opt=paths=source_relative $(PROTOS)
 
 ts: codegen-gate
 	mkdir -p gen/ts

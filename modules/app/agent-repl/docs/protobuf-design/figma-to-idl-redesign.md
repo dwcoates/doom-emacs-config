@@ -7794,3 +7794,20 @@ its integration replacement specs (unit specs deliberately absent per the
 mapping-convention amendment), and reconciliation gotchas; MAIN.md will
 carry the e2e specs. Shim and elisp are seeded from their reconciliation
 reports; store/sidecar/webapp/daemon follow as their reports land.
+
+### RECONCILIATION MERGES (5 of 6): shim, elisp, webapp, store, sidecar green; Connect Go stubs join the codegen; the daemon is a fanout subject
+
+Five subsystems reconciled green in isolated worktrees and merged (shim
+277 tests; elisp 5614; webapp 4901; store all packages race-checked;
+sidecar all packages) — each report's dead-code inventory, blockers, and
+integration replacement specs seeded into docs/implementation/. The
+DAEMON's agent correctly refused: it was never repointed off protocol.v1/
+data.v1/state.v1 (9,724 dangling reference sites, 452/830 files), so
+"minimum adaptation" would hollow it into an empty shell — its
+re-targeting is fanout implementation, per the record's own routing;
+ruling owed. Findings absorbed at the orchestrator: the binding regen had
+dropped proto/gen/go's hand-written go.mod/go.sum (restored);
+protoc-gen-connect-go joins the Makefile's go target, because
+protoc-gen-go emits message types only and NOTHING could serve the three
+Connect services — agentreplv1connect/shimv1connect/storev1connect
+handler interfaces now generate.
