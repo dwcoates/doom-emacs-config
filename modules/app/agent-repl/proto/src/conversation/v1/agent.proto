@@ -314,9 +314,7 @@ message AgentContinuationPrevented {}
 // as several records repeating one usage object, so summing units over-counts;
 // these figures do not.
 message AgentRunAccounting {
-  // WHAT THE RUN COST IN MONEY. UNSET when the producer stated no figure —
-  // which is not the same as free.
-  optional RunCost cost = 1;
+  // Tag 1 is RETIRED: money is deliberately not represented in this API.
 
   // How long it took. UNSET when the producer stated no durations.
   optional RunDuration duration = 2;
@@ -346,17 +344,6 @@ message AgentRunAccounting {
   repeated RunPermissionDenial permission_denials = 6;
 }
 
-// A sum of money.
-message RunCost {
-  // Millionths of a US dollar.
-  //
-  // AN INTEGER OF MICRO-DOLLARS RATHER THAN A FLOATING FIGURE, because these
-  // are summed — across models, across runs, across a session — and a float
-  // sum of many small charges drifts. The producer scales the vendor's own
-  // floating figure once, here, and nothing downstream re-derives a currency.
-  int64 micro_usd = 1;
-}
-
 // How long a run took, and how much of that was spent waiting on the API.
 //
 // BOTH FIGURES, because their difference is the producer's own overhead — tool
@@ -382,8 +369,7 @@ message ModelUsage {
   string provider = 3;
   // What this model's requests consumed, in the one canonical token shape.
   TokenUsage usage = 4;
-  // What this model charged. UNSET when the producer stated no figure.
-  optional RunCost cost = 5;
+  // Tag 5 is RETIRED: money is deliberately not represented in this API.
   // How many web searches this model's requests performed. Billed separately
   // from tokens, which is why it is a count rather than folded into usage.
   uint32 web_search_requests = 6;
