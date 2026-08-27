@@ -15,53 +15,74 @@ dynamically. Every prescribed decision carries its PREREQUISITES, because
 the prerequisite annotations are the orchestrator's sequencing graph —
 this planning process doubles as the implementer-orchestration plan.
 
+## Marker vocabulary
+Entries below are marked PRESCRIBED (dedicated module; responsibilities/
+interface/usage/prereqs stated), INVARIANT (binding cross-component
+constraint, no internals), or DISCRETIONARY (named for the dependency
+graph only; internal design is the implementing orchestrator's). Anything
+unmarked is DISCRETIONARY by default.
+
 ## Settled architecture decisions
 
-1. DEPENDENCY DIRECTION: the shim client is a LEAF — it knows nothing of
-   WSM or any other module; WSM knows and drives the client. All
+1. INVARIANT — dependency direction: the shim client is a LEAF (knows
+   nothing of WSM or any module); WSM knows and drives the client. All
    workspace-pertaining shim interaction STARTS at WSM.
 
-2. THE SHIM CLIENT (one per session) is a dumb connection module with an
-   internal occupancy MUTEX (obfuscated from callers) and two faces:
-   - OCCUPANCY face (StartSession, StartTurn, Kill*, SetSessionModel,
-     stand-down): fully WSM-MEDIATED, lease-checked, mutex-guarded.
-   - CONVERSATION face (WatchAgent frame streams, UpdateAgent
-     answer/stop): WSM RESOLVES the workspace to the client handle and
-     HANDS OFF — frames flow client→ingest directly; WSM never relays
-     frame-by-frame.
+2. PRESCRIBED — THE SHIM CLIENT (one per session).
+   - RESPONSIBILITIES: the only module that dials shim.v1; a dumb
+     connection with NO policy; internal occupancy MUTEX obfuscated from
+     callers.
+   - INTERFACE: two faces. OCCUPANCY (StartSession, StartTurn, Kill*,
+     SetSessionModel, stand-down) — WSM-mediated only, lease-checked,
+     mutex-guarded. CONVERSATION (WatchAgent frame streams, UpdateAgent
+     answer/stop) — WSM resolves workspace→handle and HANDS OFF; frames
+     flow client→ingest directly, never relayed through WSM.
+   - USAGE PATTERNS: WSM drives occupancy; ingest and the answer verbs
+     hold conversation-face handles obtained from WSM.
+   - PREREQUISITES: none (leaf; generated shimv1connect stubs).
 
-3. WSM is the workspace-state coordinator and SOLE DATABASE OWNER (all
-   seven tables). The in-client mutex is the in-memory guard; WSM's
-   persisted lease is the source of truth behind it.
+3. PRESCRIBED — THE OCCUPANCY LEASE (inside WSM).
+   - RESPONSIBILITIES: per-workspace exclusivity — who may drive this
+     workspace's session now. Persisted truth in WSM; the client's mutex
+     is its in-memory guard.
+   - INTERFACE: acquire/release by the merge orchestrator and the drain
+     controller; consulted by prompt delivery.
+   - USAGE PATTERNS: THE TRAY'S HOLD REASONS ARE PROJECTIONS OF THE
+     LEASE — a prompt at a leased workspace holds under the holder's
+     label (merge / restart-pending / shutdown-drain). Distinct from the
+     per-REPO merge window (queue admission); both exist.
+   - PREREQUISITES: registry, shim client.
 
-4. OCCUPANCY LEASE (non-trivial, prescribed): per-workspace exclusivity —
-   who may drive this workspace's session now. Acquired by the merge
-   orchestrator and the drain controller; respected by prompt delivery.
-   THE TRAY'S HOLD REASONS ARE PROJECTIONS OF THE LEASE: a prompt
-   arriving at a leased workspace is held under the holder's label
-   (merge / restart-pending / shutdown-drain). Distinct from the per-REPO
-   merge window (queue admission) — both exist.
+4. PRESCRIBED — THE PROMPT QUEUE (inside WSM; persisted in held_prompt).
+   - RESPONSIBILITIES: the ONE queue — classification, holds, delivery.
+   - INTERFACE: fed by the thin prompt handler (recognize the session
+     command, forward to WSM — nothing more); serves the tray's view.
+   - USAGE PATTERNS: consult lease + in-flight → deliver through the
+     occupancy face (interrupting when that is what delivery takes) or
+     persist the hold; release/drop verbs act on held rows; it never
+     knows WHY a workspace is leased, only the holder's label.
+   - PREREQUISITES: registry, lease.
 
-5. PROMPT HANDLER is deliberately THIN: recognize the session command,
-   forward to WSM. WSM consults lease + in-flight and either delivers
-   through the occupancy face or persists the hold in held_prompt ("the
-   daemon is the only queue", made literal).
+5. PRESCRIBED — THE MERGE ORCHESTRATOR (inside WSM).
+   - RESPONSIBILITIES: queue admission per repo, phase execution, the git
+     work, merge bubble/footer/roster fact synthesis.
+   - INTERFACE and USAGE PATTERNS: to be detailed as its section is
+     walked (deliberately still owed).
+   - PREREQUISITES: registry, lease.
 
-6. WSM SUBCOMPONENTS and their prerequisites (parallelizable given 6a+6b):
-   a. registry (workspace table) — no prereqs; TRIVIAL, not further
-      prescribed.
-   b. binding + occupancy lease (session_binding + lease) — prereqs:
-      registry, shim client. The one arbitration point.
-   c. prompt queue (held_prompt) — prereqs: a, b. Orthogonal to d/e by
-      the lease projection: it never knows WHY a workspace is leased.
-   d. MERGE ORCHESTRATOR — prereqs: a, b. NON-TRIVIAL, gets its own
-      dedicated component and usage-pattern prescription (queue admission
-      per repo, phases, git work, bubble/footer synthesis) — to be
-      detailed in this document as its section is walked.
-   e. drain/shutdown (shutdown_schedule + idle sweep) — prereqs: a, b.
-   Subcomponents c/d/e never call each other laterally; they meet only at
-   the lease and the registry.
+6. INVARIANT — orthogonality: the prompt queue, merge orchestrator, and
+   drain controller never call each other laterally; they meet ONLY at
+   the lease and the registry. Given registry+lease, they are pairwise
+   independent and parallelizable.
 
+7. DISCRETIONARY — registry (workspace table; prereqs: none), session
+   binding (session_binding; prereqs: registry), drain/shutdown
+   controller (shutdown_schedule + idle sweep; prereqs: registry, lease;
+   its lease usage is fully covered by 3). Internal design is the
+   implementing orchestrator's.
+
+8. WSM is the workspace-state coordinator and SOLE DATABASE OWNER (all
+   seven tables) — INVARIANT.
 ## Not yet walked
 - The EMACS+WEBAPP section (Connect server + resolvers/publishers) and
   the internal-only components (ingest core, failure classification,
