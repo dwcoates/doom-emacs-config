@@ -3167,47 +3167,18 @@ connection state over an open socket."
         ;; Assert
         (should (eq agent-repl--uds-connection-state 'open))))))
 
-;;;; ---- The vocabulary matches the generated proto ------------------------
+;;;; ---- The frame/command vocabulary has no proto to pin against ---------
 ;;
-;; This file hand-declares the frame and command oneof spellings the protos
-;; already own.  Until the frontends consume a generated constants module,
-;; drift is caught HERE, against the checked-in generated bindings: a
-;; misspelled arm then fails the suite instead of surfacing as a refused
-;; frame or a daemon-side unknown-command NACK at runtime.
-
-(ert-deftest agent-repl-test-uds-known-frame-fields-match-the-proto ()
-  "Every declared frame arm is spelled exactly as a `FrontendFrame' oneof arm."
-  ;; Arrange
-  (let ((generated (agent-repl-test--generated-oneof-arms
-                    "agentshim/frontend/v1/frame.pb.go" "FrontendFrame")))
-    ;; Act / Assert
-    (should generated)
-    (should-not (cl-remove-if (lambda (field) (member field generated))
-                              agent-repl--uds-known-frame-fields))))
-
-(ert-deftest agent-repl-test-uds-known-command-fields-match-the-proto ()
-  "Every declared command arm is spelled exactly as a `FrontendCommand' oneof arm.
-The reverse containment is deliberately NOT asserted: `createWorkspace'
-exists in the proto and is deliberately absent here."
-  ;; Arrange
-  (let ((generated (agent-repl-test--generated-oneof-arms
-                    "agentshim/frontend/v1/frame.pb.go" "FrontendCommand")))
-    ;; Act / Assert
-    (should generated)
-    (should-not (cl-remove-if (lambda (field) (member field generated))
-                              agent-repl--uds-known-command-fields))))
-
-(ert-deftest agent-repl-test-uds-ignored-frame-fields-match-the-proto ()
-  "Every deliberately-ignored arm is spelled as a real `FrontendFrame' arm.
-A typo here would silently move an arm from the ignored list into the
-unfinished-wiring log, which is the opposite of what the list means."
-  ;; Arrange
-  (let ((generated (agent-repl-test--generated-oneof-arms
-                    "agentshim/frontend/v1/frame.pb.go" "FrontendFrame")))
-    ;; Act / Assert
-    (should generated)
-    (should-not (cl-remove-if (lambda (field) (member field generated))
-                              agent-repl--uds-ignored-frame-fields))))
+;; Three tests used to pin `agent-repl--uds-known-frame-fields',
+;; `agent-repl--uds-known-command-fields' and
+;; `agent-repl--uds-ignored-frame-fields' against the `FrontendFrame' /
+;; `FrontendCommand' oneofs in `agentshim/frontend/v1/frame.proto'.  The
+;; agentrepl.v1 redesign DELETED that push/command envelope outright: the
+;; service is now 30 explicit RPCs plus per-component watch streams, and no
+;; message on the wire enumerates these arms.  The pins were removed rather
+;; than repointed, because choosing what each UDS arm becomes under the new
+;; service is a design decision, not a rename.  The lists below therefore
+;; stand unpinned until Emacs is moved onto the agentrepl.v1 service.
 
 ;;;; ---- registration precedes the write ---------------------------------
 ;;
