@@ -11,8 +11,6 @@ package agentrepl.v1;
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
 import "frontend/v1/status_panel.proto";
-import "frontend/v1/cost_panel.proto";
-import "frontend/v1/usage_panel.proto";
 import "frontend/v1/todos_panel.proto";
 import "frontend/v1/agents_panel.proto";
 import "frontend/v1/mcp_panel.proto";
@@ -74,10 +72,11 @@ message SubmitPromptCommandPanel {
   oneof panel {
     // The /status panel.
     frontend.v1.StatusPanelView status = 1;
-    // The /cost panel: what the session cost, label/value rows.
-    frontend.v1.CostPanelView cost = 2;
-    // The /usage panel: allowance utilization rows.
-    frontend.v1.UsagePanelView usage = 3;
+    // Tags 2-3 are RETIRED: /cost and /usage left the daemon-handled set —
+    // their only structured sources are an explicitly EXPERIMENTAL control
+    // method and an undeclared-shape one (vetting item 11), not worth the
+    // complication; the commands fall through to the vendor like any
+    // unrecognized command.
     // The /todos panel: the tracker's checklist, printed from the daemon's
     // own state.
     frontend.v1.TodosPanelView todos = 4;
