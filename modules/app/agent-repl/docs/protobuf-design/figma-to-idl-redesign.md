@@ -328,6 +328,40 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### MONEY LEAVES THE API (USAGE-1); IDENT-17/AGENT-12/CTRL-13 settled; USAGE-9 found wave-resolved
+
+**USAGE-1, the user's ruling ("delete the cost field... It shouldnt be
+represented in the API at all").** Money is deliberately not represented:
+RunCost is DELETED, AgentRunAccounting.cost (tag 1 RETIRED) and
+ModelUsage.cost (tag 5 RETIRED) with it. It had never reached frontend.v1 —
+no surface draws a currency figure — so the deletion is conversation-only.
+The rest of the wave's run accounting (durations, round trips, per-model
+usage, denials) stands.
+
+**IDENT-17 ("okay").** Replay's parent_agent_id does not reopen the
+no-ancestry ruling: the store stamps each row's parent agent at insert, so
+history reconstruction needs nothing from the replay surface. No change.
+
+**AGENT-12, the user's ruling.** skip_transcript-marked (ambient/
+housekeeping) tasks join the EXEMPT SET as records: the shim drops them
+entirely — no detached-work announcement, no bubble, never AgentUnmodeled.
+The earlier "rides the stream as a rendering property" ruling is
+SUPERSEDED. Consequence accepted: ambient work is invisible on our
+surfaces; the vendor's level set still governs liveness shim-side, so no
+indicator wedges.
+
+**CTRL-13, the user's ruling ("this is exempt").** The interrupt answer's
+still_queued/cancelled lists are dropped: the daemon is the only queue, so
+the vendor's queue functionally never holds anything of ours; the earlier
+"defensive evidence, a fault to surface" reading is downgraded — no
+SessionFault kind is added.
+
+**USAGE-9 found ALREADY WAVE-RESOLVED.** TokenUsage.cache_miss
+(TokenCacheMissDiagnostics: missed_input_tokens + the six-arm reason) landed
+with the wave, so the vendor's cache-miss reason IS carried; the only open
+remainder is whether the COLD GATE's drawn card states it (frontend
+question, pending the user).
+
 ### Ruling batch: STOP-4's feed specializations land; RETRACT-10 recorded as a drop; four items found already wave-resolved
 
 **STOP-4 ("you can take it home yourself").** ALL THREE conversation-side
