@@ -7666,3 +7666,18 @@ LEAD.
   resume their implementers.
 - Every proto-change request and its ruling gets a line in the design
   record: mid-flight contract drift stays auditable.
+
+### REPL joins the EXEMPT SET — the built-ins walk is COMPLETE
+
+The user's ruling, superseding the built-ins slate's "modeled, UI to be
+designed" disposition for REPL: the sandboxed code-execution tool is not
+useful enough to support now. REPL joins the EXEMPT SET — a known vendor
+built-in the contract deliberately does not carry: its calls are DROPPED at
+the shim, never emitted as AgentUnmodeled, never tripping the topbar's
+unmodeled warning. No proto change lands; the earlier ride-the-grey-card
+proposal is withdrawn unagreed. If REPL support is ever wanted, it re-enters
+as its own increment with a drawing.
+
+All six ruled built-in families are now dispositioned: plan mode,
+ReportFindings, the worktree pair, cron, and push notification landed;
+REPL exempt.
