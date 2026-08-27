@@ -13,7 +13,7 @@ import {
   type CommandRefusal,
 } from "../src/command-dispatch.js";
 import { create } from "@bufbuild/protobuf";
-import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/shared_pb";
+import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/failure_pb";
 import { failureKindName } from "../src/failure-card.js";
 import type { FailureCardItem } from "../src/store.js";
 import {
@@ -1244,7 +1244,9 @@ describe("surfaceRefusal", () => {
       kind: "failure",
       uuid: "local:x",
       view: {
-        kind: create(FailureKindSchema, { kind: { case: "shimNotSpawned", value: {} } }),
+        kind: create(FailureKindSchema, {
+          kind: { case: "shimDegraded", value: { component: "connection" } },
+        }),
         message: "m",
         detail: "",
         lifecycle: { case: "terminal" },

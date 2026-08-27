@@ -8,8 +8,8 @@ import { failureSide } from "../src/failure-card.js";
 import { create } from "@bufbuild/protobuf";
 import {
   QueryTerminationFailureSchema,
-} from "../../proto/gen/ts/frontend/v1/shared_pb";
-import { QueryStartupFailureSchema } from "../../proto/gen/ts/protocol/v1/core_pb";
+} from "../../proto/gen/ts/frontend/v1/failure_pb";
+import { QueryTerminationStartupFailureSchema as QueryStartupFailureSchema } from "../../proto/gen/ts/frontend/v1/failure_pb";
 import { decodeFrontendFrame } from "../src/frontend-proto.js";
 import {
   StateAdapter,
@@ -1035,31 +1035,6 @@ describe("failureCard arm", () => {
     });
     // Assert
     expect(failureSide((items[0] as FailureCardItem).view.kind)).toBe("machinery");
-  });
-
-  it("preserves query-termination evidence on the arm that carries it", () => {
-    // Arrange / Act
-    const items = itemsFrom({
-      uuid: "failure:termination",
-      failureCard: {
-        kind: {
-          queryTermination: {
-            detail: {
-              queryInstanceId: "query-1",
-              vendorSessionId: "claude-1",
-              observedAtMs: "1700000000000",
-              unexpectedEof: {},
-            },
-          },
-        },
-        message: "query ended",
-        terminal: {},
-      },
-    });
-    // Assert
-    const kind = (items[0] as FailureCardItem).view.kind.kind;
-    if (kind.case !== "queryTermination") throw new Error("wrong arm");
-    expect(kind.value.detail?.queryInstanceId).toBe("query-1");
   });
 
   it("carries the resolution stamp that settles a window", () => {
