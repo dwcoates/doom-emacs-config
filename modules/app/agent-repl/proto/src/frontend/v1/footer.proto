@@ -249,6 +249,11 @@ message FooterStatusWaiting {
     // remediation choice (pay / clear / compact). The feed's gate row is the
     // answering surface; the footer only says the session is parked on it.
     FooterSubStatusWaitingColdGate cold_gate = 5;
+    // An interrupt was registered and the running turn's teardown has
+    // begun; the next delivery will be the interrupting prompt. Pushed
+    // the MOMENT the interrupt registers, before the turn's real end —
+    // the user must see their stop acknowledged immediately.
+    FooterSubStatusWaitingInterrupting interrupting = 6;
   }
   // REQUIRED: every waiting state has a composable line by construction —
   // the countdown, the gated call, or the question lead. A producer that
@@ -263,6 +268,8 @@ message FooterSubStatusWaitingPermission {}
 message FooterSubStatusWaitingQuestion {}
 // The cold-context gate stands; the session is parked on its answer.
 message FooterSubStatusWaitingColdGate {}
+// The turn is being stopped on the user's behalf.
+message FooterSubStatusWaitingInterrupting {}
 // The activity kinds legal while waiting.
 message FooterStatusWaitingActivity {
   // When this activity began standing; the client ticks the relative age.
@@ -288,7 +295,15 @@ message FooterStatusWaitingActivity {
     // The vendor's context-budget warning; LOWEST precedence — shown only
     // when nothing else stands.
     FooterStatusActivityContextBudget context_budget = 9;
+    // The interrupting line, composed by the daemon ("stopping the
+    // current turn…"), standing until the teardown resolves.
+    FooterStatusActivityInterrupting interrupting = 10;
   }
+}
+// The composed interrupting line.
+message FooterStatusActivityInterrupting {
+  // Drawn verbatim.
+  string text = 1;
 }
 // The cold gate's composed cost line.
 message FooterStatusActivityColdGateCost {
