@@ -410,13 +410,14 @@ alarm's absence has exactly one reading."
 ;; this file did not follow fails the suite instead of silently downgrading
 ;; the cold-cache alarm at runtime.
 
-(ert-deftest agent-repl-test-context-cost-keep-alive-origin-matches-the-proto ()
-  "The keep-alive origin name is spelled exactly as the generated enum spells it."
-  ;; Arrange
-  (let ((generated (agent-repl-test--generated-enum-names
-                    "shim/v1/prompt_origin.pb.go" "PROMPT_ORIGIN_")))
-    ;; Act / Assert
-    (should (member agent-repl--context-cost-keep-alive-origin generated))))
+;; `agent-repl-test-context-cost-keep-alive-origin-matches-the-proto' USED TO
+;; STAND HERE and was deleted by the agentrepl.v1 reconciliation.  It pinned
+;; `agent-repl--context-cost-keep-alive-origin' against the generated enum.
+;; `PROMPT_ORIGIN_CACHE_KEEP_ALIVE' is now RETIRED (tag 27 in
+;; shim/v1/prompt_origin.proto): the proto states the cache keep-alive "is the
+;; shim's own mechanism and never appears on this wire".  The constant and the
+;; branch that reads it are left in place — removing them decides what the
+;; keep-alive alarm becomes — but nothing on the wire can match them any more.
 
 (ert-deftest agent-repl-test-context-cost-origin-prefix-matches-the-proto ()
   "Every generated `PromptOrigin' name carries the prefix this file gates on.
