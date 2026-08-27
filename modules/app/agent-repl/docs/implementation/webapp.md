@@ -1,5 +1,14 @@
 # Webapp implementation planning
 
+## The prescribed transport approach (settled with the user)
+The port uses the STANDARD CONNECT STACK end to end: @bufbuild/protobuf +
+connect-web GENERATED clients for every endpoint (unary and streams). The
+library owns (de)serialization, typing, and unknown-field refusal; the
+hand-rolled protojson decoder, its runtime strictness layer, and the
+build-time anchoring tables (invariant I5) are all SUPERSEDED by generated
+code — do not port them. Codec choice (binary vs JSON) is the client's
+config, not hand-written framing.
+
 ## Dead code to remove (with the transport port)
 - The hand-decoded FrontendFrame/FrontendCommand transport whole: the webapp
   still speaks the deleted multiplexed push stream and WILL NOT talk to the
