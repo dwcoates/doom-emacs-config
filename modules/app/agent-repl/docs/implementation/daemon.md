@@ -62,6 +62,15 @@ unmarked is DISCRETIONARY by default.
      refusal arm; post-merge-start work would be orphaned since a merged
      workspace closes), restart-pending and shutdown-drain leases HOLD
      them; items already held when a lease is acquired stay held.
+   - RULED ADOPTIONS from the feature-loss audit: exactly ONE durable
+     held-prompt store exists (the old daemon's second store,
+     session_record.queued_prompts beside the drain park rows, is an
+     accident of history — never two); and workspace state is
+     CURRENT-STATE ROWS ONLY — the old append-only multi-axis lifecycle
+     log is DEAD BY DESIGN, because history and liveness now belong to
+     the streams and the store (open watches ARE the live set), so
+     derived facts like the live-task identity set and last-activity
+     come from the new sources, never a WSM log.
    - PREREQUISITES: none. (Registry and binding internals are
      DISCRETIONARY.)
 
