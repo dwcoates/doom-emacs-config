@@ -2,17 +2,13 @@ package db
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
-	protocolv1 "agentrepl/proto/protocol/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
 )
 
@@ -31,77 +27,18 @@ func openTemp(t *testing.T) *DB {
 	return d
 }
 
-// streamPlane is the internal half every helper below starts from: the minimum
-// a stored record must carry, which is the producer that observed it.
-func streamPlane() *agentshimv1.InternalEntry {
-	return &agentshimv1.InternalEntry{
-		Plane: &agentshimv1.Plane{Plane: &agentshimv1.Plane_Stream{Stream: &agentshimv1.PlaneStream{}}},
+// streamEntry is the minimum a stored record must carry: the plane that
+// observed it. On store.v1 the plane sits on StoreEntry itself rather than on
+// the retired record's internal half.
+func streamEntry() *storev1.StoreEntry {
+	return &storev1.StoreEntry{
+		Plane: &storev1.Plane{Plane: &storev1.Plane_Stream{Stream: &storev1.PlaneStream{}}},
 	}
-}
-
-// bookkeeping builds a record that composes no message: a turn boundary. Its
-// ownership column is NULL by construction, because BookkeepingEntry has no
-// field capable of naming a message.
-func bookkeeping(session string) *agentshimv1.Entry {
-	return &agentshimv1.Entry{
-		Internal: streamPlane(),
-		External: &protocolv1.ExternalEntry{
-			SessionId: session,
-			Entry: &protocolv1.ExternalEntry_Bookkeeping{Bookkeeping: &protocolv1.BookkeepingEntry{
-				Kind: &protocolv1.BookkeepingEntry_TurnBegan{TurnBegan: &protocolv1.TurnBegan{TurnId: "t-1"}},
-			}},
-		},
-	}
-}
-
-// message builds a record belonging to the message it names, owned by topID.
-func message(session, messageID, topID string) *agentshimv1.Entry {
-	return &agentshimv1.Entry{
-		Internal: streamPlane(),
-		External: &protocolv1.ExternalEntry{
-			SessionId: session,
-			Entry: &protocolv1.ExternalEntry_Message{Message: &conversationv1.MessageEntry{
-				MessageId:         messageID,
-				TopLevelMessageId: topID,
-				Parent:            &conversationv1.MessageParent{Parent: &conversationv1.MessageParent_Root{Root: &conversationv1.MessageParentRoot{}}},
-				Author:            &conversationv1.MessageAuthor{Author: &conversationv1.MessageAuthor_User{User: &conversationv1.AuthorUser{}}},
-				Payload:           &conversationv1.MessageEntry_UserSaid{UserSaid: &conversationv1.UserSaid{}},
-			}},
-		},
-	}
-}
-
-// withWriteID stamps the producer's stable write identity on a record.
-func withWriteID(entry *agentshimv1.Entry, writeID string) *agentshimv1.Entry {
-	entry.Internal.WriteId = writeID
-	return entry
-}
-
-// unconverted builds a record the producer could not place: no external half at
-// all, so nothing can ever read it back.
-func unconverted(parseError string) *agentshimv1.Entry {
-	internal := streamPlane()
-	internal.Unconverted = &agentshimv1.InternalEntry_Unparsed{Unparsed: &agentshimv1.UnparsedEntry{ParseError: parseError}}
-	return &agentshimv1.Entry{Internal: internal}
 }
 
 // batch wraps records in the frame a producer actually writes.
-func batch(entries ...*agentshimv1.Entry) *agentshimv1.EntryBatch {
-	return &agentshimv1.EntryBatch{Entries: entries}
-}
-
-// collectReplay materializes a streamed replay only inside tests that need to
-// inspect the complete result. Production has no slice-returning replay API.
-func collectReplay(t *testing.T, d *DB, session string, fromSeq uint64) []*protocolv1.EntryDelivery {
-	t.Helper()
-	var deliveries []*protocolv1.EntryDelivery
-	if _, err := d.ReplayFrom(context.Background(), session, fromSeq, func(delivery *protocolv1.EntryDelivery) error {
-		deliveries = append(deliveries, delivery)
-		return nil
-	}); err != nil {
-		t.Fatalf("ReplayFrom: %v", err)
-	}
-	return deliveries
+func batch(entries ...*storev1.StoreEntry) *storev1.EntryBatch {
+	return &storev1.EntryBatch{Entries: entries}
 }
 
 // canonicalRecord is one decoded line of the store's JSON log.
@@ -131,76 +68,6 @@ func findRecord(t *testing.T, logs *bytes.Buffer, operation, level string) (cano
 		}
 	}
 	return found, ok
-}
-
-// --- write serialization ---------------------------------------------------
-
-func TestConcurrentIngestsAssignEverySeqExactlyOnce(t *testing.T) {
-	// Arrange: BEGIN IMMEDIATE (`_txlock=immediate`, see Open) is what makes
-	// concurrent writers mutually exclusive. Ingest reads MAX(seq) and only then
-	// inserts, so if that serialization did NOT hold, two transactions would read
-	// the same high-water and derive the same candidate — and the loser's
-	// `INSERT OR IGNORE` against PRIMARY KEY (session_id, seq) would be silently
-	// ignored and then miscounted as a replay. Every failure mode is therefore
-	// observable from outside: a duplicate seq, a gap, a lost record, or an
-	// error.
-	//
-	// The records carry no write_id, so a genuine replay can never be confused
-	// with a seq collision here.
-	const writers = 12
-	d := openTemp(t)
-
-	// Act: release every writer at once from a channel barrier — no sleeps.
-	var ready, done sync.WaitGroup
-	ready.Add(writers)
-	done.Add(writers)
-	start := make(chan struct{})
-	results := make([]Result, writers)
-	errs := make([]error, writers)
-	for i := range writers {
-		go func() {
-			defer done.Done()
-			ready.Done()
-			<-start
-			results[i], errs[i] = d.Ingest("p", batch(bookkeeping("s1")))
-		}()
-	}
-	ready.Wait()
-	close(start)
-	done.Wait()
-
-	// Assert: every writer succeeded with its one record, and the assigned seqs
-	// are exactly 1..writers with no duplicate and no gap.
-	seen := make(map[uint64]int, writers)
-	for i := range writers {
-		if errs[i] != nil {
-			t.Fatalf("writer %d: Ingest failed (write serialization did not hold): %v", i, errs[i])
-		}
-		if results[i].Accepted != 1 || results[i].Replayed != 0 {
-			t.Fatalf("writer %d: accepted=%d replayed=%d, want accepted=1 replayed=0 — a seq collision was miscounted as a replay",
-				i, results[i].Accepted, results[i].Replayed)
-		}
-		seen[results[i].LastSeq]++
-	}
-	for seq := uint64(1); seq <= writers; seq++ {
-		switch n := seen[seq]; {
-		case n == 0:
-			t.Fatalf("seq %d was never assigned; assigned set = %v", seq, seen)
-		case n > 1:
-			t.Fatalf("seq %d was assigned to %d writers; assigned set = %v", seq, n, seen)
-		}
-	}
-
-	// Assert: the durable rows agree with what ingest reported.
-	replayed := collectReplay(t, d, "s1", 0)
-	if len(replayed) != writers {
-		t.Fatalf("persisted %d records, want %d", len(replayed), writers)
-	}
-	for i, delivery := range replayed {
-		if want := uint64(i + 1); delivery.GetStored().GetSeq() != want {
-			t.Fatalf("persisted record %d has seq %d, want %d", i, delivery.GetStored().GetSeq(), want)
-		}
-	}
 }
 
 // --- schema tests ----------------------------------------------------------

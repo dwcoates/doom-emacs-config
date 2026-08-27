@@ -43,12 +43,19 @@ func TestOpenLoggerReturnsBootstrapErrorBeforePersistentSinkExists(t *testing.T)
 	}
 }
 
-func TestRunHealthCheckAlwaysWritesOneResultForMissingSocket(t *testing.T) {
+func TestRunHealthCheckAlwaysWritesExactlyOneResult(t *testing.T) {
+	// Arrange: the probe's protocol was deleted, so every invocation is now a
+	// client failure — but doctor still parses exactly one Result object from
+	// stdout, and that contract is what this asserts.
 	root := t.TempDir()
 	var stdout, stderr bytes.Buffer
+
+	// Act
 	exitCode := runHealthCheck(filepath.Join(root, "missing.sock"), filepath.Join(root, "shim-store.log"), "doctor-123", time.Second, &stdout, &stderr)
-	if exitCode != 10 {
-		t.Fatalf("runHealthCheck exit = %d, want 10", exitCode)
+
+	// Assert
+	if exitCode != 17 {
+		t.Fatalf("runHealthCheck exit = %d, want 17", exitCode)
 	}
 	if strings.Count(stdout.String(), "\n") != 1 {
 		t.Fatalf("stdout must contain exactly one JSON object: %q", stdout.String())
@@ -57,12 +64,16 @@ func TestRunHealthCheckAlwaysWritesOneResultForMissingSocket(t *testing.T) {
 		RequestID    string `json:"request_id"`
 		FailureClass string `json:"failure_class"`
 		Healthy      bool   `json:"healthy"`
+		Reason       string `json:"reason"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatalf("stdout is not Result JSON: %v: %q", err, stdout.String())
 	}
-	if result.RequestID != "doctor-123" || result.FailureClass != "missing_socket" || result.Healthy {
-		t.Fatalf("Result = %+v, want correlated missing_socket failure", result)
+	if result.RequestID != "doctor-123" || result.FailureClass != "client_failure" || result.Healthy {
+		t.Fatalf("Result = %+v, want a correlated client_failure", result)
+	}
+	if !strings.Contains(result.Reason, "no health rpc") {
+		t.Fatalf("reason = %q, want it to name the deleted protocol", result.Reason)
 	}
 }
 
