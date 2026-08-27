@@ -414,7 +414,7 @@ alarm's absence has exactly one reading."
   "The keep-alive origin name is spelled exactly as the generated enum spells it."
   ;; Arrange
   (let ((generated (agent-repl-test--generated-enum-names
-                    "agentshim/core/v1/core.pb.go" "PROMPT_ORIGIN_")))
+                    "shim/v1/prompt_origin.pb.go" "PROMPT_ORIGIN_")))
     ;; Act / Assert
     (should (member agent-repl--context-cost-keep-alive-origin generated))))
 
@@ -424,7 +424,7 @@ A prefix that had drifted would refuse origins the daemon legitimately
 sends."
   ;; Arrange
   (let ((generated (agent-repl-test--generated-enum-names
-                    "agentshim/core/v1/core.pb.go" "PROMPT_ORIGIN_")))
+                    "shim/v1/prompt_origin.pb.go" "PROMPT_ORIGIN_")))
     ;; Act / Assert
     (should generated)
     (should (cl-every (lambda (name)
