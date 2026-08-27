@@ -9,6 +9,15 @@ build-time anchoring tables (invariant I5) are all SUPERSEDED by generated
 code — do not port them. Codec choice (binary vs JSON) is the client's
 config, not hand-written framing.
 
+## Composer refusal treatment (settled with the user)
+Wherever the composer lives (Emacs host-native today; browser dev mode if
+ever enabled), it CLOSES on the merging state (the host stream's composer
+gate / the footer's merging status) — that is the PRIMARY defense against
+post-merge-start prompts. SubmitPromptError arms are the RACE FALLBACK for
+a submission already in flight when the state flipped: rendered inline at
+the composer, per typed arm, with the text preserved. The refusal is the
+submitter's own — no pushed view carries it.
+
 ## Dead code to remove (with the transport port)
 - The hand-decoded FrontendFrame/FrontendCommand transport whole: the webapp
   still speaks the deleted multiplexed push stream and WILL NOT talk to the
