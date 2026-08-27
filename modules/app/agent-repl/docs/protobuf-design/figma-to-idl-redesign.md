@@ -7373,3 +7373,34 @@ fidelity principle / identity ruling standing, debts routed to the vetting
 register (items 1-12, run-or-defer next) and the deferred metadocument.
 Design iteration is CLOSED; changes from here are vetting verdicts landing
 as increments, then reconciliation, then /cross-system-fanout.
+
+### VETTING VERDICTS LAND (2026-08-27): six deletions/additions from the run pass; /cost and /usage leave the daemon
+
+The eleven vetting runs concluded with the contract overwhelmingly upheld;
+the user's verdicts on the raised consequences landed as seven commits:
+
+- `AgentQuestionNote` DELETED (tag 4 retired): item 6 proved the wire
+  collapses a selection's typed text into one comma-joined answer string —
+  no producer can fill a distinct note.
+- `AgentPermissionAbandoned` DELETED (tag 3 retired): the vendor declares
+  permission prompts have no park deadline.
+- Unsourced fields DROPPED: `ContextCompacted.cumulative_dropped_tokens` +
+  `.tools_before_cut`, `ContextCleared.tokens`,
+  `SessionIdentityRotated.reason` (tags retired at each site).
+- `AGENT_EFFORT_LEVEL_MAX = 5` added — the vendor-declared level the enum
+  missed.
+- /cost AND /usage LEAVE the daemon-handled command set (panel files
+  deleted, SubmitPromptCommandPanel tags 2-3 retired): their only
+  structured sources are an explicitly EXPERIMENTAL method and an
+  undeclared-shape one — "not worth the added complication"; the commands
+  fall through to the vendor. /context, /todos, /agents, /mcp, /help,
+  /status stay.
+- FOOTER coverage verdicts: `FooterSubStatusInterrupted`
+  {by_user | host_shutdown} (finding 5), `FooterSubStatusBlockedBilling`
+  (finding 4), the Tag-8-RETIRED note (finding 2), the stale
+  no-substructure comment fixed (finding 1). Findings 3 and 6 await the
+  user's follow-up questions; finding 12 (the built-ins slate) goes to a
+  multi-select.
+- Producer notes corrected per item 1: ArtifactOutput is TYPED (read
+  fields, never parse prose); grep omitted figures are shim-subtracted;
+  hook duration and spawn depth are shim-derived.
