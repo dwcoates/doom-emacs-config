@@ -41,7 +41,7 @@ import (
 	"math/rand"
 	"time"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/handler"
 	"agentrepl/shim-claude-sidecar/internal/logging"
@@ -172,24 +172,21 @@ func (s *sidecar) establish() error {
 		s.store.Close()
 		return fmt.Errorf("recovering startup state: %w", err)
 	}
-	if err := s.tracker.Restore(recovery.OpenTasks); err != nil {
+	if err := s.tracker.Restore(); err != nil {
 		s.store.Close()
-		return fmt.Errorf("restoring authoritative open tasks: %w", err)
+		return fmt.Errorf("resetting the open-task tracker: %w", err)
 	}
 	s.cursors = indexCursorsByPath(recovery.Cursors)
-	// Seed the spool-owner index from the SAME authoritative snapshot. A spool
-	// carries no session of its own, and the launch line that names its owner
-	// may sit far behind this connection's resumed cursor — so without this
-	// seed a restart could leave a live task's spool unowned, and therefore
-	// unread, until its transcript happened to be re-read. The persisted
-	// TaskStarted events are exactly that mapping, already fetched.
+	// The spool-owner index used to be seeded from the SAME authoritative
+	// snapshot. store.v1 no longer carries one, so the seed reports its own
+	// impossibility instead — see seedOwners for what that costs.
 	s.resetOwners()
-	seeded := s.seedOwners(recovery.OpenTasks)
+	seeded := s.seedOwners()
 	s.link = linkUp
 	s.backoff = 0
 	s.log.With(logging.Context{Operation: "recover-startup-state"}).Log(
-		"store link up, recovered %d cursor(s), %d authoritative open task(s), seeded %d spool owner(s)",
-		len(s.cursors), len(recovery.OpenTasks), seeded)
+		"store link up, recovered %d cursor(s), seeded %d spool owner(s) (store.v1 reports no open tasks)",
+		len(s.cursors), seeded)
 
 	// Reading may begin now, and not one statement earlier.
 	s.rescan()
@@ -296,9 +293,9 @@ func (s *sidecar) watchedSessions() []string {
 // Only the report AFTER the fact is sendable, and that was already true and
 // already honest: the store is the sidecar's only channel, so while the link is
 // down there is by definition nobody to tell.
-func degradedWindowEvents(sessions []string, reason string) []*agentshimv1.Entry {
+func degradedWindowEvents(sessions []string, reason string) []*storev1.StoreEntry {
 	now := time.Now().UnixMilli()
-	out := make([]*agentshimv1.Entry, 0, len(sessions))
+	out := make([]*storev1.StoreEntry, 0, len(sessions))
 	for _, id := range sessions {
 		out = append(out, convert.ProducerDiagnostic(
 			convert.Attribution{SessionID: id, ProducedAtMs: now},
@@ -345,7 +342,7 @@ func nextBackoff(d time.Duration) time.Duration {
 // storeWrite is the sidecar's ONLY path to the store. Routing every write
 // through here is what keeps a dead connection from going unnoticed and leaving
 // the reader running against a corpse.
-func (s *sidecar) storeWrite(what string, batch *agentshimv1.EntryBatch) error {
+func (s *sidecar) storeWrite(what string, batch *storev1.EntryBatch) error {
 	err := s.store.Write(handler.Producer, batch)
 	s.noteStoreErr(what, err)
 	return err

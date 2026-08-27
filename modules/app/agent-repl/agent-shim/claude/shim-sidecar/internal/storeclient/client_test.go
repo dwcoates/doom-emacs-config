@@ -10,8 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
-	protocolv1 "agentrepl/proto/protocol/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/wire"
 )
@@ -71,7 +70,7 @@ func pipedClient(t *testing.T, log *logging.Bound) (*Client, net.Conn) {
 	return c, server
 }
 
-func TestRecoverReturnsCursorsAndOpenTasks(t *testing.T) {
+func TestRecoverReturnsCursors(t *testing.T) {
 	// Arrange
 	sock := shortSocket(t)
 	served := serveOnce(t, sock, func(conn net.Conn) error {
@@ -79,13 +78,13 @@ func TestRecoverReturnsCursorsAndOpenTasks(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, ok := msg.(*agentshimv1.CursorQuery); !ok {
-			return errors.New("expected CursorQuery")
+		if _, ok := msg.(*storev1.GetSidecarCursorsRequest); !ok {
+			return errors.New("expected GetSidecarCursorsRequest")
 		}
-		return wire.WriteAny(conn, &agentshimv1.CursorList{
-			Cursors:                []*agentshimv1.CursorState{{FileId: "7:7", Path: "/p/s1.jsonl", Offset: 99}},
-			OpenTasks:              []*agentshimv1.OpenTaskState{{LastActivityAtMs: 5}},
-			OpenTasksAuthoritative: true,
+		return wire.WriteAny(conn, &storev1.GetSidecarCursorsResponse{
+			Result: &storev1.GetSidecarCursorsResponse_Success{Success: &storev1.GetSidecarCursorsSuccess{
+				Cursors: []*storev1.CursorState{{FileId: "7:7", Path: "/p/s1.jsonl", Offset: 99}},
+			}},
 		})
 	})
 
@@ -99,22 +98,53 @@ func TestRecoverReturnsCursorsAndOpenTasks(t *testing.T) {
 	if len(recovery.Cursors) != 1 || recovery.Cursors[0].GetOffset() != 99 {
 		t.Fatalf("recovered cursors = %+v", recovery.Cursors)
 	}
-	if len(recovery.OpenTasks) != 1 || recovery.OpenTasks[0].GetLastActivityAtMs() != 5 {
-		t.Fatalf("recovered open tasks = %+v", recovery.OpenTasks)
+	if serveErr := <-served; serveErr != nil {
+		t.Fatalf("serve recovery response: %v", serveErr)
+	}
+}
+
+// A store that REFUSES recovery must not be read as a store with no cursors:
+// an empty cursor set is the honest cold-start path, and taking a refusal for
+// one re-reads every watched file from offset 0.
+func TestRecoverSurfacesAFailureRatherThanReadingItAsAColdStart(t *testing.T) {
+	// Arrange
+	sock := shortSocket(t)
+	served := serveOnce(t, sock, func(conn net.Conn) error {
+		if _, err := wire.ReadAny(conn); err != nil {
+			return err
+		}
+		return wire.WriteAny(conn, &storev1.GetSidecarCursorsResponse{
+			Result: &storev1.GetSidecarCursorsResponse_Failure{Failure: &storev1.GetSidecarCursorsFailure{
+				Detail: "cursor table is locked",
+			}},
+		})
+	})
+
+	// Act
+	recovery, err := New(sock, testLog()).Recover("")
+
+	// Assert
+	if err == nil {
+		t.Fatal("Recover read a store refusal as a cold start")
+	}
+	if len(recovery.Cursors) != 0 {
+		t.Fatalf("a refused recovery returned %d cursor(s)", len(recovery.Cursors))
 	}
 	if serveErr := <-served; serveErr != nil {
 		t.Fatalf("serve recovery response: %v", serveErr)
 	}
 }
 
-func TestRecoverRejectsStoreWithoutAuthoritativeOpenTaskState(t *testing.T) {
-	// Arrange: a store that answers without attesting its open-task set.
+// A response carrying NEITHER arm is a store this client cannot read, and it is
+// refused rather than treated as an empty success.
+func TestRecoverRejectsAResponseWithNoResultArm(t *testing.T) {
+	// Arrange
 	sock := shortSocket(t)
 	served := serveOnce(t, sock, func(conn net.Conn) error {
 		if _, err := wire.ReadAny(conn); err != nil {
 			return err
 		}
-		return wire.WriteAny(conn, &agentshimv1.CursorList{})
+		return wire.WriteAny(conn, &storev1.GetSidecarCursorsResponse{})
 	})
 
 	// Act
@@ -122,15 +152,15 @@ func TestRecoverRejectsStoreWithoutAuthoritativeOpenTaskState(t *testing.T) {
 
 	// Assert
 	if err == nil {
-		t.Fatal("Recover accepted a CursorList with no authoritative open-task attestation")
+		t.Fatal("Recover accepted a GetSidecarCursorsResponse with no result arm")
 	}
 	if serveErr := <-served; serveErr != nil {
 		t.Fatalf("serve recovery response: %v", serveErr)
 	}
 }
 
-func TestWriteSendsAStoreEntryWriteAndDoesNotWaitForAnAck(t *testing.T) {
-	// Arrange — StoreWriteAck was retired with no successor, so the write is
+func TestWriteSendsAWriteBatchRequestAndDoesNotWaitForAnAck(t *testing.T) {
+	// Arrange — this client does not read WriteBatchResponse, so the write is
 	// one-way: the frame goes out and nothing is read back. A server that never
 	// replies must therefore leave Write succeeding rather than blocking.
 	c, server := pipedClient(t, testLog())
@@ -141,9 +171,9 @@ func TestWriteSendsAStoreEntryWriteAndDoesNotWaitForAnAck(t *testing.T) {
 			served <- err
 			return
 		}
-		write, ok := msg.(*agentshimv1.StoreEntryWrite)
+		write, ok := msg.(*storev1.WriteBatchRequest)
 		if !ok {
-			served <- errors.New("expected StoreEntryWrite")
+			served <- errors.New("expected WriteBatchRequest")
 			return
 		}
 		if write.GetProducer() != "shim-claude-sidecar" {
@@ -158,9 +188,9 @@ func TestWriteSendsAStoreEntryWriteAndDoesNotWaitForAnAck(t *testing.T) {
 	}()
 
 	// Act
-	err := c.Write("shim-claude-sidecar", &agentshimv1.EntryBatch{
-		Entries:       []*agentshimv1.Entry{{Internal: &agentshimv1.InternalEntry{WriteId: "w1"}}},
-		CursorAdvance: &agentshimv1.CursorState{FileId: "7:7", Path: "/p/s1.jsonl", Offset: 99, Carry: []byte("z")},
+	err := c.Write("shim-claude-sidecar", &storev1.EntryBatch{
+		Entries:       []*storev1.StoreEntry{{WriteId: "w1"}},
+		CursorAdvance: &storev1.CursorState{FileId: "7:7", Path: "/p/s1.jsonl", Offset: 99, Carry: []byte("z")},
 	})
 
 	// Assert
@@ -168,7 +198,7 @@ func TestWriteSendsAStoreEntryWriteAndDoesNotWaitForAnAck(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 	if serveErr := <-served; serveErr != nil {
-		t.Fatalf("serve StoreEntryWrite: %v", serveErr)
+		t.Fatalf("serve WriteBatchRequest: %v", serveErr)
 	}
 	if !c.Connected() {
 		t.Fatal("a successful write dropped the producer connection")
@@ -184,7 +214,7 @@ func TestWriteTransportFailureDropsTheConnection(t *testing.T) {
 	}
 
 	// Act
-	err := c.Write("shim-claude-sidecar", &agentshimv1.EntryBatch{})
+	err := c.Write("shim-claude-sidecar", &storev1.EntryBatch{})
 
 	// Assert: the caller learns the LINK is gone, not merely that a write failed.
 	if err == nil {
@@ -202,7 +232,7 @@ func TestWriteErrorSurfacedWithoutAGlobalErrorLog(t *testing.T) {
 	c := New(shortSocket(t), logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
 
 	// Act
-	err := c.Write("shim-claude-sidecar", &agentshimv1.EntryBatch{})
+	err := c.Write("shim-claude-sidecar", &storev1.EntryBatch{})
 
 	// Assert
 	if err == nil {
@@ -227,7 +257,7 @@ func TestWriteNeverDialsImplicitly(t *testing.T) {
 	defer c.Close()
 
 	// Act
-	err = c.Write("shim-claude-sidecar", &agentshimv1.EntryBatch{})
+	err = c.Write("shim-claude-sidecar", &storev1.EntryBatch{})
 
 	// Assert
 	if !errors.Is(err, ErrNotConnected) {
@@ -235,35 +265,6 @@ func TestWriteNeverDialsImplicitly(t *testing.T) {
 	}
 	if c.Connected() {
 		t.Fatal("Write opened a producer connection; it must never dial")
-	}
-}
-
-func TestHeartbeatSendsAConnectionHeartbeatAndReadsTheEcho(t *testing.T) {
-	// Arrange
-	c, server := pipedClient(t, testLog())
-	served := make(chan error, 1)
-	go func() {
-		msg, err := wire.ReadAny(server)
-		if err != nil {
-			served <- err
-			return
-		}
-		if _, ok := msg.(*protocolv1.ConnectionHeartbeat); !ok {
-			served <- errors.New("expected ConnectionHeartbeat")
-			return
-		}
-		served <- wire.WriteAny(server, &protocolv1.ConnectionHeartbeat{SentAtMs: 1})
-	}()
-
-	// Act
-	err := c.Heartbeat()
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Heartbeat: %v", err)
-	}
-	if serveErr := <-served; serveErr != nil {
-		t.Fatalf("serve heartbeat echo: %v", serveErr)
 	}
 }
 
@@ -275,39 +276,6 @@ func TestHeartbeatOnADownConnectionIsAnErrorNotSilence(t *testing.T) {
 	// Act / Assert
 	if err := c.Heartbeat(); !errors.Is(err, ErrNotConnected) {
 		t.Fatalf("Heartbeat err = %v, want ErrNotConnected", err)
-	}
-}
-
-func TestHealthAcceptsACorrelatedHealthyStatus(t *testing.T) {
-	// Arrange
-	c, server := pipedClient(t, testLog())
-	served := make(chan error, 1)
-	go func() {
-		msg, err := wire.ReadAny(server)
-		if err != nil {
-			served <- err
-			return
-		}
-		check, ok := msg.(*protocolv1.HealthCheck)
-		if !ok {
-			served <- errors.New("expected HealthCheck")
-			return
-		}
-		served <- wire.WriteAny(server, &protocolv1.HealthStatus{RequestId: check.GetRequestId(), Healthy: true})
-	}()
-
-	// Act
-	err := c.Health("sidecar-health-test")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if serveErr := <-served; serveErr != nil {
-		t.Fatalf("serve HealthStatus: %v", serveErr)
-	}
-	if !c.Connected() {
-		t.Fatal("a healthy store dropped the producer connection")
 	}
 }
 
@@ -330,108 +298,6 @@ func TestHealthRequiresCorrelationID(t *testing.T) {
 	// Act / Assert
 	if err := c.Health(""); err == nil {
 		t.Fatal("Health accepted an empty request_id")
-	}
-}
-
-func TestHealthRejectsMismatchedResponseAndLogsContext(t *testing.T) {
-	// Arrange
-	var logs bytes.Buffer
-	c, server := pipedClient(t, logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
-	served := make(chan error, 1)
-	go func() {
-		msg, err := wire.ReadAny(server)
-		if err != nil {
-			served <- err
-			return
-		}
-		if _, ok := msg.(*protocolv1.HealthCheck); !ok {
-			served <- errors.New("expected HealthCheck")
-			return
-		}
-		served <- wire.WriteAny(server, &protocolv1.HealthStatus{
-			RequestId: "wrong-request",
-			Healthy:   true,
-		})
-	}()
-
-	// Act
-	err := c.Health("expected-request")
-
-	// Assert
-	if err == nil || !strings.Contains(err.Error(), "request_id") {
-		t.Fatalf("Health err = %v, want request_id mismatch", err)
-	}
-	if c.Connected() {
-		t.Fatal("mismatched HealthStatus left the producer connection established")
-	}
-	if serveErr := <-served; serveErr != nil {
-		t.Fatalf("serve HealthStatus: %v", serveErr)
-	}
-	if strings.Contains(logs.String(), `"level":"error"`) || strings.Contains(logs.String(), "wrong-request") {
-		t.Fatalf("storeclient globally logged caller-owned health mismatch: %q", logs.String())
-	}
-}
-
-func TestHealthRejectsUnhealthyResponseAndLogsReason(t *testing.T) {
-	// Arrange
-	var logs bytes.Buffer
-	c, server := pipedClient(t, logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
-	served := make(chan error, 1)
-	go func() {
-		if _, err := wire.ReadAny(server); err != nil {
-			served <- err
-			return
-		}
-		served <- wire.WriteAny(server, &protocolv1.HealthStatus{
-			RequestId: "health-unhealthy",
-			Healthy:   false,
-			Reason:    "database unavailable",
-		})
-	}()
-
-	// Act
-	err := c.Health("health-unhealthy")
-
-	// Assert
-	if err == nil || !strings.Contains(err.Error(), "database unavailable") {
-		t.Fatalf("Health err = %v, want store health reason", err)
-	}
-	if c.Connected() {
-		t.Fatal("unhealthy HealthStatus left the producer connection established")
-	}
-	if serveErr := <-served; serveErr != nil {
-		t.Fatalf("serve HealthStatus: %v", serveErr)
-	}
-	if strings.Contains(logs.String(), `"level":"error"`) || strings.Contains(logs.String(), "database unavailable") {
-		t.Fatalf("storeclient globally logged caller-owned unhealthy response: %q", logs.String())
-	}
-}
-
-func TestHealthRejectsAResponseThatIsNotAHealthStatus(t *testing.T) {
-	// Arrange: a peer that answers a health probe with something else has not
-	// asserted health, so the connection cannot be treated as proven.
-	c, server := pipedClient(t, testLog())
-	served := make(chan error, 1)
-	go func() {
-		if _, err := wire.ReadAny(server); err != nil {
-			served <- err
-			return
-		}
-		served <- wire.WriteAny(server, &protocolv1.ConnectionHeartbeat{SentAtMs: 1})
-	}()
-
-	// Act
-	err := c.Health("health-wrong-type")
-
-	// Assert
-	if err == nil || !strings.Contains(err.Error(), "expected HealthStatus") {
-		t.Fatalf("Health err = %v, want an expected-HealthStatus rejection", err)
-	}
-	if c.Connected() {
-		t.Fatal("a non-HealthStatus reply left the producer connection established")
-	}
-	if serveErr := <-served; serveErr != nil {
-		t.Fatalf("serve reply: %v", serveErr)
 	}
 }
 
@@ -463,5 +329,28 @@ func TestConnectEstablishesTheProducerConnectionWithoutAFrame(t *testing.T) {
 	}
 	if serveErr := <-served; serveErr != nil {
 		t.Fatalf("serve connect: %v", serveErr)
+	}
+}
+
+// A probe that CANNOT BE PERFORMED is not a healthy store. store.v1 declares no
+// health or heartbeat RPC, so both report the gap rather than passing — the one
+// answer that would let ingestion keep running against a link nothing tested.
+func TestHealthOnAConnectedStoreReportsTheMissingProbeRatherThanPassing(t *testing.T) {
+	// Arrange: an established connection, so only the missing frame is at issue.
+	c, _ := pipedClient(t, testLog())
+
+	// Act / Assert
+	if err := c.Health("sidecar-health-test"); !errors.Is(err, ErrNoHealthProbe) {
+		t.Fatalf("Health err = %v, want ErrNoHealthProbe", err)
+	}
+}
+
+func TestHeartbeatOnAConnectedStoreReportsTheMissingProbeRatherThanPassing(t *testing.T) {
+	// Arrange: an established connection, so only the missing frame is at issue.
+	c, _ := pipedClient(t, testLog())
+
+	// Act / Assert
+	if err := c.Heartbeat(); !errors.Is(err, ErrNoHealthProbe) {
+		t.Fatalf("Heartbeat err = %v, want ErrNoHealthProbe", err)
 	}
 }

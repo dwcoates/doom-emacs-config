@@ -1,7 +1,7 @@
 package handler
 
 import (
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -26,7 +26,7 @@ func NewWorkflowJournalHandler(log *logging.Bound) *WorkflowJournalHandler {
 }
 
 // Handle implements tail.Handler.
-func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*agentshimv1.Entry {
+func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
 	h.log.With(logging.Context{Operation: "journal-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
 		LogVerbose("handling frames=%d run_id=%q", len(frames), ctx.RunID)
 	// The run's identity is its run id where the path supplies one, and the task
@@ -36,7 +36,7 @@ func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*ag
 	if taskID == "" {
 		taskID = ctx.TaskID
 	}
-	var out []*agentshimv1.Entry
+	var out []*storev1.StoreEntry
 	for _, frame := range frames {
 		at := attribute(ctx, frame.Offset)
 		if frame.ParseErr != nil {
