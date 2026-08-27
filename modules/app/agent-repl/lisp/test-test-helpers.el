@@ -234,39 +234,40 @@ clean; BODY runs after the load with the same bindings still active."
   "A missing generated binding signals: silently reading nothing would make
 every vocabulary assertion built on it pass vacuously."
   ;; Act / Assert
-  (should-error (agent-repl-test--generated-go-text "agentshim/nope/v1/nope.pb.go")))
+  (should-error (agent-repl-test--generated-go-text "frontend/v1/nope.pb.go")))
 
 (ert-deftest agent-repl-test-helpers-generated-oneof-arms-reads-a-json-name ()
   "The reader recovers a multi-word arm's lowerCamelCase protojson name."
   ;; Act
   (let ((arms (agent-repl-test--generated-oneof-arms
-               "agentshim/frontend/v1/frame.pb.go" "FrontendCommand")))
+               "frontend/v1/sidebar.pb.go" "RosterRow")))
     ;; Assert
-    (should (member "hibernateWorkspace" arms))))
+    (should (member "idleAsync" arms))))
 
 (ert-deftest agent-repl-test-helpers-generated-oneof-arms-reads-a-bare-name ()
   "A single-word arm has no `json=' half, so its `name=' half must be read."
   ;; Act
   (let ((arms (agent-repl-test--generated-oneof-arms
-               "agentshim/frontend/v1/frame.pb.go" "FrontendFrame")))
+               "frontend/v1/sidebar.pb.go" "RosterRow")))
     ;; Assert
-    (should (member "snapshot" arms))))
+    (should (member "submitting" arms))))
 
 (ert-deftest agent-repl-test-helpers-generated-oneof-arms-are-message-scoped ()
-  "Arms are read per message: a command arm is not reported as a frame arm."
+  "Arms are read per message: a sibling message's arm is not reported here."
   ;; Act
   (let ((arms (agent-repl-test--generated-oneof-arms
-               "agentshim/frontend/v1/frame.pb.go" "FrontendFrame")))
+               "frontend/v1/sidebar.pb.go" "RosterRowWhen")))
     ;; Assert
-    (should-not (member "hibernateWorkspace" arms))))
+    (should (member "lastSelected" arms))
+    (should-not (member "idleAsync" arms))))
 
 (ert-deftest agent-repl-test-helpers-generated-enum-names-reads-a-value-name ()
   "The enum reader recovers a prefixed value name from the generated bindings."
   ;; Act
   (let ((names (agent-repl-test--generated-enum-names
-                "agentshim/core/v1/core.pb.go" "PROMPT_ORIGIN_")))
+                "shim/v1/prompt_origin.pb.go" "PROMPT_ORIGIN_")))
     ;; Assert
-    (should (member "PROMPT_ORIGIN_CACHE_KEEP_ALIVE" names))))
+    (should (member "PROMPT_ORIGIN_USER_SENT" names))))
 
 ;;;; ---- the quit-deferral test helpers -----------------------------------
 

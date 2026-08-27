@@ -953,8 +953,11 @@ metaprompt must NOT carry the old main-body emoji restriction."
   (should (= 1 (agent-repl-test--count-matches
                 "^### Markdown inline code for every code-like reference$"
                 agent-repl-command-prefix)))
+  ;; The MANDATE is stated once.  A later section may still POINT BACK at it
+  ;; ("still wrapped in markdown inline code per the section above"), which is
+  ;; a cross-reference rather than the restatement this test forbids.
   (should (= 1 (agent-repl-test--count-matches
-                "markdown inline code"
+                "MUST be wrapped in markdown inline code"
                 agent-repl-command-prefix))))
 
 (ert-deftest agent-repl-test-command-prefix-inline-code-forbids-escaped-backticks ()
