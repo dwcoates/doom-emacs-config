@@ -27,7 +27,7 @@
  */
 
 import { create } from "@bufbuild/protobuf";
-import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/shared_pb";
+import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/failure_pb";
 import type { FailureCardLifecycle, FailureCardView, FailureKind } from "./frontend-proto.js";
 import type { FailureCardItem } from "./store.js";
 
@@ -45,10 +45,24 @@ export const CLIENT_FAILURE_ARMS = [
   "controlPlaneFailed",
   "frameUndecodable",
   "staleBundle",
+] as const;
+export type ClientFailureArm = (typeof CLIENT_FAILURE_ARMS)[number];
+
+/**
+ * Arm names that no longer exist on `FailureKind` but still NAME A CARD.
+ *
+ * `command_unsent` and `command_rejection_unclassified` were deleted in the
+ * frontend.v1 redesign. A card can still be keyed on them — the uuid is this
+ * frontend's own reconciliation namespace, not a wire value — even though no
+ * card can be MINTED under them any more. They are listed separately so the
+ * distinction is not lost: a name here is a retired classification kept only so
+ * an existing card reconciles onto itself.
+ */
+export const RETIRED_CLIENT_FAILURE_ARMS = [
   "commandUnsent",
   "commandRejectionUnclassified",
 ] as const;
-export type ClientFailureArm = (typeof CLIENT_FAILURE_ARMS)[number];
+export type RetiredClientFailureArm = (typeof RETIRED_CLIENT_FAILURE_ARMS)[number];
 
 /** Whether an arm belongs to the band a frontend is allowed to mint. */
 export function isClientArm(arm: string): boolean {
@@ -74,7 +88,10 @@ function clientCard(
 }
 
 /** The uuid a client-minted card for ARM reconciles on. */
-export function clientFailureUuid(arm: ClientFailureArm, discriminator = ""): string {
+export function clientFailureUuid(
+  arm: ClientFailureArm | RetiredClientFailureArm,
+  discriminator = "",
+): string {
   return discriminator === "" ? `local:${arm}` : `local:${arm}:${discriminator}`;
 }
 
@@ -239,13 +256,14 @@ export function bootFailedFailure(err: unknown): FailureCardItem {
  * simply be retried once the socket is back.
  */
 export function commandUnsentFailure(command: string): FailureCardItem {
-  const kind = create(FailureKindSchema, { kind: { case: "commandUnsent", value: { command } } });
-  return clientCard(
-    kind,
-    `${command} was not sent: the connection to the daemon is down`,
-    "",
-    { case: "terminal" },
-    clientFailureUuid("commandUnsent", command),
+  // PROTO RECONCILIATION STUB. `FailureKind.command_unsent` was deleted in the
+  // frontend.v1 redesign and no surviving arm names "the frontend never got
+  // this command onto the wire". Minting under a different arm would be this
+  // end inventing a classification, so the path fails loudly instead: the
+  // condition still reaches somebody, it just cannot be drawn as a card until
+  // the schema names it again.
+  throw new Error(
+    `local-failure: ${command} was not sent, but FailureKind carries no arm for an unsent command`,
   );
 }
 
@@ -264,15 +282,10 @@ export function commandUnsentFailure(command: string): FailureCardItem {
  * card's to reword.
  */
 export function heldPromptUnsentFailure(queueId: string, reason: string): FailureCardItem {
-  const kind = create(FailureKindSchema, {
-    kind: { case: "commandUnsent", value: { command: "submitPrompt" } },
-  });
-  return clientCard(
-    kind,
-    "a prompt held across the backend restart was never sent",
-    reason,
-    { case: "terminal" },
-    clientFailureUuid("commandUnsent", `held:${queueId}`),
+  // PROTO RECONCILIATION STUB — see `commandUnsentFailure`. The arm this card
+  // was minted under (`FailureKind.command_unsent`) no longer exists.
+  throw new Error(
+    `local-failure: held prompt ${queueId} was never sent (${reason}), but FailureKind carries no arm for an unsent command`,
   );
 }
 
@@ -290,19 +303,13 @@ export function commandRejectionUnclassifiedFailure(
   command: string,
   daemonReason: string,
 ): FailureCardItem {
-  const kind = create(FailureKindSchema, {
-    kind: { case: "commandRejectionUnclassified", value: { command, daemonReason } },
-  });
-  // THE DAEMON'S OWN WORDS LEAD when it gave any. It decided this refusal, and
-  // the sentence it wrote is the closest thing to an account there is; a
-  // composed "<command> was refused" is the fallback for a refusal that came
-  // with nothing at all, not a replacement for prose the daemon supplied.
-  return clientCard(
-    kind,
-    daemonReason === "" ? `${command} was refused` : daemonReason,
-    `command=${command}`,
-    { case: "terminal" },
-    clientFailureUuid("commandRejectionUnclassified", command),
+  // PROTO RECONCILIATION STUB. `FailureKind.command_rejection_unclassified`
+  // was deleted in the frontend.v1 redesign. The daemon's prose is still the
+  // only account of the refusal, so it is carried into the throw rather than
+  // dropped; what cannot be done is drawing it as a card under an arm that
+  // does not exist.
+  throw new Error(
+    `local-failure: ${command} was refused (${daemonReason === "" ? "no reason given" : daemonReason}), but FailureKind carries no arm for an unclassified refusal`,
   );
 }
 

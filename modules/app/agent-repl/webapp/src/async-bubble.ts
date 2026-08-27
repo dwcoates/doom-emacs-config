@@ -44,46 +44,28 @@
  * same reason.
  */
 
-import {
-  DetachedWorkAgentSchema,
-  DetachedWorkAgentUpdateSchema,
-  DetachedWorkSchema,
-  DetachedWorkUpdateSchema,
-  DetachedWorkFoldSchema,
-  DetachedWorkLiveSchema,
-  DetachedWorkLivenessSchema,
-  DetachedWorkLivenessUpdateSchema,
-  DetachedWorkMergeSchema,
-  DetachedWorkOutcomeDoneSchema,
-  DetachedWorkOutcomeErrorSchema,
-  DetachedWorkOutcomeKilledSchema,
-  DetachedWorkOutputAppendSchema,
-  DetachedWorkOutputSpoolSchema,
-  DetachedWorkSettledSchema,
-  DetachedWorkShellSchema,
-  DetachedWorkShellExitSchema,
-  DetachedWorkSkillBodyResolvedSchema,
-  DetachedWorkSkillSchema,
-  DetachedWorkSkillUpdateSchema,
-  DetachedWorkUnclassifiedSchema,
-  DetachedWorkJournalRowSchema,
-  DetachedWorkJournalSchema,
-  DetachedWorkJournalUpdateSchema,
-  DetachedWorkStepDoneSchema,
-  DetachedWorkStepFailedSchema,
-  DetachedWorkStepRunningSchema,
-  type DetachedWork as GeneratedDetachedWork,
-  type DetachedWorkUpdate as GeneratedDetachedWorkUpdate,
-  type DetachedWorkLiveness as GeneratedDetachedWorkLiveness,
-  type DetachedWorkSettled as GeneratedDetachedWorkSettled,
-  type DetachedWorkSkillUpdate as GeneratedDetachedWorkSkillUpdate,
-  type DetachedWorkJournalRow as GeneratedDetachedWorkJournalRow,
-} from "../../proto/gen/ts/frontend/v1/feed_pb";
+/*
+ * PROTO RECONCILIATION NOTE (frontend.v1 redesign).
+ *
+ * Every `frontend.v1.DetachedWork*` message this module was anchored to was
+ * DELETED. The feed now carries detached work as `FeedDetachedShell` /
+ * `FeedDetachedSubagent` rows on `FeedRow`, which is a different structure
+ * rather than a rename: there is no message whose field set these tables could
+ * be re-checked against without first deciding how the new rows map onto this
+ * decoder's vocabulary, and that is a design decision.
+ *
+ * The decode tables below therefore keep their exact key sets — the runtime
+ * strictness they buy (`rejectUnknown` still refuses an unrecognized field, and
+ * every scalar accessor still throws on a type mismatch) is UNCHANGED — but
+ * invariant I5's build-time anchor is gone until the port lands. They are
+ * spelled with an explicit `string` field domain so the loss is visible here
+ * rather than silently inferred.
+ */
 import { unwrapAgentEmission, type UnwrappedEmission } from "./agent-emission.js";
 import {
   ensureArray,
   ensureObject,
-  generatedFieldSet,
+  unanchoredFieldSet,
   int64OrZero,
   num,
   offset,
@@ -168,7 +150,7 @@ export interface AsyncOutputSpool {
 export interface AsyncWorkflowJournalRow {
   label: string;
   detail: string;
-  status: ArmKeys<GeneratedDetachedWorkJournalRow["status"]>;
+  status: string;
 }
 
 /** A detached agent: a whole conversation happening elsewhere. */
@@ -430,29 +412,29 @@ export const UPDATE_ARM_KIND: Readonly<Record<Exclude<AsyncBubbleUpdateCase, "li
  * Identity and containment arrive on the message envelope instead — see
  * {@link DetachedWorkPackaging}.
  */
-const BUBBLE_KEYS = generatedFieldSet<keyof typeof DetachedWorkSchema.field>()("workspace", "originToolUseId", "label", "startedAtMs", "liveness", "agent", "journal", "shell", "unclassified", "merge", "skill");
-const AGENT_BUBBLE_KEYS = generatedFieldSet<keyof typeof DetachedWorkAgentSchema.field>()("emissions", "fold");
-const JOURNAL_KEYS = generatedFieldSet<keyof typeof DetachedWorkJournalSchema.field>()("rows", "fold");
-const SHELL_BUBBLE_KEYS = generatedFieldSet<keyof typeof DetachedWorkShellSchema.field>()("command", "output");
-const UNCLASSIFIED_BUBBLE_KEYS = generatedFieldSet<keyof typeof DetachedWorkUnclassifiedSchema.field>()("toolName", "output");
-const MERGE_BUBBLE_KEYS = generatedFieldSet<keyof typeof DetachedWorkMergeSchema.field>()("emissions", "fold");
-const SKILL_BUBBLE_KEYS = generatedFieldSet<keyof typeof DetachedWorkSkillSchema.field>()("skillName", "args", "body", "emissions", "fold");
-const SPOOL_KEYS = generatedFieldSet<keyof typeof DetachedWorkOutputSpoolSchema.field>()("text", "throughOffset");
-const JOURNAL_ROW_KEYS = generatedFieldSet<keyof typeof DetachedWorkJournalRowSchema.field>()("label", "detail", "running", "done", "failed");
-const LIVENESS_KEYS = generatedFieldSet<keyof typeof DetachedWorkLivenessSchema.field>()("live", "settled");
-const LIVE_KEYS = generatedFieldSet<keyof typeof DetachedWorkLiveSchema.field>()("lastActivityMs");
-const SETTLED_KEYS = generatedFieldSet<keyof typeof DetachedWorkSettledSchema.field>()("settledAtMs", "shellExit", "done", "error", "killed");
-const SHELL_EXIT_KEYS = generatedFieldSet<keyof typeof DetachedWorkShellExitSchema.field>()("code");
-const OUTCOME_ERROR_KEYS = generatedFieldSet<keyof typeof DetachedWorkOutcomeErrorSchema.field>()("message");
-const OUTCOME_KILLED_KEYS = generatedFieldSet<keyof typeof DetachedWorkOutcomeKilledSchema.field>()("reason");
-const FOLD_KEYS = generatedFieldSet<keyof typeof DetachedWorkFoldSchema.field>()("droppedBefore", "tailCap");
-const UPDATE_KEYS = generatedFieldSet<keyof typeof DetachedWorkUpdateSchema.field>()("messageId", "agent", "journal", "shell", "unclassified", "liveness", "merge", "skill");
-const AGENT_UPDATE_KEYS = generatedFieldSet<keyof typeof DetachedWorkAgentUpdateSchema.field>()("emissions", "fold");
-const SKILL_UPDATE_KEYS = generatedFieldSet<keyof typeof DetachedWorkSkillUpdateSchema.field>()("body", "emissions");
-const SKILL_BODY_RESOLVED_KEYS = generatedFieldSet<keyof typeof DetachedWorkSkillBodyResolvedSchema.field>()("contents");
-const JOURNAL_UPDATE_KEYS = generatedFieldSet<keyof typeof DetachedWorkJournalUpdateSchema.field>()("rows", "fold");
-const OUTPUT_APPEND_KEYS = generatedFieldSet<keyof typeof DetachedWorkOutputAppendSchema.field>()("text", "fromOffset");
-const LIVENESS_UPDATE_KEYS = generatedFieldSet<keyof typeof DetachedWorkLivenessUpdateSchema.field>()("liveness");
+const BUBBLE_KEYS = unanchoredFieldSet("workspace", "originToolUseId", "label", "startedAtMs", "liveness", "agent", "journal", "shell", "unclassified", "merge", "skill");
+const AGENT_BUBBLE_KEYS = unanchoredFieldSet("emissions", "fold");
+const JOURNAL_KEYS = unanchoredFieldSet("rows", "fold");
+const SHELL_BUBBLE_KEYS = unanchoredFieldSet("command", "output");
+const UNCLASSIFIED_BUBBLE_KEYS = unanchoredFieldSet("toolName", "output");
+const MERGE_BUBBLE_KEYS = unanchoredFieldSet("emissions", "fold");
+const SKILL_BUBBLE_KEYS = unanchoredFieldSet("skillName", "args", "body", "emissions", "fold");
+const SPOOL_KEYS = unanchoredFieldSet("text", "throughOffset");
+const JOURNAL_ROW_KEYS = unanchoredFieldSet("label", "detail", "running", "done", "failed");
+const LIVENESS_KEYS = unanchoredFieldSet("live", "settled");
+const LIVE_KEYS = unanchoredFieldSet("lastActivityMs");
+const SETTLED_KEYS = unanchoredFieldSet("settledAtMs", "shellExit", "done", "error", "killed");
+const SHELL_EXIT_KEYS = unanchoredFieldSet("code");
+const OUTCOME_ERROR_KEYS = unanchoredFieldSet("message");
+const OUTCOME_KILLED_KEYS = unanchoredFieldSet("reason");
+const FOLD_KEYS = unanchoredFieldSet("droppedBefore", "tailCap");
+const UPDATE_KEYS = unanchoredFieldSet("messageId", "agent", "journal", "shell", "unclassified", "liveness", "merge", "skill");
+const AGENT_UPDATE_KEYS = unanchoredFieldSet("emissions", "fold");
+const SKILL_UPDATE_KEYS = unanchoredFieldSet("body", "emissions");
+const SKILL_BODY_RESOLVED_KEYS = unanchoredFieldSet("contents");
+const JOURNAL_UPDATE_KEYS = unanchoredFieldSet("rows", "fold");
+const OUTPUT_APPEND_KEYS = unanchoredFieldSet("text", "fromOffset");
+const LIVENESS_UPDATE_KEYS = unanchoredFieldSet("liveness");
 
 /**
  * The EMPTY marker messages, each anchored to its own generated stub.
@@ -464,10 +446,10 @@ const LIVENESS_UPDATE_KEYS = generatedFieldSet<keyof typeof DetachedWorkLiveness
  * `EMPTY_KEY_SET` precisely so each message's emptiness is asserted
  * independently.
  */
-const STEP_RUNNING_KEYS = generatedFieldSet<keyof typeof DetachedWorkStepRunningSchema.field>()();
-const STEP_DONE_KEYS = generatedFieldSet<keyof typeof DetachedWorkStepDoneSchema.field>()();
-const STEP_FAILED_KEYS = generatedFieldSet<keyof typeof DetachedWorkStepFailedSchema.field>()();
-const OUTCOME_DONE_KEYS = generatedFieldSet<keyof typeof DetachedWorkOutcomeDoneSchema.field>()();
+const STEP_RUNNING_KEYS = unanchoredFieldSet();
+const STEP_DONE_KEYS = unanchoredFieldSet();
+const STEP_FAILED_KEYS = unanchoredFieldSet();
+const OUTCOME_DONE_KEYS = unanchoredFieldSet();
 
 /** Each journal step status arm → the anchored key set proving it is empty. */
 const JOURNAL_STATUS_KEYS: Readonly<Record<AsyncWorkflowJournalRow["status"], ReadonlySet<string>>> = {
@@ -477,17 +459,17 @@ const JOURNAL_STATUS_KEYS: Readonly<Record<AsyncWorkflowJournalRow["status"], Re
 };
 
 /** The bubble `kind` arm keys, typed against the generated oneof. */
-const BUBBLE_KIND_ARMS = ["agent", "journal", "shell", "unclassified", "merge", "skill"] as const satisfies readonly ArmKeys<GeneratedDetachedWork["kind"]>[];
+const BUBBLE_KIND_ARMS = ["agent", "journal", "shell", "unclassified", "merge", "skill"] as const satisfies readonly string[];
 /** The update arm keys, typed against the generated oneof. */
-const UPDATE_ARMS = ["agent", "journal", "shell", "unclassified", "liveness", "merge", "skill"] as const satisfies readonly ArmKeys<GeneratedDetachedWorkUpdate["update"]>[];
+const UPDATE_ARMS = ["agent", "journal", "shell", "unclassified", "liveness", "merge", "skill"] as const satisfies readonly string[];
 /** The skill update's own arm keys, typed against the generated oneof. */
-const SKILL_UPDATE_ARMS = ["body", "emissions"] as const satisfies readonly ArmKeys<GeneratedDetachedWorkSkillUpdate["update"]>[];
+const SKILL_UPDATE_ARMS = ["body", "emissions"] as const satisfies readonly string[];
 /** The liveness state arms, typed against the generated oneof. */
-const LIVENESS_ARMS = ["live", "settled"] as const satisfies readonly ArmKeys<GeneratedDetachedWorkLiveness["state"]>[];
+const LIVENESS_ARMS = ["live", "settled"] as const satisfies readonly string[];
 /** The settled outcome arms, typed against the generated oneof. */
-const OUTCOME_ARMS = ["done", "error", "killed"] as const satisfies readonly ArmKeys<GeneratedDetachedWorkSettled["outcome"]>[];
+const OUTCOME_ARMS = ["done", "error", "killed"] as const satisfies readonly string[];
 /** The journal row status arms, typed against the generated oneof. */
-const JOURNAL_STATUS_ARMS = ["running", "done", "failed"] as const satisfies readonly ArmKeys<GeneratedDetachedWorkJournalRow["status"]>[];
+const JOURNAL_STATUS_ARMS = ["running", "done", "failed"] as const satisfies readonly string[];
 
 // --- decoders ---------------------------------------------------------------
 

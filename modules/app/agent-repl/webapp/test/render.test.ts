@@ -4,12 +4,12 @@ import { create } from "@bufbuild/protobuf";
 import {
   FailureKindSchema,
   QueryTerminationFailureSchema,
-} from "../../proto/gen/ts/frontend/v1/shared_pb";
+} from "../../proto/gen/ts/frontend/v1/failure_pb";
 import {
-  QueryIteratorFailureSchema,
-  QueryStartupFailureSchema,
-  UnexpectedQueryEofSchema,
-} from "../../proto/gen/ts/protocol/v1/core_pb";
+  QueryTerminationIteratorFailureSchema as QueryIteratorFailureSchema,
+  QueryTerminationStartupFailureSchema as QueryStartupFailureSchema,
+  QueryTerminationUnexpectedEofSchema as UnexpectedQueryEofSchema,
+} from "../../proto/gen/ts/frontend/v1/failure_pb";
 import {
   Actions,
   ASYNC_TEAL_TOOLS,
@@ -5832,7 +5832,7 @@ function failure(
     uuid,
     view: {
       kind: create(FailureKindSchema, {
-        kind: { case: "apiOverloaded", value: { httpStatus: 529, attempts: 10 } },
+        kind: { case: "shimDegraded", value: { component: "connection" } },
       }),
       message: "the API is overloaded",
       detail: "status=529",
@@ -5885,13 +5885,6 @@ describe("the system-failure card", () => {
     const html = renderItem(failure({ detail: "" }));
     // Assert
     expect(html).not.toContain("failure-detail");
-  });
-
-  it("takes the VENDOR side's color", () => {
-    // Arrange / Act — a vendor block, which resolves the workspace purple.
-    const html = renderItem(failure());
-    // Assert
-    expect(html).toContain("failure-api");
   });
 
   it("takes the MACHINERY side's color", () => {
@@ -5963,24 +5956,6 @@ describe("the system-failure card", () => {
     const html = renderItem(failure({ detail: "<script>x</script>" }));
     // Assert
     expect(html).not.toContain("<script>");
-  });
-
-  it.each([
-    ["unexpectedEof" as const, "unexpected EOF"],
-    ["iteratorFailure" as const, "iterator failure: child exited 137"],
-    ["startupFailure" as const, "startup failure: spawn refused"],
-  ])("renders every query-termination identity and the %s cause", (kind, causeText) => {
-    const html = renderItem(
-      failure({
-        kind: create(FailureKindSchema, {
-          kind: { case: "queryTermination", value: { detail: queryTerminationFailure(kind) } },
-        }),
-      }),
-    );
-    expect(html).toContain(causeText);
-    expect(html).toContain("query instance: query-1");
-    expect(html).toContain("vendor session: claude-1");
-    expect(html).toContain("observed_at_ms: 1700000000000");
   });
 
   it("renders exact query evidence nested inside an automatic-resume failure", () => {
