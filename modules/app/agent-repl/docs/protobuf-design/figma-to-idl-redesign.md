@@ -328,6 +328,28 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### Ruling batch: STOP-4's feed specializations land; RETRACT-10 recorded as a drop; four items found already wave-resolved
+
+**STOP-4 ("you can take it home yourself").** ALL THREE conversation-side
+arms turned out already wave-landed (ApiBillingError 11,
+ApiOauthOrgNotAllowed 12, ApiModelNotFound 13); what was genuinely missing
+was the frontend respell — FeedTurnEndedErrored gains billing_error /
+model_not_found / oauth_org_not_allowed (14-16): no new UI family, just new
+cause arms on the existing turn-terminal error card, per the user's rule
+that specializations of existing feed error cards ride the existing route.
+
+**RETRACT-10 recorded.** The vendor's cancel_async_message control verb is
+DROPPED under the standing "the daemon is the only queue" ruling — the
+vendor's own queue is never ours to manage, so a verb cancelling one of its
+entries has no consumer; recorded against this verb by name.
+
+**Found already resolved by the SIMPLE-ADD wave during this batch**:
+USAGE-8 (TokenFallbackCredit), SESS-12 (fast-mode cooldown), AGENT-6
+(SessionBackgroundTasks 19), and STOP-4's conversation half. USAGE-1
+(money) is NOT resolved in the user's eyes — the wave LANDED RunCost while
+the user's position is that money should not be in the API at all; routed
+to the wave review.
+
 ### The DEFERRED metadocument opens — the new-family singles are parked, not judged
 
 **The user's instruction.** Surfaces learned about but deliberately not
