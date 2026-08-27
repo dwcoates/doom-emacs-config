@@ -587,3 +587,39 @@ anywhere. The contract needs no change either way (the detachment cause
 oneof is producer-noted, and task identity rides tool_use_id); the live
 observation moves to the implementation wave. **Status: RUN — frame set
 indicative; task_started question travels to implementation.**
+
+### Item 6 FINDINGS (run 2026-08-27)
+
+REFUTED as two facts, documentation-grade (206 real answer payloads): the
+wire carries exactly {questions, answers, annotations}; `answers` is ONE
+string per question, and a selection-plus-typed-text arrives as a single
+comma-joined string structurally indistinguishable from a multi-select
+label join; `annotations` only ever echoes model-authored option previews,
+never a user note. CONSEQUENCE RAISED (user ruling owed): the landed answer
+shape's distinct note element (`AgentQuestionNote`) has NO distinguishable
+producer — options are demoting the note to a producer-unfilled optional,
+or removing it and carrying the joined string as the answer.
+**Status: RUN — findings recorded; ruling owed.**
+
+### Item 7 FINDINGS (run 2026-08-27)
+
+CONFIRMED, documentation-grade: a mid-turn user prompt CAN be delivered
+into the running turn (folded as a queued_command attachment at a tool
+round — observed with real prompts), and an unfolded prompt queues and
+runs as its own coalesced turn after, individually cancellable until
+dequeued. The fold-vs-queue selection policy is undeclared (indicative
+only) — the daemon must treat delivery point as the producer's choice,
+which the landed queue design already does. **Status: RUN — assumption
+holds.**
+
+### Item 8 FINDINGS (run 2026-08-27)
+
+CONFIRMED in principle, documentation-grade: resume consumes ONLY the
+on-disk JSONL transcript (SessionStore.load materializes to a temp file and
+"the subprocess resumes from that file"); entries need deep-equality, not
+byte-equality; uuid chains are what resume walks. The exact required-field
+union is explicitly CLI-internal and undocumented — a shim-written
+transcript must mimic observed lines, and validating that is an
+implementation-wave experiment (rides with deferred item 5's capture
+harness). **Status: RUN — premise holds; field-set validation travels to
+implementation.**
