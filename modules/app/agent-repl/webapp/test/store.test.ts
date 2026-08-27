@@ -36,7 +36,7 @@ import type {
 import type { CounterEntry } from "../src/counter-menu.js";
 import type { ModelUsage, Usage } from "../src/protocol.js";
 import { create } from "@bufbuild/protobuf";
-import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/shared_pb";
+import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/failure_pb";
 import { CONNECTIVITY_WINDOW_KINDS } from "../src/failure-card.js";
 
 // The store's ONLY ingestion path after the agent-shim cutover: it folds
