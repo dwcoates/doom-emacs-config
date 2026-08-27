@@ -328,6 +328,26 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### TOOLIO-27 and SESS-13 join the exempt set — the ruling batch closes
+
+**TOOLIO-27 ("let's NOT model this").** The background-shell peek (a Bash
+call re-addressed at a running shell's id, returning a snapshot of its
+output so far) is EXEMPT: dropped at the shim, never AgentUnmodeled — the
+same bytes already reach the bubble via the spool, the TaskOutput
+precedent. The stale "no producer states an exit code" comment correction
+is folded into the wave review's scope.
+
+**SESS-13 ("let's forget it then").** The undocumented `mode` disk line
+(always "normal", 2,669 observed, meaning unknown) is EXEMPT as a record:
+the store's unparsed-residue arm keeps the raw line and nothing else ever
+sees it.
+
+**The 14-item ruling batch is CLOSED.** Every item is landed, recorded as a
+drop, exempt, or routed to the wave review (USAGE-1's already-deleted money
+fields; the exit-code comment). Remaining before the design-complete gate:
+the 19 RESTRUCTURE gaps, CTRL-8's bespoke-per-command program, and the
+SIMPLE-ADD wave's orchestrator review.
+
 ### MONEY LEAVES THE API (USAGE-1); IDENT-17/AGENT-12/CTRL-13 settled; USAGE-9 found wave-resolved
 
 **USAGE-1, the user's ruling ("delete the cost field... It shouldnt be
