@@ -7750,3 +7750,12 @@ context_budget is LOWEST (shown only when nothing else stands). The
 earlier partial placements (context_budget under idle+thinking only) are
 superseded — a warning suppressed by unrepresentability would be silently
 dropped, not outranked.
+
+### The PUSH-CADENCE convention is stated once in the schema
+
+The user asked for the update-cadence picture and approved it as the
+standing rule, now stated on FooterView (and named as the convention for
+every frontend.v1 view): EVENT-DRIVEN, WHOLE-VIEW, NO TICKS — push whole
+on any resolved change, push nothing on no change (the keepalive
+retraction restated), client-side ticking from shipped instants, bursts
+coalescible because the wire carries states, not events.
