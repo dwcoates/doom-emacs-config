@@ -7310,3 +7310,11 @@ missing — the card shows no elapsed figure rather than a ticking or invented
 one. The failure text itself needs NO new shape: `FeedToolCallReturned.failed`
 already draws the error content through the same output forms, which is
 exactly where `AgentToolFailure.content` resolves.
+
+### `frontend/v1/mcp_panel.proto`: the `disabled` badge completes the health projection
+
+`SessionMcpServer` (conversation) carries connected | failed | needs_auth |
+pending | disabled; the /mcp panel row drew only the first four, so a
+configured-but-switched-off server had no honest rendering. `McpPanelDisabled
+disabled = 6` closes it — empty, the arm is the badge, WEBAPP owns the
+treatment.
