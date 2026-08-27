@@ -7299,3 +7299,14 @@ has one: `FeedTurnErrorMaxOutputTokens max_output_tokens = 17`, empty, the
 vendor's wording on the envelope's message element. DISTINCT from
 `max_tokens` (11): that response was cut at the ceiling mid-arrival, this
 request was refused outright and retrying it unchanged cannot succeed.
+
+### `frontend/v1/feed.proto`: the settled tool card gets its frozen clock
+
+The SIMPLE-ADD wave's `AgentActivitySettledAt` (kept at review: it completes
+the landed tool cards) now has its drawn half: `FeedToolCallReturned.runtime`
+(9), a daemon-composed sentence ("ran 4.2 s") from the call's start and
+settle instants, drawn beside the ok/err badge. UNSET when either instant is
+missing — the card shows no elapsed figure rather than a ticking or invented
+one. The failure text itself needs NO new shape: `FeedToolCallReturned.failed`
+already draws the error content through the same output forms, which is
+exactly where `AgentToolFailure.content` resolves.
