@@ -7811,3 +7811,18 @@ protoc-gen-connect-go joins the Makefile's go target, because
 protoc-gen-go emits message types only and NOTHING could serve the three
 Connect services — agentreplv1connect/shimv1connect/storev1connect
 handler interfaces now generate.
+
+### SubmitPrompt gains its FIRST refusal arm: merge-in-flight is an ERROR, never a hold
+
+Settled during the daemon architecture planning (a sanctioned post-freeze
+increment): a prompt arriving AFTER a merge began is REFUSED outright —
+once the workspace merges it closes, so post-merge-start work would be
+orphaned; holding it would promise a delivery that loses work. Prompts
+already held when the merge began stay held (the dequeue offer resolves
+their fate). This upholds the old daemon's mergepromptgate refusal at
+contract level and lands SubmitPromptError's first derived reason arm
+(merging, empty — the footer and merge bubble already show which merge).
+Consequence for the daemon architecture: the occupancy-lease projection
+gains PER-HOLDER REFUSAL POLICY — the merge lease projects to
+error-on-new-submission; restart-pending and shutdown-drain project to
+holds.

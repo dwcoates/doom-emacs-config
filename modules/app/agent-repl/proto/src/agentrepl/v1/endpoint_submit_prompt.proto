@@ -91,10 +91,21 @@ message SubmitPromptCommandPanel {
   }
 }
 
-// The submission was refused. EMPTY ON PURPOSE — an empty oneof is not legal
-// proto, so the `reason` oneof is added WITH its first arms at this
-// endpoint's 3c turn, DERIVED from the daemon's real refusal sites (e.g. no
-// session, merge lease held, drain refusing) and spelled per the 3b
-// conventions.
+// The submission was refused. The reason oneof gains further arms as they
+// are derived from the daemon's real refusal sites.
 message SubmitPromptError {
+  // WHY the submission was refused.
+  oneof reason {
+    // A merge is in flight for this workspace, and the prompt arrived
+    // AFTER the merge began. It is refused outright rather than held:
+    // once the workspace merges, it closes, so work produced by a
+    // post-merge-start prompt would be orphaned. Prompts already held
+    // when the merge began stay held and are unaffected. The composer
+    // keeps the text; the user resubmits after the merge resolves.
+    SubmitPromptRefusedMerging merging = 1;
+  }
 }
+// The merge-in-flight refusal. Empty: the set arm is the whole assertion —
+// the footer's merging status and the feed's merge bubble already show
+// which merge, so the refusal carries no duplicate account of it.
+message SubmitPromptRefusedMerging {}
