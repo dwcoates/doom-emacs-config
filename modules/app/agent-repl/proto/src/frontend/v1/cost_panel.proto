@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// THE /cost PANEL: what the session cost, as label/value rows. Opened by the
+// /cost command's programmatic handling; the daemon resolves every row (the
+// vendor's structured usage answer is the source) and the WEBAPP owns the
+// panel's rendering.
+message CostPanelView {
+  // In render order; the daemon omits rows it has no value for.
+  repeated CostPanelRow rows = 1;
+}
+// One row: a label and the value beside it. String values on purpose — the
+// daemon formats, the client never re-derives.
+message CostPanelRow {
+  // As shown ("API time", "Wall time").
+  string label = 1;
+  // As shown; never empty — the daemon omits a row it has no value for.
+  string value = 2;
+}

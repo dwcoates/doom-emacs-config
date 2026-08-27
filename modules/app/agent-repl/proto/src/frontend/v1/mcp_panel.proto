@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// THE /mcp PANEL: each MCP server and where it stands, from the vendor's
+// structured status answer. Daemon-resolved; the WEBAPP owns the rendering.
+message McpPanelView {
+  // In the daemon's order.
+  repeated McpPanelRow rows = 1;
+}
+// One server's line.
+message McpPanelRow {
+  // The server's name, drawn verbatim.
+  string name = 1;
+  // Where it stands; the set arm picks the badge.
+  oneof status {
+    McpPanelConnected connected = 2;
+    McpPanelFailed failed = 3;
+    McpPanelNeedsAuth needs_auth = 4;
+    McpPanelPending pending = 5;
+  }
+}
+// Connected and serving. Empty: the arm is the badge.
+message McpPanelConnected {}
+// Failed to connect.
+message McpPanelFailed {
+  // The failure detail, verbatim from the vendor. UNSET when it gave none.
+  optional McpPanelFailedDetail detail = 1;
+}
+// The failure detail element.
+message McpPanelFailedDetail {
+  // The text, drawn verbatim.
+  string text = 1;
+}
+// Awaiting authentication. Empty: the arm is the badge.
+message McpPanelNeedsAuth {}
+// Still starting. Empty: the arm is the badge.
+message McpPanelPending {}

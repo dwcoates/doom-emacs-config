@@ -328,6 +328,38 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### CTRL-8 closes — seven command panels land, vendor-verified; the daemon owns the fill, the webapp owns the rendering
+
+**The user's model.** frontend.v1 declares the panel SHAPES; "the daemon at
+implementation time can determine how to fit to them" (which vendor route
+fills each is a daemon implementation decision, recorded here as guidance,
+never contract); and the WEBAPP has the agency to determine each panel's
+rendering — the shapes carry resolved data, not layout.
+
+**Vendor verification (Opus, SDK types + corpus + docs) trimmed the sketch's
+13 arms to 7.** PRODUCIBLE and landed, each its own component file:
+CostPanelView + UsagePanelView (label/value rows; source: the control
+channel's usage answer — EXPERIMENTAL, see the vetting item), TodosPanelView
+(pending|running|completed rows; filled from the DAEMON'S OWN tracker state,
+no vendor route needed), AgentsPanelView (name + optional description;
+supportedAgents), McpPanelView (name + connected|failed{detail}|needs_auth|
+pending; mcpServerStatus), ContextPanelView (heading'd sections of
+label/tokens/share/depth rows; getContextUsage), HelpPanelView (command +
+optional description; supportedCommands — the full help text has no route).
+SubmitPromptCommandPanel.panel grows arms 2-8.
+
+**DROPPED as interactive-only/unproducible headlessly, each verified**:
+/doctor, /hooks, /release-notes, /export (no SDK surface at all), /memory
+(only paths recoverable, an editor otherwise), /permissions (no read route —
+setPermissionMode is write-only). The sketched DoctorPanelView and
+DocumentPanelView die with them. A dropped command that later gains a vendor
+route is a new arm.
+
+**No-panel commands restated**: /clear + /compact (the context-cut row is
+the outcome), /model (topbar), and the act/flow commands (login, logout,
+exit, resume, add-dir, config, output-style, vim, statusline,
+terminal-setup, privacy-settings, rewind, bug).
+
 ### RESTRUCTURE batch 2 lands — trigger facts co-exist; the tracker forks its own vocabulary; live/stopped-work lists are CONNECTION facts; the session id names its space
 
 **CTRL-15 ("(a) is fine").** AgentPermissionTrigger's either/or becomes
