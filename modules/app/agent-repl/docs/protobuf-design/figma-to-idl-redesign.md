@@ -352,7 +352,10 @@ carries no cause. NOPROD-6 CONFIRMED (async completion carries at most one
 OPTIONAL total_tokens scalar vs the sync path's full four-field usage) —
 remediation agreed: the split lives at AgentSubagentTotals' usage FIELD as
 a two-arm oneof (full | total-only), the shared api.proto TokenUsage
-untouched; landing next.
+untouched; LANDED: AgentSubagentTotals.usage becomes oneof { TokenUsage
+full (sync) | AgentSubagentAsyncUsage total_only { optional total_tokens —
+absence means unreported, never zero } (async) }, the set arm stating the
+spawn path's honesty at the field.
 
 ### ATTACH-7 lands — the vendor's context-budget warning as a footer activity line
 
