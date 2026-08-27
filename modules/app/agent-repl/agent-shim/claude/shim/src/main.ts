@@ -34,15 +34,7 @@ import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { bindLog, configureLog, emergencyStderr } from "./uds/log.js";
-import {
-  UdsSession,
-  isQueryTerminationCleanupError,
-  isQueryTerminationPersistenceError,
-  isUnexpectedSdkStreamTerminationError,
-  type UdsQuery,
-} from "./uds/uds-session.js";
 import { acquireSessionLock, acquireWorkspaceLock } from "./uds/session-lock.js";
-import { SessionSource } from "./uds/proto.js";
 import { FAKE_COMMANDS, createFakeQuery } from "./fake-query.js";
 import { importRealSDK } from "./vendor-guard.js";
 import { normalizeOptionalModel } from "./model.js";
@@ -64,6 +56,28 @@ import {
   SdkUserMessageLike,
   SessionDeps,
 } from "./session.js";
+
+/**
+ * The one query a shim session owns, as the entrypoint constructs it.
+ *
+ * THIS TYPE USED TO LIVE IN `src/uds/uds-session.ts`, which spoke the deleted
+ * `protocol.v1` framed-`Event` contract and is gone with it. The shape itself
+ * describes only the VENDOR side -- an SDK stream, a usage read and the abort
+ * capability -- and none of it was schema-derived, so it is kept verbatim here
+ * rather than deleted along with its former home. Whoever implements `shim.v1`
+ * moves it wherever the new session implementation wants it.
+ */
+export interface UdsQuery {
+  query: QueryLike;
+  /** Read Claude subscription rate-limit state through the live query. */
+  subscriptionUsage(): Promise<SubscriptionUsageResponse>;
+  abort(): void;
+  /**
+   * Ends a fake SDK stream after the daemon handshake but before readiness.
+   * Production SDK queries never expose this test seam.
+   */
+  failDuringBringUp?: () => void;
+}
 
 /** Stable operation labels for shim-entrypoint telemetry queries and tests. */
 export const MAIN_LIFECYCLE_OPERATION = "shim.main.lifecycle";
@@ -411,8 +425,7 @@ async function realProbeCommands(args: CliArgs): Promise<SlashCommand[]> {
  * Build the SDK-query factory shared by both transports: a fake scripted query
  * under `--fake`, else the lazily-resolved real SDK query. The factory surface
  * ({@link SessionDeps.createQuery}) is identical to
- * {@link import("./uds/uds-session.js").UdsSessionDeps.createQuery}, so both
- * modes drive the SDK the same way.
+ * {@link UdsQuery}'s own factory, so both modes drive the SDK the same way.
  */
 export function makeCreateQuery(args: CliArgs): SessionDeps["createQuery"] {
   return (prompt, canUseTool): QueryLike => {
@@ -574,94 +587,24 @@ export async function runUdsMode(
     "exclusive workspace lock acquired",
   );
 
-  const session = new UdsSession({
-    sessionId: args.sessionId,
-    shimVersion: packageVersion("../package.json"),
-    protocolVersion: "1",
-    udsSocketPath: args.daemonSocket!,
-    storeSocketPath: args.storeSocket ?? defaultStoreSocket(),
-    // Validated non-empty immediately above, and the same directory the
-    // workspace lock was taken on: the store client's durable write spill
-    // journal is workspace-scoped precisely because that lock makes it
-    // exclusive.
-    workspaceDir: args.cwd,
-    // SessionStarted.source: RESUME when respawned to resume an on-disk
-    // session, FRESH for a brand-new one (design §5.2 SessionSource).
-    sessionSource: args.resume !== undefined ? SessionSource.RESUME : SessionSource.FRESH,
-    // The argv posture the query is CONSTRUCTED with. The daemon's
-    // DaemonHello.permission_mode overrides it inside the bring-up gate; this
-    // is passed so the override is a comparison rather than a guess.
-    permissionMode: args.permissionMode,
-    queryInstanceId: randomUUID(),
-    requestedModel: args.model,
-    sdkVersion: packageVersion("@anthropic-ai/claude-agent-sdk/package.json"),
-    shimBuildSha: process.env.SHIM_BUILD_SHA ?? "",
-    // The query's runtime-identity evidence. Both are read straight off the
-    // builders the real query uses, so the fingerprints the daemon reconciles
-    // against describe the configuration the turn actually ran under. The
-    // canUseTool passed here exists only to satisfy the builder's signature and
-    // is never invoked: fingerprinting an options object does not run a turn.
-    effectiveQueryOptions: realQueryOptions(args, fingerprintCanUseTool),
-    contextPrefix: systemPromptOption(),
-    // `--resume <uuid>` IS the vendor session id the store keys events by, so
-    // a resumed session can subscribe correctly from its very first Subscribe
-    // instead of waiting for the SDK to reveal the uuid.
-    ...(args.resume !== undefined ? { storeSessionId: args.resume } : {}),
-    // The lineage is validated as a complete trio by parseArgs, so presence of
-    // the first field is presence of all three.
-    ...(args.rewoundFrom !== undefined
-      ? {
-        rewindLineage: {
-          previousVendorSessionId: args.rewoundFrom,
-          retainedLeafUuid: args.rewindRetainedLeaf!,
-          droppedTurnIds: args.rewindDroppedTurns!,
-        },
-      }
-      : {}),
-    createQuery,
-    newRequestId: randomUUID,
-  });
-  const signals = udsShutdownSignalHandlers(args.sessionId, (reason) => session.shutdown(reason));
-  const onSigterm = signals.onSigterm;
-  const onSigint = signals.onSigint;
-  process.on("SIGTERM", onSigterm);
-  process.on("SIGINT", onSigint);
-  // exitError, set only on the rethrow path below, is what the `finally` trace
-  // reports the process exiting for: a signal-driven shutdown (including one
-  // that raced session.start() into throwing) is reported clean, since
-  // `signals.stopping()` had already resolved it as intentional.
-  let exitError: unknown;
-  try {
-    await session.start();
-    if (signals.stopping() === null) {
-      throw new Error("UDS session completed without an intentional shutdown signal");
-    }
-    await signals.stopping();
-  } catch (err) {
-    if (signals.stopping() !== null) {
-      await signals.stopping();
-      return;
-    }
-    exitError = err;
-    throw err;
-  } finally {
-    logMainLifecycle({
-      agent_repl_session_id: args.sessionId,
-      ...(exitError === undefined
-        ? { outcome: "uds_main_exit_clean" }
-        : {
-          level: "error",
-          outcome: "uds_main_exit_error",
-          error: exitError instanceof Error ? exitError.message : String(exitError),
-        }),
-    }, "runUdsMode exiting");
-    process.off("SIGTERM", onSigterm);
-    process.off("SIGINT", onSigint);
-    // Released in reverse acquisition order, the mirror of the fixed
-    // session-then-workspace order they were taken in.
-    releaseWorkspaceLock();
-    releaseSessionLock();
-  }
+  // THE SESSION IMPLEMENTATION IS GONE, AND SO IS ITS CONTRACT. `UdsSession`
+  // spoke `protocol.v1` -- the framed `Event` envelope, the hello/ready
+  // handshake, `Subscribe`/`ReplayRequest`, `StoreWrite`, `PermissionRequest`
+  // and `MessagePageRequest`. That package no longer exists: the daemon<->shim
+  // boundary is now the `shim.v1` rpc service and the record layer is
+  // `store.v1`, neither of which this shim implements yet.
+  //
+  // A shim that reached this point could not talk to anything, so it refuses
+  // LOUDLY rather than idling on a socket nobody speaks. Every check above --
+  // argument validation, the session lock, the workspace lock -- has already
+  // run and is unaffected; only the transport is missing.
+  releaseWorkspaceLock();
+  releaseSessionLock();
+  throw new Error(
+    `shim: no daemon transport is implemented for session ${args.sessionId}; ` +
+      "the protocol.v1 UDS session was deleted with its schema and the shim.v1 " +
+      "service has no implementation, so the shim cannot serve this session",
+  );
 }
 
 /**
@@ -750,11 +693,11 @@ const isDirectRun =
   process.argv[1] !== undefined && import.meta.url === invokedAs(process.argv[1]);
 if (isDirectRun) {
   main().catch((err: unknown) => {
-    if (
-      !isUnexpectedSdkStreamTerminationError(err) &&
-      !isQueryTerminationPersistenceError(err) &&
-      !isQueryTerminationCleanupError(err)
-    ) reportFatal(err);
+    // The three suppressed classes were UdsSession termination errors, each
+    // already logged once by that layer. The layer is deleted, so nothing
+    // reaches here pre-logged and every failure is reported here instead --
+    // strictly more surfacing than before, never less.
+    reportFatal(err);
     process.exit(1);
   });
 }
