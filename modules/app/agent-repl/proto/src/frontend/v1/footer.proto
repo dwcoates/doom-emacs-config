@@ -107,6 +107,12 @@ message FooterStrip {
 //   STATICALLY TYPED datum in an activity message (a count, an instant, a
 //   sha) is a strong indicator that datum deserves color in the rendered
 //   line.
+// - THREE ACTIVITY KINDS ARE STATUS-INDEPENDENT and appear in EVERY status
+//   arm's oneof (notification, rate_limited, context_budget). The daemon
+//   selects ONE standing activity per push, by precedence: notification
+//   OUTRANKS every competing activity; the status-bound kinds rank next, by
+//   the daemon's judgment; rate_limited is SECOND-LOWEST; context_budget is
+//   LOWEST — shown only when nothing else stands.
 message FooterStatus {
   // What the session is doing now, at the coarsest resolution. Exactly one
   // arm is set; a frame with none is malformed and rejected loudly.
@@ -269,6 +275,11 @@ message FooterStatusWaitingActivity {
     // The cold gate's cost line, composed by the daemon ("context cold —
     // 182k tokens to re-read").
     FooterStatusActivityColdGateCost cold_gate_cost = 7;
+    // A newsworthy rate-limit report; second-lowest precedence.
+    FooterStatusActivityRateLimited rate_limited = 8;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 9;
   }
 }
 // The cold gate's composed cost line.
@@ -312,6 +323,11 @@ message FooterStatusInterruptedActivity {
   oneof kind {
     // An agent notification, shown until the next activity replaces it.
     FooterStatusActivityNotification notification = 2;
+    // A newsworthy rate-limit report; second-lowest precedence.
+    FooterStatusActivityRateLimited rate_limited = 3;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 4;
   }
 }
 
@@ -392,6 +408,11 @@ message FooterStatusMergingActivity {
     FooterStatusActivityMergingCommit merging_commit = 2;
     // An agent notification, shown until the next activity replaces it.
     FooterStatusActivityNotification notification = 3;
+    // A newsworthy rate-limit report; second-lowest precedence.
+    FooterStatusActivityRateLimited rate_limited = 4;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 5;
   }
 }
 
@@ -413,6 +434,9 @@ message FooterStatusBackgroundActivity {
     FooterStatusActivityNotification notification = 2;
     // A newsworthy rate-limit report.
     FooterStatusActivityRateLimited rate_limited = 3;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 4;
   }
 }
 
@@ -463,6 +487,9 @@ message FooterStatusBlockedActivity {
     // The dead-query line, composed by the daemon ("vendor query died —
     // the next prompt restarts it").
     FooterStatusActivityQueryDied query_died = 5;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 6;
   }
 }
 // The dead-query line.
@@ -508,6 +535,11 @@ message FooterStatusDisconnectedActivity {
   oneof kind {
     // An agent notification, shown until the next activity replaces it.
     FooterStatusActivityNotification notification = 2;
+    // A newsworthy rate-limit report; second-lowest precedence.
+    FooterStatusActivityRateLimited rate_limited = 3;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 4;
   }
 }
 
@@ -537,6 +569,11 @@ message FooterStatusClosingActivity {
     FooterStatusActivityCloseBlocked close_blocked = 2;
     // An agent notification, shown until the next activity replaces it.
     FooterStatusActivityNotification notification = 3;
+    // A newsworthy rate-limit report; second-lowest precedence.
+    FooterStatusActivityRateLimited rate_limited = 4;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 5;
   }
 }
 
@@ -576,6 +613,11 @@ message FooterStatusLoadingActivity {
     FooterStatusActivityContextInjected context_injected = 2;
     // An agent notification, shown until the next activity replaces it.
     FooterStatusActivityNotification notification = 3;
+    // A newsworthy rate-limit report; second-lowest precedence.
+    FooterStatusActivityRateLimited rate_limited = 4;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 5;
   }
 }
 
