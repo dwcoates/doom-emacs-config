@@ -34,6 +34,29 @@ export function generatedFieldSet<Fields extends string>() {
   ): ReadonlySet<string> => new Set<string>(keys);
 }
 
+/**
+ * The SAME runtime allowlist as {@link generatedFieldSet}, for a message whose
+ * generated stub NO LONGER EXISTS.
+ *
+ * WHY IT IS SEPARATE, AND WHY IT IS UGLY ON PURPOSE. The frontend.v1 redesign
+ * deleted whole message families this webapp still decodes (the multiplexed
+ * frame stream, the detached-work vocabulary, the agent-emission vocabulary),
+ * so their tables have nothing left to be checked against. Silently loosening
+ * `generatedFieldSet` for them would have hidden that; a distinct, greppable
+ * name records exactly which tables lost invariant I5 and are for now aligned
+ * by review alone.
+ *
+ * NOTHING ELSE CHANGES. The set it returns is identical, so `rejectUnknown`
+ * still refuses a field the table does not name and no decoder became more
+ * permissive at run time.
+ *
+ * Every call site of this is a candidate for deletion or re-anchoring once the
+ * webapp is ported onto the new per-endpoint RPC surface.
+ */
+export function unanchoredFieldSet(...keys: readonly string[]): ReadonlySet<string> {
+  return new Set<string>(keys);
+}
+
 export function ensureObject(v: unknown, ctx: string): Obj {
   if (typeof v !== "object" || v === null || Array.isArray(v)) {
     throw new Error(`frontend-proto: ${ctx} must be a JSON object`);

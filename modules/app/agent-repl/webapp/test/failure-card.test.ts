@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/shared_pb";
+import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/failure_pb";
 import fixtureRaw from "../../proto/vocab/render-colors.json?raw";
 import {
   CONNECTIVITY_WINDOW_KINDS,
@@ -33,7 +33,7 @@ function kind(arm: string): FailureKind {
 
 function view(over: Partial<FailureCardView> = {}): FailureCardView {
   return {
-    kind: kind("apiOverloaded"),
+    kind: kind("shimDegraded"),
     message: "the API is overloaded",
     detail: "status=529",
     lifecycle: { case: "open" },
@@ -52,12 +52,7 @@ describe("the side vocabulary", () => {
 
   it("puts a daemon machinery arm on the machinery side", () => {
     // Arrange / Act / Assert
-    expect(failureSide(kind("shimNotConnected"))).toBe("machinery");
-  });
-
-  it("puts a vendor arm on the vendor side", () => {
-    // Arrange / Act / Assert
-    expect(failureSide(kind("apiRateLimit"))).toBe("vendor");
+    expect(failureSide(kind("sessionShimDied"))).toBe("machinery");
   });
 
   it("puts a CLIENT-LOCAL arm on the machinery side", () => {
@@ -94,19 +89,9 @@ describe("the tone table and the shared color fixture", () => {
     expect(FAILURE_SIDE_TONE.vendor).toBe(fixture.error_classes.ERROR_CLASS_API);
   });
 
-  it("resolves a vendor arm to the purple tone", () => {
-    // Arrange / Act / Assert
-    expect(failureTone(kind("apiRefusal"))).toBe("purple");
-  });
-
   it("resolves a machinery arm to the blue tone", () => {
     // Arrange / Act / Assert
     expect(failureTone(kind("shimDegraded"))).toBe("blue");
-  });
-
-  it("names the stylesheet class the vendor tone is drawn with", () => {
-    // Arrange / Act / Assert
-    expect(failureToneClass(kind("apiRefusal"))).toBe("failure-api");
   });
 
   it("names the stylesheet class the machinery tone is drawn with", () => {
@@ -176,7 +161,7 @@ describe("the card body", () => {
     // Arrange / Act
     const html = failureCardHtml(view(), "failure:e9");
     // Assert
-    expect(html).toContain('data-failure-kind="apiOverloaded"');
+    expect(html).toContain('data-failure-kind="shimDegraded"');
   });
 
   it("distinguishes terminal from open in the class list", () => {
@@ -202,6 +187,6 @@ describe("the card body", () => {
 
   it("names the arm through the shared helper, not a local spelling", () => {
     // Arrange / Act / Assert
-    expect(failureKindName(kind("apiMaxTurns"))).toBe("apiMaxTurns");
+    expect(failureKindName(kind("sessionSuperseded"))).toBe("sessionSuperseded");
   });
 });
