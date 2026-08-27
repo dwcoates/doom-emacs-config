@@ -1458,7 +1458,8 @@ message AgentBashOutputWhole {}
 
 // The output was cut because it was too large to carry inline.
 message AgentBashOutputPartial {
-  // How many bytes were left out — STATED, never derived by subtracting from a
+  // How many bytes were left out. The vendor declares totals, so the shim
+  // derives this figure once by subtraction; consumers never re-derive it from a
   // total. This is the figure a consumer draws ("1.2 MB more not shown"), and
   // the full size stays recoverable by addition if anything needs it.
   uint64 bytes_omitted = 1;
@@ -1559,8 +1560,9 @@ message AgentSubagentStart {
   // How deep this spawn sits below the main-thread agent — zero for a subagent
   // the main agent spawned, one for a subagent of that, and so on.
   //
-  // NOT ANCESTRY AND NOT A PARENT LINK: it is a single number the producer
-  // stamps on the spawn, and it names no other agent. A surface uses it to
+  // NOT ANCESTRY AND NOT A PARENT LINK: it is a single number the SHIM
+  // derives by walking the vendor's parent_agent_id chain (no depth scalar is
+  // declared — vetting item 1), and it names no other agent. A surface uses it to
   // decide how much nesting to draw, never to reconstruct a tree. UNSET when
   // the producer reported no depth.
   optional uint32 spawn_depth = 5;
@@ -2514,15 +2516,18 @@ message AgentArtifactSuccess {
 // The page is live.
 message AgentArtifactPublished {
   // The published page's URL — the bubble's clickable line. PRODUCER NOTE:
-  // the vendor's result is untyped prose; the shim extracts the URL from it.
+  // the vendor's ArtifactOutput is TYPED (url, title, version) — read the
+  // fields, never parse prose (corrected at vetting item 1).
   string url = 1;
   // The page's resolved title, as the result reports it. UNSET when the
   // result names none; the bubble then draws the call's title or filename.
   optional string title = 2;
 }
 
-// The listing answered. Empty on purpose: the vendor's result is untyped
-// prose nothing draws or acts on; the arm records that the read happened.
+// The listing answered. Empty ON PURPOSE even though the vendor's
+// ArtifactOutput types the list rows (title, url, updatedAt) — nothing in
+// this product draws a listing; the arm records that the read happened, and
+// the typed rows are there if that changes (vetting item 1).
 message AgentArtifactListed {}
 
 // The call never ran.
@@ -2704,7 +2709,9 @@ message AgentHookSucceeded {
   string command = 1;
   // Its exit code.
   int32 exit_code = 2;
-  // How long it ran, millis.
+  // How long it ran, millis. PRODUCER NOTE: the vendor's hook response
+  // carries no duration — the shim spans its own started→response instants
+  // (vetting item 1).
   int64 duration_ms = 3;
   // What it printed. UNSET when it printed nothing.
   optional AgentHookOutput output = 4;
