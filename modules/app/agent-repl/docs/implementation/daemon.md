@@ -87,6 +87,13 @@ unmarked is DISCRETIONARY by default.
      single connection and a single writer (two writers on one SQLite
      file was a real lost-update class); the sole-DB-owner rule made
      mechanical.
+   - INVARIANT — the battle-tested open settings are copied from the old
+     daemon's statedb open path (each exists because a real bug happened
+     without it, the worst being a silently lost concurrent write).
+   - INVARIANT — the database file carries its layout version, an older
+     daemon REFUSES to open a newer file (silent corruption class during
+     deploy/rollback), and a read-only open mode exists for inspection
+     that is guaranteed to change nothing.
    - RULED ADOPTIONS from the feature-loss audit: exactly ONE durable
      held-prompt store exists (the old daemon's second store,
      session_record.queued_prompts beside the drain park rows, is an
