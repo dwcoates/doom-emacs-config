@@ -4,6 +4,25 @@ Downstream agents do NOT consume this document. It records the PROCEDURES
 established for the daemon (and general fanout) planning process so they
 survive compaction. It joins the post-compaction mandatory-reload set.
 
+## STATUS (the settled/open ledger — updated at every landing)
+
+- PIPELINE POSITION: contract frozen at 2d79f7501; five systems
+  reconciled green and merged (shim, elisp, webapp, store, sidecar);
+  the DAEMON is ruled a FROM-SCRATCH REBUILD (its old tree is untouched
+  reference material, build knowingly red at the foundation).
+- DAEMON ARCHITECTURE WALK: shim+state-db section settled and triaged
+  through batch 4 plus the merge-variants rulings; daemon.md's OPEN
+  section lists the unruled audit backlog; the response side (ingest
+  core, view resolvers), the client-facing half (Connect server,
+  publishers), and the by-endpoint sequence diagrams (meta rule 5) are
+  UNSTARTED.
+- OWED BEFORE HANDOFF: MAIN.md (the e2e replacement specs), the
+  reconciled-foundation SHA record, and the remaining architecture
+  sections.
+- STANDING INSTRUCTIONS: STOP just before invoking /cross-system-fanout
+  — the user gates that invocation personally; digests regenerate when
+  the record grows; nothing lands without explicit approval.
+
 ## Procedures
 
 1. THE MARKER VOCABULARY. Every component entry in a planning doc opens
@@ -116,3 +135,8 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     record wins on any conflict"; they are regenerated (or appended)
     whenever the record gains entries, and the bootstrap points at
     digests, with the full record loaded only for contract-change work.
+
+17. CAPTURE AT LANDING. Every landing updates the STATUS ledger above in
+    the SAME commit — newly settled items move off the open lists, newly
+    surfaced items join them; a landing that changes neither is exempt.
+    The sitrep sync pass checks the ledger's freshness.
