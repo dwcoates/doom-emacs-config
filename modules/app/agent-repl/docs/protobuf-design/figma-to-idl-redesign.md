@@ -328,6 +328,32 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### The DEFERRED metadocument opens — the new-family singles are parked, not judged
+
+**The user's instruction.** Surfaces learned about but deliberately not
+implemented now go to `figma-to-idl-redesign.deferred.md` — a third sibling
+document beside the record and the vetting register — so a later PR starts
+from evidence rather than re-surveying. Parked there: CTRL-6 (rate-limit
+push, full quota picture), CTRL-12 (elicitation + user dialog blocking
+kinds), CTRL-16 (the 13 unreachable control verbs — a rulings pass),
+TOOLIO-23 (plan mode's product), IDENT-16 (tool-run summary,
+uuid-addressed), USAGE-11/12/14 (/context, /cost, cost-behaviour
+attribution), SESS-15 (memory recall's live channel).
+
+**Also settled from the NOPROD research (three concurrent Opus researchers,
+documentation-grade only).** NOPROD-3 CONFIRMED for our stack (the live
+gate is the only in-band producer of prompts and allow outcomes; OTel
+telemetry and rejoin replay are the only outside routes) — the landed
+permission shapes stand. NOPROD-12c REFUTED (BashOutput.timedOutAfterMs
+carries the configured limit at auto-backgrounding; backgroundedByUser
+marks Ctrl+B) — the cause arms stand and gain producer notes: the shim
+harvests cause from the BASH TOOL RESULT, never the task stream, which
+carries no cause. NOPROD-6 CONFIRMED (async completion carries at most one
+OPTIONAL total_tokens scalar vs the sync path's full four-field usage) —
+remediation agreed: the split lives at AgentSubagentTotals' usage FIELD as
+a two-arm oneof (full | total-only), the shared api.proto TokenUsage
+untouched; landing next.
+
 ### ATTACH-7 lands — the vendor's context-budget warning as a footer activity line
 
 **What changed ("looks good").** conversation.v1: SessionUpdate gains
