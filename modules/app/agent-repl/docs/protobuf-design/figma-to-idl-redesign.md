@@ -7826,3 +7826,13 @@ Consequence for the daemon architecture: the occupancy-lease projection
 gains PER-HOLDER REFUSAL POLICY — the merge lease projects to
 error-on-new-submission; restart-pending and shutdown-drain project to
 holds.
+
+### The footer gains waiting·interrupting — the stop acknowledged the moment it registers
+
+Settled during the daemon feature-loss triage (a sanctioned post-freeze
+increment): when an interrupt registers and teardown begins, the footer
+flips to waiting·interrupting IMMEDIATELY — before the turn's real end —
+with a composed activity line; the interrupting prompt is placed at the
+queue's semantic head so it, not the pre-interrupt head, is the next
+delivery. New arms: FooterSubStatusWaitingInterrupting (6) and
+FooterStatusActivityInterrupting (10) on the waiting activity oneof.

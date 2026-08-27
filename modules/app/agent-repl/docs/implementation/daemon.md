@@ -93,7 +93,26 @@ unmarked is DISCRETIONARY by default.
    - USAGE: check the occupancy lease (delivering the lease holder's own
      submissions, refusing or holding others per the lease's policy);
      deliver if clear, else hold; on turn resolution, pop and deliver
-     the next held item.
+     the next held item. RULED ADOPTIONS from the feature-loss audit:
+     - THE CLASSIFIER: a queued prompt is judged (headless cheap-model
+       run) into the five-verdict taxonomy the tray protos already carry
+       (classifying / interject / hold_for_turn_end /
+       uninterruptible_turn / classification_error), with the
+       explicit-interrupt fast path ("stop", "abort", ...) bypassing the
+       model round trip.
+     - INTERJECT, re-specified: the interrupting prompt is placed at the
+       queue's SEMANTIC HEAD before teardown begins (it, not the
+       pre-interrupt head, is the next delivery); the footer's
+       waiting·interrupting push fires the MOMENT the interrupt
+       registers; the submit waits for the turn's REAL end, and a failed
+       interrupt strips the jump and stamps the classification error.
+     - PARKED-LEDGER SEMANTICS on held_prompt: boot-materialized,
+       adopted on session wire-up, cancel legal with no session,
+       durable-drop-FIRST on cancel (a failed drop refuses the cancel),
+       tombstoned so a mid-flight restore cannot resurrect a forced or
+       cancelled prompt.
+     (Delivery-retry pacing and unknown-fate reconciliation were ruled
+     NOT prescribed — the implementing orchestrator's.)
    - PREREQUISITES: WSM, shim client.
 
 6. PRESCRIBED — THE MERGE ORCHESTRATOR (peer module).
