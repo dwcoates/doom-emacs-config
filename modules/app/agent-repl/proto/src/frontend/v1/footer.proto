@@ -148,8 +148,25 @@ message FooterSubStatus {
     FooterSubStatusClosing closing = 6;
     // The loading status's step: which kind of intake.
     FooterSubStatusLoading loading = 7;
+    // The waiting status's step.
+    FooterSubStatusWaiting waiting = 8;
   }
 }
+
+// The steps of the waiting status.
+message FooterSubStatusWaiting {
+  // Which kind of wait.
+  oneof step {
+    // A scheduled self-wakeup is pending and nothing else competes. THE
+    // FALLBACK RULE IS THE DAEMON'S: this state is resolved DAEMON-SIDE and
+    // shown only when the status would otherwise be idle/done — any real
+    // status (thinking, merging, ...) wins; the client renders whatever
+    // arrives and decides nothing.
+    FooterSubStatusWaitingWakeup wakeup = 1;
+  }
+}
+// The pending-wakeup step. Empty: the activity line carries the countdown.
+message FooterSubStatusWaitingWakeup {}
 
 // The steps of a turn in flight.
 message FooterSubStatusThinking {
@@ -320,7 +337,25 @@ message FooterStatusActivity {
     // The specific item taken on, composed by the daemon
     // ("webapp/CLAUDE.md", "graphify", "3 skills from ~/.claude/skills").
     FooterStatusActivityContextInjected context_injected = 8;
+    // The pending wakeup: the client ticks "wakes in 4:32" every second
+    // from the deadline INSTANT — a duration is drawn, an instant is
+    // shipped, per the clock convention.
+    FooterStatusActivityWakeup wakeup = 9;
   }
+}
+// The pending wakeup's countdown line.
+message FooterStatusActivityWakeup {
+  // When the wakeup fires, epoch ms; the client derives the remaining
+  // duration and re-renders it at a one-second tick.
+  int64 wake_at_ms = 1;
+  // The agent's one-sentence reason, drawn after the countdown. UNSET when
+  // the agent gave none.
+  optional FooterStatusActivityWakeupReason reason = 2;
+}
+// The reason element.
+message FooterStatusActivityWakeupReason {
+  // The sentence, drawn verbatim.
+  string text = 1;
 }
 // The commit a merge is landing right now.
 message FooterStatusActivityMergingCommit {
