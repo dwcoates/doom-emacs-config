@@ -3,11 +3,18 @@
 // operations. It knows nothing about vendors; it extracts only the envelope
 // columns needed to index otherwise-opaque payload blobs.
 //
-// WHAT IT PERSISTS IS agentshim.v1.Entry — the WHOLE stored record, both
-// halves. What it HANDS BACK is only the external half, wrapped in a
-// protocol.v1.EntryDelivery. That asymmetry is the point of the two-half
-// record: the internal half is durable and the store is one of the three
-// runtimes entitled to it, but nothing the store serves carries it.
+// WHAT IT PERSISTS IS store.v1.StoreEntry. The `entry` and `unconverted`
+// tables below still carry the retired record's addressing — a per-session
+// `seq`, a `top_level_message_id` owner — and StoreEntry supplies none of it,
+// so record persistence is REFUSED rather than guessed at (see
+// ErrRecordPersistenceUnreconciled in ingest.go). The `cursor` table is
+// unaffected: store.v1.CursorState is field-for-field the retired
+// agentshim.v1.CursorState, so the sidecar's reader position still commits.
+//
+// The schema is left standing rather than dropped because the store is nuked
+// and recreated, never migrated: the shape the reconciled read and write paths
+// will need is a design decision, and replacing this DDL with a guess would put
+// a second unreviewed schema on disk.
 package db
 
 import (
@@ -138,20 +145,16 @@ func (d *DB) Close() error {
 // created by an older binary already HAS these objects and would never see an
 // edit made here — writing the new shape into the CREATE TABLE would give
 // fresh and migrated databases two different schemas.
-// TWO RECORD TABLES, BECAUSE THE RECORDS ARE TWO DIFFERENT THINGS. `entry`
-// holds records with an external half: they have a session, a position in it,
-// and a route to the daemon. `unconverted` holds records with no external half
-// at all — the residue the producer could not place. Those are stored whole
-// (agentshim.v1's unconverted arm is durable on purpose, so the decision not to
-// model something stays reversible from stored data) and they are UNREACHABLE
-// from every read the store serves: replay, subscribe and a message page all
-// select from `entry`, so "an unconvertible record cannot reach a page" is a
-// fact about which table it is in rather than a filter a query must remember.
+// NO WRITER REACHES THE TWO RECORD TABLES ANY MORE. `entry` and `unconverted`
+// were shaped around the retired record's two halves: `entry` held records with
+// an external half, keyed (session_id, seq) and paged by top_level_message_id;
+// `unconverted` held the residue with no external half at all, deliberately
+// unreachable from every read. store.v1's StoreEntry supplies none of those
+// columns — it names no session, carries no position, and states its book as a
+// conversation.v1.AgentId — so ingest refuses record writes and both tables
+// stay empty until the shape they should take is decided.
 //
-// They are also unpositioned. `seq` is per-session addressing, and a record
-// with no external half carries no session_id anywhere in the schema — see the
-// gap note. Assigning one a seq would either gap the session's sequence or name
-// a position in a session it cannot claim to belong to.
+// The `cursor` table is the one that is still live, and it is unchanged.
 const baseDDL = `
 CREATE TABLE IF NOT EXISTS entry (
   session_id           TEXT    NOT NULL,
