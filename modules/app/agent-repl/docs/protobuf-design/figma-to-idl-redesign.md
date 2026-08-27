@@ -328,6 +328,39 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### RESTRUCTURE batch 1 rulings land: middle-slice reads; optional policy decider; the identity bucket is DEFERRED; the command enum and glob extent stand
+
+**TOOLIO-6 ("let's fix that at schema level, and we should support at the
+frontend level as well").** AgentReadSuccess.extent gains `range` (10):
+AgentReadRange { contents (line-cut slice); first_line (1-based);
+line_count; total_lines } — an offset read (observed ~6,000 times) is now
+honestly representable. Frontend needs NO schema change: the tool bubble's
+code output is daemon-resolved spans of whatever text was read, so the
+daemon highlights the slice and words the composed omitted line ("lines
+400-499 of 4,312") — the shipped text IS the text actually read, per the
+user's requirement.
+
+**TOOLFAIL-3 ("sounds good").** AgentPermissionDeniedByPolicy.decider goes
+`optional` — the vendor may name no deciding component, and absence is a
+legal answer, never an empty string; the value stays the verbatim vendor
+word.
+
+**IDENT-1 and its bucket (IDENT-2/3/4, STOP-9, RETRACT-5/8, COMPACT-4/6)
+DEFERRED.** The identity ruling stands — vendor uuids never cross the
+contract; the shim translates where a unit exists — and the permanently
+uncarried remainder (which messages a compaction preserved; the ancestry
+link across a compaction; vendor request/message ids on failure evidence)
+is logged in figma-to-idl-redesign.deferred.md for a possible future PR.
+
+**SESS-4 ("dont care... keep it").** SessionCommand stays a closed enum; no
+plugin/genericization support; an unrecognized command simply is not a
+session command.
+
+**NOPROD-2 remainder ("dont want to support older vendor binary").** Glob's
+required completeness choice STANDS — the modern binary always writes the
+completeness fields, and pre-field CLI versions are explicitly
+unsupported; the re-vet's optional-pair remediation is withdrawn.
+
 ### TOOLIO-27 and SESS-13 join the exempt set — the ruling batch closes
 
 **TOOLIO-27 ("let's NOT model this").** The background-shell peek (a Bash
