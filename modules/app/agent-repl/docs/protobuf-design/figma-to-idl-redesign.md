@@ -7549,3 +7549,32 @@ user-required countdown: the DAEMON resolves the next-fire INSTANT from the
 cron expression (accepted complexity) and ships epoch ms; the client ticks
 "5m 12s" per the clock convention. No feed cards anywhere — footer-only,
 the tasks precedent. Not jump targets: jobs have no bubble.
+
+### PUSH NOTIFICATION lands — the daemon publishes the FACT; each surface applies the policy it alone has knowledge for
+
+Fifth of the six built-in families, landed on explicit go after the model
+was corrected in iteration: the user's first sketch had the DAEMON deciding
+by Emacs focus state, and the settled model moves policy to where the
+knowledge lives — the daemon never asks "is Emacs focused."
+
+- conversation.v1 `AgentPushNotification` (item arm 32): the message, and
+  the VENDOR's own delivery outcome as a oneof — sent {push_sent,
+  local_sent, sent_at_ms} | not_sent {config_off | user_present |
+  no_transport}. The vendor's phone push is independent of our local
+  presentation; the input's "proactive" literal is not carried (a constant
+  is not a fact).
+- agentrepl.v1 `WatchHostWorkspaceResponse` becomes a push oneof: the
+  whole-state `host` arm as before, plus the `notification` EVENT arm
+  {text, at_ms}. EMACS OWNS PRESENTATION POLICY (stated at the arm):
+  unfocused → OS notification whose click raises the frame and selects the
+  tab (plain elisp, decider and actor are one process); focused+unselected
+  → tab-bar blink; selected → nothing.
+- frontend.v1 sidebar: `RosterRow.attention` (32), an empty presence
+  marker; the daemon sets it on the notification and clears it on the
+  EXISTING SelectWorkspace verb. THE CANONICAL BLINK CADENCE is specified
+  ONCE on `RosterRowAttention` (two blinks, 500 ms on/off, then steady) —
+  the webapp sidebar and the Emacs tab-bar both implement exactly that spec
+  and cite the message; divergence is a defect (user-mandated code-level
+  consistency, the editor-popup precedent).
+- frontend.v1 footer: `FooterStatusActivityNotification` (arm 11), the
+  composed line shown until the next activity replaces it.

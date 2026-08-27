@@ -20,8 +20,30 @@ message WatchHostWorkspaceRequest {
 }
 
 message WatchHostWorkspaceResponse {
-  // The workspace's host state, whole-replaced per push.
-  HostWorkspace host = 1;
+  oneof push {
+    // The workspace's host state, whole-replaced per push.
+    HostWorkspace host = 1;
+    // A notification EVENT for this workspace — fired, not state. EMACS
+    // OWNS PRESENTATION POLICY, because Emacs owns the knowledge:
+    //   Emacs unfocused           → post the OS desktop notification; its
+    //                               click raises the frame and selects this
+    //                               workspace's tab (plain elisp, no daemon
+    //                               round-trip);
+    //   focused, tab not selected → blink the tab-bar entry, per THE
+    //                               CANONICAL BLINK CADENCE specified on
+    //                               frontend.v1 RosterRowAttention;
+    //   tab selected              → nothing (the footer's activity line
+    //                               already shows it).
+    HostWorkspaceNotification notification = 2;
+  }
+}
+
+// A notification the agent addressed to the user, forwarded per workspace.
+message HostWorkspaceNotification {
+  // The agent's message, verbatim.
+  string text = 1;
+  // When the agent sent it, epoch ms.
+  int64 at_ms = 2;
 }
 
 // The host-facing state of one workspace: what Emacs needs to correlate
