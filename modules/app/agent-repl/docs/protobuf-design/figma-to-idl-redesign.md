@@ -7422,3 +7422,44 @@ Vetting item 1's unhomed-built-ins slate resolved by multi-select:
 
 Each modeled family walks the ordinary increment protocol: drawing agreed,
 then the encompassing sketch agreed, then landed end to end.
+
+### PLAN MODE lands — a coalesced read-only purple bubble with an Emacs edit affordance
+
+First of the six ruled built-in families, iterated to agreement and landed
+on the user's explicit go. `AgentPlanMode` (item arm 28) carries the
+vendor's pair faithfully: enter and exit are separate units with their own
+identities and NO wire pairing key — the daemon coalesces by the episode
+invariant (at most one open plan episode per agent), so `FeedPlan` (unit
+arm 9) is ONE purple response-styled bubble upserting planning → planned →
+failed on a single FeedId. Decisions reached in iteration:
+
+- The document is RENDERED MARKDOWN (the response bubble's prose
+  treatment), never raw text; EnterPlanMode draws NO tool card anywhere.
+- The bubble is READ-ONLY; revisions go through the composer. The one
+  affordance is the ✎ EDIT BUTTON — present iff the exit named the plan
+  file — whose click the WEBAPP RAISES TO THE HOST: the Emacs client opens
+  `FeedPlanEditTarget.path` as a doom popup, right side, half width. The
+  vendor cannot observe disk edits, so the round-trip is save-then-tell-
+  the-agent; the user declined a host-side edited marker.
+- `plan_was_edited` (the VENDOR dialog's edit flag) is carried faithfully
+  but DORMANT in this UX; file_path is MAPPED (the edit target);
+  is_agent/has_task_tool/awaiting_leader_approval are EXPECTED UNMAPPED;
+  requestId is excluded by the identity ruling.
+- Exit-with-no-enter is legal (a session started in the plan permission
+  mode never calls EnterPlanMode); the bubble is then born planned.
+- DAEMON PRESCRIPTIONS: the episode closes on exit settle, call failure,
+  or the turn's terminal while planning (composed "ended without a plan"
+  line into the failed arm); and the episode MUST close before processing
+  the `conversation_reset` that plan acceptance can emit.
+- The vendor's `get_plan` control verb (path-less read of the current
+  plan) is NOT modeled — recorded in the deferred doc as the enabler for a
+  future live-updating planning state.
+
+  While planning:                     After the exit:
+  ┌───────────────────────────┐  ┌──────────────────────────────┐
+  │ ▐ Plan        (purple bg) │  │ ▐ Plan   [✎ edit] (purple bg)│
+  │ ▐ ◌ planning…             │  │ ▐ Pagination fix  (markdown) │
+  └───────────────────────────┘  │ ▐  1. Cap the re-pull…       │
+                                 │ ▐  2. Thread the cursor…     │
+                                 └──────────────────────────────┘
+  ✎ click → Emacs doom popup, right side, 50% width, on the plan file.

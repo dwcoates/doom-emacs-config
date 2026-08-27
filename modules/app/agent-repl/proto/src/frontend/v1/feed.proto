@@ -228,7 +228,57 @@ message FeedTurnActivity {
     // A published artifact page — purple response-styled, like a response
     // bubble. Only a PUBLISH draws; a list act produces no row.
     FeedArtifact artifact = 8;
+    // The plan bubble — purple response-styled, like the artifact. ONE
+    // bubble COALESCES the enter and exit plan-mode calls: the daemon keys
+    // both onto one FeedId (at most one open plan episode per agent), so
+    // entering draws the planning state and the exit fills the same bubble
+    // with the document.
+    FeedPlan plan = 9;
   }
+}
+
+// The plan bubble: the agent's plan document, response-styled (purple),
+// READ-ONLY. One bubble per plan-mode episode; the row upserts through its
+// states. Revisions happen in the composer, never in the bubble.
+message FeedPlan {
+  oneof state {
+    // Plan mode is on and the plan has not been presented yet.
+    FeedPlanPlanning planning = 1;
+    // The plan, presented.
+    FeedPlanPlanned planned = 2;
+    // The episode broke — a plan-mode call failed, or the turn ended still
+    // in plan mode; the composed reason draws in the bubble.
+    FeedPlanFailed failed = 3;
+  }
+}
+// The in-progress state. Empty: the bubble draws its planning treatment.
+message FeedPlanPlanning {}
+// The presented state.
+message FeedPlanPlanned {
+  // The plan document. Markdown, rendered by the client's prose renderer —
+  // the same treatment as a response bubble's prose, never shown raw.
+  FeedPlanProse prose = 1;
+  // The edit affordance. PRESENT iff the vendor named the plan's file, and
+  // the button draws only when present. The CLICK is the HOST's: the Emacs
+  // client opens the file in a doom popup (right side, half width) — the
+  // webapp raises the click to the host and renders nothing itself.
+  optional FeedPlanEditTarget edit = 2;
+}
+// The plan's markdown element.
+message FeedPlanProse {
+  // Markdown, rendered by the client's prose renderer.
+  string markdown = 1;
+}
+// The edit affordance's target.
+message FeedPlanEditTarget {
+  // The plan file's path on the daemon's host, as the vendor named it.
+  // Handed to the editor verbatim; never drawn as prose.
+  string path = 1;
+}
+// The failed state.
+message FeedPlanFailed {
+  // The daemon's composed reason, drawn verbatim.
+  string text = 1;
 }
 
 // The artifact bubble: a page the agent published, response-styled. A
