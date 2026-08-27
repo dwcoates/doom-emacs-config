@@ -327,8 +327,9 @@ message AgentPermissionDeniedByUser {
 // Policy refused without an ask.
 message AgentPermissionDeniedByPolicy {
   // Which component decided (the vendor's discriminator: classifier, mode,
-  // rule, ...).
-  string decider = 1;
+  // rule, ...). UNSET when the vendor named none — absence is a legal answer,
+  // never an empty string.
+  optional string decider = 1;
   // The deciding component's own reason, when it gave one.
   optional string reason = 2;
   // The rejection message returned to the model.
