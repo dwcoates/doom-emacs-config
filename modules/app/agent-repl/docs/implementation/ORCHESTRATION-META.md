@@ -68,8 +68,11 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     beyond what orchestration-readiness needs is a defect (rule 7's
     purpose applied to the writing itself).
 
-11. UNAMBIGUOUS COMPONENT REFERENCES. When an entry mentions another
-    component, the mention is short but NEVER ambiguous — name the
-    component and anchor it ("the WSM occupancy lease (entry 3)", "the
-    shim client's occupancy face (entry 2)"), never a bare word like
-    "lease" or "publishers" that could name several things.
+11. UNAMBIGUOUS COMPONENT REFERENCES, PLAINLY SPELLED. When an entry
+    mentions another component, use exactly the component's own name —
+    "the shim client", "the WSM occupancy lease" — enough to be
+    unambiguous, and NOTHING more: no entry-number anchors ("(entry 7)"),
+    and no sub-feature descriptors ("the shim client's occupancy face"),
+    which read as naming a different thing than the component itself.
+    Ambiguous shorthand ("lease", "publishers") and over-qualified
+    references are the same defect from opposite directions.
