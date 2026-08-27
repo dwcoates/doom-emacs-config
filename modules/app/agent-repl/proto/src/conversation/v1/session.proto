@@ -381,6 +381,9 @@ message SessionUpdate {
     SessionFilesPersisted files_persisted = 16;
     // An interrupt did not cancel everything it was aimed at.
     SessionInterruptIncomplete interrupt_incomplete = 17;
+    // The vendor's own context-budget warning, injected into the prompt as
+    // the window fills. Session-scoped; the footer's activity line draws it.
+    SessionContextBudgetWarning context_budget_warning = 24;
     // One MCP server's permission policy — including a ceiling the user
     // cannot raise.
     SessionMcpPermissionPolicy mcp_permission_policy = 18;
@@ -573,6 +576,14 @@ message SessionInterruptIncomplete {
   uint32 still_queued_count = 1;
   // How many queued items the interrupt did cancel.
   uint32 cancelled_count = 2;
+}
+
+// The vendor's context-budget warning: its own signal that the context
+// window is filling, injected into the prompt as an attachment record.
+message SessionContextBudgetWarning {
+  // The vendor's warning text, verbatim — the producer composes it and no
+  // structured figure rides the record.
+  string text = 1;
 }
 
 // The permission policy in force for one MCP server.

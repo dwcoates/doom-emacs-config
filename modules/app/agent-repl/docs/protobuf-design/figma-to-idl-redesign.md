@@ -328,6 +328,15 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### ATTACH-7 lands — the vendor's context-budget warning as a footer activity line
+
+**What changed ("looks good").** conversation.v1: SessionUpdate gains
+context_budget_warning (24) — SessionContextBudgetWarning { text verbatim;
+the vendor composes it, no structured figure rides the record (1,519
+observed total_tokens_reminder injections) }. frontend.v1:
+FooterStatusActivity gains context_budget (10) { composed text } — the same
+treatment as the rate-limit allowances line, per the user: "same thing."
+
 ### ATTACH-8's mode transitions are DROPPED — no topbar badges, no conversation arm
 
 **The ruling ("let's just drop support for this. i dont care enough").** The
