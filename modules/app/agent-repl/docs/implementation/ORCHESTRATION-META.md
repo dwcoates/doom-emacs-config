@@ -84,3 +84,11 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     SUGGESTING that any change be landed, that overview is presented in
     exactly that format, and every sitrep includes a sync check of the
     planning docs against the settled state.
+
+13. POST-LANDING FEATURE-LOSS AUDIT. After landing a set of components,
+    dispatch one Opus subagent PER COMPONENT to check the EXISTING
+    implementation for responsibilities/features the settled design does
+    not account for (the near-loss of the prompt handler's
+    mirror-prompt-to-webapp responsibility is the motivating case). Each
+    agent returns a simple, concise overview of findings; findings are
+    surfaced to the user IFF non-nil.
