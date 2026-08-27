@@ -1,21 +1,21 @@
 // Package healthcheck implements the one-shot correlated shim-store health
-// probe used by agent-shim-doctor.  It owns the client side of the existing
-// protocol.v1 HealthCheck/HealthStatus protocol; it does not infer readiness from
-// socket presence alone.
+// probe used by agent-shim-doctor.
+//
+// ITS PROTOCOL IS GONE. The probe owned the client half of protocol.v1
+// HealthCheck/HealthStatus, and the store.v1 redesign deleted both messages
+// without minting a replacement: the store's Connect service
+// (store/v1/service.proto) declares seven rpcs and none of them is a health
+// verb. The JSON Result contract and the exit-code vocabulary are kept —
+// agent-shim-doctor parses them, and they are pure Go rather than proto — but
+// Probe now REFUSES LOUDLY instead of dialing a socket for a message no peer
+// can answer. Inferring readiness from socket presence alone is exactly what
+// this package exists to refuse, so no such fallback is substituted.
 package healthcheck
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"net"
-	"os"
 	"time"
 
 	"agentrepl/shim-store/internal/logging"
-	"agentrepl/wire"
-
-	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 const (
@@ -63,111 +63,34 @@ type Result struct {
 	Reason       string `json:"reason"`
 }
 
-type deps struct {
-	stat func(string) (os.FileInfo, error)
-	dial func(context.Context, string) (net.Conn, error)
-	now  func() time.Time
-}
+// ProbeUnavailableReason is the single account every probe now returns. It
+// names the deleted protocol rather than a transport symptom, so an operator
+// reading doctor's output is not sent hunting a socket that is fine.
+const ProbeUnavailableReason = "shim-store health probe is unavailable: protocol.v1 HealthCheck/HealthStatus were deleted by the store.v1 redesign and store/v1/service.proto declares no health rpc; readiness is NOT inferred from socket presence"
 
-func productionDeps() deps {
-	dialer := &net.Dialer{}
-	return deps{
-		stat: os.Stat,
-		dial: func(ctx context.Context, socketPath string) (net.Conn, error) {
-			return dialer.DialContext(ctx, "unix", socketPath)
-		},
-		now: time.Now,
-	}
-}
-
-// Probe sends exactly one HealthCheck and accepts only the correlated healthy
-// HealthStatus response.  Each terminal result is logged once by this client,
-// which owns transport and protocol-result classification.
+// Probe reports the probe's unavailability.
+//
+// Config is still validated first, so a malformed doctor invocation is still
+// reported as usage rather than being masked by the protocol gap.
 func Probe(config Config, log *logging.Logger) (Result, int) {
-	return probe(config, log, productionDeps())
-}
-
-func probe(config Config, log *logging.Logger, d deps) (Result, int) {
-	started := d.now()
 	result := Result{RequestID: config.RequestID}
-	finish := func(exitCode int, failureClass, reason, component string, healthy bool) (Result, int) {
-		result.LatencyMS = d.now().Sub(started).Milliseconds()
-		result.Component = component
-		result.Healthy = healthy
+	finish := func(exitCode int, failureClass, reason string) (Result, int) {
+		result.Component = ""
+		result.Healthy = false
 		result.FailureClass = failureClass
 		result.Reason = reason
-		level := "info"
-		if exitCode != ExitOK {
-			level = "error"
-		}
-		log.Log(logging.Fields{Component: "store", Socket: config.SocketPath, RequestID: config.RequestID, Operation: "health-check", Level: level},
-			"health probe outcome exit=%d class=%q healthy=%t component=%q latency_ms=%d reason=%q", exitCode, failureClass, healthy, component, result.LatencyMS, reason)
+		log.Log(logging.Fields{Component: "store", Socket: config.SocketPath, RequestID: config.RequestID, Operation: "health-check", Level: "error"},
+			"health probe outcome exit=%d class=%q healthy=false latency_ms=0 reason=%q", exitCode, failureClass, reason)
 		return result, exitCode
 	}
-
 	if config.SocketPath == "" {
-		return finish(ExitUsage, "usage", "socket path is required", "", false)
+		return finish(ExitUsage, "usage", "socket path is required")
 	}
 	if config.RequestID == "" {
-		return finish(ExitUsage, "usage", "health request id is required", "", false)
+		return finish(ExitUsage, "usage", "health request id is required")
 	}
 	if config.Timeout <= 0 {
-		return finish(ExitUsage, "usage", "health timeout must be positive", "", false)
+		return finish(ExitUsage, "usage", "health timeout must be positive")
 	}
-	if _, err := d.stat(config.SocketPath); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return finish(ExitMissingSocket, FailureMissingSocket, err.Error(), "", false)
-		}
-		return finish(ExitClientFailure, FailureClientFailure, fmt.Sprintf("stat socket: %v", err), "", false)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
-	defer cancel()
-	conn, err := d.dial(ctx, config.SocketPath)
-	if err != nil {
-		if isTimeout(err) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return finish(ExitTimeout, FailureTimeout, err.Error(), "", false)
-		}
-		return finish(ExitConnectFailure, FailureConnectFailure, err.Error(), "", false)
-	}
-	defer conn.Close()
-	if err := conn.SetDeadline(started.Add(config.Timeout)); err != nil {
-		return finish(ExitClientFailure, FailureClientFailure, fmt.Sprintf("set probe deadline: %v", err), "", false)
-	}
-	if err := wire.WriteAny(conn, &protocolv1.HealthCheck{RequestId: config.RequestID}); err != nil {
-		if isTimeout(err) {
-			return finish(ExitTimeout, FailureTimeout, err.Error(), "", false)
-		}
-		return finish(ExitWriteFailure, FailureWriteFailure, err.Error(), "", false)
-	}
-	message, err := wire.ReadAny(conn)
-	if err != nil {
-		if isTimeout(err) {
-			return finish(ExitTimeout, FailureTimeout, err.Error(), "", false)
-		}
-		return finish(ExitDecodeFailure, FailureDecodeFailure, err.Error(), "", false)
-	}
-	status, ok := message.(*protocolv1.HealthStatus)
-	if !ok {
-		return finish(ExitDecodeFailure, FailureDecodeFailure, fmt.Sprintf("unexpected response type %T", message), "", false)
-	}
-	if status.GetRequestId() != config.RequestID {
-		return finish(ExitMismatchedRequestID, FailureMismatchedRequestID,
-			fmt.Sprintf("response request_id %q does not match request_id %q", status.GetRequestId(), config.RequestID), status.GetComponent(), false)
-	}
-	if !status.GetHealthy() {
-		return finish(ExitUnhealthyResponse, FailureUnhealthyResponse, status.GetReason(), status.GetComponent(), false)
-	}
-	if status.GetComponent() == "" {
-		return finish(ExitUnhealthyResponse, FailureUnhealthyResponse, status.GetReason(), "", false)
-	}
-	return finish(ExitOK, "", status.GetReason(), status.GetComponent(), true)
-}
-
-func isTimeout(err error) bool {
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) {
-		return true
-	}
-	var networkErr net.Error
-	return errors.As(err, &networkErr) && networkErr.Timeout()
+	return finish(ExitClientFailure, FailureClientFailure, ProbeUnavailableReason)
 }
