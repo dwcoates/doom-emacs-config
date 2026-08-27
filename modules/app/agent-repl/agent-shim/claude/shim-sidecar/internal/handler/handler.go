@@ -15,7 +15,7 @@ package handler
 import (
 	"time"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -50,18 +50,24 @@ func attribute(ctx *Context, offset int64) convert.Attribution {
 	return at
 }
 
-// logUnconverted records every record stored WITHOUT an external half.
+// logUnconverted records every record stored as an UNSERVED item.
 //
-// A record with no external half never reaches the daemon and never reaches a
-// page, so it is invisible to the user by construction. That is a legitimate
-// outcome and also the one worth counting: it is the running measure of how much
-// of what the vendor writes this schema does not yet model.
-func logUnconverted(log *logging.Bound, ctx *Context, entries []*agentshimv1.Entry) {
+// THE TEST CHANGED WITH THE CONTRACT. It used to be "carries no external half",
+// because store.v1's predecessor split every record into an internal and an
+// external half and only the external one reached the daemon. StoreEntry has no
+// such split, so the equivalent question is now which agent_info arm the record
+// landed on: an unserved_item is by construction not a serveable frame, so it
+// never reaches a page and is invisible to the user.
+//
+// That is a legitimate outcome and also the one worth counting: it is the
+// running measure of how much of what the vendor writes this schema does not yet
+// model — a number the unported conversions have made much larger.
+func logUnconverted(log *logging.Bound, ctx *Context, entries []*storev1.StoreEntry) {
 	for _, entry := range entries {
-		if entry.GetExternal() != nil {
+		if entry.GetAgentUpdate().GetUnservedItem() == nil {
 			continue
 		}
 		log.With(logging.Context{Operation: "unconverted", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
-			LogVerbose("record stored with no external half: %s", convert.Describe(entry))
+			LogVerbose("record stored as an unserved item: %s", convert.Describe(entry))
 	}
 }
