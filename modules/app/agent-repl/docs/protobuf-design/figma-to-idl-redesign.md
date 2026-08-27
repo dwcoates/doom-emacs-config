@@ -7498,3 +7498,38 @@ from iteration:
   │ ▐ [PLAUSIBLE] [efficiency]  …                  │
   │ ▐   [fixed]   (outcome badge, re-report only)  │
   └────────────────────────────────────────────────┘
+
+### THE WORKTREE PAIR lands — and the context-cut divider GENERALIZES to `FeedSessionSeparation`
+
+Third of the six built-in families, landed on explicit go, with the user's
+structural direction: worktree moves draw as DIVIDERS in the context-cut
+theme — same rule, same geometry, SAME RENDERING SUBROUTINE — blue accent,
+different label.
+
+- conversation.v1: `AgentWorktree` (item arm 30) — enter and exit as
+  faithful tool calls (start/success/failure, typed Enter/ExitWorktree
+  fields; requested action vs stated outcome kept apart; message lines and
+  tmux name EXPECTED UNMAPPED; discarded counts optional because unstated
+  is not zero). NO coalescing: the two moments can be far apart, and each
+  settled act is its own divider — everything drawn between them happened
+  inside the tree.
+- frontend.v1: `FeedContextCut` is RENAMED AND GENERALIZED to
+  `FeedSessionSeparation` (row arm 12 respelled `separation`): one divider
+  row kind whose `kind` oneof is {cleared, compacted, worktree_entered,
+  worktree_left}, label composed by the daemon, `tokens` optional and set
+  on the context arms only. The worktree payloads carry path (a jump
+  target through the SAME shared editor-popup subroutine — dired for a
+  directory), branch, and the kept|removed outcome with a loud composed
+  discard line.
+- STRUCTURAL INVARIANT, stated in the schema and owed to the fanout's
+  /structural-invariants pass: ONE renderer subroutine draws EVERY
+  separation arm; an arm selects only accent color and label/payload text.
+  A per-arm divider renderer is a defect.
+- The conversation.v1 `ContextCut` family is deliberately NOT renamed: at
+  that tier a context cut and a worktree tool call are different facts
+  (one is a session-shape event, the other a permission-gated tool call
+  with unit identity), and only their DRAWN treatment unifies.
+
+     ── ⎇ entered worktree · ~/…/wt/fix-pagination · fix-pagination ──
+        (work inside the tree)
+     ── ⎇ left worktree · removed · 3 files, 2 commits discarded ──
