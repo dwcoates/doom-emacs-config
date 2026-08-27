@@ -23,7 +23,7 @@
 //                  drawing.
 //   permission /   the turn BLOCKED on the user: consent, or a choice. Two
 //   question       cards, mirroring the conversation-level split.
-//   context_cut    META: the feed itself changed shape here.
+//   separation     META: the session changed shape or place here.
 //
 // IDENTITY IS ONE OPAQUE STRING. FeedId is daemon-minted from the identity
 // of what the row DRAWS — a unit, a task, an agent, or a daemon fact for a
@@ -87,7 +87,7 @@ message FeedRow {
   optional FeedRowParent parent = 2;
   // The turn this row belongs to — the daemon's stamp; what a client matches
   // its SubmitPromptSuccess.turn against to find its own prompt. Unset for a
-  // row that belongs to no turn (a context-cut divider).
+  // row that belongs to no turn (a separation divider).
   optional conversation.v1.TurnId turn = 3;
   // What the row is. Each kind is a daemon-resolved element family.
   oneof row {
@@ -113,8 +113,10 @@ message FeedRow {
     FeedPermission permission = 10;
     // The turn blocked on a choice the agent posed.
     FeedQuestion question = 11;
-    // The feed changed shape here: a clear or a compaction.
-    FeedContextCut context_cut = 12;
+    // A SEPARATION — the session changed shape or place here: a context
+    // clear, a compaction, or a worktree move. One divider row kind for
+    // all of them.
+    FeedSessionSeparation separation = 12;
     // The cold-context gate: a resume or model switch was refused cold and
     // the user must choose a remediation. While STANDING it owns the
     // composer; once resolved it stays in history as the trace of the
@@ -1403,34 +1405,43 @@ message FeedColdGateResolvedCompact {
   FeedColdGateModel model = 1;
 }
 
-// ⑤ THE CONTEXT-CUT DIVIDER — the conversation was cut here, and a reader
-// scrolling back must see where. Drawn from conversation.v1.ContextCut.
-message FeedContextCut {
-  // The divider's label ("context compacted", "context cleared").
-  FeedContextCutLabel label = 1;
-  // ONE ARM: a cut is a recorded fact; it is never in flight and it does not
-  // fail (a compaction that read cold still compacted — see the cold-read
-  // notice on the compacted arm).
-  oneof result {
-    FeedContextCutSuccess success = 2;
-  }
-}
-// The cut, drawn.
-message FeedContextCutSuccess {
-  // What the cut did to the context's size, drawn on the divider. EVERY cut
-  // has one, including a clear: clearing reloads the system prompt, skills
-  // and memory, so the after side is small rather than zero, and showing it
-  // is what lets a reader see that.
-  FeedContextCutTokens tokens = 1;
-  // THE ARM IS THE KIND OF CUT.
-  oneof cut {
+// ⑤ THE SESSION-SEPARATION DIVIDER — the session changed shape or place
+// here, and a reader scrolling back must see where. Context cuts are drawn
+// from conversation.v1.ContextCut; worktree moves from AgentWorktree's
+// settled arms.
+//
+// STRUCTURAL INVARIANT FOR THE IMPLEMENTATION: ONE renderer subroutine
+// draws EVERY arm — the same rule (thickness, width, geometry) with the
+// label under it; an arm selects only its ACCENT COLOR (context arms keep
+// the existing treatment, worktree arms are BLUE) and its label/payload
+// text. A per-arm divider renderer is a defect, not a variation.
+message FeedSessionSeparation {
+  // The divider's label ("context compacted", "entered worktree …"),
+  // composed by the daemon, drawn under the rule.
+  FeedSessionSeparationLabel label = 1;
+  // ONE LEVEL: a separation is a recorded fact; it is never in flight and
+  // it does not fail (a compaction that read cold still compacted — see the
+  // cold-read notice; a worktree call that failed is a tool failure, not a
+  // divider).
+  oneof kind {
+    // The conversation was discarded outright.
     FeedContextCutCleared cleared = 2;
+    // The conversation was compressed into a summary.
     FeedContextCutCompacted compacted = 3;
+    // The session moved INTO an isolated git worktree.
+    FeedWorktreeEntered worktree_entered = 4;
+    // The session RETURNED from the worktree.
+    FeedWorktreeLeft worktree_left = 5;
   }
+  // What the cut did to the context's size, drawn on the divider — SET ON
+  // THE CONTEXT ARMS ONLY (every cut has one; even a clear reloads the
+  // system prompt, skills and memory, so the after side is small rather
+  // than zero). UNSET on the worktree arms, which change no context.
+  optional FeedContextCutTokens tokens = 6;
 }
 
 // The divider's label, verbatim.
-message FeedContextCutLabel {
+message FeedSessionSeparationLabel {
   string text = 1;
 }
 
@@ -1472,6 +1483,52 @@ message FeedContextCutSummary {
 // Whether the compression is drawn folded.
 message FeedContextCutFold {
   bool folded = 1;
+}
+
+// The entered-worktree payload.
+message FeedWorktreeEntered {
+  // The worktree's path — drawn on the divider AND a jump target: the click
+  // is HOST-raised through the shared editor-popup subroutine (the plan and
+  // findings mechanism), opening the directory in the popup.
+  FeedWorktreePath path = 1;
+  // The branch checked out in it. UNSET when the vendor named none.
+  optional FeedWorktreeBranch branch = 2;
+}
+// The left-worktree payload.
+message FeedWorktreeLeft {
+  // WHAT BECAME OF THE TREE. The set arm is the outcome, and the two draw
+  // differently: a kept tree is somewhere to go, a removed one may have
+  // taken work with it.
+  oneof outcome {
+    FeedWorktreeKept kept = 1;
+    FeedWorktreeRemoved removed = 2;
+  }
+}
+// The tree is still on disk.
+message FeedWorktreeKept {
+  // Its path — drawn and a jump target, as on the entered divider.
+  FeedWorktreePath path = 1;
+}
+// The tree was removed.
+message FeedWorktreeRemoved {
+  // The composed discard line ("3 files, 2 commits discarded"), drawn LOUD
+  // when anything was discarded. UNSET when the vendor stated no discard —
+  // the divider then draws the label alone.
+  optional FeedWorktreeDiscarded discarded = 1;
+}
+// The discard line element.
+message FeedWorktreeDiscarded {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+// A worktree path: drawn, and handed to the editor verbatim on click.
+message FeedWorktreePath {
+  string text = 1;
+}
+// The branch element.
+message FeedWorktreeBranch {
+  // The branch name, drawn verbatim.
+  string text = 1;
 }
 
 // ⑥ A WORKSPACE MERGE, coalesced into ONE bubble. The daemon orchestrates the
