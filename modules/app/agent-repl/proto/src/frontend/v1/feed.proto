@@ -669,6 +669,9 @@ message FeedTurnEndedErrored {
     FeedTurnErrorModelNotFound model_not_found = 15;
     // The account's organization does not allow this OAuth access.
     FeedTurnErrorOauthOrgNotAllowed oauth_org_not_allowed = 16;
+    // The request asked for more output tokens than the model will produce;
+    // retrying it unchanged cannot succeed.
+    FeedTurnErrorMaxOutputTokens max_output_tokens = 17;
   }
 }
 // The billing class. Empty: the arm is the cause; the envelope's message
@@ -678,6 +681,10 @@ message FeedTurnErrorBillingError {}
 message FeedTurnErrorModelNotFound {}
 // The OAuth-organization class. Empty: the arm is the cause.
 message FeedTurnErrorOauthOrgNotAllowed {}
+// The oversized-output-request class. Empty: the arm is the cause; the
+// envelope's message carries the vendor's wording. DISTINCT from max_tokens:
+// that response was cut at the ceiling, this request was refused outright.
+message FeedTurnErrorMaxOutputTokens {}
 // The vendor's sentence element.
 message FeedTurnErrorMessage {
   // The wording, drawn verbatim.
