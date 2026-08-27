@@ -7718,3 +7718,21 @@ Consequences: the daemon's footer resolver builds one tree per push
 instead of three cells; the webapp switches per status arm; every consumer
 of the old FooterSubStatus/FooterStatusActivity top-level types recompiles
 against the per-status wrappers.
+
+### Two footer gaps close (blocked·query_died, waiting·cold_gate); the strip's rendering conventions land in the schema
+
+From the user-requested conversation.v1→footer gap analysis (fast mode,
+permission-mode changes, identity rotation and mid-session MCP faults ruled
+LEFT UNMAPPED as deliberate non-surfaces):
+
+- blocked gains the query_died step + composed activity line: a dead vendor
+  query with a healthy shim previously fell back to bare idle; distinct
+  from disconnected, which is the daemon<->shim link.
+- waiting gains the cold_gate step + composed cost line: a session parked
+  on the cold-context gate previously read plain idle; the feed's gate row
+  stays the answering surface — the footer only says the session is parked.
+- RENDERING CONVENTIONS stated once on the family banner: status and
+  substatus render lowercase ASCII with spaces, never underscores; activity
+  is the rich cell — colorized, formatted, ideally one line — and a
+  statically typed datum in an activity message signals that datum deserves
+  color in the rendered line.
