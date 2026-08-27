@@ -133,6 +133,10 @@ message AgentActivity {
     AgentWebFetch web_fetch = 23;
     // The agent running a web search and receiving result links.
     AgentWebSearch web_search = 24;
+    // The agent arming a background watcher whose events wake it later.
+    // Always detached — a monitor never blocks the turn — so the frames
+    // arrive via the detached-work announcement like a workflow's.
+    AgentMonitor monitor = 25;
   }
 }
 
@@ -2394,6 +2398,81 @@ message AgentWebSearchFailure {
   AgentWebSearchQuery query = 1;
   // Why it could not run, in the shared tool-failure vocabulary.
   AgentToolFailure failure = 2;
+}
+
+// ---- The monitor: a background watcher whose events wake the agent ----
+
+// The agent's background watcher: a shell command or WebSocket whose lines
+// wake the agent as ordinary turn input while it runs. FOOTER-ONLY: no feed
+// bubble exists — the daemon tracks liveness for the footer's monitors chip
+// and panel, and the events themselves are drawn nowhere special.
+message AgentMonitor {
+  // Where the watch stands.
+  oneof result {
+    // The watch is armed. Sent once per stream, at issue.
+    AgentMonitorStart start = 1;
+    // The watch ended on its own — its source closed, or its deadline passed.
+    AgentMonitorEnded ended = 2;
+    // The watch could not be armed at all.
+    AgentMonitorFailure failure = 3;
+  }
+}
+
+// The watch as armed.
+message AgentMonitorStart {
+  // The agent's own one-line account of what it is watching, drawn verbatim
+  // as the footer row's text.
+  string description = 1;
+  // How long the watch may live; the arms are exclusive by the vendor's own
+  // rule (the timeout is ignored when persistent).
+  oneof lifetime {
+    // Killed at a deadline: the configured ceiling in milliseconds.
+    AgentMonitorDeadline deadline = 2;
+    // Runs until stopped or the session ends; the footer row marks it.
+    AgentMonitorPersistent persistent = 3;
+  }
+  // What is being watched. EXPECTED UNMAPPED: no surface draws the source —
+  // the description is the drawn account; carried for fidelity.
+  oneof source {
+    // A shell command whose stdout lines are the events.
+    AgentMonitorCommand command = 4;
+    // A WebSocket whose text frames are the events.
+    AgentMonitorWebsocket websocket = 5;
+  }
+  // When the watch was armed; the footer row's clock ticks from this.
+  int64 started_at_ms = 6;
+}
+
+// The deadline lifetime: the configured ceiling.
+message AgentMonitorDeadline {
+  // The ceiling, in milliseconds, as configured.
+  uint64 timeout_ms = 1;
+}
+
+// The persistent lifetime. Empty: the arm is the whole fact.
+message AgentMonitorPersistent {}
+
+// A command source.
+message AgentMonitorCommand {
+  // The shell command, verbatim.
+  string command = 1;
+}
+
+// A WebSocket source.
+message AgentMonitorWebsocket {
+  // The socket URL, verbatim.
+  string url = 1;
+}
+
+// The watch ended. No cause taxonomy is claimed: the vendor reports only
+// that the watch left the live set. Its events reached the agent as
+// ordinary turn input while it ran; nothing here restates them.
+message AgentMonitorEnded {}
+
+// The watch never armed.
+message AgentMonitorFailure {
+  // Why it could not be armed, in the shared vocabulary.
+  AgentToolFailure failure = 1;
 }
 
 // ---- The unmodeled tool: work this contract does not describe ----
