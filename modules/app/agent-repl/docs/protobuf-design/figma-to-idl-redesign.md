@@ -7782,3 +7782,15 @@ testable function and implementers write unit tests per anticipated edge
 case on those functions. Prescribing unit gaps would duplicate that
 machinery's output and anchor implementers to a list instead of the
 mapping.
+
+### The per-subsystem IMPLEMENTATION PLANNING DOCS open at docs/implementation/ — dead code is NAMED WORK
+
+The user's ruling: dead code the redesign stranded (reconciliation
+deliberately leaves it standing where deleting it would be design work) is
+ROUTED TO THE ORCHESTRATORS as named work in each subsystem's
+implementation planning document — never left for discovery. docs/
+implementation/<subsystem>.md carries each system's dead-code inventory,
+its integration replacement specs (unit specs deliberately absent per the
+mapping-convention amendment), and reconciliation gotchas; MAIN.md will
+carry the e2e specs. Shim and elisp are seeded from their reconciliation
+reports; store/sidecar/webapp/daemon follow as their reports land.
