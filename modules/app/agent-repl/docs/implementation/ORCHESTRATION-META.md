@@ -76,3 +76,11 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     which read as naming a different thing than the component itself.
     Ambiguous shorthand ("lease", "publishers") and over-qualified
     references are the same defect from opposite directions.
+
+12. SITREP = THE ARCHITECTURE OVERVIEW, AND IT PRECEDES EVERY LANDING
+    SUGGESTION — NO EXCEPTIONS. "What's the sitrep" means the settled
+    component overview: fully nested bullets, one brief sentence per
+    entry, covering ALL system components settled so far. Before
+    SUGGESTING that any change be landed, that overview is presented in
+    exactly that format, and every sitrep includes a sync check of the
+    planning docs against the settled state.
