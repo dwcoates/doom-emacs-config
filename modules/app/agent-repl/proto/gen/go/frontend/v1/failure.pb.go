@@ -1,13 +1,12 @@
 // failure.proto — THE FAILURE VOCABULARY A SURFACE DRAWS, and the typed
 // evidence every failure carries.
 //
-// One closed oneof naming every way work can fail ON ITS OWN, plus the typed
-// evidence each kind carries. It is a VOCABULARY FILE, not a component file:
-// nothing here describes a card, a row or a cell. Surfaces embed FailureKind in
-// their own resolved props and render it their own way — the feed's card
-// (feed.proto), the footer's row (footer.proto), the roster's notice
-// (sidebar.proto). One vocabulary, per-surface carriers, exactly as
-// tokens.proto is one economics vocabulary behind several resolved views.
+// One closed oneof naming every way work can fail ON ITS OWN WITHOUT
+// IMPLICATING A FEED ENTRY, plus the typed evidence every failure carries —
+// including the evidence for entry-correlated failures, which the feed's own
+// per-kind `error` arms import from here. It is a VOCABULARY FILE, not a
+// component file: nothing here describes a card, a row or a cell. Surfaces
+// embed the evidence in their own resolved props and render it their own way.
 //
 // WHY IT IS frontend.v1 AND NOT agentrepl.v1. This vocabulary used to live in
 // `agentrepl/v1/shared.proto` and serve two jobs at once: the account a command
@@ -53,7 +52,6 @@
 package frontendv1
 
 import (
-	v1 "agentrepl/proto/shim/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -138,21 +136,30 @@ func (x *VendorFailureContext) GetApiMessageId() string {
 	return ""
 }
 
-// WHAT failed, WHEN NOTHING ASKED. Exactly one arm is always set; an unset
-// FailureKind is a malformed frame and must be rejected rather than rendered as
-// a generic error.
+// WHAT failed, WHEN NOTHING ASKED AND NO ENTRY IS IMPLICATED. Exactly one arm
+// is always set; an unset FailureKind is a malformed frame and must be
+// rejected rather than rendered as a generic error.
 //
-// EVERY ARM HERE IS AN EVENT, NEVER AN ANSWER. A failure that answers a request
-// travels in that request's own `agentrepl.v1.<Method>Response.error` and is
-// not representable here. What is left is exactly the set of failures that
-// happen on their own — which is also exactly the set a feed has to draw,
-// because there is no call for them to be attached to.
+// EVERY ARM HERE IS AN EVENT, NEVER AN ANSWER, AND NEVER A ROW. A failure that
+// answers a request travels in that request's own
+// `agentrepl.v1.<Method>Response.error`. A failure that CORRELATES TO A FEED
+// ENTRY — a response that never settled, a tool that failed, a bubble that was
+// lost, a merge that did not land, a page that could not be completed — is
+// that entry's OWN `error` arm in feed.proto, which imports the evidence
+// message directly (FailureQueryTermination, FailureVendor*, FailureTurnUndriven,
+// FailureKeepAliveWindow*, FailureHistoryReplayTruncated,
+// FailureCompactionColdRead are declared below for exactly that). What is left
+// HERE is the residue that is inherently entry-less: the session dying, the
+// shim degrading, the daemon's own unclassifiable fault, the client's own
+// machinery. None of it is a conversation fact; it is footer/topbar/gate state,
+// and the arms exist so agentrepl.v1 error responses and the host surface can
+// name them.
 //
-// TWO PRODUCERS. The daemon mints every arm below 35 — it is the only thing
-// that can see the shim, the store or the vendor. A frontend mints the arms
-// from 35 up, and ONLY those: they are the failures of the frontend's own
-// machinery, which the daemon cannot observe. The split is by number so it
-// cannot drift, and neither producer may set the other's arms.
+// TWO PRODUCERS. The daemon mints the machinery arms — it is the only thing
+// that can see the shim, the store or the vendor. A frontend mints the
+// client-local arms, and ONLY those: they are the failures of the frontend's
+// own machinery, which the daemon cannot observe. Neither producer may set the
+// other's arms.
 type FailureKind struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Kind:
@@ -161,36 +168,13 @@ type FailureKind struct {
 	//	*FailureKind_ShimSeqRegression
 	//	*FailureKind_ShimDegraded
 	//	*FailureKind_ShimStoreWriteRejected
-	//	*FailureKind_QueryTermination
 	//	*FailureKind_SessionDeleted
 	//	*FailureKind_SessionSuperseded
 	//	*FailureKind_SessionShimDied
 	//	*FailureKind_SessionStartFailed
 	//	*FailureKind_SessionResumeFailed
 	//	*FailureKind_SessionEndedUnclassified
-	//	*FailureKind_HistoryReplayTruncated
-	//	*FailureKind_KeepAliveWindowUnclosed
-	//	*FailureKind_KeepAliveWindowInverted
-	//	*FailureKind_CompactionColdRead
-	//	*FailureKind_TurnUndriven
 	//	*FailureKind_InternalUnclassified
-	//	*FailureKind_ApiAuthenticationFailed
-	//	*FailureKind_ApiBillingError
-	//	*FailureKind_ApiRateLimit
-	//	*FailureKind_ApiInvalidRequest
-	//	*FailureKind_ApiServerError
-	//	*FailureKind_ApiOverloaded
-	//	*FailureKind_ApiOauthOrgNotAllowed
-	//	*FailureKind_ApiModelNotFound
-	//	*FailureKind_ApiNetworkDown
-	//	*FailureKind_ApiRequestFailed
-	//	*FailureKind_ApiUnknown
-	//	*FailureKind_ApiMaxOutputTokens
-	//	*FailureKind_ApiMaxTurns
-	//	*FailureKind_ApiMaxBudget
-	//	*FailureKind_ApiExecutionError
-	//	*FailureKind_ApiRefusal
-	//	*FailureKind_ApiTurnFailed
 	//	*FailureKind_DaemonUnreachable
 	//	*FailureKind_WorkspaceGone
 	//	*FailureKind_BootFailed
@@ -275,15 +259,6 @@ func (x *FailureKind) GetShimStoreWriteRejected() *FailureShimStoreWriteRejected
 	return nil
 }
 
-func (x *FailureKind) GetQueryTermination() *FailureQueryTermination {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_QueryTermination); ok {
-			return x.QueryTermination
-		}
-	}
-	return nil
-}
-
 func (x *FailureKind) GetSessionDeleted() *FailureSessionDeleted {
 	if x != nil {
 		if x, ok := x.Kind.(*FailureKind_SessionDeleted); ok {
@@ -338,208 +313,10 @@ func (x *FailureKind) GetSessionEndedUnclassified() *FailureSessionEndedUnclassi
 	return nil
 }
 
-func (x *FailureKind) GetHistoryReplayTruncated() *FailureHistoryReplayTruncated {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_HistoryReplayTruncated); ok {
-			return x.HistoryReplayTruncated
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetKeepAliveWindowUnclosed() *FailureKeepAliveWindowUnclosed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_KeepAliveWindowUnclosed); ok {
-			return x.KeepAliveWindowUnclosed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetKeepAliveWindowInverted() *FailureKeepAliveWindowInverted {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_KeepAliveWindowInverted); ok {
-			return x.KeepAliveWindowInverted
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetCompactionColdRead() *FailureCompactionColdRead {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_CompactionColdRead); ok {
-			return x.CompactionColdRead
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetTurnUndriven() *FailureTurnUndriven {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_TurnUndriven); ok {
-			return x.TurnUndriven
-		}
-	}
-	return nil
-}
-
 func (x *FailureKind) GetInternalUnclassified() *FailureInternalUnclassified {
 	if x != nil {
 		if x, ok := x.Kind.(*FailureKind_InternalUnclassified); ok {
 			return x.InternalUnclassified
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiAuthenticationFailed() *FailureApiAuthenticationFailed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiAuthenticationFailed); ok {
-			return x.ApiAuthenticationFailed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiBillingError() *FailureApiBillingError {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiBillingError); ok {
-			return x.ApiBillingError
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiRateLimit() *FailureApiRateLimit {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiRateLimit); ok {
-			return x.ApiRateLimit
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiInvalidRequest() *FailureApiInvalidRequest {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiInvalidRequest); ok {
-			return x.ApiInvalidRequest
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiServerError() *FailureApiServerError {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiServerError); ok {
-			return x.ApiServerError
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiOverloaded() *FailureApiOverloaded {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiOverloaded); ok {
-			return x.ApiOverloaded
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiOauthOrgNotAllowed() *FailureApiOAuthOrgNotAllowed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiOauthOrgNotAllowed); ok {
-			return x.ApiOauthOrgNotAllowed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiModelNotFound() *FailureApiModelNotFound {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiModelNotFound); ok {
-			return x.ApiModelNotFound
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiNetworkDown() *FailureApiNetworkDown {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiNetworkDown); ok {
-			return x.ApiNetworkDown
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiRequestFailed() *FailureApiRequestFailed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiRequestFailed); ok {
-			return x.ApiRequestFailed
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiUnknown() *FailureApiUnknown {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiUnknown); ok {
-			return x.ApiUnknown
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiMaxOutputTokens() *FailureApiMaxOutputTokens {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiMaxOutputTokens); ok {
-			return x.ApiMaxOutputTokens
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiMaxTurns() *FailureApiMaxTurns {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiMaxTurns); ok {
-			return x.ApiMaxTurns
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiMaxBudget() *FailureApiMaxBudget {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiMaxBudget); ok {
-			return x.ApiMaxBudget
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiExecutionError() *FailureApiExecutionError {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiExecutionError); ok {
-			return x.ApiExecutionError
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiRefusal() *FailureApiRefusal {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiRefusal); ok {
-			return x.ApiRefusal
-		}
-	}
-	return nil
-}
-
-func (x *FailureKind) GetApiTurnFailed() *FailureApiTurnFailed {
-	if x != nil {
-		if x, ok := x.Kind.(*FailureKind_ApiTurnFailed); ok {
-			return x.ApiTurnFailed
 		}
 	}
 	return nil
@@ -626,185 +403,66 @@ type FailureKind_ShimStoreWriteRejected struct {
 	ShimStoreWriteRejected *FailureShimStoreWriteRejected `protobuf:"bytes,4,opt,name=shim_store_write_rejected,json=shimStoreWriteRejected,proto3,oneof"`
 }
 
-type FailureKind_QueryTermination struct {
-	// The agent sdk query ended unexpectedly — the session is alive but the thing that drives it stopped.
-	QueryTermination *FailureQueryTermination `protobuf:"bytes,5,opt,name=query_termination,json=queryTermination,proto3,oneof"`
-}
-
 type FailureKind_SessionDeleted struct {
 	// The workspace's session was deleted deliberately.
-	SessionDeleted *FailureSessionDeleted `protobuf:"bytes,6,opt,name=session_deleted,json=sessionDeleted,proto3,oneof"`
+	SessionDeleted *FailureSessionDeleted `protobuf:"bytes,5,opt,name=session_deleted,json=sessionDeleted,proto3,oneof"`
 }
 
 type FailureKind_SessionSuperseded struct {
 	// A new session took over this workspace, so the previous one was stopped.
-	SessionSuperseded *FailureSessionSuperseded `protobuf:"bytes,7,opt,name=session_superseded,json=sessionSuperseded,proto3,oneof"`
+	SessionSuperseded *FailureSessionSuperseded `protobuf:"bytes,6,opt,name=session_superseded,json=sessionSuperseded,proto3,oneof"`
 }
 
 type FailureKind_SessionShimDied struct {
 	// The agent process exited.
-	SessionShimDied *FailureSessionShimDied `protobuf:"bytes,8,opt,name=session_shim_died,json=sessionShimDied,proto3,oneof"`
+	SessionShimDied *FailureSessionShimDied `protobuf:"bytes,7,opt,name=session_shim_died,json=sessionShimDied,proto3,oneof"`
 }
 
 type FailureKind_SessionStartFailed struct {
 	// The session could not be started at all.
-	SessionStartFailed *FailureSessionStartFailed `protobuf:"bytes,9,opt,name=session_start_failed,json=sessionStartFailed,proto3,oneof"`
+	SessionStartFailed *FailureSessionStartFailed `protobuf:"bytes,8,opt,name=session_start_failed,json=sessionStartFailed,proto3,oneof"`
 }
 
 type FailureKind_SessionResumeFailed struct {
 	// The vendor conversation could not be resumed without breaking continuity.
-	SessionResumeFailed *FailureSessionResumeFailed `protobuf:"bytes,10,opt,name=session_resume_failed,json=sessionResumeFailed,proto3,oneof"`
+	SessionResumeFailed *FailureSessionResumeFailed `protobuf:"bytes,9,opt,name=session_resume_failed,json=sessionResumeFailed,proto3,oneof"`
 }
 
 type FailureKind_SessionEndedUnclassified struct {
 	// The session ended for a reason the daemon could not classify.
-	SessionEndedUnclassified *FailureSessionEndedUnclassified `protobuf:"bytes,11,opt,name=session_ended_unclassified,json=sessionEndedUnclassified,proto3,oneof"`
-}
-
-type FailureKind_HistoryReplayTruncated struct {
-	// The history re-pull ended before it reached the live window, so what is on screen has a gap in it.
-	HistoryReplayTruncated *FailureHistoryReplayTruncated `protobuf:"bytes,12,opt,name=history_replay_truncated,json=historyReplayTruncated,proto3,oneof"`
-}
-
-type FailureKind_KeepAliveWindowUnclosed struct {
-	// A cache keep-alive window could not be closed, so new conversation is withheld until it is repaired.
-	KeepAliveWindowUnclosed *FailureKeepAliveWindowUnclosed `protobuf:"bytes,13,opt,name=keep_alive_window_unclosed,json=keepAliveWindowUnclosed,proto3,oneof"`
-}
-
-type FailureKind_KeepAliveWindowInverted struct {
-	// A cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation.
-	KeepAliveWindowInverted *FailureKeepAliveWindowInverted `protobuf:"bytes,14,opt,name=keep_alive_window_inverted,json=keepAliveWindowInverted,proto3,oneof"`
-}
-
-type FailureKind_CompactionColdRead struct {
-	// A compaction re-read the whole conversation at the uncached rate instead of from the prompt cache — the exact cost compaction exists to avoid.
-	CompactionColdRead *FailureCompactionColdRead `protobuf:"bytes,15,opt,name=compaction_cold_read,json=compactionColdRead,proto3,oneof"`
-}
-
-type FailureKind_TurnUndriven struct {
-	// A turn stood bound with nothing driving it, so the daemon closed it rather than leaving the workspace thinking forever.
-	TurnUndriven *FailureTurnUndriven `protobuf:"bytes,16,opt,name=turn_undriven,json=turnUndriven,proto3,oneof"`
+	SessionEndedUnclassified *FailureSessionEndedUnclassified `protobuf:"bytes,10,opt,name=session_ended_unclassified,json=sessionEndedUnclassified,proto3,oneof"`
 }
 
 type FailureKind_InternalUnclassified struct {
 	// Agent-repl's own machinery failed in a way it could not classify.
-	InternalUnclassified *FailureInternalUnclassified `protobuf:"bytes,17,opt,name=internal_unclassified,json=internalUnclassified,proto3,oneof"`
-}
-
-type FailureKind_ApiAuthenticationFailed struct {
-	// ---- VENDOR failures: the SDK or the vendor backend refused or concluded the
-	// work. Releasing it needs a human or the vendor, never a retry. This side
-	// of the vocabulary resolves the workspace PURPLE. ----
-	// Authentication failed.
-	ApiAuthenticationFailed *FailureApiAuthenticationFailed `protobuf:"bytes,18,opt,name=api_authentication_failed,json=apiAuthenticationFailed,proto3,oneof"`
-}
-
-type FailureKind_ApiBillingError struct {
-	// A billing problem stopped the request.
-	ApiBillingError *FailureApiBillingError `protobuf:"bytes,19,opt,name=api_billing_error,json=apiBillingError,proto3,oneof"`
-}
-
-type FailureKind_ApiRateLimit struct {
-	// The account is rate limited.
-	ApiRateLimit *FailureApiRateLimit `protobuf:"bytes,20,opt,name=api_rate_limit,json=apiRateLimit,proto3,oneof"`
-}
-
-type FailureKind_ApiInvalidRequest struct {
-	// The vendor rejected the request as invalid.
-	ApiInvalidRequest *FailureApiInvalidRequest `protobuf:"bytes,21,opt,name=api_invalid_request,json=apiInvalidRequest,proto3,oneof"`
-}
-
-type FailureKind_ApiServerError struct {
-	// The vendor returned a server error.
-	ApiServerError *FailureApiServerError `protobuf:"bytes,22,opt,name=api_server_error,json=apiServerError,proto3,oneof"`
-}
-
-type FailureKind_ApiOverloaded struct {
-	// The vendor is overloaded.
-	ApiOverloaded *FailureApiOverloaded `protobuf:"bytes,23,opt,name=api_overloaded,json=apiOverloaded,proto3,oneof"`
-}
-
-type FailureKind_ApiOauthOrgNotAllowed struct {
-	// This organization is not allowed to use the api.
-	ApiOauthOrgNotAllowed *FailureApiOAuthOrgNotAllowed `protobuf:"bytes,24,opt,name=api_oauth_org_not_allowed,json=apiOauthOrgNotAllowed,proto3,oneof"`
-}
-
-type FailureKind_ApiModelNotFound struct {
-	// The requested model does not exist.
-	ApiModelNotFound *FailureApiModelNotFound `protobuf:"bytes,25,opt,name=api_model_not_found,json=apiModelNotFound,proto3,oneof"`
-}
-
-type FailureKind_ApiNetworkDown struct {
-	// The network never reached the vendor.
-	ApiNetworkDown *FailureApiNetworkDown `protobuf:"bytes,26,opt,name=api_network_down,json=apiNetworkDown,proto3,oneof"`
-}
-
-type FailureKind_ApiRequestFailed struct {
-	// The vendor request failed for a reason with no more specific kind.
-	ApiRequestFailed *FailureApiRequestFailed `protobuf:"bytes,27,opt,name=api_request_failed,json=apiRequestFailed,proto3,oneof"`
-}
-
-type FailureKind_ApiUnknown struct {
-	// The vendor failed for a reason the daemon could not classify.
-	ApiUnknown *FailureApiUnknown `protobuf:"bytes,28,opt,name=api_unknown,json=apiUnknown,proto3,oneof"`
-}
-
-type FailureKind_ApiMaxOutputTokens struct {
-	// The response hit the output-token ceiling.
-	ApiMaxOutputTokens *FailureApiMaxOutputTokens `protobuf:"bytes,29,opt,name=api_max_output_tokens,json=apiMaxOutputTokens,proto3,oneof"`
-}
-
-type FailureKind_ApiMaxTurns struct {
-	// The turn hit its maximum-turns limit.
-	ApiMaxTurns *FailureApiMaxTurns `protobuf:"bytes,30,opt,name=api_max_turns,json=apiMaxTurns,proto3,oneof"`
-}
-
-type FailureKind_ApiMaxBudget struct {
-	// The turn hit its budget limit.
-	ApiMaxBudget *FailureApiMaxBudget `protobuf:"bytes,31,opt,name=api_max_budget,json=apiMaxBudget,proto3,oneof"`
-}
-
-type FailureKind_ApiExecutionError struct {
-	// The turn aborted during execution.
-	ApiExecutionError *FailureApiExecutionError `protobuf:"bytes,32,opt,name=api_execution_error,json=apiExecutionError,proto3,oneof"`
-}
-
-type FailureKind_ApiRefusal struct {
-	// The model refused the request.
-	ApiRefusal *FailureApiRefusal `protobuf:"bytes,33,opt,name=api_refusal,json=apiRefusal,proto3,oneof"`
-}
-
-type FailureKind_ApiTurnFailed struct {
-	// The turn ended abnormally for a reason with no more specific kind.
-	ApiTurnFailed *FailureApiTurnFailed `protobuf:"bytes,34,opt,name=api_turn_failed,json=apiTurnFailed,proto3,oneof"`
+	InternalUnclassified *FailureInternalUnclassified `protobuf:"bytes,11,opt,name=internal_unclassified,json=internalUnclassified,proto3,oneof"`
 }
 
 type FailureKind_DaemonUnreachable struct {
 	// ---- CLIENT-LOCAL failures: the one part of this vocabulary a frontend
-	// mints itself. See the note on FailureKind. All resolve BLUE, because a
-	// frontend can only ever observe its own machinery failing.
-	// The daemon never sets one of these arms.
-	DaemonUnreachable *FailureDaemonUnreachable `protobuf:"bytes,35,opt,name=daemon_unreachable,json=daemonUnreachable,proto3,oneof"`
+	// mints itself. All resolve BLUE, because a frontend can only ever
+	// observe its own machinery failing. The daemon never sets one of these.
+	DaemonUnreachable *FailureDaemonUnreachable `protobuf:"bytes,12,opt,name=daemon_unreachable,json=daemonUnreachable,proto3,oneof"`
 }
 
 type FailureKind_WorkspaceGone struct {
-	WorkspaceGone *FailureWorkspaceGone `protobuf:"bytes,36,opt,name=workspace_gone,json=workspaceGone,proto3,oneof"`
+	WorkspaceGone *FailureWorkspaceGone `protobuf:"bytes,13,opt,name=workspace_gone,json=workspaceGone,proto3,oneof"`
 }
 
 type FailureKind_BootFailed struct {
-	BootFailed *FailureBootFailed `protobuf:"bytes,37,opt,name=boot_failed,json=bootFailed,proto3,oneof"`
+	BootFailed *FailureBootFailed `protobuf:"bytes,14,opt,name=boot_failed,json=bootFailed,proto3,oneof"`
 }
 
 type FailureKind_ControlPlaneFailed struct {
-	ControlPlaneFailed *FailureControlPlaneFailed `protobuf:"bytes,38,opt,name=control_plane_failed,json=controlPlaneFailed,proto3,oneof"`
+	ControlPlaneFailed *FailureControlPlaneFailed `protobuf:"bytes,15,opt,name=control_plane_failed,json=controlPlaneFailed,proto3,oneof"`
 }
 
 type FailureKind_FrameUndecodable struct {
-	FrameUndecodable *FailureFrameUndecodable `protobuf:"bytes,39,opt,name=frame_undecodable,json=frameUndecodable,proto3,oneof"`
+	FrameUndecodable *FailureFrameUndecodable `protobuf:"bytes,16,opt,name=frame_undecodable,json=frameUndecodable,proto3,oneof"`
 }
 
 type FailureKind_StaleBundle struct {
-	StaleBundle *FailureStaleBundle `protobuf:"bytes,40,opt,name=stale_bundle,json=staleBundle,proto3,oneof"`
+	StaleBundle *FailureStaleBundle `protobuf:"bytes,17,opt,name=stale_bundle,json=staleBundle,proto3,oneof"`
 }
 
 func (*FailureKind_ShimVersionMismatch) isFailureKind_Kind() {}
@@ -814,8 +472,6 @@ func (*FailureKind_ShimSeqRegression) isFailureKind_Kind() {}
 func (*FailureKind_ShimDegraded) isFailureKind_Kind() {}
 
 func (*FailureKind_ShimStoreWriteRejected) isFailureKind_Kind() {}
-
-func (*FailureKind_QueryTermination) isFailureKind_Kind() {}
 
 func (*FailureKind_SessionDeleted) isFailureKind_Kind() {}
 
@@ -829,51 +485,7 @@ func (*FailureKind_SessionResumeFailed) isFailureKind_Kind() {}
 
 func (*FailureKind_SessionEndedUnclassified) isFailureKind_Kind() {}
 
-func (*FailureKind_HistoryReplayTruncated) isFailureKind_Kind() {}
-
-func (*FailureKind_KeepAliveWindowUnclosed) isFailureKind_Kind() {}
-
-func (*FailureKind_KeepAliveWindowInverted) isFailureKind_Kind() {}
-
-func (*FailureKind_CompactionColdRead) isFailureKind_Kind() {}
-
-func (*FailureKind_TurnUndriven) isFailureKind_Kind() {}
-
 func (*FailureKind_InternalUnclassified) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiAuthenticationFailed) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiBillingError) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiRateLimit) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiInvalidRequest) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiServerError) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiOverloaded) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiOauthOrgNotAllowed) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiModelNotFound) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiNetworkDown) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiRequestFailed) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiUnknown) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiMaxOutputTokens) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiMaxTurns) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiMaxBudget) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiExecutionError) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiRefusal) isFailureKind_Kind() {}
-
-func (*FailureKind_ApiTurnFailed) isFailureKind_Kind() {}
 
 func (*FailureKind_DaemonUnreachable) isFailureKind_Kind() {}
 
@@ -1745,529 +1357,10 @@ func (x *FailureInternalUnclassified) GetCause() string {
 	return ""
 }
 
-// Authentication failed. The account, not the machinery, is what is blocked.
-//
-// Resolves the workspace PURPLE.
-type FailureApiAuthenticationFailed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiAuthenticationFailed) Reset() {
-	*x = FailureApiAuthenticationFailed{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiAuthenticationFailed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiAuthenticationFailed) ProtoMessage() {}
-
-func (x *FailureApiAuthenticationFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiAuthenticationFailed.ProtoReflect.Descriptor instead.
-func (*FailureApiAuthenticationFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *FailureApiAuthenticationFailed) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiAuthenticationFailed) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiAuthenticationFailed) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// A billing problem stopped the request.
-//
-// Resolves the workspace PURPLE.
-type FailureApiBillingError struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiBillingError) Reset() {
-	*x = FailureApiBillingError{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[20]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiBillingError) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiBillingError) ProtoMessage() {}
-
-func (x *FailureApiBillingError) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[20]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiBillingError.ProtoReflect.Descriptor instead.
-func (*FailureApiBillingError) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{20}
-}
-
-func (x *FailureApiBillingError) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiBillingError) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiBillingError) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The account is rate limited.
-//
-// Resolves the workspace PURPLE.
-type FailureApiRateLimit struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiRateLimit) Reset() {
-	*x = FailureApiRateLimit{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[21]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiRateLimit) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiRateLimit) ProtoMessage() {}
-
-func (x *FailureApiRateLimit) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[21]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiRateLimit.ProtoReflect.Descriptor instead.
-func (*FailureApiRateLimit) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{21}
-}
-
-func (x *FailureApiRateLimit) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiRateLimit) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiRateLimit) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The vendor rejected the request as invalid.
-//
-// Resolves the workspace PURPLE.
-type FailureApiInvalidRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiInvalidRequest) Reset() {
-	*x = FailureApiInvalidRequest{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[22]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiInvalidRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiInvalidRequest) ProtoMessage() {}
-
-func (x *FailureApiInvalidRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[22]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiInvalidRequest.ProtoReflect.Descriptor instead.
-func (*FailureApiInvalidRequest) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{22}
-}
-
-func (x *FailureApiInvalidRequest) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiInvalidRequest) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiInvalidRequest) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The vendor returned a server error.
-//
-// Resolves the workspace PURPLE.
-type FailureApiServerError struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiServerError) Reset() {
-	*x = FailureApiServerError{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[23]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiServerError) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiServerError) ProtoMessage() {}
-
-func (x *FailureApiServerError) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[23]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiServerError.ProtoReflect.Descriptor instead.
-func (*FailureApiServerError) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{23}
-}
-
-func (x *FailureApiServerError) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiServerError) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiServerError) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The vendor is overloaded.
-//
-// Resolves the workspace PURPLE.
-type FailureApiOverloaded struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiOverloaded) Reset() {
-	*x = FailureApiOverloaded{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[24]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiOverloaded) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiOverloaded) ProtoMessage() {}
-
-func (x *FailureApiOverloaded) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[24]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiOverloaded.ProtoReflect.Descriptor instead.
-func (*FailureApiOverloaded) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{24}
-}
-
-func (x *FailureApiOverloaded) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiOverloaded) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiOverloaded) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// This organization is not allowed to use the API.
-//
-// Resolves the workspace PURPLE.
-type FailureApiOAuthOrgNotAllowed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiOAuthOrgNotAllowed) Reset() {
-	*x = FailureApiOAuthOrgNotAllowed{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[25]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiOAuthOrgNotAllowed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiOAuthOrgNotAllowed) ProtoMessage() {}
-
-func (x *FailureApiOAuthOrgNotAllowed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[25]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiOAuthOrgNotAllowed.ProtoReflect.Descriptor instead.
-func (*FailureApiOAuthOrgNotAllowed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{25}
-}
-
-func (x *FailureApiOAuthOrgNotAllowed) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiOAuthOrgNotAllowed) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiOAuthOrgNotAllowed) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The requested model does not exist.
-//
-// Resolves the workspace PURPLE.
-type FailureApiModelNotFound struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The model that was asked for, so the card names it.
-	Model         string `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiModelNotFound) Reset() {
-	*x = FailureApiModelNotFound{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[26]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiModelNotFound) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiModelNotFound) ProtoMessage() {}
-
-func (x *FailureApiModelNotFound) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[26]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiModelNotFound.ProtoReflect.Descriptor instead.
-func (*FailureApiModelNotFound) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{26}
-}
-
-func (x *FailureApiModelNotFound) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiModelNotFound) GetModel() string {
-	if x != nil {
-		return x.Model
-	}
-	return ""
-}
-
 // The network never reached the vendor. Classed with the vendor rather than with the machinery: nothing local is broken, and the work did not happen.
 //
 // Resolves the workspace PURPLE.
-type FailureApiNetworkDown struct {
+type FailureVendorNetworkDown struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The vendor conversation and request this failure pertains to.
 	Vendor        *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
@@ -2275,21 +1368,21 @@ type FailureApiNetworkDown struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FailureApiNetworkDown) Reset() {
-	*x = FailureApiNetworkDown{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[27]
+func (x *FailureVendorNetworkDown) Reset() {
+	*x = FailureVendorNetworkDown{}
+	mi := &file_frontend_v1_failure_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FailureApiNetworkDown) String() string {
+func (x *FailureVendorNetworkDown) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FailureApiNetworkDown) ProtoMessage() {}
+func (*FailureVendorNetworkDown) ProtoMessage() {}
 
-func (x *FailureApiNetworkDown) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[27]
+func (x *FailureVendorNetworkDown) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_failure_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2300,192 +1393,12 @@ func (x *FailureApiNetworkDown) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FailureApiNetworkDown.ProtoReflect.Descriptor instead.
-func (*FailureApiNetworkDown) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{27}
+// Deprecated: Use FailureVendorNetworkDown.ProtoReflect.Descriptor instead.
+func (*FailureVendorNetworkDown) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{19}
 }
 
-func (x *FailureApiNetworkDown) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-// The vendor request failed for a reason with no more specific kind.
-//
-// Resolves the workspace PURPLE.
-type FailureApiRequestFailed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiRequestFailed) Reset() {
-	*x = FailureApiRequestFailed{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[28]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiRequestFailed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiRequestFailed) ProtoMessage() {}
-
-func (x *FailureApiRequestFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[28]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiRequestFailed.ProtoReflect.Descriptor instead.
-func (*FailureApiRequestFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{28}
-}
-
-func (x *FailureApiRequestFailed) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiRequestFailed) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiRequestFailed) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The vendor failed for a reason the daemon could not classify.
-//
-// Resolves the workspace PURPLE.
-type FailureApiUnknown struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	// The HTTP status the vendor returned. 0 when the request never got one.
-	HttpStatus int32 `protobuf:"varint,2,opt,name=http_status,json=httpStatus,proto3" json:"http_status,omitempty"`
-	// How many attempts were made before giving up. 0 means it was not retried.
-	Attempts      int32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiUnknown) Reset() {
-	*x = FailureApiUnknown{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[29]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiUnknown) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiUnknown) ProtoMessage() {}
-
-func (x *FailureApiUnknown) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[29]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiUnknown.ProtoReflect.Descriptor instead.
-func (*FailureApiUnknown) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{29}
-}
-
-func (x *FailureApiUnknown) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-func (x *FailureApiUnknown) GetHttpStatus() int32 {
-	if x != nil {
-		return x.HttpStatus
-	}
-	return 0
-}
-
-func (x *FailureApiUnknown) GetAttempts() int32 {
-	if x != nil {
-		return x.Attempts
-	}
-	return 0
-}
-
-// The response hit the output-token ceiling.
-//
-// Resolves the workspace PURPLE.
-type FailureApiMaxOutputTokens struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor        *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiMaxOutputTokens) Reset() {
-	*x = FailureApiMaxOutputTokens{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[30]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiMaxOutputTokens) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiMaxOutputTokens) ProtoMessage() {}
-
-func (x *FailureApiMaxOutputTokens) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[30]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiMaxOutputTokens.ProtoReflect.Descriptor instead.
-func (*FailureApiMaxOutputTokens) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{30}
-}
-
-func (x *FailureApiMaxOutputTokens) GetVendor() *VendorFailureContext {
+func (x *FailureVendorNetworkDown) GetVendor() *VendorFailureContext {
 	if x != nil {
 		return x.Vendor
 	}
@@ -2495,7 +1408,7 @@ func (x *FailureApiMaxOutputTokens) GetVendor() *VendorFailureContext {
 // The turn hit its maximum-turns limit. A limit the user set, reached — not a fault.
 //
 // Resolves the workspace PURPLE.
-type FailureApiMaxTurns struct {
+type FailureVendorMaxTurns struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The vendor conversation and request this failure pertains to.
 	Vendor        *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
@@ -2503,21 +1416,21 @@ type FailureApiMaxTurns struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FailureApiMaxTurns) Reset() {
-	*x = FailureApiMaxTurns{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[31]
+func (x *FailureVendorMaxTurns) Reset() {
+	*x = FailureVendorMaxTurns{}
+	mi := &file_frontend_v1_failure_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FailureApiMaxTurns) String() string {
+func (x *FailureVendorMaxTurns) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FailureApiMaxTurns) ProtoMessage() {}
+func (*FailureVendorMaxTurns) ProtoMessage() {}
 
-func (x *FailureApiMaxTurns) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[31]
+func (x *FailureVendorMaxTurns) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_failure_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2528,12 +1441,12 @@ func (x *FailureApiMaxTurns) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FailureApiMaxTurns.ProtoReflect.Descriptor instead.
-func (*FailureApiMaxTurns) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{31}
+// Deprecated: Use FailureVendorMaxTurns.ProtoReflect.Descriptor instead.
+func (*FailureVendorMaxTurns) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{20}
 }
 
-func (x *FailureApiMaxTurns) GetVendor() *VendorFailureContext {
+func (x *FailureVendorMaxTurns) GetVendor() *VendorFailureContext {
 	if x != nil {
 		return x.Vendor
 	}
@@ -2543,7 +1456,7 @@ func (x *FailureApiMaxTurns) GetVendor() *VendorFailureContext {
 // The turn hit its budget limit. Also a chosen limit, reached.
 //
 // Resolves the workspace PURPLE.
-type FailureApiMaxBudget struct {
+type FailureVendorMaxBudget struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The vendor conversation and request this failure pertains to.
 	Vendor        *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
@@ -2551,21 +1464,21 @@ type FailureApiMaxBudget struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FailureApiMaxBudget) Reset() {
-	*x = FailureApiMaxBudget{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[32]
+func (x *FailureVendorMaxBudget) Reset() {
+	*x = FailureVendorMaxBudget{}
+	mi := &file_frontend_v1_failure_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FailureApiMaxBudget) String() string {
+func (x *FailureVendorMaxBudget) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FailureApiMaxBudget) ProtoMessage() {}
+func (*FailureVendorMaxBudget) ProtoMessage() {}
 
-func (x *FailureApiMaxBudget) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[32]
+func (x *FailureVendorMaxBudget) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_failure_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2576,12 +1489,12 @@ func (x *FailureApiMaxBudget) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FailureApiMaxBudget.ProtoReflect.Descriptor instead.
-func (*FailureApiMaxBudget) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{32}
+// Deprecated: Use FailureVendorMaxBudget.ProtoReflect.Descriptor instead.
+func (*FailureVendorMaxBudget) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{21}
 }
 
-func (x *FailureApiMaxBudget) GetVendor() *VendorFailureContext {
+func (x *FailureVendorMaxBudget) GetVendor() *VendorFailureContext {
 	if x != nil {
 		return x.Vendor
 	}
@@ -2591,7 +1504,7 @@ func (x *FailureApiMaxBudget) GetVendor() *VendorFailureContext {
 // The turn aborted during execution.
 //
 // Resolves the workspace PURPLE.
-type FailureApiExecutionError struct {
+type FailureVendorExecutionError struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The vendor conversation and request this failure pertains to.
 	Vendor        *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
@@ -2599,21 +1512,21 @@ type FailureApiExecutionError struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FailureApiExecutionError) Reset() {
-	*x = FailureApiExecutionError{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[33]
+func (x *FailureVendorExecutionError) Reset() {
+	*x = FailureVendorExecutionError{}
+	mi := &file_frontend_v1_failure_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FailureApiExecutionError) String() string {
+func (x *FailureVendorExecutionError) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FailureApiExecutionError) ProtoMessage() {}
+func (*FailureVendorExecutionError) ProtoMessage() {}
 
-func (x *FailureApiExecutionError) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[33]
+func (x *FailureVendorExecutionError) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_failure_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2624,60 +1537,12 @@ func (x *FailureApiExecutionError) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FailureApiExecutionError.ProtoReflect.Descriptor instead.
-func (*FailureApiExecutionError) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{33}
+// Deprecated: Use FailureVendorExecutionError.ProtoReflect.Descriptor instead.
+func (*FailureVendorExecutionError) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{22}
 }
 
-func (x *FailureApiExecutionError) GetVendor() *VendorFailureContext {
-	if x != nil {
-		return x.Vendor
-	}
-	return nil
-}
-
-// The model refused the request.
-//
-// Resolves the workspace PURPLE.
-type FailureApiRefusal struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor conversation and request this failure pertains to.
-	Vendor        *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureApiRefusal) Reset() {
-	*x = FailureApiRefusal{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[34]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureApiRefusal) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureApiRefusal) ProtoMessage() {}
-
-func (x *FailureApiRefusal) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[34]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureApiRefusal.ProtoReflect.Descriptor instead.
-func (*FailureApiRefusal) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{34}
-}
-
-func (x *FailureApiRefusal) GetVendor() *VendorFailureContext {
+func (x *FailureVendorExecutionError) GetVendor() *VendorFailureContext {
 	if x != nil {
 		return x.Vendor
 	}
@@ -2687,7 +1552,7 @@ func (x *FailureApiRefusal) GetVendor() *VendorFailureContext {
 // The turn ended abnormally for a reason with no more specific kind.
 //
 // Resolves the workspace PURPLE.
-type FailureApiTurnFailed struct {
+type FailureVendorTurnFailed struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The vendor conversation and request this failure pertains to.
 	Vendor *VendorFailureContext `protobuf:"bytes,1,opt,name=vendor,proto3" json:"vendor,omitempty"`
@@ -2698,21 +1563,21 @@ type FailureApiTurnFailed struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FailureApiTurnFailed) Reset() {
-	*x = FailureApiTurnFailed{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[35]
+func (x *FailureVendorTurnFailed) Reset() {
+	*x = FailureVendorTurnFailed{}
+	mi := &file_frontend_v1_failure_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FailureApiTurnFailed) String() string {
+func (x *FailureVendorTurnFailed) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FailureApiTurnFailed) ProtoMessage() {}
+func (*FailureVendorTurnFailed) ProtoMessage() {}
 
-func (x *FailureApiTurnFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[35]
+func (x *FailureVendorTurnFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_failure_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2723,19 +1588,19 @@ func (x *FailureApiTurnFailed) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FailureApiTurnFailed.ProtoReflect.Descriptor instead.
-func (*FailureApiTurnFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{35}
+// Deprecated: Use FailureVendorTurnFailed.ProtoReflect.Descriptor instead.
+func (*FailureVendorTurnFailed) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{23}
 }
 
-func (x *FailureApiTurnFailed) GetVendor() *VendorFailureContext {
+func (x *FailureVendorTurnFailed) GetVendor() *VendorFailureContext {
 	if x != nil {
 		return x.Vendor
 	}
 	return nil
 }
 
-func (x *FailureApiTurnFailed) GetStopReason() string {
+func (x *FailureVendorTurnFailed) GetStopReason() string {
 	if x != nil {
 		return x.StopReason
 	}
@@ -2761,7 +1626,7 @@ type FailureDaemonUnreachable struct {
 
 func (x *FailureDaemonUnreachable) Reset() {
 	*x = FailureDaemonUnreachable{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[36]
+	mi := &file_frontend_v1_failure_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2773,7 +1638,7 @@ func (x *FailureDaemonUnreachable) String() string {
 func (*FailureDaemonUnreachable) ProtoMessage() {}
 
 func (x *FailureDaemonUnreachable) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[36]
+	mi := &file_frontend_v1_failure_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2786,7 +1651,7 @@ func (x *FailureDaemonUnreachable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureDaemonUnreachable.ProtoReflect.Descriptor instead.
 func (*FailureDaemonUnreachable) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{36}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *FailureDaemonUnreachable) GetCloseCode() int32 {
@@ -2815,7 +1680,7 @@ type FailureWorkspaceGone struct {
 
 func (x *FailureWorkspaceGone) Reset() {
 	*x = FailureWorkspaceGone{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[37]
+	mi := &file_frontend_v1_failure_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2827,7 +1692,7 @@ func (x *FailureWorkspaceGone) String() string {
 func (*FailureWorkspaceGone) ProtoMessage() {}
 
 func (x *FailureWorkspaceGone) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[37]
+	mi := &file_frontend_v1_failure_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2840,7 +1705,7 @@ func (x *FailureWorkspaceGone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureWorkspaceGone.ProtoReflect.Descriptor instead.
 func (*FailureWorkspaceGone) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{37}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{25}
 }
 
 // The frontend could not start at all.
@@ -2860,7 +1725,7 @@ type FailureBootFailed struct {
 
 func (x *FailureBootFailed) Reset() {
 	*x = FailureBootFailed{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[38]
+	mi := &file_frontend_v1_failure_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2872,7 +1737,7 @@ func (x *FailureBootFailed) String() string {
 func (*FailureBootFailed) ProtoMessage() {}
 
 func (x *FailureBootFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[38]
+	mi := &file_frontend_v1_failure_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2885,7 +1750,7 @@ func (x *FailureBootFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureBootFailed.ProtoReflect.Descriptor instead.
 func (*FailureBootFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{38}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *FailureBootFailed) GetCause() string {
@@ -2912,7 +1777,7 @@ type FailureControlPlaneFailed struct {
 
 func (x *FailureControlPlaneFailed) Reset() {
 	*x = FailureControlPlaneFailed{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[39]
+	mi := &file_frontend_v1_failure_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2924,7 +1789,7 @@ func (x *FailureControlPlaneFailed) String() string {
 func (*FailureControlPlaneFailed) ProtoMessage() {}
 
 func (x *FailureControlPlaneFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[39]
+	mi := &file_frontend_v1_failure_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2937,7 +1802,7 @@ func (x *FailureControlPlaneFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureControlPlaneFailed.ProtoReflect.Descriptor instead.
 func (*FailureControlPlaneFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{39}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *FailureControlPlaneFailed) GetWhat() string {
@@ -2970,7 +1835,7 @@ type FailureFrameUndecodable struct {
 
 func (x *FailureFrameUndecodable) Reset() {
 	*x = FailureFrameUndecodable{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[40]
+	mi := &file_frontend_v1_failure_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2982,7 +1847,7 @@ func (x *FailureFrameUndecodable) String() string {
 func (*FailureFrameUndecodable) ProtoMessage() {}
 
 func (x *FailureFrameUndecodable) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[40]
+	mi := &file_frontend_v1_failure_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2995,7 +1860,7 @@ func (x *FailureFrameUndecodable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureFrameUndecodable.ProtoReflect.Descriptor instead.
 func (*FailureFrameUndecodable) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{40}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *FailureFrameUndecodable) GetCause() string {
@@ -3028,7 +1893,7 @@ type FailureStaleBundle struct {
 
 func (x *FailureStaleBundle) Reset() {
 	*x = FailureStaleBundle{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[41]
+	mi := &file_frontend_v1_failure_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3040,7 +1905,7 @@ func (x *FailureStaleBundle) String() string {
 func (*FailureStaleBundle) ProtoMessage() {}
 
 func (x *FailureStaleBundle) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[41]
+	mi := &file_frontend_v1_failure_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3053,7 +1918,7 @@ func (x *FailureStaleBundle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureStaleBundle.ProtoReflect.Descriptor instead.
 func (*FailureStaleBundle) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{41}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *FailureStaleBundle) GetDetail() string {
@@ -3101,7 +1966,7 @@ type QueryTerminationFailure struct {
 
 func (x *QueryTerminationFailure) Reset() {
 	*x = QueryTerminationFailure{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[42]
+	mi := &file_frontend_v1_failure_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3113,7 +1978,7 @@ func (x *QueryTerminationFailure) String() string {
 func (*QueryTerminationFailure) ProtoMessage() {}
 
 func (x *QueryTerminationFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[42]
+	mi := &file_frontend_v1_failure_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3126,7 +1991,7 @@ func (x *QueryTerminationFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryTerminationFailure.ProtoReflect.Descriptor instead.
 func (*QueryTerminationFailure) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{42}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *QueryTerminationFailure) GetQueryInstanceId() string {
@@ -3152,7 +2017,7 @@ func (x *QueryTerminationFailure) GetVendorSessionId() string {
 	return ""
 }
 
-func (x *QueryTerminationFailure) GetVendorSessionIdentityUnavailable() *v1.VendorSessionIdentityUnavailable {
+func (x *QueryTerminationFailure) GetVendorSessionIdentityUnavailable() *QueryTerminationVendorIdentityUnavailable {
 	if x != nil {
 		if x, ok := x.VendorIdentity.(*QueryTerminationFailure_VendorSessionIdentityUnavailable); ok {
 			return x.VendorSessionIdentityUnavailable
@@ -3175,7 +2040,7 @@ func (x *QueryTerminationFailure) GetReason() isQueryTerminationFailure_Reason {
 	return nil
 }
 
-func (x *QueryTerminationFailure) GetUnexpectedEof() *v1.UnexpectedQueryEof {
+func (x *QueryTerminationFailure) GetUnexpectedEof() *QueryTerminationUnexpectedEof {
 	if x != nil {
 		if x, ok := x.Reason.(*QueryTerminationFailure_UnexpectedEof); ok {
 			return x.UnexpectedEof
@@ -3184,7 +2049,7 @@ func (x *QueryTerminationFailure) GetUnexpectedEof() *v1.UnexpectedQueryEof {
 	return nil
 }
 
-func (x *QueryTerminationFailure) GetIteratorFailure() *v1.QueryIteratorFailure {
+func (x *QueryTerminationFailure) GetIteratorFailure() *QueryTerminationIteratorFailure {
 	if x != nil {
 		if x, ok := x.Reason.(*QueryTerminationFailure_IteratorFailure); ok {
 			return x.IteratorFailure
@@ -3193,7 +2058,7 @@ func (x *QueryTerminationFailure) GetIteratorFailure() *v1.QueryIteratorFailure 
 	return nil
 }
 
-func (x *QueryTerminationFailure) GetStartupFailure() *v1.QueryStartupFailure {
+func (x *QueryTerminationFailure) GetStartupFailure() *QueryTerminationStartupFailure {
 	if x != nil {
 		if x, ok := x.Reason.(*QueryTerminationFailure_StartupFailure); ok {
 			return x.StartupFailure
@@ -3213,7 +2078,7 @@ type QueryTerminationFailure_VendorSessionId struct {
 
 type QueryTerminationFailure_VendorSessionIdentityUnavailable struct {
 	// Records that the query ended before the SDK exposed a vendor session.
-	VendorSessionIdentityUnavailable *v1.VendorSessionIdentityUnavailable `protobuf:"bytes,3,opt,name=vendor_session_identity_unavailable,json=vendorSessionIdentityUnavailable,proto3,oneof"`
+	VendorSessionIdentityUnavailable *QueryTerminationVendorIdentityUnavailable `protobuf:"bytes,3,opt,name=vendor_session_identity_unavailable,json=vendorSessionIdentityUnavailable,proto3,oneof"`
 }
 
 func (*QueryTerminationFailure_VendorSessionId) isQueryTerminationFailure_VendorIdentity() {}
@@ -3227,17 +2092,17 @@ type isQueryTerminationFailure_Reason interface {
 
 type QueryTerminationFailure_UnexpectedEof struct {
 	// The SDK iterator ended without an intentional shim shutdown.
-	UnexpectedEof *v1.UnexpectedQueryEof `protobuf:"bytes,5,opt,name=unexpected_eof,json=unexpectedEof,proto3,oneof"`
+	UnexpectedEof *QueryTerminationUnexpectedEof `protobuf:"bytes,5,opt,name=unexpected_eof,json=unexpectedEof,proto3,oneof"`
 }
 
 type QueryTerminationFailure_IteratorFailure struct {
 	// The SDK iterator threw an error, including its complete cause.
-	IteratorFailure *v1.QueryIteratorFailure `protobuf:"bytes,6,opt,name=iterator_failure,json=iteratorFailure,proto3,oneof"`
+	IteratorFailure *QueryTerminationIteratorFailure `protobuf:"bytes,6,opt,name=iterator_failure,json=iteratorFailure,proto3,oneof"`
 }
 
 type QueryTerminationFailure_StartupFailure struct {
 	// Query initialization failed, including its complete cause.
-	StartupFailure *v1.QueryStartupFailure `protobuf:"bytes,7,opt,name=startup_failure,json=startupFailure,proto3,oneof"`
+	StartupFailure *QueryTerminationStartupFailure `protobuf:"bytes,7,opt,name=startup_failure,json=startupFailure,proto3,oneof"`
 }
 
 func (*QueryTerminationFailure_UnexpectedEof) isQueryTerminationFailure_Reason() {}
@@ -3245,6 +2110,172 @@ func (*QueryTerminationFailure_UnexpectedEof) isQueryTerminationFailure_Reason()
 func (*QueryTerminationFailure_IteratorFailure) isQueryTerminationFailure_Reason() {}
 
 func (*QueryTerminationFailure_StartupFailure) isQueryTerminationFailure_Reason() {}
+
+// The query ended before the SDK exposed a vendor session.
+type QueryTerminationVendorIdentityUnavailable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryTerminationVendorIdentityUnavailable) Reset() {
+	*x = QueryTerminationVendorIdentityUnavailable{}
+	mi := &file_frontend_v1_failure_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryTerminationVendorIdentityUnavailable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryTerminationVendorIdentityUnavailable) ProtoMessage() {}
+
+func (x *QueryTerminationVendorIdentityUnavailable) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_failure_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryTerminationVendorIdentityUnavailable.ProtoReflect.Descriptor instead.
+func (*QueryTerminationVendorIdentityUnavailable) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{31}
+}
+
+// The SDK iterator ended without an intentional shim shutdown.
+type QueryTerminationUnexpectedEof struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryTerminationUnexpectedEof) Reset() {
+	*x = QueryTerminationUnexpectedEof{}
+	mi := &file_frontend_v1_failure_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryTerminationUnexpectedEof) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryTerminationUnexpectedEof) ProtoMessage() {}
+
+func (x *QueryTerminationUnexpectedEof) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_failure_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryTerminationUnexpectedEof.ProtoReflect.Descriptor instead.
+func (*QueryTerminationUnexpectedEof) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{32}
+}
+
+// The SDK iterator threw an error.
+type QueryTerminationIteratorFailure struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The complete cause, as the SDK reported it.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryTerminationIteratorFailure) Reset() {
+	*x = QueryTerminationIteratorFailure{}
+	mi := &file_frontend_v1_failure_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryTerminationIteratorFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryTerminationIteratorFailure) ProtoMessage() {}
+
+func (x *QueryTerminationIteratorFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_failure_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryTerminationIteratorFailure.ProtoReflect.Descriptor instead.
+func (*QueryTerminationIteratorFailure) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *QueryTerminationIteratorFailure) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// Query initialization failed.
+type QueryTerminationStartupFailure struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The complete cause, as the SDK reported it.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryTerminationStartupFailure) Reset() {
+	*x = QueryTerminationStartupFailure{}
+	mi := &file_frontend_v1_failure_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryTerminationStartupFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryTerminationStartupFailure) ProtoMessage() {}
+
+func (x *QueryTerminationStartupFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_failure_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryTerminationStartupFailure.ProtoReflect.Descriptor instead.
+func (*QueryTerminationStartupFailure) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *QueryTerminationStartupFailure) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
 
 // Machine-readable evidence that a requested Claude conversation could not
 // be resumed without violating conversation continuity.
@@ -3291,7 +2322,7 @@ type SessionResumeFailure struct {
 
 func (x *SessionResumeFailure) Reset() {
 	*x = SessionResumeFailure{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[43]
+	mi := &file_frontend_v1_failure_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3303,7 +2334,7 @@ func (x *SessionResumeFailure) String() string {
 func (*SessionResumeFailure) ProtoMessage() {}
 
 func (x *SessionResumeFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[43]
+	mi := &file_frontend_v1_failure_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3316,7 +2347,7 @@ func (x *SessionResumeFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionResumeFailure.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailure) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{43}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SessionResumeFailure) GetClaudeSessionId() string {
@@ -3474,7 +2505,7 @@ type SessionResumeFailureCreate struct {
 
 func (x *SessionResumeFailureCreate) Reset() {
 	*x = SessionResumeFailureCreate{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[44]
+	mi := &file_frontend_v1_failure_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3486,7 +2517,7 @@ func (x *SessionResumeFailureCreate) String() string {
 func (*SessionResumeFailureCreate) ProtoMessage() {}
 
 func (x *SessionResumeFailureCreate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[44]
+	mi := &file_frontend_v1_failure_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3499,7 +2530,7 @@ func (x *SessionResumeFailureCreate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionResumeFailureCreate.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureCreate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{44}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{36}
 }
 
 // Marks a resume failure encountered while restoring an allocated agent-repl
@@ -3512,7 +2543,7 @@ type SessionResumeFailureAutomaticRestore struct {
 
 func (x *SessionResumeFailureAutomaticRestore) Reset() {
 	*x = SessionResumeFailureAutomaticRestore{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[45]
+	mi := &file_frontend_v1_failure_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3524,7 +2555,7 @@ func (x *SessionResumeFailureAutomaticRestore) String() string {
 func (*SessionResumeFailureAutomaticRestore) ProtoMessage() {}
 
 func (x *SessionResumeFailureAutomaticRestore) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[45]
+	mi := &file_frontend_v1_failure_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3537,7 +2568,7 @@ func (x *SessionResumeFailureAutomaticRestore) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use SessionResumeFailureAutomaticRestore.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureAutomaticRestore) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{45}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{37}
 }
 
 // Records every transcript location examined for the authoritative Claude
@@ -3552,7 +2583,7 @@ type SessionResumeFailureTranscriptUnavailable struct {
 
 func (x *SessionResumeFailureTranscriptUnavailable) Reset() {
 	*x = SessionResumeFailureTranscriptUnavailable{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[46]
+	mi := &file_frontend_v1_failure_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3564,7 +2595,7 @@ func (x *SessionResumeFailureTranscriptUnavailable) String() string {
 func (*SessionResumeFailureTranscriptUnavailable) ProtoMessage() {}
 
 func (x *SessionResumeFailureTranscriptUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[46]
+	mi := &file_frontend_v1_failure_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3577,7 +2608,7 @@ func (x *SessionResumeFailureTranscriptUnavailable) ProtoReflect() protoreflect.
 
 // Deprecated: Use SessionResumeFailureTranscriptUnavailable.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureTranscriptUnavailable) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{46}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *SessionResumeFailureTranscriptUnavailable) GetSearchedPaths() []string {
@@ -3600,7 +2631,7 @@ type SessionResumeFailureIdentityMismatch struct {
 
 func (x *SessionResumeFailureIdentityMismatch) Reset() {
 	*x = SessionResumeFailureIdentityMismatch{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[47]
+	mi := &file_frontend_v1_failure_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3612,7 +2643,7 @@ func (x *SessionResumeFailureIdentityMismatch) String() string {
 func (*SessionResumeFailureIdentityMismatch) ProtoMessage() {}
 
 func (x *SessionResumeFailureIdentityMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[47]
+	mi := &file_frontend_v1_failure_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3625,7 +2656,7 @@ func (x *SessionResumeFailureIdentityMismatch) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use SessionResumeFailureIdentityMismatch.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureIdentityMismatch) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{47}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *SessionResumeFailureIdentityMismatch) GetReplacementClaudeSessionId() string {
@@ -3648,7 +2679,7 @@ type SessionResumeFailureBringUpFailure struct {
 
 func (x *SessionResumeFailureBringUpFailure) Reset() {
 	*x = SessionResumeFailureBringUpFailure{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[48]
+	mi := &file_frontend_v1_failure_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3660,7 +2691,7 @@ func (x *SessionResumeFailureBringUpFailure) String() string {
 func (*SessionResumeFailureBringUpFailure) ProtoMessage() {}
 
 func (x *SessionResumeFailureBringUpFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[48]
+	mi := &file_frontend_v1_failure_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3673,7 +2704,7 @@ func (x *SessionResumeFailureBringUpFailure) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use SessionResumeFailureBringUpFailure.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureBringUpFailure) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{48}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *SessionResumeFailureBringUpFailure) GetCause() string {
@@ -3699,7 +2730,7 @@ type FailureCardRef struct {
 
 func (x *FailureCardRef) Reset() {
 	*x = FailureCardRef{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[49]
+	mi := &file_frontend_v1_failure_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3711,7 +2742,7 @@ func (x *FailureCardRef) String() string {
 func (*FailureCardRef) ProtoMessage() {}
 
 func (x *FailureCardRef) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[49]
+	mi := &file_frontend_v1_failure_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3724,7 +2755,7 @@ func (x *FailureCardRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureCardRef.ProtoReflect.Descriptor instead.
 func (*FailureCardRef) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{49}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *FailureCardRef) GetCardUuid() string {
@@ -3738,56 +2769,31 @@ var File_frontend_v1_failure_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_failure_proto_rawDesc = "" +
 	"\n" +
-	"\x19frontend/v1/failure.proto\x12\vfrontend.v1\x1a\x12shim/v1/core.proto\"\x8e\x01\n" +
+	"\x19frontend/v1/failure.proto\x12\vfrontend.v1\"\x8e\x01\n" +
 	"\x14VendorFailureContext\x12*\n" +
 	"\x11claude_session_id\x18\x01 \x01(\tR\x0fclaudeSessionId\x12$\n" +
 	"\x0eapi_request_id\x18\x02 \x01(\tR\fapiRequestId\x12$\n" +
-	"\x0eapi_message_id\x18\x03 \x01(\tR\fapiMessageId\"\x96\x1b\n" +
+	"\x0eapi_message_id\x18\x03 \x01(\tR\fapiMessageId\"\xe1\v\n" +
 	"\vFailureKind\x12]\n" +
 	"\x15shim_version_mismatch\x18\x01 \x01(\v2'.frontend.v1.FailureShimVersionMismatchH\x00R\x13shimVersionMismatch\x12W\n" +
 	"\x13shim_seq_regression\x18\x02 \x01(\v2%.frontend.v1.FailureShimSeqRegressionH\x00R\x11shimSeqRegression\x12G\n" +
 	"\rshim_degraded\x18\x03 \x01(\v2 .frontend.v1.FailureShimDegradedH\x00R\fshimDegraded\x12g\n" +
-	"\x19shim_store_write_rejected\x18\x04 \x01(\v2*.frontend.v1.FailureShimStoreWriteRejectedH\x00R\x16shimStoreWriteRejected\x12S\n" +
-	"\x11query_termination\x18\x05 \x01(\v2$.frontend.v1.FailureQueryTerminationH\x00R\x10queryTermination\x12M\n" +
-	"\x0fsession_deleted\x18\x06 \x01(\v2\".frontend.v1.FailureSessionDeletedH\x00R\x0esessionDeleted\x12V\n" +
-	"\x12session_superseded\x18\a \x01(\v2%.frontend.v1.FailureSessionSupersededH\x00R\x11sessionSuperseded\x12Q\n" +
-	"\x11session_shim_died\x18\b \x01(\v2#.frontend.v1.FailureSessionShimDiedH\x00R\x0fsessionShimDied\x12Z\n" +
-	"\x14session_start_failed\x18\t \x01(\v2&.frontend.v1.FailureSessionStartFailedH\x00R\x12sessionStartFailed\x12]\n" +
-	"\x15session_resume_failed\x18\n" +
-	" \x01(\v2'.frontend.v1.FailureSessionResumeFailedH\x00R\x13sessionResumeFailed\x12l\n" +
-	"\x1asession_ended_unclassified\x18\v \x01(\v2,.frontend.v1.FailureSessionEndedUnclassifiedH\x00R\x18sessionEndedUnclassified\x12f\n" +
-	"\x18history_replay_truncated\x18\f \x01(\v2*.frontend.v1.FailureHistoryReplayTruncatedH\x00R\x16historyReplayTruncated\x12j\n" +
-	"\x1akeep_alive_window_unclosed\x18\r \x01(\v2+.frontend.v1.FailureKeepAliveWindowUnclosedH\x00R\x17keepAliveWindowUnclosed\x12j\n" +
-	"\x1akeep_alive_window_inverted\x18\x0e \x01(\v2+.frontend.v1.FailureKeepAliveWindowInvertedH\x00R\x17keepAliveWindowInverted\x12Z\n" +
-	"\x14compaction_cold_read\x18\x0f \x01(\v2&.frontend.v1.FailureCompactionColdReadH\x00R\x12compactionColdRead\x12G\n" +
-	"\rturn_undriven\x18\x10 \x01(\v2 .frontend.v1.FailureTurnUndrivenH\x00R\fturnUndriven\x12_\n" +
-	"\x15internal_unclassified\x18\x11 \x01(\v2(.frontend.v1.FailureInternalUnclassifiedH\x00R\x14internalUnclassified\x12i\n" +
-	"\x19api_authentication_failed\x18\x12 \x01(\v2+.frontend.v1.FailureApiAuthenticationFailedH\x00R\x17apiAuthenticationFailed\x12Q\n" +
-	"\x11api_billing_error\x18\x13 \x01(\v2#.frontend.v1.FailureApiBillingErrorH\x00R\x0fapiBillingError\x12H\n" +
-	"\x0eapi_rate_limit\x18\x14 \x01(\v2 .frontend.v1.FailureApiRateLimitH\x00R\fapiRateLimit\x12W\n" +
-	"\x13api_invalid_request\x18\x15 \x01(\v2%.frontend.v1.FailureApiInvalidRequestH\x00R\x11apiInvalidRequest\x12N\n" +
-	"\x10api_server_error\x18\x16 \x01(\v2\".frontend.v1.FailureApiServerErrorH\x00R\x0eapiServerError\x12J\n" +
-	"\x0eapi_overloaded\x18\x17 \x01(\v2!.frontend.v1.FailureApiOverloadedH\x00R\rapiOverloaded\x12e\n" +
-	"\x19api_oauth_org_not_allowed\x18\x18 \x01(\v2).frontend.v1.FailureApiOAuthOrgNotAllowedH\x00R\x15apiOauthOrgNotAllowed\x12U\n" +
-	"\x13api_model_not_found\x18\x19 \x01(\v2$.frontend.v1.FailureApiModelNotFoundH\x00R\x10apiModelNotFound\x12N\n" +
-	"\x10api_network_down\x18\x1a \x01(\v2\".frontend.v1.FailureApiNetworkDownH\x00R\x0eapiNetworkDown\x12T\n" +
-	"\x12api_request_failed\x18\x1b \x01(\v2$.frontend.v1.FailureApiRequestFailedH\x00R\x10apiRequestFailed\x12A\n" +
-	"\vapi_unknown\x18\x1c \x01(\v2\x1e.frontend.v1.FailureApiUnknownH\x00R\n" +
-	"apiUnknown\x12[\n" +
-	"\x15api_max_output_tokens\x18\x1d \x01(\v2&.frontend.v1.FailureApiMaxOutputTokensH\x00R\x12apiMaxOutputTokens\x12E\n" +
-	"\rapi_max_turns\x18\x1e \x01(\v2\x1f.frontend.v1.FailureApiMaxTurnsH\x00R\vapiMaxTurns\x12H\n" +
-	"\x0eapi_max_budget\x18\x1f \x01(\v2 .frontend.v1.FailureApiMaxBudgetH\x00R\fapiMaxBudget\x12W\n" +
-	"\x13api_execution_error\x18  \x01(\v2%.frontend.v1.FailureApiExecutionErrorH\x00R\x11apiExecutionError\x12A\n" +
-	"\vapi_refusal\x18! \x01(\v2\x1e.frontend.v1.FailureApiRefusalH\x00R\n" +
-	"apiRefusal\x12K\n" +
-	"\x0fapi_turn_failed\x18\" \x01(\v2!.frontend.v1.FailureApiTurnFailedH\x00R\rapiTurnFailed\x12V\n" +
-	"\x12daemon_unreachable\x18# \x01(\v2%.frontend.v1.FailureDaemonUnreachableH\x00R\x11daemonUnreachable\x12J\n" +
-	"\x0eworkspace_gone\x18$ \x01(\v2!.frontend.v1.FailureWorkspaceGoneH\x00R\rworkspaceGone\x12A\n" +
-	"\vboot_failed\x18% \x01(\v2\x1e.frontend.v1.FailureBootFailedH\x00R\n" +
+	"\x19shim_store_write_rejected\x18\x04 \x01(\v2*.frontend.v1.FailureShimStoreWriteRejectedH\x00R\x16shimStoreWriteRejected\x12M\n" +
+	"\x0fsession_deleted\x18\x05 \x01(\v2\".frontend.v1.FailureSessionDeletedH\x00R\x0esessionDeleted\x12V\n" +
+	"\x12session_superseded\x18\x06 \x01(\v2%.frontend.v1.FailureSessionSupersededH\x00R\x11sessionSuperseded\x12Q\n" +
+	"\x11session_shim_died\x18\a \x01(\v2#.frontend.v1.FailureSessionShimDiedH\x00R\x0fsessionShimDied\x12Z\n" +
+	"\x14session_start_failed\x18\b \x01(\v2&.frontend.v1.FailureSessionStartFailedH\x00R\x12sessionStartFailed\x12]\n" +
+	"\x15session_resume_failed\x18\t \x01(\v2'.frontend.v1.FailureSessionResumeFailedH\x00R\x13sessionResumeFailed\x12l\n" +
+	"\x1asession_ended_unclassified\x18\n" +
+	" \x01(\v2,.frontend.v1.FailureSessionEndedUnclassifiedH\x00R\x18sessionEndedUnclassified\x12_\n" +
+	"\x15internal_unclassified\x18\v \x01(\v2(.frontend.v1.FailureInternalUnclassifiedH\x00R\x14internalUnclassified\x12V\n" +
+	"\x12daemon_unreachable\x18\f \x01(\v2%.frontend.v1.FailureDaemonUnreachableH\x00R\x11daemonUnreachable\x12J\n" +
+	"\x0eworkspace_gone\x18\r \x01(\v2!.frontend.v1.FailureWorkspaceGoneH\x00R\rworkspaceGone\x12A\n" +
+	"\vboot_failed\x18\x0e \x01(\v2\x1e.frontend.v1.FailureBootFailedH\x00R\n" +
 	"bootFailed\x12Z\n" +
-	"\x14control_plane_failed\x18& \x01(\v2&.frontend.v1.FailureControlPlaneFailedH\x00R\x12controlPlaneFailed\x12S\n" +
-	"\x11frame_undecodable\x18' \x01(\v2$.frontend.v1.FailureFrameUndecodableH\x00R\x10frameUndecodable\x12D\n" +
-	"\fstale_bundle\x18( \x01(\v2\x1f.frontend.v1.FailureStaleBundleH\x00R\vstaleBundleB\x06\n" +
+	"\x14control_plane_failed\x18\x0f \x01(\v2&.frontend.v1.FailureControlPlaneFailedH\x00R\x12controlPlaneFailed\x12S\n" +
+	"\x11frame_undecodable\x18\x10 \x01(\v2$.frontend.v1.FailureFrameUndecodableH\x00R\x10frameUndecodable\x12D\n" +
+	"\fstale_bundle\x18\x11 \x01(\v2\x1f.frontend.v1.FailureStaleBundleH\x00R\vstaleBundleB\x06\n" +
 	"\x04kind\"f\n" +
 	"\x1aFailureShimVersionMismatch\x12!\n" +
 	"\fshim_version\x18\x01 \x01(\tR\vshimVersion\x12%\n" +
@@ -3827,68 +2833,16 @@ const file_frontend_v1_failure_proto_rawDesc = "" +
 	"\x13FailureTurnUndriven\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"3\n" +
 	"\x1bFailureInternalUnclassified\x12\x14\n" +
-	"\x05cause\x18\x01 \x01(\tR\x05cause\"\x98\x01\n" +
-	"\x1eFailureApiAuthenticationFailed\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x90\x01\n" +
-	"\x16FailureApiBillingError\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x8d\x01\n" +
-	"\x13FailureApiRateLimit\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x92\x01\n" +
-	"\x18FailureApiInvalidRequest\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x8f\x01\n" +
-	"\x15FailureApiServerError\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x8e\x01\n" +
-	"\x14FailureApiOverloaded\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x96\x01\n" +
-	"\x1cFailureApiOAuthOrgNotAllowed\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"j\n" +
-	"\x17FailureApiModelNotFound\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05model\"R\n" +
-	"\x15FailureApiNetworkDown\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\"\x91\x01\n" +
-	"\x17FailureApiRequestFailed\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"\x8b\x01\n" +
-	"\x11FailureApiUnknown\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
-	"\vhttp_status\x18\x02 \x01(\x05R\n" +
-	"httpStatus\x12\x1a\n" +
-	"\battempts\x18\x03 \x01(\x05R\battempts\"V\n" +
-	"\x19FailureApiMaxOutputTokens\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\"O\n" +
-	"\x12FailureApiMaxTurns\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\"P\n" +
-	"\x13FailureApiMaxBudget\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\"U\n" +
-	"\x18FailureApiExecutionError\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\"N\n" +
-	"\x11FailureApiRefusal\x129\n" +
-	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\"r\n" +
-	"\x14FailureApiTurnFailed\x129\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"U\n" +
+	"\x18FailureVendorNetworkDown\x129\n" +
+	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\"R\n" +
+	"\x15FailureVendorMaxTurns\x129\n" +
+	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\"S\n" +
+	"\x16FailureVendorMaxBudget\x129\n" +
+	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\"X\n" +
+	"\x1bFailureVendorExecutionError\x129\n" +
+	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\"u\n" +
+	"\x17FailureVendorTurnFailed\x129\n" +
 	"\x06vendor\x18\x01 \x01(\v2!.frontend.v1.VendorFailureContextR\x06vendor\x12\x1f\n" +
 	"\vstop_reason\x18\x02 \x01(\tR\n" +
 	"stopReason\"\\\n" +
@@ -3907,17 +2861,23 @@ const file_frontend_v1_failure_proto_rawDesc = "" +
 	"\n" +
 	"frame_head\x18\x02 \x01(\tR\tframeHead\",\n" +
 	"\x12FailureStaleBundle\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x8d\x04\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"\xc8\x04\n" +
 	"\x17QueryTerminationFailure\x12*\n" +
 	"\x11query_instance_id\x18\x01 \x01(\tR\x0fqueryInstanceId\x12,\n" +
-	"\x11vendor_session_id\x18\x02 \x01(\tH\x00R\x0fvendorSessionId\x12z\n" +
-	"#vendor_session_identity_unavailable\x18\x03 \x01(\v2).shim.v1.VendorSessionIdentityUnavailableH\x00R vendorSessionIdentityUnavailable\x12$\n" +
-	"\x0eobserved_at_ms\x18\x04 \x01(\x03R\fobservedAtMs\x12D\n" +
-	"\x0eunexpected_eof\x18\x05 \x01(\v2\x1b.shim.v1.UnexpectedQueryEofH\x01R\runexpectedEof\x12J\n" +
-	"\x10iterator_failure\x18\x06 \x01(\v2\x1d.shim.v1.QueryIteratorFailureH\x01R\x0fiteratorFailure\x12G\n" +
-	"\x0fstartup_failure\x18\a \x01(\v2\x1c.shim.v1.QueryStartupFailureH\x01R\x0estartupFailureB\x11\n" +
+	"\x11vendor_session_id\x18\x02 \x01(\tH\x00R\x0fvendorSessionId\x12\x87\x01\n" +
+	"#vendor_session_identity_unavailable\x18\x03 \x01(\v26.frontend.v1.QueryTerminationVendorIdentityUnavailableH\x00R vendorSessionIdentityUnavailable\x12$\n" +
+	"\x0eobserved_at_ms\x18\x04 \x01(\x03R\fobservedAtMs\x12S\n" +
+	"\x0eunexpected_eof\x18\x05 \x01(\v2*.frontend.v1.QueryTerminationUnexpectedEofH\x01R\runexpectedEof\x12Y\n" +
+	"\x10iterator_failure\x18\x06 \x01(\v2,.frontend.v1.QueryTerminationIteratorFailureH\x01R\x0fiteratorFailure\x12V\n" +
+	"\x0fstartup_failure\x18\a \x01(\v2+.frontend.v1.QueryTerminationStartupFailureH\x01R\x0estartupFailureB\x11\n" +
 	"\x0fvendor_identityB\b\n" +
-	"\x06reason\"\xe1\x05\n" +
+	"\x06reason\"+\n" +
+	")QueryTerminationVendorIdentityUnavailable\"\x1f\n" +
+	"\x1dQueryTerminationUnexpectedEof\"7\n" +
+	"\x1fQueryTerminationIteratorFailure\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"6\n" +
+	"\x1eQueryTerminationStartupFailure\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"\xe1\x05\n" +
 	"\x14SessionResumeFailure\x12*\n" +
 	"\x11claude_session_id\x18\x01 \x01(\tR\x0fclaudeSessionId\x12\x10\n" +
 	"\x03cwd\x18\x02 \x01(\tR\x03cwd\x12\x1d\n" +
@@ -3956,7 +2916,7 @@ func file_frontend_v1_failure_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_failure_proto_rawDescData
 }
 
-var file_frontend_v1_failure_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
+var file_frontend_v1_failure_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_frontend_v1_failure_proto_goTypes = []any{
 	(*VendorFailureContext)(nil),                      // 0: frontend.v1.VendorFailureContext
 	(*FailureKind)(nil),                               // 1: frontend.v1.FailureKind
@@ -3977,117 +2937,70 @@ var file_frontend_v1_failure_proto_goTypes = []any{
 	(*FailureCompactionColdRead)(nil),                 // 16: frontend.v1.FailureCompactionColdRead
 	(*FailureTurnUndriven)(nil),                       // 17: frontend.v1.FailureTurnUndriven
 	(*FailureInternalUnclassified)(nil),               // 18: frontend.v1.FailureInternalUnclassified
-	(*FailureApiAuthenticationFailed)(nil),            // 19: frontend.v1.FailureApiAuthenticationFailed
-	(*FailureApiBillingError)(nil),                    // 20: frontend.v1.FailureApiBillingError
-	(*FailureApiRateLimit)(nil),                       // 21: frontend.v1.FailureApiRateLimit
-	(*FailureApiInvalidRequest)(nil),                  // 22: frontend.v1.FailureApiInvalidRequest
-	(*FailureApiServerError)(nil),                     // 23: frontend.v1.FailureApiServerError
-	(*FailureApiOverloaded)(nil),                      // 24: frontend.v1.FailureApiOverloaded
-	(*FailureApiOAuthOrgNotAllowed)(nil),              // 25: frontend.v1.FailureApiOAuthOrgNotAllowed
-	(*FailureApiModelNotFound)(nil),                   // 26: frontend.v1.FailureApiModelNotFound
-	(*FailureApiNetworkDown)(nil),                     // 27: frontend.v1.FailureApiNetworkDown
-	(*FailureApiRequestFailed)(nil),                   // 28: frontend.v1.FailureApiRequestFailed
-	(*FailureApiUnknown)(nil),                         // 29: frontend.v1.FailureApiUnknown
-	(*FailureApiMaxOutputTokens)(nil),                 // 30: frontend.v1.FailureApiMaxOutputTokens
-	(*FailureApiMaxTurns)(nil),                        // 31: frontend.v1.FailureApiMaxTurns
-	(*FailureApiMaxBudget)(nil),                       // 32: frontend.v1.FailureApiMaxBudget
-	(*FailureApiExecutionError)(nil),                  // 33: frontend.v1.FailureApiExecutionError
-	(*FailureApiRefusal)(nil),                         // 34: frontend.v1.FailureApiRefusal
-	(*FailureApiTurnFailed)(nil),                      // 35: frontend.v1.FailureApiTurnFailed
-	(*FailureDaemonUnreachable)(nil),                  // 36: frontend.v1.FailureDaemonUnreachable
-	(*FailureWorkspaceGone)(nil),                      // 37: frontend.v1.FailureWorkspaceGone
-	(*FailureBootFailed)(nil),                         // 38: frontend.v1.FailureBootFailed
-	(*FailureControlPlaneFailed)(nil),                 // 39: frontend.v1.FailureControlPlaneFailed
-	(*FailureFrameUndecodable)(nil),                   // 40: frontend.v1.FailureFrameUndecodable
-	(*FailureStaleBundle)(nil),                        // 41: frontend.v1.FailureStaleBundle
-	(*QueryTerminationFailure)(nil),                   // 42: frontend.v1.QueryTerminationFailure
-	(*SessionResumeFailure)(nil),                      // 43: frontend.v1.SessionResumeFailure
-	(*SessionResumeFailureCreate)(nil),                // 44: frontend.v1.SessionResumeFailureCreate
-	(*SessionResumeFailureAutomaticRestore)(nil),      // 45: frontend.v1.SessionResumeFailureAutomaticRestore
-	(*SessionResumeFailureTranscriptUnavailable)(nil), // 46: frontend.v1.SessionResumeFailureTranscriptUnavailable
-	(*SessionResumeFailureIdentityMismatch)(nil),      // 47: frontend.v1.SessionResumeFailureIdentityMismatch
-	(*SessionResumeFailureBringUpFailure)(nil),        // 48: frontend.v1.SessionResumeFailureBringUpFailure
-	(*FailureCardRef)(nil),                            // 49: frontend.v1.FailureCardRef
-	(*v1.VendorSessionIdentityUnavailable)(nil),       // 50: shim.v1.VendorSessionIdentityUnavailable
-	(*v1.UnexpectedQueryEof)(nil),                     // 51: shim.v1.UnexpectedQueryEof
-	(*v1.QueryIteratorFailure)(nil),                   // 52: shim.v1.QueryIteratorFailure
-	(*v1.QueryStartupFailure)(nil),                    // 53: shim.v1.QueryStartupFailure
+	(*FailureVendorNetworkDown)(nil),                  // 19: frontend.v1.FailureVendorNetworkDown
+	(*FailureVendorMaxTurns)(nil),                     // 20: frontend.v1.FailureVendorMaxTurns
+	(*FailureVendorMaxBudget)(nil),                    // 21: frontend.v1.FailureVendorMaxBudget
+	(*FailureVendorExecutionError)(nil),               // 22: frontend.v1.FailureVendorExecutionError
+	(*FailureVendorTurnFailed)(nil),                   // 23: frontend.v1.FailureVendorTurnFailed
+	(*FailureDaemonUnreachable)(nil),                  // 24: frontend.v1.FailureDaemonUnreachable
+	(*FailureWorkspaceGone)(nil),                      // 25: frontend.v1.FailureWorkspaceGone
+	(*FailureBootFailed)(nil),                         // 26: frontend.v1.FailureBootFailed
+	(*FailureControlPlaneFailed)(nil),                 // 27: frontend.v1.FailureControlPlaneFailed
+	(*FailureFrameUndecodable)(nil),                   // 28: frontend.v1.FailureFrameUndecodable
+	(*FailureStaleBundle)(nil),                        // 29: frontend.v1.FailureStaleBundle
+	(*QueryTerminationFailure)(nil),                   // 30: frontend.v1.QueryTerminationFailure
+	(*QueryTerminationVendorIdentityUnavailable)(nil), // 31: frontend.v1.QueryTerminationVendorIdentityUnavailable
+	(*QueryTerminationUnexpectedEof)(nil),             // 32: frontend.v1.QueryTerminationUnexpectedEof
+	(*QueryTerminationIteratorFailure)(nil),           // 33: frontend.v1.QueryTerminationIteratorFailure
+	(*QueryTerminationStartupFailure)(nil),            // 34: frontend.v1.QueryTerminationStartupFailure
+	(*SessionResumeFailure)(nil),                      // 35: frontend.v1.SessionResumeFailure
+	(*SessionResumeFailureCreate)(nil),                // 36: frontend.v1.SessionResumeFailureCreate
+	(*SessionResumeFailureAutomaticRestore)(nil),      // 37: frontend.v1.SessionResumeFailureAutomaticRestore
+	(*SessionResumeFailureTranscriptUnavailable)(nil), // 38: frontend.v1.SessionResumeFailureTranscriptUnavailable
+	(*SessionResumeFailureIdentityMismatch)(nil),      // 39: frontend.v1.SessionResumeFailureIdentityMismatch
+	(*SessionResumeFailureBringUpFailure)(nil),        // 40: frontend.v1.SessionResumeFailureBringUpFailure
+	(*FailureCardRef)(nil),                            // 41: frontend.v1.FailureCardRef
 }
 var file_frontend_v1_failure_proto_depIdxs = []int32{
 	2,  // 0: frontend.v1.FailureKind.shim_version_mismatch:type_name -> frontend.v1.FailureShimVersionMismatch
 	3,  // 1: frontend.v1.FailureKind.shim_seq_regression:type_name -> frontend.v1.FailureShimSeqRegression
 	4,  // 2: frontend.v1.FailureKind.shim_degraded:type_name -> frontend.v1.FailureShimDegraded
 	5,  // 3: frontend.v1.FailureKind.shim_store_write_rejected:type_name -> frontend.v1.FailureShimStoreWriteRejected
-	6,  // 4: frontend.v1.FailureKind.query_termination:type_name -> frontend.v1.FailureQueryTermination
-	7,  // 5: frontend.v1.FailureKind.session_deleted:type_name -> frontend.v1.FailureSessionDeleted
-	8,  // 6: frontend.v1.FailureKind.session_superseded:type_name -> frontend.v1.FailureSessionSuperseded
-	9,  // 7: frontend.v1.FailureKind.session_shim_died:type_name -> frontend.v1.FailureSessionShimDied
-	10, // 8: frontend.v1.FailureKind.session_start_failed:type_name -> frontend.v1.FailureSessionStartFailed
-	11, // 9: frontend.v1.FailureKind.session_resume_failed:type_name -> frontend.v1.FailureSessionResumeFailed
-	12, // 10: frontend.v1.FailureKind.session_ended_unclassified:type_name -> frontend.v1.FailureSessionEndedUnclassified
-	13, // 11: frontend.v1.FailureKind.history_replay_truncated:type_name -> frontend.v1.FailureHistoryReplayTruncated
-	14, // 12: frontend.v1.FailureKind.keep_alive_window_unclosed:type_name -> frontend.v1.FailureKeepAliveWindowUnclosed
-	15, // 13: frontend.v1.FailureKind.keep_alive_window_inverted:type_name -> frontend.v1.FailureKeepAliveWindowInverted
-	16, // 14: frontend.v1.FailureKind.compaction_cold_read:type_name -> frontend.v1.FailureCompactionColdRead
-	17, // 15: frontend.v1.FailureKind.turn_undriven:type_name -> frontend.v1.FailureTurnUndriven
-	18, // 16: frontend.v1.FailureKind.internal_unclassified:type_name -> frontend.v1.FailureInternalUnclassified
-	19, // 17: frontend.v1.FailureKind.api_authentication_failed:type_name -> frontend.v1.FailureApiAuthenticationFailed
-	20, // 18: frontend.v1.FailureKind.api_billing_error:type_name -> frontend.v1.FailureApiBillingError
-	21, // 19: frontend.v1.FailureKind.api_rate_limit:type_name -> frontend.v1.FailureApiRateLimit
-	22, // 20: frontend.v1.FailureKind.api_invalid_request:type_name -> frontend.v1.FailureApiInvalidRequest
-	23, // 21: frontend.v1.FailureKind.api_server_error:type_name -> frontend.v1.FailureApiServerError
-	24, // 22: frontend.v1.FailureKind.api_overloaded:type_name -> frontend.v1.FailureApiOverloaded
-	25, // 23: frontend.v1.FailureKind.api_oauth_org_not_allowed:type_name -> frontend.v1.FailureApiOAuthOrgNotAllowed
-	26, // 24: frontend.v1.FailureKind.api_model_not_found:type_name -> frontend.v1.FailureApiModelNotFound
-	27, // 25: frontend.v1.FailureKind.api_network_down:type_name -> frontend.v1.FailureApiNetworkDown
-	28, // 26: frontend.v1.FailureKind.api_request_failed:type_name -> frontend.v1.FailureApiRequestFailed
-	29, // 27: frontend.v1.FailureKind.api_unknown:type_name -> frontend.v1.FailureApiUnknown
-	30, // 28: frontend.v1.FailureKind.api_max_output_tokens:type_name -> frontend.v1.FailureApiMaxOutputTokens
-	31, // 29: frontend.v1.FailureKind.api_max_turns:type_name -> frontend.v1.FailureApiMaxTurns
-	32, // 30: frontend.v1.FailureKind.api_max_budget:type_name -> frontend.v1.FailureApiMaxBudget
-	33, // 31: frontend.v1.FailureKind.api_execution_error:type_name -> frontend.v1.FailureApiExecutionError
-	34, // 32: frontend.v1.FailureKind.api_refusal:type_name -> frontend.v1.FailureApiRefusal
-	35, // 33: frontend.v1.FailureKind.api_turn_failed:type_name -> frontend.v1.FailureApiTurnFailed
-	36, // 34: frontend.v1.FailureKind.daemon_unreachable:type_name -> frontend.v1.FailureDaemonUnreachable
-	37, // 35: frontend.v1.FailureKind.workspace_gone:type_name -> frontend.v1.FailureWorkspaceGone
-	38, // 36: frontend.v1.FailureKind.boot_failed:type_name -> frontend.v1.FailureBootFailed
-	39, // 37: frontend.v1.FailureKind.control_plane_failed:type_name -> frontend.v1.FailureControlPlaneFailed
-	40, // 38: frontend.v1.FailureKind.frame_undecodable:type_name -> frontend.v1.FailureFrameUndecodable
-	41, // 39: frontend.v1.FailureKind.stale_bundle:type_name -> frontend.v1.FailureStaleBundle
-	42, // 40: frontend.v1.FailureQueryTermination.detail:type_name -> frontend.v1.QueryTerminationFailure
-	43, // 41: frontend.v1.FailureSessionResumeFailed.detail:type_name -> frontend.v1.SessionResumeFailure
-	0,  // 42: frontend.v1.FailureApiAuthenticationFailed.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 43: frontend.v1.FailureApiBillingError.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 44: frontend.v1.FailureApiRateLimit.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 45: frontend.v1.FailureApiInvalidRequest.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 46: frontend.v1.FailureApiServerError.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 47: frontend.v1.FailureApiOverloaded.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 48: frontend.v1.FailureApiOAuthOrgNotAllowed.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 49: frontend.v1.FailureApiModelNotFound.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 50: frontend.v1.FailureApiNetworkDown.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 51: frontend.v1.FailureApiRequestFailed.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 52: frontend.v1.FailureApiUnknown.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 53: frontend.v1.FailureApiMaxOutputTokens.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 54: frontend.v1.FailureApiMaxTurns.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 55: frontend.v1.FailureApiMaxBudget.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 56: frontend.v1.FailureApiExecutionError.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 57: frontend.v1.FailureApiRefusal.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 58: frontend.v1.FailureApiTurnFailed.vendor:type_name -> frontend.v1.VendorFailureContext
-	50, // 59: frontend.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> shim.v1.VendorSessionIdentityUnavailable
-	51, // 60: frontend.v1.QueryTerminationFailure.unexpected_eof:type_name -> shim.v1.UnexpectedQueryEof
-	52, // 61: frontend.v1.QueryTerminationFailure.iterator_failure:type_name -> shim.v1.QueryIteratorFailure
-	53, // 62: frontend.v1.QueryTerminationFailure.startup_failure:type_name -> shim.v1.QueryStartupFailure
-	44, // 63: frontend.v1.SessionResumeFailure.create:type_name -> frontend.v1.SessionResumeFailureCreate
-	45, // 64: frontend.v1.SessionResumeFailure.automatic_restore:type_name -> frontend.v1.SessionResumeFailureAutomaticRestore
-	46, // 65: frontend.v1.SessionResumeFailure.transcript_unavailable:type_name -> frontend.v1.SessionResumeFailureTranscriptUnavailable
-	47, // 66: frontend.v1.SessionResumeFailure.identity_mismatch:type_name -> frontend.v1.SessionResumeFailureIdentityMismatch
-	42, // 67: frontend.v1.SessionResumeFailure.query_termination:type_name -> frontend.v1.QueryTerminationFailure
-	48, // 68: frontend.v1.SessionResumeFailure.bring_up_failure:type_name -> frontend.v1.SessionResumeFailureBringUpFailure
-	69, // [69:69] is the sub-list for method output_type
-	69, // [69:69] is the sub-list for method input_type
-	69, // [69:69] is the sub-list for extension type_name
-	69, // [69:69] is the sub-list for extension extendee
-	0,  // [0:69] is the sub-list for field type_name
+	7,  // 4: frontend.v1.FailureKind.session_deleted:type_name -> frontend.v1.FailureSessionDeleted
+	8,  // 5: frontend.v1.FailureKind.session_superseded:type_name -> frontend.v1.FailureSessionSuperseded
+	9,  // 6: frontend.v1.FailureKind.session_shim_died:type_name -> frontend.v1.FailureSessionShimDied
+	10, // 7: frontend.v1.FailureKind.session_start_failed:type_name -> frontend.v1.FailureSessionStartFailed
+	11, // 8: frontend.v1.FailureKind.session_resume_failed:type_name -> frontend.v1.FailureSessionResumeFailed
+	12, // 9: frontend.v1.FailureKind.session_ended_unclassified:type_name -> frontend.v1.FailureSessionEndedUnclassified
+	18, // 10: frontend.v1.FailureKind.internal_unclassified:type_name -> frontend.v1.FailureInternalUnclassified
+	24, // 11: frontend.v1.FailureKind.daemon_unreachable:type_name -> frontend.v1.FailureDaemonUnreachable
+	25, // 12: frontend.v1.FailureKind.workspace_gone:type_name -> frontend.v1.FailureWorkspaceGone
+	26, // 13: frontend.v1.FailureKind.boot_failed:type_name -> frontend.v1.FailureBootFailed
+	27, // 14: frontend.v1.FailureKind.control_plane_failed:type_name -> frontend.v1.FailureControlPlaneFailed
+	28, // 15: frontend.v1.FailureKind.frame_undecodable:type_name -> frontend.v1.FailureFrameUndecodable
+	29, // 16: frontend.v1.FailureKind.stale_bundle:type_name -> frontend.v1.FailureStaleBundle
+	30, // 17: frontend.v1.FailureQueryTermination.detail:type_name -> frontend.v1.QueryTerminationFailure
+	35, // 18: frontend.v1.FailureSessionResumeFailed.detail:type_name -> frontend.v1.SessionResumeFailure
+	0,  // 19: frontend.v1.FailureVendorNetworkDown.vendor:type_name -> frontend.v1.VendorFailureContext
+	0,  // 20: frontend.v1.FailureVendorMaxTurns.vendor:type_name -> frontend.v1.VendorFailureContext
+	0,  // 21: frontend.v1.FailureVendorMaxBudget.vendor:type_name -> frontend.v1.VendorFailureContext
+	0,  // 22: frontend.v1.FailureVendorExecutionError.vendor:type_name -> frontend.v1.VendorFailureContext
+	0,  // 23: frontend.v1.FailureVendorTurnFailed.vendor:type_name -> frontend.v1.VendorFailureContext
+	31, // 24: frontend.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> frontend.v1.QueryTerminationVendorIdentityUnavailable
+	32, // 25: frontend.v1.QueryTerminationFailure.unexpected_eof:type_name -> frontend.v1.QueryTerminationUnexpectedEof
+	33, // 26: frontend.v1.QueryTerminationFailure.iterator_failure:type_name -> frontend.v1.QueryTerminationIteratorFailure
+	34, // 27: frontend.v1.QueryTerminationFailure.startup_failure:type_name -> frontend.v1.QueryTerminationStartupFailure
+	36, // 28: frontend.v1.SessionResumeFailure.create:type_name -> frontend.v1.SessionResumeFailureCreate
+	37, // 29: frontend.v1.SessionResumeFailure.automatic_restore:type_name -> frontend.v1.SessionResumeFailureAutomaticRestore
+	38, // 30: frontend.v1.SessionResumeFailure.transcript_unavailable:type_name -> frontend.v1.SessionResumeFailureTranscriptUnavailable
+	39, // 31: frontend.v1.SessionResumeFailure.identity_mismatch:type_name -> frontend.v1.SessionResumeFailureIdentityMismatch
+	30, // 32: frontend.v1.SessionResumeFailure.query_termination:type_name -> frontend.v1.QueryTerminationFailure
+	40, // 33: frontend.v1.SessionResumeFailure.bring_up_failure:type_name -> frontend.v1.SessionResumeFailureBringUpFailure
+	34, // [34:34] is the sub-list for method output_type
+	34, // [34:34] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_failure_proto_init() }
@@ -4100,36 +3013,13 @@ func file_frontend_v1_failure_proto_init() {
 		(*FailureKind_ShimSeqRegression)(nil),
 		(*FailureKind_ShimDegraded)(nil),
 		(*FailureKind_ShimStoreWriteRejected)(nil),
-		(*FailureKind_QueryTermination)(nil),
 		(*FailureKind_SessionDeleted)(nil),
 		(*FailureKind_SessionSuperseded)(nil),
 		(*FailureKind_SessionShimDied)(nil),
 		(*FailureKind_SessionStartFailed)(nil),
 		(*FailureKind_SessionResumeFailed)(nil),
 		(*FailureKind_SessionEndedUnclassified)(nil),
-		(*FailureKind_HistoryReplayTruncated)(nil),
-		(*FailureKind_KeepAliveWindowUnclosed)(nil),
-		(*FailureKind_KeepAliveWindowInverted)(nil),
-		(*FailureKind_CompactionColdRead)(nil),
-		(*FailureKind_TurnUndriven)(nil),
 		(*FailureKind_InternalUnclassified)(nil),
-		(*FailureKind_ApiAuthenticationFailed)(nil),
-		(*FailureKind_ApiBillingError)(nil),
-		(*FailureKind_ApiRateLimit)(nil),
-		(*FailureKind_ApiInvalidRequest)(nil),
-		(*FailureKind_ApiServerError)(nil),
-		(*FailureKind_ApiOverloaded)(nil),
-		(*FailureKind_ApiOauthOrgNotAllowed)(nil),
-		(*FailureKind_ApiModelNotFound)(nil),
-		(*FailureKind_ApiNetworkDown)(nil),
-		(*FailureKind_ApiRequestFailed)(nil),
-		(*FailureKind_ApiUnknown)(nil),
-		(*FailureKind_ApiMaxOutputTokens)(nil),
-		(*FailureKind_ApiMaxTurns)(nil),
-		(*FailureKind_ApiMaxBudget)(nil),
-		(*FailureKind_ApiExecutionError)(nil),
-		(*FailureKind_ApiRefusal)(nil),
-		(*FailureKind_ApiTurnFailed)(nil),
 		(*FailureKind_DaemonUnreachable)(nil),
 		(*FailureKind_WorkspaceGone)(nil),
 		(*FailureKind_BootFailed)(nil),
@@ -4137,14 +3027,14 @@ func file_frontend_v1_failure_proto_init() {
 		(*FailureKind_FrameUndecodable)(nil),
 		(*FailureKind_StaleBundle)(nil),
 	}
-	file_frontend_v1_failure_proto_msgTypes[42].OneofWrappers = []any{
+	file_frontend_v1_failure_proto_msgTypes[30].OneofWrappers = []any{
 		(*QueryTerminationFailure_VendorSessionId)(nil),
 		(*QueryTerminationFailure_VendorSessionIdentityUnavailable)(nil),
 		(*QueryTerminationFailure_UnexpectedEof)(nil),
 		(*QueryTerminationFailure_IteratorFailure)(nil),
 		(*QueryTerminationFailure_StartupFailure)(nil),
 	}
-	file_frontend_v1_failure_proto_msgTypes[43].OneofWrappers = []any{
+	file_frontend_v1_failure_proto_msgTypes[35].OneofWrappers = []any{
 		(*SessionResumeFailure_Create)(nil),
 		(*SessionResumeFailure_AutomaticRestore)(nil),
 		(*SessionResumeFailure_TranscriptUnavailable)(nil),
@@ -4158,7 +3048,7 @@ func file_frontend_v1_failure_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_failure_proto_rawDesc), len(file_frontend_v1_failure_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   50,
+			NumMessages:   42,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
