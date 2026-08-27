@@ -662,8 +662,22 @@ message FeedTurnEndedErrored {
     FeedTurnErrorRefusal refusal = 12;
     // The query process died out from under the turn.
     FeedTurnErrorQueryDied query_died = 13;
+    // The account cannot be charged; the user must act on their billing.
+    FeedTurnErrorBillingError billing_error = 14;
+    // The requested model does not exist for this account; the remedy is
+    // picking another model.
+    FeedTurnErrorModelNotFound model_not_found = 15;
+    // The account's organization does not allow this OAuth access.
+    FeedTurnErrorOauthOrgNotAllowed oauth_org_not_allowed = 16;
   }
 }
+// The billing class. Empty: the arm is the cause; the envelope's message
+// carries the vendor's wording.
+message FeedTurnErrorBillingError {}
+// The missing-model class. Empty: the arm is the cause.
+message FeedTurnErrorModelNotFound {}
+// The OAuth-organization class. Empty: the arm is the cause.
+message FeedTurnErrorOauthOrgNotAllowed {}
 // The vendor's sentence element.
 message FeedTurnErrorMessage {
   // The wording, drawn verbatim.
