@@ -145,6 +145,13 @@ message AgentActivity {
     // listing existing ones. A publish draws as its own response-styled
     // feed bubble; a list is a quiet read, drawn nowhere.
     AgentArtifact artifact = 27;
+    // The plan-mode pair: entering plan mode, and exiting it with the plan
+    // document. TWO tool calls at this tier, faithfully — each with its own
+    // unit identity, and NO pairing key on the wire (the vendor offers none;
+    // its requestId is a dialog id in the vendor's own identity space). The
+    // daemon COALESCES the pair into one feed bubble by the episode
+    // invariant: an agent has at most ONE open plan episode at a time.
+    AgentPlanMode plan_mode = 28;
   }
 }
 
@@ -205,6 +212,82 @@ message AgentToolFailure {
 message AgentActivitySettledAt {
   // Milliseconds since the Unix epoch, as the producer observed the settle.
   int64 at_ms = 1;
+}
+
+// ---- Plan mode: the pair of calls around a plan document ----
+
+// One plan-mode tool call — an ENTER or an EXIT. Each call is its own unit
+// with its own identity, exactly as the vendor makes them; the one-bubble
+// treatment is the feed's coalescing, never this tier's. An EXIT WITH NO
+// ENTER IS LEGAL: a session started in the plan permission mode never calls
+// EnterPlanMode at all.
+message AgentPlanMode {
+  oneof state {
+    AgentPlanModeStart start = 1;
+    AgentPlanModeSuccess success = 2;
+    AgentPlanModeFailure failure = 3;
+  }
+}
+
+// A plan-mode call this stream has begun carrying.
+message AgentPlanModeStart {
+  // WHICH act this call is. The set arm is the act.
+  oneof act {
+    AgentPlanModeEnter enter = 1;
+    AgentPlanModeExit exit = 2;
+  }
+  // When the call was issued.
+  AgentActivityStartedAt started_at = 3;
+}
+// The agent asked to enter plan mode.
+message AgentPlanModeEnter {}
+// The agent asked to leave plan mode, presenting its plan.
+message AgentPlanModeExit {}
+
+// The call returned.
+message AgentPlanModeSuccess {
+  oneof act {
+    AgentPlanModeEntered entered = 1;
+    AgentPlanModeExited exited = 2;
+  }
+  // When the call settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 3;
+}
+// Plan mode is on. The vendor's acknowledgment line rides along.
+message AgentPlanModeEntered {
+  // The vendor's message, verbatim. EXPECTED UNMAPPED: no UI draws it — the
+  // feed's plan bubble shows its own planning treatment.
+  string message = 1;
+}
+// Plan mode ended with the plan presented.
+message AgentPlanModeExited {
+  // The plan document, markdown, as the vendor returned it. UNSET when the
+  // vendor stated a null plan — an exit with nothing to show.
+  optional AgentResponseProse plan = 1;
+  // Whether the plan was edited at the VENDOR'S approval dialog before it
+  // was accepted. Carried faithfully; DORMANT in this product's UX, whose
+  // edit channel is the plan file on disk, which the vendor cannot observe.
+  bool plan_was_edited = 2;
+  // Where the vendor wrote the plan file — the feed's edit affordance opens
+  // exactly this path in the host editor. UNSET when the vendor named none,
+  // and the affordance then does not draw.
+  optional string file_path = 3;
+  // Whether the exit came from a subagent's plan rather than the main
+  // thread's. EXPECTED UNMAPPED.
+  bool is_agent = 4;
+  // Whether the session has the Task tool available for executing the plan.
+  // EXPECTED UNMAPPED.
+  bool has_task_tool = 5;
+  // Whether the plan awaits a leader agent's approval. EXPECTED UNMAPPED.
+  bool awaiting_leader_approval = 6;
+  // The vendor's requestId is deliberately NOT carried: vendor identity
+  // spaces never cross this contract.
+}
+
+// The call could not be performed.
+message AgentPlanModeFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
 }
 
 // The vendor's per-call progress beat, relayed as observed: the call is
