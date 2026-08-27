@@ -7681,3 +7681,40 @@ as its own increment with a drawing.
 All six ruled built-in families are now dispositioned: plan mode,
 ReportFindings, the worktree pair, cron, and push notification landed;
 REPL exempt.
+
+### The FOOTER STATUS FAMILY restructures — legality by construction; waiting gains permission/question
+
+Findings 3 and 6 of the footer coverage review resolve together in the
+user's structural design: the strip's three sibling cells (status,
+sub-status, activity) become ONE TREE — each status arm declares exactly
+the sub-status steps and activity kinds legal while it stands, so an
+illegal pairing (a wakeup countdown under merging) is unrepresentable
+rather than forbidden by comment.
+
+- FooterStrip retires tags 2-3; FooterStatus's arms stop being empty and
+  each owns its substatus oneof and a per-status activity wrapper whose
+  oneof confines the legal kinds; the leaf payload messages (notification,
+  wakeup, retrying, …) are SHARED across the per-status oneofs — one drawn
+  cell, one payload vocabulary; the oneof types carry the legality.
+- The user's sketch used enums for status/substatus; landed as oneofs per
+  the standing state-enum prohibition, and the sibling coarse-status enum
+  was dropped as a second spelling of the set arm.
+- Notification is an ACTIVITY duplicated into every arm's oneof, never a
+  status — a status arm would knock the real status off the strip.
+- ACTIVITY OPTIONALITY IS EVIDENCE-GATED, the user's rule: required where a
+  producer always has a line (waiting, loading), optional elsewhere with
+  the WHY stated at each field; a bare optional with no stated absence
+  path is a review defect.
+- Finding 3 lands inside it: waiting gains permission and question steps
+  with typed activities (gated call, question lead); the wakeup fallback
+  rule is unchanged.
+- The `at` instant rides each per-status activity wrapper (duplication per
+  the figma→idl default), keeping the activity-began semantics.
+- The rendering rule is stated once on FooterStatus: a status arm with no
+  substatus merges that cell into the status cell; activity absorbs free
+  width.
+
+Consequences: the daemon's footer resolver builds one tree per push
+instead of three cells; the webapp switches per status arm; every consumer
+of the old FooterSubStatus/FooterStatusActivity top-level types recompiles
+against the per-status wrappers.
