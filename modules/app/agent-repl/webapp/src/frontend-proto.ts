@@ -138,7 +138,7 @@ import {
   str,
   type Obj,
 } from "./proto-scalars.js";
-import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/frontend/v1/shared_pb";
+import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/conversation/v1/slash_command_pb";
 import { selectedModel, type SelectedModel } from "../../proto/ts/schema-literals.js";
 
 // --- enums ------------------------------------------------------------------

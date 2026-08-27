@@ -22,7 +22,7 @@ import { create } from "@bufbuild/protobuf";
 import {
   TokenUsageSchema,
   type TokenUsage as CanonicalTokenUsage,
-} from "../../proto/gen/ts/conversation/v1/tokens_pb";
+} from "../../proto/gen/ts/conversation/v1/api_pb";
 
 /** Everything the dropdown knows how to break down. */
 export interface TokenMenuData {
