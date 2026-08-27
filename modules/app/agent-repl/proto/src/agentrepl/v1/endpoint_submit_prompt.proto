@@ -11,6 +11,13 @@ package agentrepl.v1;
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
 import "frontend/v1/status_panel.proto";
+import "frontend/v1/cost_panel.proto";
+import "frontend/v1/usage_panel.proto";
+import "frontend/v1/todos_panel.proto";
+import "frontend/v1/agents_panel.proto";
+import "frontend/v1/mcp_panel.proto";
+import "frontend/v1/context_panel.proto";
+import "frontend/v1/help_panel.proto";
 import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -65,7 +72,23 @@ message SubmitPromptTurn {
 // clients render the arm and know no command names.
 message SubmitPromptCommandPanel {
   oneof panel {
+    // The /status panel.
     frontend.v1.StatusPanelView status = 1;
+    // The /cost panel: what the session cost, label/value rows.
+    frontend.v1.CostPanelView cost = 2;
+    // The /usage panel: allowance utilization rows.
+    frontend.v1.UsagePanelView usage = 3;
+    // The /todos panel: the tracker's checklist, printed from the daemon's
+    // own state.
+    frontend.v1.TodosPanelView todos = 4;
+    // The /agents panel: the configured agent types.
+    frontend.v1.AgentsPanelView agents = 5;
+    // The /mcp panel: each MCP server and where it stands.
+    frontend.v1.McpPanelView mcp = 6;
+    // The /context panel: the context-fill tree.
+    frontend.v1.ContextPanelView context = 7;
+    // The /help panel: the command list.
+    frontend.v1.HelpPanelView help = 8;
   }
 }
 
