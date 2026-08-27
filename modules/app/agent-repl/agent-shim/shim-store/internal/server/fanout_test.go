@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	protocolv1 "agentrepl/proto/protocol/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
 )
 
@@ -17,16 +17,12 @@ func testFanout(buffer int) *fanout {
 func ignoreSubscriberDrop(subscriberDropReason) {}
 func prepareSubscriber(*subscriber)             {}
 
-// liveDelivery is the OTHER delivery arm — a record handed straight to the
-// daemon that the store never saw. The store never publishes one, but the
-// fan-out must still route it, because the routing key is on the external half
-// both arms carry.
-func liveDelivery(session string) *protocolv1.EntryDelivery {
-	return &protocolv1.EntryDelivery{
-		Delivery: &protocolv1.EntryDelivery_Live{Live: &protocolv1.LiveEntryDelivery{
-			Entry: turnBegan(session, "live").GetExternal(),
-		}},
-	}
+// line is the frame the tail carries on store.v1: one StoreLineAt, positioned
+// by an opaque store-minted pointer rather than by a seq.
+func line(pointer string) *storev1.WatchAgentSessionResponse {
+	return &storev1.WatchAgentSessionResponse{Line: &storev1.StoreLineAt{
+		At: &storev1.StoreItemPointer{Value: pointer},
+	}}
 }
 
 func TestFanoutDeliversToSessionSubscriber(t *testing.T) {
@@ -34,12 +30,12 @@ func TestFanoutDeliversToSessionSubscriber(t *testing.T) {
 	f := testFanout(4)
 	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act
-	f.publish(storedDelivery("s1", 1))
+	f.publish("s1", line("p-1"))
 	// Assert
 	select {
 	case got := <-sub.ch:
-		if got.GetStored().GetSeq() != 1 {
-			t.Fatalf("delivered seq = %d, want 1", got.GetStored().GetSeq())
+		if got.GetLine().GetAt().GetValue() != "p-1" {
+			t.Fatalf("delivered pointer = %q, want p-1", got.GetLine().GetAt().GetValue())
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for delivery")
@@ -51,7 +47,7 @@ func TestFanoutIsSessionScoped(t *testing.T) {
 	f := testFanout(4)
 	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act: publish for a different session.
-	f.publish(storedDelivery("other", 1))
+	f.publish("other", line("p-1"))
 	// Assert: nothing delivered to s1's subscriber.
 	select {
 	case got := <-sub.ch:
@@ -60,43 +56,20 @@ func TestFanoutIsSessionScoped(t *testing.T) {
 	}
 }
 
-func TestFanoutRoutesALiveDeliveryByItsExternalHalf(t *testing.T) {
-	// Arrange: a live delivery has NO seq field, which is the contract that
-	// stops a consumer resuming from a position the store never assigned. Its
-	// routing key still has to resolve, or such a record would silently reach
-	// nobody.
-	f := testFanout(4)
-	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
-	// Act
-	f.publish(liveDelivery("s1"))
-	// Assert
-	select {
-	case got := <-sub.ch:
-		if got.GetLive() == nil {
-			t.Fatalf("delivered %+v, want the live arm", got)
-		}
-		if got.GetStored().GetSeq() != 0 {
-			t.Fatal("a live delivery reported a position it cannot have")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("a live delivery was not fanned out")
-	}
-}
-
-func TestFanoutRoutesADeliveryWithNoArmToNobody(t *testing.T) {
-	// Arrange: an envelope naming neither arm carries no external half, so it
-	// carries no session either. It must reach no subscriber rather than every
-	// subscriber that happens to be registered under the empty string.
+func TestFanoutRoutesAnEmptyKeyToNobody(t *testing.T) {
+	// Arrange: the routing key is now stated by the caller, so a caller with no
+	// key must reach no subscriber rather than every subscriber registered
+	// under the empty string.
 	f := testFanout(4)
 	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 
 	// Act
-	f.publish(&protocolv1.EntryDelivery{})
+	f.publish("", line("p-1"))
 
 	// Assert
 	select {
 	case got := <-sub.ch:
-		t.Fatalf("an armless delivery reached a subscriber: %+v", got)
+		t.Fatalf("an unkeyed publish reached a subscriber: %+v", got)
 	case <-time.After(50 * time.Millisecond):
 	}
 }
@@ -106,9 +79,9 @@ func TestFanoutSlowConsumerDisconnected(t *testing.T) {
 	f := testFanout(2)
 	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act: overflow the bounded buffer.
-	f.publish(storedDelivery("s1", 1))
-	f.publish(storedDelivery("s1", 2))
-	f.publish(storedDelivery("s1", 3)) // buffer full → disconnect
+	f.publish("s1", line("p-1"))
+	f.publish("s1", line("p-2"))
+	f.publish("s1", line("p-3")) // buffer full → disconnect
 	// Assert: the subscriber is dropped and deregistered; the requester owns
 	// its session-specific reconnect diagnostic.
 	select {
@@ -127,7 +100,7 @@ func TestFanoutUnsubscribeStopsDelivery(t *testing.T) {
 	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act
 	f.unsubscribe(sub)
-	f.publish(storedDelivery("s1", 1))
+	f.publish("s1", line("p-1"))
 	// Assert: no delivery, done closed, count zero.
 	if f.subscriberCount("s1") != 0 {
 		t.Fatalf("subscriberCount = %d, want 0", f.subscriberCount("s1"))
@@ -140,19 +113,22 @@ func TestFanoutUnsubscribeStopsDelivery(t *testing.T) {
 }
 
 func TestFanoutSlowConsumerLogsCanonicalContext(t *testing.T) {
+	// Arrange
 	var logs bytes.Buffer
 	f := newFanout(1, logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "server", Socket: "store.sock"}))
 	sub := f.subscribe("vendor-session", ignoreSubscriberDrop, prepareSubscriber)
-	f.publish(storedDelivery("vendor-session", 1))
-	f.publish(storedDelivery("vendor-session", 2))
 
+	// Act
+	f.publish("vendor-session", line("p-1"))
+	f.publish("vendor-session", line("p-2"))
+
+	// Assert
 	select {
 	case <-sub.done:
 	case <-time.After(time.Second):
 		t.Fatal("slow subscriber was not disconnected")
 	}
-
-	record, found := findLoggedRecord(t, logs.Bytes(), "slow-consumer", "warn")
+	record, found := findLoggedRecord(t, splitLines(logs.Bytes()), "slow-consumer", "warn")
 	if !found {
 		t.Fatalf("slow-consumer record missing: %s", logs.String())
 	}
