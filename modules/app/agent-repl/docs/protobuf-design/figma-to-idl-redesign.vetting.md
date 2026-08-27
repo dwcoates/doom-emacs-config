@@ -652,3 +652,42 @@ daemon's own store persists conversation.v1 frames as the durable record
 and the vendor transcript is only a recovery source. **Status: RUN —
 assumption holds; the store-is-the-record premise is now load-bearing and
 verified in that direction.**
+
+### Item 1 FINDINGS (run 2026-08-27, docs + declared types ONLY per the user's constraint)
+
+Broad result: the contract is overwhelmingly routed — agent.proto 38/40
+(AgentFailure arms match TerminalReason 1:1), workflow/user/content_blocks
+100%, question.proto 19/20, permission.proto 32/35; the deliberately
+shim-own messages (ids, instants, diagnostics, turn tracking) are by-design
+N/A. Weakly- or un-routed at the declared/docs tier, with triage:
+
+- RESOLVED BY CROSS-EVIDENCE: the `<synthetic>` ModelMarker literal is
+  observed-tier proven by item 3/4's corpus tallies (444+ records) — the
+  docs-only agent could not see corpus by constraint.
+- SIDECAR-TIER BY DESIGN (routed per the item's own "SDK OR SIDECAR"
+  terms; docs-only agent couldn't confirm): skill document + allowed-tools,
+  diagnostics adjacency join, injected memory/skill content, context-budget
+  warning attachment, detached-spool termination line.
+- SHIM-DERIVABLE (producer note to sharpen, no shape change): hook
+  duration_ms (shim spans started→response), spawn_depth (walk
+  parent_agent_id), grep omitted counts (subtract totals — the "STATED,
+  never derived" comment is wrong about the vendor side).
+- STALE COMMENT: the Artifact producer note claims untyped prose, but
+  ArtifactOutput is fully typed (publish url/title/version; list rows).
+- RULINGS OWED (see slate): AgentPermissionAbandoned (sdk says permission
+  prompts "have no park deadline" — the arm may be unproducible);
+  AgentPermissionDeniedForWantOfDecider (no declared discriminator);
+  SessionIdentityRotated.reason (no source); ContextCompacted
+  cumulative_dropped_tokens + tools_before_cut and ContextCleared.tokens
+  (no declared source); AgentEffortLevel missing the vendor-declared 'max';
+  ~20 recognizable built-in tools neither modeled nor exempt (EnterPlanMode/
+  ExitPlanMode, TodoWrite spelling, ReportFindings, Cron*, EnterWorktree/
+  ExitWorktree, PushNotification, REPL, ListMcpResources family, …) which
+  would land as AgentUnmodeled that our own comment calls a producer defect.
+- SendMessage delivery arms (queued_to_live/resumed_recipient) have no
+  typed source — producer note already admits prose derivation; stands as
+  recorded.
+- Unhomed vendor facts: consistent with the exempt/deferred sets except the
+  list above; 409/504 API errors intentionally fall to ApiUnmodeledError.
+
+**Status: RUN — findings recorded; rulings slate below.**
