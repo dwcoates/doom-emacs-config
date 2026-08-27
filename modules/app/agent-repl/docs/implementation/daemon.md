@@ -166,6 +166,25 @@ unmarked is DISCRETIONARY by default.
    - USAGE: holds the occupancy lease for the merge's duration; its
      remediation prompts route through the prompt queue like any origin;
      phases are append-only (a repeat pass is a new phase).
+   - RULED ADOPTIONS from the feature-loss audit:
+     - CONFIGURED ACTIONS: before_ws_merge runs the workspace's session
+       under the lease BEFORE the pick plan and its failure fails the
+       run; postprocessing_prompt runs AFTER every commit lands, can
+       never fail the run, and its error rides the terminal status;
+       both are read from the creation-job facts.
+     - THE TEST GATE: suites selected from changed paths by blast
+       radius (unknown beats wrong), output archived and named in the
+       failure, and the agent remediation loop exits ONLY on a pass or
+       the agent's own escalation record. NO flake re-run — a failure
+       is an error to remediate, period (a deliberate change from the
+       old daemon).
+     - GIVE-UP RULES: conflicts handed to the agent EXACTLY ONCE per
+       conflict commit then parked for a human; evict/dequeue/abandon
+       are three distinct ends with distinct causes; a DELETED session
+       refuses the merge; a workspace with no session merges
+       sessionless; the displaced user turn is captured durably and
+       resubmitted exactly once at lease release, across a daemon
+       bounce.
    - GOTCHAS: phase history is feed content, not WSM columns; an
      in-flight merge across a daemon restart is resumed or LOUDLY
      failed, never left with the lease stuck; the composer gate is the
