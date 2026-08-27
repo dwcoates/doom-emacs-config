@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	protocolv1 "agentrepl/proto/protocol/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
 )
 
@@ -20,7 +20,7 @@ const defaultSubBuffer = 1024
 type subscriber struct {
 	id        uint64
 	sessionID string
-	ch        chan *protocolv1.EntryDelivery
+	ch        chan *storev1.WatchAgentSessionResponse
 	done      chan struct{}
 	closeOnce sync.Once
 	onDrop    func(subscriberDropReason)
@@ -93,7 +93,7 @@ func (f *fanout) subscribe(sessionID string, onDrop func(subscriberDropReason), 
 	s := &subscriber{
 		id:        f.nextID,
 		sessionID: sessionID,
-		ch:        make(chan *protocolv1.EntryDelivery, f.buffer),
+		ch:        make(chan *storev1.WatchAgentSessionResponse, f.buffer),
 		done:      make(chan struct{}),
 		onDrop:    onDrop,
 	}
@@ -133,23 +133,23 @@ func (f *fanout) remove(s *subscriber) bool {
 	return true
 }
 
-// publish broadcasts one delivery to every subscriber of its session in
-// arrival order. A subscriber whose buffer is full is disconnected rather than
-// blocking the publisher; the workspace-aware requester reconnects and replays.
+// publish broadcasts one line to every subscriber of a session in arrival
+// order. A subscriber whose buffer is full is disconnected rather than blocking
+// the publisher; the workspace-aware requester reconnects.
 //
-// THE STORE ONLY EVER PUBLISHES A `stored` DELIVERY. The `live` arm exists for
-// a record handed straight to the daemon that the store never saw, which by
-// definition cannot arrive here — and the write surface has no way to say "fan
-// this out without storing it" now that EventClass is retired. deliverySession
-// still reads both arms so a routing key is never silently empty.
-func (f *fanout) publish(delivery *protocolv1.EntryDelivery) {
-	sid := deliverySession(delivery)
-
+// THE ROUTING KEY IS NOW A PARAMETER. It used to be read off the frame:
+// `EntryDelivery`'s external half carried the vendor session_id. The store.v1
+// replacement frame, `WatchAgentSessionResponse`, carries a `StoreLineAt` and
+// names no session at all — a watch is addressed by an opaque, store-minted
+// AgentSessionToken instead. Deriving a session from the frame is therefore no
+// longer possible, and minting a token-to-session map is a design decision, so
+// the caller states the key.
+func (f *fanout) publish(sessionID string, line *storev1.WatchAgentSessionResponse) {
 	f.mu.Lock()
 	var slow []*subscriber
-	for _, s := range f.subs[sid] {
+	for _, s := range f.subs[sessionID] {
 		select {
-		case s.ch <- delivery:
+		case s.ch <- line:
 		default:
 			slow = append(slow, s)
 		}
@@ -157,22 +157,9 @@ func (f *fanout) publish(delivery *protocolv1.EntryDelivery) {
 	f.mu.Unlock()
 
 	for _, s := range slow {
-		f.log.Log(logging.Fields{Operation: "slow-consumer", Session: sid, Subscriber: subscriberName(s.id), Level: "warn"}, "live-tail subscriber disconnected after buffer overflow buffer=%d entry_seq=%d", f.buffer, delivery.GetStored().GetSeq())
+		f.log.Log(logging.Fields{Operation: "slow-consumer", Session: sessionID, Subscriber: subscriberName(s.id), Level: "warn"}, "live-tail subscriber disconnected after buffer overflow buffer=%d", f.buffer)
 		f.remove(s)
 		s.drop(subscriberDropSlowConsumer)
-	}
-}
-
-// deliverySession is the fan-out routing key: the VENDOR session id, which both
-// delivery arms carry on the external half they wrap.
-func deliverySession(delivery *protocolv1.EntryDelivery) string {
-	switch d := delivery.GetDelivery().(type) {
-	case *protocolv1.EntryDelivery_Stored:
-		return d.Stored.GetEntry().GetSessionId()
-	case *protocolv1.EntryDelivery_Live:
-		return d.Live.GetEntry().GetSessionId()
-	default:
-		return ""
 	}
 }
 
