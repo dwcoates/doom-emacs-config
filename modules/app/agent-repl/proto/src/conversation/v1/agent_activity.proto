@@ -162,6 +162,9 @@ message AgentActivity {
     // drawn side — the daemon folds these into its job set and pushes the
     // ⏱ chip and panel; no feed card exists for them.
     AgentCron cron = 31;
+    // The agent sent the user a push notification — an outbound action
+    // that would otherwise be invisible in the transcript.
+    AgentPushNotification push_notification = 32;
   }
 }
 
@@ -571,6 +574,77 @@ message AgentCronJob {
 
 // The call could not be performed.
 message AgentCronFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
+
+// ---- The push notification: the agent reaching an absent user ----
+
+// One PushNotification tool call. The VENDOR delivers its own phone push
+// (via the Claude app) and/or a local notification; this family records the
+// vendor's stated outcome. The LOCAL attention presentation (OS
+// notification, tab blink, sidebar marker, footer line) is this system's
+// own fan-out of the fact and rides the host stream and frontend views,
+// never this record.
+message AgentPushNotification {
+  oneof state {
+    AgentPushNotificationStart start = 1;
+    AgentPushNotificationSuccess success = 2;
+    AgentPushNotificationFailure failure = 3;
+  }
+}
+
+// A send this stream has begun carrying.
+message AgentPushNotificationStart {
+  // The agent's message, verbatim — what the user is to be told.
+  string message = 1;
+  // When the call was issued.
+  AgentActivityStartedAt started_at = 2;
+  // The input's `status` literal ("proactive") is deliberately not carried:
+  // a constant is not a fact.
+}
+
+// The call returned, with the vendor's own delivery outcome.
+message AgentPushNotificationSuccess {
+  // WHETHER THE VENDOR DELIVERED. The set arm is the answer, and it
+  // matters: an agent that believes it notified an absent user, and did
+  // not, left them waiting on nothing.
+  oneof outcome {
+    AgentPushNotificationSent sent = 1;
+    AgentPushNotificationNotSent not_sent = 2;
+  }
+  // When the call settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 3;
+}
+// The vendor delivered.
+message AgentPushNotificationSent {
+  // Whether a phone push went out via the vendor's app.
+  bool push_sent = 1;
+  // Whether a local (vendor-side desktop) notification went out.
+  bool local_sent = 2;
+  // When the vendor says it sent, unix millis. UNSET when it stated no
+  // instant.
+  optional int64 sent_at_ms = 3;
+}
+// The vendor declined to deliver, and said why.
+message AgentPushNotificationNotSent {
+  // THE VENDOR'S REASON. The set arm is the reason; the vocabulary is the
+  // vendor's declared closed set.
+  oneof reason {
+    // Notifications are switched off in the vendor's config.
+    AgentPushNotificationConfigOff config_off = 1;
+    // The vendor judged the user present, so a push would be noise.
+    AgentPushNotificationUserPresent user_present = 2;
+    // No delivery transport was available.
+    AgentPushNotificationNoTransport no_transport = 3;
+  }
+}
+message AgentPushNotificationConfigOff {}
+message AgentPushNotificationUserPresent {}
+message AgentPushNotificationNoTransport {}
+
+// The call could not be performed.
+message AgentPushNotificationFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
 }

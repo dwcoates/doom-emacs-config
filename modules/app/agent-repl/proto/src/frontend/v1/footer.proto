@@ -368,8 +368,17 @@ message FooterStatusActivity {
     // The vendor's context-budget warning — same treatment as the
     // rate-limit allowances: a composed activity line while it stands.
     FooterStatusActivityContextBudget context_budget = 10;
+    // An agent notification to the user, shown as the activity line while
+    // it stands; the next real activity replaces it.
+    FooterStatusActivityNotification notification = 11;
   }
 }
+// The notification line.
+message FooterStatusActivityNotification {
+  // The composed line ("[bell] Merge queue is green"), drawn verbatim.
+  string text = 1;
+}
+
 // The context-budget warning line.
 message FooterStatusActivityContextBudget {
   // The composed line, drawn verbatim.

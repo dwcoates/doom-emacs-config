@@ -66,6 +66,15 @@ message WorkspaceRoster {
   optional RosterCurrentWorkspace current = 4;
 }
 
+// The attention marker. Empty: presence is the fact.
+//
+// THE CANONICAL BLINK CADENCE lives HERE, ONCE: TWO blinks — 500 ms on,
+// 500 ms off, twice — then a steady marker until cleared. The webapp
+// sidebar AND the Emacs tab-bar both implement exactly this spec and cite
+// this message in their implementations; consistency is CODE-LEVEL, not
+// coincidental, and a divergent cadence is a defect.
+message RosterRowAttention {}
+
 // The selected workspace, by identity. Compared against RosterRowWorkspace,
 // never against a display name, which is not unique.
 message RosterCurrentWorkspace {
@@ -167,6 +176,12 @@ message RosterRow {
   // The workspace this row IS — its identity, and the join key every gesture
   // on the row travels back with. Names collide across repos; dirs do not.
   RosterRowWorkspace workspace = 1;
+
+  // The ATTENTION marker: present iff the workspace has an unseen
+  // notification. The daemon sets it when an agent notification fires and
+  // CLEARS it when SelectWorkspace names this workspace, re-pushing the
+  // roster both times.
+  optional RosterRowAttention attention = 32;
 
   // The row's display name.
   RosterRowName name = 2;
