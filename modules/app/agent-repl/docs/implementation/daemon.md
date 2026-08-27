@@ -32,7 +32,12 @@ unmarked is DISCRETIONARY by default.
 2. PRESCRIBED — THE SHIM CLIENT (one per session).
    - RESPONSIBILITIES: the only module that dials shim.v1, as a dumb
      no-policy connection with an internal occupancy mutex hidden from
-     callers (the in-memory guard backing WSM's persisted lease).
+     callers (the in-memory guard backing WSM's lease metadata) — AND,
+     by ruling, the shim PROCESS SUPERVISOR: spawn with process-group
+     discipline, kill with stop attribution, reap with exit decoding,
+     the stderr ring-buffer kept as failure evidence, and
+     spawn-death-vs-connect correlation (a dead process ends bring-up
+     immediately with exit and stderr, never a timeout).
    - INTERFACE: session/turn/kill/model/stand-down verbs (lease-checked,
      mutex-guarded), the WatchAgent frame streams, and answer/stop
      delivery.
@@ -48,7 +53,11 @@ unmarked is DISCRETIONARY by default.
    - INTERFACE: state operations only (resolve refs, bindings, lease
      acquire/release/inspect, held prompts, queue positions, schedules);
      NO orchestration logic; peers call it, it calls only the database.
-   - USAGE: the lease projects PER-HOLDER REFUSAL POLICY onto new
+   - USAGE: the lease is HYBRID by ruling — the kernel file lock stays
+     the ARBITRATION mechanism (cross-process, self-releasing on death,
+     no stale-pid state), and WSM holds only the lease's POLICY metadata
+     (holder label, refusal policy): the lock decides, the row
+     describes. The lease projects PER-HOLDER REFUSAL POLICY onto new
      submissions — the merge lease ERRORS them (SubmitPrompt's merging
      refusal arm; post-merge-start work would be orphaned since a merged
      workspace closes), restart-pending and shutdown-drain leases HOLD
@@ -60,18 +69,25 @@ unmarked is DISCRETIONARY by default.
    - RESPONSIBILITIES: the request-side component every prompt crosses —
      modeled as a component so business logic never lives in an rpc name.
    - INTERFACE: acknowledge with the TurnId; MIRROR THE PROMPT TO THE
-     USER IMMEDIATELY (the feed's user-prompt row on acceptance, the
-     tray's hold row when held); recognize session commands and answer
-     the read-only panel class inline; forward everything session-bound
-     to the prompt queue.
+     USER IMMEDIATELY, split by state — a HELD prompt mirrors to the
+     TRAY only, an accepted-for-delivery prompt gets its FEED row
+     (ruled: the old daemon's retired optimistic echo died of a
+     double-identity bug that daemon-minted TurnId/FeedId identity
+     removes structurally); recognize session commands and answer the
+     read-only panel class inline; forward everything session-bound to
+     the prompt queue.
    - USAGE: thin and stateless, done at submission; it owns NO execution
      and NO response formatting.
    - PREREQUISITES: prompt queue, view resolvers (for the mirror push).
 
 5. PRESCRIBED — THE PROMPT QUEUE (peer module).
    - RESPONSIBILITIES: the ONE path for ALL session-bound deliveries —
-     prompts from every origin AND session-acting commands (/clear,
-     /compact) — as a CONSTRAINT, not a default.
+     prompts from every origin, session-acting commands (/clear,
+     /compact), AND model changes (ruled: /model and the SetModel rpc
+     both submit the same session-act here, because a model change
+     resolves at the turn boundary and respects the lease like any
+     delivery — one meeting point, so command and picker can never
+     diverge) — as a CONSTRAINT, not a default.
    - INTERFACE: submit in; delivery through the shim client; holds
      persisted via WSM; serves the tray's facts.
    - USAGE: check the occupancy lease (delivering the lease holder's own
