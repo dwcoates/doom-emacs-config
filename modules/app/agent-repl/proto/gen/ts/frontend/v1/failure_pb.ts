@@ -1,13 +1,12 @@
 // failure.proto — THE FAILURE VOCABULARY A SURFACE DRAWS, and the typed
 // evidence every failure carries.
 //
-// One closed oneof naming every way work can fail ON ITS OWN, plus the typed
-// evidence each kind carries. It is a VOCABULARY FILE, not a component file:
-// nothing here describes a card, a row or a cell. Surfaces embed FailureKind in
-// their own resolved props and render it their own way — the feed's card
-// (feed.proto), the footer's row (footer.proto), the roster's notice
-// (sidebar.proto). One vocabulary, per-surface carriers, exactly as
-// tokens.proto is one economics vocabulary behind several resolved views.
+// One closed oneof naming every way work can fail ON ITS OWN WITHOUT
+// IMPLICATING A FEED ENTRY, plus the typed evidence every failure carries —
+// including the evidence for entry-correlated failures, which the feed's own
+// per-kind `error` arms import from here. It is a VOCABULARY FILE, not a
+// component file: nothing here describes a card, a row or a cell. Surfaces
+// embed the evidence in their own resolved props and render it their own way.
 //
 // WHY IT IS frontend.v1 AND NOT agentrepl.v1. This vocabulary used to live in
 // `agentrepl/v1/shared.proto` and serve two jobs at once: the account a command
@@ -50,15 +49,13 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { QueryIteratorFailure, QueryStartupFailure, UnexpectedQueryEof, VendorSessionIdentityUnavailable } from "../../shim/v1/core_pb";
-import { file_shim_v1_core } from "../../shim/v1/core_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file frontend/v1/failure.proto.
  */
 export const file_frontend_v1_failure: GenFile = /*@__PURE__*/
-  fileDesc("Chlmcm9udGVuZC92MS9mYWlsdXJlLnByb3RvEgtmcm9udGVuZC52MSJhChRWZW5kb3JGYWlsdXJlQ29udGV4dBIZChFjbGF1ZGVfc2Vzc2lvbl9pZBgBIAEoCRIWCg5hcGlfcmVxdWVzdF9pZBgCIAEoCRIWCg5hcGlfbWVzc2FnZV9pZBgDIAEoCSK+FQoLRmFpbHVyZUtpbmQSSAoVc2hpbV92ZXJzaW9uX21pc21hdGNoGAEgASgLMicuZnJvbnRlbmQudjEuRmFpbHVyZVNoaW1WZXJzaW9uTWlzbWF0Y2hIABJEChNzaGltX3NlcV9yZWdyZXNzaW9uGAIgASgLMiUuZnJvbnRlbmQudjEuRmFpbHVyZVNoaW1TZXFSZWdyZXNzaW9uSAASOQoNc2hpbV9kZWdyYWRlZBgDIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVTaGltRGVncmFkZWRIABJPChlzaGltX3N0b3JlX3dyaXRlX3JlamVjdGVkGAQgASgLMiouZnJvbnRlbmQudjEuRmFpbHVyZVNoaW1TdG9yZVdyaXRlUmVqZWN0ZWRIABJBChFxdWVyeV90ZXJtaW5hdGlvbhgFIAEoCzIkLmZyb250ZW5kLnYxLkZhaWx1cmVRdWVyeVRlcm1pbmF0aW9uSAASPQoPc2Vzc2lvbl9kZWxldGVkGAYgASgLMiIuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25EZWxldGVkSAASQwoSc2Vzc2lvbl9zdXBlcnNlZGVkGAcgASgLMiUuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25TdXBlcnNlZGVkSAASQAoRc2Vzc2lvbl9zaGltX2RpZWQYCCABKAsyIy5mcm9udGVuZC52MS5GYWlsdXJlU2Vzc2lvblNoaW1EaWVkSAASRgoUc2Vzc2lvbl9zdGFydF9mYWlsZWQYCSABKAsyJi5mcm9udGVuZC52MS5GYWlsdXJlU2Vzc2lvblN0YXJ0RmFpbGVkSAASSAoVc2Vzc2lvbl9yZXN1bWVfZmFpbGVkGAogASgLMicuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25SZXN1bWVGYWlsZWRIABJSChpzZXNzaW9uX2VuZGVkX3VuY2xhc3NpZmllZBgLIAEoCzIsLmZyb250ZW5kLnYxLkZhaWx1cmVTZXNzaW9uRW5kZWRVbmNsYXNzaWZpZWRIABJOChhoaXN0b3J5X3JlcGxheV90cnVuY2F0ZWQYDCABKAsyKi5mcm9udGVuZC52MS5GYWlsdXJlSGlzdG9yeVJlcGxheVRydW5jYXRlZEgAElEKGmtlZXBfYWxpdmVfd2luZG93X3VuY2xvc2VkGA0gASgLMisuZnJvbnRlbmQudjEuRmFpbHVyZUtlZXBBbGl2ZVdpbmRvd1VuY2xvc2VkSAASUQoaa2VlcF9hbGl2ZV93aW5kb3dfaW52ZXJ0ZWQYDiABKAsyKy5mcm9udGVuZC52MS5GYWlsdXJlS2VlcEFsaXZlV2luZG93SW52ZXJ0ZWRIABJGChRjb21wYWN0aW9uX2NvbGRfcmVhZBgPIAEoCzImLmZyb250ZW5kLnYxLkZhaWx1cmVDb21wYWN0aW9uQ29sZFJlYWRIABI5Cg10dXJuX3VuZHJpdmVuGBAgASgLMiAuZnJvbnRlbmQudjEuRmFpbHVyZVR1cm5VbmRyaXZlbkgAEkkKFWludGVybmFsX3VuY2xhc3NpZmllZBgRIAEoCzIoLmZyb250ZW5kLnYxLkZhaWx1cmVJbnRlcm5hbFVuY2xhc3NpZmllZEgAElAKGWFwaV9hdXRoZW50aWNhdGlvbl9mYWlsZWQYEiABKAsyKy5mcm9udGVuZC52MS5GYWlsdXJlQXBpQXV0aGVudGljYXRpb25GYWlsZWRIABJAChFhcGlfYmlsbGluZ19lcnJvchgTIAEoCzIjLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlCaWxsaW5nRXJyb3JIABI6Cg5hcGlfcmF0ZV9saW1pdBgUIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlSYXRlTGltaXRIABJEChNhcGlfaW52YWxpZF9yZXF1ZXN0GBUgASgLMiUuZnJvbnRlbmQudjEuRmFpbHVyZUFwaUludmFsaWRSZXF1ZXN0SAASPgoQYXBpX3NlcnZlcl9lcnJvchgWIAEoCzIiLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlTZXJ2ZXJFcnJvckgAEjsKDmFwaV9vdmVybG9hZGVkGBcgASgLMiEuZnJvbnRlbmQudjEuRmFpbHVyZUFwaU92ZXJsb2FkZWRIABJOChlhcGlfb2F1dGhfb3JnX25vdF9hbGxvd2VkGBggASgLMikuZnJvbnRlbmQudjEuRmFpbHVyZUFwaU9BdXRoT3JnTm90QWxsb3dlZEgAEkMKE2FwaV9tb2RlbF9ub3RfZm91bmQYGSABKAsyJC5mcm9udGVuZC52MS5GYWlsdXJlQXBpTW9kZWxOb3RGb3VuZEgAEj4KEGFwaV9uZXR3b3JrX2Rvd24YGiABKAsyIi5mcm9udGVuZC52MS5GYWlsdXJlQXBpTmV0d29ya0Rvd25IABJCChJhcGlfcmVxdWVzdF9mYWlsZWQYGyABKAsyJC5mcm9udGVuZC52MS5GYWlsdXJlQXBpUmVxdWVzdEZhaWxlZEgAEjUKC2FwaV91bmtub3duGBwgASgLMh4uZnJvbnRlbmQudjEuRmFpbHVyZUFwaVVua25vd25IABJHChVhcGlfbWF4X291dHB1dF90b2tlbnMYHSABKAsyJi5mcm9udGVuZC52MS5GYWlsdXJlQXBpTWF4T3V0cHV0VG9rZW5zSAASOAoNYXBpX21heF90dXJucxgeIAEoCzIfLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlNYXhUdXJuc0gAEjoKDmFwaV9tYXhfYnVkZ2V0GB8gASgLMiAuZnJvbnRlbmQudjEuRmFpbHVyZUFwaU1heEJ1ZGdldEgAEkQKE2FwaV9leGVjdXRpb25fZXJyb3IYICABKAsyJS5mcm9udGVuZC52MS5GYWlsdXJlQXBpRXhlY3V0aW9uRXJyb3JIABI1CgthcGlfcmVmdXNhbBghIAEoCzIeLmZyb250ZW5kLnYxLkZhaWx1cmVBcGlSZWZ1c2FsSAASPAoPYXBpX3R1cm5fZmFpbGVkGCIgASgLMiEuZnJvbnRlbmQudjEuRmFpbHVyZUFwaVR1cm5GYWlsZWRIABJDChJkYWVtb25fdW5yZWFjaGFibGUYIyABKAsyJS5mcm9udGVuZC52MS5GYWlsdXJlRGFlbW9uVW5yZWFjaGFibGVIABI7Cg53b3Jrc3BhY2VfZ29uZRgkIAEoCzIhLmZyb250ZW5kLnYxLkZhaWx1cmVXb3Jrc3BhY2VHb25lSAASNQoLYm9vdF9mYWlsZWQYJSABKAsyHi5mcm9udGVuZC52MS5GYWlsdXJlQm9vdEZhaWxlZEgAEkYKFGNvbnRyb2xfcGxhbmVfZmFpbGVkGCYgASgLMiYuZnJvbnRlbmQudjEuRmFpbHVyZUNvbnRyb2xQbGFuZUZhaWxlZEgAEkEKEWZyYW1lX3VuZGVjb2RhYmxlGCcgASgLMiQuZnJvbnRlbmQudjEuRmFpbHVyZUZyYW1lVW5kZWNvZGFibGVIABI3CgxzdGFsZV9idW5kbGUYKCABKAsyHy5mcm9udGVuZC52MS5GYWlsdXJlU3RhbGVCdW5kbGVIAEIGCgRraW5kIkoKGkZhaWx1cmVTaGltVmVyc2lvbk1pc21hdGNoEhQKDHNoaW1fdmVyc2lvbhgBIAEoCRIWCg5kYWVtb25fdmVyc2lvbhgCIAEoCSI+ChhGYWlsdXJlU2hpbVNlcVJlZ3Jlc3Npb24SCwoDc2VxGAEgASgEEhUKDWxhc3Rfc2Vlbl9zZXEYAiABKAQiKAoTRmFpbHVyZVNoaW1EZWdyYWRlZBIRCgljb21wb25lbnQYASABKAkiWQodRmFpbHVyZVNoaW1TdG9yZVdyaXRlUmVqZWN0ZWQSEQoJY29tcG9uZW50GAEgASgJEg4KBnJlYXNvbhgCIAEoCRIVCg1kcm9wcGVkX2NvdW50GAMgASgDIk8KF0ZhaWx1cmVRdWVyeVRlcm1pbmF0aW9uEjQKBmRldGFpbBgBIAEoCzIkLmZyb250ZW5kLnYxLlF1ZXJ5VGVybWluYXRpb25GYWlsdXJlIhcKFUZhaWx1cmVTZXNzaW9uRGVsZXRlZCIaChhGYWlsdXJlU2Vzc2lvblN1cGVyc2VkZWQiGAoWRmFpbHVyZVNlc3Npb25TaGltRGllZCIqChlGYWlsdXJlU2Vzc2lvblN0YXJ0RmFpbGVkEg0KBWNhdXNlGAEgASgJIk8KGkZhaWx1cmVTZXNzaW9uUmVzdW1lRmFpbGVkEjEKBmRldGFpbBgBIAEoCzIhLmZyb250ZW5kLnYxLlNlc3Npb25SZXN1bWVGYWlsdXJlIjUKH0ZhaWx1cmVTZXNzaW9uRW5kZWRVbmNsYXNzaWZpZWQSEgoKcmF3X3JlYXNvbhgBIAEoCSJpCh1GYWlsdXJlSGlzdG9yeVJlcGxheVRydW5jYXRlZBIQCghmcm9tX3NlcRgBIAEoBBITCgtzdG9wX2F0X3NlcRgCIAEoBBIRCglkZWxpdmVyZWQYAyABKAMSDgoGcmVhc29uGAQgASgJIjAKHkZhaWx1cmVLZWVwQWxpdmVXaW5kb3dVbmNsb3NlZBIOCgZyZWFzb24YASABKAkiMAoeRmFpbHVyZUtlZXBBbGl2ZVdpbmRvd0ludmVydGVkEg4KBnJlYXNvbhgBIAEoCSI6ChlGYWlsdXJlQ29tcGFjdGlvbkNvbGRSZWFkEh0KFXVuY2FjaGVkX2lucHV0X3Rva2VucxgBIAEoAyIlChNGYWlsdXJlVHVyblVuZHJpdmVuEg4KBnJlYXNvbhgBIAEoCSIsChtGYWlsdXJlSW50ZXJuYWxVbmNsYXNzaWZpZWQSDQoFY2F1c2UYASABKAkiegoeRmFpbHVyZUFwaUF1dGhlbnRpY2F0aW9uRmFpbGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFInIKFkZhaWx1cmVBcGlCaWxsaW5nRXJyb3ISMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSEwoLaHR0cF9zdGF0dXMYAiABKAUSEAoIYXR0ZW1wdHMYAyABKAUibwoTRmFpbHVyZUFwaVJhdGVMaW1pdBIxCgZ2ZW5kb3IYASABKAsyIS5mcm9udGVuZC52MS5WZW5kb3JGYWlsdXJlQ29udGV4dBITCgtodHRwX3N0YXR1cxgCIAEoBRIQCghhdHRlbXB0cxgDIAEoBSJ0ChhGYWlsdXJlQXBpSW52YWxpZFJlcXVlc3QSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSEwoLaHR0cF9zdGF0dXMYAiABKAUSEAoIYXR0ZW1wdHMYAyABKAUicQoVRmFpbHVyZUFwaVNlcnZlckVycm9yEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFInAKFEZhaWx1cmVBcGlPdmVybG9hZGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFIngKHEZhaWx1cmVBcGlPQXV0aE9yZ05vdEFsbG93ZWQSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSEwoLaHR0cF9zdGF0dXMYAiABKAUSEAoIYXR0ZW1wdHMYAyABKAUiWwoXRmFpbHVyZUFwaU1vZGVsTm90Rm91bmQSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQSDQoFbW9kZWwYAiABKAkiSgoVRmFpbHVyZUFwaU5ldHdvcmtEb3duEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0InMKF0ZhaWx1cmVBcGlSZXF1ZXN0RmFpbGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFIm0KEUZhaWx1cmVBcGlVbmtub3duEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC2h0dHBfc3RhdHVzGAIgASgFEhAKCGF0dGVtcHRzGAMgASgFIk4KGUZhaWx1cmVBcGlNYXhPdXRwdXRUb2tlbnMSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQiRwoSRmFpbHVyZUFwaU1heFR1cm5zEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0IkgKE0ZhaWx1cmVBcGlNYXhCdWRnZXQSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQiTQoYRmFpbHVyZUFwaUV4ZWN1dGlvbkVycm9yEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0IkYKEUZhaWx1cmVBcGlSZWZ1c2FsEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0Il4KFEZhaWx1cmVBcGlUdXJuRmFpbGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC3N0b3BfcmVhc29uGAIgASgJIkQKGEZhaWx1cmVEYWVtb25VbnJlYWNoYWJsZRISCgpjbG9zZV9jb2RlGAEgASgFEhQKDGNsb3NlX3JlYXNvbhgCIAEoCSIWChRGYWlsdXJlV29ya3NwYWNlR29uZSIiChFGYWlsdXJlQm9vdEZhaWxlZBINCgVjYXVzZRgBIAEoCSI4ChlGYWlsdXJlQ29udHJvbFBsYW5lRmFpbGVkEgwKBHdoYXQYASABKAkSDQoFY2F1c2UYAiABKAkiPAoXRmFpbHVyZUZyYW1lVW5kZWNvZGFibGUSDQoFY2F1c2UYASABKAkSEgoKZnJhbWVfaGVhZBgCIAEoCSIkChJGYWlsdXJlU3RhbGVCdW5kbGUSDgoGZGV0YWlsGAEgASgJIosDChdRdWVyeVRlcm1pbmF0aW9uRmFpbHVyZRIZChFxdWVyeV9pbnN0YW5jZV9pZBgBIAEoCRIbChF2ZW5kb3Jfc2Vzc2lvbl9pZBgCIAEoCUgAElgKI3ZlbmRvcl9zZXNzaW9uX2lkZW50aXR5X3VuYXZhaWxhYmxlGAMgASgLMikuc2hpbS52MS5WZW5kb3JTZXNzaW9uSWRlbnRpdHlVbmF2YWlsYWJsZUgAEhYKDm9ic2VydmVkX2F0X21zGAQgASgDEjUKDnVuZXhwZWN0ZWRfZW9mGAUgASgLMhsuc2hpbS52MS5VbmV4cGVjdGVkUXVlcnlFb2ZIARI5ChBpdGVyYXRvcl9mYWlsdXJlGAYgASgLMh0uc2hpbS52MS5RdWVyeUl0ZXJhdG9yRmFpbHVyZUgBEjcKD3N0YXJ0dXBfZmFpbHVyZRgHIAEoCzIcLnNoaW0udjEuUXVlcnlTdGFydHVwRmFpbHVyZUgBQhEKD3ZlbmRvcl9pZGVudGl0eUIICgZyZWFzb24iyAQKFFNlc3Npb25SZXN1bWVGYWlsdXJlEhkKEWNsYXVkZV9zZXNzaW9uX2lkGAEgASgJEgsKA2N3ZBgCIAEoCRISCgpjb25maWdfZGlyGAMgASgJEhsKE3Jlc29sdmVkX2NvbmZpZ19kaXIYBCABKAkSOQoGY3JlYXRlGAUgASgLMicuZnJvbnRlbmQudjEuU2Vzc2lvblJlc3VtZUZhaWx1cmVDcmVhdGVIABJOChFhdXRvbWF0aWNfcmVzdG9yZRgGIAEoCzIxLmZyb250ZW5kLnYxLlNlc3Npb25SZXN1bWVGYWlsdXJlQXV0b21hdGljUmVzdG9yZUgAElgKFnRyYW5zY3JpcHRfdW5hdmFpbGFibGUYByABKAsyNi5mcm9udGVuZC52MS5TZXNzaW9uUmVzdW1lRmFpbHVyZVRyYW5zY3JpcHRVbmF2YWlsYWJsZUgBEk4KEWlkZW50aXR5X21pc21hdGNoGAggASgLMjEuZnJvbnRlbmQudjEuU2Vzc2lvblJlc3VtZUZhaWx1cmVJZGVudGl0eU1pc21hdGNoSAESQQoRcXVlcnlfdGVybWluYXRpb24YCSABKAsyJC5mcm9udGVuZC52MS5RdWVyeVRlcm1pbmF0aW9uRmFpbHVyZUgBEksKEGJyaW5nX3VwX2ZhaWx1cmUYCiABKAsyLy5mcm9udGVuZC52MS5TZXNzaW9uUmVzdW1lRmFpbHVyZUJyaW5nVXBGYWlsdXJlSAFCCQoHYXR0ZW1wdEIHCgVjYXVzZSIcChpTZXNzaW9uUmVzdW1lRmFpbHVyZUNyZWF0ZSImCiRTZXNzaW9uUmVzdW1lRmFpbHVyZUF1dG9tYXRpY1Jlc3RvcmUiQwopU2Vzc2lvblJlc3VtZUZhaWx1cmVUcmFuc2NyaXB0VW5hdmFpbGFibGUSFgoOc2VhcmNoZWRfcGF0aHMYASADKAkiTQokU2Vzc2lvblJlc3VtZUZhaWx1cmVJZGVudGl0eU1pc21hdGNoEiUKHXJlcGxhY2VtZW50X2NsYXVkZV9zZXNzaW9uX2lkGAEgASgJIjMKIlNlc3Npb25SZXN1bWVGYWlsdXJlQnJpbmdVcEZhaWx1cmUSDQoFY2F1c2UYASABKAkiIwoORmFpbHVyZUNhcmRSZWYSEQoJY2FyZF91dWlkGAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_shim_v1_core]);
+  fileDesc("Chlmcm9udGVuZC92MS9mYWlsdXJlLnByb3RvEgtmcm9udGVuZC52MSJhChRWZW5kb3JGYWlsdXJlQ29udGV4dBIZChFjbGF1ZGVfc2Vzc2lvbl9pZBgBIAEoCRIWCg5hcGlfcmVxdWVzdF9pZBgCIAEoCRIWCg5hcGlfbWVzc2FnZV9pZBgDIAEoCSKlCQoLRmFpbHVyZUtpbmQSSAoVc2hpbV92ZXJzaW9uX21pc21hdGNoGAEgASgLMicuZnJvbnRlbmQudjEuRmFpbHVyZVNoaW1WZXJzaW9uTWlzbWF0Y2hIABJEChNzaGltX3NlcV9yZWdyZXNzaW9uGAIgASgLMiUuZnJvbnRlbmQudjEuRmFpbHVyZVNoaW1TZXFSZWdyZXNzaW9uSAASOQoNc2hpbV9kZWdyYWRlZBgDIAEoCzIgLmZyb250ZW5kLnYxLkZhaWx1cmVTaGltRGVncmFkZWRIABJPChlzaGltX3N0b3JlX3dyaXRlX3JlamVjdGVkGAQgASgLMiouZnJvbnRlbmQudjEuRmFpbHVyZVNoaW1TdG9yZVdyaXRlUmVqZWN0ZWRIABI9Cg9zZXNzaW9uX2RlbGV0ZWQYBSABKAsyIi5mcm9udGVuZC52MS5GYWlsdXJlU2Vzc2lvbkRlbGV0ZWRIABJDChJzZXNzaW9uX3N1cGVyc2VkZWQYBiABKAsyJS5mcm9udGVuZC52MS5GYWlsdXJlU2Vzc2lvblN1cGVyc2VkZWRIABJAChFzZXNzaW9uX3NoaW1fZGllZBgHIAEoCzIjLmZyb250ZW5kLnYxLkZhaWx1cmVTZXNzaW9uU2hpbURpZWRIABJGChRzZXNzaW9uX3N0YXJ0X2ZhaWxlZBgIIAEoCzImLmZyb250ZW5kLnYxLkZhaWx1cmVTZXNzaW9uU3RhcnRGYWlsZWRIABJIChVzZXNzaW9uX3Jlc3VtZV9mYWlsZWQYCSABKAsyJy5mcm9udGVuZC52MS5GYWlsdXJlU2Vzc2lvblJlc3VtZUZhaWxlZEgAElIKGnNlc3Npb25fZW5kZWRfdW5jbGFzc2lmaWVkGAogASgLMiwuZnJvbnRlbmQudjEuRmFpbHVyZVNlc3Npb25FbmRlZFVuY2xhc3NpZmllZEgAEkkKFWludGVybmFsX3VuY2xhc3NpZmllZBgLIAEoCzIoLmZyb250ZW5kLnYxLkZhaWx1cmVJbnRlcm5hbFVuY2xhc3NpZmllZEgAEkMKEmRhZW1vbl91bnJlYWNoYWJsZRgMIAEoCzIlLmZyb250ZW5kLnYxLkZhaWx1cmVEYWVtb25VbnJlYWNoYWJsZUgAEjsKDndvcmtzcGFjZV9nb25lGA0gASgLMiEuZnJvbnRlbmQudjEuRmFpbHVyZVdvcmtzcGFjZUdvbmVIABI1Cgtib290X2ZhaWxlZBgOIAEoCzIeLmZyb250ZW5kLnYxLkZhaWx1cmVCb290RmFpbGVkSAASRgoUY29udHJvbF9wbGFuZV9mYWlsZWQYDyABKAsyJi5mcm9udGVuZC52MS5GYWlsdXJlQ29udHJvbFBsYW5lRmFpbGVkSAASQQoRZnJhbWVfdW5kZWNvZGFibGUYECABKAsyJC5mcm9udGVuZC52MS5GYWlsdXJlRnJhbWVVbmRlY29kYWJsZUgAEjcKDHN0YWxlX2J1bmRsZRgRIAEoCzIfLmZyb250ZW5kLnYxLkZhaWx1cmVTdGFsZUJ1bmRsZUgAQgYKBGtpbmQiSgoaRmFpbHVyZVNoaW1WZXJzaW9uTWlzbWF0Y2gSFAoMc2hpbV92ZXJzaW9uGAEgASgJEhYKDmRhZW1vbl92ZXJzaW9uGAIgASgJIj4KGEZhaWx1cmVTaGltU2VxUmVncmVzc2lvbhILCgNzZXEYASABKAQSFQoNbGFzdF9zZWVuX3NlcRgCIAEoBCIoChNGYWlsdXJlU2hpbURlZ3JhZGVkEhEKCWNvbXBvbmVudBgBIAEoCSJZCh1GYWlsdXJlU2hpbVN0b3JlV3JpdGVSZWplY3RlZBIRCgljb21wb25lbnQYASABKAkSDgoGcmVhc29uGAIgASgJEhUKDWRyb3BwZWRfY291bnQYAyABKAMiTwoXRmFpbHVyZVF1ZXJ5VGVybWluYXRpb24SNAoGZGV0YWlsGAEgASgLMiQuZnJvbnRlbmQudjEuUXVlcnlUZXJtaW5hdGlvbkZhaWx1cmUiFwoVRmFpbHVyZVNlc3Npb25EZWxldGVkIhoKGEZhaWx1cmVTZXNzaW9uU3VwZXJzZWRlZCIYChZGYWlsdXJlU2Vzc2lvblNoaW1EaWVkIioKGUZhaWx1cmVTZXNzaW9uU3RhcnRGYWlsZWQSDQoFY2F1c2UYASABKAkiTwoaRmFpbHVyZVNlc3Npb25SZXN1bWVGYWlsZWQSMQoGZGV0YWlsGAEgASgLMiEuZnJvbnRlbmQudjEuU2Vzc2lvblJlc3VtZUZhaWx1cmUiNQofRmFpbHVyZVNlc3Npb25FbmRlZFVuY2xhc3NpZmllZBISCgpyYXdfcmVhc29uGAEgASgJImkKHUZhaWx1cmVIaXN0b3J5UmVwbGF5VHJ1bmNhdGVkEhAKCGZyb21fc2VxGAEgASgEEhMKC3N0b3BfYXRfc2VxGAIgASgEEhEKCWRlbGl2ZXJlZBgDIAEoAxIOCgZyZWFzb24YBCABKAkiMAoeRmFpbHVyZUtlZXBBbGl2ZVdpbmRvd1VuY2xvc2VkEg4KBnJlYXNvbhgBIAEoCSIwCh5GYWlsdXJlS2VlcEFsaXZlV2luZG93SW52ZXJ0ZWQSDgoGcmVhc29uGAEgASgJIjoKGUZhaWx1cmVDb21wYWN0aW9uQ29sZFJlYWQSHQoVdW5jYWNoZWRfaW5wdXRfdG9rZW5zGAEgASgDIiUKE0ZhaWx1cmVUdXJuVW5kcml2ZW4SDgoGcmVhc29uGAEgASgJIiwKG0ZhaWx1cmVJbnRlcm5hbFVuY2xhc3NpZmllZBINCgVjYXVzZRgBIAEoCSJNChhGYWlsdXJlVmVuZG9yTmV0d29ya0Rvd24SMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQiSgoVRmFpbHVyZVZlbmRvck1heFR1cm5zEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0IksKFkZhaWx1cmVWZW5kb3JNYXhCdWRnZXQSMQoGdmVuZG9yGAEgASgLMiEuZnJvbnRlbmQudjEuVmVuZG9yRmFpbHVyZUNvbnRleHQiUAobRmFpbHVyZVZlbmRvckV4ZWN1dGlvbkVycm9yEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0ImEKF0ZhaWx1cmVWZW5kb3JUdXJuRmFpbGVkEjEKBnZlbmRvchgBIAEoCzIhLmZyb250ZW5kLnYxLlZlbmRvckZhaWx1cmVDb250ZXh0EhMKC3N0b3BfcmVhc29uGAIgASgJIkQKGEZhaWx1cmVEYWVtb25VbnJlYWNoYWJsZRISCgpjbG9zZV9jb2RlGAEgASgFEhQKDGNsb3NlX3JlYXNvbhgCIAEoCSIWChRGYWlsdXJlV29ya3NwYWNlR29uZSIiChFGYWlsdXJlQm9vdEZhaWxlZBINCgVjYXVzZRgBIAEoCSI4ChlGYWlsdXJlQ29udHJvbFBsYW5lRmFpbGVkEgwKBHdoYXQYASABKAkSDQoFY2F1c2UYAiABKAkiPAoXRmFpbHVyZUZyYW1lVW5kZWNvZGFibGUSDQoFY2F1c2UYASABKAkSEgoKZnJhbWVfaGVhZBgCIAEoCSIkChJGYWlsdXJlU3RhbGVCdW5kbGUSDgoGZGV0YWlsGAEgASgJIsUDChdRdWVyeVRlcm1pbmF0aW9uRmFpbHVyZRIZChFxdWVyeV9pbnN0YW5jZV9pZBgBIAEoCRIbChF2ZW5kb3Jfc2Vzc2lvbl9pZBgCIAEoCUgAEmUKI3ZlbmRvcl9zZXNzaW9uX2lkZW50aXR5X3VuYXZhaWxhYmxlGAMgASgLMjYuZnJvbnRlbmQudjEuUXVlcnlUZXJtaW5hdGlvblZlbmRvcklkZW50aXR5VW5hdmFpbGFibGVIABIWCg5vYnNlcnZlZF9hdF9tcxgEIAEoAxJECg51bmV4cGVjdGVkX2VvZhgFIAEoCzIqLmZyb250ZW5kLnYxLlF1ZXJ5VGVybWluYXRpb25VbmV4cGVjdGVkRW9mSAESSAoQaXRlcmF0b3JfZmFpbHVyZRgGIAEoCzIsLmZyb250ZW5kLnYxLlF1ZXJ5VGVybWluYXRpb25JdGVyYXRvckZhaWx1cmVIARJGCg9zdGFydHVwX2ZhaWx1cmUYByABKAsyKy5mcm9udGVuZC52MS5RdWVyeVRlcm1pbmF0aW9uU3RhcnR1cEZhaWx1cmVIAUIRCg92ZW5kb3JfaWRlbnRpdHlCCAoGcmVhc29uIisKKVF1ZXJ5VGVybWluYXRpb25WZW5kb3JJZGVudGl0eVVuYXZhaWxhYmxlIh8KHVF1ZXJ5VGVybWluYXRpb25VbmV4cGVjdGVkRW9mIjAKH1F1ZXJ5VGVybWluYXRpb25JdGVyYXRvckZhaWx1cmUSDQoFY2F1c2UYASABKAkiLwoeUXVlcnlUZXJtaW5hdGlvblN0YXJ0dXBGYWlsdXJlEg0KBWNhdXNlGAEgASgJIsgEChRTZXNzaW9uUmVzdW1lRmFpbHVyZRIZChFjbGF1ZGVfc2Vzc2lvbl9pZBgBIAEoCRILCgNjd2QYAiABKAkSEgoKY29uZmlnX2RpchgDIAEoCRIbChNyZXNvbHZlZF9jb25maWdfZGlyGAQgASgJEjkKBmNyZWF0ZRgFIAEoCzInLmZyb250ZW5kLnYxLlNlc3Npb25SZXN1bWVGYWlsdXJlQ3JlYXRlSAASTgoRYXV0b21hdGljX3Jlc3RvcmUYBiABKAsyMS5mcm9udGVuZC52MS5TZXNzaW9uUmVzdW1lRmFpbHVyZUF1dG9tYXRpY1Jlc3RvcmVIABJYChZ0cmFuc2NyaXB0X3VuYXZhaWxhYmxlGAcgASgLMjYuZnJvbnRlbmQudjEuU2Vzc2lvblJlc3VtZUZhaWx1cmVUcmFuc2NyaXB0VW5hdmFpbGFibGVIARJOChFpZGVudGl0eV9taXNtYXRjaBgIIAEoCzIxLmZyb250ZW5kLnYxLlNlc3Npb25SZXN1bWVGYWlsdXJlSWRlbnRpdHlNaXNtYXRjaEgBEkEKEXF1ZXJ5X3Rlcm1pbmF0aW9uGAkgASgLMiQuZnJvbnRlbmQudjEuUXVlcnlUZXJtaW5hdGlvbkZhaWx1cmVIARJLChBicmluZ191cF9mYWlsdXJlGAogASgLMi8uZnJvbnRlbmQudjEuU2Vzc2lvblJlc3VtZUZhaWx1cmVCcmluZ1VwRmFpbHVyZUgBQgkKB2F0dGVtcHRCBwoFY2F1c2UiHAoaU2Vzc2lvblJlc3VtZUZhaWx1cmVDcmVhdGUiJgokU2Vzc2lvblJlc3VtZUZhaWx1cmVBdXRvbWF0aWNSZXN0b3JlIkMKKVNlc3Npb25SZXN1bWVGYWlsdXJlVHJhbnNjcmlwdFVuYXZhaWxhYmxlEhYKDnNlYXJjaGVkX3BhdGhzGAEgAygJIk0KJFNlc3Npb25SZXN1bWVGYWlsdXJlSWRlbnRpdHlNaXNtYXRjaBIlCh1yZXBsYWNlbWVudF9jbGF1ZGVfc2Vzc2lvbl9pZBgBIAEoCSIzCiJTZXNzaW9uUmVzdW1lRmFpbHVyZUJyaW5nVXBGYWlsdXJlEg0KBWNhdXNlGAEgASgJIiMKDkZhaWx1cmVDYXJkUmVmEhEKCWNhcmRfdXVpZBgBIAEoCUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z");
 
 /**
  * The vendor conversation and request a vendor-side failure pertains to.
@@ -102,21 +99,30 @@ export const VendorFailureContextSchema: GenMessage<VendorFailureContext> = /*@_
   messageDesc(file_frontend_v1_failure, 0);
 
 /**
- * WHAT failed, WHEN NOTHING ASKED. Exactly one arm is always set; an unset
- * FailureKind is a malformed frame and must be rejected rather than rendered as
- * a generic error.
+ * WHAT failed, WHEN NOTHING ASKED AND NO ENTRY IS IMPLICATED. Exactly one arm
+ * is always set; an unset FailureKind is a malformed frame and must be
+ * rejected rather than rendered as a generic error.
  *
- * EVERY ARM HERE IS AN EVENT, NEVER AN ANSWER. A failure that answers a request
- * travels in that request's own `agentrepl.v1.<Method>Response.error` and is
- * not representable here. What is left is exactly the set of failures that
- * happen on their own — which is also exactly the set a feed has to draw,
- * because there is no call for them to be attached to.
+ * EVERY ARM HERE IS AN EVENT, NEVER AN ANSWER, AND NEVER A ROW. A failure that
+ * answers a request travels in that request's own
+ * `agentrepl.v1.<Method>Response.error`. A failure that CORRELATES TO A FEED
+ * ENTRY — a response that never settled, a tool that failed, a bubble that was
+ * lost, a merge that did not land, a page that could not be completed — is
+ * that entry's OWN `error` arm in feed.proto, which imports the evidence
+ * message directly (FailureQueryTermination, FailureVendor*, FailureTurnUndriven,
+ * FailureKeepAliveWindow*, FailureHistoryReplayTruncated,
+ * FailureCompactionColdRead are declared below for exactly that). What is left
+ * HERE is the residue that is inherently entry-less: the session dying, the
+ * shim degrading, the daemon's own unclassifiable fault, the client's own
+ * machinery. None of it is a conversation fact; it is footer/topbar/gate state,
+ * and the arms exist so agentrepl.v1 error responses and the host surface can
+ * name them.
  *
- * TWO PRODUCERS. The daemon mints every arm below 35 — it is the only thing
- * that can see the shim, the store or the vendor. A frontend mints the arms
- * from 35 up, and ONLY those: they are the failures of the frontend's own
- * machinery, which the daemon cannot observe. The split is by number so it
- * cannot drift, and neither producer may set the other's arms.
+ * TWO PRODUCERS. The daemon mints the machinery arms — it is the only thing
+ * that can see the shim, the store or the vendor. A frontend mints the
+ * client-local arms, and ONLY those: they are the failures of the frontend's
+ * own machinery, which the daemon cannot observe. Neither producer may set the
+ * other's arms.
  *
  * @generated from message frontend.v1.FailureKind
  */
@@ -161,17 +167,9 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     case: "shimStoreWriteRejected";
   } | {
     /**
-     * The agent sdk query ended unexpectedly — the session is alive but the thing that drives it stopped.
-     *
-     * @generated from field: frontend.v1.FailureQueryTermination query_termination = 5;
-     */
-    value: FailureQueryTermination;
-    case: "queryTermination";
-  } | {
-    /**
      * The workspace's session was deleted deliberately.
      *
-     * @generated from field: frontend.v1.FailureSessionDeleted session_deleted = 6;
+     * @generated from field: frontend.v1.FailureSessionDeleted session_deleted = 5;
      */
     value: FailureSessionDeleted;
     case: "sessionDeleted";
@@ -179,7 +177,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * A new session took over this workspace, so the previous one was stopped.
      *
-     * @generated from field: frontend.v1.FailureSessionSuperseded session_superseded = 7;
+     * @generated from field: frontend.v1.FailureSessionSuperseded session_superseded = 6;
      */
     value: FailureSessionSuperseded;
     case: "sessionSuperseded";
@@ -187,7 +185,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The agent process exited.
      *
-     * @generated from field: frontend.v1.FailureSessionShimDied session_shim_died = 8;
+     * @generated from field: frontend.v1.FailureSessionShimDied session_shim_died = 7;
      */
     value: FailureSessionShimDied;
     case: "sessionShimDied";
@@ -195,7 +193,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The session could not be started at all.
      *
-     * @generated from field: frontend.v1.FailureSessionStartFailed session_start_failed = 9;
+     * @generated from field: frontend.v1.FailureSessionStartFailed session_start_failed = 8;
      */
     value: FailureSessionStartFailed;
     case: "sessionStartFailed";
@@ -203,7 +201,7 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The vendor conversation could not be resumed without breaking continuity.
      *
-     * @generated from field: frontend.v1.FailureSessionResumeFailed session_resume_failed = 10;
+     * @generated from field: frontend.v1.FailureSessionResumeFailed session_resume_failed = 9;
      */
     value: FailureSessionResumeFailed;
     case: "sessionResumeFailed";
@@ -211,235 +209,55 @@ export type FailureKind = Message<"frontend.v1.FailureKind"> & {
     /**
      * The session ended for a reason the daemon could not classify.
      *
-     * @generated from field: frontend.v1.FailureSessionEndedUnclassified session_ended_unclassified = 11;
+     * @generated from field: frontend.v1.FailureSessionEndedUnclassified session_ended_unclassified = 10;
      */
     value: FailureSessionEndedUnclassified;
     case: "sessionEndedUnclassified";
   } | {
     /**
-     * The history re-pull ended before it reached the live window, so what is on screen has a gap in it.
-     *
-     * @generated from field: frontend.v1.FailureHistoryReplayTruncated history_replay_truncated = 12;
-     */
-    value: FailureHistoryReplayTruncated;
-    case: "historyReplayTruncated";
-  } | {
-    /**
-     * A cache keep-alive window could not be closed, so new conversation is withheld until it is repaired.
-     *
-     * @generated from field: frontend.v1.FailureKeepAliveWindowUnclosed keep_alive_window_unclosed = 13;
-     */
-    value: FailureKeepAliveWindowUnclosed;
-    case: "keepAliveWindowUnclosed";
-  } | {
-    /**
-     * A cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation.
-     *
-     * @generated from field: frontend.v1.FailureKeepAliveWindowInverted keep_alive_window_inverted = 14;
-     */
-    value: FailureKeepAliveWindowInverted;
-    case: "keepAliveWindowInverted";
-  } | {
-    /**
-     * A compaction re-read the whole conversation at the uncached rate instead of from the prompt cache — the exact cost compaction exists to avoid.
-     *
-     * @generated from field: frontend.v1.FailureCompactionColdRead compaction_cold_read = 15;
-     */
-    value: FailureCompactionColdRead;
-    case: "compactionColdRead";
-  } | {
-    /**
-     * A turn stood bound with nothing driving it, so the daemon closed it rather than leaving the workspace thinking forever.
-     *
-     * @generated from field: frontend.v1.FailureTurnUndriven turn_undriven = 16;
-     */
-    value: FailureTurnUndriven;
-    case: "turnUndriven";
-  } | {
-    /**
      * Agent-repl's own machinery failed in a way it could not classify.
      *
-     * @generated from field: frontend.v1.FailureInternalUnclassified internal_unclassified = 17;
+     * @generated from field: frontend.v1.FailureInternalUnclassified internal_unclassified = 11;
      */
     value: FailureInternalUnclassified;
     case: "internalUnclassified";
   } | {
     /**
-     * ---- VENDOR failures: the SDK or the vendor backend refused or concluded the
-     * work. Releasing it needs a human or the vendor, never a retry. This side
-     * of the vocabulary resolves the workspace PURPLE. ----
-     * Authentication failed.
-     *
-     * @generated from field: frontend.v1.FailureApiAuthenticationFailed api_authentication_failed = 18;
-     */
-    value: FailureApiAuthenticationFailed;
-    case: "apiAuthenticationFailed";
-  } | {
-    /**
-     * A billing problem stopped the request.
-     *
-     * @generated from field: frontend.v1.FailureApiBillingError api_billing_error = 19;
-     */
-    value: FailureApiBillingError;
-    case: "apiBillingError";
-  } | {
-    /**
-     * The account is rate limited.
-     *
-     * @generated from field: frontend.v1.FailureApiRateLimit api_rate_limit = 20;
-     */
-    value: FailureApiRateLimit;
-    case: "apiRateLimit";
-  } | {
-    /**
-     * The vendor rejected the request as invalid.
-     *
-     * @generated from field: frontend.v1.FailureApiInvalidRequest api_invalid_request = 21;
-     */
-    value: FailureApiInvalidRequest;
-    case: "apiInvalidRequest";
-  } | {
-    /**
-     * The vendor returned a server error.
-     *
-     * @generated from field: frontend.v1.FailureApiServerError api_server_error = 22;
-     */
-    value: FailureApiServerError;
-    case: "apiServerError";
-  } | {
-    /**
-     * The vendor is overloaded.
-     *
-     * @generated from field: frontend.v1.FailureApiOverloaded api_overloaded = 23;
-     */
-    value: FailureApiOverloaded;
-    case: "apiOverloaded";
-  } | {
-    /**
-     * This organization is not allowed to use the api.
-     *
-     * @generated from field: frontend.v1.FailureApiOAuthOrgNotAllowed api_oauth_org_not_allowed = 24;
-     */
-    value: FailureApiOAuthOrgNotAllowed;
-    case: "apiOauthOrgNotAllowed";
-  } | {
-    /**
-     * The requested model does not exist.
-     *
-     * @generated from field: frontend.v1.FailureApiModelNotFound api_model_not_found = 25;
-     */
-    value: FailureApiModelNotFound;
-    case: "apiModelNotFound";
-  } | {
-    /**
-     * The network never reached the vendor.
-     *
-     * @generated from field: frontend.v1.FailureApiNetworkDown api_network_down = 26;
-     */
-    value: FailureApiNetworkDown;
-    case: "apiNetworkDown";
-  } | {
-    /**
-     * The vendor request failed for a reason with no more specific kind.
-     *
-     * @generated from field: frontend.v1.FailureApiRequestFailed api_request_failed = 27;
-     */
-    value: FailureApiRequestFailed;
-    case: "apiRequestFailed";
-  } | {
-    /**
-     * The vendor failed for a reason the daemon could not classify.
-     *
-     * @generated from field: frontend.v1.FailureApiUnknown api_unknown = 28;
-     */
-    value: FailureApiUnknown;
-    case: "apiUnknown";
-  } | {
-    /**
-     * The response hit the output-token ceiling.
-     *
-     * @generated from field: frontend.v1.FailureApiMaxOutputTokens api_max_output_tokens = 29;
-     */
-    value: FailureApiMaxOutputTokens;
-    case: "apiMaxOutputTokens";
-  } | {
-    /**
-     * The turn hit its maximum-turns limit.
-     *
-     * @generated from field: frontend.v1.FailureApiMaxTurns api_max_turns = 30;
-     */
-    value: FailureApiMaxTurns;
-    case: "apiMaxTurns";
-  } | {
-    /**
-     * The turn hit its budget limit.
-     *
-     * @generated from field: frontend.v1.FailureApiMaxBudget api_max_budget = 31;
-     */
-    value: FailureApiMaxBudget;
-    case: "apiMaxBudget";
-  } | {
-    /**
-     * The turn aborted during execution.
-     *
-     * @generated from field: frontend.v1.FailureApiExecutionError api_execution_error = 32;
-     */
-    value: FailureApiExecutionError;
-    case: "apiExecutionError";
-  } | {
-    /**
-     * The model refused the request.
-     *
-     * @generated from field: frontend.v1.FailureApiRefusal api_refusal = 33;
-     */
-    value: FailureApiRefusal;
-    case: "apiRefusal";
-  } | {
-    /**
-     * The turn ended abnormally for a reason with no more specific kind.
-     *
-     * @generated from field: frontend.v1.FailureApiTurnFailed api_turn_failed = 34;
-     */
-    value: FailureApiTurnFailed;
-    case: "apiTurnFailed";
-  } | {
-    /**
      * ---- CLIENT-LOCAL failures: the one part of this vocabulary a frontend
-     * mints itself. See the note on FailureKind. All resolve BLUE, because a
-     * frontend can only ever observe its own machinery failing.
-     * The daemon never sets one of these arms.
+     * mints itself. All resolve BLUE, because a frontend can only ever
+     * observe its own machinery failing. The daemon never sets one of these.
      *
-     * @generated from field: frontend.v1.FailureDaemonUnreachable daemon_unreachable = 35;
+     * @generated from field: frontend.v1.FailureDaemonUnreachable daemon_unreachable = 12;
      */
     value: FailureDaemonUnreachable;
     case: "daemonUnreachable";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureWorkspaceGone workspace_gone = 36;
+     * @generated from field: frontend.v1.FailureWorkspaceGone workspace_gone = 13;
      */
     value: FailureWorkspaceGone;
     case: "workspaceGone";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureBootFailed boot_failed = 37;
+     * @generated from field: frontend.v1.FailureBootFailed boot_failed = 14;
      */
     value: FailureBootFailed;
     case: "bootFailed";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureControlPlaneFailed control_plane_failed = 38;
+     * @generated from field: frontend.v1.FailureControlPlaneFailed control_plane_failed = 15;
      */
     value: FailureControlPlaneFailed;
     case: "controlPlaneFailed";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureFrameUndecodable frame_undecodable = 39;
+     * @generated from field: frontend.v1.FailureFrameUndecodable frame_undecodable = 16;
      */
     value: FailureFrameUndecodable;
     case: "frameUndecodable";
   } | {
     /**
-     * @generated from field: frontend.v1.FailureStaleBundle stale_bundle = 40;
+     * @generated from field: frontend.v1.FailureStaleBundle stale_bundle = 17;
      */
     value: FailureStaleBundle;
     case: "staleBundle";
@@ -879,302 +697,13 @@ export const FailureInternalUnclassifiedSchema: GenMessage<FailureInternalUnclas
   messageDesc(file_frontend_v1_failure, 18);
 
 /**
- * Authentication failed. The account, not the machinery, is what is blocked.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message frontend.v1.FailureApiAuthenticationFailed
- */
-export type FailureApiAuthenticationFailed = Message<"frontend.v1.FailureApiAuthenticationFailed"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: frontend.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message frontend.v1.FailureApiAuthenticationFailed.
- * Use `create(FailureApiAuthenticationFailedSchema)` to create a new message.
- */
-export const FailureApiAuthenticationFailedSchema: GenMessage<FailureApiAuthenticationFailed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 19);
-
-/**
- * A billing problem stopped the request.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message frontend.v1.FailureApiBillingError
- */
-export type FailureApiBillingError = Message<"frontend.v1.FailureApiBillingError"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: frontend.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message frontend.v1.FailureApiBillingError.
- * Use `create(FailureApiBillingErrorSchema)` to create a new message.
- */
-export const FailureApiBillingErrorSchema: GenMessage<FailureApiBillingError> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 20);
-
-/**
- * The account is rate limited.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message frontend.v1.FailureApiRateLimit
- */
-export type FailureApiRateLimit = Message<"frontend.v1.FailureApiRateLimit"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: frontend.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message frontend.v1.FailureApiRateLimit.
- * Use `create(FailureApiRateLimitSchema)` to create a new message.
- */
-export const FailureApiRateLimitSchema: GenMessage<FailureApiRateLimit> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 21);
-
-/**
- * The vendor rejected the request as invalid.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message frontend.v1.FailureApiInvalidRequest
- */
-export type FailureApiInvalidRequest = Message<"frontend.v1.FailureApiInvalidRequest"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: frontend.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message frontend.v1.FailureApiInvalidRequest.
- * Use `create(FailureApiInvalidRequestSchema)` to create a new message.
- */
-export const FailureApiInvalidRequestSchema: GenMessage<FailureApiInvalidRequest> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 22);
-
-/**
- * The vendor returned a server error.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message frontend.v1.FailureApiServerError
- */
-export type FailureApiServerError = Message<"frontend.v1.FailureApiServerError"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: frontend.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message frontend.v1.FailureApiServerError.
- * Use `create(FailureApiServerErrorSchema)` to create a new message.
- */
-export const FailureApiServerErrorSchema: GenMessage<FailureApiServerError> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 23);
-
-/**
- * The vendor is overloaded.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message frontend.v1.FailureApiOverloaded
- */
-export type FailureApiOverloaded = Message<"frontend.v1.FailureApiOverloaded"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: frontend.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message frontend.v1.FailureApiOverloaded.
- * Use `create(FailureApiOverloadedSchema)` to create a new message.
- */
-export const FailureApiOverloadedSchema: GenMessage<FailureApiOverloaded> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 24);
-
-/**
- * This organization is not allowed to use the API.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message frontend.v1.FailureApiOAuthOrgNotAllowed
- */
-export type FailureApiOAuthOrgNotAllowed = Message<"frontend.v1.FailureApiOAuthOrgNotAllowed"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: frontend.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message frontend.v1.FailureApiOAuthOrgNotAllowed.
- * Use `create(FailureApiOAuthOrgNotAllowedSchema)` to create a new message.
- */
-export const FailureApiOAuthOrgNotAllowedSchema: GenMessage<FailureApiOAuthOrgNotAllowed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 25);
-
-/**
- * The requested model does not exist.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message frontend.v1.FailureApiModelNotFound
- */
-export type FailureApiModelNotFound = Message<"frontend.v1.FailureApiModelNotFound"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: frontend.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The model that was asked for, so the card names it.
-   *
-   * @generated from field: string model = 2;
-   */
-  model: string;
-};
-
-/**
- * Describes the message frontend.v1.FailureApiModelNotFound.
- * Use `create(FailureApiModelNotFoundSchema)` to create a new message.
- */
-export const FailureApiModelNotFoundSchema: GenMessage<FailureApiModelNotFound> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 26);
-
-/**
  * The network never reached the vendor. Classed with the vendor rather than with the machinery: nothing local is broken, and the work did not happen.
  *
  * Resolves the workspace PURPLE.
  *
- * @generated from message frontend.v1.FailureApiNetworkDown
+ * @generated from message frontend.v1.FailureVendorNetworkDown
  */
-export type FailureApiNetworkDown = Message<"frontend.v1.FailureApiNetworkDown"> & {
+export type FailureVendorNetworkDown = Message<"frontend.v1.FailureVendorNetworkDown"> & {
   /**
    * The vendor conversation and request this failure pertains to.
    *
@@ -1184,117 +713,20 @@ export type FailureApiNetworkDown = Message<"frontend.v1.FailureApiNetworkDown">
 };
 
 /**
- * Describes the message frontend.v1.FailureApiNetworkDown.
- * Use `create(FailureApiNetworkDownSchema)` to create a new message.
+ * Describes the message frontend.v1.FailureVendorNetworkDown.
+ * Use `create(FailureVendorNetworkDownSchema)` to create a new message.
  */
-export const FailureApiNetworkDownSchema: GenMessage<FailureApiNetworkDown> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 27);
-
-/**
- * The vendor request failed for a reason with no more specific kind.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message frontend.v1.FailureApiRequestFailed
- */
-export type FailureApiRequestFailed = Message<"frontend.v1.FailureApiRequestFailed"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: frontend.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message frontend.v1.FailureApiRequestFailed.
- * Use `create(FailureApiRequestFailedSchema)` to create a new message.
- */
-export const FailureApiRequestFailedSchema: GenMessage<FailureApiRequestFailed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 28);
-
-/**
- * The vendor failed for a reason the daemon could not classify.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message frontend.v1.FailureApiUnknown
- */
-export type FailureApiUnknown = Message<"frontend.v1.FailureApiUnknown"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: frontend.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-
-  /**
-   * The HTTP status the vendor returned. 0 when the request never got one.
-   *
-   * @generated from field: int32 http_status = 2;
-   */
-  httpStatus: number;
-
-  /**
-   * How many attempts were made before giving up. 0 means it was not retried.
-   *
-   * @generated from field: int32 attempts = 3;
-   */
-  attempts: number;
-};
-
-/**
- * Describes the message frontend.v1.FailureApiUnknown.
- * Use `create(FailureApiUnknownSchema)` to create a new message.
- */
-export const FailureApiUnknownSchema: GenMessage<FailureApiUnknown> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 29);
-
-/**
- * The response hit the output-token ceiling.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message frontend.v1.FailureApiMaxOutputTokens
- */
-export type FailureApiMaxOutputTokens = Message<"frontend.v1.FailureApiMaxOutputTokens"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: frontend.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-};
-
-/**
- * Describes the message frontend.v1.FailureApiMaxOutputTokens.
- * Use `create(FailureApiMaxOutputTokensSchema)` to create a new message.
- */
-export const FailureApiMaxOutputTokensSchema: GenMessage<FailureApiMaxOutputTokens> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 30);
+export const FailureVendorNetworkDownSchema: GenMessage<FailureVendorNetworkDown> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_failure, 19);
 
 /**
  * The turn hit its maximum-turns limit. A limit the user set, reached — not a fault.
  *
  * Resolves the workspace PURPLE.
  *
- * @generated from message frontend.v1.FailureApiMaxTurns
+ * @generated from message frontend.v1.FailureVendorMaxTurns
  */
-export type FailureApiMaxTurns = Message<"frontend.v1.FailureApiMaxTurns"> & {
+export type FailureVendorMaxTurns = Message<"frontend.v1.FailureVendorMaxTurns"> & {
   /**
    * The vendor conversation and request this failure pertains to.
    *
@@ -1304,20 +736,20 @@ export type FailureApiMaxTurns = Message<"frontend.v1.FailureApiMaxTurns"> & {
 };
 
 /**
- * Describes the message frontend.v1.FailureApiMaxTurns.
- * Use `create(FailureApiMaxTurnsSchema)` to create a new message.
+ * Describes the message frontend.v1.FailureVendorMaxTurns.
+ * Use `create(FailureVendorMaxTurnsSchema)` to create a new message.
  */
-export const FailureApiMaxTurnsSchema: GenMessage<FailureApiMaxTurns> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 31);
+export const FailureVendorMaxTurnsSchema: GenMessage<FailureVendorMaxTurns> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_failure, 20);
 
 /**
  * The turn hit its budget limit. Also a chosen limit, reached.
  *
  * Resolves the workspace PURPLE.
  *
- * @generated from message frontend.v1.FailureApiMaxBudget
+ * @generated from message frontend.v1.FailureVendorMaxBudget
  */
-export type FailureApiMaxBudget = Message<"frontend.v1.FailureApiMaxBudget"> & {
+export type FailureVendorMaxBudget = Message<"frontend.v1.FailureVendorMaxBudget"> & {
   /**
    * The vendor conversation and request this failure pertains to.
    *
@@ -1327,20 +759,20 @@ export type FailureApiMaxBudget = Message<"frontend.v1.FailureApiMaxBudget"> & {
 };
 
 /**
- * Describes the message frontend.v1.FailureApiMaxBudget.
- * Use `create(FailureApiMaxBudgetSchema)` to create a new message.
+ * Describes the message frontend.v1.FailureVendorMaxBudget.
+ * Use `create(FailureVendorMaxBudgetSchema)` to create a new message.
  */
-export const FailureApiMaxBudgetSchema: GenMessage<FailureApiMaxBudget> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 32);
+export const FailureVendorMaxBudgetSchema: GenMessage<FailureVendorMaxBudget> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_failure, 21);
 
 /**
  * The turn aborted during execution.
  *
  * Resolves the workspace PURPLE.
  *
- * @generated from message frontend.v1.FailureApiExecutionError
+ * @generated from message frontend.v1.FailureVendorExecutionError
  */
-export type FailureApiExecutionError = Message<"frontend.v1.FailureApiExecutionError"> & {
+export type FailureVendorExecutionError = Message<"frontend.v1.FailureVendorExecutionError"> & {
   /**
    * The vendor conversation and request this failure pertains to.
    *
@@ -1350,43 +782,20 @@ export type FailureApiExecutionError = Message<"frontend.v1.FailureApiExecutionE
 };
 
 /**
- * Describes the message frontend.v1.FailureApiExecutionError.
- * Use `create(FailureApiExecutionErrorSchema)` to create a new message.
+ * Describes the message frontend.v1.FailureVendorExecutionError.
+ * Use `create(FailureVendorExecutionErrorSchema)` to create a new message.
  */
-export const FailureApiExecutionErrorSchema: GenMessage<FailureApiExecutionError> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 33);
-
-/**
- * The model refused the request.
- *
- * Resolves the workspace PURPLE.
- *
- * @generated from message frontend.v1.FailureApiRefusal
- */
-export type FailureApiRefusal = Message<"frontend.v1.FailureApiRefusal"> & {
-  /**
-   * The vendor conversation and request this failure pertains to.
-   *
-   * @generated from field: frontend.v1.VendorFailureContext vendor = 1;
-   */
-  vendor?: VendorFailureContext | undefined;
-};
-
-/**
- * Describes the message frontend.v1.FailureApiRefusal.
- * Use `create(FailureApiRefusalSchema)` to create a new message.
- */
-export const FailureApiRefusalSchema: GenMessage<FailureApiRefusal> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 34);
+export const FailureVendorExecutionErrorSchema: GenMessage<FailureVendorExecutionError> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_failure, 22);
 
 /**
  * The turn ended abnormally for a reason with no more specific kind.
  *
  * Resolves the workspace PURPLE.
  *
- * @generated from message frontend.v1.FailureApiTurnFailed
+ * @generated from message frontend.v1.FailureVendorTurnFailed
  */
-export type FailureApiTurnFailed = Message<"frontend.v1.FailureApiTurnFailed"> & {
+export type FailureVendorTurnFailed = Message<"frontend.v1.FailureVendorTurnFailed"> & {
   /**
    * The vendor conversation and request this failure pertains to.
    *
@@ -1404,11 +813,11 @@ export type FailureApiTurnFailed = Message<"frontend.v1.FailureApiTurnFailed"> &
 };
 
 /**
- * Describes the message frontend.v1.FailureApiTurnFailed.
- * Use `create(FailureApiTurnFailedSchema)` to create a new message.
+ * Describes the message frontend.v1.FailureVendorTurnFailed.
+ * Use `create(FailureVendorTurnFailedSchema)` to create a new message.
  */
-export const FailureApiTurnFailedSchema: GenMessage<FailureApiTurnFailed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 35);
+export const FailureVendorTurnFailedSchema: GenMessage<FailureVendorTurnFailed> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_failure, 23);
 
 /**
  * The connection to the daemon dropped and the frontend is reconnecting.
@@ -1442,7 +851,7 @@ export type FailureDaemonUnreachable = Message<"frontend.v1.FailureDaemonUnreach
  * Use `create(FailureDaemonUnreachableSchema)` to create a new message.
  */
 export const FailureDaemonUnreachableSchema: GenMessage<FailureDaemonUnreachable> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 36);
+  messageDesc(file_frontend_v1_failure, 24);
 
 /**
  * The workspace this page is addressed to no longer exists on the daemon.
@@ -1460,7 +869,7 @@ export type FailureWorkspaceGone = Message<"frontend.v1.FailureWorkspaceGone"> &
  * Use `create(FailureWorkspaceGoneSchema)` to create a new message.
  */
 export const FailureWorkspaceGoneSchema: GenMessage<FailureWorkspaceGone> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 37);
+  messageDesc(file_frontend_v1_failure, 25);
 
 /**
  * The frontend could not start at all.
@@ -1487,7 +896,7 @@ export type FailureBootFailed = Message<"frontend.v1.FailureBootFailed"> & {
  * Use `create(FailureBootFailedSchema)` to create a new message.
  */
 export const FailureBootFailedSchema: GenMessage<FailureBootFailed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 38);
+  messageDesc(file_frontend_v1_failure, 26);
 
 /**
  * A control-plane request the frontend issued outside the command stream (a
@@ -1519,7 +928,7 @@ export type FailureControlPlaneFailed = Message<"frontend.v1.FailureControlPlane
  * Use `create(FailureControlPlaneFailedSchema)` to create a new message.
  */
 export const FailureControlPlaneFailedSchema: GenMessage<FailureControlPlaneFailed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 39);
+  messageDesc(file_frontend_v1_failure, 27);
 
 /**
  * A frame from the daemon could not be read and was skipped. Conversation may
@@ -1550,7 +959,7 @@ export type FailureFrameUndecodable = Message<"frontend.v1.FailureFrameUndecodab
  * Use `create(FailureFrameUndecodableSchema)` to create a new message.
  */
 export const FailureFrameUndecodableSchema: GenMessage<FailureFrameUndecodable> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 40);
+  messageDesc(file_frontend_v1_failure, 28);
 
 /**
  * This page cannot read the daemon's state and reloading did not fix it.
@@ -1576,7 +985,7 @@ export type FailureStaleBundle = Message<"frontend.v1.FailureStaleBundle"> & {
  * Use `create(FailureStaleBundleSchema)` to create a new message.
  */
 export const FailureStaleBundleSchema: GenMessage<FailureStaleBundle> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 41);
+  messageDesc(file_frontend_v1_failure, 29);
 
 /**
  * Machine-readable evidence that an SDK query terminated unexpectedly.
@@ -1618,9 +1027,9 @@ export type QueryTerminationFailure = Message<"frontend.v1.QueryTerminationFailu
     /**
      * Records that the query ended before the SDK exposed a vendor session.
      *
-     * @generated from field: shim.v1.VendorSessionIdentityUnavailable vendor_session_identity_unavailable = 3;
+     * @generated from field: frontend.v1.QueryTerminationVendorIdentityUnavailable vendor_session_identity_unavailable = 3;
      */
-    value: VendorSessionIdentityUnavailable;
+    value: QueryTerminationVendorIdentityUnavailable;
     case: "vendorSessionIdentityUnavailable";
   } | { case: undefined; value?: undefined };
 
@@ -1640,25 +1049,25 @@ export type QueryTerminationFailure = Message<"frontend.v1.QueryTerminationFailu
     /**
      * The SDK iterator ended without an intentional shim shutdown.
      *
-     * @generated from field: shim.v1.UnexpectedQueryEof unexpected_eof = 5;
+     * @generated from field: frontend.v1.QueryTerminationUnexpectedEof unexpected_eof = 5;
      */
-    value: UnexpectedQueryEof;
+    value: QueryTerminationUnexpectedEof;
     case: "unexpectedEof";
   } | {
     /**
      * The SDK iterator threw an error, including its complete cause.
      *
-     * @generated from field: shim.v1.QueryIteratorFailure iterator_failure = 6;
+     * @generated from field: frontend.v1.QueryTerminationIteratorFailure iterator_failure = 6;
      */
-    value: QueryIteratorFailure;
+    value: QueryTerminationIteratorFailure;
     case: "iteratorFailure";
   } | {
     /**
      * Query initialization failed, including its complete cause.
      *
-     * @generated from field: shim.v1.QueryStartupFailure startup_failure = 7;
+     * @generated from field: frontend.v1.QueryTerminationStartupFailure startup_failure = 7;
      */
-    value: QueryStartupFailure;
+    value: QueryTerminationStartupFailure;
     case: "startupFailure";
   } | { case: undefined; value?: undefined };
 };
@@ -1668,7 +1077,79 @@ export type QueryTerminationFailure = Message<"frontend.v1.QueryTerminationFailu
  * Use `create(QueryTerminationFailureSchema)` to create a new message.
  */
 export const QueryTerminationFailureSchema: GenMessage<QueryTerminationFailure> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 42);
+  messageDesc(file_frontend_v1_failure, 30);
+
+/**
+ * The query ended before the SDK exposed a vendor session.
+ *
+ * @generated from message frontend.v1.QueryTerminationVendorIdentityUnavailable
+ */
+export type QueryTerminationVendorIdentityUnavailable = Message<"frontend.v1.QueryTerminationVendorIdentityUnavailable"> & {
+};
+
+/**
+ * Describes the message frontend.v1.QueryTerminationVendorIdentityUnavailable.
+ * Use `create(QueryTerminationVendorIdentityUnavailableSchema)` to create a new message.
+ */
+export const QueryTerminationVendorIdentityUnavailableSchema: GenMessage<QueryTerminationVendorIdentityUnavailable> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_failure, 31);
+
+/**
+ * The SDK iterator ended without an intentional shim shutdown.
+ *
+ * @generated from message frontend.v1.QueryTerminationUnexpectedEof
+ */
+export type QueryTerminationUnexpectedEof = Message<"frontend.v1.QueryTerminationUnexpectedEof"> & {
+};
+
+/**
+ * Describes the message frontend.v1.QueryTerminationUnexpectedEof.
+ * Use `create(QueryTerminationUnexpectedEofSchema)` to create a new message.
+ */
+export const QueryTerminationUnexpectedEofSchema: GenMessage<QueryTerminationUnexpectedEof> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_failure, 32);
+
+/**
+ * The SDK iterator threw an error.
+ *
+ * @generated from message frontend.v1.QueryTerminationIteratorFailure
+ */
+export type QueryTerminationIteratorFailure = Message<"frontend.v1.QueryTerminationIteratorFailure"> & {
+  /**
+   * The complete cause, as the SDK reported it.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message frontend.v1.QueryTerminationIteratorFailure.
+ * Use `create(QueryTerminationIteratorFailureSchema)` to create a new message.
+ */
+export const QueryTerminationIteratorFailureSchema: GenMessage<QueryTerminationIteratorFailure> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_failure, 33);
+
+/**
+ * Query initialization failed.
+ *
+ * @generated from message frontend.v1.QueryTerminationStartupFailure
+ */
+export type QueryTerminationStartupFailure = Message<"frontend.v1.QueryTerminationStartupFailure"> & {
+  /**
+   * The complete cause, as the SDK reported it.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message frontend.v1.QueryTerminationStartupFailure.
+ * Use `create(QueryTerminationStartupFailureSchema)` to create a new message.
+ */
+export const QueryTerminationStartupFailureSchema: GenMessage<QueryTerminationStartupFailure> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_failure, 34);
 
 /**
  * Machine-readable evidence that a requested Claude conversation could not
@@ -1784,7 +1265,7 @@ export type SessionResumeFailure = Message<"frontend.v1.SessionResumeFailure"> &
  * Use `create(SessionResumeFailureSchema)` to create a new message.
  */
 export const SessionResumeFailureSchema: GenMessage<SessionResumeFailure> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 43);
+  messageDesc(file_frontend_v1_failure, 35);
 
 /**
  * Marks a resume failure encountered while creating an agent-repl session.
@@ -1799,7 +1280,7 @@ export type SessionResumeFailureCreate = Message<"frontend.v1.SessionResumeFailu
  * Use `create(SessionResumeFailureCreateSchema)` to create a new message.
  */
 export const SessionResumeFailureCreateSchema: GenMessage<SessionResumeFailureCreate> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 44);
+  messageDesc(file_frontend_v1_failure, 36);
 
 /**
  * Marks a resume failure encountered while restoring an allocated agent-repl
@@ -1815,7 +1296,7 @@ export type SessionResumeFailureAutomaticRestore = Message<"frontend.v1.SessionR
  * Use `create(SessionResumeFailureAutomaticRestoreSchema)` to create a new message.
  */
 export const SessionResumeFailureAutomaticRestoreSchema: GenMessage<SessionResumeFailureAutomaticRestore> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 45);
+  messageDesc(file_frontend_v1_failure, 37);
 
 /**
  * Records every transcript location examined for the authoritative Claude
@@ -1837,7 +1318,7 @@ export type SessionResumeFailureTranscriptUnavailable = Message<"frontend.v1.Ses
  * Use `create(SessionResumeFailureTranscriptUnavailableSchema)` to create a new message.
  */
 export const SessionResumeFailureTranscriptUnavailableSchema: GenMessage<SessionResumeFailureTranscriptUnavailable> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 46);
+  messageDesc(file_frontend_v1_failure, 38);
 
 /**
  * Records a rejected recovery attempt that would have resumed another Claude
@@ -1860,7 +1341,7 @@ export type SessionResumeFailureIdentityMismatch = Message<"frontend.v1.SessionR
  * Use `create(SessionResumeFailureIdentityMismatchSchema)` to create a new message.
  */
 export const SessionResumeFailureIdentityMismatchSchema: GenMessage<SessionResumeFailureIdentityMismatch> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 47);
+  messageDesc(file_frontend_v1_failure, 39);
 
 /**
  * Records an exact-resume bring-up failure that has no typed query lifecycle
@@ -1883,7 +1364,7 @@ export type SessionResumeFailureBringUpFailure = Message<"frontend.v1.SessionRes
  * Use `create(SessionResumeFailureBringUpFailureSchema)` to create a new message.
  */
 export const SessionResumeFailureBringUpFailureSchema: GenMessage<SessionResumeFailureBringUpFailure> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 48);
+  messageDesc(file_frontend_v1_failure, 40);
 
 /**
  * A failure card that a surface OUTSIDE the feed needs to point at.
@@ -1909,5 +1390,5 @@ export type FailureCardRef = Message<"frontend.v1.FailureCardRef"> & {
  * Use `create(FailureCardRefSchema)` to create a new message.
  */
 export const FailureCardRefSchema: GenMessage<FailureCardRef> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_failure, 49);
+  messageDesc(file_frontend_v1_failure, 41);
 

@@ -7759,3 +7759,13 @@ every frontend.v1 view): EVENT-DRIVEN, WHOLE-VIEW, NO TICKS — push whole
 on any resolved change, push nothing on no change (the keepalive
 retraction restated), client-side ticking from shipped instants, bursts
 coalescible because the wire carries states, not events.
+
+### DESIGN FREEZES at 2d79f7501; bindings regenerate; the Makefile's proto list goes dynamic
+
+The frozen-contract SHA is 2d79f7501 (the push-cadence landing — the last
+design commit). Step 7 opens: the Makefile's hand-maintained PROTOS list —
+stale by dozens of deleted files — is replaced with discovery from src/,
+so a deleted file leaves the build the moment it leaves disk; Go and TS
+bindings are regenerated once from clean for all six packages. Per-
+subsystem reconciliation agents dispatch next; the reconciled foundation
+SHA is recorded when they merge.
