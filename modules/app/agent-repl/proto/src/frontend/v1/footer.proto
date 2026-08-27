@@ -97,10 +97,16 @@ message FooterStrip {
 // per arm, resolved by the daemon into the CSS class the client applies;
 // the client holds no table.
 //
-// RENDERING RULE, stated once: the strip draws | status | substatus |
-// activity |. A status arm with NO substatus oneof merges the substatus
-// cell into the status cell, and the activity cell always absorbs the free
-// width.
+// RENDERING RULES, stated once:
+// - The strip draws | status | substatus | activity |. A status arm with NO
+//   substatus oneof merges the substatus cell into the status cell, and the
+//   activity cell always absorbs the free width.
+// - STATUS AND SUBSTATUS TEXT is rendered lowercase ASCII with spaces,
+//   NEVER underscores — the arm name is a schema spelling, not the label.
+// - ACTIVITY is the rich cell: colorized, formatted, ideally one line. A
+//   STATICALLY TYPED datum in an activity message (a count, an instant, a
+//   sha) is a strong indicator that datum deserves color in the rendered
+//   line.
 message FooterStatus {
   // What the session is doing now, at the coarsest resolution. Exactly one
   // arm is set; a frame with none is malformed and rejected loudly.
@@ -225,6 +231,10 @@ message FooterStatusWaiting {
     FooterSubStatusWaitingPermission permission = 2;
     // A question batch is open; the agent is blocked on answers.
     FooterSubStatusWaitingQuestion question = 3;
+    // The cold-context gate stands: the session is parked on the user's
+    // remediation choice (pay / clear / compact). The feed's gate row is the
+    // answering surface; the footer only says the session is parked on it.
+    FooterSubStatusWaitingColdGate cold_gate = 5;
   }
   // REQUIRED: every waiting state has a composable line by construction —
   // the countdown, the gated call, or the question lead. A producer that
@@ -237,6 +247,8 @@ message FooterSubStatusWaitingWakeup {}
 message FooterSubStatusWaitingPermission {}
 // A question batch is open; the agent is blocked on answers.
 message FooterSubStatusWaitingQuestion {}
+// The cold-context gate stands; the session is parked on its answer.
+message FooterSubStatusWaitingColdGate {}
 // The activity kinds legal while waiting.
 message FooterStatusWaitingActivity {
   // When this activity began standing; the client ticks the relative age.
@@ -254,7 +266,15 @@ message FooterStatusWaitingActivity {
     FooterStatusActivityBlockedOnUser blocked_on_user = 5;
     // An agent notification, shown until the next activity replaces it.
     FooterStatusActivityNotification notification = 6;
+    // The cold gate's cost line, composed by the daemon ("context cold —
+    // 182k tokens to re-read").
+    FooterStatusActivityColdGateCost cold_gate_cost = 7;
   }
+}
+// The cold gate's composed cost line.
+message FooterStatusActivityColdGateCost {
+  // The composed line, drawn verbatim.
+  string text = 1;
 }
 // The gated call's composed line.
 message FooterStatusActivityGatedCall {
@@ -408,6 +428,11 @@ message FooterStatusBlocked {
     FooterSubStatusBlockedVendorError vendor_error = 3;
     // The account's billing state refuses requests.
     FooterSubStatusBlockedBilling billing = 4;
+    // The vendor query died while the shim stayed healthy and nothing has
+    // restarted it — the session looks idle but cannot serve until the next
+    // prompt restarts the query. Distinct from disconnected, which is the
+    // daemon<->shim link.
+    FooterSubStatusBlockedQueryDied query_died = 6;
   }
   // OPTIONAL BY EVIDENCE: the auth prompt line exists only on the auth
   // step; the other steps have no standing line beyond the step itself.
@@ -421,6 +446,8 @@ message FooterSubStatusBlockedUsageLimit {}
 message FooterSubStatusBlockedVendorError {}
 // The account's billing state refuses requests.
 message FooterSubStatusBlockedBilling {}
+// The vendor query died and is not yet restarted.
+message FooterSubStatusBlockedQueryDied {}
 // The activity kinds legal while blocked.
 message FooterStatusBlockedActivity {
   // When this activity began standing; the client ticks the relative age.
@@ -433,7 +460,15 @@ message FooterStatusBlockedActivity {
     FooterStatusActivityRateLimited rate_limited = 3;
     // An agent notification, shown until the next activity replaces it.
     FooterStatusActivityNotification notification = 4;
+    // The dead-query line, composed by the daemon ("vendor query died —
+    // the next prompt restarts it").
+    FooterStatusActivityQueryDied query_died = 5;
   }
+}
+// The dead-query line.
+message FooterStatusActivityQueryDied {
+  // The composed line, drawn verbatim.
+  string text = 1;
 }
 
 // The daemon's link to the session's shim is not serving.
