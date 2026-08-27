@@ -71,7 +71,7 @@ message FooterStrip {
   // Coarsest state of the workspace. Colors the strip; one arm always set.
   FooterStatus status = 1;
   // The step within the status. Unset when the status has no substructure
-  // (waiting, interrupted, background).
+  // (background), and when the daemon knows no finer step.
   optional FooterSubStatus sub_status = 2;
   // The finest, dynamic line. Unset when the daemon has nothing finer to say.
   optional FooterStatusActivity activity = 3;
@@ -109,6 +109,8 @@ message FooterStatus {
     // The vendor or the account said no (auth, usage limit, persistent
     // 4xx/5xx). A REPORT of the last turn's conclusion; gates nothing.
     FooterStatusBlocked blocked = 7;
+    // Tag 8 is RETIRED: hibernation's `asleep` status left the contract
+    // with the hibernation machinery.
     // The route Emacs→daemon→shim is compromised on OUR side (starting,
     // degraded, severed, dead, start failed).
     FooterStatusDisconnected disconnected = 9;
@@ -150,8 +152,26 @@ message FooterSubStatus {
     FooterSubStatusLoading loading = 7;
     // The waiting status's step.
     FooterSubStatusWaiting waiting = 8;
+    // The interrupted status's step: who stopped it.
+    FooterSubStatusInterrupted interrupted = 9;
   }
 }
+
+// The steps of the interrupted status — WHO stopped the turn. UNSET on the
+// strip means the daemon knows no cause, which a consumer reads as the
+// ordinary user stop.
+message FooterSubStatusInterrupted {
+  oneof step {
+    // A person commanded the stop.
+    FooterSubStatusInterruptedByUser by_user = 1;
+    // The host process went down under the turn — nobody chose this, and
+    // drawing it as a user stop tells the user they stopped something they
+    // did not.
+    FooterSubStatusInterruptedByHostShutdown host_shutdown = 2;
+  }
+}
+message FooterSubStatusInterruptedByUser {}
+message FooterSubStatusInterruptedByHostShutdown {}
 
 // The steps of the waiting status.
 message FooterSubStatusWaiting {
@@ -277,11 +297,15 @@ message FooterSubStatusBlocked {
     FooterSubStatusBlockedAuth auth = 1;
     FooterSubStatusBlockedUsageLimit usage_limit = 2;
     FooterSubStatusBlockedVendorError vendor_error = 3;
+    // The account cannot be charged — a billing block, not a vendor fault;
+    // the user's next action is their billing, not a retry.
+    FooterSubStatusBlockedBilling billing = 4;
   }
 }
 message FooterSubStatusBlockedAuth {}
 message FooterSubStatusBlockedUsageLimit {}
 message FooterSubStatusBlockedVendorError {}
+message FooterSubStatusBlockedBilling {}
 
 // The closing family.
 message FooterSubStatusClosing {
