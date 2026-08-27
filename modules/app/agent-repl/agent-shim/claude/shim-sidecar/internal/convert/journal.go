@@ -10,7 +10,7 @@ package convert
 import (
 	"strings"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
@@ -20,22 +20,22 @@ import (
 // A record whose type this reader does not know is stored unconverted rather
 // than rendered as a blank step: a step that shows nothing is worse than a step
 // a later schema can still recover, because only one of the two is reversible.
-func (c *Converter) JournalRecord(record map[string]any, at Attribution, taskID string) []*agentshimv1.Entry {
+func (c *Converter) JournalRecord(record map[string]any, at Attribution, taskID string) []*storev1.StoreEntry {
 	if taskID == "" {
 		// Without the run's identity there is no card to append to, and there is
 		// no arm for a progress record that names no work.
 		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, Session: at.SessionID, Level: "warn"}).
 			Log("journal record at offset=%d has no run identity; stored unconverted", at.Offset)
-		return []*agentshimv1.Entry{UnknownEntry(at, str(record["type"]), "type", record)}
+		return []*storev1.StoreEntry{UnknownEntry(at, str(record["type"]), "type", record)}
 	}
 	kind := str(record["type"])
 	switch kind {
 	case "started", "result":
-		return []*agentshimv1.Entry{DetachedProgress(at, taskID, journalLine(kind, record))}
+		return []*storev1.StoreEntry{DetachedProgress(at, taskID, journalLine(kind, record))}
 	default:
 		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, Session: at.SessionID, Level: "warn"}).
 			Log("journal record type=%q at offset=%d is not modeled; stored unconverted", kind, at.Offset)
-		return []*agentshimv1.Entry{UnknownEntry(at, kind, "type", record)}
+		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
 }
 

@@ -1,39 +1,41 @@
-// Package convert turns the Claude harness's on-disk JSON records into the
-// VENDOR-AGNOSTIC conversation model, at the point of production.
+// Package convert reads the Claude harness's on-disk JSON records and turns
+// them into the store.v1 entries the sidecar writes.
 //
-// WHAT REPLACED WHAT. Its predecessor was a reflection-driven transliterator: it
-// copied each JSONL line into a proto whose messages and arms were the vendor's
-// own API surface, so every consumer downstream had to know Claude to read one.
-// The model this package targets has no vendor in it. A tool was CALLED and a
-// tool RETURNED, whoever ran it; a person SAID something, whatever envelope the
-// harness wrapped it in; a conversation was CUT, however the CLI spells that.
+// THE CONVERSION HALF IS UNPORTED, AND THAT IS STATED RATHER THAN HIDDEN. This
+// package used to target conversation.v1's MessageEntry record model — UserSaid,
+// AgentSaid, ToolReturned, ContextCut, FailureRaised, SkillBodyResolved and the
+// DetachedWork* lifecycle, each with a MessageAuthor and a MessageParent. The
+// redesigned contract DELETED that model outright and replaced it with the
+// Agent* protocol model (AgentFrame / AgentPrompt / AgentActivity, keyed by
+// AgentId and AgentActivityId). That is a different structure, not a rename, and
+// populating it from Claude's JSONL is a design decision no reconciliation may
+// take on its own.
 //
-// THE THREE OUTCOMES, and nothing else happens to a record:
+// THE OUTCOMES A RECORD CAN HAVE, and nothing else happens to one:
 //
-//   - CONVERTED. The record becomes a conversation.v1 message or a protocol.v1
-//     bookkeeping fact, stored with an external half the daemon may read.
-//   - UNCONVERTED. The record is understood and deliberately not carried
+//   - UNPORTED. The record was understood well enough to name the conversion it
+//     used to get, and that conversion no longer exists. It is stored WHOLE via
+//     UnportedEntry, and the failure is logged at error level with the deleted
+//     type named. Every such record is queryable by StoreUnknown's
+//     discriminator_field == UnportedField.
+//   - UNSERVED. The record is understood and deliberately not carried
 //     (VendorSpecificEntry), parsed and not modeled (UnknownEntry), or not
-//     readable at all (UnparsedEntry). It is stored WHOLE, with no external half
-//     and therefore no path to the daemon, which is what makes converting
-//     eagerly at the edge cost no fidelity: the decision to not model something
-//     stays reversible from stored data.
+//     readable at all (UnparsedEntry).
 //   - Nothing else. There is no drop. The total-ingestion mandate is that every
-//     JSON object on disk ends up in the store as a protobuf shape.
+//     JSON object on disk ends up in the store as a protobuf shape, and it still
+//     holds: an unported record is still a record in the database.
 //
-// LINEAGE IS RESOLVED HERE, NEVER DEFERRED. MessageEntry.parent is a oneof
-// precisely so "this is a feed row" and "I could not work out a parent" cannot
-// be spelled the same way. This package states which case it is or stores the
-// record unconverted; it never emits a root it does not believe in.
+// THE VENDOR-SIDE READING IS KEPT INTACT — envelope parsing, tool-call/result
+// correlation, skill-name resolution, launch classification, compaction
+// coalescing, /clear envelope unwrapping. None of it depends on the deleted
+// protos, and all of it is knowledge that would have to be rebuilt from scratch.
 package convert
 
 import (
 	"fmt"
 	"strings"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
-	protocolv1 "agentrepl/proto/protocol/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
@@ -104,6 +106,25 @@ func readEnvelope(obj map[string]any) envelope {
 	}
 }
 
+// callBlockTypes are the vendor's spellings of "the model called a tool".
+var callBlockTypes = map[string]bool{
+	"tool_use":        true,
+	"server_tool_use": true,
+	"mcp_tool_use":    true,
+}
+
+// resultBlockTypes are the vendor's spellings of "a tool answered".
+var resultBlockTypes = map[string]bool{
+	"tool_result":            true,
+	"web_search_tool_result": true,
+	"mcp_tool_result":        true,
+}
+
+// blockType reads a content block's discriminator.
+func blockType(block map[string]any) string {
+	return str(block["type"])
+}
+
 func str(v any) string   { s, _ := v.(string); return s }
 func boolean(v any) bool { b, _ := v.(bool); return b }
 func obj(v any) map[string]any {
@@ -127,45 +148,6 @@ func (c *Converter) container(at Attribution, env envelope) string {
 	return ""
 }
 
-// lineage fills the three ids and the parent oneof for one record.
-//
-// It is the ONLY place a MessageParent is built. A record inside detached work
-// names that work; everything else is a feed row naming itself. There is no
-// third case and no fallback: a caller that cannot supply a message id has a
-// record this function must never be asked about.
-func lineage(m *conversationv1.MessageEntry, messageID, container string) {
-	m.MessageId = messageID
-	if container == "" || container == messageID {
-		m.TopLevelMessageId = messageID
-		m.Parent = &conversationv1.MessageParent{
-			Parent: &conversationv1.MessageParent_Root{Root: &conversationv1.MessageParentRoot{}},
-		}
-		return
-	}
-	m.TopLevelMessageId = container
-	m.Parent = &conversationv1.MessageParent{
-		Parent: &conversationv1.MessageParent_Inside{Inside: &conversationv1.MessageParentInside{
-			MessageId: container,
-		}},
-	}
-}
-
-func authorUser() *conversationv1.MessageAuthor {
-	return &conversationv1.MessageAuthor{Author: &conversationv1.MessageAuthor_User{User: &conversationv1.AuthorUser{}}}
-}
-
-// authorAgent resolves which agent a record is from. Inside detached work it is
-// the DETACHED agent, named by the work it runs as, so its emissions route to
-// the card without a second correlation.
-func authorAgent(container string) *conversationv1.MessageAuthor {
-	if container == "" {
-		return &conversationv1.MessageAuthor{Author: &conversationv1.MessageAuthor_Agent{Agent: &conversationv1.AuthorAgent{}}}
-	}
-	return &conversationv1.MessageAuthor{Author: &conversationv1.MessageAuthor_DetachedAgent{
-		DetachedAgent: &conversationv1.AuthorDetachedAgent{DetachedWorkMessageId: container},
-	}}
-}
-
 // Line converts one decoded transcript line into the records it implies.
 //
 // `next` is the line that FOLLOWS this one IN THE FILE, or nil at the end of a
@@ -176,7 +158,7 @@ func authorAgent(container string) *conversationv1.MessageAuthor {
 // is stored unconverted, because the ingestion mandate binds this package
 // absolutely: irrelevance to a reader is a consumption-side judgment, never a
 // reason to leave a record out of the database.
-func (c *Converter) Line(record map[string]any, at Attribution, next map[string]any) []*agentshimv1.Entry {
+func (c *Converter) Line(record map[string]any, at Attribution, next map[string]any) []*storev1.StoreEntry {
 	kind := str(record["type"])
 	c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID}).
 		LogVerbose("converting line type=%q offset=%d keys=%d", kind, at.Offset, len(record))
@@ -187,7 +169,7 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 		// cannot say what it is, which is exactly what UnknownEntry means.
 		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
 			Log("transcript line at offset=%d carries no %q field; stored unconverted with no path to the daemon", at.Offset, "type")
-		return []*agentshimv1.Entry{UnknownEntry(at, "", "type", record)}
+		return []*storev1.StoreEntry{UnknownEntry(at, "", "type", record)}
 	case "user":
 		return c.userLine(record, at)
 	case "assistant":
@@ -203,14 +185,14 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 			// which is a different situation from not knowing — so it is
 			// vendor_specific, and the follow-up it asks for is a CONVERTER, if
 			// one of them turns out to be portable after all.
-			return []*agentshimv1.Entry{VendorSpecificEntry(at, kind, record)}
+			return []*storev1.StoreEntry{VendorSpecificEntry(at, kind, record)}
 		}
 		// A top-level type this reader has never seen. We parsed it and do not
 		// model it, so the follow-up it asks for is a MODEL — and filing it as
 		// vendor_specific would claim an understanding nobody has.
 		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
 			Log("transcript line type=%q at offset=%d is not modeled; stored unconverted with no path to the daemon", kind, at.Offset)
-		return []*agentshimv1.Entry{UnknownEntry(at, kind, "type", record)}
+		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
 }
 
@@ -242,12 +224,12 @@ var knownMetadataLines = map[string]bool{
 // userLine converts a `user` record, which is FOUR different things wearing one
 // type tag: a person's prompt, a tool's result the vendor filed under the user,
 // the harness's own compaction summary, and the expanded `/clear` envelope.
-func (c *Converter) userLine(record map[string]any, at Attribution) []*agentshimv1.Entry {
+func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.StoreEntry {
 	env := readEnvelope(record)
 	container := c.container(at, env)
 	message := obj(record["message"])
 
-	var out []*agentshimv1.Entry
+	var out []*storev1.StoreEntry
 
 	// A launch result opens a detached-work card. It rides on a user record
 	// because the vendor files tool results there, and it is emitted BEFORE the
@@ -334,27 +316,37 @@ func hasUserProse(message map[string]any) bool {
 	return false
 }
 
-func (c *Converter) userSaid(record map[string]any, at Attribution, env envelope, container string) *agentshimv1.Entry {
-	m := &conversationv1.MessageEntry{Author: authorUser()}
-	lineage(m, env.uuid, container)
-	m.Payload = &conversationv1.MessageEntry_UserSaid{UserSaid: &conversationv1.UserSaid{
-		Content: userContent(obj(record["message"])["content"]),
-	}}
-	return MessageEntry(at, "user_said", m)
+// userSaid stores a person's prompt.
+//
+// UNPORTED. Its target was conversation.v1 UserSaid carried on a MessageEntry
+// with a MessageAuthor and a MessageParent, all of which the redesign deleted.
+// UserSaid survives as a type, but it is now an AgentInput arm on the shim's
+// request path, not a producer-written record on a store entry — a different
+// structure, not a rename. The prompt is stored whole instead.
+func (c *Converter) userSaid(record map[string]any, at Attribution, env envelope, container string) *storev1.StoreEntry {
+	_, _ = env, container
+	c.log.With(logging.Context{Operation: "user-said", Path: at.Path, Session: at.SessionID, Level: "error"}).
+		Log("user prompt at offset=%d has NO conversion under the redesigned conversation.v1: "+
+			"MessageEntry/MessageAuthor/MessageParent were deleted and UserSaid is now an AgentInput arm. Record stored unported", at.Offset)
+	return UnportedEntry(at, "user_said", record)
 }
 
-// toolReturns lifts every tool result out of a user record.
+// toolReturns finds every tool result in a user record.
 //
-// It returns the converted records and the ids of the results it could NOT
-// place. An unplaceable result is not converted into a root message: ToolReturned
-// exists to fold onto the message that made the call, and a result with no such
-// message would become a phantom feed row.
-func (c *Converter) toolReturns(message map[string]any, at Attribution, env envelope, container string) ([]*agentshimv1.Entry, []string) {
+// It returns the stored records and the ids of the results it could NOT place.
+// The RESOLUTION is kept — it is correlation over the vendor's own ids, and
+// losing it would lose the only knowledge of which call a result answers — but
+// the conversion is UNPORTED: conversation.v1 ToolReturned was deleted, and the
+// successor (an AgentActivity settling on its AgentActivityId) is keyed
+// differently. A result whose owner is unresolved is stored unconverted, never
+// given an invented parent.
+func (c *Converter) toolReturns(message map[string]any, at Attribution, env envelope, container string) ([]*storev1.StoreEntry, []string) {
+	_ = container
 	blocks, ok := message["content"].([]any)
 	if !ok {
 		return nil, nil
 	}
-	var out []*agentshimv1.Entry
+	var out []*storev1.StoreEntry
 	var orphans []string
 	for _, el := range blocks {
 		block, ok := el.(map[string]any)
@@ -372,14 +364,10 @@ func (c *Converter) toolReturns(message map[string]any, at Attribution, env enve
 			orphans = append(orphans, callID)
 			continue
 		}
-		m := &conversationv1.MessageEntry{Author: authorAgent(container)}
-		lineage(m, owner, container)
-		m.Payload = &conversationv1.MessageEntry_ToolReturned{ToolReturned: &conversationv1.ToolReturned{
-			ToolCallId: callID,
-			Content:    toolResultContent(block["content"]),
-			IsError:    boolean(block["is_error"]),
-		}}
-		out = append(out, MessageEntry(at, "tool_returned:"+callID, m))
+		c.log.With(logging.Context{Operation: "tool-return", Path: at.Path, Session: at.SessionID, Level: "error"}).
+			Log("tool result tool_call_id=%q owner=%q at offset=%d has NO conversion under the redesigned conversation.v1: "+
+				"ToolReturned was deleted and AgentActivity settles by AgentActivityId. Record stored unported", callID, owner, at.Offset)
+		out = append(out, UnportedEntry(at, "tool_returned:"+callID, block))
 	}
 	return out, orphans
 }
@@ -400,11 +388,16 @@ func (c *Converter) callOwner(callID string, env envelope) (string, bool) {
 // assistant lines
 // ---------------------------------------------------------------------------
 
-// assistantLine converts an `assistant` record into the agent's response, and
-// records the call ids it contains so the results that follow can find it.
-func (c *Converter) assistantLine(record map[string]any, at Attribution) []*agentshimv1.Entry {
+// assistantLine reads an `assistant` record and records the call ids it
+// contains so the results that follow can find it.
+//
+// THE INDEXING IS KEPT AND THE CONVERSION IS UNPORTED. rememberCalls is pure
+// vendor correlation and still runs; AgentSaid, FailureRaised and StopReason —
+// everything the record used to become — were deleted, and the Agent* model's
+// AgentResponse/AgentFailure are reached through an AgentFrame keyed by AgentId,
+// which this reader has no mapping to mint.
+func (c *Converter) assistantLine(record map[string]any, at Attribution) []*storev1.StoreEntry {
 	env := readEnvelope(record)
-	container := c.container(at, env)
 	message := obj(record["message"])
 
 	messageID := str(message["id"])
@@ -417,28 +410,17 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*agen
 	c.rememberCalls(message, env, messageID)
 
 	// The vendor records its own API failures as assistant records flagged on
-	// the envelope. It is a FailureRaised rather than an empty response,
-	// because a reader scrolling back must see that the turn failed rather than
-	// find it merely absent.
+	// the envelope. The distinction is PRESERVED in the stored discriminator so
+	// a reader can still tell a failed turn from an absent one.
+	conversion := "agent_said"
 	if env.apiError {
-		m := &conversationv1.MessageEntry{Author: authorAgent(container)}
-		lineage(m, messageID, container)
-		m.Payload = &conversationv1.MessageEntry_FailureRaised{FailureRaised: &conversationv1.FailureRaised{
-			Summary: firstNonEmpty(env.errorText, "the model API reported an error"),
-			Detail:  str(record["errorDetails"]),
-		}}
-		return []*agentshimv1.Entry{MessageEntry(at, "failure_raised", m)}
+		conversion = "failure_raised"
 	}
-
-	m := &conversationv1.MessageEntry{Author: authorAgent(container)}
-	lineage(m, messageID, container)
-	m.Payload = &conversationv1.MessageEntry_AgentSaid{AgentSaid: &conversationv1.AgentSaid{
-		Content:    agentContent(message["content"]),
-		Usage:      tokenUsage(message["usage"]),
-		Model:      str(message["model"]),
-		StopReason: stopReason(message["stop_reason"]),
-	}}
-	return []*agentshimv1.Entry{MessageEntry(at, "agent_said", m)}
+	c.log.With(logging.Context{Operation: "assistant-line", Path: at.Path, Session: at.SessionID, Level: "error"}).
+		Log("assistant record (%s, message_id=%q) at offset=%d has NO conversion under the redesigned conversation.v1: "+
+			"AgentSaid/FailureRaised/StopReason were deleted and AgentResponse rides an AgentFrame keyed by AgentId. Record stored unported",
+			conversion, messageID, at.Offset)
+	return []*storev1.StoreEntry{UnportedEntry(at, conversion, record)}
 }
 
 // rememberCalls indexes every call this response made, under both names a later
@@ -477,7 +459,7 @@ func firstNonEmpty(values ...string) string {
 
 // systemLine converts a `system` record by its subtype. Two subtypes have a
 // vendor-agnostic reading; the rest are the harness narrating itself.
-func (c *Converter) systemLine(record map[string]any, at Attribution, next map[string]any) []*agentshimv1.Entry {
+func (c *Converter) systemLine(record map[string]any, at Attribution, next map[string]any) []*storev1.StoreEntry {
 	env := readEnvelope(record)
 	container := c.container(at, env)
 	subtype := str(record["subtype"])
@@ -485,31 +467,29 @@ func (c *Converter) systemLine(record map[string]any, at Attribution, next map[s
 	case "":
 		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
 			Log("system line at offset=%d carries no %q field; stored unconverted", at.Offset, "subtype")
-		return []*agentshimv1.Entry{UnknownEntry(at, "", "subtype", record)}
+		return []*storev1.StoreEntry{UnknownEntry(at, "", "subtype", record)}
 	case "compact_boundary":
-		return []*agentshimv1.Entry{c.contextCompacted(record, at, env, container, next)}
+		return []*storev1.StoreEntry{c.contextCompacted(record, at, env, container, next)}
 	case "api_error":
-		return []*agentshimv1.Entry{c.apiErrorFailure(record, at, env, container)}
+		return []*storev1.StoreEntry{c.apiErrorFailure(record, at, env, container)}
 	default:
-		return []*agentshimv1.Entry{VendorSpecificEntry(at, "system."+subtype, record)}
+		return []*storev1.StoreEntry{VendorSpecificEntry(at, "system."+subtype, record)}
 	}
 }
 
-// apiErrorFailure converts the vendor's own recorded API error.
+// apiErrorFailure stores the vendor's own recorded API error.
 //
-// The failure is the vendor's, which is what makes it a conversation record
-// rather than a daemon-synthesized card: the CLI wrote it to its transcript and
-// this reader read it back, so it is durable because the vendor made it durable.
-func (c *Converter) apiErrorFailure(record map[string]any, at Attribution, env envelope, container string) *agentshimv1.Entry {
-	detail := obj(record["error"])
-	m := &conversationv1.MessageEntry{Author: authorAgent(container)}
-	lineage(m, env.uuid, container)
-	m.Payload = &conversationv1.MessageEntry_FailureRaised{FailureRaised: &conversationv1.FailureRaised{
-		Summary:   firstNonEmpty(str(detail["message"]), "the model API reported an error"),
-		Detail:    str(detail["formatted"]),
-		RetryInMs: int64(number(record["retryInMs"])),
-	}}
-	return MessageEntry(at, "failure_raised", m)
+// UNPORTED. conversation.v1 FailureRaised was deleted. api.proto's
+// ApiRequestFailed is the nearest successor, but it is an AgentFailure arm on an
+// AgentFrame with a typed kind oneof, not a free-text summary/detail/retry
+// record — mapping the vendor's error object onto those arms is a design
+// decision, so the record is stored whole.
+func (c *Converter) apiErrorFailure(record map[string]any, at Attribution, env envelope, container string) *storev1.StoreEntry {
+	_, _ = env, container
+	c.log.With(logging.Context{Operation: "api-error", Path: at.Path, Session: at.SessionID, Level: "error"}).
+		Log("vendor api_error at offset=%d has NO conversion under the redesigned conversation.v1: "+
+			"FailureRaised was deleted and ApiRequestFailed is a typed AgentFailure arm. Record stored unported", at.Offset)
+	return UnportedEntry(at, "failure_raised", record)
 }
 
 func number(v any) float64 {
@@ -524,16 +504,16 @@ func number(v any) float64 {
 // attachmentLine converts an `attachment` record. One attachment type carries a
 // conversation fact — the body of a skill that was invoked — and the rest are
 // context the harness injected, which no vendor-agnostic feed shows.
-func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*agentshimv1.Entry {
+func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*storev1.StoreEntry {
 	attachment := obj(record["attachment"])
 	if attachment == nil {
 		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
 			Log("attachment line at offset=%d carries no %q object; stored unconverted", at.Offset, "attachment")
-		return []*agentshimv1.Entry{UnknownEntry(at, "", "attachment", record)}
+		return []*storev1.StoreEntry{UnknownEntry(at, "", "attachment", record)}
 	}
 	kind := str(attachment["type"])
 	if kind != "invoked_skills" {
-		return []*agentshimv1.Entry{VendorSpecificEntry(at, "attachment."+kind, record)}
+		return []*storev1.StoreEntry{VendorSpecificEntry(at, "attachment."+kind, record)}
 	}
 	env := readEnvelope(record)
 	container := c.container(at, env)
@@ -541,19 +521,25 @@ func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*age
 	if len(entries) == 0 {
 		// Every skill in the attachment named a card this reader never opened.
 		// The bodies are stored whole rather than resolved onto an invented one.
-		return []*agentshimv1.Entry{VendorSpecificEntry(at, "attachment.invoked_skills", record)}
+		return []*storev1.StoreEntry{VendorSpecificEntry(at, "attachment.invoked_skills", record)}
 	}
 	return entries
 }
 
-// skillBodies resolves each invoked skill's file contents onto the skill's own
-// detached-work message.
-func (c *Converter) skillBodies(attachment map[string]any, at Attribution, container string) []*agentshimv1.Entry {
+// skillBodies resolves each invoked skill's file contents onto the skill it
+// belongs to, and stores each body unported.
+//
+// UNPORTED. conversation.v1 SkillBodyResolved was deleted; AgentSkillUse in the
+// Agent* model is an AgentActivity arm, not a record a file reader mints. The
+// NAME RESOLUTION is kept, so a body whose invocation this reader never saw is
+// still refused rather than attached to an invented card.
+func (c *Converter) skillBodies(attachment map[string]any, at Attribution, container string) []*storev1.StoreEntry {
+	_ = container
 	skills, ok := attachment["skills"].([]any)
 	if !ok {
 		return nil
 	}
-	var out []*agentshimv1.Entry
+	var out []*storev1.StoreEntry
 	for _, el := range skills {
 		skill, ok := el.(map[string]any)
 		if !ok {
@@ -566,12 +552,10 @@ func (c *Converter) skillBodies(attachment map[string]any, at Attribution, conta
 				Log("skill body name=%q at offset=%d names no skill invocation this reader observed; not resolved onto a card", name, at.Offset)
 			continue
 		}
-		m := &conversationv1.MessageEntry{Author: authorAgent(container)}
-		lineage(m, messageID, container)
-		m.Payload = &conversationv1.MessageEntry_SkillBodyResolved{SkillBodyResolved: &conversationv1.SkillBodyResolved{
-			Body: str(skill["content"]),
-		}}
-		out = append(out, MessageEntry(at, "skill_body:"+name, m))
+		c.log.With(logging.Context{Operation: "skill-body", Path: at.Path, Session: at.SessionID, Level: "error"}).
+			Log("skill body name=%q message_id=%q at offset=%d has NO conversion under the redesigned conversation.v1: "+
+				"SkillBodyResolved was deleted and AgentSkillUse is an AgentActivity arm. Record stored unported", name, messageID, at.Offset)
+		out = append(out, UnportedEntry(at, "skill_body:"+name, skill))
 	}
 	return out
 }
@@ -580,26 +564,32 @@ func (c *Converter) skillBodies(attachment map[string]any, at Attribution, conta
 // context cuts
 // ---------------------------------------------------------------------------
 
-// contextCleared records that history was discarded outright.
-func (c *Converter) contextCleared(at Attribution, env envelope, container string) *agentshimv1.Entry {
-	m := &conversationv1.MessageEntry{Author: authorUser()}
-	lineage(m, env.uuid, container)
-	m.Payload = &conversationv1.MessageEntry_ContextCut{ContextCut: &conversationv1.ContextCut{
-		Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
-	}}
-	c.log.With(logging.Context{Operation: "context-cleared", Path: at.Path, Session: at.SessionID}).
-		Log("context cleared at offset=%d uuid=%q", at.Offset, env.uuid)
-	return MessageEntry(at, "context_cleared", m)
+// contextCleared stores that history was discarded outright.
+//
+// UNPORTED. conversation.v1 ContextCut survives as a type but no longer has a
+// producer-written home: MessageEntry, the record that carried it, is gone.
+func (c *Converter) contextCleared(at Attribution, env envelope, container string) *storev1.StoreEntry {
+	_ = container
+	c.log.With(logging.Context{Operation: "context-cleared", Path: at.Path, Session: at.SessionID, Level: "error"}).
+		Log("context clear at offset=%d uuid=%q has NO conversion under the redesigned conversation.v1: "+
+			"MessageEntry, ContextCut's only carrier, was deleted. Record stored unported", at.Offset, env.uuid)
+	return UnportedEntry(at, "context_cleared", map[string]any{
+		"uuid":               env.uuid,
+		"__unported_because": "conversation.v1 MessageEntry (ContextCut's carrier) was deleted",
+	})
 }
 
-// contextCompacted records that history was replaced by a summary of itself,
+// contextCompacted stores that history was replaced by a summary of itself,
 // COALESCING the boundary with the summary line that follows it in the file.
 //
 // FILE ORDER, NEVER TIMESTAMP ORDER. The harness composes the summary before
 // writing the boundary that announces it, so the summary's timestamp is EARLIER
 // than the boundary's — a timestamp-ordered assembly pairs every boundary with
-// the wrong summary in a session that compacted more than once.
-func (c *Converter) contextCompacted(record map[string]any, at Attribution, env envelope, container string, next map[string]any) *agentshimv1.Entry {
+// the wrong summary in a session that compacted more than once. The coalescing
+// is therefore kept even though the conversion is UNPORTED: it is the reason the
+// deferral machinery in tail.Context exists, and dropping it would strand it.
+func (c *Converter) contextCompacted(record map[string]any, at Attribution, env envelope, container string, next map[string]any) *storev1.StoreEntry {
+	_ = container
 	metadata := obj(record["compactMetadata"])
 	summary := compactSummaryText(next)
 	if summary == "" {
@@ -609,21 +599,16 @@ func (c *Converter) contextCompacted(record map[string]any, at Attribution, env 
 		c.log.With(logging.Context{Operation: "context-compacted", Path: at.Path, Session: at.SessionID, Level: "warn"}).
 			Log("compact boundary uuid=%q at offset=%d is not followed by a summary line; the cut renders with nothing in place of the discarded history", env.uuid, at.Offset)
 	}
-	m := &conversationv1.MessageEntry{Author: authorAgent(container)}
-	lineage(m, env.uuid, container)
-	compacted := &conversationv1.ContextCompacted{
-		TokensBefore: int64(number(metadata["preTokens"])),
-		TokensAfter:  int64(number(metadata["postTokens"])),
-	}
-	if summary != "" {
-		compacted.Summary = &conversationv1.AgentContent{Blocks: []*conversationv1.AgentContentBlock{{
-			Block: &conversationv1.AgentContentBlock_Text{Text: &conversationv1.TextBlock{Text: summary}},
-		}}}
-	}
-	m.Payload = &conversationv1.MessageEntry_ContextCut{ContextCut: &conversationv1.ContextCut{
-		Cut: &conversationv1.ContextCut_Compacted{Compacted: compacted},
-	}}
-	return MessageEntry(at, "context_compacted", m)
+	c.log.With(logging.Context{Operation: "context-compacted", Path: at.Path, Session: at.SessionID, Level: "error"}).
+		Log("compact boundary uuid=%q at offset=%d has NO conversion under the redesigned conversation.v1: "+
+			"MessageEntry, ContextCut's only carrier, was deleted. Record stored unported", env.uuid, at.Offset)
+	return UnportedEntry(at, "context_compacted", map[string]any{
+		"uuid":               env.uuid,
+		"tokens_before":      number(metadata["preTokens"]),
+		"tokens_after":       number(metadata["postTokens"]),
+		"summary":            summary,
+		"__unported_because": "conversation.v1 MessageEntry (ContextCut's carrier) was deleted",
+	})
 }
 
 // IsCompactBoundary reports whether a record is a compaction boundary, which is
@@ -749,26 +734,33 @@ func takeTag(s, tag string) (inner, rest string, found bool) {
 // ---------------------------------------------------------------------------
 
 // ProducerDiagnostic states something about the READER rather than the read.
-// It is bookkeeping by the surface's own test: nothing in the feed corresponds
-// to it, and a consumer must never render it as conversation material.
-func ProducerDiagnostic(at Attribution, name, operation, detail string) *agentshimv1.Entry {
-	return SyntheticBookkeepingEntry(at, name, &protocolv1.BookkeepingEntry{
-		Kind: &protocolv1.BookkeepingEntry_ProducerDiagnostic{ProducerDiagnostic: &protocolv1.ProducerDiagnostic{
-			Operation: operation,
-			Detail:    detail,
-		}},
+//
+// UNPORTED. protocol.v1 BookkeepingEntry and its ProducerDiagnostic arm were
+// deleted outright, and store.v1 StoreEntry has no bookkeeping arm at all —
+// there is nowhere on the new contract for a producer to say something about
+// itself. The diagnostic is still WRITTEN, whole, so a session's own log can
+// still be reconstructed from stored data; it simply no longer has a typed home.
+func ProducerDiagnostic(at Attribution, name, operation, detail string) *storev1.StoreEntry {
+	return SyntheticUnportedEntry(at, name, "producer_diagnostic", map[string]any{
+		"operation":          operation,
+		"detail":             detail,
+		"session_id":         at.SessionID,
+		"path":               at.Path,
+		"produced_at_ms":     float64(at.ProducedAtMs),
+		"__unported_because": "protocol.v1 BookkeepingEntry/ProducerDiagnostic were deleted and store.v1 StoreEntry has no bookkeeping arm",
 	})
 }
 
-// Describe renders why a record was stored without an external half, for a log
-// line that has to say what was not carried.
-func Describe(entry *agentshimv1.Entry) string {
-	switch arm := entry.GetInternal().GetUnconverted().(type) {
-	case *agentshimv1.InternalEntry_VendorSpecific:
+// Describe renders why a record was stored unserved, for a log line that has to
+// say what was not carried.
+func Describe(entry *storev1.StoreEntry) string {
+	item := entry.GetAgentUpdate().GetUnservedItem()
+	switch arm := item.GetUnservedItem().(type) {
+	case *storev1.StoreUnservedItem_VendorSpecific:
 		return fmt.Sprintf("vendor_specific kind=%q", arm.VendorSpecific.GetKind())
-	case *agentshimv1.InternalEntry_Unknown:
+	case *storev1.StoreUnservedItem_Unknown:
 		return fmt.Sprintf("unknown discriminator=%q field=%q", arm.Unknown.GetDiscriminator(), arm.Unknown.GetDiscriminatorField())
-	case *agentshimv1.InternalEntry_Unparsed:
+	case *storev1.StoreUnservedItem_Unparsed:
 		return fmt.Sprintf("unparsed offset=%d error=%q", arm.Unparsed.GetOffset(), arm.Unparsed.GetParseError())
 	default:
 		return ""
