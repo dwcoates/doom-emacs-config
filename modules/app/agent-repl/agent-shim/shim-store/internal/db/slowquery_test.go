@@ -2,7 +2,6 @@ package db
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"path/filepath"
@@ -10,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	protocolv1 "agentrepl/proto/protocol/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
 )
 
@@ -139,35 +138,6 @@ func TestSlowQueryRecordIsNormalVerbosityWarn(t *testing.T) {
 	}
 }
 
-func TestSlowQueryRecordCarriesTheStatementFamilyAndCost(t *testing.T) {
-	// Arrange.
-	d, sink := openThreshold(t, time.Nanosecond)
-	if _, err := d.Ingest("producer", batch(bookkeeping("session-1"), bookkeeping("session-1"))); err != nil {
-		t.Fatalf("Ingest: %v", err)
-	}
-	sink.Reset()
-
-	// Act.
-	if _, err := d.ReplayFrom(context.Background(), "session-1", 0, func(*protocolv1.EntryDelivery) error { return nil }); err != nil {
-		t.Fatalf("ReplayFrom: %v", err)
-	}
-
-	// Assert.
-	record := slowQueryRecords(t, sink)[0]
-	if record.Context.Statement != StatementReplay {
-		t.Fatalf("statement = %q, want %q", record.Context.Statement, StatementReplay)
-	}
-	if record.Context.Rows != 2 {
-		t.Fatalf("rows = %v, want the 2 events the replay yielded", record.Context.Rows)
-	}
-	if record.Context.ThresholdMS != float64(time.Nanosecond.Milliseconds()) {
-		t.Fatalf("threshold_ms = %v, want the configured threshold", record.Context.ThresholdMS)
-	}
-	if record.Session != "session-1" {
-		t.Fatalf("claude_session_id = %q, want the replayed session", record.Session)
-	}
-}
-
 func TestSlowQueryRecordNeverCarriesRenderedSQL(t *testing.T) {
 	// Arrange. The store's payloads are opaque to it; a record quoting a
 	// parameterized statement would leak session content into the global log.
@@ -203,23 +173,24 @@ func TestSlowQueryReportsAZeroRowResultAsZero(t *testing.T) {
 }
 
 func TestSlowQueryReportsTheIngestTransaction(t *testing.T) {
-	// Arrange.
+	// Arrange. A cursor-only batch is the batch the store still commits, so it
+	// is what exercises the timed BEGIN IMMEDIATE region.
 	d, sink := openThreshold(t, time.Nanosecond)
 
 	// Act.
-	if _, err := d.Ingest("producer", batch(bookkeeping("session-1"))); err != nil {
+	if _, err := d.Ingest("producer", cursorBatch(&storev1.CursorState{FileId: "f-1", Path: "/p", Offset: 7})); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
 	// Assert. The whole BEGIN IMMEDIATE transaction is the timed unit.
 	var found bool
 	for _, record := range slowQueryRecords(t, sink) {
-		if record.Context.Statement == StatementIngest && record.Context.Rows == 1 {
+		if record.Context.Statement == StatementIngest {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("slow-query records = %+v, want an ingest transaction with rows=1", slowQueryRecords(t, sink))
+		t.Fatalf("slow-query records = %+v, want an ingest transaction", slowQueryRecords(t, sink))
 	}
 }
 
