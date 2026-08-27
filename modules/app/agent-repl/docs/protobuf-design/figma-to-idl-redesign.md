@@ -7318,3 +7318,48 @@ pending | disabled; the /mcp panel row drew only the first four, so a
 configured-but-switched-off server had no honest rendering. `McpPanelDisabled
 disabled = 6` closes it — empty, the arm is the badge, WEBAPP owns the
 treatment.
+
+### RULING UPHELD BY EVIDENCE: the stop-hook arms stay on `AgentFailure`
+
+The wave-review scrutiny of `stop_hook_prevented` and `hook_stopped` is
+resolved in their favor, at the DECLARED-TYPES tier: `TerminalReason`
+(sdk.d.ts:6909, "Why the query loop terminated") names both as first-class
+loop terminals, and `SyncHookJSONOutput.continue?: boolean` +
+`stopReason?: string` is the hook contract that ends the loop. Stop hooks DO
+end the turn at the SDK level; the earlier "stop hooks never determine the
+turn terminal" ruling concerned DAEMON-synthesized terminals and is not
+contradicted — these arms relay the vendor's own stated terminal, never a
+shim invention. Both arms ride the existing feed error route like every
+other turn-stop arm.
+
+### RENDERING PRESCRIPTIONS for the kept wave completions
+
+Each kept SIMPLE-ADD group that completes a landed surface now has its
+frontend disposition, so the reconciliation pass inherits decisions rather
+than questions:
+
+- Tool failures: `AgentToolFailure.content` resolves through the EXISTING
+  `FeedToolCallReturned.failed` verdict + output forms (the card already
+  says "a failed call's output is its error text"); no new shape.
+- Settle instants: drawn as the `FeedToolCallReturned.runtime` composed
+  clock (landed above); the shell bubble and footer rows keep their own
+  clocks and are unaffected.
+- Task `deleted`: NO footer arm. The checklist is a whole-list push, so a
+  deleted task is prescribed as ROW OMISSION — the daemon drops the row and
+  the next push carries the tracker without it.
+- Bash termination (detached): ALREADY MAPPED — the shell bubble's
+  terminator carries the exit code; `AgentBashKilled` draws as the bubble's
+  existing ended-without-status treatment.
+- Bash interrupt cause (foreground): daemon composes a trailing line in the
+  card's text output ("[stopped by user]" / "[timed out after 120 s]"); the
+  cause needs no arm on the card because the treatment is one composed line.
+- Bash spill: the daemon appends the spill path to the composed
+  `FeedToolCallOmitted` sentence ("1.2 MB more not shown · full output at
+  /path"); host-local path, shown not linked.
+- Fast-mode cooldown: conversation-complete, frontend EXPECTED UNMAPPED —
+  no frontend surface draws fast mode at all today, so the cooldown arm
+  waits with the rest of the fast-mode vocabulary.
+- Detached output path (`DetachedWorkOutput`): frontend EXPECTED UNMAPPED
+  for now — the shell bubble already shows the spool's CONTENT; the
+  host-local path adds nothing drawable until a "open the spool" affordance
+  exists, which would be a new feature.
