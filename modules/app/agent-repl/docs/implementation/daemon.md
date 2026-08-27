@@ -228,6 +228,42 @@ unmarked is DISCRETIONARY by default.
 
 9. DISCRETIONARY — drain/shutdown controller (schedule + idle sweep;
    prereqs: WSM, shim client; acquires the lease like any peer).
+## OPEN — unruled audit findings (the triage backlog)
+
+These feature-loss audit findings are NOT yet ruled; each awaits a
+remediate / do-not-remediate ruling per meta rule 14:
+
+- SHIM-CONNECTION group: reconnect/backoff policy with terminal-vs-
+  retryable classification; readiness gated on SILENCE rather than
+  elapsed time; handshake facts (permission posture, resume position
+  selection); the build-staleness bounce (shim reports build identity,
+  daemon bounces exactly once on mismatch); surviving-shim arbitration
+  (wait / adopt / evict, never a duplicate over one transcript); boot
+  reconciliation with shims that outlived the previous daemon; the
+  typed sink fan-out; model-catalog handling; connectivity truth edges
+  (OnConnected/OnLinkLost as the only witnesses of wired).
+- INTAKE SIDE EFFECTS group: a user prompt declines parked permission
+  asks (a failed decline fails the submit); it cancels owed post-bounce
+  re-drives; engagement is declared at the funnel and retracted on
+  failure; the accepted edge publishes synchronously before the shim
+  submit, with a retraction path restoring state when the submit fails.
+- DRAIN group: the work gate is re-asked INSIDE the lease (an
+  unprovable answer releases and refuses); teardown drains the
+  interrupt BEFORE cancelling the connection; workspace-scoped orphan
+  close with one-transaction bookkeeping (claim retirement +
+  interruption rows + the idle edge together); standing refusals
+  rate-limited with exact suppressed/total accounting; hold restore is
+  all-or-nothing on a corrupt ledger.
+- MERGE leftovers: dequeue-offer timing (the old flow raises it from
+  the INTERRUPT, our entry says at completion); the agent-driven
+  merge-skill detached window (a separate concept from the daemon
+  merge); cross-repo multi-queue membership (one workspace queued on
+  several repos; Standing reports the first, Dequeue takes all).
+
+DECLINED (ruled, do not re-ask): delivery-retry pacing and unknown-fate
+reconciliation are NOT prescribed (the implementing orchestrator's);
+the merge test gate has NO flake re-run.
+
 ## Not yet walked
 - The EMACS+WEBAPP section (Connect server + resolvers/publishers) and
   the internal-only components (ingest core, failure classification,
