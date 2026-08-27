@@ -188,10 +188,10 @@ message AgentQuestionSelection {
   // exhaustive. UNSET when the user typed nothing.
   optional AgentQuestionFreeText free_text = 3;
 
-  // A remark the user attached to their selection. DISTINCT FROM THE FREE TEXT
-  // ABOVE: this annotates a choice rather than substituting for one. UNSET when
-  // none was added.
-  optional AgentQuestionNote note = 4;
+  // Tag 4 is RETIRED: a selection's "note" is NOT a distinct fact on the wire
+  // — vetting item 6 (206 real payloads) found a selection with typed text
+  // arrives as ONE comma-joined answer string, structurally indistinguishable
+  // from a multi-select label join, so no producer can fill a separate note.
 }
 
 // One picked option.
@@ -208,11 +208,6 @@ message AgentQuestionFreeText {
   string text = 1;
 }
 
-// A remark the user attached to a selection.
-message AgentQuestionNote {
-  // The remark, verbatim.
-  string text = 1;
-}
 
 // The ask went unanswered and stopped waiting.
 message AgentQuestionUnanswered {}
