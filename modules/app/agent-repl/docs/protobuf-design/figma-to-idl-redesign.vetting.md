@@ -495,3 +495,28 @@ the method against the pinned version, and add a shim test that fails
 loudly when the method disappears on an upgrade.
 
 **Status.** OPEN.
+
+### 12. Footer status + sub-status COVERAGE OVERVIEW (user-requested review)
+
+Added at the design-complete gate (2026-08-27): before implementation, the
+user wants to REVIEW the footer's status/sub-status coverage as a whole —
+not a single claim to verify but an overview to present and judge.
+
+**What to present.** One table over `FooterStatus` (idle, thinking, waiting,
+interrupted, merging, background, blocked, disconnected, closing, loading)
+× `FooterSubStatus` (thinking, merging, disconnected, idle, blocked,
+closing, loading, waiting) and each sub-status's inner arms: which
+status+substatus pairs are legal (the file's own "MUST agree" note), which
+producer fact drives each pair, and which session/turn situations have NO
+pair and therefore draw as bare `idle` — plus the activity line
+(`FooterStatusActivity`, including wakeup and context-budget) as the third
+axis.
+
+**Why it is here.** The status family accreted arm by arm across the whole
+walk (waiting·wakeup landed last); nobody has re-read it as one lifecycle,
+and the figma→idl heuristic ("review lifecycles, not just shapes") says a
+per-arm-correct family can still have sequence holes.
+
+**Disposition.** Run at the vetting stage as a presented overview; the
+user's review verdicts (gaps to fill, pairs to forbid) become ordinary
+landing increments before the contract freezes for fanout.
