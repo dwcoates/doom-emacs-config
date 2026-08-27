@@ -5,22 +5,25 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
-	protocolv1 "agentrepl/proto/protocol/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// Producer is the fixed StoreEntryWrite producer identity for the sidecar.
+// Producer is the fixed WriteBatchRequest producer identity for the sidecar.
 const Producer = "shim-claude-sidecar"
 
-// maxUnparsedRaw bounds the verbatim bytes an UnparsedEntry carries. A record
-// we could not read is evidence, not a payload, and an unbounded copy of a
-// corrupt multi-megabyte line would be written to the store on every re-read.
+// maxUnparsedRaw bounds the verbatim bytes a StoreUnparsed carries. A record we
+// could not read is evidence, not a payload, and an unbounded copy of a corrupt
+// multi-megabyte line would be written to the store on every re-read.
 const maxUnparsedRaw = 64 << 10
 
 // Attribution names where a record was read from and what it sits inside. It is
 // everything the conversion needs that is NOT in the record itself.
+//
+// SessionID and ProducedAtMs NO LONGER REACH THE STORE. Their carrier was
+// protocol.v1 ExternalEntry, which the redesigned contract deleted without a
+// successor on store.v1 StoreEntry — so they survive here as attribution the
+// sidecar logs by, and the gap is reported rather than papered over.
 type Attribution struct {
 	// SessionID is the conversation the record belongs to, taken from the file
 	// PATH (the transcript IS the session's record) or from the launch that
@@ -60,9 +63,9 @@ func DetachedWorkMessageID(taskID string) string {
 // position it was read at plus the discriminator separating several records
 // produced from that one position.
 //
-// DETERMINISTIC ON PURPOSE. InternalEntry.write_id must be "minted once by the
+// DETERMINISTIC ON PURPOSE. StoreEntry.write_id must be minted once by the
 // producer when the record is first handed to a store write, and never
-// regenerated — not for a retry, not for a replay after the store bounced".
+// regenerated — not for a retry, not for a replay after the store bounced.
 // A digest of the position satisfies that without any durable state: the same
 // bytes at the same offset in the same file always mint the same id, so a
 // replay after a restart is a no-op at the store rather than a duplicate.
@@ -82,103 +85,101 @@ func syntheticWriteID(name string) string {
 
 // filePlane is the observation plane of every record this process writes: the
 // sidecar reads what the vendor wrote to disk.
-func filePlane() *agentshimv1.Plane {
-	return &agentshimv1.Plane{Plane: &agentshimv1.Plane_File{File: &agentshimv1.PlaneFile{}}}
+func filePlane() *storev1.Plane {
+	return &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
 }
 
-// external builds the half of a record that may leave the shim.
-func external(at Attribution) *protocolv1.ExternalEntry {
-	return &protocolv1.ExternalEntry{SessionId: at.SessionID, ProducedAtMs: at.ProducedAtMs}
-}
-
-// MessageEntry wraps a converted conversation record as a stored Entry.
-func MessageEntry(at Attribution, discriminator string, m *conversationv1.MessageEntry) *agentshimv1.Entry {
-	ext := external(at)
-	ext.Entry = &protocolv1.ExternalEntry_Message{Message: m}
-	return &agentshimv1.Entry{
-		Internal: &agentshimv1.InternalEntry{Plane: filePlane(), WriteId: writeID(at, discriminator)},
-		External: ext,
-	}
-}
-
-// SyntheticMessageEntry wraps a conversation record the sidecar INFERRED, whose
-// write identity therefore comes from the inference rather than a file offset.
-func SyntheticMessageEntry(at Attribution, name string, m *conversationv1.MessageEntry) *agentshimv1.Entry {
-	ext := external(at)
-	ext.Entry = &protocolv1.ExternalEntry_Message{Message: m}
-	return &agentshimv1.Entry{
-		Internal: &agentshimv1.InternalEntry{Plane: filePlane(), WriteId: syntheticWriteID(name)},
-		External: ext,
-	}
-}
-
-// BookkeepingEntry wraps a fact ABOUT the session as a stored Entry.
-func BookkeepingEntry(at Attribution, discriminator string, b *protocolv1.BookkeepingEntry) *agentshimv1.Entry {
-	ext := external(at)
-	ext.Entry = &protocolv1.ExternalEntry_Bookkeeping{Bookkeeping: b}
-	return &agentshimv1.Entry{
-		Internal: &agentshimv1.InternalEntry{Plane: filePlane(), WriteId: writeID(at, discriminator)},
-		External: ext,
-	}
-}
-
-// SyntheticBookkeepingEntry wraps a fact the sidecar states about itself rather
-// than reads: a diagnostic, an outage report. It has no file position.
-func SyntheticBookkeepingEntry(at Attribution, name string, b *protocolv1.BookkeepingEntry) *agentshimv1.Entry {
-	ext := external(at)
-	ext.Entry = &protocolv1.ExternalEntry_Bookkeeping{Bookkeeping: b}
-	return &agentshimv1.Entry{
-		Internal: &agentshimv1.InternalEntry{Plane: filePlane(), WriteId: syntheticWriteID(name)},
-		External: ext,
+// unserved wraps an unserved item as the StoreEntry the sidecar writes.
+func unserved(writeID string, item *storev1.StoreUnservedItem) *storev1.StoreEntry {
+	return &storev1.StoreEntry{
+		Plane:   filePlane(),
+		WriteId: writeID,
+		Entry: &storev1.StoreEntry_AgentUpdate{AgentUpdate: &storev1.StoreAgentUpdate{
+			AgentInfo: &storev1.StoreAgentUpdate_UnservedItem{UnservedItem: item},
+		}},
 	}
 }
 
 // VendorSpecificEntry stores a record we UNDERSTAND and have decided not to
-// carry into a vendor-agnostic feed. It has NO external half, so it has no path
-// to the daemon at all.
-func VendorSpecificEntry(at Attribution, kind string, raw map[string]any) *agentshimv1.Entry {
-	return &agentshimv1.Entry{Internal: &agentshimv1.InternalEntry{
-		Plane:   filePlane(),
-		WriteId: writeID(at, "vendor:"+kind),
-		Unconverted: &agentshimv1.InternalEntry_VendorSpecific{VendorSpecific: &agentshimv1.VendorSpecificEntry{
+// carry into a vendor-agnostic feed.
+func VendorSpecificEntry(at Attribution, kind string, raw map[string]any) *storev1.StoreEntry {
+	return unserved(writeID(at, "vendor:"+kind), &storev1.StoreUnservedItem{
+		UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{VendorSpecific: &storev1.StoreVendorSpecific{
 			Kind: kind,
 			Raw:  rawStruct(raw),
 		}},
-	}}
+	})
 }
 
 // UnknownEntry stores a record we PARSED but do not MODEL.
-func UnknownEntry(at Attribution, discriminator, discriminatorField string, raw map[string]any) *agentshimv1.Entry {
-	return &agentshimv1.Entry{Internal: &agentshimv1.InternalEntry{
-		Plane:   filePlane(),
-		WriteId: writeID(at, "unknown:"+discriminatorField+":"+discriminator),
-		Unconverted: &agentshimv1.InternalEntry_Unknown{Unknown: &agentshimv1.UnknownEntry{
+func UnknownEntry(at Attribution, discriminator, discriminatorField string, raw map[string]any) *storev1.StoreEntry {
+	return unserved(writeID(at, "unknown:"+discriminatorField+":"+discriminator), &storev1.StoreUnservedItem{
+		UnservedItem: &storev1.StoreUnservedItem_Unknown{Unknown: &storev1.StoreUnknown{
 			Discriminator:      discriminator,
 			DiscriminatorField: discriminatorField,
 			Raw:                rawStruct(raw),
 		}},
-	}}
+	})
+}
+
+// UnportedField is the discriminator field UnportedEntry files a record under.
+// It is deliberately unmistakable: nothing in the vendor's own JSON can produce
+// it, so a query for it enumerates exactly the conversions this reconciliation
+// left unwritten.
+const UnportedField = "__unported_conversion"
+
+// UnportedEntry stores a record whose CONVERSION no longer exists.
+//
+// The redesigned conversation.v1 deleted the whole MessageEntry record model
+// (MessageEntry, AgentSaid, ToolCallBlock, ToolReturned, DetachedWork*,
+// ContextCut, FailureRaised, SkillBodyResolved, MessageAuthor, MessageParent,
+// StopReason) and replaced it with the Agent* protocol model (AgentFrame,
+// AgentPrompt, AgentActivity) whose population from Claude's JSONL is a
+// DESIGN DECISION, not a rename. Rather than invent that mapping, the record is
+// stored WHOLE and the failure to convert it is stated in the data and logged.
+//
+// This preserves the total-ingestion mandate — the JSON object still reaches
+// the store — while refusing to claim it was converted. Every caller is a
+// conversion the redesign left unported; see the reconciliation report.
+func UnportedEntry(at Attribution, conversion string, raw map[string]any) *storev1.StoreEntry {
+	return unserved(writeID(at, "unported:"+conversion), &storev1.StoreUnservedItem{
+		UnservedItem: &storev1.StoreUnservedItem_Unknown{Unknown: &storev1.StoreUnknown{
+			Discriminator:      conversion,
+			DiscriminatorField: UnportedField,
+			Raw:                rawStruct(raw),
+		}},
+	})
+}
+
+// SyntheticUnportedEntry is UnportedEntry for a record the sidecar INFERRED
+// rather than read, whose write identity therefore comes from the inference.
+func SyntheticUnportedEntry(at Attribution, name, conversion string, raw map[string]any) *storev1.StoreEntry {
+	return unserved(syntheticWriteID(name), &storev1.StoreUnservedItem{
+		UnservedItem: &storev1.StoreUnservedItem_Unknown{Unknown: &storev1.StoreUnknown{
+			Discriminator:      conversion,
+			DiscriminatorField: UnportedField,
+			Raw:                rawStruct(raw),
+		}},
+	})
 }
 
 // UnparsedEntry stores a record we could not READ at all — a failure rather
 // than a gap.
-func UnparsedEntry(at Attribution, raw []byte, cause error) *agentshimv1.Entry {
+func UnparsedEntry(at Attribution, raw []byte, cause error) *storev1.StoreEntry {
 	if len(raw) > maxUnparsedRaw {
 		raw = raw[:maxUnparsedRaw]
 	}
-	return &agentshimv1.Entry{Internal: &agentshimv1.InternalEntry{
-		Plane:   filePlane(),
-		WriteId: writeID(at, "unparsed"),
-		Unconverted: &agentshimv1.InternalEntry_Unparsed{Unparsed: &agentshimv1.UnparsedEntry{
+	return unserved(writeID(at, "unparsed"), &storev1.StoreUnservedItem{
+		UnservedItem: &storev1.StoreUnservedItem_Unparsed{Unparsed: &storev1.StoreUnparsed{
 			Source:     at.Path,
 			Offset:     uint64(at.Offset),
 			ParseError: cause.Error(),
 			Raw:        string(raw),
 		}},
-	}}
+	})
 }
 
-// rawStruct converts a decoded JSON object into the Struct the unconverted arms
+// rawStruct converts a decoded JSON object into the Struct the unserved arms
 // carry it in.
 //
 // A CONVERSION FAILURE IS NOT A DROP. structpb rejects values encoding/json
