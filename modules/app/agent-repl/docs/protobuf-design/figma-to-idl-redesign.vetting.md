@@ -553,3 +553,37 @@ respectively; the /context panel's source is sound. Options when ruled:
 rely-and-absorb-breakage, or degrade the two panels to composed text.
 
 **Status: RUN — findings recorded; ruling owed.**
+
+### Item 2 FINDINGS (run 2026-08-27)
+
+CONFIRMED, documentation-grade: the SDK declares ONE shared backgrounding
+path for shells and subagents (background_tasks control → immediate
+"running in the background" tool_result → task_started/-updated edges +
+background_tasks_changed level, discriminated only by task_type payload);
+the corpus holds a real local_bash task_started. Frame ORDERING between
+level and edges is declared unspecified — the contract's whole-set replace
+semantics already tolerate that. **Status: RUN — assumption holds.**
+
+### Item 9 FINDINGS (run 2026-08-27)
+
+CONFIRMED (in the negative), documentation-grade: nothing survives the CLI
+process on the stream — the background-task level is explicitly per-process
+("consumers must reset to the empty set whenever the CLI process
+(re)starts"), init carries no task list, resume re-announces nothing.
+Whether the underlying OS processes die or orphan at exit is NOT FOUND (no
+admissible evidence). Consequence: continuity across a shim restart is the
+DAEMON's to provide (adoption), never the vendor's — which the landed
+"connection facts" ruling already assumes. **Status: RUN — assumption
+holds; OS-process fate stays an implementation-wave observation.**
+
+### Item 10 FINDINGS (run 2026-08-27)
+
+PARTIALLY RESOLVED: Ctrl+B's declared frames are the tool_result, the
+background_tasks_changed level, and task_updated{patch.is_backgrounded}
+(the candidate producer for DetachedCauseByUser); TerminalReason
+'background_requested' exists for the whole-turn case. Whether a FRESH
+task_started edge also fires is NOT FOUND — no observed sequence exists
+anywhere. The contract needs no change either way (the detachment cause
+oneof is producer-noted, and task identity rides tool_use_id); the live
+observation moves to the implementation wave. **Status: RUN — frame set
+indicative; task_started question travels to implementation.**
