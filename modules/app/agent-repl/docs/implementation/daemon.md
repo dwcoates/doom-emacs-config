@@ -47,10 +47,13 @@ unmarked is DISCRETIONARY by default.
      is its in-memory guard.
    - INTERFACE: acquire/release by the merge orchestrator and the drain
      controller; consulted by prompt delivery.
-   - USAGE PATTERNS: THE TRAY'S HOLD REASONS ARE PROJECTIONS OF THE
-     LEASE — a prompt at a leased workspace holds under the holder's
-     label (merge / restart-pending / shutdown-drain). Distinct from the
-     per-REPO merge window (queue admission); both exist.
+   - USAGE PATTERNS: the lease projects PER-HOLDER REFUSAL POLICY onto
+     NEW submissions — the MERGE lease ERRORS them (SubmitPrompt's
+     merging refusal arm: post-merge-start work would be orphaned, since
+     a merged workspace closes); restart-pending and shutdown-drain
+     leases HOLD them under the holder's label. Prompts already held
+     when a lease is acquired stay held. Distinct from the per-REPO
+     merge window (queue admission); both exist.
    - PREREQUISITES: registry, shim client.
 
 4. PRESCRIBED — THE PROMPT QUEUE (inside WSM; persisted in held_prompt).
