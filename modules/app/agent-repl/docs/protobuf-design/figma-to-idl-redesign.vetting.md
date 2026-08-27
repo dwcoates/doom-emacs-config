@@ -623,3 +623,32 @@ transcript must mimic observed lines, and validating that is an
 implementation-wave experiment (rides with deferred item 5's capture
 harness). **Status: RUN — premise holds; field-set validation travels to
 implementation.**
+
+### Item 3 FINDINGS (run 2026-08-27)
+
+CONFIRMED at TURN granularity, documentation-grade (227k records tallied):
+`tool_use` = the turn continues, `end_turn` = the turn's final response.
+Three qualifiers: (a) stop_reason is stamped PER API RESPONSE and repeated
+on every content-block record, so it never marks a record as its response's
+last; (b) null = aborted mid-stream (with `aborted: true` declared), and
+refusal/max_tokens/pause_turn are non-end_turn finals; (c) the RELIABLE
+end-of-turn signal is the `type:"result"` message, which the shim already
+keys turn terminals from. Notable: every observed `stop_sequence` (444) is
+a `<synthetic>` CLI-fabricated record, never a real model stop — the arm
+stays as API-declared vocabulary. **Status: RUN — assumption holds with
+the granularity caveat recorded.**
+
+### Item 4 FINDINGS (run 2026-08-27)
+
+MIXED, documentation-grade: turn-fatal API errors ARE transcript-persisted
+(synthetic assistant records, `isApiErrorMessage: true` + `error` wrapper —
+a reliable cold-read discriminator, and the very marker the deferred
+synthesized-notice family would consume); retried-then-recovered errors,
+`result`-level error classification, and control-channel errors are
+STREAM-ONLY and leave no transcript trace. CONSEQUENCE: a cold reader of
+the VENDOR transcript alone cannot recover retries or result-level
+classification — which the architecture already absorbs, because the
+daemon's own store persists conversation.v1 frames as the durable record
+and the vendor transcript is only a recovery source. **Status: RUN —
+assumption holds; the store-is-the-record premise is now load-bearing and
+verified in that direction.**
