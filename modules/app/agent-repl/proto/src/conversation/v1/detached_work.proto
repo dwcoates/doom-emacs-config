@@ -89,6 +89,9 @@ message DetachedWorkDetached {
   // asked for the background up front: such a call is streamed as a progress
   // item before it backgrounds, so it always has an item it detached FROM — it
   // simply never has a foreground running phase.
+  // PRODUCER NOTE: the cause is harvested from the BASH TOOL RESULT
+  // (run_in_background on the call; backgroundedByUser; timedOutAfterMs) —
+  // the vendor's task stream carries no cause on any frame.
   oneof cause {
     // The agent asked for the background at the call site. The ordinary path.
     DetachedCauseRequested requested = 2;
