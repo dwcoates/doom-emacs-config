@@ -152,6 +152,8 @@ message AgentActivity {
     // daemon COALESCES the pair into one feed bubble by the episode
     // invariant: an agent has at most ONE open plan episode at a time.
     AgentPlanMode plan_mode = 28;
+    // A code review's typed findings report.
+    AgentReportFindings report_findings = 29;
   }
 }
 
@@ -286,6 +288,81 @@ message AgentPlanModeExited {
 
 // The call could not be performed.
 message AgentPlanModeFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
+
+// ---- Findings: a code review's typed defect report ----
+
+// The agent reported code-review findings as a typed list.
+message AgentReportFindings {
+  oneof state {
+    AgentReportFindingsStart start = 1;
+    AgentReportFindingsSuccess success = 2;
+    AgentReportFindingsFailure failure = 3;
+  }
+}
+
+// A report this stream has begun carrying.
+message AgentReportFindingsStart {
+  // When the call was issued.
+  AgentActivityStartedAt started_at = 1;
+}
+
+// The report landed.
+message AgentReportFindingsSuccess {
+  // The findings, in the tool's own order — most-severe first by its
+  // contract; a consumer never re-sorts. Empty is a real report: a review
+  // that found nothing.
+  repeated AgentFinding findings = 1;
+  // The effort level the review ran at. UNSPECIFIED when the tool stated
+  // none. The one canonical effort vocabulary, shared with model support.
+  AgentEffortLevel level = 2;
+  // When the call settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 3;
+}
+
+// One finding.
+message AgentFinding {
+  // Repo-relative path of the file the finding is in.
+  string file = 1;
+  // The line it anchors to, 1-indexed. UNSET when the tool gave none.
+  optional uint32 line = 2;
+  // The one-sentence statement of the defect.
+  string summary = 3;
+  // The compressed label for narrow surfaces. UNSET when the tool gave
+  // none. EXPECTED UNMAPPED: the feed bubble always has room for the full
+  // summary.
+  optional string short_summary = 4;
+  // Concrete inputs/state → wrong output, as the tool words it.
+  string failure_scenario = 5;
+  // The finding type's slug ("correctness", "efficiency"), verbatim; the
+  // tool's vocabulary is open and it is shown, never switched on. UNSET
+  // when the tool gave none.
+  optional string category = 6;
+
+  // The verify pass's verdict. UNSET when no verify pass ran.
+  oneof verdict {
+    AgentFindingConfirmed confirmed = 7;
+    AgentFindingPlausible plausible = 8;
+  }
+
+  // What happened to the finding, set only on a RE-REPORT after fixes were
+  // applied. UNSET on an ordinary report.
+  oneof outcome {
+    AgentFindingFixed fixed = 9;
+    AgentFindingSkipped skipped = 10;
+    AgentFindingNoChangeNeeded no_change_needed = 11;
+  }
+}
+message AgentFindingConfirmed {}
+message AgentFindingPlausible {}
+message AgentFindingFixed {}
+message AgentFindingSkipped {}
+message AgentFindingNoChangeNeeded {}
+
+// The call could not be performed.
+message AgentReportFindingsFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
 }
