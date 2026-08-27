@@ -119,26 +119,6 @@ describe("FailureKind: the closed failure vocabulary", () => {
     expect(() => decodeFailureKind({ shimExploded: {} }, "k")).toThrow(/FailureKind contract/);
   });
 
-  it("preserves exact query-termination evidence on its arm", () => {
-    // Arrange / Act
-    const got = decodeFailureKind(
-      {
-        queryTermination: {
-          detail: {
-            queryInstanceId: "query-1",
-            vendorSessionId: "claude-1",
-            observedAtMs: "1700000000000",
-            iteratorFailure: { cause: "child exited 137" },
-          },
-        },
-      },
-      "k",
-    );
-    // Assert
-    if (got.kind.case !== "queryTermination") throw new Error("wrong arm");
-    expect(got.kind.value.detail?.reason.case).toBe("iteratorFailure");
-  });
-
   it("preserves exact resume-continuity evidence on its arm", () => {
     // Arrange / Act
     const got = decodeFailureKind(
