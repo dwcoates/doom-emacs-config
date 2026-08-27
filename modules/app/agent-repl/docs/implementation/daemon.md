@@ -185,6 +185,28 @@ unmarked is DISCRETIONARY by default.
        sessionless; the displaced user turn is captured durably and
        resubmitted exactly once at lease release, across a daemon
        bounce.
+   - RULED (merge-variants investigation):
+     - TWO INGRESSES, ONE ENGINE: Emacs merges arrive via the
+       MergeWorkspace rpc, non-Emacs merges via the workspace
+       command-file merge verb; the engine is identical behind both, a
+       merge never round-trips through Emacs, and a workspace with no
+       live session merges sessionless (skipping displaced-turn capture
+       and post-merge teardown).
+     - ACCOUNT/LANDING SPLIT IS COMPUTED, NEVER HARD-PINNED: a repo
+       under MULTI_REPO_ROOT lands via PR + CI merge queue then close
+       (cherry-picking would duplicate CI-owned commits); a repo outside
+       it lands via the local merge engine. The old elisp hard-pins this
+       by directory constants — the rebuild computes it from the env
+       var.
+     - SELF-RELOAD: a merged outcome whose TARGET matches the daemon's
+       own checkout (git common-dir identity; sibling worktrees
+       excluded) triggers the self-redeploy — fires exactly once, only
+       after lease release and terminal publication, classifies the
+       landed range by changed subsystem prefixes and restarts ONLY
+       what changed, defers the bounce to a live Emacs (emacsclient
+       performs the restart), and is WEBAPP-INVISIBLE: the persisted
+       feed page position and the boot re-attach machinery are what
+       make the restart evidence-free client-side.
    - GOTCHAS: phase history is feed content, not WSM columns; an
      in-flight merge across a daemon restart is resumed or LOUDLY
      failed, never left with the lease stuck; the composer gate is the

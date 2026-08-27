@@ -109,3 +109,10 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     context, and every critical agreed fact must survive there. This is
     a completeness mandate for critical facts, never a verbosity
     mandate.
+
+16. DIGESTS. The canonical design record stays intact and authoritative;
+    per-system DIGEST documents (docs/protobuf-design/digests/) are
+    DERIVED extracts, each headed with its generation SHA and "the
+    record wins on any conflict"; they are regenerated (or appended)
+    whenever the record gains entries, and the bootstrap points at
+    digests, with the full record loaded only for contract-change work.
