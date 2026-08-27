@@ -199,8 +199,9 @@ enum AgentEffortLevel {
   AGENT_EFFORT_LEVEL_LOW = 1;
   AGENT_EFFORT_LEVEL_MEDIUM = 2;
   AGENT_EFFORT_LEVEL_HIGH = 3;
-  // Above `high`: the vendor's largest reasoning budget.
   AGENT_EFFORT_LEVEL_XHIGH = 4;
+  // Above `xhigh`: the vendor's largest reasoning budget.
+  AGENT_EFFORT_LEVEL_MAX = 5;
 }
 
 // ---------------------------------------------------------------------------
