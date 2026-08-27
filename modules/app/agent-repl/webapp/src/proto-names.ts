@@ -41,37 +41,30 @@
  * outside this module's reach entirely.
  */
 
-import type {
-  FrontendCommand as GeneratedFrontendCommand,
-  ResyncCmd as GeneratedResyncCmd,
-} from "../../proto/gen/ts/frontend/v1/frame_pb";
-import type {
-  ConversationPageBefore as GeneratedConversationPageBefore,
-  ConversationPageCmd as GeneratedConversationPageCmd,
-  ConversationPageTail as GeneratedConversationPageTail,
-} from "../../proto/gen/ts/frontend/v1/conversation-page_pb";
-import type {
-  FirstPageCmd as GeneratedFirstPageCmd,
-  NextPageCmd as GeneratedNextPageCmd,
-} from "../../proto/gen/ts/frontend/v1/feed_pb";
-import type {
-  HibernationDetail as GeneratedHibernationDetail,
-  ReviveCompactFirst as GeneratedReviveCompactFirst,
-  ReviveSessionCmd as GeneratedReviveSessionCmd,
-  WorkspaceGateView as GeneratedWorkspaceGateView,
-} from "../../proto/gen/ts/frontend/v1/shared_pb";
-import { CompactionScope as GeneratedCompactionScope } from "../../proto/gen/ts/frontend/v1/shared_pb";
-import type { AnswerMergeDequeueCmd as GeneratedAnswerMergeDequeueCmd } from "../../proto/gen/ts/frontend/v1/shared_pb";
-import type { FailureKind as GeneratedFailureKind } from "../../proto/gen/ts/frontend/v1/shared_pb";
-import type { FailureCardView as GeneratedFailureCardView } from "../../proto/gen/ts/frontend/v1/feed_pb";
-import type {
-  QueueEntry as GeneratedQueueEntry,
-  QueueEntryKeepAliveHold as GeneratedQueueEntryKeepAliveHold,
-  QueueEntryRevivalHold as GeneratedQueueEntryRevivalHold,
-  QueueEntryBuildRefreshHold as GeneratedQueueEntryBuildRefreshHold,
-  QueueClassificationUninterruptibleTurn as GeneratedQueueClassificationUninterruptibleTurn,
-} from "../../proto/gen/ts/frontend/v1/footer_pb";
-import { PromptOrigin as GeneratedPromptOrigin } from "../../proto/gen/ts/protocol/v1/core_pb";
+/*
+ * PROTO RECONCILIATION NOTE (frontend.v1 redesign).
+ *
+ * Most of this table's ANCHORS were deleted with the surfaces they named. The
+ * multiplexed `FrontendFrame`/`FrontendCommand` push stream, `ResyncCmd`, the
+ * `ConversationPage*` verbs, `QueueEntry` and its holds, `HibernationDetail`,
+ * `ReviveSessionCmd`, `CompactionScope`, `WorkspaceGateView`,
+ * `AnswerMergeDequeueCmd` and `FailureCardView` no longer exist in the
+ * generated stubs, so the `satisfies` clauses that pinned those constants have
+ * nothing left to check against.
+ *
+ * The LITERALS below are retained unchanged — the hand-written encoders and
+ * decoders that spell them are still wired to the old wire and have to keep
+ * compiling — but the tables marked UNANCHORED are, for now, exactly what the
+ * module header warns a hand-written table is: aligned by review alone. They
+ * regain their guarantee when the webapp is ported onto the new per-endpoint
+ * RPC surface, which is a design decision, not a reconciliation.
+ *
+ * Two anchors survived intact and are re-pointed rather than dropped:
+ * `FailureKind` (frontend/v1/failure_pb) and `PromptOrigin`
+ * (shim/v1/prompt_origin_pb).
+ */
+import type { FailureKind as GeneratedFailureKind } from "../../proto/gen/ts/frontend/v1/failure_pb";
+import { PromptOrigin as GeneratedPromptOrigin } from "../../proto/gen/ts/shim/v1/prompt_origin_pb";
 
 /** A generated oneof's arm keys, with protobuf-es's "nothing set" arm dropped. */
 type ArmKeys<Oneof extends { case: string | undefined }> = Exclude<Oneof["case"], undefined>;
@@ -93,20 +86,14 @@ export const HIBERNATION_CAUSE = {
   idleCutoff: "idleCutoff",
   forced: "forced",
   cacheExpired: "cacheExpired",
-} as const satisfies Record<
-  ArmKeys<GeneratedHibernationDetail["cause"]>,
-  ArmKeys<GeneratedHibernationDetail["cause"]>
->;
+} as const satisfies Record<string, string>; // UNANCHORED: HibernationDetail deleted.
 
 /** `ReviveSessionCmd.mode` arm keys — the whole content of the command. */
 export const REVIVE_MODE = {
   compactFirst: "compactFirst",
   direct: "direct",
   clear: "clear",
-} as const satisfies Record<
-  ArmKeys<GeneratedReviveSessionCmd["mode"]>,
-  ArmKeys<GeneratedReviveSessionCmd["mode"]>
->;
+} as const satisfies Record<string, string>; // UNANCHORED: ReviveSessionCmd deleted.
 
 /**
  * `AnswerMergeDequeueCmd.answer` arm keys — the decision IS the arm, so both
@@ -115,10 +102,7 @@ export const REVIVE_MODE = {
 export const MERGE_DEQUEUE_ANSWER = {
   dequeue: "dequeue",
   keep: "keep",
-} as const satisfies Record<
-  ArmKeys<GeneratedAnswerMergeDequeueCmd["answer"]>,
-  ArmKeys<GeneratedAnswerMergeDequeueCmd["answer"]>
->;
+} as const satisfies Record<string, string>; // UNANCHORED: AnswerMergeDequeueCmd deleted.
 
 /**
  * The `FrontendCommand.command` arm keys the WEBAPP sends.
@@ -149,7 +133,7 @@ export const COMMAND_ARM = {
   resumeMergeQueue: "resumeMergeQueue",
   evictMerge: "evictMerge",
   answerMergeDequeue: "answerMergeDequeue",
-} as const satisfies Record<string, ArmKeys<GeneratedFrontendCommand["command"]>>;
+} as const satisfies Record<string, string>; // UNANCHORED: FrontendCommand deleted.
 
 /**
  * The `QueueEntry.classification` arm keys — the verdict IS the arm.
@@ -165,7 +149,7 @@ export const QUEUE_CLASSIFICATION_ARM = {
   holdForTurnEnd: "holdForTurnEnd",
   error: "error",
   uninterruptibleTurn: "uninterruptibleTurn",
-} as const satisfies Record<string, ArmKeys<GeneratedQueueEntry["classification"]>>;
+} as const satisfies Record<string, string>; // UNANCHORED: QueueEntry deleted.
 
 /**
  * The uninterruptible-turn verdict's only field: WHICH context cut is running.
@@ -174,8 +158,8 @@ export const QUEUE_CLASSIFICATION_ARM = {
  * says nothing without the command, so a drifted spelling would render a card
  * that cannot name what the prompt is waiting behind.
  */
-export const UNINTERRUPTIBLE_TURN_COMMAND: FieldKeys<GeneratedQueueClassificationUninterruptibleTurn> =
-  "command";
+/** UNANCHORED: its generated subject was deleted — see the header note. */
+export const UNINTERRUPTIBLE_TURN_COMMAND: string = "command";
 
 /**
  * The `QueueEntry.hold` arm keys — WHAT is holding an entry, when something
@@ -189,7 +173,7 @@ export const QUEUE_HOLD_ARM = {
   keepAlive: "keepAlive",
   revival: "revival",
   buildRefresh: "buildRefresh",
-} as const satisfies Record<string, ArmKeys<GeneratedQueueEntry["hold"]>>;
+} as const satisfies Record<string, string>; // UNANCHORED: QueueEntry deleted.
 
 /**
  * `ResyncCmd`'s FIELD names — the replay watermark and the fence echo.
@@ -205,7 +189,7 @@ export const QUEUE_HOLD_ARM = {
 export const RESYNC_FIELD = {
   fromSeq: "fromSeq",
   fence: "fence",
-} as const satisfies Record<FieldKeys<GeneratedResyncCmd>, FieldKeys<GeneratedResyncCmd>>;
+} as const satisfies Record<string, string>; // UNANCHORED: ResyncCmd deleted.
 
 /**
  * The conversation page request's field spellings, bound to the generated
@@ -215,7 +199,7 @@ export const RESYNC_FIELD = {
  */
 export const PAGE_CMD_FIELD = {
   fence: "fence",
-} as const satisfies Record<"fence", FieldKeys<GeneratedConversationPageCmd>>;
+} as const satisfies Record<"fence", string>; // UNANCHORED: ConversationPageCmd deleted.
 
 /**
  * `FirstPageCmd`'s ONLY field, and deliberately its only one.
@@ -227,7 +211,7 @@ export const PAGE_CMD_FIELD = {
  */
 export const FIRST_PAGE_FIELD = {
   workspace: "workspace",
-} as const satisfies Record<FieldKeys<GeneratedFirstPageCmd>, FieldKeys<GeneratedFirstPageCmd>>;
+} as const satisfies Record<string, string>; // UNANCHORED: FirstPageCmd deleted.
 
 /**
  * `NextPageCmd`'s ONLY field. The absence of everything else IS the contract —
@@ -235,27 +219,28 @@ export const FIRST_PAGE_FIELD = {
  */
 export const NEXT_PAGE_FIELD = {
   workspace: "workspace",
-} as const satisfies Record<FieldKeys<GeneratedNextPageCmd>, FieldKeys<GeneratedNextPageCmd>>;
+} as const satisfies Record<string, string>; // UNANCHORED: NextPageCmd deleted.
 
 /** The anchor oneof's arm keys, checked against the generated oneof. */
 export const PAGE_ANCHOR_ARM = {
   tail: "tail",
   before: "before",
-} as const satisfies Record<string, NonNullable<GeneratedConversationPageCmd["anchor"]["case"]>>;
+} as const satisfies Record<string, string>; // UNANCHORED: ConversationPageCmd deleted.
 
 /** The tail anchor's only field. */
 export const PAGE_TAIL_FIELD = {
   limit: "limit",
-} as const satisfies Record<"limit", FieldKeys<GeneratedConversationPageTail>>;
+} as const satisfies Record<"limit", string>; // UNANCHORED: ConversationPageTail deleted.
 
 /** The before anchor's fields. */
 export const PAGE_BEFORE_FIELD = {
   cursor: "cursor",
   limit: "limit",
-} as const satisfies Record<FieldKeys<GeneratedConversationPageBefore>, FieldKeys<GeneratedConversationPageBefore>>;
+} as const satisfies Record<string, string>; // UNANCHORED: ConversationPageBefore deleted.
 
 /** The keep-alive hold's only field: the ping turn whose end releases it. */
-export const KEEP_ALIVE_HOLD_TURN_ID: FieldKeys<GeneratedQueueEntryKeepAliveHold> = "turnId";
+/** UNANCHORED: its generated subject was deleted — see the header note. */
+export const KEEP_ALIVE_HOLD_TURN_ID: string = "turnId";
 
 /**
  * The revival hold carries NOTHING: it is a bare marker arm.
@@ -266,7 +251,8 @@ export const KEEP_ALIVE_HOLD_TURN_ID: FieldKeys<GeneratedQueueEntryKeepAliveHold
  * `WorkspaceState`. Spelled as an empty tuple so that a field ADDED to the
  * message fails this build rather than being silently ignored.
  */
-export const REVIVAL_HOLD_FIELDS: readonly FieldKeys<GeneratedQueueEntryRevivalHold>[] = [];
+/** UNANCHORED: its generated subject was deleted — see the header note. */
+export const REVIVAL_HOLD_FIELDS: readonly string[] = [];
 
 /**
  * The build-refresh hold carries NOTHING either: the arm being set is the whole
@@ -275,11 +261,12 @@ export const REVIVAL_HOLD_FIELDS: readonly FieldKeys<GeneratedQueueEntryRevivalH
  * empty tuple for the same reason as above: a field ADDED to the message fails
  * this build rather than being silently ignored.
  */
-export const BUILD_REFRESH_HOLD_FIELDS: readonly FieldKeys<GeneratedQueueEntryBuildRefreshHold>[] =
-  [];
+/** UNANCHORED: its generated subject was deleted — see the header note. */
+export const BUILD_REFRESH_HOLD_FIELDS: readonly string[] = [];
 
 /** The compact-first arm's only field: how much the compaction may swallow. */
-export const REVIVE_COMPACT_SCOPE: FieldKeys<GeneratedReviveCompactFirst> = "scope";
+/** UNANCHORED: its generated subject was deleted — see the header note. */
+export const REVIVE_COMPACT_SCOPE: string = "scope";
 
 /**
  * The `frontend.v1.CompactionScope` prefix protobuf-es strips from its members.
@@ -296,9 +283,11 @@ export const COMPACTION_SCOPE_PREFIX = "COMPACTION_SCOPE_";
  * argument is checked against the generated enum, so a renamed member fails to
  * compile here rather than producing a scope the daemon refuses.
  */
-export function compactionScopeName<K extends keyof typeof GeneratedCompactionScope>(
+export function compactionScopeName<K extends string>(
   member: K,
 ): `${typeof COMPACTION_SCOPE_PREFIX}${K}` {
+  // UNANCHORED: the `frontend.v1.CompactionScope` enum was deleted, so the
+  // member argument is no longer checked against a generated key set.
   return `${COMPACTION_SCOPE_PREFIX}${member}`;
 }
 
@@ -327,8 +316,16 @@ export function promptOriginName<K extends keyof typeof GeneratedPromptOrigin>(
 /** The unattributed origin — a value the daemon refuses, so both ends name it. */
 export const PROMPT_ORIGIN_UNSPECIFIED = promptOriginName("UNSPECIFIED");
 
-/** The daemon's cache keep-alive ping: the one origin the webapp distinguishes. */
-export const PROMPT_ORIGIN_CACHE_KEEP_ALIVE = promptOriginName("CACHE_KEEP_ALIVE");
+/**
+ * The daemon's cache keep-alive ping: the one origin the webapp distinguishes.
+ *
+ * UNANCHORED, AND KNOWN-DEAD. `PROMPT_ORIGIN_CACHE_KEEP_ALIVE` was REMOVED from
+ * the enum in the redesign (`shim.v1.PromptOrigin` no longer has the member),
+ * so this spelling can no longer be checked and no frame can carry it. The
+ * literal is kept so `progress-footer.ts`'s cold-keep-alive row keeps
+ * compiling; the row itself is dead until the schema names the origin again.
+ */
+export const PROMPT_ORIGIN_CACHE_KEEP_ALIVE = `${PROMPT_ORIGIN_PREFIX}CACHE_KEEP_ALIVE`;
 
 /** A prompt the user sent from the composer. */
 export const PROMPT_ORIGIN_WEBAPP_USER_SENT = promptOriginName("WEBAPP_USER_SENT");
@@ -345,10 +342,7 @@ export const PROMPT_ORIGIN_WEBAPP_CARD_ACTION = promptOriginName("WEBAPP_CARD_AC
 export const WORKSPACE_GATE_ARM = {
   open: "open",
   hibernated: "hibernated",
-} as const satisfies Record<
-  ArmKeys<GeneratedWorkspaceGateView["gate"]>,
-  ArmKeys<GeneratedWorkspaceGateView["gate"]>
->;
+} as const satisfies Record<string, string>; // UNANCHORED: WorkspaceGateView deleted.
 
 /**
  * `FailureCardView.lifecycle` arm keys — HOW a failure card ends.
@@ -361,10 +355,7 @@ export const FAILURE_CARD_LIFECYCLE_ARM = {
   open: "open",
   resolved: "resolved",
   terminal: "terminal",
-} as const satisfies Record<
-  ArmKeys<GeneratedFailureCardView["lifecycle"]>,
-  ArmKeys<GeneratedFailureCardView["lifecycle"]>
->;
+} as const satisfies Record<string, string>; // UNANCHORED: FailureCardView deleted.
 
 /**
  * Which SIDE of the failure vocabulary a `FailureKind` arm belongs to.
@@ -386,62 +377,17 @@ export type FailureSide = "machinery" | "vendor";
 
 export const FAILURE_KIND_SIDE = {
   // ---- MACHINERY (blue): agent-repl's own plumbing did not work. ----
-  shimNotConnected: "machinery",
-  shimRejected: "machinery",
-  shimAckTimeout: "machinery",
   shimVersionMismatch: "machinery",
   shimSeqRegression: "machinery",
   shimDegraded: "machinery",
   shimStoreWriteRejected: "machinery",
-  queryTermination: "machinery",
-  shimNotSpawned: "machinery",
-  shimHandshakeIncomplete: "machinery",
-  shimUnhealthy: "machinery",
-  sessionNotEstablished: "machinery",
-  workspaceNotLive: "machinery",
   sessionDeleted: "machinery",
   sessionSuperseded: "machinery",
-  reconnectSuperseded: "machinery",
   sessionShimDied: "machinery",
   sessionStartFailed: "machinery",
   sessionResumeFailed: "machinery",
-  conversationUnresumable: "machinery",
-  resumeModeRetired: "machinery",
   sessionEndedUnclassified: "machinery",
-  historyRepullInFlight: "machinery",
-  historyReplayTruncated: "machinery",
-  replayMarkRetired: "machinery",
-  interruptUndelivered: "machinery",
-  queueEntryUnwired: "machinery",
-  queueEntryKeepAliveHeld: "machinery",
-  queueEntryUninterruptibleTurn: "machinery",
-  turnUndriven: "machinery",
-  sessionHibernated: "machinery",
-  keepAliveWindowUnclosed: "machinery",
-  keepAliveWindowInverted: "machinery",
-  compactionColdRead: "machinery",
-  clientLogIdentityStale: "machinery",
-  promptRefusedByMergeState: "machinery",
   internalUnclassified: "machinery",
-
-  // ---- VENDOR (purple): the SDK or the vendor refused or concluded it. ----
-  apiAuthenticationFailed: "vendor",
-  apiBillingError: "vendor",
-  apiRateLimit: "vendor",
-  apiInvalidRequest: "vendor",
-  apiServerError: "vendor",
-  apiOverloaded: "vendor",
-  apiOauthOrgNotAllowed: "vendor",
-  apiModelNotFound: "vendor",
-  apiNetworkDown: "vendor",
-  apiRequestFailed: "vendor",
-  apiUnknown: "vendor",
-  apiMaxOutputTokens: "vendor",
-  apiMaxTurns: "vendor",
-  apiMaxBudget: "vendor",
-  apiExecutionError: "vendor",
-  apiRefusal: "vendor",
-  apiTurnFailed: "vendor",
 
   // ---- CLIENT-LOCAL (blue): the frontend's own machinery. ----
   daemonUnreachable: "machinery",
@@ -450,8 +396,13 @@ export const FAILURE_KIND_SIDE = {
   controlPlaneFailed: "machinery",
   frameUndecodable: "machinery",
   staleBundle: "machinery",
-  commandUnsent: "machinery",
-  commandRejectionUnclassified: "machinery",
+
+  // NO VENDOR (purple) SIDE REMAINS. Every `api*` arm was deleted from
+  // `FailureKind` in the redesign; the vendor-failure messages that survive in
+  // failure.proto (`FailureVendorTurnFailed` and its siblings) are not reachable
+  // through this oneof, so this record classifies machinery only. Whether the
+  // vendor band re-enters the frontend through FailureKind or through the feed's
+  // own `FeedTurnError*` arms is a design decision, not a reconciliation.
 } as const satisfies Record<ArmKeys<GeneratedFailureKind["kind"]>, FailureSide>;
 
 /** Every `FailureKind` arm key the daemon or this frontend may set. */
