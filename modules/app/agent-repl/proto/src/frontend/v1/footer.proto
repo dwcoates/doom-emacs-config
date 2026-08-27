@@ -348,6 +348,16 @@ message FooterSubStatusLoadingListing {}
 // failure card; an activity the daemon can name but has no arm for is a
 // modeling gap, and the fix is the arm, not a note.
 message FooterStatusActivity {
+  // WHEN THIS ACTIVITY BEGAN STANDING, epoch ms. ON THE ENVELOPE so every
+  // arm — present and future — carries it BY CONSTRUCTION: an arm cannot
+  // forget it, because it is not the arm's to carry ("since when" is
+  // meaningful for every arm, the usage-on-the-envelope precedent). The
+  // client derives and ticks the RELATIVE age ("· 2m ago") per the clock
+  // convention — an instant is shipped, a duration is drawn. NOT optional:
+  // a push without it is a daemon fault, rejected LOUDLY, never drawn as
+  // "now". Distinct from wakeup's own wake_at_ms, which is a FUTURE
+  // deadline counting down; this is the PAST instant counting up.
+  FooterStatusActivityAt at = 12;
   oneof activity {
     FooterStatusActivityMergingCommit merging_commit = 1;
     FooterStatusActivityHook hook = 2;
@@ -373,6 +383,12 @@ message FooterStatusActivity {
     FooterStatusActivityNotification notification = 11;
   }
 }
+// The activity's standing instant.
+message FooterStatusActivityAt {
+  // Epoch ms.
+  int64 at_ms = 1;
+}
+
 // The notification line.
 message FooterStatusActivityNotification {
   // The composed line ("[bell] Merge queue is green"), drawn verbatim.

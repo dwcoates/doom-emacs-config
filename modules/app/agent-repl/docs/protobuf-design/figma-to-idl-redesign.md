@@ -7578,3 +7578,36 @@ knowledge lives — the daemon never asks "is Emacs focused."
   consistency, the editor-popup precedent).
 - frontend.v1 footer: `FooterStatusActivityNotification` (arm 11), the
   composed line shown until the next activity replaces it.
+
+### FOOTER ACTIVITY GAINS ITS ENVELOPE INSTANT — and two implementation invariants lock down for the fanout
+
+`FooterStatusActivity.at` (12, message-wrapped, NOT optional): when the
+activity began standing, on the ENVELOPE so every arm carries it by
+construction — a per-arm spelling would be eleven copies of one fact and
+the twelfth arm forgets it. Client ticks the relative age per the clock
+convention; a push without it is a loud daemon fault; wakeup's future
+deadline stands apart as its own fact.
+
+TWO IMPLEMENTATION INVARIANTS, user-mandated at this gate, inherited
+verbatim by the fanout's planning docs:
+
+1. UNSET NON-OPTIONAL FIELDS ARE ILLEGAL, EVERYWHERE, IMMEDIATELY.
+   - REQUESTS: a request carrying an unset non-optional field is answered
+     with an ERROR to the producer at once — never "handled", never
+     defaulted. Integration tests thereby DETECT producer gaps: the
+     consumer checks the producer, and the orchestrator remediates.
+   - RESPONSES AND STREAM PUSHES: a non-optional response field MUST be
+     set; a consumer receiving one unset RAISES A LOUD ERROR itself (on a
+     stream there is no producer to answer), sized to be caught during
+     integration remediation.
+
+2. LOGGING STANDARDS FOR REMEDIATION.
+   - Every logical branch carries a DEBUG statement; warnings log at
+     WARNING, errors at ERROR — level discipline is part of review.
+   - Integration/e2e orchestration (expected to run at TWO LEVELS given the
+     project's size) turns on >=WARNING logging BEFORE tests run and
+     PERUSES the logs EVEN WHEN TESTS PASS; any warning found is remediated
+     to zero — fixed, or deliberately downgraded (e.g. to info) — never
+     left standing.
+   - When issues are detected, subsequent remediation runs enable DEBUG
+     logging to trace the path.
