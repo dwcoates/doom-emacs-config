@@ -3,25 +3,22 @@ package convert
 // detached.go — work that LEFT the turn and now runs alongside it.
 //
 // A detachment is announced by a TOOL RESULT: the harness reports the launch
-// back to the agent, and that report is what names the thing that detached. So
-// the card is opened from a user record (where the vendor files tool results),
-// and it is opened as a FEED ROW naming itself — "a page of ten rows is ten
-// bounded things rather than ten trees".
+// back to the agent, and that report is what names the thing that detached.
 //
-// EVERY LATER RECORD ABOUT THE WORK NAMES THE SAME CARD, and none of them needs
-// to remember it: DetachedWorkMessageID is a pure function of the task id, so
-// the spool that carries the output, the sidechain that carries the subagent's
-// conversation, and the staleness sweep that declares it lost all derive the
-// same message id from the identity they already hold. Nothing is correlated
-// across files and nothing has to survive a restart.
+// THE LIFECYCLE CONVERSION IS UNPORTED. Its target — conversation.v1's
+// DetachedWorkStarted / DetachedWorkProgressed / DetachedWorkEnded family with
+// its DetachedWorkKind and outcome arms — was deleted by the redesign. The
+// successor (AgentDetachedWork over DetachableWork, carried on an AgentFrame)
+// is a DIFFERENT structure keyed by DetachedWorkId and AgentActivityId, not a
+// rename of the old one, and populating it from Claude's JSONL is a design
+// decision this reconciliation is not entitled to take.
 //
-// THE MERGE KIND IS NEVER PRODUCED HERE, and that is per the contract: no tool
-// spawns a merge run — the daemon opens it when it classifies the merge skill's
-// invocation — so this reader has nothing to observe.
+// So the vendor-side CLASSIFICATION is kept verbatim — it is JSON reading, not
+// protocol — and every record it classifies is stored whole through
+// UnportedEntry, loudly, rather than converted onto a shape nobody agreed.
 
 import (
-	agentshimv1 "agentrepl/proto/agentshim/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
@@ -29,24 +26,27 @@ import (
 type launch struct {
 	taskID string
 	label  string
-	kind   *conversationv1.DetachedWorkKind
+	// kind names the sort of work that detached, as the vendor's own signature
+	// keys reveal it. It was a conversation.v1 DetachedWorkKind; that type is
+	// gone, so the classification survives as the plain name it always was.
+	kind string
 	// skillName is set only for a skill invocation, so the body that arrives
 	// later can be resolved onto this card by name.
 	skillName string
 }
 
-// launchRecords converts a user record's `toolUseResult` into the detached-work
-// lifecycle it implies: a launch opens a card, a stop closes one.
+// launchRecords classifies a user record's `toolUseResult` as the detached-work
+// lifecycle it implies, and stores each such record unported.
 //
-// A tool result that is not a launch produces nothing here and is carried by
-// toolReturns as the tool's ordinary output.
-func (c *Converter) launchRecords(record map[string]any, at Attribution, env envelope, container string) []*agentshimv1.Entry {
+// A tool result that is not a launch produces nothing here.
+func (c *Converter) launchRecords(record map[string]any, at Attribution, env envelope, container string) []*storev1.StoreEntry {
+	_ = container
 	result := obj(record["toolUseResult"])
 	if result == nil {
 		return nil
 	}
-	if stop := c.taskStop(result, at, container); stop != nil {
-		return []*agentshimv1.Entry{stop}
+	if stop := c.taskStop(result, at, record); stop != nil {
+		return []*storev1.StoreEntry{stop}
 	}
 	found := classifyLaunch(result, env)
 	if found == nil {
@@ -58,25 +58,18 @@ func (c *Converter) launchRecords(record map[string]any, at Attribution, env env
 		// opening a card nothing can ever update.
 		c.log.With(logging.Context{Operation: "detached-launch", Path: at.Path, Session: at.SessionID, Level: "warn"}).
 			Log("detached launch at offset=%d carries no task identity; stored unconverted rather than opening a card nothing can update", at.Offset)
-		return []*agentshimv1.Entry{UnknownEntry(at, "launch", "toolUseResult", record)}
+		return []*storev1.StoreEntry{UnknownEntry(at, "launch", "toolUseResult", record)}
 	}
 
 	messageID := DetachedWorkMessageID(found.taskID)
 	if found.skillName != "" {
 		c.skillMessage[found.skillName] = messageID
 	}
-	m := &conversationv1.MessageEntry{Author: authorAgent(container)}
-	// A detached-work card is a FEED ROW, so it names itself even when the
-	// record that announced it was read inside another card.
-	lineage(m, messageID, messageID)
-	m.Payload = &conversationv1.MessageEntry_DetachedWorkStarted{DetachedWorkStarted: &conversationv1.DetachedWorkStarted{
-		OriginToolCallId: env.toolUseID,
-		Label:            found.label,
-		Kind:             found.kind,
-	}}
-	c.log.With(logging.Context{Operation: "detached-launch", Path: at.Path, Session: at.SessionID, Task: found.taskID}).
-		Log("detached work opened message_id=%s origin_tool_call_id=%q", messageID, env.toolUseID)
-	return []*agentshimv1.Entry{MessageEntry(at, "detached_started:"+found.taskID, m)}
+	c.log.With(logging.Context{Operation: "detached-launch", Path: at.Path, Session: at.SessionID, Task: found.taskID, Level: "error"}).
+		Log("detached-work START (kind=%s label=%q message_id=%s origin_tool_call_id=%q) has NO conversion under the redesigned conversation.v1: "+
+			"DetachedWorkStarted was deleted and AgentDetachedWork is a different structure. Record stored unported at offset=%d",
+			found.kind, found.label, messageID, env.toolUseID, at.Offset)
+	return []*storev1.StoreEntry{UnportedEntry(at, "detached_started:"+found.kind, record)}
 }
 
 // classifyLaunch identifies which kind of work detached, by the signature keys
@@ -88,25 +81,19 @@ func classifyLaunch(result map[string]any, env envelope) *launch {
 		return &launch{
 			taskID: str(result["agentId"]),
 			label:  str(result["description"]),
-			kind: &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Agent{
-				Agent: &conversationv1.DetachedAgent{},
-			}},
+			kind:   "agent",
 		}
 	case has(result, "runId"):
 		return &launch{
 			taskID: firstNonEmpty(str(result["runId"]), str(result["taskId"])),
 			label:  firstNonEmpty(str(result["summary"]), str(result["workflowName"])),
-			kind: &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Workflow{
-				Workflow: &conversationv1.DetachedWorkflow{},
-			}},
+			kind:   "workflow",
 		}
 	case str(result["backgroundTaskId"]) != "":
 		return &launch{
 			taskID: str(result["backgroundTaskId"]),
 			label:  str(result["backgroundCwdHint"]),
-			kind: &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Shell{
-				Shell: &conversationv1.DetachedShell{},
-			}},
+			kind:   "shell",
 		}
 	case has(result, "commandName"):
 		name := str(result["commandName"])
@@ -116,21 +103,16 @@ func classifyLaunch(result map[string]any, env envelope) *launch {
 			taskID:    env.toolUseID,
 			label:     name,
 			skillName: name,
-			kind: &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Skill{
-				Skill: &conversationv1.DetachedSkill{SkillName: name},
-			}},
+			kind:      "skill",
 		}
 	default:
 		return nil
 	}
 }
 
-// taskStop converts a TaskStop result into the end of the work it stopped.
-//
-// It is CANCELLED rather than succeeded or failed: someone stopped it
-// deliberately, which is a different thing from either outcome it might have
-// reached on its own.
-func (c *Converter) taskStop(result map[string]any, at Attribution, container string) *agentshimv1.Entry {
+// taskStop recognizes a TaskStop result — the end of work someone stopped
+// deliberately — and stores it unported.
+func (c *Converter) taskStop(result map[string]any, at Attribution, record map[string]any) *storev1.StoreEntry {
 	if !has(result, "command") || !has(result, "taskType") {
 		return nil
 	}
@@ -138,70 +120,59 @@ func (c *Converter) taskStop(result map[string]any, at Attribution, container st
 	if taskID == "" {
 		return nil
 	}
-	messageID := DetachedWorkMessageID(taskID)
-	m := &conversationv1.MessageEntry{Author: authorAgent(container)}
-	lineage(m, messageID, messageID)
-	m.Payload = &conversationv1.MessageEntry_DetachedWorkEnded{DetachedWorkEnded: &conversationv1.DetachedWorkEnded{
-		Outcome: &conversationv1.DetachedWorkEnded_Cancelled{Cancelled: &conversationv1.DetachedCancelled{}},
-	}}
-	c.log.With(logging.Context{Operation: "detached-stop", Path: at.Path, Session: at.SessionID, Task: taskID}).
-		Log("detached work cancelled message_id=%s", messageID)
-	return MessageEntry(at, "detached_cancelled:"+taskID, m)
+	c.log.With(logging.Context{Operation: "detached-stop", Path: at.Path, Session: at.SessionID, Task: taskID, Level: "error"}).
+		Log("detached-work CANCELLED (message_id=%s) has NO conversion under the redesigned conversation.v1: "+
+			"DetachedWorkEnded and its Cancelled arm were deleted. Record stored unported at offset=%d",
+			DetachedWorkMessageID(taskID), at.Offset)
+	return UnportedEntry(at, "detached_cancelled", record)
 }
 
-// DetachedProgress appends output to detached work already open.
+// DetachedProgress records output appended to detached work already open.
 //
-// A DELTA rather than the whole spool: re-sending everything on every update is
-// how a long-running shell costs more to watch than it did to run.
-func DetachedProgress(at Attribution, taskID, output string) *agentshimv1.Entry {
-	messageID := DetachedWorkMessageID(taskID)
-	m := &conversationv1.MessageEntry{Author: authorAgent(messageID)}
-	lineage(m, messageID, messageID)
-	m.Payload = &conversationv1.MessageEntry_DetachedWorkProgressed{DetachedWorkProgressed: &conversationv1.DetachedWorkProgressed{
-		Output: output,
-	}}
-	return MessageEntry(at, "detached_progress", m)
+// UNPORTED. DetachedWorkProgressed was deleted and nothing in the Agent* model
+// spells "more output arrived on work already open" as a producer-written
+// record, so the delta is stored whole and the loss is stated.
+func DetachedProgress(at Attribution, taskID, output string) *storev1.StoreEntry {
+	return UnportedEntry(at, "detached_progress", map[string]any{
+		"task_id":            taskID,
+		"detached_work_id":   DetachedWorkMessageID(taskID),
+		"output":             output,
+		"__unported_because": "conversation.v1 DetachedWorkProgressed was deleted with no producer-side successor",
+	})
 }
 
-// DetachedExited ends detached work that told us how it exited.
+// DetachedExited records detached work that told us how it exited.
 //
-// The exit code is the ONLY structured byte a shell spool has, and reading it is
-// what keeps a task that plainly finished — and said so, on disk — from sitting
-// as running until a staleness sweep eventually calls it LOST. That would be the
-// wrong verdict as well as a late one: LOST means we never found out, and here
-// we did.
-func DetachedExited(at Attribution, taskID string, code int) *agentshimv1.Entry {
-	messageID := DetachedWorkMessageID(taskID)
-	m := &conversationv1.MessageEntry{Author: authorAgent(messageID)}
-	lineage(m, messageID, messageID)
-	ended := &conversationv1.DetachedWorkEnded{}
-	if code == 0 {
-		ended.Outcome = &conversationv1.DetachedWorkEnded_Succeeded{Succeeded: &conversationv1.DetachedSucceeded{}}
-	} else {
-		ended.Outcome = &conversationv1.DetachedWorkEnded_Failed{Failed: &conversationv1.DetachedFailed{
-			Summary: exitSummary(code),
-		}}
-	}
-	m.Payload = &conversationv1.MessageEntry_DetachedWorkEnded{DetachedWorkEnded: ended}
-	return MessageEntry(at, "detached_exited", m)
+// UNPORTED. The exit code is still READ and carried verbatim — losing it would
+// leave a task that plainly finished sitting as running until a staleness sweep
+// called it LOST — but DetachedWorkEnded's Succeeded/Failed arms are gone, so
+// the outcome is stored rather than asserted in the protocol.
+func DetachedExited(at Attribution, taskID string, code int) *storev1.StoreEntry {
+	return UnportedEntry(at, "detached_exited", map[string]any{
+		"task_id":            taskID,
+		"detached_work_id":   DetachedWorkMessageID(taskID),
+		"exit_code":          float64(code),
+		"summary":            exitSummary(code),
+		"__unported_because": "conversation.v1 DetachedWorkEnded (Succeeded/Failed) was deleted with no producer-side successor",
+	})
 }
 
-// DetachedLost ends detached work we stopped being able to see.
+// DetachedLost records detached work we stopped being able to see.
 //
-// A SEPARATE OUTCOME FROM FAILURE, deliberately. Folding it into failure would
-// have this system assert something it never observed: that the work died. The
-// inference is carried so "we watched it exit" stays distinguishable from "we
-// stopped hearing from it".
-func DetachedLost(at Attribution, taskID, inference string) *agentshimv1.Entry {
-	messageID := DetachedWorkMessageID(taskID)
-	m := &conversationv1.MessageEntry{Author: authorAgent(messageID)}
-	lineage(m, messageID, messageID)
-	m.Payload = &conversationv1.MessageEntry_DetachedWorkEnded{DetachedWorkEnded: &conversationv1.DetachedWorkEnded{
-		Outcome: &conversationv1.DetachedWorkEnded_Lost{Lost: &conversationv1.DetachedLost{Inference: inference}},
-	}}
-	// The verdict is stable for a task however many sweeps observe it, so the
-	// write identity is too and a re-emission is a no-op at the store.
-	return SyntheticMessageEntry(at, "detached_lost:"+at.SessionID+":"+taskID, m)
+// UNPORTED, but STILL A SEPARATE OUTCOME FROM FAILURE. Folding it into failure
+// would have this system assert something it never observed: that the work
+// died. The inference is carried so "we watched it exit" stays distinguishable
+// from "we stopped hearing from it".
+//
+// The verdict is stable for a task however many sweeps observe it, so the write
+// identity is too and a re-emission is a no-op at the store.
+func DetachedLost(at Attribution, taskID, inference string) *storev1.StoreEntry {
+	return SyntheticUnportedEntry(at, "detached_lost:"+at.SessionID+":"+taskID, "detached_lost", map[string]any{
+		"task_id":            taskID,
+		"detached_work_id":   DetachedWorkMessageID(taskID),
+		"inference":          inference,
+		"__unported_because": "conversation.v1 DetachedWorkEnded (Lost) was deleted with no producer-side successor",
+	})
 }
 
 func exitSummary(code int) string {

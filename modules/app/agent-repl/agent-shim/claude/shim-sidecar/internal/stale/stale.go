@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -116,14 +116,15 @@ func (t *Tracker) Open(id string, kind tail.Kind, session, outputPath string, st
 	t.log.With(logging.Context{Operation: "stale-open", Session: session, Task: id, Path: outputPath}).Log("tracking new task kind=%d", kind)
 }
 
-// Restore replaces the in-memory tracker with the store's authoritative
-// persisted open-task set.
+// Restore resets the in-memory tracker at the start of every established
+// connection.
 //
-// IT CAN NO LONGER RESTORE ANYTHING, AND THE REASON IS A SCHEMA HOLE RATHER
-// THAN A FAILURE. `OpenTaskState.started` carried the TaskStarted record that
-// opened a task — its id, its kind, its session, its output path — and it was
-// retired with no successor. What is left says only WHEN a task was last active,
-// which cannot name a task, so there is nothing to key a restored entry on.
+// IT HAS NOTHING LEFT TO RESTORE FROM, AND THE REASON IS A SCHEMA HOLE RATHER
+// THAN A FAILURE. The store used to hand back an authoritative open-task set
+// (agentshim.v1 CursorList.open_tasks, each an OpenTaskState). The redesigned
+// contract deleted OpenTaskState AND CursorList: store.v1
+// GetSidecarCursorsResponse returns cursors and nothing else, so the store no
+// longer reports open tasks at all and there is no snapshot to key entries on.
 //
 // The consequences are stated rather than smoothed over, because every one of
 // them is a real behavior change:
@@ -136,35 +137,22 @@ func (t *Tracker) Open(id string, kind tail.Kind, session, outputPath string, st
 //     a live task's spool stays unattributed until the transcript that announced
 //     it is re-read.
 //
-// It still VALIDATES what remains and still refuses a malformed snapshot, so the
-// link cannot come up on evidence the store contradicts itself about. What it
-// will not do is invent a task identity the schema no longer carries.
-func (t *Tracker) Restore(states []*agentshimv1.OpenTaskState) error {
-	t.log.With(logging.Context{Operation: "restore-open-tasks"}).LogVerbose("restore requested states=%d", len(states))
-	for _, state := range states {
-		if state == nil {
-			err := fmt.Errorf("stale: recovery contains a nil open task")
-			return t.restoreError(logging.Context{}, err)
-		}
-		if state.GetLastActivityAtMs() <= 0 {
-			err := fmt.Errorf("stale: invalid recovered open task last_activity_at_ms=%d", state.GetLastActivityAtMs())
-			return t.restoreError(logging.Context{}, err)
-		}
-	}
-	if len(states) > 0 {
-		// Loud, and at error level, because this is silent data loss in the
-		// user's feed: work that was running is now untracked and will never be
-		// resolved to a terminal status by this process.
-		t.log.With(logging.Context{Operation: "restore-open-tasks", Level: "error"}).Log(
-			"store reported %d open task(s) but OpenTaskState carries no task identity to restore them by; "+
-				"they are neither tracked nor swept, and their spools stay unattributed until their transcripts are re-read", len(states))
-	}
+// The error return is KEPT rather than dropped as now-unreachable: the reset is
+// still a step establishment must be able to refuse, and restoreError is still
+// how a refusal reaches the link exactly once.
+func (t *Tracker) Restore() error {
+	t.log.With(logging.Context{Operation: "restore-open-tasks"}).LogVerbose("restore requested")
+	// Loud, and at error level, because this is silent data loss in the user's
+	// feed: work that was running is now untracked and will never be resolved to
+	// a terminal status by this process.
+	t.log.With(logging.Context{Operation: "restore-open-tasks", Level: "error"}).Log(
+		"store.v1 reports no open tasks (OpenTaskState and CursorList were deleted with no successor); " +
+			"tasks open across this restart are neither tracked nor swept, and their spools stay unattributed until their transcripts are re-read")
 	t.mu.Lock()
 	t.tasks = map[taskKey]*task{}
 	t.restoreFailure = ""
 	t.mu.Unlock()
-	t.log.With(logging.Context{Operation: "restore-open-tasks"}).Log(
-		"open-task tracker reset; %d persisted open task(s) were unrestorable", len(states))
+	t.log.With(logging.Context{Operation: "restore-open-tasks"}).Log("open-task tracker reset; no persisted open tasks are recoverable")
 	return nil
 }
 
@@ -236,11 +224,11 @@ func (t *Tracker) IsOpen(session, id string) bool {
 
 // Sweep evaluates every open task against the vanish-grace and silence windows,
 // emits a LOST TaskEnded for each that crossed a threshold, and closes them.
-func (t *Tracker) Sweep(nowMs int64) []*agentshimv1.Entry {
+func (t *Tracker) Sweep(nowMs int64) []*storev1.StoreEntry {
 	t.log.With(logging.Context{Operation: "stale-sweep"}).LogVerbose("sweep requested now_ms=%d", nowMs)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var out []*agentshimv1.Entry
+	var out []*storev1.StoreEntry
 	for key, tk := range t.tasks {
 		switch {
 		case tk.vanishedAtMs != 0 && nowMs-tk.vanishedAtMs >= t.opt.Grace.Milliseconds():
@@ -257,11 +245,11 @@ func (t *Tracker) Sweep(nowMs int64) []*agentshimv1.Entry {
 
 // BootSweep LOSTs every open task whose started_at predates bootMs (nothing
 // survives a reboot). Run once at startup.
-func (t *Tracker) BootSweep(bootMs, nowMs int64) []*agentshimv1.Entry {
+func (t *Tracker) BootSweep(bootMs, nowMs int64) []*storev1.StoreEntry {
 	t.log.With(logging.Context{Operation: "stale-boot-sweep"}).LogVerbose("boot sweep requested boot_ms=%d now_ms=%d", bootMs, nowMs)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var out []*agentshimv1.Entry
+	var out []*storev1.StoreEntry
 	for key, tk := range t.tasks {
 		if tk.startedAtMs > 0 && tk.startedAtMs < bootMs {
 			out = append(out, t.lost(tk, "boot-sweep"))
@@ -278,7 +266,7 @@ func (t *Tracker) BootSweep(bootMs, nowMs int64) []*agentshimv1.Entry {
 // the work died; we know only that we cannot see it any more. The inference is
 // carried so a reader can tell "we watched it exit" from "we stopped hearing
 // from it", and so a wrong threshold is diagnosable rather than merely wrong.
-func (t *Tracker) lost(tk *task, inference string) *agentshimv1.Entry {
+func (t *Tracker) lost(tk *task, inference string) *storev1.StoreEntry {
 	t.log.With(logging.Context{Operation: "infer-lost", Task: tk.id, Session: tk.session, Level: "warn"}).
 		Log("LOST kind=%d inference=%s; never reported as succeeded", tk.kind, inference)
 	return convert.DetachedLost(convert.Attribution{

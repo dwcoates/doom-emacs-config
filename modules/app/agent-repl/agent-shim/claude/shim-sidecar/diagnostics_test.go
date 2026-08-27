@@ -2,15 +2,13 @@ package main
 
 import (
 	"errors"
-	"io"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
-	"agentrepl/shim-claude-sidecar/internal/stale"
 )
 
 func testDiagnostic() logging.Diagnostic {
@@ -47,7 +45,7 @@ func TestDiagnosticOutboxRetainsExactRecordUntilAcknowledged(t *testing.T) {
 	if first[0] != second[0] {
 		t.Fatalf("retry did not retain the exact queued record: first=%p second=%p", first[0], second[0])
 	}
-	if first[0].GetInternal().GetWriteId() != second[0].GetInternal().GetWriteId() {
+	if first[0].GetWriteId() != second[0].GetWriteId() {
 		t.Fatal("a retry minted a new write identity, so the store would write the diagnostic twice")
 	}
 	out.acknowledge(len(second))
@@ -56,41 +54,23 @@ func TestDiagnosticOutboxRetainsExactRecordUntilAcknowledged(t *testing.T) {
 	}
 }
 
-// A diagnostic is a fact about the READER rather than the read, so it is
-// bookkeeping — nothing in the feed corresponds to it, and a consumer must never
-// render it as conversation material.
-func TestDiagnosticIsCarriedAsBookkeeping(t *testing.T) {
-	// Arrange / Act.
-	entry := diagnosticEvent(testDiagnostic(), 1)
-
-	// Assert.
-	external := entry.GetExternal()
-	if external.GetMessage() != nil {
-		t.Fatal("a diagnostic was carried as a conversation message")
-	}
-	if external.GetBookkeeping().GetProducerDiagnostic() == nil {
-		t.Fatal("a diagnostic was not carried as a producer diagnostic")
-	}
-	if external.GetSessionId() != "claude-session" || external.GetProducedAtMs() != 1_700_000_000_123 {
-		t.Fatalf("diagnostic attribution = %#v", external)
-	}
-	if entry.GetInternal().GetPlane().GetFile() == nil {
-		t.Fatal("a diagnostic was not attributed to the file plane")
-	}
-}
-
-// ProducerDiagnostic has only an operation and a free-text detail, where the
-// retired FilePlaneDiagnostic had the level, verbosity, runtime, pid, path,
-// request id and a structured context as FIELDS. Everything without a field is
-// flattened into the detail rather than dropped — preserved, not structured.
+// A diagnostic has NO TYPED HOME LEFT AT ALL: protocol.v1 BookkeepingEntry and
+// its ProducerDiagnostic arm were deleted, and store.v1 StoreEntry has no
+// bookkeeping arm, so the record travels whole as an unported entry.
+//
+// EVERYTHING THE LOGGER RECORDED IS STILL THERE, which is what this covers. The
+// operation and the flattened detail — level, verbosity, runtime, pid, path,
+// request id and the structured context — are preserved, not structured.
 func TestDiagnosticDetailPreservesEveryFieldThatLostItsHome(t *testing.T) {
 	// Arrange / Act.
-	diagnostic := diagnosticEvent(testDiagnostic(), 1).
-		GetExternal().GetBookkeeping().GetProducerDiagnostic()
+	raw := diagnosticEvent(testDiagnostic(), 1).
+		GetAgentUpdate().GetUnservedItem().GetUnknown().GetRaw()
+	operation := raw.GetFields()["operation"].GetStringValue()
+	detail := raw.GetFields()["detail"].GetStringValue()
 
 	// Assert.
-	if diagnostic.GetOperation() != "sidecar.tail.poll" {
-		t.Fatalf("operation = %q, want the logger's own operation", diagnostic.GetOperation())
+	if operation != "sidecar.tail.poll" {
+		t.Fatalf("operation = %q, want the logger's own operation", operation)
 	}
 	for _, want := range []string{
 		"read failed",
@@ -102,8 +82,8 @@ func TestDiagnosticDetailPreservesEveryFieldThatLostItsHome(t *testing.T) {
 		"component=tail",
 		"cursor=8",
 	} {
-		if !strings.Contains(diagnostic.GetDetail(), want) {
-			t.Fatalf("detail %q lost %q", diagnostic.GetDetail(), want)
+		if !strings.Contains(detail, want) {
+			t.Fatalf("detail %q lost %q", detail, want)
 		}
 	}
 }
@@ -168,7 +148,7 @@ func TestDiagnosticOutboxConcurrentEnqueueHasUniqueStableIdentities(t *testing.T
 	}
 	seen := map[string]bool{}
 	for _, entry := range entries {
-		id := entry.GetInternal().GetWriteId()
+		id := entry.GetWriteId()
 		if seen[id] {
 			t.Fatalf("duplicate write identity %q; one diagnostic would silently replace another", id)
 		}
@@ -192,7 +172,7 @@ func TestDiagnosticOutboxFailedFlushNeverGrowsQueue(t *testing.T) {
 
 	// Act / Assert.
 	for attempt := 0; attempt < 4; attempt++ {
-		entry, err := out.flush(func(*agentshimv1.Entry) error { return errors.New("store unavailable") })
+		entry, err := out.flush(func(*storev1.StoreEntry) error { return errors.New("store unavailable") })
 		if err == nil || entry != first {
 			t.Fatalf("attempt %d result entry=%p err=%v", attempt, entry, err)
 		}
@@ -211,15 +191,15 @@ func TestRetainedDiagnosticFlushesOnceTheLinkReturns(t *testing.T) {
 	var out diagnosticOutbox
 	out.enqueue(testDiagnostic())
 	for attempt := 0; attempt < 3; attempt++ {
-		if _, err := out.flush(func(*agentshimv1.Entry) error { return errors.New("store unavailable") }); err == nil {
+		if _, err := out.flush(func(*storev1.StoreEntry) error { return errors.New("store unavailable") }); err == nil {
 			t.Fatalf("flush attempt %d reported success against an unavailable store", attempt)
 		}
 	}
 	retained := out.snapshot()[0]
 
 	// Act.
-	var delivered []*agentshimv1.Entry
-	entry, err := out.flush(func(e *agentshimv1.Entry) error {
+	var delivered []*storev1.StoreEntry
+	entry, err := out.flush(func(e *storev1.StoreEntry) error {
 		delivered = append(delivered, e)
 		return nil
 	})
@@ -233,36 +213,5 @@ func TestRetainedDiagnosticFlushesOnceTheLinkReturns(t *testing.T) {
 	}
 	if got := len(out.snapshot()); got != 0 {
 		t.Fatalf("successful flush retained %d diagnostics", got)
-	}
-}
-
-// A recovery-validation failure USED TO reach the session whose open task was
-// malformed, as a diagnostic that session's log would show. It cannot any more:
-// `OpenTaskState.started` carried the session id, so a failure now has nothing to
-// attribute itself to and lands in the GLOBAL sidecar log instead.
-//
-// This pins that routing change rather than the delivery that is gone, because
-// the difference matters to whoever is debugging: the failure is still loud, and
-// it is no longer visible from inside the workspace it concerns.
-func TestRecoveryValidationFailureNoLongerReachesASession(t *testing.T) {
-	// Arrange.
-	var out diagnosticOutbox
-	log := logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
-	log.SetDiagnosticSink(out.enqueue)
-	tracker := stale.New(stale.Options{}, log)
-	// The only invalidity OpenTaskState can still express: it does not say when
-	// the task was last active.
-	invalid := []*agentshimv1.OpenTaskState{{LastActivityAtMs: 0}}
-
-	// Act.
-	for attempt := 0; attempt < 3; attempt++ {
-		if err := tracker.Restore(invalid); err == nil {
-			t.Fatalf("Restore attempt %d accepted an invalid snapshot", attempt)
-		}
-	}
-
-	// Assert.
-	if queued := out.snapshot(); len(queued) != 0 {
-		t.Fatalf("recovery failure queued %d session diagnostics; it names no session to route to", len(queued))
 	}
 }
