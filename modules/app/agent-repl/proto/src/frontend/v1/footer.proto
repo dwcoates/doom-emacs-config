@@ -532,6 +532,15 @@ message FooterLiveWorkChips {
   optional FooterChipShells shells = 3;
   // 👁 — live background monitors. Set iff at least one is live.
   optional FooterChipMonitors monitors = 4;
+  // ⏱ — live scheduled jobs (cron/wakeup schedules). Set iff at least one
+  // job is scheduled.
+  optional FooterChipCrons crons = 5;
+}
+// The crons chip's props.
+message FooterChipCrons {
+  // How many rows the scheduled-jobs panel holds. At least 1 when this chip
+  // is set (a zero-count chip is expressed by leaving the chip unset).
+  uint32 count = 1;
 }
 // The monitors chip's props.
 message FooterChipMonitors {
@@ -579,7 +588,58 @@ message FooterExpanded {
   FooterExpandedShells shells = 4;
   // The live background monitors — the 👁 chip's expansion.
   FooterExpandedMonitors monitors = 5;
+  // The scheduled jobs — the ⏱ chip's expansion.
+  FooterExpandedCrons crons = 6;
 }
+
+// ---- The scheduled-jobs panel ----------------------------------------------
+
+// The ⏱ panel: one row per live scheduled job. A TRUE LIST, like the agents
+// panel. NOT jump targets: jobs have no feed bubble.
+message FooterExpandedCrons {
+  // The rows, in the daemon's order. Empty when nothing is scheduled — the
+  // chip is then unset and the panel unreachable.
+  repeated FooterCronRow rows = 1;
+}
+
+// One job's line: ⏱ · schedule · prompt · countdown · markers.
+message FooterCronRow {
+  // The human schedule ("every 5 min"), vendor-composed, drawn verbatim.
+  FooterCronRowSchedule schedule = 1;
+  // The job's prompt, daemon-truncated for width (the shell-row precedent —
+  // what arrives is what is drawn).
+  FooterCronRowPrompt prompt = 2;
+  // The next fire. The DAEMON resolves the instant from the job's cron
+  // expression; the client derives and ticks the remaining duration
+  // ("5m 12s") per the clock convention — an instant is shipped, a duration
+  // is drawn. UNSET when the daemon could not resolve one; the row then
+  // draws the schedule alone.
+  optional FooterCronRowNextFire next_fire = 3;
+  // The recurring marker. Present iff the job repeats.
+  optional FooterCronRowRecurring recurring = 4;
+  // The durable marker. Present iff the job survives the session — worth
+  // distinguishing, since everything else in this footer dies with it.
+  optional FooterCronRowDurable durable = 5;
+}
+// The schedule element.
+message FooterCronRowSchedule {
+  // The line, drawn verbatim.
+  string text = 1;
+}
+// The prompt element.
+message FooterCronRowPrompt {
+  // The prompt text, drawn verbatim.
+  string text = 1;
+}
+// The countdown element.
+message FooterCronRowNextFire {
+  // When the job fires, epoch ms; the client ticks the countdown from it.
+  int64 fire_at_ms = 1;
+}
+// The recurring marker. Empty: presence is the fact.
+message FooterCronRowRecurring {}
+// The durable marker. Empty: presence is the fact.
+message FooterCronRowDurable {}
 
 // ---- The monitors panel ----------------------------------------------------
 
