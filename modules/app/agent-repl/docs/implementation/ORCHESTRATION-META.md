@@ -92,3 +92,12 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     mirror-prompt-to-webapp responsibility is the motivating case). Each
     agent returns a simple, concise overview of findings; findings are
     surfaced to the user IFF non-nil.
+
+14. AUDIT-FINDING TRIAGE PROCESS. Feature-loss audit findings are
+    remediated through batched rulings: the orchestrator groups findings
+    into batches at its discretion (by context), and each finding is put
+    to the user as ONE single-select AskUserQuestion with at least two
+    options — one or more REMEDIATE variants (the orchestrator supplies
+    the concrete variants as needed) and DO NOT REMEDIATE. Each ruling
+    lands in the owning subsystem's planning doc per the standing
+    approval rules.
