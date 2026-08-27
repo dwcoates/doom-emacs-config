@@ -2,269 +2,132 @@ package healthcheck
 
 import (
 	"bytes"
-	"context"
-	"errors"
+	"encoding/json"
 	"io"
-	"net"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"agentrepl/shim-store/internal/logging"
-	"agentrepl/wire"
-
-	protocolv1 "agentrepl/proto/protocol/v1"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-func TestProbeClassifiesEveryHealthOutcomeAndLogsIt(t *testing.T) {
-	requestID := "doctor-123"
-	writeFailure := errors.New("write failed")
-	readFailure := errors.New("not a protobuf frame")
-	deadline := timeoutError{}
-	cases := []struct {
-		name        string
-		config      Config
-		deps        deps
-		wantExit    int
-		wantClass   string
-		wantOK      bool
-		wantComp    string
-		wantReason  string
-		checkReason bool
-	}{
-		{
-			name:      "missing socket",
-			config:    validConfig(requestID),
-			deps:      missingSocketDeps(t),
-			wantExit:  ExitMissingSocket,
-			wantClass: FailureMissingSocket,
-		},
-		{
-			name:   "connect failure",
-			config: validConfig(requestID),
-			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return nil, errors.New("connection refused")
-			}),
-			wantExit: ExitConnectFailure, wantClass: FailureConnectFailure,
-		},
-		{
-			name:      "socket inspection failure",
-			config:    validConfig(requestID),
-			deps:      statFailureDeps(errors.New("permission denied")),
-			wantExit:  ExitClientFailure,
-			wantClass: FailureClientFailure,
-		},
-		{
-			name:   "deadline setup failure",
-			config: validConfig(requestID),
-			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return &scriptedConn{deadlineErr: errors.New("deadline unsupported")}, nil
-			}),
-			wantExit: ExitClientFailure, wantClass: FailureClientFailure,
-		},
-		{
-			name:   "write failure",
-			config: validConfig(requestID),
-			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return &scriptedConn{writeErr: writeFailure}, nil
-			}),
-			wantExit: ExitWriteFailure, wantClass: FailureWriteFailure,
-		},
-		{
-			name:   "timeout",
-			config: validConfig(requestID),
-			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return &scriptedConn{readErr: deadline}, nil
-			}),
-			wantExit: ExitTimeout, wantClass: FailureTimeout,
-		},
-		{
-			name:   "decode failure",
-			config: validConfig(requestID),
-			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return &scriptedConn{readErr: readFailure}, nil
-			}),
-			wantExit: ExitDecodeFailure, wantClass: FailureDecodeFailure,
-		},
-		{
-			name:   "unexpected response type",
-			config: validConfig(requestID),
-			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return responseConn(t, wrapperspb.String("not health")), nil
-			}),
-			wantExit: ExitDecodeFailure, wantClass: FailureDecodeFailure,
-		},
-		{
-			name:   "mismatched request id",
-			config: validConfig(requestID),
-			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return responseConn(t, &protocolv1.HealthStatus{RequestId: "another-request", Healthy: true, Component: "shim-store"}), nil
-			}),
-			wantExit: ExitMismatchedRequestID, wantClass: FailureMismatchedRequestID, wantComp: "shim-store",
-		},
-		{
-			name:   "unhealthy response",
-			config: validConfig(requestID),
-			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return responseConn(t, &protocolv1.HealthStatus{RequestId: requestID, Healthy: false, Component: "shim-store", Reason: "database is draining"}), nil
-			}),
-			wantExit: ExitUnhealthyResponse, wantClass: FailureUnhealthyResponse, wantComp: "shim-store", wantReason: "database is draining", checkReason: true,
-		},
-		{
-			name:   "healthy response without component",
-			config: validConfig(requestID),
-			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return responseConn(t, &protocolv1.HealthStatus{RequestId: requestID, Healthy: true}), nil
-			}),
-			wantExit: ExitUnhealthyResponse, wantClass: FailureUnhealthyResponse,
-		},
-		{
-			name:   "correlated healthy response",
-			config: validConfig(requestID),
-			deps: testDeps(func(context.Context, string) (net.Conn, error) {
-				return responseConn(t, &protocolv1.HealthStatus{RequestId: requestID, Healthy: true, Component: "shim-store", Reason: "wal checkpoint current"}), nil
-			}),
-			wantExit: ExitOK, wantClass: "", wantOK: true, wantComp: "shim-store", wantReason: "wal checkpoint current", checkReason: true,
-		},
+func discardLogger() *logging.Logger { return logging.New(io.Discard, io.Discard, false) }
+
+func TestProbeRefusesRatherThanInferringHealthFromTheSocket(t *testing.T) {
+	// Arrange: a well-formed request. The old probe would have dialed; the
+	// protocol it dialed for is gone, and a socket that merely exists is NOT
+	// health.
+	config := Config{SocketPath: "/tmp/store.sock", RequestID: "doctor-1", Timeout: time.Second}
+
+	// Act
+	result, exitCode := Probe(config, discardLogger())
+
+	// Assert
+	if exitCode != ExitClientFailure {
+		t.Fatalf("exit = %d, want ExitClientFailure (%d)", exitCode, ExitClientFailure)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var file, stderr bytes.Buffer
-			log := logging.New(&file, &stderr, false)
-			result, gotExit := probe(tc.config, log, tc.deps)
-			if gotExit != tc.wantExit || result.FailureClass != tc.wantClass || result.Healthy != tc.wantOK || result.Component != tc.wantComp {
-				t.Fatalf("Probe = (%+v, %d), want class=%q healthy=%t component=%q exit=%d", result, gotExit, tc.wantClass, tc.wantOK, tc.wantComp, tc.wantExit)
-			}
-			if tc.checkReason && result.Reason != tc.wantReason {
-				t.Fatalf("Probe reason = %q, want protocol reason %q", result.Reason, tc.wantReason)
-			}
-			if result.RequestID != requestID || result.LatencyMS != 1 {
-				t.Fatalf("Probe metadata = %+v, want request id %q and latency 1ms", result, requestID)
-			}
-			if !strings.Contains(file.String(), `"operation":"health-check"`) || !strings.Contains(file.String(), `"request_id":"doctor-123"`) || !strings.Contains(file.String(), tc.wantClass) {
-				t.Fatalf("canonical health log missing outcome context: %s", file.String())
-			}
-		})
+	if result.Healthy {
+		t.Fatal("the probe reported healthy without a protocol to prove it with")
 	}
 }
 
-func TestProbeRejectsInvalidInputsBeforeSocketMutation(t *testing.T) {
-	cases := []struct {
-		name   string
-		config Config
-	}{
-		{name: "missing socket", config: Config{RequestID: "id", Timeout: time.Second}},
-		{name: "missing request id", config: Config{SocketPath: "/socket", Timeout: time.Second}},
-		{name: "non-positive timeout", config: Config{SocketPath: "/socket", RequestID: "id"}},
+func TestProbeRefusalNamesTheDeletedProtocol(t *testing.T) {
+	// Arrange: an operator reading doctor's output must not be sent hunting a
+	// socket that is fine.
+	config := Config{SocketPath: "/tmp/store.sock", RequestID: "doctor-1", Timeout: time.Second}
+
+	// Act
+	result, _ := Probe(config, discardLogger())
+
+	// Assert
+	if result.Reason != ProbeUnavailableReason {
+		t.Fatalf("reason = %q, want the unavailability account", result.Reason)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			called := false
-			d := testDeps(func(context.Context, string) (net.Conn, error) { called = true; return nil, nil })
-			var file, stderr bytes.Buffer
-			result, exitCode := probe(tc.config, logging.New(&file, &stderr, false), d)
-			if exitCode != ExitUsage || result.FailureClass != "usage" || called {
-				t.Fatalf("Probe = (%+v, %d), dial=%t; want usage before dialing", result, exitCode, called)
-			}
-			if !strings.Contains(file.String(), `"operation":"health-check"`) {
-				t.Fatalf("invalid input was not canonically logged: %s", file.String())
-			}
-		})
+	if !strings.Contains(result.Reason, "HealthCheck/HealthStatus") {
+		t.Fatalf("reason = %q, want it to name the deleted messages", result.Reason)
 	}
 }
 
-func validConfig(requestID string) Config {
-	return Config{SocketPath: "/socket", RequestID: requestID, Timeout: time.Second}
-}
+func TestProbeCorrelatesItsRefusalWithTheRequestID(t *testing.T) {
+	// Arrange
+	config := Config{SocketPath: "/tmp/store.sock", RequestID: "doctor-42", Timeout: time.Second}
 
-func testDeps(dial func(context.Context, string) (net.Conn, error)) deps {
-	clock := time.Unix(100, 0)
-	return deps{
-		stat: func(string) (os.FileInfo, error) { return fakeFileInfo{}, nil },
-		dial: dial,
-		now: func() time.Time {
-			clock = clock.Add(time.Millisecond)
-			return clock
-		},
+	// Act
+	result, _ := Probe(config, discardLogger())
+
+	// Assert
+	if result.RequestID != "doctor-42" {
+		t.Fatalf("request_id = %q, want the caller's correlation id echoed", result.RequestID)
 	}
 }
 
-func missingSocketDeps(t *testing.T) deps {
+func TestProbeRefusalIsLoggedOnceAtError(t *testing.T) {
+	// Arrange
+	var logs bytes.Buffer
+	log := logging.New(&logs, io.Discard, false)
+
+	// Act
+	Probe(Config{SocketPath: "/tmp/store.sock", RequestID: "doctor-1", Timeout: time.Second}, log)
+
+	// Assert
+	records := decodeRecords(t, logs.Bytes())
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want exactly one", len(records))
+	}
+	if records[0].Operation != "health-check" || records[0].Level != "error" {
+		t.Fatalf("record = %+v, want the canonical health-check error", records[0])
+	}
+}
+
+func TestProbeRejectsAnEmptySocketPath(t *testing.T) {
+	// Arrange / Act
+	result, exitCode := Probe(Config{RequestID: "doctor-1", Timeout: time.Second}, discardLogger())
+
+	// Assert: usage is still reported as usage rather than masked by the
+	// protocol gap.
+	if exitCode != ExitUsage || result.FailureClass != "usage" {
+		t.Fatalf("(exit, class) = (%d, %q), want usage", exitCode, result.FailureClass)
+	}
+}
+
+func TestProbeRejectsAnEmptyRequestID(t *testing.T) {
+	// Arrange / Act
+	result, exitCode := Probe(Config{SocketPath: "/tmp/store.sock", Timeout: time.Second}, discardLogger())
+
+	// Assert
+	if exitCode != ExitUsage || result.FailureClass != "usage" {
+		t.Fatalf("(exit, class) = (%d, %q), want usage", exitCode, result.FailureClass)
+	}
+}
+
+func TestProbeRejectsANonPositiveTimeout(t *testing.T) {
+	// Arrange / Act
+	result, exitCode := Probe(Config{SocketPath: "/tmp/store.sock", RequestID: "doctor-1"}, discardLogger())
+
+	// Assert
+	if exitCode != ExitUsage || result.FailureClass != "usage" {
+		t.Fatalf("(exit, class) = (%d, %q), want usage", exitCode, result.FailureClass)
+	}
+}
+
+type record struct {
+	Operation string `json:"operation"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+}
+
+func decodeRecords(t *testing.T, logs []byte) []record {
 	t.Helper()
-	d := testDeps(func(context.Context, string) (net.Conn, error) {
-		t.Fatal("dial called for missing socket")
-		return nil, nil
-	})
-	d.stat = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-	return d
-}
-
-func statFailureDeps(statErr error) deps {
-	d := testDeps(func(context.Context, string) (net.Conn, error) {
-		return nil, errors.New("dial must not run after stat failure")
-	})
-	d.stat = func(string) (os.FileInfo, error) { return nil, statErr }
-	return d
-}
-
-func responseConn(t *testing.T, response proto.Message) net.Conn {
-	t.Helper()
-	var read bytes.Buffer
-	if err := wire.WriteAny(&read, response); err != nil {
-		t.Fatalf("encode response: %v", err)
+	var out []record
+	for _, line := range bytes.Split(bytes.TrimSpace(logs), []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var r record
+		if err := json.Unmarshal(line, &r); err != nil {
+			t.Fatalf("health log line is not JSON: %v (%s)", err, line)
+		}
+		out = append(out, r)
 	}
-	return &scriptedConn{read: read}
+	return out
 }
-
-type scriptedConn struct {
-	read        bytes.Buffer
-	write       bytes.Buffer
-	readErr     error
-	writeErr    error
-	deadlineErr error
-}
-
-func (c *scriptedConn) Read(p []byte) (int, error) {
-	if c.readErr != nil {
-		return 0, c.readErr
-	}
-	return c.read.Read(p)
-}
-func (c *scriptedConn) Write(p []byte) (int, error) {
-	if c.writeErr != nil {
-		return 0, c.writeErr
-	}
-	return c.write.Write(p)
-}
-func (c *scriptedConn) Close() error                     { return nil }
-func (c *scriptedConn) LocalAddr() net.Addr              { return fakeAddr("local") }
-func (c *scriptedConn) RemoteAddr() net.Addr             { return fakeAddr("remote") }
-func (c *scriptedConn) SetDeadline(time.Time) error      { return c.deadlineErr }
-func (c *scriptedConn) SetReadDeadline(time.Time) error  { return nil }
-func (c *scriptedConn) SetWriteDeadline(time.Time) error { return nil }
-
-type fakeAddr string
-
-func (a fakeAddr) Network() string { return "unix" }
-func (a fakeAddr) String() string  { return string(a) }
-
-type fakeFileInfo struct{}
-
-func (fakeFileInfo) Name() string       { return "store.sock" }
-func (fakeFileInfo) Size() int64        { return 0 }
-func (fakeFileInfo) Mode() os.FileMode  { return os.ModeSocket }
-func (fakeFileInfo) ModTime() time.Time { return time.Time{} }
-func (fakeFileInfo) IsDir() bool        { return false }
-func (fakeFileInfo) Sys() any           { return nil }
-
-type timeoutError struct{}
-
-func (timeoutError) Error() string   { return "probe timed out" }
-func (timeoutError) Timeout() bool   { return true }
-func (timeoutError) Temporary() bool { return true }
-
-var _ net.Error = timeoutError{}
-var _ io.Reader = (*scriptedConn)(nil)
