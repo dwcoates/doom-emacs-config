@@ -328,6 +328,20 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### ATTACH-8's mode transitions are DROPPED — no topbar badges, no conversation arm
+
+**The ruling ("let's just drop support for this. i dont care enough").** The
+vendor's auto_mode/plan_mode/effort notices are EDGE records addressed to
+the model — a shitty API to work around — while the underlying fact is one
+exclusive selector already carried as CURRENT STATE by
+SessionPermissionModeChanged (arm 7); frontend.v1 cares only about current
+mode, never deltas. The drawn topbar badge cluster and the sketched
+SessionModesChanged arm are both withdrawn unlanded; the effort level
+remains carried per-response (AgentActivity.effort) and in the model
+catalog, with no session-level badge. If mode surfacing is ever wanted, it
+re-enters as a current-state projection of the permission mode + effort,
+never as edge relay.
+
 ### ARTIFACT lands — a response-styled publish bubble; the LONG TAIL is fully dispositioned
 
 **The drawing agreed ("looks good"), landed verbatim:**
