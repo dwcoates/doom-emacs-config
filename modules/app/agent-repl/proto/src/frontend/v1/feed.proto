@@ -234,6 +234,9 @@ message FeedTurnActivity {
     // entering draws the planning state and the exit fills the same bubble
     // with the document.
     FeedPlan plan = 9;
+    // The findings bubble — a review's typed defect list, purple
+    // response-styled.
+    FeedFindings findings = 10;
   }
 }
 
@@ -280,6 +283,80 @@ message FeedPlanFailed {
   // The daemon's composed reason, drawn verbatim.
   string text = 1;
 }
+
+// The findings bubble: a review's typed findings, response-styled (purple).
+// Decoration — verdict badges, category chips, severity coloring — is the
+// webapp's treatment; the wire carries arms and text only, and no glyph
+// rides it.
+message FeedFindings {
+  // The heading line ("Findings · 3 · high"), composed by the daemon.
+  FeedFindingsHeading heading = 1;
+  // The rows, in the served order — most-severe first; the client never
+  // re-sorts. Empty draws the bubble's nothing-found treatment.
+  repeated FeedFindingsRow rows = 2;
+}
+// The heading element.
+message FeedFindingsHeading {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+
+// One finding's row.
+message FeedFindingsRow {
+  // The verdict badge. UNSET draws no badge — an unverified finding.
+  oneof verdict {
+    FeedFindingsVerdictConfirmed confirmed = 1;
+    FeedFindingsVerdictPlausible plausible = 2;
+  }
+  // The category chip ("correctness"), drawn verbatim. UNSET draws none.
+  optional FeedFindingsCategory category = 3;
+  // The location line ("daemon/server.go:214") — drawn verbatim AND a jump
+  // target: the click is HOST-raised, opening the file at the line through
+  // THE SAME editor-popup subroutine as the plan bubble's edit button (one
+  // shared webapp link component, one shared Emacs open routine — the two
+  // affordances are consistent at the CODE level, not merely lookalike).
+  FeedFindingsLocation location = 4;
+  // The one-sentence summary, drawn verbatim.
+  FeedFindingsSummary summary = 5;
+  // The failure scenario, FOLDED by default; the fold is the client's.
+  FeedFindingsScenario scenario = 6;
+  // The outcome badge, present only on a re-report after fixes.
+  oneof outcome {
+    FeedFindingsOutcomeFixed fixed = 7;
+    FeedFindingsOutcomeSkipped skipped = 8;
+    FeedFindingsOutcomeNoChange no_change = 9;
+  }
+}
+message FeedFindingsVerdictConfirmed {}
+message FeedFindingsVerdictPlausible {}
+// The category chip element.
+message FeedFindingsCategory {
+  // The chip's text, drawn verbatim.
+  string text = 1;
+}
+// The location element: a drawn line that is also a jump target.
+message FeedFindingsLocation {
+  // The drawn line.
+  string text = 1;
+  // The jump target's path on the daemon's host, handed to the editor
+  // verbatim; never drawn.
+  string path = 2;
+  // The 1-indexed line to land on. UNSET jumps to the file's top.
+  optional uint32 line = 3;
+}
+// The summary element.
+message FeedFindingsSummary {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
+// The folded scenario element.
+message FeedFindingsScenario {
+  // The scenario text, drawn verbatim when unfolded.
+  string text = 1;
+}
+message FeedFindingsOutcomeFixed {}
+message FeedFindingsOutcomeSkipped {}
+message FeedFindingsOutcomeNoChange {}
 
 // The artifact bubble: a page the agent published, response-styled. A
 // redeploy of the same page upserts this same bubble.

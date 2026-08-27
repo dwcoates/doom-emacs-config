@@ -7463,3 +7463,38 @@ failed on a single FeedId. Decisions reached in iteration:
                                  │ ▐  2. Thread the cursor…     │
                                  └──────────────────────────────┘
   ✎ click → Emacs doom popup, right side, 50% width, on the plan file.
+
+### REPORT FINDINGS lands — the purple defect-list bubble; the shared editor-popup subroutine becomes a stated code-level prescription
+
+Second of the six built-in families, landed on explicit go.
+`AgentReportFindings` (item arm 29) carries the tool's typed report:
+findings in the tool's own most-severe-first order, per-finding verdict
+{confirmed | plausible} and re-report outcome {fixed | skipped |
+no_change_needed} as oneofs, category as an open shown-never-switched
+string, `level` reusing the canonical AgentEffortLevel; short_summary is
+carried EXPECTED UNMAPPED. `FeedFindings` (unit arm 10) is the purple
+bubble: composed heading, rows with verdict badge / category chip /
+location / summary / folded failure scenario / outcome badge. Decisions
+from iteration:
+
+- RICH DECORATION IS THE WEBAPP'S: no glyphs ride the wire — badges and
+  chips are typed arms the client styles.
+- Every location is a JUMP TARGET, and the user mandated CODE-LEVEL
+  consistency with the plan bubble's edit button: ONE shared webapp link
+  component, and ONE shared Emacs subroutine ("open path[:line] in a doom
+  popup, right side, half width") used by both affordances — a fanout
+  implementation requirement, stated here so it survives to the planning
+  docs.
+- NO client sugar (no per-row fix buttons, no rating): the vendor has no
+  findings-feedback verb, and interaction stays conversational — a
+  re-report with outcomes is the round-trip the badges draw.
+
+  ┌────────────────────────────────────────────────┐
+  │ ▐ Findings · 3 · high              (purple bg) │
+  │ ▐ [CONFIRMED] [correctness]                    │
+  │ ▐   daemon/server.go:214        (jump target)  │
+  │ ▐   The sweep drops held prompts on restart    │
+  │ ▐   ▸ failure scenario          (folded)       │
+  │ ▐ [PLAUSIBLE] [efficiency]  …                  │
+  │ ▐   [fixed]   (outcome badge, re-report only)  │
+  └────────────────────────────────────────────────┘
