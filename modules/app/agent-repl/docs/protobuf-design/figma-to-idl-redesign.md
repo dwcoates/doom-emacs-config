@@ -328,6 +328,37 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### SCHEDULEWAKEUP lands — the footer's waiting · wakeup FALLBACK state with a client-ticked countdown
+
+**The drawing agreed ("looks good then"), landed verbatim:**
+
+```
+│ waiting │ wakeup │ wakes in 4:32 · watching CI run │      │              │
+  Status    SubStatus    StatusActivity (ticks every second)  Clock  Tokens
+```
+
+**The user's design.** A pending self-wakeup is a status+substatus footer
+state, NOT a chip, and it is a FALLBACK: shown only when the footer would
+otherwise read idle/done — any real status (thinking, merging, ...) wins —
+with the fallback resolved DAEMON-SIDE ("the frontend should be a stupid
+state renderer in this respect"). The activity line is a DURATION, so the
+daemon ships the deadline INSTANT (wake_at_ms) and the client re-derives
+the remaining time at a one-second tick — the clock convention pointed the
+other way (countdown, not count-up).
+
+**conversation.v1.** AgentActivity.item gains schedule_wakeup (26).
+AgentScheduleWakeup { start { act schedule { delay_seconds; reason (the
+vendor states it is shown to the user — the activity line draws it);
+prompt (EXPECTED UNMAPPED) } | stop (exclusive by the vendor's own rule);
+started_at_ms } | success { scheduled { wake_at_ms — THE drawn fact;
+clamped_delay_seconds / was_clamped EXPECTED UNMAPPED } | stopped
+{ cancelled_wakeups EXPECTED UNMAPPED } } | failure (shared vocabulary) }.
+
+**frontend.v1.** FooterSubStatus gains the waiting family (8) — waiting's
+FIRST sub-status — with the wakeup step carrying the daemon-side fallback
+rule at the arm; FooterStatusActivity gains wakeup (9) { wake_at_ms;
+optional reason }.
+
 ### MONITOR lands footer-only — the 👁 chip and panel; ToolSearch and NotebookEdit join the exempt set
 
 **The drawing agreed ("design looks good"), landed verbatim:**

@@ -137,6 +137,10 @@ message AgentActivity {
     // Always detached — a monitor never blocks the turn — so the frames
     // arrive via the detached-work announcement like a workflow's.
     AgentMonitor monitor = 25;
+    // The agent scheduling its own future re-invocation (a self-pacing
+    // loop's tick), or ending such a loop. The pending wakeup drives the
+    // footer's waiting · wakeup fallback state.
+    AgentScheduleWakeup schedule_wakeup = 26;
   }
 }
 
@@ -2472,6 +2476,87 @@ message AgentMonitorEnded {}
 // The watch never armed.
 message AgentMonitorFailure {
   // Why it could not be armed, in the shared vocabulary.
+  AgentToolFailure failure = 1;
+}
+
+// ---- The self-wakeup: the agent scheduling its own next tick ----
+
+// The agent scheduling its own future re-invocation, or ending such a loop.
+message AgentScheduleWakeup {
+  // Where the call stands.
+  oneof result {
+    // The call as issued. Sent once per stream, at issue.
+    AgentScheduleWakeupStart start = 1;
+    // The runtime answered.
+    AgentScheduleWakeupSuccess success = 2;
+    // The call could not be performed at all.
+    AgentScheduleWakeupFailure failure = 3;
+  }
+}
+
+// The call as issued.
+message AgentScheduleWakeupStart {
+  // What was asked: the arms are exclusive by the vendor's own rule (every
+  // schedule field is ignored when stop is set).
+  oneof act {
+    // Schedule the next wakeup.
+    AgentScheduleWakeupSchedule schedule = 1;
+    // End the loop; no further wakeups fire.
+    AgentScheduleWakeupStop stop = 2;
+  }
+  // When the call was issued.
+  int64 started_at_ms = 3;
+}
+
+// The schedule act's request.
+message AgentScheduleWakeupSchedule {
+  // The requested delay, in seconds, before clamping.
+  uint32 delay_seconds = 1;
+  // The agent's one-sentence account of why this delay — the vendor states
+  // it is shown to the user; the footer's wakeup activity draws it.
+  string reason = 2;
+  // The /loop input that fires on wake. EXPECTED UNMAPPED: no surface draws
+  // it; carried for fidelity.
+  string prompt = 3;
+}
+
+// The stop act. Empty: the arm is the whole fact.
+message AgentScheduleWakeupStop {}
+
+// The runtime's answer.
+message AgentScheduleWakeupSuccess {
+  // Which act was answered.
+  oneof outcome {
+    // A wakeup is pending.
+    AgentScheduleWakeupScheduled scheduled = 1;
+    // The loop ended.
+    AgentScheduleWakeupStopped stopped = 2;
+  }
+}
+
+// A wakeup is pending.
+message AgentScheduleWakeupScheduled {
+  // When the wakeup fires, epoch ms — THE fact the footer ticks its
+  // countdown from.
+  int64 wake_at_ms = 1;
+  // The delay actually used after the runtime clamped it, in seconds.
+  // EXPECTED UNMAPPED: nothing draws it; wake_at_ms is the drawn fact.
+  uint32 clamped_delay_seconds = 2;
+  // TRUE when the requested delay was outside the runtime's bounds.
+  // EXPECTED UNMAPPED: nothing draws it; carried for fidelity.
+  bool was_clamped = 3;
+}
+
+// The loop ended.
+message AgentScheduleWakeupStopped {
+  // How many pending wakeups the stop cancelled. EXPECTED UNMAPPED: nothing
+  // draws it; carried for fidelity.
+  uint32 cancelled_wakeups = 1;
+}
+
+// The call never ran.
+message AgentScheduleWakeupFailure {
+  // Why, in the shared vocabulary.
   AgentToolFailure failure = 1;
 }
 
