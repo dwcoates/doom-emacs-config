@@ -1943,14 +1943,30 @@ message AgentSubagentTotals {
   // How long the run took, wall-clock, in milliseconds. A settled figure, unlike
   // the clock a consumer animates from a start instant.
   uint64 duration_ms = 1;
-  // What the run charged. The subagent's OWN consumption, never including its
-  // caller's.
-  TokenUsage usage = 2;
+  // What the run charged — the subagent's OWN consumption, never including
+  // its caller's. THE SET ARM IS THE SPAWN PATH'S HONESTY: the vendor's SYNC
+  // completion carries the full billed breakdown, while an ASYNC completion
+  // carries at most one optional total-tokens scalar, so a full breakdown on
+  // an async run is unproducible and is unrepresentable here.
+  oneof usage {
+    // A sync (awaited) run's settled bill, the full breakdown.
+    TokenUsage full = 2;
+    // An async (backgrounded) run's settled figure, as thin as the vendor
+    // reports it.
+    AgentSubagentAsyncUsage total_only = 6;
+  }
   // How many tool calls it made in total, including kinds not broken out below.
   uint32 tool_use_count = 3;
   // What kinds of work it did. UNSET when the producer reported no breakdown, in
   // which case a consumer draws the count above and nothing finer.
   optional AgentSubagentToolStats tool_stats = 4;
+}
+
+// An async run's settled usage: the vendor's task-notification figure.
+message AgentSubagentAsyncUsage {
+  // The run's total token consumption. UNSET when the vendor's notification
+  // carried no usage at all — absence means unreported, never zero.
+  optional uint64 total_tokens = 1;
 }
 
 // A breakdown of what a subagent spent its tool calls on.
