@@ -48,6 +48,22 @@ export const CLIENT_FAILURE_ARMS = [
 ] as const;
 export type ClientFailureArm = (typeof CLIENT_FAILURE_ARMS)[number];
 
+/**
+ * Arm names that no longer exist on `FailureKind` but still NAME A CARD.
+ *
+ * `command_unsent` and `command_rejection_unclassified` were deleted in the
+ * frontend.v1 redesign. A card can still be keyed on them — the uuid is this
+ * frontend's own reconciliation namespace, not a wire value — even though no
+ * card can be MINTED under them any more. They are listed separately so the
+ * distinction is not lost: a name here is a retired classification kept only so
+ * an existing card reconciles onto itself.
+ */
+export const RETIRED_CLIENT_FAILURE_ARMS = [
+  "commandUnsent",
+  "commandRejectionUnclassified",
+] as const;
+export type RetiredClientFailureArm = (typeof RETIRED_CLIENT_FAILURE_ARMS)[number];
+
 /** Whether an arm belongs to the band a frontend is allowed to mint. */
 export function isClientArm(arm: string): boolean {
   return (CLIENT_FAILURE_ARMS as readonly string[]).includes(arm);
@@ -72,7 +88,10 @@ function clientCard(
 }
 
 /** The uuid a client-minted card for ARM reconciles on. */
-export function clientFailureUuid(arm: ClientFailureArm, discriminator = ""): string {
+export function clientFailureUuid(
+  arm: ClientFailureArm | RetiredClientFailureArm,
+  discriminator = "",
+): string {
   return discriminator === "" ? `local:${arm}` : `local:${arm}:${discriminator}`;
 }
 

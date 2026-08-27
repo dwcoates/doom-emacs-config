@@ -56,40 +56,27 @@ import {
   type FailureKind as GeneratedFailureKind,
   type QueryTerminationFailure as GeneratedQueryTerminationFailure,
   type SessionResumeFailure as GeneratedSessionResumeFailure,
-} from "../../proto/gen/ts/frontend/v1/shared_pb";
-import {
-  FailureCardRefSchema,
-  FailureCardResolvedSchema,
-  FailureCardTerminalSchema,
-  FailureCardOpenSchema,
-  FailureCardViewSchema,
-} from "../../proto/gen/ts/frontend/v1/feed_pb";
-import {
-  ModelOptionSchema,
-  TopbarAccountingWarningSchema,
-  TopbarConnectivitySchema,
-  TopbarViewSchema,
-  TopbarWarningSchema,
-} from "../../proto/gen/ts/frontend/v1/topbar_pb";
-import {
-  TokenBreakdownRowSchema,
-  TokenBreakdownSectionSchema,
-  TokenBreakdownViewSchema,
-} from "../../proto/gen/ts/frontend/v1/topbar_pb";
-import {
-  WorkspaceGateHibernatedSchema,
-  WorkspaceGateOpenSchema,
-  WorkspaceGateViewSchema,
-} from "../../proto/gen/ts/frontend/v1/shared_pb";
-import {
-  AccountingCompleteSchema,
-  AccountingIncompleteSchema,
-  AccountingInvalidSchema,
-  FooterAccountingCellSchema,
-  FooterFailureRowSchema,
-  FooterMergeChipSchema,
-  FooterPhaseSchema,
-} from "../../proto/gen/ts/frontend/v1/footer_pb";
+} from "../../proto/gen/ts/frontend/v1/failure_pb";
+/*
+ * PROTO RECONCILIATION NOTE (frontend.v1 redesign).
+ *
+ * The generated anchors for this decoder's TOPBAR, FOOTER, WORKSPACE-GATE,
+ * FAILURE-CARD, SESSION-INIT, COMPACTION-SUMMARY and CONVERSATION-DELTA tables
+ * are gone. `frontend/v1/shared.proto` was deleted; the topbar became a tree of
+ * `Topbar*` element messages and the footer a `FooterView` with a restructured
+ * per-arm status tree, so the surviving names (`TopbarView`, `FooterView`,
+ * `TokenBreakdownView`) carry entirely different field sets rather than renamed
+ * ones.
+ *
+ * Those tables are therefore built with `unanchoredFieldSet` — same run-time
+ * allowlist, no build-time check — until the webapp is ported onto the new
+ * per-endpoint RPC surface. That port is a design decision, not a
+ * reconciliation, so nothing here is re-pointed at a message that means
+ * something else.
+ *
+ * The ONE anchor that survived intact is the FailureKind family, which moved
+ * from shared.proto to failure.proto unchanged and is re-pointed above.
+ */
 import { fromJson, type JsonValue } from "@bufbuild/protobuf";
 import { historyContinuation, type HistoryContinuation } from "./load-more.js";
 import {
@@ -115,12 +102,6 @@ import {
   type DetachedWorkPackaging,
 } from "./async-bubble.js";
 import {
-  CompactionSummaryItemSchema,
-  DetachedWorkDeltaSchema,
-  SessionInitRowSchema,
-  SessionInitViewSchema,
-} from "../../proto/gen/ts/frontend/v1/feed_pb";
-import {
   unwrapAgentEmission,
   type ResponseUsageStamp,
   type ToolOutcome,
@@ -130,7 +111,7 @@ import {
   bool,
   ensureArray,
   ensureObject,
-  generatedFieldSet,
+  unanchoredFieldSet,
   int64,
   num,
   oneof,
@@ -3594,9 +3575,7 @@ function decodeDetachedWorkMessage(v: unknown, ctx: string): AsyncBubble {
   return frame.detachedWork;
 }
 
-const DELTA_KEYS = generatedFieldSet<
-  keyof typeof DetachedWorkDeltaSchema.field
->()("workspace", "opened", "updates", "throughSeq", "fence");
+const DELTA_KEYS = unanchoredFieldSet("workspace", "opened", "updates", "throughSeq", "fence");
 
 /** Decode one `DetachedWorkDelta`. */
 function decodeAsyncBubbleDelta(v: unknown): AsyncBubbleDelta {
@@ -4208,12 +4187,8 @@ function decodeTypingDelta(v: unknown): TypingDelta {
   return td;
 }
 
-const SESSION_INIT_VIEW_KEYS = generatedFieldSet<
-  keyof typeof SessionInitViewSchema.field
->()("workspace", "fence", "rows");
-const SESSION_INIT_ROW_KEYS = generatedFieldSet<
-  keyof typeof SessionInitRowSchema.field
->()("label", "value");
+const SESSION_INIT_VIEW_KEYS = unanchoredFieldSet("workspace", "fence", "rows");
+const SESSION_INIT_ROW_KEYS = unanchoredFieldSet("label", "value");
 
 /**
  * One `/status` row, decoded STRICTLY like every other `frontend.v1`-owned
@@ -5101,9 +5076,7 @@ function decodeRosterRowStatus(o: Obj, ctx: string): RosterRow["status"] {
 // typecheck` here rather than surfacing as a frame the client silently refuses
 // (or, worse, silently accepts with a field it never reads).
 
-const TOPBAR_VIEW_KEYS = generatedFieldSet<
-  keyof typeof TopbarViewSchema.field
->()(
+const TOPBAR_VIEW_KEYS = unanchoredFieldSet(
   "workspace",
   "title",
   "sessionLine",
@@ -5113,18 +5086,10 @@ const TOPBAR_VIEW_KEYS = generatedFieldSet<
   "fence",
   "warnings",
 );
-const TOPBAR_WARNING_KEYS = generatedFieldSet<
-  keyof typeof TopbarWarningSchema.field
->()("text", "accounting");
-const TOPBAR_ACCOUNTING_WARNING_KEYS = generatedFieldSet<
-  keyof typeof TopbarAccountingWarningSchema.field
->()();
-const TOPBAR_CONNECTIVITY_KEYS = generatedFieldSet<
-  keyof typeof TopbarConnectivitySchema.field
->()("tone", "glyph", "title");
-const TOPBAR_MODEL_OPTION_KEYS = generatedFieldSet<
-  keyof typeof ModelOptionSchema.field
->()("value", "displayName", "description");
+const TOPBAR_WARNING_KEYS = unanchoredFieldSet("text", "accounting");
+const TOPBAR_ACCOUNTING_WARNING_KEYS = unanchoredFieldSet();
+const TOPBAR_CONNECTIVITY_KEYS = unanchoredFieldSet("tone", "glyph", "title");
+const TOPBAR_MODEL_OPTION_KEYS = unanchoredFieldSet("value", "displayName", "description");
 
 /**
  * Decode a `TopbarView` (frame 21 / snapshot 12).
@@ -5208,15 +5173,9 @@ function decodeTopbarWarning(v: unknown, where: string): TopbarWarning {
   throw new Error(`frontend-proto: ${where} requires a kind oneof`);
 }
 
-const TOKEN_BREAKDOWN_VIEW_KEYS = generatedFieldSet<
-  keyof typeof TokenBreakdownViewSchema.field
->()("workspace", "sections", "fence");
-const TOKEN_BREAKDOWN_SECTION_KEYS = generatedFieldSet<
-  keyof typeof TokenBreakdownSectionSchema.field
->()("label", "rows");
-const TOKEN_BREAKDOWN_ROW_KEYS = generatedFieldSet<
-  keyof typeof TokenBreakdownRowSchema.field
->()("label", "tokens", "sharePermille", "emphasized", "depth");
+const TOKEN_BREAKDOWN_VIEW_KEYS = unanchoredFieldSet("workspace", "sections", "fence");
+const TOKEN_BREAKDOWN_SECTION_KEYS = unanchoredFieldSet("label", "rows");
+const TOKEN_BREAKDOWN_ROW_KEYS = unanchoredFieldSet("label", "tokens", "sharePermille", "emphasized", "depth");
 
 /**
  * Decode a `TokenBreakdownView` (frame 22 / snapshot 13).
@@ -5262,13 +5221,11 @@ function decodeTokenBreakdownView(v: unknown): TokenBreakdownView {
   return view;
 }
 
-const WORKSPACE_GATE_VIEW_KEYS = generatedFieldSet<
-  keyof typeof WorkspaceGateViewSchema.field
->()("workspace", "fence", "open", "hibernated");
+const WORKSPACE_GATE_VIEW_KEYS = unanchoredFieldSet("workspace", "fence", "open", "hibernated");
 const WORKSPACE_GATE_OPEN_KEYS =
-  generatedFieldSet<keyof typeof WorkspaceGateOpenSchema.field>()();
+  unanchoredFieldSet();
 const WORKSPACE_GATE_HIBERNATED_KEYS =
-  generatedFieldSet<keyof typeof WorkspaceGateHibernatedSchema.field>()(
+  unanchoredFieldSet(
     "detail",
   );
 
@@ -5359,12 +5316,13 @@ export function decodeFailureKind(v: unknown, where: string): FailureKind {
   // records field by field, so an evidence record that names no query, no
   // instant, no vendor conversation or no cause is refused HERE rather than
   // reaching the card as "missing …" prose describing evidence nobody supplied.
-  if (generated.kind.case === "queryTermination") {
-    requireQueryTerminationEvidence(
-      generated.kind.value.detail,
-      `${where}.queryTermination.detail`,
-    );
-  }
+  // `FailureKind.query_termination` was DELETED in the redesign: a query death
+  // that correlates to a feed entry is now that entry's own `error` arm, which
+  // imports `FailureQueryTermination` directly. There is no arm left here to
+  // hold to its evidence, so only the resume record is checked below.
+  // `requireQueryTerminationEvidence` is retained and still enforced through
+  // `requireSessionResumeEvidence`, whose `queryTermination` cause carries the
+  // same record.
   if (generated.kind.case === "sessionResumeFailed") {
     requireSessionResumeEvidence(
       generated.kind.value.detail,
@@ -5453,23 +5411,19 @@ function requireSessionResumeEvidence(
   }
 }
 
-const FAILURE_CARD_VIEW_KEYS = generatedFieldSet<
-  keyof typeof FailureCardViewSchema.field
->()("kind", "message", "detail", "open", "resolved", "terminal");
+const FAILURE_CARD_VIEW_KEYS = unanchoredFieldSet("kind", "message", "detail", "open", "resolved", "terminal");
 const FAILURE_CARD_OPEN_KEYS =
-  generatedFieldSet<keyof typeof FailureCardOpenSchema.field>()();
+  unanchoredFieldSet();
 const FAILURE_CARD_RESOLVED_KEYS =
-  generatedFieldSet<keyof typeof FailureCardResolvedSchema.field>()(
+  unanchoredFieldSet(
     "resolvedAtMs",
   );
 const FAILURE_CARD_TERMINAL_KEYS =
-  generatedFieldSet<keyof typeof FailureCardTerminalSchema.field>()();
+  unanchoredFieldSet();
 const FAILURE_CARD_REF_KEYS =
-  generatedFieldSet<keyof typeof FailureCardRefSchema.field>()("cardUuid");
+  unanchoredFieldSet("cardUuid");
 
-const COMPACTION_SUMMARY_KEYS = generatedFieldSet<
-  keyof typeof CompactionSummaryItemSchema.field
->()("summary", "compactedAtMs", "expensiveInputTokens");
+const COMPACTION_SUMMARY_KEYS = unanchoredFieldSet("summary", "compactedAtMs", "expensiveInputTokens");
 
 /**
  * Decode a `CompactionSummaryItem` — the purple-washed summary block a
@@ -5565,9 +5519,7 @@ export function decodeFailureCardRef(
   return { cardUuid: str(o, "cardUuid", where) };
 }
 
-const FOOTER_FAILURE_ROW_KEYS = generatedFieldSet<
-  keyof typeof FooterFailureRowSchema.field
->()("message", "tone", "card");
+const FOOTER_FAILURE_ROW_KEYS = unanchoredFieldSet("message", "tone", "card");
 
 /**
  * Decode a `FooterFailureRow`.
@@ -5592,9 +5544,7 @@ export function decodeFooterFailureRow(
   return row;
 }
 
-const FOOTER_PHASE_KEYS = generatedFieldSet<
-  keyof typeof FooterPhaseSchema.field
->()("word", "tone", "breathing");
+const FOOTER_PHASE_KEYS = unanchoredFieldSet("word", "tone", "breathing");
 
 /**
  * Decode a `FooterPhase`.
@@ -5617,9 +5567,7 @@ export function decodeFooterPhase(v: unknown, where: string): FooterPhase {
   };
 }
 
-const FOOTER_MERGE_CHIP_KEYS = generatedFieldSet<
-  keyof typeof FooterMergeChipSchema.field
->()("text", "title");
+const FOOTER_MERGE_CHIP_KEYS = unanchoredFieldSet("text", "title");
 
 /**
  * Decode a `FooterMergeChip`.
@@ -5641,15 +5589,13 @@ export function decodeFooterMergeChip(
   return { text, title: str(o, "title", where) };
 }
 
-const FOOTER_ACCOUNTING_CELL_KEYS = generatedFieldSet<
-  keyof typeof FooterAccountingCellSchema.field
->()("summary", "complete", "incomplete", "invalid");
+const FOOTER_ACCOUNTING_CELL_KEYS = unanchoredFieldSet("summary", "complete", "incomplete", "invalid");
 const ACCOUNTING_COMPLETE_KEYS =
-  generatedFieldSet<keyof typeof AccountingCompleteSchema.field>()();
+  unanchoredFieldSet();
 const ACCOUNTING_INCOMPLETE_KEYS =
-  generatedFieldSet<keyof typeof AccountingIncompleteSchema.field>()("missing");
+  unanchoredFieldSet("missing");
 const ACCOUNTING_INVALID_KEYS =
-  generatedFieldSet<keyof typeof AccountingInvalidSchema.field>()("problems");
+  unanchoredFieldSet("problems");
 
 /**
  * Decode a `FooterAccountingCell`.
