@@ -41,3 +41,15 @@ survive compaction. It joins the post-compaction mandatory-reload set.
 
 6. REPLACEMENT COVERAGE prescribes INTEGRATION and E2E specs only — unit
    coverage falls out of the proto→code mapping convention.
+
+7. THE PURPOSE OF THIS PLANNING PROCESS (the user's framing, binding on
+   every entry): the goal is a GOOD HIGH-LEVEL ARCHITECTURE — landing
+   invariants, architectural points, gotchas, notes, and constraints,
+   especially insofar as they further ORCHESTRATION READINESS — never
+   detailed prescription. Over-prescription LIMITS THE ORCHESTRATORS'
+   FLEXIBILITY TO REMEDIATE and is a defect, not thoroughness.
+
+8. META-PROCEDURE: process principles the user states during planning
+   land in THIS document AUTOMATICALLY, the moment stated — the
+   orchestrator never waits to be told to record one (the design record's
+   record-on-settlement rule, applied to procedures).
