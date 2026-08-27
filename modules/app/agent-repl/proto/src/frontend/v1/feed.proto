@@ -225,7 +225,49 @@ message FeedTurnActivity {
     // A FAILING hook's card — blocked (loud) or failed (ordinary). A
     // succeeded hook draws NOTHING: quiet automation stays quiet.
     FeedHook hook = 7;
+    // A published artifact page — purple response-styled, like a response
+    // bubble. Only a PUBLISH draws; a list act produces no row.
+    FeedArtifact artifact = 8;
   }
+}
+
+// The artifact bubble: a page the agent published, response-styled. A
+// redeploy of the same page upserts this same bubble.
+message FeedArtifact {
+  // The heading: favicon emoji + title, composed by the daemon (falling
+  // back to the filename when the call named no title).
+  FeedArtifactHeading heading = 1;
+  // The bubble's state.
+  oneof state {
+    // The publish is in flight; the URL line is not yet drawn.
+    FeedArtifactPublishing publishing = 2;
+    // Published: the badge and the clickable URL.
+    FeedArtifactPublished published = 3;
+    // The publish failed; the composed reason draws where the URL would.
+    FeedArtifactFailed failed = 4;
+  }
+}
+// The heading element.
+message FeedArtifactHeading {
+  // The composed heading, drawn verbatim ("📊 Merge Queue Report").
+  string text = 1;
+}
+// The in-flight state. Empty: the arm is the badge.
+message FeedArtifactPublishing {}
+// The published state.
+message FeedArtifactPublished {
+  // The page's URL, drawn as a clickable hyperlink.
+  FeedArtifactUrl url = 1;
+}
+// The URL element.
+message FeedArtifactUrl {
+  // The URL, drawn verbatim and linked.
+  string url = 1;
+}
+// The failed state.
+message FeedArtifactFailed {
+  // The daemon's composed reason, drawn verbatim.
+  string text = 1;
 }
 
 // The prose bubble — one response unit of this feed's agent, left-rail. A
