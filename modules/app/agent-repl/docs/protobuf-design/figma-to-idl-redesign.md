@@ -7736,3 +7736,17 @@ LEFT UNMAPPED as deliberate non-surfaces):
   is the rich cell — colorized, formatted, ideally one line — and a
   statically typed datum in an activity message signals that datum deserves
   color in the rendered line.
+
+### The three status-independent activities land in EVERY status arm, with a stated precedence ladder
+
+The user's ruling on the orphan-activity finding: notification,
+rate_limited and context_budget are status-independent standing facts, so
+each appears in EVERY status arm's activity oneof (duplicate-don't-share;
+legality confinement now constrains only the truly status-bound kinds).
+The daemon selects ONE standing activity per push by precedence, stated
+once on the family banner: notification OUTRANKS everything; status-bound
+kinds rank next by the daemon's judgment; rate_limited is SECOND-LOWEST;
+context_budget is LOWEST (shown only when nothing else stands). The
+earlier partial placements (context_budget under idle+thinking only) are
+superseded — a warning suppressed by unrepresentability would be silently
+dropped, not outranked.
