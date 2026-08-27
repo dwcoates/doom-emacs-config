@@ -1,7 +1,7 @@
 package handler
 
 import (
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -31,7 +31,7 @@ func NewSessionTranscriptHandler(log *logging.Bound) *SessionTranscriptHandler {
 }
 
 // Handle implements tail.Handler.
-func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*agentshimv1.Entry {
+func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
 	h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
 		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
 
@@ -47,7 +47,7 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 				originalCount, len(frames), ctx.HeldDeliveries, ctx.HeldOffset)
 	}
 
-	var out []*agentshimv1.Entry
+	var out []*storev1.StoreEntry
 	for i, frame := range frames {
 		at := attribute(ctx, frame.Offset)
 		if frame.ParseErr != nil {

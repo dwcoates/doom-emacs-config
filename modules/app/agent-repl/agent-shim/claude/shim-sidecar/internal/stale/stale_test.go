@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
+	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func testLog() *logging.Bound {
@@ -21,37 +22,36 @@ func testLog() *logging.Bound {
 
 const min = int64(60_000) // one minute in ms
 
-// onlyLost asserts the sweep produced exactly one record and that it is an
-// end-of-work carrying the LOST outcome, returning that outcome.
+// onlyLost asserts the sweep produced exactly one record and that it is a LOST
+// verdict, returning the body that carries the inference.
 //
-// The shape moved with the schema: a sweep now emits a conversation
-// MessageEntry whose DetachedWorkEnded names the `lost` arm, in place of the
-// retired Event/TaskEnded pair with its TERMINAL_STATUS_LOST enum.
-func onlyLost(t *testing.T, entries []*agentshimv1.Entry) *conversationv1.DetachedLost {
+// THE SHAPE MOVED WITH THE SCHEMA, TWICE. It was a retired Event/TaskEnded pair
+// with a TERMINAL_STATUS_LOST enum; then a conversation MessageEntry whose
+// DetachedWorkEnded named the `lost` arm; and now — with that whole record model
+// deleted and no successor a file reader can mint — an UNPORTED record filed
+// under the `detached_lost` discriminator, carrying the task and the inference
+// verbatim. WHAT IS ASSERTED IS UNCHANGED: exactly one record, and it says LOST.
+func onlyLost(t *testing.T, entries []*storev1.StoreEntry) *structpb.Struct {
 	t.Helper()
 	if len(entries) != 1 {
 		t.Fatalf("entries = %d, want 1", len(entries))
 	}
-	msg := entries[0].GetExternal().GetMessage()
-	if msg == nil {
-		t.Fatalf("entry carries no conversation message: %+v", entries[0])
+	unknown := entries[0].GetAgentUpdate().GetUnservedItem().GetUnknown()
+	if unknown.GetDiscriminatorField() != convert.UnportedField || unknown.GetDiscriminator() != "detached_lost" {
+		t.Fatalf("entry is not a LOST verdict: %+v", entries[0])
 	}
-	lost := msg.GetDetachedWorkEnded().GetLost()
-	if lost == nil {
-		t.Fatalf("entry is not a LOST end-of-work: %+v", msg)
-	}
-	return lost
+	return unknown.GetRaw()
 }
 
-// lostTaskID recovers the task a LOST record is about from the message id the
-// card is derived from ("dw:"+task id).
-func lostTaskID(t *testing.T, entry *agentshimv1.Entry) string {
+// lostTaskID recovers the task a LOST record is about.
+func lostTaskID(t *testing.T, entry *storev1.StoreEntry) string {
 	t.Helper()
-	id := entry.GetExternal().GetMessage().GetMessageId()
-	if !strings.HasPrefix(id, "dw:") {
-		t.Fatalf("message_id = %q, want a dw: detached-work card id", id)
+	raw := entry.GetAgentUpdate().GetUnservedItem().GetUnknown().GetRaw()
+	id := raw.GetFields()["task_id"].GetStringValue()
+	if id == "" {
+		t.Fatalf("LOST record names no task: %+v", entry)
 	}
-	return strings.TrimPrefix(id, "dw:")
+	return id
 }
 
 func TestInferredLostIsWarnBecauseTheUserReadsTheVerdict(t *testing.T) {
@@ -88,8 +88,8 @@ func TestLostIsReadFromTheFilePlane(t *testing.T) {
 	entries := tr.Sweep(10_000 + 30_000)
 	// Assert
 	onlyLost(t, entries)
-	if entries[0].GetInternal().GetPlane().GetFile() == nil {
-		t.Fatalf("plane = %+v, want the file plane", entries[0].GetInternal().GetPlane())
+	if entries[0].GetPlane().GetFile() == nil {
+		t.Fatalf("plane = %+v, want the file plane", entries[0].GetPlane())
 	}
 }
 
@@ -106,8 +106,8 @@ func TestVanishGraceEmitsLostAfterWindow(t *testing.T) {
 	entries := tr.Sweep(10_000 + 30_000)
 	// Assert
 	lost := onlyLost(t, entries)
-	if lost.GetInference() != "vanished-file" {
-		t.Fatalf("inference = %q, want vanished-file", lost.GetInference())
+	if lost.GetFields()["inference"].GetStringValue() != "vanished-file" {
+		t.Fatalf("inference = %q, want vanished-file", lost.GetFields()["inference"].GetStringValue())
 	}
 	if tr.IsOpen("s1", "b1") {
 		t.Fatalf("task should be closed after LOST")
@@ -160,8 +160,8 @@ func TestSilenceTimeoutPerKind(t *testing.T) {
 	// Assert: only the shell task is LOST (past its 30m window); agent's 60m
 	// window has not elapsed.
 	lost := onlyLost(t, entries)
-	if got := lostTaskID(t, entries[0]); got != "b1" || lost.GetInference() != "silence-timeout" {
-		t.Fatalf("LOST task=%q inference=%q, want shell b1 silence-timeout", got, lost.GetInference())
+	if got := lostTaskID(t, entries[0]); got != "b1" || lost.GetFields()["inference"].GetStringValue() != "silence-timeout" {
+		t.Fatalf("LOST task=%q inference=%q, want shell b1 silence-timeout", got, lost.GetFields()["inference"].GetStringValue())
 	}
 	if !tr.IsOpen("s1", "a1") {
 		t.Fatalf("agent task should still be open at 40m")
@@ -178,28 +178,22 @@ func TestBootSweepLosesPreBootTasks(t *testing.T) {
 	entries := tr.BootSweep(boot, 200_000)
 	// Assert
 	lost := onlyLost(t, entries)
-	if got := lostTaskID(t, entries[0]); got != "old" || lost.GetInference() != "boot-sweep" {
-		t.Fatalf("LOST task=%q inference=%q, want old boot-sweep", got, lost.GetInference())
+	if got := lostTaskID(t, entries[0]); got != "old" || lost.GetFields()["inference"].GetStringValue() != "boot-sweep" {
+		t.Fatalf("LOST task=%q inference=%q, want old boot-sweep", got, lost.GetFields()["inference"].GetStringValue())
 	}
 	if !tr.IsOpen("s1", "new") {
 		t.Fatalf("post-boot task should survive the boot sweep")
 	}
 }
 
-// openState builds a recovered open task carrying the ONLY field the schema
-// still gives one: when it was last active.
-func openState(lastActivityAtMs int64) *agentshimv1.OpenTaskState {
-	return &agentshimv1.OpenTaskState{LastActivityAtMs: lastActivityAtMs}
-}
-
 func TestRestoreResetsTheTrackerToEmpty(t *testing.T) {
-	// Arrange — `OpenTaskState.started` is gone with no successor, so a recovered
+	// Arrange — the store reports no open tasks at all now, so a recovered
 	// state can no longer name the task it is about. Restore therefore restores
 	// NOTHING and resets, rather than inventing an identity the schema dropped.
 	tr := New(Options{}, testLog())
 	tr.Open("prior", tail.KindAgentTranscript, "s1", "/old", 10, 10)
 	// Act
-	if err := tr.Restore([]*agentshimv1.OpenTaskState{openState(55_000)}); err != nil {
+	if err := tr.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 	// Assert
@@ -208,145 +202,10 @@ func TestRestoreResetsTheTrackerToEmpty(t *testing.T) {
 	}
 }
 
-func TestRestoreLoudlyReportsTheUnrestorableOpenTasks(t *testing.T) {
-	// Arrange — untracked work is silent data loss in the user's feed, so the
-	// count that could not be restored is reported at error level.
-	var logs bytes.Buffer
-	log := logging.New(io.Discard, &logs).With(logging.Context{Component: "test"})
-	log.SetDiagnosticSink(func(logging.Diagnostic) {})
-	tr := New(Options{}, log)
-	// Act
-	if err := tr.Restore([]*agentshimv1.OpenTaskState{openState(1), openState(2)}); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-	// Assert
-	if !strings.Contains(logs.String(), `"operation":"restore-open-tasks"`) ||
-		!strings.Contains(logs.String(), `"level":"error"`) ||
-		!strings.Contains(logs.String(), "no task identity to restore them by") {
-		t.Fatalf("canonical unrestorable-open-tasks log = %q", logs.String())
-	}
-}
-
-func TestRestoreOfAnEmptySnapshotReportsNothingUnrestorable(t *testing.T) {
-	// Arrange — a store with no open tasks lost nothing, so the error-level
-	// report must not fire.
-	var logs bytes.Buffer
-	log := logging.New(io.Discard, &logs).With(logging.Context{Component: "test"})
-	log.SetDiagnosticSink(func(logging.Diagnostic) {})
-	tr := New(Options{}, log)
-	// Act
-	if err := tr.Restore(nil); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-	// Assert
-	if strings.Contains(logs.String(), "no task identity to restore them by") {
-		t.Fatalf("empty snapshot reported unrestorable tasks: %q", logs.String())
-	}
-}
-
-func TestRestoreValidationErrorsAreLoggedWithoutMutatingTracker(t *testing.T) {
-	cases := []struct {
-		name   string
-		states []*agentshimv1.OpenTaskState
-		cause  string
-	}{
-		{
-			name:   "nil open task",
-			states: []*agentshimv1.OpenTaskState{nil},
-			cause:  "recovery contains a nil open task",
-		},
-		{
-			name:   "unset last activity",
-			states: []*agentshimv1.OpenTaskState{openState(0)},
-			cause:  "invalid recovered open task last_activity_at_ms=0",
-		},
-		{
-			name:   "negative last activity",
-			states: []*agentshimv1.OpenTaskState{openState(-1)},
-			cause:  "invalid recovered open task last_activity_at_ms=-1",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			var global bytes.Buffer
-			log := logging.New(io.Discard, &global).With(logging.Context{Component: "test"})
-			log.SetDiagnosticSink(func(logging.Diagnostic) {})
-			tr := New(Options{}, log)
-			tr.Open("prior", tail.KindShellSpool, "s1", "", 10, 10)
-			global.Reset()
-
-			// Act
-			err := tr.Restore(tc.states)
-
-			// Assert
-			if err == nil || !strings.Contains(err.Error(), tc.cause) {
-				t.Fatalf("Restore err = %v, want cause %q", err, tc.cause)
-			}
-			if !tr.IsOpen("s1", "prior") {
-				t.Fatal("failed Restore mutated prior tracker state")
-			}
-			if !strings.Contains(global.String(), `"operation":"restore-open-tasks"`) ||
-				!strings.Contains(global.String(), `"level":"error"`) ||
-				!strings.Contains(global.String(), tc.cause) {
-				t.Fatalf("canonical global validation log = %q", global.String())
-			}
-		})
-	}
-}
-
-func TestRestoreRepeatedIdenticalFailureIsLoggedOnceUntilSuccess(t *testing.T) {
-	// Arrange — establishment retries the same authoritative snapshot until the
-	// store changes, so one canonical record is kept rather than one per retry.
-	var global bytes.Buffer
-	log := logging.New(io.Discard, &global).With(logging.Context{Component: "test"})
-	log.SetDiagnosticSink(func(logging.Diagnostic) {})
-	tr := New(Options{}, log)
-	invalid := []*agentshimv1.OpenTaskState{openState(0)}
-
-	// Act
-	for attempt := 0; attempt < 4; attempt++ {
-		if err := tr.Restore(invalid); err == nil {
-			t.Fatalf("Restore attempt %d accepted invalid snapshot", attempt)
-		}
-	}
-
-	// Assert
-	if got := strings.Count(global.String(), "recovery validation failed"); got != 1 {
-		t.Fatalf("repeated invalid snapshot logged %d validation failures, want 1", got)
-	}
-}
-
-func TestRestoreLogsANewFailureAfterASuccessfulRecovery(t *testing.T) {
-	// Arrange — a success clears the retained fingerprint, so the next failure is
-	// a distinct occurrence rather than a suppressed repeat.
-	var global bytes.Buffer
-	log := logging.New(io.Discard, &global).With(logging.Context{Component: "test"})
-	log.SetDiagnosticSink(func(logging.Diagnostic) {})
-	tr := New(Options{}, log)
-	invalid := []*agentshimv1.OpenTaskState{openState(0)}
-	if err := tr.Restore(invalid); err == nil {
-		t.Fatal("Restore accepted invalid snapshot")
-	}
-	if err := tr.Restore([]*agentshimv1.OpenTaskState{openState(50_000)}); err != nil {
-		t.Fatalf("valid Restore: %v", err)
-	}
-
-	// Act
-	if err := tr.Restore(invalid); err == nil {
-		t.Fatal("Restore accepted invalid snapshot after successful recovery")
-	}
-
-	// Assert
-	if got := strings.Count(global.String(), "recovery validation failed"); got != 2 {
-		t.Fatalf("validation failures logged = %d, want 2 distinct occurrences", got)
-	}
-}
-
 func TestLostCarriesStableSyntheticWriteIdentity(t *testing.T) {
 	// Arrange — a task's LOST verdict is ONE fact however many processes infer
 	// it, so two independent trackers must mint the same write id for it.
-	sweep := func() *agentshimv1.Entry {
+	sweep := func() *storev1.StoreEntry {
 		tr := New(Options{Grace: time.Second}, testLog())
 		tr.Open("b1", tail.KindShellSpool, "s1", "", 10, 10)
 		tr.MarkVanished("s1", "b1", 20)
@@ -357,15 +216,15 @@ func TestLostCarriesStableSyntheticWriteIdentity(t *testing.T) {
 	// Act
 	first, second := sweep(), sweep()
 	// Assert
-	if got := first.GetInternal().GetWriteId(); got == "" || got != second.GetInternal().GetWriteId() {
-		t.Fatalf("write_id = %q vs %q, want one stable non-empty identity", got, second.GetInternal().GetWriteId())
+	if got := first.GetWriteId(); got == "" || got != second.GetWriteId() {
+		t.Fatalf("write_id = %q vs %q, want one stable non-empty identity", got, second.GetWriteId())
 	}
 }
 
 func TestLostForTheSameTaskIdInSeparateSessionsIsADistinctRecord(t *testing.T) {
 	// Arrange — task ids are only unique within a conversation, so the LOST
 	// write identity is session-scoped or two sessions' verdicts collide.
-	lostIn := func(session string) *agentshimv1.Entry {
+	lostIn := func(session string) *storev1.StoreEntry {
 		tr := New(Options{Grace: time.Second}, testLog())
 		tr.Open("shared-id", tail.KindShellSpool, session, "", 10, 10)
 		tr.MarkVanished(session, "shared-id", 20)
@@ -376,7 +235,7 @@ func TestLostForTheSameTaskIdInSeparateSessionsIsADistinctRecord(t *testing.T) {
 	// Act
 	a, b := lostIn("session-a"), lostIn("session-b")
 	// Assert
-	if a.GetInternal().GetWriteId() == b.GetInternal().GetWriteId() {
+	if a.GetWriteId() == b.GetWriteId() {
 		t.Fatal("two sessions' LOST verdicts for the same task id share one write identity")
 	}
 }
@@ -392,8 +251,12 @@ func TestSweepOnlyClosesTheSessionItSwept(t *testing.T) {
 	entries := tr.Sweep(2_000)
 	// Assert
 	onlyLost(t, entries)
-	if got := entries[0].GetExternal().GetSessionId(); got != "session-a" {
-		t.Fatalf("LOST session = %q, want session-a", got)
+	// THE SESSION IS NO LONGER ASSERTABLE ON THE RECORD. It sat on protocol.v1
+	// ExternalEntry.session_id, which store.v1 StoreEntry does not carry in any
+	// form, so the only remaining evidence that the right session was swept is
+	// that the other session's same-id task survived — which is what this checks.
+	if got := lostTaskID(t, entries[0]); got != "shared-id" {
+		t.Fatalf("LOST task = %q, want shared-id", got)
 	}
 	if !tr.IsOpen("session-b", "shared-id") {
 		t.Fatal("sweeping session-a's task closed session-b's same-id task")

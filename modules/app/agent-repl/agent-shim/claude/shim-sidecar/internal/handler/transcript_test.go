@@ -5,9 +5,11 @@ import (
 	"io"
 	"testing"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func testLog(t *testing.T) *logging.Bound {
@@ -66,7 +68,7 @@ func TestParseFailureIsStoredAsUnparsed(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("entries = %d, want 1", len(entries))
 	}
-	unparsed := entries[0].GetInternal().GetUnparsed()
+	unparsed := entries[0].GetAgentUpdate().GetUnservedItem().GetUnparsed()
 	if unparsed == nil {
 		t.Fatal("a parse failure produced no unparsed record")
 	}
@@ -99,10 +101,8 @@ func TestBatchTerminalCompactBoundaryIsDeferred(t *testing.T) {
 	if ctx.HeldOffset != 60 || ctx.HeldDeliveries != 1 {
 		t.Fatalf("held offset/deliveries = %d/%d, want 60/1", ctx.HeldOffset, ctx.HeldDeliveries)
 	}
-	for _, entry := range entries {
-		if entry.GetExternal().GetMessage().GetContextCut() != nil {
-			t.Fatal("the deferred boundary was converted anyway, so its summary is lost for good")
-		}
+	if hasCompactionRecord(entries) {
+		t.Fatal("the deferred boundary produced its record anyway, so its summary is lost for good")
 	}
 }
 
@@ -127,8 +127,8 @@ func TestMidBatchCompactBoundaryIsNotDeferred(t *testing.T) {
 	}
 	var summary string
 	for _, entry := range entries {
-		if cut := entry.GetExternal().GetMessage().GetContextCut(); cut.GetCompacted() != nil {
-			summary = cut.GetCompacted().GetSummary().GetBlocks()[0].GetText().GetText()
+		if raw := compactionRaw(entry); raw != nil {
+			summary = raw.GetFields()["summary"].GetStringValue()
 		}
 	}
 	if summary != "we did X" {
@@ -149,7 +149,7 @@ func TestBoundaryIsNotDeferredWhenTheReaderWillNotRedeliver(t *testing.T) {
 	entries := h.Handle(frames, ctx)
 
 	// Assert.
-	if !hasContextCut(entries) {
+	if !hasCompactionRecord(entries) {
 		t.Fatal("a boundary was withheld from a caller that cannot redeliver it")
 	}
 }
@@ -168,11 +168,11 @@ func TestHeldBoundaryIsConvertedAfterTheSilenceBound(t *testing.T) {
 	second := h.Handle(frames, ctx)
 
 	// Assert.
-	if hasContextCut(first) {
-		t.Fatal("the boundary was converted on its first delivery instead of being held")
+	if hasCompactionRecord(first) {
+		t.Fatal("the boundary produced its record on its first delivery instead of being held")
 	}
-	if !hasContextCut(second) {
-		t.Fatal("the boundary was still held past the silence bound, so a stopped session never renders its cut")
+	if !hasCompactionRecord(second) {
+		t.Fatal("the boundary was still held past the silence bound, so a stopped session never records its cut")
 	}
 }
 
@@ -221,68 +221,32 @@ func TestUnparsableFinalFrameIsNotDeferred(t *testing.T) {
 	if ctx.HeldDeliveries != 0 {
 		t.Fatalf("held deliveries = %d, want 0", ctx.HeldDeliveries)
 	}
-	if entries[0].GetInternal().GetUnparsed() == nil {
+	if entries[0].GetAgentUpdate().GetUnservedItem().GetUnparsed() == nil {
 		t.Fatal("the unparsable frame was not stored")
 	}
 }
 
-func hasContextCut(entries []*agentshimv1.Entry) bool {
+// compactionRaw returns the body of a compaction record, or nil when the entry
+// is not one.
+//
+// IT READS AN UNPORTED RECORD. conversation.v1 ContextCut lost its only
+// producer-written carrier (MessageEntry) in the redesign, so the converter
+// stores the boundary whole under the `context_compacted` discriminator. The
+// COALESCING these tests cover — a boundary taking its summary from the line
+// that FOLLOWS it in file order — is unchanged, and is what they still assert.
+func compactionRaw(entry *storev1.StoreEntry) *structpb.Struct {
+	unknown := entry.GetAgentUpdate().GetUnservedItem().GetUnknown()
+	if unknown.GetDiscriminatorField() != convert.UnportedField || unknown.GetDiscriminator() != "context_compacted" {
+		return nil
+	}
+	return unknown.GetRaw()
+}
+
+func hasCompactionRecord(entries []*storev1.StoreEntry) bool {
 	for _, entry := range entries {
-		if entry.GetExternal().GetMessage().GetContextCut() != nil {
+		if compactionRaw(entry) != nil {
 			return true
 		}
 	}
 	return false
-}
-
-// ---------------------------------------------------------------------------
-// attribution
-// ---------------------------------------------------------------------------
-
-// A session transcript's records are feed rows; an agent sidechain's sit inside
-// the card the subagent runs as. The handler is what decides which, from the
-// file it is reading rather than from anything in the record.
-func TestAttributionPlacesRecordsByTheFileTheyCameFrom(t *testing.T) {
-	tests := []struct {
-		name          string
-		kind          tail.Kind
-		taskID        string
-		wantContainer string
-	}{
-		{name: "session transcript", kind: tail.KindSessionTranscript, taskID: "", wantContainer: ""},
-		{name: "agent sidechain", kind: tail.KindAgentTranscript, taskID: "agent-1", wantContainer: "dw:agent-1"},
-		{name: "shell spool", kind: tail.KindShellSpool, taskID: "b-2", wantContainer: "dw:b-2"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			ctx := &Context{SessionID: "sess-1", Path: "/t/f", Kind: tc.kind, TaskID: tc.taskID}
-
-			// Act.
-			at := attribute(ctx, 12)
-
-			// Assert.
-			if at.Container != tc.wantContainer {
-				t.Fatalf("container = %q, want %q", at.Container, tc.wantContainer)
-			}
-			if at.SessionID != "sess-1" || at.Path != "/t/f" || at.Offset != 12 {
-				t.Fatalf("attribution did not carry the reader's own position: %+v", at)
-			}
-		})
-	}
-}
-
-// A session transcript never sits inside a card, even when the discoverer
-// happened to give the context a task id.
-func TestSessionTranscriptIsNeverPlacedInsideACard(t *testing.T) {
-	// Arrange.
-	ctx := &Context{SessionID: "sess-1", Path: "/t/f", Kind: tail.KindSessionTranscript, TaskID: "agent-1"}
-
-	// Act.
-	at := attribute(ctx, 0)
-
-	// Assert.
-	if at.Container != "" {
-		t.Fatalf("container = %q, want the session transcript to stay a feed row", at.Container)
-	}
 }

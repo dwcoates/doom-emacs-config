@@ -13,8 +13,7 @@ import (
 	"testing"
 	"time"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -137,30 +136,23 @@ func TestNoteOwnerKeepsTheFirstSessionAndReportsAConflict(t *testing.T) {
 // This pins the honest consequence: the snapshot seeds nothing, and no owner is
 // invented from it. The spool is held and reported instead — see
 // TestAttributionBacklogRestartPastLaunchHoldsWithoutADurableOwner.
-func TestSeedOwnersCannotAttributeFromAPersistedOpenTask(t *testing.T) {
-	// Arrange — what the store hands back on every connection, all it can say.
-	s, _ := ownerSidecar(t)
-	states := []*agentshimv1.OpenTaskState{{LastActivityAtMs: 1}}
+// The store no longer reports open tasks at all — agentshim.v1 OpenTaskState
+// and the CursorList that delivered it were deleted, and store.v1's cursor
+// response carries cursors only — so the owner seed has nothing to seed FROM.
+// It reports that rather than pretending it seeded an empty set.
+func TestSeedOwnersHasNoPersistedSnapshotToSeedFrom(t *testing.T) {
+	// Arrange.
+	s, read := ownerSidecar(t)
 
-	// Act
-	n := s.seedOwners(states)
+	// Act.
+	n := s.seedOwners()
 
-	// Assert
+	// Assert.
 	if n != 0 || len(s.owners) != 0 {
-		t.Fatalf("seeded %d owner(s) = %v; OpenTaskState names no task to seed from", n, s.owners)
+		t.Fatalf("seeded %d owner(s) = %v; store.v1 reports no open tasks to seed from", n, s.owners)
 	}
-}
-
-func TestSeedOwnersOfAnEmptySnapshotSeedsNothing(t *testing.T) {
-	// Arrange
-	s, _ := ownerSidecar(t)
-
-	// Act
-	n := s.seedOwners(nil)
-
-	// Assert
-	if n != 0 || len(s.owners) != 0 {
-		t.Fatalf("seeded %d, owners = %v, want none", n, s.owners)
+	if got := linesContaining(read(), "owner seed produced nothing"); len(got) != 1 {
+		t.Fatalf("owner-seed logs = %v, want exactly one loud report", got)
 	}
 }
 
@@ -208,7 +200,7 @@ func TestParseRootsEmpty(t *testing.T) {
 
 func TestIndexCursorsByPath(t *testing.T) {
 	// Arrange
-	cs := []*agentshimv1.CursorState{
+	cs := []*storev1.CursorState{
 		{FileId: "1:1", Path: "/a.jsonl", Offset: 10},
 		{FileId: "2:2", Path: "/b.jsonl", Offset: 20},
 		{FileId: "3:3", Path: ""}, // no path → dropped
@@ -221,35 +213,6 @@ func TestIndexCursorsByPath(t *testing.T) {
 	}
 	if m["/a.jsonl"].GetOffset() != 10 || m["/b.jsonl"].GetOffset() != 20 {
 		t.Fatalf("index = %+v", m)
-	}
-}
-
-// What kind of work detached decides which silence window the staleness policy
-// applies before calling it LOST. A kind this reader does not recognize gets the
-// LONGEST window, because a premature LOST is a wrong verdict the user reads.
-func TestDetachedKindToTail(t *testing.T) {
-	shell := &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Shell{Shell: &conversationv1.DetachedShell{}}}
-	workflow := &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Workflow{Workflow: &conversationv1.DetachedWorkflow{}}}
-	agent := &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Agent{Agent: &conversationv1.DetachedAgent{}}}
-	skill := &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Skill{Skill: &conversationv1.DetachedSkill{}}}
-
-	cases := []struct {
-		name string
-		in   *conversationv1.DetachedWorkKind
-		want tail.Kind
-	}{
-		{"shell", shell, tail.KindShellSpool},
-		{"workflow", workflow, tail.KindWorkflowJournal},
-		{"agent", agent, tail.KindAgentTranscript},
-		{"skill falls back to the longest window", skill, tail.KindAgentTranscript},
-		{"unstated kind falls back to the longest window", nil, tail.KindAgentTranscript},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := detachedKindToTail(tc.in); got != tc.want {
-				t.Fatalf("detachedKindToTail(%v) = %v, want %v", tc.in, got, tc.want)
-			}
-		})
 	}
 }
 

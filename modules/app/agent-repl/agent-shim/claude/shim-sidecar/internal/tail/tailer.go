@@ -6,7 +6,7 @@ import (
 	"os"
 	"syscall"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
@@ -49,7 +49,7 @@ func New(path string, codec Codec, h Handler, ctx *Context, log *logging.Bound) 
 // Restore seeds the committed cursor from a recovered CursorState (§7.3 startup
 // recovery). Only offset/carry/file_id are restored; the record counter resumes
 // from 0 (progress counts are advisory, not durable).
-func (t *Tailer) Restore(c *agentshimv1.CursorState) {
+func (t *Tailer) Restore(c *storev1.CursorState) {
 	if c == nil {
 		t.log.With(logging.Context{Operation: "tailer-restore", Path: t.path}).LogVerbose("no recovered cursor supplied")
 		return
@@ -65,8 +65,8 @@ func (t *Tailer) Restore(c *agentshimv1.CursorState) {
 // write: the file had no new bytes, or every frame it did have was deferred by
 // the handler and so neither produced a record nor moved the cursor.
 type PollResult struct {
-	Entries []*agentshimv1.Entry
-	Next    *agentshimv1.CursorState
+	Entries []*storev1.StoreEntry
+	Next    *storev1.CursorState
 	Records int64
 	Changed bool
 }
@@ -103,7 +103,7 @@ func (t *Tailer) Poll() (PollResult, error) {
 		// No new bytes; still surface the (possibly reset) cursor so file_id and
 		// a truncation reset commit.
 		result := PollResult{
-			Next:    &agentshimv1.CursorState{FileId: fileID, Path: t.path, Offset: offset, Carry: carry},
+			Next:    &storev1.CursorState{FileId: fileID, Path: t.path, Offset: offset, Carry: carry},
 			Records: records,
 			Changed: offset != t.offset || fileID != t.fileID,
 		}
@@ -140,7 +140,7 @@ func (t *Tailer) Poll() (PollResult, error) {
 
 	result := PollResult{
 		Entries: entries,
-		Next:    &agentshimv1.CursorState{FileId: fileID, Path: t.path, Offset: newOffset, Carry: newCarry},
+		Next:    &storev1.CursorState{FileId: fileID, Path: t.path, Offset: newOffset, Carry: newCarry},
 		Records: records,
 		// A batch whose every frame was deferred moves neither the cursor nor
 		// the store, so it is not a change to write: the next poll re-reads
