@@ -7404,3 +7404,21 @@ the user's verdicts on the raised consequences landed as seven commits:
 - Producer notes corrected per item 1: ArtifactOutput is TYPED (read
   fields, never parse prose); grep omitted figures are shim-subtracted;
   hook duration and spawn depth are shim-derived.
+
+### BUILT-INS SLATE RULED (2026-08-27): six families get modeled; MCP-resource family and console misc go exempt
+
+Vetting item 1's unhomed-built-ins slate resolved by multi-select:
+
+- MODELED, with drawn homes the user assigned: EnterPlanMode/ExitPlanMode
+  and ReportFindings as FEED RESPONSE BUBBLES (purple, the Response/Artifact
+  treatment); EnterWorktree/ExitWorktree in the FEED; CronCreate/Delete/List
+  in the EXTENDED FOOTER as a chip + panel, the tasks precedent — never the
+  feed.
+- MODELED, UI to be designed ("not obvious yet" — drawings owed before
+  shapes): PushNotification, REPL.
+- EXEMPT (join the exempt set): ListMcpResources/ReadMcpResource/
+  RefreshMcpTools, SendFeedback, ClaudeDesign, Projects,
+  ShowOnboardingRolePicker, ProposeSkills.
+
+Each modeled family walks the ordinary increment protocol: drawing agreed,
+then the encompassing sketch agreed, then landed end to end.
