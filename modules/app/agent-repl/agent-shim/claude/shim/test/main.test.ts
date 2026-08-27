@@ -38,6 +38,7 @@ import {
   MAIN_LIFECYCLE_OPERATION,
   parseArgs,
   probeQueryOptions,
+  runUdsMode,
   realQueryOptions,
   logMainLifecycle,
   udsShutdownSignalHandlers,
@@ -406,6 +407,46 @@ describe("UDS query signal ownership", () => {
 // been constructed, so there is no exit trace to assert until `shim.v1` has an
 // implementation, and inventing one would be deciding the new shutdown
 // contract rather than reconciling the old one.
+
+describe("runUdsMode without a daemon transport", () => {
+  const noopCreateQuery = (() => ({})) as unknown as Parameters<typeof runUdsMode>[1];
+
+  it("refuses loudly rather than idling once both claims are held", async () => {
+    // Arrange
+    const args = parseArgs([
+      "--session-id", "sess-no-transport",
+      "--daemon-socket", "/tmp/d.sock",
+      "--cwd", "/tmp",
+      "--log-fd", "3",
+    ]);
+
+    // Act, Assert: the refusal names the session it could not serve, so a
+    // stubbed path can never be mistaken for a session that merely went quiet.
+    await expect(runUdsMode(args, noopCreateQuery)).rejects.toThrow(
+      /no daemon transport is implemented for session sess-no-transport/,
+    );
+  });
+
+  it("releases the workspace claim it took before refusing", async () => {
+    // Arrange
+    const { acquireWorkspaceLock } = await import("../src/uds/session-lock.js");
+    vi.mocked(acquireWorkspaceLock).mockClear();
+    const args = parseArgs([
+      "--session-id", "sess-release",
+      "--daemon-socket", "/tmp/d.sock",
+      "--cwd", "/tmp",
+      "--log-fd", "3",
+    ]);
+
+    // Act
+    await expect(runUdsMode(args, noopCreateQuery)).rejects.toThrow();
+
+    // Assert: the release the claim handed back was invoked, so a refused
+    // start does not strand the workspace against the next shim.
+    const release = vi.mocked(acquireWorkspaceLock).mock.results[0]?.value as () => void;
+    expect(vi.mocked(release)).toHaveBeenCalled();
+  });
+});
 
 describe("main entrypoint lifecycle log contract", () => {
   it.each([
