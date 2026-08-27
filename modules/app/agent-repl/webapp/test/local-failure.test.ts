@@ -9,8 +9,6 @@ import {
   CLIENT_FAILURE_ARMS,
   bootFailedFailure,
   clientFailureUuid,
-  commandRejectionUnclassifiedFailure,
-  commandUnsentFailure,
   controlPlaneFailure,
   daemonReachableFailure,
   daemonUnreachableFailure,
@@ -49,9 +47,6 @@ describe("locally-classified failures", () => {
       controlPlaneFailed: () => controlPlaneFailure("the login request", new Error("boom")),
       frameUndecodable: () => frameUndecodableFailure(new Error("bad"), "{"),
       staleBundle: () => staleBundleFailure("lease mismatch"),
-      commandUnsent: () => commandUnsentFailure("submitPrompt"),
-      commandRejectionUnclassified: () =>
-        commandRejectionUnclassifiedFailure("hibernateWorkspace", "no"),
     };
     // Act
     const card = byArm[arm]();
@@ -197,42 +192,3 @@ describe("the undecodable-frame failure", () => {
   });
 });
 
-describe("the refusal failures", () => {
-  it("says outright that it could not classify a bare refusal", () => {
-    // Arrange / Act — this end names the refusal rather than picking a kind on
-    // the daemon's behalf.
-    const card = commandRejectionUnclassifiedFailure("hibernateWorkspace", "no lease");
-    // Assert
-    expect(failureKindName(card.view.kind)).toBe("commandRejectionUnclassified");
-  });
-
-  it("leads with the daemon's own words verbatim", () => {
-    // Arrange / Act — it decided the refusal, and its sentence is the closest
-    // thing to an account there is.
-    const card = commandRejectionUnclassifiedFailure("hibernateWorkspace", "no lease");
-    // Assert
-    expect(card.view.message).toBe("no lease");
-  });
-
-  it("falls back to naming the command when the daemon gave no words", () => {
-    // Arrange / Act
-    const card = commandRejectionUnclassifiedFailure("hibernateWorkspace", "");
-    // Assert
-    expect(card.view.message).toBe("hibernateWorkspace was refused");
-  });
-
-  it("distinguishes a command that never left the page from a refusal", () => {
-    // Arrange / Act — nothing was decided, so the operation can be retried.
-    const card = commandUnsentFailure("submitPrompt");
-    // Assert
-    expect(failureKindName(card.view.kind)).toBe("commandUnsent");
-  });
-
-  it("keys an unsent command by the command, so two stay two cards", () => {
-    // Arrange / Act
-    // Assert
-    expect(commandUnsentFailure("interrupt").uuid).toBe(
-      clientFailureUuid("commandUnsent", "interrupt"),
-    );
-  });
-});
