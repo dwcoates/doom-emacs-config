@@ -82,3 +82,27 @@ AgentContextInjected.memory (fed from the nested_memory attachment); the
 deferred remainder is reconciling the LIVE channel with the attachment
 channel (contentDiffersFromDisk, the scope vocabulary) if memory surfacing
 ever grows beyond the footer's loading status.
+
+### IDENT-1 bucket — vendor-uuid-addressed facts (deferred 2026-08-26)
+
+The vendor stamps every transcript record with a `uuid`, and a family of
+facts is expressible only by referencing records that way. The standing
+identity ruling (vendor identity spaces never cross the contract; the shim
+translates uuid to AgentActivityId/TurnId where a unit exists) keeps these
+permanently uncarried:
+
+- COMPACT-4 — which messages a compaction PRESERVED (the preserved-segment
+  reference points at raw records, not units).
+- COMPACT-6 — `logicalParentUuid`, the vendor's one ancestry pointer across
+  a compaction; without it a compacted session's history is two
+  disconnected components.
+- IDENT-3/4 residue — the vendor's request_id / API message.id on failure
+  evidence (frontend/v1 failure.proto:VendorFailureContext declares
+  api_request_id/api_message_id with no producer); support-ticket material
+  only.
+- IDENT-2 — the "exactly one unit per response carries usage" rule keeps an
+  adjacency producer key shim-side rather than a wire key.
+
+A future PR reopening any of these must first re-open the identity ruling
+itself (a typed vendor-record reference type), which is why they travel as
+one bucket.

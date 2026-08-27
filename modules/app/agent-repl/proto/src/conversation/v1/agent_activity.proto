@@ -741,6 +741,10 @@ message AgentReadSuccess {
     // The file was long, so only its leading portion came back. More exists,
     // and a consumer may offer to fetch it.
     AgentReadHead head = 3;
+    // The caller asked for a MIDDLE SLICE (an offset read) and that slice came
+    // back. The common shape for a large file a caller already knows its way
+    // around.
+    AgentReadRange range = 10;
     // The file is an IMAGE and came back as image data. Not text with a flag
     // beside it: an image read is drawn by a different renderer entirely,
     // which is why it is its own arm rather than a `whole` carrying base64.
@@ -852,6 +856,21 @@ message AgentReadUnchangedSincePriorRead {}
 
 // Unchanged since the contents were seeded into context without a read.
 message AgentReadUnchangedSinceSeeded {}
+
+// A middle slice of the file: the caller named a starting line and got a
+// bounded run of lines from there. The daemon highlights exactly this text —
+// what a consumer draws is what was actually read, never a re-fetch.
+message AgentReadRange {
+  // The slice, cut on line boundaries.
+  string contents = 1;
+  // The 1-based line the slice begins at.
+  uint32 first_line = 2;
+  // How many lines the slice holds.
+  uint32 line_count = 3;
+  // What the whole file holds, so a consumer states "lines 400-499 of 4,312"
+  // without arithmetic and without a second request.
+  uint32 total_lines = 4;
+}
 
 // The file was long, so only its leading portion came back.
 message AgentReadHead {
