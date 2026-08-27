@@ -154,6 +154,10 @@ message AgentActivity {
     AgentPlanMode plan_mode = 28;
     // A code review's typed findings report.
     AgentReportFindings report_findings = 29;
+    // The worktree pair: the agent moving into an isolated git worktree,
+    // and returning from it. TWO tool calls, faithfully; the feed draws
+    // each settled act as a SEPARATION DIVIDER, never as a tool card.
+    AgentWorktree worktree = 30;
   }
 }
 
@@ -363,6 +367,109 @@ message AgentFindingNoChangeNeeded {}
 
 // The call could not be performed.
 message AgentReportFindingsFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}
+
+// ---- The worktree pair: into an isolated tree, and back ----
+
+// One worktree tool call — an ENTER or an EXIT. Each is its own unit with
+// its own identity; unlike plan mode there is no coalescing anywhere: each
+// settled act is its own divider in the feed, because the two moments can
+// be far apart and everything between them happened inside the tree.
+message AgentWorktree {
+  oneof state {
+    AgentWorktreeStart start = 1;
+    AgentWorktreeSuccess success = 2;
+    AgentWorktreeFailure failure = 3;
+  }
+}
+
+// A worktree call this stream has begun carrying.
+message AgentWorktreeStart {
+  // WHICH act this call is. The set arm is the act.
+  oneof act {
+    AgentWorktreeEnter enter = 1;
+    AgentWorktreeExit exit = 2;
+  }
+  // When the call was issued.
+  AgentActivityStartedAt started_at = 3;
+}
+// The agent asked to enter a worktree.
+message AgentWorktreeEnter {
+  // The name asked for. UNSET when the tool chooses. EXPECTED UNMAPPED.
+  optional string name = 1;
+  // The path asked for. UNSET when the tool chooses. EXPECTED UNMAPPED.
+  optional string path = 2;
+}
+// The agent asked to leave the worktree.
+message AgentWorktreeExit {
+  // WHAT WAS ASKED FOR THE TREE. The set arm is the request; the outcome
+  // restates what actually happened.
+  oneof action {
+    AgentWorktreeExitKeep keep = 1;
+    AgentWorktreeExitRemove remove = 2;
+  }
+}
+message AgentWorktreeExitKeep {}
+// Removal was asked for.
+message AgentWorktreeExitRemove {
+  // Whether uncommitted changes were asked to be discarded with it.
+  bool discard_changes = 1;
+}
+
+// The call returned.
+message AgentWorktreeSuccess {
+  oneof act {
+    AgentWorktreeEntered entered = 1;
+    AgentWorktreeExited exited = 2;
+  }
+  // When the call settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 3;
+}
+// The session is now inside the worktree.
+message AgentWorktreeEntered {
+  // The worktree's path on disk.
+  string path = 1;
+  // The branch checked out in it. UNSET when the vendor named none.
+  optional string branch = 2;
+  // The vendor's message line. EXPECTED UNMAPPED: the divider composes its
+  // own label.
+  string message = 3;
+}
+// The session has returned from the worktree.
+message AgentWorktreeExited {
+  // WHAT BECAME OF THE TREE, as the vendor states it happened.
+  oneof outcome {
+    AgentWorktreeKept kept = 1;
+    AgentWorktreeRemoved removed = 2;
+  }
+  // The directory the session returned to.
+  string original_cwd = 3;
+  // The worktree's path — for a kept tree, where it still is.
+  string path = 4;
+  // The branch that was checked out in it. UNSET when the vendor named
+  // none.
+  optional string branch = 5;
+  // The vendor's tmux session name for the tree, when one existed.
+  // EXPECTED UNMAPPED.
+  optional string tmux_session_name = 6;
+  // The vendor's message line. EXPECTED UNMAPPED.
+  string message = 7;
+}
+// The tree is still on disk.
+message AgentWorktreeKept {}
+// The tree was removed.
+message AgentWorktreeRemoved {
+  // How many uncommitted files were discarded with it. UNSET when the
+  // vendor stated no figure — which is not the same as zero.
+  optional uint32 discarded_files = 1;
+  // How many commits were discarded with it. UNSET on the same terms.
+  optional uint32 discarded_commits = 2;
+}
+
+// The call could not be performed.
+message AgentWorktreeFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
 }
