@@ -7769,3 +7769,16 @@ so a deleted file leaves the build the moment it leaves disk; Go and TS
 bindings are regenerated once from clean for all six packages. Per-
 subsystem reconciliation agents dispatch next; the reconciled foundation
 SHA is recorded when they merge.
+
+### AMENDMENT to the replacement-coverage prescription: INTEGRATION and E2E specs only — unit gaps are the mapping convention's job
+
+The user's refinement, superseding the earlier prescription's routing of
+unit specs: the orchestrator prescribes replacement coverage for
+INTEGRATION tests (into each subsystem's implementation planning doc) and
+E2E tests (into the main implementation doc) ONLY. Unit-test coverage is
+NOT prescribed — it falls out naturally from the landed proto→code mapping
+convention, under which every non-primitive use site gets a dedicated
+testable function and implementers write unit tests per anticipated edge
+case on those functions. Prescribing unit gaps would duplicate that
+machinery's output and anchor implementers to a list instead of the
+mapping.
