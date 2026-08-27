@@ -24,68 +24,93 @@ unmarked is DISCRETIONARY by default.
 
 ## Settled architecture decisions
 
-1. INVARIANT — dependency direction: the shim client is a LEAF (knows
-   nothing of WSM or any module); WSM knows and drives the client. All
-   workspace-pertaining shim interaction STARTS at WSM.
+1. INVARIANT — dependency direction: the shim client is a leaf that knows
+   no other module; WSM and the peer modules know and drive it, and all
+   workspace-pertaining shim interaction starts at the module that owns
+   the flow, never at the client.
 
 2. PRESCRIBED — THE SHIM CLIENT (one per session).
-   - RESPONSIBILITIES: the only module that dials shim.v1; a dumb
-     connection with NO policy; internal occupancy MUTEX obfuscated from
-     callers.
-   - INTERFACE: two faces. OCCUPANCY (StartSession, StartTurn, Kill*,
-     SetSessionModel, stand-down) — WSM-mediated only, lease-checked,
-     mutex-guarded. CONVERSATION (WatchAgent frame streams, UpdateAgent
-     answer/stop) — WSM resolves workspace→handle and HANDS OFF; frames
-     flow client→ingest directly, never relayed through WSM.
-   - USAGE PATTERNS: WSM drives occupancy; ingest and the answer verbs
-     hold conversation-face handles obtained from WSM.
-   - PREREQUISITES: none (leaf; generated shimv1connect stubs).
+   - RESPONSIBILITIES: the only module that dials shim.v1, as a dumb
+     no-policy connection with an internal occupancy mutex hidden from
+     callers (the in-memory guard backing WSM's persisted lease).
+   - INTERFACE: session/turn/kill/model/stand-down verbs (lease-checked,
+     mutex-guarded), the WatchAgent frame streams, and answer/stop
+     delivery.
+   - USAGE: frame streams flow directly to their consumers; nothing
+     relays them module-by-module.
+   - PREREQUISITES: none (leaf; the generated shimv1connect stubs).
 
-3. PRESCRIBED — THE OCCUPANCY LEASE (inside WSM).
-   - RESPONSIBILITIES: per-workspace exclusivity — who may drive this
-     workspace's session now. Persisted truth in WSM; the client's mutex
-     is its in-memory guard.
-   - INTERFACE: acquire/release by the merge orchestrator and the drain
-     controller; consulted by prompt delivery.
-   - USAGE PATTERNS: the lease projects PER-HOLDER REFUSAL POLICY onto
-     NEW submissions — the MERGE lease ERRORS them (SubmitPrompt's
-     merging refusal arm: post-merge-start work would be orphaned, since
-     a merged workspace closes); restart-pending and shutdown-drain
-     leases HOLD them under the holder's label. Prompts already held
-     when a lease is acquired stay held. Distinct from the per-REPO
-     merge window (queue admission); both exist.
-   - PREREQUISITES: registry, shim client.
+3. PRESCRIBED — WSM, THE STATE CLIENT.
+   - RESPONSIBILITIES: a database client around the daemon's durable
+     state — the sole owner of the seven tables, including the workspace
+     registry, session bindings, and the persisted occupancy lease
+     (per-workspace: who may drive the session now).
+   - INTERFACE: state operations only (resolve refs, bindings, lease
+     acquire/release/inspect, held prompts, queue positions, schedules);
+     NO orchestration logic; peers call it, it calls only the database.
+   - USAGE: the lease projects PER-HOLDER REFUSAL POLICY onto new
+     submissions — the merge lease ERRORS them (SubmitPrompt's merging
+     refusal arm; post-merge-start work would be orphaned since a merged
+     workspace closes), restart-pending and shutdown-drain leases HOLD
+     them; items already held when a lease is acquired stay held.
+   - PREREQUISITES: none. (Registry and binding internals are
+     DISCRETIONARY.)
 
-4. PRESCRIBED — THE PROMPT QUEUE (inside WSM; persisted in held_prompt).
-   - RESPONSIBILITIES: the ONE queue — classification, holds, delivery.
-   - INTERFACE: fed by the thin prompt handler (recognize the session
-     command, forward to WSM — nothing more); serves the tray's view.
-   - USAGE PATTERNS: consult lease + in-flight → deliver through the
-     occupancy face (interrupting when that is what delivery takes) or
-     persist the hold; release/drop verbs act on held rows; it never
-     knows WHY a workspace is leased, only the holder's label.
-   - PREREQUISITES: registry, lease.
+4. PRESCRIBED — THE PROMPT HANDLER (the modeled body of SubmitPrompt).
+   - RESPONSIBILITIES: the request-side component every prompt crosses —
+     modeled as a component so business logic never lives in an rpc name.
+   - INTERFACE: acknowledge with the TurnId; MIRROR THE PROMPT TO THE
+     USER IMMEDIATELY (the feed's user-prompt row on acceptance, the
+     tray's hold row when held); recognize session commands and answer
+     the read-only panel class inline; forward everything session-bound
+     to the prompt queue.
+   - USAGE: thin and stateless, done at submission; it owns NO execution
+     and NO response formatting.
+   - PREREQUISITES: prompt queue, view resolvers (for the mirror push).
 
-5. PRESCRIBED — THE MERGE ORCHESTRATOR (inside WSM).
-   - RESPONSIBILITIES: queue admission per repo, phase execution, the git
-     work, merge bubble/footer/roster fact synthesis.
-   - INTERFACE and USAGE PATTERNS: to be detailed as its section is
-     walked (deliberately still owed).
-   - PREREQUISITES: registry, lease.
+5. PRESCRIBED — THE PROMPT QUEUE (peer module).
+   - RESPONSIBILITIES: the ONE path for ALL session-bound deliveries —
+     prompts from every origin AND session-acting commands (/clear,
+     /compact) — as a CONSTRAINT, not a default.
+   - INTERFACE: submit in; delivery through the shim client; holds
+     persisted via WSM; serves the tray's facts.
+   - USAGE: check the occupancy lease (delivering the lease holder's own
+     submissions, refusing or holding others per the lease's policy);
+     deliver if clear, else hold; on turn resolution, pop and deliver
+     the next held item.
+   - PREREQUISITES: WSM, shim client.
 
-6. INVARIANT — orthogonality: the prompt queue, merge orchestrator, and
-   drain controller never call each other laterally; they meet ONLY at
-   the lease and the registry. Given registry+lease, they are pairwise
-   independent and parallelizable.
+6. PRESCRIBED — THE MERGE ORCHESTRATOR (peer module).
+   - RESPONSIBILITIES: the whole merge — per-repo queue, phases
+     (including the git work and agent-driven conflict resolution), and
+     the merge facts the frontend draws.
+   - INTERFACE: enqueue (MergeWorkspace = enqueued, rest is push);
+     pause/resume/evict; dequeue offer via the tray; emits merge facts
+     for the view resolvers, never touching a view itself.
+   - USAGE: holds the occupancy lease for the merge's duration; its
+     remediation prompts route through the prompt queue like any origin;
+     phases are append-only (a repeat pass is a new phase).
+   - GOTCHAS: phase history is feed content, not WSM columns; an
+     in-flight merge across a daemon restart is resumed or LOUDLY
+     failed, never left with the lease stuck; the composer gate is the
+     primary defense against post-merge-start prompts and the merging
+     refusal arm is the race fallback; the old daemon's merge code is
+     the edge-case reference.
+   - PREREQUISITES: WSM, shim client, prompt queue.
 
-7. DISCRETIONARY — registry (workspace table; prereqs: none), session
-   binding (session_binding; prereqs: registry), drain/shutdown
-   controller (shutdown_schedule + idle sweep; prereqs: registry, lease;
-   its lease usage is fully covered by 3). Internal design is the
-   implementing orchestrator's.
+7. INVARIANT — orthogonality: the prompt queue, merge orchestrator, and
+   drain controller never call each other laterally (the merge's prompts
+   use the queue's one public path like any origin); they meet only at
+   WSM and its lease.
 
-8. WSM is the workspace-state coordinator and SOLE DATABASE OWNER (all
-   seven tables) — INVARIANT.
+8. INVARIANT — response-side ownership: the ingest core and the view
+   resolvers own ALL outcome formatting — including session-acting
+   command outcomes such as /clear's separation row, which happen at
+   EXECUTION time, not submission time — and no request-side component
+   formats responses.
+
+9. DISCRETIONARY — drain/shutdown controller (schedule + idle sweep;
+   prereqs: WSM, shim client; acquires the lease like any peer).
 ## Not yet walked
 - The EMACS+WEBAPP section (Connect server + resolvers/publishers) and
   the internal-only components (ingest core, failure classification,
