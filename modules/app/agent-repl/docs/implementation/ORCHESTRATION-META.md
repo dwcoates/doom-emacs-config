@@ -53,3 +53,23 @@ survive compaction. It joins the post-compaction mandatory-reload set.
    land in THIS document AUTOMATICALLY, the moment stated — the
    orchestrator never waits to be told to record one (the design record's
    record-on-settlement rule, applied to procedures).
+
+9. ALL FEEDBACK IS PROCESS FEEDBACK. Every piece of feedback the user
+   gives during this planning — including feedback phrased as iteration on
+   one in-flight draft — applies to EVERYTHING covered by the process, and
+   lands in this document the moment it is given. There is no
+   "draft-local" revision: a correction to one entry IS a rule for every
+   entry, and rule 8's automatic-recording obligation covers it. (The
+   classification error this rule closes: treating a general principle as
+   sketch iteration because it arrived while a sketch was open.)
+
+10. PRESCRIPTION BREVITY. Prescriptions are written MUCH more simply than
+    a full specification: a few short lines per template field. Detail
+    beyond what orchestration-readiness needs is a defect (rule 7's
+    purpose applied to the writing itself).
+
+11. UNAMBIGUOUS COMPONENT REFERENCES. When an entry mentions another
+    component, the mention is short but NEVER ambiguous — name the
+    component and anchor it ("the WSM occupancy lease (entry 3)", "the
+    shim client's occupancy face (entry 2)"), never a bare word like
+    "lease" or "publishers" that could name several things.
