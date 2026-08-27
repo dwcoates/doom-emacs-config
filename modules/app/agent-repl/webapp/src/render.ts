@@ -2433,9 +2433,9 @@ function FailureCardBubble(item: FailureCardItem): string {
  * debugging a resume or a query death needs named individually.
  */
 function failureEvidenceHtml(kind: import("./frontend-proto.js").FailureKind): string {
-  if (kind.kind.case === "queryTermination" && kind.kind.value.detail !== undefined) {
-    return queryTerminationFailureHtml(kind.kind.value.detail);
-  }
+  // `FailureKind.query_termination` was deleted; a query death now rides the
+  // feed entry it belongs to. `queryTerminationFailureHtml` is still reached
+  // through `resumeFailureHtml`, whose cause arm carries the same record.
   if (kind.kind.case === "sessionResumeFailed" && kind.kind.value.detail !== undefined) {
     return resumeFailureHtml(kind.kind.value.detail);
   }
