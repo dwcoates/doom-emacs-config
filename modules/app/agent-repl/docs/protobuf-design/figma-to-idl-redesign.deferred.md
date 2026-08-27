@@ -187,3 +187,12 @@ context_budget_warning (tag 24) was KEPT.
 split-to-directory, unchanged extents plus AgentReadStart.requested_pages);
 `UserContentBlock.file` (tag 4) and content_blocks' FileBlock family.
 Rendering non-text reads and attachment chips is a feature of its own.
+
+### get_plan — the path-less plan read (deferred 2026-08-27)
+
+`SDKControlGetPlanRequest` (subtype 'get_plan', sdk.d.ts:3156): reads the
+session's current plan-mode plan without knowing the plan file's path (the
+worker resolves its own plan slug; never creates one). Not modeled — the
+landed FeedPlan bubble gets its document from the ExitPlanMode output. This
+verb is the enabler if the planning state ever becomes LIVE-UPDATING (the
+daemon polling the plan as it grows instead of waiting for the exit).
