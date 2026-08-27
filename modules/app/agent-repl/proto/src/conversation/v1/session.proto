@@ -25,6 +25,9 @@ message SessionStarted {
   // The vendor's identity for this session — what a later resume names and
   // what the store scopes by. May differ from the one asked for when the
   // vendor rotated it; the vendor's answer wins.
+  // THE RUNTIME'S OWN ANSWER, always: the vendor also spells a session id into
+  // its transcript records and the two spellings diverge; the transcript
+  // spelling stays shim-side and never rides this field.
   string vendor_session_id = 1;
   // Who is driving: the shim's build and the SDK it embeds.
   SessionRuntime runtime = 2;
@@ -1055,6 +1058,8 @@ message SessionKilledForced {
   // The turn that was interrupted, if one was in flight.
   optional TurnId interrupted_turn = 1;
   // Every detached item that was stopped.
+  // PRODUCER NOTE: named from the shim's own tracking at the kill; the
+  // vendor's record carries no ids.
   repeated DetachedWorkId stopped_work = 2;
 }
 
@@ -1064,5 +1069,7 @@ message SessionLive {
   // The turn in flight, if one is.
   optional TurnId turn_in_flight = 1;
   // Every detached item live now.
+  // PRODUCER NOTE: filled from the shim's OWN live-work tracking (its open
+  // detached-work streams), never from any vendor record.
   repeated DetachedWorkId live_work = 2;
 }

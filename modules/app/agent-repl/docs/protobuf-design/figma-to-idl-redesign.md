@@ -328,6 +328,35 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### RESTRUCTURE batch 2 lands — trigger facts co-exist; the tracker forks its own vocabulary; live/stopped-work lists are CONNECTION facts; the session id names its space
+
+**CTRL-15 ("(a) is fine").** AgentPermissionTrigger's either/or becomes
+THREE INDEPENDENT OPTIONALS (blocked_path, ask_rule, note) — the vendor can
+report all together and dropping any hid part of the reason.
+
+**AGENT-5 ("they should be separate vocabularies. we are not beholden to
+bad api names of the vendor").** The task tracker forks its own status set:
+AgentTaskState keeps pending | running | completed | deleted and RETIRES
+failed/killed/paused (tags 7-9) — a checklist item is a plan entry, not a
+process; the footer checklist trims to the same three drawn treatments
+(tags 4-6 retired). The vendor's shared background-task vocabulary no
+longer leaks into the tracker.
+
+**AGENT-7/8 (the user's design).** TurnLive/SessionLive.live_work and
+TurnKilledForced/SessionKilledForced.stopped_work KEEP their id lists, with
+producer notes landing the user's point: for every async item the daemon
+holds a connection to the shim, so the live set is implicit in the OPEN
+DETACHED-WORK STREAMS — the lists are filled from the shim's own tracking,
+never from vendor records (whose signals carry counts, not ids).
+
+**IDENT-18 ("a is fine").** SessionStarted.vendor_session_id is documented
+as THE RUNTIME'S OWN ANSWER; the transcript's divergent spelling (observed
+differing in ~22%% of records) stays shim-side and never rides the field.
+
+**THE RESTRUCTURE BUCKET IS CLOSED.** All 17 survivors are landed, ruled,
+or deferred; remaining before the design-complete gate: CTRL-8's
+bespoke-per-command program and the SIMPLE-ADD wave's orchestrator review.
+
 ### RESTRUCTURE batch 1 rulings land: middle-slice reads; optional policy decider; the identity bucket is DEFERRED; the command enum and glob extent stand
 
 **TOOLIO-6 ("let's fix that at schema level, and we should support at the

@@ -294,9 +294,10 @@ message AgentTaskState {
   optional string owner = 3;
 
   // Where it stands. Arms rather than an enum, so a status arrives with the
-  // evidence it implies and a status the vendor adds later is a
-  // compiler-surfaced gap rather than an unhandled value. The set is the
-  // vendor's own rather than invented here.
+  // evidence it implies and one added later is a compiler-surfaced gap. THE
+  // SET IS THE TRACKER'S OWN, deliberately narrower than the vendor's shared
+  // background-task vocabulary: a checklist item is a plan entry, not a
+  // process, so process states (killed, paused, failed) are not spelled here.
   oneof status {
     // Recorded but not begun.
     AgentTaskPending pending = 4;
@@ -305,17 +306,8 @@ message AgentTaskState {
     AgentTaskRunning running = 5;
     // Done, having achieved what it described.
     AgentTaskCompleted completed = 6;
-    // Done, having failed to. Distinct from `killed`: the work was attempted
-    // and did not succeed.
-    AgentTaskFailed failed = 7;
-    // Ended by something stopping it rather than by resolving either way.
-    AgentTaskKilled killed = 8;
-    // Begun and suspended, expected to resume. Not a terminal status: a later
-    // act can move it back to running.
-    AgentTaskPaused paused = 9;
-    // Removed from the tracker. Distinct from every ending above: the task
-    // was not resolved, it was retracted, and a consumer drops the entry
-    // rather than drawing it as finished.
+    // Removed from the plan. Tags 7-9 are RETIRED: the process states
+    // (failed, killed, paused) never belonged to a plan entry.
     AgentTaskDeleted deleted = 10;
   }
 
@@ -347,15 +339,8 @@ message AgentTaskRunning {
 // Finished, having done what it said it would.
 message AgentTaskCompleted {}
 
-// Finished, having failed to do it.
-message AgentTaskFailed {}
 
-// Ended because something stopped it, rather than because it resolved either
-// way.
-message AgentTaskKilled {}
 
-// Started and suspended, expected to resume.
-message AgentTaskPaused {}
 
 // Removed from the tracker.
 message AgentTaskDeleted {}

@@ -90,18 +90,19 @@ message AgentPermissionPrompt {
   optional string description = 3;
 }
 
-// Why this particular call was gated rather than auto-decided.
+// Why this particular call was gated rather than auto-decided. THREE
+// INDEPENDENT FACTS, not a choice: the vendor can report a blocked path AND
+// a forcing ask rule AND an unclassified note on one ask, and dropping any
+// would hide part of the reason from the user. Each is UNSET when the vendor
+// reported that fact not at all.
 message AgentPermissionTrigger {
-  // The set arm is the trigger; each carries only what that trigger knows.
-  oneof reason {
-    // The call reached a path outside the allowed directories.
-    AgentPermissionBlockedPath blocked_path = 1;
-    // A user-configured ask rule forced the prompt; the user's stated intent
-    // is a human prompt, so hosts must not auto-approve it.
-    AgentPermissionAskRule ask_rule = 2;
-    // The vendor explained the trigger in a sentence it did not classify.
-    AgentPermissionTriggerNote note = 3;
-  }
+  // The call reached a path outside the allowed directories.
+  optional AgentPermissionBlockedPath blocked_path = 1;
+  // A user-configured ask rule forced the prompt; the user's stated intent
+  // is a human prompt, so hosts must not auto-approve it.
+  optional AgentPermissionAskRule ask_rule = 2;
+  // The vendor explained the trigger in a sentence it did not classify.
+  optional AgentPermissionTriggerNote note = 3;
 }
 
 // The path that fell outside the allowed directories.

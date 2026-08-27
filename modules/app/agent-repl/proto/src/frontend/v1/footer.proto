@@ -777,14 +777,9 @@ message FooterTaskRowStatus {
     FooterTaskRowPending pending = 1;
     // Spinner — in progress, with the in-progress phrasing when given.
     FooterTaskRowRunning running = 2;
-    // ☑ — done.
+    // ☑ — done. Tags 4-6 are RETIRED: the tracker's vocabulary carries no
+    // process states, so the checklist draws none.
     FooterTaskRowCompleted completed = 3;
-    // ✗ — the task failed.
-    FooterTaskRowFailed failed = 4;
-    // ✗ — the task was stopped by hand.
-    FooterTaskRowKilled killed = 5;
-    // ⏸ — deliberately on hold.
-    FooterTaskRowPaused paused = 6;
   }
 }
 // Not started. Empty: the arm is the whole fact.
@@ -802,12 +797,6 @@ message FooterTaskRowActiveForm {
 }
 // Done. Empty: the arm is the whole fact.
 message FooterTaskRowCompleted {}
-// Failed. Empty: the arm is the whole fact.
-message FooterTaskRowFailed {}
-// Stopped by hand. Empty: the arm is the whole fact.
-message FooterTaskRowKilled {}
-// On hold. Empty: the arm is the whole fact.
-message FooterTaskRowPaused {}
 
 // ---- The shells panel ------------------------------------------------------
 
