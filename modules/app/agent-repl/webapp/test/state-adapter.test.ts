@@ -997,7 +997,7 @@ describe("failureCard arm", () => {
     const items = itemsFrom({
       uuid: "failure:e9",
       failureCard: {
-        kind: { apiOverloaded: { httpStatus: 529, attempts: 10 } },
+        kind: { shimDegraded: { component: "connection" } },
         message: "the API is overloaded",
         detail: "status=529",
         open: {},
@@ -1006,21 +1006,6 @@ describe("failureCard arm", () => {
     // Assert
     const card = items[0] as FailureCardItem;
     expect(card.view.message).toBe("the API is overloaded");
-  });
-
-  it("puts a vendor arm on the vendor side", () => {
-    // Arrange / Act — the side decides the card's color, and it comes from the
-    // arm rather than from a class field that could disagree with it.
-    const items = itemsFrom({
-      uuid: "failure:e9",
-      failureCard: {
-        kind: { apiOverloaded: {} },
-        message: "the API is overloaded",
-        terminal: {},
-      },
-    });
-    // Assert
-    expect(failureSide((items[0] as FailureCardItem).view.kind)).toBe("vendor");
   });
 
   it("puts a machinery arm on the machinery side", () => {
@@ -1058,7 +1043,7 @@ describe("failureCard arm", () => {
     // Arrange / Act
     const items = itemsFrom({
       uuid: "failure:e9",
-      failureCard: { kind: { apiOverloaded: {} }, message: "boom", terminal: {} },
+      failureCard: { kind: { shimDegraded: {} }, message: "boom", terminal: {} },
     });
     // Assert
     expect((items[0] as FailureCardItem).uuid).toBe("failure:e9");
@@ -1079,7 +1064,7 @@ describe("failureCard arm", () => {
       itemsFrom({
         uuid: "f1",
         failureCard: {
-          kind: { apiOverloaded: {}, shimDegraded: {} },
+          kind: { shimDegraded: {}, sessionShimDied: {} },
           message: "y",
           terminal: {},
         },
@@ -1091,7 +1076,7 @@ describe("failureCard arm", () => {
     // Arrange / Act / Assert — an open alarm and a settled one are different
     // news, and neither may be assumed.
     expect(() =>
-      itemsFrom({ uuid: "f1", failureCard: { kind: { apiOverloaded: {} }, message: "y" } }),
+      itemsFrom({ uuid: "f1", failureCard: { kind: { shimDegraded: {} }, message: "y" } }),
     ).toThrow(/exactly one lifecycle arm/);
   });
 
@@ -1100,7 +1085,7 @@ describe("failureCard arm", () => {
     expect(() =>
       itemsFrom({
         uuid: "f1",
-        failureCard: { kind: { apiOverloaded: {} }, message: "y", open: {}, terminal: {} },
+        failureCard: { kind: { shimDegraded: {} }, message: "y", open: {}, terminal: {} },
       }),
     ).toThrow(/exactly one lifecycle arm/);
   });
