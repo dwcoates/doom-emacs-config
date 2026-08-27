@@ -234,7 +234,7 @@ colored beside it."
 (defun agent-repl-test--failure-kind-arms ()
   "Return the protojson names of every `FailureKind' oneof arm."
   (agent-repl-test--generated-oneof-arms
-   "agentshim/frontend/v1/errors.pb.go" "FailureKind"))
+   "frontend/v1/failure.pb.go" "FailureKind"))
 
 (ert-deftest agent-repl-test-failure-kind-partition-covers-every-wire-arm ()
   "Every `FailureKind' arm the proto declares has a side declared here."

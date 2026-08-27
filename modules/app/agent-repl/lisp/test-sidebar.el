@@ -2150,7 +2150,7 @@ Both read the one minibuffer, so the guard is shared rather than per-action."
 ;; vocabulary in the test would be a fourth list to drift.
 
 (defconst agent-repl-test--frontend-proto-file
-  (expand-file-name "../proto/agentshim/frontend/v1/sidebar.proto"
+  (expand-file-name "../proto/src/frontend/v1/sidebar.proto"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "Absolute path to the component proto that declares `RosterRow', resolved at
 LOAD time.
