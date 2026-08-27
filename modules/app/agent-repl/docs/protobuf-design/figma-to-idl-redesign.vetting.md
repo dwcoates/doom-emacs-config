@@ -520,3 +520,13 @@ per-arm-correct family can still have sequence holes.
 **Disposition.** Run at the vetting stage as a presented overview; the
 user's review verdicts (gaps to fill, pairs to forbid) become ordinary
 landing increments before the contract freezes for fanout.
+
+## Run-or-defer rulings (design-complete gate, 2026-08-27)
+
+RUN now: items 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12. DEFERRED to the
+implementation wave: item 5 (rebuild the fake-query scripts from captured
+real-binary transcripts — test infrastructure, no contract shape at stake).
+
+CONSTRAINT ON ITEM 1 (user-imposed): the route verification must cross-
+reference OFFICIAL documentation and online sources, never local transcript
+history — the local corpus is inadmissible for this item.
