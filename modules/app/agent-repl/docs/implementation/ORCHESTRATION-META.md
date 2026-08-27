@@ -1,0 +1,43 @@
+# ORCHESTRATION META — FOR THE PLANNING ORCHESTRATOR ONLY
+
+Downstream agents do NOT consume this document. It records the PROCEDURES
+established for the daemon (and general fanout) planning process so they
+survive compaction. It joins the post-compaction mandatory-reload set.
+
+## Procedures
+
+1. THE MARKER VOCABULARY. Every component entry in a planning doc opens
+   with one of three markers:
+   - PRESCRIBED — needs a dedicated module; the entry follows the fixed
+     template: RESPONSIBILITIES / INTERFACE / USAGE PATTERNS /
+     PREREQUISITES.
+   - INVARIANT — a cross-component constraint, binding but prescribing no
+     internals.
+   - DISCRETIONARY — named only for the dependency graph: one line +
+     prerequisites + "internal design is the implementing orchestrator's."
+   Anything unmarked is DISCRETIONARY BY DEFAULT — silence never implies
+   prescription.
+
+2. PRESCRIPTION DEPTH. Only non-trivial components are prescribed;
+   orchestrators fill trivial gaps dynamically. Over-prescription is a
+   defect.
+
+3. PREREQUISITES ARE THE SEQUENCING GRAPH. Every prescribed or named
+   component carries its prereqs; the annotations double as the
+   implementer-orchestration plan (parallelizable = disjoint prereq
+   subtrees).
+
+4. DECISIONS LAND IMMEDIATELY. Every architecture decision settled in
+   conversation lands in the owning subsystem's planning doc the moment it
+   settles, marked per (1).
+
+5. THE DAEMON ARCHITECTURE METHOD: by agentrepl.v1 ENDPOINT — one sequence
+   diagram per rpc (31) plus exactly two non-endpoint diagrams (BOOT
+   RECOVERY, IDLE SWEEP); shim.v1 calls are implementation details inside
+   diagrams, never the set's basis; other systems appear as interface
+   targets only, never their internals. Shared machinery surfaces
+   organically through diagram overlap; the audit for machinery in NO
+   diagram is the gap check.
+
+6. REPLACEMENT COVERAGE prescribes INTEGRATION and E2E specs only — unit
+   coverage falls out of the proto→code mapping convention.
