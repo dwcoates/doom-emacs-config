@@ -603,54 +603,11 @@ message AgentResponseRefused {
   // The vendor's stated explanation. UNSET when it gave none.
   optional AgentResponseRefusalExplanation explanation = 1;
 
-  // WHICH SAFETY CATEGORY the refusal fell under. UNSET when the vendor
-  // classified the refusal into none — absence is not a category it declined
-  // to name.
-  //
-  // Carried because the category is what tells a reader whether a refusal is
-  // about the request's SUBJECT or about the shape of what was asked for, and
-  // those lead to different next actions.
-  optional AgentRefusalCategory category = 2;
-
-  // The model that refused. UNSET when the vendor did not name it, in which
-  // case the session's effective model is the best a reader has.
-  //
-  // WORTH CARRYING SEPARATELY: a refusal may be answered by a fallback on a
-  // DIFFERENT model, so the session's effective model at read time is not
-  // reliably the one that refused.
-  optional AgentModel original_model = 3;
-
-  // A model the vendor suggests would not refuse. UNSET when it suggested
-  // none. USER-ACTIONABLE: this is the one part of a refusal a surface can
-  // offer to act on.
-  optional AgentModel recommended_model = 4;
-
-  // The vendor's own handle for a billing credit against this refused
-  // attempt, quotable when the charge is disputed. UNSET when it issued none.
-  // Opaque: carried and shown, never parsed.
-  optional string fallback_credit_token = 5;
-
-  // Whether the vendor asserts a prefill claim against this refusal — its own
-  // statement that the refused attempt was partially prefilled and is
-  // therefore chargeable differently. UNSET when it asserted nothing either
-  // way, which is not the same as asserting `false`.
-  optional bool fallback_has_prefill_claim = 6;
+  // Tags 2-6 are RETIRED: the refusal's category, model pair and billing
+  // credit fields are deferred — see the deferred-work metadocument
+  // ("refusal detail").
 }
 
-// The safety categories a refusal can fall under, as the vendor names them.
-//
-// A closed set of scalar labels with no per-value payload and no exclusive
-// sibling, so an enum by the convention's own carve-out. A category the vendor
-// adds later arrives as UNSPECIFIED, which a consumer draws as "refused
-// without a stated category" — the same as absence.
-enum AgentRefusalCategory {
-  AGENT_REFUSAL_CATEGORY_UNSPECIFIED = 0;
-  AGENT_REFUSAL_CATEGORY_CYBER = 1;
-  AGENT_REFUSAL_CATEGORY_BIO = 2;
-  AGENT_REFUSAL_CATEGORY_FRONTIER_LLM = 3;
-  AGENT_REFUSAL_CATEGORY_REASONING_EXTRACTION = 4;
-  AGENT_REFUSAL_CATEGORY_GENERAL_HARMS = 5;
-}
 // The explanation element.
 message AgentResponseRefusalExplanation {
   // The vendor's wording, verbatim.
@@ -704,11 +661,9 @@ message AgentReadStart {
   ReadPath path = 1;
   // When the read began, so a consumer can draw how long it has been waiting.
   AgentActivityStartedAt started_at = 2;
-  // The page range the caller asked for, as written, when the read named one.
-  // MEANINGFUL ONLY FOR A PAGED DOCUMENT (a PDF); UNSET for every other read,
-  // which is the ordinary case. Carried verbatim: the range grammar belongs to
-  // the tool that parses it.
-  optional string requested_pages = 3;
+  // Tag 3 is RETIRED: the PDF page-range request is deferred with the pdf
+  // read extent — see the deferred-work metadocument ("non-text read
+  // extents").
 }
 
 // The file was read.
@@ -730,22 +685,9 @@ message AgentReadSuccess {
     // back. The common shape for a large file a caller already knows its way
     // around.
     AgentReadRange range = 10;
-    // The file is an IMAGE and came back as image data. Not text with a flag
-    // beside it: an image read is drawn by a different renderer entirely,
-    // which is why it is its own arm rather than a `whole` carrying base64.
-    AgentReadImage image = 4;
-    // The file is a PDF and came back as document data.
-    AgentReadPdf pdf = 5;
-    // The file is a notebook and came back as cells rather than as lines.
-    AgentReadNotebook notebook = 6;
-    // The file was too large to carry back at all, so the tool split it to a
-    // directory. NOTHING OF THE CONTENT IS HERE; the consumer is told where it
-    // went.
-    AgentReadSplitToDirectory split_to_directory = 7;
-    // The file has not changed since it was last read, so the tool returned
-    // nothing rather than the contents again. Without this arm an elided read
-    // is indistinguishable from an empty file.
-    AgentReadUnchanged unchanged = 8;
+    // Tags 4-8 are RETIRED: the image, pdf, notebook, split-to-directory
+    // and unchanged extents are deferred — see the deferred-work
+    // metadocument ("non-text read extents").
   }
 
   // When the read settled. UNSET when the producer observed no instant.
@@ -757,90 +699,6 @@ message AgentReadWhole {
   // Everything the file holds.
   string contents = 1;
 }
-
-// The file is an image, and came back as image data.
-message AgentReadImage {
-  // The image bytes as the tool returned them.
-  bytes data = 1;
-  // The IANA media type of `data`, so a consumer need not sniff the bytes.
-  string media_type = 2;
-  // How large the file is on disk. Stated because the bytes above may have
-  // been re-encoded or downscaled, so their length is not the file's size.
-  uint64 original_size_bytes = 3;
-  // The image's dimensions, as the tool measured them. UNSET when it measured
-  // none.
-  optional AgentReadImageDimensions dimensions = 4;
-}
-
-// An image read's two sizes: what the file is, and what was handed to the
-// model. THEY DIFFER whenever the tool downscaled to fit a budget, and a
-// surface that draws only one of them cannot say that happened.
-message AgentReadImageDimensions {
-  // The image's own width in pixels.
-  uint32 original_width = 1;
-  // The image's own height in pixels.
-  uint32 original_height = 2;
-  // The width the model was shown.
-  uint32 display_width = 3;
-  // The height the model was shown.
-  uint32 display_height = 4;
-}
-
-// The file is a PDF, and came back as document data.
-message AgentReadPdf {
-  // The document bytes as the tool returned them — the whole file, or the
-  // pages `AgentReadStart.requested_pages` asked for.
-  bytes data = 1;
-  // How large the file is on disk, which differs from `data`'s length whenever
-  // a page range was taken.
-  uint64 original_size_bytes = 2;
-}
-
-// The file is a notebook, and came back as cells.
-message AgentReadNotebook {
-  // The notebook's cells, in document order.
-  //
-  // UNTYPED BY NECESSITY, and this is the one reason that qualifies: a
-  // notebook cell's shape is the notebook FORMAT's, which the producer does
-  // not hold a schema for and which varies by kernel and by format version.
-  // Structured rather than a string so a generic view can list a cell's fields
-  // without re-parsing; NOTHING BRANCHES ON A KEY INSIDE IT.
-  repeated google.protobuf.Struct cells = 1;
-}
-
-// The file was too large to return, so the tool wrote it out in pieces.
-message AgentReadSplitToDirectory {
-  // The directory the pieces were written to, so a reader — or the agent's
-  // next call — can reach them.
-  string output_dir = 1;
-  // How many pieces it was split into.
-  uint32 part_count = 2;
-  // How large the file is on disk.
-  uint64 original_size_bytes = 3;
-}
-
-// The file was unchanged since it was last read, so nothing came back.
-//
-// A SUCCESS WITH NO CONTENT, not a failure and not an empty file: the tool
-// deliberately elided the contents because the reader already has them.
-message AgentReadUnchanged {
-  // WHAT THE ELISION IS RELATIVE TO. The set arm is the answer, because the
-  // two mean different things to a reader: one says "you read this yourself",
-  // the other says "this was placed in context before you asked".
-  oneof basis {
-    // Unchanged since an earlier read in this same session.
-    AgentReadUnchangedSincePriorRead prior_read = 1;
-    // Unchanged since the tool SEEDED it into context without a read of its
-    // own — so there is no earlier read frame for a consumer to point at.
-    AgentReadUnchangedSinceSeeded seeded = 2;
-  }
-}
-
-// Unchanged since an earlier read in this session.
-message AgentReadUnchangedSincePriorRead {}
-
-// Unchanged since the contents were seeded into context without a read.
-message AgentReadUnchangedSinceSeeded {}
 
 // A middle slice of the file: the caller named a starting line and got a
 // bounded run of lines from there. The daemon highlights exactly this text —

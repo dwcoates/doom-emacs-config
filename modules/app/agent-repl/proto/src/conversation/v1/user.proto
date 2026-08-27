@@ -4,7 +4,6 @@ syntax = "proto3";
 
 package conversation.v1;
 
-import "conversation/v1/agent_activity.proto";
 import "conversation/v1/content_blocks.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
@@ -25,94 +24,8 @@ message UserSaid {
   // pastes images, and a single block could not hold one alongside their words.
   UserContent content = 1;
 
-  // WHERE THIS PROMPT CAME FROM. UNSET when the producer stated nothing about
-  // its origin.
-  //
-  // THE LOAD-BEARING QUESTION IS WHETHER A PERSON TYPED IT. A prompt injected
-  // by tooling and a prompt a person composed are drawn identically without
-  // this, so a feed shows an automated nudge as something the user said —
-  // and a reader judging a conversation cannot tell which parts of it a human
-  // actually asked for.
-  optional UserPromptProvenance provenance = 2;
-}
-
-// Where a prompt came from, in the two independent senses the producer reports
-// it: WHAT SUBMITTED it, and WHO it is on behalf of. Both are optional because
-// a producer may state either, both, or neither.
-message UserPromptProvenance {
-  // What submitted the prompt. UNSET when the producer named nothing.
-  optional UserPromptSource source = 1;
-  // Whose intent the prompt carries. UNSET when the producer named nothing.
-  optional UserPromptOrigin origin = 2;
-}
-
-// WHAT SUBMITTED the prompt.
-message UserPromptSource {
-  oneof source {
-    // A person typed it into the composer.
-    UserPromptTyped typed = 1;
-    // A program submitted it through the SDK.
-    UserPromptFromSdk sdk = 2;
-    // The tooling INJECTED it — a reminder, a notice, a re-drive. Nobody asked
-    // for it and nobody typed it.
-    UserPromptInjected injected = 3;
-    // It had been held in a queue and was released when the agent became free.
-    // Someone typed it, but not now: its position in the conversation is not
-    // where it was composed.
-    UserPromptFromQueue queued = 4;
-  }
-}
-
-// A person typed it.
-message UserPromptTyped {}
-
-// A program submitted it through the SDK.
-message UserPromptFromSdk {}
-
-// The tooling injected it.
-message UserPromptInjected {}
-
-// It was released from a queue.
-message UserPromptFromQueue {}
-
-// WHOSE INTENT the prompt carries.
-message UserPromptOrigin {
-  oneof origin {
-    // A person's own instruction.
-    UserPromptFromHuman human = 1;
-    // ANOTHER AGENT SENT IT. The send side is a first-class unit of the
-    // sender's work; this is the receiving half, which is otherwise anonymous
-    // prose appearing for no visible reason.
-    UserPromptFromAgent peer = 2;
-    // A notification about a task the agent is watching, raised by the
-    // tooling rather than by any agent.
-    UserPromptFromTaskNotification task_notification = 3;
-    // An orchestrating agent's direction to a worker it is driving.
-    UserPromptFromCoordinator coordinator = 4;
-  }
-}
-
-// A person's own instruction.
-message UserPromptFromHuman {}
-
-// A notification about a watched task.
-message UserPromptFromTaskNotification {}
-
-// An orchestrator's direction.
-message UserPromptFromCoordinator {}
-
-// Another agent sent this prompt.
-message UserPromptFromAgent {
-  // WHICH AGENT sent it, so a reader can follow the message back to the unit
-  // of work that sent it. UNSET when the producer named no identity.
-  optional AgentId sender = 1;
-  // The human-readable name the sender was addressable by, when it had one.
-  // UNSET when it was unnamed. NOT a substitute for the identity above: two
-  // spawns may reuse a name.
-  optional string sender_name = 2;
-  // The task the sender was working when it sent this, when the producer named
-  // one. UNSET otherwise.
-  optional AgentTaskId sender_task = 3;
+  // Tag 2 is RETIRED: prompt provenance is deferred — see the deferred-work
+  // metadocument ("prompt provenance").
 }
 
 // What a PERSON said, as an ordered sequence of blocks. No reasoning and no
@@ -132,10 +45,7 @@ message UserContentBlock {
     // A block whose kind we do not model. It renders as nothing and is kept so
     // the decision is reversible.
     UnsupportedBlock unsupported = 3;
-    // A FILE THEY ATTACHED, with the text that was actually put in context.
-    // Its own arm rather than a text block holding a pasted file: a reader
-    // must be able to tell what the person WROTE from what they HANDED OVER,
-    // and a surface draws an attachment as a chip rather than as prose.
-    FileBlock file = 4;
+    // Tag 4 is RETIRED: the attached-file block is deferred — see the
+    // deferred-work metadocument ("attached-file block").
   }
 }

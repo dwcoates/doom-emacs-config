@@ -15,7 +15,6 @@ import "conversation/v1/permission.proto";
 import "conversation/v1/question.proto";
 import "conversation/v1/user.proto";
 import "conversation/v1/workflow.proto";
-import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
@@ -132,14 +131,8 @@ message AgentSuccess {
     AgentBackgrounded backgrounded = 3;
   }
 
-  // WHAT THE RUN COST AND HOW LONG IT TOOK. UNSET when the producer stated no
-  // accounting for the run.
-  //
-  // ON THE CONCLUSION, because a run's cost is a fact about the whole run and
-  // is only settled once it ends — unlike AgentActivity.usage, which is per
-  // API response. Both this and every unit's usage describe the same money;
-  // this one is the vendor's own reconciled figure and is the one to draw.
-  optional AgentRunAccounting accounting = 4;
+  // Tag 4 is RETIRED: run accounting is deferred — see the deferred-work
+  // metadocument ("run accounting").
 }
 
 // The agent moved to the background rather than ending.
@@ -192,10 +185,8 @@ message AgentFailure {
   // earlier attempts failed differently.
   repeated string errors = 30;
 
-  // WHAT THE RUN COST AND HOW LONG IT TOOK before it failed. UNSET when the
-  // producer stated no accounting. A FAILED RUN IS STILL CHARGED, so a surface
-  // that draws cost only on success under-reports the bill.
-  optional AgentRunAccounting accounting = 31;
+  // Tag 31 is RETIRED: run accounting is deferred — see the deferred-work
+  // metadocument ("run accounting").
 
   oneof failure {
     // The vendor API refused or failed a request and RECORDED that it did, so
@@ -304,129 +295,6 @@ message AgentExecutionError {}
 // A producer notice ended the run.
 message AgentContinuationPrevented {}
 
-// ---- What a run cost ----
-
-// WHAT ONE RUN COST AND HOW LONG IT TOOK, as the producer reconciled it at the
-// conclusion.
-//
-// THE RECONCILED FIGURES, unlike the per-response `AgentActivity.usage` a
-// consumer would otherwise have to sum. The producer states one API response
-// as several records repeating one usage object, so summing units over-counts;
-// these figures do not.
-message AgentRunAccounting {
-  // Tag 1 is RETIRED: money is deliberately not represented in this API.
-
-  // How long it took. UNSET when the producer stated no durations.
-  optional RunDuration duration = 2;
-
-  // How many model round-trips the run took. The denominator a per-round cost
-  // is read against, and the figure a round-trip ceiling is measured against.
-  uint32 model_round_trips = 3;
-
-  // WHAT EACH MODEL CHARGED, when more than one ran. Empty when the producer
-  // reported no per-model split.
-  //
-  // A SINGLE BUCKET IS A LIE FOR ANY RUN THAT SWITCHED MODELS — a refusal
-  // fallback, a cheap model for a subagent — because the same token count
-  // costs different money per model. This is the only place the split exists.
-  repeated ModelUsage per_model = 4;
-
-  // The run's latency telemetry. UNSET when the producer reported none.
-  optional RunLatency latency = 5;
-
-  // EVERYTHING THAT WAS DENIED during the run, as the producer rolled it up.
-  // Empty when nothing was.
-  //
-  // CARRIED HERE AS WELL AS PER-CALL, deliberately: a denial's own unit is
-  // only visible to a consumer that was watching when it happened, and a
-  // reader opening a finished run needs to see that the agent was blocked from
-  // doing things.
-  repeated RunPermissionDenial permission_denials = 6;
-}
-
-// How long a run took, and how much of that was spent waiting on the API.
-//
-// BOTH FIGURES, because their difference is the producer's own overhead — tool
-// execution, hook runs, the local machine — and a run that took four minutes
-// of which twenty seconds were the API is a different problem from one that was
-// all API.
-message RunDuration {
-  // Wall-clock milliseconds from the run's start to its conclusion.
-  uint64 wall_ms = 1;
-  // Of that, milliseconds spent inside API requests.
-  uint64 api_ms = 2;
-}
-
-// What ONE model charged within a run.
-message ModelUsage {
-  // Which model. The id as the run named it.
-  AgentModel model = 1;
-  // The id the vendor resolved that name to, when it resolved one. UNSET when
-  // the name above is already the resolved id.
-  optional AgentModel canonical_model = 2;
-  // Which provider served it, as the vendor words it; its vocabulary is not
-  // settled and it is shown rather than switched on.
-  string provider = 3;
-  // What this model's requests consumed, in the one canonical token shape.
-  TokenUsage usage = 4;
-  // Tag 5 is RETIRED: money is deliberately not represented in this API.
-  // How many web searches this model's requests performed. Billed separately
-  // from tokens, which is why it is a count rather than folded into usage.
-  uint32 web_search_requests = 6;
-
-  // THE MODEL'S CONTEXT-WINDOW SIZE, in tokens.
-  //
-  // THE DENOMINATOR EVERY CONTEXT-FILL SURFACE NEEDS. A context figure with no
-  // capacity beside it cannot say "82% full", and the capacity is not a
-  // constant per model name — a beta flag changes it.
-  uint64 context_window_tokens = 7;
-
-  // The output ceiling this model was run under, in tokens. The figure a
-  // response that stopped at its output ceiling actually hit — otherwise that
-  // stop can be reported but never quantified.
-  uint64 max_output_tokens = 8;
-}
-
-// A run's latency telemetry. Every figure is milliseconds and every one is
-// optional, because the producer states different subsets per path.
-message RunLatency {
-  // From the run's start to the first token of the model's answer.
-  optional uint64 time_to_first_token_ms = 1;
-  // From the run's start to the first token of the STREAM, which precedes the
-  // first answer token whenever the model reasoned first.
-  optional uint64 time_to_first_stream_token_ms = 2;
-  // From the run's start to the request leaving the producer.
-  optional uint64 time_to_request_ms = 3;
-  // From the process's spawn to the request leaving, which includes startup
-  // the run itself did not pay for.
-  optional uint64 time_to_request_from_spawn_ms = 4;
-  // When the request left, in unix millis.
-  optional int64 request_sent_at_ms = 5;
-  // The instant the figures above are measured from, in unix millis.
-  optional int64 time_origin_ms = 6;
-  // Whether the run claimed an already-warm process instead of starting one.
-  // The single largest explanation for two runs having very different startup
-  // latency.
-  bool warm_spare_claimed = 7;
-}
-
-// One tool call the run was refused, as the conclusion rolls it up.
-message RunPermissionDenial {
-  // Which tool was refused, by name.
-  string tool_name = 1;
-  // The call this names, when the producer named it — the same identity the
-  // gated unit carries, so a consumer can reach the unit's own frames. UNSET
-  // when it named none.
-  optional AgentActivityId call = 2;
-  // The arguments the refused call carried.
-  //
-  // UNTYPED BY NECESSITY: the roll-up covers EVERY tool, including ones this
-  // contract does not model, so no closed shape can hold it. Structured rather
-  // than a string so a generic view can list fields; NOTHING BRANCHES ON A KEY
-  // INSIDE IT. UNSET when the producer carried no arguments.
-  optional google.protobuf.Struct arguments = 3;
-}
-
 // ---- The workflow run's frame: the one unit that contains agents ----
 
 // ALWAYS DETACHED. The producer's launch answer reports only that a run started,
@@ -466,22 +334,8 @@ message AgentWorkflowUpdate {
   // Every top-level agent the script has spawned, in spawn order.
   repeated AgentWorkflowSubagent all_subagents = 1;
 
-  // THE RUN'S PHASES, in the order the script declares them. Empty when the
-  // script declares none, which is an ordinary flat run.
-  //
-  // A run with phases is a SEQUENCE OF STAGES rather than a pile of agents,
-  // and a surface that draws the agents without them draws twenty parallel
-  // bubbles where the script described four steps.
-  repeated AgentWorkflowPhase phases = 2;
-}
-
-// One declared stage of a run.
-message AgentWorkflowPhase {
-  // The phase's heading, as the script names it.
-  string title = 1;
-  // A longer account of what the phase does, when the script gives one.
-  // UNSET otherwise.
-  optional string detail = 2;
+  // Tag 2 is RETIRED: workflow phases are deferred — see the deferred-work
+  // metadocument ("workflow phases and progress").
 }
 
 // One of the run's agents: its spawn description, and whether it is live.
@@ -495,64 +349,9 @@ message AgentWorkflowSubagent {
     AgentWorkflowSubagentEnded ended = 3;
   }
 
-  // Which phase this agent belongs to, when the run has phases. UNSET for a
-  // run without them, and for an agent the script placed in none.
-  optional AgentWorkflowPhaseRef phase = 4;
-
-  // WHERE THIS AGENT HAS GOT TO, as the run's own bookkeeping states it.
-  // UNSET when the run stated nothing about it.
-  //
-  // BESIDE THE AGENT'S OWN STREAM RATHER THAN INSTEAD OF IT: the stream is the
-  // authority on what the agent DID, and this is the run's summary of it, kept
-  // so the run can be drawn whole without opening every agent's stream.
-  optional AgentWorkflowSubagentProgress progress = 5;
-}
-
-// Which phase an agent belongs to.
-message AgentWorkflowPhaseRef {
-  // Its position in the phase list carried by the run's update, zero-based.
-  uint32 index = 1;
-  // The phase's heading, repeated so this reference stands alone rather than
-  // making sense only beside the list.
-  string title = 2;
-}
-
-// What a run's bookkeeping says about one of its agents.
-message AgentWorkflowSubagentProgress {
-  // The model it is running under. UNSET when the run stated none.
-  optional AgentModel model = 1;
-
-  // Which attempt this is, one-based — so anything above one means earlier
-  // attempts failed. THE ONLY PLACE A RETRY IS VISIBLE for a workflow agent.
-  uint32 attempt = 2;
-
-  // The tool it last ran, by name. UNSET when it has run none.
-  optional string last_tool_name = 3;
-  // The run's one-line account of that call. UNSET when it kept none.
-  optional string last_tool_summary = 4;
-  // The opening of the instruction it was given, for a list row too narrow for
-  // the whole prompt. UNSET when the run kept none.
-  optional string prompt_preview = 5;
-  // The opening of its report, once it has one. UNSET while it is running.
-  optional string result_preview = 6;
-
-  // When it was queued, in unix millis. UNSET when the run stated none. A
-  // long gap between this and the start below is the run being throttled, not
-  // the agent being slow.
-  optional int64 queued_at_ms = 7;
-  // When it actually began, in unix millis. UNSET while it is still queued.
-  optional int64 started_at_ms = 8;
-  // When the run last saw it make progress, in unix millis. UNSET when the run
-  // stated none.
-  optional int64 last_progress_at_ms = 9;
-
-  // Wall-clock milliseconds it has run for, as the run counts it.
-  uint64 duration_ms = 10;
-  // Tokens it has consumed so far, as one running figure. NOT an accounting
-  // fact: the settled breakdown arrives on the agent's own conclusion.
-  uint64 total_tokens = 11;
-  // How many tool calls it has made so far.
-  uint32 tool_call_count = 12;
+  // Tags 4-5 are RETIRED: workflow phases and per-agent progress are
+  // deferred — see the deferred-work metadocument ("workflow phases and
+  // progress").
 }
 
 // The agent is running; its own stream is live.
@@ -580,28 +379,8 @@ message AgentWorkflowCompleted {
   // finished without a summary, which is not a failure.
   optional AgentWorkflowSummary summary = 1;
 
-  // WHAT THE WHOLE RUN COST AND DID. UNSET when the producer stated no
-  // totals.
-  //
-  // CARRIED RATHER THAN DERIVED by summing the agents: a run's agents are not
-  // paged and not retained, so a consumer reading a finished run back has
-  // nothing to sum.
-  optional AgentWorkflowTotals totals = 2;
-}
-
-// What a finished run cost and did.
-message AgentWorkflowTotals {
-  // Wall-clock milliseconds from launch to finish.
-  uint64 duration_ms = 1;
-  // How many agents the script spawned in total, at every depth.
-  uint32 agent_count = 2;
-  // Tokens consumed across every agent of the run.
-  uint64 total_tokens = 3;
-  // Tool calls made across every agent of the run.
-  uint32 total_tool_calls = 4;
-  // The model the script used where it named none per agent. UNSET when the
-  // run stated none.
-  optional AgentModel default_model = 5;
+  // Tag 2 is RETIRED: workflow run totals are deferred — see the
+  // deferred-work metadocument ("workflow run totals").
 }
 
 // The run was stopped at the user's command.

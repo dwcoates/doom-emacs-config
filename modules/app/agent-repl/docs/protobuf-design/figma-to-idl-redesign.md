@@ -7247,3 +7247,45 @@ scratch than to confuse ourselves with preexisting junk.
   `--go_opt=paths=source_relative` argument for the `endpoint_` prefix). The
   argument still holds and lives in the superseded record; re-added files
   cite the new record.
+
+### ORCHESTRATOR REVIEW of the SIMPLE-ADD wave: 12 new-support groups reverted to the deferred doc
+
+The subagent-landed SIMPLE-ADD wave (c7814df86) was audited whole by the
+orchestrator against four questions the user set: validity, complexity,
+deletions, and prescribed frontend propagation. Findings: zero deletions
+(every removed line was a comment or an empty message body gaining a field);
+four validity defects; nine unexpectedly complex shapes; and — decisive —
+almost nothing in the wave had a frontend UI change prescribed.
+
+The user's ruling: anything that is NEW feature/support goes to the deferred
+metadocument; only additions that service ALREADY-LANDED surfaces stay.
+Reverted (tags retired at each site, full semantics preserved in c7814df86
+and summarized in `figma-to-idl-redesign.deferred.md` under "SIMPLE-ADD wave
+groups reverted at orchestrator review"): the vendor handshake block, run
+accounting, workflow phases/progress/totals, prompt provenance, model
+fallback, token fallback credit + cache-miss diagnostics, MCP permission
+policy, server-side context edits, refusal detail, auth status, the sixteen
+vendor-session-event SessionUpdate arms (tags 8-23; context_budget_warning
+24 KEPT), the non-text read extents and the attached-file block.
+
+Kept because they complete landed surfaces: the sixteen turn-stop arms (the
+two stop-hook arms remain UNDER SCRUTINY against the stop-hook ruling), the
+AgentToolFailure payload and settle instants, the API error classes (feed
+arms already landed), MCP health arms (panel row still owes a `disabled`
+arm), fast-mode cooldown, task `deleted` status, bash
+termination/interrupt-cause/spill, detached output path, compaction detail,
+`errors` on AgentFailure, AgentBackgrounded, AgentInterrupted cause,
+subagent additions, model capabilities + effort, grep facets, task DAG
+edges, unmodeled mcp_server, thinking estimate, sandbox arms, FileBlock's
+UserContentBlock sibling arms, and SessionRuntime.agent_binary_version.
+
+**Consequences, stated so they are not silently lost.**
+
+- The validity defects found on DEFERRED shapes travel with them
+  (SessionAuthStatus adjacent-exclusivity; ModelUsage bare uint64 ceilings;
+  the AgentRefusalCategory enum-of-unsettled-vocabulary) and must be fixed
+  if the shape returns — the deferred doc records each.
+- Two KEPT defects are still owed before design-complete: the stop-hook arm
+  decision, and the MCP panel's missing `disabled` row arm.
+- Every kept group still needs its frontend propagation prescribed; that is
+  the next review pass, group by group.

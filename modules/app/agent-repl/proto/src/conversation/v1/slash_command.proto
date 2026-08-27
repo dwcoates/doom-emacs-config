@@ -132,9 +132,8 @@ message ContextCut {
     // A compaction was attempted and FAILED, so nothing was cut. The context
     // is as it was — and still too large, which is why this is not silence.
     ContextCompactionFailed compaction_failed = 3;
-    // The API ITSELF dropped part of the context, unasked. Not one of our
-    // cuts: nobody here decided it, and it happens between turns.
-    ContextEditedByServer server_edited = 4;
+    // Tag 4 is RETIRED: the server-side context edit is deferred — see the
+    // deferred-work metadocument ("server-side context edits").
   }
 }
 
@@ -144,47 +143,6 @@ message ContextCompactionFailed {
   // What the producer said went wrong, verbatim. The only account anyone has,
   // and the thing the user's next action depends on.
   string error = 1;
-}
-
-// THE API DROPPED PART OF THE CONTEXT ON ITS OWN, between one request and the
-// next, and reported what it dropped.
-//
-// A CUT NOBODY ASKED FOR, which is why it is its own arm rather than a
-// compaction: no summary replaces what went, and no user or daemon decided it.
-// Without it, tokens vanish from the model's view and every surface keeps
-// drawing them as present.
-message ContextEditedByServer {
-  // What the API removed, one entry per edit it applied. Empty when it
-  // reported an edit pass that removed nothing.
-  repeated ContextServerEdit edits = 1;
-}
-
-// One edit the API applied to the context.
-message ContextServerEdit {
-  // How many input tokens the edit removed.
-  uint64 cleared_input_tokens = 1;
-
-  // WHAT KIND OF CONTENT it removed. The set arm carries the count that makes
-  // sense for it — tool uses are counted as calls, thinking as turns, and
-  // neither number means anything for the other.
-  oneof cleared {
-    // Tool calls and their results were dropped from the context.
-    ContextClearedToolUses tool_uses = 2;
-    // Extended-thinking turns were dropped from the context.
-    ContextClearedThinking thinking = 3;
-  }
-}
-
-// Tool calls were dropped.
-message ContextClearedToolUses {
-  // How many tool calls went.
-  uint32 tool_use_count = 1;
-}
-
-// Thinking turns were dropped.
-message ContextClearedThinking {
-  // How many thinking turns went.
-  uint32 thinking_turn_count = 1;
 }
 
 // What the cut did to the context's size: how many tokens it held before,

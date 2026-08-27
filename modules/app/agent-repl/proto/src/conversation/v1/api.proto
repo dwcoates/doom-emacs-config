@@ -269,80 +269,10 @@ message TokenUsage {
   // response with no extended thinking reports.
   uint64 output_thinking_tokens = 4;
 
-  // Whether this request was billed at the refusal-fallback discount. UNSET
-  // when no fallback was in play at all, which is the ordinary case — absence
-  // is NOT "the credit was refused", which is the `not_applied` arm below.
-  optional TokenFallbackCredit fallback_credit = 5;
-
-  // Why the prompt cache did not serve what it might have. UNSET when the
-  // vendor reported no cache diagnostics for the request; a full cache hit
-  // also reports none.
-  optional TokenCacheMissDiagnostics cache_miss = 6;
+  // Tags 5-6 are RETIRED: the refusal-fallback credit and the cache-miss
+  // diagnostics are deferred — see the deferred-work metadocument
+  // ("token fallback credit", "cache-miss diagnostics").
 }
-
-// Whether a refusal-fallback response was billed at a discount.
-//
-// A REFUSAL FALLBACK RE-RUNS A REQUEST ON A SECOND MODEL, so the account would
-// otherwise pay twice for one answer. The vendor may credit the first attempt,
-// and states here whether it did.
-message TokenFallbackCredit {
-  // THE ARM IS WHETHER THE CREDIT APPLIED.
-  oneof status {
-    // The credit applied; the figures above are already net of it.
-    TokenFallbackCreditRedeemed redeemed = 1;
-    // The credit did not apply, and the vendor said why.
-    TokenFallbackCreditNotApplied not_applied = 2;
-  }
-}
-
-// The credit applied.
-message TokenFallbackCreditRedeemed {}
-
-// The credit did not apply.
-message TokenFallbackCreditNotApplied {
-  // The vendor's reason word, verbatim; its vocabulary is not settled and it
-  // is shown rather than switched on.
-  string reason = 1;
-  // What would have to be removed from the request for the credit to apply,
-  // as the vendor names those parts. Empty when it named none — the condition
-  // may not be one the caller can act on.
-  repeated string remove_to_redeem = 2;
-}
-
-// Why the prompt cache missed. Carried because a surface that reports a cold
-// or expensive request cannot otherwise say what made it one — and the answer
-// determines whether anything can be done about it (a changed system prompt is
-// the caller's doing; an unavailable cache is not).
-message TokenCacheMissDiagnostics {
-  // How many input tokens were processed fresh BECAUSE of the miss, as the
-  // vendor attributes them. Not a fourth counter beside the buckets above:
-  // this is the vendor's own attribution and is not summed with them.
-  uint64 missed_input_tokens = 1;
-
-  // WHAT INVALIDATED THE CACHE. The set arm is the reason.
-  oneof reason {
-    // A different model ran, and a prompt cache is per model.
-    TokenCacheMissModelChanged model_changed = 2;
-    // The system prompt differed from the cached prefix.
-    TokenCacheMissSystemChanged system_changed = 3;
-    // The tool definitions differed from the cached prefix.
-    TokenCacheMissToolsChanged tools_changed = 4;
-    // The message history differed from the cached prefix.
-    TokenCacheMissMessagesChanged messages_changed = 5;
-    // The message the cached prefix ended at was no longer present.
-    TokenCacheMissPreviousMessageNotFound previous_message_not_found = 6;
-    // The cache itself could not be consulted. Nothing about the request
-    // caused this.
-    TokenCacheMissUnavailable unavailable = 7;
-  }
-}
-
-message TokenCacheMissModelChanged {}
-message TokenCacheMissSystemChanged {}
-message TokenCacheMissToolsChanged {}
-message TokenCacheMissMessagesChanged {}
-message TokenCacheMissPreviousMessageNotFound {}
-message TokenCacheMissUnavailable {}
 
 // The prompt input this request did not have to process, because the prompt
 // cache already held it.
