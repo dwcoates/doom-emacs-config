@@ -7533,3 +7533,19 @@ different label.
      ── ⎇ entered worktree · ~/…/wt/fix-pagination · fix-pagination ──
         (work inside the tree)
      ── ⎇ left worktree · removed · 3 files, 2 commits discarded ──
+
+### CRON lands — the ⏱ chip and a TRUE-LIST panel with a client-ticked countdown; footer-only like tasks
+
+Fourth of the six built-in families, landed on explicit go. conversation.v1
+gets `AgentCron` (item arm 31): create/delete/list as faithful acts, the
+listed set carried WHOLE (replace semantics), job ids as the vendor's cron
+ids carried OPAQUE (they name jobs, not transcript records — the task-id
+precedent under the identity ruling). frontend.v1 gets `FooterChipCrons`
+(chip 5, count, hidden at zero) and `FooterExpandedCrons` (panel 6): a TRUE
+LIST like the agents panel — rows of vendor-composed human schedule,
+daemon-truncated prompt, RECURRING and DURABLE markers (durable survives
+the session; everything else in the footer dies with it), and the
+user-required countdown: the DAEMON resolves the next-fire INSTANT from the
+cron expression (accepted complexity) and ships epoch ms; the client ticks
+"5m 12s" per the clock convention. No feed cards anywhere — footer-only,
+the tasks precedent. Not jump targets: jobs have no bubble.
