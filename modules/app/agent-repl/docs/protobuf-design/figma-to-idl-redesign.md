@@ -328,6 +328,51 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### MONITOR lands footer-only — the 👁 chip and panel; ToolSearch and NotebookEdit join the exempt set
+
+**The drawing agreed ("design looks good"), landed verbatim:**
+
+```
+strip:  │ … status … │        ⚙ 2  ☑ 3/5  👁 2  $ 1 │   <- new 👁 monitors chip (live count),
+                                                          presence-gated like the others
+expanded (👁 selected):
+├──────────────────────────────────────────────────────┤
+│ 👁 tail e2e log for FAIL lines              12:04    │   <- description · runtime clock
+│ 👁 watch PR #7565 checks        persistent  1:32:11  │   <- persistent watches marked; no
+├──────────────────────────────────────────────────────┤      jump target (monitors have no bubble)
+```
+
+**What a monitor is.** The agent arms a background watcher (a shell command's
+stdout lines or a WebSocket's frames) whose events wake it as ordinary turn
+input; always detached, never blocking the turn.
+
+**conversation.v1.** AgentActivity.item gains monitor (25); DetachableWork
+gains the monitor arm (4) so the lifecycle rides the detached-work machinery
+like a workflow's. AgentMonitor { start { description; lifetime deadline
+{timeout_ms} | persistent (exclusive by the vendor's own rule); source
+command | websocket (EXPECTED UNMAPPED — the description is the drawn
+account); started_at_ms } | ended (no cause taxonomy claimed — the vendor
+reports only leaving the live set) | failure (shared AgentToolFailure) }.
+The vendor's taskId stays shim-side per the identity ruling (the
+DetachedWorkId envelope is the handle).
+
+**frontend.v1.** FooterLiveWorkChips gains optional monitors (👁 + count,
+FooterChipMonitors on the existing chip pattern); FooterExpanded gains the
+monitors panel (5): FooterMonitorRow { description; runtime clock (client
+ticks from started_at_ms); optional persistent marker } — deliberately NOT
+a jump target, monitors have no bubble; events are drawn nowhere special.
+
+**Also settled ("we can consider toolsearch exempt"; "NotebookEdit is
+useless, consider it exempt").** ToolSearch (deferred-tool schema loading —
+vendor plumbing) and NotebookEdit (declared-only, would need fabricated
+hunks to ride AgentEdit) join the EXEMPT SET: dropped at the shim, never
+AgentUnmodeled, never the topbar warning.
+
+**Queued next per the rulings**: ScheduleWakeup (footer status waiting ·
+wakeup with a daemon-side fallback against idle/done and a client-ticked
+countdown from a shipped deadline instant) and Artifact (a dedicated
+response-styled feed bubble).
+
 ### THE EXEMPT SET is specified — known built-ins deliberately NOT modeled; TaskStop and TaskOutput join it; tasks go FOOTER-ONLY (FeedTask dies)
 
 **The EXEMPT SET, the user's spec ("things that dont make it in the protos,
