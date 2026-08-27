@@ -2,8 +2,14 @@
 
 ;;; Commentary:
 
-;; The Emacs-side transport onto the daemon's `agentshim.frontend.v1'
-;; surface (design-agent-shim-architecture.md §3, §5.4, §10).  It replaces
+;; The Emacs-side transport onto the daemon's legacy frontend frame/command
+;; envelope, formerly `agentshim.frontend.v1'
+;; (design-agent-shim-architecture.md §3, §5.4, §10).  THAT PACKAGE WAS
+;; DELETED by the agentrepl.v1 redesign: the service is now 30 explicit RPCs
+;; plus per-component watch streams, and no message on the current wire
+;; enumerates the frame/command arms this file speaks.  Moving Emacs onto
+;; agentrepl.v1 is implementation work, not a rename, so the transport below
+;; is left intact and unpinned.  It replaces
 ;; the HTTP poller in `frontend-client.el': instead of Emacs deriving state
 ;; from raw frames, the daemon pushes RESOLVED `frontend.v1' frames over a
 ;; Unix-domain socket, newline-delimited, serialized with the canonical
@@ -70,7 +76,8 @@
                         (expand-file-name "~/.cache")))
   "Path to the daemon's frontend UDS listener (design §3).
 The daemon listens here; Emacs connects.  Serialized frames are
-newline-delimited protojson `agentshim.frontend.v1' messages."
+newline-delimited protojson frame/command messages (the deleted
+`agentshim.frontend.v1' envelope; see the header)."
   :type 'string
   :group 'agent-repl)
 
@@ -223,7 +230,9 @@ that the daemon or session is healthy.")
     "detachedWorkDelta" "topbar" "tokenBreakdown" "workspaceGate"
     "mergeQueueRoster" "restartPending" "conversationPage")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
-Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frame.proto.
+Mirrored the `frame' oneof in the deleted
+proto/agentshim/frontend/v1/frame.proto; the agentrepl.v1 redesign
+removed that envelope, so this list is now unpinned.
 A decoded frame whose sole top-level key is NOT one of these is
 malformed (unknown wire field) and signals loudly.
 
