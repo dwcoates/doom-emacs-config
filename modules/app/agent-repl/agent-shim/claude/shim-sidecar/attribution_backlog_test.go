@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
@@ -72,7 +71,7 @@ func observeHeld(t *testing.T, lifecycle *HeldLifecycle, target HeldTarget, owne
 
 // A restart past the launch line USED TO resolve the spool from the store's
 // durable open-task set, which was authoritative. That is no longer derivable:
-// `OpenTaskState.started` carried the task id, the session and the output path,
+// agentshim.v1 OpenTaskState carried the task id, the session and the output path,
 // and it was retired with no successor, so the snapshot names nothing to seed
 // an owner from.
 //
@@ -86,9 +85,9 @@ func TestAttributionBacklogRestartPastLaunchHoldsWithoutADurableOwner(t *testing
 	lifecycle := NewHeldLifecycle(4, discardHeldReport)
 	owners, _ := ownerSidecar(t)
 
-	seeded := owners.seedOwners([]*agentshimv1.OpenTaskState{{LastActivityAtMs: now.UnixMilli()}})
+	seeded := owners.seedOwners()
 	if seeded != 0 {
-		t.Fatalf("seeded durable owner mappings = %d, want 0: OpenTaskState carries no identity to seed from", seeded)
+		t.Fatalf("seeded durable owner mappings = %d, want 0: store.v1 reports no open tasks to seed from", seeded)
 	}
 	owner := owners.resolveOwnerResult(attributionOwnerTarget(target))
 	if owner.Outcome != OwnerUnresolvedAwaitingOwner {

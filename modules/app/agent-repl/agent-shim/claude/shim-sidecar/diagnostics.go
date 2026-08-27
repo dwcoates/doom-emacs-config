@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -21,7 +21,7 @@ import (
 type diagnosticOutbox struct {
 	mu     sync.Mutex
 	next   uint64
-	events []*agentshimv1.Entry
+	events []*storev1.StoreEntry
 }
 
 func (o *diagnosticOutbox) enqueue(d logging.Diagnostic) {
@@ -31,10 +31,10 @@ func (o *diagnosticOutbox) enqueue(d logging.Diagnostic) {
 	o.events = append(o.events, diagnosticEvent(d, o.next))
 }
 
-func (o *diagnosticOutbox) snapshot() []*agentshimv1.Entry {
+func (o *diagnosticOutbox) snapshot() []*storev1.StoreEntry {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return append([]*agentshimv1.Entry(nil), o.events...)
+	return append([]*storev1.StoreEntry(nil), o.events...)
 }
 
 func (o *diagnosticOutbox) acknowledge(n int) {
@@ -49,7 +49,7 @@ func (o *diagnosticOutbox) acknowledge(n int) {
 // flush writes queued events in order. A failed write leaves that exact event
 // at the queue head, so a later retry reuses its producer identity and dedup
 // key rather than creating a replacement.
-func (o *diagnosticOutbox) flush(write func(*agentshimv1.Entry) error) (*agentshimv1.Entry, error) {
+func (o *diagnosticOutbox) flush(write func(*storev1.StoreEntry) error) (*storev1.StoreEntry, error) {
 	for {
 		events := o.snapshot()
 		if len(events) == 0 {
@@ -73,7 +73,7 @@ func (o *diagnosticOutbox) flush(write func(*agentshimv1.Entry) error) (*agentsh
 // into that detail rather than dropped. It is PRESERVED, not STRUCTURED, and a
 // consumer that used to filter on level now has to parse prose. See the gap
 // note; nothing here invents a field to keep the old shape.
-func diagnosticEvent(d logging.Diagnostic, ordinal uint64) *agentshimv1.Entry {
+func diagnosticEvent(d logging.Diagnostic, ordinal uint64) *storev1.StoreEntry {
 	// An unencodable context is still rejected loudly, exactly as before: it is
 	// a bug in the caller, not a record to quietly truncate. The check is kept
 	// even though the Struct itself no longer has a field to sit in, because

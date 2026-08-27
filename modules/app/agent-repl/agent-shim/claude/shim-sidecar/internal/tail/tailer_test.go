@@ -9,8 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
-	protocolv1 "agentrepl/proto/protocol/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
@@ -21,8 +20,11 @@ func testLog() *logging.Bound {
 // stubEntry is the minimal stored record a stub handler emits per decoded
 // object: enough to carry the attribution the tailer handed it, and nothing
 // else the tailer's own mechanics depend on.
-func stubEntry(sessionID string) *agentshimv1.Entry {
-	return &agentshimv1.Entry{External: &protocolv1.ExternalEntry{SessionId: sessionID}}
+//
+// The session rides on write_id because store.v1 StoreEntry has no session
+// field at all — protocol.v1 ExternalEntry, which carried one, was deleted.
+func stubEntry(sessionID string) *storev1.StoreEntry {
+	return &storev1.StoreEntry{WriteId: sessionID}
 }
 
 // stubHandler records the frames it saw and emits one entry per decoded object.
@@ -31,10 +33,10 @@ type stubHandler struct {
 	lastCtx Context
 }
 
-func (s *stubHandler) Handle(fr []Frame, ctx *Context) []*agentshimv1.Entry {
+func (s *stubHandler) Handle(fr []Frame, ctx *Context) []*storev1.StoreEntry {
 	s.batches = append(s.batches, fr)
 	s.lastCtx = *ctx
-	var out []*agentshimv1.Entry
+	var out []*storev1.StoreEntry
 	for _, f := range fr {
 		if f.Obj != nil {
 			out = append(out, stubEntry(ctx.SessionID))
@@ -291,7 +293,7 @@ func TestTailerRestoreResumesFromCursor(t *testing.T) {
 	tr, _ := newTailer(t, p)
 	// Prime file_id via a stat, then restore an offset past the first line.
 	fi, _ := os.Stat(p)
-	tr.Restore(&agentshimv1.CursorState{FileId: statID(fi), Path: p, Offset: int64(len(first))})
+	tr.Restore(&storev1.CursorState{FileId: statID(fi), Path: p, Offset: int64(len(first))})
 	// Act
 	r, _ := tr.Poll()
 	tr.Commit(r)
