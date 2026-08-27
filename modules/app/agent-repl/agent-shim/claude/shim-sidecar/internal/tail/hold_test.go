@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
@@ -31,7 +31,7 @@ type holdStub struct {
 	lastCtx Context
 }
 
-func (s *holdStub) Handle(fr []Frame, ctx *Context) []*agentshimv1.Entry {
+func (s *holdStub) Handle(fr []Frame, ctx *Context) []*storev1.StoreEntry {
 	s.batches = append(s.batches, fr)
 	kept := len(fr)
 	ctx.HeldOffset, ctx.HeldDeliveries = 0, 0
@@ -44,7 +44,7 @@ func (s *holdStub) Handle(fr []Frame, ctx *Context) []*agentshimv1.Entry {
 			}
 		}
 	}
-	var out []*agentshimv1.Entry
+	var out []*storev1.StoreEntry
 	for _, f := range fr[:kept] {
 		if f.Obj != nil {
 			out = append(out, stubEntry(ctx.SessionID))

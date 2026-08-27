@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"strconv"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -45,7 +45,7 @@ func NewShellOutputHandler(log *logging.Bound) *ShellOutputHandler {
 }
 
 // Handle implements tail.Handler.
-func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*agentshimv1.Entry {
+func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
 	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
 		LogVerbose("handling frames=%d bytes_observed=%d", len(frames), ctx.BytesObserved)
 	if len(frames) == 0 {
@@ -68,7 +68,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*agents
 	for _, frame := range frames {
 		output.Write(frame.Raw)
 	}
-	entries := []*agentshimv1.Entry{convert.DetachedProgress(at, ctx.TaskID, output.String())}
+	entries := []*storev1.StoreEntry{convert.DetachedProgress(at, ctx.TaskID, output.String())}
 
 	code, ok := trailingExitCode(frames[0].Raw, frames[0].Offset)
 	if !ok {

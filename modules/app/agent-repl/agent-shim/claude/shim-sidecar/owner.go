@@ -3,7 +3,6 @@ package main
 import (
 	"path/filepath"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
@@ -213,14 +212,14 @@ func (s *sidecar) taskOpen(taskID string) bool {
 	return s.openTasks[taskID]
 }
 
-// seedOwners seeds the spool-owner index from the store's authoritative
+// seedOwners seeded the spool-owner index from the store's authoritative
 // open-task snapshot.
 //
-// IT CAN NO LONGER SEED ANYTHING. `OpenTaskState.started` carried the record
-// that opened a task — the task id, the session that launched it, and the output
-// path its spool lives at — and it was retired with no successor. What remains
-// says only when a task was last active, which names no task, no session and no
-// path, so there is no association to record.
+// IT HAS NO SNAPSHOT LEFT TO SEED FROM. agentshim.v1 OpenTaskState carried the
+// record that opened a task — the task id, the session that launched it, and the
+// output path its spool lives at — and it was deleted along with the CursorList
+// that delivered it. store.v1 GetSidecarCursorsResponse returns cursors only, so
+// the store reports no open tasks at all.
 //
 // WHAT THIS SEED EXISTED TO PREVENT NOW HAPPENS. A /tmp spool carries no session
 // of its own, and the launch line naming its owner may sit far behind this
@@ -231,14 +230,10 @@ func (s *sidecar) taskOpen(taskID string) bool {
 // The spool is HELD rather than guessed at, which is the same behavior an
 // unattributed spool has always had: inventing a session, or reading the /tmp
 // path's runtime id as an identity, are the two things this system refuses.
-func (s *sidecar) seedOwners(states []*agentshimv1.OpenTaskState) int {
-	if len(states) == 0 {
-		s.log.With(logging.Context{Operation: "seed-spool-owners"}).LogVerbose("owner seed entered with no persisted open tasks")
-		return 0
-	}
+func (s *sidecar) seedOwners() int {
 	s.log.With(logging.Context{Operation: "seed-spool-owners", Level: "error"}).Log(
-		"owner seed produced nothing from %d persisted open task(s): OpenTaskState carries no task, session or output path to seed from; "+
-			"live tasks' spools stay held and unread until their transcripts are re-read", len(states))
+		"owner seed produced nothing: store.v1 reports no open tasks (OpenTaskState was deleted with no successor), " +
+			"so live tasks' spools stay held and unread until their transcripts are re-read")
 	return 0
 }
 

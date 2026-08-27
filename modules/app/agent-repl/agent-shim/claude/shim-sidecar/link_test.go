@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 )
 
 // downSidecar builds a sidecar whose store socket does not exist, so every dial
@@ -222,7 +222,7 @@ func TestLinkLossDropsTheRecoveredCursorsAndRedialsAtOnce(t *testing.T) {
 	// Arrange.
 	s, now, read := downSidecar(t)
 	s.link = linkUp
-	s.cursors = map[string]*agentshimv1.CursorState{}
+	s.cursors = map[string]*storev1.CursorState{}
 
 	// Act.
 	s.linkLost("poll")
@@ -294,17 +294,18 @@ func TestOutageIsReportedPerWatchedSession(t *testing.T) {
 	if len(entries) != len(sessions) {
 		t.Fatalf("outage records = %d, want one per session (%d)", len(entries), len(sessions))
 	}
+	// THE SESSION IS NO LONGER ON THE RECORD. It sat on protocol.v1
+	// ExternalEntry.session_id, and store.v1 StoreEntry carries nothing like it,
+	// so what a per-session report produces is now one record PER SESSION with
+	// the session only inside the diagnostic's own body. The count and the
+	// verbatim reason are what remain assertable.
 	for i, entry := range entries {
-		external := entry.GetExternal()
-		if external.GetSessionId() != sessions[i] {
-			t.Fatalf("record %d session = %q, want %q", i, external.GetSessionId(), sessions[i])
+		raw := entry.GetAgentUpdate().GetUnservedItem().GetUnknown().GetRaw()
+		if got := raw.GetFields()["session_id"].GetStringValue(); got != sessions[i] {
+			t.Fatalf("record %d session = %q, want %q", i, got, sessions[i])
 		}
-		diagnostic := external.GetBookkeeping().GetProducerDiagnostic()
-		if diagnostic == nil {
-			t.Fatalf("record %d is not a producer diagnostic", i)
-		}
-		if diagnostic.GetDetail() != "store unreachable for 900ms" {
-			t.Fatalf("record %d detail = %q, want the outage reason verbatim", i, diagnostic.GetDetail())
+		if got := raw.GetFields()["detail"].GetStringValue(); got != "store unreachable for 900ms" {
+			t.Fatalf("record %d detail = %q, want the outage reason verbatim", i, got)
 		}
 	}
 }
@@ -318,10 +319,10 @@ func TestOutageReportIdentityNamesTheOutage(t *testing.T) {
 	different := degradedWindowEvents([]string{"s1"}, "store unreachable for 5000ms")
 
 	// Assert.
-	if first[0].GetInternal().GetWriteId() != second[0].GetInternal().GetWriteId() {
+	if first[0].GetWriteId() != second[0].GetWriteId() {
 		t.Fatal("one outage reported twice minted two write identities")
 	}
-	if first[0].GetInternal().GetWriteId() == different[0].GetInternal().GetWriteId() {
+	if first[0].GetWriteId() == different[0].GetWriteId() {
 		t.Fatal("two different outages share one write identity, so the second would be dropped")
 	}
 }

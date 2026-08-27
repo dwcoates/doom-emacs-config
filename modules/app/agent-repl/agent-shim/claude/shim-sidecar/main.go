@@ -26,8 +26,7 @@ import (
 	"syscall"
 	"time"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/handler"
 	"agentrepl/shim-claude-sidecar/internal/logging"
@@ -202,7 +201,7 @@ type sidecar struct {
 	// moment the link is lost, so a tailer can never be built from a stale — or
 	// absent — recovery.
 	link    linkState
-	cursors map[string]*agentshimv1.CursorState // by path; nil unless recovered
+	cursors map[string]*storev1.CursorState // by path; nil unless recovered
 	// nextDialAt is the ladder: while the link is down, Run dials whenever this
 	// deadline has passed. Holding the schedule as state the loop re-reads —
 	// rather than as a timer someone must re-arm — is what makes redialing
@@ -495,10 +494,10 @@ func (s *sidecar) pollAll() {
 // write_id on every record, which is a recovery rather than a guarantee.
 func (s *sidecar) writeBatch(res tail.PollResult) error {
 	diagnostics := s.diagnostics.snapshot()
-	entries := make([]*agentshimv1.Entry, 0, len(res.Entries)+len(diagnostics))
+	entries := make([]*storev1.StoreEntry, 0, len(res.Entries)+len(diagnostics))
 	entries = append(entries, res.Entries...)
 	entries = append(entries, diagnostics...)
-	batch := &agentshimv1.EntryBatch{Entries: entries, CursorAdvance: res.Next}
+	batch := &storev1.EntryBatch{Entries: entries, CursorAdvance: res.Next}
 	if err := s.storeWrite("tailer batch", batch); err != nil {
 		return err
 	}
@@ -510,20 +509,21 @@ func (s *sidecar) writeBatch(res tail.PollResult) error {
 // A failed write retains the exact record for retry, so the replay reuses its
 // write identity rather than minting a second copy of one diagnostic.
 func (s *sidecar) flushDiagnostics() {
-	diagnostic, err := s.diagnostics.flush(func(entry *agentshimv1.Entry) error {
-		return s.storeWrite("diagnostic outbox", &agentshimv1.EntryBatch{Entries: []*agentshimv1.Entry{entry}})
+	diagnostic, err := s.diagnostics.flush(func(entry *storev1.StoreEntry) error {
+		return s.storeWrite("diagnostic outbox", &storev1.EntryBatch{Entries: []*storev1.StoreEntry{entry}})
 	})
 	if err != nil {
+		// THE SESSION AND THE OPERATION ARE NO LONGER READABLE OFF THE RECORD.
+		// They sat on protocol.v1 ExternalEntry.session_id and
+		// BookkeepingEntry.ProducerDiagnostic.operation, both deleted; store.v1
+		// StoreEntry carries neither, and the diagnostic now travels as an
+		// unported record. The record's write identity is what is left, and it
+		// is logged rather than dropping the failure to a bare message.
 		s.log.With(logging.Context{
-			Operation: "diagnostic-flush",
-			Level:     "error",
-			Session:   diagnostic.GetExternal().GetSessionId(),
-			// The retired FilePlaneDiagnostic named its own source path and
-			// request id as fields; ProducerDiagnostic has neither, so the
-			// record's own operation is all this context can carry.
+			Operation:     "diagnostic-flush",
+			Level:         "error",
 			SinkEmergency: true,
-		}).Log("diagnostic outbox write failed for operation=%q: %v",
-			diagnostic.GetExternal().GetBookkeeping().GetProducerDiagnostic().GetOperation(), err)
+		}).Log("diagnostic outbox write failed for write_id=%q: %v", diagnostic.GetWriteId(), err)
 	}
 }
 
@@ -543,49 +543,37 @@ func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
 	}
 }
 
-// applyLifecycle updates the stale tracker and the spool-owner index from a
-// batch's detached-work records: an opened card starts tracking the work, an
-// ENDED one stops it (so it is never LOST-swept afterwards).
+// applyLifecycle updated the stale tracker and the spool-owner index from a
+// batch's detached-work records: an opened card started tracking the work, an
+// ENDED one stopped it (so it was never LOST-swept afterwards). The opening
+// record also ATTRIBUTED the work, which is what let a bare /tmp spool be tailed
+// without its path ever being read as an identity.
 //
-// The opening record also ATTRIBUTES the work. It is produced by the handler for
-// the transcript that announced the launch, so it carries the launching session,
-// and that is what later lets a bare /tmp spool be tailed without its path ever
-// being read as an identity.
+// IT HAS NO RECORDS LEFT TO READ. Its whole input was conversation.v1's
+// DetachedWorkStarted / DetachedWorkEnded family on a MessageEntry, deleted by
+// the redesign. The successor, AgentDetachedWork over DetachableWork, is keyed
+// by DetachedWorkId and AgentActivityId and rides an AgentFrame — a different
+// structure whose population is a design decision, so the converter no longer
+// produces anything this function can drive off.
 //
-// IT NO LONGER LEARNS THE SPOOL'S PATH. The retired TaskStarted carried
-// `output_path`, which seeded the owner index's EXACT-PATH half — the
-// authoritative resolution that survives two sessions reusing one task id.
-// DetachedWorkStarted has no such field, so only the task-id association remains
-// and the path index is seeded by nothing. Recorded as a gap; nothing here
-// reconstructs a path from a file name, because filename similarity is
-// deliberately not evidence.
-func (s *sidecar) applyLifecycle(entries []*agentshimv1.Entry, nowMs int64) {
-	for _, entry := range entries {
-		external := entry.GetExternal()
-		message := external.GetMessage()
-		taskID := taskIDFromMessageID(message.GetMessageId())
-		if taskID == "" {
-			continue
-		}
-		if started := message.GetDetachedWorkStarted(); started != nil {
-			s.markTaskOpen(taskID, OwnerSourceLiveLaunch)
-			s.noteTaskOwner(taskID, external.GetSessionId(), "", OwnerSourceLiveLaunch)
-			s.tracker.Open(taskID, detachedKindToTail(started.GetKind()), external.GetSessionId(), "", nowMs, nowMs)
-			continue
-		}
-		if ended := message.GetDetachedWorkEnded(); ended != nil {
-			// A LOST verdict is this sidecar's own inference, and the tracker
-			// already dropped the task when it emitted one. Closing on it again
-			// would be harmless, but treating an inference as an OBSERVED end is
-			// precisely the conflation the LOST arm exists to prevent, so it is
-			// excluded explicitly rather than by accident.
-			if ended.GetLost() != nil {
-				continue
-			}
-			s.markTaskClosed(taskID)
-			s.tracker.Close(external.GetSessionId(), taskID)
-		}
+// EVERYTHING IT DROVE IS THEREFORE DEAD, and each item is a real behavior loss:
+//
+//   - Detached work is never marked open, so it is never staleness-tracked and
+//     never resolved to LOST.
+//   - Detached work observed to END never closes its tracker entry.
+//   - A launch never attributes its task to a session, so a /tmp spool stays
+//     unowned and untailed.
+//
+// It fails LOUD, once per batch that reaches it, rather than returning quietly:
+// a silent no-op here is indistinguishable from a session with no detached work.
+func (s *sidecar) applyLifecycle(entries []*storev1.StoreEntry, nowMs int64) {
+	_ = nowMs
+	if len(entries) == 0 {
+		return
 	}
+	s.log.With(logging.Context{Operation: "apply-lifecycle", Level: "error"}).Log(
+		"detached-work lifecycle cannot be applied to %d record(s): conversation.v1 DetachedWorkStarted/DetachedWorkEnded were deleted "+
+			"and the sidecar produces no successor, so no task is tracked, closed, LOST-swept or attributed to a session", len(entries))
 }
 
 // taskIDFromMessageID recovers the task a detached-work card names, or "" when
@@ -602,50 +590,25 @@ func taskIDFromMessageID(messageID string) string {
 	return strings.TrimPrefix(messageID, prefix)
 }
 
-// detachedKindToTail maps what kind of work detached onto the per-kind silence
-// window the staleness policy applies to it.
-//
-// A kind it does not recognize gets the AGENT window, which is the longest of
-// the three. That direction is deliberate: an unknown kind must not be declared
-// LOST sooner than a known one would be, because a premature LOST is a wrong
-// verdict the user reads.
-func detachedKindToTail(kind *conversationv1.DetachedWorkKind) tail.Kind {
-	switch {
-	case kind.GetShell() != nil:
-		return tail.KindShellSpool
-	case kind.GetWorkflow() != nil:
-		return tail.KindWorkflowJournal
-	default:
-		return tail.KindAgentTranscript
-	}
-}
-
 // emit writes a set of inferred records (a LOST sweep, an outage report) to the
 // store as a single CURSOR-LESS batch.
 //
 // Cursor-less on purpose: these records were not read at a file position, so
 // there is no reader position that becomes durable with them and nothing that
 // could advance one wrongly.
-func (s *sidecar) emit(entries []*agentshimv1.Entry) {
+func (s *sidecar) emit(entries []*storev1.StoreEntry) {
 	if len(entries) == 0 {
 		return
 	}
-	if err := s.storeWrite("inferred records", &agentshimv1.EntryBatch{Entries: entries}); err != nil {
-		seenSessions := map[string]bool{}
-		for _, entry := range entries {
-			if session := entry.GetExternal().GetSessionId(); session != "" {
-				seenSessions[session] = true
-			}
-		}
-		if len(seenSessions) == 0 {
-			s.log.With(logging.Context{Operation: "store-write", Level: "error", SinkEmergency: true}).
-				Log("inferred record write failed for %d record(s): %v", len(entries), err)
-			return
-		}
-		for session := range seenSessions {
-			s.log.With(logging.Context{Operation: "store-write", Level: "error", Session: session, SinkEmergency: true}).
-				Log("inferred record write failed for %d record(s): %v", len(entries), err)
-		}
+	if err := s.storeWrite("inferred records", &storev1.EntryBatch{Entries: entries}); err != nil {
+		// THE PER-SESSION FANOUT IS GONE BECAUSE ITS INPUT IS. The failure used
+		// to be reported once per session named by the batch, read off
+		// protocol.v1 ExternalEntry.session_id — a field store.v1 StoreEntry
+		// does not carry in any form. The failure itself is still reported, at
+		// error level, for every record in the batch; only its session
+		// attribution was deleted out from under it.
+		s.log.With(logging.Context{Operation: "store-write", Level: "error", SinkEmergency: true}).
+			Log("inferred record write failed for %d record(s) (store.v1 StoreEntry carries no session attribution to report them under): %v", len(entries), err)
 	}
 }
 
@@ -692,8 +655,8 @@ func expandHome(p string) string {
 }
 
 // indexCursorsByPath keys recovered cursors by their file path for tailer restore.
-func indexCursorsByPath(cs []*agentshimv1.CursorState) map[string]*agentshimv1.CursorState {
-	m := make(map[string]*agentshimv1.CursorState, len(cs))
+func indexCursorsByPath(cs []*storev1.CursorState) map[string]*storev1.CursorState {
+	m := make(map[string]*storev1.CursorState, len(cs))
 	for _, c := range cs {
 		if c.GetPath() != "" {
 			m[c.GetPath()] = c

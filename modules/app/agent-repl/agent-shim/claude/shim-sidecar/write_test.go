@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	agentshimv1 "agentrepl/proto/agentshim/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -33,7 +33,7 @@ type drainingStore struct {
 	sock string
 
 	mu       sync.Mutex
-	received []*agentshimv1.StoreEntryWrite
+	received []*storev1.WriteBatchRequest
 	done     chan struct{}
 }
 
@@ -65,7 +65,7 @@ func newDrainingStore(t *testing.T) *drainingStore {
 			if err != nil {
 				return
 			}
-			write, ok := msg.(*agentshimv1.StoreEntryWrite)
+			write, ok := msg.(*storev1.WriteBatchRequest)
 			if !ok {
 				continue
 			}
@@ -83,12 +83,12 @@ func newDrainingStore(t *testing.T) *drainingStore {
 
 // writes returns the frames the store has decoded so far, waiting until at least
 // `want` have arrived rather than sleeping for them.
-func (s *drainingStore) writes(t *testing.T, want int) []*agentshimv1.StoreEntryWrite {
+func (s *drainingStore) writes(t *testing.T, want int) []*storev1.WriteBatchRequest {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		s.mu.Lock()
-		got := append([]*agentshimv1.StoreEntryWrite(nil), s.received...)
+		got := append([]*storev1.WriteBatchRequest(nil), s.received...)
 		s.mu.Unlock()
 		if len(got) >= want {
 			return got
@@ -112,11 +112,11 @@ func connectedSidecar(t *testing.T) (*sidecar, *drainingStore, func() []string) 
 	}
 	t.Cleanup(func() { s.store.Close() })
 	s.link = linkUp
-	s.cursors = map[string]*agentshimv1.CursorState{}
+	s.cursors = map[string]*storev1.CursorState{}
 	return s, store, read
 }
 
-func testEntry(session string) *agentshimv1.Entry {
+func testEntry(session string) *storev1.StoreEntry {
 	return convert.ProducerDiagnostic(
 		convert.Attribution{SessionID: session, ProducedAtMs: 1},
 		"test:"+session, "test-op", "detail")
@@ -128,8 +128,8 @@ func TestABatchCarriesItsCursorAdvanceWithItsRecords(t *testing.T) {
 	// Arrange.
 	s, store, _ := connectedSidecar(t)
 	res := tail.PollResult{
-		Entries: []*agentshimv1.Entry{testEntry("s1")},
-		Next:    &agentshimv1.CursorState{FileId: "1:2", Path: "/t/a.jsonl", Offset: 128},
+		Entries: []*storev1.StoreEntry{testEntry("s1")},
+		Next:    &storev1.CursorState{FileId: "1:2", Path: "/t/a.jsonl", Offset: 128},
 	}
 
 	// Act.
@@ -161,7 +161,7 @@ func TestQueuedDiagnosticsRideOutOnTheNextBatch(t *testing.T) {
 	})
 
 	// Act.
-	if err := s.writeBatch(tail.PollResult{Entries: []*agentshimv1.Entry{testEntry("s1")}}); err != nil {
+	if err := s.writeBatch(tail.PollResult{Entries: []*storev1.StoreEntry{testEntry("s1")}}); err != nil {
 		t.Fatalf("writeBatch: %v", err)
 	}
 
@@ -188,7 +188,7 @@ func TestAFailedBatchLeavesTheDiagnosticQueueIntact(t *testing.T) {
 	s.store.Close()
 
 	// Act.
-	err := s.writeBatch(tail.PollResult{Entries: []*agentshimv1.Entry{testEntry("s1")}})
+	err := s.writeBatch(tail.PollResult{Entries: []*storev1.StoreEntry{testEntry("s1")}})
 
 	// Assert.
 	if err == nil {
@@ -208,7 +208,7 @@ func TestInferredRecordsAreWrittenWithoutACursorAdvance(t *testing.T) {
 	s, store, _ := connectedSidecar(t)
 
 	// Act.
-	s.emit([]*agentshimv1.Entry{testEntry("s1")})
+	s.emit([]*storev1.StoreEntry{testEntry("s1")})
 
 	// Assert.
 	got := store.writes(t, 1)[0]
@@ -234,33 +234,24 @@ func TestEmittingNothingWritesNothing(t *testing.T) {
 
 // A failed emit is reported per session it concerns, so the failure is visible
 // from inside the workspace whose records were lost.
-func TestAFailedEmitIsReportedPerSession(t *testing.T) {
+// A failed emit is still REPORTED, loudly, for every record it lost.
+//
+// IT IS NO LONGER REPORTED PER SESSION. The fanout read the session off
+// protocol.v1 ExternalEntry.session_id, a field store.v1 StoreEntry does not
+// carry in any form — so the attribution was deleted out from under the report,
+// not the report itself. Losing the report entirely would be the failure this
+// covers; losing the session name is the schema gap it now documents.
+func TestAFailedEmitIsStillReported(t *testing.T) {
 	// Arrange.
 	s, _, read := connectedSidecar(t)
 	s.store.Close()
 
 	// Act.
-	s.emit([]*agentshimv1.Entry{testEntry("s1"), testEntry("s2")})
-
-	// Assert.
-	if got := linesContaining(read(), "inferred record write failed"); len(got) != 2 {
-		t.Fatalf("failure lines = %v, want one per session", got)
-	}
-}
-
-// A record naming no session still has its loss reported, once, rather than
-// vanishing because there was nobody to attribute it to.
-func TestAFailedEmitWithNoSessionIsStillReported(t *testing.T) {
-	// Arrange.
-	s, _, read := connectedSidecar(t)
-	s.store.Close()
-
-	// Act.
-	s.emit([]*agentshimv1.Entry{testEntry("")})
+	s.emit([]*storev1.StoreEntry{testEntry("s1"), testEntry("s2")})
 
 	// Assert.
 	if got := linesContaining(read(), "inferred record write failed"); len(got) != 1 {
-		t.Fatalf("failure lines = %v, want exactly 1", got)
+		t.Fatalf("failure lines = %v, want exactly one report for the failed batch", got)
 	}
 }
 

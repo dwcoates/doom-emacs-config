@@ -1,6 +1,6 @@
 package tail
 
-import agentshimv1 "agentrepl/proto/agentshim/v1"
+import storev1 "agentrepl/proto/store/v1"
 
 // Kind classifies a watched file so the tailer picks the right codec + handler.
 type Kind int
@@ -57,5 +57,5 @@ type Context struct {
 // Layer-2 implementations live in the handler package; the tailer drives them
 // through this interface.
 type Handler interface {
-	Handle(frames []Frame, ctx *Context) []*agentshimv1.Entry
+	Handle(frames []Frame, ctx *Context) []*storev1.StoreEntry
 }
