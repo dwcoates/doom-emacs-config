@@ -68,13 +68,13 @@ message FooterView {
 // the three typed resolution levels (coarsest → finest); clock and tokens
 // are the turn's figures; the live-work chips sit right-aligned.
 message FooterStrip {
-  // Coarsest state of the workspace. Colors the strip; one arm always set.
+  // The whole status family — coarse status, its step, and its activity
+  // line — as ONE tree: each status arm declares exactly the sub-status
+  // steps and activity kinds legal while it stands. Colors the strip.
   FooterStatus status = 1;
-  // The step within the status. Unset when the status has no substructure
-  // (background), and when the daemon knows no finer step.
-  optional FooterSubStatus sub_status = 2;
-  // The finest, dynamic line. Unset when the daemon has nothing finer to say.
-  optional FooterStatusActivity activity = 3;
+  // Tags 2-3 are RETIRED: the sub-status and activity cells are no longer
+  // siblings of the status — each lives INSIDE the status arm that makes it
+  // legal, so an illegal pairing is unrepresentable.
   // The turn clock. The client ticks from the carried instant.
   FooterClock clock = 4;
   // The tokens CELL: the turn's uncached-input figure plus two glyphs, and
@@ -86,149 +86,243 @@ message FooterStrip {
   FooterLiveWorkChips live_work = 6;
 }
 
-// ---- 1. Status — coarsest -------------------------------------------------
+// ---- The status family — one hierarchy, legality by construction ---------
 
-// The coarsest state. THE SET ARM IS THE STATUS; every arm is EMPTY, being
-// set is the whole assertion. Each arm's color is the shared render-colors
-// vocabulary's, one per arm, resolved by the daemon into the CSS class the
-// client applies; the client holds no table.
+// The strip's coarse status, its finer step, and its finest activity line
+// are ONE tree: the set arm IS the status, and each status arm declares
+// exactly the sub-status steps and activity kinds that are legal while it
+// stands, so an illegal pairing (a wakeup countdown under merging, a
+// cherry-pick step under idle) is unrepresentable rather than forbidden by
+// comment. Each arm's color is the shared render-colors vocabulary's, one
+// per arm, resolved by the daemon into the CSS class the client applies;
+// the client holds no table.
+//
+// RENDERING RULE, stated once: the strip draws | status | substatus |
+// activity |. A status arm with NO substatus oneof merges the substatus
+// cell into the status cell, and the activity cell always absorbs the free
+// width.
 message FooterStatus {
+  // What the session is doing now, at the coarsest resolution. Exactly one
+  // arm is set; a frame with none is malformed and rejected loudly.
   oneof status {
-    // Nothing running, route proven usable (ready, or a response unread).
+    // Nothing in flight; the session serves on demand.
     FooterStatusIdle idle = 1;
-    // A turn is in flight (submitting, thinking, clearing, compacting).
+    // A turn is in flight.
     FooterStatusThinking thinking = 2;
-    // Parked on YOU — a permission, a question.
+    // The session is parked on something — a self-scheduled wakeup, a
+    // consent card, or a question batch.
     FooterStatusWaiting waiting = 3;
-    // The last turn was interrupted; cleared by the next status update.
+    // MOMENTARY: the last turn was stopped; cleared by the next status push.
     FooterStatusInterrupted interrupted = 4;
-    // A merge run owns the session.
+    // A daemon-orchestrated merge is in flight for this workspace.
     FooterStatusMerging merging = 5;
-    // No foreground turn, but detached work is live.
+    // Detached work runs while the main thread is free.
     FooterStatusBackground background = 6;
-    // The vendor or the account said no (auth, usage limit, persistent
-    // 4xx/5xx). A REPORT of the last turn's conclusion; gates nothing.
+    // The session cannot proceed until something outside it changes.
     FooterStatusBlocked blocked = 7;
-    // Tag 8 is RETIRED: hibernation's `asleep` status left the contract
-    // with the hibernation machinery.
-    // The route Emacs→daemon→shim is compromised on OUR side (starting,
-    // degraded, severed, dead, start failed).
+    // Tag 8 is RETIRED: the asleep status died with hibernation leaving
+    // the contract.
+    // The daemon's link to the session's shim is not serving.
     FooterStatusDisconnected disconnected = 9;
-    // The workspace is being closed — or the close is blocked; the
-    // sub-status says which.
+    // A close was requested and has not completed.
     FooterStatusClosing closing = 10;
-    // The agent is taking context on — a memory file, a skill. MOMENTARY,
-    // the `interrupted` precedent: it stands until the next status update
-    // clears it, because the intake itself has no duration.
+    // MOMENTARY: context is being injected (memory, skills); falls back on
+    // the next frame.
     FooterStatusLoading loading = 11;
   }
 }
-message FooterStatusIdle {}
-message FooterStatusThinking {}
-message FooterStatusWaiting {}
-message FooterStatusInterrupted {}
-message FooterStatusMerging {}
-message FooterStatusBackground {}
-message FooterStatusBlocked {}
-message FooterStatusDisconnected {}
-message FooterStatusClosing {}
-message FooterStatusLoading {}
 
-// ---- 2. SubStatus — the step within the status ----------------------------
-
-// The step WITHIN the status, typed per status family. The family arm set
-// here MUST agree with FooterStatus's arm: a `merging` sub-status under an
-// `idle` status is a daemon fault, rejected loudly.
-message FooterSubStatus {
-  oneof sub_status {
-    FooterSubStatusThinking thinking = 1;
-    FooterSubStatusMerging merging = 2;
-    FooterSubStatusDisconnected disconnected = 3;
-    FooterSubStatusIdle idle = 4;
-    FooterSubStatusBlocked blocked = 5;
-    // The closing status's step.
-    FooterSubStatusClosing closing = 6;
-    // The loading status's step: which kind of intake.
-    FooterSubStatusLoading loading = 7;
-    // The waiting status's step.
-    FooterSubStatusWaiting waiting = 8;
-    // The interrupted status's step: who stopped it.
-    FooterSubStatusInterrupted interrupted = 9;
+// Nothing in flight; the session serves on demand.
+message FooterStatusIdle {
+  // The finer idle step. UNSET when the daemon knows no finer step.
+  oneof substatus {
+    // Never ran a turn this session.
+    FooterSubStatusIdleReady ready = 1;
+    // The last turn concluded normally.
+    FooterSubStatusIdleDone done = 2;
+  }
+  // OPTIONAL BY EVIDENCE: an idle session most often has NOTHING finer to
+  // say — no producer emits a standing line for plain idleness — so absence
+  // is the common, legitimate state, not a producer gap.
+  optional FooterStatusIdleActivity activity = 3;
+}
+// The activity kinds legal while idle.
+message FooterStatusIdleActivity {
+  // When this activity began standing; the client ticks the relative age
+  // per the clock convention. A push without it is a loud daemon fault.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 2;
+    // The vendor's context-budget warning, standing while it holds.
+    FooterStatusActivityContextBudget context_budget = 3;
+    // A newsworthy rate-limit report.
+    FooterStatusActivityRateLimited rate_limited = 4;
   }
 }
+// Never ran a turn this session.
+message FooterSubStatusIdleReady {}
+// The last turn concluded normally.
+message FooterSubStatusIdleDone {}
 
-// The steps of the interrupted status — WHO stopped the turn. UNSET on the
-// strip means the daemon knows no cause, which a consumer reads as the
-// ordinary user stop.
-message FooterSubStatusInterrupted {
-  oneof step {
-    // A person commanded the stop.
-    FooterSubStatusInterruptedByUser by_user = 1;
-    // The host process went down under the turn — nobody chose this, and
-    // drawing it as a user stop tells the user they stopped something they
-    // did not.
-    FooterSubStatusInterruptedByHostShutdown host_shutdown = 2;
-  }
-}
-message FooterSubStatusInterruptedByUser {}
-message FooterSubStatusInterruptedByHostShutdown {}
-
-// The steps of the waiting status.
-message FooterSubStatusWaiting {
-  // Which kind of wait.
-  oneof step {
-    // A scheduled self-wakeup is pending and nothing else competes. THE
-    // FALLBACK RULE IS THE DAEMON'S: this state is resolved DAEMON-SIDE and
-    // shown only when the status would otherwise be idle/done — any real
-    // status (thinking, merging, ...) wins; the client renders whatever
-    // arrives and decides nothing.
-    FooterSubStatusWaitingWakeup wakeup = 1;
-  }
-}
-// The pending-wakeup step. Empty: the activity line carries the countdown.
-message FooterSubStatusWaitingWakeup {}
-
-// The steps of a turn in flight.
-message FooterSubStatusThinking {
-  oneof step {
-    // A prompt is committed and not yet acked by the shim.
+// A turn is in flight.
+message FooterStatusThinking {
+  // The finer turn step. UNSET when the daemon knows no finer step.
+  oneof substatus {
+    // The prompt is being delivered.
     FooterSubStatusThinkingSubmitting submitting = 1;
-    // The agent is working.
+    // The model is reasoning.
     FooterSubStatusThinkingThinking thinking = 2;
-    // The conversation is being cleared.
+    // A /clear is being applied.
     FooterSubStatusThinkingClearing clearing = 3;
-    // The context is being compacted.
+    // A compaction is running.
     FooterSubStatusThinkingCompacting compacting = 4;
   }
+  // OPTIONAL BY EVIDENCE: most of a turn passes with no finer fact standing
+  // (no hook running, no retry, no notification); absence is the ordinary
+  // state.
+  optional FooterStatusThinkingActivity activity = 5;
 }
+// The activity kinds legal while a turn runs.
+message FooterStatusThinkingActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // A hook is running.
+    FooterStatusActivityHook hook = 2;
+    // The vendor call is being retried.
+    FooterStatusActivityRetrying retrying = 3;
+    // The specific context item taken on (a turn can inject mid-flight).
+    FooterStatusActivityContextInjected context_injected = 4;
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 5;
+    // The vendor's context-budget warning.
+    FooterStatusActivityContextBudget context_budget = 6;
+    // A newsworthy rate-limit report.
+    FooterStatusActivityRateLimited rate_limited = 7;
+  }
+}
+// The prompt is being delivered.
 message FooterSubStatusThinkingSubmitting {}
+// The model is reasoning.
 message FooterSubStatusThinkingThinking {}
+// A /clear is being applied.
 message FooterSubStatusThinkingClearing {}
+// A compaction is running.
 message FooterSubStatusThinkingCompacting {}
 
-// The steps of a merge run — the run's own phase vocabulary, projected.
-message FooterSubStatusMerging {
-  oneof step {
-    // The first instant of a merge, before anything durable exists for it.
+// Parked on a wakeup, a consent card, or a question batch.
+message FooterStatusWaiting {
+  // WHAT the session waits on. Exactly one; a waiting status with no step
+  // is malformed.
+  oneof substatus {
+    // The self-scheduled wakeup fallback: shown only when the footer would
+    // otherwise read idle/done — any real status wins, resolved daemon-side.
+    FooterSubStatusWaitingWakeup wakeup = 1;
+    // A permission card is open; the agent is blocked on consent.
+    FooterSubStatusWaitingPermission permission = 2;
+    // A question batch is open; the agent is blocked on answers.
+    FooterSubStatusWaitingQuestion question = 3;
+  }
+  // REQUIRED: every waiting state has a composable line by construction —
+  // the countdown, the gated call, or the question lead. A producer that
+  // cannot compose it has a bug, not a missing fact.
+  FooterStatusWaitingActivity activity = 4;
+}
+// The self-scheduled wakeup fallback state.
+message FooterSubStatusWaitingWakeup {}
+// A permission card is open; the agent is blocked on consent.
+message FooterSubStatusWaitingPermission {}
+// A question batch is open; the agent is blocked on answers.
+message FooterSubStatusWaitingQuestion {}
+// The activity kinds legal while waiting.
+message FooterStatusWaitingActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // The wakeup countdown; the client ticks from the deadline instant.
+    FooterStatusActivityWakeup wakeup = 2;
+    // The gated call, composed ("Bash: rm -rf …").
+    FooterStatusActivityGatedCall gated_call = 3;
+    // The open batch's lead, composed ("2 questions · Which approach?").
+    FooterStatusActivityQuestionLead question_lead = 4;
+    // The session reports it is parked on the user (requires_action) — a
+    // vendor fact the daemon cannot decompose further.
+    FooterStatusActivityBlockedOnUser blocked_on_user = 5;
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 6;
+  }
+}
+// The gated call's composed line.
+message FooterStatusActivityGatedCall {
+  // Drawn verbatim.
+  string text = 1;
+}
+// The open question batch's composed lead line.
+message FooterStatusActivityQuestionLead {
+  // Drawn verbatim.
+  string text = 1;
+}
+
+// MOMENTARY: the last turn was stopped; cleared by the next status push.
+message FooterStatusInterrupted {
+  // Who stopped it.
+  oneof substatus {
+    // The user commanded the stop.
+    FooterSubStatusInterruptedByUser by_user = 1;
+    // The host shut the session down mid-turn.
+    FooterSubStatusInterruptedByHostShutdown host_shutdown = 2;
+  }
+  // OPTIONAL BY EVIDENCE: the status is momentary and no producer composes
+  // a standing line for it; only a notification can accompany it.
+  optional FooterStatusInterruptedActivity activity = 3;
+}
+// The user commanded the stop.
+message FooterSubStatusInterruptedByUser {}
+// The host shut the session down mid-turn.
+message FooterSubStatusInterruptedByHostShutdown {}
+// The activity kinds legal while interrupted.
+message FooterStatusInterruptedActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 2;
+  }
+}
+
+// A daemon-orchestrated merge is in flight.
+message FooterStatusMerging {
+  // The merge run's phase, projected from the merge bubble's vocabulary.
+  oneof substatus {
+    // The merge is being enqueued.
     FooterSubStatusMergingEnqueuing enqueuing = 1;
-    // Waiting behind other workspaces' merges.
+    // Waiting in the repo's queue.
     FooterSubStatusMergingQueued queued = 2;
     // The configured before-action is running.
     FooterSubStatusMergingBeforeAction before_action = 3;
-    // Commits are landing one at a time.
+    // Commits are being cherry-picked.
     FooterSubStatusMergingCherryPicking cherry_picking = 4;
-    // The landed commit is under test.
+    // The test suite is running against the picked commits.
     FooterSubStatusMergingTesting testing = 5;
-    // Stopped on a conflict awaiting resolution.
+    // A conflict is being resolved.
     FooterSubStatusMergingConflict conflict = 6;
     // The configured after-action is running.
     FooterSubStatusMergingAfterAction after_action = 7;
-    // The run failed.
+    // The merge failed; the bubble carries the account.
     FooterSubStatusMergingFailed failed = 8;
-    // The run settled successfully.
+    // The merge landed.
     FooterSubStatusMergingMerged merged = 9;
   }
+  // OPTIONAL BY EVIDENCE: the commit line exists only while a commit is
+  // landing; most phases have no finer line.
+  optional FooterStatusMergingActivity activity = 10;
 }
+// The merge is being enqueued.
 message FooterSubStatusMergingEnqueuing {}
 // The queue place the run was admitted at.
 message FooterSubStatusMergingQueued {
@@ -237,161 +331,234 @@ message FooterSubStatusMergingQueued {
   // How many are queued in that repo.
   int32 depth = 2;
 }
+// The configured before-action is running.
 message FooterSubStatusMergingBeforeAction {
   // The configured action, for display.
   string action = 1;
 }
+// Commits are being cherry-picked.
 message FooterSubStatusMergingCherryPicking {
+  // How many commits the run picks in total.
   int32 commits_total = 1;
+  // How many have landed so far.
   int32 commits_landed = 2;
 }
+// The test suite is running against the picked commits.
 message FooterSubStatusMergingTesting {
+  // How many commits the run picks in total.
   int32 commits_total = 1;
   // The commit under test is landed but ungated.
   int32 commits_landed = 2;
 }
+// A conflict is being resolved.
 message FooterSubStatusMergingConflict {}
+// The configured after-action is running.
 message FooterSubStatusMergingAfterAction {
   // The configured action, for display.
   string action = 1;
 }
+// The merge failed; the bubble carries the account.
 message FooterSubStatusMergingFailed {}
+// The merge landed.
 message FooterSubStatusMergingMerged {}
 
-// The ways the route can be compromised.
-message FooterSubStatusDisconnected {
-  oneof step {
-    // A bring-up is in flight; the route is not yet proven.
-    FooterSubStatusDisconnectedStarting starting = 1;
-    // Running, but with an open fault on the route.
-    FooterSubStatusDisconnectedDegraded degraded = 2;
-    // The backing process is gone; the workspace is recoverable.
-    FooterSubStatusDisconnectedSevered severed = 3;
-    // Terminal: no live session backs the workspace.
-    FooterSubStatusDisconnectedDead dead = 4;
-    // The bring-up failed outright.
-    FooterSubStatusDisconnectedStartFailed start_failed = 5;
+// The activity kinds legal while merging.
+message FooterStatusMergingActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // The commit landing right now.
+    FooterStatusActivityMergingCommit merging_commit = 2;
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 3;
   }
 }
-message FooterSubStatusDisconnectedStarting {}
-message FooterSubStatusDisconnectedDegraded {}
-message FooterSubStatusDisconnectedSevered {}
-message FooterSubStatusDisconnectedDead {}
-message FooterSubStatusDisconnectedStartFailed {}
 
-// The two flavors of idle.
-message FooterSubStatusIdle {
-  oneof step {
-    // Live, proven usable, nothing to read.
-    FooterSubStatusIdleReady ready = 1;
-    // The turn finished and its response is unread.
-    FooterSubStatusIdleDone done = 2;
+// Detached work runs while the main thread is free.
+message FooterStatusBackground {
+  // No substatus: the chips and expanded panels carry the detail, so the
+  // substatus cell merges into the status cell.
+  // OPTIONAL BY EVIDENCE: nothing finer stands unless a notification or a
+  // newsworthy rate-limit report does.
+  optional FooterStatusBackgroundActivity activity = 1;
+}
+// The activity kinds legal while background.
+message FooterStatusBackgroundActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 2;
+    // A newsworthy rate-limit report.
+    FooterStatusActivityRateLimited rate_limited = 3;
   }
 }
-message FooterSubStatusIdleReady {}
-message FooterSubStatusIdleDone {}
 
-// What the vendor/account said no about.
-message FooterSubStatusBlocked {
-  oneof step {
+// The session cannot proceed until something outside it changes.
+message FooterStatusBlocked {
+  // WHY it is blocked.
+  oneof substatus {
+    // An auth prompt is up.
     FooterSubStatusBlockedAuth auth = 1;
+    // The usage allowance is exhausted.
     FooterSubStatusBlockedUsageLimit usage_limit = 2;
+    // The vendor is refusing requests.
     FooterSubStatusBlockedVendorError vendor_error = 3;
-    // The account cannot be charged — a billing block, not a vendor fault;
-    // the user's next action is their billing, not a retry.
+    // The account's billing state refuses requests.
     FooterSubStatusBlockedBilling billing = 4;
   }
+  // OPTIONAL BY EVIDENCE: the auth prompt line exists only on the auth
+  // step; the other steps have no standing line beyond the step itself.
+  optional FooterStatusBlockedActivity activity = 5;
 }
+// An auth prompt is up.
 message FooterSubStatusBlockedAuth {}
+// The usage allowance is exhausted.
 message FooterSubStatusBlockedUsageLimit {}
+// The vendor is refusing requests.
 message FooterSubStatusBlockedVendorError {}
+// The account's billing state refuses requests.
 message FooterSubStatusBlockedBilling {}
+// The activity kinds legal while blocked.
+message FooterStatusBlockedActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // The auth prompt line, verbatim.
+    FooterStatusActivityAuthenticating authenticating = 2;
+    // A newsworthy rate-limit report.
+    FooterStatusActivityRateLimited rate_limited = 3;
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 4;
+  }
+}
 
-// The closing family.
-message FooterSubStatusClosing {
-  // The step. One arm today; a graceful-drain step would join it.
-  oneof step {
-    // The close cannot proceed: work is in flight. The activity line
-    // carries the daemon's reasons.
+// The daemon's link to the session's shim is not serving.
+message FooterStatusDisconnected {
+  // The link's step.
+  oneof substatus {
+    // The shim is starting.
+    FooterSubStatusDisconnectedStarting starting = 1;
+    // The link serves with degradation.
+    FooterSubStatusDisconnectedDegraded degraded = 2;
+    // The link was severed and reconnection is being attempted.
+    FooterSubStatusDisconnectedSevered severed = 3;
+    // The shim process is gone.
+    FooterSubStatusDisconnectedDead dead = 4;
+    // The shim failed to start.
+    FooterSubStatusDisconnectedStartFailed start_failed = 5;
+  }
+  // OPTIONAL BY EVIDENCE: no producer composes a standing line for a dead
+  // link; only a notification can accompany it.
+  optional FooterStatusDisconnectedActivity activity = 6;
+}
+// The shim is starting.
+message FooterSubStatusDisconnectedStarting {}
+// The link serves with degradation.
+message FooterSubStatusDisconnectedDegraded {}
+// The link was severed and reconnection is being attempted.
+message FooterSubStatusDisconnectedSevered {}
+// The shim process is gone.
+message FooterSubStatusDisconnectedDead {}
+// The shim failed to start.
+message FooterSubStatusDisconnectedStartFailed {}
+// The activity kinds legal while disconnected.
+message FooterStatusDisconnectedActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 2;
+  }
+}
+
+// A close was requested and has not completed.
+message FooterStatusClosing {
+  // The close's step. UNSET while the close proceeds unremarkably; the
+  // family anticipates a graceful-drain step if one is ever wanted.
+  oneof substatus {
+    // The close is refused while work is live; the activity line carries
+    // the daemon's composed reasons.
     FooterSubStatusCloseBlocked blocked = 1;
   }
+  // OPTIONAL BY EVIDENCE: only the blocked step composes a reasons line;
+  // an unremarkable close has nothing finer to say.
+  optional FooterStatusClosingActivity activity = 2;
 }
-// Blocked. Empty: the arm is the fact; the reasons are the activity's.
+// The close is refused while work is live.
 message FooterSubStatusCloseBlocked {}
-
-// The loading family. Each arm is one intake kind; the activity line
-// carries the specific item.
-message FooterSubStatusLoading {
-  oneof step {
-    // A CLAUDE.md-family file entered context (the session-start tree, or
-    // a mid-turn directory touch).
-    FooterSubStatusLoadingMemory memory = 1;
-    // A skill's content expanded into context from a slash invocation.
-    FooterSubStatusLoadingInvoked invoked = 2;
-    // Dynamically found skills joined the available set.
-    FooterSubStatusLoadingDiscovered discovered = 3;
-    // The skill listing itself was re-injected — the available set changed.
-    FooterSubStatusLoadingListing listing = 4;
-  }
-}
-message FooterSubStatusLoadingMemory {}
-message FooterSubStatusLoadingInvoked {}
-message FooterSubStatusLoadingDiscovered {}
-message FooterSubStatusLoadingListing {}
-
-// ---- 3. StatusActivity — finest, dynamic ----------------------------------
-
-// The finest line: typed KINDS whose payload is mostly text the daemon
-// composed. A new thing to say is a new arm — THERE IS NO FREE-TEXT ESCAPE
-// HERE. A line with no kind belongs only where the daemon genuinely cannot
-// classify, and that place is the error route's unclassified funnel on the
-// failure card; an activity the daemon can name but has no arm for is a
-// modeling gap, and the fix is the arm, not a note.
-message FooterStatusActivity {
-  // WHEN THIS ACTIVITY BEGAN STANDING, epoch ms. ON THE ENVELOPE so every
-  // arm — present and future — carries it BY CONSTRUCTION: an arm cannot
-  // forget it, because it is not the arm's to carry ("since when" is
-  // meaningful for every arm, the usage-on-the-envelope precedent). The
-  // client derives and ticks the RELATIVE age ("· 2m ago") per the clock
-  // convention — an instant is shipped, a duration is drawn. NOT optional:
-  // a push without it is a daemon fault, rejected LOUDLY, never drawn as
-  // "now". Distinct from wakeup's own wake_at_ms, which is a FUTURE
-  // deadline counting down; this is the PAST instant counting up.
-  FooterStatusActivityAt at = 12;
-  oneof activity {
-    FooterStatusActivityMergingCommit merging_commit = 1;
-    FooterStatusActivityHook hook = 2;
-    FooterStatusActivityRetrying retrying = 3;
-    FooterStatusActivityAuthenticating authenticating = 4;
-    FooterStatusActivityBlockedOnUser blocked_on_user = 5;
-    FooterStatusActivityRateLimited rate_limited = 6;
+// The activity kinds legal while closing.
+message FooterStatusClosingActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
     // WHY the close is blocked, in concise plain English resolved by the
     // daemon ("a turn is in flight; 2 subagents and a shell are running").
-    FooterStatusActivityCloseBlocked close_blocked = 7;
-    // The specific item taken on, composed by the daemon
-    // ("webapp/CLAUDE.md", "graphify", "3 skills from ~/.claude/skills").
-    FooterStatusActivityContextInjected context_injected = 8;
-    // The pending wakeup: the client ticks "wakes in 4:32" every second
-    // from the deadline INSTANT — a duration is drawn, an instant is
-    // shipped, per the clock convention.
-    FooterStatusActivityWakeup wakeup = 9;
-    // The vendor's context-budget warning — same treatment as the
-    // rate-limit allowances: a composed activity line while it stands.
-    FooterStatusActivityContextBudget context_budget = 10;
-    // An agent notification to the user, shown as the activity line while
-    // it stands; the next real activity replaces it.
-    FooterStatusActivityNotification notification = 11;
+    FooterStatusActivityCloseBlocked close_blocked = 2;
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 3;
   }
 }
+
+// MOMENTARY: context is being injected (memory, skills).
+message FooterStatusLoading {
+  // WHAT kind of injection.
+  oneof substatus {
+    // A memory file is being injected.
+    FooterSubStatusLoadingMemory memory = 1;
+    // An invoked skill's document is loading.
+    FooterSubStatusLoadingInvoked invoked = 2;
+    // Discovered skills are being injected.
+    FooterSubStatusLoadingDiscovered discovered = 3;
+    // A skill listing is being injected.
+    FooterSubStatusLoadingListing listing = 4;
+  }
+  // REQUIRED: the injected item is always known — the injection IS the
+  // status, so a loading push with no item line is a producer bug.
+  FooterStatusLoadingActivity activity = 5;
+}
+// A memory file is being injected.
+message FooterSubStatusLoadingMemory {}
+// An invoked skill's document is loading.
+message FooterSubStatusLoadingInvoked {}
+// Discovered skills are being injected.
+message FooterSubStatusLoadingDiscovered {}
+// A skill listing is being injected.
+message FooterSubStatusLoadingListing {}
+// The activity kinds legal while loading.
+message FooterStatusLoadingActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // The specific item taken on, composed by the daemon
+    // ("webapp/CLAUDE.md", "graphify", "3 skills from ~/.claude/skills").
+    FooterStatusActivityContextInjected context_injected = 2;
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 3;
+  }
+}
+
+// ---- Shared activity leaf payloads ----------------------------------------
+// One drawn cell, one payload vocabulary: these leaves are shared across the
+// per-status activity oneofs above — the per-status ONEOF types are what
+// confine legality, and a leaf carries only the line's content.
+
 // The activity's standing instant.
 message FooterStatusActivityAt {
-  // Epoch ms.
+  // Epoch ms. The client derives and ticks the RELATIVE age ("· 2m ago")
+  // per the clock convention — an instant is shipped, a duration is drawn.
   int64 at_ms = 1;
 }
 
 // The notification line.
 message FooterStatusActivityNotification {
-  // The composed line ("[bell] Merge queue is green"), drawn verbatim.
+  // The composed line, drawn verbatim.
   string text = 1;
 }
 
@@ -400,10 +567,12 @@ message FooterStatusActivityContextBudget {
   // The composed line, drawn verbatim.
   string text = 1;
 }
+
 // The pending wakeup's countdown line.
 message FooterStatusActivityWakeup {
   // When the wakeup fires, epoch ms; the client derives the remaining
-  // duration and re-renders it at a one-second tick.
+  // duration and re-renders it at a one-second tick. A FUTURE deadline
+  // counting down, distinct from the envelope instant counting up.
   int64 wake_at_ms = 1;
   // The agent's one-sentence reason, drawn after the countdown. UNSET when
   // the agent gave none.
@@ -414,42 +583,54 @@ message FooterStatusActivityWakeupReason {
   // The sentence, drawn verbatim.
   string text = 1;
 }
+
 // The commit a merge is landing right now.
 message FooterStatusActivityMergingCommit {
+  // The commit's sha, abbreviated by the daemon.
   string sha = 1;
+  // The commit's subject line.
   string subject = 2;
 }
+
 // A hook is running.
 message FooterStatusActivityHook {
+  // The hook's name.
   string name = 1;
 }
+
 // The vendor call is being retried.
 message FooterStatusActivityRetrying {
+  // Which attempt this is.
   int32 attempt = 1;
   // The retry's status summary, verbatim.
   string status = 2;
 }
+
 // An auth prompt is up.
 message FooterStatusActivityAuthenticating {
   // The auth prompt line, verbatim.
   string line = 1;
 }
-// The session reports it is parked on the user (requires_action) — a fact the
-// daemon cannot otherwise see, so a permission count alone under-reports it.
+
+// The session reports it is parked on the user (requires_action) — a fact
+// the daemon cannot otherwise see, so a permission count alone
+// under-reports it.
 message FooterStatusActivityBlockedOnUser {
+  // The vendor's detail, verbatim.
   string detail = 1;
 }
+
 // The rate-limit rung. The vendor bills TWO independent allowances (rolling
 // five-hour session, seven-day weekly) reported through one event; both
 // figures are shown so a reader can tell WHICH allowance the newsworthy
 // percentage belongs to.
 message FooterStatusActivityRateLimited {
+  // The rolling five-hour session allowance.
   FooterAllowance session = 1;
+  // The seven-day weekly allowance.
   FooterAllowance weekly = 2;
 }
-// One allowance's last report. PRESENT means the vendor has reported it at
-// all; `newsworthy` is the narrower claim that the report was anything other
-// than a plain "allowed", which is what put the rung up.
+
 // The close-blocked reasons line.
 message FooterStatusActivityCloseBlocked {
   // The composed reasons, drawn verbatim.
