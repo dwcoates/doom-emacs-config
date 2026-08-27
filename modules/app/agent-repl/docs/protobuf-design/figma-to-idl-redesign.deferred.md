@@ -106,3 +106,84 @@ permanently uncarried:
 A future PR reopening any of these must first re-open the identity ruling
 itself (a typed vendor-record reference type), which is why they travel as
 one bucket.
+
+## SIMPLE-ADD wave groups reverted at orchestrator review (deferred 2026-08-26)
+
+The subagent-landed SIMPLE-ADD wave (c7814df86) was audited by the
+orchestrator; every group below is NEW feature/support with no prescribed
+frontend UI change, so it was reverted from the protos (tags retired at each
+site) and parked here. The wave's own comment text — the field semantics,
+the "why" prose — is preserved in that commit and is the starting evidence
+for any later PR.
+
+### Vendor handshake
+`SessionVendorHandshake` on SessionStarted (tag 8 retired): entrypoint,
+user_type, betas, capabilities, cwd, git_branch, tool/skill/subagent/plugin
+catalogs, output_style, api_key_source, api_provider, conversation names —
+plus the SessionEntrypoint/SessionApiKeySource enums and the
+SessionSubagentDefinition/SessionPlugin/SessionConversationName leaves.
+Fourteen fields of session baseline with no drawn surface yet.
+
+### Run accounting
+`AgentRunAccounting` on AgentSuccess (tag 4) and AgentFailure (tag 31):
+RunDuration (wall vs api ms), per-model ModelUsage (provider, usage,
+web-search count, context window, output ceiling), 7-field RunLatency
+telemetry, RunPermissionDenial roll-up with Struct arguments. Money was
+already deleted by ruling; the rest follows the same "no accounting surface"
+fate for now. Non-optional context_window_tokens/max_output_tokens need the
+optional treatment if this returns.
+
+### Workflow phases and progress; workflow run totals
+`AgentWorkflowUpdate.phases` (tag 2), `AgentWorkflowSubagent.phase`/
+`.progress` (tags 4-5, the 12-field AgentWorkflowSubagentProgress grab-bag),
+`AgentWorkflowCompleted.totals` (tag 2, AgentWorkflowTotals). Workflow
+rendering today draws spawn order and liveness only.
+
+### Prompt provenance
+`UserSaid.provenance` (tag 2): the two-axis UserPromptProvenance
+(source: typed|sdk|injected|queued × origin: human|peer|task_notification|
+coordinator, with sender identity on the peer arm). No feed treatment for
+non-human prompts exists yet.
+
+### Model fallback
+`SessionUpdate.model_fallback` (in the retired 8-23 block):
+SessionModelFallback with the retry|revert|sticky direction oneof and the
+refusal echo. Returns together with "refusal detail" below.
+
+### Token fallback credit; cache-miss diagnostics
+`TokenUsage` tags 5-6 retired: TokenFallbackCredit (redeemed|not_applied
+with remove_to_redeem) and TokenCacheMissDiagnostics (missed tokens + 6-arm
+invalidation reason). No cost/usage surface consumes either.
+
+### MCP permission policy
+`SessionUpdate.mcp_permission_policy`: per-server policy oneof plus the
+org-ceiling oneof. The MCP panel draws health only.
+
+### Server-side context edits
+`ContextCut.server_edited` (tag 4 retired): ContextEditedByServer with
+per-edit typed counts (tool uses vs thinking turns). The API-initiated cut
+has no drawn treatment; compaction_failed (tag 3) was KEPT.
+
+### Refusal detail
+`AgentResponseRefused` tags 2-6 retired: AgentRefusalCategory enum,
+original/recommended model pair, fallback credit token and prefill claim.
+If it returns, revisit the enum-of-unsettled-vendor-vocabulary choice.
+
+### Auth status
+`SessionUpdate.auth_status`: SessionAuthStatus. Also carries a known schema
+defect to fix on return: `output`/`error` sit beside the state oneof but
+only mean anything in the authenticating arm (adjacent-exclusivity).
+
+### Vendor session events (the remaining SessionUpdate arms)
+Tags 8-23 retired on SessionUpdate: api_retrying, busy periods,
+worker_shutting_down, notifications (with priority enum), transcript write
+failure, active_goal, prompt_suggestion, files_persisted,
+interrupt_incomplete, background_tasks, location/worktree state, tool-set
+churn, settings_fault. Each is real vendor evidence with no UI story;
+context_budget_warning (tag 24) was KEPT.
+
+### Non-text read extents; attached-file block
+`AgentReadSuccess` tags 4-8 retired (image, pdf, notebook,
+split-to-directory, unchanged extents plus AgentReadStart.requested_pages);
+`UserContentBlock.file` (tag 4) and content_blocks' FileBlock family.
+Rendering non-text reads and attachment chips is a feature of its own.
