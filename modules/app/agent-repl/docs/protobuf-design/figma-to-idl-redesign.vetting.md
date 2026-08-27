@@ -530,3 +530,26 @@ real-binary transcripts — test infrastructure, no contract shape at stake).
 CONSTRAINT ON ITEM 1 (user-imposed): the route verification must cross-
 reference OFFICIAL documentation and online sources, never local transcript
 history — the local corpus is inadmissible for this item.
+
+### Item 11 FINDINGS (run 2026-08-27, declared-types + documentation tier, SDK 0.3.220)
+
+- `get_context_usage` (the /context panel's source): EXISTS, stable-looking,
+  documented in the TS SDK reference; rich typed response. SAFE to rely on.
+- `get_usage` (the /usage panel's source): EXISTS but the Query method is
+  literally named `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`,
+  jsdoc: "unstable and may change or be removed in any release without
+  notice"; undocumented online. The response DOES carry the full window set
+  our SessionAccountUsage models (five_hour, seven_day, oauth-apps, opus,
+  sonnet, model_scoped).
+- `get_session_cost` (the /cost panel's source): request type exists but NO
+  declared response type — the jsdoc says it returns the FORMATTED TEXT the
+  /usage dialog prints; the structured shape is undeclared.
+- Unavailability: no capability string is declared for any of the three; an
+  older binary surfaces only a generic control error envelope.
+
+CONSEQUENCE RAISED (user ruling owed): the /cost and /usage panels rest on
+an explicitly experimental method and an undeclared-shape method
+respectively; the /context panel's source is sound. Options when ruled:
+rely-and-absorb-breakage, or degrade the two panels to composed text.
+
+**Status: RUN — findings recorded; ruling owed.**
