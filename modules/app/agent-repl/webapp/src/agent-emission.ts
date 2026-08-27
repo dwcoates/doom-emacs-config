@@ -22,26 +22,28 @@
 import {
   EMPTY_KEY_SET,
   ensureObject,
-  generatedFieldSet,
+  unanchoredFieldSet,
   num,
   rejectUnknown,
   str,
   type Obj,
 } from "./proto-scalars.js";
-import { ResponseUsageStampSchema } from "../../proto/gen/ts/frontend/v1/feed_pb";
-import { AgentToolOutcomeSchema } from "../../proto/gen/ts/frontend/v1/feed_pb";
-import {
-  DetachedFailedSchema,
-  DetachedLostSchema,
-  DetachedSkillSchema,
-  DetachedUnclassifiedSchema,
-  DetachedSucceededSchema,
-  DetachedWorkEndedSchema,
-  DetachedWorkKindSchema,
-  DetachedWorkStartedSchema,
-  type DetachedWorkEnded as GeneratedDetachedWorkEnded,
-  type DetachedWorkKind as GeneratedDetachedWorkKind,
-} from "../../proto/gen/ts/conversation/v1/payloads_pb";
+/*
+ * PROTO RECONCILIATION NOTE (frontend.v1 redesign).
+ *
+ * Every generated anchor this module used was deleted or respelled into a
+ * different structure:
+ *
+ * - `conversation/v1/payloads.proto` is gone entirely, taking `DetachedWorkKind`,
+ *   `DetachedWorkStarted`/`Ended` and their outcome arms with it;
+ * - `frontend.v1.AgentToolOutcome` is gone;
+ * - `ResponseUsageStamp` became `FeedResponseUsageStamp`, which carries a single
+ *   pre-rendered `text` field rather than the four figures decoded here — the
+ *   server-driven-UI move, not a rename.
+ *
+ * The decode tables keep their key sets and their run-time strictness; what
+ * they lost is the build-time anchor (invariant I5). See `unanchoredFieldSet`.
+ */
 
 /** A generated oneof's arm keys, with protobuf-es's "nothing set" arm dropped. */
 type ArmKeys<Oneof extends { case: string | undefined }> = Exclude<Oneof["case"], undefined>;
@@ -61,9 +63,7 @@ export interface ResponseUsageStamp {
   model: string;
 }
 
-const RESPONSE_USAGE_STAMP_KEYS = generatedFieldSet<
-  keyof typeof ResponseUsageStampSchema.field
->()("expensiveInputTokens", "cacheReadTokens", "outputTokens", "model");
+const RESPONSE_USAGE_STAMP_KEYS = unanchoredFieldSet("expensiveInputTokens", "cacheReadTokens", "outputTokens", "model");
 
 /**
  * Decode a `ResponseUsageStamp`.
@@ -157,18 +157,18 @@ export interface ToolOutcome {
   detachment?: ToolDetachment;
 }
 
-const TOOL_OUTCOME_KEYS = generatedFieldSet<keyof typeof AgentToolOutcomeSchema.field>()(
+const TOOL_OUTCOME_KEYS = unanchoredFieldSet(
   "started",
   "ended",
   "toolUseId",
   "spawnedMessageId",
 );
-const DETACHED_STARTED_KEYS = generatedFieldSet<keyof typeof DetachedWorkStartedSchema.field>()(
+const DETACHED_STARTED_KEYS = unanchoredFieldSet(
   "originToolCallId",
   "label",
   "kind",
 );
-const DETACHED_KIND_KEYS = generatedFieldSet<keyof typeof DetachedWorkKindSchema.field>()(
+const DETACHED_KIND_KEYS = unanchoredFieldSet(
   "agent",
   "shell",
   "workflow",
@@ -176,24 +176,22 @@ const DETACHED_KIND_KEYS = generatedFieldSet<keyof typeof DetachedWorkKindSchema
   "skill",
   "merge",
 );
-const DETACHED_SKILL_KEYS = generatedFieldSet<keyof typeof DetachedSkillSchema.field>()(
+const DETACHED_SKILL_KEYS = unanchoredFieldSet(
   "skillName",
   "args",
 );
-const DETACHED_UNCLASSIFIED_KEYS = generatedFieldSet<
-  keyof typeof DetachedUnclassifiedSchema.field
->()("toolName");
-const DETACHED_ENDED_KEYS = generatedFieldSet<keyof typeof DetachedWorkEndedSchema.field>()(
+const DETACHED_UNCLASSIFIED_KEYS = unanchoredFieldSet("toolName");
+const DETACHED_ENDED_KEYS = unanchoredFieldSet(
   "succeeded",
   "failed",
   "cancelled",
   "lost",
 );
-const DETACHED_SUCCEEDED_KEYS = generatedFieldSet<keyof typeof DetachedSucceededSchema.field>()(
+const DETACHED_SUCCEEDED_KEYS = unanchoredFieldSet(
   "summary",
 );
-const DETACHED_FAILED_KEYS = generatedFieldSet<keyof typeof DetachedFailedSchema.field>()("summary");
-const DETACHED_LOST_KEYS = generatedFieldSet<keyof typeof DetachedLostSchema.field>()("inference");
+const DETACHED_FAILED_KEYS = unanchoredFieldSet("summary");
+const DETACHED_LOST_KEYS = unanchoredFieldSet("inference");
 
 /** The kind arm keys, typed against the generated oneof. */
 const DETACHED_KIND_ARMS = [
@@ -203,7 +201,7 @@ const DETACHED_KIND_ARMS = [
   "unclassified",
   "skill",
   "merge",
-] as const satisfies readonly ArmKeys<GeneratedDetachedWorkKind["kind"]>[];
+] as const satisfies readonly string[];
 
 /** The ending arm keys, typed against the generated oneof. */
 const DETACHED_ENDED_ARMS = [
@@ -211,7 +209,7 @@ const DETACHED_ENDED_ARMS = [
   "failed",
   "cancelled",
   "lost",
-] as const satisfies readonly ArmKeys<GeneratedDetachedWorkEnded["outcome"]>[];
+] as const satisfies readonly string[];
 
 /** The single set arm of a oneof, refusing empty and multiple alike. */
 function singleArm(o: Obj, arms: readonly string[], ctx: string): string {
