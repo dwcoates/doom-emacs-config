@@ -20,6 +20,7 @@ message McpPanelRow {
     McpPanelFailed failed = 3;
     McpPanelNeedsAuth needs_auth = 4;
     McpPanelPending pending = 5;
+    McpPanelDisabled disabled = 6;
   }
 }
 // Connected and serving. Empty: the arm is the badge.
@@ -38,3 +39,5 @@ message McpPanelFailedDetail {
 message McpPanelNeedsAuth {}
 // Still starting. Empty: the arm is the badge.
 message McpPanelPending {}
+// Configured but switched off, never attempted. Empty: the arm is the badge.
+message McpPanelDisabled {}
