@@ -85,13 +85,19 @@ whole current answer on every ProgressView, so an entry lives exactly as
 long as the wire field does.")
 
 (defconst agent-repl--context-cost-origin-prefix "PROMPT_ORIGIN_"
-  "The common prefix of every `agentshim.core.v1.PromptOrigin' value name.
+  "The common prefix of every `shim.v1.PromptOrigin' value name.
 An origin that does not carry it is not a PromptOrigin at all — not a
 different one, not an older one — so it is refused rather than read.")
 
 (defconst agent-repl--context-cost-keep-alive-origin "PROMPT_ORIGIN_CACHE_KEEP_ALIVE"
   "The protojson name of the cache keep-alive prompt origin.
-Mirrors the `agentshim.core.v1.PromptOrigin' value of the same name.
+RETIRED ON THE WIRE.  It mirrored the `PromptOrigin' value of the same
+name; `shim/v1/prompt_origin.proto' now marks that tag retired, stating
+the cache keep-alive is the shim\='s own mechanism and never appearing on
+this wire.  Nothing arriving can match this name any more.  The constant
+and `agent-repl--context-cost-keep-alive-p' are kept rather than removed
+because retiring the keep-alive alarm is a product decision, not a
+rename.
 
 The NAME is the whole vocabulary here: protojson emits enums by name,
 the daemon speaks protojson, and the webapp decodes the identical field

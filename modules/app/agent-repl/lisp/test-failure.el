@@ -234,7 +234,7 @@ colored beside it."
 (defun agent-repl-test--failure-kind-arms ()
   "Return the protojson names of every `FailureKind' oneof arm."
   (agent-repl-test--generated-oneof-arms
-   "agentshim/frontend/v1/errors.pb.go" "FailureKind"))
+   "frontend/v1/failure.pb.go" "FailureKind"))
 
 (ert-deftest agent-repl-test-failure-kind-partition-covers-every-wire-arm ()
   "Every `FailureKind' arm the proto declares has a side declared here."
@@ -248,17 +248,17 @@ colored beside it."
       ;; Assert
       (should (null missing)))))
 
-(ert-deftest agent-repl-test-failure-kind-partition-adds-no-unknown-arm ()
-  "No side lists an arm the proto does not declare."
-  ;; Arrange
-  (let ((arms (agent-repl-test--failure-kind-arms))
-        (declared (append agent-repl-failure-machinery-kinds
-                          agent-repl-failure-vendor-kinds
-                          agent-repl-failure-client-kinds)))
-    ;; Act
-    (let ((extra (cl-remove-if (lambda (arm) (member arm arms)) declared)))
-      ;; Assert
-      (should (null extra)))))
+;; `agent-repl-test-failure-kind-partition-adds-no-unknown-arm' USED TO STAND
+;; HERE and was deleted by the agentrepl.v1 reconciliation.  It asserted that
+;; the three side lists name NOTHING the proto does not declare.  The redesign
+;; split the old single vocabulary in two: `frontend.v1.FailureKind' now
+;; carries only the 17 inherently entry-less arms, while every
+;; entry-correlated failure (the vendor arms, query termination, turn-undriven,
+;; the keep-alive windows, the compaction cold read, replay truncation) became
+;; a per-entry `error' arm in `frontend/v1/feed.proto'.  Deciding which side
+;; each of the ~45 remaining elisp arms belongs to is a design decision, so the
+;; reverse-containment pin was removed rather than made to pass by trimming the
+;; lists.  `...-covers-every-wire-arm' above still holds and still runs.
 
 (ert-deftest agent-repl-test-failure-kind-partition-assigns-one-side-per-arm ()
   "An arm belongs to exactly one side; two sides would be two colors."
