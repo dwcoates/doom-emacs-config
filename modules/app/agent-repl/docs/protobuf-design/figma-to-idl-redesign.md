@@ -7611,3 +7611,58 @@ verbatim by the fanout's planning docs:
      left standing.
    - When issues are detected, subsequent remediation runs enable DEBUG
      logging to trace the path.
+
+### IMPLEMENTATION CONVENTIONS lock down: proto→code mapping, validation, logging, and the six-orchestrator protocol
+
+User-settled at the design gate's implementation detours; the fanout's
+planning docs inherit ALL of this verbatim, for all five systems, both
+directions (producers and consumers).
+
+**Proto→code mapping.**
+- Every MESSAGE has one core implementation function ("base") per
+  language: validation lives there ONCE — unset non-optional fields and
+  empty strings with required semantics are ERRORS; an unset oneof is an
+  ERROR BY DEFAULT, a documented fallback only where the schema comment
+  explicitly sanctions absence.
+- Every NON-PRIMITIVE use site (message-typed field, oneof arm) has its
+  own dedicated, TESTABLE function that delegates to the child message's
+  base; ancestry-named specializations go one layer deeper ONLY where a
+  specific path has real site-specific behavior, still through the base.
+- PRIMITIVES get no wrappers.
+- The producer side is SYMMETRIC: build functions with the same validation
+  at construction, per-site builders on top.
+- NO class-per-message mandate: the requirement is dedicated testable
+  functions and separated concerns, NOT a shape — organization into
+  modules/files/classes is the implementing agents' discretion, settled at
+  the orchestration-planning stage; the anti-goal is a million
+  unnamespaced Handle<A><B><C> functions.
+
+**Validation invariant (restated from the previous entry, part of this
+package):** illegal requests error to the producer immediately; illegal
+stream pushes raise loudly at the consumer; integration testing is
+expected to CATCH both, and the orchestrator remediates.
+
+**Logging invariant (restated):** debug on every logical branch, correct
+levels, >=WARNING enabled and PERUSED by orchestrators even on green
+runs, warnings remediated to zero (fixed or deliberately downgraded),
+debug enabled during remediation traces.
+
+**The six-orchestrator protocol.** Five per-system orchestrators + one
+LEAD.
+- Every orchestrator and implementer reads the main design record and
+  their system's implementation doc into context BEFORE any planning or
+  work.
+- Implementers anticipate API edge cases; every anticipated case gets a
+  unit test on the corresponding per-site function; when the API is
+  unclear for a test, implementers ASK their orchestrator, never guess.
+- Implementers NEVER change protobufs. A needed change is a REQUEST to
+  their orchestrator, who triages: true systemic oversight → surfaced to
+  the lead AND the user; small remediation → to the lead, who vetoes or
+  approves.
+- On approval: lead broadcasts PAUSE (finish-or-abandon the current edit,
+  never mid-file) → lead lands the proto change and rebuilds bindings →
+  lead broadcasts RESUME carrying the NEW FOUNDATION COMMIT SHA so every
+  system re-points at one identical contract version → orchestrators
+  resume their implementers.
+- Every proto-change request and its ruling gets a line in the design
+  record: mid-flight contract drift stays auditable.
