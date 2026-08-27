@@ -52,6 +52,14 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // The footer: the always-drawn strip plus the expanded section's panels.
 // EVERY panel is always resolved on every push: which panel is open is a
 // webview-local selection the daemon never learns.
+// PUSH CADENCE, the convention for this view and every frontend.v1 view:
+// EVENT-DRIVEN, WHOLE-VIEW, NO TICKS. The daemon pushes the view WHOLE
+// whenever ANY resolved fact changes — never a partial, never a delta —
+// and pushes NOTHING when nothing changed: there is no keepalive, no
+// periodic re-push, and an identical consecutive push is waste, not
+// protocol. Continuous motion (clocks, countdowns, relative ages) is
+// CLIENT-side ticking from shipped instants. Bursts of upstream frames may
+// coalesce into one push, because the wire carries STATES, not events.
 message FooterView {
   // The one-line strip at the bottom of the workspace view. Always drawn.
   FooterStrip strip = 1;
