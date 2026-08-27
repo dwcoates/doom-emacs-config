@@ -141,6 +141,10 @@ message AgentActivity {
     // loop's tick), or ending such a loop. The pending wakeup drives the
     // footer's waiting · wakeup fallback state.
     AgentScheduleWakeup schedule_wakeup = 26;
+    // The agent publishing a local file as a hosted artifact page, or
+    // listing existing ones. A publish draws as its own response-styled
+    // feed bubble; a list is a quiet read, drawn nowhere.
+    AgentArtifact artifact = 27;
   }
 }
 
@@ -2556,6 +2560,95 @@ message AgentScheduleWakeupStopped {
 
 // The call never ran.
 message AgentScheduleWakeupFailure {
+  // Why, in the shared vocabulary.
+  AgentToolFailure failure = 1;
+}
+
+// ---- The artifact: a local file published as a hosted page ----
+
+// The agent publishing a local HTML/markdown file as an artifact — a hosted
+// page on claude.ai the user can open and share — or listing existing ones.
+message AgentArtifact {
+  // Where the call stands.
+  oneof result {
+    // The call as issued. Sent once per stream, at issue.
+    AgentArtifactStart start = 1;
+    // The service answered.
+    AgentArtifactSuccess success = 2;
+    // The call could not be performed at all.
+    AgentArtifactFailure failure = 3;
+  }
+}
+
+// The call as issued.
+message AgentArtifactStart {
+  // Which action was asked; the arms are exclusive by the vendor's own rule
+  // (each action reads its own fields and ignores the other's).
+  oneof act {
+    // Publish (or redeploy) a page.
+    AgentArtifactPublish publish = 1;
+    // List existing artifacts — a quiet read.
+    AgentArtifactList list = 2;
+  }
+  // When the call was issued.
+  int64 started_at_ms = 3;
+}
+
+// A publish as asked.
+message AgentArtifactPublish {
+  // The local file being rendered to the page.
+  string file_path = 1;
+  // The browser-tab emoji, drawn as the bubble's leading glyph. UNSET when
+  // the call gave none.
+  optional string favicon = 2;
+  // The page title, when supplied at the call (the page's own <title> tag
+  // wins at the vendor). UNSET when the call gave none.
+  optional string title = 3;
+  // An existing artifact URL being updated in place — presence means this
+  // publish is a REDEPLOY, not a new page. UNSET on a fresh publish.
+  optional string updates_url = 4;
+  // The version label. EXPECTED UNMAPPED: nothing draws it.
+  optional string label = 5;
+  // The gallery-card subtitle. EXPECTED UNMAPPED: nothing draws it.
+  optional string description = 6;
+  // TRUE when a concurrent-write conflict is deliberately overwritten.
+  // EXPECTED UNMAPPED: nothing draws it; carried for fidelity.
+  bool force = 7;
+}
+
+// A listing as asked. Every field EXPECTED UNMAPPED; carried for fidelity.
+message AgentArtifactList {
+  // The row cap asked for.
+  optional uint32 limit = 1;
+  // Whose artifacts ("mine", "shared", "all"), verbatim.
+  optional string scope = 2;
+}
+
+// The service's answer.
+message AgentArtifactSuccess {
+  // Which act was answered.
+  oneof outcome {
+    AgentArtifactPublished published = 1;
+    AgentArtifactListed listed = 2;
+  }
+}
+
+// The page is live.
+message AgentArtifactPublished {
+  // The published page's URL — the bubble's clickable line. PRODUCER NOTE:
+  // the vendor's result is untyped prose; the shim extracts the URL from it.
+  string url = 1;
+  // The page's resolved title, as the result reports it. UNSET when the
+  // result names none; the bubble then draws the call's title or filename.
+  optional string title = 2;
+}
+
+// The listing answered. Empty on purpose: the vendor's result is untyped
+// prose nothing draws or acts on; the arm records that the read happened.
+message AgentArtifactListed {}
+
+// The call never ran.
+message AgentArtifactFailure {
   // Why, in the shared vocabulary.
   AgentToolFailure failure = 1;
 }

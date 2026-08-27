@@ -328,6 +328,40 @@ cumulative rule, are reworded. The accumulator moves to the daemon, where
 state is allowed.
 
 ## Landed changes
+### ARTIFACT lands — a response-styled publish bubble; the LONG TAIL is fully dispositioned
+
+**The drawing agreed ("looks good"), landed verbatim:**
+
+```
++-FeedArtifact (purple, response-styled)-------------------+
+| 📊 Merge Queue Report                        published  |   <- favicon emoji + title; state badge
+| claude.ai/artifacts/abc123…                             |   <- the published URL, clickable
++---------------------------------------------------------+
+```
+
+**conversation.v1.** AgentActivity.item gains artifact (27). AgentArtifact
+{ start { act publish { file_path; optional favicon/title; optional
+updates_url (presence = a REDEPLOY); label/description/force EXPECTED
+UNMAPPED } | list { limit/scope, all EXPECTED UNMAPPED — a quiet read } ;
+started_at_ms } | success { published { url — PRODUCER NOTE: the vendor's
+result is untyped prose, the shim extracts the URL; optional title } |
+listed (empty on purpose) } | failure }. Evidence tier stated plainly: NO
+Artifact call exists in this machine's corpus (the audit's 2 sightings were
+aggregate) and the output is untyped, so the result shape rests on the
+input types + doc surface — the URL-extraction producer note is the debt's
+marker.
+
+**frontend.v1.** FeedTurnActivity gains artifact (8): FeedArtifact
+{ composed heading (favicon + title, filename fallback); publishing |
+published { clickable url } | failed { composed reason } }. Only a publish
+draws; a list produces no row. A redeploy upserts the same bubble.
+
+**THE LONG TAIL (TOOLIO-28) + NOTEBOOKEDIT (TOOLIO-24) ARE NOW FULLY
+DISPOSITIONED**: WebFetch/WebSearch modeled+drawn; Monitor modeled, footer
+chip; ScheduleWakeup modeled, footer fallback state; Artifact modeled,
+response bubble; TaskStop/TaskOutput/TaskGet/TaskList/ToolSearch/
+NotebookEdit exempt.
+
 ### SCHEDULEWAKEUP lands — the footer's waiting · wakeup FALLBACK state with a client-ticked countdown
 
 **The drawing agreed ("looks good then"), landed verbatim:**
