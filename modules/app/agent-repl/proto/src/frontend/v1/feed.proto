@@ -401,6 +401,11 @@ message FeedToolCallReturned {
     // A link list: web search results, each row a clickable title.
     FeedToolCallLinksOutput links = 8;
   }
+  // The settled clock — "ran 4.2 s" — composed by the daemon from the
+  // call's start and settle instants, drawn beside the badge. UNSET when
+  // either instant is missing; the card then shows no elapsed figure
+  // rather than a ticking or invented one.
+  optional FeedToolCallRuntime runtime = 9;
   // The IDE's findings against this change, one composed line each, drawn
   // below the output. Present iff the edit raised any — a later re-push of
   // the settled card adds them when they arrive.
@@ -411,6 +416,11 @@ message FeedToolCallDiagnostics {
   // The composed lines ("render.ts:214 · error · 'x' is never used"),
   // client-capped.
   repeated string lines = 1;
+}
+// The settled clock element.
+message FeedToolCallRuntime {
+  // The composed sentence, drawn verbatim.
+  string text = 1;
 }
 // The call succeeded. Empty: the arm is the badge.
 message FeedToolCallSucceeded {}
