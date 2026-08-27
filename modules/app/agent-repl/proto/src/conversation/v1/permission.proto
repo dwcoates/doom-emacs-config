@@ -267,8 +267,8 @@ message AgentPermissionSuccess {
     AgentPermissionAllowed allowed = 1;
     // The tool may not run.
     AgentPermissionDenied denied = 2;
-    // Nobody decided before the agent gave up waiting; the tool did not run.
-    AgentPermissionAbandoned abandoned = 3;
+    // Tag 3 is RETIRED: the vendor declares permission prompts have NO park
+    // deadline (vetting item 1), so an expiry arm had no producer.
   }
 }
 
@@ -337,8 +337,6 @@ message AgentPermissionDeniedByPolicy {
   string message = 3;
 }
 
-// The ask expired with no decision.
-message AgentPermissionAbandoned {}
 
 // The ask could not be put to the user.
 message AgentPermissionFailure {
