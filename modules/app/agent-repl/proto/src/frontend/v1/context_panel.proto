@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// THE /context PANEL: the context-fill tree — what occupies the window, by
+// category, from the vendor's structured breakdown answer. Daemon-resolved;
+// the WEBAPP owns the rendering. Distinct from the topbar's session token
+// breakdown — a different fact and a different component.
+message ContextPanelView {
+  // The sections, in render order.
+  repeated ContextPanelSection sections = 1;
+}
+// One section: a heading over its rows.
+message ContextPanelSection {
+  // The heading element.
+  ContextPanelHeading heading = 1;
+  // The rows, in render order.
+  repeated ContextPanelRow rows = 2;
+}
+// The heading element.
+message ContextPanelHeading {
+  // As shown ("Memory files", "MCP tools").
+  string text = 1;
+}
+// One item's line.
+message ContextPanelRow {
+  // The item ("webapp/CLAUDE.md").
+  string label = 1;
+  // Daemon-formatted token figure ("2.1k").
+  string tokens = 2;
+  // Of the whole window, permille. UNSET = the row draws no share.
+  optional uint32 share_permille = 3;
+  // Nesting depth for indentation, 0 = top.
+  uint32 depth = 4;
+}

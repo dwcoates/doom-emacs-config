@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// THE /usage PANEL: allowance utilization, as label/value rows (session and
+// weekly windows, resets, overage standing). Daemon-resolved; the WEBAPP owns
+// the rendering.
+message UsagePanelView {
+  // In render order; the daemon omits rows it has no value for.
+  repeated UsagePanelRow rows = 1;
+}
+// One row: a label and the value beside it, daemon-formatted.
+message UsagePanelRow {
+  // As shown ("Session window", "Weekly window").
+  string label = 1;
+  // As shown ("62% · resets 4:10pm").
+  string value = 2;
+}

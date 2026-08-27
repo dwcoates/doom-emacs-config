@@ -476,3 +476,22 @@ promises a rotation never splits a page; `SessionStarted.main_agent_id`
 promises the id is stable across starts; both are store facts.
 
 **Status.** OPEN.
+
+### 11. The cost/usage panels' one structured source is an EXPERIMENTAL control method
+
+**The assumption.** The vendor's structured session-usage answer (the
+control channel's get-usage response: session cost, rate-limit windows) —
+the only structured producer for CostPanelView and UsagePanelView — remains
+available, despite the SDK naming it experimental
+(`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`).
+
+**What is affected.** CostPanelView and UsagePanelView: if the method is
+removed or reshaped, the daemon's fill for both panels breaks; the panel
+SHAPES survive (label/value rows), only the fill strategy changes (e.g.
+deriving cost rows from per-turn result usage instead).
+
+**How to verify it.** At the implementation wave: pin the SDK version, call
+the method against the pinned version, and add a shim test that fails
+loudly when the method disappears on an upgrade.
+
+**Status.** OPEN.
