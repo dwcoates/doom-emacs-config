@@ -164,9 +164,8 @@ message ContextTokenDelta {
 
 // History was discarded with nothing left in its place.
 message ContextCleared {
-  // What the clear did to the context's size. Not zero after: see
-  // ContextTokenDelta.
-  ContextTokenDelta tokens = 1;
+  // Tag 1 is RETIRED: the vendor's conversation-reset record carries no token
+  // delta (vetting item 1), so no producer could fill one.
 }
 
 // History was replaced by a summary of itself.
@@ -198,19 +197,8 @@ message ContextCompacted {
   // nothing drawn deserves to be told what it was spent on.
   uint64 duration_ms = 5;
 
-  // HOW MUCH CONTEXT THE SESSION HAS DISCARDED ACROSS ITS WHOLE LIFE, in
-  // tokens, including this cut.
-  //
-  // NOT DERIVABLE FROM THE DELTA ABOVE, which is per-cut: a session compacted
-  // six times has lost far more than its last cut says, and this is the only
-  // figure that states how much of the conversation is gone.
-  uint64 cumulative_dropped_tokens = 6;
-
-  // The tools the session had available immediately BEFORE the cut, by name.
-  // Empty when the producer listed none. Carried because a compaction can
-  // change the tool set, and a later call that fails on an unknown tool is
-  // otherwise unexplainable.
-  repeated string tools_before_cut = 7;
+  // Tags 6-7 are RETIRED: the cumulative-drop figure and the pre-cut tool
+  // list have no declared producer (vetting item 1).
 }
 
 // The cut was asked for.

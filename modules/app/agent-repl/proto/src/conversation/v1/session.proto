@@ -209,8 +209,7 @@ message SessionIdentityRotated {
   string previous_vendor_session_id = 1;
   // The identity from now on.
   string vendor_session_id = 2;
-  // The vendor's stated reason, verbatim; its vocabulary is not in evidence.
-  string reason = 3;
+  // Tag 3 is RETIRED: no producer states a rotation reason (vetting item 1).
 }
 
 // The query ended on its own. THE ARM IS HOW; an orderly close is
