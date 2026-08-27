@@ -463,6 +463,14 @@ message FooterLiveWorkChips {
   optional FooterChipTasks tasks = 2;
   // $ — live detached shells. Set iff at least one is running.
   optional FooterChipShells shells = 3;
+  // 👁 — live background monitors. Set iff at least one is live.
+  optional FooterChipMonitors monitors = 4;
+}
+// The monitors chip's props.
+message FooterChipMonitors {
+  // How many monitor rows the monitors panel holds. At least 1 when this
+  // chip is set (a zero-count chip is expressed by leaving the chip unset).
+  uint32 count = 1;
 }
 // The agents chip's props.
 message FooterChipAgents {
@@ -502,7 +510,41 @@ message FooterExpanded {
   FooterExpandedTasks tasks = 3;
   // The live detached shells — the $ chip's expansion.
   FooterExpandedShells shells = 4;
+  // The live background monitors — the 👁 chip's expansion.
+  FooterExpandedMonitors monitors = 5;
 }
+
+// ---- The monitors panel ----------------------------------------------------
+
+// The 👁 panel: one row per live monitor.
+message FooterExpandedMonitors {
+  // The rows, in the daemon's order. Empty when nothing is live — the chip
+  // is then unset and the panel unreachable.
+  repeated FooterMonitorRow rows = 1;
+}
+
+// One live monitor's line: 👁 · description · (persistent) · clock. NOT a
+// jump target: monitors have no feed bubble, unlike the agent and shell rows.
+message FooterMonitorRow {
+  // What is being watched, drawn verbatim (the agent's description).
+  FooterMonitorRowDescription description = 1;
+  // The runtime clock; the client ticks from the start instant.
+  FooterMonitorRowRuntime runtime = 2;
+  // Present iff the watch is persistent; draws the "persistent" marker.
+  optional FooterMonitorRowPersistent persistent = 3;
+}
+// The row's description element.
+message FooterMonitorRowDescription {
+  // The text, drawn verbatim.
+  string text = 1;
+}
+// The row's clock element.
+message FooterMonitorRowRuntime {
+  // When the watch was armed; the client ticks the duration from it.
+  int64 started_at_ms = 1;
+}
+// The persistent marker element. Empty: presence is the marker.
+message FooterMonitorRowPersistent {}
 
 // ---- The tokens panel ------------------------------------------------------
 
