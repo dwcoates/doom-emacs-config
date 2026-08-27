@@ -15,3 +15,9 @@ per-system digests under docs/protobuf-design/digests/ as needed; load the
 full record only for contract-change work. Also load
 docs/implementation/<subsystem>.md for any other subsystem being worked
 (shim, elisp, store, sidecar).
+
+THE /create-or-update-protobufs SKILL MUST NOT BE READ OR INVOKED unless
+the user gives EXPLICIT permission. If it is read, under NO circumstances
+follow its instructions to read further files (its design-record and
+vetting-register reload obligations): that context is already loaded by
+the list above.
