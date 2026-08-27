@@ -7363,3 +7363,13 @@ than questions:
   for now — the shell bubble already shows the spool's CONTENT; the
   host-local path adds nothing drawable until a "open the spool" affordance
   exists, which would be a new feature.
+
+### DESIGN-COMPLETE GATE PASSED (2026-08-27)
+
+The user approved the consequences recap whole: six surfaces settled at
+b24ced959 (plus vetting item 12 added at the gate), breaking consequences
+accepted under the land-whether-or-not-it-breaks rule, the exempt set /
+fidelity principle / identity ruling standing, debts routed to the vetting
+register (items 1-12, run-or-defer next) and the deferred metadocument.
+Design iteration is CLOSED; changes from here are vetting verdicts landing
+as increments, then reconciliation, then /cross-system-fanout.
