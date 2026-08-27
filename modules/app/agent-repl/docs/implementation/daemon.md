@@ -62,6 +62,31 @@ unmarked is DISCRETIONARY by default.
      refusal arm; post-merge-start work would be orphaned since a merged
      workspace closes), restart-pending and shutdown-drain leases HOLD
      them; items already held when a lease is acquired stay held.
+   - DURABLE FACT INVENTORY (ruled; the facts are prescribed, the DDL is
+     the orchestrator's):
+     - MERGE GEOMETRY: per-workspace source branch, source dir, target
+       dir, origin — recorded at workspace creation, REFUSED rather than
+       guessed when absent.
+     - CREATION JOBS: workspace lifecycle BEFORE any session exists
+       (worktree path, branch, resolved base, materialization state),
+       plus the configured before/after merge actions the merge
+       orchestrator reads back.
+     - SESSION FACTS beyond the binding: last-engagement (the idle
+       sweep's input), death/terminality with cause (a deleted session
+       REFUSES resurrection), and spawn identity (config dir,
+       overrides).
+     - FEED PAGE POSITION: the daemon persists, per workspace, where the
+       webapp's page walk stands — because a fresh webapp asks for the
+       first page (no token needed), but when the DAEMON restarts under
+       a live workspace session (the doom self-merge reload), it must
+       remember what page the webapp is on so a NextPage request works
+       before a new prompt remints the walk.
+     - DEAD BY DESIGN: the old compaction-gate instants — the shim's
+       SessionCold refusal is the authoritative coldness fact now.
+   - INVARIANT — one handle, one writer: WSM opens the database with a
+     single connection and a single writer (two writers on one SQLite
+     file was a real lost-update class); the sole-DB-owner rule made
+     mechanical.
    - RULED ADOPTIONS from the feature-loss audit: exactly ONE durable
      held-prompt store exists (the old daemon's second store,
      session_record.queued_prompts beside the drain park rows, is an

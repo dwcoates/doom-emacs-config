@@ -101,3 +101,11 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     the concrete variants as needed) and DO NOT REMEDIATE. Each ruling
     lands in the owning subsystem's planning doc per the standing
     approval rules.
+
+15. AGREED TECHNICAL DETAILS SURVIVE INTO THE DOC. Any technical detail
+    the user specifies and the orchestrator agrees with MUST be carried
+    into the planning-doc update when the ruling lands: the doc is
+    DEFINITIVE, downstream agents have none of this conversation's
+    context, and every critical agreed fact must survive there. This is
+    a completeness mandate for critical facts, never a verbosity
+    mandate.
