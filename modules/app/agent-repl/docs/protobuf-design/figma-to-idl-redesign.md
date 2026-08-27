@@ -7289,3 +7289,13 @@ UserContentBlock sibling arms, and SessionRuntime.agent_binary_version.
   decision, and the MCP panel's missing `disabled` row arm.
 - Every kept group still needs its frontend propagation prescribed; that is
   the next review pass, group by group.
+
+### `frontend/v1/feed.proto`: `max_output_tokens` joins the turn-error taxonomy
+
+`ApiRequestFailed.max_output_tokens` (the request asked for more output than
+the model will produce) landed in the SIMPLE-ADD wave beside billing_error
+and oauth_org_not_allowed, but only those two got feed arms. The third now
+has one: `FeedTurnErrorMaxOutputTokens max_output_tokens = 17`, empty, the
+vendor's wording on the envelope's message element. DISTINCT from
+`max_tokens` (11): that response was cut at the ceiling mid-arrival, this
+request was refused outright and retrying it unchanged cannot succeed.
