@@ -16,7 +16,7 @@ import {
 import {
   SessionCommand,
   SessionCommandSchema,
-} from "../../proto/gen/ts/frontend/v1/shared_pb";
+} from "../../proto/gen/ts/conversation/v1/slash_command_pb";
 
 describe("sessionCommandSpecs", () => {
   const cases: ReadonlyArray<{

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { ConversationStore, type ConversationItem, type DaemonInterceptedCommandItem } from "../src/store.js";
 import { SESSION_COMMANDS, decodeFrontendFrame, sessionCommandOf } from "../src/frontend-proto.js";
-import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/frontend/v1/shared_pb";
+import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/conversation/v1/slash_command_pb";
 import { StateAdapter, type AdapterEffect } from "../src/state-adapter.js";
 import { renderItem, itemKey, sessionCommandLabel } from "../src/render.js";
 

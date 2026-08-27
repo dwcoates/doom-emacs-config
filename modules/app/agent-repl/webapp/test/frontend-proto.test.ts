@@ -92,11 +92,11 @@ describe("FailureKind: the closed failure vocabulary", () => {
   it("adopts an arm with its own typed evidence", () => {
     // Arrange / Act — each arm carries the evidence that arm actually has,
     // rather than a shared free-text field every producer packs differently.
-    const got = decodeFailureKind({ shimRejected: { requestId: "r1", reason: "busy" } }, "k");
+    const got = decodeFailureKind({ shimDegraded: { component: "connection" } }, "k");
     // Assert
     expect(got.kind).toEqual({
-      case: "shimRejected",
-      value: expect.objectContaining({ requestId: "r1", reason: "busy" }),
+      case: "shimDegraded",
+      value: expect.objectContaining({ component: "connection" }),
     });
   });
 
@@ -108,7 +108,7 @@ describe("FailureKind: the closed failure vocabulary", () => {
 
   it("THROWS on a double-set kind rather than picking an arm", () => {
     // Arrange / Act / Assert
-    expect(() => decodeFailureKind({ shimRejected: {}, apiOverloaded: {} }, "k")).toThrow(
+    expect(() => decodeFailureKind({ shimDegraded: {}, sessionShimDied: {} }, "k")).toThrow(
       /FailureKind contract/,
     );
   });
@@ -117,26 +117,6 @@ describe("FailureKind: the closed failure vocabulary", () => {
     // Arrange / Act / Assert — a consumer meeting an unfamiliar failure fails
     // to match it instead of silently rendering it as something else.
     expect(() => decodeFailureKind({ shimExploded: {} }, "k")).toThrow(/FailureKind contract/);
-  });
-
-  it("preserves exact query-termination evidence on its arm", () => {
-    // Arrange / Act
-    const got = decodeFailureKind(
-      {
-        queryTermination: {
-          detail: {
-            queryInstanceId: "query-1",
-            vendorSessionId: "claude-1",
-            observedAtMs: "1700000000000",
-            iteratorFailure: { cause: "child exited 137" },
-          },
-        },
-      },
-      "k",
-    );
-    // Assert
-    if (got.kind.case !== "queryTermination") throw new Error("wrong arm");
-    expect(got.kind.value.detail?.reason.case).toBe("iteratorFailure");
   });
 
   it("preserves exact resume-continuity evidence on its arm", () => {
@@ -172,85 +152,6 @@ describe("FailureKind: the closed failure vocabulary", () => {
 // alike, so the record's own invariants are enforced in the decoder and each
 // violation is refused LOUDLY — never rendered as "missing …" prose describing
 // evidence nobody supplied.
-
-describe("FailureKind: query-termination evidence invariants", () => {
-  /** A complete, valid query-termination record, with one field overridden. */
-  function queryTermination(over: Record<string, unknown> = {}): unknown {
-    return {
-      queryTermination: {
-        detail: {
-          queryInstanceId: "query-1",
-          vendorSessionId: "claude-1",
-          observedAtMs: "1700000000000",
-          iteratorFailure: { cause: "child exited 137" },
-          ...over,
-        },
-      },
-    };
-  }
-
-  it("THROWS when the arm carries no detail record at all", () => {
-    // Arrange / Act / Assert — the arm exists to carry exact evidence, so an
-    // empty one claims a query death it can say nothing about.
-    expect(() => decodeFailureKind({ queryTermination: {} }, "k")).toThrow(
-      /requires query-termination evidence/,
-    );
-  });
-
-  it("THROWS on a blank query_instance_id", () => {
-    // Arrange / Act / Assert — a record naming no query() invocation
-    // corroborates nothing.
-    expect(() => decodeFailureKind(queryTermination({ queryInstanceId: "  " }), "k")).toThrow(
-      /nonblank `query_instance_id`/,
-    );
-  });
-
-  it("THROWS on a non-positive observed_at_ms", () => {
-    // Arrange / Act / Assert — an unset instant is not "the epoch", it is a
-    // record that cannot say when the query died.
-    expect(() => decodeFailureKind(queryTermination({ observedAtMs: "0" }), "k")).toThrow(
-      /positive `observed_at_ms`/,
-    );
-  });
-
-  it("THROWS when neither vendor-identity arm is set", () => {
-    // Arrange / Act / Assert — the proto offers an explicit "identity was never
-    // exposed" arm, so silence is a malformed frame rather than that statement.
-    const noVendor = {
-      queryTermination: {
-        detail: {
-          queryInstanceId: "query-1",
-          observedAtMs: "1700000000000",
-          iteratorFailure: { cause: "child exited 137" },
-        },
-      },
-    };
-    expect(() => decodeFailureKind(noVendor, "k")).toThrow(/explicit vendor identity evidence/);
-  });
-
-  it("THROWS on a blank vendor_session_id", () => {
-    // Arrange / Act / Assert — the arm asserts an authoritative conversation
-    // UUID; blank asserts one and supplies none.
-    expect(() => decodeFailureKind(queryTermination({ vendorSessionId: "" }), "k")).toThrow(
-      /vendorSessionId must be nonblank/,
-    );
-  });
-
-  it("THROWS when no termination reason is set", () => {
-    // Arrange / Act / Assert — the reason is the whole point of the record;
-    // without it the card would read "missing termination reason".
-    const noReason = {
-      queryTermination: {
-        detail: {
-          queryInstanceId: "query-1",
-          vendorSessionId: "claude-1",
-          observedAtMs: "1700000000000",
-        },
-      },
-    };
-    expect(() => decodeFailureKind(noReason, "k")).toThrow(/unexpected termination reason/);
-  });
-});
 
 describe("FailureKind: resume-continuity evidence invariants", () => {
   it("THROWS when the arm carries no detail record at all", () => {
@@ -316,7 +217,7 @@ describe("FailureKind: resume-continuity evidence invariants", () => {
 });
 
 describe("FailureCardView: the feed's resolved failure card", () => {
-  const KIND = { apiOverloaded: { httpStatus: 529, attempts: 10 } };
+  const KIND = { shimDegraded: { component: "connection" } };
 
   it("carries the daemon's sentence verbatim", () => {
     // Arrange / Act

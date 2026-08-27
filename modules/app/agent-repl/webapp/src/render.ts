@@ -6,7 +6,7 @@
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
 import { bubbleWaveStyle } from "./breathing.js";
-import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/frontend/v1/shared_pb";
+import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/conversation/v1/slash_command_pb";
 import { sessionCommandSpecs } from "../../proto/ts/schema-literals.js";
 import { STREAM_ITEM_CAP, parseJournal } from "./async-stream.js";
 import { clearLogDedup, log } from "./wslog.js";
@@ -2433,9 +2433,9 @@ function FailureCardBubble(item: FailureCardItem): string {
  * debugging a resume or a query death needs named individually.
  */
 function failureEvidenceHtml(kind: import("./frontend-proto.js").FailureKind): string {
-  if (kind.kind.case === "queryTermination" && kind.kind.value.detail !== undefined) {
-    return queryTerminationFailureHtml(kind.kind.value.detail);
-  }
+  // `FailureKind.query_termination` was deleted; a query death now rides the
+  // feed entry it belongs to. `queryTerminationFailureHtml` is still reached
+  // through `resumeFailureHtml`, whose cause arm carries the same record.
   if (kind.kind.case === "sessionResumeFailed" && kind.kind.value.detail !== undefined) {
     return resumeFailureHtml(kind.kind.value.detail);
   }
@@ -2452,7 +2452,7 @@ function failureEvidenceHtml(kind: import("./frontend-proto.js").FailureKind): s
  * prose here, never as a blank line beside real evidence.
  */
 function queryTerminationFailureHtml(
-  failure: import("../../proto/gen/ts/frontend/v1/shared_pb").QueryTerminationFailure,
+  failure: import("../../proto/gen/ts/frontend/v1/failure_pb").QueryTerminationFailure,
 ): string {
   const reason = failure.reason.case === "unexpectedEof"
     ? "unexpected EOF"
@@ -2477,7 +2477,7 @@ function queryTerminationFailureHtml(
  * exactly one attempt and exactly one cause on every decoded record.
  */
 function resumeFailureHtml(
-  failure: import("../../proto/gen/ts/frontend/v1/shared_pb").SessionResumeFailure,
+  failure: import("../../proto/gen/ts/frontend/v1/failure_pb").SessionResumeFailure,
 ): string {
   const attempt = failure.attempt.case === "create" ? "session creation" : "automatic restoration";
   if (failure.cause.case === "queryTermination") {
