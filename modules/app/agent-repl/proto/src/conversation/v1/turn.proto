@@ -64,11 +64,16 @@ message TurnKilledAgentOnly {}
 // Spawned work was killed with the turn.
 message TurnKilledForced {
   // Every detached item this turn spawned, transitively, that was stopped.
+  // PRODUCER NOTE: named from the shim's own live-work tracking at the moment
+  // of the kill; the vendor's kill record carries no ids.
   repeated DetachedWorkId stopped_work = 1;
 }
 
 // The turn could not be killed without force: work it spawned is live.
 message TurnLive {
   // Every detached item this turn spawned, transitively, that is live now.
+  // PRODUCER NOTE: filled from the shim's OWN live-work tracking — the set of
+  // open detached-work streams — never from any vendor record (the vendor's
+  // signals carry counts, not ids).
   repeated DetachedWorkId live_work = 1;
 }
