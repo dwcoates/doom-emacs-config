@@ -7783,7 +7783,7 @@ case on those functions. Prescribing unit gaps would duplicate that
 machinery's output and anchor implementers to a list instead of the
 mapping.
 
-### The per-subsystem IMPLEMENTATION PLANNING DOCS open at docs/implementation/ — dead code is NAMED WORK
+### The per-subsystem IMPLEMENTATION PLANNING DOCS open at docs/overhaul/ — dead code is NAMED WORK
 
 The user's ruling: dead code the redesign stranded (reconciliation
 deliberately leaves it standing where deleting it would be design work) is
@@ -7800,7 +7800,7 @@ reports; store/sidecar/webapp/daemon follow as their reports land.
 Five subsystems reconciled green in isolated worktrees and merged (shim
 277 tests; elisp 5614; webapp 4901; store all packages race-checked;
 sidecar all packages) — each report's dead-code inventory, blockers, and
-integration replacement specs seeded into docs/implementation/. The
+integration replacement specs seeded into docs/overhaul/. The
 DAEMON's agent correctly refused: it was never repointed off protocol.v1/
 data.v1/state.v1 (9,724 dangling reference sites, 452/830 files), so
 "minimum adaptation" would hollow it into an empty shell — its

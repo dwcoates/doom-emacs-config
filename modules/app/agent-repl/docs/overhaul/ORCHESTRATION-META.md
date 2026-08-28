@@ -17,7 +17,7 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   publishers), and the by-endpoint sequence diagrams (meta rule 5) are
   UNSTARTED.
 - ORCHESTRATOR PROMPT DOCS opened (2026-08-28) at
-  docs/implementation/prompts/ — TEAMLEAD.md (shared by all five) and
+  docs/overhaul/prompts/ — TEAMLEAD.md (shared by all five) and
   PROJECTLEAD.md; running tallies per rule 22. The client-facing walk LANDED
   (2026-08-28): Connect server + publishers DISCRETIONARY (daemon.md
   12) and the never-miss-never-end-stale subscription invariant (13).
@@ -250,7 +250,7 @@ survive compaction. It joins the post-compaction mandatory-reload set.
       definitionally not-the-design; rulings later move items out.
     - SUBAGENT REPORTS GET A DURABLE HOME. A report whose findings are
       not fully ruled in the same conversation is saved verbatim under
-      docs/implementation/reports/, and the OPEN items cite it — the
+      docs/overhaul/reports/, and the OPEN items cite it — the
       evidence outlives the transcript even when the summary is lossy.
     - PARKING IS A WRITE, NOT A NOTE. Suspending any walk or triage
       REQUIRES flushing its complete remaining state — every unruled

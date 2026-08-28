@@ -832,7 +832,7 @@ separation row is the outcome), /model (topbar), and the act/flow commands.
    rename), is DELETED, never adapted. Pure renames adapt mechanically. An
    adaptation that would require deciding what behavior should NOW be is a
    surfaced gap, not an adaptation. Replacement INTEGRATION coverage is
-   prescribed into `docs/implementation/webapp.md`; unit coverage is NOT
+   prescribed into `docs/overhaul/webapp.md`; unit coverage is NOT
    prescribed — it falls out of the mapping convention above.
 
 6. **Store is NUKED, never migrated.** No durable-compatibility argument
@@ -840,7 +840,7 @@ separation row is the outcome), /model (topbar), and the act/flow commands.
 
 Webapp reconciliation merged green (4901 tests) at the reconciliation pass;
 its dead-code inventory, integration replacement specs and reconciliation
-gotchas live in `docs/implementation/webapp.md`.
+gotchas live in `docs/overhaul/webapp.md`.
 
 ## 12. The graceful-rollout handover (post-freeze increment)
 

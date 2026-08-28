@@ -770,7 +770,7 @@ no-variable-state principle that bounds all of it.
   delegating to the child's base; primitives get no wrappers; the producer side is
   SYMMETRIC.
 - The SHIM reconciled green (277 tests) and merged; its dead-code inventory, blockers and
-  integration replacement specs are seeded into `docs/implementation/`. Design froze at
+  integration replacement specs are seeded into `docs/overhaul/`. Design froze at
   `2d79f7501`.
 
 ## 13. STANDING OWED ITEMS AND GOTCHAS FOR THE SHIM

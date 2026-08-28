@@ -70,7 +70,7 @@ Escalate — never guess through — anything that is:
 
 - START by reading, fully: your system's protobuf DIGEST document
   (docs/protobuf-design/digests/<your-system>.md) and your system's
-  ARCHITECTURE document (docs/implementation/<your-system>.md).
+  ARCHITECTURE document (docs/overhaul/<your-system>.md).
 - AVAILABLE AS NEEDED: the digest and architecture documents of the OTHER
   systems, and the protobuf files themselves under proto/src/ — they are
   well documented and authoritative; read them as needed (they carry real

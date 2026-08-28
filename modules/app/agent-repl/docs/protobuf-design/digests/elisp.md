@@ -441,7 +441,7 @@ The admin verbs are NOT host-natured — "Emacs is just today's caller."
   line in the design record.
 
 - DEAD CODE the redesign stranded is NAMED WORK in
-  `docs/implementation/elisp.md`, never left for discovery. That document also
+  `docs/overhaul/elisp.md`, never left for discovery. That document also
   carries elisp's integration replacement specs and reconciliation gotchas.
 
 ## 14. Reconciliation status (standing fact)
@@ -450,7 +450,7 @@ The admin verbs are NOT host-natured — "Emacs is just today's caller."
   six packages and the Makefile's proto list went dynamic.
 - The ELISP subsystem reconciled GREEN in an isolated worktree and merged
   (5,614 tests), with its dead-code inventory, blockers and integration
-  replacement specs seeded into `docs/implementation/elisp.md`. Shim, webapp,
+  replacement specs seeded into `docs/overhaul/elisp.md`. Shim, webapp,
   store and sidecar merged alongside it; the DAEMON is a fanout subject rather
   than a reconciliation one.
 

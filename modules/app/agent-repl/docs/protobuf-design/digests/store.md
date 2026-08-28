@@ -544,7 +544,7 @@ superseded. What actually landed is the set above; the rest is reference.
   and merged (all packages race-checked); `storev1connect` handler interfaces
   now generate, because `protoc-gen-go` emits message types only. The store's
   dead-code inventory, integration replacement specs and reconciliation gotchas
-  are seeded into `docs/implementation/`.
+  are seeded into `docs/overhaul/`.
 - THE TEST RULE for reconciliation: any test referencing a DELETED symbol, or a
   RESPELLED one, is DELETED, never adapted; pure renames adapt mechanically.
   Replacement coverage is prescribed for INTEGRATION and E2E only — unit

@@ -795,7 +795,7 @@ untyped exception, written verbatim to the daemon's on-disk log; Emacs never cal
    architecture work: INTEGRATION specs go to each subsystem's implementation planning doc and
    E2E specs to the main doc; unit specs are NOT prescribed — they fall out of the mapping
    convention.
-7. **Dead code is NAMED WORK** in each subsystem's `docs/implementation/<subsystem>.md`,
+7. **Dead code is NAMED WORK** in each subsystem's `docs/overhaul/<subsystem>.md`,
    never left for discovery.
 
 **Daemon status at freeze.** The design froze at `2d79f7501`. Five subsystems reconciled
