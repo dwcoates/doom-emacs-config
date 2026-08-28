@@ -116,7 +116,7 @@ frozen; anything that looks like a schema gap is surfaced upward, never patched 
   speaks).
 - Proto comments are the authoritative per-field documentation: every oneof arm states when a
   producer sets it and what a consumer does with it. Read the file you implement against.
-- `docs/overhaul/conventions.md` holds the cross-system conventions
+- `the teamlead prompt (standing conventions) and the proto comments` holds the cross-system conventions
   (identity spaces, echo tokens, response-outcome and bounded-stream conventions, presence
   rules, push cadence, package model). Not repeated here — read it once before implementing.
 - The full design record is the PROJECT LEAD's context; escalate rather than consulting it
