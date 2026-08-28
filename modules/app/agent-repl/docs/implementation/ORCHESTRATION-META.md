@@ -40,8 +40,13 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   footer merging family realigned; batch-1 triage RULED (refuse
   pre-state, queued merge blocks close, daemon-owned worktree removal,
   conflict resume = conversational-only, hand-resolution unsupported).
-  STILL UNRULED (OPEN in daemon.md): boot-backfill gate, Emacs durable
-  merge-state, doom-multi-repo-mode, skill-side leftovers; TWO MERGE
+  TRIAGE SWEEP (2026-08-28): every merge-variants finding RULED (boot
+  repair dead; Emacs merge memory + merged-tab hiding killed;
+  doom-multi-repo-mode killed; skill leftovers wont-do); INTAKE SIDE
+  EFFECTS dropped for this project; DRAIN group fully ruled (three WSM
+  invariants + rate-limited refusal logging; interrupt-before-
+  disconnect rejected); STILL OPEN: seven plain-worded shim-connection
+  questions (daemon.md's backlog); TWO MERGE
   METHODS RULED (2026-08-28): Emacs repo = pre-prompt → no-FF merge
   commit → tests+fixes → bounce → post-prompt; everything else =
   pre-prompt → post-prompt only; seven conditional tabs landed (protos

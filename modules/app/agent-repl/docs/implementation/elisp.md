@@ -30,3 +30,17 @@
 - Roster status decode covers EVERY RosterRow.status arm the frozen contract
   declares and REFUSES unknown arms loudly (replaces the deleted
   hibernated-inclusive pin).
+
+## Removals ruled 2026-08-28 (merge-variants + account rulings)
+- Emacs's durable merged/merge-failed memory across restart: REMOVED
+  (session.el's saved merge-completed restore, the re-classification
+  probe); the daemon's pushed views are the only merge state.
+- The merged-tab hiding/greying (tab-bar filtering, sidebar greying of
+  merged workspaces): REMOVED — the information is deliberately not
+  provided to Emacs.
+- agent-repl-doom-multi-repo-mode: KILLED — path-under-$MULTI_REPO_ROOT
+  is the only account rule; no Emacs-side widening exists.
+- The intake side-effect machinery (auto-decline of parked permission
+  asks on prompt, owed-redelivery cancellation): dropped for this
+  project; the landed permission/question API is the only path.
+

@@ -97,6 +97,19 @@ unmarked is DISCRETIONARY by default.
    - INVARIANT — the battle-tested open settings are copied from the old
      daemon's statedb open path (each exists because a real bug happened
      without it, the worst being a silently lost concurrent write).
+   - INVARIANT — FREENESS IS ONLY EVER JUDGED WHILE HOLDING THE
+     WORKSPACE'S LEASE: never checked before acquiring, never assumed
+     across a release — the whole of the old recheck machinery, made
+     structural (ruled 2026-08-28).
+   - INVARIANT — ONE-TRANSACTION ORPHAN CLOSE: when a workspace shuts
+     down, everything that never got a terminal is closed together in a
+     single database transaction (turn claim retired, interrupted
+     markers written, last-activity stamped) — a crash mid-teardown can
+     never leave half the bookkeeping done (ruled 2026-08-28).
+   - INVARIANT — ALL-OR-NOTHING HOLD RESTORE: at boot, held prompts
+     restore from durable storage whole; a corrupt record restores
+     NOTHING, loudly — never a partial set that silently loses what
+     users typed (ruled 2026-08-28).
    - INVARIANT — the database file carries its layout version, an older
      daemon REFUSES to open a newer file (silent corruption class during
      deploy/rollback), and a read-only open mode exists for inspection
@@ -287,6 +300,10 @@ unmarked is DISCRETIONARY by default.
 
 9. DISCRETIONARY — drain/shutdown controller (schedule + idle sweep;
    prereqs: WSM, shim client; acquires the lease like any peer).
+   RULED (2026-08-28): teardown NEVER interrupts the vendor — graceful
+   shutdown means waiting for freeness, so the old interrupt-before-
+   disconnect step is REJECTED outright; repeated refusals log
+   rate-limited with exact suppressed/total counts, never a flood.
 
 10. PRESCRIBED — THE ROLLOUT CONTROLLER (graceful doom-change rollout).
    - RESPONSIBILITIES: turns the merge orchestrator's self-reload
@@ -465,48 +482,48 @@ unmarked is DISCRETIONARY by default.
 These feature-loss audit findings are NOT yet ruled; each awaits a
 remediate / do-not-remediate ruling per meta rule 14:
 
-- SHIM-CONNECTION group: reconnect/backoff policy with terminal-vs-
-  retryable classification; readiness gated on SILENCE rather than
-  elapsed time; handshake facts (permission posture, resume position
-  selection); the build-staleness bounce (shim reports build identity,
-  daemon bounces exactly once on mismatch); surviving-shim arbitration
-  (wait / adopt / evict, never a duplicate over one transcript); boot
-  reconciliation with shims that outlived the previous daemon; the
-  typed sink fan-out; model-catalog handling; connectivity truth edges
-  (OnConnected/OnLinkLost as the only witnesses of wired).
-- INTAKE SIDE EFFECTS group: a user prompt declines parked permission
-  asks (a failed decline fails the submit); it cancels owed post-bounce
-  re-drives; engagement is declared at the funnel and retracted on
-  failure; the accepted edge publishes synchronously before the shim
-  submit, with a retraction path restoring state when the submit fails.
-- DRAIN group: the work gate is re-asked INSIDE the lease (an
-  unprovable answer releases and refuses); teardown drains the
-  interrupt BEFORE cancelling the connection; workspace-scoped orphan
-  close with one-transaction bookkeeping (claim retirement +
-  interruption rows + the idle edge together); standing refusals
-  rate-limited with exact suppressed/total accounting; hold restore is
-  all-or-nothing on a corrupt ledger.
+- SHIM-CONNECTION group, seven questions still open (the
+  build-staleness bounce and graceful-handover shim adoption are
+  covered by the rollout controller): (1) REDIAL — if the daemon's
+  connection to a still-running shim breaks, how persistently does it
+  redial and which failures mean give up; (2) READY-WHEN-QUIET — a
+  starting shim counts as ready once it goes quiet for a moment, never
+  after a fixed delay; (3) FIRST-CONNECT FACTS — what the shim reports
+  when the connection opens (active permission mode, where in the
+  transcript it resumed); (4) SHIMS THAT OUTLIVED A CRASH — reconnect
+  to them or kill and restart; (5) MESSAGE DISTRIBUTION — whether the
+  fan-out of each incoming shim message to interested subsystems is
+  prescribed or the implementer's; (6) MODEL LIST — the topbar's
+  options come from the shim's report at connect; (7) PROOF OF
+  CONNECTED — only actual connect/disconnect events flip the
+  workspace's connected state, never inference from silence.
+- INTAKE SIDE EFFECTS group: DROPPED FOR THIS PROJECT (ruled
+  2026-08-28) — auto-declining parked permission asks, cancelling owed
+  redeliveries, engagement declaration at the funnel, and the
+  synchronous accepted-edge publish with retraction are all future-PR
+  material; for now the landed permission/question API (fully
+  webapp-side) is the only path.
+- DRAIN group: ALL RULED 2026-08-28 — freeness-under-the-lease,
+  one-transaction orphan close, and all-or-nothing hold restore landed
+  as WSM invariants; rate-limited refusal logging adopted (drain
+  entry); interrupt-before-disconnect REJECTED (teardown never
+  interrupts the vendor).
 - MERGE leftovers: dequeue-offer timing (the old flow raises it from
   the INTERRUPT, our entry says at completion); the agent-driven
   merge-skill detached window (a separate concept from the daemon
   merge); cross-repo multi-queue membership (one workspace queued on
   several repos; Standing reports the first, Dequeue takes all).
-- MERGE-VARIANTS findings, UNRULED (evidence:
-  docs/implementation/reports/merge-variants-2026-08-27.md; refusal
-  semantics, close-vs-queue, worktree removal and conflict resume were
-  RULED 2026-08-28 and moved to the merge orchestrator's entry): the
-  boot geometry-backfill gate yields to a host connect briefly then
-  runs anyway (merges must never depend on Emacs being up, and merge
-  commands block on the gate); Emacs holds durable merged/merge-failed
-  state across its own restart plus the merged-workspace visibility
-  treatments (tab close on merged, re-raise on failure, teardown
-  refusal mid-merge) that the new pushed views must feed;
-  doom-multi-repo-mode membership is unevaluable by the daemon (an
-  Emacs toggle with no on-disk representation widening "under the
-  root"); --pr-was-merged exists only in the workspace skill — the
-  merge engine has no PR-merged branch at all; and
-  parent-notification-on-child-merge has no found implementation
-  (unresolved in the report).
+- MERGE-VARIANTS findings: ALL RULED as of 2026-08-28 (evidence:
+  docs/implementation/reports/merge-variants-2026-08-27.md). DEAD BY
+  RULING: the old boot-time repair of missing merge layout facts (the
+  facts are recorded at creation and refused when absent — no repair
+  exists); Emacs's durable merged/merge-failed memory AND the
+  merged-tab hiding/greying (removed outright — the information is
+  deliberately not provided); the doom-multi-repo-mode toggle (killed
+  from Emacs too — path-under-$MULTI_REPO_ROOT is the ONLY account
+  rule everywhere). WONT-DO (gap accepted): --pr-was-merged has no
+  engine counterpart; parent-notification-on-child-merge is not
+  implemented.
 
 DECLINED (ruled, do not re-ask): delivery-retry pacing and unknown-fate
 reconciliation are NOT prescribed (the implementing orchestrator's);
