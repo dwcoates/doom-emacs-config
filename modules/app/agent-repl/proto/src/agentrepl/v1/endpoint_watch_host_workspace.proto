@@ -35,8 +35,26 @@ message WatchHostWorkspaceResponse {
     //   tab selected              → nothing (the footer's activity line
     //                               already shows it).
     HostWorkspaceNotification notification = 2;
+    // DAEMON HANDOVER: this workspace has been released by this (old)
+    // daemon at freeness — from this push on, this daemon does NO work for
+    // the workspace. Emacs's obligation: call AdoptHostWorkspace on the NEW
+    // daemon's connection (address from WatchDaemon's shutdown
+    // announcement), then CANCEL this stream and re-subscribe there. The
+    // stream stays standing until the client cancels — this arm is a push,
+    // never a terminal frame.
+    HostWorkspaceTransferred transferred = 3;
+    // WEBAPP-ONLY ROLLOUT: rebuilt webapp assets are deployed and Emacs
+    // must reload this workspace's xwidget against the SAME daemon. Empty
+    // by design: no address rides it (the daemon is not changing), and a
+    // combined daemon+webapp rollout never sends it — the handover's fresh
+    // attach pulls the new assets as a side effect. The reloaded webview's
+    // default first-page load is the whole of the recovery.
+    HostWorkspaceReloadWebapp reload_webapp = 4;
   }
 }
+
+message HostWorkspaceTransferred {}
+message HostWorkspaceReloadWebapp {}
 
 // A notification the agent addressed to the user, forwarded per workspace.
 message HostWorkspaceNotification {

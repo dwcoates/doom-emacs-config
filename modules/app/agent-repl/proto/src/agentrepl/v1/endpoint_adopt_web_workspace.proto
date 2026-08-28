@@ -1,0 +1,33 @@
+// endpoint_adopt_web_workspace.proto — AdoptWebWorkspace: the webview's half
+// of the per-workspace handover rendezvous. WEB LINK section, called on the
+// NEW daemon's connection after `transferred` arrived on WatchWebWorkspace.
+// The VERB identifies the participant; rendezvous semantics are stated on
+// AdoptHostWorkspace and are identical here: all expected participants'
+// calls succeed together when adoption completes.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AdoptWebWorkspaceRequest {
+  // The workspace being adopted.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+message AdoptWebWorkspaceResponse {
+  oneof result {
+    AdoptWebWorkspaceSuccess success = 1;
+    AdoptWebWorkspaceError error = 2;
+  }
+}
+
+// Adoption is COMPLETE: re-open the workspace's view streams here now; the
+// persisted feed page position makes the re-attach evidence-free.
+message AdoptWebWorkspaceSuccess {}
+
+// Arms derived at the wave from the new daemon's real refusal sites.
+message AdoptWebWorkspaceError {}

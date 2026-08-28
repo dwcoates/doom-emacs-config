@@ -1,0 +1,37 @@
+// endpoint_watch_web_workspace.proto — WatchWebWorkspace: the webview's
+// standing daemon-link stream for ONE workspace. WEB LINK section — the
+// webview analog of WatchHostWorkspace: "Web" qualifies the VIEW (the
+// workspace's web-client-facing link state), exactly as "Host" qualifies
+// Emacs's. NOT DRAWN: the webview uses it to follow its connection's
+// lifecycle, never to render.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message WatchWebWorkspaceRequest {
+  // The workspace this webview is bound to.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+message WatchWebWorkspaceResponse {
+  oneof push {
+    // DAEMON HANDOVER: this workspace has been released by this (old)
+    // daemon at freeness. The webview's obligation, IN ORDER: connect to
+    // `address`, call AdoptWebWorkspace there, and only then cancel this
+    // connection's streams — the old connection outlives the new one's
+    // creation, so no gap is observable and nothing races the switch. The
+    // address rides HERE because a webview has no daemon-level stream to
+    // have learned it from.
+    WebWorkspaceTransferred transferred = 1;
+  }
+}
+
+message WebWorkspaceTransferred {
+  // The new daemon's socket address, verbatim.
+  string address = 1;
+}

@@ -34,7 +34,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_submit_prompt.proto.
  */
 export const file_agentrepl_v1_endpoint_submit_prompt: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3VibWl0X3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIogBChNTdWJtaXRQcm9tcHRSZXF1ZXN0EicKBHNhaWQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSFwoPaWRlbXBvdGVuY3lfa2V5GAIgASgJEiYKBGZlZWQYAyABKAsyEy5mcm9udGVuZC52MS5GZWVkSWRIAIgBAUIHCgVfZmVlZCKIAQoUU3VibWl0UHJvbXB0UmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0RXJyb3JIAEIICgZyZXN1bHQikQEKE1N1Ym1pdFByb21wdFN1Y2Nlc3MSLgoEdHVybhgBIAEoCzIeLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRUdXJuSAASPwoNY29tbWFuZF9wYW5lbBgCIAEoCzImLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRDb21tYW5kUGFuZWxIAEIJCgdvdXRjb21lIjkKEFN1Ym1pdFByb21wdFR1cm4SJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiuQIKGFN1Ym1pdFByb21wdENvbW1hbmRQYW5lbBIuCgZzdGF0dXMYASABKAsyHC5mcm9udGVuZC52MS5TdGF0dXNQYW5lbFZpZXdIABIsCgV0b2RvcxgEIAEoCzIbLmZyb250ZW5kLnYxLlRvZG9zUGFuZWxWaWV3SAASLgoGYWdlbnRzGAUgASgLMhwuZnJvbnRlbmQudjEuQWdlbnRzUGFuZWxWaWV3SAASKAoDbWNwGAYgASgLMhkuZnJvbnRlbmQudjEuTWNwUGFuZWxWaWV3SAASMAoHY29udGV4dBgHIAEoCzIdLmZyb250ZW5kLnYxLkNvbnRleHRQYW5lbFZpZXdIABIqCgRoZWxwGAggASgLMhouZnJvbnRlbmQudjEuSGVscFBhbmVsVmlld0gAQgcKBXBhbmVsIhMKEVN1Ym1pdFByb21wdEVycm9yQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_conversation_v1_turn, file_conversation_v1_user, file_frontend_v1_status_panel, file_frontend_v1_todos_panel, file_frontend_v1_agents_panel, file_frontend_v1_mcp_panel, file_frontend_v1_context_panel, file_frontend_v1_help_panel, file_frontend_v1_feed]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3VibWl0X3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIogBChNTdWJtaXRQcm9tcHRSZXF1ZXN0EicKBHNhaWQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSFwoPaWRlbXBvdGVuY3lfa2V5GAIgASgJEiYKBGZlZWQYAyABKAsyEy5mcm9udGVuZC52MS5GZWVkSWRIAIgBAUIHCgVfZmVlZCKIAQoUU3VibWl0UHJvbXB0UmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0RXJyb3JIAEIICgZyZXN1bHQikQEKE1N1Ym1pdFByb21wdFN1Y2Nlc3MSLgoEdHVybhgBIAEoCzIeLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRUdXJuSAASPwoNY29tbWFuZF9wYW5lbBgCIAEoCzImLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRDb21tYW5kUGFuZWxIAEIJCgdvdXRjb21lIjkKEFN1Ym1pdFByb21wdFR1cm4SJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiuQIKGFN1Ym1pdFByb21wdENvbW1hbmRQYW5lbBIuCgZzdGF0dXMYASABKAsyHC5mcm9udGVuZC52MS5TdGF0dXNQYW5lbFZpZXdIABIsCgV0b2RvcxgEIAEoCzIbLmZyb250ZW5kLnYxLlRvZG9zUGFuZWxWaWV3SAASLgoGYWdlbnRzGAUgASgLMhwuZnJvbnRlbmQudjEuQWdlbnRzUGFuZWxWaWV3SAASKAoDbWNwGAYgASgLMhkuZnJvbnRlbmQudjEuTWNwUGFuZWxWaWV3SAASMAoHY29udGV4dBgHIAEoCzIdLmZyb250ZW5kLnYxLkNvbnRleHRQYW5lbFZpZXdIABIqCgRoZWxwGAggASgLMhouZnJvbnRlbmQudjEuSGVscFBhbmVsVmlld0gAQgcKBXBhbmVsIloKEVN1Ym1pdFByb21wdEVycm9yEjsKB21lcmdpbmcYASABKAsyKC5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0UmVmdXNlZE1lcmdpbmdIAEIICgZyZWFzb24iHAoaU3VibWl0UHJvbXB0UmVmdXNlZE1lcmdpbmdCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_conversation_v1_turn, file_conversation_v1_user, file_frontend_v1_status_panel, file_frontend_v1_todos_panel, file_frontend_v1_agents_panel, file_frontend_v1_mcp_panel, file_frontend_v1_context_panel, file_frontend_v1_help_panel, file_frontend_v1_feed]);
 
 /**
  * What the user typed, submitted whole.
@@ -244,15 +244,31 @@ export const SubmitPromptCommandPanelSchema: GenMessage<SubmitPromptCommandPanel
   messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 4);
 
 /**
- * The submission was refused. EMPTY ON PURPOSE — an empty oneof is not legal
- * proto, so the `reason` oneof is added WITH its first arms at this
- * endpoint's 3c turn, DERIVED from the daemon's real refusal sites (e.g. no
- * session, merge lease held, drain refusing) and spelled per the 3b
- * conventions.
+ * The submission was refused. The reason oneof gains further arms as they
+ * are derived from the daemon's real refusal sites.
  *
  * @generated from message agentrepl.v1.SubmitPromptError
  */
 export type SubmitPromptError = Message<"agentrepl.v1.SubmitPromptError"> & {
+  /**
+   * WHY the submission was refused.
+   *
+   * @generated from oneof agentrepl.v1.SubmitPromptError.reason
+   */
+  reason: {
+    /**
+     * A merge is in flight for this workspace, and the prompt arrived
+     * AFTER the merge began. It is refused outright rather than held:
+     * once the workspace merges, it closes, so work produced by a
+     * post-merge-start prompt would be orphaned. Prompts already held
+     * when the merge began stay held and are unaffected. The composer
+     * keeps the text; the user resubmits after the merge resolves.
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptRefusedMerging merging = 1;
+     */
+    value: SubmitPromptRefusedMerging;
+    case: "merging";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -261,4 +277,21 @@ export type SubmitPromptError = Message<"agentrepl.v1.SubmitPromptError"> & {
  */
 export const SubmitPromptErrorSchema: GenMessage<SubmitPromptError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 5);
+
+/**
+ * The merge-in-flight refusal. Empty: the set arm is the whole assertion —
+ * the footer's merging status and the feed's merge bubble already show
+ * which merge, so the refusal carries no duplicate account of it.
+ *
+ * @generated from message agentrepl.v1.SubmitPromptRefusedMerging
+ */
+export type SubmitPromptRefusedMerging = Message<"agentrepl.v1.SubmitPromptRefusedMerging"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptRefusedMerging.
+ * Use `create(SubmitPromptRefusedMergingSchema)` to create a new message.
+ */
+export const SubmitPromptRefusedMergingSchema: GenMessage<SubmitPromptRefusedMerging> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 6);
 

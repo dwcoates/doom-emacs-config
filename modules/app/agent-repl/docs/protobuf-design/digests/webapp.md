@@ -841,3 +841,19 @@ separation row is the outcome), /model (topbar), and the act/flow commands.
 Webapp reconciliation merged green (4901 tests) at the reconciliation pass;
 its dead-code inventory, integration replacement specs and reconciliation
 gotchas live in `docs/implementation/webapp.md`.
+
+## 12. The graceful-rollout handover (post-freeze increment)
+
+- NEW WEB LINK section: `WatchWebWorkspace { WorkspaceRef }` is the
+  webview's standing daemon-link stream; its `transferred { address }`
+  push means the old daemon released this workspace.
+- The webview's obligation, IN ORDER: connect to the address, call
+  `AdoptWebWorkspace { WorkspaceRef }` there, and only after success
+  cancel the old connection's streams — connect-new-first, so no gap is
+  observable; the persisted feed page position makes re-attach
+  evidence-free (cold open = newest page only).
+- The adopt is a rendezvous with Emacs's `AdoptHostWorkspace`; all
+  expected participants succeed together.
+- OWED derived refusal arms at the wave: `transferring_away { address }`
+  from the old daemon (self-heal from the refusal) and `not_yet_adopted {}`
+  from the new.

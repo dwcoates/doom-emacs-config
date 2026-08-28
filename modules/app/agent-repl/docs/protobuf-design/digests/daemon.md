@@ -819,3 +819,23 @@ palette, which contracts to five colors cross-system.
 daemon picks ONE activity); the when-column precedence; the `frontendv1.RenderState` Go type
 (the SSM keeps its state machine internally; the wire carries only projections); the
 translate-layer re-encoding, which becomes the feed row resolver.
+
+## 15. The graceful-rollout handover (post-freeze increment)
+
+- The rollout controller's wire: `WatchDaemon` (daemon-level host stream,
+  `shutdown_announced { address }`), `transferred` + `reload_webapp` push
+  arms on `WatchHostWorkspace`, the WEB LINK section (`WatchWebWorkspace`
+  with `transferred { address }`, `AdoptWebWorkspace`), and
+  `AdoptHostWorkspace` — two adopt verbs so the VERB identifies the
+  participant.
+- Rendezvous: expected participants = per-workspace stream holders at
+  announcement; adoption (kernel-lock claim, shim adoption, held-intake
+  drain) completes only when all have called; headless = zero rendezvous
+  via WSM facts + lock.
+- The new daemon refuses per-workspace rpcs pre-adoption; derived arms
+  owed at the wave: `transferring_away { address }` (old) /
+  `not_yet_adopted {}` (new).
+- Old-daemon-side adoption timeout surfaces as the workspace's error —
+  remediate-as-it-comes-up, deliberately NOT a hardened invariant.
+- Never-free workspace: wait forever, periodic warning log (~10 min);
+  a newer rollout supersedes an unfinished joining daemon.

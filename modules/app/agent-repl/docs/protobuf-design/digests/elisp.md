@@ -453,3 +453,20 @@ The admin verbs are NOT host-natured — "Emacs is just today's caller."
   replacement specs seeded into `docs/implementation/elisp.md`. Shim, webapp,
   store and sidecar merged alongside it; the DAEMON is a fanout subject rather
   than a reconciliation one.
+
+## 15. The graceful-rollout handover (post-freeze increment)
+
+- `WatchDaemon {}` is Emacs's daemon-level stream (HOST section); its
+  `shutdown_announced { address }` push starts a rollout: Emacs opens a
+  second connection to the address while keeping the first.
+- Per workspace, the OLD daemon pushes `transferred` on that workspace's
+  `WatchHostWorkspace` at freeness (a push, never a terminal frame); Emacs
+  then calls `AdoptHostWorkspace { WorkspaceRef }` on the NEW connection,
+  and on success CANCELS the old stream and re-subscribes on the new.
+- The adopt is a RENDEZVOUS with the webview's `AdoptWebWorkspace`: all
+  expected participants (the per-workspace stream holders at announcement)
+  succeed together; the old daemon times the window and surfaces expiry as
+  the workspace's error (not an invariant to harden).
+- `reload_webapp` on `WatchHostWorkspace` is the webapp-only rollout:
+  Emacs reloads the workspace's xwidget against the SAME daemon (empty arm
+  — no address; the webview's default first-page load is the recovery).
