@@ -93,3 +93,12 @@ submitter's own — no pushed view carries it.
   hover shows the session-scoped breakdown (no turn figures — footer's).
 - The account label draws the email, or "logged out" as a warning state.
 
+## Code-level consistency requirements (from the conventions walk)
+- ONE renderer subroutine draws EVERY FeedSessionSeparation arm; the
+  arm selects only accent color and label/payload text — a per-arm
+  divider renderer is a defect.
+- ONE shared link component backs every jump-to-file affordance.
+- THE BLINK CADENCE is implemented exactly from the one spec on
+  RosterRowAttention (two blinks, 500 ms on/off, then steady);
+  divergence from the Emacs tab-bar is a defect.
+

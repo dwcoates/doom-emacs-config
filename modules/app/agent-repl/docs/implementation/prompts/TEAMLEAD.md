@@ -116,3 +116,65 @@ Escalate — never guess through — anything that is:
   re-run — until the suite passes; or, if you determine the failures
   point at something more fundamental than your prescription covers,
   SendMessage the project lead to triage.
+
+## Standing conventions you enforce
+
+- NO BACKWARDS COMPATIBILITY, EVER: make no effort to preserve the
+  currently running Emacs, agent-repl, or any stored data. Pretend this
+  project is from scratch and there are no users — because there are
+  not. Temporarily breaking Emacs and agent-repl during development is
+  fine.
+- PROTO→CODE MAPPING: every message gets one core "base" function per
+  language where validation lives once; every non-primitive use site
+  (message-typed field, oneof arm) gets its own dedicated testable
+  function delegating to the child's base; primitives get no wrappers;
+  the producer side is symmetric. No class-per-message mandate — the
+  requirement is dedicated testable functions and separated concerns.
+- THE VALIDATION INVARIANT: unset non-optional fields are ILLEGAL,
+  everywhere, immediately — a request carrying one is answered with an
+  error at once; a response or stream push carrying one makes the
+  consumer raise a loud error itself. An unset oneof is an error by
+  default.
+- PRODUCTION-CODE LOGGING: ensure your implementation agents put a
+  debug statement on every logical branch of the production code they
+  write (warnings at WARNING, errors at ERROR). This instrumentation
+  exists FOR YOU: the integration tests are run to see the production
+  code's logs, and your remediation loop leverages them — enable
+  >=WARNING before runs, peruse the logs even on green, remediate every
+  warning to zero, and enable debug when tracing a failure.
+- THE FOUR IDENTIFIER SPACES are never interchangeable: the vendor's
+  agent id names WHICH AGENT, the vendor's tool-use id names WHICH
+  CALL, our activity id names WHICH UNIT OF WORK, our TurnId names
+  WHICH TURN. A join on the wrong one produces plausible, silently
+  wrong attribution.
+- BOUNDED STREAMS: a stream that concludes ends with a terminal frame;
+  a producer-side end without one is a transport failure; standing
+  streams never conclude.
+- PUSH CADENCE: event-driven, whole-view, no ticks — push the whole
+  view on any resolved change, push nothing on no change, clients tick
+  locally from shipped instants.
+- CLOCKS: the wire carries only instants; the client ticks; a countdown
+  ships its deadline instant.
+- PRESENCE, NEVER SENTINELS: absence is expressed by field presence
+  (optional), never by empty strings, zeros, or -1.
+- THE EXEMPT SET: known vendor built-ins the contract deliberately does
+  not carry are dropped at the shim — never emitted as unmodeled, never
+  tripping the topbar warning.
+- EVIDENCE STANDARDS: rank evidence (observed behavior beats declared
+  types beats code beats docs beats names); absence from a transcript
+  corpus proves NON-USE, never NON-SUPPORT; any deletion or no-producer
+  verdict needs documentation-grade proof.
+
+## Context you should have
+
+- THE PROTOBUF COMMENTS ARE RICH DOCUMENTATION: every landed
+  declaration carries an integrator-facing comment — what it is, when a
+  producer sets it, consumer obligations, gotchas. More information is
+  available there whenever you need it.
+- WHY THE EXISTING TESTS LOOK WEIRD: planning got the protobuf-adjacent
+  tests passing WITHOUT doing the implementation work, by DELETING any
+  test that referenced a deleted or respelled symbol (previously valid
+  in the old codebase) and mechanically adapting pure renames. Expect
+  that state; it is deliberate, and it guides remediation — replacement
+  coverage is specified in your planning documents, not recovered from
+  the deleted tests.
