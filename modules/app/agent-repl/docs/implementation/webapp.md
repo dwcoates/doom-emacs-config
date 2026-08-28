@@ -68,12 +68,15 @@ submitter's own — no pushed view carries it.
   collapse → abandon the token; a merge-specific nested-content loader
   is a DEFECT.
 - The body renderer is the one legitimate difference: a TAB STRIP over
-  the sub-feed's FeedMergeTab rows. RESOLVED tabs (queue, tests,
-  landing) draw the row's own content — the queue snapshot, the test
-  suites with PAINT-CLASS COLORED SPANS (the client paints classes,
-  never parses ANSI), the landing narration lines. AGENTIC tabs
-  (rebase, remediation, action) draw the sub-feed rows parented to
-  them, exactly the subagent-feed rendering path.
+  the sub-feed's FeedMergeTab rows — queue | pre-prompt | merge |
+  conflicts | tests | fixes | post-prompt, every tab conditional on its
+  work having begun. RESOLVED tabs (queue, merge, tests) draw the
+  row's own content — the queue snapshot, the merge commit's narration
+  lines, the test suites with PAINT-CLASS COLORED SPANS (the client
+  paints classes, never parses ANSI). AGENTIC tabs (pre-prompt,
+  conflicts, fixes, post-prompt) draw the sub-feed rows parented to
+  them, exactly the subagent-feed rendering path; PARKED exists only
+  on conflicts and fixes.
 - PARKED tabs show the composed standing line plus a paused badge; the
   user's prompts (typed into the ordinary composer while the host
   stream says merge_parked) land in that tab as ordinary user-prompt

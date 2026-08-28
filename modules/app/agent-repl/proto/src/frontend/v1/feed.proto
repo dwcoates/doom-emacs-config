@@ -1622,31 +1622,38 @@ message FeedMergeFold {
 }
 
 // THE TAB FAMILY — one row per drawn tab of a merge bubble's sub-feed.
-// TWO TAB SHAPES: RESOLVED tabs (queue, tests, landing) carry their
-// content in this row, replaced whole per push; AGENTIC tabs (rebase,
-// remediation, action) are containers — their content is the sub-feed
-// rows parented to this row (the lease session's conversation, routed by
-// the daemon's output address). Tabs are APPEND-ONLY: a tab appears
-// BECAUSE that work began, so there is no pending tab, and a tab never
-// reopens — a second round is a SECOND TAB with the round in its label
-// ("tests (2)"), so an abnormal second pass looks abnormal.
+// TWO TAB SHAPES: RESOLVED tabs (queue, merge, tests) carry their
+// content in this row, replaced whole per push; AGENTIC tabs
+// (pre_prompt, conflicts, fixes, post_prompt) are containers — their
+// content is the sub-feed rows parented to this row (the lease session's
+// conversation, routed by the daemon's output address). Tabs are
+// APPEND-ONLY and CONDITIONAL: a tab appears BECAUSE that work began —
+// no conflicts means no conflicts tab, no test failures means no fixes
+// tab, an unconfigured prompt means no prompt tab — and a tab never
+// reopens: a second round is a SECOND TAB with the round in its label
+// ("tests (2)"). The Emacs-repo run is queue | pre-prompt | merge |
+// conflicts | tests | fixes | post-prompt; every other repo's run is
+// queue | pre-prompt | post-prompt (landing, tests and PR work are the
+// prompts' job there).
 //
 // EACH KIND OWNS ITS STATE oneof, declaring exactly the states legal for
-// it — an agentic tab can be PARKED (awaiting the user's guidance), a
-// resolved tab never can, and the illegal pairing is unrepresentable
-// rather than forbidden by comment (the footer-restructure pattern). The
-// leaf payloads (live, parked line, settled outcome) are SHARED messages
+// it: PARKED (stopped, awaiting the user's guidance) exists ONLY on
+// conflicts and fixes — the two loops with a give-up-to-human path; the
+// prompt tabs cannot park (pre-prompt failure fails the run, post-prompt
+// failure rides the terminal), and resolved tabs never can. The leaf
+// payloads (live, parked line, settled outcome) are SHARED messages
 // across the per-kind oneofs — one badge vocabulary, legality carried by
 // the oneof types.
 message FeedMergeTab {
   FeedMergeTabLabel label = 1;
   oneof kind {
     FeedMergeTabQueue queue = 2;
-    FeedMergeTabRebase rebase = 3;
-    FeedMergeTabTests tests = 4;
-    FeedMergeTabRemediation remediation = 5;
-    FeedMergeTabAction action = 6;
-    FeedMergeTabLanding landing = 7;
+    FeedMergeTabPrePrompt pre_prompt = 3;
+    FeedMergeTabMerge merge = 4;
+    FeedMergeTabConflicts conflicts = 5;
+    FeedMergeTabTests tests = 6;
+    FeedMergeTabFixes fixes = 7;
+    FeedMergeTabPostPrompt post_prompt = 8;
   }
 }
 
@@ -1700,10 +1707,36 @@ message FeedMergeTabQueue {
   FeedMergeQueue queue = 3;
 }
 
-// AGENTIC: the rebase — inherently agentic, conflict resolution included
-// (conflicts are the rebase's hard parts, never a separate tab). Content:
-// sub-feed rows parented to this row.
-message FeedMergeTabRebase {
+// AGENTIC: the configured --before-ws-merge prompt running the
+// workspace's session under the lease. Absent unless configured; its
+// failure FAILS THE RUN. Content: sub-feed rows parented to this row.
+message FeedMergeTabPrePrompt {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+}
+
+// RESOLVED: the landing itself — a NO-FF MERGE COMMIT onto the default
+// branch (one commit to apply, one to revert), narrated thin as
+// daemon-composed lines. Replaced whole per push. A conflict during it
+// opens the conflicts tab; the commit completes there.
+message FeedMergeTabMerge {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+  repeated FeedMergeMergeLine lines = 3;
+}
+message FeedMergeMergeLine {
+  // One daemon-composed narration line ("merged 4 commits · a1b2c3d").
+  string text = 1;
+}
+
+// AGENTIC: conflict resolution for the merge step's conflicts. Absent
+// unless the merge conflicted; parks when the agent exhausts its one
+// attempt per conflict. Content: sub-feed rows parented to this row.
+message FeedMergeTabConflicts {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabParked parked = 2;
@@ -1743,9 +1776,11 @@ message FeedMergeTestSpan {
   string paint_class = 2;
 }
 
-// AGENTIC: a test-failure remediation round. Content: sub-feed rows
-// parented to this row. Appears only after a failed tests tab.
-message FeedMergeTabRemediation {
+// AGENTIC: test-failure fixes. Absent unless a tests tab failed; parks
+// when the remediation loop escalates to the user. Content: sub-feed
+// rows parented to this row. A round that fixes and re-tests produces
+// "tests (2)", never a reopened tab.
+message FeedMergeTabFixes {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabParked parked = 2;
@@ -1753,29 +1788,15 @@ message FeedMergeTabRemediation {
   }
 }
 
-// AGENTIC: a configured action (before_ws_merge, postprocessing_prompt)
-// running the workspace's session under the lease. Content: sub-feed rows
-// parented to this row; the label carries the action's name.
-message FeedMergeTabAction {
-  oneof state {
-    FeedMergeTabLive live = 1;
-    FeedMergeTabParked parked = 2;
-    FeedMergeTabSettled settled = 3;
-  }
-}
-
-// RESOLVED: the landing — the actual git, narrated thin: commits picked,
-// shas landed. Replaced whole per push.
-message FeedMergeTabLanding {
+// AGENTIC: the configured --post-processing-prompt running the
+// workspace's session under the lease. Absent unless configured; its
+// failure never fails the run (it rides the terminal). Content: sub-feed
+// rows parented to this row.
+message FeedMergeTabPostPrompt {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
   }
-  repeated FeedMergeLandingLine lines = 3;
-}
-message FeedMergeLandingLine {
-  // One daemon-composed narration line ("picked 4f2a1c fold tokens…").
-  string text = 1;
 }
 
 // The repo queue snapshot the queue tab draws: who is ahead, this

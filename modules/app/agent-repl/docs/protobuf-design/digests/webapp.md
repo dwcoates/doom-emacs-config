@@ -870,3 +870,7 @@ gotchas live in `docs/implementation/webapp.md`.
   rows parented to them; parked tabs show the composed line + paused
   badge, and the user's prompts land there as ordinary rows.
 - Content is LAZY: collapsed = head only; settled merges page on demand.
+- TAB REVISION: seven conditional tabs — queue | pre-prompt | merge |
+  conflicts | tests | fixes | post-prompt; resolved = queue/merge/
+  tests, agentic = the rest; parked only on conflicts/fixes.
+

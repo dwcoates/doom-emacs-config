@@ -83,6 +83,13 @@ unmarked is DISCRETIONARY by default.
        before a new prompt remints the walk.
      - DEAD BY DESIGN: the old compaction-gate instants — the shim's
        SessionCold refusal is the authoritative coldness fact now.
+     - ACCOUNT SELECTION (MULTI_REPO_ROOT), carried forward as the
+       current system supports it: config-dir routing by path
+       (under-root → the multi-repo config dir, else default),
+       create-time resolution with the no-inheritance asymmetry (a
+       parent merely under the root has chosen nothing), transcript
+       lookup probing the routed root first, same-vendor-uuid-under-
+       two-accounts disambiguation, and the two-root account roster.
    - INVARIANT — one handle, one writer: WSM opens the database with a
      single connection and a single writer (two writers on one SQLite
      file was a real lost-update class); the sole-DB-owner rule made
@@ -237,20 +244,28 @@ unmarked is DISCRETIONARY by default.
      reason); post-merge WORKTREE REMOVAL IS THE DAEMON'S (this
      orchestrator's post-merge teardown removes the merged worktree —
      Emacs's finish removal dies).
-   - RULED (non-Emacs-repo merges, 2026-08-28): the TESTS phase and its
-     REMEDIATION run IFF the merge target is our own repo, decided by
-     the existing self-repo identity computation (git common-dir vs the
-     daemon's checkout — the self-reload trigger's own check); every
-     other repo's merge is queue → actions → rebase → landing, with the
-     absent tabs structural (append-only, tab-appears-because-work-
-     began). NO per-repo test configuration surface exists.
-   - RULED: the configured before/after prompts are supported for EVERY
-     merge on EVERY ingress, Emacs included — read from the WSM
-     creation-job facts regardless of who dispatched the merge. A
-     SESSIONLESS workspace with a configured action gets a session
-     STARTED under the lease to run it (revival-is-implicit applied);
-     only a workspace with no configured actions merges truly
-     sessionless.
+   - TWO MERGE METHODS (ruled 2026-08-28), keyed self-repo-or-not (the
+     common-dir identity the self-reload check computes); MULTI_REPO_ROOT
+     is ACCOUNT SELECTION ONLY, never merge strategy. EMACS REPO:
+     pre-prompt (lease, if configured) → NO-FF MERGE COMMIT onto the
+     default branch (one commit to apply, one to revert; conflicts via
+     the parked-lease spec) → tests on the merge commit + fixes (lease)
+     → the rollout bounce → post-prompt (lease, if configured).
+     EVERYTHING ELSE: pre-prompt → post-prompt, nothing more — PR
+     creation, landing, tests are the prompts' job there. The per-repo
+     queue and the terminal/teardown path are IDENTICAL for both.
+   - TABS (revised): queue | pre-prompt | merge | conflicts | tests |
+     fixes | post-prompt — resolved: queue/merge/tests; agentic:
+     pre-prompt/conflicts/fixes/post-prompt; all conditional
+     structurally; PARKED only on conflicts and fixes.
+   - RULED: the configured prompts run for EVERY merge on EVERY
+     ingress, Emacs included — read from the WSM creation-job facts. A
+     SESSIONLESS workspace with a configured prompt gets a session
+     STARTED under the lease (revival-is-implicit); only a workspace
+     with no configured prompts merges truly sessionless.
+   - CONSEQUENCE for self-reload: the landed range is the merge
+     commit's second-parent history (default..branch) read off the
+     commit — the cherry-pick-annotation walk dies with cherry-picking.
    - GOTCHAS: phase history is feed content, not WSM columns; an
      in-flight merge across a daemon restart is resumed or LOUDLY
      failed, never left with the lease stuck; the composer gate is the
