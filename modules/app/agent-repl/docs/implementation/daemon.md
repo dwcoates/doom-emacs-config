@@ -237,6 +237,20 @@ unmarked is DISCRETIONARY by default.
      reason); post-merge WORKTREE REMOVAL IS THE DAEMON'S (this
      orchestrator's post-merge teardown removes the merged worktree —
      Emacs's finish removal dies).
+   - RULED (non-Emacs-repo merges, 2026-08-28): the TESTS phase and its
+     REMEDIATION run IFF the merge target is our own repo, decided by
+     the existing self-repo identity computation (git common-dir vs the
+     daemon's checkout — the self-reload trigger's own check); every
+     other repo's merge is queue → actions → rebase → landing, with the
+     absent tabs structural (append-only, tab-appears-because-work-
+     began). NO per-repo test configuration surface exists.
+   - RULED: the configured before/after prompts are supported for EVERY
+     merge on EVERY ingress, Emacs included — read from the WSM
+     creation-job facts regardless of who dispatched the merge. A
+     SESSIONLESS workspace with a configured action gets a session
+     STARTED under the lease to run it (revival-is-implicit applied);
+     only a workspace with no configured actions merges truly
+     sessionless.
    - GOTCHAS: phase history is feed content, not WSM columns; an
      in-flight merge across a daemon restart is resumed or LOUDLY
      failed, never left with the lease stuck; the composer gate is the
