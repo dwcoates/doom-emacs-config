@@ -53,8 +53,9 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   first component); shim.v1 GetSessionContextUsage + conversation
   SessionContextUsage landed (pulled, never derived; /context panel
   un-stranded); account-switch CONSTRAINTS landed (daemon determines
-  config dir + ports transcripts itself). OPEN: create-time account
-  selection on CreateWorkspace; two webapp audit reports parked in
+  config dir + ports transcripts itself). The create-time selection gap DISSOLVED by
+  ruling: the account is DETERMINED (repo-under-root), never selected —
+  landed as an invariant. Two webapp audit reports parked in
   docs/protobuf-design/ for webapp planning.
 - STANDING INSTRUCTIONS: STOP just before invoking /cross-system-fanout
   — the user gates that invocation personally; digests regenerate when
