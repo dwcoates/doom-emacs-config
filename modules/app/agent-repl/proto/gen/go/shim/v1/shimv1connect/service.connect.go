@@ -103,8 +103,10 @@ type ShimClient interface {
 	// answering.
 	StartSession(context.Context, *connect.Request[v1.StartSessionRequest]) (*connect.Response[v1.StartSessionResponse], error)
 	// ATTACH: the standing stream of session-level facts as they manifest
-	// upstream. The facts fixed at start are StartSession's; nothing synthetic
-	// rides here — the shim's own health is pulled.
+	// upstream. The facts fixed at start are StartSession's. The shim's own
+	// health and the session's context usage RIDE THIS STREAM as pushed arms
+	// (SessionUpdate.diagnostics, SessionUpdate.context_usage) — no pull
+	// verbs exist for them.
 	WatchSession(context.Context, *connect.Request[v1.WatchSessionRequest]) (*connect.ServerStreamForClient[v1.WatchSessionResponse], error)
 	// Change the model from the next turn on. Resolves after the current turn
 	// ends; refused IMMEDIATELY with the cold cost when the context exceeds the
@@ -367,8 +369,10 @@ type ShimHandler interface {
 	// answering.
 	StartSession(context.Context, *connect.Request[v1.StartSessionRequest]) (*connect.Response[v1.StartSessionResponse], error)
 	// ATTACH: the standing stream of session-level facts as they manifest
-	// upstream. The facts fixed at start are StartSession's; nothing synthetic
-	// rides here — the shim's own health is pulled.
+	// upstream. The facts fixed at start are StartSession's. The shim's own
+	// health and the session's context usage RIDE THIS STREAM as pushed arms
+	// (SessionUpdate.diagnostics, SessionUpdate.context_usage) — no pull
+	// verbs exist for them.
 	WatchSession(context.Context, *connect.Request[v1.WatchSessionRequest], *connect.ServerStream[v1.WatchSessionResponse]) error
 	// Change the model from the next turn on. Resolves after the current turn
 	// ends; refused IMMEDIATELY with the cold cost when the context exceeds the

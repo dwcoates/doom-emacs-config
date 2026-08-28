@@ -644,3 +644,307 @@ the merge test gate has NO flake re-run.
   free); the FOOTER RESOLVER is NOT agnostic (it projects merge facts
   into the merging status family); resolvers dispatch feed and footer
   pushes in parallel per state change.
+
+## Contract context (for implementers)
+
+Orientation for daemon implementation agents. The .proto files under
+`proto/src/` are the contract; their comments are the authoritative
+documentation — read the files you implement against. This section is the
+map: the ideas, the package layout, and how the pieces relate. Generic
+wire/schema conventions (identity spaces, echo tokens, response-outcome,
+bounded streams, presence, no-seq, no-keepalive, the file/package model)
+live in `docs/protobuf-design/digests/conventions.md` — read that too;
+nothing there is restated here. The full design record is
+`docs/protobuf-design/figma-to-idl-redesign.md` (canonical on conflict).
+Implementers never touch protobufs — a needed proto change is routed
+upward, never made.
+
+### What the daemon IS
+
+- The ONE component allowed to hold state.
+  - Shim, store, and sidecar hold NO variable-size state; every
+    observation there costs a constant number of single indexed lookups.
+  - The daemon's durable state (WSM) is an in-process SQLite library, one
+    writer, no wire shape (`state.v1` was deleted; internal DDL, not proto).
+- Resolvers own ALL formatting; clients derive NOTHING.
+  - No client-side precedence tables, phase→word maps, color maps, label
+    lookups, arithmetic, or path→URL mapping — daemon-resolved values ride
+    the wire and re-publish on every change.
+  - One narrow exception: the cold-context gate ships raw facts (token
+    count, last-request instant, model) and the client owns wording.
+  - The daemon parses ANSI (merge test output) and syntax-highlights code
+    into paint-class spans itself; clients only paint classes.
+- The daemon is the ONLY prompt queue.
+  - The vendor binary's internal queue is never modeled or surfaced; the
+    daemon submits only when no turn is in flight for that agent.
+- Command recognition is daemon-side and transparent: the client submits
+  the composer text whole; `SubmitPrompt`'s success arm forks into "a
+  minted turn" vs "a recognized command's panel" — clients know no
+  command names.
+
+### Package map
+
+All packages under `proto/src/`. Each service file (`service.proto`) lists
+every rpc with one `endpoint_<rpc>.proto` per rpc; shared vocabulary gets
+its own file only when >1 endpoint needs it.
+
+- `agentrepl/v1` — the Connect service the daemon SERVES to Emacs and the
+  webapp. Sections mirror drawn components plus control surfaces:
+  - FEED: SubmitPrompt; OpenFeed → WatchFeed (open mints the token, watch
+    tails it) + GetFeedPage (daemon-held walk, first/next); Interrupt;
+    AnswerPermission / AnswerQuestion / AnswerColdGate.
+  - SIDEBAR: WatchWorkspaceRoster (the ONE global stream — no workspace
+    field; every webview watches the same roster) + the workspace verbs
+    Create/Open/Close/Kill/Nuke/Merge/Restart.
+  - TOPBAR: WatchTopbar + SetModel. FOOTER: WatchFooter.
+  - DAEMON-HOLD TRAY: WatchDaemonHolds + UpdateHeldPrompt + AnswerHeldOffer.
+  - DAEMON ADMIN: UpdateShutdownSchedule, UpdateMergeQueue, DaemonHealth,
+    SessionHealth, ClientLog.
+  - HOST (Emacs-only, not drawn): RegisterWorkspace (idempotent by dir),
+    SelectWorkspace, WatchHostWorkspace (per-workspace, correlation and
+    composer gating), WatchDaemon (daemon-scoped facts, e.g. shutdown
+    announcement), AdoptHostWorkspace.
+  - WEB LINK: WatchWebWorkspace + AdoptWebWorkspace — the webview's
+    standing daemon link the graceful rollout rides.
+  - Every per-workspace request carries `WorkspaceRef`; requests are
+    verbs, never state; error arms start EMPTY and are derived from the
+    daemon's real refusal sites at implementation time.
+- `frontend/v1` — the views the daemon's resolvers produce, one file per
+  drawn component: feed (self-similar — a subagent bubble IS a feed),
+  sidebar, topbar, footer, daemon_hold (the held tray), the slash panels
+  (status/context/agents/help/mcp/todos), failure (the entry-less failure
+  vocabulary). Never imports `agentrepl.v1`; both import `workspace.v1`.
+- `shim/v1` — the service the daemon CONSUMES, one shim per session.
+  Sections: Session (StartSession/WatchSession/SetSessionModel/
+  SetSessionPermissionMode/KillSession), Agent (StartTurn/WatchAgent/
+  UpdateAgent/KillTurn), Detached work (WatchBash/StopBash,
+  GetWorkflow/WatchWorkflow/StopWorkflow, DetachForeground), History
+  (ReadHistory, next-only). Wraps `conversation.v1` frames; no paint
+  attestation — a response never claims anything was rendered.
+- `conversation/v1` — the shared conversation VOCABULARY every surface
+  reads (agent frames, activity units, content blocks, permission,
+  question, session start / cold context, slash commands, turn identity,
+  detached work, workflow, vendor API outcomes, history pages). Leaf-most;
+  vendor-content-neutral block model; carries vendor fields even with no
+  UI consumer (fidelity layer).
+- `workspace/v1` — one line: the leaf identity package minting
+  `WorkspaceRef`/`RepositoryRef` echo tokens.
+- `store/v1` — NOT the daemon's surface. THE DAEMON MUST NEVER IMPORT IT
+  (an isolation gate in `store.proto`'s header forbids it). Its callers
+  are the shim and the sidecar only; everything the daemon is entitled to
+  see is `conversation.v1`, served over `shim.v1` (ReadHistory + the
+  Watch streams).
+
+### Identity, as the daemon lives it
+
+- The daemon MINTS: `TurnId` (returned by SubmitPrompt; stamped on the
+  feed rows a turn produced — the client matches its own prompt by it,
+  no optimistic rows, no pending-request maps), `WorkspaceRef` /
+  `RepositoryRef` (a path is never an identity — Register/Create return
+  the id), `FeedId` (ENCODE/DECODE, not a table: the daemon encodes the
+  identity of what the row draws and decodes it on echo, so the same row
+  gets the same id across pushes, restarts and replays; a bubble row's id
+  IS its sub-feed's OpenFeed address), session and controller-generation
+  identities on the host stream.
+- Typed identity spaces (unit, agent, task, ask) STOP at the daemon; the
+  frontend holds only "which row" and "inside what" — the one typed
+  survivor on the client wire is `TurnId`.
+- The shim mints unit ids (`activity_id`, stable for a unit's whole life)
+  and the durable `main_agent_id`; vendor identities (uuid, message.id,
+  session id) never cross the daemon↔client contract.
+- `SubmitPrompt` alone carries a client-minted `idempotency_key`
+  (duplicate refusal) — distinct from `TurnId`, which the daemon mints.
+
+### Session lifecycle: spawn / attach / end, resume, the cold gate
+
+- Sessions and turns OUTLIVE the daemon; the three acts are decoupled.
+  - SPAWN is unary and returns an identity the daemon persists
+    (StartSession, StartTurn — StartTurn returns once the prompt is
+    accepted, WITH the first page).
+  - ATTACH (WatchSession/WatchAgent/WatchBash/WatchWorkflow) creates
+    nothing and ends nothing; closing it leaves work running; opening
+    late or after a daemon restart misses nothing (opens with a page, or
+    the gap above the caller's own known-through mark).
+  - END is a Kill that refuses while work is live unless forced and NAMES
+    what it killed; narrow stops stay single-target (UpdateAgent.stop,
+    StopBash, StopWorkflow, agentrepl Interrupt).
+- On restart the daemon simply re-runs the Watches from persisted
+  identities and its persisted opaque history pointer; catch-up is the
+  same open-with-a-page path as cold paint.
+- Cold gate: a cold context (cache lapsed, or model switching) is REFUSED
+  with its cost named, never silently paid. The daemon reopens naming a
+  remediation — pay | clear | compact{model, scope} — chosen by the user
+  (AnswerColdGate) or daemon policy. Compaction is shim-implemented via a
+  throwaway session; no consumer sees it. The footer only says the
+  session is parked; the feed's gate row is the answering surface.
+- Hibernation is pure daemon POLICY (idle-cutoff sweep + implicit revive
+  on prompt); no API verb, no frontend-visible fact beyond the cold gate.
+- Workspace verb triad: Close = view-level, requires quiet (live work or
+  held prompts refuse it — undelivered user intent is never silently
+  discarded; a standing cold gate or a parked session does NOT block);
+  Kill = forced session death, never blocks, data survives; Nuke = kill
+  then delete worktree and branch — the only data destruction.
+- Resume gotcha: model and permission mode are recoverable from the
+  transcript but the SDK does NOT restore them — the shim passes them
+  back explicitly; the daemon carries the cold-gate remediation into the
+  next open. Account/config-dir is DETERMINED (path under
+  $MULTI_REPO_ROOT), never selected; the daemon itself ports the vendor
+  transcript between roots on an account switch.
+
+### The shim boundary, from the daemon's side
+
+- A subagent is handled EXACTLY as the turn: one write type, one frame
+  type, one queue — requests differ only in the address. "Main agent"
+  never appears on the API.
+- The shim forwards what CHANGED and accumulates nothing; the daemon owns
+  the fold — the feed resolver keeps the prose buffer per in-flight unit.
+  Response/thinking deltas have no offsets; the terminal arm restates the
+  WHOLE text, so a lost fragment self-corrects (bash keeps its offset —
+  no settled whole exists to recover from).
+- `start` means "this stream now carries this unit," not "work began"; a
+  re-announcement after detach or restart repeats the ORIGINAL start
+  instant (recovered from the store, not shim memory). `update` arms
+  exist only for kinds with genuine growth (response, thinking, bash).
+- Edges vs levels: the vendor's live-background-task set is a LEVEL with
+  replace semantics; the daemon must NEVER pair start/end edges to
+  reconstruct membership (ordering vs the level is unspecified upstream).
+  Detachment's defined instant is membership change in that set.
+- Announcement rides the spawning stream, recursively; provenance is
+  implicit in which stream announced an item. One stream per detached
+  item; zero item streams structurally IS "no detached work in flight."
+- Keep-alives are INVISIBLE on the control plane: the shim submits them,
+  yields to real work (rewind + discard), and never lets the daemon see
+  one — but they are visible on the record plane (accounting; superseded
+  turns excluded from replay, so paged history must tolerate them).
+- Shim health is stated, not timed: heartbeats are relayed as facts and
+  the daemon re-pushes "last progress" instants (clients tick locally);
+  the shim owns the wedge ruling; a stream ending without a terminal
+  frame is the transport failure.
+- Two-leg detached flow: daemon↔shim watches are EAGER (opened on
+  announcement — the open set IS the live-work set); webapp↔daemon is
+  LAZY (a bubble expand only subscribes to rows already produced;
+  collapse cancels only the client leg).
+- Live-work reconciliation is the SHIM's (`GetLiveWork` against the
+  store at session start: re-adopt or write the closing terminal); the
+  daemon's invariant is simply that every started thing eventually gets
+  a terminal row.
+
+### Queue, holds, leases — contract facts
+
+- One turn in flight PER AGENT, structurally: a second submit while a
+  turn runs on that agent is a daemon fault, refused outright.
+- A prompt submitted while a turn runs is HELD daemon-side (WSM,
+  keyed by TurnId, content is a `conversation.v1.UserSaid` — one
+  canonical form client → daemon → tray → shim → record), classified,
+  and delivered later; the vendor never sees it until then.
+- The held tray is its own component and stream (WatchDaemonHolds),
+  whole-list-replaced: `HeldPrompt` (deliver/force/cancel via
+  UpdateHeldPrompt) and `HeldOffer` (a daemon-parked question, e.g. the
+  merge-dequeue offer, answered via AnswerHeldOffer). Gates are NOT
+  holds: a merge lease or hibernated session REFUSES input; the
+  uninterruptible context cut is a classification, not a hold.
+- Occupancy leases carry PER-HOLDER REFUSAL POLICY: the merge lease
+  projects to error-on-submit; restart-pending and shutdown-drain
+  project to holds. A prompt arriving after a merge began is refused
+  (never held); prompts already held stay held and the dequeue offer
+  resolves their fate.
+- The genuine daemon holds are exactly four: shutdown drain, keep-alive
+  turn, revival pending, build refresh.
+
+### Merge (daemon-synthesized)
+
+- Merging is a daemon action the vendor knows nothing about; the daemon
+  coalesces everything produced during a merge into one feed bubble.
+- The merge bubble is a sub-feed (own FeedId, OpenFeed/WatchFeed — the
+  same plumbing as subagent bubbles). Routing is ADDRESS-DRIVEN: the
+  feed resolver is merge-agnostic and honors a generic output address
+  {target feed, parent row} supplied by lease holders; only the merge
+  orchestrator and the FOOTER resolver know "merge" as a concept.
+- Two methods keyed by self-repo-or-not; PARKED is recognized purely
+  from lease state (no content classifier) and the conversational
+  parked flow is the only resume path — no hand-resolution verb exists.
+- Merge phase history is not stored state — it is feed content the
+  daemon synthesizes on the fly.
+
+### Resolvers and push duties
+
+- Five resolvers — feed, footer, topbar, sidebar, hold tray — each
+  converting `conversation.v1` items plus daemon facts into that
+  component's `frontend.v1` view; internals deliberately unprescribed.
+- The Session Manager (one per live session) is the only consumer of
+  shim output: owns every shim watch, routes every frame by type through
+  one table to feed resolver, footer resolver, accounting, and the
+  turn-lifecycle announcement the prompt queue drains on. Simple reads
+  the shim now PUSHES on the session stream (context usage, diagnostics)
+  — no pull rpcs remain.
+- Views push WHOLE, event-driven, no ticks (conventions.md 3.4); every
+  footer panel ships fully resolved on every push because panel
+  selection is webview-local (folded-menu convention) — the daemon never
+  learns which panel is open. Resolvers dispatch feed and footer pushes
+  in parallel per state change.
+- Resolver accumulation state may stay unpersisted: resolvers buffer
+  piecemeal frames in memory and ship complete snapshots.
+- The daemon never issues commands to Emacs (the host command loop is
+  deleted); Emacs registers, selects, watches, and reacts.
+
+### Failure classification — where each failure lives
+
+- One failure, one home:
+  - Entry-correlated failures are arms of the specific row's own `error`
+    (turn-terminal rows carry the vendor API taxonomy; why a response
+    died lives on the turn-terminal, not the response bubble).
+  - Entry-less residue (machinery/shim/internal/client-local) is
+    `frontend.v1` failure.proto's vocabulary — a VOCABULARY file, not a
+    component; surfaces embed the evidence and render it their own way.
+  - Unmodeled tools are NOT failures and never feed rows — their home is
+    the topbar's warning dropdown, one warning per distinct name.
+  - Health verdicts: unhealthy is an ANSWER (success arm), never an rpc
+    error; DaemonFault and SessionFault are deliberately separate types
+    (different producers), arms derived from real fault sites only.
+  - Every live vendor API failure must also land as a transcript record,
+    or the feed silently misses it.
+- Liveness is layered, never keepalive-framed: upstream silence is
+  stated by the daemon as a fact (shim-degraded arms); pipe death is the
+  transport's; a wedged publisher is the daemon's own watchdog's
+  (DaemonHealth), never client frame-timing.
+
+### Rollout / handover
+
+- Blue-green self-rollout: old daemon spawns the rebuilt one (joining
+  mode), transfers workspaces one by one at FREENESS (no in-flight turn,
+  no live detached work). No daemon↔daemon channel — client relay + WSM
+  facts + per-workspace kernel locks.
+- Ordering by REFUSAL: the new daemon refuses unowned workspaces
+  (`not_yet_adopted`); the old refuses with `transferring_away{address}`;
+  lagging clients self-heal. Adoption completes only when every expected
+  participant has called its adopt verb (AdoptHostWorkspace /
+  AdoptWebWorkspace); headless workspaces transfer with zero rendezvous.
+- During handover, intake is HELD and replays in order on the new daemon
+  (the merge-in-flight refusal still applies).
+
+### Standing gotchas
+
+- Usage is stamped on EXACTLY ONE unit per API response (the first
+  content block's unit); summing units triple-counts. Absent usage means
+  "not the carrying unit," never "free." Thinking-token estimates are
+  unbilled — never add them to a bill.
+- Finality of a response is derived per render from the turn's own
+  conclusion, never a positional or wire fact.
+- On a nested activity frame, the unit upserted is the INNERMOST id;
+  the outer id is the containment path.
+- Foreground shell output is structurally unobservable (the spool
+  materializes at exit); incremental output exists only for detached
+  bash, produced by the sidecar.
+- Feed liveness is structural: no FeedTurnEnded row for the current turn
+  means the turn is live; a connection dying without one is a transport
+  failure.
+- GetFeedPage's walk position is DAEMON-held (one webview per
+  workspace); `next` with no walk standing is a refusal, not an empty
+  page; the daemon picks page sizes.
+- Domain outcomes (no matches, denial, unhealthy, "nothing running")
+  are SUCCESS answers.
+- Money/cost is deliberately absent from the entire API.
+- The store is nuked, never migrated — write no migration or backfill.
+- Unset non-optional fields are illegal everywhere: error the producer
+  on a request; raise loudly at the consumer on a stream push. Every
+  logical branch gets a DEBUG log; warnings are remediated to zero.
