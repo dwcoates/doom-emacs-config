@@ -554,6 +554,25 @@ unmarked is DISCRETIONARY by default.
      are semantically non-optional and a partial push would violate
      them; accumulation happens daemon-side, before the wire.
 
+12. DISCRETIONARY — THE CONNECT SERVER AND PUBLISHERS: the rpc
+   handlers validate per the base-function convention and DELEGATE to
+   the landed components (SubmitPrompt → the prompt handler, workspace
+   verbs → WSM and the orchestrators, adopts → the rollout rendezvous,
+   answers → the queue and shim); publishers deliver resolver views to
+   subscribers. Internals are the implementing orchestrator's.
+
+13. INVARIANT — SUBSCRIPTIONS NEVER MISS AND NEVER END STALE: a Watch
+   subscriber receives every complete view published from its
+   subscribe point onward, in order, with the most-recently-published
+   view (IF one exists) delivered first; no published view ever falls
+   in the crack between subscribing and receiving. This does NOT mean
+   immediacy: when a resolver has not yet produced a complete view,
+   the subscriber's first frame is the first view ever published —
+   absence of any frame is the legal "not yet resolved" state, and an
+   empty or partial message is never sent (the non-optional-fields
+   rule). Applies uniformly to every Watch stream; the feed's
+   token-pinned tail is this same guarantee's feed spelling.
+
 ## OPEN — unruled audit findings (the triage backlog)
 
 These feature-loss audit findings are NOT yet ruled; each awaits a
