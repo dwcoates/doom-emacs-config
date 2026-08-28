@@ -7827,6 +7827,25 @@ gains PER-HOLDER REFUSAL POLICY — the merge lease projects to
 error-on-new-submission; restart-pending and shutdown-drain project to
 holds.
 
+### THE SESSION MANAGER settles — one component per live session; eager shim watches, lazy client subscriptions
+
+Settled 2026-08-28 (architecture, no wire change), superseding the
+same-day response-handler naming: the daemon-side face of a workspace's
+live session is ONE component, THE SESSION MANAGER — the only consumer
+of shim output, above the dumb-wire shim client. STREAM HALF: it owns
+every shim watch (WatchSession, the turn's WatchAgent, one per live
+detached item — opened EAGERLY on announcement, because liveness is
+structural and the chips/freeness checks count the open set) and routes
+every frame by type through one table to the feed resolver (output
+address honored), footer resolver, accounting, and the turn-lifecycle
+announcement the prompt queue drains on. QUERY HALF: the shim pulls
+(context usage, diagnostics) are SYNCHRONOUS MEMBER FUNCTIONS answering
+their caller directly, never entering the routing table. TWO-LEG
+DETACHED FLOW: daemon↔shim eager, webapp↔daemon lazy — an expand's
+OpenFeed/WatchFeed only SUBSCRIBES to rows already being produced; a
+collapse cancels only the client leg; the expand never creates a
+shim-side route. Pushing out is the resolvers'/publishers' alone.
+
 ### `GetSessionContextUsage` lands — the context fact is PULLED, never derived; the daemon owns account switching
 
 Settled 2026-08-28 (a sanctioned post-freeze increment, completing the

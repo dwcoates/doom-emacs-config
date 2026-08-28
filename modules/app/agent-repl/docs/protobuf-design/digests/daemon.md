@@ -903,4 +903,12 @@ translate-layer re-encoding, which becomes the feed row resolver.
   topbar catalog/context, accounting). CONNECTIVITY: witnessed only by
   the three standing streams' liveness (WatchSession /
   WatchWebWorkspace / WatchHostWorkspace); all live = connected.
+- THE SESSION MANAGER (2026-08-28, supersedes "response handler"): one
+  per live session, the only consumer of shim output; owns every shim
+  watch (eager — open set = live-work set) and routes each frame by
+  type (feed via output address, footer, accounting, turn-lifecycle →
+  the queue); shim pulls are synchronous member functions answering
+  their caller. Detached work: daemon↔shim leg eager, webapp↔daemon
+  leg lazy (expand = subscribe only). Client pushes are the
+  resolvers'.
 

@@ -490,23 +490,49 @@ unmarked is DISCRETIONARY by default.
      unrepresentable (there is no input through which one could be
      asked for).
 
-10b. PRESCRIBED — THE RESPONSE HANDLER (the response side's core; the
-   user's design, 2026-08-28).
-   - RESPONSIBILITIES: the SINGLE component through which EVERY
-     shim-originated response and frame flows — there is exactly ONE,
-     and no subsystem consumes shim output except through it. It
-     routes per RESPONSE TYPE: agent frames to the feed resolver
-     (honoring the standing output address), status facts to the
-     footer resolver, usage to accounting, the session-start catalog
-     and context-usage answers to the topbar resolver — and a given
-     response type may fan out to SEVERAL auxiliary frontend channels
-     (topbar today; footer or sidebar as future types warrant), with
-     this handler the one place that routing knowledge lives.
-   - WHY: distributed consumption (the old daemon's per-subsystem
-     typed sinks) scatters the routing table across the codebase; one
-     handler makes "what happens when X arrives" answerable in one
-     place.
-   - PREREQUISITES: shim client; the view resolvers consume from it.
+10b. PRESCRIBED — THE SESSION MANAGER (the response side's core; the
+   user's design, settled 2026-08-28, superseding the response-handler
+   naming and scope from earlier the same day).
+   - WHAT IT IS: the daemon-side face of a workspace's LIVE SESSION —
+     one per workspace session, the ONLY component that consumes shim
+     output, sitting above the shim client (the client is the dumb
+     WIRE: dial, streams, process supervision, no policy; the manager
+     is the SEMANTICS: what this session's traffic means).
+   - THE STREAM HALF: it owns every shim watch for its session —
+     WatchSession, the turn's WatchAgent, and ONE watch per live
+     detached item (WatchAgent / WatchBash / WatchWorkflow) — opened
+     EAGERLY the moment the detached-work announcement arrives (never
+     click-driven: liveness is structural, the open set IS the
+     live-work set, the footer chips count from it, and freeness
+     checks ask it), held for the item's life, reaped at terminals.
+     Every incoming frame routes by TYPE through ONE table: activity →
+     the feed resolver (honoring the standing output address) + the
+     footer resolver + accounting (envelope usage); questions and
+     permissions → feed cards + footer waiting substatus; turn
+     terminals → the feed's turn-ended row + footer idle + the
+     TURN-LIFECYCLE ANNOUNCEMENT the prompt queue drains its next held
+     item on; detached-work announcements → the feed's bubble head +
+     the manager opening that item's own watch; session updates → per
+     arm (model changed → topbar; account usage → footer allowance;
+     query died → footer blocked + feed error; context budget → footer
+     activity).
+   - THE QUERY HALF: the shim's pull verbs are SYNCHRONOUS MEMBER
+     FUNCTIONS on the manager — ContextUsage(), Diagnostics() — that
+     client code (the topbar resolver's cadence loop, a freeness
+     check) calls as needed; each wraps its shim verb and answers the
+     CALLER directly, never entering the routing table.
+   - THE TWO-LEG DETACHED-WORK FLOW (invariant): the daemon↔shim leg
+     is EAGER (above); the webapp↔daemon leg is LAZY — an expand's
+     OpenFeed decodes the bubble's FeedId to the agent identity,
+     serves the newest page from history, and WatchFeed merely
+     SUBSCRIBES the webview to rows the resolver was producing
+     regardless; a collapse cancels only the client leg. The expand
+     never creates a shim-side route — it taps an existing flow.
+   - PUSHING OUT is never the manager's: the resolvers push whole
+     views to subscribers; the manager never touches a client
+     connection.
+   - PREREQUISITES: shim client; the view resolvers and the prompt
+     queue consume from it.
 
 11. INVARIANT — CONNECTIVITY TRUTH PER HOP (the user's specification,
    2026-08-28): a workspace's connected state is witnessed ONLY by the

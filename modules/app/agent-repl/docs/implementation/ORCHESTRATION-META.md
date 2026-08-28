@@ -47,9 +47,11 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   invariants + rate-limited refusal logging; interrupt-before-
   disconnect rejected); SHIM-CONNECTION group fully ruled
   (2026-08-28): redial-forever-by-evidence, readiness-is-the-health-
-  answer, crash-boot adoption, THE RESPONSE HANDLER prescribed (10b —
-  the single component all shim output flows through, per-type routing
-  to resolvers), connectivity-per-hop invariant (11). THE TRIAGE
+  answer, crash-boot adoption, THE SESSION MANAGER prescribed (10b —
+  renamed/rescoped from the response handler: one per live session,
+  eager shim watches + one routing table + synchronous pull members;
+  detached work eager shim-side / lazy client-side),
+  connectivity-per-hop invariant (11). THE TRIAGE
   BACKLOG IS EMPTY; TWO MERGE
   METHODS RULED (2026-08-28): Emacs repo = pre-prompt → no-FF merge
   commit → tests+fixes → bounce → post-prompt; everything else =
