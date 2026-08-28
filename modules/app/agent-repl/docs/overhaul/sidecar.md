@@ -44,3 +44,194 @@
 - Restart recovery: cursors from GetSidecarCursors + live-work re-announce
   with original start instants recovered from the store (Owed A).
 - WriteBatch ack handling: success retires spill; failure replays.
+
+## Contract context (for implementers)
+
+Meta: the protos live under `proto/src/` (the sidecar produces `store/v1`
+envelopes around `conversation/v1` facts); the comments IN the `.proto` files
+are the authoritative documentation — read them at the symbol you implement.
+Implementers never change protobufs; a needed change is a request up the
+orchestration chain. Cross-cutting conventions are in
+`docs/protobuf-design/digests/conventions.md` and are not repeated here.
+
+### What the sidecar is
+
+- The FILE-PLANE READER: it tails what the vendor's agent binary writes to
+  disk, converts each record into `conversation.v1` vocabulary, and writes it
+  to the store as `store.v1.StoreEntry` batches. It is a COPIER — no view of
+  liveness, no session semantics, no daemon contact.
+- Dual-plane relationship with the shim: `StoreEntry.plane` names the
+  producer. The SHIM (stream plane) watches the SDK live — first to know,
+  authoritative for session/turn LIFECYCLE and the only source for anything
+  not yet on disk. The SIDECAR (file plane) reads what the vendor itself
+  recorded — authoritative for conversation CONTENT. Both write through the
+  same envelope, one upsert_key space, one write path.
+- The no-variable-state principle binds it: every conversion step costs a
+  CONSTANT number of single indexed lookups — no stacks, queues, trees, or
+  lineage walks. A single parent-id lookup is fine; a variable number is not.
+
+### Constant-cost conversion into conversation.v1
+
+- Each file record resolves with one lookup each, all structural:
+  - a tool RETURN finds its call by the vendor's `tool_use_id` (the unit's
+    identity where one exists; message-id + block index otherwise);
+  - a SKILL document finds its call by `sourceToolUseID` on the isMeta user
+    record — direct and structural, NEVER a skill-name map matched against
+    "whatever arrives next" (the old converter's fragile positional
+    correlation is explicitly retired);
+  - IDE diagnostics join their write/edit unit by ADJACENCY — one remembered
+    last-write/edit-unit value, constant and sanctioned at the schema;
+  - a spawned agent finds its spawn (`AgentSubagentStart.created_agent_id` is
+    the container key);
+  - `top_level` is copied from the parent's stored row at insert — one
+    lookup, inductively correct at any depth.
+- A frame is an UPSERT of its whole unit: identity per THING, one id per unit
+  for its whole life; a later frame (a return, a diagnostics report) is the
+  same unit's row superseded whole, never a second entry.
+- Vendor identity never crosses the contract: uuids, message ids, vendor task
+  ids stay sidecar-side; the typed identities (AgentId, AgentActivityId,
+  TurnId, DetachedWorkId) are what ride the wire.
+- Unconvertible material is NEVER dropped: it lands as
+  `StoreUnservedItem { vendor_specific | unknown | unparsed }` — durable,
+  whole, and investigable (unparsed carries source, offset, parse_error, raw
+  bytes). These arms are loud residue, not a fallback: a recognizable modeled
+  kind arriving there is a producer defect. The EXEMPT SET is different:
+  known built-ins deliberately not carried (TaskStop/TaskOutput/TaskGet/
+  TaskList, ToolSearch, NotebookEdit, REPL, the MCP-resource family, …) are
+  DROPPED entirely — never AgentUnmodeled, never residue.
+- `AgentUnmodeled` keeps its meaning: a tool whose schema genuinely cannot be
+  known. It is not a lazy fallback either.
+
+### Discovery scope
+
+- Exactly four kinds of file, all written by the agent binary:
+  1. session transcripts (JSONL);
+  2. subagent transcripts;
+  3. workflow journals — plus, per Owed E, the workflow PER-AGENT transcripts:
+     discovery globs `workflows/wf_*/agent-*.jsonl` AND each agent's
+     `agent-<id>.meta.json`, which is the ONLY source for the agent's type,
+     spawn depth, model, and worktree — a per-agent transcript is not
+     ingestible without its meta file;
+  4. `tasks/*.output` spools — PER-TASK files, so only BACKGROUND work has
+     one. Foreground shell output exists in NO file while it runs (the spool
+     path materializes at process exit, already final-size): the bash update
+     arm is structurally detach-only.
+- A workflow journal holds exactly two record shapes — `{started, key,
+  agentId}` and `{result, key, agentId, result}` — nothing run-scoped: the
+  journal's started record IS a workflow agent's announcement; the agent's
+  PROMPT is the first user message of its own transcript; nothing in a
+  journal ever says the run finished (run terminals come from the live set,
+  i.e. the stream plane).
+- The detached-shell spool is a delta stream terminated by its `EXIT=<code>`
+  line; spool bytes convert to `AgentBashUpdate` deltas (offset-carrying),
+  the EXIT marker to the terminal.
+
+### Owner resolution and the LOST/staleness policy
+
+- Every frame must name its agent (`AgentFrame.agent_id`; the store's book is
+  read from the frame, never invented). The main agent's id is OURS —
+  shim-minted on first fresh start, store-persisted, stable across vendor
+  identity rotations; a subagent's is the vendor's agentId space (distinct
+  from the spawning call's tool_use_id — an agent is not its spawning call).
+  How a file-only reader learns these is the doc's standing lead-level
+  blocker (see above): the design record's identity entries are the spec.
+- LOST is its own word — "we stopped seeing it", not "known failed":
+  `DetachedLost { file_vanished | went_silent | swept_up }`. The arm is HOW
+  we concluded it. Staleness judgments (a spool gone quiet, a file removed)
+  are the reader's to state loudly, never to silently drop.
+- The sidecar holds no authoritative open-task snapshot: boot LOST sweeps,
+  staleness tracking, and spool-owner seeding re-derive from the STORE's
+  live-work reads — but GetLiveWork's CALLER is the shim; the sidecar's only
+  recovery verb is GetSidecarCursors.
+
+### Cursor recovery (the sidecar's whole restart story)
+
+- Per tailed file: `CursorState { file_id ("dev:inode", rename-proof); path;
+  offset (next read); carry (bounded partial-line bytes) }`.
+- The cursor RIDES THE BATCH (`EntryBatch.cursor_advance`) and commits in the
+  SAME store transaction as the records read at that position — that is the
+  exactly-once guarantee: no re-read duplicates, no outage holes. `write_id`
+  absorption is the recovery for the duplicate case, not the guarantee.
+- On startup: `GetSidecarCursors` (all cursors, or one file_id); empty
+  success is the fresh-store answer — start every file from zero. After any
+  crash or deploy the UX is "no gaps, no repeats".
+
+### Writing to the store (the sidecar as producer)
+
+- `WriteBatch { producer: "shim-claude-sidecar"; EntryBatch }` — read the
+  response: SUCCESS means durable (records + cursor, one transaction), and a
+  replayed batch fully absorbed by write_id is the SAME success arm; FAILURE
+  means NOTHING committed. On failure the sidecar simply does not advance —
+  it needs no retry buffer and no spill, because its sources are durable
+  files it re-reads from the last committed cursor.
+- Envelope duties per entry: mint `write_id` once per write; mint
+  `upsert_key` from the unit's identity (the mapping is the producer's, the
+  store never interprets it); set `plane.file`; resolve `top_level` (UNSET
+  only when genuinely unresolvable); pick the `agent_info` arm — pageability
+  is the PRODUCER'S decision: `serveable_frame` names its book
+  (`page_agent_id`), `bash`/`workflow` wrap run frames with the run identity,
+  `unserved_item` for keepalives and residue.
+- Transport is Connect rpc — the old length-prefixed Any-over-UDS framing,
+  Subscribe/Ack/heartbeat machinery, and any health probe are all gone from
+  the contract; there is NO store health verb by design (streams + transport
+  own liveness), which is why the beat-timer blocker above must resolve as
+  "remove probing", not "find a probe".
+
+### store/v1, the surface it talks to (medium)
+
+- `ShimStore` service: WriteBatch and GetSidecarCursors are the sidecar's two
+  verbs. The read side (OpenAgentSession → token → WatchAgentSession;
+  ReadAgentPage; GetWorkflow; GetLiveWork) is the SHIM's — know it exists so
+  you understand what your rows feed: pages are per-book (`page_agent_id`),
+  ordered by FIRST insert (stable pointers across upserts), watched as a pure
+  tail pinned after an opened page.
+- Standing policy: THE STORE IS NUKED, NEVER MIGRATED — never write backfill
+  or migration logic, never preserve a shape for old rows.
+- The daemon never touches store.v1 (codegen-enforced isolation).
+
+### conversation/v1, what it converts into (medium)
+
+- The protocol model is NODES, upserted — not a flat log. The families the
+  sidecar produces:
+  - `AgentPrompt { TurnId; AgentId agent; UserSaid }` — the ONE form of a
+    delivered prompt (stored as a page line like any frame).
+  - `AgentFrame { agent_id; update | success | failure | detached_work }` —
+    the one frame of any agent's stream; `AgentUpdate` is pure content
+    { activity | question | permission }; the terminals are the only record
+    of how a turn ended.
+  - `AgentActivity { AgentActivityId; agent_id; optional usage; item }` —
+    ~30 item kinds (read/write/edit/grep/glob/bash/subagent/skill/
+    send_message/task acts/hooks/diagnostics/web/artifact/monitor/wakeup/
+    plan/findings/worktree/cron/…), each on the start | update (iff growth) |
+    success | failure pattern; `start` means "this stream now carries this
+    unit", updates carry DELTAS, terminals carry wholes; exactly ONE unit per
+    vendor API response carries `usage` (the first content block's unit).
+  - `AgentBash` / `AgentWorkflow` — detached-run frames;
+    `AgentWorkflowUpdate` is the WHOLE subagent level, replace semantics,
+    one frame per observation, emitted as observed, never buffered.
+  - `SessionUpdate` — session-scoped facts (a raw StoreEntry arm; the row is
+    the main agent's).
+- The fidelity principle governs fields of MODELED kinds: vendor fields land
+  even when no UI draws them (EXPECTED UNMAPPED at the field); untyped
+  Structs appear only where a schema genuinely cannot exist.
+
+### Gotchas
+
+- Keep-alive turns are first-class NEVER-SERVED rows (`unserved_item.
+  keepalive`): they must be indexed such that no page returns them and no
+  activity routes onward.
+- Re-announcement repeats the ORIGINAL start instant, recovered from the
+  store by unit id — never re-stamped at emit time (drawn clocks must not
+  reset).
+- A unit's later frames (a return, a spool delta's settled whole) are
+  UPSERTS of the same upsert_key, not children; nothing has a tool call as a
+  parent.
+- Skill scope has NO delimiter at the source: never invent a skill-ended
+  record; post-skill nesting is a presentation choice downstream.
+- An assistant message arrives as SEVERAL block units (thinking, prose, each
+  tool call its own unit) — never collapse them into one row.
+- Empty search results are SUCCESS with an empty answer; a non-zero shell
+  exit is COMPLETED (the code is the verdict), not a failure arm.
+- The vendor's transcript spelling of the session id diverges from the
+  runtime's answer in ~22% of records — stay on the runtime's; transcript
+  divergence never rides the wire.
