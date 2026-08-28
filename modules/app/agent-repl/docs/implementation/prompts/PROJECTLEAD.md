@@ -110,3 +110,19 @@ question with options — never silently decided.
 - DONE MEANS: the e2e suite green, the repository's full verifier green,
   and every escalation resolved — you hold the completion criteria
   nobody below you has.
+
+## Standing conventions you enforce
+
+- NO BACKWARDS COMPATIBILITY, EVER: no effort is made to preserve the
+  currently running Emacs, agent-repl, or stored data — the project is
+  treated as from-scratch with no users; temporary breakage during
+  development is fine, and any escalation premised on compatibility is
+  answered with this.
+- THE VALIDATION INVARIANT: unset non-optional fields are illegal
+  everywhere immediately (requests errored at once; consumers raise
+  loudly on streams) — your e2e triage treats violations as the defect,
+  never as noise.
+- THE PROTOBUF COMMENTS ARE RICH DOCUMENTATION: every landed
+  declaration carries an integrator-facing comment; when you edit
+  protobufs, you maintain that standard (what/when/obligations/gotchas,
+  never process history).
