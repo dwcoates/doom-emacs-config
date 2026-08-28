@@ -874,4 +874,12 @@ translate-layer re-encoding, which becomes the feed row resolver.
   Configured before/after prompts run on EVERY merge, every ingress; a
   sessionless workspace with a configured action gets a session started
   under the lease.
+- TWO MERGE METHODS (superseding the six-tab and tests-iff-self-repo
+  phrasings): Emacs repo = pre-prompt → NO-FF MERGE COMMIT (conflicts
+  via parked lease) → tests + fixes → rollout bounce → post-prompt;
+  everything else = pre-prompt → post-prompt only. Seven conditional
+  tabs (queue | pre_prompt | merge | conflicts | tests | fixes |
+  post_prompt); parked only on conflicts/fixes. MULTI_REPO_ROOT is
+  account selection ONLY. Self-reload's landed range = the merge
+  commit's second-parent history.
 

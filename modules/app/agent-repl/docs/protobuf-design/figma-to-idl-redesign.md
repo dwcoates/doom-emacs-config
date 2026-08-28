@@ -7827,6 +7827,44 @@ gains PER-HOLDER REFUSAL POLICY — the merge lease projects to
 error-on-new-submission; restart-pending and shutdown-drain project to
 holds.
 
+### TWO MERGE METHODS — Emacs-repo vs everything else; the SEVEN-TAB vocabulary; the landing is a NO-FF MERGE COMMIT; MULTI_REPO_ROOT is account-only
+
+Settled 2026-08-28 (a sanctioned post-freeze increment), superseding BY
+NAME the six-tab family of the sub-feed landing and the merge-variants
+entry's "landing split computed from MULTI_REPO_ROOT":
+
+- MULTI_REPO_ROOT HAS NOTHING TO DO WITH MERGE STRATEGY — it is ACCOUNT
+  SELECTION only, carried forward exactly as the current system supports
+  it (config-dir routing by path, transcript-root probing, create-time
+  resolution with the no-inheritance asymmetry, same-uuid-two-accounts
+  disambiguation, the two-root roster).
+- TWO METHODS, keyed self-repo-or-not (the git common-dir identity the
+  self-reload check already computes). EMACS REPO: pre-prompt (lease) →
+  NO-FF MERGE COMMIT onto the default branch (one commit to apply, one
+  to revert — not cherry-pick, not rebase) with conflicts handled via
+  the parked-lease spec → tests on the merge commit + fixes (lease) →
+  the rollout bounce → post-prompt (lease). EVERYTHING ELSE: pre-prompt
+  → post-prompt, nothing more — PR creation, landing, tests are the
+  prompts' job there, for now.
+- THE SEVEN TABS (FeedMergeTab.kind revised; landing/action/rebase/
+  remediation kinds die): queue | pre_prompt | merge | conflicts |
+  tests | fixes | post_prompt. RESOLVED: queue, merge (the commit's
+  thin git narration lines), tests. AGENTIC: pre_prompt, conflicts,
+  fixes, post_prompt. ALL CONDITIONAL structurally: no conflicts → no
+  conflicts tab, no failures → no fixes, unconfigured prompt → no tab.
+  PARKED exists ONLY on conflicts and fixes (the two give-up-to-human
+  loops); the prompt tabs cannot park (pre-prompt failure fails the
+  run; post-prompt failure rides the terminal). The footer merging
+  family realigns to the same words (pre_prompt, merge, conflicts,
+  testing, fixes, post_prompt, parked, failed, merged).
+- CONSEQUENCE for the self-reload trigger: the landed range is the
+  merge commit's second-parent history (default..branch), read off the
+  commit — the cherry-pick-annotation walk dies.
+- The per-repo queue and the terminal path (bubble settles, teardown,
+  daemon-owned worktree removal) are IDENTICAL for both methods; a
+  sessionless workspace with a configured prompt gets a session started
+  under the lease.
+
 ### The MERGE BUBBLE becomes a SUB-FEED — six per-kind-state tabs; the PARKED lease policy; merge routing goes address-driven
 
 Settled during the merge-flow gap remediation (a sanctioned post-freeze
