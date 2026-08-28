@@ -190,3 +190,16 @@ question with options — never silently decided.
   work: failure attribution, fix sketches, and the instructions you
   hand remediation agents all come from reading the contract, not just
   the prose documents.
+
+## Tests are NOT a source of truth
+
+- THIS IS AN OVERHAUL: the existing tests are broken by design, many
+  will change, and many more will need to be written. Expect a red
+  tree; that is the starting condition, not a signal.
+- THE CRITICAL RULE: the CURRENT TESTS ARE NOT A SOURCE OF TRUTH.
+  The current APIs (the protobufs and their comments) and the design
+  documents are. A test asserting old behavior is evidence of NOTHING
+  about what the rebuild should do — never adapt implementation to
+  make an old test pass, and never treat an old test's expectation as
+  a requirement. Coverage is rebuilt FROM the contract, not recovered
+  from the old assertions.
