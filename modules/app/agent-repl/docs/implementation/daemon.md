@@ -235,21 +235,39 @@ unmarked is DISCRETIONARY by default.
      per-workspace preemptive relaunch; elisp → hot-load; webapp → hot
      asset swap; STORE → deliberately UNHANDLED (a user-initiated full
      restart; store restarts are rare by design).
-   - DAEMON HANDOVER: the old daemon rebuilds and spawns the new one
-     (joining mode: fresh socket, WSM read-only, owns nothing);
-     announces shutdown + the new address on the existing Emacs
-     connection; Emacs dual-attaches; per workspace, AT FREENESS (no
-     in-flight turn, no live detached work) the old daemon quiesces —
-     from the transfer notice on it does NO work for that workspace,
-     holding all arrivals — releases the workspace's kernel lock, and
-     announces on the OLD connection; Emacs tells the NEW daemon to
-     adopt on the new connection; the new daemon adopts the running
-     shim, claims the lock, drains held intake, pushes fresh views;
-     after the last workspace the old daemon exits gracefully.
+   - DAEMON HANDOVER (product spec — the full agreed flow):
+     1. SPAWN. The old daemon detects the self-merge, rebuilds, and
+        spawns the new daemon itself. The new daemon starts in JOINING
+        mode: binds a fresh socket, opens WSM read-only, owns no
+        workspaces.
+     2. ANNOUNCE. The old daemon announces its shutdown on the
+        EXISTING Emacs connection, carrying the new daemon's address.
+     3. DUAL ATTACHMENT. Emacs opens a second connection to the new
+        address while keeping the first. Both are live; each
+        workspace's updates flow ONLY from the daemon that currently
+        owns it, so Emacs never sees one workspace from two sources.
+     4. PER-WORKSPACE TRANSFER. The OLD daemon detects freeness (no
+        in-flight turn, no live detached work) — it owns the session,
+        so only it can know. At freeness it QUIESCES: from the
+        transfer notice on it does NO work for that workspace (queue,
+        views, anything), holding all arrivals; it detaches from the
+        workspace's shim (which keeps running), releases the
+        workspace's kernel lock, and announces the transfer on the
+        OLD connection. Emacs then treats the new connection as that
+        workspace's home and tells the NEW daemon "workspace X is
+        yours — resume pending operations." The new daemon adopts the
+        running shim, claims the lock, drains the held intake in
+        order, and pushes fresh views (the persisted feed page
+        position keeps the webapp seamless).
+     5. DRAIN AND EXIT. After the last transfer the old daemon exits
+        gracefully; the new daemon's WSM handle becomes the sole
+        writer.
    - WEBAPP SIDE: the old daemon pushes a transfer notice per webview;
-     the webview connects to the new daemon FIRST, then acks the old —
-     the old connection outlives the new one's creation, so no gap is
-     observable; the persisted feed page position makes re-attach
+     from that notice on, the webview sends nothing more on the old
+     connection for that workspace; it connects to the new daemon
+     FIRST, then acks the old — the old connection outlives the new
+     one's creation, so no gap is observable and no work races the
+     switch; the persisted feed page position makes re-attach
      evidence-free.
    - INVARIANT — no daemon↔daemon channel: coordination is Emacs relay
      + WSM facts + kernel locks only (locks self-release on death, so
