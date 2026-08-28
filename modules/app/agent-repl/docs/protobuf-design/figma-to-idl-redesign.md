@@ -7827,6 +7827,38 @@ gains PER-HOLDER REFUSAL POLICY — the merge lease projects to
 error-on-new-submission; restart-pending and shutdown-drain project to
 holds.
 
+### The TOPBAR gains its ACCOUNT element and the CONTEXT CHIP; the strip's layout and reveal conventions land
+
+Settled 2026-08-28 (a sanctioned post-freeze increment), from the old-vs-new
+topbar comparison:
+
+- LAYOUT: one THIN strip — left, tight: account label + connectivity dot;
+  center: the title with ALL free width flexing around it (the flank
+  groups never spread); right, tight, in order: model selector, context
+  chip, warning chip at the far edge. REVEAL CONVENTION: every element's
+  detail renders BELOW the strip and CLAMPS within the viewport — never
+  off-screen (the old implementation's stated failing).
+- ACCOUNT (TopbarView.account = 8): which account the session SPENDS AS,
+  daemon-resolved from the session's config root's login — the old
+  webapp's account.ts feature (it rode an HTTP side-channel) restored as
+  contract. THE ARM IS THE STATE: logged_in{email} | logged_out{}, the
+  logged-out label drawn AS the warning (a logged-out root cannot run a
+  turn; blank reads as loading).
+- THE CONTEXT CHIP (TopbarView.context = 7; tag 6 token_breakdown
+  RETIRED): the chip is a NUMBER, not an icon — the CURRENT CONTEXT SIZE,
+  rendered YELLOW, shrinking on compaction/clear and never exceeding the
+  model's window (a producer fact). Hover reveals TokenBreakdownView,
+  now hardened SESSION-SCOPED ONLY: no turn section may ever appear —
+  turn figures are the FOOTER's domain exclusively.
+- ARCH TODO (daemon): the CONTEXT-SIZE PRODUCER — the figure is not
+  natively on the conversation.v1 stream; candidates are the vendor's
+  get_context_usage control verb (verified stable/typed at vetting) and
+  the separation rows' after-tokens; the mechanism is implementation-wave
+  work, the requirement stands now.
+- STILL OPEN: the create-time ACCOUNT SELECTION half (an account option
+  on CreateWorkspace + served options) and the account-switch-without-
+  losing-transcripts mechanics.
+
 ### TWO MERGE METHODS — Emacs-repo vs everything else; the SEVEN-TAB vocabulary; the landing is a NO-FF MERGE COMMIT; MULTI_REPO_ROOT is account-only
 
 Settled 2026-08-28 (a sanctioned post-freeze increment), superseding BY

@@ -882,4 +882,8 @@ translate-layer re-encoding, which becomes the feed row resolver.
   post_prompt); parked only on conflicts/fixes. MULTI_REPO_ROOT is
   account selection ONLY. Self-reload's landed range = the merge
   commit's second-parent history.
+- TOPBAR (2026-08-28): the resolver serves TopbarAccount (login email
+  from the session config root; logged-out drawn) and TopbarContextChip
+  (current context size, session-scoped breakdown). OPEN arch todo: the
+  context-size producer (get_context_usage vs separation after-tokens).
 

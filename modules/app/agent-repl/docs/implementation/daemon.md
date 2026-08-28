@@ -429,6 +429,17 @@ unmarked is DISCRETIONARY by default.
    - PREREQUISITES: WSM, shim client (adoption), prompt queue
      (hold/drain), merge orchestrator (trigger).
 
+10a. INVARIANT — topbar resolution duties (settled 2026-08-28): the
+   topbar resolver serves the ACCOUNT element (resolve the login email
+   from the session's config root's .claude.json; logged-out is a drawn
+   state) and the CONTEXT CHIP (the current context size, daemon-
+   formatted, session-scoped breakdown on hover — never a turn figure).
+   ARCH TODO: the CONTEXT-SIZE PRODUCER — not natively on the
+   conversation.v1 stream; candidates: the vendor's get_context_usage
+   control verb (stable/typed per vetting) polled or read per turn, and
+   the separation rows' after-tokens on clear/compact; mechanism is the
+   implementing orchestrator's, the requirement is binding.
+
 ## OPEN — unruled audit findings (the triage backlog)
 
 These feature-loss audit findings are NOT yet ruled; each awaits a
