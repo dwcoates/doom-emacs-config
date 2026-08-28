@@ -52,7 +52,7 @@ envelopes around `conversation/v1` facts); the comments IN the `.proto` files
 are the authoritative documentation — read them at the symbol you implement.
 Implementers never change protobufs; a needed change is a request up the
 orchestration chain. Cross-cutting conventions are in
-`docs/overhaul/conventions.md` and are not repeated here.
+`the teamlead prompt (standing conventions) and the proto comments` and are not repeated here.
 
 ### What the sidecar is
 

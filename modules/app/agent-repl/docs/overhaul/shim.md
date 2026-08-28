@@ -36,7 +36,7 @@ are the authoritative documentation — read the files you work on; this section
 gives the map and the ideas. Cross-cutting rules (identity spaces, echo tokens,
 response/stream conventions, presence rules, the fidelity principle, the exempt
 set, implementation/validation/logging conventions) live in
-`docs/overhaul/conventions.md` and are NOT restated here.
+`the teamlead prompt (standing conventions) and the proto comments` and are NOT restated here.
 Implementers never change protobufs; a needed change is a request up the
 orchestration chain.
 
@@ -363,4 +363,4 @@ purpose).
   `SessionStarted.vendor_session_id`, the divergence stays shim-side.
 - Unset non-optional fields are illegal everywhere, immediately: error to
   the producer on requests, loud raise at the consumer on stream pushes;
-  debug-log every logical branch (see conventions.md §6).
+  debug-log every logical branch (see the standing conventions (teamlead prompt) and proto comments §6).

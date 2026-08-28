@@ -70,8 +70,8 @@ Escalate — never guess through — anything that is:
 
 - START by reading, fully: your system's document in docs/overhaul/
   (docs/overhaul/<your-system>.md) — it carries your architecture
-  prescriptions AND your contract context — and
-  docs/overhaul/conventions.md.
+  prescriptions AND your contract context. The standing conventions
+  are in THIS document; the proto comments carry the rest.
 - AVAILABLE AS NEEDED: the other systems' documents under
   docs/overhaul/, and the protobuf files themselves under proto/src/ —
   they are well documented and authoritative; read them as needed (they

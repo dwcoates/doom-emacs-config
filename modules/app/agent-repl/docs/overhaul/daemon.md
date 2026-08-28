@@ -705,7 +705,7 @@ documentation — read the files you implement against. This section is the
 map: the ideas, the package layout, and how the pieces relate. Generic
 wire/schema conventions (identity spaces, echo tokens, response-outcome,
 bounded streams, presence, no-seq, no-keepalive, the file/package model)
-live in `docs/overhaul/conventions.md` — read that too;
+live in `the teamlead prompt (standing conventions) and the proto comments` — read that too;
 nothing there is restated here. The full design record is
 the canonical design record (the project lead's; on conflict, escalate).
 Implementers never touch protobufs — a needed proto change is routed
@@ -929,7 +929,7 @@ its own file only when >1 endpoint needs it.
   turn-lifecycle announcement the prompt queue drains on. Simple reads
   the shim now PUSHES on the session stream (context usage, diagnostics)
   — no pull rpcs remain.
-- Views push WHOLE, event-driven, no ticks (conventions.md 3.4); every
+- Views push WHOLE, event-driven, no ticks (the standing conventions (teamlead prompt) and proto comments 3.4); every
   footer panel ships fully resolved on every push because panel
   selection is webview-local (folded-menu convention) — the daemon never
   learns which panel is open. Resolvers dispatch feed and footer pushes
