@@ -206,6 +206,37 @@ unmarked is DISCRETIONARY by default.
        what changed; EXECUTION is delegated to the rollout controller
        (the graceful-rollout entry below), which owns the
        zero-perceived-downtime mechanics.
+   - THE BUBBLE AND ROUTING (settled at the merge-flow remediation):
+     the merge bubble is a SUB-FEED (FeedMerge = head only; six
+     FeedMergeTab rows: queue | rebase | tests | remediation | action |
+     landing; agentic tabs are parent containers, resolved tabs replace
+     whole; rounds are new tabs). The orchestrator EMITS: the merge
+     facts, the queue snapshot (front entry carrying its active tab
+     label), and the generic OUTPUT ADDRESS {target feed, parent row} —
+     set on lease acquisition, updated per tab, cleared on release —
+     that the merge-agnostic feed resolver applies. Feed and footer
+     pushes dispatch IN PARALLEL at every merge-state change
+     (prescription, not a wire invariant). The tests tab ships
+     daemon-parsed ANSI as paint-class spans.
+   - THE PARKED POLICY (settled): when the resolution agent exhausts its
+     attempt, the lease's refusal policy flips to PARKED — submitted
+     prompts are neither refused nor queued as the session's own turn;
+     the prompt queue's one path delivers them through this orchestrator
+     as guidance to the resolution agent, landing in the parked tab. NO
+     classifier and no content inspection: THE LEASE STATE IS THE
+     RECOGNITION. The host composer's merge_parked arm opens the
+     composer with context; the footer shows merging·parked with the
+     composed line. HAND-RESOLUTION IS UNSUPPORTED by ruling — no
+     resolved-continue verb exists on any ingress; the conversational
+     parked flow is the only resume.
+   - RULED (batch-1 triage, 2026-08-28): unrecorded/unmergeable
+     workspaces are refused PRE-STATE on both ingresses (rpc: derived
+     MergeWorkspace error arm; file route: quarantine — no
+     enqueuing→failed stamp exists); a QUEUED merge JOINS THE CLOSE
+     BLOCKERS (close refuses while a merge is queued, one more composed
+     reason); post-merge WORKTREE REMOVAL IS THE DAEMON'S (this
+     orchestrator's post-merge teardown removes the merged worktree —
+     Emacs's finish removal dies).
    - GOTCHAS: phase history is feed content, not WSM columns; an
      in-flight merge across a daemon restart is resumed or LOUDLY
      failed, never left with the lease stuck; the composer gate is the
@@ -401,14 +432,9 @@ remediate / do-not-remediate ruling per meta rule 14:
   merge); cross-repo multi-queue membership (one workspace queued on
   several repos; Standing reports the first, Dequeue takes all).
 - MERGE-VARIANTS findings, UNRULED (evidence:
-  docs/implementation/reports/merge-variants-2026-08-27.md; the first
-  four were parked mid-triage): per-ingress refusal semantics for an
-  unrecorded workspace diverge (file route quarantines pre-state, rpc
-  route stamps enqueuing→failed); a queued-not-yet-head merge survives
-  its workspace closing (only a parked conflict is abandoned);
-  post-merge worktree removal is Emacs-only today (the daemon removes
-  only its temp rebase worktree); conflict resume is reachable only
-  from the Emacs ingress (the command file has no resume field); the
+  docs/implementation/reports/merge-variants-2026-08-27.md; refusal
+  semantics, close-vs-queue, worktree removal and conflict resume were
+  RULED 2026-08-28 and moved to the merge orchestrator's entry): the
   boot geometry-backfill gate yields to a host connect briefly then
   runs anyway (merges must never depend on Emacs being up, and merge
   commands block on the gate); Emacs holds durable merged/merge-failed
@@ -430,3 +456,10 @@ the merge test gate has NO flake re-run.
 - The EMACS+WEBAPP section (Connect server + resolvers/publishers) and
   the internal-only components (ingest core, failure classification,
   accounting, git ops) — architecture decisions land here as settled.
+- FIRST SETTLED FACT for the response side (from the merge-flow
+  remediation): the FEED RESOLVER honors a generic OUTPUT ADDRESS
+  {target feed, parent row} supplied by lease holders — it is
+  merge-agnostic (any future lease holder gets bubble-routed output for
+  free); the FOOTER RESOLVER is NOT agnostic (it projects merge facts
+  into the merging status family); resolvers dispatch feed and footer
+  pushes in parallel per state change.

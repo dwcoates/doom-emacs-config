@@ -7827,6 +7827,58 @@ gains PER-HOLDER REFUSAL POLICY — the merge lease projects to
 error-on-new-submission; restart-pending and shutdown-drain project to
 holds.
 
+### The MERGE BUBBLE becomes a SUB-FEED — six per-kind-state tabs; the PARKED lease policy; merge routing goes address-driven
+
+Settled during the merge-flow gap remediation (a sanctioned post-freeze
+increment), superseding BY NAME the per-phase tab strip and
+presentation-nesting spec of the FeedMerge landing:
+
+- THE BUBBLE IS A SUB-FEED: FeedMerge shrinks to the collapsed HEAD (tag 5
+  `phases` retired); the bubble's own FeedId is its feed address (OpenFeed
+  → WatchFeed, the subagent mechanics — ONE shared plumbing path, a
+  merge-specific loader is a defect); content is LAZY (collapsed = head
+  only; settled merges page like any settled bubble).
+- SIX TABS as sub-feed rows (NEW FeedRow arm `merge_tab`, sub-feed-only):
+  queue | rebase | tests | remediation | action | landing. TWO SHAPES:
+  RESOLVED tabs (queue, tests, landing) carry content in the row, replaced
+  whole; AGENTIC tabs (rebase, remediation, action) are containers whose
+  content is sub-feed rows parented to them. Conflicts are the REBASE's
+  hard parts, never a separate tab; rounds are new tabs ("tests (2)"),
+  append-only as before. EACH KIND OWNS ITS STATE oneof (agentic: live |
+  parked | settled; resolved: live | settled) with SHARED leaf payloads —
+  the footer-restructure pattern, so "parked queue" is unrepresentable.
+- TESTS SHIP COLOR: the daemon parses the terminal's ANSI into
+  paint-class SPANS (this component's own wrapper, the code-span
+  precedent); the client paints classes, never escapes.
+- THE QUEUE TAB keeps ahead/current/behind, replaced whole; the front
+  entry's status carries the front's ACTIVE TAB LABEL (the same message
+  its own bubble draws, imported never respelled).
+- ADDRESS-DRIVEN ROUTING: the feed resolver is MERGE-AGNOSTIC — a lease
+  holder supplies a generic OUTPUT ADDRESS {target feed, parent row}, set
+  on acquisition, updated per tab, cleared on release; while it stands,
+  every session-produced record resolves to the merge sub-feed under the
+  active tab and the root feed gains nothing but head upserts. Only the
+  MERGE ORCHESTRATOR (semantics, facts, address) and the FOOTER RESOLVER
+  (the merging status family) know "merge". Feed and footer pushes are
+  dispatched IN PARALLEL at every merge-state change (prescription, not a
+  wire invariant).
+- THE PARKED POLICY, state-based recognition: when the agent exhausts its
+  attempt, the lease's refusal policy flips to PARKED — prompts are then
+  NOT refused and NOT queued as the session's own turn; the queue's one
+  path delivers them through the merge orchestrator as guidance to the
+  resolution agent, landing in the parked tab. NO classifier, no content
+  inspection: the LEASE STATE is the recognition. The host composer oneof
+  gains `merge_parked` (open-with-context) beside `merging` (closed); the
+  footer merging family realigns (cherry_picking → rebasing, conflict →
+  parked{composed line}, + remediating).
+- HAND-RESOLUTION IS UNSUPPORTED by ruling ("not something that will
+  happen"): no resolved-continue verb ever exists on any ingress; the
+  conversational parked flow is the ONLY resume — which also resolves the
+  old conflict-resume triage question.
+- DEFERRED, next in the walk: the non-Emacs-repo merge (queue+rebase only
+  — no well-defined tests, hence no remediation; the append-only tab rule
+  already makes absent tabs structural) and MULTI_REPO_ROOT handling.
+
 ### The producer SPILL is REMOVED — WriteBatch failure holds in a bounded in-memory buffer; exhausted retries are LOUD
 
 Settled during the rollout-controller planning (a sanctioned post-freeze
