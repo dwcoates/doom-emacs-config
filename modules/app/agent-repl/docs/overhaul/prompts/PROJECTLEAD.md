@@ -145,8 +145,8 @@ question with options — never silently decided.
   VENDOR (mock shim SDK) exists and works: no test or playtest may
   ever make a real Claude call.
 - The mock must be usable by the REAL shim and sidecar, and must
-  support a robust suite of inputs with strong coverage — normal
-  prompts, the various slash commands, detached work, WatchSession
+  support a robust suite of inputs with strong coverage — a WIDE ARRAY
+  of prompts, the various slash commands, detached work, WatchSession
   updates, and the rest of the vendor surface the contract exercises.
 
 ## Runtime playtesting (after the e2e suite settles)
@@ -169,3 +169,24 @@ question with options — never silently decided.
   discretion to pick the visual aspects most likely to be tricky to get
   right or least verifiable from logs, and confirm those — not
   anywhere close to all frontend behavior.
+- REMEDIATE AS YOU GO, looping until completion: when playtesting (or
+  e2e) surfaces an issue, fan out implementation-fix agents at your
+  discretion, re-test, dispatch again — find, fix, verify, repeat until
+  fixed. This is the one phase where you dynamically dispatch
+  implementation agents YOURSELF: at the start you dispatch only the
+  teamleads, and direct implementation dispatch is reserved for e2e and
+  playtest remediation.
+
+## The API is king (for your remediation too)
+
+- There WILL be UX and specification gaps, and they are filled by
+  intelligently understanding the API — the contract implies the answer
+  more often than not (e.g. nothing may say exactly when the sidebar's
+  selected workspace updates, but the API makes it obvious: the moment
+  the daemon receives the workspace-selection rpc from Emacs). Fill
+  such gaps from the API's own logic; take to the user only what the
+  API genuinely cannot answer.
+- Understanding the relevant APIs is required for your remediation
+  work: failure attribution, fix sketches, and the instructions you
+  hand remediation agents all come from reading the contract, not just
+  the prose documents.
