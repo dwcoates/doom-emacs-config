@@ -84,3 +84,12 @@ submitter's own — no pushed view carries it.
 - LAZY: a collapsed merge bubble transfers only its head; a settled
   merge pages like any settled bubble. Rounds are separate tabs
   ("tests (2)").
+
+## The topbar (settled 2026-08-28)
+- Thin strip; left tight (account, connectivity dot), centered flexing
+  title, right tight (model selector, context chip, warning chip).
+- Every reveal renders BELOW the strip, clamped in-viewport.
+- The context chip renders the current context size as a YELLOW number;
+  hover shows the session-scoped breakdown (no turn figures — footer's).
+- The account label draws the email, or "logged out" as a warning state.
+
