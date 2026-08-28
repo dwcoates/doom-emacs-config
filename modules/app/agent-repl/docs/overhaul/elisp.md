@@ -61,7 +61,7 @@ Orientation for implementation agents working the elisp side. The protos under
 documentation — read the actual `.proto` files you work against. Cross-cutting
 conventions (response spelling, echo tokens, identity vocabulary, validation
 and logging invariants, the proto→code mapping) live in
-`docs/overhaul/conventions.md` and are not repeated here. The
+`the teamlead prompt (standing conventions) and the proto comments` and are not repeated here. The
 full history and rationale is the design record, which is the PROJECT LEAD's context — escalate rather than reading it.
 Implementers never change protobufs — a needed change is a request up the
 orchestration chain.
