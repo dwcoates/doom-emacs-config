@@ -892,4 +892,7 @@ translate-layer re-encoding, which becomes the feed row resolver.
   /context panel fills from the same pull. ACCOUNT SWITCHING: the
   daemon determines the config dir (repo-under-root rule) and ports the
   transcript between roots itself — no shim involvement.
+- INVARIANT: the account is DETERMINED (repo-under-root), never
+  selected — no request field, no override, no inheritance; a
+  differently-accounted workspace is structurally unrepresentable.
 

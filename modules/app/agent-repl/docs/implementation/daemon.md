@@ -452,6 +452,13 @@ unmarked is DISCRETIONARY by default.
      DAEMON does the porting itself (a file move before the ordinary
      resume under the new root; no shim involvement — a deliberate
      simplification over shim-owned porting).
+   - INVARIANT — THE ACCOUNT IS DETERMINED, NEVER SELECTED: the
+     repo-under-root rule is the ONLY source of a workspace's account;
+     no request field, no override, no inheritance carries one — the
+     old create-time explicit selection DIES, and the implementation
+     must make a differently-accounted workspace structurally
+     unrepresentable (there is no input through which one could be
+     asked for).
 
 ## OPEN — unruled audit findings (the triage backlog)
 

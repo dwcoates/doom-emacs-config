@@ -7842,6 +7842,11 @@ topbar landing):
   usage-frame derivation is forbidden as the chip's source. This also
   un-strands the /context panel, whose specced fill previously had no
   route.
+- THE ACCOUNT IS DETERMINED, NEVER SELECTED (invariant): the
+  repo-under-root rule is the account's ONLY source — CreateWorkspace
+  deliberately carries NO account field, the old create-time explicit
+  selection dies, and a differently-accounted workspace is structurally
+  unrepresentable. This also discharges the create-time-selection gap.
 - ACCOUNT SWITCHING, constraints not mechanics: the DAEMON determines
   the config dir (repo under $MULTI_REPO_ROOT → multi-repo dir, else
   default) and the DAEMON ports the vendor transcript between roots on a
