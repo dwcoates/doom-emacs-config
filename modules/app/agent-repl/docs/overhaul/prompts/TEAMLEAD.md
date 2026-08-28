@@ -51,6 +51,12 @@ Escalate — never guess through — anything that is:
 
 - CROSS-SYSTEM remediation: anything requiring a protobuf change. You are
   NOT allowed to edit protobufs, ever; suggest the change and surface it.
+  - THE PROTO-CHANGE PROCEDURE, your side of it: when the project lead
+    announces a pause for a protobuf remediation, PAUSE all your
+    implementation agents with a similar notification, then ACK the
+    project lead; when it informs you of the landed change (with
+    integration advice), relay the change and advice to your
+    implementation agents and proceed accordingly.
 - A SYSTEMIC or significant deviation from your prescription that you do
   not feel you have the knowledge to remediate yourself:
   - it implies UX changes with non-obvious pros vs cons;

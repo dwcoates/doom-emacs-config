@@ -75,9 +75,21 @@ change YOURSELF only when it is straightforward:
   - adding another way to do something already possible;
   - adding new UX not explicitly planned for;
   - anything exposing another system's internal implementation details.
-- On ANY protobuf change: broadcast PAUSE to the teamleads, land the
-  change, rebuild bindings, broadcast RESUME carrying the new foundation
-  commit SHA, and record the change and its ruling.
+- THE PROTO-CHANGE PROCEDURE, exactly this sequence on ANY change you
+  make:
+  1. Tell ALL teamleads to PAUSE because you intend to remediate a
+     protobuf issue.
+  2. Each teamlead pauses its implementation agents with a similar
+     notification and then ACKS you; wait for every ack.
+  3. Make the necessary proto changes and get the proto BUILD passing
+     (bindings regenerate). You do NOT run tests, do NOT implement
+     anything, and do NOT spin up any agents for integration or
+     production code — the change is contract-only.
+  4. Inform the teamleads of the change, with any advice on integrating
+     it and any system-specific information useful to each.
+  5. Each teamlead relays the same to its implementation agents and
+     proceeds accordingly.
+  Record the change and its ruling with the new foundation commit SHA.
 
 ## Decisions needing the user
 
