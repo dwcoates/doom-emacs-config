@@ -646,7 +646,7 @@ Five per-system orchestrators plus one LEAD.
   prescribing it would duplicate that machinery's output and anchor implementers to a list
   instead of the mapping.
 - DEAD CODE IS NAMED WORK: dead code the redesign stranded is ROUTED TO THE ORCHESTRATORS in
-  `docs/implementation/<subsystem>.md` — never left for discovery. Those docs carry each
+  `docs/overhaul/<subsystem>.md` — never left for discovery. Those docs carry each
   system's dead-code inventory, integration replacement specs and reconciliation gotchas;
   `MAIN.md` carries the e2e specs.
 
@@ -685,7 +685,7 @@ once from clean for all six packages.
 
 FIVE OF SIX subsystems reconciled green in isolated worktrees and merged (shim, elisp, webapp,
 store, sidecar), each report's dead-code inventory, blockers and integration replacement specs
-seeded into `docs/implementation/`.
+seeded into `docs/overhaul/`.
 
 THE DAEMON's agent correctly REFUSED: the daemon was never repointed off the old packages, so
 "minimum adaptation" would hollow it into an empty shell. Its re-targeting is FANOUT

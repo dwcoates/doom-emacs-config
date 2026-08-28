@@ -618,7 +618,7 @@ remediate / do-not-remediate ruling per meta rule 14:
   merge); cross-repo multi-queue membership (one workspace queued on
   several repos; Standing reports the first, Dequeue takes all).
 - MERGE-VARIANTS findings: ALL RULED as of 2026-08-28 (evidence:
-  docs/implementation/reports/merge-variants-2026-08-27.md). DEAD BY
+  docs/overhaul/reports/merge-variants-2026-08-27.md). DEAD BY
   RULING: the old boot-time repair of missing merge layout facts (the
   facts are recorded at creation and refused when absent — no repair
   exists); Emacs's durable merged/merge-failed memory AND the

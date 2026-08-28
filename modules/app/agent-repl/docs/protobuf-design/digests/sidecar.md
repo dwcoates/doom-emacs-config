@@ -514,7 +514,7 @@ prescribed, because it falls out of the proto→code mapping convention.
   bindings regenerated from clean for all six packages.
 - The SIDECAR reconciled GREEN in an isolated worktree and merged (all packages
   passing); its dead-code inventory, blockers and integration replacement specs
-  are seeded into `docs/implementation/sidecar.md`.
+  are seeded into `docs/overhaul/sidecar.md`.
 - Dead code the redesign stranded is NAMED WORK in that document — never left
   for discovery.
 - The daemon alone remains a fanout subject (it was never repointed off the old
