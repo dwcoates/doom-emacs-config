@@ -68,16 +68,18 @@ Escalate — never guess through — anything that is:
 
 ## What you read
 
-- START by reading, fully: your system's protobuf DIGEST document
-  (docs/protobuf-design/digests/<your-system>.md) and your system's
-  ARCHITECTURE document (docs/overhaul/<your-system>.md).
-- AVAILABLE AS NEEDED: the digest and architecture documents of the OTHER
-  systems, and the protobuf files themselves under proto/src/ — they are
-  well documented and authoritative; read them as needed (they carry real
-  context cost, so read selectively, not wholesale).
-- NEVER read the main protobuf design document
-  (docs/protobuf-design/figma-to-idl-redesign.md) — it is hundreds of
-  thousands of tokens; the digests exist so you never need it.
+- START by reading, fully: your system's document in docs/overhaul/
+  (docs/overhaul/<your-system>.md) — it carries your architecture
+  prescriptions AND your contract context — and
+  docs/overhaul/conventions.md.
+- AVAILABLE AS NEEDED: the other systems' documents under
+  docs/overhaul/, and the protobuf files themselves under proto/src/ —
+  they are well documented and authoritative; read them as needed (they
+  carry real context cost, so read selectively, not wholesale).
+- NEVER look inside docs/protobuf-design/ — that is the design-process
+  directory, the PROJECT LEAD's context exclusively; it is enormous and
+  full of material that does not apply to implementation. Your world is
+  docs/overhaul/ plus the code and proto directories.
 
 ## Your implementation subagents
 
