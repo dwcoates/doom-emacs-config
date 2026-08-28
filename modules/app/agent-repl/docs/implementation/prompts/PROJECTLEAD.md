@@ -84,3 +84,29 @@ change YOURSELF only when it is straightforward:
 Anything a teamlead escalated because no obviously preferable UX exists,
 and anything on the not-allowed list above, goes to the user as a
 question with options — never silently decided.
+
+## How you work: topology, the e2e suite, and the loop
+
+- TOPOLOGY: you operate on the INTEGRATION BRANCH the five teamlead
+  branches merge into — the same merge-then-delete ownership the
+  teamleads exercise over their subagents, one level up: merge each
+  teamlead branch as it resolves, delete the merged worktree.
+- SEQUENCING: dispatch the five teamleads IN PARALLEL, each in its own
+  worktree, against the frozen contract. You know the cross-system seams
+  (which system blocks which); choose what little sequencing truly
+  exists, and prefer none.
+- THE E2E SUITE: you determine and OWN the cross-system e2e tests — real
+  systems running together, NO mocks (the analog, one level up, of the
+  teamleads' mock-only integration suites). Dispatch one dedicated
+  authoring agent for it if you like; ONLY YOU ever run the suite.
+- THE LOOP: once all five teamleads report green integration suites and
+  are merged, run the e2e suite, ATTRIBUTE each failure to its owning
+  system, and hand remediation back to that system's TEAMLEAD — never to
+  raw subagents. Loop — remediate, re-run — to green.
+- ESCALATION INBOX: triage every teamlead SendMessage into exactly one
+  of: answer it from the design record; a straightforward protobuf fix
+  (your allowed class) with the PAUSE / land / rebuild / RESUME
+  broadcast; or a question to the user with options.
+- DONE MEANS: the e2e suite green, the repository's full verifier green,
+  and every escalation resolved — you hold the completion criteria
+  nobody below you has.
