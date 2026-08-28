@@ -466,10 +466,10 @@ unmarked is DISCRETIONARY by default.
      selector (catalog + current selection), connectivity (link state),
      warnings (accounting + unmodeled + pulled diagnostics), the CONTEXT
      CHIP, the ACCOUNT element.
-   - CONTEXT: PULLED via shim.v1 GetSessionContextUsage at the
-     resolver's own cadence plus at every turn end — the vendor's own
-     answer, NEVER derived from usage frames (correctness ruling); the
-     /context panel resolves from the SAME pull.
+   - CONTEXT: arrives as WatchSession's pushed context_usage arm (the
+     vendor's own answer, NEVER derived from usage frames — the
+     correctness ruling), routed by the sessionwatcher; the /context
+     panel resolves from the SAME fact.
    - ACCOUNT: the config dir comes from WSM's spawn-identity facts; the
      resolver reads that root's .claude.json for the email; logged-out
      is a drawn state, never blank.
@@ -490,49 +490,44 @@ unmarked is DISCRETIONARY by default.
      unrepresentable (there is no input through which one could be
      asked for).
 
-10b. PRESCRIBED — THE SESSION MANAGER (the response side's core; the
-   user's design, settled 2026-08-28, superseding the response-handler
-   naming and scope from earlier the same day).
-   - WHAT IT IS: the daemon-side face of a workspace's LIVE SESSION —
-     one per workspace session, the ONLY component that consumes shim
-     output, sitting above the shim client (the client is the dumb
-     WIRE: dial, streams, process supervision, no policy; the manager
-     is the SEMANTICS: what this session's traffic means).
-   - THE STREAM HALF: it owns every shim watch for its session —
-     WatchSession, the turn's WatchAgent, and ONE watch per live
-     detached item (WatchAgent / WatchBash / WatchWorkflow) — opened
-     EAGERLY the moment the detached-work announcement arrives (never
-     click-driven: liveness is structural, the open set IS the
-     live-work set, the footer chips count from it, and freeness
-     checks ask it), held for the item's life, reaped at terminals.
-     Every incoming frame routes by TYPE through ONE table: activity →
-     the feed resolver (honoring the standing output address) + the
-     footer resolver + accounting (envelope usage); questions and
-     permissions → feed cards + footer waiting substatus; turn
-     terminals → the feed's turn-ended row + footer idle + the
-     TURN-LIFECYCLE ANNOUNCEMENT the prompt queue drains its next held
-     item on; detached-work announcements → the feed's bubble head +
-     the manager opening that item's own watch; session updates → per
-     arm (model changed → topbar; account usage → footer allowance;
-     query died → footer blocked + feed error; context budget → footer
-     activity).
-   - THE QUERY HALF: the shim's pull verbs are SYNCHRONOUS MEMBER
-     FUNCTIONS on the manager — ContextUsage(), Diagnostics() — that
-     client code (the topbar resolver's cadence loop, a freeness
-     check) calls as needed; each wraps its shim verb and answers the
-     CALLER directly, never entering the routing table.
+10b. PRESCRIBED — THE SESSIONWATCHER (the user's design, settled
+   2026-08-28; supersedes the session-manager and response-handler
+   shapes from the same walk). ONE INSTANCE PER WORKSPACE/SHIM, with
+   exactly three responsibilities:
+   1. WATCH THE STREAMS: it owns every shim watch for its session —
+      WatchSession, the turn's WatchAgent, one per live detached item
+      (WatchAgent / WatchBash / WatchWorkflow) — opened EAGERLY on
+      announcement (liveness is structural: the open set IS the
+      live-work set), held for the item's life, reaped at terminals.
+   2. SOURCE OF TRUTH ON CONNECTIVITY: it is the ONLY thing watching
+      the workspace's shim, so "is the session connected" is its
+      answer and nobody else's (invariant 11's daemon↔shim hop).
+   3. ROUTE, FANNING OUT AS NEEDED: every stream response routes by
+      type to the corresponding resolver(s) — activity to feed (via
+      the standing output address) and footer and accounting;
+      questions/permissions to feed and footer; turn terminals to
+      feed, footer, and the turn-lifecycle announcement the prompt
+      queue drains on; detached-work announcements to the feed's
+      bubble head plus opening that item's own watch; session-update
+      arms per kind (diagnostics and context usage to the topbar
+      resolver, account usage to the footer, query died to footer and
+      feed).
+   - NO PULLS, NO WRITES: the former pull verbs are FOLDED INTO
+     WatchSession as pushed arms (diagnostics 25, context_usage 26),
+     so the sessionwatcher is purely stream-consuming. Anything the
+     daemon SENDS is not its concern: prompt submission goes through
+     the prompt queue only; simple synchronous reads
+     (ReadHistory-class) may call the shim client directly; but ALL
+     async streaming data enters the daemon through the sessionwatcher
+     — no other daemon code consumes shim streams.
    - THE TWO-LEG DETACHED-WORK FLOW (invariant): the daemon↔shim leg
      is EAGER (above); the webapp↔daemon leg is LAZY — an expand's
-     OpenFeed decodes the bubble's FeedId to the agent identity,
-     serves the newest page from history, and WatchFeed merely
-     SUBSCRIBES the webview to rows the resolver was producing
-     regardless; a collapse cancels only the client leg. The expand
-     never creates a shim-side route — it taps an existing flow.
-   - PUSHING OUT is never the manager's: the resolvers push whole
-     views to subscribers; the manager never touches a client
-     connection.
-   - PREREQUISITES: shim client; the view resolvers and the prompt
-     queue consume from it.
+     OpenFeed decodes the bubble's FeedId, serves the newest page from
+     history, and WatchFeed merely SUBSCRIBES the webview to rows the
+     resolver was producing regardless; collapse cancels only the
+     client leg. The expand never creates a shim-side route.
+   - PREREQUISITES: shim client; the resolvers and prompt queue
+     consume from it.
 
 11. INVARIANT — CONNECTIVITY TRUTH PER HOP (the user's specification,
    2026-08-28): a workspace's connected state is witnessed ONLY by the
@@ -542,16 +537,22 @@ unmarked is DISCRETIONARY by default.
    CONNECTED iff all are live, and any one down means not connected.
    Silence on a live stream is never evidence of anything.
 
-10c. INVARIANT — ONE RESOLVER PER COMPONENT: exactly one resolver
-   exists per frontend component — the feed resolver, the footer
-   resolver, the topbar resolver (10a), the sidebar resolver, and the
-   hold tray resolver — each turning daemon facts into its component's
-   finished frontend.v1 view (composed text, formatted figures, chosen
-   arms) so the client renders verbatim, pushed whole per the standing
-   cadence convention. Their internal design is DISCRETIONARY — the
-   implementing orchestrator's, bounded only by the already-landed
-   invariants (output address, precedence ladder, one-activity pick,
-   server-side when-column, whole-list tray replace).
+10c. PRESCRIBED — THE FIVE RESOLVERS, existence and purpose only:
+   exactly these five exist — the FEED resolver, the FOOTER resolver,
+   the TOPBAR resolver, the SIDEBAR resolver, and the HOLD TRAY
+   resolver — each with ONE general purpose: convert response items
+   from conversation.v1 (and daemon facts) into its component's
+   frontend.v1 view for verbatim rendering. Their exact
+   responsibilities and internals are DELIBERATELY NOT PRESCRIBED —
+   the implementing orchestrator's, within the already-landed
+   invariants.
+   - RESOLVER STATE IS FINE, UNPERSISTED: a resolver may accumulate
+     in-memory state across piecemeal frames (the topbar resolver
+     assembling its view from facts arriving in different WatchSession
+     frames) and ships COMPLETE SNAPSHOTS only — the webapp never
+     tracks partial state, because the contract's non-optional fields
+     are semantically non-optional and a partial push would violate
+     them; accumulation happens daemon-side, before the wire.
 
 ## OPEN — unruled audit findings (the triage backlog)
 

@@ -7827,6 +7827,35 @@ gains PER-HOLDER REFUSAL POLICY — the merge lease projects to
 error-on-new-submission; restart-pending and shutdown-drain project to
 holds.
 
+### THE SESSIONWATCHER settles — the pulls FOLD INTO WatchSession; the five resolvers named, internals free
+
+Settled 2026-08-28, superseding BY NAME the same-walk session-manager
+shape, the just-landed GetSessionContextUsage verb, AND the original
+"diagnostics are PULLED, not pushed" ruling:
+
+- shim.v1 GetSessionDiagnostics and GetSessionContextUsage are DELETED;
+  SessionUpdate gains `diagnostics` (25) and `context_usage` (26) —
+  the shim PUSHES both at its own cadence (context usage also at every
+  turn end) on the one session stream. Simpler: the daemon has no
+  session pulls at all.
+- THE SESSIONWATCHER (one per workspace/shim) has exactly three jobs:
+  watch the session's streams (turn, detached items, session — opened
+  eagerly, the open set IS the live-work set); be the SOLE source of
+  truth on session connectivity (the only thing watching the shim);
+  route stream responses to the resolvers, fanning out per type. It
+  never pulls and never writes — prompt submission is the prompt
+  queue's alone, simple synchronous reads may use the shim client
+  directly, and ALL async streaming data enters through the
+  sessionwatcher.
+- THE FIVE RESOLVERS, existence + purpose only: feed, footer, topbar,
+  sidebar, hold tray — each converts conversation.v1 items and daemon
+  facts into its component's frontend.v1 view; internals deliberately
+  unprescribed. RESOLVER STATE IS FINE, unpersisted: resolvers
+  accumulate piecemeal frames in memory and ship COMPLETE snapshots —
+  the webapp never assembles partial state, because non-optional
+  fields are semantically non-optional and a partial push would
+  violate them.
+
 ### THE SESSION MANAGER settles — one component per live session; eager shim watches, lazy client subscriptions
 
 Settled 2026-08-28 (architecture, no wire change), superseding the

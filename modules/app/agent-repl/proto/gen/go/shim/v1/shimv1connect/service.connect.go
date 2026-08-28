@@ -48,12 +48,6 @@ const (
 	// ShimSetSessionPermissionModeProcedure is the fully-qualified name of the Shim's
 	// SetSessionPermissionMode RPC.
 	ShimSetSessionPermissionModeProcedure = "/shim.v1.Shim/SetSessionPermissionMode"
-	// ShimGetSessionDiagnosticsProcedure is the fully-qualified name of the Shim's
-	// GetSessionDiagnostics RPC.
-	ShimGetSessionDiagnosticsProcedure = "/shim.v1.Shim/GetSessionDiagnostics"
-	// ShimGetSessionContextUsageProcedure is the fully-qualified name of the Shim's
-	// GetSessionContextUsage RPC.
-	ShimGetSessionContextUsageProcedure = "/shim.v1.Shim/GetSessionContextUsage"
 	// ShimKillSessionProcedure is the fully-qualified name of the Shim's KillSession RPC.
 	ShimKillSessionProcedure = "/shim.v1.Shim/KillSession"
 	// ShimStartTurnProcedure is the fully-qualified name of the Shim's StartTurn RPC.
@@ -87,8 +81,6 @@ var (
 	shimWatchSessionMethodDescriptor             = shimServiceDescriptor.Methods().ByName("WatchSession")
 	shimSetSessionModelMethodDescriptor          = shimServiceDescriptor.Methods().ByName("SetSessionModel")
 	shimSetSessionPermissionModeMethodDescriptor = shimServiceDescriptor.Methods().ByName("SetSessionPermissionMode")
-	shimGetSessionDiagnosticsMethodDescriptor    = shimServiceDescriptor.Methods().ByName("GetSessionDiagnostics")
-	shimGetSessionContextUsageMethodDescriptor   = shimServiceDescriptor.Methods().ByName("GetSessionContextUsage")
 	shimKillSessionMethodDescriptor              = shimServiceDescriptor.Methods().ByName("KillSession")
 	shimStartTurnMethodDescriptor                = shimServiceDescriptor.Methods().ByName("StartTurn")
 	shimWatchAgentMethodDescriptor               = shimServiceDescriptor.Methods().ByName("WatchAgent")
@@ -120,12 +112,6 @@ type ShimClient interface {
 	SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error)
 	// Change the session's permission mode for every gate from now on.
 	SetSessionPermissionMode(context.Context, *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error)
-	// Ask the shim how it is: its health and its degraded windows. A pull, at
-	// the daemon's cadence.
-	GetSessionDiagnostics(context.Context, *connect.Request[v1.GetSessionDiagnosticsRequest]) (*connect.Response[v1.GetSessionDiagnosticsResponse], error)
-	// The session's current context usage, pulled — the vendor's own answer,
-	// never derived. See endpoint_get_session_context_usage.proto.
-	GetSessionContextUsage(context.Context, *connect.Request[v1.GetSessionContextUsageRequest]) (*connect.Response[v1.GetSessionContextUsageResponse], error)
 	// END: the session and EVERYTHING live in it — the turn if one is open and
 	// every live task, whichever turn spawned it. Refuses while anything is
 	// live unless forced; names what it killed.
@@ -196,18 +182,6 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			httpClient,
 			baseURL+ShimSetSessionPermissionModeProcedure,
 			connect.WithSchema(shimSetSessionPermissionModeMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
-		getSessionDiagnostics: connect.NewClient[v1.GetSessionDiagnosticsRequest, v1.GetSessionDiagnosticsResponse](
-			httpClient,
-			baseURL+ShimGetSessionDiagnosticsProcedure,
-			connect.WithSchema(shimGetSessionDiagnosticsMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
-		getSessionContextUsage: connect.NewClient[v1.GetSessionContextUsageRequest, v1.GetSessionContextUsageResponse](
-			httpClient,
-			baseURL+ShimGetSessionContextUsageProcedure,
-			connect.WithSchema(shimGetSessionContextUsageMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		killSession: connect.NewClient[v1.KillSessionRequest, v1.KillSessionResponse](
@@ -291,8 +265,6 @@ type shimClient struct {
 	watchSession             *connect.Client[v1.WatchSessionRequest, v1.WatchSessionResponse]
 	setSessionModel          *connect.Client[v1.SetSessionModelRequest, v1.SetSessionModelResponse]
 	setSessionPermissionMode *connect.Client[v1.SetSessionPermissionModeRequest, v1.SetSessionPermissionModeResponse]
-	getSessionDiagnostics    *connect.Client[v1.GetSessionDiagnosticsRequest, v1.GetSessionDiagnosticsResponse]
-	getSessionContextUsage   *connect.Client[v1.GetSessionContextUsageRequest, v1.GetSessionContextUsageResponse]
 	killSession              *connect.Client[v1.KillSessionRequest, v1.KillSessionResponse]
 	startTurn                *connect.Client[v1.StartTurnRequest, v1.StartTurnResponse]
 	watchAgent               *connect.Client[v1.WatchAgentRequest, v1.WatchAgentResponse]
@@ -325,16 +297,6 @@ func (c *shimClient) SetSessionModel(ctx context.Context, req *connect.Request[v
 // SetSessionPermissionMode calls shim.v1.Shim.SetSessionPermissionMode.
 func (c *shimClient) SetSessionPermissionMode(ctx context.Context, req *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error) {
 	return c.setSessionPermissionMode.CallUnary(ctx, req)
-}
-
-// GetSessionDiagnostics calls shim.v1.Shim.GetSessionDiagnostics.
-func (c *shimClient) GetSessionDiagnostics(ctx context.Context, req *connect.Request[v1.GetSessionDiagnosticsRequest]) (*connect.Response[v1.GetSessionDiagnosticsResponse], error) {
-	return c.getSessionDiagnostics.CallUnary(ctx, req)
-}
-
-// GetSessionContextUsage calls shim.v1.Shim.GetSessionContextUsage.
-func (c *shimClient) GetSessionContextUsage(ctx context.Context, req *connect.Request[v1.GetSessionContextUsageRequest]) (*connect.Response[v1.GetSessionContextUsageResponse], error) {
-	return c.getSessionContextUsage.CallUnary(ctx, req)
 }
 
 // KillSession calls shim.v1.Shim.KillSession.
@@ -414,12 +376,6 @@ type ShimHandler interface {
 	SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error)
 	// Change the session's permission mode for every gate from now on.
 	SetSessionPermissionMode(context.Context, *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error)
-	// Ask the shim how it is: its health and its degraded windows. A pull, at
-	// the daemon's cadence.
-	GetSessionDiagnostics(context.Context, *connect.Request[v1.GetSessionDiagnosticsRequest]) (*connect.Response[v1.GetSessionDiagnosticsResponse], error)
-	// The session's current context usage, pulled — the vendor's own answer,
-	// never derived. See endpoint_get_session_context_usage.proto.
-	GetSessionContextUsage(context.Context, *connect.Request[v1.GetSessionContextUsageRequest]) (*connect.Response[v1.GetSessionContextUsageResponse], error)
 	// END: the session and EVERYTHING live in it — the turn if one is open and
 	// every live task, whichever turn spawned it. Refuses while anything is
 	// live unless forced; names what it killed.
@@ -486,18 +442,6 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		ShimSetSessionPermissionModeProcedure,
 		svc.SetSessionPermissionMode,
 		connect.WithSchema(shimSetSessionPermissionModeMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
-	shimGetSessionDiagnosticsHandler := connect.NewUnaryHandler(
-		ShimGetSessionDiagnosticsProcedure,
-		svc.GetSessionDiagnostics,
-		connect.WithSchema(shimGetSessionDiagnosticsMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
-	shimGetSessionContextUsageHandler := connect.NewUnaryHandler(
-		ShimGetSessionContextUsageProcedure,
-		svc.GetSessionContextUsage,
-		connect.WithSchema(shimGetSessionContextUsageMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	shimKillSessionHandler := connect.NewUnaryHandler(
@@ -582,10 +526,6 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimSetSessionModelHandler.ServeHTTP(w, r)
 		case ShimSetSessionPermissionModeProcedure:
 			shimSetSessionPermissionModeHandler.ServeHTTP(w, r)
-		case ShimGetSessionDiagnosticsProcedure:
-			shimGetSessionDiagnosticsHandler.ServeHTTP(w, r)
-		case ShimGetSessionContextUsageProcedure:
-			shimGetSessionContextUsageHandler.ServeHTTP(w, r)
 		case ShimKillSessionProcedure:
 			shimKillSessionHandler.ServeHTTP(w, r)
 		case ShimStartTurnProcedure:
@@ -633,14 +573,6 @@ func (UnimplementedShimHandler) SetSessionModel(context.Context, *connect.Reques
 
 func (UnimplementedShimHandler) SetSessionPermissionMode(context.Context, *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.SetSessionPermissionMode is not implemented"))
-}
-
-func (UnimplementedShimHandler) GetSessionDiagnostics(context.Context, *connect.Request[v1.GetSessionDiagnosticsRequest]) (*connect.Response[v1.GetSessionDiagnosticsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.GetSessionDiagnostics is not implemented"))
-}
-
-func (UnimplementedShimHandler) GetSessionContextUsage(context.Context, *connect.Request[v1.GetSessionContextUsageRequest]) (*connect.Response[v1.GetSessionContextUsageResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.GetSessionContextUsage is not implemented"))
 }
 
 func (UnimplementedShimHandler) KillSession(context.Context, *connect.Request[v1.KillSessionRequest]) (*connect.Response[v1.KillSessionResponse], error) {

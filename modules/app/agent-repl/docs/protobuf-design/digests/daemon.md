@@ -915,4 +915,13 @@ translate-layer re-encoding, which becomes the feed row resolver.
   topbar, sidebar, hold tray — each producing its finished frontend.v1
   view for verbatim rendering; internals discretionary within the
   landed invariants.
+- THE SESSIONWATCHER (final, supersedes session manager): one per
+  workspace/shim; three jobs — watch the session's streams (eager),
+  sole connectivity truth, route/fan out to resolvers. No pulls (the
+  diagnostics + context-usage verbs folded into WatchSession as pushed
+  arms 25/26), no writes (prompts = queue only; sync reads may use the
+  shim client directly; ALL async streams enter here). Five resolvers
+  by name (feed, footer, topbar, sidebar, hold tray), purpose-only;
+  resolver in-memory accumulation is fine — ship complete snapshots,
+  never partial pushes.
 

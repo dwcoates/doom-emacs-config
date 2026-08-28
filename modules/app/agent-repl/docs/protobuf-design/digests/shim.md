@@ -816,4 +816,8 @@ no-variable-state principle that bounds all of it.
   control response mapped to conversation.v1 SessionContextUsage —
   never an estimate, never derived from usage frames. Failure kind arms
   derive at the wave.
+- FOLD (2026-08-28): GetSessionDiagnostics and GetSessionContextUsage
+  are DELETED; SessionUpdate carries diagnostics (25) and
+  context_usage (26) as PUSHED arms — the shim reports both at its own
+  cadence, context usage also at every turn end.
 

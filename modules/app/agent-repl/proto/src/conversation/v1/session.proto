@@ -191,6 +191,16 @@ message SessionUpdate {
     // The vendor's own context-budget warning, injected into the prompt as
     // the window fills. Session-scoped; the footer's activity line draws it.
     SessionContextBudgetWarning context_budget_warning = 24;
+    // The shim's own health report, PUSHED at the shim's cadence and on
+    // change — the pulled GetSessionDiagnostics verb is superseded by
+    // this arm; the daemon's sessionwatcher routes it (topbar warnings).
+    SessionDiagnostics diagnostics = 25;
+    // The session's current context usage, PUSHED at the shim's cadence
+    // and at every turn end — the vendor's own get_context_usage answer,
+    // never an estimate; supersedes the pulled GetSessionContextUsage
+    // verb. Routed to the topbar resolver (the context chip and the
+    // /context panel both resolve from it).
+    SessionContextUsage context_usage = 26;
   }
 }
 
