@@ -590,6 +590,25 @@ unmarked is DISCRETIONARY by default.
      migration code anywhere; where contents are in the way, drop and
      recreate.
 
+15. RULED (the internal-components close, 2026-08-28):
+   - FAILURE CLASSIFICATION IS NOT A COMPONENT: it falls out of the
+     spec'd design — the shim produces the vendor taxonomy's typed
+     arms, the feed resolver respells turn errors per its arm table,
+     faults arrive typed on the diagnostics push, refusals are derived
+     error arms per verb; what remains is per-site switches inside
+     components that already exist.
+   - ACCOUNTING IS NOT A COMPONENT, and the SESSIONWATCHER ROUTES ONLY
+     TO RESOLVERS — never to any non-resolver aggregator. Each
+     resolver owns determining what information it needs to collect,
+     accumulates it IN MEMORY (never persisted — aggregation, not
+     storage), forwards its view only once it is COMPLETE (the
+     non-optional rule: the first message sent is fully populated;
+     before that, no message is the legal state), and thereafter
+     forwards the updated whole message immediately on every relevant
+     sessionwatcher frame. The footer resolver accumulates the turn's
+     figures; the topbar resolver the session's — same facts, each
+     resolver's own accumulation, no shared accumulator.
+
 ## OPEN — unruled audit findings (the triage backlog)
 
 These feature-loss audit findings are NOT yet ruled; each awaits a
