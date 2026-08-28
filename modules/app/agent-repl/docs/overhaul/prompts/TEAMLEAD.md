@@ -231,3 +231,17 @@ over time. The generic handling:
   accumulated state and you immediately forward the NEW VERSION of
   the whole message — only part changed, but the whole message is
   populated, so every send is complete.
+
+## Architecture specs are highly advisory, not strict requirements
+
+- The architectural prescriptions in your system's document are
+  HIGHLY ADVISORY: follow them by default, and deviate only with a
+  good reason.
+- Acceptable deviations are one of two kinds:
+  - RELATIVELY SMALL: not changing the principal architecture — a
+    little responsibility conflation is okay;
+  - COMPLEMENTARY: adding extra abstractions, narrowing an
+    abstraction's scope, and the like — refinements on top of the
+    prescription.
+- What is NOT acceptable: dissolving prescribed abstractions or
+  muddying responsibilities — deviations subtract clarity never.
