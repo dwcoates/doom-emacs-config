@@ -184,3 +184,18 @@ Escalate — never guess through — anything that is:
   that state; it is deliberate, and it guides remediation — replacement
   coverage is specified in your planning documents, not recovered from
   the deleted tests.
+
+## The API is king
+
+- There WILL be UX and specification gaps. They are filled by
+  intelligently understanding the API — the contract implies the answer
+  more often than not (e.g. nothing may say exactly when the sidebar's
+  selected workspace updates, but it is obvious from the API that it is
+  the moment the daemon receives the workspace-selection rpc from
+  Emacs). Fill such gaps from the API's own logic; escalate only the
+  gaps the API genuinely cannot answer.
+- Understanding your system's relevant APIs is therefore REQUIRED
+  before you plan: your orchestration plan for the implementation
+  agents, your own lead-derived gap-fills, and the integration suite
+  you hand the integration-tests agent all come from reading the
+  contract, not just the prose documents.

@@ -138,3 +138,34 @@ question with options — never silently decided.
   declaration carries an integrator-facing comment; when you edit
   protobufs, you maintain that standard (what/when/obligations/gotchas,
   never process history).
+
+## The mocked vendor — a hard prerequisite
+
+- BEFORE any e2e test or playtest runs, you must ensure a MOCKED
+  VENDOR (mock shim SDK) exists and works: no test or playtest may
+  ever make a real Claude call.
+- The mock must be usable by the REAL shim and sidecar, and must
+  support a robust suite of inputs with strong coverage — normal
+  prompts, the various slash commands, detached work, WatchSession
+  updates, and the rest of the vendor surface the contract exercises.
+
+## Runtime playtesting (after the e2e suite settles)
+
+- Once e2e is green, proceed to ACTUAL RUNTIME PLAYTESTING in Emacs
+  using the /debug-emacs-agent-repl skill (it may need some refinement,
+  but it specifies how to send code to Emacs and watch logs).
+- Playtest the high-level workspace functionality thoroughly: switching
+  workspaces, creating them, killing them, verifying that restarting
+  Emacs restores the workspaces that existed at shutdown, and the rest
+  of the workspace lifecycle.
+- Prompting playtests (feed results received and rendered, etc.) run
+  against the mocked vendor only.
+- LOGS ARE THE CRITICAL RESOURCE: use them to confirm data is flowing
+  where expected (to Emacs, to the webapp). Once the logs confirm
+  delivery, SCREENSHOTS (verified by opus subagents) confirm the
+  frontend LOOKS right for the situation (e.g. a detached agent's feed
+  bubble containing its nested input when expected).
+- Visual verification is PRIORITIZED, never exhaustive: it is your
+  discretion to pick the visual aspects most likely to be tricky to get
+  right or least verifiable from logs, and confirm those — not
+  anywhere close to all frontend behavior.
