@@ -171,8 +171,11 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     arch-doc update when it lands. Period. No decided constraint is ever
     left implicit, "obvious", or recoverable only from conversation;
     rule 15's completeness mandate is absolute, and the pre-landing
-    check is: re-scan the conversation since the last landing for
-    decided details and confirm each is in the diff.
+    check is: re-scan for BOTH decided details AND surfaced-undecided
+    items, against the baseline "everything not yet in a doc" (the OPEN
+    sections are the checklist) — never merely "since the last landing",
+    so a missed item keeps failing the scan until captured instead of
+    aging out of the window. (Scope widened by rule 21.)
 
 20. ARCH AND PROTO LANDINGS CROSS-CHECK EACH OTHER. Every arch-doc
     landing includes a check for protobuf changes the change implies —
@@ -180,3 +183,19 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     landing updates the canonical design record with the new entries AND
     regenerates (or appends to) every per-system digest the change
     touches, in the same landing.
+
+21. THE OPEN PIPELINE — CAPTURE IS NOT ENDORSEMENT. The decided-things
+    pipeline (rules 4, 15, 17, 19) gets its undecided mirror:
+    - FINDINGS PERSIST AT SURFACING, AS OPEN. The moment an audit or
+      investigation finding is surfaced, it lands in the owning
+      subsystem doc's OPEN section marked UNRULED. This lands nothing
+      unresolved into the prescriptions — the OPEN section is
+      definitionally not-the-design; rulings later move items out.
+    - SUBAGENT REPORTS GET A DURABLE HOME. A report whose findings are
+      not fully ruled in the same conversation is saved verbatim under
+      docs/implementation/reports/, and the OPEN items cite it — the
+      evidence outlives the transcript even when the summary is lossy.
+    - PARKING IS A WRITE, NOT A NOTE. Suspending any walk or triage
+      REQUIRES flushing its complete remaining state — every unruled
+      finding, not just those already phrased as questions — into the
+      OPEN section before moving on; the ledger points at it.
