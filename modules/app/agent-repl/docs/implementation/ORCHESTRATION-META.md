@@ -17,8 +17,16 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   publishers), and the by-endpoint sequence diagrams (meta rule 5) are
   UNSTARTED.
 - OWED BEFORE HANDOFF: MAIN.md (the e2e replacement specs), the
-  reconciled-foundation SHA record, and the remaining architecture
-  sections.
+  reconciled-foundation SHA record, the remaining architecture
+  sections, and the graceful-rollout handover PROTOBUF INCREMENT
+  (shutdown announcement, transfer notice/ack, adopt command on the
+  emacs and web surfaces).
+- ROLLOUT CONTROLLER: landed as daemon.md entry 10 (blue-green daemon
+  handover, per-workspace shim/sidecar relaunch, store unhandled);
+  OPEN there: never-free-workspace policy, shim/sidecar relaunch
+  details; the merge-variants triage questions (refusal semantics,
+  close-vs-queue, worktree removal, conflict resume reachability)
+  remain unruled and resume after the rollout work.
 - STANDING INSTRUCTIONS: STOP just before invoking /cross-system-fanout
   — the user gates that invocation personally; digests regenerate when
   the record grows; nothing lands without explicit approval.
