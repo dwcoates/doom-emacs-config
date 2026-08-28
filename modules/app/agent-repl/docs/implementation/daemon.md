@@ -363,6 +363,27 @@ remediate / do-not-remediate ruling per meta rule 14:
   merge-skill detached window (a separate concept from the daemon
   merge); cross-repo multi-queue membership (one workspace queued on
   several repos; Standing reports the first, Dequeue takes all).
+- MERGE-VARIANTS findings, UNRULED (evidence:
+  docs/implementation/reports/merge-variants-2026-08-27.md; the first
+  four were parked mid-triage): per-ingress refusal semantics for an
+  unrecorded workspace diverge (file route quarantines pre-state, rpc
+  route stamps enqueuing→failed); a queued-not-yet-head merge survives
+  its workspace closing (only a parked conflict is abandoned);
+  post-merge worktree removal is Emacs-only today (the daemon removes
+  only its temp rebase worktree); conflict resume is reachable only
+  from the Emacs ingress (the command file has no resume field); the
+  boot geometry-backfill gate yields to a host connect briefly then
+  runs anyway (merges must never depend on Emacs being up, and merge
+  commands block on the gate); Emacs holds durable merged/merge-failed
+  state across its own restart plus the merged-workspace visibility
+  treatments (tab close on merged, re-raise on failure, teardown
+  refusal mid-merge) that the new pushed views must feed;
+  doom-multi-repo-mode membership is unevaluable by the daemon (an
+  Emacs toggle with no on-disk representation widening "under the
+  root"); --pr-was-merged exists only in the workspace skill — the
+  merge engine has no PR-merged branch at all; and
+  parent-notification-on-child-merge has no found implementation
+  (unresolved in the report).
 
 DECLINED (ruled, do not re-ask): delivery-retry pacing and unknown-fate
 reconciliation are NOT prescribed (the implementing orchestrator's);
