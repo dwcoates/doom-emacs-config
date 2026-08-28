@@ -605,6 +605,7 @@ type HostSessionLive struct {
 	//	*HostSessionLive_Merging
 	//	*HostSessionLive_Draining
 	//	*HostSessionLive_Restarting
+	//	*HostSessionLive_MergeParked
 	Composer isHostSessionLive_Composer `protobuf_oneof:"composer"`
 	// Standing faults scoped to `generation`, for doctor output; a fault
 	// window dies with its generation, which is why these live on the LIVE
@@ -724,6 +725,15 @@ func (x *HostSessionLive) GetRestarting() *HostComposerRestarting {
 	return nil
 }
 
+func (x *HostSessionLive) GetMergeParked() *HostComposerMergeParked {
+	if x != nil {
+		if x, ok := x.Composer.(*HostSessionLive_MergeParked); ok {
+			return x.MergeParked
+		}
+	}
+	return nil
+}
+
 func (x *HostSessionLive) GetFaults() []*HostFault {
 	if x != nil {
 		return x.Faults
@@ -764,6 +774,14 @@ type HostSessionLive_Restarting struct {
 	Restarting *HostComposerRestarting `protobuf:"bytes,8,opt,name=restarting,proto3,oneof"`
 }
 
+type HostSessionLive_MergeParked struct {
+	// The merge PARKED for the user's guidance: the composer is OPEN with
+	// context — everything submitted while parked is delivered to the
+	// merge's resolution agent, never refused and never queued as the
+	// session's own turn.
+	MergeParked *HostComposerMergeParked `protobuf:"bytes,10,opt,name=merge_parked,json=mergeParked,proto3,oneof"`
+}
+
 func (*HostSessionLive_Open) isHostSessionLive_Composer() {}
 
 func (*HostSessionLive_Merging) isHostSessionLive_Composer() {}
@@ -771,6 +789,8 @@ func (*HostSessionLive_Merging) isHostSessionLive_Composer() {}
 func (*HostSessionLive_Draining) isHostSessionLive_Composer() {}
 
 func (*HostSessionLive_Restarting) isHostSessionLive_Composer() {}
+
+func (*HostSessionLive_MergeParked) isHostSessionLive_Composer() {}
 
 type HostSessionTerminal struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1441,6 +1461,42 @@ func (*HostComposerRestarting) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{22}
 }
 
+type HostComposerMergeParked struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostComposerMergeParked) Reset() {
+	*x = HostComposerMergeParked{}
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostComposerMergeParked) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostComposerMergeParked) ProtoMessage() {}
+
+func (x *HostComposerMergeParked) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostComposerMergeParked.ProtoReflect.Descriptor instead.
+func (*HostComposerMergeParked) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{23}
+}
+
 // One standing fault — the dynamic account now; the kind oneof is added WITH
 // its first derived arms at the wave, from the controller's real fault sites
 // (the old RuntimeFault's component/fault_type/impact/cause strings become
@@ -1457,7 +1513,7 @@ type HostFault struct {
 
 func (x *HostFault) Reset() {
 	*x = HostFault{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1469,7 +1525,7 @@ func (x *HostFault) String() string {
 func (*HostFault) ProtoMessage() {}
 
 func (x *HostFault) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1482,7 +1538,7 @@ func (x *HostFault) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostFault.ProtoReflect.Descriptor instead.
 func (*HostFault) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{23}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *HostFault) GetDetail() string {
@@ -1528,7 +1584,7 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x04live\x18\x02 \x01(\v2\x1d.agentrepl.v1.HostSessionLiveH\x00R\x04live\x12?\n" +
 	"\bterminal\x18\x03 \x01(\v2!.agentrepl.v1.HostSessionTerminalH\x00R\bterminalB\n" +
 	"\n" +
-	"\bstanding\"\xb3\x04\n" +
+	"\bstanding\"\xff\x04\n" +
 	"\x0fHostSessionLive\x12>\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\v2\x1e.agentrepl.v1.HostGenerationIdR\n" +
@@ -1541,7 +1597,9 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\bdraining\x18\a \x01(\v2\".agentrepl.v1.HostComposerDrainingH\x01R\bdraining\x12F\n" +
 	"\n" +
 	"restarting\x18\b \x01(\v2$.agentrepl.v1.HostComposerRestartingH\x01R\n" +
-	"restarting\x12/\n" +
+	"restarting\x12J\n" +
+	"\fmerge_parked\x18\n" +
+	" \x01(\v2%.agentrepl.v1.HostComposerMergeParkedH\x01R\vmergeParked\x12/\n" +
 	"\x06faults\x18\t \x03(\v2\x17.agentrepl.v1.HostFaultR\x06faultsB\r\n" +
 	"\vvendor_infoB\n" +
 	"\n" +
@@ -1576,7 +1634,8 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x10HostComposerOpen\"\x15\n" +
 	"\x13HostComposerMerging\"\x16\n" +
 	"\x14HostComposerDraining\"\x18\n" +
-	"\x16HostComposerRestarting\"E\n" +
+	"\x16HostComposerRestarting\"\x19\n" +
+	"\x17HostComposerMergeParked\"E\n" +
 	"\tHostFault\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12 \n" +
 	"\fopened_at_ms\x18\x02 \x01(\x03R\n" +
@@ -1594,7 +1653,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP() []byte 
 	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_agentrepl_v1_endpoint_watch_host_workspace_proto_goTypes = []any{
 	(*WatchHostWorkspaceRequest)(nil),  // 0: agentrepl.v1.WatchHostWorkspaceRequest
 	(*WatchHostWorkspaceResponse)(nil), // 1: agentrepl.v1.WatchHostWorkspaceResponse
@@ -1619,11 +1678,12 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_goTypes = []any{
 	(*HostComposerMerging)(nil),        // 20: agentrepl.v1.HostComposerMerging
 	(*HostComposerDraining)(nil),       // 21: agentrepl.v1.HostComposerDraining
 	(*HostComposerRestarting)(nil),     // 22: agentrepl.v1.HostComposerRestarting
-	(*HostFault)(nil),                  // 23: agentrepl.v1.HostFault
-	(*v1.WorkspaceRef)(nil),            // 24: workspace.v1.WorkspaceRef
+	(*HostComposerMergeParked)(nil),    // 23: agentrepl.v1.HostComposerMergeParked
+	(*HostFault)(nil),                  // 24: agentrepl.v1.HostFault
+	(*v1.WorkspaceRef)(nil),            // 25: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
-	24, // 0: agentrepl.v1.WatchHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	25, // 0: agentrepl.v1.WatchHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	5,  // 1: agentrepl.v1.WatchHostWorkspaceResponse.host:type_name -> agentrepl.v1.HostWorkspace
 	4,  // 2: agentrepl.v1.WatchHostWorkspaceResponse.notification:type_name -> agentrepl.v1.HostWorkspaceNotification
 	2,  // 3: agentrepl.v1.WatchHostWorkspaceResponse.transferred:type_name -> agentrepl.v1.HostWorkspaceTransferred
@@ -1641,16 +1701,17 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
 	20, // 15: agentrepl.v1.HostSessionLive.merging:type_name -> agentrepl.v1.HostComposerMerging
 	21, // 16: agentrepl.v1.HostSessionLive.draining:type_name -> agentrepl.v1.HostComposerDraining
 	22, // 17: agentrepl.v1.HostSessionLive.restarting:type_name -> agentrepl.v1.HostComposerRestarting
-	23, // 18: agentrepl.v1.HostSessionLive.faults:type_name -> agentrepl.v1.HostFault
-	15, // 19: agentrepl.v1.HostBackfill.none:type_name -> agentrepl.v1.HostBackfillNone
-	16, // 20: agentrepl.v1.HostBackfill.pending:type_name -> agentrepl.v1.HostBackfillPending
-	17, // 21: agentrepl.v1.HostBackfill.done:type_name -> agentrepl.v1.HostBackfillDone
-	18, // 22: agentrepl.v1.HostBackfill.failed:type_name -> agentrepl.v1.HostBackfillFailed
-	23, // [23:23] is the sub-list for method output_type
-	23, // [23:23] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	23, // 18: agentrepl.v1.HostSessionLive.merge_parked:type_name -> agentrepl.v1.HostComposerMergeParked
+	24, // 19: agentrepl.v1.HostSessionLive.faults:type_name -> agentrepl.v1.HostFault
+	15, // 20: agentrepl.v1.HostBackfill.none:type_name -> agentrepl.v1.HostBackfillNone
+	16, // 21: agentrepl.v1.HostBackfill.pending:type_name -> agentrepl.v1.HostBackfillPending
+	17, // 22: agentrepl.v1.HostBackfill.done:type_name -> agentrepl.v1.HostBackfillDone
+	18, // 23: agentrepl.v1.HostBackfill.failed:type_name -> agentrepl.v1.HostBackfillFailed
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() }
@@ -1678,6 +1739,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 		(*HostSessionLive_Merging)(nil),
 		(*HostSessionLive_Draining)(nil),
 		(*HostSessionLive_Restarting)(nil),
+		(*HostSessionLive_MergeParked)(nil),
 	}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[13].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[14].OneofWrappers = []any{
@@ -1692,7 +1754,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

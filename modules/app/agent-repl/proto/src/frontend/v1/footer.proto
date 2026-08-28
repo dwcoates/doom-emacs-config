@@ -364,18 +364,24 @@ message FooterStatusMerging {
     FooterSubStatusMergingQueued queued = 2;
     // The configured before-action is running.
     FooterSubStatusMergingBeforeAction before_action = 3;
-    // Commits are being cherry-picked.
-    FooterSubStatusMergingCherryPicking cherry_picking = 4;
+    // The rebase is running — inherently agentic, conflict resolution
+    // included (the merge bubble's rebase tab).
+    FooterSubStatusMergingRebasing rebasing = 4;
     // The test suite is running against the picked commits.
     FooterSubStatusMergingTesting testing = 5;
-    // A conflict is being resolved.
-    FooterSubStatusMergingConflict conflict = 6;
+    // The merge is PARKED awaiting the user's guidance — the resolution
+    // agent exhausted its attempt; the composer is open (merge_parked)
+    // and everything typed is delivered to the merge's agent.
+    FooterSubStatusMergingParked parked = 6;
     // The configured after-action is running.
     FooterSubStatusMergingAfterAction after_action = 7;
     // The merge failed; the bubble carries the account.
     FooterSubStatusMergingFailed failed = 8;
     // The merge landed.
     FooterSubStatusMergingMerged merged = 9;
+    // A test-failure remediation round is running (the bubble's
+    // remediation tab).
+    FooterSubStatusMergingRemediating remediating = 11;
   }
   // OPTIONAL BY EVIDENCE: the commit line exists only while a commit is
   // landing; most phases have no finer line.
@@ -395,8 +401,8 @@ message FooterSubStatusMergingBeforeAction {
   // The configured action, for display.
   string action = 1;
 }
-// Commits are being cherry-picked.
-message FooterSubStatusMergingCherryPicking {
+// The rebase is running, conflicts included.
+message FooterSubStatusMergingRebasing {
   // How many commits the run picks in total.
   int32 commits_total = 1;
   // How many have landed so far.
@@ -409,8 +415,14 @@ message FooterSubStatusMergingTesting {
   // The commit under test is landed but ungated.
   int32 commits_landed = 2;
 }
-// A conflict is being resolved.
-message FooterSubStatusMergingConflict {}
+// Parked awaiting the user's guidance.
+message FooterSubStatusMergingParked {
+  // The daemon-composed line — the same standing fact the bubble's parked
+  // tab shows, this component's own wrapper.
+  string line = 1;
+}
+// A remediation round is running.
+message FooterSubStatusMergingRemediating {}
 // The configured after-action is running.
 message FooterSubStatusMergingAfterAction {
   // The configured action, for display.

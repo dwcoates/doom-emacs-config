@@ -849,3 +849,22 @@ translate-layer re-encoding, which becomes the feed row resolver.
   lifetime-sequencing defect to fix, not a condition for fallback
   persistence; the graceful shim stand-down waits for all acks before
   exit, so an exit with unacked writes IS the loud failure.
+
+## 17. The merge bubble as a sub-feed; address-driven routing; the parked policy (post-freeze increment)
+
+- FeedMerge is the collapsed HEAD only; the bubble is a SUB-FEED (its
+  FeedId is the address) carrying six FeedMergeTab rows — queue | rebase
+  | tests | remediation | action | landing — resolved tabs replaced
+  whole, agentic tabs as parent containers; per-kind state oneofs;
+  rounds are new tabs.
+- The feed resolver is MERGE-AGNOSTIC: a lease holder supplies a generic
+  OUTPUT ADDRESS {target feed, parent row}; while it stands, everything
+  the session produces routes to the merge sub-feed under the active
+  tab. Only the merge orchestrator and the footer resolver know "merge".
+  Feed + footer pushes dispatch in parallel at every merge-state change.
+- PARKED policy: agent exhausts its attempt → lease flips to PARKED →
+  prompts deliver through the merge orchestrator as guidance (no
+  classifier — the lease state IS the recognition); composer gains
+  merge_parked; footer merging family: rebasing, parked{line},
+  remediating. Hand-resolution unsupported — no continue verb exists.
+- Tests tab ships daemon-parsed ANSI as paint-class spans.

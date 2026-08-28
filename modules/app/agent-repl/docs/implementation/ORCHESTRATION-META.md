@@ -33,9 +33,16 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   SPILL is REMOVED (bounded in-memory retry, loud exhausted-retry
   drop) — record amended, WriteBatch comment updated, digests appended.
   The two derived refusal arms land at the wave.
-  The merge-variants triage questions (refusal semantics,
-  close-vs-queue, worktree removal, conflict resume reachability)
-  remain unruled and resume after the rollout work.
+  MERGE-FLOW REMEDIATION (2026-08-28): the merge bubble is a SUB-FEED
+  with six per-kind-state tabs (protos landed, record + digests
+  updated); address-driven merge-agnostic feed routing; the PARKED
+  lease policy with state-based recognition; merge_parked composer arm;
+  footer merging family realigned; batch-1 triage RULED (refuse
+  pre-state, queued merge blocks close, daemon-owned worktree removal,
+  conflict resume = conversational-only, hand-resolution unsupported).
+  STILL UNRULED (OPEN in daemon.md): boot-backfill gate, Emacs durable
+  merge-state, doom-multi-repo-mode, skill-side leftovers; DEFERRED
+  next: non-Emacs-repo merge tabs, MULTI_REPO_ROOT handling.
 - STANDING INSTRUCTIONS: STOP just before invoking /cross-system-fanout
   — the user gates that invocation personally; digests regenerate when
   the record grows; nothing lands without explicit approval.

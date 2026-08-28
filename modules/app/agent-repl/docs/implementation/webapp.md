@@ -61,3 +61,23 @@ submitter's own — no pushed view carries it.
   vendor-band and query-termination suites' subjects).
 - Command dispatch over unary rpcs: refusal surfaces per endpoint error arm
   (replaces the deleted nack-classification suites' subjects).
+
+## The merge bubble (settled at the merge-flow remediation, 2026-08-28)
+- PARITY INVARIANT: the merge bubble uses the SAME sub-feed plumbing as
+  the subagent bubble — expand → OpenFeed(bubble FeedId) → WatchFeed;
+  collapse → abandon the token; a merge-specific nested-content loader
+  is a DEFECT.
+- The body renderer is the one legitimate difference: a TAB STRIP over
+  the sub-feed's FeedMergeTab rows. RESOLVED tabs (queue, tests,
+  landing) draw the row's own content — the queue snapshot, the test
+  suites with PAINT-CLASS COLORED SPANS (the client paints classes,
+  never parses ANSI), the landing narration lines. AGENTIC tabs
+  (rebase, remediation, action) draw the sub-feed rows parented to
+  them, exactly the subagent-feed rendering path.
+- PARKED tabs show the composed standing line plus a paused badge; the
+  user's prompts (typed into the ordinary composer while the host
+  stream says merge_parked) land in that tab as ordinary user-prompt
+  rows.
+- LAZY: a collapsed merge bubble transfers only its head; a settled
+  merge pages like any settled bubble. Rounds are separate tabs
+  ("tests (2)").

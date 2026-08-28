@@ -470,3 +470,11 @@ The admin verbs are NOT host-natured — "Emacs is just today's caller."
 - `reload_webapp` on `WatchHostWorkspace` is the webapp-only rollout:
   Emacs reloads the workspace's xwidget against the SAME daemon (empty arm
   — no address; the webview's default first-page load is the recovery).
+
+## 16. The merge_parked composer arm (post-freeze increment)
+
+- HostSessionLive's composer oneof gains `merge_parked` (10): the merge
+  parked for the user's guidance — the composer OPENS with context, and
+  everything submitted is delivered to the merge's resolution agent
+  (never refused, never queued as the session's own turn). `merging`
+  stays closed as before.
