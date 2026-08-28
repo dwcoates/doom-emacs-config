@@ -33,11 +33,13 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   popup subroutine + blink cadence; webapp: one separation renderer +
   link component + blink cadence); everything unchecked stays
   digest-only.
-- OWED BEFORE HANDOFF: MAIN.md (the e2e replacement specs), the
-  reconciled-foundation SHA record, the remaining architecture
-  sections, and the graceful-rollout handover PROTOBUF INCREMENT
-  (shutdown announcement, transfer notice/ack, adopt command on the
-  emacs and web surfaces).
+- OWED BEFORE HANDOFF: the internal-only components walk (failure
+  classification, accounting, git operations) and the foundation SHA
+  stamped at dispatch. MAIN.md is DEAD BY RULING (2026-08-28): the
+  project lead's prompt carries the e2e-suite duty — the lead derives
+  the suite from the record and the contract; tests-are-not-truth is
+  stated in both prompt docs. The by-endpoint diagrams are DROPPED by
+  ruling.
 - ROLLOUT CONTROLLER: daemon.md entry 10 is settled through the wire —
   the handover protobuf increment LANDED (WatchDaemon, adopt rendezvous
   pair, WEB LINK section, transferred/reload_webapp arms; record +
