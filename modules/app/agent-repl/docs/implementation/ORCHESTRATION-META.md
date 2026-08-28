@@ -45,8 +45,12 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   doom-multi-repo-mode killed; skill leftovers wont-do); INTAKE SIDE
   EFFECTS dropped for this project; DRAIN group fully ruled (three WSM
   invariants + rate-limited refusal logging; interrupt-before-
-  disconnect rejected); STILL OPEN: seven plain-worded shim-connection
-  questions (daemon.md's backlog); TWO MERGE
+  disconnect rejected); SHIM-CONNECTION group fully ruled
+  (2026-08-28): redial-forever-by-evidence, readiness-is-the-health-
+  answer, crash-boot adoption, THE RESPONSE HANDLER prescribed (10b —
+  the single component all shim output flows through, per-type routing
+  to resolvers), connectivity-per-hop invariant (11). THE TRIAGE
+  BACKLOG IS EMPTY; TWO MERGE
   METHODS RULED (2026-08-28): Emacs repo = pre-prompt → no-FF merge
   commit → tests+fixes → bounce → post-prompt; everything else =
   pre-prompt → post-prompt only; seven conditional tabs landed (protos
