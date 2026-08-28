@@ -7827,6 +7827,26 @@ gains PER-HOLDER REFUSAL POLICY — the merge lease projects to
 error-on-new-submission; restart-pending and shutdown-drain project to
 holds.
 
+### The producer SPILL is REMOVED — WriteBatch failure holds in a bounded in-memory buffer; exhausted retries are LOUD
+
+Settled during the rollout-controller planning (a sanctioned post-freeze
+increment, reopening the WriteBatch entry's spill language). The user's
+ruling: a failure to relay information from the shim to the store — the one
+and only situation the spill served — is a LOUD FAILURE (loud logs, never a
+shim crash), addressed if it ever occurs in production; durable
+producer-side persistence is a workaround, not a robust fix, because a
+persistent inability to reach the store indicates a LIFETIME-SEQUENCING
+defect whose solution lies in the sequencing. What replaces it: a bounded
+IN-MEMORY retry buffer absorbing transient blips silently; exhausted
+retries log what was lost, loudly. Sequencing rule that falls out: the
+shim's graceful stand-down WAITS FOR ALL ACKS before exiting — an exit
+with unacknowledged writes IS the loud failure. Blast radius accepted:
+records still close via GetLiveWork reconciliation and transcript-backed
+content still arrives via the sidecar; only stream-only residue of the
+crash window is lost, in a compound case (shim death during a store
+outage) the operational rulings make doubly rare. The force-kill
+spill-adoption question dies with the spill.
+
 ### The GRACEFUL-ROLLOUT HANDOVER lands — WatchDaemon, the adopt rendezvous pair, and the WEB LINK section
 
 Settled during the daemon architecture planning (a sanctioned post-freeze
