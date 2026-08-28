@@ -542,6 +542,17 @@ unmarked is DISCRETIONARY by default.
    CONNECTED iff all are live, and any one down means not connected.
    Silence on a live stream is never evidence of anything.
 
+10c. INVARIANT — ONE RESOLVER PER COMPONENT: exactly one resolver
+   exists per frontend component — the feed resolver, the footer
+   resolver, the topbar resolver (10a), the sidebar resolver, and the
+   hold tray resolver — each turning daemon facts into its component's
+   finished frontend.v1 view (composed text, formatted figures, chosen
+   arms) so the client renders verbatim, pushed whole per the standing
+   cadence convention. Their internal design is DISCRETIONARY — the
+   implementing orchestrator's, bounded only by the already-landed
+   invariants (output address, precedence ladder, one-activity pick,
+   server-side when-column, whole-list tray replace).
+
 ## OPEN — unruled audit findings (the triage backlog)
 
 These feature-loss audit findings are NOT yet ruled; each awaits a

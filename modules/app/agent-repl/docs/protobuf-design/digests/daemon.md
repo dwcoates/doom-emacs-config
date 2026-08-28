@@ -911,4 +911,8 @@ translate-layer re-encoding, which becomes the feed row resolver.
   their caller. Detached work: daemon↔shim leg eager, webapp↔daemon
   leg lazy (expand = subscribe only). Client pushes are the
   resolvers'.
+- RESOLVERS (2026-08-28): exactly ONE per component — feed, footer,
+  topbar, sidebar, hold tray — each producing its finished frontend.v1
+  view for verbatim rendering; internals discretionary within the
+  landed invariants.
 
