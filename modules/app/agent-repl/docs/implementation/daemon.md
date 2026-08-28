@@ -429,16 +429,29 @@ unmarked is DISCRETIONARY by default.
    - PREREQUISITES: WSM, shim client (adoption), prompt queue
      (hold/drain), merge orchestrator (trigger).
 
-10a. INVARIANT — topbar resolution duties (settled 2026-08-28): the
-   topbar resolver serves the ACCOUNT element (resolve the login email
-   from the session's config root's .claude.json; logged-out is a drawn
-   state) and the CONTEXT CHIP (the current context size, daemon-
-   formatted, session-scoped breakdown on hover — never a turn figure).
-   ARCH TODO: the CONTEXT-SIZE PRODUCER — not natively on the
-   conversation.v1 stream; candidates: the vendor's get_context_usage
-   control verb (stable/typed per vetting) polled or read per turn, and
-   the separation rows' after-tokens on clear/compact; mechanism is the
-   implementing orchestrator's, the requirement is binding.
+10a. PRESCRIBED — THE TOPBAR RESOLVER (the response side's first
+   prescribed component).
+   - RESPONSIBILITIES: resolve and push the whole TopbarView on any
+     change: title + session line (WSM naming and session facts), model
+     selector (catalog + current selection), connectivity (link state),
+     warnings (accounting + unmodeled + pulled diagnostics), the CONTEXT
+     CHIP, the ACCOUNT element.
+   - CONTEXT: PULLED via shim.v1 GetSessionContextUsage at the
+     resolver's own cadence plus at every turn end — the vendor's own
+     answer, NEVER derived from usage frames (correctness ruling); the
+     /context panel resolves from the SAME pull.
+   - ACCOUNT: the config dir comes from WSM's spawn-identity facts; the
+     resolver reads that root's .claude.json for the email; logged-out
+     is a drawn state, never blank.
+   - PREREQUISITES: WSM, shim client.
+   - ACCOUNT-SWITCH CONSTRAINTS (mechanics the wave's, constraints
+     binding): the config dir is DETERMINED by the daemon — workspace's
+     main repo under $MULTI_REPO_ROOT → the multi-repo config dir, else
+     the default — never by the shim; switching one to the other PORTS
+     the vendor transcript between the two roots' project dirs, and the
+     DAEMON does the porting itself (a file move before the ordinary
+     resume under the new root; no shim involvement — a deliberate
+     simplification over shim-owned porting).
 
 ## OPEN — unruled audit findings (the triage backlog)
 

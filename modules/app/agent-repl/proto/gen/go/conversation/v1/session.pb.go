@@ -3132,6 +3132,130 @@ func (x *SessionLive) GetLiveWork() []*DetachedWorkId {
 	return nil
 }
 
+// The session's CURRENT CONTEXT USAGE, as the vendor's own control answer
+// states it (the get_context_usage verb — the one stable, typed source;
+// never derived from usage frames). Pulled by the daemon; the topbar's
+// context chip and the /context panel both resolve from THIS one fact.
+type SessionContextUsage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Tokens currently in context — the topbar chip's number. Shrinks on a
+	// compaction or clear; can never exceed max_tokens.
+	TotalTokens int64 `protobuf:"varint,1,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
+	// The model's context window — the bound.
+	MaxTokens int64 `protobuf:"varint,2,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
+	// The vendor's category breakdown, in served order — the /context
+	// panel's rows.
+	Categories    []*SessionContextCategory `protobuf:"bytes,3,rep,name=categories,proto3" json:"categories,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionContextUsage) Reset() {
+	*x = SessionContextUsage{}
+	mi := &file_conversation_v1_session_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextUsage) ProtoMessage() {}
+
+func (x *SessionContextUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextUsage.ProtoReflect.Descriptor instead.
+func (*SessionContextUsage) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *SessionContextUsage) GetTotalTokens() int64 {
+	if x != nil {
+		return x.TotalTokens
+	}
+	return 0
+}
+
+func (x *SessionContextUsage) GetMaxTokens() int64 {
+	if x != nil {
+		return x.MaxTokens
+	}
+	return 0
+}
+
+func (x *SessionContextUsage) GetCategories() []*SessionContextCategory {
+	if x != nil {
+		return x.Categories
+	}
+	return nil
+}
+
+// One category of the context breakdown.
+type SessionContextCategory struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The vendor's category label, verbatim.
+	Label string `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
+	// The category's token count.
+	Tokens        int64 `protobuf:"varint,2,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionContextCategory) Reset() {
+	*x = SessionContextCategory{}
+	mi := &file_conversation_v1_session_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextCategory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextCategory) ProtoMessage() {}
+
+func (x *SessionContextCategory) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextCategory.ProtoReflect.Descriptor instead.
+func (*SessionContextCategory) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *SessionContextCategory) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *SessionContextCategory) GetTokens() int64 {
+	if x != nil {
+		return x.Tokens
+	}
+	return 0
+}
+
 var File_conversation_v1_session_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_session_proto_rawDesc = "" +
@@ -3294,7 +3418,17 @@ const file_conversation_v1_session_proto_rawDesc = "" +
 	"\vSessionLive\x12B\n" +
 	"\x0eturn_in_flight\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdH\x00R\fturnInFlight\x88\x01\x01\x12<\n" +
 	"\tlive_work\x18\x02 \x03(\v2\x1f.conversation.v1.DetachedWorkIdR\bliveWorkB\x11\n" +
-	"\x0f_turn_in_flight*\xa3\x01\n" +
+	"\x0f_turn_in_flight\"\xa0\x01\n" +
+	"\x13SessionContextUsage\x12!\n" +
+	"\ftotal_tokens\x18\x01 \x01(\x03R\vtotalTokens\x12\x1d\n" +
+	"\n" +
+	"max_tokens\x18\x02 \x01(\x03R\tmaxTokens\x12G\n" +
+	"\n" +
+	"categories\x18\x03 \x03(\v2'.conversation.v1.SessionContextCategoryR\n" +
+	"categories\"F\n" +
+	"\x16SessionContextCategory\x12\x14\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\x12\x16\n" +
+	"\x06tokens\x18\x02 \x01(\x03R\x06tokens*\xa3\x01\n" +
 	"\x13SessionCompactScope\x12%\n" +
 	"!SESSION_COMPACT_SCOPE_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19SESSION_COMPACT_SCOPE_ALL\x10\x01\x12!\n" +
@@ -3314,7 +3448,7 @@ func file_conversation_v1_session_proto_rawDescGZIP() []byte {
 }
 
 var file_conversation_v1_session_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_conversation_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
+var file_conversation_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
 var file_conversation_v1_session_proto_goTypes = []any{
 	(SessionCompactScope)(0),                   // 0: conversation.v1.SessionCompactScope
 	(*SessionStarted)(nil),                     // 1: conversation.v1.SessionStarted
@@ -3364,27 +3498,29 @@ var file_conversation_v1_session_proto_goTypes = []any{
 	(*SessionKilledIdle)(nil),                  // 45: conversation.v1.SessionKilledIdle
 	(*SessionKilledForced)(nil),                // 46: conversation.v1.SessionKilledForced
 	(*SessionLive)(nil),                        // 47: conversation.v1.SessionLive
-	(*AgentModel)(nil),                         // 48: conversation.v1.AgentModel
-	(*AgentPermissionMode)(nil),                // 49: conversation.v1.AgentPermissionMode
-	(*ModelOption)(nil),                        // 50: conversation.v1.ModelOption
-	(*TurnId)(nil),                             // 51: conversation.v1.TurnId
-	(*AgentDetachedWork)(nil),                  // 52: conversation.v1.AgentDetachedWork
-	(*DetachedWorkId)(nil),                     // 53: conversation.v1.DetachedWorkId
+	(*SessionContextUsage)(nil),                // 48: conversation.v1.SessionContextUsage
+	(*SessionContextCategory)(nil),             // 49: conversation.v1.SessionContextCategory
+	(*AgentModel)(nil),                         // 50: conversation.v1.AgentModel
+	(*AgentPermissionMode)(nil),                // 51: conversation.v1.AgentPermissionMode
+	(*ModelOption)(nil),                        // 52: conversation.v1.ModelOption
+	(*TurnId)(nil),                             // 53: conversation.v1.TurnId
+	(*AgentDetachedWork)(nil),                  // 54: conversation.v1.AgentDetachedWork
+	(*DetachedWorkId)(nil),                     // 55: conversation.v1.DetachedWorkId
 }
 var file_conversation_v1_session_proto_depIdxs = []int32{
 	2,  // 0: conversation.v1.SessionStarted.runtime:type_name -> conversation.v1.SessionRuntime
-	48, // 1: conversation.v1.SessionStarted.effective_model:type_name -> conversation.v1.AgentModel
-	49, // 2: conversation.v1.SessionStarted.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	50, // 3: conversation.v1.SessionStarted.model_catalog:type_name -> conversation.v1.ModelOption
-	51, // 4: conversation.v1.SessionStarted.turn_in_flight:type_name -> conversation.v1.TurnId
-	52, // 5: conversation.v1.SessionStarted.live_work:type_name -> conversation.v1.AgentDetachedWork
-	48, // 6: conversation.v1.SessionCold.requested_model:type_name -> conversation.v1.AgentModel
+	50, // 1: conversation.v1.SessionStarted.effective_model:type_name -> conversation.v1.AgentModel
+	51, // 2: conversation.v1.SessionStarted.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	52, // 3: conversation.v1.SessionStarted.model_catalog:type_name -> conversation.v1.ModelOption
+	53, // 4: conversation.v1.SessionStarted.turn_in_flight:type_name -> conversation.v1.TurnId
+	54, // 5: conversation.v1.SessionStarted.live_work:type_name -> conversation.v1.AgentDetachedWork
+	50, // 6: conversation.v1.SessionCold.requested_model:type_name -> conversation.v1.AgentModel
 	4,  // 7: conversation.v1.SessionCold.lapsed:type_name -> conversation.v1.SessionColdLapsed
 	5,  // 8: conversation.v1.SessionCold.model_switch:type_name -> conversation.v1.SessionColdModelSwitch
 	7,  // 9: conversation.v1.SessionColdRemediation.pay:type_name -> conversation.v1.SessionColdPay
 	8,  // 10: conversation.v1.SessionColdRemediation.clear:type_name -> conversation.v1.SessionColdClear
 	9,  // 11: conversation.v1.SessionColdRemediation.compact:type_name -> conversation.v1.SessionColdCompact
-	48, // 12: conversation.v1.SessionColdCompact.model:type_name -> conversation.v1.AgentModel
+	50, // 12: conversation.v1.SessionColdCompact.model:type_name -> conversation.v1.AgentModel
 	0,  // 13: conversation.v1.SessionColdCompact.scope:type_name -> conversation.v1.SessionCompactScope
 	12, // 14: conversation.v1.SessionUpdate.identity_rotated:type_name -> conversation.v1.SessionIdentityRotated
 	13, // 15: conversation.v1.SessionUpdate.query_died:type_name -> conversation.v1.SessionQueryDied
@@ -3396,8 +3532,8 @@ var file_conversation_v1_session_proto_depIdxs = []int32{
 	11, // 21: conversation.v1.SessionUpdate.context_budget_warning:type_name -> conversation.v1.SessionContextBudgetWarning
 	14, // 22: conversation.v1.SessionQueryDied.unexpected_eof:type_name -> conversation.v1.SessionQueryUnexpectedEof
 	15, // 23: conversation.v1.SessionQueryDied.iterator_failure:type_name -> conversation.v1.SessionQueryIteratorFailure
-	49, // 24: conversation.v1.SessionPermissionModeChanged.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	48, // 25: conversation.v1.SessionModelChanged.effective_model:type_name -> conversation.v1.AgentModel
+	51, // 24: conversation.v1.SessionPermissionModeChanged.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	50, // 25: conversation.v1.SessionModelChanged.effective_model:type_name -> conversation.v1.AgentModel
 	20, // 26: conversation.v1.SessionFastMode.on:type_name -> conversation.v1.SessionFastModeOn
 	21, // 27: conversation.v1.SessionFastMode.off:type_name -> conversation.v1.SessionFastModeOff
 	19, // 28: conversation.v1.SessionFastMode.cooldown:type_name -> conversation.v1.SessionFastModeCooldown
@@ -3414,7 +3550,7 @@ var file_conversation_v1_session_proto_depIdxs = []int32{
 	31, // 39: conversation.v1.SessionAccountUsageAvailable.seven_day_opus:type_name -> conversation.v1.SessionUsageWindow
 	31, // 40: conversation.v1.SessionAccountUsageAvailable.seven_day_sonnet:type_name -> conversation.v1.SessionUsageWindow
 	30, // 41: conversation.v1.SessionAccountUsageAvailable.model_scoped:type_name -> conversation.v1.SessionModelUsageWindow
-	48, // 42: conversation.v1.SessionModelUsageWindow.model:type_name -> conversation.v1.AgentModel
+	50, // 42: conversation.v1.SessionModelUsageWindow.model:type_name -> conversation.v1.AgentModel
 	31, // 43: conversation.v1.SessionModelUsageWindow.window:type_name -> conversation.v1.SessionUsageWindow
 	33, // 44: conversation.v1.SessionAccountUsageUnavailable.service_unavailable:type_name -> conversation.v1.SessionUsageServiceUnavailable
 	34, // 45: conversation.v1.SessionAccountUsageUnavailable.window_unavailable:type_name -> conversation.v1.SessionUsageWindowUnavailable
@@ -3428,15 +3564,16 @@ var file_conversation_v1_session_proto_depIdxs = []int32{
 	43, // 53: conversation.v1.SessionDegradedWindow.closed:type_name -> conversation.v1.SessionDegradedClosed
 	45, // 54: conversation.v1.SessionKilled.idle:type_name -> conversation.v1.SessionKilledIdle
 	46, // 55: conversation.v1.SessionKilled.forced:type_name -> conversation.v1.SessionKilledForced
-	51, // 56: conversation.v1.SessionKilledForced.interrupted_turn:type_name -> conversation.v1.TurnId
-	53, // 57: conversation.v1.SessionKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
-	51, // 58: conversation.v1.SessionLive.turn_in_flight:type_name -> conversation.v1.TurnId
-	53, // 59: conversation.v1.SessionLive.live_work:type_name -> conversation.v1.DetachedWorkId
-	60, // [60:60] is the sub-list for method output_type
-	60, // [60:60] is the sub-list for method input_type
-	60, // [60:60] is the sub-list for extension type_name
-	60, // [60:60] is the sub-list for extension extendee
-	0,  // [0:60] is the sub-list for field type_name
+	53, // 56: conversation.v1.SessionKilledForced.interrupted_turn:type_name -> conversation.v1.TurnId
+	55, // 57: conversation.v1.SessionKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
+	53, // 58: conversation.v1.SessionLive.turn_in_flight:type_name -> conversation.v1.TurnId
+	55, // 59: conversation.v1.SessionLive.live_work:type_name -> conversation.v1.DetachedWorkId
+	49, // 60: conversation.v1.SessionContextUsage.categories:type_name -> conversation.v1.SessionContextCategory
+	61, // [61:61] is the sub-list for method output_type
+	61, // [61:61] is the sub-list for method input_type
+	61, // [61:61] is the sub-list for extension type_name
+	61, // [61:61] is the sub-list for extension extendee
+	0,  // [0:61] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_session_proto_init() }
@@ -3515,7 +3652,7 @@ func file_conversation_v1_session_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_session_proto_rawDesc), len(file_conversation_v1_session_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   47,
+			NumMessages:   49,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
