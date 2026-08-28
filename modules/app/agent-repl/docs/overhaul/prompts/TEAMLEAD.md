@@ -214,3 +214,20 @@ Escalate — never guess through — anything that is:
   make an old test pass, and never treat an old test's expectation as
   a requirement. Coverage is rebuilt FROM the contract, not recovered
   from the old assertions.
+
+## Building messages piecemeal under the non-optional rule
+
+A recurring situation: the message you must produce has non-optional
+fields, but the information arrives PIECEMEAL from several sources
+over time. The generic handling:
+
+- ACCUMULATE in memory (never on disk — nothing here is persisted;
+  the information only needs aggregating) until you hold enough to
+  populate a COMPLETE message.
+- Send NOTHING until then: the very first message forwarded must be
+  fully populated (the non-optional rule); before that, absence of
+  any message is the legal "not yet" state.
+- From then on, every incoming piece of new information updates your
+  accumulated state and you immediately forward the NEW VERSION of
+  the whole message — only part changed, but the whole message is
+  populated, so every send is complete.
