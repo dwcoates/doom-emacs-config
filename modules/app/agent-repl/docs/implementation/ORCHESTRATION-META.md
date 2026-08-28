@@ -148,3 +148,15 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     the SAME commit — newly settled items move off the open lists, newly
     surfaced items join them; a landing that changes neither is exempt.
     The sitrep sync pass checks the ledger's freshness.
+
+18. PRODUCT-SPEC DEPTH FOR COMPLEX ADDITIONS. Some additions are COMPLEX
+    PRODUCT REQUIREMENTS internal to a system, not mere architecture —
+    the graceful-rollout daemon handover is the exemplar. For those (and
+    only those — they are rare), the entry captures the FULL AGREED FLOW
+    at narrative depth: numbered phases, each phase's actors and actions,
+    and the settled revisions — the level of the conversation's own final
+    summary. Rule 10's brevity governs ordinary prescriptions; it never
+    licenses compressing a product spec into a paragraph that loses the
+    flow. The distinction to apply: describing WHAT the product must do
+    step by step is spec, not over-prescription; prescribing HOW modules
+    implement it internally still is.
