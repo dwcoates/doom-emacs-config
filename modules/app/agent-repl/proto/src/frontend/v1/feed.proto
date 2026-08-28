@@ -122,6 +122,12 @@ message FeedRow {
     // composer; once resolved it stays in history as the trace of the
     // choice.
     FeedColdGate cold_gate = 13;
+    // One TAB of a merge bubble's sub-feed — appears ONLY as a top-level
+    // row of a merge bubble's own feed, never on the root feed. The
+    // webapp draws one tab per tab row; an AGENTIC tab's content is the
+    // sub-feed rows parented to it, a RESOLVED tab's content rides the
+    // row itself, replaced whole.
+    FeedMergeTab merge_tab = 14;
   }
 }
 
@@ -1532,31 +1538,34 @@ message FeedWorktreeBranch {
 }
 
 // ⑥ A WORKSPACE MERGE, coalesced into ONE bubble. The daemon orchestrates the
-// merge (a skill run under the hood) and DECIDES which records belong to it;
-// the vendor knows nothing about any of it. The bubble's body is a TAB STRIP:
-// one tab per phase the run actually entered, in entry order.
+// merge and DECIDES which records belong to it; the vendor knows nothing
+// about any of it. THIS ROW IS THE COLLAPSED HEAD ONLY: the bubble is a
+// SUB-FEED — its own FeedId is the feed address (OpenFeed → WatchFeed,
+// exactly the subagent bubble's mechanics; ONE shared plumbing path, a
+// merge-specific loader is a defect). The bubble's CONTENT rides that
+// sub-feed as FeedMergeTab rows plus, for agentic tabs, ordinary rows
+// parented to their tab. Content is therefore LAZY: a collapsed bubble
+// transfers nothing but this head, and a settled merge pages like any
+// settled bubble.
 //
 //   │ ⇄ merge  DWC/fix-flaky → master           6:31  ● merging  ▾      │
 //   │ ┌───────────────────────────────────────────────────────────────┐ │
-//   │ │ queue ✓ │ rebase ✓ │ conflicts ✓ 3 │ tests ● 8/12            │ │
+//   │ │ queue ✓ │ rebase ✓ │ tests (2) ● 8/12 │ remediation ⏸       │ │
 //   │ ├───────────────────────────────────────────────────────────────┤ │
 //   │ │  │ ⚙ agent ▏fixing TestReconnect…                            │ │
 //   │ └───────────────────────────────────────────────────────────────┘ │
 message FeedMerge {
   FeedMergeHead head = 1;
   // THE ARM IS THE STATE of the merge as a whole — the head's badge. WHAT it
-  // is doing right now is the last tab, not a field here.
+  // is doing right now is the last tab of the sub-feed, not a field here.
   oneof result {
     FeedMergeUpdate update = 2;
     FeedMergeSuccess success = 3;
     FeedMergeError error = 4;
   }
-  // The phases entered so far, in entry order — the tab strip. APPEND-ONLY:
-  // a tab appears BECAUSE that work began, so there is no pending tab, and a
-  // phase never reopens. A second round of a phase is a SECOND TAB
-  // ("conflicts (2)"), deliberately, so an abnormal second pass looks
-  // abnormal without any badge saying so.
-  repeated FeedMergePhase phases = 5;
+  // Tag 5 RETIRED (repeated FeedMergePhase phases): the tab strip moved to
+  // the bubble's sub-feed as FeedMergeTab rows.
+  reserved 5;
 }
 
 // The bubble's head line: the constant props.
@@ -1612,176 +1621,199 @@ message FeedMergeFold {
   bool folded = 1;
 }
 
-// ONE TAB of the merge bubble. A tab draws from exactly two things and
-// derives nothing: its label, and its state (which picks the badge's
-// treatment). Whatever DETAIL the badge shows comes from the kind arm, which
-// is already resolved.
-message FeedMergePhase {
-  // The tab's label, resolved by the daemon, round number included
-  // ("conflicts (2)"). The client counts nothing.
-  FeedMergePhaseLabel label = 1;
-  // THE ARM IS THE BADGE. Monotonic: update once, then success or error, never
-  // reopened — a repeat of this work is a new tab, not this one going live
-  // again.
-  oneof result {
-    FeedMergePhaseUpdate update = 2;
-    FeedMergePhaseSuccess success = 3;
-    FeedMergePhaseError error = 4;
-  }
-  // THE ARM IS WHAT THIS PHASE IS, and carries the evidence that phase has.
+// THE TAB FAMILY — one row per drawn tab of a merge bubble's sub-feed.
+// TWO TAB SHAPES: RESOLVED tabs (queue, tests, landing) carry their
+// content in this row, replaced whole per push; AGENTIC tabs (rebase,
+// remediation, action) are containers — their content is the sub-feed
+// rows parented to this row (the lease session's conversation, routed by
+// the daemon's output address). Tabs are APPEND-ONLY: a tab appears
+// BECAUSE that work began, so there is no pending tab, and a tab never
+// reopens — a second round is a SECOND TAB with the round in its label
+// ("tests (2)"), so an abnormal second pass looks abnormal.
+//
+// EACH KIND OWNS ITS STATE oneof, declaring exactly the states legal for
+// it — an agentic tab can be PARKED (awaiting the user's guidance), a
+// resolved tab never can, and the illegal pairing is unrepresentable
+// rather than forbidden by comment (the footer-restructure pattern). The
+// leaf payloads (live, parked line, settled outcome) are SHARED messages
+// across the per-kind oneofs — one badge vocabulary, legality carried by
+// the oneof types.
+message FeedMergeTab {
+  FeedMergeTabLabel label = 1;
   oneof kind {
-    FeedMergePhaseQueue queue = 5;
-    FeedMergePhaseRebasing rebasing = 6;
-    FeedMergePhaseResolving resolving = 7;
-    FeedMergePhaseBuilding building = 8;
-    FeedMergePhaseTesting testing = 9;
-    FeedMergePhaseLanding landing = 10;
+    FeedMergeTabQueue queue = 2;
+    FeedMergeTabRebase rebase = 3;
+    FeedMergeTabTests tests = 4;
+    FeedMergeTabRemediation remediation = 5;
+    FeedMergeTabAction action = 6;
+    FeedMergeTabLanding landing = 7;
   }
 }
 
-// The tab's label.
-message FeedMergePhaseLabel {
+// The tab's drawn label, resolved by the daemon.
+message FeedMergeTabLabel {
+  // The tab's word ("queue", "rebase", "tests", the action's name).
+  string text = 1;
+  // The 1-based round; the client decorates rounds beyond the first
+  // ("tests (2)") and draws nothing for round 1.
+  uint32 round = 2;
+}
+
+// SHARED STATE LEAVES — the badge vocabulary every kind's oneof selects
+// from.
+message FeedMergeTabLive {}
+// An agentic tab awaiting the USER: the resolution agent exhausted its
+// attempt and the merge parked. The composer is open (the host stream's
+// merge_parked arm); everything the user types while parked is delivered
+// to this tab's agent as guidance and lands here as ordinary rows.
+message FeedMergeTabParked {
+  // The daemon-composed standing line ("parked for your input — 2
+  // conflicts remain in daemon/server.go").
+  FeedMergeTabParkedLine line = 1;
+}
+message FeedMergeTabParkedLine {
+  string text = 1;
+}
+message FeedMergeTabSettled {
+  // When the tab settled, epoch ms.
+  int64 ended_at_ms = 1;
+  oneof outcome {
+    FeedMergeTabSucceeded succeeded = 2;
+    FeedMergeTabFailed failed = 3;
+  }
+}
+message FeedMergeTabSucceeded {}
+message FeedMergeTabFailed {
+  // The daemon-composed one-line account; the tab's own content carries
+  // the detail.
+  string summary = 1;
+}
+
+// RESOLVED: the repo queue as it stands, replaced whole on every queue
+// change and on any change to the front's active tab. Settles (succeeded)
+// when this merge reaches the front; failed covers eviction while queued.
+message FeedMergeTabQueue {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+  FeedMergeQueue queue = 3;
+}
+
+// AGENTIC: the rebase — inherently agentic, conflict resolution included
+// (conflicts are the rebase's hard parts, never a separate tab). Content:
+// sub-feed rows parented to this row.
+message FeedMergeTabRebase {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabParked parked = 2;
+    FeedMergeTabSettled settled = 3;
+  }
+}
+
+// RESOLVED: the programmatic test run — suites, progress, and COLORED
+// output. Replaced whole per push.
+message FeedMergeTabTests {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+  repeated FeedMergeTestSuite suites = 3;
+}
+message FeedMergeTestSuite {
+  // The suite's name, verbatim.
+  string name = 1;
+  oneof state {
+    FeedMergeTestSuiteRunning running = 2;
+    FeedMergeTestSuitePassed passed = 3;
+    FeedMergeTestSuiteFailed failed = 4;
+  }
+  // The suite's capped output as DAEMON-RESOLVED COLORED SPANS: the
+  // daemon parses the terminal's ANSI escapes and ships paint classes;
+  // the client paints classes and never parses escapes (the code-span
+  // precedent, this component's own wrapper).
+  repeated FeedMergeTestSpan output = 5;
+}
+message FeedMergeTestSuiteRunning {}
+message FeedMergeTestSuitePassed {}
+message FeedMergeTestSuiteFailed {}
+message FeedMergeTestSpan {
+  string text = 1;
+  // A paint-class name from the shared render vocabulary; empty = plain.
+  string paint_class = 2;
+}
+
+// AGENTIC: a test-failure remediation round. Content: sub-feed rows
+// parented to this row. Appears only after a failed tests tab.
+message FeedMergeTabRemediation {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabParked parked = 2;
+    FeedMergeTabSettled settled = 3;
+  }
+}
+
+// AGENTIC: a configured action (before_ws_merge, postprocessing_prompt)
+// running the workspace's session under the lease. Content: sub-feed rows
+// parented to this row; the label carries the action's name.
+message FeedMergeTabAction {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabParked parked = 2;
+    FeedMergeTabSettled settled = 3;
+  }
+}
+
+// RESOLVED: the landing — the actual git, narrated thin: commits picked,
+// shas landed. Replaced whole per push.
+message FeedMergeTabLanding {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+  repeated FeedMergeLandingLine lines = 3;
+}
+message FeedMergeLandingLine {
+  // One daemon-composed narration line ("picked 4f2a1c fold tokens…").
   string text = 1;
 }
 
-// This phase is the one running.
-message FeedMergePhaseUpdate {}
-
-// Finished cleanly: when, and the badge's summary when there is one ("3
-// files", "0844824").
-message FeedMergePhaseSuccess {
-  int64 ended_at_ms = 1;
-  string summary = 2;
-}
-
-// Finished badly: when, and a resolved sentence ("3 tests still failing").
-message FeedMergePhaseError {
-  int64 ended_at_ms = 1;
-  string summary = 2;
-}
-
-// ==========================================================================
-// The merge phases. Each carries its own evidence, and the working phases
-// each carry their nested rows' count — the records the agent produced doing
-// that phase's work, parented to the PHASE rather than to the merge, so
-// "which pass produced this fix" is answerable by structure.
-// ==========================================================================
-
-// WAITING IN THE QUEUE. Its content is a SNAPSHOT, replacing the previous one
-// whole — there are no deltas and no ordering to reconcile, exactly as a
-// background shell's spool is replaced whole. The daemon republishes on any
-// queue change AND on any phase change at the front, which is what makes a
-// waiting user see motion rather than a static "3 ahead".
-//
-// It has no records of its own: nothing is being done here.
-//
-// WHEN THIS WORKSPACE REACHES THE FRONT the tab SETTLES, frozen on its last
-// snapshot ("you were #1 of 4"), and the phase tabs take over. It does not
-// keep updating — the front workspace is shown nothing about the queue,
-// because a merging user cares about the merge, not about who is behind
-// them.
-message FeedMergePhaseQueue {
-  FeedMergeQueue queue = 1;
-}
-
-// The queue, as this workspace sees it. Every workspace appears exactly once,
-// and WHICH ENTRY THE READER IS is `current` — structurally, never by
-// comparing ids.
+// The repo queue snapshot the queue tab draws: who is ahead, this
+// workspace, who is behind — structural, so "you are here" is never
+// derived by comparing ids. The head workspace is shown NOTHING about the
+// queue (its bubble is busy merging).
 message FeedMergeQueue {
-  // Ahead of us, front-first.
+  // The entries ahead, front first.
   repeated FeedMergeQueueEntry ahead = 1;
-  // Us. The "you are here" row.
+  // This workspace's own entry.
   FeedMergeQueueEntry current = 2;
-  // Behind us, front-first.
+  // The entries behind, nearest first.
   repeated FeedMergeQueueEntry behind = 3;
 }
-
-// One workspace in the queue — the same drawn row wherever it sits.
 message FeedMergeQueueEntry {
   FeedMergeQueueWorkspace workspace = 1;
   FeedMergeQueueLabel label = 2;
-  // THE ARM IS WHAT THIS WORKSPACE IS DOING. Only the front entry is ever
-  // `merging`, and only `merging` has a phase to report.
+  // THE ARM IS THE ENTRY'S STANDING.
   oneof status {
     FeedMergeQueueMerging merging = 3;
     FeedMergeQueueWaiting waiting = 4;
   }
 }
-
-// Which workspace this row names, so the row is a jump target — the
-// imported join key.
+// The entry's workspace, a jump target across workspaces.
 message FeedMergeQueueWorkspace {
-  workspace.v1.WorkspaceRef workspace = 1;
+  workspace.v1.WorkspaceRef ref = 1;
 }
-
-// The row's label, resolved ("DWC/roster-resolver").
+// The entry's drawn name, resolved by the daemon.
 message FeedMergeQueueLabel {
   string text = 1;
 }
-
-// At the front and running. This MIRRORS that workspace's own merge bubble:
-// the SAME phase messages its tab strip uses, imported rather than respelled,
-// so the two never drift.
+// The FRONT entry only: what its run is doing right now — the front's
+// active tab label, the SAME message its own bubble draws, imported never
+// respelled, so a waiting user sees the front's progress.
 message FeedMergeQueueMerging {
-  oneof phase {
-    FeedMergePhaseRebasing rebasing = 1;
-    FeedMergePhaseResolving resolving = 2;
-    FeedMergePhaseBuilding building = 3;
-    FeedMergePhaseTesting testing = 4;
-    FeedMergePhaseLanding landing = 5;
-  }
+  FeedMergeTabLabel active_tab = 1;
 }
-
-// Waiting its turn; nothing to report beyond who it is.
 message FeedMergeQueueWaiting {}
-
-// Bringing the branch up to date on its base.
-message FeedMergePhaseRebasing {
-  // The base, resolved ("master @ 0844824").
-  string base = 1;
-  FeedMergePhaseRowCount rows = 2;
-}
-
-// The agent is resolving conflicts. This is the phase that makes the bubble
-// read as an agent bubble at all.
-message FeedMergePhaseResolving {
-  // The conflicted paths, in display order.
-  repeated string paths = 1;
-  // The one being worked right now, when the daemon can name it.
-  string current_path = 2;
-  FeedMergePhaseRowCount rows = 3;
-}
-
-// Building after the resolution.
-message FeedMergePhaseBuilding {
-  // The build's live line, resolved ("compiling daemon").
-  string detail = 1;
-  FeedMergePhaseRowCount rows = 2;
-}
-
-// Running the suite; the agent fixes what it breaks, which is more records.
-message FeedMergePhaseTesting {
-  // Which suite ("elisp", "webapp", "e2e"), resolved.
-  string suite = 1;
-  // Progress, composed by the daemon ("8/12"); the client counts nothing.
-  string progress = 2;
-  FeedMergePhaseRowCount rows = 3;
-}
-
-// Landing the result: the push, the queue interaction, the commit produced.
-// The merge's own narration — the skill's initiating prompt, the closing
-// message — is THIS phase's records, which is why the body is uniformly tabs
-// and carries no loose rows.
-message FeedMergePhaseLanding {
-  FeedMergePhaseRowCount rows = 1;
-}
-
-// How many nested rows this phase has. The rows themselves are ordinary
-// FeedRows whose `parent` is the phase, paged through the same page and
-// breadcrumbs as the feed.
-message FeedMergePhaseRowCount {
-  int32 count = 1;
-}
 
 // ==========================================================================
 // PENDING — old bodies, verbatim, judged one kind at a time.

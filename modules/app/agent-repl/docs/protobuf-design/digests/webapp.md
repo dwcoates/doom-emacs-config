@@ -857,3 +857,16 @@ gotchas live in `docs/implementation/webapp.md`.
 - OWED derived refusal arms at the wave: `transferring_away { address }`
   from the old daemon (self-heal from the refusal) and `not_yet_adopted {}`
   from the new.
+
+## 13. The merge bubble as a sub-feed (post-freeze increment)
+
+- PARITY INVARIANT: the merge bubble uses the SAME sub-feed plumbing as
+  the subagent bubble (expand → OpenFeed(id) → WatchFeed; collapse →
+  abandon); a merge-specific nested-content loader is a defect.
+- The body renderer is the one legitimate difference: a TAB STRIP over
+  FeedMergeTab rows — resolved tabs (queue snapshot; tests suites with
+  paint-class colored spans; landing narration lines) draw the row's
+  content; agentic tabs (rebase, remediation, action) draw the sub-feed
+  rows parented to them; parked tabs show the composed line + paused
+  badge, and the user's prompts land there as ordinary rows.
+- Content is LAZY: collapsed = head only; settled merges page on demand.
