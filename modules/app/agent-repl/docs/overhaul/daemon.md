@@ -590,6 +590,39 @@ unmarked is DISCRETIONARY by default.
      migration code anywhere; where contents are in the way, drop and
      recreate.
 
+14a. PRESCRIBED — THE GIT CLIENT (the second LEAF client, the shim
+   client's sibling: a dumb, no-policy executor of git actions,
+   knowing nothing of WSM or any peer; the peers compose it with WSM
+   exactly as they compose the shim client — creation records facts in
+   WSM and materializes through this client; the merge orchestrator
+   drives the landing through it under the lease; teardown calls it
+   after terminal publication; the self-reload trigger uses its
+   identity check).
+   REQUIREMENTS (implementation details the orchestrator's):
+   - CREATION: derive the slug (from the initial prompt when present),
+     the branch from the slug, the worktree dir; resolve the optional
+     base ref (default: the repo's default branch); run the git;
+     registration happens only after the worktree materializes; the
+     merge layout facts (source branch, source dir, target dir,
+     origin) are recorded at creation — a merge is REFUSED when they
+     are absent, never guessed.
+   - THE MERGE LANDING: a NO-FF merge commit onto the target's default
+     branch — never cherry-pick, never rebase; conflicts are detected
+     and left staged for the conflicts flow; rollback is reverting the
+     one merge commit; a git failure fails the merge LOUDLY with the
+     git output preserved as evidence.
+   - POST-MERGE WORKTREE REMOVAL: daemon-owned, only AFTER the merge's
+     terminal publication — never mid-run.
+   - NUKE: delete the worktree AND the branch, forced.
+   - SELF-REPO IDENTITY: the git common-dir comparison with symlink
+     canonicalization — the one computation behind the merge-method
+     split and the self-reload trigger.
+   - LANDED-RANGE DERIVATION: the merge commit's second-parent history
+     (default..branch), read off the commit itself.
+   - LOCAL ONLY: the daemon never pushes, fetches, or touches remotes
+     — remote work is the prompts' agents' business.
+   - PREREQUISITES: none (leaf).
+
 15. RULED (the internal-components close, 2026-08-28):
    - FAILURE CLASSIFICATION IS NOT A COMPONENT: it falls out of the
      spec'd design — the shim produces the vendor taxonomy's typed

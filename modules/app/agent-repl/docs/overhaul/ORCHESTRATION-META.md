@@ -33,9 +33,12 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   popup subroutine + blink cadence; webapp: one separation renderer +
   link component + blink cadence); everything unchecked stays
   digest-only.
-- OWED BEFORE HANDOFF: the internal-only components walk (failure
-  classification, accounting, git operations) and the foundation SHA
-  stamped at dispatch. MAIN.md is DEAD BY RULING (2026-08-28): the
+- OWED BEFORE HANDOFF: only the foundation SHA stamped at dispatch.
+  THE ARCHITECTURE WALK IS COMPLETE (2026-08-28): the internal
+  components closed — failure classification falls out, accounting
+  dissolved into per-resolver accumulation (sessionwatcher routes to
+  resolvers only), git operations landed as THE GIT CLIENT (the second
+  leaf, requirements-only). MAIN.md is DEAD BY RULING (2026-08-28): the
   project lead's prompt carries the e2e-suite duty — the lead derives
   the suite from the record and the contract; tests-are-not-truth is
   stated in both prompt docs. The by-endpoint diagrams are DROPPED by
