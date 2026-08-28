@@ -158,6 +158,17 @@ itself or that it judges to be genuine toss-ups).
   their work is completing behavior, not un-breaking builds — smaller
   deltas than daemon and webapp.
 
+## Dispatch is per-lead, and never blocks on a sibling
+
+After your preliminary investigation, you decide PER LEAD, one at a
+time: either SURFACE any uncertainty in that lead's prescription to
+the user (so they can weigh in) or simply DISPATCH that lead. A lead
+whose prescription needs remediation NEVER stops the others — do not
+halt at the first uncertain one; continue through the rest in the same
+fashion. The five are mutually exclusive, and it is fine for the leads
+with good prescriptions to be working while the questions on the
+others are squared away.
+
 ## Standing conventions you enforce
 
 - NO BACKWARDS COMPATIBILITY, EVER: no effort is made to preserve the
