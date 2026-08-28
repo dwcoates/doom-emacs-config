@@ -78,8 +78,10 @@ export const Shim: GenService<{
   },
   /**
    * ATTACH: the standing stream of session-level facts as they manifest
-   * upstream. The facts fixed at start are StartSession's; nothing synthetic
-   * rides here — the shim's own health is pulled.
+   * upstream. The facts fixed at start are StartSession's. The shim's own
+   * health and the session's context usage RIDE THIS STREAM as pushed arms
+   * (SessionUpdate.diagnostics, SessionUpdate.context_usage) — no pull
+   * verbs exist for them.
    *
    * @generated from rpc shim.v1.Shim.WatchSession
    */

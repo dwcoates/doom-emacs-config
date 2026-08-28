@@ -53,3 +53,298 @@
   frontend.v1 RosterRowAttention (two blinks, 500 ms on/off, then
   steady); divergence from the webapp sidebar is a defect.
 
+
+## Contract context (for implementers)
+
+Orientation for implementation agents working the elisp side. The protos under
+`proto/src/` are the contract; their comments are the authoritative
+documentation — read the actual `.proto` files you work against. Cross-cutting
+conventions (response spelling, echo tokens, identity vocabulary, validation
+and logging invariants, the proto→code mapping) live in
+`docs/protobuf-design/digests/conventions.md` and are not repeated here. The
+full history and rationale is `docs/protobuf-design/figma-to-idl-redesign.md`.
+Implementers never change protobufs — a needed change is a request up the
+orchestration chain.
+
+### What Emacs is in this system
+
+- Emacs is a HOST, not an author. Its whole workspace contribution is two
+  verbs: REGISTER a workspace (hand the daemon a dir; the daemon mints and
+  returns the identity) and SELECT a workspace (the user switched tabs).
+  Everything else about a workspace — parentage, branch, repo, naming, status
+  — the daemon derives and pushes.
+- Emacs REACTS to streams; the daemon never calls Emacs. There is no
+  daemon→host command loop, no action inbox, no report-back ("I finished
+  setting up" has no listener). A workspace appearing on the roster means
+  open its buffers; a close means tear down — the same reactive model as the
+  webapp.
+- Emacs commands are THIN WRAPPERS: send the request, await the daemon's ack,
+  update editor state. Every piece of real machinery (git, worktrees, session
+  lifecycle, merge orchestration) is the daemon's.
+- Emacs is the daemon's SINGULAR CLIENT MULTIPLEXER: one process holding the
+  one WatchDaemon stream plus one WatchHostWorkspace stream per open
+  workspace. Each open workspace also hosts one xwidget WKWebView (the
+  webapp), bound to its buffer for life, with its own connection; the
+  composer is HOST-native (the webview runs with the composer disabled).
+- Transport is Connect (HTTP/2), not gRPC — chosen for exactly these clients.
+  Commands are ordinary unary requests; component streams are
+  server-streaming rpcs multiplexed over one connection. PROTOJSON IS THE
+  ELISP CODEC: Connect serves binary or JSON per client; elisp speaks the
+  same schema as the webapp in JSON. One schema, two codecs — Emacs and the
+  webapp call the identical rpcs.
+- Stream lifecycle: cancelling a stream IS the graceful close (no
+  CloseXConnection verbs exist); a reconnect re-opens and re-pulls — streams
+  are "now", never "since", and no resume token exists. After a daemon
+  restart Emacs re-registers (idempotent by dir) and re-subscribes; that is
+  the normal path, not an error.
+
+### Package map, from the elisp seat
+
+- `agentrepl.v1` — the ONLY service Emacs calls. Seven sections on one
+  `service AgentRepl`: feed / sidebar / topbar / footer / daemon-hold tray
+  (webapp-facing), daemon admin, host, plus the web-link section (webview
+  only). One `endpoint_<rpc>.proto` per rpc; `service.proto` is the index.
+- `workspace.v1` — the identity leaf: `WorkspaceRef {id, dir}` and
+  `RepositoryRef {id, dir}`. Daemon-minted echo tokens: a path is never an
+  identity (paths have many spellings); `id` is opaque, compared byte-wise,
+  handed back verbatim; `dir` is display/normalized, never used as a key.
+  Emacs obtains a ref from RegisterWorkspace's success (or the roster) and
+  echoes it on every per-workspace call.
+- `frontend.v1` — the webapp's drawn-component vocabulary. Emacs touches it
+  in exactly ONE place: `sidebar.proto`'s `RosterRowAttention`, whose comment
+  is the canonical blink-cadence spec (below). Everything else in frontend.v1
+  is the webview's business.
+- `conversation.v1`, `shim.v1`, `store.v1` — never Emacs's; listed only so
+  nobody goes looking.
+
+### The HOST section (agentrepl.v1)
+
+Three rpcs plus the handover pair.
+
+- `RegisterWorkspace { dir }` → `{ WorkspaceRef }`. Emacs provides the path in
+  whatever spelling it has; the daemon normalizes, mints, returns. IDEMPOTENT
+  BY DIR — re-registration after reconnect/daemon restart reconciles, one
+  success answer.
+- `SelectWorkspace { WorkspaceRef }` → empty success. Fired on tab switch;
+  the daemon stamps `current` and last-selected, and CLEARS the workspace's
+  attention marker; the roster stream reflects it. Idempotent — re-selecting
+  the current workspace succeeds.
+- `WatchHostWorkspace { WorkspaceRef }` — one subscription per OPEN
+  workspace: snapshot first, then whole-replace per push. Closing a
+  workspace cancels its stream. The response is a push oneof:
+  - `host` — the `HostWorkspace` state, whole (below).
+  - `notification` — an EVENT {text, at_ms}, fired not state (presentation
+    policy below).
+  - `transferred` — daemon handover: this (old) daemon released the
+    workspace (below).
+  - `reload_webapp` — webapp-only rollout: reload this workspace's xwidget
+    against the SAME daemon; empty by design (no address — the daemon is not
+    changing; a combined daemon+webapp rollout never sends it because the
+    handover re-attach pulls fresh assets).
+
+The flow, as designed: Emacs connects → RegisterWorkspace per known worktree
+→ per OPEN workspace one WatchHostWorkspace subscription → closes cancel → a
+daemon restart drops the streams and Emacs re-registers and re-subscribes.
+There is no global host-workspace stream — workspace-dependent and
+workspace-independent channels are distinct types by ruling, which is why
+WatchDaemon exists separately.
+
+### HostWorkspace, abstractly
+
+The host-facing state of one workspace: what Emacs needs to correlate
+processes, gate its composer, and manage buffers — nothing a webview draws.
+Emacs renders FIXED TREATMENTS PER ARM, never mapping values (ordinary oneof
+rendering; the old composed "gate sentence" died for this).
+
+- `session` oneof: `none` (registered, no session ever created) |
+  `existing`.
+- `existing` hoists the shared `HostSessionId` (daemon-minted; sessions
+  rotate under one workspace — this is what Emacs correlates transcripts,
+  health probes and fault windows against) over a `standing` oneof:
+  `live` | `terminal {rehydratable}`.
+- `live` carries:
+  - `generation` (controller generation; rotates on daemon-side restart
+    without the session id changing; fault windows scope to it);
+  - `shim_attached` — false while the daemon is between shim starts;
+  - `vendor_info` oneof, arm = the vendor: `claude {session_id,
+    config_dir}` — config_dir names which account/login the conversation
+    belongs to;
+  - `backfill` — the never-blue signal, arm = state: none | pending | done
+    | failed{detail} (known gap carried in the comment: a non-parse sidecar
+    read error still manifests as pending-forever);
+  - the `composer` gate oneof (below);
+  - `faults` — standing generation-scoped `HostFault {detail,
+    opened_at_ms}` for doctor output (typed kind arms arrive with their
+    first derived producers).
+- `naming {optional slug, optional title}` sits BESIDE the session oneof —
+  buffers need a name in every standing; both fields unset until derived.
+
+Composer gating: the resolved arm IS the gate, and it exists only on the
+LIVE arm (the other standings are blocked by their own nature). Arms:
+`open` | `merging` (the merge lease owns the session — composer closed) |
+`draining` (scheduled shutdown) | `restarting` (graceful RestartWorkspace)
+| `merge_parked` (the merge gave up and wants guidance: the composer is
+OPEN WITH CONTEXT — everything submitted while parked is delivered to the
+merge's resolution agent, never refused and never queued as the session's
+own turn). The composer is host-native, so this gate is Emacs's to enforce.
+
+### Hibernation does not exist on the wire
+
+- Hibernation is entirely a daemon implementation detail (an idle-shutdown
+  sweep). NO frontend word says hibernation anywhere: no host arm, no roster
+  status, no footer state, no hibernate/revive verbs.
+- A parked workspace presents as `live` with `shim_attached = false` — "the
+  session exists and serves on demand". The composer stays open; typing
+  revives under the hood. The only user-visible cost story is the webapp
+  feed's cold-context gate, which is not Emacs's surface.
+- Consequence for elisp: the teal treatment, 💤 glyph, hibernated decoders,
+  hibernate command and its rpc plumbing are all dead (see the dead-code
+  inventory above); the frontend cannot distinguish parked from idle, on
+  purpose.
+
+### The daemon handover (graceful rollout)
+
+A daemon self-rollout is blue-green: the old daemon spawns the rebuilt one
+(joining mode, fresh socket), announces, and transfers workspaces one by one
+at freeness (no in-flight turn, no live detached work). There is no
+daemon↔daemon channel — coordination is CLIENT RELAY + durable facts +
+per-workspace kernel locks, and Emacs is the relay.
+
+- `WatchDaemon {}` — the one daemon-level stream. Push arm:
+  `shutdown_announced {address}`. On it, Emacs DUAL-ATTACHES: open a second
+  connection to `address` while KEEPING the old one — each workspace's
+  updates keep flowing from the daemon that currently owns it.
+- Per workspace, the old daemon pushes `transferred` on that workspace's
+  WatchHostWorkspace stream when it releases it. `transferred` is a PUSH,
+  never a terminal frame — the stream stays standing until the CLIENT
+  cancels (the standing-stream convention). Emacs's obligation, in order:
+  call `AdoptHostWorkspace {WorkspaceRef}` on the NEW connection, then
+  cancel the old stream and re-subscribe on the new connection.
+- The adopt rendezvous: `AdoptHostWorkspace` and `AdoptWebWorkspace` are
+  SIBLING VERBS so the verb itself identifies the participant (no
+  self-declared kind field a confused client could get wrong). Expected
+  participants = holders of the workspace's two streams at announcement
+  time; the new daemon completes adoption (kernel lock, shim adoption,
+  drain of held intake) only when every expected participant has called,
+  and all calls succeed together. Headless workspaces transfer with zero
+  rendezvous.
+- Ordering is enforced BY REFUSAL, not convention: per-workspace rpcs for
+  an unowned workspace are refused. Two derived error arms are owed to the
+  wave — `transferring_away {address}` on the old daemon's verbs (a lagging
+  client self-heals from the refusal) and `not_yet_adopted {}` on the new
+  daemon's — two arms because wrong-daemon and right-daemon-too-early are
+  different facts.
+- Prompts arriving during the window are HELD (never errored) and replay in
+  order on the new daemon.
+- The old daemon times the adoption window; expiry surfaces as that
+  workspace's own error and is NOT hardened machinery — no abort/retry
+  exists.
+
+### Notifications and the attention marker (presentation policy is Emacs's)
+
+- The daemon publishes the FACT (`notification` push per workspace); each
+  surface applies the policy it alone has the knowledge for. The daemon
+  never asks "is Emacs focused".
+- Emacs's policy, stated at the arm:
+  - Emacs UNFOCUSED → post an OS desktop notification; its click raises the
+    frame and selects the workspace's tab (plain elisp — decider and actor
+    are one process, no daemon round-trip).
+  - Focused, tab NOT selected → blink that tab-bar entry per the canonical
+    cadence.
+  - Tab selected → nothing (the footer's activity line already shows it).
+- THE CANONICAL BLINK CADENCE is specified ONCE, on frontend.v1
+  `RosterRowAttention`: two blinks — 500 ms on, 500 ms off, twice — then a
+  steady marker until cleared. The webapp sidebar and the Emacs tab-bar
+  both implement exactly that spec and CITE THE MESSAGE; a divergent
+  cadence is a defect (code-level consistency is user-mandated).
+- The marker's lifecycle is daemon-owned: set on notification, cleared by
+  the existing SelectWorkspace verb — Emacs's ordinary tab switch is the
+  clearing act; no dedicated ack verb exists.
+
+### The workspace verbs Emacs wraps
+
+Vocabulary note: doom-speak was renamed to match the contract — doom's old
+"kill" (remove from the editor) is CLOSE; doom's old "nuke" is KILL; NUKE is
+reserved for the verb that destroys data.
+
+- `CloseWorkspace` (SPC j x) — the user's close, a VIEW act: fast ack, tab
+  gone, the daemon↔shim session UNTOUCHED. REQUIRES QUIET: no turn in
+  flight, no live async work, NO HELD PROMPTS (undelivered user intent may
+  never be silently discarded; the user clears a hold via the tray's
+  release/drop). A refusal manifests in the WEBAPP FOOTER (status closing ·
+  close blocked, daemon-composed reasons), not as an Emacs dialog — the
+  response carries only the blocked cause arm.
+- `KillWorkspace` — the big red button: forced session death (connections
+  and the shim). Never blocks, never warns; worktree and branch survive.
+- `NukeWorkspace` — data destruction: kill first if live, then delete the
+  worktree and branch.
+- `OpenWorkspace` — just opens; any revival happens under the hood.
+- `MergeWorkspace` — success means ENQUEUED; the merge's whole life from
+  there is the webapp feed's merge bubble and the roster/footer. Emacs
+  holds NO merge state: no durable merged/failed memory, no merged-tab
+  filtering — the pushed views are the only merge state.
+- `RestartWorkspace {force}` — bounce only the workspace's shim. Graceful:
+  wait for quiet, holding prompts in the tray meanwhile. Forced: interrupt
+  and bounce; the agent is NOT resumed afterwards — continuing is the
+  user's next prompt.
+- `CreateWorkspace {RepositoryRef, optional initial_prompt, optional
+  base_ref}` — THE DAEMON names and creates everything (slug → branch →
+  worktree), registers it, and the workspace appears on the roster; no host
+  materialization round-trip exists. The RepositoryRef comes from the
+  roster's repo sections. No account field exists: the account is
+  DETERMINED by the repo-under-root rule, never selected.
+
+### Daemon-admin verbs (Emacs is merely today's caller)
+
+These are not host-natured; elisp is the plumbing that reaches them.
+
+- `UpdateShutdownSchedule { schedule{at_ms} | cancel | now }` — deploy
+  tooling's drain-and-exit control, purely inbound; consequences ride
+  existing surfaces (tray holds during drain, footer status).
+- `UpdateMergeQueue { pause | resume | evict{WorkspaceRef} }` — operator
+  control; visible state rides the merge bubble's queue tab and the roster.
+- `DaemonHealth {}` / `SessionHealth {WorkspaceRef}` — health pulls;
+  UNHEALTHY IS AN ANSWER (a success arm carrying typed fault lists with
+  dynamic detail strings), never a transport error. Two deliberately
+  separate fault vocabularies (DaemonFault, SessionFault).
+- `ClientLog` — Emacs NEVER calls it; it exists for console-less clients
+  (the xwidget webapp) and Emacs has durable logs of its own.
+
+### The shared editor-popup subroutine
+
+- ONE elisp subroutine backs every open-a-file affordance the webapp raises
+  to the host: "open path[:line] in a doom popup, right side, half width" —
+  dired when the path is a directory.
+- Its callers, all mandated to share the one implementation: the plan
+  bubble's ✎ edit button (opens the plan file; the round-trip is
+  save-then-tell-the-agent — the vendor cannot observe disk edits, and no
+  edited marker exists), every findings-row location jump, and the worktree
+  separation-divider paths.
+- Divergence between call sites is a defect: the consistency requirement is
+  code-level, the same ruling as the blink cadence.
+
+### Gotchas worth knowing before touching elisp
+
+- Echo refs verbatim: constructing or parsing a WorkspaceRef id — or using
+  `dir` as a key — is typed-as-wrong by the contract's opacity comments.
+- Empty error messages are DELIBERATE: error arms are derived from real
+  refusal sites at implementation time, never invented ahead; an empty
+  `<Rpc>Error` today is the correct current shape, and new arms land as the
+  daemon's refusal sites are written.
+- Success is empty wherever the new state arrives as a push (select,
+  adopt, the workspace verbs): do not expect state in unary answers; the
+  streams are the authority.
+- A stream the PRODUCER ends without a terminal frame is a transport
+  failure; a CLIENT cancel is the normal close. `transferred` and
+  `reload_webapp` are pushes, not endings.
+- No keepalive frames exist anywhere; connection death is detected at the
+  transport, and unary calls fail loudly. Staleness machinery (fences,
+  revisions, boot ids) is gone — per-stream ordering is the only ordering.
+- The roster is READ-ONLY for Emacs: the daemon authors it wholesale
+  (Emacs's old sidebar.el status table and roster publishing have no
+  successor); Emacs consumes it, if at all, only for tab bookkeeping — and
+  its two inputs to the roster are exactly Register and Select.
+- Push cadence, stated on the frontend views and true of the host stream
+  alike: event-driven, whole-replace, no ticks — push whole on any resolved
+  change, push nothing on no change; clients tick clocks locally from
+  shipped instants.
