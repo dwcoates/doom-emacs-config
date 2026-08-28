@@ -116,10 +116,10 @@ frozen; anything that looks like a schema gap is surfaced upward, never patched 
   speaks).
 - Proto comments are the authoritative per-field documentation: every oneof arm states when a
   producer sets it and what a consumer does with it. Read the file you implement against.
-- `docs/protobuf-design/digests/conventions.md` holds the cross-system conventions
+- `docs/overhaul/conventions.md` holds the cross-system conventions
   (identity spaces, echo tokens, response-outcome and bounded-stream conventions, presence
   rules, push cadence, package model). Not repeated here — read it once before implementing.
-- `docs/protobuf-design/figma-to-idl-redesign.md` is the full design record; consult it only
+- The full design record is the PROJECT LEAD's context; escalate rather than consulting it
   when a proto comment leaves a "why" open.
 
 ### Design philosophy bearing on the webapp

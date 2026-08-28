@@ -48,7 +48,7 @@ Meta: the protos live under `proto/src/` (packages `store/v1`, `conversation/v1`
 implement. Implementers never change protobufs; a needed change is a request up
 the orchestration chain. Cross-cutting conventions (response-outcome spelling,
 bounded streams, clock convention, validation/logging invariants) are in
-`docs/protobuf-design/digests/conventions.md` and are not repeated here.
+`docs/overhaul/conventions.md` and are not repeated here.
 
 ### What the store is
 
