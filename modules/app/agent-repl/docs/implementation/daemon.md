@@ -262,6 +262,14 @@ unmarked is DISCRETIONARY by default.
      5. DRAIN AND EXIT. After the last transfer the old daemon exits
         gracefully; the new daemon's WSM handle becomes the sole
         writer.
+   - SHIM/SIDECAR RELAUNCH (what is decided so far): the new binary is
+     rebuilt immediately and PRELAUNCHED per workspace (process up and
+     warm before it is needed); the swap waits for that workspace's
+     freeness (no in-flight turn, no live detached work), then
+     reattaches GREEDILY the moment it holds — detach old, attach new,
+     old gracefully killed — minimizing perceived interruption to
+     near zero; sidecar restarts follow the same shape as shim
+     restarts; remaining details OPEN.
    - WEBAPP SIDE: the old daemon pushes a transfer notice per webview;
      from that notice on, the webview sends nothing more on the old
      connection for that workspace; it connects to the new daemon
