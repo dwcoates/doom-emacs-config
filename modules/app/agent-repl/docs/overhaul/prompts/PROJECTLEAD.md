@@ -132,7 +132,14 @@ question with options — never silently decided.
   and every escalation resolved — you hold the completion criteria
   nobody below you has.
 
-## The service-specific picture (brief each teamlead accordingly)
+## The service-specific picture (synthesized into each dispatch)
+
+You don't merely forward this picture: you use it, TOGETHER WITH your
+preliminary-investigation findings, to SYNTHESIZE each teamlead's
+dispatch directive — a tailored briefing per lead (e.g. the Emacs lead
+is told explicitly that its system is lightly specified, and that it
+should surface any soft spots to you that it cannot work through
+itself or that it judges to be genuine toss-ups).
 
 - DAEMON: a FULL REWRITE from scratch — the old daemon tree is
   untouched reference material only, its build knowingly red; nothing
