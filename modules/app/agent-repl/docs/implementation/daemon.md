@@ -203,10 +203,9 @@ unmarked is DISCRETIONARY by default.
        excluded) triggers the self-redeploy — fires exactly once, only
        after lease release and terminal publication, classifies the
        landed range by changed subsystem prefixes and restarts ONLY
-       what changed, defers the bounce to a live Emacs (emacsclient
-       performs the restart), and is WEBAPP-INVISIBLE: the persisted
-       feed page position and the boot re-attach machinery are what
-       make the restart evidence-free client-side.
+       what changed; EXECUTION is delegated to the rollout controller
+       (the graceful-rollout entry below), which owns the
+       zero-perceived-downtime mechanics.
    - GOTCHAS: phase history is feed content, not WSM columns; an
      in-flight merge across a daemon restart is resumed or LOUDLY
      failed, never left with the lease stuck; the composer gate is the
@@ -228,6 +227,50 @@ unmarked is DISCRETIONARY by default.
 
 9. DISCRETIONARY — drain/shutdown controller (schedule + idle sweep;
    prereqs: WSM, shim client; acquires the lease like any peer).
+
+10. PRESCRIBED — THE ROLLOUT CONTROLLER (graceful doom-change rollout).
+   - RESPONSIBILITIES: turns the merge orchestrator's self-reload
+     trigger into a zero-perceived-downtime rollout, per changed
+     subsystem: daemon → blue-green handover; shim and sidecar →
+     per-workspace preemptive relaunch; elisp → hot-load; webapp → hot
+     asset swap; STORE → deliberately UNHANDLED (a user-initiated full
+     restart; store restarts are rare by design).
+   - DAEMON HANDOVER: the old daemon rebuilds and spawns the new one
+     (joining mode: fresh socket, WSM read-only, owns nothing);
+     announces shutdown + the new address on the existing Emacs
+     connection; Emacs dual-attaches; per workspace, AT FREENESS (no
+     in-flight turn, no live detached work) the old daemon quiesces —
+     from the transfer notice on it does NO work for that workspace,
+     holding all arrivals — releases the workspace's kernel lock, and
+     announces on the OLD connection; Emacs tells the NEW daemon to
+     adopt on the new connection; the new daemon adopts the running
+     shim, claims the lock, drains held intake, pushes fresh views;
+     after the last workspace the old daemon exits gracefully.
+   - WEBAPP SIDE: the old daemon pushes a transfer notice per webview;
+     the webview connects to the new daemon FIRST, then acks the old —
+     the old connection outlives the new one's creation, so no gap is
+     observable; the persisted feed page position makes re-attach
+     evidence-free.
+   - INVARIANT — no daemon↔daemon channel: coordination is Emacs relay
+     + WSM facts + kernel locks only (locks self-release on death, so
+     a crash mid-window leaves every workspace claimable by the
+     survivor).
+   - INVARIANT — WSM contention scope: during the overlap every
+     mutable WSM fact is workspace-scoped (arbitrated by the workspace
+     kernel lock) or repo-scoped (the per-repo merge queue gets its
+     own kernel lock); any future cross-cutting table must be
+     lock-scoped or rollout-frozen.
+   - GOTCHAS: headless workspaces transfer via WSM facts + lock claim
+     alone and must never wait on an Emacs relay (Emacs may not be
+     running); a never-free workspace leaves the rollout in a
+     two-daemon steady state (policy open); a newer rollout supersedes
+     a joining daemon that never finished.
+   - OWED: the handover messages (shutdown announcement, transfer
+     notice/ack, adopt command) are new emacs↔daemon and web↔daemon
+     contract shapes — a protobuf increment to design before fanout.
+   - PREREQUISITES: WSM, shim client (adoption), prompt queue
+     (hold/drain), merge orchestrator (trigger).
+
 ## OPEN — unruled audit findings (the triage backlog)
 
 These feature-loss audit findings are NOT yet ruled; each awaits a
