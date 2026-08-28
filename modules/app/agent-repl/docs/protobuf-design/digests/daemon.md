@@ -886,4 +886,10 @@ translate-layer re-encoding, which becomes the feed row resolver.
   from the session config root; logged-out drawn) and TopbarContextChip
   (current context size, session-scoped breakdown). OPEN arch todo: the
   context-size producer (get_context_usage vs separation after-tokens).
+- CONTEXT USAGE (2026-08-28): shim.v1 GetSessionContextUsage pulls the
+  vendor's own answer (SessionContextUsage: total/max/categories);
+  derivation from usage frames is FORBIDDEN as the chip's source; the
+  /context panel fills from the same pull. ACCOUNT SWITCHING: the
+  daemon determines the config dir (repo-under-root rule) and ports the
+  transcript between roots itself — no shim involvement.
 
