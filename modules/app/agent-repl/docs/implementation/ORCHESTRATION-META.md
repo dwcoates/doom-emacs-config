@@ -169,3 +169,10 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     rule 15's completeness mandate is absolute, and the pre-landing
     check is: re-scan the conversation since the last landing for
     decided details and confirm each is in the diff.
+
+20. ARCH AND PROTO LANDINGS CROSS-CHECK EACH OTHER. Every arch-doc
+    landing includes a check for protobuf changes the change implies —
+    surfaced with the landing, never discovered later. Every protobuf
+    landing updates the canonical design record with the new entries AND
+    regenerates (or appends to) every per-system digest the change
+    touches, in the same landing.
