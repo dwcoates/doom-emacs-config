@@ -160,3 +160,12 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     flow. The distinction to apply: describing WHAT the product must do
     step by step is spec, not over-prescription; prescribing HOW modules
     implement it internally still is.
+
+19. NO SALIENT DETAIL LEFT TO INTERPRETATION. Every detail salient to
+    the implementation that WE TOGETHER determined — anything decided to
+    BE a certain way or to NOT be a certain way — MUST appear in the
+    arch-doc update when it lands. Period. No decided constraint is ever
+    left implicit, "obvious", or recoverable only from conversation;
+    rule 15's completeness mandate is absolute, and the pre-landing
+    check is: re-scan the conversation since the last landing for
+    decided details and confirm each is in the diff.
