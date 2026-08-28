@@ -36,7 +36,7 @@ are the authoritative documentation — read the files you work on; this section
 gives the map and the ideas. Cross-cutting rules (identity spaces, echo tokens,
 response/stream conventions, presence rules, the fidelity principle, the exempt
 set, implementation/validation/logging conventions) live in
-`docs/protobuf-design/digests/conventions.md` and are NOT restated here.
+`docs/overhaul/conventions.md` and are NOT restated here.
 Implementers never change protobufs; a needed change is a request up the
 orchestration chain.
 

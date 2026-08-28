@@ -49,7 +49,16 @@ lead — the one orchestrator above the five system teamleads.
 
 - READ THE ENTIRE protobuf design document into context:
   docs/protobuf-design/figma-to-idl-redesign.md. You are the only
-  orchestrator who does.
+  orchestrator who does — and docs/protobuf-design/ AS A WHOLE (the
+  record, the vetting register, the deferred metadocument, the design
+  digests, the two webapp audit reports) is YOUR context exclusively:
+  the teamleads are told never to look inside it, and you never point
+  them at it — anything they need from it, you relay.
+- DO YOUR OWN PRELIMINARY INVESTIGATION before dispatching the
+  teamleads, exactly as they investigate before dispatching
+  implementers: the record, the per-system documents under
+  docs/overhaul/, and the contract — enough to brief each teamlead
+  with the service-specific picture below and anything else you find.
 - Do NOT read the /create-or-update-protobufs skill. You are the only
   agent even capable of editing protobufs and thus the only one to whom
   that skill could apply — but its context is already loaded by the
@@ -122,6 +131,25 @@ question with options — never silently decided.
 - DONE MEANS: the e2e suite green, the repository's full verifier green,
   and every escalation resolved — you hold the completion criteria
   nobody below you has.
+
+## The service-specific picture (brief each teamlead accordingly)
+
+- DAEMON: a FULL REWRITE from scratch — the old daemon tree is
+  untouched reference material only, its build knowingly red; nothing
+  is adapted, everything is built against the new contract.
+- EMACS: relatively loosely specified in UX terms — expect MORE HOLES
+  in the UX requirements than elsewhere; the API-is-king gap-filling
+  will carry more weight here, and more escalations are normal.
+- WEBAPP: a number of NEW features are enabled by the backend that
+  have NO existing equivalent to imitate (merge tabs, sub-feeds, the
+  tray, the cold gate, panels) — the two audit reports in your
+  directory (webapp-feature-loss-audit, frontend-unsketched-features)
+  enumerate the known gaps and unsketched surfaces; mine them during
+  your preliminary investigation and relay what matters.
+- SHIM / STORE / SIDECAR: all three reconciled GREEN against the new
+  contract during planning (their tests pass at the foundation), so
+  their work is completing behavior, not un-breaking builds — smaller
+  deltas than daemon and webapp.
 
 ## Standing conventions you enforce
 

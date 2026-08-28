@@ -653,9 +653,9 @@ documentation — read the files you implement against. This section is the
 map: the ideas, the package layout, and how the pieces relate. Generic
 wire/schema conventions (identity spaces, echo tokens, response-outcome,
 bounded streams, presence, no-seq, no-keepalive, the file/package model)
-live in `docs/protobuf-design/digests/conventions.md` — read that too;
+live in `docs/overhaul/conventions.md` — read that too;
 nothing there is restated here. The full design record is
-`docs/protobuf-design/figma-to-idl-redesign.md` (canonical on conflict).
+the canonical design record (the project lead's; on conflict, escalate).
 Implementers never touch protobufs — a needed proto change is routed
 upward, never made.
 
