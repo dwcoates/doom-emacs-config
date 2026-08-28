@@ -479,13 +479,16 @@ func (*SubmitPromptCommandPanel_Context) isSubmitPromptCommandPanel_Panel() {}
 
 func (*SubmitPromptCommandPanel_Help) isSubmitPromptCommandPanel_Panel() {}
 
-// The submission was refused. EMPTY ON PURPOSE — an empty oneof is not legal
-// proto, so the `reason` oneof is added WITH its first arms at this
-// endpoint's 3c turn, DERIVED from the daemon's real refusal sites (e.g. no
-// session, merge lease held, drain refusing) and spelled per the 3b
-// conventions.
+// The submission was refused. The reason oneof gains further arms as they
+// are derived from the daemon's real refusal sites.
 type SubmitPromptError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// WHY the submission was refused.
+	//
+	// Types that are valid to be assigned to Reason:
+	//
+	//	*SubmitPromptError_Merging
+	Reason        isSubmitPromptError_Reason `protobuf_oneof:"reason"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -520,6 +523,77 @@ func (*SubmitPromptError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{5}
 }
 
+func (x *SubmitPromptError) GetReason() isSubmitPromptError_Reason {
+	if x != nil {
+		return x.Reason
+	}
+	return nil
+}
+
+func (x *SubmitPromptError) GetMerging() *SubmitPromptRefusedMerging {
+	if x != nil {
+		if x, ok := x.Reason.(*SubmitPromptError_Merging); ok {
+			return x.Merging
+		}
+	}
+	return nil
+}
+
+type isSubmitPromptError_Reason interface {
+	isSubmitPromptError_Reason()
+}
+
+type SubmitPromptError_Merging struct {
+	// A merge is in flight for this workspace, and the prompt arrived
+	// AFTER the merge began. It is refused outright rather than held:
+	// once the workspace merges, it closes, so work produced by a
+	// post-merge-start prompt would be orphaned. Prompts already held
+	// when the merge began stay held and are unaffected. The composer
+	// keeps the text; the user resubmits after the merge resolves.
+	Merging *SubmitPromptRefusedMerging `protobuf:"bytes,1,opt,name=merging,proto3,oneof"`
+}
+
+func (*SubmitPromptError_Merging) isSubmitPromptError_Reason() {}
+
+// The merge-in-flight refusal. Empty: the set arm is the whole assertion —
+// the footer's merging status and the feed's merge bubble already show
+// which merge, so the refusal carries no duplicate account of it.
+type SubmitPromptRefusedMerging struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubmitPromptRefusedMerging) Reset() {
+	*x = SubmitPromptRefusedMerging{}
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitPromptRefusedMerging) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitPromptRefusedMerging) ProtoMessage() {}
+
+func (x *SubmitPromptRefusedMerging) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitPromptRefusedMerging.ProtoReflect.Descriptor instead.
+func (*SubmitPromptRefusedMerging) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{6}
+}
+
 var File_agentrepl_v1_endpoint_submit_prompt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
@@ -547,8 +621,11 @@ const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
 	"\x03mcp\x18\x06 \x01(\v2\x19.frontend.v1.McpPanelViewH\x00R\x03mcp\x129\n" +
 	"\acontext\x18\a \x01(\v2\x1d.frontend.v1.ContextPanelViewH\x00R\acontext\x120\n" +
 	"\x04help\x18\b \x01(\v2\x1a.frontend.v1.HelpPanelViewH\x00R\x04helpB\a\n" +
-	"\x05panel\"\x13\n" +
-	"\x11SubmitPromptErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x05panel\"c\n" +
+	"\x11SubmitPromptError\x12D\n" +
+	"\amerging\x18\x01 \x01(\v2(.agentrepl.v1.SubmitPromptRefusedMergingH\x00R\amergingB\b\n" +
+	"\x06reason\"\x1c\n" +
+	"\x1aSubmitPromptRefusedMergingB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescOnce sync.Once
@@ -562,43 +639,45 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_agentrepl_v1_endpoint_submit_prompt_proto_goTypes = []any{
-	(*SubmitPromptRequest)(nil),      // 0: agentrepl.v1.SubmitPromptRequest
-	(*SubmitPromptResponse)(nil),     // 1: agentrepl.v1.SubmitPromptResponse
-	(*SubmitPromptSuccess)(nil),      // 2: agentrepl.v1.SubmitPromptSuccess
-	(*SubmitPromptTurn)(nil),         // 3: agentrepl.v1.SubmitPromptTurn
-	(*SubmitPromptCommandPanel)(nil), // 4: agentrepl.v1.SubmitPromptCommandPanel
-	(*SubmitPromptError)(nil),        // 5: agentrepl.v1.SubmitPromptError
-	(*v1.UserSaid)(nil),              // 6: conversation.v1.UserSaid
-	(*v11.FeedId)(nil),               // 7: frontend.v1.FeedId
-	(*v1.TurnId)(nil),                // 8: conversation.v1.TurnId
-	(*v11.StatusPanelView)(nil),      // 9: frontend.v1.StatusPanelView
-	(*v11.TodosPanelView)(nil),       // 10: frontend.v1.TodosPanelView
-	(*v11.AgentsPanelView)(nil),      // 11: frontend.v1.AgentsPanelView
-	(*v11.McpPanelView)(nil),         // 12: frontend.v1.McpPanelView
-	(*v11.ContextPanelView)(nil),     // 13: frontend.v1.ContextPanelView
-	(*v11.HelpPanelView)(nil),        // 14: frontend.v1.HelpPanelView
+	(*SubmitPromptRequest)(nil),        // 0: agentrepl.v1.SubmitPromptRequest
+	(*SubmitPromptResponse)(nil),       // 1: agentrepl.v1.SubmitPromptResponse
+	(*SubmitPromptSuccess)(nil),        // 2: agentrepl.v1.SubmitPromptSuccess
+	(*SubmitPromptTurn)(nil),           // 3: agentrepl.v1.SubmitPromptTurn
+	(*SubmitPromptCommandPanel)(nil),   // 4: agentrepl.v1.SubmitPromptCommandPanel
+	(*SubmitPromptError)(nil),          // 5: agentrepl.v1.SubmitPromptError
+	(*SubmitPromptRefusedMerging)(nil), // 6: agentrepl.v1.SubmitPromptRefusedMerging
+	(*v1.UserSaid)(nil),                // 7: conversation.v1.UserSaid
+	(*v11.FeedId)(nil),                 // 8: frontend.v1.FeedId
+	(*v1.TurnId)(nil),                  // 9: conversation.v1.TurnId
+	(*v11.StatusPanelView)(nil),        // 10: frontend.v1.StatusPanelView
+	(*v11.TodosPanelView)(nil),         // 11: frontend.v1.TodosPanelView
+	(*v11.AgentsPanelView)(nil),        // 12: frontend.v1.AgentsPanelView
+	(*v11.McpPanelView)(nil),           // 13: frontend.v1.McpPanelView
+	(*v11.ContextPanelView)(nil),       // 14: frontend.v1.ContextPanelView
+	(*v11.HelpPanelView)(nil),          // 15: frontend.v1.HelpPanelView
 }
 var file_agentrepl_v1_endpoint_submit_prompt_proto_depIdxs = []int32{
-	6,  // 0: agentrepl.v1.SubmitPromptRequest.said:type_name -> conversation.v1.UserSaid
-	7,  // 1: agentrepl.v1.SubmitPromptRequest.feed:type_name -> frontend.v1.FeedId
+	7,  // 0: agentrepl.v1.SubmitPromptRequest.said:type_name -> conversation.v1.UserSaid
+	8,  // 1: agentrepl.v1.SubmitPromptRequest.feed:type_name -> frontend.v1.FeedId
 	2,  // 2: agentrepl.v1.SubmitPromptResponse.success:type_name -> agentrepl.v1.SubmitPromptSuccess
 	5,  // 3: agentrepl.v1.SubmitPromptResponse.error:type_name -> agentrepl.v1.SubmitPromptError
 	3,  // 4: agentrepl.v1.SubmitPromptSuccess.turn:type_name -> agentrepl.v1.SubmitPromptTurn
 	4,  // 5: agentrepl.v1.SubmitPromptSuccess.command_panel:type_name -> agentrepl.v1.SubmitPromptCommandPanel
-	8,  // 6: agentrepl.v1.SubmitPromptTurn.turn:type_name -> conversation.v1.TurnId
-	9,  // 7: agentrepl.v1.SubmitPromptCommandPanel.status:type_name -> frontend.v1.StatusPanelView
-	10, // 8: agentrepl.v1.SubmitPromptCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
-	11, // 9: agentrepl.v1.SubmitPromptCommandPanel.agents:type_name -> frontend.v1.AgentsPanelView
-	12, // 10: agentrepl.v1.SubmitPromptCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
-	13, // 11: agentrepl.v1.SubmitPromptCommandPanel.context:type_name -> frontend.v1.ContextPanelView
-	14, // 12: agentrepl.v1.SubmitPromptCommandPanel.help:type_name -> frontend.v1.HelpPanelView
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	9,  // 6: agentrepl.v1.SubmitPromptTurn.turn:type_name -> conversation.v1.TurnId
+	10, // 7: agentrepl.v1.SubmitPromptCommandPanel.status:type_name -> frontend.v1.StatusPanelView
+	11, // 8: agentrepl.v1.SubmitPromptCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
+	12, // 9: agentrepl.v1.SubmitPromptCommandPanel.agents:type_name -> frontend.v1.AgentsPanelView
+	13, // 10: agentrepl.v1.SubmitPromptCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
+	14, // 11: agentrepl.v1.SubmitPromptCommandPanel.context:type_name -> frontend.v1.ContextPanelView
+	15, // 12: agentrepl.v1.SubmitPromptCommandPanel.help:type_name -> frontend.v1.HelpPanelView
+	6,  // 13: agentrepl.v1.SubmitPromptError.merging:type_name -> agentrepl.v1.SubmitPromptRefusedMerging
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_submit_prompt_proto_init() }
@@ -623,13 +702,16 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_init() {
 		(*SubmitPromptCommandPanel_Context)(nil),
 		(*SubmitPromptCommandPanel_Help)(nil),
 	}
+	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[5].OneofWrappers = []any{
+		(*SubmitPromptError_Merging)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc), len(file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

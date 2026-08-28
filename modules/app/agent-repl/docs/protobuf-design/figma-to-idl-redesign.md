@@ -7827,6 +7827,60 @@ gains PER-HOLDER REFUSAL POLICY — the merge lease projects to
 error-on-new-submission; restart-pending and shutdown-drain project to
 holds.
 
+### The GRACEFUL-ROLLOUT HANDOVER lands — WatchDaemon, the adopt rendezvous pair, and the WEB LINK section
+
+Settled during the daemon architecture planning (a sanctioned post-freeze
+increment, the rollout controller's wire): a daemon self-rollout is a
+blue-green handover — the old daemon spawns the rebuilt one (joining mode:
+fresh socket, WSM read-only, owns nothing), announces, and transfers
+workspaces one by one at freeness (no in-flight turn, no live detached
+work), with no daemon↔daemon channel: coordination is client relay + WSM
+facts + per-workspace kernel locks.
+
+- HOST section gains `WatchDaemon {}` — THE daemon-level host stream the
+  record reserved ("until a daemon-level pushed fact needs one"; that fact
+  arrived). First push arm: `shutdown_announced { address }`. Emacs — the
+  singular client multiplexer — dual-attaches on it.
+- `WatchHostWorkspaceResponse` gains two push arms: `transferred` (the old
+  daemon released this workspace at freeness and does no further work for
+  it; Emacs adopts on the new connection then CANCELS the stream — a PUSH,
+  never a terminal frame, honoring the standing-stream convention) and
+  `reload_webapp` (webapp-only rollout: Emacs reloads the xwidget against
+  the SAME daemon; empty by design — no address, and a combined rollout
+  never sends it because the handover re-attach pulls fresh assets).
+- NEW WEB LINK SECTION — the webview's connection surface, neither
+  host-natured nor a drawn component: `WatchWebWorkspace { WorkspaceRef }`
+  (the webview analog of WatchHostWorkspace — "Web" qualifies the VIEW as
+  "Host" qualifies Emacs's; push `transferred { address }`, the address
+  riding here because a webview has no daemon-level stream) and
+  `AdoptWebWorkspace`.
+- THE ADOPT RENDEZVOUS, two sibling verbs (`AdoptHostWorkspace` /
+  `AdoptWebWorkspace`) so THE VERB identifies the participant — a shared
+  rpc would need a self-declared kind field a confused client could get
+  wrong. Expected participants = holders of the two per-workspace streams
+  at announcement time; the new daemon completes adoption (claim the
+  kernel lock, adopt the running shim, drain held intake) only when every
+  expected participant has called, and all succeed together. Headless
+  workspaces (no streams) transfer with zero rendezvous via WSM facts and
+  the lock alone.
+- ORDERING BY REFUSAL, not convention: the new daemon refuses per-workspace
+  rpcs for an unowned workspace; OWED TO THE WAVE as derived error arms:
+  `transferring_away { address }` on the old daemon's per-workspace verbs
+  (a lagging client self-heals from the refusal) and `not_yet_adopted {}`
+  on the new daemon's — two arms, not one, because wrong-daemon and
+  right-daemon-too-early are different facts.
+- INTAKE DURING THE WINDOW: prompts are HELD (never errored) and replay in
+  order on the new daemon; the merge-in-flight refusal is unrelated and
+  stands.
+- ADOPTION TIMEOUT (the user's ruling): the OLD daemon times the window
+  and surfaces expiry as that workspace's own error — remediated as it
+  comes up, EXPLICITLY NOT an invariant to harden: absent a systemic
+  cause it is not treated as a guarantee the architecture provides, and no
+  abort/retry machinery exists.
+- NEVER-FREE WORKSPACE: the rollout waits forever in the two-daemon steady
+  state, logging a periodic warning (~10 min) naming the holdout; a newer
+  rollout supersedes a joining daemon that never finished.
+
 ### The footer gains waiting·interrupting — the stop acknowledged the moment it registers
 
 Settled during the daemon feature-loss triage (a sanctioned post-freeze

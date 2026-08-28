@@ -42,6 +42,10 @@ import "agentrepl/v1/endpoint_client_log.proto";
 import "agentrepl/v1/endpoint_register_workspace.proto";
 import "agentrepl/v1/endpoint_select_workspace.proto";
 import "agentrepl/v1/endpoint_watch_host_workspace.proto";
+import "agentrepl/v1/endpoint_watch_daemon.proto";
+import "agentrepl/v1/endpoint_adopt_host_workspace.proto";
+import "agentrepl/v1/endpoint_watch_web_workspace.proto";
+import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -166,4 +170,24 @@ service AgentRepl {
   // The host-facing view of one workspace, per-workspace subscription. See
   // endpoint_watch_host_workspace.proto.
   rpc WatchHostWorkspace(WatchHostWorkspaceRequest) returns (stream WatchHostWorkspaceResponse);
+
+  // The daemon-level host stream — daemon-scoped facts only (the graceful
+  // rollout's shutdown announcement). See endpoint_watch_daemon.proto.
+  rpc WatchDaemon(WatchDaemonRequest) returns (stream WatchDaemonResponse);
+
+  // Emacs's half of the handover rendezvous, called on the NEW daemon. See
+  // endpoint_adopt_host_workspace.proto.
+  rpc AdoptHostWorkspace(AdoptHostWorkspaceRequest) returns (AdoptHostWorkspaceResponse);
+
+  // ---- WEB LINK ----
+  // The webview's connection surface: neither host-natured nor a drawn
+  // component — the per-workspace daemon link the graceful rollout rides.
+
+  // The webview's standing daemon-link stream for one workspace. See
+  // endpoint_watch_web_workspace.proto.
+  rpc WatchWebWorkspace(WatchWebWorkspaceRequest) returns (stream WatchWebWorkspaceResponse);
+
+  // The webview's half of the handover rendezvous, called on the NEW
+  // daemon. See endpoint_adopt_web_workspace.proto.
+  rpc AdoptWebWorkspace(AdoptWebWorkspaceRequest) returns (AdoptWebWorkspaceResponse);
 }

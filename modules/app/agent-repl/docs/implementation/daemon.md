@@ -262,7 +262,42 @@ unmarked is DISCRETIONARY by default.
      5. DRAIN AND EXIT. After the last transfer the old daemon exits
         gracefully; the new daemon's WSM handle becomes the sole
         writer.
-   - SHIM/SIDECAR RELAUNCH (what is decided so far): the new binary is
+   - THE WIRE (landed post-freeze increment): Emacs holds `WatchDaemon`
+     (push `shutdown_announced { address }`); `WatchHostWorkspace` gains
+     `transferred` and `reload_webapp` push arms; the webview holds
+     `WatchWebWorkspace` (push `transferred { address }` — the address
+     rides here since a webview has no daemon-level stream); adoption is
+     TWO sibling verbs, `AdoptHostWorkspace` and `AdoptWebWorkspace`
+     (WEB LINK section), so the VERB identifies the participant.
+     `transferred` is a PUSH, never a terminal frame — the CLIENT cancels
+     its streams after acting (the standing-stream convention).
+   - THE ADOPT RENDEZVOUS: expected participants are the holders of the
+     workspace's two per-workspace streams at announcement time; the new
+     daemon completes adoption (claim the kernel lock, adopt the running
+     shim, drain held intake) only when every expected participant has
+     called, and all calls succeed together; headless workspaces have
+     zero participants and transfer via WSM facts + the lock alone. The
+     new daemon REFUSES per-workspace rpcs for an unowned workspace —
+     ordering by refusal, not convention; derived error arms owed at the
+     wave: `transferring_away { address }` on the old daemon's verbs,
+     `not_yet_adopted {}` on the new daemon's (two arms — wrong daemon vs
+     too early are different facts).
+   - ADOPTION TIMEOUT (ruled): the OLD daemon times the window and
+     surfaces expiry as that workspace's own error; remediated as it
+     comes up — deliberately NOT an invariant to harden, and no
+     abort/retry machinery exists.
+   - NEVER-FREE WORKSPACE (ruled): wait forever in the two-daemon steady
+     state, with a periodic warning log (~every 10 minutes) naming the
+     holdout; a newer rollout supersedes a joining daemon that never
+     finished.
+   - WEBAPP-ONLY ROLLOUT (ruled): the `reload_webapp` push has EMACS
+     reload the workspace's xwidget against the SAME daemon; the arm is
+     empty (no address — the daemon is not changing, and a combined
+     rollout never sends it: the handover's fresh attach pulls new assets
+     as a side effect); the webview's default first-page-only load is the
+     whole recovery.
+   - SHIM/SIDECAR RELAUNCH (TENTATIVE — the shape is NOT settled; only
+     the ordering is: this design follows the daemon handover): the new binary is
      rebuilt immediately and PRELAUNCHED per workspace (process up and
      warm before it is needed); the swap waits for that workspace's
      freeness (no in-flight turn, no live detached work), then
