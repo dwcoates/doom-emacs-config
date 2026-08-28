@@ -21,10 +21,14 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   sections, and the graceful-rollout handover PROTOBUF INCREMENT
   (shutdown announcement, transfer notice/ack, adopt command on the
   emacs and web surfaces).
-- ROLLOUT CONTROLLER: landed as daemon.md entry 10 (blue-green daemon
-  handover, per-workspace shim/sidecar relaunch, store unhandled);
-  OPEN there: never-free-workspace policy, shim/sidecar relaunch
-  details; the merge-variants triage questions (refusal semantics,
+- ROLLOUT CONTROLLER: daemon.md entry 10 is settled through the wire —
+  the handover protobuf increment LANDED (WatchDaemon, adopt rendezvous
+  pair, WEB LINK section, transferred/reload_webapp arms; record +
+  digests updated); ruled: adoption timeout (not an invariant),
+  never-free (wait forever + periodic warn), webapp-only reload via
+  Emacs. OPEN there: shim/sidecar relaunch design (TENTATIVE, follows
+  the daemon handover); the two derived refusal arms land at the wave.
+  The merge-variants triage questions (refusal semantics,
   close-vs-queue, worktree removal, conflict resume reachability)
   remain unruled and resume after the rollout work.
 - STANDING INSTRUCTIONS: STOP just before invoking /cross-system-fanout

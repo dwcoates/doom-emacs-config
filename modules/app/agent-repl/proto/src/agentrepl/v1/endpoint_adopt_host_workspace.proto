@@ -1,0 +1,44 @@
+// endpoint_adopt_host_workspace.proto — AdoptHostWorkspace: Emacs's half of
+// the per-workspace handover rendezvous. HOST section, called on the NEW
+// daemon's connection after the OLD daemon pushed `transferred` for this
+// workspace. The VERB identifies the participant — Emacs and the webview
+// have sibling adopt verbs, so no request field self-declares the caller's
+// kind.
+//
+// RENDEZVOUS SEMANTICS: the expected participants are the holders of the
+// workspace's WatchHostWorkspace and WatchWebWorkspace streams at the moment
+// the old daemon announced the transfer. The new daemon completes adoption
+// — claim the workspace's kernel lock, adopt the running shim, drain held
+// intake — only when EVERY expected participant has called; all calls then
+// succeed together. A workspace with no streams (headless) transfers with
+// no rendezvous at all, via WSM facts and the lock alone.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AdoptHostWorkspaceRequest {
+  // The workspace being adopted — echoed from the old daemon's registration.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+message AdoptHostWorkspaceResponse {
+  oneof result {
+    AdoptHostWorkspaceSuccess success = 1;
+    AdoptHostWorkspaceError error = 2;
+  }
+}
+
+// Adoption is COMPLETE: this daemon owns the workspace, the shim is
+// adopted, and held intake has drained. Re-subscribe the workspace's
+// streams here now.
+message AdoptHostWorkspaceSuccess {}
+
+// Arms derived at the wave from the new daemon's real refusal sites (an
+// adopt for a workspace no transfer announced; a caller whose stream was
+// never open).
+message AdoptHostWorkspaceError {}

@@ -119,6 +119,17 @@ const (
 	// AgentReplWatchHostWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// WatchHostWorkspace RPC.
 	AgentReplWatchHostWorkspaceProcedure = "/agentrepl.v1.AgentRepl/WatchHostWorkspace"
+	// AgentReplWatchDaemonProcedure is the fully-qualified name of the AgentRepl's WatchDaemon RPC.
+	AgentReplWatchDaemonProcedure = "/agentrepl.v1.AgentRepl/WatchDaemon"
+	// AgentReplAdoptHostWorkspaceProcedure is the fully-qualified name of the AgentRepl's
+	// AdoptHostWorkspace RPC.
+	AgentReplAdoptHostWorkspaceProcedure = "/agentrepl.v1.AgentRepl/AdoptHostWorkspace"
+	// AgentReplWatchWebWorkspaceProcedure is the fully-qualified name of the AgentRepl's
+	// WatchWebWorkspace RPC.
+	AgentReplWatchWebWorkspaceProcedure = "/agentrepl.v1.AgentRepl/WatchWebWorkspace"
+	// AgentReplAdoptWebWorkspaceProcedure is the fully-qualified name of the AgentRepl's
+	// AdoptWebWorkspace RPC.
+	AgentReplAdoptWebWorkspaceProcedure = "/agentrepl.v1.AgentRepl/AdoptWebWorkspace"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
@@ -154,6 +165,10 @@ var (
 	agentReplRegisterWorkspaceMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
 	agentReplSelectWorkspaceMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
 	agentReplWatchHostWorkspaceMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("WatchHostWorkspace")
+	agentReplWatchDaemonMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("WatchDaemon")
+	agentReplAdoptHostWorkspaceMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("AdoptHostWorkspace")
+	agentReplWatchWebWorkspaceMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("WatchWebWorkspace")
+	agentReplAdoptWebWorkspaceMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("AdoptWebWorkspace")
 )
 
 // AgentReplClient is a client for the agentrepl.v1.AgentRepl service.
@@ -238,6 +253,18 @@ type AgentReplClient interface {
 	// The host-facing view of one workspace, per-workspace subscription. See
 	// endpoint_watch_host_workspace.proto.
 	WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchHostWorkspaceResponse], error)
+	// The daemon-level host stream — daemon-scoped facts only (the graceful
+	// rollout's shutdown announcement). See endpoint_watch_daemon.proto.
+	WatchDaemon(context.Context, *connect.Request[v1.WatchDaemonRequest]) (*connect.ServerStreamForClient[v1.WatchDaemonResponse], error)
+	// Emacs's half of the handover rendezvous, called on the NEW daemon. See
+	// endpoint_adopt_host_workspace.proto.
+	AdoptHostWorkspace(context.Context, *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error)
+	// The webview's standing daemon-link stream for one workspace. See
+	// endpoint_watch_web_workspace.proto.
+	WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchWebWorkspaceResponse], error)
+	// The webview's half of the handover rendezvous, called on the NEW
+	// daemon. See endpoint_adopt_web_workspace.proto.
+	AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error)
 }
 
 // NewAgentReplClient constructs a client for the agentrepl.v1.AgentRepl service. By default, it
@@ -430,6 +457,30 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplWatchHostWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		watchDaemon: connect.NewClient[v1.WatchDaemonRequest, v1.WatchDaemonResponse](
+			httpClient,
+			baseURL+AgentReplWatchDaemonProcedure,
+			connect.WithSchema(agentReplWatchDaemonMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		adoptHostWorkspace: connect.NewClient[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse](
+			httpClient,
+			baseURL+AgentReplAdoptHostWorkspaceProcedure,
+			connect.WithSchema(agentReplAdoptHostWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		watchWebWorkspace: connect.NewClient[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse](
+			httpClient,
+			baseURL+AgentReplWatchWebWorkspaceProcedure,
+			connect.WithSchema(agentReplWatchWebWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		adoptWebWorkspace: connect.NewClient[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse](
+			httpClient,
+			baseURL+AgentReplAdoptWebWorkspaceProcedure,
+			connect.WithSchema(agentReplAdoptWebWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -465,6 +516,10 @@ type agentReplClient struct {
 	registerWorkspace      *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
 	selectWorkspace        *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
 	watchHostWorkspace     *connect.Client[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse]
+	watchDaemon            *connect.Client[v1.WatchDaemonRequest, v1.WatchDaemonResponse]
+	adoptHostWorkspace     *connect.Client[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse]
+	watchWebWorkspace      *connect.Client[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse]
+	adoptWebWorkspace      *connect.Client[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse]
 }
 
 // SubmitPrompt calls agentrepl.v1.AgentRepl.SubmitPrompt.
@@ -617,6 +672,26 @@ func (c *agentReplClient) WatchHostWorkspace(ctx context.Context, req *connect.R
 	return c.watchHostWorkspace.CallServerStream(ctx, req)
 }
 
+// WatchDaemon calls agentrepl.v1.AgentRepl.WatchDaemon.
+func (c *agentReplClient) WatchDaemon(ctx context.Context, req *connect.Request[v1.WatchDaemonRequest]) (*connect.ServerStreamForClient[v1.WatchDaemonResponse], error) {
+	return c.watchDaemon.CallServerStream(ctx, req)
+}
+
+// AdoptHostWorkspace calls agentrepl.v1.AgentRepl.AdoptHostWorkspace.
+func (c *agentReplClient) AdoptHostWorkspace(ctx context.Context, req *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error) {
+	return c.adoptHostWorkspace.CallUnary(ctx, req)
+}
+
+// WatchWebWorkspace calls agentrepl.v1.AgentRepl.WatchWebWorkspace.
+func (c *agentReplClient) WatchWebWorkspace(ctx context.Context, req *connect.Request[v1.WatchWebWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchWebWorkspaceResponse], error) {
+	return c.watchWebWorkspace.CallServerStream(ctx, req)
+}
+
+// AdoptWebWorkspace calls agentrepl.v1.AgentRepl.AdoptWebWorkspace.
+func (c *agentReplClient) AdoptWebWorkspace(ctx context.Context, req *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {
+	return c.adoptWebWorkspace.CallUnary(ctx, req)
+}
+
 // AgentReplHandler is an implementation of the agentrepl.v1.AgentRepl service.
 type AgentReplHandler interface {
 	// The composer's submission, whole; the daemon recognizes programmatically
@@ -699,6 +774,18 @@ type AgentReplHandler interface {
 	// The host-facing view of one workspace, per-workspace subscription. See
 	// endpoint_watch_host_workspace.proto.
 	WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest], *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error
+	// The daemon-level host stream — daemon-scoped facts only (the graceful
+	// rollout's shutdown announcement). See endpoint_watch_daemon.proto.
+	WatchDaemon(context.Context, *connect.Request[v1.WatchDaemonRequest], *connect.ServerStream[v1.WatchDaemonResponse]) error
+	// Emacs's half of the handover rendezvous, called on the NEW daemon. See
+	// endpoint_adopt_host_workspace.proto.
+	AdoptHostWorkspace(context.Context, *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error)
+	// The webview's standing daemon-link stream for one workspace. See
+	// endpoint_watch_web_workspace.proto.
+	WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest], *connect.ServerStream[v1.WatchWebWorkspaceResponse]) error
+	// The webview's half of the handover rendezvous, called on the NEW
+	// daemon. See endpoint_adopt_web_workspace.proto.
+	AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error)
 }
 
 // NewAgentReplHandler builds an HTTP handler from the service implementation. It returns the path
@@ -887,6 +974,30 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplWatchHostWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplWatchDaemonHandler := connect.NewServerStreamHandler(
+		AgentReplWatchDaemonProcedure,
+		svc.WatchDaemon,
+		connect.WithSchema(agentReplWatchDaemonMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplAdoptHostWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplAdoptHostWorkspaceProcedure,
+		svc.AdoptHostWorkspace,
+		connect.WithSchema(agentReplAdoptHostWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplWatchWebWorkspaceHandler := connect.NewServerStreamHandler(
+		AgentReplWatchWebWorkspaceProcedure,
+		svc.WatchWebWorkspace,
+		connect.WithSchema(agentReplWatchWebWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplAdoptWebWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplAdoptWebWorkspaceProcedure,
+		svc.AdoptWebWorkspace,
+		connect.WithSchema(agentReplAdoptWebWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/agentrepl.v1.AgentRepl/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AgentReplSubmitPromptProcedure:
@@ -949,6 +1060,14 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSelectWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplWatchHostWorkspaceProcedure:
 			agentReplWatchHostWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplWatchDaemonProcedure:
+			agentReplWatchDaemonHandler.ServeHTTP(w, r)
+		case AgentReplAdoptHostWorkspaceProcedure:
+			agentReplAdoptHostWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplWatchWebWorkspaceProcedure:
+			agentReplWatchWebWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplAdoptWebWorkspaceProcedure:
+			agentReplAdoptWebWorkspaceHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1076,4 +1195,20 @@ func (UnimplementedAgentReplHandler) SelectWorkspace(context.Context, *connect.R
 
 func (UnimplementedAgentReplHandler) WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest], *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchHostWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) WatchDaemon(context.Context, *connect.Request[v1.WatchDaemonRequest], *connect.ServerStream[v1.WatchDaemonResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchDaemon is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) AdoptHostWorkspace(context.Context, *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AdoptHostWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest], *connect.ServerStream[v1.WatchWebWorkspaceResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchWebWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AdoptWebWorkspace is not implemented"))
 }
