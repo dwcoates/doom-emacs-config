@@ -895,4 +895,12 @@ translate-layer re-encoding, which becomes the feed row resolver.
 - INVARIANT: the account is DETERMINED (repo-under-root), never
   selected — no request field, no override, no inheritance; a
   differently-accounted workspace is structurally unrepresentable.
+- SHIM-CONNECTION rulings (2026-08-28): redial forever, give-up by
+  evidence only; readiness = GetSessionDiagnostics answering healthy;
+  crashed-daemon boot ADOPTS surviving shims. THE RESPONSE HANDLER:
+  one single component through which every shim response flows,
+  routing per type to the resolvers (feed via output address, footer,
+  topbar catalog/context, accounting). CONNECTIVITY: witnessed only by
+  the three standing streams' liveness (WatchSession /
+  WatchWebWorkspace / WatchHostWorkspace); all live = connected.
 

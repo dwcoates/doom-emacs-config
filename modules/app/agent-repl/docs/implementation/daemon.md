@@ -43,6 +43,19 @@ unmarked is DISCRETIONARY by default.
      delivery.
    - USAGE: frame streams flow directly to their consumers; nothing
      relays them module-by-module.
+   - RULED (2026-08-28): REDIAL FOREVER with backoff when the
+     connection to a still-running shim breaks — retry-vs-give-up is
+     decided by EVIDENCE (a dead process stops the redial and
+     surfaces), never by a count. READINESS IS THE HEALTH ANSWER: a
+     starting shim counts as ready when GetSessionDiagnostics answers
+     healthy — structural, never a fixed delay and never a
+     quiet-on-the-wire heuristic (both die). First-connect facts
+     (permission mode, resume position) are implicit in StartSession/
+     WatchSession — when to call StartSession is the implementing
+     orchestrator's, with the health endpoint available for gating.
+     CRASH BOOT: shim processes that outlived a crashed daemon are
+     RECONNECTED AND ADOPTED (the handover's adoption machinery), never
+     killed-and-restarted — in-flight work survives the crash.
    - PREREQUISITES: none (leaf; the generated shimv1connect stubs).
 
 3. PRESCRIBED — WSM, THE STATE CLIENT.
@@ -477,26 +490,43 @@ unmarked is DISCRETIONARY by default.
      unrepresentable (there is no input through which one could be
      asked for).
 
+10b. PRESCRIBED — THE RESPONSE HANDLER (the response side's core; the
+   user's design, 2026-08-28).
+   - RESPONSIBILITIES: the SINGLE component through which EVERY
+     shim-originated response and frame flows — there is exactly ONE,
+     and no subsystem consumes shim output except through it. It
+     routes per RESPONSE TYPE: agent frames to the feed resolver
+     (honoring the standing output address), status facts to the
+     footer resolver, usage to accounting, the session-start catalog
+     and context-usage answers to the topbar resolver — and a given
+     response type may fan out to SEVERAL auxiliary frontend channels
+     (topbar today; footer or sidebar as future types warrant), with
+     this handler the one place that routing knowledge lives.
+   - WHY: distributed consumption (the old daemon's per-subsystem
+     typed sinks) scatters the routing table across the codebase; one
+     handler makes "what happens when X arrives" answerable in one
+     place.
+   - PREREQUISITES: shim client; the view resolvers consume from it.
+
+11. INVARIANT — CONNECTIVITY TRUTH PER HOP (the user's specification,
+   2026-08-28): a workspace's connected state is witnessed ONLY by the
+   liveness of its three standing streams — shim.v1 WatchSession for
+   daemon↔shim, agentrepl.v1 WatchWebWorkspace for webapp↔daemon,
+   agentrepl.v1 WatchHostWorkspace for Emacs↔daemon — the workspace is
+   CONNECTED iff all are live, and any one down means not connected.
+   Silence on a live stream is never evidence of anything.
+
 ## OPEN — unruled audit findings (the triage backlog)
 
 These feature-loss audit findings are NOT yet ruled; each awaits a
 remediate / do-not-remediate ruling per meta rule 14:
 
-- SHIM-CONNECTION group, seven questions still open (the
-  build-staleness bounce and graceful-handover shim adoption are
-  covered by the rollout controller): (1) REDIAL — if the daemon's
-  connection to a still-running shim breaks, how persistently does it
-  redial and which failures mean give up; (2) READY-WHEN-QUIET — a
-  starting shim counts as ready once it goes quiet for a moment, never
-  after a fixed delay; (3) FIRST-CONNECT FACTS — what the shim reports
-  when the connection opens (active permission mode, where in the
-  transcript it resumed); (4) SHIMS THAT OUTLIVED A CRASH — reconnect
-  to them or kill and restart; (5) MESSAGE DISTRIBUTION — whether the
-  fan-out of each incoming shim message to interested subsystems is
-  prescribed or the implementer's; (6) MODEL LIST — the topbar's
-  options come from the shim's report at connect; (7) PROOF OF
-  CONNECTED — only actual connect/disconnect events flip the
-  workspace's connected state, never inference from silence.
+- SHIM-CONNECTION group: ALL RULED 2026-08-28 — redial/readiness/
+  first-connect/crash-adopt landed on the shim client entry; message
+  distribution resolved by THE RESPONSE HANDLER prescription (10b);
+  the model list is SessionStarted's catalog routed through the
+  handler to the topbar resolver; connectivity truth landed as
+  invariant 11 (per-hop stream liveness).
 - INTAKE SIDE EFFECTS group: DROPPED FOR THIS PROJECT (ruled
   2026-08-28) — auto-declining parked permission asks, cancelling owed
   redeliveries, engagement declaration at the funnel, and the
