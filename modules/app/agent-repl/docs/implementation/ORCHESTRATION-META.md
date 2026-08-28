@@ -41,8 +41,10 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   pre-state, queued merge blocks close, daemon-owned worktree removal,
   conflict resume = conversational-only, hand-resolution unsupported).
   STILL UNRULED (OPEN in daemon.md): boot-backfill gate, Emacs durable
-  merge-state, doom-multi-repo-mode, skill-side leftovers; DEFERRED
-  next: non-Emacs-repo merge tabs, MULTI_REPO_ROOT handling.
+  merge-state, doom-multi-repo-mode, skill-side leftovers; NON-EMACS-REPO
+  merges RULED (tests+remediation iff self-repo by common-dir identity;
+  actions on every ingress; sessionless-with-action starts a session);
+  DEFERRED next: MULTI_REPO_ROOT handling.
 - STANDING INSTRUCTIONS: STOP just before invoking /cross-system-fanout
   — the user gates that invocation personally; digests regenerate when
   the record grows; nothing lands without explicit approval.
