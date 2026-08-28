@@ -868,3 +868,10 @@ translate-layer re-encoding, which becomes the feed row resolver.
   merge_parked; footer merging family: rebasing, parked{line},
   remediating. Hand-resolution unsupported — no continue verb exists.
 - Tests tab ships daemon-parsed ANSI as paint-class spans.
+- NON-EMACS-REPO MERGES (ruled): tests + remediation tabs exist IFF the
+  merge target is our own repo (self-repo common-dir identity, the
+  self-reload check); other repos: queue → actions → rebase → landing.
+  Configured before/after prompts run on EVERY merge, every ingress; a
+  sessionless workspace with a configured action gets a session started
+  under the lease.
+
