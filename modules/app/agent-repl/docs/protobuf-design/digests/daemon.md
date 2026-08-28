@@ -839,3 +839,13 @@ translate-layer re-encoding, which becomes the feed row resolver.
   remediate-as-it-comes-up, deliberately NOT a hardened invariant.
 - Never-free workspace: wait forever, periodic warning log (~10 min);
   a newer rollout supersedes an unfinished joining daemon.
+
+## 16. The spill removal (post-freeze increment)
+
+- The shim's durable WriteBatch spill is REMOVED: transient store blips
+  absorb into a bounded in-memory retry buffer; exhausted retries are a
+  LOUD failure (dropped frames logged with what was lost), never a crash.
+- Rationale (the user's): persistent store unreachability is a
+  lifetime-sequencing defect to fix, not a condition for fallback
+  persistence; the graceful shim stand-down waits for all acks before
+  exit, so an exit with unacked writes IS the loud failure.

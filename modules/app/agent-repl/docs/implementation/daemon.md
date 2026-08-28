@@ -231,10 +231,11 @@ unmarked is DISCRETIONARY by default.
 10. PRESCRIBED — THE ROLLOUT CONTROLLER (graceful doom-change rollout).
    - RESPONSIBILITIES: turns the merge orchestrator's self-reload
      trigger into a zero-perceived-downtime rollout, per changed
-     subsystem: daemon → blue-green handover; shim and sidecar →
-     per-workspace preemptive relaunch; elisp → hot-load; webapp → hot
-     asset swap; STORE → deliberately UNHANDLED (a user-initiated full
-     restart; store restarts are rare by design).
+     subsystem: daemon → blue-green handover; shim → per-workspace
+     preemptive relaunch; elisp → hot-load; webapp → hot asset swap;
+     SIDECAR and STORE → deliberately UNHANDLED (a user-initiated full
+     restart; both are rare-change codebases by design — revisitable in
+     a future project, not this one).
    - DAEMON HANDOVER (product spec — the full agreed flow):
      1. SPAWN. The old daemon detects the self-merge, rebuilds, and
         spawns the new daemon itself. The new daemon starts in JOINING
@@ -296,15 +297,51 @@ unmarked is DISCRETIONARY by default.
      rollout never sends it: the handover's fresh attach pulls new assets
      as a side effect); the webview's default first-page-only load is the
      whole recovery.
-   - SHIM/SIDECAR RELAUNCH (TENTATIVE — the shape is NOT settled; only
-     the ordering is: this design follows the daemon handover): the new binary is
-     rebuilt immediately and PRELAUNCHED per workspace (process up and
-     warm before it is needed); the swap waits for that workspace's
-     freeness (no in-flight turn, no live detached work), then
-     reattaches GREEDILY the moment it holds — detach old, attach new,
-     old gracefully killed — minimizing perceived interruption to
-     near zero; sidecar restarts follow the same shape as shim
-     restarts; remaining details OPEN.
+   - SHIM RELAUNCH (product spec — the settled flow; the same engine
+     serves the build-staleness bounce, one engine two triggers):
+     1. REBUILD once; per live workspace, independently and in
+        parallel, PRELAUNCH the new shim process — up and
+        daemon-connected but INERT by construction (no session started:
+        no vendor process, no store writes, no keep-alives), so it
+        coexists with the old shim indefinitely.
+     2. WAIT FOR FREENESS (no in-flight turn, no live detached work — a
+        shim bounce kills the vendor process and everything under it);
+        never-free gets the same wait-forever + periodic-warn ruling as
+        the daemon handover.
+     3. AT FREENESS: flip intake to the restart-pending HOLD
+        (tray-visible, existing semantics); STAND DOWN the old shim —
+        stop keep-alives, WAIT FOR ALL STORE ACKS (an exit with
+        unacknowledged writes is a loud failure; there is no durable
+        spill), terminate its vendor process, exit.
+     4. THE REAP IS THE GATE: the shim client confirms the old process
+        is GONE (kill attribution + exit decoding) before anything
+        else — the guarantee that at most one vendor binary ever
+        touches the session's transcript.
+     5. GREEDY REATTACH: StartSession(resume) on the prelaunched shim
+        at once; the context cache is SERVER-side so a fast swap stays
+        warm (the cold gate fires only on a genuinely lapsed TTL, under
+        the ordinary rules); model and mode recover from the transcript
+        per the settled resume behavior.
+     6. DRAIN the held intake; keep-alives resume in the new shim. No
+        wire fact anywhere: the host stream's shim_attached flicker is
+        acceptable and useful feedback; parked (shim-less) workspaces
+        need nothing — the next implicit revival spawns the new binary.
+     FAILURE DISPOSITIONS: old shim won't exit in the stand-down window
+     → force-kill + reap, GetLiveWork reconciliation closes every open
+     obligation (stream-only residue of the window is lost, loudly
+     logged — accepted, not an invariant); resume finds a lapsed TTL →
+     the ordinary cold gate; resume fails hard → the workspace's own
+     error, remediate-as-it-comes-up.
+   - INVARIANT — no durable producer spill: the shim's WriteBatch retry
+     is a BOUNDED IN-MEMORY buffer; exhausted retries are a LOUD logged
+     drop, never a crash and never disk persistence (persistent store
+     unreachability is a lifetime-sequencing defect to fix at the
+     source). The sidecar needs no buffer: its sources are durable
+     files re-read from the cursor.
+   - FACT (verified in source): the shim never talks to the sidecar —
+     they meet only at the store and at the files the vendor binary
+     writes; a shim-only bounce is sidecar-oblivious, and the sidecar
+     is a SINGLETON launchd process covering all workspaces.
    - WEBAPP SIDE: the old daemon pushes a transfer notice per webview;
      from that notice on, the webview sends nothing more on the old
      connection for that workspace; it connects to the new daemon

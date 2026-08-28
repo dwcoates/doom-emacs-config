@@ -166,8 +166,8 @@ func (*WriteBatchResponse_Failure) isWriteBatchResponse_Result() {}
 
 // The batch is DURABLE — records and cursor advance committed as one
 // transaction. A replayed batch whose write_ids all landed before is this
-// same arm: absorption is success, and the producer's spill can retire the
-// batch either way.
+// same arm: absorption is success, and the producer can retire the batch
+// from its retry buffer either way.
 type WriteBatchSuccess struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -204,9 +204,15 @@ func (*WriteBatchSuccess) Descriptor() ([]byte, []int) {
 	return file_store_v1_endpoint_write_batch_proto_rawDescGZIP(), []int{2}
 }
 
-// Nothing was committed: the transaction failed whole, so the producer's
-// spill holds the batch and replays it. `kind` arms are DERIVED at the wave
-// from the store's real failure sites.
+// Nothing was committed: the transaction failed whole, so the producer
+// holds the batch in its BOUNDED IN-MEMORY retry buffer and replays it.
+// There is deliberately NO durable producer-side spill: exhausted retries
+// are a LOUD failure (dropped frames logged with what was lost), because a
+// persistent inability to reach the store indicates a lifetime-sequencing
+// defect to fix, not a condition to paper over with fallback persistence.
+// (The sidecar needs no buffer at all — its sources are durable files it
+// re-reads from the cursor.) `kind` arms are DERIVED at the wave from the
+// store's real failure sites.
 type WriteBatchFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The store's account, for a human and for logs; never switched on.

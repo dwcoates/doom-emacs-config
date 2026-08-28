@@ -555,3 +555,10 @@ superseded. What actually landed is the set above; the rest is reference.
   loudly); one base implementation function per message where validation lives
   once; a dedicated testable function per non-primitive use site; debug logging
   on every logical branch, warnings remediated to zero.
+
+## The spill removal (post-freeze increment)
+
+- WriteBatchFailure's contract comment no longer names a durable producer
+  spill: producers hold failed batches in a bounded in-memory retry
+  buffer, and exhausted retries are a loud logged drop. Absorption-by-
+  write_id semantics are unchanged.

@@ -26,8 +26,13 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   pair, WEB LINK section, transferred/reload_webapp arms; record +
   digests updated); ruled: adoption timeout (not an invariant),
   never-free (wait forever + periodic warn), webapp-only reload via
-  Emacs. OPEN there: shim/sidecar relaunch design (TENTATIVE, follows
-  the daemon handover); the two derived refusal arms land at the wave.
+  Emacs. The SHIM RELAUNCH is now SETTLED at product-spec depth
+  (prelaunch-inert, freeness, hold, stand-down-with-ack-wait, reap
+  gate, greedy resume, dispositions); SIDECAR joined STORE as
+  rollout-UNHANDLED (user-initiated full restart); the durable producer
+  SPILL is REMOVED (bounded in-memory retry, loud exhausted-retry
+  drop) — record amended, WriteBatch comment updated, digests appended.
+  The two derived refusal arms land at the wave.
   The merge-variants triage questions (refusal semantics,
   close-vs-queue, worktree removal, conflict resume reachability)
   remain unruled and resume after the rollout work.

@@ -798,3 +798,14 @@ no-variable-state principle that bounds all of it.
   run's terminal is the run leaving the vendor's live-background set. 524 `started` records
   against 489 `result` records means agents that started and never produced one, with
   nothing distinguishing "still running" from "died".
+
+## The spill removal (post-freeze increment)
+
+- The durable WriteBatch spill is REMOVED. WriteBatch failure holds the
+  batch in a BOUNDED IN-MEMORY retry buffer; exhausted retries log loudly
+  what was lost and drop — never a shim crash, never disk persistence.
+- The graceful stand-down WAITS FOR ALL ACKS before the shim exits; an
+  exit with unacknowledged writes is the loud failure (a sequencing
+  defect to fix at the source).
+- The sidecar needs no buffer at all: its sources are durable files it
+  re-reads from the cursor.
