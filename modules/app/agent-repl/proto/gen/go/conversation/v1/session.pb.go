@@ -735,6 +735,8 @@ type SessionUpdate struct {
 	//	*SessionUpdate_AccountUsage
 	//	*SessionUpdate_PermissionModeChanged
 	//	*SessionUpdate_ContextBudgetWarning
+	//	*SessionUpdate_Diagnostics
+	//	*SessionUpdate_ContextUsage
 	Update        isSessionUpdate_Update `protobuf_oneof:"update"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -849,6 +851,24 @@ func (x *SessionUpdate) GetContextBudgetWarning() *SessionContextBudgetWarning {
 	return nil
 }
 
+func (x *SessionUpdate) GetDiagnostics() *SessionDiagnostics {
+	if x != nil {
+		if x, ok := x.Update.(*SessionUpdate_Diagnostics); ok {
+			return x.Diagnostics
+		}
+	}
+	return nil
+}
+
+func (x *SessionUpdate) GetContextUsage() *SessionContextUsage {
+	if x != nil {
+		if x, ok := x.Update.(*SessionUpdate_ContextUsage); ok {
+			return x.ContextUsage
+		}
+	}
+	return nil
+}
+
 type isSessionUpdate_Update interface {
 	isSessionUpdate_Update()
 }
@@ -905,6 +925,22 @@ type SessionUpdate_ContextBudgetWarning struct {
 	ContextBudgetWarning *SessionContextBudgetWarning `protobuf:"bytes,24,opt,name=context_budget_warning,json=contextBudgetWarning,proto3,oneof"`
 }
 
+type SessionUpdate_Diagnostics struct {
+	// The shim's own health report, PUSHED at the shim's cadence and on
+	// change — the pulled GetSessionDiagnostics verb is superseded by
+	// this arm; the daemon's sessionwatcher routes it (topbar warnings).
+	Diagnostics *SessionDiagnostics `protobuf:"bytes,25,opt,name=diagnostics,proto3,oneof"`
+}
+
+type SessionUpdate_ContextUsage struct {
+	// The session's current context usage, PUSHED at the shim's cadence
+	// and at every turn end — the vendor's own get_context_usage answer,
+	// never an estimate; supersedes the pulled GetSessionContextUsage
+	// verb. Routed to the topbar resolver (the context chip and the
+	// /context panel both resolve from it).
+	ContextUsage *SessionContextUsage `protobuf:"bytes,26,opt,name=context_usage,json=contextUsage,proto3,oneof"`
+}
+
 func (*SessionUpdate_IdentityRotated) isSessionUpdate_Update() {}
 
 func (*SessionUpdate_QueryDied) isSessionUpdate_Update() {}
@@ -920,6 +956,10 @@ func (*SessionUpdate_AccountUsage) isSessionUpdate_Update() {}
 func (*SessionUpdate_PermissionModeChanged) isSessionUpdate_Update() {}
 
 func (*SessionUpdate_ContextBudgetWarning) isSessionUpdate_Update() {}
+
+func (*SessionUpdate_Diagnostics) isSessionUpdate_Update() {}
+
+func (*SessionUpdate_ContextUsage) isSessionUpdate_Update() {}
 
 // The vendor's context-budget warning: its own signal that the context
 // window is filling, injected into the prompt as an attachment record.
@@ -3295,7 +3335,7 @@ const file_conversation_v1_session_proto_rawDesc = "" +
 	"\x10SessionColdClear\"\x83\x01\n" +
 	"\x12SessionColdCompact\x121\n" +
 	"\x05model\x18\x01 \x01(\v2\x1b.conversation.v1.AgentModelR\x05model\x12:\n" +
-	"\x05scope\x18\x02 \x01(\x0e2$.conversation.v1.SessionCompactScopeR\x05scope\"\xa1\x05\n" +
+	"\x05scope\x18\x02 \x01(\x0e2$.conversation.v1.SessionCompactScopeR\x05scope\"\xb7\x06\n" +
 	"\rSessionUpdate\x12T\n" +
 	"\x10identity_rotated\x18\x01 \x01(\v2'.conversation.v1.SessionIdentityRotatedH\x00R\x0fidentityRotated\x12B\n" +
 	"\n" +
@@ -3306,7 +3346,9 @@ const file_conversation_v1_session_proto_rawDesc = "" +
 	"mcp_server\x18\x05 \x01(\v2!.conversation.v1.SessionMcpServerH\x00R\tmcpServer\x12K\n" +
 	"\raccount_usage\x18\x06 \x01(\v2$.conversation.v1.SessionAccountUsageH\x00R\faccountUsage\x12g\n" +
 	"\x17permission_mode_changed\x18\a \x01(\v2-.conversation.v1.SessionPermissionModeChangedH\x00R\x15permissionModeChanged\x12d\n" +
-	"\x16context_budget_warning\x18\x18 \x01(\v2,.conversation.v1.SessionContextBudgetWarningH\x00R\x14contextBudgetWarningB\b\n" +
+	"\x16context_budget_warning\x18\x18 \x01(\v2,.conversation.v1.SessionContextBudgetWarningH\x00R\x14contextBudgetWarning\x12G\n" +
+	"\vdiagnostics\x18\x19 \x01(\v2#.conversation.v1.SessionDiagnosticsH\x00R\vdiagnostics\x12K\n" +
+	"\rcontext_usage\x18\x1a \x01(\v2$.conversation.v1.SessionContextUsageH\x00R\fcontextUsageB\b\n" +
 	"\x06update\"1\n" +
 	"\x1bSessionContextBudgetWarning\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"\x81\x01\n" +
@@ -3530,50 +3572,52 @@ var file_conversation_v1_session_proto_depIdxs = []int32{
 	28, // 19: conversation.v1.SessionUpdate.account_usage:type_name -> conversation.v1.SessionAccountUsage
 	16, // 20: conversation.v1.SessionUpdate.permission_mode_changed:type_name -> conversation.v1.SessionPermissionModeChanged
 	11, // 21: conversation.v1.SessionUpdate.context_budget_warning:type_name -> conversation.v1.SessionContextBudgetWarning
-	14, // 22: conversation.v1.SessionQueryDied.unexpected_eof:type_name -> conversation.v1.SessionQueryUnexpectedEof
-	15, // 23: conversation.v1.SessionQueryDied.iterator_failure:type_name -> conversation.v1.SessionQueryIteratorFailure
-	51, // 24: conversation.v1.SessionPermissionModeChanged.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	50, // 25: conversation.v1.SessionModelChanged.effective_model:type_name -> conversation.v1.AgentModel
-	20, // 26: conversation.v1.SessionFastMode.on:type_name -> conversation.v1.SessionFastModeOn
-	21, // 27: conversation.v1.SessionFastMode.off:type_name -> conversation.v1.SessionFastModeOff
-	19, // 28: conversation.v1.SessionFastMode.cooldown:type_name -> conversation.v1.SessionFastModeCooldown
-	26, // 29: conversation.v1.SessionMcpServer.connected:type_name -> conversation.v1.SessionMcpServerConnected
-	27, // 30: conversation.v1.SessionMcpServer.failed:type_name -> conversation.v1.SessionMcpServerFailed
-	23, // 31: conversation.v1.SessionMcpServer.needs_auth:type_name -> conversation.v1.SessionMcpServerNeedsAuth
-	24, // 32: conversation.v1.SessionMcpServer.pending:type_name -> conversation.v1.SessionMcpServerPending
-	25, // 33: conversation.v1.SessionMcpServer.disabled:type_name -> conversation.v1.SessionMcpServerDisabled
-	29, // 34: conversation.v1.SessionAccountUsage.available:type_name -> conversation.v1.SessionAccountUsageAvailable
-	32, // 35: conversation.v1.SessionAccountUsage.unavailable:type_name -> conversation.v1.SessionAccountUsageUnavailable
-	31, // 36: conversation.v1.SessionAccountUsageAvailable.five_hour:type_name -> conversation.v1.SessionUsageWindow
-	31, // 37: conversation.v1.SessionAccountUsageAvailable.seven_day:type_name -> conversation.v1.SessionUsageWindow
-	31, // 38: conversation.v1.SessionAccountUsageAvailable.seven_day_oauth_apps:type_name -> conversation.v1.SessionUsageWindow
-	31, // 39: conversation.v1.SessionAccountUsageAvailable.seven_day_opus:type_name -> conversation.v1.SessionUsageWindow
-	31, // 40: conversation.v1.SessionAccountUsageAvailable.seven_day_sonnet:type_name -> conversation.v1.SessionUsageWindow
-	30, // 41: conversation.v1.SessionAccountUsageAvailable.model_scoped:type_name -> conversation.v1.SessionModelUsageWindow
-	50, // 42: conversation.v1.SessionModelUsageWindow.model:type_name -> conversation.v1.AgentModel
-	31, // 43: conversation.v1.SessionModelUsageWindow.window:type_name -> conversation.v1.SessionUsageWindow
-	33, // 44: conversation.v1.SessionAccountUsageUnavailable.service_unavailable:type_name -> conversation.v1.SessionUsageServiceUnavailable
-	34, // 45: conversation.v1.SessionAccountUsageUnavailable.window_unavailable:type_name -> conversation.v1.SessionUsageWindowUnavailable
-	35, // 46: conversation.v1.SessionAccountUsageUnavailable.utilization_unavailable:type_name -> conversation.v1.SessionUsageUtilizationUnavailable
-	36, // 47: conversation.v1.SessionAccountUsageUnavailable.sampling_failure:type_name -> conversation.v1.SessionUsageSamplingFailure
-	38, // 48: conversation.v1.SessionDiagnostics.healthy:type_name -> conversation.v1.SessionHealthy
-	39, // 49: conversation.v1.SessionDiagnostics.unhealthy:type_name -> conversation.v1.SessionUnhealthy
-	41, // 50: conversation.v1.SessionDiagnostics.degraded_windows:type_name -> conversation.v1.SessionDegradedWindow
-	40, // 51: conversation.v1.SessionUnhealthy.faults:type_name -> conversation.v1.SessionFault
-	42, // 52: conversation.v1.SessionDegradedWindow.open:type_name -> conversation.v1.SessionDegradedOpen
-	43, // 53: conversation.v1.SessionDegradedWindow.closed:type_name -> conversation.v1.SessionDegradedClosed
-	45, // 54: conversation.v1.SessionKilled.idle:type_name -> conversation.v1.SessionKilledIdle
-	46, // 55: conversation.v1.SessionKilled.forced:type_name -> conversation.v1.SessionKilledForced
-	53, // 56: conversation.v1.SessionKilledForced.interrupted_turn:type_name -> conversation.v1.TurnId
-	55, // 57: conversation.v1.SessionKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
-	53, // 58: conversation.v1.SessionLive.turn_in_flight:type_name -> conversation.v1.TurnId
-	55, // 59: conversation.v1.SessionLive.live_work:type_name -> conversation.v1.DetachedWorkId
-	49, // 60: conversation.v1.SessionContextUsage.categories:type_name -> conversation.v1.SessionContextCategory
-	61, // [61:61] is the sub-list for method output_type
-	61, // [61:61] is the sub-list for method input_type
-	61, // [61:61] is the sub-list for extension type_name
-	61, // [61:61] is the sub-list for extension extendee
-	0,  // [0:61] is the sub-list for field type_name
+	37, // 22: conversation.v1.SessionUpdate.diagnostics:type_name -> conversation.v1.SessionDiagnostics
+	48, // 23: conversation.v1.SessionUpdate.context_usage:type_name -> conversation.v1.SessionContextUsage
+	14, // 24: conversation.v1.SessionQueryDied.unexpected_eof:type_name -> conversation.v1.SessionQueryUnexpectedEof
+	15, // 25: conversation.v1.SessionQueryDied.iterator_failure:type_name -> conversation.v1.SessionQueryIteratorFailure
+	51, // 26: conversation.v1.SessionPermissionModeChanged.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	50, // 27: conversation.v1.SessionModelChanged.effective_model:type_name -> conversation.v1.AgentModel
+	20, // 28: conversation.v1.SessionFastMode.on:type_name -> conversation.v1.SessionFastModeOn
+	21, // 29: conversation.v1.SessionFastMode.off:type_name -> conversation.v1.SessionFastModeOff
+	19, // 30: conversation.v1.SessionFastMode.cooldown:type_name -> conversation.v1.SessionFastModeCooldown
+	26, // 31: conversation.v1.SessionMcpServer.connected:type_name -> conversation.v1.SessionMcpServerConnected
+	27, // 32: conversation.v1.SessionMcpServer.failed:type_name -> conversation.v1.SessionMcpServerFailed
+	23, // 33: conversation.v1.SessionMcpServer.needs_auth:type_name -> conversation.v1.SessionMcpServerNeedsAuth
+	24, // 34: conversation.v1.SessionMcpServer.pending:type_name -> conversation.v1.SessionMcpServerPending
+	25, // 35: conversation.v1.SessionMcpServer.disabled:type_name -> conversation.v1.SessionMcpServerDisabled
+	29, // 36: conversation.v1.SessionAccountUsage.available:type_name -> conversation.v1.SessionAccountUsageAvailable
+	32, // 37: conversation.v1.SessionAccountUsage.unavailable:type_name -> conversation.v1.SessionAccountUsageUnavailable
+	31, // 38: conversation.v1.SessionAccountUsageAvailable.five_hour:type_name -> conversation.v1.SessionUsageWindow
+	31, // 39: conversation.v1.SessionAccountUsageAvailable.seven_day:type_name -> conversation.v1.SessionUsageWindow
+	31, // 40: conversation.v1.SessionAccountUsageAvailable.seven_day_oauth_apps:type_name -> conversation.v1.SessionUsageWindow
+	31, // 41: conversation.v1.SessionAccountUsageAvailable.seven_day_opus:type_name -> conversation.v1.SessionUsageWindow
+	31, // 42: conversation.v1.SessionAccountUsageAvailable.seven_day_sonnet:type_name -> conversation.v1.SessionUsageWindow
+	30, // 43: conversation.v1.SessionAccountUsageAvailable.model_scoped:type_name -> conversation.v1.SessionModelUsageWindow
+	50, // 44: conversation.v1.SessionModelUsageWindow.model:type_name -> conversation.v1.AgentModel
+	31, // 45: conversation.v1.SessionModelUsageWindow.window:type_name -> conversation.v1.SessionUsageWindow
+	33, // 46: conversation.v1.SessionAccountUsageUnavailable.service_unavailable:type_name -> conversation.v1.SessionUsageServiceUnavailable
+	34, // 47: conversation.v1.SessionAccountUsageUnavailable.window_unavailable:type_name -> conversation.v1.SessionUsageWindowUnavailable
+	35, // 48: conversation.v1.SessionAccountUsageUnavailable.utilization_unavailable:type_name -> conversation.v1.SessionUsageUtilizationUnavailable
+	36, // 49: conversation.v1.SessionAccountUsageUnavailable.sampling_failure:type_name -> conversation.v1.SessionUsageSamplingFailure
+	38, // 50: conversation.v1.SessionDiagnostics.healthy:type_name -> conversation.v1.SessionHealthy
+	39, // 51: conversation.v1.SessionDiagnostics.unhealthy:type_name -> conversation.v1.SessionUnhealthy
+	41, // 52: conversation.v1.SessionDiagnostics.degraded_windows:type_name -> conversation.v1.SessionDegradedWindow
+	40, // 53: conversation.v1.SessionUnhealthy.faults:type_name -> conversation.v1.SessionFault
+	42, // 54: conversation.v1.SessionDegradedWindow.open:type_name -> conversation.v1.SessionDegradedOpen
+	43, // 55: conversation.v1.SessionDegradedWindow.closed:type_name -> conversation.v1.SessionDegradedClosed
+	45, // 56: conversation.v1.SessionKilled.idle:type_name -> conversation.v1.SessionKilledIdle
+	46, // 57: conversation.v1.SessionKilled.forced:type_name -> conversation.v1.SessionKilledForced
+	53, // 58: conversation.v1.SessionKilledForced.interrupted_turn:type_name -> conversation.v1.TurnId
+	55, // 59: conversation.v1.SessionKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
+	53, // 60: conversation.v1.SessionLive.turn_in_flight:type_name -> conversation.v1.TurnId
+	55, // 61: conversation.v1.SessionLive.live_work:type_name -> conversation.v1.DetachedWorkId
+	49, // 62: conversation.v1.SessionContextUsage.categories:type_name -> conversation.v1.SessionContextCategory
+	63, // [63:63] is the sub-list for method output_type
+	63, // [63:63] is the sub-list for method input_type
+	63, // [63:63] is the sub-list for extension type_name
+	63, // [63:63] is the sub-list for extension extendee
+	0,  // [0:63] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_session_proto_init() }
@@ -3604,6 +3648,8 @@ func file_conversation_v1_session_proto_init() {
 		(*SessionUpdate_AccountUsage)(nil),
 		(*SessionUpdate_PermissionModeChanged)(nil),
 		(*SessionUpdate_ContextBudgetWarning)(nil),
+		(*SessionUpdate_Diagnostics)(nil),
+		(*SessionUpdate_ContextUsage)(nil),
 	}
 	file_conversation_v1_session_proto_msgTypes[12].OneofWrappers = []any{
 		(*SessionQueryDied_UnexpectedEof)(nil),
