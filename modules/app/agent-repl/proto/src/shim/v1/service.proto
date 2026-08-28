@@ -10,6 +10,7 @@ package shim.v1;
 
 import "shim/v1/endpoint_detach_foreground.proto";
 import "shim/v1/endpoint_get_session_diagnostics.proto";
+import "shim/v1/endpoint_get_session_context_usage.proto";
 import "shim/v1/endpoint_kill_session.proto";
 import "shim/v1/endpoint_kill_turn.proto";
 import "shim/v1/endpoint_read_history.proto";
@@ -56,6 +57,10 @@ service Shim {
   // Ask the shim how it is: its health and its degraded windows. A pull, at
   // the daemon's cadence.
   rpc GetSessionDiagnostics(GetSessionDiagnosticsRequest) returns (GetSessionDiagnosticsResponse);
+
+  // The session's current context usage, pulled — the vendor's own answer,
+  // never derived. See endpoint_get_session_context_usage.proto.
+  rpc GetSessionContextUsage(GetSessionContextUsageRequest) returns (GetSessionContextUsageResponse);
   // END: the session and EVERYTHING live in it — the turn if one is open and
   // every live task, whichever turn spawned it. Refuses while anything is
   // live unless forced; names what it killed.

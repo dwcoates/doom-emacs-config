@@ -499,3 +499,25 @@ message SessionLive {
   // detached-work streams), never from any vendor record.
   repeated DetachedWorkId live_work = 2;
 }
+
+// The session's CURRENT CONTEXT USAGE, as the vendor's own control answer
+// states it (the get_context_usage verb — the one stable, typed source;
+// never derived from usage frames). Pulled by the daemon; the topbar's
+// context chip and the /context panel both resolve from THIS one fact.
+message SessionContextUsage {
+  // Tokens currently in context — the topbar chip's number. Shrinks on a
+  // compaction or clear; can never exceed max_tokens.
+  int64 total_tokens = 1;
+  // The model's context window — the bound.
+  int64 max_tokens = 2;
+  // The vendor's category breakdown, in served order — the /context
+  // panel's rows.
+  repeated SessionContextCategory categories = 3;
+}
+// One category of the context breakdown.
+message SessionContextCategory {
+  // The vendor's category label, verbatim.
+  string label = 1;
+  // The category's token count.
+  int64 tokens = 2;
+}

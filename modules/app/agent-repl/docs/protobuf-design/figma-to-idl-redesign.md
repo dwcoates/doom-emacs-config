@@ -7827,6 +7827,28 @@ gains PER-HOLDER REFUSAL POLICY — the merge lease projects to
 error-on-new-submission; restart-pending and shutdown-drain project to
 holds.
 
+### `GetSessionContextUsage` lands — the context fact is PULLED, never derived; the daemon owns account switching
+
+Settled 2026-08-28 (a sanctioned post-freeze increment, completing the
+topbar landing):
+
+- NEW conversation/v1 `SessionContextUsage { total_tokens; max_tokens;
+  repeated SessionContextCategory { label; tokens } }` — the vendor's own
+  get_context_usage answer as a conversation fact; the topbar chip and
+  the /context panel BOTH resolve from this one fact.
+- NEW shim.v1 `GetSessionContextUsage` (SESSION section), pulled at the
+  daemon's cadence plus every turn end (the GetSessionDiagnostics
+  pattern). The user's ruling: CORRECT, not "derived" — the
+  usage-frame derivation is forbidden as the chip's source. This also
+  un-strands the /context panel, whose specced fill previously had no
+  route.
+- ACCOUNT SWITCHING, constraints not mechanics: the DAEMON determines
+  the config dir (repo under $MULTI_REPO_ROOT → multi-repo dir, else
+  default) and the DAEMON ports the vendor transcript between roots on a
+  switch (a file move before the ordinary resume) — a shim-owned port
+  was sketched and REVERSED as needless complication; the shim never
+  participates.
+
 ### The TOPBAR gains its ACCOUNT element and the CONTEXT CHIP; the strip's layout and reveal conventions land
 
 Settled 2026-08-28 (a sanctioned post-freeze increment), from the old-vs-new

@@ -809,3 +809,11 @@ no-variable-state principle that bounds all of it.
   defect to fix at the source).
 - The sidecar needs no buffer at all: its sources are durable files it
   re-reads from the cursor.
+## GetSessionContextUsage (post-freeze increment, 2026-08-28)
+
+- NEW SESSION-section verb: the daemon pulls the session's current
+  context usage; the shim answers with the vendor's get_context_usage
+  control response mapped to conversation.v1 SessionContextUsage —
+  never an estimate, never derived from usage frames. Failure kind arms
+  derive at the wave.
+

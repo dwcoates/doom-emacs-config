@@ -48,11 +48,14 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   + record + digests); MULTI_REPO_ROOT ruled ACCOUNT-ONLY and its
   support requirement landed on WSM; self-reload landed-range =
   merge-commit second-parent history.
-- TOPBAR (2026-08-28): account element + context chip landed (protos,
-  record, digests, docs); OPEN: create-time account selection on
-  CreateWorkspace + account-switch-without-losing-transcripts
-  mechanics; context-size producer is a daemon arch todo; two webapp
-  audit reports parked in docs/protobuf-design/ for webapp planning.
+- TOPBAR (2026-08-28): account element + context chip landed; the
+  TOPBAR RESOLVER is PRESCRIBED (daemon.md 10a — the response side's
+  first component); shim.v1 GetSessionContextUsage + conversation
+  SessionContextUsage landed (pulled, never derived; /context panel
+  un-stranded); account-switch CONSTRAINTS landed (daemon determines
+  config dir + ports transcripts itself). OPEN: create-time account
+  selection on CreateWorkspace; two webapp audit reports parked in
+  docs/protobuf-design/ for webapp planning.
 - STANDING INSTRUCTIONS: STOP just before invoking /cross-system-fanout
   — the user gates that invocation personally; digests regenerate when
   the record grows; nothing lands without explicit approval.
