@@ -16,6 +16,11 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   core, view resolvers), the client-facing half (Connect server,
   publishers), and the by-endpoint sequence diagrams (meta rule 5) are
   UNSTARTED.
+- ORCHESTRATOR PROMPT DOCS opened (2026-08-28) at
+  docs/implementation/prompts/ — TEAMLEAD.md (shared by all five) and
+  PROJECTLEAD.md; running tallies per rule 22. PENDING from the
+  client-facing walk: the Connect-server DISCRETIONARY entry + the
+  no-missed-no-stale subscription invariant (reworded, unlanded).
 - OWED BEFORE HANDOFF: MAIN.md (the e2e replacement specs), the
   reconciled-foundation SHA record, the remaining architecture
   sections, and the graceful-rollout handover PROTOBUF INCREMENT
@@ -239,3 +244,12 @@ survive compaction. It joins the post-compaction mandatory-reload set.
       REQUIRES flushing its complete remaining state — every unruled
       finding, not just those already phrased as questions — into the
       OPEN section before moving on; the ledger points at it.
+
+22. THE ORCHESTRATOR PROMPT DOCS ARE A RUNNING TALLY. docs/
+    implementation/prompts/TEAMLEAD.md (one shared document for all
+    five system teamleads — system-specific content lives in each
+    system's digest and architecture documents, never here) and
+    prompts/PROJECTLEAD.md hold the prompt information the fanout's
+    orchestrators are launched with. Prompt-relevant rulings made
+    during planning land there the moment they are made, per the
+    rule-8 automatic-recording obligation.
