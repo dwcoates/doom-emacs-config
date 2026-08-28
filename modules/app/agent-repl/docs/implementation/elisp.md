@@ -44,3 +44,12 @@
   asks on prompt, owed-redelivery cancellation): dropped for this
   project; the landed permission/question API is the only path.
 
+## Code-level consistency requirements (from the conventions walk)
+- ONE shared subroutine backs every open-a-file affordance: "open
+  path[:line] in a doom popup, right side, half width" — the plan
+  bubble's edit button, every findings location, the worktree
+  separation paths (dired for a directory) all call it.
+- THE BLINK CADENCE is implemented exactly from the one spec on
+  frontend.v1 RosterRowAttention (two blinks, 500 ms on/off, then
+  steady); divergence from the webapp sidebar is a defect.
+

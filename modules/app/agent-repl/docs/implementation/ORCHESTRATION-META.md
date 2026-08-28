@@ -21,6 +21,18 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   PROJECTLEAD.md; running tallies per rule 22. The client-facing walk LANDED
   (2026-08-28): Connect server + publishers DISCRETIONARY (daemon.md
   12) and the never-miss-never-end-stale subscription invariant (13).
+- CONVENTIONS WALK COMPLETE (2026-08-28): the conventions digest was
+  triaged item by item into the prompt docs (teamlead gains: no-
+  backwards-compat, proto→code mapping, validation invariant,
+  production-code logging, four identifier spaces, bounded streams,
+  push cadence, clocks, presence, exempt set, evidence standards, the
+  proto-docs and weird-tests declaratives; projectlead gains:
+  no-backwards-compat, validation invariant, proto-docs standard);
+  system docs gained their specific items (daemon: parity, lifecycle
+  decoupling, softened state-placement preference, store-nuke; elisp:
+  popup subroutine + blink cadence; webapp: one separation renderer +
+  link component + blink cadence); everything unchecked stays
+  digest-only.
 - OWED BEFORE HANDOFF: MAIN.md (the e2e replacement specs), the
   reconciled-foundation SHA record, the remaining architecture
   sections, and the graceful-rollout handover PROTOBUF INCREMENT

@@ -573,6 +573,23 @@ unmarked is DISCRETIONARY by default.
    rule). Applies uniformly to every Watch stream; the feed's
    token-pinned tail is this same guarantee's feed spelling.
 
+14. NOTES carried from the conventions walk (2026-08-28):
+   - SUBAGENT PARITY: a subagent is handled exactly as the turn is —
+     same write type, same frame type, same daemon-side queuing —
+     differing only in address.
+   - SPAWN / ATTACH / END ARE DECOUPLED: sessions and turns outlive
+     the daemon; spawning is unary, attaching is a Watch that creates
+     and ends nothing, ending is an explicit Kill — restart recovery
+     is re-running the corresponding Watch.
+   - STATE PLACEMENT IS A STRONG PREFERENCE, not a hard rule: the
+     daemon holds state and most of the persistence model; the shim,
+     store and sidecar stay constant-cost — exceptions need a good
+     reason and should be rare. The store exists solely to persist
+     vendor information: a datalayer client, never a state manager.
+   - THE STORE IS NUKED, NEVER MIGRATED: no backfill, hydration, or
+     migration code anywhere; where contents are in the way, drop and
+     recreate.
+
 ## OPEN — unruled audit findings (the triage backlog)
 
 These feature-loss audit findings are NOT yet ruled; each awaits a
