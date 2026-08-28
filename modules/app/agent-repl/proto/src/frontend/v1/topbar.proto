@@ -1,5 +1,14 @@
-// topbar.proto — THE TOPBAR: title, session line, model selector,
-// connectivity glyph, warning strip. Per-workspace; resolved by the daemon.
+// topbar.proto — THE TOPBAR: one THIN strip. Left, tight: account label,
+// connectivity dot. Center: the title, and ALL free width flexes around it
+// — the flank groups never spread. Right, tight, in order: model selector,
+// context chip, warning chip at the far edge.
+//
+//   │ dodge@…com ●        DWC/fix-flaky-reconnect   haiku 4.5 ▾  142.3k  ⚠ 2 │
+//
+// REVEAL CONVENTION: every strip element's detail (session line, model
+// options, the context chip's usage breakdown, the warning dropdown and
+// its overlays) renders BELOW the strip and CLAMPS within the viewport —
+// never off-screen left or right.
 //
 // EVERY FIELD OF THE VIEW IS AN ELEMENT MESSAGE. Reading TopbarView
 // enumerates the topbar's subcomponents; each element's props are its own
@@ -35,12 +44,45 @@ message TopbarView {
   TopbarConnectivity connectivity = 4;
   // The warning strip.
   TopbarWarningStrip warnings = 5;
-  // The token-breakdown menu — the SESSION's accounting, drawn when the user
-  // opens it. ALWAYS POPULATED, exactly as a folded section still carries its
-  // rows: the client hides it until opened, so opening needs no round-trip
-  // and the open menu stays current with every push.
-  TokenBreakdownView token_breakdown = 6;
+  // Tag 6 RETIRED (TokenBreakdownView token_breakdown): the breakdown now
+  // rides the context chip's hover content.
+  reserved 6;
+  // The context chip — a NUMBER, not an icon.
+  TopbarContextChip context = 7;
+  // Which account the session spends as.
+  TopbarAccount account = 8;
 }
+
+// THE CHIP IS THE CURRENT CONTEXT SIZE, rendered YELLOW: the one figure
+// that must stay visible, because "how full is my context" is what the
+// topbar's token presence exists to answer. It SHRINKS on a compaction or
+// clear, and can never exceed the model's context window — a PRODUCER
+// fact, never a client clamp. Hover reveals the session's usage breakdown.
+message TopbarContextChip {
+  // The current context size, daemon-formatted ("142.3k").
+  string text = 1;
+  // The hover content: the SESSION's token usage. ALWAYS POPULATED so the
+  // hover needs no round-trip.
+  TokenBreakdownView breakdown = 2;
+}
+
+// Which Claude account the session spends as, resolved by the daemon from
+// the session's own config root (its .claude.json login). Far left of the
+// strip. THE ARM IS THE STATE: a logged-out root is a DRAWN WARNING —
+// a session whose root is logged out cannot run a turn, so the label is
+// the warning, never a blank (blank reads as "loading", the one thing it
+// is not).
+message TopbarAccount {
+  oneof state {
+    TopbarAccountLoggedIn logged_in = 1;
+    TopbarAccountLoggedOut logged_out = 2;
+  }
+}
+message TopbarAccountLoggedIn {
+  // The logged-in email, verbatim.
+  string email = 1;
+}
+message TopbarAccountLoggedOut {}
 
 // The title line the topbar shows.
 message TopbarTitle {
@@ -216,8 +258,11 @@ message TopbarDegradedWindowClosed {
 
 // The token-breakdown menu, fully resolved. Sections and rows arrive in
 // display order; the client renders exactly this tree.
+// SESSION-SCOPED ONLY: input/output, cached/uncached, thinking, per-model.
+// NO turn-scoped section may ever appear here — turn figures are the
+// FOOTER's domain exclusively (the topbar is turn-nonspecific by nature).
 message TokenBreakdownView {
-  // Menu sections, in display order (e.g. "this turn", "session", per-model).
+  // Menu sections, in display order (e.g. "session", per-model).
   repeated TokenBreakdownSection sections = 1;
 }
 

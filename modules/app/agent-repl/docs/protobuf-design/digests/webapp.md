@@ -873,4 +873,10 @@ gotchas live in `docs/implementation/webapp.md`.
 - TAB REVISION: seven conditional tabs — queue | pre-prompt | merge |
   conflicts | tests | fixes | post-prompt; resolved = queue/merge/
   tests, agentic = the rest; parked only on conflicts/fixes.
+- TOPBAR REVISION (2026-08-28): thin strip — left tight: account +
+  connectivity; centered flexing title; right tight: model selector,
+  CONTEXT CHIP (a YELLOW number = current context size; hover = the
+  session-scoped breakdown, tag 6 token_breakdown retired), warning
+  chip. TopbarAccount: logged_in{email} | logged_out{} (drawn warning).
+  All reveals render below the strip, clamped in-viewport.
 
