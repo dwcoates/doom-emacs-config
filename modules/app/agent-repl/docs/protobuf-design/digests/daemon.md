@@ -924,4 +924,9 @@ translate-layer re-encoding, which becomes the feed row resolver.
   by name (feed, footer, topbar, sidebar, hold tray), purpose-only;
   resolver in-memory accumulation is fine — ship complete snapshots,
   never partial pushes.
+- CLIENT-FACING HALF (2026-08-28): the Connect server delegates to the
+  landed components, internals discretionary; INVARIANT: a Watch
+  subscriber never misses a published view and never ends on a stale
+  one — the latest view first if one exists, else the first ever
+  published; empty/partial frames never sent.
 

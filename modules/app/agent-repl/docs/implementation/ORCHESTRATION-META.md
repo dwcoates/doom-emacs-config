@@ -18,9 +18,9 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   UNSTARTED.
 - ORCHESTRATOR PROMPT DOCS opened (2026-08-28) at
   docs/implementation/prompts/ — TEAMLEAD.md (shared by all five) and
-  PROJECTLEAD.md; running tallies per rule 22. PENDING from the
-  client-facing walk: the Connect-server DISCRETIONARY entry + the
-  no-missed-no-stale subscription invariant (reworded, unlanded).
+  PROJECTLEAD.md; running tallies per rule 22. The client-facing walk LANDED
+  (2026-08-28): Connect server + publishers DISCRETIONARY (daemon.md
+  12) and the never-miss-never-end-stale subscription invariant (13).
 - OWED BEFORE HANDOFF: MAIN.md (the e2e replacement specs), the
   reconciled-foundation SHA record, the remaining architecture
   sections, and the graceful-rollout handover PROTOBUF INCREMENT
