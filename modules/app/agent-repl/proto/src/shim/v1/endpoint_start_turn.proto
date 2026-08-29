@@ -53,10 +53,23 @@ message StartTurnSuccess {
   conversation.v1.AgentPrompt prompt = 1;
 }
 
-// Not accepted. `kind` arms are DERIVED at the wave from the shim's real
-// refusal sites: a turn already open (the daemon fault), no session, the
-// agent binary refusing the prompt.
+// Not accepted. THE ARM IS WHY.
 message StartTurnFailure {
   // The shim's account, for a human and for logs; never switched on.
   string detail = 1;
+  oneof kind {
+    // A turn is already open — the DAEMON's fault (it is the only queue).
+    StartTurnTurnAlreadyOpen turn_already_open = 2;
+    // No session is open on this shim.
+    StartTurnNoSession no_session = 3;
+    // The agent binary refused the prompt; `detail` carries its wording.
+    StartTurnVendorRefused vendor_refused = 4;
+    // The vendor query is dead; nothing can accept a prompt until the
+    // session is restarted.
+    StartTurnQueryDead query_dead = 5;
+  }
 }
+message StartTurnTurnAlreadyOpen {}
+message StartTurnNoSession {}
+message StartTurnVendorRefused {}
+message StartTurnQueryDead {}
