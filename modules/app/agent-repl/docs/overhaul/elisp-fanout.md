@@ -134,6 +134,15 @@ are deleted by the verbs agent once verbs.el replaces them.
   equivalent; the implementer chooses and documents.
 - ON-PUSH exceptions are caught at the filter boundary: log ERROR with the
   payload in context; the stream stays open.
+- STANDING-STREAM ACCEPTANCE (project-lead contract rule): the daemon
+  flushes response headers on accept, so a stream is ACCEPTED the moment its
+  HTTP 200 header block arrives — before any frame; connect.el exposes that
+  instant (`ON-OPEN`/an accepted flag) and daemon-link/host/roster key
+  "subscribed" on it, never on a first frame. A client ends a watch only by
+  killing its transport (`agent-repl-connect-stream-cancel`); a standing
+  stream never ends on its own, so an end frame or process death on a
+  standing stream is always a failure. The fake daemon flushes headers on
+  accept too.
 - LANDED SHAPES (connect.el as merged): the failure datum handed to
   `:on-failure` and carried in `(:error DETAIL)` is the plist
   `(:kind K :code CODE :status STATUS :message MSG)` with `:kind` one of
