@@ -216,23 +216,18 @@ function drawStopControl(rc: RowContext): HTMLElement {
   wrap.append(button);
 
   button.addEventListener("click", () => {
-    void stop(rc, wrap, button, false);
+    void stop(rc, wrap);
   });
   return wrap;
 }
 
 /** Issue the stop and draw whatever came back beside the control. */
-async function stop(
-  rc: RowContext,
-  wrap: HTMLElement,
-  button: HTMLButtonElement,
-  confirmAgents: boolean,
-): Promise<void> {
+async function stop(rc: RowContext, wrap: HTMLElement): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
   clearOutcome(wrap);
   log("info", "stopping a detached subagent", {
     operation: "feed.subagent-stop",
-    context: { row: id.value, confirm_agents: confirmAgents },
+    context: { row: id.value },
   });
   let response: InterruptResponse;
   try {
@@ -254,7 +249,7 @@ async function stop(
       wrap.append(successNote(result.value, rc));
       return;
     case "error":
-      wrap.append(errorNote(result.value, rc, wrap, button));
+      wrap.append(errorNote(result.value));
       return;
     default:
       unreachableArm("InterruptResponse.result", armName(result));
@@ -290,30 +285,23 @@ function successNote(
 /**
  * The refusal, at the control that made the call.
  *
- * `confirm_required` is the one landed arm and it is a CHALLENGE rather than a
- * dead end, so it draws the count and a second control that answers it.
+ * NO CONFIRM STEP LIVES HERE. `confirm_required` is the daemon's challenge to
+ * the TURN target — interrupting a turn while detached agents are live — and
+ * `confirm_agents` is meaningless on a detached target, so a detached stop that
+ * receives it has been answered with an arm that cannot apply to it. It is
+ * drawn as the ordinary refusal it is and logged at warn, rather than offering a
+ * second click that would resend the identical request and be refused again.
  */
-function errorNote(
-  error: { kind: { case?: string; value?: unknown } },
-  rc: RowContext,
-  wrap: HTMLElement,
-  button: HTMLButtonElement,
-): HTMLElement {
+function errorNote(error: { kind: { case?: string; value?: unknown } }): HTMLElement {
   const kind = requireCase(error.kind, "InterruptError.kind");
   switch (kind.case) {
     case "confirmRequired": {
       const count = (kind.value as { liveAgentCount: bigint }).liveAgentCount.toString();
-      const el = refusal(kind.case, `${count} live agent(s) would also stop`);
-      const confirm = document.createElement("button");
-      confirm.type = "button";
-      confirm.className = "subagent-stop-button";
-      confirm.setAttribute("data-interrupt-confirm", "true");
-      confirm.textContent = "stop them too";
-      confirm.addEventListener("click", () => {
-        void stop(rc, wrap, button, true);
+      log("warn", "a detached stop was answered with the turn target's confirm challenge", {
+        operation: "feed.subagent-stop-confirm-required",
+        context: { live_agent_count: count },
       });
-      el.append(confirm);
-      return el;
+      return refusal(kind.case, `refused: ${count} live agent(s) would also stop`);
     }
     default:
       return unreachableArm("InterruptError.kind", armName(kind));
