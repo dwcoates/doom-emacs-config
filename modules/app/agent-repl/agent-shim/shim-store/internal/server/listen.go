@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"agentrepl/shim-store/internal/logging"
 )
@@ -15,13 +16,24 @@ import (
 // every participant at a private store without editing any command line.
 const EnvSocket = "AGENT_REPL_STORE_SOCKET"
 
+// occupancyDialTimeout bounds the exclusivity probe. Connecting to a unix
+// socket is a kernel-local operation: a live listener accepts at once and an
+// abandoned path refuses at once, so this is a guard against a pathological
+// filesystem, never a wait anything normal pays.
+const occupancyDialTimeout = 2 * time.Second
+
 // Listen binds the store's unix domain socket.
 //
-// A LEFTOVER SOCKET IS RECLAIMED; ANYTHING ELSE IS REFUSED. A store that died
+// A LEFTOVER SOCKET IS RECLAIMED; A LIVE ONE IS NEVER STOLEN. A store that died
 // holding the path leaves a stale socket which would otherwise make the service
 // permanently unstartable — but unlinking whatever happens to sit at an
 // operator-supplied path is how a service deletes somebody's file, so the mode
-// is proved before the path is removed.
+// is proved before the path is removed, and the path is DIALLED before it is
+// unlinked. A successful dial means a live store owns it: unlinking then
+// re-binding would leave the first store serving a socket no client can reach
+// any more while this one silently took its clients, so the boot is refused
+// instead. The socket is the store's singleton token, and the kernel is what
+// arbitrates it.
 func Listen(path string, log *logging.Logger) (net.Listener, error) {
 	if log == nil {
 		panic("shim-store server: nil logger")
@@ -37,7 +49,16 @@ func Listen(path string, log *logging.Logger) (net.Listener, error) {
 	}
 	switch info, statErr := os.Lstat(absolute); {
 	case statErr == nil && info.Mode()&os.ModeSocket != 0:
-		log.Log(logging.Fields{Operation: "store.listen.reclaim", Level: "warn", Socket: absolute}, "removing a stale socket left by a previous store")
+		if occupied, dialErr := net.DialTimeout("unix", absolute, occupancyDialTimeout); dialErr == nil {
+			if closeErr := occupied.Close(); closeErr != nil {
+				log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: absolute}, "closing the occupancy probe failed: %v", closeErr)
+				return nil, fmt.Errorf("shim-store server: close occupancy probe for %q: %w", absolute, closeErr)
+			}
+			log.Log(logging.Fields{Operation: "store.listen.occupied", Level: "error", Socket: absolute},
+				"another store is already listening on this socket; refusing to steal it — the store is a singleton and the socket is its token")
+			return nil, fmt.Errorf("shim-store server: another store is already listening on %q", absolute)
+		}
+		log.Log(logging.Fields{Operation: "store.listen.reclaim", Level: "warn", Socket: absolute}, "the socket refused a connection, so it is a stale one left by a previous store; reclaiming it")
 		if removeErr := os.Remove(absolute); removeErr != nil {
 			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: absolute}, "removing the stale socket failed: %v", removeErr)
 			return nil, fmt.Errorf("shim-store server: remove stale socket %q: %w", absolute, removeErr)

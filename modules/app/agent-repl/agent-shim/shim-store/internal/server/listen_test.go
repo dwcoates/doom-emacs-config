@@ -104,3 +104,66 @@ func TestListenRefusesToReplaceANonSocket(t *testing.T) {
 		t.Fatal("Listen over a regular file = nil error, want a loud refusal")
 	}
 }
+
+func TestListenRefusesASocketALiveStoreIsServing(t *testing.T) {
+	// Arrange: an ACCEPTING listener on the path. Unlinking it would leave the
+	// incumbent serving a socket no client can reach, with this process
+	// silently taking its callers.
+	path := shortSocketPath(t)
+	live, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("stage live socket: %v", err)
+	}
+	defer live.Close()
+
+	// Act.
+	ln, err := Listen(path, testLogger())
+
+	// Assert.
+	if err == nil {
+		ln.Close()
+		t.Fatal("Listen over a live socket = nil error, want a refusal to steal it")
+	}
+}
+
+func TestListenLeavesALiveSocketOnDisk(t *testing.T) {
+	// Arrange.
+	path := shortSocketPath(t)
+	live, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("stage live socket: %v", err)
+	}
+	defer live.Close()
+
+	// Act.
+	if _, err := Listen(path, testLogger()); err == nil {
+		t.Fatal("Listen over a live socket = nil error, want a refusal")
+	}
+
+	// Assert: the incumbent's socket is untouched, so it keeps serving.
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("stat %q = %v, want the incumbent's socket still on disk", path, statErr)
+	}
+}
+
+func TestListenRecordsTheOccupiedSocketOnce(t *testing.T) {
+	// Arrange.
+	path := shortSocketPath(t)
+	live, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("stage live socket: %v", err)
+	}
+	defer live.Close()
+	sink := &syncBuffer{}
+	log := logging.New(sink, io.Discard, true)
+
+	// Act.
+	if _, err := Listen(path, log); err == nil {
+		t.Fatal("Listen over a live socket = nil error, want a refusal")
+	}
+
+	// Assert.
+	if _, ok := findRecord(t, sink, "store.listen.occupied", "error"); !ok {
+		t.Fatalf("no store.listen.occupied error record; log was:\n%s", sink.String())
+	}
+}
