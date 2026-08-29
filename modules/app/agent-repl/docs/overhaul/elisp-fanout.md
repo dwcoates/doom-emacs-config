@@ -632,6 +632,15 @@ names; each brief owns every file listed for its constituent rows.
   integration link suite's "WatchDaemon with no pushes yields link-up" case
   keeps passing.
 
+- R-QUESTION (landing 3): `HostNotificationKind` gains
+  `question_asked {header}`. wire-host.el's kind decoder accepts the arm
+  (decoded `(:arm :question-asked :value (:header H))`), pinned against the
+  Go bindings' arm set; host.el applies the SAME notification policy as
+  permission_requested (unfocused → banner; focused + tab not selected →
+  blink; selected → log only), with `header` in the log context. Tests: one
+  per decode edge (present, missing header = proto3 default "", unknown
+  sibling arm still refused) and one per policy branch.
+
 ## 16. Escalations sent to the project lead (defaults in force meanwhile)
 
 - E1 RESOLVED: SubmitPromptRequest.origin landed, REQUIRED.
