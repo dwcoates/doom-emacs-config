@@ -1,71 +1,51 @@
 package convert
 
-// journal.go — a workflow's own record of its steps.
+// journal.go — WORKFLOW IS KICKED THIS WAVE.
 //
-// A workflow journal is the OUTPUT of detached work, not a conversation of its
-// own: the run has a card in the feed and its journal is what accumulates into
-// that card. So each record becomes a DetachedWorkProgressed delta on the run's
-// message, and the terminal record ends it.
+// The vocabulary stays in the contract and the files are still discovered and
+// cursor-tailed — nothing on disk is ever dropped — but no workflow FEATURE is
+// implemented, so every journal record converts to residue rather than to an
+// AgentWorkflow frame nobody consumes yet. Filing them as `unknown` would say
+// "we do not model this", which is false; the model exists and the FEATURE does
+// not. So they are vendor_specific: understood, deliberately not carried, and the
+// follow-up they ask for is the workflow wave itself.
 
 import (
-	"strings"
-
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
-// JournalRecord converts one workflow-journal object into the progress it adds
-// to the run's card.
+// JournalRecord converts one workflow-journal object.
 //
-// A record whose type this reader does not know is stored unconverted rather
-// than rendered as a blank step: a step that shows nothing is worse than a step
-// a later schema can still recover, because only one of the two is reversible.
-func (c *Converter) JournalRecord(record map[string]any, at Attribution, taskID string) []*storev1.StoreEntry {
-	if taskID == "" {
-		// Without the run's identity there is no card to append to, and there is
-		// no arm for a progress record that names no work.
-		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, Session: at.SessionID, Level: "warn"}).
-			Log("journal record at offset=%d has no run identity; stored unconverted", at.Offset)
-		return []*storev1.StoreEntry{UnknownEntry(at, str(record["type"]), "type", record)}
-	}
+// A journal holds exactly two record shapes — {started, key, agentId} and
+// {result, key, agentId, result} — and nothing run-scoped: NOTHING IN A JOURNAL
+// EVER SAYS THE RUN FINISHED, which is why no terminal is minted from one.
+func (c *Converter) JournalRecord(record map[string]any, at Attribution, runID string) []*storev1.StoreEntry {
 	kind := str(record["type"])
 	switch kind {
 	case "started", "result":
-		return []*storev1.StoreEntry{DetachedProgress(at, taskID, journalLine(kind, record))}
+		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, Task: at.TaskID}).
+			LogVerbose("workflow journal %s record run=%s agent=%s at offset=%d held as residue (workflow is kicked this wave)",
+				kind, runID, str(record["agentId"]), at.Offset)
+		return []*storev1.StoreEntry{VendorSpecificEntry(at, "workflow_journal/"+kind, record)}
 	default:
-		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, Session: at.SessionID, Level: "warn"}).
-			Log("journal record type=%q at offset=%d is not modeled; stored unconverted", kind, at.Offset)
+		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, Level: "warn"}).
+			Log("workflow journal record type=%q at offset=%d is not one of the two journal shapes; stored as unknown residue", kind, at.Offset)
 		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
 }
 
-// journalLine renders one journal record as the line it contributes to the run's
-// output.
+// WorkflowSpool converts a `w*.output` workflow spool's bytes.
 //
-// THE RENDERING IS LOSSY AND THAT IS A KNOWN COST. DetachedWorkProgressed
-// carries a string, because output is what a card shows — so a journal record's
-// structure does not survive into the store. See the gap note on partially
-// convertible records: an Entry can carry an external half OR an unconverted
-// half, so there is nowhere to put the verbatim record alongside its rendering.
-func journalLine(kind string, record map[string]any) string {
-	var b strings.Builder
-	b.WriteString(kind)
-	if key := str(record["key"]); key != "" {
-		b.WriteString(" ")
-		b.WriteString(key)
-	}
-	switch result := record["result"].(type) {
-	case string:
-		if result != "" {
-			b.WriteString(": ")
-			b.WriteString(result)
-		}
-	case map[string]any:
-		if status := str(result["status"]); status != "" {
-			b.WriteString(": ")
-			b.WriteString(status)
-		}
-	}
-	b.WriteString("\n")
-	return b.String()
+// Same disposition as the journal: discovered, tailed, and held as residue until
+// the workflow wave, so no byte the vendor wrote is lost in the meantime.
+func (c *Converter) WorkflowSpool(at Attribution, output string) *storev1.StoreEntry {
+	c.log.With(logging.Context{Operation: "workflow-spool", Path: at.Path, Task: at.TaskID}).
+		LogVerbose("workflow spool bytes=%d at offset=%d held as residue (workflow is kicked this wave)", len(output), at.Offset)
+	return VendorSpecificEntry(at, "workflow_spool", map[string]any{
+		"task_id": at.TaskID,
+		"path":    at.Path,
+		"offset":  float64(at.Offset),
+		"output":  output,
+	})
 }

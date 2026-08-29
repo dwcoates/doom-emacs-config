@@ -9,8 +9,8 @@ import (
 	"sync"
 
 	storev1 "agentrepl/proto/store/v1"
-	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
+
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -87,17 +87,18 @@ func diagnosticEvent(d logging.Diagnostic, ordinal uint64) *storev1.StoreEntry {
 	// The write identity is the digest the retired dedup key used, unchanged, so
 	// a diagnostic replayed after a lost connection is still one record.
 	keySource := fmt.Sprintf("%s\x00%d\x00%d\x00%d", d.Session, d.PID, ordinal, d.Timestamp.UnixMilli())
-	digest := sha256.Sum256([]byte(keySource))
-	return convert.ProducerDiagnostic(
-		convert.Attribution{
-			SessionID:    d.Session,
-			Path:         d.Path,
-			ProducedAtMs: d.Timestamp.UnixMilli(),
-		},
-		"sidecar-diagnostic:"+hex.EncodeToString(digest[:]),
-		d.Operation,
-		diagnosticDetail(d),
-	)
+	_ = sha256.Sum256([]byte(keySource))
+	_ = hex.EncodeToString
+	_ = diagnosticDetail
+	// R10: SIDECAR SELF-DIAGNOSTICS HAVE NO WIRE HOME. store.v1 StoreEntry has no
+	// bookkeeping arm and none is being invented, so a diagnostic is a STRUCTURED
+	// LOG and nothing else. The validation above is kept — an unencodable context
+	// is still a caller bug and still refused — and no record is produced.
+	//
+	// This outbox is deleted outright by the production-cycle port; the call site
+	// is neutralized here so this package compiles without resurrecting a store
+	// arm the contract does not have.
+	return nil
 }
 
 // diagnosticDetail flattens everything ProducerDiagnostic has no field for into
