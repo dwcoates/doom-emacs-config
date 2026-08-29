@@ -130,6 +130,18 @@ export function bashUpsertKey(run: conversationv1.AgentActivityId): string {
 }
 
 /**
+ * A detached-work ANNOUNCEMENT, keyed by the handle the work is addressed by.
+ *
+ * ITS OWN KEY RATHER THAN THE UNIT'S: the announcement and the announced unit
+ * are two rows about two facts — "this work left the turn" and "this is what
+ * the work is" — and keying the announcement as the unit would have the
+ * announcement overwrite the call that spawned it.
+ */
+export function detachedWorkUpsertKey(work: conversationv1.DetachedWorkId): string {
+  return `detached:${requireValue(work.value, "the detached work id")}`;
+}
+
+/**
  * A session-level fact, keyed by WHICH KIND of fact and which vendor record
  * stated it.
  *
@@ -141,6 +153,21 @@ export function bashUpsertKey(run: conversationv1.AgentActivityId): string {
  */
 export function sessionUpsertKey(arm: string, vendorRecordUuid: string): string {
   return `session:${requireValue(arm, "the session update arm")}:${requireValue(
+    vendorRecordUuid,
+    "the vendor record uuid",
+  )}`;
+}
+
+/**
+ * A residue row, keyed by WHAT KIND of record it was and which record it was.
+ *
+ * Residue has no identity of its own — that is what makes it residue — so the
+ * key is its provenance. Keyed by the vendor record's own uuid so a redelivered
+ * record settles as one row rather than accumulating copies of the same
+ * unconverted line.
+ */
+export function residueUpsertKey(kind: string, vendorRecordUuid: string): string {
+  return `residue:${requireValue(kind, "the residue kind")}:${requireValue(
     vendorRecordUuid,
     "the vendor record uuid",
   )}`;
