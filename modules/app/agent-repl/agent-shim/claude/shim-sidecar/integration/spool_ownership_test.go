@@ -218,3 +218,66 @@ func TestOneSpoolReachedByTwoPathSpellingsIsOneFile(t *testing.T) {
 		accumulated += uint64(len(up.GetNewOutput()))
 	}
 }
+
+// TestTheSpoolRootIsAcceptedAtEitherLevel asserts --spool-root works pointed at
+// the claude-<uid> directory ITSELF, not only at its parent: the launchd default
+// names /tmp while a mock harness names /tmp/claude-<uid>, and the same file must
+// be discovered either way. The fixture does not move — only the flag's level.
+func TestTheSpoolRootIsAcceptedAtEitherLevel(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	cwd := "/Users/dodgecoates/spool-uid-level-probe"
+	slug := cwdSlug(cwd)
+	session := "60606060-6060-4060-8060-60606060aaaa"
+	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)
+
+	opts := defaultSidecarOptions(t, fake.Socket, tree)
+	// The uid directory itself, one level below the launchd default.
+	opts.SpoolRoot = filepath.Join(tree.SpoolRoot, "claude-"+spoolUID)
+
+	// Act.
+	startSidecar(t, opts)
+	spool := newGrowingFile(t, spoolPath)
+	spool.AppendRaw([]byte("discovered from the uid level too\n"))
+
+	// Assert.
+	awaitAnyCursorFor(ctx, t, fake, spoolPath)
+}
+
+// TestResidueCarriesNoTopLevel asserts residue names no agent: an unparsed
+// record may belong to nothing, and top_level is UNSET rather than guessed.
+func TestResidueCarriesNoTopLevel(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	cwd := "/Users/dodgecoates/residue-toplevel-probe"
+	slug := cwdSlug(cwd)
+	session := "70707070-7070-4070-8070-70707070aaaa"
+	spoolPath := tree.spoolPath(slug, session, "z0uncla551f1able")
+
+	// Act.
+	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	spool := newGrowingFile(t, spoolPath)
+	spool.AppendRaw([]byte("bytes belonging to nobody\n"))
+	fake.awaitEntry(ctx, t, "residue naming the unclassifiable spool", func(e *storev1.StoreEntry) bool {
+		u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
+		return u != nil && samePath(u.GetSource(), spoolPath)
+	})
+
+	// Assert.
+	for _, e := range fake.Entries() {
+		u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
+		if u == nil || !samePath(u.GetSource(), spoolPath) {
+			continue
+		}
+		if got := e.GetAgentUpdate().GetTopLevel(); got != nil {
+			t.Errorf("residue entry %q names top_level %q; residue that names no agent must leave it UNSET",
+				e.GetUpsertKey(), got.GetValue())
+		}
+	}
+}
