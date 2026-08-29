@@ -68,7 +68,7 @@ OWN ACCORD (hygiene, no schema change): deleted generated bindings whose
 .proto no longer exists (shim/v1 endpoint_get_session_context_usage,
 endpoint_get_session_diagnostics, prompt_origin — Go and TS).
 
-## Landing 3 — STAGED on overhaul/landing-3 (not yet landed)
+## Landing 3 — overhaul/integration (2026-08-29; protos 29d147b79 + de58dda4b)
 
 OWN ACCORD:
 - DetachedLost {file_vanished | went_silent | swept_up} (agent_activity.proto)
@@ -95,7 +95,33 @@ OWN ACCORD:
 - Comment-only: FeedPageErrorHeadline.tone cites render-colors.json's colors.
 - FeedColdGateResolvedCompact.scope — the resolved trace named the summarizer
   but not the chosen scope, which the answer verb carries.
-- PENDING before landing: the daemon's derived error arms (every empty
+- shim.v1 StartTurnSuccess.page (conversation.v1.HistoryPage, required) —
+  the request already carried page_size/known_through and every comment
+  said the opening page rides the response; the field was missing.
+- shim.v1 UpdateAgentFailure.kind gains `not_deliverable` — the pinned SDK
+  has no route to prompt an existing subagent, and the nearest landed arm
+  (nothing_running) would have lied.
+- shim.v1 DetachForegroundFailure.kind gains `unsupported` — the pinned SDK
+  offers no verb to initiate a detachment; `not_detachable` (wrong kind)
+  would have lied.
+- Comment-only: conversation.v1.AgentId carries the CROSS-PLANE MINTING RULE
+  (main = original vendor session id; subagent = the spawning call's
+  tool_use_id, the one id both the stream and meta.json carry). The
+  previous wording implied a vendor agent-id space the stream never exposes.
+- store.v1 ReadAgentPageSuccess.lines: `repeated StorePageLine` →
+  `repeated StoreLineAt` — a continuation page carried no pointers while
+  HistoryEntryAt.at is required, so the shim was minting placeholder marks.
+- store.v1 rpc WatchBashRun {run} → stream {row: StoreAgentBash}, replay
+  then follow, ends after the terminal. BORDERLINE for the allowed class
+  (a new rpc, not a field): the bash table had a write path (the sidecar's
+  spool rows) and NO read path, so "every byte of detached shell output
+  comes from the sidecar" was unreachable. Reversible if the user prefers
+  folding bash rows into WatchAgentSession.
+- Comment-only: conversation.v1 AgentFrame.detached_work IS a page line
+  (upsert key `detached:<work id>`) — agent.proto said "never as a page
+  line" while history.proto required it for replay and GetLiveWork's
+  live_detached had no other source.
+- Deferred to landing 4: the daemon's derived error arms (every empty
   `<Rpc>Error` in agentrepl.v1, `transferring_away`, `not_yet_adopted`, the
   DaemonFault/SessionFault/HostFault kind oneofs).
 
