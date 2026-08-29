@@ -299,3 +299,6 @@ func collectStates(t *testing.T, c Client, n int) []LinkState {
 
 // alive reports whether a pid is still there.
 func alive(pid int) bool { return syscall.Kill(pid, syscall.Signal(0)) == nil }
+
+// Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
+func (s testSurfaces) Evict(_ string) error { return nil }
