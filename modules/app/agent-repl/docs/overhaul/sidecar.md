@@ -98,12 +98,34 @@ orchestration chain. Cross-cutting conventions are in
   kind arriving there is a producer defect. The EXEMPT SET is different:
   known built-ins deliberately not carried (TaskStop/TaskOutput/TaskGet/
   TaskList, ToolSearch, NotebookEdit, REPL, the MCP-resource family, …) are
-  DROPPED entirely — never AgentUnmodeled, never residue.
+  DROPPED entirely — never AgentUnmodeled, never residue. ONE CARVE-OUT
+  (ruled 2026-08-29): the TaskStop CALL stays dropped, but its RESULT
+  ({command, taskType, taskId}) is CONSUMED as the owning task's CANCELLED
+  terminal before dropping — deliberately-stopped work must resolve
+  cancelled, never LOST.
 - `AgentUnmodeled` keeps its meaning: a tool whose schema genuinely cannot be
   known. It is not a lazy fallback either.
+- CONTEXT-LIFECYCLE CONVERSION (ruled 2026-08-29): /clear is detected by
+  UNWRAPPING the vendor's expanded command envelope (the literal "/clear"
+  never appears on disk); compaction coalesces the boundary record with the
+  FOLLOWING summary line in FILE order, never timestamp order — both
+  produce the landed ContextCut records.
+- API-ERROR RECORDS (ruled 2026-08-29): a transcript system/api_error line
+  converts to the corresponding ApiRequestFailed conversation record —
+  mid-turn evidence, not a turn terminal.
+- WITHHOLDING (ruled 2026-08-29, conversion-side): records that must never
+  become feed rows are CLASSIFIED AT INGEST into non-feed kinds — CLI
+  slash-command bookkeeping/machinery, SKILL.md bodies (folded into the
+  Skill card), task-notification envelopes, the synthetic "No response
+  requested." assistant record, context-cut exclusions — so no resolver
+  ever sees them as prose and no history page regrows fake prompt bubbles.
 
 ### Discovery scope
 
+- MULTI-ROOT (ruled 2026-08-29): BOTH account config roots (the default and
+  the multi-repo root's config dir) are discovery roots, configurable — the
+  second account's transcripts are invisible otherwise. Scan/notify latency
+  mechanics are the implementer's.
 - Exactly four kinds of file, all written by the agent binary:
   1. session transcripts (JSONL);
   2. subagent transcripts;
@@ -113,7 +135,10 @@ orchestration chain. Cross-cutting conventions are in
      spawn depth, model, and worktree — a per-agent transcript is not
      ingestible without its meta file;
   4. `tasks/*.output` spools — PER-TASK files, so only BACKGROUND work has
-     one. Foreground shell output exists in NO file while it runs (the spool
+     one. Spools carry THREE kinds by task-id prefix (ruled 2026-08-29):
+     `b*` shell output, `a*` agent transcripts, `w*` workflow journals —
+     each routed to its kind's conversion; an unclassifiable prefix is a
+     loud total-ingestion violation. Foreground shell output exists in NO file while it runs (the spool
      path materializes at process exit, already final-size): the bash update
      arm is structurally detach-only.
 - A workflow journal holds exactly two record shapes — `{started, key,
@@ -127,6 +152,14 @@ orchestration chain. Cross-cutting conventions are in
   the EXIT marker to the terminal.
 
 ### Owner resolution and the LOST/staleness policy
+
+- TOTAL INGESTION IS ABSOLUTE (ruled 2026-08-29): an unattributed spool is
+  held untailed while ownership is unresolved, but it is NEVER permanently
+  dropped — an aged unowned spool ingests as residue with unknown
+  ownership rather than being retired terminal.
+- PATH NORMALIZATION (ruled 2026-08-29): resolve the macOS /tmp →
+  /private/tmp symlink before comparing spool paths — the same file must
+  not read as two.
 
 - Every frame must name its agent (`AgentFrame.agent_id`; the store's book is
   read from the frame, never invented). The main agent's id is OURS —
@@ -155,6 +188,16 @@ orchestration chain. Cross-cutting conventions are in
 - On startup: `GetSidecarCursors` (all cursors, or one file_id); empty
   success is the fresh-store answer — start every file from zero. After any
   crash or deploy the UX is "no gaps, no repeats".
+- STORE-UNREACHABLE INVARIANT (ruled 2026-08-29, connection-free
+  restatement of the old link machine): every production cycle BEGINS with
+  a successful cursor read from the store; any store error suspends ALL
+  production until a full recover-cursors-then-rescan succeeds. Never build
+  a tailer from a position the store did not hand us; produce NOTHING while
+  the store is unreachable.
+- THE HOLD (ruled 2026-08-29): a conversion may HOLD the trailing frame of
+  a batch (its meaning depends on the next line) — the cursor then advances
+  SHORT of what was read, to the held frame's offset; the hold is bounded
+  to one redelivery, and an out-of-batch hold is refused loudly.
 
 ### Writing to the store (the sidecar as producer)
 
@@ -164,7 +207,11 @@ orchestration chain. Cross-cutting conventions are in
   means NOTHING committed. On failure the sidecar simply does not advance —
   it needs no retry buffer and no spill, because its sources are durable
   files it re-reads from the last committed cursor.
-- Envelope duties per entry: mint `write_id` once per write; mint
+- Envelope duties per entry: mint `write_id` once per write — and
+  DETERMINISTICALLY (ruled 2026-08-29): a digest of the write's source
+  coordinates (producer, path, offset, discriminator), so the same bytes
+  re-read always mint the same id; randomness is forbidden (replay
+  idempotence rests on it); mint
   `upsert_key` from the unit's identity (the mapping is the producer's, the
   store never interprets it); set `plane.file`; resolve `top_level` (UNSET
   only when genuinely unresolvable); pick the `agent_info` arm — pageability
@@ -235,3 +282,13 @@ orchestration chain. Cross-cutting conventions are in
 - The vendor's transcript spelling of the session id diverges from the
   runtime's answer in ~22% of records — stay on the runtime's; transcript
   divergence never rides the wire.
+
+### Additional rulings (final-audit triage, 2026-08-29)
+
+- LOG CORRELATION: store and sidecar work WITH THE PROJECT LEAD to
+  consolidate the structured-logging and log-correlation scheme (the old
+  keys — claude_session_id, seq counters — are retired with the
+  addressing), unified under the /debug-emacs-agent-repl logging contract.
+- WORKFLOW IS KICKED: workflow journal/transcript ingestion vocabulary
+  stays in the contract but the workflow feature is NOT implemented in
+  this wave.
