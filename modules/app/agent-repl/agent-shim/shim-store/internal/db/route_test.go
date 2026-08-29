@@ -56,14 +56,20 @@ func TestClassifyRoutesEveryArmToItsKind(t *testing.T) {
 			wantBook: "agent-1",
 		},
 		{
-			name:     "detached work announcement is never a page line",
+			// The handoff is what the book's reader has to see, and the
+			// announcement is the one durable copy of what was announced.
+			name:     "detached work announcement is a page line",
 			entry:    pageEntry("w", "u", "agent-1", frameItem(detachedFrame("agent-1", createdWork("work-1", bashWork())))),
-			wantKind: kindDetachedWork,
+			wantKind: kindPageLine,
+			wantBook: "agent-1",
 		},
 		{
-			name:     "a detached workflow announcement is workflow residue",
+			// A workflow-kind announcement is a page line like every other
+			// announcement; what this wave does not do is SERVE the workflow.
+			name:     "a detached workflow announcement is a page line too",
 			entry:    pageEntry("w", "u", "agent-1", frameItem(detachedFrame("agent-1", createdWork("work-1", workflowWork())))),
-			wantKind: kindWorkflow,
+			wantKind: kindPageLine,
+			wantBook: "agent-1",
 		},
 		{
 			name:     "keepalive is never served",

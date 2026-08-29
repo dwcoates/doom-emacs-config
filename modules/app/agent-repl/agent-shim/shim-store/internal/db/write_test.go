@@ -110,23 +110,85 @@ func TestWriteBatchCreatesTheAgentRowASubagentStartAnnounces(t *testing.T) {
 	}
 }
 
-func TestWriteBatchLandsADetachedSubagentAnnouncementInTheLifecycleTableOnly(t *testing.T) {
-	// Arrange
+func TestWriteBatchLandsADetachedSubagentAnnouncementAsAPageLine(t *testing.T) {
+	// Arrange: "work left this stream" is the HANDOFF, and a book that omitted
+	// it would keep claiming work that is no longer in the turn.
 	d, _ := newStore(t)
 	entry := pageEntry("w1", "u1", "agent-1", frameItem(detachedFrame("agent-1", createdWork("work-1", subagentWork("agent-2")))))
 
 	// Act
 	result := writeOK(t, d, entry)
 
-	// Assert: never a page line — the spawning call already is one.
-	if len(result.Lines) != 0 {
-		t.Fatalf("lines = %d, want 0", len(result.Lines))
+	// Assert
+	if len(result.Lines) != 1 {
+		t.Fatalf("lines = %d, want 1", len(result.Lines))
 	}
+	if result.Lines[0].AgentID != "agent-1" {
+		t.Fatalf("line book = %q, want the ANNOUNCING agent's book", result.Lines[0].AgentID)
+	}
+}
+
+func TestWriteBatchAlsoWritesTheJoinRowADetachedAnnouncementNames(t *testing.T) {
+	// Arrange: the page line is what is SERVED; the join row is what
+	// GetLiveWork scans and what a terminal closes.
+	d, _ := newStore(t)
+	entry := pageEntry("w1", "u1", "agent-1", frameItem(detachedFrame("agent-1", createdWork("work-1", subagentWork("agent-2")))))
+
+	// Act
+	writeOK(t, d, entry)
+
+	// Assert
 	if got := scalar[string](t, d, `SELECT kind FROM detached_work WHERE work_id = 'work-1'`); got != detachedKindSubagent {
 		t.Fatalf("kind = %q, want %q", got, detachedKindSubagent)
 	}
 	if got := scalar[int](t, d, `SELECT COUNT(*) FROM agent WHERE agent_id = 'agent-2'`); got != 1 {
 		t.Fatal("the created agent's row was not ensured")
+	}
+}
+
+func TestWriteBatchReAnnouncementUpsertsTheJoinRowRatherThanDuplicatingIt(t *testing.T) {
+	// Arrange: the handle is the row's identity, so a producer that replays an
+	// announcement under a new write_id still names one run.
+	d, _ := newStore(t)
+	first := pageEntry("w1", "detached:work-1", "agent-1", frameItem(detachedFrame("agent-1", createdWork("work-1", bashWork()))))
+	second := pageEntry("w2", "detached:work-1", "agent-1", frameItem(detachedFrame("agent-1", createdWork("work-1", bashWork()))))
+	writeOK(t, d, first)
+
+	// Act
+	writeOK(t, d, second)
+
+	// Assert
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM detached_work WHERE work_id = 'work-1'`); got != 1 {
+		t.Fatalf("detached_work rows = %d, want 1", got)
+	}
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM entry WHERE upsert_key = 'detached:work-1'`); got != 1 {
+		t.Fatalf("entry rows = %d, want 1 — the announcement supersedes its own row", got)
+	}
+}
+
+func TestWriteBatchKeepsTheAnnouncementItselfOutOfTheLifecycleTable(t *testing.T) {
+	// Arrange: the spool path, the readability, the cause and the timeout live
+	// in the served page line and NOWHERE ELSE. Unpacking them here as well
+	// would give one fact two homes that can disagree.
+	d, _ := newStore(t)
+	work := withOutput(createdWork("work-1", bashWork()), &conversationv1.DetachedWorkOutput{
+		Path:        "/tmp/spool.log",
+		Readability: &conversationv1.DetachedWorkOutput_Readable{Readable: &conversationv1.DetachedWorkOutputReadable{}},
+	})
+	entry := pageEntry("w1", "u1", "agent-1", frameItem(detachedFrame("agent-1", work)))
+
+	// Act
+	result := writeOK(t, d, entry)
+
+	// Assert: the served line still carries the spool, and the join row holds
+	// only join columns.
+	served := result.Lines[0].Line.GetLine().GetAgentItem().GetAgentFrame().GetDetachedWork()
+	if got := served.GetOutput().GetPath(); got != "/tmp/spool.log" {
+		t.Fatalf("the served announcement's spool path = %q, want /tmp/spool.log", got)
+	}
+	columns := scalar[int](t, d, `SELECT COUNT(*) FROM pragma_table_info('detached_work')`)
+	if columns != 7 {
+		t.Fatalf("detached_work has %d columns, want the 7 join columns only", columns)
 	}
 }
 
@@ -154,15 +216,14 @@ func TestWriteBatchRecordsEachDetachableWorkKind(t *testing.T) {
 			if got := scalar[string](t, d, `SELECT kind FROM detached_work WHERE work_id = 'work-1'`); got != test.want {
 				t.Fatalf("kind = %q, want %q", got, test.want)
 			}
-			if got := scalar[string](t, d, `SELECT cause FROM detached_work WHERE work_id = 'work-1'`); got != causeCreated {
-				t.Fatalf("cause = %q, want %q", got, causeCreated)
-			}
 		})
 	}
 }
 
-func TestWriteBatchRecordsTheDetachCauseAndItsTimeout(t *testing.T) {
-	// Arrange: the figure is the CONFIGURED limit, not the work's runtime.
+func TestWriteBatchRecordsTheOriginUnitADetachedAnnouncementNames(t *testing.T) {
+	// Arrange: origin_unit is the JOIN — the one indexed lookup a terminal on
+	// the spawning stream closes this row through. The detach CAUSE and its
+	// timeout are conversation content and stay in the served page line.
 	d, _ := newStore(t)
 	work := detachedWork("work-1", "act-1", &conversationv1.DetachedWorkDetached_TimedOut{
 		TimedOut: &conversationv1.DetachedCauseTimedOut{TimeoutMs: 30_000},
@@ -170,40 +231,15 @@ func TestWriteBatchRecordsTheDetachCauseAndItsTimeout(t *testing.T) {
 	entry := pageEntry("w1", "u1", "agent-1", frameItem(detachedFrame("agent-1", work)))
 
 	// Act
-	writeOK(t, d, entry)
+	result := writeOK(t, d, entry)
 
 	// Assert
-	if got := scalar[string](t, d, `SELECT cause FROM detached_work WHERE work_id = 'work-1'`); got != causeTimedOut {
-		t.Fatalf("cause = %q, want %q", got, causeTimedOut)
-	}
-	if got := scalar[int64](t, d, `SELECT timeout_ms FROM detached_work WHERE work_id = 'work-1'`); got != 30_000 {
-		t.Fatalf("timeout_ms = %d, want 30000", got)
-	}
 	if got := scalar[string](t, d, `SELECT origin_unit FROM detached_work WHERE work_id = 'work-1'`); got != "act-1" {
 		t.Fatalf("origin_unit = %q, want act-1", got)
 	}
-}
-
-func TestWriteBatchRecordsTheSpoolAndItsReadability(t *testing.T) {
-	// Arrange: an unreadable spool is a path shown for the record; a readable
-	// one is something a surface may offer to follow, so the two are stored
-	// apart rather than inferred from the path.
-	d, _ := newStore(t)
-	work := withOutput(createdWork("work-1", bashWork()), &conversationv1.DetachedWorkOutput{
-		Path:        "/tmp/spool.log",
-		Readability: &conversationv1.DetachedWorkOutput_Readable{Readable: &conversationv1.DetachedWorkOutputReadable{}},
-	})
-	entry := pageEntry("w1", "u1", "agent-1", frameItem(detachedFrame("agent-1", work)))
-
-	// Act
-	writeOK(t, d, entry)
-
-	// Assert
-	if got := scalar[string](t, d, `SELECT output_path FROM detached_work WHERE work_id = 'work-1'`); got != "/tmp/spool.log" {
-		t.Fatalf("output_path = %q", got)
-	}
-	if got := scalar[bool](t, d, `SELECT output_readable FROM detached_work WHERE work_id = 'work-1'`); !got {
-		t.Fatal("output_readable = false, want true")
+	served := result.Lines[0].Line.GetLine().GetAgentItem().GetAgentFrame().GetDetachedWork()
+	if got := served.GetDetached().GetTimedOut().GetTimeoutMs(); got != 30_000 {
+		t.Fatalf("the served announcement's timeout = %d, want 30000", got)
 	}
 }
 
@@ -714,23 +750,6 @@ func TestWriteBatchStoresTheAgentFrameItselfAsTheTerminal(t *testing.T) {
 	}
 }
 
-func TestWriteBatchStoresTheBashFrameItselfAsTheLatestState(t *testing.T) {
-	// Arrange
-	d, _ := newStore(t)
-
-	// Act
-	writeOK(t, d, bashEntry("w1", "u1", "run-1", bashStart()))
-
-	// Assert
-	blob := scalar[[]byte](t, d, `SELECT latest_state FROM detached_work WHERE work_id = 'run-1'`)
-	frame := &conversationv1.AgentBash{}
-	if err := proto.Unmarshal(blob, frame); err != nil {
-		t.Fatalf("latest_state is not an AgentBash: %v", err)
-	}
-	if frame.GetStart() == nil {
-		t.Fatalf("latest_state frame = %v", frame)
-	}
-}
 
 // ---- the write ledger ----
 

@@ -120,7 +120,7 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 			continue
 		}
 
-		if r.kind == kindWorkflow {
+		if r.workflowNotImplemented {
 			// DURABLE, NEVER DROPPED, and loud: the row lands whole so nothing
 			// is lost, and the warning says why nothing serves it yet.
 			warn := fields

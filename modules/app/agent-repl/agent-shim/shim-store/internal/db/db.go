@@ -41,7 +41,7 @@ import (
 // and there never will be: the store is nuked, never migrated, so the version
 // answers exactly one question — "did this binary create what is on disk?" —
 // and the only remedy for "no" is to recreate it.
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 // nowMillis is the store's wall clock in unix millis.
 func nowMillis() int64 { return time.Now().UnixMilli() }
@@ -226,17 +226,22 @@ CREATE TABLE workflow (
 );
 CREATE INDEX workflow_live ON workflow(ended_at_ms);
 
+-- detached_work holds THE JOIN AND NOTHING ELSE.
+--
+-- The announcement itself is a PAGE LINE of the announcing agent's book, and
+-- that page line is the one copy of what was announced: the spool path, the
+-- readability, the detach cause, the timeout. Unpacking any of it here as well
+-- would give the same fact two homes that can disagree, and the store would be
+-- re-deriving conversation content it is not entitled to interpret. What is
+-- left is exactly what the store itself filters and joins on: the handle, the
+-- kind, the origin unit a terminal closes the row through, the announcing
+-- agent, and the terminal columns.
 CREATE TABLE detached_work (
   work_id         TEXT PRIMARY KEY,
   kind            TEXT NOT NULL,
   origin_unit     TEXT,
   owner_agent     TEXT,
-  output_path     TEXT,
-  output_readable INTEGER,
-  cause           TEXT,
-  timeout_ms      INTEGER,
   announced_at_ms INTEGER NOT NULL,
-  latest_state    BLOB NOT NULL,
   ended_at_ms     INTEGER,
   terminal        BLOB
 );
