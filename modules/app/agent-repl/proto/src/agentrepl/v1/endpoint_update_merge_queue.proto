@@ -51,6 +51,12 @@ message UpdateMergeQueueError {
     UpdateMergeQueueTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     UpdateMergeQueueNotYetAdopted not_yet_adopted = 4;
+    // The queue is already paused.
+    UpdateMergeQueueAlreadyPaused already_paused = 5;
+    // The queue is not paused.
+    UpdateMergeQueueNotPaused not_paused = 6;
+    // No queued merge for that workspace.
+    UpdateMergeQueueNoSuchQueuedMerge no_such_queued_merge = 7;
   }
 }
 message UpdateMergeQueueUnknownWorkspace {}
@@ -63,3 +69,6 @@ message UpdateMergeQueueTransferringAway {
   string address = 1;
 }
 message UpdateMergeQueueNotYetAdopted {}
+message UpdateMergeQueueAlreadyPaused {}
+message UpdateMergeQueueNotPaused {}
+message UpdateMergeQueueNoSuchQueuedMerge {}
