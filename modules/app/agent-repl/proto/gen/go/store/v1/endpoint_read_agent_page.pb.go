@@ -180,8 +180,10 @@ func (*ReadAgentPageResponse_Failure) isReadAgentPageResponse_Result() {}
 // The page as served.
 type ReadAgentPageSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The lines, newest first. At most page_size of them.
-	Lines []*StorePageLine `protobuf:"bytes,1,rep,name=lines,proto3" json:"lines,omitempty"`
+	// The lines, newest first, each with its pointer — a continuation page
+	// carries real positions exactly as the opening page does, so a reader
+	// never mints a placeholder mark. At most page_size of them.
+	Lines []*StoreLineAt `protobuf:"bytes,1,rep,name=lines,proto3" json:"lines,omitempty"`
 	// Whether older lines remain. THE ARM IS THE COMPLETENESS.
 	//
 	// Types that are valid to be assigned to Boundary:
@@ -223,7 +225,7 @@ func (*ReadAgentPageSuccess) Descriptor() ([]byte, []int) {
 	return file_store_v1_endpoint_read_agent_page_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *ReadAgentPageSuccess) GetLines() []*StorePageLine {
+func (x *ReadAgentPageSuccess) GetLines() []*StoreLineAt {
 	if x != nil {
 		return x.Lines
 	}
@@ -271,12 +273,17 @@ func (*ReadAgentPageSuccess_More) isReadAgentPageSuccess_Boundary() {}
 
 func (*ReadAgentPageSuccess_Floor) isReadAgentPageSuccess_Boundary() {}
 
-// The page could not be served. `kind` arms are DERIVED at the wave from the
-// store's real refusal sites (unknown book, stale pointer).
+// The page could not be served. THE ARM IS WHY.
 type ReadAgentPageFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The store's account, for a human and for logs; never switched on.
-	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	Detail string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*ReadAgentPageFailure_InvalidRequest
+	//	*ReadAgentPageFailure_StalePointer
+	//	*ReadAgentPageFailure_StorageFailure
+	Kind          isReadAgentPageFailure_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -318,6 +325,186 @@ func (x *ReadAgentPageFailure) GetDetail() string {
 	return ""
 }
 
+func (x *ReadAgentPageFailure) GetKind() isReadAgentPageFailure_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *ReadAgentPageFailure) GetInvalidRequest() *ReadAgentPageInvalidRequest {
+	if x != nil {
+		if x, ok := x.Kind.(*ReadAgentPageFailure_InvalidRequest); ok {
+			return x.InvalidRequest
+		}
+	}
+	return nil
+}
+
+func (x *ReadAgentPageFailure) GetStalePointer() *ReadAgentPageStalePointer {
+	if x != nil {
+		if x, ok := x.Kind.(*ReadAgentPageFailure_StalePointer); ok {
+			return x.StalePointer
+		}
+	}
+	return nil
+}
+
+func (x *ReadAgentPageFailure) GetStorageFailure() *ReadAgentPageStorageFailure {
+	if x != nil {
+		if x, ok := x.Kind.(*ReadAgentPageFailure_StorageFailure); ok {
+			return x.StorageFailure
+		}
+	}
+	return nil
+}
+
+type isReadAgentPageFailure_Kind interface {
+	isReadAgentPageFailure_Kind()
+}
+
+type ReadAgentPageFailure_InvalidRequest struct {
+	// Empty book, zero page_size, or an `after` that is unset, empty or not
+	// store-minted.
+	InvalidRequest *ReadAgentPageInvalidRequest `protobuf:"bytes,2,opt,name=invalid_request,json=invalidRequest,proto3,oneof"`
+}
+
+type ReadAgentPageFailure_StalePointer struct {
+	// A well-formed `after` naming no line of this book.
+	StalePointer *ReadAgentPageStalePointer `protobuf:"bytes,3,opt,name=stale_pointer,json=stalePointer,proto3,oneof"`
+}
+
+type ReadAgentPageFailure_StorageFailure struct {
+	StorageFailure *ReadAgentPageStorageFailure `protobuf:"bytes,4,opt,name=storage_failure,json=storageFailure,proto3,oneof"`
+}
+
+func (*ReadAgentPageFailure_InvalidRequest) isReadAgentPageFailure_Kind() {}
+
+func (*ReadAgentPageFailure_StalePointer) isReadAgentPageFailure_Kind() {}
+
+func (*ReadAgentPageFailure_StorageFailure) isReadAgentPageFailure_Kind() {}
+
+// The request was malformed or violated the validation invariant.
+type ReadAgentPageInvalidRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which field (with the offending entry's index where one applies), as
+	// the store names it — for the producer's logs, never switched on.
+	Field         string `protobuf:"bytes,1,opt,name=field,proto3" json:"field,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadAgentPageInvalidRequest) Reset() {
+	*x = ReadAgentPageInvalidRequest{}
+	mi := &file_store_v1_endpoint_read_agent_page_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadAgentPageInvalidRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadAgentPageInvalidRequest) ProtoMessage() {}
+
+func (x *ReadAgentPageInvalidRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_read_agent_page_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadAgentPageInvalidRequest.ProtoReflect.Descriptor instead.
+func (*ReadAgentPageInvalidRequest) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_read_agent_page_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ReadAgentPageInvalidRequest) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
+
+// The database failed; `detail` carries the driver's text.
+type ReadAgentPageStorageFailure struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadAgentPageStorageFailure) Reset() {
+	*x = ReadAgentPageStorageFailure{}
+	mi := &file_store_v1_endpoint_read_agent_page_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadAgentPageStorageFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadAgentPageStorageFailure) ProtoMessage() {}
+
+func (x *ReadAgentPageStorageFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_read_agent_page_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadAgentPageStorageFailure.ProtoReflect.Descriptor instead.
+func (*ReadAgentPageStorageFailure) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_read_agent_page_proto_rawDescGZIP(), []int{5}
+}
+
+// The pointer names no line of the addressed book.
+type ReadAgentPageStalePointer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadAgentPageStalePointer) Reset() {
+	*x = ReadAgentPageStalePointer{}
+	mi := &file_store_v1_endpoint_read_agent_page_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadAgentPageStalePointer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadAgentPageStalePointer) ProtoMessage() {}
+
+func (x *ReadAgentPageStalePointer) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_read_agent_page_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadAgentPageStalePointer.ProtoReflect.Descriptor instead.
+func (*ReadAgentPageStalePointer) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_read_agent_page_proto_rawDescGZIP(), []int{6}
+}
+
 var File_store_v1_endpoint_read_agent_page_proto protoreflect.FileDescriptor
 
 const file_store_v1_endpoint_read_agent_page_proto_rawDesc = "" +
@@ -330,15 +517,23 @@ const file_store_v1_endpoint_read_agent_page_proto_rawDesc = "" +
 	"\x15ReadAgentPageResponse\x12:\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1e.store.v1.ReadAgentPageSuccessH\x00R\asuccess\x12:\n" +
 	"\afailure\x18\x02 \x01(\v2\x1e.store.v1.ReadAgentPageFailureH\x00R\afailureB\b\n" +
-	"\x06result\"\xba\x01\n" +
-	"\x14ReadAgentPageSuccess\x12-\n" +
-	"\x05lines\x18\x01 \x03(\v2\x17.store.v1.StorePageLineR\x05lines\x121\n" +
+	"\x06result\"\xb8\x01\n" +
+	"\x14ReadAgentPageSuccess\x12+\n" +
+	"\x05lines\x18\x01 \x03(\v2\x15.store.v1.StoreLineAtR\x05lines\x121\n" +
 	"\x04more\x18\x02 \x01(\v2\x1b.store.v1.ReadAgentPageMoreH\x00R\x04more\x124\n" +
 	"\x05floor\x18\x03 \x01(\v2\x1c.store.v1.ReadAgentPageFloorH\x00R\x05floorB\n" +
 	"\n" +
-	"\bboundary\".\n" +
+	"\bboundary\"\xa6\x02\n" +
 	"\x14ReadAgentPageFailure\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detailB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
+	"\x06detail\x18\x01 \x01(\tR\x06detail\x12P\n" +
+	"\x0finvalid_request\x18\x02 \x01(\v2%.store.v1.ReadAgentPageInvalidRequestH\x00R\x0einvalidRequest\x12J\n" +
+	"\rstale_pointer\x18\x03 \x01(\v2#.store.v1.ReadAgentPageStalePointerH\x00R\fstalePointer\x12P\n" +
+	"\x0fstorage_failure\x18\x04 \x01(\v2%.store.v1.ReadAgentPageStorageFailureH\x00R\x0estorageFailureB\x06\n" +
+	"\x04kind\"3\n" +
+	"\x1bReadAgentPageInvalidRequest\x12\x14\n" +
+	"\x05field\x18\x01 \x01(\tR\x05field\"\x1d\n" +
+	"\x1bReadAgentPageStorageFailure\"\x1b\n" +
+	"\x19ReadAgentPageStalePointerB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 
 var (
 	file_store_v1_endpoint_read_agent_page_proto_rawDescOnce sync.Once
@@ -352,31 +547,37 @@ func file_store_v1_endpoint_read_agent_page_proto_rawDescGZIP() []byte {
 	return file_store_v1_endpoint_read_agent_page_proto_rawDescData
 }
 
-var file_store_v1_endpoint_read_agent_page_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_store_v1_endpoint_read_agent_page_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_store_v1_endpoint_read_agent_page_proto_goTypes = []any{
-	(*ReadAgentPageRequest)(nil),  // 0: store.v1.ReadAgentPageRequest
-	(*ReadAgentPageResponse)(nil), // 1: store.v1.ReadAgentPageResponse
-	(*ReadAgentPageSuccess)(nil),  // 2: store.v1.ReadAgentPageSuccess
-	(*ReadAgentPageFailure)(nil),  // 3: store.v1.ReadAgentPageFailure
-	(*v1.AgentId)(nil),            // 4: conversation.v1.AgentId
-	(*StoreItemPointer)(nil),      // 5: store.v1.StoreItemPointer
-	(*StorePageLine)(nil),         // 6: store.v1.StorePageLine
-	(*ReadAgentPageMore)(nil),     // 7: store.v1.ReadAgentPageMore
-	(*ReadAgentPageFloor)(nil),    // 8: store.v1.ReadAgentPageFloor
+	(*ReadAgentPageRequest)(nil),        // 0: store.v1.ReadAgentPageRequest
+	(*ReadAgentPageResponse)(nil),       // 1: store.v1.ReadAgentPageResponse
+	(*ReadAgentPageSuccess)(nil),        // 2: store.v1.ReadAgentPageSuccess
+	(*ReadAgentPageFailure)(nil),        // 3: store.v1.ReadAgentPageFailure
+	(*ReadAgentPageInvalidRequest)(nil), // 4: store.v1.ReadAgentPageInvalidRequest
+	(*ReadAgentPageStorageFailure)(nil), // 5: store.v1.ReadAgentPageStorageFailure
+	(*ReadAgentPageStalePointer)(nil),   // 6: store.v1.ReadAgentPageStalePointer
+	(*v1.AgentId)(nil),                  // 7: conversation.v1.AgentId
+	(*StoreItemPointer)(nil),            // 8: store.v1.StoreItemPointer
+	(*StoreLineAt)(nil),                 // 9: store.v1.StoreLineAt
+	(*ReadAgentPageMore)(nil),           // 10: store.v1.ReadAgentPageMore
+	(*ReadAgentPageFloor)(nil),          // 11: store.v1.ReadAgentPageFloor
 }
 var file_store_v1_endpoint_read_agent_page_proto_depIdxs = []int32{
-	4, // 0: store.v1.ReadAgentPageRequest.book:type_name -> conversation.v1.AgentId
-	5, // 1: store.v1.ReadAgentPageRequest.after:type_name -> store.v1.StoreItemPointer
-	2, // 2: store.v1.ReadAgentPageResponse.success:type_name -> store.v1.ReadAgentPageSuccess
-	3, // 3: store.v1.ReadAgentPageResponse.failure:type_name -> store.v1.ReadAgentPageFailure
-	6, // 4: store.v1.ReadAgentPageSuccess.lines:type_name -> store.v1.StorePageLine
-	7, // 5: store.v1.ReadAgentPageSuccess.more:type_name -> store.v1.ReadAgentPageMore
-	8, // 6: store.v1.ReadAgentPageSuccess.floor:type_name -> store.v1.ReadAgentPageFloor
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	7,  // 0: store.v1.ReadAgentPageRequest.book:type_name -> conversation.v1.AgentId
+	8,  // 1: store.v1.ReadAgentPageRequest.after:type_name -> store.v1.StoreItemPointer
+	2,  // 2: store.v1.ReadAgentPageResponse.success:type_name -> store.v1.ReadAgentPageSuccess
+	3,  // 3: store.v1.ReadAgentPageResponse.failure:type_name -> store.v1.ReadAgentPageFailure
+	9,  // 4: store.v1.ReadAgentPageSuccess.lines:type_name -> store.v1.StoreLineAt
+	10, // 5: store.v1.ReadAgentPageSuccess.more:type_name -> store.v1.ReadAgentPageMore
+	11, // 6: store.v1.ReadAgentPageSuccess.floor:type_name -> store.v1.ReadAgentPageFloor
+	4,  // 7: store.v1.ReadAgentPageFailure.invalid_request:type_name -> store.v1.ReadAgentPageInvalidRequest
+	6,  // 8: store.v1.ReadAgentPageFailure.stale_pointer:type_name -> store.v1.ReadAgentPageStalePointer
+	5,  // 9: store.v1.ReadAgentPageFailure.storage_failure:type_name -> store.v1.ReadAgentPageStorageFailure
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_read_agent_page_proto_init() }
@@ -393,13 +594,18 @@ func file_store_v1_endpoint_read_agent_page_proto_init() {
 		(*ReadAgentPageSuccess_More)(nil),
 		(*ReadAgentPageSuccess_Floor)(nil),
 	}
+	file_store_v1_endpoint_read_agent_page_proto_msgTypes[3].OneofWrappers = []any{
+		(*ReadAgentPageFailure_InvalidRequest)(nil),
+		(*ReadAgentPageFailure_StalePointer)(nil),
+		(*ReadAgentPageFailure_StorageFailure)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_store_v1_endpoint_read_agent_page_proto_rawDesc), len(file_store_v1_endpoint_read_agent_page_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
