@@ -82,6 +82,12 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 
 	settled := c.settledItem(kind, call, result, block, failed, env.timestampMs, at)
 	if settled == nil {
+		if settlesLater(kind) {
+			// Deliberate: this kind's unit settles on a later record, and its own
+			// branch has already logged which. Filing it as residue would report
+			// a perfectly-handled result as a mapping gap.
+			return nil
+		}
 		c.log.With(at.ctxWarn("tool-return")).With(logging.Context{ActivityID: callID}).
 			Log("tool result name=%q produced no settled unit; stored as vendor_specific residue so the answer is not lost", call.name)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "unsettled_tool_result/"+call.name, record)}
