@@ -3283,8 +3283,7 @@ export type AgentReadStart = Message<"conversation.v1.AgentReadStart"> & {
    * When the read began, so a consumer can draw how long it has been waiting.
    *
    * Tag 3 is RETIRED: the PDF page-range request is deferred with the pdf
-   * read extent — see the deferred-work metadocument ("non-text read
-   * extents").
+   * read extent.
    *
    * @generated from field: conversation.v1.AgentActivityStartedAt started_at = 2;
    */

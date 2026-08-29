@@ -271,8 +271,7 @@ message TokenUsage {
   uint64 output_thinking_tokens = 4;
 
   // Tags 5-6 are RETIRED: the refusal-fallback credit and the cache-miss
-  // diagnostics are deferred — see the deferred-work metadocument
-  // ("token fallback credit", "cache-miss diagnostics").
+  // diagnostics are deferred.
 }
 
 // The prompt input this request did not have to process, because the prompt

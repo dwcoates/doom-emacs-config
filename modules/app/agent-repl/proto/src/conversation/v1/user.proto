@@ -45,7 +45,6 @@ message UserContentBlock {
     // A block whose kind we do not model. It renders as nothing and is kept so
     // the decision is reversible.
     UnsupportedBlock unsupported = 3;
-    // Tag 4 is RETIRED: the attached-file block is deferred — see the
-    // deferred-work metadocument ("attached-file block").
+    // Tag 4 is RETIRED: the attached-file block is deferred.
   }
 }

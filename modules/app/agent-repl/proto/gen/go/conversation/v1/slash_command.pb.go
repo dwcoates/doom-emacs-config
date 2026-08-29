@@ -365,7 +365,7 @@ type ContextCut_Compacted struct {
 type ContextCut_CompactionFailed struct {
 	// A compaction was attempted and FAILED, so nothing was cut. The context
 	// is as it was — and still too large, which is why this is not silence.
-	CompactionFailed *ContextCompactionFailed `protobuf:"bytes,3,opt,name=compaction_failed,json=compactionFailed,proto3,oneof"`
+	CompactionFailed *ContextCompactionFailed `protobuf:"bytes,3,opt,name=compaction_failed,json=compactionFailed,proto3,oneof"` // Tag 4 is RETIRED: the server-side context edit is deferred.
 }
 
 func (*ContextCut_Cleared) isContextCut_Cut() {}

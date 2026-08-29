@@ -51,8 +51,7 @@ message SessionStarted {
   // have announced it, so a consumer opens the matching stream for each.
   repeated AgentDetachedWork live_work = 6;
 
-  // Tag 8 is RETIRED: the vendor handshake block is deferred — see the
-  // deferred-work metadocument ("vendor handshake").
+  // Tag 8 is RETIRED: the vendor handshake block is deferred.
 }
 
 // The shim and the SDK it drives. Fixed for the process; stated once.
@@ -186,8 +185,7 @@ message SessionUpdate {
     // busy periods, announced shutdown, notifications, transcript write
     // failure, active goal, prompt suggestions, file uploads, incomplete
     // interrupts, MCP policy, background tasks, model fallback, relocation
-    // and worktree state, tool-set churn, settings faults) are deferred —
-    // see the deferred-work metadocument ("vendor session events").
+    // and worktree state, tool-set churn, settings faults) are deferred.
     // The vendor's own context-budget warning, injected into the prompt as
     // the window fills. Session-scoped; the footer's activity line draws it.
     SessionContextBudgetWarning context_budget_warning = 24;
