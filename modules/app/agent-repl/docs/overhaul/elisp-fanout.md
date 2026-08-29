@@ -17,8 +17,11 @@ the proto wins and the agent reports the conflict.
   under that variable.
 - Logging: every logical branch of production code logs through core.el's
   canonical API: `agent-repl--log` (debug), `agent-repl--info`,
-  `agent-repl--warn` (WARNING), `agent-repl--error` (ERROR; added by the
-  dead-code pre-pass). Operation names: `elisp.<module>.<operation>`.
+  `agent-repl--warn` (WARNING), `agent-repl--error` (ERROR; a PURE LOGGER
+  that never signals — ruled at the pre-pass). REFUSALS that must abort use
+  `agent-repl--fatal` (record at ERROR, then signal — the pre-existing
+  behavior, renamed) or `user-error` for interactive refusals; never swallow
+  a signal. Operation names: `elisp.<module>.<operation>`.
   Dynamic values go in the context, never only in the message.
 - Validation invariant: a push or response missing a non-optional field, an
   unset oneof, a oneof with two arms set, or an unknown field/arm is a
@@ -292,6 +295,14 @@ are deleted by the verbs agent once verbs.el replaces them.
 
 - `(agent-repl-roster-subscribe CONN)`; `agent-repl-roster-view` holds the
   last decoded roster; `agent-repl-roster-update-functions` (ROSTER).
+- LANDED SHAPES (wire-roster.el as merged): the decoded roster keeps the
+  contract's nesting — a row's ref is `(plist-get (plist-get ROW :workspace)
+  :workspace)`, a repo section's ref is under `:key` then `:repository`, the
+  roster's current is `(plist-get (plist-get ROSTER :current) :workspace)`;
+  an optional EMPTY message (RosterRowAttention, priority badge presence) decodes
+  to `t` when present and nil when absent; `agent-repl-wire-roster-row-status-
+  keywords` exports the 23 arm keywords in proto order for status.el's table
+  and its assertion tests.
 - Tab reconciliation `(agent-repl-roster-reconcile ROSTER)`: walk
   `repository.sections` in order and rows depth-first (row, then its
   children), then `recently_merged.rows`. A row with `closed` false → ensure

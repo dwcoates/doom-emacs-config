@@ -4549,7 +4549,7 @@ without waiting for a hook fire."
               (agent-repl-load-workspace-snapshot)
               (should (equal established '("ws-a")))
               ;; Fire the timeout for ws-a manually; it surfaces the fault via
-              ;; `agent-repl--error' (which signals) after advancing the queue.
+              ;; `agent-repl--fatal' (which signals) after advancing the queue.
               (should-error
                (apply (car captured-timer-callback) (cdr captured-timer-callback)))
               (should (equal (reverse established) '("ws-a" "ws-b")))))
