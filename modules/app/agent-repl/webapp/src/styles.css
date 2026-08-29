@@ -4094,3 +4094,103 @@ body.ungated #mode-select {
   font-style: italic;
   margin-top: 0.2rem;
 }
+
+/* ---- hold tray (src/tray) ---------------------------------------------- */
+
+/* The tray's own heading, composed daemon-side. Quiet: it labels a region the
+   reader is scrolling past, not a section they came for. */
+.hold-tray-heading {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+  padding: 0.4rem 0 0.3rem;
+}
+/* The items list. Delimited by the one shared `.list-rows` rule, so a held
+   prompt is separated from the next exactly as a footer panel's rows are. */
+.hold-tray-items > * + * { padding-top: 0.5rem; }
+.hold-tray-items > * { padding-bottom: 0.5rem; }
+/* AN EMPTY TRAY IS A VALUE, drawn rather than collapsed away: the reader can
+   see that nothing is held instead of inferring it from a gap. */
+.hold-tray-empty {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* The ticking queued-at age, trailing the badge. Tabular so the number does
+   not shuffle the badge sideways once a second. */
+.queued-age {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* The classifier is still deciding: a slow breath, which is how every other
+   transient state in this app says "not settled". */
+.queued-badge.classifying {
+  color: var(--muted);
+  border-color: var(--muted);
+  animation: hold-breathe 2.6s ease-in-out infinite;
+}
+@keyframes hold-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+/* NOTHING classified this entry, and that is a warning rather than a state:
+   the orange the app spends on "something did not work as intended". */
+.queued-badge.unclassified {
+  color: var(--thinking);
+  border-color: var(--thinking);
+  font-weight: 700;
+}
+.queued-reason.queued-unclassified { font-style: normal; color: var(--muted); }
+/* The hold the user has seen and confirmed. A quiet mark, never a second
+   button: accepting changes nothing about delivery. */
+.queued-accepted {
+  margin-left: 0.4rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.queued-accepted::before {
+  content: "✓";
+  margin-right: 0.2rem;
+}
+/* The prompt's own words, at full color inside the subdued chrome. */
+.queued-text > *:first-child { margin-top: 0; }
+.queued-text > *:last-child { margin-bottom: 0; }
+/* An attached image, capped so a paste cannot take over the tray. */
+.queued-image { max-width: 100%; max-height: 8rem; border-radius: 6px; }
+/* A host-local image the webview cannot fetch: named, not drawn broken. */
+.queued-image-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+/* The row's controls, and the refusal that lands under them. */
+.queued-actions button {
+  padding: 0.15rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+}
+.queued-actions button:disabled { cursor: not-allowed; opacity: 0.5; }
+.queued-refusal {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+}
+
+/* The parked question, sharing the merge-dequeue card's alarm frame. It is
+   the same statement — a button here destroys work — so it is the same look,
+   reached through the existing `#merge-dequeue` rules by class. */
+.held-offer {
+  border: 1px solid var(--err);
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.85rem;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--err) 8%, transparent);
+}
+.offer-refusal { margin-top: 0.35rem; font-size: 0.75rem; }
+
