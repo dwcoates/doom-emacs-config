@@ -115,8 +115,13 @@ The directory is removed afterwards, so no test observes another's files."
     (agent-repl-test-notes--with-dir
       (let ((visited nil))
         (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "alpha"))
-                  ((symbol-function 'find-file)
-                   (lambda (file &rest _) (setq visited file))))
+                  ;; The ONE shared editor-popup subroutine is what notes
+                  ;; opens through; a local `find-file' here would be the
+                  ;; divergence the shared-subroutine rule forbids.
+                  ((symbol-function 'agent-repl-popup-open)
+                   (lambda (file &optional _line)
+                     (setq visited file)
+                     (find-file-noselect file))))
           (agent-repl-notes-open)
           (should (equal visited
                          (expand-file-name "alpha.org" (agent-repl--notes-dir)))))))))
