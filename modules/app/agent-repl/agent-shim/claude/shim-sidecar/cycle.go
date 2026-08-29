@@ -464,7 +464,7 @@ func (s *sidecar) writeBatch(result tail.PollResult) error {
 // terminals.
 func (s *sidecar) sweep() {
 	s.requireCursors("sweep")
-	s.emit("lost sweep", s.lostEntries(s.tracker.Sweep(s.now().UnixMilli())))
+	s.emit("lost sweep", s.lostEntries(s.tracker.Sweep(s.bootTimeMs(), s.now().UnixMilli())))
 }
 
 // emit writes inferred records as a single CURSOR-LESS batch: they were not
