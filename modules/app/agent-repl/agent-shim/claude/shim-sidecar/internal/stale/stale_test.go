@@ -303,3 +303,41 @@ func TestActivityForAnUntrackedPathIsANoOp(t *testing.T) {
 		t.Fatal("activity on an untracked path started tracking it")
 	}
 }
+
+func TestWindowsReportsTheDefaultsWhenOptionsAreZero(t *testing.T) {
+	// Arrange.
+	tr, _ := tracker(t, Options{})
+
+	// Act.
+	got := tr.Windows()
+
+	// Assert.
+	want := Options{
+		Grace:           DefaultGrace,
+		ShellSilence:    DefaultShellSilence,
+		AgentSilence:    DefaultAgentSilence,
+		WorkflowSilence: DefaultWorkflowSilence,
+	}
+	if got != want {
+		t.Fatalf("windows = %+v, want the package defaults %+v", got, want)
+	}
+}
+
+func TestWindowsReportsTheOptionsTheCallerChose(t *testing.T) {
+	// Arrange: the four windows the sidecar's flags carry, all distinct.
+	opt := Options{
+		Grace:           10 * time.Millisecond,
+		ShellSilence:    20 * time.Millisecond,
+		AgentSilence:    30 * time.Millisecond,
+		WorkflowSilence: 40 * time.Millisecond,
+	}
+	tr, _ := tracker(t, opt)
+
+	// Act.
+	got := tr.Windows()
+
+	// Assert.
+	if got != opt {
+		t.Fatalf("windows = %+v, want the caller's %+v", got, opt)
+	}
+}
