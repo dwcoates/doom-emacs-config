@@ -175,6 +175,12 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; It names the codec (`wire-*.el') without requiring it, so its position
 ;; here does not constrain where the codec loads.
 (agent-repl--load-module "rpc")
+;; WHY: daemon-link.el owns the daemon connection's whole life — discovery,
+;; the one WatchDaemon stream, the reconnect loop and the blue-green
+;; handover — and publishes the hooks every daemon-facing module hangs off.
+;; It needs core.el, connect.el and rpc.el and nothing else, so it loads
+;; immediately after the transport and before its first consumer.
+(agent-repl--load-module "daemon-link")
 ;; WHY: external-browser.el pins `browse-url-browser-function' so every
 ;; hyperlink lands in the external Chrome profile instead of an Emacs
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
@@ -191,6 +197,13 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; after core.el (which provides the logging primitives workspace.el
 ;; calls) and before everything else.
 (agent-repl--load-module "workspace")
+;; WHY: host.el is the agentrepl.v1 HOST section (register / select /
+;; WatchHostWorkspace / adopt).  It registers on daemon-link.el's up/down
+;; hooks AND on workspace.el's perspective-activation boundary at load
+;; time, so it loads after BOTH.  The W2-B surfaces it calls (the tab
+;; blink, the webview reload, the editor popup) resolve at call time, long
+;; after every module is loaded.
+(agent-repl--load-module "host")
 ;; WHY: frontends.el defines the presentation-frontend registry that
 ;; frontend.el (gui) registers into at load time.
 (agent-repl--load-module "frontends")
@@ -345,6 +358,19 @@ the auto-load entirely.  Intended to run from `emacs-startup-hook'."
 
 (add-hook 'emacs-startup-hook #'agent-repl--schedule-snapshot-startup-load)
 (agent-repl--boot-info "snapshot-startup: registered scheduler on emacs-startup-hook")
+
+;; COLD START.  Emacs owns bringing a daemon up and nothing after that:
+;; `agent-repl-daemon-ensure' adopts any daemon that answers, and only
+;; builds and starts one when `daemon.addr' names nobody.  Registered on
+;; `emacs-startup-hook' rather than run here, so the boot cost lands after
+;; the editor is usable — and GATED ON `noninteractive', because a batch
+;; run must never build or spawn anything.
+(if (and agent-repl-frontend-auto-start (not noninteractive))
+    (progn
+      (add-hook 'emacs-startup-hook #'agent-repl-daemon-ensure)
+      (agent-repl--boot-info "cold-start: registered daemon ensure on emacs-startup-hook"))
+  (agent-repl--boot-info "cold-start: daemon ensure NOT registered auto-start=%s batch=%s"
+                         agent-repl-frontend-auto-start noninteractive))
 
 (provide 'agent-repl)
 ;;; config.el ends here
