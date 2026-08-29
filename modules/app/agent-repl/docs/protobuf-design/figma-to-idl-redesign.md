@@ -8191,3 +8191,19 @@ record may not import shim.v1; shim.v1 imports it back for StartTurn) and
 so replay routes merge-born rows and labels restart re-drives.
 `RosterRow.priority = 33` (optional `RosterRowPriorityBadge{label}`,
 resolver-composed): the drawn badge; ordering stays the resolver's.
+
+## 2026-08-29 — the /context rich schema (landed; increments complete)
+
+`SessionContextUsage` reshaped to the vendor's FULL get_context_usage
+answer, typed field-for-field against the SDK's declared response type
+(sdk.d.ts SDKControlGetContextUsageResponse): totals + raw window +
+vendor percentage + model, categories{label,tokens,color,is_deferred?},
+memory_files, mcp_tools, deferred_builtin_tools, system_tools,
+system_prompt_sections, agents, slash_commands/skills roll-ups (with
+per-skill frontmatter), auto_compact_threshold?/is_auto_compact_enabled,
+message_breakdown (plane figures + the ENCAPSULATED tool_calls_by_type +
+attachments_by_type), api_usage? (vendor-nullable). gridRows omitted —
+pure presentation. `ContextPanelView` rewritten as resolver-composed
+typed sections (composed header/figures — the client never does
+arithmetic), with message_breakdown.tool_calls the auto-folded foldable
+render per the ruling. THE TRIAGE'S CONTRACT INCREMENTS ARE ALL LANDED.
