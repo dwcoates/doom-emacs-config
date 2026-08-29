@@ -191,6 +191,9 @@ export function drawCreateWorkspaceForm(
   });
   const form = document.createElement("div");
   form.className = "sb-create";
+  // The two hooks the integration suite targets on this form; every field is
+  // reached by its `name` instead, so the form adds no vocabulary of its own.
+  form.setAttribute("data-create-form", "");
   form.addEventListener("click", (event) => event.stopPropagation());
 
   const mode = radioPair(form, "form", [
@@ -241,6 +244,7 @@ export function drawCreateWorkspaceForm(
   const submit = document.createElement("button");
   submit.type = "button";
   submit.className = "sb-form-go";
+  submit.setAttribute("data-create-submit", "");
   submit.textContent = "Create";
   submit.addEventListener("click", (event) => {
     event.preventDefault();
