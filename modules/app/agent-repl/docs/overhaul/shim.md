@@ -150,7 +150,7 @@ orchestration chain.
   turn`), kept solely so `KillTurn` can name its transitive refusal set; never
   on the wire except inside a refusal.
 
-### shim/v1 — the service the shim serves (16 rpcs, four sections)
+### shim/v1 — the service the shim serves (17 rpcs, four sections)
 
 Files: `service.proto`, one `endpoint_<rpc>.proto` each, `prompt_origin.proto`
 (the one shared file — an enum of send sites; it has no keep-alive value on
@@ -182,6 +182,14 @@ purpose).
     vendor's get_context_usage (never derived from usage frames). NOTE: the
     rpc comment in `service.proto` ("the shim's own health is pulled")
     predates that fold; the SessionUpdate arm comments are current.
+    OPENING FRAME (binding, daemon shim client, 2026-08-29): on EVERY
+    WatchSession open the shim pushes a `diagnostics` frame IMMEDIATELY
+    (the current health verdict), then at its cadence and on change —
+    connect-go surfaces a server-stream refusal only at the first Receive,
+    so the daemon consumes every watch's opening frame as the open's answer
+    and a silent WatchSession would block bring-up (readiness = the first
+    healthy diagnostics push). WatchAgent/WatchBash likewise open with their
+    page/start frame, as already contracted.
     A `compacting` arm is owed (contract increment, ruled 2026-08-29):
     vendor-initiated auto-compaction still happens, and its start signal
     (the system status:compacting message — the ContextCut record is the
