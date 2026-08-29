@@ -915,6 +915,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       throw new Error("shim session: StartSession reached the engine with no source");
     }
     let vendorSessionId: string;
+    let clearedTo: string | undefined;
     let facts: TranscriptFacts | undefined;
     let requestedModel = "";
     if (source.case === "fresh") {
@@ -958,36 +959,42 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         return startSessionRefused({ kind: "vendorStartFailed" }, remedy.detail);
       }
       if (remedy.kind === "cleared") {
+        clearedTo = remedy.vendorSessionId;
         // /clear KEEPS THE SESSION IDENTITY AND DISCARDS THE CONTEXT, and the
         // cheapest declared way to do that is to bind FRESH under a newly
         // minted vendor session id: no API call, no transcript rewrite, and the
         // AgentId is unaffected because R9 fixes it to the ORIGINAL id. The
         // rotation is announced on WatchSession like any other.
-        vendorSessionId = remedy.vendorSessionId;
       }
     }
+    const inForce = clearedTo ?? vendorSessionId;
     try {
-      releaseLock = acquireLock(vendorSessionId);
+      releaseLock = acquireLock(inForce);
     } catch (err) {
       LOGGER.log(
-        { level: "warn", vendor_session_id: vendorSessionId, cause: err instanceof Error ? err.message : String(err) },
+        { level: "warn", vendor_session_id: inForce, cause: err instanceof Error ? err.message : String(err) },
         "REFUSED StartSession: another shim holds this conversation's session lock",
       );
       return startSessionRefused(
         { kind: "conversationOwned" },
-        `another process already owns vendor session ${JSON.stringify(vendorSessionId)}`,
+        `another process already owns vendor session ${JSON.stringify(inForce)}`,
       );
     }
-    const fresh = source.case === "fresh" || facts === undefined;
-    identity = fresh
+    const brandNew = source.case === "fresh" || facts === undefined;
+    identity = brandNew
       ? await SessionIdentity.fresh(identityStore, () => vendorSessionId)
       : await SessionIdentity.resume(identityStore, vendorSessionId);
+    if (clearedTo !== undefined) {
+      // The AgentId does not move; only the resume handle does, and the
+      // rotation is announced exactly like a vendor-initiated one.
+      pushes.push(await identity.rotate(clearedTo));
+    }
     effectiveModel = requestedModel;
     try {
       const initialized = awaitInit();
       await startQuery(
-        fresh
-          ? { kind: "fresh", sessionId: vendorSessionId }
+        brandNew || clearedTo !== undefined
+          ? { kind: "fresh", sessionId: inForce }
           : { kind: "resume", resumeSessionId: vendorSessionId },
       );
       await initialized;
@@ -1045,12 +1052,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // The readiness signal, and the reason a consumer may open WatchSession
     // before anything else exists.
     pushes.push(pushes.diagnostics());
+    // The build sha and SDK version are the PROCESS's, injected at construction;
+    // only the agent binary version has to be waited for, and
+    // requireSessionRuntime refuses to answer until `system:init` stated it —
+    // which is the presence rule doing its job, not a failure.
     const runtime = requireSessionRuntime();
     const started_ = create(conversationv1.SessionStartedSchema, {
       vendorSessionId: identity.vendorSessionId,
       runtime: create(conversationv1.SessionRuntimeSchema, {
-        shimBuildSha: runtime.shimBuildSha,
-        sdkVersion: runtime.sdkVersion,
+        shimBuildSha: deps.runtime.shimBuildSha,
+        sdkVersion: deps.runtime.sdkVersion,
         agentBinaryVersion: runtime.agentBinaryVersion,
       }),
       effectiveModel: create(conversationv1.AgentModelSchema, { name: effectiveModel }),
