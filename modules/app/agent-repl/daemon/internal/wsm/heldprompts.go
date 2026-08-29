@@ -6,37 +6,54 @@ import (
 	"errors"
 	"fmt"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"google.golang.org/protobuf/proto"
+
 	"claude-repld/internal/dlog"
 )
 
-// heldPromptColumns is the one select list every held-prompt read shares.
-const heldPromptColumns = `turn_id, workspace_id, text, origin, target, hold_kind,
-	classification_interject, classification_reason, classification_failed, classification_at,
-	tombstone_kind, tombstone_at, queued_at`
+// heldPromptColumns is the one select list every held-prompt read shares, so a
+// column added to the row can never be decoded by only some of them.
+const heldPromptColumns = `turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
+	classification_arm, classification_reason, classification_command, classification_at,
+	accepted, tombstone_kind, tombstone_at, queued_at`
 
 // scanHeldPrompt decodes one held prompt all-or-nothing. This is the row the
 // all-or-nothing rule was written for: a corrupt hold must never restore as a
-// partial set that silently loses what a user typed, so an undeclared hold kind,
-// a half-written classification, a half-written tombstone or an unparseable
-// target all fail the WHOLE read.
+// partial set that silently loses what a user typed. An unparseable `said`
+// blob, an undeclared hold kind or classification arm, a half-written
+// classification or tombstone, and an unparseable target all fail the WHOLE
+// read.
 func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 	var (
-		h         HeldPrompt
-		target    sql.NullString
-		holdKind  sql.NullInt64
-		interject sql.NullBool
-		reason    sql.NullString
-		failed    sql.NullBool
-		classAt   sql.NullInt64
-		tombKind  sql.NullString
-		tombAt    sql.NullInt64
-		queued    int64
+		h        HeldPrompt
+		said     []byte
+		target   sql.NullString
+		holdKind sql.NullInt64
+		schedule sql.NullString
+		arm      sql.NullInt64
+		reason   sql.NullString
+		command  sql.NullInt64
+		classAt  sql.NullInt64
+		tombKind sql.NullString
+		tombAt   sql.NullInt64
+		queued   int64
 	)
-	if err := row.Scan(&h.Turn, &h.Workspace, &h.Text, &h.Origin, &target, &holdKind,
-		&interject, &reason, &failed, &classAt, &tombKind, &tombAt, &queued); err != nil {
+	if err := row.Scan(&h.Turn, &h.Workspace, &said, &h.Origin, &target, &holdKind, &schedule,
+		&arm, &reason, &command, &classAt, &h.Accepted, &tombKind, &tombAt, &queued); err != nil {
 		return HeldPrompt{}, err
 	}
 	id := string(h.Turn)
+
+	// The submission is the one fact a hold exists to preserve; an unparseable
+	// blob is never read as an empty prompt.
+	var decoded conversationv1.UserSaid
+	if err := proto.Unmarshal(said, &decoded); err != nil {
+		return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "said", Err: err}
+	}
+	h.Said = &decoded
+
 	if target.Valid {
 		ref, err := decodeRef("held_prompts", id, target.String)
 		if err != nil {
@@ -50,14 +67,39 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 			return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "hold_kind", Err: fmt.Errorf("unknown hold kind %d", holdKind.Int64)}
 		}
 		h.Hold = &kind
+		if schedule.Valid {
+			h.ScheduleID = schedule.String
+		}
+		// A shutdown hold waits on a specific schedule; without it the daemon
+		// could not tell which drain to resume from.
+		if kind == HoldShutdown && h.ScheduleID == "" {
+			return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "hold_schedule_id", Err: errors.New("a shutdown hold names the drain schedule it waits on")}
+		}
+	} else if schedule.Valid && schedule.String != "" {
+		return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "hold_schedule_id", Err: errors.New("a schedule id without a hold kind")}
 	}
+
 	switch {
-	case !interject.Valid && !reason.Valid && !failed.Valid && !classAt.Valid:
-	case interject.Valid && reason.Valid && failed.Valid && classAt.Valid:
-		h.Classification = &Classification{Interject: interject.Bool, Reason: reason.String, Failed: failed.Bool, At: fromNanos(classAt.Int64)}
+	case !arm.Valid && !reason.Valid && !command.Valid && !classAt.Valid:
+	case arm.Valid && reason.Valid && command.Valid && classAt.Valid:
+		verdict := ClassificationArm(arm.Int64)
+		if !verdict.valid() {
+			return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "classification_arm", Err: fmt.Errorf("unknown classification arm %d", arm.Int64)}
+		}
+		cmd := conversationv1.SessionCommand(command.Int64)
+		if _, ok := conversationv1.SessionCommand_name[int32(command.Int64)]; !ok {
+			return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "classification_command", Err: fmt.Errorf("unknown session command %d", command.Int64)}
+		}
+		h.Classification = &Classification{Arm: verdict, Reason: reason.String, Command: cmd, At: fromNanos(classAt.Int64)}
 	default:
 		return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "classification", Err: errors.New("a classification is stored whole or not at all")}
 	}
+	// Accepting is legal only on a hold_for_turn_end verdict, so an accepted row
+	// with any other verdict is corruption rather than a state to render.
+	if h.Accepted && (h.Classification == nil || h.Classification.Arm != ArmHoldForTurnEnd) {
+		return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "accepted", Err: ErrAcceptNotOffered}
+	}
+
 	switch {
 	case !tombKind.Valid && !tombAt.Valid:
 	case tombKind.Valid && tombAt.Valid:
@@ -75,50 +117,92 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 	const op = "daemon.wsm.put_held_prompt"
 	fields := dlog.Context{"workspace": string(h.Workspace), "turn": string(h.Turn), "origin": h.Origin}
+	if h.Said == nil {
+		err := errors.New("wsm: a held prompt carries what the user said")
+		s.log.Error(op, "refused a held prompt with no submission", withError(fields, err))
+		return err
+	}
+	said, err := proto.Marshal(h.Said)
+	if err != nil {
+		wrapped := fmt.Errorf("wsm: encode held prompt submission: %w", err)
+		s.log.Error(op, "refused an unencodable held-prompt submission", withError(fields, wrapped))
+		return wrapped
+	}
 	target, err := encodeRef(h.Target)
 	if err != nil {
 		s.log.Error(op, "refused an unencodable held-prompt target", withError(fields, err))
 		return err
 	}
-	if h.Hold != nil && !h.Hold.valid() {
-		err := fmt.Errorf("wsm: undeclared hold kind %d", int(*h.Hold))
-		s.log.Error(op, "refused an undeclared hold kind", withError(fields, err))
+	if err := validateHold(h); err != nil {
+		s.log.Error(op, "refused an inconsistent hold", withError(fields, err))
 		return err
+	}
+	if h.Hold != nil {
+		fields["hold_kind"] = h.Hold.String()
+	}
+	if h.Classification != nil {
+		fields["classification_arm"] = h.Classification.Arm.String()
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if err := refuseTombstoned(ctx, tx, h.Turn); err != nil {
 			return err
 		}
-		var holdKind any
+		var holdKind, schedule any
 		if h.Hold != nil {
 			holdKind = int(*h.Hold)
+			schedule = h.ScheduleID
 		}
-		var interject, reason, failed, classAt any
+		var arm, reason, command, classAt any
 		if h.Classification != nil {
-			interject, reason, failed, classAt = h.Classification.Interject, h.Classification.Reason, h.Classification.Failed, nanos(h.Classification.At)
+			arm, reason = int(h.Classification.Arm), h.Classification.Reason
+			command, classAt = int32(h.Classification.Command), nanos(h.Classification.At)
 		}
 		var tombKind, tombAt any
 		if h.Tombstone != nil {
 			tombKind, tombAt = h.Tombstone.Kind, nanos(h.Tombstone.At)
 		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO held_prompts (turn_id, workspace_id, text, origin, target, hold_kind,
-			   classification_interject, classification_reason, classification_failed, classification_at,
-			   tombstone_kind, tombstone_at, queued_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO held_prompts (turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
+			   classification_arm, classification_reason, classification_command, classification_at,
+			   accepted, tombstone_kind, tombstone_at, queued_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(turn_id) DO UPDATE SET
-			   workspace_id = excluded.workspace_id, text = excluded.text, origin = excluded.origin,
+			   workspace_id = excluded.workspace_id, said = excluded.said, origin = excluded.origin,
 			   target = excluded.target, hold_kind = excluded.hold_kind,
-			   classification_interject = excluded.classification_interject,
+			   hold_schedule_id = excluded.hold_schedule_id,
+			   classification_arm = excluded.classification_arm,
 			   classification_reason = excluded.classification_reason,
-			   classification_failed = excluded.classification_failed,
+			   classification_command = excluded.classification_command,
 			   classification_at = excluded.classification_at,
+			   accepted = excluded.accepted,
 			   tombstone_kind = excluded.tombstone_kind, tombstone_at = excluded.tombstone_at,
 			   queued_at = excluded.queued_at`,
-			h.Turn, h.Workspace, h.Text, h.Origin, target, holdKind,
-			interject, reason, failed, classAt, tombKind, tombAt, nanos(h.QueuedAt))
+			h.Turn, h.Workspace, said, h.Origin, target, holdKind, schedule,
+			arm, reason, command, classAt, h.Accepted, tombKind, tombAt, nanos(h.QueuedAt))
 		return err
 	})
+}
+
+// validateHold refuses the combinations the row must never carry, so the
+// decoder's rules and the writer's rules are the same rules.
+func validateHold(h HeldPrompt) error {
+	if h.Hold != nil {
+		if !h.Hold.valid() {
+			return fmt.Errorf("wsm: undeclared hold kind %d", int(*h.Hold))
+		}
+		if *h.Hold == HoldShutdown && h.ScheduleID == "" {
+			return errors.New("wsm: a shutdown hold names the drain schedule it waits on")
+		}
+	} else if h.ScheduleID != "" {
+		return errors.New("wsm: a schedule id without a hold kind")
+	}
+	if h.Classification != nil && !h.Classification.Arm.valid() {
+		return fmt.Errorf("wsm: undeclared classification arm %d", int(h.Classification.Arm))
+	}
+	if h.Accepted && (h.Classification == nil || h.Classification.Arm != ArmHoldForTurnEnd) {
+		return ErrAcceptNotOffered
+	}
+	return nil
 }
 
 // refuseTombstoned refuses any write to a retired hold. It is the one place
@@ -155,40 +239,85 @@ func requireStandingHold(ctx context.Context, tx *sql.Tx, turn TurnID) error {
 	return nil
 }
 
-// UpdateHeldPromptClassification records the classifier's verdict.
+// UpdateHeldPromptClassification records the classifier's verdict. A verdict
+// that is not hold_for_turn_end clears any standing acceptance, because the
+// offer the user accepted no longer exists.
 func (s *store) UpdateHeldPromptClassification(ctx context.Context, turn TurnID, c Classification) error {
-	fields := dlog.Context{"turn": string(turn), "interject": c.Interject, "failed": c.Failed}
-	return s.write(ctx, "daemon.wsm.update_held_prompt_classification", fields, func(ctx context.Context, tx *sql.Tx) error {
+	const op = "daemon.wsm.update_held_prompt_classification"
+	fields := dlog.Context{"turn": string(turn), "classification_arm": c.Arm.String()}
+	if !c.Arm.valid() {
+		err := fmt.Errorf("wsm: undeclared classification arm %d", int(c.Arm))
+		s.log.Error(op, "refused an undeclared classification arm", withError(fields, err))
+		return err
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireStandingHold(ctx, tx, turn); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx,
-			`UPDATE held_prompts SET classification_interject = ?, classification_reason = ?, classification_failed = ?, classification_at = ?
-			 WHERE turn_id = ?`, c.Interject, c.Reason, c.Failed, nanos(c.At), turn)
+			`UPDATE held_prompts SET classification_arm = ?, classification_reason = ?, classification_command = ?, classification_at = ?,
+			   accepted = CASE WHEN ? THEN accepted ELSE 0 END
+			 WHERE turn_id = ?`,
+			int(c.Arm), c.Reason, int32(c.Command), nanos(c.At), c.Arm == ArmHoldForTurnEnd, turn)
 		return err
 	})
 }
 
-// UpdateHeldPromptHold changes or clears why a prompt is held. Clearing it is
-// what makes the prompt deliverable.
-func (s *store) UpdateHeldPromptHold(ctx context.Context, turn TurnID, h *HoldKind) error {
+// SetHeldPromptAccepted records the user's acceptance of the tray's offer to let
+// the prompt wait for the turn's end. It is LEGAL ONLY on a hold_for_turn_end
+// verdict, which is checked here rather than trusted from the caller.
+func (s *store) SetHeldPromptAccepted(ctx context.Context, turn TurnID) error {
+	fields := dlog.Context{"turn": string(turn)}
+	return s.write(ctx, "daemon.wsm.set_held_prompt_accepted", fields, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireStandingHold(ctx, tx, turn); err != nil {
+			return err
+		}
+		var arm sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT classification_arm FROM held_prompts WHERE turn_id = ?`, turn).Scan(&arm); err != nil {
+			return err
+		}
+		if !arm.Valid || ClassificationArm(arm.Int64) != ArmHoldForTurnEnd {
+			return fmt.Errorf("wsm: held prompt %s: %w", turn, ErrAcceptNotOffered)
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE held_prompts SET accepted = 1 WHERE turn_id = ?`, turn)
+		return err
+	})
+}
+
+// UpdateHeldPromptHold changes or clears the daemon-side condition holding a
+// prompt. Clearing it is part of what makes the prompt deliverable.
+//
+// scheduleID is the drain schedule a HoldShutdown waits on and is required for
+// that arm; it is empty for every other kind.
+func (s *store) UpdateHeldPromptHold(ctx context.Context, turn TurnID, h *HoldKind, scheduleID string) error {
 	const op = "daemon.wsm.update_held_prompt_hold"
 	fields := dlog.Context{"turn": string(turn)}
-	var kind any
+	var kind, schedule any
 	if h != nil {
 		if !h.valid() {
 			err := fmt.Errorf("wsm: undeclared hold kind %d", int(*h))
 			s.log.Error(op, "refused an undeclared hold kind", withError(fields, err))
 			return err
 		}
+		if *h == HoldShutdown && scheduleID == "" {
+			err := errors.New("wsm: a shutdown hold names the drain schedule it waits on")
+			s.log.Error(op, "refused a shutdown hold with no schedule", withError(fields, err))
+			return err
+		}
 		kind = int(*h)
-		fields["hold_kind"] = int(*h)
+		schedule = scheduleID
+		fields["hold_kind"] = h.String()
+		fields["hold_schedule_id"] = scheduleID
+	} else if scheduleID != "" {
+		err := errors.New("wsm: a schedule id without a hold kind")
+		s.log.Error(op, "refused a schedule id with no hold kind", withError(fields, err))
+		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireStandingHold(ctx, tx, turn); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE held_prompts SET hold_kind = ? WHERE turn_id = ?`, kind, turn)
+		_, err := tx.ExecContext(ctx, `UPDATE held_prompts SET hold_kind = ?, hold_schedule_id = ? WHERE turn_id = ?`, kind, schedule, turn)
 		return err
 	})
 }
@@ -200,6 +329,9 @@ func (s *store) TombstoneHeldPrompt(ctx context.Context, turn TurnID, why Tombst
 	return s.write(ctx, "daemon.wsm.tombstone_held_prompt", fields, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireStandingHold(ctx, tx, turn); err != nil {
 			return err
+		}
+		if why.Kind == "" {
+			return errors.New("wsm: a tombstone names its reason")
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE held_prompts SET tombstone_kind = ?, tombstone_at = ? WHERE turn_id = ?`,
 			why.Kind, nanos(why.At), turn)

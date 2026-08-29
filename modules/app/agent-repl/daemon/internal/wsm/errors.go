@@ -149,7 +149,46 @@ func (p LeasePolicy) valid() bool { return p >= PolicyRefuse && p <= PolicyParke
 func (p Priority) valid() bool { return p >= PriorityP05 && p <= PriorityP3 }
 
 // valid reports whether the hold kind is one of the declared arms.
-func (h HoldKind) valid() bool { return h >= HoldClassifying && h <= HoldBuildRefresh }
+func (h HoldKind) valid() bool { return h >= HoldShutdown && h <= HoldBuildRefresh }
+
+// String names a hold kind, for logs and refusals.
+func (h HoldKind) String() string {
+	switch h {
+	case HoldShutdown:
+		return "shutdown"
+	case HoldSessionStarting:
+		return "session_starting"
+	case HoldBuildRefresh:
+		return "build_refresh"
+	default:
+		return fmt.Sprintf("hold_kind(%d)", int(h))
+	}
+}
+
+// valid reports whether the classification arm is one of the declared arms.
+func (a ClassificationArm) valid() bool { return a >= ArmClassifying && a <= ArmClassificationError }
+
+// String names a classification arm, for logs and refusals.
+func (a ClassificationArm) String() string {
+	switch a {
+	case ArmClassifying:
+		return "classifying"
+	case ArmInterject:
+		return "interject"
+	case ArmHoldForTurnEnd:
+		return "hold_for_turn_end"
+	case ArmUninterruptibleTurn:
+		return "uninterruptible_turn"
+	case ArmClassificationError:
+		return "classification_error"
+	default:
+		return fmt.Sprintf("classification_arm(%d)", int(a))
+	}
+}
+
+// ErrAcceptNotOffered refuses an accept on a verdict that never offered one.
+// Accepting is legal ONLY on a hold_for_turn_end verdict.
+var ErrAcceptNotOffered = errors.New("wsm: accept is legal only on a hold_for_turn_end verdict")
 
 // valid reports whether the turn close is one of the declared arms.
 func (c TurnClose) valid() bool { return c >= CloseCompleted && c <= CloseOrphaned }
