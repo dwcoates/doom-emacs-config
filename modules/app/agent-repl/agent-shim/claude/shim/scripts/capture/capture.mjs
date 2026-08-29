@@ -59,6 +59,7 @@ import {
   anonymizePlainText,
 } from "./anonymize.mjs";
 import { apiKeySource, classifyCapture, verdictLine } from "./outcome.mjs";
+import { isPromptDriven, planWorlds, promptTurnsOf, worldOf } from "./worlds.mjs";
 import {
   AUTH_CONFIG_ROOT,
   AuthRefusedError,
@@ -206,7 +207,10 @@ export function loadPrompts(promptsPath) {
       throw new Error(`${promptsPath}: duplicate scenario name ${scenario.name}`);
     }
     seen.add(scenario.name);
-    const hasPrompt = typeof scenario.prompt === "string" && scenario.prompt !== "";
+    // Throws on a malformed config_root or prompts entry, so a typo is caught
+    // by `--check` rather than by an empty capture hours later.
+    worldOf(scenario);
+    const hasPrompt = promptTurnsOf(scenario).length > 0;
     const hasManual = typeof scenario.manual === "string" && scenario.manual !== "";
     if (!hasPrompt && !hasManual) {
       throw new Error(
@@ -430,6 +434,35 @@ export function materializeCwd(cwd, setup) {
 }
 
 /**
+ * Run a scenario's `cwd_init` shell command in the scratch cwd.
+ *
+ * WHY IT EXISTS: `worktree-enter-exit-kept-and-removed` shipped a
+ * `.capture-init.sh` that `materializeCwd` faithfully wrote to disk and NOTHING
+ * EVER RAN. The worktree tools need a real git repository, so the scenario
+ * would have failed on an uninitialized directory while looking correctly
+ * configured. A setup file nobody executes is worse than no setup file: it
+ * reads as done.
+ *
+ * A non-zero exit is FATAL to the scenario rather than a warning — a scenario
+ * whose precondition failed captures a golden of the wrong situation.
+ */
+export function runCwdInit(cwd, command) {
+  if (typeof command !== "string" || command === "") return null;
+  const run = spawnSync("bash", ["-lc", command], {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+  });
+  if (run.status !== 0) {
+    throw new Error(
+      `capture: cwd_init failed (exit ${run.status}) in ${cwd}: ${command}\n` +
+        `stdout: ${run.stdout}\nstderr: ${run.stderr}`,
+    );
+  }
+  return { command, stdout: run.stdout, stderr: run.stderr };
+}
+
+/**
  * Copy a tree into the capture, anonymizing every file on the way.
  *
  * `.jsonl` and `.json` files go through the JSON walker; everything else
@@ -466,6 +499,32 @@ export function copyTreeAnonymized(sourceDir, destDir, report) {
 }
 
 /**
+ * Create the scratch world a group of scenarios shares.
+ *
+ * The CWD IS ALWAYS SCRATCH, in every authentication mode — a capture must
+ * never run against the operator's real working tree. Only the account root
+ * depends on the mechanism, and under `--config-root` it is the operator's real
+ * one, which is why each scenario's project directory is reclaimed and deleted
+ * afterwards.
+ */
+export function createWorld(auth, label) {
+  const scratch = mkdtempSync(path.join(tmpdir(), `agent-repl-capture-${label}-`));
+  const cwd = path.join(scratch, "cwd");
+  const scratchConfigDir = path.join(scratch, "config");
+  const spoolRoot = path.join(scratch, "spool");
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(spoolRoot, { recursive: true });
+  return {
+    world: label,
+    scratch,
+    cwd,
+    scratchConfigDir,
+    spoolRoot,
+    configDir: prepareAccountRoot(auth, scratchConfigDir),
+  };
+}
+
+/**
  * Run ONE scenario end to end. Only reached past the authorization gate.
  *
  * The options are the SHIM'S PRODUCTION OPTIONS, deliberately: a capture taken
@@ -476,7 +535,7 @@ export function copyTreeAnonymized(sourceDir, destDir, report) {
  * gate relies on; `includePartialMessages` is the whole streamed-prose plane;
  * and without `forwardSubagentText` a subagent's prose never arrives at all.
  */
-async function runScenario(sdk, scenario, opts, auth) {
+async function runScenario(sdk, scenario, opts, auth, world) {
   // STAGED, NEVER WRITTEN IN PLACE: a capture becomes a golden only after it
   // is classified, so a poisoned run can never occupy captures/<name>/ even
   // for an instant (a run interrupted mid-scenario leaves _inflight/, which is
@@ -489,18 +548,12 @@ async function runScenario(sdk, scenario, opts, auth) {
 
   const report = { unparsed: [], controls: [], errors: [] };
   const entries = [];
-  const scratch = mkdtempSync(path.join(tmpdir(), `agent-repl-capture-${scenario.name}-`));
-  const cwd = path.join(scratch, "cwd");
-  const scratchConfigDir = path.join(scratch, "config");
-  const spoolRoot = path.join(scratch, "spool");
-  mkdirSync(cwd, { recursive: true });
-  mkdirSync(spoolRoot, { recursive: true });
+  // The WORLD supplies the cwd and account root. An isolated scenario gets a
+  // world of its own; scenarios sharing a `config_root` share one, so a later
+  // scenario sees what the earlier ones did.
+  const { cwd, scratchConfigDir, configDir, spoolRoot } = world;
   materializeCwd(cwd, scenario.cwd_setup);
-
-  // THE CWD IS ALWAYS SCRATCH; only the ACCOUNT ROOT depends on the mechanism.
-  // Under --config-root this is the operator's real root, which is why the
-  // scenario's project directory is reclaimed and deleted below.
-  const configDir = prepareAccountRoot(auth, scratchConfigDir);
+  const cwdInit = runCwdInit(cwd, scenario.cwd_init);
 
   const t0 = Date.now();
   const record = (dir, msg) => {
@@ -519,6 +572,9 @@ async function runScenario(sdk, scenario, opts, auth) {
   const input = createInputChannel();
   const parked = [];
   let query;
+  // The vendor's own session id, learned from system:init and needed by a
+  // `resume` turn.
+  let vendorSessionId = null;
 
   const canUseTool = async (toolName, toolInput, options) => {
     record("control", { kind: "can_use_tool_request", tool_name: toolName, input: toolInput, options });
@@ -577,35 +633,77 @@ async function runScenario(sdk, scenario, opts, auth) {
     if (append !== "") options.systemPrompt = { ...options.systemPrompt, append };
   }
 
-  try {
-    query = sdk.query({ prompt: input, options });
+  const turns = promptTurnsOf(scenario);
+  // Controls fire at most once per scenario. Tracked in a LOCAL set rather than
+  // by stamping the control object: the corpus is loaded once per process, so a
+  // flag written onto it would leak across runs (and across tests).
+  const firedControls = new Set();
+
+  const openQuery = (extraOptions) => {
+    query = sdk.query({ prompt: input, options: { ...options, ...extraOptions } });
     record("control", {
       kind: "query_started",
-      options: { ...options, canUseTool: "[function]", abortController: "[AbortController]", env: "[inherited]" },
+      options: {
+        ...options,
+        ...extraOptions,
+        canUseTool: "[function]",
+        abortController: "[AbortController]",
+        env: "[inherited]",
+      },
     });
+    return query;
+  };
+
+  try {
+    openQuery({});
 
     for (const control of scenario.controls ?? []) {
       if (control.at !== "session_start") continue;
       report.controls.push(await driveControl(query, control, record));
     }
 
-    input.push({
-      type: "user",
-      message: { role: "user", content: scenario.prompt },
-      parent_tool_use_id: null,
-      session_id: "",
-    });
+    for (let turnIndex = 0; turnIndex < turns.length; turnIndex += 1) {
+      const turn = turns[turnIndex];
 
-    for await (const msg of query) {
-      record("sdk", msg);
-      for (const control of scenario.controls ?? []) {
-        if (control.at !== "on_message") continue;
-        if (control.fired === true) continue;
-        if (!messageMatches(control.after, msg)) continue;
-        control.fired = true;
-        report.controls.push(await driveControl(query, control, record));
+      if (turn.resume) {
+        // A RESUME IS A NEW PROCESS. The point of the arm is to capture what a
+        // resume actually costs (the cold read lands with the first prompt), so
+        // the query must genuinely be torn down and reopened against the same
+        // vendor session id — steering the existing one would capture nothing.
+        if (vendorSessionId === null) {
+          throw new Error(
+            `capture: ${scenario.name} turn ${turnIndex} asks to resume, but no vendor ` +
+              "session id has been observed yet (no system:init arrived)",
+          );
+        }
+        try { query?.close(); } catch { /* already gone */ }
+        record("control", { kind: "resuming", session_id: vendorSessionId, turn: turnIndex });
+        openQuery({ resume: vendorSessionId });
       }
-      if (msg.type === "result") break;
+
+      record("control", { kind: "turn_submitted", turn: turnIndex, text: turn.text });
+      input.push({
+        type: "user",
+        message: { role: "user", content: turn.text },
+        parent_tool_use_id: null,
+        session_id: "",
+      });
+
+      for await (const msg of query) {
+        record("sdk", msg);
+        if (msg?.type === "system" && msg?.subtype === "init" && typeof msg.session_id === "string") {
+          vendorSessionId = msg.session_id;
+        }
+        for (const control of scenario.controls ?? []) {
+          if (control.at !== "on_message") continue;
+          const controlKey = JSON.stringify([control.at, control.do, control.after ?? null]);
+          if (firedControls.has(controlKey)) continue;
+          if (!messageMatches(control.after, msg)) continue;
+          firedControls.add(controlKey);
+          report.controls.push(await driveControl(query, control, record));
+        }
+        if (msg.type === "result") break;
+      }
     }
 
     for (const control of scenario.controls ?? []) {
@@ -670,7 +768,10 @@ async function runScenario(sdk, scenario, opts, auth) {
         ok: outcome.ok,
         failure_reasons: outcome.reasons,
         prompt: scenario.prompt ?? null,
-        prompts: scenario.prompts ?? null,
+        prompts: turns,
+        world: world.world,
+        cwd_init: cwdInit,
+        vendor_session_id: vendorSessionId,
         manual: scenario.manual ?? null,
         expect: scenario.expect,
         cwd_slug: cwdSlug(cwd),
@@ -721,7 +822,8 @@ async function main(argv, env) {
 
   if (opts.list) {
     for (const scenario of doc.scenarios) {
-      const kind = scenario.prompt ? "prompt" : "MANUAL";
+      const turns = promptTurnsOf(scenario);
+      const kind = turns.length === 0 ? "MANUAL" : turns.length === 1 ? "prompt" : `prompt x${turns.length}`;
       process.stdout.write(`${scenario.name}\t${kind}\t${scenario.covers ?? ""}\n`);
     }
     return 0;
@@ -729,8 +831,9 @@ async function main(argv, env) {
   if (opts.check) {
     process.stdout.write(
       `${doc.scenarios.length} scenarios, ` +
-        `${doc.scenarios.filter((s) => s.prompt).length} prompt-driven, ` +
-        `${doc.scenarios.filter((s) => !s.prompt).length} manual\n`,
+        `${doc.scenarios.filter(isPromptDriven).length} prompt-driven, ` +
+        `${doc.scenarios.filter((s) => !isPromptDriven(s)).length} manual, ` +
+        `${planWorlds(doc.scenarios).filter((g) => g.world !== null).length} shared world(s)\n`,
     );
     return 0;
   }
@@ -749,22 +852,31 @@ async function main(argv, env) {
   mkdirSync(opts.outDir, { recursive: true });
   const skipped = [];
   const poisoned = [];
-  for (const scenario of selected) {
-    if (!scenario.prompt) {
-      if (!opts.includeManual) {
-        skipped.push(scenario.name);
-        continue;
+  // Scenarios sharing a world run against ONE cwd and account root, in corpus
+  // order, so a later one sees what the earlier ones did — that is how a
+  // /clear has an identity to rotate and a /compact has a conversation.
+  for (const group of planWorlds(selected)) {
+    const runnable = group.scenarios.filter((scenario) => {
+      if (isPromptDriven(scenario)) return true;
+      if (opts.includeManual) {
+        process.stderr.write(`capture.mjs: ${scenario.name} is MANUAL — ${scenario.manual}\n`);
       }
-      process.stderr.write(
-        `capture.mjs: ${scenario.name} is MANUAL — ${scenario.manual}\n` +
-          `Perform the step, then press Enter is NOT wired: run it by hand and capture separately.\n`,
-      );
       skipped.push(scenario.name);
-      continue;
+      return false;
+    });
+    if (runnable.length === 0) continue;
+
+    const world = createWorld(auth, group.world ?? runnable[0].name);
+    if (group.world !== null) {
+      process.stderr.write(
+        `capture.mjs: world ${group.world} — ${runnable.map((s) => s.name).join(" -> ")}\n`,
+      );
     }
-    process.stderr.write(`capture.mjs: capturing ${scenario.name}\n`);
-    const { outcome } = await runScenario(sdk, scenario, opts, auth);
-    if (!outcome.ok) poisoned.push({ scenario: scenario.name, reasons: outcome.reasons });
+    for (const scenario of runnable) {
+      process.stderr.write(`capture.mjs: capturing ${scenario.name}\n`);
+      const { outcome } = await runScenario(sdk, scenario, opts, auth, world);
+      if (!outcome.ok) poisoned.push({ scenario: scenario.name, reasons: outcome.reasons });
+    }
   }
   writeFileSync(
     path.join(opts.outDir, "SKIPPED.json"),
