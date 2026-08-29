@@ -156,13 +156,17 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 
 // refuse records the refusal exactly once, here at its owning layer, and hands
 // the error back for the server to shape into a typed failure arm.
+//
+// EVERY error return of this package goes through it, read paths included, so
+// the rule "each error is logged exactly once by its owning layer" has one
+// implementation rather than a convention.
 func (d *DB) refuse(fields logging.Fields, err error) error {
 	fields.Level = "error"
 	fields.ErrorCause = err.Error()
 	if fields.Operation == "" {
 		fields.Operation = "store.db"
 	}
-	d.log.Log(fields, "write refused: %v", err)
+	d.log.Log(fields, "refused: %v", err)
 	return err
 }
 
