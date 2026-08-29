@@ -43,8 +43,14 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   user and landed before kickoff (the /context rich schema additionally
   needs verification against the vendor's real get_context_usage
   answer).
-- OWED BEFORE HANDOFF: the contract increments above, then the
-  foundation SHA stamped at dispatch.
+- CONTRACT INCREMENTS LANDED (2026-08-29): all triage increments are in
+  (creation facts + one-shot form, priority + permission-mode verbs,
+  Hibernate + compacting + build-sha note, typed DrainReason + enriched
+  shutdown announcement + drain pushes, Interrupt all_agents +
+  confirm_required, login port, OpenExternal, typed notification kinds,
+  task verbs, durable PromptOrigin on AgentPrompt + roster priority
+  badge, the /context rich schema). 46 rpcs; build green throughout.
+- OWED BEFORE HANDOFF: only the foundation SHA stamped at dispatch.
   THE ARCHITECTURE WALK IS COMPLETE (2026-08-28): the internal
   components closed — failure classification falls out, accounting
   dissolved into per-resolver accumulation (sessionwatcher routes to
