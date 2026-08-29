@@ -180,7 +180,6 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
 ;; this early so no later module can visit a URL before the handler is in
 ;; place.
-(agent-repl--load-module "external-browser")
 ;; WHY: prompts.el is the loader for this module's file-backed automatic
 ;; prompt texts (prompts/*.md).  It depends on nothing but subr-x, and
 ;; every composer that calls it (worktree.el's workspace-generation
