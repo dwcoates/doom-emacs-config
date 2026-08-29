@@ -197,13 +197,15 @@ discovery step must leave one."
 
 ;;;; ---- Scenario 16: the two stream endings ----
 
-(defun agent-repl-itest-connect--watch-daemon (conn outcomes)
-  "Open a WatchDaemon stream on CONN, pushing close outcomes onto OUTCOMES.
-OUTCOMES is a symbol naming a special variable."
+(defun agent-repl-itest-connect--watch-daemon (conn on-close)
+  "Open a WatchDaemon stream on CONN, handing close outcomes to ON-CLOSE.
+ON-CLOSE is a FUNCTION, not a symbol: this file is lexically bound, so a
+`symbol-value' indirection would miss the caller's `let' binding entirely
+and every close assertion would wait on a variable nothing ever wrote."
   (agent-repl-connect-stream
    conn "WatchDaemon" (json-serialize '())
    (lambda (_push) nil)
-   (lambda (outcome) (push outcome (symbol-value outcomes)))))
+   on-close))
 
 (ert-deftest agent-repl-itest-connect-producer-close-without-an-end-frame-fails ()
   "A producer that stops without its terminal envelope is a TRANSPORT failure.
@@ -215,7 +217,8 @@ transport failure; only a CLIENT cancel is a normal close."
           (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
       (unwind-protect
           (progn
-            (agent-repl-itest-connect--watch-daemon conn 'outcomes)
+            (agent-repl-itest-connect--watch-daemon
+             conn (lambda (outcome) (push outcome outcomes)))
             (agent-repl-itest--await-subscriber daemon "daemon")
             ;; Act: drop the TCP connection with no end frame at all.
             (agent-repl-itest--end daemon "daemon" nil nil t)
@@ -236,7 +239,8 @@ said why."
           (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
       (unwind-protect
           (progn
-            (agent-repl-itest-connect--watch-daemon conn 'outcomes)
+            (agent-repl-itest-connect--watch-daemon
+             conn (lambda (outcome) (push outcome outcomes)))
             (agent-repl-itest--await-subscriber daemon "daemon")
             ;; Act.
             (agent-repl-itest--end daemon "daemon" nil
@@ -258,7 +262,8 @@ but that policy belongs to the consumer, not to the transport."
           (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
       (unwind-protect
           (progn
-            (agent-repl-itest-connect--watch-daemon conn 'outcomes)
+            (agent-repl-itest-connect--watch-daemon
+             conn (lambda (outcome) (push outcome outcomes)))
             (agent-repl-itest--await-subscriber daemon "daemon")
             ;; Act.
             (agent-repl-itest--end daemon "daemon")
@@ -277,7 +282,8 @@ daemon observes the cancel as the subscription going away."
     (let ((outcomes nil)
           (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
       (unwind-protect
-          (let ((stream (agent-repl-itest-connect--watch-daemon conn 'outcomes)))
+          (let ((stream (agent-repl-itest-connect--watch-daemon
+             conn (lambda (outcome) (push outcome outcomes)))))
             (agent-repl-itest--await-subscriber daemon "daemon")
             ;; Act.
             (agent-repl-connect-stream-cancel stream)
