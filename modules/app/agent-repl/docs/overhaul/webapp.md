@@ -374,3 +374,54 @@ One file per drawn component; each file's header comment is its spec.
 - ADD-SUPPORT SURVIVES: the unsupported-command refusal card carries the
   "engineer support for it" offer, spawning a support workspace through
   the ordinary creation verb.
+
+## Kickoff increments and rulings (2026-08-29, project lead)
+
+- LANDED: `OpenInEditor` — the ONE shared link component calls it for the
+  plan edit button, findings locations and worktree divider paths (the click
+  is relayed to Emacs; the webapp draws nothing); FeedRow `command_panel`
+  (panel oneof over status/todos/mcp/context views) and `command_refused`
+  (command + composed reason + optional add-support offer whose button calls
+  `RequestCommandSupport`); WatchLoginTerminal is a SERVER stream of bytes
+  and `SendLoginInput` carries keystrokes/resize (a WKWebView cannot speak
+  Connect bidi); `TopbarView.permission_mode_picker` (current + options; the
+  picker echoes an option's `mode` to SetPermissionMode); `UpdateHeldPrompt.
+  accept` (button only on hold_for_turn_end entries); `SubmitPromptRequest.
+  origin` is REQUIRED (the dev-mode composer sends WEBAPP_USER_SENT).
+- The webview URL carries BOTH `workspace=<id>` and `dir=<dir>`; every
+  request echoes the full WorkspaceRef from that one place.
+- R2 fold: the shipped fold value is the INITIAL state on a row's first
+  draw; the local toggle wins thereafter. R4: FailureKind has no carrier —
+  the six client-local arms are drawn by the webapp's own failure overlay.
+  R5: merge-tab badge = label (+round) + state glyph, no counts. R6: sub-feed
+  expansion is INLINE (existing bubble look); breadcrumbs draw only when
+  non-empty as an inner header; no drill-in. R7: bubble composers stay in
+  the webapp (SubmitPrompt{feed}) and disable while the footer is merging/
+  closing/disconnected. R8: sidebar and merge-queue navigation call
+  SelectWorkspace. A jump into a collapsed shell bubble degrades to
+  scroll-if-rendered. proto/vocab/render-colors.json + paint-classes.json
+  (the daemon's) are the color and paint-class vocabularies.
+
+- CROSS-SYSTEM PROCESS CONTRACTS (project lead, kickoff): one state root
+  `$AGENT_REPL_STATE_DIR` (default ~/.claude-emacs); the daemon binds ONE
+  loopback TCP listener serving Connect (HTTP/1.1 + h2c, binary + JSON) and
+  the webapp assets on one origin, writes `127.0.0.1:<port>` to
+  `$AGENT_REPL_STATE_DIR/daemon.addr` (atomic replace; removed on orderly
+  exit; a joining successor writes it only after it owns every workspace);
+  the webview URL is `http://<daemon.addr>/?workspace=<id>&dir=<dir>`
+  (`&composer=1` only in dev mode); the shim is spawned as `node
+  agent-shim/claude/shim/dist/main.js --listen <uds> --store-socket <uds>
+  --log-fd 3 [--fake]` with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED=1,
+  AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA (tests add
+  AGENT_REPL_FORBID_VENDOR_CALLS=1), cwd = the workspace; session facts
+  travel only in StartSession; readiness = the first healthy `diagnostics`
+  push on WatchSession; the store serves on ~/.cache/agent-repl/sock/
+  store.sock (tests: env AGENT_REPL_STORE_SOCKET, a flag beats it); kernel
+  locks live in ~/.cache/agent-repl/run/ — `workspace-<md5hex(clean abs
+  dir)[:8]>.lock` (shim-held from startup; the daemon probes ONLY this one,
+  flock LOCK_EX|LOCK_NB) and `session-<vendor session id>.lock` (taken
+  inside StartSession; pre-minted on a fresh start); proto/vocab/
+  render-colors.json + paint-classes.json are the daemon's, consumed by
+  webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
+  golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
+  `go 1.23`).
