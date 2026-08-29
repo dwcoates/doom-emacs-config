@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_start_turn.proto.
  */
 export const file_shim_v1_endpoint_start_turn: GenFile = /*@__PURE__*/
-  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEi8wEKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEhEKCXBhZ2Vfc2l6ZRgEIAEoDRI7Cg1rbm93bl90aHJvdWdoGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVySACIAQFCEAoOX2tub3duX3Rocm91Z2gieQoRU3RhcnRUdXJuUmVzcG9uc2USLAoHc3VjY2VzcxgBIAEoCzIZLnNoaW0udjEuU3RhcnRUdXJuU3VjY2Vzc0gAEiwKB2ZhaWx1cmUYAiABKAsyGS5zaGltLnYxLlN0YXJ0VHVybkZhaWx1cmVIAEIICgZyZXN1bHQiQAoQU3RhcnRUdXJuU3VjY2VzcxIsCgZwcm9tcHQYASABKAsyHC5jb252ZXJzYXRpb24udjEuQWdlbnRQcm9tcHQiIgoQU3RhcnRUdXJuRmFpbHVyZRIOCgZkZXRhaWwYASABKAlCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_history, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
+  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEi8wEKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEhEKCXBhZ2Vfc2l6ZRgEIAEoDRI7Cg1rbm93bl90aHJvdWdoGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVySACIAQFCEAoOX2tub3duX3Rocm91Z2gieQoRU3RhcnRUdXJuUmVzcG9uc2USLAoHc3VjY2VzcxgBIAEoCzIZLnNoaW0udjEuU3RhcnRUdXJuU3VjY2Vzc0gAEiwKB2ZhaWx1cmUYAiABKAsyGS5zaGltLnYxLlN0YXJ0VHVybkZhaWx1cmVIAEIICgZyZXN1bHQiQAoQU3RhcnRUdXJuU3VjY2VzcxIsCgZwcm9tcHQYASABKAsyHC5jb252ZXJzYXRpb24udjEuQWdlbnRQcm9tcHQiiwIKEFN0YXJ0VHVybkZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEj4KEXR1cm5fYWxyZWFkeV9vcGVuGAIgASgLMiEuc2hpbS52MS5TdGFydFR1cm5UdXJuQWxyZWFkeU9wZW5IABIxCgpub19zZXNzaW9uGAMgASgLMhsuc2hpbS52MS5TdGFydFR1cm5Ob1Nlc3Npb25IABI5Cg52ZW5kb3JfcmVmdXNlZBgEIAEoCzIfLnNoaW0udjEuU3RhcnRUdXJuVmVuZG9yUmVmdXNlZEgAEjEKCnF1ZXJ5X2RlYWQYBSABKAsyGy5zaGltLnYxLlN0YXJ0VHVyblF1ZXJ5RGVhZEgAQgYKBGtpbmQiGgoYU3RhcnRUdXJuVHVybkFscmVhZHlPcGVuIhQKElN0YXJ0VHVybk5vU2Vzc2lvbiIYChZTdGFydFR1cm5WZW5kb3JSZWZ1c2VkIhQKElN0YXJ0VHVyblF1ZXJ5RGVhZEIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_history, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
 
 /**
  * The prompt the daemon is handing over NOW. Nothing here is a queue entry:
@@ -138,9 +138,7 @@ export const StartTurnSuccessSchema: GenMessage<StartTurnSuccess> = /*@__PURE__*
   messageDesc(file_shim_v1_endpoint_start_turn, 2);
 
 /**
- * Not accepted. `kind` arms are DERIVED at the wave from the shim's real
- * refusal sites: a turn already open (the daemon fault), no session, the
- * agent binary refusing the prompt.
+ * Not accepted. THE ARM IS WHY.
  *
  * @generated from message shim.v1.StartTurnFailure
  */
@@ -151,6 +149,44 @@ export type StartTurnFailure = Message<"shim.v1.StartTurnFailure"> & {
    * @generated from field: string detail = 1;
    */
   detail: string;
+
+  /**
+   * @generated from oneof shim.v1.StartTurnFailure.kind
+   */
+  kind: {
+    /**
+     * A turn is already open — the DAEMON's fault (it is the only queue).
+     *
+     * @generated from field: shim.v1.StartTurnTurnAlreadyOpen turn_already_open = 2;
+     */
+    value: StartTurnTurnAlreadyOpen;
+    case: "turnAlreadyOpen";
+  } | {
+    /**
+     * No session is open on this shim.
+     *
+     * @generated from field: shim.v1.StartTurnNoSession no_session = 3;
+     */
+    value: StartTurnNoSession;
+    case: "noSession";
+  } | {
+    /**
+     * The agent binary refused the prompt; `detail` carries its wording.
+     *
+     * @generated from field: shim.v1.StartTurnVendorRefused vendor_refused = 4;
+     */
+    value: StartTurnVendorRefused;
+    case: "vendorRefused";
+  } | {
+    /**
+     * The vendor query is dead; nothing can accept a prompt until the
+     * session is restarted.
+     *
+     * @generated from field: shim.v1.StartTurnQueryDead query_dead = 5;
+     */
+    value: StartTurnQueryDead;
+    case: "queryDead";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -159,4 +195,56 @@ export type StartTurnFailure = Message<"shim.v1.StartTurnFailure"> & {
  */
 export const StartTurnFailureSchema: GenMessage<StartTurnFailure> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_start_turn, 3);
+
+/**
+ * @generated from message shim.v1.StartTurnTurnAlreadyOpen
+ */
+export type StartTurnTurnAlreadyOpen = Message<"shim.v1.StartTurnTurnAlreadyOpen"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartTurnTurnAlreadyOpen.
+ * Use `create(StartTurnTurnAlreadyOpenSchema)` to create a new message.
+ */
+export const StartTurnTurnAlreadyOpenSchema: GenMessage<StartTurnTurnAlreadyOpen> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_turn, 4);
+
+/**
+ * @generated from message shim.v1.StartTurnNoSession
+ */
+export type StartTurnNoSession = Message<"shim.v1.StartTurnNoSession"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartTurnNoSession.
+ * Use `create(StartTurnNoSessionSchema)` to create a new message.
+ */
+export const StartTurnNoSessionSchema: GenMessage<StartTurnNoSession> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_turn, 5);
+
+/**
+ * @generated from message shim.v1.StartTurnVendorRefused
+ */
+export type StartTurnVendorRefused = Message<"shim.v1.StartTurnVendorRefused"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartTurnVendorRefused.
+ * Use `create(StartTurnVendorRefusedSchema)` to create a new message.
+ */
+export const StartTurnVendorRefusedSchema: GenMessage<StartTurnVendorRefused> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_turn, 6);
+
+/**
+ * @generated from message shim.v1.StartTurnQueryDead
+ */
+export type StartTurnQueryDead = Message<"shim.v1.StartTurnQueryDead"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartTurnQueryDead.
+ * Use `create(StartTurnQueryDeadSchema)` to create a new message.
+ */
+export const StartTurnQueryDeadSchema: GenMessage<StartTurnQueryDead> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_turn, 7);
 
