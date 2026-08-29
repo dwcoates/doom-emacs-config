@@ -4194,3 +4194,47 @@ body.ungated #mode-select {
 }
 .offer-refusal { margin-top: 0.35rem; font-size: 0.75rem; }
 
+/* ---- composer (src/composer) ------------------------------------------- */
+
+/* The dev-mode and per-bubble composer. It reuses the shell composer's shape
+   (a flex row of textarea and send button) so a bubble's box reads as the same
+   control as the one at the page's foot. */
+.composer-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.composer-input {
+  flex: 1;
+  resize: none;
+  cursor: text;
+  background: var(--composer-bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-family: inherit;
+}
+.composer-send { cursor: pointer; }
+/* THE SEND CONTROL CARRIES THE GATE, never the textarea: a closed composer
+   keeps the draft editable, exactly as the legacy merge gate left it. */
+.composer-send:disabled { cursor: not-allowed; opacity: 0.5; }
+/* Why the composer is closed, in the footer's own words. Muted rather than
+   alarming: merging and closing are deliberate, routine states. */
+.composer-notice {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 0 0.25rem 0.2rem;
+}
+.composer-notice:empty { display: none; }
+/* The submitter's own refusal, inline, with the text still in the box above
+   it. Orange rather than red: nothing failed, the submission was declined. */
+.composer-refusal {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+  color: var(--thinking);
+  padding: 0.15rem 0.25rem 0;
+}
+
