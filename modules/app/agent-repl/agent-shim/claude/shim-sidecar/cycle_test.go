@@ -445,3 +445,23 @@ func TestTheConfiguredLostWindowsReachTheTracker(t *testing.T) {
 		t.Fatalf("the tracker runs with %+v, want the configured %+v", got, options.Stale)
 	}
 }
+
+// TestTheConfiguredHoldWindowReachesTheHeldIndex asserts the same wiring for the
+// unclaimed-spool wait, which is the other wall-clock window a caller sits out.
+func TestTheConfiguredHoldWindowReachesTheHeldIndex(t *testing.T) {
+	// Arrange.
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "sidecar-test"})
+	options := Options{
+		StoreSocket:        filepath.Join(os.TempDir(), "ar-unused.sock"),
+		UnownedSpoolWindow: 12 * time.Millisecond,
+	}
+
+	// Act.
+	sc := newSidecar(options, log)
+
+	// Assert.
+	if sc.held.window != options.UnownedSpoolWindow {
+		t.Fatalf("the held index runs with %s, want the configured %s", sc.held.window, options.UnownedSpoolWindow)
+	}
+}
