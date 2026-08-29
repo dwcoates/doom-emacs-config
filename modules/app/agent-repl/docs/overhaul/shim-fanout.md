@@ -369,3 +369,10 @@ every UX or contract gap you surfaced instead of improvising.
   AgentSubagentFailure.cause and AgentFailure.failure; the stream plane
   produces them from its own LOST judgments (a spool the store stops
   feeding, a task that vanished from the level signal without a terminal).
+- E2E MOCK ADDITIONS, continued (integration author finding): the first
+  mock roster has no `!usage-*` or `!fast-*` producers, so the additions
+  also cover (4) FAST MODE on/off/cooldown (`!fast-on`, `!fast-off`,
+  `!fast-cooldown` via the init / session-state fast_mode_state fields) and
+  (5) ACCOUNT USAGE with every window populated plus one scenario per
+  unavailable reason (`!usage-full`, `!usage-service-unavailable`,
+  `!usage-window-unavailable`, `!usage-utilization-unavailable`).
