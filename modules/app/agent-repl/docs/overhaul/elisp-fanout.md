@@ -36,6 +36,19 @@ the proto wins and the agent reports the conflict.
   validation once; one dedicated function per non-primitive use site
   delegating to the child's base; primitives get no wrappers.
 
+## 0b. Dispatch policy (user ruling, binding from 2026-08-29 evening)
+
+- Every NEW implementation dispatch is Opus at LOW effort (`opus-low`; if
+  the type is not offered, `subagent_type: "claude"` with `model: "opus"`
+  and the effort stated in the brief). Agents already running or resumed
+  keep their tier.
+- Implementers MAY offload mechanical, fully specified writes (boilerplate,
+  tests from a settled table, rote conversions, doc sections) to Sonnet at
+  MEDIUM effort (`sonnet-medium`, or `claude` + `model: "sonnet"`). The
+  offloading agent stays accountable: it reviews the output, runs the
+  suites, and reports every offload in its completion report.
+- Adversarial auditors stay `claude` + `model: "fable"`, fresh context.
+
 ## 1. Module map (final tree of lisp/)
 
 New files:
@@ -640,6 +653,35 @@ names; each brief owns every file listed for its constituent rows.
   blink; selected → log only), with `header` in the log context. Tests: one
   per decode edge (present, missing header = proto3 default "", unknown
   sibling arm still refused) and one per policy branch.
+
+- R-CLICK (integration suite finding): the desktop notification's click
+  has no activation channel — `agent-repl--notify` takes `(WS TITLE
+  MESSAGE)` and host.el passes no callback, so "click raises the frame and
+  selects the workspace's tab" is unimplemented. notifications.el gains a
+  per-notification activation (the existing emacsclient click round-trip
+  carrying the workspace name → `agent-repl--notification-activate` raises
+  the frame and `agent-repl--ws-switch`es), host.el's unfocused branch uses
+  it for every notification kind. Tests: notifications (activation selects
+  the tab; unknown workspace → WARNING, no switch), host (unfocused branch
+  passes the workspace), the integration host suite's click case.
+
+- FIRST INTEGRATION RUN (tip 942659cd6 + landing 3): connect 12/16, link
+  14/18, host 21/32, roster 17/20, daemon 1/12; composer/verbs not run
+  (W2-C pending). Clusters, dispatched in this order as slots free:
+  R-DAEMON (the cold-start suite, 11 timeouts — independent of every other
+  cluster); R-PUSHINVALID (host ×2, roster ×2: an invalid push must log
+  `elisp.rpc.push-invalid` at ERROR and leave the stream standing, and the
+  suite's log reader must find the record — verify where core.el writes
+  global records versus where test-integration-helpers reads them);
+  R-NOTIFY (host banner/blink/click + roster attention blink + R-CLICK +
+  the `:unknown` gate before any push — after the R-QUESTION agent leaves
+  host.el); R-HANDOVER (link dual attach/promotion, host transferred ×4 —
+  re-run after R-ACCEPT/R-STREAMCLOSE land; remediate what remains).
+
+- R-SUITE-1 (adversarial audit 1, docs/overhaul/reports/elisp-suite-audit-1.md):
+  92 findings, all accepted; a suite-extension agent implements them
+  (MISSING first, then WEAK), never running the suite itself. Ruling folded
+  in: a drained resend reuses the failed attempt's idempotency key.
 
 ## 16. Escalations sent to the project lead (defaults in force meanwhile)
 

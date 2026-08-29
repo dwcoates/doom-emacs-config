@@ -74,7 +74,23 @@
   (load (expand-file-name "test-wire-verbs.el" dir) nil t)
   (load (expand-file-name "test-workspace.el" dir) nil t)
   (load (expand-file-name "test-workspace-create-client.el" dir) nil t)
-  (load (expand-file-name "test-worktree.el" dir) nil t))
+  (load (expand-file-name "test-worktree.el" dir) nil t)
+
+  ;; integration suites
+  ;;
+  ;; These drive the production transport against a REAL agentrepl.v1 server
+  ;; (lisp/testsupport/fakedaemon, built once per run) over a real loopback
+  ;; socket.  They mock Emacs's one NEIGHBOR and compose no other system, so
+  ;; they are integration tests, never end-to-end ones.  test-integration-
+  ;; helpers.el loads test-helpers.el itself and inherits its batch-only
+  ;; gating.
+  (load (expand-file-name "test-integration-connect.el" dir) nil t)
+  (load (expand-file-name "test-integration-host.el" dir) nil t)
+  (load (expand-file-name "test-integration-link.el" dir) nil t)
+  (load (expand-file-name "test-integration-roster.el" dir) nil t)
+  (load (expand-file-name "test-integration-composer.el" dir) nil t)
+  (load (expand-file-name "test-integration-verbs.el" dir) nil t)
+  (load (expand-file-name "test-integration-daemon.el" dir) nil t))
 
 (provide 'test-agent-repl)
 
