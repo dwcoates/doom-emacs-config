@@ -158,25 +158,6 @@ message DetachableWork {
   }
 }
 
-// WE STOPPED BEING ABLE TO SEE THE WORK — not known to have failed, not
-// known to have finished. THE ARM IS HOW WE CONCLUDED IT, stated by the file
-// reader (the sidecar) or the stream owner (the shim) loudly rather than by
-// silently dropping the run. Drawn as its own word ("lost"), never as a
-// failure or a cancel.
-message DetachedLost {
-  oneof how {
-    // The spool or transcript file disappeared from disk.
-    DetachedLostFileVanished file_vanished = 1;
-    // The run produced nothing past the reader's silence ruling.
-    DetachedLostWentSilent went_silent = 2;
-    // A boot sweep found the run open with no living producer.
-    DetachedLostSweptUp swept_up = 3;
-  }
-}
-message DetachedLostFileVanished {}
-message DetachedLostWentSilent {}
-message DetachedLostSweptUp {}
-
 // The identity of one unit of detached work, and the handle a stop is aimed at.
 // Opaque; equality is the only question asked of it.
 message DetachedWorkId {

@@ -23,7 +23,6 @@ package conversation.v1;
 
 import "conversation/v1/api.proto";
 import "conversation/v1/content_blocks.proto";
-import "conversation/v1/detached_work.proto";
 import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
@@ -649,6 +648,25 @@ message AgentPushNotificationFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
 }
+
+// WE STOPPED BEING ABLE TO SEE THE WORK — not known to have failed, not
+// known to have finished. THE ARM IS HOW WE CONCLUDED IT, stated by the file
+// reader (the sidecar) or the stream owner (the shim) loudly rather than by
+// silently dropping the run. Drawn as its own word ("lost"), never as a
+// failure or a cancel.
+message DetachedLost {
+  oneof how {
+    // The spool or transcript file disappeared from disk.
+    DetachedLostFileVanished file_vanished = 1;
+    // The run produced nothing past the reader's silence ruling.
+    DetachedLostWentSilent went_silent = 2;
+    // A boot sweep found the run open with no living producer.
+    DetachedLostSweptUp swept_up = 3;
+  }
+}
+message DetachedLostFileVanished {}
+message DetachedLostWentSilent {}
+message DetachedLostSweptUp {}
 
 // The vendor's per-call progress beat, relayed as observed: the call is
 // alive. A RELAY of an observed fact, never a shim-invented ping — the shim
