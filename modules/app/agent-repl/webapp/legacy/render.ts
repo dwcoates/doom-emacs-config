@@ -9,7 +9,7 @@ import { bubbleWaveStyle } from "./breathing.js";
 import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/conversation/v1/slash_command_pb";
 import { sessionCommandSpecs } from "../../proto/ts/schema-literals.js";
 import { STREAM_ITEM_CAP, parseJournal } from "./async-stream.js";
-import { clearLogDedup, log } from "./wslog.js";
+import { clearLogDedup, log } from "./log.js";
 import {
   TOPBAR_AGENT_ATTR,
   TopbarMenu,
