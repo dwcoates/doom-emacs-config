@@ -1723,3 +1723,20 @@ func TestGrowingFileReportsTheOffsetEachRecordStartedAt(t *testing.T) {
 		t.Errorf("the file's offset is %d, wanted %d", g.Offset(), want)
 	}
 }
+
+// setMessageID re-points an assistant record at another API message id, so
+// several real fixture lines can be composed into ONE multi-line message and
+// the block-ordinal rule exercised across them.
+func setMessageID(t *testing.T, obj map[string]any, id string) map[string]any {
+	t.Helper()
+	msg, ok := obj["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("record carries no message object: %v", obj)
+	}
+	newMsg := make(map[string]any, len(msg))
+	for k, v := range msg {
+		newMsg[k] = v
+	}
+	newMsg["id"] = id
+	return withFields(t, obj, map[string]any{"message": newMsg})
+}
