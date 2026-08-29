@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
@@ -21,6 +21,13 @@ import { createAppContext, type AppContext } from "../../../src/rpc/context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { ARTIFACT_STATE_ARMS, drawFeedArtifact } from "../../../src/feed/cards/artifact.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
+
+/**
+ * The oneof as an INIT shape rather than a built message: the fixtures below
+ * hand plain object literals to `create`, which is what protobuf-es accepts,
+ * while the built message type would demand a `$typeName` on every arm.
+ */
+type InitOfFeedArtifact = MessageInitShape<typeof FeedArtifactSchema>["state"];
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 const HEADING = "📊 Merge Queue Report";
@@ -64,7 +71,7 @@ function harness(answer?: OpenExternalResponse): Harness {
 }
 
 /** An artifact bubble with the composed heading and one STATE. */
-function artifact(state: FeedArtifact["state"]): FeedArtifact {
+function artifact(state: InitOfFeedArtifact): FeedArtifact {
   return create(FeedArtifactSchema, { heading: { text: HEADING }, state });
 }
 
@@ -96,12 +103,12 @@ describe("drawFeedArtifact", () => {
 
   for (const c of states) {
     it(`carries ${c.arm} as the bubble's state`, () => {
-      const el = drawFeedArtifact(artifact(c.state as FeedArtifact["state"]), harness().rc);
+      const el = drawFeedArtifact(artifact(c.state as InitOfFeedArtifact), harness().rc);
       expect(el.getAttribute("data-state")).toBe(c.arm);
     });
 
     it(`badges the ${c.arm} arm`, () => {
-      const el = drawFeedArtifact(artifact(c.state as FeedArtifact["state"]), harness().rc);
+      const el = drawFeedArtifact(artifact(c.state as InitOfFeedArtifact), harness().rc);
       expect(el.querySelector(".badge")?.textContent).toBe(c.badge);
     });
   }

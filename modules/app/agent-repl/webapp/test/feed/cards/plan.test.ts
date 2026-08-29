@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
@@ -21,6 +21,13 @@ import { createAppContext } from "../../../src/rpc/context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedPlan, EDIT_PLAN_TEXT, PLAN_STATE_ARMS } from "../../../src/feed/cards/plan.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
+
+/**
+ * The oneof as an INIT shape rather than a built message: the fixtures below
+ * hand plain object literals to `create`, which is what protobuf-es accepts,
+ * while the built message type would demand a `$typeName` on every arm.
+ */
+type InitOfFeedPlan = MessageInitShape<typeof FeedPlanSchema>["state"];
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 const PLAN_PATH = "/w/.claude/plan.md";
@@ -62,12 +69,12 @@ function harness(answer?: OpenInEditorResponse): Harness {
 }
 
 /** A plan bubble in one STATE. */
-function plan(state: FeedPlan["state"]): FeedPlan {
+function plan(state: InitOfFeedPlan): FeedPlan {
   return create(FeedPlanSchema, { state });
 }
 
 /** The planned arm, with the plan's markdown and optionally an edit target. */
-function planned(markdown: string, path?: string): FeedPlan["state"] {
+function planned(markdown: string, path?: string): InitOfFeedPlan {
   return {
     case: "planned",
     value: { prose: { markdown }, edit: path === undefined ? undefined : { path } },
@@ -98,12 +105,12 @@ describe("drawFeedPlan", () => {
 
   for (const c of states) {
     it(`carries ${c.arm} as the bubble's state`, () => {
-      const el = drawFeedPlan(plan(c.state as FeedPlan["state"]), harness().rc);
+      const el = drawFeedPlan(plan(c.state as InitOfFeedPlan), harness().rc);
       expect(el.getAttribute("data-state")).toBe(c.arm);
     });
 
     it(`badges the ${c.arm} arm`, () => {
-      const el = drawFeedPlan(plan(c.state as FeedPlan["state"]), harness().rc);
+      const el = drawFeedPlan(plan(c.state as InitOfFeedPlan), harness().rc);
       expect(el.querySelector(".badge")?.textContent).toBe(c.badge);
     });
   }
