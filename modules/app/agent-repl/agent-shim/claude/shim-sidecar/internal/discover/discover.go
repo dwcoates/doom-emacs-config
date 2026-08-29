@@ -101,12 +101,12 @@ func (d *Discoverer) Scan() []Target {
 func (d *Discoverer) Classify(path string) (Target, bool) {
 	d.log.With(logging.Context{Operation: "discover-classify", Path: path}).LogVerbose("classify requested")
 	if t, ok := d.classifyConfig(path); ok {
-		d.log.With(logging.Context{Operation: "discover-classify", Path: path, Task: t.TaskID}).LogVerbose("classified config target kind=%d", t.Kind)
+		d.log.With(logging.Context{Operation: "discover-classify", Path: path, TaskID: t.TaskID}).LogVerbose("classified config target kind=%d", t.Kind)
 		return t, true
 	}
 	t, ok := d.classifySpool(path)
 	if ok {
-		d.log.With(logging.Context{Operation: "discover-classify", Path: path, Task: t.TaskID}).LogVerbose("classified spool target kind=%d raw=%t", t.Kind, t.Raw)
+		d.log.With(logging.Context{Operation: "discover-classify", Path: path, TaskID: t.TaskID}).LogVerbose("classified spool target kind=%d raw=%t", t.Kind, t.Raw)
 	} else {
 		d.log.With(logging.Context{Operation: "discover-classify", Path: path}).LogVerbose("path does not match a watched artifact")
 	}
@@ -194,7 +194,7 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 	default:
 		// Unclassifiable means the file leaves discovery entirely and is never
 		// ingested — a total-ingestion violation, not a note.
-		d.log.With(logging.Context{Operation: "classify-spool", Path: path, Task: taskID, Level: "warn"}).Log("spool task has no a/b/w kind prefix; the file is dropped from discovery and never ingested")
+		d.log.With(logging.Context{Operation: "classify-spool", Path: path, TaskID: taskID, Level: "warn"}).Log("spool task has no a/b/w kind prefix; the file is dropped from discovery and never ingested")
 		return Target{}, false
 	}
 	return t, true

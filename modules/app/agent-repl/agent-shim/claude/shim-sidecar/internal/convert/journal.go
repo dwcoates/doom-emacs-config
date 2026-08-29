@@ -24,7 +24,7 @@ func (c *Converter) JournalRecord(record map[string]any, at Attribution, taskID 
 	if taskID == "" {
 		// Without the run's identity there is no card to append to, and there is
 		// no arm for a progress record that names no work.
-		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, VendorSessionID: at.SessionID, Level: "warn"}).
 			Log("journal record at offset=%d has no run identity; stored unconverted", at.Offset)
 		return []*storev1.StoreEntry{UnknownEntry(at, str(record["type"]), "type", record)}
 	}
@@ -33,7 +33,7 @@ func (c *Converter) JournalRecord(record map[string]any, at Attribution, taskID 
 	case "started", "result":
 		return []*storev1.StoreEntry{DetachedProgress(at, taskID, journalLine(kind, record))}
 	default:
-		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, VendorSessionID: at.SessionID, Level: "warn"}).
 			Log("journal record type=%q at offset=%d is not modeled; stored unconverted", kind, at.Offset)
 		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}

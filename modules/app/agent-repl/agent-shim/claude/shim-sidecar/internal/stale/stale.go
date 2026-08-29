@@ -92,7 +92,7 @@ func New(opt Options, log *logging.Bound) *Tracker {
 // Open registers (or refreshes) an open task. startedAtMs is the launch/observed
 // time; nowMs seeds last-activity.
 func (t *Tracker) Open(id string, kind tail.Kind, session, outputPath string, startedAtMs, nowMs int64) {
-	t.log.With(logging.Context{Operation: "stale-open", Session: session, Task: id, Path: outputPath}).LogVerbose("open requested kind=%d started_at_ms=%d now_ms=%d", kind, startedAtMs, nowMs)
+	t.log.With(logging.Context{Operation: "stale-open", VendorSessionID: session, TaskID: id, Path: outputPath}).LogVerbose("open requested kind=%d started_at_ms=%d now_ms=%d", kind, startedAtMs, nowMs)
 	if id == "" || session == "" {
 		err := fmt.Sprintf("stale: task identity is required session=%q task_id=%q", session, id)
 		// An incomplete identity cannot be routed to a session diagnostic.
@@ -106,14 +106,14 @@ func (t *Tracker) Open(id string, kind tail.Kind, session, outputPath string, st
 		if outputPath != "" {
 			existing.outputPath = outputPath
 		}
-		t.log.With(logging.Context{Operation: "stale-open", Session: session, Task: id, Path: existing.outputPath}).LogVerbose("refreshed existing task")
+		t.log.With(logging.Context{Operation: "stale-open", VendorSessionID: session, TaskID: id, Path: existing.outputPath}).LogVerbose("refreshed existing task")
 		return
 	}
 	t.tasks[key] = &task{
 		id: id, kind: kind, session: session, outputPath: outputPath,
 		startedAtMs: startedAtMs, lastActMs: nowMs,
 	}
-	t.log.With(logging.Context{Operation: "stale-open", Session: session, Task: id, Path: outputPath}).Log("tracking new task kind=%d", kind)
+	t.log.With(logging.Context{Operation: "stale-open", VendorSessionID: session, TaskID: id, Path: outputPath}).Log("tracking new task kind=%d", kind)
 }
 
 // Restore resets the in-memory tracker at the start of every established
@@ -161,7 +161,7 @@ func (t *Tracker) Restore() error {
 // enqueuing the same session diagnostic on every retry would grow the outbox
 // forever while the link is necessarily unable to flush it.
 func (t *Tracker) restoreError(ctx logging.Context, err error) error {
-	fingerprint := ctx.Session + "\x00" + ctx.Task + "\x00" + err.Error()
+	fingerprint := ctx.VendorSessionID + "\x00" + ctx.TaskID + "\x00" + err.Error()
 	t.mu.Lock()
 	repeated := t.restoreFailure == fingerprint
 	if !repeated {
@@ -267,7 +267,7 @@ func (t *Tracker) BootSweep(bootMs, nowMs int64) []*storev1.StoreEntry {
 // carried so a reader can tell "we watched it exit" from "we stopped hearing
 // from it", and so a wrong threshold is diagnosable rather than merely wrong.
 func (t *Tracker) lost(tk *task, inference string) *storev1.StoreEntry {
-	t.log.With(logging.Context{Operation: "infer-lost", Task: tk.id, Session: tk.session, Level: "warn"}).
+	t.log.With(logging.Context{Operation: "infer-lost", TaskID: tk.id, VendorSessionID: tk.session, Level: "warn"}).
 		Log("LOST kind=%d inference=%s; never reported as succeeded", tk.kind, inference)
 	return convert.DetachedLost(convert.Attribution{
 		SessionID:    tk.session,
