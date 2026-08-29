@@ -74,6 +74,10 @@ export function convertUserRecord(
 
   const settledAtMs = context.nowMs();
   const structured = record.tool_use_result;
+  // THE SDK DECLARES A USER RECORD'S uuid OPTIONAL, and a write id needs a
+  // coordinate. The settling call's own id is the deterministic stand-in: it
+  // names exactly this settle and nothing else, so a replay still absorbs.
+  const uuidOf = (toolUseId: string): string => message.uuid ?? `tool_result:${toolUseId}`;
   const entries: PersistEntry[] = [];
   for (const block of results) {
     const toolUseId = block.tool_use_id;
@@ -107,7 +111,7 @@ export function convertUserRecord(
       const detachment = bashDetachmentEntry(
         context,
         pending.agentId,
-        message.uuid,
+        uuidOf(toolUseId),
         toolUseId,
         structured,
       );
@@ -115,7 +119,7 @@ export function convertUserRecord(
     }
     entries.push(
       ...convertToolResult(converters, context, registry, toolUseId, outcome, {
-        vendorUuid: message.uuid,
+        vendorUuid: uuidOf(toolUseId),
       }),
     );
   }
@@ -169,7 +173,7 @@ function skillDocumentEntry(
       context,
       {
         agentId: call.agentId,
-        vendorUuid: message.uuid,
+        vendorUuid: message.uuid ?? `skill_document:${call.toolUseId}`,
         discriminator: "activity.skill_use.success",
       },
       agentActivity(
