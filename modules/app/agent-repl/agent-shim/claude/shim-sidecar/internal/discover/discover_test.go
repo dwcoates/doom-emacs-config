@@ -336,22 +336,59 @@ func TestClassifyRejectsAnUnwatchedShape(t *testing.T) {
 	}
 }
 
-// The relayed on-disk layout (shim lead): transcripts
+// The on-disk layout: transcripts
 // <config root>/projects/<cwd-slug>/<vendor session>.jsonl, subagents
 // .../<vendor session>/subagents/agent-<id>.jsonl + meta.json, spools
-// <spool root>/[claude-<uid>/]<cwd-slug>/<vendor session>/tasks/<task>.output,
-// where <cwd-slug> maps both '/' and '.' to '-'.
+// <spool root>/[claude-<uid>/]<cwd-slug>/<vendor session>/tasks/<task>.output.
+//
+// <cwd-slug> replaces EVERY byte of the absolute cwd outside [A-Za-z0-9] with
+// '-' (underscores included, case preserved), so it is LOSSY and not
+// invertible. These tests pin that the slug is matched positionally and its
+// content is never read.
 
-func TestScanAcceptsASlugWithDashesForPathSeparators(t *testing.T) {
-	// Arrange: the slug of /Users/me/work.dir is -Users-me-work-dir.
-	d, _, _, _ := fixture(t, "config-a/projects/-Users-me-work-dir/sess-1.jsonl")
+func TestScanAcceptsALossyCwdSlug(t *testing.T) {
+	// Arrange: the slug of /private/var/folders/_m/x, whose underscore and dots
+	// are all flattened to dashes.
+	d, _, _, _ := fixture(t, "config-a/projects/-private-var-folders--m-x/sess-1.jsonl")
 
 	// Act.
 	got := find(t, d.Scan(), "sess-1.jsonl")
 
 	// Assert.
 	if got.Kind != tail.KindSessionTranscript || got.SessionID != "sess-1" {
-		t.Fatalf("target = %+v, want the slugged project dir's session transcript", got)
+		t.Fatalf("target = %+v, want the session transcript inside the slugged dir", got)
+	}
+}
+
+func TestATargetDecodesNothingFromTheSlug(t *testing.T) {
+	// Arrange: two DIFFERENT cwds can render to one slug, so a slug read back as
+	// a path would be a guess.
+	d, _, _, _ := fixture(t, "config-a/projects/-a-b-c/sess-1.jsonl")
+
+	// Act.
+	got := find(t, d.Scan(), "sess-1.jsonl")
+
+	// Assert: no field carries the slug or anything derived from it.
+	for name, value := range map[string]string{
+		"SessionID": got.SessionID, "AgentID": got.AgentID,
+		"TaskID": got.TaskID, "RunID": got.RunID,
+	} {
+		if strings.Contains(value, "-a-b-c") {
+			t.Fatalf("%s = %q carries the cwd slug; the slug is an opaque directory name", name, value)
+		}
+	}
+}
+
+func TestASpoolDecodesNothingFromItsSlugOrRuntimeSession(t *testing.T) {
+	// Arrange.
+	d, _, _, _ := fixture(t, "spool/claude-501/-a-b-c/runtime-sess/tasks/b1.output")
+
+	// Act.
+	got := find(t, d.Scan(), "b1.output")
+
+	// Assert: only the task basename carries an identity.
+	if got.TaskID != "b1" || got.SessionID != "" {
+		t.Fatalf("target = %+v, want only the task id read from the path", got)
 	}
 }
 

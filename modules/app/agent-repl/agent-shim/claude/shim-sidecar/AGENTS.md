@@ -145,10 +145,21 @@ Four kinds of file, all written by the vendor's agent binary:
    + meta)
 4. task spools — `<spool root>/[claude-<uid>/]<cwd-slug>/<vendor session>/tasks/<task>.output`
 
-`<cwd-slug>` maps both `/` and `.` to `-`. BOTH SPOOL-ROOT SPELLINGS ARE
-ACCEPTED: `--spool-root /tmp` resolves `claude-<uid>` itself, and a root
-pointed straight at the uid dir works too, because neither spelling may make a
-spool invisible.
+BOTH SPOOL-ROOT SPELLINGS ARE ACCEPTED: `--spool-root /tmp` resolves
+`claude-<uid>` itself, and a root pointed straight at the uid dir works too,
+because neither spelling may make a spool invisible.
+
+- NOTHING IS EVER DECODED FROM `<cwd-slug>`. The vendor builds it by replacing
+  every byte of the absolute cwd outside `[A-Za-z0-9]` with `-` (underscores
+  included, case preserved), so `/private/var/folders/_m/x` becomes
+  `-private-var-folders--m-x`. THAT MAPPING IS LOSSY AND NOT INVERTIBLE: two
+  different directories can render to one slug. The slug is matched
+  POSITIONALLY and its content is never read; every identity comes from what is
+  INSIDE it — the session uuid file names, `subagents/`, `wf_*`, `agent-<id>`,
+  and the `tasks/` basenames. Never add a slug-to-path decoder, and never
+  compare slugs across roots as though they were paths.
+- The `<vendor session>` directory segment of a spool path is not read either:
+  it is the harness's RUNTIME session id (see below).
 
 - A SPOOL PATH IS A LOCATION, NEVER AN IDENTITY. The spool layout embeds a
   session-shaped segment; it is the harness's RUNTIME session id, which
