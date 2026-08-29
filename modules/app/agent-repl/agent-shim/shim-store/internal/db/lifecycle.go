@@ -27,7 +27,7 @@ func (d *DB) applyLifecycle(ctx context.Context, tx *sql.Tx, r routed, now int64
 	case *storev1.StoreAgentUpdate_ServeableFrame:
 		return d.applyServeableFrameLifecycle(ctx, tx, r, arm.ServeableFrame, now)
 	case *storev1.StoreAgentUpdate_Bash:
-		return d.applyBashLifecycle(ctx, tx, r, arm.Bash, now)
+		return d.applyBashLifecycle(ctx, tx, arm.Bash, now)
 	default:
 		// Residue and workflow frames touch no lifecycle table: the residue
 		// describes nothing the store models, and the workflow table takes no
@@ -48,13 +48,21 @@ func (d *DB) applyServeableFrameLifecycle(ctx context.Context, tx *sql.Tx, r rou
 		if err := d.ensureAgent(ctx, tx, agentID, now); err != nil {
 			return err
 		}
+		// THE STORED BLOB IS THE AgentFrame, not the store envelope around it.
+		// A terminal column is read back as conversation vocabulary, and a
+		// reader that had to strip a storage envelope off it would be reading
+		// the datalayer's model to recover the protocol's.
+		blob, err := proto.Marshal(frame)
+		if err != nil {
+			return invalidf("frame of agent %q cannot be re-serialized: %v", agentID, err)
+		}
 		switch arm := frame.GetResult().(type) {
 		case *conversationv1.AgentFrame_Update:
-			return d.applyUpdateLifecycle(ctx, tx, r, agentID, arm.Update, now)
+			return d.applyUpdateLifecycle(ctx, tx, agentID, arm.Update, blob, now)
 		case *conversationv1.AgentFrame_Success, *conversationv1.AgentFrame_Failure:
-			return d.endAgent(ctx, tx, agentID, r.frame, now)
+			return d.endAgent(ctx, tx, agentID, blob, now)
 		case *conversationv1.AgentFrame_DetachedWork:
-			return d.announceDetachedWork(ctx, tx, r, agentID, arm.DetachedWork, now)
+			return d.announceDetachedWork(ctx, tx, agentID, arm.DetachedWork, blob, now)
 		}
 	}
 	return nil
@@ -64,7 +72,7 @@ func (d *DB) applyServeableFrameLifecycle(ctx context.Context, tx *sql.Tx, r rou
 // unpacked tables. It NEVER touches the acting agent's own terminal columns:
 // only a success or a failure frame ends an agent, and an update arriving after
 // one is an out-of-order write, not a resurrection.
-func (d *DB) applyUpdateLifecycle(ctx context.Context, tx *sql.Tx, r routed, agentID string, update *conversationv1.AgentUpdate, now int64) error {
+func (d *DB) applyUpdateLifecycle(ctx context.Context, tx *sql.Tx, agentID string, update *conversationv1.AgentUpdate, blob []byte, now int64) error {
 	activity, ok := update.GetUpdate().(*conversationv1.AgentUpdate_Activity)
 	if !ok {
 		return nil
@@ -78,7 +86,7 @@ func (d *DB) applyUpdateLifecycle(ctx context.Context, tx *sql.Tx, r routed, age
 		}
 	}
 	if activityIsTerminal(act) {
-		return d.closeDetachedByOrigin(ctx, tx, act.GetActivityId().GetValue(), r.frame, now)
+		return d.closeDetachedByOrigin(ctx, tx, act.GetActivityId().GetValue(), blob, now)
 	}
 	return nil
 }
@@ -173,7 +181,7 @@ func (d *DB) endAgent(ctx context.Context, tx *sql.Tx, agentID string, terminal 
 
 // announceDetachedWork records one AgentDetachedWork in the lifecycle table.
 // It is never a page line: the spawning call already is one.
-func (d *DB) announceDetachedWork(ctx context.Context, tx *sql.Tx, r routed, owner string, work *conversationv1.AgentDetachedWork, now int64) error {
+func (d *DB) announceDetachedWork(ctx context.Context, tx *sql.Tx, owner string, work *conversationv1.AgentDetachedWork, blob []byte, now int64) error {
 	kind, err := validateDetachedWork(work, 0)
 	if err != nil {
 		return err
@@ -226,7 +234,7 @@ func (d *DB) announceDetachedWork(ctx context.Context, tx *sql.Tx, r routed, own
 		outputReadable: outputReadable,
 		cause:          sql.NullString{String: cause, Valid: cause != ""},
 		timeoutMs:      timeout,
-		latestState:    r.frame,
+		latestState:    blob,
 		now:            now,
 	})
 }
@@ -234,7 +242,7 @@ func (d *DB) announceDetachedWork(ctx context.Context, tx *sql.Tx, r routed, own
 // applyBashLifecycle records a detached shell run's frame against the run's own
 // row. Never a page line: the shell CALL in the spawning agent's book is the
 // page line, and this frame is that run's state.
-func (d *DB) applyBashLifecycle(ctx context.Context, tx *sql.Tx, r routed, bash *storev1.StoreAgentBash, now int64) error {
+func (d *DB) applyBashLifecycle(ctx context.Context, tx *sql.Tx, bash *storev1.StoreAgentBash, now int64) error {
 	runID := bash.GetRun().GetValue()
 	state, err := proto.Marshal(bash.GetFrame())
 	if err != nil {

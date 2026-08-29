@@ -692,3 +692,42 @@ func TestWriteBatchKeepsTheFirstSightInstantOfAnAgentThatSpeaksAgain(t *testing.
 		t.Fatalf("started_at_ms moved from %d to %d", first, got)
 	}
 }
+
+func TestWriteBatchStoresTheAgentFrameItselfAsTheTerminal(t *testing.T) {
+	// Arrange: a terminal column is read back as CONVERSATION vocabulary, so
+	// it holds the AgentFrame rather than the storage envelope around it — a
+	// reader stripping an envelope off it would be reading the datalayer's
+	// model to recover the protocol's.
+	d, _ := newStore(t)
+
+	// Act
+	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(successFrame("agent-1"))))
+
+	// Assert
+	blob := scalar[[]byte](t, d, `SELECT terminal FROM agent WHERE agent_id = 'agent-1'`)
+	frame := &conversationv1.AgentFrame{}
+	if err := proto.Unmarshal(blob, frame); err != nil {
+		t.Fatalf("terminal is not an AgentFrame: %v", err)
+	}
+	if frame.GetAgentId().GetValue() != "agent-1" || frame.GetSuccess() == nil {
+		t.Fatalf("terminal frame = %v", frame)
+	}
+}
+
+func TestWriteBatchStoresTheBashFrameItselfAsTheLatestState(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	writeOK(t, d, bashEntry("w1", "u1", "run-1", bashStart()))
+
+	// Assert
+	blob := scalar[[]byte](t, d, `SELECT latest_state FROM detached_work WHERE work_id = 'run-1'`)
+	frame := &conversationv1.AgentBash{}
+	if err := proto.Unmarshal(blob, frame); err != nil {
+		t.Fatalf("latest_state is not an AgentBash: %v", err)
+	}
+	if frame.GetStart() == nil {
+		t.Fatalf("latest_state frame = %v", frame)
+	}
+}
