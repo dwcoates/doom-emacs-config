@@ -204,7 +204,11 @@ TS for shim/v1, store/v1, conversation/v1). Tests move with their modules.
 - Turn terminals come from `result` only; hook activity never synthesizes
   one. The 16 failure arms map from the result subtypes + error strings.
 - Anything unconvertible lands in `residue.ts` (vendor_specific | unknown |
-  unparsed) as an unserved store row — never dropped, never a crash.
+  unparsed) as an unserved store row — never dropped, never a crash. The
+  `vendor_specific.kind` spelling is shared with the sidecar: an attachment
+  record is `attachment/<type>` (e.g. `attachment/deferred_tools_delta`,
+  `attachment/agent_listing_delta`); a system record is `system/<subtype>`;
+  any other transcript/stream record kind is `<type>` verbatim.
 - Every converter logs its branch through `log.ts`.
 
 ## Streams the engine serves
