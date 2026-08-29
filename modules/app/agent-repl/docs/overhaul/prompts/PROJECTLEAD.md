@@ -205,6 +205,19 @@ others are squared away.
   support a robust suite of inputs with strong coverage — a WIDE ARRAY
   of prompts, the various slash commands, detached work, WatchSession
   updates, and the rest of the vendor surface the contract exercises.
+- THE CAPTURE CARVE-OUT (ruled 2026-08-29): the no-real-calls rule
+  governs tests and playtests. A ONE-TIME supervised CAPTURE RUN —
+  which YOU dispatch, with the user's approval — records real
+  transcripts from the actual agent binary; the mock's scripts are
+  rebuilt FROM those captures (so the fake cannot agree with us by
+  construction), and the shim teamlead's golden-transcript suites
+  consume them. This is the single sanctioned exception.
+- WORKFLOW IS KICKED (ruled 2026-08-29): workflow APIs remain in the
+  contract but are NOT implemented in this wave — direct teamleads
+  accordingly; no workflow surface, ingestion, or verbs get built.
+- The retired element-catalogue page is gone; you MAY recreate a
+  similar visual test surface over the new vocabulary at your own
+  discretion.
 
 ## Runtime playtesting (after the e2e suite settles)
 

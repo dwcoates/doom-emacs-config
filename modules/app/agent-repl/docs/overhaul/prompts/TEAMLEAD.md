@@ -137,6 +137,11 @@ Escalate — never guess through — anything that is:
 
 ## Standing conventions you enforce
 
+- WORKFLOW IS KICKED (ruled 2026-08-29): workflow APIs (shim verbs,
+  store table, sidecar journal ingestion, any frontend surface) stay in
+  the contract but are NOT implemented in this wave. Do not dispatch
+  work for them; a spec mention of workflow is future material.
+
 - NO BACKWARDS COMPATIBILITY, EVER: make no effort to preserve the
   currently running Emacs, agent-repl, or any stored data. Pretend this
   project is from scratch and there are no users — because there are
