@@ -12,8 +12,8 @@ import { metapromptPath } from "../src/metaprompt.js";
 // an idempotent release — while the pure helpers (lockPath, workspaceLockKey,
 // …) stay real so a drift between double and module surfaces here rather than
 // silently.
-vi.mock("../src/uds/session-lock.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/uds/session-lock.js")>();
+vi.mock("../src/locks.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/locks.js")>();
   return {
     ...actual,
     acquireSessionLock: vi.fn((sessionId: string) => {
@@ -429,7 +429,7 @@ describe("runUdsMode without a daemon transport", () => {
 
   it("releases the workspace claim it took before refusing", async () => {
     // Arrange
-    const { acquireWorkspaceLock } = await import("../src/uds/session-lock.js");
+    const { acquireWorkspaceLock } = await import("../src/locks.js");
     vi.mocked(acquireWorkspaceLock).mockClear();
     const args = parseArgs([
       "--session-id", "sess-release",

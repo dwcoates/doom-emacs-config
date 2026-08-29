@@ -6,7 +6,7 @@ const mockedWriteSync = vi.mocked(writeSync);
 
 async function freshLog() {
   vi.resetModules();
-  return import("../src/uds/log.js");
+  return import("../src/log.js");
 }
 
 function persisted(): Record<string, unknown>[] {

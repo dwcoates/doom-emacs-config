@@ -7,7 +7,7 @@ import {
   acquireWorkspaceLock,
   lockPath,
   workspaceLockPath,
-} from "../src/uds/session-lock.js";
+} from "../src/locks.js";
 
 // The lock replaces the uniqueness bind() used to give away for free: while
 // each shim listened on its own path, a second shim for one session could not

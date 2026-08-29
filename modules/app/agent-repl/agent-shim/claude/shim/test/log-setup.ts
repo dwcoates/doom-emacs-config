@@ -8,7 +8,7 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
-const { configureLog } = await import("../src/uds/log.js");
+const { configureLog } = await import("../src/log.js");
 configureLog({ fd: 3, cwd: "/test/workspace", agentReplSessionId: "test-agent-session" });
 
 // Normal shim records deliberately echo to stderr in production. Suppress
