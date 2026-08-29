@@ -56,9 +56,16 @@ message SetSessionModelFailure {
     // The context exceeds the threshold and no remediation was named: here
     // is what the switch would cost, so a remediation can be chosen.
     conversation.v1.SessionCold cold = 1;
-    // Further arms DERIVED at the wave from the shim's real sites (a model not
-    // in the catalog, no session, the vendor refusing the switch).
+    // The model is not one of the catalog's served options.
+    SetSessionModelNotInCatalog model_not_in_catalog = 3;
+    // No session is open on this shim.
+    SetSessionModelNoSession no_session = 4;
+    // The vendor refused the switch; `detail` carries its wording.
+    SetSessionModelVendorRefused vendor_refused = 5;
   }
   // The shim's account, for a human and for logs; never switched on.
   string detail = 2;
 }
+message SetSessionModelNotInCatalog {}
+message SetSessionModelNoSession {}
+message SetSessionModelVendorRefused {}
