@@ -59,6 +59,13 @@ func (v *verbs) AnswerPermission(ctx context.Context, ws ids.WorkspaceID, answer
 			fmt.Sprintf("workspace %q has no live session to answer through", ws), false)
 	}
 	if err := shim.Answer(ctx, served.Agent, answer); err != nil {
+		if refusal, ok := AsShimRefusal(err); ok {
+			// The shim's own arm reaches the caller: `not_deliverable` (the SDK
+			// has no route to that agent) is a different answer from
+			// `no_open_ask` (the card is stale), and the user acts differently
+			// on each. Neither is hidden.
+			return refuse(log, "AnswerPermission", refusal.Arm, refusal.Detail, false)
+		}
 		log.Error(opAnswerPerm, "the permission answer was not accepted", dlog.Context{
 			"ask": ask.GetValue(), "cause": err.Error(),
 		})
@@ -108,6 +115,9 @@ func (v *verbs) AnswerQuestion(ctx context.Context, ws ids.WorkspaceID, answer *
 			fmt.Sprintf("workspace %q has no live session to answer through", ws), false)
 	}
 	if err := shim.Answer(ctx, served.Agent, answer); err != nil {
+		if refusal, ok := AsShimRefusal(err); ok {
+			return refuse(log, "AnswerQuestion", refusal.Arm, refusal.Detail, false)
+		}
 		log.Error(opAnswerQuestion, "the question answer was not accepted", dlog.Context{
 			"ask": ask.GetValue(), "cause": err.Error(),
 		})
