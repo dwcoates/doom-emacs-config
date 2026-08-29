@@ -22,9 +22,34 @@ func QuestionKey(toolUseID string) string { return "question:" + toolUseID }
 // session's life and none of them supersedes another.
 func TerminalKey(agent, recordUUID string) string { return "terminal:" + agent + ":" + recordUUID }
 
-// BashKey names a detached shell run by the spawning call's unit id, so the
-// spool's deltas and the announcement land on ONE row.
-func BashKey(run string) string { return "bash:" + run }
+// Bash row keys — ONE ROW PER SPOOL-DERIVED WRITE, never one row superseded.
+//
+// WHY NOT ONE KEY FOR THE RUN. The store holds one row per upsert key and a
+// write supersedes that row WHOLE, so a single `bash:<run>` key would leave the
+// run holding only its most recent delta: every earlier chunk of output would be
+// erased by the next one. store.v1 WatchBashRun exists to REPLAY a run's rows in
+// write order — the start, each delta, then the terminal — which is only
+// possible if each of those writes is its own row.
+//
+// THE DELTA'S KEY IS ITS from_offset, which is the delta's identity: the same
+// bytes re-read after a restart mint the same key and supersede their own row
+// rather than appending a second copy of themselves. The terminal has a fixed
+// key because a run has exactly one, however many times it is restated (an EXIT
+// marker re-read, a LOST sweep re-concluding).
+
+// BashStartKey names a run's opening row. The sidecar does not normally mint one
+// — a spool exists only after the launch the STREAM plane announced — but the
+// key belongs to this space so a producer that does mint one agrees with the
+// replay order.
+func BashStartKey(run string) string { return "bash:" + run + ":start" }
+
+// BashDeltaKey names one delta of a run by the file offset its bytes start at.
+func BashDeltaKey(run string, fromOffset int64) string {
+	return "bash:" + run + ":" + itoa(int(fromOffset))
+}
+
+// BashTerminalKey names a run's single terminal row.
+func BashTerminalKey(run string) string { return "bash:" + run + ":terminal" }
 
 // SessionKey names a session-scoped fact by its arm and the record that carried
 // it — a context cut, a mid-turn api error.

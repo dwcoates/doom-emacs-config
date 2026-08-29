@@ -23,12 +23,19 @@ import (
 type AgentTranscriptHandler struct {
 	conv *convert.Converter
 	log  *logging.Bound
+	// obs is the reader's callbacks, adopted one at a time and installed on the
+	// converter once, at construction: a converter has exactly one observer, and
+	// two independent adoptions must not overwrite each other.
+	obs *seamObserver
 }
 
 // NewAgentTranscriptHandler builds a handler with its own converter.
 func NewAgentTranscriptHandler(log *logging.Bound) *AgentTranscriptHandler {
 	log.With(logging.Context{Operation: "agent-handler-new"}).LogVerbose("constructing agent transcript handler")
-	return &AgentTranscriptHandler{conv: convert.New(log), log: log}
+	obs := &seamObserver{}
+	conv := convert.New(log)
+	conv.SetObserver(obs)
+	return &AgentTranscriptHandler{conv: conv, log: log, obs: obs}
 }
 
 // SetObserver installs the owner-resolution listener on this handler's converter.

@@ -34,7 +34,7 @@ func TestSpoolBytesBecomeADeltaCarryingTheirStartOffset(t *testing.T) {
 	entries := h.Handle(spoolFrames("second chunk", 512), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
 
 	// Assert.
-	delta := entryByKey(t, entries, convert.BashKey("toolu_run1"))
+	delta := entryByKey(t, entries, convert.BashDeltaKey("toolu_run1", 512))
 	update := delta.GetAgentUpdate().GetBash().GetFrame().GetUpdate()
 	if update == nil {
 		t.Fatal("spool bytes must land on the bash update arm")
@@ -55,7 +55,7 @@ func TestSpoolDeltaNamesTheRunAndIsNotPaginatable(t *testing.T) {
 	entries := h.Handle(spoolFrames("output", 0), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
 
 	// Assert.
-	delta := entryByKey(t, entries, convert.BashKey("toolu_run1"))
+	delta := entryByKey(t, entries, convert.BashDeltaKey("toolu_run1", 0))
 	if got := delta.GetAgentUpdate().GetBash().GetRun().GetValue(); got != "toolu_run1" {
 		t.Fatalf("run = %q, want the spawning call's unit id", got)
 	}
@@ -164,7 +164,7 @@ func TestLostTerminalResolvesInterruptedWithNoCause(t *testing.T) {
 	if interrupted.GetByUser() != nil || interrupted.GetTimedOut() != nil {
 		t.Fatal("a LOST run must state NO cause: neither a user stop nor a timeout was observed")
 	}
-	if got := entries[0].GetUpsertKey(); got != convert.BashKey("toolu_run") {
+	if got := entries[0].GetUpsertKey(); got != convert.BashTerminalKey("toolu_run") {
 		t.Fatalf("upsert_key = %q, want the run's bash key so it upserts the run's own row", got)
 	}
 }
@@ -223,11 +223,11 @@ func TestSpoolFramesAreKeyedByTheSpawningCallRatherThanTheVendorTaskId(t *testin
 
 	// Assert.
 	for _, e := range entries {
-		if e.GetUpsertKey() == convert.BashKey("bbkq1") {
+		if e.GetUpsertKey() == convert.BashDeltaKey("bbkq1", 0) {
 			t.Fatalf("entry keyed by the vendor task id %q; the run is the spawning call", "bbkq1")
 		}
 	}
-	entryByKey(t, entries, convert.BashKey("toolu_run1"))
+	entryByKey(t, entries, convert.BashDeltaKey("toolu_run1", 0))
 }
 
 func TestATerminalCarriesTheWholeRunsOutputRatherThanTheLastBatch(t *testing.T) {

@@ -106,6 +106,16 @@ type sidecar struct {
 	// between.
 	settling map[string]string // resolved path -> run activity id
 
+	// stopped holds the tasks a person stopped whose spool was not being read
+	// when the stop arrived, with the instant the stop was observed. ONE VALUE
+	// PER TASK: a stop is a single fact and restating it changes nothing.
+	//
+	// IT IS NOT DROPPED ON SUSPENSION, unlike `settling`: a pending stop is a
+	// fact read out of a transcript, not a promise about a write in flight, and
+	// the transcript's own cursor did not advance either — so re-reading will
+	// report it again and the map absorbs the repeat.
+	stopped map[string]int64
+
 	// cursors is CYCLE-SCOPED: recovered as the first act of every production
 	// cycle and dropped the moment production is suspended, so a tailer can
 	// never be built from a stale — or absent — recovery.
@@ -146,6 +156,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		log:      log,
 		watchers: map[string]*watched{},
 		settling: map[string]string{},
+		stopped:  map[string]int64{},
 		rewound:  map[string]bool{},
 		// A fresh sidecar is simply a sidecar whose first cycle has not begun
 		// yet, with its first attempt due immediately. That is all "boot" means.
@@ -399,6 +410,11 @@ func (s *sidecar) watch(target discover.Target, now time.Time) {
 	s.watchers[target.Path] = &watched{target: target, tailer: tailer}
 	s.trackDetached(target, now)
 	bound.With(logging.Context{Operation: "watch"}).Log("watching %s", target.Kind)
+	// A stop that arrived while this spool was still held is applied now that it
+	// has a reader — the whole reason the stop is remembered rather than dropped.
+	if target.TaskID != "" {
+		s.applyStop(target.TaskID)
+	}
 }
 
 // rewindOnce applies the boot rewind: ONE bounded backward scan per file per

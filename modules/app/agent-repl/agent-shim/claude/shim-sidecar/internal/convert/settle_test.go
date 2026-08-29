@@ -2,7 +2,11 @@ package convert
 
 // settle_test.go — the joins, the exempt set, and the TaskStop carve-out.
 
-import "testing"
+import (
+	"testing"
+
+	storev1 "agentrepl/proto/store/v1"
+)
 
 const ts2 = "2026-07-22T19:58:40.000Z"
 
@@ -113,36 +117,82 @@ func TestExemptToolResultProducesNoEntryAtAll(t *testing.T) {
 	}
 }
 
-func TestTaskStopResultIsConsumedAsAShellRunsCancelledTerminal(t *testing.T) {
-	// Arrange. THE ONE CARVE-OUT: the TaskStop CALL stays dropped, but its RESULT
-	// resolves the owning task as CANCELLED — deliberately-stopped work must
-	// never resolve LOST.
+func TestAShellTasksStopIsReportedRatherThanConvertedHere(t *testing.T) {
+	// Arrange. THE ONE CARVE-OUT: the TaskStop CALL stays dropped and its RESULT
+	// resolves the owning task as CANCELLED — but a cancelled shell run's
+	// terminal owes the OUTPUT the run produced, and those bytes are in the
+	// spool this converter never reads. So the fact travels to the reader, which
+	// mints the terminal through the spool's own handler.
 	c := newTestConverter(t)
-	// The launch is what binds task b7 to the call that opened it; the stop's
-	// terminal is keyed by THAT call, never by the vendor task id.
-	launch := assistantWith("a0", "msg_0", ts1, toolCall("toolu_run", "Bash", `{"command":"sleep 1","run_in_background":true}`))
-	launched := toolResultLine("u0", "toolu_run", ts1, `[{"type":"text","text":"launched"}]`,
-		`{"backgroundTaskId":"b7","outputFile":"/tmp/b7.output"}`)
+	var stopped []string
+	c.SetObserver(recordingObserver{stopped: &stopped})
 	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{"task_id":"b7"}`))
 	result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
 		`{"command":"stop","task_type":"bash","task_id":"b7","message":"stopped"}`)
 
 	// Act.
-	entries := convertLines(t, c, launch, launched, call, result)
+	entries := convertLines(t, c, call, result)
 
 	// Assert.
-	terminal := entryByKey(t, entries, BashKey("toolu_run"))
-	interrupted := terminal.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted()
-	if interrupted == nil {
-		t.Fatal("a stopped shell run must resolve on the interrupted arm")
+	if len(stopped) != 1 || stopped[0] != "b7" {
+		t.Fatalf("stops reported = %v, want exactly the stopped task", stopped)
 	}
-	if interrupted.GetByUser() == nil {
-		t.Fatal("a deliberate stop must name the USER as the cause: that is the evidence we do have")
+	for _, e := range entries {
+		if e.GetAgentUpdate().GetBash() != nil {
+			t.Fatalf("the transcript converter minted a bash frame %q; the spool's reader owns the run's terminal", e.GetUpsertKey())
+		}
+	}
+}
+
+func TestAShellTasksStopProducesNoEntryOfItsOwn(t *testing.T) {
+	// Arrange. The stop is a REPORT, and the TaskStop call is exempt either way,
+	// so the record itself converts to nothing at all — not a page line, not
+	// residue.
+	c := newTestConverter(t)
+	var stopped []string
+	c.SetObserver(recordingObserver{stopped: &stopped})
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{"task_id":"b7"}`))
+	result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
+		`{"command":"stop","task_type":"local_bash","task_id":"b7","message":"stopped"}`)
+
+	// Act.
+	entries := convertLines(t, c, call, result)
+
+	// Assert.
+	if len(entries) != 0 {
+		t.Fatalf("entries = %d, want 0: keys=%v", len(entries), allKeys(entries))
 	}
 }
 
 func TestTaskStopResultIsConsumedAsAnAgentSpawnsStoppedFailure(t *testing.T) {
-	// Arrange.
+	// Arrange. An agent task DOES settle here: the spawn unit is a line in this
+	// stream's own book. It is keyed by the CALL that spawned it, never by the
+	// vendor task id, so the launch has to be in the file.
+	c := newTestConverter(t)
+	launch := assistantWith("a0", "msg_0", ts1, toolCall("toolu_spawn", "Agent", `{"description":"d","prompt":"p"}`))
+	launched := toolResultLine("u0", "toolu_spawn", ts1, `[{"type":"text","text":"launched"}]`,
+		`{"isAsync":true,"agentId":"a9","outputFile":"/tmp/a9.output"}`)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{"task_id":"a9"}`))
+	result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
+		`{"command":"stop","task_type":"agent","task_id":"a9","message":"stopped"}`)
+
+	// Act.
+	entries := convertLines(t, c, launch, launched, call, result)
+
+	// Assert. The spawn unit's row is written twice on purpose — the launch
+	// settles it, and the stop supersedes it WHOLE — so the last write is the
+	// unit's state, exactly as the store would hold it.
+	terminal := lastEntryByKey(t, entries, ActivityKey("toolu_spawn"))
+	failure := activityOf(terminal).GetSubagent().GetFailure()
+	if failure.GetStoppedByUser() == nil {
+		t.Fatal("a stopped subagent must resolve stopped_by_user, which is not a fault")
+	}
+}
+
+func TestAnAgentStopForATaskNoLaunchOpenedIsStoredRatherThanKeyedOnAGuess(t *testing.T) {
+	// Arrange. Without the launch nothing says WHICH call the spawn unit is, and
+	// keying it on the vendor task id would settle a row no reader can join to a
+	// call — so the record is stored whole instead.
 	c := newTestConverter(t)
 	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{"task_id":"a9"}`))
 	result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
@@ -152,10 +202,11 @@ func TestTaskStopResultIsConsumedAsAnAgentSpawnsStoppedFailure(t *testing.T) {
 	entries := convertLines(t, c, call, result)
 
 	// Assert.
-	terminal := entryByKey(t, entries, ActivityKey("a9"))
-	failure := activityOf(terminal).GetSubagent().GetFailure()
-	if failure.GetStoppedByUser() == nil {
-		t.Fatal("a stopped subagent must resolve stopped_by_user, which is not a fault")
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want exactly 1 (the record stored whole): keys=%v", len(entries), allKeys(entries))
+	}
+	if got := entries[0].GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetKind(); got != "task_stop/unlaunched" {
+		t.Fatalf("kind = %q, want task_stop/unlaunched", got)
 	}
 }
 
@@ -354,28 +405,30 @@ func TestUnknownToolBecomesUnmodeledNotResidue(t *testing.T) {
 	}
 }
 
-func TestATaskStopForATaskNoLaunchOpenedIsStoredRatherThanKeyedOnAGuess(t *testing.T) {
-	// Arrange. Without the launch there is nothing that says WHICH call the task
-	// belongs to, and keying the terminal on the vendor task id would settle a
-	// row no reader can join to a call — so the record is stored whole instead.
-	c := newTestConverter(t)
-	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{"task_id":"b7"}`))
-	result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
-		`{"command":"stop","task_type":"bash","task_id":"b7","message":"stopped"}`)
+// recordingObserver captures the facts a conversion reports to the reader.
+type recordingObserver struct {
+	stopped *[]string
+}
 
-	// Act.
-	entries := convertLines(t, c, call, result)
+func (o recordingObserver) TaskSpawned(string, string, string, string) {}
 
-	// Assert.
+func (o recordingObserver) TaskStopped(taskID string) {
+	*o.stopped = append(*o.stopped, taskID)
+}
+
+// lastEntryByKey answers the LAST entry written under a key, which is the state
+// the store holds: a write supersedes its row whole, so an earlier write of the
+// same key is history rather than a duplicate.
+func lastEntryByKey(t *testing.T, entries []*storev1.StoreEntry, key string) *storev1.StoreEntry {
+	t.Helper()
+	var out *storev1.StoreEntry
 	for _, e := range entries {
-		if e.GetUpsertKey() == BashKey("b7") {
-			t.Fatalf("a stop with no launch minted %q; the vendor task id is not a run identity", e.GetUpsertKey())
+		if e.GetUpsertKey() == key {
+			out = e
 		}
 	}
-	if len(entries) != 1 {
-		t.Fatalf("entries = %d, want exactly 1 (the record stored whole): keys=%v", len(entries), allKeys(entries))
+	if out == nil {
+		t.Fatalf("no entry under upsert_key %q; keys present: %v", key, allKeys(entries))
 	}
-	if got := entries[0].GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetKind(); got != "task_stop/unlaunched" {
-		t.Fatalf("kind = %q, want task_stop/unlaunched", got)
-	}
+	return out
 }

@@ -39,6 +39,20 @@ type lostTerminalSink interface {
 	LostTerminal(taskID, runActivityID, ownerAgentID, reason string) []*storev1.StoreEntry
 }
 
+// cancelTerminalSink is implemented by a handler that can spell a person's stop
+// as the run's terminal. Only the spool's reader can: the terminal owes the
+// output the run produced, and those bytes exist nowhere else.
+type cancelTerminalSink interface {
+	CancelTerminal(taskID, run, ownerAgentID string, settledAtMs int64) []*storev1.StoreEntry
+}
+
+// taskStopSink is implemented by a handler whose converter reports the TaskStop
+// results it reads. The transcript states the fact; the reader routes it to the
+// spool that owns the run.
+type taskStopSink interface {
+	SetTaskStopObserver(func(taskID string))
+}
+
 // terminalReadSink is implemented by a handler that can tell the reader it READ
 // a detached run's own terminal off the file (a spool's EXIT marker). The reader
 // is what turns that into "this run can no longer be concluded LOST".
@@ -66,8 +80,32 @@ func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
 		panic(fmt.Sprintf("sidecar: unsupported tail kind %d", kind))
 	}
 	s.plumbObserver(kind, built, handlerLog)
+	s.plumbTaskStops(kind, built, handlerLog)
 	s.plumbTerminals(kind, built, handlerLog)
 	return built
+}
+
+// plumbTaskStops hands the converter the reader's task-stop callback.
+//
+// ONLY A TRANSCRIPT CARRIES A TaskStop RESULT, for the same reason only a
+// transcript carries a launch: both are tool results. A transcript converter
+// that reports none leaves every cancelled run to be concluded LOST instead,
+// which is the one thing the carve-out exists to prevent — so its silence is a
+// defect, and a spool's is not.
+func (s *sidecar) plumbTaskStops(kind tail.Kind, built tail.Handler, log *logging.Bound) {
+	sink, ok := built.(taskStopSink)
+	if !ok {
+		if kind != tail.KindSessionTranscript && kind != tail.KindAgentTranscript {
+			log.With(logging.Context{Operation: "plumb-task-stop"}).LogVerbose(
+				"the %s converter reports no task stops; only a transcript carries the tool results a stop is stated in", kind)
+			return
+		}
+		log.With(logging.Context{Operation: "plumb-task-stop", Level: "error"}).Log(
+			"the %s converter reports no task stops (it implements no SetTaskStopObserver): a run a person stopped will be concluded LOST instead of cancelled", kind)
+		return
+	}
+	sink.SetTaskStopObserver(s.TaskStopped)
+	log.With(logging.Context{Operation: "plumb-task-stop"}).LogVerbose("task stops plumbed for kind=%s", kind)
 }
 
 // plumbTerminals hands the converter the reader's terminal-read callback.

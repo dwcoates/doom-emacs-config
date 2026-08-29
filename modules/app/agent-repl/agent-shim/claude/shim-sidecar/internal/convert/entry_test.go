@@ -159,7 +159,9 @@ func TestUpsertKeySpellingsTable(t *testing.T) {
 		{name: "a content block is message id plus index", got: ActivityKey(BlockActivityID("msg_1", 2)), want: "activity:msg_1:2"},
 		{name: "an ask has its own space", got: QuestionKey("toolu_ask"), want: "question:toolu_ask"},
 		{name: "a terminal is per agent and record", got: TerminalKey("agent-1", "uuid-9"), want: "terminal:agent-1:uuid-9"},
-		{name: "a detached run is keyed by its call", got: BashKey("toolu_run"), want: "bash:toolu_run"},
+		{name: "a detached run's delta is keyed by its call and its offset", got: BashDeltaKey("toolu_run", 512), want: "bash:toolu_run:512"},
+		{name: "a detached run's terminal has one key however often it is restated", got: BashTerminalKey("toolu_run"), want: "bash:toolu_run:terminal"},
+		{name: "a detached run's start row is its own key", got: BashStartKey("toolu_run"), want: "bash:toolu_run:start"},
 		{name: "a session fact names its arm", got: SessionKey("context_cut", "uuid-3"), want: "session:context_cut:uuid-3"},
 		{name: "an api error names its arm", got: SessionKey("api_error", "uuid-4"), want: "session:api_error:uuid-4"},
 	}
