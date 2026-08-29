@@ -665,6 +665,11 @@ names; each brief owns every file listed for its constituent rows.
   host.el); R-HANDOVER (link dual attach/promotion, host transferred ×4 —
   re-run after R-ACCEPT/R-STREAMCLOSE land; remediate what remains).
 
+- R-SUITE-1 (adversarial audit 1, docs/overhaul/reports/elisp-suite-audit-1.md):
+  92 findings, all accepted; a suite-extension agent implements them
+  (MISSING first, then WEAK), never running the suite itself. Ruling folded
+  in: a drained resend reuses the failed attempt's idempotency key.
+
 ## 16. Escalations sent to the project lead (defaults in force meanwhile)
 
 - E1 RESOLVED: SubmitPromptRequest.origin landed, REQUIRED.
