@@ -197,9 +197,27 @@ export class LiveWorkTable {
     return this.all().filter((entry) => entry.turnId === turnId);
   }
 
-  /** The live set as the wire names it. */
+  /**
+   * The live set as the WIRE names it: by the SPAWNING CALL, never by task id.
+   *
+   * `DetachedWorkId.value == AgentActivityId.value` (ruling, landing 3), so a
+   * terminal retires a handle by equality. A task the vendor started with no
+   * originating call has no wire name at all and is omitted — it is tracked for
+   * liveness (the level still governs no-wedge) but nothing can address it.
+   */
   workIds(entries: readonly LiveWorkEntry[] = this.all()): conversationv1.DetachedWorkId[] {
-    return entries.map((entry) => detachedWorkId(entry.taskId));
+    const ids: conversationv1.DetachedWorkId[] = [];
+    for (const entry of entries) {
+      if (entry.toolUseId === undefined || entry.toolUseId === "") {
+        LOGGER.log(
+          { level: "warn", task_id: entry.taskId },
+          "live work with no originating call has no wire handle; omitted from the named set",
+        );
+        continue;
+      }
+      ids.push(detachedWorkId(entry.toolUseId));
+    }
+    return ids;
   }
 
   /** Nothing is live. */

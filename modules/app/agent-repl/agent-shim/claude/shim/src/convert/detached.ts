@@ -82,9 +82,15 @@ export function detachedOutput(path: string, readable: boolean): conversationv1.
 
 /** What one detachment announcement says. */
 export interface DetachmentFacts {
-  /** The handle the work is addressed by. */
-  readonly workId: string;
-  /** The in-turn unit it detached FROM. */
+  /**
+   * The in-turn unit it detached FROM — and, by the same bytes, the HANDLE the
+   * work is addressed by.
+   *
+   * `DetachedWorkId.value == AgentActivityId.value` (ruling, landing 3): one
+   * identity addresses the work, its unit, and (for a subagent) its book, so a
+   * terminal retires the handle by equality. The vendor's `task_id` stays
+   * shim-side as the lookup for `stopTask` and the live level.
+   */
   readonly detachedFromToolUseId: string;
   /** Why it left. */
   readonly cause: DetachCause;
@@ -110,7 +116,7 @@ export function detachmentEntry(
   vendorUuid: string,
   facts: DetachmentFacts,
 ): PersistEntry {
-  const work = detachedWorkId(facts.workId);
+  const work = detachedWorkId(facts.detachedFromToolUseId);
   const announcement = create(conversationv1.AgentDetachedWorkSchema, {
     work,
     output:
@@ -159,8 +165,11 @@ export function bashDetachmentEntry(
   structured: unknown,
 ): PersistEntry | undefined {
   const output = structured as Record<string, unknown> | undefined;
-  const workId = output?.backgroundTaskId;
-  if (typeof workId !== "string" || workId === "") return undefined;
+  // THE VENDOR'S TASK ID IS ONLY EVIDENCE THAT IT BACKGROUNDED, not the handle:
+  // the wire handle is the spawning call's own id (ruling, landing 3), and the
+  // task id stays shim-side for `stopTask` and the live level.
+  const vendorTaskId = output?.backgroundTaskId;
+  if (typeof vendorTaskId !== "string" || vendorTaskId === "") return undefined;
   const timedOut = output?.timedOutAfterMs;
   const cause: DetachCause =
     typeof timedOut === "number"
@@ -169,11 +178,10 @@ export function bashDetachmentEntry(
         ? "by_user"
         : "requested";
   LOGGER.log(
-    { work: workId, tool_use_id: toolUseId, cause },
+    { vendor_task_id: vendorTaskId, work: toolUseId, tool_use_id: toolUseId, cause },
     "a shell command moved to the background rather than ending",
   );
   return detachmentEntry(context, agentId, vendorUuid, {
-    workId,
     detachedFromToolUseId: toolUseId,
     cause,
     timeoutMs: typeof timedOut === "number" ? timedOut : undefined,
@@ -252,7 +260,6 @@ export function convertDetached(
       LOGGER.log({ uuid, task_id: taskId, tool_use_id: toolUseId }, "work left the turn");
       return [
         detachmentEntry(context, agentId, uuid, {
-          workId: taskId,
           detachedFromToolUseId: toolUseId,
           cause: "requested",
         }),
@@ -280,7 +287,6 @@ export function convertDetached(
       LOGGER.log({ uuid, task_id: taskId }, "a person backgrounded running work by hand");
       return [
         detachmentEntry(context, agentId, uuid, {
-          workId: taskId,
           detachedFromToolUseId: toolUseId,
           cause: "by_user",
         }),
@@ -299,7 +305,6 @@ export function convertDetached(
       if (toolUseId !== undefined && toolUseId !== "" && raw.output_file !== undefined) {
         entries.push(
           detachmentEntry(context, agentId, uuid, {
-            workId: taskId,
             detachedFromToolUseId: toolUseId,
             cause: "requested",
             outputPath: raw.output_file,

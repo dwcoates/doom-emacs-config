@@ -624,8 +624,13 @@ export class TurnEngine {
     });
   }
 
-  /** A work id, for callers that hold a task id. */
-  static workId(taskId: string): conversationv1.DetachedWorkId {
-    return detachedWorkId(taskId);
+  /**
+   * A work id, for callers that hold the SPAWNING CALL's id.
+   *
+   * The wire handle is the call's `tool_use_id` (ruling, landing 3); a caller
+   * holding a vendor task id resolves it through the live set first.
+   */
+  static workId(spawningToolUseId: string): conversationv1.DetachedWorkId {
+    return detachedWorkId(spawningToolUseId);
   }
 }

@@ -187,8 +187,6 @@ export interface Reader {
     after: conversationv1.HistoryPointer,
   ): Promise<conversationv1.HistoryPage>;
   openBashRun(work: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>>;
-  /** Remember which run a detached-work handle names, from its announcement. */
-  linkWork(workValue: string, runValue: string): void;
   /** Relay one shell-run frame to whoever is watching that run. */
   noteBashFrame(runValue: string, frame: conversationv1.AgentBash): void;
 }
@@ -200,8 +198,6 @@ export interface ReaderOptions {
 
 export function createReader(options: ReaderOptions): Reader {
   const client = options.client;
-  /** DetachedWorkId → the run's AgentActivityId, from the announcement. */
-  const workToRun = new Map<string, string>();
 
   const openSession = async (
     agent: conversationv1.AgentId,
@@ -383,16 +379,13 @@ export function createReader(options: ReaderOptions): Reader {
     },
 
     async openBashRun(work) {
-      const runValue = workToRun.get(work.value);
-      if (runValue === undefined) {
-        LOGGER.log(
-          { level: "warn", work: work.value },
-          "no announced shell run carries this detached-work handle",
-        );
-        throw new PersistenceError(
-          "unknown_work",
-          `no announced shell run carries the detached-work handle ${JSON.stringify(work.value)}`,
-        );
+      // THE HANDLE IS THE RUN (ruling, landing 3): `DetachedWorkId.value ==
+      // AgentActivityId.value`, the spawning call's own `tool_use_id`. So there
+      // is no side table to consult and no way for a lookup to go stale — and a
+      // handle the store holds no row for is refused by the store itself.
+      const runValue = work.value;
+      if (runValue === "") {
+        throw new PersistenceError("unknown_work", "a detached-work handle is never the empty string");
       }
       // ONE PATH FOR EVERY RUN, and it is the STORE's. A detached shell's output
       // is written by the SIDECAR as deltas — no SDK route carries a byte of it
@@ -446,11 +439,6 @@ export function createReader(options: ReaderOptions): Reader {
           }
         },
       };
-    },
-
-    linkWork(workValue, runValue) {
-      if (workValue === "" || runValue === "") return;
-      workToRun.set(workValue, runValue);
     },
 
     noteBashFrame(runValue, frame) {

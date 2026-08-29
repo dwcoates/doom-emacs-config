@@ -130,10 +130,22 @@ export function permissionId(gatedToolUseId: string): conversationv1.AgentPermis
   });
 }
 
-/** Detached work: the vendor `task_id`, verbatim. */
-export function detachedWorkId(vendorTaskId: string): conversationv1.DetachedWorkId {
+/**
+ * Detached work: the SPAWNING CALL's `tool_use_id`, verbatim.
+ *
+ * NOT the vendor's `task_id` (ruling, landing 3). `DetachedWorkId.value` and
+ * `AgentActivityId.value` are the SAME BYTES, which is what lets a terminal
+ * retire a handle by equality instead of through a side table — and for a
+ * subagent it is also its `AgentId`, so one identity addresses the work, its
+ * unit and its book.
+ *
+ * The vendor's `task_id` stays SHIM-SIDE as the internal lookup for `stopTask`
+ * and for the `background_tasks_changed` level; nothing task-id-shaped ever
+ * goes on the wire.
+ */
+export function detachedWorkId(spawningToolUseId: string): conversationv1.DetachedWorkId {
   return create(conversationv1.DetachedWorkIdSchema, {
-    value: requireVendorValue(vendorTaskId, "the vendor task id"),
+    value: requireVendorValue(spawningToolUseId, "the spawning call's tool use id"),
   });
 }
 

@@ -388,30 +388,17 @@ export function createPersistence(options: PersistenceOptions): Persistence {
   const reconciler = createReconciler({ client: options.client });
 
   /**
-   * Tell the reader what a batch says about detached shell runs.
+   * Tell the reader which shell-run rows this batch wrote.
    *
-   * `WatchBash` is served from the frames THIS shim wrote (store.v1 has no read
-   * verb for the bash lifecycle table — see `reader.ts`), so the two facts a
-   * watcher needs are harvested as they pass through: which run a detached-work
-   * handle names, and every lifecycle frame of that run.
+   * The rows themselves are read back from the store — a run is served through
+   * `WatchBashRun`, whether the shim or the sidecar wrote it — so this is only
+   * the writer's observation point: a frame that never reached the store is
+   * visible in the log rather than merely missing from a watcher.
    */
   const noteShellRuns = (entries: readonly PersistEntry[]): void => {
     for (const entry of entries) {
-      if (entry.item.kind === "bash_run") {
-        reader.noteBashFrame(entry.item.run.value, entry.item.frame);
-        continue;
-      }
-      if (entry.item.kind !== "frame") continue;
-      const result = entry.item.frame.result;
-      if (result.case !== "detachedWork") continue;
-      const work = result.value.work?.value;
-      const origin = result.value.origin;
-      // ONLY THE `detached` ARM NAMES A RUN. A `created` announcement describes
-      // work that had no originating call, so there is no unit id to join to —
-      // and inventing one would point a watch at another run's rows.
-      if (origin.case !== "detached") continue;
-      const run = origin.value.detachedFromId?.value;
-      if (work !== undefined && run !== undefined) reader.linkWork(work, run);
+      if (entry.item.kind !== "bash_run") continue;
+      reader.noteBashFrame(entry.item.run.value, entry.item.frame);
     }
   };
 
