@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": [
+    "test/integration/fake-daemon.ts",
+    "test/integration/fixtures.ts",
+    "test/integration/vocab.ts",
+    "../proto/gen/ts/**/*.ts"
+  ]
+}

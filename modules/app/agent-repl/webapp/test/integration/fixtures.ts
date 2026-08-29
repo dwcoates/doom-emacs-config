@@ -9,6 +9,13 @@
  * Every builder takes an overrides object merged over its defaults, so a test
  * states only the field it is about.
  *
+ * TYPING. Builders that compose a nested piece return that piece's INIT SHAPE
+ * (`MessageInitShape<typeof XSchema>`), not its message type: a plain object
+ * literal is an init, and `create()` at the outermost builder turns the whole
+ * tree into messages once. Returning message types would force a cast at every
+ * nested literal and lose the compiler's field checking, which is the one
+ * thing keeping these fixtures honest against the generated code.
+ *
  * ARM ENUMERATION. The arm tables below are keyed by the generated oneof CASE
  * names, and `assertCoversOneof` checks a table against the schema descriptor.
  * A new arm landed in the contract therefore fails the suite loudly instead of
@@ -22,27 +29,26 @@ import { AgentModelSchema, ModelOptionSchema } from "../../../proto/gen/ts/conve
 import { UserSaidSchema } from "../../../proto/gen/ts/conversation/v1/user_pb";
 import { SessionCompactScope } from "../../../proto/gen/ts/conversation/v1/session_pb";
 import { SessionCommand } from "../../../proto/gen/ts/conversation/v1/slash_command_pb";
+import { PromptOrigin } from "../../../proto/gen/ts/conversation/v1/prompt_origin_pb";
 import {
   FeedIdSchema,
   FeedPageSchema,
   FeedRowSchema,
+  FeedTurnActivitySchema,
   type FeedId,
   type FeedPage,
   type FeedRow,
-  type FeedTurnActivity,
-  type FeedSubagent,
-  type FeedShell,
-  type FeedMergeTab,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   FooterViewSchema,
+  FooterStatusSchema,
+  FooterExpandedSchema,
   type FooterView,
-  type FooterStatus,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import {
   TopbarViewSchema,
+  TopbarWarningSchema,
   type TopbarView,
-  type TopbarWarning,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import {
   WorkspaceRosterSchema,
@@ -52,19 +58,25 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   DaemonHoldTraySchema,
+  DaemonHoldItemSchema,
   HeldPromptSchema,
   type DaemonHoldTray,
   type HeldPrompt,
-  type DaemonHoldItem,
 } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
 import { FailureKindSchema, type FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import {
   WatchHostWorkspaceResponseSchema,
   type WatchHostWorkspaceResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_host_workspace_pb";
-import { WatchDaemonResponseSchema, type WatchDaemonResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
+import {
+  WatchDaemonResponseSchema,
+  type WatchDaemonResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
 import { DrainReasonSchema, type DrainReason } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
-import { SubmitPromptCommandPanelSchema, type SubmitPromptCommandPanel } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import {
+  SubmitPromptCommandPanelSchema,
+  type SubmitPromptCommandPanel,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 
 // ---------------------------------------------------------------------------
 // Arm enumeration
@@ -93,7 +105,7 @@ export function assertCoversOneof(
   covered: readonly string[],
 ): void {
   const declared = armsOf(schema, oneofLocalName).sort();
-  const seen = [...covered].sort();
+  const seen = [...new Set(covered)].sort();
   const missing = declared.filter((a) => !seen.includes(a));
   const extra = seen.filter((a) => !declared.includes(a));
   if (missing.length > 0 || extra.length > 0) {
@@ -114,10 +126,22 @@ function make<Desc extends DescMessage>(
 }
 
 // ---------------------------------------------------------------------------
+// Init-shape aliases (see the TYPING note above)
+// ---------------------------------------------------------------------------
+
+export type RowInit = MessageInitShape<typeof FeedRowSchema>;
+export type RowArm = NonNullable<RowInit["row"]>;
+export type ActivityUnit = NonNullable<MessageInitShape<typeof FeedTurnActivitySchema>["unit"]>;
+export type StatusArm = NonNullable<MessageInitShape<typeof FooterStatusSchema>["status"]>;
+export type WarningInit = MessageInitShape<typeof TopbarWarningSchema>;
+export type HoldItemInit = MessageInitShape<typeof DaemonHoldItemSchema>;
+
+// ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------
 
 export const WORKSPACE_ID = "ws-1";
+export const WORKSPACE_DIR = "/tmp/ws-1";
 
 export const workspaceRef = (id = WORKSPACE_ID) => create(WorkspaceRefSchema, { id, dir: `/tmp/${id}` });
 export const repositoryRef = (id = "repo-1") => create(RepositoryRefSchema, { id, dir: `/src/${id}` });
@@ -129,26 +153,21 @@ export const modelOption = (name = "opus", displayName = "Opus", description = "
 export const userSaid = (text = "hello") =>
   create(UserSaidSchema, { content: { blocks: [{ block: { case: "text", value: { text } } }] } });
 
+/** The origin every webapp submission carries; re-exported so suites assert it. */
+export const WEBAPP_ORIGIN = PromptOrigin.WEBAPP_USER_SENT;
+export const CARD_ACTION_ORIGIN = PromptOrigin.WEBAPP_CARD_ACTION;
+
 // ---------------------------------------------------------------------------
 // Feed rows
 // ---------------------------------------------------------------------------
 
-type RowInit = MessageInitShape<typeof FeedRowSchema>;
-
-/** A FeedRow wrapping `row`, with id/turn defaulted and overridable. */
-export function feedRow(row: RowInit["row"], overrides?: Partial<RowInit>): FeedRow {
-  return make(
-    FeedRowSchema,
-    { id: feedId("row-1"), turn: turnId(), row },
-    overrides,
-  );
+/** A FeedRow wrapping `row`, with id and turn defaulted and overridable. */
+export function feedRow(row: RowArm, overrides?: Partial<RowInit>): FeedRow {
+  return make(FeedRowSchema, { id: feedId("row-1"), turn: turnId(), row }, overrides);
 }
 
 /** An activity row: the FeedTurnActivity wrapper around one unit. */
-export function activityRow(
-  unit: MessageInitShape<typeof FeedRowSchema>["row"] extends infer _ ? FeedTurnActivity["unit"] : never,
-  overrides?: Partial<RowInit>,
-): FeedRow {
+export function activityRow(unit: ActivityUnit, overrides?: Partial<RowInit>): FeedRow {
   return feedRow({ case: "activity", value: { unit } }, overrides);
 }
 
@@ -188,7 +207,7 @@ export const responseUnit = (
   state: ResponseState,
   markdown = "the answer",
   usageText = "1.2k in / 340 out",
-): FeedTurnActivity["unit"] => ({
+): ActivityUnit => ({
   case: "response",
   value: { usage: { text: usageText }, result: { case: state, value: { prose: { markdown } } } },
 });
@@ -204,7 +223,23 @@ export const responseRow = (
 export const TOOL_OUTPUT_FORMS = ["text", "code", "diff", "lines", "links"] as const;
 export type ToolOutputForm = (typeof TOOL_OUTPUT_FORMS)[number];
 
+export const TOOL_VERDICTS = ["succeeded", "failed"] as const;
 export const DIFF_LINE_KINDS = ["header", "added", "removed", "context"] as const;
+
+/**
+ * The code output's spans exercise every paint-class case at once: a syntax
+ * name, an ansi name, the empty string (plain), and a name in neither
+ * vocabulary list (unstyled, with a warning, never an error).
+ */
+export const CODE_SPANS = [
+  { text: "const ", paintClass: "keyword" },
+  { text: "red ", paintClass: "ansi-fg-red" },
+  { text: "plain ", paintClass: "" },
+  { text: "alien ", paintClass: "not-a-real-class" },
+] as const;
+
+type ToolCallArm = Extract<ActivityUnit, { case: "simpleToolCall" }>;
+type ToolCallOutcome = NonNullable<ToolCallArm["value"]["outcome"]>;
 
 const toolOutputForm = (form: ToolOutputForm) => {
   switch (form) {
@@ -213,14 +248,7 @@ const toolOutputForm = (form: ToolOutputForm) => {
     case "code":
       return {
         case: "code" as const,
-        value: {
-          spans: [
-            { text: "PASS ", paintClass: "ok" },
-            { text: "FAIL ", paintClass: "err" },
-            { text: "raw ", paintClass: "" },
-          ],
-          omitted: { text: "12 lines omitted" },
-        },
+        value: { spans: CODE_SPANS.map((s) => ({ ...s })), omitted: { text: "12 lines omitted" } },
       };
     case "diff":
       return {
@@ -253,7 +281,7 @@ const toolOutputForm = (form: ToolOutputForm) => {
   }
 };
 
-export const toolCallRunningUnit = (lastProgressAtMs = 1_000n): FeedTurnActivity["unit"] => ({
+export const toolCallRunningUnit = (lastProgressAtMs = 1_000n): ActivityUnit => ({
   case: "simpleToolCall",
   value: {
     name: { text: "Bash" },
@@ -264,25 +292,28 @@ export const toolCallRunningUnit = (lastProgressAtMs = 1_000n): FeedTurnActivity
 
 export const toolCallReturnedUnit = (
   form: ToolOutputForm,
-  verdict: "succeeded" | "failed" = "succeeded",
-): FeedTurnActivity["unit"] => ({
-  case: "simpleToolCall",
-  value: {
-    name: { text: "Bash" },
-    input: { text: "npm test", link: { url: "https://example.test/run" } },
-    outcome: {
-      case: "returned",
-      value: {
-        verdict: { case: verdict, value: {} },
-        form: toolOutputForm(form),
-        runtime: { text: "ran 4.2 s" },
-        diagnostics: { lines: ["one warning"] },
-      },
+  verdict: (typeof TOOL_VERDICTS)[number] = "succeeded",
+): ActivityUnit => {
+  const outcome: ToolCallOutcome = {
+    case: "returned",
+    value: {
+      verdict: { case: verdict, value: {} },
+      form: toolOutputForm(form),
+      runtime: { text: "ran 4.2 s" },
+      diagnostics: { lines: ["one warning"] },
     },
-  },
-});
+  };
+  return {
+    case: "simpleToolCall",
+    value: {
+      name: { text: "Bash" },
+      input: { text: "npm test", link: { url: "https://example.test/run" } },
+      outcome,
+    },
+  };
+};
 
-export const toolCallDeniedUnit = (): FeedTurnActivity["unit"] => ({
+export const toolCallDeniedUnit = (): ActivityUnit => ({
   case: "simpleToolCall",
   value: {
     name: { text: "Bash" },
@@ -296,7 +327,7 @@ export const toolCallDeniedUnit = (): FeedTurnActivity["unit"] => ({
 export const SKILL_OUTCOMES = ["running", "loaded", "failed", "denied"] as const;
 export type SkillOutcome = (typeof SKILL_OUTCOMES)[number];
 
-export const skillUnit = (outcome: SkillOutcome): FeedTurnActivity["unit"] => ({
+export const skillUnit = (outcome: SkillOutcome): ActivityUnit => ({
   case: "skill",
   value: {
     invocation: { text: "/graphify" },
@@ -317,7 +348,7 @@ export const skillUnit = (outcome: SkillOutcome): FeedTurnActivity["unit"] => ({
 export const HOOK_OUTCOMES = ["blocked", "failed"] as const;
 export type HookOutcome = (typeof HOOK_OUTCOMES)[number];
 
-export const hookUnit = (outcome: HookOutcome): FeedTurnActivity["unit"] => ({
+export const hookUnit = (outcome: HookOutcome): ActivityUnit => ({
   case: "hook",
   value: {
     headline: { text: "PreToolUse hook" },
@@ -329,12 +360,12 @@ export const hookUnit = (outcome: HookOutcome): FeedTurnActivity["unit"] => ({
   },
 });
 
-// ---- FeedArtifact / FeedPlan / FeedFindings --------------------------------
+// ---- FeedArtifact / FeedPlan / FeedFindings -------------------------------
 
 export const ARTIFACT_STATES = ["publishing", "published", "failed"] as const;
 export type ArtifactState = (typeof ARTIFACT_STATES)[number];
 
-export const artifactUnit = (state: ArtifactState): FeedTurnActivity["unit"] => ({
+export const artifactUnit = (state: ArtifactState): ActivityUnit => ({
   case: "artifact",
   value: {
     heading: { text: "Release notes" },
@@ -350,15 +381,15 @@ export const artifactUnit = (state: ArtifactState): FeedTurnActivity["unit"] => 
 export const PLAN_STATES = ["planning", "planned", "failed"] as const;
 export type PlanState = (typeof PLAN_STATES)[number];
 
-export const planUnit = (state: PlanState): FeedTurnActivity["unit"] => ({
+/** The path the planned plan's edit link opens; the suites echo it verbatim. */
+export const PLAN_EDIT_PATH = "/repo/PLAN.md";
+
+export const planUnit = (state: PlanState): ActivityUnit => ({
   case: "plan",
   value: {
     state:
       state === "planned"
-        ? {
-            case: "planned",
-            value: { prose: { markdown: "1. do it" }, edit: { path: "/repo/PLAN.md" } },
-          }
+        ? { case: "planned", value: { prose: { markdown: "1. do it" }, edit: { path: PLAN_EDIT_PATH } } }
         : state === "failed"
           ? { case: "failed", value: { text: "planning refused" } }
           : { case: "planning", value: {} },
@@ -368,7 +399,12 @@ export const planUnit = (state: PlanState): FeedTurnActivity["unit"] => ({
 export const FINDINGS_VERDICTS = ["confirmed", "plausible"] as const;
 export const FINDINGS_OUTCOMES = ["fixed", "skipped", "noChange"] as const;
 
-export const findingsUnit = (): FeedTurnActivity["unit"] => ({
+/** The first findings row's location: the one that carries a line number. */
+export const FINDINGS_LOCATION = { text: "feed.ts:42", path: "/repo/src/feed.ts", line: 42 } as const;
+/** The third row's location has NO line — the client must omit it from the rpc. */
+export const FINDINGS_LOCATION_NO_LINE = { text: "row.ts", path: "/repo/src/row.ts" } as const;
+
+export const findingsUnit = (): ActivityUnit => ({
   case: "findings",
   value: {
     heading: { text: "Review findings" },
@@ -376,7 +412,7 @@ export const findingsUnit = (): FeedTurnActivity["unit"] => ({
       {
         verdict: { case: "confirmed", value: {} },
         category: { text: "correctness" },
-        location: { text: "feed.ts:42", path: "/repo/src/feed.ts", line: 42 },
+        location: { ...FINDINGS_LOCATION },
         summary: { text: "the id is parsed" },
         scenario: { text: "when a sub-feed row arrives" },
         outcome: { case: "fixed", value: {} },
@@ -392,7 +428,7 @@ export const findingsUnit = (): FeedTurnActivity["unit"] => ({
       {
         verdict: { case: "confirmed", value: {} },
         category: { text: "perf" },
-        location: { text: "row.ts:1", path: "/repo/src/row.ts", line: 1 },
+        location: { ...FINDINGS_LOCATION_NO_LINE },
         summary: { text: "already handled" },
         scenario: { text: "on a burst" },
         outcome: { case: "noChange", value: {} },
@@ -406,62 +442,48 @@ export const findingsUnit = (): FeedTurnActivity["unit"] => ({
 export const SUBAGENT_OUTCOMES = ["succeeded", "failed", "cancelled", "lost"] as const;
 export type SubagentOutcome = (typeof SUBAGENT_OUTCOMES)[number];
 
-export function subagent(
-  state: "live" | SubagentOutcome,
-  overrides?: Partial<MessageInitShape<typeof FeedRowSchema>>,
-): FeedSubagent["state"] extends never ? never : FeedTurnActivity["unit"] {
-  void overrides;
-  return {
-    case: "subagent",
-    value: {
-      label: { text: "reviewer" },
-      description: { text: "review the diff" },
-      tokens: { text: "12.4k" },
-      runtime: { startedAtMs: 1_000n },
-      state:
-        state === "live"
-          ? { case: "live", value: { lastProgress: { atMs: 2_000n } } }
-          : { case: "settled", value: { endedAtMs: 9_000n, outcome: { case: state, value: {} } } },
-    },
-  };
-}
+export const subagentUnit = (state: "live" | SubagentOutcome): ActivityUnit => ({
+  case: "subagent",
+  value: {
+    label: { text: "reviewer" },
+    description: { text: "review the diff" },
+    tokens: { text: "12.4k" },
+    runtime: { startedAtMs: 1_000n },
+    state:
+      state === "live"
+        ? { case: "live", value: { lastProgress: { atMs: 2_000n } } }
+        : { case: "settled", value: { endedAtMs: 9_000n, outcome: { case: state, value: {} } } },
+  },
+});
 
 export const SHELL_OUTCOMES = ["completed", "cancelled", "lost"] as const;
 export type ShellOutcome = (typeof SHELL_OUTCOMES)[number];
 
-export function shell(state: "live" | ShellOutcome): FeedShell["state"] extends never ? never : MessageInitShape<typeof FeedRowSchema>["row"] {
-  return {
-    case: "detachedShell",
-    value: {
-      shell: {
-        command: { text: "npm run watch" },
-        runtime: { startedAtMs: 1_000n },
-        spool: { text: "building...", omitted: { text: "40 lines omitted" } },
-        state:
-          state === "live"
-            ? { case: "live", value: { lastProgress: { atMs: 2_000n } } }
-            : {
-                case: "settled",
-                value: { endedAtMs: 9_000n, exit: { code: 1 }, outcome: { case: state, value: {} } },
-              },
-      },
-    },
-  };
-}
+const shellInit = (state: "live" | ShellOutcome) => ({
+  command: { text: "npm run watch" },
+  runtime: { startedAtMs: 1_000n },
+  spool: { text: "building...", omitted: { text: "40 lines omitted" } },
+  state:
+    state === "live"
+      ? { case: "live" as const, value: { lastProgress: { atMs: 2_000n } } }
+      : {
+          case: "settled" as const,
+          value: { endedAtMs: 9_000n, exit: { code: 1 }, outcome: { case: state, value: {} } },
+        },
+});
 
 export const detachedSubagentRow = (
   state: "live" | SubagentOutcome = "live",
   overrides?: Partial<RowInit>,
 ): FeedRow => {
-  const unit = subagent(state) as { case: "subagent"; value: unknown };
-  return feedRow(
-    { case: "detachedSubagent", value: { subagent: unit.value as never } },
-    overrides,
-  );
+  const unit = subagentUnit(state) as Extract<ActivityUnit, { case: "subagent" }>;
+  return feedRow({ case: "detachedSubagent", value: { subagent: unit.value } }, overrides);
 };
 
-export const detachedShellRow = (state: "live" | ShellOutcome = "live", overrides?: Partial<RowInit>): FeedRow =>
-  feedRow(shell(state) as RowInit["row"], overrides);
+export const detachedShellRow = (
+  state: "live" | ShellOutcome = "live",
+  overrides?: Partial<RowInit>,
+): FeedRow => feedRow({ case: "detachedShell", value: { shell: shellInit(state) } }, overrides);
 
 // ---- FeedTurnEnded --------------------------------------------------------
 
@@ -485,6 +507,12 @@ export const TURN_ERROR_ARMS = [
 ] as const;
 export type TurnErrorArm = (typeof TURN_ERROR_ARMS)[number];
 
+/** The two arms that ship a retry deadline the client counts down to. */
+export const RETRYING_TURN_ERROR_ARMS = ["rateLimited", "overloaded"] as const;
+
+type TurnEndedValue = Extract<RowArm, { case: "turnEnded" }>["value"];
+type TurnEndedOutcome = NonNullable<TurnEndedValue["outcome"]>;
+
 const turnErrorValue = (arm: TurnErrorArm, retryAfterMs?: bigint) => {
   if (arm === "rateLimited" || arm === "overloaded") {
     return { case: arm, value: { retryAfterMs: retryAfterMs ?? 30_000n } };
@@ -503,23 +531,16 @@ export const turnEndedErroredRow = (
   arm: TurnErrorArm,
   init?: { retryAfterMs?: bigint; message?: string },
   overrides?: Partial<RowInit>,
-): FeedRow =>
-  feedRow(
-    {
-      case: "turnEnded",
-      value: {
-        endedAtMs: 9_000n,
-        outcome: {
-          case: "errored",
-          value: {
-            message: { text: init?.message ?? `the turn failed: ${arm}` },
-            error: turnErrorValue(arm, init?.retryAfterMs) as never,
-          },
-        },
-      },
+): FeedRow => {
+  const outcome = {
+    case: "errored",
+    value: {
+      message: { text: init?.message ?? `the turn failed: ${arm}` },
+      error: turnErrorValue(arm, init?.retryAfterMs),
     },
-    overrides,
-  );
+  } as TurnEndedOutcome;
+  return feedRow({ case: "turnEnded", value: { endedAtMs: 9_000n, outcome } }, overrides);
+};
 
 export const turnEndedInterruptedRow = (overrides?: Partial<RowInit>): FeedRow =>
   feedRow(
@@ -537,12 +558,29 @@ export const PERMISSION_ANSWERS = [
 ] as const;
 export type PermissionAnswer = (typeof PERMISSION_ANSWERS)[number];
 
+type PermissionValue = Extract<RowArm, { case: "permission" }>["value"];
+type PermissionState = NonNullable<PermissionValue["state"]>;
+
 export function permissionRow(
   state: "open" | "abandoned" | PermissionAnswer,
   init?: { standingOffered?: boolean },
   overrides?: Partial<RowInit>,
 ): FeedRow {
   const answered = (PERMISSION_ANSWERS as readonly string[]).includes(state);
+  const resolved: PermissionState = answered
+    ? {
+        case: "answered",
+        value: {
+          atMs: 5_000n,
+          answer:
+            state === "deniedByPolicy"
+              ? { case: "deniedByPolicy", value: { text: "policy forbids it" } }
+              : { case: state as Exclude<PermissionAnswer, "deniedByPolicy">, value: {} },
+        },
+      }
+    : state === "abandoned"
+      ? { case: "abandoned", value: { atMs: 5_000n } }
+      : { case: "open", value: {} };
   return feedRow(
     {
       case: "permission",
@@ -552,20 +590,7 @@ export function permissionRow(
         trigger: { text: "requested by the reviewer subagent" },
         arguments: { lines: ["cwd=/repo", "timeout=120s"] },
         standingOffered: init?.standingOffered === false ? undefined : {},
-        state: answered
-          ? {
-              case: "answered",
-              value: {
-                atMs: 5_000n,
-                answer:
-                  state === "deniedByPolicy"
-                    ? { case: "deniedByPolicy", value: { text: "policy forbids it" } }
-                    : { case: state as Exclude<PermissionAnswer, "deniedByPolicy">, value: {} },
-              },
-            }
-          : state === "abandoned"
-            ? { case: "abandoned", value: { atMs: 5_000n } }
-            : { case: "open", value: {} },
+        state: resolved,
       },
     },
     overrides,
@@ -574,37 +599,49 @@ export function permissionRow(
 
 // ---- FeedQuestion ---------------------------------------------------------
 
-export function questionRow(
-  state: "open" | "answered" | "expired",
-  overrides?: Partial<RowInit>,
-): FeedRow {
+export const QUESTION_STATES = ["open", "answered", "expired"] as const;
+export type QuestionState = (typeof QUESTION_STATES)[number];
+
+/** The two questions every question fixture poses; suites echo these verbatim. */
+export const QUESTION_ONE = {
+  header: "Scope",
+  text: "How far should the port go?",
+  options: ["whole app", "the feed only"],
+} as const;
+export const QUESTION_TWO = {
+  header: "Suites",
+  text: "Which suites run?",
+  options: ["unit", "integration"],
+} as const;
+
+export function questionRow(state: QuestionState, overrides?: Partial<RowInit>): FeedRow {
   return feedRow(
     {
       case: "question",
       value: {
         questions: [
           {
-            header: { text: "Scope" },
-            text: { text: "How far should the port go?" },
+            header: { text: QUESTION_ONE.header },
+            text: { text: QUESTION_ONE.text },
             options: {
               case: "singleSelect",
               value: {
                 options: [
-                  { label: { text: "whole app" }, description: { text: "every component" } },
-                  { label: { text: "the feed only" }, description: { text: "one component" } },
+                  { label: { text: QUESTION_ONE.options[0] }, description: { text: "every component" } },
+                  { label: { text: QUESTION_ONE.options[1] }, description: { text: "one component" } },
                 ],
               },
             },
           },
           {
-            header: { text: "Suites" },
-            text: { text: "Which suites run?" },
+            header: { text: QUESTION_TWO.header },
+            text: { text: QUESTION_TWO.text },
             options: {
               case: "multiSelect",
               value: {
                 options: [
-                  { label: { text: "unit" }, description: { text: "vitest" } },
-                  { label: { text: "integration" }, description: { text: "the fake daemon" } },
+                  { label: { text: QUESTION_TWO.options[0] }, description: { text: "vitest" } },
+                  { label: { text: QUESTION_TWO.options[1] }, description: { text: "the fake daemon" } },
                 ],
               },
             },
@@ -617,8 +654,12 @@ export function questionRow(
                 value: {
                   atMs: 5_000n,
                   answers: [
-                    { header: { text: "Scope" }, chosen: ["whole app"], otherText: { text: "and the docs" } },
-                    { header: { text: "Suites" }, chosen: ["unit", "integration"] },
+                    {
+                      header: { text: QUESTION_ONE.header },
+                      chosen: [QUESTION_ONE.options[0]],
+                      otherText: { text: "and the docs" },
+                    },
+                    { header: { text: QUESTION_TWO.header }, chosen: [...QUESTION_TWO.options] },
                   ],
                 },
               }
@@ -636,13 +677,19 @@ export function questionRow(
 export const SEPARATION_ARMS = ["cleared", "compacted", "worktreeEntered", "worktreeLeft"] as const;
 export type SeparationArm = (typeof SEPARATION_ARMS)[number];
 
-const separationKind = (arm: SeparationArm) => {
+/** The path the worktree divider's link opens; the suites echo it verbatim. */
+export const WORKTREE_PATH = "/repo/wt";
+
+type SeparationValue = Extract<RowArm, { case: "separation" }>["value"];
+type SeparationKind = NonNullable<SeparationValue["kind"]>;
+
+const separationKind = (arm: SeparationArm): SeparationKind => {
   switch (arm) {
     case "cleared":
-      return { case: "cleared" as const, value: {} };
+      return { case: "cleared", value: {} };
     case "compacted":
       return {
-        case: "compacted" as const,
+        case: "compacted",
         value: {
           summary: { markdown: "the session so far" },
           fold: { folded: true },
@@ -651,13 +698,13 @@ const separationKind = (arm: SeparationArm) => {
       };
     case "worktreeEntered":
       return {
-        case: "worktreeEntered" as const,
-        value: { path: { text: "/repo/wt" }, branch: { text: "feature/x" } },
+        case: "worktreeEntered",
+        value: { path: { text: WORKTREE_PATH }, branch: { text: "feature/x" } },
       };
     case "worktreeLeft":
       return {
-        case: "worktreeLeft" as const,
-        value: { outcome: { case: "kept" as const, value: { path: { text: "/repo/wt" } } } },
+        case: "worktreeLeft",
+        value: { outcome: { case: "kept", value: { path: { text: WORKTREE_PATH } } } },
       };
   }
 };
@@ -668,7 +715,7 @@ export const separationRow = (arm: SeparationArm, overrides?: Partial<RowInit>):
       case: "separation",
       value: {
         label: { text: `separation: ${arm}` },
-        kind: separationKind(arm) as never,
+        kind: separationKind(arm),
         tokens: { beforeText: "180k", afterText: "12k" },
       },
     },
@@ -697,6 +744,16 @@ export const worktreeRemovedRow = (overrides?: Partial<RowInit>): FeedRow =>
 export const COLD_GATE_CHOICES = ["pay", "clear", "compact"] as const;
 export type ColdGateChoice = (typeof COLD_GATE_CHOICES)[number];
 
+/** The cold gate's served facts — the ONE card the client formats itself. */
+export const COLD_GATE_TOKENS = 184_320n;
+export const COLD_GATE_LAST_REQUEST_MS = 1_000n;
+export const COLD_GATE_MODELS = ["opus", "haiku"] as const;
+export const COLD_GATE_SCOPES = [
+  SessionCompactScope.ALL,
+  SessionCompactScope.PROMPTS,
+  SessionCompactScope.RESPONSES,
+] as const;
+
 export const coldGateStandingRow = (
   init?: { contextTokens?: bigint; lastRequestAtMs?: bigint },
   overrides?: Partial<RowInit>,
@@ -708,12 +765,12 @@ export const coldGateStandingRow = (
         state: {
           case: "standing",
           value: {
-            contextTokens: { tokens: init?.contextTokens ?? 184_320n },
-            lastRequest: { atMs: init?.lastRequestAtMs ?? 1_000n },
-            model: { model: agentModel("opus") },
+            contextTokens: { tokens: init?.contextTokens ?? COLD_GATE_TOKENS },
+            lastRequest: { atMs: init?.lastRequestAtMs ?? COLD_GATE_LAST_REQUEST_MS },
+            model: { model: agentModel(COLD_GATE_MODELS[0]) },
             compact: {
-              models: [{ model: agentModel("opus") }, { model: agentModel("haiku") }],
-              scopes: [SessionCompactScope.ALL, SessionCompactScope.PROMPTS, SessionCompactScope.RESPONSES],
+              models: COLD_GATE_MODELS.map((m) => ({ model: agentModel(m) })),
+              scopes: [...COLD_GATE_SCOPES],
             },
           },
         },
@@ -737,6 +794,40 @@ export const coldGateResolvedRow = (choice: ColdGateChoice, overrides?: Partial<
                 : { case: choice, value: {} },
           },
         },
+      },
+    },
+    overrides,
+  );
+
+// ---- FeedCommandPanel / FeedCommandRefused (synthesized, non-durable) -----
+
+export const FEED_COMMAND_PANEL_ARMS = ["status", "todos", "mcp", "context"] as const;
+export type FeedCommandPanelArm = (typeof FEED_COMMAND_PANEL_ARMS)[number];
+
+type CommandPanelValue = Extract<RowArm, { case: "commandPanel" }>["value"];
+type CommandPanelArmInit = NonNullable<CommandPanelValue["panel"]>;
+
+/**
+ * A command-panel row. These are SYNTHESIZED and NON-DURABLE: the daemon puts
+ * them on the live tail only, so a page fixture must never carry one.
+ */
+export const commandPanelRow = (arm: FeedCommandPanelArm, overrides?: Partial<RowInit>): FeedRow =>
+  feedRow({ case: "commandPanel", value: { panel: panelValue(arm) as CommandPanelArmInit } }, overrides);
+
+/** The command text the refused card carries; RequestCommandSupport echoes it. */
+export const REFUSED_COMMAND = "/agents";
+
+export const commandRefusedRow = (
+  init?: { command?: string; reason?: string; addSupport?: boolean },
+  overrides?: Partial<RowInit>,
+): FeedRow =>
+  feedRow(
+    {
+      case: "commandRefused",
+      value: {
+        command: { text: init?.command ?? REFUSED_COMMAND },
+        reason: { text: init?.reason ?? "recognized, but not supported this wave" },
+        addSupport: init?.addSupport === false ? undefined : {},
       },
     },
     overrides,
@@ -766,43 +857,59 @@ export const MERGE_TAB_STATES: Record<MergeTabKind, readonly ("live" | "parked" 
   postPrompt: ["live", "settled"],
 };
 
-const mergeTabState = (state: "live" | "parked" | "settled") => {
-  if (state === "live") return { case: "live" as const, value: {} };
-  if (state === "parked") {
-    return { case: "parked" as const, value: { line: { text: "paused for your answer" } } };
-  }
-  return {
-    case: "settled" as const,
-    value: { endedAtMs: 9_000n, outcome: { case: "succeeded" as const, value: {} } },
-  };
-};
+const liveState = () => ({ case: "live" as const, value: {} });
+const settledState = () => ({
+  case: "settled" as const,
+  value: { endedAtMs: 9_000n, outcome: { case: "succeeded" as const, value: {} } },
+});
+const parkedState = () => ({
+  case: "parked" as const,
+  value: { line: { text: "paused for your answer" } },
+});
 
-const mergeTabKindValue = (kind: MergeTabKind, state: "live" | "parked" | "settled") => {
-  const base = { state: mergeTabState(state) };
+/** The state arms every tab carries; `parked` is legal on conflicts/fixes only. */
+const plainState = (state: "live" | "parked" | "settled") =>
+  state === "settled" ? settledState() : liveState();
+const parkableState = (state: "live" | "parked" | "settled") =>
+  state === "settled" ? settledState() : state === "parked" ? parkedState() : liveState();
+
+/** The tests tab's suites: one passed, one failed, one running, painted spans. */
+export const MERGE_TEST_SPANS = [
+  { text: "PASS ", paintClass: "ansi-fg-green" },
+  { text: "24 tests", paintClass: "" },
+] as const;
+
+type MergeTabValue = Extract<RowArm, { case: "mergeTab" }>["value"];
+type MergeTabKindInit = NonNullable<MergeTabValue["kind"]>;
+
+const mergeTabKindValue = (
+  kind: MergeTabKind,
+  state: "live" | "parked" | "settled",
+): MergeTabKindInit => {
   switch (kind) {
     case "queue":
       return {
-        case: "queue" as const,
+        case: "queue",
         value: {
-          ...base,
+          state: plainState(state),
           queue: {
             ahead: [
               {
                 workspace: { ref: workspaceRef("ws-ahead") },
                 label: { text: "ws-ahead" },
-                status: { case: "waiting" as const, value: {} },
+                status: { case: "waiting", value: {} },
               },
             ],
             current: {
               workspace: { ref: workspaceRef() },
               label: { text: "ws-1" },
-              status: { case: "merging" as const, value: { activeTab: { text: "tests", round: 2 } } },
+              status: { case: "merging", value: { activeTab: { text: "tests", round: 2 } } },
             },
             behind: [
               {
                 workspace: { ref: workspaceRef("ws-behind") },
                 label: { text: "ws-behind" },
-                status: { case: "waiting" as const, value: {} },
+                status: { case: "waiting", value: {} },
               },
             ],
           },
@@ -810,38 +917,44 @@ const mergeTabKindValue = (kind: MergeTabKind, state: "live" | "parked" | "settl
       };
     case "merge":
       return {
-        case: "merge" as const,
-        value: { ...base, lines: [{ text: "cherry-picked 3 commits" }, { text: "no conflicts" }] },
+        case: "merge",
+        value: {
+          state: plainState(state),
+          lines: [{ text: "cherry-picked 3 commits" }, { text: "no conflicts" }],
+        },
       };
     case "tests":
       return {
-        case: "tests" as const,
+        case: "tests",
         value: {
-          ...base,
+          state: plainState(state),
           suites: [
             {
               name: "vitest",
-              state: { case: "passed" as const, value: {} },
-              output: [
-                { text: "PASS ", paintClass: "ok" },
-                { text: "24 tests", paintClass: "" },
-              ],
+              state: { case: "passed", value: {} },
+              output: MERGE_TEST_SPANS.map((s) => ({ ...s })),
             },
             {
               name: "ert",
-              state: { case: "failed" as const, value: {} },
-              output: [{ text: "FAIL ", paintClass: "err" }],
+              state: { case: "failed", value: {} },
+              output: [{ text: "FAIL ", paintClass: "ansi-fg-red" }],
             },
             {
               name: "go",
-              state: { case: "running" as const, value: {} },
-              output: [{ text: "running", paintClass: "dim" }],
+              state: { case: "running", value: {} },
+              output: [{ text: "running", paintClass: "ansi-dim" }],
             },
           ],
         },
       };
-    default:
-      return { case: kind, value: base } as never;
+    case "conflicts":
+      return { case: "conflicts", value: { state: parkableState(state) } };
+    case "fixes":
+      return { case: "fixes", value: { state: parkableState(state) } };
+    case "prePrompt":
+      return { case: "prePrompt", value: { state: plainState(state) } };
+    case "postPrompt":
+      return { case: "postPrompt", value: { state: plainState(state) } };
   }
 };
 
@@ -855,17 +968,16 @@ export const mergeTabRow = (
       case: "mergeTab",
       value: {
         label: { text: kind, round: kind === "tests" ? 2 : 1 },
-        kind: mergeTabKindValue(kind, state) as FeedMergeTab["kind"],
+        kind: mergeTabKindValue(kind, state),
       },
     },
     overrides,
   );
 
-export const MERGE_RESULTS = ["update", "success", "error"] as const;
+export const MERGE_RESULTS = ["update", "success", "failed", "abandoned"] as const;
+export type MergeResult = (typeof MERGE_RESULTS)[number];
 
-export const mergeUnit = (
-  result: "update" | "success" | "failed" | "abandoned",
-): FeedTurnActivity["unit"] => ({
+export const mergeUnit = (result: MergeResult): ActivityUnit => ({
   case: "merge",
   value: {
     head: {
@@ -964,6 +1076,9 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
 
 export const FOOTER_STATUS_ARMS = Object.keys(FOOTER_STATUS_SUBSTATUSES);
 
+/** The one status arm with no substatus of its own: it merges into the cell. */
+export const FOOTER_STATUS_WITHOUT_SUBSTATUS = "background";
+
 /** The substatus arms that carry payload; everything else is empty. */
 const substatusValue = (substatus: string): object => {
   if (substatus === "queued") return { position: 2, depth: 5 };
@@ -1018,30 +1133,42 @@ export const FOOTER_STATUS_ACTIVITIES: Record<string, readonly string[]> = {
   loading: ["contextInjected", "notification", "rateLimited", "contextBudget"],
 };
 
+/**
+ * The status arm, built from the string tables above.
+ *
+ * The tables are keyed by generated case names checked against the descriptors
+ * by `assertCoversOneof`, so the ONE cast here is the seam between a
+ * string-keyed table and the generated union — not a way around the contract.
+ */
 export function footerStatus(
   status: string,
   init?: { substatus?: string; activity?: string; activityAtMs?: bigint },
-): FooterStatus["status"] {
+): StatusArm {
   const substatuses = FOOTER_STATUS_SUBSTATUSES[status];
-  const substatus = init?.substatus ?? substatuses[0];
-  const activityKind = init?.activity;
+  if (!substatuses) throw new Error(`no substatus table for footer status ${JSON.stringify(status)}`);
   const value: Record<string, unknown> = {};
   if (substatuses.length > 0) {
+    const substatus = init?.substatus ?? substatuses[0];
     value.substatus = { case: substatus, value: substatusValue(substatus) };
   }
-  if (activityKind) {
+  if (init?.activity) {
     value.activity = {
-      at: { atMs: init?.activityAtMs ?? 3_000n },
-      kind: { case: activityKind, value: FOOTER_ACTIVITY_KINDS[activityKind] },
+      at: { atMs: init.activityAtMs ?? 3_000n },
+      kind: { case: init.activity, value: FOOTER_ACTIVITY_KINDS[init.activity] },
     };
   }
-  return { case: status, value } as FooterStatus["status"];
+  return { case: status, value } as StatusArm;
 }
 
 export const FOOTER_CHIPS = ["agents", "tasks", "shells", "monitors", "crons"] as const;
 export type FooterChip = (typeof FOOTER_CHIPS)[number];
 
+export const FOOTER_PANELS = ["tokens", ...FOOTER_CHIPS] as const;
 export const FOOTER_TOKENS_VERDICTS = ["complete", "incomplete", "invalid"] as const;
+
+/** The FeedIds the expanded panels' jump rows target. */
+export const FOOTER_AGENT_TARGET = "agent-row";
+export const FOOTER_SHELL_TARGET = "shell-row";
 
 type FooterInit = {
   status?: string;
@@ -1080,7 +1207,7 @@ export function footerView(init?: FooterInit): FooterView {
 }
 
 /** Every expanded panel, fully resolved, exactly as the daemon ships them. */
-function footerExpandedInit() {
+function footerExpandedInit(): MessageInitShape<typeof FooterExpandedSchema> {
   return {
     tokens: {
       input: { value: "42.1k" },
@@ -1095,7 +1222,7 @@ function footerExpandedInit() {
     agents: {
       rows: [
         {
-          target: feedId("agent-row"),
+          target: feedId(FOOTER_AGENT_TARGET),
           label: { text: "reviewer" },
           description: { text: "review the diff" },
           tokens: { text: "12.4k" },
@@ -1112,13 +1239,16 @@ function footerExpandedInit() {
           },
           subject: { text: "write the harness" },
         },
-        { status: { status: { case: "completed" as const, value: {} } }, subject: { text: "read the protos" } },
+        {
+          status: { status: { case: "completed" as const, value: {} } },
+          subject: { text: "read the protos" },
+        },
       ],
     },
     shells: {
       rows: [
         {
-          target: feedId("shell-row"),
+          target: feedId(FOOTER_SHELL_TARGET),
           command: { text: "npm run watch" },
           runtime: { startedAtMs: 1_000n },
         },
@@ -1126,11 +1256,7 @@ function footerExpandedInit() {
     },
     monitors: {
       rows: [
-        {
-          description: { text: "watch the daemon log" },
-          runtime: { startedAtMs: 1_000n },
-          persistent: {},
-        },
+        { description: { text: "watch the daemon log" }, runtime: { startedAtMs: 1_000n }, persistent: {} },
       ],
     },
     crons: {
@@ -1163,16 +1289,18 @@ export const TOPBAR_WARNING_ARMS = [
 ] as const;
 export type TopbarWarningArm = (typeof TOPBAR_WARNING_ARMS)[number];
 
-const warningDetail = (arm: TopbarWarningArm) => {
+type WarningDetail = NonNullable<WarningInit["detail"]>;
+
+const warningDetail = (arm: TopbarWarningArm): WarningDetail => {
   switch (arm) {
     case "accounting":
       return {
-        case: "accounting" as const,
+        case: "accounting",
         value: { lines: [{ text: "usage figures are estimates" }, { text: "cache reads uncounted" }] },
       };
     case "unmodeledTool":
       return {
-        case: "unmodeledTool" as const,
+        case: "unmodeledTool",
         value: {
           toolName: { text: "mcp__weather__forecast" },
           argumentLines: [{ text: "city=Berlin" }, { text: "days=3" }],
@@ -1180,52 +1308,59 @@ const warningDetail = (arm: TopbarWarningArm) => {
       };
     case "detachedUnmodeled":
       return {
-        case: "detachedUnmodeled" as const,
+        case: "detachedUnmodeled",
         value: { toolName: { text: "mcp__weather__watch" }, startedAtMs: 1_000n },
       };
     case "sessionFault":
       return {
-        case: "sessionFault" as const,
+        case: "sessionFault",
         value: { component: { text: "shim" }, detail: { text: "store writes rejected" } },
       };
     case "degradedWindow":
       return {
-        case: "degradedWindow" as const,
+        case: "degradedWindow",
         value: {
           component: { text: "store" },
           reason: { text: "disk pressure" },
           beganAtMs: 1_000n,
-          extent: { case: "open" as const, value: {} },
+          extent: { case: "open", value: {} },
         },
       };
   }
 };
 
-export const topbarWarning = (arm: TopbarWarningArm): MessageInitShape<typeof TopbarViewSchema>["warnings"] extends infer _ ? TopbarWarning : never =>
-  ({
-    line: { text: `warning: ${arm}` },
-    detail: warningDetail(arm),
-  }) as unknown as TopbarWarning;
+export const topbarWarning = (arm: TopbarWarningArm): WarningInit => ({
+  line: { text: `warning: ${arm}` },
+  detail: warningDetail(arm),
+});
 
 /** The closed extent of the degraded-window detail, drawn without a tick. */
-export const degradedWindowClosedWarning = (): TopbarWarning =>
-  ({
-    line: { text: "warning: degradedWindow closed" },
-    detail: {
-      case: "degradedWindow",
-      value: {
-        component: { text: "store" },
-        reason: { text: "disk pressure" },
-        beganAtMs: 1_000n,
-        extent: { case: "closed", value: { endedAtMs: 5_000n, droppedCount: 12n } },
-      },
+export const degradedWindowClosedWarning = (): WarningInit => ({
+  line: { text: "warning: degradedWindow closed" },
+  detail: {
+    case: "degradedWindow",
+    value: {
+      component: { text: "store" },
+      reason: { text: "disk pressure" },
+      beganAtMs: 1_000n,
+      extent: { case: "closed", value: { endedAtMs: 5_000n, droppedCount: 12n } },
     },
-  }) as unknown as TopbarWarning;
+  },
+});
+
+export const TOPBAR_ACCOUNT_ARMS = ["loggedIn", "loggedOut"] as const;
+
+/** The permission modes the picker lists; SetPermissionMode echoes `mode`. */
+export const PERMISSION_MODES = [
+  { mode: "default", displayName: "default" },
+  { mode: "acceptEdits", displayName: "accept edits" },
+  { mode: "plan", displayName: "plan" },
+] as const;
 
 type TopbarInit = {
   title?: string;
   sessionLine?: string;
-  account?: "loggedIn" | "loggedOut";
+  account?: (typeof TOPBAR_ACCOUNT_ARMS)[number];
   email?: string;
   tone?: string;
   glyph?: string;
@@ -1234,7 +1369,10 @@ type TopbarInit = {
   selected?: string;
   contextText?: string;
   breakdown?: boolean;
-  warnings?: TopbarWarning[];
+  /** Omit the per-row share, which is `optional` and drawn only when set. */
+  shares?: boolean;
+  warnings?: WarningInit[];
+  permissionMode?: string;
 };
 
 export function topbarView(init?: TopbarInit): TopbarView {
@@ -1250,7 +1388,7 @@ export function topbarView(init?: TopbarInit): TopbarView {
       options: models.map((m) => modelOption(m.name, m.displayName, m.description)),
     },
     connectivity: {
-      tone: init?.tone ?? "ok",
+      tone: init?.tone ?? "green",
       glyph: init?.glyph ?? "dot",
       title: init?.connectivityTitle ?? "connected to claude-repld",
     },
@@ -1265,7 +1403,13 @@ export function topbarView(init?: TopbarInit): TopbarView {
                 {
                   heading: { text: "session" },
                   rows: [
-                    { label: "system prompt", tokens: 12_000n, sharePermille: 65, emphasized: true, depth: 0 },
+                    {
+                      label: "system prompt",
+                      tokens: 12_000n,
+                      sharePermille: init?.shares === false ? undefined : 65,
+                      emphasized: true,
+                      depth: 0,
+                    },
                     { label: "memory files", tokens: 4_000n, emphasized: false, depth: 1 },
                   ],
                 },
@@ -1276,6 +1420,10 @@ export function topbarView(init?: TopbarInit): TopbarView {
       init?.account === "loggedOut"
         ? { state: { case: "loggedOut", value: {} } }
         : { state: { case: "loggedIn", value: { email: init?.email ?? "dev@example.test" } } },
+    permissionModePicker: {
+      current: PERMISSION_MODES.find((m) => m.mode === (init?.permissionMode ?? "default")),
+      options: PERMISSION_MODES.map((m) => ({ ...m })),
+    },
   });
 }
 
@@ -1312,6 +1460,16 @@ export const ROSTER_STATUS_ARMS = [
 ] as const;
 export type RosterStatusArm = (typeof ROSTER_STATUS_ARMS)[number];
 
+/** The merge arms the vocabulary paints with glyphs instead of a color. */
+export const ROSTER_MERGE_ARMS = [
+  "mergeEnqueuing",
+  "merging",
+  "mergeQueued",
+  "mergeConflict",
+  "mergeFailed",
+  "merged",
+] as const;
+
 type RosterRowInit = {
   id?: string;
   name?: string;
@@ -1335,9 +1493,7 @@ export function rosterRow(init?: RosterRowInit): RosterRow {
     status: { case: init?.status ?? "ready", value: {} } as RosterRow["status"],
     current: { current: init?.current ?? false },
     children: init?.children ?? [],
-    when: {
-      shown: { case: init?.when ?? "lastSelected", value: { atMs: init?.whenAtMs ?? 1_000n } },
-    },
+    when: { shown: { case: init?.when ?? "lastSelected", value: { atMs: init?.whenAtMs ?? 1_000n } } },
     detail:
       init?.detail === false
         ? undefined
@@ -1350,16 +1506,17 @@ export function rosterRow(init?: RosterRowInit): RosterRow {
   });
 }
 
-export function roster(init?: { rows?: RosterRow[]; taskRows?: RosterRow[]; merged?: RosterRow[]; current?: string }): WorkspaceRoster {
+export function roster(init?: {
+  rows?: RosterRow[];
+  taskRows?: RosterRow[];
+  merged?: RosterRow[];
+  current?: string;
+}): WorkspaceRoster {
   const rows = init?.rows ?? [rosterRow()];
   return create(WorkspaceRosterSchema, {
     repository: {
       sections: [
-        {
-          key: { repository: repositoryRef() },
-          header: { label: { text: "doom" } },
-          rows: { rows },
-        },
+        { key: { repository: repositoryRef() }, header: { label: { text: "doom" } }, rows: { rows } },
       ],
     },
     task: {
@@ -1394,39 +1551,49 @@ export const HOLD_CLASSIFICATION_ARMS = [
 ] as const;
 export type HoldClassificationArm = (typeof HOLD_CLASSIFICATION_ARMS)[number];
 
+/** The ONE classification that draws an [accept] button (ruled). */
+export const HOLD_ACCEPTABLE_ARM = "holdForTurnEnd";
+
 export const HOLD_ARMS = ["shutdown", "keepAlive", "sessionStarting", "buildRefresh"] as const;
 export type HoldArm = (typeof HOLD_ARMS)[number];
 
-const classificationValue = (arm: HoldClassificationArm, accepted?: boolean) => {
+type HeldPromptInit = MessageInitShape<typeof HeldPromptSchema>;
+
+const classificationValue = (
+  arm: HoldClassificationArm,
+  accepted?: boolean,
+): NonNullable<HeldPromptInit["classification"]> => {
   switch (arm) {
     case "classifying":
-      return { case: "classifying" as const, value: {} };
+      return { case: "classifying", value: {} };
     case "interject":
-      return { case: "interject" as const, value: { rationale: "it changes the current work" } };
+      return { case: "interject", value: { rationale: "it changes the current work" } };
     case "holdForTurnEnd":
       return {
-        case: "holdForTurnEnd" as const,
+        case: "holdForTurnEnd",
         value: { rationale: "it is a follow-up", accepted: { accepted: accepted ?? false } },
       };
     case "uninterruptibleTurn":
-      return { case: "uninterruptibleTurn" as const, value: { command: SessionCommand.COMPACT } };
+      return { case: "uninterruptibleTurn", value: { command: SessionCommand.COMPACT } };
     case "classificationError":
-      return { case: "classificationError" as const, value: { detail: "the classifier timed out" } };
+      return { case: "classificationError", value: { detail: "the classifier timed out" } };
   }
 };
 
-const holdValue = (arm: HoldArm) => {
+const holdValue = (arm: HoldArm): NonNullable<HeldPromptInit["hold"]> => {
   switch (arm) {
     case "shutdown":
-      return { case: "shutdown" as const, value: { scheduleId: "sched-1" } };
+      return { case: "shutdown", value: { scheduleId: "sched-1" } };
     case "keepAlive":
-      return { case: "keepAlive" as const, value: { turn: turnId("turn-live") } };
+      return { case: "keepAlive", value: { turn: turnId("turn-live") } };
     case "sessionStarting":
-      return { case: "sessionStarting" as const, value: {} };
+      return { case: "sessionStarting", value: {} };
     case "buildRefresh":
-      return { case: "buildRefresh" as const, value: {} };
+      return { case: "buildRefresh", value: {} };
   }
 };
+
+export const HELD_TURN_ID = "turn-held";
 
 export function heldPrompt(init?: {
   turn?: string;
@@ -1436,25 +1603,34 @@ export function heldPrompt(init?: {
   accepted?: boolean;
 }): HeldPrompt {
   return create(HeldPromptSchema, {
-    turn: turnId(init?.turn ?? "turn-held"),
+    turn: turnId(init?.turn ?? HELD_TURN_ID),
     said: userSaid(init?.text ?? "also fix the footer"),
     queuedAt: { atMs: 3_000n },
-    classification: classificationValue(init?.classification ?? "interject", init?.accepted) as never,
-    hold: holdValue(init?.hold ?? "keepAlive") as never,
+    classification: classificationValue(init?.classification ?? "interject", init?.accepted),
+    hold: holdValue(init?.hold ?? "keepAlive"),
   });
 }
 
-export const heldOfferItem = (headline = "your merge is queued behind 2 others"): DaemonHoldItem =>
-  ({
-    item: { case: "offer", value: { offer: { case: "mergeDequeue", value: { headline: { text: headline } } } } },
-  }) as unknown as DaemonHoldItem;
+export const heldPromptItem = (init?: Parameters<typeof heldPrompt>[0]): HoldItemInit => ({
+  item: { case: "prompt", value: heldPrompt(init) },
+});
 
-export function holdTray(init?: { heading?: string; items?: DaemonHoldItem[] }): DaemonHoldTray {
+export const HELD_OFFER_ARMS = ["mergeDequeue"] as const;
+export const HELD_OFFER_HEADLINE = "your merge is queued behind 2 others";
+
+export const heldOfferItem = (headline = HELD_OFFER_HEADLINE): HoldItemInit => ({
+  item: {
+    case: "offer",
+    value: { offer: { case: "mergeDequeue", value: { headline: { text: headline } } } },
+  },
+});
+
+export const HOLD_TRAY_HEADING = "held prompts";
+
+export function holdTray(init?: { heading?: string; items?: HoldItemInit[] }): DaemonHoldTray {
   return create(DaemonHoldTraySchema, {
-    heading: { text: init?.heading ?? "held prompts" },
-    items:
-      init?.items ??
-      ([{ item: { case: "prompt", value: heldPrompt() } }] as unknown as DaemonHoldItem[]),
+    heading: { text: init?.heading ?? HOLD_TRAY_HEADING },
+    items: init?.items ?? [heldPromptItem()],
   });
 }
 
@@ -1462,7 +1638,7 @@ export function holdTray(init?: { heading?: string; items?: DaemonHoldItem[] }):
 export const emptyTray = (): DaemonHoldTray => holdTray({ items: [] });
 
 // ---------------------------------------------------------------------------
-// Failures (client-local arms the webapp's own overlay mints)
+// Failures (the six client-local arms the webapp's own overlay mints)
 // ---------------------------------------------------------------------------
 
 export const CLIENT_FAILURE_ARMS = [
@@ -1475,31 +1651,33 @@ export const CLIENT_FAILURE_ARMS = [
 ] as const;
 export type ClientFailureArm = (typeof CLIENT_FAILURE_ARMS)[number];
 
-const failureValue = (arm: ClientFailureArm) => {
+type FailureArm = NonNullable<MessageInitShape<typeof FailureKindSchema>["kind"]>;
+
+const failureValue = (arm: ClientFailureArm): FailureArm => {
   switch (arm) {
     case "daemonUnreachable":
-      return { case: "daemonUnreachable" as const, value: { closeCode: 1006, closeReason: "abnormal" } };
+      return { case: "daemonUnreachable", value: { closeCode: 1006, closeReason: "abnormal" } };
     case "workspaceGone":
-      return { case: "workspaceGone" as const, value: {} };
+      return { case: "workspaceGone", value: {} };
     case "bootFailed":
-      return { case: "bootFailed" as const, value: { cause: "the page address had no workspace" } };
+      return { case: "bootFailed", value: { cause: "the page address had no workspace" } };
     case "controlPlaneFailed":
       return {
-        case: "controlPlaneFailed" as const,
+        case: "controlPlaneFailed",
         value: { what: "WatchFooter", cause: "the stream refused the token" },
       };
     case "frameUndecodable":
       return {
-        case: "frameUndecodable" as const,
+        case: "frameUndecodable",
         value: { cause: "unknown field 999", frameHead: "WatchFooterResponse" },
       };
     case "staleBundle":
-      return { case: "staleBundle" as const, value: { detail: "the daemon shipped a newer bundle" } };
+      return { case: "staleBundle", value: { detail: "the daemon shipped a newer bundle" } };
   }
 };
 
 export const clientFailure = (arm: ClientFailureArm): FailureKind =>
-  create(FailureKindSchema, { kind: failureValue(arm) as never });
+  create(FailureKindSchema, { kind: failureValue(arm) });
 
 // ---------------------------------------------------------------------------
 // Daemon lifecycle pushes
@@ -1518,6 +1696,8 @@ export const drainReason = (arm: DrainReasonArm): DrainReason =>
 
 export const SHUTDOWN_CAUSE_ARMS = ["selfMergeRollout", "scheduledDrain", "immediate"] as const;
 export type ShutdownCauseArm = (typeof SHUTDOWN_CAUSE_ARMS)[number];
+
+export const WATCH_DAEMON_PUSHES = ["shutdownAnnounced", "drainScheduled", "drainCancelled"] as const;
 
 export function shutdownAnnounced(init?: {
   address?: string;
@@ -1574,7 +1754,7 @@ export const hostWorkspacePush = (): WatchHostWorkspaceResponse =>
   });
 
 // ---------------------------------------------------------------------------
-// Command panels (SubmitPrompt success arms)
+// Command panels (SubmitPrompt success arms and the feed's panel row)
 // ---------------------------------------------------------------------------
 
 export const COMMAND_PANEL_ARMS = ["status", "todos", "agents", "mcp", "context", "help"] as const;
@@ -1583,11 +1763,13 @@ export type CommandPanelArm = (typeof COMMAND_PANEL_ARMS)[number];
 export const MCP_STATUS_ARMS = ["connected", "failed", "needsAuth", "pending", "disabled"] as const;
 export const TODO_STATUS_ARMS = ["pending", "running", "completed"] as const;
 
-const panelValue = (arm: CommandPanelArm) => {
+type PanelArm = NonNullable<MessageInitShape<typeof SubmitPromptCommandPanelSchema>["panel"]>;
+
+function panelValue(arm: CommandPanelArm | FeedCommandPanelArm): PanelArm {
   switch (arm) {
     case "status":
       return {
-        case: "status" as const,
+        case: "status",
         value: {
           rows: [
             { label: "version", value: "0.1.0" },
@@ -1599,18 +1781,18 @@ const panelValue = (arm: CommandPanelArm) => {
       };
     case "todos":
       return {
-        case: "todos" as const,
+        case: "todos",
         value: {
           rows: [
-            { status: { case: "pending" as const, value: {} }, subject: "write fixtures" },
-            { status: { case: "running" as const, value: {} }, subject: "write the harness" },
-            { status: { case: "completed" as const, value: {} }, subject: "read the protos" },
+            { status: { case: "pending", value: {} }, subject: "write fixtures" },
+            { status: { case: "running", value: {} }, subject: "write the harness" },
+            { status: { case: "completed", value: {} }, subject: "read the protos" },
           ],
         },
       };
     case "agents":
       return {
-        case: "agents" as const,
+        case: "agents",
         value: {
           rows: [
             { name: "reviewer", description: { text: "review the diff" } },
@@ -1620,23 +1802,20 @@ const panelValue = (arm: CommandPanelArm) => {
       };
     case "mcp":
       return {
-        case: "mcp" as const,
+        case: "mcp",
         value: {
           rows: [
-            { name: "weather", status: { case: "connected" as const, value: {} } },
-            {
-              name: "gmail",
-              status: { case: "failed" as const, value: { detail: { text: "handshake refused" } } },
-            },
-            { name: "drive", status: { case: "needsAuth" as const, value: {} } },
-            { name: "slack", status: { case: "pending" as const, value: {} } },
-            { name: "figma", status: { case: "disabled" as const, value: {} } },
+            { name: "weather", status: { case: "connected", value: {} } },
+            { name: "gmail", status: { case: "failed", value: { detail: { text: "handshake refused" } } } },
+            { name: "drive", status: { case: "needsAuth", value: {} } },
+            { name: "slack", status: { case: "pending", value: {} } },
+            { name: "figma", status: { case: "disabled", value: {} } },
           ],
         },
       };
     case "context":
       return {
-        case: "context" as const,
+        case: "context",
         value: {
           header: "context usage",
           categories: [{ label: "system prompt", figure: "12.0k", color: "blue" }],
@@ -1658,7 +1837,7 @@ const panelValue = (arm: CommandPanelArm) => {
       };
     case "help":
       return {
-        case: "help" as const,
+        case: "help",
         value: {
           rows: [
             { command: "/clear", description: { text: "clear the context" } },
@@ -1667,7 +1846,7 @@ const panelValue = (arm: CommandPanelArm) => {
         },
       };
   }
-};
+}
 
 export const commandPanel = (arm: CommandPanelArm): SubmitPromptCommandPanel =>
-  create(SubmitPromptCommandPanelSchema, { panel: panelValue(arm) as never });
+  create(SubmitPromptCommandPanelSchema, { panel: panelValue(arm) });
