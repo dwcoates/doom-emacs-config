@@ -690,6 +690,70 @@ unary rpc can produce, which the contract never collapses into one."
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "tool=\"Bash\""))))
 
+(ert-deftest agent-repl-test-host-question-asked-unfocused-posts-a-banner ()
+  "A question batch blocks the agent: unfocused, it earns the OS banner."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--focused nil)
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :notification
+                  :value (agent-repl-test-host--notification
+                          :kind (list :arm :question-asked
+                                      :value (list :header "Which branch?")))))
+    ;; Assert
+    (should (equal (car agent-repl-test-host--notifications)
+                   (list "ws-1" "ws-1" "the agent has a question")))))
+
+(ert-deftest agent-repl-test-host-question-asked-focused-unselected-blinks ()
+  "Focused with the tab elsewhere: the same blink a permission ask gets."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--focused t
+          agent-repl-test-host--current-ws "ws-other")
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :notification
+                  :value (agent-repl-test-host--notification
+                          :kind (list :arm :question-asked
+                                      :value (list :header "Which branch?")))))
+    ;; Assert
+    (should (equal (assq :blink agent-repl-test-host--effects) '(:blink . "ws-1")))))
+
+(ert-deftest agent-repl-test-host-question-asked-on-the-selected-tab-is-logged-only ()
+  "Selected: the footer already shows it, so the log is the whole reaction."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--focused t
+          agent-repl-test-host--current-ws "ws-1")
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :notification
+                  :value (agent-repl-test-host--notification
+                          :kind (list :arm :question-asked
+                                      :value (list :header "Which branch?")))))
+    ;; Assert
+    (should (and (null agent-repl-test-host--effects)
+                 (agent-repl-test-host--logged-p :info "elisp.host.notification-selected")))))
+
+(ert-deftest agent-repl-test-host-question-asked-logs-the-header ()
+  "The chip header belongs in the log context, like a gated tool's name."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--focused nil)
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :notification
+                  :value (agent-repl-test-host--notification
+                          :kind (list :arm :question-asked
+                                      :value (list :header "Which branch?")))))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "header=\"Which branch?\""))))
+
 ;;;; ---- The handover ----
 
 (ert-deftest agent-repl-test-host-transferred-adopts-on-the-successor ()
