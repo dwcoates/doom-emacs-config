@@ -107,14 +107,19 @@ func firstNonEmpty(values ...string) string {
 // does not carry. An unserved item is by construction not a servable frame, so it
 // never reaches a page and is invisible to the user — a legitimate outcome, and
 // the one worth counting.
-func logResidue(log *logging.Bound, ctx *Context, entries []*storev1.StoreEntry) {
+//
+// IT IS PER SOURCE RECORD RATHER THAN PER BATCH, because a write record owes the
+// full write vocabulary — file_id, path, OFFSET and write_id — and the offset is
+// the one coordinate a batch cannot state: the position is the record's own, and
+// a record whose position is unstated cannot be found again on disk.
+func logResidue(log *logging.Bound, ctx *Context, offset int64, entries []*storev1.StoreEntry) {
 	for _, entry := range entries {
 		if entry.GetAgentUpdate().GetUnservedItem() == nil {
 			continue
 		}
 		log.With(logging.Context{
 			Operation: "residue", Path: ctx.Path, FileID: ctx.FileID, TaskID: ctx.TaskID,
-			AgentID: ctx.AgentID, VendorSessionID: ctx.SessionID,
+			AgentID: ctx.AgentID, VendorSessionID: ctx.SessionID, Offset: logging.Off(offset),
 			UpsertKey: entry.GetUpsertKey(), WriteID: entry.GetWriteId(),
 		}).LogVerbose("record stored as an unserved item: %s", convert.Describe(entry))
 	}
