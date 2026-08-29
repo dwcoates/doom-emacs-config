@@ -451,13 +451,15 @@ not be routed at all.
     ;; and last contribution to the roster, and host.el sends it from the
     ;; perspective-activated hook.  Nothing else about the switch reaches
     ;; the daemon, and nothing about it is asked of the page.
-    ;; Flip the emacs-side bit on the fully-loaded latch.  If
-    ;; --on-session-start-event has also fired, this fires the
-    ;; ws-fully-loaded hook; otherwise we just record the bit and wait
-    ;; for agent-ready.  Guarded on ws non-nil so the nil-ws fallback
-    ;; (test envs, persp init) doesn't poison the hash table.
+    ;; THE FULLY-LOADED LATCH IS GONE with the session events that armed
+    ;; its other half: readiness is the daemon's, and a workspace's state
+    ;; arrives on the roster rather than being latched together here out of
+    ;; two local observations.
     (when ws
-      (agent-repl--latch-and-maybe-fire-loaded ws :ws-loaded))))
+      ;; Screened through `--ws-log-name' like every other record on this
+      ;; path: persp-mode hands it its own placeholders too, and those own
+      ;; no durable sink to route a workspace-attributed record to.
+      (agent-repl--log log-ws "elisp.panels.switch: complete ws=%s" ws))))
 
 ;; Save window state for current workspace before switching away,
 ;; so the panel-visibility paint can inspect the saved config.
