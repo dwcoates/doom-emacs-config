@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_detach_foreground.proto.
  */
 export const file_shim_v1_endpoint_detach_foreground: GenFile = /*@__PURE__*/
-  fileDesc("CihzaGltL3YxL2VuZHBvaW50X2RldGFjaF9mb3JlZ3JvdW5kLnByb3RvEgdzaGltLnYxIkkKF0RldGFjaEZvcmVncm91bmRSZXF1ZXN0Ei4KBHVuaXQYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkIo4BChhEZXRhY2hGb3JlZ3JvdW5kUmVzcG9uc2USMwoHc3VjY2VzcxgBIAEoCzIgLnNoaW0udjEuRGV0YWNoRm9yZWdyb3VuZFN1Y2Nlc3NIABIzCgdmYWlsdXJlGAIgASgLMiAuc2hpbS52MS5EZXRhY2hGb3JlZ3JvdW5kRmFpbHVyZUgAQggKBnJlc3VsdCIZChdEZXRhY2hGb3JlZ3JvdW5kU3VjY2VzcyIpChdEZXRhY2hGb3JlZ3JvdW5kRmFpbHVyZRIOCgZkZXRhaWwYASABKAlCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_agent_activity]);
+  fileDesc("CihzaGltL3YxL2VuZHBvaW50X2RldGFjaF9mb3JlZ3JvdW5kLnByb3RvEgdzaGltLnYxIkkKF0RldGFjaEZvcmVncm91bmRSZXF1ZXN0Ei4KBHVuaXQYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkIo4BChhEZXRhY2hGb3JlZ3JvdW5kUmVzcG9uc2USMwoHc3VjY2VzcxgBIAEoCzIgLnNoaW0udjEuRGV0YWNoRm9yZWdyb3VuZFN1Y2Nlc3NIABIzCgdmYWlsdXJlGAIgASgLMiAuc2hpbS52MS5EZXRhY2hGb3JlZ3JvdW5kRmFpbHVyZUgAQggKBnJlc3VsdCIZChdEZXRhY2hGb3JlZ3JvdW5kU3VjY2VzcyKzAgoXRGV0YWNoRm9yZWdyb3VuZEZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEjwKDHVua25vd25fdW5pdBgCIAEoCzIkLnNoaW0udjEuRGV0YWNoRm9yZWdyb3VuZFVua25vd25Vbml0SAASRgoRYWxyZWFkeV9jb25jbHVkZWQYAyABKAsyKS5zaGltLnYxLkRldGFjaEZvcmVncm91bmRBbHJlYWR5Q29uY2x1ZGVkSAASQAoObm90X2RldGFjaGFibGUYBCABKAsyJi5zaGltLnYxLkRldGFjaEZvcmVncm91bmROb3REZXRhY2hhYmxlSAASOAoKbm9fc2Vzc2lvbhgFIAEoCzIiLnNoaW0udjEuRGV0YWNoRm9yZWdyb3VuZE5vU2Vzc2lvbkgAQgYKBGtpbmQiHQobRGV0YWNoRm9yZWdyb3VuZFVua25vd25Vbml0IiIKIERldGFjaEZvcmVncm91bmRBbHJlYWR5Q29uY2x1ZGVkIh8KHURldGFjaEZvcmVncm91bmROb3REZXRhY2hhYmxlIhsKGURldGFjaEZvcmVncm91bmROb1Nlc3Npb25CIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_agent_activity]);
 
 /**
  * What to background.
@@ -86,8 +86,7 @@ export const DetachForegroundSuccessSchema: GenMessage<DetachForegroundSuccess> 
   messageDesc(file_shim_v1_endpoint_detach_foreground, 2);
 
 /**
- * Not detached: no such unit, already concluded, not a detachable kind. `kind` arms are DERIVED at the wave from the shim's real refusal
- * sites.
+ * Not detached. THE ARM IS WHY.
  *
  * @generated from message shim.v1.DetachForegroundFailure
  */
@@ -98,6 +97,43 @@ export type DetachForegroundFailure = Message<"shim.v1.DetachForegroundFailure">
    * @generated from field: string detail = 1;
    */
   detail: string;
+
+  /**
+   * @generated from oneof shim.v1.DetachForegroundFailure.kind
+   */
+  kind: {
+    /**
+     * No in-flight unit carries this identity.
+     *
+     * @generated from field: shim.v1.DetachForegroundUnknownUnit unknown_unit = 2;
+     */
+    value: DetachForegroundUnknownUnit;
+    case: "unknownUnit";
+  } | {
+    /**
+     * The unit already concluded.
+     *
+     * @generated from field: shim.v1.DetachForegroundAlreadyConcluded already_concluded = 3;
+     */
+    value: DetachForegroundAlreadyConcluded;
+    case: "alreadyConcluded";
+  } | {
+    /**
+     * The unit's kind cannot detach (only a bash or a subagent can).
+     *
+     * @generated from field: shim.v1.DetachForegroundNotDetachable not_detachable = 4;
+     */
+    value: DetachForegroundNotDetachable;
+    case: "notDetachable";
+  } | {
+    /**
+     * No session is open on this shim.
+     *
+     * @generated from field: shim.v1.DetachForegroundNoSession no_session = 5;
+     */
+    value: DetachForegroundNoSession;
+    case: "noSession";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -106,4 +142,56 @@ export type DetachForegroundFailure = Message<"shim.v1.DetachForegroundFailure">
  */
 export const DetachForegroundFailureSchema: GenMessage<DetachForegroundFailure> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_detach_foreground, 3);
+
+/**
+ * @generated from message shim.v1.DetachForegroundUnknownUnit
+ */
+export type DetachForegroundUnknownUnit = Message<"shim.v1.DetachForegroundUnknownUnit"> & {
+};
+
+/**
+ * Describes the message shim.v1.DetachForegroundUnknownUnit.
+ * Use `create(DetachForegroundUnknownUnitSchema)` to create a new message.
+ */
+export const DetachForegroundUnknownUnitSchema: GenMessage<DetachForegroundUnknownUnit> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_detach_foreground, 4);
+
+/**
+ * @generated from message shim.v1.DetachForegroundAlreadyConcluded
+ */
+export type DetachForegroundAlreadyConcluded = Message<"shim.v1.DetachForegroundAlreadyConcluded"> & {
+};
+
+/**
+ * Describes the message shim.v1.DetachForegroundAlreadyConcluded.
+ * Use `create(DetachForegroundAlreadyConcludedSchema)` to create a new message.
+ */
+export const DetachForegroundAlreadyConcludedSchema: GenMessage<DetachForegroundAlreadyConcluded> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_detach_foreground, 5);
+
+/**
+ * @generated from message shim.v1.DetachForegroundNotDetachable
+ */
+export type DetachForegroundNotDetachable = Message<"shim.v1.DetachForegroundNotDetachable"> & {
+};
+
+/**
+ * Describes the message shim.v1.DetachForegroundNotDetachable.
+ * Use `create(DetachForegroundNotDetachableSchema)` to create a new message.
+ */
+export const DetachForegroundNotDetachableSchema: GenMessage<DetachForegroundNotDetachable> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_detach_foreground, 6);
+
+/**
+ * @generated from message shim.v1.DetachForegroundNoSession
+ */
+export type DetachForegroundNoSession = Message<"shim.v1.DetachForegroundNoSession"> & {
+};
+
+/**
+ * Describes the message shim.v1.DetachForegroundNoSession.
+ * Use `create(DetachForegroundNoSessionSchema)` to create a new message.
+ */
+export const DetachForegroundNoSessionSchema: GenMessage<DetachForegroundNoSession> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_detach_foreground, 7);
 

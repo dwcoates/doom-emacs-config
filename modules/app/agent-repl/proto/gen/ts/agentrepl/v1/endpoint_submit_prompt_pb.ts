@@ -14,6 +14,8 @@ import type { TurnId } from "../../conversation/v1/turn_pb";
 import { file_conversation_v1_turn } from "../../conversation/v1/turn_pb";
 import type { UserSaid } from "../../conversation/v1/user_pb";
 import { file_conversation_v1_user } from "../../conversation/v1/user_pb";
+import type { PromptOrigin } from "../../conversation/v1/prompt_origin_pb";
+import { file_conversation_v1_prompt_origin } from "../../conversation/v1/prompt_origin_pb";
 import type { StatusPanelView } from "../../frontend/v1/status_panel_pb";
 import { file_frontend_v1_status_panel } from "../../frontend/v1/status_panel_pb";
 import type { TodosPanelView } from "../../frontend/v1/todos_panel_pb";
@@ -34,7 +36,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_submit_prompt.proto.
  */
 export const file_agentrepl_v1_endpoint_submit_prompt: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3VibWl0X3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIogBChNTdWJtaXRQcm9tcHRSZXF1ZXN0EicKBHNhaWQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSFwoPaWRlbXBvdGVuY3lfa2V5GAIgASgJEiYKBGZlZWQYAyABKAsyEy5mcm9udGVuZC52MS5GZWVkSWRIAIgBAUIHCgVfZmVlZCKIAQoUU3VibWl0UHJvbXB0UmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0RXJyb3JIAEIICgZyZXN1bHQikQEKE1N1Ym1pdFByb21wdFN1Y2Nlc3MSLgoEdHVybhgBIAEoCzIeLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRUdXJuSAASPwoNY29tbWFuZF9wYW5lbBgCIAEoCzImLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRDb21tYW5kUGFuZWxIAEIJCgdvdXRjb21lIjkKEFN1Ym1pdFByb21wdFR1cm4SJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiuQIKGFN1Ym1pdFByb21wdENvbW1hbmRQYW5lbBIuCgZzdGF0dXMYASABKAsyHC5mcm9udGVuZC52MS5TdGF0dXNQYW5lbFZpZXdIABIsCgV0b2RvcxgEIAEoCzIbLmZyb250ZW5kLnYxLlRvZG9zUGFuZWxWaWV3SAASLgoGYWdlbnRzGAUgASgLMhwuZnJvbnRlbmQudjEuQWdlbnRzUGFuZWxWaWV3SAASKAoDbWNwGAYgASgLMhkuZnJvbnRlbmQudjEuTWNwUGFuZWxWaWV3SAASMAoHY29udGV4dBgHIAEoCzIdLmZyb250ZW5kLnYxLkNvbnRleHRQYW5lbFZpZXdIABIqCgRoZWxwGAggASgLMhouZnJvbnRlbmQudjEuSGVscFBhbmVsVmlld0gAQgcKBXBhbmVsIloKEVN1Ym1pdFByb21wdEVycm9yEjsKB21lcmdpbmcYASABKAsyKC5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0UmVmdXNlZE1lcmdpbmdIAEIICgZyZWFzb24iHAoaU3VibWl0UHJvbXB0UmVmdXNlZE1lcmdpbmdCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_conversation_v1_turn, file_conversation_v1_user, file_frontend_v1_status_panel, file_frontend_v1_todos_panel, file_frontend_v1_agents_panel, file_frontend_v1_mcp_panel, file_frontend_v1_context_panel, file_frontend_v1_help_panel, file_frontend_v1_feed]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3VibWl0X3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIrcBChNTdWJtaXRQcm9tcHRSZXF1ZXN0EicKBHNhaWQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSFwoPaWRlbXBvdGVuY3lfa2V5GAIgASgJEiYKBGZlZWQYAyABKAsyEy5mcm9udGVuZC52MS5GZWVkSWRIAIgBARItCgZvcmlnaW4YBCABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luQgcKBV9mZWVkIogBChRTdWJtaXRQcm9tcHRSZXNwb25zZRI0CgdzdWNjZXNzGAEgASgLMiEuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFN1Y2Nlc3NIABIwCgVlcnJvchgCIAEoCzIfLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRFcnJvckgAQggKBnJlc3VsdCLWAQoTU3VibWl0UHJvbXB0U3VjY2VzcxIuCgR0dXJuGAEgASgLMh4uYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFR1cm5IABI/Cg1jb21tYW5kX3BhbmVsGAIgASgLMiYuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdENvbW1hbmRQYW5lbEgAEkMKD2NvbW1hbmRfcmVmdXNlZBgDIAEoCzIoLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRDb21tYW5kUmVmdXNlZEgAQgkKB291dGNvbWUiLQoaU3VibWl0UHJvbXB0Q29tbWFuZFJlZnVzZWQSDwoHY29tbWFuZBgBIAEoCSI5ChBTdWJtaXRQcm9tcHRUdXJuEiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkIrkCChhTdWJtaXRQcm9tcHRDb21tYW5kUGFuZWwSLgoGc3RhdHVzGAEgASgLMhwuZnJvbnRlbmQudjEuU3RhdHVzUGFuZWxWaWV3SAASLAoFdG9kb3MYBCABKAsyGy5mcm9udGVuZC52MS5Ub2Rvc1BhbmVsVmlld0gAEi4KBmFnZW50cxgFIAEoCzIcLmZyb250ZW5kLnYxLkFnZW50c1BhbmVsVmlld0gAEigKA21jcBgGIAEoCzIZLmZyb250ZW5kLnYxLk1jcFBhbmVsVmlld0gAEjAKB2NvbnRleHQYByABKAsyHS5mcm9udGVuZC52MS5Db250ZXh0UGFuZWxWaWV3SAASKgoEaGVscBgIIAEoCzIaLmZyb250ZW5kLnYxLkhlbHBQYW5lbFZpZXdIAEIHCgVwYW5lbCJaChFTdWJtaXRQcm9tcHRFcnJvchI7CgdtZXJnaW5nGAEgASgLMiguYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFJlZnVzZWRNZXJnaW5nSABCCAoGcmVhc29uIhwKGlN1Ym1pdFByb21wdFJlZnVzZWRNZXJnaW5nQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin, file_frontend_v1_status_panel, file_frontend_v1_todos_panel, file_frontend_v1_agents_panel, file_frontend_v1_mcp_panel, file_frontend_v1_context_panel, file_frontend_v1_help_panel, file_frontend_v1_feed]);
 
 /**
  * What the user typed, submitted whole.
@@ -70,6 +72,16 @@ export type SubmitPromptRequest = Message<"agentrepl.v1.SubmitPromptRequest"> & 
    * @generated from field: optional frontend.v1.FeedId feed = 3;
    */
   feed?: FeedId | undefined;
+
+  /**
+   * WHICH SEND SITE caused this prompt — the closed attribution vocabulary
+   * every Emacs send site chooses its own value from; the daemon persists
+   * it onto the turn's durable record (StartTurn.origin → AgentPrompt).
+   * Never UNSPECIFIED: a submission carrying it is refused at once.
+   *
+   * @generated from field: conversation.v1.PromptOrigin origin = 4;
+   */
+  origin: PromptOrigin;
 };
 
 /**
@@ -137,6 +149,17 @@ export type SubmitPromptSuccess = Message<"agentrepl.v1.SubmitPromptSuccess"> & 
      */
     value: SubmitPromptCommandPanel;
     case: "commandPanel";
+  } | {
+    /**
+     * It is a command the daemon RECOGNIZES but neither answers nor forwards
+     * (/agents, /help, …): refused with the add-support offer. The card is
+     * the feed's `command_refused` row; the caller learns only that no turn
+     * was minted.
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptCommandRefused command_refused = 3;
+     */
+    value: SubmitPromptCommandRefused;
+    case: "commandRefused";
   } | { case: undefined; value?: undefined };
 };
 
@@ -146,6 +169,27 @@ export type SubmitPromptSuccess = Message<"agentrepl.v1.SubmitPromptSuccess"> & 
  */
 export const SubmitPromptSuccessSchema: GenMessage<SubmitPromptSuccess> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 2);
+
+/**
+ * The recognized-but-unsupported answer.
+ *
+ * @generated from message agentrepl.v1.SubmitPromptCommandRefused
+ */
+export type SubmitPromptCommandRefused = Message<"agentrepl.v1.SubmitPromptCommandRefused"> & {
+  /**
+   * The command as typed ("/agents").
+   *
+   * @generated from field: string command = 1;
+   */
+  command: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptCommandRefused.
+ * Use `create(SubmitPromptCommandRefusedSchema)` to create a new message.
+ */
+export const SubmitPromptCommandRefusedSchema: GenMessage<SubmitPromptCommandRefused> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 3);
 
 /**
  * The minted turn — what a client matches against FeedRow.turn to find its
@@ -166,7 +210,7 @@ export type SubmitPromptTurn = Message<"agentrepl.v1.SubmitPromptTurn"> & {
  * Use `create(SubmitPromptTurnSchema)` to create a new message.
  */
 export const SubmitPromptTurnSchema: GenMessage<SubmitPromptTurn> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 3);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 4);
 
 /**
  * The recognized command's panel. THE ARM IS WHICH COMMAND was recognized; a
@@ -241,7 +285,7 @@ export type SubmitPromptCommandPanel = Message<"agentrepl.v1.SubmitPromptCommand
  * Use `create(SubmitPromptCommandPanelSchema)` to create a new message.
  */
 export const SubmitPromptCommandPanelSchema: GenMessage<SubmitPromptCommandPanel> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 4);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 5);
 
 /**
  * The submission was refused. The reason oneof gains further arms as they
@@ -276,7 +320,7 @@ export type SubmitPromptError = Message<"agentrepl.v1.SubmitPromptError"> & {
  * Use `create(SubmitPromptErrorSchema)` to create a new message.
  */
 export const SubmitPromptErrorSchema: GenMessage<SubmitPromptError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 5);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 6);
 
 /**
  * The merge-in-flight refusal. Empty: the set arm is the whole assertion —
@@ -293,5 +337,5 @@ export type SubmitPromptRefusedMerging = Message<"agentrepl.v1.SubmitPromptRefus
  * Use `create(SubmitPromptRefusedMergingSchema)` to create a new message.
  */
 export const SubmitPromptRefusedMergingSchema: GenMessage<SubmitPromptRefusedMerging> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 6);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 7);
 

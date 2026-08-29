@@ -41,8 +41,13 @@ message KillSessionFailure {
   oneof cause {
     // Work is live and force was not asked: here is what is live.
     conversation.v1.SessionLive live = 1;
-    // Further arms DERIVED at the wave (the query refusing to end).
+    // No session is open on this shim.
+    KillSessionNoSession no_session = 3;
+    // The vendor query refused to end in the stand-down window.
+    KillSessionQueryRefusedToEnd query_refused_to_end = 4;
   }
   // The shim's account, for a human and for logs; never switched on.
   string detail = 2;
 }
+message KillSessionNoSession {}
+message KillSessionQueryRefusedToEnd {}
