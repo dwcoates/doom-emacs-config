@@ -543,3 +543,19 @@ generated arms when the landing merges (one place each):
   not_yet_adopted, and the DaemonFault / SessionFault / HostFault kind arms)
   is collected in ERROR-ARMS.md and sent by the teamlead once the server
   handlers expose the sites.
+
+## Deploy chain adaptation (wave 3)
+
+- `bin/deploy-all.sh` step 5 evaluates an elisp restart hook via emacsclient;
+  the function it names today, `agent-repl-frontend-daemon-restart-await`,
+  is DEAD on overhaul/elisp. The successor is
+  `(agent-repl-runtime-restart-await)` in `lisp/services.el` (build script +
+  store/sidecar bounce + UpdateShutdownSchedule{now} + re-ensure, pumping
+  until DaemonHealth answers). The rewritten chain calls that name; the
+  elisp lead edits nothing under bin/.
+- The chain's order stays proto → bindings → shim → webapp → daemon →
+  store/sidecar; `build-frontend.sh` builds `daemon/bin/claude-repld` from
+  `./cmd/claude-repld`; the daemon's self-reload invokes the ONE chain with
+  `--no-bounce`.
+- `agent-shim/wire` is deleted with the rewrite (nothing in the daemon
+  imports it) and its `bin/test-all.sh` roster entry dropped.
