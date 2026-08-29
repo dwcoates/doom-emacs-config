@@ -731,3 +731,110 @@ func TestWriteBatchStoresTheBashFrameItselfAsTheLatestState(t *testing.T) {
 		t.Fatalf("latest_state frame = %v", frame)
 	}
 }
+
+// ---- the write ledger ----
+
+func TestWriteBatchAbsorbsASupersededWriteIdWithoutRegressingTheRow(t *testing.T) {
+	// Arrange: w1 then w2 settle the SAME upsert_key. Probing entry.write_id
+	// would answer "never seen" for the replayed w1, because entry holds only
+	// the LATEST write — and re-applying it would overwrite the newer content.
+	d, _ := newStore(t)
+	first := pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", proseSaying("A"))))
+	second := pageEntry("w2", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", proseSaying("A settled"))))
+	writeOK(t, d, first)
+	writeOK(t, d, second)
+
+	// Act
+	result := writeOK(t, d, proto.Clone(first).(*storev1.StoreEntry))
+
+	// Assert
+	if result.Absorbed != 1 || result.Written != 0 {
+		t.Fatalf("result = %+v, want the superseded replay absorbed", result)
+	}
+	if got := scalar[string](t, d, `SELECT write_id FROM entry WHERE upsert_key = 'u1'`); got != "w2" {
+		t.Fatalf("write_id = %q, want the newer write w2 to still own the row", got)
+	}
+}
+
+func TestWriteBatchLeavesTheWriteOrdinalAloneForASupersededReplay(t *testing.T) {
+	// Arrange: bumping it would re-deliver the REGRESSED line to every live
+	// watcher.
+	d, _ := newStore(t)
+	first := pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", proseSaying("A"))))
+	second := pageEntry("w2", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", proseSaying("A settled"))))
+	writeOK(t, d, first)
+	writeOK(t, d, second)
+	before := scalar[int64](t, d, `SELECT write_seq FROM entry WHERE upsert_key = 'u1'`)
+
+	// Act
+	writeOK(t, d, proto.Clone(first).(*storev1.StoreEntry))
+
+	// Assert
+	if after := scalar[int64](t, d, `SELECT write_seq FROM entry WHERE upsert_key = 'u1'`); after != before {
+		t.Fatalf("write_seq moved from %d to %d on a superseded replay", before, after)
+	}
+}
+
+func TestWriteBatchRecordsOneLedgerRowPerAppliedWrite(t *testing.T) {
+	// Arrange: the ledger is the absorption index, so every APPLIED write —
+	// insert and upsert alike — leaves exactly one row behind.
+	d, _ := newStore(t)
+
+	// Act
+	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", proseSaying("A")))))
+	writeOK(t, d, pageEntry("w2", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", proseSaying("B")))))
+
+	// Assert
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM write_ledger`); got != 2 {
+		t.Fatalf("write_ledger rows = %d, want one per applied write", got)
+	}
+}
+
+func TestWriteBatchLeavesNoLedgerRowForAnAbsorbedWrite(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	entry := pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose())))
+	writeOK(t, d, entry)
+
+	// Act
+	writeOK(t, d, proto.Clone(entry).(*storev1.StoreEntry))
+
+	// Assert
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM write_ledger WHERE write_id = 'w1'`); got != 1 {
+		t.Fatalf("write_ledger rows for w1 = %d, want the single original", got)
+	}
+}
+
+func TestWriteBatchLedgerRowNamesTheRowAndOrdinalItApplied(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+
+	// Assert
+	if got := scalar[string](t, d, `SELECT upsert_key FROM write_ledger WHERE write_id = 'w1'`); got != "u1" {
+		t.Fatalf("ledger upsert_key = %q, want u1", got)
+	}
+	if got := scalar[int64](t, d, `SELECT write_ledger.write_seq - entry.write_seq FROM write_ledger, entry WHERE write_ledger.write_id = 'w1' AND entry.upsert_key = 'u1'`); got != 0 {
+		t.Fatalf("ledger write_seq differs from the row's by %d, want the same ordinal", got)
+	}
+}
+
+func TestWriteBatchCommitsNoLedgerRowWhenTheBatchFails(t *testing.T) {
+	// Arrange: durable or nothing includes the absorption fact — a ledger row
+	// for a write whose row rolled back would make the retry a silent no-op.
+	d, _ := newStore(t)
+	good := pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose())))
+	bad := pageEntry("w2", "u2", "agent-1", frameItem(activityFrame("", "act-2", prose())))
+
+	// Act
+	if _, err := d.WriteBatch(ctx(), "producer", batch(good, bad)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("WriteBatch error = %v, want ErrInvalid", err)
+	}
+
+	// Assert
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM write_ledger`); got != 0 {
+		t.Fatalf("write_ledger rows after a failed batch = %d, want 0", got)
+	}
+}

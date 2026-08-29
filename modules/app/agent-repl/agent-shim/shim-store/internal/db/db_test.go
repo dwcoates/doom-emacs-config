@@ -156,6 +156,19 @@ func prose() *conversationv1.AgentResponse {
 	return &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Start{Start: &conversationv1.AgentResponseStart{}}}
 }
 
+// proseSaying is a SETTLED response whose markdown is the row's content, so a
+// test can tell one write of a unit from a later write of the same unit.
+func proseSaying(markdown string) *conversationv1.AgentResponse {
+	return &conversationv1.AgentResponse{
+		Result: &conversationv1.AgentResponse_Success{
+			Success: &conversationv1.AgentResponseSuccess{
+				Prose:      &conversationv1.AgentResponseProse{Markdown: markdown},
+				Authorship: &conversationv1.AgentResponseSuccess_FromModel{FromModel: &conversationv1.AgentResponseFromModel{}},
+			},
+		},
+	}
+}
+
 func successFrame(agentID string) *conversationv1.AgentFrame {
 	return &conversationv1.AgentFrame{
 		AgentId: &conversationv1.AgentId{Value: agentID},
