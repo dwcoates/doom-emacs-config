@@ -618,6 +618,20 @@ verbs (+ worktree slimming, doctor, deleting merge-handlers.el and
 workspace-create-client.el). Seams between the three are exactly the §6–§12
 names; each brief owns every file listed for its constituent rows.
 
+## 15b. Remediation queue (teamlead loop; dispatched as slots free)
+
+- R-ACCEPT (from the standing-stream rule): `agent-repl-connect-stream`
+  gains an optional ON-OPEN callback, invoked exactly once when the header
+  reader parses an HTTP 200 status for the stream (before any frame); a
+  non-200 or a transport death before headers never calls it. daemon-link.el
+  keys `agent-repl-link-up-functions` (first connect AND reconnect) and the
+  successor's readiness on ON-OPEN instead of on spawn; host.el and roster.el
+  log `elisp.host.subscribed` / `elisp.roster.subscribed` on ON-OPEN. Tests:
+  connect (on-open once, not on non-200, not on death-before-headers),
+  daemon-link (link-up only after acceptance; reconnect likewise), and the
+  integration link suite's "WatchDaemon with no pushes yields link-up" case
+  keeps passing.
+
 ## 16. Escalations sent to the project lead (defaults in force meanwhile)
 
 - E1 RESOLVED: SubmitPromptRequest.origin landed, REQUIRED.
