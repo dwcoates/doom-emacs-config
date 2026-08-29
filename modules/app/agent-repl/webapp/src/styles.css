@@ -4705,3 +4705,13 @@ body.ungated #mode-select {
 .footer-token-verdict.arm-complete { color: var(--muted); }
 .footer-token-verdict.arm-incomplete,
 .footer-token-verdict.arm-invalid { color: var(--err); }
+
+/* ---- tool card input forms (src/feed/cards/tool-call.ts) ---- */
+/* The daemon names the drawn form of the card's one input line and the client
+   applies the treatment that shape of line has always worn: the shell command
+   keeps `.cmd.bash-input`, a path keeps the muted `.file-path`, and an unstated
+   form is the plain `.tool-input`. Those three rules already exist and are
+   reused untouched; only the query needs a treatment of its own — the accent
+   monospace line WITHOUT the shell chrome, held back a touch so a search
+   pattern does not read as a command that ran. */
+.tool-query { opacity: 0.9; }
