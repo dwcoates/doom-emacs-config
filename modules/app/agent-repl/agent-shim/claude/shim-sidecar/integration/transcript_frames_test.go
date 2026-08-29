@@ -12,10 +12,22 @@ import (
 // is COPIED into a vendor-shaped tree and grown line by line, so the sidecar
 // reads a file that is being written rather than one that already exists whole.
 
-// The four units the captured transcript's two API responses produce. Each
-// assistant block is its OWN unit (agent_activity.proto: "An assistant message
-// arrives as SEVERAL block units"), and a tool call's unit is identified by the
-// vendor's tool_use_id while a thinking block's is <message.id>:<block index>.
+// The four units the captured transcript's two API responses produce.
+//
+// Each assistant block is its OWN unit (agent_activity.proto: "An assistant
+// message arrives as SEVERAL block units"). A tool call's unit is identified by
+// the vendor's tool_use_id; every other block's is <message.id>:<block ordinal>.
+//
+// THE ORDINAL IS THE BLOCK'S POSITION WITHIN THE API MESSAGE, counted in FILE
+// ORDER across every transcript line sharing one `message.id`, and reset when
+// the id changes. The vendor writes one block per line, so a message split over
+// three lines yields ordinals 0, 1, 2 — and a tool_use block CONSUMES an
+// ordinal even though it is identified by its tool_use_id instead. `usage` and
+// `effort` ride ordinal 0 alone.
+//
+// Both captured messages are thinking-then-tool_use, so their thinking units
+// are ordinal 0; TestBlockOrdinalsCountAcrossTheLinesOfOneMessage covers a
+// non-zero ordinal.
 const (
 	capturedResponse1  = "msg_011CdwKJSPRurr1J5dkq3UTJ"
 	capturedResponse2  = "msg_011CdwKKaU8iPheLaxxxiqX2"
@@ -519,6 +531,211 @@ func TestAPageLineReachesAWatcherAsItIsWritten(t *testing.T) {
 			}
 		case <-ctx.Done():
 			t.Fatalf("%q never reached the watcher within the deadline", capturedBashCall2)
+		}
+	}
+}
+
+// TestBlockOrdinalsCountAcrossTheLinesOfOneMessage asserts the ordinal is the
+// block's position within the API MESSAGE, not within the transcript line: a
+// message written over three lines yields ordinals 0, 1 and 2, and the tool_use
+// block consumes one without being named by it.
+func TestBlockOrdinalsCountAcrossTheLinesOfOneMessage(t *testing.T) {
+	// Arrange: one API message split over three real fixture lines —
+	// thinking (ordinal 0), prose (ordinal 1), a tool call (ordinal 2).
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	captured := loadCapturedSession(t)
+	cwd := "/Users/dodgecoates/block-ordinal-probe"
+	slug := cwdSlug(cwd)
+	session := "0a0a0a0a-0a0a-40a0-80a0-0a0a0a0a0a0a"
+	message := capturedResponse1
+
+	thinking := retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)
+	prose := setMessageID(t,
+		retargetSession(t, decodeRecord(t, corpusLine(t, "content-blocks/text.jsonl", 0)), session, cwd),
+		message)
+	call := retargetSession(t, decodeRecord(t, captured.Lines[8]), session, cwd)
+
+	// Act.
+	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	g := newGrowingFile(t, tree.sessionPath(slug, session))
+	g.AppendLine(encodeRecord(t, thinking))
+	g.AppendLine(encodeRecord(t, prose))
+	g.AppendLine(encodeRecord(t, call))
+	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
+
+	// Assert.
+	held := map[string]bool{}
+	for _, line := range linesForBook(fake.Entries(), session) {
+		if a := activityOf(line); a != nil {
+			held[a.GetActivityId().GetValue()] = true
+		}
+	}
+	for _, want := range []string{message + ":0", message + ":1", capturedBashCall1} {
+		if !held[want] {
+			t.Errorf("unit %q is missing; the book holds %v", want, sortedStrings(keysOf(held)))
+		}
+	}
+	if held[message+":2"] {
+		t.Errorf("the tool_use block consumed ordinal 2 but must be identified by its tool_use_id, not %q", message+":2")
+	}
+}
+
+// TestUsageRidesOrdinalZeroOfAMultiLineMessage asserts the carrier is the
+// message's FIRST block, wherever the vendor split the message.
+func TestUsageRidesOrdinalZeroOfAMultiLineMessage(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	captured := loadCapturedSession(t)
+	cwd := "/Users/dodgecoates/ordinal-usage-probe"
+	slug := cwdSlug(cwd)
+	session := "0b0b0b0b-0b0b-40b0-80b0-0b0b0b0b0b0b"
+	message := capturedResponse1
+
+	thinking := retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)
+	prose := setMessageID(t,
+		retargetSession(t, decodeRecord(t, corpusLine(t, "content-blocks/text.jsonl", 0)), session, cwd),
+		message)
+	call := retargetSession(t, decodeRecord(t, captured.Lines[8]), session, cwd)
+
+	// Act.
+	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	g := newGrowingFile(t, tree.sessionPath(slug, session))
+	g.AppendLine(encodeRecord(t, thinking))
+	g.AppendLine(encodeRecord(t, prose))
+	g.AppendLine(encodeRecord(t, call))
+	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
+
+	// Assert: exactly one unit of the message carries usage, and it is ordinal 0.
+	var carriers []string
+	for _, line := range linesForBook(fake.Entries(), session) {
+		a := activityOf(line)
+		if a != nil && a.GetUsage() != nil {
+			carriers = append(carriers, a.GetActivityId().GetValue())
+		}
+	}
+	if len(carriers) != 1 {
+		t.Fatalf("one API message yields ONE usage carrier; %d units carried it: %v", len(carriers), sortedStrings(carriers))
+	}
+	if carriers[0] != message+":0" {
+		t.Errorf("usage rode unit %q, wanted the message's first block %q", carriers[0], message+":0")
+	}
+}
+
+// TestNoTwoUnitsOfOneMessageShareAnActivityId asserts the ordinal actually
+// discriminates: every block of one API message is a distinct unit.
+func TestNoTwoUnitsOfOneMessageShareAnActivityId(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	captured := loadCapturedSession(t)
+	cwd := "/Users/dodgecoates/ordinal-distinct-probe"
+	slug := cwdSlug(cwd)
+	session := "0c0c0c0c-0c0c-40c0-80c0-0c0c0c0c0c0c"
+	message := capturedResponse1
+
+	thinking := retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)
+	proseA := setMessageID(t,
+		retargetSession(t, decodeRecord(t, corpusLine(t, "content-blocks/text.jsonl", 0)), session, cwd),
+		message)
+	proseB := setMessageID(t,
+		retargetSession(t, decodeRecord(t, corpusLine(t, "content-blocks/text.jsonl", 0)), session, cwd),
+		message)
+
+	// Act: two prose blocks of ONE message would collide under any per-line rule.
+	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	g := newGrowingFile(t, tree.sessionPath(slug, session))
+	g.AppendLine(encodeRecord(t, thinking))
+	g.AppendLine(encodeRecord(t, proseA))
+	g.AppendLine(encodeRecord(t, proseB))
+	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
+
+	// Assert.
+	counts := map[string]int{}
+	for _, line := range linesForBook(fake.Entries(), session) {
+		if a := activityOf(line); a != nil {
+			counts[a.GetActivityId().GetValue()]++
+		}
+	}
+	for id, n := range counts {
+		if n != 1 {
+			t.Errorf("unit %q appears %d times; two blocks of one message collided onto one identity", id, n)
+		}
+	}
+	for _, want := range []string{message + ":1", message + ":2"} {
+		if counts[want] == 0 {
+			t.Errorf("unit %q is missing; the ordinal must keep counting across the message's lines. Book: %v",
+				want, sortedStrings(keysOf(toSet(counts))))
+		}
+	}
+}
+
+// TestOrdinalsResetWhenTheMessageIdChanges asserts the ordinal is scoped to one
+// API message: the next message starts again at zero.
+func TestOrdinalsResetWhenTheMessageIdChanges(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	captured := loadCapturedSession(t)
+	cwd := "/Users/dodgecoates/ordinal-reset-probe"
+	slug := cwdSlug(cwd)
+	session := "0d0d0d0d-0d0d-40d0-80d0-0d0d0d0d0d0d"
+
+	// Act: the captured file's two messages, each thinking-then-tool_use.
+	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	g := newGrowingFile(t, tree.sessionPath(slug, session))
+	for _, i := range []int{7, 8, 12, 13} {
+		g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[i]), session, cwd)))
+	}
+	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
+
+	// Assert: the SECOND message's thinking block is ordinal 0, not 2.
+	held := map[string]bool{}
+	for _, line := range linesForBook(fake.Entries(), session) {
+		if a := activityOf(line); a != nil {
+			held[a.GetActivityId().GetValue()] = true
+		}
+	}
+	if !held[capturedThinking2] {
+		t.Errorf("unit %q is missing; the ordinal must reset at a new message id. Book: %v",
+			capturedThinking2, sortedStrings(keysOf(held)))
+	}
+	if held[capturedResponse2+":2"] {
+		t.Errorf("the ordinal carried over from the previous message into %q", capturedResponse2+":2")
+	}
+}
+
+// TestUnmodeledAttachmentsAreWithheldAsVendorSpecific asserts the ruled
+// disposition of a parsed-but-unmodeled attachment: vendor_specific with kind
+// "attachment/<type>", never the `unknown` arm.
+func TestUnmodeledAttachmentsAreWithheldAsVendorSpecific(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	captured := loadCapturedSession(t)
+
+	// Act.
+	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	g := writeCapturedTranscript(t, tree, captured)
+	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
+
+	// Assert: the capture carries a deferred_tools_delta and an
+	// agent_listing_delta, neither of which this contract models.
+	kinds := vendorSpecificKinds(fake.Entries())
+	for _, want := range []string{"attachment/deferred_tools_delta", "attachment/agent_listing_delta"} {
+		if !containsString(kinds, want) {
+			t.Errorf("unmodeled attachment kind %q was not withheld; withheld kinds were %v", want, kinds)
 		}
 	}
 }
