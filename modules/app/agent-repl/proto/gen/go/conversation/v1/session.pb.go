@@ -3234,16 +3234,49 @@ func (x *SessionLive) GetLiveWork() []*DetachedWorkId {
 // states it (the get_context_usage verb — the one stable, typed source;
 // never derived from usage frames). Pulled by the daemon; the topbar's
 // context chip and the /context panel both resolve from THIS one fact.
+// The vendor's FULL get_context_usage answer, typed field for field (the
+// fidelity principle; verified against the SDK's declared response type).
+// The one deliberate omission is the vendor's gridRows — pure presentation
+// data (pre-rendered grid squares) the resolvers compose for themselves.
 type SessionContextUsage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Tokens currently in context — the topbar chip's number. Shrinks on a
 	// compaction or clear; can never exceed max_tokens.
 	TotalTokens int64 `protobuf:"varint,1,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
-	// The model's context window — the bound.
+	// The usable context window — the bound the percentage is against.
 	MaxTokens int64 `protobuf:"varint,2,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
-	// The vendor's category breakdown, in served order — the /context
-	// panel's rows.
-	Categories    []*SessionContextCategory `protobuf:"bytes,3,rep,name=categories,proto3" json:"categories,omitempty"`
+	// The model's raw window before any usable-window adjustment.
+	RawMaxTokens int64 `protobuf:"varint,4,opt,name=raw_max_tokens,json=rawMaxTokens,proto3" json:"raw_max_tokens,omitempty"`
+	// The vendor's own percent-used figure, verbatim (never re-derived).
+	Percentage int64 `protobuf:"varint,5,opt,name=percentage,proto3" json:"percentage,omitempty"`
+	// The model the window belongs to, the vendor's spelling.
+	Model string `protobuf:"bytes,6,opt,name=model,proto3" json:"model,omitempty"`
+	// The vendor's category breakdown, in served order.
+	Categories []*SessionContextCategory `protobuf:"bytes,3,rep,name=categories,proto3" json:"categories,omitempty"`
+	// Memory files loaded into context (CLAUDE.md and friends).
+	MemoryFiles []*SessionContextMemoryFile `protobuf:"bytes,7,rep,name=memory_files,json=memoryFiles,proto3" json:"memory_files,omitempty"`
+	// MCP tools in context, per tool.
+	McpTools []*SessionContextMcpTool `protobuf:"bytes,8,rep,name=mcp_tools,json=mcpTools,proto3" json:"mcp_tools,omitempty"`
+	// Deferred built-in tools (schema loaded on demand).
+	DeferredBuiltinTools []*SessionContextDeferredBuiltinTool `protobuf:"bytes,9,rep,name=deferred_builtin_tools,json=deferredBuiltinTools,proto3" json:"deferred_builtin_tools,omitempty"`
+	// Built-in system tools in context.
+	SystemTools []*SessionContextSystemTool `protobuf:"bytes,10,rep,name=system_tools,json=systemTools,proto3" json:"system_tools,omitempty"`
+	// The system prompt, by section.
+	SystemPromptSections []*SessionContextSystemPromptSection `protobuf:"bytes,11,rep,name=system_prompt_sections,json=systemPromptSections,proto3" json:"system_prompt_sections,omitempty"`
+	// Available subagents loaded into context.
+	Agents []*SessionContextAgent `protobuf:"bytes,12,rep,name=agents,proto3" json:"agents,omitempty"`
+	// The slash-command roll-up. UNSET when the vendor omitted it.
+	SlashCommands *SessionContextSlashCommands `protobuf:"bytes,13,opt,name=slash_commands,json=slashCommands,proto3,oneof" json:"slash_commands,omitempty"`
+	// The skills roll-up. UNSET when the vendor omitted it.
+	Skills *SessionContextSkills `protobuf:"bytes,14,opt,name=skills,proto3,oneof" json:"skills,omitempty"`
+	// The auto-compact trigger threshold. UNSET when the vendor omitted it.
+	AutoCompactThreshold *int64 `protobuf:"varint,15,opt,name=auto_compact_threshold,json=autoCompactThreshold,proto3,oneof" json:"auto_compact_threshold,omitempty"`
+	// Whether vendor auto-compaction is enabled.
+	IsAutoCompactEnabled bool `protobuf:"varint,16,opt,name=is_auto_compact_enabled,json=isAutoCompactEnabled,proto3" json:"is_auto_compact_enabled,omitempty"`
+	// The message-plane breakdown. UNSET when the vendor omitted it.
+	MessageBreakdown *SessionContextMessageBreakdown `protobuf:"bytes,17,opt,name=message_breakdown,json=messageBreakdown,proto3,oneof" json:"message_breakdown,omitempty"`
+	// The API-side usage figures. UNSET when the vendor answered null.
+	ApiUsage      *SessionContextApiUsage `protobuf:"bytes,18,opt,name=api_usage,json=apiUsage,proto3,oneof" json:"api_usage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3292,9 +3325,114 @@ func (x *SessionContextUsage) GetMaxTokens() int64 {
 	return 0
 }
 
+func (x *SessionContextUsage) GetRawMaxTokens() int64 {
+	if x != nil {
+		return x.RawMaxTokens
+	}
+	return 0
+}
+
+func (x *SessionContextUsage) GetPercentage() int64 {
+	if x != nil {
+		return x.Percentage
+	}
+	return 0
+}
+
+func (x *SessionContextUsage) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
 func (x *SessionContextUsage) GetCategories() []*SessionContextCategory {
 	if x != nil {
 		return x.Categories
+	}
+	return nil
+}
+
+func (x *SessionContextUsage) GetMemoryFiles() []*SessionContextMemoryFile {
+	if x != nil {
+		return x.MemoryFiles
+	}
+	return nil
+}
+
+func (x *SessionContextUsage) GetMcpTools() []*SessionContextMcpTool {
+	if x != nil {
+		return x.McpTools
+	}
+	return nil
+}
+
+func (x *SessionContextUsage) GetDeferredBuiltinTools() []*SessionContextDeferredBuiltinTool {
+	if x != nil {
+		return x.DeferredBuiltinTools
+	}
+	return nil
+}
+
+func (x *SessionContextUsage) GetSystemTools() []*SessionContextSystemTool {
+	if x != nil {
+		return x.SystemTools
+	}
+	return nil
+}
+
+func (x *SessionContextUsage) GetSystemPromptSections() []*SessionContextSystemPromptSection {
+	if x != nil {
+		return x.SystemPromptSections
+	}
+	return nil
+}
+
+func (x *SessionContextUsage) GetAgents() []*SessionContextAgent {
+	if x != nil {
+		return x.Agents
+	}
+	return nil
+}
+
+func (x *SessionContextUsage) GetSlashCommands() *SessionContextSlashCommands {
+	if x != nil {
+		return x.SlashCommands
+	}
+	return nil
+}
+
+func (x *SessionContextUsage) GetSkills() *SessionContextSkills {
+	if x != nil {
+		return x.Skills
+	}
+	return nil
+}
+
+func (x *SessionContextUsage) GetAutoCompactThreshold() int64 {
+	if x != nil && x.AutoCompactThreshold != nil {
+		return *x.AutoCompactThreshold
+	}
+	return 0
+}
+
+func (x *SessionContextUsage) GetIsAutoCompactEnabled() bool {
+	if x != nil {
+		return x.IsAutoCompactEnabled
+	}
+	return false
+}
+
+func (x *SessionContextUsage) GetMessageBreakdown() *SessionContextMessageBreakdown {
+	if x != nil {
+		return x.MessageBreakdown
+	}
+	return nil
+}
+
+func (x *SessionContextUsage) GetApiUsage() *SessionContextApiUsage {
+	if x != nil {
+		return x.ApiUsage
 	}
 	return nil
 }
@@ -3305,7 +3443,12 @@ type SessionContextCategory struct {
 	// The vendor's category label, verbatim.
 	Label string `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
 	// The category's token count.
-	Tokens        int64 `protobuf:"varint,2,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	Tokens int64 `protobuf:"varint,2,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	// The vendor's display color for the category, verbatim.
+	Color string `protobuf:"bytes,3,opt,name=color,proto3" json:"color,omitempty"`
+	// Whether the category is deferred (loaded on demand). UNSET when the
+	// vendor omitted the flag.
+	IsDeferred    *bool `protobuf:"varint,4,opt,name=is_deferred,json=isDeferred,proto3,oneof" json:"is_deferred,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3350,6 +3493,872 @@ func (x *SessionContextCategory) GetLabel() string {
 func (x *SessionContextCategory) GetTokens() int64 {
 	if x != nil {
 		return x.Tokens
+	}
+	return 0
+}
+
+func (x *SessionContextCategory) GetColor() string {
+	if x != nil {
+		return x.Color
+	}
+	return ""
+}
+
+func (x *SessionContextCategory) GetIsDeferred() bool {
+	if x != nil && x.IsDeferred != nil {
+		return *x.IsDeferred
+	}
+	return false
+}
+
+// One memory file in context.
+type SessionContextMemoryFile struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The file's path, the vendor's spelling.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// The vendor's memory-file type label, verbatim.
+	Type          string `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	Tokens        int64  `protobuf:"varint,3,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionContextMemoryFile) Reset() {
+	*x = SessionContextMemoryFile{}
+	mi := &file_conversation_v1_session_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextMemoryFile) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextMemoryFile) ProtoMessage() {}
+
+func (x *SessionContextMemoryFile) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextMemoryFile.ProtoReflect.Descriptor instead.
+func (*SessionContextMemoryFile) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *SessionContextMemoryFile) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *SessionContextMemoryFile) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *SessionContextMemoryFile) GetTokens() int64 {
+	if x != nil {
+		return x.Tokens
+	}
+	return 0
+}
+
+// One MCP tool in context.
+type SessionContextMcpTool struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// The owning MCP server's name.
+	ServerName string `protobuf:"bytes,2,opt,name=server_name,json=serverName,proto3" json:"server_name,omitempty"`
+	Tokens     int64  `protobuf:"varint,3,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	// Whether the tool's schema is currently loaded. UNSET when the vendor
+	// omitted the flag.
+	IsLoaded      *bool `protobuf:"varint,4,opt,name=is_loaded,json=isLoaded,proto3,oneof" json:"is_loaded,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionContextMcpTool) Reset() {
+	*x = SessionContextMcpTool{}
+	mi := &file_conversation_v1_session_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextMcpTool) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextMcpTool) ProtoMessage() {}
+
+func (x *SessionContextMcpTool) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextMcpTool.ProtoReflect.Descriptor instead.
+func (*SessionContextMcpTool) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *SessionContextMcpTool) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SessionContextMcpTool) GetServerName() string {
+	if x != nil {
+		return x.ServerName
+	}
+	return ""
+}
+
+func (x *SessionContextMcpTool) GetTokens() int64 {
+	if x != nil {
+		return x.Tokens
+	}
+	return 0
+}
+
+func (x *SessionContextMcpTool) GetIsLoaded() bool {
+	if x != nil && x.IsLoaded != nil {
+		return *x.IsLoaded
+	}
+	return false
+}
+
+// One deferred built-in tool.
+type SessionContextDeferredBuiltinTool struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Tokens        int64                  `protobuf:"varint,2,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	IsLoaded      bool                   `protobuf:"varint,3,opt,name=is_loaded,json=isLoaded,proto3" json:"is_loaded,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionContextDeferredBuiltinTool) Reset() {
+	*x = SessionContextDeferredBuiltinTool{}
+	mi := &file_conversation_v1_session_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextDeferredBuiltinTool) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextDeferredBuiltinTool) ProtoMessage() {}
+
+func (x *SessionContextDeferredBuiltinTool) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextDeferredBuiltinTool.ProtoReflect.Descriptor instead.
+func (*SessionContextDeferredBuiltinTool) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *SessionContextDeferredBuiltinTool) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SessionContextDeferredBuiltinTool) GetTokens() int64 {
+	if x != nil {
+		return x.Tokens
+	}
+	return 0
+}
+
+func (x *SessionContextDeferredBuiltinTool) GetIsLoaded() bool {
+	if x != nil {
+		return x.IsLoaded
+	}
+	return false
+}
+
+// One built-in system tool.
+type SessionContextSystemTool struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Tokens        int64                  `protobuf:"varint,2,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionContextSystemTool) Reset() {
+	*x = SessionContextSystemTool{}
+	mi := &file_conversation_v1_session_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextSystemTool) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextSystemTool) ProtoMessage() {}
+
+func (x *SessionContextSystemTool) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextSystemTool.ProtoReflect.Descriptor instead.
+func (*SessionContextSystemTool) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *SessionContextSystemTool) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SessionContextSystemTool) GetTokens() int64 {
+	if x != nil {
+		return x.Tokens
+	}
+	return 0
+}
+
+// One system-prompt section.
+type SessionContextSystemPromptSection struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Tokens        int64                  `protobuf:"varint,2,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionContextSystemPromptSection) Reset() {
+	*x = SessionContextSystemPromptSection{}
+	mi := &file_conversation_v1_session_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextSystemPromptSection) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextSystemPromptSection) ProtoMessage() {}
+
+func (x *SessionContextSystemPromptSection) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextSystemPromptSection.ProtoReflect.Descriptor instead.
+func (*SessionContextSystemPromptSection) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *SessionContextSystemPromptSection) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SessionContextSystemPromptSection) GetTokens() int64 {
+	if x != nil {
+		return x.Tokens
+	}
+	return 0
+}
+
+// One available subagent in context.
+type SessionContextAgent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The agent type name.
+	AgentType string `protobuf:"bytes,1,opt,name=agent_type,json=agentType,proto3" json:"agent_type,omitempty"`
+	// Where the agent definition came from, the vendor's spelling.
+	Source        string `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	Tokens        int64  `protobuf:"varint,3,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionContextAgent) Reset() {
+	*x = SessionContextAgent{}
+	mi := &file_conversation_v1_session_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextAgent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextAgent) ProtoMessage() {}
+
+func (x *SessionContextAgent) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextAgent.ProtoReflect.Descriptor instead.
+func (*SessionContextAgent) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *SessionContextAgent) GetAgentType() string {
+	if x != nil {
+		return x.AgentType
+	}
+	return ""
+}
+
+func (x *SessionContextAgent) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *SessionContextAgent) GetTokens() int64 {
+	if x != nil {
+		return x.Tokens
+	}
+	return 0
+}
+
+// The slash-command roll-up.
+type SessionContextSlashCommands struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	TotalCommands    int64                  `protobuf:"varint,1,opt,name=total_commands,json=totalCommands,proto3" json:"total_commands,omitempty"`
+	IncludedCommands int64                  `protobuf:"varint,2,opt,name=included_commands,json=includedCommands,proto3" json:"included_commands,omitempty"`
+	Tokens           int64                  `protobuf:"varint,3,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *SessionContextSlashCommands) Reset() {
+	*x = SessionContextSlashCommands{}
+	mi := &file_conversation_v1_session_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextSlashCommands) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextSlashCommands) ProtoMessage() {}
+
+func (x *SessionContextSlashCommands) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextSlashCommands.ProtoReflect.Descriptor instead.
+func (*SessionContextSlashCommands) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *SessionContextSlashCommands) GetTotalCommands() int64 {
+	if x != nil {
+		return x.TotalCommands
+	}
+	return 0
+}
+
+func (x *SessionContextSlashCommands) GetIncludedCommands() int64 {
+	if x != nil {
+		return x.IncludedCommands
+	}
+	return 0
+}
+
+func (x *SessionContextSlashCommands) GetTokens() int64 {
+	if x != nil {
+		return x.Tokens
+	}
+	return 0
+}
+
+// The skills roll-up, with per-skill frontmatter figures.
+type SessionContextSkills struct {
+	state            protoimpl.MessageState            `protogen:"open.v1"`
+	TotalSkills      int64                             `protobuf:"varint,1,opt,name=total_skills,json=totalSkills,proto3" json:"total_skills,omitempty"`
+	IncludedSkills   int64                             `protobuf:"varint,2,opt,name=included_skills,json=includedSkills,proto3" json:"included_skills,omitempty"`
+	Tokens           int64                             `protobuf:"varint,3,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	SkillFrontmatter []*SessionContextSkillFrontmatter `protobuf:"bytes,4,rep,name=skill_frontmatter,json=skillFrontmatter,proto3" json:"skill_frontmatter,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *SessionContextSkills) Reset() {
+	*x = SessionContextSkills{}
+	mi := &file_conversation_v1_session_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextSkills) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextSkills) ProtoMessage() {}
+
+func (x *SessionContextSkills) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextSkills.ProtoReflect.Descriptor instead.
+func (*SessionContextSkills) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *SessionContextSkills) GetTotalSkills() int64 {
+	if x != nil {
+		return x.TotalSkills
+	}
+	return 0
+}
+
+func (x *SessionContextSkills) GetIncludedSkills() int64 {
+	if x != nil {
+		return x.IncludedSkills
+	}
+	return 0
+}
+
+func (x *SessionContextSkills) GetTokens() int64 {
+	if x != nil {
+		return x.Tokens
+	}
+	return 0
+}
+
+func (x *SessionContextSkills) GetSkillFrontmatter() []*SessionContextSkillFrontmatter {
+	if x != nil {
+		return x.SkillFrontmatter
+	}
+	return nil
+}
+
+// One skill's loaded frontmatter.
+type SessionContextSkillFrontmatter struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Where the skill came from, the vendor's spelling.
+	Source        string `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	Tokens        int64  `protobuf:"varint,3,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionContextSkillFrontmatter) Reset() {
+	*x = SessionContextSkillFrontmatter{}
+	mi := &file_conversation_v1_session_proto_msgTypes[58]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextSkillFrontmatter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextSkillFrontmatter) ProtoMessage() {}
+
+func (x *SessionContextSkillFrontmatter) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[58]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextSkillFrontmatter.ProtoReflect.Descriptor instead.
+func (*SessionContextSkillFrontmatter) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{58}
+}
+
+func (x *SessionContextSkillFrontmatter) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SessionContextSkillFrontmatter) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *SessionContextSkillFrontmatter) GetTokens() int64 {
+	if x != nil {
+		return x.Tokens
+	}
+	return 0
+}
+
+// The message-plane breakdown — where the conversation's tokens went.
+type SessionContextMessageBreakdown struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	ToolCallTokens          int64                  `protobuf:"varint,1,opt,name=tool_call_tokens,json=toolCallTokens,proto3" json:"tool_call_tokens,omitempty"`
+	ToolResultTokens        int64                  `protobuf:"varint,2,opt,name=tool_result_tokens,json=toolResultTokens,proto3" json:"tool_result_tokens,omitempty"`
+	AttachmentTokens        int64                  `protobuf:"varint,3,opt,name=attachment_tokens,json=attachmentTokens,proto3" json:"attachment_tokens,omitempty"`
+	AssistantMessageTokens  int64                  `protobuf:"varint,4,opt,name=assistant_message_tokens,json=assistantMessageTokens,proto3" json:"assistant_message_tokens,omitempty"`
+	UserMessageTokens       int64                  `protobuf:"varint,5,opt,name=user_message_tokens,json=userMessageTokens,proto3" json:"user_message_tokens,omitempty"`
+	RedirectedContextTokens int64                  `protobuf:"varint,6,opt,name=redirected_context_tokens,json=redirectedContextTokens,proto3" json:"redirected_context_tokens,omitempty"`
+	UnattributedTokens      int64                  `protobuf:"varint,7,opt,name=unattributed_tokens,json=unattributedTokens,proto3" json:"unattributed_tokens,omitempty"`
+	// Per-tool call/result figures — the ENCAPSULATED tool-call list the
+	// /context panel folds.
+	ToolCallsByType []*SessionContextToolCallsByType `protobuf:"bytes,8,rep,name=tool_calls_by_type,json=toolCallsByType,proto3" json:"tool_calls_by_type,omitempty"`
+	// Per-attachment-type figures.
+	AttachmentsByType []*SessionContextAttachmentsByType `protobuf:"bytes,9,rep,name=attachments_by_type,json=attachmentsByType,proto3" json:"attachments_by_type,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *SessionContextMessageBreakdown) Reset() {
+	*x = SessionContextMessageBreakdown{}
+	mi := &file_conversation_v1_session_proto_msgTypes[59]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextMessageBreakdown) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextMessageBreakdown) ProtoMessage() {}
+
+func (x *SessionContextMessageBreakdown) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[59]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextMessageBreakdown.ProtoReflect.Descriptor instead.
+func (*SessionContextMessageBreakdown) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{59}
+}
+
+func (x *SessionContextMessageBreakdown) GetToolCallTokens() int64 {
+	if x != nil {
+		return x.ToolCallTokens
+	}
+	return 0
+}
+
+func (x *SessionContextMessageBreakdown) GetToolResultTokens() int64 {
+	if x != nil {
+		return x.ToolResultTokens
+	}
+	return 0
+}
+
+func (x *SessionContextMessageBreakdown) GetAttachmentTokens() int64 {
+	if x != nil {
+		return x.AttachmentTokens
+	}
+	return 0
+}
+
+func (x *SessionContextMessageBreakdown) GetAssistantMessageTokens() int64 {
+	if x != nil {
+		return x.AssistantMessageTokens
+	}
+	return 0
+}
+
+func (x *SessionContextMessageBreakdown) GetUserMessageTokens() int64 {
+	if x != nil {
+		return x.UserMessageTokens
+	}
+	return 0
+}
+
+func (x *SessionContextMessageBreakdown) GetRedirectedContextTokens() int64 {
+	if x != nil {
+		return x.RedirectedContextTokens
+	}
+	return 0
+}
+
+func (x *SessionContextMessageBreakdown) GetUnattributedTokens() int64 {
+	if x != nil {
+		return x.UnattributedTokens
+	}
+	return 0
+}
+
+func (x *SessionContextMessageBreakdown) GetToolCallsByType() []*SessionContextToolCallsByType {
+	if x != nil {
+		return x.ToolCallsByType
+	}
+	return nil
+}
+
+func (x *SessionContextMessageBreakdown) GetAttachmentsByType() []*SessionContextAttachmentsByType {
+	if x != nil {
+		return x.AttachmentsByType
+	}
+	return nil
+}
+
+// One tool's call/result token split.
+type SessionContextToolCallsByType struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	CallTokens    int64                  `protobuf:"varint,2,opt,name=call_tokens,json=callTokens,proto3" json:"call_tokens,omitempty"`
+	ResultTokens  int64                  `protobuf:"varint,3,opt,name=result_tokens,json=resultTokens,proto3" json:"result_tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionContextToolCallsByType) Reset() {
+	*x = SessionContextToolCallsByType{}
+	mi := &file_conversation_v1_session_proto_msgTypes[60]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextToolCallsByType) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextToolCallsByType) ProtoMessage() {}
+
+func (x *SessionContextToolCallsByType) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[60]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextToolCallsByType.ProtoReflect.Descriptor instead.
+func (*SessionContextToolCallsByType) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{60}
+}
+
+func (x *SessionContextToolCallsByType) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SessionContextToolCallsByType) GetCallTokens() int64 {
+	if x != nil {
+		return x.CallTokens
+	}
+	return 0
+}
+
+func (x *SessionContextToolCallsByType) GetResultTokens() int64 {
+	if x != nil {
+		return x.ResultTokens
+	}
+	return 0
+}
+
+// One attachment type's tokens.
+type SessionContextAttachmentsByType struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Tokens        int64                  `protobuf:"varint,2,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionContextAttachmentsByType) Reset() {
+	*x = SessionContextAttachmentsByType{}
+	mi := &file_conversation_v1_session_proto_msgTypes[61]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextAttachmentsByType) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextAttachmentsByType) ProtoMessage() {}
+
+func (x *SessionContextAttachmentsByType) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[61]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextAttachmentsByType.ProtoReflect.Descriptor instead.
+func (*SessionContextAttachmentsByType) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{61}
+}
+
+func (x *SessionContextAttachmentsByType) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SessionContextAttachmentsByType) GetTokens() int64 {
+	if x != nil {
+		return x.Tokens
+	}
+	return 0
+}
+
+// The API-side usage figures riding the vendor's answer.
+type SessionContextApiUsage struct {
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	InputTokens              int64                  `protobuf:"varint,1,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
+	OutputTokens             int64                  `protobuf:"varint,2,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	CacheCreationInputTokens int64                  `protobuf:"varint,3,opt,name=cache_creation_input_tokens,json=cacheCreationInputTokens,proto3" json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int64                  `protobuf:"varint,4,opt,name=cache_read_input_tokens,json=cacheReadInputTokens,proto3" json:"cache_read_input_tokens,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
+}
+
+func (x *SessionContextApiUsage) Reset() {
+	*x = SessionContextApiUsage{}
+	mi := &file_conversation_v1_session_proto_msgTypes[62]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionContextApiUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionContextApiUsage) ProtoMessage() {}
+
+func (x *SessionContextApiUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[62]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionContextApiUsage.ProtoReflect.Descriptor instead.
+func (*SessionContextApiUsage) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{62}
+}
+
+func (x *SessionContextApiUsage) GetInputTokens() int64 {
+	if x != nil {
+		return x.InputTokens
+	}
+	return 0
+}
+
+func (x *SessionContextApiUsage) GetOutputTokens() int64 {
+	if x != nil {
+		return x.OutputTokens
+	}
+	return 0
+}
+
+func (x *SessionContextApiUsage) GetCacheCreationInputTokens() int64 {
+	if x != nil {
+		return x.CacheCreationInputTokens
+	}
+	return 0
+}
+
+func (x *SessionContextApiUsage) GetCacheReadInputTokens() int64 {
+	if x != nil {
+		return x.CacheReadInputTokens
 	}
 	return 0
 }
@@ -3522,17 +4531,109 @@ const file_conversation_v1_session_proto_rawDesc = "" +
 	"\vSessionLive\x12B\n" +
 	"\x0eturn_in_flight\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdH\x00R\fturnInFlight\x88\x01\x01\x12<\n" +
 	"\tlive_work\x18\x02 \x03(\v2\x1f.conversation.v1.DetachedWorkIdR\bliveWorkB\x11\n" +
-	"\x0f_turn_in_flight\"\xa0\x01\n" +
+	"\x0f_turn_in_flight\"\x8a\n" +
+	"\n" +
 	"\x13SessionContextUsage\x12!\n" +
 	"\ftotal_tokens\x18\x01 \x01(\x03R\vtotalTokens\x12\x1d\n" +
 	"\n" +
-	"max_tokens\x18\x02 \x01(\x03R\tmaxTokens\x12G\n" +
+	"max_tokens\x18\x02 \x01(\x03R\tmaxTokens\x12$\n" +
+	"\x0eraw_max_tokens\x18\x04 \x01(\x03R\frawMaxTokens\x12\x1e\n" +
+	"\n" +
+	"percentage\x18\x05 \x01(\x03R\n" +
+	"percentage\x12\x14\n" +
+	"\x05model\x18\x06 \x01(\tR\x05model\x12G\n" +
 	"\n" +
 	"categories\x18\x03 \x03(\v2'.conversation.v1.SessionContextCategoryR\n" +
-	"categories\"F\n" +
+	"categories\x12L\n" +
+	"\fmemory_files\x18\a \x03(\v2).conversation.v1.SessionContextMemoryFileR\vmemoryFiles\x12C\n" +
+	"\tmcp_tools\x18\b \x03(\v2&.conversation.v1.SessionContextMcpToolR\bmcpTools\x12h\n" +
+	"\x16deferred_builtin_tools\x18\t \x03(\v22.conversation.v1.SessionContextDeferredBuiltinToolR\x14deferredBuiltinTools\x12L\n" +
+	"\fsystem_tools\x18\n" +
+	" \x03(\v2).conversation.v1.SessionContextSystemToolR\vsystemTools\x12h\n" +
+	"\x16system_prompt_sections\x18\v \x03(\v22.conversation.v1.SessionContextSystemPromptSectionR\x14systemPromptSections\x12<\n" +
+	"\x06agents\x18\f \x03(\v2$.conversation.v1.SessionContextAgentR\x06agents\x12X\n" +
+	"\x0eslash_commands\x18\r \x01(\v2,.conversation.v1.SessionContextSlashCommandsH\x00R\rslashCommands\x88\x01\x01\x12B\n" +
+	"\x06skills\x18\x0e \x01(\v2%.conversation.v1.SessionContextSkillsH\x01R\x06skills\x88\x01\x01\x129\n" +
+	"\x16auto_compact_threshold\x18\x0f \x01(\x03H\x02R\x14autoCompactThreshold\x88\x01\x01\x125\n" +
+	"\x17is_auto_compact_enabled\x18\x10 \x01(\bR\x14isAutoCompactEnabled\x12a\n" +
+	"\x11message_breakdown\x18\x11 \x01(\v2/.conversation.v1.SessionContextMessageBreakdownH\x03R\x10messageBreakdown\x88\x01\x01\x12I\n" +
+	"\tapi_usage\x18\x12 \x01(\v2'.conversation.v1.SessionContextApiUsageH\x04R\bapiUsage\x88\x01\x01B\x11\n" +
+	"\x0f_slash_commandsB\t\n" +
+	"\a_skillsB\x19\n" +
+	"\x17_auto_compact_thresholdB\x14\n" +
+	"\x12_message_breakdownB\f\n" +
+	"\n" +
+	"_api_usage\"\x92\x01\n" +
 	"\x16SessionContextCategory\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x16\n" +
-	"\x06tokens\x18\x02 \x01(\x03R\x06tokens*\xa3\x01\n" +
+	"\x06tokens\x18\x02 \x01(\x03R\x06tokens\x12\x14\n" +
+	"\x05color\x18\x03 \x01(\tR\x05color\x12$\n" +
+	"\vis_deferred\x18\x04 \x01(\bH\x00R\n" +
+	"isDeferred\x88\x01\x01B\x0e\n" +
+	"\f_is_deferred\"Z\n" +
+	"\x18SessionContextMemoryFile\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x16\n" +
+	"\x06tokens\x18\x03 \x01(\x03R\x06tokens\"\x94\x01\n" +
+	"\x15SessionContextMcpTool\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
+	"\vserver_name\x18\x02 \x01(\tR\n" +
+	"serverName\x12\x16\n" +
+	"\x06tokens\x18\x03 \x01(\x03R\x06tokens\x12 \n" +
+	"\tis_loaded\x18\x04 \x01(\bH\x00R\bisLoaded\x88\x01\x01B\f\n" +
+	"\n" +
+	"_is_loaded\"l\n" +
+	"!SessionContextDeferredBuiltinTool\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06tokens\x18\x02 \x01(\x03R\x06tokens\x12\x1b\n" +
+	"\tis_loaded\x18\x03 \x01(\bR\bisLoaded\"F\n" +
+	"\x18SessionContextSystemTool\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06tokens\x18\x02 \x01(\x03R\x06tokens\"O\n" +
+	"!SessionContextSystemPromptSection\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06tokens\x18\x02 \x01(\x03R\x06tokens\"d\n" +
+	"\x13SessionContextAgent\x12\x1d\n" +
+	"\n" +
+	"agent_type\x18\x01 \x01(\tR\tagentType\x12\x16\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x12\x16\n" +
+	"\x06tokens\x18\x03 \x01(\x03R\x06tokens\"\x89\x01\n" +
+	"\x1bSessionContextSlashCommands\x12%\n" +
+	"\x0etotal_commands\x18\x01 \x01(\x03R\rtotalCommands\x12+\n" +
+	"\x11included_commands\x18\x02 \x01(\x03R\x10includedCommands\x12\x16\n" +
+	"\x06tokens\x18\x03 \x01(\x03R\x06tokens\"\xd8\x01\n" +
+	"\x14SessionContextSkills\x12!\n" +
+	"\ftotal_skills\x18\x01 \x01(\x03R\vtotalSkills\x12'\n" +
+	"\x0fincluded_skills\x18\x02 \x01(\x03R\x0eincludedSkills\x12\x16\n" +
+	"\x06tokens\x18\x03 \x01(\x03R\x06tokens\x12\\\n" +
+	"\x11skill_frontmatter\x18\x04 \x03(\v2/.conversation.v1.SessionContextSkillFrontmatterR\x10skillFrontmatter\"d\n" +
+	"\x1eSessionContextSkillFrontmatter\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x12\x16\n" +
+	"\x06tokens\x18\x03 \x01(\x03R\x06tokens\"\xbb\x04\n" +
+	"\x1eSessionContextMessageBreakdown\x12(\n" +
+	"\x10tool_call_tokens\x18\x01 \x01(\x03R\x0etoolCallTokens\x12,\n" +
+	"\x12tool_result_tokens\x18\x02 \x01(\x03R\x10toolResultTokens\x12+\n" +
+	"\x11attachment_tokens\x18\x03 \x01(\x03R\x10attachmentTokens\x128\n" +
+	"\x18assistant_message_tokens\x18\x04 \x01(\x03R\x16assistantMessageTokens\x12.\n" +
+	"\x13user_message_tokens\x18\x05 \x01(\x03R\x11userMessageTokens\x12:\n" +
+	"\x19redirected_context_tokens\x18\x06 \x01(\x03R\x17redirectedContextTokens\x12/\n" +
+	"\x13unattributed_tokens\x18\a \x01(\x03R\x12unattributedTokens\x12[\n" +
+	"\x12tool_calls_by_type\x18\b \x03(\v2..conversation.v1.SessionContextToolCallsByTypeR\x0ftoolCallsByType\x12`\n" +
+	"\x13attachments_by_type\x18\t \x03(\v20.conversation.v1.SessionContextAttachmentsByTypeR\x11attachmentsByType\"y\n" +
+	"\x1dSessionContextToolCallsByType\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
+	"\vcall_tokens\x18\x02 \x01(\x03R\n" +
+	"callTokens\x12#\n" +
+	"\rresult_tokens\x18\x03 \x01(\x03R\fresultTokens\"M\n" +
+	"\x1fSessionContextAttachmentsByType\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06tokens\x18\x02 \x01(\x03R\x06tokens\"\xd6\x01\n" +
+	"\x16SessionContextApiUsage\x12!\n" +
+	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
+	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x12=\n" +
+	"\x1bcache_creation_input_tokens\x18\x03 \x01(\x03R\x18cacheCreationInputTokens\x125\n" +
+	"\x17cache_read_input_tokens\x18\x04 \x01(\x03R\x14cacheReadInputTokens*\xa3\x01\n" +
 	"\x13SessionCompactScope\x12%\n" +
 	"!SESSION_COMPACT_SCOPE_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19SESSION_COMPACT_SCOPE_ALL\x10\x01\x12!\n" +
@@ -3552,7 +4653,7 @@ func file_conversation_v1_session_proto_rawDescGZIP() []byte {
 }
 
 var file_conversation_v1_session_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_conversation_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
+var file_conversation_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 63)
 var file_conversation_v1_session_proto_goTypes = []any{
 	(SessionCompactScope)(0),                   // 0: conversation.v1.SessionCompactScope
 	(*SessionStarted)(nil),                     // 1: conversation.v1.SessionStarted
@@ -3605,27 +4706,40 @@ var file_conversation_v1_session_proto_goTypes = []any{
 	(*SessionLive)(nil),                        // 48: conversation.v1.SessionLive
 	(*SessionContextUsage)(nil),                // 49: conversation.v1.SessionContextUsage
 	(*SessionContextCategory)(nil),             // 50: conversation.v1.SessionContextCategory
-	(*AgentModel)(nil),                         // 51: conversation.v1.AgentModel
-	(*AgentPermissionMode)(nil),                // 52: conversation.v1.AgentPermissionMode
-	(*ModelOption)(nil),                        // 53: conversation.v1.ModelOption
-	(*TurnId)(nil),                             // 54: conversation.v1.TurnId
-	(*AgentDetachedWork)(nil),                  // 55: conversation.v1.AgentDetachedWork
-	(*DetachedWorkId)(nil),                     // 56: conversation.v1.DetachedWorkId
+	(*SessionContextMemoryFile)(nil),           // 51: conversation.v1.SessionContextMemoryFile
+	(*SessionContextMcpTool)(nil),              // 52: conversation.v1.SessionContextMcpTool
+	(*SessionContextDeferredBuiltinTool)(nil),  // 53: conversation.v1.SessionContextDeferredBuiltinTool
+	(*SessionContextSystemTool)(nil),           // 54: conversation.v1.SessionContextSystemTool
+	(*SessionContextSystemPromptSection)(nil),  // 55: conversation.v1.SessionContextSystemPromptSection
+	(*SessionContextAgent)(nil),                // 56: conversation.v1.SessionContextAgent
+	(*SessionContextSlashCommands)(nil),        // 57: conversation.v1.SessionContextSlashCommands
+	(*SessionContextSkills)(nil),               // 58: conversation.v1.SessionContextSkills
+	(*SessionContextSkillFrontmatter)(nil),     // 59: conversation.v1.SessionContextSkillFrontmatter
+	(*SessionContextMessageBreakdown)(nil),     // 60: conversation.v1.SessionContextMessageBreakdown
+	(*SessionContextToolCallsByType)(nil),      // 61: conversation.v1.SessionContextToolCallsByType
+	(*SessionContextAttachmentsByType)(nil),    // 62: conversation.v1.SessionContextAttachmentsByType
+	(*SessionContextApiUsage)(nil),             // 63: conversation.v1.SessionContextApiUsage
+	(*AgentModel)(nil),                         // 64: conversation.v1.AgentModel
+	(*AgentPermissionMode)(nil),                // 65: conversation.v1.AgentPermissionMode
+	(*ModelOption)(nil),                        // 66: conversation.v1.ModelOption
+	(*TurnId)(nil),                             // 67: conversation.v1.TurnId
+	(*AgentDetachedWork)(nil),                  // 68: conversation.v1.AgentDetachedWork
+	(*DetachedWorkId)(nil),                     // 69: conversation.v1.DetachedWorkId
 }
 var file_conversation_v1_session_proto_depIdxs = []int32{
 	2,  // 0: conversation.v1.SessionStarted.runtime:type_name -> conversation.v1.SessionRuntime
-	51, // 1: conversation.v1.SessionStarted.effective_model:type_name -> conversation.v1.AgentModel
-	52, // 2: conversation.v1.SessionStarted.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	53, // 3: conversation.v1.SessionStarted.model_catalog:type_name -> conversation.v1.ModelOption
-	54, // 4: conversation.v1.SessionStarted.turn_in_flight:type_name -> conversation.v1.TurnId
-	55, // 5: conversation.v1.SessionStarted.live_work:type_name -> conversation.v1.AgentDetachedWork
-	51, // 6: conversation.v1.SessionCold.requested_model:type_name -> conversation.v1.AgentModel
+	64, // 1: conversation.v1.SessionStarted.effective_model:type_name -> conversation.v1.AgentModel
+	65, // 2: conversation.v1.SessionStarted.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	66, // 3: conversation.v1.SessionStarted.model_catalog:type_name -> conversation.v1.ModelOption
+	67, // 4: conversation.v1.SessionStarted.turn_in_flight:type_name -> conversation.v1.TurnId
+	68, // 5: conversation.v1.SessionStarted.live_work:type_name -> conversation.v1.AgentDetachedWork
+	64, // 6: conversation.v1.SessionCold.requested_model:type_name -> conversation.v1.AgentModel
 	4,  // 7: conversation.v1.SessionCold.lapsed:type_name -> conversation.v1.SessionColdLapsed
 	5,  // 8: conversation.v1.SessionCold.model_switch:type_name -> conversation.v1.SessionColdModelSwitch
 	7,  // 9: conversation.v1.SessionColdRemediation.pay:type_name -> conversation.v1.SessionColdPay
 	8,  // 10: conversation.v1.SessionColdRemediation.clear:type_name -> conversation.v1.SessionColdClear
 	9,  // 11: conversation.v1.SessionColdRemediation.compact:type_name -> conversation.v1.SessionColdCompact
-	51, // 12: conversation.v1.SessionColdCompact.model:type_name -> conversation.v1.AgentModel
+	64, // 12: conversation.v1.SessionColdCompact.model:type_name -> conversation.v1.AgentModel
 	0,  // 13: conversation.v1.SessionColdCompact.scope:type_name -> conversation.v1.SessionCompactScope
 	13, // 14: conversation.v1.SessionUpdate.identity_rotated:type_name -> conversation.v1.SessionIdentityRotated
 	14, // 15: conversation.v1.SessionUpdate.query_died:type_name -> conversation.v1.SessionQueryDied
@@ -3640,8 +4754,8 @@ var file_conversation_v1_session_proto_depIdxs = []int32{
 	11, // 24: conversation.v1.SessionUpdate.compacting:type_name -> conversation.v1.SessionCompacting
 	15, // 25: conversation.v1.SessionQueryDied.unexpected_eof:type_name -> conversation.v1.SessionQueryUnexpectedEof
 	16, // 26: conversation.v1.SessionQueryDied.iterator_failure:type_name -> conversation.v1.SessionQueryIteratorFailure
-	52, // 27: conversation.v1.SessionPermissionModeChanged.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	51, // 28: conversation.v1.SessionModelChanged.effective_model:type_name -> conversation.v1.AgentModel
+	65, // 27: conversation.v1.SessionPermissionModeChanged.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	64, // 28: conversation.v1.SessionModelChanged.effective_model:type_name -> conversation.v1.AgentModel
 	21, // 29: conversation.v1.SessionFastMode.on:type_name -> conversation.v1.SessionFastModeOn
 	22, // 30: conversation.v1.SessionFastMode.off:type_name -> conversation.v1.SessionFastModeOff
 	20, // 31: conversation.v1.SessionFastMode.cooldown:type_name -> conversation.v1.SessionFastModeCooldown
@@ -3658,7 +4772,7 @@ var file_conversation_v1_session_proto_depIdxs = []int32{
 	32, // 42: conversation.v1.SessionAccountUsageAvailable.seven_day_opus:type_name -> conversation.v1.SessionUsageWindow
 	32, // 43: conversation.v1.SessionAccountUsageAvailable.seven_day_sonnet:type_name -> conversation.v1.SessionUsageWindow
 	31, // 44: conversation.v1.SessionAccountUsageAvailable.model_scoped:type_name -> conversation.v1.SessionModelUsageWindow
-	51, // 45: conversation.v1.SessionModelUsageWindow.model:type_name -> conversation.v1.AgentModel
+	64, // 45: conversation.v1.SessionModelUsageWindow.model:type_name -> conversation.v1.AgentModel
 	32, // 46: conversation.v1.SessionModelUsageWindow.window:type_name -> conversation.v1.SessionUsageWindow
 	34, // 47: conversation.v1.SessionAccountUsageUnavailable.service_unavailable:type_name -> conversation.v1.SessionUsageServiceUnavailable
 	35, // 48: conversation.v1.SessionAccountUsageUnavailable.window_unavailable:type_name -> conversation.v1.SessionUsageWindowUnavailable
@@ -3672,16 +4786,29 @@ var file_conversation_v1_session_proto_depIdxs = []int32{
 	44, // 56: conversation.v1.SessionDegradedWindow.closed:type_name -> conversation.v1.SessionDegradedClosed
 	46, // 57: conversation.v1.SessionKilled.idle:type_name -> conversation.v1.SessionKilledIdle
 	47, // 58: conversation.v1.SessionKilled.forced:type_name -> conversation.v1.SessionKilledForced
-	54, // 59: conversation.v1.SessionKilledForced.interrupted_turn:type_name -> conversation.v1.TurnId
-	56, // 60: conversation.v1.SessionKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
-	54, // 61: conversation.v1.SessionLive.turn_in_flight:type_name -> conversation.v1.TurnId
-	56, // 62: conversation.v1.SessionLive.live_work:type_name -> conversation.v1.DetachedWorkId
+	67, // 59: conversation.v1.SessionKilledForced.interrupted_turn:type_name -> conversation.v1.TurnId
+	69, // 60: conversation.v1.SessionKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
+	67, // 61: conversation.v1.SessionLive.turn_in_flight:type_name -> conversation.v1.TurnId
+	69, // 62: conversation.v1.SessionLive.live_work:type_name -> conversation.v1.DetachedWorkId
 	50, // 63: conversation.v1.SessionContextUsage.categories:type_name -> conversation.v1.SessionContextCategory
-	64, // [64:64] is the sub-list for method output_type
-	64, // [64:64] is the sub-list for method input_type
-	64, // [64:64] is the sub-list for extension type_name
-	64, // [64:64] is the sub-list for extension extendee
-	0,  // [0:64] is the sub-list for field type_name
+	51, // 64: conversation.v1.SessionContextUsage.memory_files:type_name -> conversation.v1.SessionContextMemoryFile
+	52, // 65: conversation.v1.SessionContextUsage.mcp_tools:type_name -> conversation.v1.SessionContextMcpTool
+	53, // 66: conversation.v1.SessionContextUsage.deferred_builtin_tools:type_name -> conversation.v1.SessionContextDeferredBuiltinTool
+	54, // 67: conversation.v1.SessionContextUsage.system_tools:type_name -> conversation.v1.SessionContextSystemTool
+	55, // 68: conversation.v1.SessionContextUsage.system_prompt_sections:type_name -> conversation.v1.SessionContextSystemPromptSection
+	56, // 69: conversation.v1.SessionContextUsage.agents:type_name -> conversation.v1.SessionContextAgent
+	57, // 70: conversation.v1.SessionContextUsage.slash_commands:type_name -> conversation.v1.SessionContextSlashCommands
+	58, // 71: conversation.v1.SessionContextUsage.skills:type_name -> conversation.v1.SessionContextSkills
+	60, // 72: conversation.v1.SessionContextUsage.message_breakdown:type_name -> conversation.v1.SessionContextMessageBreakdown
+	63, // 73: conversation.v1.SessionContextUsage.api_usage:type_name -> conversation.v1.SessionContextApiUsage
+	59, // 74: conversation.v1.SessionContextSkills.skill_frontmatter:type_name -> conversation.v1.SessionContextSkillFrontmatter
+	61, // 75: conversation.v1.SessionContextMessageBreakdown.tool_calls_by_type:type_name -> conversation.v1.SessionContextToolCallsByType
+	62, // 76: conversation.v1.SessionContextMessageBreakdown.attachments_by_type:type_name -> conversation.v1.SessionContextAttachmentsByType
+	77, // [77:77] is the sub-list for method output_type
+	77, // [77:77] is the sub-list for method input_type
+	77, // [77:77] is the sub-list for extension type_name
+	77, // [77:77] is the sub-list for extension extendee
+	0,  // [0:77] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_session_proto_init() }
@@ -3757,13 +4884,16 @@ func file_conversation_v1_session_proto_init() {
 	}
 	file_conversation_v1_session_proto_msgTypes[46].OneofWrappers = []any{}
 	file_conversation_v1_session_proto_msgTypes[47].OneofWrappers = []any{}
+	file_conversation_v1_session_proto_msgTypes[48].OneofWrappers = []any{}
+	file_conversation_v1_session_proto_msgTypes[49].OneofWrappers = []any{}
+	file_conversation_v1_session_proto_msgTypes[51].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_session_proto_rawDesc), len(file_conversation_v1_session_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   50,
+			NumMessages:   63,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

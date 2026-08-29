@@ -523,20 +523,167 @@ message SessionLive {
 // states it (the get_context_usage verb — the one stable, typed source;
 // never derived from usage frames). Pulled by the daemon; the topbar's
 // context chip and the /context panel both resolve from THIS one fact.
+// The vendor's FULL get_context_usage answer, typed field for field (the
+// fidelity principle; verified against the SDK's declared response type).
+// The one deliberate omission is the vendor's gridRows — pure presentation
+// data (pre-rendered grid squares) the resolvers compose for themselves.
 message SessionContextUsage {
   // Tokens currently in context — the topbar chip's number. Shrinks on a
   // compaction or clear; can never exceed max_tokens.
   int64 total_tokens = 1;
-  // The model's context window — the bound.
+  // The usable context window — the bound the percentage is against.
   int64 max_tokens = 2;
-  // The vendor's category breakdown, in served order — the /context
-  // panel's rows.
+  // The model's raw window before any usable-window adjustment.
+  int64 raw_max_tokens = 4;
+  // The vendor's own percent-used figure, verbatim (never re-derived).
+  int64 percentage = 5;
+  // The model the window belongs to, the vendor's spelling.
+  string model = 6;
+  // The vendor's category breakdown, in served order.
   repeated SessionContextCategory categories = 3;
+  // Memory files loaded into context (CLAUDE.md and friends).
+  repeated SessionContextMemoryFile memory_files = 7;
+  // MCP tools in context, per tool.
+  repeated SessionContextMcpTool mcp_tools = 8;
+  // Deferred built-in tools (schema loaded on demand).
+  repeated SessionContextDeferredBuiltinTool deferred_builtin_tools = 9;
+  // Built-in system tools in context.
+  repeated SessionContextSystemTool system_tools = 10;
+  // The system prompt, by section.
+  repeated SessionContextSystemPromptSection system_prompt_sections = 11;
+  // Available subagents loaded into context.
+  repeated SessionContextAgent agents = 12;
+  // The slash-command roll-up. UNSET when the vendor omitted it.
+  optional SessionContextSlashCommands slash_commands = 13;
+  // The skills roll-up. UNSET when the vendor omitted it.
+  optional SessionContextSkills skills = 14;
+  // The auto-compact trigger threshold. UNSET when the vendor omitted it.
+  optional int64 auto_compact_threshold = 15;
+  // Whether vendor auto-compaction is enabled.
+  bool is_auto_compact_enabled = 16;
+  // The message-plane breakdown. UNSET when the vendor omitted it.
+  optional SessionContextMessageBreakdown message_breakdown = 17;
+  // The API-side usage figures. UNSET when the vendor answered null.
+  optional SessionContextApiUsage api_usage = 18;
 }
+
 // One category of the context breakdown.
 message SessionContextCategory {
   // The vendor's category label, verbatim.
   string label = 1;
   // The category's token count.
   int64 tokens = 2;
+  // The vendor's display color for the category, verbatim.
+  string color = 3;
+  // Whether the category is deferred (loaded on demand). UNSET when the
+  // vendor omitted the flag.
+  optional bool is_deferred = 4;
+}
+
+// One memory file in context.
+message SessionContextMemoryFile {
+  // The file's path, the vendor's spelling.
+  string path = 1;
+  // The vendor's memory-file type label, verbatim.
+  string type = 2;
+  int64 tokens = 3;
+}
+
+// One MCP tool in context.
+message SessionContextMcpTool {
+  string name = 1;
+  // The owning MCP server's name.
+  string server_name = 2;
+  int64 tokens = 3;
+  // Whether the tool's schema is currently loaded. UNSET when the vendor
+  // omitted the flag.
+  optional bool is_loaded = 4;
+}
+
+// One deferred built-in tool.
+message SessionContextDeferredBuiltinTool {
+  string name = 1;
+  int64 tokens = 2;
+  bool is_loaded = 3;
+}
+
+// One built-in system tool.
+message SessionContextSystemTool {
+  string name = 1;
+  int64 tokens = 2;
+}
+
+// One system-prompt section.
+message SessionContextSystemPromptSection {
+  string name = 1;
+  int64 tokens = 2;
+}
+
+// One available subagent in context.
+message SessionContextAgent {
+  // The agent type name.
+  string agent_type = 1;
+  // Where the agent definition came from, the vendor's spelling.
+  string source = 2;
+  int64 tokens = 3;
+}
+
+// The slash-command roll-up.
+message SessionContextSlashCommands {
+  int64 total_commands = 1;
+  int64 included_commands = 2;
+  int64 tokens = 3;
+}
+
+// The skills roll-up, with per-skill frontmatter figures.
+message SessionContextSkills {
+  int64 total_skills = 1;
+  int64 included_skills = 2;
+  int64 tokens = 3;
+  repeated SessionContextSkillFrontmatter skill_frontmatter = 4;
+}
+
+// One skill's loaded frontmatter.
+message SessionContextSkillFrontmatter {
+  string name = 1;
+  // Where the skill came from, the vendor's spelling.
+  string source = 2;
+  int64 tokens = 3;
+}
+
+// The message-plane breakdown — where the conversation's tokens went.
+message SessionContextMessageBreakdown {
+  int64 tool_call_tokens = 1;
+  int64 tool_result_tokens = 2;
+  int64 attachment_tokens = 3;
+  int64 assistant_message_tokens = 4;
+  int64 user_message_tokens = 5;
+  int64 redirected_context_tokens = 6;
+  int64 unattributed_tokens = 7;
+  // Per-tool call/result figures — the ENCAPSULATED tool-call list the
+  // /context panel folds.
+  repeated SessionContextToolCallsByType tool_calls_by_type = 8;
+  // Per-attachment-type figures.
+  repeated SessionContextAttachmentsByType attachments_by_type = 9;
+}
+
+// One tool's call/result token split.
+message SessionContextToolCallsByType {
+  string name = 1;
+  int64 call_tokens = 2;
+  int64 result_tokens = 3;
+}
+
+// One attachment type's tokens.
+message SessionContextAttachmentsByType {
+  string name = 1;
+  int64 tokens = 2;
+}
+
+// The API-side usage figures riding the vendor's answer.
+message SessionContextApiUsage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+  int64 cache_creation_input_tokens = 3;
+  int64 cache_read_input_tokens = 4;
 }

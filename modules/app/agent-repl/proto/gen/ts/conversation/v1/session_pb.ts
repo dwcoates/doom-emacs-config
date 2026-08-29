@@ -27,7 +27,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/session.proto.
  */
 export const file_conversation_v1_session: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvc2Vzc2lvbi5wcm90bxIPY29udmVyc2F0aW9uLnYxIocDCg5TZXNzaW9uU3RhcnRlZBIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRIwCgdydW50aW1lGAIgASgLMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25SdW50aW1lEjQKD2VmZmVjdGl2ZV9tb2RlbBgDIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEj0KD3Blcm1pc3Npb25fbW9kZRgHIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlEjMKDW1vZGVsX2NhdGFsb2cYBCADKAsyHC5jb252ZXJzYXRpb24udjEuTW9kZWxPcHRpb24SNAoOdHVybl9pbl9mbGlnaHQYBSABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSACIAQESNQoJbGl2ZV93b3JrGAYgAygLMiIuY29udmVyc2F0aW9uLnYxLkFnZW50RGV0YWNoZWRXb3JrQhEKD190dXJuX2luX2ZsaWdodCJbCg5TZXNzaW9uUnVudGltZRIWCg5zaGltX2J1aWxkX3NoYRgBIAEoCRITCgtzZGtfdmVyc2lvbhgCIAEoCRIcChRhZ2VudF9iaW5hcnlfdmVyc2lvbhgDIAEoCSL4AQoLU2Vzc2lvbkNvbGQSFgoOY29udGV4dF90b2tlbnMYASABKAQSGgoSbGFzdF9yZXF1ZXN0X2F0X21zGAIgASgDEjQKD3JlcXVlc3RlZF9tb2RlbBgDIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEjQKBmxhcHNlZBgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZExhcHNlZEgAEj8KDG1vZGVsX3N3aXRjaBgFIAEoCzInLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZE1vZGVsU3dpdGNoSABCCAoGcmVhc29uIikKEVNlc3Npb25Db2xkTGFwc2VkEhQKDGNhY2hlX3R0bF9tcxgBIAEoAyIYChZTZXNzaW9uQ29sZE1vZGVsU3dpdGNoIsMBChZTZXNzaW9uQ29sZFJlbWVkaWF0aW9uEi4KA3BheRgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZFBheUgAEjIKBWNsZWFyGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkQ2xlYXJIABI2Cgdjb21wYWN0GAMgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkQ29tcGFjdEgAQg0KC3JlbWVkaWF0aW9uIhAKDlNlc3Npb25Db2xkUGF5IhIKEFNlc3Npb25Db2xkQ2xlYXIidQoSU2Vzc2lvbkNvbGRDb21wYWN0EioKBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWwSMwoFc2NvcGUYAiABKA4yJC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbXBhY3RTY29wZSLcBQoNU2Vzc2lvblVwZGF0ZRJDChBpZGVudGl0eV9yb3RhdGVkGAEgASgLMicuY29udmVyc2F0aW9uLnYxLlNlc3Npb25JZGVudGl0eVJvdGF0ZWRIABI3CgpxdWVyeV9kaWVkGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlNlc3Npb25RdWVyeURpZWRIABI9Cg1tb2RlbF9jaGFuZ2VkGAMgASgLMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Nb2RlbENoYW5nZWRIABI1CglmYXN0X21vZGUYBCABKAsyIC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkZhc3RNb2RlSAASNwoKbWNwX3NlcnZlchgFIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uTWNwU2VydmVySAASPQoNYWNjb3VudF91c2FnZRgGIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQWNjb3VudFVzYWdlSAASUAoXcGVybWlzc2lvbl9tb2RlX2NoYW5nZWQYByABKAsyLS5jb252ZXJzYXRpb24udjEuU2Vzc2lvblBlcm1pc3Npb25Nb2RlQ2hhbmdlZEgAEk4KFmNvbnRleHRfYnVkZ2V0X3dhcm5pbmcYGCABKAsyLC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbnRleHRCdWRnZXRXYXJuaW5nSAASOgoLZGlhZ25vc3RpY3MYGSABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkRpYWdub3N0aWNzSAASPQoNY29udGV4dF91c2FnZRgaIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dFVzYWdlSAASOAoKY29tcGFjdGluZxgbIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tcGFjdGluZ0gAQggKBnVwZGF0ZSITChFTZXNzaW9uQ29tcGFjdGluZyIrChtTZXNzaW9uQ29udGV4dEJ1ZGdldFdhcm5pbmcSDAoEdGV4dBgBIAEoCSJXChZTZXNzaW9uSWRlbnRpdHlSb3RhdGVkEiIKGnByZXZpb3VzX3ZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAIgASgJIqsBChBTZXNzaW9uUXVlcnlEaWVkEkQKDnVuZXhwZWN0ZWRfZW9mGAEgASgLMiouY29udmVyc2F0aW9uLnYxLlNlc3Npb25RdWVyeVVuZXhwZWN0ZWRFb2ZIABJIChBpdGVyYXRvcl9mYWlsdXJlGAIgASgLMiwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25RdWVyeUl0ZXJhdG9yRmFpbHVyZUgAQgcKBWNhdXNlIhsKGVNlc3Npb25RdWVyeVVuZXhwZWN0ZWRFb2YiLAobU2Vzc2lvblF1ZXJ5SXRlcmF0b3JGYWlsdXJlEg0KBWNhdXNlGAEgASgJIl0KHFNlc3Npb25QZXJtaXNzaW9uTW9kZUNoYW5nZWQSPQoPcGVybWlzc2lvbl9tb2RlGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkFnZW50UGVybWlzc2lvbk1vZGUiSwoTU2Vzc2lvbk1vZGVsQ2hhbmdlZBI0Cg9lZmZlY3RpdmVfbW9kZWwYASABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbCK+AQoPU2Vzc2lvbkZhc3RNb2RlEjAKAm9uGAEgASgLMiIuY29udmVyc2F0aW9uLnYxLlNlc3Npb25GYXN0TW9kZU9uSAASMgoDb2ZmGAIgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25GYXN0TW9kZU9mZkgAEjwKCGNvb2xkb3duGAMgASgLMiguY29udmVyc2F0aW9uLnYxLlNlc3Npb25GYXN0TW9kZUNvb2xkb3duSABCBwoFc3RhdGUiGQoXU2Vzc2lvbkZhc3RNb2RlQ29vbGRvd24iEwoRU2Vzc2lvbkZhc3RNb2RlT24iJAoSU2Vzc2lvbkZhc3RNb2RlT2ZmEg4KBnJlYXNvbhgBIAEoCSLkAgoQU2Vzc2lvbk1jcFNlcnZlchIMCgRuYW1lGAEgASgJEj8KCWNvbm5lY3RlZBgCIAEoCzIqLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uTWNwU2VydmVyQ29ubmVjdGVkSAASOQoGZmFpbGVkGAMgASgLMicuY29udmVyc2F0aW9uLnYxLlNlc3Npb25NY3BTZXJ2ZXJGYWlsZWRIABJACgpuZWVkc19hdXRoGAQgASgLMiouY29udmVyc2F0aW9uLnYxLlNlc3Npb25NY3BTZXJ2ZXJOZWVkc0F1dGhIABI7CgdwZW5kaW5nGAUgASgLMiguY29udmVyc2F0aW9uLnYxLlNlc3Npb25NY3BTZXJ2ZXJQZW5kaW5nSAASPQoIZGlzYWJsZWQYBiABKAsyKS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbk1jcFNlcnZlckRpc2FibGVkSABCCAoGaGVhbHRoIhsKGVNlc3Npb25NY3BTZXJ2ZXJOZWVkc0F1dGgiGQoXU2Vzc2lvbk1jcFNlcnZlclBlbmRpbmciGgoYU2Vzc2lvbk1jcFNlcnZlckRpc2FibGVkIhsKGVNlc3Npb25NY3BTZXJ2ZXJDb25uZWN0ZWQiJwoWU2Vzc2lvbk1jcFNlcnZlckZhaWxlZBINCgVlcnJvchgBIAEoCSLfAQoTU2Vzc2lvbkFjY291bnRVc2FnZRIWCg5vYnNlcnZlZF9hdF9tcxgBIAEoAxIZChFzdWJzY3JpcHRpb25fdHlwZRgCIAEoCRJCCglhdmFpbGFibGUYAyABKAsyLS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkFjY291bnRVc2FnZUF2YWlsYWJsZUgAEkYKC3VuYXZhaWxhYmxlGAQgASgLMi8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25BY2NvdW50VXNhZ2VVbmF2YWlsYWJsZUgAQgkKB291dGNvbWUi8AMKHFNlc3Npb25BY2NvdW50VXNhZ2VBdmFpbGFibGUSNgoJZml2ZV9ob3VyGAEgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVdpbmRvdxI7CglzZXZlbl9kYXkYAiABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlV2luZG93SACIAQESRgoUc2V2ZW5fZGF5X29hdXRoX2FwcHMYAyABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlV2luZG93SAGIAQESQAoOc2V2ZW5fZGF5X29wdXMYBCABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlV2luZG93SAKIAQESQgoQc2V2ZW5fZGF5X3Nvbm5ldBgFIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXNhZ2VXaW5kb3dIA4gBARI+Cgxtb2RlbF9zY29wZWQYBiADKAsyKC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbk1vZGVsVXNhZ2VXaW5kb3dCDAoKX3NldmVuX2RheUIXChVfc2V2ZW5fZGF5X29hdXRoX2FwcHNCEQoPX3NldmVuX2RheV9vcHVzQhMKEV9zZXZlbl9kYXlfc29ubmV0InoKF1Nlc3Npb25Nb2RlbFVzYWdlV2luZG93EioKBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWwSMwoGd2luZG93GAIgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVdpbmRvdyJHChJTZXNzaW9uVXNhZ2VXaW5kb3cSGwoTdXRpbGl6YXRpb25fcGVyY2VudBgBIAEoARIUCgxyZXNldHNfYXRfbXMYAiABKAMi6gIKHlNlc3Npb25BY2NvdW50VXNhZ2VVbmF2YWlsYWJsZRJOChNzZXJ2aWNlX3VuYXZhaWxhYmxlGAEgASgLMi8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVNlcnZpY2VVbmF2YWlsYWJsZUgAEkwKEndpbmRvd191bmF2YWlsYWJsZRgCIAEoCzIuLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXNhZ2VXaW5kb3dVbmF2YWlsYWJsZUgAElYKF3V0aWxpemF0aW9uX3VuYXZhaWxhYmxlGAMgASgLMjMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVV0aWxpemF0aW9uVW5hdmFpbGFibGVIABJIChBzYW1wbGluZ19mYWlsdXJlGAQgASgLMiwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVNhbXBsaW5nRmFpbHVyZUgAQggKBnJlYXNvbiIgCh5TZXNzaW9uVXNhZ2VTZXJ2aWNlVW5hdmFpbGFibGUiHwodU2Vzc2lvblVzYWdlV2luZG93VW5hdmFpbGFibGUiJAoiU2Vzc2lvblVzYWdlVXRpbGl6YXRpb25VbmF2YWlsYWJsZSIsChtTZXNzaW9uVXNhZ2VTYW1wbGluZ0ZhaWx1cmUSDQoFY2F1c2UYASABKAkizAEKElNlc3Npb25EaWFnbm9zdGljcxIyCgdoZWFsdGh5GAEgASgLMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25IZWFsdGh5SAASNgoJdW5oZWFsdGh5GAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlNlc3Npb25VbmhlYWx0aHlIABJAChBkZWdyYWRlZF93aW5kb3dzGAMgAygLMiYuY29udmVyc2F0aW9uLnYxLlNlc3Npb25EZWdyYWRlZFdpbmRvd0IICgZoZWFsdGgiEAoOU2Vzc2lvbkhlYWx0aHkiQQoQU2Vzc2lvblVuaGVhbHRoeRItCgZmYXVsdHMYASADKAsyHS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkZhdWx0IjEKDFNlc3Npb25GYXVsdBIRCgljb21wb25lbnQYASABKAkSDgoGZGV0YWlsGAIgASgJIskBChVTZXNzaW9uRGVncmFkZWRXaW5kb3cSEQoJY29tcG9uZW50GAEgASgJEg4KBnJlYXNvbhgCIAEoCRITCgtiZWdhbl9hdF9tcxgDIAEoAxI0CgRvcGVuGAQgASgLMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25EZWdyYWRlZE9wZW5IABI4CgZjbG9zZWQYBSABKAsyJi5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkRlZ3JhZGVkQ2xvc2VkSABCCAoGZXh0ZW50IhUKE1Nlc3Npb25EZWdyYWRlZE9wZW4iQwoVU2Vzc2lvbkRlZ3JhZGVkQ2xvc2VkEhMKC2VuZGVkX2F0X21zGAEgASgDEhUKDWRyb3BwZWRfY291bnQYAiABKAQiggEKDVNlc3Npb25LaWxsZWQSMgoEaWRsZRgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uS2lsbGVkSWRsZUgAEjYKBmZvcmNlZBgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uS2lsbGVkRm9yY2VkSABCBQoDaG93IhMKEVNlc3Npb25LaWxsZWRJZGxlIpkBChNTZXNzaW9uS2lsbGVkRm9yY2VkEjYKEGludGVycnVwdGVkX3R1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSACIAQESNQoMc3RvcHBlZF93b3JrGAIgAygLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkQhMKEV9pbnRlcnJ1cHRlZF90dXJuIooBCgtTZXNzaW9uTGl2ZRI0Cg50dXJuX2luX2ZsaWdodBgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAIgBARIyCglsaXZlX3dvcmsYAiADKAsyHy5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrSWRCEQoPX3R1cm5faW5fZmxpZ2h0InwKE1Nlc3Npb25Db250ZXh0VXNhZ2USFAoMdG90YWxfdG9rZW5zGAEgASgDEhIKCm1heF90b2tlbnMYAiABKAMSOwoKY2F0ZWdvcmllcxgDIAMoCzInLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dENhdGVnb3J5IjcKFlNlc3Npb25Db250ZXh0Q2F0ZWdvcnkSDQoFbGFiZWwYASABKAkSDgoGdG9rZW5zGAIgASgDKqMBChNTZXNzaW9uQ29tcGFjdFNjb3BlEiUKIVNFU1NJT05fQ09NUEFDVF9TQ09QRV9VTlNQRUNJRklFRBAAEh0KGVNFU1NJT05fQ09NUEFDVF9TQ09QRV9BTEwQARIhCh1TRVNTSU9OX0NPTVBBQ1RfU0NPUEVfUFJPTVBUUxACEiMKH1NFU1NJT05fQ09NUEFDVF9TQ09QRV9SRVNQT05TRVMQA0IwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_api, file_conversation_v1_detached_work, file_conversation_v1_permission, file_conversation_v1_turn]);
+  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvc2Vzc2lvbi5wcm90bxIPY29udmVyc2F0aW9uLnYxIocDCg5TZXNzaW9uU3RhcnRlZBIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRIwCgdydW50aW1lGAIgASgLMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25SdW50aW1lEjQKD2VmZmVjdGl2ZV9tb2RlbBgDIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEj0KD3Blcm1pc3Npb25fbW9kZRgHIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlEjMKDW1vZGVsX2NhdGFsb2cYBCADKAsyHC5jb252ZXJzYXRpb24udjEuTW9kZWxPcHRpb24SNAoOdHVybl9pbl9mbGlnaHQYBSABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSACIAQESNQoJbGl2ZV93b3JrGAYgAygLMiIuY29udmVyc2F0aW9uLnYxLkFnZW50RGV0YWNoZWRXb3JrQhEKD190dXJuX2luX2ZsaWdodCJbCg5TZXNzaW9uUnVudGltZRIWCg5zaGltX2J1aWxkX3NoYRgBIAEoCRITCgtzZGtfdmVyc2lvbhgCIAEoCRIcChRhZ2VudF9iaW5hcnlfdmVyc2lvbhgDIAEoCSL4AQoLU2Vzc2lvbkNvbGQSFgoOY29udGV4dF90b2tlbnMYASABKAQSGgoSbGFzdF9yZXF1ZXN0X2F0X21zGAIgASgDEjQKD3JlcXVlc3RlZF9tb2RlbBgDIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEjQKBmxhcHNlZBgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZExhcHNlZEgAEj8KDG1vZGVsX3N3aXRjaBgFIAEoCzInLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZE1vZGVsU3dpdGNoSABCCAoGcmVhc29uIikKEVNlc3Npb25Db2xkTGFwc2VkEhQKDGNhY2hlX3R0bF9tcxgBIAEoAyIYChZTZXNzaW9uQ29sZE1vZGVsU3dpdGNoIsMBChZTZXNzaW9uQ29sZFJlbWVkaWF0aW9uEi4KA3BheRgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZFBheUgAEjIKBWNsZWFyGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkQ2xlYXJIABI2Cgdjb21wYWN0GAMgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkQ29tcGFjdEgAQg0KC3JlbWVkaWF0aW9uIhAKDlNlc3Npb25Db2xkUGF5IhIKEFNlc3Npb25Db2xkQ2xlYXIidQoSU2Vzc2lvbkNvbGRDb21wYWN0EioKBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWwSMwoFc2NvcGUYAiABKA4yJC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbXBhY3RTY29wZSLcBQoNU2Vzc2lvblVwZGF0ZRJDChBpZGVudGl0eV9yb3RhdGVkGAEgASgLMicuY29udmVyc2F0aW9uLnYxLlNlc3Npb25JZGVudGl0eVJvdGF0ZWRIABI3CgpxdWVyeV9kaWVkGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlNlc3Npb25RdWVyeURpZWRIABI9Cg1tb2RlbF9jaGFuZ2VkGAMgASgLMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Nb2RlbENoYW5nZWRIABI1CglmYXN0X21vZGUYBCABKAsyIC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkZhc3RNb2RlSAASNwoKbWNwX3NlcnZlchgFIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uTWNwU2VydmVySAASPQoNYWNjb3VudF91c2FnZRgGIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQWNjb3VudFVzYWdlSAASUAoXcGVybWlzc2lvbl9tb2RlX2NoYW5nZWQYByABKAsyLS5jb252ZXJzYXRpb24udjEuU2Vzc2lvblBlcm1pc3Npb25Nb2RlQ2hhbmdlZEgAEk4KFmNvbnRleHRfYnVkZ2V0X3dhcm5pbmcYGCABKAsyLC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbnRleHRCdWRnZXRXYXJuaW5nSAASOgoLZGlhZ25vc3RpY3MYGSABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkRpYWdub3N0aWNzSAASPQoNY29udGV4dF91c2FnZRgaIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dFVzYWdlSAASOAoKY29tcGFjdGluZxgbIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tcGFjdGluZ0gAQggKBnVwZGF0ZSITChFTZXNzaW9uQ29tcGFjdGluZyIrChtTZXNzaW9uQ29udGV4dEJ1ZGdldFdhcm5pbmcSDAoEdGV4dBgBIAEoCSJXChZTZXNzaW9uSWRlbnRpdHlSb3RhdGVkEiIKGnByZXZpb3VzX3ZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAIgASgJIqsBChBTZXNzaW9uUXVlcnlEaWVkEkQKDnVuZXhwZWN0ZWRfZW9mGAEgASgLMiouY29udmVyc2F0aW9uLnYxLlNlc3Npb25RdWVyeVVuZXhwZWN0ZWRFb2ZIABJIChBpdGVyYXRvcl9mYWlsdXJlGAIgASgLMiwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25RdWVyeUl0ZXJhdG9yRmFpbHVyZUgAQgcKBWNhdXNlIhsKGVNlc3Npb25RdWVyeVVuZXhwZWN0ZWRFb2YiLAobU2Vzc2lvblF1ZXJ5SXRlcmF0b3JGYWlsdXJlEg0KBWNhdXNlGAEgASgJIl0KHFNlc3Npb25QZXJtaXNzaW9uTW9kZUNoYW5nZWQSPQoPcGVybWlzc2lvbl9tb2RlGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkFnZW50UGVybWlzc2lvbk1vZGUiSwoTU2Vzc2lvbk1vZGVsQ2hhbmdlZBI0Cg9lZmZlY3RpdmVfbW9kZWwYASABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbCK+AQoPU2Vzc2lvbkZhc3RNb2RlEjAKAm9uGAEgASgLMiIuY29udmVyc2F0aW9uLnYxLlNlc3Npb25GYXN0TW9kZU9uSAASMgoDb2ZmGAIgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25GYXN0TW9kZU9mZkgAEjwKCGNvb2xkb3duGAMgASgLMiguY29udmVyc2F0aW9uLnYxLlNlc3Npb25GYXN0TW9kZUNvb2xkb3duSABCBwoFc3RhdGUiGQoXU2Vzc2lvbkZhc3RNb2RlQ29vbGRvd24iEwoRU2Vzc2lvbkZhc3RNb2RlT24iJAoSU2Vzc2lvbkZhc3RNb2RlT2ZmEg4KBnJlYXNvbhgBIAEoCSLkAgoQU2Vzc2lvbk1jcFNlcnZlchIMCgRuYW1lGAEgASgJEj8KCWNvbm5lY3RlZBgCIAEoCzIqLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uTWNwU2VydmVyQ29ubmVjdGVkSAASOQoGZmFpbGVkGAMgASgLMicuY29udmVyc2F0aW9uLnYxLlNlc3Npb25NY3BTZXJ2ZXJGYWlsZWRIABJACgpuZWVkc19hdXRoGAQgASgLMiouY29udmVyc2F0aW9uLnYxLlNlc3Npb25NY3BTZXJ2ZXJOZWVkc0F1dGhIABI7CgdwZW5kaW5nGAUgASgLMiguY29udmVyc2F0aW9uLnYxLlNlc3Npb25NY3BTZXJ2ZXJQZW5kaW5nSAASPQoIZGlzYWJsZWQYBiABKAsyKS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbk1jcFNlcnZlckRpc2FibGVkSABCCAoGaGVhbHRoIhsKGVNlc3Npb25NY3BTZXJ2ZXJOZWVkc0F1dGgiGQoXU2Vzc2lvbk1jcFNlcnZlclBlbmRpbmciGgoYU2Vzc2lvbk1jcFNlcnZlckRpc2FibGVkIhsKGVNlc3Npb25NY3BTZXJ2ZXJDb25uZWN0ZWQiJwoWU2Vzc2lvbk1jcFNlcnZlckZhaWxlZBINCgVlcnJvchgBIAEoCSLfAQoTU2Vzc2lvbkFjY291bnRVc2FnZRIWCg5vYnNlcnZlZF9hdF9tcxgBIAEoAxIZChFzdWJzY3JpcHRpb25fdHlwZRgCIAEoCRJCCglhdmFpbGFibGUYAyABKAsyLS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkFjY291bnRVc2FnZUF2YWlsYWJsZUgAEkYKC3VuYXZhaWxhYmxlGAQgASgLMi8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25BY2NvdW50VXNhZ2VVbmF2YWlsYWJsZUgAQgkKB291dGNvbWUi8AMKHFNlc3Npb25BY2NvdW50VXNhZ2VBdmFpbGFibGUSNgoJZml2ZV9ob3VyGAEgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVdpbmRvdxI7CglzZXZlbl9kYXkYAiABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlV2luZG93SACIAQESRgoUc2V2ZW5fZGF5X29hdXRoX2FwcHMYAyABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlV2luZG93SAGIAQESQAoOc2V2ZW5fZGF5X29wdXMYBCABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlV2luZG93SAKIAQESQgoQc2V2ZW5fZGF5X3Nvbm5ldBgFIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXNhZ2VXaW5kb3dIA4gBARI+Cgxtb2RlbF9zY29wZWQYBiADKAsyKC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbk1vZGVsVXNhZ2VXaW5kb3dCDAoKX3NldmVuX2RheUIXChVfc2V2ZW5fZGF5X29hdXRoX2FwcHNCEQoPX3NldmVuX2RheV9vcHVzQhMKEV9zZXZlbl9kYXlfc29ubmV0InoKF1Nlc3Npb25Nb2RlbFVzYWdlV2luZG93EioKBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWwSMwoGd2luZG93GAIgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVdpbmRvdyJHChJTZXNzaW9uVXNhZ2VXaW5kb3cSGwoTdXRpbGl6YXRpb25fcGVyY2VudBgBIAEoARIUCgxyZXNldHNfYXRfbXMYAiABKAMi6gIKHlNlc3Npb25BY2NvdW50VXNhZ2VVbmF2YWlsYWJsZRJOChNzZXJ2aWNlX3VuYXZhaWxhYmxlGAEgASgLMi8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVNlcnZpY2VVbmF2YWlsYWJsZUgAEkwKEndpbmRvd191bmF2YWlsYWJsZRgCIAEoCzIuLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXNhZ2VXaW5kb3dVbmF2YWlsYWJsZUgAElYKF3V0aWxpemF0aW9uX3VuYXZhaWxhYmxlGAMgASgLMjMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVV0aWxpemF0aW9uVW5hdmFpbGFibGVIABJIChBzYW1wbGluZ19mYWlsdXJlGAQgASgLMiwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVNhbXBsaW5nRmFpbHVyZUgAQggKBnJlYXNvbiIgCh5TZXNzaW9uVXNhZ2VTZXJ2aWNlVW5hdmFpbGFibGUiHwodU2Vzc2lvblVzYWdlV2luZG93VW5hdmFpbGFibGUiJAoiU2Vzc2lvblVzYWdlVXRpbGl6YXRpb25VbmF2YWlsYWJsZSIsChtTZXNzaW9uVXNhZ2VTYW1wbGluZ0ZhaWx1cmUSDQoFY2F1c2UYASABKAkizAEKElNlc3Npb25EaWFnbm9zdGljcxIyCgdoZWFsdGh5GAEgASgLMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25IZWFsdGh5SAASNgoJdW5oZWFsdGh5GAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlNlc3Npb25VbmhlYWx0aHlIABJAChBkZWdyYWRlZF93aW5kb3dzGAMgAygLMiYuY29udmVyc2F0aW9uLnYxLlNlc3Npb25EZWdyYWRlZFdpbmRvd0IICgZoZWFsdGgiEAoOU2Vzc2lvbkhlYWx0aHkiQQoQU2Vzc2lvblVuaGVhbHRoeRItCgZmYXVsdHMYASADKAsyHS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkZhdWx0IjEKDFNlc3Npb25GYXVsdBIRCgljb21wb25lbnQYASABKAkSDgoGZGV0YWlsGAIgASgJIskBChVTZXNzaW9uRGVncmFkZWRXaW5kb3cSEQoJY29tcG9uZW50GAEgASgJEg4KBnJlYXNvbhgCIAEoCRITCgtiZWdhbl9hdF9tcxgDIAEoAxI0CgRvcGVuGAQgASgLMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25EZWdyYWRlZE9wZW5IABI4CgZjbG9zZWQYBSABKAsyJi5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkRlZ3JhZGVkQ2xvc2VkSABCCAoGZXh0ZW50IhUKE1Nlc3Npb25EZWdyYWRlZE9wZW4iQwoVU2Vzc2lvbkRlZ3JhZGVkQ2xvc2VkEhMKC2VuZGVkX2F0X21zGAEgASgDEhUKDWRyb3BwZWRfY291bnQYAiABKAQiggEKDVNlc3Npb25LaWxsZWQSMgoEaWRsZRgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uS2lsbGVkSWRsZUgAEjYKBmZvcmNlZBgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uS2lsbGVkRm9yY2VkSABCBQoDaG93IhMKEVNlc3Npb25LaWxsZWRJZGxlIpkBChNTZXNzaW9uS2lsbGVkRm9yY2VkEjYKEGludGVycnVwdGVkX3R1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSACIAQESNQoMc3RvcHBlZF93b3JrGAIgAygLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkQhMKEV9pbnRlcnJ1cHRlZF90dXJuIooBCgtTZXNzaW9uTGl2ZRI0Cg50dXJuX2luX2ZsaWdodBgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAIgBARIyCglsaXZlX3dvcmsYAiADKAsyHy5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrSWRCEQoPX3R1cm5faW5fZmxpZ2h0Io4IChNTZXNzaW9uQ29udGV4dFVzYWdlEhQKDHRvdGFsX3Rva2VucxgBIAEoAxISCgptYXhfdG9rZW5zGAIgASgDEhYKDnJhd19tYXhfdG9rZW5zGAQgASgDEhIKCnBlcmNlbnRhZ2UYBSABKAMSDQoFbW9kZWwYBiABKAkSOwoKY2F0ZWdvcmllcxgDIAMoCzInLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dENhdGVnb3J5Ej8KDG1lbW9yeV9maWxlcxgHIAMoCzIpLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dE1lbW9yeUZpbGUSOQoJbWNwX3Rvb2xzGAggAygLMiYuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db250ZXh0TWNwVG9vbBJSChZkZWZlcnJlZF9idWlsdGluX3Rvb2xzGAkgAygLMjIuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db250ZXh0RGVmZXJyZWRCdWlsdGluVG9vbBI/CgxzeXN0ZW1fdG9vbHMYCiADKAsyKS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbnRleHRTeXN0ZW1Ub29sElIKFnN5c3RlbV9wcm9tcHRfc2VjdGlvbnMYCyADKAsyMi5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbnRleHRTeXN0ZW1Qcm9tcHRTZWN0aW9uEjQKBmFnZW50cxgMIAMoCzIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dEFnZW50EkkKDnNsYXNoX2NvbW1hbmRzGA0gASgLMiwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db250ZXh0U2xhc2hDb21tYW5kc0gAiAEBEjoKBnNraWxscxgOIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dFNraWxsc0gBiAEBEiMKFmF1dG9fY29tcGFjdF90aHJlc2hvbGQYDyABKANIAogBARIfChdpc19hdXRvX2NvbXBhY3RfZW5hYmxlZBgQIAEoCBJPChFtZXNzYWdlX2JyZWFrZG93bhgRIAEoCzIvLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dE1lc3NhZ2VCcmVha2Rvd25IA4gBARI/CglhcGlfdXNhZ2UYEiABKAsyJy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbnRleHRBcGlVc2FnZUgEiAEBQhEKD19zbGFzaF9jb21tYW5kc0IJCgdfc2tpbGxzQhkKF19hdXRvX2NvbXBhY3RfdGhyZXNob2xkQhQKEl9tZXNzYWdlX2JyZWFrZG93bkIMCgpfYXBpX3VzYWdlInAKFlNlc3Npb25Db250ZXh0Q2F0ZWdvcnkSDQoFbGFiZWwYASABKAkSDgoGdG9rZW5zGAIgASgDEg0KBWNvbG9yGAMgASgJEhgKC2lzX2RlZmVycmVkGAQgASgISACIAQFCDgoMX2lzX2RlZmVycmVkIkYKGFNlc3Npb25Db250ZXh0TWVtb3J5RmlsZRIMCgRwYXRoGAEgASgJEgwKBHR5cGUYAiABKAkSDgoGdG9rZW5zGAMgASgDInAKFVNlc3Npb25Db250ZXh0TWNwVG9vbBIMCgRuYW1lGAEgASgJEhMKC3NlcnZlcl9uYW1lGAIgASgJEg4KBnRva2VucxgDIAEoAxIWCglpc19sb2FkZWQYBCABKAhIAIgBAUIMCgpfaXNfbG9hZGVkIlQKIVNlc3Npb25Db250ZXh0RGVmZXJyZWRCdWlsdGluVG9vbBIMCgRuYW1lGAEgASgJEg4KBnRva2VucxgCIAEoAxIRCglpc19sb2FkZWQYAyABKAgiOAoYU2Vzc2lvbkNvbnRleHRTeXN0ZW1Ub29sEgwKBG5hbWUYASABKAkSDgoGdG9rZW5zGAIgASgDIkEKIVNlc3Npb25Db250ZXh0U3lzdGVtUHJvbXB0U2VjdGlvbhIMCgRuYW1lGAEgASgJEg4KBnRva2VucxgCIAEoAyJJChNTZXNzaW9uQ29udGV4dEFnZW50EhIKCmFnZW50X3R5cGUYASABKAkSDgoGc291cmNlGAIgASgJEg4KBnRva2VucxgDIAEoAyJgChtTZXNzaW9uQ29udGV4dFNsYXNoQ29tbWFuZHMSFgoOdG90YWxfY29tbWFuZHMYASABKAMSGQoRaW5jbHVkZWRfY29tbWFuZHMYAiABKAMSDgoGdG9rZW5zGAMgASgDIqEBChRTZXNzaW9uQ29udGV4dFNraWxscxIUCgx0b3RhbF9za2lsbHMYASABKAMSFwoPaW5jbHVkZWRfc2tpbGxzGAIgASgDEg4KBnRva2VucxgDIAEoAxJKChFza2lsbF9mcm9udG1hdHRlchgEIAMoCzIvLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dFNraWxsRnJvbnRtYXR0ZXIiTgoeU2Vzc2lvbkNvbnRleHRTa2lsbEZyb250bWF0dGVyEgwKBG5hbWUYASABKAkSDgoGc291cmNlGAIgASgJEg4KBnRva2VucxgDIAEoAyKLAwoeU2Vzc2lvbkNvbnRleHRNZXNzYWdlQnJlYWtkb3duEhgKEHRvb2xfY2FsbF90b2tlbnMYASABKAMSGgoSdG9vbF9yZXN1bHRfdG9rZW5zGAIgASgDEhkKEWF0dGFjaG1lbnRfdG9rZW5zGAMgASgDEiAKGGFzc2lzdGFudF9tZXNzYWdlX3Rva2VucxgEIAEoAxIbChN1c2VyX21lc3NhZ2VfdG9rZW5zGAUgASgDEiEKGXJlZGlyZWN0ZWRfY29udGV4dF90b2tlbnMYBiABKAMSGwoTdW5hdHRyaWJ1dGVkX3Rva2VucxgHIAEoAxJKChJ0b29sX2NhbGxzX2J5X3R5cGUYCCADKAsyLi5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbnRleHRUb29sQ2FsbHNCeVR5cGUSTQoTYXR0YWNobWVudHNfYnlfdHlwZRgJIAMoCzIwLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dEF0dGFjaG1lbnRzQnlUeXBlIlkKHVNlc3Npb25Db250ZXh0VG9vbENhbGxzQnlUeXBlEgwKBG5hbWUYASABKAkSEwoLY2FsbF90b2tlbnMYAiABKAMSFQoNcmVzdWx0X3Rva2VucxgDIAEoAyI/Ch9TZXNzaW9uQ29udGV4dEF0dGFjaG1lbnRzQnlUeXBlEgwKBG5hbWUYASABKAkSDgoGdG9rZW5zGAIgASgDIosBChZTZXNzaW9uQ29udGV4dEFwaVVzYWdlEhQKDGlucHV0X3Rva2VucxgBIAEoAxIVCg1vdXRwdXRfdG9rZW5zGAIgASgDEiMKG2NhY2hlX2NyZWF0aW9uX2lucHV0X3Rva2VucxgDIAEoAxIfChdjYWNoZV9yZWFkX2lucHV0X3Rva2VucxgEIAEoAyqjAQoTU2Vzc2lvbkNvbXBhY3RTY29wZRIlCiFTRVNTSU9OX0NPTVBBQ1RfU0NPUEVfVU5TUEVDSUZJRUQQABIdChlTRVNTSU9OX0NPTVBBQ1RfU0NPUEVfQUxMEAESIQodU0VTU0lPTl9DT01QQUNUX1NDT1BFX1BST01QVFMQAhIjCh9TRVNTSU9OX0NPTVBBQ1RfU0NPUEVfUkVTUE9OU0VTEANCMFouYWdlbnRyZXBsL3Byb3RvL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_conversation_v1_api, file_conversation_v1_detached_work, file_conversation_v1_permission, file_conversation_v1_turn]);
 
 /**
  * A session that can accept a prompt. Everything here is a FACT AT START;
@@ -1538,6 +1538,10 @@ export const SessionLiveSchema: GenMessage<SessionLive> = /*@__PURE__*/
  * states it (the get_context_usage verb — the one stable, typed source;
  * never derived from usage frames). Pulled by the daemon; the topbar's
  * context chip and the /context panel both resolve from THIS one fact.
+ * The vendor's FULL get_context_usage answer, typed field for field (the
+ * fidelity principle; verified against the SDK's declared response type).
+ * The one deliberate omission is the vendor's gridRows — pure presentation
+ * data (pre-rendered grid squares) the resolvers compose for themselves.
  *
  * @generated from message conversation.v1.SessionContextUsage
  */
@@ -1551,19 +1555,123 @@ export type SessionContextUsage = Message<"conversation.v1.SessionContextUsage">
   totalTokens: bigint;
 
   /**
-   * The model's context window — the bound.
+   * The usable context window — the bound the percentage is against.
    *
    * @generated from field: int64 max_tokens = 2;
    */
   maxTokens: bigint;
 
   /**
-   * The vendor's category breakdown, in served order — the /context
-   * panel's rows.
+   * The model's raw window before any usable-window adjustment.
+   *
+   * @generated from field: int64 raw_max_tokens = 4;
+   */
+  rawMaxTokens: bigint;
+
+  /**
+   * The vendor's own percent-used figure, verbatim (never re-derived).
+   *
+   * @generated from field: int64 percentage = 5;
+   */
+  percentage: bigint;
+
+  /**
+   * The model the window belongs to, the vendor's spelling.
+   *
+   * @generated from field: string model = 6;
+   */
+  model: string;
+
+  /**
+   * The vendor's category breakdown, in served order.
    *
    * @generated from field: repeated conversation.v1.SessionContextCategory categories = 3;
    */
   categories: SessionContextCategory[];
+
+  /**
+   * Memory files loaded into context (CLAUDE.md and friends).
+   *
+   * @generated from field: repeated conversation.v1.SessionContextMemoryFile memory_files = 7;
+   */
+  memoryFiles: SessionContextMemoryFile[];
+
+  /**
+   * MCP tools in context, per tool.
+   *
+   * @generated from field: repeated conversation.v1.SessionContextMcpTool mcp_tools = 8;
+   */
+  mcpTools: SessionContextMcpTool[];
+
+  /**
+   * Deferred built-in tools (schema loaded on demand).
+   *
+   * @generated from field: repeated conversation.v1.SessionContextDeferredBuiltinTool deferred_builtin_tools = 9;
+   */
+  deferredBuiltinTools: SessionContextDeferredBuiltinTool[];
+
+  /**
+   * Built-in system tools in context.
+   *
+   * @generated from field: repeated conversation.v1.SessionContextSystemTool system_tools = 10;
+   */
+  systemTools: SessionContextSystemTool[];
+
+  /**
+   * The system prompt, by section.
+   *
+   * @generated from field: repeated conversation.v1.SessionContextSystemPromptSection system_prompt_sections = 11;
+   */
+  systemPromptSections: SessionContextSystemPromptSection[];
+
+  /**
+   * Available subagents loaded into context.
+   *
+   * @generated from field: repeated conversation.v1.SessionContextAgent agents = 12;
+   */
+  agents: SessionContextAgent[];
+
+  /**
+   * The slash-command roll-up. UNSET when the vendor omitted it.
+   *
+   * @generated from field: optional conversation.v1.SessionContextSlashCommands slash_commands = 13;
+   */
+  slashCommands?: SessionContextSlashCommands | undefined;
+
+  /**
+   * The skills roll-up. UNSET when the vendor omitted it.
+   *
+   * @generated from field: optional conversation.v1.SessionContextSkills skills = 14;
+   */
+  skills?: SessionContextSkills | undefined;
+
+  /**
+   * The auto-compact trigger threshold. UNSET when the vendor omitted it.
+   *
+   * @generated from field: optional int64 auto_compact_threshold = 15;
+   */
+  autoCompactThreshold?: bigint | undefined;
+
+  /**
+   * Whether vendor auto-compaction is enabled.
+   *
+   * @generated from field: bool is_auto_compact_enabled = 16;
+   */
+  isAutoCompactEnabled: boolean;
+
+  /**
+   * The message-plane breakdown. UNSET when the vendor omitted it.
+   *
+   * @generated from field: optional conversation.v1.SessionContextMessageBreakdown message_breakdown = 17;
+   */
+  messageBreakdown?: SessionContextMessageBreakdown | undefined;
+
+  /**
+   * The API-side usage figures. UNSET when the vendor answered null.
+   *
+   * @generated from field: optional conversation.v1.SessionContextApiUsage api_usage = 18;
+   */
+  apiUsage?: SessionContextApiUsage | undefined;
 };
 
 /**
@@ -1592,6 +1700,21 @@ export type SessionContextCategory = Message<"conversation.v1.SessionContextCate
    * @generated from field: int64 tokens = 2;
    */
   tokens: bigint;
+
+  /**
+   * The vendor's display color for the category, verbatim.
+   *
+   * @generated from field: string color = 3;
+   */
+  color: string;
+
+  /**
+   * Whether the category is deferred (loaded on demand). UNSET when the
+   * vendor omitted the flag.
+   *
+   * @generated from field: optional bool is_deferred = 4;
+   */
+  isDeferred?: boolean | undefined;
 };
 
 /**
@@ -1600,6 +1723,433 @@ export type SessionContextCategory = Message<"conversation.v1.SessionContextCate
  */
 export const SessionContextCategorySchema: GenMessage<SessionContextCategory> = /*@__PURE__*/
   messageDesc(file_conversation_v1_session, 49);
+
+/**
+ * One memory file in context.
+ *
+ * @generated from message conversation.v1.SessionContextMemoryFile
+ */
+export type SessionContextMemoryFile = Message<"conversation.v1.SessionContextMemoryFile"> & {
+  /**
+   * The file's path, the vendor's spelling.
+   *
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * The vendor's memory-file type label, verbatim.
+   *
+   * @generated from field: string type = 2;
+   */
+  type: string;
+
+  /**
+   * @generated from field: int64 tokens = 3;
+   */
+  tokens: bigint;
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextMemoryFile.
+ * Use `create(SessionContextMemoryFileSchema)` to create a new message.
+ */
+export const SessionContextMemoryFileSchema: GenMessage<SessionContextMemoryFile> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 50);
+
+/**
+ * One MCP tool in context.
+ *
+ * @generated from message conversation.v1.SessionContextMcpTool
+ */
+export type SessionContextMcpTool = Message<"conversation.v1.SessionContextMcpTool"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * The owning MCP server's name.
+   *
+   * @generated from field: string server_name = 2;
+   */
+  serverName: string;
+
+  /**
+   * @generated from field: int64 tokens = 3;
+   */
+  tokens: bigint;
+
+  /**
+   * Whether the tool's schema is currently loaded. UNSET when the vendor
+   * omitted the flag.
+   *
+   * @generated from field: optional bool is_loaded = 4;
+   */
+  isLoaded?: boolean | undefined;
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextMcpTool.
+ * Use `create(SessionContextMcpToolSchema)` to create a new message.
+ */
+export const SessionContextMcpToolSchema: GenMessage<SessionContextMcpTool> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 51);
+
+/**
+ * One deferred built-in tool.
+ *
+ * @generated from message conversation.v1.SessionContextDeferredBuiltinTool
+ */
+export type SessionContextDeferredBuiltinTool = Message<"conversation.v1.SessionContextDeferredBuiltinTool"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: int64 tokens = 2;
+   */
+  tokens: bigint;
+
+  /**
+   * @generated from field: bool is_loaded = 3;
+   */
+  isLoaded: boolean;
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextDeferredBuiltinTool.
+ * Use `create(SessionContextDeferredBuiltinToolSchema)` to create a new message.
+ */
+export const SessionContextDeferredBuiltinToolSchema: GenMessage<SessionContextDeferredBuiltinTool> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 52);
+
+/**
+ * One built-in system tool.
+ *
+ * @generated from message conversation.v1.SessionContextSystemTool
+ */
+export type SessionContextSystemTool = Message<"conversation.v1.SessionContextSystemTool"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: int64 tokens = 2;
+   */
+  tokens: bigint;
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextSystemTool.
+ * Use `create(SessionContextSystemToolSchema)` to create a new message.
+ */
+export const SessionContextSystemToolSchema: GenMessage<SessionContextSystemTool> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 53);
+
+/**
+ * One system-prompt section.
+ *
+ * @generated from message conversation.v1.SessionContextSystemPromptSection
+ */
+export type SessionContextSystemPromptSection = Message<"conversation.v1.SessionContextSystemPromptSection"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: int64 tokens = 2;
+   */
+  tokens: bigint;
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextSystemPromptSection.
+ * Use `create(SessionContextSystemPromptSectionSchema)` to create a new message.
+ */
+export const SessionContextSystemPromptSectionSchema: GenMessage<SessionContextSystemPromptSection> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 54);
+
+/**
+ * One available subagent in context.
+ *
+ * @generated from message conversation.v1.SessionContextAgent
+ */
+export type SessionContextAgent = Message<"conversation.v1.SessionContextAgent"> & {
+  /**
+   * The agent type name.
+   *
+   * @generated from field: string agent_type = 1;
+   */
+  agentType: string;
+
+  /**
+   * Where the agent definition came from, the vendor's spelling.
+   *
+   * @generated from field: string source = 2;
+   */
+  source: string;
+
+  /**
+   * @generated from field: int64 tokens = 3;
+   */
+  tokens: bigint;
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextAgent.
+ * Use `create(SessionContextAgentSchema)` to create a new message.
+ */
+export const SessionContextAgentSchema: GenMessage<SessionContextAgent> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 55);
+
+/**
+ * The slash-command roll-up.
+ *
+ * @generated from message conversation.v1.SessionContextSlashCommands
+ */
+export type SessionContextSlashCommands = Message<"conversation.v1.SessionContextSlashCommands"> & {
+  /**
+   * @generated from field: int64 total_commands = 1;
+   */
+  totalCommands: bigint;
+
+  /**
+   * @generated from field: int64 included_commands = 2;
+   */
+  includedCommands: bigint;
+
+  /**
+   * @generated from field: int64 tokens = 3;
+   */
+  tokens: bigint;
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextSlashCommands.
+ * Use `create(SessionContextSlashCommandsSchema)` to create a new message.
+ */
+export const SessionContextSlashCommandsSchema: GenMessage<SessionContextSlashCommands> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 56);
+
+/**
+ * The skills roll-up, with per-skill frontmatter figures.
+ *
+ * @generated from message conversation.v1.SessionContextSkills
+ */
+export type SessionContextSkills = Message<"conversation.v1.SessionContextSkills"> & {
+  /**
+   * @generated from field: int64 total_skills = 1;
+   */
+  totalSkills: bigint;
+
+  /**
+   * @generated from field: int64 included_skills = 2;
+   */
+  includedSkills: bigint;
+
+  /**
+   * @generated from field: int64 tokens = 3;
+   */
+  tokens: bigint;
+
+  /**
+   * @generated from field: repeated conversation.v1.SessionContextSkillFrontmatter skill_frontmatter = 4;
+   */
+  skillFrontmatter: SessionContextSkillFrontmatter[];
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextSkills.
+ * Use `create(SessionContextSkillsSchema)` to create a new message.
+ */
+export const SessionContextSkillsSchema: GenMessage<SessionContextSkills> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 57);
+
+/**
+ * One skill's loaded frontmatter.
+ *
+ * @generated from message conversation.v1.SessionContextSkillFrontmatter
+ */
+export type SessionContextSkillFrontmatter = Message<"conversation.v1.SessionContextSkillFrontmatter"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * Where the skill came from, the vendor's spelling.
+   *
+   * @generated from field: string source = 2;
+   */
+  source: string;
+
+  /**
+   * @generated from field: int64 tokens = 3;
+   */
+  tokens: bigint;
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextSkillFrontmatter.
+ * Use `create(SessionContextSkillFrontmatterSchema)` to create a new message.
+ */
+export const SessionContextSkillFrontmatterSchema: GenMessage<SessionContextSkillFrontmatter> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 58);
+
+/**
+ * The message-plane breakdown — where the conversation's tokens went.
+ *
+ * @generated from message conversation.v1.SessionContextMessageBreakdown
+ */
+export type SessionContextMessageBreakdown = Message<"conversation.v1.SessionContextMessageBreakdown"> & {
+  /**
+   * @generated from field: int64 tool_call_tokens = 1;
+   */
+  toolCallTokens: bigint;
+
+  /**
+   * @generated from field: int64 tool_result_tokens = 2;
+   */
+  toolResultTokens: bigint;
+
+  /**
+   * @generated from field: int64 attachment_tokens = 3;
+   */
+  attachmentTokens: bigint;
+
+  /**
+   * @generated from field: int64 assistant_message_tokens = 4;
+   */
+  assistantMessageTokens: bigint;
+
+  /**
+   * @generated from field: int64 user_message_tokens = 5;
+   */
+  userMessageTokens: bigint;
+
+  /**
+   * @generated from field: int64 redirected_context_tokens = 6;
+   */
+  redirectedContextTokens: bigint;
+
+  /**
+   * @generated from field: int64 unattributed_tokens = 7;
+   */
+  unattributedTokens: bigint;
+
+  /**
+   * Per-tool call/result figures — the ENCAPSULATED tool-call list the
+   * /context panel folds.
+   *
+   * @generated from field: repeated conversation.v1.SessionContextToolCallsByType tool_calls_by_type = 8;
+   */
+  toolCallsByType: SessionContextToolCallsByType[];
+
+  /**
+   * Per-attachment-type figures.
+   *
+   * @generated from field: repeated conversation.v1.SessionContextAttachmentsByType attachments_by_type = 9;
+   */
+  attachmentsByType: SessionContextAttachmentsByType[];
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextMessageBreakdown.
+ * Use `create(SessionContextMessageBreakdownSchema)` to create a new message.
+ */
+export const SessionContextMessageBreakdownSchema: GenMessage<SessionContextMessageBreakdown> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 59);
+
+/**
+ * One tool's call/result token split.
+ *
+ * @generated from message conversation.v1.SessionContextToolCallsByType
+ */
+export type SessionContextToolCallsByType = Message<"conversation.v1.SessionContextToolCallsByType"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: int64 call_tokens = 2;
+   */
+  callTokens: bigint;
+
+  /**
+   * @generated from field: int64 result_tokens = 3;
+   */
+  resultTokens: bigint;
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextToolCallsByType.
+ * Use `create(SessionContextToolCallsByTypeSchema)` to create a new message.
+ */
+export const SessionContextToolCallsByTypeSchema: GenMessage<SessionContextToolCallsByType> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 60);
+
+/**
+ * One attachment type's tokens.
+ *
+ * @generated from message conversation.v1.SessionContextAttachmentsByType
+ */
+export type SessionContextAttachmentsByType = Message<"conversation.v1.SessionContextAttachmentsByType"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: int64 tokens = 2;
+   */
+  tokens: bigint;
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextAttachmentsByType.
+ * Use `create(SessionContextAttachmentsByTypeSchema)` to create a new message.
+ */
+export const SessionContextAttachmentsByTypeSchema: GenMessage<SessionContextAttachmentsByType> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 61);
+
+/**
+ * The API-side usage figures riding the vendor's answer.
+ *
+ * @generated from message conversation.v1.SessionContextApiUsage
+ */
+export type SessionContextApiUsage = Message<"conversation.v1.SessionContextApiUsage"> & {
+  /**
+   * @generated from field: int64 input_tokens = 1;
+   */
+  inputTokens: bigint;
+
+  /**
+   * @generated from field: int64 output_tokens = 2;
+   */
+  outputTokens: bigint;
+
+  /**
+   * @generated from field: int64 cache_creation_input_tokens = 3;
+   */
+  cacheCreationInputTokens: bigint;
+
+  /**
+   * @generated from field: int64 cache_read_input_tokens = 4;
+   */
+  cacheReadInputTokens: bigint;
+};
+
+/**
+ * Describes the message conversation.v1.SessionContextApiUsage.
+ * Use `create(SessionContextApiUsageSchema)` to create a new message.
+ */
+export const SessionContextApiUsageSchema: GenMessage<SessionContextApiUsage> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 62);
 
 /**
  * The compaction scopes: a closed set of scalar choices (no state, no
