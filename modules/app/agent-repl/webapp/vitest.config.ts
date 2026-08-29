@@ -14,8 +14,11 @@ export default defineConfig({
     css: true,
     setupFiles: ["./test/setup.ts"],
     // `legacy/` is reference-only, does not compile, and carries no suites;
-    // keep vitest's default discovery from ever reaching into it.
-    exclude: ["**/node_modules/**", "**/dist/**", "legacy/**"],
+    // keep vitest's default discovery from ever reaching into it. The
+    // integration suite has its own config (vitest.integration.config.ts): it
+    // boots the app against a real loopback Connect server, so it must not
+    // ride along in the fast unit run either.
+    exclude: ["**/node_modules/**", "**/dist/**", "legacy/**", "test/integration/**"],
     coverage: {
       provider: "v8",
       all: true,
