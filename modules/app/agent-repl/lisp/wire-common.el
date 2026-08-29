@@ -62,21 +62,14 @@ routes here (`wire-verbs.el' keeps a same-named thin wrapper for
 readability at its own call sites), so the breach path is a single
 function rather than a shape re-derived per file.
 
-NOTHING IS SWALLOWED HERE.  `agent-repl--error' currently BOTH persists
-the record at ERROR level and signals a plain `error' as its display
-mechanism; that generic signal is caught precisely so the TYPED
-`agent-repl-wire-error' — the one every wire consumer catches, carrying
-which message, which field and why — is what leaves this function.  The
-failure is surfaced, and surfaced with strictly more information.  The
-fanout spec §13 has core.el's pre-pass making `agent-repl--error' a
-non-signaling ERROR rung like `agent-repl--warn'; when that lands, this
-`condition-case' becomes dead and should be deleted outright.  Deleting
-it BEFORE then would replace the typed error with an untyped one at every
-breach and break every consumer's handler."
-  (condition-case nil
-      (agent-repl--error nil "elisp.wire.contract-breach message=%s field=%s reason=%s"
-                         message-name field reason)
-    (error nil))
+The two acts are separate and both happen, in order: `agent-repl--error'
+RECORDS the breach on the durable sink at ERROR level, and the `signal'
+then ABORTS the caller with the TYPED error every wire consumer catches —
+carrying which message, which field, and why.  There is no
+`condition-case' anywhere in the codec: `agent-repl--error' is a pure
+logging rung that never signals, so nothing here can swallow anything."
+  (agent-repl--error nil "elisp.wire.contract-breach message=%s field=%s reason=%s"
+                     message-name field reason)
   (signal 'agent-repl-wire-error (list message-name field reason)))
 
 (defun agent-repl-wire--decoded (message-name value)
