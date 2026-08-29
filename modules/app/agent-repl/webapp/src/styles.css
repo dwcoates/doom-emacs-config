@@ -4062,3 +4062,35 @@ body.ungated #mode-select {
 .badge.hook-exit {
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- feed cards: response (src/feed/cards/response.ts) ----------------- */
+
+/* The bubble, its body, its 25-line cap and the green final-answer border are
+   all the existing `.bubble.assistant.md` treatment, unchanged. These are the
+   corner stamp and the two state marks. */
+
+/* The cost corner: the daemon's composed figure, drawn verbatim in the token
+   amber the footer's token cell wears, so the same idea reads the same color
+   wherever it appears. */
+.usage-stamp {
+  color: var(--info-tokens);
+  font-variant-numeric: tabular-nums;
+}
+/* The arriving indicator trails the prose that has landed so far. The dots are
+   the same animated ellipsis every other live face uses. */
+.response-arriving {
+  margin-left: 0.15rem;
+}
+/* A bubble the turn's death cut short: the border says it and the marker names
+   it. WHY it died is the turn's terminal row, never this bubble's, so the
+   marker carries no reason text. */
+.bubble.assistant.response-cut-short {
+  border-color: var(--err);
+}
+.response-cut-short-marker {
+  display: block;
+  color: var(--err);
+  font-size: 0.7rem;
+  font-style: italic;
+  margin-top: 0.2rem;
+}
