@@ -402,7 +402,7 @@ describe("KillTurn", () => {
     expect(failureKind(await h.turns.killTurn(kill(false)))).toBe("live");
   });
 
-  it("NAMES the live work in the refusal", async () => {
+  it("NAMES the live work in the refusal, by its spawning call", async () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.live.onTaskStarted(
@@ -414,7 +414,7 @@ describe("KillTurn", () => {
     const failure = response.result.case === "failure" ? response.result.value : undefined;
     expect(
       failure?.cause.case === "live" ? failure.cause.value.liveWork.map((id) => id.value) : undefined,
-    ).toEqual(["b01"]);
+    ).toEqual(["t"]);
   });
 
   it("stops the whole transitive set when forced", async () => {
