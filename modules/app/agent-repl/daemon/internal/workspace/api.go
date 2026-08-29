@@ -177,6 +177,11 @@ type Verbs interface {
 	// verbatim. The daemon validates the workspace and opens nothing itself;
 	// there is no ack and no command loop.
 	OpenInEditor(ctx context.Context, ws ids.WorkspaceID, path string, line *uint32) error
+	// Notify raises one host notification: it relays the TYPED notification
+	// onto the workspace's host stream and sets the roster's attention marker,
+	// which SelectWorkspace clears. It is the session watcher's LifecycleSink
+	// notification hook, wired by the server.
+	Notify(ctx context.Context, ws ids.WorkspaceID, note sessionwatcher.HostNotification) error
 	// Resolve turns a client's echoed WorkspaceRef into a workspace, keying on
 	// `id` and REFUSING a ref whose `dir` disagrees with the registry.
 	Resolve(ctx context.Context, ref *workspacev1.WorkspaceRef) (wsm.Workspace, error)
