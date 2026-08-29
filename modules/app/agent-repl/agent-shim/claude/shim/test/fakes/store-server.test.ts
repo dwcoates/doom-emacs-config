@@ -1,0 +1,693 @@
+/**
+ * The fake store is TEST INFRASTRUCTURE that other suites assert against, so
+ * its own semantics are pinned here. A fake that upserts wrongly, or replays
+ * its opening page down the tail, would make every suite built on it pass
+ * while the real shim is broken.
+ */
+import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
+import { mkdtempSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { conversationv1, storev1 } from "../../src/proto.js";
+import { createStoreClient, type StoreClient } from "../../src/store/client.js";
+import { startFakeStore, type FakeStore } from "./store-server.js";
+
+const running: FakeStore[] = [];
+
+afterEach(async () => {
+  for (const store of running.splice(0)) await store.close();
+});
+
+async function store(): Promise<{ store: FakeStore; client: StoreClient }> {
+  const sock = path.join(mkdtempSync(path.join(os.tmpdir(), "fake-store-")), "store.sock");
+  const started = await startFakeStore(sock);
+  running.push(started);
+  return { store: started, client: createStoreClient(sock) };
+}
+
+const agentId = (value: string): conversationv1.AgentId =>
+  create(conversationv1.AgentIdSchema, { value });
+
+/** One page line for `book`, carrying an activity update, under `upsertKey`. */
+function pageLineEntry(book: string, upsertKey: string, text: string): storev1.StoreEntry {
+  return create(storev1.StoreEntrySchema, {
+    plane: create(storev1.PlaneSchema, {
+      stream: create(storev1.PlaneStreamSchema, {}),
+    }),
+    writeId: `w-${upsertKey}-${text}`,
+    upsertKey,
+    entry: {
+      case: "agentUpdate",
+      value: create(storev1.StoreAgentUpdateSchema, {
+        agentInfo: {
+          case: "serveableFrame",
+          value: create(storev1.StorePageLineSchema, {
+            pageAgentId: agentId(book),
+            agentItem: create(storev1.StoreAgentItemSchema, {
+              item: {
+                case: "agentPrompt",
+                value: create(conversationv1.AgentPromptSchema, {
+                  id: create(conversationv1.TurnIdSchema, { value: text }),
+                  agent: agentId(book),
+                }),
+              },
+            }),
+          }),
+        },
+      }),
+    },
+  });
+}
+
+/** A frame carrying one of the terminal arms, which concludes an agent. */
+function terminalEntry(book: string, upsertKey: string): storev1.StoreEntry {
+  return create(storev1.StoreEntrySchema, {
+    plane: create(storev1.PlaneSchema, { stream: create(storev1.PlaneStreamSchema, {}) }),
+    writeId: `w-${upsertKey}`,
+    upsertKey,
+    entry: {
+      case: "agentUpdate",
+      value: create(storev1.StoreAgentUpdateSchema, {
+        agentInfo: {
+          case: "serveableFrame",
+          value: create(storev1.StorePageLineSchema, {
+            pageAgentId: agentId(book),
+            agentItem: create(storev1.StoreAgentItemSchema, {
+              item: {
+                case: "agentFrame",
+                value: create(conversationv1.AgentFrameSchema, {
+                  agentId: agentId(book),
+                  result: {
+                    case: "success",
+                    value: create(conversationv1.AgentSuccessSchema, {
+                      outcome: {
+                        case: "completed",
+                        value: create(conversationv1.AgentCompletedSchema, {}),
+                      },
+                    }),
+                  },
+                }),
+              },
+            }),
+          }),
+        },
+      }),
+    },
+  });
+}
+
+/** A frame announcing detached work, optionally naming the run it left. */
+function detachedEntry(book: string, upsertKey: string, workId: string, runId: string): storev1.StoreEntry {
+  return create(storev1.StoreEntrySchema, {
+    plane: create(storev1.PlaneSchema, { stream: create(storev1.PlaneStreamSchema, {}) }),
+    writeId: `w-${upsertKey}`,
+    upsertKey,
+    entry: {
+      case: "agentUpdate",
+      value: create(storev1.StoreAgentUpdateSchema, {
+        agentInfo: {
+          case: "serveableFrame",
+          value: create(storev1.StorePageLineSchema, {
+            pageAgentId: agentId(book),
+            agentItem: create(storev1.StoreAgentItemSchema, {
+              item: {
+                case: "agentFrame",
+                value: create(conversationv1.AgentFrameSchema, {
+                  agentId: agentId(book),
+                  result: {
+                    case: "detachedWork",
+                    value: create(conversationv1.AgentDetachedWorkSchema, {
+                      work: create(conversationv1.DetachedWorkIdSchema, { value: workId }),
+                      origin: {
+                        case: "detached",
+                        value: create(conversationv1.DetachedWorkDetachedSchema, {
+                          detachedFromId: create(conversationv1.AgentActivityIdSchema, { value: runId }),
+                          cause: {
+                            case: "requested",
+                            value: create(conversationv1.DetachedCauseRequestedSchema, {}),
+                          },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+            }),
+          }),
+        },
+      }),
+    },
+  });
+}
+
+/** A bash lifecycle row terminating one run. */
+function bashTerminalEntry(runId: string): storev1.StoreEntry {
+  return create(storev1.StoreEntrySchema, {
+    plane: create(storev1.PlaneSchema, { stream: create(storev1.PlaneStreamSchema, {}) }),
+    writeId: `w-bash-${runId}`,
+    upsertKey: `bash:${runId}`,
+    entry: {
+      case: "agentUpdate",
+      value: create(storev1.StoreAgentUpdateSchema, {
+        agentInfo: {
+          case: "bash",
+          value: create(storev1.StoreAgentBashSchema, {
+            run: create(conversationv1.AgentActivityIdSchema, { value: runId }),
+            frame: create(conversationv1.AgentBashSchema, {
+              result: {
+                case: "success",
+                value: create(conversationv1.AgentBashSuccessSchema, {}),
+              },
+            }),
+          }),
+        },
+      }),
+    },
+  });
+}
+
+async function write(client: StoreClient, ...entries: storev1.StoreEntry[]): Promise<void> {
+  const response = await client.writeBatch(
+    create(storev1.WriteBatchRequestSchema, {
+      producer: "claude-shim:test",
+      batch: create(storev1.EntryBatchSchema, { entries }),
+    }),
+  );
+  if (response.result.case !== "success") {
+    throw new Error(`fake store refused a write: ${JSON.stringify(response.result)}`);
+  }
+}
+
+async function open(
+  client: StoreClient,
+  book: string,
+  pageSize: number,
+  knownThrough?: storev1.StoreItemPointer,
+): Promise<storev1.OpenAgentSessionSuccess> {
+  const response = await client.openAgentSession(
+    create(storev1.OpenAgentSessionRequestSchema, {
+      agent: agentId(book),
+      pageSize,
+      ...(knownThrough === undefined ? {} : { knownThrough }),
+    }),
+  );
+  if (response.result.case !== "success") throw new Error("fake store refused an open");
+  return response.result.value;
+}
+
+describe("WriteBatch", () => {
+  it("acks a batch and lands its entries", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+
+    // Act.
+    await write(client, pageLineEntry("a", "prompt:t1", "t1"));
+
+    // Assert.
+    expect(fake.book("a")).toHaveLength(1);
+  });
+
+  it("UPSERTS by key: a re-sent row replaces rather than appends", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "first"));
+
+    // Act.
+    await write(client, pageLineEntry("a", "prompt:t1", "second"));
+
+    // Assert.
+    expect(fake.book("a")).toHaveLength(1);
+  });
+
+  it("keeps an upserted row's original POSITION", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "one"));
+    await write(client, pageLineEntry("a", "prompt:t2", "two"));
+
+    // Act.
+    await write(client, pageLineEntry("a", "prompt:t1", "one-revised"));
+
+    // Assert.
+    expect(fake.book("a").map((line) => line.at?.value)).toEqual(["1", "2"]);
+  });
+
+  it("fails every write while the failure switch is set", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failWrites("store is down");
+
+    // Act.
+    const response = await client.writeBatch(
+      create(storev1.WriteBatchRequestSchema, {
+        producer: "claude-shim:test",
+        batch: create(storev1.EntryBatchSchema, {
+          entries: [pageLineEntry("a", "prompt:t1", "t1")],
+        }),
+      }),
+    );
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+
+  it("lands NOTHING from a failed batch, so a whole-batch retry cannot duplicate", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failWrites("store is down");
+
+    // Act.
+    await client.writeBatch(
+      create(storev1.WriteBatchRequestSchema, {
+        producer: "claude-shim:test",
+        batch: create(storev1.EntryBatchSchema, {
+          entries: [pageLineEntry("a", "prompt:t1", "t1")],
+        }),
+      }),
+    );
+
+    // Assert.
+    expect(fake.book("a")).toEqual([]);
+  });
+
+  it("accepts writes again once the switch is cleared", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failWrites("store is down");
+    fake.failWrites(null);
+
+    // Act.
+    await write(client, pageLineEntry("a", "prompt:t1", "t1"));
+
+    // Assert.
+    expect(fake.book("a")).toHaveLength(1);
+  });
+
+  it("records session updates separately from page lines", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    const entry = create(storev1.StoreEntrySchema, {
+      plane: create(storev1.PlaneSchema, { stream: create(storev1.PlaneStreamSchema, {}) }),
+      writeId: "w-1",
+      upsertKey: "session:model_changed:u1",
+      entry: {
+        case: "sessionUpdate",
+        value: create(conversationv1.SessionUpdateSchema, {
+          update: {
+            case: "modelChanged",
+            value: create(conversationv1.SessionModelChangedSchema, {}),
+          },
+        }),
+      },
+    });
+
+    // Act.
+    await write(client, entry);
+
+    // Assert.
+    expect(fake.sessionUpdates()).toHaveLength(1);
+  });
+
+  it("keeps unserved items out of the served book", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    const entry = create(storev1.StoreEntrySchema, {
+      plane: create(storev1.PlaneSchema, { stream: create(storev1.PlaneStreamSchema, {}) }),
+      writeId: "w-2",
+      upsertKey: "prompt:keepalive",
+      entry: {
+        case: "agentUpdate",
+        value: create(storev1.StoreAgentUpdateSchema, {
+          agentInfo: {
+            case: "unservedItem",
+            value: create(storev1.StoreUnservedItemSchema, {
+              unservedItem: {
+                case: "keepalive",
+                value: create(storev1.StoreAgentItemSchema, {}),
+              },
+            }),
+          },
+        }),
+      },
+    });
+
+    // Act.
+    await write(client, entry);
+
+    // Assert.
+    expect({ book: fake.book("a"), unserved: fake.unserved().length }).toEqual({
+      book: [],
+      unserved: 1,
+    });
+  });
+});
+
+describe("OpenAgentSession", () => {
+  it("serves the opening page NEWEST FIRST", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "one"));
+    await write(client, pageLineEntry("a", "prompt:t2", "two"));
+
+    // Act.
+    const success = await open(client, "a", 10);
+
+    // Assert.
+    expect(success.page?.lines.map((line) => line.at?.value)).toEqual(["2", "1"]);
+  });
+
+  it("caps the page at the caller's budget", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "one"));
+    await write(client, pageLineEntry("a", "prompt:t2", "two"));
+    await write(client, pageLineEntry("a", "prompt:t3", "three"));
+
+    // Act.
+    const success = await open(client, "a", 2);
+
+    // Assert.
+    expect(success.page?.lines).toHaveLength(2);
+  });
+
+  it("points `more` at the page's OLDEST line, which the next read echoes", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "one"));
+    await write(client, pageLineEntry("a", "prompt:t2", "two"));
+    await write(client, pageLineEntry("a", "prompt:t3", "three"));
+
+    // Act.
+    const success = await open(client, "a", 2);
+
+    // Assert.
+    expect(success.page?.boundary).toEqual({
+      case: "more",
+      value: expect.objectContaining({
+        lastItem: expect.objectContaining({ value: "2" }),
+      }),
+    });
+  });
+
+  it("reports the floor when the page reached the oldest line", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "one"));
+
+    // Act.
+    const success = await open(client, "a", 10);
+
+    // Assert.
+    expect(success.page?.boundary.case).toBe("floor");
+  });
+
+  it("honors known_through by serving ONLY items newer than it", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "one"));
+    await write(client, pageLineEntry("a", "prompt:t2", "two"));
+    const knownThrough = create(storev1.StoreItemPointerSchema, { value: "1" });
+
+    // Act.
+    const success = await open(client, "a", 10, knownThrough);
+
+    // Assert.
+    expect(success.page?.lines.map((line) => line.at?.value)).toEqual(["2"]);
+  });
+
+  it("serves an empty page for a book nobody has written", async () => {
+    // Arrange.
+    const { client } = await store();
+
+    // Act.
+    const success = await open(client, "unknown", 10);
+
+    // Assert.
+    expect(success.page?.lines).toEqual([]);
+  });
+
+  it("mints a watch token with the page", async () => {
+    // Arrange.
+    const { client } = await store();
+
+    // Act.
+    const success = await open(client, "a", 10);
+
+    // Assert.
+    expect(success.watch?.value).not.toBe("");
+  });
+});
+
+describe("WatchAgentSession", () => {
+  it("tails lines written AFTER the open", async () => {
+    // Arrange.
+    const { client } = await store();
+    const success = await open(client, "a", 10);
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
+    )[Symbol.asyncIterator]();
+
+    // Act.
+    await write(client, pageLineEntry("a", "prompt:t1", "after-open"));
+    const first = await tail.next();
+
+    // Assert.
+    expect(first.value?.line?.at?.value).toBe("1");
+  });
+
+  it("is a PURE tail: it never replays what the opening page carried", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "before-open"));
+    const success = await open(client, "a", 10);
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
+    )[Symbol.asyncIterator]();
+
+    // Act.
+    await write(client, pageLineEntry("a", "prompt:t2", "after-open"));
+    const first = await tail.next();
+
+    // Assert.
+    expect(first.value?.line?.at?.value).toBe("2");
+  });
+
+  it("delivers an UPSERT of an existing row down the tail", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "first"));
+    const success = await open(client, "a", 0);
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
+    )[Symbol.asyncIterator]();
+
+    // Act.
+    await write(client, pageLineEntry("a", "prompt:t2", "second"));
+    const first = await tail.next();
+
+    // Assert.
+    expect(first.value?.line?.at?.value).toBe("2");
+  });
+
+  it("refuses an unknown token with NotFound, since a stream cannot say it otherwise", async () => {
+    // Arrange.
+    const { client } = await store();
+    const request = create(storev1.WatchAgentSessionRequestSchema, {
+      watch: create(storev1.AgentSessionTokenSchema, { value: "never-minted" }),
+    });
+
+    // Act.
+    const rejection = await (async (): Promise<ConnectError | null> => {
+      try {
+        for await (const _line of client.watchAgentSession(request)) return null;
+        return null;
+      } catch (err) {
+        return ConnectError.from(err);
+      }
+    })();
+
+    // Assert.
+    expect(rejection?.code).toBe(Code.NotFound);
+  });
+});
+
+describe("ReadAgentPage", () => {
+  it("walks strictly OLDER than the pointer it was given", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "one"));
+    await write(client, pageLineEntry("a", "prompt:t2", "two"));
+    await write(client, pageLineEntry("a", "prompt:t3", "three"));
+
+    // Act.
+    const response = await client.readAgentPage(
+      create(storev1.ReadAgentPageRequestSchema, {
+        book: agentId("a"),
+        pageSize: 10,
+        after: create(storev1.StoreItemPointerSchema, { value: "3" }),
+      }),
+    );
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.lines : []).toHaveLength(2);
+  });
+
+  it("reports the floor once the walk reached the oldest line", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "one"));
+    await write(client, pageLineEntry("a", "prompt:t2", "two"));
+
+    // Act.
+    const response = await client.readAgentPage(
+      create(storev1.ReadAgentPageRequestSchema, {
+        book: agentId("a"),
+        pageSize: 10,
+        after: create(storev1.StoreItemPointerSchema, { value: "2" }),
+      }),
+    );
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.boundary.case : "").toBe(
+      "floor",
+    );
+  });
+
+  it("reports `more` when the budget cut the walk short", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "one"));
+    await write(client, pageLineEntry("a", "prompt:t2", "two"));
+    await write(client, pageLineEntry("a", "prompt:t3", "three"));
+
+    // Act.
+    const response = await client.readAgentPage(
+      create(storev1.ReadAgentPageRequestSchema, {
+        book: agentId("a"),
+        pageSize: 1,
+        after: create(storev1.StoreItemPointerSchema, { value: "3" }),
+      }),
+    );
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.boundary.case : "").toBe(
+      "more",
+    );
+  });
+});
+
+describe("GetLiveWork", () => {
+  it("reports an agent that started and never concluded", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, detachedEntry("a", "activity:run1", "task-1", "run1"));
+
+    // Act.
+    const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+
+    // Assert.
+    expect(
+      response.result.case === "success"
+        ? response.result.value.liveAgents.map((id) => id.value)
+        : [],
+    ).toEqual(["a"]);
+  });
+
+  it("stops reporting an agent once a terminal frame lands", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, detachedEntry("a", "activity:run1", "task-1", "run1"));
+    await write(client, terminalEntry("a", "terminal:a:u1"));
+
+    // Act.
+    const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+
+    // Assert.
+    expect(
+      response.result.case === "success" ? response.result.value.liveAgents : [],
+    ).toEqual([]);
+  });
+
+  it("reports announced detached work with no terminal bash row", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, detachedEntry("a", "activity:run1", "task-1", "run1"));
+
+    // Act.
+    const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+
+    // Assert.
+    expect(
+      response.result.case === "success"
+        ? response.result.value.liveDetached.map((id) => id.value)
+        : [],
+    ).toEqual(["task-1"]);
+  });
+
+  it("stops reporting detached work once its run terminates", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, detachedEntry("a", "activity:run1", "task-1", "run1"));
+    await write(client, bashTerminalEntry("run1"));
+
+    // Act.
+    const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+
+    // Assert.
+    expect(
+      response.result.case === "success" ? response.result.value.liveDetached : [],
+    ).toEqual([]);
+  });
+
+  it("reports no live workflows, because nothing writes one this wave", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, detachedEntry("a", "activity:run1", "task-1", "run1"));
+
+    // Act.
+    const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+
+    // Assert.
+    expect(
+      response.result.case === "success" ? response.result.value.liveWorkflows : [],
+    ).toEqual([]);
+  });
+});
+
+describe("GetWorkflow", () => {
+  it("answers Unimplemented, the same way the shim's own verb does", async () => {
+    // Arrange.
+    const { client } = await store();
+
+    // Act.
+    const rejection = await client
+      .getWorkflow(
+        create(storev1.GetWorkflowRequestSchema, {
+          work: create(conversationv1.DetachedWorkIdSchema, { value: "w1" }),
+        }),
+      )
+      .then(() => null, (err: unknown) => ConnectError.from(err));
+
+    // Assert.
+    expect(rejection?.code).toBe(Code.Unimplemented);
+  });
+});
+
+describe("GetSidecarCursors", () => {
+  it("answers an empty SUCCESS: nothing-yet is an answer, not an error", async () => {
+    // Arrange.
+    const { client } = await store();
+
+    // Act.
+    const response = await client.getSidecarCursors(
+      create(storev1.GetSidecarCursorsRequestSchema, {}),
+    );
+
+    // Assert.
+    expect(
+      response.result.case === "success" ? response.result.value.cursors : null,
+    ).toEqual([]);
+  });
+});
