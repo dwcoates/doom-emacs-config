@@ -353,15 +353,13 @@ func TestDetachedLostIsAnOrdinaryTerminal(t *testing.T) {
 	h.quiet()
 
 	// Act.
-	got := h.route(open.stream, entryFrame(&conversationv1.AgentFrame{
+	got := h.routeReaping(open.stream, entryFrame(&conversationv1.AgentFrame{
 		AgentId: agentID("sub-1"),
 		Result:  &conversationv1.AgentFrame_Failure{Failure: lostFailure()},
 	}))
 
 	// Assert.
-	assertNames(t, got, []string{
-		"feed.OnAgentTerminal", "footer.OnAgentTerminal", "sidebar.OnAgentTerminal", "lifecycle.OnLiveWorkChanged",
-	})
+	assertNames(t, got, []string{"feed.OnAgentTerminal", "footer.OnAgentTerminal", "sidebar.OnAgentTerminal"})
 	if !h.w.LiveWork().Empty() {
 		t.Fatal("lost work stayed in the live set")
 	}
