@@ -150,7 +150,7 @@ orchestration chain.
   turn`), kept solely so `KillTurn` can name its transitive refusal set; never
   on the wire except inside a refusal.
 
-### shim/v1 — the service the shim serves (16 rpcs, four sections)
+### shim/v1 — the service the shim serves (17 rpcs, four sections)
 
 Files: `service.proto`, one `endpoint_<rpc>.proto` each, `prompt_origin.proto`
 (the one shared file — an enum of send sites; it has no keep-alive value on
