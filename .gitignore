@@ -6,3 +6,5 @@
 .projectile
 **/.DS_Store
 modules/app/agent-repl/skills/**/.last-update.json
+
+node_modules
