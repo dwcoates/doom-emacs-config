@@ -9,6 +9,8 @@ package wsm
 import (
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 )
@@ -233,59 +235,88 @@ type OutputAddress struct {
 }
 
 // HeldPrompt is one parked submission. WSM is the ONE durable hold store.
+//
+// Two ORTHOGONAL facts describe a hold and each has its own column. The
+// CLASSIFICATION is the judge's verdict on the prompt (five arms, one column);
+// the HOLD KIND is a daemon-side condition unrelated to any verdict (three
+// arms, a separate nullable column). Neither is derivable from the other, so
+// neither is stored as a projection of the other.
 type HeldPrompt struct {
 	Workspace WorkspaceID
 	// Turn is the minted turn the prompt will run as when released.
 	Turn TurnID
-	// Text is the submission's full text (the metaprompt sentinel spans are
-	// stripped only for display, never on the record).
-	Text string
+	// Said is the WHOLE submission as the user composed it — text and any
+	// attached images — kept as the serialized proto blob. A text-only record
+	// would silently drop a pasted image, so there is no text column.
+	Said *conversationv1.UserSaid
 	// Origin is the prompt's origin, as conversation.v1.PromptOrigin names it.
 	Origin string
 	// Target, when set, is the bubble composer's addressed row.
 	Target *feedid.Ref
-	// Hold is why it is held, nil once it is deliverable.
+	// Hold is the daemon-side condition holding the prompt, nil when no
+	// condition does.
 	Hold *HoldKind
+	// ScheduleID is the drain schedule a HoldShutdown is waiting on, empty for
+	// every other hold kind.
+	ScheduleID string
 	// Classification is the classifier's verdict, nil until judged.
 	Classification *Classification
+	// Accepted records that the user accepted the tray's offer to let the
+	// prompt wait for the turn's end (UpdateHeldPrompt.accept), which is legal
+	// only on a hold_for_turn_end verdict.
+	Accepted bool
 	// Tombstone is why it was retired, nil while it stands.
 	Tombstone *Tombstone
 	// QueuedAt is when it was submitted.
 	QueuedAt time.Time
 }
 
-// HoldKind is why a prompt is held, mirroring frontend.v1's held-prompt arms.
+// HoldKind is a DAEMON-SIDE condition holding a prompt, independent of any
+// classification verdict. Keep-alive is not an arm: the keep-alive window is
+// the shim's, and the daemon never holds a prompt for it.
 type HoldKind int
 
 // The hold kinds.
 const (
-	// HoldClassifying is awaiting the classifier's verdict.
-	HoldClassifying HoldKind = iota
-	// HoldForTurnEnd waits for the running turn to end.
-	HoldForTurnEnd
-	// HoldUninterruptibleTurn waits because the running turn refuses interrupts.
-	HoldUninterruptibleTurn
-	// HoldClassificationError holds after the classifier failed.
-	HoldClassificationError
 	// HoldShutdown holds for the shutdown drain's lease.
-	HoldShutdown
-	// HoldKeepAlive holds inside a keep-alive window.
-	HoldKeepAlive
+	HoldShutdown HoldKind = iota
 	// HoldSessionStarting holds while the session is still coming up.
 	HoldSessionStarting
 	// HoldBuildRefresh holds across a build-staleness bounce.
 	HoldBuildRefresh
 )
 
+// ClassificationArm is the classifier's verdict on a held prompt: ONE column
+// with five arms, mirroring frontend.v1's held-prompt verdict oneof. Interject
+// and failure are arms of this one fact, never separate booleans that could
+// disagree with it.
+type ClassificationArm int
+
+// The classification arms.
+const (
+	// ArmClassifying is awaiting the classifier's verdict.
+	ArmClassifying ClassificationArm = iota
+	// ArmInterject interrupts the running turn.
+	ArmInterject
+	// ArmHoldForTurnEnd waits for the running turn to end.
+	ArmHoldForTurnEnd
+	// ArmUninterruptibleTurn waits because the running turn refuses interrupts;
+	// Command names the session command that made it uninterruptible.
+	ArmUninterruptibleTurn
+	// ArmClassificationError is the verdict after the classifier failed.
+	ArmClassificationError
+)
+
 // Classification is the classifier's verdict on a held prompt.
 type Classification struct {
-	// Interject reports whether the prompt interrupts the running turn.
-	Interject bool
+	// Arm is the verdict.
+	Arm ClassificationArm
 	// Reason is the judge's stated reason, kept as evidence.
 	Reason string
-	// Failed reports that judging errored; the prompt holds with
-	// HoldClassificationError.
-	Failed bool
+	// Command is the recognized session command that made the running turn
+	// uninterruptible. It is set only on ArmUninterruptibleTurn and is
+	// UNSPECIFIED otherwise.
+	Command conversationv1.SessionCommand
 	// At is when the verdict landed.
 	At time.Time
 }

@@ -82,8 +82,14 @@ type DB interface {
 	PutHeldPrompt(ctx context.Context, h HeldPrompt) error
 	// UpdateHeldPromptClassification records the classifier's verdict.
 	UpdateHeldPromptClassification(ctx context.Context, turn TurnID, c Classification) error
-	// UpdateHeldPromptHold changes or clears why a prompt is held.
-	UpdateHeldPromptHold(ctx context.Context, turn TurnID, h *HoldKind) error
+	// UpdateHeldPromptHold changes or clears the daemon-side condition holding a
+	// prompt. scheduleID is the drain schedule a HoldShutdown waits on and is
+	// required for that arm, empty for every other kind.
+	UpdateHeldPromptHold(ctx context.Context, turn TurnID, h *HoldKind, scheduleID string) error
+	// SetHeldPromptAccepted records the user's acceptance of the tray's offer to
+	// let the prompt wait for the turn's end. Legal ONLY on a hold_for_turn_end
+	// verdict.
+	SetHeldPromptAccepted(ctx context.Context, turn TurnID) error
 	// TombstoneHeldPrompt retires a held prompt with its reason.
 	TombstoneHeldPrompt(ctx context.Context, turn TurnID, why Tombstone) error
 	// HeldPrompts loads one workspace's standing holds, all-or-nothing.
