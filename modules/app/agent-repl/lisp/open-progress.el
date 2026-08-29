@@ -25,11 +25,11 @@
 ;;   first redisplay after the key already carries the workspace's name and
 ;;   the word "opening".
 ;;
-;;   PHASED.  Every later line comes from something that ARRIVED — a
-;;   continuation firing in the establishment ladder, or a daemon-pushed
-;;   `WorkspaceState' reaching `agent-repl-ws-state-transition-functions'.
-;;   Nothing here polls the daemon; the escalation timer is the file's only
-;;   timer and it measures OUR OWN patience, not the daemon's state.
+  ;;   PHASED.  Every later line comes from something that ARRIVED — the
+;;   verb's own ack, the first host push for the workspace, the xwidget's
+;;   load-finished event.  Nothing here polls the daemon and nothing asks
+;;   the page a question; the escalation timer is the file's only timer and
+;;   it measures OUR OWN patience, not the daemon's state.
 ;;
 ;;   RESOLVED ON EVERY PATH.  A placeholder is torn down by success, and
 ;;   REPLACED IN PLACE by a named cause on nack, timeout, or a severed
@@ -52,9 +52,8 @@
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--sanitize-ws-name "agent-repl-core" (name))
 (declare-function agent-repl--frontend-main-area-window "agent-repl-frontend" ())
-(declare-function agent-repl--frontend-ws-command-key "agent-repl-frontend-client" (ws))
-(declare-function agent-repl--frontend-backfill-settled-p "agent-repl-frontend-client" (workspace))
 
+(defvar agent-repl-host-update-functions)
 (defvar agent-repl--color-init-blue)
 (defvar agent-repl--color-thinking-red)
 
@@ -118,17 +117,28 @@ specifically \"a bring-up is in flight\", which is exactly this."
 ;;;; ---- The stage ladder -------------------------------------------------
 
 (defconst agent-repl--open-progress-stages
-  '((:dispatched  . "Asking the daemon to open this workspace")
-    (:daemon-ready . "Daemon reached; waiting for it to report ready")
-    (:opening     . "openWorkspace sent; awaiting acknowledgement")
-    (:acked       . "Acknowledged; bringing the session up")
-    (:backfilling . "Session up; loading the conversation")
-    (:rendering   . "Rendering the view"))
+  '((:requested  . "Asking the daemon to open this workspace")
+    (:acked      . "The daemon answered")
+    (:host-state . "The workspace's host state arrived")
+    (:loaded     . "The webview finished loading"))
   "The ordered stages an open passes through, newest last.
+
+FOUR STAGES, and every one of them is EMACS-OBSERVABLE — the ladder
+reports what this process saw, never what it guessed the daemon was
+doing.  `:requested\=' is the verb leaving; `:acked\=' is its answer;
+`:host-state\=' is the FIRST host push for the workspace (arriving on
+`agent-repl-host-update-functions\=', which is the moment the daemon has
+a state to report); `:loaded\=' is the xwidget saying its load finished.
+
+There is no probing anywhere on it.  The old ladder asked the page
+whether it had rendered, through a JavaScript hook that no longer
+exists — and could not have been trusted anyway, since a page that
+cannot answer is exactly the page whose stall the ladder is for.
+
 Each entry is (PHASE . LABEL).  The order is the ladder: a phase may
-only ever ADVANCE (`agent-repl--open-progress-note' drops a regression),
-because a stage report arriving late must not make a nearly-mounted view
-claim it is still waiting for the daemon.")
+only ever ADVANCE (`agent-repl--open-progress-note\=' drops a
+regression), because a stage report arriving late must not make a
+nearly-mounted view claim it is still waiting for the daemon.")
 
 (defconst agent-repl--open-progress-terminal-phases '(:failed :timed-out)
   "Phases that END a placeholder's progress and leave it standing.
@@ -188,7 +198,7 @@ the reason a second keypress cannot stack a second placeholder."
          ;; A terminal phase has no ladder index; every stage before it
          ;; stays as it was, so an unresolved ladder reads as unresolved
          ;; rather than silently completing itself.
-         (now (or now (agent-repl--open-progress-stage-index :dispatched))))
+         (now (or now (agent-repl--open-progress-stage-index :requested))))
     (cond
      ((< here now) (concat (propertize "  ✓ " 'face 'agent-repl-open-progress-done)
                            (propertize label 'face 'agent-repl-open-progress-done)))
@@ -277,7 +287,7 @@ asynchronous is even attempted."
           (unless (derived-mode-p 'agent-repl-open-progress-mode)
             (agent-repl-open-progress-mode)))
         (puthash ws (list :buffer buf
-                          :phase :dispatched
+                          :phase :requested
                           :detail nil
                           :started (float-time)
                           :timer (run-at-time agent-repl-open-progress-escalate-seconds
@@ -335,6 +345,21 @@ the buffer, or nil when WS had no pending open."
     (agent-repl--warn ws "open-progress: FAILED detail=%s" detail)
     (agent-repl--open-progress-render ws)))
 
+(defun agent-repl--open-progress-stall-diagnosis (phase)
+  "Return the stall diagnosis for an open stuck at PHASE.
+
+NAMES THE FIRST MISSING STAGE, because that is the whole diagnostic
+value of a ladder: what has not happened is what is wrong, and the last
+stage reached only says how far the open got before it stopped.  A
+PHASE that is not on the ladder (a terminal one) has no successor to
+name, so the diagnosis says the ladder itself never advanced."
+  (let* ((index (agent-repl--open-progress-stage-index phase))
+         (next (and index (nth (1+ index) agent-repl--open-progress-stages))))
+    (if next
+        (format "stalled waiting for: %s (reached: %s)"
+                (cdr next) (alist-get phase agent-repl--open-progress-stages))
+      (format "stalled at %s with no further stage expected" phase))))
+
 (defun agent-repl--open-progress-escalate (ws)
   "Escalate WS's still-pending placeholder to a visible warning.
 Armed by `agent-repl--open-progress-start' and cancelled by every
@@ -347,9 +372,7 @@ waiting.  A placeholder already resolved is left exactly as it is."
         (puthash ws (plist-put
                      (plist-put
                       (plist-put entry :phase :timed-out)
-                      :detail (format "no response past %s — last stage reached: %s"
-                                      (alist-get phase agent-repl--open-progress-stages)
-                                      phase))
+                      :detail (agent-repl--open-progress-stall-diagnosis phase))
                      :timer nil)
                  agent-repl--open-progress)
         (agent-repl--warn ws "open-progress: ESCALATED after %ss stage=%s"
@@ -402,50 +425,26 @@ Returns non-nil when a placeholder was actually torn down."
 ;; load-order reason the state-transition subscription below is.
 (add-hook 'agent-repl-ws-del-hook #'agent-repl--open-progress-abandon)
 
-;;;; ---- Pushed-state subscription ----------------------------------------
+;;;; ---- The host stream and the webview -------------------------------
 
-(defconst agent-repl--open-progress-broken-states
-  '(:severed :dead :degraded)
-  "Pushed render states that RESOLVE a pending open as failed.
-Every one of them is the blue band's \"the local route to a session is
-broken\" claim, which is a verdict on the very thing the placeholder is
-waiting for — so the placeholder reports it instead of waiting out its
-own deadline against a bring-up the daemon has already given up on.")
-
-(defun agent-repl--open-progress-react-to-pushed-state (ws new _previous)
-  "Advance WS's placeholder from a daemon-pushed render state NEW.
-Subscriber for `agent-repl-ws-state-transition-functions'
-\(frontend-state.el).  This is the PHASED half of the contract and it
-polls nothing: the daemon pushes `WorkspaceState', frontend-state.el
-applies it, and the placeholder moves on the same frame.
-
-`:init' is the bring-up itself.  Any other live state means the session
-is up, so the remaining wait is the transcript — read off the same
-pushed `SessionView.backfill' the switch-ensure reads.  `:hibernated'
-moves nothing: the workspace is asleep and the open is what will wake
-it."
+(defun agent-repl--open-progress-note-host-state (ws &optional _host)
+  "Advance WS's placeholder on the FIRST host push for the workspace.
+Registered on `agent-repl-host-update-functions', which runs after every
+`WatchHostWorkspace' push.  The ladder only ever advances, so later
+pushes move nothing — the stage is \"a host state ARRIVED\", not \"the
+newest one\"."
   (when (agent-repl--open-progress-active-p ws)
-    (cond
-     ((memq new agent-repl--open-progress-broken-states)
-      (agent-repl--open-progress-fail
-       ws (format "the daemon pushed %s for this workspace — its session route is broken"
-                  new)))
-     ((eq new :init)
-      (agent-repl--open-progress-note ws :acked))
-     ((eq new :hibernated) nil)
-     (t
-      (agent-repl--open-progress-note
-       ws (if (agent-repl--frontend-backfill-settled-p
-               (agent-repl--frontend-ws-command-key ws))
-              :rendering
-            :backfilling))))))
+    (agent-repl--open-progress-note ws :host-state)))
 
-;; Registered here though the hook lives in frontend-state.el: `add-hook'
-;; auto-vivifies the variable and that file's `defvar ... nil' does not reset
-;; an already-bound one, so this survives either load order (the arrangement
-;; sidebar.el and status.el already use).
-(add-hook 'agent-repl-ws-state-transition-functions
-          #'agent-repl--open-progress-react-to-pushed-state)
+(defun agent-repl-open-progress-note-loaded (ws)
+  "Advance WS's placeholder to `:loaded' — the xwidget finished loading.
+Called by frontend.el from the mounted widget's own load-finished event,
+which is the only honest report that the page is up: nothing asks the
+page a question, so a page too broken to answer one cannot fake this."
+  (when (agent-repl--open-progress-active-p ws)
+    (agent-repl--open-progress-note ws :loaded)))
+
+(add-hook 'agent-repl-host-update-functions #'agent-repl--open-progress-note-host-state)
 
 (provide 'agent-repl-open-progress)
 ;;; open-progress.el ends here
