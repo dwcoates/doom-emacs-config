@@ -34,8 +34,18 @@
  * `api_error_status` (`AgentFailure.api_request_failed`). Each `!api-*`
  * scenario produces the whole arc, because a converter that saw only one half
  * would classify the other wrongly.
+ *
+ * # The two `!fault-*` turns are about the SHIM, not the turn
+ *
+ * `!fault-converter` and `!fault-recover` are the only scenarios here whose
+ * turns SUCCEED. What goes wrong in the first is not the conversation — it is
+ * one vendor message the converter cannot convert, which the contract answers
+ * with no frame, a logged converter defect and a residue record rather than a
+ * dead session. They live in this family because the fact under test is a
+ * failure; they end well because a defective vendor message does not stop a
+ * turn.
  */
-import { scenario } from "./support.js";
+import { conclude, scenario } from "./support.js";
 import type { Scenario, ScenarioContext } from "../scenario.js";
 
 /**
@@ -555,6 +565,64 @@ export const REFUSAL_NO_FALLBACK = scenario({
   },
 });
 
+/** The hook the two converter-fault scenarios announce, well-formed or not. */
+const FAULT_HOOK = { hook_name: "PreToolUse:Read", hook_event: "PreToolUse" } as const;
+
+export const FAULT_CONVERTER = scenario({
+  name: "fault-converter",
+  prompt: "!fault-converter",
+  emits:
+    "ONE MALFORMED VENDOR MESSAGE and then an ordinary turn: a `hook_started` whose `hook_id` is the EMPTY " +
+    "STRING — an identity the converter requires and refuses to invent — followed by prose and a success result. " +
+    "The malformed message produces NO frame at all: the fold refuses it, logs a converter defect and records it " +
+    "as residue, which is the contract's answer to a record missing a required field",
+  writes: "the assistant line, the prompt line and the turn record; the malformed message is stream-only",
+  arms:
+    "SessionFault.converter_defect with an OPEN SessionDegradedWindow — the diagnostics arm, reached without any " +
+    "rpc failing. The malformed message itself reaches NO conversation.v1 arm, which is the point",
+  run(ctx) {
+    ctx.log(
+      { level: "warn", turn: ctx.turn, branch: "fault-converter" },
+      "fake turn carrying ONE malformed vendor message",
+    );
+    // `hook_id` is what `AgentHook`'s activity identity IS — the firing has no
+    // other stable name across its two records — so an empty one is not a
+    // degraded frame, it is no frame. Present-and-empty rather than absent: the
+    // converter refuses an identity that is stated as nothing, which is the
+    // shape a defective producer actually emits.
+    ctx.systemMessage("hook_started", { hook_id: "", ...FAULT_HOOK });
+    conclude(ctx, "One vendor message was unconvertible; the rest of the turn was ordinary.");
+  },
+});
+
+export const FAULT_RECOVER = scenario({
+  name: "fault-recover",
+  prompt: "!fault-recover",
+  emits:
+    "the SAME hook announcement, WELL-FORMED: a `hook_started`/`hook_response` pair carrying a real `hook_id`, " +
+    "so the fold converts it and the frame the malformed turn could not produce appears. Nothing else changes — " +
+    "the recovery is that an ordinary turn converted cleanly",
+  writes: "the assistant line, the prompt line and the turn record",
+  arms:
+    "AgentHook.result=succeeded, and the diagnostics returning to HEALTHY with the degraded window CLOSED " +
+    "carrying the dropped count the fault left behind",
+  run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "fault-recover" }, "fake recovery turn; every message converts");
+    const hookId = ctx.newUuid();
+    ctx.systemMessage("hook_started", { hook_id: hookId, ...FAULT_HOOK });
+    ctx.systemMessage("hook_response", {
+      hook_id: hookId,
+      ...FAULT_HOOK,
+      output: "",
+      stdout: "{}\n",
+      stderr: "",
+      exit_code: 0,
+      outcome: "success",
+    });
+    conclude(ctx, "Every message of this turn converted.");
+  },
+});
+
 export const CONTEXT_WINDOW_EXCEEDED = scenario({
   name: "context-window",
   prompt: "!context-window",
@@ -632,5 +700,7 @@ export const FAILURE_SCENARIOS = [
   REFUSAL_FALLBACK,
   REFUSAL_NO_FALLBACK,
   CONTEXT_WINDOW_EXCEEDED,
+  FAULT_CONVERTER,
+  FAULT_RECOVER,
   FAIL_MARKER,
 ];
