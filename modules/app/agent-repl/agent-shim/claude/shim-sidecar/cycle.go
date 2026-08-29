@@ -83,6 +83,9 @@ const rpcTimeout = 30 * time.Second
 type watched struct {
 	target discover.Target
 	tailer *tail.Tailer
+	// vanished records that the file has gone missing, so the disappearance is
+	// stated once rather than on every poll of a file that is still absent.
+	vanished bool
 }
 
 type sidecar struct {
@@ -424,7 +427,12 @@ func (s *sidecar) pollAll() {
 			return
 		}
 		w.tailer.Commit(result)
-		s.tracker.Activity(path, nowMs)
+		if w.vanished {
+			// A file that is readable again was a rename race; the tracker
+			// clears its own grace clock on the activity below.
+			w.vanished = false
+		}
+		s.tracker.Activity(path, fileActivityMs(path, nowMs))
 		s.log.With(logging.Context{
 			Operation: "tail-pickup", Path: path, TaskID: w.target.TaskID,
 			FileID: result.Next.GetFileId(), Offset: logging.Off(result.Next.GetOffset()),
@@ -432,12 +440,37 @@ func (s *sidecar) pollAll() {
 	}
 }
 
+// fileActivityMs answers when a file last actually GREW, which is what the LOST
+// policy's clock means. Our own read is not activity: a file full of bytes
+// written before the last reboot is not alive because we got round to reading
+// it, and stamping the read time onto it would make swept_up unreachable for
+// exactly the runs it exists to conclude. The fallback is used only when the
+// file cannot be stat'd, which the next poll will surface as its own failure.
+func fileActivityMs(path string, fallback int64) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fallback
+	}
+	return info.ModTime().UnixMilli()
+}
+
 // pollFailed narrates one file's read failure and, for a file that vanished,
 // starts the LOST policy's grace clock.
+//
+// THE VANISHED FILE'S TAILER IS KEPT. Its handler is the only converter that
+// can spell this run's terminal (seam.go looks the run's file up among the
+// watchers), so dropping it here would turn every file_vanished conclusion into
+// "no terminal for the LOST run" and leave the run open in every reader
+// downstream. It is dropped in lostEntries, once its terminal has been stated.
 func (s *sidecar) pollFailed(path string, w *watched, err error, nowMs int64) {
 	if os.IsNotExist(err) {
 		s.tracker.MarkVanished(path, nowMs)
-		delete(s.watchers, path)
+		if w.vanished {
+			s.log.With(logging.Context{Operation: "file-vanished", Path: path, TaskID: w.target.TaskID}).
+				LogVerbose("the vanished file is still absent; its grace window has not decided yet")
+			return
+		}
+		w.vanished = true
 		s.log.With(logging.Context{Operation: "file-vanished", Path: path, TaskID: w.target.TaskID, Level: "warn"}).
 			Log("the watched file vanished; any bytes appended past the committed offset went with it")
 		return
