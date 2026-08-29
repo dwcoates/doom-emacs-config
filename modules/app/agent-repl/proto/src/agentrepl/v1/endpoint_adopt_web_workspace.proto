@@ -29,5 +29,27 @@ message AdoptWebWorkspaceResponse {
 // persisted feed page position makes the re-attach evidence-free.
 message AdoptWebWorkspaceSuccess {}
 
-// Arms derived at the wave from the new daemon's real refusal sites.
-message AdoptWebWorkspaceError {}
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message AdoptWebWorkspaceError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    AdoptWebWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    AdoptWebWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    AdoptWebWorkspaceTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    AdoptWebWorkspaceNotYetAdopted not_yet_adopted = 4;
+  }
+}
+message AdoptWebWorkspaceUnknownWorkspace {}
+message AdoptWebWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message AdoptWebWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message AdoptWebWorkspaceNotYetAdopted {}

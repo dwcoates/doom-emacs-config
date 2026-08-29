@@ -63,16 +63,22 @@ message InterruptedDetached {
 }
 message InterruptNothingRunning {}
 
-// Refusal arms: confirm_required is landed (the UX depends on it); the
-// rest are DERIVED at the wave (e.g. the shim cannot be asked — today's
-// shim.v1 DetachedCancelUnsupported — is a real failure and lands here),
-// spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message InterruptError {
   oneof kind {
     // A turn interrupt while detached agents are live: the challenge.
     // Resend with confirm_agents to also stop them, or stop them first
     // via the all_agents target.
     InterruptConfirmRequired confirm_required = 1;
+    // The workspace id is not in the daemon's registry.
+    InterruptUnknownWorkspace unknown_workspace = 2;
+    // The echoed dir disagrees with the registry's dir for this id.
+    InterruptWorkspaceRefMismatch workspace_ref_mismatch = 3;
+    // This daemon released the workspace to a successor; dial `address`.
+    InterruptTransferringAway transferring_away = 4;
+    // A joining daemon has not finished adopting this workspace yet.
+    InterruptNotYetAdopted not_yet_adopted = 5;
   }
 }
 
@@ -81,3 +87,13 @@ message InterruptConfirmRequired {
   // How many live detached agents the stop would also end.
   int64 live_agent_count = 1;
 }
+message InterruptUnknownWorkspace {}
+message InterruptWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message InterruptTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message InterruptNotYetAdopted {}
