@@ -11,6 +11,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
 )
@@ -1070,4 +1071,131 @@ func (h *harness) shellWatchFor(work string) *shellWatch {
 		h.t.Fatalf("no shell watch for %q", work)
 	}
 	return entry
+}
+
+// shimResponse is the agent stream's frame type, spelled once so the
+// serialization test's helper signature stays readable.
+type shimResponse = shimv1.WatchAgentResponse
+
+// quietAll drains everything the START emitted and returns it, so a test can
+// assert on the opening facts themselves.
+func (h *harness) quietAll() []event {
+	h.t.Helper()
+	return h.sentinel(h.main)
+}
+
+// addressNow reads the output address currently in force.
+func (h *harness) addressNow() OutputAddress {
+	h.w.mu.Lock()
+	defer h.w.mu.Unlock()
+	return h.w.addr
+}
+
+// collect reads exactly n events.
+func (h *harness) collect(t *testing.T, n int) []event {
+	t.Helper()
+	seen := make([]event, 0, n)
+	for len(seen) < n {
+		select {
+		case e := <-h.rec.ch:
+			seen = append(seen, e)
+		case <-time.After(waitDeadline):
+			t.Fatalf("only %d of %d events arrived", len(seen), n)
+		}
+	}
+	return seen
+}
+
+// awaitRecord waits for the watcher to log a record, which is how a test
+// observes a branch that touches no sink.
+func (h *harness) awaitRecord(t *testing.T, level, operation string) {
+	t.Helper()
+	deadline := time.After(waitDeadline)
+	for {
+		if h.hasRecord(level, operation) {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("the record %s/%s was never logged", level, operation)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+// feedFor addresses one subagent bubble's sub-feed.
+func feedFor(agent string) feedid.Feed {
+	return feedid.Feed{Agent: agentID(agent)}
+}
+
+// assertLiveWork asserts the live set is exactly this one.
+func assertLiveWork(t *testing.T, got, want LiveWorkSet) {
+	t.Helper()
+	assertIDs(t, "agents", agentValues(got.Agents), agentValues(want.Agents))
+	assertIDs(t, "shells", workValues(got.Shells), workValues(want.Shells))
+	assertIDs(t, "monitors", workValues(got.Monitors), workValues(want.Monitors))
+}
+
+func assertIDs(t *testing.T, what string, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("live %s = %v, want %v", what, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("live %s = %v, want %v", what, got, want)
+		}
+	}
+}
+
+func agentValues(ids []*conversationv1.AgentId) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id.GetValue())
+	}
+	return out
+}
+
+func workValues(ids []*conversationv1.DetachedWorkId) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id.GetValue())
+	}
+	return out
+}
+
+// assertPerAgentOrder asserts the feed saw one agent's activities in the order
+// they were sent, and that each frame's feed call is immediately followed by
+// its footer call — nothing from another stream landed between the two, which
+// is what serialization buys the resolvers.
+func assertPerAgentOrder(t *testing.T, got []event, agent string, frames int) {
+	t.Helper()
+	seen := 0
+	for i, e := range got {
+		if e.name() != "feed.OnActivity" || e.agent != agent {
+			continue
+		}
+		want := agent + "-" + itoa(seen)
+		if e.detail != want {
+			t.Fatalf("%s activity %d = %q, want %q", agent, seen, e.detail, want)
+		}
+		if i+1 >= len(got) || got[i+1].name() != "footer.OnActivity" || got[i+1].detail != want {
+			t.Fatalf("%s activity %q was interrupted between the feed and the footer", agent, want)
+		}
+		seen++
+	}
+	if seen != frames {
+		t.Fatalf("the feed saw %d of %s's %d activities", seen, agent, frames)
+	}
+}
+
+// routeReaping sends a frame that REAPS its own stream, and is bounded by the
+// live-work republication the reap ends with.
+//
+// A sentinel cannot be used here: the reap closes the very stream the sentinel
+// would ride, so the send would block on a stream nobody is reading any more.
+func (h *harness) routeReaping(stream *fakeStream[*shimResponse], frame *shimResponse) []event {
+	h.t.Helper()
+	stream.send(h.t, frame)
+	return h.rec.until(h.t, "lifecycle.OnLiveWorkChanged")
 }
