@@ -536,3 +536,84 @@ func TestAVanishedFileIsStatedOnce(t *testing.T) {
 		t.Fatalf("the disappearance is stated %d time(s), want exactly 1", got)
 	}
 }
+
+func TestAFirstCycleThatNeverBeganStatesTheOutage(t *testing.T) {
+	// Arrange. A process that starts with no store is in exactly the outage a
+	// process whose store died mid-run is in, and it never makes the live-cycle
+	// transition suspend() reports — so without this the boot outage was silent
+	// and the file plane stopped with nothing said at normal verbosity.
+	h := newHarness(t, nil)
+
+	// Act.
+	h.sc.attempt()
+
+	// Assert.
+	if got := strings.Count(h.logText(), "production suspended"); got != 1 {
+		t.Fatalf("the boot outage was stated %d times, want exactly once: %s", got, h.logText())
+	}
+}
+
+func TestRepeatedFailedAttemptsRestateNothing(t *testing.T) {
+	// Arrange. The ladder runs forever; a WARNING per attempt would bury the one
+	// record that matters.
+	h := newHarness(t, nil)
+
+	// Act.
+	h.sc.attempt()
+	h.advance(time.Minute)
+	h.sc.attemptDue()
+	h.advance(time.Minute)
+	h.sc.attemptDue()
+
+	// Assert.
+	if got := strings.Count(h.logText(), "production suspended"); got != 1 {
+		t.Fatalf("the outage was stated %d times across three attempts, want once", got)
+	}
+}
+
+func TestASecondOutageIsStatedAgain(t *testing.T) {
+	// Arrange. "Stated once" is per OUTAGE, not per process: a store that dies,
+	// recovers and dies again is two outages and owes two records.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.sc.suspend("first outage", nil)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("second beginCycle: %v", err)
+	}
+	h.sc.suspend("second outage", nil)
+
+	// Assert.
+	if got := strings.Count(h.logText(), "production suspended"); got != 2 {
+		t.Fatalf("two outages were stated %d times, want twice", got)
+	}
+}
+
+func TestTheSuspensionRecordNamesTheStoreItIsWaitingOn(t *testing.T) {
+	// Arrange. The dependency the file plane stopped for is a correlation key,
+	// not prose: an operator filters on store_socket to find every reader that
+	// lost the same store.
+	h := newHarness(t, nil)
+
+	// Act.
+	h.sc.attempt()
+
+	// Assert.
+	var found bool
+	for _, line := range *h.logs {
+		if !strings.Contains(line, "production suspended") {
+			continue
+		}
+		found = true
+		if !strings.Contains(line, `"store_socket":"`+h.socket+`"`) {
+			t.Fatalf("the suspension record names no store_socket: %s", line)
+		}
+	}
+	if !found {
+		t.Fatal("no suspension record was written at all")
+	}
+}

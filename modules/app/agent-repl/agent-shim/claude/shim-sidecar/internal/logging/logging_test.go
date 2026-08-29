@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -238,4 +239,61 @@ func TestSinkEmergencySkipsPersistentSink(t *testing.T) {
 	if got := decode(t, stderr.String()).Operation; got != "store-write" {
 		t.Fatalf("emergency record = %q, want the caller's operation", got)
 	}
+}
+
+func TestARecoveryRecordCarriesItsAttemptAndArmedBackoff(t *testing.T) {
+	// Arrange. An outage's progress must be filterable: "which attempt" and
+	// "how long until the next one" are facts a reader joins on, not prose.
+	var sink bytes.Buffer
+	log := New(io.Discard, &sink).With(Context{Component: "sidecar"})
+
+	// Act.
+	log.With(Context{
+		Operation: "recover-cursors", Level: "warn",
+		Attempt: Attempt(3), BackoffMs: BackoffMs(1500 * time.Millisecond),
+	}).Log("recovery attempt failed")
+
+	// Assert.
+	ctx := decodeOneContext(t, &sink)
+	if got := ctx["attempt"]; got != float64(3) {
+		t.Fatalf("attempt = %v, want 3", got)
+	}
+	if got := ctx["backoff_ms"]; got != float64(1500) {
+		t.Fatalf("backoff_ms = %v, want 1500", got)
+	}
+}
+
+func TestARecordThatArmsNoBackoffOmitsTheKeyEntirely(t *testing.T) {
+	// Arrange. Absence is presence-shaped: an unset backoff must be missing
+	// rather than reported as a zero delay that reads as "retrying now".
+	var sink bytes.Buffer
+	log := New(io.Discard, &sink).With(Context{Component: "sidecar"})
+
+	// Act.
+	log.With(Context{Operation: "recover-cursors"}).Log("cursors recovered")
+
+	// Assert.
+	ctx := decodeOneContext(t, &sink)
+	if _, ok := ctx["backoff_ms"]; ok {
+		t.Fatalf("backoff_ms is present on a record that armed none: %v", ctx)
+	}
+	if _, ok := ctx["attempt"]; ok {
+		t.Fatalf("attempt is present on a record that made none: %v", ctx)
+	}
+}
+
+// decodeOneContext reads the single record a test wrote and returns its context.
+func decodeOneContext(t *testing.T, sink *bytes.Buffer) map[string]any {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(sink.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("records = %d, want exactly 1: %q", len(lines), sink.String())
+	}
+	var rec struct {
+		Context map[string]any `json:"context"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+		t.Fatalf("record is not JSON: %v", err)
+	}
+	return rec.Context
 }
