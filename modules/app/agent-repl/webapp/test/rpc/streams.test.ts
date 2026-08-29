@@ -1,0 +1,525 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
+import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
+import {
+  WatchFooterResponseSchema,
+  type WatchFooterResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
+import { FooterViewSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
+import { ForwardingLogger, setLogger } from "../../src/log.js";
+import type { ClientFailureArm, FailureSink } from "../../src/failure/sink.js";
+import { createAgentReplClient, type AgentReplClient } from "../../src/rpc/client.js";
+import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import { MalformedView } from "../../src/rpc/malformed.js";
+import { createTicker } from "../../src/clock.js";
+import { watchStream, type StreamEnd } from "../../src/rpc/streams.js";
+
+const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
+const UNKNOWN = [{ no: 999, wireType: 0, data: new Uint8Array([1]) }];
+const BACKOFF = { initialMs: 250, maxMs: 5000 };
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+/** Records every report/retract, so a test can assert the arms in order. */
+class RecordingSink implements FailureSink {
+  readonly reported: string[] = [];
+  readonly retracted: ClientFailureArm[] = [];
+  report(kind: FailureKind): void {
+    this.reported.push(kind.kind.case ?? "unset");
+  }
+  retract(arm: ClientFailureArm): void {
+    this.retracted.push(arm);
+  }
+}
+
+/** A clean footer push. */
+function push(): WatchFooterResponse {
+  return create(WatchFooterResponseSchema, { footer: create(FooterViewSchema, {}) });
+}
+
+/** A push carrying a field this build has no descriptor for. */
+function undecodablePush(): WatchFooterResponse {
+  const response = push();
+  response.$unknown = UNKNOWN;
+  return response;
+}
+
+/**
+ * A client whose WatchFooter yields SCRIPT[n] on its nth open. Each script
+ * entry is the run's pushes; the run then ENDS, which a standing stream treats
+ * as a transport failure. `openCount` reports how many times it was opened.
+ */
+function scriptedClient(script: ReadonlyArray<ReadonlyArray<WatchFooterResponse> | Error>) {
+  const state = { openCount: 0 };
+  const transport = createRouterTransport(({ service }) => {
+    service(AgentRepl, {
+      watchFooter: async function* () {
+        const run = script[Math.min(state.openCount, script.length - 1)];
+        state.openCount += 1;
+        if (run instanceof Error) throw run;
+        for (const response of run) yield response;
+      },
+    });
+  });
+  return { client: createAgentReplClient(transport), state };
+}
+
+function contextFor(client: AgentReplClient, failures: FailureSink): AppContext {
+  return createAppContext({
+    client,
+    workspace: WORKSPACE,
+    ticker: createTicker(1000),
+    failures,
+    composerEnabled: false,
+  });
+}
+
+function open(
+  ctx: AppContext,
+  onPush: (r: WatchFooterResponse) => void,
+  onEnd?: (e: StreamEnd) => void,
+) {
+  return watchStream(ctx, {
+    name: "WatchFooter",
+    schema: WatchFooterResponseSchema,
+    open: (client, signal) => client.watchFooter({ workspace: WORKSPACE }, { signal }),
+    onPush,
+    onEnd,
+    backoff: BACKOFF,
+  });
+}
+
+/**
+ * Let the stream's promise chain run WITHOUT advancing the clock.
+ *
+ * The router transport hands frames on through a zero-delay timer rather than
+ * a bare microtask, so draining the microtask queue alone never delivers a
+ * push. Advancing by 0 runs those without moving the clock the backoff
+ * assertions read, and the loop covers a run that schedules another.
+ */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
+}
+
+/** Advance the fake clock and let the resulting continuations run. */
+async function advance(ms: number): Promise<void> {
+  await vi.advanceTimersByTimeAsync(ms);
+  await settle();
+}
+
+describe("watchStream: pushes", () => {
+  it("delivers a push to onPush", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    const seen: WatchFooterResponse[] = [];
+    // ACT
+    const handle = open(contextFor(client, sink), (r) => seen.push(r));
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(seen).toHaveLength(1);
+  });
+
+  it("delivers every push of a run, in order", async () => {
+    const sink = new RecordingSink();
+    const a = push();
+    const b = push();
+    const { client } = scriptedClient([[a, b]]);
+    const seen: WatchFooterResponse[] = [];
+    const handle = open(contextFor(client, sink), (r) => seen.push(r));
+    await settle();
+    handle.cancel();
+    expect(seen).toHaveLength(2);
+  });
+});
+
+describe("watchStream: an unreadable frame", () => {
+  it("reports frameUndecodable for a push carrying an unknown field", async () => {
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[undecodablePush()]]);
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    handle.cancel();
+    expect(sink.reported).toContain("frameUndecodable");
+  });
+
+  it("SKIPS the bad frame rather than handing it to onPush", async () => {
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[undecodablePush()]]);
+    const seen: WatchFooterResponse[] = [];
+    const handle = open(contextFor(client, sink), (r) => seen.push(r));
+    await settle();
+    handle.cancel();
+    expect(seen).toHaveLength(0);
+  });
+
+  it("KEEPS THE STREAM: the next frame is still delivered", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[undecodablePush(), push()]]);
+    const seen: WatchFooterResponse[] = [];
+    // ACT
+    const handle = open(contextFor(client, sink), (r) => seen.push(r));
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(seen).toHaveLength(1);
+  });
+
+  it("does not reopen the stream over one bad frame", async () => {
+    const sink = new RecordingSink();
+    const { client, state } = scriptedClient([[undecodablePush(), push()]]);
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    handle.cancel();
+    expect(state.openCount).toBe(1);
+  });
+
+  it("reports frameUndecodable when onPush itself refuses the view", async () => {
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    const handle = open(contextFor(client, sink), () => {
+      throw new MalformedView("FooterView.status", "a oneof sets no arm");
+    });
+    await settle();
+    handle.cancel();
+    expect(sink.reported).toContain("frameUndecodable");
+  });
+
+  it("keeps the stream when onPush refuses one view", async () => {
+    const sink = new RecordingSink();
+    let calls = 0;
+    const { client } = scriptedClient([[push(), push()]]);
+    const handle = open(contextFor(client, sink), () => {
+      calls += 1;
+      if (calls === 1) throw new MalformedView("FooterView.status", "unset");
+    });
+    await settle();
+    handle.cancel();
+    expect(calls).toBe(2);
+  });
+
+  it("does not swallow a non-MalformedView throw from onPush", async () => {
+    // ARRANGE: a genuine bug in a renderer must not be filed as a bad frame.
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    // ACT
+    const handle = open(contextFor(client, sink), () => {
+      throw new TypeError("undefined is not a function");
+    });
+    await settle();
+    handle.cancel();
+    // ASSERT: it surfaced as the run's end, not as a skipped frame.
+    expect(sink.reported).not.toContain("frameUndecodable");
+  });
+});
+
+describe("watchStream: a stream that ended", () => {
+  it("reports daemonUnreachable when the producer simply concluded", async () => {
+    // ARRANGE: a standing stream never concludes on its own.
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    // ACT
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(sink.reported).toContain("daemonUnreachable");
+  });
+
+  it("reports daemonUnreachable when the stream threw", async () => {
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([new ConnectError("gone", Code.Unavailable)]);
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    handle.cancel();
+    expect(sink.reported).toContain("daemonUnreachable");
+  });
+
+  it("tells onEnd a clean conclusion apart from a thrown one", async () => {
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    const ends: StreamEnd[] = [];
+    const handle = open(contextFor(client, sink), () => {}, (e) => ends.push(e));
+    await settle();
+    handle.cancel();
+    expect(ends[0]?.kind).toBe("producer_ended");
+  });
+
+  it("tells onEnd a thrown run was a transport failure", async () => {
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([new ConnectError("gone", Code.Unavailable)]);
+    const ends: StreamEnd[] = [];
+    const handle = open(contextFor(client, sink), () => {}, (e) => ends.push(e));
+    await settle();
+    handle.cancel();
+    expect(ends[0]?.kind).toBe("transport_failure");
+  });
+
+  it("reopens after the first backoff", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client, state } = scriptedClient([[push()], []]);
+    // ACT
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    await advance(250);
+    handle.cancel();
+    // ASSERT
+    expect(state.openCount).toBe(2);
+  });
+
+  it("does NOT reopen before the first backoff elapses", async () => {
+    const sink = new RecordingSink();
+    const { client, state } = scriptedClient([[push()], []]);
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    await advance(249);
+    handle.cancel();
+    expect(state.openCount).toBe(1);
+  });
+
+  it("doubles the backoff after a second failure", async () => {
+    // ARRANGE: run 1 ends, wait 250; run 2 ends, wait 500.
+    const sink = new RecordingSink();
+    const { client, state } = scriptedClient([[], [], []]);
+    // ACT
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    await advance(250);
+    await advance(499);
+    handle.cancel();
+    // ASSERT: still on the second open, because 500 has not elapsed.
+    expect(state.openCount).toBe(2);
+  });
+
+  it("opens the third time once the doubled backoff elapses", async () => {
+    const sink = new RecordingSink();
+    const { client, state } = scriptedClient([[], [], []]);
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    await advance(250);
+    await advance(500);
+    handle.cancel();
+    expect(state.openCount).toBe(3);
+  });
+
+  it("caps the backoff at five seconds rather than doubling forever", async () => {
+    // ARRANGE: 250, 500, 1000, 2000, 4000, then 5000 and 5000.
+    const sink = new RecordingSink();
+    const { client, state } = scriptedClient([[]]);
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    for (const wait of [250, 500, 1000, 2000, 4000, 5000]) await advance(wait);
+    const opensBefore = state.openCount;
+    // ACT: the next wait is the cap, not 8000.
+    await advance(5000);
+    handle.cancel();
+    // ASSERT
+    expect(state.openCount).toBe(opensBefore + 1);
+  });
+
+  it("RETRACTS daemonUnreachable on the first push after a failure", async () => {
+    // ARRANGE: run 1 ends immediately, run 2 pushes.
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[], [push()]]);
+    // ACT
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    await advance(250);
+    handle.cancel();
+    // ASSERT
+    expect(sink.retracted).toEqual(["daemonUnreachable"]);
+  });
+
+  it("does not retract before a failure has been reported", async () => {
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    handle.cancel();
+    expect(sink.retracted).toEqual([]);
+  });
+
+  it("re-arms the backoff after a recovery, so a flapping link does not creep to the cap", async () => {
+    // ARRANGE: fail, reopen and push, fail again -- the next wait is 250 again.
+    const sink = new RecordingSink();
+    const { client, state } = scriptedClient([[], [push()], []]);
+    // ACT
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    await advance(250);
+    await advance(250);
+    handle.cancel();
+    // ASSERT
+    expect(state.openCount).toBe(3);
+  });
+});
+
+describe("watchStream: cancel", () => {
+  it("stops reopening", async () => {
+    const sink = new RecordingSink();
+    const { client, state } = scriptedClient([[]]);
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    handle.cancel();
+    await advance(5000);
+    expect(state.openCount).toBe(1);
+  });
+
+  it("files no daemonUnreachable for the cancelled run", async () => {
+    // ARRANGE: a stream that never ended on its own.
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push(), push()]]);
+    // ACT
+    const handle = open(contextFor(client, sink), () => {});
+    handle.cancel();
+    await settle();
+    // ASSERT
+    expect(sink.reported).not.toContain("daemonUnreachable");
+  });
+
+  it("is idempotent", async () => {
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[]]);
+    const handle = open(contextFor(client, sink), () => {});
+    handle.cancel();
+    expect(() => handle.cancel()).not.toThrow();
+  });
+
+  it("returns early from a backoff wait rather than idling it out", async () => {
+    const sink = new RecordingSink();
+    const { client, state } = scriptedClient([[]]);
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    handle.cancel();
+    await advance(10_000);
+    expect(state.openCount).toBe(1);
+  });
+});
+
+describe("watchStream: client replacement", () => {
+  it("reopens on the adopted client", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const first = scriptedClient([[push(), push(), push()]]);
+    const second = scriptedClient([[push()]]);
+    const ctx = contextFor(first.client, sink);
+    const handle = open(ctx, () => {});
+    await settle();
+    // ACT
+    ctx.replaceClient(second.client);
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(second.state.openCount).toBe(1);
+  });
+
+  it("does not reopen on the OLD client after adoption", async () => {
+    const sink = new RecordingSink();
+    const first = scriptedClient([[]]);
+    const second = scriptedClient([[push()]]);
+    const ctx = contextFor(first.client, sink);
+    const handle = open(ctx, () => {});
+    await settle();
+    const opensBefore = first.state.openCount;
+    ctx.replaceClient(second.client);
+    await settle();
+    await advance(250);
+    handle.cancel();
+    expect(first.state.openCount).toBe(opensBefore);
+  });
+
+  it("reopens IMMEDIATELY on adoption rather than waiting out a backoff", async () => {
+    // ARRANGE: the first client has already failed, so a backoff is running.
+    const sink = new RecordingSink();
+    const first = scriptedClient([[]]);
+    const second = scriptedClient([[push()]]);
+    const ctx = contextFor(first.client, sink);
+    const handle = open(ctx, () => {});
+    await settle();
+    // ACT
+    ctx.replaceClient(second.client);
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(second.state.openCount).toBe(1);
+  });
+
+  it("a CANCELLED handle does not reopen on adoption", async () => {
+    const sink = new RecordingSink();
+    const first = scriptedClient([[]]);
+    const second = scriptedClient([[push()]]);
+    const ctx = contextFor(first.client, sink);
+    const handle = open(ctx, () => {});
+    await settle();
+    handle.cancel();
+    ctx.replaceClient(second.client);
+    await settle();
+    expect(second.state.openCount).toBe(0);
+  });
+
+  it("moves EVERY live handle, not merely the first", async () => {
+    const sink = new RecordingSink();
+    const first = scriptedClient([[push(), push(), push()]]);
+    const second = scriptedClient([[push(), push(), push()]]);
+    const ctx = contextFor(first.client, sink);
+    const a = open(ctx, () => {});
+    const b = open(ctx, () => {});
+    await settle();
+    ctx.replaceClient(second.client);
+    await settle();
+    a.cancel();
+    b.cancel();
+    expect(second.state.openCount).toBe(2);
+  });
+});
+
+describe("watchStream: logging", () => {
+  it("logs a skipped frame at error, so the evidence is not only a card", async () => {
+    // ARRANGE
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    const { client } = scriptedClient([[undecodablePush()]]);
+    // ACT
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(
+      lines.some(([level, line]) => level === "error" && line.includes("rpc.stream-frame-undecodable")),
+    ).toBe(true);
+  });
+
+  it("logs a stream that ended at error", async () => {
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    const { client } = scriptedClient([[]]);
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    handle.cancel();
+    expect(
+      lines.some(([level, line]) => level === "error" && line.includes("rpc.stream-transport-failure")),
+    ).toBe(true);
+  });
+
+  it("logs the recovery, so a retraction is traceable", async () => {
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    const { client } = scriptedClient([[], [push()]]);
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    await advance(250);
+    handle.cancel();
+    expect(lines.some(([, line]) => line.includes("rpc.stream-recovered"))).toBe(true);
+  });
+});

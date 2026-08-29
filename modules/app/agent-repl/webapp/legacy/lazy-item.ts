@@ -42,7 +42,7 @@
 import { escapeHtml } from "./highlight.js";
 import { ConversationItem } from "./store.js";
 import { userTurnText } from "./turn.js";
-import { logVerbose } from "./wslog.js";
+import { logVerbose } from "./log.js";
 
 /** Class on the wrapper of an item rendered as a placeholder. */
 export const PLACEHOLDER_CLASS = "feed-placeholder";

@@ -2,7 +2,7 @@
   "name": "claude-repl-webapp",
   "version": "0.1.0",
   "private": true,
-  "description": "Layer-2 WebSocket SPA client for claude-repld",
+  "description": "Connect (protobuf-es) SPA client for claude-repld",
   "type": "module",
   "scripts": {
     "ensure-deps": "npm ls --depth=0 >/dev/null 2>&1 || npm ci",
@@ -15,16 +15,13 @@
     "coverage": "vitest run --coverage",
     "pretypecheck": "npm run ensure-deps",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:integration": "vitest run -c vitest.integration.config.ts",
-    "pretest:integration": "npm run ensure-deps"
+    "pretest:integration": "npm run ensure-deps",
+    "test:integration": "vitest run -c vitest.integration.config.ts"
   },
   "devDependencies": {
-    "@bufbuild/protobuf": "^2.13.0",
-    "@connectrpc/connect": "^2.1.2",
     "@connectrpc/connect-node": "^2.1.2",
-    "@connectrpc/connect-web": "^2.1.2",
     "@types/markdown-it": "^14.1.2",
-    "@types/node": "^26.4.0",
+    "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^2.1.9",
     "jsdom": "^29.1.1",
     "typescript": "^5.6.0",
@@ -32,6 +29,9 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.13.0",
+    "@connectrpc/connect": "^2.1.2",
+    "@connectrpc/connect-web": "^2.1.2",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "highlight.js": "^11.11.1",

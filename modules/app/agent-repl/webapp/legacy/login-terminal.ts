@@ -25,7 +25,7 @@ import {
   loginTerminalUrl,
   resizeFrame,
 } from "./login.js";
-import { log } from "./wslog.js";
+import { log } from "./log.js";
 
 /** A live login terminal. */
 export interface LoginTerminal {
