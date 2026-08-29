@@ -46,10 +46,10 @@ func NewShellOutputHandler(log *logging.Bound) *ShellOutputHandler {
 
 // Handle implements tail.Handler.
 func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
-	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
 		LogVerbose("handling frames=%d bytes_observed=%d", len(frames), ctx.BytesObserved)
 	if len(frames) == 0 {
-		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
 			LogVerbose("no frames to convert")
 		return nil
 	}
@@ -58,7 +58,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 		// to accumulate. It is never silently discarded: the sidecar refuses to
 		// tail an unattributed spool at all (see the owner index), so reaching
 		// here means that guarantee broke.
-		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Level: "error"}).
+		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, VendorSessionID: ctx.SessionID, Level: "error"}).
 			Log("shell spool reached the handler with no task identity; its bytes have no card to append to")
 		return nil
 	}
@@ -72,14 +72,14 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 
 	code, ok := trailingExitCode(frames[0].Raw, frames[0].Offset)
 	if !ok {
-		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
 			LogVerbose("no terminal exit marker in batch entries=%d", len(entries))
 		return entries
 	}
-	h.log.With(logging.Context{Operation: "exit-marker", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+	h.log.With(logging.Context{Operation: "exit-marker", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
 		Log("EXIT=%d observed on disk; ending the card on evidence rather than on a silence timeout", code)
 	entries = append(entries, convert.DetachedExited(at, ctx.TaskID, code))
-	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
 		LogVerbose("terminal marker converted entries=%d", len(entries))
 	return entries
 }

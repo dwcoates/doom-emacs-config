@@ -1,0 +1,138 @@
+// writebatch_test.go — SUBJECT 1: WriteBatch's durable-ack semantics.
+//
+// Success means DURABLE: the records and the cursor advance committed as ONE
+// transaction, which is why every assertion here reads the state back AFTER a
+// store restart — an in-memory answer cannot pass. Failure means NOTHING
+// committed, so the same restart shows neither the records nor the cursor.
+package integration
+
+import (
+	"testing"
+
+	storev1 "agentrepl/proto/store/v1"
+)
+
+// TestWriteBatchCommitsRecordsAndCursorInOneTransaction is the durable-ack
+// arm: after a restart on the same database, both halves of the batch are
+// there.
+func TestWriteBatchCommitsRecordsAndCursorInOneTransaction(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	sidecar := fileProducer(store.client())
+	cursor := cursorState("16777232:900001", "/transcripts/a.jsonl", 4096, []byte(`{"partial":`))
+
+	// Act.
+	sidecar.writeWithCursor(ctx, t, cursor,
+		sidecar.agentEntry("w-durable-1", "u-main-line-1", frameLine(agentID("main"), responseFrame("main", "act-1", "first"))),
+	)
+	store.restart()
+
+	// Assert.
+	after, cancelAfter := callContext(t)
+	defer cancelAfter()
+	cli := store.client()
+
+	got := sidecarCursors(after, t, cli, nil)
+	if len(got) != 1 {
+		t.Fatalf("after restart the store holds %d cursors, want 1", len(got))
+	}
+	if got[0].GetFileId() != cursor.GetFileId() || got[0].GetOffset() != cursor.GetOffset() {
+		t.Fatalf("cursor survived as %v, want file_id=%q offset=%d", got[0], cursor.GetFileId(), cursor.GetOffset())
+	}
+	if string(got[0].GetCarry()) != string(cursor.GetCarry()) {
+		t.Fatalf("cursor carry survived as %q, want %q", got[0].GetCarry(), cursor.GetCarry())
+	}
+
+	page := openSession(after, t, cli, "main", 10, nil)
+	assertTexts(t, "the main agent's book after restart", pageTexts(page.GetPage()), []string{"first"})
+	store.assertNoErrorRecords()
+}
+
+// TestWriteBatchReplayIsAbsorbedAsSuccess is the replay arm: the same
+// write_ids sent twice are the SAME success arm and duplicate no lines.
+func TestWriteBatchReplayIsAbsorbedAsSuccess(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	shim := streamProducer(store.client())
+	batch := []*storev1.StoreEntry{
+		shim.agentEntry("w-replay-1", "u-main-line-1", frameLine(agentID("main"), responseFrame("main", "act-1", "alpha"))),
+		shim.agentEntry("w-replay-2", "u-main-line-2", frameLine(agentID("main"), responseFrame("main", "act-2", "beta"))),
+	}
+
+	// Act.
+	shim.write(ctx, t, batch...)
+	shim.write(ctx, t, batch...)
+
+	// Assert.
+	page := openSession(ctx, t, store.client(), "main", 10, nil)
+	assertTexts(t, "the book after a replayed batch", pageTexts(page.GetPage()), []string{"beta", "alpha"})
+	store.assertNoErrorRecords()
+}
+
+// TestWriteBatchWithOneInvalidEntryCommitsNothing is the all-or-nothing arm:
+// a single bad entry rolls the whole transaction back, records AND cursor.
+func TestWriteBatchWithOneInvalidEntryCommitsNothing(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	sidecar := fileProducer(store.client())
+	cursor := cursorState("16777232:900002", "/transcripts/b.jsonl", 8192, nil)
+	good := sidecar.agentEntry("w-partial-1", "u-main-line-1", frameLine(agentID("main"), responseFrame("main", "act-1", "would-be-durable")))
+	// An entry with no upsert_key: the row has no identity, which is illegal.
+	bad := sidecar.agentEntry("w-partial-2", "", frameLine(agentID("main"), responseFrame("main", "act-2", "invalid")))
+
+	// Act.
+	detail := sidecar.writeExpectingFailure(ctx, t, cursor, good, bad)
+
+	// Assert.
+	if detail == "" {
+		t.Errorf("the refusal carried no detail; the store owes a human account naming the offending entry")
+	}
+	store.restart()
+
+	after, cancelAfter := callContext(t)
+	defer cancelAfter()
+	cli := store.client()
+
+	if cursors := sidecarCursors(after, t, cli, nil); len(cursors) != 0 {
+		t.Errorf("a refused batch advanced the cursor to %v; a failed transaction commits nothing", cursors)
+	}
+	page := openSession(after, t, cli, "main", 10, nil)
+	assertTexts(t, "the book after a refused batch", pageTexts(page.GetPage()), nil)
+}
+
+// TestWriteBatchWithoutCursorAdvanceLeavesCursorsUntouched is the stream-plane
+// arm: a producer with no file to be positioned in never moves a cursor.
+func TestWriteBatchWithoutCursorAdvanceLeavesCursorsUntouched(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	sidecar := fileProducer(cli)
+	shim := streamProducer(cli)
+	cursor := cursorState("16777232:900003", "/transcripts/c.jsonl", 128, nil)
+	sidecar.writeWithCursor(ctx, t, cursor,
+		sidecar.agentEntry("w-file-1", "u-main-line-1", frameLine(agentID("main"), responseFrame("main", "act-1", "from-file"))),
+	)
+
+	// Act.
+	shim.write(ctx, t,
+		shim.agentEntry("w-stream-1", "u-main-line-2", frameLine(agentID("main"), responseFrame("main", "act-2", "from-stream"))),
+	)
+
+	// Assert.
+	got := sidecarCursors(ctx, t, cli, nil)
+	if len(got) != 1 {
+		t.Fatalf("the store holds %d cursors after a stream-plane write, want the sidecar's 1", len(got))
+	}
+	if got[0].GetOffset() != cursor.GetOffset() {
+		t.Errorf("a stream-plane write moved the cursor to %d, want it left at %d", got[0].GetOffset(), cursor.GetOffset())
+	}
+	store.assertNoErrorRecords()
+}

@@ -67,7 +67,7 @@ func logUnconverted(log *logging.Bound, ctx *Context, entries []*storev1.StoreEn
 		if entry.GetAgentUpdate().GetUnservedItem() == nil {
 			continue
 		}
-		log.With(logging.Context{Operation: "unconverted", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+		log.With(logging.Context{Operation: "unconverted", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
 			LogVerbose("record stored as an unserved item: %s", convert.Describe(entry))
 	}
 }

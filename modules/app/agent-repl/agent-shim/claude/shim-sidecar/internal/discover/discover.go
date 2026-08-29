@@ -1,27 +1,44 @@
-// Package discover enumerates the Claude harness's on-disk artifacts (design
-// §7.1) and classifies each path into a tail Target: file kind, task id, codec,
-// and — for CONFIG-ROOT paths only — the session that owns it. Discovery unions
-// config-root globs (session transcripts, agent sidechains + meta, workflow
-// journals) with the /tmp task spools (kind by a*/b*/w* filename prefix). A
-// periodic full Scan is the completeness backstop; fsnotify (Watcher) supplies
-// latency.
+// Package discover enumerates the vendor's on-disk artifacts across BOTH
+// account config roots and the task-spool root, and classifies each path into a
+// tail Target: file kind, identity, codec, and the companion meta file a kind
+// requires. A periodic full Scan is the completeness backstop; fsnotify
+// (Watcher) supplies latency.
 //
-// A SPOOL PATH IS A LOCATION, NEVER AN IDENTITY. The /tmp layout embeds a
-// session-shaped segment (…/<session>/tasks/<taskid>.output), and this package
-// used to read it as the owning session. It is not one: the harness names that
-// directory with its RUNTIME session id, which differs from the id the
-// conversation's transcript carries whenever a session was resumed. Trusting it
-// filed one task under two different session ids, which is a state the store
-// accepts (it keys by session_id + task_id) but the staleness tracker treats as
-// an impossible collision — taking the whole file plane down with it.
+// FOUR KINDS OF FILE, all written by the vendor's agent binary:
 //
-// So a spool Target carries NO SessionID. Its owner is resolved by the sidecar
-// from the task id, against the transcript that launched it (see the owner
-// index in main.go). That leaves exactly one session identifier in the system:
-// the transcript's.
+//  1. session transcripts      projects/<project>/<session>.jsonl
+//  2. subagent transcripts     projects/<project>/<session>/subagents/agent-<id>.jsonl
+//     (+ agent-<id>.meta.json, REQUIRED: the only source of the agent's type,
+//     spawn depth, model and worktree)
+//  3. workflow journals and their per-agent transcripts, under
+//     .../subagents/workflows/wf_<id>/
+//  4. task spools              <spool root>/claude-<uid>/<project>/<session>/tasks/<task>.output
+//
+// MULTI-ROOT IS NOT OPTIONAL: the second account's config dir holds real
+// transcripts, and a single-root scan simply cannot see them.
+//
+// A SPOOL PATH IS A LOCATION, NEVER AN IDENTITY. The spool layout embeds a
+// session-shaped segment, and this package used to read it as the owning
+// session. It is not one: the harness names that directory with its RUNTIME
+// session id, which differs from the id the transcript carries whenever a
+// session was resumed. Trusting it filed one task under two ids. So a spool
+// Target carries NO SessionID; its owner is resolved by task id against the
+// call that launched it (see the root package's owner index).
+//
+// A SPOOL'S KIND IS ITS TASK-ID PREFIX: b* shell output, a* an agent
+// transcript, w* a workflow journal. Any other prefix is a TOTAL-INGESTION
+// VIOLATION — logged at error, and still discovered as KindResidueSpool so its
+// bytes land whole as residue. Dropping the file from discovery, which is what
+// this package used to do, is the one outcome the mandate forbids.
+//
+// EVERY DISCOVERED PATH IS SYMLINK-RESOLVED. On macOS /tmp is a symlink to
+// /private/tmp, so the same spool reaches this package under two spellings; a
+// path that is compared (against an owner's output path, against a watcher's
+// key) must first be resolved, or one file reads as two.
 package discover
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -29,20 +46,35 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-// Target is one discovered file plus the attribution the tailer/handler need.
+// Target is one discovered file plus the attribution the tailer and handler
+// need. Path is always symlink-resolved.
 type Target struct {
 	Path string
 	Kind tail.Kind
-	// SessionID is the owning session, read from a CONFIG-ROOT path only.
-	// EMPTY for a /tmp spool: that path states where the bytes live, not whose
-	// they are (see the package comment). The sidecar resolves a spool's owner
-	// by TaskID before it is tailed.
+
+	// SessionID is the owning session's vendor uuid, read from a CONFIG-ROOT
+	// path only. EMPTY for a spool: that path states where the bytes live, not
+	// whose they are.
 	SessionID string
-	TaskID    string // agent/shell/workflow files
-	RunID     string // workflow journals
-	SpoolDir  string // session's /tmp task dir (shell output_path construction)
-	MetaPath  string // agent sidechain companion agent-<id>.meta.json, if any
-	Raw       bool   // true → RawTextCodec (shell spool); else JSONLCodec
+	// AgentID is the vendor agent id of a subagent or workflow-agent
+	// transcript, read from the `agent-<id>` file name.
+	AgentID string
+
+	TaskID   string // spool task id, and the subagent id for a sidechain file
+	RunID    string // workflow run id from the journal path
+	SpoolDir string // the session's task spool dir
+	// MetaPath is the companion agent-<id>.meta.json a subagent or
+	// workflow-agent transcript REQUIRES before it can be ingested.
+	MetaPath string
+	// MetaMissing reports that MetaPath is required and not on disk yet. Such a
+	// target is HELD — discovered and re-checked, never tailed and never
+	// dropped — because its records cannot be attributed without the meta.
+	MetaMissing bool
+	// Raw selects RawTextCodec (a shell spool) over JSONLCodec.
+	Raw bool
+	// ConfigRoot is the discovery root the path was found under; empty for a
+	// spool, whose root is the spool root.
+	ConfigRoot string
 }
 
 // Codec returns the framing codec for this target.
@@ -55,21 +87,45 @@ func (t Target) Codec() tail.Codec {
 
 // Discoverer holds the configured roots and performs discovery.
 type Discoverer struct {
-	configRoots []string // e.g. ~/.claude, ~/.claude-chesscom
-	spoolRoot   string   // e.g. /tmp (resolves /tmp/claude-<uid>/… itself)
+	configRoots []string
+	spoolRoot   string
 	log         *logging.Bound
+
+	// warnedMeta remembers which held transcripts have already had their
+	// warning, so a rescan every few seconds does not repeat one line forever
+	// while a meta file is being written.
+	warnedMeta map[string]bool
 }
 
-// New builds a Discoverer.
+// New builds a Discoverer over the given config roots and spool root. Every
+// root is symlink-resolved once here, so a path compared against a root is
+// compared in the same spelling.
 func New(configRoots []string, spoolRoot string, log *logging.Bound) *Discoverer {
-	log.With(logging.Context{Operation: "discover-new"}).LogVerbose("constructing discoverer config_roots=%d spool_root=%q", len(configRoots), spoolRoot)
-	return &Discoverer{configRoots: configRoots, spoolRoot: spoolRoot, log: log}
+	resolved := make([]string, 0, len(configRoots))
+	for _, root := range configRoots {
+		resolved = append(resolved, Normalize(root))
+	}
+	log.With(logging.Context{Operation: "discover-new"}).
+		LogVerbose("constructing discoverer config_roots=%v spool_root=%q", resolved, Normalize(spoolRoot))
+	return &Discoverer{
+		configRoots: resolved,
+		spoolRoot:   Normalize(spoolRoot),
+		log:         log,
+		warnedMeta:  map[string]bool{},
+	}
 }
 
-// Scan performs a full glob-based discovery across all roots (§7.1). It is the
+// ConfigRoots returns the resolved config roots.
+func (d *Discoverer) ConfigRoots() []string { return d.configRoots }
+
+// SpoolRoot returns the resolved spool root.
+func (d *Discoverer) SpoolRoot() string { return d.spoolRoot }
+
+// Scan performs a full glob-based discovery across every root. It is the
 // backstop that catches files that appeared while fsnotify was down.
 func (d *Discoverer) Scan() []Target {
-	d.log.With(logging.Context{Operation: "discover-scan"}).LogVerbose("scan start config_roots=%d spool_root=%q", len(d.configRoots), d.spoolRoot)
+	d.log.With(logging.Context{Operation: "discover-scan"}).
+		LogVerbose("scan start config_roots=%d spool_root=%q", len(d.configRoots), d.spoolRoot)
 	var out []Target
 	seen := map[string]bool{}
 	add := func(t Target, ok bool) {
@@ -80,37 +136,41 @@ func (d *Discoverer) Scan() []Target {
 		out = append(out, t)
 	}
 	for _, root := range d.configRoots {
-		for _, m := range globAll(
+		for _, match := range globAll(
 			filepath.Join(root, "projects", "*", "*.jsonl"),
 			filepath.Join(root, "projects", "*", "*", "subagents", "agent-*.jsonl"),
 			filepath.Join(root, "projects", "*", "*", "subagents", "workflows", "wf_*", "journal.jsonl"),
+			filepath.Join(root, "projects", "*", "*", "subagents", "workflows", "wf_*", "agent-*.jsonl"),
 		) {
-			add(d.Classify(m))
+			add(d.Classify(match))
 		}
 	}
-	for _, m := range globAll(filepath.Join(d.spoolRoot, "claude-*", "*", "*", "tasks", "*.output")) {
-		add(d.Classify(m))
+	for _, match := range globAll(filepath.Join(d.spoolRoot, "claude-*", "*", "*", "tasks", "*.output")) {
+		add(d.Classify(match))
 	}
 	d.log.With(logging.Context{Operation: "discover-scan"}).LogVerbose("scan complete targets=%d", len(out))
 	return out
 }
 
-// Classify maps one absolute path to a Target. ok is false for a path that
-// matches none of the §7.1 shapes (e.g. a meta.json companion, which is not
-// tailed on its own).
+// Classify maps one path to a Target. ok is false only for a path that matches
+// none of the four shapes (a meta.json companion, say, which is never tailed on
+// its own).
 func (d *Discoverer) Classify(path string) (Target, bool) {
-	d.log.With(logging.Context{Operation: "discover-classify", Path: path}).LogVerbose("classify requested")
-	if t, ok := d.classifyConfig(path); ok {
-		d.log.With(logging.Context{Operation: "discover-classify", Path: path, Task: t.TaskID}).LogVerbose("classified config target kind=%d", t.Kind)
-		return t, true
+	path = Normalize(path)
+	if target, ok := d.classifyConfig(path); ok {
+		d.log.With(logging.Context{Operation: "discover-classify", Path: path, TaskID: target.TaskID, AgentID: target.AgentID}).
+			LogVerbose("classified config target kind=%s meta_missing=%t", target.Kind, target.MetaMissing)
+		return target, true
 	}
-	t, ok := d.classifySpool(path)
+	target, ok := d.classifySpool(path)
 	if ok {
-		d.log.With(logging.Context{Operation: "discover-classify", Path: path, Task: t.TaskID}).LogVerbose("classified spool target kind=%d raw=%t", t.Kind, t.Raw)
+		d.log.With(logging.Context{Operation: "discover-classify", Path: path, TaskID: target.TaskID}).
+			LogVerbose("classified spool target kind=%s raw=%t", target.Kind, target.Raw)
 	} else {
-		d.log.With(logging.Context{Operation: "discover-classify", Path: path}).LogVerbose("path does not match a watched artifact")
+		d.log.With(logging.Context{Operation: "discover-classify", Path: path}).
+			LogVerbose("path matches none of the four watched shapes")
 	}
-	return t, ok
+	return target, ok
 }
 
 func (d *Discoverer) classifyConfig(path string) (Target, bool) {
@@ -120,96 +180,172 @@ func (d *Discoverer) classifyConfig(path string) (Target, bool) {
 			continue
 		}
 		segs := strings.Split(filepath.ToSlash(path[len(prefix):]), "/")
-		// segs[0] = project dir.
+		// segs[0] is the project dir.
 		switch {
 		case len(segs) == 2 && strings.HasSuffix(segs[1], ".jsonl"):
 			// projects/<project>/<session>.jsonl
+			//
+			// THE FILE'S BASENAME IS THE MAIN AGENT'S IDENTITY, not the
+			// per-record sessionId field, which diverges from it.
 			return Target{
-				Path:      path,
-				Kind:      tail.KindSessionTranscript,
-				SessionID: strings.TrimSuffix(segs[1], ".jsonl"),
+				Path:       path,
+				Kind:       tail.KindSessionTranscript,
+				SessionID:  strings.TrimSuffix(segs[1], ".jsonl"),
+				ConfigRoot: root,
 			}, true
-		case len(segs) == 4 && segs[2] == "subagents" && matchesAgent(segs[3]):
+		case len(segs) == 4 && segs[2] == "subagents" && isAgentTranscript(segs[3]):
 			// projects/<project>/<session>/subagents/agent-<id>.jsonl
-			session := segs[1]
-			id := strings.TrimSuffix(strings.TrimPrefix(segs[3], "agent-"), ".jsonl")
-			return Target{
-				Path:      path,
-				Kind:      tail.KindAgentTranscript,
-				SessionID: session,
-				TaskID:    id,
-				MetaPath:  strings.TrimSuffix(path, ".jsonl") + ".meta.json",
-			}, true
+			return d.withMeta(Target{
+				Path:       path,
+				Kind:       tail.KindAgentTranscript,
+				SessionID:  segs[1],
+				AgentID:    agentIDOf(segs[3]),
+				TaskID:     agentIDOf(segs[3]),
+				ConfigRoot: root,
+			}), true
 		case len(segs) == 6 && segs[2] == "subagents" && segs[3] == "workflows" &&
 			strings.HasPrefix(segs[4], "wf_") && segs[5] == "journal.jsonl":
 			// projects/<project>/<session>/subagents/workflows/wf_<id>/journal.jsonl
 			return Target{
-				Path:      path,
-				Kind:      tail.KindWorkflowJournal,
-				SessionID: segs[1],
-				RunID:     segs[4],
-				TaskID:    segs[4],
+				Path:       path,
+				Kind:       tail.KindWorkflowJournal,
+				SessionID:  segs[1],
+				RunID:      segs[4],
+				TaskID:     segs[4],
+				ConfigRoot: root,
 			}, true
+		case len(segs) == 6 && segs[2] == "subagents" && segs[3] == "workflows" &&
+			strings.HasPrefix(segs[4], "wf_") && isAgentTranscript(segs[5]):
+			// projects/<project>/<session>/subagents/workflows/wf_<id>/agent-<id>.jsonl
+			//
+			// A workflow's PER-AGENT transcript. It is tailed like any other
+			// file, but workflow conversion is kicked this wave, so its records
+			// land as residue rather than as feed rows.
+			return d.withMeta(Target{
+				Path:       path,
+				Kind:       tail.KindWorkflowJournal,
+				SessionID:  segs[1],
+				RunID:      segs[4],
+				AgentID:    agentIDOf(segs[5]),
+				TaskID:     agentIDOf(segs[5]),
+				ConfigRoot: root,
+			}), true
 		}
 		return Target{}, false
 	}
 	return Target{}, false
 }
 
+// withMeta attaches the companion meta path and states whether it exists yet.
+//
+// A TRANSCRIPT WITHOUT ITS META IS HELD, NEVER DROPPED: agent-<id>.meta.json is
+// the ONLY source of the agent's type, spawn depth, model and worktree, so its
+// records cannot be attributed without it. The file keeps being discovered and
+// re-checked until the meta appears.
+func (d *Discoverer) withMeta(target Target) Target {
+	target.MetaPath = strings.TrimSuffix(target.Path, ".jsonl") + ".meta.json"
+	if _, err := os.Stat(target.MetaPath); err == nil {
+		if d.warnedMeta[target.Path] {
+			delete(d.warnedMeta, target.Path)
+			d.log.With(logging.Context{Operation: "discover-meta", Path: target.Path, AgentID: target.AgentID}).
+				Log("the held transcript's meta file appeared at %s; it is ingestible now", target.MetaPath)
+		}
+		return target
+	}
+	target.MetaMissing = true
+	if !d.warnedMeta[target.Path] {
+		d.warnedMeta[target.Path] = true
+		d.log.With(logging.Context{Operation: "discover-meta", Path: target.Path, AgentID: target.AgentID, Level: "warn"}).
+			Log("transcript held: its required meta file %s is not on disk yet, so its agent's type, depth and model are unknown; it is re-checked every rescan and never dropped", target.MetaPath)
+		return target
+	}
+	d.log.With(logging.Context{Operation: "discover-meta", Path: target.Path, AgentID: target.AgentID}).
+		LogVerbose("transcript still held: %s has not appeared", target.MetaPath)
+	return target
+}
+
 func (d *Discoverer) classifySpool(path string) (Target, bool) {
-	prefix := d.spoolRoot + string(filepath.Separator) + "claude-"
-	if !strings.HasPrefix(path, d.spoolRoot+string(filepath.Separator)) || !strings.Contains(path, "claude-") {
+	prefix := d.spoolRoot + string(filepath.Separator)
+	if !strings.HasPrefix(path, prefix) {
 		return Target{}, false
 	}
-	if !strings.HasPrefix(filepath.ToSlash(path), filepath.ToSlash(prefix)) {
-		return Target{}, false
-	}
-	// /tmp/claude-<uid>/<slug>/<session>/tasks/<taskid>.output
+	// claude-<uid>/<project>/<session>/tasks/<task>.output
 	//
-	// segs[2] is session-SHAPED and is deliberately NOT read: it is the
-	// harness's runtime session id, which disagrees with the transcript's
-	// whenever a session was resumed. See the package comment — the owner is
-	// resolved from TaskID instead, so no second identifier ever enters the
-	// system.
-	rel := path[len(d.spoolRoot)+1:] // claude-<uid>/<slug>/<session>/tasks/<file>
-	segs := strings.Split(filepath.ToSlash(rel), "/")
-	if len(segs) != 5 || segs[3] != "tasks" || !strings.HasSuffix(segs[4], ".output") {
+	// segs[2] is session-SHAPED and deliberately NOT read: it is the harness's
+	// runtime session id, which disagrees with the transcript's whenever a
+	// session was resumed.
+	segs := strings.Split(filepath.ToSlash(path[len(prefix):]), "/")
+	if len(segs) != 5 || !strings.HasPrefix(segs[0], "claude-") || segs[3] != "tasks" || !strings.HasSuffix(segs[4], ".output") {
 		return Target{}, false
 	}
 	taskID := strings.TrimSuffix(segs[4], ".output")
-	spoolDir := filepath.Dir(path)
-	t := Target{
-		Path:     path,
-		TaskID:   taskID,
-		SpoolDir: spoolDir,
-	}
+	target := Target{Path: path, TaskID: taskID, SpoolDir: filepath.Dir(path)}
 	switch {
-	case strings.HasPrefix(taskID, "a"):
-		t.Kind = tail.KindAgentTranscript // a*.output is agent JSONL
 	case strings.HasPrefix(taskID, "b"):
-		t.Kind = tail.KindShellSpool
-		t.Raw = true
+		target.Kind = tail.KindShellSpool
+		target.Raw = true
+	case strings.HasPrefix(taskID, "a"):
+		target.Kind = tail.KindAgentTranscript
 	case strings.HasPrefix(taskID, "w"):
-		t.Kind = tail.KindWorkflowJournal
+		target.Kind = tail.KindWorkflowJournal
 	default:
-		// Unclassifiable means the file leaves discovery entirely and is never
-		// ingested — a total-ingestion violation, not a note.
-		d.log.With(logging.Context{Operation: "classify-spool", Path: path, Task: taskID, Level: "warn"}).Log("spool task has no a/b/w kind prefix; the file is dropped from discovery and never ingested")
-		return Target{}, false
+		// THE PREFIX IS HOW A SPOOL'S CONVERSION IS SELECTED, so one we do not
+		// recognize means the bytes cannot be converted. They are still
+		// ingested — whole, as residue — because a file dropped from discovery
+		// is the one thing total ingestion forbids.
+		target.Kind = tail.KindResidueSpool
+		target.Raw = true
+		d.log.With(logging.Context{Operation: "classify-spool", Path: path, TaskID: taskID, Level: "error"}).
+			Log("spool task id has no a/b/w kind prefix: its conversion cannot be selected, so its bytes are ingested as unparsed residue rather than dropped")
 	}
-	return t, true
+	return target, true
 }
 
-func matchesAgent(name string) bool {
-	return strings.HasPrefix(name, "agent-") && strings.HasSuffix(name, ".jsonl") &&
-		!strings.HasSuffix(name, ".meta.json")
+// Normalize resolves a path to the spelling everything else compares against.
+//
+// Two spellings of one file — notably macOS's /tmp symlink onto /private/tmp —
+// must collapse to one key, so symlinks are RESOLVED rather than merely
+// cleaned. A path is observed both before and after it exists and
+// filepath.EvalSymlinks fails on a missing path, so resolution walks up to the
+// deepest existing ancestor, resolves that, and rejoins the not-yet-created
+// suffix. When nothing on the path exists the cleaned path is returned:
+// normalization never fails and never drops a path.
+func Normalize(path string) string {
+	if path == "" {
+		return ""
+	}
+	cleaned := filepath.Clean(path)
+	var suffix []string
+	current := cleaned
+	for {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return resolved
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return cleaned
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
+	}
+}
+
+func isAgentTranscript(name string) bool {
+	return strings.HasPrefix(name, "agent-") && strings.HasSuffix(name, ".jsonl")
+}
+
+func agentIDOf(name string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
 }
 
 func globAll(patterns ...string) []string {
 	var out []string
-	for _, p := range patterns {
-		if m, err := filepath.Glob(p); err == nil {
-			out = append(out, m...)
+	for _, pattern := range patterns {
+		if matches, err := filepath.Glob(pattern); err == nil {
+			out = append(out, matches...)
 		}
 	}
 	return out

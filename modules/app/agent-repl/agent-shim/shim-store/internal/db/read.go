@@ -1,0 +1,268 @@
+package db
+
+import (
+	"context"
+	"database/sql"
+	"time"
+
+	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-store/internal/logging"
+	"google.golang.org/protobuf/proto"
+)
+
+// OpenedPage is the answer to an open: the page itself, and the write ordinal
+// the watch that follows it must begin after.
+//
+// PinSeq IS TAKEN INSIDE THE PAGE'S OWN TRANSACTION. Taking it before would
+// re-deliver lines the page already carries; taking it after would drop lines
+// written in between. Neither is recoverable by the caller, because the caller
+// cannot see the window it lost.
+type OpenedPage struct {
+	Page   *storev1.AgentSessionPage
+	PinSeq uint64
+}
+
+// OpenPage answers one agent's opening page.
+//
+// AN AGENT WITH NO ROWS IS A LEGAL, EMPTY BOOK — an empty page at the floor.
+// "Unknown agent" is only an EMPTY agent value: the store cannot distinguish an
+// agent that has said nothing yet from one that never existed, and refusing the
+// open would make a freshly spawned subagent unwatchable for exactly as long as
+// it takes it to speak.
+func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, knownThrough *storev1.StoreItemPointer) (OpenedPage, error) {
+	base := logging.Fields{Operation: "store.db.open-page", Table: "entry", BookAgentID: agentID}
+	if err := validateBook(agentID, pageSize); err != nil {
+		return OpenedPage{}, d.refuse(base, err)
+	}
+	started := time.Now()
+
+	tx, err := d.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return OpenedPage{}, d.refuse(base, storagef(err, "begin read transaction"))
+	}
+	defer tx.Rollback() //nolint:errcheck // a read transaction commits nothing
+
+	var floorPosition int64
+	if knownThrough != nil {
+		position, err := decodePointer(knownThrough, "known_through")
+		if err != nil {
+			return OpenedPage{}, d.refuse(base, err)
+		}
+		if err := d.pointerInBook(ctx, tx, agentID, position, "known_through", knownThrough.GetValue()); err != nil {
+			fields := base
+			fields.Position = knownThrough.GetValue()
+			return OpenedPage{}, d.refuse(fields, err)
+		}
+		floorPosition = position
+	}
+
+	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, `position > ?`, floorPosition)
+	if err != nil {
+		return OpenedPage{}, d.refuse(base, err)
+	}
+
+	var pinSeq uint64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(write_seq), 0) FROM entry`).Scan(&pinSeq); err != nil {
+		return OpenedPage{}, d.refuse(base, storagef(err, "reading the watch pin"))
+	}
+
+	page := &storev1.AgentSessionPage{Lines: lines}
+	if more {
+		page.Boundary = &storev1.AgentSessionPage_More{
+			More: &storev1.ReadAgentPageMore{LastItem: lines[len(lines)-1].GetAt()},
+		}
+	} else {
+		page.Boundary = &storev1.AgentSessionPage_Floor{Floor: &storev1.ReadAgentPageFloor{}}
+	}
+	d.observeQuery(StatementOpenPage, "entry", base, started, int64(len(lines)))
+	verbose := base
+	verbose.WriteSeq = pinSeq
+	d.log.LogVerbose(verbose, "page opened lines=%d more=%t known_through=%t", len(lines), more, knownThrough != nil)
+	return OpenedPage{Page: page, PinSeq: pinSeq}, nil
+}
+
+// ReadPage walks one book OLDER than a served pointer. There is no first-page
+// arm: the first page is the open's answer and this verb only ever continues.
+func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, after *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error) {
+	base := logging.Fields{Operation: "store.db.read-page", Table: "entry", BookAgentID: agentID}
+	if err := validateBook(agentID, pageSize); err != nil {
+		return nil, d.refuse(base, err)
+	}
+	position, err := decodePointer(after, "after")
+	if err != nil {
+		return nil, d.refuse(base, err)
+	}
+	started := time.Now()
+
+	tx, err := d.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, d.refuse(base, storagef(err, "begin read transaction"))
+	}
+	defer tx.Rollback() //nolint:errcheck // a read transaction commits nothing
+
+	if err := d.pointerInBook(ctx, tx, agentID, position, "after", after.GetValue()); err != nil {
+		fields := base
+		fields.Position = after.GetValue()
+		return nil, d.refuse(fields, err)
+	}
+	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, `position < ?`, position)
+	if err != nil {
+		return nil, d.refuse(base, err)
+	}
+
+	success := &storev1.ReadAgentPageSuccess{}
+	for _, line := range lines {
+		success.Lines = append(success.Lines, line.GetLine())
+	}
+	if more {
+		success.Boundary = &storev1.ReadAgentPageSuccess_More{
+			More: &storev1.ReadAgentPageMore{LastItem: lines[len(lines)-1].GetAt()},
+		}
+	} else {
+		success.Boundary = &storev1.ReadAgentPageSuccess_Floor{Floor: &storev1.ReadAgentPageFloor{}}
+	}
+	d.observeQuery(StatementReadPage, "entry", base, started, int64(len(lines)))
+	d.log.LogVerbose(base, "page read lines=%d more=%t", len(lines), more)
+	return success, nil
+}
+
+// LinesSince is the watch replay: every page line of one book written after a
+// pin, in WRITE order rather than page order.
+//
+// TWO ORDERINGS AND THIS ONE IS write_seq, deliberately. A watcher must receive
+// an UPSERT of an old row — the row keeps its original position and therefore
+// its original pointer, but it is new information, and ordering the replay by
+// position would place it back where the caller has already read past.
+func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([]LineWritten, error) {
+	base := logging.Fields{Operation: "store.db.lines-since", Table: "entry", BookAgentID: agentID, WriteSeq: afterSeq}
+	if agentID == "" {
+		return nil, d.refuse(base, invalidf("agent id value is empty"))
+	}
+	started := time.Now()
+
+	const querySQL = `SELECT position, write_seq, frame FROM entry
+	  WHERE book_agent_id = ? AND kind = ? AND write_seq > ?
+	  ORDER BY write_seq ASC`
+	rows, err := d.sql.QueryContext(ctx, querySQL, agentID, kindPageLine, afterSeq)
+	if err != nil {
+		return nil, d.refuse(base, storagef(err, "replaying lines of book %q", agentID))
+	}
+	defer rows.Close() //nolint:errcheck // the deferred close of a read
+
+	var out []LineWritten
+	for rows.Next() {
+		var position int64
+		var seq uint64
+		var frame []byte
+		if err := rows.Scan(&position, &seq, &frame); err != nil {
+			return nil, d.refuse(base, storagef(err, "scanning a replayed line of book %q", agentID))
+		}
+		line, err := decodePageLine(frame, position)
+		if err != nil {
+			return nil, d.refuse(base, err)
+		}
+		out = append(out, LineWritten{
+			AgentID:  agentID,
+			Line:     &storev1.StoreLineAt{At: encodePointer(position), Line: line},
+			WriteSeq: seq,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, d.refuse(base, storagef(err, "iterating replayed lines of book %q", agentID))
+	}
+	d.observeQuery(StatementLinesSince, "entry", base, started, int64(len(out)))
+	d.log.LogVerbose(base, "replay read lines=%d", len(out))
+	return out, nil
+}
+
+// validateBook is the shared refusal for the two paging verbs.
+func validateBook(agentID string, pageSize uint32) error {
+	if agentID == "" {
+		return invalidf("agent id value is empty")
+	}
+	if pageSize == 0 {
+		return invalidf("page_size is zero — a page with no budget is not a page")
+	}
+	return nil
+}
+
+// pointerInBook is the stale-pointer check. THE BOOK IS PART OF IT: a position
+// that exists in some OTHER agent's book is stale for this one, and answering
+// its page would serve one agent's lines under another's name.
+func (d *DB) pointerInBook(ctx context.Context, tx *sql.Tx, agentID string, position int64, field, value string) error {
+	var one int
+	err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM entry WHERE position = ? AND book_agent_id = ? AND kind = ?`,
+		position, agentID, kindPageLine).Scan(&one)
+	switch {
+	case err == nil:
+		return nil
+	case isNoRows(err):
+		return stalePointerf("%s %q names no line of book %q", field, value, agentID)
+	default:
+		return storagef(err, "validating %s against book %q", field, agentID)
+	}
+}
+
+// pageLines reads one page of a book, newest first, and reports whether older
+// lines remain below it.
+//
+// IT ASKS FOR ONE MORE ROW THAN THE PAGE HOLDS. That extra row is how the
+// boundary arm is DECIDED rather than guessed: `more` when the row came back,
+// `floor` when it did not. A count query beside the page could disagree with it
+// under a concurrent write; one query cannot.
+//
+// `kind = page_line` is the never-served index doing its work: a keep-alive or
+// a residue row carries no book at all, so no page can reach one.
+func (d *DB) pageLines(ctx context.Context, tx *sql.Tx, agentID string, pageSize uint32, boundClause string, bound int64) ([]*storev1.StoreLineAt, bool, error) {
+	querySQL := `SELECT position, frame FROM entry
+	  WHERE book_agent_id = ? AND kind = ? AND ` + boundClause + `
+	  ORDER BY position DESC LIMIT ?`
+	rows, err := tx.QueryContext(ctx, querySQL, agentID, kindPageLine, bound, int64(pageSize)+1)
+	if err != nil {
+		return nil, false, storagef(err, "reading a page of book %q", agentID)
+	}
+	defer rows.Close() //nolint:errcheck // the deferred close of a read
+
+	var lines []*storev1.StoreLineAt
+	more := false
+	for rows.Next() {
+		if uint32(len(lines)) == pageSize {
+			more = true
+			break
+		}
+		var position int64
+		var frame []byte
+		if err := rows.Scan(&position, &frame); err != nil {
+			return nil, false, storagef(err, "scanning a page row of book %q", agentID)
+		}
+		line, err := decodePageLine(frame, position)
+		if err != nil {
+			return nil, false, err
+		}
+		lines = append(lines, &storev1.StoreLineAt{At: encodePointer(position), Line: line})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, storagef(err, "iterating a page of book %q", agentID)
+	}
+	return lines, more, nil
+}
+
+// decodePageLine recovers the served line from a stored frame.
+//
+// A ROW THAT CANNOT BE DECODED IS A LOUD FAILURE, never a skipped line. The
+// blob was written by this very package from a message it had already
+// validated, so failing to read one back means the file is damaged — and
+// serving the page with a hole in it would report that damage as an agent that
+// simply said less than it did.
+func decodePageLine(frame []byte, position int64) (*storev1.StorePageLine, error) {
+	entry := &storev1.StoreEntry{}
+	if err := proto.Unmarshal(frame, entry); err != nil {
+		return nil, storagef(err, "stored frame at position %d cannot be decoded", position)
+	}
+	line := entry.GetAgentUpdate().GetServeableFrame()
+	if line == nil {
+		return nil, storagef(errNotAPageLine, "stored frame at position %d is indexed as a page line but carries none", position)
+	}
+	return line, nil
+}

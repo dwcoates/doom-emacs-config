@@ -27,7 +27,7 @@ func NewWorkflowJournalHandler(log *logging.Bound) *WorkflowJournalHandler {
 
 // Handle implements tail.Handler.
 func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
-	h.log.With(logging.Context{Operation: "journal-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+	h.log.With(logging.Context{Operation: "journal-handle", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
 		LogVerbose("handling frames=%d run_id=%q", len(frames), ctx.RunID)
 	// The run's identity is its run id where the path supplies one, and the task
 	// id otherwise. Both name the same card, because the launch that opened it
@@ -40,7 +40,7 @@ func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*st
 	for _, frame := range frames {
 		at := attribute(ctx, frame.Offset)
 		if frame.ParseErr != nil {
-			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).
+			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID, Level: "warn"}).
 				Log("parse failure at offset=%d; the record is stored whole with no path to a page: %v", frame.Offset, frame.ParseErr)
 			out = append(out, convert.UnparsedEntry(at, frame.Raw, frame.ParseErr))
 			continue
@@ -48,7 +48,7 @@ func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*st
 		out = append(out, h.conv.JournalRecord(frame.Obj, at, taskID)...)
 	}
 	logUnconverted(h.log, ctx, out)
-	h.log.With(logging.Context{Operation: "journal-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+	h.log.With(logging.Context{Operation: "journal-handle", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
 		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
 }
