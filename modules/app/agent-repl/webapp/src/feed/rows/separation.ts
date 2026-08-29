@@ -1,0 +1,272 @@
+/**
+ * separation — THE ONE DIVIDER RENDERER.
+ *
+ * feed.proto states this as a structural invariant rather than a preference:
+ * ONE subroutine draws EVERY arm — the same rule geometry with the label under
+ * it — and an arm selects only its ACCENT COLOR and its label/payload. A per-arm
+ * divider renderer is a defect, not a variation. So there is exactly one
+ * element-building path below, and the arm feeds it two things: an accent class
+ * and a payload element (or none).
+ *
+ * THE GEOMETRY IS THE EXISTING ONE. The context arms keep the treatment the
+ * `/clear` and `/compact` dividers already had — a 4px bar across the central
+ * column with a centered muted label beneath it — and the worktree arms are the
+ * same bar in BLUE. That is why the rule's own class is shared and only the
+ * accent differs.
+ *
+ * THE FOLD IS THE CLIENT'S, INITIALIZED FROM THE WIRE (R2): the shipped
+ * `folded` is the state on a row's FIRST draw, and the reader's toggle wins
+ * thereafter — so a re-push re-reads the toggle off the previous element rather
+ * than resetting it.
+ */
+import { log } from "../../log.js";
+import { renderMarkdown } from "../../markdown.js";
+import { renderEditorLink } from "../../link.js";
+import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
+import type {
+  FeedContextCutCleared,
+  FeedContextCutColdRead,
+  FeedContextCutCompacted,
+  FeedContextCutTokens,
+  FeedSessionSeparation,
+  FeedSessionSeparationLabel,
+  FeedWorktreeEntered,
+  FeedWorktreeLeft,
+  FeedWorktreePath,
+} from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { armName } from "../renderers.js";
+import type { RowContext } from "../renderers.js";
+
+const PATH = "FeedSessionSeparation";
+
+/** The accent class each arm's rule wears. Colour is the ONLY thing it picks. */
+const ACCENTS = {
+  cleared: "sep-accent-cleared",
+  compacted: "sep-accent-compacted",
+  worktreeEntered: "sep-accent-worktree",
+  worktreeLeft: "sep-accent-worktree",
+} as const satisfies Record<string, string>;
+
+/** Every separation arm this build draws, for the suite to hold to the schema. */
+export const SEPARATION_ARMS: readonly string[] = Object.keys(ACCENTS);
+
+/**
+ * The divider.
+ *
+ * `tokens` is set on the CONTEXT arms only — every cut has one, even a clear
+ * (which reloads the system prompt, skills and memory, so the after side is
+ * small rather than zero) — and unset on the worktree arms, which change no
+ * context. Absence draws no figure; the client does no arithmetic on either
+ * side, both being already formatted by the daemon.
+ */
+export function drawFeedSessionSeparation(
+  msg: FeedSessionSeparation,
+  rc: RowContext,
+): HTMLElement {
+  const kind = requireCase(msg.kind, `${PATH}.kind`);
+  log("debug", `drawing a separation row as ${kind.case}`, {
+    operation: "feed.draw-separation",
+    context: { arm: kind.case, has_tokens: msg.tokens !== undefined },
+  });
+
+  const el = document.createElement("div");
+  el.className = "separation";
+  el.setAttribute("data-arm", kind.case);
+
+  const rule = document.createElement("div");
+  rule.className = `sep-rule ${ACCENTS[kind.case]}`;
+  el.append(rule);
+
+  const label = drawFeedSessionSeparationLabel(
+    requireMessage(msg.label, `${PATH}.label`),
+    msg.tokens,
+  );
+  el.append(label);
+
+  const payload = ((): HTMLElement | null => {
+    switch (kind.case) {
+      case "cleared":
+        return drawFeedContextCutCleared(kind.value);
+      case "compacted":
+        return drawFeedContextCutCompacted(kind.value, rc);
+      case "worktreeEntered":
+        return drawFeedWorktreeEntered(kind.value, rc);
+      case "worktreeLeft":
+        return drawFeedWorktreeLeft(kind.value, rc);
+      default:
+        return unreachableArm(`${PATH}.kind`, armName(kind));
+    }
+  })();
+  if (payload !== null) el.append(payload);
+  return el;
+}
+
+/** The label line, with the size change beside it when the arm carries one. */
+export function drawFeedSessionSeparationLabel(
+  labelMsg: FeedSessionSeparationLabel,
+  tokens: FeedContextCutTokens | undefined,
+): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "sep-label";
+  el.textContent = labelMsg.text;
+  if (tokens !== undefined) el.append(drawFeedContextCutTokens(tokens));
+  return el;
+}
+
+/**
+ * The size change, as the daemon already formatted BOTH sides of it.
+ *
+ * No arithmetic and no unit rounding happens here: the wire carries two
+ * display strings precisely so two frontends cannot round the same cut
+ * differently.
+ */
+export function drawFeedContextCutTokens(tokens: FeedContextCutTokens): HTMLElement {
+  const el = document.createElement("span");
+  el.className = "sep-tokens";
+  el.textContent = ` ${tokens.beforeText} → ${tokens.afterText}`;
+  return el;
+}
+
+/**
+ * The outright discard has NOTHING to expand — the history is gone and there is
+ * no summary standing in its place — so the divider is the whole of it.
+ */
+export function drawFeedContextCutCleared(_cleared: FeedContextCutCleared): null {
+  return null;
+}
+
+/**
+ * The compaction's surviving account, folded, plus the cold-read notice when the
+ * compaction paid full price for the read it exists to avoid.
+ *
+ * The notice is a WARNING ON A COMPACTION THAT HAPPENED, not a failure of it,
+ * which is why it sits beside the summary rather than replacing it.
+ */
+export function drawFeedContextCutCompacted(
+  compacted: FeedContextCutCompacted,
+  rc: RowContext,
+): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "sep-compacted";
+
+  const fold = requireMessage(compacted.fold, `${PATH}.compacted.fold`);
+  const summary = requireMessage(compacted.summary, `${PATH}.compacted.summary`);
+  const folded = initialFold(fold.folded, rc);
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "sep-fold-toggle";
+  toggle.setAttribute("data-fold", "compaction-summary");
+
+  const body = document.createElement("div");
+  body.className = "bubble assistant md compact-summary sep-summary";
+  body.innerHTML = renderMarkdown(summary.markdown);
+
+  const apply = (next: boolean): void => {
+    toggle.setAttribute("data-folded", next ? "true" : "false");
+    toggle.textContent = next ? "▸ summary" : "▾ summary";
+    body.hidden = next;
+  };
+  apply(folded);
+  toggle.addEventListener("click", () => {
+    const next = toggle.getAttribute("data-folded") !== "true";
+    log("debug", `the reader ${next ? "folded" : "unfolded"} a compaction summary`, {
+      operation: "feed.separation-fold-toggled",
+      context: { folded: next },
+    });
+    apply(next);
+  });
+
+  el.append(toggle, body);
+  if (compacted.coldRead !== undefined) {
+    el.append(drawFeedContextCutColdRead(compacted.coldRead));
+  }
+  return el;
+}
+
+/**
+ * The fold state a fresh draw starts in: the reader's own toggle when this row
+ * has been drawn before, and the wire's value only on the FIRST draw (R2).
+ */
+function initialFold(wireFolded: boolean, rc: RowContext): boolean {
+  const previous = rc.previous?.querySelector('[data-fold="compaction-summary"]') ?? null;
+  const held = previous?.getAttribute("data-folded") ?? null;
+  if (held === null) return wireFolded;
+  return held === "true";
+}
+
+/** What the cold read cost, stated rather than alluded to. */
+export function drawFeedContextCutColdRead(coldRead: FeedContextCutColdRead): HTMLElement {
+  const evidence = requireMessage(coldRead.evidence, `${PATH}.compacted.cold_read.evidence`);
+  const el = document.createElement("div");
+  el.className = "sep-cold-read";
+  el.setAttribute("data-cold-read", "true");
+  el.textContent = `read cold: ${evidence.uncachedInputTokens.toString()} uncached input tokens`;
+  log("warn", "a compaction re-read the whole conversation at the uncached rate", {
+    operation: "feed.separation-cold-read",
+    context: { uncached_input_tokens: evidence.uncachedInputTokens.toString() },
+  });
+  return el;
+}
+
+/** The tree the session moved INTO: its path as a jump target, and the branch. */
+export function drawFeedWorktreeEntered(
+  entered: FeedWorktreeEntered,
+  rc: RowContext,
+): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "sep-worktree";
+  el.append(drawFeedWorktreePath(requireMessage(entered.path, `${PATH}.worktree_entered.path`), rc));
+  if (entered.branch !== undefined) {
+    const branch = document.createElement("span");
+    branch.className = "sep-branch";
+    branch.textContent = ` on ${entered.branch.text}`;
+    el.append(branch);
+  }
+  return el;
+}
+
+/**
+ * What became of the tree the session left.
+ *
+ * The two arms draw differently because they mean different things to a reader:
+ * a KEPT tree is somewhere to go (so its path is the same jump target the
+ * entered divider drew), and a REMOVED one may have taken work with it (so the
+ * discard line is loud when the vendor stated one, and absent when it did not).
+ */
+export function drawFeedWorktreeLeft(left: FeedWorktreeLeft, rc: RowContext): HTMLElement {
+  const outcome = requireCase(left.outcome, `${PATH}.worktree_left.outcome`);
+  const el = document.createElement("div");
+  el.className = "sep-worktree";
+  el.setAttribute("data-left", outcome.case);
+  switch (outcome.case) {
+    case "kept":
+      el.append(
+        drawFeedWorktreePath(
+          requireMessage(outcome.value.path, `${PATH}.worktree_left.kept.path`),
+          rc,
+        ),
+      );
+      return el;
+    case "removed": {
+      if (outcome.value.discarded !== undefined) {
+        const loud = document.createElement("span");
+        loud.className = "sep-discarded";
+        loud.textContent = outcome.value.discarded.text;
+        el.append(loud);
+      }
+      return el;
+    }
+    default:
+      return unreachableArm(`${PATH}.worktree_left.outcome`, armName(outcome));
+  }
+}
+
+/**
+ * A worktree path: drawn, and handed to the editor verbatim on click, through
+ * THE ONE shared jump-to-file component the plan button and the findings
+ * locations use.
+ */
+export function drawFeedWorktreePath(path: FeedWorktreePath, rc: RowContext): HTMLElement {
+  return renderEditorLink(rc.ctx, { text: path.text, path: path.text });
+}

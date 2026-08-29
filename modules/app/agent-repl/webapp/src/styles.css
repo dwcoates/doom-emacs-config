@@ -4094,3 +4094,194 @@ body.ungated #mode-select {
   font-style: italic;
   margin-top: 0.2rem;
 }
+/* ---- feed core (src/feed) ----------------------------------------------- */
+
+/* The row's own body sits above its nesting slot; the chrome itself adds no
+   box, so a card looks exactly as it did before the port. */
+.feed-nest {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-left: 1rem;
+}
+
+/* The rows a body renderer laid out, in the same column rhythm #feed uses. */
+.feed-body,
+.feed-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* THE LOAD-MORE CONTROL: the walk into the past, at the top of the feed it
+   walks. Drawn in the same pill vocabulary as a fold's ticker (.async-ticker)
+   so it reads as feed chrome rather than as a card. */
+.feed-load-more {
+  align-self: center;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.8rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}
+.feed-load-more:disabled { cursor: progress; opacity: 0.6; }
+
+/* The breadcrumb header a nested page draws — ONLY when the trail is non-empty
+   (R6): expansion is inline, so this is context, never navigation. */
+.feed-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.feed-breadcrumb {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+/* A row this build could not draw. Compact and loud enough to be noticed
+   without displacing the rest of the feed, which goes on working. */
+.row-malformed {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  color: var(--err);
+  border: 1px dashed var(--err);
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+}
+
+/* The page the daemon could not serve, drawn where the rows would be. */
+.feed-page-error {
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.8rem;
+}
+.feed-page-error-evidence {
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+/* Where a jump lands: a brief inset bar, the same affordance the feed already
+   used to say "the cursor is here", so the two read as one vocabulary. */
+.row-revealed { box-shadow: inset 3px 0 0 var(--accent); border-radius: 4px; }
+
+/* THE BUBBLE'S FOLD TOGGLE — a caret, not an icon font: ▸ collapsed, ▾ open. */
+.bubble-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-right: 0.25rem;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* The subagent head line: label, description, tokens, clock, quietness, stop.
+   Laid out on one row in the fold's own pill, which the existing .async-ticker
+   rule already dresses. */
+.subagent-head {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.subagent-description,
+.subagent-tokens,
+.subagent-clock,
+.subagent-quiet,
+.subagent-outcome {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.subagent-description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 24rem;
+}
+/* LOST IS NOT FAILURE: we stopped being able to see it, which the muted dot
+   says and the red error dot would not. */
+.agent-dot.agent-lost { color: var(--muted); }
+.subagent-stop-button {
+  font-size: 0.7rem;
+  padding: 0 0.5rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}
+.subagent-stop-outcome { font-size: 0.7rem; color: var(--muted); }
+
+/* THE ONE SEPARATION SHAPE. Same 4px bar and centered label the /clear and
+   /compact dividers already drew, confined to the same central column; the arm
+   picks only the accent. */
+.sep-rule {
+  height: 4px;
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
+  border-radius: 2px;
+  width: var(--agent-bubble-cap);
+  margin-left: auto;
+  margin-right: auto;
+}
+.sep-accent-cleared { background: var(--clear-divider); }
+.sep-accent-compacted { background: var(--compact-rule); }
+.sep-accent-worktree { background: var(--init); }
+.sep-label {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.sep-tokens { color: var(--muted); }
+.sep-compacted,
+.sep-worktree {
+  width: var(--agent-bubble-cap);
+  margin-left: auto;
+  margin-right: auto;
+  font-size: 0.75rem;
+}
+.sep-fold-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--muted);
+  cursor: pointer;
+}
+/* The cold read is a WARNING on a compaction that happened, not a failure of
+   it, so it takes the warning register rather than the error one. */
+.sep-cold-read { color: var(--thinking); }
+/* A removed worktree that took work with it says so LOUDLY. */
+.sep-discarded { color: var(--err); }
+
+/* The turn's terminal row. A conclusion says nothing; the other two do. */
+.turn-ended {
+  width: var(--agent-bubble-cap);
+  margin-left: auto;
+  margin-right: auto;
+  font-size: 0.75rem;
+}
+.turn-ended-errored { color: var(--err); }
+.turn-ended-vendor,
+.turn-ended-retry { color: var(--muted); }
+.turn-ended-interrupted { color: var(--muted); }
+
+/* The prompt's author line, above its body inside the existing bubble. */
+.prompt-author {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+/* An AGENT-addressed prompt wears the orange border the schema names for it. */
+.bubble.user.prompt-agent { border: 1px solid var(--thinking); }
+.prompt-block-unsupported { color: var(--muted); font-style: italic; }

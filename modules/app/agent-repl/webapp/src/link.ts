@@ -101,6 +101,9 @@ export function renderEditorLink(ctx: AppContext, spec: EditorLinkSpec): HTMLEle
   const anchor = document.createElement("a");
   anchor.className = "editor-link";
   anchor.textContent = spec.text === "" ? spec.path : spec.text;
+  // The stable hook every jump-to-file affordance carries, whichever view
+  // drew it: the plan button, a finding's location, a worktree divider's path.
+  anchor.setAttribute("data-editor-link", "");
   anchor.setAttribute("data-host-path", spec.path);
   if (spec.line !== undefined) anchor.setAttribute("data-host-line", String(spec.line));
   // No href: the destination is on the daemon's host, so there is no URL a
