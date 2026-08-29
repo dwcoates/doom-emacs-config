@@ -88,6 +88,13 @@ type RegisterFacts struct {
 	ParentBranch string
 	// RepoDir is the repository's canonicalized common dir.
 	RepoDir string
+	// DefaultBranch is the repository's default branch, as the announcing
+	// caller read it off git. It is recorded on FIRST SIGHT of the repository
+	// and refreshed on every later announcement, so a repository whose default
+	// branch is renamed does not keep answering with the old one. Empty leaves
+	// whatever is recorded alone, because "not looked up" is not "no default
+	// branch".
+	DefaultBranch string
 }
 
 // Priority is the roster's ordering priority, mirroring
