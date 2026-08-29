@@ -137,23 +137,29 @@ export function toStoreEntry(producer: string, entry: PersistEntry): storev1.Sto
   if (entry.upsertKey === "") {
     throw new Error("shim store writer: an entry with an empty upsert key would collide with every other");
   }
-  const update = create(storev1.StoreAgentUpdateSchema, {
-    // THE BOOK IS THE TOP LEVEL here: every book this shim writes is a
-    // non-sync agent's (the main agent, or a detached agent with its own
-    // stream), which is exactly what `top_level` names.
-    topLevel: entry.item.kind === "residue" ? undefined : entry.agentId,
-    agentInfo: agentInfo(entry),
-  });
+  // BUILT LAZILY, because a session fact has no agent update at all and
+  // `agentInfo` refuses an entry with no servable item — eagerly building one
+  // would turn every session row into a failed batch.
+  const arm: storev1.StoreEntry["entry"] =
+    entry.item.kind === "session_update"
+      ? { case: "sessionUpdate", value: entry.item.update }
+      : {
+          case: "agentUpdate",
+          value: create(storev1.StoreAgentUpdateSchema, {
+            // THE BOOK IS THE TOP LEVEL here: every book this shim writes is a
+            // non-sync agent's (the main agent, or a detached agent with its own
+            // stream), which is exactly what `top_level` names.
+            topLevel: entry.item.kind === "residue" ? undefined : entry.agentId,
+            agentInfo: agentInfo(entry),
+          }),
+        };
   return create(storev1.StoreEntrySchema, {
     plane: create(storev1.PlaneSchema, {
       plane: { case: "stream", value: create(storev1.PlaneStreamSchema, {}) },
     }),
     writeId: entryWriteId(producer, entry),
     upsertKey: entry.upsertKey,
-    entry:
-      entry.item.kind === "session_update"
-        ? { case: "sessionUpdate", value: entry.item.update }
-        : { case: "agentUpdate", value: update },
+    entry: arm,
   });
 }
 
