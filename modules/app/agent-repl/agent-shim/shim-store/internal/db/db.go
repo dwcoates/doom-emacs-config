@@ -41,7 +41,7 @@ import (
 // and there never will be: the store is nuked, never migrated, so the version
 // answers exactly one question — "did this binary create what is on disk?" —
 // and the only remedy for "no" is to recreate it.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // nowMillis is the store's wall clock in unix millis.
 func nowMillis() int64 { return time.Now().UnixMilli() }
@@ -248,6 +248,14 @@ CREATE TABLE cursor (
   updated_at_ms INTEGER NOT NULL
 );
 
+CREATE TABLE write_ledger (
+  write_id      TEXT    PRIMARY KEY,
+  upsert_key    TEXT    NOT NULL,
+  write_seq     INTEGER NOT NULL,
+  applied_at_ms INTEGER NOT NULL
+);
+CREATE INDEX write_ledger_upsert_key ON write_ledger(upsert_key);
+
 CREATE TABLE schema_meta (version INTEGER NOT NULL);
 `
 
@@ -255,7 +263,7 @@ CREATE TABLE schema_meta (version INTEGER NOT NULL);
 // compared against what is on disk so a database carrying the RIGHT version
 // stamp on the WRONG shape — a half-applied create, a hand-edited file, a
 // binary that crashed between DROP and CREATE — is nuked rather than trusted.
-var schemaTables = []string{"agent", "cursor", "detached_work", "entry", "schema_meta", "workflow"}
+var schemaTables = []string{"agent", "cursor", "detached_work", "entry", "schema_meta", "workflow", "write_ledger"}
 
 // ensureSchema brings the database to SchemaVersion by the only means this
 // package has: dropping everything and recreating it.
