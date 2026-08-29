@@ -22,7 +22,12 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
 import { promptUpsertKey } from "../store/keys.js";
-import { PersistenceError, type PersistEntry, type Persistence } from "../store/persistence.js";
+import {
+  PersistenceError,
+  type AgentPageSession,
+  type PersistEntry,
+  type Persistence,
+} from "../store/persistence.js";
 import { detachedWorkId, storeItemPointerValue } from "../convert/ids.js";
 import {
   detachForegroundDetached,
@@ -32,6 +37,7 @@ import {
   notFound,
   readHistoryPage,
   readHistoryRefused,
+  emptyOpeningPage,
   startTurnAccepted,
   startTurnRefused,
   stopBashRefused,
@@ -203,8 +209,47 @@ export class TurnEngine {
       LOGGER.log({ level: "error", turn_id: turn.value, cause: detail }, "the vendor refused the prompt");
       return startTurnRefused({ kind: "vendorRefused" }, detail);
     }
-    LOGGER.log({ turn_id: turn.value, origin: request.origin }, "opened a turn and delivered its prompt");
-    return startTurnAccepted(prompt);
+    // ONE CALL SUBMITS AND PAINTS. The page is read AFTER the prompt is
+    // delivered, so it already contains the prompt row and a consumer's first
+    // paint is never missing the turn it just opened.
+    const page = await this.openingPage(identity.agentId, request.pageSize, request.knownThrough);
+    LOGGER.log(
+      { turn_id: turn.value, origin: request.origin, page_entries: page.entries.length },
+      "opened a turn, delivered its prompt, and painted the opening page",
+    );
+    return startTurnAccepted(prompt, page);
+  }
+
+  /**
+   * The opening page StartTurn answers with.
+   *
+   * The page session's tail is closed IMMEDIATELY: StartTurn paints once and the
+   * consumer follows with its own WatchAgent, so a tail left open here would be
+   * a second reader of the same book that nobody drains.
+   *
+   * A store that cannot be read does NOT fail the call: the prompt is already
+   * durable and already delivered, so a failure would tell the daemon a turn did
+   * not start that is running. The empty page says "nothing to paint from here".
+   */
+  private async openingPage(
+    agent: conversationv1.AgentId,
+    pageSize: number,
+    knownThrough?: conversationv1.HistoryPointer,
+  ): Promise<conversationv1.HistoryPage> {
+    let opened: AgentPageSession | undefined;
+    try {
+      opened = await this.session.persistence.openAgentPage(agent, pageSize, knownThrough);
+      return opened.page;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      LOGGER.log(
+        { level: "warn", agent_id: agent.value, cause: detail },
+        "the opening page could not be read; answering an empty page rather than failing a turn that is running",
+      );
+      return emptyOpeningPage();
+    } finally {
+      opened?.close();
+    }
   }
 
   // -- UpdateAgent ----------------------------------------------------------
@@ -332,9 +377,13 @@ export class TurnEngine {
       { level: "warn", agent_id: target.value, gap: "no_declared_subagent_prompt_route" },
       "REFUSED UpdateAgent.prompt to a subagent: the pinned SDK declares no route that delivers a prompt to a named agent",
     );
+    // NOT `nothingRunning`: that is a claim about the AGENT'S STATE, and it
+    // would send a caller looking for a live agent that was live all along. The
+    // gap is the SDK's — no route reaches a named agent — and the same input to
+    // the main agent would deliver.
     return Promise.resolve(
       updateAgentRefused(
-        { kind: "nothingRunning" },
+        { kind: "notDeliverable" },
         `the pinned agent SDK declares no route that delivers a prompt to agent ${JSON.stringify(target.value)}; ` +
           "the shim refuses rather than guessing an address (reported as a contract gap)",
       ),
@@ -430,6 +479,26 @@ export class TurnEngine {
       return detachForegroundRefused(
         { kind: "alreadyConcluded" },
         `unit ${JSON.stringify(unit)} has no live background work`,
+      );
+    }
+    // THE VENDOR MADE THIS DETACHMENT, NOT US. `backgroundTasks(unit)` is an
+    // OBSERVATION: it says the vendor already holds live background work for
+    // the unit, which is a detachment the shim can confirm. The pinned SDK
+    // offers no verb to INITIATE one, so a unit that is detachable in kind and
+    // still in flight in the FOREGROUND is refused `unsupported` — never
+    // `notDetachable`, which would say its kind cannot detach at all and tell a
+    // consumer to stop offering an affordance for work that backgrounds itself
+    // routinely.
+    if (known !== undefined && known.backgrounded !== true) {
+      LOGGER.log(
+        { level: "warn", unit, gap: "no_declared_detach_verb" },
+        "REFUSED DetachForeground: the unit is detachable in kind and live, but the pinned SDK offers no verb to initiate a detachment",
+      );
+      return detachForegroundRefused(
+        { kind: "unsupported" },
+        `unit ${JSON.stringify(unit)} is detachable in kind and still in flight, but the pinned agent SDK ` +
+          "offers no verb to initiate a detachment; the shim can only observe detachments the vendor made " +
+          "(reported as a contract gap)",
       );
     }
     LOGGER.log({ unit }, "reported a foreground unit as detached: the vendor holds live background work for it");

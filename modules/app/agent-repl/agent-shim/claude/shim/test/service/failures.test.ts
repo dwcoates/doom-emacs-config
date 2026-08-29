@@ -11,7 +11,7 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { describe, expect, it } from "vitest";
-import { conversationv1 } from "../../src/proto.js";
+import { conversationv1, shimv1 } from "../../src/proto.js";
 import * as failures from "../../src/service/failures.js";
 
 describe("startSessionFailure", () => {
@@ -251,13 +251,28 @@ describe("startTurnAccepted", () => {
     });
 
     // Act.
-    const response = failures.startTurnAccepted(prompt);
+    const response = failures.startTurnAccepted(prompt, failures.emptyOpeningPage());
 
     // Assert.
     expect(response.result).toEqual({
       case: "success",
       value: expect.objectContaining({ prompt }),
     });
+  });
+
+  it("always carries a page, because an absent one and an empty one look alike", () => {
+    // Arrange.
+    const prompt = create(conversationv1.AgentPromptSchema, {
+      id: create(conversationv1.TurnIdSchema, { value: "t-7" }),
+    });
+
+    // Act.
+    const response = failures.startTurnAccepted(prompt, failures.emptyOpeningPage());
+
+    // Assert.
+    const success = response.result.value as shimv1.StartTurnSuccess;
+    expect(success.page).toBeDefined();
+    expect(success.page?.boundary.case).toBe("floor");
   });
 });
 
