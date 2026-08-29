@@ -1281,3 +1281,12 @@ its own file only when >1 endpoint needs it.
   webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
   golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
   `go 1.23`).
+
+## Landing 3 relay (2026-08-29, project lead)
+
+- StartTurnSuccess.page is the opening page; page_size/known_through on the request are live.
+- UpdateAgent prompt to a subagent refuses `not_deliverable` (SDK limit); DetachForeground refuses `unsupported` when the SDK cannot initiate a detachment. Both surface honestly in the feed; whether the controls are hidden this wave is the user's call (put to the user).
+- AgentId minting rule (proto comment on AgentId): main = original vendor session id; subagent = spawning call's tool_use_id. The daemon never derives a spawn unit's identity from an AgentId even though the bytes coincide.
+- FILE-PLANE-ONLY facts: AgentContextInjected, the write/edit `diagnostics` consequence arm and SessionUpdate.context_budget_warning arrive only through the store tail (WatchAgent replay/follow), never on the shim's live WatchSession; the daemon must not wait for them on the session stream.
+- Left unset by the stream plane (never invented): subagent spawn_depth/working_dir/transcript_suppressed/structured_result, worktree provenance/cleanup, AgentActivity.effort, ApiRateLimited.retry_after_ms from a result, AgentHookStart.gated_call, a foreground bash's termination, an image bash result's media_type.
+- Your error-arm batch is landing 4.

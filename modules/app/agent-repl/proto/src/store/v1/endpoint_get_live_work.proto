@@ -44,9 +44,13 @@ message GetLiveWorkSuccess {
   repeated conversation.v1.DetachedWorkId live_detached = 3;
 }
 
-// The set could not be read. `kind` arms are DERIVED at the wave from the
-// store's real failure sites.
+// The set could not be read. THE ARM IS WHY.
 message GetLiveWorkFailure {
   // The store's account, for a human and for logs; never switched on.
   string detail = 1;
+  oneof kind {
+    GetLiveWorkStorageFailure storage_failure = 2;
+  }
 }
+// The database failed; `detail` carries the driver's text.
+message GetLiveWorkStorageFailure {}
