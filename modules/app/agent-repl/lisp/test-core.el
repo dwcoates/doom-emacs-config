@@ -831,6 +831,107 @@ one to its caller.  A caller that must abort signals for itself."
   "An error record displays under the default `agent-repl-log-buffer-level'."
   (should (agent-repl--log-record-displays-p "error" "normal")))
 
+;;;; ---- Tests: runtime log-verbosity controls ----
+
+(ert-deftest agent-repl-test-toggle-debug-turns-visibility-on ()
+  "`agent-repl-toggle-debug' turns *Messages* visibility on from nil."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-debug nil))
+      (agent-repl-toggle-debug)
+      (should (eq agent-repl-debug t)))))
+
+(ert-deftest agent-repl-test-toggle-debug-turns-visibility-off ()
+  "`agent-repl-toggle-debug' turns visibility back off from t."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-debug t))
+      (agent-repl-toggle-debug)
+      (should (eq agent-repl-debug nil)))))
+
+(ert-deftest agent-repl-test-toggle-debug-prefix-selects-verbose ()
+  "With a prefix argument the toggle selects the verbose rung."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-debug nil))
+      (agent-repl-toggle-debug t)
+      (should (eq agent-repl-debug 'verbose)))))
+
+(ert-deftest agent-repl-test-toggle-debug-prefix-clears-verbose ()
+  "With a prefix argument the toggle clears an existing verbose setting."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-debug 'verbose))
+      (agent-repl-toggle-debug t)
+      (should (eq agent-repl-debug nil)))))
+
+(ert-deftest agent-repl-test-toggle-debug-leaves-the-file-level-alone ()
+  "The visibility toggle does not touch durable log volume."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-debug nil)
+          (agent-repl-log-file-level 'debug))
+      (agent-repl-toggle-debug)
+      (should (eq agent-repl-log-file-level 'debug)))))
+
+(ert-deftest agent-repl-test-toggle-debug-is-interactive ()
+  "`agent-repl-toggle-debug' is a user-facing command."
+  (should (commandp 'agent-repl-toggle-debug)))
+
+(ert-deftest agent-repl-test-set-log-file-level-sets-the-threshold ()
+  "`agent-repl-set-log-file-level' sets the durable threshold."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'debug))
+      (agent-repl-set-log-file-level 'warn)
+      (should (eq agent-repl-log-file-level 'warn)))))
+
+(ert-deftest agent-repl-test-set-log-file-level-rejects-an-unknown-level ()
+  "An unknown level is refused rather than silently installed."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'debug))
+      (should-error (agent-repl-set-log-file-level 'chatty) :type 'error)
+      (should (eq agent-repl-log-file-level 'debug)))))
+
+(ert-deftest agent-repl-test-set-log-file-level-leaves-debug-visibility-alone ()
+  "Changing durable volume does not change *Messages* visibility."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'debug)
+          (agent-repl-debug nil))
+      (agent-repl-set-log-file-level 'error)
+      (should (eq agent-repl-debug nil)))))
+
+(ert-deftest agent-repl-test-set-log-file-level-is-interactive ()
+  "`agent-repl-set-log-file-level' is a user-facing command."
+  (should (commandp 'agent-repl-set-log-file-level)))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-turns-it-on ()
+  "The verbose-to-disk toggle raises the durable threshold to verbose."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'debug))
+      (agent-repl-toggle-verbose-to-disk)
+      (should (eq agent-repl-log-file-level 'verbose)))))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-turns-it-off ()
+  "The verbose-to-disk toggle drops back to debug from verbose."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'verbose))
+      (agent-repl-toggle-verbose-to-disk)
+      (should (eq agent-repl-log-file-level 'debug)))))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-from-a-quieter-rung-goes-verbose ()
+  "From a rung above debug the toggle still turns verbose ON, never off."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'warn))
+      (agent-repl-toggle-verbose-to-disk)
+      (should (eq agent-repl-log-file-level 'verbose)))))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-leaves-the-buffer-level-alone ()
+  "The verbose-to-disk toggle affects the FILE only, not the log buffers."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'debug)
+          (agent-repl-log-buffer-level 'info))
+      (agent-repl-toggle-verbose-to-disk)
+      (should (eq agent-repl-log-buffer-level 'info)))))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-is-interactive ()
+  "`agent-repl-toggle-verbose-to-disk' is a user-facing command."
+  (should (commandp 'agent-repl-toggle-verbose-to-disk)))
+
 ;;;; ---- Tests: state-dir / state-file ----
 
 (ert-deftest agent-repl-test-state-dir-uses-env-override ()
