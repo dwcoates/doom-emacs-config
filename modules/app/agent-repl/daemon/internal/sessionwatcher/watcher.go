@@ -109,6 +109,13 @@ type watcher struct {
 	// address of a spawned subagent) and the call's tool name (what a
 	// permission notification names). NOT ANCESTRY: nothing here says who
 	// spawned whom, and no placement is ever derived from it.
+	//
+	// KEYED BY ACTIVITY ID, DELIBERATELY. A subagent's AgentId is minted from
+	// the spawning call's tool_use_id (and the main agent's from the original
+	// vendor session id), so the bytes of a spawn unit's identity and its
+	// created agent's identity COINCIDE. They are still two different things,
+	// and this map keys on the UNIT so nothing here ever derives a spawn
+	// unit's identity from an AgentId.
 	facts map[string]*activityFact
 }
 
@@ -316,6 +323,35 @@ func (w *watcher) adoptMainAgentLocked(agent *conversationv1.AgentId, source str
 			"source":            source,
 		})
 		w.mainAgent = agent
+	}
+}
+
+// OnTurnOpened is the prompt queue handing over an accepted turn.
+func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, page *conversationv1.HistoryPage) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if ws != w.ws {
+		// A turn handed to the wrong workspace's watcher is an invariant
+		// violation, and there is nothing useful to do with it.
+		w.log.Error("daemon.sessionwatcher.turn_opened_foreign", "a turn was opened on another workspace's watcher", dlog.Context{
+			"handed_workspace_id": string(ws), "turn_id": prompt.GetId().GetValue(),
+		})
+		return
+	}
+
+	w.adoptMainAgentLocked(prompt.GetAgent(), "start_turn")
+	if turnID := prompt.GetId().GetValue(); turnID != "" {
+		turn := ids.TurnID(turnID)
+		w.turn = &turn
+	}
+	w.log.Debug("daemon.sessionwatcher.turn_opened", "the queue opened a turn", dlog.Context{
+		"turn_id":  prompt.GetId().GetValue(),
+		"agent_id": prompt.GetAgent().GetValue(),
+		"entries":  len(page.GetEntries()),
+	})
+	if page != nil {
+		w.routeOpeningPageLocked(w.main, page)
 	}
 }
 

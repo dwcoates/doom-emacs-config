@@ -397,6 +397,10 @@ func (s *footerSink) OnPermission(_ ids.WorkspaceID, agent *conversationv1.Agent
 	s.rec.emit(event{sink: "footer", method: "OnPermission", agent: agent.GetValue()})
 }
 
+func (s *footerSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ContextCut) {
+	s.rec.emit(event{sink: "footer", method: "OnContextCut", agent: agent.GetValue()})
+}
+
 func (s *footerSink) OnApiError(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ApiRequestFailed) {
 	s.rec.emit(event{sink: "footer", method: "OnApiError", agent: agent.GetValue()})
 }
@@ -547,14 +551,22 @@ func (h *harness) quiet() {
 	h.sentinel(h.main)
 }
 
-// sentinel pushes the one frame that routes to exactly one sink — a context
-// cut, which only the feed draws — and reads the recorder up to it.
+// sentinel pushes a context cut, whose routing is fixed and short (the feed
+// then the footer), and reads the recorder up to it. Everything returned is
+// what the frame under test provoked.
 func (h *harness) sentinel(stream *fakeStream[*shimv1.WatchAgentResponse]) []event {
 	h.t.Helper()
 	stream.send(h.t, entryFrame(frameUpdate("sentinel", &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{}},
 	})))
-	return h.rec.until(h.t, "feed.OnContextCut")
+	// The cut reaches the feed AND the footer, and the footer is second, so
+	// the FOOTER's call is the sentinel: reading only to the feed's would
+	// leave the footer's behind to pollute the next assertion.
+	seen := h.rec.until(h.t, "footer.OnContextCut")
+	if len(seen) > 0 && seen[len(seen)-1].name() == "feed.OnContextCut" {
+		seen = seen[:len(seen)-1]
+	}
+	return seen
 }
 
 // route sends one frame down a stream and returns exactly the sink calls it

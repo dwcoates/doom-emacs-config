@@ -126,7 +126,7 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 // page, or one entry as written.
 func (w *watcher) routeAgentResponseLocked(a *agentWatch, resp *shimv1.WatchAgentResponse) {
 	if page := resp.GetPage(); page != nil {
-		w.routeHistoryPageLocked(a, page)
+		w.routeOpeningPageLocked(a, page)
 		return
 	}
 	if at := resp.GetEntry(); at != nil {
@@ -138,14 +138,15 @@ func (w *watcher) routeAgentResponseLocked(a *agentWatch, resp *shimv1.WatchAgen
 	})
 }
 
-// routeHistoryPageLocked hands a watch's opening page to the feed whole.
+// routeOpeningPageLocked hands an OPENING PAGE to the feed whole — a watch's
+// own first frame, or the page StartTurnSuccess carried.
 //
 // THE PAGE IS NOT REPLAYED AS LIVE FRAMES. Its entries are NEWEST FIRST, so
 // walking them would see a turn's terminal before its prompt and leave a
 // finished turn recorded as in flight. The only thing read out of a page is
 // the MAIN agent's identity, which an adopted session has no other source for
 // until its next StartTurn.
-func (w *watcher) routeHistoryPageLocked(a *agentWatch, page *conversationv1.HistoryPage) {
+func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.HistoryPage) {
 	if entries := page.GetEntries(); len(entries) > 0 {
 		if ptr := entries[0].GetAt(); ptr != nil {
 			w.known[watchKey(a.id)] = ptr
@@ -252,10 +253,11 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.notifyPermissionLocked(permission)
 
 	case update.GetContextCut() != nil:
-		w.log.Debug("daemon.sessionwatcher.context_cut", "the conversation was cut", dlog.Context{
+		w.log.Debug("daemon.sessionwatcher.context_cut", "the conversation was cut; the footer clears its cut states", dlog.Context{
 			"agent_id": agent.GetValue(),
 		})
 		w.sinks.Feed.OnContextCut(w.ws, agent, update.GetContextCut(), w.addr)
+		w.sinks.Footer.OnContextCut(w.ws, agent, update.GetContextCut())
 
 	case update.GetApiError() != nil:
 		w.log.Warn("daemon.sessionwatcher.api_error", "a vendor request failed mid-turn", dlog.Context{
@@ -684,11 +686,8 @@ func (w *watcher) permissionToolNameLocked(permission *conversationv1.AgentPermi
 }
 
 // notifyQuestionLocked raises the host notification a blocked question
-// deserves: the agent is addressing the user.
-//
-// LANDING 3 will give this its own kind (HostNotificationKind.question_asked
-// with the header); until it lands the notification is raised as
-// agent_addressed, and switching is one constant here.
+// deserves: HostNotificationKind.question_asked, which gets a permission ask's
+// attention treatment and carries the first question's chip label.
 func (w *watcher) notifyQuestionLocked(question *conversationv1.AgentQuestion) {
 	start := question.GetStart()
 	if start == nil {
@@ -703,9 +702,10 @@ func (w *watcher) notifyQuestionLocked(question *conversationv1.AgentQuestion) {
 		text = asked[0].GetQuestion().GetText()
 	}
 	note := HostNotification{
-		Text: text,
-		At:   instantOf(start.GetStartedAt().GetAtMs()),
-		Kind: NotificationAgentAddressed,
+		Text:   text,
+		At:     instantOf(start.GetStartedAt().GetAtMs()),
+		Kind:   NotificationQuestionAsked,
+		Header: asked[0].GetHeader(),
 	}
 	w.log.Debug("daemon.sessionwatcher.notify", "question notification raised", dlog.Context{
 		"question_id": question.GetId().GetValue(),
