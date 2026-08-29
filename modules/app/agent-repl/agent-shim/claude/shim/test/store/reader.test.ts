@@ -18,7 +18,6 @@ import { producerId } from "../../src/store/keys.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
 import {
   agent,
-  bashAnnouncementEntry,
   bashDeltaEntry,
   bashStartEntry,
   bashTerminalEntry,
@@ -285,23 +284,22 @@ describe("failure translation", () => {
 });
 
 describe("openBashRun", () => {
-  it("refuses a handle no announcement carries", async () => {
+  it("refuses an empty handle, which names no run at all", async () => {
     const { plane } = await seeded("bash-unknown", 0);
 
     await expect(
-      plane.openBashRun(create(conversationv1.DetachedWorkIdSchema, { value: "b-nope" })),
+      plane.openBashRun(create(conversationv1.DetachedWorkIdSchema, { value: "" })),
     ).rejects.toMatchObject({ kind: "unknown_work" });
   });
 
   it("replays the run's stored rows, so a growing spool has no hole in the middle", async () => {
     const { plane } = await seeded("bash-rows", 0);
+    // No join to establish: the handle IS the run's own identity.
     plane.write([bashStartEntry(), bashDeltaEntry()]);
-    // The announcement is what carries the handle→run join.
-    plane.write([bashAnnouncementEntry()]);
     await plane.flush();
 
     const run = await plane.openBashRun(
-      create(conversationv1.DetachedWorkIdSchema, { value: "work-1" }),
+      create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
     );
     const seen: string[] = [];
     for await (const frame of run) {
@@ -314,11 +312,11 @@ describe("openBashRun", () => {
 
   it("ends the run's stream after the terminal row, as a bounded stream owes", async () => {
     const { plane } = await seeded("bash-terminal", 0);
-    plane.write([bashStartEntry(), bashTerminalEntry(), bashAnnouncementEntry()]);
+    plane.write([bashStartEntry(), bashTerminalEntry()]);
     await plane.flush();
 
     const run = await plane.openBashRun(
-      create(conversationv1.DetachedWorkIdSchema, { value: "work-1" }),
+      create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
     );
     const arms: string[] = [];
     for await (const frame of run) arms.push(String(frame.result.case));
@@ -328,11 +326,9 @@ describe("openBashRun", () => {
 
   it("refuses a run the store holds no row for", async () => {
     const { plane } = await seeded("bash-no-rows", 0);
-    plane.write([bashAnnouncementEntry()]);
-    await plane.flush();
 
     const run = await plane.openBashRun(
-      create(conversationv1.DetachedWorkIdSchema, { value: "work-1" }),
+      create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
     );
 
     await expect(

@@ -201,10 +201,24 @@ describe("the vendor's level", () => {
 });
 
 describe("the live set as the wire names it", () => {
-  it("answers DetachedWorkIds carrying the vendor task ids verbatim", () => {
+  it("names work by the SPAWNING CALL, never by the vendor task id", () => {
     const table = new LiveWorkTable();
     table.onTaskStarted(started());
 
-    expect(table.workIds().map((id) => id.value)).toEqual(["b01"]);
+    // `DetachedWorkId.value == AgentActivityId.value` (ruling, landing 3), so a
+    // terminal retires a handle by equality; the task id stays shim-side for
+    // stopTask and the level.
+    expect(table.workIds().map((id) => id.value)).toEqual(["toolu_1"]);
+  });
+
+  it("omits work with no originating call, which has no wire name at all", () => {
+    const table = new LiveWorkTable();
+
+    table.onLevel(level([{ task_id: "b99", task_type: "agent", description: "x" }]));
+
+    // Still tracked for liveness — the level governs no-wedge — but nothing can
+    // address it, and inventing a handle would point a watch at nothing.
+    expect(table.workIds()).toEqual([]);
+    expect(table.get("b99")).toBeDefined();
   });
 });
