@@ -259,7 +259,9 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         // Strictly OLDER than `after`, newest first.
         const older = rowsOf(bookId).filter((row) => Number(row.pointer) < after);
         const window = older.slice(Math.max(0, older.length - request.pageSize));
-        const lines = [...window].reverse().map((row) => row.line);
+        // EVERY LINE CARRIES ITS OWN POINTER (landing 3): a continuation page
+        // is a reconnect mark like any other.
+        const lines = [...window].reverse().map(lineAt);
         const oldestInPage = window[0];
         const olderExist = older.length > window.length;
         return create(storev1.ReadAgentPageResponseSchema, {
