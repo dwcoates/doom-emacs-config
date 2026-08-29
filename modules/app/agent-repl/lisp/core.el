@@ -1464,14 +1464,14 @@ the debug lines a reader actually wants."
 ;;
 ;;   2. The LOUD sink — the echo area / modeline.  This is the highest-
 ;;      sensitivity channel we have: it interrupts the user and covers the
-;;      minibuffer.  It is reserved for GENUINE FATAL errors alone — the
-;;      conditions the user (or an agent watching the modeline for them)
-;;      MUST act on immediately.  In this ladder that means ONLY
-;;      `agent-repl--error', which reaches the modeline by SIGNALLING an
-;;      `error' (Emacs always displays a signalled error), NOT through the
-;;      `inhibit-message' gate below.  Warnings and every other diagnostic
-;;      are non-fatal, so they stay on the quiet sink and NEVER flash in the
-;;      modeline; they remain durable and greppable for whoever needs them.
+;;      minibuffer.  It is reserved for GENUINE FATAL conditions alone — the
+;;      ones the user (or an agent watching the modeline for them) MUST act
+;;      on immediately.  Nothing on the ladder reaches it: a fatal condition
+;;      is SIGNALLED (`agent-repl--do-log' with ERROR-P, which Emacs always
+;;      displays), and signalling is a control-flow act, not a log level.
+;;      Every ladder level — `agent-repl--error' included — stays on the
+;;      quiet sink and NEVER flashes in the modeline; the records remain
+;;      durable and greppable for whoever needs them.
 ;;
 ;; `agent-repl--emit-message' is the single chokepoint that decides which
 ;; sink a line reaches.  Binding `inhibit-message' suppresses the echo-area
@@ -1486,7 +1486,7 @@ the debug lines a reader actually wants."
 ;;   `agent-repl--log'          debug chatter      file always, quiet
 ;;   `agent-repl--info'         background notice  file + *Messages*, quiet
 ;;   `agent-repl--warn'         recorded warning   file + *Messages*, quiet
-;;   `agent-repl--error'        signals an error   file + *Messages* + ECHO
+;;   `agent-repl--error'        recorded error     file + *Messages*, quiet
 ;;
 ;; A bare `message' remains correct for one case only: synchronous feedback
 ;; from an interactive command the user just ran ("Copied: <ref>").  Async,
@@ -1564,8 +1564,9 @@ user must not be interrupted by: module loads, worktree creation progress,
 snapshot-load steps, sentinel bookkeeping, agent start/finish notices.
 
 Use `agent-repl--warn' instead to tag a recorded line with `WARNING:'
-severity (still quiet), or `agent-repl--error' to signal a genuine fatal
-condition loudly into the modeline."
+severity (still quiet), or `agent-repl--error' for the `error' rung — a
+contract breach or a failed operation, recorded at the level the logging
+contract reserves for them."
   (let ((text (agent-repl--build-log-text ws fmt args)))
     (agent-repl--persist-log-record ws "info" "normal" fmt args)
     (agent-repl--emit-message text nil)))
@@ -1575,11 +1576,12 @@ condition loudly into the modeline."
 A `WARNING: ' severity tag is prepended, so call sites pass the bare
 message (no literal \"WARNING:\" prefix of their own).
 
-A warning is NOT fatal, so it no longer reaches the echo area / modeline:
+A warning is NOT fatal, so it does not reach the echo area / modeline:
 the line is recorded on the durable, greppable channels (log file plus
 *Messages*) for the user or a watching agent to find, but it never
-interrupts.  Reserve `agent-repl--error' for the genuine fatal conditions
-that MUST surface in the modeline immediately.  This level still carries
+interrupts.  Reserve `agent-repl--error' for the `error' rung — a broken
+contract or a failed operation, which is worse but no louder.  This level
+still carries
 the `WARNING: ' severity that a plain `agent-repl--info' notice lacks:
 use it for failed writes, dropped state, broken invariants, and degraded
 functionality that are worth flagging in the log but are not fatal."
@@ -1934,15 +1936,33 @@ value."
   (agent-repl--emit-message (concat "agent-repl: " (apply #'format fmt args)) t))
 
 (defun agent-repl--error (ws fmt &rest args)
-  "Signal an error with a [agent-repl] tag, timestamp, and workspace metadata.
-WS is the workspace name for context (or nil).  FMT and ARGS are formatted
-the same way `agent-repl--log' formats them, and the resulting line is also
-written to the logfile before the error is signalled so the failure is
-captured regardless of whether debug logging is on.
+  "Log an ERROR for WS to the QUIET sink: the log file and *Messages*.
+An `ERROR: \' severity tag is prepended, so call sites pass the bare
+message (no literal \"ERROR:\" prefix of their own).
 
-Unlike `agent-repl--log', this fires regardless of `agent-repl-debug' —
-errors are not gated on the debug flag."
-  (agent-repl--do-log ws fmt args t))
+This is the top rung of the ladder and it is a LOGGING level, exactly like
+`agent-repl--warn' one rung below it: the JSONL record carries
+`level: \"error\"' (the spelling logging-contract.md reserves for a broken
+invariant or a failed operation), it is persisted whenever it clears
+`agent-repl-log-file-level', and it is emitted quietly so it never flashes
+in the modeline.
+
+It does NOT signal.  Recording that something failed and ABORTING the
+caller are separate acts, and conflating them makes the error level
+unusable for the every-logical-branch instrumentation it exists for: a
+branch that logs its own failure and then returns a failure to its caller
+must be able to say so without unwinding the stack underneath itself.  A
+caller that genuinely must abort signals for itself — `agent-repl--do-log'
+with ERROR-P non-nil records the line and then signals, which is what
+`agent-repl--assert-main-thread' uses."
+  (if (stringp fmt)
+      (agent-repl--do-log-level ws (concat "ERROR: " fmt) args "error")
+    ;; A non-string FMT is a caller bug.  Hand it through untouched rather
+    ;; than `concat'-ing it (which would raise a wrong-type-argument here and
+    ;; bury the real culprit): `agent-repl--build-log-text' already captures a
+    ;; backtrace to *agent-repl-log-bug* for exactly this case, and ARGS is
+    ;; preserved so nothing about the offending call is lost.
+    (agent-repl--do-log-level ws fmt args "error")))
 
 (defun agent-repl--assert-main-thread (what)
   "Signal an error when called off the main thread; no-op (nil) on main.
@@ -2289,13 +2309,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-webview-reload-widget
     agent-repl--frontend-webview-navigate-widget
     agent-repl--frontend-webview-uri
-    agent-repl--uds-connect
-    agent-repl--uds-socket-file-present-p
-    agent-repl--uds-probe
-    agent-repl--image-call-process
-    agent-repl--external-browser-call-process
-    agent-repl--run-install-script
-    agent-repl--readiness-run-script)
+    agent-repl--image-call-process)
   "Symbols of every external-process or external-state-mutation wrapper.
 Each MUST be mocked by tests that reach it via production code.  The
 test harness installs guards so unmocked invocations fail loudly.
