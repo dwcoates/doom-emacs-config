@@ -20,7 +20,7 @@ import {
   decodeFrontendFrame,
   type FrontendFrame,
 } from "../src/frontend-proto.js";
-import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/log.js";
 import { PromptOrigin } from "../src/frontend-command.js";
 
 function installLogging(): {

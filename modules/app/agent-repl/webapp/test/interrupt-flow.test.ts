@@ -41,7 +41,7 @@ import { resolveFooterLiveness } from "../src/footer-liveness.js";
 import { WorkspaceSidebar } from "../src/sidebar.js";
 import { StateAdapter } from "../src/state-adapter.js";
 import { ConversationStore } from "../src/store.js";
-import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/log.js";
 
 afterEach(() => resetLoggingForTests());
 import type { CommandRefusal } from "../src/command-dispatch.js";

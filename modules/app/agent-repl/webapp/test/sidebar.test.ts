@@ -33,7 +33,7 @@ import {
 } from "../src/sidebar.js";
 import type { MergeStatus } from "../src/state-adapter.js";
 import css from "../src/styles.css?raw";
-import { ForwardingLogger, setLogger } from "../src/wslog.js";
+import { ForwardingLogger, setLogger } from "../src/log.js";
 
 const NOW_MS = 1_700_000_000_000;
 const NOW_S = NOW_MS / 1000;

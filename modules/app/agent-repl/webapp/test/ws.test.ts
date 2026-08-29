@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "../src/ws.js";
-import { ForwardingLogger, setLogger } from "../src/wslog.js";
+import { ForwardingLogger, setLogger } from "../src/log.js";
 
 function captureCanonicalLogs(): Array<Record<string, unknown>> {
   const records: Array<Record<string, unknown>> = [];
