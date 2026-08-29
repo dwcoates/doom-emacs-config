@@ -1,0 +1,127 @@
+package workspace
+
+import (
+	"context"
+	"fmt"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/wsm"
+)
+
+// Kill is the big red button: FORCED session death. It never blocks on what is
+// running, and it destroys no data — the worktree, the branch and every durable
+// record survive, and the terminal it writes is REHYDRATABLE, so the
+// conversation can be resumed later.
+//
+// The order matters: the session is asked to die forcefully FIRST, so the shim
+// writes its own terminals, and only then is the process stopped. Everything
+// still without a terminal is closed in ONE transaction.
+func (v *verbs) Kill(ctx context.Context, ws ids.WorkspaceID) error {
+	_, log, err := v.owned(ctx, "KillWorkspace", ws)
+	if err != nil {
+		return err
+	}
+	return v.kill(ctx, log, ws)
+}
+
+// kill is Kill's body, shared with Nuke, which kills before it destroys.
+func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
+	if shim, live := v.deps.Shim(ws); live {
+		if err := shim.KillSession(ctx, true); err != nil {
+			// A shim that will not answer is not a reason to leave the
+			// workspace alive: the process stop below is unconditional, and the
+			// refusal is evidence.
+			log.Warn(opKill, "the forced KillSession did not answer", dlog.Context{"cause": err.Error()})
+		} else {
+			log.Debug(opKill, "the session was killed forcefully", nil)
+		}
+	} else {
+		log.Debug(opKill, "no live session to kill", nil)
+	}
+
+	if err := v.deps.Sessions.Stop(ctx, ws, true); err != nil {
+		log.Error(opKill, "could not stop the shim process", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("kill %q: stop the shim: %w", ws, err)
+	}
+
+	at := v.now()
+	report, err := v.deps.DB.CloseOrphans(ctx, ws, at)
+	if err != nil {
+		log.Error(opKill, "could not close the orphaned turns", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("kill %q: close orphans: %w", ws, err)
+	}
+	if err := v.deps.DB.SetSessionTerminal(ctx, ws, wsm.SessionTerminal{
+		Kind:   "killed",
+		Detail: "KillWorkspace",
+		At:     at,
+	}); err != nil {
+		log.Error(opKill, "could not record the session terminal", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("kill %q: record the terminal: %w", ws, err)
+	}
+
+	// A killed workspace's roster row carries closed = true: Emacs derives its
+	// tab set from that flag, and a killed workspace has no editor state left.
+	if err := v.deps.DB.SetClosed(ctx, ws, true); err != nil {
+		log.Error(opKill, "could not record the close", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("kill %q: record closed: %w", ws, err)
+	}
+
+	log.Info(opKill, "killed the workspace's session", dlog.Context{"orphans_closed": len(report.Turns)})
+	v.republishRegistry(ctx, log, opKill)
+	return nil
+}
+
+// Nuke destroys data: it kills the session when one is live, deletes the
+// worktree AND the branch, and forgets the record. A nuked workspace LEAVES the
+// roster entirely — it is the only verb in this package with no undo.
+func (v *verbs) Nuke(ctx context.Context, ws ids.WorkspaceID) error {
+	record, log, err := v.owned(ctx, "NukeWorkspace", ws)
+	if err != nil {
+		return err
+	}
+
+	if v.deps.Sessions.Live(ws) {
+		if err := v.kill(ctx, log, ws); err != nil {
+			return fmt.Errorf("nuke %q: %w", ws, err)
+		}
+	} else {
+		log.Debug(opNuke, "no live session to kill before the nuke", nil)
+	}
+
+	repo, err := v.repoDirOf(ctx, record)
+	if err != nil {
+		log.Error(opNuke, "could not resolve the repository to nuke from", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("nuke %q: %w", ws, err)
+	}
+	if err := v.deps.Git.Nuke(ctx, repo, record.Dir, record.Branch); err != nil {
+		log.Error(opNuke, "could not destroy the worktree and branch", dlog.Context{
+			"repo": repo, "dir": record.Dir, "branch": record.Branch, "cause": err.Error(),
+		})
+		return fmt.Errorf("nuke %q: destroy %q: %w", ws, record.Dir, err)
+	}
+
+	if err := v.deps.DB.Forget(ctx, ws); err != nil {
+		log.Error(opNuke, "could not forget the workspace record", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("nuke %q: forget: %w", ws, err)
+	}
+
+	log.Info(opNuke, "nuked the workspace", dlog.Context{"dir": record.Dir, "branch": record.Branch})
+	v.republishRegistry(ctx, log, opNuke)
+	return nil
+}
+
+// repoDirOf answers the repository directory a workspace belongs to, from the
+// registry rather than from the worktree's own path.
+func (v *verbs) repoDirOf(ctx context.Context, record wsm.Workspace) (string, error) {
+	repositories, err := v.deps.DB.ListRepositories(ctx)
+	if err != nil {
+		return "", fmt.Errorf("list the repositories: %w", err)
+	}
+	for _, repo := range repositories {
+		if repo.ID == record.Repo {
+			return repo.Dir, nil
+		}
+	}
+	return "", fmt.Errorf("repository %q is not registered", record.Repo)
+}
