@@ -44,6 +44,87 @@
   asks on prompt, owed-redelivery cancellation): dropped for this
   project; the landed permission/question API is the only path.
 
+## Removals ruled 2026-08-29 (final-audit triage)
+- WORKSPACE RENAME (rename.el, SPC TAB r, 577 lines): DEAD — names are
+  daemon-minted at creation and permanent.
+- CODEX as a second backend (backend.el, codex.el): DEAD for now — the
+  vendor oneof stays extensible; a future vendor is a future shim.
+- explain-config (the read-only config Q&A popup): DEAD.
+- The pre-close /gns-sockets agent round-trip: DEAD.
+- The readiness mode-line segment AND the recovery-SLO machinery
+  (readiness.el, recovery-slo.el): DEAD — blue-green + reconnect-is-reopen
+  replace both.
+- The durable Emacs workspace-roster snapshot: DEAD — the DAEMON is the
+  source; on connect Emacs opens tabs from the roster stream; only local
+  display prefs may persist locally.
+- The daemon-link-degraded banner and connection-notice retraction
+  machinery: DEAD.
+- Client-authored tab ORDERING and HIDING: DEAD — tabs follow roster order
+  strictly (the resolver orders, priority included); push/pull-tab
+  commands, priority auto-reordering, and hide-project-dirs all die;
+  sidebar folding affects the sidebar only.
+- Composer slash/skill completion: DEAD (no data source; the panels'
+  producer gap is a separate wave escalation).
+- The stale-webview sweep on link-up: DEAD (reload_webapp replaces it).
+- Emacs-side external-browser pinning of browse-url: DEAD (the daemon's
+  OpenExternal verb is the one pinned path).
+- The debug keymap (SPC j h), memory-state.el's continuous dump, and the
+  sentinel reset/nuke recovery commands: DEAD.
+- The skill-symlink auto-installer + pre-commit hook installer: DEAD —
+  provisioning is install.sh's job.
+- ALL webview key affordances installed via JS eval (copy chords, chess
+  stepping, text-size controls): DEAD — no window.agentRepl* hook surface
+  exists at all; the webview is purely daemon-driven.
+- Per-workspace clipboard slot, arbitrary data payloads, the PGN board
+  popup, and the profiler-report dump: DEAD (/runtime-eval-code SURVIVES —
+  debugging depends on it).
+- Sidebar keyboard navigation and the single-prompt-at-a-time guard: DEAD.
+- The output-feed navigation commands (webview bubble cycling): DEAD.
+- Emacs task store, org notes files, and task gestures move to the wire:
+  the task-verbs increment (CreateTask/UpdateTask/AssignWorkspaceTask)
+  owns tasks; org NOTES files stay Emacs-local.
+
+## Host-native behaviors blessed 2026-08-29 (survive as Emacs-local)
+- PROMPT COMPOSITION IS FREE: Emacs may compose/decorate prompt text
+  freely BEFORE submission — the metaprompt prepend, the SPC j canned
+  prompts (explain/test/lint/PR families), prefix/postfix send variants.
+  "Verbatim" means no post-submission rewriting, not no composition; what
+  is submitted is what is drawn (the daemon strips the sentinel-marked
+  metaprompt spans from the DRAWN row).
+- ONE-SHOTS ride the wire now: Emacs supplies {prompt, model, parentage}
+  through the dedicated one-shot creation form; the DAEMON owns naming,
+  worktree, decoration, and merge/PR postprocessing.
+- THE OPEN-PROGRESS LADDER survives as host-native UX over
+  Emacs-observable stages (request sent, ack, page load, render) with the
+  stall diagnosis; no wire change.
+- EMACS OWNS COLD START of the daemon: auto-start on Emacs boot,
+  stale-binary rebuild-and-start, foreign-daemon handling, build-failure
+  surfacing. Everything after boot is the daemon's own blue-green.
+- LOCAL PRESENTATION AXIS: Emacs may compose its tab treatment from the
+  pushed state arm × local-only facts (panels-dismissed bracket-only
+  paint, the ready-shout-then-fade dwell) — the fixed-treatment rule
+  governs the ARM's meaning, not host-local modifiers.
+- WEBVIEW POOL: pre-creation and staggering are blessed performance
+  machinery ("bound from FIRST MOUNT for life"); the manual rescue
+  command survives as an escape hatch.
+- Editor-local conveniences kept: tab-bar geometry, panel/window
+  discipline, commit-emoji + hook, magit integrations, interaction
+  record/replay, the autosave sweep, composer input history
+  (persistence, fuzzy search, glyph), copy-reference/copy-name/
+  revert-and-eval/reload-config/print-branch.
+
+## Turn state and reactions (ruled 2026-08-29)
+- EMACS SUBSCRIBES WatchWorkspaceRoster: the roster's per-row state/dot
+  vocabulary is the ONE source for tab coloring and the sidebar dot (no
+  HostWorkspace lifecycle axis exists; the palette's five live colors
+  paint from roster arms).
+- THE FINISH EDGE is the roster row's turn-running→idle transition; all
+  four reactions ride it as Emacs-local policy: the unfocused "Agent
+  ready" desktop banner, the cross-workspace echo, the magit-status
+  refresh, and the deferred-prompt drain.
+- Tab REHYDRATION: on connect, Emacs opens tabs for the workspaces the
+  roster lists — the daemon is the source of which workspaces exist.
+
 ## Code-level consistency requirements (from the conventions walk)
 - ONE shared subroutine backs every open-a-file affordance: "open
   path[:line] in a doom popup, right side, half width" — the plan
@@ -134,7 +215,10 @@ Three rpcs plus the handover pair.
   workspace cancels its stream. The response is a push oneof:
   - `host` — the `HostWorkspace` state, whole (below).
   - `notification` — an EVENT {text, at_ms}, fired not state (presentation
-    policy below).
+    policy below). TYPED KINDS (increment ruled 2026-08-29): the push
+    gains a kind oneof (agent_addressed | permission_requested | ...)
+    beside the composed text; a permission ask FIRES this push and sets
+    the attention marker — Emacs's focus policy needs no new logic.
   - `transferred` — daemon handover: this (old) daemon released the
     workspace (below).
   - `reload_webapp` — webapp-only rollout: reload this workspace's xwidget
@@ -283,14 +367,19 @@ reserved for the verb that destroys data.
   there is the webapp feed's merge bubble and the roster/footer. Emacs
   holds NO merge state: no durable merged/failed memory, no merged-tab
   filtering — the pushed views are the only merge state.
-- `RestartWorkspace {force}` — bounce only the workspace's shim. Graceful:
-  wait for quiet, holding prompts in the tray meanwhile. Forced: interrupt
-  and bounce; the agent is NOT resumed afterwards — continuing is the
-  user's next prompt.
+- `RestartWorkspace {force}` — SPC o C-c calls this and nothing else; the
+  DAEMON owns everything the restart entails, INCLUDING bouncing the
+  webapp view (via reload_webapp after the ack if Emacs coordination is
+  needed). Graceful: wait for quiet, holding prompts in the tray
+  meanwhile. Forced: interrupt and bounce; the agent is NOT resumed
+  afterwards — continuing is the user's next prompt.
 - `CreateWorkspace {RepositoryRef, optional initial_prompt, optional
   base_ref}` — THE DAEMON names and creates everything (slug → branch →
   worktree), registers it, and the workspace appears on the roster; no host
-  materialization round-trip exists. The RepositoryRef comes from the
+  materialization round-trip exists. THE CREATION-FACTS INCREMENT (ruled
+  2026-08-29, see daemon.md) adds: merge actions, priority, fork-from,
+  the ungated-consent flag, user name, parentage, model, and the one-shot
+  form. The RepositoryRef comes from the
   roster's repo sections. No account field exists: the account is
   DETERMINED by the repo-under-root rule, never selected.
 
@@ -298,9 +387,12 @@ reserved for the verb that destroys data.
 
 These are not host-natured; elisp is the plumbing that reaches them.
 
-- `UpdateShutdownSchedule { schedule{at_ms} | cancel | now }` — deploy
-  tooling's drain-and-exit control, purely inbound; consequences ride
-  existing surfaces (tray holds during drain, footer status).
+- `UpdateShutdownSchedule { schedule{at_ms, reason} | cancel | now }` —
+  deploy tooling's drain-and-exit control; the reason is REQUIRED on
+  schedule (increment ruled 2026-08-29) and a drain-scheduled WatchDaemon
+  push carries reason + at_ms so every client can draw the standing
+  banner; other consequences ride existing surfaces (tray holds, footer
+  status).
 - `UpdateMergeQueue { pause | resume | evict{WorkspaceRef} }` — operator
   control; visible state rides the merge bubble's queue tab and the roster.
 - `DaemonHealth {}` / `SessionHealth {WorkspaceRef}` — health pulls;
