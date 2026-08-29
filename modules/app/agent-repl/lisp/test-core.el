@@ -723,6 +723,41 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
 
 ;;;; ---- Tests: error ----
 
+(ert-deftest agent-repl-test-fatal-signals ()
+  "`agent-repl--fatal' aborts the caller: it signals, unlike `--error'."
+  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
+    (should-error (agent-repl--fatal nil "bad %s" "thing") :type 'error)))
+
+(ert-deftest agent-repl-test-fatal-formats-fmt-and-args ()
+  "`agent-repl--fatal' expands FMT with ARGS in the signalled message."
+  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
+    (let ((err (should-error (agent-repl--fatal nil "ws=%s code=%d" "foo" 7))))
+      (should (string-match-p "ws=foo code=7" (error-message-string err))))))
+
+(ert-deftest agent-repl-test-fatal-includes-agent-repl-tag ()
+  "`agent-repl--fatal' output includes the [agent-repl] tag."
+  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
+    (let ((err (should-error (agent-repl--fatal nil "something"))))
+      (should (string-match-p "\\[agent-repl\\] something"
+                              (error-message-string err))))))
+
+(ert-deftest agent-repl-test-fatal-persists-record-at-level-error ()
+  "`agent-repl--fatal' records at level \"error\" before it signals."
+  (let ((captured nil))
+    (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+               (lambda (_ws level _verbosity _fmt _args) (setq captured level))))
+      (should-error (agent-repl--fatal nil "boom"))
+      (should (equal captured "error")))))
+
+(ert-deftest agent-repl-test-fatal-persists-before-signalling ()
+  "The record is written BEFORE the signal, so the failure is never lost."
+  (let ((order nil))
+    (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+               (lambda (&rest _) (push 'persisted order))))
+      (ignore-errors (agent-repl--fatal nil "boom"))
+      (push 'unwound order))
+    (should (equal (nreverse order) '(persisted unwound)))))
+
 (ert-deftest agent-repl-test-error-does-not-signal ()
   "`agent-repl--error' RECORDS a failure; it never unwinds the caller.
 The error rung exists so a branch can log its own failure and still return

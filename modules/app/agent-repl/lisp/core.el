@@ -390,8 +390,8 @@ what you want is a smaller LOG FILE, this is the wrong knob — set
 (defcustom agent-repl-log-to-file t
   "Master kill-switch for file-writing of agent-repl log lines.
 When non-nil (the default), every call to `agent-repl--log',
-`agent-repl--info', `agent-repl--warn', `agent-repl--do-log', or
-`agent-repl--error' appends its JSONL record to the workspace's canonical
+`agent-repl--info', `agent-repl--warn', `agent-repl--do-log',
+`agent-repl--error', or `agent-repl--fatal' appends its JSONL record to the workspace's canonical
 sink, or to `agent-repl-log-file-name' when the call is genuinely
 workspace-agnostic, REGARDLESS of `agent-repl-debug'.
 `agent-repl--log-verbose' persists as well; `agent-repl-debug' controls
@@ -1463,12 +1463,12 @@ the debug lines a reader actually wants."
 ;;      sensitivity channel we have: it interrupts the user and covers the
 ;;      minibuffer.  It is reserved for GENUINE FATAL conditions alone — the
 ;;      ones the user (or an agent watching the modeline for them) MUST act
-;;      on immediately.  Nothing on the ladder reaches it: a fatal condition
-;;      is SIGNALLED (`agent-repl--do-log' with ERROR-P, which Emacs always
-;;      displays), and signalling is a control-flow act, not a log level.
-;;      Every ladder level — `agent-repl--error' included — stays on the
-;;      quiet sink and NEVER flashes in the modeline; the records remain
-;;      durable and greppable for whoever needs them.
+;;      on immediately.  Nothing on the LADDER reaches it: a fatal condition
+;;      is SIGNALLED (`agent-repl--fatal', which Emacs always displays), and
+;;      signalling is a control-flow act, not a log level.  Every ladder
+;;      level — `agent-repl--error' included — stays on the quiet sink and
+;;      NEVER flashes in the modeline; the records remain durable and
+;;      greppable for whoever needs them.
 ;;
 ;; `agent-repl--emit-message' is the single chokepoint that decides which
 ;; sink a line reaches.  Binding `inhibit-message' suppresses the echo-area
@@ -1484,6 +1484,10 @@ the debug lines a reader actually wants."
 ;;   `agent-repl--info'         background notice  file + *Messages*, quiet
 ;;   `agent-repl--warn'         recorded warning   file + *Messages*, quiet
 ;;   `agent-repl--error'        recorded error     file + *Messages*, quiet
+;;
+;; Aborting is not a rung: `agent-repl--fatal' records at the `error' level
+;; and then SIGNALS, for a refusal or a broken precondition the caller must
+;; not continue past.
 ;;
 ;; A bare `message' remains correct for one case only: synchronous feedback
 ;; from an interactive command the user just ran ("Copied: <ref>").  Async,
@@ -1563,7 +1567,7 @@ snapshot-load steps, sentinel bookkeeping, agent start/finish notices.
 Use `agent-repl--warn' instead to tag a recorded line with `WARNING:'
 severity (still quiet), or `agent-repl--error' for the `error' rung — a
 contract breach or a failed operation, recorded at the level the logging
-contract reserves for them."
+contract reserves for them.  `agent-repl--fatal' is the abort."
   (let ((text (agent-repl--build-log-text ws fmt args)))
     (agent-repl--persist-log-record ws "info" "normal" fmt args)
     (agent-repl--emit-message text nil)))
@@ -1577,8 +1581,9 @@ A warning is NOT fatal, so it does not reach the echo area / modeline:
 the line is recorded on the durable, greppable channels (log file plus
 *Messages*) for the user or a watching agent to find, but it never
 interrupts.  Reserve `agent-repl--error' for the `error' rung — a broken
-contract or a failed operation, which is worse but no louder.  This level
-still carries
+contract or a failed operation, which is worse but no louder — and
+`agent-repl--fatal' for a condition the caller must not continue past.
+This level still carries
 the `WARNING: ' severity that a plain `agent-repl--info' notice lacks:
 use it for failed writes, dropped state, broken invariants, and degraded
 functionality that are worth flagging in the log but are not fatal."
@@ -1932,6 +1937,22 @@ value."
   (agent-repl--persist-log-record ws "info" "normal" fmt args)
   (agent-repl--emit-message (concat "agent-repl: " (apply #'format fmt args)) t))
 
+(defun agent-repl--fatal (ws fmt &rest args)
+  "Record a fatal condition for WS and then SIGNAL it.
+WS is the workspace name for context (or nil).  FMT and ARGS are formatted
+the same way `agent-repl--log' formats them, and the resulting line is
+written to the durable sink BEFORE the `error' is signalled so the failure
+is captured regardless of whether debug logging is on.  Fires regardless
+of `agent-repl-debug'.
+
+This is the ABORT, not a log level: a signalled `error' is the one thing
+Emacs always displays, so it is also the only path to the loud sink (see
+the severity-gate commentary above).  Reach for it where the caller must
+not continue — a refusal, a broken precondition, an unusable input.  When
+the branch only needs to RECORD that something failed and carry on, that
+is `agent-repl--error' one line below."
+  (agent-repl--do-log ws fmt args t))
+
 (defun agent-repl--error (ws fmt &rest args)
   "Log an ERROR for WS to the QUIET sink: the log file and *Messages*.
 An `ERROR: \' severity tag is prepended, so call sites pass the bare
@@ -1948,10 +1969,12 @@ It does NOT signal.  Recording that something failed and ABORTING the
 caller are separate acts, and conflating them makes the error level
 unusable for the every-logical-branch instrumentation it exists for: a
 branch that logs its own failure and then returns a failure to its caller
-must be able to say so without unwinding the stack underneath itself.  A
-caller that genuinely must abort signals for itself — `agent-repl--do-log'
-with ERROR-P non-nil records the line and then signals, which is what
-`agent-repl--assert-main-thread' uses."
+must be able to say so without unwinding the stack underneath itself.
+
+A caller that must abort uses `agent-repl--fatal' (one line above), which
+records at this same level and then signals; a refusal that already has
+its own `error' / `user-error' keeps it and calls this to put the reason
+on the record first."
   (if (stringp fmt)
       (agent-repl--do-log-level ws (concat "ERROR: " fmt) args "error")
     ;; A non-string FMT is a caller bug.  Hand it through untouched rather
