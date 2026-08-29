@@ -33,7 +33,18 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   popup subroutine + blink cadence; webapp: one separation renderer +
   link component + blink cadence); everything unchecked stays
   digest-only.
-- OWED BEFORE HANDOFF: only the foundation SHA stamped at dispatch.
+- FINAL-AUDIT TRIAGE COMPLETE (2026-08-29): all 144 findings from the
+  seven coverage audits were walked and ruled with the user
+  (docs/protobuf-design/final-audit/TRIAGE-RULINGS.md is the ledger);
+  every DOC ruling is LANDED in the six system docs and both prompt
+  docs; the proto comments were swept of planning-doc/skill pointers
+  (build green). OWED: the ~17 sanctioned contract increments listed in
+  daemon.md's "Contract increments owed" section — sketched with the
+  user and landed before kickoff (the /context rich schema additionally
+  needs verification against the vendor's real get_context_usage
+  answer).
+- OWED BEFORE HANDOFF: the contract increments above, then the
+  foundation SHA stamped at dispatch.
   THE ARCHITECTURE WALK IS COMPLETE (2026-08-28): the internal
   components closed — failure classification falls out, accounting
   dissolved into per-resolver accumulation (sessionwatcher routes to
