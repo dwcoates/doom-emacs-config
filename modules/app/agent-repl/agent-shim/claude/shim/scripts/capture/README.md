@@ -165,6 +165,25 @@ Everything is passed through `anonymize.mjs` before it lands — the walker
 structural field — uuids, session ids, paths, timestamps, tool-use ids, object
 keys — survives verbatim. A capture directory is safe to commit.
 
+## The MCP probe server
+
+`mcp-echo.mjs` is a real, minimal MCP server over stdio — line-delimited
+JSON-RPC 2.0, **node built-ins only**. It offers `echo` (returns its input) and
+`slow` (sleeps, to provoke the vendor's per-call progress heartbeat).
+
+It exists because `mcp-unmodeled-tool` and `mcp-server-healths` previously
+shipped a comment-only stub and asked the operator to supply a server at capture
+time — so the two scenarios that exist to capture `AgentUnmodeled`, the one arm
+producible only by a tool whose schema the shim genuinely cannot know, could not
+run at all. Nothing else in the corpus reaches that branch: every other tool is a
+modeled built-in.
+
+No dependency was added on purpose: putting `@modelcontextprotocol/sdk` in the
+shim's production lockfile so a capture script can echo a string is the wrong
+trade. Both scenarios name it through `options.mcpServers`, using the
+`{{CAPTURE_DIR}}` token that the harness substitutes with this directory's
+absolute path.
+
 ## Shared worlds and multi-turn scenarios
 
 Three scenarios used to carry a `manual_setup` note asking the operator to
