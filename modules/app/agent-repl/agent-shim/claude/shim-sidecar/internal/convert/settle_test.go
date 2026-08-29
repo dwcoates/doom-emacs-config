@@ -118,15 +118,20 @@ func TestTaskStopResultIsConsumedAsAShellRunsCancelledTerminal(t *testing.T) {
 	// resolves the owning task as CANCELLED — deliberately-stopped work must
 	// never resolve LOST.
 	c := newTestConverter(t)
+	// The launch is what binds task b7 to the call that opened it; the stop's
+	// terminal is keyed by THAT call, never by the vendor task id.
+	launch := assistantWith("a0", "msg_0", ts1, toolCall("toolu_run", "Bash", `{"command":"sleep 1","run_in_background":true}`))
+	launched := toolResultLine("u0", "toolu_run", ts1, `[{"type":"text","text":"launched"}]`,
+		`{"backgroundTaskId":"b7","outputFile":"/tmp/b7.output"}`)
 	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{"task_id":"b7"}`))
 	result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
 		`{"command":"stop","task_type":"bash","task_id":"b7","message":"stopped"}`)
 
 	// Act.
-	entries := convertLines(t, c, call, result)
+	entries := convertLines(t, c, launch, launched, call, result)
 
 	// Assert.
-	terminal := entryByKey(t, entries, BashKey("b7"))
+	terminal := entryByKey(t, entries, BashKey("toolu_run"))
 	interrupted := terminal.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted()
 	if interrupted == nil {
 		t.Fatal("a stopped shell run must resolve on the interrupted arm")
@@ -346,5 +351,31 @@ func TestUnknownToolBecomesUnmodeledNotResidue(t *testing.T) {
 	}
 	if start.GetArguments() == nil {
 		t.Fatal("the arguments must be carried structured, so a generic view can list fields")
+	}
+}
+
+func TestATaskStopForATaskNoLaunchOpenedIsStoredRatherThanKeyedOnAGuess(t *testing.T) {
+	// Arrange. Without the launch there is nothing that says WHICH call the task
+	// belongs to, and keying the terminal on the vendor task id would settle a
+	// row no reader can join to a call — so the record is stored whole instead.
+	c := newTestConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{"task_id":"b7"}`))
+	result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
+		`{"command":"stop","task_type":"bash","task_id":"b7","message":"stopped"}`)
+
+	// Act.
+	entries := convertLines(t, c, call, result)
+
+	// Assert.
+	for _, e := range entries {
+		if e.GetUpsertKey() == BashKey("b7") {
+			t.Fatalf("a stop with no launch minted %q; the vendor task id is not a run identity", e.GetUpsertKey())
+		}
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want exactly 1 (the record stored whole): keys=%v", len(entries), allKeys(entries))
+	}
+	if got := entries[0].GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetKind(); got != "task_stop/unlaunched" {
+		t.Fatalf("kind = %q, want task_stop/unlaunched", got)
 	}
 }

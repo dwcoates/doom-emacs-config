@@ -51,5 +51,8 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 	}
 	c.log.With(at.ctxFor("launch")).With(logging.Context{TaskID: taskID, ActivityID: call.activityID, BookAgentID: agent}).
 		Log("detached launch observed with output path %q", output)
+	// Remembered for THIS file's own conversions: a TaskStop result names only
+	// the task, and the run it cancels is the call recorded here.
+	c.spawnedRuns[taskID] = call.activityID
 	c.observer.TaskSpawned(taskID, call.activityID, agent, output)
 }

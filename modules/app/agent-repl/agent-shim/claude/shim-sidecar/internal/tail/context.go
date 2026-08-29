@@ -80,6 +80,19 @@ type Context struct {
 	SpoolDir string // the session's task spool dir
 	RunID    string // workflow run id from the journal PATH
 
+	// RunActivityID is the SPAWNING CALL's tool_use_id for a detached spool —
+	// the identity a detached run is announced under on BOTH planes, and
+	// therefore the only thing a `bash:` frame may be keyed by.
+	//
+	// THE VENDOR TASK ID IS NOT AN IDENTITY. It names the harness's runtime
+	// bookkeeping for the launch, is absent from the stream plane entirely, and
+	// keying frames by it would put the spool's output on a row no reader of the
+	// conversation can ever join to the call that produced it. The reader
+	// resolves it once, from the launch the converter observed, and hands it
+	// over here; it is empty exactly while the spool is unclaimed, and a spool
+	// is not tailed in that state.
+	RunActivityID string
+
 	RecordsObserved int64
 	BytesObserved   int64
 
