@@ -8151,3 +8151,12 @@ bounce), `DaemonShutdownCause { self_merge_rollout | scheduled_drain
 receiver shortens its window). `WatchDaemon` gains `drain_scheduled
 {at_ms, reason}` / `drain_cancelled` pushes; `UpdateShutdownSchedule`'s
 schedule and now arms both REQUIRE a DrainReason.
+
+## 2026-08-29 — Interrupt: fan-wide target + confirm challenge (landed)
+
+Kept the absorption ruling: no CancelDetachedAgents verb returns; instead
+InterruptRequest.target gains `all_agents {}` (the fan-wide stop, success
+via the existing interrupted_detached count arm), plus `confirm_agents`
+(bool, answers the challenge) and the landed refusal arm
+`InterruptError.confirm_required { live_agent_count }` — a turn stop with
+live agents is refused once, naming the count.
