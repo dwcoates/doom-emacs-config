@@ -146,9 +146,6 @@ unmarked is DISCRETIONARY by default.
      - FRESH DATABASE: the rebuilt daemon starts with a FRESH WSM file;
        the old state.db is abandoned in place — no import, no
        migration (consistent with no-backwards-compat).
-     - RETENTION: live records are never pruned; terminal records are
-       retained to a bounded per-table cap (number the implementer's);
-       growth is bounded by construction.
      - CORRUPT ⇒ REFUSE, GENERALIZED: a corrupt or partially-readable
        durable record refuses the whole load LOUDLY — never a
        fabricated default — for EVERY table (the all-or-nothing

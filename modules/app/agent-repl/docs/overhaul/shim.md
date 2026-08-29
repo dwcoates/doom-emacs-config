@@ -68,8 +68,7 @@ orchestration chain.
   says NO when the truth is NOT YET); the workspace key catches two session
   ids over one transcript. The daemon PROBES these locks before spawning,
   and the rollout's per-workspace transfer waits on the shim's workspace
-  lock. A platform that cannot take an exclusive open-lock fails LOUDLY
-  rather than reading as free. Failure to acquire = refusal to start.
+  lock.
 - SYSTEM PROMPT AND SETTINGS (load-bearing): every session starts with the
   vendor's `claude_code` preset system prompt PLUS the harness metaprompt
   appended (read from the canonical metaprompt.md file at spawn — the
