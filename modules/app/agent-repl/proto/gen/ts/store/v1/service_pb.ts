@@ -25,6 +25,8 @@ import type { ReadAgentPageRequestSchema, ReadAgentPageResponseSchema } from "./
 import { file_store_v1_endpoint_read_agent_page } from "./endpoint_read_agent_page_pb";
 import type { WatchAgentSessionRequestSchema, WatchAgentSessionResponseSchema } from "./endpoint_watch_agent_session_pb";
 import { file_store_v1_endpoint_watch_agent_session } from "./endpoint_watch_agent_session_pb";
+import type { WatchBashRunRequestSchema, WatchBashRunResponseSchema } from "./endpoint_watch_bash_run_pb";
+import { file_store_v1_endpoint_watch_bash_run } from "./endpoint_watch_bash_run_pb";
 import type { WriteBatchRequestSchema, WriteBatchResponseSchema } from "./endpoint_write_batch_pb";
 import { file_store_v1_endpoint_write_batch } from "./endpoint_write_batch_pb";
 
@@ -32,7 +34,7 @@ import { file_store_v1_endpoint_write_batch } from "./endpoint_write_batch_pb";
  * Describes the file store/v1/service.proto.
  */
 export const file_store_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("ChZzdG9yZS92MS9zZXJ2aWNlLnByb3RvEghzdG9yZS52MTLXBAoJU2hpbVN0b3JlElkKEE9wZW5BZ2VudFNlc3Npb24SIS5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBoiLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25SZXNwb25zZRJeChFXYXRjaEFnZW50U2Vzc2lvbhIiLnN0b3JlLnYxLldhdGNoQWdlbnRTZXNzaW9uUmVxdWVzdBojLnN0b3JlLnYxLldhdGNoQWdlbnRTZXNzaW9uUmVzcG9uc2UwARJQCg1SZWFkQWdlbnRQYWdlEh4uc3RvcmUudjEuUmVhZEFnZW50UGFnZVJlcXVlc3QaHy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlUmVzcG9uc2USSgoLR2V0V29ya2Zsb3cSHC5zdG9yZS52MS5HZXRXb3JrZmxvd1JlcXVlc3QaHS5zdG9yZS52MS5HZXRXb3JrZmxvd1Jlc3BvbnNlElwKEUdldFNpZGVjYXJDdXJzb3JzEiIuc3RvcmUudjEuR2V0U2lkZWNhckN1cnNvcnNSZXF1ZXN0GiMuc3RvcmUudjEuR2V0U2lkZWNhckN1cnNvcnNSZXNwb25zZRJKCgtHZXRMaXZlV29yaxIcLnN0b3JlLnYxLkdldExpdmVXb3JrUmVxdWVzdBodLnN0b3JlLnYxLkdldExpdmVXb3JrUmVzcG9uc2USRwoKV3JpdGVCYXRjaBIbLnN0b3JlLnYxLldyaXRlQmF0Y2hSZXF1ZXN0Ghwuc3RvcmUudjEuV3JpdGVCYXRjaFJlc3BvbnNlQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_store_v1_endpoint_get_live_work, file_store_v1_endpoint_get_sidecar_cursors, file_store_v1_endpoint_get_workflow, file_store_v1_endpoint_open_agent_session, file_store_v1_endpoint_read_agent_page, file_store_v1_endpoint_watch_agent_session, file_store_v1_endpoint_write_batch]);
+  fileDesc("ChZzdG9yZS92MS9zZXJ2aWNlLnByb3RvEghzdG9yZS52MTKoBQoJU2hpbVN0b3JlElkKEE9wZW5BZ2VudFNlc3Npb24SIS5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBoiLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25SZXNwb25zZRJeChFXYXRjaEFnZW50U2Vzc2lvbhIiLnN0b3JlLnYxLldhdGNoQWdlbnRTZXNzaW9uUmVxdWVzdBojLnN0b3JlLnYxLldhdGNoQWdlbnRTZXNzaW9uUmVzcG9uc2UwARJQCg1SZWFkQWdlbnRQYWdlEh4uc3RvcmUudjEuUmVhZEFnZW50UGFnZVJlcXVlc3QaHy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlUmVzcG9uc2USTwoMV2F0Y2hCYXNoUnVuEh0uc3RvcmUudjEuV2F0Y2hCYXNoUnVuUmVxdWVzdBoeLnN0b3JlLnYxLldhdGNoQmFzaFJ1blJlc3BvbnNlMAESSgoLR2V0V29ya2Zsb3cSHC5zdG9yZS52MS5HZXRXb3JrZmxvd1JlcXVlc3QaHS5zdG9yZS52MS5HZXRXb3JrZmxvd1Jlc3BvbnNlElwKEUdldFNpZGVjYXJDdXJzb3JzEiIuc3RvcmUudjEuR2V0U2lkZWNhckN1cnNvcnNSZXF1ZXN0GiMuc3RvcmUudjEuR2V0U2lkZWNhckN1cnNvcnNSZXNwb25zZRJKCgtHZXRMaXZlV29yaxIcLnN0b3JlLnYxLkdldExpdmVXb3JrUmVxdWVzdBodLnN0b3JlLnYxLkdldExpdmVXb3JrUmVzcG9uc2USRwoKV3JpdGVCYXRjaBIbLnN0b3JlLnYxLldyaXRlQmF0Y2hSZXF1ZXN0Ghwuc3RvcmUudjEuV3JpdGVCYXRjaFJlc3BvbnNlQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_store_v1_endpoint_get_live_work, file_store_v1_endpoint_get_sidecar_cursors, file_store_v1_endpoint_get_workflow, file_store_v1_endpoint_open_agent_session, file_store_v1_endpoint_read_agent_page, file_store_v1_endpoint_watch_agent_session, file_store_v1_endpoint_watch_bash_run, file_store_v1_endpoint_write_batch]);
 
 /**
  * ---- Reads: what the shim recovers and serves from durable state ----
@@ -70,6 +72,18 @@ export const ShimStore: GenService<{
     methodKind: "unary";
     input: typeof ReadAgentPageRequestSchema;
     output: typeof ReadAgentPageResponseSchema;
+  },
+  /**
+   * One detached shell run's lifecycle rows, replayed then followed, ending
+   * after the terminal. Serves the shim's own WatchBash for runs whose bytes
+   * the sidecar wrote.
+   *
+   * @generated from rpc store.v1.ShimStore.WatchBashRun
+   */
+  watchBashRun: {
+    methodKind: "server_streaming";
+    input: typeof WatchBashRunRequestSchema;
+    output: typeof WatchBashRunResponseSchema;
   },
   /**
    * One workflow run's stored state: description, derived agent level,
