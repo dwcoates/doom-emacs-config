@@ -7,7 +7,7 @@
     "manual": "The operator procedure, for a scenario a prompt cannot provoke (or cannot provoke alone).",
     "manual_setup": "An operator step needed BEFORE an otherwise prompt-driven turn.",
     "cwd_setup": "Files materialized in the scratch cwd before the turn: {path, content} or {path, dir: true}.",
-    "options": "Extra SDK Options merged over the production options (maxTurns, maxBudgetUsd, model).",
+    "options": "Extra SDK Options merged over the production options (maxTurns, maxBudgetUsd, model, outputFormat, mcpServers). The token {{CAPTURE_DIR}} is replaced with scripts/capture/'s absolute path.",
     "model": "Options.model for this scenario.",
     "permission_mode": "Options.permissionMode for this scenario.",
     "permission_script": "{default, rules:[{tool, decision, message?, delay_ms?}]}; decision is allow_once | allow_standing | deny | park.",
@@ -570,23 +570,25 @@
     {
       "name": "mcp-unmodeled-tool",
       "covers": "an UNMODELED MCP tool — the one legitimate AgentUnmodeled producer",
-      "prompt": "Call the capture-probe MCP server's `echo` tool with the text 'unmodeled probe' and report what it returned.",
-      "cwd_setup": [
-        {
-          "path": ".mcp.json",
-          "content": "{\n  \"mcpServers\": {\n    \"capture-probe\": {\n      \"command\": \"node\",\n      \"args\": [\n        \"mcp-echo.mjs\"\n      ]\n    }\n  }\n}"
-        },
-        {
-          "path": "mcp-echo.mjs",
-          "content": "// Minimal stdio MCP server exposing one `echo` tool, so the capture has a\n// genuinely unmodeled tool whose schema the shim cannot know.\n// The project lead fills this in from the MCP quickstart at capture time; it\n// is deliberately NOT vendored here, because a half-working server captured as\n// a golden would teach the mock a shape the real world does not have.\n"
-        }
-      ],
+      "prompt": "Call the capture-probe MCP server's `echo` tool with the text 'unmodeled probe', then call its `slow` tool with ms 8000. Report what each returned.",
+      "cwd_setup": [],
       "expect": [
         "tool:mcp__capture-probe__echo",
+        "tool:mcp__capture-probe__slow",
         "AgentUnmodeled with mcp_server stated by the vendor",
-        "system:mcp_status"
+        "tool_progress beat on the slow call",
+        "system:init listing capture-probe as connected"
       ],
-      "manual": "Supply a working stdio MCP server for `mcp-echo.mjs` before running (any minimal echo server). The scenario is prompt-driven once the server exists; it is listed here because the server is operator-supplied."
+      "options": {
+        "mcpServers": {
+          "capture-probe": {
+            "command": "node",
+            "args": [
+              "{{CAPTURE_DIR}}/mcp-echo.mjs"
+            ]
+          }
+        }
+      }
     },
     {
       "name": "ide-diagnostics-after-edit",
@@ -1239,12 +1241,6 @@
       "name": "mcp-server-healths",
       "covers": "mcp_server healths (connected / failed / needs-auth / pending)",
       "prompt": "Report the status of every MCP server configured in this session.",
-      "cwd_setup": [
-        {
-          "path": ".mcp.json",
-          "content": "{\n  \"mcpServers\": {\n    \"capture-ok\": {\n      \"command\": \"node\",\n      \"args\": [\n        \"mcp-echo.mjs\"\n      ]\n    },\n    \"capture-broken\": {\n      \"command\": \"/nonexistent/binary\",\n      \"args\": []\n    }\n  }\n}"
-        }
-      ],
       "controls": [
         {
           "at": "session_start",
@@ -1260,7 +1256,21 @@
         "McpServerStatus[] with at least one connected and one failed",
         "system:mcp_status"
       ],
-      "manual": "`capture-ok` needs the same operator-supplied echo server as `mcp-unmodeled-tool`. The needs-auth health additionally requires a remote MCP server that demands OAuth; capture it against one of the claude.ai connectors if the lead's account has one configured."
+      "manual": "The connected and failed healths are produced by this scenario as written. The NEEDS-AUTH health additionally requires a remote MCP server demanding OAuth; capture it against one of the claude.ai connectors if the lead's account has one configured.",
+      "options": {
+        "mcpServers": {
+          "capture-ok": {
+            "command": "node",
+            "args": [
+              "{{CAPTURE_DIR}}/mcp-echo.mjs"
+            ]
+          },
+          "capture-broken": {
+            "command": "/nonexistent/binary",
+            "args": []
+          }
+        }
+      }
     },
     {
       "name": "account-usage",
