@@ -56,7 +56,10 @@ message SessionStarted {
 
 // The shim and the SDK it drives. Fixed for the process; stated once.
 message SessionRuntime {
-  // The shim's build commit.
+  // The shim's build commit. THE STALENESS-BOUNCE CARRIER: the daemon
+  // compares this against its current deploy stamp and relaunches a
+  // stale surviving shim at freeness (the rollout's build-staleness
+  // bounce).
   string shim_build_sha = 1;
   // The vendor SDK package version the shim embeds.
   string sdk_version = 2;
@@ -199,7 +202,15 @@ message SessionUpdate {
     // verb. Routed to the topbar resolver (the context chip and the
     // /context panel both resolve from it).
     SessionContextUsage context_usage = 26;
+    // Vendor-initiated auto-compaction BEGAN (the vendor's system
+    // status:compacting signal, relayed). The ContextCut record that
+    // follows is the end signal — no progress figure exists upstream.
+    SessionCompacting compacting = 27;
   }
+}
+
+// Presence is the fact: the vendor is compacting the context right now.
+message SessionCompacting {
 }
 
 // The vendor's context-budget warning: its own signal that the context
