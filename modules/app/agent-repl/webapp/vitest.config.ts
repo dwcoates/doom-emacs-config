@@ -13,6 +13,9 @@ export default defineConfig({
   test: {
     css: true,
     setupFiles: ["./test/setup.ts"],
+    // `legacy/` is reference-only, does not compile, and carries no suites;
+    // keep vitest's default discovery from ever reaching into it.
+    exclude: ["**/node_modules/**", "**/dist/**", "legacy/**"],
     coverage: {
       provider: "v8",
       all: true,
