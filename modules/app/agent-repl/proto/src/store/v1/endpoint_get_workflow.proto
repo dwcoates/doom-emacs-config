@@ -52,9 +52,21 @@ message GetWorkflowEnded {
   }
 }
 
-// The run is not known to this store. `kind` arms are DERIVED at the wave
-// from the store's real refusal sites.
+// The run could not be served. THE ARM IS WHY.
 message GetWorkflowFailure {
   // The store's account, for a human and for logs; never switched on.
   string detail = 1;
+  oneof kind {
+    // Workflow is not implemented this wave — the only arm produced today.
+    GetWorkflowNotImplemented not_implemented = 2;
+    // `work` empty. Reserved for the workflow wave.
+    GetWorkflowInvalidRequest invalid_request = 3;
+    // No run is known under this handle. Reserved for the workflow wave.
+    GetWorkflowUnknownRun unknown_run = 4;
+  }
 }
+message GetWorkflowNotImplemented {}
+message GetWorkflowInvalidRequest {
+  string field = 1;
+}
+message GetWorkflowUnknownRun {}
