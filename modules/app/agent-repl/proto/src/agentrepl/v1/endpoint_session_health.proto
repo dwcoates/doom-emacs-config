@@ -40,11 +40,56 @@ message SessionUnhealthy {
 }
 
 // One standing fault — DaemonFault's discipline, the session controller's
-// vocabulary: a dynamic detail now, the kind oneof ADDED WITH its first
-// derived arms at the wave, from the controller's real fault sites.
+// vocabulary. Kinds derived from the controller's real fault sites
+// (landing 4, 2026-08-29).
 message SessionFault {
   // The dynamic account, verbatim — supplements the kind, never replaces it.
   string detail = 1;
+  oneof kind {
+    // Starting the session's shim failed.
+    SessionFaultShimStartFailed shim_start_failed = 2;
+    // The shim exited while the session was live.
+    SessionFaultShimDied shim_died = 3;
+    // The daemon-shim link was severed.
+    SessionFaultLinkSevered link_severed = 4;
+    // Resuming the vendor session failed.
+    SessionFaultResumeFailed resume_failed = 5;
+    // A bounce's replacement shim died before it came up.
+    SessionFaultBounceDied bounce_died = 6;
+    // A bounce ended in a state the controller cannot name.
+    SessionFaultBounceUnknown bounce_unknown = 7;
+    // The turn classifier failed.
+    SessionFaultClassifierFailed classifier_failed = 8;
+    // A shim-side SessionFault, relayed.
+    SessionFaultShimReported shim_reported = 9;
+  }
+}
+message SessionFaultShimStartFailed {
+  // The shim's exit code.
+  int32 exit_code = 1;
+  // The tail of the shim's stderr.
+  string stderr_tail = 2;
+}
+message SessionFaultShimDied {
+  // The shim's exit code.
+  int32 exit_code = 1;
+}
+message SessionFaultLinkSevered {}
+message SessionFaultResumeFailed {
+  // Why the resume failed.
+  string cause = 1;
+}
+message SessionFaultBounceDied {}
+message SessionFaultBounceUnknown {}
+message SessionFaultClassifierFailed {
+  // The classifier's own account of the failure.
+  string detail = 1;
+}
+message SessionFaultShimReported {
+  // Which shim component reported it.
+  string component = 1;
+  // The shim's own kind name.
+  string kind = 2;
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
