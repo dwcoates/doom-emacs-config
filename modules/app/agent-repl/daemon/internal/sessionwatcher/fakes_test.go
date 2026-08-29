@@ -849,3 +849,225 @@ func indexOf(haystack, needle string) int {
 	}
 	return -1
 }
+
+// ---- assertions ----
+
+// assertNames asserts a frame's routing was EXACTLY this run of sink calls, in
+// order. Exactness is the point: a route to one sink too many is a duplicated
+// row, and one too few is a fact nobody draws.
+func assertNames(t *testing.T, got []event, want []string) {
+	t.Helper()
+	have := names(got)
+	if len(have) != len(want) {
+		t.Fatalf("routed to %v, want %v", have, want)
+	}
+	for i := range want {
+		if have[i] != want[i] {
+			t.Fatalf("routed to %v, want %v", have, want)
+		}
+	}
+}
+
+// requireEvent returns the named event, failing when the routing did not
+// produce one.
+func requireEvent(t *testing.T, got []event, name string) event {
+	t.Helper()
+	e, ok := find(got, name)
+	if !ok {
+		t.Fatalf("no %s in %v", name, names(got))
+	}
+	return e
+}
+
+// ---- more frame builders ----
+
+// questionUpdate is an agent blocked on the user's choice.
+func questionUpdate(id, header, text string) *conversationv1.AgentUpdate {
+	return &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Question{
+		Question: &conversationv1.AgentQuestion{
+			Id: &conversationv1.AgentQuestionId{Value: id},
+			Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{
+				Batch: &conversationv1.AgentQuestionBatch{Questions: []*conversationv1.AgentQuestionAsked{{
+					Question: &conversationv1.AgentQuestionText{Text: text},
+					Header:   header,
+				}}},
+				StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1700000000000},
+			}},
+		},
+	}}
+}
+
+// permissionUpdate is an agent blocked on the user's consent for one call.
+func permissionUpdate(id, gatedCall, title, displayName string) *conversationv1.AgentUpdate {
+	return &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Permission{
+		Permission: &conversationv1.AgentPermission{
+			Id:        &conversationv1.AgentPermissionId{Value: id},
+			GatedCall: &conversationv1.AgentActivityId{Value: gatedCall},
+			Result: &conversationv1.AgentPermission_Start{Start: &conversationv1.AgentPermissionStart{
+				Prompt:    &conversationv1.AgentPermissionPrompt{Title: title, DisplayName: displayName},
+				StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1700000000000},
+			}},
+		},
+	}}
+}
+
+// apiErrorUpdate is a vendor request that failed MID-TURN, which is evidence
+// and never a terminal.
+func apiErrorUpdate(message string) *conversationv1.AgentUpdate {
+	return &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_ApiError{
+		ApiError: &conversationv1.ApiRequestFailed{
+			Message: message,
+			Kind:    &conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{}},
+		},
+	}}
+}
+
+// contextInjectedActivity is a FILE-PLANE-ONLY fact: it arrives through an
+// agent watch's replay or follow and never on the live session stream.
+func contextInjectedActivity(activityID string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: activityID},
+		Item: &conversationv1.AgentActivity_ContextInjected{
+			ContextInjected: &conversationv1.AgentContextInjected{},
+		},
+	}
+}
+
+// responseActivity is prose, which is not a tool call.
+func responseActivity(activityID string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: activityID},
+		Item:       &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{}},
+	}
+}
+
+// lostFailure is a DetachedLost terminal: work the daemon lost track of. It is
+// an ORDINARY terminal, which is exactly what this builder exists to prove.
+func lostFailure() *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_Lost{Lost: &conversationv1.DetachedLost{
+			How: &conversationv1.DetachedLost_WentSilent{WentSilent: &conversationv1.DetachedLostWentSilent{}},
+		}},
+	}
+}
+
+// ---- session update builders, one per routed arm ----
+
+func diagnosticsUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_Diagnostics{
+		Diagnostics: &conversationv1.SessionDiagnostics{
+			Health: &conversationv1.SessionDiagnostics_Healthy{Healthy: &conversationv1.SessionHealthy{}},
+		},
+	}}
+}
+
+func contextUsageUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_ContextUsage{
+		ContextUsage: &conversationv1.SessionContextUsage{TotalTokens: 1000, MaxTokens: 200000},
+	}}
+}
+
+func identityRotatedUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_IdentityRotated{
+		IdentityRotated: &conversationv1.SessionIdentityRotated{
+			PreviousVendorSessionId: "vendor-1", VendorSessionId: "vendor-2",
+		},
+	}}
+}
+
+func fastModeUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_FastMode{
+		FastMode: &conversationv1.SessionFastMode{
+			State: &conversationv1.SessionFastMode_On{On: &conversationv1.SessionFastModeOn{}},
+		},
+	}}
+}
+
+func mcpServerUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_McpServer{
+		McpServer: &conversationv1.SessionMcpServer{
+			Name:   "things",
+			Health: &conversationv1.SessionMcpServer_Connected{Connected: &conversationv1.SessionMcpServerConnected{}},
+		},
+	}}
+}
+
+func modelChangedUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_ModelChanged{
+		ModelChanged: &conversationv1.SessionModelChanged{},
+	}}
+}
+
+func permissionModeChangedUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_PermissionModeChanged{
+		PermissionModeChanged: &conversationv1.SessionPermissionModeChanged{},
+	}}
+}
+
+func accountUsageUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_AccountUsage{
+		AccountUsage: &conversationv1.SessionAccountUsage{ObservedAtMs: 1700000000000},
+	}}
+}
+
+func budgetWarningUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_ContextBudgetWarning{
+		ContextBudgetWarning: &conversationv1.SessionContextBudgetWarning{Text: "the context is filling"},
+	}}
+}
+
+func compactingUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_Compacting{
+		Compacting: &conversationv1.SessionCompacting{},
+	}}
+}
+
+func queryDiedUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_QueryDied{
+		QueryDied: &conversationv1.SessionQueryDied{
+			Cause: &conversationv1.SessionQueryDied_UnexpectedEof{UnexpectedEof: &conversationv1.SessionQueryUnexpectedEof{}},
+		},
+	}}
+}
+
+// routeNow applies one frame through the watcher's own routing SYNCHRONOUSLY
+// and returns exactly the sink calls it made.
+//
+// WHY NOT A SENTINEL: the sentinel bound works only WITHIN one stream, because
+// one stream's frames are consumed one at a time. Two streams are two
+// goroutines with no order between them, so a frame on the session or a bash
+// stream cannot be bounded by a sentinel on the agent stream. A synchronous
+// call is the exact bound, and the stream plumbing that would otherwise be
+// skipped has tests of its own.
+func (h *harness) routeNow(apply func(w *watcher)) []event {
+	h.t.Helper()
+	h.w.mu.Lock()
+	apply(h.w)
+	h.w.mu.Unlock()
+	return h.drainNow()
+}
+
+// drainNow reads everything already recorded and returns it.
+func (h *harness) drainNow() []event {
+	var seen []event
+	for {
+		select {
+		case e := <-h.rec.ch:
+			seen = append(seen, e)
+		default:
+			return seen
+		}
+	}
+}
+
+// shellWatchFor returns the watcher's own entry for one detached shell.
+func (h *harness) shellWatchFor(work string) *shellWatch {
+	h.t.Helper()
+	h.w.mu.Lock()
+	defer h.w.mu.Unlock()
+	entry, ok := h.w.shells[work]
+	if !ok {
+		h.t.Fatalf("no shell watch for %q", work)
+	}
+	return entry
+}
