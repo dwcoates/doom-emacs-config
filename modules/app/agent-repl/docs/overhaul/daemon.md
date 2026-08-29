@@ -1223,3 +1223,61 @@ its own file only when >1 endpoint needs it.
 - WORKFLOW IS KICKED: workflow watch/store/ingest APIs stay in the
   contract but are NOT implemented in this wave; no frontend surface
   exists for the run, deliberately.
+
+## Kickoff increments and rulings (2026-08-29, project lead)
+
+- LANDED PROTO INCREMENTS: `OpenInEditor{workspace,path,optional line}` (WEB
+  LINK) relayed as the host push arm `open_in_editor` — the daemon validates
+  and relays verbatim, opens nothing; FeedRow arms `command_panel` and
+  `command_refused` — recognized panels and refusals MIRROR into the ROOT
+  FEED as synthesized NON-DURABLE rows (resolver memory; never stored, never
+  replayed after a restart); SubmitPromptSuccess gains `command_refused`;
+  `RequestCommandSupport{workspace,command}` composes the support brief and
+  creates the support workspace (ordinary creation underneath);
+  SubmitPromptRequest gains the REQUIRED `origin` (persisted onto the turn);
+  WatchLoginTerminal is a SERVER stream + unary `SendLoginInput`; TopbarView
+  gains `permission_mode_picker` (the daemon serves exactly the switchable
+  set); AgentUpdate gains the page-line arms `context_cut` (drawn as the
+  separation divider) and `api_error` (mid-turn evidence, never a terminal);
+  UpdateHeldPrompt gains `accept` (legal only on hold_for_turn_end);
+  shim.v1 failure `kind`/`cause` arms and SessionFault.kind landed from the
+  shim's real refusal sites.
+- /agents AND /help (user ruling): the daemon RECOGNIZES them, never forwards
+  them to the shim, and answers `command_refused` with the add-support offer.
+  No catalog increment exists.
+- R1: momentary footer statuses are retired by a daemon-side one-shot
+  successor push. R3: WatchDaemon serves Emacs AND every webview. R13: the
+  held-prompt classifier is the daemon's own headless vendor run, guarded by
+  AGENT_REPL_FORBID_VENDOR_CALLS, with a scripted `-fake` mode. R14: no
+  daemon fact is ever written to the store.
+- The daemon keys every WorkspaceRef on `id` and REFUSES a ref whose `dir`
+  disagrees with the registry. A merged, closed or killed workspace's roster
+  row carries `closed = true` (Emacs derives its tab set from it); a nuked
+  workspace leaves the roster. Emacs launches `daemon/bin/claude-repld` with
+  no required argv (state via the env); a successor is spawned with the
+  daemon's own joining argument. agent-shim/wire is deleted by the daemon
+  rewrite once nothing imports it.
+
+- CROSS-SYSTEM PROCESS CONTRACTS (project lead, kickoff): one state root
+  `$AGENT_REPL_STATE_DIR` (default ~/.claude-emacs); the daemon binds ONE
+  loopback TCP listener serving Connect (HTTP/1.1 + h2c, binary + JSON) and
+  the webapp assets on one origin, writes `127.0.0.1:<port>` to
+  `$AGENT_REPL_STATE_DIR/daemon.addr` (atomic replace; removed on orderly
+  exit; a joining successor writes it only after it owns every workspace);
+  the webview URL is `http://<daemon.addr>/?workspace=<id>&dir=<dir>`
+  (`&composer=1` only in dev mode); the shim is spawned as `node
+  agent-shim/claude/shim/dist/main.js --listen <uds> --store-socket <uds>
+  --log-fd 3 [--fake]` with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED=1,
+  AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA (tests add
+  AGENT_REPL_FORBID_VENDOR_CALLS=1), cwd = the workspace; session facts
+  travel only in StartSession; readiness = the first healthy `diagnostics`
+  push on WatchSession; the store serves on ~/.cache/agent-repl/sock/
+  store.sock (tests: env AGENT_REPL_STORE_SOCKET, a flag beats it); kernel
+  locks live in ~/.cache/agent-repl/run/ — `workspace-<md5hex(clean abs
+  dir)[:8]>.lock` (shim-held from startup; the daemon probes ONLY this one,
+  flock LOCK_EX|LOCK_NB) and `session-<vendor session id>.lock` (taken
+  inside StartSession; pre-minted on a fresh start); proto/vocab/
+  render-colors.json + paint-classes.json are the daemon's, consumed by
+  webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
+  golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
+  `go 1.23`).
