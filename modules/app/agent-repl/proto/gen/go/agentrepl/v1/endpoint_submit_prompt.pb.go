@@ -45,7 +45,12 @@ type SubmitPromptRequest struct {
 	// prompt is addressed to THAT agent, and the daemon delivers it through
 	// the same hold-and-deliver machinery (the shim's UpdateAgent.prompt
 	// underneath). Command recognition is unchanged either way.
-	Feed          *v11.FeedId `protobuf:"bytes,3,opt,name=feed,proto3,oneof" json:"feed,omitempty"`
+	Feed *v11.FeedId `protobuf:"bytes,3,opt,name=feed,proto3,oneof" json:"feed,omitempty"`
+	// WHICH SEND SITE caused this prompt — the closed attribution vocabulary
+	// every Emacs send site chooses its own value from; the daemon persists
+	// it onto the turn's durable record (StartTurn.origin → AgentPrompt).
+	// Never UNSPECIFIED: a submission carrying it is refused at once.
+	Origin        v1.PromptOrigin `protobuf:"varint,4,opt,name=origin,proto3,enum=conversation.v1.PromptOrigin" json:"origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -99,6 +104,13 @@ func (x *SubmitPromptRequest) GetFeed() *v11.FeedId {
 		return x.Feed
 	}
 	return nil
+}
+
+func (x *SubmitPromptRequest) GetOrigin() v1.PromptOrigin {
+	if x != nil {
+		return x.Origin
+	}
+	return v1.PromptOrigin(0)
 }
 
 // THE ARM IS THE OUTCOME.
@@ -192,6 +204,7 @@ type SubmitPromptSuccess struct {
 	//
 	//	*SubmitPromptSuccess_Turn
 	//	*SubmitPromptSuccess_CommandPanel
+	//	*SubmitPromptSuccess_CommandRefused
 	Outcome       isSubmitPromptSuccess_Outcome `protobuf_oneof:"outcome"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -252,6 +265,15 @@ func (x *SubmitPromptSuccess) GetCommandPanel() *SubmitPromptCommandPanel {
 	return nil
 }
 
+func (x *SubmitPromptSuccess) GetCommandRefused() *SubmitPromptCommandRefused {
+	if x != nil {
+		if x, ok := x.Outcome.(*SubmitPromptSuccess_CommandRefused); ok {
+			return x.CommandRefused
+		}
+	}
+	return nil
+}
+
 type isSubmitPromptSuccess_Outcome interface {
 	isSubmitPromptSuccess_Outcome()
 }
@@ -267,9 +289,65 @@ type SubmitPromptSuccess_CommandPanel struct {
 	CommandPanel *SubmitPromptCommandPanel `protobuf:"bytes,2,opt,name=command_panel,json=commandPanel,proto3,oneof"`
 }
 
+type SubmitPromptSuccess_CommandRefused struct {
+	// It is a command the daemon RECOGNIZES but neither answers nor forwards
+	// (/agents, /help, …): refused with the add-support offer. The card is
+	// the feed's `command_refused` row; the caller learns only that no turn
+	// was minted.
+	CommandRefused *SubmitPromptCommandRefused `protobuf:"bytes,3,opt,name=command_refused,json=commandRefused,proto3,oneof"`
+}
+
 func (*SubmitPromptSuccess_Turn) isSubmitPromptSuccess_Outcome() {}
 
 func (*SubmitPromptSuccess_CommandPanel) isSubmitPromptSuccess_Outcome() {}
+
+func (*SubmitPromptSuccess_CommandRefused) isSubmitPromptSuccess_Outcome() {}
+
+// The recognized-but-unsupported answer.
+type SubmitPromptCommandRefused struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The command as typed ("/agents").
+	Command       string `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubmitPromptCommandRefused) Reset() {
+	*x = SubmitPromptCommandRefused{}
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitPromptCommandRefused) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitPromptCommandRefused) ProtoMessage() {}
+
+func (x *SubmitPromptCommandRefused) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitPromptCommandRefused.ProtoReflect.Descriptor instead.
+func (*SubmitPromptCommandRefused) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *SubmitPromptCommandRefused) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
 
 // The minted turn — what a client matches against FeedRow.turn to find its
 // own prompt. Nothing else returns here: every visible effect arrives on the
@@ -283,7 +361,7 @@ type SubmitPromptTurn struct {
 
 func (x *SubmitPromptTurn) Reset() {
 	*x = SubmitPromptTurn{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -295,7 +373,7 @@ func (x *SubmitPromptTurn) String() string {
 func (*SubmitPromptTurn) ProtoMessage() {}
 
 func (x *SubmitPromptTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -308,7 +386,7 @@ func (x *SubmitPromptTurn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptTurn.ProtoReflect.Descriptor instead.
 func (*SubmitPromptTurn) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SubmitPromptTurn) GetTurn() *v1.TurnId {
@@ -338,7 +416,7 @@ type SubmitPromptCommandPanel struct {
 
 func (x *SubmitPromptCommandPanel) Reset() {
 	*x = SubmitPromptCommandPanel{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -350,7 +428,7 @@ func (x *SubmitPromptCommandPanel) String() string {
 func (*SubmitPromptCommandPanel) ProtoMessage() {}
 
 func (x *SubmitPromptCommandPanel) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -363,7 +441,7 @@ func (x *SubmitPromptCommandPanel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptCommandPanel.ProtoReflect.Descriptor instead.
 func (*SubmitPromptCommandPanel) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SubmitPromptCommandPanel) GetPanel() isSubmitPromptCommandPanel_Panel {
@@ -495,7 +573,7 @@ type SubmitPromptError struct {
 
 func (x *SubmitPromptError) Reset() {
 	*x = SubmitPromptError{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -507,7 +585,7 @@ func (x *SubmitPromptError) String() string {
 func (*SubmitPromptError) ProtoMessage() {}
 
 func (x *SubmitPromptError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -520,7 +598,7 @@ func (x *SubmitPromptError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptError.ProtoReflect.Descriptor instead.
 func (*SubmitPromptError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SubmitPromptError) GetReason() isSubmitPromptError_Reason {
@@ -566,7 +644,7 @@ type SubmitPromptRefusedMerging struct {
 
 func (x *SubmitPromptRefusedMerging) Reset() {
 	*x = SubmitPromptRefusedMerging{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -578,7 +656,7 @@ func (x *SubmitPromptRefusedMerging) String() string {
 func (*SubmitPromptRefusedMerging) ProtoMessage() {}
 
 func (x *SubmitPromptRefusedMerging) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -591,27 +669,31 @@ func (x *SubmitPromptRefusedMerging) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptRefusedMerging.ProtoReflect.Descriptor instead.
 func (*SubmitPromptRefusedMerging) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{7}
 }
 
 var File_agentrepl_v1_endpoint_submit_prompt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
 	"\n" +
-	")agentrepl/v1/endpoint_submit_prompt.proto\x12\fagentrepl.v1\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a\x1efrontend/v1/status_panel.proto\x1a\x1dfrontend/v1/todos_panel.proto\x1a\x1efrontend/v1/agents_panel.proto\x1a\x1bfrontend/v1/mcp_panel.proto\x1a\x1ffrontend/v1/context_panel.proto\x1a\x1cfrontend/v1/help_panel.proto\x1a\x16frontend/v1/feed.proto\"\xa4\x01\n" +
+	")agentrepl/v1/endpoint_submit_prompt.proto\x12\fagentrepl.v1\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\x1a\x1efrontend/v1/status_panel.proto\x1a\x1dfrontend/v1/todos_panel.proto\x1a\x1efrontend/v1/agents_panel.proto\x1a\x1bfrontend/v1/mcp_panel.proto\x1a\x1ffrontend/v1/context_panel.proto\x1a\x1cfrontend/v1/help_panel.proto\x1a\x16frontend/v1/feed.proto\"\xdb\x01\n" +
 	"\x13SubmitPromptRequest\x12-\n" +
 	"\x04said\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12,\n" +
-	"\x04feed\x18\x03 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x04feed\x88\x01\x01B\a\n" +
+	"\x04feed\x18\x03 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x04feed\x88\x01\x01\x125\n" +
+	"\x06origin\x18\x04 \x01(\x0e2\x1d.conversation.v1.PromptOriginR\x06originB\a\n" +
 	"\x05_feed\"\x98\x01\n" +
 	"\x14SubmitPromptResponse\x12=\n" +
 	"\asuccess\x18\x01 \x01(\v2!.agentrepl.v1.SubmitPromptSuccessH\x00R\asuccess\x127\n" +
 	"\x05error\x18\x02 \x01(\v2\x1f.agentrepl.v1.SubmitPromptErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"\xa5\x01\n" +
+	"\x06result\"\xfa\x01\n" +
 	"\x13SubmitPromptSuccess\x124\n" +
 	"\x04turn\x18\x01 \x01(\v2\x1e.agentrepl.v1.SubmitPromptTurnH\x00R\x04turn\x12M\n" +
-	"\rcommand_panel\x18\x02 \x01(\v2&.agentrepl.v1.SubmitPromptCommandPanelH\x00R\fcommandPanelB\t\n" +
-	"\aoutcome\"?\n" +
+	"\rcommand_panel\x18\x02 \x01(\v2&.agentrepl.v1.SubmitPromptCommandPanelH\x00R\fcommandPanel\x12S\n" +
+	"\x0fcommand_refused\x18\x03 \x01(\v2(.agentrepl.v1.SubmitPromptCommandRefusedH\x00R\x0ecommandRefusedB\t\n" +
+	"\aoutcome\"6\n" +
+	"\x1aSubmitPromptCommandRefused\x12\x18\n" +
+	"\acommand\x18\x01 \x01(\tR\acommand\"?\n" +
 	"\x10SubmitPromptTurn\x12+\n" +
 	"\x04turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\"\xe4\x02\n" +
 	"\x18SubmitPromptCommandPanel\x126\n" +
@@ -639,45 +721,49 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agentrepl_v1_endpoint_submit_prompt_proto_goTypes = []any{
 	(*SubmitPromptRequest)(nil),        // 0: agentrepl.v1.SubmitPromptRequest
 	(*SubmitPromptResponse)(nil),       // 1: agentrepl.v1.SubmitPromptResponse
 	(*SubmitPromptSuccess)(nil),        // 2: agentrepl.v1.SubmitPromptSuccess
-	(*SubmitPromptTurn)(nil),           // 3: agentrepl.v1.SubmitPromptTurn
-	(*SubmitPromptCommandPanel)(nil),   // 4: agentrepl.v1.SubmitPromptCommandPanel
-	(*SubmitPromptError)(nil),          // 5: agentrepl.v1.SubmitPromptError
-	(*SubmitPromptRefusedMerging)(nil), // 6: agentrepl.v1.SubmitPromptRefusedMerging
-	(*v1.UserSaid)(nil),                // 7: conversation.v1.UserSaid
-	(*v11.FeedId)(nil),                 // 8: frontend.v1.FeedId
-	(*v1.TurnId)(nil),                  // 9: conversation.v1.TurnId
-	(*v11.StatusPanelView)(nil),        // 10: frontend.v1.StatusPanelView
-	(*v11.TodosPanelView)(nil),         // 11: frontend.v1.TodosPanelView
-	(*v11.AgentsPanelView)(nil),        // 12: frontend.v1.AgentsPanelView
-	(*v11.McpPanelView)(nil),           // 13: frontend.v1.McpPanelView
-	(*v11.ContextPanelView)(nil),       // 14: frontend.v1.ContextPanelView
-	(*v11.HelpPanelView)(nil),          // 15: frontend.v1.HelpPanelView
+	(*SubmitPromptCommandRefused)(nil), // 3: agentrepl.v1.SubmitPromptCommandRefused
+	(*SubmitPromptTurn)(nil),           // 4: agentrepl.v1.SubmitPromptTurn
+	(*SubmitPromptCommandPanel)(nil),   // 5: agentrepl.v1.SubmitPromptCommandPanel
+	(*SubmitPromptError)(nil),          // 6: agentrepl.v1.SubmitPromptError
+	(*SubmitPromptRefusedMerging)(nil), // 7: agentrepl.v1.SubmitPromptRefusedMerging
+	(*v1.UserSaid)(nil),                // 8: conversation.v1.UserSaid
+	(*v11.FeedId)(nil),                 // 9: frontend.v1.FeedId
+	(v1.PromptOrigin)(0),               // 10: conversation.v1.PromptOrigin
+	(*v1.TurnId)(nil),                  // 11: conversation.v1.TurnId
+	(*v11.StatusPanelView)(nil),        // 12: frontend.v1.StatusPanelView
+	(*v11.TodosPanelView)(nil),         // 13: frontend.v1.TodosPanelView
+	(*v11.AgentsPanelView)(nil),        // 14: frontend.v1.AgentsPanelView
+	(*v11.McpPanelView)(nil),           // 15: frontend.v1.McpPanelView
+	(*v11.ContextPanelView)(nil),       // 16: frontend.v1.ContextPanelView
+	(*v11.HelpPanelView)(nil),          // 17: frontend.v1.HelpPanelView
 }
 var file_agentrepl_v1_endpoint_submit_prompt_proto_depIdxs = []int32{
-	7,  // 0: agentrepl.v1.SubmitPromptRequest.said:type_name -> conversation.v1.UserSaid
-	8,  // 1: agentrepl.v1.SubmitPromptRequest.feed:type_name -> frontend.v1.FeedId
-	2,  // 2: agentrepl.v1.SubmitPromptResponse.success:type_name -> agentrepl.v1.SubmitPromptSuccess
-	5,  // 3: agentrepl.v1.SubmitPromptResponse.error:type_name -> agentrepl.v1.SubmitPromptError
-	3,  // 4: agentrepl.v1.SubmitPromptSuccess.turn:type_name -> agentrepl.v1.SubmitPromptTurn
-	4,  // 5: agentrepl.v1.SubmitPromptSuccess.command_panel:type_name -> agentrepl.v1.SubmitPromptCommandPanel
-	9,  // 6: agentrepl.v1.SubmitPromptTurn.turn:type_name -> conversation.v1.TurnId
-	10, // 7: agentrepl.v1.SubmitPromptCommandPanel.status:type_name -> frontend.v1.StatusPanelView
-	11, // 8: agentrepl.v1.SubmitPromptCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
-	12, // 9: agentrepl.v1.SubmitPromptCommandPanel.agents:type_name -> frontend.v1.AgentsPanelView
-	13, // 10: agentrepl.v1.SubmitPromptCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
-	14, // 11: agentrepl.v1.SubmitPromptCommandPanel.context:type_name -> frontend.v1.ContextPanelView
-	15, // 12: agentrepl.v1.SubmitPromptCommandPanel.help:type_name -> frontend.v1.HelpPanelView
-	6,  // 13: agentrepl.v1.SubmitPromptError.merging:type_name -> agentrepl.v1.SubmitPromptRefusedMerging
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	8,  // 0: agentrepl.v1.SubmitPromptRequest.said:type_name -> conversation.v1.UserSaid
+	9,  // 1: agentrepl.v1.SubmitPromptRequest.feed:type_name -> frontend.v1.FeedId
+	10, // 2: agentrepl.v1.SubmitPromptRequest.origin:type_name -> conversation.v1.PromptOrigin
+	2,  // 3: agentrepl.v1.SubmitPromptResponse.success:type_name -> agentrepl.v1.SubmitPromptSuccess
+	6,  // 4: agentrepl.v1.SubmitPromptResponse.error:type_name -> agentrepl.v1.SubmitPromptError
+	4,  // 5: agentrepl.v1.SubmitPromptSuccess.turn:type_name -> agentrepl.v1.SubmitPromptTurn
+	5,  // 6: agentrepl.v1.SubmitPromptSuccess.command_panel:type_name -> agentrepl.v1.SubmitPromptCommandPanel
+	3,  // 7: agentrepl.v1.SubmitPromptSuccess.command_refused:type_name -> agentrepl.v1.SubmitPromptCommandRefused
+	11, // 8: agentrepl.v1.SubmitPromptTurn.turn:type_name -> conversation.v1.TurnId
+	12, // 9: agentrepl.v1.SubmitPromptCommandPanel.status:type_name -> frontend.v1.StatusPanelView
+	13, // 10: agentrepl.v1.SubmitPromptCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
+	14, // 11: agentrepl.v1.SubmitPromptCommandPanel.agents:type_name -> frontend.v1.AgentsPanelView
+	15, // 12: agentrepl.v1.SubmitPromptCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
+	16, // 13: agentrepl.v1.SubmitPromptCommandPanel.context:type_name -> frontend.v1.ContextPanelView
+	17, // 14: agentrepl.v1.SubmitPromptCommandPanel.help:type_name -> frontend.v1.HelpPanelView
+	7,  // 15: agentrepl.v1.SubmitPromptError.merging:type_name -> agentrepl.v1.SubmitPromptRefusedMerging
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_submit_prompt_proto_init() }
@@ -693,8 +779,9 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_init() {
 	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[2].OneofWrappers = []any{
 		(*SubmitPromptSuccess_Turn)(nil),
 		(*SubmitPromptSuccess_CommandPanel)(nil),
+		(*SubmitPromptSuccess_CommandRefused)(nil),
 	}
-	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[4].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[5].OneofWrappers = []any{
 		(*SubmitPromptCommandPanel_Status)(nil),
 		(*SubmitPromptCommandPanel_Todos)(nil),
 		(*SubmitPromptCommandPanel_Agents)(nil),
@@ -702,7 +789,7 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_init() {
 		(*SubmitPromptCommandPanel_Context)(nil),
 		(*SubmitPromptCommandPanel_Help)(nil),
 	}
-	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[5].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[6].OneofWrappers = []any{
 		(*SubmitPromptError_Merging)(nil),
 	}
 	type x struct{}
@@ -711,7 +798,7 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc), len(file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
