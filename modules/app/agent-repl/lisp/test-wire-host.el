@@ -284,6 +284,45 @@
                   "{\"text\":\"x\",\"atMs\":\"1\",\"kind\":{}}")
                  '("HostNotificationKind" kind "oneof is unset"))))
 
+(ert-deftest agent-repl-test-wire-host-notification-decodes-question-asked ()
+  "A question batch names the first question's chip label for the banner."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace-notification
+                             (concat "{\"text\":\"pick a branch\",\"atMs\":1,"
+                                     "\"kind\":{\"questionAsked\":"
+                                     "{\"header\":\"Which branch?\"}}}"))
+                            :kind)
+                 '(:arm :question-asked :value (:header "Which branch?")))))
+
+(ert-deftest agent-repl-test-wire-host-question-asked-without-a-header-defaults ()
+  "`header' is a non-optional proto3 string: protojson omits the default."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace-notification
+                             (concat "{\"text\":\"x\",\"atMs\":1,"
+                                     "\"kind\":{\"questionAsked\":{}}}"))
+                            :kind)
+                 '(:arm :question-asked :value (:header "")))))
+
+(ert-deftest agent-repl-test-wire-host-question-asked-unknown-field-is-a-breach ()
+  "An unmodeled field inside the arm is refused, not ignored."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-notification
+                  (concat "{\"text\":\"x\",\"atMs\":1,"
+                          "\"kind\":{\"questionAsked\":{\"count\":2}}}"))
+                 '("HostNotificationQuestionAsked" count "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-notification-kind-arms-match-the-bindings ()
+  "The kind decoder's arm set is exactly what the frozen schema declares.
+A future arm added to the proto fails this loudly rather than reaching the
+unknown-arm refusal at runtime."
+  (let ((declared (sort (agent-repl-test--generated-oneof-arms
+                         "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
+                         "HostNotificationKind")
+                        #'string<))
+        (spelled (sort (list "agentAddressed" "permissionRequested" "questionAsked")
+                       #'string<)))
+    (should (equal spelled declared))))
+
 (ert-deftest agent-repl-test-wire-host-notification-kind-unknown-arm-is-refused ()
   "An unmodeled notification kind is refused rather than silently dropped."
   (should (equal (agent-repl-test-wire-host--breach
