@@ -124,10 +124,34 @@ const legalStartSession = create(shimv1.StartSessionRequestSchema, {
     }),
   },
 });
-const startSession = await client
+// A REAL StartSession over the mocked vendor. The mock has landed, so this
+// exercises the whole path the daemon takes: validation, the session lock, the
+// pre-minted vendor session id, the query, the vendor's own init, and the
+// SessionStarted the daemon reads its readiness and build staleness from.
+const started = await client
   .startSession(legalStartSession)
-  .then((): unknown => "resolved", (err: unknown): unknown => ConnectError.from(err).code);
-check("a legal StartSession reaches the engine and answers Unimplemented", startSession, Code.Unimplemented);
+  .then(
+    (response): unknown => response.result.case,
+    (err: unknown): unknown => `threw ${String(ConnectError.from(err).code)}`,
+  );
+check("a legal StartSession over --fake starts a real session", started, "success");
+
+const session = await client.startSession(legalStartSession).then(
+  (response): unknown =>
+    response.result.case === "failure" ? response.result.value.cause.case : response.result.case,
+  (err: unknown): unknown => `threw ${String(ConnectError.from(err).code)}`,
+);
+check("a SECOND StartSession is refused as already started", session, "alreadyStarted");
+
+// The readiness signal, and the thing a Go client observes at its first
+// Receive: the stream's FIRST frame is diagnostics.
+const firstWatchFrame = await (async (): Promise<unknown> => {
+  for await (const response of client.watchSession(create(shimv1.WatchSessionRequestSchema, {}))) {
+    return response.update?.update.case;
+  }
+  return "ended";
+})();
+check("WatchSession's first frame is diagnostics", firstWatchFrame, "diagnostics");
 
 const illegalStartSession = await client
   .startSession(create(shimv1.StartSessionRequestSchema, {}))
