@@ -34,6 +34,7 @@ const (
 	SiteStalePointer           = "stale_pointer"
 	SiteDatabaseFailure        = "database_failure"
 	SiteWorkflowNotImplemented = "workflow_not_implemented"
+	SiteStreamNotFlushable     = "stream_not_flushable"
 )
 
 // refusal is one typed refusal: the site the server logs, and the human detail

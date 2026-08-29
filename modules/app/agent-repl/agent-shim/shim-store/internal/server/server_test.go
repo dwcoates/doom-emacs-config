@@ -445,6 +445,41 @@ func TestOpenAgentSessionRefusesAnAgentIdWithNoValue(t *testing.T) {
 	}
 }
 
+// TestWriteBatchRecordsAStorageRefusalAgainstItsProcedure: a request the
+// storage layer refuses is a refusal of THIS call, and the only record that can
+// name the procedure is written here.
+func TestWriteBatchRecordsAStorageRefusalAgainstItsProcedure(t *testing.T) {
+	// Arrange. The malformed part is inside the envelope this layer keeps
+	// opaque, so the storage layer is what refuses it.
+	store := newFakeStore()
+	store.writeErr = fmt.Errorf("%w: entries[0].agent_update sets no `agent_info` arm", ErrInvalid)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "claude-shim:test",
+		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+	rec, ok := findRecord(t, h.logs, "store.rpc.write-batch", "warn")
+	if !ok {
+		t.Fatalf("records = %+v, want the refusal recorded at warn", records(t, h.logs))
+	}
+	if rec.Context["rpc"] != storev1connect.ShimStoreWriteBatchProcedure {
+		t.Errorf("rpc = %v, want %q", rec.Context["rpc"], storev1connect.ShimStoreWriteBatchProcedure)
+	}
+	if rec.Context["refusal_site"] != SiteStoreRefusedRequest {
+		t.Errorf("refusal_site = %v, want %q", rec.Context["refusal_site"], SiteStoreRefusedRequest)
+	}
+}
+
 func TestOpenAgentSessionMapsAStalePointerToTheFailureArm(t *testing.T) {
 	// Arrange.
 	store := newFakeStore()

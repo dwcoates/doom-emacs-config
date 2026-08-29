@@ -199,12 +199,16 @@ func (x *GetSidecarCursorsSuccess) GetCursors() []*CursorState {
 	return nil
 }
 
-// The cursors could not be read. `kind` arms are DERIVED at the wave from the
-// store's real failure sites.
+// The cursors could not be read. THE ARM IS WHY.
 type GetSidecarCursorsFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The store's account, for a human and for logs; never switched on.
-	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	Detail string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*GetSidecarCursorsFailure_InvalidRequest
+	//	*GetSidecarCursorsFailure_StorageFailure
+	Kind          isGetSidecarCursorsFailure_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -246,6 +250,132 @@ func (x *GetSidecarCursorsFailure) GetDetail() string {
 	return ""
 }
 
+func (x *GetSidecarCursorsFailure) GetKind() isGetSidecarCursorsFailure_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *GetSidecarCursorsFailure) GetInvalidRequest() *GetSidecarCursorsInvalidRequest {
+	if x != nil {
+		if x, ok := x.Kind.(*GetSidecarCursorsFailure_InvalidRequest); ok {
+			return x.InvalidRequest
+		}
+	}
+	return nil
+}
+
+func (x *GetSidecarCursorsFailure) GetStorageFailure() *GetSidecarCursorsStorageFailure {
+	if x != nil {
+		if x, ok := x.Kind.(*GetSidecarCursorsFailure_StorageFailure); ok {
+			return x.StorageFailure
+		}
+	}
+	return nil
+}
+
+type isGetSidecarCursorsFailure_Kind interface {
+	isGetSidecarCursorsFailure_Kind()
+}
+
+type GetSidecarCursorsFailure_InvalidRequest struct {
+	// file_id present but empty.
+	InvalidRequest *GetSidecarCursorsInvalidRequest `protobuf:"bytes,2,opt,name=invalid_request,json=invalidRequest,proto3,oneof"`
+}
+
+type GetSidecarCursorsFailure_StorageFailure struct {
+	StorageFailure *GetSidecarCursorsStorageFailure `protobuf:"bytes,3,opt,name=storage_failure,json=storageFailure,proto3,oneof"`
+}
+
+func (*GetSidecarCursorsFailure_InvalidRequest) isGetSidecarCursorsFailure_Kind() {}
+
+func (*GetSidecarCursorsFailure_StorageFailure) isGetSidecarCursorsFailure_Kind() {}
+
+// The request was malformed or violated the validation invariant.
+type GetSidecarCursorsInvalidRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which field (with the offending entry's index where one applies), as
+	// the store names it — for the producer's logs, never switched on.
+	Field         string `protobuf:"bytes,1,opt,name=field,proto3" json:"field,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSidecarCursorsInvalidRequest) Reset() {
+	*x = GetSidecarCursorsInvalidRequest{}
+	mi := &file_store_v1_endpoint_get_sidecar_cursors_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSidecarCursorsInvalidRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSidecarCursorsInvalidRequest) ProtoMessage() {}
+
+func (x *GetSidecarCursorsInvalidRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_get_sidecar_cursors_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSidecarCursorsInvalidRequest.ProtoReflect.Descriptor instead.
+func (*GetSidecarCursorsInvalidRequest) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_get_sidecar_cursors_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *GetSidecarCursorsInvalidRequest) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
+
+// The database failed; `detail` carries the driver's text.
+type GetSidecarCursorsStorageFailure struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSidecarCursorsStorageFailure) Reset() {
+	*x = GetSidecarCursorsStorageFailure{}
+	mi := &file_store_v1_endpoint_get_sidecar_cursors_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSidecarCursorsStorageFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSidecarCursorsStorageFailure) ProtoMessage() {}
+
+func (x *GetSidecarCursorsStorageFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_get_sidecar_cursors_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSidecarCursorsStorageFailure.ProtoReflect.Descriptor instead.
+func (*GetSidecarCursorsStorageFailure) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_get_sidecar_cursors_proto_rawDescGZIP(), []int{5}
+}
+
 var File_store_v1_endpoint_get_sidecar_cursors_proto protoreflect.FileDescriptor
 
 const file_store_v1_endpoint_get_sidecar_cursors_proto_rawDesc = "" +
@@ -260,9 +390,15 @@ const file_store_v1_endpoint_get_sidecar_cursors_proto_rawDesc = "" +
 	"\afailure\x18\x02 \x01(\v2\".store.v1.GetSidecarCursorsFailureH\x00R\afailureB\b\n" +
 	"\x06result\"K\n" +
 	"\x18GetSidecarCursorsSuccess\x12/\n" +
-	"\acursors\x18\x01 \x03(\v2\x15.store.v1.CursorStateR\acursors\"2\n" +
+	"\acursors\x18\x01 \x03(\v2\x15.store.v1.CursorStateR\acursors\"\xe6\x01\n" +
 	"\x18GetSidecarCursorsFailure\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detailB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
+	"\x06detail\x18\x01 \x01(\tR\x06detail\x12T\n" +
+	"\x0finvalid_request\x18\x02 \x01(\v2).store.v1.GetSidecarCursorsInvalidRequestH\x00R\x0einvalidRequest\x12T\n" +
+	"\x0fstorage_failure\x18\x03 \x01(\v2).store.v1.GetSidecarCursorsStorageFailureH\x00R\x0estorageFailureB\x06\n" +
+	"\x04kind\"7\n" +
+	"\x1fGetSidecarCursorsInvalidRequest\x12\x14\n" +
+	"\x05field\x18\x01 \x01(\tR\x05field\"!\n" +
+	"\x1fGetSidecarCursorsStorageFailureB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 
 var (
 	file_store_v1_endpoint_get_sidecar_cursors_proto_rawDescOnce sync.Once
@@ -276,23 +412,27 @@ func file_store_v1_endpoint_get_sidecar_cursors_proto_rawDescGZIP() []byte {
 	return file_store_v1_endpoint_get_sidecar_cursors_proto_rawDescData
 }
 
-var file_store_v1_endpoint_get_sidecar_cursors_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_store_v1_endpoint_get_sidecar_cursors_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_store_v1_endpoint_get_sidecar_cursors_proto_goTypes = []any{
-	(*GetSidecarCursorsRequest)(nil),  // 0: store.v1.GetSidecarCursorsRequest
-	(*GetSidecarCursorsResponse)(nil), // 1: store.v1.GetSidecarCursorsResponse
-	(*GetSidecarCursorsSuccess)(nil),  // 2: store.v1.GetSidecarCursorsSuccess
-	(*GetSidecarCursorsFailure)(nil),  // 3: store.v1.GetSidecarCursorsFailure
-	(*CursorState)(nil),               // 4: store.v1.CursorState
+	(*GetSidecarCursorsRequest)(nil),        // 0: store.v1.GetSidecarCursorsRequest
+	(*GetSidecarCursorsResponse)(nil),       // 1: store.v1.GetSidecarCursorsResponse
+	(*GetSidecarCursorsSuccess)(nil),        // 2: store.v1.GetSidecarCursorsSuccess
+	(*GetSidecarCursorsFailure)(nil),        // 3: store.v1.GetSidecarCursorsFailure
+	(*GetSidecarCursorsInvalidRequest)(nil), // 4: store.v1.GetSidecarCursorsInvalidRequest
+	(*GetSidecarCursorsStorageFailure)(nil), // 5: store.v1.GetSidecarCursorsStorageFailure
+	(*CursorState)(nil),                     // 6: store.v1.CursorState
 }
 var file_store_v1_endpoint_get_sidecar_cursors_proto_depIdxs = []int32{
 	2, // 0: store.v1.GetSidecarCursorsResponse.success:type_name -> store.v1.GetSidecarCursorsSuccess
 	3, // 1: store.v1.GetSidecarCursorsResponse.failure:type_name -> store.v1.GetSidecarCursorsFailure
-	4, // 2: store.v1.GetSidecarCursorsSuccess.cursors:type_name -> store.v1.CursorState
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	6, // 2: store.v1.GetSidecarCursorsSuccess.cursors:type_name -> store.v1.CursorState
+	4, // 3: store.v1.GetSidecarCursorsFailure.invalid_request:type_name -> store.v1.GetSidecarCursorsInvalidRequest
+	5, // 4: store.v1.GetSidecarCursorsFailure.storage_failure:type_name -> store.v1.GetSidecarCursorsStorageFailure
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_get_sidecar_cursors_proto_init() }
@@ -306,13 +446,17 @@ func file_store_v1_endpoint_get_sidecar_cursors_proto_init() {
 		(*GetSidecarCursorsResponse_Success)(nil),
 		(*GetSidecarCursorsResponse_Failure)(nil),
 	}
+	file_store_v1_endpoint_get_sidecar_cursors_proto_msgTypes[3].OneofWrappers = []any{
+		(*GetSidecarCursorsFailure_InvalidRequest)(nil),
+		(*GetSidecarCursorsFailure_StorageFailure)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_store_v1_endpoint_get_sidecar_cursors_proto_rawDesc), len(file_store_v1_endpoint_get_sidecar_cursors_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
