@@ -67,6 +67,11 @@ export interface Harness {
   tick(ms: number): Promise<void>;
   /** Boot a SECOND fake daemon, for the transfer/adopt case. */
   startSecondDaemon(): Promise<FakeDaemon>;
+  /**
+   * Dispose every mount while LEAVING the daemon up, so a test can observe
+   * what the app's own cancellation does to the server's live streams.
+   */
+  disposeMounts(): Promise<void>;
   /** Dispose every mount, stop every daemon, restore real timers. */
   stop(): Promise<void>;
 
@@ -215,6 +220,11 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       await second.start();
       harness.secondFake = second;
       return second;
+    },
+    async disposeMounts() {
+      for (const handle of [...handles].reverse()) handle.dispose();
+      handles.length = 0;
+      await settle();
     },
     async stop() {
       for (const handle of [...handles].reverse()) handle.dispose();
