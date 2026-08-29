@@ -617,3 +617,67 @@ func TestTheSuspensionRecordNamesTheStoreItIsWaitingOn(t *testing.T) {
 		t.Fatal("no suspension record was written at all")
 	}
 }
+
+func TestASpoolThatReadItsOwnExitMarkerIsNoLongerTracked(t *testing.T) {
+	// Arrange. LOST means "we stopped seeing it". A run whose EXIT marker we
+	// READ is a run we watched finish, so leaving it tracked would have the
+	// staleness sweep eventually restate a completed run as LOST.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1settled", "work\nEXIT=0\n")
+	h.sc.TaskSpawned("b1settled", "toolu_settled_run", "", spool)
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+
+	// Assert.
+	if h.sc.tracker.Open(spool) {
+		t.Fatalf("the run is still tracked after its own terminal was read: %s", h.logText())
+	}
+}
+
+func TestARunIsSettledOnlyOnceItsTerminalIsDurable(t *testing.T) {
+	// Arrange. A terminal whose batch the store refused is a terminal the store
+	// never saw; untracking the run against it would leave a run that is neither
+	// tracked nor recorded as ended.
+	store := &fakeStore{writeFail: "the store is refusing everything"}
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1refused", "work\nEXIT=0\n")
+	h.sc.TaskSpawned("b1refused", "toolu_refused_run", "", spool)
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+
+	// Assert.
+	if !h.sc.tracker.Open(spool) {
+		t.Fatal("a run whose terminal was never committed must stay tracked")
+	}
+}
+
+func TestASettledRunIsNeverConcludedLost(t *testing.T) {
+	// Arrange. The sweep is what would restate the finished run, so the subject
+	// is the sweep itself, run past every silence window.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1swept", "work\nEXIT=0\n")
+	h.sc.TaskSpawned("b1swept", "toolu_swept_run", "", spool)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+
+	// Act: long past any silence window.
+	h.advance(24 * time.Hour)
+	h.sc.sweep()
+
+	// Assert.
+	if strings.Contains(h.logText(), "run concluded LOST") {
+		t.Fatalf("a run that ended on its own EXIT marker was restated LOST: %s", h.logText())
+	}
+}
