@@ -1,0 +1,32 @@
+// endpoint_hibernate.proto — Hibernate: the daemon's pre-hibernation
+// directive. SESSION section. The daemon calls this BEFORE standing a shim
+// down for hibernation; the shim COMPACTS the session (its ordinary
+// compaction mechanism — a throwaway summarizing session rewriting the
+// transcript), then acks. Only after the ack does the daemon stand the
+// shim down, so a later revival never pays a cold context.
+
+syntax = "proto3";
+
+package shim.v1;
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+message HibernateRequest {
+}
+
+// THE ARM IS THE OUTCOME.
+message HibernateResponse {
+  oneof result {
+    HibernateSuccess success = 1;
+    HibernateError error = 2;
+  }
+}
+
+// The session is compacted; the daemon may stand the shim down.
+message HibernateSuccess {
+}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (turn in flight,
+// compaction failed, …), spelled per the standing conventions.
+message HibernateError {
+}
