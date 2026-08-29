@@ -38,8 +38,10 @@
 
 (defmacro agent-repl-test-wire-verbs--with-common (&rest body)
   "Run BODY with wire-common.el's leaf codecs bound to deterministic fakes.
-Also silences core.el's logging ladder: `agent-repl--error' signals after
-persisting, and the suite asserts the SIGNAL, not the log file."
+Also silences core.el's logging ladder.  `agent-repl--error' is a pure
+logging rung that never signals, so the stub is a no-op: the typed
+`agent-repl-wire-error' this suite asserts comes from the codec's own
+`signal', never from the logger."
   (declare (indent 0))
   `(cl-letf (((symbol-function 'agent-repl-wire-encode-workspace-ref)
               (lambda (ref) (list (cons 'id (plist-get ref :id))
@@ -61,8 +63,7 @@ persisting, and the suite asserts the SIGNAL, not the log file."
              ((symbol-function 'agent-repl-wire-decode-turn-id)
               (lambda (json) (list :value (cdr (assq 'value json)))))
              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-             ((symbol-function 'agent-repl--error)
-              (lambda (&rest _) (error "stubbed agent-repl--error"))))
+             ((symbol-function 'agent-repl--error) (lambda (&rest _) nil)))
      ,@body))
 
 (defconst agent-repl-test-wire-verbs--ref '(:id "ws-1" :dir "/w/one")
@@ -553,47 +554,74 @@ persisting, and the suite asserts the SIGNAL, not the log file."
 ;;;; ---- SubmitPromptRequest ---------------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-submit-request-shape ()
-  "A submission carries said, the idempotency key and the origin."
+  "A submission carries the workspace, said, the idempotency key and the origin."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-encode-submit-prompt-request
-                    '(:said (:text "hi") :idempotency-key "k-1" :origin :user-sent))
-                   '((said . ((said . "hi")))
+                    (list :workspace agent-repl-test-wire-verbs--ref
+                          :said '(:text "hi") :idempotency-key "k-1"
+                          :origin :user-sent))
+                   '((workspace . ((id . "ws-1") (dir . "/w/one")))
+                     (said . ((said . "hi")))
                      (idempotencyKey . "k-1")
                      (origin . "ORIGIN::user-sent"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-request-echoes-the-workspace ()
+  "The workspace ref rides every Emacs submit, echoed verbatim.
+Landing 2: the root feed has no id of its own, so the workspace — not
+`feed' — is what names WHICH workspace the submission belongs to."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (cdr (assq 'workspace
+                              (agent-repl-wire-encode-submit-prompt-request
+                               (list :workspace agent-repl-test-wire-verbs--ref
+                                     :said '(:text "hi") :idempotency-key "k-1"
+                                     :origin :user-sent))))
+                   '((id . "ws-1") (dir . "/w/one"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-missing-workspace-refused ()
+  "The workspace is REQUIRED, so a submission without one never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-submit-prompt-request
+                   '(:said (:text "hi") :idempotency-key "k-1" :origin :user-sent))
+                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-request-omits-feed ()
   "Emacs never addresses a subagent feed, so `feed' is never spelled."
   (agent-repl-test-wire-verbs--with-common
     (should-not (assq 'feed (agent-repl-wire-encode-submit-prompt-request
-                             '(:said (:text "hi") :idempotency-key "k-1"
-                               :origin :user-sent))))))
+                             (list :workspace agent-repl-test-wire-verbs--ref
+                                   :said '(:text "hi") :idempotency-key "k-1"
+                                   :origin :user-sent))))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-empty-idempotency-key-refused ()
   "An empty idempotency key defeats duplicate refusal and is refused here."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-submit-prompt-request
-                   '(:said (:text "hi") :idempotency-key "" :origin :user-sent))
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :said '(:text "hi") :idempotency-key "" :origin :user-sent))
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-missing-idempotency-key-refused ()
   "An absent idempotency key is refused before the submission can be sent."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-submit-prompt-request
-                   '(:said (:text "hi") :origin :user-sent))
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :said '(:text "hi") :origin :user-sent))
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-missing-origin-refused ()
   "The origin is REQUIRED, so a submission without one never reaches the wire."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-submit-prompt-request
-                   '(:said (:text "hi") :idempotency-key "k-1"))
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :said '(:text "hi") :idempotency-key "k-1"))
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-missing-said-refused ()
   "A submission with nothing said is incomplete and errors before send."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-submit-prompt-request
-                   '(:idempotency-key "k-1" :origin :user-sent))
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :idempotency-key "k-1" :origin :user-sent))
                   :type 'agent-repl-wire-error)))
 
 
@@ -929,13 +957,17 @@ persisting, and the suite asserts the SIGNAL, not the log file."
 ;;;; ---- Logging -----------------------------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-breach-logs-error ()
-  "Every contract breach logs at ERROR before the typed signal leaves."
+  "Every contract breach logs at ERROR before the typed signal leaves.
+Recording the failure and aborting the caller are separate acts: the
+logging rung returns normally, and the typed signal follows it."
   (agent-repl-test-wire-verbs--with-common
     (let (calls)
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (&rest args) (push args calls) (error "logged"))))
+                 (lambda (&rest args) (push args calls) nil)))
         (should-error (agent-repl-wire-encode-submit-prompt-request
-                       '(:said (:text "hi") :idempotency-key "" :origin :user-sent))
+                       (list :workspace agent-repl-test-wire-verbs--ref
+                             :said '(:text "hi") :idempotency-key ""
+                             :origin :user-sent))
                       :type 'agent-repl-wire-error))
       (should (= (length calls) 1)))))
 

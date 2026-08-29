@@ -17,8 +17,11 @@ the proto wins and the agent reports the conflict.
   under that variable.
 - Logging: every logical branch of production code logs through core.el's
   canonical API: `agent-repl--log` (debug), `agent-repl--info`,
-  `agent-repl--warn` (WARNING), `agent-repl--error` (ERROR; added by the
-  dead-code pre-pass). Operation names: `elisp.<module>.<operation>`.
+  `agent-repl--warn` (WARNING), `agent-repl--error` (ERROR; a PURE LOGGER
+  that never signals — ruled at the pre-pass). REFUSALS that must abort use
+  `agent-repl--fatal` (record at ERROR, then signal — the pre-existing
+  behavior, renamed) or `user-error` for interactive refusals; never swallow
+  a signal. Operation names: `elisp.<module>.<operation>`.
   Dynamic values go in the context, never only in the message.
 - Validation invariant: a push or response missing a non-optional field, an
   unset oneof, a oneof with two arms set, or an unknown field/arm is a
@@ -131,6 +134,15 @@ are deleted by the verbs agent once verbs.el replaces them.
   equivalent; the implementer chooses and documents.
 - ON-PUSH exceptions are caught at the filter boundary: log ERROR with the
   payload in context; the stream stays open.
+- STANDING-STREAM ACCEPTANCE (project-lead contract rule): the daemon
+  flushes response headers on accept, so a stream is ACCEPTED the moment its
+  HTTP 200 header block arrives — before any frame; connect.el exposes that
+  instant (`ON-OPEN`/an accepted flag) and daemon-link/host/roster key
+  "subscribed" on it, never on a first frame. A client ends a watch only by
+  killing its transport (`agent-repl-connect-stream-cancel`); a standing
+  stream never ends on its own, so an end frame or process death on a
+  standing stream is always a failure. The fake daemon flushes headers on
+  accept too.
 - LANDED SHAPES (connect.el as merged): the failure datum handed to
   `:on-failure` and carried in `(:error DETAIL)` is the plist
   `(:kind K :code CODE :status STATUS :message MSG)` with `:kind` one of
@@ -292,6 +304,14 @@ are deleted by the verbs agent once verbs.el replaces them.
 
 - `(agent-repl-roster-subscribe CONN)`; `agent-repl-roster-view` holds the
   last decoded roster; `agent-repl-roster-update-functions` (ROSTER).
+- LANDED SHAPES (wire-roster.el as merged): the decoded roster keeps the
+  contract's nesting — a row's ref is `(plist-get (plist-get ROW :workspace)
+  :workspace)`, a repo section's ref is under `:key` then `:repository`, the
+  roster's current is `(plist-get (plist-get ROSTER :current) :workspace)`;
+  an optional EMPTY message (RosterRowAttention, priority badge presence) decodes
+  to `t` when present and nil when absent; `agent-repl-wire-roster-row-status-
+  keywords` exports the 23 arm keywords in proto order for status.el's table
+  and its assertion tests.
 - Tab reconciliation `(agent-repl-roster-reconcile ROSTER)`: walk
   `repository.sections` in order and rows depth-first (row, then its
   children), then `recently_merged.rows`. A row with `closed` false → ensure
@@ -597,6 +617,29 @@ open-progress, panels, window, popup); W2-C "user commands" = composer +
 verbs (+ worktree slimming, doctor, deleting merge-handlers.el and
 workspace-create-client.el). Seams between the three are exactly the §6–§12
 names; each brief owns every file listed for its constituent rows.
+
+## 15b. Remediation queue (teamlead loop; dispatched as slots free)
+
+- R-ACCEPT (from the standing-stream rule): `agent-repl-connect-stream`
+  gains an optional ON-OPEN callback, invoked exactly once when the header
+  reader parses an HTTP 200 status for the stream (before any frame); a
+  non-200 or a transport death before headers never calls it. daemon-link.el
+  keys `agent-repl-link-up-functions` (first connect AND reconnect) and the
+  successor's readiness on ON-OPEN instead of on spawn; host.el and roster.el
+  log `elisp.host.subscribed` / `elisp.roster.subscribed` on ON-OPEN. Tests:
+  connect (on-open once, not on non-200, not on death-before-headers),
+  daemon-link (link-up only after acceptance; reconnect likewise), and the
+  integration link suite's "WatchDaemon with no pushes yields link-up" case
+  keeps passing.
+
+- R-QUESTION (landing 3): `HostNotificationKind` gains
+  `question_asked {header}`. wire-host.el's kind decoder accepts the arm
+  (decoded `(:arm :question-asked :value (:header H))`), pinned against the
+  Go bindings' arm set; host.el applies the SAME notification policy as
+  permission_requested (unfocused → banner; focused + tab not selected →
+  blink; selected → log only), with `header` in the log context. Tests: one
+  per decode edge (present, missing header = proto3 default "", unknown
+  sibling arm still refused) and one per policy branch.
 
 ## 16. Escalations sent to the project lead (defaults in force meanwhile)
 

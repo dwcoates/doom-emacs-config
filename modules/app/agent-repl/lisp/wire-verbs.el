@@ -56,6 +56,7 @@
 
 ;; wire-common.el (concurrent sibling module) owns the shared leaf codecs and
 ;; the `agent-repl-wire-error' definition.
+(declare-function agent-repl-wire--fail "agent-repl-wire-common" (message field reason))
 (declare-function agent-repl-wire-encode-workspace-ref "agent-repl-wire-common" (ref))
 (declare-function agent-repl-wire-decode-workspace-ref "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-encode-repository-ref "agent-repl-wire-common" (ref))
@@ -75,15 +76,11 @@
 (defun agent-repl-wire-verbs--fail (message field reason)
   "Log a contract breach at ERROR and signal `agent-repl-wire-error'.
 MESSAGE names the protobuf message, FIELD the offending field or oneof,
-REASON the breach.  `agent-repl--error' both persists the record at ERROR
-level and signals a plain `error'; the signal is swallowed here so the
-TYPED `agent-repl-wire-error' — the one every wire consumer catches — is
-what actually leaves this function, with the ERROR log already written."
-  (condition-case nil
-      (agent-repl--error nil "elisp.wire.verbs-contract-breach message=%s field=%s reason=%s"
-                          message field reason)
-    (error nil))
-  (signal 'agent-repl-wire-error (list message field reason)))
+REASON the breach.  Delegates to `agent-repl-wire--fail', which is the ONE
+place in the codec that turns a breach into the typed signal; this file
+keeps its own name only because every call site inside it reads better
+that way."
+  (agent-repl-wire--fail message field reason))
 
 (defun agent-repl-wire-verbs--object (message json)
   "Return JSON when it is a decoded protojson object for MESSAGE, else fail.
@@ -752,18 +749,29 @@ Empty: the roster push carries the new state."
   "Encode SubmitPromptRequest's `origin' use site from ORIGIN."
   (agent-repl-wire-encode-prompt-origin origin))
 
+(defun agent-repl-wire-encode-submit-prompt-request-workspace (ref)
+  "Encode SubmitPromptRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
 (defun agent-repl-wire-encode-submit-prompt-request (request)
   "Encode SubmitPromptRequest from plist REQUEST.
-REQUEST is (:said SAID :idempotency-key STRING :origin KEYWORD).  All
-three are required: an empty idempotency key defeats the duplicate refusal
-that makes a retry safe, and the origin is REQUIRED and never UNSPECIFIED
-because a stored turn must trace back to the exact send site.  `feed' is
-never set — Emacs composes into the workspace's root feed only, so the
-absent field IS that fact."
+REQUEST is (:workspace REF :said SAID :idempotency-key STRING :origin
+KEYWORD).  All four are required: the workspace names WHICH workspace the
+submission belongs to and is echoed verbatim like every other
+per-workspace request (it is required even though `feed' is not, because
+the root feed has no id of its own); an empty idempotency key defeats the
+duplicate refusal that makes a retry safe; and the origin is REQUIRED and
+never UNSPECIFIED because a stored turn must trace back to the exact send
+site.  `feed' is never set — Emacs composes into the workspace's root feed
+only, so the absent field IS that fact."
   (let ((message "SubmitPromptRequest"))
     (agent-repl--log nil "elisp.wire.verbs-encode-submit-prompt-request origin=%s"
                       (plist-get request :origin))
-    (list (cons 'said (agent-repl-wire-encode-submit-prompt-request-said
+    (list (cons 'workspace
+                (agent-repl-wire-encode-submit-prompt-request-workspace
+                 (agent-repl-wire-verbs--require message "workspace"
+                                                  (plist-get request :workspace))))
+          (cons 'said (agent-repl-wire-encode-submit-prompt-request-said
                        (agent-repl-wire-verbs--require message "said"
                                                         (plist-get request :said))))
           (cons 'idempotencyKey
