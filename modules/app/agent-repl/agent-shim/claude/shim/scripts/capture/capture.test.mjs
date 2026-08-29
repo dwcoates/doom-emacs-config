@@ -8,12 +8,15 @@
  * the gate.
  */
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
 import { TOKEN_ENV_VARS } from "./auth.mjs";
+import { isPromptDriven } from "./worlds.mjs";
 import {
   CAPTURE_FLAG,
   CaptureRefusedError,
@@ -27,6 +30,7 @@ import {
   messageMatches,
   parseArgv,
   patternMatches,
+  runCwdInit,
   permissionResultFor,
   resolvePermissionDecision,
 } from "./capture.mjs";
@@ -202,10 +206,10 @@ describe("loadPrompts", () => {
     expect(doc.scenarios.length).toBeGreaterThan(0);
   });
 
-  it("gives every scenario either a prompt or a manual procedure", () => {
+  it("gives every scenario either prompt turns or a manual procedure", () => {
     const doc = loadPrompts(path.join(HERE, "prompts.json"));
-    const orphans = doc.scenarios.filter((s) => !s.prompt && !s.manual);
-    expect(orphans).toEqual([]);
+    const orphans = doc.scenarios.filter((s) => !isPromptDriven(s) && !s.manual);
+    expect(orphans.map((s) => s.name)).toEqual([]);
   });
 
   it("gives every scenario a coverage-list item", () => {
@@ -224,6 +228,80 @@ describe("loadPrompts", () => {
     const doc = loadPrompts(path.join(HERE, "prompts.json"));
     const names = doc.scenarios.map((s) => s.name);
     expect(new Set(names).size).toBe(names.length);
+  });
+});
+
+describe("runCwdInit — the setup file that used to be written and never run", () => {
+  it("does nothing when a scenario declares no init command", () => {
+    expect(runCwdInit(HERE, undefined)).toBeNull();
+  });
+
+  it("does nothing for an empty command", () => {
+    expect(runCwdInit(HERE, "")).toBeNull();
+  });
+
+  it("runs the command IN the scratch cwd", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "capture-cwdinit-"));
+    runCwdInit(dir, "touch marker-from-init");
+    expect(existsSync(path.join(dir, "marker-from-init"))).toBe(true);
+  });
+
+  it("initializes a real git repository, which the worktree scenario needs", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "capture-cwdinit-git-"));
+    writeFileSync(path.join(dir, "README.md"), "# fixture\n", "utf8");
+    runCwdInit(
+      dir,
+      "git init -q . && git add -A && git -c user.email=c@e.invalid -c user.name=c commit -qm init",
+    );
+    expect(existsSync(path.join(dir, ".git"))).toBe(true);
+  });
+
+  it("THROWS on a non-zero exit rather than capturing a golden of the wrong situation", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "capture-cwdinit-fail-"));
+    expect(() => runCwdInit(dir, "exit 3")).toThrow(/cwd_init failed \(exit 3\)/);
+  });
+
+  it("includes the failing command's stderr in the error", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "capture-cwdinit-fail2-"));
+    expect(() => runCwdInit(dir, "echo boom >&2; exit 1")).toThrow(/boom/);
+  });
+});
+
+describe("the corpus uses the features that retired its manual_setup notes", () => {
+  const doc = loadPrompts(path.join(HERE, "prompts.json"));
+  const by = Object.fromEntries(doc.scenarios.map((s) => [s.name, s]));
+
+  it("has no scenario left carrying a manual_setup note", () => {
+    const remaining = doc.scenarios.filter((s) => s.manual_setup !== undefined);
+    expect(remaining.map((s) => s.name)).toEqual([]);
+  });
+
+  it("gives the worktree scenario a cwd_init that makes a real git repository", () => {
+    expect(by["worktree-enter-exit-kept-and-removed"].cwd_init).toMatch(/git init/);
+  });
+
+  it("no longer ships the worktree init script that was never executed", () => {
+    const paths = by["worktree-enter-exit-kept-and-removed"].cwd_setup.map((f) => f.path);
+    expect(paths).not.toContain(".capture-init.sh");
+  });
+
+  it("puts identity-rotation-clear in a world with prior conversation", () => {
+    expect(by["identity-rotation-clear"].config_root).toBe(by["prose-streamed"].config_root);
+  });
+
+  it("puts compaction-directed in that same world", () => {
+    expect(by["compaction-directed"].config_root).toBe(by["prose-streamed"].config_root);
+  });
+
+  it("gives identity-rotation-clear a turn before the /clear and one after", () => {
+    const turns = by["identity-rotation-clear"].prompts;
+    expect(turns).toHaveLength(3);
+    expect(turns[1]).toBe("/clear");
+  });
+
+  it("drives the cold-resume scenario's resume from the harness", () => {
+    const turns = by["cold-resume"].prompts;
+    expect(turns[turns.length - 1].resume).toBe(true);
   });
 });
 

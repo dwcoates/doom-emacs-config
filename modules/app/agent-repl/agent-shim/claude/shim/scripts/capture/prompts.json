@@ -14,7 +14,10 @@
     "question_script": "{answers:[{question, select:[label...], free_text?}]}; a question with no entry is left UNANSWERED.",
     "controls": "[{at: session_start|on_message|turn_end, after?: {type, subtype, contains}, do: <verb>, args}].",
     "expect": "What the capture must contain for the scenario to have discharged its coverage. Prose, read by a human at review time — not asserted by code.",
-    "expects_api_error": "True only for a scenario whose GOLDEN is an API error. Every other scenario is quarantined if its result carries is_error / terminal_reason api_error / api_error_status, or if any message carries is_api_error_message."
+    "expects_api_error": "True only for a scenario whose GOLDEN is an API error. Every other scenario is quarantined if its result carries is_error / terminal_reason api_error / api_error_status, or if any message carries is_api_error_message.",
+    "config_root": "\"shared-world:<name>\": scenarios naming the same world share ONE cwd and account root and run in corpus order, so a later scenario sees what the earlier ones did. Absent = an isolated world of its own.",
+    "prompts": "An ordered array of turns, instead of `prompt`. Each entry is a string, or { text, resume: true } to close the query and reopen it resuming the same vendor session id.",
+    "cwd_init": "A shell command run in the scratch cwd BEFORE the query (e.g. `git init`). A non-zero exit fails the scenario."
   },
   "scenarios": [
     {
@@ -33,7 +36,8 @@
         "stream_event:message_stop",
         "assistant",
         "result:success"
-      ]
+      ],
+      "config_root": "shared-world:conversation-history"
     },
     {
       "name": "read-whole-head-range",
@@ -50,7 +54,8 @@
         "tool_result:read",
         "tool:Read(limit)",
         "tool:Read(offset+limit)"
-      ]
+      ],
+      "config_root": "shared-world:conversation-history"
     },
     {
       "name": "write-created-and-updated",
@@ -107,7 +112,8 @@
         "tool:Grep(output_mode=files_with_matches)",
         "tool:Grep(output_mode=count)",
         "tool_result:grep"
-      ]
+      ],
+      "config_root": "shared-world:conversation-history"
     },
     {
       "name": "glob",
@@ -319,10 +325,6 @@
         {
           "path": "README.md",
           "content": "# capture worktree fixture\n"
-        },
-        {
-          "path": ".capture-init.sh",
-          "content": "git init -q . && git add -A && git -c user.email=capture@example.invalid -c user.name=capture commit -qm init\n"
         }
       ],
       "expect": [
@@ -332,7 +334,7 @@
         "exit kept",
         "exit removed"
       ],
-      "manual_setup": "Run `bash .capture-init.sh` inside the scratch cwd before the turn; the worktree tool needs a real git repository."
+      "cwd_init": "git init -q . && git add -A && git -c user.email=capture@example.invalid -c user.name=capture commit -qm init"
     },
     {
       "name": "cron-create-list-delete",
@@ -1142,7 +1144,6 @@
     {
       "name": "identity-rotation-clear",
       "covers": "identity rotation via /clear (SessionIdentityRotated — the resume handle changes, the agent does not)",
-      "prompt": "/clear",
       "controls": [
         {
           "at": "turn_end",
@@ -1152,9 +1153,15 @@
       "expect": [
         "system:local_command_output",
         "the vendor session id BEFORE and AFTER the clear (they differ)",
-        "ContextCleared"
+        "ContextCleared",
+        "the post-clear turn having no memory of the pre-clear turns"
       ],
-      "manual_setup": "Run this scenario SECOND against the same scratch config root as `prose-streamed`, so there is a real session to clear; the rotation is only observable across two turns."
+      "config_root": "shared-world:conversation-history",
+      "prompts": [
+        "Summarize in one sentence everything we have discussed so far in this conversation.",
+        "/clear",
+        "What did we discuss before? Answer in one sentence."
+      ]
     },
     {
       "name": "model-changed",
@@ -1353,13 +1360,17 @@
     {
       "name": "compaction-directed",
       "covers": "DIRECTED compaction (ours: the throwaway summarizing session that rewrites the transcript)",
-      "prompt": "/compact",
       "expect": [
         "system:compact_boundary with DiskCompactMetadata",
         "system:local_command_output",
         "the rewritten transcript's per-line field union (the undocumented shape the compaction experiment must observe)"
       ],
-      "manual_setup": "Run against a scratch config root that ALREADY carries a multi-turn session (run `prose-streamed`, `read-whole-head-range` and `grep-content-files-count` into the same root first). A compaction of an empty session captures nothing."
+      "config_root": "shared-world:conversation-history",
+      "prompts": [
+        "Recap, at length, every topic covered in this conversation so far.",
+        "/compact",
+        "What is the first thing I asked you in this conversation?"
+      ]
     },
     {
       "name": "auto-compaction",
@@ -1401,11 +1412,18 @@
       "name": "cold-resume",
       "covers": "cold resume — resuming a session after its context has gone cold (past the vendor's cache TTL)",
       "prompt": null,
-      "manual": "Two-phase and time-boxed. Phase 1: run `prose-streamed` against a scratch config root and note the vendor session id. Phase 2: WAIT past the prompt-cache TTL (well over an hour), then resume that id with `options.resume` and no prompt, confirming the resume itself makes NO API call (the refusal-is-free claim), then submit one prompt and capture the cold read that lands with it. The wait is the whole point and cannot be shortened.",
+      "manual": "The RESUME ITSELF is now driven by the harness (turn 2 carries `resume: true`, which closes the query and reopens it against the same vendor session id). What the harness cannot do is WAIT: a genuinely COLD resume needs the prompt-cache TTL to lapse between the two turns (well over an hour). Run this scenario as-is for the warm-resume golden; for the cold one, run turn 1, wait past the TTL, and run turn 2 with --only cold-resume against the same world.",
       "expect": [
         "a resume that emits system:init and nothing else",
         "the first prompt's usage showing a full cache MISS",
         "the model and permission mode readable from the transcript's last mode / permission-mode lines"
+      ],
+      "prompts": [
+        "Explain in one paragraph what a write-ahead log is.",
+        {
+          "text": "What did you just tell me? Answer in one sentence.",
+          "resume": true
+        }
       ]
     }
   ]

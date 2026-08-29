@@ -165,15 +165,39 @@ Everything is passed through `anonymize.mjs` before it lands — the walker
 structural field — uuids, session ids, paths, timestamps, tool-use ids, object
 keys — survives verbatim. A capture directory is safe to commit.
 
+## Shared worlds and multi-turn scenarios
+
+Three scenarios used to carry a `manual_setup` note asking the operator to
+hand-arrange state the harness could arrange itself. They no longer do.
+
+**A world** is a shared cwd and account root. Scenarios naming the same
+`config_root: "shared-world:<name>"` run in **corpus order** against one world,
+so a later scenario sees everything the earlier ones did. `prose-streamed`,
+`read-whole-head-range`, `grep-content-files-count`, `identity-rotation-clear`
+and `compaction-directed` share `shared-world:conversation-history` — which is
+how a `/clear` has an identity to rotate and a `/compact` has a conversation to
+compact.
+
+**A multi-turn scenario** uses `prompts` (an array) instead of `prompt`. Turns
+run on ONE query by default. A turn spelled `{ text, resume: true }` closes the
+query and opens a fresh one resuming the same vendor session id — the shim's own
+resume path, and the only way to capture what a resume actually costs.
+
+**`cwd_init`** is a shell command run in the scratch cwd before the query. The
+worktree scenario uses it to make a real git repository; it previously shipped a
+`.capture-init.sh` that was written to disk and **never executed**, so the
+worktree tools would have run against an uninitialized directory while the
+scenario looked correctly configured. A non-zero exit fails the scenario rather
+than warning, because a scenario whose precondition failed captures a golden of
+the wrong situation.
+
 ## The corpus
 
 `prompts.json` holds one entry per item in the SHIM directive's coverage list.
 `prompt` is `null` exactly when the scenario has **no prompt-only
 provocation** — a 429, a query death, a cold resume past the cache TTL, a
 refusal, a max-tokens-on-schema failure — and `manual` then states the operator
-procedure. `manual_setup` marks an otherwise prompt-driven scenario that needs
-a step first (a git repo, a pre-existing multi-turn session, a bulk file tree).
-`--list` prints which is which.
+procedure. `--list` prints which is which, and how many turns each has.
 
 ## Afterwards
 
