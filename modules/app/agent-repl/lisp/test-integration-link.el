@@ -30,7 +30,7 @@
 (declare-function agent-repl-link-primary "daemon-link")
 (declare-function agent-repl-link-successor "daemon-link")
 (declare-function agent-repl-link-up-p "daemon-link")
-(declare-function agent-repl-link-drain-segment "daemon-link")
+(declare-function agent-repl-link-teardown "daemon-link")
 (declare-function agent-repl-connect-close "connect")
 (declare-function agent-repl-host-register "host")
 (declare-function agent-repl--ws-put "workspace")
@@ -40,6 +40,7 @@
 (defvar agent-repl-link-drain-functions)
 (defvar agent-repl-link-no-daemon-functions)
 (defvar agent-repl-link-drain)
+(defvar agent-repl-link-drain-segment)
 (defvar agent-repl-link-reconnect-interval-seconds)
 
 ;;;; ---- Fixtures ----
@@ -56,16 +57,14 @@ loop's own timing is not what a test spends its deadline on."
          (agent-repl-link-drain-functions nil)
          (agent-repl-link-no-daemon-functions nil)
          (agent-repl-link-drain nil)
+         (agent-repl-link-drain-segment nil)
          (agent-repl-link-reconnect-interval-seconds 0.05))
      (unwind-protect
          (progn
            (agent-repl-link-connect)
            (agent-repl-itest--await-subscriber ,daemon "daemon")
            ,@body)
-       (when (agent-repl-link-successor)
-         (ignore-errors (agent-repl-connect-close (agent-repl-link-successor))))
-       (when (agent-repl-link-primary)
-         (ignore-errors (agent-repl-connect-close (agent-repl-link-primary)))))))
+       (ignore-errors (agent-repl-link-teardown)))))
 
 (defun agent-repl-itest-link--announce (daemon &optional address cause)
   "Push `shutdown_announced' on DAEMON, optionally naming ADDRESS.
@@ -112,6 +111,7 @@ input is the header block."
           (agent-repl-link-drain-functions nil)
           (agent-repl-link-no-daemon-functions nil)
           (agent-repl-link-drain nil)
+          (agent-repl-link-drain-segment nil)
           (agent-repl-link-reconnect-interval-seconds 0.05))
       (add-hook 'agent-repl-link-up-functions (lambda (&rest _) (setq up t)))
       (unwind-protect
@@ -126,8 +126,7 @@ input is the header block."
             ;; And the stream is STANDING, not concluded — a standing stream
             ;; never ends of its own accord.
             (should (equal 1 (length (agent-repl-itest--subscribers daemon "daemon")))))
-        (when (agent-repl-link-primary)
-          (ignore-errors (agent-repl-connect-close (agent-repl-link-primary))))))))
+        (ignore-errors (agent-repl-link-teardown))))))
 
 (ert-deftest agent-repl-itest-link-absent-daemon-runs-the-no-daemon-hooks ()
   "No daemon.addr → the no-daemon hooks run and the link stays down.
@@ -345,11 +344,12 @@ different facts, and the operator's note is dynamic detail."
              `((drainScheduled . ((atMs . "1735689600000") (reason . ,reason)))))
             ;; Assert.
             (agent-repl-itest--wait-until
-             (lambda () (let ((segment (agent-repl-link-drain-segment)))
-                          (and segment (string-match-p (regexp-quote expected) segment))))
+             (lambda () (and agent-repl-link-drain-segment
+                             (string-match-p (regexp-quote expected)
+                                             agent-repl-link-drain-segment)))
              nil (format "the drain segment to name %S" expected))
             (should (string-match-p (regexp-quote expected)
-                                    (agent-repl-link-drain-segment)))))))))
+                                    agent-repl-link-drain-segment))))))))
 
 (ert-deftest agent-repl-itest-link-drain-cancelled-clears-the-indicator ()
   "`drain_cancelled' retracts the schedule and the indicator with it.

@@ -32,7 +32,8 @@
 (declare-function agent-repl-status-tab-state "status")
 (declare-function agent-repl-connect-open "connect")
 (declare-function agent-repl-connect-close "connect")
-(declare-function agent-repl--ws-known-p "workspace")
+(declare-function agent-repl--ws-by-ref-id "workspace")
+(declare-function agent-repl-roster-tab-order "roster")
 (declare-function agent-repl--ws-put "workspace")
 (declare-function agent-repl--ws-switch "workspace")
 (declare-function agent-repl--ws-dir-owner "workspace")
@@ -266,9 +267,9 @@ exist, and Emacs holds no durable roster snapshot of its own."
                (list (agent-repl-itest-roster--row "itest-open" "itest-open" 'ready))))
       ;; Assert.
       (agent-repl-itest--wait-until
-       (lambda () (agent-repl--ws-known-p "itest-open"))
-       nil "the open row's workspace to be established")
-      (should (agent-repl--ws-known-p "itest-open")))))
+       (lambda () (agent-repl--ws-by-ref-id "itest-open"))
+       nil "the open row's tab to be opened")
+      (should (equal (agent-repl--ws-by-ref-id "itest-open") "itest-open")))))
 
 (ert-deftest agent-repl-itest-roster-closed-rows-are-torn-down ()
   "A `closed = true' row means tear the tab down; teardown is idempotent.
@@ -281,8 +282,8 @@ leaves the roster entirely."
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row "itest-close" "itest-close" 'ready))))
       (agent-repl-itest--wait-until
-       (lambda () (agent-repl--ws-known-p "itest-close"))
-       nil "the open row's workspace to be established")
+       (lambda () (agent-repl--ws-by-ref-id "itest-close"))
+       nil "the open row's tab to be opened")
       ;; Act.
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
@@ -291,14 +292,14 @@ leaves the roster entirely."
                       '(closed . ((closed . t)))))))
       ;; Assert.
       (agent-repl-itest--wait-until
-       (lambda () (not (agent-repl--ws-known-p "itest-close")))
+       (lambda () (not (agent-repl--ws-by-ref-id "itest-close")))
        nil "the closed row's tab to be torn down")
-      (should-not (agent-repl--ws-known-p "itest-close")))))
+      (should-not (agent-repl--ws-by-ref-id "itest-close")))))
 
-(ert-deftest agent-repl-itest-roster-preserves-the-walk-order ()
-  "The decoded roster preserves row order; tab order IS the walk order.
-Client-authored ordering and hiding are DEAD — tabs follow roster order
-strictly, and the resolver is what orders (priority included)."
+(ert-deftest agent-repl-itest-roster-tab-order-is-the-walk-order ()
+  "Tab order IS the roster walk order, strictly.
+Client-authored ordering and hiding are DEAD — the resolver orders
+(priority included), and Emacs reproduces that order and nothing else."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -308,14 +309,56 @@ strictly, and the resolver is what orders (priority included)."
                (list (agent-repl-itest-roster--row "ws-a" "ws-a" 'ready)
                      (agent-repl-itest-roster--row "ws-b" "ws-b" 'ready)
                      (agent-repl-itest-roster--row "ws-c" "ws-c" 'ready))))
-      (agent-repl-itest-roster--await-view daemon)
-      ;; Assert: the view's row order is the wire's row order.
-      (let* ((sections (plist-get (plist-get agent-repl-roster-view :repository) :sections))
-             (rows (plist-get (plist-get (car sections) :rows) :rows))
-             (ids (mapcar (lambda (row)
-                            (plist-get (plist-get (plist-get row :workspace) :workspace) :id))
-                          rows)))
-        (should (equal ids '("ws-a" "ws-b" "ws-c")))))))
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (equal (agent-repl-roster-tab-order) '("ws-a" "ws-b" "ws-c")))
+       nil "the tabs to take the roster's walk order")
+      (should (equal (agent-repl-roster-tab-order) '("ws-a" "ws-b" "ws-c"))))))
+
+(ert-deftest agent-repl-itest-roster-reordered-rows-reorder-the-tabs ()
+  "A reordered roster reorders the tabs; nothing local pins the old order.
+The daemon may reorder at any time — a priority change alone does it —
+and Emacs follows rather than remembering."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "ws-a" "ws-a" 'ready)
+                     (agent-repl-itest-roster--row "ws-b" "ws-b" 'ready))))
+      (agent-repl-itest--wait-until
+       (lambda () (equal (agent-repl-roster-tab-order) '("ws-a" "ws-b")))
+       nil "the initial tab order")
+      ;; Act: the same two rows, the other way round.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "ws-b" "ws-b" 'ready)
+                     (agent-repl-itest-roster--row "ws-a" "ws-a" 'ready))))
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (equal (agent-repl-roster-tab-order) '("ws-b" "ws-a")))
+       nil "the tabs to follow the new walk order")
+      (should (equal (agent-repl-roster-tab-order) '("ws-b" "ws-a"))))))
+
+(ert-deftest agent-repl-itest-roster-closed-rows-get-no-tab-at-all ()
+  "A row that arrives already `closed' never gets a tab.
+Membership is the whole `closed = false' rule; a merged row arriving on a
+fresh connect must not open a tab just because it is on the roster."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "ws-open" "ws-open" 'ready)
+                     (agent-repl-itest-roster--row
+                      "ws-gone" "ws-gone" 'merged
+                      '(closed . ((closed . t)))))))
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (equal (agent-repl-roster-tab-order) '("ws-open")))
+       nil "only the open row to get a tab")
+      (should (null (agent-repl--ws-by-ref-id "ws-gone"))))))
 
 (ert-deftest agent-repl-itest-roster-daemon-originated-current-switches-the-tab ()
   "A `current' Emacs did not originate is a tab-SWITCH REQUEST (R8).
@@ -379,17 +422,17 @@ at any time."
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row "itest-ren" "old-name" 'ready))))
       (agent-repl-itest--wait-until
-       (lambda () (agent-repl--ws-known-p "old-name"))
-       nil "the initial row's workspace")
+       (lambda () (agent-repl--ws-by-ref-id "itest-ren"))
+       nil "the initial row's tab")
       ;; Act.
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row "itest-ren" "new-name" 'ready))))
       ;; Assert: one workspace, under its new name.
       (agent-repl-itest--wait-until
-       (lambda () (agent-repl--ws-known-p "new-name"))
-       nil "the renamed row's workspace")
-      (should-not (agent-repl--ws-known-p "old-name")))))
+       (lambda () (equal (agent-repl--ws-by-ref-id "itest-ren") "new-name"))
+       nil "the renamed row's tab")
+      (should (equal (agent-repl--ws-by-ref-id "itest-ren") "new-name")))))
 
 ;;;; ---- Scenario 11: the finish edge ----
 
