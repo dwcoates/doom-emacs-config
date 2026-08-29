@@ -12,6 +12,18 @@ import (
 	"agentrepl/shim-store/internal/logging"
 )
 
+// shortSocketPath keeps a store socket path inside the platform's sun_path
+// limit (~104 bytes on macOS), which a path under t.TempDir() would blow.
+func shortSocketPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "ss")
+	if err != nil {
+		t.Fatalf("mkdtemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return filepath.Join(dir, "store.sock")
+}
+
 // storePprofSock keeps a socket path inside the platform's sun_path limit.
 func storePprofSock(t *testing.T) string {
 	t.Helper()
