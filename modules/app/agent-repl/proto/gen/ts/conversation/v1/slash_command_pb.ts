@@ -113,8 +113,7 @@ export type ContextCut = Message<"conversation.v1.ContextCut"> & {
      * A compaction was attempted and FAILED, so nothing was cut. The context
      * is as it was — and still too large, which is why this is not silence.
      *
-     * Tag 4 is RETIRED: the server-side context edit is deferred — see the
-     * deferred-work metadocument ("server-side context edits").
+     * Tag 4 is RETIRED: the server-side context edit is deferred.
      *
      * @generated from field: conversation.v1.ContextCompactionFailed compaction_failed = 3;
      */

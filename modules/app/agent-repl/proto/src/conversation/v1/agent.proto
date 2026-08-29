@@ -350,8 +350,7 @@ message AgentWorkflowSubagent {
   }
 
   // Tags 4-5 are RETIRED: workflow phases and per-agent progress are
-  // deferred — see the deferred-work metadocument ("workflow phases and
-  // progress").
+  // deferred.
 }
 
 // The agent is running; its own stream is live.
@@ -379,8 +378,7 @@ message AgentWorkflowCompleted {
   // finished without a summary, which is not a failure.
   optional AgentWorkflowSummary summary = 1;
 
-  // Tag 2 is RETIRED: workflow run totals are deferred — see the
-  // deferred-work metadocument ("workflow run totals").
+  // Tag 2 is RETIRED: workflow run totals are deferred.
 }
 
 // The run was stopped at the user's command.
