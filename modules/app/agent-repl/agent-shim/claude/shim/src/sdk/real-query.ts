@@ -63,6 +63,15 @@ export interface RealQuerySpec {
   readonly claudeConfigDir: string;
   /** Fresh (pre-minted id) or resume (existing vendor id). */
   readonly binding: VendorBinding;
+  /**
+   * Resume only THROUGH this record, discarding everything after it.
+   *
+   * The keep-alive yield obligation's mechanism: a real prompt must not build
+   * on keep-alive context, and `resumeSessionAt` is the ONE declared surface
+   * that truncates a conversation without rewriting the vendor's own file.
+   * Meaningless without a `resume` binding, which is why it lives beside it.
+   */
+  readonly resumeSessionAt?: string;
   /** The model to answer with, or absence for the account default. */
   readonly model?: string;
   /** The permission mode every gate starts under. */
@@ -102,7 +111,10 @@ export function realQueryOptions(spec: RealQuerySpec): Options {
     ...(spec.model === undefined ? {} : { model: spec.model }),
     ...(spec.binding.kind === "fresh"
       ? { sessionId: spec.binding.sessionId }
-      : { resume: spec.binding.resumeSessionId }),
+      : {
+          resume: spec.binding.resumeSessionId,
+          ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
+        }),
   };
   return options;
 }
