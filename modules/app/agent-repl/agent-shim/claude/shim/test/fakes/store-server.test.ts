@@ -11,6 +11,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { conversationv1, storev1 } from "../../src/proto.js";
+
+/** The stream plane every shim-written entry lands on. */
+function streamPlane(): storev1.Plane {
+  return create(storev1.PlaneSchema, {
+    plane: { case: "stream", value: create(storev1.PlaneStreamSchema, {}) },
+  });
+}
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
 import { startFakeStore, type FakeStore } from "./store-server.js";
 
@@ -33,9 +40,7 @@ const agentId = (value: string): conversationv1.AgentId =>
 /** One page line for `book`, carrying an activity update, under `upsertKey`. */
 function pageLineEntry(book: string, upsertKey: string, text: string): storev1.StoreEntry {
   return create(storev1.StoreEntrySchema, {
-    plane: create(storev1.PlaneSchema, {
-      stream: create(storev1.PlaneStreamSchema, {}),
-    }),
+    plane: streamPlane(),
     writeId: `w-${upsertKey}-${text}`,
     upsertKey,
     entry: {
@@ -64,7 +69,7 @@ function pageLineEntry(book: string, upsertKey: string, text: string): storev1.S
 /** A frame carrying one of the terminal arms, which concludes an agent. */
 function terminalEntry(book: string, upsertKey: string): storev1.StoreEntry {
   return create(storev1.StoreEntrySchema, {
-    plane: create(storev1.PlaneSchema, { stream: create(storev1.PlaneStreamSchema, {}) }),
+    plane: streamPlane(),
     writeId: `w-${upsertKey}`,
     upsertKey,
     entry: {
@@ -101,7 +106,7 @@ function terminalEntry(book: string, upsertKey: string): storev1.StoreEntry {
 /** A frame announcing detached work, optionally naming the run it left. */
 function detachedEntry(book: string, upsertKey: string, workId: string, runId: string): storev1.StoreEntry {
   return create(storev1.StoreEntrySchema, {
-    plane: create(storev1.PlaneSchema, { stream: create(storev1.PlaneStreamSchema, {}) }),
+    plane: streamPlane(),
     writeId: `w-${upsertKey}`,
     upsertKey,
     entry: {
@@ -145,7 +150,7 @@ function detachedEntry(book: string, upsertKey: string, workId: string, runId: s
 /** A bash lifecycle row terminating one run. */
 function bashTerminalEntry(runId: string): storev1.StoreEntry {
   return create(storev1.StoreEntrySchema, {
-    plane: create(storev1.PlaneSchema, { stream: create(storev1.PlaneStreamSchema, {}) }),
+    plane: streamPlane(),
     writeId: `w-bash-${runId}`,
     upsertKey: `bash:${runId}`,
     entry: {
@@ -289,7 +294,7 @@ describe("WriteBatch", () => {
     // Arrange.
     const { store: fake, client } = await store();
     const entry = create(storev1.StoreEntrySchema, {
-      plane: create(storev1.PlaneSchema, { stream: create(storev1.PlaneStreamSchema, {}) }),
+      plane: streamPlane(),
       writeId: "w-1",
       upsertKey: "session:model_changed:u1",
       entry: {
@@ -314,7 +319,7 @@ describe("WriteBatch", () => {
     // Arrange.
     const { store: fake, client } = await store();
     const entry = create(storev1.StoreEntrySchema, {
-      plane: create(storev1.PlaneSchema, { stream: create(storev1.PlaneStreamSchema, {}) }),
+      plane: streamPlane(),
       writeId: "w-2",
       upsertKey: "prompt:keepalive",
       entry: {

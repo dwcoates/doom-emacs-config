@@ -9,6 +9,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { conversationv1, storev1 } from "../../src/proto.js";
+
+/** The stream plane every shim-written entry lands on. */
+function streamPlane(): storev1.Plane {
+  return create(storev1.PlaneSchema, {
+    plane: { case: "stream", value: create(storev1.PlaneStreamSchema, {}) },
+  });
+}
 import { STORE_BASE_URL, createStoreClient } from "../../src/store/client.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
 
@@ -65,7 +72,7 @@ describe("createStoreClient", () => {
     const sock = await fakeStore();
     const client = createStoreClient(sock);
     const entry = create(storev1.StoreEntrySchema, {
-      plane: create(storev1.PlaneSchema, { stream: create(storev1.PlaneStreamSchema, {}) }),
+      plane: streamPlane(),
       writeId: "w-1",
       upsertKey: "prompt:t1",
       entry: {
