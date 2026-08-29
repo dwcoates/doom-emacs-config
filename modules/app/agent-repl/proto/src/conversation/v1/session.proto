@@ -189,9 +189,9 @@ message SessionUpdate {
     // failure, active goal, prompt suggestions, file uploads, incomplete
     // interrupts, MCP policy, background tasks, model fallback, relocation
     // and worktree state, tool-set churn, settings faults) are deferred.
-    // The vendor's own context-budget warning, injected into the prompt as
-    // the window fills. Session-scoped; the footer's activity line draws it.
-    SessionContextBudgetWarning context_budget_warning = 24;
+    // Tag 24 (context_budget_warning) is RETIRED: the warning is a transcript
+    // attachment with no live-stream producer, so it lives on the agent plane
+    // as AgentUpdate.context_budget_warning (ruled 2026-08-29).
     // The shim's own health report, PUSHED at the shim's cadence and on
     // change — the pulled GetSessionDiagnostics verb is superseded by
     // this arm; the daemon's sessionwatcher routes it (topbar warnings).
@@ -215,12 +215,6 @@ message SessionCompacting {
 
 // The vendor's context-budget warning: its own signal that the context
 // window is filling, injected into the prompt as an attachment record.
-message SessionContextBudgetWarning {
-  // The vendor's warning text, verbatim — the producer composes it and no
-  // structured figure rides the record.
-  string text = 1;
-}
-
 // The vendor rotated the session's identity. The store scopes by this id, so
 // a consumer re-keys; the previous id is carried so the two halves join.
 message SessionIdentityRotated {
