@@ -66,11 +66,17 @@ unmarked is DISCRETIONARY by default.
    - INTERFACE: state operations only (resolve refs, bindings, lease
      acquire/release/inspect, held prompts, queue positions, schedules);
      NO orchestration logic; peers call it, it calls only the database.
-   - USAGE: the lease is HYBRID by ruling — the kernel file lock stays
-     the ARBITRATION mechanism (cross-process, self-releasing on death,
-     no stale-pid state), and WSM holds only the lease's POLICY metadata
+   - USAGE: the lease is HYBRID by ruling — kernel file locks stay the
+     cross-process ARBITRATION mechanism (self-releasing on death, no
+     stale-pid state), and WSM holds only the lease's POLICY metadata
      (holder label, refusal policy): the lock decides, the row
-     describes. The lease projects PER-HOLDER REFUSAL POLICY onto new
+     describes. LOCK HOLDER (ruled 2026-08-29): the SHIM holds the two
+     conversation locks (session-keyed + workspace-keyed) for its
+     lifetime — the daemon PROBES them before spawning; a fresh daemon
+     boot reads a held lock as "a surviving shim owns this
+     conversation" even before that shim dials in. Daemon-side
+     occupancy (which peer may drive the session) is the WSM lease
+     row's, in-memory-guarded per the shim-client mutex. The lease projects PER-HOLDER REFUSAL POLICY onto new
      submissions — the merge lease ERRORS them (SubmitPrompt's merging
      refusal arm; post-merge-start work would be orphaned since a merged
      workspace closes), restart-pending and shutdown-drain leases HOLD
@@ -88,12 +94,12 @@ unmarked is DISCRETIONARY by default.
        sweep's input), death/terminality with cause (a deleted session
        REFUSES resurrection), and spawn identity (config dir,
        overrides).
-     - FEED PAGE POSITION: the daemon persists, per workspace, where the
-       webapp's page walk stands — because a fresh webapp asks for the
-       first page (no token needed), but when the DAEMON restarts under
-       a live workspace session (the doom self-merge reload), it must
-       remember what page the webapp is on so a NextPage request works
-       before a new prompt remints the walk.
+     - FEED PAGE POSITION (corrected 2026-08-29): per-READER and
+       EPHEMERAL — the walk position is keyed to the open connection,
+       dropped at every open, and never persisted; a fresh or
+       re-attached webview lands at the tail and pages back. Nothing
+       about the walk survives a restart (the earlier persist-per-
+       workspace prescription is superseded).
      - DEAD BY DESIGN: the old compaction-gate instants — the shim's
        SessionCold refusal is the authoritative coldness fact now.
      - ACCOUNT SELECTION (MULTI_REPO_ROOT), carried forward as the
@@ -136,6 +142,28 @@ unmarked is DISCRETIONARY by default.
      the streams and the store (open watches ARE the live set), so
      derived facts like the live-task identity set and last-activity
      come from the new sources, never a WSM log.
+   - RULED 2026-08-29 (final-audit triage):
+     - FRESH DATABASE: the rebuilt daemon starts with a FRESH WSM file;
+       the old state.db is abandoned in place — no import, no
+       migration (consistent with no-backwards-compat).
+     - RETENTION: live records are never pruned; terminal records are
+       retained to a bounded per-table cap (number the implementer's);
+       growth is bounded by construction.
+     - CORRUPT ⇒ REFUSE, GENERALIZED: a corrupt or partially-readable
+       durable record refuses the whole load LOUDLY — never a
+       fabricated default — for EVERY table (the all-or-nothing
+       hold-restore rule, made general).
+     - FAULT CLOSURE: fault records carry open/closed with a PERSISTED
+       resolved-at instant; the daemon writes the closing edge when
+       the condition clears — a card that reopens unresolved on every
+       boot is unrepresentable.
+     - TASKS: WSM stores the user's task list and workspace↔task
+       assignments (the task-verbs increment writes them; the roster's
+       task view reads them).
+     - MERGE-LEASE LEDGER: a minimal durable ledger per merge (lease
+       id, tab intervals) so replay resolvers can join it with the
+       persisted turn origin and rebuild historical merge-bubble tab
+       membership exactly.
    - PREREQUISITES: none. (Registry and binding internals are
      DISCRETIONARY.)
 
@@ -161,7 +189,14 @@ unmarked is DISCRETIONARY by default.
      both submit the same session-act here, because a model change
      resolves at the turn boundary and respects the lease like any
      delivery — one meeting point, so command and picker can never
-     diverge) — as a CONSTRAINT, not a default.
+     diverge) — as a CONSTRAINT, not a default. MODEL RULES (ruled
+     2026-08-29): the model FACT is last-writer-wins by SHIM-observed
+     order (the shim serializes its set-confirmation and the stream's
+     re-announcement, so the daemon stores one ordered truth — an
+     in-flight submit can never silently revert a user's model change);
+     bare argument-less /model is refused/absorbed daemon-side (the
+     CLI's own picker is unreachable through us — the topbar picker is
+     the only argument-less path).
    - INTERFACE: submit in; delivery through the shim client; holds
      persisted via WSM; serves the tray's facts.
    - USAGE: check the occupancy lease (delivering the lease holder's own
@@ -187,6 +222,15 @@ unmarked is DISCRETIONARY by default.
        cancelled prompt.
      (Delivery-retry pacing and unknown-fate reconciliation were ruled
      NOT prescribed — the implementing orchestrator's.)
+   - ORIGIN IS DURABLE (ruled 2026-08-29): every delivery's PromptOrigin
+     persists onto the turn's durable record via StartTurn (the
+     prompt-origin increment) — replay resolvers read it to route
+     merge-born rows and to label restart re-drives instead of drawing
+     them as fresh user turns.
+   - BOOT RECONCILIATION (ruled 2026-08-29): on boot/adoption the daemon
+     re-opens watches for (or reconciles via GetLiveWork) every
+     in-flight daemon-originated turn, so no machine-submitted turn is
+     ever unwatched to completion.
    - PREREQUISITES: WSM, shim client.
 
 6. PRESCRIBED — THE MERGE ORCHESTRATOR (peer module).
@@ -225,6 +269,12 @@ unmarked is DISCRETIONARY by default.
        merge never round-trips through Emacs, and a workspace with no
        live session merges sessionless (skipping displaced-turn capture
        and post-merge teardown).
+     - THE FILE ROUTE IS A GENERAL INGRESS (ruled 2026-08-29): the
+       durable command-file protocol survives beyond merge — its
+       inbound verbs (prompt, send, create, close, open, and the rest
+       scripts and skills dispatch) map onto the SAME internal paths as
+       the corresponding rpcs (prompt→queue, close→CloseWorkspace, …);
+       only the daemon→Emacs direction is dead.
      - ACCOUNT/LANDING SPLIT IS COMPUTED, NEVER HARD-PINNED: a repo
        under MULTI_REPO_ROOT lands via PR + CI merge queue then close
        (cherry-picking would duplicate CI-owned commits); a repo outside
@@ -292,7 +342,14 @@ unmarked is DISCRETIONARY by default.
    - CONSEQUENCE for self-reload: the landed range is the merge
      commit's second-parent history (default..branch) read off the
      commit — the cherry-pick-annotation walk dies with cherry-picking.
-   - GOTCHAS: phase history is feed content, not WSM columns; an
+   - AGENT BRIEFS ARE FILES (ruled 2026-08-29): the synthesized briefs
+     (conflict resolution, test-fix with its escalation marker,
+     add-support) are read from the prompts/ directory at USE time —
+     customizable without a rebuild, loud on a missing file or bad
+     placeholder; never compiled-in constants.
+   - GOTCHAS: phase history is feed content, not WSM columns (the WSM
+     merge-lease ledger records only lease id + tab intervals for
+     replay reconstruction — never the content); an
      in-flight merge across a daemon restart is resumed or LOUDLY
      failed, never left with the lease stuck; the composer gate is the
      primary defense against post-merge-start prompts and the merging
@@ -342,19 +399,25 @@ unmarked is DISCRETIONARY by default.
         so only it can know. At freeness it QUIESCES: from the
         transfer notice on it does NO work for that workspace (queue,
         views, anything), holding all arrivals; it detaches from the
-        workspace's shim (which keeps running), releases the
-        workspace's kernel lock, and announces the transfer on the
-        OLD connection. Emacs then treats the new connection as that
+        workspace's shim (which keeps running and KEEPS its kernel
+        locks — the locks are shim-held, ruled 2026-08-29), records the
+        handoff in WSM, and announces the transfer on the OLD
+        connection. Emacs then treats the new connection as that
         workspace's home and tells the NEW daemon "workspace X is
         yours — resume pending operations." The new daemon adopts the
-        running shim, claims the lock, drains the held intake in
-        order, and pushes fresh views (the persisted feed page
-        position keeps the webapp seamless).
+        running shim, claims serving ownership (WSM facts — the kernel
+        locks are the SHIM's, held continuously through the handover),
+        drains the held intake in order, and pushes fresh views (the
+        webview re-attaches at the tail per the per-reader page rule).
      5. DRAIN AND EXIT. After the last transfer the old daemon exits
         gracefully; the new daemon's WSM handle becomes the sole
         writer.
    - THE WIRE (landed post-freeze increment): Emacs holds `WatchDaemon`
-     (push `shutdown_announced { address }`); `WatchHostWorkspace` gains
+     (push `shutdown_announced { address }` — ENRICHMENT RULED
+     2026-08-29: the arm gains cause, a bounded expected outage, and a
+     minted-at instant; absence of an address means a plain bounce, so
+     clients can draw "restarting (reason)" instead of the severed-link
+     treatment); `WatchHostWorkspace` gains
      `transferred` and `reload_webapp` push arms; the webview holds
      `WatchWebWorkspace` (push `transferred { address }` — the address
      rides here since a webview has no daemon-level stream); adoption is
@@ -387,6 +450,11 @@ unmarked is DISCRETIONARY by default.
      rollout never sends it: the handover's fresh attach pulls new assets
      as a side effect); the webview's default first-page-only load is the
      whole recovery.
+   - ASSET ORIGIN (ruled 2026-08-29, what makes the hot swap real): the
+     DAEMON serves the webapp's assets; the HTML entry point is
+     re-stat'd per request so a rebuild self-corrects with no restart;
+     `Cache-Control: no-store` on the entry point ONLY (the fix for
+     webviews pinning a deleted bundle).
    - SHIM RELAUNCH (product spec — the settled flow; the same engine
      serves the build-staleness bounce, one engine two triggers):
      1. REBUILD once; per live workspace, independently and in
@@ -394,9 +462,12 @@ unmarked is DISCRETIONARY by default.
         daemon-connected but INERT by construction (no session started:
         no vendor process, no store writes, no keep-alives), so it
         coexists with the old shim indefinitely.
-     2. WAIT FOR FREENESS (no in-flight turn, no live detached work — a
-        shim bounce kills the vendor process and everything under it);
-        never-free gets the same wait-forever + periodic-warn ruling as
+     2. WAIT FOR FREENESS (no in-flight turn, no live detached work).
+        Freeness at shim kill is an INVARIANT of the rollout's design —
+        by construction nothing is running under the vendor process
+        when it dies, so killing the CLI is inconsequential by design
+        (ruled 2026-08-29; no orphan-process question arises).
+        Never-free gets the same wait-forever + periodic-warn ruling as
         the daemon handover.
      3. AT FREENESS: flip intake to the restart-pending HOLD
         (tray-visible, existing semantics); STAND DOWN the old shim —
@@ -437,17 +508,31 @@ unmarked is DISCRETIONARY by default.
      connection for that workspace; it connects to the new daemon
      FIRST, then acks the old — the old connection outlives the new
      one's creation, so no gap is observable and no work races the
-     switch; the persisted feed page position makes re-attach
-     evidence-free.
+     switch; re-attach lands at the tail per the per-reader page rule.
    - INVARIANT — no daemon↔daemon channel: coordination is Emacs relay
-     + WSM facts + kernel locks only (locks self-release on death, so
-     a crash mid-window leaves every workspace claimable by the
-     survivor).
+     + WSM facts + the shim-held kernel locks only (a daemon crash
+     mid-window leaves every workspace adoptable by the survivor — it
+     dials the still-locked shim and claims serving ownership in WSM).
    - INVARIANT — WSM contention scope: during the overlap every
-     mutable WSM fact is workspace-scoped (arbitrated by the workspace
-     kernel lock) or repo-scoped (the per-repo merge queue gets its
-     own kernel lock); any future cross-cutting table must be
-     lock-scoped or rollout-frozen.
+     mutable WSM fact is workspace-scoped (arbitrated by that
+     workspace's recorded serving ownership) or repo-scoped (the
+     per-repo merge queue gets its own kernel lock); any future
+     cross-cutting table must be ownership-scoped or rollout-frozen.
+   - BOUNCE ACCOUNTABILITY (ruled 2026-08-29): at stand-down the
+     outgoing daemon writes an intent manifest (per-session shim pid +
+     intent); the incoming daemon reconciles it against the kernel
+     locks actually held, and PRESERVED / ROLLED / DIED / UNKNOWN are
+     never collapsed — after a crash or force-kill, which sessions
+     silently died is surfaced per workspace, not counted.
+   - BOOT EXCLUSIVITY (ruled 2026-08-29): a daemon binds its address
+     FIRST as the exclusivity claim, before touching any socket; a
+     successor is distinguishable because it is SPAWNED with an
+     explicit joining argument — an unflagged second daemon loses the
+     claim and exits without disturbing the incumbent's listeners.
+   - DEPLOY CHAIN (ruled 2026-08-29): build mechanics and ordering are
+     the ONE deploy script's domain — the rollout invokes it, never a
+     second build path; a proto-prefix change classifies as touching
+     every consumer of the regenerated bindings.
    - GOTCHAS: headless workspaces transfer via WSM facts + lock claim
      alone and must never wait on an Emacs relay (Emacs may not be
      running); a never-free workspace leaves the rollout in a
@@ -621,6 +706,9 @@ unmarked is DISCRETIONARY by default.
      (default..branch), read off the commit itself.
    - LOCAL ONLY: the daemon never pushes, fetches, or touches remotes
      — remote work is the prompts' agents' business.
+   - ENV HYGIENE (ruled 2026-08-29): every git invocation strips
+     inherited repository-selecting GIT_* env vars (git hooks export
+     them into children); `-C dir` is the ONLY repository selector.
    - PREREQUISITES: none (leaf).
 
 15. RULED (the internal-components close, 2026-08-28):
@@ -696,6 +784,60 @@ the merge test gate has NO flake re-run.
   free); the FOOTER RESOLVER is NOT agnostic (it projects merge facts
   into the merging status family); resolvers dispatch feed and footer
   pushes in parallel per state change.
+
+## Contract increments owed (final-audit triage, 2026-08-29)
+
+Sanctioned post-freeze increments ruled at the triage; each lands as a
+proto change (project-lead-only edit class) with its owning doc updated:
+
+- CREATION FACTS: `CreateWorkspaceRequest` gains optional
+  before_ws_merge + postprocessing_prompt, priority, fork-from (source
+  workspace/conversation), the ungated-permission consent flag (refusal
+  without it when the mode disables the gate), user-supplied name,
+  parentage (source workspace), and model — plus a dedicated ONE-SHOT
+  creation form (likely an arm): Emacs supplies {prompt, model,
+  parentage} and the DAEMON owns the whole sequence (naming, worktree,
+  prompt decoration, self-merge/PR postprocessing).
+- LOGIN: `OpenLogin` + one duplex byte stream (pty bytes out, keystrokes
+  in, a resize control) + close — per-account idempotent; the daemon owns
+  the pty running `claude /login` exactly as today; logged-out detection
+  stays the .claude.json email probe.
+- HIBERNATE: a shim.v1 directive — daemon calls, shim compacts then
+  acks, daemon stands the shim down after the ack.
+- SHUTDOWN ANNOUNCEMENT ENRICHED: `shutdown_announced` gains cause,
+  expected-outage bound, and minted-at (no address = a plain bounce, not
+  a handover).
+- DRAIN SCHEDULE: `UpdateShutdownSchedule.schedule` gains a REQUIRED
+  reason; a drain-scheduled push (WatchDaemon arm) carries reason +
+  at_ms so every client can draw the standing banner.
+- FAN-WIDE CANCEL: `CancelDetachedAgents` verb (typed outcome) + an
+  `Interrupt` refusal arm `confirm_required{live_agent_count}` answered
+  by resending with confirm.
+- `OpenExternal{url}` (WEB LINK section): the daemon opens the pinned
+  external browser profile.
+- `SetPermissionMode` (TOPBAR section, mirrors SetModel).
+- `SetWorkspacePriority` (or an UpdateWorkspace arm); the roster
+  resolver orders by priority and the roster row carries the badge fact.
+- TASK VERBS: CreateTask / UpdateTask{title|done} / AssignWorkspaceTask;
+  WSM stores tasks + assignments; the roster's task view becomes
+  fillable.
+- TYPED NOTIFICATIONS: the host `notification` push gains a typed kind
+  oneof (agent_addressed | permission_requested | ...) beside the
+  composed text; a permission ask FIRES the push and sets the attention
+  marker (Emacs's existing focus policy does the rest).
+- PROMPT ORIGIN DURABLE: StartTurn's origin persists onto the turn's
+  durable record (conversation.v1/store) so replay can route merge-born
+  rows and label restart re-drives.
+- SHIM BUILD SHA on SessionStarted (the staleness bounce's carrier).
+- `compacting` SessionUpdate arm (vendor auto-compaction start signal).
+- /CONTEXT RICH SCHEMA: SessionContextUsage (and context_panel) are
+  redesigned by the orchestrator to carry the vendor's FULL
+  get_context_usage answer, strongly structured (tool calls as their own
+  encapsulated list, etc.); the webapp renders the panel custom with
+  tool calls in an auto-folded foldable render.
+- `RestartWorkspace{force}` semantics: the daemon owns everything the
+  restart entails INCLUDING bouncing the webapp view (via reload_webapp
+  after the ack if Emacs coordination is needed).
 
 ## Contract context (for implementers)
 
@@ -819,7 +961,10 @@ its own file only when >1 endpoint needs it.
     the gap above the caller's own known-through mark).
   - END is a Kill that refuses while work is live unless forced and NAMES
     what it killed; narrow stops stay single-target (UpdateAgent.stop,
-    StopBash, StopWorkflow, agentrepl Interrupt).
+    StopBash, StopWorkflow, agentrepl Interrupt) — plus the ONE
+    fan-wide verb ruled 2026-08-29: CancelDetachedAgents stops every
+    detached agent, and Interrupt with live agents refuses with
+    confirm_required{live_agent_count}, answered by a confirm resend.
 - On restart the daemon simply re-runs the Watches from persisted
   identities and its persisted opaque history pointer; catch-up is the
   same open-with-a-page path as cold paint.
@@ -829,8 +974,27 @@ its own file only when >1 endpoint needs it.
   (AnswerColdGate) or daemon policy. Compaction is shim-implemented via a
   throwaway session; no consumer sees it. The footer only says the
   session is parked; the feed's gate row is the answering surface.
-- Hibernation is pure daemon POLICY (idle-cutoff sweep + implicit revive
-  on prompt); no API verb, no frontend-visible fact beyond the cold gate.
+- Hibernation is daemon POLICY (idle-cutoff sweep + implicit revive on
+  prompt) with ONE wire act (ruled 2026-08-29): before standing a shim
+  down for hibernation the daemon calls the shim's Hibernate directive —
+  the shim compacts, then acks; only after the ack does the stand-down
+  proceed, so revival never pays a cold context. No frontend-visible
+  fact beyond the cold gate.
+- SPAWN ON MOUNT (ruled 2026-08-29): mounting a parked workspace's
+  frontend IS an implicit revival — the shim spawns and ReadHistory
+  serves; there is no shim-less read path (the store isolation gate
+  stands absolute).
+- FRESH-CONVERSATION INVARIANT (ruled 2026-08-29): StartSession(fresh)
+  is legal ONLY with proof the workspace never had a conversation at
+  all; anything else resumes or refuses loudly — a conversation is never
+  silently replaced (abandonment is irreversible; every alternative is
+  recoverable). Mechanism the implementer's; the rule is binding.
+- RESUME GUARDS (ruled 2026-08-29): a resume whose vendor transcript
+  file is MISSING is refused with a typed arm BEFORE any process spawns
+  (a vanished file yields no death evidence, so the redial ladder would
+  otherwise loop forever on an unchangeable fact); after resume the shim
+  VERIFIES the query landed on the exact conversation asked for —
+  identity mismatch is an error (/clear discharges the commitment).
 - Workspace verb triad: Close = view-level, requires quiet (live work or
   held prompts refuse it — undelivered user intent is never silently
   discarded; a standing cold gate or a parked session does NOT block);
@@ -852,7 +1016,10 @@ its own file only when >1 endpoint needs it.
   the fold — the feed resolver keeps the prose buffer per in-flight unit.
   Response/thinking deltas have no offsets; the terminal arm restates the
   WHOLE text, so a lost fragment self-corrects (bash keeps its offset —
-  no settled whole exists to recover from).
+  no settled whole exists to recover from). ONE relaxation of the
+  no-client-timer rule (ruled 2026-08-29): a streaming-preview card whose
+  stream has DIED may be retired client-side — a torn-down query sends no
+  terminal, and nothing else can retire the card.
 - `start` means "this stream now carries this unit," not "work began"; a
   re-announcement after detach or restart repeats the ORIGINAL start
   instant (recovered from the store, not shim memory). `update` arms
@@ -900,8 +1067,13 @@ its own file only when >1 endpoint needs it.
   project to holds. A prompt arriving after a merge began is refused
   (never held); prompts already held stay held and the dequeue offer
   resolves their fate.
-- The genuine daemon holds are exactly four: shutdown drain, keep-alive
-  turn, revival pending, build refresh.
+- The genuine daemon holds are exactly three: shutdown drain, revival
+  pending, build refresh (keep-alives are wholly shim-internal — the
+  daemon holds nothing for them; corrected 2026-08-29).
+- PERMISSION DECLINE IS DENY-AND-CONTINUE (deliberate reversal, ruled
+  2026-08-29): declining a permission denies that tool and the agent may
+  route around it; the turn does NOT end. Stopping is what Interrupt is
+  for.
 
 ### Merge (daemon-synthesized)
 
@@ -953,8 +1125,11 @@ its own file only when >1 endpoint needs it.
   - Health verdicts: unhealthy is an ANSWER (success arm), never an rpc
     error; DaemonFault and SessionFault are deliberately separate types
     (different producers), arms derived from real fault sites only.
-  - Every live vendor API failure must also land as a transcript record,
-    or the feed silently misses it.
+  - The STORE must hold every failure frame (the shim persists what it
+    sees on the stream): the vendor transcript PROVABLY lacks several
+    failure classes (retried-then-recovered, result-level
+    classification, control-channel errors are stream-only) and is
+    never the recovery source for them (corrected 2026-08-29).
 - Liveness is layered, never keepalive-framed: upstream silence is
   stated by the daemon as a fact (shim-degraded arms); pipe death is the
   transport's; a wedged publisher is the daemon's own watchdog's
@@ -1000,3 +1175,54 @@ its own file only when >1 endpoint needs it.
 - Unset non-optional fields are illegal everywhere: error the producer
   on a request; raise loudly at the consumer on a stream push. Every
   logical branch gets a DEBUG log; warnings are remediated to zero.
+
+### Additional rulings (final-audit triage, 2026-08-29)
+
+- LOG SURFACES (the full existing design is ported): per-workspace
+  durable log targets with shared-fd write access, a size cap with
+  periodic maintenance, eviction on workspace close, and a
+  NON-CLOSEABLE BORROW handle (one caller's Close once poisoned the
+  inode for every writer and the next spawn inherited a closed fd 3); a
+  restart-scoped run log with retained backups and an in-run cap whose
+  open-failure is a boot fatal; ClientLog lines land in the owning
+  workspace's log; the terminal mirror is DECOUPLED from the durable
+  sink and must never block it (a stalled pty reader once added ~7s to
+  boot).
+- ENV CONTRACTS (all four): `-fake` forces the offline scripted-SDK mode
+  onto every session including respawns (the mock plane the projectlead's
+  no-real-calls mandate rides); `AGENT_REPL_FORBID_VENDOR_CALLS` hard-
+  refuses at every vendor exec site; `AGENT_REPL_STATE_DIR` is a NAMED
+  cross-process contract — daemon, Emacs, and the skills must resolve
+  the SAME state root, and divergence is a loud misconfig (it silently
+  drops messages otherwise); `AGENT_REPL_OWNED` is propagated through
+  the shim spawn env so vendor hook scripts recognize our processes.
+- PPROF: an opt-in, LOCAL-ONLY profiling surface (unix socket or
+  loopback; wildcard refused), opened BEFORE dependency boot so a wedged
+  boot is still diagnosable.
+- ADD-SUPPORT: an unsupported slash command's refusal card carries the
+  "engineer support for it" offer; accepting spawns a support workspace
+  with a daemon-composed brief (ordinary creation + initial prompt).
+- SKILL CARD (windows are dead): a Skill invocation's bubble is
+  populated from exactly the TWO shim messages — the invocation and the
+  skill document content; NO temporal window folds subsequent responses
+  under it.
+- METAPROMPT STRIPPING: the feed resolver strips the host's
+  sentinel-marked injected spans when composing the DRAWN prompt row
+  (the full text stays on the record) — the client never sniffs
+  sentinels.
+- ROSTER ORDER: the sidebar resolver orders by priority (the
+  SetWorkspacePriority increment's fact); clients — Emacs tabs
+  included — follow roster order strictly and never re-sort.
+- KNOWN-OPEN — THE /agents AND /help PANELS: their vendor catalogs died
+  with the handshake reversion and no producer exists; the shim's
+  probe-resolved command list is the named restoration path. Escalate
+  to the project lead before implementing; an EMPTY panel is not an
+  acceptable quiet outcome.
+- /status DEGRADES BY DESIGN: with the handshake deferred, the panel
+  resolves version + spliced account/model/mode rows ONLY (cwd, auth,
+  plugins, memory return if the handshake deferral ever lands) — a
+  playtest seeing the thin panel is seeing the settled consequence, not
+  a bug.
+- WORKFLOW IS KICKED: workflow watch/store/ingest APIs stay in the
+  contract but are NOT implemented in this wave; no frontend surface
+  exists for the run, deliberately.
