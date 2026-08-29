@@ -542,7 +542,25 @@ message FeedToolCallInput {
   // UNSET = plain text; SET = the line is drawn as a hyperlink to this URL
   // (a WebFetch card's fetched page, say).
   optional FeedToolCallInputLink link = 2;
+  // THE DRAWN FORM of the line — the treatment the existing look gives it
+  // (a shell command line vs a muted file path vs a search query). The
+  // DAEMON states it because only it knows the tool; the client applies
+  // the treatment and still knows no tool. UNSET = plain text.
+  oneof form {
+    FeedToolCallInputCommand command = 3;
+    FeedToolCallInputPath path = 4;
+    FeedToolCallInputQuery query = 5;
+  }
 }
+// A shell command line ("$" chrome is the client's).
+message FeedToolCallInputCommand {}
+// A file or directory path, drawn muted.
+message FeedToolCallInputPath {}
+// A search pattern or query.
+message FeedToolCallInputQuery {}
+// The returned call produced no output. Empty: the arm is the fact.
+message FeedToolCallNoOutput {}
+
 // The input line's hyperlink target.
 message FeedToolCallInputLink {
   // Where the line links when activated.
@@ -587,6 +605,10 @@ message FeedToolCallReturned {
     FeedToolCallLinesOutput lines = 6;
     // A link list: web search results, each row a clickable title.
     FeedToolCallLinksOutput links = 8;
+    // The call returned NOTHING to draw (a write, an empty search): the
+    // output section is omitted. An arm, never an empty text — presence,
+    // not a sentinel.
+    FeedToolCallNoOutput none = 10;
   }
   // The settled clock — "ran 4.2 s" — composed by the daemon from the
   // call's start and settle instants, drawn beside the badge. UNSET when
