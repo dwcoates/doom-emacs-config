@@ -2,551 +2,1136 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
-	"agentrepl/shim-store/internal/db"
+	"agentrepl/proto/store/v1/storev1connect"
 	"agentrepl/shim-store/internal/logging"
-	"agentrepl/wire"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
+
+	"connectrpc.com/connect"
+	"golang.org/x/net/http2"
 )
 
-// --- harness ---------------------------------------------------------------
-
-type harness struct {
-	srv  *Server
-	db   *db.DB
-	path string
-	done <-chan struct{}
+func TestMain(m *testing.M) {
+	// Nothing in this package can reach a vendor, and the suite states so
+	// rather than relying on that remaining true.
+	if err := os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1"); err != nil {
+		panic(err)
+	}
+	os.Exit(m.Run())
 }
 
-// start brings up a server on a short UDS path (macOS sun_path limit) with the
-// given fanout buffer and log sink.
-func start(t *testing.T, buffer int, log *logging.Logger) *harness {
-	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "sst")
-	if err != nil {
-		t.Fatalf("mkdtemp: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	sockPath := filepath.Join(dir, "s")
+// ---- test doubles ----
 
-	dbPath := filepath.Join(t.TempDir(), "entries.db")
-	database, err := db.Open(dbPath, log.With(logging.Fields{Component: "db"}))
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { database.Close() })
-
-	ln, err := Listen(sockPath, log.With(logging.Fields{Component: "server", Socket: sockPath}))
-	if err != nil {
-		t.Fatalf("Listen: %v", err)
-	}
-	srv := New(database, log, buffer)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_ = srv.Serve(ln)
-	}()
-	t.Cleanup(func() {
-		_ = srv.Close()
-		<-done
-	})
-	return &harness{srv: srv, db: database, path: sockPath, done: done}
+// syncBuffer is a log sink safe to read from the test goroutine while server
+// goroutines write to it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
 }
 
-func testLogger() *logging.Logger { return logging.New(io.Discard, io.Discard, false) }
-
-func (h *harness) dial(t *testing.T) net.Conn {
-	t.Helper()
-	conn, err := net.Dial("unix", h.path)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
-	return conn
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
 }
 
-// seedCursor commits a reader position through the db layer directly.
-//
-// NOT OVER THE WIRE, because there is no write barrier left. The producer
-// connection used to be probed with a correlated HealthCheck to establish that
-// an earlier write had been fully processed; ConnectionHeartbeat and
-// HealthCheck are both deleted and WriteBatchResponse is not served, so the
-// producer stream is write-only with nothing to synchronize on. Seeding through
-// the db layer is synchronous by construction rather than by a timing
-// assumption.
-func (h *harness) seedCursor(t *testing.T, c *storev1.CursorState) {
-	t.Helper()
-	if _, err := h.db.Ingest("test", &storev1.EntryBatch{CursorAdvance: c}); err != nil {
-		t.Fatalf("seeding cursor: %v", err)
-	}
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
-func sendMsg(conn net.Conn, m proto.Message) error {
-	a, err := anypb.New(m)
-	if err != nil {
-		return fmt.Errorf("anypb.New: %w", err)
-	}
-	b, err := proto.Marshal(a)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	if err := wire.WriteFrame(conn, b); err != nil {
-		return fmt.Errorf("write frame: %w", err)
-	}
-	return nil
-}
-
-func recvMsg(conn net.Conn) (proto.Message, error) {
-	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
-		return nil, fmt.Errorf("set read deadline: %w", err)
-	}
-	frame, err := wire.ReadFrame(conn)
-	if err != nil {
-		return nil, fmt.Errorf("read frame: %w", err)
-	}
-	a := &anypb.Any{}
-	if err := proto.Unmarshal(frame, a); err != nil {
-		return nil, fmt.Errorf("unmarshal Any: %w", err)
-	}
-	m, err := a.UnmarshalNew()
-	if err != nil {
-		return nil, fmt.Errorf("resolve Any: %w", err)
-	}
-	return m, nil
-}
-
-func send(t *testing.T, conn net.Conn, m proto.Message) {
-	t.Helper()
-	if err := sendMsg(conn, m); err != nil {
-		t.Fatalf("send: %v", err)
-	}
-}
-
-func recv(t *testing.T, conn net.Conn) proto.Message {
-	t.Helper()
-	m, err := recvMsg(conn)
-	if err != nil {
-		t.Fatalf("recv: %v", err)
-	}
-	return m
-}
-
-func recvCursors(t *testing.T, conn net.Conn) *storev1.GetSidecarCursorsResponse {
-	t.Helper()
-	m := recv(t, conn)
-	resp, ok := m.(*storev1.GetSidecarCursorsResponse)
-	if !ok {
-		t.Fatalf("expected *GetSidecarCursorsResponse, got %T", m)
-	}
-	return resp
-}
-
-// --- record fixtures -------------------------------------------------------
-
-// streamEntry is the minimum a stored record carries: the plane that observed
-// it. Every batch built on it is refused by the db layer, which is the point of
-// the producer tests below.
-func streamEntry() *storev1.StoreEntry {
-	return &storev1.StoreEntry{
-		Plane: &storev1.Plane{Plane: &storev1.Plane_Stream{Stream: &storev1.PlaneStream{}}},
-	}
-}
-
-func writeBatch(entries ...*storev1.StoreEntry) *storev1.WriteBatchRequest {
-	return &storev1.WriteBatchRequest{Producer: "test", Batch: &storev1.EntryBatch{Entries: entries}}
-}
-
-// --- log helpers -----------------------------------------------------------
-
-type channelWriter chan string
-
-func (w channelWriter) Write(p []byte) (int, error) {
-	select {
-	case w <- strings.TrimSpace(string(p)):
-	default:
-	}
-	return len(p), nil
-}
-
-// drain returns every record the sink holds without blocking.
-func drain(lines <-chan string) []string {
-	var out []string
-	for {
-		select {
-		case l := <-lines:
-			out = append(out, l)
-		default:
-			return out
-		}
-	}
-}
-
-// awaitLine blocks until the log sink emits a record for `operation`.
-//
-// IT IS THE ONLY BARRIER LEFT ON A PRODUCER CONNECTION. The write half is
-// write-only — WriteBatchResponse is declared but not served, and the
-// correlated HealthCheck the old suite used as a barrier is deleted — so no
-// reply frame can prove the server has taken the connection. The canonical
-// record is emitted from handleConn AFTER trackConn and the handler's
-// wg.Add(1), so receiving it establishes that Close will find the connection.
-// A channel receive, never a sleep.
-// It returns every record it consumed, the awaited one last.
-func awaitLine(t *testing.T, lines <-chan string, operation string) []string {
-	t.Helper()
-	var seen []string
-	deadline := time.After(10 * time.Second)
-	for {
-		select {
-		case l := <-lines:
-			seen = append(seen, l)
-			if strings.Contains(l, `"operation":"`+operation+`"`) {
-				return seen
-			}
-		case <-deadline:
-			t.Fatalf("timed out waiting for a %q record; saw %v", operation, seen)
-		}
-	}
-}
-
-func findLine(lines []string, operation string) string {
-	for _, l := range lines {
-		if strings.Contains(l, `"operation":"`+operation+`"`) {
-			return l
-		}
-	}
-	return ""
-}
-
-type loggedRecord struct {
-	Level     string         `json:"level"`
+type logRecord struct {
 	Operation string         `json:"operation"`
+	Level     string         `json:"level"`
 	Message   string         `json:"message"`
-	Session   string         `json:"claude_session_id"`
+	RequestID string         `json:"request_id"`
 	Context   map[string]any `json:"context"`
 }
 
-func findLoggedRecord(t *testing.T, lines []string, operation, level string) (loggedRecord, bool) {
+func records(t *testing.T, sink *syncBuffer) []logRecord {
 	t.Helper()
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
+	var out []logRecord
+	for _, line := range strings.Split(strings.TrimSpace(sink.String()), "\n") {
+		if line == "" {
 			continue
 		}
-		var record loggedRecord
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			t.Fatalf("server record is not JSON: %v (%s)", err, line)
+		var rec logRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("decode log line %q: %v", line, err)
 		}
-		if record.Operation == operation && record.Level == level {
-			return record, true
-		}
-	}
-	return loggedRecord{}, false
-}
-
-// splitLines adapts a buffered sink to findLoggedRecord.
-func splitLines(logs []byte) []string {
-	var out []string
-	for _, l := range bytes.Split(bytes.TrimSpace(logs), []byte("\n")) {
-		out = append(out, string(l))
+		out = append(out, rec)
 	}
 	return out
 }
 
-// --- connection classification ---------------------------------------------
-
-func TestUnrecognizedFirstFrameIsRefusedLoudly(t *testing.T) {
-	// Arrange: a frame that is not one of the three the store still speaks.
-	lines := make(chan string, 64)
-	h := start(t, 0, logging.New(channelWriter(lines), io.Discard, false).With(logging.Fields{Component: "server", Socket: "store.sock"}))
-	conn := h.dial(t)
-
-	// Act
-	send(t, conn, &storev1.ReadAgentPageRequest{})
-	collected := awaitLine(t, lines, "classify-connection")
-
-	// Assert
-	record, found := findLoggedRecord(t, collected, "classify-connection", "error")
-	if !found {
-		t.Fatalf("unclassified-frame record missing: %v", collected)
+func findRecord(t *testing.T, sink *syncBuffer, operation, level string) (logRecord, bool) {
+	t.Helper()
+	for _, rec := range records(t, sink) {
+		if rec.Operation == operation && rec.Level == level {
+			return rec, true
+		}
 	}
-	if !strings.Contains(record.Message, "expected WriteBatchRequest") {
-		t.Fatalf("refusal message = %q, want it to name the frames the store accepts", record.Message)
+	return logRecord{}, false
+}
+
+// fakeStore is the storage layer as internal/server needs it: every answer is
+// staged by the test, and the two gates make the replay-to-live handoff
+// observable without a single sleep.
+type fakeStore struct {
+	mu sync.Mutex
+
+	writeResult WriteResult
+	writeErr    error
+	writes      []string
+
+	opened  OpenedPage
+	openErr error
+
+	page    *storev1.ReadAgentPageSuccess
+	pageErr error
+
+	since    []LineWritten
+	sinceErr error
+	// sinceEntered is closed the first time LinesSince is called, which is the
+	// signal that the handler has already subscribed to the fan-out.
+	sinceEntered chan struct{}
+	// sinceRelease, when non-nil, blocks LinesSince until the test closes it.
+	sinceRelease chan struct{}
+
+	live    *storev1.GetLiveWorkSuccess
+	liveErr error
+
+	cursors      []*storev1.CursorState
+	cursorsErr   error
+	cursorsFor   *string
+	cursorsScope bool
+
+	closed bool
+}
+
+func newFakeStore() *fakeStore {
+	return &fakeStore{
+		opened:       OpenedPage{Page: &storev1.AgentSessionPage{Boundary: &storev1.AgentSessionPage_Floor{Floor: &storev1.ReadAgentPageFloor{}}}},
+		page:         &storev1.ReadAgentPageSuccess{Boundary: &storev1.ReadAgentPageSuccess_Floor{Floor: &storev1.ReadAgentPageFloor{}}},
+		live:         &storev1.GetLiveWorkSuccess{},
+		sinceEntered: make(chan struct{}),
 	}
 }
 
-// --- the subscription refusal ----------------------------------------------
+func (f *fakeStore) WriteBatch(_ context.Context, producer string, _ *storev1.EntryBatch) (WriteResult, error) {
+	f.mu.Lock()
+	f.writes = append(f.writes, producer)
+	result, err := f.writeResult, f.writeErr
+	f.mu.Unlock()
+	return result, err
+}
 
-func TestWatchAgentSessionIsRefusedRatherThanRegistered(t *testing.T) {
-	// Arrange: a registered subscription that can never deliver a line is a
-	// silent empty feed, which is the failure this refusal exists to prevent.
-	h := start(t, 0, testLogger())
-	sub := h.dial(t)
+func (f *fakeStore) OpenPage(context.Context, string, uint32, *storev1.StoreItemPointer) (OpenedPage, error) {
+	return f.opened, f.openErr
+}
 
-	// Act
-	send(t, sub, &storev1.WatchAgentSessionRequest{Watch: &storev1.AgentSessionToken{Value: "tok"}})
+func (f *fakeStore) ReadPage(context.Context, string, uint32, *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error) {
+	return f.page, f.pageErr
+}
 
-	// Assert: the connection ends rather than standing open with no tail.
-	if err := sub.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatalf("setting read deadline: %v", err)
+func (f *fakeStore) LinesSince(context.Context, string, uint64) ([]LineWritten, error) {
+	f.mu.Lock()
+	select {
+	case <-f.sinceEntered:
+	default:
+		close(f.sinceEntered)
 	}
-	if _, err := wire.ReadAny(sub); err == nil {
-		t.Fatal("a refused watch left the connection open, which reads as a live subscription")
+	release := f.sinceRelease
+	f.mu.Unlock()
+	if release != nil {
+		<-release
+	}
+	return f.since, f.sinceErr
+}
+
+func (f *fakeStore) LiveWork(context.Context) (*storev1.GetLiveWorkSuccess, error) {
+	return f.live, f.liveErr
+}
+
+func (f *fakeStore) Cursors(_ context.Context, fileID *string) ([]*storev1.CursorState, error) {
+	f.mu.Lock()
+	f.cursorsScope = true
+	f.cursorsFor = fileID
+	f.mu.Unlock()
+	return f.cursors, f.cursorsErr
+}
+
+func (f *fakeStore) Close() error {
+	f.closed = true
+	return nil
+}
+
+// ---- harness ----
+
+type harness struct {
+	server *Server
+	client storev1connect.ShimStoreClient
+	// stream is the h2c client the watch tests use, so streaming is exercised
+	// on the same cleartext HTTP/2 the store's socket offers.
+	stream storev1connect.ShimStoreClient
+	url    string
+	logs   *syncBuffer
+	http   *http.Client
+}
+
+// h2cClient dials cleartext HTTP/2 with prior knowledge: no TLS anywhere, which
+// is what the store's unix socket offers.
+func h2cClient() *http.Client {
+	return &http.Client{Transport: &http2.Transport{
+		AllowHTTP: true,
+		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		},
+	}}
+}
+
+// newHarness mounts the service on an HTTP/1.1 test server, which is the
+// transport a Connect stream uses over the store's unix socket too.
+func newHarness(t *testing.T, store Store, watchBuffer int) *harness {
+	t.Helper()
+	sink := &syncBuffer{}
+	log := logging.New(sink, io.Discard, true)
+	srv := New(store, log, watchBuffer)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown: %v", err)
+		}
+	})
+	return &harness{
+		server: srv,
+		client: storev1connect.NewShimStoreClient(ts.Client(), ts.URL),
+		stream: storev1connect.NewShimStoreClient(h2cClient(), ts.URL),
+		url:    ts.URL,
+		logs:   sink,
+		http:   ts.Client(),
 	}
 }
 
-func TestWatchAgentSessionRefusalRegistersNoSubscriber(t *testing.T) {
-	// Arrange
-	h := start(t, 0, testLogger())
-	sub := h.dial(t)
+func agentID(value string) *conversationv1.AgentId {
+	return &conversationv1.AgentId{Value: value}
+}
 
-	// Act
-	send(t, sub, &storev1.WatchAgentSessionRequest{})
-	if err := sub.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatalf("setting read deadline: %v", err)
-	}
-	_, _ = wire.ReadAny(sub)
-
-	// Assert: the fan-out registry is untouched, so nothing can leak a
-	// subscriber the store cannot serve.
-	if got := h.srv.fan.subscriberCount(""); got != 0 {
-		t.Fatalf("subscriberCount = %d, want 0 after a refused watch", got)
+func line(agent, pointer string, seq uint64) LineWritten {
+	return LineWritten{
+		AgentID: agent,
+		Line: &storev1.StoreLineAt{
+			At:   &storev1.StoreItemPointer{Value: pointer},
+			Line: &storev1.StorePageLine{PageAgentId: agentID(agent)},
+		},
+		WriteSeq: seq,
 	}
 }
 
-func TestWatchAgentSessionRefusalIsLoggedAtError(t *testing.T) {
-	// Arrange
-	lines := make(chan string, 64)
-	h := start(t, 0, logging.New(channelWriter(lines), io.Discard, false).With(logging.Fields{Component: "server", Socket: "store.sock"}))
-	conn := h.dial(t)
-
-	// Act
-	send(t, conn, &storev1.WatchAgentSessionRequest{})
-	collected := awaitLine(t, lines, "subscribe")
-
-	// Assert
-	record, found := findLoggedRecord(t, collected, "subscribe", "error")
-	if !found {
-		t.Fatalf("watch refusal record missing: %v", collected)
-	}
-	if !strings.Contains(record.Message, "REFUSED") || record.Context["component"] != "server" || record.Context["subscriber"] == "" {
-		t.Fatalf("watch refusal lacks canonical connection context: %#v", record)
+func validEntry(writeID, upsertKey string) *storev1.StoreEntry {
+	return &storev1.StoreEntry{
+		Plane:     &storev1.Plane{Plane: &storev1.Plane_Stream{Stream: &storev1.PlaneStream{}}},
+		WriteId:   writeID,
+		UpsertKey: upsertKey,
+		Entry: &storev1.StoreEntry_AgentUpdate{AgentUpdate: &storev1.StoreAgentUpdate{
+			AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{PageAgentId: agentID("a1")}},
+		}},
 	}
 }
 
-// --- the producer side ------------------------------------------------------
-
-func TestRejectedBatchDropsTheProducerConnection(t *testing.T) {
-	// Arrange: every batch carrying records is refused by the db layer while
-	// record persistence is unreconciled.
-	//
-	// THE CONNECTION DROP IS THE WHOLE SIGNAL. WriteBatchResponse exists in the
-	// schema but is not served, so silence would be indistinguishable from
-	// success and the producer would go on writing into a store discarding its
-	// work.
-	var logs bytes.Buffer
-	h := start(t, 0, logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "server"}))
-	bad := h.dial(t)
-
-	// Act
-	send(t, bad, writeBatch(streamEntry()))
-
-	// Assert: the connection ends rather than staying open in false health.
-	if err := bad.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatalf("setting read deadline: %v", err)
+func writeOne(t *testing.T, h *harness) {
+	t.Helper()
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "claude-shim:test",
+		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
+	if err != nil {
+		t.Fatalf("WriteBatch: %v", err)
 	}
-	if _, err := wire.ReadAny(bad); err == nil {
-		t.Fatal("a rejected batch left the producer connection open, which is indistinguishable from success")
-	}
-
-	// Assert: the refusal was loud. The server is stopped first so the log sink
-	// has one writer, then this reader — no concurrent access, and no timing
-	// assumption either.
-	if err := h.srv.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	<-h.done
-	record, found := findLoggedRecord(t, splitLines(logs.Bytes()), "store-write", "error")
-	if !found {
-		t.Fatalf("rejected-batch record missing: %s", logs.String())
-	}
-	if !strings.Contains(record.Message, "REJECTED") {
-		t.Fatalf("rejection message = %q, want it to state the refusal", record.Message)
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("WriteBatch = %v, want the success arm", res.Msg.GetResult())
 	}
 }
 
-func TestEmptyBatchLogsNoIngestLine(t *testing.T) {
-	// Arrange: a batch with neither records nor a cursor advance never touches
-	// the database, so it must not narrate one.
-	lines := make(chan string, 64)
-	h := start(t, 0, logging.New(channelWriter(lines), io.Discard, true))
-	prod := h.dial(t)
-
-	// Act
-	send(t, prod, writeBatch())
-	awaitLine(t, lines, "ingest-classify")
-	if err := h.srv.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+func openSession(t *testing.T, h *harness, agent string) string {
+	t.Helper()
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID(agent), PageSize: 10,
+	}))
+	if err != nil {
+		t.Fatalf("OpenAgentSession: %v", err)
 	}
-	<-h.done
+	success := res.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenAgentSession = %v, want the success arm", res.Msg.GetResult())
+	}
+	return success.GetWatch().GetValue()
+}
 
-	// Assert: the classify line fired, so the batch was processed; no `ingest`
-	// line followed it, because nothing touched the database.
-	if got := findLine(drain(lines), "ingest"); got != "" {
-		t.Fatalf("empty batch logged %q, want silence", got)
+// ---- WriteBatch ----
+
+func TestWriteBatchSuccessArmOnACommittedBatch(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.writeResult = WriteResult{Written: 1}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "claude-shim:s1",
+		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want the success arm", res.Msg.GetResult())
 	}
 }
 
-// --- sidecar cursor recovery -------------------------------------------------
+func TestWriteBatchAnswersAnAbsorbedReplayWithTheSameSuccessArm(t *testing.T) {
+	// Arrange. Every write_id landed before; nothing new was written.
+	store := newFakeStore()
+	store.writeResult = WriteResult{Absorbed: 3}
+	h := newHarness(t, store, 0)
 
-func TestCursorQueryReturnsAllPersistedCursors(t *testing.T) {
-	// Arrange
-	h := start(t, 0, testLogger())
-	h.seedCursor(t, &storev1.CursorState{FileId: "10:20", Path: "/x/y.jsonl", Offset: 42, Carry: []byte("tail")})
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "claude-shim:s1",
+		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
 
-	// Act: an unset file_id asks for every cursor.
-	cq := h.dial(t)
-	send(t, cq, &storev1.GetSidecarCursorsRequest{})
-	resp := recvCursors(t, cq)
-
-	// Assert
-	cursors := resp.GetSuccess().GetCursors()
-	if len(cursors) != 1 {
-		t.Fatalf("cursors = %d, want 1 (result=%T)", len(cursors), resp.GetResult())
+	// Assert.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
 	}
-	c := cursors[0]
-	if c.GetFileId() != "10:20" || c.GetOffset() != 42 || string(c.GetCarry()) != "tail" {
-		t.Fatalf("cursor = %+v", c)
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want the success arm for an absorbed replay", res.Msg.GetResult())
 	}
 }
 
-func TestCursorQueryByFileID(t *testing.T) {
-	// Arrange: two persisted cursors.
-	h := start(t, 0, testLogger())
-	h.seedCursor(t, &storev1.CursorState{FileId: "1:1", Path: "/p/1", Offset: 7})
-	h.seedCursor(t, &storev1.CursorState{FileId: "2:2", Path: "/p/2", Offset: 7})
+func TestWriteBatchMapsAStorageFailureToTheFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.writeErr = fmt.Errorf("%w: disk is gone", ErrStorage)
+	h := newHarness(t, store, 0)
 
-	// Act
-	cq := h.dial(t)
-	send(t, cq, &storev1.GetSidecarCursorsRequest{FileId: proto.String("2:2")})
-	resp := recvCursors(t, cq)
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "claude-shim:s1",
+		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
 
-	// Assert
-	cursors := resp.GetSuccess().GetCursors()
-	if len(cursors) != 1 || cursors[0].GetFileId() != "2:2" {
-		t.Fatalf("by-id query = %+v, want just 2:2", cursors)
+	// Assert. A refusal is an HTTP 200 with the typed arm, never a Connect error.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil (a refusal is not a transport error)", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+	// internal/db logged this failure already; the server must not record it a
+	// second time, only trace that it answered the failure arm.
+	if _, ok := findRecord(t, h.logs, "store.rpc.write-batch", "error"); ok {
+		t.Fatalf("records = %+v, want no second error record for a db failure", records(t, h.logs))
+	}
+	rec, ok := findRecord(t, h.logs, "store.rpc.write-batch", "debug")
+	if !ok || rec.Context["refusal_site"] != SiteDatabaseFailure {
+		t.Fatalf("records = %+v, want a verbose trace at site %q", records(t, h.logs), SiteDatabaseFailure)
 	}
 }
 
-func TestCursorQueryEmptyWhenAbsent(t *testing.T) {
-	// Arrange: nothing persisted. An empty set is a legitimate answer — a fresh
-	// store has no cursors — so it is the SUCCESS arm, not the failure arm.
-	h := start(t, 0, testLogger())
+func TestWriteBatchRefusesARequestNamingNoProducer(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
 
-	// Act
-	cq := h.dial(t)
-	send(t, cq, &storev1.GetSidecarCursorsRequest{FileId: proto.String("nope")})
-	resp := recvCursors(t, cq)
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
 
-	// Assert
-	if resp.GetSuccess() == nil {
-		t.Fatalf("result = %T, want the success arm for an absent cursor", resp.GetResult())
+	// Assert. The store must not be touched by a refused request.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
 	}
-	if len(resp.GetSuccess().GetCursors()) != 0 {
-		t.Fatalf("cursors = %d, want 0", len(resp.GetSuccess().GetCursors()))
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
 	}
-}
-
-func TestCursorQueryFailureIsAnsweredRatherThanSwallowed(t *testing.T) {
-	// Arrange: a closed database, so the query fails at the driver. A sidecar
-	// that cannot tell "no cursors" from "could not read cursors" resumes every
-	// tailed file from zero.
-	h := start(t, 0, testLogger())
-	if err := h.db.Close(); err != nil {
-		t.Fatalf("closing db: %v", err)
-	}
-
-	// Act
-	cq := h.dial(t)
-	send(t, cq, &storev1.GetSidecarCursorsRequest{})
-	resp := recvCursors(t, cq)
-
-	// Assert
-	if resp.GetFailure() == nil {
-		t.Fatalf("result = %T, want the failure arm", resp.GetResult())
-	}
-	if resp.GetFailure().GetDetail() == "" {
-		t.Fatal("failure carries no detail, so the sidecar's log cannot say why")
+	if len(store.writes) != 0 {
+		t.Fatalf("store writes = %d, want 0: validation runs before the store is touched", len(store.writes))
 	}
 }
 
-// --- lifecycle ---------------------------------------------------------------
+func TestWriteBatchRefusalIsLoggedAtItsSite(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
 
-func TestCloseLogsListenerFailure(t *testing.T) {
-	// Arrange
-	var logs bytes.Buffer
-	closeErr := errors.New("listener close failed")
-	srv := &Server{
-		log:   logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "server", Socket: "store.sock"}),
-		ln:    failingListener{err: closeErr},
-		conns: make(map[net.Conn]struct{}),
+	// Act.
+	if _, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "claude-shim:s1",
+		Batch:    &storev1.EntryBatch{},
+	})); err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
 	}
 
-	// Act
-	err := srv.Close()
-
-	// Assert
-	if !errors.Is(err, closeErr) {
-		t.Fatalf("Close error = %v, want listener failure", err)
-	}
-	record, found := findLoggedRecord(t, splitLines(logs.Bytes()), "close-listener", "error")
-	if !found {
-		t.Fatalf("listener-close error record missing: %s", logs.String())
-	}
-	if record.Level != "error" || record.Context["component"] != "server" || record.Context["socket"] != "store.sock" {
-		t.Fatalf("listener-close error lacks canonical context: %#v", record)
+	// Assert.
+	rec, ok := findRecord(t, h.logs, "store.rpc.write-batch", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteBatchEmpty {
+		t.Fatalf("records = %+v, want a warn record at site %q", records(t, h.logs), SiteBatchEmpty)
 	}
 }
 
-func TestCloseDisconnectsLiveConnections(t *testing.T) {
-	// Arrange: a producer connection the server has demonstrably taken.
-	lines := make(chan string, 64)
-	h := start(t, 0, logging.New(channelWriter(lines), io.Discard, false))
-	prod := h.dial(t)
-	send(t, prod, writeBatch())
-	awaitLine(t, lines, "classify-connection")
+// ---- OpenAgentSession ----
 
-	// Act
-	if err := h.srv.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+func TestOpenAgentSessionAnswersAPageAndAToken(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.opened = OpenedPage{Page: &storev1.AgentSessionPage{
+		Lines:    []*storev1.StoreLineAt{line("a1", "p1", 7).Line},
+		Boundary: &storev1.AgentSessionPage_Floor{Floor: &storev1.ReadAgentPageFloor{}},
+	}, PinSeq: 7}
+	h := newHarness(t, store, 0)
 
-	// Assert
-	if err := prod.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
-		t.Fatalf("setting read deadline: %v", err)
+	// Act.
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("a1"), PageSize: 10,
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
 	}
-	if _, err := wire.ReadFrame(prod); err == nil {
-		t.Fatal("expected the producer read to fail after server Close")
+	success := res.Msg.GetSuccess()
+	if success == nil || len(success.GetPage().GetLines()) != 1 || success.GetWatch().GetValue() == "" {
+		t.Fatalf("result = %v, want one page line and a minted token", res.Msg.GetResult())
 	}
 }
 
-type failingListener struct{ err error }
+func TestOpenAgentSessionRefusesAnAgentIdWithNoValue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
 
-func (l failingListener) Accept() (net.Conn, error) { return nil, l.err }
-func (l failingListener) Close() error              { return l.err }
-func (l failingListener) Addr() net.Addr            { return fakeAddr("store.sock") }
+	// Act.
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID(""), PageSize: 10,
+	}))
 
-type fakeAddr string
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
 
-func (a fakeAddr) Network() string { return "unix" }
-func (a fakeAddr) String() string  { return string(a) }
+func TestOpenAgentSessionMapsAStalePointerToTheFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.openErr = fmt.Errorf("%w: known_through names no position in this book", ErrStalePointer)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("a1"), PageSize: 10, KnownThrough: &storev1.StoreItemPointer{Value: "p9"},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+	rec, ok := findRecord(t, h.logs, "store.rpc.open-agent-session", "debug")
+	if !ok || rec.Context["refusal_site"] != SiteStalePointer {
+		t.Fatalf("records = %+v, want a verbose trace at site %q", records(t, h.logs), SiteStalePointer)
+	}
+}
+
+func TestOpenAgentSessionServesAnEmptyBookAsALegalPage(t *testing.T) {
+	// Arrange. An agent with no rows is an empty book, not an unknown agent.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("fresh"), PageSize: 10,
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+	success := res.Msg.GetSuccess()
+	if success == nil || len(success.GetPage().GetLines()) != 0 || success.GetWatch().GetValue() == "" {
+		t.Fatalf("result = %v, want an empty page with a valid token", res.Msg.GetResult())
+	}
+}
+
+// ---- WatchAgentSession ----
+
+// watcher runs one WatchAgentSession call off the test goroutine.
+//
+// THE CALL ITSELF BLOCKS UNTIL THE SERVER WRITES RESPONSE HEADERS, which a
+// Connect server stream does on its first frame. A test that must observe a
+// STANDING watch — one that has subscribed but has nothing to deliver yet —
+// therefore cannot wait on the call; it waits on the fake store's LinesSince
+// gate instead, which is entered strictly after the subscription.
+type watcher struct {
+	streamc chan *connect.ServerStreamForClient[storev1.WatchAgentSessionResponse]
+	errc    chan error
+}
+
+func startWatch(h *harness, ctx context.Context, token string) *watcher {
+	w := &watcher{
+		streamc: make(chan *connect.ServerStreamForClient[storev1.WatchAgentSessionResponse], 1),
+		errc:    make(chan error, 1),
+	}
+	go func() {
+		stream, err := h.stream.WatchAgentSession(ctx, connect.NewRequest(&storev1.WatchAgentSessionRequest{
+			Watch: &storev1.AgentSessionToken{Value: token},
+		}))
+		if err != nil {
+			w.errc <- err
+			return
+		}
+		w.streamc <- stream
+	}()
+	return w
+}
+
+// open blocks until the stream is readable and fails if it was refused.
+func (w *watcher) open(t *testing.T) *connect.ServerStreamForClient[storev1.WatchAgentSessionResponse] {
+	t.Helper()
+	select {
+	case stream := <-w.streamc:
+		t.Cleanup(func() { stream.Close() })
+		return stream
+	case err := <-w.errc:
+		t.Fatalf("WatchAgentSession = %v, want a stream", err)
+		return nil
+	}
+}
+
+// refusal blocks until the watch ends and returns why.
+func (w *watcher) refusal(t *testing.T) error {
+	t.Helper()
+	select {
+	case err := <-w.errc:
+		return err
+	case stream := <-w.streamc:
+		defer stream.Close()
+		for stream.Receive() {
+		}
+		return stream.Err()
+	}
+}
+
+func TestWatchDeliversALineWrittenAfterThePin(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act. The write lands after the subscription, so it can only arrive live.
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 1, Lines: []LineWritten{line("a1", "p5", 5)}}
+	store.mu.Unlock()
+	writeOne(t, h)
+
+	// Assert.
+	stream := w.open(t)
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want a line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p5" {
+		t.Fatalf("pointer = %q, want %q", got, "p5")
+	}
+}
+
+func TestWatchNeverDeliversALineAtOrBelowThePin(t *testing.T) {
+	// Arrange. The page was read at write ordinal 5.
+	store := newFakeStore()
+	store.opened = OpenedPage{Page: &storev1.AgentSessionPage{}, PinSeq: 5}
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act. Ordinal 5 is already in the page; ordinal 6 is not.
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 2, Lines: []LineWritten{line("a1", "p5", 5), line("a1", "p6", 6)}}
+	store.mu.Unlock()
+	writeOne(t, h)
+
+	// Assert. The first frame delivered is the one above the pin.
+	stream := w.open(t)
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want a line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p6" {
+		t.Fatalf("first delivered pointer = %q, want %q", got, "p6")
+	}
+}
+
+func TestWatchNeverDeliversALineOfAnotherBook(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act. One batch carrying another agent's line and then this agent's.
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 2, Lines: []LineWritten{line("other", "px", 1), line("a1", "p2", 2)}}
+	store.mu.Unlock()
+	writeOne(t, h)
+
+	// Assert.
+	stream := w.open(t)
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want a line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p2" {
+		t.Fatalf("first delivered pointer = %q, want %q", got, "p2")
+	}
+}
+
+func TestWatchDeliversALineWrittenBetweenOpenAndWatchExactlyOnce(t *testing.T) {
+	// Arrange. The watch is held inside LinesSince — i.e. after it subscribed —
+	// while the very line the replay is about to return is also published live.
+	// That overlap is what the handoff must collapse.
+	store := newFakeStore()
+	store.since = []LineWritten{line("a1", "p1", 1)}
+	store.sinceRelease = make(chan struct{})
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 1, Lines: []LineWritten{line("a1", "p1", 1)}}
+	store.mu.Unlock()
+	writeOne(t, h)
+	close(store.sinceRelease)
+
+	// Act. A later, distinct line proves nothing sat between the two.
+	stream := w.open(t)
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want the replayed line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p1" {
+		t.Fatalf("first pointer = %q, want %q", got, "p1")
+	}
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 1, Lines: []LineWritten{line("a1", "p2", 2)}}
+	store.mu.Unlock()
+	writeOne(t, h)
+
+	// Assert.
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want the second line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p2" {
+		t.Fatalf("second pointer = %q, want %q (p1 was delivered twice)", got, "p2")
+	}
+}
+
+func TestWatchTokenIsSingleUse(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act. The same token, a second time.
+	err := startWatch(h, context.Background(), token).refusal(t)
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeNotFound)
+	}
+}
+
+func TestWatchRefusesATokenThisStoreNeverMinted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	err := startWatch(h, context.Background(), "0123456789abcdef").refusal(t)
+
+	// Assert. There is no failure arm on this rpc by design: the refusal is the
+	// transport's CodeNotFound and the caller re-opens.
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeNotFound)
+	}
+	rec, ok := findRecord(t, h.logs, "store.rpc.watch-agent-session", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteUnknownWatchToken {
+		t.Fatalf("records = %+v, want a warn record at site %q", records(t, h.logs), SiteUnknownWatchToken)
+	}
+}
+
+func TestWatchRefusesATokenWithNoValue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	err := startWatch(h, context.Background(), "").refusal(t)
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeNotFound)
+	}
+	rec, ok := findRecord(t, h.logs, "store.rpc.watch-agent-session", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteTokenEmpty {
+		t.Fatalf("records = %+v, want a warn record at site %q", records(t, h.logs), SiteTokenEmpty)
+	}
+}
+
+func TestWatchOverflowEndsTheStreamAndLogsAWarning(t *testing.T) {
+	// Arrange. A one-frame buffer, and the watch held inside LinesSince so it
+	// cannot drain while the writer publishes.
+	store := newFakeStore()
+	store.sinceRelease = make(chan struct{})
+	h := newHarness(t, store, 1)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act.
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 3, Lines: []LineWritten{
+		line("a1", "p1", 1), line("a1", "p2", 2), line("a1", "p3", 3),
+	}}
+	store.mu.Unlock()
+	writeOne(t, h)
+	close(store.sinceRelease)
+
+	// Assert.
+	err := w.refusal(t)
+	if connect.CodeOf(err) != connect.CodeResourceExhausted {
+		t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeResourceExhausted)
+	}
+	if _, ok := findRecord(t, h.logs, "store.fanout.overflow", "warn"); !ok {
+		t.Fatalf("records = %+v, want a store.fanout.overflow warning", records(t, h.logs))
+	}
+}
+
+func TestWatchMapsAReplayFailureToATransportError(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.sinceErr = fmt.Errorf("%w: read failed", ErrStorage)
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+
+	// Act.
+	err := startWatch(h, context.Background(), token).refusal(t)
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeInternal)
+	}
+}
+
+func TestShutdownEndsAStandingWatchCleanly(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := h.server.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown = %v, want nil", err)
+	}
+
+	// Assert. The stream ends without an error: the store concluded nothing, it
+	// simply stopped.
+	if err := w.refusal(t); err != nil {
+		t.Fatalf("stream error = %v, want a clean end", err)
+	}
+}
+
+// ---- ReadAgentPage ----
+
+func TestReadAgentPageServesAPage(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.page = &storev1.ReadAgentPageSuccess{
+		Lines:    []*storev1.StorePageLine{{PageAgentId: agentID("a1")}},
+		Boundary: &storev1.ReadAgentPageSuccess_Floor{Floor: &storev1.ReadAgentPageFloor{}},
+	}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
+		Book: agentID("a1"), PageSize: 10, After: &storev1.StoreItemPointer{Value: "p9"},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReadAgentPage = %v, want nil", err)
+	}
+	if success := res.Msg.GetSuccess(); success == nil || len(success.GetLines()) != 1 {
+		t.Fatalf("result = %v, want one line", res.Msg.GetResult())
+	}
+}
+
+func TestReadAgentPageRefusesAMissingAfterPointer(t *testing.T) {
+	// Arrange. This verb only walks older; the first page is the open's answer.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
+		Book: agentID("a1"), PageSize: 10,
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReadAgentPage = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
+
+func TestReadAgentPageMapsAStalePointerToTheFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.pageErr = fmt.Errorf("%w: p9 is not in this book", ErrStalePointer)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
+		Book: agentID("a1"), PageSize: 10, After: &storev1.StoreItemPointer{Value: "p9"},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReadAgentPage = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
+
+// ---- GetLiveWork ----
+
+func TestGetLiveWorkServesTheOpenObligations(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.live = &storev1.GetLiveWorkSuccess{LiveAgents: []*conversationv1.AgentId{agentID("a1")}}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveWork = %v, want nil", err)
+	}
+	if success := res.Msg.GetSuccess(); success == nil || len(success.GetLiveAgents()) != 1 {
+		t.Fatalf("result = %v, want one live agent", res.Msg.GetResult())
+	}
+}
+
+func TestGetLiveWorkMapsAStorageFailureToTheFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.liveErr = fmt.Errorf("%w: scan failed", ErrStorage)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveWork = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
+
+// ---- GetSidecarCursors ----
+
+func TestGetSidecarCursorsServesAnEmptySetAsSuccess(t *testing.T) {
+	// Arrange. A fresh store has no cursors and every file starts from zero.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.client.GetSidecarCursors(context.Background(), connect.NewRequest(&storev1.GetSidecarCursorsRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetSidecarCursors = %v, want nil", err)
+	}
+	if success := res.Msg.GetSuccess(); success == nil || len(success.GetCursors()) != 0 {
+		t.Fatalf("result = %v, want an empty success", res.Msg.GetResult())
+	}
+}
+
+func TestGetSidecarCursorsScopesToOneFileWhenAsked(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.cursors = []*storev1.CursorState{{FileId: "1:2", Path: "/t.jsonl", Offset: 12}}
+	h := newHarness(t, store, 0)
+	fileID := "1:2"
+
+	// Act.
+	res, err := h.client.GetSidecarCursors(context.Background(), connect.NewRequest(&storev1.GetSidecarCursorsRequest{FileId: &fileID}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetSidecarCursors = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want the success arm", res.Msg.GetResult())
+	}
+	if store.cursorsFor == nil || *store.cursorsFor != fileID {
+		t.Fatalf("store scoped to %v, want %q", store.cursorsFor, fileID)
+	}
+}
+
+func TestGetSidecarCursorsRefusesAPresentButEmptyFileId(t *testing.T) {
+	// Arrange. Absence is spelled by omitting the field, never by "".
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	empty := ""
+
+	// Act.
+	res, err := h.client.GetSidecarCursors(context.Background(), connect.NewRequest(&storev1.GetSidecarCursorsRequest{FileId: &empty}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetSidecarCursors = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+	if store.cursorsScope {
+		t.Fatal("the store was queried for a refused request")
+	}
+}
+
+func TestGetSidecarCursorsMapsAStorageFailureToTheFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.cursorsErr = fmt.Errorf("%w: select failed", ErrStorage)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetSidecarCursors(context.Background(), connect.NewRequest(&storev1.GetSidecarCursorsRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetSidecarCursors = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
+
+// ---- GetWorkflow ----
+
+func TestGetWorkflowAnswersTheNotImplementedFailure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.client.GetWorkflow(context.Background(), connect.NewRequest(&storev1.GetWorkflowRequest{
+		Work: &conversationv1.DetachedWorkId{Value: "wf1"},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetWorkflow = %v, want nil", err)
+	}
+	failure := res.Msg.GetFailure()
+	if failure == nil || !strings.Contains(failure.GetDetail(), "not implemented") {
+		t.Fatalf("result = %v, want the not-implemented failure arm", res.Msg.GetResult())
+	}
+	rec, ok := findRecord(t, h.logs, "store.rpc.get-workflow", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteWorkflowNotImplemented {
+		t.Fatalf("records = %+v, want a warn record at site %q", records(t, h.logs), SiteWorkflowNotImplemented)
+	}
+}
+
+// ---- transport ----
+
+func TestServesOverHTTP11(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveWork over HTTP/1.1 = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want the success arm", res.Msg.GetResult())
+	}
+}
+
+func TestServesOverH2CWithPriorKnowledge(t *testing.T) {
+	// Arrange. No TLS anywhere: the h2c wrapper is what makes an HTTP/2
+	// prior-knowledge client work on the same cleartext socket.
+	sink := &syncBuffer{}
+	srv := New(newFakeStore(), logging.New(sink, io.Discard, true), 0)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := h2cClient()
+
+	// Act.
+	res, err := storev1connect.NewShimStoreClient(client, ts.URL).GetLiveWork(
+		context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveWork over h2c = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want the success arm", res.Msg.GetResult())
+	}
+}
+
+func TestServesTheJSONCodec(t *testing.T) {
+	// Arrange. A plain POST with a JSON body is the shape a curl probe uses.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.http.Post(h.url+storev1connect.ShimStoreGetLiveWorkProcedure, "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	// Assert.
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", res.StatusCode, body)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode %s: %v", body, err)
+	}
+	if _, ok := decoded["success"]; !ok {
+		t.Fatalf("body = %s, want a success arm", body)
+	}
+}
+
+func TestServesOverAUnixSocket(t *testing.T) {
+	// Arrange. macOS caps sun_path at ~104 bytes, so the path is short by
+	// construction rather than under t.TempDir().
+	sink := &syncBuffer{}
+	log := logging.New(sink, io.Discard, true)
+	path := shortSocketPath(t)
+	ln, err := Listen(path, log)
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	srv := New(newFakeStore(), log, 0)
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown: %v", err)
+		}
+	})
+	client := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", path)
+		},
+	}}
+
+	// Act.
+	res, err := storev1connect.NewShimStoreClient(client, "http://store").GetLiveWork(
+		context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveWork over the unix socket = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want the success arm", res.Msg.GetResult())
+	}
+}
+
+func TestRequestIdHeaderIsCarriedIntoTheLog(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+	req := connect.NewRequest(&storev1.GetWorkflowRequest{Work: &conversationv1.DetachedWorkId{Value: "wf1"}})
+	req.Header().Set(RequestIDHeader, "req-42")
+
+	// Act.
+	if _, err := h.client.GetWorkflow(context.Background(), req); err != nil {
+		t.Fatalf("GetWorkflow = %v, want nil", err)
+	}
+
+	// Assert.
+	rec, ok := findRecord(t, h.logs, "store.rpc.get-workflow", "warn")
+	if !ok || rec.RequestID != "req-42" {
+		t.Fatalf("record = %+v, want request_id %q", rec, "req-42")
+	}
+}
+
+func TestNewPanicsWithoutAStore(t *testing.T) {
+	// Arrange.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("New with a nil store returned, want a panic")
+		}
+	}()
+
+	// Act.
+	New(nil, logging.New(&syncBuffer{}, io.Discard, false), 0)
+}

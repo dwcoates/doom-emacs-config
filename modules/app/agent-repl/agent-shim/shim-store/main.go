@@ -1,17 +1,23 @@
-// Command shim-store is the agent-shim event store (design §6): a singleton,
-// launchd-managed UDS service that owns the SQLite event database, assigns each
-// session's gapless seq, dedups stream-plane/file-plane overlap, and serves
-// replay-then-live-tail subscriptions.
+// Command shim-store is the agent-repl record store: a singleton,
+// launchd-managed service that owns the SQLite database and serves
+// store.v1.ShimStore over a unix domain socket with Connect.
 //
-// Flags (all paths default under the agent-repl cache dir but are always
-// injectable, which is what lets tests point every path at a temp dir):
+// Flags (every path is injectable, which is what lets a test point the whole
+// stack at a temp dir):
 //
-//	-socket  UDS path the store listens on          (…/sock/store.sock)
-//	-db      SQLite database path                    (…/store/events.db)
-//	-log     append-only log file (also to stderr)   (…/log/shim-store.log)
+//	--socket        UDS path to serve on   (env AGENT_REPL_STORE_SOCKET, else …/sock/store.sock)
+//	--db            SQLite database path                          (…/store/events.db)
+//	--log           append-only log file, also mirrored to stderr (…/log/shim-store.log)
+//	--pprof         OPT-IN local-only profiling surface           (env AGENT_REPL_STORE_PPROF_ADDR)
+//	--watch-buffer  per-subscriber watch frame buffer             (8192)
+//
+// THERE IS NO HEALTH MODE. The old -health-check/-health-request-id/
+// -health-timeout trio died with the dial protocol: the store has no health
+// verb by design, and agent-shim-doctor probes the Connect endpoints directly.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -25,7 +31,6 @@ import (
 	"time"
 
 	"agentrepl/shim-store/internal/db"
-	"agentrepl/shim-store/internal/healthcheck"
 	"agentrepl/shim-store/internal/logging"
 	"agentrepl/shim-store/internal/pprofsurface"
 	"agentrepl/shim-store/internal/server"
@@ -33,107 +38,112 @@ import (
 	sharedlogging "agentrepl/logging"
 )
 
+// shutdownGrace bounds the orderly drain: standing watches are ended first, so
+// what remains is in-flight unary work.
+const shutdownGrace = 5 * time.Second
+
 func main() {
 	base := defaultCacheDir()
-	socketPath := flag.String("socket", filepath.Join(base, "sock", "store.sock"), "UDS path to listen on")
+	socketPath := flag.String("socket", socketDefault(base), "UDS path to serve store.v1.ShimStore on; defaults to $"+server.EnvSocket+" when set")
 	dbPath := flag.String("db", filepath.Join(base, "store", "events.db"), "SQLite database path")
 	logPath := flag.String("log", filepath.Join(base, "log", "shim-store.log"), "log file path (also mirrored to stderr)")
-	healthCheck := flag.Bool("health-check", false, "send one correlated HealthCheck and emit its JSON result")
-	healthRequestID := flag.String("health-request-id", "", "required correlation ID for -health-check")
-	healthTimeout := flag.Duration("health-timeout", 0, "required deadline for -health-check")
 	pprofAddr := flag.String("pprof", envStr(pprofsurface.EnvAddr, ""), "OPT-IN Go profiling surface: a unix socket path, or an explicitly loopback host:port (127.0.0.1:6061). Empty = OFF, which is the default; there is no always-on listener. The resolved surface is named in the store.pprof.enabled record at startup")
+	watchBuffer := flag.Int("watch-buffer", server.DefaultWatchBuffer, "per-subscriber WatchAgentSession frame buffer; a subscriber that overflows it is ended and must re-open with known_through")
 	flag.Parse()
-	if *healthCheck {
-		os.Exit(runHealthCheck(*socketPath, *logPath, *healthRequestID, *healthTimeout, os.Stdout, os.Stderr))
-	}
 
-	if err := run(*socketPath, *dbPath, *logPath, *pprofAddr); err != nil {
+	if err := run(*socketPath, *dbPath, *logPath, *pprofAddr, *watchBuffer); err != nil {
 		reportFatal(err, os.Stderr)
 		os.Exit(1)
 	}
 }
 
-// runHealthCheck owns the CLI's one-shot health mode.  Its stdout is exactly
-// one Result JSON object; store diagnostics continue through the canonical log
-// and stderr sink rather than contaminating the machine-readable response.
-func runHealthCheck(socketPath, logPath, requestID string, timeout time.Duration, stdout, stderr io.Writer) int {
-	log, closeLog, err := openHealthLogger(socketPath, logPath, stderr)
-	if err != nil {
-		reportFatal(err, stderr)
-		writeHealthResult(stdout, healthcheck.Result{
-			RequestID:    requestID,
-			LatencyMS:    0,
-			Component:    "",
-			Healthy:      false,
-			FailureClass: healthcheck.FailureClientFailure,
-			Reason:       fmt.Sprintf("health logger bootstrap failed: %v", err),
-		})
-		return healthcheck.ExitClientFailure
-	}
-	defer closeLog()
-
-	result, exitCode := healthcheck.Probe(healthcheck.Config{
-		SocketPath: socketPath,
-		RequestID:  requestID,
-		Timeout:    timeout,
-	}, log)
-	if err := writeHealthResult(stdout, result); err != nil {
-		log.Log(logging.Fields{Component: "store", Socket: socketPath, RequestID: requestID, Operation: "health-check-output", Level: "error"}, "health JSON output failed: %v", err)
-		return healthcheck.ExitWriteFailure
-	}
-	return exitCode
-}
-
-func writeHealthResult(stdout io.Writer, result healthcheck.Result) error {
-	return json.NewEncoder(stdout).Encode(result)
-}
-
-// openHealthLogger creates the same durable store diagnostic sink used by the
-// service without touching the event database.  A one-shot probe is a store
-// operation, so failures must be traceable in the canonical store log.
-func openHealthLogger(socketPath, logPath string, stderr io.Writer) (*logging.Logger, func(), error) {
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return nil, nil, bootstrapError{fmt.Errorf("creating dir for %q: %w", logPath, err)}
-	}
-	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
-	}
-	log := logging.New(lf, stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
-	log = log.With(logging.Fields{Component: "store", Socket: socketPath})
-	return log, func() { _ = lf.Close() }, nil
-}
-
 // reportFatal writes only bootstrap failures because all post-bootstrap errors
 // have already reached the canonical logger and its stderr sink.
 func reportFatal(err error, stderr io.Writer) {
-	if isBootstrapError(err) {
-		payload, encodeErr := json.Marshal(map[string]any{
-			"timestamp": sharedlogging.Timestamp(time.Now()),
-			"runtime":   "store", "pid": os.Getpid(), "level": "error", "verbosity": "normal",
-			"operation": "store.bootstrap", "message": "shim-store bootstrap failed",
-			"context": map[string]any{"error": err.Error()},
-		})
-		if encodeErr != nil {
-			panic(fmt.Sprintf("shim-store bootstrap log encode failed: %v", encodeErr))
-		}
-		if _, writeErr := stderr.Write(append(payload, '\n')); writeErr != nil {
-			panic(fmt.Sprintf("shim-store bootstrap log write failed: %v", writeErr))
-		}
+	if !isBootstrapError(err) {
+		return
+	}
+	payload, encodeErr := json.Marshal(map[string]any{
+		"timestamp": sharedlogging.Timestamp(time.Now()),
+		"runtime":   "store", "pid": os.Getpid(), "level": "error", "verbosity": "normal",
+		"operation": "store.bootstrap", "message": "shim-store bootstrap failed",
+		"context": map[string]any{"error": err.Error()},
+	})
+	if encodeErr != nil {
+		panic(fmt.Sprintf("shim-store bootstrap log encode failed: %v", encodeErr))
+	}
+	if _, writeErr := stderr.Write(append(payload, '\n')); writeErr != nil {
+		panic(fmt.Sprintf("shim-store bootstrap log write failed: %v", writeErr))
 	}
 }
 
-// run wires up logging, the database, and the server, then blocks until a
-// termination signal or a fatal serve error. Factored out of main so its wiring
-// is exercised with temp paths in tests.
-func run(socketPath, dbPath, logPath, pprofAddr string) (err error) {
+// run wires up logging, the profiling surface, the database and the server,
+// then blocks until a termination signal or a fatal serve error. Factored out
+// of main so its wiring is exercised with temp paths in tests.
+func run(socketPath, dbPath, logPath, pprofAddr string, watchBuffer int) (err error) {
 	log, closeLog, err := openLogger(socketPath, dbPath, logPath)
 	if err != nil {
 		return err
 	}
 	defer closeLog()
 	defer logProcessExit(log, &err)
-	return runWithLogger(socketPath, dbPath, pprofAddr, log)
+	return runWithLogger(socketPath, dbPath, pprofAddr, watchBuffer, log)
+}
+
+// runWithLogger owns errors that reach the process orchestration after logging
+// is available. db.Open and server.Listen retain their lower-layer ownership.
+func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *logging.Logger) error {
+	// OPENED BEFORE THE DATABASE, so a store wedged recreating its schema or
+	// on a cold-cache first read of a large database is still profilable.
+	pprofSurface, err := openPprofSurface(pprofAddr, log)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := pprofSurface.Close(); closeErr != nil {
+			log.Log(logging.Fields{Operation: "store.pprof.close", Level: "error"}, "closing pprof surface failed: %v", closeErr)
+		}
+	}()
+
+	database, err := db.Open(dbPath, log.With(logging.Fields{Component: "db"}))
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	ln, err := server.Listen(socketPath, log.With(logging.Fields{Component: "server"}))
+	if err != nil {
+		return err
+	}
+	srv := server.New(database, log.With(logging.Fields{Component: "server"}), watchBuffer)
+
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigc)
+
+	errc := make(chan error, 1)
+	go func() { errc <- srv.Serve(ln) }()
+
+	select {
+	case sig := <-sigc:
+		log.Log(logging.Fields{Operation: "store.shutdown"}, "received signal=%s", sig)
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		defer cancel()
+		if shutdownErr := srv.Shutdown(ctx); shutdownErr != nil {
+			return shutdownErr
+		}
+		// Serve returns http.ErrServerClosed once the drain completes; that is
+		// the orderly outcome and is not an error.
+		if serveErr := <-errc; serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			return serveErr
+		}
+		return nil
+	case serveErr := <-errc:
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			return serveErr
+		}
+		return nil
+	}
 }
 
 // openPprofSurface binds the opt-in profiling surface and records the decision
@@ -152,7 +162,7 @@ func openPprofSurface(addr string, log *logging.Logger) (*pprofsurface.Surface, 
 	}
 	if surface == nil {
 		log.LogVerbose(logging.Fields{Operation: "store.pprof.disabled", Level: "debug"},
-			"Go profiling surface is off env=%s flag=-pprof", pprofsurface.EnvAddr)
+			"Go profiling surface is off env=%s flag=--pprof", pprofsurface.EnvAddr)
 		return nil, nil
 	}
 	log.Log(logging.Fields{Operation: "store.pprof.enabled", Level: "warn", Socket: surface.Address()},
@@ -166,8 +176,20 @@ func openPprofSurface(addr string, log *logging.Logger) (*pprofsurface.Surface, 
 	return surface, nil
 }
 
+// socketDefault is the --socket flag's default: $AGENT_REPL_STORE_SOCKET when
+// it is set, else the cache-dir path.
+//
+// AN EXPLICIT FLAG STILL BEATS THE ENVIRONMENT, because this only ever supplies
+// flag.String's default value. The variable exists so a test harness can point
+// every participant at a private store without editing a command line.
+func socketDefault(base string) string {
+	return envStr(server.EnvSocket, filepath.Join(base, "sock", "store.sock"))
+}
+
 // envStr returns the environment variable's value, or def when it is unset or
-// empty. Used to source a flag's default from the environment.
+// empty. It is what makes $AGENT_REPL_STORE_SOCKET the DEFAULT of --socket: an
+// explicit flag still beats it, because flag.String only uses this as its
+// default value.
 func envStr(name, def string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
@@ -176,13 +198,13 @@ func envStr(name, def string) string {
 }
 
 // logProcessExit is shim-store's one deferred exit trace: whatever caused
-// runWithLogger to return — a clean signal-driven shutdown, a runtime
-// failure, or a panic — is the last record this process writes, so a
-// truncated log still names why the process is gone.
+// runWithLogger to return — a clean signal-driven shutdown, a runtime failure,
+// or a panic — is the last record this process writes, so a truncated log still
+// names why the process is gone.
 //
 // It re-panics after logging rather than recovering: a panic here is an
-// invariant violation (e.g. server.New's nil-dependency guard), and this
-// trace exists to narrate the crash, not to turn it into a normal exit.
+// invariant violation (server.New's nil-dependency guard, for instance), and
+// this trace exists to narrate the crash, not to turn it into a normal exit.
 func logProcessExit(log *logging.Logger, err *error) {
 	if r := recover(); r != nil {
 		log.Log(logging.Fields{Operation: "exit", Level: "error"}, "shim-store exiting: panic: %v", r)
@@ -203,7 +225,6 @@ func openLogger(socketPath, dbPath, logPath string) (*logging.Logger, func(), er
 			return nil, nil, bootstrapError{fmt.Errorf("creating dir for %q: %w", p, err)}
 		}
 	}
-
 	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
@@ -211,59 +232,6 @@ func openLogger(socketPath, dbPath, logPath string) (*logging.Logger, func(), er
 	log := logging.New(lf, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
 	log = log.With(logging.Fields{Component: "store", DatabasePath: dbPath, Socket: socketPath})
 	return log, func() { _ = lf.Close() }, nil
-}
-
-// runWithLogger owns errors that reach the process orchestration after logging
-// is available. db.Open and server.Listen retain their lower-layer ownership.
-func runWithLogger(socketPath, dbPath, pprofAddr string, log *logging.Logger) error {
-	// Opened BEFORE the database, so a store wedged in schema migration or a
-	// cold-cache first read of a multi-gigabyte events.db is still profilable.
-	pprofSurface, err := openPprofSurface(pprofAddr, log)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if closeErr := pprofSurface.Close(); closeErr != nil {
-			log.Log(logging.Fields{Operation: "store.pprof.close", Level: "error"}, "closing pprof surface failed: %v", closeErr)
-		}
-	}()
-
-	database, err := db.Open(dbPath, log.With(logging.Fields{Component: "db", Table: "event"}))
-	if err != nil {
-		return err
-	}
-	defer database.Close()
-
-	ln, err := server.Listen(socketPath, log.With(logging.Fields{Component: "server"}))
-	if err != nil {
-		return err
-	}
-	srv := server.New(database, log.With(logging.Fields{Component: "server"}), 0)
-
-	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
-
-	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(ln) }()
-	log.Log(logging.Fields{Operation: "serve"}, "listening")
-
-	select {
-	case sig := <-sigc:
-		log.Log(logging.Fields{Operation: "shutdown"}, "received signal=%s", sig)
-		return runLogged(log, "shutdown", srv.Close)
-	case err := <-errc:
-		return runLogged(log, "serve", func() error { return err })
-	}
-}
-
-func runLogged(log *logging.Logger, operation string, execute func() error) error {
-	if err := execute(); err != nil {
-		// The only callers are a fatal serve error and a failed Close, both of
-		// which end the process; an omitted Level would persist either as info.
-		log.Log(logging.Fields{Operation: operation, Level: "error"}, "runtime operation failed: %v", err)
-		return err
-	}
-	return nil
 }
 
 // bootstrapError marks the only failures that may be reported before the

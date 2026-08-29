@@ -63,8 +63,13 @@ type Fields struct {
 	WriteSeq uint64
 	// WatchTokenHash is the sha256 PREFIX of a watch token, never the token.
 	WatchTokenHash string
-	// RPC is the Connect procedure name.
+	// RPC is the Connect procedure name, spelled exactly as Connect does —
+	// with its leading slash, e.g. "/store.v1.ShimStore/WriteBatch".
 	RPC string
+	// RefusalSite names WHICH refusal the store issued — the vocabulary the
+	// proto's failure `kind` arms are derived from — so refusals are counted
+	// by site instead of grepped out of a human detail string.
+	RefusalSite string
 	// FileID is a CursorState.file_id.
 	FileID string
 	// Path is a filesystem path a record concerns (a cursor's file, a spool).
@@ -204,6 +209,7 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		"position":          merged.Position,
 		"watch_token_hash":  merged.WatchTokenHash,
 		"rpc":               merged.RPC,
+		"refusal_site":      merged.RefusalSite,
 		"file_id":           merged.FileID,
 		"path":              merged.Path,
 		"task_id":           merged.TaskID,
@@ -325,6 +331,7 @@ func merge(base, extra Fields) Fields {
 		{&base.Position, &extra.Position},
 		{&base.WatchTokenHash, &extra.WatchTokenHash},
 		{&base.RPC, &extra.RPC},
+		{&base.RefusalSite, &extra.RefusalSite},
 		{&base.FileID, &extra.FileID},
 		{&base.Path, &extra.Path},
 		{&base.TaskID, &extra.TaskID},
