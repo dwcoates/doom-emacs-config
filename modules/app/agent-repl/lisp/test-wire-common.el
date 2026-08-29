@@ -22,10 +22,10 @@
 
 (defmacro agent-repl-test-wire-common--quiet (&rest body)
   "Run BODY with the logging ladder stubbed out.
-`agent-repl--error' is the ERROR rung the codec logs a breach through, and
-it signals an `error' of its own; the codec catches that so the TYPED wire
-error survives, and these tests stub it so a breach case neither writes to
-the durable sink nor depends on that catch."
+`agent-repl--error' is the pure ERROR rung the codec RECORDS a breach
+through; the typed `agent-repl-wire-error' these tests assert comes from
+the codec's own `signal' afterwards.  Stubbed here only so a breach case
+does not write to the durable sink."
   (declare (indent 0))
   `(cl-letf (((symbol-function 'agent-repl--error) (lambda (&rest _) nil))
              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
