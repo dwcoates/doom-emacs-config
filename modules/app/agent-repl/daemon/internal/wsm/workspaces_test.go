@@ -608,3 +608,55 @@ func TestForgetRefusesAnUnknownWorkspace(t *testing.T) {
 		t.Fatalf("Forget = %v, want ErrNotFound", err)
 	}
 }
+
+func TestRegisterWorkspaceRecordsTheRepositoryDefaultBranch(t *testing.T) {
+	// Arrange.
+	s, _ := testStore(t)
+	dir := t.TempDir()
+
+	// Act.
+	if _, _, err := s.RegisterWorkspace(context.Background(), dir, RegisterFacts{
+		Branch: "feature", ParentBranch: "main", RepoDir: dir, DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+
+	// Assert.
+	repos, err := s.ListRepositories(context.Background())
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(repos) != 1 || repos[0].DefaultBranch != "main" {
+		t.Fatalf("repositories = %+v, want one whose default branch is main", repos)
+	}
+}
+
+func TestRegisterWorkspaceKeepsAKnownDefaultBranchWhenNoneIsSupplied(t *testing.T) {
+	// Arrange: the first announcement records the branch; the second omits it,
+	// which means "not looked up", never "no default branch".
+	s, _ := testStore(t)
+	repoDir := t.TempDir()
+	if _, _, err := s.RegisterWorkspace(context.Background(), repoDir, RegisterFacts{
+		RepoDir: repoDir, DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	second := filepath.Join(repoDir, "second")
+	if err := os.MkdirAll(second, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Act.
+	if _, _, err := s.RegisterWorkspace(context.Background(), second, RegisterFacts{RepoDir: repoDir}); err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+
+	// Assert.
+	repos, err := s.ListRepositories(context.Background())
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(repos) != 1 || repos[0].DefaultBranch != "main" {
+		t.Fatalf("repositories = %+v, want the recorded default branch kept", repos)
+	}
+}

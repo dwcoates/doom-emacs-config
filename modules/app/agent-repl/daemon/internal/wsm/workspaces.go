@@ -113,7 +113,7 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		if err != nil {
 			return err
 		}
-		repo, err := ensureRepo(ctx, tx, repoDir)
+		repo, err := ensureRepo(ctx, tx, repoDir, facts.DefaultBranch)
 		if err != nil {
 			return err
 		}
@@ -147,19 +147,29 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 }
 
 // ensureRepo returns the repository for a canonicalized common dir, minting one
-// on first sight. The display name is the dir's base name; the default branch is
-// unknown at registration and stays empty until a caller records it.
-func ensureRepo(ctx context.Context, tx *sql.Tx, repoDir string) (RepoID, error) {
+// on first sight. The display name is the dir's base name; the default branch
+// is the announcing caller's, which is the only party that reads it off git.
+//
+// An EMPTY defaultBranch leaves a recorded one alone: "the caller did not look
+// it up" is not "the repository has no default branch", and overwriting a known
+// value with a blank would silently unset the merge target every later
+// announcement depends on.
+func ensureRepo(ctx context.Context, tx *sql.Tx, repoDir, defaultBranch string) (RepoID, error) {
 	var id RepoID
 	err := tx.QueryRowContext(ctx, `SELECT id FROM repositories WHERE dir = ?`, repoDir).Scan(&id)
-	if err == nil {
+	switch {
+	case err == nil:
+		if defaultBranch != "" {
+			if _, err := tx.ExecContext(ctx, `UPDATE repositories SET default_branch = ? WHERE id = ?`, defaultBranch, id); err != nil {
+				return "", err
+			}
+		}
 		return id, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	case !errors.Is(err, sql.ErrNoRows):
 		return "", err
 	}
 	id = NewRepoID()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO repositories (id, dir, name, default_branch) VALUES (?, ?, ?, '')`, id, repoDir, filepath.Base(repoDir)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO repositories (id, dir, name, default_branch) VALUES (?, ?, ?, ?)`, id, repoDir, filepath.Base(repoDir), defaultBranch); err != nil {
 		return "", err
 	}
 	return id, nil
