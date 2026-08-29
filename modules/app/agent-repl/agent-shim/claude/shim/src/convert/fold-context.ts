@@ -80,6 +80,19 @@ export interface FoldContext {
    */
   subagentFor(toolUseId: string): conversationv1.AgentId | undefined;
   /**
+   * The MCP server names this session knows, from `system:init.mcp_servers` and
+   * `mcpServerStatus()`.
+   *
+   * WHY A LOOKUP AND NOT A PARSE: no vendor field states which server served an
+   * `mcp__<server>__<tool>` call, and the qualification grammar is the vendor's
+   * — a server whose own name contains the separator would be split wrongly. So
+   * `AgentUnmodeled*.mcp_server` is set only when the candidate segment EXACTLY
+   * matches a name the session knows, and is left unset otherwise (shim lead's
+   * ruling, 2026-08-29).
+   */
+  mcpServerNames(): readonly string[];
+
+  /**
    * The last write or edit unit this agent produced.
    *
    * The vendor's IDE-diagnostics record carries NO tool-call id, so the join to
