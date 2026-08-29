@@ -181,6 +181,11 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; It sits above both the codec it encodes through and the transport it
 ;; sends over.
 (agent-repl--load-module "rpc")
+;; WHY: popup.el is the ONE shared editor-popup subroutine ("open path[:line]
+;; in a doom popup, right side, half width"); notes.el, commands.el and the
+;; host stream's `open_in_editor' arm all call it, so it loads above all of
+;; them.  It depends on core.el's logging ladder and nothing else.
+(agent-repl--load-module "popup")
 ;; WHY: daemon-link.el owns the daemon connection's whole life — discovery,
 ;; the one WatchDaemon stream, the reconnect loop and the blue-green
 ;; handover — and publishes the hooks every daemon-facing module hangs off.
@@ -210,6 +215,13 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; blink, the webview reload, the editor popup) resolve at call time, long
 ;; after every module is loaded.
 (agent-repl--load-module "host")
+;; WHY: roster.el is the WatchWorkspaceRoster consumer — the one source of
+;; Emacs's tabs, their order and their paint.  It sits above rpc.el (it
+;; subscribes through it) and calls workspace.el and status.el at runtime
+;; only, so it may load before either.
+;; It loads after host.el so the host accessors and hooks it reacts through
+;; are defined before its own hook registrations run.
+(agent-repl--load-module "roster")
 ;; WHY: frontends.el defines the presentation-frontend registry that
 ;; frontend.el (gui) registers into at load time.
 (agent-repl--load-module "frontends")

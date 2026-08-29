@@ -380,17 +380,6 @@ nil so post-kill passes don't act on stale runtime intent."
         (when (file-symlink-p canonical) (delete-file canonical))
         (when (file-exists-p target) (delete-file target))))))
 
-(ert-deftest agent-repl-test-ws-del-clears-pushed-render-state ()
-  "ws-del clears `:pushed-render-state' — a daemon-pushed runtime key tied
-to the session, so it must not outlive the tombstone.
-\(The former :queued-messages runtime key was removed in the S9 queue-plane
-endgame; this covers the same tombstone-clearing contract on a live key.)"
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-    (agent-repl--ws-put "ws1" :pushed-render-state :thinking)
-    (agent-repl--ws-del "ws1")
-    (should-not (agent-repl--ws-get "ws1" :pushed-render-state))))
-
 (ert-deftest agent-repl-test-ws-del-clears-incoming-session-id ()
   "ws-del clears `:incoming-session-id' — a staged id belongs to the
 killed session and must never survive into a revived workspace, where
@@ -761,65 +750,7 @@ dead shadow never counts as the owner."
 
 ;;;; ---- Tests: --ws-hide-tombstoned-p ----
 
-(ert-deftest agent-repl-test-ws-hide-tombstoned-p-returns-t-when-both-set ()
-  "A workspace tombstoned by the hide flow returns t."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "hidden-ws" :project-dir "/tmp/x")
-    (agent-repl--ws-put "hidden-ws" :hidden-project-dir t)
-    (agent-repl--ws-del "hidden-ws")
-    (should (agent-repl--ws-hide-tombstoned-p "hidden-ws"))))
-
-(ert-deftest agent-repl-test-ws-hide-tombstoned-p-returns-nil-for-kill-tombstoned ()
-  "A workspace tombstoned without the hide marker returns nil even though it is tombstoned."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "killed-ws" :project-dir "/tmp/x")
-    (agent-repl--ws-del "killed-ws")
-    (should (agent-repl--ws-tombstoned-p "killed-ws"))
-    (should-not (agent-repl--ws-hide-tombstoned-p "killed-ws"))))
-
-(ert-deftest agent-repl-test-ws-hide-tombstoned-p-returns-nil-for-live-marker ()
-  "A live workspace carrying the marker but no :killed-at returns nil.
-Predicate is a conjunction of tombstone state AND reason marker."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "live-ws" :project-dir "/tmp/x")
-    (agent-repl--ws-put "live-ws" :hidden-project-dir t)
-    (should-not (agent-repl--ws-hide-tombstoned-p "live-ws"))))
-
-(ert-deftest agent-repl-test-ws-hide-tombstoned-p-returns-nil-for-unknown ()
-  "An unregistered workspace returns nil."
-  (agent-repl-test--with-clean-state
-    (should-not (agent-repl--ws-hide-tombstoned-p "never-seen"))))
-
 ;;;; ---- Tests: --ws-hide-tombstoned-names ----
-
-(ert-deftest agent-repl-test-ws-hide-tombstoned-names-returns-hide-tombstones-only ()
-  "Enumerator returns hide-tombstoned ws but excludes kill-tombstoned and live ws."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "hidden1" :project-dir "/tmp/a")
-    (agent-repl--ws-put "hidden1" :hidden-project-dir t)
-    (agent-repl--ws-del "hidden1")
-    (agent-repl--ws-put "killed"   :project-dir "/tmp/b")
-    (agent-repl--ws-del "killed")
-    (agent-repl--ws-put "live"    :project-dir "/tmp/c")
-    (let ((names (agent-repl--ws-hide-tombstoned-names)))
-      (should (equal names '("hidden1")))
-      (should-not (member "killed" names))
-      (should-not (member "live" names)))))
-
-(ert-deftest agent-repl-test-ws-hide-tombstoned-names-sorted-by-name ()
-  "Returned names are sorted lexicographically for deterministic restore order."
-  (agent-repl-test--with-clean-state
-    (dolist (n '("c" "a" "b"))
-      (agent-repl--ws-put n :project-dir (concat "/tmp/" n))
-      (agent-repl--ws-put n :hidden-project-dir t)
-      (agent-repl--ws-del n))
-    (should (equal (agent-repl--ws-hide-tombstoned-names) '("a" "b" "c")))))
-
-(ert-deftest agent-repl-test-ws-hide-tombstoned-names-empty-when-no-matches ()
-  "Returns nil when no workspace carries the marker."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "live" :project-dir "/tmp/x")
-    (should-not (agent-repl--ws-hide-tombstoned-names))))
 
 ;;;; ---- Tests: --ws-render-status nil for hide-tombstoned ----
 
@@ -1014,27 +945,6 @@ even if bound — a nil cache is not a usable tab-bar signal."
   (agent-repl-test--with-clean-state
     (should-error (agent-repl--ws-render-status "missing") :type 'user-error)))
 
-(ert-deftest agent-repl-test-ws-render-status-returns-pushed-keyword ()
-  "The pushed :pushed-render-state keyword is returned verbatim."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
-    (agent-repl--ws-put "ws1" :pushed-render-state :thinking)
-    (should (eq :thinking (agent-repl--ws-render-status "ws1")))))
-
-(ert-deftest agent-repl-test-ws-render-status-returns-pushed-merge-conflict ()
-  "A pushed :merge-conflict is returned — the reactive conflict UX re-keys to it."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
-    (agent-repl--ws-put "ws1" :pushed-render-state :merge-conflict)
-    (should (eq :merge-conflict (agent-repl--ws-render-status "ws1")))))
-
-(ert-deftest agent-repl-test-ws-render-status-init-for-unpushed-known-live ()
-  "A known, live ws with no pushed state yet returns :init (never nil).
-A just-created workspace legitimately predates its first daemon push."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
-    (should (eq :init (agent-repl--ws-render-status "ws1")))))
-
 (ert-deftest agent-repl-test-ws-render-status-nil-for-tombstoned ()
   "Tombstoned (locally-closed) ws returns nil — the guard dominates."
   (agent-repl-test--with-clean-state
@@ -1052,187 +962,7 @@ workspace's badge."
     (agent-repl--ws-del "ws1")
     (should-not (agent-repl--ws-render-status "ws1"))))
 
-(ert-deftest agent-repl-test-ws-render-status-ignores-legacy-agent-state ()
-  "The function no longer derives from :agent-state / :repl-state.
-A legacy :agent-state is ignored; the pushed key alone decides."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
-    (agent-repl--ws-put "ws1" :agent-state :thinking)
-    (agent-repl--ws-put "ws1" :repl-state :dead)
-    (agent-repl--ws-put "ws1" :pushed-render-state :idle)
-    (should (eq :idle (agent-repl--ws-render-status "ws1")))))
-
 ;;;; ---- Tests: reorder-workspace-by-priority (moved from test-status.el) ----
-
-(ert-deftest agent-repl-test-reorder-priority-noop-when-priority-nil ()
-  "reorder-workspace-by-priority leaves cache untouched when ws has no priority."
-  (agent-repl-test--with-clean-state
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "ws-a" "new-ws"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-by-priority "new-ws")
-        (should-not captured)))))
-
-(ert-deftest agent-repl-test-reorder-priority-noop-when-not-in-cache ()
-  "reorder-workspace-by-priority no-ops when ws is not registered in cache."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "missing-ws" :priority "p1")
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "ws-a"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-by-priority "missing-ws")
-        (should-not captured)))))
-
-(ert-deftest agent-repl-test-reorder-priority-logs-bail-no-priority ()
-  "reorder-workspace-by-priority emits a BAIL/no-priority log line when ws has no :priority."
-  (agent-repl-test--with-clean-state
-    (let* ((persp-names-cache '("main" "ws-a" "new-ws"))
-           (logs nil))
-      (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args)
-                   (push (apply #'format fmt args) logs))))
-        (agent-repl--reorder-workspace-by-priority "new-ws")
-        (should (cl-find-if (lambda (l)
-                              (and (string-match-p "reorder-workspace-by-priority: BAIL" l)
-                                   (string-match-p "reason=no-priority" l)))
-                            logs))))))
-
-(ert-deftest agent-repl-test-reorder-priority-logs-bail-not-in-cache ()
-  "reorder-workspace-by-priority emits a BAIL/not-in-cache log line when ws is missing from the cache."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "missing-ws" :priority "p1")
-    (let* ((persp-names-cache '("main" "ws-a"))
-           (logs nil))
-      (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args)
-                   (push (apply #'format fmt args) logs))))
-        (agent-repl--reorder-workspace-by-priority "missing-ws")
-        (should (cl-find-if (lambda (l)
-                              (and (string-match-p "reorder-workspace-by-priority: BAIL" l)
-                                   (string-match-p "reason=not-in-cache" l)))
-                            logs))))))
-
-(ert-deftest agent-repl-test-reorder-priority-preserves-cache-string-identity ()
-  "After reorder, the WS slot in `persp-names-cache' is `eq' to the
-canonical string already in the cache, NOT to the (potentially fresh)
-WS argument.  Regression for the persp-kill failure where `cl-delete'
-with default `:test #'eql' could not match a content-equal but
-identity-distinct string injected by `agent-repl-set-priority' from
-`completing-read'.  See workspace.el for the full explanation."
-  (agent-repl-test--with-clean-state
-    (let* ((canonical (copy-sequence "new-p1"))
-           (fresh (copy-sequence "new-p1"))
-           (persp-nil-name "main")
-           (persp-names-cache (list "main" "ws-a" canonical))
-           (captured nil))
-      (should-not (eq canonical fresh))
-      (agent-repl--ws-put fresh :priority "p1")
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-by-priority fresh)
-        (let ((injected (car (member "new-p1" captured))))
-          (should injected)
-          (should (eq injected canonical))
-          (should-not (eq injected fresh)))))))
-
-(ert-deftest agent-repl-test-reorder-priority-logs-apply-on-success ()
-  "reorder-workspace-by-priority emits an APPLY log line on the success path."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "new-p1" :priority "p1")
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "ws-a" "new-p1"))
-           (logs nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache) (lambda (_) nil))
-                ((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args)
-                   (push (apply #'format fmt args) logs))))
-        (agent-repl--reorder-workspace-by-priority "new-p1")
-        (should (cl-find-if (lambda (l)
-                              (string-match-p "reorder-workspace-by-priority: APPLY" l))
-                            logs))))))
-
-(ert-deftest agent-repl-test-reorder-priority-p1-moves-before-unprioritized ()
-  "A new p1 workspace is moved ahead of unprioritized workspaces."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "new-p1" :priority "p1")
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "ws-a" "ws-b" "new-p1"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-by-priority "new-p1")
-        (should (equal captured '("main" "new-p1" "ws-a" "ws-b")))))))
-
-(ert-deftest agent-repl-test-reorder-priority-p2-after-existing-p1 ()
-  "A new p2 workspace lands after an existing p1 but before unprioritized."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-p1" :priority "p1")
-    (agent-repl--ws-put "new-p2" :priority "p2")
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "ws-p1" "ws-a" "new-p2"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-by-priority "new-p2")
-        (should (equal captured '("main" "ws-p1" "new-p2" "ws-a")))))))
-
-(ert-deftest agent-repl-test-reorder-priority-equal-priority-after-existing ()
-  "A new p1 workspace lands after an existing p1 (does not displace peers)."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-p1-old" :priority "p1")
-    (agent-repl--ws-put "new-p1" :priority "p1")
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "ws-p1-old" "ws-a" "new-p1"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-by-priority "new-p1")
-        (should (equal captured '("main" "ws-p1-old" "new-p1" "ws-a")))))))
-
-(ert-deftest agent-repl-test-reorder-priority-p05-goes-to-very-front ()
-  "A new p05 workspace lands ahead of every other priority and unprioritized."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-p1" :priority "p1")
-    (agent-repl--ws-put "ws-p2" :priority "p2")
-    (agent-repl--ws-put "new-p05" :priority "p05")
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "ws-p1" "ws-p2" "ws-a" "new-p05"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-by-priority "new-p05")
-        (should (equal captured '("main" "new-p05" "ws-p1" "ws-p2" "ws-a")))))))
-
-(ert-deftest agent-repl-test-reorder-priority-p3-after-all-priorities ()
-  "A new p3 workspace lands after p05/p1/p2 and before unprioritized."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-p05" :priority "p05")
-    (agent-repl--ws-put "ws-p1" :priority "p1")
-    (agent-repl--ws-put "ws-p2" :priority "p2")
-    (agent-repl--ws-put "new-p3" :priority "p3")
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "ws-p05" "ws-p1" "ws-p2" "ws-a" "new-p3"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-by-priority "new-p3")
-        (should (equal captured '("main" "ws-p05" "ws-p1" "ws-p2" "new-p3" "ws-a")))))))
-
-(ert-deftest agent-repl-test-reorder-priority-preserves-nil-persp-position ()
-  "reorder-workspace-by-priority keeps persp-nil-name at the head of the cache."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "new-p1" :priority "p1")
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "ws-a" "new-p1"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-by-priority "new-p1")
-        (should (equal (car captured) "main"))))))
 
 ;;;; ---- Tests: --reorder-workspace-next-to ----
 
@@ -1580,24 +1310,6 @@ gated push would then drop the very repaint this exists for."
       (should-not (agent-repl--ws-frame-save-state)))))
 
 ;;;; ---- Tests: --ws-materialize-daemon-workspace roster durability ----
-
-(ert-deftest agent-repl-test-ws-materialize-daemon-persists-roster ()
-  "A successful materialization writes the new workspace to the roster.
-Materialization starts no session, so the `--state-save' piggyback that
-persists a normally-opened workspace never runs for it; without this
-call the workspace exists only in memory and its perspective is gone
-after the next Emacs restart."
-  (agent-repl-test--with-clean-state
-    (let ((persisted nil))
-      (cl-letf (((symbol-function 'persp-add-new) (lambda (_ws) 'a-persp))
-                ((symbol-function 'set-persp-parameter) #'ignore)
-                ((symbol-function 'persp-kill) #'ignore)
-                ((symbol-function 'agent-repl--snapshot-persist-materialized-workspace)
-                 (lambda (ws) (setq persisted ws))))
-        (should (eq (agent-repl--ws-materialize-daemon-workspace
-                     "dws" '(:project-dir "/tmp/dws" :daemon-workspace-job-id "j1"))
-                    'created))
-        (should (equal persisted "dws"))))))
 
 ;;;; ---- Tests: --ws-create ----
 
@@ -2437,41 +2149,6 @@ That is the bare-repository shape: no main checkout to switch to."
     (agent-repl--toggle-repo-fold "/a/.git")
     (should (equal (agent-repl--folded-repo-keys) '("/a/.git" "/b/.git")))))
 
-(ert-deftest agent-repl-test-filter-folded-names-drops-folded-repo ()
-  "`--filter-folded-names' drops the workspaces of a folded repo."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "doom-a" :group-key "/repos/doom/.git")
-    (agent-repl--ws-put "ee-a"   :group-key "/repos/explanation-engine/.git")
-    (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
-    (should (equal (agent-repl--filter-folded-names '("doom-a" "ee-a") "doom-a")
-                   '("doom-a")))))
-
-(ert-deftest agent-repl-test-filter-folded-names-retains-current ()
-  "`--filter-folded-names' keeps CURRENT-NAME even when its repo is folded."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ee-a" :group-key "/repos/explanation-engine/.git")
-    (agent-repl--ws-put "ee-b" :group-key "/repos/explanation-engine/.git")
-    (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
-    (should (equal (agent-repl--filter-folded-names '("ee-a" "ee-b") "ee-b")
-                   '("ee-b")))))
-
-(ert-deftest agent-repl-test-filter-folded-names-identity-when-nothing-folded ()
-  "`--filter-folded-names' returns NAMES untouched when no repo is folded."
-  (agent-repl-test--with-clean-state
-    (let ((names '("a" "b")))
-      (should (eq (agent-repl--filter-folded-names names "a") names)))))
-
-(ert-deftest agent-repl-test-ws-tabline-names-excludes-folded-repo ()
-  "`--ws-tabline-names' is the tab-bar list minus folded repos."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "doom-a" :group-key "/repos/doom/.git")
-    (agent-repl--ws-put "ee-a"   :group-key "/repos/explanation-engine/.git")
-    (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
-    (let ((persp-names-cache '("doom-a" "ee-a")))
-      (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-                 (lambda () "doom-a")))
-        (should (equal (agent-repl--ws-tabline-names) '("doom-a")))))))
-
 ;;;; ---- The two context cuts --------------------------------------------
 
 (ert-deftest agent-repl-test-ws-state-icon-clearing ()
@@ -2483,13 +2160,6 @@ That is the bare-repository shape: no main checkout to switch to."
   ":compacting has a glyph of its own in `agent-repl-ws-state-icons'."
   ;; Act / Assert
   (should (equal (alist-get :compacting agent-repl-ws-state-icons) "🗜")))
-
-(ert-deftest agent-repl-test-ws-hibernated-keeps-the-sleep-glyph ()
-  "The 💤 glyph belongs to `:hibernated\=', which is what it always described.
-It named a nap while the state it sat on also covered a dead shim; after
-the split it sits on the half it was actually about."
-  ;; Act / Assert
-  (should (equal (alist-get :hibernated agent-repl-ws-state-icons) "💤")))
 
 (ert-deftest agent-repl-test-ws-severed-takes-a-glyph-of-its-own ()
   "`:severed\=' gets its OWN glyph, never the sleep one.
@@ -2534,24 +2204,6 @@ must keep seeing what persp-mode actually says."
 ;; mid-merge kills the session the daemon's merge lease drives conflict
 ;; resolution through, so the primitive refuses before it touches anything.
 
-(ert-deftest agent-repl-test-merge-unfinished-p-true-while-merging ()
-  "A pushed `:merging' state reads as an unfinished merge."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :pushed-render-state :merging)
-    (should (agent-repl--ws-merge-unfinished-p "ws"))))
-
-(ert-deftest agent-repl-test-merge-unfinished-p-true-while-queued ()
-  "A pushed `:merge-queued' state reads as an unfinished merge."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :pushed-render-state :merge-queued)
-    (should (agent-repl--ws-merge-unfinished-p "ws"))))
-
-(ert-deftest agent-repl-test-merge-unfinished-p-true-while-conflicted ()
-  "A pushed `:merge-conflict' state reads as an unfinished merge."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :pushed-render-state :merge-conflict)
-    (should (agent-repl--ws-merge-unfinished-p "ws"))))
-
 (ert-deftest agent-repl-test-merge-unfinished-p-nil-when-merged ()
   "`:merged' is terminal, so the workspace is free to be torn down."
   (agent-repl-test--with-clean-state
@@ -2576,44 +2228,11 @@ must keep seeing what persp-mode actually says."
     (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
     (should-not (agent-repl--ws-merge-unfinished-p "ws"))))
 
-(ert-deftest agent-repl-test-teardown-guard-signals-on-unfinished-merge ()
-  "The assertion signals `user-error' for a workspace still merging."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :pushed-render-state :merging)
-    (should-error (agent-repl--assert-mergeable-teardown "ws")
-                  :type 'user-error)))
-
 (ert-deftest agent-repl-test-teardown-guard-passes-on-terminal-merge ()
   "The assertion returns quietly once the merge has a verdict."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws" :pushed-render-state :merged)
     (should-not (agent-repl--assert-mergeable-teardown "ws"))))
-
-(ert-deftest agent-repl-test-teardown-guard-logs-the-refusal ()
-  "The refusal is recorded through the canonical log helper."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :pushed-render-state :merge-conflict)
-    (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args)
-                   (push (apply #'format fmt args) logged))))
-        (ignore-errors (agent-repl--assert-mergeable-teardown "ws")))
-      (should (cl-some (lambda (line)
-                         (and (string-match-p "REFUSED" line)
-                              (string-match-p "merge not finished" line)))
-                       logged)))))
-
-(ert-deftest agent-repl-test-kill-refuses-merging-workspace-before-teardown ()
-  "`--kill-one-workspace' aborts BEFORE any teardown step mutates state."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
-    (agent-repl--ws-put "ws" :pushed-render-state :merging)
-    (let ((saved nil))
-      (cl-letf (((symbol-function 'agent-repl--state-save)
-                 (lambda (&rest _) (setq saved t))))
-        (should-error (agent-repl--kill-one-workspace "ws") :type 'user-error))
-      (should-not saved)
-      (should (agent-repl--ws-get "ws" :project-dir)))))
 
 ;;;; ---- ws-log-name screens a caller-supplied name ----
 
@@ -2641,6 +2260,150 @@ The screen must only demote names that could not be routed at all."
               ;; Assert
               (should (equal resolved "ws1"))))
         (delete-directory project t)))))
+
+
+;;;; ---- The ref id is the identity ---------------------------------------
+
+(ert-deftest agent-repl-test-ws-by-ref-id-finds-the-workspace ()
+  "A workspace is found by the daemon-minted id it echoes."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "alpha" :ref '(:id "ws-1" :dir "/w/1"))
+    ;; Act / Assert
+    (should (equal (agent-repl--ws-by-ref-id "ws-1") "alpha"))))
+
+(ert-deftest agent-repl-test-ws-by-ref-id-answers-nil-for-an-unknown-id ()
+  "An id no workspace carries resolves to nothing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "alpha" :ref '(:id "ws-1" :dir "/w/1"))
+    ;; Act / Assert
+    (should (null (agent-repl--ws-by-ref-id "ws-2")))))
+
+(ert-deftest agent-repl-test-ws-by-ref-id-ignores-a-tombstone ()
+  "A tombstone has no tab, so answering with one would resurrect it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "alpha" :ref '(:id "ws-1" :dir "/w/1"))
+    (agent-repl--ws-put "alpha" :killed-at (current-time))
+    ;; Act / Assert
+    (should (null (agent-repl--ws-by-ref-id "ws-1")))))
+
+(ert-deftest agent-repl-test-ws-by-ref-id-does-not-match-on-the-dir ()
+  "The dir is display, never a key: paths have many spellings."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "alpha" :ref '(:id "ws-1" :dir "/w/1"))
+    ;; Act / Assert
+    (should (null (agent-repl--ws-by-ref-id "/w/1")))))
+
+;;;; ---- Render status is the roster's arm --------------------------------
+
+(ert-deftest agent-repl-test-ws-render-status-answers-the-roster-arm ()
+  "The status renderers read is the roster row's status arm."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "alpha" :project-dir "/w/1")
+    (cl-letf (((symbol-function 'agent-repl-status-tab-state)
+               (lambda (_ws) :merge-conflict)))
+      ;; Act / Assert
+      (should (eq (agent-repl--ws-render-status "alpha") :merge-conflict)))))
+
+(ert-deftest agent-repl-test-ws-render-status-is-nil-before-the-first-push ()
+  "A workspace the roster has not spoken about draws no colour."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "alpha" :project-dir "/w/1")
+    (cl-letf (((symbol-function 'agent-repl-status-tab-state) (lambda (_ws) nil)))
+      ;; Act / Assert
+      (should (null (agent-repl--ws-render-status "alpha"))))))
+
+(ert-deftest agent-repl-test-ws-render-status-is-nil-for-a-tombstone ()
+  "A workspace closed locally has no state to draw."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "alpha" :project-dir "/w/1")
+    (agent-repl--ws-put "alpha" :killed-at (current-time))
+    (cl-letf (((symbol-function 'agent-repl-status-tab-state) (lambda (_ws) :ready)))
+      ;; Act / Assert
+      (should (null (agent-repl--ws-render-status "alpha"))))))
+
+(ert-deftest agent-repl-test-ws-render-status-refuses-an-unknown-workspace ()
+  "An unregistered name is a caller bug, not a default state."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    ;; Act / Assert
+    (should-error (agent-repl--ws-render-status "never-registered")
+                  :type 'user-error)))
+
+;;;; ---- The tab bar follows the roster -----------------------------------
+
+(ert-deftest agent-repl-test-ws-tabline-names-follow-the-roster-order ()
+  "Tab order is the roster's walk order strictly."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-roster-tab-order)
+               (lambda () '("two" "one")))
+              ((symbol-function 'agent-repl--ws-list-names)
+               (lambda () '("one" "two"))))
+      ;; Act / Assert
+      (should (equal (agent-repl--ws-tabline-names) '("two" "one"))))))
+
+(ert-deftest agent-repl-test-ws-tabline-names-drop-a-name-with-no-perspective ()
+  "The tab bar can only render tabs that exist."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-roster-tab-order)
+               (lambda () '("one" "ghost")))
+              ((symbol-function 'agent-repl--ws-list-names)
+               (lambda () '("one"))))
+      ;; Act / Assert
+      (should (equal (agent-repl--ws-tabline-names) '("one"))))))
+
+(ert-deftest agent-repl-test-ws-tabline-names-fall-back-before-the-first-push ()
+  "Before the roster speaks, the workspaces Emacs knows are drawn as they are."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
+              ((symbol-function 'agent-repl--ws-list-names)
+               (lambda () '("one" "two"))))
+      ;; Act / Assert
+      (should (equal (agent-repl--ws-tabline-names) '("one" "two"))))))
+
+;;;; ---- The merge teardown guard -----------------------------------------
+
+(ert-deftest agent-repl-test-ws-merge-unfinished-p-is-true-while-merging ()
+  "A merge with no verdict yet is unfinished."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-status-tab-state) (lambda (_ws) :merging)))
+      ;; Act / Assert
+      (should (agent-repl--ws-merge-unfinished-p "alpha")))))
+
+(ert-deftest agent-repl-test-ws-merge-unfinished-p-is-false-once-merged ()
+  "A settled merge is finished and the workspace is free to tear down."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-status-tab-state) (lambda (_ws) :merged)))
+      ;; Act / Assert
+      (should-not (agent-repl--ws-merge-unfinished-p "alpha")))))
+
+(ert-deftest agent-repl-test-ws-teardown-guard-refuses-an-unfinished-merge ()
+  "Tearing a merging workspace down kills the session the merge is driving."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-status-tab-state) (lambda (_ws) :merge-conflict)))
+      ;; Act / Assert
+      (should-error (agent-repl--assert-mergeable-teardown "alpha")
+                    :type 'user-error))))
+
+(ert-deftest agent-repl-test-ws-teardown-guard-allows-a-settled-workspace ()
+  "A workspace with no merge in flight tears down normally."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-status-tab-state) (lambda (_ws) :ready)))
+      ;; Act / Assert
+      (should (null (agent-repl--assert-mergeable-teardown "alpha"))))))
 
 (provide 'test-workspace)
 ;;; test-workspace.el ends here
