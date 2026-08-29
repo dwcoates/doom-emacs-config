@@ -23,6 +23,7 @@ package conversation.v1;
 
 import "conversation/v1/api.proto";
 import "conversation/v1/content_blocks.proto";
+import "conversation/v1/detached_work.proto";
 import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
@@ -1842,6 +1843,9 @@ message AgentBashInterrupted {
     AgentBashInterruptedByUser by_user = 2;
     // It outlived its own timeout.
     AgentBashInterruptedByTimeout timed_out = 3;
+    // We stopped being able to see it — the spool vanished or went silent;
+    // not known to have failed. Draws as "lost", never as a cancel.
+    DetachedLost lost = 4;
   }
 }
 
@@ -2351,6 +2355,9 @@ message AgentSubagentFailure {
     // A person stopped the subagent by hand. Not a fault: the run did what it
     // was told, and a consumer must not draw it as an error.
     AgentSubagentStoppedByUser stopped_by_user = 2;
+    // We stopped being able to see it — its transcript vanished or went
+    // silent; not known to have failed. Draws as "lost".
+    DetachedLost lost = 3;
   }
 }
 

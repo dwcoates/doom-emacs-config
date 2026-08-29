@@ -255,6 +255,10 @@ message AgentFailure {
     // this is a turn that simply stops, which a consumer draws as still
     // working.
     AgentContinuationPrevented continuation_prevented = 17;
+    // WE STOPPED BEING ABLE TO SEE THE AGENT — a detached agent whose
+    // transcript vanished or went silent, or one a boot sweep found open with
+    // no producer. Not known to have failed; the feed draws "lost".
+    DetachedLost lost = 18;
   }
 }
 
