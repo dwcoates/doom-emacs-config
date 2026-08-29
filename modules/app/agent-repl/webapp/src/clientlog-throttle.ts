@@ -13,7 +13,7 @@
  * the burst in the first place, which is what keeps the daemon's queue, its
  * ack bookkeeping and the on-disk log proportional to what actually happened.
  *
- * WHY THROTTLING RATHER THAN BATCHING: `ClientLogCmd` carries ONE level, ONE
+ * WHY THROTTLING RATHER THAN BATCHING: `ClientLogRecord` carries ONE level, ONE
  * message and ONE context Struct. A batch would need a repeated field, and the
  * per-record context — which is where the whole structured record lives — has
  * nowhere to go in a newline-joined message. Changing the wire contract to save
@@ -24,8 +24,7 @@
  * bound is already full, and every drop is counted and reported to the daemon
  * as its own record at the next flush.
  */
-import type { ClientLogContext } from "./protocol.js";
-import type { ClientLogLevel } from "./wslog.js";
+import type { ClientLogContext, ClientLogLevel } from "./log.js";
 
 /** Pushes one record toward the daemon; false means the socket refused it. */
 export type ClientLogSend = (level: ClientLogLevel, message: string, context?: ClientLogContext) => boolean;

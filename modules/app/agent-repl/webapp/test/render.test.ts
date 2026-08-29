@@ -45,7 +45,7 @@ import {
   navTokensForEntry,
 } from "../src/render.js";
 import { BUBBLE_WAVE_PERIOD_MS } from "../src/breathing.js";
-import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/log.js";
 import { DEFERRED_CLASS, HEIGHT_VAR, PLACEHOLDER_CLASS } from "../src/lazy-item.js";
 import { StubIntersectionObserver, withIntersectionObserver } from "./intersection-stub.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";

@@ -38,7 +38,7 @@ import {
   commandUnsentFailure,
 } from "./local-failure.js";
 import type { FailureCardItem } from "./store.js";
-import { log, logVerbose } from "./wslog.js";
+import { log, logVerbose } from "./log.js";
 import { selectedModel, type SelectedModel } from "../../proto/ts/schema-literals.js";
 
 /**

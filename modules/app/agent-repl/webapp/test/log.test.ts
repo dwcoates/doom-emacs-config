@@ -10,7 +10,7 @@ import {
   resetLoggingForTests,
   restampRecordIdentity,
   setLogger,
-} from "../src/wslog.js";
+} from "../src/log.js";
 
 /** A logger wired to spies: captured forwards, captured console lines. */
 function spyLogger(sendResult = true): {
@@ -543,7 +543,7 @@ describe("forwarded record source identity", () => {
 
     // Act — re-import the module graph, exactly as a reload would build it.
     vi.resetModules();
-    return import("../src/wslog.js").then((reloaded) => {
+    return import("../src/log.js").then((reloaded) => {
       const stamped = reloaded.restampRecordIdentity({
         message: "first record after reload",
         claude_session_id: "60f5-retired",

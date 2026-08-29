@@ -20,7 +20,7 @@
  * app's own control elements are left alone: they are UI gestures, not
  * hyperlinks, and hijacking them would break the page.
  */
-import { log } from "./wslog.js";
+import { log } from "./log.js";
 
 /** Opens one URL outside the webview. Rejects when the daemon refused it. */
 export type ExternalOpener = (url: string) => Promise<void>;

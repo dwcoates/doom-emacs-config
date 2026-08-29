@@ -7,7 +7,7 @@ import {
   transcriptStatsCached,
 } from "../src/async-stream.js";
 import { TextItem, ToolItem } from "../src/store.js";
-import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/log.js";
 
 /** One JSONL line of a subagent transcript. */
 function line(o: unknown): string {

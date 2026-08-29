@@ -10,7 +10,7 @@ import {
   log,
   resetLoggingForTests,
   setLogger,
-} from "../src/wslog.js";
+} from "../src/log.js";
 
 class GraphWebSocket {
   static readonly OPEN = 1;

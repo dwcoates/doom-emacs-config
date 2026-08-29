@@ -17,7 +17,7 @@
  */
 
 import { animatedEllipsis, escapeHtml } from "./highlight.js";
-import { log } from "./wslog.js";
+import { log } from "./log.js";
 
 /** Line prefix the skill emits; everything after it is the file path. */
 export const CHESS_GAME_MARKER = "---> agent-repl-chess-game-file: ";

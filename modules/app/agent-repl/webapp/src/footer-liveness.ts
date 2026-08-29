@@ -33,7 +33,7 @@ import type { FooterAgentRow } from "./progress-footer.js";
 import type { MergeStatus, ProgressInput, WebRenderState } from "./state-adapter.js";
 import type { ConversationItem } from "./store.js";
 import type { ClientLogContext } from "./protocol.js";
-import type { ClientLogLevel } from "./wslog.js";
+import type { ClientLogLevel } from "./log.js";
 
 /**
  * The brand. It is `declare const`, so it exists only in the type system and

@@ -9,7 +9,7 @@
  * open, so nothing enters the durable replay ring and nothing polls once
  * every fold is shut.
  */
-import { clearLogDedup, log } from "./wslog.js";
+import { clearLogDedup, log } from "./log.js";
 
 /** The daemon's task-output route response (see server.handleTaskOutput). */
 export interface TaskTailResponse {

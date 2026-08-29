@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FetchTail, TaskTailResponse, WatcherPoller } from "../src/watcher-poll.js";
-import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/log.js";
 
 /** A logger wired to spies: captured console lines, no forwarding. */
 function spyLogger(): { logger: ForwardingLogger; consoleLines: string[] } {
