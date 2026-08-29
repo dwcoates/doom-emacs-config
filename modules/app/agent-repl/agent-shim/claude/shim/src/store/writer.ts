@@ -388,12 +388,11 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       if (result.case !== "detachedWork") continue;
       const work = result.value.work?.value;
       const origin = result.value.origin;
-      const run =
-        origin.case === "detached"
-          ? origin.value.detachedFromId?.value
-          : origin.case === "created" && origin.value.workCreated?.work.case === "bash"
-            ? undefined
-            : undefined;
+      // ONLY THE `detached` ARM NAMES A RUN. A `created` announcement describes
+      // work that had no originating call, so there is no unit id to join to —
+      // and inventing one would point a watch at another run's rows.
+      if (origin.case !== "detached") continue;
+      const run = origin.value.detachedFromId?.value;
       if (work !== undefined && run !== undefined) reader.linkWork(work, run);
     }
   };

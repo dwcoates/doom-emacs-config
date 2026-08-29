@@ -52,6 +52,7 @@ describe("createStoreClient", () => {
       "openAgentSession",
       "readAgentPage",
       "watchAgentSession",
+      "watchBashRun",
       "writeBatch",
     ]);
   });
