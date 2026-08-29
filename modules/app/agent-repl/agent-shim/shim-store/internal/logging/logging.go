@@ -35,6 +35,33 @@ type Fields struct {
 	Operation          string
 	Level              string
 	RequestID          string
+	// ---- the overhaul's correlation vocabulary (BRIEF-COMMON) ----
+	// Every identifier lives in its own context key; none is ever left to the
+	// message text, because the integration loop greps these keys by name.
+	AgentID string
+	// VendorSessionID is the vendor's own session id, a mutable ATTRIBUTE of an
+	// agent — never an addressing key.
+	VendorSessionID string
+	// BookAgentID is StorePageLine.page_agent_id: the book a line renders in.
+	BookAgentID string
+	WriteID     string
+	UpsertKey   string
+	// Position is the opaque StoreItemPointer value, never the raw row id.
+	Position string
+	// WriteSeq is the store-internal global write ordinal (the watch pin). It
+	// never appears on any wire.
+	WriteSeq uint64
+	// WatchTokenHash is a sha256 PREFIX of a watch token. The token itself is a
+	// capability and is never logged.
+	WatchTokenHash string
+	// RPC is the Connect procedure name, e.g. "/store.v1.ShimStore/WriteBatch".
+	RPC        string
+	FileID     string
+	Path       string
+	Offset     int64
+	TaskID     string
+	ActivityID string
+	TurnID     string
 	// Statement is a SQL statement FAMILY — "replay", "ingest", "open_tasks" —
 	// never rendered SQL and never bound values. The store's payloads are
 	// opaque to it by design, and a slow-query record that quoted a statement
@@ -140,16 +167,29 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 	}
 	context := map[string]any{}
 	for key, value := range map[string]string{
-		"component":       merged.Component,
-		"db":              merged.DatabasePath,
-		"table":           merged.Table,
-		"socket":          merged.Socket,
-		"producer":        merged.Producer,
-		"subscriber":      merged.Subscriber,
-		"transaction":     merged.Transaction,
-		"terminal_owner":  merged.TerminalOwner,
-		"terminal_reason": merged.TerminalReason,
-		"error":           merged.ErrorCause,
+		"component":         merged.Component,
+		"db":                merged.DatabasePath,
+		"table":             merged.Table,
+		"socket":            merged.Socket,
+		"producer":          merged.Producer,
+		"subscriber":        merged.Subscriber,
+		"transaction":       merged.Transaction,
+		"terminal_owner":    merged.TerminalOwner,
+		"terminal_reason":   merged.TerminalReason,
+		"error":             merged.ErrorCause,
+		"agent_id":          merged.AgentID,
+		"vendor_session_id": merged.VendorSessionID,
+		"book_agent_id":     merged.BookAgentID,
+		"write_id":          merged.WriteID,
+		"upsert_key":        merged.UpsertKey,
+		"position":          merged.Position,
+		"watch_token_hash":  merged.WatchTokenHash,
+		"rpc":               merged.RPC,
+		"file_id":           merged.FileID,
+		"path":              merged.Path,
+		"task_id":           merged.TaskID,
+		"activity_id":       merged.ActivityID,
+		"turn_id":           merged.TurnID,
 	} {
 		if value != "" {
 			context[key] = value
@@ -160,6 +200,12 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		context["duration_ms"] = merged.Duration.Milliseconds()
 		context["rows"] = merged.Rows
 		context["threshold_ms"] = merged.Threshold.Milliseconds()
+	}
+	if merged.WriteSeq != 0 {
+		context["write_seq"] = merged.WriteSeq
+	}
+	if merged.Offset != 0 {
+		context["offset"] = merged.Offset
 	}
 	terminal := merged.TerminalOwner != "" || merged.TerminalReason != ""
 	for key, value := range map[string]uint64{
@@ -301,6 +347,51 @@ func merge(base, extra Fields) Fields {
 	}
 	if extra.RequestID != "" {
 		base.RequestID = extra.RequestID
+	}
+	if extra.AgentID != "" {
+		base.AgentID = extra.AgentID
+	}
+	if extra.VendorSessionID != "" {
+		base.VendorSessionID = extra.VendorSessionID
+	}
+	if extra.BookAgentID != "" {
+		base.BookAgentID = extra.BookAgentID
+	}
+	if extra.WriteID != "" {
+		base.WriteID = extra.WriteID
+	}
+	if extra.UpsertKey != "" {
+		base.UpsertKey = extra.UpsertKey
+	}
+	if extra.Position != "" {
+		base.Position = extra.Position
+	}
+	if extra.WriteSeq != 0 {
+		base.WriteSeq = extra.WriteSeq
+	}
+	if extra.WatchTokenHash != "" {
+		base.WatchTokenHash = extra.WatchTokenHash
+	}
+	if extra.RPC != "" {
+		base.RPC = extra.RPC
+	}
+	if extra.FileID != "" {
+		base.FileID = extra.FileID
+	}
+	if extra.Path != "" {
+		base.Path = extra.Path
+	}
+	if extra.Offset != 0 {
+		base.Offset = extra.Offset
+	}
+	if extra.TaskID != "" {
+		base.TaskID = extra.TaskID
+	}
+	if extra.ActivityID != "" {
+		base.ActivityID = extra.ActivityID
+	}
+	if extra.TurnID != "" {
+		base.TurnID = extra.TurnID
 	}
 	if extra.Statement != "" {
 		base.Statement = extra.Statement
