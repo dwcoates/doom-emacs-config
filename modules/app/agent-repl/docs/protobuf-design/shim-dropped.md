@@ -13,3 +13,6 @@ unless marked FORBIDDEN.
 - --claude-bin (driving the user's system claude for version parity):
   FORBIDDEN by the bundled-only ruling (the pinned SDK binary is the one
   driven) — this one IS a prohibition, stated in shim.md.
+- (Prohibition audit, later 2026-08-29) STRIPPED to silence: the
+  lock-acquisition loud-failure/refuse-to-start sentences, and the
+  nothing-parses-the-login-TUI rule (the raw-bytes design implies it).
