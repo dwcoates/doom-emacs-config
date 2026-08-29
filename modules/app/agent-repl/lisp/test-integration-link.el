@@ -91,6 +91,44 @@ WatchDaemon is the ONE daemon-level stream; the link holds exactly it."
       (should (agent-repl-link-up-p))
       (should (equal 1 (length (agent-repl-itest--subscribers daemon "daemon")))))))
 
+(ert-deftest agent-repl-itest-link-comes-up-on-acceptance-with-no-pushes ()
+  "A WatchDaemon that is never pushed anything still brings the link UP.
+THE STANDING-STREAM ACCEPTANCE RULE: the daemon flushes the response
+headers the moment it accepts the subscription, and a client treats their
+ARRIVAL as acceptance — before any frame exists.  A quiet daemon is the
+normal case (nothing is draining, nothing is rolling out), so a link that
+waited for a first push would sit down indefinitely against a perfectly
+healthy daemon.
+
+Nothing here pushes, scripts a snapshot, or waits on the daemon's own
+subscriber registry first: the assertion is the CLIENT's, and its only
+input is the header block."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((up nil)
+          (agent-repl-link-up-functions nil)
+          (agent-repl-link-down-functions nil)
+          (agent-repl-link-handover-functions nil)
+          (agent-repl-link-drain-functions nil)
+          (agent-repl-link-no-daemon-functions nil)
+          (agent-repl-link-drain nil)
+          (agent-repl-link-reconnect-interval-seconds 0.05))
+      (add-hook 'agent-repl-link-up-functions (lambda (&rest _) (setq up t)))
+      (unwind-protect
+          (progn
+            ;; Act.
+            (agent-repl-link-connect)
+            ;; Assert: acceptance alone is enough.
+            (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p)) nil
+                                          "the link to come up on acceptance alone")
+            (should (agent-repl-link-up-p))
+            (should up)
+            ;; And the stream is STANDING, not concluded — a standing stream
+            ;; never ends of its own accord.
+            (should (equal 1 (length (agent-repl-itest--subscribers daemon "daemon")))))
+        (when (agent-repl-link-primary)
+          (ignore-errors (agent-repl-connect-close (agent-repl-link-primary))))))))
+
 (ert-deftest agent-repl-itest-link-absent-daemon-runs-the-no-daemon-hooks ()
   "No daemon.addr → the no-daemon hooks run and the link stays down.
 That absence is the legal no-daemon state; cold start hooks onto exactly

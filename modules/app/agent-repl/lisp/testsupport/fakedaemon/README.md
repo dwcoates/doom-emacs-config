@@ -66,6 +66,25 @@ registry: `WatchHostWorkspace` (keyed by workspace id), `WatchDaemon` and
 `agentrepl.v1` stream belongs to the webapp; the fake answers those
 `unimplemented` so a wrong caller fails loudly instead of hanging.
 
+**Acceptance is the header block.** A standing stream is ACCEPTED the moment
+its subscription is registered, and the response headers (status 200 and the
+streaming content type) are flushed right then — before any snapshot, before
+any push, and even when the stream will stay silent indefinitely. A client
+treats header arrival as acceptance, and ends a watch only by killing its
+transport.
+
+`connect-go` does not do this on its own: it writes headers lazily, on the
+handler's first `Send`. `accept.go` supplies the mechanism — a
+`ResponseWriter` wrapper the mux installs on every request, which the stream
+handlers call `accept` on once the subscriber is registered, and which
+swallows `connect-go`'s later `WriteHeader` (logging a warning if that call
+ever disagrees about the status). Unary calls are untouched: nothing calls
+`accept`, so `connect-go`'s own `WriteHeader` is the first one through, and a
+refusal keeps its own status.
+
+Validation runs BEFORE registration, so an illegal stream request is refused
+and never accepted.
+
 ## Control plane
 
 All under `/_fake/`, on the same address. Control bodies are parsed with
@@ -99,10 +118,10 @@ A suite drives one instance like this:
 2. Read the address from that file, exactly as production does.
 3. `/_fake/script` any answer the scenario needs that is not the default (an
    error arm, an unhealthy verdict, a blocked close).
-4. Open whatever streams the scenario needs from the Emacs side, then
-   poll `GET /_fake/subscribers` until the
-   expected subscription is registered — a push before that would be
-   delivered to nobody.
+4. Open whatever streams the scenario needs from the Emacs side. The open
+   completes on the header block alone, so it never blocks on a first push.
+   Then poll `GET /_fake/subscribers` until the expected subscription is
+   registered — a push before that would be delivered to nobody.
 5. `/_fake/push` the pushes, in order. Ordering within one stream is the only
    ordering the contract provides.
 6. Assert on `GET /_fake/calls` (what Emacs sent) and on Emacs's own state
