@@ -539,6 +539,13 @@ generated arms when the landing merges (one place each):
   AgentBashInterrupted.cause, AgentSubagentFailure.cause and
   AgentFailure.failure — the feed resolver maps them to FeedShellLost /
   FeedSubagentLost; the sessionwatcher routes them as ordinary terminals.
+- `FeedColdGateResolvedCompact.scope` (SessionCompactScope) — the resolved
+  trace names what was summarized; the feed resolver carries model + scope.
+- Ungated permission modes are exactly `bypass` and `dont_ask`; `auto` keeps
+  a gate and needs no creation consent.
+- One-shot FINISH execution (self_merge / open_pr on the turn that concludes
+  with the success marker) is the prompt queue's turn-terminal hook calling
+  a workspace verb; the workspace verbs only record the finish action.
 - The error-arm batch (every `<Rpc>Error` arm incl. transferring_away /
   not_yet_adopted, and the DaemonFault / SessionFault / HostFault kind arms)
   is collected in ERROR-ARMS.md and sent by the teamlead once the server
