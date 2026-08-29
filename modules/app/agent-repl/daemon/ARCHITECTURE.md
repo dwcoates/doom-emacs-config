@@ -604,3 +604,8 @@ generated arms when the landing merges (one place each):
   modules/app/agent-repl/lisp/testsupport/fakedaemon/accept.go (+ test).
   Verify in the integration suite: a Watch* open on a workspace with no
   published view returns headers before any frame.
+- Live-work items restored from `SessionStarted.live_work` have NO
+  announcing agent: the feed/footer/sidebar sinks receive a nil agent and
+  MUST place such items on the ROOT feed (root-feed fallback), never drop
+  them (ruled by the daemon lead; a shim-side re-announce with the
+  `created` origin is requested upstream).
