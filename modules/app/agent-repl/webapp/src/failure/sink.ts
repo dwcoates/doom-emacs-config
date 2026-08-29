@@ -17,7 +17,11 @@
  * nothing to come back, and a self-clearing version would hide a page that is
  * silently wrong.
  */
-import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
+import { create } from "@bufbuild/protobuf";
+import {
+  FailureKindSchema,
+  type FailureKind,
+} from "../../../proto/gen/ts/frontend/v1/failure_pb";
 
 /**
  * The arm names a frontend may mint, spelled once.
@@ -47,3 +51,87 @@ export interface FailureSink {
   /** Remove ARM's card, if one stands. */
   retract(arm: ClientFailureArm): void;
 }
+
+// ---------------------------------------------------------------------------
+// THE MINTING HELPERS.
+//
+// They live beside the interface rather than in `overlay.ts` because
+// `src/rpc/streams.ts` mints two of them (frame_undecodable on a push it could
+// not read, daemon_unreachable on a stream that ended) and must not pull the
+// overlay's DOM in to do it. `overlay.ts` re-exports them, so a component that
+// only draws still imports one module.
+// ---------------------------------------------------------------------------
+
+/**
+ * The link to the daemon is down. WINDOW-SHAPED: retracted on the first
+ * successful push after it, never settled in place.
+ *
+ * The close code and reason are the arm's OWN typed evidence rather than
+ * prose, because they are the only thing distinguishing a daemon that
+ * restarted cleanly from a network drop. Reporting both as one thing is what
+ * made "reconnecting..." the webapp's answer to every transport fault.
+ */
+export function daemonUnreachable(closeCode: number, closeReason: string): FailureKind {
+  return create(FailureKindSchema, {
+    kind: { case: "daemonUnreachable", value: { closeCode, closeReason } },
+  });
+}
+
+/**
+ * A push could not be read and was skipped. Conversation may be missing as a
+ * result, which is why it is a card rather than a log line.
+ */
+export function frameUndecodable(cause: string, frameHead: string): FailureKind {
+  return create(FailureKindSchema, {
+    kind: { case: "frameUndecodable", value: { cause, frameHead } },
+  });
+}
+
+/**
+ * The frontend could not start at all — the one failure that cannot be carried
+ * the way the others are, since the machinery that would carry it is the
+ * machinery that failed to build.
+ */
+export function bootFailed(cause: string): FailureKind {
+  return create(FailureKindSchema, { kind: { case: "bootFailed", value: { cause } } });
+}
+
+/**
+ * A control-plane request issued outside the component streams (a login, an
+ * account switch) failed. WHAT names the request in the frontend's own words,
+ * so repeats of DIFFERENT requests do not reconcile onto one card.
+ */
+export function controlPlaneFailed(what: string, cause: string): FailureKind {
+  return create(FailureKindSchema, {
+    kind: { case: "controlPlaneFailed", value: { what, cause } },
+  });
+}
+
+/**
+ * The workspace this page is addressed to no longer exists on the daemon.
+ * NEVER RETRACTS: unlike a dropped connection, there is nothing to come back.
+ */
+export function workspaceGone(): FailureKind {
+  return create(FailureKindSchema, { kind: { case: "workspaceGone", value: {} } });
+}
+
+/**
+ * This page cannot read the daemon's state and reloading did not fix it.
+ * Deliberately loud and DELIBERATELY UNRETRACTABLE: the only exit is
+ * restarting the view, and a self-clearing version would hide a page that is
+ * silently wrong.
+ */
+export function staleBundle(detail: string): FailureKind {
+  return create(FailureKindSchema, { kind: { case: "staleBundle", value: { detail } } });
+}
+
+/**
+ * The arms whose card DISAPPEARS when its window closes, rather than settling.
+ *
+ * Only `daemon_unreachable`: it reports a transport link that was momentarily
+ * down and is now up again, so once the link is back the card names a
+ * condition that no longer exists beside a feed that is visibly live. The
+ * other five either never resolve (`workspace_gone`, `stale_bundle`) or are
+ * retracted by whoever filed them.
+ */
+export const RETRACTABLE_ON_RECONNECT: readonly ClientFailureArm[] = ["daemonUnreachable"];

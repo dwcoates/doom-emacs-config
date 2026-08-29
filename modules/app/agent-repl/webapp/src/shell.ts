@@ -13,6 +13,8 @@
  * id it cannot find and the boot fails where the fault is.
  */
 
+import { log } from "./log.js";
+
 /** Every element the boot mounts a component on. */
 export interface ShellElements {
   /** The workspaces rail, left of the main column. Ships hidden. */
@@ -63,10 +65,23 @@ const SHELL_IDS: ReadonlyArray<readonly [keyof ShellElements, string]> = [
  * missing.
  */
 export function shellElements(doc: Document): ShellElements {
+  log("debug", "resolving the page shell", {
+    operation: "shell.resolve",
+    context: { mount_points: SHELL_IDS.length },
+  });
   const resolved: Partial<ShellElements> = {};
   for (const [key, id] of SHELL_IDS) {
     const element = doc.getElementById(id);
-    if (element === null) throw new Error(`the page shell is missing #${id}`);
+    if (element === null) {
+      // The one branch that selects a materially different outcome, and the
+      // boot's first possible failure: logged where the fault is, by name,
+      // before the throw carries it up to the pre-overlay emergency path.
+      log("error", `the page shell is missing #${id}`, {
+        operation: "shell.missing-mount-point",
+        context: { id, key },
+      });
+      throw new Error(`the page shell is missing #${id}`);
+    }
     resolved[key] = element;
   }
   return resolved as ShellElements;
