@@ -1,0 +1,267 @@
+package main
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"testing"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	"connectrpc.com/connect"
+)
+
+func TestRegisterWorkspaceMintsRefFromCleanedDir(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.RegisterWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: "/tmp/ws/./one"}))
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+
+	// Assert: the daemon normalizes the path it was handed and returns the
+	// minted ref (elisp.md, "The HOST section").
+	got := resp.Msg.GetSuccess().GetWorkspace()
+	if got.GetDir() != "/tmp/ws/one" {
+		t.Fatalf("dir = %q, want the cleaned spelling", got.GetDir())
+	}
+	if got.GetId() == "" {
+		t.Fatalf("id is empty; the daemon mints the identity")
+	}
+}
+
+func TestRegisterWorkspaceIsIdempotentByDir(t *testing.T) {
+	// Arrange: two spellings of one directory.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	first, err := client.RegisterWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: "/tmp/ws/one"}))
+	if err != nil {
+		t.Fatalf("first RegisterWorkspace: %v", err)
+	}
+	second, err := client.RegisterWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: "/tmp/ws/two/../one"}))
+	if err != nil {
+		t.Fatalf("second RegisterWorkspace: %v", err)
+	}
+
+	// Assert: RegisterWorkspace is IDEMPOTENT BY DIR — re-registration after
+	// a reconnect must reconcile to the same id.
+	if first.Msg.GetSuccess().GetWorkspace().GetId() != second.Msg.GetSuccess().GetWorkspace().GetId() {
+		t.Fatalf("ids differ across spellings of one dir: %q vs %q",
+			first.Msg.GetSuccess().GetWorkspace().GetId(),
+			second.Msg.GetSuccess().GetWorkspace().GetId())
+	}
+}
+
+func TestDefaultDaemonHealthIsHealthy(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.DaemonHealth(context.Background(),
+		connect.NewRequest(&agentreplv1.DaemonHealthRequest{}))
+	if err != nil {
+		t.Fatalf("DaemonHealth: %v", err)
+	}
+
+	// Assert: UNHEALTHY IS AN ANSWER, so the healthy default must arrive as a
+	// resolved success arm rather than an empty message.
+	if resp.Msg.GetSuccess().GetHealthy() == nil {
+		t.Fatalf("DaemonHealth default is %v, want success.healthy", resp.Msg)
+	}
+}
+
+func TestDefaultSelectWorkspaceIsSuccess(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.SelectWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{
+			Workspace: &workspaceRef}))
+	if err != nil {
+		t.Fatalf("SelectWorkspace: %v", err)
+	}
+
+	// Assert: success is EMPTY wherever the new state arrives as a push.
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("SelectWorkspace default is %v, want the success arm", resp.Msg)
+	}
+}
+
+func TestDefaultSubmitPromptCarriesATurnId(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.SubmitPrompt(context.Background(),
+		connect.NewRequest(&agentreplv1.SubmitPromptRequest{
+			Said:           nil,
+			IdempotencyKey: "abc",
+		}))
+	if err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert: SubmitPromptTurn.turn is a non-optional message field, so a
+	// default that left it unset would make every client raise.
+	if resp.Msg.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
+		t.Fatalf("SubmitPrompt default is %v, want success.turn.turn.value set", resp.Msg)
+	}
+}
+
+func TestScriptedResponseWinsOverTheDefault(t *testing.T) {
+	// Arrange: script the error arm the default synthesis never produces.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+	status, body := controlPost(t, baseURL, "/_fake/script",
+		`{"method":"RegisterWorkspace","response":{"error":{}}}`)
+	if status != http.StatusOK {
+		t.Fatalf("/_fake/script = %d %s", status, body)
+	}
+
+	// Act.
+	resp, err := client.RegisterWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: "/tmp/ws"}))
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+
+	// Assert.
+	if resp.Msg.GetError() == nil {
+		t.Fatalf("response is %v, want the scripted error arm", resp.Msg)
+	}
+}
+
+func TestScriptRefusesAnUnknownMethod(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+
+	// Act.
+	status, body := controlPost(t, baseURL, "/_fake/script",
+		`{"method":"NoSuchRpc","response":{}}`)
+
+	// Assert.
+	if status != http.StatusBadRequest {
+		t.Fatalf("/_fake/script for an unknown method = %d %s, want 400", status, body)
+	}
+}
+
+func TestScriptRefusesAResponseTheSchemaRejects(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+
+	// Act: `succes` is not a field of RegisterWorkspaceResponse.
+	status, body := controlPost(t, baseURL, "/_fake/script",
+		`{"method":"RegisterWorkspace","response":{"succes":{}}}`)
+
+	// Assert: validation happens at script time so a suite never discovers a
+	// bad script as a mysterious client-side wire error.
+	if status != http.StatusBadRequest {
+		t.Fatalf("/_fake/script with an invalid response = %d %s, want 400", status, body)
+	}
+}
+
+func TestUnaryRefusesAnUnknownRequestField(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+
+	// Act.
+	status, body := rawUnary(t, baseURL, "RegisterWorkspace", `{"dir":"/tmp/ws","bogus":1}`)
+
+	// Assert: the round trip through the generated types is the check on the
+	// client's encoders; DiscardUnknown would make a misspelling invisible.
+	if status != http.StatusBadRequest || !strings.Contains(body, "bogus") {
+		t.Fatalf("unknown-field request = %d %s, want 400 naming the field", status, body)
+	}
+}
+
+func TestCallsAreRecordedInOrder(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	if _, err := client.RegisterWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: "/a"})); err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	if _, err := client.SelectWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: &workspaceRef})); err != nil {
+		t.Fatalf("SelectWorkspace: %v", err)
+	}
+
+	// Assert.
+	status, body := controlGet(t, baseURL, "/_fake/calls")
+	if status != http.StatusOK {
+		t.Fatalf("/_fake/calls = %d %s", status, body)
+	}
+	calls := decodeCalls(t, body)
+	if len(calls) != 2 || calls[0].Method != "RegisterWorkspace" || calls[1].Method != "SelectWorkspace" {
+		t.Fatalf("recorded %v, want RegisterWorkspace then SelectWorkspace", calls)
+	}
+}
+
+func TestRecordedBodyIsTheRequestProtojson(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	if _, err := client.RegisterWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: "/a/b"})); err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+
+	// Assert: the recording carries the request as the wire saw it, so a
+	// suite can assert on lowerCamel keys and echoed values.
+	_, body := controlGet(t, baseURL, "/_fake/calls")
+	calls := decodeCalls(t, body)
+	if len(calls) != 1 || string(calls[0].Body) != `{"dir":"/a/b"}` {
+		t.Fatalf("recorded body = %v, want the request protojson", calls)
+	}
+}
+
+func TestCallsIsAnEmptyArrayBeforeAnyRequest(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+
+	// Act.
+	status, body := controlGet(t, baseURL, "/_fake/calls")
+
+	// Assert: an empty recording is `[]`, never `null` — a client parsing it
+	// must not have to special-case the empty case.
+	if status != http.StatusOK || strings.TrimSpace(body) != "[]" {
+		t.Fatalf("/_fake/calls = %d %s, want 200 []", status, body)
+	}
+}
+
+func TestWebappStreamIsRefusedAsUnimplemented(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act: WatchFooter belongs to the webapp; this fake mocks Emacs's
+	// neighbor only, and never composes another system.
+	stream, err := client.WatchFooter(context.Background(),
+		connect.NewRequest(&agentreplv1.WatchFooterRequest{Workspace: &workspaceRef}))
+	if err != nil {
+		t.Fatalf("open WatchFooter: %v", err)
+	}
+	defer stream.Close()
+	stream.Receive()
+
+	// Assert.
+	if connect.CodeOf(stream.Err()) != connect.CodeUnimplemented {
+		t.Fatalf("WatchFooter error = %v, want unimplemented", stream.Err())
+	}
+}
