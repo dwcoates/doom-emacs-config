@@ -831,3 +831,21 @@ func sessionStarted(turn string, live ...*conversationv1.AgentDetachedWork) *con
 	}
 	return started
 }
+
+// newTestLogger is the logger every test starts a watcher with.
+func newTestLogger() *dlog.TestLogger { return dlog.NewTestLogger() }
+
+// contains is strings.Contains, kept local so the assertions read as
+// assertions.
+func contains(haystack, needle string) bool {
+	return len(needle) == 0 || len(haystack) >= len(needle) && indexOf(haystack, needle) >= 0
+}
+
+func indexOf(haystack, needle string) int {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return i
+		}
+	}
+	return -1
+}
