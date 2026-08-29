@@ -80,7 +80,14 @@ workspace is an invariant violation, never a global write.
 ## Conventions
 
 Table-driven tests, Arrange/Act/Assert, one test file per source file, one
-edge case per test, no `time.Sleep` for synchronization. Unlanded refusal
+edge case per test, no `time.Sleep` for synchronization. GIT IS NEVER CALLED
+DURING TESTING (user directive): every package above the git client tests
+against a fake `gitclient.Git`; the integration harness scripts every git
+fact (commits, conflicts, landed ranges, worktree lists) as fixture data;
+the git-client leaf's own tests exercise its one spawn point against a
+scripted fake `git` executable placed first on PATH (recording argv/env,
+answering from a fixture table); the merge test gate is a scripted fake
+script in tests. No `git init`, no temp repositories, anywhere in tests. Unlanded refusal
 arms are answered at the transport as `intended arm: <Rpc>Error.<arm>: …`,
 logged at WARNING under `daemon.refusal.unlanded_arm`, and recorded in
 `ERROR-ARMS.md`.
