@@ -6,7 +6,7 @@ import {
   SmoothReveal,
   revealSlice,
 } from "../src/smooth.js";
-import type { ConversationItem, StoreState, TextItem, ThinkingItem } from "../src/store.js";
+import type { RevealBlock, RevealItem, RevealState } from "../src/smooth.js";
 
 /** A clock the test advances by hand, in milliseconds. */
 function fakeClock(): RevealClock & { advance(ms: number): void } {
@@ -19,81 +19,26 @@ function fakeClock(): RevealClock & { advance(ms: number): void } {
   };
 }
 
-function textItem(over: Partial<TextItem> = {}): TextItem {
-  return {
-    kind: "text",
-    blockId: "b1",
-    messageId: "m1",
-    text: "",
-    done: false,
-    ts: "2026-05-24T10:00:00.000Z",
-    ...over,
-  };
+function textItem(over: Partial<RevealBlock> = {}): RevealBlock {
+  return { kind: "text", blockId: "b1", text: "", done: false, ...over };
 }
 
-function thinkingItem(over: Partial<ThinkingItem> = {}): ThinkingItem {
-  return {
-    kind: "thinking",
-    blockId: "t1",
-    messageId: "m1",
-    text: "",
-    done: false,
-    ...over,
-  };
+function thinkingItem(over: Partial<RevealBlock> = {}): RevealBlock {
+  return { kind: "thinking", blockId: "t1", text: "", done: false, ...over };
 }
 
-function state(items: ConversationItem[]): StoreState {
-  return {
-    sessionId: "s1",
-    daemonVersion: "0.1.0",
-    model: "m",
-    models: [],
-    cwd: "/w",
-    claudeSessionId: "",
-    permissionMode: "default",
-    statusRows: [],
-    items,
-    queued: [],
-    turnInFlight: true,
-    turnStartedAt: "2026-05-24T10:00:00.000Z",
-    contextTokens: null,
-    resultUsage: null,
-    turnUsage: new Map(),
-    modelUsage: null,
-    interrupting: false,
-    turnRetracted: false,
-    costUsd: null,
-    taskSummary: null,
-    lastSeq: 0,
-    paging: { continuation: null, inFlight: null, staleFenceRequestId: null },
-    renderState: null,
-    sessionConnectivity: null,
-    sessionStatus: null,
-    controllerGenerationId: "",
-    activeFaults: [],
-    workspaceStateAtMs: 0,
-    mergeLeaseHeld: false,
-    mergeStatus: null,
-    mergeDequeueOffer: null,
-    shutdownSchedule: null,
-    hibernation: null,
-    fences: new Map(),
-    retiredFences: new Map(),
-    topbars: new Map(),
-    tokenBreakdowns: new Map(),
-    gates: new Map(),
-    workspaceStateCauseSeq: 0,
-  };
+function state(items: RevealItem[]): RevealState {
+  return { items };
 }
 
 /** Tight, fast options so a frame's advance lands on round character counts. */
 const opts: RevealOptions = { minCps: 200, catchupSeconds: 0.3 };
 
 /** The single text block of a smoothed feed state. */
-function shownText(s: StoreState): TextItem {
+function shownText(s: RevealState): RevealBlock {
   const item = s.items.find((i) => i.kind === "text");
-  if (!item || item.kind !== "text") throw new Error("no text item");
-  return item;
+  if (!item) throw new Error("no text item");
+  return item as RevealBlock;
 }
 
 describe("revealSlice", () => {
@@ -176,7 +121,7 @@ describe("SmoothReveal.reveal", () => {
     // Act
     const out = smooth.reveal(state([first, tail]));
     // Assert — the finished block shows whole, the tail starts from nothing.
-    const shown = out.state.items.filter((i): i is TextItem => i.kind === "text");
+    const shown = out.state.items.filter((i): i is RevealBlock => i.kind === "text");
     expect(shown[0].text).toBe("first block done");
     expect(shown[1].text).toBe("");
     expect(out.pending).toBe(true);
@@ -188,23 +133,13 @@ describe("SmoothReveal.reveal", () => {
     const smooth = new SmoothReveal(fakeClock(), opts);
     const t1 = textItem({ blockId: "b1", text: "answer one", done: true });
     const t2 = textItem({ blockId: "b2", text: "answer two", done: true });
-    const result: ConversationItem = {
-      kind: "result",
-      uuid: "r1",
-      subtype: "success",
-      durationMs: 1,
-      numTurns: 1,
-      totalCostUsd: 0,
-      usage: { input_tokens: 1, output_tokens: 1 },
-      isError: false,
-      context: null,
-    };
+    const result: RevealItem = { kind: "result" };
     const s = state([t1, t2, result]);
     // Act
     const out = smooth.reveal(s);
     // Assert — both bubbles show whole, no frame is requested, and the untouched
     // state passes through by identity rather than as an animated copy.
-    const shown = out.state.items.filter((i): i is TextItem => i.kind === "text");
+    const shown = out.state.items.filter((i): i is RevealBlock => i.kind === "text");
     expect(shown.map((i) => i.text)).toEqual(["answer one", "answer two"]);
     expect(out.pending).toBe(false);
     expect(out.state).toBe(s);
@@ -227,7 +162,7 @@ describe("SmoothReveal.reveal", () => {
       ]),
     );
     // Assert — the superseded block shows in full, not its half-typed prefix.
-    const shown = out.state.items.filter((i): i is TextItem => i.kind === "text");
+    const shown = out.state.items.filter((i): i is RevealBlock => i.kind === "text");
     expect(shown[0].text).toBe("0123456789");
     expect(shown[0].done).toBe(true);
   });
@@ -297,21 +232,13 @@ describe("SmoothReveal.reveal", () => {
     const out = smooth.reveal(state([thinkingItem({ text: "0123456789" })]));
     // Assert — thinking paces at the same floor rate as text.
     const think = out.state.items.find((i) => i.kind === "thinking");
-    expect(think?.kind === "thinking" ? think.text : "").toBe("012");
+    expect(think !== undefined ? (think as RevealBlock).text : "").toBe("012");
   });
 
   it("leaves non-streaming items untouched", () => {
     // Arrange — a tool item carries no revealable text.
     const smooth = new SmoothReveal(fakeClock(), opts);
-    const tool: ConversationItem = {
-      kind: "tool",
-      toolUseId: "u1",
-      toolName: "Bash",
-      messageId: "m1",
-      ts: "2026-05-24T10:00:00.000Z",
-      inputJson: "",
-      inputDone: false,
-    };
+    const tool: RevealItem = { kind: "tool" };
     const s = state([tool]);
     // Act
     const out = smooth.reveal(s);
