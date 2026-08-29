@@ -58,7 +58,6 @@ import { type Engine } from "./engine/engine.js";
 import { createEngine, type CreateQuery, type QuerySpec } from "./engine/session.js";
 import { createFold } from "./convert/fold.js";
 import { createStoreClient } from "./store/client.js";
-import { producerId } from "./store/keys.js";
 import { createPersistence } from "./store/persistence.js";
 import { createRealQuery } from "./sdk/real-query.js";
 import { createFakeQuery } from "./fake/index.js";
@@ -510,14 +509,14 @@ export async function main(): Promise<void> {
 
   // THE SESSION ENGINE, with the real record plane behind it.
   //
-  // The producer name is keyed by the workspace until the vendor names a
-  // session: write ids are `sha256(producer | coordinates | arm)`, so the name
-  // only has to be STABLE for one conversation's writes to share a namespace,
-  // and the workspace is the one identity that exists before StartSession.
+  // The record plane is UNNAMED here on purpose: a writer is keyed by the
+  // conversation's ORIGINAL vendor session id, which only StartSession learns,
+  // and it names itself then (`Persistence.setProducer`). Nothing writes before
+  // that, and a write that tried would raise rather than land rows under a
+  // placeholder name no replay could absorb against.
   const engine: Engine = createEngine({
     persistence: createPersistence({
       client: createStoreClient(environment.storeSocket),
-      producer: producerId(`workspace:${workspaceLockKey(cwd)}`),
       nowMs: () => Date.now(),
     }),
     fold: createFold(),

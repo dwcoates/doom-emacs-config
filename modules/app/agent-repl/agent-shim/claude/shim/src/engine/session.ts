@@ -1018,6 +1018,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     identity = brandNew
       ? await SessionIdentity.fresh(identityStore, () => vendorSessionId)
       : await SessionIdentity.resume(identityStore, vendorSessionId);
+    // NAME THE WRITER BEFORE ANYTHING IS WRITTEN. A row is keyed by the
+    // conversation's ORIGINAL vendor session id, which is exactly what the
+    // identity just settled — and a write attempted before this raises rather
+    // than landing rows under a name no replay could absorb against.
+    deps.persistence.setProducer(identity.originalVendorSessionId);
     if (clearedTo !== undefined) {
       // The AgentId does not move; only the resume handle does, and the
       // rotation is announced exactly like a vendor-initiated one.

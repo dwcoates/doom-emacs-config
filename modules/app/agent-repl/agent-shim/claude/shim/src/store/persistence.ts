@@ -156,6 +156,21 @@ export class PersistenceError extends Error {
  */
 export interface Persistence {
   /**
+   * Name this writer, once the vendor has named the conversation.
+   *
+   * THE PRODUCER IS KEYED BY THE ORIGINAL VENDOR SESSION ID (`claude-shim:<id>`)
+   * and by nothing else. Write ids are `sha256(producer | coordinates | arm)`,
+   * so the name decides which namespace a conversation's deterministic ids live
+   * in — and a name that rotated with the vendor's current session id would make
+   * one writer look like two, splitting a conversation's replay absorption in
+   * half at the rotation.
+   *
+   * Called once, from StartSession, before any write happens. A write attempted
+   * before it raises loudly rather than landing rows under a placeholder name
+   * that nothing could ever absorb a replay against.
+   */
+  setProducer(originalVendorSessionId: string): void;
+  /**
    * Write these rows and resolve when the store says they are DURABLE.
    *
    * Rejects with a {@link PersistenceError} when the batch could not be landed
@@ -232,8 +247,14 @@ export const DEFAULT_RETRY_POLICY: PersistenceRetryPolicy = {
 export interface PersistenceOptions {
   /** The store, already dialed. */
   readonly client: StoreClient;
-  /** This writer's name, from `store/keys.ts` `producerId()`. */
-  readonly producer: string;
+  /**
+   * This writer's name, when it is already known.
+   *
+   * UNSET at construction is the ordinary case: the shim is built before
+   * StartSession, and only StartSession learns the conversation's original
+   * vendor session id. {@link Persistence.setProducer} supplies it then.
+   */
+  readonly producer?: string;
   /** The retry schedule. Defaults to {@link DEFAULT_RETRY_POLICY}. */
   readonly retry?: PersistenceRetryPolicy;
   /** The clock, injected so a test does not wait in real time. */
@@ -273,6 +294,7 @@ export function unavailablePersistence(): Persistence {
       `shim persistence: ${verb} has no store to reach in this build`,
     );
   return {
+    setProducer: () => undefined,
     writeDurable: () => Promise.reject(refuse("writeDurable")),
     write: () => {
       throw refuse("write");
