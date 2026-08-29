@@ -15,15 +15,15 @@ import type { AgentPrompt, TurnId } from "../../conversation/v1/turn_pb";
 import { file_conversation_v1_turn } from "../../conversation/v1/turn_pb";
 import type { UserSaid } from "../../conversation/v1/user_pb";
 import { file_conversation_v1_user } from "../../conversation/v1/user_pb";
-import type { PromptOrigin } from "./prompt_origin_pb";
-import { file_shim_v1_prompt_origin } from "./prompt_origin_pb";
+import type { PromptOrigin } from "../../conversation/v1/prompt_origin_pb";
+import { file_conversation_v1_prompt_origin } from "../../conversation/v1/prompt_origin_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file shim/v1/endpoint_start_turn.proto.
  */
 export const file_shim_v1_endpoint_start_turn: GenFile = /*@__PURE__*/
-  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEi6wEKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBIlCgZvcmlnaW4YAyABKA4yFS5zaGltLnYxLlByb21wdE9yaWdpbhIRCglwYWdlX3NpemUYBCABKA0SOwoNa25vd25fdGhyb3VnaBgFIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UG9pbnRlckgAiAEBQhAKDl9rbm93bl90aHJvdWdoInkKEVN0YXJ0VHVyblJlc3BvbnNlEiwKB3N1Y2Nlc3MYASABKAsyGS5zaGltLnYxLlN0YXJ0VHVyblN1Y2Nlc3NIABIsCgdmYWlsdXJlGAIgASgLMhkuc2hpbS52MS5TdGFydFR1cm5GYWlsdXJlSABCCAoGcmVzdWx0IkAKEFN0YXJ0VHVyblN1Y2Nlc3MSLAoGcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0IiIKEFN0YXJ0VHVybkZhaWx1cmUSDgoGZGV0YWlsGAEgASgJQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_history, file_conversation_v1_turn, file_conversation_v1_user, file_shim_v1_prompt_origin]);
+  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEi8wEKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEhEKCXBhZ2Vfc2l6ZRgEIAEoDRI7Cg1rbm93bl90aHJvdWdoGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVySACIAQFCEAoOX2tub3duX3Rocm91Z2gieQoRU3RhcnRUdXJuUmVzcG9uc2USLAoHc3VjY2VzcxgBIAEoCzIZLnNoaW0udjEuU3RhcnRUdXJuU3VjY2Vzc0gAEiwKB2ZhaWx1cmUYAiABKAsyGS5zaGltLnYxLlN0YXJ0VHVybkZhaWx1cmVIAEIICgZyZXN1bHQiQAoQU3RhcnRUdXJuU3VjY2VzcxIsCgZwcm9tcHQYASABKAsyHC5jb252ZXJzYXRpb24udjEuQWdlbnRQcm9tcHQiIgoQU3RhcnRUdXJuRmFpbHVyZRIOCgZkZXRhaWwYASABKAlCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_history, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
 
 /**
  * The prompt the daemon is handing over NOW. Nothing here is a queue entry:
@@ -55,7 +55,7 @@ export type StartTurnRequest = Message<"shim.v1.StartTurnRequest"> & {
    * Closed attribution copied onto the turn's durable record so a stored turn
    * can be traced to the exact situation that caused it.
    *
-   * @generated from field: shim.v1.PromptOrigin origin = 3;
+   * @generated from field: conversation.v1.PromptOrigin origin = 3;
    */
   origin: PromptOrigin;
 

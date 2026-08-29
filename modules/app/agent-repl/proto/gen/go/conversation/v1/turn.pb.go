@@ -99,7 +99,11 @@ type AgentPrompt struct {
 	// prompt always has exactly one recipient.
 	Agent *AgentId `protobuf:"bytes,2,opt,name=agent,proto3" json:"agent,omitempty"`
 	// What was said.
-	Said          *UserSaid `protobuf:"bytes,3,opt,name=said,proto3" json:"said,omitempty"`
+	Said *UserSaid `protobuf:"bytes,3,opt,name=said,proto3" json:"said,omitempty"`
+	// Why this turn exists — the closed attribution vocabulary, persisted
+	// with the prompt so REPLAY can route merge-born rows and label
+	// restart re-drives instead of drawing them as fresh user turns.
+	Origin        PromptOrigin `protobuf:"varint,4,opt,name=origin,proto3,enum=conversation.v1.PromptOrigin" json:"origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -153,6 +157,13 @@ func (x *AgentPrompt) GetSaid() *UserSaid {
 		return x.Said
 	}
 	return nil
+}
+
+func (x *AgentPrompt) GetOrigin() PromptOrigin {
+	if x != nil {
+		return x.Origin
+	}
+	return PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED
 }
 
 // The turn was killed. THE ARM IS HOW.
@@ -378,13 +389,14 @@ var File_conversation_v1_turn_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_turn_proto_rawDesc = "" +
 	"\n" +
-	"\x1aconversation/v1/turn.proto\x12\x0fconversation.v1\x1a$conversation/v1/agent_activity.proto\x1a#conversation/v1/detached_work.proto\x1a\x1aconversation/v1/user.proto\"\x1e\n" +
+	"\x1aconversation/v1/turn.proto\x12\x0fconversation.v1\x1a$conversation/v1/agent_activity.proto\x1a#conversation/v1/prompt_origin.proto\x1a#conversation/v1/detached_work.proto\x1a\x1aconversation/v1/user.proto\"\x1e\n" +
 	"\x06TurnId\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05value\"\x95\x01\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"\xcc\x01\n" +
 	"\vAgentPrompt\x12'\n" +
 	"\x02id\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x02id\x12.\n" +
 	"\x05agent\x18\x02 \x01(\v2\x18.conversation.v1.AgentIdR\x05agent\x12-\n" +
-	"\x04said\x18\x03 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\"\x97\x01\n" +
+	"\x04said\x18\x03 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\x125\n" +
+	"\x06origin\x18\x04 \x01(\x0e2\x1d.conversation.v1.PromptOriginR\x06origin\"\x97\x01\n" +
 	"\n" +
 	"TurnKilled\x12E\n" +
 	"\n" +
@@ -419,21 +431,23 @@ var file_conversation_v1_turn_proto_goTypes = []any{
 	(*TurnLive)(nil),            // 5: conversation.v1.TurnLive
 	(*AgentId)(nil),             // 6: conversation.v1.AgentId
 	(*UserSaid)(nil),            // 7: conversation.v1.UserSaid
-	(*DetachedWorkId)(nil),      // 8: conversation.v1.DetachedWorkId
+	(PromptOrigin)(0),           // 8: conversation.v1.PromptOrigin
+	(*DetachedWorkId)(nil),      // 9: conversation.v1.DetachedWorkId
 }
 var file_conversation_v1_turn_proto_depIdxs = []int32{
 	0, // 0: conversation.v1.AgentPrompt.id:type_name -> conversation.v1.TurnId
 	6, // 1: conversation.v1.AgentPrompt.agent:type_name -> conversation.v1.AgentId
 	7, // 2: conversation.v1.AgentPrompt.said:type_name -> conversation.v1.UserSaid
-	3, // 3: conversation.v1.TurnKilled.agent_only:type_name -> conversation.v1.TurnKilledAgentOnly
-	4, // 4: conversation.v1.TurnKilled.forced:type_name -> conversation.v1.TurnKilledForced
-	8, // 5: conversation.v1.TurnKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
-	8, // 6: conversation.v1.TurnLive.live_work:type_name -> conversation.v1.DetachedWorkId
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	8, // 3: conversation.v1.AgentPrompt.origin:type_name -> conversation.v1.PromptOrigin
+	3, // 4: conversation.v1.TurnKilled.agent_only:type_name -> conversation.v1.TurnKilledAgentOnly
+	4, // 5: conversation.v1.TurnKilled.forced:type_name -> conversation.v1.TurnKilledForced
+	9, // 6: conversation.v1.TurnKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
+	9, // 7: conversation.v1.TurnLive.live_work:type_name -> conversation.v1.DetachedWorkId
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_turn_proto_init() }
@@ -442,6 +456,7 @@ func file_conversation_v1_turn_proto_init() {
 		return
 	}
 	file_conversation_v1_agent_activity_proto_init()
+	file_conversation_v1_prompt_origin_proto_init()
 	file_conversation_v1_detached_work_proto_init()
 	file_conversation_v1_user_proto_init()
 	file_conversation_v1_turn_proto_msgTypes[2].OneofWrappers = []any{

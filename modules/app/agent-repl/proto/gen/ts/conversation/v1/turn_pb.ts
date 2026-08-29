@@ -15,6 +15,8 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { AgentId } from "./agent_activity_pb";
 import { file_conversation_v1_agent_activity } from "./agent_activity_pb";
+import type { PromptOrigin } from "./prompt_origin_pb";
+import { file_conversation_v1_prompt_origin } from "./prompt_origin_pb";
 import type { DetachedWorkId } from "./detached_work_pb";
 import { file_conversation_v1_detached_work } from "./detached_work_pb";
 import type { UserSaid } from "./user_pb";
@@ -25,7 +27,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/turn.proto.
  */
 export const file_conversation_v1_turn: GenFile = /*@__PURE__*/
-  fileDesc("Chpjb252ZXJzYXRpb24vdjEvdHVybi5wcm90bxIPY29udmVyc2F0aW9uLnYxIhcKBlR1cm5JZBINCgV2YWx1ZRgBIAEoCSKEAQoLQWdlbnRQcm9tcHQSIwoCaWQYASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEicKBWFnZW50GAIgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWQSJwoEc2FpZBgDIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZCKEAQoKVHVybktpbGxlZBI6CgphZ2VudF9vbmx5GAEgASgLMiQuY29udmVyc2F0aW9uLnYxLlR1cm5LaWxsZWRBZ2VudE9ubHlIABIzCgZmb3JjZWQYAiABKAsyIS5jb252ZXJzYXRpb24udjEuVHVybktpbGxlZEZvcmNlZEgAQgUKA2hvdyIVChNUdXJuS2lsbGVkQWdlbnRPbmx5IkkKEFR1cm5LaWxsZWRGb3JjZWQSNQoMc3RvcHBlZF93b3JrGAEgAygLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkIj4KCFR1cm5MaXZlEjIKCWxpdmVfd29yaxgBIAMoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtJZEIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_agent_activity, file_conversation_v1_detached_work, file_conversation_v1_user]);
+  fileDesc("Chpjb252ZXJzYXRpb24vdjEvdHVybi5wcm90bxIPY29udmVyc2F0aW9uLnYxIhcKBlR1cm5JZBINCgV2YWx1ZRgBIAEoCSKzAQoLQWdlbnRQcm9tcHQSIwoCaWQYASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEicKBWFnZW50GAIgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWQSJwoEc2FpZBgDIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YBCABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luIoQBCgpUdXJuS2lsbGVkEjoKCmFnZW50X29ubHkYASABKAsyJC5jb252ZXJzYXRpb24udjEuVHVybktpbGxlZEFnZW50T25seUgAEjMKBmZvcmNlZBgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5UdXJuS2lsbGVkRm9yY2VkSABCBQoDaG93IhUKE1R1cm5LaWxsZWRBZ2VudE9ubHkiSQoQVHVybktpbGxlZEZvcmNlZBI1CgxzdG9wcGVkX3dvcmsYASADKAsyHy5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrSWQiPgoIVHVybkxpdmUSMgoJbGl2ZV93b3JrGAEgAygLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_prompt_origin, file_conversation_v1_detached_work, file_conversation_v1_user]);
 
 /**
  * The identity of a turn.
@@ -89,6 +91,15 @@ export type AgentPrompt = Message<"conversation.v1.AgentPrompt"> & {
    * @generated from field: conversation.v1.UserSaid said = 3;
    */
   said?: UserSaid | undefined;
+
+  /**
+   * Why this turn exists — the closed attribution vocabulary, persisted
+   * with the prompt so REPLAY can route merge-born rows and label
+   * restart re-drives instead of drawing them as fresh user turns.
+   *
+   * @generated from field: conversation.v1.PromptOrigin origin = 4;
+   */
+  origin: PromptOrigin;
 };
 
 /**

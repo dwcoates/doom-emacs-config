@@ -12,6 +12,7 @@ syntax = "proto3";
 package conversation.v1;
 
 import "conversation/v1/agent_activity.proto";
+import "conversation/v1/prompt_origin.proto";
 import "conversation/v1/detached_work.proto";
 import "conversation/v1/user.proto";
 
@@ -46,6 +47,10 @@ message AgentPrompt {
   AgentId agent = 2;
   // What was said.
   UserSaid said = 3;
+  // Why this turn exists — the closed attribution vocabulary, persisted
+  // with the prompt so REPLAY can route merge-born rows and label
+  // restart re-drives instead of drawing them as fresh user turns.
+  PromptOrigin origin = 4;
 }
 
 // The turn was killed. THE ARM IS HOW.

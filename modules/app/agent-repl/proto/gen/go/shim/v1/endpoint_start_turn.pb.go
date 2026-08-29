@@ -42,7 +42,7 @@ type StartTurnRequest struct {
 	// WHO CAUSED this prompt — a human send site, a daemon-driven merge step.
 	// Closed attribution copied onto the turn's durable record so a stored turn
 	// can be traced to the exact situation that caused it.
-	Origin PromptOrigin `protobuf:"varint,3,opt,name=origin,proto3,enum=shim.v1.PromptOrigin" json:"origin,omitempty"`
+	Origin v1.PromptOrigin `protobuf:"varint,3,opt,name=origin,proto3,enum=conversation.v1.PromptOrigin" json:"origin,omitempty"`
 	// The opening page's budget.
 	PageSize uint32 `protobuf:"varint,4,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// The newest entry the caller already holds. UNSET = repaint: a full first
@@ -96,11 +96,11 @@ func (x *StartTurnRequest) GetSaid() *v1.UserSaid {
 	return nil
 }
 
-func (x *StartTurnRequest) GetOrigin() PromptOrigin {
+func (x *StartTurnRequest) GetOrigin() v1.PromptOrigin {
 	if x != nil {
 		return x.Origin
 	}
-	return PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED
+	return v1.PromptOrigin(0)
 }
 
 func (x *StartTurnRequest) GetPageSize() uint32 {
@@ -301,11 +301,11 @@ var File_shim_v1_endpoint_start_turn_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_start_turn_proto_rawDesc = "" +
 	"\n" +
-	"!shim/v1/endpoint_start_turn.proto\x12\ashim.v1\x1a\x1dconversation/v1/history.proto\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a\x1bshim/v1/prompt_origin.proto\"\x97\x02\n" +
+	"!shim/v1/endpoint_start_turn.proto\x12\ashim.v1\x1a\x1dconversation/v1/history.proto\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\"\x9f\x02\n" +
 	"\x10StartTurnRequest\x12+\n" +
 	"\x04turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12-\n" +
-	"\x04said\x18\x02 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\x12-\n" +
-	"\x06origin\x18\x03 \x01(\x0e2\x15.shim.v1.PromptOriginR\x06origin\x12\x1b\n" +
+	"\x04said\x18\x02 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\x125\n" +
+	"\x06origin\x18\x03 \x01(\x0e2\x1d.conversation.v1.PromptOriginR\x06origin\x12\x1b\n" +
 	"\tpage_size\x18\x04 \x01(\rR\bpageSize\x12I\n" +
 	"\rknown_through\x18\x05 \x01(\v2\x1f.conversation.v1.HistoryPointerH\x00R\fknownThrough\x88\x01\x01B\x10\n" +
 	"\x0e_known_through\"\x8b\x01\n" +
@@ -338,14 +338,14 @@ var file_shim_v1_endpoint_start_turn_proto_goTypes = []any{
 	(*StartTurnFailure)(nil),  // 3: shim.v1.StartTurnFailure
 	(*v1.TurnId)(nil),         // 4: conversation.v1.TurnId
 	(*v1.UserSaid)(nil),       // 5: conversation.v1.UserSaid
-	(PromptOrigin)(0),         // 6: shim.v1.PromptOrigin
+	(v1.PromptOrigin)(0),      // 6: conversation.v1.PromptOrigin
 	(*v1.HistoryPointer)(nil), // 7: conversation.v1.HistoryPointer
 	(*v1.AgentPrompt)(nil),    // 8: conversation.v1.AgentPrompt
 }
 var file_shim_v1_endpoint_start_turn_proto_depIdxs = []int32{
 	4, // 0: shim.v1.StartTurnRequest.turn:type_name -> conversation.v1.TurnId
 	5, // 1: shim.v1.StartTurnRequest.said:type_name -> conversation.v1.UserSaid
-	6, // 2: shim.v1.StartTurnRequest.origin:type_name -> shim.v1.PromptOrigin
+	6, // 2: shim.v1.StartTurnRequest.origin:type_name -> conversation.v1.PromptOrigin
 	7, // 3: shim.v1.StartTurnRequest.known_through:type_name -> conversation.v1.HistoryPointer
 	2, // 4: shim.v1.StartTurnResponse.success:type_name -> shim.v1.StartTurnSuccess
 	3, // 5: shim.v1.StartTurnResponse.failure:type_name -> shim.v1.StartTurnFailure
@@ -362,7 +362,6 @@ func file_shim_v1_endpoint_start_turn_proto_init() {
 	if File_shim_v1_endpoint_start_turn_proto != nil {
 		return
 	}
-	file_shim_v1_prompt_origin_proto_init()
 	file_shim_v1_endpoint_start_turn_proto_msgTypes[0].OneofWrappers = []any{}
 	file_shim_v1_endpoint_start_turn_proto_msgTypes[1].OneofWrappers = []any{
 		(*StartTurnResponse_Success)(nil),
