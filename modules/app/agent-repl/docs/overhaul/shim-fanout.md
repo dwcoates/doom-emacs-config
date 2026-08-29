@@ -346,3 +346,11 @@ every UX or contract gap you surfaced instead of improvising.
   model.ts survive from the old shim; the record-plane agent adopts (as
   harvest for TokenUsage / account-usage mapping) or retires each, with a
   stated reason; model.ts's normalizeOptionalModel may serve the engine.
+- STANDING-STREAM TRANSPORT RULES (store lead, connect v1.17.0 semantics;
+  recorded in the shim's AGENTS.md): (1) the shim.v1 server FLUSHES RESPONSE
+  HEADERS the moment it accepts WatchSession/WatchAgent/WatchBash, so
+  acceptance is observable before the first frame (on top of the immediate
+  diagnostics push); (2) the store client ends WatchAgentSession by
+  CANCELLING its context (an AbortSignal on the call) — connect's stream
+  Close drains the body and blocks forever on a standing stream; never Close
+  alone. The store flushes on accept too.
