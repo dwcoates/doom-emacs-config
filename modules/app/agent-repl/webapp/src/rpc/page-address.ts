@@ -1,12 +1,14 @@
 /**
- * The page's address: which workspace this webview is showing, and whether the
- * browser-local dev composer is on.
+ * The page's address: which workspace this webview is showing, where that
+ * workspace lives on the daemon's host, and whether the browser-local dev
+ * composer is on.
  *
- * THE WORKSPACE IS REQUIRED AND HAS NO DEFAULT. Identities are daemon-minted
- * opaque tokens — a client never derives one from a path and never guesses —
- * so a page opened without `?workspace=` is addressed at nothing and cannot
- * mount anything. That is a BOOT FAILURE, which is why this throws rather than
- * returning a "no workspace" state nothing downstream could draw.
+ * `?workspace=<id>&dir=<dir>` — BOTH REQUIRED, both URL-encoded. The id is the
+ * identity (daemon-minted, opaque, compared byte-wise, never derived from a
+ * path); the dir is the normalized worktree directory the ref carries for
+ * display and for opening files. A page missing either is addressed at nothing
+ * and cannot mount anything, which is a BOOT FAILURE — hence a throw rather
+ * than a "no workspace" state nothing downstream could draw.
  *
  * `&composer=1` turns on the browser-local composer. Production runs
  * composer-less: the root composer is host-native (Emacs), and this flag
@@ -19,6 +21,8 @@
 export interface PageAddress {
   /** The daemon-minted workspace id, URL-decoded and echoed verbatim after. */
   workspaceId: string;
+  /** The workspace's normalized worktree directory. Display, not identity. */
+  workspaceDir: string;
   /** Whether the browser-local dev composer is enabled. */
   composer: boolean;
 }
@@ -30,5 +34,9 @@ export function pageAddress(search: string): PageAddress {
   if (workspaceId === null || workspaceId === "") {
     throw new Error("the page address carries no ?workspace=<id>; there is nothing to show");
   }
-  return { workspaceId, composer: params.get("composer") === "1" };
+  const workspaceDir = params.get("dir");
+  if (workspaceDir === null || workspaceDir === "") {
+    throw new Error("the page address carries no &dir=<dir>; the workspace ref cannot be built");
+  }
+  return { workspaceId, workspaceDir, composer: params.get("composer") === "1" };
 }

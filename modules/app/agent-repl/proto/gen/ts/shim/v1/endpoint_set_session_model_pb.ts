@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_set_session_model.proto.
  */
 export const file_shim_v1_endpoint_set_session_model: GenFile = /*@__PURE__*/
-  fileDesc("CihzaGltL3YxL2VuZHBvaW50X3NldF9zZXNzaW9uX21vZGVsLnByb3RvEgdzaGltLnYxIsABChZTZXRTZXNzaW9uTW9kZWxSZXF1ZXN0EioKBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWwSHQoVY29sZF90aHJlc2hvbGRfdG9rZW5zGAIgASgEEkYKEGNvbGRfcmVtZWRpYXRpb24YAyABKAsyJy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRSZW1lZGlhdGlvbkgAiAEBQhMKEV9jb2xkX3JlbWVkaWF0aW9uIosBChdTZXRTZXNzaW9uTW9kZWxSZXNwb25zZRIyCgdzdWNjZXNzGAEgASgLMh8uc2hpbS52MS5TZXRTZXNzaW9uTW9kZWxTdWNjZXNzSAASMgoHZmFpbHVyZRgCIAEoCzIfLnNoaW0udjEuU2V0U2Vzc2lvbk1vZGVsRmFpbHVyZUgAQggKBnJlc3VsdCJVChZTZXRTZXNzaW9uTW9kZWxTdWNjZXNzEjsKDW1vZGVsX2NoYW5nZWQYASABKAsyJC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbk1vZGVsQ2hhbmdlZCJfChZTZXRTZXNzaW9uTW9kZWxGYWlsdXJlEiwKBGNvbGQYASABKAsyHC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRIABIOCgZkZXRhaWwYAiABKAlCBwoFY2F1c2VCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_api, file_conversation_v1_session]);
+  fileDesc("CihzaGltL3YxL2VuZHBvaW50X3NldF9zZXNzaW9uX21vZGVsLnByb3RvEgdzaGltLnYxIsABChZTZXRTZXNzaW9uTW9kZWxSZXF1ZXN0EioKBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWwSHQoVY29sZF90aHJlc2hvbGRfdG9rZW5zGAIgASgEEkYKEGNvbGRfcmVtZWRpYXRpb24YAyABKAsyJy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRSZW1lZGlhdGlvbkgAiAEBQhMKEV9jb2xkX3JlbWVkaWF0aW9uIosBChdTZXRTZXNzaW9uTW9kZWxSZXNwb25zZRIyCgdzdWNjZXNzGAEgASgLMh8uc2hpbS52MS5TZXRTZXNzaW9uTW9kZWxTdWNjZXNzSAASMgoHZmFpbHVyZRgCIAEoCzIfLnNoaW0udjEuU2V0U2Vzc2lvbk1vZGVsRmFpbHVyZUgAQggKBnJlc3VsdCJVChZTZXRTZXNzaW9uTW9kZWxTdWNjZXNzEjsKDW1vZGVsX2NoYW5nZWQYASABKAsyJC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbk1vZGVsQ2hhbmdlZCKfAgoWU2V0U2Vzc2lvbk1vZGVsRmFpbHVyZRIsCgRjb2xkGAEgASgLMhwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkSAASRAoUbW9kZWxfbm90X2luX2NhdGFsb2cYAyABKAsyJC5zaGltLnYxLlNldFNlc3Npb25Nb2RlbE5vdEluQ2F0YWxvZ0gAEjcKCm5vX3Nlc3Npb24YBCABKAsyIS5zaGltLnYxLlNldFNlc3Npb25Nb2RlbE5vU2Vzc2lvbkgAEj8KDnZlbmRvcl9yZWZ1c2VkGAUgASgLMiUuc2hpbS52MS5TZXRTZXNzaW9uTW9kZWxWZW5kb3JSZWZ1c2VkSAASDgoGZGV0YWlsGAIgASgJQgcKBWNhdXNlIh0KG1NldFNlc3Npb25Nb2RlbE5vdEluQ2F0YWxvZyIaChhTZXRTZXNzaW9uTW9kZWxOb1Nlc3Npb24iHgocU2V0U2Vzc2lvbk1vZGVsVmVuZG9yUmVmdXNlZEIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_api, file_conversation_v1_session]);
 
 /**
  * Which model, and what a cold switch may cost.
@@ -135,13 +135,34 @@ export type SetSessionModelFailure = Message<"shim.v1.SetSessionModelFailure"> &
      * The context exceeds the threshold and no remediation was named: here
      * is what the switch would cost, so a remediation can be chosen.
      *
-     * Further arms DERIVED at the wave from the shim's real sites (a model not
-     * in the catalog, no session, the vendor refusing the switch).
-     *
      * @generated from field: conversation.v1.SessionCold cold = 1;
      */
     value: SessionCold;
     case: "cold";
+  } | {
+    /**
+     * The model is not one of the catalog's served options.
+     *
+     * @generated from field: shim.v1.SetSessionModelNotInCatalog model_not_in_catalog = 3;
+     */
+    value: SetSessionModelNotInCatalog;
+    case: "modelNotInCatalog";
+  } | {
+    /**
+     * No session is open on this shim.
+     *
+     * @generated from field: shim.v1.SetSessionModelNoSession no_session = 4;
+     */
+    value: SetSessionModelNoSession;
+    case: "noSession";
+  } | {
+    /**
+     * The vendor refused the switch; `detail` carries its wording.
+     *
+     * @generated from field: shim.v1.SetSessionModelVendorRefused vendor_refused = 5;
+     */
+    value: SetSessionModelVendorRefused;
+    case: "vendorRefused";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -158,4 +179,43 @@ export type SetSessionModelFailure = Message<"shim.v1.SetSessionModelFailure"> &
  */
 export const SetSessionModelFailureSchema: GenMessage<SetSessionModelFailure> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_set_session_model, 3);
+
+/**
+ * @generated from message shim.v1.SetSessionModelNotInCatalog
+ */
+export type SetSessionModelNotInCatalog = Message<"shim.v1.SetSessionModelNotInCatalog"> & {
+};
+
+/**
+ * Describes the message shim.v1.SetSessionModelNotInCatalog.
+ * Use `create(SetSessionModelNotInCatalogSchema)` to create a new message.
+ */
+export const SetSessionModelNotInCatalogSchema: GenMessage<SetSessionModelNotInCatalog> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_set_session_model, 4);
+
+/**
+ * @generated from message shim.v1.SetSessionModelNoSession
+ */
+export type SetSessionModelNoSession = Message<"shim.v1.SetSessionModelNoSession"> & {
+};
+
+/**
+ * Describes the message shim.v1.SetSessionModelNoSession.
+ * Use `create(SetSessionModelNoSessionSchema)` to create a new message.
+ */
+export const SetSessionModelNoSessionSchema: GenMessage<SetSessionModelNoSession> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_set_session_model, 5);
+
+/**
+ * @generated from message shim.v1.SetSessionModelVendorRefused
+ */
+export type SetSessionModelVendorRefused = Message<"shim.v1.SetSessionModelVendorRefused"> & {
+};
+
+/**
+ * Describes the message shim.v1.SetSessionModelVendorRefused.
+ * Use `create(SetSessionModelVendorRefusedSchema)` to create a new message.
+ */
+export const SetSessionModelVendorRefusedSchema: GenMessage<SetSessionModelVendorRefused> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_set_session_model, 6);
 
