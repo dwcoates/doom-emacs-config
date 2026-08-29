@@ -49,6 +49,8 @@ daemon/
     daemonaddr/    the loopback listener claim + daemon.addr write/remove (atomic)
     vocab/         readers + assertions for proto/vocab/render-colors.json and paint-classes.json
     paint/         ANSI escape parser -> paint spans; syntax highlighter -> paint spans
+    ids/           the identity newtypes shared by every package (WorkspaceID, RepoID, InstanceID,
+                   LeaseID, TurnID, TaskID, FaultID) — a leaf below wsm and feedid; both alias them
     feedid/        FeedId encode/decode (no table)
     prompts/       prompts/ directory reader: header parse, placeholder validation, splice
     wsm/           the state client (SQLite; the durable fact inventory; lease policy metadata)
@@ -445,6 +447,24 @@ UpdateAgent.stop / StopBash; all_agents → fan-wide), `AnswerPermission`,
 - Workflow is kicked: workflow rpcs and arms are answered/ignored with a
   typed not-implemented refusal (transport-layer, intended arm
   `<Rpc>Error.not_implemented`); no watch is ever opened for a workflow.
+- LANDED at overhaul/integration 80a7a0322 (merged): see docs/overhaul/daemon.md
+  "Kickoff increments and rulings". Additions beyond the list below:
+  `RequestCommandSupport{workspace, command}` → `{WorkspaceRef}` composes the
+  add-support brief from `prompts/add-support-slash-command.md` (loud on
+  absence) and creates via the ordinary standard form with initial_prompt;
+  `SubmitPromptRequest.origin` is REQUIRED (UNSPECIFIED refused; persisted
+  onto the turn via StartTurn); `UpdateHeldPrompt.accept` is legal only on a
+  `hold_for_turn_end` verdict (flips HeldPromptAccepted, re-pushes the tray);
+  `SessionFault.kind` (store_unreachable | converter_defect |
+  log_sink_poisoned | keepalive_failed | vendor_query_failed) feeds the
+  topbar's session_fault warnings; every shim.v1 failure now carries a
+  typed `kind`/`cause` arm the daemon switches on. Panel/refusal rows mint
+  FeedIds from (workspace, a per-workspace monotonically increasing
+  synthesized sequence) so re-pushes upsert. Roster `closed = true` on
+  merged, closed AND killed rows; a nuked row leaves the roster. Emacs
+  launches `daemon/bin/claude-repld` with NO argv (state via env); the
+  joining successor is spawned with `-joining <incumbent address>`
+  (documented in daemon/AGENTS.md).
 - RULINGS (project lead landing, 2026-08-29):
   - Q1: `/agents` and `/help` ARE recognized and never forwarded to the shim;
     they answer as `command_refused` (the add-support card, "not supported").
@@ -459,7 +479,7 @@ UpdateAgent.stop / StopBash; all_agents → fan-wide), `AnswerPermission`,
     composed reason, add-support offer marker}`; resolver memory only, never
     stored, never replayed after restart. SubmitPromptSuccess keeps
     `command_panel` and gains `command_refused`.
-  - Q4: no held-prompt accept action (unchanged).
+  - Q4: superseded — `accept` landed (see above).
   - Login: `WatchLoginTerminal` is a SERVER stream (request {workspace};
     output bytes|closed) plus unary `SendLoginInput{workspace, oneof
     keystrokes|resize}`.
