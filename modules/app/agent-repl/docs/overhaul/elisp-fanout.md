@@ -17,8 +17,11 @@ the proto wins and the agent reports the conflict.
   under that variable.
 - Logging: every logical branch of production code logs through core.el's
   canonical API: `agent-repl--log` (debug), `agent-repl--info`,
-  `agent-repl--warn` (WARNING), `agent-repl--error` (ERROR; added by the
-  dead-code pre-pass). Operation names: `elisp.<module>.<operation>`.
+  `agent-repl--warn` (WARNING), `agent-repl--error` (ERROR; a PURE LOGGER
+  that never signals — ruled at the pre-pass). REFUSALS that must abort use
+  `agent-repl--fatal` (record at ERROR, then signal — the pre-existing
+  behavior, renamed) or `user-error` for interactive refusals; never swallow
+  a signal. Operation names: `elisp.<module>.<operation>`.
   Dynamic values go in the context, never only in the message.
 - Validation invariant: a push or response missing a non-optional field, an
   unset oneof, a oneof with two arms set, or an unknown field/arm is a
