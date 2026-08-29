@@ -266,3 +266,42 @@ bounded streams, clock convention, validation/logging invariants) are in
 - KEEP-ALIVE OWNERSHIP: the keep-alive stamp on turns is written by the
   SHIM at submission; the store's never-served index rides that stamp —
   the daemon holds no keep-alive knowledge.
+
+## Kickoff increments and rulings (2026-08-29, project lead)
+
+- LANDED: AgentUpdate `context_cut` and `api_error` are page lines (an
+  `update` arm never touches the agent row's terminal columns). No failure
+  arm on WatchAgentSession: a refused watch (unknown/consumed token, store
+  restarted) closes at the transport with Connect CodeNotFound and the
+  shim re-opens — the contract's refused-open convention.
+- R11: the doctor probes the Connect endpoints; the Serve/Close race is fixed
+  in production; the private test socket is env AGENT_REPL_STORE_SOCKET (a
+  flag beats it). The upsert-key rule and keep-alive marker in shim.md are
+  the cross-plane contract. Go modules pin connect v1.17.0 + x/net v0.43.0.
+  agent-shim/wire is dropped as a dependency here and deleted by the daemon
+  rewrite. Workflow: the table exists, nothing routes into it; GetWorkflow
+  answers the typed not-implemented failure.
+
+- CROSS-SYSTEM PROCESS CONTRACTS (project lead, kickoff): one state root
+  `$AGENT_REPL_STATE_DIR` (default ~/.claude-emacs); the daemon binds ONE
+  loopback TCP listener serving Connect (HTTP/1.1 + h2c, binary + JSON) and
+  the webapp assets on one origin, writes `127.0.0.1:<port>` to
+  `$AGENT_REPL_STATE_DIR/daemon.addr` (atomic replace; removed on orderly
+  exit; a joining successor writes it only after it owns every workspace);
+  the webview URL is `http://<daemon.addr>/?workspace=<id>&dir=<dir>`
+  (`&composer=1` only in dev mode); the shim is spawned as `node
+  agent-shim/claude/shim/dist/main.js --listen <uds> --store-socket <uds>
+  --log-fd 3 [--fake]` with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED=1,
+  AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA (tests add
+  AGENT_REPL_FORBID_VENDOR_CALLS=1), cwd = the workspace; session facts
+  travel only in StartSession; readiness = the first healthy `diagnostics`
+  push on WatchSession; the store serves on ~/.cache/agent-repl/sock/
+  store.sock (tests: env AGENT_REPL_STORE_SOCKET, a flag beats it); kernel
+  locks live in ~/.cache/agent-repl/run/ — `workspace-<md5hex(clean abs
+  dir)[:8]>.lock` (shim-held from startup; the daemon probes ONLY this one,
+  flock LOCK_EX|LOCK_NB) and `session-<vendor session id>.lock` (taken
+  inside StartSession; pre-minted on a fresh start); proto/vocab/
+  render-colors.json + paint-classes.json are the daemon's, consumed by
+  webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
+  golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
+  `go 1.23`).

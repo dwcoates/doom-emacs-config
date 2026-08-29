@@ -44,6 +44,9 @@ const (
 const (
 	// AgentReplSubmitPromptProcedure is the fully-qualified name of the AgentRepl's SubmitPrompt RPC.
 	AgentReplSubmitPromptProcedure = "/agentrepl.v1.AgentRepl/SubmitPrompt"
+	// AgentReplRequestCommandSupportProcedure is the fully-qualified name of the AgentRepl's
+	// RequestCommandSupport RPC.
+	AgentReplRequestCommandSupportProcedure = "/agentrepl.v1.AgentRepl/RequestCommandSupport"
 	// AgentReplOpenFeedProcedure is the fully-qualified name of the AgentRepl's OpenFeed RPC.
 	AgentReplOpenFeedProcedure = "/agentrepl.v1.AgentRepl/OpenFeed"
 	// AgentReplWatchFeedProcedure is the fully-qualified name of the AgentRepl's WatchFeed RPC.
@@ -144,10 +147,15 @@ const (
 	// AgentReplWatchLoginTerminalProcedure is the fully-qualified name of the AgentRepl's
 	// WatchLoginTerminal RPC.
 	AgentReplWatchLoginTerminalProcedure = "/agentrepl.v1.AgentRepl/WatchLoginTerminal"
+	// AgentReplSendLoginInputProcedure is the fully-qualified name of the AgentRepl's SendLoginInput
+	// RPC.
+	AgentReplSendLoginInputProcedure = "/agentrepl.v1.AgentRepl/SendLoginInput"
 	// AgentReplCloseLoginProcedure is the fully-qualified name of the AgentRepl's CloseLogin RPC.
 	AgentReplCloseLoginProcedure = "/agentrepl.v1.AgentRepl/CloseLogin"
 	// AgentReplOpenExternalProcedure is the fully-qualified name of the AgentRepl's OpenExternal RPC.
 	AgentReplOpenExternalProcedure = "/agentrepl.v1.AgentRepl/OpenExternal"
+	// AgentReplOpenInEditorProcedure is the fully-qualified name of the AgentRepl's OpenInEditor RPC.
+	AgentReplOpenInEditorProcedure = "/agentrepl.v1.AgentRepl/OpenInEditor"
 	// AgentReplAdoptWebWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// AdoptWebWorkspace RPC.
 	AgentReplAdoptWebWorkspaceProcedure = "/agentrepl.v1.AgentRepl/AdoptWebWorkspace"
@@ -157,6 +165,7 @@ const (
 var (
 	agentReplServiceDescriptor                      = v1.File_agentrepl_v1_service_proto.Services().ByName("AgentRepl")
 	agentReplSubmitPromptMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("SubmitPrompt")
+	agentReplRequestCommandSupportMethodDescriptor  = agentReplServiceDescriptor.Methods().ByName("RequestCommandSupport")
 	agentReplOpenFeedMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("OpenFeed")
 	agentReplWatchFeedMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("WatchFeed")
 	agentReplGetFeedPageMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("GetFeedPage")
@@ -196,8 +205,10 @@ var (
 	agentReplWatchWebWorkspaceMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("WatchWebWorkspace")
 	agentReplOpenLoginMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("OpenLogin")
 	agentReplWatchLoginTerminalMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("WatchLoginTerminal")
+	agentReplSendLoginInputMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SendLoginInput")
 	agentReplCloseLoginMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("CloseLogin")
 	agentReplOpenExternalMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("OpenExternal")
+	agentReplOpenInEditorMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("OpenInEditor")
 	agentReplAdoptWebWorkspaceMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("AdoptWebWorkspace")
 )
 
@@ -206,6 +217,10 @@ type AgentReplClient interface {
 	// The composer's submission, whole; the daemon recognizes programmatically
 	// handled commands transparently. See endpoint_submit_prompt.proto.
 	SubmitPrompt(context.Context, *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error)
+	// The refusal card's "engineer support for it" offer: spawn a support
+	// workspace with a daemon-composed brief. See
+	// endpoint_request_command_support.proto.
+	RequestCommandSupport(context.Context, *connect.Request[v1.RequestCommandSupportRequest]) (*connect.Response[v1.RequestCommandSupportResponse], error)
 	// The feed's live half: every row upsert for one workspace, top-level and
 	// nested alike. See endpoint_watch_feed.proto.
 	// Opens ONE feed (root, or a subagent bubble's sub-feed): answers with the
@@ -309,15 +324,22 @@ type AgentReplClient interface {
 	// Begin (or join) the account login flow — the daemon-owned pty running
 	// the vendor's login TUI. See endpoint_open_login.proto.
 	OpenLogin(context.Context, *connect.Request[v1.OpenLoginRequest]) (*connect.Response[v1.OpenLoginResponse], error)
-	// The login pty's duplex stream: keystrokes/resize in, raw bytes out,
-	// scrollback replayed on attach. See endpoint_watch_login_terminal.proto.
-	WatchLoginTerminal(context.Context) *connect.BidiStreamForClient[v1.LoginTerminalInput, v1.LoginTerminalOutput]
+	// The login pty's output stream: raw bytes out, scrollback replayed on
+	// attach; the input direction is SendLoginInput (a WKWebView cannot speak
+	// a bidirectional Connect stream). See endpoint_watch_login_terminal.proto.
+	WatchLoginTerminal(context.Context, *connect.Request[v1.WatchLoginTerminalRequest]) (*connect.ServerStreamForClient[v1.LoginTerminalOutput], error)
+	// Keystrokes or a resize for the login pty. See
+	// endpoint_send_login_input.proto.
+	SendLoginInput(context.Context, *connect.Request[v1.SendLoginInputRequest]) (*connect.Response[v1.SendLoginInputResponse], error)
 	// End the login session; closing an absent one is success. See
 	// endpoint_close_login.proto.
 	CloseLogin(context.Context, *connect.Request[v1.CloseLoginRequest]) (*connect.Response[v1.CloseLoginResponse], error)
 	// Open a clicked link in the pinned external browser profile. See
 	// endpoint_open_external.proto.
 	OpenExternal(context.Context, *connect.Request[v1.OpenExternalRequest]) (*connect.Response[v1.OpenExternalResponse], error)
+	// A host-raised click: open a path (at a line) in the editor — relayed to
+	// the workspace's host stream. See endpoint_open_in_editor.proto.
+	OpenInEditor(context.Context, *connect.Request[v1.OpenInEditorRequest]) (*connect.Response[v1.OpenInEditorResponse], error)
 	// The webview's half of the handover rendezvous, called on the NEW
 	// daemon. See endpoint_adopt_web_workspace.proto.
 	AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error)
@@ -337,6 +359,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplSubmitPromptProcedure,
 			connect.WithSchema(agentReplSubmitPromptMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		requestCommandSupport: connect.NewClient[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse](
+			httpClient,
+			baseURL+AgentReplRequestCommandSupportProcedure,
+			connect.WithSchema(agentReplRequestCommandSupportMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		openFeed: connect.NewClient[v1.OpenFeedRequest, v1.OpenFeedResponse](
@@ -567,10 +595,16 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplOpenLoginMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		watchLoginTerminal: connect.NewClient[v1.LoginTerminalInput, v1.LoginTerminalOutput](
+		watchLoginTerminal: connect.NewClient[v1.WatchLoginTerminalRequest, v1.LoginTerminalOutput](
 			httpClient,
 			baseURL+AgentReplWatchLoginTerminalProcedure,
 			connect.WithSchema(agentReplWatchLoginTerminalMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		sendLoginInput: connect.NewClient[v1.SendLoginInputRequest, v1.SendLoginInputResponse](
+			httpClient,
+			baseURL+AgentReplSendLoginInputProcedure,
+			connect.WithSchema(agentReplSendLoginInputMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		closeLogin: connect.NewClient[v1.CloseLoginRequest, v1.CloseLoginResponse](
@@ -585,6 +619,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplOpenExternalMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		openInEditor: connect.NewClient[v1.OpenInEditorRequest, v1.OpenInEditorResponse](
+			httpClient,
+			baseURL+AgentReplOpenInEditorProcedure,
+			connect.WithSchema(agentReplOpenInEditorMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		adoptWebWorkspace: connect.NewClient[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplAdoptWebWorkspaceProcedure,
@@ -597,6 +637,7 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 // agentReplClient implements AgentReplClient.
 type agentReplClient struct {
 	submitPrompt           *connect.Client[v1.SubmitPromptRequest, v1.SubmitPromptResponse]
+	requestCommandSupport  *connect.Client[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse]
 	openFeed               *connect.Client[v1.OpenFeedRequest, v1.OpenFeedResponse]
 	watchFeed              *connect.Client[v1.WatchFeedRequest, v1.WatchFeedResponse]
 	getFeedPage            *connect.Client[v1.GetFeedPageRequest, v1.GetFeedPageResponse]
@@ -635,15 +676,22 @@ type agentReplClient struct {
 	adoptHostWorkspace     *connect.Client[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse]
 	watchWebWorkspace      *connect.Client[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse]
 	openLogin              *connect.Client[v1.OpenLoginRequest, v1.OpenLoginResponse]
-	watchLoginTerminal     *connect.Client[v1.LoginTerminalInput, v1.LoginTerminalOutput]
+	watchLoginTerminal     *connect.Client[v1.WatchLoginTerminalRequest, v1.LoginTerminalOutput]
+	sendLoginInput         *connect.Client[v1.SendLoginInputRequest, v1.SendLoginInputResponse]
 	closeLogin             *connect.Client[v1.CloseLoginRequest, v1.CloseLoginResponse]
 	openExternal           *connect.Client[v1.OpenExternalRequest, v1.OpenExternalResponse]
+	openInEditor           *connect.Client[v1.OpenInEditorRequest, v1.OpenInEditorResponse]
 	adoptWebWorkspace      *connect.Client[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse]
 }
 
 // SubmitPrompt calls agentrepl.v1.AgentRepl.SubmitPrompt.
 func (c *agentReplClient) SubmitPrompt(ctx context.Context, req *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error) {
 	return c.submitPrompt.CallUnary(ctx, req)
+}
+
+// RequestCommandSupport calls agentrepl.v1.AgentRepl.RequestCommandSupport.
+func (c *agentReplClient) RequestCommandSupport(ctx context.Context, req *connect.Request[v1.RequestCommandSupportRequest]) (*connect.Response[v1.RequestCommandSupportResponse], error) {
+	return c.requestCommandSupport.CallUnary(ctx, req)
 }
 
 // OpenFeed calls agentrepl.v1.AgentRepl.OpenFeed.
@@ -837,8 +885,13 @@ func (c *agentReplClient) OpenLogin(ctx context.Context, req *connect.Request[v1
 }
 
 // WatchLoginTerminal calls agentrepl.v1.AgentRepl.WatchLoginTerminal.
-func (c *agentReplClient) WatchLoginTerminal(ctx context.Context) *connect.BidiStreamForClient[v1.LoginTerminalInput, v1.LoginTerminalOutput] {
-	return c.watchLoginTerminal.CallBidiStream(ctx)
+func (c *agentReplClient) WatchLoginTerminal(ctx context.Context, req *connect.Request[v1.WatchLoginTerminalRequest]) (*connect.ServerStreamForClient[v1.LoginTerminalOutput], error) {
+	return c.watchLoginTerminal.CallServerStream(ctx, req)
+}
+
+// SendLoginInput calls agentrepl.v1.AgentRepl.SendLoginInput.
+func (c *agentReplClient) SendLoginInput(ctx context.Context, req *connect.Request[v1.SendLoginInputRequest]) (*connect.Response[v1.SendLoginInputResponse], error) {
+	return c.sendLoginInput.CallUnary(ctx, req)
 }
 
 // CloseLogin calls agentrepl.v1.AgentRepl.CloseLogin.
@@ -851,6 +904,11 @@ func (c *agentReplClient) OpenExternal(ctx context.Context, req *connect.Request
 	return c.openExternal.CallUnary(ctx, req)
 }
 
+// OpenInEditor calls agentrepl.v1.AgentRepl.OpenInEditor.
+func (c *agentReplClient) OpenInEditor(ctx context.Context, req *connect.Request[v1.OpenInEditorRequest]) (*connect.Response[v1.OpenInEditorResponse], error) {
+	return c.openInEditor.CallUnary(ctx, req)
+}
+
 // AdoptWebWorkspace calls agentrepl.v1.AgentRepl.AdoptWebWorkspace.
 func (c *agentReplClient) AdoptWebWorkspace(ctx context.Context, req *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {
 	return c.adoptWebWorkspace.CallUnary(ctx, req)
@@ -861,6 +919,10 @@ type AgentReplHandler interface {
 	// The composer's submission, whole; the daemon recognizes programmatically
 	// handled commands transparently. See endpoint_submit_prompt.proto.
 	SubmitPrompt(context.Context, *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error)
+	// The refusal card's "engineer support for it" offer: spawn a support
+	// workspace with a daemon-composed brief. See
+	// endpoint_request_command_support.proto.
+	RequestCommandSupport(context.Context, *connect.Request[v1.RequestCommandSupportRequest]) (*connect.Response[v1.RequestCommandSupportResponse], error)
 	// The feed's live half: every row upsert for one workspace, top-level and
 	// nested alike. See endpoint_watch_feed.proto.
 	// Opens ONE feed (root, or a subagent bubble's sub-feed): answers with the
@@ -964,15 +1026,22 @@ type AgentReplHandler interface {
 	// Begin (or join) the account login flow — the daemon-owned pty running
 	// the vendor's login TUI. See endpoint_open_login.proto.
 	OpenLogin(context.Context, *connect.Request[v1.OpenLoginRequest]) (*connect.Response[v1.OpenLoginResponse], error)
-	// The login pty's duplex stream: keystrokes/resize in, raw bytes out,
-	// scrollback replayed on attach. See endpoint_watch_login_terminal.proto.
-	WatchLoginTerminal(context.Context, *connect.BidiStream[v1.LoginTerminalInput, v1.LoginTerminalOutput]) error
+	// The login pty's output stream: raw bytes out, scrollback replayed on
+	// attach; the input direction is SendLoginInput (a WKWebView cannot speak
+	// a bidirectional Connect stream). See endpoint_watch_login_terminal.proto.
+	WatchLoginTerminal(context.Context, *connect.Request[v1.WatchLoginTerminalRequest], *connect.ServerStream[v1.LoginTerminalOutput]) error
+	// Keystrokes or a resize for the login pty. See
+	// endpoint_send_login_input.proto.
+	SendLoginInput(context.Context, *connect.Request[v1.SendLoginInputRequest]) (*connect.Response[v1.SendLoginInputResponse], error)
 	// End the login session; closing an absent one is success. See
 	// endpoint_close_login.proto.
 	CloseLogin(context.Context, *connect.Request[v1.CloseLoginRequest]) (*connect.Response[v1.CloseLoginResponse], error)
 	// Open a clicked link in the pinned external browser profile. See
 	// endpoint_open_external.proto.
 	OpenExternal(context.Context, *connect.Request[v1.OpenExternalRequest]) (*connect.Response[v1.OpenExternalResponse], error)
+	// A host-raised click: open a path (at a line) in the editor — relayed to
+	// the workspace's host stream. See endpoint_open_in_editor.proto.
+	OpenInEditor(context.Context, *connect.Request[v1.OpenInEditorRequest]) (*connect.Response[v1.OpenInEditorResponse], error)
 	// The webview's half of the handover rendezvous, called on the NEW
 	// daemon. See endpoint_adopt_web_workspace.proto.
 	AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error)
@@ -988,6 +1057,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplSubmitPromptProcedure,
 		svc.SubmitPrompt,
 		connect.WithSchema(agentReplSubmitPromptMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplRequestCommandSupportHandler := connect.NewUnaryHandler(
+		AgentReplRequestCommandSupportProcedure,
+		svc.RequestCommandSupport,
+		connect.WithSchema(agentReplRequestCommandSupportMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplOpenFeedHandler := connect.NewUnaryHandler(
@@ -1218,10 +1293,16 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplOpenLoginMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentReplWatchLoginTerminalHandler := connect.NewBidiStreamHandler(
+	agentReplWatchLoginTerminalHandler := connect.NewServerStreamHandler(
 		AgentReplWatchLoginTerminalProcedure,
 		svc.WatchLoginTerminal,
 		connect.WithSchema(agentReplWatchLoginTerminalMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSendLoginInputHandler := connect.NewUnaryHandler(
+		AgentReplSendLoginInputProcedure,
+		svc.SendLoginInput,
+		connect.WithSchema(agentReplSendLoginInputMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplCloseLoginHandler := connect.NewUnaryHandler(
@@ -1236,6 +1317,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplOpenExternalMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplOpenInEditorHandler := connect.NewUnaryHandler(
+		AgentReplOpenInEditorProcedure,
+		svc.OpenInEditor,
+		connect.WithSchema(agentReplOpenInEditorMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplAdoptWebWorkspaceHandler := connect.NewUnaryHandler(
 		AgentReplAdoptWebWorkspaceProcedure,
 		svc.AdoptWebWorkspace,
@@ -1246,6 +1333,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		switch r.URL.Path {
 		case AgentReplSubmitPromptProcedure:
 			agentReplSubmitPromptHandler.ServeHTTP(w, r)
+		case AgentReplRequestCommandSupportProcedure:
+			agentReplRequestCommandSupportHandler.ServeHTTP(w, r)
 		case AgentReplOpenFeedProcedure:
 			agentReplOpenFeedHandler.ServeHTTP(w, r)
 		case AgentReplWatchFeedProcedure:
@@ -1324,10 +1413,14 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplOpenLoginHandler.ServeHTTP(w, r)
 		case AgentReplWatchLoginTerminalProcedure:
 			agentReplWatchLoginTerminalHandler.ServeHTTP(w, r)
+		case AgentReplSendLoginInputProcedure:
+			agentReplSendLoginInputHandler.ServeHTTP(w, r)
 		case AgentReplCloseLoginProcedure:
 			agentReplCloseLoginHandler.ServeHTTP(w, r)
 		case AgentReplOpenExternalProcedure:
 			agentReplOpenExternalHandler.ServeHTTP(w, r)
+		case AgentReplOpenInEditorProcedure:
+			agentReplOpenInEditorHandler.ServeHTTP(w, r)
 		case AgentReplAdoptWebWorkspaceProcedure:
 			agentReplAdoptWebWorkspaceHandler.ServeHTTP(w, r)
 		default:
@@ -1341,6 +1434,10 @@ type UnimplementedAgentReplHandler struct{}
 
 func (UnimplementedAgentReplHandler) SubmitPrompt(context.Context, *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SubmitPrompt is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RequestCommandSupport(context.Context, *connect.Request[v1.RequestCommandSupportRequest]) (*connect.Response[v1.RequestCommandSupportResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RequestCommandSupport is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) OpenFeed(context.Context, *connect.Request[v1.OpenFeedRequest]) (*connect.Response[v1.OpenFeedResponse], error) {
@@ -1495,8 +1592,12 @@ func (UnimplementedAgentReplHandler) OpenLogin(context.Context, *connect.Request
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.OpenLogin is not implemented"))
 }
 
-func (UnimplementedAgentReplHandler) WatchLoginTerminal(context.Context, *connect.BidiStream[v1.LoginTerminalInput, v1.LoginTerminalOutput]) error {
+func (UnimplementedAgentReplHandler) WatchLoginTerminal(context.Context, *connect.Request[v1.WatchLoginTerminalRequest], *connect.ServerStream[v1.LoginTerminalOutput]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchLoginTerminal is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SendLoginInput(context.Context, *connect.Request[v1.SendLoginInputRequest]) (*connect.Response[v1.SendLoginInputResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SendLoginInput is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) CloseLogin(context.Context, *connect.Request[v1.CloseLoginRequest]) (*connect.Response[v1.CloseLoginResponse], error) {
@@ -1505,6 +1606,10 @@ func (UnimplementedAgentReplHandler) CloseLogin(context.Context, *connect.Reques
 
 func (UnimplementedAgentReplHandler) OpenExternal(context.Context, *connect.Request[v1.OpenExternalRequest]) (*connect.Response[v1.OpenExternalResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.OpenExternal is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) OpenInEditor(context.Context, *connect.Request[v1.OpenInEditorRequest]) (*connect.Response[v1.OpenInEditorResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.OpenInEditor is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {

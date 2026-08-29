@@ -28,10 +28,15 @@ message UpdateHeldPromptRequest {
     UpdateHeldPromptRelease release = 3;
     // Discard it, never delivered (the composer takes the text back).
     UpdateHeldPromptDrop drop = 4;
+    // Confirm the hold (view state only: HeldPromptAccepted.accepted flips
+    // and the tray re-pushes; delivery is unchanged). Legal ONLY on an
+    // entry whose classification is hold_for_turn_end; refused otherwise.
+    UpdateHeldPromptAccept accept = 5;
   }
 }
 message UpdateHeldPromptRelease {}
 message UpdateHeldPromptDrop {}
+message UpdateHeldPromptAccept {}
 
 // THE ARM IS THE OUTCOME.
 message UpdateHeldPromptResponse {

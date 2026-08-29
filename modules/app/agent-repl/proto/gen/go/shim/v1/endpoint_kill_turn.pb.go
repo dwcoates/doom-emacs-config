@@ -221,6 +221,9 @@ type KillTurnFailure struct {
 	// Types that are valid to be assigned to Cause:
 	//
 	//	*KillTurnFailure_Live
+	//	*KillTurnFailure_NotTheOpenTurn
+	//	*KillTurnFailure_NoTurnOpen
+	//	*KillTurnFailure_NoSession
 	Cause isKillTurnFailure_Cause `protobuf_oneof:"cause"`
 	// The shim's account, for a human and for logs; never switched on.
 	Detail        string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
@@ -274,6 +277,33 @@ func (x *KillTurnFailure) GetLive() *v1.TurnLive {
 	return nil
 }
 
+func (x *KillTurnFailure) GetNotTheOpenTurn() *KillTurnNotTheOpenTurn {
+	if x != nil {
+		if x, ok := x.Cause.(*KillTurnFailure_NotTheOpenTurn); ok {
+			return x.NotTheOpenTurn
+		}
+	}
+	return nil
+}
+
+func (x *KillTurnFailure) GetNoTurnOpen() *KillTurnNoTurnOpen {
+	if x != nil {
+		if x, ok := x.Cause.(*KillTurnFailure_NoTurnOpen); ok {
+			return x.NoTurnOpen
+		}
+	}
+	return nil
+}
+
+func (x *KillTurnFailure) GetNoSession() *KillTurnNoSession {
+	if x != nil {
+		if x, ok := x.Cause.(*KillTurnFailure_NoSession); ok {
+			return x.NoSession
+		}
+	}
+	return nil
+}
+
 func (x *KillTurnFailure) GetDetail() string {
 	if x != nil {
 		return x.Detail
@@ -287,10 +317,139 @@ type isKillTurnFailure_Cause interface {
 
 type KillTurnFailure_Live struct {
 	// Work this turn spawned is live and force was not asked: here it is.
-	Live *v1.TurnLive `protobuf:"bytes,1,opt,name=live,proto3,oneof"` // Further arms DERIVED at the wave (not the open turn, no session).
+	Live *v1.TurnLive `protobuf:"bytes,1,opt,name=live,proto3,oneof"`
+}
+
+type KillTurnFailure_NotTheOpenTurn struct {
+	// The named turn is not the open one.
+	NotTheOpenTurn *KillTurnNotTheOpenTurn `protobuf:"bytes,3,opt,name=not_the_open_turn,json=notTheOpenTurn,proto3,oneof"`
+}
+
+type KillTurnFailure_NoTurnOpen struct {
+	// No turn is open.
+	NoTurnOpen *KillTurnNoTurnOpen `protobuf:"bytes,4,opt,name=no_turn_open,json=noTurnOpen,proto3,oneof"`
+}
+
+type KillTurnFailure_NoSession struct {
+	// No session is open on this shim.
+	NoSession *KillTurnNoSession `protobuf:"bytes,5,opt,name=no_session,json=noSession,proto3,oneof"`
 }
 
 func (*KillTurnFailure_Live) isKillTurnFailure_Cause() {}
+
+func (*KillTurnFailure_NotTheOpenTurn) isKillTurnFailure_Cause() {}
+
+func (*KillTurnFailure_NoTurnOpen) isKillTurnFailure_Cause() {}
+
+func (*KillTurnFailure_NoSession) isKillTurnFailure_Cause() {}
+
+type KillTurnNotTheOpenTurn struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KillTurnNotTheOpenTurn) Reset() {
+	*x = KillTurnNotTheOpenTurn{}
+	mi := &file_shim_v1_endpoint_kill_turn_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillTurnNotTheOpenTurn) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillTurnNotTheOpenTurn) ProtoMessage() {}
+
+func (x *KillTurnNotTheOpenTurn) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_kill_turn_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillTurnNotTheOpenTurn.ProtoReflect.Descriptor instead.
+func (*KillTurnNotTheOpenTurn) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_kill_turn_proto_rawDescGZIP(), []int{4}
+}
+
+type KillTurnNoTurnOpen struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KillTurnNoTurnOpen) Reset() {
+	*x = KillTurnNoTurnOpen{}
+	mi := &file_shim_v1_endpoint_kill_turn_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillTurnNoTurnOpen) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillTurnNoTurnOpen) ProtoMessage() {}
+
+func (x *KillTurnNoTurnOpen) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_kill_turn_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillTurnNoTurnOpen.ProtoReflect.Descriptor instead.
+func (*KillTurnNoTurnOpen) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_kill_turn_proto_rawDescGZIP(), []int{5}
+}
+
+type KillTurnNoSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KillTurnNoSession) Reset() {
+	*x = KillTurnNoSession{}
+	mi := &file_shim_v1_endpoint_kill_turn_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillTurnNoSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillTurnNoSession) ProtoMessage() {}
+
+func (x *KillTurnNoSession) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_kill_turn_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillTurnNoSession.ProtoReflect.Descriptor instead.
+func (*KillTurnNoSession) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_kill_turn_proto_rawDescGZIP(), []int{6}
+}
 
 var File_shim_v1_endpoint_kill_turn_proto protoreflect.FileDescriptor
 
@@ -305,11 +464,19 @@ const file_shim_v1_endpoint_kill_turn_proto_rawDesc = "" +
 	"\afailure\x18\x02 \x01(\v2\x18.shim.v1.KillTurnFailureH\x00R\afailureB\b\n" +
 	"\x06result\"F\n" +
 	"\x0fKillTurnSuccess\x123\n" +
-	"\x06killed\x18\x01 \x01(\v2\x1b.conversation.v1.TurnKilledR\x06killed\"c\n" +
+	"\x06killed\x18\x01 \x01(\v2\x1b.conversation.v1.TurnKilledR\x06killed\"\xaf\x02\n" +
 	"\x0fKillTurnFailure\x12/\n" +
-	"\x04live\x18\x01 \x01(\v2\x19.conversation.v1.TurnLiveH\x00R\x04live\x12\x16\n" +
+	"\x04live\x18\x01 \x01(\v2\x19.conversation.v1.TurnLiveH\x00R\x04live\x12L\n" +
+	"\x11not_the_open_turn\x18\x03 \x01(\v2\x1f.shim.v1.KillTurnNotTheOpenTurnH\x00R\x0enotTheOpenTurn\x12?\n" +
+	"\fno_turn_open\x18\x04 \x01(\v2\x1b.shim.v1.KillTurnNoTurnOpenH\x00R\n" +
+	"noTurnOpen\x12;\n" +
+	"\n" +
+	"no_session\x18\x05 \x01(\v2\x1a.shim.v1.KillTurnNoSessionH\x00R\tnoSession\x12\x16\n" +
 	"\x06detail\x18\x02 \x01(\tR\x06detailB\a\n" +
-	"\x05causeB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x05cause\"\x18\n" +
+	"\x16KillTurnNotTheOpenTurn\"\x14\n" +
+	"\x12KillTurnNoTurnOpen\"\x13\n" +
+	"\x11KillTurnNoSessionB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_kill_turn_proto_rawDescOnce sync.Once
@@ -323,27 +490,33 @@ func file_shim_v1_endpoint_kill_turn_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_kill_turn_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_kill_turn_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_shim_v1_endpoint_kill_turn_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_shim_v1_endpoint_kill_turn_proto_goTypes = []any{
-	(*KillTurnRequest)(nil),  // 0: shim.v1.KillTurnRequest
-	(*KillTurnResponse)(nil), // 1: shim.v1.KillTurnResponse
-	(*KillTurnSuccess)(nil),  // 2: shim.v1.KillTurnSuccess
-	(*KillTurnFailure)(nil),  // 3: shim.v1.KillTurnFailure
-	(*v1.TurnId)(nil),        // 4: conversation.v1.TurnId
-	(*v1.TurnKilled)(nil),    // 5: conversation.v1.TurnKilled
-	(*v1.TurnLive)(nil),      // 6: conversation.v1.TurnLive
+	(*KillTurnRequest)(nil),        // 0: shim.v1.KillTurnRequest
+	(*KillTurnResponse)(nil),       // 1: shim.v1.KillTurnResponse
+	(*KillTurnSuccess)(nil),        // 2: shim.v1.KillTurnSuccess
+	(*KillTurnFailure)(nil),        // 3: shim.v1.KillTurnFailure
+	(*KillTurnNotTheOpenTurn)(nil), // 4: shim.v1.KillTurnNotTheOpenTurn
+	(*KillTurnNoTurnOpen)(nil),     // 5: shim.v1.KillTurnNoTurnOpen
+	(*KillTurnNoSession)(nil),      // 6: shim.v1.KillTurnNoSession
+	(*v1.TurnId)(nil),              // 7: conversation.v1.TurnId
+	(*v1.TurnKilled)(nil),          // 8: conversation.v1.TurnKilled
+	(*v1.TurnLive)(nil),            // 9: conversation.v1.TurnLive
 }
 var file_shim_v1_endpoint_kill_turn_proto_depIdxs = []int32{
-	4, // 0: shim.v1.KillTurnRequest.turn:type_name -> conversation.v1.TurnId
+	7, // 0: shim.v1.KillTurnRequest.turn:type_name -> conversation.v1.TurnId
 	2, // 1: shim.v1.KillTurnResponse.success:type_name -> shim.v1.KillTurnSuccess
 	3, // 2: shim.v1.KillTurnResponse.failure:type_name -> shim.v1.KillTurnFailure
-	5, // 3: shim.v1.KillTurnSuccess.killed:type_name -> conversation.v1.TurnKilled
-	6, // 4: shim.v1.KillTurnFailure.live:type_name -> conversation.v1.TurnLive
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	8, // 3: shim.v1.KillTurnSuccess.killed:type_name -> conversation.v1.TurnKilled
+	9, // 4: shim.v1.KillTurnFailure.live:type_name -> conversation.v1.TurnLive
+	4, // 5: shim.v1.KillTurnFailure.not_the_open_turn:type_name -> shim.v1.KillTurnNotTheOpenTurn
+	5, // 6: shim.v1.KillTurnFailure.no_turn_open:type_name -> shim.v1.KillTurnNoTurnOpen
+	6, // 7: shim.v1.KillTurnFailure.no_session:type_name -> shim.v1.KillTurnNoSession
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_kill_turn_proto_init() }
@@ -357,6 +530,9 @@ func file_shim_v1_endpoint_kill_turn_proto_init() {
 	}
 	file_shim_v1_endpoint_kill_turn_proto_msgTypes[3].OneofWrappers = []any{
 		(*KillTurnFailure_Live)(nil),
+		(*KillTurnFailure_NotTheOpenTurn)(nil),
+		(*KillTurnFailure_NoTurnOpen)(nil),
+		(*KillTurnFailure_NoSession)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -364,7 +540,7 @@ func file_shim_v1_endpoint_kill_turn_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_kill_turn_proto_rawDesc), len(file_shim_v1_endpoint_kill_turn_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

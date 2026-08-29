@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_set_session_permission_mode.proto.
  */
 export const file_shim_v1_endpoint_set_session_permission_mode: GenFile = /*@__PURE__*/
-  fileDesc("CjJzaGltL3YxL2VuZHBvaW50X3NldF9zZXNzaW9uX3Blcm1pc3Npb25fbW9kZS5wcm90bxIHc2hpbS52MSJgCh9TZXRTZXNzaW9uUGVybWlzc2lvbk1vZGVSZXF1ZXN0Ej0KD3Blcm1pc3Npb25fbW9kZRgBIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlIqYBCiBTZXRTZXNzaW9uUGVybWlzc2lvbk1vZGVSZXNwb25zZRI7CgdzdWNjZXNzGAEgASgLMiguc2hpbS52MS5TZXRTZXNzaW9uUGVybWlzc2lvbk1vZGVTdWNjZXNzSAASOwoHZmFpbHVyZRgCIAEoCzIoLnNoaW0udjEuU2V0U2Vzc2lvblBlcm1pc3Npb25Nb2RlRmFpbHVyZUgAQggKBnJlc3VsdCIhCh9TZXRTZXNzaW9uUGVybWlzc2lvbk1vZGVTdWNjZXNzIjEKH1NldFNlc3Npb25QZXJtaXNzaW9uTW9kZUZhaWx1cmUSDgoGZGV0YWlsGAEgASgJQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_permission]);
+  fileDesc("CjJzaGltL3YxL2VuZHBvaW50X3NldF9zZXNzaW9uX3Blcm1pc3Npb25fbW9kZS5wcm90bxIHc2hpbS52MSJgCh9TZXRTZXNzaW9uUGVybWlzc2lvbk1vZGVSZXF1ZXN0Ej0KD3Blcm1pc3Npb25fbW9kZRgBIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlIqYBCiBTZXRTZXNzaW9uUGVybWlzc2lvbk1vZGVSZXNwb25zZRI7CgdzdWNjZXNzGAEgASgLMiguc2hpbS52MS5TZXRTZXNzaW9uUGVybWlzc2lvbk1vZGVTdWNjZXNzSAASOwoHZmFpbHVyZRgCIAEoCzIoLnNoaW0udjEuU2V0U2Vzc2lvblBlcm1pc3Npb25Nb2RlRmFpbHVyZUgAQggKBnJlc3VsdCIhCh9TZXRTZXNzaW9uUGVybWlzc2lvbk1vZGVTdWNjZXNzIsUBCh9TZXRTZXNzaW9uUGVybWlzc2lvbk1vZGVGYWlsdXJlEg4KBmRldGFpbBgBIAEoCRJACgpub19zZXNzaW9uGAIgASgLMiouc2hpbS52MS5TZXRTZXNzaW9uUGVybWlzc2lvbk1vZGVOb1Nlc3Npb25IABJICg52ZW5kb3JfcmVmdXNlZBgDIAEoCzIuLnNoaW0udjEuU2V0U2Vzc2lvblBlcm1pc3Npb25Nb2RlVmVuZG9yUmVmdXNlZEgAQgYKBGtpbmQiIwohU2V0U2Vzc2lvblBlcm1pc3Npb25Nb2RlTm9TZXNzaW9uIicKJVNldFNlc3Npb25QZXJtaXNzaW9uTW9kZVZlbmRvclJlZnVzZWRCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_permission]);
 
 /**
  * The mode to set.
@@ -87,8 +87,7 @@ export const SetSessionPermissionModeSuccessSchema: GenMessage<SetSessionPermiss
   messageDesc(file_shim_v1_endpoint_set_session_permission_mode, 2);
 
 /**
- * Not set. `kind` arms are DERIVED at the wave from the shim's real refusal
- * sites (no session, a mode the vendor refused).
+ * Not set. THE ARM IS WHY.
  *
  * @generated from message shim.v1.SetSessionPermissionModeFailure
  */
@@ -99,6 +98,27 @@ export type SetSessionPermissionModeFailure = Message<"shim.v1.SetSessionPermiss
    * @generated from field: string detail = 1;
    */
   detail: string;
+
+  /**
+   * @generated from oneof shim.v1.SetSessionPermissionModeFailure.kind
+   */
+  kind: {
+    /**
+     * No session is open on this shim.
+     *
+     * @generated from field: shim.v1.SetSessionPermissionModeNoSession no_session = 2;
+     */
+    value: SetSessionPermissionModeNoSession;
+    case: "noSession";
+  } | {
+    /**
+     * The vendor refused the mode; `detail` carries its wording.
+     *
+     * @generated from field: shim.v1.SetSessionPermissionModeVendorRefused vendor_refused = 3;
+     */
+    value: SetSessionPermissionModeVendorRefused;
+    case: "vendorRefused";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -107,4 +127,30 @@ export type SetSessionPermissionModeFailure = Message<"shim.v1.SetSessionPermiss
  */
 export const SetSessionPermissionModeFailureSchema: GenMessage<SetSessionPermissionModeFailure> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_set_session_permission_mode, 3);
+
+/**
+ * @generated from message shim.v1.SetSessionPermissionModeNoSession
+ */
+export type SetSessionPermissionModeNoSession = Message<"shim.v1.SetSessionPermissionModeNoSession"> & {
+};
+
+/**
+ * Describes the message shim.v1.SetSessionPermissionModeNoSession.
+ * Use `create(SetSessionPermissionModeNoSessionSchema)` to create a new message.
+ */
+export const SetSessionPermissionModeNoSessionSchema: GenMessage<SetSessionPermissionModeNoSession> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_set_session_permission_mode, 4);
+
+/**
+ * @generated from message shim.v1.SetSessionPermissionModeVendorRefused
+ */
+export type SetSessionPermissionModeVendorRefused = Message<"shim.v1.SetSessionPermissionModeVendorRefused"> & {
+};
+
+/**
+ * Describes the message shim.v1.SetSessionPermissionModeVendorRefused.
+ * Use `create(SetSessionPermissionModeVendorRefusedSchema)` to create a new message.
+ */
+export const SetSessionPermissionModeVendorRefusedSchema: GenMessage<SetSessionPermissionModeVendorRefused> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_set_session_permission_mode, 5);
 

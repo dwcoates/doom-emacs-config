@@ -50,7 +50,20 @@ message WatchHostWorkspaceResponse {
     // attach pulls the new assets as a side effect. The reloaded webview's
     // default first-page load is the whole of the recovery.
     HostWorkspaceReloadWebapp reload_webapp = 4;
+    // A HOST-RAISED CLICK relayed from the webview (OpenInEditor): open the
+    // path — at the line when given, dired for a directory — through the ONE
+    // shared editor-popup subroutine (right side, half width). A fact, not a
+    // command: nothing acks it.
+    HostOpenInEditor open_in_editor = 5;
   }
+}
+
+// The relayed click's target, verbatim from the request.
+message HostOpenInEditor {
+  // The path on this host.
+  string path = 1;
+  // The 1-indexed line. UNSET = the file's top (or a directory).
+  optional uint32 line = 2;
 }
 
 message HostWorkspaceTransferred {}

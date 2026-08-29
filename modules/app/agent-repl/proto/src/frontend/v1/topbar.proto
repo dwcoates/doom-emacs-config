@@ -51,6 +51,29 @@ message TopbarView {
   TopbarContextChip context = 7;
   // Which account the session spends as.
   TopbarAccount account = 8;
+  // The permission-mode picker, the model selector's sibling.
+  TopbarPermissionModePicker permission_mode_picker = 9;
+}
+
+// The permission-mode picker: the mode in force and the modes this session
+// may switch to (the daemon serves exactly the set SetPermissionMode will
+// accept — an ungated mode only where creation consented to it). Modes are
+// spelled as the session facts spell them (the shim's mode vocabulary);
+// SetPermissionMode echoes an option's `mode` unchanged.
+message TopbarPermissionModePicker {
+  // The mode in force, WHOLE — the button shows its display_name.
+  TopbarPermissionModeOption current = 1;
+  // The switchable modes, in display order. The picker renders exactly this
+  // list.
+  repeated TopbarPermissionModeOption options = 2;
+}
+
+// One mode the picker offers.
+message TopbarPermissionModeOption {
+  // The mode's wire spelling — what SetPermissionMode echoes.
+  string mode = 1;
+  // The name the picker shows for it.
+  string display_name = 2;
 }
 
 // THE CHIP IS THE CURRENT CONTEXT SIZE, rendered YELLOW: the one figure
@@ -115,7 +138,9 @@ message TopbarModelSelector {
 // The STATE it derives from is the session's connectivity, resolved by the
 // daemon; the client never maps that state itself.
 message TopbarConnectivity {
-  // Vocabulary color-class name: "none" | "blue" | "teal" | "green".
+  // Vocabulary color-class name: one of proto/vocab/render-colors.json's
+  // `topbar_tones` ("none" plus the five live colors; teal died with
+  // hibernation).
   string tone = 1;
   // The literal glyph character(s) the indicator draws.
   string glyph = 2;
