@@ -1,0 +1,39 @@
+// endpoint_request_command_support.proto — RequestCommandSupport: the
+// unsupported-command refusal card's "engineer support for it" button. FEED
+// section. The DAEMON composes the support brief (which command, what the
+// vendor answers, where the daemon's recognition lives) and creates an
+// ordinary support workspace in the same repository with that brief as its
+// initial prompt — the ordinary CreateWorkspace path underneath; the caller
+// never composes a brief.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message RequestCommandSupportRequest {
+  // The workspace whose feed carried the refusal card.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The refused command, echoed from the card ("/agents").
+  string command = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message RequestCommandSupportResponse {
+  oneof result {
+    RequestCommandSupportSuccess success = 1;
+    RequestCommandSupportError error = 2;
+  }
+}
+
+// The support workspace exists; everything else rides the roster.
+message RequestCommandSupportSuccess {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown workspace, a
+// command the daemon never refused, creation failed, …), spelled per 3b.
+message RequestCommandSupportError {}
