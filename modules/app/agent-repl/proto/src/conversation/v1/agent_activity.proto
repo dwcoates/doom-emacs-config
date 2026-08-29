@@ -1046,8 +1046,7 @@ message AgentResponseRefused {
   optional AgentResponseRefusalExplanation explanation = 1;
 
   // Tags 2-6 are RETIRED: the refusal's category, model pair and billing
-  // credit fields are deferred — see the deferred-work metadocument
-  // ("refusal detail").
+  // credit fields are deferred.
 }
 
 // The explanation element.
@@ -1104,8 +1103,7 @@ message AgentReadStart {
   // When the read began, so a consumer can draw how long it has been waiting.
   AgentActivityStartedAt started_at = 2;
   // Tag 3 is RETIRED: the PDF page-range request is deferred with the pdf
-  // read extent — see the deferred-work metadocument ("non-text read
-  // extents").
+  // read extent.
 }
 
 // The file was read.

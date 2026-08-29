@@ -221,7 +221,7 @@ type UserContentBlock_Image struct {
 type UserContentBlock_Unsupported struct {
 	// A block whose kind we do not model. It renders as nothing and is kept so
 	// the decision is reversible.
-	Unsupported *UnsupportedBlock `protobuf:"bytes,3,opt,name=unsupported,proto3,oneof"`
+	Unsupported *UnsupportedBlock `protobuf:"bytes,3,opt,name=unsupported,proto3,oneof"` // Tag 4 is RETIRED: the attached-file block is deferred.
 }
 
 func (*UserContentBlock_Text) isUserContentBlock_Block() {}

@@ -100,8 +100,7 @@ export type UserContentBlock = Message<"conversation.v1.UserContentBlock"> & {
      * A block whose kind we do not model. It renders as nothing and is kept so
      * the decision is reversible.
      *
-     * Tag 4 is RETIRED: the attached-file block is deferred — see the
-     * deferred-work metadocument ("attached-file block").
+     * Tag 4 is RETIRED: the attached-file block is deferred.
      *
      * @generated from field: conversation.v1.UnsupportedBlock unsupported = 3;
      */

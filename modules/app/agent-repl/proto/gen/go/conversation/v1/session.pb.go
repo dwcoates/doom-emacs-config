@@ -918,8 +918,7 @@ type SessionUpdate_ContextBudgetWarning struct {
 	// busy periods, announced shutdown, notifications, transcript write
 	// failure, active goal, prompt suggestions, file uploads, incomplete
 	// interrupts, MCP policy, background tasks, model fallback, relocation
-	// and worktree state, tool-set churn, settings faults) are deferred —
-	// see the deferred-work metadocument ("vendor session events").
+	// and worktree state, tool-set churn, settings faults) are deferred.
 	// The vendor's own context-budget warning, injected into the prompt as
 	// the window fills. Session-scoped; the footer's activity line draws it.
 	ContextBudgetWarning *SessionContextBudgetWarning `protobuf:"bytes,24,opt,name=context_budget_warning,json=contextBudgetWarning,proto3,oneof"`
