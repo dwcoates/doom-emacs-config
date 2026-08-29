@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { TOKEN_ENV_VARS } from "./auth.mjs";
 import {
   CAPTURE_FLAG,
   CaptureRefusedError,
@@ -33,11 +34,22 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(HERE, "capture.mjs");
 
-/** Spawn the script with a controlled environment, never inheriting the suite's. */
+/**
+ * Spawn the script with a controlled environment, never inheriting the suite's.
+ *
+ * The operator's own credentials are stripped from every spawn: a machine with
+ * ANTHROPIC_API_KEY exported would otherwise satisfy the auth preflight and the
+ * child would go on to run a REAL scenario against the vendor. The tests here
+ * are about refusals, and a refusal test that can accidentally succeed at
+ * calling the API is a bug in the test.
+ */
 function runScript(args, extraEnv = {}) {
   const env = { ...process.env, ...extraEnv };
   if (extraEnv[FORBID_VENDOR_CALLS_ENV] === undefined) {
     delete env[FORBID_VENDOR_CALLS_ENV];
+  }
+  for (const tokenVar of TOKEN_ENV_VARS) {
+    if (extraEnv[tokenVar] === undefined) delete env[tokenVar];
   }
   return spawnSync(process.execPath, [SCRIPT, ...args], { env, encoding: "utf8" });
 }
@@ -76,6 +88,43 @@ describe("the refusal gate, by spawn", () => {
   it("still checks the corpus without either key", () => {
     const run = runScript(["--check"], { [FORBID_VENDOR_CALLS_ENV]: "1" });
     expect(run.status).toBe(0);
+  });
+});
+
+describe("the authentication preflight, by spawn", () => {
+  it("refuses a run with no authentication mechanism, before any scenario", () => {
+    const run = runScript([CAPTURE_FLAG]);
+    expect(run.status).toBe(EXIT_REFUSED);
+  });
+
+  it("explains the logged-out capture it is preventing", () => {
+    expect(runScript([CAPTURE_FLAG]).stderr).toContain("Not logged in");
+  });
+
+  it("refuses a --config-root that does not exist", () => {
+    const run = runScript([CAPTURE_FLAG, "--config-root", "/no/such/account/root"]);
+    expect(run.status).toBe(EXIT_REFUSED);
+  });
+
+  it("refuses two mechanisms at once as ambiguous", () => {
+    const run = runScript([CAPTURE_FLAG, "--config-root", "/tmp", "--seed-credentials"]);
+    expect(run.stderr).toMatch(/mechanisms are in effect at once/);
+  });
+
+  it("refuses a config root that is ambiguous with an inherited token", () => {
+    const run = runScript([CAPTURE_FLAG, "--config-root", "/tmp"], {
+      ANTHROPIC_API_KEY: "not-a-real-key",
+    });
+    expect(run.status).toBe(EXIT_REFUSED);
+  });
+
+  it("still refuses on the two-key gate before it ever reaches authentication", () => {
+    const run = runScript(["--config-root", "/tmp"], { [FORBID_VENDOR_CALLS_ENV]: "1" });
+    expect(run.stderr).toContain(CAPTURE_FLAG);
+  });
+
+  it("lists the corpus without authenticating, because listing calls nothing", () => {
+    expect(runScript(["--list"]).status).toBe(0);
   });
 });
 
@@ -118,6 +167,28 @@ describe("parseArgv", () => {
 
   it("records the authorization flag", () => {
     expect(parseArgv([CAPTURE_FLAG]).authorized).toBe(true);
+  });
+
+  it("reads --config-root as an absolute path", () => {
+    expect(path.isAbsolute(parseArgv(["--config-root", "root"]).configRoot)).toBe(true);
+  });
+
+  it("reads --config-root=<dir> in the equals spelling", () => {
+    expect(parseArgv(["--config-root=/tmp/x"]).configRoot).toBe("/tmp/x");
+  });
+
+  it("reads --seed-credentials", () => {
+    expect(parseArgv(["--seed-credentials"]).seedCredentials).toBe(true);
+  });
+
+  it("reads --credentials-from", () => {
+    expect(parseArgv(["--credentials-from=/tmp/root"]).credentialsFrom).toBe("/tmp/root");
+  });
+
+  it("defaults to no authentication mechanism, so a bare run must refuse", () => {
+    const opts = parseArgv([]);
+    expect(opts.configRoot).toBeNull();
+    expect(opts.seedCredentials).toBe(false);
   });
 
   it("refuses an unrecognized argument rather than ignoring it", () => {
