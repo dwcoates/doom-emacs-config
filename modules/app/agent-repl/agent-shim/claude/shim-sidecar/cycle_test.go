@@ -465,3 +465,74 @@ func TestTheConfiguredHoldWindowReachesTheHeldIndex(t *testing.T) {
 		t.Fatalf("the held index runs with %s, want the configured %s", sc.held.window, options.UnownedSpoolWindow)
 	}
 }
+
+func TestFileActivityMsReportsWhenTheFileLastGrew(t *testing.T) {
+	// Arrange: our own read is not activity — the file's mtime is.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+
+	// Act.
+	got := fileActivityMs(spool, h.clock.Add(time.Hour).UnixMilli())
+
+	// Assert.
+	if got != h.clock.UnixMilli() {
+		t.Fatalf("activity = %d, want the file's mtime %d rather than the caller's clock", got, h.clock.UnixMilli())
+	}
+}
+
+func TestFileActivityMsFallsBackWhenTheFileCannotBeStatted(t *testing.T) {
+	// Arrange.
+	fallback := int64(1234)
+
+	// Act.
+	got := fileActivityMs(filepath.Join(os.TempDir(), "ar-no-such-file.output"), fallback)
+
+	// Assert.
+	if got != fallback {
+		t.Fatalf("activity = %d, want the fallback %d", got, fallback)
+	}
+}
+
+func TestAVanishedFileKeepsItsTailerSoItsTerminalCanBeSpelled(t *testing.T) {
+	// Arrange: a claimed spool being tailed.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+	h.sc.TaskSpawned("b1", "call-1", "", "")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	if err := os.Remove(spool); err != nil {
+		t.Fatalf("remove %s: %v", spool, err)
+	}
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert: the handler is the only converter that can spell this run's
+	// terminal, so it must outlive the file.
+	if _, ok := h.sc.watchers[spool]; !ok {
+		t.Fatal("the vanished file's tailer was dropped, so its LOST terminal could never be spelled")
+	}
+}
+
+func TestAVanishedFileIsStatedOnce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+	h.sc.TaskSpawned("b1", "call-1", "", "")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	if err := os.Remove(spool); err != nil {
+		t.Fatalf("remove %s: %v", spool, err)
+	}
+
+	// Act: the poll loop keeps running while the grace window decides.
+	h.sc.pollAll()
+	h.sc.pollAll()
+
+	// Assert.
+	if got := strings.Count(h.logText(), "the watched file vanished"); got != 1 {
+		t.Fatalf("the disappearance is stated %d time(s), want exactly 1", got)
+	}
+}

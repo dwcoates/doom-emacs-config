@@ -76,7 +76,7 @@ func TestReObserveLearnsTheOwner(t *testing.T) {
 
 	// Act.
 	tr.Observe(Work{Path: "/private/tmp/b1.output", OwnerAgentID: "agent-1"}, nowMs)
-	lost := tr.Sweep(bootMs, nowMs + shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].OwnerAgentID != "agent-1" {
@@ -90,7 +90,7 @@ func TestSilentRunIsLost(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs + shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].Reason != ReasonWentSilent {
@@ -105,7 +105,7 @@ func TestActivityKeepsARunAlive(t *testing.T) {
 
 	// Act: the file grew just before the window would have expired.
 	tr.Activity("/private/tmp/b1.output", nowMs+shellMs-1)
-	lost := tr.Sweep(bootMs, nowMs + shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert.
 	if len(lost) != 0 {
@@ -120,7 +120,7 @@ func TestVanishedRunIsLostAfterGrace(t *testing.T) {
 	tr.MarkVanished("/private/tmp/b1.output", nowMs)
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs + 1000)
+	lost := tr.Sweep(bootMs, nowMs+1000)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].Reason != ReasonFileVanished {
@@ -135,7 +135,7 @@ func TestVanishedRunSurvivesInsideGrace(t *testing.T) {
 	tr.MarkVanished("/private/tmp/b1.output", nowMs)
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs + 999)
+	lost := tr.Sweep(bootMs, nowMs+999)
 
 	// Assert.
 	if len(lost) != 0 {
@@ -151,7 +151,7 @@ func TestAReturningFileClearsTheVanish(t *testing.T) {
 
 	// Act.
 	tr.Activity("/private/tmp/b1.output", nowMs+500)
-	lost := tr.Sweep(bootMs, nowMs + 1000)
+	lost := tr.Sweep(bootMs, nowMs+1000)
 
 	// Assert.
 	if len(lost) != 0 {
@@ -166,7 +166,7 @@ func TestSettledRunIsNeverSwept(t *testing.T) {
 
 	// Act.
 	tr.Settle("/private/tmp/b1.output")
-	lost := tr.Sweep(bootMs, nowMs + shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert: LOST is only ever the answer for a run we stopped seeing.
 	if len(lost) != 0 {
@@ -225,7 +225,7 @@ func TestSweepStopsTrackingWhatItConcluded(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	tr.Sweep(bootMs, nowMs + shellMs)
+	tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert: a run is concluded once, never on every later sweep.
 	if tr.Open("/private/tmp/b1.output") {
@@ -239,7 +239,7 @@ func TestConclusionIsLoggedAsAWarning(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	tr.Sweep(bootMs, nowMs + shellMs)
+	tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert.
 	joined := strings.Join(*logs, "\n")
@@ -269,7 +269,7 @@ func TestSilenceWindowIsPerKind(t *testing.T) {
 			tr.Observe(Work{Path: "/private/tmp/x.output", TaskID: "x", Kind: tc.kind, LastActivityMs: nowMs}, nowMs)
 
 			// Act.
-			lost := tr.Sweep(bootMs, nowMs + tc.elapsed)
+			lost := tr.Sweep(bootMs, nowMs+tc.elapsed)
 
 			// Assert.
 			if len(lost) != tc.want {
@@ -286,7 +286,7 @@ func TestSweepOrdersConclusionsByPath(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs + shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert: a sweep's records must be stable across runs.
 	if len(lost) != 2 || lost[0].Path != "/private/tmp/b1.output" {
