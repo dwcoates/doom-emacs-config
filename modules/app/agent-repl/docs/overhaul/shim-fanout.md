@@ -401,3 +401,31 @@ every UX or contract gap you surfaced instead of improvising.
   offload. Both statements ride every brief. If the types are not offered,
   `subagent_type: "claude"` with `model: "opus"` / `"sonnet"` and the effort
   stated in the brief.
+- COMPACTION RULE (user ruling): the moment the lead's context is compacted
+  it drops to LOW effort (`/effort low` if available; else explicitly — no
+  re-derivation, no exploration; act on the summary + these docs + the
+  ledger below) and says "compacted" to the project lead.
+
+## LIVE LEDGER (shim lead; updated at every dispatch/merge)
+
+- Branch `overhaul/shim`, worktree `~/.config/doom-overhaul/shim`. Merged and
+  retired: scaffold, capture harness, engine, mock (first roster).
+- RUNNING (opus-medium, keep tier): RECORD PLANE agent `a699887424d695c83`
+  in `~/.config/doom-overhaul/shim-agents/record` (branch
+  `overhaul/shim-record`; steps 1–10: StoreLineAt pointers, WatchBashRun,
+  lost arms, producer re-key, engine extras page/not_deliverable/unsupported,
+  owed unit files, created-origin live_work, DetachedWorkId == activity id,
+  budget-warning mapping); INTEGRATION AUTHOR `a4e55fa0df5a8d8c9` in
+  `shim-agents/itests` (branch `overhaul/shim-itests`; seven suites; never
+  runs them); MOCK ADDITIONS `a4c3a36d86587908d` in `shim-agents/mock2`
+  (branch `overhaul/shim-mock2`; fast/usage/context-drift/fault/fallback).
+- NEXT: merge each landing (verify typecheck/test/build/smoke); run
+  `npm run test:integration` (pretest builds); remediation dispatches at
+  `opus-low` in hand-made worktrees `overhaul/shim-<slug>`; fresh fable
+  auditor (`subagent_type: "claude"`, `model: "fable"`) over docs/overhaul/
+  {shim,daemon,store,sidecar}.md vs test/integration; loop; landing 4 merge
+  (retired context_budget_warning arm; daemon error arms); final report per
+  COMMON.md (must include the R9 rule + evidence, the mock file layout, the
+  prompt→scenario table location = agent-shim/claude/shim/AGENTS.md).
+- ESCALATIONS OUTSTANDING: none (all seven answered in landing 3).
+- Project lead address for SendMessage: `main`.
