@@ -14,6 +14,7 @@ import {
   FeedTurnActivitySchema,
   FeedResponseSchema,
   FeedSimpleToolCallSchema,
+  FeedToolCallInputSchema,
   FeedToolCallReturnedSchema,
   FeedSkillSchema,
   FeedHookSchema,
@@ -35,6 +36,7 @@ import {
 import { startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
 import { expectedPaintClass } from "./vocab";
+import { SessionCompactScope } from "../../../proto/gen/ts/conversation/v1/session_pb";
 import {
   ARTIFACT_STATES,
   CODE_SPANS,
@@ -57,7 +59,9 @@ import {
   SHELL_OUTCOMES,
   SKILL_OUTCOMES,
   SUBAGENT_OUTCOMES,
+  TOOL_INPUT_FORMS,
   TOOL_OUTPUT_FORMS,
+  TOOL_OUTPUT_FORMS_WITH_OMISSION,
   WORKSPACE_ID,
   activityRow,
   agentPromptRow,
@@ -154,6 +158,10 @@ describe("arm coverage", () => {
 
   it("covers every tool-call output form", () => {
     assertCoversOneof(FeedToolCallReturnedSchema, "form", [...TOOL_OUTPUT_FORMS]);
+  });
+
+  it("covers every tool-call input form", () => {
+    assertCoversOneof(FeedToolCallInputSchema, "form", [...TOOL_INPUT_FORMS]);
   });
 
   it("covers every diff line kind", () => {
@@ -341,9 +349,86 @@ describe.each(TOOL_OUTPUT_FORMS)("a returned tool call with %s output", (form) =
   it("draws the omission note when the output was capped", async () => {
     // Arrange / Act
     const row = await drawRow(activityRow(toolCallReturnedUnit(form)));
-    // Assert: text and diff carry no omission field; the rest do.
-    const expected = form === "text" || form === "diff" ? false : true;
+    // Assert: only the capped forms carry an omission field.
+    const expected = (TOOL_OUTPUT_FORMS_WITH_OMISSION as readonly string[]).includes(form);
     expect(/omitted|more/.test(row.textContent ?? "")).toBe(expected);
+  });
+});
+
+describe("a tool call that returned no output", () => {
+  it("carries the none form", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("none")));
+    // Assert
+    expect(row.querySelector('[data-output-form="none"]')).not.toBeNull();
+  });
+
+  it("draws no output section at all", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("none")));
+    // Assert
+    expect(row.querySelector("[data-output-body]")).toBeNull();
+  });
+
+  it("still draws its input line", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("none")));
+    // Assert
+    expect(row.textContent).toContain("npm test");
+  });
+
+  it("still draws its verdict", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("none", "failed")));
+    // Assert
+    expect(row.querySelector('[data-verdict="failed"]')).not.toBeNull();
+  });
+
+  it("still draws its runtime", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("none")));
+    // Assert
+    expect(row.textContent).toContain("ran 4.2 s");
+  });
+});
+
+describe.each(TOOL_INPUT_FORMS)("an input line drawn as a %s", (inputForm) => {
+  it("carries its form as the treatment", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("text", "succeeded", inputForm)));
+    // Assert
+    expect(row.querySelector("[data-input-form]")?.getAttribute("data-input-form")).toBe(inputForm);
+  });
+
+  it("gives the line a treatment class of its own", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("text", "succeeded", inputForm)));
+    // Assert: the daemon states the form; the client applies a treatment and
+    // still knows no tool.
+    expect(row.querySelector("[data-input-form]")?.className).toContain(inputForm);
+  });
+
+  it("draws the composed line verbatim regardless of the treatment", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("text", "succeeded", inputForm)));
+    // Assert
+    expect(row.textContent).toContain("npm test");
+  });
+});
+
+describe("an input line with no form", () => {
+  it("draws as plain text", async () => {
+    // Arrange / Act: UNSET form is a legal fourth state meaning plain text.
+    const row = await drawRow(activityRow(toolCallReturnedUnit("text")));
+    // Assert
+    expect(row.querySelector("[data-input-form]")).toBeNull();
+  });
+
+  it("still draws the composed line verbatim", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("text")));
+    // Assert
+    expect(row.textContent).toContain("npm test");
   });
 });
 
@@ -709,6 +794,33 @@ describe("a standing cold gate", () => {
     const row = await drawRow(coldGateStandingRow({ contextTokens: COLD_GATE_TOKENS + 1n }));
     // Assert: the figure moved with the served value.
     expect(row.textContent).not.toBe("");
+  });
+});
+
+describe("a cold gate resolved by compacting", () => {
+  it("draws the scope the resolution carries", async () => {
+    // Arrange / Act
+    const row = await drawRow(coldGateResolvedRow("compact", { scope: SessionCompactScope.PROMPTS }));
+    // Assert
+    expect(row.querySelector("[data-compact-scope]")?.getAttribute("data-compact-scope")).toBe(
+      String(SessionCompactScope.PROMPTS),
+    );
+  });
+
+  it("draws the model the resolution carries", async () => {
+    // Arrange / Act
+    const row = await drawRow(coldGateResolvedRow("compact"));
+    // Assert
+    expect(row.textContent).toContain("haiku");
+  });
+
+  it("draws a different scope when a different one was chosen", async () => {
+    // Arrange / Act
+    const row = await drawRow(coldGateResolvedRow("compact", { scope: SessionCompactScope.RESPONSES }));
+    // Assert
+    expect(row.querySelector("[data-compact-scope]")?.getAttribute("data-compact-scope")).toBe(
+      String(SessionCompactScope.RESPONSES),
+    );
   });
 });
 
