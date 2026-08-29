@@ -364,7 +364,8 @@ func driveSpools(t *testing.T, dir string) []*storev1.StoreEntry {
 		h := NewShellOutputHandler(testLogger(t))
 		ctx := &Context{
 			Path: path, SessionID: "spool-session", MainAgentID: "spool-session",
-			AgentID: "spool-session", TaskID: "b1golden", Kind: tail.KindShellSpool, FileID: "dev:4",
+			AgentID: "spool-session", TaskID: "b1golden", RunActivityID: "toolu_golden_run",
+			Kind: tail.KindShellSpool, FileID: "dev:4",
 		}
 		raw := readFixture(t, path)
 		all = append(all, h.Handle([]tail.Frame{{Raw: []byte(raw), Offset: 0}}, ctx)...)

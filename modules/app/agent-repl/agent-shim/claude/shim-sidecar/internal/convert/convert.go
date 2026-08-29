@@ -101,6 +101,15 @@ type Converter struct {
 	currentMessageID string
 	nextBlockOrdinal int
 
+	// spawnedRuns maps a vendor task id to the tool_use_id of the call that
+	// launched it. ONE ENTRY PER OPEN LAUNCH, written where the launch result is
+	// read and consulted where a TaskStop result must name the run it cancelled.
+	//
+	// IT IS THE SAME FACT THE READER GETS THROUGH THE OBSERVER, kept here because
+	// a TaskStop result arrives on THIS file's stream and must be converted from
+	// what this file already said — the converter cannot ask the reader anything.
+	spawnedRuns map[string]string
+
 	// keepalive marks every record converted while a keep-alive turn is open.
 	// ONE REMEMBERED BOOL per file, cleared by the next non-keepalive prompt.
 	keepalive bool
@@ -110,10 +119,11 @@ type Converter struct {
 func New(log *logging.Bound) *Converter {
 	log.With(logging.Context{Operation: "convert-new"}).LogVerbose("constructing converter producer=%s", Producer)
 	return &Converter{
-		log:        log,
-		observer:   noopObserver{},
-		openCalls:  map[string]openCall{},
-		openSkills: map[string]openCall{},
+		log:         log,
+		observer:    noopObserver{},
+		openCalls:   map[string]openCall{},
+		openSkills:  map[string]openCall{},
+		spawnedRuns: map[string]string{},
 	}
 }
 

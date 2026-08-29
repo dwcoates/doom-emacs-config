@@ -52,12 +52,16 @@ func (h *AgentTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agen
 // swept_up); an unrecognized one is carried through rather than remapped, because
 // silently normalizing it would lose the only account of what was observed.
 func (h *ShellOutputHandler) LostTerminal(taskID, runActivityID, ownerAgentID, reason string) []*storev1.StoreEntry {
-	run := firstNonEmpty(runActivityID, taskID)
+	// THE RUN IS THE SPAWNING CALL AND NOTHING ELSE. Falling back to the vendor
+	// task id would key the terminal on a row no reader of the conversation can
+	// join to the call, which is worse than saying nothing: the run would appear
+	// settled while the call it belongs to stayed open forever.
+	run := runActivityID
 	if run == "" {
 		// Nothing to name the run by: the terminal would upsert no row. Refused
 		// loudly rather than emitted against an invented key.
 		h.log.With(logging.Context{Operation: "lost-terminal", Level: "error", TaskID: taskID, AgentID: ownerAgentID}).
-			Log("no terminal minted for a LOST run: neither a run activity id nor a task id was supplied, so the frame would name no unit (reason=%s)", reason)
+			Log("no terminal minted for a LOST run: no spawning-call activity id was supplied, so the frame would name no unit (reason=%s)", reason)
 		return nil
 	}
 	at := convert.Attribution{

@@ -48,12 +48,19 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 			LogVerbose("no frames to convert")
 		return nil
 	}
-	if ctx.TaskID == "" {
-		// A spool with no task identity names no run, so its bytes have nowhere
+	// THE RUN IS THE SPAWNING CALL, NEVER THE VENDOR TASK ID. A detached command
+	// is announced under one identity on both planes — the tool_use_id of the
+	// call that launched it — so that is what the spool's frames are keyed by.
+	// The reader resolves it from the launch it observed and hands it over on the
+	// context; a spool whose owner is unresolved is HELD rather than tailed, so
+	// reaching here without one is a reader defect, stated as such.
+	run := ctx.RunActivityID
+	if run == "" {
+		// A spool with no run identity names no run, so its bytes have nowhere
 		// to accumulate. They are NEVER silently discarded: they land as residue
 		// naming the spool, which is what the aged-unowned-spool policy requires.
 		h.log.With(handleErr("shell-handle", ctx)).
-			Log("shell spool reached the handler with no task identity; its bytes have no run to append to and are stored as residue")
+			Log("shell spool reached the handler with no spawning-call identity; its bytes have no run to append to and are stored as residue")
 		at := attribute(ctx, frames[0].Offset)
 		var raw bytes.Buffer
 		for _, frame := range frames {
@@ -67,7 +74,6 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 	}
 
 	at := attribute(ctx, frames[0].Offset)
-	run := ctx.TaskID
 
 	var output bytes.Buffer
 	for _, frame := range frames {
@@ -91,7 +97,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 // staleness policy in the root package, never inferred here.
 func (h *ShellOutputHandler) Lost(ctx *Context, reason convert.LostReason) *storev1.StoreEntry {
 	at := attribute(ctx, ctx.BytesObserved)
-	return h.conv.BashLost(at, ctx.TaskID, "", reason)
+	return h.conv.BashLost(at, ctx.RunActivityID, "", reason)
 }
 
 // trailingExitCode reads the `EXIT=<code>` terminator off the END of a raw spool

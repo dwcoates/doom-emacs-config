@@ -128,9 +128,19 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 		activity.ActivityId = activityID(taskID)
 		return []*storev1.StoreEntry{c.settledEntry(at, agent, taskID, activity)}
 	default:
-		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, ActivityID: taskID, UpsertKey: BashKey(taskID)}).
+		// THE RUN IS THE SPAWNING CALL. A TaskStop result names only the vendor
+		// task, so the cancelled terminal is keyed by the call this file's own
+		// launch result recorded for it; without that launch the stop names no
+		// unit at all and is stored whole rather than keyed on a guess.
+		run, launched := c.spawnedRuns[taskID]
+		if !launched {
+			c.log.With(at.ctxWarn("task-stop")).With(logging.Context{TaskID: taskID}).
+				Log("TaskStop names a task no launch on this stream opened; the run it cancelled cannot be identified and the record is stored as vendor_specific")
+			return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unlaunched", result)}
+		}
+		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, ActivityID: run, UpsertKey: BashKey(run)}).
 			Log("TaskStop consumed as the CANCELLED terminal of a shell run")
-		return []*storev1.StoreEntry{BashRun(at, "bash_terminal", BashKey(taskID), taskID, &conversationv1.AgentBash{
+		return []*storev1.StoreEntry{BashRun(at, "bash_terminal", BashKey(run), run, &conversationv1.AgentBash{
 			Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 				Command:   &conversationv1.AgentBashCommand{Line: taskID},
 				SettledAt: settledAt(env.timestampMs),
