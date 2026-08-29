@@ -529,7 +529,12 @@ describe("the account-usage probe", () => {
         answer = await query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
       },
     });
-    return answer as { rate_limits: Record<string, unknown> | null; rate_limits_available: boolean; behaviors: unknown };
+    return answer as {
+      rate_limits: Record<string, unknown> | null;
+      rate_limits_available: boolean;
+      behaviors: unknown;
+      subscription_type?: string;
+    };
   };
 
   it("answers every window when the service is available", async () => {
@@ -543,6 +548,42 @@ describe("the account-usage probe", () => {
         "seven_day_opus", "seven_day_sonnet",
       ].sort(),
     );
+  });
+
+  it("answers every window under !usage-full too, which is the name the e2e roster spells", async () => {
+    // Arrange + Act
+    const answer = await usage(["!usage-full"]);
+
+    // Assert
+    expect(Object.keys(answer.rate_limits ?? {}).sort()).toEqual(
+      [
+        "extra_usage", "five_hour", "model_scoped", "seven_day", "seven_day_oauth_apps",
+        "seven_day_opus", "seven_day_sonnet",
+      ].sort(),
+    );
+  });
+
+  it("gives every populated window BOTH a utilization and a reset instant", async () => {
+    // Arrange + Act
+    const answer = await usage(["!usage-full"]);
+    const windows = ["five_hour", "seven_day", "seven_day_oauth_apps", "seven_day_opus", "seven_day_sonnet"];
+
+    // Assert. A window with a utilization and no reset instant cannot be drawn
+    // as a window at all, so "populated" has to mean both.
+    expect(
+      windows.map((name) => {
+        const value = (answer.rate_limits ?? {})[name] as { utilization: unknown; resets_at: unknown };
+        return typeof value.utilization === "number" && typeof value.resets_at === "string";
+      }),
+    ).toEqual(windows.map(() => true));
+  });
+
+  it("names the subscription the windows belong to", async () => {
+    // Arrange + Act
+    const answer = await usage(["!usage-full"]);
+
+    // Assert
+    expect(answer.subscription_type).toBe("max");
   });
 
   it("answers null rate limits when the service is unavailable", async () => {
