@@ -31,7 +31,7 @@
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--fatal "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--backend-phase "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--backend-output-tail "agent-repl-core" (output &optional lines))
 (declare-function agent-repl--logfile-path "agent-repl-core" ())
@@ -1308,11 +1308,11 @@ Assumes the artifacts are already built; call
      agent-repl--frontend-shim-entry shim-exists
      agent-repl--frontend-webapp-dir)
     (unless daemon-exists
-      (agent-repl--error
+      (agent-repl--fatal
        nil "daemon binary missing after build: %s"
        agent-repl--frontend-daemon-bin))
     (unless shim-exists
-      (agent-repl--error
+      (agent-repl--fatal
        nil "Claude shim entrypoint missing after build: %s"
        agent-repl--frontend-shim-entry))
     (agent-repl--backend-phase nil "starting the daemon…")
@@ -1974,7 +1974,7 @@ in place; spawning next to it would only bind-fail."
      (let ((started (agent-repl--frontend-start-daemon)))
        (when on-complete (funcall on-complete started))))
    (lambda ()
-     (agent-repl--error nil "adopted daemon on %s ignored shutdown within %ss; replacement aborted"
+     (agent-repl--fatal nil "adopted daemon on %s ignored shutdown within %ss; replacement aborted"
                         agent-repl-frontend-daemon-addr
                         agent-repl-frontend-foreign-stop-grace-seconds))
    "foreign-daemon-shutdown")
@@ -2001,7 +2001,7 @@ CALLBACK receives a validated state before any lifecycle mutation."
              (agent-repl--log nil "runtime-bounce preflight: state=%S addr=%s" state agent-repl-frontend-daemon-addr)
              (funcall callback state)))
           (owner
-           (agent-repl--error nil "daemon address %s is held by unrelated process pid=%s command=%s"
+           (agent-repl--fatal nil "daemon address %s is held by unrelated process pid=%s command=%s"
                               agent-repl-frontend-daemon-addr (car owner) (cdr owner)))
           (t
            (agent-repl--log nil "runtime-bounce preflight: state=absent addr=%s" agent-repl-frontend-daemon-addr)
@@ -2046,7 +2046,7 @@ any asynchronous stop has settled."
         (when on-complete (funcall on-complete started))
         started))
      (t
-      (agent-repl--error nil
+      (agent-repl--fatal nil
                          "invalid daemon runtime-bounce preflight state: %S"
                          state)))))
 
@@ -2210,7 +2210,7 @@ a port nothing can use."
         (agent-repl--log nil "incompatible daemon termination: pid=%s outcome=kill-stopped" pid)
         (funcall on-stopped))
       (lambda (still-owner)
-        (agent-repl--error nil "incompatible daemon pid=%s survived SIGKILL owner=%S; replacement aborted" pid still-owner))
+        (agent-repl--fatal nil "incompatible daemon pid=%s survived SIGKILL owner=%S; replacement aborted" pid still-owner))
       "incompatible-daemon-kill"))
    "incompatible-daemon-term")
   :pending)
