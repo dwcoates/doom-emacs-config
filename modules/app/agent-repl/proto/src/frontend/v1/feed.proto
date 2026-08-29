@@ -1497,6 +1497,8 @@ message FeedColdGateResolvedClear {}
 message FeedColdGateResolvedCompact {
   // The summarizer that wrote it.
   FeedColdGateModel model = 1;
+  // What was summarized — the scope the user chose, drawn on the trace.
+  conversation.v1.SessionCompactScope scope = 2;
 }
 
 // ⑤ THE SESSION-SEPARATION DIVIDER — the session changed shape or place
