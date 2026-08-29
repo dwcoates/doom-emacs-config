@@ -8,8 +8,9 @@ package wsm
 // workspace's registration (a workspace is registered only after its worktree
 // is materialized), so creation_jobs carries no reference to workspaces and
 // Forget deletes it explicitly. Everything else — sessions, leases, held
-// prompts, turns, idempotency claims, the merge ledger, faults — exists only
-// after registration and cascades with the workspace row.
+// prompts, turns, idempotency claims, the merge ledger, the per-repo merge
+// queue, faults — exists only after registration and cascades with the
+// workspace row.
 const schemaDDL = `
 CREATE TABLE layout (
   id      INTEGER PRIMARY KEY CHECK (id = 1),
@@ -153,6 +154,22 @@ CREATE TABLE faults (
   opened_at    INTEGER NOT NULL,
   resolved_at  INTEGER
 );
+
+CREATE TABLE merge_queue_repos (
+  repo_key TEXT PRIMARY KEY,
+  paused   INTEGER NOT NULL
+);
+
+CREATE TABLE merge_queue (
+  repo_key     TEXT NOT NULL,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  seq          INTEGER NOT NULL,
+  state        INTEGER NOT NULL,
+  enqueued_at  INTEGER NOT NULL,
+  PRIMARY KEY (repo_key, workspace_id)
+);
+
+CREATE UNIQUE INDEX merge_queue_seq ON merge_queue(repo_key, seq);
 
 CREATE TABLE drain_schedule (
   id       INTEGER PRIMARY KEY CHECK (id = 1),

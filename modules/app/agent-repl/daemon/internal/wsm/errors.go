@@ -153,3 +153,36 @@ func (h HoldKind) valid() bool { return h >= HoldClassifying && h <= HoldBuildRe
 
 // valid reports whether the turn close is one of the declared arms.
 func (c TurnClose) valid() bool { return c >= CloseCompleted && c <= CloseOrphaned }
+
+// String names a merge queue state, for logs and refusals.
+func (s MergeQueueState) String() string {
+	switch s {
+	case MergeQueued:
+		return "queued"
+	case MergeAdmitted:
+		return "admitted"
+	default:
+		return fmt.Sprintf("merge_queue_state(%d)", int(s))
+	}
+}
+
+// valid reports whether the merge queue state is one of the declared arms.
+func (s MergeQueueState) valid() bool { return s >= MergeQueued && s <= MergeAdmitted }
+
+// MergeQueuedError refuses a duplicate enqueue, carrying the place the
+// workspace already holds so the caller reports it rather than queueing twice.
+type MergeQueuedError struct {
+	// Repo is the queue the workspace is already in.
+	Repo RepoKey
+	// Workspace is the workspace already queued.
+	Workspace WorkspaceID
+	// Position is the place it already holds.
+	Position int
+	// State is where that entry stands.
+	State MergeQueueState
+}
+
+// Error implements error.
+func (e *MergeQueuedError) Error() string {
+	return fmt.Sprintf("wsm: workspace %s is already %s in repo %q merge queue at position %d", e.Workspace, e.State, e.Repo, e.Position)
+}
