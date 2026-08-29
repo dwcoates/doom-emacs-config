@@ -161,12 +161,6 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
     version))
 
 (agent-repl--load-module "core")
-;; WHY: external-browser.el pins `browse-url-browser-function' so every
-;; hyperlink lands in the external Chrome profile instead of an Emacs
-;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
-;; this early so no later module can visit a URL before the handler is in
-;; place.
-(agent-repl--load-module "external-browser")
 ;; WHY: prompts.el is the loader for this module's file-backed automatic
 ;; prompt texts (prompts/*.md).  It depends on nothing but subr-x, and
 ;; every composer that calls it (worktree.el's workspace-generation
@@ -178,32 +172,13 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; after core.el (which provides the logging primitives workspace.el
 ;; calls) and before everything else.
 (agent-repl--load-module "workspace")
-;; WHY: backend.el defines the pluggable agent-CLI backend registry and
-;; registers the `claude' backend.  It must load after workspace.el
-;; (its selection helpers call the `agent-repl--ws-*' accessors) and
-;; before session.el (whose command assembly resolves the backend).
-(agent-repl--load-module "backend")
 ;; WHY: frontends.el defines the presentation-frontend registry that
 ;; frontend.el (gui) registers into at load time.
 (agent-repl--load-module "frontends")
-(agent-repl--load-module "install")
-;; WHY: codex.el registers the codex backend (backend.el must precede
-;; it) and reuses install.el's hook-registration writer for its
-;; hooks.json installer.
-(agent-repl--load-module "codex")
 (agent-repl--load-module "notifications")
 (agent-repl--load-module "history")
-(agent-repl--load-module "memory-state")
 (agent-repl--load-module "status")
-(agent-repl--load-module "workspace-status-export")
 (agent-repl--load-module "autosave")
-(agent-repl--load-module "sentinel")
-;; WHY: output-nav.el defines the feed-cycling commands that
-;; `agent-repl-input-mode-map' (input.el) binds, and drives them through
-;; the webview script boundary in frontend.el -- both sides already loaded
-;; above.  Ahead of input.el so the commands exist before the map cites
-;; them, though `map!' stores symbols and would resolve them either way.
-(agent-repl--load-module "output-nav")
 (agent-repl--load-module "input")
 ;; WHY: clipboard-image.el binds `agent-repl-attach-clipboard-image' into
 ;; `agent-repl-input-mode-map' (input.el) and writes captured images under
@@ -214,63 +189,21 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "commands")
 (agent-repl--load-module "session")
 (agent-repl--load-module "daemon")
-;; The held-prompt queue: what a prompt sent across a backend bounce becomes
-;; instead of a `client.command_unacked' failure card.  Loaded BEFORE
-;; frontend-client, whose gui send path offers every prompt to it first; its own
-;; defaults call back into frontend-client and frontend-uds, but only from
-;; lambdas that run long after both are loaded.
+;; The held-prompt queue: what a prompt sent across a daemon bounce becomes
+;; instead of a dropped submission.  It needs only core.el and workspace.el at
+;; load time; its defaults call back into the transport from lambdas that run
+;; long after every module is loaded.
 (agent-repl--load-module "prompt-queue")
-(agent-repl--load-module "frontend-client")
-;; The classified-failure vocabulary (F4): the ONE place Emacs turns a
-;; failure into something a human reads, and the closed `client.'-prefixed
-;; set it is allowed to classify for itself. Loaded BEFORE the transport,
-;; which surfaces a refused command's classified ack through it.
-(agent-repl--load-module "failure")
-;; Retractable daemon-connection notices: the ONE place Emacs says it cannot
-;; reach the daemon, and the ONE place it takes that back once the reconnect's
-;; snapshot lands.  Loaded beside failure.el because it is the same vocabulary
-;; seen from the other end — failure.el classifies, this decides what survives
-;; the condition ending.
-(agent-repl--load-module "connection-notice")
-;; The agent-shim frontend UDS transport + state application (design §10,
-;; G10).  Loaded right after frontend-client: `frontend-uds' owns the
-;; connection/framing/dispatch, `frontend-state' registers the state-bearing
-;; handlers on it (order matters — `frontend-state' calls
-;; `agent-repl--uds-register-handler', defined in `frontend-uds').  These
-;; supersede the sentinel/hook-derived render-status inputs the cutover deletes.
-(agent-repl--load-module "frontend-uds")
-;; WHY HERE, AND NOT BESIDE webview-recovery.el WHICH IT DRIVES: recovery-slo.el
-;; is CALLED FROM the frame dispatch in frontend-uds.el (the wire signal) and
-;; from the state apply in frontend-state.el (the emacs signal), so it must be
-;; defined before the first frame can arrive rather than merely before the
-;; first sweep.  Everything it calls OUTWARD — the webview sweep, the
-;; ensure/reattach path, the webview script channel — is reached at runtime
-;; through `declare-function' and is loaded well before any link comes up.
-(agent-repl--load-module "recovery-slo")
-(agent-repl--load-module "frontend-state")
 ;; WHY: services.el owns launchd lifecycle for shim-store/sidecar and the
 ;; coordinated runtime bounce.  It needs the daemon/client plus the pushed
 ;; state stores loaded so its preflight can reject every active turn before
 ;; changing any process.
 (agent-repl--load-module "services")
-;; WHY: permission.el registers the `conversationDelta' frame handler on the
-;; transport (frontend-uds), so it must load after it; it drives the
-;; permission UX (prompt bookkeeping + desktop notification + answer
-;; round-trip) entirely from pushed `frontend.v1' state, replacing the
-;; deleted permission sentinels/hooks (S8/S9).  Needs notifications.el and
-;; workspace.el (both loaded above) for `--notify' and the ws accessors.
-;; WHY: open-fence.el is read BY permission.el's `conversationDelta' handler
-;; (the one delta reader Emacs owns), so it must be defined before that handler
-;; can run.  It only reads the pushed card and the `agent-repl--ws-*'
-;; accessors, both loaded above, and registers nothing of its own.
-(agent-repl--load-module "open-fence")
-(agent-repl--load-module "permission")
 (agent-repl--load-module "frontend")
 ;; WHY: webview-recovery.el drives the webapp's recovery hook through
-;; frontend.el's execute-script chokepoint, so it must load after it, and it
-;; subscribes to `agent-repl-uds-snapshot-applied-functions' (frontend-uds.el,
-;; loaded above).  It exists because a hidden xwidget webview's own timers are
-;; suspended by the embedder — see the file's commentary.
+;; frontend.el's execute-script chokepoint, so it must load after it.  It
+;; exists because a hidden xwidget webview's own timers are suspended by the
+;; embedder — see the file's commentary.
 (agent-repl--load-module "webview-recovery")
 ;; WHY: tasks.el owns the user-defined task model the sidebar's "Task"
 ;; view groups workspaces under, persisting via history.el's sexp-file
@@ -278,52 +211,21 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; workspace.el both load above.  Must precede sidebar.el, which builds
 ;; the task-view roster and hosts the task command handlers.
 (agent-repl--load-module "tasks")
-(agent-repl--load-module "sidebar")
-;; There is no login module here any more.  The gui login ran in an Emacs
-;; vterm because the OAuth flow needs a TTY and Emacs was believed to be the
-;; only TTY host in the system.  The daemon can open a pty of its own, so it
-;; now runs the login and streams the terminal to the webapp — Emacs is not
-;; in that path at all.  See daemon/internal/login.
-;; WHY: readiness.el decorates the webview modeline off frontend.el's
-;; `agent-repl-frontend-webview-adopt-hook' and faces its cells with the
-;; color constants status.el defines — both load above.  It also starts a
-;; timer, so it must come after core.el's `--cancel-all-timers'.
-(agent-repl--load-module "readiness")
-;; WHY: context-cost.el decorates the SAME webview modeline off frontend.el's
-;; `agent-repl-frontend-webview-adopt-hook', registers its `progress' frame
-;; handler on frontend-uds.el's dispatcher, and reads the int64 helper
-;; frontend-state.el defines — all three load above.  It owns exactly one
-;; field of ProgressView (`expensive_turn'); the rest of that message stays
-;; webapp-only.
-(agent-repl--load-module "context-cost")
 (agent-repl--load-module "prompt-summary")
-(agent-repl--load-module "ai-title")
-(agent-repl--load-module "transcripts")
-(agent-repl--load-module "context")
 (agent-repl--load-module "window")
 (agent-repl--load-module "sibling-popup")
 (agent-repl--load-module "panels")
 ;; WHY: open-progress.el shows its placeholder in the SAME main-area window
-;; the webview mount claims, so it needs frontend.el's host resolution, and it
-;; reads the pushed `SessionView.backfill' through frontend-client.el.  It
+;; the webview mount claims, so it needs frontend.el's host resolution.  It
 ;; subscribes to the pushed-state hook at load time; `add-hook' auto-vivifies
-;; that variable, so frontend-state.el's position above is not load-critical.
+;; that variable, so the producer's position above is not load-critical.
 (agent-repl--load-module "open-progress")
-;; WHY: explain-config.el mounts the SAME webkit GUI the workspace
-;; frontend uses, so it needs frontend.el (the webview boundary wrapper)
-;; and frontend-client.el (session CRUD + message injection) already
-;; registered, plus window.el's `--delete-buffer-windows' for the popup's
-;; hide path.  It registers a persp-activated hook at load time, so
-;; workspace.el must precede it too — every one of those is loaded above.
-(agent-repl--load-module "explain-config")
-(agent-repl--load-module "merge-handlers")
 (agent-repl--load-module "worktree")
-;; The daemon owns workspace creation.  This thin-client bridge loads after
-;; worktree.el/sidebar.el so inbound HostAction can reuse the existing UI-only
-;; handlers, and after frontend-uds.el so it can register the new frame arms.
-(agent-repl--load-module "workspace-create-client")
-(agent-repl--load-module "rename")
-(agent-repl--load-module "hide-project-dirs")
+;; merge-handlers.el and workspace-create-client.el are NOT loaded any more.
+;; Both were written against the deleted frontend-state/frontend-uds transport
+;; (`agent-repl--frontend-render-state-map', `agent-repl--uds-register-handler')
+;; and no longer load at all.  verbs.el replaces both; the verbs agent removes
+;; the files themselves.
 (agent-repl--load-module "keybindings")
 (agent-repl--load-module "magit")
 (agent-repl--load-module "emoji")
