@@ -66,10 +66,12 @@ type record struct {
 	Operation string  `json:"operation"`
 	Message   string  `json:"message"`
 	Context   Context `json:"context"`
-	// PID is required of every OS-process runtime. The browser webapp sends
-	// connection_id instead, which arrives inside a forwarded record's
-	// context and stays there.
-	PID int `json:"pid"`
+	// PID is required of every OS-process runtime and is omitted only where
+	// the contract says it must be: a record FORWARDED from another runtime
+	// carries that runtime's own identity (the browser webapp sends
+	// connection_id, the sidecar sends its own pid, both inside context), and
+	// stamping the daemon's pid on it would attribute it to the wrong process.
+	PID int `json:"pid,omitempty"`
 
 	WorkspaceDir       string `json:"workspace_dir,omitempty"`
 	WorkspaceID        string `json:"workspace_id,omitempty"`
