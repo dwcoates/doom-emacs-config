@@ -151,6 +151,19 @@ export function toHistoryPage(page: storev1.AgentSessionPage): conversationv1.Hi
  */
 export const UNPOINTERED_PREFIX = "shim-unpointered:";
 
+/**
+ * The budget a REFUSED-OPEN recovery re-opens with.
+ *
+ * Deliberately NOT the caller's own page size. The re-open's page is what
+ * carries everything written during the gap, so a small budget — a caller that
+ * asked for a page of zero, say — would leave those entries neither in the page
+ * nor in the tail, because the new watch token is pinned after the NEWEST item
+ * the store holds. A generous budget makes the recovery lossless in every
+ * realistic gap, and a gap that still exceeds it is reported LOUDLY rather than
+ * silently skipped.
+ */
+export const CATCHUP_PAGE_SIZE = 1024;
+
 // ---------------------------------------------------------------------------
 // Failure translation
 // ---------------------------------------------------------------------------
@@ -320,7 +333,7 @@ export function createReader(options: ReaderOptions): Reader {
                 { level: "warn", agent: agent.value, served_through: servedThrough?.value },
                 "the store refused the watch token; re-opening the book from the last served pointer",
               );
-              const reopened = await openSession(agent, 0, servedThrough);
+              const reopened = await openSession(agent, CATCHUP_PAGE_SIZE, servedThrough);
               if (reopened.watch === undefined) {
                 throw new PersistenceError(
                   "store_unavailable",
@@ -330,6 +343,12 @@ export function createReader(options: ReaderOptions): Reader {
               // The re-open's page is bounded by `known_through`, so anything
               // it carries is newer than what was served and must be yielded
               // before the tail continues.
+              if (reopened.page?.boundary.case === "more") {
+                LOGGER.log(
+                  { level: "error", agent: agent.value, budget: CATCHUP_PAGE_SIZE },
+                  "the gap since the last served pointer exceeds the catch-up budget; entries were skipped",
+                );
+              }
               for (const line of [...(reopened.page?.lines ?? [])].reverse()) {
                 const entry = toHistoryEntryAt(line);
                 servedThrough = entry.at;
