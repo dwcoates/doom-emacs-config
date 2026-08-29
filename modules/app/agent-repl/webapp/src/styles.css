@@ -4029,3 +4029,36 @@ body.ungated #mode-select {
 .diff .ctx {
   color: inherit;
 }
+
+/* ---- feed cards: hook (src/feed/cards/hook.ts) ------------------------- */
+
+/* A hook card is a tool card; only the two things the arm decides differ. */
+.tool-card.tool-hook-blocked {
+  border-color: var(--err);
+}
+/* The refusal's reason wears the error hue, because the refusal IS the card's
+   statement — the loud treatment the blocked arm calls for. */
+.tool-hook-blocked .hook-reason {
+  color: var(--err);
+}
+/* "▸ gated:" — the reference to the call this firing gated. It reveals a row
+   that already exists rather than drawing the call a second time. */
+.hook-gated {
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+.hook-gated-caret {
+  margin-right: 0.15rem;
+}
+/* A row the feed could not reach (a collapsed shell bubble, say) says so at
+   the link the user just pressed, in the muted register of a fact rather than
+   the error hue of a failure: nothing broke, the target is simply not there. */
+.hook-gated[data-unreachable="true"] {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+/* The exit chip's tone is the code's; a zero keeps the plain badge. */
+.badge.hook-exit {
+  font-variant-numeric: tabular-nums;
+}
