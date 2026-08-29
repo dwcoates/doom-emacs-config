@@ -345,3 +345,9 @@ orchestration chain. Cross-cutting conventions are in
   slug names the subagent directory and the spool tree. The slug is lossy —
   never decode a path from it.
 
+## Landing 3 relay (2026-08-29, project lead)
+
+- A subagent's AgentId = its spawning call's tool_use_id (meta.json.toolUseId); `agent-<id>` in the filename is never the AgentId.
+- `handler.LostTerminal` produces the `lost` cause arms (DetachedLost {file_vanished|went_silent|swept_up}).
+- Bash rows the sidecar writes are read back through store.v1 WatchBashRun; the shim's WatchBash is the consumer.
+- The sidecar is the ONLY producer of AgentContextInjected (memory files, skills), the write/edit `diagnostics` consequence arm and SessionUpdate.context_budget_warning: the pinned SDK stream carries no attachment records.
