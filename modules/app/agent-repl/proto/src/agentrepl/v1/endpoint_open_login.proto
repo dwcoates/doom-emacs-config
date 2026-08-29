@@ -1,0 +1,40 @@
+// endpoint_open_login.proto — OpenLogin: begin (or join) the account login
+// flow for a workspace's account root. WEB LINK section. THE PTY PATH IS
+// THE MECHANISM: the daemon spawns `claude /login` on a daemon-owned pty
+// (one per account root; a second open JOINS the running session — the
+// open is per-account idempotent) and the client renders the raw bytes in
+// a terminal overlay via WatchLoginTerminal. The daemon owns the default
+// geometry (wide enough that the OAuth URL never hard-wraps); resize
+// layers on top. Nothing anywhere parses the TUI.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message OpenLoginRequest {
+  // The workspace whose session's account root logs in.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message OpenLoginResponse {
+  oneof result {
+    OpenLoginSuccess success = 1;
+    OpenLoginError error = 2;
+  }
+}
+
+// The login session is up (fresh or joined); attach WatchLoginTerminal.
+message OpenLoginSuccess {
+  // The account root the terminal logs in — the overlay header draws it.
+  string config_dir = 1;
+}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (spawn failed, …),
+// spelled per 3b.
+message OpenLoginError {
+}
