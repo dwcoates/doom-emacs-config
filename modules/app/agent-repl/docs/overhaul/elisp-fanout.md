@@ -131,6 +131,19 @@ are deleted by the verbs agent once verbs.el replaces them.
   equivalent; the implementer chooses and documents.
 - ON-PUSH exceptions are caught at the filter boundary: log ERROR with the
   payload in context; the stream stays open.
+- LANDED SHAPES (connect.el as merged): the failure datum handed to
+  `:on-failure` and carried in `(:error DETAIL)` is the plist
+  `(:kind K :code CODE :status STATUS :message MSG)` with `:kind` one of
+  `:http`, `:transport`, `:timeout`, `:malformed`, `:malformed-addr`,
+  `:no-end-frame`. `(agent-repl-connect-close CONN)` marks the connection
+  dead and cancels every standing stream as `(:cancelled)` — daemon-link's
+  teardown primitive. `agent-repl-connect--spawn-curl` is the single spawn
+  point, registered in `agent-repl--external-boundary-functions`. The HTTP
+  status is read from `curl -D -` header blocks for unary and streams alike.
+- LANDED SHAPES (rpc.el as merged): request encoders are called for EMPTY
+  request messages too (`agent-repl-wire-encode-watch-daemon-request`,
+  `-watch-workspace-roster-request`, `-daemon-health-request` receive nil);
+  `agent-repl-rpc-watch-host-workspace` hands its encoder `(:workspace REF)`.
 
 ## 4. rpc.el
 
@@ -179,7 +192,8 @@ are deleted by the verbs agent once verbs.el replaces them.
   model, priority, allow_ungated, merge_actions, base_ref, name,
   initial_prompt; response); Open/Close(blocked arm)/Kill/Nuke/Merge/
   Restart(force)/SetWorkspacePriority (absent priority = clear); SubmitPrompt
-  (request said + idempotency_key + REQUIRED origin, feed omitted;
+  (request said + idempotency_key + REQUIRED origin + REQUIRED workspace
+  (WorkspaceRef, landing 2: every Emacs submit sends it), feed omitted;
   response: success turn {TurnId} | command_panel — decode only the ARM
   KEYWORD and keep the panel payload as the raw alist |
   command_refused{command} (decoded `(:command "/agents")`) | error
@@ -188,6 +202,16 @@ are deleted by the verbs agent once verbs.el replaces them.
   DaemonHealth (healthy | unhealthy{faults[{detail}]}); SessionHealth.
 - Empty error messages decode to `(:arm :error :value nil)`; a future arm
   is an unknown key → loud error (by design: the teamlead threads new arms).
+- LANDED SHAPES (wire-verbs.el as merged): presence-only fields (`fork`,
+  `allow_ungated`) are passed as `t` on the elisp side (nil = absent, since
+  nil is also the value of a set empty message); `force`, `self_certified`
+  and `add_to_merge_queue` are always encoded explicitly, false included;
+  an unset one-shot `finish` is refused before send; an unset
+  `CloseWorkspaceError.cause` is a decode breach; merge-action fields are
+  UserSaid values. REMEDIATION OWED (teamlead loop): wire-verbs.el wraps
+  `agent-repl--error` in a `condition-case` that swallows a signal — once
+  core.el's non-signaling `agent-repl--error` lands, that wrapper is
+  removed (never swallow errors).
 
 ## 6. daemon-link.el
 
@@ -363,7 +387,7 @@ are deleted by the verbs agent once verbs.el replaces them.
   per-buffer list of attached images and their MIME types, drawn as the
   existing thumbnail overlay, cleared on a successful send) →
   `agent-repl-rpc-submit-prompt` with `(:said SAID :idempotency-key
-  (agent-repl--uuid) :origin ORIGIN)` (RFC 4122 v4 from `random`; ORIGIN
+  (agent-repl--uuid) :origin ORIGIN :workspace (agent-repl-host-ref WS))` (RFC 4122 v4 from `random`; ORIGIN
   is the send site's keyword, REQUIRED) → success `:turn` →
   clear the input, push history, run `agent-repl-send-posthooks`; success
   `:command-panel` or `:command-refused` → "answered, nothing to await":
@@ -563,6 +587,16 @@ them).
 
 Keybindings.el is shared: each owner edits only its own commands' lines; the
 teamlead resolves merge seams.
+
+WAVE-2 REGROUP (project-lead concurrency cap: at most three running agents per
+lead): the seven wave-2 rows above are dispatched as THREE briefs, in this
+critical-path order — W2-A "stream core" = link + host (+ notifications
+adaptation) + cold-start; W2-B "tabs and views" = roster (+ status,
+workspace, session finish reactions) + webview (frontend, webview-recovery,
+open-progress, panels, window, popup); W2-C "user commands" = composer +
+verbs (+ worktree slimming, doctor, deleting merge-handlers.el and
+workspace-create-client.el). Seams between the three are exactly the §6–§12
+names; each brief owns every file listed for its constituent rows.
 
 ## 16. Escalations sent to the project lead (defaults in force meanwhile)
 

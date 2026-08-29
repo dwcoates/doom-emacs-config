@@ -165,11 +165,22 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; sits on, so it loads directly after core.el — its only dependency is
 ;; core.el's logging ladder — and before anything that speaks to the daemon.
 ;; Order within the group is the dependency order: wire-common.el carries the
-;; error, the shared primitives and the leaf vocabularies the other two build
-;; on.
+;; error, the shared primitives and the leaf vocabularies the other three
+;; build on; wire-verbs.el is the workspace and daemon-admin verbs.
 (agent-repl--load-module "wire-common")
 (agent-repl--load-module "wire-host")
 (agent-repl--load-module "wire-roster")
+(agent-repl--load-module "wire-verbs")
+;; WHY: connect.el is the Connect-over-HTTP/1.1 transport every daemon
+;; exchange rides.  It loads right after the codec, whose error it never
+;; needs but whose consumers all sit above it, and before any consumer of
+;; the daemon.
+(agent-repl--load-module "connect")
+;; WHY: rpc.el is the one function per `agentrepl.v1' rpc Emacs calls, and
+;; every daemon-facing module calls it rather than the transport directly.
+;; It sits above both the codec it encodes through and the transport it
+;; sends over.
+(agent-repl--load-module "rpc")
 ;; WHY: external-browser.el pins `browse-url-browser-function' so every
 ;; hyperlink lands in the external Chrome profile instead of an Emacs
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
