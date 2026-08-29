@@ -46,19 +46,17 @@ func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID) error {
 	// closed, so nothing is blocking it any more.
 	v.deps.Footer.SetClosing(ws, nil)
 
-	// The workspace's durable log sink is evicted, which is what releases the
-	// shared fd the closed workspace no longer writes through. Eviction is
-	// injected because dlog.Surfaces does not expose it yet; a daemon wired
-	// without it simply keeps the sink open, which is a leak and not a
-	// correctness failure, so it is not worth refusing the close over.
-	if v.deps.EvictLogSink != nil {
-		if err := v.deps.EvictLogSink(record.Dir); err != nil {
-			log.Warn(opClose, "could not evict the workspace log sink", dlog.Context{
-				"dir": record.Dir, "cause": err.Error(),
-			})
-		} else {
-			log.Debug(opClose, "evicted the workspace log sink", dlog.Context{"dir": record.Dir})
-		}
+	// The workspace's durable log sinks are evicted, which releases the shared
+	// descriptors the closed workspace no longer writes through; the canonical
+	// links and their targets stay on disk. A failed eviction is a LEAK rather
+	// than a correctness failure, so it warns instead of refusing a close the
+	// record already says happened.
+	if err := v.deps.Log.Evict(record.Dir); err != nil {
+		log.Warn(opClose, "could not evict the workspace log sinks", dlog.Context{
+			"dir": record.Dir, "cause": err.Error(),
+		})
+	} else {
+		log.Debug(opClose, "evicted the workspace log sinks", dlog.Context{"dir": record.Dir})
 	}
 
 	log.Info(opClose, "closed the workspace", dlog.Context{"dir": record.Dir})

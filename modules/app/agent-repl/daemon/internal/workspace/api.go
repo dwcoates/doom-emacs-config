@@ -249,10 +249,6 @@ type Deps struct {
 	SplicePrompt PromptSplicer
 	// Now supplies the instants the verbs stamp. nil means time.Now.
 	Now func() time.Time
-	// EvictLogSink drops one workspace's durable log sink when the workspace
-	// closes, releasing the shared descriptor. It is a function because
-	// dlog.Surfaces does not expose eviction yet; nil leaves the sink open.
-	EvictLogSink func(dir string) error
 }
 
 // PromptLoader reads one brief by name from a prompts directory at use time.

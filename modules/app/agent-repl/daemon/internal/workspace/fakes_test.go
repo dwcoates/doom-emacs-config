@@ -652,6 +652,8 @@ type fakeSurfaces struct {
 	logger       *dlog.TestLogger
 	workspaceErr error
 	shimSinkErr  error
+	evictErr     error
+	evicted      []string
 }
 
 func newFakeSurfaces() *fakeSurfaces { return &fakeSurfaces{logger: dlog.NewTestLogger()} }
@@ -724,8 +726,6 @@ type fixture struct {
 	briefs map[string]prompts.Prompt
 	// briefErr fails every brief load.
 	briefErr error
-	// evicted records the log sinks the close verb evicted.
-	evicted []string
 }
 
 // newFixture arranges a verb surface with a live session, an owned workspace
@@ -799,8 +799,7 @@ func newFixture(t *testing.T) *fixture {
 			}
 			return out, nil
 		},
-		Now:          func() time.Time { return fixedNow },
-		EvictLogSink: func(dir string) error { f.evicted = append(f.evicted, dir); return nil },
+		Now: func() time.Time { return fixedNow },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -865,5 +864,12 @@ func containsString(set []string, want string) bool {
 	return false
 }
 
-// Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
-func (s *fakeSurfaces) Evict(_ string) error { return nil }
+// Evict records the sinks a close released, and fails when the test arranged
+// an eviction failure.
+func (s *fakeSurfaces) Evict(dir string) error {
+	if s.evictErr != nil {
+		return s.evictErr
+	}
+	s.evicted = append(s.evicted, dir)
+	return nil
+}
