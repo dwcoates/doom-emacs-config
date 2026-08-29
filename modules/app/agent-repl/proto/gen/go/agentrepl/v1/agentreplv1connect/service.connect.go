@@ -85,6 +85,13 @@ const (
 	// AgentReplSetWorkspacePriorityProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspacePriority RPC.
 	AgentReplSetWorkspacePriorityProcedure = "/agentrepl.v1.AgentRepl/SetWorkspacePriority"
+	// AgentReplCreateTaskProcedure is the fully-qualified name of the AgentRepl's CreateTask RPC.
+	AgentReplCreateTaskProcedure = "/agentrepl.v1.AgentRepl/CreateTask"
+	// AgentReplUpdateTaskProcedure is the fully-qualified name of the AgentRepl's UpdateTask RPC.
+	AgentReplUpdateTaskProcedure = "/agentrepl.v1.AgentRepl/UpdateTask"
+	// AgentReplAssignWorkspaceTaskProcedure is the fully-qualified name of the AgentRepl's
+	// AssignWorkspaceTask RPC.
+	AgentReplAssignWorkspaceTaskProcedure = "/agentrepl.v1.AgentRepl/AssignWorkspaceTask"
 	// AgentReplWatchTopbarProcedure is the fully-qualified name of the AgentRepl's WatchTopbar RPC.
 	AgentReplWatchTopbarProcedure = "/agentrepl.v1.AgentRepl/WatchTopbar"
 	// AgentReplSetModelProcedure is the fully-qualified name of the AgentRepl's SetModel RPC.
@@ -139,6 +146,8 @@ const (
 	AgentReplWatchLoginTerminalProcedure = "/agentrepl.v1.AgentRepl/WatchLoginTerminal"
 	// AgentReplCloseLoginProcedure is the fully-qualified name of the AgentRepl's CloseLogin RPC.
 	AgentReplCloseLoginProcedure = "/agentrepl.v1.AgentRepl/CloseLogin"
+	// AgentReplOpenExternalProcedure is the fully-qualified name of the AgentRepl's OpenExternal RPC.
+	AgentReplOpenExternalProcedure = "/agentrepl.v1.AgentRepl/OpenExternal"
 	// AgentReplAdoptWebWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// AdoptWebWorkspace RPC.
 	AgentReplAdoptWebWorkspaceProcedure = "/agentrepl.v1.AgentRepl/AdoptWebWorkspace"
@@ -164,6 +173,9 @@ var (
 	agentReplMergeWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("MergeWorkspace")
 	agentReplRestartWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
 	agentReplSetWorkspacePriorityMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
+	agentReplCreateTaskMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("CreateTask")
+	agentReplUpdateTaskMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("UpdateTask")
+	agentReplAssignWorkspaceTaskMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("AssignWorkspaceTask")
 	agentReplWatchTopbarMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("WatchTopbar")
 	agentReplSetModelMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SetModel")
 	agentReplSetPermissionModeMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("SetPermissionMode")
@@ -185,6 +197,7 @@ var (
 	agentReplOpenLoginMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("OpenLogin")
 	agentReplWatchLoginTerminalMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("WatchLoginTerminal")
 	agentReplCloseLoginMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("CloseLogin")
+	agentReplOpenExternalMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("OpenExternal")
 	agentReplAdoptWebWorkspaceMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("AdoptWebWorkspace")
 )
 
@@ -234,6 +247,14 @@ type AgentReplClient interface {
 	// Set or clear a workspace's priority; the roster orders by it. See
 	// endpoint_set_workspace_priority.proto.
 	SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error)
+	// A new user task; the roster's task view renders it. See
+	// endpoint_create_task.proto.
+	CreateTask(context.Context, *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error)
+	// Change one task (retitle, done, reopen). See endpoint_update_task.proto.
+	UpdateTask(context.Context, *connect.Request[v1.UpdateTaskRequest]) (*connect.Response[v1.UpdateTaskResponse], error)
+	// Assign a workspace to a task, or unassign it. See
+	// endpoint_assign_workspace_task.proto.
+	AssignWorkspaceTask(context.Context, *connect.Request[v1.AssignWorkspaceTaskRequest]) (*connect.Response[v1.AssignWorkspaceTaskResponse], error)
 	// The topbar's stream: the view, whole (the token-breakdown menu inside).
 	WatchTopbar(context.Context, *connect.Request[v1.WatchTopbarRequest]) (*connect.ServerStreamForClient[v1.WatchTopbarResponse], error)
 	// The selector's pick: the typed echo token handed back. See
@@ -294,6 +315,9 @@ type AgentReplClient interface {
 	// End the login session; closing an absent one is success. See
 	// endpoint_close_login.proto.
 	CloseLogin(context.Context, *connect.Request[v1.CloseLoginRequest]) (*connect.Response[v1.CloseLoginResponse], error)
+	// Open a clicked link in the pinned external browser profile. See
+	// endpoint_open_external.proto.
+	OpenExternal(context.Context, *connect.Request[v1.OpenExternalRequest]) (*connect.Response[v1.OpenExternalResponse], error)
 	// The webview's half of the handover rendezvous, called on the NEW
 	// daemon. See endpoint_adopt_web_workspace.proto.
 	AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error)
@@ -409,6 +433,24 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplSetWorkspacePriorityProcedure,
 			connect.WithSchema(agentReplSetWorkspacePriorityMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		createTask: connect.NewClient[v1.CreateTaskRequest, v1.CreateTaskResponse](
+			httpClient,
+			baseURL+AgentReplCreateTaskProcedure,
+			connect.WithSchema(agentReplCreateTaskMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		updateTask: connect.NewClient[v1.UpdateTaskRequest, v1.UpdateTaskResponse](
+			httpClient,
+			baseURL+AgentReplUpdateTaskProcedure,
+			connect.WithSchema(agentReplUpdateTaskMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		assignWorkspaceTask: connect.NewClient[v1.AssignWorkspaceTaskRequest, v1.AssignWorkspaceTaskResponse](
+			httpClient,
+			baseURL+AgentReplAssignWorkspaceTaskProcedure,
+			connect.WithSchema(agentReplAssignWorkspaceTaskMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		watchTopbar: connect.NewClient[v1.WatchTopbarRequest, v1.WatchTopbarResponse](
@@ -537,6 +579,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplCloseLoginMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		openExternal: connect.NewClient[v1.OpenExternalRequest, v1.OpenExternalResponse](
+			httpClient,
+			baseURL+AgentReplOpenExternalProcedure,
+			connect.WithSchema(agentReplOpenExternalMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		adoptWebWorkspace: connect.NewClient[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplAdoptWebWorkspaceProcedure,
@@ -565,6 +613,9 @@ type agentReplClient struct {
 	mergeWorkspace         *connect.Client[v1.MergeWorkspaceRequest, v1.MergeWorkspaceResponse]
 	restartWorkspace       *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
 	setWorkspacePriority   *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
+	createTask             *connect.Client[v1.CreateTaskRequest, v1.CreateTaskResponse]
+	updateTask             *connect.Client[v1.UpdateTaskRequest, v1.UpdateTaskResponse]
+	assignWorkspaceTask    *connect.Client[v1.AssignWorkspaceTaskRequest, v1.AssignWorkspaceTaskResponse]
 	watchTopbar            *connect.Client[v1.WatchTopbarRequest, v1.WatchTopbarResponse]
 	setModel               *connect.Client[v1.SetModelRequest, v1.SetModelResponse]
 	setPermissionMode      *connect.Client[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse]
@@ -586,6 +637,7 @@ type agentReplClient struct {
 	openLogin              *connect.Client[v1.OpenLoginRequest, v1.OpenLoginResponse]
 	watchLoginTerminal     *connect.Client[v1.LoginTerminalInput, v1.LoginTerminalOutput]
 	closeLogin             *connect.Client[v1.CloseLoginRequest, v1.CloseLoginResponse]
+	openExternal           *connect.Client[v1.OpenExternalRequest, v1.OpenExternalResponse]
 	adoptWebWorkspace      *connect.Client[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse]
 }
 
@@ -672,6 +724,21 @@ func (c *agentReplClient) RestartWorkspace(ctx context.Context, req *connect.Req
 // SetWorkspacePriority calls agentrepl.v1.AgentRepl.SetWorkspacePriority.
 func (c *agentReplClient) SetWorkspacePriority(ctx context.Context, req *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error) {
 	return c.setWorkspacePriority.CallUnary(ctx, req)
+}
+
+// CreateTask calls agentrepl.v1.AgentRepl.CreateTask.
+func (c *agentReplClient) CreateTask(ctx context.Context, req *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error) {
+	return c.createTask.CallUnary(ctx, req)
+}
+
+// UpdateTask calls agentrepl.v1.AgentRepl.UpdateTask.
+func (c *agentReplClient) UpdateTask(ctx context.Context, req *connect.Request[v1.UpdateTaskRequest]) (*connect.Response[v1.UpdateTaskResponse], error) {
+	return c.updateTask.CallUnary(ctx, req)
+}
+
+// AssignWorkspaceTask calls agentrepl.v1.AgentRepl.AssignWorkspaceTask.
+func (c *agentReplClient) AssignWorkspaceTask(ctx context.Context, req *connect.Request[v1.AssignWorkspaceTaskRequest]) (*connect.Response[v1.AssignWorkspaceTaskResponse], error) {
+	return c.assignWorkspaceTask.CallUnary(ctx, req)
 }
 
 // WatchTopbar calls agentrepl.v1.AgentRepl.WatchTopbar.
@@ -779,6 +846,11 @@ func (c *agentReplClient) CloseLogin(ctx context.Context, req *connect.Request[v
 	return c.closeLogin.CallUnary(ctx, req)
 }
 
+// OpenExternal calls agentrepl.v1.AgentRepl.OpenExternal.
+func (c *agentReplClient) OpenExternal(ctx context.Context, req *connect.Request[v1.OpenExternalRequest]) (*connect.Response[v1.OpenExternalResponse], error) {
+	return c.openExternal.CallUnary(ctx, req)
+}
+
 // AdoptWebWorkspace calls agentrepl.v1.AgentRepl.AdoptWebWorkspace.
 func (c *agentReplClient) AdoptWebWorkspace(ctx context.Context, req *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {
 	return c.adoptWebWorkspace.CallUnary(ctx, req)
@@ -830,6 +902,14 @@ type AgentReplHandler interface {
 	// Set or clear a workspace's priority; the roster orders by it. See
 	// endpoint_set_workspace_priority.proto.
 	SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error)
+	// A new user task; the roster's task view renders it. See
+	// endpoint_create_task.proto.
+	CreateTask(context.Context, *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error)
+	// Change one task (retitle, done, reopen). See endpoint_update_task.proto.
+	UpdateTask(context.Context, *connect.Request[v1.UpdateTaskRequest]) (*connect.Response[v1.UpdateTaskResponse], error)
+	// Assign a workspace to a task, or unassign it. See
+	// endpoint_assign_workspace_task.proto.
+	AssignWorkspaceTask(context.Context, *connect.Request[v1.AssignWorkspaceTaskRequest]) (*connect.Response[v1.AssignWorkspaceTaskResponse], error)
 	// The topbar's stream: the view, whole (the token-breakdown menu inside).
 	WatchTopbar(context.Context, *connect.Request[v1.WatchTopbarRequest], *connect.ServerStream[v1.WatchTopbarResponse]) error
 	// The selector's pick: the typed echo token handed back. See
@@ -890,6 +970,9 @@ type AgentReplHandler interface {
 	// End the login session; closing an absent one is success. See
 	// endpoint_close_login.proto.
 	CloseLogin(context.Context, *connect.Request[v1.CloseLoginRequest]) (*connect.Response[v1.CloseLoginResponse], error)
+	// Open a clicked link in the pinned external browser profile. See
+	// endpoint_open_external.proto.
+	OpenExternal(context.Context, *connect.Request[v1.OpenExternalRequest]) (*connect.Response[v1.OpenExternalResponse], error)
 	// The webview's half of the handover rendezvous, called on the NEW
 	// daemon. See endpoint_adopt_web_workspace.proto.
 	AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error)
@@ -1001,6 +1084,24 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplSetWorkspacePriorityProcedure,
 		svc.SetWorkspacePriority,
 		connect.WithSchema(agentReplSetWorkspacePriorityMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplCreateTaskHandler := connect.NewUnaryHandler(
+		AgentReplCreateTaskProcedure,
+		svc.CreateTask,
+		connect.WithSchema(agentReplCreateTaskMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplUpdateTaskHandler := connect.NewUnaryHandler(
+		AgentReplUpdateTaskProcedure,
+		svc.UpdateTask,
+		connect.WithSchema(agentReplUpdateTaskMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplAssignWorkspaceTaskHandler := connect.NewUnaryHandler(
+		AgentReplAssignWorkspaceTaskProcedure,
+		svc.AssignWorkspaceTask,
+		connect.WithSchema(agentReplAssignWorkspaceTaskMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplWatchTopbarHandler := connect.NewServerStreamHandler(
@@ -1129,6 +1230,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplCloseLoginMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplOpenExternalHandler := connect.NewUnaryHandler(
+		AgentReplOpenExternalProcedure,
+		svc.OpenExternal,
+		connect.WithSchema(agentReplOpenExternalMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplAdoptWebWorkspaceHandler := connect.NewUnaryHandler(
 		AgentReplAdoptWebWorkspaceProcedure,
 		svc.AdoptWebWorkspace,
@@ -1171,6 +1278,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplRestartWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspacePriorityProcedure:
 			agentReplSetWorkspacePriorityHandler.ServeHTTP(w, r)
+		case AgentReplCreateTaskProcedure:
+			agentReplCreateTaskHandler.ServeHTTP(w, r)
+		case AgentReplUpdateTaskProcedure:
+			agentReplUpdateTaskHandler.ServeHTTP(w, r)
+		case AgentReplAssignWorkspaceTaskProcedure:
+			agentReplAssignWorkspaceTaskHandler.ServeHTTP(w, r)
 		case AgentReplWatchTopbarProcedure:
 			agentReplWatchTopbarHandler.ServeHTTP(w, r)
 		case AgentReplSetModelProcedure:
@@ -1213,6 +1326,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplWatchLoginTerminalHandler.ServeHTTP(w, r)
 		case AgentReplCloseLoginProcedure:
 			agentReplCloseLoginHandler.ServeHTTP(w, r)
+		case AgentReplOpenExternalProcedure:
+			agentReplOpenExternalHandler.ServeHTTP(w, r)
 		case AgentReplAdoptWebWorkspaceProcedure:
 			agentReplAdoptWebWorkspaceHandler.ServeHTTP(w, r)
 		default:
@@ -1290,6 +1405,18 @@ func (UnimplementedAgentReplHandler) RestartWorkspace(context.Context, *connect.
 
 func (UnimplementedAgentReplHandler) SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspacePriority is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) CreateTask(context.Context, *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.CreateTask is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UpdateTask(context.Context, *connect.Request[v1.UpdateTaskRequest]) (*connect.Response[v1.UpdateTaskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateTask is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) AssignWorkspaceTask(context.Context, *connect.Request[v1.AssignWorkspaceTaskRequest]) (*connect.Response[v1.AssignWorkspaceTaskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AssignWorkspaceTask is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) WatchTopbar(context.Context, *connect.Request[v1.WatchTopbarRequest], *connect.ServerStream[v1.WatchTopbarResponse]) error {
@@ -1374,6 +1501,10 @@ func (UnimplementedAgentReplHandler) WatchLoginTerminal(context.Context, *connec
 
 func (UnimplementedAgentReplHandler) CloseLogin(context.Context, *connect.Request[v1.CloseLoginRequest]) (*connect.Response[v1.CloseLoginResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.CloseLogin is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) OpenExternal(context.Context, *connect.Request[v1.OpenExternalRequest]) (*connect.Response[v1.OpenExternalResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.OpenExternal is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {

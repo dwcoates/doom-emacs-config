@@ -1,0 +1,36 @@
+// endpoint_open_external.proto — OpenExternal: open a clicked link in the
+// user's pinned external browser profile. WEB LINK section. The ONLY
+// thing between a clicked link and the webview navigating away (or
+// nothing happening): the shared link component calls this instead of
+// following the href; the daemon owns the pinned-profile launch.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message OpenExternalRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The clicked link, verbatim.
+  string url = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message OpenExternalResponse {
+  oneof result {
+    OpenExternalSuccess success = 1;
+    OpenExternalError error = 2;
+  }
+}
+
+// The browser was handed the link.
+message OpenExternalSuccess {
+}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (browser missing,
+// launch failed, …), spelled per 3b.
+message OpenExternalError {
+}
