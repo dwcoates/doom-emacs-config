@@ -453,6 +453,72 @@ describe("createFeedController: the rolling highlight", () => {
   });
 });
 
+describe("createFeedController: following the tail", () => {
+  /** A scroll box and a tail owner whose decisions the test dictates. */
+  function scrollStub(following: boolean) {
+    const acts: string[] = [];
+    const box = {
+      scrollTop: 0,
+      scrollHeight: 1000,
+      clientHeight: 100,
+      querySelector: () => null,
+    };
+    const tail = {
+      isFollowing: () => following,
+      park: () => acts.push("park"),
+      place: () => acts.push("place"),
+    };
+    return { box, tail, acts };
+  }
+
+  /** A controller wired to that box. */
+  function scrolled(following: boolean) {
+    const h = harness();
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const scroll = scrollStub(following);
+    const controller = createFeedController({
+      ctx: h.ctx,
+      host,
+      feed: "root",
+      renderers: stubRenderers(),
+      body: defaultBubbleBody,
+      revealRow: async () => false,
+      bubble: (row) => stubBubble(row),
+      bodyContext: {
+        ctx: h.ctx,
+        feed: "root",
+        row: create(FeedRowSchema, {}),
+        revealRow: async () => false,
+      },
+      scroll: { box: scroll.box as never, tail: scroll.tail as never },
+    });
+    return { controller, acts: scroll.acts };
+  }
+
+  it("pulls the view to the tail while the reader is following it", () => {
+    const { controller, acts } = scrolled(true);
+    acts.length = 0;
+    controller.upsert(responseRow("r1"));
+    expect(acts).toContain("park");
+  });
+
+  it("leaves a reader who has scrolled away exactly where they are", () => {
+    const { controller, acts } = scrolled(false);
+    acts.length = 0;
+    controller.upsert(responseRow("r1"));
+    expect(acts).not.toContain("park");
+  });
+
+  it("anchors a following reader at the tail when older rows land above", () => {
+    const { controller, acts } = scrolled(true);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    acts.length = 0;
+    controller.applyPage(page([responseRow("older")]), "prepend");
+    expect(acts).toContain("park");
+  });
+});
+
 describe("createFeedController: lookups and disposal", () => {
   it("finds a row's element by its id", () => {
     const { controller } = fixture();
