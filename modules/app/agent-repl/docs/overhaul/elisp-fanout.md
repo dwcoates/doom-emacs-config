@@ -295,6 +295,14 @@ are deleted by the verbs agent once verbs.el replaces them.
 
 - `(agent-repl-roster-subscribe CONN)`; `agent-repl-roster-view` holds the
   last decoded roster; `agent-repl-roster-update-functions` (ROSTER).
+- LANDED SHAPES (wire-roster.el as merged): the decoded roster keeps the
+  contract's nesting — a row's ref is `(plist-get (plist-get ROW :workspace)
+  :workspace)`, a repo section's ref is under `:key` then `:repository`, the
+  roster's current is `(plist-get (plist-get ROSTER :current) :workspace)`;
+  an optional EMPTY message (RosterRowAttention, priority badge presence) decodes
+  to `t` when present and nil when absent; `agent-repl-wire-roster-row-status-
+  keywords` exports the 23 arm keywords in proto order for status.el's table
+  and its assertion tests.
 - Tab reconciliation `(agent-repl-roster-reconcile ROSTER)`: walk
   `repository.sections` in order and rows depth-first (row, then its
   children), then `recently_merged.rows`. A row with `closed` false → ensure
