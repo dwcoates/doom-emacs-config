@@ -25,6 +25,7 @@ import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   DIAGNOSTICS_VISIBLE,
   TOOL_CALL_FORM_ARMS,
+  TOOL_CALL_INPUT_FORM_ARMS,
   TOOL_CALL_OUTCOME_ARMS,
   TOOL_CALL_VERDICT_ARMS,
   drawFeedSimpleToolCall,
@@ -103,6 +104,12 @@ describe("the arms this module claims to draw", () => {
       armsOf(FeedToolCallReturnedSchema.oneofs, "form").sort(),
     );
   });
+
+  it("covers every input-form arm the schema declares", () => {
+    expect([...TOOL_CALL_INPUT_FORM_ARMS].sort()).toEqual(
+      armsOf(FeedToolCallInputSchema.oneofs, "form").sort(),
+    );
+  });
 });
 
 describe("the card shell", () => {
@@ -122,12 +129,20 @@ describe("the card shell", () => {
     expect(el.getAttribute("data-state")).toBe("running");
   });
 
-  it("draws the composed input line verbatim as plain text", () => {
+  it("draws an unformed input line verbatim as plain text", () => {
     const el = drawFeedSimpleToolCall(
       card({ input: { text: "grep: FeedRow" }, outcome: { case: "running", value: {} } }),
       rowContext(),
     );
-    expect(el.querySelector(".bash-input")?.textContent).toBe("grep: FeedRow");
+    expect(el.querySelector(".tool-input")?.textContent).toBe("grep: FeedRow");
+  });
+
+  it("gives an unformed input line no shell treatment", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ input: { text: "whatever" }, outcome: { case: "running", value: {} } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".bash-input")).toBeNull();
   });
 
   it("draws the input line as a hyperlink when the view carries a link", () => {
@@ -138,8 +153,89 @@ describe("the card shell", () => {
       }),
       rowContext(),
     );
-    const anchor = el.querySelector(".bash-input a.external-link");
+    const anchor = el.querySelector(".tool-input a.external-link");
     expect(anchor?.getAttribute("href")).toBe("https://example.com/page");
+  });
+});
+
+describe("the input line's drawn form", () => {
+  it("draws a command in the shell treatment", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: { text: "go test ./...", form: { case: "command", value: {} } },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector("pre.cmd.bash-input")).not.toBeNull();
+  });
+
+  it("puts the client's shell chrome in front of a command", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: { text: "go test ./...", form: { case: "command", value: {} } },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector("pre.bash-input")?.textContent).toBe("$ go test ./...");
+  });
+
+  it("draws a path in the muted file-path treatment", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: { text: "src/render.ts", form: { case: "path", value: {} } },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector("div.file-path")?.textContent).toBe("src/render.ts");
+  });
+
+  it("gives a path no shell chrome", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: { text: "src/render.ts", form: { case: "path", value: {} } },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".file-path")?.textContent?.startsWith("$")).toBe(false);
+  });
+
+  it("draws a query in the query treatment", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: { text: "grep: FeedRow", form: { case: "query", value: {} } },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector("pre.cmd.tool-query")?.textContent).toBe("grep: FeedRow");
+  });
+
+  it("keeps a linked line in its own form's treatment", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: {
+          text: "src/render.ts",
+          form: { case: "path", value: {} },
+          link: { url: "https://example.com/render.ts" },
+        },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector("div.file-path a.external-link")?.getAttribute("href")).toBe(
+      "https://example.com/render.ts",
+    );
+  });
+
+  it("refuses an input form arm this build does not know", () => {
+    const built = card({ outcome: { case: "running", value: {} } });
+    built.input = create(FeedToolCallInputSchema, { text: "x" });
+    (built.input as { form: unknown }).form = { case: "sonar", value: {} };
+    expect(() => drawFeedSimpleToolCall(built, rowContext())).toThrow(MalformedView);
   });
 });
 
