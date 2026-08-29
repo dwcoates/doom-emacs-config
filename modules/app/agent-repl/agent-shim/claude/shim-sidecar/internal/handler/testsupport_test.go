@@ -65,7 +65,10 @@ func framesFrom(t *testing.T, text string) []tail.Frame {
 
 // sessionContext is the attribution a session transcript is read under.
 func sessionContext(path, session string) *Context {
-	return &Context{Path: path, SessionID: session, Kind: tail.KindSessionTranscript}
+	return &Context{
+		Path: path, SessionID: session, MainAgentID: session,
+		AgentID: session, FileID: "dev:1", Kind: tail.KindSessionTranscript,
+	}
 }
 
 // corpusRoot locates testdata/corpus from this package.

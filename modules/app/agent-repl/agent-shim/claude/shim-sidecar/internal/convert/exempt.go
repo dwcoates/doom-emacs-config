@@ -38,3 +38,19 @@ func IsExempt(tool string) bool { return exemptTools[tool] }
 
 // taskStopTool is the one exempt tool whose RESULT is consumed before the drop.
 const taskStopTool = "TaskStop"
+
+// settlesLater names the kinds whose RESULT deliberately produces no entry,
+// distinct from a result this converter FAILED to settle.
+//
+// THE DISTINCTION IS LOAD-BEARING. Both cases produce no activity, and treating
+// them alike files a perfectly-handled record as residue — which then shows up as
+// a mapping gap in exactly the query built to find real ones.
+//
+//   - A SKILL's own return is a bare acknowledgement restating the name. The unit
+//     settles when its DOCUMENT lands, joined by sourceToolUseID.
+//   - A MONITOR is always detached; arming it does not end it. The result only
+//     acknowledges the arm, so the announcement stands and the watch's own end is
+//     what settles it.
+func settlesLater(kind toolKind) bool {
+	return kind == kindSkill || kind == kindMonitor
+}
