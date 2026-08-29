@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 )
 
@@ -73,11 +72,16 @@ func TestSpoolBytesBecomeBashUpdatesUnderTheSpawningCallsIdentity(t *testing.T) 
 	spool.AppendRaw([]byte("first chunk of output\n"))
 	awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
 
-	// Assert.
-	frames := bashFramesForRun(fake.Entries(), fx.CallID)
-	if len(frames) == 0 {
-		t.Fatalf("no bash frame was written for run %q; runs seen: %v",
+	// Assert: the run is READABLE under the spawning call's identity...
+	rows, ok := watchBashRun(ctx, t, storeClient(fake.Socket), fx.CallID)
+	if !ok || len(rows) == 0 {
+		t.Fatalf("no bash row was readable for run %q; runs seen: %v",
 			fx.CallID, runsSeen(fake.Entries()))
+	}
+	// ...and under nothing else. The vendor task id must never reach the run's
+	// identity space: a row keyed by it can be joined to no call in the book.
+	if _, found := watchBashRun(ctx, t, storeClient(fake.Socket), fx.TaskID); found {
+		t.Fatalf("the run was also readable under the vendor task id %q", fx.TaskID)
 	}
 }
 
@@ -106,29 +110,86 @@ func TestBashDeltasCarryContiguousOffsets(t *testing.T) {
 		awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
 	}
 
-	// Assert.
-	var accumulated uint64
-	var joined strings.Builder
+	// Assert: read the run back and walk its deltas in the order the store
+	// replays them, which is the order a consumer accumulates them in.
+	rows, ok := watchBashRun(ctx, t, storeClient(fake.Socket), fx.CallID)
+	if !ok {
+		t.Fatalf("the run %q was not readable at all; runs seen: %v", fx.CallID, runsSeen(fake.Entries()))
+	}
 	var updates int
-	for _, frame := range bashFramesForRun(fake.Entries(), fx.CallID) {
-		up := frame.GetUpdate()
-		if up == nil {
-			continue
+	for _, row := range rows {
+		if row.GetUpdate() != nil {
+			updates++
 		}
-		updates++
-		if up.GetFromOffset() != accumulated {
-			t.Fatalf("update %d states from_offset %d, wanted %d — from_offset is a gap detector and must equal the bytes already accumulated",
-				updates, up.GetFromOffset(), accumulated)
-		}
-		joined.WriteString(up.GetNewOutput())
-		accumulated += uint64(len(up.GetNewOutput()))
 	}
 	if updates == 0 {
-		t.Fatalf("the spool grew three times and produced no update frame")
+		t.Fatalf("the spool grew three times and produced no update row: %v", describeBashRows(rows))
 	}
+	joined := requireContiguousDeltas(t, fx.CallID, rows)
 	want := string(chunks[0]) + string(chunks[1]) + string(chunks[2])
-	if joined.String() != want {
-		t.Errorf("the deltas concatenate to %q, wanted the spool's bytes %q", joined.String(), want)
+	if joined != want {
+		t.Errorf("the deltas concatenate to %q, wanted the spool's bytes %q", joined, want)
+	}
+}
+
+// TestEachSpoolDeltaIsItsOwnRowSoNoneErasesAnother asserts the per-row key
+// space where it is observable: the store holds one row per write, so a run that
+// grew three times replays THREE deltas. One key for the run would leave only
+// the last, and the output before it would be gone.
+func TestEachSpoolDeltaIsItsOwnRowSoNoneErasesAnother(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/detached-rows-probe",
+		"a5a5a5a5-a5a5-4a5a-8a5a-a5a5a5a5a5a5")
+	chunks := []string{"one\n", "two\n", "three\n"}
+
+	// Act: each chunk is a separate poll, so each is a separate write.
+	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	awaitCursorInBatches(ctx, t, fake, fx.Parent.Path(), fx.Parent.Offset())
+	spool := newGrowingFile(t, fx.SpoolPath)
+	for _, chunk := range chunks {
+		spool.AppendRaw([]byte(chunk))
+		awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
+	}
+
+	// Assert.
+	rows, ok := watchBashRun(ctx, t, storeClient(fake.Socket), fx.CallID)
+	if !ok {
+		t.Fatalf("the run %q was not readable at all", fx.CallID)
+	}
+	var deltas int
+	for _, row := range rows {
+		if row.GetUpdate() != nil {
+			deltas++
+		}
+	}
+	if deltas != len(chunks) {
+		t.Fatalf("the run replayed %d delta rows for %d writes: %v; each write is its own row",
+			deltas, len(chunks), describeBashRows(rows))
+	}
+	if got := requireContiguousDeltas(t, fx.CallID, rows); got != strings.Join(chunks, "") {
+		t.Errorf("the replayed deltas concatenate to %q, wanted every chunk", got)
+	}
+}
+
+// TestAnUnknownRunIsARefusedOpen asserts the endpoint's own convention: a run
+// the store holds no row for is refused at the transport, never answered with an
+// empty stream that reads as "the run produced nothing".
+func TestAnUnknownRunIsARefusedOpen(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+
+	// Act.
+	_, ok := watchBashRun(ctx, t, storeClient(fake.Socket), "toolu_no_such_run")
+
+	// Assert.
+	if ok {
+		t.Fatal("a run with no stored row must be a refused open, not an empty stream")
 	}
 }
 
@@ -154,15 +215,12 @@ func TestTheExitMarkerSettlesTheRunAsCompleted(t *testing.T) {
 	spool.AppendRaw(clean)
 	awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
 
-	// Assert.
-	var settled *conversationv1.AgentBashSuccess
-	for _, frame := range bashFramesForRun(fake.Entries(), fx.CallID) {
-		if s := frame.GetSuccess(); s != nil {
-			settled = s
-		}
-	}
+	// Assert: read the run through to its terminal row.
+	rows := awaitBashRunTerminal(ctx, t, storeClient(fake.Socket), fx.CallID)
+	requireBashReplayOrder(t, fx.CallID, rows)
+	settled := rows[len(rows)-1].GetSuccess()
 	if settled == nil {
-		t.Fatalf("the EXIT marker produced no terminal frame for run %q", fx.CallID)
+		t.Fatalf("the EXIT marker produced no terminal row for run %q: %v", fx.CallID, describeBashRows(rows))
 	}
 	completed := settled.GetCompleted()
 	if completed == nil {
@@ -203,13 +261,8 @@ func TestASplitSpoolLineConvertsOnceAndWhole(t *testing.T) {
 	awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
 
 	// Assert.
-	var joined strings.Builder
-	for _, frame := range bashFramesForRun(fake.Entries(), fx.CallID) {
-		if up := frame.GetUpdate(); up != nil {
-			joined.WriteString(up.GetNewOutput())
-		}
-	}
-	whole := joined.String()
+	rows := awaitBashRunTerminal(ctx, t, storeClient(fake.Socket), fx.CallID)
+	whole := requireContiguousDeltas(t, fx.CallID, rows)
 	if strings.Count(whole, "a line that will be cut in half") != 1 {
 		t.Fatalf("the split line converted %d times, wanted exactly once; deltas joined to %q",
 			strings.Count(whole, "a line that will be cut in half"), whole)
@@ -243,8 +296,8 @@ func TestDetachedRunFramesAreNeverPageLines(t *testing.T) {
 		if e.GetAgentUpdate().GetServeableFrame() != nil {
 			t.Errorf("entry %q is both a bash frame and a page line", e.GetUpsertKey())
 		}
-		if want := "bash:" + fx.CallID; e.GetUpsertKey() != want {
-			t.Errorf("bash frame keyed %q, wanted %q", e.GetUpsertKey(), want)
+		if prefix := "bash:" + fx.CallID + ":"; !strings.HasPrefix(e.GetUpsertKey(), prefix) {
+			t.Errorf("bash frame keyed %q, wanted a row of %q", e.GetUpsertKey(), prefix)
 		}
 	}
 }
@@ -286,17 +339,21 @@ func TestTaskStopResultCancelsTheOwningTask(t *testing.T) {
 	awaitCursorInBatches(ctx, t, fake, fx.Parent.Path(), fx.Parent.Offset())
 
 	// Assert.
-	var interrupted *conversationv1.AgentBashInterrupted
-	for _, frame := range bashFramesForRun(fake.Entries(), fx.CallID) {
-		if i := frame.GetSuccess().GetInterrupted(); i != nil {
-			interrupted = i
-		}
-	}
+	rows := awaitBashRunTerminal(ctx, t, storeClient(fake.Socket), fx.CallID)
+	requireBashReplayOrder(t, fx.CallID, rows)
+	interrupted := rows[len(rows)-1].GetSuccess().GetInterrupted()
 	if interrupted == nil {
-		t.Fatalf("a stopped task must settle as interrupted; run %q never did", fx.CallID)
+		t.Fatalf("a stopped task must settle as interrupted; run %q ended on %v",
+			fx.CallID, describeBashRows(rows))
 	}
 	if interrupted.GetByUser() == nil {
 		t.Errorf("a TaskStop result is a person's decision and must state by_user: %v", interrupted.GetCause())
+	}
+	// THE CANCELLED TERMINAL OWES THE OUTPUT THE SPOOL HELD: the run said
+	// something before it was stopped, and the terminal is the last thing any
+	// reader sees of it.
+	if got := interrupted.GetOutput().GetText().GetStdout(); !strings.Contains(got, "partial work") {
+		t.Errorf("the cancelled terminal carries stdout %q, wanted the output the spool held", got)
 	}
 }
 
