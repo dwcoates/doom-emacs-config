@@ -10,45 +10,42 @@
 // rulings) plus the four the harness had to choose for the fakes. The
 // production agents must honor every one of them.
 //
-// Contracted, from ARCHITECTURE.md and the kickoff rulings:
+// All of these are the BINDING spellings from daemon/AGENTS.md. The harness
+// invents nothing.
 //
-//	AGENT_REPL_STATE_DIR            the state root (a fresh temp dir per test)
-//	AGENT_REPL_FORBID_VENDOR_CALLS  set to 1 in every spawned process
-//	MULTI_REPO_ROOT                 the tree whose workspaces use the multi-repo config root
-//	AGENT_REPL_STORE_SOCKET         the store socket the -store-socket flag beats
-//	-fake                           the daemon's fake mode (the keyword classifier heuristic)
-//	-node <path>                    the interpreter the shim is spawned with (the fakeshim binary here)
-//	-shim <path>                    the shim module path (a placeholder file here)
-//	-webapp <dir>                   the webapp dist served at the asset origin
-//	-store-socket <path>            the store socket passed explicitly to every shim
-//	-prompts-dir <dir>              the prompts/ directory the briefs are read from
-//	-default-config-dir <dir>       the default account root
-//	-multi-repo-config-dir <dir>    the account root for workspaces under MULTI_REPO_ROOT
-//	-joining <addr>                 joining mode, naming the incumbent's address
-//	-pprof <addr>                   the opt-in local-only profiling listener
-//	-idle-cutoff <duration>         the hibernation idle cutoff
+// Flags:
 //
-// CHOSEN BY THE HARNESS (relay these to the production agents):
+//	--state-dir <dir>                the state root (a fresh temp dir per test)
+//	--fake                           the shim's offline scripted SDK and the -fake classifier
+//	--node <bin>                     the interpreter the shim is spawned with (the fakeshim binary here)
+//	--shim-main <path>               the shim entry point (a placeholder file here)
+//	--webapp-dist <dir>              the webapp assets served at /
+//	--store-socket <path>            the store socket passed explicitly to every shim
+//	--prompts-dir <dir>              the prompts directory the briefs are read from
+//	--default-config-dir <dir>       the default account root
+//	--multi-repo-config-dir <dir>    the account root for workspaces under MULTI_REPO_ROOT
+//	--joining <addr>                 blue-green successor of the incumbent at the address
+//	--idle-cutoff <duration>         the hibernation idle cutoff
+//	--pprof <addr>                   the opt-in local-only profiling listener
 //
-//	AGENT_REPL_LOCK_DIR             redirects ~/.cache/agent-repl/run so a test
-//	                                never touches the real kernel-lock directory.
-//	                                Both the daemon's probe and the shim's own
-//	                                acquisition must honor it.
-//	-self-repo <dir>                the daemon's own checkout, for deciding
-//	                                whether a merge target is the emacs repo.
-//	                                Env fallback AGENT_REPL_SELF_REPO.
-//	-browser <path>                 the external browser launcher OpenExternal
-//	                                invokes, as `<path> <url>`.
-//	                                Env fallback AGENT_REPL_BROWSER.
-//	-deploy-script <path>           the rollout's deploy script, invoked as
-//	                                `<path> --no-bounce`.
-//	                                Env fallback AGENT_REPL_DEPLOY_SCRIPT.
+// Environment:
+//
+//	AGENT_REPL_STATE_DIR                  the state root
+//	AGENT_REPL_FORBID_VENDOR_CALLS=1      set in every spawned process
+//	AGENT_REPL_STORE_SOCKET               the store socket a flag beats
+//	MULTI_REPO_ROOT                       the tree whose workspaces use the multi-repo account
+//	AGENT_REPL_LOCK_DIR                   redirects ~/.cache/agent-repl/run for the kernel locks
+//	AGENT_REPL_SELF_REPO_DIR              the daemon's own-checkout identity for the merge split
+//	AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS   compresses the idle cutoff
+//	AGENT_REPL_BROWSER_CMD                the external browser launcher for OpenExternal
+//	AGENT_REPL_CLAUDE_BIN                 the claude binary for the login pty and the classifier
+//	AGENT_REPL_DEPLOY_SCRIPT              overrides bin/deploy-all.sh for the self-reload trigger
 //
 // Fake-shim-only (read by the fake, never by the daemon; they ride the
 // daemon's own environment into the spawned shim):
 //
-//	FAKESHIM_PROFILE_DIR            per-workspace startup profiles
-//	FAKESHIM_BUILD_SHA              the runtime shim_build_sha the fake reports
+//	FAKESHIM_PROFILE_DIR   per-workspace startup profiles
+//	FAKESHIM_BUILD_SHA     the runtime shim_build_sha the fake reports
 //
 // # Discipline
 //

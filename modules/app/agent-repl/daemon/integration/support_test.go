@@ -72,8 +72,7 @@ func (f *fixture) open() {
 	f.shim = f.d.Shim(f.ws)
 }
 
-// selectWorkspace makes this workspace the current one, which is what
-// SubmitPrompt keys on when its optional feed is unset.
+// selectWorkspace makes this workspace the current one.
 func (f *fixture) selectWorkspace() {
 	f.t.Helper()
 	if _, err := f.d.Client().SelectWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: f.ws})); err != nil {
@@ -81,11 +80,11 @@ func (f *fixture) selectWorkspace() {
 	}
 }
 
-// submit selects the workspace and submits a prompt to it.
+// submit submits a prompt to the fixture's workspace.
 func (f *fixture) submit(text, key string, origin conversationv1.PromptOrigin) *agentreplv1.SubmitPromptResponse {
 	f.t.Helper()
-	f.selectWorkspace()
 	return f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace:      f.ws,
 		Said:           said(text),
 		IdempotencyKey: key,
 		Origin:         origin,
