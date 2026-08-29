@@ -4238,3 +4238,108 @@ body.ungated #mode-select {
   padding: 0.15rem 0.25rem 0;
 }
 
+/* ---- command panels (src/panels) --------------------------------------- */
+
+/* A panel is a quiet framed block in the feed's column: it answers a command
+   the daemon handled itself, so it must not read as the agent speaking. */
+.command-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+.panel-rows > * { padding: 0.22rem 0; }
+.panel-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.panel-row-label { flex: 0 0 auto; }
+/* The figure hugs the right rail so a column of them lines up and can be read
+   down rather than across. */
+.panel-row-value {
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.panel-row-detail {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.panel-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* The checklist glyphs: hollow for not-started, filled for done, and the
+   running one breathing. Never emoji — a box glyph keeps the text's weight. */
+.todo-glyph { flex: 0 0 auto; margin-right: 0.4rem; }
+[data-todo-status="pending"] .todo-glyph { color: var(--muted); }
+[data-todo-status="running"] .todo-glyph {
+  color: var(--thinking);
+  animation: hold-breathe 2.6s ease-in-out infinite;
+}
+[data-todo-status="completed"] .todo-glyph { color: var(--ok); }
+[data-todo-status="completed"] .todo-subject { color: var(--muted); }
+
+/* The mcp badges. ONE table, keyed by the arm, so a new arm draws unstyled
+   rather than borrowing another arm's meaning. */
+.mcp-badge {
+  margin-left: auto;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+[data-mcp-status="connected"] .mcp-badge { color: var(--ok); border-color: var(--ok); }
+[data-mcp-status="failed"] .mcp-badge { color: var(--err); border-color: var(--err); }
+[data-mcp-status="needsAuth"] .mcp-badge {
+  color: var(--thinking);
+  border-color: var(--thinking);
+}
+[data-mcp-status="disabled"] .mcp-badge { opacity: 0.55; }
+.mcp-detail { color: var(--err); }
+
+.help-command { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* The /context panel's own presentation. The composed header leads; the
+   category band sits under it as the at-a-glance summary; the detail sections
+   follow, each with a small heading, and each drawn only when it has rows. */
+.context-header {
+  font-weight: 700;
+  padding-bottom: 0.35rem;
+}
+.context-categories > * { padding: 0.18rem 0; }
+.context-section-heading {
+  margin-top: 0.5rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  text-transform: lowercase;
+}
+.context-rollup { margin-top: 0.5rem; color: var(--muted); }
+.context-auto-compact {
+  margin-top: 0.6rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+/* The tool-call section: the longest and the least often wanted, so it ships
+   FOLDED with its own toggle and a caret that announces the state. */
+.context-fold { margin-top: 0.5rem; }
+.context-fold-toggle {
+  font: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.context-fold-caret { margin-right: 0.3rem; }
