@@ -44,12 +44,15 @@ func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*st
 		if frame.ParseErr != nil {
 			h.log.With(handleWarn("parse", ctx)).With(logging.Context{Offset: logging.Off(frame.Offset)}).
 				Log("parse failure; the record is stored whole with no path to a page: %v", frame.ParseErr)
-			out = append(out, convert.UnparsedEntry(at, frame.Raw, frame.ParseErr))
+			unparsed := convert.UnparsedEntry(at, frame.Raw, frame.ParseErr)
+			logResidue(h.log, ctx, frame.Offset, []*storev1.StoreEntry{unparsed})
+			out = append(out, unparsed)
 			continue
 		}
-		out = append(out, h.conv.JournalRecord(frame.Obj, at, runID)...)
+		converted := h.conv.JournalRecord(frame.Obj, at, runID)
+		logResidue(h.log, ctx, frame.Offset, converted)
+		out = append(out, converted...)
 	}
-	logResidue(h.log, ctx, out)
 	h.log.With(handleCtx("journal-handle", ctx)).
 		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
