@@ -1,0 +1,38 @@
+// endpoint_send_login_input.proto — SendLoginInput: the login pty's INPUT
+// direction — keystrokes or a resize — as a unary call, the companion of
+// the server-streamed WatchLoginTerminal. WEB LINK section. Addressed by
+// workspace exactly as the watch is; the daemon writes to the account
+// root's running login pty.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/endpoint_watch_login_terminal.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SendLoginInputRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // THE ARM IS THE INPUT.
+  oneof input {
+    LoginTerminalKeystrokes keystrokes = 2;
+    LoginTerminalResize resize = 3;
+  }
+}
+
+// THE ARM IS THE OUTCOME.
+message SendLoginInputResponse {
+  oneof result {
+    SendLoginInputSuccess success = 1;
+    SendLoginInputError error = 2;
+  }
+}
+
+// Written to the pty.
+message SendLoginInputSuccess {}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (no login session
+// standing, pty write failed, …), spelled per 3b.
+message SendLoginInputError {}

@@ -26,9 +26,16 @@ message StopBashResponse {
 // The kill was sent; the stream concludes with the unit's `interrupted` outcome.
 message StopBashSuccess {}
 
-// Not sent: no such item, already ended. `kind` arms are DERIVED at the wave from the shim's real refusal
-// sites.
+// Not sent. THE ARM IS WHY.
 message StopBashFailure {
   // The shim's account, for a human and for logs; never switched on.
   string detail = 1;
+  oneof kind {
+    // No live shell carries this handle.
+    StopBashUnknownWork unknown_work = 2;
+    // The shell already ended.
+    StopBashAlreadyEnded already_ended = 3;
+  }
 }
+message StopBashUnknownWork {}
+message StopBashAlreadyEnded {}

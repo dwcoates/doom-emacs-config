@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_kill_turn.proto.
  */
 export const file_shim_v1_endpoint_kill_turn: GenFile = /*@__PURE__*/
-  fileDesc("CiBzaGltL3YxL2VuZHBvaW50X2tpbGxfdHVybi5wcm90bxIHc2hpbS52MSJHCg9LaWxsVHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSDQoFZm9yY2UYAiABKAgidgoQS2lsbFR1cm5SZXNwb25zZRIrCgdzdWNjZXNzGAEgASgLMhguc2hpbS52MS5LaWxsVHVyblN1Y2Nlc3NIABIrCgdmYWlsdXJlGAIgASgLMhguc2hpbS52MS5LaWxsVHVybkZhaWx1cmVIAEIICgZyZXN1bHQiPgoPS2lsbFR1cm5TdWNjZXNzEisKBmtpbGxlZBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5UdXJuS2lsbGVkIlUKD0tpbGxUdXJuRmFpbHVyZRIpCgRsaXZlGAEgASgLMhkuY29udmVyc2F0aW9uLnYxLlR1cm5MaXZlSAASDgoGZGV0YWlsGAIgASgJQgcKBWNhdXNlQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_turn]);
+  fileDesc("CiBzaGltL3YxL2VuZHBvaW50X2tpbGxfdHVybi5wcm90bxIHc2hpbS52MSJHCg9LaWxsVHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSDQoFZm9yY2UYAiABKAgidgoQS2lsbFR1cm5SZXNwb25zZRIrCgdzdWNjZXNzGAEgASgLMhguc2hpbS52MS5LaWxsVHVyblN1Y2Nlc3NIABIrCgdmYWlsdXJlGAIgASgLMhguc2hpbS52MS5LaWxsVHVybkZhaWx1cmVIAEIICgZyZXN1bHQiPgoPS2lsbFR1cm5TdWNjZXNzEisKBmtpbGxlZBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5UdXJuS2lsbGVkIvoBCg9LaWxsVHVybkZhaWx1cmUSKQoEbGl2ZRgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5UdXJuTGl2ZUgAEjwKEW5vdF90aGVfb3Blbl90dXJuGAMgASgLMh8uc2hpbS52MS5LaWxsVHVybk5vdFRoZU9wZW5UdXJuSAASMwoMbm9fdHVybl9vcGVuGAQgASgLMhsuc2hpbS52MS5LaWxsVHVybk5vVHVybk9wZW5IABIwCgpub19zZXNzaW9uGAUgASgLMhouc2hpbS52MS5LaWxsVHVybk5vU2Vzc2lvbkgAEg4KBmRldGFpbBgCIAEoCUIHCgVjYXVzZSIYChZLaWxsVHVybk5vdFRoZU9wZW5UdXJuIhQKEktpbGxUdXJuTm9UdXJuT3BlbiITChFLaWxsVHVybk5vU2Vzc2lvbkIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_turn]);
 
 /**
  * Which turn, and whether its spawned work may die with it.
@@ -116,12 +116,34 @@ export type KillTurnFailure = Message<"shim.v1.KillTurnFailure"> & {
     /**
      * Work this turn spawned is live and force was not asked: here it is.
      *
-     * Further arms DERIVED at the wave (not the open turn, no session).
-     *
      * @generated from field: conversation.v1.TurnLive live = 1;
      */
     value: TurnLive;
     case: "live";
+  } | {
+    /**
+     * The named turn is not the open one.
+     *
+     * @generated from field: shim.v1.KillTurnNotTheOpenTurn not_the_open_turn = 3;
+     */
+    value: KillTurnNotTheOpenTurn;
+    case: "notTheOpenTurn";
+  } | {
+    /**
+     * No turn is open.
+     *
+     * @generated from field: shim.v1.KillTurnNoTurnOpen no_turn_open = 4;
+     */
+    value: KillTurnNoTurnOpen;
+    case: "noTurnOpen";
+  } | {
+    /**
+     * No session is open on this shim.
+     *
+     * @generated from field: shim.v1.KillTurnNoSession no_session = 5;
+     */
+    value: KillTurnNoSession;
+    case: "noSession";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -138,4 +160,43 @@ export type KillTurnFailure = Message<"shim.v1.KillTurnFailure"> & {
  */
 export const KillTurnFailureSchema: GenMessage<KillTurnFailure> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_kill_turn, 3);
+
+/**
+ * @generated from message shim.v1.KillTurnNotTheOpenTurn
+ */
+export type KillTurnNotTheOpenTurn = Message<"shim.v1.KillTurnNotTheOpenTurn"> & {
+};
+
+/**
+ * Describes the message shim.v1.KillTurnNotTheOpenTurn.
+ * Use `create(KillTurnNotTheOpenTurnSchema)` to create a new message.
+ */
+export const KillTurnNotTheOpenTurnSchema: GenMessage<KillTurnNotTheOpenTurn> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_kill_turn, 4);
+
+/**
+ * @generated from message shim.v1.KillTurnNoTurnOpen
+ */
+export type KillTurnNoTurnOpen = Message<"shim.v1.KillTurnNoTurnOpen"> & {
+};
+
+/**
+ * Describes the message shim.v1.KillTurnNoTurnOpen.
+ * Use `create(KillTurnNoTurnOpenSchema)` to create a new message.
+ */
+export const KillTurnNoTurnOpenSchema: GenMessage<KillTurnNoTurnOpen> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_kill_turn, 5);
+
+/**
+ * @generated from message shim.v1.KillTurnNoSession
+ */
+export type KillTurnNoSession = Message<"shim.v1.KillTurnNoSession"> & {
+};
+
+/**
+ * Describes the message shim.v1.KillTurnNoSession.
+ * Use `create(KillTurnNoSessionSchema)` to create a new message.
+ */
+export const KillTurnNoSessionSchema: GenMessage<KillTurnNoSession> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_kill_turn, 6);
 
