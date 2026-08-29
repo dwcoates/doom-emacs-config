@@ -12,7 +12,7 @@
 //     spawn depth, model and worktree)
 //  3. workflow journals and their per-agent transcripts, under
 //     .../subagents/workflows/wf_<id>/
-//  4. task spools              <spool root>/claude-<uid>/<project>/<session>/tasks/<task>.output
+//  4. task spools              <spool root>/[claude-<uid>/]<cwd-slug>/<vendor session>/tasks/<task>.output
 //
 // MULTI-ROOT IS NOT OPTIONAL: the second account's config dir holds real
 // transcripts, and a single-root scan simply cannot see them.
@@ -145,7 +145,16 @@ func (d *Discoverer) Scan() []Target {
 			add(d.Classify(match))
 		}
 	}
-	for _, match := range globAll(filepath.Join(d.spoolRoot, "claude-*", "*", "*", "tasks", "*.output")) {
+	// BOTH SPOOL-ROOT SPELLINGS ARE ACCEPTED. The vendor writes spools under
+	// <uid dir>/<cwd-slug>/<vendor session>/tasks/, and a caller may point
+	// --spool-root either at the parent of the uid dir (production: /tmp, which
+	// resolves claude-<uid> itself) or directly at the uid dir (a mock harness,
+	// whose own root default IS that directory). Neither spelling may make a
+	// spool invisible, so both are globbed.
+	for _, match := range globAll(
+		filepath.Join(d.spoolRoot, "claude-*", "*", "*", "tasks", "*.output"),
+		filepath.Join(d.spoolRoot, "*", "*", "tasks", "*.output"),
+	) {
 		add(d.Classify(match))
 	}
 	d.log.With(logging.Context{Operation: "discover-scan"}).LogVerbose("scan complete targets=%d", len(out))
@@ -269,16 +278,26 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 	if !strings.HasPrefix(path, prefix) {
 		return Target{}, false
 	}
-	// claude-<uid>/<project>/<session>/tasks/<task>.output
-	//
-	// segs[2] is session-SHAPED and deliberately NOT read: it is the harness's
-	// runtime session id, which disagrees with the transcript's whenever a
-	// session was resumed.
 	segs := strings.Split(filepath.ToSlash(path[len(prefix):]), "/")
-	if len(segs) != 5 || !strings.HasPrefix(segs[0], "claude-") || segs[3] != "tasks" || !strings.HasSuffix(segs[4], ".output") {
+	// Two accepted shapes, because --spool-root may be pointed at either level:
+	//
+	//	claude-<uid>/<cwd-slug>/<vendor session>/tasks/<task>.output   (root = /tmp)
+	//	<cwd-slug>/<vendor session>/tasks/<task>.output                (root = the uid dir)
+	//
+	// The <vendor session> segment is deliberately NOT read: it is the
+	// harness's RUNTIME session id, which disagrees with the transcript's
+	// whenever a session was resumed.
+	switch {
+	case len(segs) == 5 && strings.HasPrefix(segs[0], "claude-"):
+		segs = segs[1:]
+	case len(segs) == 4:
+	default:
 		return Target{}, false
 	}
-	taskID := strings.TrimSuffix(segs[4], ".output")
+	if segs[2] != "tasks" || !strings.HasSuffix(segs[3], ".output") {
+		return Target{}, false
+	}
+	taskID := strings.TrimSuffix(segs[3], ".output")
 	target := Target{Path: path, TaskID: taskID, SpoolDir: filepath.Dir(path)}
 	switch {
 	case strings.HasPrefix(taskID, "b"):

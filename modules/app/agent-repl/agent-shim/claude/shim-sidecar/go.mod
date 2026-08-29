@@ -2,8 +2,6 @@ module agentrepl/shim-claude-sidecar
 
 go 1.23.0
 
-toolchain go1.24.6
-
 require (
 	agentrepl/logging v0.0.0
 	agentrepl/proto v0.0.0
