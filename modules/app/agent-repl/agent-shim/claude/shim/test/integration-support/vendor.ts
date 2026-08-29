@@ -12,7 +12,7 @@
  * spelled the layout a second time would agree with itself and not with the
  * producer.
  */
-import { existsSync, readFileSync, realpathSync, watch } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, watch } from "node:fs";
 import path from "node:path";
 import {
   cwdSlug,
@@ -154,4 +154,61 @@ export function promptText(record: TranscriptRecord): string {
   if (!Array.isArray(content)) return "";
   const first = content[0] as { text?: unknown } | undefined;
   return typeof first?.text === "string" ? first.text : "";
+}
+
+/** Where this session's task spools live. */
+export function spoolDir(dirs: ShimDirectories, vendorSessionId: string): string {
+  return path.dirname(spoolFilePath(dirs, vendorSessionId, "placeholder"));
+}
+
+/**
+ * Every spool the mock wrote for one session, by task id.
+ *
+ * Read by SCANNING rather than by deriving one path from a wire value: the
+ * vendor's task id never appears on the wire (the `DetachedWorkId` is the
+ * spawning call's tool_use_id), so a test that built the filename from an
+ * announcement would be asserting a mapping the contract deliberately hides.
+ */
+export function readSpools(
+  dirs: ShimDirectories,
+  vendorSessionId: string,
+): Array<{ readonly taskId: string; readonly text: string }> {
+  const dir = spoolDir(dirs, vendorSessionId);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".output"))
+    .map((name) => ({
+      taskId: name.replace(/\.output$/, ""),
+      text: readFileSync(path.join(dir, name), "utf8"),
+    }));
+}
+
+/** Resolve once any spool for the session terminates with `EXIT=<code>`. */
+export async function awaitSpoolExit(
+  dirs: ShimDirectories,
+  vendorSessionId: string,
+  code: number,
+): Promise<string> {
+  const marker = `EXIT=${String(code)}`;
+  const found = (): string | null => {
+    const hit = readSpools(dirs, vendorSessionId).find((spool) => spool.text.includes(marker));
+    return hit === undefined ? null : hit.taskId;
+  };
+  const already = found();
+  if (already !== null) return already;
+  const dir = spoolDir(dirs, vendorSessionId);
+  await awaitFile(dir);
+  return new Promise<string>((resolve) => {
+    const watcher = watch(dir, () => {
+      const hit = found();
+      if (hit === null) return;
+      watcher.close();
+      resolve(hit);
+    });
+    const raced = found();
+    if (raced !== null) {
+      watcher.close();
+      resolve(raced);
+    }
+  });
 }
