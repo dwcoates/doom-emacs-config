@@ -5,12 +5,14 @@
  * Not a test file — the shared arrangement every sidebar suite reuses, so no
  * suite builds its own idea of what a roster looks like.
  */
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import {
   RosterRowSchema,
+  RosterRowDetailSchema,
+  RosterRowWhenSchema,
   RosterMergedSectionSchema,
   RosterRepoSectionSchema,
   RosterTaskSectionSchema,
@@ -159,13 +161,14 @@ export function row(init: {
   id: string;
   name?: string;
   dir?: string;
-  status?: RosterRow["status"];
+  status?: MessageInitShape<typeof RosterRowSchema>["status"];
   current?: boolean;
   closed?: boolean;
   attention?: boolean;
   priority?: string;
-  when?: RosterRow["when"];
-  detail?: RosterRow["detail"];
+  /** The when-column's ARM; omitted leaves the column empty. */
+  when?: MessageInitShape<typeof RosterRowWhenSchema>["shown"];
+  detail?: MessageInitShape<typeof RosterRowDetailSchema>;
   children?: RosterRow[];
 }): RosterRow {
   return create(RosterRowSchema, {
@@ -174,7 +177,7 @@ export function row(init: {
     status: init.status ?? { case: "ready", value: {} },
     current: { current: init.current ?? false },
     closed: { closed: init.closed ?? false },
-    when: init.when ?? {},
+    when: { shown: init.when },
     detail: init.detail ?? {},
     children: init.children ?? [],
     ...(init.attention === true ? { attention: {} } : {}),
