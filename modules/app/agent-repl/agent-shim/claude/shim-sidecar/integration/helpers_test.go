@@ -802,9 +802,10 @@ func bookLines(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClie
 			t.Fatalf("ReadAgentPage(%s) refused: %s", agent, f.GetDetail())
 		}
 		ok := res.Msg.GetSuccess()
-		for _, line := range ok.GetLines() {
-			out = append(out, &storev1.StoreLineAt{Line: line})
-		}
+		// Landing 3: a page's lines each carry their own store-minted pointer, so
+		// they are appended as they arrive rather than re-wrapped without one —
+		// the pointer is what a caller reconnects and pages from.
+		out = append(out, ok.GetLines()...)
 		more = ok.GetMore()
 		if len(ok.GetLines()) == 0 {
 			break
@@ -987,7 +988,14 @@ type fakeStore struct {
 	// (a test proves the same records are re-sent under the same write_ids) but
 	// it committed NOTHING, so a helper that waits for a cursor to become
 	// durable must never be satisfied by one.
-	acked          []*storev1.WriteBatchRequest
+	acked []*storev1.WriteBatchRequest
+	// bashRows is every StoreAgentBash row the fake made durable, in WRITE
+	// ORDER, which is the order store.v1 WatchBashRun replays them in. Keyed by
+	// the run so a watch costs one lookup.
+	bashRows map[string][]*storev1.StoreAgentBash
+	// bashWaiters are the open WatchBashRun streams, per run, each fed every
+	// subsequent row of that run.
+	bashWaiters    map[string][]chan *storev1.StoreAgentBash
 	cursors        []*storev1.CursorState
 	cursorsFailure string
 	writeFailures  int
@@ -1014,11 +1022,13 @@ func startFakeStore(t *testing.T) *fakeStore {
 func startFakeStoreAt(t *testing.T, socket string) *fakeStore {
 	t.Helper()
 	f := &fakeStore{
-		t:      t,
-		Socket: socket,
-		batchC: make(chan *storev1.WriteBatchRequest, 4096),
-		callC:  make(chan string, 4096),
-		done:   make(chan struct{}),
+		t:           t,
+		Socket:      socket,
+		batchC:      make(chan *storev1.WriteBatchRequest, 4096),
+		callC:       make(chan string, 4096),
+		done:        make(chan struct{}),
+		bashRows:    map[string][]*storev1.StoreAgentBash{},
+		bashWaiters: map[string][]chan *storev1.StoreAgentBash{},
 	}
 	mux := http.NewServeMux()
 	path, handler := storev1connect.NewShimStoreHandler(f)
@@ -1136,10 +1146,97 @@ func (f *fakeStore) WriteBatch(_ context.Context, req *connect.Request[storev1.W
 	}
 	f.mu.Lock()
 	f.acked = append(f.acked, recorded)
+	f.recordBashRows(recorded)
 	f.mu.Unlock()
 	return connect.NewResponse(&storev1.WriteBatchResponse{
 		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
 	}), nil
+}
+
+// recordBashRows keeps every bash row a durable batch carried. Caller holds mu.
+//
+// ONE ROW PER WRITE, NOT ONE PER RUN: the sidecar's key space gives each delta
+// and the terminal its own row precisely so this replay is possible, and a fake
+// that collapsed them would hide exactly the defect the key space fixes.
+func (f *fakeStore) recordBashRows(request *storev1.WriteBatchRequest) {
+	for _, entry := range request.GetBatch().GetEntries() {
+		row := entry.GetAgentUpdate().GetBash()
+		if row == nil {
+			continue
+		}
+		run := row.GetRun().GetValue()
+		f.bashRows[run] = append(f.bashRows[run], row)
+		for _, waiter := range f.bashWaiters[run] {
+			select {
+			case waiter <- row:
+			default:
+			}
+		}
+	}
+}
+
+// WatchBashRun replays one run's stored rows in write order, then follows, and
+// ends after the terminal row is sent — the endpoint's stated contract. A run
+// with no stored row is a refused open, which the store spells as a transport
+// error rather than a failure frame.
+func (f *fakeStore) WatchBashRun(ctx context.Context, req *connect.Request[storev1.WatchBashRunRequest], stream *connect.ServerStream[storev1.WatchBashRunResponse]) error {
+	run := req.Msg.GetRun().GetValue()
+	f.mu.Lock()
+	f.calls = append(f.calls, "WatchBashRun")
+	stored := append([]*storev1.StoreAgentBash(nil), f.bashRows[run]...)
+	var follow chan *storev1.StoreAgentBash
+	if len(stored) > 0 {
+		follow = make(chan *storev1.StoreAgentBash, 256)
+		f.bashWaiters[run] = append(f.bashWaiters[run], follow)
+	}
+	f.mu.Unlock()
+	f.signalCall("WatchBashRun")
+
+	if len(stored) == 0 {
+		return connect.NewError(connect.CodeNotFound, fmt.Errorf("no stored row for run %q", run))
+	}
+	defer f.dropBashWaiter(run, follow)
+
+	for _, row := range stored {
+		if err := stream.Send(&storev1.WatchBashRunResponse{Row: row}); err != nil {
+			return err
+		}
+		if isBashTerminalRow(row) {
+			return nil
+		}
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case row := <-follow:
+			if err := stream.Send(&storev1.WatchBashRunResponse{Row: row}); err != nil {
+				return err
+			}
+			if isBashTerminalRow(row) {
+				return nil
+			}
+		}
+	}
+}
+
+func (f *fakeStore) dropBashWaiter(run string, follow chan *storev1.StoreAgentBash) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	kept := f.bashWaiters[run][:0]
+	for _, w := range f.bashWaiters[run] {
+		if w != follow {
+			kept = append(kept, w)
+		}
+	}
+	f.bashWaiters[run] = kept
+}
+
+// isBashTerminalRow reports whether a row ENDS the run: the two settled arms of
+// AgentBash.result. A start, an update and a progress beat are all mid-run.
+func isBashTerminalRow(row *storev1.StoreAgentBash) bool {
+	frame := row.GetFrame()
+	return frame.GetSuccess() != nil || frame.GetFailure() != nil
 }
 
 func (f *fakeStore) OpenAgentSession(context.Context, *connect.Request[storev1.OpenAgentSessionRequest]) (*connect.Response[storev1.OpenAgentSessionResponse], error) {
@@ -1249,6 +1346,146 @@ func (f *fakeStore) awaitEntry(ctx context.Context, t *testing.T, what string, m
 		case <-tick.C:
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Reading a detached run back through store.v1 WatchBashRun.
+//
+// THIS IS THE RUN'S ONE READ PATH. The sidecar writes a run's rows and the
+// shim's own WatchBash serves them, so a subject that only inspected the
+// envelopes the sidecar sent would never prove the rows are READABLE as a run —
+// which is exactly what the per-row key space exists for. Reading them back is
+// the assertion; the raw envelopes are only how a failure is explained.
+// ---------------------------------------------------------------------------
+
+// watchBashRun replays one run's rows through the store and returns them in the
+// order the store sent them, ending after the terminal row (or when the context
+// is done). A run the store holds no row for is a refused open, reported as
+// ok=false rather than as a failure.
+func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, run string) ([]*conversationv1.AgentBash, bool) {
+	t.Helper()
+	stream, err := c.WatchBashRun(ctx, connect.NewRequest(&storev1.WatchBashRunRequest{
+		Run: &conversationv1.AgentActivityId{Value: run},
+	}))
+	if err != nil {
+		return nil, false
+	}
+	defer stream.Close()
+	var out []*conversationv1.AgentBash
+	for stream.Receive() {
+		row := stream.Msg().GetRow()
+		if got := row.GetRun().GetValue(); got != run {
+			t.Fatalf("WatchBashRun(%s) sent a row for run %q", run, got)
+		}
+		out = append(out, row.GetFrame())
+	}
+	if err := stream.Err(); err != nil && len(out) == 0 {
+		return nil, false
+	}
+	return out, true
+}
+
+// awaitBashRunTerminal follows a run until its terminal row arrives and returns
+// every row of it, in write order. The stream's own delivery is the signal.
+func awaitBashRunTerminal(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, run string) []*conversationv1.AgentBash {
+	t.Helper()
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		rows, ok := watchBashRun(ctx, t, c, run)
+		if ok && len(rows) > 0 && isTerminalFrame(rows[len(rows)-1]) {
+			return rows
+		}
+		select {
+		case <-ctx.Done():
+			rows, _ := watchBashRun(context.Background(), t, c, run)
+			t.Fatalf("run %s never reached a terminal row within the deadline; its rows were %v",
+				run, describeBashRows(rows))
+			return nil
+		case <-tick.C:
+		}
+	}
+}
+
+// isTerminalFrame reports whether a frame ENDS the run — the two settled arms.
+func isTerminalFrame(frame *conversationv1.AgentBash) bool {
+	return frame.GetSuccess() != nil || frame.GetFailure() != nil
+}
+
+// describeBashRows names each row's arm, for a failure message.
+func describeBashRows(rows []*conversationv1.AgentBash) []string {
+	var out []string
+	for _, row := range rows {
+		switch {
+		case row.GetStart() != nil:
+			out = append(out, "start")
+		case row.GetUpdate() != nil:
+			out = append(out, fmt.Sprintf("update@%d", row.GetUpdate().GetFromOffset()))
+		case row.GetProgress() != nil:
+			out = append(out, "progress")
+		case row.GetSuccess() != nil:
+			out = append(out, "success")
+		case row.GetFailure() != nil:
+			out = append(out, "failure")
+		default:
+			out = append(out, "unset")
+		}
+	}
+	return out
+}
+
+// requireBashReplayOrder states the endpoint's ordering contract: the start
+// first if there is one, then the deltas, then the terminal LAST and once.
+func requireBashReplayOrder(t *testing.T, run string, rows []*conversationv1.AgentBash) {
+	t.Helper()
+	if len(rows) == 0 {
+		t.Fatalf("run %s replayed no rows at all", run)
+	}
+	var terminals, updatesAfterTerminal int
+	seenTerminal := false
+	for _, row := range rows {
+		if row.GetStart() != nil && seenTerminal {
+			t.Errorf("run %s replayed a start AFTER its terminal: %v", run, describeBashRows(rows))
+		}
+		if row.GetUpdate() != nil && seenTerminal {
+			updatesAfterTerminal++
+		}
+		if isTerminalFrame(row) {
+			terminals++
+			seenTerminal = true
+		}
+	}
+	if terminals != 1 {
+		t.Errorf("run %s replayed %d terminal rows, want exactly 1: %v", run, terminals, describeBashRows(rows))
+	}
+	if updatesAfterTerminal != 0 {
+		t.Errorf("run %s replayed %d delta rows after its terminal: %v", run, updatesAfterTerminal, describeBashRows(rows))
+	}
+	if !isTerminalFrame(rows[len(rows)-1]) {
+		t.Errorf("run %s did not end on its terminal row: %v", run, describeBashRows(rows))
+	}
+}
+
+// requireContiguousDeltas states the from_offset contract across a replay:
+// every delta's from_offset equals the bytes the consumer has accumulated, so a
+// consumer concatenating them can never draw output that never existed.
+func requireContiguousDeltas(t *testing.T, run string, rows []*conversationv1.AgentBash) string {
+	t.Helper()
+	var accumulated uint64
+	var joined strings.Builder
+	for i, row := range rows {
+		update := row.GetUpdate()
+		if update == nil {
+			continue
+		}
+		if update.GetFromOffset() != accumulated {
+			t.Fatalf("run %s row %d states from_offset %d, wanted %d — from_offset is a gap detector and must equal the bytes already accumulated (%v)",
+				run, i, update.GetFromOffset(), accumulated, describeBashRows(rows))
+		}
+		joined.WriteString(update.GetNewOutput())
+		accumulated += uint64(len(update.GetNewOutput()))
+	}
+	return joined.String()
 }
 
 // ---------------------------------------------------------------------------
