@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -240,6 +241,67 @@ func TestOpenCreatesTheSchemaOnAFreshDatabase(t *testing.T) {
 	}
 	if got := scalar[int](t, d, `SELECT version FROM schema_meta`); got != SchemaVersion {
 		t.Fatalf("schema version = %d, want %d", got, SchemaVersion)
+	}
+}
+
+func TestOpenCreatesTheDirectoryItsDatabaseLivesIn(t *testing.T) {
+	// Arrange: a path whose parent does not exist. Nothing upstream may create
+	// it, because that would move an unwritable --db ahead of the pprof surface.
+	_, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store", "events.db")
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("stat %q = %v, want the database created under a directory Open made", path, statErr)
+	}
+}
+
+func TestOpenRefusesADatabaseDirectoryItCannotCreate(t *testing.T) {
+	// Arrange: a FILE where the database's parent directory must be.
+	s, log := newSink(t)
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("a file, not a directory"), 0o600); err != nil {
+		t.Fatalf("staging the blocker: %v", err)
+	}
+
+	// Act
+	d, err := OpenWithOptions(filepath.Join(blocker, "events.db"), log, Options{})
+
+	// Assert
+	if err == nil {
+		d.Close() //nolint:errcheck // the open should not have succeeded
+		t.Fatal("OpenWithOptions = nil, want the unwritable database directory refused")
+	}
+	if !errors.Is(err, ErrStorage) {
+		t.Fatalf("error = %v, want an ErrStorage", err)
+	}
+	s.assertLogged(t, "error", "creating the database directory failed")
+}
+
+func TestOpenRecordsAFirstCreateWithoutWarning(t *testing.T) {
+	// Arrange: an empty database, which is what every fresh store starts from.
+	s, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store.db")
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert: creating a schema where there was none is not a degraded state.
+	for _, record := range s.records(t) {
+		if record["level"] == "warn" {
+			t.Fatalf("a first create logged a warning: %v", record)
+		}
 	}
 }
 

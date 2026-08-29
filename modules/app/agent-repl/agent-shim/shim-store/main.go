@@ -42,6 +42,17 @@ import (
 // what remains is in-flight unary work.
 const shutdownGrace = 5 * time.Second
 
+// pprofBootFailureGrace bounds how long a FAILED boot holds an ENABLED
+// profiling surface open.
+//
+// A surface that dies with the failure it was opened to explain never served
+// its purpose: the boot order puts it ahead of the database precisely so a boot
+// that cannot get past the database is diagnosable, and a store that exits in
+// the same millisecond is not. So a failed boot keeps the surface serving until
+// it has answered a request, or until this grace expires — never longer, and
+// never at all unless an operator asked for the surface by name.
+const pprofBootFailureGrace = 5 * time.Second
+
 func main() {
 	base := defaultCacheDir()
 	socketPath := flag.String("socket", socketDefault(base), "UDS path to serve store.v1.ShimStore on; defaults to $"+server.EnvSocket+" when set")
@@ -92,7 +103,7 @@ func run(socketPath, dbPath, logPath, pprofAddr string, watchBuffer int) (err er
 
 // runWithLogger owns errors that reach the process orchestration after logging
 // is available. db.Open and server.Listen retain their lower-layer ownership.
-func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *logging.Logger) error {
+func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *logging.Logger) (err error) {
 	// OPENED BEFORE THE DATABASE, so a store wedged recreating its schema or
 	// on a cold-cache first read of a large database is still profilable.
 	pprofSurface, err := openPprofSurface(pprofAddr, log)
@@ -102,6 +113,13 @@ func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *l
 	defer func() {
 		if closeErr := pprofSurface.Close(); closeErr != nil {
 			log.Log(logging.Fields{Operation: "store.pprof.close", Level: "error"}, "closing pprof surface failed: %v", closeErr)
+		}
+	}()
+	// Registered AFTER the close above, so it runs BEFORE it: the surface is
+	// still listening while a failed boot is held open to be profiled.
+	defer func() {
+		if err != nil {
+			holdPprofForDiagnosis(pprofSurface, log)
 		}
 	}()
 
@@ -176,6 +194,31 @@ func openPprofSurface(addr string, log *logging.Logger) (*pprofsurface.Surface, 
 	return surface, nil
 }
 
+// holdPprofForDiagnosis keeps an enabled profiling surface serving after the
+// boot failed, until it has answered a request or the grace expires.
+//
+// IT IS A NO-OP WHEN THE SURFACE IS OFF, which is the shipped state: an
+// ordinary failed boot still exits at once. Only an operator who asked for
+// profiles by name pays this wait, and it is what makes the surface's
+// before-the-database boot order mean anything.
+func holdPprofForDiagnosis(surface *pprofsurface.Surface, log *logging.Logger) {
+	if surface == nil {
+		log.LogVerbose(logging.Fields{Operation: "store.pprof.hold", Level: "debug"},
+			"the boot failed with no profiling surface to hold open")
+		return
+	}
+	log.Log(logging.Fields{Operation: "store.pprof.hold", Level: "warn", Socket: surface.Address()},
+		"the boot failed; holding the profiling surface open so it can be profiled url=%s grace_ms=%d", surface.URL(), pprofBootFailureGrace.Milliseconds())
+	select {
+	case <-surface.Served():
+		log.Log(logging.Fields{Operation: "store.pprof.hold", Level: "warn", Socket: surface.Address()},
+			"the failed boot was profiled; exiting")
+	case <-time.After(pprofBootFailureGrace):
+		log.Log(logging.Fields{Operation: "store.pprof.hold", Level: "warn", Socket: surface.Address()},
+			"nobody profiled the failed boot within the grace; exiting grace_ms=%d", pprofBootFailureGrace.Milliseconds())
+	}
+}
+
 // socketDefault is the --socket flag's default: $AGENT_REPL_STORE_SOCKET when
 // it is set, else the cache-dir path.
 //
@@ -219,11 +262,16 @@ func logProcessExit(log *logging.Logger, err *error) {
 
 // openLogger creates shim-store's only persistent diagnostic sink. Directory
 // and file-open failures occur before that sink exists and are bootstrap-only.
+//
+// IT CREATES ONLY ITS OWN DIRECTORY. Pre-creating the database's and the
+// socket's directories here would move their failures ahead of the profiling
+// surface, which is the one thing the boot order exists to prevent: an
+// unopenable --db has to fail at db.Open, with pprof already serving. Each of
+// those paths is created by the layer that owns it (db.OpenWithOptions,
+// server.Listen).
 func openLogger(socketPath, dbPath, logPath string) (*logging.Logger, func(), error) {
-	for _, p := range []string{socketPath, dbPath, logPath} {
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			return nil, nil, bootstrapError{fmt.Errorf("creating dir for %q: %w", p, err)}
-		}
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return nil, nil, bootstrapError{fmt.Errorf("creating dir for %q: %w", logPath, err)}
 	}
 	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
