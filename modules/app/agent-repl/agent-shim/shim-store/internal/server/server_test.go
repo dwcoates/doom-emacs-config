@@ -113,6 +113,14 @@ type fakeStore struct {
 	// sinceRelease, when non-nil, blocks LinesSince until the test closes it.
 	sinceRelease chan struct{}
 
+	bashRun    BashRunReplay
+	bashRunErr error
+	// bashRunEntered is closed the first time BashRun is called, which is the
+	// signal that the handler has already subscribed to the bash fan-out.
+	bashRunEntered chan struct{}
+	// bashRunRelease, when non-nil, blocks BashRun until the test closes it.
+	bashRunRelease chan struct{}
+
 	live    *storev1.GetLiveWorkSuccess
 	liveErr error
 
@@ -129,7 +137,8 @@ func newFakeStore() *fakeStore {
 		opened:       OpenedPage{Page: &storev1.AgentSessionPage{Boundary: &storev1.AgentSessionPage_Floor{Floor: &storev1.ReadAgentPageFloor{}}}},
 		page:         &storev1.ReadAgentPageSuccess{Boundary: &storev1.ReadAgentPageSuccess_Floor{Floor: &storev1.ReadAgentPageFloor{}}},
 		live:         &storev1.GetLiveWorkSuccess{},
-		sinceEntered: make(chan struct{}),
+		sinceEntered:   make(chan struct{}),
+		bashRunEntered: make(chan struct{}),
 	}
 }
 
@@ -162,6 +171,21 @@ func (f *fakeStore) LinesSince(context.Context, string, uint64) ([]LineWritten, 
 		<-release
 	}
 	return f.since, f.sinceErr
+}
+
+func (f *fakeStore) BashRun(context.Context, string) (BashRunReplay, error) {
+	f.mu.Lock()
+	select {
+	case <-f.bashRunEntered:
+	default:
+		close(f.bashRunEntered)
+	}
+	release := f.bashRunRelease
+	f.mu.Unlock()
+	if release != nil {
+		<-release
+	}
+	return f.bashRun, f.bashRunErr
 }
 
 func (f *fakeStore) LiveWork(context.Context) (*storev1.GetLiveWorkSuccess, error) {
@@ -835,7 +859,10 @@ func TestReadAgentPageServesAPage(t *testing.T) {
 	// Arrange.
 	store := newFakeStore()
 	store.page = &storev1.ReadAgentPageSuccess{
-		Lines:    []*storev1.StorePageLine{{PageAgentId: agentID("a1")}},
+		Lines: []*storev1.StoreLineAt{{
+			At:   &storev1.StoreItemPointer{Value: "sip1-8"},
+			Line: &storev1.StorePageLine{PageAgentId: agentID("a1")},
+		}},
 		Boundary: &storev1.ReadAgentPageSuccess_Floor{Floor: &storev1.ReadAgentPageFloor{}},
 	}
 	h := newHarness(t, store, 0)
@@ -849,8 +876,14 @@ func TestReadAgentPageServesAPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadAgentPage = %v, want nil", err)
 	}
-	if success := res.Msg.GetSuccess(); success == nil || len(success.GetLines()) != 1 {
+	success := res.Msg.GetSuccess()
+	if success == nil || len(success.GetLines()) != 1 {
 		t.Fatalf("result = %v, want one line", res.Msg.GetResult())
+	}
+	// A CONTINUATION LINE CARRIES ITS OWN POINTER, so a reader never mints a
+	// placeholder mark for a page it walked to.
+	if got := success.GetLines()[0].GetAt().GetValue(); got != "sip1-8" {
+		t.Fatalf("line pointer = %q, want the position the store served", got)
 	}
 }
 

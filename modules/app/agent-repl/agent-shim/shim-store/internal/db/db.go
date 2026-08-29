@@ -41,7 +41,7 @@ import (
 // and there never will be: the store is nuked, never migrated, so the version
 // answers exactly one question — "did this binary create what is on disk?" —
 // and the only remedy for "no" is to recreate it.
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // nowMillis is the store's wall clock in unix millis.
 func nowMillis() int64 { return time.Now().UnixMilli() }
@@ -180,6 +180,7 @@ CREATE TABLE entry (
   plane                INTEGER NOT NULL,
   kind                 TEXT    NOT NULL,
   book_agent_id        TEXT,
+  run_id               TEXT,
   top_level            TEXT,
   frame                BLOB    NOT NULL,
   first_inserted_at_ms INTEGER NOT NULL,
@@ -188,6 +189,8 @@ CREATE TABLE entry (
 CREATE INDEX entry_book_position  ON entry(book_agent_id, position);
 CREATE INDEX entry_book_write_seq ON entry(book_agent_id, write_seq);
 CREATE INDEX entry_write_seq      ON entry(write_seq);
+CREATE INDEX entry_run_position  ON entry(run_id, position);
+CREATE INDEX entry_run_write_seq ON entry(run_id, write_seq);
 
 CREATE TABLE agent (
   agent_id              TEXT PRIMARY KEY,

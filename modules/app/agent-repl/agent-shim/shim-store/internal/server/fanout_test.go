@@ -6,7 +6,7 @@ func TestNewFanoutFallsBackToTheDefaultBuffer(t *testing.T) {
 	// Arrange.
 
 	// Act.
-	f := newFanout(0)
+	f := newFanout(0, lineKey)
 
 	// Assert.
 	if f.buffer != DefaultWatchBuffer {
@@ -16,7 +16,7 @@ func TestNewFanoutFallsBackToTheDefaultBuffer(t *testing.T) {
 
 func TestPublishDeliversToTheSubscribedBook(t *testing.T) {
 	// Arrange.
-	f := newFanout(4)
+	f := newFanout(4, lineKey)
 	sub := f.subscribe("a1", "hash")
 
 	// Act.
@@ -26,7 +26,7 @@ func TestPublishDeliversToTheSubscribedBook(t *testing.T) {
 	if len(overflowed) != 0 {
 		t.Fatalf("overflowed = %d, want 0", len(overflowed))
 	}
-	got := <-sub.lines
+	got := <-sub.items
 	if got.Line.GetAt().GetValue() != "p1" {
 		t.Fatalf("delivered %q, want %q", got.Line.GetAt().GetValue(), "p1")
 	}
@@ -34,26 +34,26 @@ func TestPublishDeliversToTheSubscribedBook(t *testing.T) {
 
 func TestPublishSkipsAnotherBooksLines(t *testing.T) {
 	// Arrange. Fan-out is an exact match on the line's book.
-	f := newFanout(4)
+	f := newFanout(4, lineKey)
 	sub := f.subscribe("a1", "hash")
 
 	// Act.
 	f.publish([]LineWritten{line("other", "px", 1), line("a1", "p2", 2)})
 
 	// Assert.
-	got := <-sub.lines
+	got := <-sub.items
 	if got.Line.GetAt().GetValue() != "p2" {
 		t.Fatalf("delivered %q, want only this book's %q", got.Line.GetAt().GetValue(), "p2")
 	}
-	if len(sub.lines) != 0 {
-		t.Fatalf("buffered %d more lines, want none", len(sub.lines))
+	if len(sub.items) != 0 {
+		t.Fatalf("buffered %d more lines, want none", len(sub.items))
 	}
 }
 
 func TestPublishDropsAnOverflowedSubscriberFromTheRegistry(t *testing.T) {
 	// Arrange. A watcher that fell behind recovers by re-opening, never by
 	// being silently thinned.
-	f := newFanout(1)
+	f := newFanout(1, lineKey)
 	f.subscribe("a1", "hash")
 
 	// Act.
@@ -70,7 +70,7 @@ func TestPublishDropsAnOverflowedSubscriberFromTheRegistry(t *testing.T) {
 
 func TestPublishSignalsAnOverflowedSubscriber(t *testing.T) {
 	// Arrange.
-	f := newFanout(1)
+	f := newFanout(1, lineKey)
 	sub := f.subscribe("a1", "hash")
 
 	// Act.
@@ -82,7 +82,7 @@ func TestPublishSignalsAnOverflowedSubscriber(t *testing.T) {
 
 func TestPublishCountsTheLinesLostToAnOverflow(t *testing.T) {
 	// Arrange. The warning must say how much was dropped.
-	f := newFanout(1)
+	f := newFanout(1, lineKey)
 	sub := f.subscribe("a1", "hash")
 
 	// Act.
@@ -97,21 +97,21 @@ func TestPublishCountsTheLinesLostToAnOverflow(t *testing.T) {
 
 func TestPublishOfNoLinesTouchesNoSubscriber(t *testing.T) {
 	// Arrange. A batch of unserveable rows produces no page lines.
-	f := newFanout(1)
+	f := newFanout(1, lineKey)
 	sub := f.subscribe("a1", "hash")
 
 	// Act.
 	overflowed := f.publish(nil)
 
 	// Assert.
-	if len(overflowed) != 0 || len(sub.lines) != 0 {
-		t.Fatalf("overflowed = %d, buffered = %d, want 0 and 0", len(overflowed), len(sub.lines))
+	if len(overflowed) != 0 || len(sub.items) != 0 {
+		t.Fatalf("overflowed = %d, buffered = %d, want 0 and 0", len(overflowed), len(sub.items))
 	}
 }
 
 func TestUnsubscribeIsIdempotent(t *testing.T) {
 	// Arrange. The watch loop's defer runs even after an overflow removed it.
-	f := newFanout(4)
+	f := newFanout(4, lineKey)
 	sub := f.subscribe("a1", "hash")
 
 	// Act.
