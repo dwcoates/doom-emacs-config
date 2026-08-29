@@ -105,9 +105,10 @@ TS for shim/v1, store/v1, conversation/v1). Tests move with their modules.
   lock (keyed by cwd) → bind the UDS → serve. The SESSION lock is taken inside
   StartSession (fresh: keyed by the pre-minted vendor session id; resume:
   keyed by the resume id), before the SDK is touched, and held for the
-  process lifetime. Lock files stay at `~/.cache/agent-repl/run/`
-  (`workspace-<md5-8>.lock`, `session-<vendor-session-id>.lock`), the
-  existing convention the daemon probes.
+  process lifetime. Lock files live in `$AGENT_REPL_LOCK_DIR` (default
+  `~/.cache/agent-repl/run/`; the override exists so tests run private
+  locks) as `workspace-<md5-8>.lock` and `session-<vendor-session-id>.lock`,
+  the convention the daemon probes.
 - SIGTERM = graceful stand-down (same path as KillSession{force:true} then
   wait for all store acks, then exit 0); SIGINT refused and logged at ERROR.
 - Log-fd survival: EPIPE/EBADF on fd 3 is surfaced once (a SessionFault +
@@ -204,7 +205,11 @@ TS for shim/v1, store/v1, conversation/v1). Tests move with their modules.
 - Turn terminals come from `result` only; hook activity never synthesizes
   one. The 16 failure arms map from the result subtypes + error strings.
 - Anything unconvertible lands in `residue.ts` (vendor_specific | unknown |
-  unparsed) as an unserved store row — never dropped, never a crash.
+  unparsed) as an unserved store row — never dropped, never a crash. The
+  `vendor_specific.kind` spelling is shared with the sidecar: an attachment
+  record is `attachment/<type>` (e.g. `attachment/deferred_tools_delta`,
+  `attachment/agent_listing_delta`); a system record is `system/<subtype>`;
+  any other transcript/stream record kind is `<type>` verbatim.
 - Every converter logs its branch through `log.ts`.
 
 ## Streams the engine serves
@@ -313,3 +318,11 @@ every UX or contract gap you surfaced instead of improvising.
   daemon probes the workspace lock only.
 - VERSIONS: `@connectrpc/*` and `@bufbuild/protobuf` are pinned to exact
   versions in package.json.
+- LOCK DIR OVERRIDE: env `AGENT_REPL_LOCK_DIR` overrides the lock directory
+  (default `~/.cache/agent-repl/run/`); the real shim honors it.
+- FANOUT REGROUPED under the session-wide subagent cap (at most three
+  implementation agents running at once): wave 1 is four briefs — ENGINE
+  (engine/*), RECORD PLANE (convert/* + store/*), MOCK VENDOR (fake/* +
+  AGENTS.md table + shim.md mock section), INTEGRATION SUITE
+  (test/integration) — the first three first, the suite in the first freed
+  slot, auditors after.
