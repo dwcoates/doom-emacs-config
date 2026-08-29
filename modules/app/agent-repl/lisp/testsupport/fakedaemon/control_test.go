@@ -11,60 +11,49 @@ import (
 	"connectrpc.com/connect"
 )
 
-// streamResult carries a client stream open that completes only once the
-// server has flushed response headers.  Connect over HTTP/1.1 does not flush
-// them until the handler's first Send (or its end frame), so a stream that
-// has been pushed nothing keeps the OPEN outstanding — which these tests use
-// as the observable for "nothing was delivered".
-type streamResult[T any] struct {
-	stream *connect.ServerStreamForClient[T]
-	err    error
-}
+// Streams are ACCEPTED on response headers, which the daemon flushes the
+// moment the subscription is registered, so an open returns immediately even
+// when nothing has been pushed.  These helpers therefore open synchronously
+// and then wait on the SERVER-side registration before pushing, so a push can
+// never race a subscribe.
+//
+// Callers do NOT Close() a stream: Close drains the response body, and a
+// STANDING stream never finishes producing one.  Cancelling the request
+// context is the graceful close on this contract (elisp.md, "Stream
+// lifecycle").
 
-func openAsync[T any](open func(context.Context) (*connect.ServerStreamForClient[T], error)) (<-chan streamResult[T], context.CancelFunc) {
-	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan streamResult[T], 1)
-	go func() {
-		stream, err := open(ctx)
-		out <- streamResult[T]{stream: stream, err: err}
-	}()
-	return out, cancel
-}
-
-func openHostAsync(client agentreplv1connectClient, id string) (<-chan streamResult[agentreplv1.WatchHostWorkspaceResponse], context.CancelFunc) {
-	return openAsync(func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse], error) {
-		return client.WatchHostWorkspace(ctx,
-			connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-				Workspace: &workspacev1.WorkspaceRef{Id: id, Dir: "/tmp/" + id}}))
-	})
-}
-
-func openDaemonAsync(client agentreplv1connectClient) (<-chan streamResult[agentreplv1.WatchDaemonResponse], context.CancelFunc) {
-	return openAsync(func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], error) {
-		return client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
-	})
-}
-
-// awaitOpen returns the opened stream.  Callers do NOT Close() it: Close
-// drains the response body, and a STANDING stream never finishes producing
-// one — cancelling the request context is the graceful close on this
-// contract (elisp.md, "Stream lifecycle").
-func awaitOpen[T any](t *testing.T, ch <-chan streamResult[T]) *connect.ServerStreamForClient[T] {
+func openHost(t *testing.T, server *fakeServer, client agentreplv1connectClient, id string) (*connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse], context.CancelFunc) {
 	t.Helper()
-	res := <-ch
-	if res.err != nil {
-		t.Fatalf("stream open failed: %v", res.err)
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := client.WatchHostWorkspace(ctx,
+		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+			Workspace: &workspacev1.WorkspaceRef{Id: id, Dir: "/tmp/" + id}}))
+	if err != nil {
+		cancel()
+		t.Fatalf("WatchHostWorkspace(%s): %v", id, err)
 	}
-	return res.stream
+	server.awaitSubscribers(streamHost, id, 1)
+	return stream, cancel
+}
+
+func openDaemon(t *testing.T, server *fakeServer, client agentreplv1connectClient) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], context.CancelFunc) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+	if err != nil {
+		cancel()
+		t.Fatalf("WatchDaemon: %v", err)
+	}
+	server.awaitSubscribers(streamDaemon, "", 1)
+	return stream, cancel
 }
 
 func TestPushReachesTheKeyedWorkspaceStream(t *testing.T) {
 	// Arrange.
 	server, baseURL := newTestServer(t)
 	client := newTestClient(t, baseURL)
-	opened, cancel := openHostAsync(client, "ws-a")
+	stream, cancel := openHost(t, server, client, "ws-a")
 	defer cancel()
-	server.awaitSubscribers(streamHost, "ws-a", 1)
 
 	// Act.
 	status, body := controlPost(t, baseURL, "/_fake/push",
@@ -75,7 +64,6 @@ func TestPushReachesTheKeyedWorkspaceStream(t *testing.T) {
 
 	// Assert: WatchHostWorkspace is ONE subscription per open workspace, so a
 	// push keyed by that workspace lands on it.
-	stream := awaitOpen(t, opened)
 	if !stream.Receive() {
 		t.Fatalf("stream ended without a push: %v", stream.Err())
 	}
@@ -88,29 +76,36 @@ func TestPushDoesNotReachAnotherWorkspacesStream(t *testing.T) {
 	// Arrange: two open workspaces, each with its own subscription.
 	server, baseURL := newTestServer(t)
 	client := newTestClient(t, baseURL)
-	openedA, cancelA := openHostAsync(client, "ws-a")
+	streamA, cancelA := openHost(t, server, client, "ws-a")
 	defer cancelA()
-	openedB, cancelB := openHostAsync(client, "ws-b")
+	streamB, cancelB := openHost(t, server, client, "ws-b")
 	defer cancelB()
-	server.awaitSubscribers(streamHost, "ws-a", 1)
-	server.awaitSubscribers(streamHost, "ws-b", 1)
 
 	// Act.
 	if status, body := controlPost(t, baseURL, "/_fake/push",
 		`{"stream":"host","workspace_id":"ws-a","message":{"reloadWebapp":{}}}`); status != http.StatusOK {
 		t.Fatalf("/_fake/push = %d %s", status, body)
 	}
-
-	// Assert: ws-a's open completes (headers flushed by the delivery) while
-	// ws-b's is still outstanding — nothing was routed to the other workspace.
-	streamA := awaitOpen(t, openedA)
 	if !streamA.Receive() {
-		t.Fatalf("ws-a stream ended without a push: %v", streamA.Err())
+		t.Fatalf("ws-a stream ended without the push: %v", streamA.Err())
 	}
-	select {
-	case res := <-openedB:
-		t.Fatalf("ws-b stream received something: %+v", res)
-	default:
+
+	// Assert: ws-b is ended cleanly and drained; a workspace-keyed push must
+	// have put NOTHING on another workspace's stream.  Ending it is what makes
+	// "nothing arrived" observable without waiting on a clock.
+	if status, body := controlPost(t, baseURL, "/_fake/end",
+		`{"stream":"host","workspace_id":"ws-b"}`); status != http.StatusOK {
+		t.Fatalf("/_fake/end = %d %s", status, body)
+	}
+	received := 0
+	for streamB.Receive() {
+		received++
+	}
+	if streamB.Err() != nil {
+		t.Fatalf("ws-b stream ended with %v, want a clean end", streamB.Err())
+	}
+	if received != 0 {
+		t.Fatalf("ws-b received %d messages, want none", received)
 	}
 }
 
@@ -124,13 +119,11 @@ func TestSnapshotIsReplayedToALaterSubscriber(t *testing.T) {
 	}
 
 	// Act.
-	opened, cancel := openDaemonAsync(client)
+	stream, cancel := openDaemon(t, server, client)
 	defer cancel()
-	server.awaitSubscribers(streamDaemon, "", 1)
 
 	// Assert: streams are "now", never "since" — a late subscriber gets the
 	// standing state as its first push.
-	stream := awaitOpen(t, opened)
 	if !stream.Receive() {
 		t.Fatalf("stream ended without the snapshot: %v", stream.Err())
 	}
@@ -200,9 +193,8 @@ func TestEndWithErrorDeliversTheConnectError(t *testing.T) {
 	// Arrange.
 	server, baseURL := newTestServer(t)
 	client := newTestClient(t, baseURL)
-	opened, cancel := openDaemonAsync(client)
+	stream, cancel := openDaemon(t, server, client)
 	defer cancel()
-	server.awaitSubscribers(streamDaemon, "", 1)
 
 	// Act.
 	if status, body := controlPost(t, baseURL, "/_fake/end",
@@ -212,7 +204,6 @@ func TestEndWithErrorDeliversTheConnectError(t *testing.T) {
 
 	// Assert: an end frame carrying an error is a stream FAILURE the client
 	// must surface, not a graceful close.
-	stream := awaitOpen(t, opened)
 	for stream.Receive() {
 	}
 	if connect.CodeOf(stream.Err()) != connect.CodeUnavailable {
@@ -224,9 +215,8 @@ func TestCleanEndDeliversNoError(t *testing.T) {
 	// Arrange.
 	server, baseURL := newTestServer(t)
 	client := newTestClient(t, baseURL)
-	opened, cancel := openDaemonAsync(client)
+	stream, cancel := openDaemon(t, server, client)
 	defer cancel()
-	server.awaitSubscribers(streamDaemon, "", 1)
 
 	// Act.
 	if status, body := controlPost(t, baseURL, "/_fake/end", `{"stream":"daemon"}`); status != http.StatusOK {
@@ -235,7 +225,6 @@ func TestCleanEndDeliversNoError(t *testing.T) {
 
 	// Assert: the end frame arrives cleanly.  (A STANDING stream's consumer
 	// treats that as a failure of its own — that policy is the client's.)
-	stream := awaitOpen(t, opened)
 	for stream.Receive() {
 	}
 	if stream.Err() != nil {
@@ -247,9 +236,8 @@ func TestAbortEndsTheStreamWithoutAnEndFrame(t *testing.T) {
 	// Arrange.
 	server, baseURL := newTestServer(t)
 	client := newTestClient(t, baseURL)
-	opened, cancel := openDaemonAsync(client)
+	stream, cancel := openDaemon(t, server, client)
 	defer cancel()
-	server.awaitSubscribers(streamDaemon, "", 1)
 
 	// Act.
 	if status, body := controlPost(t, baseURL, "/_fake/end",
@@ -259,11 +247,6 @@ func TestAbortEndsTheStreamWithoutAnEndFrame(t *testing.T) {
 
 	// Assert: a producer-side end WITHOUT a terminal frame is a transport
 	// failure, and must not read as a clean close.
-	res := <-opened
-	if res.err != nil {
-		return
-	}
-	stream := res.stream
 	for stream.Receive() {
 	}
 	if stream.Err() == nil {
@@ -303,9 +286,8 @@ func TestSubscribersListsOpenStreams(t *testing.T) {
 	// Arrange.
 	server, baseURL := newTestServer(t)
 	client := newTestClient(t, baseURL)
-	_, cancel := openHostAsync(client, "ws-a")
+	_, cancel := openHost(t, server, client, "ws-a")
 	defer cancel()
-	server.awaitSubscribers(streamHost, "ws-a", 1)
 
 	// Act.
 	status, body := controlGet(t, baseURL, "/_fake/subscribers")

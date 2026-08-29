@@ -24,7 +24,7 @@ func newHandler(s *fakeServer, exit func()) http.Handler {
 	path, handler := agentreplv1connect.NewAgentReplHandler(s, strictJSONOptions()...)
 	mux.Handle(path, handler)
 	s.registerControlPlane(mux, exit)
-	return h2c.NewHandler(mux, &http2.Server{})
+	return h2c.NewHandler(withAcceptWriter(mux), &http2.Server{})
 }
 
 func run() error {

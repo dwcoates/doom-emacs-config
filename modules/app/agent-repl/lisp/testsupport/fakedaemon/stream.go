@@ -31,6 +31,22 @@ func serveStream[Res any](ctx context.Context, s *fakeServer, name, workspaceID 
 	sub := s.addSubscriber(name, workspaceID, connFrom(ctx))
 	defer s.removeSubscriber(sub)
 
+	// The subscription is registered, so the stream is ACCEPTED: flush the
+	// headers now rather than on the first frame.  A standing stream may have
+	// nothing to say for a long time, and the client must not read that
+	// silence as a stream that was never accepted.
+	if writer := acceptWriterFrom(ctx); writer != nil {
+		writer.accept(streamContentTypeFrom(ctx))
+		logInfo("fakedaemon.stream.accepted", "flushed response headers on acceptance",
+			map[string]any{"id": sub.id, "stream": name, "workspace_id": workspaceID})
+	} else {
+		// Nothing can accept the stream, so a client would hang waiting for
+		// headers; that is a wiring defect, not a quiet stream.
+		logError("fakedaemon.stream.accept-unavailable",
+			"no accept writer on the request context; headers cannot be flushed on acceptance",
+			map[string]any{"id": sub.id, "stream": name})
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -77,6 +93,19 @@ func serveStream[Res any](ctx context.Context, s *fakeServer, name, workspaceID 
 			return nil
 		}
 	}
+}
+
+type streamContentTypeKey struct{}
+
+// withStreamContentType records the request's content type so an accepted
+// stream answers in the same codec the client asked for.
+func withStreamContentType(ctx context.Context, contentType string) context.Context {
+	return context.WithValue(ctx, streamContentTypeKey{}, contentType)
+}
+
+func streamContentTypeFrom(ctx context.Context) string {
+	contentType, _ := ctx.Value(streamContentTypeKey{}).(string)
+	return contentType
 }
 
 // connContext is the http.Server hook that captures each accepted connection.
