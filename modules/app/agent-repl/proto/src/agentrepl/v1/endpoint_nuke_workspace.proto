@@ -39,6 +39,8 @@ message NukeWorkspaceError {
     NukeWorkspaceTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     NukeWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // A git operation failed mid-delete.
+    NukeWorkspaceGitFailed git_failed = 5;
   }
 }
 message NukeWorkspaceUnknownWorkspace {}
@@ -51,3 +53,7 @@ message NukeWorkspaceTransferringAway {
   string address = 1;
 }
 message NukeWorkspaceNotYetAdopted {}
+message NukeWorkspaceGitFailed {
+  // Git's own account of the failure.
+  string detail = 1;
+}

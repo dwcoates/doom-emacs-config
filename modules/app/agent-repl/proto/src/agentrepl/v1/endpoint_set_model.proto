@@ -41,6 +41,12 @@ message SetModelError {
     SetModelTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     SetModelNotYetAdopted not_yet_adopted = 4;
+    // The workspace has no session to set a model on.
+    SetModelNoSession no_session = 5;
+    // The model is not in the served catalog.
+    SetModelNotInCatalog not_in_catalog = 6;
+    // The vendor refused the change.
+    SetModelVendorRefused vendor_refused = 7;
   }
 }
 message SetModelUnknownWorkspace {}
@@ -53,3 +59,9 @@ message SetModelTransferringAway {
   string address = 1;
 }
 message SetModelNotYetAdopted {}
+message SetModelNoSession {}
+message SetModelNotInCatalog {}
+message SetModelVendorRefused {
+  // The vendor's own account of the refusal.
+  string detail = 1;
+}

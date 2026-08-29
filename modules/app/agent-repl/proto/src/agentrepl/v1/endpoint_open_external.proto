@@ -42,6 +42,12 @@ message OpenExternalError {
     OpenExternalTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     OpenExternalNotYetAdopted not_yet_adopted = 4;
+    // The url does not parse.
+    OpenExternalInvalidUrl invalid_url = 5;
+    // No browser is configured to open it with.
+    OpenExternalNoBrowserConfigured no_browser_configured = 6;
+    // Launching the browser failed.
+    OpenExternalLaunchFailed launch_failed = 7;
   }
 }
 message OpenExternalUnknownWorkspace {}
@@ -54,3 +60,9 @@ message OpenExternalTransferringAway {
   string address = 1;
 }
 message OpenExternalNotYetAdopted {}
+message OpenExternalInvalidUrl {}
+message OpenExternalNoBrowserConfigured {}
+message OpenExternalLaunchFailed {
+  // The launch's own account of the failure.
+  string detail = 1;
+}

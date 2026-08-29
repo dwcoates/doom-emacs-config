@@ -43,6 +43,8 @@ message AssignWorkspaceTaskError {
     AssignWorkspaceTaskTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     AssignWorkspaceTaskNotYetAdopted not_yet_adopted = 4;
+    // No task by that id.
+    AssignWorkspaceTaskUnknownTask unknown_task = 5;
   }
 }
 message AssignWorkspaceTaskUnknownWorkspace {}
@@ -55,3 +57,4 @@ message AssignWorkspaceTaskTransferringAway {
   string address = 1;
 }
 message AssignWorkspaceTaskNotYetAdopted {}
+message AssignWorkspaceTaskUnknownTask {}

@@ -58,6 +58,12 @@ message GetFeedPageError {
     GetFeedPageTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     GetFeedPageNotYetAdopted not_yet_adopted = 4;
+    // A next page was asked for with no walk standing.
+    GetFeedPageNoWalkStanding no_walk_standing = 5;
+    // The FeedId does not decode.
+    GetFeedPageFeedUndecodable feed_undecodable = 6;
+    // The FeedId decodes to another workspace.
+    GetFeedPageFeedNotInWorkspace feed_not_in_workspace = 7;
   }
 }
 message GetFeedPageUnknownWorkspace {}
@@ -70,3 +76,6 @@ message GetFeedPageTransferringAway {
   string address = 1;
 }
 message GetFeedPageNotYetAdopted {}
+message GetFeedPageNoWalkStanding {}
+message GetFeedPageFeedUndecodable {}
+message GetFeedPageFeedNotInWorkspace {}

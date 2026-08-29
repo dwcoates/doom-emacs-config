@@ -36,6 +36,14 @@ message MergeWorkspaceError {
     MergeWorkspaceTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     MergeWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // The daemon holds no layout facts for this workspace to merge with.
+    MergeWorkspaceNoLayoutFacts no_layout_facts = 5;
+    // The workspace's session has been deleted.
+    MergeWorkspaceSessionDeleted session_deleted = 6;
+    // This workspace's merge is already in the queue.
+    MergeWorkspaceAlreadyQueued already_queued = 7;
+    // This workspace's merge is already in flight.
+    MergeWorkspaceAlreadyMerging already_merging = 8;
   }
 }
 message MergeWorkspaceUnknownWorkspace {}
@@ -48,3 +56,7 @@ message MergeWorkspaceTransferringAway {
   string address = 1;
 }
 message MergeWorkspaceNotYetAdopted {}
+message MergeWorkspaceNoLayoutFacts {}
+message MergeWorkspaceSessionDeleted {}
+message MergeWorkspaceAlreadyQueued {}
+message MergeWorkspaceAlreadyMerging {}

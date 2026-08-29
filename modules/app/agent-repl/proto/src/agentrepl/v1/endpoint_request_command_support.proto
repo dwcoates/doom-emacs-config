@@ -46,6 +46,10 @@ message RequestCommandSupportError {
     RequestCommandSupportTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     RequestCommandSupportNotYetAdopted not_yet_adopted = 4;
+    // The command is blank once trimmed.
+    RequestCommandSupportBlankCommand blank_command = 5;
+    // The named brief file is absent.
+    RequestCommandSupportBriefMissing brief_missing = 6;
   }
 }
 message RequestCommandSupportUnknownWorkspace {}
@@ -58,3 +62,8 @@ message RequestCommandSupportTransferringAway {
   string address = 1;
 }
 message RequestCommandSupportNotYetAdopted {}
+message RequestCommandSupportBlankCommand {}
+message RequestCommandSupportBriefMissing {
+  // The brief's name, as asked for.
+  string name = 1;
+}

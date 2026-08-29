@@ -45,6 +45,8 @@ message SendLoginInputError {
     SendLoginInputTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     SendLoginInputNotYetAdopted not_yet_adopted = 4;
+    // No login terminal is open for this workspace.
+    SendLoginInputNoLoginOpen no_login_open = 5;
   }
 }
 message SendLoginInputUnknownWorkspace {}
@@ -57,3 +59,4 @@ message SendLoginInputTransferringAway {
   string address = 1;
 }
 message SendLoginInputNotYetAdopted {}
+message SendLoginInputNoLoginOpen {}
