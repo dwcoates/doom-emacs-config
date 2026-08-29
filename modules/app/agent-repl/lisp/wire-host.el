@@ -286,6 +286,19 @@ as for any other notification kind."
      (list :tool-name (agent-repl-wire--decode-string
                        "HostNotificationPermissionRequested" 'toolName object)))))
 
+(defun agent-repl-wire-decode-host-notification-question-asked (value)
+  "Decode VALUE as `HostNotificationQuestionAsked' `(:header)'.
+The first question's chip label, for the banner line.  A question batch
+blocks the agent exactly as a permission ask does, so it takes the same
+attention treatment; `header' is a non-optional proto3 string, so an
+absent one decodes to the empty string rather than to a breach."
+  (let ((object (agent-repl-wire--object "HostNotificationQuestionAsked" value)))
+    (agent-repl-wire--check-keys "HostNotificationQuestionAsked" object '(header))
+    (agent-repl-wire--decoded
+     "HostNotificationQuestionAsked"
+     (list :header (agent-repl-wire--decode-string
+                    "HostNotificationQuestionAsked" 'header object)))))
+
 (defun agent-repl-wire-decode-host-notification-kind-kind (value)
   "Decode `HostNotificationKind''s `kind' oneof from the object VALUE."
   (agent-repl-wire--decode-oneof
@@ -293,7 +306,9 @@ as for any other notification kind."
    '((agentAddressed :agent-addressed
                      agent-repl-wire-decode-host-notification-agent-addressed)
      (permissionRequested :permission-requested
-                          agent-repl-wire-decode-host-notification-permission-requested))))
+                          agent-repl-wire-decode-host-notification-permission-requested)
+     (questionAsked :question-asked
+                    agent-repl-wire-decode-host-notification-question-asked))))
 
 (defun agent-repl-wire-decode-host-notification-kind (value)
   "Decode VALUE as `HostNotificationKind', the oneof plist `(:arm :value)'.
@@ -301,7 +316,8 @@ THE ARM IS THE KIND: the composed text is presentation, the arm is the
 programmatic semantics."
   (let ((object (agent-repl-wire--object "HostNotificationKind" value)))
     (agent-repl-wire--check-keys
-     "HostNotificationKind" object '(agentAddressed permissionRequested))
+     "HostNotificationKind" object
+     '(agentAddressed permissionRequested questionAsked))
     (agent-repl-wire--decoded
      "HostNotificationKind"
      (agent-repl-wire-decode-host-notification-kind-kind object))))
