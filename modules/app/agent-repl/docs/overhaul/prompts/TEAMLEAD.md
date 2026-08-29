@@ -114,6 +114,16 @@ Escalate — never guess through — anything that is:
   subagents MUST be assigned to implementing that suite. It NEVER runs
   the suite (only you do), so it may run concurrently with the
   production-code agents if you like.
+- THE ADVERSARIAL SUITE AUDIT: refine the integration suite through an
+  adversarial agent loop. Dispatch a FRESH-CONTEXT fable agent, pointed
+  at `docs/overhaul/` — specifically your system's spec document
+  (`docs/overhaul/<service>.md`) and the spec documents of the services
+  that surface your system — and ask it to find holes in the suite
+  relative to those specifications: behaviors specified but untested,
+  edge cases the spec implies that no test exercises. Feed real critiques
+  back into the suite, then dispatch a fresh auditor again. Loop until an
+  audit produces no critiques, or until YOU are satisfied — you are the
+  lead, and you need not suffer nitpicking.
 - UNIT TESTS: every production-code subagent (not the integration-tests
   agent) writes its own unit tests and returns successfully ONLY when
   they pass. A subagent genuinely stuck may return with an error or ask
