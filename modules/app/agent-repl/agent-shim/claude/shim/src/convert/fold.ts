@@ -1,20 +1,30 @@
 /**
- * convert/fold.ts — the seam every converter plugs into.
+ * convert/fold.ts — the seam every converter plugs into, and the dispatcher.
  *
  * # What the fold IS
  *
  * The vendor's stream is a FLAT LOG of records. `conversation.v1` is a model of
  * UNITS WITH IDENTITY that are upserted whole. The fold is the mapping between
  * them, and it is the shim's central act: one SDK message in, zero or more
- * self-describing frames out.
+ * self-describing rows out.
  *
  * It ACCUMULATES NOTHING beyond constant-size joins. That is not an efficiency
  * preference, it is the statelessness the whole architecture rests on: a shim
  * that grew state per turn would be a second, divergent copy of the record the
  * store already owns, and a bounce would lose it. The joins it is allowed are
- * each ONE lookup of a remembered value — a tool result to its call by
- * `tool_use_id`, a skill document to its call by `sourceToolUseID`, a spawned
- * agent to its spawn — never a scan and never a history.
+ * each ONE remembered value — the current API response's first-block unit (so
+ * usage rides exactly one unit), the per-message block counter (so
+ * `<message.id>:<block_index>` is stable across the lines the vendor splits one
+ * message into), and the message id the counter belongs to. Both are cleared at
+ * `message_stop`. The last write/edit unit is the ENGINE's remembered value and
+ * arrives on the context.
+ *
+ * # Why the output is PersistEntry and not frames
+ *
+ * Every frame the fold produces is going to ONE place: a store row. Which book
+ * it belongs to, which row it replaces and where in the vendor's record it came
+ * from are facts only the fold has seen, so it mints them here rather than
+ * making a second pass re-derive them from a frame that no longer says.
  *
  * # The rules every converter obeys
  *
@@ -26,78 +36,167 @@
  *     `AgentUnmodeled` means a genuinely unknown tool, and a recognizable
  *     built-in arriving there is a producer defect.
  *   - Anything unconvertible becomes RESIDUE rather than being dropped or
- *     crashing. Residue is the reason the fold can be eager: nothing is lost by
- *     failing to understand it.
- *   - Every converter LOGS its branch, so a wrong conversion is diagnosable
- *     from the record of what was chosen rather than by re-deriving it.
- *
- * # Ownership
- *
- * OWNER: the fold agent (`convert/`). This file declares the seam and the
- * output shape and deliberately implements NO conversion: the dispatcher, the
- * stream-event converters, the per-tool files, the terminals and the residue
- * are that agent's, and they attach here.
+ *     crashing.
+ *   - A record MISSING A FIELD the proto requires produces NO frame at all and
+ *     a logged converter defect — never a partial message.
+ *   - Every converter LOGS its branch.
  */
-import type { conversationv1, storev1 } from "../proto.js";
+import { bindLog } from "../log.js";
+import type { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
+import type { PersistEntry } from "../store/persistence.js";
+import { convertDetached } from "./detached.js";
+import type { FoldContext } from "./fold-context.js";
+import { convertPermissionDenied } from "./permission.js";
+import { residueEntry, residueForMessage } from "./residue.js";
+import { convertSessionMessage } from "./session-updates.js";
+import {
+  createBlockState,
+  convertAssistantMessage,
+  convertStreamEvent,
+  type BlockState,
+} from "./stream-events.js";
+import { convertResult } from "./terminals.js";
+import { convertToolProgress, convertUserMessage } from "./tool-calls.js";
+
+const LOGGER = bindLog({ component: "shim-convert-fold", operation: "shim.convert.fold" });
 
 /**
  * Everything ONE SDK message produced.
  *
- * Three lists rather than one union, because the three go to three different
- * places and a consumer must not have to re-derive which is which:
- *
- *   - `frames` are the agent's own record. They route by
- *     `AgentFrame.agent_id` and land as page lines (an `update`), as a page
- *     line PLUS the agent's terminal state (a `success`/`failure`), or as the
- *     lifecycle record for their kind (a `detached_work`).
- *   - `sessionUpdates` are facts about the SESSION, not about any agent. They
- *     ride WatchSession, and the vendor-sourced ones are written to the store.
- *     The shim-SYNTHESIZED ones (`diagnostics`, `context_usage`) are pushed and
- *     never written — they are the shim's report about itself, not vendor
- *     conversation.
- *   - `residue` is what could not be converted. Never dropped, never a crash.
- *
- * All three are empty for a message that produced nothing, which is a normal
- * and frequent outcome — every exempt tool call yields exactly this.
+ * `turnEnded` is present EXACTLY when the message was the turn's `result` — the
+ * only source of a turn terminal. Its frame is ALSO in `entries`: the terminal
+ * is both a page line (the feed's stop notice has no other source) and the
+ * engine's signal that the main thread can accept a prompt again, and making
+ * the engine dig it back out of the list would be a second parse of a fact the
+ * fold already resolved.
  */
 export interface FoldOutput {
-  /**
-   * Conversation frames, in the order the vendor stated them.
-   *
-   * `AgentUpdate` carries five page-line arms the shim can produce: `activity`,
-   * `question`, `permission`, `context_cut` (a /clear, a compaction, or a
-   * compaction that failed) and `api_error` (a failed API request as MID-TURN
-   * evidence — a turn TERMINAL is still `AgentFailure.api_request_failed`, and
-   * the two must not be confused: one says the turn is over, the other says it
-   * is not).
-   */
-  readonly frames: readonly conversationv1.AgentFrame[];
-  /** Session-level facts this message stated. */
-  readonly sessionUpdates: readonly conversationv1.SessionUpdate[];
-  /** What this message carried that no converter could model. */
-  readonly residue: readonly storev1.StoreUnservedItem[];
+  /** The rows this message produced, in the order the vendor stated them. */
+  readonly entries: readonly PersistEntry[];
+  /** Set only for the turn's `result` message. */
+  readonly turnEnded?: { readonly frame: conversationv1.AgentFrame };
 }
 
-/** An output that produced nothing — the exempt set's answer, and the common case. */
-export const EMPTY_FOLD_OUTPUT: FoldOutput = { frames: [], sessionUpdates: [], residue: [] };
+/** An output that produced nothing — the exempt set's answer, and common. */
+export const EMPTY_FOLD_OUTPUT: FoldOutput = { entries: [] };
+
+/**
+ * SDK message types that carry no conversation fact at all.
+ *
+ * DISTINCT FROM RESIDUE: residue means "we could not model this", and these are
+ * transport bookkeeping we have modelled as meaning nothing. Recording them
+ * would fill the unserved table with keep-alive frames.
+ */
+const SILENTLY_IGNORED_TYPES = new Set<string>(["keep_alive"]);
 
 /**
  * The fold, as the engine drives it.
  *
- * ONE method, called once per SDK message in arrival order. It is synchronous
- * on purpose: a fold that could await would be able to interleave two messages
- * and break the ordering every upsert depends on. Anything that must be awaited
- * (a store write) is the caller's, after the fold has answered.
+ * ONE method, called once per SDK message in arrival order. Synchronous on
+ * purpose: a fold that could await would be able to interleave two messages and
+ * break the ordering every upsert depends on.
  */
 export interface Fold {
   /**
    * Convert one SDK message.
    *
-   * NEVER THROWS for an unrecognized record: that is what `residue` is for. It
-   * may throw for a BROKEN one — a record missing a field the contract says is
-   * always present — because that is a producer defect the session must surface
-   * as a `SessionFault` rather than quietly convert around.
+   * NEVER THROWS: an unrecognized record is residue, and a malformed one is
+   * residue plus a logged converter defect — a fold that threw would take the
+   * session down over one bad vendor line.
    */
-  onSdkMessage(message: SdkMessage): FoldOutput;
+  onSdkMessage(message: SdkMessage, context: FoldContext): FoldOutput;
+}
+
+/**
+ * Build a fold.
+ *
+ * The returned object holds ONLY the constant-size joins named in this file's
+ * header. Nothing else survives a message.
+ */
+export function createFold(): Fold {
+  const blocks: BlockState = createBlockState();
+
+  return {
+    onSdkMessage(message: SdkMessage, context: FoldContext): FoldOutput {
+      try {
+        return dispatch(message, context, blocks);
+      } catch (error) {
+        // A converter that throws is a DEFECT, and the honest answer to a
+        // defect is residue plus a loud log — never a dead session, and never a
+        // half-built message on the wire.
+        const detail = error instanceof Error ? error.message : String(error);
+        LOGGER.log(
+          { level: "error", sdk_message_type: (message as { type?: string }).type, detail },
+          "converter defect: the message produced no frame and lands as residue",
+        );
+        return {
+          entries: [
+            residueEntry(
+              context,
+              message,
+              residueForMessage(message, `converter defect: ${detail}`),
+              "residue.unparsed",
+            ),
+          ],
+        };
+      }
+    },
+  };
+}
+
+/** The one switch over the vendor's message vocabulary. */
+function dispatch(message: SdkMessage, context: FoldContext, blocks: BlockState): FoldOutput {
+  const type = message.type;
+  if (SILENTLY_IGNORED_TYPES.has(type)) {
+    LOGGER.logVerbose({ sdk_message_type: type }, "message carries no conversation fact; ignored");
+    return EMPTY_FOLD_OUTPUT;
+  }
+
+  switch (type) {
+    case "stream_event":
+      return { entries: convertStreamEvent(message, context, blocks) };
+    case "assistant":
+      return { entries: convertAssistantMessage(message, context, blocks) };
+    case "user":
+      return { entries: convertUserMessage(message, context) };
+    case "result":
+      return convertResult(message, context);
+    case "tool_progress":
+      return { entries: convertToolProgress(message, context) };
+    case "system":
+      return { entries: convertSystemMessage(message, context) };
+    case "rate_limit_event":
+    case "conversation_reset":
+      return { entries: convertSessionMessage(message, context) };
+    default:
+      LOGGER.log(
+        { level: "warn", sdk_message_type: type },
+        "no converter owns this SDK message type; it lands as residue",
+      );
+      return {
+        entries: [
+          residueEntry(context, message, residueForMessage(message), `unknown.${String(type)}`),
+        ],
+      };
+  }
+}
+
+/** `type: "system"` fans out by subtype across three converter families. */
+function convertSystemMessage(
+  message: Extract<SdkMessage, { type: "system" }>,
+  context: FoldContext,
+): readonly PersistEntry[] {
+  switch (message.subtype) {
+    case "permission_denied":
+      return convertPermissionDenied(message, context);
+    case "task_started":
+    case "task_updated":
+    case "task_notification":
+    case "task_progress":
+    case "background_tasks_changed":
+      return convertDetached(message, context);
+    default:
+      return convertSessionMessage(message, context);
+  }
 }
