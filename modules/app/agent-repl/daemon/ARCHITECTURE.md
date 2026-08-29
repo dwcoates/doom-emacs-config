@@ -522,3 +522,24 @@ syntax highlighting emits the highlight classes (keyword, string, comment,
 number, type, function, operator, punctuation, variable, constant, attribute,
 tag, heading, link, emphasis, strong, added, removed, meta). `paint` asserts
 its emitted classes are in the vocabulary file.
+
+## Landing 3 (staged on overhaul/landing-3; lands with the error-arm batch)
+
+Build against these shapes behind your OWN seam types now; swap to the
+generated arms when the landing merges (one place each):
+- `FeedTurnEndedErrored.headline` — a daemon-composed per-arm sentence (the
+  feed resolver composes it; the client's sentence table dies).
+- `FeedToolCallReturned.form.none` — a returned call with nothing to draw;
+  never `text{""}`.
+- `FeedToolCallInput.form` = command | path | query — the daemon states the
+  input line's drawn form (shell line vs muted path vs query).
+- `HostNotificationKind.question_asked{header}` — a blocked question's
+  notification (route as agent_addressed until it lands).
+- `DetachedLost{file_vanished | went_silent | swept_up}` as `lost` arms on
+  AgentBashInterrupted.cause, AgentSubagentFailure.cause and
+  AgentFailure.failure — the feed resolver maps them to FeedShellLost /
+  FeedSubagentLost; the sessionwatcher routes them as ordinary terminals.
+- The error-arm batch (every `<Rpc>Error` arm incl. transferring_away /
+  not_yet_adopted, and the DaemonFault / SessionFault / HostFault kind arms)
+  is collected in ERROR-ARMS.md and sent by the teamlead once the server
+  handlers expose the sites.
