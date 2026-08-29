@@ -525,6 +525,15 @@ type sidecarOptions struct {
 	PollInterval time.Duration
 	RescanEvery  time.Duration
 	ExtraEnv     []string
+
+	// The LOST policy's windows and the unclaimed-spool hold. A zero field is
+	// not passed at all, so the sidecar keeps its production default and every
+	// subject that is not about staleness is unaffected by these.
+	StaleGrace           time.Duration
+	StaleShellSilence    time.Duration
+	StaleAgentSilence    time.Duration
+	StaleWorkflowSilence time.Duration
+	UnownedSpoolWindow   time.Duration
 }
 
 func defaultSidecarOptions(t *testing.T, storeSocket string, tree *vendorTree) sidecarOptions {
@@ -557,6 +566,21 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 		"--log", opts.LogPath,
 		"--poll-interval", opts.PollInterval.String(),
 		"--rescan-interval", opts.RescanEvery.String(),
+	}
+	for _, window := range []struct {
+		flag  string
+		value time.Duration
+	}{
+		{"--stale-grace", opts.StaleGrace},
+		{"--stale-shell-silence", opts.StaleShellSilence},
+		{"--stale-agent-silence", opts.StaleAgentSilence},
+		{"--stale-workflow-silence", opts.StaleWorkflowSilence},
+		{"--unowned-spool-window", opts.UnownedSpoolWindow},
+	} {
+		if window.value == 0 {
+			continue
+		}
+		args = append(args, window.flag, window.value.String())
 	}
 	cmd := exec.Command(sidecarBin, args...)
 	cmd.Env = append(os.Environ(),
