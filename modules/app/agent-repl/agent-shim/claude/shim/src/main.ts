@@ -56,8 +56,10 @@ import { acquireWorkspaceLock, lockDir, workspaceLockKey, LOCK_DIR_ENV } from ".
 import { runtimeIdentity } from "./build-identity.js";
 import { type Engine } from "./engine/engine.js";
 import { createEngine, type CreateQuery, type QuerySpec } from "./engine/session.js";
-import { turnBoundaryOnlyFold } from "./engine/fold-context.js";
-import { unavailablePersistence } from "./store/persistence.js";
+import { createFold } from "./convert/fold.js";
+import { createStoreClient } from "./store/client.js";
+import { producerId } from "./store/keys.js";
+import { createPersistence } from "./store/persistence.js";
 import { createRealQuery } from "./sdk/real-query.js";
 import { createFakeQuery } from "./fake/index.js";
 import { randomUUID } from "node:crypto";
@@ -506,15 +508,19 @@ export async function main(): Promise<void> {
     "exclusive workspace lock acquired",
   );
 
-  // THE SESSION ENGINE. Two of its collaborators are still scaffolds and say
-  // so: `unavailablePersistence` refuses every store verb (the record-plane
-  // agent lands the real one) and `turnBoundaryOnlyFold` converts nothing while
-  // still ending turns (the same agent lands `convert/`). Both refuse loudly
-  // rather than answering plausibly, so a build wired to them cannot be
-  // mistaken for a working record.
+  // THE SESSION ENGINE, with the real record plane behind it.
+  //
+  // The producer name is keyed by the workspace until the vendor names a
+  // session: write ids are `sha256(producer | coordinates | arm)`, so the name
+  // only has to be STABLE for one conversation's writes to share a namespace,
+  // and the workspace is the one identity that exists before StartSession.
   const engine: Engine = createEngine({
-    persistence: unavailablePersistence(),
-    fold: turnBoundaryOnlyFold(),
+    persistence: createPersistence({
+      client: createStoreClient(environment.storeSocket),
+      producer: producerId(`workspace:${workspaceLockKey(cwd)}`),
+      nowMs: () => Date.now(),
+    }),
+    fold: createFold(),
     createQuery: queryFactory(args.fake, environment, cwd),
     runtime: { shimBuildSha: identity.shimBuildSha, sdkVersion: identity.sdkVersion },
     env: { stateDir: environment.stateDir, configDir: environment.claudeConfigDir, cwd },
