@@ -89,7 +89,6 @@
 (declare-function agent-repl--gui-running-p "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-durable-session-id "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-adopt-session "agent-repl-frontend-client" (ws claude-session-id on-success on-failure))
-(declare-function agent-repl--frontend-build-targets-async "agent-repl-daemon" (targets &optional force on-success on-failure))
 (defvar agent-repl-input-height-fraction)
 (declare-function xwidget-webkit--create-new-session-buffer "xwidget" (url &optional callback))
 (declare-function xwidget-webkit-current-session "xwidget" ())
