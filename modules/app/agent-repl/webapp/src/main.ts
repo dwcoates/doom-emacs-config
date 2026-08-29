@@ -157,7 +157,7 @@ import {
   setLogger,
   type ClientLogContext,
   type ClientLogLevel,
-} from "./wslog.js";
+} from "./log.js";
 import { fetchTaskTail } from "./watcher-poll.js";
 import { installExternalLinkInterceptor, makeExternalOpener } from "./external-link.js";
 import "./styles.css";

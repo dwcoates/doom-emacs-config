@@ -4,7 +4,7 @@
  * inbound frames to `onMessage` and sends pre-encoded outbound frames (the
  * caller encodes `FrontendCommand` protojson via command-dispatch.ts).
  */
-import { log, logVerbose } from "./wslog.js";
+import { log, logVerbose } from "./log.js";
 
 export interface WsClientOptions {
   url: string;

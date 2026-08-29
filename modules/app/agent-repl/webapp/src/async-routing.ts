@@ -50,7 +50,7 @@ import {
   type AsyncOutputAppend,
   type AsyncOutputSpool,
 } from "./async-bubble.js";
-import { log } from "./wslog.js";
+import { log } from "./log.js";
 
 /** Offsets are BYTE counts on the wire, so they are measured in bytes here. */
 const ENCODER = new TextEncoder();

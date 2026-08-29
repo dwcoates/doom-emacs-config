@@ -18,7 +18,7 @@
  */
 import { AsyncSource } from "./protocol.js";
 import { ConversationItem, TextItem, ThinkingItem, ToolItem } from "./store.js";
-import { log } from "./wslog.js";
+import { log } from "./log.js";
 
 /**
  * Most items rendered from one parsed stream. A settled agent's transcript

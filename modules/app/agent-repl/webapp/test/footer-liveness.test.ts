@@ -7,7 +7,7 @@ import {
 } from "../src/footer-liveness.js";
 import type { FooterParts, LivenessGap, LivenessLogSink } from "../src/footer-liveness.js";
 import type { ClientLogContext } from "../src/protocol.js";
-import type { ClientLogLevel } from "../src/wslog.js";
+import type { ClientLogLevel } from "../src/log.js";
 import type { ProgressInput } from "../src/state-adapter.js";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");

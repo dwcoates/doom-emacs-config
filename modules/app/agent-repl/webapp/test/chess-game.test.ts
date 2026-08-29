@@ -89,7 +89,7 @@ import {
   releaseChessGames,
   WIDGET_UNAVAILABLE_MSG,
 } from "../src/chess-game.js";
-import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/log.js";
 
 /** A logger wired to a console spy only — matches wslog.test.ts's fixture. */
 function spyLogger(): { logger: ForwardingLogger; consoleLines: string[] } {

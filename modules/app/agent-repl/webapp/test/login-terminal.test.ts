@@ -16,7 +16,7 @@ import {
   ForwardingLogger,
   resetLoggingForTests,
   setLogger,
-} from "../src/wslog.js";
+} from "../src/log.js";
 
 const { createdTerminals } = vi.hoisted(() => {
   return { createdTerminals: [] as FakeTerminal[] };
