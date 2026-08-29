@@ -113,3 +113,34 @@ export interface Persistence {
   /** Degraded windows the record plane opened and closed. Returns an unsubscribe. */
   onDegradedWindow(listener: (w: conversationv1.SessionDegradedWindow) => void): () => void;
 }
+
+/**
+ * The persistence before there is a record plane.
+ *
+ * SCAFFOLD, owned jointly and replaced by the record-plane agent's real
+ * factory. It REFUSES rather than pretending: a placeholder that answered with
+ * an empty page would make a history read look like an empty conversation, and
+ * one that swallowed writes would make a lost record look like a written one.
+ * Every verb answers `store_unavailable`, which the engine already maps onto a
+ * loud `SessionFault` and a `ReadHistoryStoreUnavailable`.
+ */
+export function unavailablePersistence(): Persistence {
+  const refuse = (verb: string): PersistenceError =>
+    new PersistenceError(
+      "store_unavailable",
+      `shim persistence: ${verb} is not implemented in this build; store/persistence.ts is a scaffold placeholder owned by the record-plane agent`,
+    );
+  return {
+    writeDurable: () => Promise.reject(refuse("writeDurable")),
+    write: () => {
+      throw refuse("write");
+    },
+    flush: () => Promise.resolve(),
+    openAgentPage: () => Promise.reject(refuse("openAgentPage")),
+    readAgentPage: () => Promise.reject(refuse("readAgentPage")),
+    liveWork: () => Promise.reject(refuse("liveWork")),
+    openBashRun: () => Promise.reject(refuse("openBashRun")),
+    onFault: () => () => undefined,
+    onDegradedWindow: () => () => undefined,
+  };
+}
