@@ -3966,3 +3966,66 @@ body.ungated #mode-select {
 .paint-ansi-bg-bright-magenta { background: color-mix(in srgb, #d8b4fe 30%, transparent); }
 .paint-ansi-bg-bright-cyan { background: color-mix(in srgb, #22d3ee 30%, transparent); }
 .paint-ansi-bg-bright-white { background: color-mix(in srgb, var(--fg) 18%, transparent); }
+
+/* ---- feed cards: tool call (src/feed/cards/tool-call.ts) --------------- */
+
+/* THE CARD ITSELF IS UNCHANGED: the shell, the head, the badges, the input
+   line and the output boxes all reuse the classes an ordinary bash call has
+   always rendered in. What follows is only the elements the new schema added,
+   drawn in the register the card already speaks in — nothing here restyles an
+   existing class. */
+
+/* "quiet for 12s": the client's own clock over the daemon's last observed
+   beat. Muted and italic like every other aside on a card, NOT the run badge's
+   orange — it qualifies the badge rather than repeating it. */
+.tool-quiet {
+  color: var(--muted);
+  font-style: italic;
+}
+/* "ran 4.2 s", composed daemon-side, sitting beside the verdict badge it
+   qualifies. It is a settled figure, so it gets no motion and no hue. */
+.tool-runtime {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+/* The composed truncation line, below its output box and outside it, so the
+   count stays put while the box scrolls. No divider of its own: the output
+   above already drew the card's one dashed rule. */
+.tool-omitted {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-style: italic;
+  margin-top: 0.2rem;
+}
+/* A link list draws as rows, delimited by the one shared list rule. */
+.tool-link-row {
+  padding: 0.15rem 0;
+}
+/* The IDE's findings against an edit, under the output that caused them. The
+   overflow toggle reveals the rest in place — the row already carries every
+   line, so there is nothing to fetch. */
+.tool-diagnostics {
+  margin-top: 0.35rem;
+}
+.tool-diagnostic {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  padding: 0.1rem 0;
+}
+.tool-diagnostics-more {
+  margin-top: 0.2rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  padding: 0.05rem 0.5rem;
+  color: var(--accent);
+}
+/* A diff's unchanged context line takes the card's own register: the added and
+   removed hues mean something, and a context line means the absence of that. */
+.diff .ctx {
+  color: inherit;
+}
