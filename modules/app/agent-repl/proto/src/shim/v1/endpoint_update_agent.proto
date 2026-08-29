@@ -31,9 +31,25 @@ message UpdateAgentResponse {
 // the stop's acknowledgment arrive as the agent's next frames.
 message UpdateAgentSuccess {}
 
-// Not delivered: unknown agent, no open ask, a stop with nothing running.
-// `kind` arms are DERIVED at the wave from the shim's real refusal sites.
+// Not delivered. THE ARM IS WHY.
 message UpdateAgentFailure {
   // The shim's account, for a human and for logs; never switched on.
   string detail = 1;
+  oneof kind {
+    // The addressed agent is not known to this shim.
+    UpdateAgentUnknownAgent unknown_agent = 2;
+    // An answer was sent but the agent has no open ask.
+    UpdateAgentNoOpenAsk no_open_ask = 3;
+    // The answer's echoed values do not match the pending ask.
+    UpdateAgentAnswerMismatch answer_mismatch = 4;
+    // A stop was sent but nothing is running on the agent.
+    UpdateAgentNothingRunning nothing_running = 5;
+    // No session is open on this shim.
+    UpdateAgentNoSession no_session = 6;
+  }
 }
+message UpdateAgentUnknownAgent {}
+message UpdateAgentNoOpenAsk {}
+message UpdateAgentAnswerMismatch {}
+message UpdateAgentNothingRunning {}
+message UpdateAgentNoSession {}
