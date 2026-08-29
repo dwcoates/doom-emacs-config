@@ -21,6 +21,24 @@
  * see {@link sniffProtocol}. Both servers run the SAME Connect handler, so the
  * two paths cannot diverge in behavior.
  *
+ * # Standing streams: the head goes out ON ACCEPT
+ *
+ * connect-node writes a response head LAZILY — for a server stream that has
+ * pushed nothing yet, `writeHead` fires only when the stream ENDS. A Go client
+ * surfaces a server-stream refusal at its first `Receive`, so a stream that has
+ * accepted but not yet spoken is indistinguishable at the client from one that
+ * was refused, and the daemon's bring-up blocks on a WatchSession that is
+ * perfectly healthy and merely quiet.
+ *
+ * So the head is written HERE, before the Connect adapter sees the request:
+ * a streaming content type gets `200` with the request's own content type
+ * echoed back, `flushHeaders()`, and then `writeHead` rebound to a no-op so the
+ * adapter's later call cannot raise ERR_HTTP_HEADERS_SENT. Unary requests are
+ * untouched — they have a real status to report and nothing to gain from an
+ * early head. A streaming verb that REFUSES still reports its refusal, because
+ * the Connect protocol carries a stream's error in its end-of-stream frame,
+ * not in the head.
+ *
  * # Stale sockets, and why a LIVE one is refused
  *
  * A unix socket path outlives the process that bound it: a shim killed with
@@ -142,7 +160,7 @@ export async function serve(
   }
   if (verdict === "stale") unlinkSocketFile(socketPath, "stale predecessor");
 
-  const handler = connectNodeAdapter({ routes });
+  const handler = withEarlyStreamHeaders(connectNodeAdapter({ routes }));
   // Neither of these ever LISTENS. They exist to own a connection's protocol
   // state machine; the net server below feeds them sockets directly.
   const h1 = http.createServer(handler);
@@ -201,6 +219,87 @@ export async function serve(
       LOGGER.log({ socket_path: socketPath }, "shim.v1 listener closed and its socket removed");
     },
   };
+}
+
+/**
+ * The request content types that mean "this is a stream".
+ *
+ * The Connect, gRPC-Web and gRPC streaming framings, all of which the router
+ * accepts. A unary Connect request is `application/proto` or
+ * `application/json` and is deliberately absent: it has a real status to
+ * report, and committing to 200 before the handler ran would throw that away.
+ */
+export const STREAMING_CONTENT_TYPES: ReadonlySet<string> = new Set([
+  "application/connect+proto",
+  "application/connect+json",
+  "application/grpc-web+proto",
+  "application/grpc-web+json",
+  "application/grpc+proto",
+  "application/grpc",
+]);
+
+/** Whether a request's content type means the response is a stream. */
+export function isStreamingContentType(contentType: string | undefined): boolean {
+  if (contentType === undefined) return false;
+  return STREAMING_CONTENT_TYPES.has((contentType.split(";")[0] ?? "").trim().toLowerCase());
+}
+
+/**
+ * The request and response shapes both dialects present to a Node handler.
+ *
+ * Structural rather than the two Node unions: `http.ServerResponse` and
+ * `http2.Http2ServerResponse` declare incompatible `writeHead` overloads, so a
+ * union of them has no callable signature at all. This names exactly the three
+ * members this wrapper touches, which BOTH satisfy.
+ */
+export interface StreamableRequest {
+  readonly headers: Record<string, string | string[] | undefined>;
+}
+export interface StreamableResponse {
+  readonly headersSent: boolean;
+  writeHead(status: number, headers: Record<string, string>): unknown;
+  flushHeaders?: () => void;
+}
+type NodeHandler = (request: never, response: never) => void;
+
+/**
+ * Send the response head the moment a streaming request is accepted.
+ *
+ * Wraps the Connect adapter rather than patching it: the adapter's own
+ * `writeHead` is lazy by design, and the only place that can beat it is the
+ * layer above. See the note at the top of this file for why a quiet stream is
+ * otherwise indistinguishable from a refused one.
+ */
+export function withEarlyStreamHeaders<H extends NodeHandler>(handler: H): H {
+  const wrapped = (request: StreamableRequest, response: StreamableResponse): void => {
+    flushStreamHead(request, response);
+    (handler as unknown as (request: StreamableRequest, response: StreamableResponse) => void)(
+      request,
+      response,
+    );
+  };
+  return wrapped as unknown as H;
+}
+
+/**
+ * Write and flush the head for a streaming request, exactly once.
+ *
+ * Separated from the wrapper so a suite can drive it with a plain object and
+ * assert the three effects — head written, headers flushed, later writeHead
+ * absorbed — without a socket.
+ */
+export function flushStreamHead(request: StreamableRequest, response: StreamableResponse): boolean {
+  const header = request.headers["content-type"];
+  const contentType = Array.isArray(header) ? header[0] : header;
+  if (!isStreamingContentType(contentType) || response.headersSent) return false;
+  response.writeHead(200, { "content-type": contentType as string });
+  if (typeof response.flushHeaders === "function") response.flushHeaders();
+  // The adapter WILL call writeHead again. Once the head is out that is an
+  // ERR_HTTP_HEADERS_SENT throw, so the call is absorbed rather than allowed to
+  // fail a healthy stream.
+  response.writeHead = (): unknown => response;
+  LOGGER.logVerbose({ content_type: contentType }, "flushed the response head on accepting a stream");
+  return true;
 }
 
 /**

@@ -223,10 +223,7 @@ export function convertDetached(
 
   const known = context.liveTask(taskId);
   const toolUseId = raw.tool_use_id ?? known?.toolUseId;
-  const agentId =
-    known?.agentId === undefined
-      ? context.mainAgentId
-      : create(conversationv1.AgentIdSchema, { value: known.agentId });
+  const agentId = known?.agentId ?? context.mainAgentId;
 
   switch (raw.subtype) {
     case "task_started": {

@@ -102,11 +102,12 @@ export function convertPermissionDenied(
     );
     return [];
   }
+  // A DENIAL INSIDE A SUBAGENT names the subagent on the vendor's own record,
+  // which is the one place the stream plane does state an agent id.
   const agentId =
     message.agent_id === undefined || message.agent_id === ""
       ? context.mainAgentId
-      : (context.subagentFor(message.tool_use_id) ??
-        create(conversationv1.AgentIdSchema, { value: message.agent_id }));
+      : create(conversationv1.AgentIdSchema, { value: message.agent_id });
   LOGGER.log(
     {
       tool: message.tool_name,

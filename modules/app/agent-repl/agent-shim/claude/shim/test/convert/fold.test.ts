@@ -575,7 +575,7 @@ describe("session facts", () => {
     expect(output.entries).toHaveLength(0);
   });
 
-  it("draws a compaction that FAILED as a cut that did not happen", () => {
+  it("leaves the FAILED cut to the engine, which holds the compaction it asked for", () => {
     const fold = createFold();
 
     const output = fold.onSdkMessage(
@@ -591,12 +591,7 @@ describe("session facts", () => {
       foldContext(),
     );
 
-    const frame =
-      output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
-    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
-    const cut = update.value as conversationv1.ContextCut;
-    expect(update.case).toBe("contextCut");
-    expect(cut.cut.case).toBe("compactionFailed");
+    expect(output.entries).toHaveLength(0);
   });
 
   it("holds a compaction boundary until its summary arrives, then records the cut", () => {
@@ -923,7 +918,7 @@ describe("attribution", () => {
     expect(output.entries[0]?.agentId.value).toBe("agent-7");
   });
 
-  it("attributes to the main agent, not to an invented id, when the spawn has named none", () => {
+  it("mints a subagent's book from its SPAWNING CALL when the engine knows no id", () => {
     const fold = createFold();
 
     const output = fold.onSdkMessage(
@@ -933,6 +928,9 @@ describe("attribution", () => {
       foldContext(),
     );
 
-    expect(output.entries[0]?.agentId.value).toBe("main-agent");
+    // The pinned SDK stream states NO agent id anywhere, so the spawning call's
+    // own id is the subagent's book until a ruling gives it a real producer —
+    // minted in ONE function so that ruling changes one line.
+    expect(output.entries[0]?.agentId.value).toBe("toolu_spawn");
   });
 });
