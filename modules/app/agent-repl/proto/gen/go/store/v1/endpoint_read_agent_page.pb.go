@@ -180,8 +180,10 @@ func (*ReadAgentPageResponse_Failure) isReadAgentPageResponse_Result() {}
 // The page as served.
 type ReadAgentPageSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The lines, newest first. At most page_size of them.
-	Lines []*StorePageLine `protobuf:"bytes,1,rep,name=lines,proto3" json:"lines,omitempty"`
+	// The lines, newest first, each with its pointer — a continuation page
+	// carries real positions exactly as the opening page does, so a reader
+	// never mints a placeholder mark. At most page_size of them.
+	Lines []*StoreLineAt `protobuf:"bytes,1,rep,name=lines,proto3" json:"lines,omitempty"`
 	// Whether older lines remain. THE ARM IS THE COMPLETENESS.
 	//
 	// Types that are valid to be assigned to Boundary:
@@ -223,7 +225,7 @@ func (*ReadAgentPageSuccess) Descriptor() ([]byte, []int) {
 	return file_store_v1_endpoint_read_agent_page_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *ReadAgentPageSuccess) GetLines() []*StorePageLine {
+func (x *ReadAgentPageSuccess) GetLines() []*StoreLineAt {
 	if x != nil {
 		return x.Lines
 	}
@@ -515,9 +517,9 @@ const file_store_v1_endpoint_read_agent_page_proto_rawDesc = "" +
 	"\x15ReadAgentPageResponse\x12:\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1e.store.v1.ReadAgentPageSuccessH\x00R\asuccess\x12:\n" +
 	"\afailure\x18\x02 \x01(\v2\x1e.store.v1.ReadAgentPageFailureH\x00R\afailureB\b\n" +
-	"\x06result\"\xba\x01\n" +
-	"\x14ReadAgentPageSuccess\x12-\n" +
-	"\x05lines\x18\x01 \x03(\v2\x17.store.v1.StorePageLineR\x05lines\x121\n" +
+	"\x06result\"\xb8\x01\n" +
+	"\x14ReadAgentPageSuccess\x12+\n" +
+	"\x05lines\x18\x01 \x03(\v2\x15.store.v1.StoreLineAtR\x05lines\x121\n" +
 	"\x04more\x18\x02 \x01(\v2\x1b.store.v1.ReadAgentPageMoreH\x00R\x04more\x124\n" +
 	"\x05floor\x18\x03 \x01(\v2\x1c.store.v1.ReadAgentPageFloorH\x00R\x05floorB\n" +
 	"\n" +
@@ -556,7 +558,7 @@ var file_store_v1_endpoint_read_agent_page_proto_goTypes = []any{
 	(*ReadAgentPageStalePointer)(nil),   // 6: store.v1.ReadAgentPageStalePointer
 	(*v1.AgentId)(nil),                  // 7: conversation.v1.AgentId
 	(*StoreItemPointer)(nil),            // 8: store.v1.StoreItemPointer
-	(*StorePageLine)(nil),               // 9: store.v1.StorePageLine
+	(*StoreLineAt)(nil),                 // 9: store.v1.StoreLineAt
 	(*ReadAgentPageMore)(nil),           // 10: store.v1.ReadAgentPageMore
 	(*ReadAgentPageFloor)(nil),          // 11: store.v1.ReadAgentPageFloor
 }
@@ -565,7 +567,7 @@ var file_store_v1_endpoint_read_agent_page_proto_depIdxs = []int32{
 	8,  // 1: store.v1.ReadAgentPageRequest.after:type_name -> store.v1.StoreItemPointer
 	2,  // 2: store.v1.ReadAgentPageResponse.success:type_name -> store.v1.ReadAgentPageSuccess
 	3,  // 3: store.v1.ReadAgentPageResponse.failure:type_name -> store.v1.ReadAgentPageFailure
-	9,  // 4: store.v1.ReadAgentPageSuccess.lines:type_name -> store.v1.StorePageLine
+	9,  // 4: store.v1.ReadAgentPageSuccess.lines:type_name -> store.v1.StoreLineAt
 	10, // 5: store.v1.ReadAgentPageSuccess.more:type_name -> store.v1.ReadAgentPageMore
 	11, // 6: store.v1.ReadAgentPageSuccess.floor:type_name -> store.v1.ReadAgentPageFloor
 	4,  // 7: store.v1.ReadAgentPageFailure.invalid_request:type_name -> store.v1.ReadAgentPageInvalidRequest

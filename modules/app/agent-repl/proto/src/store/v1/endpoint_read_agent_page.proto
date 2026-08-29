@@ -35,8 +35,10 @@ message ReadAgentPageResponse {
 
 // The page as served.
 message ReadAgentPageSuccess {
-  // The lines, newest first. At most page_size of them.
-  repeated StorePageLine lines = 1;
+  // The lines, newest first, each with its pointer — a continuation page
+  // carries real positions exactly as the opening page does, so a reader
+  // never mints a placeholder mark. At most page_size of them.
+  repeated StoreLineAt lines = 1;
   // Whether older lines remain. THE ARM IS THE COMPLETENESS.
   oneof boundary {
     ReadAgentPageMore more = 2;
