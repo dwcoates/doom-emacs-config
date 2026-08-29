@@ -4534,3 +4534,200 @@ body.ungated #mode-select {
   cursor: pointer;
 }
 .context-fold-caret { margin-right: 0.3rem; }
+
+/* ---- sidebar (src/sidebar) --------------------------------------------- */
+
+/* The rail's own look is UNCHANGED: `#ws-sidebar`, `.sb-head`, `.sb-views`,
+   `.repo-head`, `.task-head`, `.row`, `.st*`, `.kids`, `.detail` and the
+   Recently Merged band above are reused as they stand. What follows is only
+   what the new feature set adds — the two panes, the attention marker's
+   cadence, the priority badge, the verb menu and the two forms — plus the
+   handful of rules that key the status mark off the shared color vocabulary
+   instead of a per-state hue. */
+
+/* The two resolved groupings. One is shown, the other is `hidden`; the
+   selection costs no round trip and derives nothing. */
+#ws-sidebar .sb-pane[hidden] { display: none; }
+
+/* THE STATUS MARK. The dot's SIZE and shape are the rail's (above); its COLOR
+   comes from `.tone-<color>` through src/vocab.ts, so a workspace cannot read
+   one color here and another in the footer or the Emacs tab bar. `currentColor`
+   is what makes one fill rule serve all five tones. */
+#ws-sidebar .st[data-glyph="dot"] { background: currentColor; }
+/* The glyph statuses are not discs: a box that centers a single character, so
+   the recycle mark turns on its own axis rather than orbiting. */
+#ws-sidebar .st-glyph {
+  width: 1em;
+  height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  background: none;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+/* A merge spends no color of its own (`none` in the vocabulary), so the glyph
+   takes the rail's accent — except the two that wait on a human, which are the
+   one merge state worth an alarm. */
+#ws-sidebar .st[data-glyph="queue"],
+#ws-sidebar .st[data-glyph="recycle"],
+#ws-sidebar .st[data-glyph="check"] { color: var(--accent); }
+#ws-sidebar .st[data-glyph="conflict"],
+#ws-sidebar .st[data-glyph="failed"] { color: var(--err); }
+#ws-sidebar .st[data-glyph="inactive"] { color: var(--muted); }
+#ws-sidebar .st[data-glyph="none"] { visibility: hidden; }
+/* ONE breath and ONE spin for the whole rail, so the animation always makes
+   the same claim: breathing = work in flight, spinning = the merge queue is on
+   this run. */
+#ws-sidebar .st.breathes { animation: ws-pulse 1.3s ease-in-out infinite; }
+#ws-sidebar .st.spins { animation: ws-spin 1.4s linear infinite; }
+
+/* THE ATTENTION MARKER, on the ONE cadence frontend.v1.RosterRowAttention
+   specifies: two blinks of 500 ms on / 500 ms off, then steady. The phases are
+   driven from src/sidebar/attention.ts (a stylesheet cannot hold a cadence that
+   must survive a redraw), so all this does is honor the state it stamps. */
+#ws-sidebar .sb-attn {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--async);
+}
+#ws-sidebar .ws[data-blink="off"] .sb-attn { opacity: 0; }
+#ws-sidebar .ws[data-blink="on"] .sb-attn,
+#ws-sidebar .ws[data-blink="steady"] .sb-attn { opacity: 1; }
+
+/* The priority badge: the resolver's own label, drawn verbatim, in the quiet
+   pill treatment the rail already uses for its counts. */
+#ws-sidebar .sb-prio {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.4em;
+}
+
+/* The row's action control, quiet until the row is hovered. */
+#ws-sidebar .sb-more {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  line-height: 1;
+  padding: 0 0.2rem;
+  cursor: pointer;
+  opacity: 0;
+}
+#ws-sidebar .row:hover .sb-more,
+#ws-sidebar .sb-more:focus-visible { opacity: 1; }
+#ws-sidebar .sb-more:hover { color: var(--fg); }
+
+/* THE VERB MENU opens DOWNWARD, inside the row's own box, so it can never
+   clip off the top of the rail; it caps its height and scrolls if the rail is
+   short. Delimited by the shared `.list-rows` rule, like every other list. */
+#ws-sidebar .sb-menu,
+#ws-sidebar .sb-submenu {
+  margin: 0.15rem 0.7rem 0.3rem 2rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  max-height: 60vh;
+  overflow-y: auto;
+  font-size: 0.78rem;
+}
+#ws-sidebar .sb-submenu { margin: 0.15rem 0 0.15rem 0.8rem; }
+#ws-sidebar .sb-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+#ws-sidebar .sb-menu-item:hover { background: var(--code-bg); }
+#ws-sidebar .sb-menu-item:disabled { color: var(--muted); cursor: default; }
+#ws-sidebar .sb-menu-destructive .sb-menu-item[data-verb="nuke"] { color: var(--err); }
+#ws-sidebar .sb-confirm { padding: 0.3rem 0.6rem 0.5rem; }
+#ws-sidebar .sb-confirm-note { color: var(--muted); font-size: 0.72rem; margin-bottom: 0.3rem; }
+#ws-sidebar .sb-confirm-name { width: 100%; margin-bottom: 0.3rem; }
+#ws-sidebar .sb-confirm-go {
+  border: 1px solid var(--err);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--err);
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+#ws-sidebar .sb-confirm-go:disabled { border-color: var(--border); color: var(--muted); cursor: default; }
+
+/* A refusal is said AT THE CONTROL that made the call, in the rail's error
+   hue, and never anywhere else. */
+#ws-sidebar .sb-refusal {
+  color: var(--err);
+  font-size: 0.7rem;
+  padding: 0.15rem 0.6rem 0.25rem;
+}
+/* A control with a call in flight takes no further clicks. */
+#ws-sidebar .is-busy { pointer-events: none; opacity: 0.6; }
+
+/* The two forms: the create-workspace form under a repo header, and the
+   one-field new-task form at the head of the task grouping. Both open
+   downward from the control that asked for them. */
+#ws-sidebar .sb-create,
+#ws-sidebar .sb-task-form {
+  margin: 0.2rem 0.7rem 0.4rem 1.2rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+#ws-sidebar .sb-create-field { display: flex; flex-direction: column; gap: 0.1rem; }
+#ws-sidebar .sb-create-field > span { color: var(--muted); font-size: 0.68rem; }
+#ws-sidebar .sb-create-field input,
+#ws-sidebar .sb-create-field select,
+#ws-sidebar .sb-create-field textarea,
+#ws-sidebar .sb-task-form input {
+  font: inherit;
+  font-size: 0.75rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.15rem 0.3rem;
+}
+#ws-sidebar .sb-create-radios { display: flex; gap: 0.6rem; }
+#ws-sidebar .sb-create-radios label,
+#ws-sidebar .sb-create-check { display: inline-flex; align-items: center; gap: 0.25rem; }
+#ws-sidebar .sb-create-standard,
+#ws-sidebar .sb-create-one-shot,
+#ws-sidebar .sb-create-shared { display: flex; flex-direction: column; gap: 0.3rem; }
+#ws-sidebar .sb-create-standard[hidden],
+#ws-sidebar .sb-create-one-shot[hidden],
+#ws-sidebar .sb-task-form[hidden] { display: none; }
+#ws-sidebar .sb-form-go {
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--info-ws);
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+#ws-sidebar .sb-form-go:hover { background: var(--code-bg); }
+#ws-sidebar .sb-task-create { padding: 0.35rem 0.7rem 0; }
+#ws-sidebar .task-rename { font: inherit; font-size: 0.75rem; }
