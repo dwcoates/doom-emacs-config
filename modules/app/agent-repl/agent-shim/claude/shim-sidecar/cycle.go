@@ -114,6 +114,13 @@ type sidecar struct {
 	attempts       int
 	suspendedSince time.Time
 	bootSwept      bool
+	// suspensionStated remembers that the WARNING opening this outage has been
+	// written. THE OUTAGE IS STATED ONCE, and a process that starts with no
+	// store is in an outage exactly like one whose store died mid-run — so the
+	// record belongs to the first FAILED attempt rather than to a transition
+	// between two live cycles, which is the transition a fresh process never
+	// makes and which therefore used to leave a boot outage entirely silent.
+	suspensionStated bool
 
 	// now and jitter are the cycle's clock and its backoff spread, injectable so
 	// the ladder is tested by advancing a fake clock rather than by waiting.
@@ -213,14 +220,37 @@ func (s *sidecar) attempt() {
 		s.attempts++
 		s.backoff = nextBackoff(s.backoff)
 		delay := s.jitter(s.backoff)
+		// A process whose FIRST cycle never began is a suspended process, and
+		// its outage is opened here: nothing else has a transition to report.
+		s.stateSuspension("recover-cursors", err)
 		// Reading no files IS the whole file plane stopped, so each retry is
 		// recorded — at verbose, because the WARNING that opened the suspension
 		// already said the loud part once.
-		s.log.With(logging.Context{Operation: "recover-cursors", Level: "warn"}).
-			LogVerbose("recovery attempt %d failed, retrying in %s while reading no files: %v", s.attempts, delay, err)
+		s.log.With(logging.Context{
+			Operation: "recover-cursors", Level: "warn",
+			Attempt: logging.Attempt(s.attempts), BackoffMs: logging.BackoffMs(delay),
+		}).LogVerbose("recovery attempt %d failed, retrying in %s while reading no files: %v", s.attempts, delay, err)
 		s.nextAttemptAt = s.now().Add(delay)
 		return
 	}
+}
+
+// stateSuspension writes the ONE WARNING that opens an outage, and only the
+// first time it is owed. Both entrances to suspension come through here — a
+// live cycle losing its store, and a first cycle that never began — so "the
+// outage is stated once" is a property of one function rather than a rule two
+// call sites have to keep agreeing on.
+func (s *sidecar) stateSuspension(operation string, cause error) {
+	if s.suspensionStated {
+		return
+	}
+	s.suspensionStated = true
+	// The caller owns the causal error; this record owns the transition, and
+	// names the dependency the file plane is now waiting on.
+	s.log.With(logging.Context{
+		Operation: "production-suspended", Level: "warn",
+		StoreSocket: s.options.StoreSocket, Attempt: logging.Attempt(s.attempts),
+	}).Log("production suspended after operation=%s; reading no files until a full cursor recovery succeeds: %v", operation, cause)
 }
 
 // beginCycle is the first act of every production cycle: recover the cursors,
@@ -237,7 +267,9 @@ func (s *sidecar) beginCycle() error {
 		return fmt.Errorf("recovering cursors: %w", err)
 	}
 	s.cursors = indexCursorsByPath(cursors)
-	s.log.With(logging.Context{Operation: "recover-cursors"}).Log(
+	// The outage is over, so the next one gets its own opening WARNING.
+	s.suspensionStated = false
+	s.log.With(logging.Context{Operation: "recover-cursors", StoreSocket: s.options.StoreSocket}).Log(
 		"production cycle begins: recovered %d cursor(s) from the store", len(s.cursors))
 
 	// Reading may begin now, and not one statement earlier.
@@ -271,12 +303,7 @@ func (s *sidecar) suspend(operation string, cause error) {
 	s.attempts = 0
 	s.backoff = 0
 	s.nextAttemptAt = s.now()
-	// The record that OPENS the outage: every tail stops here and the file plane
-	// produces nothing until the store answers again. The caller owns the causal
-	// error, so this record owns only the transition.
-	s.log.With(logging.Context{Operation: "production-suspended", Level: "warn"}).Log(
-		"production suspended after operation=%s; reading no files until a full cursor recovery succeeds", operation)
-	_ = cause
+	s.stateSuspension(operation, cause)
 }
 
 // noteStoreErr suspends production for any store error. There is no connection
@@ -297,7 +324,10 @@ func (s *sidecar) reportResumed() {
 		return
 	}
 	downMs := s.now().Sub(s.suspendedSince).Milliseconds()
-	s.log.With(logging.Context{Operation: "production-resumed"}).Log(
+	s.log.With(logging.Context{
+		Operation: "production-resumed", StoreSocket: s.options.StoreSocket,
+		Attempt: logging.Attempt(s.attempts),
+	}).Log(
 		"production resumed: the store was unreachable for %dms across %d failed recovery attempt(s), during which no file was read",
 		downMs, s.attempts)
 	s.attempts = 0

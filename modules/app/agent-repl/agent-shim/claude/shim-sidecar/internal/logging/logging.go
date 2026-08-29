@@ -85,11 +85,26 @@ type Context struct {
 	TurnID string
 	// StoreSocket is the store's UDS path.
 	StoreSocket string
+	// Attempt is the ordinal of a recovery attempt against an unreachable
+	// dependency, so an outage's progress is filterable rather than buried in
+	// the message text.
+	Attempt *int
+	// BackoffMs is the delay armed before the NEXT attempt, in milliseconds.
+	BackoffMs *int64
 }
 
 // Off boxes a byte offset for Context.Offset, so an unset offset is genuinely
 // absent rather than a zero that reads as "the start of the file".
 func Off(v int64) *int64 { return &v }
+
+// Attempt boxes a recovery attempt ordinal for Context.Attempt.
+func Attempt(v int) *int { return &v }
+
+// BackoffMs boxes an armed retry delay for Context.BackoffMs.
+func BackoffMs(d time.Duration) *int64 {
+	ms := d.Milliseconds()
+	return &ms
+}
 
 // Seq boxes a store write ordinal for Context.WriteSeq.
 func Seq(v uint64) *uint64 { return &v }
@@ -203,6 +218,12 @@ func contextMap(ctx Context) map[string]any {
 	}
 	if ctx.WriteSeq != nil {
 		out["write_seq"] = *ctx.WriteSeq
+	}
+	if ctx.Attempt != nil {
+		out["attempt"] = *ctx.Attempt
+	}
+	if ctx.BackoffMs != nil {
+		out["backoff_ms"] = *ctx.BackoffMs
 	}
 	return out
 }
@@ -334,6 +355,12 @@ func mergeContext(base, add Context) Context {
 	}
 	if add.WriteSeq != nil {
 		base.WriteSeq = add.WriteSeq
+	}
+	if add.Attempt != nil {
+		base.Attempt = add.Attempt
+	}
+	if add.BackoffMs != nil {
+		base.BackoffMs = add.BackoffMs
 	}
 	if add.SinkEmergency {
 		base.SinkEmergency = true
