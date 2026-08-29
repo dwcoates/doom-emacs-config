@@ -68,10 +68,9 @@ const (
 	// NotificationPermissionRequested is an agent blocked on consent, with the
 	// gated call's tool named.
 	NotificationPermissionRequested NotificationKind = "permission_requested"
-	// NotificationQuestionAsked is RESERVED for Landing 3's
-	// HostNotificationKind.question_asked{header}. Until that arm lands a
-	// blocked question is raised as NotificationAgentAddressed, and switching
-	// is a one-line change here and at the one route site.
+	// NotificationQuestionAsked is a question batch blocking the agent, which
+	// gets a permission ask's attention treatment. It carries the first
+	// question's chip label, as HostNotificationQuestionAsked.header does.
 	NotificationQuestionAsked NotificationKind = "question_asked"
 )
 
@@ -84,8 +83,12 @@ type HostNotification struct {
 	At time.Time
 	// Kind names it.
 	Kind NotificationKind
-	// ToolName is set for a permission notification, empty otherwise.
+	// ToolName is set for a permission notification, empty otherwise. It is
+	// HostNotificationPermissionRequested.tool_name.
 	ToolName string
+	// Header is set for a question notification, empty otherwise. It is
+	// HostNotificationQuestionAsked.header: the first question's chip label.
+	Header string
 }
 
 // FeedSink receives everything the feed resolver draws a row from. Every
@@ -134,6 +137,11 @@ type FooterSink interface {
 	OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission)
 	// OnApiError is mid-turn evidence the footer draws as a retry notice.
 	OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed)
+	// OnContextCut is the cut's END SIGNAL. SessionUpdate.compacting says a
+	// compaction BEGAN and nothing upstream says it finished, so this record
+	// is what clears the footer's compacting and clearing states — which is
+	// why the footer sees a page line the feed also draws.
+	OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut)
 	// OnAgentTerminal retires an agent from the status tree.
 	OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure)
 	// OnDetachedWork adds or updates a live-work chip.
@@ -235,6 +243,17 @@ type Watcher interface {
 	// two has named it, a terminal cannot be attributed to the main agent and
 	// OnTurnEnded is withheld rather than guessed.
 	SetMainAgent(agent *conversationv1.AgentId)
+	// OnTurnOpened is the prompt queue handing over an accepted turn: the
+	// prompt as StartTurn delivered it, and the opening page
+	// StartTurnSuccess now carries. It is the ONE entry point for a turn the
+	// watcher did not see opened on a stream — it names the main agent,
+	// records the turn a terminal will be attributed to, and feeds the page
+	// through the same history-page path a watch's own opening page takes.
+	//
+	// IT DOES NOT MIRROR THE PROMPT: the queue draws the accepted prompt's
+	// row itself, and the prompt also arrives as a history entry on the main
+	// watch. Two feed rows for one prompt is what routing it here would cost.
+	OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, page *conversationv1.HistoryPage)
 	// Close tears down every watch this workspace owns.
 	Close() error
 }
