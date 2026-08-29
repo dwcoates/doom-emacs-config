@@ -125,7 +125,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		options:  options,
 		store:    storeclient.New(options.StoreSocket, log.With(logging.Context{Component: "storeclient"})),
 		disc:     discover.New(options.ConfigRoots, options.SpoolRoot, log.With(logging.Context{Component: "discover"})),
-		tracker:  stale.New(stale.Options{}, log.With(logging.Context{Component: "stale"})),
+		tracker:  stale.New(options.Stale, log.With(logging.Context{Component: "stale"})),
 		log:      log,
 		watchers: map[string]*watched{},
 		rewound:  map[string]bool{},

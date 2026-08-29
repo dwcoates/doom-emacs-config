@@ -1,11 +1,16 @@
 package main
 
 import (
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
+	"agentrepl/shim-claude-sidecar/internal/stale"
 )
 
 func TestCycleBeginsOnlyAfterASuccessfulCursorRead(t *testing.T) {
@@ -413,5 +418,30 @@ func TestNoHeartbeatPathRemains(t *testing.T) {
 		if strings.Contains(strings.ToLower(h.logText()), retired) {
 			t.Fatalf("the retired %q path is still exercised; got %s", retired, h.logText())
 		}
+	}
+}
+
+// TestTheConfiguredLostWindowsReachTheTracker asserts the flag wiring lands:
+// a window that never reaches internal/stale is a flag that does nothing.
+func TestTheConfiguredLostWindowsReachTheTracker(t *testing.T) {
+	// Arrange: windows no production default could be confused with.
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "sidecar-test"})
+	options := Options{
+		StoreSocket: filepath.Join(os.TempDir(), "ar-unused.sock"),
+		Stale: stale.Options{
+			Grace:           11 * time.Millisecond,
+			ShellSilence:    22 * time.Millisecond,
+			AgentSilence:    33 * time.Millisecond,
+			WorkflowSilence: 44 * time.Millisecond,
+		},
+	}
+
+	// Act.
+	sc := newSidecar(options, log)
+
+	// Assert.
+	if got := sc.tracker.Windows(); got != options.Stale {
+		t.Fatalf("the tracker runs with %+v, want the configured %+v", got, options.Stale)
 	}
 }
