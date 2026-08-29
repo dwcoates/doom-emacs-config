@@ -539,7 +539,7 @@ observed as a stale flag force-cleared with a warning minutes later."
               (agent-repl--log ws "normal-entry")
               (agent-repl--info ws "info-entry")
               (agent-repl--warn ws "warn-entry")
-              (should-error (agent-repl--error ws "error-entry") :type 'error)
+              (agent-repl--error ws "error-entry")
               ;; Verbose records persist even when terminal visibility is off.
               (agent-repl--log-verbose ws "terminal-hidden-verbose-entry")
               (let ((agent-repl-debug 'verbose))
@@ -555,7 +555,7 @@ observed as a stale flag force-cleared with a warning minutes later."
                               records)))
               (should (equal messages
                              '("normal-entry" "info-entry"
-                               "WARNING: warn-entry" "error-entry"
+                               "WARNING: warn-entry" "ERROR: error-entry"
                                "terminal-hidden-verbose-entry"
                                "terminal-visible-verbose-entry")))))
         (when (buffer-live-p buf)
@@ -566,9 +566,10 @@ observed as a stale flag force-cleared with a warning minutes later."
 ;;
 ;; The invariant under test: the log file and *Messages* are the QUIET sink
 ;; and take everything; the echo area / modeline is the LOUD sink and is
-;; reserved for GENUINE FATAL errors alone — `agent-repl--error', which
-;; reaches it by SIGNALLING an `error', not through the gate below.  Every
-;; ladder level (including `agent-repl--warn') emits quietly.
+;; reserved for GENUINE FATAL conditions alone, which reach it by SIGNALLING
+;; an `error' (`agent-repl--do-log' with ERROR-P), not through the gate
+;; below.  EVERY ladder level — `agent-repl--warn' and `agent-repl--error'
+;; alike — emits quietly.
 ;; `inhibit-message' is what separates the quiet emits — when it is non-nil
 ;; at the moment `message' runs, the line reaches *Messages* but never the
 ;; echo area.  So "did this quiet line reach the modeline?" is exactly "was
@@ -722,31 +723,78 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
 
 ;;;; ---- Tests: error ----
 
-(ert-deftest agent-repl-test-error-signals-regardless-of-debug ()
-  "`agent-repl--error' should signal even when `agent-repl-debug' is nil."
-  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
-    (let ((agent-repl-debug nil))
-      (should-error (agent-repl--error nil "bad %s" "thing") :type 'error))))
+(ert-deftest agent-repl-test-error-does-not-signal ()
+  "`agent-repl--error' RECORDS a failure; it never unwinds the caller.
+The error rung exists so a branch can log its own failure and still return
+one to its caller.  A caller that must abort signals for itself."
+  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
+            ((symbol-function 'agent-repl--emit-message) #'ignore))
+    (should (equal (progn (agent-repl--error nil "bad %s" "thing") 'returned)
+                   'returned))))
+
+(ert-deftest agent-repl-test-error-emits-regardless-of-debug ()
+  "`agent-repl--error' emits with `agent-repl-debug' nil — it is ungated."
+  (let ((agent-repl-debug nil))
+    (let ((res (agent-repl-test--capture-emission
+                (lambda () (agent-repl--error nil "bad %s" "thing")))))
+      (should (plist-get res :called)))))
+
+(ert-deftest agent-repl-test-error-emits-quietly ()
+  "`agent-repl--error' stays on the QUIET sink: it never reaches the echo area."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--error nil "bad thing")))))
+    (should-not (plist-get res :echoed))))
 
 (ert-deftest agent-repl-test-error-formats-fmt-and-args ()
-  "`agent-repl--error' should expand FMT with ARGS in the error message."
-  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
-    (condition-case err
-        (progn
-          (agent-repl--error nil "ws=%s code=%d" "foo" 7)
-          (should nil))
-      (error
-       (should (string-match-p "ws=foo code=7" (error-message-string err)))))))
+  "`agent-repl--error' expands FMT with ARGS in the emitted line."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--error nil "ws=%s code=%d" "foo" 7)))))
+    (should (string-match-p "ws=foo code=7" (plist-get res :text)))))
 
 (ert-deftest agent-repl-test-error-includes-agent-repl-tag ()
-  "`agent-repl--error' output should include the [agent-repl] tag."
-  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
-    (condition-case err
-        (progn
-          (agent-repl--error nil "something")
-          (should nil))
-      (error
-       (should (string-match-p "\\[agent-repl\\] something" (error-message-string err)))))))
+  "`agent-repl--error' output includes the [agent-repl] tag."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--error nil "something")))))
+    (should (string-match-p "\\[agent-repl\\] ERROR: something" (plist-get res :text)))))
+
+(ert-deftest agent-repl-test-error-prepends-severity-tag ()
+  "`agent-repl--error' prepends the `ERROR: ' severity tag, as `--warn' does."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--error nil "boom")))))
+    (should (string-match-p "ERROR: boom" (plist-get res :text)))))
+
+(ert-deftest agent-repl-test-error-passes-non-string-fmt-through-untouched ()
+  "A non-string FMT is handed through rather than `concat'-ed into a type error."
+  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
+            ((symbol-function 'agent-repl--emit-message) #'ignore))
+    (should (equal (progn (agent-repl--error nil 'not-a-string) 'returned)
+                   'returned))))
+
+(ert-deftest agent-repl-test-error-persists-record-at-level-error ()
+  "The persisted JSONL record carries `level' = \"error\" per logging-contract.md."
+  (let ((captured nil))
+    (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
+              ((symbol-function 'agent-repl--persist-log-record)
+               (lambda (_ws level _verbosity _fmt _args) (setq captured level))))
+      (agent-repl--error nil "boom")
+      (should (equal captured "error")))))
+
+(ert-deftest agent-repl-test-error-persists-record-at-normal-verbosity ()
+  "The persisted record is `normal' verbosity, so the durable sink keeps it."
+  (let ((captured nil))
+    (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
+              ((symbol-function 'agent-repl--persist-log-record)
+               (lambda (_ws _level verbosity _fmt _args) (setq captured verbosity))))
+      (agent-repl--error nil "boom")
+      (should (equal captured "normal")))))
+
+(ert-deftest agent-repl-test-error-record-clears-default-file-threshold ()
+  "An error record persists under the default `agent-repl-log-file-level'."
+  (should (agent-repl--log-record-persists-p "error" "normal")))
+
+(ert-deftest agent-repl-test-error-record-clears-default-buffer-threshold ()
+  "An error record displays under the default `agent-repl-log-buffer-level'."
+  (should (agent-repl--log-record-displays-p "error" "normal")))
 
 ;;;; ---- Tests: state-dir / state-file ----
 
