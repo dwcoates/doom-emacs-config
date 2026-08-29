@@ -303,13 +303,17 @@ func (x *ReadHistorySuccess) GetPage() *v1.HistoryPage {
 	return nil
 }
 
-// Not served. `kind` arms are DERIVED at the wave from the shim's real
-// refusal sites: an unknown agent, a continuation the store no longer
-// honors, the store unavailable.
+// Not served. THE ARM IS WHY.
 type ReadHistoryFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The shim's account, for a human and for logs; never switched on.
-	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	Detail string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*ReadHistoryFailure_UnknownAgent
+	//	*ReadHistoryFailure_StalePointer
+	//	*ReadHistoryFailure_StoreUnavailable
+	Kind          isReadHistoryFailure_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -351,6 +355,173 @@ func (x *ReadHistoryFailure) GetDetail() string {
 	return ""
 }
 
+func (x *ReadHistoryFailure) GetKind() isReadHistoryFailure_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *ReadHistoryFailure) GetUnknownAgent() *ReadHistoryUnknownAgent {
+	if x != nil {
+		if x, ok := x.Kind.(*ReadHistoryFailure_UnknownAgent); ok {
+			return x.UnknownAgent
+		}
+	}
+	return nil
+}
+
+func (x *ReadHistoryFailure) GetStalePointer() *ReadHistoryStalePointer {
+	if x != nil {
+		if x, ok := x.Kind.(*ReadHistoryFailure_StalePointer); ok {
+			return x.StalePointer
+		}
+	}
+	return nil
+}
+
+func (x *ReadHistoryFailure) GetStoreUnavailable() *ReadHistoryStoreUnavailable {
+	if x != nil {
+		if x, ok := x.Kind.(*ReadHistoryFailure_StoreUnavailable); ok {
+			return x.StoreUnavailable
+		}
+	}
+	return nil
+}
+
+type isReadHistoryFailure_Kind interface {
+	isReadHistoryFailure_Kind()
+}
+
+type ReadHistoryFailure_UnknownAgent struct {
+	// The addressed agent is not known.
+	UnknownAgent *ReadHistoryUnknownAgent `protobuf:"bytes,2,opt,name=unknown_agent,json=unknownAgent,proto3,oneof"`
+}
+
+type ReadHistoryFailure_StalePointer struct {
+	// The echoed pointer names a position the store no longer honors.
+	StalePointer *ReadHistoryStalePointer `protobuf:"bytes,3,opt,name=stale_pointer,json=stalePointer,proto3,oneof"`
+}
+
+type ReadHistoryFailure_StoreUnavailable struct {
+	// The store could not be reached.
+	StoreUnavailable *ReadHistoryStoreUnavailable `protobuf:"bytes,4,opt,name=store_unavailable,json=storeUnavailable,proto3,oneof"`
+}
+
+func (*ReadHistoryFailure_UnknownAgent) isReadHistoryFailure_Kind() {}
+
+func (*ReadHistoryFailure_StalePointer) isReadHistoryFailure_Kind() {}
+
+func (*ReadHistoryFailure_StoreUnavailable) isReadHistoryFailure_Kind() {}
+
+type ReadHistoryUnknownAgent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadHistoryUnknownAgent) Reset() {
+	*x = ReadHistoryUnknownAgent{}
+	mi := &file_shim_v1_endpoint_read_history_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadHistoryUnknownAgent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadHistoryUnknownAgent) ProtoMessage() {}
+
+func (x *ReadHistoryUnknownAgent) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_read_history_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadHistoryUnknownAgent.ProtoReflect.Descriptor instead.
+func (*ReadHistoryUnknownAgent) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_read_history_proto_rawDescGZIP(), []int{5}
+}
+
+type ReadHistoryStalePointer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadHistoryStalePointer) Reset() {
+	*x = ReadHistoryStalePointer{}
+	mi := &file_shim_v1_endpoint_read_history_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadHistoryStalePointer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadHistoryStalePointer) ProtoMessage() {}
+
+func (x *ReadHistoryStalePointer) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_read_history_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadHistoryStalePointer.ProtoReflect.Descriptor instead.
+func (*ReadHistoryStalePointer) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_read_history_proto_rawDescGZIP(), []int{6}
+}
+
+type ReadHistoryStoreUnavailable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadHistoryStoreUnavailable) Reset() {
+	*x = ReadHistoryStoreUnavailable{}
+	mi := &file_shim_v1_endpoint_read_history_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadHistoryStoreUnavailable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadHistoryStoreUnavailable) ProtoMessage() {}
+
+func (x *ReadHistoryStoreUnavailable) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_read_history_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadHistoryStoreUnavailable.ProtoReflect.Descriptor instead.
+func (*ReadHistoryStoreUnavailable) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_read_history_proto_rawDescGZIP(), []int{7}
+}
+
 var File_shim_v1_endpoint_read_history_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_read_history_proto_rawDesc = "" +
@@ -370,9 +541,16 @@ const file_shim_v1_endpoint_read_history_proto_rawDesc = "" +
 	"\afailure\x18\x02 \x01(\v2\x1b.shim.v1.ReadHistoryFailureH\x00R\afailureB\b\n" +
 	"\x06result\"F\n" +
 	"\x12ReadHistorySuccess\x120\n" +
-	"\x04page\x18\x01 \x01(\v2\x1c.conversation.v1.HistoryPageR\x04page\",\n" +
+	"\x04page\x18\x01 \x01(\v2\x1c.conversation.v1.HistoryPageR\x04page\"\x9b\x02\n" +
 	"\x12ReadHistoryFailure\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detailB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x06detail\x18\x01 \x01(\tR\x06detail\x12G\n" +
+	"\runknown_agent\x18\x02 \x01(\v2 .shim.v1.ReadHistoryUnknownAgentH\x00R\funknownAgent\x12G\n" +
+	"\rstale_pointer\x18\x03 \x01(\v2 .shim.v1.ReadHistoryStalePointerH\x00R\fstalePointer\x12S\n" +
+	"\x11store_unavailable\x18\x04 \x01(\v2$.shim.v1.ReadHistoryStoreUnavailableH\x00R\x10storeUnavailableB\x06\n" +
+	"\x04kind\"\x19\n" +
+	"\x17ReadHistoryUnknownAgent\"\x19\n" +
+	"\x17ReadHistoryStalePointer\"\x1d\n" +
+	"\x1bReadHistoryStoreUnavailableB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_read_history_proto_rawDescOnce sync.Once
@@ -386,29 +564,35 @@ func file_shim_v1_endpoint_read_history_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_read_history_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_read_history_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_shim_v1_endpoint_read_history_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_shim_v1_endpoint_read_history_proto_goTypes = []any{
-	(*ReadHistoryRequest)(nil),  // 0: shim.v1.ReadHistoryRequest
-	(*ReadHistoryFirst)(nil),    // 1: shim.v1.ReadHistoryFirst
-	(*ReadHistoryResponse)(nil), // 2: shim.v1.ReadHistoryResponse
-	(*ReadHistorySuccess)(nil),  // 3: shim.v1.ReadHistorySuccess
-	(*ReadHistoryFailure)(nil),  // 4: shim.v1.ReadHistoryFailure
-	(*v1.AgentId)(nil),          // 5: conversation.v1.AgentId
-	(*v1.HistoryPointer)(nil),   // 6: conversation.v1.HistoryPointer
-	(*v1.HistoryPage)(nil),      // 7: conversation.v1.HistoryPage
+	(*ReadHistoryRequest)(nil),          // 0: shim.v1.ReadHistoryRequest
+	(*ReadHistoryFirst)(nil),            // 1: shim.v1.ReadHistoryFirst
+	(*ReadHistoryResponse)(nil),         // 2: shim.v1.ReadHistoryResponse
+	(*ReadHistorySuccess)(nil),          // 3: shim.v1.ReadHistorySuccess
+	(*ReadHistoryFailure)(nil),          // 4: shim.v1.ReadHistoryFailure
+	(*ReadHistoryUnknownAgent)(nil),     // 5: shim.v1.ReadHistoryUnknownAgent
+	(*ReadHistoryStalePointer)(nil),     // 6: shim.v1.ReadHistoryStalePointer
+	(*ReadHistoryStoreUnavailable)(nil), // 7: shim.v1.ReadHistoryStoreUnavailable
+	(*v1.AgentId)(nil),                  // 8: conversation.v1.AgentId
+	(*v1.HistoryPointer)(nil),           // 9: conversation.v1.HistoryPointer
+	(*v1.HistoryPage)(nil),              // 10: conversation.v1.HistoryPage
 }
 var file_shim_v1_endpoint_read_history_proto_depIdxs = []int32{
-	5, // 0: shim.v1.ReadHistoryRequest.target:type_name -> conversation.v1.AgentId
-	1, // 1: shim.v1.ReadHistoryRequest.first:type_name -> shim.v1.ReadHistoryFirst
-	6, // 2: shim.v1.ReadHistoryRequest.after:type_name -> conversation.v1.HistoryPointer
-	3, // 3: shim.v1.ReadHistoryResponse.success:type_name -> shim.v1.ReadHistorySuccess
-	4, // 4: shim.v1.ReadHistoryResponse.failure:type_name -> shim.v1.ReadHistoryFailure
-	7, // 5: shim.v1.ReadHistorySuccess.page:type_name -> conversation.v1.HistoryPage
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	8,  // 0: shim.v1.ReadHistoryRequest.target:type_name -> conversation.v1.AgentId
+	1,  // 1: shim.v1.ReadHistoryRequest.first:type_name -> shim.v1.ReadHistoryFirst
+	9,  // 2: shim.v1.ReadHistoryRequest.after:type_name -> conversation.v1.HistoryPointer
+	3,  // 3: shim.v1.ReadHistoryResponse.success:type_name -> shim.v1.ReadHistorySuccess
+	4,  // 4: shim.v1.ReadHistoryResponse.failure:type_name -> shim.v1.ReadHistoryFailure
+	10, // 5: shim.v1.ReadHistorySuccess.page:type_name -> conversation.v1.HistoryPage
+	5,  // 6: shim.v1.ReadHistoryFailure.unknown_agent:type_name -> shim.v1.ReadHistoryUnknownAgent
+	6,  // 7: shim.v1.ReadHistoryFailure.stale_pointer:type_name -> shim.v1.ReadHistoryStalePointer
+	7,  // 8: shim.v1.ReadHistoryFailure.store_unavailable:type_name -> shim.v1.ReadHistoryStoreUnavailable
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_read_history_proto_init() }
@@ -424,13 +608,18 @@ func file_shim_v1_endpoint_read_history_proto_init() {
 		(*ReadHistoryResponse_Success)(nil),
 		(*ReadHistoryResponse_Failure)(nil),
 	}
+	file_shim_v1_endpoint_read_history_proto_msgTypes[4].OneofWrappers = []any{
+		(*ReadHistoryFailure_UnknownAgent)(nil),
+		(*ReadHistoryFailure_StalePointer)(nil),
+		(*ReadHistoryFailure_StoreUnavailable)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_read_history_proto_rawDesc), len(file_shim_v1_endpoint_read_history_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
