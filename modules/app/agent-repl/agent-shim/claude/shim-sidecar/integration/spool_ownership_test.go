@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	storev1 "agentrepl/proto/store/v1"
 )
@@ -16,9 +17,17 @@ import (
 // total-ingestion violation whose bytes still land as residue; and the /tmp
 // versus /private/tmp spellings of one file are one file.
 
-// TestASpoolSeenBeforeItsOwnerIsRetained asserts an unowned spool is kept and
-// re-checked rather than discarded.
-func TestASpoolSeenBeforeItsOwnerIsRetained(t *testing.T) {
+// TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue asserts the
+// whole shape of the hold, which the design states in two halves:
+//
+//   - HELD MEANS DISCOVERED AND RE-CHECKED, NOT TAILED. A spool whose spawning
+//     call has not been read names no run, so reading it would mean either
+//     inventing an owner or keying its output on the spool path's runtime id.
+//     Nothing is read, so no cursor is offered for it.
+//   - AN AGED UNOWNED SPOOL IS NEVER DROPPED. Once the bounded wait lapses the
+//     bytes are ingested attributed to the residue path, with a WARNING, and the
+//     file keeps being tailed — so a cursor appears exactly then and not before.
+func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -28,21 +37,85 @@ func TestASpoolSeenBeforeItsOwnerIsRetained(t *testing.T) {
 	slug := cwdSlug(cwd)
 	session := "10101010-1010-4010-8010-101010101010"
 	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)
+	payload := "output written before anyone claimed it\n"
+	opts := defaultSidecarOptions(t, fake.Socket, tree)
+	// Long enough that the held state is observable, short enough that the
+	// lapse is too.
+	opts.UnownedSpoolWindow = 2 * time.Second
 
-	// Act: the spool exists first; its owner appears only afterwards.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	// Act: the spool exists and no transcript ever names it.
+	startSidecar(t, opts)
 	spool := newGrowingFile(t, spoolPath)
-	spool.AppendRaw([]byte("output written before anyone claimed it\n"))
-	awaitAnyCursorFor(ctx, t, fake, spoolPath)
+	spool.AppendRaw([]byte(payload))
+	awaitLog(ctx, t, opts.LogPath, "the spool being held", func(r logRecord) bool {
+		return r.Operation == "hold-spool" && samePathAny(r.Context["path"], spoolPath)
+	})
 
-	// Assert: the file is being read, and nothing said it was dropped.
-	if latestCursorFor(fake.Batches(), spoolPath) == nil {
-		t.Fatalf("an unowned spool must stay discovered and be re-checked, never dropped")
+	// Assert (the first half): held is not tailed, so nothing was read.
+	if cs := latestCursorFor(fake.Batches(), spoolPath); cs != nil {
+		t.Fatalf("a held spool was tailed: a cursor for %s was offered at %d while its owner was unknown", spoolPath, cs.GetOffset())
+	}
+
+	// Act (the second half): let the bounded wait lapse.
+	awaitLog(ctx, t, opts.LogPath, "the hold expiring", func(r logRecord) bool {
+		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
+	})
+	fake.awaitEntry(ctx, t, "residue naming the aged spool", func(e *storev1.StoreEntry) bool {
+		u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
+		return u != nil && samePath(u.GetSource(), spoolPath)
+	})
+
+	// Assert (the second half): the bytes landed and the file is being read.
+	awaitAnyCursorFor(ctx, t, fake, spoolPath)
+	var found bool
+	for _, r := range unparsedOf(fake.Entries()) {
+		if !samePath(r.GetSource(), spoolPath) {
+			continue
+		}
+		found = true
+		if !strings.Contains(r.GetRaw(), strings.TrimSpace(payload)) {
+			t.Errorf("residue for %s carries %q, wanted the spool's bytes %q", spoolPath, r.GetRaw(), payload)
+		}
+	}
+	if !found {
+		t.Fatal("an aged unowned spool's bytes were dropped rather than ingested as residue")
 	}
 }
 
+// TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses asserts the lapse is
+// a stated degradation rather than a silent reclassification: the bytes stop
+// being a shell run's output and become residue, and that is worth saying once.
+func TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	cwd := "/Users/dodgecoates/spool-orphan-warning-probe"
+	slug := cwdSlug(cwd)
+	session := "11111111-1111-4111-8111-111111111111"
+	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)
+	opts := defaultSidecarOptions(t, fake.Socket, tree)
+
+	// Act.
+	startSidecar(t, opts)
+	spool := newGrowingFile(t, spoolPath)
+	spool.AppendRaw([]byte("nobody claimed this\n"))
+
+	// Assert.
+	rec := awaitLog(ctx, t, opts.LogPath, "the hold-expiry warning", func(r logRecord) bool {
+		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
+	})
+	if rec.Level != "warn" {
+		t.Errorf("the hold expired at level %q; an aged unowned spool is a degradation and is stated as a WARNING", rec.Level)
+	}
+	_ = fake
+}
+
 // TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears asserts the retained spool
-// is attributed to the spawning call as soon as the transcript names it.
+// is attributed to the spawning call as soon as the transcript names it — which
+// is the point of holding rather than reading it: the run's whole output lands
+// under the call's identity, with no prefix of it stranded as residue.
 func TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -54,17 +127,23 @@ func TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears(t *testing.T) {
 	session := "20202020-2020-4020-8020-202020202020"
 	captured := loadCapturedSession(t)
 	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)
+	opts := defaultSidecarOptions(t, fake.Socket, tree)
+	// The owner arrives well inside the window, which is the ordinary case: the
+	// launch line is written when the task starts.
+	opts.UnownedSpoolWindow = 30 * time.Second
 
 	call := retargetSession(t, decodeRecord(t, captured.Lines[8]), session, cwd)
 	result := retargetSession(t, decodeRecord(t, captured.Lines[10]), session, cwd)
 	result = setToolResultText(t, result, backgroundLaunchText(capturedSpoolTask1, spoolPath))
 	result = setNested(t, result, "toolUseResult", "backgroundTaskId", capturedSpoolTask1)
 
-	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	// Act: the spool appears first and is HELD, so no cursor is offered for it.
+	startSidecar(t, opts)
 	spool := newGrowingFile(t, spoolPath)
 	spool.AppendRaw([]byte("orphaned output\n"))
-	awaitAnyCursorFor(ctx, t, fake, spoolPath)
+	awaitLog(ctx, t, opts.LogPath, "the spool being held", func(r logRecord) bool {
+		return r.Operation == "hold-spool" && samePathAny(r.Context["path"], spoolPath)
+	})
 
 	parent := newGrowingFile(t, tree.sessionPath(slug, session))
 	parent.AppendLine(encodeRecord(t, call))
@@ -73,10 +152,16 @@ func TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears(t *testing.T) {
 		return e.GetAgentUpdate().GetBash().GetRun().GetValue() == capturedBashCall1
 	})
 
-	// Assert.
+	// Assert: the whole spool landed under the spawning call, none of it as
+	// residue.
 	frames := bashFramesForRun(fake.Entries(), capturedBashCall1)
 	if len(frames) == 0 {
 		t.Fatalf("the spool was never attributed to its owner; runs seen: %v", runsSeen(fake.Entries()))
+	}
+	for _, r := range unparsedOf(fake.Entries()) {
+		if samePath(r.GetSource(), spoolPath) {
+			t.Errorf("a spool that was claimed inside its window still had bytes ingested as residue: %q", r.GetRaw())
+		}
 	}
 }
 

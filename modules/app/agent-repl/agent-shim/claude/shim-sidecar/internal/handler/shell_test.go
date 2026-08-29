@@ -229,3 +229,95 @@ func TestSpoolFramesAreKeyedByTheSpawningCallRatherThanTheVendorTaskId(t *testin
 	}
 	entryByKey(t, entries, convert.BashKey("toolu_run1"))
 }
+
+func TestATerminalCarriesTheWholeRunsOutputRatherThanTheLastBatch(t *testing.T) {
+	// Arrange. A spool whose EXIT marker arrives on a LATER poll than its output
+	// would otherwise settle carrying only the final chunk while claiming to
+	// carry the whole — erasing everything the run actually said.
+	h := NewShellOutputHandler(testLogger(t))
+	ctx := spoolContext("/t/b1.output", "bbkq1", "toolu_run1")
+
+	// Act.
+	h.Handle(spoolFrames("first chunk\n", 0), ctx)
+	entries := h.Handle(spoolFrames("EXIT=0\n", 12), ctx)
+
+	// Assert.
+	var settled bool
+	for _, e := range entries {
+		success := e.GetAgentUpdate().GetBash().GetFrame().GetSuccess()
+		if success == nil {
+			continue
+		}
+		settled = true
+		if got := success.GetCompleted().GetOutput().GetText().GetStdout(); got != "first chunk\nEXIT=0\n" {
+			t.Fatalf("terminal stdout = %q, want everything the run said", got)
+		}
+	}
+	if !settled {
+		t.Fatal("the EXIT marker produced no terminal")
+	}
+}
+
+func TestALostTerminalCarriesTheOutputTheRunHadProduced(t *testing.T) {
+	// Arrange. A LOST run's terminal is the last thing any reader will see of
+	// it, so settling it with an empty output would throw away the only account
+	// of what it managed to do.
+	h := NewShellOutputHandler(testLogger(t))
+	ctx := spoolContext("/t/b1.output", "bbkq1", "toolu_run1")
+	h.Handle(spoolFrames("all it managed to say\n", 0), ctx)
+
+	// Act.
+	entries := h.LostTerminal("bbkq1", "toolu_run1", "owner-agent", "went_silent")
+
+	// Assert.
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	got := entries[0].GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput().GetText().GetStdout()
+	if got != "all it managed to say\n" {
+		t.Fatalf("LOST terminal stdout = %q, want the output the run had produced", got)
+	}
+}
+
+func TestAMarkerOnItsOwnPollIsRecognizedAfterANewlineTerminatedBatch(t *testing.T) {
+	// Arrange. The raw spool codec carries nothing, so a batch may begin
+	// mid-line and a marker at its very start cannot be trusted on its own. It
+	// CAN be trusted when the previous batch ended on a newline — which is the
+	// ordinary shape of a command that finishes between two polls.
+	h := NewShellOutputHandler(testLogger(t))
+	ctx := spoolContext("/t/b1.output", "bbkq1", "toolu_run1")
+	h.Handle(spoolFrames("first chunk\n", 0), ctx)
+
+	// Act.
+	entries := h.Handle(spoolFrames("EXIT=0\n", 12), ctx)
+
+	// Assert.
+	var settled bool
+	for _, e := range entries {
+		if e.GetAgentUpdate().GetBash().GetFrame().GetSuccess() != nil {
+			settled = true
+		}
+	}
+	if !settled {
+		t.Fatal("a marker arriving on its own poll after a newline-terminated batch must end the run")
+	}
+}
+
+func TestAMarkerOpeningAMidLineBatchIsNotTrusted(t *testing.T) {
+	// Arrange. `EXIT=` is common as ordinary output, and a batch that continues
+	// an unterminated line may be carrying its tail — so the marker is refused
+	// and the staleness policy owns the outcome, exactly as before.
+	h := NewShellOutputHandler(testLogger(t))
+	ctx := spoolContext("/t/b1.output", "bbkq1", "toolu_run1")
+	h.Handle(spoolFrames("BUILD_", 0), ctx)
+
+	// Act.
+	entries := h.Handle(spoolFrames("EXIT=0\n", 6), ctx)
+
+	// Assert.
+	for _, e := range entries {
+		if e.GetAgentUpdate().GetBash().GetFrame().GetSuccess() != nil {
+			t.Fatal("a marker continuing an unterminated line must not end the run")
+		}
+	}
+}

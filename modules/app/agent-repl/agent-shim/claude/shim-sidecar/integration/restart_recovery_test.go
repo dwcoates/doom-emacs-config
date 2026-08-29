@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,7 +42,8 @@ func TestARestartLeavesNoGapAndNoRepeat(t *testing.T) {
 		g.AppendLine(line)
 	}
 	startSidecar(t, opts)
-	lines := awaitBookLines(ctx, t, store.Client, captured.Session, 4)
+	lines := awaitBookUnits(ctx, t, store.Client, captured.Session,
+		capturedThinking1, capturedBashCall1, capturedThinking2, capturedBashCall2)
 
 	// Assert: no unit appears twice, and the four expected units are all there.
 	seen := map[string]int{}
@@ -99,9 +101,22 @@ func TestARestartMintsIdenticalWriteIdsForReplayedRecords(t *testing.T) {
 	}
 }
 
-// TestAStoreCursorIsHonoredSoOnlyTheTailIsWritten seeds a cursor mid-file and
-// asserts the sidecar writes only what follows it.
-func TestAStoreCursorIsHonoredSoOnlyTheTailIsWritten(t *testing.T) {
+// TestASeededCursorIsResumedFromTheInProgressTurnsFirstRecord pins the project
+// lead's REWIND RULING against a seeded cursor.
+//
+// THE RULING. On boot each tailer resumes from the store's cursor REWOUND to the
+// in-progress turn's first record: re-emitted records mint identical write_ids
+// and are absorbed where the store already holds them, and land where it does
+// not. So "only the tail is written" is NOT the contract — a cursor mid-turn is
+// deliberately walked back, because a converter's joins are in memory and a turn
+// read half before a restart has no open call for its results to settle.
+//
+// What the rewind does NOT license is re-reading EARLIER turns: the scan stops
+// at the last turn start at or before the cursor, so records from before it must
+// not land. The captured transcript opens with vendor bookkeeping (its
+// queue-operation lines) ahead of the only user prompt in the file, which is
+// exactly that "before the turn" region.
+func TestASeededCursorIsResumedFromTheInProgressTurnsFirstRecord(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -109,6 +124,7 @@ func TestAStoreCursorIsHonoredSoOnlyTheTailIsWritten(t *testing.T) {
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	path := tree.sessionPath(captured.Slug, captured.Session)
+	opts := defaultSidecarOptions(t, fake.Socket, tree)
 
 	g := newGrowingFile(t, path)
 	var headBytes int64
@@ -118,6 +134,7 @@ func TestAStoreCursorIsHonoredSoOnlyTheTailIsWritten(t *testing.T) {
 			headBytes = start + int64(len(line)) + 1
 		}
 	}
+	turnStart := turnStartOffsetAtOrBefore(t, captured.Lines, headBytes)
 	fake.SeedCursors(&storev1.CursorState{
 		FileId: fileID(t, path),
 		Path:   path,
@@ -125,21 +142,92 @@ func TestAStoreCursorIsHonoredSoOnlyTheTailIsWritten(t *testing.T) {
 	})
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	awaitCursorInBatches(ctx, t, fake, path, g.Offset())
 
-	// Assert: nothing before the seeded offset was re-read.
-	held := map[string]bool{}
-	for _, e := range fake.Entries() {
-		held[e.GetUpsertKey()] = true
-	}
-	if held["activity:"+capturedThinking1] {
-		t.Errorf("unit %q lies before the seeded cursor and must not be written", capturedThinking1)
-	}
+	// Assert: the tail after the cursor landed.
+	held := upsertKeySet(fake.Entries())
 	if !held["activity:"+capturedBashCall2] {
 		t.Errorf("unit %q lies after the seeded cursor and must be written; keys held: %v",
 			capturedBashCall2, sortedStrings(keysOf(held)))
 	}
+
+	// Assert: the rewind is a STATED decision naming the offset it rewound to,
+	// and that offset is the in-progress turn's first record.
+	rec := awaitLog(ctx, t, opts.LogPath, "the boot rewind record", func(r logRecord) bool {
+		return r.Operation == "boot-rewind" && samePathAny(r.Context["path"], path) &&
+			strings.Contains(r.Message, "rewound")
+	})
+	rewound, ok := rec.Context["offset"].(float64)
+	if !ok {
+		t.Fatalf("the rewind record must name the offset it rewound to; its context was %v", rec.Context)
+	}
+	if int64(rewound) != turnStart {
+		t.Errorf("rewound to offset %d, wanted the in-progress turn's first record at %d", int64(rewound), turnStart)
+	}
+	if int64(rewound) > headBytes {
+		t.Errorf("rewound to offset %d, which is PAST the seeded cursor at %d", int64(rewound), headBytes)
+	}
+
+	// Assert: nothing from before that turn was re-read. The file's
+	// queue-operation lines are the only records ahead of its single turn start.
+	for _, kind := range vendorSpecificKinds(fake.Entries()) {
+		if kind == "queue-operation" {
+			t.Errorf("a record from BEFORE the in-progress turn was written; the rewind stops at the turn's first record, not at the file's")
+		}
+	}
+}
+
+// turnStartOffsetAtOrBefore answers the byte offset of the last turn-opening
+// record at or before limit — a user record carrying PROSE rather than a
+// tool_result, which is the boundary the production rewind scans back to.
+// Computed here from the fixture's own bytes so the subject never imports the
+// production predicate it is checking.
+func turnStartOffsetAtOrBefore(t *testing.T, lines []string, limit int64) int64 {
+	t.Helper()
+	var offset, found int64
+	found = -1
+	for _, line := range lines {
+		start := offset
+		offset += int64(len(line)) + 1
+		if start >= limit {
+			break
+		}
+		var rec struct {
+			Type    string `json:"type"`
+			IsMeta  bool   `json:"isMeta"`
+			Message struct {
+				Content any `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("fixture line is not JSON: %v", err)
+		}
+		if rec.Type != "user" || rec.IsMeta {
+			continue
+		}
+		switch content := rec.Message.Content.(type) {
+		case string:
+			if content != "" {
+				found = start
+			}
+		case []any:
+			for _, raw := range content {
+				block, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				if block["type"] == "text" {
+					found = start
+					break
+				}
+			}
+		}
+	}
+	if found < 0 {
+		t.Fatalf("the fixture holds no turn start at or before offset %d", limit)
+	}
+	return found
 }
 
 // TestAFreshStoreReadsEveryFileFromZero asserts an empty GetSidecarCursors

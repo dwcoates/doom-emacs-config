@@ -97,25 +97,28 @@ func lostConclusions(t *testing.T, logPath, path string) []logRecord {
 	return out
 }
 
-// awaitInterruptedTerminal polls one book until the detached run's unit carries
-// the interrupted terminal. The store read is the signal; the ticker paces it.
-func awaitInterruptedTerminal(ctx context.Context, t *testing.T, store *realStore, book, run string) *conversationv1.AgentBashInterrupted {
+// awaitInterruptedTerminal polls the run's own frames until one carries the
+// interrupted terminal.
+//
+// IT READS THE RUN'S FRAMES, NOT A BOOK. A detached run's frames are
+// StoreAgentUpdate.bash and are NEVER page lines — the spawning CALL is already
+// the page line, which the detached-work subject pins explicitly — so a book
+// read can never see this terminal, however long it waits. The wire the sidecar
+// wrote is where the terminal is, and that is what this reads.
+func awaitInterruptedTerminal(ctx context.Context, t *testing.T, f *fakeStore, run string) *conversationv1.AgentBashInterrupted {
 	t.Helper()
 	tick := time.NewTicker(pollTick)
 	defer tick.Stop()
 	for {
-		for _, at := range bookLines(ctx, t, store.Client, book, 200) {
-			activity := activityOf(at.GetLine())
-			if activity == nil || activity.GetActivityId().GetValue() != run {
-				continue
-			}
-			if cut := activity.GetBash().GetSuccess().GetInterrupted(); cut != nil {
+		for _, frame := range bashFramesForRun(f.Entries(), run) {
+			if cut := frame.GetSuccess().GetInterrupted(); cut != nil {
 				return cut
 			}
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("the run %q in book %q never settled as interrupted within the deadline", run, book)
+			t.Fatalf("the run %q never settled as interrupted within the deadline; runs seen: %v",
+				run, runsSeen(f.Entries()))
 		case <-tick.C:
 		}
 	}
@@ -171,23 +174,23 @@ func TestAVanishedSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "a2a2a2a2-a2a2-4a2a-8a2a-a2a2a2a2a2a2"
 	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-vanished-terminal-probe", session)
-	opts := lostOptions(t, store.Socket, tree)
+	opts := lostOptions(t, fake.Socket, tree)
 	opts.StaleGrace = shortGrace
 
 	// Act.
 	startSidecar(t, opts)
-	awaitCursorAtLeast(ctx, t, store.Client, fx.Parent.Path(), fx.Parent.Offset())
+	awaitCursorInBatches(ctx, t, fake, fx.Parent.Path(), fx.Parent.Offset())
 	spool := newGrowingFile(t, fx.SpoolPath)
 	spool.AppendRaw([]byte("all it managed to say\n"))
-	awaitCursorAtLeast(ctx, t, store.Client, fx.SpoolPath, spool.Offset())
+	awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
 	spool.Remove()
 
 	// Assert.
-	cut := awaitInterruptedTerminal(ctx, t, store, session, fx.CallID)
+	cut := awaitInterruptedTerminal(ctx, t, fake, fx.CallID)
 	requireNoCause(t, cut)
 	if got := cut.GetOutput().GetText().GetStdout(); !strings.Contains(got, "all it managed to say") {
 		t.Errorf("the LOST terminal carries stdout %q, wanted the output the run had produced", got)
@@ -229,22 +232,22 @@ func TestASilentSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b2b2"
 	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-silent-terminal-probe", session)
-	opts := lostOptions(t, store.Socket, tree)
+	opts := lostOptions(t, fake.Socket, tree)
 	opts.StaleShellSilence = shortSilence
 
 	// Act.
 	startSidecar(t, opts)
-	awaitCursorAtLeast(ctx, t, store.Client, fx.Parent.Path(), fx.Parent.Offset())
+	awaitCursorInBatches(ctx, t, fake, fx.Parent.Path(), fx.Parent.Offset())
 	spool := newGrowingFile(t, fx.SpoolPath)
 	spool.AppendRaw([]byte("started, then stopped saying anything\n"))
-	awaitCursorAtLeast(ctx, t, store.Client, fx.SpoolPath, spool.Offset())
+	awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
 
 	// Assert.
-	cut := awaitInterruptedTerminal(ctx, t, store, session, fx.CallID)
+	cut := awaitInterruptedTerminal(ctx, t, fake, fx.CallID)
 	requireNoCause(t, cut)
 	if got := cut.GetOutput().GetText().GetStdout(); !strings.Contains(got, "started, then stopped") {
 		t.Errorf("the LOST terminal carries stdout %q, wanted the output the run had produced", got)
