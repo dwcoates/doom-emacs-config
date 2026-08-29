@@ -86,6 +86,7 @@ import {
   emptyTopbarView,
   emptyTray,
   hostWorkspacePush,
+  shutdownAnnounced,
 } from "./fixtures";
 
 /** Every rpc the fake serves, by its generated lowerCamel method name. */
@@ -192,12 +193,7 @@ export interface FakeDaemon {
 
   // --- web-link and daemon-lifecycle pushes --------------------------------
   transfer(workspace: string, address: string): void;
-  announceShutdown(init: {
-    address?: string;
-    expectedOutageMs: bigint;
-    mintedAtMs: bigint;
-    reason?: DrainReason;
-  }): void;
+  announceShutdown(init: Parameters<typeof shutdownAnnounced>[0]): void;
   scheduleDrain(atMs: bigint, reason: DrainReason): void;
   cancelDrain(): void;
 
@@ -863,27 +859,7 @@ export function createFakeDaemon(): FakeDaemon {
       );
     },
     announceShutdown(init) {
-      broadcast(
-        "watchDaemon",
-        undefined,
-        undefined,
-        create(WatchDaemonResponseSchema, {
-          push: {
-            case: "shutdownAnnounced",
-            value: {
-              address: init.address,
-              cause: {
-                kind: {
-                  case: "scheduledDrain",
-                  value: { reason: init.reason ?? { kind: { case: "deploy", value: {} } } },
-                },
-              },
-              expectedOutageMs: init.expectedOutageMs,
-              mintedAtMs: init.mintedAtMs,
-            },
-          },
-        }),
-      );
+      broadcast("watchDaemon", undefined, undefined, shutdownAnnounced(init));
     },
     scheduleDrain(atMs, reason) {
       broadcast(
