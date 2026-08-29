@@ -379,12 +379,17 @@ func (*GetWorkflowEnded_Success) isGetWorkflowEnded_Outcome() {}
 
 func (*GetWorkflowEnded_Failure) isGetWorkflowEnded_Outcome() {}
 
-// The run is not known to this store. `kind` arms are DERIVED at the wave
-// from the store's real refusal sites.
+// The run could not be served. THE ARM IS WHY.
 type GetWorkflowFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The store's account, for a human and for logs; never switched on.
-	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	Detail string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*GetWorkflowFailure_NotImplemented
+	//	*GetWorkflowFailure_InvalidRequest
+	//	*GetWorkflowFailure_UnknownRun
+	Kind          isGetWorkflowFailure_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -426,6 +431,181 @@ func (x *GetWorkflowFailure) GetDetail() string {
 	return ""
 }
 
+func (x *GetWorkflowFailure) GetKind() isGetWorkflowFailure_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *GetWorkflowFailure) GetNotImplemented() *GetWorkflowNotImplemented {
+	if x != nil {
+		if x, ok := x.Kind.(*GetWorkflowFailure_NotImplemented); ok {
+			return x.NotImplemented
+		}
+	}
+	return nil
+}
+
+func (x *GetWorkflowFailure) GetInvalidRequest() *GetWorkflowInvalidRequest {
+	if x != nil {
+		if x, ok := x.Kind.(*GetWorkflowFailure_InvalidRequest); ok {
+			return x.InvalidRequest
+		}
+	}
+	return nil
+}
+
+func (x *GetWorkflowFailure) GetUnknownRun() *GetWorkflowUnknownRun {
+	if x != nil {
+		if x, ok := x.Kind.(*GetWorkflowFailure_UnknownRun); ok {
+			return x.UnknownRun
+		}
+	}
+	return nil
+}
+
+type isGetWorkflowFailure_Kind interface {
+	isGetWorkflowFailure_Kind()
+}
+
+type GetWorkflowFailure_NotImplemented struct {
+	// Workflow is not implemented this wave — the only arm produced today.
+	NotImplemented *GetWorkflowNotImplemented `protobuf:"bytes,2,opt,name=not_implemented,json=notImplemented,proto3,oneof"`
+}
+
+type GetWorkflowFailure_InvalidRequest struct {
+	// `work` empty. Reserved for the workflow wave.
+	InvalidRequest *GetWorkflowInvalidRequest `protobuf:"bytes,3,opt,name=invalid_request,json=invalidRequest,proto3,oneof"`
+}
+
+type GetWorkflowFailure_UnknownRun struct {
+	// No run is known under this handle. Reserved for the workflow wave.
+	UnknownRun *GetWorkflowUnknownRun `protobuf:"bytes,4,opt,name=unknown_run,json=unknownRun,proto3,oneof"`
+}
+
+func (*GetWorkflowFailure_NotImplemented) isGetWorkflowFailure_Kind() {}
+
+func (*GetWorkflowFailure_InvalidRequest) isGetWorkflowFailure_Kind() {}
+
+func (*GetWorkflowFailure_UnknownRun) isGetWorkflowFailure_Kind() {}
+
+type GetWorkflowNotImplemented struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetWorkflowNotImplemented) Reset() {
+	*x = GetWorkflowNotImplemented{}
+	mi := &file_store_v1_endpoint_get_workflow_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetWorkflowNotImplemented) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetWorkflowNotImplemented) ProtoMessage() {}
+
+func (x *GetWorkflowNotImplemented) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_get_workflow_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetWorkflowNotImplemented.ProtoReflect.Descriptor instead.
+func (*GetWorkflowNotImplemented) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_get_workflow_proto_rawDescGZIP(), []int{6}
+}
+
+type GetWorkflowInvalidRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Field         string                 `protobuf:"bytes,1,opt,name=field,proto3" json:"field,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetWorkflowInvalidRequest) Reset() {
+	*x = GetWorkflowInvalidRequest{}
+	mi := &file_store_v1_endpoint_get_workflow_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetWorkflowInvalidRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetWorkflowInvalidRequest) ProtoMessage() {}
+
+func (x *GetWorkflowInvalidRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_get_workflow_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetWorkflowInvalidRequest.ProtoReflect.Descriptor instead.
+func (*GetWorkflowInvalidRequest) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_get_workflow_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *GetWorkflowInvalidRequest) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
+
+type GetWorkflowUnknownRun struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetWorkflowUnknownRun) Reset() {
+	*x = GetWorkflowUnknownRun{}
+	mi := &file_store_v1_endpoint_get_workflow_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetWorkflowUnknownRun) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetWorkflowUnknownRun) ProtoMessage() {}
+
+func (x *GetWorkflowUnknownRun) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_get_workflow_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetWorkflowUnknownRun.ProtoReflect.Descriptor instead.
+func (*GetWorkflowUnknownRun) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_get_workflow_proto_rawDescGZIP(), []int{8}
+}
+
 var File_store_v1_endpoint_get_workflow_proto protoreflect.FileDescriptor
 
 const file_store_v1_endpoint_get_workflow_proto_rawDesc = "" +
@@ -448,9 +628,18 @@ const file_store_v1_endpoint_get_workflow_proto_rawDesc = "" +
 	"\x10GetWorkflowEnded\x12A\n" +
 	"\asuccess\x18\x01 \x01(\v2%.conversation.v1.AgentWorkflowSuccessH\x00R\asuccess\x12A\n" +
 	"\afailure\x18\x02 \x01(\v2%.conversation.v1.AgentWorkflowFailureH\x00R\afailureB\t\n" +
-	"\aoutcome\",\n" +
+	"\aoutcome\"\x98\x02\n" +
 	"\x12GetWorkflowFailure\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detailB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
+	"\x06detail\x18\x01 \x01(\tR\x06detail\x12N\n" +
+	"\x0fnot_implemented\x18\x02 \x01(\v2#.store.v1.GetWorkflowNotImplementedH\x00R\x0enotImplemented\x12N\n" +
+	"\x0finvalid_request\x18\x03 \x01(\v2#.store.v1.GetWorkflowInvalidRequestH\x00R\x0einvalidRequest\x12B\n" +
+	"\vunknown_run\x18\x04 \x01(\v2\x1f.store.v1.GetWorkflowUnknownRunH\x00R\n" +
+	"unknownRunB\x06\n" +
+	"\x04kind\"\x1b\n" +
+	"\x19GetWorkflowNotImplemented\"1\n" +
+	"\x19GetWorkflowInvalidRequest\x12\x14\n" +
+	"\x05field\x18\x01 \x01(\tR\x05field\"\x17\n" +
+	"\x15GetWorkflowUnknownRunB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 
 var (
 	file_store_v1_endpoint_get_workflow_proto_rawDescOnce sync.Once
@@ -464,35 +653,41 @@ func file_store_v1_endpoint_get_workflow_proto_rawDescGZIP() []byte {
 	return file_store_v1_endpoint_get_workflow_proto_rawDescData
 }
 
-var file_store_v1_endpoint_get_workflow_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_store_v1_endpoint_get_workflow_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_store_v1_endpoint_get_workflow_proto_goTypes = []any{
-	(*GetWorkflowRequest)(nil),      // 0: store.v1.GetWorkflowRequest
-	(*GetWorkflowResponse)(nil),     // 1: store.v1.GetWorkflowResponse
-	(*GetWorkflowSuccess)(nil),      // 2: store.v1.GetWorkflowSuccess
-	(*GetWorkflowLive)(nil),         // 3: store.v1.GetWorkflowLive
-	(*GetWorkflowEnded)(nil),        // 4: store.v1.GetWorkflowEnded
-	(*GetWorkflowFailure)(nil),      // 5: store.v1.GetWorkflowFailure
-	(*v1.DetachedWorkId)(nil),       // 6: conversation.v1.DetachedWorkId
-	(*v1.AgentWorkflowStart)(nil),   // 7: conversation.v1.AgentWorkflowStart
-	(*v1.AgentWorkflowUpdate)(nil),  // 8: conversation.v1.AgentWorkflowUpdate
-	(*v1.AgentWorkflowSuccess)(nil), // 9: conversation.v1.AgentWorkflowSuccess
-	(*v1.AgentWorkflowFailure)(nil), // 10: conversation.v1.AgentWorkflowFailure
+	(*GetWorkflowRequest)(nil),        // 0: store.v1.GetWorkflowRequest
+	(*GetWorkflowResponse)(nil),       // 1: store.v1.GetWorkflowResponse
+	(*GetWorkflowSuccess)(nil),        // 2: store.v1.GetWorkflowSuccess
+	(*GetWorkflowLive)(nil),           // 3: store.v1.GetWorkflowLive
+	(*GetWorkflowEnded)(nil),          // 4: store.v1.GetWorkflowEnded
+	(*GetWorkflowFailure)(nil),        // 5: store.v1.GetWorkflowFailure
+	(*GetWorkflowNotImplemented)(nil), // 6: store.v1.GetWorkflowNotImplemented
+	(*GetWorkflowInvalidRequest)(nil), // 7: store.v1.GetWorkflowInvalidRequest
+	(*GetWorkflowUnknownRun)(nil),     // 8: store.v1.GetWorkflowUnknownRun
+	(*v1.DetachedWorkId)(nil),         // 9: conversation.v1.DetachedWorkId
+	(*v1.AgentWorkflowStart)(nil),     // 10: conversation.v1.AgentWorkflowStart
+	(*v1.AgentWorkflowUpdate)(nil),    // 11: conversation.v1.AgentWorkflowUpdate
+	(*v1.AgentWorkflowSuccess)(nil),   // 12: conversation.v1.AgentWorkflowSuccess
+	(*v1.AgentWorkflowFailure)(nil),   // 13: conversation.v1.AgentWorkflowFailure
 }
 var file_store_v1_endpoint_get_workflow_proto_depIdxs = []int32{
-	6,  // 0: store.v1.GetWorkflowRequest.work:type_name -> conversation.v1.DetachedWorkId
+	9,  // 0: store.v1.GetWorkflowRequest.work:type_name -> conversation.v1.DetachedWorkId
 	2,  // 1: store.v1.GetWorkflowResponse.success:type_name -> store.v1.GetWorkflowSuccess
 	5,  // 2: store.v1.GetWorkflowResponse.failure:type_name -> store.v1.GetWorkflowFailure
-	7,  // 3: store.v1.GetWorkflowSuccess.start:type_name -> conversation.v1.AgentWorkflowStart
+	10, // 3: store.v1.GetWorkflowSuccess.start:type_name -> conversation.v1.AgentWorkflowStart
 	3,  // 4: store.v1.GetWorkflowSuccess.live:type_name -> store.v1.GetWorkflowLive
 	4,  // 5: store.v1.GetWorkflowSuccess.ended:type_name -> store.v1.GetWorkflowEnded
-	8,  // 6: store.v1.GetWorkflowLive.subagents:type_name -> conversation.v1.AgentWorkflowUpdate
-	9,  // 7: store.v1.GetWorkflowEnded.success:type_name -> conversation.v1.AgentWorkflowSuccess
-	10, // 8: store.v1.GetWorkflowEnded.failure:type_name -> conversation.v1.AgentWorkflowFailure
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	11, // 6: store.v1.GetWorkflowLive.subagents:type_name -> conversation.v1.AgentWorkflowUpdate
+	12, // 7: store.v1.GetWorkflowEnded.success:type_name -> conversation.v1.AgentWorkflowSuccess
+	13, // 8: store.v1.GetWorkflowEnded.failure:type_name -> conversation.v1.AgentWorkflowFailure
+	6,  // 9: store.v1.GetWorkflowFailure.not_implemented:type_name -> store.v1.GetWorkflowNotImplemented
+	7,  // 10: store.v1.GetWorkflowFailure.invalid_request:type_name -> store.v1.GetWorkflowInvalidRequest
+	8,  // 11: store.v1.GetWorkflowFailure.unknown_run:type_name -> store.v1.GetWorkflowUnknownRun
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_get_workflow_proto_init() }
@@ -512,13 +707,18 @@ func file_store_v1_endpoint_get_workflow_proto_init() {
 		(*GetWorkflowEnded_Success)(nil),
 		(*GetWorkflowEnded_Failure)(nil),
 	}
+	file_store_v1_endpoint_get_workflow_proto_msgTypes[5].OneofWrappers = []any{
+		(*GetWorkflowFailure_NotImplemented)(nil),
+		(*GetWorkflowFailure_InvalidRequest)(nil),
+		(*GetWorkflowFailure_UnknownRun)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_store_v1_endpoint_get_workflow_proto_rawDesc), len(file_store_v1_endpoint_get_workflow_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
