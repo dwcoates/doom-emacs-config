@@ -264,8 +264,9 @@ is fd 3; the contract is `modules/app/agent-repl/logging-contract.md`.
   - `<spool-root>/<cwd-slug>/<vendor-session-id>/tasks/<task-id>.output`
     where `<spool-root>` = `$AGENT_REPL_FAKE_SPOOL_ROOT` or
     `/tmp/claude-<uid>`; task ids are `b<hex>` (shell), `a<hex>` (agent)
-  - `<cwd-slug>` = the absolute cwd with every `/` and `.` replaced by `-`
-    (observed: `/Users/x/.config/y` → `-Users-x--config-y`).
+  - `<cwd-slug>` = the absolute cwd with EVERY byte not in `[A-Za-z0-9]`
+    replaced by `-` (underscore included; case preserved), verified against
+    the live tree: `/private/var/folders/_m/x` → `-private-var-folders--m-x`.
 
 ## Tests
 
