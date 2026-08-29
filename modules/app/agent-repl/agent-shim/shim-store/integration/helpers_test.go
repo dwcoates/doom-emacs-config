@@ -305,13 +305,44 @@ func (s *storeProcess) exit() error {
 	return s.exitErr
 }
 
-// restart stops the store and starts a new one on the SAME database. Every
-// durability subject is expressed through this.
+// restart stops the store and starts a new one on the SAME database and the
+// SAME socket path. Every durability subject is expressed through this.
+//
+// IT DOES NOT REMOVE THE SOCKET. Doing so masked the reclaim path entirely:
+// every restart handed the successor a clean path, so the store's own decision
+// about a socket already sitting there — dial it, refuse a live one, reclaim a
+// dead one — was never exercised by a single subject.
 func (s *storeProcess) restart() {
 	s.t.Helper()
 	s.stop()
-	if err := os.Remove(s.socket); err != nil && !os.IsNotExist(err) {
-		s.t.Fatalf("removing the socket before restart: %v", err)
+	s.launch()
+	s.awaitReady()
+}
+
+// kill ends the store with SIGKILL and waits for it. There is no orderly
+// shutdown and therefore no listener close, so the socket file is LEFT ON DISK
+// exactly as a crashed store leaves it.
+func (s *storeProcess) kill() {
+	s.t.Helper()
+	select {
+	case <-s.done:
+		return
+	default:
+	}
+	if err := s.cmd.Process.Kill(); err != nil {
+		s.t.Fatalf("killing the store: %v", err)
+	}
+	<-s.done
+}
+
+// restartAfterKill kills the store and starts a successor over the socket its
+// predecessor abandoned. This is the ONLY path that reaches the reclaim branch,
+// because an orderly exit unlinks the socket on its way out.
+func (s *storeProcess) restartAfterKill() {
+	s.t.Helper()
+	s.kill()
+	if !s.socketExists() {
+		s.t.Fatalf("SIGKILL left no socket at %q; the reclaim path is not being exercised", s.socket)
 	}
 	s.launch()
 	s.awaitReady()
