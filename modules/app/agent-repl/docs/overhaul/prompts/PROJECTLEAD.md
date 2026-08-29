@@ -335,3 +335,18 @@ classes, with different freedom to depart from it:
   make an old test pass, and never treat an old test's expectation as
   a requirement. Coverage is rebuilt FROM the contract, not recovered
   from the old assertions.
+
+## Kickoff ledger (2026-08-29)
+
+- Landing 1 (project lead, integration branch): OpenInEditor + host push
+  arm (Q2); feed rows command_panel/command_refused + SubmitPromptSuccess.
+  command_refused + RequestCommandSupport (Q3); /agents and /help recognized
+  daemon-side and refused (Q1, user ruling); UpdateHeldPrompt.accept (Q4);
+  SubmitPromptRequest.origin; the login stream split (WatchLoginTerminal
+  server stream + SendLoginInput); TopbarView.permission_mode_picker;
+  AgentUpdate.context_cut + api_error; the shim's derived failure arms +
+  SessionFault.kind; comment fixes; connect v1.17.0 pinned in
+  proto/gen/go. The one-time capture run is APPROVED (Q5).
+- The cross-system process contracts and rulings R1–R15 are recorded in
+  each system document's kickoff section; the live orchestration ledger is
+  the project lead's memory file.
