@@ -390,6 +390,166 @@ persisting, and the suite asserts the SIGNAL, not the log file."
                   :type 'agent-repl-wire-error)))
 
 
+;;;; ---- The {workspace}-request / empty-result verbs -------------------
+
+(ert-deftest agent-repl-test-wire-verbs-simple-request-echoes-ref ()
+  "Each simple verb's request echoes the WorkspaceRef verbatim."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (verb agent-repl-test-wire-verbs--simple-verbs)
+      (should (equal (funcall (nth 1 verb)
+                              (list :workspace agent-repl-test-wire-verbs--ref))
+                     '((workspace . ((id . "ws-1") (dir . "/w/one")))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-simple-request-without-workspace ()
+  "Each simple verb refuses a request with no workspace."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (verb agent-repl-test-wire-verbs--simple-verbs)
+      (should-error (funcall (nth 1 verb) nil) :type 'agent-repl-wire-error))))
+
+(ert-deftest agent-repl-test-wire-verbs-simple-response-success ()
+  "Each simple verb's empty success decodes to the success arm."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (verb agent-repl-test-wire-verbs--simple-verbs)
+      (should (equal (funcall (nth 2 verb)
+                              (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                     '(:arm :success :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-simple-response-error ()
+  "Each simple verb's empty error decodes to the error arm."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (verb agent-repl-test-wire-verbs--simple-verbs)
+      (should (equal (funcall (nth 2 verb)
+                              (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
+                     '(:arm :error :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-simple-response-unset-oneof ()
+  "A response with no result arm set is a contract breach for every verb."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (verb agent-repl-test-wire-verbs--simple-verbs)
+      (should-error (funcall (nth 2 verb) (agent-repl-test-wire-verbs--parse "{}"))
+                    :type 'agent-repl-wire-error))))
+
+(ert-deftest agent-repl-test-wire-verbs-simple-response-two-arms ()
+  "A response with both result arms set is a contract breach for every verb."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (verb agent-repl-test-wire-verbs--simple-verbs)
+      (should-error (funcall (nth 2 verb)
+                             (agent-repl-test-wire-verbs--parse
+                              "{\"success\":{},\"error\":{}}"))
+                    :type 'agent-repl-wire-error))))
+
+(ert-deftest agent-repl-test-wire-verbs-simple-response-unknown-field ()
+  "A response field outside the result oneof is refused for every verb."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (verb agent-repl-test-wire-verbs--simple-verbs)
+      (should-error (funcall (nth 2 verb)
+                             (agent-repl-test-wire-verbs--parse "{\"queued\":{}}"))
+                    :type 'agent-repl-wire-error))))
+
+
+;;;; ---- CloseWorkspace --------------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-close-request-echoes-ref ()
+  "CloseWorkspaceRequest echoes the WorkspaceRef verbatim."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-close-workspace-request
+                    (list :workspace agent-repl-test-wire-verbs--ref))
+                   '((workspace . ((id . "ws-1") (dir . "/w/one"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-response-blocked ()
+  "A blocked close decodes to the cause arm; the reasons ride the footer."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-close-workspace-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"blocked\":{}}}"))
+                   '(:arm :error :value (:cause (:arm :blocked :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-response-error-without-cause ()
+  "A close error with no cause arm set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-close-workspace-response
+                   (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-close-response-unknown-cause ()
+  "A future close-refusal arm arrives as an unknown key and is loud."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-close-workspace-response
+                   (agent-repl-test-wire-verbs--parse "{\"error\":{\"heldPrompts\":{}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-close-response-success ()
+  "A quiet close decodes to the empty success arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-close-workspace-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                   '(:arm :success :value nil)))))
+
+
+;;;; ---- RestartWorkspace ------------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-restart-force-true ()
+  "A forced restart states force explicitly on the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-restart-workspace-request
+                     (list :workspace agent-repl-test-wire-verbs--ref :force t)))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"force\":true}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-restart-force-false-explicit ()
+  "A graceful restart still SPELLS force, rather than omitting the default."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-restart-workspace-request
+                     (list :workspace agent-repl-test-wire-verbs--ref)))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"force\":false}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-restart-without-workspace ()
+  "A restart with no workspace is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-restart-workspace-request '(:force t))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-restart-response-success ()
+  "An accepted restart decodes to the empty success arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-restart-workspace-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                   '(:arm :success :value nil)))))
+
+
+;;;; ---- SetWorkspacePriority --------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-set-priority-present ()
+  "A set priority delegates to the WorkspacePriority codec."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-set-workspace-priority-request
+                    (list :workspace agent-repl-test-wire-verbs--ref
+                          :priority '(:arm :p2 :value nil)))
+                   '((workspace . ((id . "ws-1") (dir . "/w/one")))
+                     (priority . ((level . ":p2"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-priority-absent-clears ()
+  "An absent priority OMITS the field, which is how a priority is cleared."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-set-workspace-priority-request
+                    (list :workspace agent-repl-test-wire-verbs--ref))
+                   '((workspace . ((id . "ws-1") (dir . "/w/one"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-priority-without-workspace ()
+  "A priority change with no workspace is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-set-workspace-priority-request
+                   '(:priority (:arm :p1 :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-set-priority-response-error ()
+  "A refused priority change decodes to the empty error arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-set-workspace-priority-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
+                   '(:arm :error :value nil)))))
+
+
 ;;;; ---- Arm lists pinned against the generated Go bindings --------------
 
 (ert-deftest agent-repl-test-wire-verbs-create-form-arms-pinned ()
@@ -407,6 +567,13 @@ persisting, and the suite asserts the SIGNAL, not the log file."
                         "CreateWorkspaceOneShot")
                        #'string<)
                  '("openPr" "selfMerge"))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-cause-arms-pinned ()
+  "CloseWorkspaceError's cause oneof has exactly the arm this codec decodes."
+  (should (equal (agent-repl-test--generated-oneof-arms
+                  "agentrepl/v1/endpoint_close_workspace.pb.go"
+                  "CloseWorkspaceError")
+                 '("blocked"))))
 
 (provide 'test-wire-verbs)
 
