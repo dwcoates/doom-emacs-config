@@ -71,6 +71,11 @@ type routed struct {
 	// book is StorePageLine.page_agent_id.value for a page line and NULL for
 	// every never-served row. It IS the never-served index.
 	book sql.NullString
+	// runID is StoreAgentBash.run.value for a bash row and NULL for everything
+	// else. It is the bash equivalent of `book`: the indexed column WatchBashRun
+	// replays a run's own rows by, so following one detached shell costs the
+	// same single indexed lookup a page does.
+	runID sql.NullString
 	// topLevel is StoreAgentUpdate.top_level, the nearest non-sync ancestor.
 	topLevel sql.NullString
 	// frame is the whole serialized StoreEntry, exactly as written.
@@ -78,6 +83,9 @@ type routed struct {
 	// pageLine is the line a page or a watcher serves. Non-nil exactly when
 	// kind == kindPageLine.
 	pageLine *storev1.StorePageLine
+	// bashRow is the row a WatchBashRun watcher serves. Non-nil exactly when
+	// kind == kindBash.
+	bashRow *storev1.StoreAgentBash
 }
 
 // classify validates one StoreEntry whole and resolves its `entry` row.
@@ -179,7 +187,15 @@ func classifyAgentUpdate(r routed, update *storev1.StoreAgentUpdate, index int) 
 		if err := validateStoreAgentBash(arm.Bash, index); err != nil {
 			return routed{}, err
 		}
+		// A BASH FRAME IS ITS OWN ROW, not merely a lifecycle-table update.
+		// The sidecar writes a detached run's spool in deltas, and every one
+		// of them must survive and be replayable in order — so the run's
+		// history lives in the entry spine under `run_id`, the way a book's
+		// history lives there under `book_agent_id`. It is still NOT a page
+		// line: a detached run has no book, and its reader is WatchBashRun.
 		r.kind = kindBash
+		r.runID = sql.NullString{String: arm.Bash.GetRun().GetValue(), Valid: true}
+		r.bashRow = arm.Bash
 		return r, nil
 	case *storev1.StoreAgentUpdate_Workflow:
 		if err := validateStoreAgentWorkflow(arm.Workflow, index); err != nil {

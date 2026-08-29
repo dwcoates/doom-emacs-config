@@ -7,52 +7,63 @@ import "sync"
 // because the alternative to buffering a burst is ending a healthy watch.
 const DefaultWatchBuffer = 8192
 
-// subscriber is one standing WatchAgentSession: the book it follows, the
-// bounded channel the fan-out hands lines to, and the overflow signal that
-// ends it.
-type subscriber struct {
-	agentID   string
+// sink is one standing watch: the key it follows (a book for a page-line
+// watch, a run for a bash watch), the bounded channel the fan-out hands items
+// to, and the overflow signal that ends it.
+type sink[T any] struct {
+	key       string
 	tokenHash string
-	lines     chan LineWritten
+	items     chan T
 	// overflow is CLOSED, never sent on, when this subscriber could not keep
 	// up. A closed channel is readable forever, so the watch loop cannot miss
 	// the signal no matter which branch of its select won a race.
 	overflow chan struct{}
-	// dropped is the line count lost at the moment of overflow, for the
+	// dropped is the item count lost at the moment of overflow, for the
 	// warning record. Written once, under the fan-out's lock, before overflow
 	// is closed; read only after observing that close.
 	dropped int
 }
 
-// fanout is the registry of standing watchers.
+// fanout is the registry of standing watchers of one item kind.
+//
+// IT IS GENERIC OVER THE ITEM because the store now has two standing streams —
+// page lines keyed by book, bash rows keyed by run — with identical
+// backpressure semantics. Two hand-copied registries would be two places for
+// the non-blocking-publish rule to drift out of agreement.
 //
 // PUBLISHING NEVER BLOCKS. Every send is non-blocking under the registry lock:
 // a subscriber that cannot keep up is unsubscribed and signalled, so one slow
 // reader can never stall a writer's transaction acknowledgement.
-type fanout struct {
+type fanout[T any] struct {
 	mu     sync.Mutex
 	buffer int
-	subs   map[*subscriber]struct{}
+	subs   map[*sink[T]]struct{}
+	// keyOf reads the routing key off one item — the only thing that differs
+	// between the two registries.
+	keyOf func(T) string
 }
 
-func newFanout(buffer int) *fanout {
+func newFanout[T any](buffer int, keyOf func(T) string) *fanout[T] {
+	if keyOf == nil {
+		panic("shim-store server: fan-out with no key function")
+	}
 	if buffer <= 0 {
 		buffer = DefaultWatchBuffer
 	}
-	return &fanout{buffer: buffer, subs: map[*subscriber]struct{}{}}
+	return &fanout[T]{buffer: buffer, subs: map[*sink[T]]struct{}{}, keyOf: keyOf}
 }
 
-// subscribe registers a watcher for one book.
+// subscribe registers a watcher for one key.
 //
 // IT IS CALLED BEFORE THE REPLAY QUERY, under this lock, which is what makes
-// the replay-to-live handoff gapless: any line committed after this point is
+// the replay-to-live handoff gapless: any item committed after this point is
 // either found by the replay, delivered on this channel, or both — and the
 // watch loop dedupes the "both" case by write ordinal.
-func (f *fanout) subscribe(agentID, tokenHash string) *subscriber {
-	sub := &subscriber{
-		agentID:   agentID,
+func (f *fanout[T]) subscribe(key, tokenHash string) *sink[T] {
+	sub := &sink[T]{
+		key:       key,
 		tokenHash: tokenHash,
-		lines:     make(chan LineWritten, f.buffer),
+		items:     make(chan T, f.buffer),
 		overflow:  make(chan struct{}),
 	}
 	f.mu.Lock()
@@ -63,36 +74,36 @@ func (f *fanout) subscribe(agentID, tokenHash string) *subscriber {
 
 // unsubscribe removes a watcher. It is idempotent, so the watch loop's defer
 // is safe after an overflow already removed the subscriber.
-func (f *fanout) unsubscribe(sub *subscriber) {
+func (f *fanout[T]) unsubscribe(sub *sink[T]) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.subs, sub)
 }
 
-// publish hands each line to every subscriber of its book and returns the
+// publish hands each item to every subscriber of its key and returns the
 // subscribers that overflowed, so the caller logs one warning per victim.
-func (f *fanout) publish(lines []LineWritten) []*subscriber {
-	if len(lines) == 0 {
+func (f *fanout[T]) publish(items []T) []*sink[T] {
+	if len(items) == 0 {
 		return nil
 	}
-	var overflowed []*subscriber
+	var overflowed []*sink[T]
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for sub := range f.subs {
 		remaining := 0
-		for i, line := range lines {
-			if line.AgentID != sub.agentID {
+		for i, item := range items {
+			if f.keyOf(item) != sub.key {
 				continue
 			}
 			select {
-			case sub.lines <- line:
+			case sub.items <- item:
 			default:
 				// The buffer is full. Count what this batch could not place,
 				// signal the subscriber, and drop it from the registry: a
-				// watcher that fell behind recovers by re-opening with
-				// known_through, never by being silently thinned.
-				for _, rest := range lines[i:] {
-					if rest.AgentID == sub.agentID {
+				// watcher that fell behind recovers by re-opening, never by
+				// being silently thinned.
+				for _, rest := range items[i:] {
+					if f.keyOf(rest) == sub.key {
 						remaining++
 					}
 				}
@@ -110,8 +121,14 @@ func (f *fanout) publish(lines []LineWritten) []*subscriber {
 }
 
 // subscribers is the number of standing watchers. Diagnostics only.
-func (f *fanout) subscribers() int {
+func (f *fanout[T]) subscribers() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.subs)
 }
+
+// lineKey routes a written page line by the book it belongs to.
+func lineKey(line LineWritten) string { return line.AgentID }
+
+// bashRowKey routes a written bash row by the run it belongs to.
+func bashRowKey(row BashRowWritten) string { return row.RunID }
