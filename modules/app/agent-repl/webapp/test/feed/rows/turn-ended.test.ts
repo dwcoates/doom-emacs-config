@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
   FeedTurnEndedErroredSchema,
   FeedTurnEndedSchema,
@@ -22,7 +22,9 @@ afterEach(() => {
 });
 
 /** A terminal row with the given outcome. */
-function ended(outcome: FeedTurnEnded["outcome"], endedAtMs = 1_000_000n): FeedTurnEnded {
+type EndedInit = MessageInitShape<typeof FeedTurnEndedSchema>;
+
+function ended(outcome: EndedInit["outcome"], endedAtMs = 1_000_000n): FeedTurnEnded {
   return create(FeedTurnEndedSchema, { endedAtMs, outcome });
 }
 

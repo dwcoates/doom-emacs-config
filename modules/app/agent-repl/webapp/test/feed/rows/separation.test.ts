@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
   FeedSessionSeparationSchema,
   type FeedSessionSeparation,
@@ -20,8 +20,10 @@ afterEach(() => {
 });
 
 /** A separation with the given arm. */
+type SeparationInit = MessageInitShape<typeof FeedSessionSeparationSchema>;
+
 function separation(
-  kind: FeedSessionSeparation["kind"],
+  kind: SeparationInit["kind"],
   opts: { label?: string; tokens?: { beforeText: string; afterText: string } } = {},
 ): FeedSessionSeparation {
   return create(FeedSessionSeparationSchema, {
@@ -37,7 +39,7 @@ function ctxFor(previous?: HTMLElement) {
 }
 
 /** Every arm, with a payload legal for it. */
-const ARMS: ReadonlyArray<[string, FeedSessionSeparation["kind"]]> = [
+const ARMS: ReadonlyArray<[string, SeparationInit["kind"]]> = [
   ["cleared", { case: "cleared", value: {} }],
   [
     "compacted",
