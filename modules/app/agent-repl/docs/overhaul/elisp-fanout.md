@@ -131,6 +131,19 @@ are deleted by the verbs agent once verbs.el replaces them.
   equivalent; the implementer chooses and documents.
 - ON-PUSH exceptions are caught at the filter boundary: log ERROR with the
   payload in context; the stream stays open.
+- LANDED SHAPES (connect.el as merged): the failure datum handed to
+  `:on-failure` and carried in `(:error DETAIL)` is the plist
+  `(:kind K :code CODE :status STATUS :message MSG)` with `:kind` one of
+  `:http`, `:transport`, `:timeout`, `:malformed`, `:malformed-addr`,
+  `:no-end-frame`. `(agent-repl-connect-close CONN)` marks the connection
+  dead and cancels every standing stream as `(:cancelled)` — daemon-link's
+  teardown primitive. `agent-repl-connect--spawn-curl` is the single spawn
+  point, registered in `agent-repl--external-boundary-functions`. The HTTP
+  status is read from `curl -D -` header blocks for unary and streams alike.
+- LANDED SHAPES (rpc.el as merged): request encoders are called for EMPTY
+  request messages too (`agent-repl-wire-encode-watch-daemon-request`,
+  `-watch-workspace-roster-request`, `-daemon-health-request` receive nil);
+  `agent-repl-rpc-watch-host-workspace` hands its encoder `(:workspace REF)`.
 
 ## 4. rpc.el
 
