@@ -505,3 +505,46 @@ purpose).
   webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
   golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
   `go 1.23`).
+
+## The mocked vendor (`--fake`) — file layout and cross-plane rulings (shim lead)
+
+The mock writes vendor-shaped files exactly where the real binary would, so the
+REAL sidecar ingests them:
+
+- `$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<vendor-session-id>.jsonl` — the
+  session transcript (one JSON object per line: user/assistant/system/
+  attachment/queue-operation lines with `uuid`, `parentUuid`, `sessionId`,
+  `timestamp`, `cwd`, `version`, `isSidechain`, `userType`, `entrypoint`;
+  tool results carry `toolUseResult`).
+- `$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<vendor-session-id>/subagents/agent-<agent-id>.jsonl`
+  plus `agent-<agent-id>.meta.json` beside it (agent_type, description,
+  tool_use_id, spawn_depth, model).
+- `<spool-root>/<cwd-slug>/<vendor-session-id>/tasks/<task-id>.output` —
+  `b<hex>` shell spools terminated by an `EXIT=<code>` line, `a<hex>` agent
+  spools (agent JSONL); `<spool-root>` = `$AGENT_REPL_FAKE_SPOOL_ROOT` or
+  `/tmp/claude-<uid>`.
+- `<cwd-slug>` = the absolute cwd with every `/` and `.` replaced by `-`
+  (observed: `/Users/x/.config/y` → `-Users-x--config-y`).
+- Shapes come from `testdata/corpus` and the pinned `sdk.d.ts`, and are
+  rebuilt from the real captures once the capture run lands.
+
+Cross-plane rulings (shim lead, 2026-08-29, relayed to the store/sidecar lead):
+
+- BLOCK INDEX IS PER MESSAGE. `<message.id>:<block_index>` counts blocks
+  0-based in the ORDER OF THE ASSISTANT MESSAGE, across every transcript line
+  that shares the message id when the vendor splits one message into several
+  lines each holding one block. Text and tool_use blocks of one message thus
+  get distinct ids on both planes, and the usage carrier is the message's
+  FIRST block (index 0) whichever line it lands on. The mock writes split
+  lines the way the real binary does (one block per assistant line, same
+  `message.id`).
+- `deferred_tools_delta` and `agent_listing_delta` attachment records are
+  VENDOR_SPECIFIC RESIDUE (`StoreUnservedItem.vendor_specific{kind}`), never
+  `context_injected`: that unit carries instructions the model reads (memory
+  files, skill documents), while a tool-availability delta and an agent-type
+  listing are vendor bookkeeping about what the model MAY call. Both planes
+  drop them from every page.
+- The main agent's `AgentId` is the conversation's ORIGINAL vendor session id
+  (R9 default); the shim pre-mints it with `Options.sessionId` on a fresh
+  start. The rotation/fork rule is settled in this section by the engine
+  agent's evidence (pending).
