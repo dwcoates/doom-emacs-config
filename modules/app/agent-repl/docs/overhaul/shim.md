@@ -539,7 +539,9 @@ Cross-plane rulings (shim lead, 2026-08-29, relayed to the store/sidecar lead):
   lines the way the real binary does (one block per assistant line, same
   `message.id`).
 - `deferred_tools_delta` and `agent_listing_delta` attachment records are
-  VENDOR_SPECIFIC RESIDUE (`StoreUnservedItem.vendor_specific{kind}`), never
+  VENDOR_SPECIFIC RESIDUE — `StoreUnservedItem.vendor_specific{kind:
+  "attachment/<type>"}` (e.g. `attachment/deferred_tools_delta`), the exact
+  kind spelling the sidecar uses so both planes' residue agrees — never
   `context_injected`: that unit carries instructions the model reads (memory
   files, skill documents), while a tool-availability delta and an agent-type
   listing are vendor bookkeeping about what the model MAY call. Both planes
