@@ -527,24 +527,14 @@ describe("session facts with no message behind them", () => {
     watch.close();
   });
 
-  test("!context-budget produces a context_budget_warning arm", async () => {
-    // The warning is the vendor's `context_tip` ATTACHMENT record, never a
-    // stream message — so a shim reading only the stream would never emit it.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const watch = watchSession(shim);
-
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!context-budget" }));
-    const frame = await watch.until(
-      (f) => sessionUpdate(f).update.case === "contextBudgetWarning",
-    );
-
-    const update = sessionUpdate(frame);
-    if (update.update.case === "contextBudgetWarning") {
-      expect(update.update.value.text).not.toBe("");
-    }
-    watch.close();
-  });
+  // RETIRED AT LANDING 4: the budget warning is no longer a SessionUpdate arm.
+  // It becomes a sidecar-produced page line (AgentUpdate.context_budget_warning
+  // {text}) read off the vendor's `context_tip` ATTACHMENT record, and the shim
+  // never emits it live — so there is nothing for a WatchSession test to assert,
+  // and the coverage belongs to whoever tests the file plane.
+  test.todo(
+    "the context budget warning is a SIDECAR page line, not a WatchSession arm — the shim has no live producer for it after landing 4",
+  );
 
   test("!context-usage-drift pushes a NEW context_usage at the turn end", async () => {
     // Context usage is pushed at every turn end, so a drifting figure must
