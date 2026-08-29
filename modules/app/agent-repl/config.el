@@ -181,6 +181,18 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; It sits above both the codec it encodes through and the transport it
 ;; sends over.
 (agent-repl--load-module "rpc")
+;; WHY: popup.el is the ONE shared editor-popup subroutine ("open path[:line]
+;; in a doom popup, right side, half width"); notes.el, commands.el and the
+;; host stream's `open_in_editor' arm all call it, so it loads above all of
+;; them.  It depends on core.el's logging ladder and nothing else.
+(agent-repl--load-module "popup")
+;; WHY: roster.el is the WatchWorkspaceRoster consumer — the one source of
+;; Emacs's tabs, their order and their paint.  It sits above rpc.el (it
+;; subscribes through it) and calls workspace.el and status.el at runtime
+;; only, so it may load before either.
+;; NOTE: W2-A adds `daemon-link' and `host' between "rpc" and here; roster.el
+;; `declare-function's both, so this ordering holds either way.
+(agent-repl--load-module "roster")
 ;; WHY: external-browser.el pins `browse-url-browser-function' so every
 ;; hyperlink lands in the external Chrome profile instead of an Emacs
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
