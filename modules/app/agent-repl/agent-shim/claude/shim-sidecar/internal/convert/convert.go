@@ -44,12 +44,22 @@ type Observer interface {
 	// the call that spawned it, the agent it created (empty for a shell run) and
 	// the spool path the vendor named (empty when it named none).
 	TaskSpawned(taskID, toolUseID, agentID, outputPath string)
+
+	// TaskStopped reports a TaskStop result: a person stopped this task.
+	//
+	// THE TERMINAL IS NOT MINTED HERE. A cancelled shell run's terminal has to
+	// carry the OUTPUT the run produced, and those bytes live in the spool —
+	// which this converter is not the reader of. So the fact travels and the
+	// reader mints the terminal through the spool's own handler, the same way a
+	// LOST conclusion does.
+	TaskStopped(taskID string)
 }
 
 // noopObserver is the default: a converter with nobody listening still converts.
 type noopObserver struct{}
 
 func (noopObserver) TaskSpawned(string, string, string, string) {}
+func (noopObserver) TaskStopped(string)                          {}
 
 // openCall is what a tool RETURN needs to settle its unit, remembered from the
 // call. One entry per OPEN call, deleted the moment the call settles — the map

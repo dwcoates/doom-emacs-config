@@ -5,7 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
@@ -164,4 +167,119 @@ func TestObserverNormalizesTheOutputPath(t *testing.T) {
 	if !ok || got.activityID != "call-1" {
 		t.Fatalf("resolve = %+v ok=%t, want the spawn found under the resolved spelling", got, ok)
 	}
+}
+
+func TestAStopMintsTheCancelledTerminalThroughTheSpoolsReader(t *testing.T) {
+	// Arrange. The terminal owes the OUTPUT the run produced, and only the
+	// spool's handler holds those bytes — so the transcript's converter reports
+	// the stop and the reader mints the terminal here.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1stopped", "partial work\n")
+	h.sc.TaskSpawned("b1stopped", "toolu_stopped_run", "", spool)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+
+	// Act.
+	h.sc.TaskStopped("b1stopped")
+
+	// Assert.
+	cut := interruptedFor(store.writes, "toolu_stopped_run")
+	if cut == nil {
+		t.Fatalf("no cancelled terminal was written for the stopped run: %s", h.logText())
+	}
+	if cut.GetByUser() == nil {
+		t.Fatalf("a stop is a person's decision and must state by_user: %v", cut.GetCause())
+	}
+	if got := cut.GetOutput().GetText().GetStdout(); got != "partial work\n" {
+		t.Fatalf("cancelled stdout = %q, want the output the spool held", got)
+	}
+}
+
+func TestAStoppedRunIsNeverConcludedLost(t *testing.T) {
+	// Arrange. Deliberately-stopped work must resolve CANCELLED, never LOST:
+	// the sweep is what would restate it, so the subject is the sweep.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1stopswept", "partial work\n")
+	h.sc.TaskSpawned("b1stopswept", "toolu_stopswept_run", "", spool)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+	h.sc.TaskStopped("b1stopswept")
+
+	// Act.
+	h.advance(24 * time.Hour)
+	h.sc.sweep()
+
+	// Assert.
+	if strings.Contains(h.logText(), "run concluded LOST") {
+		t.Fatalf("a run a person stopped was restated LOST: %s", h.logText())
+	}
+}
+
+func TestAStopForAnUnclaimedSpoolIsHeldAndAppliedOnClaim(t *testing.T) {
+	// Arrange. A spool is frequently written before the transcript line naming
+	// it, so a stop arriving in that window has no reader to mint its terminal —
+	// and dropping it would leave the run to be concluded LOST instead.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1late", "work before the claim\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act: the stop arrives while the spool is still unowned, and only then does
+	// its launch appear.
+	h.sc.TaskStopped("b1late")
+	if cut := interruptedFor(store.writes, "toolu_late_run"); cut != nil {
+		t.Fatal("a terminal was minted for a spool that had no reader yet")
+	}
+	h.sc.TaskSpawned("b1late", "toolu_late_run", "", spool)
+	h.sc.rescan()
+	h.sc.pollAll()
+
+	// Assert.
+	cut := interruptedFor(store.writes, "toolu_late_run")
+	if cut == nil {
+		t.Fatalf("the held stop was never applied once the spool was claimed: %s", h.logText())
+	}
+	if cut.GetByUser() == nil {
+		t.Fatalf("the applied stop must still state by_user: %v", cut.GetCause())
+	}
+}
+
+func TestAStopWithNoTaskIsRefusedLoudly(t *testing.T) {
+	// Arrange. A stop that names no task names no run, and attributing it to
+	// anything would settle a row on a guess.
+	h := newHarness(t, &fakeStore{})
+
+	// Act.
+	h.sc.TaskStopped("")
+
+	// Assert.
+	if !strings.Contains(h.logText(), "task stop reported with no task id") {
+		t.Fatalf("an unattributable stop was not stated: %s", h.logText())
+	}
+}
+
+// interruptedFor answers the interrupted terminal a producer wrote for a run,
+// or nil when it wrote none.
+func interruptedFor(batches []*storev1.EntryBatch, run string) *conversationv1.AgentBashInterrupted {
+	var out *conversationv1.AgentBashInterrupted
+	for _, batch := range batches {
+		for _, e := range batch.GetEntries() {
+			bash := e.GetAgentUpdate().GetBash()
+			if bash.GetRun().GetValue() != run {
+				continue
+			}
+			if cut := bash.GetFrame().GetSuccess().GetInterrupted(); cut != nil {
+				out = cut
+			}
+		}
+	}
+	return out
 }
