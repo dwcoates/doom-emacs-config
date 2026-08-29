@@ -32,9 +32,26 @@ const DefaultLockDir = "~/.cache/agent-repl/run"
 // a test's probe and a test's shim agree about which lock is which.
 const LockDirEnv = "AGENT_REPL_LOCK_DIR"
 
-// ProbeFunc probes one kernel lock. It is injected so a test drives the
-// spawn-versus-adopt decision without a real shim holding a real flock.
-type ProbeFunc func(lockPath string) (sessionlock.State, error)
+// ProbeFunc probes ONE workspace's kernel lock, deriving the lock path from the
+// run directory and the worktree. It takes the two inputs rather than a path so
+// the whole derive-and-probe step is one injection point, which is what lets a
+// test drive the spawn-versus-adopt decision without a real shim holding a real
+// flock.
+type ProbeFunc func(runDir, workspaceDir string) (sessionlock.State, error)
+
+// probeWorkspaceLock is the production probe: derive the path, take and release
+// the lock. Any error other than "held" is StateUnknown WITH the error, because
+// an unreadable lock is never reported as free.
+func probeWorkspaceLock(runDir, workspaceDir string) (sessionlock.State, error) {
+	path, err := sessionlock.WorkspaceLockPath(runDir, workspaceDir)
+	if err != nil {
+		return sessionlock.StateUnknown, fmt.Errorf("derive the workspace lock path: %w", err)
+	}
+	return sessionlock.Probe(path)
+}
+
+// WatcherStarter opens one workspace's watch fleet against its shim client.
+type WatcherStarter func(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, sinks sessionwatcher.Sinks, log dlog.Logger) (sessionwatcher.Watcher, error)
 
 // FleetDeps are what the session fleet needs to bring a session up.
 type FleetDeps struct {
@@ -70,6 +87,10 @@ type FleetDeps struct {
 	LockDir string
 	// Probe probes the workspace lock; nil means sessionlock.Probe.
 	Probe ProbeFunc
+	// StartWatcher opens one workspace's watch fleet; nil means
+	// sessionwatcher.Start. It is a function for the same reason Probe is: the
+	// fleet's decisions are exercised without a shim process behind them.
+	StartWatcher WatcherStarter
 	// Log is the fleet's logger.
 	Log dlog.Surfaces
 	// Now supplies the instants the fleet stamps; nil means time.Now.
@@ -89,6 +110,7 @@ type live struct {
 type Fleet struct {
 	deps  FleetDeps
 	probe ProbeFunc
+	watch WatcherStarter
 	now   func() time.Time
 
 	mu        sync.RWMutex
@@ -112,7 +134,11 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	}
 	probe := deps.Probe
 	if probe == nil {
-		probe = sessionlock.Probe
+		probe = probeWorkspaceLock
+	}
+	watch := deps.StartWatcher
+	if watch == nil {
+		watch = sessionwatcher.Start
 	}
 	now := deps.Now
 	if now == nil {
@@ -121,6 +147,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	return &Fleet{
 		deps:      deps,
 		probe:     probe,
+		watch:     watch,
 		now:       now,
 		sessions:  map[ids.WorkspaceID]*live{},
 		coldGates: map[ids.WorkspaceID]ServedColdGate{},
@@ -283,7 +310,7 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		return nil
 	}
 
-	watcher, err := sessionwatcher.Start(ctx, ws, client, f.deps.Sinks, log)
+	watcher, err := f.watch(ctx, ws, client, f.deps.Sinks, log)
 	if err != nil {
 		log.Error(opBringUp, "could not start the session watcher", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: start the watcher: %w", ws, err)
@@ -304,12 +331,8 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 // as free: spawning a second shim onto one conversation is the failure the lock
 // exists to prevent.
 func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir string) (shimclient.Client, bool, error) {
-	lockPath, err := sessionlock.WorkspaceLockPath(f.lockDir(), dir)
-	if err != nil {
-		log.Error(opBringUp, "could not derive the workspace lock path", dlog.Context{"cause": err.Error()})
-		return nil, false, fmt.Errorf("start session for %q: workspace lock path: %w", ws, err)
-	}
-	state, err := f.probe(lockPath)
+	lockPath := f.lockDir()
+	state, err := f.probe(lockPath, dir)
 	switch state {
 	case sessionlock.StateHeld:
 		log.Debug(opBringUp, "a surviving shim holds the workspace lock; adopting it", dlog.Context{"lock": lockPath})
