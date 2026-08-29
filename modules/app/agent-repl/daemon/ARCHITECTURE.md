@@ -559,3 +559,20 @@ generated arms when the landing merges (one place each):
   `--no-bounce`.
 - `agent-shim/wire` is deleted with the rewrite (nothing in the daemon
   imports it) and its `bin/test-all.sh` roster entry dropped.
+
+## Standing-stream mechanics (connect-go v1.17.0, system-wide rule)
+
+- SERVER: every Watch* handler (WatchFeed, WatchFooter, WatchTopbar,
+  WatchWorkspaceRoster, WatchDaemonHolds, WatchHostWorkspace, WatchDaemon,
+  WatchWebWorkspace, WatchLoginTerminal) FLUSHES its response headers the
+  moment it accepts the stream (`stream.ResponseHeader()` set, then an
+  explicit flush via the underlying `http.Flusher` / `connect` send of the
+  headers before the first frame), so acceptance is observable before the
+  first published view arrives; a refused open is a Connect error before
+  any frame.
+- CLIENT (the shim client): a standing watch is ended by CANCELLING its
+  context, never by `Close` alone — `ServerStreamForClient.Close` drains
+  the body and blocks forever on a stream that never ends. `CallServerStream`
+  returns once headers arrive (before the first frame under early flush);
+  refusals surface at the first `Receive`, so the opening frame is consumed
+  as the open's answer (WatchSession's first `diagnostics` push).
