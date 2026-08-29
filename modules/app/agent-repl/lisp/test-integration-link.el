@@ -99,9 +99,9 @@ this, and it is NOT an error."
   (agent-repl-itest--with-fake-daemon daemon
     (delete-file (agent-repl-itest--addr-file
                   (agent-repl-itest-daemon-state-dir daemon)))
-    (let ((called nil)
-          (agent-repl-link-no-daemon-functions (list (lambda () (setq called t))))
-          (agent-repl-link-up-functions nil))
+    (let* ((called nil)
+           (agent-repl-link-no-daemon-functions (list (lambda () (setq called t))))
+           (agent-repl-link-up-functions nil))
       ;; Act.
       (let ((conn (agent-repl-link-connect)))
         ;; Assert.
