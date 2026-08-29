@@ -237,12 +237,17 @@ func (x *OpenAgentSessionSuccess) GetWatch() *AgentSessionToken {
 	return nil
 }
 
-// The open could not be served. `kind` arms are DERIVED at the wave from the
-// store's real refusal sites (unknown agent, stale pointer).
+// The open could not be served. THE ARM IS WHY.
 type OpenAgentSessionFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The store's account, for a human and for logs; never switched on.
-	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	Detail string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*OpenAgentSessionFailure_InvalidRequest
+	//	*OpenAgentSessionFailure_StalePointer
+	//	*OpenAgentSessionFailure_StorageFailure
+	Kind          isOpenAgentSessionFailure_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -284,6 +289,186 @@ func (x *OpenAgentSessionFailure) GetDetail() string {
 	return ""
 }
 
+func (x *OpenAgentSessionFailure) GetKind() isOpenAgentSessionFailure_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *OpenAgentSessionFailure) GetInvalidRequest() *OpenAgentSessionInvalidRequest {
+	if x != nil {
+		if x, ok := x.Kind.(*OpenAgentSessionFailure_InvalidRequest); ok {
+			return x.InvalidRequest
+		}
+	}
+	return nil
+}
+
+func (x *OpenAgentSessionFailure) GetStalePointer() *OpenAgentSessionStalePointer {
+	if x != nil {
+		if x, ok := x.Kind.(*OpenAgentSessionFailure_StalePointer); ok {
+			return x.StalePointer
+		}
+	}
+	return nil
+}
+
+func (x *OpenAgentSessionFailure) GetStorageFailure() *OpenAgentSessionStorageFailure {
+	if x != nil {
+		if x, ok := x.Kind.(*OpenAgentSessionFailure_StorageFailure); ok {
+			return x.StorageFailure
+		}
+	}
+	return nil
+}
+
+type isOpenAgentSessionFailure_Kind interface {
+	isOpenAgentSessionFailure_Kind()
+}
+
+type OpenAgentSessionFailure_InvalidRequest struct {
+	// Empty agent id, zero page_size, or a known_through that is empty or
+	// not store-minted.
+	InvalidRequest *OpenAgentSessionInvalidRequest `protobuf:"bytes,2,opt,name=invalid_request,json=invalidRequest,proto3,oneof"`
+}
+
+type OpenAgentSessionFailure_StalePointer struct {
+	// A well-formed known_through naming no line of THIS book.
+	StalePointer *OpenAgentSessionStalePointer `protobuf:"bytes,3,opt,name=stale_pointer,json=stalePointer,proto3,oneof"`
+}
+
+type OpenAgentSessionFailure_StorageFailure struct {
+	StorageFailure *OpenAgentSessionStorageFailure `protobuf:"bytes,4,opt,name=storage_failure,json=storageFailure,proto3,oneof"`
+}
+
+func (*OpenAgentSessionFailure_InvalidRequest) isOpenAgentSessionFailure_Kind() {}
+
+func (*OpenAgentSessionFailure_StalePointer) isOpenAgentSessionFailure_Kind() {}
+
+func (*OpenAgentSessionFailure_StorageFailure) isOpenAgentSessionFailure_Kind() {}
+
+// The request was malformed or violated the validation invariant.
+type OpenAgentSessionInvalidRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which field (with the offending entry's index where one applies), as
+	// the store names it — for the producer's logs, never switched on.
+	Field         string `protobuf:"bytes,1,opt,name=field,proto3" json:"field,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenAgentSessionInvalidRequest) Reset() {
+	*x = OpenAgentSessionInvalidRequest{}
+	mi := &file_store_v1_endpoint_open_agent_session_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenAgentSessionInvalidRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenAgentSessionInvalidRequest) ProtoMessage() {}
+
+func (x *OpenAgentSessionInvalidRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_open_agent_session_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenAgentSessionInvalidRequest.ProtoReflect.Descriptor instead.
+func (*OpenAgentSessionInvalidRequest) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_open_agent_session_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *OpenAgentSessionInvalidRequest) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
+
+// The database failed; `detail` carries the driver's text.
+type OpenAgentSessionStorageFailure struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenAgentSessionStorageFailure) Reset() {
+	*x = OpenAgentSessionStorageFailure{}
+	mi := &file_store_v1_endpoint_open_agent_session_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenAgentSessionStorageFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenAgentSessionStorageFailure) ProtoMessage() {}
+
+func (x *OpenAgentSessionStorageFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_open_agent_session_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenAgentSessionStorageFailure.ProtoReflect.Descriptor instead.
+func (*OpenAgentSessionStorageFailure) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_open_agent_session_proto_rawDescGZIP(), []int{5}
+}
+
+// The pointer names no line of the addressed book.
+type OpenAgentSessionStalePointer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenAgentSessionStalePointer) Reset() {
+	*x = OpenAgentSessionStalePointer{}
+	mi := &file_store_v1_endpoint_open_agent_session_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenAgentSessionStalePointer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenAgentSessionStalePointer) ProtoMessage() {}
+
+func (x *OpenAgentSessionStalePointer) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_open_agent_session_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenAgentSessionStalePointer.ProtoReflect.Descriptor instead.
+func (*OpenAgentSessionStalePointer) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_open_agent_session_proto_rawDescGZIP(), []int{6}
+}
+
 var File_store_v1_endpoint_open_agent_session_proto protoreflect.FileDescriptor
 
 const file_store_v1_endpoint_open_agent_session_proto_rawDesc = "" +
@@ -300,9 +485,17 @@ const file_store_v1_endpoint_open_agent_session_proto_rawDesc = "" +
 	"\x06result\"|\n" +
 	"\x17OpenAgentSessionSuccess\x12.\n" +
 	"\x04page\x18\x01 \x01(\v2\x1a.store.v1.AgentSessionPageR\x04page\x121\n" +
-	"\x05watch\x18\x02 \x01(\v2\x1b.store.v1.AgentSessionTokenR\x05watch\"1\n" +
+	"\x05watch\x18\x02 \x01(\v2\x1b.store.v1.AgentSessionTokenR\x05watch\"\xb2\x02\n" +
 	"\x17OpenAgentSessionFailure\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detailB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
+	"\x06detail\x18\x01 \x01(\tR\x06detail\x12S\n" +
+	"\x0finvalid_request\x18\x02 \x01(\v2(.store.v1.OpenAgentSessionInvalidRequestH\x00R\x0einvalidRequest\x12M\n" +
+	"\rstale_pointer\x18\x03 \x01(\v2&.store.v1.OpenAgentSessionStalePointerH\x00R\fstalePointer\x12S\n" +
+	"\x0fstorage_failure\x18\x04 \x01(\v2(.store.v1.OpenAgentSessionStorageFailureH\x00R\x0estorageFailureB\x06\n" +
+	"\x04kind\"6\n" +
+	"\x1eOpenAgentSessionInvalidRequest\x12\x14\n" +
+	"\x05field\x18\x01 \x01(\tR\x05field\" \n" +
+	"\x1eOpenAgentSessionStorageFailure\"\x1e\n" +
+	"\x1cOpenAgentSessionStalePointerB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 
 var (
 	file_store_v1_endpoint_open_agent_session_proto_rawDescOnce sync.Once
@@ -316,29 +509,35 @@ func file_store_v1_endpoint_open_agent_session_proto_rawDescGZIP() []byte {
 	return file_store_v1_endpoint_open_agent_session_proto_rawDescData
 }
 
-var file_store_v1_endpoint_open_agent_session_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_store_v1_endpoint_open_agent_session_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_store_v1_endpoint_open_agent_session_proto_goTypes = []any{
-	(*OpenAgentSessionRequest)(nil),  // 0: store.v1.OpenAgentSessionRequest
-	(*OpenAgentSessionResponse)(nil), // 1: store.v1.OpenAgentSessionResponse
-	(*OpenAgentSessionSuccess)(nil),  // 2: store.v1.OpenAgentSessionSuccess
-	(*OpenAgentSessionFailure)(nil),  // 3: store.v1.OpenAgentSessionFailure
-	(*v1.AgentId)(nil),               // 4: conversation.v1.AgentId
-	(*StoreItemPointer)(nil),         // 5: store.v1.StoreItemPointer
-	(*AgentSessionPage)(nil),         // 6: store.v1.AgentSessionPage
-	(*AgentSessionToken)(nil),        // 7: store.v1.AgentSessionToken
+	(*OpenAgentSessionRequest)(nil),        // 0: store.v1.OpenAgentSessionRequest
+	(*OpenAgentSessionResponse)(nil),       // 1: store.v1.OpenAgentSessionResponse
+	(*OpenAgentSessionSuccess)(nil),        // 2: store.v1.OpenAgentSessionSuccess
+	(*OpenAgentSessionFailure)(nil),        // 3: store.v1.OpenAgentSessionFailure
+	(*OpenAgentSessionInvalidRequest)(nil), // 4: store.v1.OpenAgentSessionInvalidRequest
+	(*OpenAgentSessionStorageFailure)(nil), // 5: store.v1.OpenAgentSessionStorageFailure
+	(*OpenAgentSessionStalePointer)(nil),   // 6: store.v1.OpenAgentSessionStalePointer
+	(*v1.AgentId)(nil),                     // 7: conversation.v1.AgentId
+	(*StoreItemPointer)(nil),               // 8: store.v1.StoreItemPointer
+	(*AgentSessionPage)(nil),               // 9: store.v1.AgentSessionPage
+	(*AgentSessionToken)(nil),              // 10: store.v1.AgentSessionToken
 }
 var file_store_v1_endpoint_open_agent_session_proto_depIdxs = []int32{
-	4, // 0: store.v1.OpenAgentSessionRequest.agent:type_name -> conversation.v1.AgentId
-	5, // 1: store.v1.OpenAgentSessionRequest.known_through:type_name -> store.v1.StoreItemPointer
-	2, // 2: store.v1.OpenAgentSessionResponse.success:type_name -> store.v1.OpenAgentSessionSuccess
-	3, // 3: store.v1.OpenAgentSessionResponse.failure:type_name -> store.v1.OpenAgentSessionFailure
-	6, // 4: store.v1.OpenAgentSessionSuccess.page:type_name -> store.v1.AgentSessionPage
-	7, // 5: store.v1.OpenAgentSessionSuccess.watch:type_name -> store.v1.AgentSessionToken
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	7,  // 0: store.v1.OpenAgentSessionRequest.agent:type_name -> conversation.v1.AgentId
+	8,  // 1: store.v1.OpenAgentSessionRequest.known_through:type_name -> store.v1.StoreItemPointer
+	2,  // 2: store.v1.OpenAgentSessionResponse.success:type_name -> store.v1.OpenAgentSessionSuccess
+	3,  // 3: store.v1.OpenAgentSessionResponse.failure:type_name -> store.v1.OpenAgentSessionFailure
+	9,  // 4: store.v1.OpenAgentSessionSuccess.page:type_name -> store.v1.AgentSessionPage
+	10, // 5: store.v1.OpenAgentSessionSuccess.watch:type_name -> store.v1.AgentSessionToken
+	4,  // 6: store.v1.OpenAgentSessionFailure.invalid_request:type_name -> store.v1.OpenAgentSessionInvalidRequest
+	6,  // 7: store.v1.OpenAgentSessionFailure.stale_pointer:type_name -> store.v1.OpenAgentSessionStalePointer
+	5,  // 8: store.v1.OpenAgentSessionFailure.storage_failure:type_name -> store.v1.OpenAgentSessionStorageFailure
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_open_agent_session_proto_init() }
@@ -352,13 +551,18 @@ func file_store_v1_endpoint_open_agent_session_proto_init() {
 		(*OpenAgentSessionResponse_Success)(nil),
 		(*OpenAgentSessionResponse_Failure)(nil),
 	}
+	file_store_v1_endpoint_open_agent_session_proto_msgTypes[3].OneofWrappers = []any{
+		(*OpenAgentSessionFailure_InvalidRequest)(nil),
+		(*OpenAgentSessionFailure_StalePointer)(nil),
+		(*OpenAgentSessionFailure_StorageFailure)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_store_v1_endpoint_open_agent_session_proto_rawDesc), len(file_store_v1_endpoint_open_agent_session_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
