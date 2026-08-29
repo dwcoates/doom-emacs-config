@@ -32,7 +32,7 @@ func NewSessionTranscriptHandler(log *logging.Bound) *SessionTranscriptHandler {
 
 // Handle implements tail.Handler.
 func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
-	h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+	h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
 		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
 
 	// A compaction boundary at the very end of a batch is UNSETTLED: its summary
@@ -42,7 +42,7 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 	originalCount := len(frames)
 	frames = frames[:h.holdCount(frames, ctx)]
 	if len(frames) != originalCount {
-		h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+		h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
 			Log("deferred compact boundary frames=%d processed=%d held_deliveries=%d held_offset=%d",
 				originalCount, len(frames), ctx.HeldDeliveries, ctx.HeldOffset)
 	}
@@ -51,7 +51,7 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 	for i, frame := range frames {
 		at := attribute(ctx, frame.Offset)
 		if frame.ParseErr != nil {
-			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).
+			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID, Level: "warn"}).
 				Log("parse failure at offset=%d; the record is stored whole with no path to a page: %v", frame.Offset, frame.ParseErr)
 			out = append(out, convert.UnparsedEntry(at, frame.Raw, frame.ParseErr))
 			continue
@@ -59,7 +59,7 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 		out = append(out, h.conv.Line(frame.Obj, at, lookahead(frames, i+1))...)
 	}
 	logUnconverted(h.log, ctx, out)
-	h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+	h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
 		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
 }

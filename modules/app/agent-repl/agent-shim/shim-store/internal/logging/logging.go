@@ -1,4 +1,12 @@
 // Package logging owns shim-store's single structured logging API.
+//
+// THE CORRELATION VOCABULARY IS THE ADDRESSING. The retired (session_id, seq)
+// addressing died with the schema, and its keys died with it: claude_session_id,
+// seq, from_seq and the replay_*_seq trio name nothing this store can produce.
+// What replaces them is the store's real addressing — the agent whose book a
+// line belongs to, the write that produced it, the row it superseded, the
+// position it landed at, and the store-internal write ordinal a watcher is
+// pinned to.
 package logging
 
 import (
@@ -13,60 +21,77 @@ import (
 )
 
 // Fields is diagnostic context bound to a store logger or supplied per record.
-// Empty fields are omitted.  The store's runtime owners bind the stable values
-// they know: database and table in db, socket and connection role in server.
+// Empty fields are omitted. The store's runtime owners bind the stable values
+// they know: database and table in db, socket and rpc in server.
 type Fields struct {
-	Component          string
-	DatabasePath       string
-	Table              string
-	Socket             string
+	// ---- Runtime placement ----
+	Component    string
+	DatabasePath string
+	Table        string
+	Socket       string
+	Transaction  string
+	Operation    string
+	Level        string
+
+	// ---- Top-level record identity ----
 	AgentReplSessionID string
-	Session            string
-	Producer           string
-	Subscriber         string
-	Transaction        string
-	ReplayFromSeq      uint64
-	ReplayFirstSeq     uint64
-	ReplayLastSeq      uint64
-	Delivered          uint64
-	TerminalOwner      string
-	TerminalReason     string
-	ErrorCause         string
-	Operation          string
-	Level              string
 	RequestID          string
-	// ---- the overhaul's correlation vocabulary (BRIEF-COMMON) ----
-	// Every identifier lives in its own context key; none is ever left to the
-	// message text, because the integration loop greps these keys by name.
+
+	// ---- The correlation vocabulary ----
+
+	// Producer is the WriteBatch caller's self-declared name.
+	Producer string
+	// AgentID is a conversation.v1.AgentId.value.
 	AgentID string
-	// VendorSessionID is the vendor's own session id, a mutable ATTRIBUTE of an
-	// agent — never an addressing key.
+	// VendorSessionID is the vendor's own mutable session identity, when the
+	// record concerns one. It is an ATTRIBUTE, never an address.
 	VendorSessionID string
-	// BookAgentID is StorePageLine.page_agent_id: the book a line renders in.
+	// BookAgentID is the agent whose book a page line belongs to
+	// (StorePageLine.page_agent_id.value). Empty for every never-served row.
 	BookAgentID string
-	WriteID     string
-	UpsertKey   string
-	// Position is the opaque StoreItemPointer value, never the raw row id.
+	// WriteID is StoreEntry.write_id — the replay-dedup identity of one write.
+	WriteID string
+	// UpsertKey is StoreEntry.upsert_key — the identity of the ROW a write
+	// supersedes whole.
+	UpsertKey string
+	// Position is a page position, rendered as the opaque pointer the store
+	// mints for it. Never the raw rowid: a log reader echoing a pointer must
+	// be echoing the same string the caller holds.
 	Position string
-	// WriteSeq is the store-internal global write ordinal (the watch pin). It
-	// never appears on any wire.
+	// WriteSeq is the store-internal global write ordinal — the watch pin.
+	// Never on the wire. Omitted when zero, which is never a valid ordinal.
 	WriteSeq uint64
-	// WatchTokenHash is a sha256 PREFIX of a watch token. The token itself is a
-	// capability and is never logged.
+	// WatchTokenHash is the sha256 PREFIX of a watch token, never the token.
 	WatchTokenHash string
-	// RPC is the Connect procedure name, e.g. "/store.v1.ShimStore/WriteBatch".
+	// RPC is the Connect procedure name, spelled exactly as Connect does —
+	// with its leading slash, e.g. "/store.v1.ShimStore/WriteBatch".
 	RPC string
-	// RefusalSite names WHICH refusal the store issued — the derived `kind`
-	// vocabulary — so a refusal is counted by site rather than grepped out of
-	// a human detail string.
+	// RefusalSite names WHICH refusal the store issued — the vocabulary the
+	// proto's failure `kind` arms are derived from — so refusals are counted
+	// by site instead of grepped out of a human detail string.
 	RefusalSite string
-	FileID      string
-	Path        string
-	Offset      int64
-	TaskID      string
-	ActivityID  string
-	TurnID      string
-	// Statement is a SQL statement FAMILY — "replay", "ingest", "open_tasks" —
+	// FileID is a CursorState.file_id.
+	FileID string
+	// Path is a filesystem path a record concerns (a cursor's file, a spool).
+	Path string
+	// Offset is a byte offset. A POINTER because zero is a meaningful offset
+	// and must be reported rather than omitted.
+	Offset *int64
+	// TaskID, ActivityID and TurnID are the conversation.v1 unit identities.
+	TaskID     string
+	ActivityID string
+	TurnID     string
+
+	// ---- Fan-out accounting ----
+	Subscriber     string
+	Delivered      uint64
+	TerminalOwner  string
+	TerminalReason string
+	ErrorCause     string
+
+	// ---- Query timing ----
+
+	// Statement is a SQL statement FAMILY — "write_batch", "open_page" —
 	// never rendered SQL and never bound values. The store's payloads are
 	// opaque to it by design, and a slow-query record that quoted a statement
 	// with its parameters would put session content into the global log.
@@ -89,7 +114,6 @@ type record struct {
 	Operation          string         `json:"operation"`
 	Message            string         `json:"message"`
 	AgentReplSessionID string         `json:"agent_repl_session_id,omitempty"`
-	ClaudeSessionID    string         `json:"claude_session_id,omitempty"`
 	RequestID          string         `json:"request_id,omitempty"`
 	Context            map[string]any `json:"context"`
 }
@@ -175,12 +199,8 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		"db":                merged.DatabasePath,
 		"table":             merged.Table,
 		"socket":            merged.Socket,
-		"producer":          merged.Producer,
-		"subscriber":        merged.Subscriber,
 		"transaction":       merged.Transaction,
-		"terminal_owner":    merged.TerminalOwner,
-		"terminal_reason":   merged.TerminalReason,
-		"error":             merged.ErrorCause,
+		"producer":          merged.Producer,
 		"agent_id":          merged.AgentID,
 		"vendor_session_id": merged.VendorSessionID,
 		"book_agent_id":     merged.BookAgentID,
@@ -195,10 +215,20 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		"task_id":           merged.TaskID,
 		"activity_id":       merged.ActivityID,
 		"turn_id":           merged.TurnID,
+		"subscriber":        merged.Subscriber,
+		"terminal_owner":    merged.TerminalOwner,
+		"terminal_reason":   merged.TerminalReason,
+		"error":             merged.ErrorCause,
 	} {
 		if value != "" {
 			context[key] = value
 		}
+	}
+	if merged.WriteSeq != 0 {
+		context["write_seq"] = merged.WriteSeq
+	}
+	if merged.Offset != nil {
+		context["offset"] = *merged.Offset
 	}
 	if merged.Statement != "" {
 		context["statement"] = merged.Statement
@@ -206,22 +236,9 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		context["rows"] = merged.Rows
 		context["threshold_ms"] = merged.Threshold.Milliseconds()
 	}
-	if merged.WriteSeq != 0 {
-		context["write_seq"] = merged.WriteSeq
-	}
-	if merged.Offset != 0 {
-		context["offset"] = merged.Offset
-	}
 	terminal := merged.TerminalOwner != "" || merged.TerminalReason != ""
-	for key, value := range map[string]uint64{
-		"replay_from_seq":  merged.ReplayFromSeq,
-		"replay_first_seq": merged.ReplayFirstSeq,
-		"replay_last_seq":  merged.ReplayLastSeq,
-		"delivered":        merged.Delivered,
-	} {
-		if value != 0 || terminal {
-			context[key] = value
-		}
+	if merged.Delivered != 0 || terminal {
+		context["delivered"] = merged.Delivered
 	}
 	now := sharedlogging.Timestamp(l.clock())
 	entry := record{
@@ -233,7 +250,6 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		Operation:          merged.Operation,
 		Message:            fmt.Sprintf(format, args...),
 		AgentReplSessionID: merged.AgentReplSessionID,
-		ClaudeSessionID:    merged.Session,
 		RequestID:          merged.RequestID,
 		Context:            context,
 	}
@@ -296,113 +312,49 @@ func writeFull(w io.Writer, value string) error {
 }
 
 func merge(base, extra Fields) Fields {
-	if extra.Component != "" {
-		base.Component = extra.Component
-	}
-	if extra.DatabasePath != "" {
-		base.DatabasePath = extra.DatabasePath
-	}
-	if extra.Table != "" {
-		base.Table = extra.Table
-	}
-	if extra.Socket != "" {
-		base.Socket = extra.Socket
-	}
-	if extra.AgentReplSessionID != "" {
-		base.AgentReplSessionID = extra.AgentReplSessionID
-	}
-	if extra.Session != "" {
-		base.Session = extra.Session
-	}
-	if extra.Producer != "" {
-		base.Producer = extra.Producer
-	}
-	if extra.Subscriber != "" {
-		base.Subscriber = extra.Subscriber
-	}
-	if extra.Transaction != "" {
-		base.Transaction = extra.Transaction
-	}
-	if extra.ReplayFromSeq != 0 {
-		base.ReplayFromSeq = extra.ReplayFromSeq
-	}
-	if extra.ReplayFirstSeq != 0 {
-		base.ReplayFirstSeq = extra.ReplayFirstSeq
-	}
-	if extra.ReplayLastSeq != 0 {
-		base.ReplayLastSeq = extra.ReplayLastSeq
-	}
-	if extra.Delivered != 0 {
-		base.Delivered = extra.Delivered
-	}
-	if extra.TerminalOwner != "" {
-		base.TerminalOwner = extra.TerminalOwner
-	}
-	if extra.TerminalReason != "" {
-		base.TerminalReason = extra.TerminalReason
-	}
-	if extra.ErrorCause != "" {
-		base.ErrorCause = extra.ErrorCause
-	}
-	if extra.Operation != "" {
-		base.Operation = extra.Operation
-	}
-	if extra.Level != "" {
-		base.Level = extra.Level
-	}
-	if extra.RequestID != "" {
-		base.RequestID = extra.RequestID
-	}
-	if extra.AgentID != "" {
-		base.AgentID = extra.AgentID
-	}
-	if extra.VendorSessionID != "" {
-		base.VendorSessionID = extra.VendorSessionID
-	}
-	if extra.BookAgentID != "" {
-		base.BookAgentID = extra.BookAgentID
-	}
-	if extra.WriteID != "" {
-		base.WriteID = extra.WriteID
-	}
-	if extra.UpsertKey != "" {
-		base.UpsertKey = extra.UpsertKey
-	}
-	if extra.Position != "" {
-		base.Position = extra.Position
+	for _, pair := range []struct{ dst, src *string }{
+		{&base.Component, &extra.Component},
+		{&base.DatabasePath, &extra.DatabasePath},
+		{&base.Table, &extra.Table},
+		{&base.Socket, &extra.Socket},
+		{&base.Transaction, &extra.Transaction},
+		{&base.Operation, &extra.Operation},
+		{&base.Level, &extra.Level},
+		{&base.AgentReplSessionID, &extra.AgentReplSessionID},
+		{&base.RequestID, &extra.RequestID},
+		{&base.Producer, &extra.Producer},
+		{&base.AgentID, &extra.AgentID},
+		{&base.VendorSessionID, &extra.VendorSessionID},
+		{&base.BookAgentID, &extra.BookAgentID},
+		{&base.WriteID, &extra.WriteID},
+		{&base.UpsertKey, &extra.UpsertKey},
+		{&base.Position, &extra.Position},
+		{&base.WatchTokenHash, &extra.WatchTokenHash},
+		{&base.RPC, &extra.RPC},
+		{&base.RefusalSite, &extra.RefusalSite},
+		{&base.FileID, &extra.FileID},
+		{&base.Path, &extra.Path},
+		{&base.TaskID, &extra.TaskID},
+		{&base.ActivityID, &extra.ActivityID},
+		{&base.TurnID, &extra.TurnID},
+		{&base.Subscriber, &extra.Subscriber},
+		{&base.TerminalOwner, &extra.TerminalOwner},
+		{&base.TerminalReason, &extra.TerminalReason},
+		{&base.ErrorCause, &extra.ErrorCause},
+		{&base.Statement, &extra.Statement},
+	} {
+		if *pair.src != "" {
+			*pair.dst = *pair.src
+		}
 	}
 	if extra.WriteSeq != 0 {
 		base.WriteSeq = extra.WriteSeq
 	}
-	if extra.WatchTokenHash != "" {
-		base.WatchTokenHash = extra.WatchTokenHash
-	}
-	if extra.RPC != "" {
-		base.RPC = extra.RPC
-	}
-	if extra.RefusalSite != "" {
-		base.RefusalSite = extra.RefusalSite
-	}
-	if extra.FileID != "" {
-		base.FileID = extra.FileID
-	}
-	if extra.Path != "" {
-		base.Path = extra.Path
-	}
-	if extra.Offset != 0 {
+	if extra.Offset != nil {
 		base.Offset = extra.Offset
 	}
-	if extra.TaskID != "" {
-		base.TaskID = extra.TaskID
-	}
-	if extra.ActivityID != "" {
-		base.ActivityID = extra.ActivityID
-	}
-	if extra.TurnID != "" {
-		base.TurnID = extra.TurnID
-	}
-	if extra.Statement != "" {
-		base.Statement = extra.Statement
+	if extra.Delivered != 0 {
+		base.Delivered = extra.Delivered
 	}
 	if extra.Duration != 0 {
 		base.Duration = extra.Duration
