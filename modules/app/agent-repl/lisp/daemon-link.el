@@ -34,6 +34,19 @@
 ;; shortens its quiet window instead of restarting it; the reconnect loop
 ;; polls nothing until that instant passes.
 ;;
+;; ACCEPTANCE, NEVER A SPAWN.  A link is up when the daemon ACCEPTED its
+;; `WatchDaemon' subscription — the HTTP 200 header block, which the daemon
+;; flushes on accept — and not a moment earlier.  Spawning a curl against
+;; an address that names a corpse succeeds; only acceptance proves a daemon
+;; is there.  So `agent-repl-link--open' returns as soon as the transport
+;; exists, but the connection sits PENDING: the primary is marked up, the
+;; indicator refreshed and `agent-repl-link-up-functions' run only from
+;; connect.el's ON-OPEN.  A pending stream that dies goes straight to the
+;; reconnect loop and fires NO down hooks, because it was never up.  The
+;; successor is the same story: it becomes adoptable — `agent-repl-link-
+;; successor' answers it, and the handover hooks run — only once ITS
+;; `WatchDaemon' was accepted.
+;;
 ;; NO SLEEPS ANYWHERE.  Every wait in this file is a timer, and every
 ;; timer's function is a named `defun' a test can call directly.
 
@@ -53,7 +66,7 @@
 (declare-function agent-repl-connect-connection-address "connect" (conn))
 (declare-function agent-repl-connect-connection-alive-p "connect" (conn))
 (declare-function agent-repl-connect-failure-message "connect" (detail))
-(declare-function agent-repl-rpc-watch-daemon "rpc" (conn on-push on-close))
+(declare-function agent-repl-rpc-watch-daemon "rpc" (conn on-push on-close &optional on-open))
 
 ;;;; ---- Customization ----
 
@@ -80,10 +93,13 @@ An ABSENT address file is the legal no-daemon state, not an error: the
 cold start (daemon.el) hangs here and builds and starts one.")
 
 (defvar agent-repl-link-up-functions nil
-  "Functions run with the CONNECTION once a `WatchDaemon' stream stands.
+  "Functions run with the CONNECTION once a `WatchDaemon' stream is ACCEPTED.
 Runs on the first connect and after every reconnect — host.el
 re-registers and re-subscribes its workspaces, roster.el re-subscribes.
-It does NOT run for a handover promotion: nothing was lost there.")
+Keyed on the stream's acceptance (its HTTP 200 header block), never on the
+spawn: a connection to a dead address spawns fine and would send the whole
+fleet's registrations into a void.  It does NOT run for a handover
+promotion: nothing was lost there.")
 
 (defvar agent-repl-link-down-functions nil
   "Functions run with the CONNECTION when the link dies unexpectedly.
@@ -93,7 +109,9 @@ old daemon's stream closing after a handover (that is a promotion).")
 (defvar agent-repl-link-handover-functions nil
   "Functions run with (OLD-CONN NEW-CONN) when a successor daemon is up.
 Both connections are live at this point, by design: each workspace keeps
-flowing from whichever daemon still owns it until it is transferred.")
+flowing from whichever daemon still owns it until it is transferred.  Run
+from the successor's ACCEPTANCE, so NEW-CONN is already proven adoptable
+when a hook sees it.")
 
 (defvar agent-repl-link-drain-functions nil
   "Functions run with the current value of `agent-repl-link-drain'.
@@ -112,6 +130,27 @@ Nil means the standing schedule was cancelled.")
 
 (defvar agent-repl-link--successor-stream nil
   "The `WatchDaemon' stream standing on `agent-repl-link--successor'.")
+
+(defvar agent-repl-link--pending nil
+  "A connection whose `WatchDaemon' has not been ACCEPTED yet, or nil.
+It becomes `agent-repl-link--primary' from connect.el's ON-OPEN and
+nowhere else; until then Emacs holds a transport but no proven link.")
+
+(defvar agent-repl-link--pending-stream nil
+  "The unaccepted `WatchDaemon' stream on `agent-repl-link--pending'.")
+
+(defvar agent-repl-link--pending-reconnect-p nil
+  "Non-nil when `agent-repl-link--pending' came from the reconnect loop.
+Only the log line differs; it is kept so the record still distinguishes a
+cold connect from a recovery.")
+
+(defvar agent-repl-link--pending-successor nil
+  "A successor connection whose `WatchDaemon' is not ACCEPTED yet, or nil.
+`agent-repl-link-successor' does NOT answer it: host.el must never adopt
+onto a daemon that has not proven it is listening.")
+
+(defvar agent-repl-link--pending-successor-stream nil
+  "The unaccepted `WatchDaemon' stream on `agent-repl-link--pending-successor'.")
 
 (defvar agent-repl-link-drain nil
   "The standing drain schedule, or nil when none is armed.
@@ -166,19 +205,25 @@ in this file is against this one clock reading."
 
 ;;;; ---- Connecting ----
 
-(defun agent-repl-link--open (address)
+(defun agent-repl-link--open (address on-open)
   "Open a connection to ADDRESS and stand a `WatchDaemon' stream on it.
-Returns the connection, or nil when either step fails — a failure here is
-an ordinary absent-daemon outcome (the address file can name a daemon
-that has already exited), so it is WARNED and answered with nil rather
-than signalled."
+Returns `(CONN . STREAM)' as soon as the TRANSPORT exists, or nil when
+either step fails — a failure here is an ordinary absent-daemon outcome
+(the address file can name a daemon that has already exited), so it is
+WARNED and answered with nil rather than signalled.
+
+A RETURN IS NOT AN ACCEPTANCE.  Spawning a curl at a dead address
+succeeds; only the daemon's HTTP 200 header block proves it is listening.
+ON-OPEN is called with no arguments from that instant and from nowhere
+else, so every caller here keys its link-stands work on it."
   (condition-case err
       (let ((conn (agent-repl-connect-open address)))
         (condition-case stream-err
             (let ((stream (agent-repl-rpc-watch-daemon
                            conn
                            (lambda (push) (agent-repl-link--handle-push conn push))
-                           (lambda (outcome) (agent-repl-link--handle-close conn outcome)))))
+                           (lambda (outcome) (agent-repl-link--handle-close conn outcome))
+                           on-open)))
               (agent-repl--info nil "elisp.link.open address=%S" address)
               (cons conn stream))
           (error
@@ -195,31 +240,66 @@ than signalled."
 Returns the primary connection, or nil.  An ABSENT `daemon.addr' is the
 legal no-daemon state and runs `agent-repl-link-no-daemon-functions' —
 the cold start's entry point — rather than failing."
-  (if (agent-repl-link-up-p)
-      (progn
-        (agent-repl--log nil "elisp.link.connect-noop address=%S"
-                         (agent-repl-connect-connection-address agent-repl-link--primary))
-        agent-repl-link--primary)
+  (cond
+   ((agent-repl-link-up-p)
+    (agent-repl--log nil "elisp.link.connect-noop address=%S"
+                     (agent-repl-connect-connection-address agent-repl-link--primary))
+    agent-repl-link--primary)
+   (agent-repl-link--pending
+    (agent-repl--log nil "elisp.link.connect-pending address=%S"
+                     (agent-repl-connect-connection-address agent-repl-link--pending))
+    agent-repl-link--pending)
+   (t
     (let ((address (agent-repl-connect-read-daemon-addr)))
       (if (null address)
           (progn
             (agent-repl--info nil "elisp.link.no-daemon")
             (run-hooks 'agent-repl-link-no-daemon-functions)
             nil)
-        (let ((opened (agent-repl-link--open address)))
-          (if (null opened)
-              (progn
-                (agent-repl--warn nil "elisp.link.connect-failed address=%S" address)
-                nil)
-            (setq agent-repl-link--primary (car opened)
-                  agent-repl-link--primary-stream (cdr opened))
-            (agent-repl-link--cancel-reconnect)
-            (setq agent-repl-link--quiet-until-ms nil
-                  agent-repl-link--bounce-cause nil)
-            (agent-repl-link--refresh-indicator)
-            (agent-repl--info nil "elisp.link.up address=%S" address)
-            (run-hook-with-args 'agent-repl-link-up-functions agent-repl-link--primary)
-            agent-repl-link--primary))))))
+        (agent-repl-link--open-primary address nil))))))
+
+(defun agent-repl-link--open-primary (address reconnect-p)
+  "Stand a PENDING primary link on ADDRESS and return its connection, or nil.
+RECONNECT-P records that the reconnect loop drove this, for the log line
+acceptance later writes.  Nothing is marked up here: `agent-repl-link-up-p'
+stays nil and no up hook runs until `agent-repl-link--accept-primary'."
+  (let ((opened (agent-repl-link--open
+                 address
+                 (lambda () (agent-repl-link--accept-primary address)))))
+    (if (null opened)
+        (progn
+          (agent-repl--warn nil "elisp.link.connect-failed address=%S" address)
+          nil)
+      (setq agent-repl-link--pending (car opened)
+            agent-repl-link--pending-stream (cdr opened)
+            agent-repl-link--pending-reconnect-p reconnect-p)
+      (agent-repl--info nil "elisp.link.open-pending address=%S reconnect=%S"
+                        address (and reconnect-p t))
+      agent-repl-link--pending)))
+
+(defun agent-repl-link--accept-primary (address)
+  "Promote the pending connection to primary: the daemon ACCEPTED the watch.
+The ONE place the link becomes up.  Everything a standing link owes its
+consumers happens here and nowhere else: the reconnect loop is disarmed,
+any bounce quiet window is dropped, the indicator is redrawn, and
+`agent-repl-link-up-functions' run — so no consumer ever registers a
+workspace against a connection the daemon never answered."
+  (if (null agent-repl-link--pending)
+      (agent-repl--warn nil "elisp.link.accept-without-pending address=%S" address)
+    (setq agent-repl-link--primary agent-repl-link--pending
+          agent-repl-link--primary-stream agent-repl-link--pending-stream)
+    (let ((reconnect-p agent-repl-link--pending-reconnect-p))
+      (setq agent-repl-link--pending nil
+            agent-repl-link--pending-stream nil
+            agent-repl-link--pending-reconnect-p nil)
+      (agent-repl-link--cancel-reconnect)
+      (setq agent-repl-link--quiet-until-ms nil
+            agent-repl-link--bounce-cause nil)
+      (agent-repl-link--refresh-indicator)
+      (if reconnect-p
+          (agent-repl--info nil "elisp.link.reconnected address=%S" address)
+        (agent-repl--info nil "elisp.link.up address=%S" address))
+      (run-hook-with-args 'agent-repl-link-up-functions agent-repl-link--primary))))
 
 (defun agent-repl-link-teardown ()
   "Close every connection this link holds and forget all of its state.
@@ -229,17 +309,23 @@ ON-CLOSE runs with `(:cancelled)', which this file treats as normal."
                     (if agent-repl-link--primary "t" "nil")
                     (if agent-repl-link--successor "t" "nil"))
   (agent-repl-link--cancel-reconnect)
-  (let ((primary agent-repl-link--primary)
-        (successor agent-repl-link--successor))
+  (let ((conns (delq nil (list agent-repl-link--primary
+                               agent-repl-link--pending
+                               agent-repl-link--successor
+                               agent-repl-link--pending-successor))))
     (setq agent-repl-link--primary nil
           agent-repl-link--primary-stream nil
+          agent-repl-link--pending nil
+          agent-repl-link--pending-stream nil
+          agent-repl-link--pending-reconnect-p nil
           agent-repl-link--successor nil
           agent-repl-link--successor-stream nil
+          agent-repl-link--pending-successor nil
+          agent-repl-link--pending-successor-stream nil
           agent-repl-link--quiet-until-ms nil
           agent-repl-link--bounce-cause nil
           agent-repl-link-drain nil)
-    (when primary (agent-repl-connect-close primary))
-    (when successor (agent-repl-connect-close successor)))
+    (dolist (conn conns) (agent-repl-connect-close conn)))
   (agent-repl-link--refresh-indicator))
 
 ;;;; ---- The reconnect loop ----
@@ -283,6 +369,11 @@ dependence on the scheduler and no sleep anywhere."
    ((agent-repl-link-up-p)
     (agent-repl--log nil "elisp.link.reconnect-already-up")
     (agent-repl-link--cancel-reconnect))
+   (agent-repl-link--pending
+    ;; A transport is already standing and waiting to be accepted; a second
+    ;; one would race it and leave an orphan.
+    (agent-repl--log nil "elisp.link.reconnect-pending")
+    (agent-repl-link--schedule-reconnect))
    ((agent-repl-link--quiet-p)
     (agent-repl--log nil "elisp.link.reconnect-quiet until=%S now=%S"
                      agent-repl-link--quiet-until-ms (agent-repl-link--now-ms))
@@ -297,20 +388,11 @@ dependence on the scheduler and no sleep anywhere."
           (progn
             (agent-repl--log nil "elisp.link.reconnect-no-address")
             (agent-repl-link--schedule-reconnect))
-        (let ((opened (agent-repl-link--open address)))
-          (if (null opened)
-              (progn
-                (agent-repl--log nil "elisp.link.reconnect-refused address=%S" address)
-                (agent-repl-link--schedule-reconnect))
-            (setq agent-repl-link--primary (car opened)
-                  agent-repl-link--primary-stream (cdr opened))
-            (agent-repl-link--cancel-reconnect)
-            (setq agent-repl-link--quiet-until-ms nil
-                  agent-repl-link--bounce-cause nil)
-            (agent-repl-link--refresh-indicator)
-            (agent-repl--info nil "elisp.link.reconnected address=%S" address)
-            (run-hook-with-args 'agent-repl-link-up-functions
-                                agent-repl-link--primary))))))))
+        (if (agent-repl-link--open-primary address t)
+            (agent-repl--log nil "elisp.link.reconnect-awaiting-acceptance address=%S"
+                             address)
+          (agent-repl--log nil "elisp.link.reconnect-refused address=%S" address)
+          (agent-repl-link--schedule-reconnect)))))))
 
 ;;;; ---- Stream close: death, cancel, promotion ----
 
@@ -336,6 +418,29 @@ of a STANDING stream, which the contract calls a transport failure; and
 `(:error DETAIL)' is one already."
   (let ((kind (car outcome)))
     (cond
+     ((eq conn agent-repl-link--pending)
+      ;; A stream that died before it was ACCEPTED was never up, so there is
+      ;; nothing to take down: no down hooks, straight back to the poll.
+      (setq agent-repl-link--pending nil
+            agent-repl-link--pending-stream nil
+            agent-repl-link--pending-reconnect-p nil)
+      (if (eq kind :cancelled)
+          (agent-repl--log nil "elisp.link.pending-stream-cancelled")
+        (agent-repl--warn nil "elisp.link.open-refused address=%S outcome=%S"
+                          (agent-repl-connect-connection-address conn) outcome)
+        (agent-repl-connect-close conn)
+        (agent-repl-link--schedule-reconnect)))
+     ((eq conn agent-repl-link--pending-successor)
+      ;; The successor died before proving it was listening.  Nothing was
+      ;; adopted onto it, by construction, so the old daemon still serves
+      ;; everything and the only loss is the handover itself.
+      (setq agent-repl-link--pending-successor nil
+            agent-repl-link--pending-successor-stream nil)
+      (if (eq kind :cancelled)
+          (agent-repl--log nil "elisp.link.pending-successor-cancelled")
+        (agent-repl--error nil "elisp.link.successor-open-refused address=%S outcome=%S"
+                           (agent-repl-connect-connection-address conn) outcome)
+        (agent-repl-connect-close conn)))
      ((eq conn agent-repl-link--successor)
       ;; The successor died before it took over.  The old daemon still
       ;; owns whatever it has not transferred, so the link is not down —
@@ -403,26 +508,61 @@ The old connection is KEPT: until each workspace is transferred it is the
 daemon still serving it.  Re-announcements are idempotent — an already
 attached successor at the same address is a no-op, never a second
 connection."
-  (cond
-   ((and agent-repl-link--successor
-         (equal address (agent-repl-connect-connection-address
-                         agent-repl-link--successor)))
-    (agent-repl--log nil "elisp.link.successor-already-attached address=%S" address))
-   (agent-repl-link--successor
-    (agent-repl--error nil "elisp.link.successor-address-changed old=%S new=%S"
-                       (agent-repl-connect-connection-address agent-repl-link--successor)
-                       address))
-   (t
-    (let ((opened (agent-repl-link--open address)))
-      (if (null opened)
-          (agent-repl--error nil "elisp.link.successor-attach-failed address=%S cause=%S"
-                             address (plist-get cause :arm))
-        (setq agent-repl-link--successor (car opened)
-              agent-repl-link--successor-stream (cdr opened))
-        (agent-repl--info nil "elisp.link.handover-announced address=%S cause=%S"
-                          address (plist-get cause :arm))
-        (run-hook-with-args 'agent-repl-link-handover-functions
-                            old agent-repl-link--successor))))))
+  (let ((attached (or agent-repl-link--successor agent-repl-link--pending-successor)))
+    (cond
+     ((and attached
+           (equal address (agent-repl-connect-connection-address attached)))
+      (agent-repl--log nil "elisp.link.successor-already-attached address=%S" address))
+     (attached
+      (agent-repl--error nil "elisp.link.successor-address-changed old=%S new=%S"
+                         (agent-repl-connect-connection-address attached)
+                         address))
+     (t
+      (let ((opened (agent-repl-link--open
+                     address
+                     (lambda () (agent-repl-link--accept-successor old address cause)))))
+        (if (null opened)
+            (agent-repl--error nil "elisp.link.successor-attach-failed address=%S cause=%S"
+                               address (plist-get cause :arm))
+          (setq agent-repl-link--pending-successor (car opened)
+                agent-repl-link--pending-successor-stream (cdr opened))
+          (agent-repl--info nil "elisp.link.successor-pending address=%S cause=%S"
+                            address (plist-get cause :arm))))))))
+
+(defun agent-repl-link--accept-successor (old address cause)
+  "Record the successor at ADDRESS as ADOPTABLE: it ACCEPTED its watch.
+Announced on OLD with CAUSE.  Until this runs `agent-repl-link-successor'
+answers nil, so host.el cannot send an adopt to a daemon that has not
+proven it is listening; from here the handover hooks run with both live
+connections."
+  (if (null agent-repl-link--pending-successor)
+      (agent-repl--warn nil "elisp.link.successor-accept-without-pending address=%S"
+                        address)
+    (setq agent-repl-link--successor agent-repl-link--pending-successor
+          agent-repl-link--successor-stream agent-repl-link--pending-successor-stream
+          agent-repl-link--pending-successor nil
+          agent-repl-link--pending-successor-stream nil)
+    (agent-repl--info nil "elisp.link.successor-accepted address=%S cause=%S"
+                      address (plist-get cause :arm))
+    (if (null agent-repl-link--primary)
+        ;; The old daemon dropped its stream before the successor was
+        ;; accepted, so there is nothing to hand over FROM: the successor is
+        ;; simply the link now, and the fleet has to be rebuilt on it.
+        (progn
+          (agent-repl--warn nil "elisp.link.successor-accepted-without-primary address=%S"
+                            address)
+          (setq agent-repl-link--primary agent-repl-link--successor
+                agent-repl-link--primary-stream agent-repl-link--successor-stream
+                agent-repl-link--successor nil
+                agent-repl-link--successor-stream nil)
+          (agent-repl-link--cancel-reconnect)
+          (agent-repl-link--refresh-indicator)
+          (agent-repl--info nil "elisp.link.up address=%S" address)
+          (run-hook-with-args 'agent-repl-link-up-functions agent-repl-link--primary))
+      (agent-repl--info nil "elisp.link.handover-announced address=%S cause=%S"
+                        address (plist-get cause :arm))
+      (run-hook-with-args 'agent-repl-link-handover-functions
+                          old agent-repl-link--successor))))
 
 (defun agent-repl-link--drain-scheduled (schedule)
   "Record the standing drain SCHEDULE and redraw the indicator."

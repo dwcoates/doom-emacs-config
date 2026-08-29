@@ -14,6 +14,13 @@
 ;; ON-CLOSE back to the test, which invokes them SYNCHRONOUSLY — that is
 ;; what makes every arm deterministic.
 ;;
+;; ACCEPTANCE IS EXPLICIT.  The stream stub keeps the ON-OPEN it was handed
+;; and never calls it; a test calls `agent-repl-test-link--accept' to say
+;; the daemon accepted the subscription.  `agent-repl-test-link--connect'
+;; opens AND accepts, because a standing link is most tests' arrangement;
+;; `agent-repl-test-link--stand' opens WITHOUT accepting, which is how the
+;; refused-before-acceptance cases are set up.
+;;
 ;; Timers are captured, never scheduled: `run-with-timer' is stubbed to
 ;; record its callback and answer an un-armed timer object, and a test that
 ;; wants the next poll calls `agent-repl-link--reconnect-tick' itself.
@@ -78,6 +85,11 @@
          (agent-repl-link--primary-stream nil)
          (agent-repl-link--successor nil)
          (agent-repl-link--successor-stream nil)
+         (agent-repl-link--pending nil)
+         (agent-repl-link--pending-stream nil)
+         (agent-repl-link--pending-reconnect-p nil)
+         (agent-repl-link--pending-successor nil)
+         (agent-repl-link--pending-successor-stream nil)
          (agent-repl-link--reconnect-timer nil)
          (agent-repl-link--reconnect-interval nil)
          (agent-repl-link--quiet-until-ms nil)
@@ -95,10 +107,11 @@
                         (1+ agent-repl-test-link--addr-reads))
                   agent-repl-test-link--address))
                ((symbol-function 'agent-repl-rpc-watch-daemon)
-                (lambda (conn on-push on-close)
+                (lambda (conn on-push on-close &optional on-open)
                   (setq agent-repl-test-link--stream-counter
                         (1+ agent-repl-test-link--stream-counter))
                   (let ((record (list :conn conn :on-push on-push :on-close on-close
+                                      :on-open on-open
                                       :id agent-repl-test-link--stream-counter)))
                     (push record agent-repl-test-link--streams)
                     record)))
@@ -120,10 +133,25 @@
                   (push (cons :error (apply #'format fmt args)) agent-repl-test-link--logs))))
        ,@body)))
 
-(defun agent-repl-test-link--connect (address)
-  "Stand a link against ADDRESS and return the primary connection."
+(defun agent-repl-test-link--stand (address)
+  "Open a link against ADDRESS WITHOUT the daemon accepting it.
+Returns the pending connection, or nil when the open itself failed."
   (setq agent-repl-test-link--address address)
   (agent-repl-link-connect))
+
+(defun agent-repl-test-link--accept (conn)
+  "Say the daemon ACCEPTED the `WatchDaemon' subscription standing on CONN."
+  (let ((on-open (plist-get (agent-repl-test-link--stream-for conn) :on-open)))
+    (should on-open)
+    (funcall on-open)))
+
+(defun agent-repl-test-link--connect (address)
+  "Stand a link against ADDRESS, accept it, and return the primary connection.
+The two steps are separate in production — a spawn is not an acceptance —
+so they are separate here, and this is the both-of-them convenience."
+  (let ((conn (agent-repl-test-link--stand address)))
+    (when conn (agent-repl-test-link--accept conn))
+    agent-repl-link--primary))
 
 (defun agent-repl-test-link--push (conn push)
   "Deliver PUSH to the stubbed `WatchDaemon' stream standing on CONN."
@@ -132,6 +160,22 @@
 (defun agent-repl-test-link--close (conn outcome)
   "Close the stubbed `WatchDaemon' stream on CONN with OUTCOME."
   (funcall (plist-get (agent-repl-test-link--stream-for conn) :on-close) outcome))
+
+(defun agent-repl-test-link--accept-pending ()
+  "Accept whatever primary connection is currently pending acceptance."
+  (should agent-repl-link--pending)
+  (agent-repl-test-link--accept agent-repl-link--pending))
+
+(defun agent-repl-test-link--announce-successor (conn address)
+  "Announce a successor at ADDRESS on CONN and let it be ACCEPTED.
+Returns the successor connection, which is nil until acceptance — that
+gate is the point, so it is exercised here rather than bypassed."
+  (agent-repl-test-link--push
+   conn (list :arm :shutdown-announced
+              :value (agent-repl-test-link--announcement :address address)))
+  (when agent-repl-link--pending-successor
+    (agent-repl-test-link--accept agent-repl-link--pending-successor))
+  (agent-repl-link-successor))
 
 (defun agent-repl-test-link--announcement (&rest overrides)
   "Return a `shutdown_announced' value plist, with OVERRIDES applied."
@@ -312,6 +356,7 @@
     (setq agent-repl-test-link--address "127.0.0.1:9002")
     ;; Act
     (agent-repl-link--reconnect-tick)
+    (agent-repl-test-link--accept-pending)
     ;; Assert
     (should (equal (cdr (assq :up agent-repl-test-link--hooks))
                    (list (agent-repl-link-primary))))))
@@ -336,6 +381,7 @@
           agent-repl-test-link--address "127.0.0.1:9002")
     ;; Act
     (agent-repl-link--reconnect-tick)
+    (agent-repl-test-link--accept-pending)
     ;; Assert
     (should (agent-repl-link-up-p))))
 
@@ -370,9 +416,7 @@
     ;; Arrange
     (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
       ;; Act
-      (agent-repl-test-link--push
-       conn (list :arm :shutdown-announced
-                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
       ;; Assert
       (should (equal (agent-repl-connect-connection-address (agent-repl-link-successor))
                      "127.0.0.1:9100")))))
@@ -383,9 +427,7 @@
     ;; Arrange
     (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
       ;; Act
-      (agent-repl-test-link--push
-       conn (list :arm :shutdown-announced
-                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
       ;; Assert
       (should (eq (agent-repl-link-primary) conn)))))
 
@@ -397,9 +439,7 @@
       (add-hook 'agent-repl-link-handover-functions
                 (agent-repl-test-link--record-hook :handover))
       ;; Act
-      (agent-repl-test-link--push
-       conn (list :arm :shutdown-announced
-                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
       ;; Assert
       (should (equal (cdr (assq :handover agent-repl-test-link--hooks))
                      (list conn (agent-repl-link-successor)))))))
@@ -423,9 +463,7 @@
   (agent-repl-test-link--with-harness
     ;; Arrange
     (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
-      (agent-repl-test-link--push
-       conn (list :arm :shutdown-announced
-                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
       (let ((successor (agent-repl-link-successor)))
         ;; Act
         (agent-repl-test-link--close conn '(:error (:kind :transport)))
@@ -437,9 +475,7 @@
   (agent-repl-test-link--with-harness
     ;; Arrange
     (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
-      (agent-repl-test-link--push
-       conn (list :arm :shutdown-announced
-                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
       (add-hook 'agent-repl-link-down-functions
                 (agent-repl-test-link--record-hook :down))
       ;; Act
@@ -452,9 +488,7 @@
   (agent-repl-test-link--with-harness
     ;; Arrange
     (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
-      (agent-repl-test-link--push
-       conn (list :arm :shutdown-announced
-                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
       (add-hook 'agent-repl-link-up-functions
                 (agent-repl-test-link--record-hook :up))
       ;; Act
@@ -467,9 +501,7 @@
   (agent-repl-test-link--with-harness
     ;; Arrange
     (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
-      (agent-repl-test-link--push
-       conn (list :arm :shutdown-announced
-                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
       ;; Act
       (agent-repl-test-link--close conn '(:error (:kind :transport)))
       ;; Assert
@@ -480,9 +512,7 @@
   (agent-repl-test-link--with-harness
     ;; Arrange
     (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
-      (agent-repl-test-link--push
-       conn (list :arm :shutdown-announced
-                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
       ;; Act
       (agent-repl-test-link--close (agent-repl-link-successor)
                                    '(:error (:kind :transport)))
@@ -688,6 +718,216 @@
       (agent-repl-link--handle-close stale '(:error (:kind :transport)))
       ;; Assert
       (should (null (assq :down agent-repl-test-link--hooks))))))
+
+
+;;;; ---- Acceptance: a spawn is not a link ----
+
+(ert-deftest agent-repl-test-link-open-alone-does-not-report-up ()
+  "A transport that the daemon has not accepted is not a link."
+  (agent-repl-test-link--with-harness
+    ;; Arrange / Act
+    (agent-repl-test-link--stand "127.0.0.1:9001")
+    ;; Assert
+    (should-not (agent-repl-link-up-p))))
+
+(ert-deftest agent-repl-test-link-open-alone-records-no-primary ()
+  "The primary is set from acceptance and from nowhere else."
+  (agent-repl-test-link--with-harness
+    ;; Arrange / Act
+    (agent-repl-test-link--stand "127.0.0.1:9001")
+    ;; Assert
+    (should (null (agent-repl-link-primary)))))
+
+(ert-deftest agent-repl-test-link-open-alone-runs-no-up-hook ()
+  "Registering a fleet against an unanswered connection would send it nowhere."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-up-functions (agent-repl-test-link--record-hook :up))
+    ;; Act
+    (agent-repl-test-link--stand "127.0.0.1:9001")
+    ;; Assert
+    (should (null (assq :up agent-repl-test-link--hooks)))))
+
+(ert-deftest agent-repl-test-link-acceptance-runs-the-up-hook ()
+  "The daemon accepting the watch is what runs the up hooks."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-up-functions (agent-repl-test-link--record-hook :up))
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--accept conn)
+      ;; Assert
+      (should (equal (cdr (assq :up agent-repl-test-link--hooks)) (list conn))))))
+
+(ert-deftest agent-repl-test-link-acceptance-reports-up ()
+  "After acceptance the link stands."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--accept conn)
+      ;; Assert
+      (should (agent-repl-link-up-p)))))
+
+(ert-deftest agent-repl-test-link-connect-while-pending-opens-no-second-transport ()
+  "A second connect while one waits to be accepted would orphan a curl."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--stand "127.0.0.1:9001")
+    ;; Act
+    (agent-repl-link-connect)
+    ;; Assert
+    (should (= (length agent-repl-test-link--streams) 1))))
+
+(ert-deftest agent-repl-test-link-death-before-acceptance-runs-no-down-hook ()
+  "A link that was never up cannot go down."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      (add-hook 'agent-repl-link-down-functions (agent-repl-test-link--record-hook :down))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (null (assq :down agent-repl-test-link--hooks))))))
+
+(ert-deftest agent-repl-test-link-death-before-acceptance-schedules-a-reconnect ()
+  "A refused open goes straight back to the poll."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (eq (cdar agent-repl-test-link--timers)
+                  #'agent-repl-link--reconnect-tick)))))
+
+(ert-deftest agent-repl-test-link-death-before-acceptance-logs-open-refused ()
+  "The refusal is named on the record at WARNING."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (agent-repl-test-link--logged-p :warn "elisp.link.open-refused")))))
+
+(ert-deftest agent-repl-test-link-death-before-acceptance-clears-the-pending ()
+  "A refused open leaves nothing behind for the next poll to trip over."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (null agent-repl-link--pending)))))
+
+(ert-deftest agent-repl-test-link-reconnect-open-alone-does-not-report-up ()
+  "The reconnect loop is keyed on acceptance exactly as the first connect is."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (setq agent-repl-test-link--address "127.0.0.1:9002")
+    ;; Act
+    (agent-repl-link--reconnect-tick)
+    ;; Assert
+    (should-not (agent-repl-link-up-p))))
+
+(ert-deftest agent-repl-test-link-reconnect-acceptance-logs-a-reconnect ()
+  "A recovery is still distinguishable from a cold start on the record."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (setq agent-repl-test-link--address "127.0.0.1:9002")
+    (agent-repl-link--reconnect-tick)
+    ;; Act
+    (agent-repl-test-link--accept-pending)
+    ;; Assert
+    (should (agent-repl-test-link--logged-p :info "elisp.link.reconnected"))))
+
+(ert-deftest agent-repl-test-link-reconnect-tick-while-pending-opens-nothing ()
+  "A poll that fires while a transport awaits acceptance must not race it."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (setq agent-repl-test-link--address "127.0.0.1:9002")
+    (agent-repl-link--reconnect-tick)
+    ;; Act
+    (agent-repl-link--reconnect-tick)
+    ;; Assert
+    (should (= (length agent-repl-test-link--streams) 1))))
+
+;;;; ---- Acceptance: the successor gate ----
+
+(ert-deftest agent-repl-test-link-unaccepted-successor-is-not-adoptable ()
+  "host.el must never adopt onto a daemon that has not answered."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      ;; Assert
+      (should (null (agent-repl-link-successor))))))
+
+(ert-deftest agent-repl-test-link-unaccepted-successor-runs-no-handover-hook ()
+  "The handover hook promises an adoptable NEW connection."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (add-hook 'agent-repl-link-handover-functions
+                (agent-repl-test-link--record-hook :handover))
+      ;; Act
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      ;; Assert
+      (should (null (assq :handover agent-repl-test-link--hooks))))))
+
+(ert-deftest agent-repl-test-link-successor-acceptance-is-logged ()
+  "The successor becoming adoptable is a fact worth naming."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
+      ;; Assert
+      (should (agent-repl-test-link--logged-p :info "elisp.link.successor-accepted")))))
+
+(ert-deftest agent-repl-test-link-successor-death-before-acceptance-keeps-the-primary ()
+  "The old daemon still owns everything it has not released."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      ;; Act
+      (agent-repl-test-link--close agent-repl-link--pending-successor
+                                   '(:error (:kind :transport)))
+      ;; Assert
+      (should (eq (agent-repl-link-primary) conn)))))
+
+(ert-deftest agent-repl-test-link-successor-death-before-acceptance-is-an-error ()
+  "A handover that cannot complete is loud, never silent."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      ;; Act
+      (agent-repl-test-link--close agent-repl-link--pending-successor
+                                   '(:error (:kind :transport)))
+      ;; Assert
+      (should (agent-repl-test-link--logged-p :error "elisp.link.successor-open-refused")))))
+
+(ert-deftest agent-repl-test-link-teardown-closes-a-pending-connection ()
+  "Teardown owes the same closure to a transport still awaiting acceptance."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--stand "127.0.0.1:9001")
+    ;; Act
+    (agent-repl-link-teardown)
+    ;; Assert
+    (should (null agent-repl-link--pending))))
 
 (provide 'test-daemon-link)
 
