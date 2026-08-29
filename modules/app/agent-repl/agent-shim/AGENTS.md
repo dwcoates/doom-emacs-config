@@ -2,14 +2,28 @@
 
 The shim ecosystem. Its responsibility is EXCLUSIVELY facilitating agent-backend
 interaction: driving a vendor's agent SDK/harness and surfacing everything it
-produces as agent-shim protocol messages (`proto/agentshim/`). Frontend serving,
-merge/workspace state, and render-state derivation never live here.
+produces on the wire. Frontend serving, merge/workspace state, and render-state
+derivation never live here.
 
 Layout: one directory per VENDOR (`claude/`, a future `codex/`), each holding
 that vendor's shim and its vendor-facing services — `claude/shim/` (the
-per-session SDK subprocess) and `claude/shim-sidecar/` (the file-plane reader)
-— plus the vendor-neutral `shim-store/` (event store) and `wire/` (shared Go
-framing) at this level.
+per-session SDK subprocess, the STREAM plane) and `claude/shim-sidecar/` (the
+FILE plane: it reads the vendor's own on-disk transcripts and spools) — plus
+the vendor-neutral `shim-store/` (the durable event store) and `logging/go`
+(the canonical structured logging API every one of these runtimes records
+through) at this level. `wire/` is retired from the store and the sidecar and
+survives only for the daemon's remaining import; see its own AGENTS.md.
+
+The vocabulary is `store.v1` and `conversation.v1`, not the old `agentshim.*` /
+`protocol.v1` packages. `store.v1.ShimStore` is a Connect service the shim and
+the sidecar call over a UNIX domain socket — WriteBatch, OpenAgentSession,
+WatchAgentSession, ReadAgentPage, GetWorkflow, GetLiveWork, GetSidecarCursors,
+with no dial protocol and deliberately no health verb. Its `StoreEntry`
+envelope adds only storage concerns (plane, dedup `write_id`, `upsert_key`
+identity, pageability) around the `conversation.v1` facts it carries; the store
+never interprets or re-derives that content. THE DAEMON NEVER IMPORTS OR CALLS
+`store.v1` — the daemon's read path is `shim.v1`, and the isolation is enforced
+at codegen.
 
 ## What belongs in a shim-wire package, and what does not
 
@@ -57,4 +71,7 @@ The practical consequence: **a shim-wire package should never grow a message
 because a frontend needed somewhere to put something.** If the shim would not
 produce it and the shim would not consume it, it is not shim material.
 
-Dependencies: `proto/agentshim/` (the protocol definitions).
+Dependencies: the protos under `proto/src/` — `store/v1` and
+`conversation/v1` for everything at this level — with the generated Go in
+`proto/gen/go/` (module `agentrepl/proto`; the Connect handlers and clients
+live in `proto/gen/go/store/v1/storev1connect`).
