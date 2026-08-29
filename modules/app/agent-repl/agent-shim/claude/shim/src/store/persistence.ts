@@ -255,3 +255,34 @@ export type { StoreClient };
  * declares the seam and re-exports the constructor so a caller has one import.
  */
 export { createPersistence } from "./writer.js";
+
+/**
+ * The persistence before there is a store to reach.
+ *
+ * KEPT FROM THE ENGINE'S SCAFFOLD because it is still the honest answer for a
+ * build with no store socket: it REFUSES rather than pretending. A placeholder
+ * that answered with an empty page would make a history read look like an empty
+ * conversation, and one that swallowed writes would make a lost record look
+ * like a written one. Every verb answers `store_unavailable`, which the engine
+ * already maps onto a loud `SessionFault` and a `ReadHistoryStoreUnavailable`.
+ */
+export function unavailablePersistence(): Persistence {
+  const refuse = (verb: string): PersistenceError =>
+    new PersistenceError(
+      "store_unavailable",
+      `shim persistence: ${verb} has no store to reach in this build`,
+    );
+  return {
+    writeDurable: () => Promise.reject(refuse("writeDurable")),
+    write: () => {
+      throw refuse("write");
+    },
+    flush: () => Promise.resolve(),
+    openAgentPage: () => Promise.reject(refuse("openAgentPage")),
+    readAgentPage: () => Promise.reject(refuse("readAgentPage")),
+    liveWork: () => Promise.reject(refuse("liveWork")),
+    openBashRun: () => Promise.reject(refuse("openBashRun")),
+    onFault: () => () => undefined,
+    onDegradedWindow: () => () => undefined,
+  };
+}

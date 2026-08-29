@@ -34,7 +34,7 @@ import { bindLog } from "../log.js";
 import type { conversationv1 } from "../proto.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { activityEntry, agentActivity, toolProgress, type FrameOrigin } from "./entries.js";
-import type { FoldContext } from "./fold-context.js";
+import { mcpServerNames, type FoldContext } from "./fold-context.js";
 import { toolCallActivityId } from "./ids.js";
 
 const LOGGER = bindLog({ component: "shim-convert-tools", operation: "shim.convert.tools" });
@@ -252,7 +252,7 @@ export function dispositionOf(
 
 /** The session facts a converter may read, from the context the engine handed in. */
 export function environmentOf(context: FoldContext): ToolEnvironment {
-  return { mcpServerNames: context.mcpServerNames() };
+  return { mcpServerNames: mcpServerNames(context) };
 }
 
 /** The activity envelope every tool frame shares: the unit's identity. */
