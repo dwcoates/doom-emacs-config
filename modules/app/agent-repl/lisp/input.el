@@ -629,10 +629,10 @@ Handles input preparation, sending, history, and persistence."
   (unless (and (stringp prompt-origin)
                (string-prefix-p "PROMPT_ORIGIN_" prompt-origin)
                (not (equal prompt-origin "PROMPT_ORIGIN_UNSPECIFIED")))
-    (agent-repl--error ws "send: invalid prompt-origin=%S" prompt-origin))
+    (agent-repl--fatal ws "send: invalid prompt-origin=%S" prompt-origin))
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (unless ws
-      (agent-repl--error nil "send: no active workspace prompt-supplied=%s force-metaprompt=%s on-settle=%s"
+      (agent-repl--fatal nil "send: no active workspace prompt-supplied=%s force-metaprompt=%s on-settle=%s"
                           (not (null prompt)) force-metaprompt (not (null on-settle))))
     (agent-repl--log ws "send: ws=%s prompt-origin=%s force-metaprompt=%s from-buf=%s" ws prompt-origin force-metaprompt (null prompt))
     (let* ((from-buf  (null prompt))

@@ -419,10 +419,10 @@ work in the batch process.  Ignores every argument by design."
 ;; merge-rebase worktree, and CI alike.
 ;;
 ;; The redirect is of the DIRECTORY, not of `agent-repl--frontend-build-id'
-;; itself: the production function still runs, still reads a real stamp off
-;; disk, and test-frontend-client.el's own tests of a missing and of a
-;; well-formed stamp keep exercising it by rebinding this same variable.
-;; Overriding the function would have taken the reader out of the suite.
+;; itself: the production function still runs and still reads a real stamp
+;; off disk, so its owner's suite keeps exercising the missing-stamp and
+;; well-formed-stamp paths by rebinding this same variable.  Overriding the
+;; function would have taken the reader out of the suite.
 ;;
 ;; Batch-gated like the state-dir redirect above: in a live session this
 ;; would address the webview at a temp directory the daemon serves nothing
