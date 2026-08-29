@@ -47,7 +47,9 @@
 (declare-function agent-repl--warn "core" (ws format-string &rest args))
 (declare-function agent-repl--error "core" (ws format-string &rest args))
 (declare-function agent-repl--current-ws-p "core" (ws))
-(declare-function agent-repl-rpc-watch-workspace-roster "rpc" (conn on-push on-close))
+(declare-function agent-repl-connect-connection-address "connect" (conn))
+(declare-function agent-repl-rpc-watch-workspace-roster "rpc"
+                  (conn on-push on-close &optional on-open))
 (declare-function agent-repl-connect-stream-cancel "connect" (stream))
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--ws-known-p "workspace" (ws))
@@ -516,15 +518,23 @@ stream so the next link-up subscribes a fresh one."
 ;;;; ---- The subscription -------------------------------------------------
 
 (defun agent-repl-roster-subscribe (conn)
-  "Subscribe to the roster on CONN, replacing any stream already standing."
+  "Subscribe to the roster on CONN, replacing any stream already standing.
+SUBSCRIBED IS AN ACCEPTANCE: `elisp.roster.subscribed' is written from the
+transport's ON-OPEN — the daemon's HTTP 200 header block — and not from
+the spawn, because a roster stream that was never accepted will never
+deliver the tabs."
   (when agent-repl-roster--stream
     (agent-repl--log nil "elisp.roster.subscribe: cancelling prior stream")
     (agent-repl-connect-stream-cancel agent-repl-roster--stream)
     (setq agent-repl-roster--stream nil))
   (setq agent-repl-roster--stream
         (agent-repl-rpc-watch-workspace-roster
-         conn #'agent-repl-roster-on-push #'agent-repl-roster-on-close))
-  (agent-repl--info nil "elisp.roster.subscribe: subscribed")
+         conn #'agent-repl-roster-on-push #'agent-repl-roster-on-close
+         (lambda ()
+           (agent-repl--info nil "elisp.roster.subscribed method=%S address=%S"
+                             "WatchWorkspaceRoster"
+                             (agent-repl-connect-connection-address conn)))))
+  (agent-repl--info nil "elisp.roster.subscribe: opened")
   agent-repl-roster--stream)
 
 (defun agent-repl-roster-unsubscribe ()

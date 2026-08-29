@@ -596,7 +596,7 @@ Re-selection is idempotent, which is what keeps this from looping."
     (let ((conns nil)
           (agent-repl-roster--stream nil))
       (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
-                 (lambda (conn _on-push _on-close) (push conn conns) 'fake-stream)))
+                 (lambda (conn _on-push _on-close &optional _on-open) (push conn conns) 'fake-stream)))
         ;; Act
         (agent-repl-roster-on-link-up 'conn-1)
         ;; Assert
@@ -609,7 +609,7 @@ Re-selection is idempotent, which is what keeps this from looping."
     (let ((cancelled nil)
           (agent-repl-roster--stream nil))
       (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
-                 (lambda (_conn _on-push _on-close) 'fake-stream))
+                 (lambda (_conn _on-push _on-close &optional _on-open) 'fake-stream))
                 ((symbol-function 'agent-repl-connect-stream-cancel)
                  (lambda (s) (push s cancelled))))
         (agent-repl-roster-subscribe 'conn-1)
@@ -641,5 +641,67 @@ Re-selection is idempotent, which is what keeps this from looping."
       (agent-repl-roster-on-link-down 'conn-1)
       ;; Assert
       (should (null agent-repl-roster--stream)))))
+
+
+;;;; ---- Subscription acceptance ----
+
+(ert-deftest agent-repl-test-roster-subscribe-alone-is-not-subscribed ()
+  "A spawned roster stream that was never accepted delivers no tabs."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((logs nil)
+          (agent-repl-roster--stream nil))
+      (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                 (lambda (_conn _on-push _on-close &optional _on-open) 'fake-stream))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        ;; Act
+        (agent-repl-roster-subscribe 'conn-1))
+      ;; Assert
+      (should-not (seq-some (lambda (text)
+                              (string-search "elisp.roster.subscribed" text))
+                            logs)))))
+
+(ert-deftest agent-repl-test-roster-acceptance-logs-subscribed ()
+  "The daemon accepting the roster watch is what records it as subscribed."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((logs nil)
+          (accepted nil)
+          (conn (agent-repl-connect-open "127.0.0.1:9001"))
+          (agent-repl-roster--stream nil))
+      (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                 (lambda (_conn _on-push _on-close &optional on-open)
+                   (setq accepted on-open) 'fake-stream))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        (agent-repl-roster-subscribe conn)
+        ;; Act
+        (funcall accepted))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (string-search "elisp.roster.subscribed" text))
+                        logs)))))
+
+(ert-deftest agent-repl-test-roster-acceptance-names-the-method ()
+  "The accepted record says WHICH subscription stands."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((logs nil)
+          (accepted nil)
+          (conn (agent-repl-connect-open "127.0.0.1:9001"))
+          (agent-repl-roster--stream nil))
+      (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                 (lambda (_conn _on-push _on-close &optional on-open)
+                   (setq accepted on-open) 'fake-stream))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        (agent-repl-roster-subscribe conn)
+        ;; Act
+        (funcall accepted))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (string-search "method=\"WatchWorkspaceRoster\"" text))
+                        logs)))))
 
 ;;; test-roster.el ends here

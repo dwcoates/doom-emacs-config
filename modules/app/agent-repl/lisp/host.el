@@ -53,7 +53,8 @@
 (declare-function agent-repl-rpc-register-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-select-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-adopt-host-workspace "rpc" (conn request &rest keys))
-(declare-function agent-repl-rpc-watch-host-workspace "rpc" (conn ref on-push on-close))
+(declare-function agent-repl-rpc-watch-host-workspace "rpc"
+                  (conn ref on-push on-close &optional on-open))
 
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-link-successor "daemon-link" ())
@@ -295,14 +296,22 @@ already holds; neither copy is ever derived from a path."
 (defun agent-repl-host-subscribe (conn ws ref)
   "Open WS's `WatchHostWorkspace' subscription on CONN, echoing REF.
 One subscription per OPEN workspace: a snapshot arrives first, then whole
-replacements.  Returns the stream."
+replacements.  Returns the stream.
+
+SUBSCRIBED IS AN ACCEPTANCE, not a spawn: `elisp.host.subscribed' is
+written from the transport's ON-OPEN — the daemon's HTTP 200 header block
+— so the record never claims a workspace is being watched by a daemon
+that never answered."
   (agent-repl-host--attach ws conn ref)
   (let ((stream (agent-repl-rpc-watch-host-workspace
                  conn ref
                  (lambda (push) (agent-repl-host--handle-push ws push))
-                 (lambda (outcome) (agent-repl-host--handle-close ws outcome)))))
+                 (lambda (outcome) (agent-repl-host--handle-close ws outcome))
+                 (lambda ()
+                   (agent-repl--info ws "elisp.host.subscribed ws=%s method=%S id=%S"
+                                     ws "WatchHostWorkspace" (plist-get ref :id))))))
     (agent-repl-host--put ws :stream stream)
-    (agent-repl--info ws "elisp.host.subscribed ws=%s id=%S" ws (plist-get ref :id))
+    (agent-repl--info ws "elisp.host.subscribe-opened ws=%s id=%S" ws (plist-get ref :id))
     stream))
 
 (defun agent-repl-host-unsubscribe (ws)
