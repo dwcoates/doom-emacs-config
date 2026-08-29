@@ -44,7 +44,7 @@ the proto wins and the agent reports the conflict.
   keep their tier.
 - Implementers MAY offload mechanical, fully specified writes (boilerplate,
   tests from a settled table, rote conversions, doc sections) to Sonnet at
-  MEDIUM effort (`sonnet-medium`, or `claude` + `model: "sonnet"`). The
+  MEDIUM effort (`sonnet-medium`; both types are offered in this session). The
   offloading agent stays accountable: it reviews the output, runs the
   suites, and reports every offload in its completion report.
 - Adversarial auditors stay `claude` + `model: "fable"`, fresh context.
