@@ -56,7 +56,7 @@ func (c *Converter) launchRecords(record map[string]any, at Attribution, env env
 		// A launch the harness did not name. The card would have no identity for
 		// its own output to route to, so the record is stored whole instead of
 		// opening a card nothing can ever update.
-		c.log.With(logging.Context{Operation: "detached-launch", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+		c.log.With(logging.Context{Operation: "detached-launch", Path: at.Path, VendorSessionID: at.SessionID, Level: "warn"}).
 			Log("detached launch at offset=%d carries no task identity; stored unconverted rather than opening a card nothing can update", at.Offset)
 		return []*storev1.StoreEntry{UnknownEntry(at, "launch", "toolUseResult", record)}
 	}
@@ -65,7 +65,7 @@ func (c *Converter) launchRecords(record map[string]any, at Attribution, env env
 	if found.skillName != "" {
 		c.skillMessage[found.skillName] = messageID
 	}
-	c.log.With(logging.Context{Operation: "detached-launch", Path: at.Path, Session: at.SessionID, Task: found.taskID, Level: "error"}).
+	c.log.With(logging.Context{Operation: "detached-launch", Path: at.Path, VendorSessionID: at.SessionID, TaskID: found.taskID, Level: "error"}).
 		Log("detached-work START (kind=%s label=%q message_id=%s origin_tool_call_id=%q) has NO conversion under the redesigned conversation.v1: "+
 			"DetachedWorkStarted was deleted and AgentDetachedWork is a different structure. Record stored unported at offset=%d",
 			found.kind, found.label, messageID, env.toolUseID, at.Offset)
@@ -120,7 +120,7 @@ func (c *Converter) taskStop(result map[string]any, at Attribution, record map[s
 	if taskID == "" {
 		return nil
 	}
-	c.log.With(logging.Context{Operation: "detached-stop", Path: at.Path, Session: at.SessionID, Task: taskID, Level: "error"}).
+	c.log.With(logging.Context{Operation: "detached-stop", Path: at.Path, VendorSessionID: at.SessionID, TaskID: taskID, Level: "error"}).
 		Log("detached-work CANCELLED (message_id=%s) has NO conversion under the redesigned conversation.v1: "+
 			"DetachedWorkEnded and its Cancelled arm were deleted. Record stored unported at offset=%d",
 			DetachedWorkMessageID(taskID), at.Offset)

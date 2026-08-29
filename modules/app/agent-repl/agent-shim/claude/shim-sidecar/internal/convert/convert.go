@@ -160,14 +160,14 @@ func (c *Converter) container(at Attribution, env envelope) string {
 // reason to leave a record out of the database.
 func (c *Converter) Line(record map[string]any, at Attribution, next map[string]any) []*storev1.StoreEntry {
 	kind := str(record["type"])
-	c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID}).
+	c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, VendorSessionID: at.SessionID}).
 		LogVerbose("converting line type=%q offset=%d keys=%d", kind, at.Offset, len(record))
 
 	switch kind {
 	case "":
 		// No discriminator at all. It parsed, so it is not unparsed; we simply
 		// cannot say what it is, which is exactly what UnknownEntry means.
-		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, VendorSessionID: at.SessionID, Level: "warn"}).
 			Log("transcript line at offset=%d carries no %q field; stored unconverted with no path to the daemon", at.Offset, "type")
 		return []*storev1.StoreEntry{UnknownEntry(at, "", "type", record)}
 	case "user":
@@ -190,7 +190,7 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 		// A top-level type this reader has never seen. We parsed it and do not
 		// model it, so the follow-up it asks for is a MODEL — and filing it as
 		// vendor_specific would claim an understanding nobody has.
-		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, VendorSessionID: at.SessionID, Level: "warn"}).
 			Log("transcript line type=%q at offset=%d is not modeled; stored unconverted with no path to the daemon", kind, at.Offset)
 		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
@@ -247,7 +247,7 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 		// consumed by the compaction boundary that precedes it (systemLine), so
 		// emitting it here as a user message would render the summary twice and
 		// attribute the harness's text to the person.
-		c.log.With(logging.Context{Operation: "compact-summary", Path: at.Path, Session: at.SessionID}).
+		c.log.With(logging.Context{Operation: "compact-summary", Path: at.Path, VendorSessionID: at.SessionID}).
 			LogVerbose("compaction summary at offset=%d folded into its boundary", at.Offset)
 	case c.isClearCommand(message):
 		out = append(out, c.contextCleared(at, env, container))
@@ -273,7 +273,7 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 		// Every branch above is either an emit or a documented fold, so this is
 		// only reachable if one stops emitting. It fails LOUD and stores the
 		// record rather than letting a line vanish silently.
-		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, VendorSessionID: at.SessionID, Level: "warn"}).
 			Log("user line at offset=%d produced no record; stored unconverted so it is not lost", at.Offset)
 		out = append(out, UnknownEntry(at, "user", "type", record))
 	}
@@ -325,7 +325,7 @@ func hasUserProse(message map[string]any) bool {
 // structure, not a rename. The prompt is stored whole instead.
 func (c *Converter) userSaid(record map[string]any, at Attribution, env envelope, container string) *storev1.StoreEntry {
 	_, _ = env, container
-	c.log.With(logging.Context{Operation: "user-said", Path: at.Path, Session: at.SessionID, Level: "error"}).
+	c.log.With(logging.Context{Operation: "user-said", Path: at.Path, VendorSessionID: at.SessionID, Level: "error"}).
 		Log("user prompt at offset=%d has NO conversion under the redesigned conversation.v1: "+
 			"MessageEntry/MessageAuthor/MessageParent were deleted and UserSaid is now an AgentInput arm. Record stored unported", at.Offset)
 	return UnportedEntry(at, "user_said", record)
@@ -359,12 +359,12 @@ func (c *Converter) toolReturns(message map[string]any, at Attribution, env enve
 			// The call this answers was read before this process's cursor, so
 			// the message it folds onto is not derivable from the record. There
 			// is no arm for an unresolved owner and none is invented.
-			c.log.With(logging.Context{Operation: "tool-return", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+			c.log.With(logging.Context{Operation: "tool-return", Path: at.Path, VendorSessionID: at.SessionID, Level: "warn"}).
 				Log("tool result tool_call_id=%q at offset=%d names no message this reader observed; stored unconverted rather than given an invented parent", callID, at.Offset)
 			orphans = append(orphans, callID)
 			continue
 		}
-		c.log.With(logging.Context{Operation: "tool-return", Path: at.Path, Session: at.SessionID, Level: "error"}).
+		c.log.With(logging.Context{Operation: "tool-return", Path: at.Path, VendorSessionID: at.SessionID, Level: "error"}).
 			Log("tool result tool_call_id=%q owner=%q at offset=%d has NO conversion under the redesigned conversation.v1: "+
 				"ToolReturned was deleted and AgentActivity settles by AgentActivityId. Record stored unported", callID, owner, at.Offset)
 		out = append(out, UnportedEntry(at, "tool_returned:"+callID, block))
@@ -416,7 +416,7 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 	if env.apiError {
 		conversion = "failure_raised"
 	}
-	c.log.With(logging.Context{Operation: "assistant-line", Path: at.Path, Session: at.SessionID, Level: "error"}).
+	c.log.With(logging.Context{Operation: "assistant-line", Path: at.Path, VendorSessionID: at.SessionID, Level: "error"}).
 		Log("assistant record (%s, message_id=%q) at offset=%d has NO conversion under the redesigned conversation.v1: "+
 			"AgentSaid/FailureRaised/StopReason were deleted and AgentResponse rides an AgentFrame keyed by AgentId. Record stored unported",
 			conversion, messageID, at.Offset)
@@ -465,7 +465,7 @@ func (c *Converter) systemLine(record map[string]any, at Attribution, next map[s
 	subtype := str(record["subtype"])
 	switch subtype {
 	case "":
-		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, VendorSessionID: at.SessionID, Level: "warn"}).
 			Log("system line at offset=%d carries no %q field; stored unconverted", at.Offset, "subtype")
 		return []*storev1.StoreEntry{UnknownEntry(at, "", "subtype", record)}
 	case "compact_boundary":
@@ -486,7 +486,7 @@ func (c *Converter) systemLine(record map[string]any, at Attribution, next map[s
 // decision, so the record is stored whole.
 func (c *Converter) apiErrorFailure(record map[string]any, at Attribution, env envelope, container string) *storev1.StoreEntry {
 	_, _ = env, container
-	c.log.With(logging.Context{Operation: "api-error", Path: at.Path, Session: at.SessionID, Level: "error"}).
+	c.log.With(logging.Context{Operation: "api-error", Path: at.Path, VendorSessionID: at.SessionID, Level: "error"}).
 		Log("vendor api_error at offset=%d has NO conversion under the redesigned conversation.v1: "+
 			"FailureRaised was deleted and ApiRequestFailed is a typed AgentFailure arm. Record stored unported", at.Offset)
 	return UnportedEntry(at, "failure_raised", record)
@@ -507,7 +507,7 @@ func number(v any) float64 {
 func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*storev1.StoreEntry {
 	attachment := obj(record["attachment"])
 	if attachment == nil {
-		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, VendorSessionID: at.SessionID, Level: "warn"}).
 			Log("attachment line at offset=%d carries no %q object; stored unconverted", at.Offset, "attachment")
 		return []*storev1.StoreEntry{UnknownEntry(at, "", "attachment", record)}
 	}
@@ -548,11 +548,11 @@ func (c *Converter) skillBodies(attachment map[string]any, at Attribution, conta
 		name := str(skill["name"])
 		messageID, resolved := c.skillMessage[name]
 		if !resolved || messageID == "" {
-			c.log.With(logging.Context{Operation: "skill-body", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+			c.log.With(logging.Context{Operation: "skill-body", Path: at.Path, VendorSessionID: at.SessionID, Level: "warn"}).
 				Log("skill body name=%q at offset=%d names no skill invocation this reader observed; not resolved onto a card", name, at.Offset)
 			continue
 		}
-		c.log.With(logging.Context{Operation: "skill-body", Path: at.Path, Session: at.SessionID, Level: "error"}).
+		c.log.With(logging.Context{Operation: "skill-body", Path: at.Path, VendorSessionID: at.SessionID, Level: "error"}).
 			Log("skill body name=%q message_id=%q at offset=%d has NO conversion under the redesigned conversation.v1: "+
 				"SkillBodyResolved was deleted and AgentSkillUse is an AgentActivity arm. Record stored unported", name, messageID, at.Offset)
 		out = append(out, UnportedEntry(at, "skill_body:"+name, skill))
@@ -570,7 +570,7 @@ func (c *Converter) skillBodies(attachment map[string]any, at Attribution, conta
 // producer-written home: MessageEntry, the record that carried it, is gone.
 func (c *Converter) contextCleared(at Attribution, env envelope, container string) *storev1.StoreEntry {
 	_ = container
-	c.log.With(logging.Context{Operation: "context-cleared", Path: at.Path, Session: at.SessionID, Level: "error"}).
+	c.log.With(logging.Context{Operation: "context-cleared", Path: at.Path, VendorSessionID: at.SessionID, Level: "error"}).
 		Log("context clear at offset=%d uuid=%q has NO conversion under the redesigned conversation.v1: "+
 			"MessageEntry, ContextCut's only carrier, was deleted. Record stored unported", at.Offset, env.uuid)
 	return UnportedEntry(at, "context_cleared", map[string]any{
@@ -596,10 +596,10 @@ func (c *Converter) contextCompacted(record map[string]any, at Attribution, env 
 		// A compaction with no summary renders as a hole where the discarded
 		// history was. It is emitted anyway — the cut is real and a reader must
 		// see WHERE — but never silently.
-		c.log.With(logging.Context{Operation: "context-compacted", Path: at.Path, Session: at.SessionID, Level: "warn"}).
+		c.log.With(logging.Context{Operation: "context-compacted", Path: at.Path, VendorSessionID: at.SessionID, Level: "warn"}).
 			Log("compact boundary uuid=%q at offset=%d is not followed by a summary line; the cut renders with nothing in place of the discarded history", env.uuid, at.Offset)
 	}
-	c.log.With(logging.Context{Operation: "context-compacted", Path: at.Path, Session: at.SessionID, Level: "error"}).
+	c.log.With(logging.Context{Operation: "context-compacted", Path: at.Path, VendorSessionID: at.SessionID, Level: "error"}).
 		Log("compact boundary uuid=%q at offset=%d has NO conversion under the redesigned conversation.v1: "+
 			"MessageEntry, ContextCut's only carrier, was deleted. Record stored unported", env.uuid, at.Offset)
 	return UnportedEntry(at, "context_compacted", map[string]any{

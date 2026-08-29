@@ -11,6 +11,7 @@ package agentrepl.v1;
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
 import "conversation/v1/prompt_origin.proto";
+import "workspace/v1/workspace.proto";
 import "frontend/v1/status_panel.proto";
 import "frontend/v1/todos_panel.proto";
 import "frontend/v1/agents_panel.proto";
@@ -23,6 +24,12 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 // What the user typed, submitted whole.
 message SubmitPromptRequest {
+  // The workspace this submission belongs to — the daemon-minted ref,
+  // echoed verbatim like every per-workspace request. Names the workspace
+  // even when `feed` is unset (the root feed has no id of its own); when
+  // `feed` is set it must belong to this workspace, else the submission is
+  // refused.
+  workspace.v1.WorkspaceRef workspace = 5;
   // The composed prompt — one canonical form client → daemon → tray → shim →
   // record (a held prompt IS a UserSaid).
   conversation.v1.UserSaid said = 1;

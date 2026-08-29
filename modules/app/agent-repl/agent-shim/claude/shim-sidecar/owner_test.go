@@ -1,258 +1,167 @@
 package main
 
 import (
-	"os"
+	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"agentrepl/shim-claude-sidecar/internal/discover"
-	"agentrepl/shim-claude-sidecar/internal/tail"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
-func ownerTarget(path, taskID string) discover.Target {
-	return discover.Target{Path: path, Kind: tail.KindShellSpool, TaskID: taskID, Raw: true}
-}
-
-func TestOwnerResolutionPrefersExactNormalizedOutputPath(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	path := "/tmp/claude-501/slug/runtime/tasks/b1.output"
-	if !s.noteTaskOwner("b1", "S1", path, OwnerSourceLiveLaunch) {
-		t.Fatal("did not record live task owner")
-	}
-	got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/slug/runtime/tasks/./b1.output", "b1"))
-	if !got.Resolved() || got.Outcome != OwnerResolvedPath || got.SessionID != "S1" || got.OutputPath != normalizeOwnerOutputPath(path) {
-		t.Fatalf("resolution = %+v, want exact path S1", got)
-	}
-}
-
-func TestOwnerResolutionRejectsExactOutputPathTaskMismatch(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	path := "/tmp/claude-501/slug/runtime/tasks/b1.output"
-	s.noteTaskOwner("b1", "S1", path, OwnerSourceLiveLaunch)
-
-	got := s.resolveOwnerResult(ownerTarget(path, "b2"))
-	if got.Outcome != OwnerUnresolvedConflict || got.Resolved() || !got.MayArrive() {
-		t.Fatalf("resolution = %+v, want retryable path-task conflict", got)
-	}
-}
-
-func TestOwnerResolutionRejectsConflictingTaskIDWithoutMatchingPath(t *testing.T) {
-	s, read := ownerSidecar(t)
-	s.noteTaskOwner("b1", "S1", "", OwnerSourceLiveLaunch)
-	s.noteTaskOwner("b1", "S2", "", OwnerSourceLiveLaunch)
-
-	got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/slug/runtime/tasks/b1.output", "b1"))
-	if got.Outcome != OwnerUnresolvedConflict || got.Resolved() || !got.MayArrive() {
-		t.Fatalf("resolution = %+v, want retryable conflict", got)
-	}
-	if lines := linesContaining(read(), "conflicting task ownership"); len(lines) != 1 {
-		t.Fatalf("conflict resolution logs = %v, want one", lines)
-	}
-}
-
-func TestOwnerResolutionKeepsDistinctExactPathsWhenTaskAssociationConflicts(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	firstPath := "/tmp/claude-501/slug/one/tasks/b1.output"
-	secondPath := "/tmp/claude-501/slug/two/tasks/b1.output"
-	s.noteTaskOwner("b1", "S1", firstPath, OwnerSourceLiveLaunch)
-	s.noteTaskOwner("b1", "S2", secondPath, OwnerSourceLiveLaunch)
-
-	for path, session := range map[string]string{firstPath: "S1", secondPath: "S2"} {
-		got := s.resolveOwnerResult(ownerTarget(path, "b1"))
-		if got.Outcome != OwnerResolvedPath || got.SessionID != session {
-			t.Fatalf("resolution for %s = %+v, want exact path %s", path, got, session)
-		}
-	}
-	if got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/slug/three/tasks/b1.output", "b1")); got.Outcome != OwnerUnresolvedConflict {
-		t.Fatalf("task-only resolution = %+v, want conflict", got)
-	}
-}
-
-func TestOwnerResolutionRejectsConflictingExactOutputPath(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	path := "/tmp/claude-501/slug/runtime/tasks/b1.output"
-	s.noteTaskOwner("b1", "S1", path, OwnerSourceLiveLaunch)
-	s.noteTaskOwner("b2", "S2", path, OwnerSourceLiveLaunch)
-
-	if got := s.resolveOwnerResult(ownerTarget(path, "b1")); got.Outcome != OwnerUnresolvedConflict {
-		t.Fatalf("resolution = %+v, want poisoned path conflict", got)
-	}
-}
-
-func TestOwnerResolutionRejectsExactOutputPathClaimedByDifferentTaskInSameSession(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	path := "/tmp/claude-501/slug/runtime/tasks/shared.output"
-	s.noteTaskOwner("b1", "S1", path, OwnerSourceLiveLaunch)
-	s.noteTaskOwner("b2", "S1", path, OwnerSourceLiveLaunch)
-
-	if got := s.resolveOwnerResult(ownerTarget(path, "b1")); got.Outcome != OwnerUnresolvedConflict {
-		t.Fatalf("resolution = %+v, want poisoned path conflict", got)
-	}
-}
-
-func TestOwnerResolutionRejectsTaskAssociationWithDifferentRecordedOutputPath(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	s.noteTaskOwner("b1", "S1", "/tmp/claude-501/slug/runtime/tasks/b1.output", OwnerSourceLiveLaunch)
-
-	got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/other-runtime/tasks/b1.output", "b1"))
-	if got.Outcome != OwnerUnresolvedConflict || got.Resolved() {
-		t.Fatalf("resolution = %+v, want task path conflict", got)
-	}
-}
-
-func TestResetOwnersDiscardsPriorConnectionMappings(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	s.noteTaskOwner("b1", "S1", "/tmp/claude-501/slug/runtime/tasks/b1.output", OwnerSourceLiveLaunch)
-	s.resetOwners()
-
-	got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/slug/runtime/tasks/b1.output", "b1"))
-	if got.Outcome != OwnerUnresolvedAwaitingOwner || !got.MayArrive() {
-		t.Fatalf("resolution = %+v, want cleared retryable mapping", got)
-	}
-}
-
-func TestOpenTaskIndexRejectsMissingLifecycleIdentity(t *testing.T) {
-	s, read := ownerSidecar(t)
-	s.markTaskOpen("", OwnerSourceLiveLaunch)
-	s.markTaskClosed("")
-	if len(s.openTasks) != 0 {
-		t.Fatalf("invalid lifecycle observation mutated open tasks: %v", s.openTasks)
-	}
-	if got := linesContaining(read(), "observation rejected missing task id"); len(got) != 2 {
-		t.Fatalf("invalid lifecycle logs = %v, want two errors", got)
-	}
-}
-
-func TestOwnerResolutionUsesUniqueTaskOnlyWhenNoContradictionExists(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	s.noteTaskOwner("b1", "S1", "", OwnerSourceLiveLaunch)
-
-	got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/other-runtime/tasks/b1.output", "b1"))
-	if got.Outcome != OwnerResolvedTask || got.SessionID != "S1" || got.Source != OwnerSourceLiveLaunch {
-		t.Fatalf("resolution = %+v, want unique live task owner", got)
-	}
-}
-
-func TestOwnerResolutionAwaitingOwnerCanResolveAfterLiveObservation(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	target := ownerTarget("/tmp/claude-501/slug/runtime/tasks/b1.output", "b1")
-
-	before := s.resolveOwnerResult(target)
-	if before.Outcome != OwnerUnresolvedAwaitingOwner || !before.MayArrive() {
-		t.Fatalf("before = %+v, want retryable unresolved", before)
-	}
-	s.noteTaskOwner("b1", "S1", target.Path, OwnerSourceLiveLaunch)
-	after := s.resolveOwnerResult(target)
-	if after.Outcome != OwnerResolvedPath || after.SessionID != "S1" {
-		t.Fatalf("after = %+v, want exact path S1", after)
-	}
-}
-
-func TestOwnerResolutionRejectsMalformedSpoolTarget(t *testing.T) {
-	s, read := ownerSidecar(t)
-	got := s.resolveOwnerResult(ownerTarget("", ""))
-	if got.Outcome != OwnerUnresolvedInvalid || got.MayArrive() {
-		t.Fatalf("resolution = %+v, want terminal invalid", got)
-	}
-	if lines := linesContaining(read(), "rejected invalid spool target"); len(lines) != 1 {
-		t.Fatalf("invalid resolution logs = %v, want one", lines)
-	}
-}
-
-// symlinkedSpoolDir returns two spellings of one tasks directory: the real one
-// and one reached through a symlinked ancestor, mirroring macOS /tmp.
-func symlinkedSpoolDir(t *testing.T) (real string, linked string) {
+func ownerIndexFor(t *testing.T) (*ownerIndex, *[]string) {
 	t.Helper()
-	base := t.TempDir()
-	real = filepath.Join(base, "private", "runtime", "tasks")
-	if err := os.MkdirAll(real, 0o755); err != nil {
-		t.Fatalf("mkdir spool dir: %v", err)
-	}
-	if err := os.Symlink(filepath.Join(base, "private"), filepath.Join(base, "link")); err != nil {
-		t.Fatalf("symlink spool root: %v", err)
-	}
-	return real, filepath.Join(base, "link", "runtime", "tasks")
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "owner-test"})
+	return newOwnerIndex(log), &logs
 }
 
-func TestOwnerResolutionResolvesSymlinkedSpellingOfRecordedPath(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	realDir, linkedDir := symlinkedSpoolDir(t)
-	recorded := filepath.Join(realDir, "b1.output")
-	if !s.noteTaskOwner("b1", "S1", recorded, OwnerSourceLiveLaunch) {
-		t.Fatal("did not record live task owner")
-	}
+func spoolTarget(path, taskID string) discover.Target {
+	return discover.Target{Path: path, TaskID: taskID}
+}
 
-	got := s.resolveOwnerResult(ownerTarget(filepath.Join(linkedDir, "b1.output"), "b1"))
+func TestOwnerResolvesByTaskID(t *testing.T) {
+	// Arrange.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "b1", activityID: "call-1", agentID: ""})
 
-	if !got.Resolved() || got.SessionID != "S1" {
-		t.Fatalf("resolution = %+v, want S1 resolved through symlinked spelling", got)
+	// Act.
+	got, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
+
+	// Assert.
+	if !ok || got.activityID != "call-1" {
+		t.Fatalf("resolve = %+v ok=%t, want the spawning call", got, ok)
 	}
 }
 
-func TestOwnerResolutionResolvesTaskOnlyAssociationAcrossSymlinkedSpellings(t *testing.T) {
-	s, read := ownerSidecar(t)
-	realDir, linkedDir := symlinkedSpoolDir(t)
-	s.owners["b1"] = "S1"
-	s.ownerSource["b1"] = OwnerSourceDurableOpenTask
-	s.ownerTaskOutput["b1"] = normalizeOwnerOutputPath(filepath.Join(realDir, "b1.output"))
+func TestOwnerResolvesByExactOutputPath(t *testing.T) {
+	// Arrange: the vendor named this exact file, which needs no id comparison.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "b1", activityID: "call-1", outputPath: "/private/tmp/b1.output"})
 
-	got := s.resolveOwnerResult(ownerTarget(filepath.Join(linkedDir, "b1.output"), "b1"))
+	// Act.
+	got, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
 
-	if got.Outcome != OwnerResolvedTask || got.SessionID != "S1" {
-		t.Fatalf("resolution = %+v, want task association across symlinked spellings", got)
-	}
-	if lines := linesContaining(read(), "different authoritative output path"); len(lines) != 0 {
-		t.Fatalf("conflict logs = %v, want none", lines)
+	// Assert.
+	if !ok || got.activityID != "call-1" {
+		t.Fatalf("resolve = %+v ok=%t, want the spawning call", got, ok)
 	}
 }
 
-func TestNormalizeOwnerOutputPathResolvesSymlinkForMissingSpoolFile(t *testing.T) {
-	realDir, linkedDir := symlinkedSpoolDir(t)
+func TestOwnerIsUnknownUntilASpawnIsObserved(t *testing.T) {
+	// Arrange.
+	index, _ := ownerIndexFor(t)
 
-	got := normalizeOwnerOutputPath(filepath.Join(linkedDir, "not-created-yet.output"))
+	// Act.
+	_, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
 
-	if want := normalizeOwnerOutputPath(realDir) + "/not-created-yet.output"; got != want {
-		t.Fatalf("normalized = %q, want %q", got, want)
+	// Assert.
+	if ok {
+		t.Fatal("a spool resolved to an owner nobody reported")
 	}
 }
 
-func TestNormalizeOwnerOutputPathKeepsFullyMissingPath(t *testing.T) {
-	want := "/agent-repl-absent-root/runtime/tasks/b1.output"
+func TestConflictingSpawnsResolveToNothing(t *testing.T) {
+	// Arrange: two calls claim one task.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "b1", activityID: "call-1"})
+	index.observe(observation{taskID: "b1", activityID: "call-2"})
 
-	if got := normalizeOwnerOutputPath(want); got != want {
-		t.Fatalf("normalized = %q, want %q unchanged", got, want)
+	// Act.
+	_, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
+
+	// Assert: guessing between two claims is how one run's output lands in
+	// another run's card.
+	if ok {
+		t.Fatal("a conflicted task resolved to a guess")
 	}
 }
 
-func TestOwnerResolutionStillRejectsGenuinelyDifferentAuthoritativePath(t *testing.T) {
-	s, read := ownerSidecar(t)
-	realDir, _ := symlinkedSpoolDir(t)
-	s.owners["b1"] = "S1"
-	s.ownerSource["b1"] = OwnerSourceDurableOpenTask
-	s.ownerTaskOutput["b1"] = normalizeOwnerOutputPath(filepath.Join(realDir, "b1.output"))
+func TestConflictingSpawnsAreLoggedAsAnError(t *testing.T) {
+	// Arrange.
+	index, logs := ownerIndexFor(t)
+	index.observe(observation{taskID: "b1", activityID: "call-1"})
 
-	got := s.resolveOwnerResult(ownerTarget(filepath.Join(realDir, "other.output"), "b1"))
+	// Act.
+	index.observe(observation{taskID: "b1", activityID: "call-2"})
 
-	if got.Outcome != OwnerUnresolvedConflict || got.Resolved() {
-		t.Fatalf("resolution = %+v, want conflict for a genuinely different file", got)
-	}
-	if lines := linesContaining(read(), "different authoritative output path"); len(lines) != 1 {
-		t.Fatalf("conflict logs = %v, want one", lines)
+	// Assert.
+	joined := strings.Join(*logs, "\n")
+	if !strings.Contains(joined, "CONFLICTING") || !strings.Contains(joined, `"level":"error"`) {
+		t.Fatalf("the conflict was not stated loudly; got %v", *logs)
 	}
 }
 
-func TestOwnerResolutionStillRejectsTwoSessionsClaimingOneTaskAcrossSymlinkedSpellings(t *testing.T) {
-	s, read := ownerSidecar(t)
-	realDir, linkedDir := symlinkedSpoolDir(t)
-	s.noteTaskOwner("b1", "S1", filepath.Join(realDir, "b1.output"), OwnerSourceLiveLaunch)
-	s.noteTaskOwner("b1", "S2", filepath.Join(linkedDir, "b1.output"), OwnerSourceLiveLaunch)
+func TestASpawnRePortedByTheSameCallIsNotAConflict(t *testing.T) {
+	// Arrange: a re-read record reports the same spawn again.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "b1", activityID: "call-1"})
 
-	got := s.resolveOwnerResult(ownerTarget(filepath.Join(realDir, "b1.output"), "b1"))
+	// Act.
+	index.observe(observation{taskID: "b1", activityID: "call-1"})
+	_, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
 
-	if got.Outcome != OwnerUnresolvedConflict || got.Resolved() {
-		t.Fatalf("resolution = %+v, want conflict for two sessions claiming one task", got)
+	// Assert.
+	if !ok {
+		t.Fatal("a replayed spawn observation was treated as a conflict")
 	}
-	if lines := linesContaining(read(), "CONFLICTING owner"); len(lines) != 1 {
-		t.Fatalf("conflict logs = %v, want one", lines)
+}
+
+func TestAMismatchedOutputPathRefusesResolution(t *testing.T) {
+	// Arrange: the task's authoritative output is elsewhere.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "b1", activityID: "call-1", outputPath: "/private/tmp/elsewhere.output"})
+
+	// Act.
+	_, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
+
+	// Assert.
+	if ok {
+		t.Fatal("a spool resolved against a task whose authoritative output is a different file")
+	}
+}
+
+func TestASpawnWithNoCallIsRejected(t *testing.T) {
+	// Arrange.
+	index, logs := ownerIndexFor(t)
+
+	// Act.
+	index.observe(observation{taskID: "b1"})
+
+	// Assert.
+	if _, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1")); ok {
+		t.Fatal("a spawn naming no call was recorded")
+	}
+	if !strings.Contains(strings.Join(*logs, "\n"), "names no task or no spawning call") {
+		t.Fatalf("the rejection was silent; got %v", *logs)
+	}
+}
+
+func TestMainAgentOfASessionTranscriptIsItsFileName(t *testing.T) {
+	// Arrange: the per-record sessionId diverges from the file's; the file wins.
+	index, _ := ownerIndexFor(t)
+
+	// Act.
+	got := index.mainAgentFor(discover.Target{Path: "/c/projects/p/sess-1.jsonl", SessionID: "sess-1"})
+
+	// Assert.
+	if got != "sess-1" {
+		t.Fatalf("main agent = %q, want the transcript file's own session uuid", got)
+	}
+}
+
+func TestObserverNormalizesTheOutputPath(t *testing.T) {
+	// Arrange: the converter reports the /tmp spelling of a /private/tmp file.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+
+	// Act.
+	h.sc.TaskSpawned("b1", "call-1", "", filepath.Join(h.base, "spool", "claude-501", "proj", "runtime-sess", "tasks", "b1.output"))
+	got, ok := h.sc.owners.resolve(spoolTarget(spool, "b1"))
+
+	// Assert: the same file must not read as two.
+	if !ok || got.activityID != "call-1" {
+		t.Fatalf("resolve = %+v ok=%t, want the spawn found under the resolved spelling", got, ok)
 	}
 }
