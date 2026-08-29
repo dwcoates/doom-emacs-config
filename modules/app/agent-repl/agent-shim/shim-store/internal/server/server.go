@@ -141,6 +141,28 @@ func storeRefusal(err error) *refusal {
 	}
 }
 
+// storeFailure classifies a storage-layer error, records it at the weight its
+// class deserves, and returns the refusal the failure arm carries.
+//
+// A REFUSED REQUEST IS NOT A DATABASE FAILURE. When the storage layer refuses
+// the request itself (ErrInvalid — a malformed frame inside the envelope this
+// layer keeps opaque), the refusal belongs to the CALL, and only this layer
+// knows the call: the storage layer's own record names its statement and table,
+// and nothing in it ties the refusal to the procedure, the request id or the
+// producer. So an ErrInvalid is recorded here exactly as this layer's own
+// validation refusals are. A stale pointer is an ordinary race a caller
+// recovers from, and a database failure was already recorded by the layer that
+// owns it; both stay verbose traces.
+func (s *Server) storeFailure(log *logging.Logger, operation string, err error, fields logging.Fields) *refusal {
+	ref := storeRefusal(err)
+	if ref.site == SiteStoreRefusedRequest {
+		s.logRefusal(log, operation, ref, fields)
+		return ref
+	}
+	s.logStoreFailure(log, operation, ref, fields)
+	return ref
+}
+
 // logStoreFailure records that a request ended in the failure arm BECAUSE of
 // the storage layer.
 //
@@ -180,8 +202,7 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 
 	result, err := s.store.WriteBatch(ctx, msg.GetProducer(), msg.GetBatch())
 	if err != nil {
-		ref := storeRefusal(err)
-		s.logStoreFailure(log, "store.rpc.write-batch", ref, logging.Fields{Producer: msg.GetProducer()})
+		ref := s.storeFailure(log, "store.rpc.write-batch", err, logging.Fields{Producer: msg.GetProducer()})
 		return writeBatchFailure(ref), nil
 	}
 
@@ -232,8 +253,7 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 
 	opened, err := s.store.OpenPage(ctx, agentID, msg.GetPageSize(), msg.GetKnownThrough())
 	if err != nil {
-		ref := storeRefusal(err)
-		s.logStoreFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
+		ref := s.storeFailure(log, "store.rpc.open-agent-session", err, logging.Fields{AgentID: agentID})
 		return openFailure(ref), nil
 	}
 	if opened.Page == nil {
@@ -297,8 +317,7 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 
 	replay, err := s.store.LinesSince(ctx, entry.agentID, entry.pinSeq)
 	if err != nil {
-		ref := storeRefusal(err)
-		s.logStoreFailure(log, "store.rpc.watch-agent-session", ref, logging.Fields{WriteSeq: entry.pinSeq})
+		ref := s.storeFailure(log, "store.rpc.watch-agent-session", err, logging.Fields{WriteSeq: entry.pinSeq})
 		return connect.NewError(connect.CodeInternal, ref)
 	}
 	replayed := make(map[uint64]struct{}, len(replay))
@@ -387,8 +406,7 @@ func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1
 
 	page, err := s.store.ReadPage(ctx, agentID, msg.GetPageSize(), msg.GetAfter())
 	if err != nil {
-		ref := storeRefusal(err)
-		s.logStoreFailure(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID, Position: msg.GetAfter().GetValue()})
+		ref := s.storeFailure(log, "store.rpc.read-agent-page", err, logging.Fields{AgentID: agentID, Position: msg.GetAfter().GetValue()})
 		return readPageFailure(ref), nil
 	}
 	if page == nil {
@@ -430,8 +448,7 @@ func (s *Server) GetLiveWork(ctx context.Context, req *connect.Request[storev1.G
 
 	live, err := s.store.LiveWork(ctx)
 	if err != nil {
-		ref := storeRefusal(err)
-		s.logStoreFailure(log, "store.rpc.get-live-work", ref, logging.Fields{})
+		ref := s.storeFailure(log, "store.rpc.get-live-work", err, logging.Fields{})
 		return liveWorkFailure(ref), nil
 	}
 	if live == nil {
@@ -467,8 +484,7 @@ func (s *Server) GetSidecarCursors(ctx context.Context, req *connect.Request[sto
 
 	cursors, err := s.store.Cursors(ctx, msg.FileId)
 	if err != nil {
-		ref := storeRefusal(err)
-		s.logStoreFailure(log, "store.rpc.get-sidecar-cursors", ref, logging.Fields{FileID: msg.GetFileId()})
+		ref := s.storeFailure(log, "store.rpc.get-sidecar-cursors", err, logging.Fields{FileID: msg.GetFileId()})
 		return cursorsFailure(ref), nil
 	}
 	// An empty answer is the fresh-store answer, not a failure: every tailed
