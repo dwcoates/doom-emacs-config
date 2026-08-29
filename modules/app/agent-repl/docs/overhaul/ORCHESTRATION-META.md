@@ -50,7 +50,11 @@ survive compaction. It joins the post-compaction mandatory-reload set.
   confirm_required, login port, OpenExternal, typed notification kinds,
   task verbs, durable PromptOrigin on AgentPrompt + roster priority
   badge, the /context rich schema). 46 rpcs; build green throughout.
-- OWED BEFORE HANDOFF: only the foundation SHA stamped at dispatch.
+- KICKOFF-READY (2026-08-29): operational mechanics landed in both
+  prompt docs (dispatch, worktree hygiene, SendMessage, reports,
+  model tiers, directive taxonomy, rewrite-vs-adaptation split, webapp
+  visual directives); nothing is owed before handoff. The user invokes
+  the kickoff.
   THE ARCHITECTURE WALK IS COMPLETE (2026-08-28): the internal
   components closed — failure classification falls out, accounting
   dissolved into per-resolver accumulation (sessionwatcher routes to
