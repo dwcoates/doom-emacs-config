@@ -522,3 +522,57 @@ syntax highlighting emits the highlight classes (keyword, string, comment,
 number, type, function, operator, punctuation, variable, constant, attribute,
 tag, heading, link, emphasis, strong, added, removed, meta). `paint` asserts
 its emitted classes are in the vocabulary file.
+
+## Landing 3 (staged on overhaul/landing-3; lands with the error-arm batch)
+
+Build against these shapes behind your OWN seam types now; swap to the
+generated arms when the landing merges (one place each):
+- `FeedTurnEndedErrored.headline` — a daemon-composed per-arm sentence (the
+  feed resolver composes it; the client's sentence table dies).
+- `FeedToolCallReturned.form.none` — a returned call with nothing to draw;
+  never `text{""}`.
+- `FeedToolCallInput.form` = command | path | query — the daemon states the
+  input line's drawn form (shell line vs muted path vs query).
+- `HostNotificationKind.question_asked{header}` — a blocked question's
+  notification (route as agent_addressed until it lands).
+- `DetachedLost{file_vanished | went_silent | swept_up}` as `lost` arms on
+  AgentBashInterrupted.cause, AgentSubagentFailure.cause and
+  AgentFailure.failure — the feed resolver maps them to FeedShellLost /
+  FeedSubagentLost; the sessionwatcher routes them as ordinary terminals.
+- The error-arm batch (every `<Rpc>Error` arm incl. transferring_away /
+  not_yet_adopted, and the DaemonFault / SessionFault / HostFault kind arms)
+  is collected in ERROR-ARMS.md and sent by the teamlead once the server
+  handlers expose the sites.
+
+## Deploy chain adaptation (wave 3)
+
+- `bin/deploy-all.sh` step 5 evaluates an elisp restart hook via emacsclient;
+  the function it names today, `agent-repl-frontend-daemon-restart-await`,
+  is DEAD on overhaul/elisp. The successor is
+  `(agent-repl-runtime-restart-await)` in `lisp/services.el` (build script +
+  store/sidecar bounce + UpdateShutdownSchedule{now} + re-ensure, pumping
+  until DaemonHealth answers). The rewritten chain calls that name; the
+  elisp lead edits nothing under bin/.
+- The chain's order stays proto → bindings → shim → webapp → daemon →
+  store/sidecar; `build-frontend.sh` builds `daemon/bin/claude-repld` from
+  `./cmd/claude-repld`; the daemon's self-reload invokes the ONE chain with
+  `--no-bounce`.
+- `agent-shim/wire` is deleted with the rewrite (nothing in the daemon
+  imports it) and its `bin/test-all.sh` roster entry dropped.
+
+## Standing-stream mechanics (connect-go v1.17.0, system-wide rule)
+
+- SERVER: every Watch* handler (WatchFeed, WatchFooter, WatchTopbar,
+  WatchWorkspaceRoster, WatchDaemonHolds, WatchHostWorkspace, WatchDaemon,
+  WatchWebWorkspace, WatchLoginTerminal) FLUSHES its response headers the
+  moment it accepts the stream (`stream.ResponseHeader()` set, then an
+  explicit flush via the underlying `http.Flusher` / `connect` send of the
+  headers before the first frame), so acceptance is observable before the
+  first published view arrives; a refused open is a Connect error before
+  any frame.
+- CLIENT (the shim client): a standing watch is ended by CANCELLING its
+  context, never by `Close` alone — `ServerStreamForClient.Close` drains
+  the body and blocks forever on a stream that never ends. `CallServerStream`
+  returns once headers arrive (before the first frame under early flush);
+  refusals surface at the first `Receive`, so the opening frame is consumed
+  as the open's answer (WatchSession's first `diagnostics` push).
