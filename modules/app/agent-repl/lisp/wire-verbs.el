@@ -439,6 +439,309 @@ contract breach, not an empty success."
    #'agent-repl-wire-decode-create-workspace-response-error))
 
 
+;;;; ---- OpenWorkspace --------------------------------------------------
+
+(defun agent-repl-wire-encode-open-workspace-request-workspace (ref)
+  "Encode OpenWorkspaceRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-open-workspace-request (request)
+  "Encode OpenWorkspaceRequest from plist REQUEST (:workspace REF)."
+  (agent-repl--log nil "elisp.wire.verbs-encode-open-workspace-request")
+  (list (cons 'workspace
+              (agent-repl-wire-encode-open-workspace-request-workspace
+               (agent-repl-wire-verbs--require "OpenWorkspaceRequest" "workspace"
+                                                (plist-get request :workspace))))))
+
+(defun agent-repl-wire-decode-open-workspace-success (json)
+  "Decode OpenWorkspaceSuccess from JSON.  Empty: the effects ride the streams."
+  (agent-repl-wire-verbs--decode-empty "OpenWorkspaceSuccess" json))
+
+(defun agent-repl-wire-decode-open-workspace-error (json)
+  "Decode OpenWorkspaceError from JSON.  Empty until its arms are derived."
+  (agent-repl-wire-verbs--decode-empty "OpenWorkspaceError" json))
+
+(defun agent-repl-wire-decode-open-workspace-response-success (json)
+  "Decode OpenWorkspaceResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-open-workspace-success json))
+
+(defun agent-repl-wire-decode-open-workspace-response-error (json)
+  "Decode OpenWorkspaceResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-open-workspace-error json))
+
+(defun agent-repl-wire-decode-open-workspace-response (json)
+  "Decode OpenWorkspaceResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "OpenWorkspaceResponse" json
+   #'agent-repl-wire-decode-open-workspace-response-success
+   #'agent-repl-wire-decode-open-workspace-response-error))
+
+
+;;;; ---- CloseWorkspace -------------------------------------------------
+
+(defun agent-repl-wire-encode-close-workspace-request-workspace (ref)
+  "Encode CloseWorkspaceRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-close-workspace-request (request)
+  "Encode CloseWorkspaceRequest from plist REQUEST (:workspace REF)."
+  (agent-repl--log nil "elisp.wire.verbs-encode-close-workspace-request")
+  (list (cons 'workspace
+              (agent-repl-wire-encode-close-workspace-request-workspace
+               (agent-repl-wire-verbs--require "CloseWorkspaceRequest" "workspace"
+                                                (plist-get request :workspace))))))
+
+(defun agent-repl-wire-decode-close-workspace-success (json)
+  "Decode CloseWorkspaceSuccess from JSON.  Empty: quiet, so the close happened."
+  (agent-repl-wire-verbs--decode-empty "CloseWorkspaceSuccess" json))
+
+(defun agent-repl-wire-decode-close-workspace-blocked (json)
+  "Decode CloseWorkspaceBlocked from JSON.
+Empty on purpose: the reasons are pushed on the footer stream, so this
+refusal never restates them."
+  (agent-repl-wire-verbs--decode-empty "CloseWorkspaceBlocked" json))
+
+(defun agent-repl-wire-decode-close-workspace-error-blocked (json)
+  "Decode CloseWorkspaceError's `blocked' cause arm from JSON."
+  (agent-repl-wire-decode-close-workspace-blocked json))
+
+(defun agent-repl-wire-decode-close-workspace-error (json)
+  "Decode CloseWorkspaceError from JSON into (:cause (:arm ARM :value V)).
+The cause oneof is the refusal, so an unset cause is a contract breach."
+  (let ((message "CloseWorkspaceError"))
+    (agent-repl-wire-verbs--check-keys message json '(blocked))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'blocked :blocked
+                       #'agent-repl-wire-decode-close-workspace-error-blocked))))))
+
+(defun agent-repl-wire-decode-close-workspace-response-success (json)
+  "Decode CloseWorkspaceResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-close-workspace-success json))
+
+(defun agent-repl-wire-decode-close-workspace-response-error (json)
+  "Decode CloseWorkspaceResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-close-workspace-error json))
+
+(defun agent-repl-wire-decode-close-workspace-response (json)
+  "Decode CloseWorkspaceResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "CloseWorkspaceResponse" json
+   #'agent-repl-wire-decode-close-workspace-response-success
+   #'agent-repl-wire-decode-close-workspace-response-error))
+
+
+;;;; ---- KillWorkspace --------------------------------------------------
+
+(defun agent-repl-wire-encode-kill-workspace-request-workspace (ref)
+  "Encode KillWorkspaceRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-kill-workspace-request (request)
+  "Encode KillWorkspaceRequest from plist REQUEST (:workspace REF)."
+  (agent-repl--log nil "elisp.wire.verbs-encode-kill-workspace-request")
+  (list (cons 'workspace
+              (agent-repl-wire-encode-kill-workspace-request-workspace
+               (agent-repl-wire-verbs--require "KillWorkspaceRequest" "workspace"
+                                                (plist-get request :workspace))))))
+
+(defun agent-repl-wire-decode-kill-workspace-success (json)
+  "Decode KillWorkspaceSuccess from JSON.  Empty: the effects ride the streams."
+  (agent-repl-wire-verbs--decode-empty "KillWorkspaceSuccess" json))
+
+(defun agent-repl-wire-decode-kill-workspace-error (json)
+  "Decode KillWorkspaceError from JSON.  Empty until its arms are derived."
+  (agent-repl-wire-verbs--decode-empty "KillWorkspaceError" json))
+
+(defun agent-repl-wire-decode-kill-workspace-response-success (json)
+  "Decode KillWorkspaceResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-kill-workspace-success json))
+
+(defun agent-repl-wire-decode-kill-workspace-response-error (json)
+  "Decode KillWorkspaceResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-kill-workspace-error json))
+
+(defun agent-repl-wire-decode-kill-workspace-response (json)
+  "Decode KillWorkspaceResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "KillWorkspaceResponse" json
+   #'agent-repl-wire-decode-kill-workspace-response-success
+   #'agent-repl-wire-decode-kill-workspace-response-error))
+
+
+;;;; ---- NukeWorkspace --------------------------------------------------
+
+(defun agent-repl-wire-encode-nuke-workspace-request-workspace (ref)
+  "Encode NukeWorkspaceRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-nuke-workspace-request (request)
+  "Encode NukeWorkspaceRequest from plist REQUEST (:workspace REF)."
+  (agent-repl--log nil "elisp.wire.verbs-encode-nuke-workspace-request")
+  (list (cons 'workspace
+              (agent-repl-wire-encode-nuke-workspace-request-workspace
+               (agent-repl-wire-verbs--require "NukeWorkspaceRequest" "workspace"
+                                                (plist-get request :workspace))))))
+
+(defun agent-repl-wire-decode-nuke-workspace-success (json)
+  "Decode NukeWorkspaceSuccess from JSON.  Empty: the effects ride the streams."
+  (agent-repl-wire-verbs--decode-empty "NukeWorkspaceSuccess" json))
+
+(defun agent-repl-wire-decode-nuke-workspace-error (json)
+  "Decode NukeWorkspaceError from JSON.  Empty until its arms are derived."
+  (agent-repl-wire-verbs--decode-empty "NukeWorkspaceError" json))
+
+(defun agent-repl-wire-decode-nuke-workspace-response-success (json)
+  "Decode NukeWorkspaceResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-nuke-workspace-success json))
+
+(defun agent-repl-wire-decode-nuke-workspace-response-error (json)
+  "Decode NukeWorkspaceResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-nuke-workspace-error json))
+
+(defun agent-repl-wire-decode-nuke-workspace-response (json)
+  "Decode NukeWorkspaceResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "NukeWorkspaceResponse" json
+   #'agent-repl-wire-decode-nuke-workspace-response-success
+   #'agent-repl-wire-decode-nuke-workspace-response-error))
+
+
+;;;; ---- MergeWorkspace -------------------------------------------------
+
+(defun agent-repl-wire-encode-merge-workspace-request-workspace (ref)
+  "Encode MergeWorkspaceRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-merge-workspace-request (request)
+  "Encode MergeWorkspaceRequest from plist REQUEST (:workspace REF)."
+  (agent-repl--log nil "elisp.wire.verbs-encode-merge-workspace-request")
+  (list (cons 'workspace
+              (agent-repl-wire-encode-merge-workspace-request-workspace
+               (agent-repl-wire-verbs--require "MergeWorkspaceRequest" "workspace"
+                                                (plist-get request :workspace))))))
+
+(defun agent-repl-wire-decode-merge-workspace-success (json)
+  "Decode MergeWorkspaceSuccess from JSON.  Empty: success means ENQUEUED."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceSuccess" json))
+
+(defun agent-repl-wire-decode-merge-workspace-error (json)
+  "Decode MergeWorkspaceError from JSON.  Empty until its arms are derived."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceError" json))
+
+(defun agent-repl-wire-decode-merge-workspace-response-success (json)
+  "Decode MergeWorkspaceResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-success json))
+
+(defun agent-repl-wire-decode-merge-workspace-response-error (json)
+  "Decode MergeWorkspaceResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-error json))
+
+(defun agent-repl-wire-decode-merge-workspace-response (json)
+  "Decode MergeWorkspaceResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "MergeWorkspaceResponse" json
+   #'agent-repl-wire-decode-merge-workspace-response-success
+   #'agent-repl-wire-decode-merge-workspace-response-error))
+
+
+;;;; ---- RestartWorkspace -----------------------------------------------
+
+(defun agent-repl-wire-encode-restart-workspace-request-workspace (ref)
+  "Encode RestartWorkspaceRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-restart-workspace-request (request)
+  "Encode RestartWorkspaceRequest from plist REQUEST (:workspace REF :force BOOL).
+`force' is spelled EXPLICITLY on the wire even when false: a forced
+restart interrupts live work, so the request states the mode rather than
+leaning on an omitted default."
+  (agent-repl--log nil "elisp.wire.verbs-encode-restart-workspace-request force=%S"
+                    (and (plist-get request :force) t))
+  (list (cons 'workspace
+              (agent-repl-wire-encode-restart-workspace-request-workspace
+               (agent-repl-wire-verbs--require "RestartWorkspaceRequest" "workspace"
+                                                (plist-get request :workspace))))
+        (cons 'force (agent-repl-wire-verbs--encode-bool (plist-get request :force)))))
+
+(defun agent-repl-wire-decode-restart-workspace-success (json)
+  "Decode RestartWorkspaceSuccess from JSON.  Empty: the restart is accepted."
+  (agent-repl-wire-verbs--decode-empty "RestartWorkspaceSuccess" json))
+
+(defun agent-repl-wire-decode-restart-workspace-error (json)
+  "Decode RestartWorkspaceError from JSON.  Empty until its arms are derived."
+  (agent-repl-wire-verbs--decode-empty "RestartWorkspaceError" json))
+
+(defun agent-repl-wire-decode-restart-workspace-response-success (json)
+  "Decode RestartWorkspaceResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-restart-workspace-success json))
+
+(defun agent-repl-wire-decode-restart-workspace-response-error (json)
+  "Decode RestartWorkspaceResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-restart-workspace-error json))
+
+(defun agent-repl-wire-decode-restart-workspace-response (json)
+  "Decode RestartWorkspaceResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "RestartWorkspaceResponse" json
+   #'agent-repl-wire-decode-restart-workspace-response-success
+   #'agent-repl-wire-decode-restart-workspace-response-error))
+
+
+;;;; ---- SetWorkspacePriority -------------------------------------------
+
+(defun agent-repl-wire-encode-set-workspace-priority-request-workspace (ref)
+  "Encode SetWorkspacePriorityRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-set-workspace-priority-request-priority (priority)
+  "Encode SetWorkspacePriorityRequest's `priority' use site from PRIORITY."
+  (agent-repl-wire-encode-workspace-priority priority))
+
+(defun agent-repl-wire-encode-set-workspace-priority-request (request)
+  "Encode SetWorkspacePriorityRequest from plist REQUEST.
+REQUEST is (:workspace REF :priority PRIORITY-OR-NIL).  An ABSENT priority
+IS the clear — presence, never a sentinel level — so a nil priority omits
+the field entirely."
+  (let ((out (list (cons 'workspace
+                         (agent-repl-wire-encode-set-workspace-priority-request-workspace
+                          (agent-repl-wire-verbs--require
+                           "SetWorkspacePriorityRequest" "workspace"
+                           (plist-get request :workspace)))))))
+    (agent-repl--log nil "elisp.wire.verbs-encode-set-workspace-priority-request cleared=%S"
+                      (null (plist-get request :priority)))
+    (if (plist-get request :priority)
+        (append out (list (cons 'priority
+                                (agent-repl-wire-encode-set-workspace-priority-request-priority
+                                 (plist-get request :priority)))))
+      out)))
+
+(defun agent-repl-wire-decode-set-workspace-priority-success (json)
+  "Decode SetWorkspacePrioritySuccess from JSON.
+Empty: the roster push carries the new state."
+  (agent-repl-wire-verbs--decode-empty "SetWorkspacePrioritySuccess" json))
+
+(defun agent-repl-wire-decode-set-workspace-priority-error (json)
+  "Decode SetWorkspacePriorityError from JSON.  Empty until its arms are derived."
+  (agent-repl-wire-verbs--decode-empty "SetWorkspacePriorityError" json))
+
+(defun agent-repl-wire-decode-set-workspace-priority-response-success (json)
+  "Decode SetWorkspacePriorityResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-set-workspace-priority-success json))
+
+(defun agent-repl-wire-decode-set-workspace-priority-response-error (json)
+  "Decode SetWorkspacePriorityResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-set-workspace-priority-error json))
+
+(defun agent-repl-wire-decode-set-workspace-priority-response (json)
+  "Decode SetWorkspacePriorityResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "SetWorkspacePriorityResponse" json
+   #'agent-repl-wire-decode-set-workspace-priority-response-success
+   #'agent-repl-wire-decode-set-workspace-priority-response-error))
+
+
 (provide 'agent-repl-wire-verbs)
 
 ;;; wire-verbs.el ends here
