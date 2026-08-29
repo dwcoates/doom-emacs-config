@@ -6,6 +6,7 @@ package tail
 // to defer belongs to the handler package.
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -146,7 +147,7 @@ func TestTailerRedeliversAHeldFrameOnTheNextPoll(t *testing.T) {
 	}
 }
 
-func TestTailerRefusesAHoldOutsideTheBatch(t *testing.T) {
+func TestTailerRejectsABatchWhoseHoldIsOutsideIt(t *testing.T) {
 	tests := []struct {
 		name string
 		// at is the offset the handler names, relative to the batch it was given.
@@ -158,24 +159,117 @@ func TestTailerRefusesAHoldOutsideTheBatch(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: a handler naming an offset it was never given frames for.
-			content := `{"a":1}` + "\n"
-			tr, _, logs, _ := newHoldTailer(t, content, func([]Frame) (int64, bool) { return tc.at, true })
-			// Act
-			r, err := tr.Poll()
-			if err != nil {
-				t.Fatalf("poll: %v", err)
-			}
-			tr.Commit(r)
+			tr, _, _, _ := newHoldTailer(t, `{"a":1}`+"\n", func([]Frame) (int64, bool) { return tc.at, true })
+
+			// Act.
+			_, err := tr.Poll()
+
 			// Assert: obeying it would rewind over converted records or park the
-			// cursor ahead of the frame it claims to hold, so it is refused —
-			// loudly, never silently.
-			if off := r.Next.GetOffset(); off != int64(len(content)) {
-				t.Fatalf("committed offset = %d, want %d (the refused hold must not move the cursor)", off, int64(len(content)))
-			}
-			if !strings.Contains(strings.Join(*logs, "\n"), "outside this batch") {
-				t.Fatalf("missing the loud log for the refused hold; got %v", *logs)
+			// cursor ahead of the frame it claims to hold, so the whole batch is
+			// rejected as a producer defect.
+			if !errors.Is(err, ErrHoldOutOfBatch) {
+				t.Fatalf("Poll error = %v, want ErrHoldOutOfBatch", err)
 			}
 		})
+	}
+}
+
+func TestTailerLogsARejectedOutOfBatchHold(t *testing.T) {
+	// Arrange.
+	tr, _, logs, _ := newHoldTailer(t, `{"a":1}`+"\n", func([]Frame) (int64, bool) { return 1 << 20, true })
+
+	// Act.
+	if _, err := tr.Poll(); err == nil {
+		t.Fatal("an out-of-batch hold was accepted")
+	}
+
+	// Assert.
+	if !strings.Contains(strings.Join(*logs, "\n"), "outside this batch") {
+		t.Fatalf("missing the loud log for the rejected hold; got %v", *logs)
+	}
+}
+
+func TestTailerRejectedHoldLeavesTheCursorUnmoved(t *testing.T) {
+	// Arrange.
+	tr, _, _, _ := newHoldTailer(t, `{"a":1}`+"\n", func([]Frame) (int64, bool) { return 1 << 20, true })
+
+	// Act.
+	if _, err := tr.Poll(); err == nil {
+		t.Fatal("an out-of-batch hold was accepted")
+	}
+
+	// Assert: nothing was written, so nothing may be committed.
+	if got := tr.offset; got != 0 {
+		t.Fatalf("committed offset = %d, want 0 (a rejected batch commits nothing)", got)
+	}
+}
+
+func TestTailerForcesConversionOnTheRedelivery(t *testing.T) {
+	// Arrange: a handler that holds the batch's last frame every time it is
+	// asked, so only the tailer's bound can end the hold.
+	tr, h, _, _ := newHoldTailer(t, `{"a":1}`+"\n"+`{"b":2}`+"\n", holdLast)
+	r1, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll1: %v", err)
+	}
+	tr.Commit(r1)
+
+	// Act: the redelivery.
+	r2, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll2: %v", err)
+	}
+	tr.Commit(r2)
+
+	// Assert: the handler was told the delivery was forced.
+	if !h.lastCtx.HoldForced {
+		t.Fatal("the redelivery did not tell the handler its hold was forced")
+	}
+}
+
+func TestTailerAdvancesPastAHoldThatSurvivesItsRedelivery(t *testing.T) {
+	// Arrange: the same never-settling handler.
+	tr, _, _, p := newHoldTailer(t, `{"a":1}`+"\n"+`{"b":2}`+"\n", holdLast)
+	r1, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll1: %v", err)
+	}
+	tr.Commit(r1)
+
+	// Act.
+	r2, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll2: %v", err)
+	}
+	tr.Commit(r2)
+
+	// Assert: a record held forever is a record never stored, so the bound wins.
+	fi, err := os.Stat(p)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if off := r2.Next.GetOffset(); off != fi.Size() {
+		t.Fatalf("committed offset = %d, want %d (the exhausted hold must release)", off, fi.Size())
+	}
+}
+
+func TestTailerLogsAnExhaustedHold(t *testing.T) {
+	// Arrange.
+	tr, _, logs, _ := newHoldTailer(t, `{"a":1}`+"\n"+`{"b":2}`+"\n", holdLast)
+	r1, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll1: %v", err)
+	}
+	tr.Commit(r1)
+
+	// Act.
+	if _, err := tr.Poll(); err != nil {
+		t.Fatalf("poll2: %v", err)
+	}
+
+	// Assert.
+	if !strings.Contains(strings.Join(*logs, "\n"), "forced redelivery") {
+		t.Fatalf("an exhausted hold was released without saying so; got %v", *logs)
 	}
 }
 
