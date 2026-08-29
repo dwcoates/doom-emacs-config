@@ -257,3 +257,10 @@ func statID(fi os.FileInfo) string {
 	// targets unix, so this path is effectively unreachable.
 	return fmt.Sprintf("nosys:%d:%d", fi.Size(), fi.ModTime().UnixNano())
 }
+
+// Handler returns the handler this tailer drives, so the reader can ask it for
+// something only a converter can spell (a LOST run's terminal, say).
+func (t *Tailer) Handler() Handler { return t.handler }
+
+// Offset returns the committed read position.
+func (t *Tailer) Offset() int64 { return t.offset }
