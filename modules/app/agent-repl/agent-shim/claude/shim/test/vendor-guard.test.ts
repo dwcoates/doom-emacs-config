@@ -8,7 +8,8 @@ import {
   assertVendorCallsAllowed,
   importRealSDK,
 } from "../src/vendor-guard.js";
-import { makeCreateQuery, parseArgs } from "../src/main.js";
+import { Code, ConnectError } from "@connectrpc/connect";
+import { createFakeQuery } from "../src/fake/index.js";
 
 // test/setup.ts sets the variable for the whole suite; the "allowed" cases
 // below clear it and this restores the suite-wide posture afterwards.
@@ -66,13 +67,26 @@ describe("importRealSDK", () => {
 
 describe("fake mode", () => {
   it("never reaches the chokepoint even with the variable set", () => {
-    // Arrange
+    // Arrange. The mocked vendor is a scaffold placeholder, so it refuses —
+    // but it must refuse as UNIMPLEMENTED, never as a blocked vendor call: the
+    // second would mean --fake had reached for the real SDK.
     process.env[FORBID_VENDOR_CALLS_ENV] = "1";
-    const createQuery = makeCreateQuery(parseArgs(["--fake", "--session-id", "s1"]));
     const prompt = (async function* () {})() as never;
     const canUseTool = (async () => ({ behavior: "allow" as const, updatedInput: {} })) as never;
-    // Act + Assert
-    expect(() => createQuery(prompt, canUseTool)).not.toThrow();
+
+    // Act.
+    let raised: unknown;
+    try {
+      createFakeQuery(prompt, canUseTool, { sessionId: "s1", newUuid: () => "u1" });
+    } catch (err) {
+      raised = err;
+    }
+
+    // Assert.
+    expect({
+      forbidden: raised instanceof VendorCallsForbiddenError,
+      code: ConnectError.from(raised).code,
+    }).toEqual({ forbidden: false, code: Code.Unimplemented });
   });
 });
 

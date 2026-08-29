@@ -1,516 +1,519 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { metapromptPath } from "../src/metaprompt.js";
-
-// runUdsMode's session and workspace claims are mocked so the flag and
-// signal-ownership suites never touch a real lock file.
-// Both claims are doubled, since runUdsMode takes the session lock AND the
-// workspace lock before it constructs anything. The doubles keep the real
-// exports' contract — a refusal to run is an exception, and success hands back
-// an idempotent release — while the pure helpers (lockPath, workspaceLockKey,
-// …) stay real so a drift between double and module surfaces here rather than
-// silently.
-vi.mock("../src/locks.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/locks.js")>();
-  return {
-    ...actual,
-    acquireSessionLock: vi.fn((sessionId: string) => {
-      if (sessionId === "") throw new Error("shim-session-lock: a session lock needs a session id");
-      return releaseDouble();
-    }),
-    // Faithful to the real export, which derives the lock file through
-    // workspaceLockKey and so refuses an empty workspace directory outright.
-    acquireWorkspaceLock: vi.fn((cwd: string) => {
-      actual.workspaceLockKey(cwd);
-      return releaseDouble();
-    }),
-  };
-});
-
-/** A release that, like the real one, is idempotent — extra calls are no-ops. */
-function releaseDouble(): () => void {
-  return vi.fn(() => undefined);
-}
+/**
+ * The process shell: argv, environment, --version, the signal boundary, and the
+ * lock directory.
+ *
+ * The suite deliberately does NOT call `main()`. main() binds a socket, takes a
+ * kernel lock and then parks forever, so the parts worth asserting are exported
+ * as pure functions and asserted directly; the end-to-end behavior of the built
+ * bundle is the dist smoke's job.
+ */
+import { describe, expect, it, vi } from "vitest";
+import { LOCK_DIR_ENV, lockDir } from "../src/locks.js";
 import {
-  makeUdsQueryFactory,
-  MAIN_LIFECYCLE_OPERATION,
+  DEFAULT_STATE_DIR_NAME,
+  OWNED_ENV,
+  STORE_SOCKET_ENV,
+  packageVersion,
   parseArgs,
-  probeQueryOptions,
-  runUdsMode,
-  realQueryOptions,
-  logMainLifecycle,
-  udsShutdownSignalHandlers,
-  validateUdsLoggingArgs,
+  processIdentity,
+  requireServingArgs,
+  resolveEnvironment,
+  shutdownSignalHandlers,
+  versionLine,
+  type CliArgs,
 } from "../src/main.js";
+import type { Engine } from "../src/engine/engine.js";
 
-// The metaprompt is resolved from the canonical doom checkout under HOME, so
-// every test in this file runs against a throwaway home. Without the swap the
-// options builders would read the developer's real metaprompt and the
-// assertions below would depend on a file outside the repository.
-const metapromptHomes: string[] = [];
-let realHome: string | undefined;
-beforeEach(() => {
-  realHome = process.env.HOME;
-  process.env.HOME = makeMetapromptHome();
-});
-afterEach(() => {
-  if (realHome === undefined) delete process.env.HOME;
-  else process.env.HOME = realHome;
-  metapromptHomes.splice(0).forEach((r) => fs.rmSync(r, { recursive: true, force: true }));
-});
+/** A complete, legal spawn environment. */
+function spawnEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    CLAUDE_CONFIG_DIR: "/accounts/primary",
+    [OWNED_ENV]: "1",
+    SHIM_BUILD_SHA: "abc1234",
+    ...overrides,
+  };
+}
 
-/** A throwaway HOME, optionally carrying a doom checkout holding BODY. */
-function makeMetapromptHome(body?: string): string {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "shim-main-metaprompt-"));
-  metapromptHomes.push(home);
-  if (body !== undefined) {
-    const file = metapromptPath(home);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, body, "utf8");
-  }
-  return home;
+function servingArgs(overrides: Partial<CliArgs> = {}): CliArgs {
+  return {
+    listen: "/tmp/shim.sock",
+    storeSocket: "/tmp/store.sock",
+    logFd: 3,
+    fake: false,
+    version: false,
+    ...overrides,
+  };
 }
 
 describe("parseArgs", () => {
-  it("defaults to real SDK mode with a generated session id and default mode", () => {
-    // Arrange + Act
-    const args = parseArgs([]);
-    // Assert
-    expect(args.fake).toBe(false);
-    expect(args.permissionMode).toBe("default");
-    expect(args.sessionId).toMatch(/[0-9a-f-]{36}/);
-  });
-
-  it("parses every supported flag", () => {
-    // Arrange + Act
+  it("accepts the whole spawn contract", () => {
+    // Arrange, Act.
     const args = parseArgs([
+      "--listen",
+      "/tmp/shim.sock",
+      "--store-socket",
+      "/tmp/store.sock",
+      "--log-fd",
+      "3",
       "--fake",
-      "--session-id", "sess-42",
-      "--permission-mode", "acceptEdits",
-      "--cwd", "/tmp/x",
-      "--model", "opus",
-      "--resume", "prior-session",
     ]);
-    // Assert
+
+    // Assert.
     expect(args).toEqual({
+      listen: "/tmp/shim.sock",
+      storeSocket: "/tmp/store.sock",
+      logFd: 3,
       fake: true,
-      sessionId: "sess-42",
-      permissionMode: "acceptEdits",
-      cwd: "/tmp/x",
-      model: "opus",
-      resume: "prior-session",
+      version: false,
     });
   });
 
-  it("throws on an invalid permission mode", () => {
-    // Arrange + Act + Assert
-    expect(() => parseArgs(["--permission-mode", "yolo"])).toThrow(/invalid --permission-mode/);
+  it("defaults --fake off", () => {
+    // Arrange, Act.
+    const args = parseArgs(["--listen", "/tmp/shim.sock", "--log-fd", "3"]);
+
+    // Assert.
+    expect(args.fake).toBe(false);
   });
 
-  it("throws on an unknown argument", () => {
-    // Arrange + Act + Assert
-    expect(() => parseArgs(["--frob"])).toThrow(/unknown argument/);
+  it("accepts --version alone", () => {
+    // Arrange, Act.
+    const args = parseArgs(["--version"]);
+
+    // Assert.
+    expect(args.version).toBe(true);
   });
 
-  it("throws when a flag is missing its value", () => {
-    // Arrange + Act + Assert
-    expect(() => parseArgs(["--session-id"])).toThrow(/missing value/);
-  });
-});
-
-describe("parseArgs rewind lineage", () => {
-  /** The daemon's complete rewind spawn contract, minus the flag under test. */
-  const LINEAGE = [
-    "--resume", "new-vendor",
-    "--rewound-from", "old-vendor",
-    "--rewind-retained-leaf", "leaf-uuid",
-    "--rewind-dropped-turns", "t1,t2,t3",
-  ];
-
-  it("accepts the complete trio alongside --resume", () => {
-    // Arrange + Act
-    const args = parseArgs(["--session-id", "s1", ...LINEAGE]);
-    // Assert
-    expect(args.rewoundFrom).toBe("old-vendor");
-    expect(args.rewindRetainedLeaf).toBe("leaf-uuid");
-    expect(args.rewindDroppedTurns).toEqual(["t1", "t2", "t3"]);
+  it("REFUSES an unknown argument rather than starting with it discarded", () => {
+    // Arrange, Act, Assert.
+    expect(() => parseArgs(["--nonsense"])).toThrow(/unknown argument "--nonsense"/);
   });
 
-  it("preserves dropped-turn submission order rather than sorting", () => {
-    // Arrange + Act
-    const args = parseArgs([
-      "--resume", "new-vendor",
-      "--rewound-from", "old-vendor",
-      "--rewind-retained-leaf", "leaf-uuid",
-      "--rewind-dropped-turns", "t9,t1,t5",
-    ]);
-    // Assert — KeepAliveDiscard.dropped_turn_ids is "in submission order".
-    expect(args.rewindDroppedTurns).toEqual(["t9", "t1", "t5"]);
+  it("names the whole spawn contract when it refuses one", () => {
+    // Arrange, Act, Assert.
+    expect(() => parseArgs(["--nonsense"])).toThrow(/--listen <uds> --store-socket <uds> --log-fd 3/);
   });
 
-  it("parses a single dropped turn id with no separator", () => {
-    // Arrange + Act
-    const args = parseArgs([
-      "--resume", "new-vendor",
-      "--rewound-from", "old-vendor",
-      "--rewind-retained-leaf", "leaf-uuid",
-      "--rewind-dropped-turns", "only-turn",
-    ]);
-    // Assert
-    expect(args.rewindDroppedTurns).toEqual(["only-turn"]);
-  });
-
-  it("leaves the lineage absent when no rewind flag is supplied", () => {
-    // Arrange + Act
-    const args = parseArgs(["--session-id", "s1", "--resume", "new-vendor"]);
-    // Assert
-    expect(args.rewoundFrom).toBeUndefined();
-    expect(args.rewindRetainedLeaf).toBeUndefined();
-    expect(args.rewindDroppedTurns).toBeUndefined();
-  });
-
-  it("fails loudly when --rewound-from arrives without its two companions", () => {
-    // Arrange + Act + Assert
-    expect(() => parseArgs(["--resume", "new-vendor", "--rewound-from", "old-vendor"]))
-      .toThrow(/incomplete rewind lineage/);
-  });
-
-  it("fails loudly when only --rewind-retained-leaf is missing", () => {
-    // Arrange + Act + Assert
-    expect(() => parseArgs([
-      "--resume", "new-vendor",
-      "--rewound-from", "old-vendor",
-      "--rewind-dropped-turns", "t1",
-    ])).toThrow(/--rewind-retained-leaf/);
-  });
-
-  it("fails loudly when only --rewind-dropped-turns is missing", () => {
-    // Arrange + Act + Assert
-    expect(() => parseArgs([
-      "--resume", "new-vendor",
-      "--rewound-from", "old-vendor",
-      "--rewind-retained-leaf", "leaf-uuid",
-    ])).toThrow(/--rewind-dropped-turns/);
-  });
-
-  it("fails loudly when the complete lineage arrives without --resume", () => {
-    // Arrange + Act + Assert
-    expect(() => parseArgs([
-      "--rewound-from", "old-vendor",
-      "--rewind-retained-leaf", "leaf-uuid",
-      "--rewind-dropped-turns", "t1",
-    ])).toThrow(/rewind lineage requires --resume/);
-  });
-
-  it("fails loudly when the rewind names one vendor session on both sides", () => {
-    // Arrange + Act + Assert
-    expect(() => parseArgs([
-      "--resume", "same-vendor",
-      "--rewound-from", "same-vendor",
-      "--rewind-retained-leaf", "leaf-uuid",
-      "--rewind-dropped-turns", "t1",
-    ])).toThrow(/--rewound-from equals --resume/);
-  });
-
-  it("rejects an empty dropped-turn id rather than dropping it silently", () => {
-    // Arrange + Act + Assert
-    expect(() => parseArgs([
-      "--resume", "new-vendor",
-      "--rewound-from", "old-vendor",
-      "--rewind-retained-leaf", "leaf-uuid",
-      "--rewind-dropped-turns", "t1,,t2",
-    ])).toThrow(/every comma-separated turn id must be non-empty/);
-  });
-
-  it("rejects an entirely empty dropped-turn list", () => {
-    // Arrange + Act + Assert — a rewind that dropped nothing is not a rewind.
-    expect(() => parseArgs([
-      "--resume", "new-vendor",
-      "--rewound-from", "old-vendor",
-      "--rewind-retained-leaf", "leaf-uuid",
-      "--rewind-dropped-turns", "",
-    ])).toThrow(/every comma-separated turn id must be non-empty/);
-  });
-});
-
-describe("realQueryOptions", () => {
-  const noopCanUse = (async () => ({ behavior: "allow" as const, updatedInput: {} })) as never;
-
-  it("requests interactive-CLI parity (claude_code preset + all setting sources)", () => {
-    // Arrange
-    const args = parseArgs(["--session-id", "s1"]);
-    // Act
-    const opts = realQueryOptions(args, noopCanUse);
-    // Assert — without the preset the model has no environment block
-    // (and invents paths like /Users/user for `~`); without the
-    // sources the user's settings/hooks/CLAUDE.md never load.
-    expect(opts.systemPrompt).toEqual({ type: "preset", preset: "claude_code" });
-    expect(opts.settingSources).toEqual(["user", "project", "local"]);
-    expect(opts.includePartialMessages).toBe(true);
-  });
-
-  it("appends the canonical metaprompt to the system prompt", () => {
-    // Arrange: a home carrying the doom checkout's metaprompt, and a session
-    // rooted somewhere else entirely.
-    process.env.HOME = makeMetapromptHome("Answer as a TLDR tree.\n");
-    const cwd = makeMetapromptHome();
-    // Act
-    const opts = realQueryOptions(parseArgs(["--session-id", "s1", "--cwd", cwd]), noopCanUse);
-    // Assert — the guidelines reach the agent as system prompt rather than
-    // as a read-directive injected into the conversation, so they survive
-    // `/clear`, `/compact`, and resume without anything re-firing them.
-    expect(opts.systemPrompt).toEqual({
-      type: "preset",
-      preset: "claude_code",
-      append: "Answer as a TLDR tree.",
-    });
-  });
-
-  it("passes cwd/model/resume through only when provided", () => {
-    // Arrange
-    const bare = realQueryOptions(parseArgs(["--session-id", "s1"]), noopCanUse);
-    const full = realQueryOptions(
-      parseArgs(["--session-id", "s1", "--cwd", "/w", "--model", "haiku", "--resume", "cli-1"]),
-      noopCanUse,
-    );
-    // Assert
-    expect("cwd" in bare).toBe(false);
-    expect("model" in bare).toBe(false);
-    expect("resume" in bare).toBe(false);
-    expect(full.cwd).toBe("/w");
-    expect(full.model).toBe("haiku");
-    expect(full.resume).toBe("cli-1");
-  });
-
-  it("passes the UDS session-owned abort controller to the Agent SDK", () => {
-    // Arrange
-    const abortController = new AbortController();
-    // Act
-    const opts = realQueryOptions(parseArgs(["--session-id", "s1"]), noopCanUse, abortController);
-    // Assert
-    expect(opts.abortController).toBe(abortController);
-  });
-
-  it("omits empty and synthetic model overrides identically", () => {
-    // Arrange / Act
-    const empty = realQueryOptions(
-      parseArgs(["--session-id", "s1", "--model", ""]),
-      noopCanUse,
-    );
-    const synthetic = realQueryOptions(
-      parseArgs(["--session-id", "s1", "--model", "<synthetic>"]),
-      noopCanUse,
-    );
-    // Assert
-    expect("model" in empty).toBe(false);
-    expect("model" in synthetic).toBe(false);
-  });
-});
-
-describe("probeQueryOptions", () => {
-  it("keeps the session's setting sources so the probe resolves the same skills", () => {
-    // Arrange — without settingSources the CLI resolves only the 8
-    // built-ins, so the probe would offer a menu the session cannot match.
-    const args = parseArgs(["--session-id", "s1", "--cwd", "/w"]);
-    // Act
-    const opts = probeQueryOptions(args, new AbortController());
-    // Assert
-    expect(opts.settingSources).toEqual(["user", "project", "local"]);
-    expect(opts.cwd).toBe("/w");
-  });
-
-  it("drops resume, since command resolution never reads the transcript", () => {
-    // Arrange — resuming would only point a second process at the live
-    // session's transcript for a list that comes from disk and settings.
-    const args = parseArgs(["--session-id", "s1", "--resume", "cli-1"]);
-    // Act
-    const opts = probeQueryOptions(args, new AbortController());
-    // Assert
-    expect("resume" in opts).toBe(false);
-  });
-
-  it("wires the abort controller so the probe's child can be reaped", () => {
-    // Arrange — a Query exposes no close(), so aborting the controller is
-    // the only way to SIGTERM the `claude` child the probe spawns.
-    const controller = new AbortController();
-    // Act
-    const opts = probeQueryOptions(parseArgs(["--session-id", "s1"]), controller);
-    // Assert
-    expect(opts.abortController).toBe(controller);
-  });
-});
-
-describe("makeUdsQueryFactory", () => {
-  it("gives fake UDS query shutdown one abort capability that ends its stream", async () => {
-    // Arrange
-    const factory = makeUdsQueryFactory(parseArgs(["--fake", "--session-id", "s1"]));
-    const prompt = (async function* () {})() as never;
-    const canUseTool = (async () => ({ behavior: "allow" as const, updatedInput: {} })) as never;
-    const owned = factory(prompt, canUseTool);
-    const iterator = owned.query[Symbol.asyncIterator]();
-    await iterator.next(); // fake SDK init
-    const next = iterator.next();
-    // Act
-    owned.abort();
-    // Assert
-    await expect(next).resolves.toMatchObject({ done: true });
-  });
-});
-
-describe("UDS query signal ownership", () => {
-  it("allows SIGTERM to end the query exactly once", async () => {
-    const shutdown = vi.fn(async () => undefined);
-    const signals = udsShutdownSignalHandlers("sess-1", shutdown);
-
-    signals.onSigterm();
-    signals.onSigterm();
-
-    await expect(signals.stopping()).resolves.toBeUndefined();
-    expect(shutdown).toHaveBeenCalledTimes(1);
-    expect(shutdown).toHaveBeenCalledWith("SIGTERM");
-  });
-
-  it("refuses SIGINT without ending the query and logs the preserved owner", () => {
-    const records: Array<Record<string, unknown>> = [];
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown): boolean => {
-      records.push(JSON.parse(String(chunk)) as Record<string, unknown>);
-      return true;
-    }) as typeof process.stderr.write);
-    const shutdown = vi.fn(async () => undefined);
-    const signals = udsShutdownSignalHandlers("sess-1", shutdown);
-
-    signals.onSigint();
-
-    expect(signals.stopping()).toBeNull();
-    expect(shutdown).not.toHaveBeenCalled();
-    expect(records).toContainEqual(expect.objectContaining({
-      level: "error",
-      agent_repl_session_id: "test-agent-session",
-      message: "refused unauthorized signal as an SDK query shutdown condition",
-      context: expect.objectContaining({
-        signal: "SIGINT",
-        outcome: "refused_query_termination",
-        query_preserved: true,
-      }),
-    }));
-    stderr.mockRestore();
-  });
-});
-
-// THE `runUdsMode exit trace` SUITE WAS DELETED, NOT ADAPTED. Both of its
-// cases drove a doubled `UdsSession.start()` -- one racing a SIGTERM into a
-// clean exit, one resolving with no signal into the error exit -- and that
-// class no longer exists: it spoke `protocol.v1`, which the schema redesign
-// removed. runUdsMode now refuses loudly at the point the session would have
-// been constructed, so there is no exit trace to assert until `shim.v1` has an
-// implementation, and inventing one would be deciding the new shutdown
-// contract rather than reconciling the old one.
-
-describe("runUdsMode without a daemon transport", () => {
-  const noopCreateQuery = (() => ({})) as unknown as Parameters<typeof runUdsMode>[1];
-
-  it("refuses loudly rather than idling once both claims are held", async () => {
-    // Arrange
-    const args = parseArgs([
-      "--session-id", "sess-no-transport",
-      "--daemon-socket", "/tmp/d.sock",
-      "--cwd", "/tmp",
-      "--log-fd", "3",
-    ]);
-
-    // Act, Assert: the refusal names the session it could not serve, so a
-    // stubbed path can never be mistaken for a session that merely went quiet.
-    await expect(runUdsMode(args, noopCreateQuery)).rejects.toThrow(
-      /no daemon transport is implemented for session sess-no-transport/,
-    );
-  });
-
-  it("releases the workspace claim it took before refusing", async () => {
-    // Arrange
-    const { acquireWorkspaceLock } = await import("../src/locks.js");
-    vi.mocked(acquireWorkspaceLock).mockClear();
-    const args = parseArgs([
-      "--session-id", "sess-release",
-      "--daemon-socket", "/tmp/d.sock",
-      "--cwd", "/tmp",
-      "--log-fd", "3",
-    ]);
-
-    // Act
-    await expect(runUdsMode(args, noopCreateQuery)).rejects.toThrow();
-
-    // Assert: the release the claim handed back was invoked, so a refused
-    // start does not strand the workspace against the next shim.
-    const release = vi.mocked(acquireWorkspaceLock).mock.results[0]?.value as () => void;
-    expect(vi.mocked(release)).toHaveBeenCalled();
-  });
-});
-
-describe("main entrypoint lifecycle log contract", () => {
   it.each([
-    ["normalized launch model", { requested_model: "<synthetic>", effective_model: "" }, "normalized empty-equivalent launch model before constructing SDK options", "info"],
-    ["validated startup", { fake: true, daemon_socket: "/tmp/daemon.sock" }, "validated shim startup arguments and configured durable logging", "info"],
-    ["selected query implementation", { query_source: "fake" }, "selecting shim query implementation", "info"],
-    ["acquired session lock", {}, "exclusive session lock acquired", "info"],
-    ["authorized shutdown signal", { signal: "SIGTERM", outcome: "intentional_query_shutdown" }, "received authorized shim shutdown signal", "info"],
-    ["refused unauthorized signal", { level: "error", signal: "SIGINT", outcome: "refused_query_termination", query_preserved: true }, "refused unauthorized signal as an SDK query shutdown condition", "error"],
-  ])("assigns %s a stable lifecycle operation and %s level", (_caseName, fields, message, expectedLevel) => {
-    const records: Array<Record<string, unknown>> = [];
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown): boolean => {
-      records.push(JSON.parse(String(chunk)) as Record<string, unknown>);
-      return true;
-    }) as typeof process.stderr.write);
-
-    logMainLifecycle(fields, message);
-
-    expect(records).toContainEqual(expect.objectContaining({
-      operation: MAIN_LIFECYCLE_OPERATION,
-      level: expectedLevel,
-      message,
-    }));
-    stderr.mockRestore();
-  });
-});
-
-describe("CLI-era flags", () => {
-  it("accepts permission-mode auto and friends", () => {
-    // Arrange + Act + Assert
-    expect(parseArgs(["--permission-mode", "auto"]).permissionMode).toBe("auto");
-    expect(parseArgs(["--permission-mode", "dontAsk"]).permissionMode).toBe("dontAsk");
-    expect(() => parseArgs(["--permission-mode", "yolo"])).toThrow("invalid");
+    ["--session-id"],
+    ["--cwd"],
+    ["--model"],
+    ["--permission-mode"],
+    ["--resume"],
+    ["--claude-bin"],
+    ["--daemon-socket"],
+    ["--rewound-from"],
+  ])("refuses the retired flag %s", (flag) => {
+    // Arrange, Act, Assert.
+    expect(() => parseArgs([flag, "value"])).toThrow(/unknown argument/);
   });
 
-  it("threads --claude-bin into pathToClaudeCodeExecutable", () => {
-    // Arrange
-    const noopCanUse = (async () => ({ behavior: "allow" as const, updatedInput: {} })) as never;
-    // Act
-    const withBin = realQueryOptions(
-      parseArgs(["--session-id", "s1", "--claude-bin", "/usr/local/bin/claude"]),
-      noopCanUse,
-    );
-    const withoutBin = realQueryOptions(parseArgs(["--session-id", "s1"]), noopCanUse);
-    // Assert
-    expect(withBin.pathToClaudeCodeExecutable).toBe("/usr/local/bin/claude");
-    expect("pathToClaudeCodeExecutable" in withoutBin).toBe(false);
+  it("refuses a flag whose value is missing", () => {
+    // Arrange, Act, Assert.
+    expect(() => parseArgs(["--listen"])).toThrow(/missing value for --listen/);
   });
-});
 
-describe("UDS durable-log CLI contract", () => {
-  it("accepts inherited fd 3 only", () => {
-    const args = parseArgs(["--daemon-socket", "/tmp/daemon.sock", "--cwd", "/canonical", "--log-fd", "3"]);
+  it("accepts fd 3 for the durable sink", () => {
+    // Arrange, Act.
+    const args = parseArgs(["--log-fd", "3"]);
+
+    // Assert.
     expect(args.logFd).toBe(3);
-    expect(() => validateUdsLoggingArgs(args)).not.toThrow();
   });
 
-  it.each([
-    [["--log-fd", "4"], "invalid --log-fd"],
-    [["--log-fd", "wat"], "invalid --log-fd"],
-    [["--daemon-socket", "/tmp/daemon.sock", "--log-fd", "3"], "requires --cwd"],
-    [["--daemon-socket", "/tmp/daemon.sock", "--cwd", "/canonical"], "requires --log-fd 3"],
-  ])("rejects UDS logging configuration %j", (argv, expected) => {
-    if (expected === "invalid --log-fd") expect(() => parseArgs(argv)).toThrow(expected);
-    else expect(() => validateUdsLoggingArgs(parseArgs(argv))).toThrow(expected);
+  it("refuses any other descriptor, which could point the record at a dying pipe", () => {
+    // Arrange, Act, Assert.
+    expect(() => parseArgs(["--log-fd", "2"])).toThrow(/the durable sink is inherited fd 3/);
+  });
+});
+
+describe("requireServingArgs", () => {
+  it("accepts a complete serving command line", () => {
+    // Arrange, Act, Assert.
+    expect(() => requireServingArgs(servingArgs())).not.toThrow();
+  });
+
+  it("refuses a shim with nowhere to listen", () => {
+    // Arrange.
+    const args = parseArgs(["--log-fd", "3"]);
+
+    // Act, Assert.
+    expect(() => requireServingArgs(args)).toThrow(/--listen <uds> is required/);
+  });
+
+  it("refuses a shim with no durable log sink", () => {
+    // Arrange.
+    const args = parseArgs(["--listen", "/tmp/shim.sock"]);
+
+    // Act, Assert.
+    expect(() => requireServingArgs(args)).toThrow(/--log-fd 3 is required/);
+  });
+});
+
+describe("resolveEnvironment", () => {
+  it("resolves a complete environment", () => {
+    // Arrange, Act.
+    const environment = resolveEnvironment(spawnEnv(), servingArgs(), "/home/dev");
+
+    // Assert.
+    expect(environment).toEqual({
+      claudeConfigDir: "/accounts/primary",
+      stateDir: `/home/dev/${DEFAULT_STATE_DIR_NAME}`,
+      shimBuildSha: "abc1234",
+      storeSocket: "/tmp/store.sock",
+    });
+  });
+
+  it("refuses a missing account root rather than guessing which account to run as", () => {
+    // Arrange.
+    const env = spawnEnv({ CLAUDE_CONFIG_DIR: undefined });
+
+    // Act, Assert.
+    expect(() => resolveEnvironment(env, servingArgs(), "/home/dev")).toThrow(
+      /CLAUDE_CONFIG_DIR is required/,
+    );
+  });
+
+  it("refuses an empty account root, which is a sentinel and not an absence", () => {
+    // Arrange.
+    const env = spawnEnv({ CLAUDE_CONFIG_DIR: "" });
+
+    // Act, Assert.
+    expect(() => resolveEnvironment(env, servingArgs(), "/home/dev")).toThrow(
+      /CLAUDE_CONFIG_DIR is required/,
+    );
+  });
+
+  it("refuses to run unowned", () => {
+    // Arrange.
+    const env = spawnEnv({ [OWNED_ENV]: undefined });
+
+    // Act, Assert.
+    expect(() => resolveEnvironment(env, servingArgs(), "/home/dev")).toThrow(
+      /AGENT_REPL_OWNED=1 is required/,
+    );
+  });
+
+  it("refuses an owned marker that is not exactly 1", () => {
+    // Arrange.
+    const env = spawnEnv({ [OWNED_ENV]: "true" });
+
+    // Act, Assert.
+    expect(() => resolveEnvironment(env, servingArgs(), "/home/dev")).toThrow(
+      /AGENT_REPL_OWNED=1 is required/,
+    );
+  });
+
+  it("refuses a missing build sha, which would make every shim look current", () => {
+    // Arrange.
+    const env = spawnEnv({ SHIM_BUILD_SHA: undefined });
+
+    // Act, Assert.
+    expect(() => resolveEnvironment(env, servingArgs(), "/home/dev")).toThrow(
+      /SHIM_BUILD_SHA is required/,
+    );
+  });
+
+  it("falls back to AGENT_REPL_STORE_SOCKET when the flag is absent", () => {
+    // Arrange.
+    const env = spawnEnv({ [STORE_SOCKET_ENV]: "/env/store.sock" });
+    const args = servingArgs({ storeSocket: undefined });
+
+    // Act.
+    const environment = resolveEnvironment(env, args, "/home/dev");
+
+    // Assert.
+    expect(environment.storeSocket).toBe("/env/store.sock");
+  });
+
+  it("lets the FLAG beat the env, because a caller that stated it meant it", () => {
+    // Arrange.
+    const env = spawnEnv({ [STORE_SOCKET_ENV]: "/env/store.sock" });
+    const args = servingArgs({ storeSocket: "/flag/store.sock" });
+
+    // Act.
+    const environment = resolveEnvironment(env, args, "/home/dev");
+
+    // Assert.
+    expect(environment.storeSocket).toBe("/flag/store.sock");
+  });
+
+  it("refuses when neither the flag nor the env names a store", () => {
+    // Arrange.
+    const args = servingArgs({ storeSocket: undefined });
+
+    // Act, Assert.
+    expect(() => resolveEnvironment(spawnEnv(), args, "/home/dev")).toThrow(
+      /the store socket is required/,
+    );
+  });
+
+  it("defaults the state root under the user's home", () => {
+    // Arrange, Act.
+    const environment = resolveEnvironment(spawnEnv(), servingArgs(), "/home/dev");
+
+    // Assert.
+    expect(environment.stateDir).toBe(`/home/dev/${DEFAULT_STATE_DIR_NAME}`);
+  });
+
+  it("honors an explicit state root", () => {
+    // Arrange.
+    const env = spawnEnv({ AGENT_REPL_STATE_DIR: "/var/state" });
+
+    // Act.
+    const environment = resolveEnvironment(env, servingArgs(), "/home/dev");
+
+    // Assert.
+    expect(environment.stateDir).toBe("/var/state");
+  });
+
+  it("treats an EMPTY state root as unset rather than as the filesystem root", () => {
+    // Arrange.
+    const env = spawnEnv({ AGENT_REPL_STATE_DIR: "" });
+
+    // Act.
+    const environment = resolveEnvironment(env, servingArgs(), "/home/dev");
+
+    // Assert.
+    expect(environment.stateDir).toBe(`/home/dev/${DEFAULT_STATE_DIR_NAME}`);
+  });
+});
+
+describe("lockDir", () => {
+  it("defaults to the directory the deployed daemon probes", () => {
+    // Arrange.
+    const original = process.env[LOCK_DIR_ENV];
+    delete process.env[LOCK_DIR_ENV];
+
+    // Act.
+    const resolved = lockDir();
+
+    // Assert.
+    expect(resolved).toMatch(/\.cache\/agent-repl\/run$/);
+    if (original !== undefined) process.env[LOCK_DIR_ENV] = original;
+  });
+
+  it("honors an override, so a test can isolate its locks from the machine's", () => {
+    // Arrange.
+    const original = process.env[LOCK_DIR_ENV];
+    process.env[LOCK_DIR_ENV] = "/tmp/isolated-locks";
+
+    // Act.
+    const resolved = lockDir();
+
+    // Assert.
+    expect(resolved).toBe("/tmp/isolated-locks");
+    if (original === undefined) delete process.env[LOCK_DIR_ENV];
+    else process.env[LOCK_DIR_ENV] = original;
+  });
+
+  it("treats an EMPTY override as unset", () => {
+    // Arrange.
+    const original = process.env[LOCK_DIR_ENV];
+    process.env[LOCK_DIR_ENV] = "";
+
+    // Act.
+    const resolved = lockDir();
+
+    // Assert.
+    expect(resolved).toMatch(/\.cache\/agent-repl\/run$/);
+    if (original === undefined) delete process.env[LOCK_DIR_ENV];
+    else process.env[LOCK_DIR_ENV] = original;
+  });
+});
+
+describe("versionLine", () => {
+  it("names the shim and its package version", () => {
+    // Arrange, Act.
+    const line = versionLine();
+
+    // Assert.
+    expect(line).toBe(`claude-shim ${packageVersion()}`);
+  });
+
+  it("reports a real version rather than the unknown fallback", () => {
+    // Arrange, Act.
+    const version = packageVersion();
+
+    // Assert.
+    expect(version).not.toBe("unknown");
+  });
+});
+
+describe("processIdentity", () => {
+  it("correlates with the workspace lock file and every log record", () => {
+    // Arrange, Act.
+    const identity = processIdentity("/ws/feature");
+
+    // Assert.
+    expect(identity).toMatch(/^shim-[0-9a-f]{8}-\d+$/);
+  });
+
+  it("gives two workspaces two identities", () => {
+    // Arrange, Act.
+    const first = processIdentity("/ws/one");
+    const second = processIdentity("/ws/two");
+
+    // Assert.
+    expect(first).not.toBe(second);
+  });
+});
+
+/** An engine that records its stand-down, and can be made to fail it. */
+function standDownEngine(failure?: Error): { engine: Engine; calls: string[] } {
+  const calls: string[] = [];
+  const engine = {
+    standDown: async (reason: string): Promise<void> => {
+      calls.push(reason);
+      if (failure !== undefined) throw failure;
+    },
+  } as unknown as Engine;
+  return { engine, calls };
+}
+
+describe("shutdownSignalHandlers", () => {
+  it("stands the session down on SIGTERM", async () => {
+    // Arrange.
+    const { engine, calls } = standDownEngine();
+    const handlers = shutdownSignalHandlers({
+      engine,
+      server: { close: async () => undefined },
+      exit: () => undefined,
+    });
+
+    // Act.
+    handlers.onSigterm();
+    await handlers.standingDown();
+
+    // Assert.
+    expect(calls).toEqual(["SIGTERM"]);
+  });
+
+  it("closes the listener so the socket file does not outlive the process", async () => {
+    // Arrange.
+    const { engine } = standDownEngine();
+    let closed = false;
+    const handlers = shutdownSignalHandlers({
+      engine,
+      server: {
+        close: async () => {
+          closed = true;
+        },
+      },
+      exit: () => undefined,
+    });
+
+    // Act.
+    handlers.onSigterm();
+    await handlers.standingDown();
+
+    // Assert.
+    expect(closed).toBe(true);
+  });
+
+  it("exits 0 after a clean stand-down", async () => {
+    // Arrange.
+    const { engine } = standDownEngine();
+    const codes: number[] = [];
+    const handlers = shutdownSignalHandlers({
+      engine,
+      server: { close: async () => undefined },
+      exit: (code) => codes.push(code),
+    });
+
+    // Act.
+    handlers.onSigterm();
+    await handlers.standingDown();
+
+    // Assert.
+    expect(codes).toEqual([0]);
+  });
+
+  it("exits NONZERO when the stand-down failed, never claiming good order", async () => {
+    // Arrange.
+    const { engine } = standDownEngine(new Error("store never acked"));
+    const codes: number[] = [];
+    const handlers = shutdownSignalHandlers({
+      engine,
+      server: { close: async () => undefined },
+      exit: (code) => codes.push(code),
+    });
+
+    // Act.
+    handlers.onSigterm();
+    await handlers.standingDown();
+
+    // Assert.
+    expect(codes).toEqual([1]);
+  });
+
+  it("ignores a second SIGTERM instead of racing two teardowns", async () => {
+    // Arrange.
+    const { engine, calls } = standDownEngine();
+    const handlers = shutdownSignalHandlers({
+      engine,
+      server: { close: async () => undefined },
+      exit: () => undefined,
+    });
+
+    // Act.
+    handlers.onSigterm();
+    handlers.onSigterm();
+    await handlers.standingDown();
+
+    // Assert.
+    expect(calls).toEqual(["SIGTERM"]);
+  });
+
+  it("REFUSES SIGINT, leaving the session running", () => {
+    // Arrange.
+    const { engine, calls } = standDownEngine();
+    const handlers = shutdownSignalHandlers({
+      engine,
+      server: { close: async () => undefined },
+      exit: () => undefined,
+    });
+
+    // Act.
+    handlers.onSigint();
+
+    // Assert.
+    expect({ stoodDown: calls, standingDown: handlers.standingDown() }).toEqual({
+      stoodDown: [],
+      standingDown: null,
+    });
+  });
+
+  it("logs the SIGINT refusal at ERROR, because it means something is misconfigured", () => {
+    // Arrange.
+    const { engine } = standDownEngine();
+    const handlers = shutdownSignalHandlers({
+      engine,
+      server: { close: async () => undefined },
+      exit: () => undefined,
+    });
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    // Act.
+    handlers.onSigint();
+
+    // Assert.
+    const written = stderr.mock.calls.map((call) => String(call[0])).join("");
+    expect(written).toContain('"level":"error"');
+  });
+
+  it("reports no stand-down in flight before any signal arrives", () => {
+    // Arrange.
+    const { engine } = standDownEngine();
+
+    // Act.
+    const handlers = shutdownSignalHandlers({
+      engine,
+      server: { close: async () => undefined },
+      exit: () => undefined,
+    });
+
+    // Assert.
+    expect(handlers.standingDown()).toBeNull();
   });
 });
