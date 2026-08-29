@@ -98,7 +98,9 @@ TS for shim/v1, store/v1, conversation/v1). Tests move with their modules.
   (default `~/.claude-emacs`), `SHIM_BUILD_SHA` (required; reported on
   SessionStarted), `AGENT_REPL_FORBID_VENDOR_CALLS` (the guard),
   `AGENT_REPL_FAKE_TURN_GATE` / `AGENT_REPL_FAKE_TURN_GATE_TEXT` (fake only),
-  `AGENT_REPL_FAKE_SPOOL_ROOT` (fake only; default `/tmp/claude-<uid>`).
+  `AGENT_REPL_FAKE_SPOOL_ROOT` (fake only; default `/tmp/claude-<uid>`),
+  `AGENT_REPL_STORE_SOCKET` (the store socket when `--store-socket` is
+  absent; the flag beats the env).
 - Startup order: parse argv → configure log on fd 3 → take the WORKSPACE
   lock (keyed by cwd) → bind the UDS → serve. The SESSION lock is taken inside
   StartSession (fresh: keyed by the pre-minted vendor session id; resume:
@@ -137,32 +139,43 @@ TS for shim/v1, store/v1, conversation/v1). Tests move with their modules.
   settles the rotation/fork/resume rule empirically and writes it into
   shim.md's mock section.
 - `AgentActivityId` = the vendor `tool_use_id` for a tool call; for text and
-  thinking blocks `<message.id>#<block index>`.
-- `AgentQuestionId` = `q:<tool_use_id>` (the AskUserQuestion call);
-  `AgentPermissionId` = `p:<tool_use_id>` (the gated call's id; consent joins
-  to the work it gates).
+  thinking blocks `<message.id>:<block_index>` (0-based).
+- `AgentQuestionId` = the AskUserQuestion call's `tool_use_id` verbatim;
+  `AgentPermissionId` = the gated call's `tool_use_id` verbatim (consent
+  joins to the work it gates; the two never collide because a question is
+  never a permission's gated call).
 - `DetachedWorkId` = the vendor `task_id`, verbatim (the mapping to the
   underlying identity is one lookup from `task_started`).
 - `TurnId` is daemon-minted and adopted; the shim never mints one.
 - `HistoryPointer.value` is the store's `StoreItemPointer.value` passed
   through verbatim (opaque in both directions).
 
-## Store keys (store/keys.ts — the one place)
+## Store keys (store/keys.ts — the one place; the CROSS-PLANE rule agreed with the store lead)
 
-- `upsert_key`: `prompt:<TurnId>` (AgentPrompt) · `unit:<AgentActivityId>`
-  (every activity frame of a unit) · `question:<AgentQuestionId>` ·
-  `permission:<AgentPermissionId>` · `terminal:<AgentId>:<TurnId>` (the
-  main agent's turn terminal) · `terminal:<AgentId>` (a subagent's) ·
-  `detached:<DetachedWorkId>` (announcements, lifecycle rows) ·
-  `session:<vendor_session_id>:<update digest>` (SessionUpdate rows).
-- `write_id`: `sha256(producer | upsert_key | canonical-proto-bytes)`,
-  hex — deterministic; the same frame re-sent mints the same id and the
-  store absorbs it.
+- `upsert_key`: `activity:<AgentActivityId.value>` (every frame of a unit;
+  the id is the tool_use_id for a tool call, `<message.id>:<block_index>`
+  0-based for text/thinking blocks) · `prompt:<TurnId.value>` (AgentPrompt) ·
+  `question:<AgentQuestionId.value>` (= the AskUserQuestion tool_use_id) ·
+  `permission:<AgentPermissionId.value>` · `terminal:<AgentId.value>:<vendor
+  record uuid>` (an agent's success/failure frame; the uuid is the SDK
+  message's) · `bash:<run AgentActivityId.value>` (a detached shell run's
+  lifecycle rows) · `session:<arm>:<vendor record uuid>` (SessionUpdate rows;
+  the arm is the oneof field name).
+- `write_id`: `sha256("<producer>|<source coordinates>|<discriminator>")`
+  hex — deterministic; source coordinates are the SDK message uuid (plus the
+  block index for a block-derived unit), the discriminator is the frame's
+  arm path. The same frame re-sent mints the same id and the store absorbs it.
 - `producer`: `claude-shim:<original vendor session id>`.
-- Routing: `update` → page line; `success`/`failure` → page line (the
-  store dual-writes the terminal columns); `detached_work` → the lifecycle
-  arm (`bash` for a shell, `workflow` never this wave); keep-alive turns'
-  prompt + frames → `unserved_item.keepalive`.
+- Shim-synthesized session facts (diagnostics, context_usage pushes) are
+  NEVER written to the store — they are not vendor conversation.
+- Routing: `update` → page line; `success`/`failure` → page line (the store
+  dual-writes the terminal columns); `detached_work` → the lifecycle arm
+  (`bash` for a shell; workflow never this wave); keep-alive turns' prompt +
+  frames → `unserved_item.keepalive`.
+- R15: the shim's `AgentPrompt` row is the ONE served prompt row (the
+  sidecar classifies transcript user records as unserved). StartTurn writes
+  it and has its durable ack BEFORE the turn's first activity frame is
+  written.
 
 ## The fold (convert/) — rules every converter obeys
 
@@ -270,3 +283,33 @@ Atomic commits on your branch; tests ride with the change they cover;
 Report: what landed (commit range), suites run and results, every
 prescribed detail you overrode and why, every derived-arm refusal site,
 every UX or contract gap you surfaced instead of improvising.
+
+## Rulings adopted 2026-08-29 (after kickoff; these win over anything above)
+
+- PROTO LANDING (merged from overhaul/integration): every shim.v1 failure
+  message now carries its derived `kind`/`cause` arms (StartSession,
+  SetSessionModel, SetSessionPermissionMode, Hibernate, KillSession,
+  StartTurn, UpdateAgent, KillTurn, StopBash, DetachForeground, ReadHistory)
+  and `SessionFault` has a `kind` oneof. Populate the arm; `detail` stays a
+  human string. WatchBash refusals are transport-level Connect errors (a
+  stream has no failure message). The workflow trio answers
+  `Code.Unimplemented`.
+- `AgentUpdate` gained two page-line arms the shim PRODUCES: `context_cut`
+  (conversation.v1.ContextCut — /clear, compaction, compaction_failed) and
+  `api_error` (ApiRequestFailed as MID-TURN evidence; a turn terminal is
+  still `AgentFailure.api_request_failed`).
+- KEEP-ALIVE MARKER: every keep-alive prompt the shim submits BEGINS with
+  the literal `<!--agent-repl:keepalive-->` (mirrors the existing
+  `<!--agent-repl:meta-->` marker). The store/sidecar treat a turn opened by
+  such a prompt as keep-alive until the next non-keep-alive prompt. shim.md
+  publishes this.
+- Q1: /agents and /help are recognized by the DAEMON and never reach the
+  shim; the shim probes no catalogs.
+- Q5 APPROVED: the one-time real capture run happens; the lead dispatches it
+  once the capture harness reports ready. Until the captures arrive the mock
+  is built from `testdata/corpus` + `sdk.d.ts`; afterwards its scripts and
+  the goldens are rebuilt FROM the captures.
+- LOCKS: the convention in "Process shell" is the cross-system contract; the
+  daemon probes the workspace lock only.
+- VERSIONS: `@connectrpc/*` and `@bufbuild/protobuf` are pinned to exact
+  versions in package.json.
