@@ -595,10 +595,58 @@ Cross-plane rulings (shim lead, 2026-08-29, relayed to the store/sidecar lead):
   files, skill documents), while a tool-availability delta and an agent-type
   listing are vendor bookkeeping about what the model MAY call. Both planes
   drop them from every page.
-- The main agent's `AgentId` is the conversation's ORIGINAL vendor session id
-  (R9 default); the shim pre-mints it with `Options.sessionId` on a fresh
-  start. The rotation/fork rule is settled in this section by the engine
-  agent's evidence (pending).
+### R9, SETTLED (engine agent, evidence below)
+
+The main agent's `AgentId` is the conversation's ORIGINAL vendor session id.
+The final rule, one case at a time:
+
+1. FRESH START. The shim pre-mints a uuid, passes it as `Options.sessionId`,
+   and adopts it as the AgentId. It is persisted at
+   `$AGENT_REPL_STATE_DIR/shim/<workspace-key>/agent-id.json` (atomic replace,
+   `{original_vendor_session_id, workspace_key, minted_at_ms}`) BEFORE the
+   query is created, so a crash between mint and first record still leaves the
+   identity recoverable.
+
+2. RESUME. The resume id IS the original id, and a FILE-ONLY READER CAN DERIVE
+   IT. Therefore, when `agent-id.json` is absent on a resume, the shim ADOPTS
+   the resume id as the original and persists it; that is a derivation, not a
+   guess, and it is logged as one.
+
+3. ROTATION AND FORK. FILES ALONE DO NOT SUFFICE, so the shim writes the link
+   they lack: one pointer file per rotated id at
+   `$AGENT_REPL_STATE_DIR/shim/<workspace-key>/vendor-id/<vendor-session-id>.json`
+   holding `{vendor_session_id, original_vendor_session_id, linked_at_ms}`.
+   `engine/identity.ts:resolveOriginal(stateDir, workspaceKey, vendorSessionId)`
+   is the file-plane reader: a rotated id answers from its link file, an
+   unrotated one answers itself, and neither costs more than one stat. The
+   AgentId never moves; `SessionIdentityRotated{previous, new}` is pushed and
+   `reason` stays unset (no declared producer).
+
+EVIDENCE, ranked:
+
+- STRONGEST — the real file tree (1,107 transcripts under
+  `~/.claude/projects/*/*.jsonl`, scanned whole): every file's `sessionId`
+  equals its filename (0 mismatches), and exactly one file carries more than
+  one session id (a synthetic fixture with a placeholder uuid). A resume
+  therefore appends to the SAME file under the SAME id. The union of all 92
+  distinct keys appearing anywhere in those files contains NO lineage field —
+  no `forkedFrom`, `parentSessionId`, `resumedFrom`, `originSessionId` or
+  equivalent. (`origin` is `{kind: "human"|"task-notification"}`; `source` is
+  an api-error retry reason; neither names a session.)
+- STRONG — compaction is IN PLACE: a `system`/`compact_boundary` line carries
+  the UNCHANGED `sessionId` and links to its predecessor record with
+  `logicalParentUuid`. Compaction therefore never rotates an id.
+- STRONG — `sdk.d.ts`: `ForkSessionResult` is `{ sessionId }` alone, and
+  `SDKSessionInfo` (what `getSessionInfo` returns) has no parent or ancestor
+  field. Nothing the SDK can tell a file-only reader names a predecessor.
+- THE RUNTIME EXCEPTION — `SDKConversationResetMessage` carries BOTH
+  `session_id` and `new_conversation_id`, so the link exists exactly once, in
+  the stream, at the moment of rotation. That is why the shim must capture it
+  then and write it down: nobody can recover it afterwards.
+
+CONCLUSION FOR THE FILE PLANE: files alone suffice for resume and compaction;
+they do NOT suffice for rotation or fork, and the shim-written pointer file
+above is the smallest link that closes the gap. No store verb is involved.
 
 ### Where the sixteen failure arms actually live (mock agent evidence)
 
