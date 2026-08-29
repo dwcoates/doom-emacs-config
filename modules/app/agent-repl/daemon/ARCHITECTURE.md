@@ -528,7 +528,7 @@ number, type, function, operator, punctuation, variable, constant, attribute,
 tag, heading, link, emphasis, strong, added, removed, meta). `paint` asserts
 its emitted classes are in the vocabulary file.
 
-## Landing 3 (staged on overhaul/landing-3; lands with the error-arm batch)
+## Landing 3 (LANDED at overhaul/integration 87234e51c, merged at c0a4cf153 — see docs/overhaul/daemon.md "Landing 3 relay"; the error-arm batch is landing 4)
 
 Build against these shapes behind your OWN seam types now; swap to the
 generated arms when the landing merges (one place each):
