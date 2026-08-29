@@ -287,3 +287,9 @@ survive compaction. It joins the post-compaction mandatory-reload set.
     orchestrators are launched with. Prompt-relevant rulings made
     during planning land there the moment they are made, per the
     rule-8 automatic-recording obligation.
+
+23. NO PLANNING-DOC POINTERS IN THE CONTRACT. Proto comments and
+    docs/protobuf-design files never direct the reader to planning
+    documents or skills; they may only suggest real source or proto
+    files. (The 2026-08-29 sweep enforced this retroactively; every
+    future landing obeys it.)

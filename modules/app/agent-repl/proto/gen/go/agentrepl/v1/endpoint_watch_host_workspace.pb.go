@@ -289,7 +289,7 @@ func (*HostWorkspaceReloadWebapp) Descriptor() ([]byte, []int) {
 
 // A notification for this workspace's user. THE KIND IS TYPED — the
 // composed text is presentation; the kind arm is the programmatic
-// semantics (never differentiate by parsing the text).
+// semantics.
 type HostWorkspaceNotification struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The composed line, verbatim (agent-authored or daemon-composed).
