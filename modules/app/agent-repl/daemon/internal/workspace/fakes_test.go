@@ -890,3 +890,6 @@ func containsString(set []string, want string) bool {
 	}
 	return false
 }
+
+// Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
+func (s *fakeSurfaces) Evict(_ string) error { return nil }

@@ -66,7 +66,7 @@ func (s *fakeSupervisor) Spawn(_ context.Context, spec shimclient.Spec) (shimcli
 	return s.client, nil
 }
 
-func (s *fakeSupervisor) Adopt(_ context.Context, _ ids.WorkspaceID, uds string) (shimclient.Client, error) {
+func (s *fakeSupervisor) Adopt(_ context.Context, _ ids.WorkspaceID, _ string, uds string) (shimclient.Client, error) {
 	if s.adoptErr != nil {
 		return nil, s.adoptErr
 	}
