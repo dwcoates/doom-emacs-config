@@ -7,12 +7,13 @@ package health
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
-	"claude-repld/internal/notimpl"
 	"claude-repld/internal/wsm"
 )
 
@@ -43,13 +44,32 @@ type Deps struct {
 	Live LiveFunc
 	// Log is the reporter's logger.
 	Log dlog.Surfaces
+	// Now supplies the instant a fault's open and resolved marks are stamped
+	// with. It is injected so a test asserts an exact instant rather than a
+	// window; nil means time.Now.
+	Now func() time.Time
 }
 
 // LiveFunc reports one workspace's live session standing: whether a session
 // exists, and whether the daemon-to-shim link is serving.
 type LiveFunc func(ws ids.WorkspaceID) (exists, connected bool)
 
-// New builds the reporter.
+// New builds the reporter. Every collaborator is required: a reporter with no
+// state client or no liveness probe could only answer by guessing, and a health
+// answer is never a guess.
 func New(deps Deps) (Reporter, error) {
-	return nil, notimpl.Err
+	if deps.DB == nil {
+		return nil, fmt.Errorf("health: a state client is required")
+	}
+	if deps.Live == nil {
+		return nil, fmt.Errorf("health: a liveness probe is required")
+	}
+	if deps.Log == nil {
+		return nil, fmt.Errorf("health: log surfaces are required")
+	}
+	now := deps.Now
+	if now == nil {
+		now = time.Now
+	}
+	return &reporter{db: deps.DB, live: deps.Live, log: deps.Log, now: now}, nil
 }
