@@ -23,6 +23,20 @@ import { Code, ConnectError, createClient, type Client } from "@connectrpc/conne
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { connect as netConnect } from "node:net";
 import { conversationv1, shimv1 } from "../../src/proto.js";
+import { FAKE_DEFAULT_MODEL } from "../../src/fake/catalogs.js";
+
+/**
+ * The model every request names by default.
+ *
+ * The MOCK's own catalog, not a plausible-looking real model id: a session
+ * started on a model the catalog does not carry would be refused
+ * `model_not_in_catalog`, and every test would then be exercising that refusal
+ * by accident.
+ */
+export const DEFAULT_MODEL = FAKE_DEFAULT_MODEL;
+
+/** A model id no catalog carries — the `model_not_in_catalog` subject. */
+export const UNCATALOGED_MODEL = "model-nobody-offers";
 
 /** A shim.v1 client. */
 export type ShimClient = Client<typeof shimv1.Shim>;
@@ -205,7 +219,7 @@ export function permissionMode(arm: PermissionModeArm): conversationv1.AgentPerm
 
 /** A fresh-start request. */
 export function freshSession(
-  modelName = "claude-opus-5",
+  modelName: string = DEFAULT_MODEL,
   mode: PermissionModeArm = "default",
 ): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
@@ -251,7 +265,7 @@ export function remediationClear(): conversationv1.SessionColdRemediation {
 
 /** `SessionColdRemediation{compact}`. */
 export function remediationCompact(
-  modelName = "claude-opus-5",
+  modelName: string = DEFAULT_MODEL,
   scope: conversationv1.SessionCompactScope = conversationv1.SessionCompactScope.ALL,
 ): conversationv1.SessionColdRemediation {
   return create(conversationv1.SessionColdRemediationSchema, {
