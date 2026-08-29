@@ -136,6 +136,36 @@ submitter's own — no pushed view carries it.
 - A drain-scheduled WatchDaemon push (reason + at_ms) draws the standing
   page-wide restart banner (ruled 2026-08-29).
 
+## Visual quality and fidelity directives (ruled 2026-08-29)
+
+- EXISTING LOOK AND FEEL DOES NOT CHANGE, and existing elements do not
+  change in ways the new feature set or a prescription does not
+  necessitate. The expanded footer must change (agents and tasks now
+  live there); the look of an ordinary bash tool call must not (nothing
+  in the API suggests it should). The same rule holds for UX behaviors:
+  the rolling highlight of prompt bubbles needn't change just because
+  the message carrying prompts changed — nothing about that change
+  suggests a UI change.
+- GLYPHS: where the proto schemas or documentation suggest glyphs, use
+  them — but NEVER as emoticons or emojis; always graphical
+  glyphs/elements. Prefer simple and sleek (minimalist) over noisy and
+  opinionated. Color is great and carries SEMANTIC value (orange =
+  warnings, red = errors, …); blinking for status/activity; hollowed-out
+  for done. CONSISTENCY is important.
+- NEW UI features and changes are SLICK and PROFESSIONAL-GRADE — this
+  is a user application meant to be pleasing to use and look at.
+- DROPDOWNS AND HOVER MENUS open in the RIGHT DIRECTION (topbar
+  dropdowns drop DOWNWARD, never upward) and never clip off any edge of
+  the screen.
+- LISTS anywhere in the UI (topbar dropdowns, the expanded footer, …)
+  get SUBTLE THIN GREY DELIMITER LINES between rows — subtle, and
+  CONSISTENT across elements (the same look in the expanded footer as
+  in a topbar dropdown).
+- The webapp teamlead should FREELY SURFACE UI/UX questions and
+  concerns for further discussion (via the project lead, to the user)
+  whenever it senses a gap in the UI/UX prescription the user could
+  fill.
+
 ## Code-level consistency requirements (from the conventions walk)
 - ONE renderer subroutine draws EVERY FeedSessionSeparation arm; the
   arm selects only accent color and label/payload text — a per-arm
