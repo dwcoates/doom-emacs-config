@@ -42,7 +42,7 @@ func (v *verbs) RequestCommandSupport(ctx context.Context, ws ids.WorkspaceID, c
 		return wsm.Workspace{}, refuse(log, "RequestCommandSupport", ArmBriefMissing,
 			fmt.Sprintf("the %s brief is unreadable: %v", BriefAddSupport, err), false)
 	}
-	prompt, err := brief.Splice(map[string]string{
+	prompt, err := v.splice(brief, map[string]string{
 		"command":     command,
 		"config_root": v.deps.Accounts.ConfigDirFor(record.Dir),
 	})

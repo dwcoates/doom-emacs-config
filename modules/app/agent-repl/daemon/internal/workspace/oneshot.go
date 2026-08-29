@@ -81,7 +81,7 @@ func (v *verbs) decorateOneShot(raw string, finish *OneShotFinish) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("read the %s brief: %w", BriefAutonomousPreamble, err)
 	}
-	preambleText, err := preamble.Splice(nil)
+	preambleText, err := v.splice(preamble, nil)
 	if err != nil {
 		return "", fmt.Errorf("splice the %s brief: %w", BriefAutonomousPreamble, err)
 	}
@@ -104,7 +104,7 @@ func (v *verbs) oneShotSuffix(finish *OneShotFinish) (string, error) {
 
 	switch {
 	case finish.SelfMerge:
-		text, err := success.Splice(map[string]string{
+		text, err := v.splice(success, map[string]string{
 			"invocation":    "the " + WorkspaceSkill + " merge skill",
 			"action_phrase": selfMergeActionPhrase,
 		})
@@ -115,7 +115,7 @@ func (v *verbs) oneShotSuffix(finish *OneShotFinish) (string, error) {
 
 	case finish.OpenPr != nil:
 		prCommand := createPrCommand(finish.OpenPr)
-		first, err := success.Splice(map[string]string{
+		first, err := v.splice(success, map[string]string{
 			"invocation":    "`" + prCommand + "`",
 			"action_phrase": openPrActionPhrase,
 		})
@@ -126,7 +126,7 @@ func (v *verbs) oneShotSuffix(finish *OneShotFinish) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("read the %s brief: %w", BriefOneShotCreatePrFollowup, err)
 		}
-		second, err := followup.Splice(map[string]string{
+		second, err := v.splice(followup, map[string]string{
 			"create_pr_command": prCommand,
 			"wrapup_command":    WorkspaceSkill + " close",
 		})
