@@ -205,12 +205,11 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; exists because a hidden xwidget webview's own timers are suspended by the
 ;; embedder — see the file's commentary.
 (agent-repl--load-module "webview-recovery")
-;; WHY: tasks.el owns the user-defined task model the sidebar's "Task"
-;; view groups workspaces under, persisting via history.el's sexp-file
-;; helpers and reading the `agent-repl--ws-*' accessors — history.el and
-;; workspace.el both load above.  Must precede sidebar.el, which builds
-;; the task-view roster and hosts the task command handlers.
-(agent-repl--load-module "tasks")
+;; WHY: notes.el owns the per-workspace org notes file, all that survives
+;; of tasks.el.  It reads core.el's state-dir resolver, workspace.el's
+;; `--ws-current-name' and autosave.el's save-on-kill helper — all loaded
+;; above.
+(agent-repl--load-module "notes")
 (agent-repl--load-module "prompt-summary")
 (agent-repl--load-module "window")
 (agent-repl--load-module "sibling-popup")
@@ -239,20 +238,40 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; capture the tail of the module load rather than the user's session.
 (agent-repl--load-module "interaction-record")
 
-;; Task notes popup: the sidebar's Task view opens each task's org notes
-;; file (`agent-repl--task-open', tasks.el) in a right-side popup that
-;; leaves the agent-repl panels the left two thirds of the frame.
-;; `:autosave t' persists the notes when the popup is dismissed, matching
-;; the buffer-local save-on-kill hook the opener also installs.  Guarded
-;; because the Doom popup module (and its `set-popup-rule!' macro) is
-;; absent under `emacs -Q' — the batch ERT suite loads this file but has
+;; Workspace notes popup: `agent-repl-notes-open' (notes.el) opens the
+;; current workspace's org notes file in a right-side popup that leaves the
+;; agent-repl panels the left two thirds of the frame.  `:autosave t'
+;; persists the notes when the popup is dismissed, matching the
+;; buffer-local save-on-kill hook the opener also installs.
+;;
+;; The rule matches by PREDICATE, not by buffer name: a notes buffer is
+;; named `<workspace>.org', which no name pattern can tell apart from any
+;; other org file the user opens, while its residence under the notes
+;; directory identifies it exactly.
+;;
+;; Guarded because the Doom popup module (and its `set-popup-rule!' macro)
+;; is absent under `emacs -Q' — the batch ERT suite loads this file but has
 ;; no popup system to configure.
+(defun agent-repl--notes-buffer-p (buffer-name &optional _action)
+  "Return non-nil when BUFFER-NAME names a buffer visiting a notes file.
+The popup predicate for `agent-repl-notes-open': a notes buffer is
+identified by the file it visits living under `agent-repl--notes-dir',
+never by its name."
+  (let* ((buf (get-buffer buffer-name))
+         (file (and (buffer-live-p buf) (buffer-file-name buf)))
+         (match (and file
+                     (string-prefix-p (expand-file-name (agent-repl--notes-dir))
+                                      (expand-file-name file)))))
+    (agent-repl--log nil "elisp.notes.popup-predicate: buffer=%S file=%S match=%s"
+                     buffer-name file (if match t nil))
+    match))
+
 (if (fboundp 'set-popup-rule!)
     (progn
-      (set-popup-rule! "^task-notes-.*\\.org\\'"
+      (set-popup-rule! #'agent-repl--notes-buffer-p
         :side 'right :size 0.33 :select t :quit t :autosave t)
-      (agent-repl--boot-info "task-notes popup rule installed side=right size=0.33 autosave=t"))
-  (agent-repl--boot-info "task-notes popup rule skipped; set-popup-rule! is unavailable"))
+      (agent-repl--boot-info "workspace-notes popup rule installed side=right size=0.33 autosave=t"))
+  (agent-repl--boot-info "workspace-notes popup rule skipped; set-popup-rule! is unavailable"))
 
 (if agent-repl--load-errors
     (progn
