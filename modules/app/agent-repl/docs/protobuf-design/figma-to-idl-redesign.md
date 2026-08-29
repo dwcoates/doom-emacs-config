@@ -8107,3 +8107,19 @@ with a composed activity line; the interrupting prompt is placed at the
 queue's semantic head so it, not the pre-interrupt head, is the next
 delivery. New arms: FooterSubStatusWaitingInterrupting (6) and
 FooterStatusActivityInterrupting (10) on the waiting activity oneof.
+
+## 2026-08-29 — the creation-facts increment (triage ruling; landed 5c2dee711)
+
+`endpoint_create_workspace.proto` reshaped: a `form` oneof (`standard` |
+`one_shot`) confines form-specific fields per the adjacent-exclusivity
+test — a one-shot never carries name/base_ref/merge_actions/fork, so the
+arm is the kind. Shared facts beside the form: `parent` (UNSET = top-level,
+merge target the repo mainline; PRESENT = child, merge target the parent's
+worktree/branch — recorded into the merge layout facts; `fork` lives
+INSIDE parent so a parentless fork is unrepresentable), `model`,
+`WorkspacePriority` (new shared file, oneof of four empty level arms —
+also the future SetWorkspacePriority vocabulary), and
+`CreateWorkspaceUngatedConsent` (presence IS consent; an ungated-mode
+creation without it is refused). `CreateWorkspaceOneShot` = required
+prompt + required `finish` oneof (`self_merge` | `open_pr {self_certified,
+add_to_merge_queue}`); the daemon owns the one-shot's whole sequence.
