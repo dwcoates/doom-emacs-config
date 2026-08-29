@@ -17,6 +17,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -1158,14 +1159,39 @@ func sidecarCursors(ctx context.Context, t *testing.T, cli storev1connect.ShimSt
 	return success.GetCursors()
 }
 
+// watch is one open tail plus the cancellation that ends it.
+//
+// A STANDING TAIL IS ENDED BY CANCELLING IT, NEVER BY Close ALONE. A Connect
+// client's Close DRAINS the response body, and this stream never ends on its
+// own — so a bare Close would block until the caller's own deadline, which is
+// exactly what a real consumer must avoid too. Every watch therefore gets its
+// own child context, and Close cancels it first.
+type watch struct {
+	*connect.ServerStreamForClient[storev1.WatchAgentSessionResponse]
+	cancel context.CancelFunc
+}
+
+// Close ends the tail. The cancellation the harness itself issued is not a
+// failure to report; anything else is.
+func (w *watch) Close() error {
+	w.cancel()
+	err := w.ServerStreamForClient.Close()
+	if err == nil || errors.Is(err, context.Canceled) || connect.CodeOf(err) == connect.CodeCanceled {
+		return nil
+	}
+	return err
+}
+
 // watchStream opens the tail for a token. The caller owns Close.
-func watchStream(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, token *storev1.AgentSessionToken) *connect.ServerStreamForClient[storev1.WatchAgentSessionResponse] {
+func watchStream(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, token *storev1.AgentSessionToken) *watch {
 	t.Helper()
-	stream, err := cli.WatchAgentSession(ctx, connect.NewRequest(&storev1.WatchAgentSessionRequest{Watch: token}))
+	streamCtx, cancel := context.WithCancel(ctx)
+	stream, err := cli.WatchAgentSession(streamCtx, connect.NewRequest(&storev1.WatchAgentSessionRequest{Watch: token}))
 	if err != nil {
+		cancel()
 		t.Fatalf("WatchAgentSession transport error: %v", err)
 	}
-	return stream
+	return &watch{ServerStreamForClient: stream, cancel: cancel}
 }
 
 // receivedLine is one frame a watcher saw, reduced to what tests assert on.
@@ -1177,7 +1203,7 @@ type receivedLine struct {
 // receiveLines reads exactly n frames from a stream, failing on a short or
 // erroring stream. The stream's own delivery is the synchronization primitive:
 // there is no polling and no sleeping anywhere in this path.
-func receiveLines(t *testing.T, stream *connect.ServerStreamForClient[storev1.WatchAgentSessionResponse], n int) []receivedLine {
+func receiveLines(t *testing.T, stream *watch, n int) []receivedLine {
 	t.Helper()
 
 	type result struct {
@@ -1215,7 +1241,7 @@ func receiveLines(t *testing.T, stream *connect.ServerStreamForClient[storev1.Wa
 
 // awaitStreamEnd waits for a stream to end and returns why. A stream that
 // keeps delivering forever fails the test rather than hanging the suite.
-func awaitStreamEnd(t *testing.T, stream *connect.ServerStreamForClient[storev1.WatchAgentSessionResponse]) error {
+func awaitStreamEnd(t *testing.T, stream *watch) error {
 	t.Helper()
 
 	done := make(chan error, 1)
@@ -1401,7 +1427,7 @@ func contains(values []string, want string) bool {
 // token already consumed, a token minted before a restart) closes at the
 // transport: the stream's first Receive fails with Connect CodeNotFound, and
 // the shim's recovery is to re-open.
-func assertWatchRefused(t *testing.T, stream *connect.ServerStreamForClient[storev1.WatchAgentSessionResponse]) {
+func assertWatchRefused(t *testing.T, stream *watch) {
 	t.Helper()
 
 	type outcome struct {
