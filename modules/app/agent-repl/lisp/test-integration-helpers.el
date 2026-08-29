@@ -360,28 +360,53 @@ consequence of reading a sink that is still being appended to."
           (forward-line 1))))
     (nreverse records)))
 
-(defun agent-repl-itest--operation-prefix (name)
-  "Return the `operation' prefix core.el derives for the log NAME.
+(defun agent-repl-itest--operation-slug (name)
+  "Return the slug core.el derives from the log NAME's format string.
 `agent-repl--log-operation' normalizes the FORMAT STRING into
 `agent-repl.<slug>', so a logical operation name like
-\"elisp.rpc.push-invalid\" becomes a PREFIX of the recorded operation
-\(the format's trailing `key=%S' fragments extend it)."
-  (concat "agent-repl."
-          (replace-regexp-in-string
-           "\\`-+\\|-+\\'" ""
-           (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase name)))))
+\"elisp.rpc.push-invalid\" becomes a PREFIX of the recorded slug (the
+format's trailing `key=%S' fragments extend it)."
+  (replace-regexp-in-string
+   "\\`-+\\|-+\\'" ""
+   (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase name))))
+
+(defun agent-repl-itest--operation-prefix (name)
+  "Return the `operation' prefix core.el derives for the log NAME.
+Kept for callers that want the plain `agent-repl.<slug>' form; the
+matcher below is what tolerates core.el's SEVERITY prefix."
+  (concat "agent-repl." (agent-repl-itest--operation-slug name)))
+
+(defconst agent-repl-itest--operation-severity-slugs '("" "warning-" "error-")
+  "Slug fragments core.el's severity tags contribute to `operation'.
+`agent-repl--warn' and `agent-repl--error' prepend \"WARNING: \" and
+\"ERROR: \" to the FORMAT STRING itself, and `agent-repl--log-operation'
+normalizes that whole string — so the recorded operation for a warned
+`elisp.daemon.stale-addr' is `agent-repl.warning-elisp-daemon-stale-addr...'.
+The LEVEL field already carries the severity, so a reader asking for a
+logical operation name must accept it with or without the tag rather than
+making every caller spell the tag it cannot see from the call site.")
+
+(defun agent-repl-itest--operation-matches-p (operation name)
+  "Return non-nil when the recorded OPERATION names the logical NAME.
+Matches `agent-repl.<slug>...' with or without a severity tag between the
+namespace and the slug (see
+`agent-repl-itest--operation-severity-slugs')."
+  (let ((slug (agent-repl-itest--operation-slug name)))
+    (seq-some (lambda (severity)
+                (string-prefix-p (concat "agent-repl." severity slug) operation))
+              agent-repl-itest--operation-severity-slugs)))
 
 (defun agent-repl-itest--log-entries (daemon operation &optional level)
   "Return DAEMON's log records for OPERATION, optionally at LEVEL.
 OPERATION is the logical `elisp.<module>.<operation>' name the production
 code logs; LEVEL is core.el's level string (\"debug\", \"info\", \"warn\"
 or \"error\")."
-  (let ((prefix (agent-repl-itest--operation-prefix operation)))
-    (seq-filter
-     (lambda (record)
-       (and (string-prefix-p prefix (or (alist-get 'operation record) ""))
-            (or (null level) (equal (alist-get 'level record) level))))
-     (agent-repl-itest--log-records daemon))))
+  (seq-filter
+   (lambda (record)
+     (and (agent-repl-itest--operation-matches-p
+           (or (alist-get 'operation record) "") operation)
+          (or (null level) (equal (alist-get 'level record) level))))
+   (agent-repl-itest--log-records daemon)))
 
 (defun agent-repl-itest--logged-p (daemon operation &optional level)
   "Return non-nil when DAEMON's run logged OPERATION (at LEVEL)."
