@@ -44,6 +44,7 @@ import {
   type FeedToolCallLinesOutput,
   type FeedToolCallLinksOutput,
   type FeedToolCallName,
+  type FeedToolCallNoOutput,
   type FeedToolCallOmitted,
   type FeedToolCallReturned,
   type FeedToolCallRunning,
@@ -444,6 +445,8 @@ function drawForm(
       return drawFeedToolCallLinesOutput(form.value, `${path}.lines`);
     case "links":
       return drawFeedToolCallLinksOutput(form.value, rc, `${path}.links`);
+    case "none":
+      return drawFeedToolCallNoOutput(form.value, `${path}.none`);
     default: {
       // The narrowed value is `never` here, which is the compile-time half of
       // the guarantee; the run-time half still needs the arm's NAME, and an arm
@@ -452,6 +455,27 @@ function drawForm(
       return unreachableArm(`${path}.form`, other.case);
     }
   }
+}
+
+/**
+ * The no-output form: NOTHING, deliberately.
+ *
+ * The arm says the call returned nothing to draw — a write, an empty search —
+ * so the output section is OMITTED WHOLE: no dashed divider, no empty box, no
+ * "(no output)" line. An empty text arm would have been the sentinel this arm
+ * exists to replace, and drawing an empty block would put the sentinel back in
+ * the DOM instead of on the wire. The badge and the runtime still stand; the
+ * diagnostics, if the edit raised any, are their own section and unaffected.
+ */
+export function drawFeedToolCallNoOutput(
+  _u: FeedToolCallNoOutput,
+  path: string,
+): readonly HTMLElement[] {
+  log("debug", "the returned call has no output to draw", {
+    operation: "feed.cards.tool-call.no-output",
+    context: { path },
+  });
+  return [];
 }
 
 /** The ok badge. */
@@ -763,5 +787,12 @@ export function drawFeedToolCallDiagnostics(
  */
 export const TOOL_CALL_OUTCOME_ARMS: readonly string[] = ["running", "returned", "denied"];
 export const TOOL_CALL_VERDICT_ARMS: readonly string[] = ["succeeded", "failed"];
-export const TOOL_CALL_FORM_ARMS: readonly string[] = ["text", "code", "diff", "lines", "links"];
+export const TOOL_CALL_FORM_ARMS: readonly string[] = [
+  "text",
+  "code",
+  "diff",
+  "lines",
+  "links",
+  "none",
+];
 export const TOOL_CALL_INPUT_FORM_ARMS: readonly string[] = ["command", "path", "query"];
