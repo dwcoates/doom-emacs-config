@@ -44,9 +44,26 @@ message ReadAgentPageSuccess {
   }
 }
 
-// The page could not be served. `kind` arms are DERIVED at the wave from the
-// store's real refusal sites (unknown book, stale pointer).
+// The page could not be served. THE ARM IS WHY.
 message ReadAgentPageFailure {
   // The store's account, for a human and for logs; never switched on.
   string detail = 1;
+  oneof kind {
+    // Empty book, zero page_size, or an `after` that is unset, empty or not
+    // store-minted.
+    ReadAgentPageInvalidRequest invalid_request = 2;
+    // A well-formed `after` naming no line of this book.
+    ReadAgentPageStalePointer stale_pointer = 3;
+    ReadAgentPageStorageFailure storage_failure = 4;
+  }
 }
+// The request was malformed or violated the validation invariant.
+message ReadAgentPageInvalidRequest {
+  // Which field (with the offending entry's index where one applies), as
+  // the store names it — for the producer's logs, never switched on.
+  string field = 1;
+}
+// The database failed; `detail` carries the driver's text.
+message ReadAgentPageStorageFailure {}
+// The pointer names no line of the addressed book.
+message ReadAgentPageStalePointer {}

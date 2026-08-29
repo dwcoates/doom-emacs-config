@@ -84,6 +84,17 @@ OWN ACCORD:
   {storage_failure}; GetSidecarCursorsFailure.kind {invalid_request{field},
   storage_failure}; GetWorkflowFailure.kind {not_implemented,
   invalid_request{field}, unknown_run}.
+- FeedToolCallReturned.form gains `none` (FeedToolCallNoOutput) — a returned
+  call with nothing to draw had no representation (an empty text would be a
+  sentinel).
+- FeedToolCallInput.form oneof {command | path | query} (UNSET = plain) — the
+  existing look styles a shell line, a muted path and a query differently and
+  the client holds no per-tool knowledge, so the daemon states the form.
+- FeedTurnEndedErrored.headline (FeedTurnErrorHeadline, required) — the
+  client owned sixteen per-arm sentences, a server-driven-UI violation.
+- Comment-only: FeedPageErrorHeadline.tone cites render-colors.json's colors.
+- FeedColdGateResolvedCompact.scope — the resolved trace named the summarizer
+  but not the chosen scope, which the answer verb carries.
 - PENDING before landing: the daemon's derived error arms (every empty
   `<Rpc>Error` in agentrepl.v1, `transferring_away`, `not_yet_adopted`, the
   DaemonFault/SessionFault/HostFault kind oneofs).
