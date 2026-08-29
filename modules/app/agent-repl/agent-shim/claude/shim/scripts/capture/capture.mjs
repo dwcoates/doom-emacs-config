@@ -59,6 +59,17 @@ import {
   anonymizePlainText,
 } from "./anonymize.mjs";
 import { apiKeySource, classifyCapture, verdictLine } from "./outcome.mjs";
+import {
+  AUTH_CONFIG_ROOT,
+  AuthRefusedError,
+  prepareAccountRoot,
+  preflightAuth,
+  reclaimScratchProject,
+  releaseScratchProject,
+  resolveAuthMode,
+  sdkEnvFor,
+  wipeSeededCredentials,
+} from "./auth.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -144,6 +155,9 @@ export function parseArgv(argv) {
     outDir: path.join(HERE, "captures"),
     promptsPath: path.join(HERE, "prompts.json"),
     includeManual: false,
+    configRoot: null,
+    seedCredentials: false,
+    credentialsFrom: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -151,6 +165,15 @@ export function parseArgv(argv) {
     else if (arg === "--check") opts.check = true;
     else if (arg === CAPTURE_FLAG) opts.authorized = true;
     else if (arg === "--include-manual") opts.includeManual = true;
+    else if (arg === "--seed-credentials") opts.seedCredentials = true;
+    else if (arg === "--config-root") opts.configRoot = path.resolve(String(argv[++i]));
+    else if (arg.startsWith("--config-root=")) {
+      opts.configRoot = path.resolve(arg.slice("--config-root=".length));
+    } else if (arg === "--credentials-from") {
+      opts.credentialsFrom = path.resolve(String(argv[++i]));
+    } else if (arg.startsWith("--credentials-from=")) {
+      opts.credentialsFrom = path.resolve(arg.slice("--credentials-from=".length));
+    }
     else if (arg === "--only") opts.only.push(...String(argv[++i]).split(","));
     else if (arg.startsWith("--only=")) {
       opts.only.push(...arg.slice("--only=".length).split(","));
@@ -453,7 +476,7 @@ export function copyTreeAnonymized(sourceDir, destDir, report) {
  * gate relies on; `includePartialMessages` is the whole streamed-prose plane;
  * and without `forwardSubagentText` a subagent's prose never arrives at all.
  */
-async function runScenario(sdk, scenario, opts) {
+async function runScenario(sdk, scenario, opts, auth) {
   // STAGED, NEVER WRITTEN IN PLACE: a capture becomes a golden only after it
   // is classified, so a poisoned run can never occupy captures/<name>/ even
   // for an instant (a run interrupted mid-scenario leaves _inflight/, which is
@@ -468,12 +491,16 @@ async function runScenario(sdk, scenario, opts) {
   const entries = [];
   const scratch = mkdtempSync(path.join(tmpdir(), `agent-repl-capture-${scenario.name}-`));
   const cwd = path.join(scratch, "cwd");
-  const configDir = path.join(scratch, "config");
+  const scratchConfigDir = path.join(scratch, "config");
   const spoolRoot = path.join(scratch, "spool");
   mkdirSync(cwd, { recursive: true });
-  mkdirSync(configDir, { recursive: true });
   mkdirSync(spoolRoot, { recursive: true });
   materializeCwd(cwd, scenario.cwd_setup);
+
+  // THE CWD IS ALWAYS SCRATCH; only the ACCOUNT ROOT depends on the mechanism.
+  // Under --config-root this is the operator's real root, which is why the
+  // scenario's project directory is reclaimed and deleted below.
+  const configDir = prepareAccountRoot(auth, scratchConfigDir);
 
   const t0 = Date.now();
   const record = (dir, msg) => {
@@ -529,6 +556,7 @@ async function runScenario(sdk, scenario, opts) {
       ...process.env,
       CLAUDE_CONFIG_DIR: configDir,
       AGENT_REPL_OWNED: "1",
+      ...sdkEnvFor(auth, process.env),
     },
     ...(scenario.options ?? {}),
   };
@@ -605,10 +633,29 @@ async function runScenario(sdk, scenario, opts) {
   // sidechains and their .meta.json, and the spool the sidecar tails. A stream
   // without them cannot exercise the sidecar or the compaction experiment.
   const filesDir = path.join(outDir, "files");
-  copyTreeAnonymized(path.join(configDir, "projects"), path.join(filesDir, "projects"), report);
+  // Under --config-root the operator's root holds every project they have ever
+  // opened, so only THIS scenario's own slug is harvested — never the tree.
+  const scratchProject = reclaimScratchProject(auth, configDir, cwdSlug(cwd));
+  if (auth.mode === AUTH_CONFIG_ROOT) {
+    if (scratchProject !== null) {
+      copyTreeAnonymized(
+        scratchProject,
+        path.join(filesDir, "projects", cwdSlug(cwd)),
+        report,
+      );
+    }
+  } else {
+    copyTreeAnonymized(path.join(configDir, "projects"), path.join(filesDir, "projects"), report);
+  }
   copyTreeAnonymized(spoolRoot, path.join(filesDir, "spool"), report);
   const defaultSpool = path.join("/tmp", `claude-${process.getuid?.() ?? 0}`, cwdSlug(cwd));
   copyTreeAnonymized(defaultSpool, path.join(filesDir, "spool-default"), report);
+
+  // LEAVE THE ACCOUNT AS FOUND. The harvest above already has the transcripts;
+  // what the vendor wrote into the operator's real root is now removed.
+  releaseScratchProject(scratchProject);
+  // A seeded credential must never reach the capture directory.
+  wipeSeededCredentials(auth, scratchConfigDir);
 
   // THE GATE. A capture is a golden the converter suites are graded against
   // and the mock is rebuilt from, so it must earn that standing rather than
@@ -628,6 +675,7 @@ async function runScenario(sdk, scenario, opts) {
         expect: scenario.expect,
         cwd_slug: cwdSlug(cwd),
         api_key_source: apiKeySource(entries),
+        auth_mode: auth.mode,
         captured_at: new Date().toISOString(),
         controls: report.controls,
         unparsed_lines: report.unparsed,
@@ -689,6 +737,14 @@ async function main(argv, env) {
 
   assertCaptureAuthorized(env, argv);
 
+  // BEFORE THE FIRST SCENARIO, ALWAYS. Discovering a credential problem after
+  // a long run is how the first attempt was wasted.
+  const auth = resolveAuthMode(opts, env);
+  const preflight = preflightAuth(auth);
+  process.stderr.write(
+    `capture.mjs: authenticating via ${preflight.mode} (${preflight.source})\n`,
+  );
+
   const sdk = await import("@anthropic-ai/claude-agent-sdk");
   mkdirSync(opts.outDir, { recursive: true });
   const skipped = [];
@@ -707,7 +763,7 @@ async function main(argv, env) {
       continue;
     }
     process.stderr.write(`capture.mjs: capturing ${scenario.name}\n`);
-    const { outcome } = await runScenario(sdk, scenario, opts);
+    const { outcome } = await runScenario(sdk, scenario, opts, auth);
     if (!outcome.ok) poisoned.push({ scenario: scenario.name, reasons: outcome.reasons });
   }
   writeFileSync(
@@ -739,7 +795,8 @@ if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === path.reso
     (code) => process.exit(code),
     (err) => {
       process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
-      process.exit(err instanceof CaptureRefusedError ? EXIT_REFUSED : EXIT_FAILED);
+      const refused = err instanceof CaptureRefusedError || err instanceof AuthRefusedError;
+      process.exit(refused ? EXIT_REFUSED : EXIT_FAILED);
     },
   );
 }
