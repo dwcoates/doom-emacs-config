@@ -73,10 +73,8 @@
 (declare-function agent-repl-rpc-daemon-health "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-session-health "agent-repl-rpc" (conn request &rest keys))
 
-;; Defined by W2-B (roster.el) and by session.el's model-preferences
-;; section.  Declared, never defined here.
+;; Defined by roster.el.  Declared, never defined here.
 (defvar agent-repl-roster-view)
-(defvar agent-repl-oneshot-model-candidates)
 
 ;;;; ---- Resolution -------------------------------------------------------
 
@@ -578,6 +576,16 @@ this is its own command rather than a flag on the plain create."
 ;; one-shot commands did by hand is now one CreateWorkspace request whose
 ;; form arm says one_shot.
 
+(defcustom agent-repl-oneshot-model-candidates '("opus" "sonnet" "haiku")
+  "The models offered when creating a ONE-SHOT workspace, in order.
+One-shots ride the wire -- Emacs supplies prompt, model and parentage
+through the dedicated one-shot creation form and the daemon owns naming,
+the worktree, decoration and the merge/PR postprocessing -- so this list
+is a picker's contents and nothing more.  It lives beside the one-shot
+commands that read it, which are its only consumer."
+  :type '(repeat string)
+  :group 'agent-repl)
+
 (defun agent-repl-verbs--read-model ()
   "Read a model, or nil for the daemon's default.
 Completes against `agent-repl-oneshot-model-candidates' without requiring
@@ -586,9 +594,7 @@ the vendor's, not ours."
   (let ((value (string-trim
                 (completing-read
                  "Model (blank = daemon default): "
-                 (and (boundp 'agent-repl-oneshot-model-candidates)
-                      agent-repl-oneshot-model-candidates)
-                 nil nil))))
+                 agent-repl-oneshot-model-candidates nil nil))))
     (unless (string-empty-p value) value)))
 
 (cl-defun agent-repl-verbs--create-oneshot (finish &key model)
