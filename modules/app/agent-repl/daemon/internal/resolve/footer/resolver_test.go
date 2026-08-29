@@ -446,3 +446,115 @@ func createdShell(work, command string) *conversationv1.AgentDetachedWork {
 		},
 	}
 }
+
+// ---- the R1 dwell ---------------------------------------------------------
+
+func TestTheMomentaryInterruptedStatusIsRetiredByTheDwell(t *testing.T) {
+	// Arrange
+	h := newHarness(t, WithMomentaryDwell(time.Second))
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
+	if got := h.status(t); got != "interrupted" {
+		t.Fatalf("status = %q, want interrupted before the dwell elapses", got)
+	}
+
+	// Act
+	h.clock.Advance(time.Second)
+
+	// Assert
+	if got := h.status(t); got != "idle" {
+		t.Fatalf("status = %q, want the successor once the dwell elapsed", got)
+	}
+}
+
+func TestTheDwellDoesNotFireEarly(t *testing.T) {
+	// Arrange
+	h := newHarness(t, WithMomentaryDwell(time.Second))
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
+
+	// Act
+	h.clock.Advance(999 * time.Millisecond)
+
+	// Assert
+	if got := h.status(t); got != "interrupted" {
+		t.Fatalf("status = %q, want interrupted until the dwell fully elapses", got)
+	}
+}
+
+func TestAHostShutdownIsDrawnAsItsOwnInterruptedStep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByHostDown(), nil)
+
+	// Assert
+	interrupted := h.view(t).GetStrip().GetStatus().GetInterrupted()
+	if interrupted.GetHostShutdown() == nil {
+		t.Fatalf("substatus = %+v, want host_shutdown", interrupted.GetSubstatus())
+	}
+}
+
+func TestAnUnstatedInterruptCauseReadsAsTheUserStop(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Interrupted{
+			Interrupted: &conversationv1.AgentInterrupted{},
+		},
+	}, nil)
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetInterrupted().GetByUser() == nil {
+		t.Fatalf("want the ordinary user stop when the producer stated no cause")
+	}
+}
+
+func TestANewTurnSupersedesAStandingDwell(t *testing.T) {
+	// Arrange
+	h := newHarness(t, WithMomentaryDwell(time.Second))
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
+
+	// Act
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.clock.Advance(time.Second)
+
+	// Assert
+	if got := h.status(t); got != "thinking" {
+		t.Fatalf("status = %q, want the new turn to survive the cancelled dwell", got)
+	}
+}
+
+func TestTheDwellRetiresTheMomentaryLoadingStatus(t *testing.T) {
+	// Arrange
+	h := newHarness(t, WithMomentaryDwell(time.Second))
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+	h.r.OnActivity(testWS, mainAgent, memoryInjection("CLAUDE.md"))
+	if got := h.status(t); got != "loading" {
+		t.Fatalf("status = %q, want loading before the dwell elapses", got)
+	}
+
+	// Act
+	h.clock.Advance(time.Second)
+
+	// Assert
+	if got := h.status(t); got != "idle" {
+		t.Fatalf("status = %q, want the successor once the dwell elapsed", got)
+	}
+}
