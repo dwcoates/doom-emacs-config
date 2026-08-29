@@ -31,14 +31,14 @@ func (v *verbs) Notify(ctx context.Context, ws ids.WorkspaceID, note sessionwatc
 			"a notification must name its kind", false)
 	}
 
-	v.deps.Host.Notify(ws, note.Text, note.Kind, note.ToolName)
+	v.deps.Host.Notify(ws, note.Text, string(note.Kind), note.ToolName)
 
 	if err := v.deps.DB.SetAttention(ctx, ws, true); err != nil {
 		log.Error(opNotify, "could not set the attention marker", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("notify %q: set attention: %w", ws, err)
 	}
 	log.Info(opNotify, "raised a host notification", dlog.Context{
-		"kind": note.Kind, "tool": note.ToolName,
+		"kind": string(note.Kind), "tool": note.ToolName,
 	})
 	v.republishRegistry(ctx, log, opNotify)
 	return nil
