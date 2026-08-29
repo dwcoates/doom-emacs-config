@@ -162,9 +162,11 @@ type AgentFrame_Failure struct {
 
 type AgentFrame_DetachedWork struct {
 	// Work left this agent's stream for a life of its own. The consumer opens
-	// the connection its handle names; the store lands it in the lifecycle
-	// record for its kind, never as a page line — the spawning CALL is
-	// already one.
+	// the connection its handle names. The announcement IS a page line of the
+	// announcing agent's book (upsert key `detached:<work id>`): a replayed
+	// page must carry it, and the store's liveness of non-agent detached runs
+	// is read from it. The run's own rows land in the lifecycle table for its
+	// kind, which never holds the announcement.
 	DetachedWork *AgentDetachedWork `protobuf:"bytes,5,opt,name=detached_work,json=detachedWork,proto3,oneof"`
 }
 
