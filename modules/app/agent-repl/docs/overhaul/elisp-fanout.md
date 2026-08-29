@@ -641,6 +641,17 @@ names; each brief owns every file listed for its constituent rows.
   per decode edge (present, missing header = proto3 default "", unknown
   sibling arm still refused) and one per policy branch.
 
+- R-CLICK (integration suite finding): the desktop notification's click
+  has no activation channel — `agent-repl--notify` takes `(WS TITLE
+  MESSAGE)` and host.el passes no callback, so "click raises the frame and
+  selects the workspace's tab" is unimplemented. notifications.el gains a
+  per-notification activation (the existing emacsclient click round-trip
+  carrying the workspace name → `agent-repl--notification-activate` raises
+  the frame and `agent-repl--ws-switch`es), host.el's unfocused branch uses
+  it for every notification kind. Tests: notifications (activation selects
+  the tab; unknown workspace → WARNING, no switch), host (unfocused branch
+  passes the workspace), the integration host suite's click case.
+
 ## 16. Escalations sent to the project lead (defaults in force meanwhile)
 
 - E1 RESOLVED: SubmitPromptRequest.origin landed, REQUIRED.
