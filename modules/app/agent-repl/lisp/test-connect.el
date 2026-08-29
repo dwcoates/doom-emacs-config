@@ -753,6 +753,77 @@ frames begin."
     ;; Assert
     (should (= (length agent-repl-test-connect--closes) 1))))
 
+(ert-deftest agent-repl-test-connect-stream-end-frame-closes-before-the-exit ()
+  "ON-CLOSE runs from the END FRAME, not from the process exit.
+The producer has already said how the stream ended; making a consumer
+wait on a curl exit for that fact is what left a real stream hanging."
+  ;; Arrange / Act
+  (agent-repl-test-connect--with-stream
+    (agent-repl-test-connect--feed record (agent-repl-connect-envelope-encode #x02 "{}"))
+    ;; Assert — no `--exit' has run yet
+    (should (equal agent-repl-test-connect--closes '((:ended))))))
+
+(ert-deftest agent-repl-test-connect-stream-end-frame-kills-the-process ()
+  "The end frame is followed by killing curl: nothing is left running."
+  ;; Arrange / Act
+  (agent-repl-test-connect--with-stream
+    (agent-repl-test-connect--feed record (agent-repl-connect-envelope-encode #x02 "{}"))
+    ;; Assert
+    (should-not (process-live-p (plist-get record :process)))))
+
+(ert-deftest agent-repl-test-connect-stream-error-end-frame-closes-before-the-exit ()
+  "An end frame CARRYING an error closes on the frame too, not on the exit."
+  ;; Arrange / Act
+  (agent-repl-test-connect--with-stream
+    (agent-repl-test-connect--feed
+     record (agent-repl-connect-envelope-encode
+             #x02 "{\"error\":{\"code\":\"unavailable\",\"message\":\"going away\"}}"))
+    ;; Assert
+    (should (eq (car (car agent-repl-test-connect--closes)) :error))))
+
+(ert-deftest agent-repl-test-connect-stream-frame-after-the-end-is-not-delivered ()
+  "The end frame is the end: a later message frame is never a push."
+  ;; Arrange
+  (agent-repl-test-connect--with-stream
+    ;; Act
+    (agent-repl-test-connect--feed
+     record (concat (agent-repl-connect-envelope-encode #x02 "{}")
+                    (agent-repl-connect-envelope-encode 0 "{\"n\":1}")))
+    ;; Assert
+    (should (null agent-repl-test-connect--pushes))))
+
+(ert-deftest agent-repl-test-connect-stream-frame-after-the-end-is-logged ()
+  "A producer contradicting its own end frame is named at WARNING."
+  ;; Arrange
+  (agent-repl-test-connect--with-stream
+    ;; Act
+    (agent-repl-test-connect--feed
+     record (concat (agent-repl-connect-envelope-encode #x02 "{}")
+                    (agent-repl-connect-envelope-encode 0 "{\"n\":1}")))
+    ;; Assert
+    (should (agent-repl-test-connect--logs-matching
+             'warn "elisp\\.connect\\.frame-after-end"))))
+
+(ert-deftest agent-repl-test-connect-stream-end-frame-then-exit-closes-once ()
+  "The sentinel finds the stream already closed and reports nothing again."
+  ;; Arrange
+  (agent-repl-test-connect--with-stream
+    ;; Act
+    (agent-repl-test-connect--feed record (agent-repl-connect-envelope-encode #x02 "{}"))
+    (agent-repl-test-connect--exit record)
+    ;; Assert
+    (should (= (length agent-repl-test-connect--closes) 1))))
+
+(ert-deftest agent-repl-test-connect-stream-end-frame-still-frees-the-temporaries ()
+  "Closing on the frame must not leak the body file or the stderr buffer."
+  ;; Arrange
+  (agent-repl-test-connect--with-stream
+    ;; Act
+    (agent-repl-test-connect--feed record (agent-repl-connect-envelope-encode #x02 "{}"))
+    (agent-repl-test-connect--exit record)
+    ;; Assert
+    (should-not (buffer-live-p (plist-get record :stderr)))))
+
 (ert-deftest agent-repl-test-connect-stream-contains-an-on-push-exception ()
   "An ON-PUSH that signals is contained: the stream stays open for the next push."
   ;; Arrange

@@ -38,6 +38,16 @@
 ;; header block ever arrives, and no `-L' is passed so no redirect can add
 ;; another.
 ;;
+;; CLOSING, EXACTLY ONCE, IN ONE OF THREE WAYS.  A terminal envelope runs
+;; ON-CLOSE from the FILTER, the instant the producer said how the stream
+;; ended, and kills curl afterwards — a consumer is never made to wait on
+;; a process exit for a fact it has already been sent.  A client cancel
+;; kills curl and the sentinel reports `(:cancelled)'.  A death with no
+;; terminal envelope is reported by the sentinel as an error.  CLOSED-P
+;; makes the three mutually exclusive and each of them singular, and a
+;; frame arriving after the end frame is logged at WARNING, never
+;; delivered.
+;;
 ;; STANDING-STREAM ACCEPTANCE.  The daemon flushes its response headers on
 ;; accept, so the HTTP 200 header block IS the acceptance of a
 ;; subscription — before any frame, and long before a first push that a
@@ -680,13 +690,27 @@ nothing.  Returns the stream object."
                 (t
                  (agent-repl-connect--dispatch-open stream)
                  (dolist (frame (agent-repl-connect-envelope-feed parser bytes))
-                   (if (agent-repl-connect-envelope-end-frame-p (car frame))
-                       (unless (agent-repl-connect-stream-close-reason stream)
-                         (setf (agent-repl-connect-stream-close-reason stream)
-                               (agent-repl-connect--end-frame-reason method (cdr frame)))
-                         (let ((proc (agent-repl-connect-stream-process stream)))
-                           (when (process-live-p proc) (delete-process proc))))
-                     (agent-repl-connect--dispatch-push stream (cdr frame))))))))
+                   (cond
+                    ;; THE END FRAME IS THE END.  Anything after it is the
+                    ;; producer contradicting itself, never a push to deliver.
+                    ((agent-repl-connect-stream-closed-p stream)
+                     (agent-repl--warn nil "elisp.connect.frame-after-end method=%S flags=%S"
+                                       method (car frame)))
+                    ((agent-repl-connect-envelope-end-frame-p (car frame))
+                     ;; ON-CLOSE runs HERE, from the frame that ended the
+                     ;; stream, and not from the sentinel: the producer has
+                     ;; already said what happened, so a consumer must not
+                     ;; wait on a process exit to be told.  The process is
+                     ;; killed straight after; the sentinel then finds the
+                     ;; stream closed and only frees the temporaries.
+                     (let ((reason (agent-repl-connect--end-frame-reason
+                                    method (cdr frame))))
+                       (setf (agent-repl-connect-stream-close-reason stream) reason)
+                       (agent-repl-connect--close-stream stream reason)
+                       (let ((proc (agent-repl-connect-stream-process stream)))
+                         (when (process-live-p proc) (delete-process proc)))))
+                    (t
+                     (agent-repl-connect--dispatch-push stream (cdr frame)))))))))
            (lambda (proc _event)
              (unless (process-live-p proc)
                (let ((status (agent-repl-connect--reader-status reader))
