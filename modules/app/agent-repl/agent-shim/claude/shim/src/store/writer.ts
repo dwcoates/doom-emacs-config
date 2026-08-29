@@ -1,0 +1,478 @@
+/**
+ * store/writer.ts — the WRITE half of the record plane, and the one place a
+ * `PersistEntry` becomes a `store.v1` row.
+ *
+ * # The retry buffer, and why there is no spill
+ *
+ * A store that blips must not cost the conversation a frame, so a failed batch
+ * holds in a BOUNDED in-memory buffer and replays. A store that is GONE must not
+ * be papered over, so the buffer is bounded and exhaustion is LOUD: every lost
+ * upsert key is named in the log, a degraded window records how many
+ * observations were lost, and a `store_unreachable` fault stands until a write
+ * succeeds again.
+ *
+ * There is deliberately NO durable producer-side spill. A persistent inability
+ * to reach the store is a lifetime-sequencing defect to fix, not a condition to
+ * survive with fallback persistence — and a spill would make the shim a second
+ * durable copy of the record, which is exactly the statelessness the
+ * architecture rests on not having.
+ *
+ * # Why replay is safe
+ *
+ * `write_id` is `sha256(producer | source coordinates | discriminator)` — a
+ * function of the frame's PROVENANCE, not of when it was sent. A replayed batch
+ * mints the same ids and the store absorbs it as a no-op. That is the whole
+ * reason the buffer can resend freely.
+ *
+ * # Routing (the CROSS-PLANE rule agreed with the store lead)
+ *
+ *   - a prompt, and an `update`/`success`/`failure` frame → a PAGE LINE of the
+ *     frame's own book;
+ *   - a `detached_work` announcement → also a page line, keyed by the work id.
+ *     The proto comment says the announcement lands in "the lifecycle record for
+ *     its kind" — but store.v1's lifecycle arms carry an `AgentBash` and an
+ *     `AgentWorkflow`, neither of which can hold an `AgentDetachedWork`, and
+ *     `GetLiveWork.live_detached` has no other source. Recorded as a deviation
+ *     in the record-plane report; the shared fake store already reads liveness
+ *     from exactly this row.
+ *   - a detached shell run's `AgentBash` frames → the `bash` lifecycle arm;
+ *   - a session fact → the `session_update` entry arm;
+ *   - anything belonging to a KEEP-ALIVE turn, and all residue → `unserved_item`.
+ */
+import { create } from "@bufbuild/protobuf";
+import { bindLog } from "../log.js";
+import { conversationv1, storev1 } from "../proto.js";
+import type { StoreClient } from "./client.js";
+import {
+  bashUpsertKey,
+  writeId,
+  type SourceCoordinates as KeySourceCoordinates,
+} from "./keys.js";
+import {
+  DEFAULT_RETRY_POLICY,
+  PersistenceError,
+  type AgentPageSession,
+  type PersistEntry,
+  type Persistence,
+  type PersistenceOptions,
+  type PersistenceRetryPolicy,
+} from "./persistence.js";
+import { createReader } from "./reader.js";
+import { createReconciler } from "./reconcile.js";
+
+const LOGGER = bindLog({ component: "shim-store-writer", operation: "shim.store.writer" });
+
+/** The component name every fault and degraded window from this half carries. */
+export const WRITER_COMPONENT = "store-writer";
+
+// ---------------------------------------------------------------------------
+// PersistEntry → StoreEntry: one function per arm (the proto→code mapping)
+// ---------------------------------------------------------------------------
+
+/** The write's deterministic identity, from its provenance alone. */
+export function entryWriteId(producer: string, entry: PersistEntry): string {
+  const coordinates: KeySourceCoordinates = {
+    vendorRecordUuid: entry.source.vendorUuid,
+    ...(entry.source.blockIndex === undefined ? {} : { blockIndex: entry.source.blockIndex }),
+  };
+  return writeId(producer, coordinates, entry.source.discriminator);
+}
+
+/** A prompt or a frame, wrapped as the store's servable item. */
+function agentItem(entry: PersistEntry): storev1.StoreAgentItem | undefined {
+  switch (entry.item.kind) {
+    case "prompt":
+      return create(storev1.StoreAgentItemSchema, {
+        item: { case: "agentPrompt", value: entry.item.prompt },
+      });
+    case "frame":
+      return create(storev1.StoreAgentItemSchema, {
+        item: { case: "agentFrame", value: entry.item.frame },
+      });
+    default:
+      return undefined;
+  }
+}
+
+/** The page line one servable item renders as, in its own book. */
+function pageLine(entry: PersistEntry, item: storev1.StoreAgentItem): storev1.StorePageLine {
+  return create(storev1.StorePageLineSchema, {
+    pageAgentId: entry.agentId,
+    agentItem: item,
+  });
+}
+
+/** The `agent_info` arm one entry lands in. */
+function agentInfo(entry: PersistEntry): storev1.StoreAgentUpdate["agentInfo"] {
+  if (entry.item.kind === "residue") {
+    return { case: "unservedItem", value: entry.item.residue };
+  }
+  if (entry.item.kind === "bash_run") {
+    return {
+      case: "bash",
+      value: create(storev1.StoreAgentBashSchema, {
+        run: entry.item.run,
+        frame: entry.item.frame,
+      }),
+    };
+  }
+  const item = agentItem(entry);
+  if (item === undefined) {
+    throw new Error(`shim store writer: entry kind ${entry.item.kind} has no servable item`);
+  }
+  if (entry.keepalive) {
+    // A KEEP-ALIVE IS RECORDED AND NEVER SERVED. It made a real API call and
+    // cost real tokens, so dropping it would lose accounting; it has no book,
+    // so serving it would put a turn nobody asked for in the feed.
+    return {
+      case: "unservedItem",
+      value: create(storev1.StoreUnservedItemSchema, { unservedItem: { case: "keepalive", value: item } }),
+    };
+  }
+  return { case: "serveableFrame", value: pageLine(entry, item) };
+}
+
+/** One `PersistEntry` as the store's own envelope. */
+export function toStoreEntry(producer: string, entry: PersistEntry): storev1.StoreEntry {
+  if (entry.upsertKey === "") {
+    throw new Error("shim store writer: an entry with an empty upsert key would collide with every other");
+  }
+  // BUILT LAZILY, because a session fact has no agent update at all and
+  // `agentInfo` refuses an entry with no servable item — eagerly building one
+  // would turn every session row into a failed batch.
+  const arm: storev1.StoreEntry["entry"] =
+    entry.item.kind === "session_update"
+      ? { case: "sessionUpdate", value: entry.item.update }
+      : {
+          case: "agentUpdate",
+          value: create(storev1.StoreAgentUpdateSchema, {
+            // THE BOOK IS THE TOP LEVEL here: every book this shim writes is a
+            // non-sync agent's (the main agent, or a detached agent with its own
+            // stream), which is exactly what `top_level` names.
+            topLevel: entry.item.kind === "residue" ? undefined : entry.agentId,
+            agentInfo: agentInfo(entry),
+          }),
+        };
+  return create(storev1.StoreEntrySchema, {
+    plane: create(storev1.PlaneSchema, {
+      plane: { case: "stream", value: create(storev1.PlaneStreamSchema, {}) },
+    }),
+    writeId: entryWriteId(producer, entry),
+    upsertKey: entry.upsertKey,
+    entry: arm,
+  });
+}
+
+/** The batch request one group of entries becomes. */
+export function toWriteBatchRequest(
+  producer: string,
+  entries: readonly PersistEntry[],
+): storev1.WriteBatchRequest {
+  return create(storev1.WriteBatchRequestSchema, {
+    producer,
+    batch: create(storev1.EntryBatchSchema, {
+      entries: entries.map((entry) => toStoreEntry(producer, entry)),
+      // A STREAM-PLANE PRODUCER HAS NO FILE to be positioned in, so no cursor
+      // rides with its records. Only the sidecar advances one.
+    }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The buffered writer
+// ---------------------------------------------------------------------------
+
+/** One batch waiting to be acked, and how many attempts it has had. */
+interface PendingBatch {
+  readonly entries: readonly PersistEntry[];
+  attempts: number;
+}
+
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    // Never hold the process open for a backoff: a shim standing down flushes
+    // explicitly, and a pending timer must not be the reason it lingers.
+    timer.unref?.();
+  });
+
+/**
+ * Build the whole record plane: this write half, plus the reader and the
+ * reconciler, behind the one {@link Persistence} seam.
+ */
+export function createPersistence(options: PersistenceOptions): Persistence {
+  const retry: PersistenceRetryPolicy = options.retry ?? DEFAULT_RETRY_POLICY;
+  const sleep = options.sleep ?? defaultSleep;
+  const producer = options.producer;
+
+  const faultListeners = new Set<(fault: conversationv1.SessionFault) => void>();
+  const windowListeners = new Set<(window: conversationv1.SessionDegradedWindow) => void>();
+
+  /** The queue of batches enqueued by `write()` and not yet settled. */
+  const queue: PendingBatch[] = [];
+  /** Set while the drain loop is running, so `write()` never starts a second. */
+  let draining: Promise<void> | undefined;
+  /** Open degraded window: when it opened, and what it has lost so far. */
+  let degradedSince: number | undefined;
+  let degradedReason = "";
+  let droppedWhileDegraded = 0n;
+
+  const emitFault = (kind: "store_unreachable" | "converter_defect", detail: string): void => {
+    const fault = create(conversationv1.SessionFaultSchema, {
+      component: WRITER_COMPONENT,
+      detail,
+      kind:
+        kind === "store_unreachable"
+          ? {
+              case: "storeUnreachable",
+              value: create(conversationv1.SessionFaultStoreUnreachableSchema, {}),
+            }
+          : {
+              case: "converterDefect",
+              value: create(conversationv1.SessionFaultConverterDefectSchema, {}),
+            },
+    });
+    for (const listener of faultListeners) listener(fault);
+  };
+
+  const openDegraded = (reason: string): void => {
+    if (degradedSince !== undefined) return;
+    degradedSince = options.nowMs();
+    degradedReason = reason;
+    droppedWhileDegraded = 0n;
+    LOGGER.log(
+      { level: "warn", reason },
+      "the store is unreachable; writes are buffering and a degraded window is open",
+    );
+    emitFault("store_unreachable", reason);
+    for (const listener of windowListeners) {
+      listener(
+        create(conversationv1.SessionDegradedWindowSchema, {
+          component: WRITER_COMPONENT,
+          reason,
+          beganAtMs: BigInt(degradedSince),
+          extent: { case: "open", value: create(conversationv1.SessionDegradedOpenSchema, {}) },
+        }),
+      );
+    }
+  };
+
+  const closeDegraded = (): void => {
+    if (degradedSince === undefined) return;
+    const beganAtMs = BigInt(degradedSince);
+    const endedAtMs = BigInt(options.nowMs());
+    const dropped = droppedWhileDegraded;
+    const reason = degradedReason;
+    degradedSince = undefined;
+    degradedReason = "";
+    droppedWhileDegraded = 0n;
+    LOGGER.log(
+      { dropped_count: dropped.toString(), reason },
+      "the store answered again; the degraded window is closed",
+    );
+    for (const listener of windowListeners) {
+      listener(
+        create(conversationv1.SessionDegradedWindowSchema, {
+          component: WRITER_COMPONENT,
+          reason,
+          beganAtMs,
+          extent: {
+            case: "closed",
+            value: create(conversationv1.SessionDegradedClosedSchema, {
+              endedAtMs,
+              droppedCount: dropped,
+            }),
+          },
+        }),
+      );
+    }
+  };
+
+  /** Send one batch once. Resolves with the store's own refusal detail, or null. */
+  const attempt = async (entries: readonly PersistEntry[]): Promise<string | null> => {
+    let response: storev1.WriteBatchResponse;
+    try {
+      response = await options.client.writeBatch(toWriteBatchRequest(producer, entries));
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+    const result = response.result;
+    if (result.case === "success") return null;
+    if (result.case === "failure") return result.value.detail;
+    // AN UNSET ONEOF IS ILLEGAL, immediately and loudly: a response that says
+    // neither durable nor failed cannot be acted on either way.
+    return "store answered a WriteBatch with no result arm set";
+  };
+
+  /** Announce a batch that will never be written, naming every row it lost. */
+  const dropLoudly = (batch: PendingBatch, detail: string): void => {
+    const lost = batch.entries.map((entry) => entry.upsertKey);
+    droppedWhileDegraded += BigInt(lost.length);
+    LOGGER.log(
+      { level: "error", attempts: batch.attempts, detail, lost_upsert_keys: lost },
+      "DROPPING store writes: the retry schedule is exhausted and there is no spill",
+    );
+  };
+
+  /**
+   * Send one batch, retrying on the schedule.
+   *
+   * Resolves when the batch is durable, or when it has been dropped loudly. It
+   * never rejects: `write()` is fire-and-forget, and a rejection with no caller
+   * is an unhandled rejection.
+   */
+  const deliver = async (batch: PendingBatch): Promise<boolean> => {
+    for (;;) {
+      batch.attempts += 1;
+      const failure = await attempt(batch.entries);
+      if (failure === null) {
+        closeDegraded();
+        LOGGER.logVerbose(
+          { entries: batch.entries.length, attempts: batch.attempts },
+          "batch is durable",
+        );
+        return true;
+      }
+      openDegraded(failure);
+      if (batch.attempts >= retry.maxAttempts) {
+        dropLoudly(batch, failure);
+        return false;
+      }
+      const backoff = retry.backoffMs[Math.min(batch.attempts - 1, retry.backoffMs.length - 1)] ?? 0;
+      LOGGER.log(
+        { level: "warn", attempt: batch.attempts, backoff_ms: backoff, detail: failure },
+        "the store refused a batch; replaying it from the retry buffer",
+      );
+      await sleep(backoff);
+    }
+  };
+
+  /** Drain the queue in order. One loop, so batches land in the order written. */
+  const drain = async (): Promise<void> => {
+    while (queue.length > 0) {
+      const batch = queue[0];
+      if (batch === undefined) break;
+      await deliver(batch);
+      queue.shift();
+    }
+    draining = undefined;
+  };
+
+  const startDraining = (): void => {
+    if (draining !== undefined) return;
+    draining = drain();
+    // Nothing awaits the drain except flush(); a rejection here would be
+    // unhandled, and deliver() is written never to reject.
+    void draining;
+  };
+
+  const reader = createReader({ client: options.client });
+  const reconciler = createReconciler({ client: options.client });
+
+  /**
+   * Tell the reader what a batch says about detached shell runs.
+   *
+   * `WatchBash` is served from the frames THIS shim wrote (store.v1 has no read
+   * verb for the bash lifecycle table — see `reader.ts`), so the two facts a
+   * watcher needs are harvested as they pass through: which run a detached-work
+   * handle names, and every lifecycle frame of that run.
+   */
+  const noteShellRuns = (entries: readonly PersistEntry[]): void => {
+    for (const entry of entries) {
+      if (entry.item.kind === "bash_run") {
+        reader.noteBashFrame(entry.item.run.value, entry.item.frame);
+        continue;
+      }
+      if (entry.item.kind !== "frame") continue;
+      const result = entry.item.frame.result;
+      if (result.case !== "detachedWork") continue;
+      const work = result.value.work?.value;
+      const origin = result.value.origin;
+      const run =
+        origin.case === "detached"
+          ? origin.value.detachedFromId?.value
+          : origin.case === "created" && origin.value.workCreated?.work.case === "bash"
+            ? undefined
+            : undefined;
+      if (work !== undefined && run !== undefined) reader.linkWork(work, run);
+    }
+  };
+
+  return {
+    async writeDurable(entries: PersistEntry[]): Promise<void> {
+      if (entries.length === 0) return;
+      noteShellRuns(entries);
+      // ORDERED BEHIND WHATEVER IS BUFFERED: a durable write that jumped the
+      // queue could land a turn's first activity frame before the prompt row
+      // that R15 says precedes it.
+      await this.flush();
+      const batch: PendingBatch = { entries, attempts: 0 };
+      const landed = await deliver(batch);
+      if (!landed) {
+        throw new PersistenceError(
+          "store_unavailable",
+          `the store did not accept ${entries.length} durable row(s) after ${batch.attempts} attempts`,
+        );
+      }
+    },
+
+    write(entries: PersistEntry[]): void {
+      if (entries.length === 0) return;
+      noteShellRuns(entries);
+      if (queue.length >= retry.bufferCapacity) {
+        const evicted = queue.shift();
+        if (evicted !== undefined) {
+          dropLoudly(evicted, `retry buffer is full at ${retry.bufferCapacity} batches`);
+        }
+      }
+      queue.push({ entries, attempts: 0 });
+      LOGGER.logVerbose({ entries: entries.length, queued: queue.length }, "batch enqueued");
+      startDraining();
+    },
+
+    async flush(): Promise<void> {
+      while (draining !== undefined) await draining;
+    },
+
+    openAgentPage(
+      agent: conversationv1.AgentId,
+      pageSize: number,
+      knownThrough?: conversationv1.HistoryPointer,
+    ): Promise<AgentPageSession> {
+      return reader.openAgentPage(agent, pageSize, knownThrough);
+    },
+
+    readAgentPage(
+      agent: conversationv1.AgentId,
+      pageSize: number,
+      after: conversationv1.HistoryPointer,
+    ): Promise<conversationv1.HistoryPage> {
+      return reader.readAgentPage(agent, pageSize, after);
+    },
+
+    liveWork(): Promise<storev1.GetLiveWorkSuccess> {
+      return reconciler.liveWork();
+    },
+
+    openBashRun(
+      work: conversationv1.DetachedWorkId,
+    ): Promise<AsyncIterable<conversationv1.AgentBash>> {
+      return reader.openBashRun(work);
+    },
+
+    onFault(listener: (fault: conversationv1.SessionFault) => void): () => void {
+      faultListeners.add(listener);
+      return () => faultListeners.delete(listener);
+    },
+
+    onDegradedWindow(
+      listener: (window: conversationv1.SessionDegradedWindow) => void,
+    ): () => void {
+      windowListeners.add(listener);
+      return () => windowListeners.delete(listener);
+    },
+  };
+}
+
+/** The upsert key one detached shell run's lifecycle rows share. Re-exported for the fold. */
+export { bashUpsertKey };

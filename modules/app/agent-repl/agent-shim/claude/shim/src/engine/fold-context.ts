@@ -49,6 +49,28 @@ export interface FoldContext {
   /** A live task, by vendor task id: the call it belongs to, and its agent when known. */
   liveTask(taskId: string): { toolUseId: string; agentId?: conversationv1.AgentId } | undefined;
   /**
+   * WHICH AGENT a spawning call created, by that call's `tool_use_id`.
+   *
+   * ADDED BY THE RECORD PLANE (2026-08-29). The pinned SDK stream carries NO
+   * agent id anywhere — a subagent's own messages name only
+   * `parent_tool_use_id` — so this is the one place a subagent's book can be
+   * resolved. UNSET falls back to the record plane's own minting rule
+   * (`convert/ids.ts subagentId`), which is deliberately ONE function so a
+   * later ruling changes one line.
+   */
+  subagentFor?(toolUseId: string): conversationv1.AgentId | undefined;
+  /**
+   * The MCP server names this session knows (`system:init.mcp_servers`,
+   * `mcpServerStatus()`).
+   *
+   * ADDED BY THE RECORD PLANE (2026-08-29), per the shim lead's ruling: no
+   * vendor field states which server served an `mcp__<server>__<tool>` call, so
+   * `AgentUnmodeled.mcp_server` is resolved by an EXACT match against these
+   * names and never by splitting the qualified name.
+   */
+  mcpServerNames?(): readonly string[];
+
+  /**
    * The last write or edit unit seen.
    *
    * The vendor's IDE-diagnostics record carries no tool id, so the join is by
