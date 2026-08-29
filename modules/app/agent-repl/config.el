@@ -169,6 +169,7 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; on.
 (agent-repl--load-module "wire-common")
 (agent-repl--load-module "wire-host")
+(agent-repl--load-module "wire-roster")
 ;; WHY: external-browser.el pins `browse-url-browser-function' so every
 ;; hyperlink lands in the external Chrome profile instead of an Emacs
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
