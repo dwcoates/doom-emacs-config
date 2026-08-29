@@ -11,12 +11,12 @@ package gitclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/notimpl"
 )
 
 // Git is the leaf's whole surface.
@@ -84,7 +84,11 @@ type Commit struct {
 }
 
 // Error is a git invocation's failure, carrying the command's own output as
-// evidence. Every Git method's error is one of these.
+// evidence. Every failing GIT INVOCATION surfaces as one of these; the two
+// failures that are not a git invocation's — a repository with no determinable
+// default branch, and git output this client could not parse — are ordinary
+// errors, because there is no command whose exit status and stderr they could
+// honestly report.
 type Error struct {
 	// Args is the argument vector, after the environment hygiene.
 	Args []string
@@ -104,7 +108,11 @@ func (e *Error) Error() string {
 		strings.Join(e.Args, " "), e.Dir, e.ExitCode, strings.TrimSpace(e.Stderr))
 }
 
-// New builds the git client.
+// New builds the git client. It holds no state beyond its log surfaces: every
+// method's truth is the repository on disk, read fresh each time.
 func New(log dlog.Surfaces) (Git, error) {
-	return nil, notimpl.Err
+	if log == nil {
+		return nil, errors.New("gitclient: log surfaces are required")
+	}
+	return &client{log: log}, nil
 }
