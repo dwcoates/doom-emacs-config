@@ -3,6 +3,7 @@ module claude-repld
 go 1.23.0
 
 require (
+	agentrepl/logging v0.0.0-00010101000000-000000000000
 	agentrepl/proto v0.0.0
 	connectrpc.com/connect v1.17.0
 	github.com/creack/pty v1.1.24
