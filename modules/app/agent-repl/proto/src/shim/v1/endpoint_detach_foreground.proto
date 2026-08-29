@@ -27,9 +27,22 @@ message DetachForegroundResponse {
 // Detached. The turn's stream announces `detached_work.detached` naming the new handle; the consumer opens the matching Watch.
 message DetachForegroundSuccess {}
 
-// Not detached: no such unit, already concluded, not a detachable kind. `kind` arms are DERIVED at the wave from the shim's real refusal
-// sites.
+// Not detached. THE ARM IS WHY.
 message DetachForegroundFailure {
   // The shim's account, for a human and for logs; never switched on.
   string detail = 1;
+  oneof kind {
+    // No in-flight unit carries this identity.
+    DetachForegroundUnknownUnit unknown_unit = 2;
+    // The unit already concluded.
+    DetachForegroundAlreadyConcluded already_concluded = 3;
+    // The unit's kind cannot detach (only a bash or a subagent can).
+    DetachForegroundNotDetachable not_detachable = 4;
+    // No session is open on this shim.
+    DetachForegroundNoSession no_session = 5;
+  }
 }
+message DetachForegroundUnknownUnit {}
+message DetachForegroundAlreadyConcluded {}
+message DetachForegroundNotDetachable {}
+message DetachForegroundNoSession {}

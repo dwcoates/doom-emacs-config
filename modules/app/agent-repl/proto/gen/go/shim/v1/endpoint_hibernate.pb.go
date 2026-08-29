@@ -184,10 +184,15 @@ func (*HibernateSuccess) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_hibernate_proto_rawDescGZIP(), []int{2}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (turn in flight,
-// compaction failed, …), spelled per the standing conventions.
+// Not hibernated. THE ARM IS WHY.
 type HibernateError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*HibernateError_TurnInFlight
+	//	*HibernateError_CompactionFailed
+	//	*HibernateError_NoSession
+	Kind          isHibernateError_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -222,6 +227,183 @@ func (*HibernateError) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_hibernate_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *HibernateError) GetKind() isHibernateError_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *HibernateError) GetTurnInFlight() *HibernateTurnInFlight {
+	if x != nil {
+		if x, ok := x.Kind.(*HibernateError_TurnInFlight); ok {
+			return x.TurnInFlight
+		}
+	}
+	return nil
+}
+
+func (x *HibernateError) GetCompactionFailed() *HibernateCompactionFailed {
+	if x != nil {
+		if x, ok := x.Kind.(*HibernateError_CompactionFailed); ok {
+			return x.CompactionFailed
+		}
+	}
+	return nil
+}
+
+func (x *HibernateError) GetNoSession() *HibernateNoSession {
+	if x != nil {
+		if x, ok := x.Kind.(*HibernateError_NoSession); ok {
+			return x.NoSession
+		}
+	}
+	return nil
+}
+
+type isHibernateError_Kind interface {
+	isHibernateError_Kind()
+}
+
+type HibernateError_TurnInFlight struct {
+	// A turn is in flight; hibernation waits for freeness.
+	TurnInFlight *HibernateTurnInFlight `protobuf:"bytes,1,opt,name=turn_in_flight,json=turnInFlight,proto3,oneof"`
+}
+
+type HibernateError_CompactionFailed struct {
+	// The compaction ran and failed; nothing was cut.
+	CompactionFailed *HibernateCompactionFailed `protobuf:"bytes,2,opt,name=compaction_failed,json=compactionFailed,proto3,oneof"`
+}
+
+type HibernateError_NoSession struct {
+	// No session is open on this shim.
+	NoSession *HibernateNoSession `protobuf:"bytes,3,opt,name=no_session,json=noSession,proto3,oneof"`
+}
+
+func (*HibernateError_TurnInFlight) isHibernateError_Kind() {}
+
+func (*HibernateError_CompactionFailed) isHibernateError_Kind() {}
+
+func (*HibernateError_NoSession) isHibernateError_Kind() {}
+
+type HibernateTurnInFlight struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HibernateTurnInFlight) Reset() {
+	*x = HibernateTurnInFlight{}
+	mi := &file_shim_v1_endpoint_hibernate_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HibernateTurnInFlight) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HibernateTurnInFlight) ProtoMessage() {}
+
+func (x *HibernateTurnInFlight) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_hibernate_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HibernateTurnInFlight.ProtoReflect.Descriptor instead.
+func (*HibernateTurnInFlight) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_hibernate_proto_rawDescGZIP(), []int{4}
+}
+
+// The compaction failed; the context is as it was.
+type HibernateCompactionFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What went wrong, verbatim.
+	Error         string `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HibernateCompactionFailed) Reset() {
+	*x = HibernateCompactionFailed{}
+	mi := &file_shim_v1_endpoint_hibernate_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HibernateCompactionFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HibernateCompactionFailed) ProtoMessage() {}
+
+func (x *HibernateCompactionFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_hibernate_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HibernateCompactionFailed.ProtoReflect.Descriptor instead.
+func (*HibernateCompactionFailed) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_hibernate_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *HibernateCompactionFailed) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type HibernateNoSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HibernateNoSession) Reset() {
+	*x = HibernateNoSession{}
+	mi := &file_shim_v1_endpoint_hibernate_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HibernateNoSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HibernateNoSession) ProtoMessage() {}
+
+func (x *HibernateNoSession) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_hibernate_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HibernateNoSession.ProtoReflect.Descriptor instead.
+func (*HibernateNoSession) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_hibernate_proto_rawDescGZIP(), []int{6}
+}
+
 var File_shim_v1_endpoint_hibernate_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_hibernate_proto_rawDesc = "" +
@@ -232,8 +414,17 @@ const file_shim_v1_endpoint_hibernate_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2\x19.shim.v1.HibernateSuccessH\x00R\asuccess\x12/\n" +
 	"\x05error\x18\x02 \x01(\v2\x17.shim.v1.HibernateErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x12\n" +
-	"\x10HibernateSuccess\"\x10\n" +
-	"\x0eHibernateErrorB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x10HibernateSuccess\"\xf1\x01\n" +
+	"\x0eHibernateError\x12F\n" +
+	"\x0eturn_in_flight\x18\x01 \x01(\v2\x1e.shim.v1.HibernateTurnInFlightH\x00R\fturnInFlight\x12Q\n" +
+	"\x11compaction_failed\x18\x02 \x01(\v2\".shim.v1.HibernateCompactionFailedH\x00R\x10compactionFailed\x12<\n" +
+	"\n" +
+	"no_session\x18\x03 \x01(\v2\x1b.shim.v1.HibernateNoSessionH\x00R\tnoSessionB\x06\n" +
+	"\x04kind\"\x17\n" +
+	"\x15HibernateTurnInFlight\"1\n" +
+	"\x19HibernateCompactionFailed\x12\x14\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error\"\x14\n" +
+	"\x12HibernateNoSessionB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_hibernate_proto_rawDescOnce sync.Once
@@ -247,21 +438,27 @@ func file_shim_v1_endpoint_hibernate_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_hibernate_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_hibernate_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_shim_v1_endpoint_hibernate_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_shim_v1_endpoint_hibernate_proto_goTypes = []any{
-	(*HibernateRequest)(nil),  // 0: shim.v1.HibernateRequest
-	(*HibernateResponse)(nil), // 1: shim.v1.HibernateResponse
-	(*HibernateSuccess)(nil),  // 2: shim.v1.HibernateSuccess
-	(*HibernateError)(nil),    // 3: shim.v1.HibernateError
+	(*HibernateRequest)(nil),          // 0: shim.v1.HibernateRequest
+	(*HibernateResponse)(nil),         // 1: shim.v1.HibernateResponse
+	(*HibernateSuccess)(nil),          // 2: shim.v1.HibernateSuccess
+	(*HibernateError)(nil),            // 3: shim.v1.HibernateError
+	(*HibernateTurnInFlight)(nil),     // 4: shim.v1.HibernateTurnInFlight
+	(*HibernateCompactionFailed)(nil), // 5: shim.v1.HibernateCompactionFailed
+	(*HibernateNoSession)(nil),        // 6: shim.v1.HibernateNoSession
 }
 var file_shim_v1_endpoint_hibernate_proto_depIdxs = []int32{
 	2, // 0: shim.v1.HibernateResponse.success:type_name -> shim.v1.HibernateSuccess
 	3, // 1: shim.v1.HibernateResponse.error:type_name -> shim.v1.HibernateError
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	4, // 2: shim.v1.HibernateError.turn_in_flight:type_name -> shim.v1.HibernateTurnInFlight
+	5, // 3: shim.v1.HibernateError.compaction_failed:type_name -> shim.v1.HibernateCompactionFailed
+	6, // 4: shim.v1.HibernateError.no_session:type_name -> shim.v1.HibernateNoSession
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_hibernate_proto_init() }
@@ -273,13 +470,18 @@ func file_shim_v1_endpoint_hibernate_proto_init() {
 		(*HibernateResponse_Success)(nil),
 		(*HibernateResponse_Error)(nil),
 	}
+	file_shim_v1_endpoint_hibernate_proto_msgTypes[3].OneofWrappers = []any{
+		(*HibernateError_TurnInFlight)(nil),
+		(*HibernateError_CompactionFailed)(nil),
+		(*HibernateError_NoSession)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_hibernate_proto_rawDesc), len(file_shim_v1_endpoint_hibernate_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

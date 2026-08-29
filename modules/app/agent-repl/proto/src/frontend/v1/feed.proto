@@ -53,6 +53,10 @@ import "conversation/v1/api.proto";
 import "conversation/v1/session.proto";
 import "conversation/v1/turn.proto";
 import "frontend/v1/failure.proto";
+import "frontend/v1/status_panel.proto";
+import "frontend/v1/todos_panel.proto";
+import "frontend/v1/mcp_panel.proto";
+import "frontend/v1/context_panel.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
@@ -128,8 +132,56 @@ message FeedRow {
     // sub-feed rows parented to it, a RESOLVED tab's content rides the
     // row itself, replaced whole.
     FeedMergeTab merge_tab = 14;
+    // A recognized command's PANEL, mirrored into the feed (ruled
+    // 2026-08-29): the root composer is host-native, so the caller of
+    // SubmitPrompt cannot draw the panel its answer carries — the daemon
+    // emits it as a SYNTHESIZED, NON-DURABLE row on the root feed (resolver
+    // memory only: never stored, never replayed after a daemon restart).
+    FeedCommandPanel command_panel = 15;
+    // A recognized-but-unsupported command's REFUSAL card (/agents, /help,
+    // and any command the daemon recognizes and neither answers nor
+    // forwards), carrying the "engineer support for it" offer. Synthesized
+    // and non-durable, like command_panel.
+    FeedCommandRefused command_refused = 16;
   }
 }
+
+// A recognized command's resolved panel, as a feed row. THE ARM IS WHICH
+// COMMAND was recognized; a new programmatically handled command is a new
+// arm, deployed daemon-side — clients render the arm and know no command
+// names. The same view SubmitPromptSuccess.command_panel answers the caller
+// with; the row is where it is DRAWN.
+message FeedCommandPanel {
+  oneof panel {
+    StatusPanelView status = 1;
+    TodosPanelView todos = 2;
+    McpPanelView mcp = 3;
+    ContextPanelView context = 4;
+  }
+}
+
+// The unsupported-command refusal card.
+message FeedCommandRefused {
+  // The command as typed ("/agents"), drawn verbatim.
+  FeedCommandRefusedCommand command = 1;
+  // The daemon's composed sentence ("/agents is not supported here"),
+  // drawn verbatim.
+  FeedCommandRefusedReason reason = 2;
+  // The "engineer support for it" offer. PRESENT iff the daemon offers
+  // it; the button calls RequestCommandSupport with this row's command.
+  optional FeedCommandAddSupportOffer add_support = 3;
+}
+// The command element.
+message FeedCommandRefusedCommand {
+  string text = 1;
+}
+// The reason element.
+message FeedCommandRefusedReason {
+  string text = 1;
+}
+// The offer marker. Empty: presence is the fact; the button's label is the
+// client's.
+message FeedCommandAddSupportOffer {}
 
 // The containing row's identity, for presentation nesting.
 message FeedRowParent {
@@ -619,10 +671,11 @@ message FeedToolCallOmitted {
 message FeedCodeSpan {
   // The span's text, verbatim.
   string text = 1;
-  // The paint class the stylesheet keys on ("keyword", "string", "comment").
-  // A closed arm set is owed in this vocabulary's place once the daemon's
-  // highlighter fixes the class inventory; until then the client must treat
-  // an unknown class as unstyled text, never an error.
+  // The paint class the stylesheet keys on ("keyword", "string", "comment"):
+  // one of the names in proto/vocab/paint-classes.json (the closed inventory
+  // the daemon's highlighter and ANSI parser emit; `syntax` names for code,
+  // `ansi` names for terminal output). A client treats a name outside the
+  // inventory as unstyled text, never an error.
   string paint_class = 2;
 }
 // One diff line; the arm is the color.

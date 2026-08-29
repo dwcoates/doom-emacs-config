@@ -85,9 +85,21 @@ message StartSessionFailure {
     // The context is cold and no remediation was named: here is what
     // resuming would cost, so a remediation can be chosen.
     conversation.v1.SessionCold cold = 1;
-    // Further arms DERIVED at the wave from the shim's real sites (the agent
-    // binary failing to start, an unknown session id).
+    // The agent binary (or the SDK query) failed to start; `detail` carries
+    // the cause.
+    StartSessionVendorStartFailed vendor_start_failed = 3;
+    // A resume named a session id with no transcript on disk — refused
+    // BEFORE any process spawns (a vanished file yields no death evidence).
+    StartSessionUnknownSession unknown_session = 4;
+    // A second StartSession on a shim that already holds a session.
+    StartSessionAlreadyStarted already_started = 5;
+    // Another shim holds this conversation's kernel lock.
+    StartSessionConversationOwned conversation_owned = 6;
   }
   // The shim's account, for a human and for logs; never switched on.
   string detail = 2;
 }
+message StartSessionVendorStartFailed {}
+message StartSessionUnknownSession {}
+message StartSessionAlreadyStarted {}
+message StartSessionConversationOwned {}
