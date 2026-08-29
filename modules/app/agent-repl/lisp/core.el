@@ -118,13 +118,11 @@ Returns non-nil when a timer was actually cancelled."
 (defun agent-repl--cancel-all-timers ()
   "Cancel every timer in `agent-repl--timers' and reset both registries.
 
-Also tears down the workspace-state update chain (status.el).  That chain
-is driven by one-shot `run-at-time' continuations rather than a
-registered timer, so cancelling the registry alone would leave its
-in-flight flag armed by a generation whose heartbeat has just been
-cancelled — the flag then survives the reload and is only noticed minutes
-later by the stale-flag backstop.  Guarded on `fboundp' because this
-function runs at core.el load time, before status.el has been read."
+THE ONLY TIMERS LEFT ARE REGISTERED ONES.  The workspace-state update
+chain this used to tear down separately — one-shot `run-at-time'
+continuations outside the registry — died with the local state machine:
+the roster pushes every workspace's state, so nothing polls and there is
+no unregistered chain to leave armed across a reload."
   (let ((count (length agent-repl--timers))
         (keyed-count (length agent-repl--keyed-timers)))
     (dolist (timer agent-repl--timers)
@@ -132,8 +130,6 @@ function runs at core.el load time, before status.el has been read."
         (cancel-timer timer)))
     (setq agent-repl--timers nil)
     (setq agent-repl--keyed-timers nil)
-    (when (fboundp 'agent-repl--update-chain-teardown)
-      (agent-repl--update-chain-teardown))
     ;; Guard: this function is called at load time (line below), before
     ;; agent-repl--log is defined.  Only log when logging is available.
     (when (fboundp 'agent-repl--log)
