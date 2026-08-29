@@ -623,3 +623,24 @@ generated arms when the landing merges (one place each):
   and NEVER writes the file; the project entry the CLI keeps under
   `projects.<cwd>` is not read or written by the daemon — transcript porting
   moves files under `<root>/projects/<encoded cwd>/` only.
+
+## Landing 4 (staged on overhaul/landing-4; lands with the ERROR-ARMS batch)
+
+Rulings already binding; code swaps to the generated arms when it lands:
+- `SessionStarted.live_work` items are ALWAYS `created`-origin on
+  re-adoption (ruled on the shim); the sessionwatcher's ERROR + skip on a
+  `detached`-origin live item is the correct contract-violation handling.
+- `DetachedWorkId.value == the unit's AgentActivityId.value` (same bytes; a
+  subagent's is also its AgentId) — so a `created`-origin MONITOR is retired
+  by the monitor's own `ended`/`failure` frame whose activity id equals the
+  handle. Monitors stay in freeness. (Sessionwatcher remediation at landing
+  4: key the created-monitor reap by that equality.)
+- `SessionUpdate.context_budget_warning` (tag 24) is RETIRED; the arm becomes
+  `AgentUpdate.context_budget_warning = 7 {text}` — a page line, sidecar-
+  produced, arriving via WatchAgent. Route it to the footer from the agent
+  plane (sessionwatcher: new AgentUpdate arm → FooterSink; delete the
+  WatchSession routing; footer: unchanged consumer).
+- Restored live-work items route to the root feed (agreed).
+- The landing-4 batch also carries the ERROR-ARMS.md arms and the four e2e
+  seam answers (arm names; the merge test-gate invocation; the .claude.json
+  key path; the metaprompt sentinels — the last two are pinned above).
