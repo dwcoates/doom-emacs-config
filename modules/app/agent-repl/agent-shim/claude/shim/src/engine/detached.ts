@@ -2,12 +2,10 @@
  * engine/detached.ts — the live set of detached work, and the verbs that
  * address it.
  *
- * OWNER: the detached-work agent.
- *
  * RESPONSIBILITY. Fold `task_started`, `background_tasks_changed`,
  * `task_updated` and `task_notification` into the set of work that is currently
  * live, maintain the `DetachedWorkId` ↔ underlying-identity mapping, and serve
- * `WatchBash`/`StopBash` from it.
+ * the kill paths and `SessionLive`/`TurnLive` from it.
  *
  * THE MAPPING IS ONE LOOKUP, NEVER A SCAN. `task_started` carries BOTH the
  * vendor task id and the tool_use_id it belongs to, so the association is
@@ -15,15 +13,197 @@
  * or timings would be a guess, and a wrong guess routes one run's output onto
  * another run's stream.
  *
+ * THE LEVEL IS A REPLACEMENT, NOT A DIFF. `background_tasks_changed` states the
+ * WHOLE live set. It is applied by replacement — entries it omits are gone,
+ * entries it names are kept or created — and the difference between the old set
+ * and the new one is never computed into anything retained. Diffing a level
+ * into edges is how a missed message becomes a permanently wedged indicator.
+ *
+ * SPAWN PROVENANCE IS THE ONE BOUNDED STATE EXCEPTION. Each live entry
+ * remembers the turn that spawned it, solely so `KillTurn` can NAME its
+ * transitive refusal set. It is bounded by the number of live tasks and never
+ * appears on the wire except inside a refusal.
+ *
+ * `skip_transcript` WORK IS TRACKED AND NEVER ANNOUNCED. The vendor's own level
+ * set still governs liveness, so an ambient task must count for
+ * "is anything running" — but it produces no bubble and no announcement, which
+ * is exactly the split {@link LiveWorkTable.announceable} draws.
+ *
  * WHAT A STOP ACTUALLY IS. `query.stopTask` — the SDK's native per-task stop.
  * There is no process to kill at this boundary: detached work runs INSIDE the
  * agent binary, not as a child of the shim, so the shim owns no process
- * boundary that could reach it. The stopped task's own
- * `system:task_notification` is the terminal fact everything settles on.
- *
- * RE-ADOPTION AFTER A BOUNCE. A re-announced start recovers its ORIGINAL
- * instant FROM THE STORE by unit id, never from memory — memory is exactly what
- * a bounce lost, and restamping the start would make a long-running command
- * look like it just began.
+ * boundary that could reach it.
  */
-export {};
+import { bindLog } from "../log.js";
+import { detachedWorkId } from "../convert/ids.js";
+import type { conversationv1 } from "../proto.js";
+import type {
+  SdkBackgroundTasksChangedMessage,
+  SdkTaskNotificationMessage,
+  SdkTaskStartedMessage,
+  SdkTaskUpdatedMessage,
+} from "../sdk/types.js";
+
+const LOGGER = bindLog({ component: "shim-engine-detached", operation: "shim.engine.detached" });
+
+/** One live item, as the shim knows it. */
+export interface LiveWorkEntry {
+  /** The vendor task id, which IS the `DetachedWorkId`. */
+  readonly taskId: string;
+  /** The call this work belongs to, when `task_started` stated one. */
+  readonly toolUseId?: string;
+  /** The vendor's own kind word (`bash`, `agent`, …), when stated. */
+  readonly taskType?: string;
+  /** The subagent definition, for agent work. */
+  readonly subagentType?: string;
+  /** The vendor's description of the work. */
+  readonly description: string;
+  /** Ambient work: tracked for liveness, never announced. */
+  readonly skipTranscript: boolean;
+  /** The turn that spawned it — the provenance `KillTurn` names its set from. */
+  readonly turnId?: string;
+  /** The vendor's last stated status, when one was stated. */
+  readonly status?: string;
+  /** Whether the vendor has reported this work backgrounded. */
+  readonly backgrounded?: boolean;
+}
+
+/**
+ * The live table.
+ *
+ * Constant-size in the number of LIVE items — nothing terminal is retained,
+ * because a terminal item is not live and remembering it would make this a
+ * history of the session, which the store already is.
+ */
+export class LiveWorkTable {
+  private readonly entries = new Map<string, LiveWorkEntry>();
+
+  /** A task began: the one moment the id, the call and the kind are all stated. */
+  onTaskStarted(message: SdkTaskStartedMessage, turnId?: string): LiveWorkEntry {
+    const entry: LiveWorkEntry = {
+      taskId: message.task_id,
+      description: message.description,
+      skipTranscript: message.skip_transcript === true,
+      ...(message.tool_use_id === undefined ? {} : { toolUseId: message.tool_use_id }),
+      ...(message.task_type === undefined ? {} : { taskType: message.task_type }),
+      ...(message.subagent_type === undefined ? {} : { subagentType: message.subagent_type }),
+      ...(turnId === undefined ? {} : { turnId }),
+    };
+    this.entries.set(entry.taskId, entry);
+    LOGGER.log(
+      {
+        task_id: entry.taskId,
+        tool_use_id: entry.toolUseId ?? "",
+        task_type: entry.taskType ?? "",
+        skip_transcript: entry.skipTranscript,
+        turn_id: entry.turnId ?? "",
+      },
+      "recorded a live detached-work item and its spawn provenance",
+    );
+    return entry;
+  }
+
+  /** A patch to one task. Unknown ids are ignored, loudly. */
+  onTaskUpdated(message: SdkTaskUpdatedMessage): LiveWorkEntry | undefined {
+    const existing = this.entries.get(message.task_id);
+    if (existing === undefined) {
+      LOGGER.log(
+        { level: "warn", task_id: message.task_id },
+        "task_updated for a task this shim never saw start; ignored",
+      );
+      return undefined;
+    }
+    const updated: LiveWorkEntry = {
+      ...existing,
+      ...(message.patch.description === undefined ? {} : { description: message.patch.description }),
+      ...(message.patch.status === undefined ? {} : { status: message.patch.status }),
+      ...(message.patch.is_backgrounded === undefined
+        ? {}
+        : { backgrounded: message.patch.is_backgrounded }),
+    };
+    this.entries.set(updated.taskId, updated);
+    return updated;
+  }
+
+  /** A task concluded. Its terminal fact is the vendor's; the entry leaves the set. */
+  onTaskNotification(message: SdkTaskNotificationMessage): LiveWorkEntry | undefined {
+    const existing = this.entries.get(message.task_id);
+    this.entries.delete(message.task_id);
+    LOGGER.log(
+      { task_id: message.task_id, status: message.status, known: existing !== undefined },
+      "a detached-work item concluded and left the live set",
+    );
+    return existing;
+  }
+
+  /**
+   * The vendor stated the WHOLE live set. Apply it by replacement.
+   *
+   * Entries the level names are kept with everything already known about them
+   * (the level carries no tool_use_id, and losing that mapping would orphan the
+   * run's output); entries it omits are dropped; entries it names that are new
+   * are created with what the level states and nothing invented.
+   */
+  onLevel(message: SdkBackgroundTasksChangedMessage): void {
+    const next = new Map<string, LiveWorkEntry>();
+    for (const task of message.tasks) {
+      const existing = this.entries.get(task.task_id);
+      next.set(
+        task.task_id,
+        existing === undefined
+          ? {
+              taskId: task.task_id,
+              description: task.description,
+              taskType: task.task_type,
+              skipTranscript: false,
+            }
+          : { ...existing, description: task.description, taskType: task.task_type },
+      );
+    }
+    const dropped = [...this.entries.keys()].filter((id) => !next.has(id));
+    this.entries.clear();
+    for (const [id, entry] of next) this.entries.set(id, entry);
+    LOGGER.log(
+      { level_size: next.size, dropped: dropped.join(" ") },
+      "applied the vendor's live-task LEVEL by replacement",
+    );
+  }
+
+  /** One item by its work id. */
+  get(taskId: string): LiveWorkEntry | undefined {
+    return this.entries.get(taskId);
+  }
+
+  /** The item a tool call spawned, if it is still live. */
+  byToolUseId(toolUseId: string): LiveWorkEntry | undefined {
+    for (const entry of this.entries.values()) {
+      if (entry.toolUseId === toolUseId) return entry;
+    }
+    return undefined;
+  }
+
+  /** Everything live, ambient work included. */
+  all(): readonly LiveWorkEntry[] {
+    return [...this.entries.values()];
+  }
+
+  /** Everything live that a consumer may be told about. */
+  announceable(): readonly LiveWorkEntry[] {
+    return this.all().filter((entry) => !entry.skipTranscript);
+  }
+
+  /** Everything one turn spawned — `KillTurn`'s transitive set. */
+  spawnedBy(turnId: string): readonly LiveWorkEntry[] {
+    return this.all().filter((entry) => entry.turnId === turnId);
+  }
+
+  /** The live set as the wire names it. */
+  workIds(entries: readonly LiveWorkEntry[] = this.all()): conversationv1.DetachedWorkId[] {
+    return entries.map((entry) => detachedWorkId(entry.taskId));
+  }
+
+  /** Nothing is live. */
+  get empty(): boolean {
+    return this.entries.size === 0;
+  }
+}
