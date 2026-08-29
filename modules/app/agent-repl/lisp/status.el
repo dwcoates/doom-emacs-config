@@ -681,7 +681,7 @@ second answer to a question only the daemon answers."
     arm))
 
 (defun agent-repl-status-tab-color (arm)
-  "Return the color NAME the tab bar paints ARM with, or "none".
+  "Return the color NAME the tab bar paints ARM with, or \"none\".
 Reads `agent-repl-status-tab-bar-color-table', which is the shared
 assignment with the tab bar's declared overrides layered over it.  An
 arm this build does not know is a contract breach the codec already
@@ -983,8 +983,8 @@ face so selection dims the state color."
   "Return the run drawn BEFORE NAME's name region for ARM, or nil.
 
 Two things live there, in this order: the roster's PRIORITY BADGE label
-\("P0.5", "P1", ... — resolver-composed, drawn verbatim; ordering is
-already the resolver's and this is only the label) and the arm's glyph
+\(resolver-composed and drawn verbatim; ordering is already the
+resolver's and this is only the label) and the arm's glyph
 \(the merge pipeline's, the inactive question mark, or the attention
 marker).  Both are absent far more often than present, so the whole run
 is nil in the ordinary case and the tab is name and bracket alone."
