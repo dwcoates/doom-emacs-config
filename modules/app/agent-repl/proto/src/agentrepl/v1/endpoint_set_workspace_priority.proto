@@ -1,0 +1,36 @@
+// endpoint_set_workspace_priority.proto — SetWorkspacePriority: set or
+// clear a workspace's priority after creation. SIDEBAR section. The roster
+// resolver orders by priority and the roster row carries the badge fact;
+// the new state arrives on the roster stream.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_priority.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetWorkspacePriorityRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The new priority. UNSET = clear (back to unprioritized); presence,
+  // never a sentinel level.
+  optional WorkspacePriority priority = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetWorkspacePriorityResponse {
+  oneof result {
+    SetWorkspacePrioritySuccess success = 1;
+    SetWorkspacePriorityError error = 2;
+  }
+}
+
+// Done; the roster push carries the new state.
+message SetWorkspacePrioritySuccess {}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown workspace,
+// …), spelled per 3b.
+message SetWorkspacePriorityError {
+}
