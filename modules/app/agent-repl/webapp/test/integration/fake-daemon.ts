@@ -347,6 +347,16 @@ export function createFakeDaemon(): FakeDaemon {
     return { channel, iterate };
   };
 
+  /**
+   * Spend a pending `injectUnknown(rpc)` on `message`.
+   *
+   * The flag is consumed only when a message actually carries it, so arming an
+   * injection before the stream is open still taints the FIRST frame that
+   * reaches a reader rather than being swallowed by a push nobody received.
+   */
+  const taint = <T extends object>(rpc: RpcName, message: T): T =>
+    unknowns.delete(rpc) ? withUnknown(message) : message;
+
   /** Push one value to every live stream of `rpc` matching workspace/feed. */
   const broadcast = (
     rpc: RpcName,
@@ -354,14 +364,15 @@ export function createFakeDaemon(): FakeDaemon {
     feed: FeedKey | undefined,
     value: object,
   ): void => {
-    const message = unknowns.has(rpc) ? withUnknown(value) : value;
-    for (const reg of registrations) {
-      if (reg.rpc !== rpc) continue;
-      if (workspace !== undefined && reg.workspace !== workspace) continue;
-      if (feed !== undefined && reg.feed !== feed) continue;
-      reg.channel.push(message);
-    }
-    unknowns.delete(rpc);
+    const targets = [...registrations].filter((reg) => {
+      if (reg.rpc !== rpc) return false;
+      if (workspace !== undefined && reg.workspace !== workspace) return false;
+      if (feed !== undefined && reg.feed !== feed) return false;
+      return true;
+    });
+    if (targets.length === 0) return;
+    const message = taint(rpc, value);
+    for (const reg of targets) reg.channel.push(message);
   };
 
   const routes = (router: ConnectRouter): void => {
@@ -469,7 +480,7 @@ export function createFakeDaemon(): FakeDaemon {
         record("watchWorkspaceRoster", request);
         consumeFailure("watchWorkspaceRoster");
         const { channel, iterate } = openStream("watchWorkspaceRoster", "", context.signal);
-        channel.push(create(WatchWorkspaceRosterResponseSchema, { roster }));
+        channel.push(taint("watchWorkspaceRoster", create(WatchWorkspaceRosterResponseSchema, { roster })));
         yield* iterate();
       },
       createWorkspace(request) {
@@ -549,7 +560,10 @@ export function createFakeDaemon(): FakeDaemon {
         const workspace = request.workspace?.id ?? "";
         const { channel, iterate } = openStream("watchTopbar", workspace, context.signal);
         channel.push(
-          create(WatchTopbarResponseSchema, { topbar: topbars.get(workspace) ?? emptyTopbarView() }),
+          taint(
+            "watchTopbar",
+            create(WatchTopbarResponseSchema, { topbar: topbars.get(workspace) ?? emptyTopbarView() }),
+          ),
         );
         yield* iterate();
       },
@@ -571,7 +585,10 @@ export function createFakeDaemon(): FakeDaemon {
         const workspace = request.workspace?.id ?? "";
         const { channel, iterate } = openStream("watchFooter", workspace, context.signal);
         channel.push(
-          create(WatchFooterResponseSchema, { footer: footers.get(workspace) ?? emptyFooterView() }),
+          taint(
+            "watchFooter",
+            create(WatchFooterResponseSchema, { footer: footers.get(workspace) ?? emptyFooterView() }),
+          ),
         );
         yield* iterate();
       },
@@ -580,7 +597,12 @@ export function createFakeDaemon(): FakeDaemon {
         consumeFailure("watchDaemonHolds");
         const workspace = request.workspace?.id ?? "";
         const { channel, iterate } = openStream("watchDaemonHolds", workspace, context.signal);
-        channel.push(create(WatchDaemonHoldsResponseSchema, { tray: trays.get(workspace) ?? emptyTray() }));
+        channel.push(
+          taint(
+            "watchDaemonHolds",
+            create(WatchDaemonHoldsResponseSchema, { tray: trays.get(workspace) ?? emptyTray() }),
+          ),
+        );
         yield* iterate();
       },
       updateHeldPrompt(request) {
@@ -649,7 +671,7 @@ export function createFakeDaemon(): FakeDaemon {
         consumeFailure("watchHostWorkspace");
         const workspace = request.workspace?.id ?? "";
         const { channel, iterate } = openStream("watchHostWorkspace", workspace, context.signal);
-        channel.push(hosts.get(workspace) ?? hostWorkspacePush());
+        channel.push(taint("watchHostWorkspace", hosts.get(workspace) ?? hostWorkspacePush()));
         yield* iterate();
       },
       async *watchDaemon(request, context) {
@@ -696,7 +718,10 @@ export function createFakeDaemon(): FakeDaemon {
         // buffer to a newly attached viewer, before any live byte arrives.
         for (const chunk of loginScrollback.get(workspace) ?? []) {
           channel.push(
-            create(LoginTerminalOutputSchema, { output: { case: "bytes", value: { data: chunk } } }),
+            taint(
+              "watchLoginTerminal",
+              create(LoginTerminalOutputSchema, { output: { case: "bytes", value: { data: chunk } } }),
+            ),
           );
         }
         yield* iterate() as AsyncGenerator<LoginTerminalOutput>;

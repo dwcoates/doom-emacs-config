@@ -14,7 +14,9 @@
     "precoverage": "npm run ensure-deps",
     "coverage": "vitest run --coverage",
     "pretypecheck": "npm run ensure-deps",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:integration": "vitest run -c vitest.integration.config.ts",
+    "pretest:integration": "npm run ensure-deps"
   },
   "devDependencies": {
     "@bufbuild/protobuf": "^2.13.0",
