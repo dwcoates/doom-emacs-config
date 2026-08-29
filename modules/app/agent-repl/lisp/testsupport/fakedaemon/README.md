@@ -100,7 +100,7 @@ A suite drives one instance like this:
 3. `/_fake/script` any answer the scenario needs that is not the default (an
    error arm, an unhealthy verdict, a blocked close).
 4. Open whatever streams the scenario needs from the Emacs side, then
-   `/_fake/wait` for them by polling `GET /_fake/subscribers` until the
+   poll `GET /_fake/subscribers` until the
    expected subscription is registered — a push before that would be
    delivered to nobody.
 5. `/_fake/push` the pushes, in order. Ordering within one stream is the only
