@@ -1,0 +1,34 @@
+// endpoint_create_task.proto — CreateTask: a new user task. SIDEBAR
+// section. The task appears in the roster's task view; assignment is
+// AssignWorkspaceTask's.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/task.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message CreateTaskRequest {
+  // The task's title, non-blank.
+  string title = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message CreateTaskResponse {
+  oneof result {
+    CreateTaskSuccess success = 1;
+    CreateTaskError error = 2;
+  }
+}
+
+// The created task's identity; everything else rides the roster stream.
+message CreateTaskSuccess {
+  TaskRef task = 1;
+}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (blank title, …),
+// spelled per 3b.
+message CreateTaskError {
+}

@@ -1,0 +1,15 @@
+// task.proto — the user task vocabulary. Tasks are daemon-owned rows in
+// WSM (created/updated via the task verbs, rendered by the roster's task
+// view); a workspace may be assigned to at most one task.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The daemon-minted task identity — an opaque echo token, compared
+// byte-wise, handed back verbatim.
+message TaskRef {
+  string id = 1;
+}

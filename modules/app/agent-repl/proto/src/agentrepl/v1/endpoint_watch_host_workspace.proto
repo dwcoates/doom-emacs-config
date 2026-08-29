@@ -56,12 +56,35 @@ message WatchHostWorkspaceResponse {
 message HostWorkspaceTransferred {}
 message HostWorkspaceReloadWebapp {}
 
-// A notification the agent addressed to the user, forwarded per workspace.
+// A notification for this workspace's user. THE KIND IS TYPED — the
+// composed text is presentation; the kind arm is the programmatic
+// semantics (never differentiate by parsing the text).
 message HostWorkspaceNotification {
-  // The agent's message, verbatim.
+  // The composed line, verbatim (agent-authored or daemon-composed).
   string text = 1;
-  // When the agent sent it, epoch ms.
+  // When it fired, epoch ms.
   int64 at_ms = 2;
+  // THE ARM IS THE KIND.
+  HostNotificationKind kind = 3;
+}
+
+// THE ARM IS THE KIND of notification.
+message HostNotificationKind {
+  oneof kind {
+    HostNotificationAgentAddressed agent_addressed = 1;
+    HostNotificationPermissionRequested permission_requested = 2;
+  }
+}
+
+// The agent addressed the user directly.
+message HostNotificationAgentAddressed {
+}
+
+// A permission ask arrived and blocks the agent; the daemon also sets the
+// attention marker. The client's focus policy decides presentation.
+message HostNotificationPermissionRequested {
+  // The gated tool's name, for the banner line.
+  string tool_name = 1;
 }
 
 // The host-facing state of one workspace: what Emacs needs to correlate

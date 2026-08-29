@@ -1,0 +1,37 @@
+// endpoint_assign_workspace_task.proto — AssignWorkspaceTask: assign a
+// workspace to a task, or unassign it. SIDEBAR section. A workspace
+// belongs to at most one task; the roster's task view groups by the
+// assignment.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/task.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AssignWorkspaceTaskRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The task to assign to. UNSET = unassign (back to the repo grouping);
+  // presence, never a sentinel id.
+  optional TaskRef task = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message AssignWorkspaceTaskResponse {
+  oneof result {
+    AssignWorkspaceTaskSuccess success = 1;
+    AssignWorkspaceTaskError error = 2;
+  }
+}
+
+// Done; the roster push carries the new grouping.
+message AssignWorkspaceTaskSuccess {
+}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown task,
+// unknown workspace, …), spelled per 3b.
+message AssignWorkspaceTaskError {
+}
