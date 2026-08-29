@@ -523,8 +523,13 @@ REAL sidecar ingests them:
   `b<hex>` shell spools terminated by an `EXIT=<code>` line, `a<hex>` agent
   spools (agent JSONL); `<spool-root>` = `$AGENT_REPL_FAKE_SPOOL_ROOT` or
   `/tmp/claude-<uid>`.
-- `<cwd-slug>` = the absolute cwd with every `/` and `.` replaced by `-`
-  (observed: `/Users/x/.config/y` → `-Users-x--config-y`).
+- `<cwd-slug>` = the absolute cwd with EVERY byte that is not `[A-Za-z0-9]`
+  replaced by `-` (underscore included; case preserved; existing dashes
+  untouched) — verified against the live `~/.claude/projects` tree:
+  `/private/var/folders/_m/x` → `-private-var-folders--m-x`,
+  `/Users/x/.config/y` → `-Users-x--config-y`. The subagent directory
+  `<vendor-session-id>/` beside `<vendor-session-id>.jsonl` follows the same
+  rule for the slug segment.
 - Shapes come from `testdata/corpus` and the pinned `sdk.d.ts`, and are
   rebuilt from the real captures once the capture run lands.
 
@@ -539,7 +544,9 @@ Cross-plane rulings (shim lead, 2026-08-29, relayed to the store/sidecar lead):
   lines the way the real binary does (one block per assistant line, same
   `message.id`).
 - `deferred_tools_delta` and `agent_listing_delta` attachment records are
-  VENDOR_SPECIFIC RESIDUE (`StoreUnservedItem.vendor_specific{kind}`), never
+  VENDOR_SPECIFIC RESIDUE — `StoreUnservedItem.vendor_specific{kind:
+  "attachment/<type>"}` (e.g. `attachment/deferred_tools_delta`), the exact
+  kind spelling the sidecar uses so both planes' residue agrees — never
   `context_injected`: that unit carries instructions the model reads (memory
   files, skill documents), while a tool-availability delta and an agent-type
   listing are vendor bookkeeping about what the model MAY call. Both planes
