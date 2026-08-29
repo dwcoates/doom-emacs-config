@@ -150,7 +150,7 @@ orchestration chain.
   turn`), kept solely so `KillTurn` can name its transitive refusal set; never
   on the wire except inside a refusal.
 
-### shim/v1 — the service the shim serves (16 rpcs, four sections)
+### shim/v1 — the service the shim serves (17 rpcs, four sections)
 
 Files: `service.proto`, one `endpoint_<rpc>.proto` each, `prompt_origin.proto`
 (the one shared file — an enum of send sites; it has no keep-alive value on
@@ -182,6 +182,14 @@ purpose).
     vendor's get_context_usage (never derived from usage frames). NOTE: the
     rpc comment in `service.proto` ("the shim's own health is pulled")
     predates that fold; the SessionUpdate arm comments are current.
+    OPENING FRAME (binding, daemon shim client, 2026-08-29): on EVERY
+    WatchSession open the shim pushes a `diagnostics` frame IMMEDIATELY
+    (the current health verdict), then at its cadence and on change —
+    connect-go surfaces a server-stream refusal only at the first Receive,
+    so the daemon consumes every watch's opening frame as the open's answer
+    and a silent WatchSession would block bring-up (readiness = the first
+    healthy diagnostics push). WatchAgent/WatchBash likewise open with their
+    page/start frame, as already contracted.
     A `compacting` arm is owed (contract increment, ruled 2026-08-29):
     vendor-initiated auto-compaction still happens, and its start signal
     (the system status:compacting message — the ContextCut record is the
@@ -509,29 +517,63 @@ purpose).
 ## The mocked vendor (`--fake`) — file layout and cross-plane rulings (shim lead)
 
 The mock writes vendor-shaped files exactly where the real binary would, so the
-REAL sidecar ingests them:
+REAL sidecar ingests them. IMPLEMENTED (mock agent, 2026-08-29): the layout
+below is what `src/fake/vendor-files.ts` writes, and every field named here is
+observed in `testdata/corpus` unless marked otherwise.
 
 - `$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<vendor-session-id>.jsonl` — the
-  session transcript (one JSON object per line: user/assistant/system/
-  attachment/queue-operation lines with `uuid`, `parentUuid`, `sessionId`,
-  `timestamp`, `cwd`, `version`, `isSidechain`, `userType`, `entrypoint`;
-  tool results carry `toolUseResult`).
+  session transcript. Two KINDS of line, and the distinction is load-bearing:
+  - CHAINED records (`user`, `assistant`, `system`, `attachment`) carry
+    `parentUuid`, `isSidechain`, `uuid`, `timestamp`, `userType: "external"`,
+    `entrypoint: "sdk-cli"`, `cwd`, `sessionId`, `version`, `gitBranch`. A user
+    prompt adds `promptId`, `permissionMode`, `promptSource: "sdk"`; a tool
+    result adds `toolUseResult` and `sourceToolAssistantUUID` (and
+    `toolDenialKind` when a rule refused it); an assistant line adds `requestId`
+    and `effort`.
+  - UNCHAINED metadata records (`queue-operation`, `mode`, `permission-mode`,
+    `ai-title`, `last-prompt`, `pr-link`, `frame-link`, the file-history pair)
+    carry NO `uuid` and NO `parentUuid` and never advance the chain. Writing one
+    through the chained path would both invent fields and orphan the next
+    record.
 - `$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<vendor-session-id>/subagents/agent-<agent-id>.jsonl`
-  plus `agent-<agent-id>.meta.json` beside it (agent_type, description,
-  tool_use_id, spawn_depth, model).
+  plus `agent-<agent-id>.meta.json` beside it. The meta sidecar carries EXACTLY
+  four camelCase fields — `agentType`, `description`, `toolUseId`, `spawnDepth`
+  (corpus: `sidechain/agent-aef975b7bc3422d4b.meta.json`). There is NO `model`
+  field: the earlier spelling in this document (`agent_type, description,
+  tool_use_id, spawn_depth, model`) was snake_case and named a fifth field the
+  corpus does not have. Sidechain records add `agentId` and set
+  `isSidechain: true`, and keep their OWN parentUuid chain, independent of the
+  session transcript's.
 - `<spool-root>/<cwd-slug>/<vendor-session-id>/tasks/<task-id>.output` —
-  `b<hex>` shell spools terminated by an `EXIT=<code>` line, `a<hex>` agent
-  spools (agent JSONL); `<spool-root>` = `$AGENT_REPL_FAKE_SPOOL_ROOT` or
-  `/tmp/claude-<uid>`.
+  `b<hex>` shell spools written INCREMENTALLY (one append per chunk, so the
+  sidecar's tail observes growth events) and terminated by an `EXIT=<code>`
+  line; `a<hex>` AGENT spools, which are the agent's own JSONL transcript and
+  carry NO terminator. A shell run that never ends leaves no `EXIT=` line at
+  all — the corpus's `spools/bash-midoutput.output` shape. A `stopTask` writes
+  `EXIT=143`.
+  Task-id shapes are the vendor's: 9-character base36 for a shell
+  (`b86pl7ir1`), 17-character hex for an agent (`a0cbd94e5da2d662d`). A detached
+  agent's task id IS its agent id, which is what makes the spool, the transcript
+  file and the task stream address the same thing.
 - `<cwd-slug>` = the absolute cwd with EVERY byte that is not `[A-Za-z0-9]`
-  replaced by `-` (underscore included; case preserved; existing dashes
-  untouched) — verified against the live `~/.claude/projects` tree:
-  `/private/var/folders/_m/x` → `-private-var-folders--m-x`,
-  `/Users/x/.config/y` → `-Users-x--config-y`. The subagent directory
-  `<vendor-session-id>/` beside `<vendor-session-id>.jsonl` follows the same
-  rule for the slug segment.
-- Shapes come from `testdata/corpus` and the pinned `sdk.d.ts`, and are
-  rebuilt from the real captures once the capture run lands.
+  replaced by `-` — underscore included, case preserved, existing dashes
+  untouched (verified against the live `~/.claude/projects` tree). Observed:
+  `/Users/x/.config/y` → `-Users-x--config-y`;
+  `/private/var/folders/_m/x` → `-private-var-folders--m-x`. The same rule names
+  the subagent directory beside the transcript.
+- ROTATION (`/clear`). The retired identity's file is CLOSED, never truncated or
+  moved — a resume of the old id must still load — and gets one closing system
+  record before the identity moves. THE CORPUS HAS NO `/clear` RECORD: it
+  carries `compact_boundary` for compaction and nothing for a clear, so the mock
+  writes a `compact_boundary`-shaped record with `content: "Conversation
+  cleared"` and emits the DECLARED `conversation_reset` message plus a fresh
+  `system:init` on the stream. Flagged as declared-not-observed.
+- RESUME. The writer reads the existing transcript's last CHAINED record and
+  adopts its uuid as the chain head, so a resumed session's first record names a
+  parent a reader can resolve. Unchained metadata lines are skipped when looking
+  for that head, as is a half-written trailing line (what a killed CLI leaves).
+- Shapes come from `testdata/corpus` and the pinned `sdk.d.ts`, and are rebuilt
+  from the real captures once the capture run lands.
 
 Cross-plane rulings (shim lead, 2026-08-29, relayed to the store/sidecar lead):
 
@@ -542,7 +584,9 @@ Cross-plane rulings (shim lead, 2026-08-29, relayed to the store/sidecar lead):
   get distinct ids on both planes, and the usage carrier is the message's
   FIRST block (index 0) whichever line it lands on. The mock writes split
   lines the way the real binary does (one block per assistant line, same
-  `message.id`).
+  `message.id`) — AND splits the SDK side identically, emitting one `assistant`
+  message per block sharing the id, each with its own uuid and the SAME usage
+  object. That symmetry is what lets the fold pick block 0 on either plane.
 - `deferred_tools_delta` and `agent_listing_delta` attachment records are
   VENDOR_SPECIFIC RESIDUE — `StoreUnservedItem.vendor_specific{kind:
   "attachment/<type>"}` (e.g. `attachment/deferred_tools_delta`), the exact
@@ -555,3 +599,41 @@ Cross-plane rulings (shim lead, 2026-08-29, relayed to the store/sidecar lead):
   (R9 default); the shim pre-mints it with `Options.sessionId` on a fresh
   start. The rotation/fork rule is settled in this section by the engine
   agent's evidence (pending).
+
+### Where the sixteen failure arms actually live (mock agent evidence)
+
+`sdk.d.ts` declares FOUR `result` error subtypes — `error_during_execution`,
+`error_max_turns`, `error_max_budget_usd`,
+`error_max_structured_output_retries`. Every finer stop is a `TerminalReason` on
+the result: `blocking_limit`, `rapid_refill_breaker`, `prompt_too_long`,
+`image_error`, `model_error`, `api_error`, `malformed_tool_use_exhausted`,
+`aborted_streaming`, `aborted_tools`, `stop_hook_prevented`, `hook_stopped`,
+`tool_deferred`, `max_turns`, `background_requested`, `completed`,
+`budget_exhausted`, `structured_output_retry_exhausted`,
+`tool_deferred_unavailable`, `turn_setup_failed`. A converter keyed on `subtype`
+alone can reach four of the sixteen conversation.v1 arms; the pairing is the
+contract.
+
+`AgentContinuationPrevented` has NO `TerminalReason` of its own. The two
+declared prevent-continuation signals are
+`SDKInformationalMessage.prevent_continuation` and the transcript's
+`system:stop_hook_summary.preventedContinuation`; the mock emits both beside a
+`stop_hook_prevented` terminal. UNSETTLED — a real capture may show otherwise.
+
+### Session facts with no message behind them (mock agent evidence)
+
+`sdk.d.ts` declares NO system message for `model_changed`,
+`permission_mode_changed`, `fast_mode`, `mcp_server`, `account_usage` or
+`context_budget_warning`. Those `SessionUpdate` arms are produced by the shim
+from CONTROL ANSWERS and from fields riding other messages:
+
+- model change → the next assistant message's `message.model` (the mock also
+  emits the declared `session_state_changed` beat, which carries no model).
+- permission mode → `SDKStatusMessage.permissionMode`.
+- fast mode → `result.fast_mode_state` / `fast_mode_disabled_reason`, and
+  `init.fast_mode_state`.
+- mcp servers → `query.mcpServerStatus()`.
+- account usage → `query.usage_EXPERIMENTAL…()`, whose four unavailable shapes
+  are distinct on the wire: `rate_limits: null` (service), a null WINDOW, a null
+  `utilization` inside a present window, and `behaviors: null` (the local scan).
+- context budget → the vendor's `context_tip` ATTACHMENT record.
