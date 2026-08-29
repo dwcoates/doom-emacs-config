@@ -5,8 +5,13 @@ import (
 	"fmt"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/wsm"
 )
 
@@ -121,4 +126,39 @@ func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operatio
 	log.Debug(operation, "republished the roster registry", dlog.Context{
 		"workspaces": len(workspaces), "repositories": len(repositories), "tasks": len(tasks),
 	})
+}
+
+// promptSubmission composes the queue submission for a daemon-born prompt: the
+// workspace-creation origin, no bubble target. It exists so the create verb and
+// the command-file ingress cannot spell the same submission differently.
+func promptSubmission(ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) promptqueue.Submission {
+	return promptqueue.Submission{
+		WS:     ws,
+		Turn:   turn,
+		Said:   said,
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED,
+	}
+}
+
+// rootFeed is the workspace's top-level feed, which is where every
+// daemon-synthesized row this package produces lands.
+func rootFeed() feedid.Feed { return feedid.Feed{Root: true} }
+
+// coldGateRow renders the answered gate as its resolved row. The row's id comes
+// from the gate's own address, so the answer UPSERTS the standing row rather
+// than adding a second one beneath it.
+func coldGateRow(ws ids.WorkspaceID, vendorSessionID string, answer *frontendv1.FeedColdGateResolved) *frontendv1.FeedRow {
+	ref := feedid.Ref{
+		WS:   ws,
+		Feed: rootFeed(),
+		Row:  feedid.RowKey{Kind: feedid.KindColdGate, ID: vendorSessionID},
+	}
+	return &frontendv1.FeedRow{
+		Id: feedid.Encode(ref),
+		Row: &frontendv1.FeedRow_ColdGate{
+			ColdGate: &frontendv1.FeedColdGate{
+				State: &frontendv1.FeedColdGate_Resolved{Resolved: answer},
+			},
+		},
+	}
 }

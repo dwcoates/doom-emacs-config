@@ -162,8 +162,10 @@ type Verbs interface {
 	// validating the mode against exactly what the topbar's picker served. An
 	// ungated mode needs the consent recorded at creation.
 	SetPermissionMode(ctx context.Context, ws ids.WorkspaceID, mode string) error
-	// Interrupt stops what the target names.
-	Interrupt(ctx context.Context, ws ids.WorkspaceID, target InterruptTarget, confirm bool) error
+	// Interrupt stops what the target names and ANSWERS with what it stopped:
+	// the interrupted turn, the number of detached items stopped, or "nothing
+	// was running", which is a success and not a failure.
+	Interrupt(ctx context.Context, ws ids.WorkspaceID, target InterruptTarget, confirm bool) (InterruptOutcome, error)
 	// AnswerPermission delivers the permission card's verdict.
 	AnswerPermission(ctx context.Context, ws ids.WorkspaceID, answer *conversationv1.AgentAnswer) error
 	// AnswerQuestion delivers the question card's answer, echoing the served
@@ -239,6 +241,10 @@ type Deps struct {
 	LoadPrompt PromptLoader
 	// Now supplies the instants the verbs stamp. nil means time.Now.
 	Now func() time.Time
+	// EvictLogSink drops one workspace's durable log sink when the workspace
+	// closes, releasing the shared descriptor. It is a function because
+	// dlog.Surfaces does not expose eviction yet; nil leaves the sink open.
+	EvictLogSink func(dir string) error
 }
 
 // PromptLoader reads one brief by name from a prompts directory at use time.
@@ -325,6 +331,10 @@ type Cards interface {
 	// ColdGate answers the standing cold gate's served menu, false when no
 	// gate stands.
 	ColdGate(ws ids.WorkspaceID) (ServedColdGate, bool)
+	// PermissionModes answers EXACTLY the switchable set the topbar's picker
+	// served, false when the workspace has served no picker. SetPermissionMode
+	// validates against it, because the daemon accepts only what it offered.
+	PermissionModes(ws ids.WorkspaceID) ([]string, bool)
 }
 
 // ServedPermission is one served permission ask: who asked, and whether a
