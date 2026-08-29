@@ -1948,7 +1948,7 @@ Non-nil means a load is in flight — concurrent invocations of
 If the awaited workspace's `agent-repl--on-session-start-event' hasn't
 fired by then, `agent-repl--snapshot-load-timeout' faults that one
 workspace — counting it under `:load-error' and surfacing it through
-`agent-repl--error' — and the loader advances to the next entry anyway.
+`agent-repl--fatal' — and the loader advances to the next entry anyway.
 Readiness is never synthesized for the timed-out workspace.  Tuned long
 enough for a first-time claude startup but short enough that a wedged
 workspace doesn't lock the entire load."
@@ -2095,10 +2095,10 @@ failure to WS and keeps the loader moving:
   the user needs to see, and tearing it down would also destroy the
   `:origin' window-configuration bookkeeping finish relies on,
 - `--snapshot-load-step' then runs the remaining queue, and only after it
-  returns is the fault raised through `agent-repl--error'.  The error is
+  returns is the fault raised through `agent-repl--fatal'.  The error is
   last precisely because it signals: raising it first would unwind the
   timer callback before the queue advanced, which is the abort this
-  function exists to avoid.  `agent-repl--error' writes the logfile line
+  function exists to avoid.  `agent-repl--fatal' writes the logfile line
   before signalling, so the fault is durable either way."
   (let ((state agent-repl--snapshot-load-state))
     (when (and state (equal ws (plist-get state :awaiting)))
@@ -2116,7 +2116,7 @@ failure to WS and keeps the loader moving:
       (setq agent-repl--restored-workspaces
             (delete ws agent-repl--restored-workspaces))
       (agent-repl--snapshot-load-step)
-      (agent-repl--error ws
+      (agent-repl--fatal ws
                          "snapshot-load timeout awaiting ws=%s; workspace left faulted, restore continued with the remaining entries"
                          ws))))
 
@@ -2511,7 +2511,7 @@ restore re-arms itself on the daemon's snapshot-applied edge
            (condition-case err
                (agent-repl-load-workspace-snapshot file t)
              (error
-              (agent-repl--error nil "startup restore: snapshot load aborted file=%s err=%S"
+              (agent-repl--fatal nil "startup restore: snapshot load aborted file=%s err=%S"
                                  file err)))
          (agent-repl--log nil
                           "startup restore: no snapshot file=%s; no restore requested"

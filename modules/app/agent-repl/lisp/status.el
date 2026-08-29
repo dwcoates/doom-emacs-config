@@ -26,70 +26,6 @@
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-state-poll-interval 1
-  "Seconds between workspace state update polls."
-  :type 'integer
-  :group 'agent-repl)
-
-(defcustom agent-repl-state-git-tick-modulus 5
-  "Per-workspace git refreshes fire once every N timer ticks.
-The 1Hz `agent-repl--update-all-workspace-states' timer drives both
-the cheap state-machine work (agent-running-p, mark-dead) and the
-expensive git work (`agent-repl--async-refresh-branch-merged').
-Cheap work runs every tick so transitions like `:done' -> `:idle'
-stay snappy.  Git work runs only when `(mod tick-counter N) == 0' so
-the per-ws fork load is amortized to one-in-N ticks; the on-disk
-reality git observes does not change at 1Hz, so polling that fast is
-wasteful.
-
-Lower values mean fresher cached git state at higher CPU cost;
-higher values do the inverse.  The default of 5 yields one git
-refresh per workspace per ~5 seconds, paired with the spread (see
-`agent-repl-state-spread-window') so even those refreshes are not
-bursty."
-  :type 'integer
-  :group 'agent-repl)
-
-(defcustom agent-repl-state-spread-window 1.0
-  "Seconds over which per-workspace state updates are spread per tick.
-Each tick, `agent-repl--update-all-workspace-states' snapshots the
-workspace list and processes one workspace at a time via
-`run-at-time' with gap `(max agent-repl-state-spread-min-gap (/ this
-N))', where N is the workspace count.  This flattens the per-tick
-burst (N forks landing simultaneously when the git modulus hits) into
-a smooth trickle paced across the window.
-
-Setting this to 0 collapses the spread to synchronous serial
-iteration, which is what tests want."
-  :type 'number
-  :group 'agent-repl)
-
-(defcustom agent-repl-state-spread-min-gap 0.05
-  "Floor on the per-step gap inside the workspace-state update chain.
-Computed as `(max this (/ agent-repl-state-spread-window N))' so
-high workspace counts can't spawn very-fast `run-at-time' timers."
-  :type 'number
-  :group 'agent-repl)
-
-(defcustom agent-repl-state-stale-threshold 5.0
-  "Seconds after which an in-flight update chain is considered wedged.
-`agent-repl--update-all-workspace-states' (the periodic timer
-entrypoint) skips its tick when the previous chain has not finished.
-If the in-flight marker is older than this threshold, the chain is
-treated as stuck (likely due to an error in a per-step body that
-escaped the `condition-case' net) and the flag is force-cleared so a
-new chain can start.  Belt-and-braces against permanent wedging.
-
-Age is only half the test.  Crossing this threshold means a chain is
-suspect, not that it is dead: a chain whose next hop is still scheduled
-is starved rather than wedged (see
-`agent-repl--update-chain-continuation-pending-p'), which is routine when
-a long main-thread operation such as a full snapshot resync holds the
-thread past this many seconds.  Only a chain that is both this old AND
-has no successor left is force-cleared."
-  :type 'number
-  :group 'agent-repl)
-
 ;; There is no `agent-repl-done-idle-delay' any more, and no :done->:idle
 ;; decay for it to pace.  The decay moved a workspace off the green "ready
 ;; for review" color once the user had looked at it, which mattered while
@@ -109,7 +45,7 @@ has no successor left is force-cleared."
 ;; !! DO NOT REMOVE `agent-repl--tabline-space-toggle' OR ITS USAGE   !!
 ;; !! IN `agent-repl--tabline-advice',                                !!
 ;; !! `agent-repl--force-tab-bar-redraw', AND                         !!
-;; !! `agent-repl--update-all-workspace-states'.                      !!
+;; !! `agent-repl--status-dwell-tick'.                            !!
 ;; !!                                                                  !!
 ;; !! The tab-bar will NOT repaint unless the string it displays       !!
 ;; !! actually changes between ticks.  Toggling the cache-buster       !!
@@ -144,7 +80,7 @@ has no successor left is force-cleared."
 ;; !! flips the toggle AND drives `tab-bar-tabs-set' /                 !!
 ;; !! `force-mode-line-update' so                                     !!
 ;; !! the alternating string actually reaches the display.  The 1Hz   !!
-;; !! `agent-repl--update-all-workspace-states' timer calls            !!
+;; !! `agent-repl--status-dwell-tick' timer calls            !!
 ;; !! `--force-tab-bar-redraw' every tick.                              !!
 ;; !!                                                                  !!
 ;; !! This has been accidentally removed multiple times.  DO NOT       !!
@@ -153,7 +89,7 @@ has no successor left is force-cleared."
 ;; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 (defvar agent-repl--tabline-space-toggle nil
   "Non-nil means append the zero-width cache-buster to the tabline string.
-Flipped on every poll cycle by `agent-repl--update-all-workspace-states'
+Flipped on every repaint by `agent-repl--force-tab-bar-redraw'
 \(via `agent-repl--force-tab-bar-redraw').  Read (through
 `agent-repl--tabline-cache-buster') by `agent-repl--tabline-advice'
 AND by `agent-repl-workspace-tabline-formatted' /
@@ -234,102 +170,6 @@ every recognized priority."
 ;;                     :dead     — agent session has died.
 ;;                   Only :dead contributes to tab display (blue);
 ;;                   other values are bookkeeping only.
-
-(defun agent-repl--ws-state (ws)
-  "Return the current :agent-state keyword for workspace WS, or nil.
-Compat shim: equivalent to `agent-repl--ws-agent-state', retained for
-test callers that have not yet migrated."
-  (agent-repl--ws-get ws :agent-state))
-
-(defun agent-repl--ws-agent-state (ws)
-  "Return the current :agent-state keyword for workspace WS, or nil."
-  (agent-repl--ws-get ws :agent-state))
-
-(defun agent-repl--ws-repl-state (ws)
-  "Return the current :repl-state keyword for workspace WS, or nil."
-  (agent-repl--ws-get ws :repl-state))
-
-(defun agent-repl--ws-set-agent-state (ws state)
-  "Set workspace WS's :agent-state to STATE.
-STATE is one of: nil, :init, :idle, :thinking, :done, :permission."
-  (unless ws (error "agent-repl--ws-set-agent-state: ws is nil"))
-  (let ((previous (agent-repl--ws-get ws :agent-state)))
-    (agent-repl--log ws "agent-state: ws=%s previous=%s next=%s" ws previous state))
-  (agent-repl--ws-put ws :agent-state state)
-  (force-mode-line-update t)
-  (agent-repl--memory-state-save ws))
-
-(defun agent-repl--ws-set-repl-state (ws state)
-  "Set workspace WS's :repl-state to STATE.
-STATE is one of:
-  nil        — freshly killed / no session
-  :active    — panels displayed, session alive
-  :inactive  — panels hidden, session alive (plain `SPC o c' close)
-  :merged    — workspace's branch has been merged into its source.
-               Set when a merge lands
-               (alongside `:merge-completed t').  Takes precedence
-               over `:dead' so the 🔀 badge survives the post-merge
-               kill-and-poll cycle that would otherwise mark the
-               now-sessionless workspace dead.
-  :dead      — agent session gone
-
-There is no viewed-acknowledgment axis any more: `:done', `:ready' and
-`:idle' are all READY, so tracking whether the user had looked at a
-`:done' only ever changed the color without changing anything true.
-
-Persists the new value to disk via `agent-repl--state-save' when STATE
-is `:active' or `:inactive' so panel-visibility survives Emacs
-restart.  `:dead' / nil are not
-persisted — they reduce to \"no opinion\" at restart, so default
-open-panels behavior applies.  `:dead' is set via `--ws-put' directly
-(in `--mark-dead'), bypassing this setter, so no special-case is
-needed there."
-  (unless ws (error "agent-repl--ws-set-repl-state: ws is nil"))
-  (let ((previous (agent-repl--ws-get ws :repl-state)))
-    (agent-repl--log ws "repl-state: ws=%s previous=%s next=%s persists=%s"
-                      ws previous state (memq state '(:active :inactive))))
-  (agent-repl--ws-put ws :repl-state state)
-  (force-mode-line-update t)
-  (when (memq state '(:active :inactive))
-    (agent-repl--state-save ws))
-  (agent-repl--memory-state-save ws))
-
-(defun agent-repl--ws-agent-state-clear-if (ws state)
-  "Clear WS's :agent-state when it currently equals STATE.
-Compare-and-clear: no-op if the current value is not STATE."
-  (unless ws (error "agent-repl--ws-agent-state-clear-if: ws is nil"))
-  (if (eq (agent-repl--ws-get ws :agent-state) state)
-      (progn
-        (agent-repl--log ws "agent-state-clear-if %s %s -> nil" ws state)
-        (agent-repl--ws-put ws :agent-state nil)
-        (force-mode-line-update t))
-    (agent-repl--log-verbose ws
-                              "agent-state-clear-if ws=%s state=%s no-op (current=%s)"
-                              ws state (agent-repl--ws-get ws :agent-state))))
-
-;; --- Stop / SubagentStop coordination: DELETED (agent-shim cutover) ---
-;;
-;; The `:stop-received' / `:pending-subagents' hook-counter block and
-;; `agent-repl--fully-stopped-p' were deleted in the agent-shim cutover
-;; (design §10).  The turn-finished (`:thinking → :done') resolution and
-;; the subagent-in-flight accounting are now owned by the daemon's SSM,
-;; which resolves THE render-state (RENDER_STATE_DONE / IDLE / etc.) and
-;; pushes it as a `frontend.v1' WorkspaceState frame — Emacs no longer
-;; counts SubagentStart/SubagentStop hooks or gates on them.  The Stop /
-;; SubagentStart / SubagentStop / StopFailure managed hooks that fed this
-;; block are removed from `install.el', and their sentinel dispatch
-;; handlers are removed from `sentinel.el'.
-
-;; Legacy APIs below delegate into the typed setters.  Call sites migrate
-;; to the typed names in a later commit; retained here for the duration
-;; of the migration so every existing caller keeps working.
-
-(defun agent-repl--ws-set (ws state)
-  "Set workspace WS to STATE.
-Thin wrapper around `agent-repl--ws-set-agent-state' preserved for
-callers that have not yet migrated to the typed setter.
-STATE is one of: :thinking, :done, :permission, :inactive."
-  (agent-repl--ws-set-agent-state ws state))
 
 (defun agent-repl--ws-dir (ws)
   "Return the project root directory for workspace WS.
@@ -415,33 +255,11 @@ means the same thing to them, which is that this workspace cannot be
 relied on right now.  The sidebar carries the distinction where it is
 worth having.
 
-WHAT BLUE NO LONGER COVERS is the benign half it used to.  A single
-`:dormant\=' state meant both \"we put this session to sleep on purpose to
-reclaim its ~500MB\" and \"the backend substrate is broken\", so the most
-ordinary event in the system — the idle sweeper reaping a workspace
-nobody had touched for an hour — painted a tab exactly like a dead shim
-did.  A color that fires on both means neither, and a user who watches
-every workspace go blue after an ordinary daemon bounce learns to ignore
-blue.  `agent-repl--color-hibernated-teal\=' took that half, and blue
-finally means something is actually wrong.")
-
-(defconst agent-repl--color-hibernated-teal  "#0d9488"
-  "TEAL: no live backend session, and NOTHING IS WRONG.
-The session was deliberately put to sleep to reclaim its memory, or
-nothing has ever been wired to this workspace.  No bring-up failed and
-no session controller died — there is simply nobody home, on purpose.
-
-It is NOT green, and its precedence is the blue band\='s rather than
-green\='s: a teal workspace cannot be interacted with until a bring-up is
-paid for, which is exactly the claim green exists to deny.  Only the
-REASON is benign.  Ranked below green instead, a stale `:thinking\=' row
-from the turn a workspace was hibernated after would mask a workspace
-that is genuinely asleep.
-
-Deliberately far from `agent-repl--color-init-blue\=' rather than a shade
-of it: the two states were ONE before the split, and a teal that reads as
-\"bluish\" would re-merge them in the only place it matters, which is a
-glance at the tab bar.")
+THERE IS NO TEAL BESIDE IT ANY MORE.  Teal existed solely to hold
+hibernation apart from a broken substrate; hibernation LEFT THE CONTRACT
+\(a parked workspace presents as live with `shim_attached' false\), so the
+sixth color went with it, and blue no longer carries a benign second
+job.")
 
 (defconst agent-repl--color-thinking-red     "#cc3333"
   "RED: a turn is in flight.
@@ -520,130 +338,161 @@ tabs; readable against `agent-repl--color-selected-bg'.")
 
 ;; --- The six-color assignment --- ;;
 
-(defconst agent-repl--state-color
-  '((:init           . "blue")
-    (:severed        . "blue")
-    (:dead           . "blue")
-    (:degraded       . "blue")
-    (:start-failed   . "blue")
-    ;; TEAL, alone.  It is the benign half of the state `:dormant' used to be,
-    ;; and the whole reason it is not blue is that blue was firing on both an
-    ;; intentional teardown and a broken substrate.
-    (:hibernated     . "teal")
-    (:vendor-blocked . "purple")
-    (:submitting     . "red")
-    (:thinking       . "red")
-    (:clearing       . "red")
-    (:compacting     . "red")
-    (:idle-async     . "yellow")
-    (:idle           . "green")
-    (:ready          . "green")
-    (:done           . "green")
-    (:interrupted    . "green")
-    (:permission     . "green")
+(defconst agent-repl-status-color-table
+  '((:none            . "none")
+    (:inactive        . "none")
+
+    (:init            . "blue")
+    (:severed         . "blue")
+    (:dead            . "blue")
+    (:degraded        . "blue")
+    (:start-failed    . "blue")
+
+    (:vendor-blocked  . "purple")
+
+    (:submitting      . "red")
+    (:thinking        . "red")
+    (:clearing        . "red")
+    (:compacting      . "red")
+
+    (:idle-async      . "yellow")
+
+    (:ready           . "green")
+    (:done            . "green")
+    (:interrupted     . "green")
+    (:permission      . "green")
+
     (:merge-enqueuing . "none")
-    (:merging        . "none")
-    (:merge-queued   . "none")
-    (:merge-conflict . "none")
-    (:merge-failed   . "none")
-    (:merged         . "none"))
-  "Which of the six colors each render state takes, BY NAME.
+    (:merging         . "none")
+    (:merge-queued    . "none")
+    (:merge-conflict  . "none")
+    (:merge-failed    . "none")
+    (:merged          . "none"))
+  "Which of the five colors each ROSTER STATUS ARM takes, BY NAME.
+
+Keyed by the `RosterRow.status' arm keywords `wire-roster.el' decodes
+\(`agent-repl-wire-roster-row-status-keywords\='), which is the ONE
+lifecycle vocabulary now: the daemon resolves every workspace\='s state
+and the arm it sets IS the state a renderer paints.  There is no second
+spelling and no local state machine left to keep aligned with it.
 
 This is Emacs\='s corner of the cross-language contract in
-proto/vocab/render-colors.json.  Go, TypeScript and this table each
-assert against that one file, which is the only mechanism that makes a
-divergence between the three fail loudly rather than quietly — sidebar.el
-has claimed in a COMMENT that its wire table and the webapp\='s union are
-one contract, and until now nothing checked it.
+proto/vocab/render-colors.json\='s `roster_status\=' section.  Go,
+TypeScript and this table each assert against that one file, which is
+the only mechanism that makes a divergence between the three fail loudly
+instead of quietly; `test-render-colors.el\=' is this side of it and
+fails on any row that diverges and on any arm missing from either side.
 
 It names the color rather than its value: each renderer keeps its own
-hex, since a tab-bar background and a CSS dot legitimately want different
-shades of one idea.  What may never differ is the ASSIGNMENT.
+hex, since a tab-bar background and a CSS dot legitimately want
+different shades of one idea.  What may never differ is the ASSIGNMENT.
 
-\"none\" is a real answer.  The merge states take none of the six here:
-the sidebar reports them with a glyph and a status word, so no color has
-to.  The tab bar, which has neither, DECLARES an override for the
-in-flight three — see `agent-repl--tab-bar-color-overrides\=' and the
-fixture\='s \"surface_overrides\" section.  This table is what every
-surface starts from, never what the tab bar finishes with; read
-`agent-repl--tab-bar-state-color\=' for that.")
+\"none\" is a real answer.  The merge arms take none of the five here —
+the sidebar reports them with a glyph rather than spending a lifecycle
+color on the merge pipeline — and `none\=' and `inactive\=' take none
+because a workspace with no session has no lifecycle to report at all.
+THE TAB BAR DECLARES ITS OWN OVERRIDES (see
+`agent-repl-status-tab-bar-color-overrides\='); this table is what every
+surface starts from, never what the tab bar finishes with.
 
-(defconst agent-repl--tab-bar-color-overrides
+THERE IS NO TEAL, and no RENDER_STATE_* enum: both left with
+hibernation.")
+
+(defconst agent-repl-status-tab-bar-color-overrides
   '((:merge-enqueuing . "purple")
     (:merge-queued    . "purple")
     (:merging         . "purple")
     (:vendor-blocked  . "blue"))
-  "Where the TAB BAR paints a state differently from `agent-repl--state-color\='.
+  "Where the TAB BAR paints an arm differently from the shared assignment.
 
-Emacs\='s corner of the fixture\='s \"surface_overrides.emacs_tab_bar\"
+Emacs\='s corner of the fixture\='s `surface_overrides.emacs_tab_bar\='
 section, asserted against it row for row.  The override is DECLARED in
 the shared file rather than kept as a private local table: a surface that
 quietly disagrees with the contract is the exact drift the contract
-exists to catch, so the escape hatch has to be legible from the contract
-itself.
+exists to catch.
 
-The tab bar carries no badges and no glyphs — a state reaches it only as
-the [N] bracket\='s color — so \"none\" there renders a workspace whose
-merge is running identically to one nobody has touched.  PURPLE is the
-tab bar\='s merge color: a merge is the system\='s own work rather than the
-agent\='s, and red would have said \"a turn is running\" about a workspace
-whose turn ended before the merge began.
+The tab bar has no room for the sidebar\='s status word — a state reaches
+it as the [N] bracket\='s color plus at most one glyph — so `none\' there
+would render a workspace whose merge is running identically to one nobody
+has touched.  PURPLE says what is true of the three IN-FLIGHT merge arms:
+work is in flight, it is the SYSTEM\='s rather than the agent\='s, and the
+user cannot act on the workspace until it resolves.  `merge_conflict\'
+wants the user and the other two are terminal, so none of them is
+overridden.
 
-The merge rows are the three states with no verdict yet: about to
-enqueue, waiting behind a sibling in its repository\='s queue, and
-running.  `:merge-conflict\=' is NOT here — a conflict is waiting on the
-user, which is the opposite of the in-flight claim — and
-`:merge-failed\=' and `:merged\=' are terminal.
+`:vendor-blocked\=' is the fourth row, and it and the merge rows are ONE
+decision: purple can carry only one meaning on a surface this small, so
+vendor-blocked joins the blue band it already belongs beside — every way
+the route to a working session is compromised.")
 
-`:vendor-blocked\=' is the fourth row, and it is here because purple can
-say only ONE thing on a surface with no glyph to disambiguate two.  It
-takes the blue this tab bar already spends on `:init\=', `:severed\=',
-`:dead\=' and `:degraded\=' — every way the route to a working session is
-compromised — which is exactly what an auth wall, a usage limit or a
-persistent vendor failure is.  The badge-bearing surfaces keep it purple
-on the shared assignment.")
-
-(defconst agent-repl--tab-bar-state-color
+(defconst agent-repl-status-tab-bar-color-table
   (mapcar (lambda (row)
             (cons (car row)
-                  (or (alist-get (car row) agent-repl--tab-bar-color-overrides)
+                  (or (alist-get (car row) agent-repl-status-tab-bar-color-overrides)
                       (cdr row))))
-          agent-repl--state-color)
-  "The color each render state takes ON THE TAB BAR, by name.
+          agent-repl-status-color-table)
+  "The color each roster status arm takes ON THE TAB BAR, by name.
 
-`agent-repl--state-color\=' with `agent-repl--tab-bar-color-overrides\='
-layered over it.  DERIVED rather than written out, so the tab bar\='s
-table can never disagree with the shared one about which states EXIST —
-only about the handful of colors it explicitly overrides.
+`agent-repl-status-color-table\=' with
+`agent-repl-status-tab-bar-color-overrides\=' layered over it.  DERIVED
+rather than written out, so the tab bar\='s table can never disagree with
+the shared one about which arms EXIST — only about the four colors it
+explicitly overrides.")
 
-This is the table `agent-repl--tab-palette\=' answers to.  The shared
-table remains the contract every other surface reads.")
+(defconst agent-repl-status-merge-glyphs
+  '((:merge-enqueuing . "⧖")
+    (:merge-queued    . "⧖")
+    (:merging         . "↻")
+    (:merge-conflict  . "≠")
+    (:merge-failed    . "✗")
+    (:merged          . "✓"))
+  "The character each merge arm draws, keyed by the fixture\='s glyph NAMES.
+
+proto/vocab/render-colors.json\='s `merge_glyphs\=' section names WHICH
+glyph a merge state gets (queue, recycle, conflict, failed, check) and
+deliberately not which character: each renderer maps those names to
+whatever its surface can draw.  This is the tab bar\='s mapping, and the
+assertion test checks that every named glyph has a character here.
+
+The merge arms take no color on the shared assignment precisely so the
+glyph can be the whole report; on the tab bar the three in-flight arms
+ALSO take purple, and the glyph then says which of the three it is.")
+
+(defconst agent-repl-status-inactive-glyph "?"
+  "The glyph an `inactive\=' row draws.
+Registered but with no open perspective, so there is no live session
+whose lifecycle a dot could report — the contract itself says \"drawn as
+a question mark\".")
+
+(defconst agent-repl-status-attention-glyph "●"
+  "The steady attention marker: the workspace has an unseen notification.
+The daemon sets `RosterRow.attention\=' when a notification fires and
+CLEARS it when SelectWorkspace names the workspace, so an ordinary tab
+switch is the whole clearing act — no dedicated ack verb exists.")
 
 (defconst agent-repl--color-by-name
   `(("blue"   . ,agent-repl--color-init-blue)
-    ("teal"   . ,agent-repl--color-hibernated-teal)
     ("purple" . ,agent-repl--color-merging-purple)
     ("red"    . ,agent-repl--color-thinking-red)
     ("yellow" . ,agent-repl--color-idle-async-yellow)
     ("green"  . ,agent-repl--color-done-green))
-  "Map each of the six color NAMES to the constant this renderer draws it with.
+  "Map each of the five color NAMES to the constant this renderer draws it with.
 
-The indirection is what lets `agent-repl--state-color\=' speak the shared
+The indirection is what lets the color tables speak the shared
 vocabulary while the palette keeps painting with Emacs\='s own values.")
 
 (defconst agent-repl--color-precedence
-  '("blue" "teal" "purple" "red" "yellow" "green")
-  "The six-color precedence, strongest claim first.
+  '("blue" "purple" "red" "yellow" "green")
+  "The five-color precedence, strongest claim first.
 
 Each color is a strictly stronger claim about what the user CANNOT do
-than the one beneath it.  The SSM\='s SQL `prec\=' ranks are the sole
-authority; this restates that order for the cross-language assertion and
-may never reorder it.
+than the one beneath it: blue leads because a compromised route to a
+session denies everything else; purple is the vendor or the account
+refusing; red is the agent holding the turn; yellow is detached work the
+user can talk over; green is the session yours to use.
 
-TEAL SITS BETWEEN BLUE AND PURPLE, which is the SSM\='s `hibernated\=' at
-rank 15 — directly below the blue band (severed 12, starting 14) and
-above purple\='s 20.  Emphatically NOT below green: hibernation makes the
-same actionability claim blue does, and only the reason is benign.")
+The fixture\='s `precedence\=' array is the authority and this restates it
+for the cross-language assertion.  THERE IS NO TEAL in it any more.")
 
 (defun agent-repl--tab-palette-row (face color fg)
   "Build one `agent-repl--tab-palette' row from the parts that VARY.
@@ -694,15 +543,6 @@ light bracket numeral, and `agent-repl--tab-weight' throughout."
                   'agent-repl-tab-init
                   agent-repl--color-init-blue
                   agent-repl--color-light))
-    ;; HIBERNATED takes a color of its OWN, which is the one place in this
-    ;; palette where a borrowed shade was not enough.  Every other borrow above
-    ;; shares a hue because the two states share a claim; these two shared a
-    ;; claim about ACTIONABILITY and disagreed completely about FAULT, and
-    ;; painting them alike is what made blue unreadable.
-    (:hibernated . ,(agent-repl--tab-palette-row
-                     'agent-repl-tab-hibernated
-                     agent-repl--color-hibernated-teal
-                     agent-repl--color-light))
     (:thinking . ,(agent-repl--tab-palette-row
                    'agent-repl-tab-thinking
                    agent-repl--color-thinking-red
@@ -741,10 +581,6 @@ light bracket numeral, and `agent-repl--tab-weight' throughout."
                      'agent-repl-tab-permission
                      agent-repl--color-done-green
                      agent-repl--color-dark))
-    (:idle . ,(agent-repl--tab-palette-row
-               'agent-repl-tab-ready
-               agent-repl--color-done-green
-               agent-repl--color-dark))
     (:ready . ,(agent-repl--tab-palette-row
                 'agent-repl-tab-ready
                 agent-repl--color-done-green
@@ -800,29 +636,177 @@ light bracket numeral, and `agent-repl--tab-weight' throughout."
                   'agent-repl-tab-merging
                   agent-repl--color-merging-purple
                   agent-repl--color-light)))
-  "Per-state tab-appearance palette.
-Each entry fully describes both selected and unselected looks for a
-agent-state keyword via nested `:unselected' and `:selected' plists.
-`:repl-state :inactive' does not contribute to color (it is bookkeeping
-only).
+  "Per-arm tab-appearance palette, keyed by the ROSTER STATUS ARM.
+Each entry fully describes both selected and unselected looks for one
+`RosterRow.status' arm keyword via nested `:unselected' and `:selected'
+plists.
 
 Every row is built by `agent-repl--tab-palette-row', so a row states
 ONLY what it does not share with the others: its face, its color, and
 its unselected foreground.  The shape itself lives in that one function,
-where a change to what a row means reaches all twenty at once, and an
-entry is always ONE color end to end.
+and an entry is always ONE color end to end.
 
-Two kinds of row answer to `agent-repl--tab-bar-state-color' rather than
-to the shared `agent-repl--state-color', and both divergences are
-declared in `agent-repl--tab-bar-color-overrides'.  The three IN-FLIGHT
-merge states have rows at all because of the override that gives them
-purple; `:vendor-blocked' has a row whose color is BLUE here and purple
-on every badge-bearing surface.
+Two kinds of row answer to `agent-repl-status-tab-bar-color-table'
+rather than to the shared `agent-repl-status-color-table', and both
+divergences are declared in
+`agent-repl-status-tab-bar-color-overrides'.  The three IN-FLIGHT merge
+arms have rows at all because of the override that gives them purple;
+`:vendor-blocked' has a row whose color is BLUE here and purple on every
+badge-bearing surface.
 
-`:merge-conflict' and `:merge-failed' still have NO entry: they take none
-of the six, and with no badge on the tab the merge pipeline says what it
-has to say about them in the sidebar.  `:merged' likewise never reaches
-the tab-bar at all (`agent-repl--filter-merged-names').")
+The arms taking `none' have NO entry and fall through to
+`agent-repl--tab-default': `:merge-conflict', `:merge-failed' and
+`:merged' report themselves with a glyph, and `:none' and `:inactive'
+have no lifecycle to report at all.")
+
+
+;;; The roster is the state -----------------------------------------------
+;;
+;; EMACS SUBSCRIBES WatchWorkspaceRoster and the row's status arm is the
+;; ONE source for tab coloring.  There is no HostWorkspace lifecycle axis to
+;; combine it with and no local machine to reconcile it against: the daemon
+;; resolves the lifecycle, coarsens it onto this vocabulary, and pushes the
+;; whole roster on any change.
+
+(defun agent-repl-status-tab-state (ws)
+  "Return WS's tab state: its roster row's status arm keyword, or nil.
+
+nil means the roster has not spoken about WS yet — a tab that exists
+locally before its first push, or a workspace with no row.  It is drawn
+UNCOLORED rather than guessed at: a colour invented here would be a
+second answer to a question only the daemon answers."
+  (let ((arm (and (fboundp 'agent-repl-roster-status-for-ws)
+                  (agent-repl-roster-status-for-ws ws))))
+    (agent-repl--log-verbose ws "elisp.status.tab-state: ws=%s arm=%s" ws arm)
+    arm))
+
+(defun agent-repl-status-tab-color (arm)
+  "Return the color NAME the tab bar paints ARM with, or \"none\".
+Reads `agent-repl-status-tab-bar-color-table', which is the shared
+assignment with the tab bar's declared overrides layered over it.  An
+arm this build does not know is a contract breach the codec already
+refused, so reaching here with one is a programming error and is logged
+at ERROR rather than painted."
+  (cond
+   ((null arm) "none")
+   ((alist-get arm agent-repl-status-tab-bar-color-table))
+   (t
+    (agent-repl--error nil "elisp.status.tab-color: unknown arm=%S" arm)
+    "none")))
+
+(defun agent-repl-status-tab-glyph (ws arm)
+  "Return the glyph WS draws for ARM, or nil when it draws none.
+Three glyphs exist, in precedence order: the merge pipeline's (the
+merge arms carry no lifecycle color, so the glyph is their whole
+report), the inactive question mark, and the attention marker."
+  (let ((glyph (or (alist-get arm agent-repl-status-merge-glyphs)
+                   (and (eq arm :inactive) agent-repl-status-inactive-glyph)
+                   (and (agent-repl-status-attention-visible-p ws)
+                        agent-repl-status-attention-glyph))))
+    (agent-repl--log-verbose ws "elisp.status.tab-glyph: ws=%s arm=%s glyph=%s"
+                             ws arm (or glyph "none"))
+    glyph))
+
+;;; The attention marker and its blink ---------------------------------------
+;;
+;; THE CANONICAL BLINK CADENCE is specified ONCE, on `frontend.v1'
+;; `RosterRowAttention' (frontend/v1/sidebar.proto): TWO blinks — 500 ms
+;; on, 500 ms off, twice — then a steady marker until cleared.  The webapp
+;; sidebar and this tab bar both implement exactly that spec and cite that
+;; message; a divergent cadence is a DEFECT, and the consistency requirement
+;; is code-level rather than coincidental.
+;;
+;; The marker's LIFECYCLE is daemon-owned: it is set when a notification
+;; fires and cleared when SelectWorkspace names the workspace, both of which
+;; arrive as a re-pushed roster.  Emacs times only the blink.
+
+(defconst agent-repl-status-blink-schedule
+  '((0.0 . t) (0.5 . nil) (1.0 . t) (1.5 . nil) (2.0 . t))
+  "The blink cadence of `frontend.v1' `RosterRowAttention', in seconds.
+Marker ON at 0 ms, OFF at 500, ON at 1000, OFF at 1500, and STEADY ON
+from 2000 — two blinks of 500 ms on and 500 ms off, then steady.  The
+schedule is data so the test can assert the exact instants against the
+one spec rather than against a re-reading of the implementation.")
+
+(defvar agent-repl-status--marker-on (make-hash-table :test 'equal)
+  "Workspace -> whether its attention marker is drawn right now.")
+
+(defun agent-repl-status--blink-timer-key (ws index)
+  "Return the keyed-timer key for WS's blink step INDEX.
+Deterministic per workspace and per step, which is what makes a second
+`agent-repl-status-blink-tab' RESTART the cadence:
+`agent-repl--register-timer' cancels and replaces the timer already
+held under the key."
+  (intern (format "agent-repl-status-blink-%s-%d" ws index)))
+
+(defun agent-repl-status--set-marker (ws on)
+  "Draw or undraw WS's attention marker and repaint the tab bar."
+  (puthash ws on agent-repl-status--marker-on)
+  (agent-repl--log ws "elisp.status.blink-step: ws=%s marker=%s" ws (if on "on" "off"))
+  (agent-repl--force-tab-bar-redraw))
+
+(defun agent-repl-status-attention-visible-p (ws)
+  "Return non-nil when WS's attention marker is drawn right now."
+  (and (gethash ws agent-repl-status--marker-on) t))
+
+(defun agent-repl-status-blink-tab (ws)
+  "Blink WS's tab-bar entry per the canonical cadence, then leave it steady.
+
+IMPLEMENTS `frontend.v1' `RosterRowAttention' EXACTLY, which is where
+that cadence is specified once for every surface: two blinks — 500 ms on,
+500 ms off, twice — then a steady marker until cleared.  The webapp
+sidebar implements the same spec from the same message, and a divergence
+between the two is a defect.
+
+Re-entrant: a second call while a blink is in flight RESTARTS the
+cadence rather than interleaving with it, because each step is armed
+under a deterministic per-workspace key that replaces its predecessor.
+The marker is cleared by `agent-repl-status-clear-attention', which the
+roster drives when the marker leaves the row."
+  (agent-repl--info ws "elisp.status.blink: ws=%s steps=%d"
+                    ws (length agent-repl-status-blink-schedule))
+  (let ((index 0))
+    (dolist (step agent-repl-status-blink-schedule)
+      (let ((delay (car step))
+            (on (cdr step)))
+        (agent-repl--register-timer
+         (agent-repl-status--blink-timer-key ws index)
+         (run-with-timer delay nil #'agent-repl-status--set-marker ws on)))
+      (setq index (1+ index))))
+  ws)
+
+(defun agent-repl-status-clear-attention (ws)
+  "Clear WS's attention marker and cancel any blink still in flight.
+Called when the marker LEAVES THE ROW — the daemon clears it on
+SelectWorkspace and re-pushes the roster — so a blink that has not
+finished must not paint a marker the daemon has already retracted."
+  (let ((index 0))
+    (dolist (_step agent-repl-status-blink-schedule)
+      (agent-repl--cancel-timer-key (agent-repl-status--blink-timer-key ws index))
+      (setq index (1+ index))))
+  (if (gethash ws agent-repl-status--marker-on)
+      (progn
+        (remhash ws agent-repl-status--marker-on)
+        (agent-repl--log ws "elisp.status.attention-cleared: ws=%s" ws)
+        (agent-repl--force-tab-bar-redraw))
+    (agent-repl--log-verbose ws "elisp.status.attention-cleared: ws=%s already-clear" ws)))
+
+(defun agent-repl-status-sync-attention (roster)
+  "Follow ROSTER's attention markers: steady on where set, cleared where not.
+Registered on `agent-repl-roster-update-functions'.  A row that ARRIVES
+carrying the marker is shown it steadily — the blink itself is driven by
+the notification push (host.el), which is the EVENT; the roster carries
+the standing FACT."
+  (dolist (entry (agent-repl-roster-walk roster))
+    (let* ((row (plist-get entry :row))
+           (ws (agent-repl--ws-by-ref-id (agent-repl-roster-row-id row))))
+      (when ws
+        (if (agent-repl-roster-row-attention-p row)
+            (unless (agent-repl-status-attention-visible-p ws)
+              (agent-repl-status--set-marker ws t))
+          (agent-repl-status-clear-attention ws))))))
+
+(add-hook 'agent-repl-roster-update-functions #'agent-repl-status-sync-attention)
 
 (defun agent-repl--tab-spec (state selected)
   "Return the appearance spec (plist) for STATE with SELECTED flag.
@@ -861,14 +845,6 @@ of the tab falls back to the default appearance."
        :foreground ,agent-repl--color-light
        :weight ,agent-repl--tab-weight))
   "Face for workspace tabs where the agent is initializing (blue).")
-
-(defface agent-repl-tab-hibernated
-  `((t :background ,agent-repl--color-hibernated-teal
-       :foreground ,agent-repl--color-light
-       :weight ,agent-repl--tab-weight))
-  "Face for workspace tabs put to sleep on purpose (teal + 💤).
-Not blue: nothing is wrong here, and blue\='s only job now is to mean
-that something is.")
 
 (defface agent-repl-tab-thinking
   `((t :background ,agent-repl--color-thinking-red
@@ -914,67 +890,6 @@ more.  A vendor-blocked workspace paints BLUE on the tab bar, so it
 takes `agent-repl-tab-init' exactly as `:severed', `:dead' and
 `:degraded' do — every one of them a compromised route to a working
 session.")
-
-;;; The daemon-link indicator
-;;
-;; A workspace tab paints a DAEMON-OWNED fact: the state the daemon pushed
-;; for that workspace's session.  Nothing on that row can describe Emacs's
-;; own link to the daemon, and for a long time nothing anywhere did — a
-;; command that vanished on the way to the daemon left every tab painting a
-;; perfectly healthy session while the command plane was dead.
-;;
-;; This indicator is the frontend's own fact, deliberately rendered OUTSIDE
-;; the tab row (right-aligned, its own segment) so it can never be read as
-;; a verdict on any one workspace.  Its source is
-;; `agent-repl-uds-link-health', which frontend-uds.el owns.
-(declare-function agent-repl-uds-link-health "frontend-uds" ())
-(declare-function agent-repl--frontend-expected-restart-covering-initiator
-                  "daemon" (&optional as-of))
-(declare-function agent-repl--frontend-expected-restart-window-live-p "daemon" ())
-
-(defface agent-repl-daemon-link-degraded
-  `((t :background ,agent-repl--color-thinking-red
-       :foreground ,agent-repl--color-light
-       :weight ,agent-repl--tab-weight))
-  "Face for the tab-bar indicator saying the DAEMON LINK is degraded.
-Distinct from every `agent-repl-tab-*' face by position rather than by
-color: those paint one workspace's daemon-pushed session state, this
-paints Emacs's own command link to the daemon.")
-
-(defconst agent-repl-daemon-link-degraded-label " DAEMON LINK DEGRADED "
-  "The visible caption of the degraded-command-link tab-bar indicator.
-Names the LINK rather than any workspace, because a degraded link says
-nothing about which session the user was talking to.")
-
-(defun agent-repl-daemon-link-segment ()
-  "Return the right-aligned DAEMON LINK indicator for the tab bar.
-
-Empty while `agent-repl-uds-link-health' is `:healthy', so the segment
-costs nothing and shows nothing in the ordinary case.  It renders
-`agent-repl-daemon-link-degraded-label' for EITHER degraded condition the
-reader owns: a command unacknowledged past its deadline, or a link
-process that is not connected at all (down, dialing, or waiting on a
-scheduled reconnect).  The label stays until an ack lands inside its
-deadline AND the link is connected again.
-
-Runs inside redisplay, so it deliberately performs no logging: the health
-transitions themselves are logged where they are decided, in
-frontend-uds.el.  For the same reason the restart window is read through
-its side-effect-free predicate, never through the reader that expires an
-elapsed window as it answers.
-
-A DELIBERATE BOUNCE IS NOT A DEGRADED LINK.  While an expected-restart
-window is open — armed by the restart coordinator, or by the daemon's own
-restart announcement — the link being down is a PHASE of a restart
-somebody ordered, and painting an alarm for it is exactly the noise the
-window exists to remove.  The suppression is bounded by the window: a
-daemon that goes away and stays away has its window elapse, and this
-segment lights up as it always did."
-  (if (and (eq (agent-repl-uds-link-health) :degraded)
-           (not (agent-repl--frontend-expected-restart-window-live-p)))
-      (propertize agent-repl-daemon-link-degraded-label
-                  'face 'agent-repl-daemon-link-degraded)
-    ""))
 
 (defun agent-repl--force-tab-bar-redraw ()
   "Force the tab-bar to repaint NOW, bypassing its string-equality cache.
@@ -1024,10 +939,10 @@ for the cache-buster rationale."
   "Render a tab string for workspace NAME from SPEC.
 SPEC is a plist with keys :bg :fg :bracket-fg :weight (see
 `agent-repl--tab-palette' docstring).  NAME-FACE is applied to the
-workspace-name portion.  LABEL is the bracket content (number or
-emoji).  IMG-STR, when non-nil, is inserted between bracket and name
-with a single un-faced space on each side so the image does not butt
-up against the name's background.
+workspace-name portion.  LABEL is the bracket content (the tab number).
+IMG-STR, when non-nil, is the badge run (priority label and glyph)
+inserted between bracket and name with a single un-faced space on each
+side so it does not butt up against the name's background.
 
 The string ends with an un-faced trailing space so each entry
 self-terminates.  Emacs's `display_tab_bar_line' calls
@@ -1063,6 +978,23 @@ face so selection dims the state color."
   (when-let ((priority (agent-repl--ws-get name :priority)))
     (when-let ((img (agent-repl--priority-image priority)))
       (propertize " " 'display img))))
+
+(defun agent-repl--tab-badge-str (name arm)
+  "Return the run drawn BEFORE NAME's name region for ARM, or nil.
+
+Two things live there, in this order: the roster's PRIORITY BADGE label
+\(resolver-composed and drawn verbatim; ordering is already the
+resolver's and this is only the label) and the arm's glyph
+\(the merge pipeline's, the inactive question mark, or the attention
+marker).  Both are absent far more often than present, so the whole run
+is nil in the ordinary case and the tab is name and bracket alone."
+  (let* ((row (and (fboundp 'agent-repl-roster-row-for-ws)
+                   (agent-repl-roster-row-for-ws name)))
+         (badge (and row (agent-repl-roster-row-priority-label row)))
+         (glyph (agent-repl-status-tab-glyph name arm))
+         (parts (delq nil (list badge glyph))))
+    (when parts
+      (string-join parts " "))))
 
 ;;; Ready-view acknowledgment
 ;;
@@ -1114,7 +1046,7 @@ activated has no stamp and has therefore never been viewed."
 
 (defun agent-repl--note-ready-view-dwell ()
   "Latch the ready-view acknowledgment for the workspace on screen.
-Rides the 1Hz heartbeat (`agent-repl--update-all-workspace-states'),
+Rides the dwell heartbeat (`agent-repl--status-dwell-tick'),
 which is the same tick that repaints the tab-bar, so the fade lands on
 the first repaint at or after the delay rather than needing a timer of
 its own.  Idempotent: the latch is written once and re-checking a
@@ -1211,18 +1143,19 @@ UI-boundary tolerance: returns nil for unknown ws (see
 
 (defun agent-repl--render-tab-entry (name current-name index)
   "Render a single tab entry for workspace NAME.
-CURRENT-NAME is the active workspace name.  INDEX is the 1-based
-tab position.  The display state (from `agent-repl--ws-display-state')
-drives the name face.  The appearance spec is resolved via
-`agent-repl--tab-spec' when display-state is non-nil; when display-state
-is nil but `agent-repl--ws-bracket-state' returns a state (panels
-dismissed for a workspace that still has agent-state, or a `:ready'
-workspace whose ready-view acknowledgment has latched), the spec is
-built via `agent-repl--tab-spec-bracket-only' so only the [N] bracket
-keeps the state's color.  The bracket label is the tab's 1-based INDEX
-and nothing else: state reaches the bracket as COLOR, so a workspace
-whose panels are closed still reads its state from the bracket's
-color without any glyph beside the numeral."
+CURRENT-NAME is the active workspace name.  INDEX is the 1-based tab
+position.  The display state (from `agent-repl--ws-display-state') drives
+the name face.  The appearance spec is resolved via `agent-repl--tab-spec'
+when display-state is non-nil; when display-state is nil but
+`agent-repl--ws-bracket-state' returns an arm (panels dismissed for a
+workspace the roster does report on, or a `:ready' workspace whose
+ready-view acknowledgment has latched), the spec is built via
+`agent-repl--tab-spec-bracket-only' so only the [N] bracket keeps the
+arm's color.  The bracket label is the tab's 1-based INDEX and nothing
+else: state reaches the bracket as COLOR.
+
+The badge run — the roster's priority label and the arm's glyph — is
+drawn BEFORE the name."
   ;; Called on every tab-bar redisplay, potentially many times per second;
   ;; renderer branch traces would overwhelm even verbose diagnostics.
   (let* ((selected      (equal current-name name))
@@ -1235,8 +1168,9 @@ color without any glyph beside the numeral."
                           (agent-repl--tab-spec display-state selected)))
          (label         (number-to-string index))
          (face          (agent-repl--tab-face display-state selected))
-         (img-str       (agent-repl--tab-priority-image-str name)))
-    (agent-repl--render-tab name spec label face img-str)))
+         (badge         (agent-repl--tab-badge-str
+                         name (or display-state bracket-state))))
+    (agent-repl--render-tab name spec label face badge)))
 
 (cl-defun agent-repl--tabline-rendered-entries (&optional (names nil names-supplied-p))
   "Return the list of rendered tab-entry strings for NAMES.
@@ -2226,7 +2160,6 @@ parameters, and the watchdog cleanup result."
          (watchdog-cleanup (agent-repl--retire-redisplay-storm-watchdog)))
     (setq tab-bar-format '(agent-repl-workspace-tabline-formatted
                            tab-bar-format-align-right
-                           agent-repl-daemon-link-segment
                            agent-repl-current-workspace-name-segment)
           tab-bar-show t
           tab-bar-close-button-show nil
@@ -2351,513 +2284,62 @@ For background workspaces, inspects the saved persp window configuration."
       (agent-repl--agent-visible-in-current-ws-p)
     (agent-repl--agent-in-saved-wconf-p ws-name)))
 
-;;; State machine ------------------------------------------------------------
 
-;; `agent-repl--update-ws-state' is gone with the decay it drove.  The
-;; timer no longer touches the agent-state axis at all: every transition on
-;; it is now owned by the SSM's pushed WorkspaceState, which is what makes
-;; a tab's color a report of something that happened rather than partly a
-;; report and partly a clock.
-
-(defvar agent-repl--update-tick-counter 0
-  "Monotonic tick counter for the workspace-state update timer.
-Incremented at the top of every `agent-repl--update-all-workspace-states-now'
-pass.  Read by the inner per-workspace step to gate git work via
-`(zerop (mod counter agent-repl-state-git-tick-modulus))'.")
-
-(defvar agent-repl--update-in-flight nil
-  "Float-time of the most recent chain start, or nil when no chain is in flight.
-Set by `agent-repl--update-all-workspace-states-now' at chain
-kickoff and cleared by the terminal finalize step.  Read by
-`agent-repl--update-in-flight-p' so the periodic timer entrypoint
-can skip its tick when a previous chain has not finished.  Carries a
-timestamp rather than a plain `t' so stale flags from an errored
-chain (one that escaped the per-step `condition-case' and never
-finalized) can be detected and force-cleared via
-`agent-repl-state-stale-threshold'.")
-
-(defvar agent-repl--update-chain-timer nil
-  "Timer holding the pending next step of the update chain, or nil.
-The chain hops from workspace to workspace through `run-at-time', so
-between two steps the ONLY thing keeping it alive is that timer.  Holding
-it here is what makes the chain tearable-down: `agent-repl--update-chain-
-teardown' cancels it and clears `agent-repl--update-in-flight', so a
-module reload or an explicit restart cannot leave a flag armed by a
-generation whose continuation has been cancelled out from under it.
-
-Deliberately NOT registered in `agent-repl--timers': the entry is a
-one-shot continuation replaced on every hop, and registering it would
-churn the keyed-timer registry once per workspace per second.
-
-When concurrent chains overlap (an event-driven `-now' call landing on
-top of a running timer chain), this holds the most recent hop only.  The
-older chain is harmless: it still finalizes, and finalize is an
-idempotent clear.")
-
-(defvar agent-repl--update-spread-sync nil
-  "When non-nil, the chain processes all workspaces synchronously.
-Test-only affordance: production code never sets this.  Tests bind it
-to `t' so multi-workspace dispatch assertions can read state
-immediately after the call, without having to advance time to let
-`run-at-time'-scheduled steps fire.")
-
-(defun agent-repl--update-chain-continuation-pending-p ()
-  "Return non-nil when the update chain still has a scheduled next hop.
-This is the structural difference between a chain that is WEDGED and one
-that is merely SLOW, and it is the reason age alone must not be trusted.
-
-`agent-repl--update-all-workspace-states--step' nils
-`agent-repl--update-chain-timer' the instant it is entered, and before it
-returns it either finalizes (clearing the in-flight flag) or installs the
-next hop's timer.  So `agent-repl--update-in-flight' non-nil together with
-a live timer here means the chain has a successor that Emacs will run and
-that will reach a finalize; the flag is not orphaned, and no amount of
-elapsed wall-clock makes it so.  `agent-repl--update-chain-teardown' is
-the only path that drops a hop, and it nils both the timer and the flag
-together, so it cannot leave a false positive behind.
-
-The `timer-list' membership check is belt-and-braces against any future
-path that cancels the timer without nilling the variable: a cancelled
-timer is off the list and will never fire, which is a wedge."
-  (and (timerp agent-repl--update-chain-timer)
-       (memq agent-repl--update-chain-timer timer-list)
-       t))
-
-(defun agent-repl--update-in-flight-p ()
-  "Return non-nil when an update chain is in flight and not stale.
-A non-nil `agent-repl--update-in-flight' set within the last
-`agent-repl-state-stale-threshold' seconds means a chain is still
-running and a new tick should skip.  An older stamp is treated as a
-wedged chain (the per-step `condition-case' didn't catch some error
-path or the finalize never ran), force-cleared in place, and the
-caller is told to proceed — but only once
-`agent-repl--update-chain-continuation-pending-p' has ruled out the chain
-simply being slow."
-  (cond
-   ((null agent-repl--update-in-flight)
-    (agent-repl--log-verbose nil "update-in-flight-p: result=nil reason=no-chain")
-    nil)
-   ((< (- (float-time) agent-repl--update-in-flight)
-       agent-repl-state-stale-threshold)
-    (agent-repl--log-verbose nil "update-in-flight-p: result=t age=%.2fs threshold=%.2fs"
-                              (- (float-time) agent-repl--update-in-flight)
-                              agent-repl-state-stale-threshold)
-    t)
-   (t
-    ;; The CLEAR is unconditional; only the reporting is classified.  A chain
-    ;; that was in flight when Emacs bounced the daemon stalls for as long as
-    ;; the daemon is away, so it crosses the threshold on essentially every
-    ;; deploy — and the flag left behind is just as wedged as any other, so
-    ;; it must still be force-cleared here or the tick that follows the
-    ;; restart never runs.
-    ;;
-    ;; What that restart does not justify is spending the warn.  This warn is
-    ;; the in-flight-flag LEAK detector, and its value is that it fires only
-    ;; when a chain genuinely failed to finalize; letting a deploy fire it
-    ;; every time would train every reader to scroll past it.  So a stale flag
-    ;; stamped inside an expected-restart window is recorded at info naming
-    ;; the initiator, and a stale flag with no window covering it keeps the
-    ;; warn verbatim.
-    ;;
-    ;; None of that applies while the chain still has a scheduled hop.  The
-    ;; chain advances by `run-at-time', and an Emacs timer cannot preempt the
-    ;; main thread: any single main-thread operation longer than the threshold
-    ;; starves every pending hop for its whole duration.  A full snapshot
-    ;; resync is exactly such an operation at this installation's scale (~100
-    ;; workspaces / ~200 sessions applied in one pass), and it is triggered by
-    ;; ordinary interactions like creating a workspace.  The chain's own
-    ;; designed duration pushes the same way: the per-step gap floors at
-    ;; `agent-repl-state-spread-min-gap', so a pass over N workspaces takes at
-    ;; least N * that floor, which reaches the threshold on its own around 100
-    ;; workspaces.  Force-clearing there would be actively wrong — it drops the
-    ;; reentry guard while the previous chain is still walking the list, so a
-    ;; second chain starts on top of it — and warning there is worse, because
-    ;; it spends the leak alarm on healthy behavior.
-    (if (agent-repl--update-chain-continuation-pending-p)
-        (let ((age (- (float-time) agent-repl--update-in-flight)))
-          (agent-repl--info
-           nil
-           "update-in-flight-p: chain age=%.2fs over threshold=%.2fs but its next hop is still scheduled — starved, not wedged; skipping this tick"
-           age agent-repl-state-stale-threshold)
-          t)
-      (let ((initiator (agent-repl--frontend-expected-restart-covering-initiator
-                        agent-repl--update-in-flight))
-            (age (- (float-time) agent-repl--update-in-flight)))
-        (setq agent-repl--update-in-flight nil)
-        (if initiator
-            (agent-repl--info nil
-                              "update-in-flight-p: stale flag (%.2fs old) from the %s restart, force-clearing"
-                              age initiator)
-          (agent-repl--warn nil "update-in-flight-p: stale flag (%.2fs old), force-clearing"
-                            age)))
-      nil))))
-
-(defun agent-repl--update-one-workspace-state (ws do-git-p)
-  "Run the per-workspace state-update body for WS.
-The cheap parts (`agent-repl--agent-running-p',
-`agent-repl--mark-dead') run every tick.  DO-GIT-P gates the
-expensive git refresh (`agent-repl--async-refresh-branch-merged') so
-it fires only on the mod-N tick selected by
-`agent-repl-state-git-tick-modulus'.
-
-A gui-frontend workspace always takes the alive branch here,
-regardless of what `agent-repl--agent-running-p' would separately
-answer: for a gui workspace that predicate is a CHEAP check (a daemon
-session binding exists — see `agent-repl--gui-running-p') rather than
-a live daemon health probe, and it can be transiently nil for reasons
-that are not a death (e.g. mid-reattach after a daemon restart).
-Liveness/death for a gui workspace is owned exclusively by the daemon
-\(pushed DEAD `WorkspaceState' — see
-`agent-repl--status-react-to-pushed-death'), so this poll deliberately
-never marks a gui workspace dead."
-  (let* ((gui-p (agent-repl--ws-gui-frontend-p ws))
-         (running-p (and (not gui-p) (agent-repl--agent-running-p ws))))
-    ;; Per-workspace timer body: record detailed branch inputs only in
-    ;; verbose traces because it normally runs once per second per workspace.
-    (agent-repl--log-verbose ws
-                              "update-one-workspace-state: ws=%s gui=%s running=%s do-git=%s"
-                              ws gui-p running-p do-git-p)
-    (unless (or gui-p running-p)
-      ;; No live agent session → clear non-thinking state.
-      (agent-repl--mark-dead ws)))
-  ;; Merged-ness is independent of agent liveness — refresh for every
-  ;; workspace so `agent-repl--ws-merged-p' always reads a
-  ;; fresh `:branch-merged' value.  Gated on DO-GIT-P because the
-  ;; refresh's preconditions and process spawn are the reason the
-  ;; whole pass is gated at all.
-  (when (and do-git-p
-             (fboundp 'agent-repl--async-refresh-branch-merged))
-    (agent-repl--async-refresh-branch-merged ws)))
-
-(defun agent-repl--update-all-workspace-states--step (remaining do-git-p gap)
-  "Process the head of REMAINING; schedule self for the rest.
-DO-GIT-P is the precomputed mod-N gate for the whole pass (snapshotted
-at chain kickoff so every workspace in this pass sees the same value).
-GAP is the inter-step delay in seconds.
-
-Per-step `agent-repl--ws-project-pollable-p' recheck covers
-snapshot-vs-live divergence: a workspace can be removed mid-chain
-\(`--ws-del' from a merge, kill, or sweep), or become a non-project
-placeholder, and we must not act on either shape.  The body itself is
-wrapped in `condition-case' so an error in one ws step never wedges
-the in-flight flag for subsequent ticks — the chain logs and keeps
-going.
-
-When `agent-repl--update-spread-sync' is non-nil (tests only),
-recurses directly instead of via `run-at-time'."
-  ;; This invocation IS the continuation the previous hop scheduled, so the
-  ;; slot no longer holds anything cancellable until we schedule the next.
-  (setq agent-repl--update-chain-timer nil)
-  (cond
-   ((null remaining)
-    (agent-repl--update-all-workspace-states--finalize))
-   (t
-    ;; CONTINUED tracks whether the chain still has a successor that will
-    ;; reach a finalize.  Anything that escapes the body — an error from
-    ;; `agent-repl--warn' itself, or from `run-at-time' — leaves it nil, and
-    ;; the unwind clause finalizes so the flag never outlives the chain.
-    ;; The error still propagates; nothing here swallows it.
-    (let ((continued nil))
-      (unwind-protect
-          (let ((ws (car remaining))
-                (rest (cdr remaining)))
-            (condition-case err
-                (if (agent-repl--ws-project-pollable-p ws)
-                    (agent-repl--update-one-workspace-state ws do-git-p)
-                  (agent-repl--log-verbose
-                   ws
-                   "update-all-workspace-states--step: skipped ws=%s live=%S project-dir=%S"
-                   ws (agent-repl--ws-live-p ws)
-                   (agent-repl--ws-get ws :project-dir)))
-              (error
-               (agent-repl--warn ws "update-all-workspace-states--step: error ws=%s err=%S"
-                                 ws err)))
-            (cond
-             ((null rest)
-              (setq continued t)
-              (agent-repl--update-all-workspace-states--finalize))
-             (agent-repl--update-spread-sync
-              (setq continued t)
-              (agent-repl--update-all-workspace-states--step rest do-git-p gap))
-             (t
-              (setq agent-repl--update-chain-timer
-                    (run-at-time gap nil
-                                 #'agent-repl--update-all-workspace-states--step
-                                 rest do-git-p gap))
-              (setq continued t))))
-        (unless continued
-          (agent-repl--update-all-workspace-states--finalize)))))))
-
-(defun agent-repl--update-all-workspace-states--finalize ()
-  "Terminal step of the workspace-state update chain.
-Clears the in-flight flag so the next timer tick can run.
-
-The clear happens BEFORE the trace, not after: logging goes through the
-module's file-backed logger, and a logger that signals (a state directory
-swapped out from under us by a deploy is the observed way that happens)
-must not be able to strand the flag.  Idempotent — safe to call from any
-exit path, including one where a concurrent chain already cleared."
-  (let ((previous agent-repl--update-in-flight))
-    (setq agent-repl--update-in-flight nil)
-    (agent-repl--log-verbose nil "update-all-workspace-states--finalize: previous=%S"
-                              previous)))
-
-(defun agent-repl--update-chain-teardown ()
-  "Abort any in-flight workspace-state update chain and clear its flag.
-Cancels the pending continuation (`agent-repl--update-chain-timer') and
-clears `agent-repl--update-in-flight'.
-
-This is the death path for the chain.  The chain has no process and no
-connection behind it — it is a sequence of `run-at-time' hops — so it
-dies exactly when its timers are torn down, which is what
-`agent-repl--cancel-all-timers' does on every module reload and on the
-explicit restart command.  Without this clear, a reload landing mid-chain
-left the flag armed at the old generation's timestamp while the heartbeat
-that would have force-cleared it was itself being cancelled, so the flag
-survived until some later tick noticed it was minutes stale and warned.
-
-Clears before logging for the same reason `--finalize' does."
-  (when (timerp agent-repl--update-chain-timer)
-    (cancel-timer agent-repl--update-chain-timer))
-  (setq agent-repl--update-chain-timer nil)
-  (let ((previous agent-repl--update-in-flight))
-    (setq agent-repl--update-in-flight nil)
-    (when previous
-      (agent-repl--log nil "update-chain-teardown: aborted in-flight chain age=%.2fs"
-                       (- (float-time) previous)))))
-
-(defun agent-repl--update-all-workspace-states-now ()
-  "Unguarded entrypoint for the workspace-state update chain.
-Snapshots `agent-repl--ws-project-poll-partition' so the chain
-iterates a stable list of live project workspaces even as state mutates
-mid-pass; per-step `agent-repl--ws-project-pollable-p' recheck filters
-out workspaces deleted or reduced to placeholders during the spread
-window.  The partition's placeholder names are included in the kickoff
-log so every exclusion is observable.
-
-Increments `agent-repl--update-tick-counter' and computes DO-GIT-P
-once so every ws in this pass agrees on the mod-N decision.  Sets the
-in-flight marker; the terminal finalize step clears it.
-
-Polls the sentinel directory as a file-notify fallback (`--poll-
-workspace-notifications').  Does NOT flip the tabline space toggle —
-that's the periodic timer's job (`agent-repl--update-all-workspace-
-states', the guarded entrypoint), since event-driven callers
-\(frame-focus, workspace-switch, show-panels) already trigger a
-redisplay through other paths.
-
-For event-driven callers that want to kick a refresh independent of
-the 1Hz reentry guard.  Concurrent chains from rapid sync calls are
-permitted (rare in practice); each tracks its own snapshot and
-finalize, and the last to finalize clears the flag harmlessly.
-
-Polling (`agent-repl--poll-workspace-notifications') is intentionally
-NOT called here.  The poll is a file-notify fallback — it has no
-purpose on event-driven refreshes (workspace-switch, frame-focus,
-show-panels) and its `directory-files' scan on every call is
-unnecessary overhead on those paths.  The periodic timer
-\(`agent-repl--update-all-workspace-states') is the sole caller of
-the poll."
-  (setq agent-repl--update-tick-counter (1+ agent-repl--update-tick-counter))
-  ;; Poll only live project workspaces.  Persp-mode placeholders such as
-  ;; "main" and "none" are real hash entries but intentionally have no
-  ;; project directory; the workspace-layer partition makes the exclusion
-  ;; explicit and observable.
-  (let* ((partition (agent-repl--ws-project-poll-partition))
-         (ws-names (car partition))
-         (placeholder-names (cdr partition))
-         (n (length ws-names))
-         (do-git-p (zerop (mod agent-repl--update-tick-counter
-                               agent-repl-state-git-tick-modulus)))
-         (gap (if (and (> n 0) (> agent-repl-state-spread-window 0))
-                  (max agent-repl-state-spread-min-gap
-                       (/ agent-repl-state-spread-window (float n)))
-                agent-repl-state-spread-min-gap)))
-    (agent-repl--log-verbose
-     nil
-     "update-all-workspace-states-now: count=%d placeholders=%S do-git=%s gap=%.3fs counter=%d"
-     n placeholder-names do-git-p gap agent-repl--update-tick-counter)
-    (setq agent-repl--update-in-flight (float-time))
-    ;; Arm-and-enter is one unit: if the first step signals before it can
-    ;; install its own unwind protection, the flag must not survive the
-    ;; error.  The error is re-raised by `unwind-protect', not swallowed.
-    (let ((entered nil))
-      (unwind-protect
-          (progn
-            (agent-repl--update-all-workspace-states--step ws-names do-git-p gap)
-            (setq entered t))
-        (unless entered
-          (agent-repl--update-all-workspace-states--finalize))))))
-
-(declare-function agent-repl--sidebar-tick "sidebar" ())
-
-(defun agent-repl--update-all-workspace-states ()
-  "Periodic 1Hz timer entrypoint for workspace-state updates.
-Evaluates the ready-view dwell (`agent-repl--note-ready-view-dwell')
-first, so the `:ready' tab the user has been sitting in fades on the
-same tick it ripens, then always drives
-`agent-repl--force-tab-bar-redraw' to force a tab-bar
-repaint (DO NOT REMOVE — see the block comment above
-`agent-repl--tabline-space-toggle').  The redraw happens BEFORE the
-in-flight check so the tab-bar keeps animating even when the update
-chain is stacking and we skip a tick.
-
-Flipping `agent-repl--tabline-space-toggle' alone is not enough:
-the active tab-bar format function
-\(`agent-repl-workspace-tabline-formatted') calls
-`agent-repl--tabline-rendered-entries' directly and bypasses
-`+workspace--tabline', so the `agent-repl--tabline-advice' path is
-no longer on the displayed-rendering hot path.  `--force-tab-bar-
-redraw' flips the toggle AND drives `tab-bar-tabs-set' /
-`force-mode-line-update' so the alternating-string cache-bust actually
-reaches the display without invoking Emacs's one-line height policy.
-
-When a previous chain is still in flight (per
-`agent-repl--update-in-flight-p'), skips this tick — the in-flight
-chain will catch up.  Stale flags older than
-`agent-repl-state-stale-threshold' are force-cleared so a wedged
-chain can't permanently disable the timer.
-
-Otherwise delegates to `agent-repl--update-all-workspace-states-now',
-which owns the actual per-workspace iteration with the mod-N git
-gate and the recursive serial spread.
-
-Event-driven callers (frame-focus, workspace-switch, show-panels)
-should call `-now' directly instead of this guarded entrypoint — they
-want to kick a fresh refresh and don't compete with the timer for
-the in-flight slot."
-  ;; Evaluate the ready-view dwell BEFORE the redraw so a latch that ripens
-  ;; on this tick is painted by this tick's repaint rather than the next.
-  (agent-repl--note-ready-view-dwell)
-  ;; Drive the tab-bar redraw on every tick so face-only status
-  ;; transitions (:thinking -> :done, etc.) actually reach the display.
-  ;; DO NOT REMOVE — see the block comment above
-  ;; `agent-repl--tabline-space-toggle'.  Happens before the in-flight
-  ;; check so the animation survives long chains.
-  (agent-repl--force-tab-bar-redraw)
-  ;; Poll here (timer path only) so the file-notify fallback scan runs once
-  ;; per second rather than on every event-driven refresh.  See
-  ;; `--update-all-workspace-states-now' for why it was moved here.
-  (agent-repl--poll-workspace-notifications)
-  ;; Sidebar roster push (sidebar.el): rides this timer rather than
-  ;; owning one so the whole 1Hz heartbeat lives in one place; its
-  ;; signature gate keeps the per-tick cost to in-memory reads + one
-  ;; stat.
-  (agent-repl--sidebar-tick)
-  (if (agent-repl--update-in-flight-p)
-      (agent-repl--log-verbose nil "update-all-workspace-states: skipped reason=in-flight")
-    (agent-repl--update-all-workspace-states-now)))
-
-;; Periodically update all workspace states.
+;;; The heartbeat ------------------------------------------------------------
 ;;
-;; This is THE heartbeat: the 1Hz tick that repaints the tab bar, polls
-;; workspace notifications, and pushes the sidebar roster.  Losing it is
-;; the most visible failure the module has (frozen tabs), so it is armed
-;; under the `:state-poll' key — re-loading this file replaces the timer
-;; rather than stacking a second one, and core.el's
-;; `agent-repl--assert-heartbeat-armed' can re-arm it by name.
+;; THE LOCAL STATE MACHINE IS GONE.  A workspace's colour is the roster's
+;; status arm and nothing else: no poll of the process table, no git ticks,
+;; no spread window, no staleness threshold, no `:agent-state' / `:repl-state'
+;; axes, no local death detection.  The daemon resolves every workspace's
+;; lifecycle and pushes the whole roster on any change (event-driven, whole
+;; view, no ticks), so a local re-derivation could only ever be a second,
+;; drifting answer to a question already answered.
+;;
+;; ONE local clock survives, and it drives nothing but a repaint: the
+;; ready-shout-then-fade dwell is a LOCAL PRESENTATION modifier (blessed as
+;; such), and a dwell measured in seconds needs something to notice that the
+;; seconds passed.  It reads no state, forks nothing, and touches no
+;; workspace plist beyond the latch the dwell itself owns.
+
 (defun agent-repl--arm-state-poll-timer ()
-  "Arm the 1Hz workspace-state heartbeat under the `:state-poll' key.
+  "Arm the ready-view dwell heartbeat under the `:state-poll' key.
 Idempotent: `agent-repl--register-timer' cancels and replaces any timer
 already held under the key, so any number of re-loads of this file leave
-exactly one heartbeat running.  Returns the timer."
+exactly one heartbeat running.  Returns the timer.
+
+The key keeps its name because core.el's `agent-repl--required-timer-keys'
+names the JOB the tab bar depends on — a heartbeat that repaints it —
+and that job survives even though everything it used to poll does not."
   (agent-repl--register-timer
    :state-poll
-   (run-with-timer agent-repl-state-poll-interval
-                   agent-repl-state-poll-interval
-                   #'agent-repl--update-all-workspace-states)))
+   (run-with-timer agent-repl-ready-view-fade-delay
+                   agent-repl-ready-view-fade-delay
+                   #'agent-repl--status-dwell-tick)))
+
+(defun agent-repl--status-dwell-tick ()
+  "Latch the ready-view dwell for the workspace on screen and repaint.
+The whole heartbeat: no workspace is polled, and the only state written
+is the dwell's own latch."
+  (agent-repl--note-ready-view-dwell)
+  (agent-repl--force-tab-bar-redraw))
 
 (agent-repl--arm-state-poll-timer)
-
-(defun agent-repl--mark-dead (ws)
-  "Record that WS's agent session is no longer running.
-Sets `:repl-state :dead' and clears `:agent-state'.  This is a
-documented lifecycle-cleanup exception to the sentinel-only writer
-rule: no hook will ever fire again for a dead session, so Emacs is
-the only observer that can reset state.
-
-No-op in four cases:
-- `:repl-state' is already `:dead' (idempotent on the poll path).
-- `:repl-state' is `:merged' — the workspace was killed after a
-  successful merge and `:merged' takes precedence over `:dead'.
-  Without this guard, the next poll would clobber the merge badge.
-- `:repl-state' is `:merge-failed' — the workspace was killed after
-  a silent-failure merge and `:merge-failed' is the canonical badge
-  for that state (routed under MERGED, not orphaned as :dead).  Without this guard, the next poll would re-classify the
-  workspace as plain `:dead' and the MERGED-section semantics would
-  be lost.
-- `:agent-state' is `:init' — the agent is starting, the daemon
-  session may not have reached running state yet, and observing no
-  session does not mean dead.  The session-start hook will transition
-  away from `:init' shortly; until then the timer leaves things alone.
-
-An already-`:dead' workspace is idempotent for `:repl-state' but NOT
-for `:agent-state': a gui send into a dead binding optimistically
-marks `:thinking' before the heal, and when the healed session also
-dies the death event must still clear it — otherwise the tab spins
-`:thinking' forever (observed in the resume-death-loop incident)."
-  (cond
-   ((or (eq (agent-repl--ws-repl-state ws) :merged)
-        (eq (agent-repl--ws-repl-state ws) :merge-failed)
-        (eq (agent-repl--ws-agent-state ws) :init))
-    (agent-repl--log-verbose ws
-                              "mark-dead: ws=%s skipped repl-state=%s agent-state=%s"
-                              ws (agent-repl--ws-repl-state ws) (agent-repl--ws-agent-state ws))
-    nil)
-   ((eq (agent-repl--ws-repl-state ws) :dead)
-    (when (agent-repl--ws-agent-state ws)
-      (agent-repl--log ws "mark-dead: ws=%s already :dead — clearing stale agent-state=%s"
-                        ws (agent-repl--ws-agent-state ws))
-      (agent-repl--ws-put ws :agent-state nil)
-      (force-mode-line-update t))
-    (unless (agent-repl--ws-agent-state ws)
-      (agent-repl--log-verbose ws "mark-dead: ws=%s skipped already-dead-clean" ws)))
-   (t
-    (agent-repl--log ws "mark-dead: ws=%s agent-state=%s -> :dead"
-                      ws (agent-repl--ws-agent-state ws))
-    (agent-repl--ws-put ws :repl-state :dead)
-    (agent-repl--ws-put ws :agent-state nil)
-    (force-mode-line-update t))))
-
-(defun agent-repl--status-react-to-pushed-death (ws new previous)
-  "Mark WS dead when the daemon pushes a DEAD render state NEW.
-Subscriber for `agent-repl-ws-state-transition-functions' (frontend-state.el).
-
-The daemon owns session death now (design §10 sentinel endgame): the
-deleted `session_dead_' sentinel handler's SOLE effect was
-`agent-repl--mark-dead', which is re-anchored here onto the pushed DEAD
-`WorkspaceState' (the terminal/death-reason detail rides the pushed
-`SessionView').  `mark-dead' owns the guarded `:dead' transition
-\(idempotent; respects the `:merged'/`:merge-failed' precedence and the
-`:init' grace), so a non-DEAD NEW is a no-op — this subscriber only
-forwards the DEAD case that used to arrive as a daemon-written sentinel."
-  (if (eq new :dead)
-      (progn
-        (agent-repl--log ws "status-react-to-pushed-death: ws=%s previous=%s next=%s action=mark-dead"
-                          ws previous new)
-        (agent-repl--mark-dead ws))
-    (agent-repl--log ws "status-react-to-pushed-death: ws=%s previous=%s next=%s action=ignored"
-                      ws previous new)))
-
-;; Registered here (status.el owns `mark-dead') though the hook variable is
-;; defined later in frontend-state.el: `add-hook' auto-vivifies the unbound
-;; variable, and frontend-state.el's `defvar ... nil' does not reset an
-;; already-bound variable, so this subscriber survives the load order.
-(add-hook 'agent-repl-ws-state-transition-functions
-          #'agent-repl--status-react-to-pushed-death)
 
 ;;; Frame focus handler -------------------------------------------------------
 
 (defun agent-repl--on-frame-focus ()
-  "Update all workspace states when Emacs regains focus.
-Calls `agent-repl--update-all-workspace-states-now' (the unguarded
-entrypoint) rather than the periodic-timer entrypoint: frame focus is
-an event-driven signal that the user is back and wants fresh data, so
-it should kick a refresh regardless of the in-flight reentry guard."
+  "Repaint the tab bar when Emacs regains focus.
+There is nothing to refresh: the roster stream pushed every workspace's
+state while the frame was unfocused, and the tab bar simply has to draw
+what already arrived."
   (if (frame-focus-state)
       (progn
-        (agent-repl--log (agent-repl--ws-current-log-name) "on-frame-focus: focused")
-        (agent-repl--update-all-workspace-states-now))
-    (agent-repl--log-verbose (agent-repl--ws-current-log-name) "on-frame-focus: not focused")))
+        (agent-repl--log (agent-repl--ws-current-log-name) "elisp.status.frame-focus: focused")
+        (agent-repl--force-tab-bar-redraw))
+    (agent-repl--log-verbose (agent-repl--ws-current-log-name)
+                             "elisp.status.frame-focus: not focused")))
 
 (add-function :after after-focus-change-function #'agent-repl--on-frame-focus)
+
+(provide 'agent-repl-status)
+;;; status.el ends here

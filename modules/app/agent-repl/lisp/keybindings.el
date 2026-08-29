@@ -1,4 +1,4 @@
-;;; keybindings.el --- keybindings and debug helpers -*- lexical-binding: t; -*-
+;;; keybindings.el --- keybindings -*- lexical-binding: t; -*-
 
 ;; `map!' comes from Doom.  Byte-compiled outside a Doom session
 ;; (emacs -batch -Q) the macro is undefined, so the compiler treats each
@@ -12,166 +12,6 @@
     (defmacro map! (&rest _args) nil)))
 
 ;;; Section 1: Internal helpers
-
-(defcustom agent-repl-dump-buffer-name "*agent-repl-dump*"
-  "Buffer name for workspace state dump output."
-  :type 'string
-  :group 'agent-repl)
-
-;;;; Faces for `agent-repl-debug/dump-workspace' ---------------------------
-
-(defface agent-repl-dump-title
-  '((t :weight bold :height 1.6 :inherit font-lock-function-name-face))
-  "Face for the workspace title line in `agent-repl-debug/dump-workspace'."
-  :group 'agent-repl)
-
-(defface agent-repl-dump-section
-  '((t :weight bold :height 1.25 :inherit font-lock-keyword-face))
-  "Face for section headers in `agent-repl-debug/dump-workspace'."
-  :group 'agent-repl)
-
-(defface agent-repl-dump-key
-  '((t :weight bold :inherit font-lock-variable-name-face))
-  "Face for plist keys in `agent-repl-debug/dump-workspace'."
-  :group 'agent-repl)
-
-(defface agent-repl-dump-rule
-  '((t :inherit shadow))
-  "Face for the rule line beneath the title in
-`agent-repl-debug/dump-workspace'."
-  :group 'agent-repl)
-
-;;;; Section layout for `agent-repl-debug/dump-workspace' ------------------
-
-(defconst agent-repl--dump-sections
-  '(("🏷️  Identity"
-     (:name :ws-id :priority :group-key))
-    ("⚡ State"
-     (:agent-state :repl-state :status :pushed-render-state
-      :pushed-session-connectivity :pushed-session-status
-      :pushed-render-state-meta
-      :dead :bogus :merged))
-    ("🌳 Project / Git"
-     (:project-dir :worktree-p :source-ws-dir :source-ws-name
-      :merge-parent-dir :branch-merged :branch-merged-last-check
-      :detail-branch :detail-dirty-count :detail-last-commit
-      :detail-last-commit-time :detail-master-ahead :detail-source-ahead
-      :detail-source-branch))
-    ("🧠 Session"
-     (:session-id :fork-session-id :frontend-buffer :active-env
-      :bare-metal :agent-ready :ws-loaded :ready-timer))
-    ("💬 Prompts"
-     (:last-prompt-time :last-prompt-text :last-prompt-summary
-      :last-prompt-summary-pending :deferred-prompts
-      :clipboard))
-    ("🔔 Notifications"
-     (:done :done-acked :done-acked-at :last-notify-time))
-    ("🔀 Merge"
-     (:merge-completed :merge-completed-at :merge-conflict
-      :merge-failed :merge-proc :merge-queued :merging
-      :pushed-merge-status :merge-echo-last))
-    ("🪟 UI / Panels"
-     (:input-buffer :pending-magit :pending-show-panels
-      :pending-initial-buffers :fullscreen-config :ai-title-cache
-      :saved-tab-index))
-    ("🔢 Counters"
-     (:counter)))
-  "Section layout for `agent-repl-debug/dump-workspace'.
-Each entry is (TITLE KEYS).  TITLE is the section header string (with a
-leading emoji); KEYS is the list of plist keys that belong in that
-section, in display order.  Any key present in the workspace plist that
-is not listed in any section falls through to the
-`agent-repl--dump-other-section' bucket at the end of the dump.")
-
-(defconst agent-repl--dump-other-section "📦 Other"
-  "Section header used for plist keys not classified by
-`agent-repl--dump-sections'.")
-
-(defun agent-repl--format-dump-value (val)
-  "Render VAL for the workspace dump output.
-Buffers, processes, timers, and cl-structs become readable strings;
-every other value goes through `pp-to-string' so cons cells and lists
-render as Lisp."
-  (cond
-   ((bufferp val)
-    (format "#<buffer %s %s>"
-            (buffer-name val)
-            (if (buffer-live-p val) "live" "dead")))
-   ((processp val)
-    (format "#<process %s %s>"
-            (process-name val)
-            (if (process-live-p val) "running" "exited")))
-   ((timerp val)
-    (format "#<timer %s>" (if (timer--triggered val) "triggered" "pending")))
-   ((cl-struct-p val)
-    (string-trim (pp-to-string val)))
-   (t (string-trim (pp-to-string val)))))
-
-(defun agent-repl--dump-plist-to-alist (plist)
-  "Convert PLIST to an alist of (KEY . VALUE), preserving insertion order."
-  (let (result)
-    (while plist
-      (let ((k (pop plist))
-            (v (pop plist)))
-        (push (cons k v) result)))
-    (nreverse result)))
-
-(defun agent-repl--dump-insert-row (key val)
-  "Insert one KEY/VAL row at point in the current buffer.
-KEY is rendered with `agent-repl-dump-key' face; VAL is rendered via
-`agent-repl--format-dump-value' with no face."
-  (insert "  ")
-  (insert (propertize (format "%-30s" (symbol-name key))
-                      'face 'agent-repl-dump-key))
-  (insert "  ")
-  (insert (agent-repl--format-dump-value val))
-  (insert "\n"))
-
-(defun agent-repl--dump-insert-section (title rows)
-  "Insert section TITLE followed by ROWS (an alist of (KEY . VALUE)).
-No-op when ROWS is empty so empty sections do not clutter the output."
-  (when rows
-    (insert "\n")
-    (insert (propertize title 'face 'agent-repl-dump-section))
-    (insert "\n")
-    (dolist (row rows)
-      (agent-repl--dump-insert-row (car row) (cdr row)))))
-
-(defun agent-repl--dump-partition (alist sections)
-  "Partition ALIST by SECTIONS.
-Returns a list of (TITLE . ROWS) plus a final (OTHER-TITLE . REMAINING)
-entry holding any cells whose key did not appear in SECTIONS.  Order
-within each section follows the key order in SECTIONS; OTHER preserves
-the original ALIST order."
-  (let ((remaining alist)
-        (result nil))
-    (dolist (section sections)
-      (let* ((title (car section))
-             (keys (cadr section))
-             (rows nil))
-        (dolist (k keys)
-          (let ((cell (assoc k remaining)))
-            (when cell
-              (push cell rows)
-              (setq remaining (delq cell remaining)))))
-        (push (cons title (nreverse rows)) result)))
-    (push (cons agent-repl--dump-other-section remaining) result)
-    (nreverse result)))
-
-(defun agent-repl--cons-name-state (name)
-  "Return (NAME . agent-state) for workspace NAME."
-  (cons name (agent-repl--ws-agent-state name)))
-
-(defun agent-repl--format-workspace-state (pair)
-  "Format a (NAME . STATE) PAIR as an indented diagnostic string."
-  (format "  %s: %s" (car pair) (or (cdr pair) "nil")))
-
-(defun agent-repl--format-buffer-info (buf)
-  "Format BUF's name, owning workspace, and persp workspace as a diagnostic string."
-  (format "  %s  owning=%s  persp=%s"
-          (buffer-name buf)
-          (or (agent-repl--buffer-owner buf) "nil")
-          (or (agent-repl--workspace-for-buffer buf) "nil")))
 
 (defun agent-repl--kill-before-workspace-delete (&optional name &rest _)
   "Before-advice for `+workspace/kill': tear down any running agent session.
@@ -392,271 +232,7 @@ doom-config worktree reloads its own checkout."
     (load-file file)
     (message "[agent-repl] Reloaded %s" file)))
 
-;;; Section 3: Debug helpers -- interactive commands for diagnosing workspace state issues.
-;;; Call via M-x agent-repl-debug/...
-
-(defun agent-repl-debug/cancel-timers ()
-  "Cancel all agent-repl timers."
-  (interactive)
-  (agent-repl--log (agent-repl--ws-current-log-name)
-                    "debug/cancel-timers: requested")
-  (agent-repl--cancel-all-timers)
-  (message "Cancelled all agent-repl timers."))
-
-(defun agent-repl-debug/workspace-states ()
-  "Display all workspace states."
-  (interactive)
-  (let ((states (mapcar #'agent-repl--cons-name-state (agent-repl--ws-list-names))))
-    (agent-repl--log (agent-repl--ws-current-log-name)
-                      "debug/workspace-states: count=%d states=%S"
-                      (length states) states)
-    (message "Workspace states:\n%s"
-             (mapconcat #'agent-repl--format-workspace-state states "\n"))))
-
-(defun agent-repl-debug/buffer-info ()
-  "Display all agent view (webview) buffers with their owning and persp workspaces."
-  (interactive)
-  (let* ((bufs (cl-remove-if-not #'agent-repl--agent-view-buffer-p (buffer-list)))
-         (lines (mapcar #'agent-repl--format-buffer-info bufs)))
-    (agent-repl--log (agent-repl--ws-current-log-name)
-                      "debug/buffer-info: agent-view-count=%d buffers=%S"
-                      (length bufs) (mapcar #'buffer-name bufs))
-    (message "Claude buffers:\n%s"
-             (if lines (mapconcat #'identity lines "\n") "  (none)"))))
-
-(defun agent-repl-debug/clear-state (ws)
-  "Clear all states for workspace WS without killing buffers."
-  (interactive (list (agent-repl--read-workspace "Workspace: ")))
-  (agent-repl--log ws "debug/clear-state: ws=%s states=%S"
-                    ws '(:thinking :done :permission :inactive))
-  (dolist (state '(:thinking :done :permission :inactive))
-    (agent-repl--ws-agent-state-clear-if ws state))
-  (message "Cleared all states for %s" ws))
-
-(defun agent-repl--kill-owned-panel-buffers (ws)
-  "Kill all agent panel buffers owned by workspace WS.
-Closes their windows (selected-frame, to preserve historical scope)
-and silences process exit queries before killing."
-  (agent-repl--log ws "kill-owned-panel-buffers: entry ws=%s" ws)
-  (dolist (buf (buffer-list))
-    (when (and (buffer-live-p buf)
-               (agent-repl--agent-panel-buffer-p buf)
-               (equal ws (agent-repl--buffer-owner buf)))
-      (agent-repl--log ws "kill-owned-panel-buffers: killing buffer=%s" (buffer-name buf))
-      (agent-repl-window--delete-buffer-windows buf :all-frames nil)
-      (let ((proc (get-buffer-process buf)))
-        (when proc (set-process-query-on-exit-flag proc nil)))
-      (kill-buffer buf))))
-
-(defun agent-repl-debug/obliterate (ws)
-  "Completely remove workspace WS from all agent-repl tracking.
-Kills agent buffers, closes windows, and removes all state."
-  (interactive (list (agent-repl--read-workspace "Obliterate workspace: ")))
-  (agent-repl--log ws "debug/obliterate: entry ws=%s" ws)
-  (agent-repl--kill-owned-panel-buffers ws)
-  (agent-repl--ws-del ws)
-  (message "Obliterated all agent-repl state for %s" ws))
-
-(defun agent-repl-debug/set-owning-workspace ()
-  "Set the owning workspace for an agent view (webview) buffer."
-  (interactive)
-  (let* ((bufs (cl-remove-if-not #'agent-repl--agent-view-buffer-p (buffer-list)))
-         (buf-name (completing-read "Buffer: " (mapcar #'buffer-name bufs) nil t))
-         (ws (agent-repl--read-workspace "Owning workspace: ")))
-    (with-current-buffer buf-name
-      (setq-local agent-repl--owning-workspace ws))
-    (agent-repl--log ws "debug/set-owning-workspace: buffer=%s ws=%s candidate-count=%d"
-                      buf-name ws (length bufs))
-    (message "Set %s owning workspace to %s" buf-name ws)))
-
-(defun agent-repl-debug/toggle-logging (&optional verbose)
-  "Toggle debug logging VISIBILITY in *Messages*.
-Without prefix argument: cycle nil → t → nil.
-With prefix argument (\\[universal-argument]): cycle nil → verbose → nil.
-Verbose mode additionally SHOWS high-frequency events (timer ticks,
-window changes, git-diff sentinels, resolve-root, etc.).
-
-This does not change what is written to the log file, and turning it off
-will not shrink one.  For that, use
-\\[agent-repl-debug/set-log-file-level]."
-  (interactive "P")
-  (setq agent-repl-debug
-        (if verbose
-            (if (eq agent-repl-debug 'verbose) nil 'verbose)
-          (if agent-repl-debug nil t)))
-  (let ((label (pcase agent-repl-debug
-                 ('nil "OFF")
-                 ('t   "ON")
-                 ('verbose "ON (verbose)")
-                 (_ (error "agent-repl-debug has unexpected value: %S" agent-repl-debug)))))
-    ;; Always emit via message so it's visible even when logging is off.
-    (message "[agent-repl] debug logging: %s" label)
-    ;; Also emit via the log system so it appears in the log stream.
-    (when agent-repl-debug
-      (agent-repl--log (agent-repl--ws-current-log-name) "debug logging toggled: %s" label))))
-
-(defun agent-repl-debug/set-log-file-level (level)
-  "Set `agent-repl-log-file-level' to LEVEL for the rest of this session.
-
-This is the control for LOG FILE volume, which `agent-repl-debug' has
-never governed.  It takes effect on the very next record — no restart, no
-reload — so it can be turned down while a log is actively being flooded
-and back up when a reproduction is about to be captured."
-  (interactive
-   (list (intern
-          (completing-read
-           (format "Durable log level (currently %s): " agent-repl-log-file-level)
-           '("verbose" "debug" "info" "warn" "error")
-           nil t nil nil (symbol-name agent-repl-log-file-level)))))
-  (unless (assoc (symbol-name level) agent-repl--log-level-rank)
-    (error "agent-repl: %S is not a log level; expected one of verbose debug info warn error"
-           level))
-  (setq agent-repl-log-file-level level)
-  ;; Announced through the durable sink as well as the echo area: the record
-  ;; that says the threshold moved is itself the boundary a later reader needs
-  ;; to explain why the surrounding volume changed.
-  (agent-repl--info (agent-repl--ws-current-log-name)
-                    "debug/set-log-file-level: durable log level now %s" level)
-  (message "[agent-repl] durable log level: %s" level))
-
-(defun agent-repl-debug/toggle-verbose-to-disk ()
-  "Toggle whether the verbose rung is written to the LOG FILE.
-
-Flips `agent-repl-log-file-level' between `verbose' (write the hot-path
-chatter) and `debug' (write everything else).  This is the knob to reach
-for when a log is growing faster than it is worth: turn it off, and turn
-it back on before provoking the reproduction you need it for.
-
-Affects the file only.  The per-workspace log buffers follow
-`agent-repl-log-buffer-level' and the *Messages* buffer follows
-`agent-repl-debug'."
-  (interactive)
-  (setq agent-repl-log-file-level
-        (if (eq agent-repl-log-file-level 'verbose) 'debug 'verbose))
-  (let ((on (eq agent-repl-log-file-level 'verbose)))
-    (agent-repl--info (agent-repl--ws-current-log-name)
-                      "debug/toggle-verbose-to-disk: verbose->file %s"
-                      (if on "ON" "OFF"))
-    (message "[agent-repl] verbose logging to disk: %s%s"
-             (if on "ON" "OFF")
-             (if on "" " (warnings and errors still recorded)"))))
-
-(defun agent-repl-debug/toggle-log-to-file ()
-  "Toggle writing debug log output to `agent-repl-log-file-name'.
-When enabled, all messages that pass through `agent-repl--do-log' are
-appended to the file regardless of the `agent-repl-debug' level."
-  (interactive)
-  (setq agent-repl-log-to-file (not agent-repl-log-to-file))
-  (let ((label (if agent-repl-log-to-file "ON" "OFF"))
-        (path (agent-repl--logfile-path)))
-    (message "[agent-repl] log-to-file: %s%s"
-             label
-             (if path (format " (%s)" path) ""))))
-
-(defun agent-repl-debug/toggle-metaprompt ()
-  "Toggle the on-demand metaprompt re-read.
-Does NOT affect the metaprompt the shim installs as each session's
-system prompt, which is how the guidelines ordinarily reach the agent."
-  (interactive)
-  (setq agent-repl-skip-permissions (not agent-repl-skip-permissions))
-  (agent-repl--log (agent-repl--ws-current-log-name)
-                    "debug/toggle-metaprompt: skip-permissions=%s"
-                    (if agent-repl-skip-permissions "t" "nil"))
-  (message "Agent REPL on-demand metaprompt re-read: %s" (if agent-repl-skip-permissions "ON" "OFF")))
-
-(defun agent-repl-debug/dump-workspace ()
-  "Display the full serialized plist for a selected workspace from the hashmap.
-Prompts to select from workspaces registered in `agent-repl--workspaces',
-defaulting to the current workspace when registered.
-
-Output is organized into emoji-prefixed sections (Identity, State,
-Project / Git, Session, Prompts, Notifications, Merge, UI / Panels,
-Counters) per `agent-repl--dump-sections', with any unclassified keys
-emitted under the `Other' bucket.  Section headers and the workspace
-title are rendered with `agent-repl-dump-section' / `agent-repl-dump-title'
-faces so they stand out visually in the help buffer."
-  (interactive)
-  (let* ((ws (agent-repl--read-known-workspace "Dump workspace: "))
-         (plist (agent-repl--ws-plist ws))
-         (alist (agent-repl--dump-plist-to-alist plist))
-         (partition (agent-repl--dump-partition
-                     alist agent-repl--dump-sections)))
-    (agent-repl--log ws "debug/dump-workspace: ws=%s plist-key-count=%d section-count=%d"
-                      ws (/ (length plist) 2) (length partition))
-    (with-help-window agent-repl-dump-buffer-name
-      (with-current-buffer agent-repl-dump-buffer-name
-        (insert (propertize (format "Workspace: %s" ws)
-                            'face 'agent-repl-dump-title))
-        (insert "\n")
-        (insert (propertize (make-string 60 ?─)
-                            'face 'agent-repl-dump-rule))
-        (insert "\n")
-        (dolist (section partition)
-          (agent-repl--dump-insert-section (car section) (cdr section)))))))
-
-(defun agent-repl-debug/--gather-ws-diagnostics (ws-name)
-  "Gather diagnostic information about workspace WS-NAME.
-Returns a plist with keys :owning-ws :has-window :agent-open.
-`:owning-ws' and `:has-window' are derived from WS-NAME's agent view
-\(webview) buffer, independently re-derived from the persp's actual
-buffer list rather than trusted from the `:frontend-buffer' plist
-entry — this is a diagnostic tool for exactly the buffer-ownership
-drift it would otherwise be trying to take on faith."
-  (let* ((open (agent-repl--ws-agent-open-p ws-name))
-         (persp (agent-repl--ws-resolve-persp ws-name))
-         (persp-bufs (agent-repl--ws-buffers persp))
-         (view-buf (cl-loop for buf in persp-bufs
-                            when (and (buffer-live-p buf)
-                                      (agent-repl--agent-view-buffer-p buf))
-                            return buf))
-         (owning-ws (agent-repl--buffer-owner view-buf))
-         (has-window (and view-buf (get-buffer-window view-buf t))))
-    (list :owning-ws owning-ws :has-window has-window
-          :agent-open open)))
-
-(defun agent-repl-debug/--apply-state-refresh (ws-name agent-open)
-  "Apply a state refresh for WS-NAME given whether AGENT-OPEN is non-nil.
-Mirrors the logic in `agent-repl--update-all-workspace-states'."
-  (if agent-open
-      (agent-repl--update-ws-state ws-name)
-    (agent-repl--mark-dead ws-name)))
-
-(defun agent-repl-debug/--format-diagnostics (ws-name diag before after)
-  "Format a diagnostic summary string for WS-NAME.
-DIAG is the plist from `agent-repl-debug/--gather-ws-diagnostics'.
-BEFORE and AFTER are the workspace states before and after refresh."
-  (format (concat "Workspace %s:\n"
-                  "  owning-ws=%s has-window=%s\n"
-                  "  agent-open=%s\n"
-                  "  state=%s -> %s")
-          ws-name
-          (or (plist-get diag :owning-ws) "nil")
-          (if (plist-get diag :has-window) "yes" "no")
-          (if (plist-get diag :agent-open) "yes" "no")
-          (or before "nil") (or after "nil")))
-
-(defun agent-repl-debug/refresh-state (ws-name)
-  "Force a full state refresh for workspace WS-NAME.
-Runs the same logic as the periodic `update-all-workspace-states' timer:
-checks agent visibility and applies the state table.
-Reports comprehensive diagnostics."
-  (interactive (list (agent-repl--read-workspace-with-default "Workspace: ")))
-  (let* ((before (agent-repl--ws-agent-state ws-name))
-         (diag (agent-repl-debug/--gather-ws-diagnostics ws-name)))
-    (agent-repl--log ws-name
-                      "debug/refresh-state: ws=%s before=%S agent-open=%s owning-ws=%S has-window=%s"
-                      ws-name before
-                      (if (plist-get diag :agent-open) "t" "nil")
-                      (plist-get diag :owning-ws)
-                      (if (plist-get diag :has-window) "t" "nil"))
-    (agent-repl-debug/--apply-state-refresh ws-name (plist-get diag :agent-open))
-    (let ((after (agent-repl--ws-agent-state ws-name)))
-      (agent-repl--log ws-name "debug/refresh-state: ws=%s outcome=%s"
-                        ws-name (if (plist-get diag :agent-open) "update" "mark-dead"))
-      (force-mode-line-update t)
-      (message "%s" (agent-repl-debug/--format-diagnostics ws-name diag before after)))))
-
-;;; Section 4: Keybinding definitions
+;;; Section 3: Keybinding definitions
 
 (defconst agent-repl--workspace-create-keybindings
   '(("n" . agent-repl-create-worktree-workspace)
@@ -702,17 +278,10 @@ so a chord wins key lookup regardless of which evil state is current.")
       ;; somewhere else entirely (an external link inside the webapp takes the
       ;; xwidget with it) and has no way back on its own.
       :desc "Rescue webview (navigated away)" "o L" #'agent-repl-frontend-rescue-webview
-      ;; SPC o z -- put the session to sleep on purpose.  It sits beside the
-      ;; restart because they are the two session-process verbs: `o C-c'
-      ;; replaces the process under a conversation worth keeping, `o z' gives
-      ;; the process back to the machine and keeps the conversation
-      ;; rehydratable.  Neither loses the conversation.
-      :desc "Hibernate session (reclaim its memory)" "o z" #'agent-repl-hibernate-workspace
       ;; SPC o m -- go home.  Every worktree workspace of a repo has exactly one
       ;; main checkout behind it, so this is a jump with no picker: from any
       ;; workspace on a linked worktree of the doom repo, `o m' lands on `doom'.
-      :desc "Switch to main worktree workspace" "o m" #'agent-repl-switch-to-main-worktree-workspace
-      :desc "Toggle hide-project-dirs (ChessCom workspaces)" "o H" #'agent-repl-toggle-hide-project-dirs)
+      :desc "Switch to main worktree workspace" "o m" #'agent-repl-switch-to-main-worktree-workspace)
 
 (map! :leader
       (:prefix "p"
@@ -726,25 +295,10 @@ so a chord wins key lookup regardless of which evil state is current.")
        :desc "Fork worktree ws + fork Claude session" "f" #'agent-repl-fork-worktree-workspace
        :desc "Merge current workspace into source" "M" #'agent-repl-workspace-merge-current-into-source
        :desc "Continue merge after resolving conflict" "c" #'agent-repl-workspace-merge-continue-after-resolve
-       :desc "Rename current workspace" "r" #'agent-repl-rename-workspace
-       :desc "Push workspace to second-to-last" "p" #'agent-repl-workspace-push-to-back
-       :desc "Pull workspace to second" "P" #'agent-repl-workspace-pull-to-front
        :desc "Open most recent workspace" "R" #'agent-repl-open-most-recent-workspace))
 
 (map! "s-{" #'agent-repl-switch-left
       "s-}" #'agent-repl-switch-right)
-
-(map! :leader
-      :desc "Switch to 1st workspace"   "1" #'agent-repl-workspace-switch-to-0
-      :desc "Switch to 2nd workspace"   "2" #'agent-repl-workspace-switch-to-1
-      :desc "Switch to 3rd workspace"   "3" #'agent-repl-workspace-switch-to-2
-      :desc "Switch to 4th workspace"   "4" #'agent-repl-workspace-switch-to-3
-      :desc "Switch to 5th workspace"   "5" #'agent-repl-workspace-switch-to-4
-      :desc "Switch to 6th workspace"   "6" #'agent-repl-workspace-switch-to-5
-      :desc "Switch to 7th workspace"   "7" #'agent-repl-workspace-switch-to-6
-      :desc "Switch to 8th workspace"   "8" #'agent-repl-workspace-switch-to-7
-      :desc "Switch to 9th workspace"   "9" #'agent-repl-workspace-switch-to-8
-      :desc "Switch to final workspace" "0" #'agent-repl-workspace-switch-to-final)
 
 ;; Workspace-jump chords (M-1..M-9 / M-0 and s-1..s-9 / s-0) must beat:
 ;;
@@ -833,21 +387,14 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
        :desc "Close workspace"          "d" #'agent-repl-close-workspace
        :desc "Update GitHub PR description"  "r" #'agent-repl-update-pr
        :desc "Rebase branch onto origin/master" "b" #'agent-repl-rebase-onto-origin-master
-       (:prefix ("c" . "conversation")
-        :desc "Select transcript to resume" "s" #'agent-repl-select-transcript
-        :desc "Restore latest in all workspaces" "r" #'agent-repl-restore-latest-transcripts)
+       :desc "Toggle debug logging"    "D" #'agent-repl-toggle-debug
+       :desc "Set durable log level"   "L" #'agent-repl-set-log-file-level
+       :desc "Toggle verbose to disk"  "V" #'agent-repl-toggle-verbose-to-disk
        :desc "Kill workspace"           "x" #'agent-repl-kill-workspace
        :desc "Kill ALL workspaces"      "X" #'agent-repl-kill-all-workspaces
        :desc "Paste workspace clipboard" "p" #'agent-repl-paste-clipboard
-       :desc "Toggle debug logging"    "D" #'agent-repl-debug/toggle-logging
-       :desc "Set durable log level"   "L" #'agent-repl-debug/set-log-file-level
-       :desc "Toggle verbose to disk"  "V" #'agent-repl-debug/toggle-verbose-to-disk
-       (:prefix ("h" . "help/debug")
-        :desc "Dump workspace state"     "p" #'agent-repl-debug/dump-workspace
-        :desc "Copy workspace name"      "y" #'agent-repl-copy-workspace-name
-        :desc "Explain config (read-only Q&A)" "c" #'agent-repl-explain-config
-        :desc "Close explain-config popup"     "C" #'agent-repl-explain-config-close
-        :desc "New explain-config conversation" "n" #'agent-repl-explain-config-reset)
+       (:prefix ("h" . "help")
+        :desc "Copy workspace name"      "y" #'agent-repl-copy-workspace-name)
        (:prefix ("e" . "explain")
         :desc "line/region/hunk (prompt)" "e" #'agent-repl-explain-prompt
         :desc "line/region/hunk (canned)" "E" #'agent-repl-explain
@@ -902,7 +449,7 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
 (map! :leader "b R" #'agent-repl-revert-and-eval-buffer)
 (map! :leader "m e B" #'agent-repl-revert-and-eval-buffer)
 
-;;; Section 5: Advice registrations
+;;; Section 4: Advice registrations
 
 ;; TODO: This +workspace/kill advice is a behavioral hook, not a keybinding.
 ;; It belongs in session.el or panels.el.  Do not move yet -- other agents are

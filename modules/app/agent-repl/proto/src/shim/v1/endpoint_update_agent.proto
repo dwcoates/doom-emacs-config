@@ -46,6 +46,12 @@ message UpdateAgentFailure {
     UpdateAgentNothingRunning nothing_running = 5;
     // No session is open on this shim.
     UpdateAgentNoSession no_session = 6;
+    // The input is well-formed and the agent is known, but the vendor offers
+    // NO ROUTE to deliver it to this agent kind — a prompt addressed to a
+    // subagent on an SDK whose input stream reaches only the main thread.
+    // Not a fault of the caller's state: the same input to the main agent
+    // would deliver.
+    UpdateAgentNotDeliverable not_deliverable = 7;
   }
 }
 message UpdateAgentUnknownAgent {}
@@ -53,3 +59,4 @@ message UpdateAgentNoOpenAsk {}
 message UpdateAgentAnswerMismatch {}
 message UpdateAgentNothingRunning {}
 message UpdateAgentNoSession {}
+message UpdateAgentNotDeliverable {}

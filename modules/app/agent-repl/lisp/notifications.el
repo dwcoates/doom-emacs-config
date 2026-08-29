@@ -3,6 +3,12 @@
 ;;; Code:
 
 (declare-function server-running-p "server")
+(declare-function agent-repl--ws-switch "workspace" (ws &rest args))
+(declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--info "core" (ws fmt &rest args))
+(declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
+(declare-function agent-repl--do-log "core" (ws fmt args &optional error-p))
+(declare-function agent-repl--fatal "core" (ws fmt &rest args))
 
 (defcustom agent-repl-terminal-notifier-executable "terminal-notifier"
   "Name or path of the terminal-notifier binary."
@@ -247,17 +253,24 @@ where no server is useful and starting one would be a side effect."
       (server-start))))
 
 (defun agent-repl--notification-activate (ws)
-  "Focus Emacs and switch to workspace WS.
-Invoked via emacsclient when a finished-notification is clicked.  Jumps to
-WS (so the click lands on the workspace that finished) and then raises and
-focuses the selected frame so clicking the banner brings Emacs forward.
-Guards against a nil/empty WS so a workspace-free notification click still
-focuses Emacs without attempting a bogus jump."
-  (agent-repl--log ws "notification-activate ws=%s" ws)
+  "Raise the Emacs frame and select workspace WS's tab.
+THE CLICK ACTION of the host stream's `notification' push, per the policy
+stated at that arm: decider and actor are one process, so the click is
+plain elisp with no daemon round-trip and no SelectWorkspace of its own —
+the tab switch that follows is what issues that verb, through
+workspace.el's activation boundary, and the daemon clears the attention
+marker on it.
+
+Switches through `agent-repl--ws-switch', workspace.el's persp-mode
+navigation boundary, then raises and focuses the frame so the banner
+brings Emacs forward.  A nil or empty WS still focuses Emacs rather than
+attempting a bogus jump."
+  (agent-repl--log ws "elisp.notifications.activate ws=%s" ws)
   (let ((navigable (and ws (stringp ws) (not (string-empty-p ws)))))
-    (agent-repl--log ws "notification-activate navigable=%s" navigable)
+    (agent-repl--log ws "elisp.notifications.activate-navigable ws=%s navigable=%s"
+                     ws navigable)
     (when navigable
-    (agent-repl--switch-to-workspace ws))
+      (agent-repl--ws-switch ws))
     (select-frame-set-input-focus (selected-frame))))
 
 (defun agent-repl--notification-click-command (ws)
@@ -397,14 +410,41 @@ Signals an error if no supported notification tool is found."
     (agent-repl--log nil "select-notification-backend: backend=terminal-notifier")
     #'agent-repl--notify-backend-terminal-notifier)
    (t
-    (agent-repl--error
+    (agent-repl--fatal
      nil "select-notification-backend FAILED alerter=%s osascript=%s terminal-notifier=%s"
      agent-repl-alerter-executable agent-repl-osascript-executable
      agent-repl-terminal-notifier-executable))))
 
-(defvar agent-repl--notification-backend (agent-repl--select-notification-backend)
-  "Desktop notification backend function, selected at load time
-based on available platform tools.")
+(defvar agent-repl--notification-backend nil
+  "The desktop notification backend function, or nil until first resolved.
+
+RESOLVED LAZILY, never at load time.  Selecting the backend probes the
+host for `alerter' / `osascript' / `terminal-notifier', and doing that
+while the module loads made a machine with none of them a FATAL load
+error for the whole of agent-repl — a notification tool is not a
+prerequisite for editing.  Resolving on first use also gives tests their
+seam: bind this to a recording function (see
+`agent-repl-notify-make-fake-backend') and no probe ever runs.")
+
+(defun agent-repl--resolve-notification-backend ()
+  "Return the desktop notification backend, resolving it once.
+The resolved function is cached in `agent-repl--notification-backend',
+so the host probe happens at most once per session."
+  (or agent-repl--notification-backend
+      (setq agent-repl--notification-backend
+            (agent-repl--select-notification-backend))))
+
+(defun agent-repl-notify-make-fake-backend (sink)
+  "Return a notification backend that records into SINK instead of posting.
+SINK is a symbol whose value is a list; each call conses
+`(WS TITLE MESSAGE)' onto its front.  THE TEST SEAM for the notification
+policy: bound over `agent-repl--notification-backend', it proves what
+Emacs decided to post without any host tool existing at all."
+  (lambda (ws title message)
+    (set sink (cons (list ws title message) (symbol-value sink)))
+    (agent-repl--log ws "elisp.notifications.fake-backend title=%s message=%s"
+                     title message)
+    t))
 
 (defun agent-repl--emacs-focused-p (&optional ws)
   "Return non-nil when Emacs is the focused desktop application.
@@ -435,6 +475,12 @@ application (see `agent-repl--emacs-focused-p').  The focus check runs
 here at emit time, so focus regained during `agent-repl-notify-delay'
 between scheduling and firing still suppresses the banner."
   (if (agent-repl--emacs-focused-p ws)
-      (agent-repl--log ws "notify SKIPPED (emacs focused) title=%s msg=%s" title message)
-    (agent-repl--log ws "notify title=%s msg=%s" title message)
-    (funcall agent-repl--notification-backend ws title message)))
+      (agent-repl--log ws "elisp.notifications.skipped ws=%s reason=emacs-focused title=%s"
+                       ws title)
+    (agent-repl--info ws "elisp.notifications.post ws=%s title=%s message=%s"
+                      ws title message)
+    (funcall (agent-repl--resolve-notification-backend) ws title message)))
+
+(provide 'notifications)
+
+;;; notifications.el ends here

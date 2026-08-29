@@ -292,7 +292,7 @@ never performed."
   (interactive)
   (let ((events (agent-repl--interaction-record-events-in-order)))
     (unless events
-      (agent-repl--error
+      (agent-repl--fatal
        nil
        (concat "interaction-record: refusing to save an EMPTY recording "
                "(mode=%s) — enable `agent-repl-interaction-record-mode' "
@@ -347,16 +347,16 @@ Signals when FILE is missing, holds no recording, or carries an
 unknown schema version."
   (let ((path (expand-file-name file)))
     (unless (file-readable-p path)
-      (agent-repl--error nil "interaction-replay: unreadable recording file=%S" path))
+      (agent-repl--fatal nil "interaction-replay: unreadable recording file=%S" path))
     (let ((agent-repl-interaction-recording nil))
       (load path nil t t)
       (let ((recording agent-repl-interaction-recording))
         (unless (plist-member recording :events)
-          (agent-repl--error
+          (agent-repl--fatal
            nil "interaction-replay: file carries no recording file=%S" path))
         (let ((version (plist-get recording :version)))
           (unless (equal version agent-repl-interaction-record-format-version)
-            (agent-repl--error
+            (agent-repl--fatal
              nil
              "interaction-replay: unsupported recording version=%S supported=%S file=%S"
              version agent-repl-interaction-record-format-version path)))
@@ -419,17 +419,17 @@ lines carrying the returned replay id, which is how a log-mining runbook
 bounds the replay window."
   (interactive "fRecording file: ")
   (when agent-repl-interaction-record-mode
-    (agent-repl--error
+    (agent-repl--fatal
      nil
      (concat "interaction-replay: refusing to replay while recording is ACTIVE "
              "— disable `agent-repl-interaction-record-mode' first")))
   (when agent-repl--interaction-replay-id
-    (agent-repl--error
+    (agent-repl--fatal
      nil "interaction-replay: refusing, replay already in flight replay_id=%s"
      agent-repl--interaction-replay-id))
   (let* ((scale (or speed 1.0)))
     (unless (and (numberp scale) (> scale 0))
-      (agent-repl--error nil "interaction-replay: SPEED must be a positive number, got %S"
+      (agent-repl--fatal nil "interaction-replay: SPEED must be a positive number, got %S"
                          speed))
     (let* ((recording (agent-repl--interaction-replay-load file))
            (events (plist-get recording :events))
@@ -437,7 +437,7 @@ bounds the replay window."
            (replay-id (agent-repl--interaction-replay-new-id))
            (last-delay 0.0))
       (unless events
-        (agent-repl--error nil "interaction-replay: recording has no events file=%S" file))
+        (agent-repl--fatal nil "interaction-replay: recording has no events file=%S" file))
       (setq agent-repl--interaction-replay-id replay-id
             agent-repl--interaction-replay-timers nil
             agent-repl--interaction-replay-failures 0)

@@ -1,0 +1,639 @@
+;;; test-wire-host.el --- ERT tests for agent-repl wire-host.el -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; Run with:
+;;   AGENT_REPL_FORBID_VENDOR_CALLS=1 emacs -batch -Q -l ert \
+;;     -l lisp/test-wire-host.el -f ert-run-tests-batch-and-exit
+;;
+;; Fixtures are hand-written from the .proto files in Go's protojson shape.
+
+;;; Code:
+
+(load (expand-file-name "test-helpers.el" (file-name-directory
+                                            (or load-file-name buffer-file-name)))
+      nil t)
+
+;;;; ---- Local harness ----
+
+(defmacro agent-repl-test-wire-host--quiet (&rest body)
+  "Run BODY with the logging ladder stubbed out."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'agent-repl--error) (lambda (&rest _) nil))
+             ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+     ,@body))
+
+(defun agent-repl-test-wire-host--parse (json)
+  "Parse JSON exactly as the codec's callers do."
+  (json-parse-string json :object-type 'alist :array-type 'list
+                     :null-object :null :false-object :false))
+
+(defun agent-repl-test-wire-host--decode (decoder json)
+  "Decode JSON with DECODER, quietly."
+  (agent-repl-test-wire-host--quiet
+    (funcall decoder (agent-repl-test-wire-host--parse json))))
+
+(defun agent-repl-test-wire-host--breach (decoder json)
+  "Return the `agent-repl-wire-error' data decoding JSON with DECODER raises."
+  (agent-repl-test-wire-host--quiet
+    (condition-case err
+        (progn (funcall decoder (agent-repl-test-wire-host--parse json)) nil)
+      (agent-repl-wire-error (cdr err)))))
+
+(defconst agent-repl-test-wire-host--live-json
+  (concat "{\"existing\":{\"id\":{\"value\":\"sess-1\"},"
+          "\"live\":{\"generation\":{\"value\":\"gen-3\"},"
+          "\"shimAttached\":true,"
+          "\"claude\":{\"sessionId\":\"vendor-9\",\"configDir\":\"/home/me/.claude\"},"
+          "\"backfill\":{\"done\":{}},"
+          "\"open\":{},"
+          "\"faults\":[{\"detail\":\"sidecar lag\",\"openedAtMs\":\"1756400000000\"}]}},"
+          "\"naming\":{\"slug\":\"fix-flaky\",\"title\":\"Fix the flaky reconnect\"}}")
+  "A fully populated HostWorkspace on the live standing.")
+
+;;;; ---- RegisterWorkspace ----
+
+(ert-deftest agent-repl-test-wire-host-register-request-carries-the-path ()
+  "RegisterWorkspace sends a PATH; the daemon mints the identity from it."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-register-workspace-request
+                     '(:dir "~/w/fix"))))
+                 "{\"dir\":\"~/w/fix\"}")))
+
+(ert-deftest agent-repl-test-wire-host-register-success-carries-the-minted-ref ()
+  "The success arm carries the daemon-minted WorkspaceRef, whole."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-register-workspace-response
+                  "{\"success\":{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}}")
+                 '(:arm :success :value (:workspace (:id "ws-7" :dir "/w/fix"))))))
+
+(ert-deftest agent-repl-test-wire-host-register-error-arm-is-empty ()
+  "The error message is empty on purpose until its arms are derived."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-register-workspace-response
+                  "{\"error\":{}}")
+                 '(:arm :error :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-register-unset-result-is-a-breach ()
+  "A response with no outcome arm is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-register-workspace-response "{}")
+                 '("RegisterWorkspaceResponse" result "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-register-two-results-is-a-breach ()
+  "A response setting both outcome arms is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-register-workspace-response
+                  "{\"success\":{\"workspace\":{\"id\":\"a\"}},\"error\":{}}")
+                 '("RegisterWorkspaceResponse" result "oneof has more than one arm set"))))
+
+(ert-deftest agent-repl-test-wire-host-register-success-without-workspace-is-a-breach ()
+  "The success arm's workspace is not optional."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-register-workspace-response
+                  "{\"success\":{}}")
+                 '("RegisterWorkspaceSuccess" workspace
+                   "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-register-refuses-an-unknown-field ()
+  "An unknown key on the response is refused at the response's own level."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-register-workspace-response
+                  "{\"pending\":{}}")
+                 '("RegisterWorkspaceResponse" pending "unknown field"))))
+
+;;;; ---- SelectWorkspace ----
+
+(ert-deftest agent-repl-test-wire-host-select-request-echoes-the-ref ()
+  "SelectWorkspace echoes the daemon-minted ref, never a path it built."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-select-workspace-request
+                     '(:workspace (:id "ws-7" :dir "/w/fix")))))
+                 "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}")))
+
+(ert-deftest agent-repl-test-wire-host-select-request-without-a-ref-is-refused ()
+  "An incomplete request errors before send, never on the wire."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (condition-case err
+                       (progn (agent-repl-wire-encode-select-workspace-request nil) nil)
+                     (agent-repl-wire-error (cdr err))))
+                 '("SelectWorkspaceRequest" workspace
+                   "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-select-success-is-empty ()
+  "Selection succeeded; the roster stream carries the new `current'."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-select-workspace-response "{\"success\":{}}")
+                 '(:arm :success :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-select-error-arm-decodes ()
+  "The error arm decodes to its keyword with an empty value."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-select-workspace-response "{\"error\":{}}")
+                 '(:arm :error :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-select-unset-result-is-a-breach ()
+  "A SelectWorkspace response with no arm is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-select-workspace-response "{}")
+                 '("SelectWorkspaceResponse" result "oneof is unset"))))
+
+;;;; ---- AdoptHostWorkspace ----
+
+(ert-deftest agent-repl-test-wire-host-adopt-request-echoes-the-ref ()
+  "The adopt verb identifies the participant; the request carries only the ref."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-adopt-host-workspace-request
+                     '(:workspace (:id "ws-7" :dir "/w/fix")))))
+                 "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}")))
+
+(ert-deftest agent-repl-test-wire-host-adopt-success-is-empty ()
+  "Adoption is COMPLETE: re-subscribe the workspace's streams here now."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-adopt-host-workspace-response
+                  "{\"success\":{}}")
+                 '(:arm :success :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-adopt-error-arm-decodes ()
+  "The adopt error arm decodes to its keyword."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-adopt-host-workspace-response
+                  "{\"error\":{}}")
+                 '(:arm :error :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-adopt-unset-result-is-a-breach ()
+  "An adopt response with no arm is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-adopt-host-workspace-response "{}")
+                 '("AdoptHostWorkspaceResponse" result "oneof is unset"))))
+
+;;;; ---- WatchHostWorkspace: the request and the push oneof ----
+
+(ert-deftest agent-repl-test-wire-host-watch-request-echoes-the-ref ()
+  "One subscription per open workspace, addressed by the minted ref."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-watch-host-workspace-request
+                     '(:workspace (:id "ws-7" :dir "/w/fix")))))
+                 "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}")))
+
+(ert-deftest agent-repl-test-wire-host-push-decodes-every-arm ()
+  "Every declared push arm decodes to its own keyword."
+  (dolist (case (list (list (concat "{\"host\":" agent-repl-test-wire-host--live-json "}")
+                            :host)
+                      (list (concat "{\"notification\":{\"text\":\"hi\",\"atMs\":\"1\","
+                                    "\"kind\":{\"agentAddressed\":{}}}}")
+                            :notification)
+                      (list "{\"transferred\":{}}" :transferred)
+                      (list "{\"reloadWebapp\":{}}" :reload-webapp)
+                      (list "{\"openInEditor\":{\"path\":\"/w/a.el\"}}" :open-in-editor)))
+    (should (equal (plist-get (agent-repl-test-wire-host--decode
+                               #'agent-repl-wire-decode-watch-host-workspace-response
+                               (nth 0 case))
+                              :arm)
+                   (nth 1 case)))))
+
+(ert-deftest agent-repl-test-wire-host-push-unset-is-a-breach ()
+  "A push carrying no arm is a contract breach, not an empty update."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-host-workspace-response "{}")
+                 '("WatchHostWorkspaceResponse" push "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-push-two-arms-is-a-breach ()
+  "Two push arms set is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-host-workspace-response
+                  "{\"transferred\":{},\"reloadWebapp\":{}}")
+                 '("WatchHostWorkspaceResponse" push "oneof has more than one arm set"))))
+
+(ert-deftest agent-repl-test-wire-host-push-unknown-arm-is-refused ()
+  "An arm this build does not carry is refused as an unknown field."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-host-workspace-response
+                  "{\"restartWebview\":{}}")
+                 '("WatchHostWorkspaceResponse" restartWebview "unknown field"))))
+
+;;;; ---- HostOpenInEditor ----
+
+(ert-deftest agent-repl-test-wire-host-open-in-editor-carries-the-line ()
+  "A relayed click with a line decodes both halves."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-open-in-editor
+                  "{\"path\":\"/w/a.el\",\"line\":41}")
+                 '(:path "/w/a.el" :line 41))))
+
+(ert-deftest agent-repl-test-wire-host-open-in-editor-absent-line-is-nil ()
+  "UNSET line means the file's top, or a directory — nil, not 0."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-open-in-editor
+                             "{\"path\":\"/w/src\"}")
+                            :line)
+                 nil)))
+
+(ert-deftest agent-repl-test-wire-host-open-in-editor-refuses-an-unknown-field ()
+  "An unknown key on the relayed click is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-open-in-editor
+                  "{\"path\":\"/w/a.el\",\"column\":3}")
+                 '("HostOpenInEditor" column "unknown field"))))
+
+;;;; ---- The notification push ----
+
+(ert-deftest agent-repl-test-wire-host-notification-decodes-agent-addressed ()
+  "The agent addressed the user: text, instant, and the kind arm."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace-notification
+                  (concat "{\"text\":\"ready for review\",\"atMs\":\"1756400000000\","
+                          "\"kind\":{\"agentAddressed\":{}}}"))
+                 '(:text "ready for review" :at-ms 1756400000000
+                   :kind (:arm :agent-addressed :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-notification-decodes-permission-requested ()
+  "A permission ask names the gated tool for the banner line."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace-notification
+                             (concat "{\"text\":\"allow Bash?\",\"atMs\":1,"
+                                     "\"kind\":{\"permissionRequested\":"
+                                     "{\"toolName\":\"Bash\"}}}"))
+                            :kind)
+                 '(:arm :permission-requested :value (:tool-name "Bash")))))
+
+(ert-deftest agent-repl-test-wire-host-notification-accepts-a-numeric-instant ()
+  "protojson accepts a number for int64, and an instant is an int64."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace-notification
+                             (concat "{\"text\":\"x\",\"atMs\":1756400000000,"
+                                     "\"kind\":{\"agentAddressed\":{}}}"))
+                            :at-ms)
+                 1756400000000)))
+
+(ert-deftest agent-repl-test-wire-host-notification-without-a-kind-is-a-breach ()
+  "The kind is not optional: the arm is the programmatic semantics."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-notification
+                  "{\"text\":\"x\",\"atMs\":\"1\"}")
+                 '("HostWorkspaceNotification" kind "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-notification-kind-unset-is-a-breach ()
+  "A kind message with no arm is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-notification
+                  "{\"text\":\"x\",\"atMs\":\"1\",\"kind\":{}}")
+                 '("HostNotificationKind" kind "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-notification-kind-unknown-arm-is-refused ()
+  "An unmodeled notification kind is refused rather than silently dropped."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-notification
+                  "{\"text\":\"x\",\"atMs\":\"1\",\"kind\":{\"budgetExceeded\":{}}}")
+                 '("HostNotificationKind" budgetExceeded "unknown field"))))
+
+;;;; ---- HostWorkspace: the session axis ----
+
+(ert-deftest agent-repl-test-wire-host-workspace-decodes-the-none-session ()
+  "Registered, but no session was ever created for it."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace
+                             "{\"none\":{},\"naming\":{}}")
+                            :session)
+                 '(:arm :none :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-workspace-decodes-the-live-standing ()
+  "A fully populated live workspace decodes whole, tree preserved."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace
+                  agent-repl-test-wire-host--live-json)
+                 '(:session
+                   (:arm :existing
+                    :value (:id (:value "sess-1")
+                            :standing
+                            (:arm :live
+                             :value (:generation (:value "gen-3")
+                                     :shim-attached t
+                                     :vendor-info (:arm :claude
+                                                   :value (:session-id "vendor-9"
+                                                           :config-dir "/home/me/.claude"))
+                                     :backfill (:arm :done :value nil)
+                                     :composer (:arm :open :value nil)
+                                     :faults ((:detail "sidecar lag"
+                                               :opened-at-ms 1756400000000))))))
+                   :naming (:slug "fix-flaky" :title "Fix the flaky reconnect")))))
+
+(ert-deftest agent-repl-test-wire-host-workspace-decodes-the-terminal-standing ()
+  "A terminal session states whether reopening can rehydrate it."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-session-existing
+                  "{\"id\":{\"value\":\"s\"},\"terminal\":{\"rehydratable\":true}}")
+                 '(:id (:value "s")
+                   :standing (:arm :terminal :value (:rehydratable t))))))
+
+(ert-deftest agent-repl-test-wire-host-workspace-unset-session-is-a-breach ()
+  "A workspace with no session arm is a breach, not a default."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace "{\"naming\":{}}")
+                 '("HostWorkspace" session "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-workspace-without-naming-is-a-breach ()
+  "`naming' is a REQUIRED message: a buffer needs a name in every standing."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace "{\"none\":{}}")
+                 '("HostWorkspace" naming "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-naming-undecided-halves-are-nil ()
+  "Both naming fields are OPTIONAL and unset until derived."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace
+                             "{\"none\":{},\"naming\":{}}")
+                            :naming)
+                 '(:slug nil :title nil))))
+
+(ert-deftest agent-repl-test-wire-host-naming-present-empty-slug-is-empty ()
+  "A PRESENT empty slug is \"\", distinct from an absent one."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace-naming
+                             "{\"slug\":\"\"}")
+                            :slug)
+                 "")))
+
+(ert-deftest agent-repl-test-wire-host-workspace-refuses-an-unknown-field ()
+  "An unknown key on HostWorkspace is refused at that level."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace
+                  "{\"none\":{},\"naming\":{},\"hibernated\":{}}")
+                 '("HostWorkspace" hibernated "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-existing-without-an-id-is-a-breach ()
+  "The session identity is hoisted over the standing and is required."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-session-existing "{\"terminal\":{}}")
+                 '("HostSessionExisting" id "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-existing-without-a-standing-is-a-breach ()
+  "A session that exists always has a standing."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-session-existing
+                  "{\"id\":{\"value\":\"s\"}}")
+                 '("HostSessionExisting" standing "oneof is unset"))))
+
+;;;; ---- HostSessionLive ----
+
+(defconst agent-repl-test-wire-host--minimal-live
+  "{\"generation\":{\"value\":\"g\"},\"backfill\":{\"none\":{}},%s}"
+  "A live session with only its required parts, plus a %s slot for a gate.")
+
+(defun agent-repl-test-wire-host--live (extra)
+  "Return a minimal HostSessionLive JSON carrying EXTRA."
+  (format agent-repl-test-wire-host--minimal-live extra))
+
+(ert-deftest agent-repl-test-wire-host-live-decodes-every-composer-arm ()
+  "Every composer gate arm decodes to its keyword; the arm IS the gate."
+  (dolist (case '(("\"open\":{}" :open)
+                  ("\"merging\":{}" :merging)
+                  ("\"draining\":{}" :draining)
+                  ("\"restarting\":{}" :restarting)
+                  ("\"mergeParked\":{}" :merge-parked)))
+    (should (equal (plist-get (agent-repl-test-wire-host--decode
+                               #'agent-repl-wire-decode-host-session-live
+                               (agent-repl-test-wire-host--live (nth 0 case)))
+                              :composer)
+                   (list :arm (nth 1 case) :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-live-composer-arms-match-the-bindings ()
+  "The decoder's arm set is exactly what the frozen schema declares.
+Read from the checked-in Go bindings, which carry HostSessionLive's
+composer and vendor_info arms together."
+  (let ((declared (sort (agent-repl-test--generated-oneof-arms
+                         "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
+                         "HostSessionLive")
+                        #'string<))
+        (spelled (sort (list "open" "merging" "draining" "restarting" "mergeParked"
+                             "claude")
+                       #'string<)))
+    (should (equal spelled declared))))
+
+(ert-deftest agent-repl-test-wire-host-live-unset-composer-is-a-breach ()
+  "A live session with no gate arm is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-session-live
+                  "{\"generation\":{\"value\":\"g\"},\"backfill\":{\"none\":{}}}")
+                 '("HostSessionLive" composer "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-live-two-composer-arms-is-a-breach ()
+  "Two gates set is the same breach as none."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-session-live
+                  (agent-repl-test-wire-host--live "\"open\":{},\"merging\":{}"))
+                 '("HostSessionLive" composer "oneof has more than one arm set"))))
+
+(ert-deftest agent-repl-test-wire-host-live-unset-vendor-info-is-legal ()
+  "The vendor oneof stays UNSET while no vendor conversation exists yet."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-session-live
+                             (agent-repl-test-wire-host--live "\"open\":{}"))
+                            :vendor-info)
+                 nil)))
+
+(ert-deftest agent-repl-test-wire-host-live-vendor-claude-names-the-account ()
+  "The claude arm names the conversation and the account it runs against."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-session-live
+                             (agent-repl-test-wire-host--live
+                              (concat "\"open\":{},\"claude\":{\"sessionId\":\"v\","
+                                      "\"configDir\":\"/c\"}")))
+                            :vendor-info)
+                 '(:arm :claude :value (:session-id "v" :config-dir "/c")))))
+
+(ert-deftest agent-repl-test-wire-host-live-without-a-generation-is-a-breach ()
+  "The controller generation is required: fault windows scope to it."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-session-live
+                  "{\"backfill\":{\"none\":{}},\"open\":{}}")
+                 '("HostSessionLive" generation "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-live-without-backfill-is-a-breach ()
+  "The never-blue signal is required on a live session."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-session-live
+                  "{\"generation\":{\"value\":\"g\"},\"open\":{}}")
+                 '("HostSessionLive" backfill "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-live-omitted-shim-attached-is-false ()
+  "protojson omits the default, so an absent shimAttached is false."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-session-live
+                             (agent-repl-test-wire-host--live "\"open\":{}"))
+                            :shim-attached)
+                 nil)))
+
+(ert-deftest agent-repl-test-wire-host-live-empty-faults-is-the-empty-list ()
+  "No standing faults decodes to the empty list, never to a breach."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-session-live
+                             (agent-repl-test-wire-host--live "\"open\":{},\"faults\":[]"))
+                            :faults)
+                 nil)))
+
+(ert-deftest agent-repl-test-wire-host-live-faults-decode-each-window ()
+  "Each standing fault decodes its account and the instant it opened."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-session-live
+                             (agent-repl-test-wire-host--live
+                              (concat "\"open\":{},\"faults\":["
+                                      "{\"detail\":\"a\",\"openedAtMs\":\"7\"},"
+                                      "{\"detail\":\"b\",\"openedAtMs\":9}]")))
+                            :faults)
+                 '((:detail "a" :opened-at-ms 7) (:detail "b" :opened-at-ms 9)))))
+
+(ert-deftest agent-repl-test-wire-host-live-refuses-an-unknown-field ()
+  "An unknown key on the live standing is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-session-live
+                  (agent-repl-test-wire-host--live "\"open\":{},\"hibernated\":true"))
+                 '("HostSessionLive" hibernated "unknown field"))))
+
+;;;; ---- HostBackfill ----
+
+(ert-deftest agent-repl-test-wire-host-backfill-decodes-every-arm ()
+  "Every backfill state arm decodes to its keyword."
+  (dolist (case '(("{\"none\":{}}" (:arm :none :value nil))
+                  ("{\"pending\":{}}" (:arm :pending :value nil))
+                  ("{\"done\":{}}" (:arm :done :value nil))
+                  ("{\"failed\":{\"detail\":\"parse error\"}}"
+                   (:arm :failed :value (:detail "parse error")))))
+    (should (equal (agent-repl-test-wire-host--decode
+                    #'agent-repl-wire-decode-host-backfill (nth 0 case))
+                   (nth 1 case)))))
+
+(ert-deftest agent-repl-test-wire-host-backfill-unset-is-a-breach ()
+  "A backfill message with no state arm is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-backfill "{}")
+                 '("HostBackfill" state "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-backfill-unknown-arm-is-refused ()
+  "An unmodeled backfill state is refused as an unknown field."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-backfill "{\"partial\":{}}")
+                 '("HostBackfill" partial "unknown field"))))
+
+;;;; ---- WatchDaemon ----
+
+(ert-deftest agent-repl-test-wire-host-watch-daemon-request-is-empty ()
+  "The stream is daemon-scoped, so there is nothing to address."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize (agent-repl-wire-encode-watch-daemon-request nil)))
+                 "{}")))
+
+(ert-deftest agent-repl-test-wire-host-shutdown-announced-carries-the-successor ()
+  "A handover announcement carries the address Emacs dual-attaches to."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (concat "{\"shutdownAnnounced\":{\"address\":\"127.0.0.1:5051\","
+                          "\"cause\":{\"selfMergeRollout\":{}},"
+                          "\"expectedOutageMs\":\"4000\","
+                          "\"mintedAtMs\":\"1756400000000\"}}"))
+                 '(:arm :shutdown-announced
+                   :value (:address "127.0.0.1:5051"
+                           :cause (:arm :self-merge-rollout :value nil)
+                           :expected-outage-ms 4000
+                           :minted-at-ms 1756400000000)))))
+
+(ert-deftest agent-repl-test-wire-host-shutdown-announced-without-address-is-a-bounce ()
+  "UNSET address is a PLAIN BOUNCE: nil, never an empty-string sentinel."
+  (should (equal (plist-get (plist-get
+                             (agent-repl-test-wire-host--decode
+                              #'agent-repl-wire-decode-watch-daemon-response
+                              (concat "{\"shutdownAnnounced\":{"
+                                      "\"cause\":{\"selfMergeRollout\":{}},"
+                                      "\"expectedOutageMs\":\"4000\","
+                                      "\"mintedAtMs\":\"1\"}}"))
+                             :value)
+                            :address)
+                 nil)))
+
+(ert-deftest agent-repl-test-wire-host-shutdown-cause-scheduled-drain-nests-its-reason ()
+  "A scheduled drain's cause carries the typed drain reason."
+  (should (equal (plist-get (plist-get
+                             (agent-repl-test-wire-host--decode
+                              #'agent-repl-wire-decode-watch-daemon-response
+                              (concat "{\"shutdownAnnounced\":{\"cause\":{"
+                                      "\"scheduledDrain\":{\"reason\":{\"deploy\":{}}}},"
+                                      "\"expectedOutageMs\":\"1\",\"mintedAtMs\":\"1\"}}"))
+                             :value)
+                            :cause)
+                 '(:arm :scheduled-drain
+                   :value (:reason (:arm :deploy :value nil))))))
+
+(ert-deftest agent-repl-test-wire-host-shutdown-cause-immediate-nests-its-reason ()
+  "An immediate operator shutdown carries the operator's note."
+  (should (equal (plist-get (plist-get
+                             (agent-repl-test-wire-host--decode
+                              #'agent-repl-wire-decode-watch-daemon-response
+                              (concat "{\"shutdownAnnounced\":{\"cause\":{"
+                                      "\"immediate\":{\"reason\":{\"operator\":"
+                                      "{\"note\":\"hotfix\"}}}},"
+                                      "\"expectedOutageMs\":\"1\",\"mintedAtMs\":\"1\"}}"))
+                             :value)
+                            :cause)
+                 '(:arm :immediate
+                   :value (:reason (:arm :operator :value (:note "hotfix")))))))
+
+(ert-deftest agent-repl-test-wire-host-shutdown-without-a-cause-is-a-breach ()
+  "The cause is not optional: an unexplained retirement is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (concat "{\"shutdownAnnounced\":{\"expectedOutageMs\":\"1\","
+                          "\"mintedAtMs\":\"1\"}}"))
+                 '("DaemonShutdownAnnounced" cause "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-shutdown-cause-unset-is-a-breach ()
+  "A cause message with no arm is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (concat "{\"shutdownAnnounced\":{\"cause\":{},"
+                          "\"expectedOutageMs\":\"1\",\"mintedAtMs\":\"1\"}}"))
+                 '("DaemonShutdownCause" kind "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-drain-scheduled-carries-its-instant ()
+  "The standing drain schedule ships its deadline instant and its reason."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (concat "{\"drainScheduled\":{\"atMs\":\"1756400000000\","
+                          "\"reason\":{\"maintenance\":{}}}}"))
+                 '(:arm :drain-scheduled
+                   :value (:at-ms 1756400000000
+                           :reason (:arm :maintenance :value nil))))))
+
+(ert-deftest agent-repl-test-wire-host-drain-scheduled-without-a-reason-is-a-breach ()
+  "Every client's banner names the reason, so it is required."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"drainScheduled\":{\"atMs\":\"1\"}}")
+                 '("DaemonDrainScheduled" reason "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-drain-cancelled-is-presence-alone ()
+  "Presence is the fact: the schedule was cancelled."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"drainCancelled\":{}}")
+                 '(:arm :drain-cancelled :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-daemon-push-unset-is-a-breach ()
+  "A daemon push carrying no arm is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-daemon-response "{}")
+                 '("WatchDaemonResponse" push "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-daemon-push-unknown-arm-is-refused ()
+  "An unmodeled daemon push arm is refused as an unknown field."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"configReloaded\":{}}")
+                 '("WatchDaemonResponse" configReloaded "unknown field"))))
+
+(provide 'test-wire-host)
+
+;;; test-wire-host.el ends here
