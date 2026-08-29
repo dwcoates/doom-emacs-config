@@ -3,10 +3,13 @@ package gitclient
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// --- the environment contract, as a pure function -----------------------
 
 func TestScrubEnvStripsEveryRepositorySelectingVar(t *testing.T) {
 	tests := []struct {
@@ -33,10 +36,8 @@ func TestScrubEnvStripsEveryRepositorySelectingVar(t *testing.T) {
 			scrubbed := scrubEnv(env)
 
 			// Assert.
-			for _, entry := range scrubbed {
-				if entry == test.binding {
-					t.Fatalf("scrubEnv kept %q; `-C dir` must be the only repository selector", test.binding)
-				}
+			if containsEntry(scrubbed, test.binding) {
+				t.Fatalf("scrubEnv kept %q; `-C dir` must be the only repository selector", test.binding)
 			}
 		})
 	}
@@ -64,8 +65,8 @@ func TestScrubEnvPinsTerminalPromptOverInheritedValue(t *testing.T) {
 	// Act.
 	scrubbed := scrubEnv(env)
 
-	// Assert: the pinned binding is the only one present, not merely the last.
-	if got := entriesFor(scrubbed, "GIT_TERMINAL_PROMPT"); len(got) != 1 || got[0] != "GIT_TERMINAL_PROMPT=0" {
+	// Assert: the pinned binding is the ONLY one present, not merely the last.
+	if got := envValues(scrubbed, "GIT_TERMINAL_PROMPT"); len(got) != 1 || got[0] != "GIT_TERMINAL_PROMPT=0" {
 		t.Fatalf("GIT_TERMINAL_PROMPT bindings = %v, want exactly [GIT_TERMINAL_PROMPT=0]", got)
 	}
 }
@@ -78,84 +79,243 @@ func TestScrubEnvPinsLocaleOverInheritedValue(t *testing.T) {
 	scrubbed := scrubEnv(env)
 
 	// Assert.
-	if got := entriesFor(scrubbed, "LC_ALL"); len(got) != 1 || got[0] != "LC_ALL=C" {
+	if got := envValues(scrubbed, "LC_ALL"); len(got) != 1 || got[0] != "LC_ALL=C" {
 		t.Fatalf("LC_ALL bindings = %v, want exactly [LC_ALL=C]", got)
 	}
 }
 
-// TestInheritedGitDirDoesNotSelectTheRepository is the regression this leaf
-// exists for: git honors GIT_DIR ahead of `-C dir`, so a leaked one from a hook
-// would silently point every command at another repository.
-func TestInheritedGitDirDoesNotSelectTheRepository(t *testing.T) {
+// --- the environment contract, as the child actually sees it ------------
+
+// TestInheritedGitDirNeverReachesTheChild is the regression this leaf exists
+// for: git honors GIT_DIR ahead of `-C dir`, so a hook-leaked one would
+// silently point every command at another repository.
+func TestInheritedGitDirNeverReachesTheChild(t *testing.T) {
 	// Arrange.
 	git, _ := newTestClient(t)
-	dir := seedRepo(t, "main")
-	t.Setenv("GIT_DIR", filepath.Join(t.TempDir(), "bogus", ".git"))
+	fake := newFakeGit(t, ok("main\n"))
+	t.Setenv("GIT_DIR", "/nowhere/else/.git")
 
 	// Act.
-	branch, err := git.CurrentBranch(context.Background(), dir)
+	if _, err := git.CurrentBranch(context.Background(), "/repo"); err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("CurrentBranch under a bogus inherited GIT_DIR: %v", err)
-	}
-	if branch != "main" {
-		t.Fatalf("CurrentBranch = %q, want %q", branch, "main")
+	if got := envValues(fake.only().Env, "GIT_DIR"); len(got) != 0 {
+		t.Fatalf("the child's environment carries %v; GIT_DIR must be scrubbed", got)
 	}
 }
 
-// TestInheritedGitWorkTreeDoesNotSelectTheWorkTree covers the second half of
-// the same hazard: GIT_WORK_TREE alone is enough to produce bogus work-tree
-// errors against a directory the caller never named.
-func TestInheritedGitWorkTreeDoesNotSelectTheWorkTree(t *testing.T) {
+func TestInheritedGitWorkTreeNeverReachesTheChild(t *testing.T) {
 	// Arrange.
 	git, _ := newTestClient(t)
-	dir := seedRepo(t, "main")
-	t.Setenv("GIT_WORK_TREE", t.TempDir())
+	fake := newFakeGit(t, ok(""))
+	t.Setenv("GIT_WORK_TREE", "/nowhere/else")
 
 	// Act.
-	clean, err := git.IsClean(context.Background(), dir)
+	if _, err := git.IsClean(context.Background(), "/repo"); err != nil {
+		t.Fatalf("IsClean: %v", err)
+	}
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("IsClean under a bogus inherited GIT_WORK_TREE: %v", err)
-	}
-	if !clean {
-		t.Fatalf("IsClean = false, want true for a freshly seeded repository")
+	if got := envValues(fake.only().Env, "GIT_WORK_TREE"); len(got) != 0 {
+		t.Fatalf("the child's environment carries %v; GIT_WORK_TREE must be scrubbed", got)
 	}
 }
 
-func TestFailureCarriesGitExitCodeAndStderr(t *testing.T) {
-	// Arrange.
+func TestInheritedGitIndexFileNeverReachesTheChild(t *testing.T) {
+	// Arrange: an index binding would make git stage into another repository's
+	// index even with `-C dir` correct.
 	git, _ := newTestClient(t)
-	dir := seedRepo(t, "main")
+	fake := newFakeGit(t, ok(""))
+	t.Setenv("GIT_INDEX_FILE", "/nowhere/else/index")
 
 	// Act.
-	_, err := git.ResolveRef(context.Background(), dir, "refs/heads/does-not-exist")
+	if _, err := git.ConflictedFiles(context.Background(), "/repo"); err != nil {
+		t.Fatalf("ConflictedFiles: %v", err)
+	}
+
+	// Assert.
+	if got := envValues(fake.only().Env, "GIT_INDEX_FILE"); len(got) != 0 {
+		t.Fatalf("the child's environment carries %v; GIT_INDEX_FILE must be scrubbed", got)
+	}
+}
+
+func TestPinnedTerminalPromptReachesTheChild(t *testing.T) {
+	// Arrange: a daemon has no terminal, so git must fail rather than block.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("main\n"))
+	t.Setenv("GIT_TERMINAL_PROMPT", "1")
+
+	// Act.
+	if _, err := git.CurrentBranch(context.Background(), "/repo"); err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+
+	// Assert.
+	if got := envValues(fake.only().Env, "GIT_TERMINAL_PROMPT"); len(got) != 1 || got[0] != "GIT_TERMINAL_PROMPT=0" {
+		t.Fatalf("the child sees GIT_TERMINAL_PROMPT %v, want exactly [GIT_TERMINAL_PROMPT=0]", got)
+	}
+}
+
+func TestPinnedLocaleReachesTheChild(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("main\n"))
+	t.Setenv("LC_ALL", "fr_FR.UTF-8")
+
+	// Act.
+	if _, err := git.CurrentBranch(context.Background(), "/repo"); err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+
+	// Assert.
+	if got := envValues(fake.only().Env, "LC_ALL"); len(got) != 1 || got[0] != "LC_ALL=C" {
+		t.Fatalf("the child sees LC_ALL %v, want exactly [LC_ALL=C]", got)
+	}
+}
+
+func TestUnrelatedInheritedBindingReachesTheChild(t *testing.T) {
+	// Arrange: the scrub is narrow. The git identity, PATH and HOME must
+	// survive, or the daemon's git could not commit at all.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("main\n"))
+	t.Setenv("GIT_AUTHOR_NAME", "Someone")
+
+	// Act.
+	if _, err := git.CurrentBranch(context.Background(), "/repo"); err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+
+	// Assert.
+	if got := envValues(fake.only().Env, "GIT_AUTHOR_NAME"); len(got) != 1 || got[0] != "GIT_AUTHOR_NAME=Someone" {
+		t.Fatalf("the child sees GIT_AUTHOR_NAME %v, want it preserved", got)
+	}
+}
+
+// --- `-C dir` is the only selector --------------------------------------
+
+func TestTheDirectoryIsPassedAsDashC(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("main\n"))
+
+	// Act.
+	if _, err := git.CurrentBranch(context.Background(), "/some/repo"); err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+
+	// Assert.
+	if got := fake.only().dashCDir(); got != "/some/repo" {
+		t.Fatalf("the call selected %q, want `-C /some/repo`", got)
+	}
+}
+
+func TestTheChildIsNotChdiredIntoTheRepository(t *testing.T) {
+	// Arrange: selecting the repository by spawning git INSIDE it would make
+	// the daemon's own working directory part of the contract.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("main\n"))
+	here, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("reading the working directory: %v", err)
+	}
+
+	// Act.
+	if _, err := git.CurrentBranch(context.Background(), "/some/repo"); err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+
+	// Assert.
+	if got := fake.only().Cwd; got != here {
+		t.Fatalf("git was spawned in %q, want the daemon's own %q", got, here)
+	}
+}
+
+// --- failure evidence ----------------------------------------------------
+
+func TestFailureCarriesGitExitCode(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: Needed a single revision\n"))
+
+	// Act.
+	_, err := git.ResolveRef(context.Background(), "/repo", "nope")
 
 	// Assert.
 	var failure *Error
 	if !errors.As(err, &failure) {
 		t.Fatalf("ResolveRef error = %v (%T), want a *gitclient.Error", err, err)
 	}
-	if failure.ExitCode == 0 {
-		t.Fatalf("Error.ExitCode = 0, want git's nonzero status")
-	}
-	if failure.Dir != dir {
-		t.Fatalf("Error.Dir = %q, want %q", failure.Dir, dir)
-	}
-	if strings.TrimSpace(failure.Stderr) == "" {
-		t.Fatalf("Error.Stderr is empty; git's own words are the evidence")
+	if failure.ExitCode != 128 {
+		t.Fatalf("Error.ExitCode = %d, want 128", failure.ExitCode)
 	}
 }
 
-func TestFailureCarriesTheArgumentVector(t *testing.T) {
+func TestFailureCarriesGitStderrVerbatim(t *testing.T) {
 	// Arrange.
 	git, _ := newTestClient(t)
-	dir := seedRepo(t, "main")
+	const stderr = "fatal: Needed a single revision\n"
+	newFakeGit(t, fails(128, stderr))
 
 	// Act.
-	_, err := git.ResolveRef(context.Background(), dir, "refs/heads/does-not-exist")
+	_, err := git.ResolveRef(context.Background(), "/repo", "nope")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("ResolveRef error = %v (%T), want a *gitclient.Error", err, err)
+	}
+	if failure.Stderr != stderr {
+		t.Fatalf("Error.Stderr = %q, want %q verbatim", failure.Stderr, stderr)
+	}
+}
+
+func TestFailureCarriesGitStdoutVerbatim(t *testing.T) {
+	// Arrange: a git that printed something before failing. Dropping it would
+	// throw away half the evidence.
+	git, _ := newTestClient(t)
+	newFakeGit(t, gitFixture{Stdout: "partial output\n", Stderr: "fatal: boom\n", Exit: 1})
+
+	// Act.
+	_, err := git.ResolveRef(context.Background(), "/repo", "nope")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("ResolveRef error = %v (%T), want a *gitclient.Error", err, err)
+	}
+	if failure.Stdout != "partial output\n" {
+		t.Fatalf("Error.Stdout = %q, want it preserved", failure.Stdout)
+	}
+}
+
+func TestFailureCarriesTheDirectory(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(1, "boom\n"))
+
+	// Act.
+	_, err := git.ResolveRef(context.Background(), "/some/repo", "nope")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("ResolveRef error = %v (%T), want a *gitclient.Error", err, err)
+	}
+	if failure.Dir != "/some/repo" {
+		t.Fatalf("Error.Dir = %q, want %q", failure.Dir, "/some/repo")
+	}
+}
+
+func TestFailureCarriesTheSubcommandVectorWithoutTheDashC(t *testing.T) {
+	// Arrange: Dir already records the `-C` directory, so repeating it in Args
+	// would make the rendered message say it twice.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(1, "boom\n"))
+
+	// Act.
+	_, err := git.ResolveRef(context.Background(), "/repo", "nope")
 
 	// Assert.
 	var failure *Error
@@ -163,17 +323,36 @@ func TestFailureCarriesTheArgumentVector(t *testing.T) {
 		t.Fatalf("ResolveRef error = %v (%T), want a *gitclient.Error", err, err)
 	}
 	if len(failure.Args) == 0 || failure.Args[0] != "rev-parse" {
-		t.Fatalf("Error.Args = %v, want the rev-parse vector", failure.Args)
+		t.Fatalf("Error.Args = %v, want the rev-parse vector with no `-C`", failure.Args)
+	}
+	if containsEntry(failure.Args, "-C") {
+		t.Fatalf("Error.Args = %v, want no `-C`", failure.Args)
 	}
 }
 
-func TestFailureIsLoggedAtErrorOnce(t *testing.T) {
+func TestErrorMessageQuotesGitStderr(t *testing.T) {
 	// Arrange.
-	git, surfaces := newTestClient(t)
-	dir := seedRepo(t, "main")
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: not a valid object name\n"))
 
 	// Act.
-	_, _ = git.ResolveRef(context.Background(), dir, "refs/heads/does-not-exist")
+	_, err := git.ResolveRef(context.Background(), "/repo", "nope")
+
+	// Assert.
+	if !strings.Contains(err.Error(), "fatal: not a valid object name") {
+		t.Fatalf("Error() = %q, want it to quote git's own words", err.Error())
+	}
+}
+
+// --- logging -------------------------------------------------------------
+
+func TestFailureIsLoggedAtErrorExactlyOnce(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(1, "boom\n"))
+
+	// Act.
+	_, _ = git.ResolveRef(context.Background(), "/repo", "nope")
 
 	// Assert.
 	var errorRecords int
@@ -187,13 +366,31 @@ func TestFailureIsLoggedAtErrorOnce(t *testing.T) {
 	}
 }
 
+func TestFailureRecordCarriesTheGitEvidence(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(1, "boom\n"))
+
+	// Act.
+	_, _ = git.ResolveRef(context.Background(), "/repo", "nope")
+
+	// Assert.
+	record, ok := recordFor(surfaces.records(), "error", "daemon.gitclient.resolve_ref")
+	if !ok {
+		t.Fatalf("no error record for resolve_ref")
+	}
+	if record.Context["stderr"] != "boom\n" {
+		t.Fatalf("the record's stderr = %v, want git's own words", record.Context["stderr"])
+	}
+}
+
 func TestOrdinaryPathIsLoggedAtDebug(t *testing.T) {
 	// Arrange.
 	git, surfaces := newTestClient(t)
-	dir := seedRepo(t, "main")
+	newFakeGit(t, ok("main\n"))
 
 	// Act.
-	if _, err := git.CurrentBranch(context.Background(), dir); err != nil {
+	if _, err := git.CurrentBranch(context.Background(), "/repo"); err != nil {
 		t.Fatalf("CurrentBranch: %v", err)
 	}
 
@@ -203,13 +400,15 @@ func TestOrdinaryPathIsLoggedAtDebug(t *testing.T) {
 	}
 }
 
-func TestInvokeReportsAnUnrunnableGit(t *testing.T) {
+// --- a git that never ran ------------------------------------------------
+
+func TestUnrunnableGitReportsNoExitStatus(t *testing.T) {
 	// Arrange: a PATH with no git on it at all.
-	git, surfaces := newTestClient(t)
-	t.Setenv("PATH", t.TempDir())
+	git, _ := newTestClient(t)
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty"))
 
 	// Act.
-	_, err := git.CurrentBranch(context.Background(), t.TempDir())
+	_, err := git.CurrentBranch(context.Background(), "/repo")
 
 	// Assert.
 	var failure *Error
@@ -219,28 +418,47 @@ func TestInvokeReportsAnUnrunnableGit(t *testing.T) {
 	if failure.ExitCode != -1 {
 		t.Fatalf("Error.ExitCode = %d, want -1 for a git that never ran", failure.ExitCode)
 	}
+}
+
+func TestUnrunnableGitCarriesTheSpawnFailureAsEvidence(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty"))
+
+	// Act.
+	_, err := git.CurrentBranch(context.Background(), "/repo")
+
+	// Assert: git wrote no stderr, so the reason it could not be spawned takes
+	// its place rather than leaving the evidence empty.
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("CurrentBranch error = %v (%T), want a *gitclient.Error", err, err)
+	}
+	if strings.TrimSpace(failure.Stderr) == "" {
+		t.Fatalf("Error.Stderr is empty; the spawn failure is the only evidence there is")
+	}
+}
+
+func TestUnrunnableGitIsLoggedAtError(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty"))
+
+	// Act.
+	_, _ = git.CurrentBranch(context.Background(), "/repo")
+
+	// Assert.
 	if _, ok := recordFor(surfaces.records(), "error", "daemon.gitclient.current_branch"); !ok {
 		t.Fatalf("a git that could not be run must be logged at ERROR")
 	}
 }
 
-// containsEntry reports whether env carries that exact binding.
-func containsEntry(env []string, binding string) bool {
-	for _, entry := range env {
-		if entry == binding {
+// containsEntry reports whether values carries that exact string.
+func containsEntry(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
 			return true
 		}
 	}
 	return false
-}
-
-// entriesFor returns every binding of that variable name in env.
-func entriesFor(env []string, name string) []string {
-	var found []string
-	for _, entry := range env {
-		if strings.HasPrefix(entry, name+"=") {
-			found = append(found, entry)
-		}
-	}
-	return found
 }
