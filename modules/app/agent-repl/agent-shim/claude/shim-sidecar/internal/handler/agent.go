@@ -1,5 +1,17 @@
 package handler
 
+// agent.go — a subagent's sidechain transcript, which is the same JSONL shape as
+// a session transcript and is therefore read by the same converter.
+//
+// WHAT DIFFERS IS THE BOOK, AND ONLY THE BOOK. A subagent's constituents form ITS
+// OWN book, keyed by the vendor `agentId`; the SPAWN that created it is a line in
+// the PARENT's book. Nothing has to be correlated with the session transcript
+// that launched it and nothing has to survive a restart for the association to
+// hold, because both identities are derived from the file path.
+//
+// A sidechain can itself launch detached work — a subagent spawning a subagent —
+// and those launches are read off the tool result exactly as in any other file.
+
 import (
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
@@ -7,20 +19,7 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-// AgentTranscriptHandler reads a subagent's sidechain transcript, which is the
-// same JSONL shape as a session transcript and is therefore parsed by the same
-// converter.
-//
-// WHAT DIFFERS IS LINEAGE, AND ONLY LINEAGE. Every record it reads sits INSIDE
-// the detached-work card the subagent runs as, so a page of ten feed rows counts
-// the subagent once however long its conversation runs. The card's message id is
-// derived from the task id the discoverer already holds, so nothing has to be
-// correlated with the session transcript that launched it and nothing has to
-// survive a restart for the association to hold.
-//
-// A sidechain can itself launch detached work — a subagent spawning a subagent —
-// and those launches open their own cards through the same path, because the
-// converter reads them off the tool result rather than off the file it is in.
+// AgentTranscriptHandler reads a subagent's sidechain transcript.
 type AgentTranscriptHandler struct {
 	conv *convert.Converter
 	log  *logging.Bound
@@ -32,23 +31,16 @@ func NewAgentTranscriptHandler(log *logging.Bound) *AgentTranscriptHandler {
 	return &AgentTranscriptHandler{conv: convert.New(log), log: log}
 }
 
+// SetObserver installs the owner-resolution listener on this handler's converter.
+func (h *AgentTranscriptHandler) SetObserver(o convert.Observer) { h.conv.SetObserver(o) }
+
 // Handle implements tail.Handler.
 func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
-	h.log.With(logging.Context{Operation: "agent-handle", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
+	h.log.With(handleCtx("agent-handle", ctx)).
 		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
-	var out []*storev1.StoreEntry
-	for i, frame := range frames {
-		at := attribute(ctx, frame.Offset)
-		if frame.ParseErr != nil {
-			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID, Level: "warn"}).
-				Log("parse failure at offset=%d; the record is stored whole with no path to a page: %v", frame.Offset, frame.ParseErr)
-			out = append(out, convert.UnparsedEntry(at, frame.Raw, frame.ParseErr))
-			continue
-		}
-		out = append(out, h.conv.Line(frame.Obj, at, lookahead(frames, i+1))...)
-	}
-	logUnconverted(h.log, ctx, out)
-	h.log.With(logging.Context{Operation: "agent-handle", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
+	out := convertFrames(h.conv, h.log, frames, ctx)
+	logResidue(h.log, ctx, out)
+	h.log.With(handleCtx("agent-handle", ctx)).
 		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
 }
