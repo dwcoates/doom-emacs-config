@@ -587,6 +587,20 @@ func (s *fakeShim) StartSession(_ context.Context, resume ColdResume) error {
 	return nil
 }
 
+// fakeBrowser is an externalbrowser.Opener.
+type fakeBrowser struct {
+	opened []string
+	err    error
+}
+
+func (b *fakeBrowser) Open(_ context.Context, url string) error {
+	if b.err != nil {
+		return b.err
+	}
+	b.opened = append(b.opened, url)
+	return nil
+}
+
 // fakeOwnership answers one standing for every workspace.
 type fakeOwnership struct {
 	standing Standing
@@ -671,6 +685,7 @@ type fixture struct {
 	footer  *fakeFooter
 	sidebar *fakeSidebar
 	host    *fakeHost
+	browser *fakeBrowser
 	fleet   *fakeSessions
 	shim    *fakeShim
 	owner   *fakeOwnership
@@ -704,6 +719,7 @@ func newFixture(t *testing.T) *fixture {
 		footer:  newFakeFooter(),
 		sidebar: &fakeSidebar{},
 		host:    &fakeHost{},
+		browser: &fakeBrowser{},
 		fleet:   newFakeSessions(),
 		shim:    &fakeShim{},
 		owner:   &fakeOwnership{standing: StandingOwned},
@@ -715,7 +731,7 @@ func newFixture(t *testing.T) *fixture {
 
 	verbs, err := New(Deps{
 		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{},
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{}, Browser: f.browser,
 		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Sessions: f.fleet,
 		PromptsDir: "/prompts", Log: f.log,
 		Shim: func(ids.WorkspaceID) (Shim, bool) {
@@ -767,6 +783,18 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.verbs = verbs
 	return f
+}
+
+// mutable exposes the concrete verbs so a test can rearrange a collaborator
+// New already accepted — the browser's absence, for one, which is a legal
+// headless wiring rather than a construction error.
+func (f *fixture) mutable(t *testing.T) *verbs {
+	t.Helper()
+	v, ok := f.verbs.(*verbs)
+	if !ok {
+		t.Fatalf("verbs = %T, want *verbs", f.verbs)
+	}
+	return v
 }
 
 // workspace registers one workspace in the fixture's fake registry. The
