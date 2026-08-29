@@ -11,7 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createClient, type Client, ConnectError, Code } from "@connectrpc/connect";
-import { createGrpcWebTransport } from "@connectrpc/connect-node";
+import { createGrpcWebTransport, createConnectTransport } from "@connectrpc/connect-node";
 
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { create } from "@bufbuild/protobuf";
@@ -515,5 +515,90 @@ describe("bookkeeping", () => {
     await client.requestCommandSupport({ workspace: workspaceRef(), command: "/two" });
     // Assert
     expect([(await first).command, (await second).command]).toEqual(["/one", "/two"]);
+  });
+});
+
+describe("headers flush on accept", () => {
+  /**
+   * A standing stream may push nothing for a long time, so "accepted" and "not
+   * yet connected" must not look alike on the client. These run over BOTH
+   * protocols because the app dials with the Connect binary transport while
+   * this suite's own client uses grpc-web, and the fake writes the head itself
+   * rather than waiting for the adapter's lazy one.
+   */
+  const PROTOCOLS = [
+    { name: "connect binary", make: (baseUrl: string) => createConnectTransport({ baseUrl, httpVersion: "1.1" as const, useBinaryFormat: true }) },
+    { name: "grpc-web", make: (baseUrl: string) => createGrpcWebTransport({ baseUrl, httpVersion: "1.1" as const }) },
+  ];
+
+  it.each(PROTOCOLS)("resolves the response head over $name with no pushes", async ({ make }) => {
+    // Arrange: WatchDaemon pushes nothing on open, so only the head can arrive.
+    const typed = createClient(AgentRepl, make(fake.baseUrl));
+    let sawHeader = false;
+    const stream = typed.watchDaemon({}, { onHeader: () => { sawHeader = true; } });
+    const reading = (async () => {
+      try {
+        for await (const _ of stream) break;
+      } catch {
+        // the stream is ended below; the head is what this asserts
+      }
+    })();
+    // Act
+    await fake.awaitStream("watchDaemon");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Assert
+    expect(sawHeader).toBe(true);
+    fake.endStream("watchDaemon");
+    await reading;
+  });
+
+  it("registers the stream before any frame is pushed", async () => {
+    // Arrange / Act
+    const stream = client.watchDaemon({});
+    const reading = (async () => {
+      try {
+        for await (const _ of stream) break;
+      } catch {
+        // ended below
+      }
+    })();
+    await fake.awaitStream("watchDaemon");
+    // Assert: acceptance is observable with nothing yet pushed.
+    expect(fake.liveStreams("watchDaemon")).toBe(1);
+    fake.endStream("watchDaemon");
+    await reading;
+  });
+
+  it("still delivers the first frame after the early head", async () => {
+    // Arrange
+    const reader = take(client.watchDaemon({}), 1);
+    await fake.awaitStream("watchDaemon");
+    // Act
+    fake.cancelDrain();
+    // Assert: writing the head early must not swallow the frames after it.
+    const [push] = await reader;
+    expect(push.push.case).toBe("drainCancelled");
+  });
+
+  it("drops the stream when the client aborts its request", async () => {
+    // Arrange
+    const controller = new AbortController();
+    const stream = client.watchDaemon({}, { signal: controller.signal });
+    const reading = (async () => {
+      try {
+        for await (const _ of stream) break;
+      } catch {
+        // the abort surfaces here
+      }
+    })();
+    await fake.awaitStream("watchDaemon");
+    // Act: a client ends a watch ONLY by aborting; nothing terminal is sent.
+    controller.abort();
+    await reading;
+    for (let i = 0; i < 50 && fake.liveStreams("watchDaemon") > 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    // Assert
+    expect(fake.liveStreams("watchDaemon")).toBe(0);
   });
 });

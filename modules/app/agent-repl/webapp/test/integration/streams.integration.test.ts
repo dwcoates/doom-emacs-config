@@ -290,3 +290,113 @@ describe("the feed's own tail", () => {
     expect(harness.$('[data-feed="root"]')?.textContent).toContain("after the death");
   });
 });
+
+/**
+ * ACCEPTANCE AND CANCELLATION.
+ *
+ * A standing stream never ends on its own, so the two observable events in its
+ * life are the daemon ACCEPTING it (the head flushes before any frame, so the
+ * client can tell it is open while nothing has been pushed) and the client
+ * ABORTING it. Anything else ending the stream is a transport failure, which
+ * the tables above cover.
+ */
+describe("watch acceptance", () => {
+  it.each(STREAM_CASES)("registers $name before any frame is pushed", async (streamCase) => {
+    // Arrange / Act: nothing is pushed here at all.
+    harness = await startHarness();
+    await harness.fake.awaitStream(streamCase.rpc);
+    // Assert
+    expect(harness.fake.liveStreams(streamCase.rpc)).toBeGreaterThan(0);
+  });
+
+  it("registers the web-link watch before any frame", async () => {
+    // Arrange / Act
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchWebWorkspace");
+    // Assert
+    expect(harness.fake.liveStreams("watchWebWorkspace")).toBe(1);
+  });
+
+  it("registers the daemon watch before any frame", async () => {
+    // Arrange / Act
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    // Assert
+    expect(harness.fake.liveStreams("watchDaemon")).toBe(1);
+  });
+
+  it("reports no failure for a watch that has pushed nothing", async () => {
+    // Arrange / Act: silence on a standing stream is not a fault.
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    await harness.tick(30_000);
+    // Assert
+    expect(harness.failureArms()).toEqual([]);
+  });
+});
+
+describe("watch cancellation", () => {
+  /** Wait for the fake to see the aborted request drop off. */
+  const awaitDrop = async (rpc: RpcName): Promise<void> => {
+    for (let i = 0; i < 50 && harness.fake.liveStreams(rpc) > 0; i += 1) {
+      await harness.tick(10);
+    }
+  };
+
+  it.each(STREAM_CASES)("drops $name when the app disposes its mount", async (streamCase) => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream(streamCase.rpc);
+    // Act: the app cancels by aborting its request, never by waiting for an end.
+    await harness.disposeMounts();
+    await awaitDrop(streamCase.rpc);
+    // Assert
+    expect(harness.fake.liveStreams(streamCase.rpc)).toBe(0);
+  });
+
+  it("drops the web-link watch on dispose", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchWebWorkspace");
+    // Act
+    await harness.disposeMounts();
+    await awaitDrop("watchWebWorkspace");
+    // Assert
+    expect(harness.fake.liveStreams("watchWebWorkspace")).toBe(0);
+  });
+
+  it("drops the daemon watch on dispose", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    // Act
+    await harness.disposeMounts();
+    await awaitDrop("watchDaemon");
+    // Assert
+    expect(harness.fake.liveStreams("watchDaemon")).toBe(0);
+  });
+
+  it("does not reopen a stream the app cancelled", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFooter");
+    await harness.disposeMounts();
+    await awaitDrop("watchFooter");
+    const after = harness.fake.calls("watchFooter").length;
+    // Act: a cancellation is deliberate, so no backoff reopen may follow it.
+    await harness.tick(10_000);
+    // Assert
+    expect(harness.fake.calls("watchFooter").length).toBe(after);
+  });
+
+  it("reports no failure for a stream the app cancelled", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFooter");
+    // Act
+    await harness.disposeMounts();
+    await harness.tick(10_000);
+    // Assert: the client ended it, so it is not a transport failure.
+    expect(harness.failureArms()).not.toContain("daemonUnreachable");
+  });
+});
