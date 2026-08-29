@@ -26,7 +26,21 @@ message HibernateResponse {
 message HibernateSuccess {
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (turn in flight,
-// compaction failed, …), spelled per the standing conventions.
+// Not hibernated. THE ARM IS WHY.
 message HibernateError {
+  oneof kind {
+    // A turn is in flight; hibernation waits for freeness.
+    HibernateTurnInFlight turn_in_flight = 1;
+    // The compaction ran and failed; nothing was cut.
+    HibernateCompactionFailed compaction_failed = 2;
+    // No session is open on this shim.
+    HibernateNoSession no_session = 3;
+  }
 }
+message HibernateTurnInFlight {}
+// The compaction failed; the context is as it was.
+message HibernateCompactionFailed {
+  // What went wrong, verbatim.
+  string error = 1;
+}
+message HibernateNoSession {}

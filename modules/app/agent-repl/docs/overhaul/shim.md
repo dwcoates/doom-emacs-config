@@ -451,3 +451,57 @@ purpose).
 - Unset non-optional fields are illegal everywhere, immediately: error to
   the producer on requests, loud raise at the consumer on stream pushes;
   debug-log every logical branch (see the standing conventions (teamlead prompt) and proto comments §6).
+
+## Kickoff increments and rulings (2026-08-29, project lead)
+
+- LANDED: shim.v1 failure `kind`/`cause` arms on StartSession,
+  SetSessionModel, SetSessionPermissionMode, Hibernate, KillSession,
+  StartTurn, UpdateAgent, KillTurn, StopBash, DetachForeground, ReadHistory,
+  plus SessionFault.kind; AgentUpdate gains `context_cut` and `api_error`
+  page-line arms (the shim may produce both). Workflow verbs answer Connect
+  Code.Unimplemented. A refused WatchBash/WatchAgent open closes at the
+  transport.
+- UPSERT KEYS (cross-plane, adopted with the store lead): `activity:<
+  AgentActivityId>` (tool_use_id; `<message.id>:<block_index>` 0-based for
+  text/thinking); `prompt:<TurnId>`; `question:<AgentQuestionId>` (the ask
+  tool_use_id); `permission:<AgentPermissionId>`; `terminal:<AgentId>:<
+  vendor record uuid>`; `bash:<run AgentActivityId>`; `session:<arm>:<vendor
+  record uuid>`. write_id = sha256("<producer>|<source coordinates>|<
+  discriminator>") hex; producer = "claude-shim:<original vendor session
+  id>". Shim-synthesized session facts (diagnostics, context_usage) are
+  never written to the store.
+- KEEP-ALIVE MARKER: every keep-alive prompt begins with the literal
+  `<!--agent-repl:keepalive-->`; the sidecar classifies that turn's records
+  never-served until the next non-keep-alive prompt.
+- R9 default: main AgentId = the conversation's ORIGINAL vendor session id
+  (the shim lead settles the final rule against real file behavior). R15:
+  the shim's AgentPrompt row is the ONE served prompt; it is durably acked
+  before the turn's first activity frame. /agents and /help never reach the
+  shim. The mock's spools go under `$AGENT_REPL_FAKE_SPOOL_ROOT` (default
+  /tmp/claude-<uid>) and transcripts under `$CLAUDE_CONFIG_DIR/projects/
+  <cwd-slug>/`. The one-time real capture run is APPROVED; the project lead
+  dispatches it when the harness is ready.
+
+- CROSS-SYSTEM PROCESS CONTRACTS (project lead, kickoff): one state root
+  `$AGENT_REPL_STATE_DIR` (default ~/.claude-emacs); the daemon binds ONE
+  loopback TCP listener serving Connect (HTTP/1.1 + h2c, binary + JSON) and
+  the webapp assets on one origin, writes `127.0.0.1:<port>` to
+  `$AGENT_REPL_STATE_DIR/daemon.addr` (atomic replace; removed on orderly
+  exit; a joining successor writes it only after it owns every workspace);
+  the webview URL is `http://<daemon.addr>/?workspace=<id>&dir=<dir>`
+  (`&composer=1` only in dev mode); the shim is spawned as `node
+  agent-shim/claude/shim/dist/main.js --listen <uds> --store-socket <uds>
+  --log-fd 3 [--fake]` with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED=1,
+  AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA (tests add
+  AGENT_REPL_FORBID_VENDOR_CALLS=1), cwd = the workspace; session facts
+  travel only in StartSession; readiness = the first healthy `diagnostics`
+  push on WatchSession; the store serves on ~/.cache/agent-repl/sock/
+  store.sock (tests: env AGENT_REPL_STORE_SOCKET, a flag beats it); kernel
+  locks live in ~/.cache/agent-repl/run/ — `workspace-<md5hex(clean abs
+  dir)[:8]>.lock` (shim-held from startup; the daemon probes ONLY this one,
+  flock LOCK_EX|LOCK_NB) and `session-<vendor session id>.lock` (taken
+  inside StartSession; pre-minted on a fresh start); proto/vocab/
+  render-colors.json + paint-classes.json are the daemon's, consumed by
+  webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
+  golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
+  `go 1.23`).

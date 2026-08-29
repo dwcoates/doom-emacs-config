@@ -49,10 +49,19 @@ message ReadHistorySuccess {
   conversation.v1.HistoryPage page = 1;
 }
 
-// Not served. `kind` arms are DERIVED at the wave from the shim's real
-// refusal sites: an unknown agent, a continuation the store no longer
-// honors, the store unavailable.
+// Not served. THE ARM IS WHY.
 message ReadHistoryFailure {
   // The shim's account, for a human and for logs; never switched on.
   string detail = 1;
+  oneof kind {
+    // The addressed agent is not known.
+    ReadHistoryUnknownAgent unknown_agent = 2;
+    // The echoed pointer names a position the store no longer honors.
+    ReadHistoryStalePointer stale_pointer = 3;
+    // The store could not be reached.
+    ReadHistoryStoreUnavailable store_unavailable = 4;
+  }
 }
+message ReadHistoryUnknownAgent {}
+message ReadHistoryStalePointer {}
+message ReadHistoryStoreUnavailable {}
