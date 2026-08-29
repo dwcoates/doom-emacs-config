@@ -345,7 +345,7 @@ body::after {
      the prompt's right margin is half the leftover so its right edge lands
      flush with the centered response's, and follows automatically if this
      cap is retuned. Declared on the column (not just #feed) so the
-     bottom-pinned #progress-footer below the feed inherits the same cap, landing
+     bottom-pinned #footer below the feed inherits the same cap, landing
      the tail line's rails on the very columns the feed's bubbles hug. */
   --agent-bubble-cap: 75%;
 }
@@ -1223,9 +1223,17 @@ body::after {
   color: var(--init);
 }
 
-#feed {
+/* The scrolling region: the feed plus the hold tray at its tail, so the two
+   move together and a reader at the bottom sees the held prompts after the
+   last row. It takes the leftover height between the drain banner and the
+   docked footer; its children lay out in ordinary block flow. */
+#feed-scroll {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
+}
+
+#feed {
   padding: 1rem;
   display: flex;
   flex-direction: column;
@@ -1921,7 +1929,10 @@ pre {
    scroll box inside it, so each one abuts its edge of the section and
    runs the section's full height instead of only the scrollable box's.
    The cursor stays on the box, since that is what the wheel turns. */
-.scroll-zone {
+/* Excluding the page's own scrolling region: it carries this class statically
+   as the scroller it is, while the bars below mark a capped SECTION that the
+   pointer has armed, which scroll.ts adds and removes as the pointer moves. */
+.scroll-zone:not(#feed-scroll) {
   box-shadow: inset 2px 0 0 var(--accent), inset -2px 0 0 var(--accent);
 }
 .scroll-zone-box { cursor: ns-resize; }
@@ -2925,16 +2936,16 @@ pre {
    from design-progress-footer-samples.html — a grabber notch over a row of
    bordered cells, with an error row and an expansion sheet under it.
 
-   The slot is a flex sibling wedged between the scrolling #feed and the
-   #composer, so the dock stays stuck to the window's bottom rather than
+   The slot is a flex sibling wedged between the scrolling #feed-scroll and
+   the #composer, so the dock stays stuck to the window's bottom rather than
    floating just under the last bubble as the feed grows. `flex: none` keeps it
-   content-sized so #feed absorbs the leftover height; :empty collapses it
+   content-sized so #feed-scroll absorbs the leftover height; :empty collapses it
    before the daemon has resolved anything. */
-#progress-footer {
+#footer {
   flex: none;
   padding: 0.25rem 1rem 0.5rem;
 }
-#progress-footer:empty { display: none; }
+#footer:empty { display: none; }
 
 /* The dock itself: capped to the SAME width as the widest response bubble
    (--agent-bubble-cap, inherited from #main-col) and centered in the same
@@ -3693,4 +3704,42 @@ body.ungated #mode-select {
    so they read against the dark surface rather than sinking into it. */
 @media (prefers-color-scheme: dark) {
   .token-heat { color: hsl(var(--token-heat-hue) 75% 63%); }
+}
+
+/* ---- the shell's new mount points (index.html, shell.ts) ---------------- */
+
+/* The held-prompt tray: the feed's TAIL region, inside the scroll zone, so it
+   sits after the last row rather than as chrome docked under the feed. It
+   shares the feed's horizontal padding so a held prompt lines up with the
+   bubbles above it, and pays no layout at all while nothing is held. */
+#hold-tray {
+  padding: 0 1rem 1rem;
+}
+#hold-tray:empty { display: none; }
+
+/* The client-local failure overlay. Positioned above the page but BELOW the
+   login overlay (z-index 50), which is modal and must cover everything. Empty
+   -- the healthy case -- it takes no space and swallows no clicks. */
+#failure-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+#failure-overlay:empty { display: none; }
+/* The overlay is a positioning frame; its content takes the pointer back. */
+#failure-overlay > * { pointer-events: auto; }
+
+/* The composer ships hidden: production runs composer-less, since the root
+   composer is host-native (Emacs), and only the dev-mode boot reveals it. */
+#composer[hidden] { display: none; }
+
+/* ---- shared list delimiters (every dropdown, panel, tray and menu) ------ */
+
+/* ONE rule for the subtle thin grey line between rows, so an expanded footer
+   panel, a topbar dropdown, a command panel and the hold tray all delimit
+   their rows identically. Between rows only -- never above the first or below
+   the last, which would read as a border around the list. */
+.list-rows > * + * {
+  border-top: 1px solid var(--border);
 }
