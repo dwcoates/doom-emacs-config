@@ -1,6 +1,6 @@
 // endpoint_interrupt.proto — Interrupt: "stop that". FEED section. One user
-// intent, two targets; THE ARM IS THE TARGET. (CancelDetachedAgents does not
-// return; this verb absorbed it.)
+// intent, three targets; THE ARM IS THE TARGET. (CancelDetachedAgents does
+// not return as a verb; the all_agents target is its fan-wide successor.)
 
 syntax = "proto3";
 
@@ -19,9 +19,17 @@ message InterruptRequest {
     // A detached bubble's work, by the bubble row's FeedId exactly as the
     // feed served it (the daemon decodes it and issues the task stop).
     frontend.v1.FeedId detached = 3;
+    // EVERY live detached agent at once — the fan-wide stop.
+    InterruptAllAgents all_agents = 4;
   }
+  // Answers the confirm_required challenge: interrupting a TURN while
+  // detached agents are live is refused once, naming the count; resending
+  // with this set also stops those agents. Meaningless on the other
+  // targets. Default false.
+  bool confirm_agents = 5;
 }
 message InterruptTurn {}
+message InterruptAllAgents {}
 
 // THE ARM IS THE OUTCOME.
 message InterruptResponse {
@@ -55,8 +63,21 @@ message InterruptedDetached {
 }
 message InterruptNothingRunning {}
 
-// EMPTY ON PURPOSE: refusal arms are DERIVED at the wave (e.g. the shim
-// cannot be asked — today's shim.v1 DetachedCancelUnsupported — is a real
-// failure and lands here), spelled per 3b.
+// Refusal arms: confirm_required is landed (the UX depends on it); the
+// rest are DERIVED at the wave (e.g. the shim cannot be asked — today's
+// shim.v1 DetachedCancelUnsupported — is a real failure and lands here),
+// spelled per 3b.
 message InterruptError {
+  oneof kind {
+    // A turn interrupt while detached agents are live: the challenge.
+    // Resend with confirm_agents to also stop them, or stop them first
+    // via the all_agents target.
+    InterruptConfirmRequired confirm_required = 1;
+  }
+}
+
+// The are-you-sure challenge for a turn stop with live agents.
+message InterruptConfirmRequired {
+  // How many live detached agents the stop would also end.
+  int64 live_agent_count = 1;
 }
