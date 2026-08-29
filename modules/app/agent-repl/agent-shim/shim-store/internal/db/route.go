@@ -86,6 +86,12 @@ type routed struct {
 	// bashRow is the row a WatchBashRun watcher serves. Non-nil exactly when
 	// kind == kindBash.
 	bashRow *storev1.StoreAgentBash
+	// workflowNotImplemented marks an entry that carries workflow material this
+	// wave serves nothing for. It is a FLAG rather than a `kind`, because a
+	// workflow-kind DETACHED ANNOUNCEMENT is a page line like every other
+	// announcement — the warning is about what the store does not yet SERVE,
+	// not about where the row lands.
+	workflowNotImplemented bool
 }
 
 // classify validates one StoreEntry whole and resolves its `entry` row.
@@ -202,6 +208,7 @@ func classifyAgentUpdate(r routed, update *storev1.StoreAgentUpdate, index int) 
 			return routed{}, err
 		}
 		r.kind = kindWorkflow
+		r.workflowNotImplemented = true
 		return r, nil
 	default:
 		return routed{}, invalidf("entries[%d].agent_update sets no `agent_info` arm — the producer did not decide the entry's pageability", index)
@@ -256,9 +263,11 @@ func validateAgentPrompt(prompt *conversationv1.AgentPrompt, index int) error {
 
 // classifyAgentFrame is the base function for conversation.v1.AgentFrame.
 //
-// THREE OF ITS FOUR ARMS ARE PAGE LINES AND ONE IS NOT. `detached_work` is an
-// announcement that work left this stream; the spawning CALL is already the
-// page line for it, so landing a second one would draw the same work twice.
+// EVERY ARM IS A PAGE LINE, `detached_work` included: an announcement that work
+// left this stream is the HANDOFF the book's reader has to see, and it is the
+// one durable copy of what was announced. The arms differ in what else they
+// touch — a terminal ends its agent, an announcement writes the join row — not
+// in whether they are served.
 func classifyAgentFrame(r routed, line *storev1.StorePageLine, frame *conversationv1.AgentFrame, index int) (routed, error) {
 	if frame == nil {
 		return routed{}, invalidf("entries[%d] carries a nil agent_frame", index)
@@ -286,15 +295,15 @@ func classifyAgentFrame(r routed, line *storev1.StorePageLine, frame *conversati
 		if err != nil {
 			return routed{}, err
 		}
-		// A workflow announcement lands as workflow residue rather than as a
-		// detached-work row's kind alone, so the not-implemented warning is
-		// raised from exactly one place.
+		// AN ANNOUNCEMENT IS A PAGE LINE. "Work left this stream" is something
+		// the reader of the announcing agent's book must SEE — it is the
+		// handoff, and drawing the spawning call without it leaves the feed
+		// claiming work that is still in the turn. It is also the one durable
+		// copy of what was announced (the spool, the cause, the timeout), which
+		// is why the lifecycle table keeps only the join columns.
 		if kind == detachedKindWorkflow {
-			r.kind = kindWorkflow
-		} else {
-			r.kind = kindDetachedWork
+			r.workflowNotImplemented = true
 		}
-		return r, nil
 	default:
 		return routed{}, invalidf("entries[%d].agent_frame sets no `result` arm", index)
 	}

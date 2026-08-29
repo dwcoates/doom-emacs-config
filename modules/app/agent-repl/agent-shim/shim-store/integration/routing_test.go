@@ -155,9 +155,10 @@ func TestTerminalArmsWriteAPageLineAndCloseTheAgent(t *testing.T) {
 	}
 }
 
-// TestDetachedWorkAnnouncementIsNeverAPageLine: the spawning call is already a
-// page line, so the announcement is a lifecycle row alone.
-func TestDetachedWorkAnnouncementIsNeverAPageLine(t *testing.T) {
+// TestDetachedWorkAnnouncementIsAPageLineOfTheAnnouncersBook: "work left this
+// stream" is the HANDOFF, and a book that omitted it would keep claiming work
+// that is no longer in the turn.
+func TestDetachedWorkAnnouncementIsAPageLineOfTheAnnouncersBook(t *testing.T) {
 	// Arrange.
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
@@ -167,17 +168,65 @@ func TestDetachedWorkAnnouncementIsNeverAPageLine(t *testing.T) {
 
 	// Act.
 	shim.write(ctx, t,
-		shim.agentEntry("w-detach-1", "u-detach-1",
+		shim.agentEntry("w-detach-1", "detached:work-bash-1",
 			frameLine(agentID("main"), detachedBashFrame("main", "work-bash-1", "sleep 60", 3000))),
 	)
 
 	// Assert.
 	page := openSession(ctx, t, cli, "main", 10, nil)
-	assertTexts(t, "the announcer's book", pageTexts(page.GetPage()), nil)
+	assertTexts(t, "the announcer's book", pageTexts(page.GetPage()), []string{"detached:work-bash-1"})
+	store.assertNoErrorRecords()
+}
 
+// TestDetachedWorkAnnouncementIsTheSourceOfLiveDetached: the same write is both
+// the served handoff and the open obligation.
+func TestDetachedWorkAnnouncementIsTheSourceOfLiveDetached(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+
+	// Act.
+	shim.write(ctx, t,
+		shim.agentEntry("w-detach-live-1", "detached:work-bash-live",
+			frameLine(agentID("main"), detachedBashFrame("main", "work-bash-live", "sleep 60", 3000))),
+	)
+
+	// Assert.
 	live := liveWork(ctx, t, cli)
-	if !contains(workValues(live.GetLiveDetached()), "work-bash-1") {
+	if !contains(workValues(live.GetLiveDetached()), "work-bash-live") {
 		t.Errorf("the announced run is missing from live_detached: %v", workValues(live.GetLiveDetached()))
+	}
+	store.assertNoErrorRecords()
+}
+
+// TestReAnnouncingDetachedWorkNeitherDuplicatesTheLineNorTheObligation: the
+// handle is the identity, so a replay under a new write_id still names one run.
+func TestReAnnouncingDetachedWorkNeitherDuplicatesTheLineNorTheObligation(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+	shim.write(ctx, t,
+		shim.agentEntry("w-reannounce-1", "detached:work-again",
+			frameLine(agentID("main"), detachedBashFrame("main", "work-again", "sleep 60", 3000))),
+	)
+
+	// Act.
+	shim.write(ctx, t,
+		shim.agentEntry("w-reannounce-2", "detached:work-again",
+			frameLine(agentID("main"), detachedBashFrame("main", "work-again", "sleep 60", 3000))),
+	)
+
+	// Assert.
+	page := openSession(ctx, t, cli, "main", 10, nil)
+	assertTexts(t, "the announcer's book after a re-announcement", pageTexts(page.GetPage()), []string{"detached:work-again"})
+	if got := workValues(liveWork(ctx, t, cli).GetLiveDetached()); len(got) != 1 {
+		t.Errorf("live_detached = %v, want exactly one entry per run", got)
 	}
 	store.assertNoErrorRecords()
 }
