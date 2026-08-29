@@ -220,8 +220,37 @@ export const responseRow = (
 
 // ---- FeedSimpleToolCall ---------------------------------------------------
 
-export const TOOL_OUTPUT_FORMS = ["text", "code", "diff", "lines", "links"] as const;
+export const TOOL_OUTPUT_FORMS = ["text", "code", "diff", "lines", "links", "none"] as const;
 export type ToolOutputForm = (typeof TOOL_OUTPUT_FORMS)[number];
+
+/** The output forms that carry an omission note; `text`/`diff`/`none` do not. */
+export const TOOL_OUTPUT_FORMS_WITH_OMISSION = ["code", "lines", "links"] as const;
+
+/**
+ * THE DRAWN FORM of the input line. The daemon states it because only it knows
+ * the tool; the client applies a treatment and still knows no tool. UNSET is a
+ * legal fourth state meaning plain text, so it is exercised alongside the arms.
+ */
+export const TOOL_INPUT_FORMS = ["command", "path", "query"] as const;
+export type ToolInputForm = (typeof TOOL_INPUT_FORMS)[number];
+
+type ToolInputInit = NonNullable<Extract<ActivityUnit, { case: "simpleToolCall" }>["value"]["input"]>;
+
+/**
+ * The ONE input builder every tool-call fixture uses, so the four form states
+ * are stated in a single place rather than inline at each call site.
+ */
+export function toolCallInput(init?: {
+  text?: string;
+  form?: ToolInputForm;
+  link?: boolean;
+}): ToolInputInit {
+  return {
+    text: init?.text ?? "npm test",
+    link: init?.link ? { url: "https://example.test/run" } : undefined,
+    form: init?.form ? { case: init.form, value: {} } : undefined,
+  };
+}
 
 export const TOOL_VERDICTS = ["succeeded", "failed"] as const;
 export const DIFF_LINE_KINDS = ["header", "added", "removed", "context"] as const;
@@ -241,7 +270,11 @@ export const CODE_SPANS = [
 type ToolCallArm = Extract<ActivityUnit, { case: "simpleToolCall" }>;
 type ToolCallOutcome = NonNullable<ToolCallArm["value"]["outcome"]>;
 
-const toolOutputForm = (form: ToolOutputForm) => {
+type ToolOutputFormInit = NonNullable<
+  Extract<ToolCallOutcome, { case: "returned" }>["value"]["form"]
+>;
+
+const toolOutputForm = (form: ToolOutputForm): ToolOutputFormInit => {
   switch (form) {
     case "text":
       return { case: "text" as const, value: { text: "plain output" } };
@@ -278,14 +311,21 @@ const toolOutputForm = (form: ToolOutputForm) => {
           omitted: { text: "1 more link" },
         },
       };
+    case "none":
+      // A call that returned nothing to show. The card still draws its input
+      // line, its verdict and its runtime; there is simply no output section.
+      return { case: "none" as const, value: {} };
   }
 };
 
-export const toolCallRunningUnit = (lastProgressAtMs = 1_000n): ActivityUnit => ({
+export const toolCallRunningUnit = (
+  lastProgressAtMs = 1_000n,
+  form?: ToolInputForm,
+): ActivityUnit => ({
   case: "simpleToolCall",
   value: {
     name: { text: "Bash" },
-    input: { text: "npm test" },
+    input: toolCallInput({ form }),
     outcome: { case: "running", value: { lastProgress: { atMs: lastProgressAtMs } } },
   },
 });
@@ -293,6 +333,7 @@ export const toolCallRunningUnit = (lastProgressAtMs = 1_000n): ActivityUnit => 
 export const toolCallReturnedUnit = (
   form: ToolOutputForm,
   verdict: (typeof TOOL_VERDICTS)[number] = "succeeded",
+  inputForm?: ToolInputForm,
 ): ActivityUnit => {
   const outcome: ToolCallOutcome = {
     case: "returned",
@@ -307,7 +348,7 @@ export const toolCallReturnedUnit = (
     case: "simpleToolCall",
     value: {
       name: { text: "Bash" },
-      input: { text: "npm test", link: { url: "https://example.test/run" } },
+      input: toolCallInput({ form: inputForm, link: true }),
       outcome,
     },
   };
@@ -317,7 +358,7 @@ export const toolCallDeniedUnit = (): ActivityUnit => ({
   case: "simpleToolCall",
   value: {
     name: { text: "Bash" },
-    input: { text: "rm -rf /" },
+    input: toolCallInput({ text: "rm -rf /" }),
     outcome: { case: "denied", value: {} },
   },
 });
@@ -510,6 +551,34 @@ export type TurnErrorArm = (typeof TURN_ERROR_ARMS)[number];
 /** The two arms that ship a retry deadline the client counts down to. */
 export const RETRYING_TURN_ERROR_ARMS = ["rateLimited", "overloaded"] as const;
 
+/**
+ * THE DAEMON'S OWN HEADLINE PER ARM.
+ *
+ * `headline` is required and the client holds NO per-arm sentence table: it
+ * draws this verbatim. So the suites assert these strings, and the two
+ * token-limit arms read differently here because the DAEMON composed them
+ * differently — not because the renderer knows what the arms mean. Only the
+ * retry countdown is client-ticked.
+ */
+export const TURN_ERROR_HEADLINES: Record<TurnErrorArm, string> = {
+  rateLimited: "rate limited",
+  overloaded: "the vendor is overloaded",
+  authenticationFailed: "authentication failed",
+  permissionDenied: "the vendor refused this account",
+  invalidRequest: "the request was rejected",
+  requestTooLarge: "the request was too large",
+  notFound: "the vendor found nothing at that address",
+  internal: "the vendor failed internally",
+  vendorUnmodeled: "the vendor returned something unmodeled",
+  maxTokens: "cut short mid-answer at the context ceiling",
+  refusal: "the model declined to answer",
+  queryDied: "the query died",
+  billingError: "billing refused the request",
+  modelNotFound: "that model does not exist",
+  oauthOrgNotAllowed: "this organization is not allowed",
+  maxOutputTokens: "refused outright at the output ceiling",
+};
+
 type TurnEndedValue = Extract<RowArm, { case: "turnEnded" }>["value"];
 type TurnEndedOutcome = NonNullable<TurnEndedValue["outcome"]>;
 
@@ -529,13 +598,14 @@ export const turnEndedConcludedRow = (answer: FeedId, overrides?: Partial<RowIni
 
 export const turnEndedErroredRow = (
   arm: TurnErrorArm,
-  init?: { retryAfterMs?: bigint; message?: string },
+  init?: { retryAfterMs?: bigint; message?: string; headline?: string },
   overrides?: Partial<RowInit>,
 ): FeedRow => {
   const outcome = {
     case: "errored",
     value: {
       message: { text: init?.message ?? `the turn failed: ${arm}` },
+      headline: { text: init?.headline ?? TURN_ERROR_HEADLINES[arm] },
       error: turnErrorValue(arm, init?.retryAfterMs),
     },
   } as TurnEndedOutcome;
@@ -779,7 +849,11 @@ export const coldGateStandingRow = (
     overrides,
   );
 
-export const coldGateResolvedRow = (choice: ColdGateChoice, overrides?: Partial<RowInit>): FeedRow =>
+export const coldGateResolvedRow = (
+  choice: ColdGateChoice,
+  init?: { scope?: SessionCompactScope },
+  overrides?: Partial<RowInit>,
+): FeedRow =>
   feedRow(
     {
       case: "coldGate",
@@ -790,7 +864,13 @@ export const coldGateResolvedRow = (choice: ColdGateChoice, overrides?: Partial<
             atMs: 5_000n,
             choice:
               choice === "compact"
-                ? { case: "compact", value: { model: { model: agentModel("haiku") } } }
+                ? {
+                    case: "compact",
+                    value: {
+                      model: { model: agentModel("haiku") },
+                      scope: init?.scope ?? SessionCompactScope.ALL,
+                    },
+                  }
                 : { case: choice, value: {} },
           },
         },

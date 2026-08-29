@@ -27,6 +27,7 @@ import {
   FEED_PAGE_ERROR_ARMS,
   RETRYING_TURN_ERROR_ARMS,
   TURN_ERROR_ARMS,
+  TURN_ERROR_HEADLINES,
   WORKSPACE_ID,
   clientFailure,
   feedPageError,
@@ -142,6 +143,17 @@ describe("turn error arms", () => {
     expect(harness.row("row-1")?.querySelector(`[data-turn-error="${arm}"]`)).not.toBeNull();
   });
 
+  it.each(TURN_ERROR_ARMS)("draws the %s arm's composed headline verbatim", async (arm) => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow(arm));
+    await harness.settle();
+    // Assert: the daemon composed it; the client holds no per-arm table.
+    expect(harness.row("row-1")?.textContent).toContain(TURN_ERROR_HEADLINES[arm]);
+  });
+
   it.each(TURN_ERROR_ARMS)("draws the %s arm's composed message verbatim", async (arm) => {
     // Arrange
     harness = await startHarness();
@@ -218,25 +230,36 @@ describe("the two token-limit arms", () => {
     expect(harness.$('[data-turn-error="maxOutputTokens"]')).not.toBeNull();
   });
 
-  it("gives the two arms different drawn text", async () => {
-    // Arrange
+  it("reads the two arms differently because the DAEMON worded them differently", async () => {
+    // Arrange: the distinction lives in the served headline, not in a client
+    // table — the renderer holds no per-arm sentences at all.
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
-    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow("maxTokens", { message: "same" }));
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow("maxTokens"));
     await harness.settle();
-    const truncated = harness.$('[data-turn-error="maxTokens"]')?.textContent;
-    await harness.stop();
+    const truncated = harness.row("row-1")?.textContent ?? "";
     // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow("maxOutputTokens"));
+    await harness.settle();
+    // Assert
+    expect(harness.row("row-1")?.textContent).not.toBe(truncated);
+  });
+
+  it("draws whatever headline the daemon serves, holding no table of its own", async () => {
+    // Arrange: serve max_output_tokens' wording ON the max_tokens arm. A
+    // renderer with its own per-arm sentence would override this; a renderer
+    // that draws the headline verbatim shows exactly what arrived.
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
+    // Act
     harness.fake.pushRow(
       WORKSPACE_ID,
       ROOT_FEED,
-      turnEndedErroredRow("maxOutputTokens", { message: "same" }),
+      turnEndedErroredRow("maxTokens", { headline: TURN_ERROR_HEADLINES.maxOutputTokens }),
     );
     await harness.settle();
-    // Assert: the same composed message must still read differently.
-    expect(harness.$('[data-turn-error="maxOutputTokens"]')?.textContent).not.toBe(truncated);
+    // Assert
+    expect(harness.row("row-1")?.textContent).toContain(TURN_ERROR_HEADLINES.maxOutputTokens);
   });
 });
 
