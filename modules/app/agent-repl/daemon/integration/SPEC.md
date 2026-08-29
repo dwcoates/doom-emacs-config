@@ -76,7 +76,8 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - SelectWorkspace stamps `current` on the roster push and the row's
   last_selected; re-selecting is success and produces no duplicate push
 - a per-workspace rpc with an unknown WorkspaceRef answers NotFound naming
-  the intended arm
+  the intended arm; a ref whose `dir` disagrees with the registry for its
+  `id` is refused (workspace_ref_mismatch)
 - a request with an unset non-optional field answers InvalidArgument naming
   the field (SubmitPrompt without `said`)
 
@@ -101,7 +102,8 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 
 ### session_lifecycle_test.go
 - OpenWorkspace spawns the fake shim with the contracted argv and env
-  (assert on the fake's recorded argv: `--listen`, `--store-socket`,
+  (assert on the fake's recorded argv: `--listen`, `--store-socket` = the
+  explicitly passed socket (flag beats env AGENT_REPL_STORE_SOCKET),
   `--log-fd 3`, `--fake`; env CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED=1,
   AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA, AGENT_REPL_FORBID_VENDOR_CALLS) and
   cwd = the workspace dir
@@ -174,12 +176,14 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   prompts held before the merge stay held
 - SubmitPrompt with `feed` set to a subagent bubble delivers via
   UpdateAgent.prompt addressed to that agent
-- `/status` answers a StatusPanelView inline with no StartTurn; `/clear`
+- `/status` answers a StatusPanelView inline with no StartTurn AND mirrors a
+  non-durable `command_panel` row onto the root feed (absent after a daemon
+  restart's first page); `/agents` and `/help` answer `command_refused`
+  (also mirrored) and never reach the shim; an unknown slash command falls
+  through as a prompt; `/clear`
   and `/compact` go through the queue as session acts and produce a
   separation row on the ContextCut record; `/model` with an argument
-  submits the model change; bare `/model` is refused/absorbed; `/agents`
-  and `/help` fall through as prompts (Q1 default); an unknown slash
-  command falls through as a prompt
+  submits the model change; bare `/model` is refused/absorbed; 
 - a second submit while a turn runs on the same agent through the bubble
   path answers the daemon-fault refusal
 - SetModel with a catalog token sends SetSessionModel and the topbar
@@ -216,7 +220,9 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - plan-mode enter then exit coalesce onto ONE FeedId (`planning` →
   `planned{prose, edit}`); exit without enter is legal
 - worktree enter/exit draw separation dividers with the token delta unset
-- ContextCut cleared/compacted draw separation rows with formatted before/after
+- an AgentUpdate `context_cut` arm (cleared/compacted/compaction_failed)
+  draws the separation row with formatted before/after; compaction_failed
+  draws no separation and surfaces the error
 - permission start → `permission.open` row + footer `waiting.permission`
   + host `notification{permission_requested}`; answered → `answered` re-push
 - question start → `question.open`; answers → `answered` with echoed labels
@@ -257,6 +263,10 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   push; degraded windows drawn open then closed; connectivity tone/glyph
   from the vocabulary file; account email
 - the /context panel resolves from the same context_usage fact
+- permission_mode_picker serves the switchable set with the current mode;
+  a permission_mode_changed push updates `current`
+- an `api_error` page-line arm mid-turn draws the footer `thinking.retrying`
+  style evidence and does NOT end the turn; the turn's terminal is authoritative
 - link death: dropping the fake's WatchSession stream flips footer to
   `disconnected.severed` and the roster to `severed`; the daemon redials
   forever with backoff; the fake exiting flips to `dead` and stops redials
@@ -321,8 +331,12 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   diagnostics unhealthy → unhealthy{faults}; unknown workspace → error
 - ClientLog writes a JSONL record into the workspace's webapp.log sink
 - OpenLogin spawns the pty (a fake `claude` on PATH that prints a marker
-  and echoes input), WatchLoginTerminal replays scrollback then streams;
-  resize is applied; CloseLogin ends with `closed`; a second OpenLogin joins
+  and echoes input), WatchLoginTerminal (server stream) replays scrollback
+  then streams; SendLoginInput{keystrokes} is echoed back on the stream;
+  {resize} is applied; CloseLogin ends the stream with `closed`; a second
+  OpenLogin joins the same pty
+- OpenInEditor{path, line} relays an `open_in_editor` push onto that
+  workspace's WatchHostWorkspace stream; an unknown workspace is refused
 - OpenExternal invokes the configured browser launcher with the url
 - workflow rpcs / arms answer the typed not-implemented refusal
 

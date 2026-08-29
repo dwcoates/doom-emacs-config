@@ -23,9 +23,11 @@ reference only: `internal/workspace/merge/` (git edge cases),
   `google.golang.org/protobuf`. Replace directives stay:
   `agentrepl/proto => ../proto/gen/go`, `agentrepl/logging =>
   ../agent-shim/logging/go`, `agentrepl/wire => ../agent-shim/wire`.
-- `proto/gen/go` does not require connect in its own go.mod; the daemon's
-  go.mod carries `connectrpc.com/connect` directly, which satisfies the
-  generated `*connect` packages under Go's pruned module graph.
+- `proto/gen/go/go.mod` requires `connectrpc.com/connect v1.17.0` (landed by
+  the project lead); the daemon pins the same version.
+- `agent-shim/wire` is NOT imported by the rebuild; once nothing in the
+  daemon imports it, the daemon lead deletes `agent-shim/wire` and its
+  `bin/test-all.sh` roster entry (the store lead drops its dependency).
 - store.v1 is never imported (the codegen gate enforces it).
 - Build: `cd daemon && go build ./... && go vet ./... && go test ./...`.
 
@@ -112,18 +114,22 @@ lease) and at the shim client.
 
 ## Shim-held kernel locks (probe only)
 
-Directory `~/.cache/agent-repl/run/`. Workspace lock:
-`workspace-<md5hex(filepath.Clean(absDir))[:8]>.lock`. Session lock:
-`session-<vendor_session_id>.lock` (ASSUMED — cross-system, flagged to the
-project lead; the daemon's probes and rollout wait use the WORKSPACE lock
-only, so the session-lock spelling is not load-bearing for the daemon). A
-probe is `open + flock(LOCK_EX|LOCK_NB)`: success (then unlock) means free;
-EWOULDBLOCK means a live shim holds it; any other error means "could not
-tell" and is never read as free.
+RULED (project lead, 2026-08-29). Directory `~/.cache/agent-repl/run/`.
+Workspace lock `workspace-<md5hex(filepath.Clean(absDir))[:8]>.lock`, taken
+by the shim at startup with flock(LOCK_EX). Session lock
+`session-<vendor-session-id>.lock`, taken inside StartSession (the shim
+pre-mints the id on fresh). The daemon probes the WORKSPACE lock only —
+`open + flock(LOCK_EX|LOCK_NB)`, released immediately — for boot adoption
+and the rollout's transfer wait. Success means free; EWOULDBLOCK means a
+live shim holds it; any other error means "could not tell" and is never
+read as free.
 
 ## Shim spawn (the common contract, verbatim)
 
-`node <module>/agent-shim/claude/shim/dist/main.js --listen <uds> --store-socket <store uds> --log-fd 3 [--fake]`,
+`node <module>/agent-shim/claude/shim/dist/main.js --listen <uds> --store-socket <store uds> --log-fd 3 [--fake]`
+(the store socket is ALWAYS passed explicitly: `-store-socket` flag beats
+env `AGENT_REPL_STORE_SOCKET` beats the default
+`~/.cache/agent-repl/sock/store.sock`),
 env `CLAUDE_CONFIG_DIR=<account root>`, `AGENT_REPL_OWNED=1`,
 `AGENT_REPL_STATE_DIR`, `SHIM_BUILD_SHA`, and in tests
 `AGENT_REPL_FORBID_VENDOR_CALLS=1`; cwd is the workspace dir; fd 3 is the
@@ -439,9 +445,37 @@ UpdateAgent.stop / StopBash; all_agents → fan-wide), `AnswerPermission`,
 - Workflow is kicked: workflow rpcs and arms are answered/ignored with a
   typed not-implemented refusal (transport-layer, intended arm
   `<Rpc>Error.not_implemented`); no watch is ever opened for a workflow.
-- Q1–Q4 defaults: `/agents` and `/help` are NOT recognized (fall through as
-  prompts); no OpenInEditor; panels answer in SubmitPromptSuccess only;
-  no held-prompt accept action.
+- RULINGS (project lead landing, 2026-08-29):
+  - Q1: `/agents` and `/help` ARE recognized and never forwarded to the shim;
+    they answer as `command_refused` (the add-support card, "not supported").
+    AgentsPanelView / HelpPanelView stay unproduced.
+  - Q2: WEB LINK verb `OpenInEditor{workspace, path, optional line}` + a
+    `WatchHostWorkspaceResponse.open_in_editor{path, optional line}` push:
+    the daemon validates the workspace and relays the click onto that
+    workspace's host stream; no ack, no command loop.
+  - Q3: recognized command panels and command refusals are MIRRORED into the
+    ROOT FEED as synthesized NON-DURABLE rows — `FeedRow.command_panel` (a
+    panel oneof over the six views) and `FeedRow.command_refused{literal,
+    composed reason, add-support offer marker}`; resolver memory only, never
+    stored, never replayed after restart. SubmitPromptSuccess keeps
+    `command_panel` and gains `command_refused`.
+  - Q4: no held-prompt accept action (unchanged).
+  - Login: `WatchLoginTerminal` is a SERVER stream (request {workspace};
+    output bytes|closed) plus unary `SendLoginInput{workspace, oneof
+    keystrokes|resize}`.
+  - `TopbarView.permission_mode_picker{current, options[{mode, display_name}]}`:
+    the daemon serves the switchable set it will accept for the session;
+    SetPermissionMode validates against what it served.
+  - `AgentUpdate` gains page-line arms `context_cut` (ContextCut: /clear,
+    compaction, compaction_failed — the feed draws the separation divider
+    from it) and `api_error` (ApiRequestFailed as MID-TURN evidence, never a
+    terminal — the feed/footer draw it as retry/notice evidence).
+  - shim.v1 failure `kind` oneofs now carry the shim's real arms; the daemon
+    switches on them (respelled into the feed/footer/fault vocabularies).
+  - WorkspaceRef echo: clients echo the FULL ref; the daemon keys on `id` and
+    REFUSES a ref whose `dir` disagrees with the registry (intended arm
+    `<Rpc>Error.workspace_ref_mismatch` until landed). The webview URL is
+    `http://<daemon.addr>/?workspace=<id>&dir=<normalized dir>`.
 
 ## FeedId scheme (`internal/feedid`)
 
