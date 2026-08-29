@@ -29,8 +29,8 @@ import (
 // system prompt, skills and memory files are reloaded — which is exactly why
 // fabricating a zero here would be a lie a reader could see.
 func (c *Converter) contextCleared(record map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
-	c.log.With(logging.Context{Operation: "context-cleared", Path: at.Path}).
-		Log("context clear at offset=%d uuid=%s upsert_key=%s", at.Offset, env.uuid, SessionKey("context_cut", env.uuid))
+	c.log.With(at.ctxFor("context-cleared")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
+		Log("context clear: history discarded outright, with no token delta the vendor stated")
 	return c.contextCutEntry(at, env, agent, &conversationv1.ContextCut{
 		Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
 	})
@@ -45,8 +45,8 @@ func (c *Converter) contextCompacted(record map[string]any, at Attribution, env 
 		// A compaction with no summary renders as a hole where the discarded
 		// history was. It is emitted anyway — the cut is REAL and a reader must
 		// see WHERE — but never silently.
-		c.log.With(logging.Context{Operation: "context-compacted", Path: at.Path, Level: "warn"}).
-			Log("compact boundary uuid=%s at offset=%d is not followed by a summary line; the cut renders with nothing in place of the discarded history", env.uuid, at.Offset)
+		c.log.With(at.ctxWarn("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
+			Log("compact boundary is not followed by a summary line; the cut renders with nothing in place of the discarded history")
 	}
 
 	compacted := &conversationv1.ContextCompacted{
@@ -60,10 +60,9 @@ func (c *Converter) contextCompacted(record map[string]any, at Attribution, env 
 		compacted.Trigger = &conversationv1.ContextCompacted_Requested{Requested: &conversationv1.ContextCompactionRequested{}}
 	}
 
-	c.log.With(logging.Context{Operation: "context-compacted", Path: at.Path}).
-		Log("compaction at offset=%d uuid=%s upsert_key=%s trigger=%q tokens %d->%d coalesced with its summary (%d characters)",
-			at.Offset, env.uuid, SessionKey("context_cut", env.uuid), str(metadata["trigger"]),
-			compacted.GetTokens().GetTokensBefore(), compacted.GetTokens().GetTokensAfter(), len(summary))
+	c.log.With(at.ctxFor("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
+		Log("compaction trigger=%q tokens %d->%d coalesced with its summary (%d characters)",
+			str(metadata["trigger"]), compacted.GetTokens().GetTokensBefore(), compacted.GetTokens().GetTokensAfter(), len(summary))
 
 	return c.contextCutEntry(at, env, agent, &conversationv1.ContextCut{
 		Cut: &conversationv1.ContextCut_Compacted{Compacted: compacted},

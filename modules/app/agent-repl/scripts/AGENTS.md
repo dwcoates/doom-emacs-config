@@ -3,7 +3,42 @@
 Operational/diagnostic scripts for the agent-repl system. Notably
 `agent-shim-doctor.sh`: a connectivity and liveness check across every UDS
 socket (store, sidecar-facing, per-session shims, daemon frontend) plus log
-pointers — the first stop when diagnosing a degraded state.
+pointers — the first stop when diagnosing a degraded state. It is strictly
+read-only and never mutates a service, socket, file, or launchd state.
+
+## The store probe
+
+`store.v1` is served with Connect over a UNIX domain socket and deliberately
+defines NO health verb — streams and the transport own liveness. The doctor
+therefore probes the store's real endpoints directly with `curl
+--unix-socket`, POSTing the empty request message to
+`store.v1.ShimStore/GetLiveWork` and `store.v1.ShimStore/GetSidecarCursors`.
+Both are pure reads, which is what keeps the probe read-only. The store serves
+on `~/.cache/agent-repl/sock/store.sock`; `AGENT_REPL_STORE_SOCKET` is the
+test-only override of that default and an explicit `--socket` beats it, so the
+doctor resolves the path from its state root rather than from the environment.
+
+A healthy store answers HTTP 200 with a JSON body whose single top-level key is
+`success` (an empty success arm is `{"success":{}}`). Everything else is a
+separate failure class with its own hint, never collapsed into one "unhealthy":
+`missing_socket`, `connection_refused`, `timeout`, `transport_failure`,
+`http_status` (a served endpoint answers 200 even when it REFUSES),
+`malformed_response`, `failure_arm` (the store is up and refused the read; its
+`detail` is retained), and `unexpected_body`. When `curl` or `python3` is
+absent the probe SKIPs — an honest environment report, never a pass and never a
+silently different classification. Each probe sends an
+`X-Agent-Repl-Request-Id` header and reports that id and its latency in the
+result metadata. `AGENT_REPL_DOCTOR_STORE_PROBE_TIMEOUT` (whole seconds) sets
+the per-probe deadline.
+
+The sidecar has no socket of its own; its health is read from launchd state and
+its log's freshness, exactly as before.
+
+`test-agent-shim-doctor.sh` covers every one of those classes against
+`fake-store-fixture.py` — a scripted Connect server on a temporary UNIX socket.
+It builds and runs no Go binary, so it stays deterministic and independent of
+the store's own build. The fixture's readiness latch is a FIFO it opens only
+after bind+listen, so the harness never sleep-polls for startup.
 
 `agent-repl-log-discovery.sh` is the read-only resolver for structured logs.
 It lists canonical workspace links at `<workspace>/.claude/emacs/*.log`, the

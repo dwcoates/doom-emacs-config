@@ -41,10 +41,10 @@ func NewShellOutputHandler(log *logging.Bound) *ShellOutputHandler {
 
 // Handle implements tail.Handler.
 func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
-	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Task: ctx.TaskID}).
+	h.log.With(handleCtx("shell-handle", ctx)).
 		LogVerbose("handling frames=%d bytes_observed=%d", len(frames), ctx.BytesObserved)
 	if len(frames) == 0 {
-		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Task: ctx.TaskID}).
+		h.log.With(handleCtx("shell-handle", ctx)).
 			LogVerbose("no frames to convert")
 		return nil
 	}
@@ -52,7 +52,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 		// A spool with no task identity names no run, so its bytes have nowhere
 		// to accumulate. They are NEVER silently discarded: they land as residue
 		// naming the spool, which is what the aged-unowned-spool policy requires.
-		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Level: "error"}).
+		h.log.With(handleErr("shell-handle", ctx)).
 			Log("shell spool reached the handler with no task identity; its bytes have no run to append to and are stored as residue")
 		at := attribute(ctx, frames[0].Offset)
 		var raw bytes.Buffer
@@ -79,7 +79,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 
 	code, ok := trailingExitCode(frames[0].Raw, frames[0].Offset)
 	if !ok {
-		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Task: ctx.TaskID}).
+		h.log.With(handleCtx("shell-handle", ctx)).
 			LogVerbose("no terminal exit marker in batch entries=%d", len(entries))
 		return entries
 	}

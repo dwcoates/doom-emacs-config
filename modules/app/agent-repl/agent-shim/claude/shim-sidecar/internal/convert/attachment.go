@@ -18,8 +18,8 @@ import (
 func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*storev1.StoreEntry {
 	attachment := obj(record["attachment"])
 	if attachment == nil {
-		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Level: "warn"}).
-			Log("attachment line at offset=%d carries no %q object; stored as unknown residue", at.Offset, "attachment")
+		c.log.With(at.ctxWarn("convert-line")).
+			Log("attachment line carries no %q object; stored as unknown residue", "attachment")
 		return []*storev1.StoreEntry{UnknownEntry(at, "", "attachment", record)}
 	}
 	env := readEnvelope(record)
@@ -38,8 +38,8 @@ func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*sto
 	default:
 		// Context-cut exclusions and CLI machinery: understood, and deliberately
 		// not carried into a vendor-agnostic feed.
-		c.log.With(logging.Context{Operation: "withhold", Path: at.Path}).
-			LogVerbose("attachment/%s at offset=%d withheld as vendor_specific", kind, at.Offset)
+		c.log.With(at.ctxFor("withhold")).
+			LogVerbose("attachment/%s withheld as vendor_specific", kind)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "attachment/"+kind, record)}
 	}
 }
@@ -75,8 +75,8 @@ func (c *Converter) hookAttachment(kind string, attachment map[string]any, at At
 			Command:      firstNonEmpty(str(blocking["command"]), str(attachment["command"])),
 			BlockingText: firstNonEmpty(str(blocking["blockingError"]), str(attachment["blockingError"])),
 		}}
-		c.log.With(logging.Context{Operation: "hook", Path: at.Path, Level: "warn"}).
-			Log("hook %q BLOCKED the gated call at offset=%d; the agent proceeds without it", str(pick(attachment, "hookName", "hook_name")), at.Offset)
+		c.log.With(at.ctxWarn("hook")).With(logging.Context{ActivityID: unitID}).
+			Log("hook %q BLOCKED the gated call; the agent proceeds without it", str(pick(attachment, "hookName", "hook_name")))
 	case "hook_non_blocking_error":
 		hook.Result = &conversationv1.AgentHook_NonBlockingError{NonBlockingError: &conversationv1.AgentHookNonBlockingError{
 			Command:    str(attachment["command"]),
@@ -84,14 +84,14 @@ func (c *Converter) hookAttachment(kind string, attachment map[string]any, at At
 			DurationMs: int64(number(attachment["durationMs"])),
 			Output:     hookOutput(attachment),
 		}}
-		c.log.With(logging.Context{Operation: "hook", Path: at.Path, Level: "warn"}).
-			Log("hook %q failed without blocking at offset=%d", str(pick(attachment, "hookName", "hook_name")), at.Offset)
+		c.log.With(at.ctxWarn("hook")).With(logging.Context{ActivityID: unitID}).
+			Log("hook %q failed without blocking", str(pick(attachment, "hookName", "hook_name")))
 	default:
 		hook.Result = &conversationv1.AgentHook_Cancelled{Cancelled: &conversationv1.AgentHookCancelled{}}
 	}
 
-	c.log.With(logging.Context{Operation: "hook", Path: at.Path}).
-		LogVerbose("hook attachment kind=%s activity_id=%s upsert_key=%s at offset=%d", kind, unitID, ActivityKey(unitID), at.Offset)
+	c.log.With(at.ctxFor("hook")).With(logging.Context{ActivityID: unitID, UpsertKey: ActivityKey(unitID)}).
+		LogVerbose("hook attachment kind=%s", kind)
 
 	activity := item(&conversationv1.AgentActivity_Hook{Hook: hook})
 	activity.ActivityId = activityID(unitID)
@@ -127,8 +127,8 @@ func (c *Converter) diagnosticsAttachment(attachment map[string]any, at Attribut
 		// Nothing to attach them to: the change was read before this reader's
 		// cursor. The findings are kept whole rather than pinned onto a unit
 		// this reader guessed at.
-		c.log.With(logging.Context{Operation: "diagnostics", Path: at.Path, Level: "warn"}).
-			Log("IDE diagnostics at offset=%d follow no write or edit this reader observed; stored as vendor_specific rather than attached by guess", at.Offset)
+		c.log.With(at.ctxWarn("diagnostics")).
+			Log("IDE diagnostics follow no write or edit this reader observed; stored as vendor_specific rather than attached by guess")
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "attachment/diagnostics", attachment)}
 	}
 
@@ -158,8 +158,8 @@ func (c *Converter) diagnosticsAttachment(attachment map[string]any, at Attribut
 	}
 
 	unit := c.lastChangeUnit
-	c.log.With(logging.Context{Operation: "diagnostics", Path: at.Path}).
-		Log("IDE diagnostics at offset=%d joined by adjacency to activity_id=%s upsert_key=%s (%d file(s))", at.Offset, unit, ActivityKey(unit), len(report.Files))
+	c.log.With(at.ctxFor("diagnostics")).With(logging.Context{ActivityID: unit, UpsertKey: ActivityKey(unit)}).
+		Log("IDE diagnostics joined by adjacency to the last change unit (%d file(s))", len(report.Files))
 
 	// The report rides the CHANGE's own unit as a further frame of it. Which
 	// change kind it was decides the arm, so the remembered value carries it.
@@ -204,8 +204,8 @@ func (c *Converter) injectedMemory(attachment map[string]any, at Attribution, en
 	path := firstNonEmpty(str(attachment["path"]), str(content["path"]))
 	unitID := "context:memory:" + env.uuid
 
-	c.log.With(logging.Context{Operation: "context-injected", Path: at.Path}).
-		LogVerbose("memory file %q injected at offset=%d activity_id=%s", path, at.Offset, unitID)
+	c.log.With(at.ctxFor("context-injected")).With(logging.Context{ActivityID: unitID, UpsertKey: ActivityKey(unitID)}).
+		LogVerbose("memory file %q injected", path)
 
 	activity := item(&conversationv1.AgentActivity_ContextInjected{ContextInjected: &conversationv1.AgentContextInjected{
 		Injected: &conversationv1.AgentContextInjected_Memory{Memory: &conversationv1.AgentInjectedMemory{
@@ -247,8 +247,8 @@ func (c *Converter) injectedSkills(kind string, attachment map[string]any, at At
 		}
 	}
 
-	c.log.With(logging.Context{Operation: "context-injected", Path: at.Path}).
-		LogVerbose("attachment/%s injected %d skill(s) at offset=%d activity_id=%s", kind, len(injected.Skills), at.Offset, unitID)
+	c.log.With(at.ctxFor("context-injected")).With(logging.Context{ActivityID: unitID, UpsertKey: ActivityKey(unitID)}).
+		LogVerbose("attachment/%s injected %d skill(s)", kind, len(injected.Skills))
 
 	activity := item(&conversationv1.AgentActivity_ContextInjected{ContextInjected: &conversationv1.AgentContextInjected{
 		Injected: &conversationv1.AgentContextInjected_Skills{Skills: injected},

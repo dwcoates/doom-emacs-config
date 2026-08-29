@@ -49,8 +49,8 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 	if !resolved {
 		// The call was read before this reader's cursor. There is no unit to
 		// settle and none is invented.
-		c.log.With(logging.Context{Operation: "orphan-tool-result", Path: at.Path, Level: "warn"}).
-			Log("tool result activity_id=%s at offset=%d path=%s names no call this reader observed; the settle is lost and the record is stored as vendor_specific residue", callID, at.Offset, at.Path)
+		c.log.With(at.ctxWarn("orphan-tool-result")).With(logging.Context{ActivityID: callID}).
+			Log("tool result names no call this reader observed; the settle is lost and the record is stored as vendor_specific residue")
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "orphan_tool_result", record)}
 	}
 	delete(c.openCalls, callID)
@@ -62,8 +62,8 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 		return c.taskStopTerminal(result, at, env, agent)
 	}
 	if IsExempt(call.name) {
-		c.log.With(logging.Context{Operation: "exempt-drop", Path: at.Path}).
-			LogVerbose("tool result for exempt tool name=%q activity_id=%s at offset=%d dropped entirely", call.name, callID, at.Offset)
+		c.log.With(at.ctxFor("exempt-drop")).With(logging.Context{ActivityID: callID}).
+			LogVerbose("tool result for exempt tool name=%q dropped entirely", call.name)
 		return nil
 	}
 
@@ -82,8 +82,8 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 
 	settled := c.settledItem(kind, call, result, block, failed, env.timestampMs, at)
 	if settled == nil {
-		c.log.With(logging.Context{Operation: "tool-return", Path: at.Path, Level: "warn"}).
-			Log("tool result name=%q activity_id=%s at offset=%d produced no settled unit; stored as vendor_specific residue so the answer is not lost", call.name, callID, at.Offset)
+		c.log.With(at.ctxWarn("tool-return")).With(logging.Context{ActivityID: callID}).
+			Log("tool result name=%q produced no settled unit; stored as vendor_specific residue so the answer is not lost", call.name)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "unsettled_tool_result/"+call.name, record)}
 	}
 	settled.ActivityId = activityID(call.activityID)
@@ -95,8 +95,8 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 		c.lastChangeWasEdit = kind == kindEdit
 	}
 
-	c.log.With(logging.Context{Operation: "tool-return", Path: at.Path}).
-		LogVerbose("tool result name=%q activity_id=%s upsert_key=%s settled at offset=%d failed=%t", call.name, callID, ActivityKey(call.activityID), at.Offset, failed)
+	c.log.With(at.ctxFor("tool-return")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID)}).
+		LogVerbose("tool result name=%q settled failed=%t", call.name, failed)
 	return []*storev1.StoreEntry{c.settledEntry(at, agent, call.activityID, settled)}
 }
 

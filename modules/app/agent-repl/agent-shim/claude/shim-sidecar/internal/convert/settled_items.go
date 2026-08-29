@@ -79,8 +79,8 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 		// DOCUMENT lands, as a separate injected-context record linked back to
 		// this call — so nothing is emitted here.
 		c.rememberSkillCall(call)
-		c.log.With(logging.Context{Operation: "skill", Path: at.Path}).
-			LogVerbose("skill call activity_id=%s acknowledged at offset=%d; the unit settles when its document lands", call.activityID, at.Offset)
+		c.log.With(at.ctxFor("skill")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID)}).
+			LogVerbose("skill call acknowledged; the unit settles when its document lands")
 		return nil
 	case kindSendMessage:
 		if failed {
@@ -220,7 +220,7 @@ func (c *Converter) settleUnmodeled(call openCall, block map[string]any, failed 
 		}})
 	}
 	activity.ActivityId = activityID(call.activityID)
-	c.log.With(logging.Context{Operation: "unmodeled-return", Path: at.Path}).
-		LogVerbose("unmodeled tool name=%q activity_id=%s settled at offset=%d failed=%t", call.name, call.activityID, at.Offset, failed)
+	c.log.With(at.ctxFor("unmodeled-return")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID)}).
+		LogVerbose("unmodeled tool name=%q settled failed=%t", call.name, failed)
 	return c.settledEntry(at, agent, call.activityID, activity)
 }

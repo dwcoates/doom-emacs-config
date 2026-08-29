@@ -45,11 +45,11 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 		// A launch the harness did not name. Nothing can be attributed to it,
 		// and a spool that later appears will be ingested as residue rather than
 		// attached to an invented owner.
-		c.log.With(logging.Context{Operation: "launch", Path: at.Path, Level: "warn"}).
-			Log("detached launch from activity_id=%s at offset=%d carries no task identity; its spool cannot be attributed to this call", call.activityID, at.Offset)
+		c.log.With(at.ctxWarn("launch")).With(logging.Context{ActivityID: call.activityID}).
+			Log("detached launch carries no task identity; its spool cannot be attributed to this call")
 		return
 	}
-	c.log.With(logging.Context{Operation: "launch", Path: at.Path, Task: taskID}).
-		Log("detached launch observed: task=%s activity_id=%s agent_id=%q output=%q", taskID, call.activityID, agent, output)
+	c.log.With(at.ctxFor("launch")).With(logging.Context{TaskID: taskID, ActivityID: call.activityID, BookAgentID: agent}).
+		Log("detached launch observed with output path %q", output)
 	c.observer.TaskSpawned(taskID, call.activityID, agent, output)
 }

@@ -1,231 +1,337 @@
 package discover
 
 import (
-	"bytes"
-	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-func testLog() *logging.Bound {
-	return logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+func TestMain(m *testing.M) {
+	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	os.Exit(m.Run())
 }
 
-// mkfile creates path (and parents) with some content.
-func mkfile(t *testing.T, path string) {
+// fixture lays out roots under one temp dir and returns a Discoverer plus the
+// log lines it wrote.
+func fixture(t *testing.T, files ...string) (*Discoverer, string, string, *[]string) {
+	t.Helper()
+	base := t.TempDir()
+	rootA := filepath.Join(base, "config-a")
+	rootB := filepath.Join(base, "config-b")
+	spool := filepath.Join(base, "spool")
+	for _, dir := range []string{rootA, rootB, spool} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("creating %s: %v", dir, err)
+		}
+	}
+	for _, rel := range files {
+		write(t, filepath.Join(base, rel))
+	}
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "discover-test"})
+	return New([]string{rootA, rootB}, spool, log), base, spool, &logs
+}
+
+type sliceWriter struct{ lines *[]string }
+
+func (w sliceWriter) Write(p []byte) (int, error) {
+	*w.lines = append(*w.lines, string(p))
+	return len(p), nil
+}
+
+func write(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+		t.Fatalf("creating %s: %v", filepath.Dir(path), err)
 	}
 	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
+		t.Fatalf("writing %s: %v", path, err)
 	}
 }
 
-func TestClassifySessionTranscript(t *testing.T) {
-	// Arrange
-	root := t.TempDir()
-	p := filepath.Join(root, "projects", "-proj", "sess-abc.jsonl")
-	d := New([]string{root}, "/tmp", testLog())
-	// Act
-	got, ok := d.Classify(p)
-	// Assert
-	if !ok || got.Kind != tail.KindSessionTranscript {
-		t.Fatalf("classify = %+v ok=%v, want session transcript", got, ok)
+// find returns the scanned target whose path ends with suffix.
+func find(t *testing.T, targets []Target, suffix string) Target {
+	t.Helper()
+	for _, target := range targets {
+		if strings.HasSuffix(target.Path, suffix) {
+			return target
+		}
 	}
-	if got.SessionID != "sess-abc" || got.Raw {
-		t.Fatalf("session = %q raw=%v", got.SessionID, got.Raw)
+	t.Fatalf("no target ending in %q among %d targets", suffix, len(targets))
+	return Target{}
+}
+
+func TestScanFindsSessionTranscript(t *testing.T) {
+	// Arrange.
+	d, _, _, _ := fixture(t, "config-a/projects/proj/sess-1.jsonl")
+
+	// Act.
+	got := find(t, d.Scan(), "sess-1.jsonl")
+
+	// Assert.
+	if got.Kind != tail.KindSessionTranscript || got.SessionID != "sess-1" {
+		t.Fatalf("target = %+v, want a session transcript identified sess-1", got)
 	}
 }
 
-func TestClassifyAgentSidechain(t *testing.T) {
-	// Arrange
-	root := t.TempDir()
-	p := filepath.Join(root, "projects", "-proj", "S1", "subagents", "agent-abc123.jsonl")
-	d := New([]string{root}, "/tmp", testLog())
-	// Act
-	got, ok := d.Classify(p)
-	// Assert: session from the PATH segment; task id from the filename; meta companion.
-	if !ok || got.Kind != tail.KindAgentTranscript {
-		t.Fatalf("classify = %+v ok=%v", got, ok)
-	}
-	if got.SessionID != "S1" || got.TaskID != "abc123" {
-		t.Fatalf("session=%q task=%q", got.SessionID, got.TaskID)
-	}
-	if !filepath.IsAbs(got.MetaPath) || filepath.Base(got.MetaPath) != "agent-abc123.meta.json" {
-		t.Fatalf("meta path = %q", got.MetaPath)
+func TestScanFindsSubagentTranscript(t *testing.T) {
+	// Arrange.
+	d, _, _, _ := fixture(t,
+		"config-a/projects/proj/sess-1/subagents/agent-abc.jsonl",
+		"config-a/projects/proj/sess-1/subagents/agent-abc.meta.json",
+	)
+
+	// Act.
+	got := find(t, d.Scan(), "agent-abc.jsonl")
+
+	// Assert.
+	if got.Kind != tail.KindAgentTranscript || got.AgentID != "abc" || got.SessionID != "sess-1" {
+		t.Fatalf("target = %+v, want a subagent transcript for agent abc of sess-1", got)
 	}
 }
 
-func TestClassifyWorkflowJournal(t *testing.T) {
-	// Arrange
-	root := t.TempDir()
-	p := filepath.Join(root, "projects", "-proj", "S2", "subagents", "workflows", "wf_deadbeef", "journal.jsonl")
-	d := New([]string{root}, "/tmp", testLog())
-	// Act
-	got, ok := d.Classify(p)
-	// Assert
-	if !ok || got.Kind != tail.KindWorkflowJournal {
-		t.Fatalf("classify = %+v ok=%v", got, ok)
-	}
-	if got.SessionID != "S2" || got.RunID != "wf_deadbeef" {
-		t.Fatalf("session=%q run=%q", got.SessionID, got.RunID)
+func TestScanFindsWorkflowJournal(t *testing.T) {
+	// Arrange.
+	d, _, _, _ := fixture(t, "config-a/projects/proj/sess-1/subagents/workflows/wf_7/journal.jsonl")
+
+	// Act.
+	got := find(t, d.Scan(), "journal.jsonl")
+
+	// Assert.
+	if got.Kind != tail.KindWorkflowJournal || got.RunID != "wf_7" {
+		t.Fatalf("target = %+v, want the journal of run wf_7", got)
 	}
 }
 
-func TestClassifySpoolKinds(t *testing.T) {
-	// Arrange
-	spool := t.TempDir()
-	d := New(nil, spool, testLog())
-	cases := []struct {
-		name string
-		file string
-		want tail.Kind
-		raw  bool
+func TestScanFindsWorkflowPerAgentTranscript(t *testing.T) {
+	// Arrange.
+	d, _, _, _ := fixture(t,
+		"config-a/projects/proj/sess-1/subagents/workflows/wf_7/agent-xyz.jsonl",
+		"config-a/projects/proj/sess-1/subagents/workflows/wf_7/agent-xyz.meta.json",
+	)
+
+	// Act.
+	got := find(t, d.Scan(), "agent-xyz.jsonl")
+
+	// Assert.
+	if got.Kind != tail.KindWorkflowJournal || got.RunID != "wf_7" || got.AgentID != "xyz" {
+		t.Fatalf("target = %+v, want workflow wf_7's per-agent transcript for xyz", got)
+	}
+}
+
+func TestScanCoversBothConfigRoots(t *testing.T) {
+	// Arrange: the second account's transcript is invisible to a single-root scan.
+	d, _, _, _ := fixture(t,
+		"config-a/projects/proj/sess-a.jsonl",
+		"config-b/projects/proj/sess-b.jsonl",
+	)
+
+	// Act.
+	targets := d.Scan()
+
+	// Assert.
+	find(t, targets, "sess-a.jsonl")
+	find(t, targets, "sess-b.jsonl")
+}
+
+func TestScanClassifiesSpoolsByPrefix(t *testing.T) {
+	tests := []struct {
+		name     string
+		file     string
+		wantKind tail.Kind
+		wantRaw  bool
 	}{
-		{"agent", "a1234.output", tail.KindAgentTranscript, false},
-		{"shell", "b5678.output", tail.KindShellSpool, true},
-		{"workflow", "w9012.output", tail.KindWorkflowJournal, false},
+		{name: "shell output", file: "b17.output", wantKind: tail.KindShellSpool, wantRaw: true},
+		{name: "agent transcript", file: "a17.output", wantKind: tail.KindAgentTranscript, wantRaw: false},
+		{name: "workflow journal", file: "w17.output", wantKind: tail.KindWorkflowJournal, wantRaw: false},
 	}
-	for _, tc := range cases {
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			p := filepath.Join(spool, "claude-501", "the-slug", "SESS", "tasks", tc.file)
-			// Act
-			got, ok := d.Classify(p)
-			// Assert: kind by a/b/w prefix, spool dir set, task id off the
-			// filename. The session-shaped path segment is NOT read.
-			if !ok || got.Kind != tc.want || got.Raw != tc.raw {
-				t.Fatalf("%s: got %+v ok=%v", tc.name, got, ok)
-			}
-			if got.SpoolDir != filepath.Dir(p) {
-				t.Fatalf("%s: spool dir = %q", tc.name, got.SpoolDir)
+			// Arrange.
+			d, _, _, _ := fixture(t, filepath.Join("spool", "claude-501", "proj", "sess-1", "tasks", tc.file))
+
+			// Act.
+			got := find(t, d.Scan(), tc.file)
+
+			// Assert.
+			if got.Kind != tc.wantKind || got.Raw != tc.wantRaw {
+				t.Fatalf("target = %+v, want kind %s raw=%t", got, tc.wantKind, tc.wantRaw)
 			}
 		})
 	}
 }
 
-// A spool path embeds a session-SHAPED segment that is the harness's runtime
-// id, not the transcript's. Reading it filed one task under two session ids and
-// took the whole file plane down, so classification must leave a spool
-// unattributed and let the sidecar resolve its owner by task id.
-func TestClassifySpoolCarriesNoSessionID(t *testing.T) {
-	// Arrange
-	spool := t.TempDir()
-	d := New(nil, spool, testLog())
-	p := filepath.Join(spool, "claude-501", "the-slug", "a4f52dc5-runtime-id", "tasks", "b1pi0nmip.output")
-	// Act
-	got, ok := d.Classify(p)
-	// Assert
-	if !ok {
-		t.Fatalf("classify did not recognize the spool path %s", p)
-	}
+func TestSpoolCarriesNoSessionID(t *testing.T) {
+	// Arrange: the spool path's session-shaped segment is the harness's RUNTIME
+	// id, which disagrees with the transcript's after a resume.
+	d, _, _, _ := fixture(t, "spool/claude-501/proj/runtime-sess/tasks/b1.output")
+
+	// Act.
+	got := find(t, d.Scan(), "b1.output")
+
+	// Assert.
 	if got.SessionID != "" {
-		t.Fatalf("session = %q, want empty — the path segment must not be read as an identity", got.SessionID)
-	}
-	if got.TaskID != "b1pi0nmip" {
-		t.Fatalf("task id = %q, want b1pi0nmip", got.TaskID)
+		t.Fatalf("spool target claimed session %q; a spool path is a location, never an identity", got.SessionID)
 	}
 }
 
-func TestClassifyRejectingASpoolWarnsThatItIsNeverIngested(t *testing.T) {
-	// Arrange — a rejected spool leaves discovery for good.
-	var sink bytes.Buffer
-	spool := t.TempDir()
-	d := New(nil, spool, logging.New(io.Discard, &sink).With(logging.Context{Component: "test"}))
-	p := filepath.Join(spool, "claude-501", "slug", "SESS", "tasks", "x999.output")
-	// Act
-	d.Classify(p)
-	// Assert
-	var record struct {
-		Level   string `json:"level"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(sink.String())), &record); err != nil {
-		t.Fatalf("persisted record is not JSON: %v", err)
-	}
-	if record.Level != "warn" {
-		t.Fatalf("classify-spool level = %q, want warn (%q)", record.Level, record.Message)
+func TestUnknownSpoolPrefixIsIngestedAsResidue(t *testing.T) {
+	// Arrange.
+	d, _, _, _ := fixture(t, "spool/claude-501/proj/sess-1/tasks/q17.output")
+
+	// Act.
+	got := find(t, d.Scan(), "q17.output")
+
+	// Assert: dropping it from discovery is the one outcome total ingestion
+	// forbids, so it is kept and routed to residue.
+	if got.Kind != tail.KindResidueSpool {
+		t.Fatalf("target kind = %s, want the residue spool kind", got.Kind)
 	}
 }
 
-func TestClassifyRejectsUnknownSpoolPrefix(t *testing.T) {
-	// Arrange: a task id whose first char is not a/b/w.
-	spool := t.TempDir()
-	d := New(nil, spool, testLog())
-	p := filepath.Join(spool, "claude-501", "slug", "SESS", "tasks", "x999.output")
-	// Act
-	_, ok := d.Classify(p)
-	// Assert
+func TestUnknownSpoolPrefixIsLoggedAsAViolation(t *testing.T) {
+	// Arrange.
+	d, _, _, logs := fixture(t, "spool/claude-501/proj/sess-1/tasks/q17.output")
+
+	// Act.
+	d.Scan()
+
+	// Assert.
+	joined := strings.Join(*logs, "\n")
+	if !strings.Contains(joined, "no a/b/w kind prefix") || !strings.Contains(joined, `"level":"error"`) {
+		t.Fatalf("the ingestion violation was not stated loudly; got %v", *logs)
+	}
+}
+
+func TestSubagentTranscriptWithoutMetaIsHeld(t *testing.T) {
+	// Arrange: the transcript exists, its meta does not.
+	d, _, _, _ := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+
+	// Act.
+	got := find(t, d.Scan(), "agent-abc.jsonl")
+
+	// Assert.
+	if !got.MetaMissing {
+		t.Fatal("a transcript with no meta file was reported as ingestible")
+	}
+}
+
+func TestSubagentTranscriptWithoutMetaIsStillDiscovered(t *testing.T) {
+	// Arrange.
+	d, _, _, _ := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+
+	// Act: two scans, as a held transcript is re-checked on every rescan.
+	d.Scan()
+	targets := d.Scan()
+
+	// Assert: it is held, never dropped.
+	find(t, targets, "agent-abc.jsonl")
+}
+
+func TestHeldTranscriptWarnsOnce(t *testing.T) {
+	// Arrange.
+	d, _, _, logs := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+
+	// Act.
+	d.Scan()
+	d.Scan()
+
+	// Assert: a rescan every few seconds must not repeat the same line forever.
+	if got := strings.Count(strings.Join(*logs, "\n"), "transcript held"); got != 1 {
+		t.Fatalf("held warning emitted %d times, want once", got)
+	}
+}
+
+func TestMetaAppearingClearsTheHold(t *testing.T) {
+	// Arrange.
+	d, base, _, _ := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+	d.Scan()
+	write(t, filepath.Join(base, "config-a/projects/proj/sess-1/subagents/agent-abc.meta.json"))
+
+	// Act.
+	got := find(t, d.Scan(), "agent-abc.jsonl")
+
+	// Assert.
+	if got.MetaMissing {
+		t.Fatal("the transcript stayed held after its meta file appeared")
+	}
+}
+
+func TestMetaCompanionIsNotItselfATarget(t *testing.T) {
+	// Arrange.
+	d, base, _, _ := fixture(t,
+		"config-a/projects/proj/sess-1/subagents/agent-abc.jsonl",
+		"config-a/projects/proj/sess-1/subagents/agent-abc.meta.json",
+	)
+
+	// Act.
+	_, ok := d.Classify(filepath.Join(base, "config-a/projects/proj/sess-1/subagents/agent-abc.meta.json"))
+
+	// Assert.
 	if ok {
-		t.Fatalf("expected classify to reject a non-a/b/w spool")
+		t.Fatal("a meta.json companion was classified as a tailable file")
 	}
 }
 
-func TestClassifyMetaJsonNotTailed(t *testing.T) {
-	// Arrange: the sidechain meta.json companion is not a tail target.
-	root := t.TempDir()
-	p := filepath.Join(root, "projects", "-proj", "S1", "subagents", "agent-abc.meta.json")
-	d := New([]string{root}, "/tmp", testLog())
-	// Act
-	_, ok := d.Classify(p)
-	// Assert
+func TestClassifyNormalizesTheSymlinkedPath(t *testing.T) {
+	// Arrange: a link standing in for macOS's /tmp -> /private/tmp.
+	d, base, spool, _ := fixture(t, "spool/claude-501/proj/sess-1/tasks/b1.output")
+	link := filepath.Join(base, "spool-link")
+	if err := os.Symlink(spool, link); err != nil {
+		t.Fatalf("linking %s: %v", link, err)
+	}
+
+	// Act.
+	got, ok := d.Classify(filepath.Join(link, "claude-501", "proj", "sess-1", "tasks", "b1.output"))
+
+	// Assert: the same file must not read as two.
+	if !ok {
+		t.Fatal("the symlinked spelling was not classified at all")
+	}
+	want := filepath.Join(Normalize(spool), "claude-501", "proj", "sess-1", "tasks", "b1.output")
+	if got.Path != want {
+		t.Fatalf("path = %q, want the resolved spelling %q", got.Path, want)
+	}
+}
+
+func TestNormalizeKeepsAPathThatDoesNotExistYet(t *testing.T) {
+	// Arrange: a spool is observed before it exists.
+	base := t.TempDir()
+	path := filepath.Join(base, "not", "created", "yet.output")
+
+	// Act.
+	got := Normalize(path)
+
+	// Assert.
+	if !strings.HasSuffix(got, filepath.Join("not", "created", "yet.output")) {
+		t.Fatalf("Normalize(%q) = %q, want the not-yet-created suffix preserved", path, got)
+	}
+}
+
+func TestNormalizeEmptyPath(t *testing.T) {
+	// Arrange, Act.
+	got := Normalize("")
+
+	// Assert.
+	if got != "" {
+		t.Fatalf("Normalize(\"\") = %q, want the empty path unchanged", got)
+	}
+}
+
+func TestClassifyRejectsAnUnwatchedShape(t *testing.T) {
+	// Arrange.
+	d, base, _, _ := fixture(t)
+
+	// Act.
+	_, ok := d.Classify(filepath.Join(base, "config-a", "settings.json"))
+
+	// Assert.
 	if ok {
-		t.Fatalf("meta.json should not classify as a tail target")
-	}
-}
-
-func TestScanUnionsRootsAndSpools(t *testing.T) {
-	// Arrange: a config root with a session + sidechain + journal, and a spool.
-	root := t.TempDir()
-	spool := t.TempDir()
-	mkfile(t, filepath.Join(root, "projects", "-p", "S.jsonl"))
-	mkfile(t, filepath.Join(root, "projects", "-p", "S", "subagents", "agent-a1.jsonl"))
-	mkfile(t, filepath.Join(root, "projects", "-p", "S", "subagents", "workflows", "wf_x", "journal.jsonl"))
-	mkfile(t, filepath.Join(spool, "claude-501", "sl", "S", "tasks", "b7.output"))
-	d := New([]string{root}, spool, testLog())
-	// Act
-	got := d.Scan()
-	// Assert: all four shapes discovered.
-	if len(got) != 4 {
-		t.Fatalf("scan found %d targets, want 4: %+v", len(got), got)
-	}
-	kinds := map[tail.Kind]int{}
-	for _, tg := range got {
-		kinds[tg.Kind]++
-	}
-	if kinds[tail.KindSessionTranscript] != 1 || kinds[tail.KindShellSpool] != 1 || kinds[tail.KindWorkflowJournal] != 1 {
-		t.Fatalf("kind distribution = %v", kinds)
-	}
-}
-
-func TestWatcherReportsCreatedFile(t *testing.T) {
-	// Arrange: watch an existing directory.
-	dir := t.TempDir()
-	w, err := NewWatcher([]string{dir}, nil)
-	if err != nil {
-		t.Fatalf("watcher: %v", err)
-	}
-	defer w.Close()
-	// Act: create a file in the watched dir.
-	if err := os.WriteFile(filepath.Join(dir, "new.jsonl"), []byte("x"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	// Assert: an event arrives (block on the channel; timeout is only a failsafe).
-	select {
-	case ev := <-w.Events():
-		if filepath.Base(ev.Name) != "new.jsonl" {
-			t.Fatalf("event for %q, want new.jsonl", ev.Name)
-		}
-	case err := <-w.Errors():
-		t.Fatalf("watch error: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("no fsnotify event within failsafe window")
+		t.Fatal("a path matching none of the four shapes was classified")
 	}
 }

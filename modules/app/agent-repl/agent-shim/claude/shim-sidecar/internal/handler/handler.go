@@ -30,46 +30,45 @@ type Context = tail.Context
 
 // attribute builds the conversion attribution for one frame.
 //
-// IDENTITY IS DERIVED FROM THE FILE, NOT FROM THE RECORD (R9). The main agent's
-// id is the transcript FILE's session uuid — the `<session>.jsonl` basename —
-// and never the per-record `sessionId`, which diverges from the runtime's answer
-// in ~22% of records. Deriving it means a re-read after a restart lands on the
-// same book with nothing to recover.
+// EVERY IDENTITY COMES FROM THE READER, which derived it from the file path (R9:
+// the main agent is the transcript FILE's session uuid, never the per-record
+// `sessionId`, which diverges from the runtime's answer in ~22% of records).
+// Reading it here rather than re-deriving it means the two halves of the seam
+// cannot disagree about whose book a record lands in.
+//
+// EVERY FIELD IS READ DEFENSIVELY: an empty value means the reader has not
+// supplied it, and the fallbacks below are what keep a book named rather than
+// leaving a record unservable.
 func attribute(ctx *Context, offset int64) convert.Attribution {
-	main := mainAgentID(ctx)
+	main := firstNonEmpty(ctx.MainAgentID, ctx.SessionID, sessionIDFromPath(ctx.Path))
 	at := convert.Attribution{
-		VendorSessionID: main,
+		VendorSessionID: firstNonEmpty(ctx.SessionID, main),
 		MainAgentID:     main,
 		Path:            ctx.Path,
+		FileID:          ctx.FileID,
 		Offset:          offset,
 		TaskID:          ctx.TaskID,
+		Backgrounded:    ctx.SpawnBackgrounded,
 	}
 	switch ctx.Kind {
 	case tail.KindSessionTranscript:
 		// The session's own book is the main agent's.
 		at.AgentID = main
 	case tail.KindAgentTranscript:
-		// A subagent's constituents form ITS OWN book. Its identity is the
-		// vendor `agentId`, which the records carry and the file name repeats.
-		at.AgentID = agentIDFromPath(ctx.Path)
-		at.Backgrounded = backgroundedSpawn(ctx)
+		// A subagent's constituents form ITS OWN book, keyed by the vendor
+		// `agentId`. The SPAWN that created it is a line in the PARENT's book,
+		// which is why the two identities are distinct here.
+		at.AgentID = firstNonEmpty(ctx.AgentID, agentIDFromPath(ctx.Path))
+	default:
+		// A spool or a journal: the run's frames name the run, and the owning
+		// agent is whatever the reader resolved.
+		at.AgentID = firstNonEmpty(ctx.AgentID, main)
 	}
 	return at
 }
 
-// mainAgentID resolves the session's main agent.
-//
-// The tailer supplies it as the file-path attribution; when it did not, the path
-// is the fallback, because a book that cannot be named is a record that cannot be
-// served and that must not depend on a field the vendor rewrites.
-func mainAgentID(ctx *Context) string {
-	if ctx.SessionID != "" {
-		return ctx.SessionID
-	}
-	return sessionIDFromPath(ctx.Path)
-}
-
-// sessionIDFromPath reads the session uuid out of a transcript path.
+// sessionIDFromPath reads the session uuid out of a transcript path, for the case
+// where the reader supplied none.
 //
 // `projects/<project>/<session>.jsonl` names it directly; a subagent transcript
 // at `projects/<project>/<session>/subagents/agent-<id>.jsonl` names it as the
@@ -82,7 +81,6 @@ func sessionIDFromPath(path string) string {
 	if !strings.HasPrefix(base, "agent-") {
 		return base
 	}
-	// .../<session>/subagents/agent-<id>.jsonl
 	return filepath.Base(filepath.Dir(filepath.Dir(path)))
 }
 
@@ -92,17 +90,15 @@ func agentIDFromPath(path string) string {
 	return strings.TrimPrefix(base, "agent-")
 }
 
-// backgroundedSpawn reports whether this file's agent was spawned into the
-// background, which makes it its OWN top_level rather than the session's main
-// agent.
-//
-// DERIVED FROM WHAT THE SEAM SUPPLIES TODAY: a backgrounded agent is the one the
-// vendor gives an `a*` task spool, so a task id in the `a` space is the evidence.
-// A dedicated `SpawnBackgrounded` field on tail.Context would state it directly;
-// until the reader supplies one this derivation is the honest available answer,
-// and it is read defensively — an empty task id simply means "not backgrounded".
-func backgroundedSpawn(ctx *Context) bool {
-	return strings.HasPrefix(ctx.TaskID, "a")
+// firstNonEmpty is the defensive read the seam requires: the first value the
+// reader actually supplied.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // logResidue records every record that landed with no path to a page.
@@ -116,9 +112,41 @@ func logResidue(log *logging.Bound, ctx *Context, entries []*storev1.StoreEntry)
 		if entry.GetAgentUpdate().GetUnservedItem() == nil {
 			continue
 		}
-		log.With(logging.Context{Operation: "residue", Path: ctx.Path, Task: ctx.TaskID}).
-			LogVerbose("record stored as an unserved item: %s", convert.Describe(entry))
+		log.With(logging.Context{
+			Operation: "residue", Path: ctx.Path, FileID: ctx.FileID, TaskID: ctx.TaskID,
+			AgentID: ctx.AgentID, VendorSessionID: ctx.SessionID,
+			UpsertKey: entry.GetUpsertKey(), WriteID: entry.GetWriteId(),
+		}).LogVerbose("record stored as an unserved item: %s", convert.Describe(entry))
 	}
+}
+
+// handleCtx is the correlation base for a handler's own records: the reader's
+// identities in DEDICATED KEYS, never interpolated into a sentence, so the
+// integration loop that reads these logs can filter and join on them.
+func handleCtx(operation string, ctx *Context) logging.Context {
+	return logging.Context{
+		Operation:       operation,
+		Producer:        Producer,
+		Path:            ctx.Path,
+		FileID:          ctx.FileID,
+		TaskID:          ctx.TaskID,
+		AgentID:         firstNonEmpty(ctx.AgentID, ctx.MainAgentID),
+		VendorSessionID: ctx.SessionID,
+	}
+}
+
+// handleWarn is handleCtx at warning level.
+func handleWarn(operation string, ctx *Context) logging.Context {
+	c := handleCtx(operation, ctx)
+	c.Level = "warn"
+	return c
+}
+
+// handleErr is handleCtx at error level.
+func handleErr(operation string, ctx *Context) logging.Context {
+	c := handleCtx(operation, ctx)
+	c.Level = "error"
+	return c
 }
 
 // lookahead returns the decoded record that FOLLOWS a frame in the file, or nil
