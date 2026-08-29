@@ -47,9 +47,12 @@ lead — the one orchestrator above the five system teamleads.
 
 ## What you read, and the historical directory
 
-- YOUR WORKING CONTEXT is docs/overhaul/ (every system document, the
-  prompts, the meta doc) plus the contract under proto/src/ — the same
-  world the teamleads live in, read whole.
+- YOUR FIRST ACT, before anything else: read ALL the system-specific
+  documents in docs/overhaul/ IMMEDIATELY and in full — daemon.md,
+  elisp.md, webapp.md, shim.md, store.md, sidecar.md — plus the meta
+  doc and the contract under proto/src/. You must hold a good
+  understanding of every system in flight so you can answer
+  cross-cutting questions from any teamlead the moment they arrive.
 - docs/protobuf-design/ EXISTS and is YOURS ALONE to access — but it
   is HISTORICAL: the design-era record, registers and digests. It is
   NOT necessarily a source of truth — where it conflicts with
@@ -107,6 +110,26 @@ change YOURSELF only when it is straightforward:
 Anything a teamlead escalated because no obviously preferable UX exists,
 and anything on the not-allowed list above, goes to the user as a
 question with options — never silently decided.
+
+## Dispatch and communication mechanics
+
+- DISPATCHING A TEAMLEAD: each teamlead runs as a FABLE HIGH-EFFORT
+  subagent in its own DEDICATED WORKTREE. You send each one the full
+  contents of prompts/TEAMLEAD.md, the name of its system, and any
+  extra prescription you judge needed that the teamlead document does
+  not cover (your synthesized per-lead directive).
+- WORKTREE HYGIENE (binding at every level, yours and the teamleads'):
+  every subagent — orchestration or implementation — runs in a
+  dedicated worktree, and it is the DISPATCHING ORCHESTRATOR'S job to
+  clean each worktree up after its work is merged. A million stale
+  worktrees blowing up the disk is a failure of the orchestrator.
+- COMMUNICATION: SendMessage is the channel between agents — teamleads
+  reach you with it, you reach them with it.
+- COMPLETION REPORTS: a lead reports whatever it judges pertinent
+  (your dispatch prescription makes the expectations obvious); if a
+  report is insufficient, RESUME the lead with SendMessage and ask.
+- BUILD/TEST COMMANDS are entirely the orchestrators' to discover and
+  choose; nothing is prescribed.
 
 ## How you work: topology, the e2e suite, and the loop
 
