@@ -30,6 +30,7 @@
 (declare-function agent-repl--error "core" (ws format-string &rest args))
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--save-buffer-if-modified "autosave" (buf &optional ws aggregate-p))
+(declare-function agent-repl-popup-open "popup" (path &optional line))
 
 ;;;; ---- On-disk locations -----------------------------------------------
 
@@ -102,10 +103,11 @@ by workspace and there is nothing to key them by."
       (user-error "agent-repl: no current workspace to open notes for"))
     (agent-repl--log nil "elisp.notes.open: begin workspace=%s" workspace)
     (let ((file (agent-repl--notes-ensure workspace)))
-      ;; TODO: route through `agent-repl-popup-open' (popup.el) — the one
-      ;; shared editor-popup subroutine — once the webview agent lands it.
-      (find-file file)
-      (agent-repl--notes-install-save-on-kill (current-buffer))
+      ;; The ONE shared editor-popup subroutine (popup.el): right side, half
+      ;; the frame width.  Every open-a-file affordance goes through it, and
+      ;; a local `find-file' here would be the divergence that rule forbids.
+      (agent-repl-popup-open file)
+      (agent-repl--notes-install-save-on-kill (get-file-buffer file))
       (agent-repl--info nil "elisp.notes.open: opened workspace=%s file=%s" workspace file)
       (current-buffer))))
 
