@@ -14,14 +14,15 @@ package shimclient
 
 import (
 	"context"
+	"errors"
 	"os"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
-	"claude-repld/internal/notimpl"
 )
 
 // Spec is everything a spawn needs. It reproduces the common spawn contract in
@@ -50,6 +51,15 @@ type Spec struct {
 	LogSink *os.File
 	// ForbidVendor sets AGENT_REPL_FORBID_VENDOR_CALLS=1 (tests).
 	ForbidVendor bool
+	// StateDir is AGENT_REPL_STATE_DIR for the child: the ONE state root the
+	// daemon, Emacs and the skills must all resolve. Empty inherits this
+	// daemon's own, which is correct only when the daemon took its own from
+	// the environment rather than from -state-dir.
+	StateDir string
+	// SessionID is AGENT_REPL_SESSION_ID, the host session identity, for LOG
+	// CORRELATION only; session facts still travel exclusively in
+	// StartSession. Empty omits it.
+	SessionID string
 }
 
 // Supervisor brings shim processes up and adopts surviving ones.
@@ -62,8 +72,11 @@ type Supervisor interface {
 	// Adopt dials a shim that is already running — a crash boot's surviving
 	// process, or a handover's transferred one — and supervises it without
 	// spawning. In-flight work survives; a surviving shim is never
-	// killed-and-restarted.
-	Adopt(ctx context.Context, ws ids.WorkspaceID, udsPath string) (Client, error)
+	// killed-and-restarted. The workspace dir is required because every
+	// record an adopted client writes is workspace-bound (a global write would
+	// be the invariant violation) and because the adopted-death witness is
+	// keyed on the workspace's kernel lock.
+	Adopt(ctx context.Context, ws ids.WorkspaceID, workspaceDir, udsPath string) (Client, error)
 }
 
 // Client is one shim connection. Every verb is mutex-guarded by the internal
@@ -180,7 +193,44 @@ type KillAttribution struct {
 	Force bool
 }
 
+// DefaultPageSize is the opening page budget every paged request carries. The
+// shim REFUSES page_size == 0, so no request is ever sent with a zero-as-
+// default; a caller with its own budget states it instead.
+const DefaultPageSize uint32 = 50
+
+// Option adjusts the supervisor. Every option exists because a peer must be
+// able to state a policy the client itself must not own.
+type Option func(*supervisor)
+
+// WithBackoff replaces the redial schedule. Tests make it instant; nothing
+// about the client's behavior depends on the delays.
+func WithBackoff(initial, max time.Duration, factor float64) Option {
+	return func(s *supervisor) { s.back = backoff{Initial: initial, Max: max, Factor: factor} }
+}
+
+// WithKillGrace replaces how long a SIGTERMed shim has before the SIGKILL.
+func WithKillGrace(grace time.Duration) Option {
+	return func(s *supervisor) { s.grace = grace }
+}
+
+// WithLockProbe supplies the ADOPTED-DEATH WITNESS: given a workspace dir, it
+// answers whether that workspace's kernel lock reads FREE. sessionlock is
+// shimclient's PEER, not its dependency, so the probe is injected by the
+// component that owns both (boot, rollout). Without it an adopted shim's
+// broken link is redialed forever — which is correct, because nothing has
+// witnessed a death.
+func WithLockProbe(probe func(workspaceDir string) (free bool, err error)) Option {
+	return func(s *supervisor) { s.lockProbe = probe }
+}
+
 // NewSupervisor builds the supervisor. It is the daemon's only one.
-func NewSupervisor(log dlog.Surfaces) (Supervisor, error) {
-	return nil, notimpl.Err
+func NewSupervisor(log dlog.Surfaces, opts ...Option) (Supervisor, error) {
+	if log == nil {
+		return nil, errors.New("shimclient: log surfaces are required")
+	}
+	s := &supervisor{surfaces: log, back: defaultBackoff, grace: defaultKillGrace}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s, nil
 }

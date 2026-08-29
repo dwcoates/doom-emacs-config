@@ -583,3 +583,19 @@ generated arms when the landing merges (one place each):
   returns once headers arrive (before the first frame under early flush);
   refusals surface at the first `Receive`, so the opening frame is consumed
   as the open's answer (WatchSession's first `diagnostics` push).
+- IMPLEMENTATION of flush-on-accept in connect-go: response headers are sent
+  lazily (first Send or handler return), so every Watch* handler must act:
+  when a most-recently-published view exists, the subscription invariant's
+  first Send happens immediately; when none exists yet, flush headers via a
+  ResponseWriter wrapper installed on the h2c mux that `accept`s (status 200
+  + the request's streaming content type, flushed) the moment the
+  subscription is registered, swallows connect-go's later WriteHeader
+  (warning if the status disagrees), and implements `Unwrap()` so
+  `http.NewResponseController` still reaches the real writer; unary is
+  untouched; stream-request validation runs BEFORE registration so refusals
+  stay refusals. A proven copy (read-only reference): branch
+  overhaul/elisp-integration, worktree
+  /Users/dodgecoates/.config/doom-overhaul/elisp-agents/integration, file
+  modules/app/agent-repl/lisp/testsupport/fakedaemon/accept.go (+ test).
+  Verify in the integration suite: a Watch* open on a workspace with no
+  published view returns headers before any frame.

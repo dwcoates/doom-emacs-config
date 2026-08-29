@@ -336,7 +336,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 	switch state {
 	case sessionlock.StateHeld:
 		log.Debug(opBringUp, "a surviving shim holds the workspace lock; adopting it", dlog.Context{"lock": lockPath})
-		client, err := f.deps.Supervisor.Adopt(ctx, ws, udsPath)
+		client, err := f.deps.Supervisor.Adopt(ctx, ws, dir, udsPath)
 		if err != nil {
 			log.Error(opBringUp, "could not adopt the surviving shim", dlog.Context{"cause": err.Error()})
 			return nil, false, fmt.Errorf("start session for %q: adopt: %w", ws, err)
