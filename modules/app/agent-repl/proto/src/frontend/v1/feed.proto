@@ -225,6 +225,9 @@ message FeedPageError {
 }
 message FeedPageErrorHeadline {
   string text = 1;
+  // A color-class name from proto/vocab/render-colors.json's `colors`
+  // section (the same names the topbar's tone uses); the client paints the
+  // class and holds no table.
   string tone = 2;
 }
 
@@ -542,7 +545,25 @@ message FeedToolCallInput {
   // UNSET = plain text; SET = the line is drawn as a hyperlink to this URL
   // (a WebFetch card's fetched page, say).
   optional FeedToolCallInputLink link = 2;
+  // THE DRAWN FORM of the line — the treatment the existing look gives it
+  // (a shell command line vs a muted file path vs a search query). The
+  // DAEMON states it because only it knows the tool; the client applies
+  // the treatment and still knows no tool. UNSET = plain text.
+  oneof form {
+    FeedToolCallInputCommand command = 3;
+    FeedToolCallInputPath path = 4;
+    FeedToolCallInputQuery query = 5;
+  }
 }
+// A shell command line ("$" chrome is the client's).
+message FeedToolCallInputCommand {}
+// A file or directory path, drawn muted.
+message FeedToolCallInputPath {}
+// A search pattern or query.
+message FeedToolCallInputQuery {}
+// The returned call produced no output. Empty: the arm is the fact.
+message FeedToolCallNoOutput {}
+
 // The input line's hyperlink target.
 message FeedToolCallInputLink {
   // Where the line links when activated.
@@ -587,6 +608,10 @@ message FeedToolCallReturned {
     FeedToolCallLinesOutput lines = 6;
     // A link list: web search results, each row a clickable title.
     FeedToolCallLinksOutput links = 8;
+    // The call returned NOTHING to draw (a write, an empty search): the
+    // output section is omitted. An arm, never an empty text — presence,
+    // not a sentinel.
+    FeedToolCallNoOutput none = 10;
   }
   // The settled clock — "ran 4.2 s" — composed by the daemon from the
   // call's start and settle instants, drawn beside the badge. UNSET when
@@ -834,6 +859,11 @@ message FeedTurnEndedErrored {
   // The vendor's own sentence, when one was recorded. UNSET for causes with
   // no vendor wording (a query death); the arm still names the cause.
   optional FeedTurnErrorMessage message = 1;
+  // THE DRAWN HEADLINE, composed by the daemon from the arm ("rate limited",
+  // "cut short at the output ceiling", "the query died") — the client draws
+  // it verbatim and holds no per-arm sentence table. Only the countdown
+  // (rate_limited/overloaded's retry_after_ms) is client-ticked.
+  FeedTurnErrorHeadline headline = 18;
   oneof error {
     // 429 — rate limited; may carry the vendor's wait.
     FeedTurnErrorRateLimited rate_limited = 2;
@@ -883,6 +913,11 @@ message FeedTurnErrorOauthOrgNotAllowed {}
 // envelope's message carries the vendor's wording. DISTINCT from max_tokens:
 // that response was cut at the ceiling, this request was refused outright.
 message FeedTurnErrorMaxOutputTokens {}
+// The composed headline element.
+message FeedTurnErrorHeadline {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
 // The vendor's sentence element.
 message FeedTurnErrorMessage {
   // The wording, drawn verbatim.
@@ -1462,6 +1497,8 @@ message FeedColdGateResolvedClear {}
 message FeedColdGateResolvedCompact {
   // The summarizer that wrote it.
   FeedColdGateModel model = 1;
+  // What was summarized — the scope the user chose, drawn on the trace.
+  conversation.v1.SessionCompactScope scope = 2;
 }
 
 // ⑤ THE SESSION-SEPARATION DIVIDER — the session changed shape or place
