@@ -192,7 +192,8 @@ are deleted by the verbs agent once verbs.el replaces them.
   model, priority, allow_ungated, merge_actions, base_ref, name,
   initial_prompt; response); Open/Close(blocked arm)/Kill/Nuke/Merge/
   Restart(force)/SetWorkspacePriority (absent priority = clear); SubmitPrompt
-  (request said + idempotency_key + REQUIRED origin, feed omitted;
+  (request said + idempotency_key + REQUIRED origin + REQUIRED workspace
+  (WorkspaceRef, landing 2: every Emacs submit sends it), feed omitted;
   response: success turn {TurnId} | command_panel — decode only the ARM
   KEYWORD and keep the panel payload as the raw alist |
   command_refused{command} (decoded `(:command "/agents")`) | error
@@ -386,7 +387,7 @@ are deleted by the verbs agent once verbs.el replaces them.
   per-buffer list of attached images and their MIME types, drawn as the
   existing thumbnail overlay, cleared on a successful send) →
   `agent-repl-rpc-submit-prompt` with `(:said SAID :idempotency-key
-  (agent-repl--uuid) :origin ORIGIN)` (RFC 4122 v4 from `random`; ORIGIN
+  (agent-repl--uuid) :origin ORIGIN :workspace (agent-repl-host-ref WS))` (RFC 4122 v4 from `random`; ORIGIN
   is the send site's keyword, REQUIRED) → success `:turn` →
   clear the input, push history, run `agent-repl-send-posthooks`; success
   `:command-panel` or `:command-refused` → "answered, nothing to await":
