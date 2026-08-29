@@ -23,7 +23,7 @@ function started(overrides: Partial<SdkTaskStartedMessage> = {}): SdkTaskStarted
     tool_use_id: "toolu_1",
     description: "run the build",
     task_type: "bash",
-    uuid: "u-1",
+    uuid: "00000000-0000-4000-8000-000000000001",
     session_id: "s-1",
     ...overrides,
   } as SdkTaskStartedMessage;
@@ -34,7 +34,7 @@ function level(tasks: { task_id: string; task_type: string; description: string 
     type: "system",
     subtype: "background_tasks_changed",
     tasks,
-    uuid: "u-2",
+    uuid: "00000000-0000-4000-8000-000000000002",
     session_id: "s-1",
   } as SdkBackgroundTasksChangedMessage;
 }
@@ -96,7 +96,7 @@ describe("a task update", () => {
       subtype: "task_updated",
       task_id: "b01",
       patch: { status: "running" },
-      uuid: "u",
+      uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
     } as SdkTaskUpdatedMessage);
 
@@ -112,7 +112,7 @@ describe("a task update", () => {
       subtype: "task_updated",
       task_id: "b01",
       patch: { is_backgrounded: true },
-      uuid: "u",
+      uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
     } as SdkTaskUpdatedMessage);
 
@@ -128,7 +128,7 @@ describe("a task update", () => {
         subtype: "task_updated",
         task_id: "unknown",
         patch: {},
-        uuid: "u",
+        uuid: "00000000-0000-4000-8000-000000000000",
         session_id: "s",
       } as SdkTaskUpdatedMessage),
     ).toBeUndefined();
@@ -147,7 +147,7 @@ describe("a task notification", () => {
       status: "completed",
       output_file: "/spool/b01.output",
       summary: "",
-      uuid: "u",
+      uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
     } as SdkTaskNotificationMessage);
 

@@ -312,7 +312,7 @@ describe("UpdateAgent.stop", () => {
       task_id: "a01",
       tool_use_id: "toolu_1",
       description: "",
-      uuid: "u",
+      uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
     } as SdkTaskStartedMessage);
 
@@ -395,7 +395,7 @@ describe("KillTurn", () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.live.onTaskStarted(
-      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "u", session_id: "s" } as SdkTaskStartedMessage,
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" } as SdkTaskStartedMessage,
       "turn-1",
     );
 
@@ -406,7 +406,7 @@ describe("KillTurn", () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.live.onTaskStarted(
-      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "u", session_id: "s" } as SdkTaskStartedMessage,
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" } as SdkTaskStartedMessage,
       "turn-1",
     );
 
@@ -421,7 +421,7 @@ describe("KillTurn", () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.live.onTaskStarted(
-      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "u", session_id: "s" } as SdkTaskStartedMessage,
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" } as SdkTaskStartedMessage,
       "turn-1",
     );
 
@@ -434,7 +434,7 @@ describe("KillTurn", () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.live.onTaskStarted(
-      { type: "system", subtype: "task_started", task_id: "b99", tool_use_id: "t", description: "", uuid: "u", session_id: "s" } as SdkTaskStartedMessage,
+      { type: "system", subtype: "task_started", task_id: "b99", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" } as SdkTaskStartedMessage,
       "another-turn",
     );
 
@@ -464,7 +464,7 @@ describe("DetachForeground", () => {
       task_id: "b01",
       tool_use_id: "toolu_1",
       description: "",
-      uuid: "u",
+      uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
     } as SdkTaskStartedMessage);
 
@@ -594,7 +594,7 @@ describe("StopBash", () => {
       task_id: "b01",
       tool_use_id: "t",
       description: "",
-      uuid: "u",
+      uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
     } as SdkTaskStartedMessage);
 
