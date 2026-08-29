@@ -60,12 +60,55 @@
   (cl-letf (((symbol-function 'executable-find) (lambda (_cmd) nil)))
     (should-error (agent-repl--select-notification-backend) :type 'error)))
 
+(defvar agent-repl-test-notifications--sink nil
+  "Sink the fake notification backend records into; see its tests.")
+
 ;;;; ---- Tests: notification backend variable ----
 
-(ert-deftest agent-repl-test-notification-backend-is-bound ()
-  "The notification backend variable should be set at load time."
-  (should (boundp 'agent-repl--notification-backend))
-  (should (functionp agent-repl--notification-backend)))
+(ert-deftest agent-repl-test-notification-backend-variable-exists ()
+  "The backend cache exists; whether it is FILLED is the resolver's business."
+  (should (boundp 'agent-repl--notification-backend)))
+
+(ert-deftest agent-repl-test-resolve-backend-probes-only-once ()
+  "The host probe is cached: a notification tool is probed for at most once."
+  (let ((agent-repl--notification-backend nil)
+        (probes 0))
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--select-notification-backend)
+               (lambda () (setq probes (1+ probes)) #'ignore)))
+      (agent-repl--resolve-notification-backend)
+      (agent-repl--resolve-notification-backend)
+      (should (= probes 1)))))
+
+(ert-deftest agent-repl-test-resolve-backend-answers-the-cached-value ()
+  "A bound backend is answered without probing the host at all."
+  (let ((agent-repl--notification-backend #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--select-notification-backend)
+               (lambda () (error "the host must not be probed"))))
+      (should (eq (agent-repl--resolve-notification-backend) #'ignore)))))
+
+(ert-deftest agent-repl-test-fake-backend-records-instead-of-posting ()
+  "THE TEST SEAM: what Emacs decided to post, with no host tool in play."
+  (let ((agent-repl-test-notifications--sink nil))
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      (funcall (agent-repl-notify-make-fake-backend 'agent-repl-test-notifications--sink)
+               "ws-a" "Title" "Message")
+      (should (equal agent-repl-test-notifications--sink
+                     '(("ws-a" "Title" "Message")))))))
+
+(ert-deftest agent-repl-test-notify-dispatches-through-the-resolver ()
+  "`agent-repl--notify' goes through the resolver, never a raw funcall."
+  (let ((agent-repl--notification-backend nil)
+        (agent-repl-test-notifications--sink nil))
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--info) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) nil))
+              ((symbol-function 'agent-repl--select-notification-backend)
+               (lambda () (agent-repl-notify-make-fake-backend
+                           'agent-repl-test-notifications--sink))))
+      (agent-repl--notify "ws-a" "Title" "Message")
+      (should (equal agent-repl-test-notifications--sink
+                     '(("ws-a" "Title" "Message")))))))
 
 ;;;; ---- Tests: terminal-notifier backend ----
 
@@ -536,27 +579,25 @@ load-bearing."
       (agent-repl--notify "ws-a" "Test Title" "Test Message")
       (should (equal called-with '("ws-a" "Test Title" "Test Message"))))))
 
-(ert-deftest agent-repl-test-notify-logs-when-debug-enabled ()
-  "agent-repl--notify should log when debug is enabled."
-  (let (log-called)
+(ert-deftest agent-repl-test-notify-records-the-post-at-info ()
+  "Posting a banner is lifecycle chatter worth having ungated on the record."
+  (let (recorded)
     (cl-letf ((agent-repl--notification-backend (lambda (_ws _t _m) nil))
-              (agent-repl-debug t)
-              ((symbol-function 'agent-repl--log)
-               (lambda (_ws _fmt &rest _args) (setq log-called t))))
+              ((symbol-function 'agent-repl--info)
+               (lambda (_ws fmt &rest args) (setq recorded (apply #'format fmt args)))))
       (agent-repl--notify nil "Title" "Message")
-      (should log-called))))
+      (should (string-search "elisp.notifications.post" recorded)))))
 
-(ert-deftest agent-repl-test-notify-logs-before-sending ()
-  "agent-repl--notify should call log before dispatching to backend."
+(ert-deftest agent-repl-test-notify-records-before-sending ()
+  "The record lands BEFORE the backend runs, so a hung tool is still evidenced."
   (let (call-order)
     (cl-letf ((agent-repl--notification-backend
                (lambda (_ws _t _m) (push 'backend call-order)))
-              (agent-repl-debug t)
-              ((symbol-function 'agent-repl--log)
-               (lambda (_ws _fmt &rest _args) (push 'log call-order))))
+              ((symbol-function 'agent-repl--info)
+               (lambda (&rest _) (push 'record call-order))))
       (agent-repl--notify nil "Title" "Msg")
       ;; call-order is reversed because we push
-      (should (equal call-order '(backend log))))))
+      (should (equal call-order '(backend record))))))
 
 (ert-deftest agent-repl-test-notify-does-not-log-when-debug-off ()
   "agent-repl--notify should not log when debug is nil."
@@ -650,11 +691,14 @@ load-bearing."
 ;;;; ---- Tests: agent-repl--notification-activate ----
 
 (ert-deftest agent-repl-test-activate-jumps-to-workspace ()
-  "Activate should jump to the given workspace."
+  "A banner click selects the workspace's tab, through workspace.el's boundary.
+THE CLICK ACTION of the host stream's notification policy: decider and
+actor are one process, so no daemon round-trip and no SelectWorkspace of
+its own — the tab switch that follows issues that verb."
   (let (jumped)
     (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--switch-to-workspace)
-               (lambda (ws) (setq jumped ws)))
+              ((symbol-function 'agent-repl--ws-switch)
+               (lambda (ws &rest _) (setq jumped ws)))
               ((symbol-function 'select-frame-set-input-focus) (lambda (&rest _) nil))
               ((symbol-function 'selected-frame) (lambda () 'frame)))
       (agent-repl--notification-activate "ws-a")
@@ -664,7 +708,7 @@ load-bearing."
   "Activate should focus the selected frame so Emacs comes forward."
   (let (focused)
     (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--switch-to-workspace) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil))
               ((symbol-function 'selected-frame) (lambda () 'the-frame))
               ((symbol-function 'select-frame-set-input-focus)
                (lambda (frame) (setq focused frame))))
@@ -675,7 +719,7 @@ load-bearing."
   "Activate with a nil WS should focus Emacs but not attempt a jump."
   (let ((jumped nil) (focused nil))
     (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--switch-to-workspace)
+              ((symbol-function 'agent-repl--ws-switch)
                (lambda (&rest _) (setq jumped t)))
               ((symbol-function 'selected-frame) (lambda () 'frame))
               ((symbol-function 'select-frame-set-input-focus)
