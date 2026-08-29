@@ -60,6 +60,7 @@ type snapshotKey struct {
 
 type fakeServer struct {
 	mu          sync.Mutex
+	subChanged  *sync.Cond
 	calls       []recordedCall
 	scripts     map[string]json.RawMessage
 	subscribers map[int64]*subscriber
@@ -68,11 +69,39 @@ type fakeServer struct {
 }
 
 func newFakeServer() *fakeServer {
-	return &fakeServer{
+	s := &fakeServer{
 		scripts:     map[string]json.RawMessage{},
 		subscribers: map[int64]*subscriber{},
 		snapshots:   map[snapshotKey][]proto.Message{},
 	}
+	s.subChanged = sync.NewCond(&s.mu)
+	return s
+}
+
+// awaitSubscribers blocks until at least N subscribers of STREAM (and, for
+// the host stream, of WORKSPACEID) are registered.  Real synchronization on
+// the registry's own condition variable, so a caller never has to guess how
+// long a subscription takes to land.
+func (s *fakeServer) awaitSubscribers(stream, workspaceID string, n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for s.countSubscribersLocked(stream, workspaceID) < n {
+		s.subChanged.Wait()
+	}
+}
+
+func (s *fakeServer) countSubscribersLocked(stream, workspaceID string) int {
+	count := 0
+	for _, sub := range s.subscribers {
+		if sub.stream != stream {
+			continue
+		}
+		if stream == streamHost && sub.workspaceID != workspaceID {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 // ---- recording ----
@@ -135,6 +164,7 @@ func (s *fakeServer) addSubscriber(stream, workspaceID string, conn net.Conn) *s
 		conn: conn,
 	}
 	s.subscribers[sub.id] = sub
+	s.subChanged.Broadcast()
 	snaps := append([]proto.Message(nil), s.snapshots[snapshotKey{stream, workspaceID}]...)
 	s.mu.Unlock()
 	logInfo("fakedaemon.stream.subscribed", "stream subscriber registered",
@@ -148,6 +178,7 @@ func (s *fakeServer) addSubscriber(stream, workspaceID string, conn net.Conn) *s
 func (s *fakeServer) removeSubscriber(sub *subscriber) {
 	s.mu.Lock()
 	delete(s.subscribers, sub.id)
+	s.subChanged.Broadcast()
 	s.mu.Unlock()
 	logInfo("fakedaemon.stream.unsubscribed", "stream subscriber removed",
 		map[string]any{"id": sub.id, "stream": sub.stream, "workspace_id": sub.workspaceID})
