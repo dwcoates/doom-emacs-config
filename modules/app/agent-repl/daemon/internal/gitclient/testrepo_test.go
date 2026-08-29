@@ -40,6 +40,10 @@ func (s *testSurfaces) ClientLog(string, dlog.ClientRecord) error {
 	panic("gitclient must never persist a client record")
 }
 
+func (s *testSurfaces) Evict(string) error {
+	panic("gitclient must never evict a workspace's sinks")
+}
+
 func (s *testSurfaces) Close() error { return nil }
 
 // records returns every log record captured so far.
